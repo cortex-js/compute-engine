@@ -1,0 +1,91 @@
+{
+    "scripts": {
+        "build": "bash ./scripts/build.sh",
+        "dist": "bash ./scripts/build.sh production",
+        "clean": "bash ./scripts/clean.sh",
+        "coverage": "bash ./scripts/test.sh coverage",
+        "lint": "eslint --fix src/",
+        "snapshot": "bash ./scripts/test.sh snapshot",
+        "test": "bash ./scripts/test.sh",
+        "start": "bash ./scripts/build.sh watch"
+    },
+    "name": "@cortex-js/math-json",
+    "version": "0.1.0",
+    "description": "A JSON schema to represent math formulas",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/cortex-js/math-json.git"
+    },
+    "bugs": "https://github.com/cortex-js/math-json/issues/",
+    "publishConfig": {
+        "access": "public"
+    },
+    "keywords": [
+        "math",
+        "JSON",
+        "latex",
+        "tex",
+        "mathjax",
+        "katex",
+        "mathquill"
+    ],
+    "license": "MIT",
+    "files": [
+        "/dist"
+    ],
+    "main": "./dist/math-json.js",
+    "types": "./types/math-json.d.ts",
+    "engines": {
+        "npm": ">=6.14.8",
+        "node": ">=12.0.0"
+    },
+    "devDependencies": {
+        "@cortex-js/prettier-config": "^1.0.0",
+        "@rollup/plugin-node-resolve": "^10.0.0",
+        "@types/jest": "^26.0.15",
+        "@types/node": "^14.14.7",
+        "@typescript-eslint/eslint-plugin": "^4.7.0",
+        "@typescript-eslint/parser": "^4.7.0",
+        "@typescript-eslint/typescript-estree": "^4.7.0",
+        "chalk": "^4.1.0",
+        "check-node-version": "^4.0.3",
+        "child_process": "^1.0.2",
+        "chokidar": "^3.4.3",
+        "eslint": "^7.13.0",
+        "eslint-config-prettier": "^6.15.0",
+        "eslint-plugin-no-unsanitized": "^3.1.4",
+        "eslint-plugin-prettier": "^3.1.4",
+        "http-server": "^0.12.3",
+        "husky": "^4.3.0",
+        "jest": "^26.6.3",
+        "jest-silent-reporter": "latest",
+        "lint-staged": "^10.5.1",
+        "prettier": "^2.1.2",
+        "rollup": "^2.33.1",
+        "rollup-plugin-copy": "^3.3.0",
+        "rollup-plugin-eslint": "^7.0.0",
+        "rollup-plugin-terser": "^7.0.2",
+        "rollup-plugin-typescript2": "latest",
+        "ts-jest": "^26.4.4",
+        "typescript": "^4.0.5",
+        "update-notifier": "^5.0.1"
+    },
+    "dependencies": {},
+    "prettier": "@cortex-js/prettier-config",
+    "husky": {
+        "hooks": {
+            "pre-commit": "lint-staged",
+            "pre-push": "npm test"
+        }
+    },
+    "lint-staged": {
+        "**/*.ts": [
+            "eslint --fix",
+            "git add"
+        ],
+        "*.{js,css,json,md}": [
+            "prettier --write",
+            "git add"
+        ]
+    }
+}

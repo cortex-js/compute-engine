@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+    <meta charset="utf-8" />
+    <title>MathJSON REPL</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="style.css" />
+
+    <style>
+        code {
+            white-space: pre-wrap;
+        }
+
+        h2 {
+            font-size: 1em;
+            padding: 0;
+            margin: 0;
+            color: #666;
+        }
+
+        #mathfield-container {
+            padding: 8px;
+            min-width: 50px;
+            border: 1px solid #ddd;
+        }
+    </style>
+    <script src='https://unpkg.com/mathlive/dist/mathlive.min.js'></script>
+</head>
+
+<body>
+    <header>
+        <h1>MathJSON REPL</h1>
+    </header>
+    <main>
+        <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
+            <script type=“application/json>
+            {
+                "virtualKeyboardLayout": "dvorak"
+            }
+            </script>
+            x=1
+        </math-field>
+
+        <!-- (x,,2) -->
+        <!-- -123, 456.789, -->
+        <!-- x_5 -->
+        <!-- -5-3-2 -->
+        <!-- 12+ -- >
+        <!-- \lbrack\rbrack -- >
+        <!-- \foo  -->
+        <!-- (a,,b) -- >
+        <!--       a\le b \overline{z} \overrightarrow{ABC} -->
+        <!-- $$(deadbeef)_{16}$$ -->
+        <!-- \partial^2_{x,y} f(x,y) -->
+        <!-- |(a+|b|+1)| -->
+        <!-- -0+0(\frac{0}{\frac{0}{0}}-0)+x^\pi -->
+        <!-- -0+0(\frac{0}{\frac{0}{0}}-0) -->
+        <!-- x_0 + x_{0} +  x_n + x_{n+1}-->
+        <!-- -2x5z\sqrt{y}\frac{3}{4}3\pi y} -->
+        <!-- \sin^{-1}\prime(x)      \sin^{-1}'(x) -- >
+        <!-- "\begin{align*}\dot{x} & =\sigma(y-x) \\ \dot{y} & =\rho x-y-xz \\ \dot{z} & =-\beta z+xy\end{align*}" ->
+        <!-- i, 2i, -i -->
+        <!-- 2{xy} should create group -->
+
+
+        <!-- \huge x \text{y} -->
+        <!-- \scriptscriptstyle x \text{y} -->
+        <!-- \sqrt[\Huge 3]{29} -->
+        <!-- x^{\binom{n}{k}} -->
+        <!-- \binom12 \textstyle \binom34 \scriptstyle \binom56 \displaystyle \binom78 \scriptstyle \binom90 -->
+        <!-- \int^b_a x^2 dx -->
+        <!-- \int^b_a\int^c_d x^2 dx dy -->
+        <!-- \int x^2 + x = 0 -->
+        <!-- \int x^2 + x dx = 0 -->
+        <!-- \int (x^2 + x) dx = 0 -->
+
+        <h2>Latex</h2>
+        <div class="output" id="latex"></div>
+        <h2>MathJSON Canonical Form</h2>
+        <div class="output" id="mathjson-canonical"></div>
+        <h2>MathJSON Full Form</h2>
+        <div class="output" id="mathjson-full"></div>
+        <h2>MathJSON Raw</h2>
+        <div class="output" id="mathjson-raw"></div>
+        <h2>MathASCII</h2>
+        <div class="output" id="mathascii"></div>
+    </main>
+
+    <script type="module">
+        // import { convertLatexToMarkup } from 'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
+        import { emitLatex, parseLatex } from '../dist/math-json.js';
+
+        const mf = document.getElementById('mf');
+        mf.addEventListener('change', (ev) => updateContent(mf));
+        updateContent(mf);
+
+        function updateContent(mf) {
+            const latex = mf.getValue('latex-expanded');
+            try {
+
+                document.getElementById('latex').innerHTML = escapeHtml(
+                    latex
+                );
+
+
+                let errors = [];
+                let expr = parseLatex(latex, {
+                    form: 'canonical',
+                    onError: (err) =>
+                        errors.push('parse: ' + err.code + (err.arg ? ' ' + err.arg : '')),
+                });
+                let jsonLatex = emitLatex(expr, {
+                    precision: 100, onError: (err) =>
+                        errors.push('emit: ' + err.code + (err.arg ? ' ' + err.arg : '')),
+                });
+
+
+                document.getElementById('mathjson-canonical').innerHTML =
+                    escapeHtml(JSON.stringify(expr, null, 2)) +
+                    '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
+                    errors.join('<br>') +
+                    '</div><br><hr>' +
+                    escapeHtml(jsonLatex) + '<br><hr>'
+                // + convertLatexToMarkup(jsonLatex);
+
+                errors = [];
+                expr = parseLatex(latex, {
+                    form: 'full',
+                    preserveLatex: true,
+                    onError: (err) =>
+                        errors.push('parse: ' + err.code + (err.arg ? ' ' + err.arg : '')),
+                });
+                jsonLatex = emitLatex(expr, {
+                    precision: 100, onError: (err) =>
+                        errors.push('emit: ' + err.code + (err.arg ? ' ' + err.arg : '')),
+                });
+
+                document.getElementById('mathjson-full').innerHTML =
+                    escapeHtml(JSON.stringify(expr, null, 2)) +
+                    '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
+                    errors.join('<br>') +
+                    '</div><br><hr>' +
+                    escapeHtml(jsonLatex) + '<br><hr>'
+                //+ convertLatexToMarkup(jsonLatex);
+
+                errors = [];
+                expr = parseLatex(latex, {
+                    form: 'full',
+                    invisibleOperator: '',
+                    superscriptOperator: '',
+                    subscriptOperator: '',
+                    // parseArgumentsOfUnknownLatexCommands: false,
+                    invisiblePlusOperator: '',
+                    dictionary: [],
+                    promoteUnknownSymbols: /./,
+
+                    parseArgumentsOfUnknownLatexCommands: true,
+                    parseNumbers: true,
+
+                    onError: (err) =>
+                        errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
+                });
+
+                document.getElementById('mathjson-raw').innerHTML =
+                    escapeHtml(JSON.stringify(expr, null)) +
+                    '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
+                    errors.join('<br>') +
+                    '</div>';
+
+                document.getElementById(
+                    'mathascii'
+                ).innerHTML = escapeHtml(mf.getValue('ASCIIMath'));
+            } catch (e) {
+                console.error("Error converting %c " + latex + '%c ' +
+                    e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+            }
+        }
+
+
+
+
+        function escapeHtml(string) {
+            return String(string).replace(/[&<>"'`=/\u200b]/g, function (
+                s
+            ) {
+                return (
+                    {
+                        '&': '&amp;',
+                        '<': '&lt;',
+                        '>': '&gt;',
+                        '"': '&quot;',
+                        "'": '&#39;',
+                        '/': '&#x2F;',
+                        '`': '&#x60;',
+                        '=': '&#x3D;',
+                        '\u200b': '&amp;#zws;',
+                    }[s] || s
+                );
+            });
+        }
+    </script>
+</body>
+
+</html>

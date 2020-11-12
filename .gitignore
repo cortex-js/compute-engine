@@ -1,3 +1,14 @@
+build/
+dist/
+stage/
+coverage/
+
+# OS Files
+.DS_Store
+
+# Secret files
+*secret.js
+
 # Logs
 logs
 *.log
@@ -59,3 +70,4 @@ typings/
 
 # next.js build output
 .next
+

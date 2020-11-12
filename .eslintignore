@@ -1,0 +1,13 @@
+# Third party
+**/node_modules
+
+# Build products
+build/
+coverage/
+dist/
+stage/
+bin/
+
+# Config files
+config/
+*.config.js
