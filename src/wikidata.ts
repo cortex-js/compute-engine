@@ -2,39 +2,39 @@ import { isNumberObject, isSymbolObject, isFunctionObject } from './utils';
 import { Dictionary, Expression } from './public';
 
 export function getWikidata(dictionary: Dictionary, json: Expression): string {
-    if (typeof json === 'number') return '';
-    if (isNumberObject(json)) {
-        if (json.wikidata) return json.wikidata;
-        return '';
-    }
-    if (typeof json === 'string') {
-        const def = dictionary[json];
-        if (typeof def === 'object') return def.wikidata ?? '';
-        return '';
-    }
-    if (isSymbolObject(json)) {
-        if (json.wikidata) return json.wikidata;
-        const def = dictionary[json.sym[0] as string];
-        if (typeof def === 'object') return def.wikidata ?? '';
-        return '';
-    }
-    if (Array.isArray(json)) {
-        const fnDef = dictionary[json[0] as string];
-        if (typeof fnDef === 'object') return fnDef.wikidata ?? '';
-        const opDef = dictionary.operators[json[0] as string];
-        if (typeof opDef === 'object') return opDef.wikidata ?? '';
-
-        return '';
-    }
-    if (isFunctionObject(json)) {
-        if (json.wikidata) return json.wikidata;
-        const fnDef = dictionary[json.fn[0] as string];
-        if (typeof fnDef === 'object') return fnDef.wikidata ?? '';
-        const opDef = dictionary[json.fn[0] as string];
-        if (typeof opDef === 'object') return opDef.wikidata ?? '';
-        return '';
-    }
+  if (typeof json === 'number') return '';
+  if (isNumberObject(json)) {
+    if (json.wikidata) return json.wikidata;
     return '';
+  }
+  if (typeof json === 'string') {
+    const def = dictionary[json];
+    if (typeof def === 'object') return def.wikidata ?? '';
+    return '';
+  }
+  if (isSymbolObject(json)) {
+    if (json.wikidata) return json.wikidata;
+    const def = dictionary[json.sym[0] as string];
+    if (typeof def === 'object') return def.wikidata ?? '';
+    return '';
+  }
+  if (Array.isArray(json)) {
+    const fnDef = dictionary[json[0] as string];
+    if (typeof fnDef === 'object') return fnDef.wikidata ?? '';
+    const opDef = dictionary.operators[json[0] as string];
+    if (typeof opDef === 'object') return opDef.wikidata ?? '';
+
+    return '';
+  }
+  if (isFunctionObject(json)) {
+    if (json.wikidata) return json.wikidata;
+    const fnDef = dictionary[json.fn[0] as string];
+    if (typeof fnDef === 'object') return fnDef.wikidata ?? '';
+    const opDef = dictionary[json.fn[0] as string];
+    if (typeof opDef === 'object') return opDef.wikidata ?? '';
+    return '';
+  }
+  return '';
 }
 
 // class SPARQLQueryDispatcher {

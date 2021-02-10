@@ -2,30 +2,34 @@
 
 The MathJSON format is independent of any particular syntactic representation.
 
-This document describes the default parser than transforms a Latex
-formula into a MathJSON expression.
+This document describes the default parser that transforms a Latex formula into
+a MathJSON expression.
 
 ### Sequence
 
-| Latex        | MathJSON                                                           |
-| :----------- | :----------------------------------------------------------------- |
-| `a, b, c`    | `["Sequence", "a", "b", "c"]`                                      |
-| `a, b; c, d` | `["Sequence", ["Subsequence["a", "b"], ["Subsequence", "c", "d"]]` |
+A sequence is a collection of expressions separated by a `,` or a `;`.
+
+| Latex        | MathJSON                                                     |
+| :----------- | :----------------------------------------------------------- |
+| `a, b, c`    | `["Sequence", "a", "b", "c"]`                                |
+| `a, b; x`    | `["Sequence", ["Sequence", "a", "b"], "x"]`                  |
+| `a; b`       | `["Sequence", ["Sequence", "a"], ["Sequence", "b"]]`         |
+| `a, b; c, d` | `["Sequence", ["Sequence["a", "b"], ["Sequence", "c", "d"]]` |
 
 ### Group
 
-`(1, 2, 3)` -> Group with three elements
-
-`()` -> Empty group
-
-`(1, 2; 3, 4)` -> Group with subsequence
+| Latex          | MathJSON                                                    |
+| :------------- | :---------------------------------------------------------- |
+| `()`           | `["Group"]`                                                 |
+| `(a, b, c)`    | `["Group", "a", "b", "c"]`                                  |
+| `(a, b; c, d)` | `["Group", ["Sequence", "a", "b"], ["Sequence", "c", "d"]]` |
+| `a, (b, c)`    | `["Sequence", "a", ["Group", "b", "c"]]`                    |
 
 ### List
 
-`["a", "b", "c"]`
+`[a, b, c]`
 
-List with missing element:
-`["a", , "c"]` -> ["a", "NOTHING", "c"]
+List with missing element: `[a, , c]` -> ["a", "Nothing", "c"]
 
 ### Set
 
@@ -57,8 +61,8 @@ List with missing element:
 
 #### Euler Modified Notation
 
-This notation is used by Mathematica. The Euler notation uses `D` instead
-of `\partial`
+This notation is used by Mathematica. The Euler notation uses `D` instead of
+`\partial`
 
 | Latex              | MathJSON |
 | :----------------- | :------- |
@@ -67,18 +71,16 @@ of `\partial`
 
 #### Newton Notation (@todo)
 
-`\dot{v}` -> first derivative relative to time t
-`\ddot{v}` -> second derivative relative to time t
+`\dot{v}` -> first derivative relative to time t `\ddot{v}` -> second derivative
+relative to time t
 
 ### Integral
 
 #### Indefinite Integral
 
-`\int f dx` -> ["Integrate", f, x,]
-`\int\int f dxdy` -> ["Integrate", f, x, y]
+`\int f dx` -> ["Integrate", f, x,] `\int\int f dxdy` -> ["Integrate", f, x, y]
 
-Note:
-`["Integrate", ["Integrate", f , x], y]` is equivalent to
+Note: `["Integrate", ["Integrate", f , x], y]` is equivalent to
 `["Integrate", f , x, y]`
 
 #### Definite Integral
@@ -98,16 +100,16 @@ If `[a, b]` are numeric, numeric methods are used to approximate the integral.
 
 ### Contour Integral
 
-`\oint f dx` -> ["ContourIntegral", f, x,]
-`\varointclockwise f dx` -> ["ClockwiseContourIntegral", f, x]
-`\ointctrclockwise f dx` -> ["CounterclockwiseContourIntegral", f, x,]
+`\oint f dx` -> ["ContourIntegral", f, x,] `\varointclockwise f dx` ->
+["ClockwiseContourIntegral", f, x] `\ointctrclockwise f dx` ->
+["CounterclockwiseContourIntegral", f, x,]
 
-`\oiint f ds` -> ["DoubleCountourIntegral", f, s] : integral over closed surfaces
+`\oiint f ds` -> ["DoubleCountourIntegral", f, s] : integral over closed
+surfaces
 
-`\oiiint` f dv -> ["TripleCountourIntegral", f, v] : integral over closed volumes
+`\oiiint` f dv -> ["TripleCountourIntegral", f, v] : integral over closed
+volumes
 
-`\intclockwise`
-`\intctrclockwise`
+`\intclockwise` `\intctrclockwise`
 
-`\iint`
-`\iiint`
+`\iint` `\iiint`

@@ -1,26 +1,29 @@
 import type { Dictionary } from '../public';
 
 export const CORE_DICTIONARY: Dictionary = {
-    Evaluate: {
-        // expr, [precision]
-    },
-    Group: {
-        domain: 'expression',
-        isListable: true,
-        // To support `((a,b),(c,d))`, group is considered non associative
-        // and non-idempotent
-        isPure: false,
-    },
-    Latex: {
-        domain: 'string',
-        isListable: false,
-        isPure: true,
-    },
-    String: {
-        domain: 'string',
-        isListable: true,
-        isPure: true,
-    },
+  // BaseForm: {
+  //   domain: ['number', 'number'],
+  // },
+  Evaluate: {
+    // expr, [precision]
+  },
+  Group: {
+    domain: 'expression',
+    isListable: true,
+    // To support `((a,b),(c,d))`, group is considered non associative
+    // and non-idempotent
+    isPure: false,
+  },
+  Latex: {
+    domain: 'string',
+    isListable: false,
+    isPure: true,
+  },
+  String: {
+    domain: 'string',
+    isListable: true,
+    isPure: true,
+  },
 };
 
 // https://www.mathworks.com/help/referencelist.html?type=function&listtype=cat&category=&blocktype=&capability=&s_tid=CRUX_lftnav        // list

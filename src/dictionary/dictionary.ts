@@ -1,8 +1,8 @@
 import type {
-    Dictionary,
-    DictionaryCategory,
-    SymbolDefinition,
-    FunctionDefinition,
+  Dictionary,
+  DictionaryCategory,
+  SymbolDefinition,
+  FunctionDefinition,
 } from '../public';
 import { ARITHMETIC_DICTIONARY } from './dictionary-arithmetic';
 import { CORE_DICTIONARY } from './dictionary-core';
@@ -10,75 +10,76 @@ import { SETS_DICTIONARY } from './dictionary-sets';
 import { TRIGONOMETRY_DICTIONARY } from './dictionary-trigonometry';
 
 /**
- * These constants are the 'primitives' that are used for some basic manipulations
- * such as parsing, and transforming to canonical form.
+ * These constants are the 'primitive' functions and constants that are used
+ * for some basic manipulations such as parsing, and transforming to canonical
+ * form.
  *
  */
+export const GROUP = 'Group';
+export const IDENTITY = 'Identity';
 export const LATEX = 'Latex';
 export const LIST = 'List';
-export const IDENTITY = 'Identity';
 export const MISSING = 'Missing';
 export const NOTHING = 'Nothing';
 export const SEQUENCE = 'Sequence';
-export const SUBSEQUENCE = 'Subsequence';
-export const GROUP = 'Group';
+export const SEQUENCE2 = 'Sequence2';
 
-export const MULTIPLY = 'Multiply';
-export const POWER = 'Power';
-export const DIVIDE = 'Divide';
 export const ADD = 'Add';
-export const SUBTRACT = 'Subtract';
-export const NEGATE = 'Negate';
 export const DERIVATIVE = 'Derivative';
-export const INVERSE_FUNCTION = 'InverseFunction';
+export const DIVIDE = 'Divide';
 export const EXP = 'Exp';
-export const SQRT = 'Sqrt';
-export const ROOT = 'Root';
+export const INVERSE_FUNCTION = 'InverseFunction';
+export const MULTIPLY = 'Multiply';
+export const NEGATE = 'Negate';
+export const POWER = 'Power';
 export const PRIME = 'Prime';
+export const ROOT = 'Root';
+export const SQRT = 'Sqrt';
+export const SUBTRACT = 'Subtract';
 
-export const COMPLEX_INFINITY = 'COMPLEX_INFINITY';
-export const PI = 'PI';
-export const EXPONENTIAL_E = 'E';
-export const IMAGINARY_I = 'I';
+export const COMPLEX_INFINITY = 'ComplexInfinity';
+export const PI = 'Pi';
+export const EXPONENTIAL_E = 'ExponentialE';
+export const IMAGINARY_I = 'ImaginaryI';
 
 export function getDefaultDictionary(
-    domain: DictionaryCategory | 'all' = 'all'
-): Dictionary {
-    let result: Dictionary;
-    if (domain === 'all') {
-        result = {};
-        Object.keys(DICTIONARY).forEach((x) => {
-            result = { ...result, ...DICTIONARY[x] };
-        });
-    } else {
-        result = { ...DICTIONARY[domain] };
-    }
-    return result;
+  domain: DictionaryCategory | 'all' = 'all'
+): Readonly<Dictionary> {
+  let result: Dictionary;
+  if (domain === 'all') {
+    result = {};
+    Object.keys(DICTIONARY).forEach((x) => {
+      result = { ...result, ...DICTIONARY[x] };
+    });
+  } else {
+    result = { ...DICTIONARY[domain] };
+  }
+  return result;
 }
 
 export function findInDictionary(
-    dic: Dictionary,
-    name: string
+  dic: Dictionary,
+  name: string
 ): SymbolDefinition | FunctionDefinition | null {
-    return dic[name];
+  return dic[name];
 }
 export function findFunctionInDictionary(
-    dic: Dictionary,
-    name: string
+  dic: Dictionary,
+  name: string
 ): FunctionDefinition | null {
-    if (dic[name] && !('isConstant' in dic[name])) {
-        return dic[name] as FunctionDefinition;
-    }
-    return null;
+  if (dic[name] && !('isConstant' in dic[name])) {
+    return dic[name] as FunctionDefinition;
+  }
+  return null;
 }
 export function findSymbolInDictionary(
-    dic: Dictionary,
-    name: string
+  dic: Dictionary,
+  name: string
 ): SymbolDefinition | null {
-    if (dic[name] && 'isConstant' in dic[name]) {
-        return dic[name] as SymbolDefinition;
-    }
-    return null;
+  if (dic[name] && 'isConstant' in dic[name]) {
+    return dic[name] as SymbolDefinition;
+  }
+  return null;
 }
 
 // export const ADD = 'Q32043';
@@ -119,145 +120,145 @@ export function findSymbolInDictionary(
 // - others...?
 
 export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
-    arithmetic: ARITHMETIC_DICTIONARY,
-    algebra: {
-        // polynomial([0, 2, 0, 4]:list, x:symbol) -> 2x + 4x^3
-        // polynomial(2x + 4x^3, x) -> {0, 2, 0, 4}
-        // rational(2x + 4x^3, {3, 1}, x) -> (2x + 4x^3)/(3+x)
-        // https://reference.wolfram.com/language/tutorial/AlgebraicCalculations.html
-        // simplify-trig (macsyma)
-        //  - trigReduce, trigExpand, trigFactor, trigToExp (mathematica)
-        // Mathematica:
-        // - distribute -> (a+b)(c+d) -> ac+ ad+ bc+ bd (doesn't have to be multiply,
-        // f(a+b, c+d) -> f(a, c) + f(a, d) + f(b, c) + f(b, d)
-        // -- distribute(expr, over=add, with=multiply)
-        // https://reference.wolfram.com/language/ref/Distribute.html
-        // - expand, expand-all
-        // - factor
-        // - simplify
-    },
+  'arithmetic': ARITHMETIC_DICTIONARY,
+  'algebra': {
+    // polynomial([0, 2, 0, 4]:list, x:symbol) -> 2x + 4x^3
+    // polynomial(2x + 4x^3, x) -> {0, 2, 0, 4}
+    // rational(2x + 4x^3, {3, 1}, x) -> (2x + 4x^3)/(3+x)
+    // https://reference.wolfram.com/language/tutorial/AlgebraicCalculations.html
+    // simplify-trig (macsyma)
+    //  - trigReduce, trigExpand, trigFactor, trigToExp (mathematica)
+    // Mathematica:
+    // - distribute -> (a+b)(c+d) -> ac+ ad+ bc+ bd (doesn't have to be multiply,
+    // f(a+b, c+d) -> f(a, c) + f(a, d) + f(b, c) + f(b, d)
+    // -- distribute(expr, over=add, with=multiply)
+    // https://reference.wolfram.com/language/ref/Distribute.html
+    // - expand, expand-all
+    // - factor
+    // - simplify
+  },
 
-    calculus: {
-        // D
-        // Derivative (mathematica)
-        // diff (macsyma)
-        // nth-diff
-        // int
-        // - integrate(expression, symbol)  -- indefinite integral
-        // - integrate(expression, range) <range> = {symbol, min, max} -- definite integral
-        // - integrate(expression, range1, range2) -- multiple integral
-        // def-int
+  'calculus': {
+    // D
+    // Derivative (mathematica)
+    // diff (macsyma)
+    // nth-diff
+    // int
+    // - integrate(expression, symbol)  -- indefinite integral
+    // - integrate(expression, range) <range> = {symbol, min, max} -- definite integral
+    // - integrate(expression, range1, range2) -- multiple integral
+    // def-int
+  },
+  'combinatorics': {}, // fibonacci, binomial, etc...
+  'complex': {
+    // real
+    // imaginary
+    // complex-cartesian (constructor)
+    // complex-polar
+    // argument
+    // conjugate
+  },
+  'core': CORE_DICTIONARY,
+  'dimensions': {
+    // volume, speed, area
+  },
+  'lists': {
+    // first    or head
+    // rest     or tail
+    // cons -> cons(first (element), rest (list)) = list
+    // append -> append(list, list) -> list
+    // reverse
+    // rotate
+    // in
+    // map   ⁡ map(2x, x, list) ( 2 ⁢ x | x ∈ [ 0 , 10 ] )
+    // such-that {x ∈ Z | x ≥ 0 ∧ x < 100 ∧ x 2 ∈ Z}
+    // select : picks out all elements ei of list for which crit[ei] is True.
+    // sort
+    // contains / find
+  },
+  'logic': {
+    // true, false
+    // and, or, not, xor,, nand, nor, xnor,
+    // equivalent, implies
+    // for-all
+    // exists
+  },
+  'inequalities': {},
+  'intervals': {
+    // interval of integers vs interval of other sets (integer interval don't need to be open/closed)
+    // interval vs. ranges
+    // interval, open-interval, etc..
+    // upper     or min?
+    // lower    or max?
+  },
+  'linear-algebra': {
+    // matrix
+    // transpose
+    // cross-product
+    // outer-product
+    // determinant
+    // vector
+    // matrix
+    // rank
+    // scalar-matrix
+    // constant-matrix
+    // identitity-matrix
+  },
+  'numeric': {
+    // Gamma function
+    // Zeta function
+    // erf function
+    // numerator(fraction)
+    // denominator(fraction)
+    // exactFloatToRational
+    // N -> eval as a number
+    // random
+    // hash
+  },
+  'other': {},
+  'polynomials': {
+    // degree
+    // expand
+    // factors
+    // roots
+  },
+  'physics': {
+    'mu-0': {
+      isConstant: true,
+      wikidata: 'Q1515261',
+      domain: 'R+',
+      value: 1.25663706212e-6,
+      unit: [MULTIPLY, 'H', [POWER, 'm', -1]],
     },
-    combinatorics: {}, // fibonacci, binomial, etc...
-    complex: {
-        // real
-        // imaginary
-        // complex-cartesian (constructor)
-        // complex-polar
-        // argument
-        // conjugate
-    },
-    core: CORE_DICTIONARY,
-    dimensions: {
-        // volume, speed, area
-    },
-    lists: {
-        // first    or head
-        // rest     or tail
-        // cons -> cons(first (element), rest (list)) = list
-        // append -> append(list, list) -> list
-        // reverse
-        // rotate
-        // in
-        // map   ⁡ map(2x, x, list) ( 2 ⁢ x | x ∈ [ 0 , 10 ] )
-        // such-that {x ∈ Z | x ≥ 0 ∧ x < 100 ∧ x 2 ∈ Z}
-        // select : picks out all elements ei of list for which crit[ei] is True.
-        // sort
-        // contains / find
-    },
-    logic: {
-        // true, false
-        // and, or, not, xor,, nand, nor, xnor,
-        // equivalent, implies
-        // for-all
-        // exists
-    },
-    inequalities: {},
-    intervals: {
-        // interval of integers vs interval of other sets (integer interval don't need to be open/closed)
-        // interval vs. ranges
-        // interval, open-interval, etc..
-        // upper     or min?
-        // lower    or max?
-    },
-    'linear-algebra': {
-        // matrix
-        // transpose
-        // cross-product
-        // outer-product
-        // determinant
-        // vector
-        // matrix
-        // rank
-        // scalar-matrix
-        // constant-matrix
-        // identitity-matrix
-    },
-    numeric: {
-        // Gamma function
-        // Zeta function
-        // erf function
-        // numerator(fraction)
-        // denominator(fraction)
-        // exactFloatToRational
-        // N -> eval as a number
-        // random
-        // hash
-    },
-    other: {},
-    polynomials: {
-        // degree
-        // expand
-        // factors
-        // roots
-    },
-    physics: {
-        'mu-0': {
-            isConstant: true,
-            wikidata: 'Q1515261',
-            domain: 'R+',
-            value: 1.25663706212e-6,
-            unit: [MULTIPLY, 'H', [POWER, 'm', -1]],
-        },
-    },
-    quantifiers: {},
-    relations: {
-        // eq, lt, leq, gt, geq, neq, approx
-        //     shortLogicalImplies: 52, // ->
-        // shortImplies => 51
-        // implies ==> 49
-        //    impliedBy: 45, // <==
-        // := assign 80
-        // less-than-or-equal-to: Q55935272 241
-        // greater-than-or-equal: Q55935291 242
-        // greater-than: Q47035128  243
-        // less-than: Q52834024 245
-    },
-    rounding: {
-        // ceiling, floor, trunc, round,
-    },
-    sets: SETS_DICTIONARY,
-    statistics: {
-        // average
-        // mean
-        // variance = size(l) * stddev(l)^2 / (size(l) - 1)
-        // stddev
-        // median
-        // quantile
-    },
-    transcendentals: {
-        // log, ln, exp,
-    },
-    trigonometry: TRIGONOMETRY_DICTIONARY,
-    units: {},
+  },
+  'quantifiers': {},
+  'relations': {
+    // eq, lt, leq, gt, geq, neq, approx
+    //     shortLogicalImplies: 52, // ->
+    // shortImplies => 51
+    // implies ==> 49
+    //    impliedBy: 45, // <==
+    // := assign 80
+    // less-than-or-equal-to: Q55935272 241
+    // greater-than-or-equal: Q55935291 242
+    // greater-than: Q47035128  243
+    // less-than: Q52834024 245
+  },
+  'rounding': {
+    // ceiling, floor, trunc, round,
+  },
+  'sets': SETS_DICTIONARY,
+  'statistics': {
+    // average
+    // mean
+    // variance = size(l) * stddev(l)^2 / (size(l) - 1)
+    // stddev
+    // median
+    // quantile
+  },
+  'transcendentals': {
+    // log, ln, exp,
+  },
+  'trigonometry': TRIGONOMETRY_DICTIONARY,
+  'units': {},
 };
