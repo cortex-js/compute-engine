@@ -42,19 +42,28 @@ A MathJSON expression is a combination of
 - symbols and strings
 - functions
 
-| Example                              |
-| :----------------------------------- |
-| **Number**                           |
-| `2`, `314.e-2`                       |
-| `{"num": "3.1"}`                     |
-| `{"num": "-Infinity"}`               |
+| **Number**             |
+| :--------------------- |
+| `3.14`                 |
+| `314.e-2`              |
+| `{"num": "3.14"}`      |
+| `{"num": "-Infinity"}` |
+
 | **Symbol**                           |
+| :----------------------------------- |
 | `"x"`                                |
 | `"Pi"`                               |
 | `{"sym": "Pi", "wikidata": "Q167" }` |
-| **Function**                         |
-| `["Add", 1, "x"]`                    |
-| `{"fn": ["Add", 1, {sym: "x"}]}`     |
+
+| **Function**                                     |
+| :----------------------------------------------- |
+| `["Add", 1, "x"]`                                |
+| `{"fn": [{sym: "Add"}, {num: "1"}, {sym: "x"}]}` |
+
+Numbers, symbols and functions can be expressed either as an object literal with
+a `"num"`, `"sym"` or `"fn"` property, respectively, or as a short-hand notation
+using a number, string or array. The short-hand notation is more concise and
+easier to read, but cannot include metadata properties.
 
 ## Numbers
 
@@ -172,11 +181,9 @@ If a function has no extra metadata it can be represented as a JSON array.
 For example these two expressions are equivalent:
 
 ```json
-['Cos', ['Add', 'x', 1]]
+["Cos", ["Add", "x", 1]]
 
-{
-  fn: ['Cos', ['Add', 'x', 1]],
-}
+{ "fn": ["Cos", ["Add", "x", 1]] }
 ```
 
 ## Metadata

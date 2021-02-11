@@ -9,7 +9,7 @@ import {
   PI,
 } from '../src/dictionary/dictionary';
 import { Expression } from '../src/public';
-import { expression, printExpression } from './utils';
+import { expression, printExpression, engine } from './utils';
 
 beforeEach(() => {
   jest.spyOn(console, 'assert').mockImplementation((assertion) => {
@@ -275,6 +275,30 @@ describe('ORDER', () => {
       expect(expression(x[0], { form: 'canonical' })).toStrictEqual(x[1]);
     })
   );
+});
+describe('OBJECT LITERAL FORM', () => {
+  test('Shorthand expression', () => {
+    expect(
+      engine.format(['Add', 'x', ['Sin', 'Pi'], 2], ['object-literal'])
+    ).toMatchInlineSnapshot(
+      `{fn: [{sym: 'Add'}, {sym: 'x'}, {fn: [{sym: 'Sin'}, {sym: 'Pi'}]}, {num: '2'}]}`
+    );
+  });
+  test('Expression with metadata', () => {
+    expect(
+      engine.format(
+        [
+          { sym: 'Add', metadata: 'add' },
+          { sym: 'x', metadata: 'ecks' },
+          { fn: ['Sin', 'Pi'], metadata: 'fn-md' },
+          { num: '1', metadata: 'one' },
+        ] as any,
+        ['object-literal']
+      )
+    ).toMatchInlineSnapshot(
+      `{fn: [{sym: 'Add', metadata: 'add'}, {sym: 'x', metadata: 'ecks'}, {fn: [{sym: 'Sin'}, {sym: 'Pi'}], metadata: 'fn-md'}, {num: '1', metadata: 'one'}]}`
+    );
+  });
 });
 
 describe('BASE FORM', () => {

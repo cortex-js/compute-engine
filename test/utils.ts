@@ -13,7 +13,7 @@ const rawLatex = new Latex({
   promoteUnknownSymbols: /./,
   dictionary: [],
 });
-const engine = new ComputeEngine();
+export const engine = new ComputeEngine();
 export function expression(
   latex: string,
   options?: { form: Form }

@@ -645,7 +645,7 @@ export function strippedMetadataForm(
     return expr;
   }
   if (Array.isArray(expr)) {
-    return mapArgs(expr, (x) => strippedMetadataForm(x, dict));
+    return expr.map((x) => strippedMetadataForm(x, dict));
   }
   if (typeof expr === 'object') {
     if ('num' in expr) {
@@ -653,16 +653,35 @@ export function strippedMetadataForm(
       if (typeof val === 'number') return val;
       return { num: val };
     } else if ('fn' in expr) {
-      return mapArgs(expr.fn, (x) => strippedMetadataForm(x, dict));
+      return expr.fn.map((x) => strippedMetadataForm(x, dict));
     }
   }
 
   return null;
 }
 
+export function objectLiteralForm(
+  expr: Expression,
+  dict: Dictionary
+): Expression {
+  if (typeof expr === 'number') {
+    return { num: expr.toString() };
+  }
+  if (typeof expr === 'string') {
+    return { sym: expr };
+  }
+  if (Array.isArray(expr) && expr.length > 0) {
+    return { fn: expr.map((x) => objectLiteralForm(x, dict)) };
+  }
+  if (typeof expr === 'object' && 'fn' in expr) {
+    return { ...expr, fn: expr.fn.map((x) => objectLiteralForm(x, dict)) };
+  }
+  return expr;
+}
+
 /**
  * Transform the expression so that the arguments of functions that have the
- * `isCommutative` attributes are ordered as per the following:
+ * `isCommutative` attributes are ordered as follow:
  *
  * - Real numbers
  * - Complex numbers
@@ -672,15 +691,15 @@ export function strippedMetadataForm(
  * Within Real Numbers:
  * - by their value
  *
- * With Complex numbers:
+ * Within Complex numbers:
  * - by the value of their imaginary component,
  * - then by the value of their real component
  *
- * With Symbols:
+ * Within Symbols:
  * - constants (`isConstant === true`) before non-constants
  * - then alphabetically
  *
- * With Functions:
+ * Within Functions:
  * - if a `[MULTIPLY]` or a `[POWER]`... @todo
  *
  */
@@ -790,6 +809,7 @@ export function form(
       'flatten': flattenForm,
       'sorted': sortedForm,
       'stripped-metadata': strippedMetadataForm,
+      'object-literal': objectLiteralForm,
       // 'sum-product': sumProductForm,
     }[form];
     if (!fn) {

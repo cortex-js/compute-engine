@@ -270,6 +270,8 @@ export type Expression =
  *       - other functions follow, sorted lexicographically
  * - **`'stripped-metadata'`**: any metadata associated with elements of the
  *      expression is removed.
+ * - **`'object-literal'`**:  each term of an expression is expressed as an
+ *      object literal: no shorthand representation is used.
  * - *`'canonical-add'`**: `addition of 0 is simplified, associativity rules
  *      are applied, unnecessary groups are moved, single argument 'add' are simplified
  * - *`'canonical-divide'`**: `divide` is replaced with `multiply` and `power',
@@ -312,6 +314,7 @@ export type Form =
   | 'canonical-subtract'
   | 'flatten' // simplify associative, idempotent and groups
   | 'full'
+  | 'object-literal'
   | 'sorted'
   | 'stripped-metadata'
   | 'sum-product';
