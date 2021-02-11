@@ -346,6 +346,14 @@ export type DictionaryCategory =
   | 'rounding'
   | 'units';
 
+/**
+ * For best performance when calling repeatedly `format()` or `evalute()`,
+ * create an instance of `ComputeEngine` and call its methods. The constructor
+ * of `ComputeEngine` will compile and optimize the dictionary so that calls of
+ * the `format()` and `evalute()` methods will bypass that step. By contrast
+ * invoking the `format()` and `evaluate()` functions will compile the
+ * dictionary each time they are called.
+ */
 export declare class ComputeEngine {
   /**
    * Return a dictionary suitable for the specified category, or `"all"`
@@ -355,41 +363,59 @@ export declare class ComputeEngine {
    * expression should be interpreted, i.e. how to evaluate and manipulate them.
    *
    */
-  static getDictionary(domain: DictionaryCategory | 'all'): Dictionary;
+  static getDictionary(category: DictionaryCategory | 'all'): Dictionary;
 
-  readonly scope: Dictionary;
+  scope: Dictionary;
 
   constructor(options?: {
     dictionary?: Dictionary;
     onError?: ErrorListener<ErrorCode>;
   });
 
-  /**
-   * Transform an expression by applying one or more rewriting rules to it,
-   * recursively.
-   *
-   * There are many ways to symbolically manipulate an expression, but
-   * transformations with `form` have the following characteristics:
-   *
-   * - they don't require calculations or assumptions about the domain of free
-   *    variables or the value of constants
-   * - the output expression is expressed with more primitive functions,
-   *    for example subtraction is replaced with addition
-   *
-   *
-   */
   format(expr: Expression | null, forms: Form[]): Expression | null;
 
-  /**
-   * Apply the definitions in the supplied dictionary to an expression
-   * and return the result.
-   *
-   * Unlike `format` this may entail performing calculations and irreversible
-   * transformations.
-   *
-   * @param scope - An optional set of functions and constants to use
-   * when evaluating the expression. Evaluating the expression may modify the
-   * scope, for example if the expression is an assignment or definition.
-   */
   evaluate(exp: Readonly<Expression>): Expression | null;
 }
+
+/**
+ * Transform an expression by applying one or more rewriting rules to it,
+ * recursively.
+ *
+ * There are many ways to symbolically manipulate an expression, but
+ * transformations with `form` have the following characteristics:
+ *
+ * - they don't require calculations or assumptions about the domain of free
+ *    variables or the value of constants
+ * - the output expression is expressed with more primitive functions,
+ *    for example subtraction is replaced with addition
+ *
+ *
+ */
+export declare function format(
+  expr: Expression,
+  forms: Form[],
+  options?: {
+    dictionary?: Dictionary;
+    onError?: ErrorListener<ErrorCode>;
+  }
+): Expression;
+
+/**
+ * Apply the definitions in the supplied dictionary to an expression
+ * and return the result.
+ *
+ * Unlike `format` this may entail performing calculations and irreversible
+ * transformations.
+ *
+ * @param scope - An optional set of functions and constants to use
+ * when evaluating the expression. Evaluating the expression may modify the
+ * scope, for example if the expression is an assignment or definition.
+ */
+export declare function evaluate(
+  expr: Expression,
+  options?: {
+    scope?: Dictionary;
+    dictionary?: Dictionary;
+    onError?: ErrorListener<ErrorCode>;
+  }
+): Expression;

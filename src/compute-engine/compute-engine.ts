@@ -5,9 +5,9 @@ import {
   ErrorCode,
   Expression,
   Form,
-} from './public';
-import { getDefaultDictionary } from './dictionary/dictionary';
-import { form } from './forms';
+} from '../public';
+import { getDefaultDictionary } from '../dictionary/dictionary';
+import { form } from '../forms';
 
 export class ComputeEngine {
   static getDictionary(domain: DictionaryCategory | 'all' = 'all'): Dictionary {
@@ -19,6 +19,7 @@ export class ComputeEngine {
 
   constructor(options?: {
     dictionary?: Dictionary;
+    scope?: Dictionary;
     onError?: ErrorListener<ErrorCode>;
   }) {
     const onError = (err) => {
@@ -50,9 +51,13 @@ export class ComputeEngine {
     };
     this.onError = options?.onError ?? onError;
     this.dictionary = options?.dictionary ?? ComputeEngine.getDictionary();
+    this._scope = options?.scope ?? {};
   }
   get scope(): Dictionary {
     return this._scope;
+  }
+  set scope(scope: Dictionary) {
+    this._scope = scope;
   }
   format(expr: Expression | null, forms: Form[]): Expression | null {
     return form(expr, forms, { dictionary: this.dictionary });
@@ -60,4 +65,28 @@ export class ComputeEngine {
   evaluate(exp: Readonly<Expression>): Expression | null {
     return exp as Expression;
   }
+}
+
+export function format(
+  expr: Expression,
+  forms: Form[],
+  options?: {
+    dictionary?: Dictionary;
+    onError?: ErrorListener<ErrorCode>;
+  }
+): Expression {
+  const engine = new ComputeEngine(options);
+  return engine.format(expr, forms);
+}
+
+export function evaluate(
+  expr: Expression,
+  options?: {
+    scope?: Dictionary;
+    dictionary?: Dictionary;
+    onError?: ErrorListener<ErrorCode>;
+  }
+): Expression {
+  const engine = new ComputeEngine(options);
+  return engine.evaluate(expr);
 }

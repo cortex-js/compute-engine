@@ -26,7 +26,7 @@ import {
   DEFAULT_SERIALIZE_LATEX_OPTIONS,
 } from './utils';
 
-export class Latex {
+export class LatexSyntax {
   onError?: ErrorListener<ErrorCode>;
 
   options: Required<LatexNumberOptions> &
@@ -80,7 +80,7 @@ export class Latex {
       ...opts,
     };
     this.dictionary = indexLatexDictionary(
-      options?.dictionary ?? Latex.getDictionary(),
+      options?.dictionary ?? LatexSyntax.getDictionary(),
       this.onError
     );
   }
@@ -124,4 +124,32 @@ export class Latex {
     );
     return serializer.serialize(expr);
   }
+}
+
+export function parse(
+  latex: LatexString,
+  options?: LatexNumberOptions &
+    ParseLatexOptions & {
+      dictionary?: Readonly<LatexDictionary>;
+      onError?: ErrorListener<ErrorCode>;
+    }
+): Expression {
+  const syntax = new LatexSyntax(options);
+  return syntax.parse(latex);
+}
+
+/**
+ * Serialize a MathJSON expression as a Latex string.
+ *
+ */
+export function serialize(
+  expr: Expression,
+  options?: LatexNumberOptions &
+    SerializeLatexOptions & {
+      dictionary?: Readonly<LatexDictionary>;
+      onError?: ErrorListener<ErrorCode>;
+    }
+): LatexString {
+  const syntax = new LatexSyntax(options);
+  return syntax.serialize(expr);
 }

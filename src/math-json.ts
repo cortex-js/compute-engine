@@ -1,2 +1,2 @@
-export { ComputeEngine } from './compute-engine';
-export { Latex } from './latex/latex';
+export { ComputeEngine } from './compute-engine/compute-engine';
+export { LatexSyntax } from './latex-syntax/latex-syntax';

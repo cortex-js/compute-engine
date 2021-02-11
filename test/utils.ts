@@ -1,12 +1,12 @@
 import type { Expression, Form } from '../src/public';
-import { Latex, ComputeEngine } from '../src/math-json';
+import { LatexSyntax, ComputeEngine } from '../src/math-json';
 
 let errors: string[] = [];
 
-const defaultLatex = new Latex({
+const defaultLatex = new LatexSyntax({
   onError: (err) => errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
 });
-const rawLatex = new Latex({
+const rawLatex = new LatexSyntax({
   invisibleOperator: '',
   parseArgumentsOfUnknownLatexCommands: false,
   invisiblePlusOperator: '',

@@ -211,12 +211,12 @@ export type ParseLatexOptions = {
    * Otherwise, return each token making up the number (minus sign, digits,
    * decimal separator, etc...)
    */
-  parseNumbers?: true;
+  parseNumbers?: boolean;
 
   /**
    * If this setting is not empty, when a number is immediately followed by a
    * fraction, assume that the fraction should be added to the number, that
-   * is that there is an invisble plus operator between the two.
+   * is that there is an invisible plus operator between the two.
    *
    * For example with `2\frac{3}{4}`:
    * - when `invisiblePlusOperator` is `"add"` : `["add", 2, ["divide", 3, 4]]`
@@ -233,7 +233,7 @@ export type ParseLatexOptions = {
   promoteUnknownSymbols?: RegExp;
 
   /**
-   * When one token is encountered at a position that could match
+   * When a token is encountered at a position that could match
    * a function call, and it is followed by an apply function operator
    * (typically, parentheses), consider them to a be a function if the
    * string of tokens match this regular expression.
@@ -262,7 +262,7 @@ export type ParseLatexOptions = {
 
   /**
    * If true, the expression will be decorated with the Latex
-   * fragments correspondind to each elements of the expression
+   * fragments corresponding to each elements of the expression
    */
   preserveLatex?: boolean;
 };
@@ -324,17 +324,29 @@ export type LatexNumberOptions = {
   imaginaryNumber?: LatexString;
 };
 
-export declare class Latex {
+/**
+ * For best performance when calling repeatedly `parse()` or `serialize()`,
+ * create an instance of `LatexSyntax` and call its methods. The constructor
+ * of `LatexSyntax` will compile and optimize the dictionary so that calls of
+ * the `parse()` and `serialize()` methods will bypass that step. By contrast
+ * invoking the `parse()` and `serialize()` functions will compile the
+ * dictionary each time they are called.
+ */
+export declare class LatexSyntax {
   /**
    *
    * @pram onError - Called when a non-fatal error is encountered. When parsing,
    * the parser will attempt to recover and continue.
    *
    */
-  constructor(options?: {
-    dictionary?: Readonly<LatexDictionary>;
-    onError?: ErrorListener<ErrorCode>;
-  });
+  constructor(
+    options?: LatexNumberOptions &
+      ParseLatexOptions &
+      SerializeLatexOptions & {
+        dictionary?: Readonly<LatexDictionary>;
+        onError?: ErrorListener<ErrorCode>;
+      }
+  );
 
   /**
    * Return a Latex dictionary suitable for the specified category, or `"all"`
@@ -360,18 +372,7 @@ export declare class Latex {
     domain?: DictionaryCategory | 'all'
   ): Readonly<LatexDictionary>;
 
-  /**
-   * Parse a Latex string and return a corresponding MathJSON expression.
-   *
-   * @pram onError - Called when a non-fatal error is encountered while parsing.
-   * The parsing will attempt to recover and continue.
-   *
-   */
   parse(latex: LatexString): Expression;
-  /**
-   * Serialize a MathJSON expression as a Latex string.
-   *
-   */
   serialize(expr: Expression): LatexString;
 }
 
@@ -507,3 +508,32 @@ export interface Scanner {
     onError?: ErrorListener<ErrorCode>
   ): Expression | null;
 }
+
+/**
+ * Parse a Latex string and return a corresponding MathJSON expression.
+ *
+ * @pram onError - Called when a non-fatal error is encountered while parsing.
+ * The parsing will attempt to recover and continue.
+ *
+ */
+export declare function parse(
+  latex: LatexString,
+  options?: LatexNumberOptions &
+    ParseLatexOptions & {
+      dictionary?: Readonly<LatexDictionary>;
+      onError?: ErrorListener<ErrorCode>;
+    }
+): Expression;
+
+/**
+ * Serialize a MathJSON expression as a Latex string.
+ *
+ */
+export declare function serialize(
+  expr: Expression,
+  options?: LatexNumberOptions &
+    SerializeLatexOptions & {
+      dictionary?: Readonly<LatexDictionary>;
+      onError?: ErrorListener<ErrorCode>;
+    }
+): LatexString;
