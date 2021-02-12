@@ -1,9 +1,9 @@
-# Math-JSON
+# MathJSON
 
 The MathJSON format is a lightweight data interchange format for mathematical
 notation.
 
-| Latex                      | mathJSON                                                                  |
+| Latex                      | MathJSON                                                                  |
 | :------------------------- | :------------------------------------------------------------------------ |
 | `\frac{a}{1+x}`            | `["Divide", "a", ["Add", 1, "x"]]`                                        |
 | `e^{\imaginaryI \pi }+1=0` | `["Eq", ["Power", "E", ["Add", ["Multiply", "Pi", "ImaginaryI"], 1]], 0]` |

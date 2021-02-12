@@ -1,5 +1,6 @@
 import type { Dictionary } from '../public';
 
+// @todo
 // sec, csc, cot
 // sechh, csch, coth,
 // arcsec, arccsc, arccot, arcsinh,
@@ -20,10 +21,12 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Arctan: {
     /** Elem */
+    wikidata: 'Q2257242',
     isPure: true,
   },
   Arctan2: {
     /** Elem */
+    wikidata: 'Q776598',
     isPure: true,
   },
   Arsinh: {
@@ -48,7 +51,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
     isPure: true,
   },
   Haversine: {
-    /** = sin(z/2)^2 */
+    /** = sin(z/2)^2 = (1 - cos z) / 2*/
+    wikidata: 'Q2528380',
     isPure: true,
   },
   Hypot: {

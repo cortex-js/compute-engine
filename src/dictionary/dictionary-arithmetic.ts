@@ -45,6 +45,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary = {
     isPure: true,
   },
   E: {
+    wikidata: 'Q82435',
     isConstant: true,
     value: { num: '2.7182818284590452354' },
   },

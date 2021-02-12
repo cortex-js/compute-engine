@@ -1,4 +1,13 @@
-# MathJSON
+---
+title: MathJSON Format
+permalink: /guides/math-json-format/
+layout: single
+date: Last Modified
+sidebar:
+  - nav: 'mathjson'
+---
+
+# MathJSON Format
 
 The MathJSON format is a lightweight data interchange format for mathematical
 notation.
@@ -203,8 +212,3 @@ The following properties are recommended to represent metadata:
 | `wikidata` | `"Q167"` | A short string indicating an entry in a wikibase. This information can be used to disambiguate the meaning of a symbol                                                  |
 | `comment`  |          | A human readable string to annotate an expression, since JSON does not allow comments in its encoding                                                                   |
 | `latex`    | `"\pi"`  | A visual representation in LaTeX of the expression. This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
-
-## Next
-
-- The [MathJSON API documentation](API.md)
-- The [Latex Syntax](./latex-syntax/README.md) (default dictionary)
