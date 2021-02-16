@@ -7,6 +7,11 @@ sidebar:
   - nav: 'mathjson'
 ---
 
+<script type='module'>
+    import { renderMathInDocument } from '//unpkg.com/mathlive/dist/mathlive.mjs';
+    renderMathInDocument();
+</script>
+
 # MathJSON Format
 
 The MathJSON format is a lightweight data interchange format for mathematical
@@ -41,11 +46,11 @@ mathematical notations, and as such is not a replacement for LaTeX or MathML.
 
 ## Examples
 
-| Latex                      | mathJSON                                                                  |
-| :------------------------- | :------------------------------------------------------------------------ |
-| `\frac{a}{1+x}`            | `["Divide", "a", ["Add", 1, "x"]]`                                        |
-| `e^{\imaginaryI \pi }+1=0` | `["Eq", ["Power", "E", ["Add", ["Multiply", "Pi", "ImaginaryI"], 1]], 0]` |
-| `\sin^{-1}\prime(x)`       | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                    |
+| Latex                        | MathJSON                                                                  |
+| :--------------------------- | :------------------------------------------------------------------------ |
+| $$\frac{a}{1+x}$$            | `["Divide", "a", ["Add", 1, "x"]]`                                        |
+| $$e^{\imaginaryI \pi }+1=0$$ | `["Eq", ["Add", ["Power", "E", ["Multiply", "Pi", "ImaginaryI"], 1]], 0]` |
+| $$\sin^{-1}\prime(x)$$       | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                    |
 
 ## Structure of a MathJSON Expression
 
@@ -116,8 +121,8 @@ Specifically:
 
 { "num": "-234.534e-46" }
 
-{ "num": "3.1415926535 8979323846 2643383279 5028841971 6939937510 5820974944 5923078164 0628620899 8628034825 3421170679 8214808651 3282306647 0938446095 5058223172 5359408128 4811174502 8410270193 8521105559 6446229489 5493038196 4428810975 6659334461 2847564823 3786783165 2712019091 4564856692 3460348610 4543266482 1339360726 0249141273 7245870066 0631558817 4881520920 9628292540 9171536436 7892590360 0113305305 4882046652 1384146951 9415116094 3305727036 5759591953 0921861173 8193261179 3105118548 0744623799 6274956735"
-}
+{ "num": "3.1415926535 8979323846 2643383279 5028841971 6939937510 5820974944" }
+
 
 { "num": "-Infinity" }
 
@@ -183,9 +188,14 @@ It frequently is a string, but it can also be another expression.
 Following the head are zero or more **arguments** to the function, which are
 expressions as well.
 
-For example in `\sin^{-1}(x)`, the corresponding expression is
-`[["InverseFunction", "Sin"], "x"]`, the head is `["InverseFunction", "Sin"]`,
-and the argument is "x".
+The expression corresponding to $$\sin^{-1}(x)$$ is
+
+```json
+[["InverseFunction", "Sin"], "x"]
+```
+
+The head of this expression is `["InverseFunction", "Sin"]`, and the argument is
+"x".
 
 ### JSON array
 
