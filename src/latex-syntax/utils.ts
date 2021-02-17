@@ -1,9 +1,9 @@
+import { MULTIPLY, ADD } from '../utils';
 import {
   LatexNumberOptions,
   ParseLatexOptions,
   SerializeLatexOptions,
 } from './public';
-import { MULTIPLY, ADD } from '../dictionary/dictionary';
 
 export const DEFAULT_LATEX_NUMBER_OPTIONS: Required<LatexNumberOptions> = {
   precision: 15, // assume 2^53 bits floating points

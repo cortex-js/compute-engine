@@ -1,4 +1,4 @@
-import { Expression, Dictionary, Form } from './public';
+import { Expression, Form, Domain, ComputeEngine } from './public';
 import {
   isNumberObject,
   isFunctionObject,
@@ -9,12 +9,8 @@ import {
   getArg,
   mapArgs,
   getArgCount,
-  vars,
   getFunctionHead,
   isAtomic,
-} from './utils';
-import {
-  findFunctionInDictionary,
   GROUP,
   POWER,
   DIVIDE,
@@ -31,7 +27,7 @@ import {
   NOTHING,
   SEQUENCE,
   SEQUENCE2,
-} from './dictionary/dictionary';
+} from './utils';
 import { canonicalOrder } from './order';
 
 function ungroup(expr: Expression): Expression {
@@ -123,41 +119,57 @@ function flatten(expr: Expression | null, flatName: string): Expression | null {
   return [head, ...newArgs];
 }
 
-function flattenIdempotent(
+function flattenInvolution(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const name = getFunctionName(expr);
-  const def = findFunctionInDictionary(dic, name);
-  if (def?.isIdempotent) return flatten(expr, name);
+  const def = engine.getFunctionDefinition(name);
+  if (def?.involution) {
+    const args = getArgs(expr);
+    if (args.length === 1 && getFunctionName(args[0]) === name) {
+      return flatten(args[0], name);
+    }
+  }
 
-  return mapArgs(expr, (x) => flattenIdempotent(x, dic));
+  return mapArgs(expr, (x) => flattenInvolution(x, engine));
+}
+
+function flattenIdempotent(
+  expr: Expression | null,
+  engine: ComputeEngine
+): Expression | null {
+  const name = getFunctionName(expr);
+  const def = engine.getFunctionDefinition(name);
+  if (def?.idempotent) return flatten(expr, name);
+
+  return mapArgs(expr, (x) => flattenIdempotent(x, engine));
 }
 
 function flattenAssociative(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const name = getFunctionName(expr);
-  const def = findFunctionInDictionary(dic, name);
-  if (def?.isAssociative) return flatten(expr, name);
+  const def = engine.getFunctionDefinition(name);
+  if (def?.associative) return flatten(expr, name);
 
-  return mapArgs(expr, (x) => flattenAssociative(x, dic));
+  return mapArgs(expr, (x) => flattenAssociative(x, engine));
 }
 
 function canonicalAddForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== ADD) {
-    return mapArgs(expr, (x) => canonicalAddForm(x, dic));
+    return mapArgs(expr, (x) => canonicalAddForm(x, engine));
   }
   expr = flatten(ungroup(expr), ADD);
   let args = getArgs(expr);
   args = args
-    .map((x) => canonicalAddForm(x, dic))
+    .map((x) => canonicalAddForm(x, engine))
     .filter((x) => getNumberValue(x) !== 0);
   const argCount = args.length;
   if (argCount === 0) return 0;
@@ -167,18 +179,18 @@ function canonicalAddForm(
 
 function canonicalDivideForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== DIVIDE) {
-    return mapArgs(expr, (x) => canonicalDivideForm(x, dic));
+    return mapArgs(expr, (x) => canonicalDivideForm(x, engine));
   }
 
   if (getArgCount(expr) !== 2) return expr;
 
-  const arg1 = canonicalDivideForm(getArg(expr, 1), dic);
-  const arg2 = canonicalDivideForm(getArg(expr, 2), dic);
+  const arg1 = canonicalDivideForm(getArg(expr, 1), engine);
+  const arg2 = canonicalDivideForm(getArg(expr, 2), engine);
   const val2 = getNumberValue(arg2);
   if (val2 === 1) return arg1;
   const val1 = getNumberValue(arg1);
@@ -188,28 +200,28 @@ function canonicalDivideForm(
 
 function canonicalExpForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== EXP) {
-    return mapArgs(expr, (x) => canonicalExpForm(x, dic));
+    return mapArgs(expr, (x) => canonicalExpForm(x, engine));
   }
 
   if (getArgCount(expr) !== 1) return expr;
 
-  return [POWER, EXPONENTIAL_E, canonicalExpForm(getArg(expr, 1), dic)];
+  return [POWER, EXPONENTIAL_E, canonicalExpForm(getArg(expr, 1), engine)];
 }
 
 function canonicalListForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   if (isAtomic(expr)) return expr;
 
   const rootName = getFunctionName(expr);
   if (rootName !== LIST && rootName !== SEQUENCE && rootName !== SEQUENCE2) {
-    return mapArgs(expr, (x) => canonicalListForm(x, dic));
+    return mapArgs(expr, (x) => canonicalListForm(x, engine));
   }
 
   const isList = rootName === LIST;
@@ -218,7 +230,7 @@ function canonicalListForm(
 
   if (isList) {
     for (let arg of args) {
-      arg = canonicalListForm(arg, dic);
+      arg = canonicalListForm(arg, engine);
       const name = getFunctionName(arg);
       if (name === IDENTITY) {
         const newArg = getArg(arg, 1);
@@ -232,11 +244,11 @@ function canonicalListForm(
     return [LIST, ...newArgs];
   }
 
-  const def = findFunctionInDictionary(dic, rootName);
+  const def = engine.getFunctionDefinition(rootName);
   const sequenceHold = def?.sequenceHold ?? false;
 
   for (let arg of args) {
-    arg = canonicalListForm(arg, dic);
+    arg = canonicalListForm(arg, engine);
     const name = getFunctionName(arg);
     if (name === IDENTITY) {
       const newArg = getArg(arg, 1);
@@ -299,11 +311,11 @@ function getSquareRoots(expr: Expression): [Expression[], Expression[]] {
 
 function canonicalMultiplyForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const head = getFunctionHead(expr);
   if (!head) return expr;
-  expr = mapArgs(expr, (x) => canonicalMultiplyForm(x, dic));
+  expr = mapArgs(expr, (x) => canonicalMultiplyForm(x, engine));
   if (head !== MULTIPLY) return expr;
 
   expr = flatten(ungroup(expr), MULTIPLY);
@@ -383,21 +395,21 @@ function canonicalMultiplyForm(
 // @todo: see https://docs.sympy.org/1.6/modules/core.html#pow
 function canonicalPowerForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== POWER) {
-    return mapArgs(expr, (x) => canonicalPowerForm(x, dic));
+    return mapArgs(expr, (x) => canonicalPowerForm(x, engine));
   }
 
   expr = ungroup(expr);
 
   if (getArgCount(expr) !== 2) return expr;
 
-  const arg1 = canonicalPowerForm(getArg(expr, 1), dic);
+  const arg1 = canonicalPowerForm(getArg(expr, 1), engine);
   const val1 = getNumberValue(arg1);
-  const arg2 = canonicalPowerForm(getArg(expr, 2), dic);
+  const arg2 = canonicalPowerForm(getArg(expr, 2), engine);
   const val2 = getNumberValue(arg2);
 
   if (val2 === 0) return 1;
@@ -436,7 +448,7 @@ function canonicalPowerForm(
 
 function canonicalNegateForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const head = getFunctionHead(expr);
   if (head === NEGATE) {
@@ -471,17 +483,17 @@ function canonicalNegateForm(
       return [MULTIPLY, -1, arg];
     }
   } else if (head) {
-    return mapArgs(expr, (x) => canonicalNegateForm(x, dic));
+    return mapArgs(expr, (x) => canonicalNegateForm(x, engine));
   }
   return expr;
 }
 
 function canonicalNumberForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   if (getFunctionHead(expr)) {
-    return mapArgs(expr, (x) => canonicalNumberForm(x, dic));
+    return mapArgs(expr, (x) => canonicalNumberForm(x, engine));
   }
 
   if (typeof expr === 'number') {
@@ -516,45 +528,45 @@ function canonicalNumberForm(
 
 function canonicalSubtractForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== SUBTRACT) {
-    return mapArgs(expr, (x) => canonicalSubtractForm(x, dic));
+    return mapArgs(expr, (x) => canonicalSubtractForm(x, engine));
   }
 
   if (getArgCount(expr) !== 2) return expr;
 
-  const arg1 = canonicalSubtractForm(getArg(expr, 1), dic);
+  const arg1 = canonicalSubtractForm(getArg(expr, 1), engine);
   const val1 = getNumberValue(arg1);
-  const arg2 = canonicalSubtractForm(getArg(expr, 2), dic);
+  const arg2 = canonicalSubtractForm(getArg(expr, 2), engine);
   const val2 = getNumberValue(arg2);
 
   if (val1 === 0) {
     if (val2 === 0) return 0;
-    return canonicalSubtractForm([ADD, arg1, applyNegate(arg2)], dic);
+    return canonicalSubtractForm([ADD, arg1, applyNegate(arg2)], engine);
   }
-  return canonicalSubtractForm([ADD, arg1, applyNegate(arg2)], dic);
+  return canonicalSubtractForm([ADD, arg1, applyNegate(arg2)], engine);
 }
 
 function canonicalRootForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== ROOT && head !== SQRT) {
-    return mapArgs(expr, (x) => canonicalRootForm(x, dic));
+    return mapArgs(expr, (x) => canonicalRootForm(x, engine));
   }
 
   if (getArgCount(expr) < 1) return expr;
 
-  const arg1 = canonicalRootForm(getArg(expr, 1), dic);
+  const arg1 = canonicalRootForm(getArg(expr, 1), engine);
 
   let arg2: Expression = 2;
   if (getArgCount(expr) > 1) {
-    arg2 = canonicalPowerForm(getArg(expr, 2), dic);
+    arg2 = canonicalPowerForm(getArg(expr, 2), engine);
   }
   const val2 = getNumberValue(arg2);
   if (val2 === 1) {
@@ -602,7 +614,7 @@ function isValidJSONNumber(num: string): string | number {
  */
 export function fullForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
   if (expr === null) return null;
   if (Array.isArray(expr)) {
@@ -610,7 +622,7 @@ export function fullForm(
       if (i === 0) {
         return x;
       }
-      return fullForm(x, dic);
+      return fullForm(x, engine);
     });
   }
   if (typeof expr === 'object') {
@@ -623,14 +635,14 @@ export function fullForm(
         return { num: val };
       }
       if (isFunctionObject(expr)) {
-        return expr.fn.map((x) => fullForm(x, dic));
+        return expr.fn.map((x) => fullForm(x, engine));
       }
       if (isSymbolObject(expr)) {
         return expr.sym;
       }
     } else {
       if (isFunctionObject(expr)) {
-        expr.fn = expr.fn.map((x) => fullForm(x, dic));
+        expr.fn = expr.fn.map((x) => fullForm(x, engine));
       }
     }
   }
@@ -639,13 +651,13 @@ export function fullForm(
 
 export function strippedMetadataForm(
   expr: Expression,
-  dict: Dictionary
+  engine: ComputeEngine
 ): Expression {
   if (typeof expr === 'number' || typeof expr === 'string') {
     return expr;
   }
   if (Array.isArray(expr)) {
-    return expr.map((x) => strippedMetadataForm(x, dict));
+    return expr.map((x) => strippedMetadataForm(x, engine));
   }
   if (typeof expr === 'object') {
     if ('num' in expr) {
@@ -653,7 +665,7 @@ export function strippedMetadataForm(
       if (typeof val === 'number') return val;
       return { num: val };
     } else if ('fn' in expr) {
-      return expr.fn.map((x) => strippedMetadataForm(x, dict));
+      return expr.fn.map((x) => strippedMetadataForm(x, engine));
     }
   }
 
@@ -662,7 +674,7 @@ export function strippedMetadataForm(
 
 export function objectLiteralForm(
   expr: Expression,
-  dict: Dictionary
+  engine: ComputeEngine
 ): Expression {
   if (typeof expr === 'number') {
     return { num: expr.toString() };
@@ -671,10 +683,10 @@ export function objectLiteralForm(
     return { sym: expr };
   }
   if (Array.isArray(expr) && expr.length > 0) {
-    return { fn: expr.map((x) => objectLiteralForm(x, dict)) };
+    return { fn: expr.map((x) => objectLiteralForm(x, engine)) };
   }
   if (typeof expr === 'object' && 'fn' in expr) {
-    return { ...expr, fn: expr.fn.map((x) => objectLiteralForm(x, dict)) };
+    return { ...expr, fn: expr.fn.map((x) => objectLiteralForm(x, engine)) };
   }
   return expr;
 }
@@ -703,11 +715,31 @@ export function objectLiteralForm(
  * - if a `[MULTIPLY]` or a `[POWER]`... @todo
  *
  */
-export function sortedForm(expr: Expression, dic: Dictionary): Expression {
+export function sortedForm(
+  expr: Expression,
+  engine: ComputeEngine
+): Expression {
   // Get the unique variables (not constants) in the expression
-  const v: Set<string> = vars(dic, expr);
+  const v: Set<string> = engine.getVars(expr);
 
-  return canonicalOrder(dic, Array.from(v).sort(), expr);
+  return canonicalOrder(engine, Array.from(v).sort(), expr);
+}
+
+/**
+ * Return a canonical form of the domain
+ *
+ */
+export function canonicalDomainForm(
+  dom: Domain,
+  _engine: ComputeEngine
+): Domain {
+  // The canonical domain is calculated by evaluating the
+  // domain expression @todo
+
+  // @todo Deal with parametric domains
+  // when overlapping
+  // Simplify ranges: Real[-infinity, +infinity] (or does Real not include infinity?)
+  return dom;
 }
 
 /**
@@ -721,35 +753,35 @@ export function sortedForm(expr: Expression, dic: Dictionary): Expression {
  */
 export function canonicalForm(
   expr: Expression | null,
-  dic: Readonly<Dictionary>
+  engine: ComputeEngine
 ): Expression | null {
-  return form(
-    expr,
-    [
-      'canonical-number', // -> simplify number
-      'canonical-exp', // -> power
-      'canonical-root', // -> power, divide
-      'canonical-subtract', // -> add, negate, multiply,
-      'canonical-divide', // -> multiply, power
-      'canonical-power', // simplify power
-      'canonical-multiply', // -> multiply, power,    (this might generate
-      // some POWER functions, but they are 'safe' (don't need simplification)
-      'canonical-negate', // simplify negate
-      'canonical-add', // simplify add
-      'flatten', // associative, idempotent and groups
-      'canonical-list', // 'NOTHING', 'Identity' and 'Sequence'
-      'sorted',
-      'full',
-    ],
-    { dictionary: dic }
-  );
+  return engine.format(expr, [
+    'canonical-number', // -> simplify number
+    'canonical-exp', // -> power
+    'canonical-root', // -> power, divide
+    'canonical-subtract', // -> add, negate, multiply,
+    'canonical-divide', // -> multiply, power
+    'canonical-power', // simplify power
+    'canonical-multiply', // -> multiply, power,    (this might generate
+    // some POWER functions, but they are 'safe' (don't need simplification)
+    'canonical-negate', // simplify negate
+    'canonical-add', // simplify add
+    'flatten', // associative, idempotent and groups
+    'canonical-list', // 'Nothing', 'Identity' and 'Sequence'
+    'canonical-domain',
+    'sorted',
+    'full',
+  ]);
 }
 
 function flattenForm(
   expr: Expression | null,
-  dic: Dictionary
+  engine: ComputeEngine
 ): Expression | null {
-  return flattenAssociative(flattenIdempotent(expr, dic), dic);
+  return flattenAssociative(
+    flattenIdempotent(flattenInvolution(expr, engine), engine),
+    engine
+  );
 }
 
 /**
@@ -780,19 +812,16 @@ export function escapeText(s: string): string {
  * for example subtraction is replaced with addition
  *
  */
-export function form(
+export function format(
   expr: Expression | null,
   forms: Form[],
-  options: {
-    dictionary: Readonly<Dictionary>;
-  }
+  engine: ComputeEngine
 ): Expression | null {
   let result = expr;
-  const dictionary = options.dictionary;
   for (const form of forms) {
     const fn: (
       expr: Expression | null,
-      dic: Dictionary
+      engine: ComputeEngine
     ) => Expression | null = {
       'canonical': canonicalForm,
       'canonical-add': canonicalAddForm,
@@ -810,13 +839,14 @@ export function form(
       'sorted': sortedForm,
       'stripped-metadata': strippedMetadataForm,
       'object-literal': objectLiteralForm,
+      'canonical-domain': canonicalDomainForm,
       // 'sum-product': sumProductForm,
     }[form];
     if (!fn) {
       console.error('Unknown form ' + form);
       return null;
     }
-    result = fn(result, dictionary);
+    result = fn(result, engine);
     // console.log(form + ' = ' + JSON.stringify(result));
   }
   return result;

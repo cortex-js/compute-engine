@@ -1,6 +1,69 @@
-import { Domain } from './domains';
+export type FunctionFeatures = {
+  /**  If true, the function is applied element by element to lists, matrices
+   * and equations.
+   *
+   * Default: false
+   */
+  threadable: boolean;
 
-export type FunctionDefinition = {
+  /** If true, [f, [f, a], b] simplifies to [f, a, b]
+   *
+   * Default: false
+   */
+  associative: boolean;
+
+  /** If true, [f, a, b] simplifies to [f, b, a]
+   *
+   * Default: false
+   */
+  commutative: boolean;
+
+  /** If true, when the function is univariate, `[f, ["Add", x, c]]` where `c`
+   * is constant, is simplified to `["Add", [f, x], c]`.
+   *
+   * When the function is multivariate, additivity is considered only on the
+   * first argument: `[f, ["Add", x, c], y]` simplifies to `["Add", [f, x, y], c]`.
+   */
+  additive: boolean;
+
+  /** If true, when the function is univariate, `[f, ["Multiply", x, y]]`
+   * simplifies to `["Multiply", [f, x], [f, y]]`.
+   *
+   * When the function is multivariate, multipicativity is considered only on the
+   * first argument: `[f, ["Multiply", x, y], z]` simplifies to
+   * `["Multiply", [f, x, z], [f, y, z]]`
+   */
+  multiplicative: boolean;
+
+  /** If true, when the function is univariate, `[f, ["Multiply", x, c]]`
+   * simplifies to `["Multiply", [f, x], c]` where `c` is constant
+   *
+   * When the function is multivariate, multiplicativity is considered only on the
+   * first argument: `[f, ["Multiply", x, y], z]` simplifies to
+   * `["Multiply", [f, x, z], [f, y, z]]`
+   */
+  outtative: boolean;
+
+  /** If true, `[f, [f, x]]` simplifies to `[f, x]`
+   *
+   * Default: false
+   */
+  idempotent: boolean;
+
+  /** If true, `[f, [f, x]]` simplifies to `x` */
+  involution: boolean;
+
+  /** If true, invoking the function with a given set of arguments will
+   * always return the same value, i.e. 'Sin' is pure, 'Random' isn't.
+   * This is used to cache the result of the function.
+   *
+   * Default: true
+   */
+  pure: boolean;
+};
+
+export type Definition = {
+  domain: Domain;
   /**
    * A short string indicating an entry in a wikibase. For example
    * `"Q167"` is the [wikidata entry](https://www.wikidata.org/wiki/Q167)
@@ -8,77 +71,83 @@ export type FunctionDefinition = {
    */
   wikidata?: string;
 
-  /** The domain of the result */
-  domain?: Domain;
-
-  /**  If true, the function will be automatically mapped to a list argument */
-  isListable?: boolean;
-
-  /** If true, [f, [f, a], b] is equivalent to [f, a, b] */
-  isAssociative?: boolean;
-
-  /** If true, [f, a, b] is equivalent to [f, b, a] */
-  isCommutative?: boolean;
-
-  /** If true, [f, [f, a]] is equivalent to [f, a] */
-  isIdempotent?: boolean;
-
-  /** If true, invoking the function with a given set of arguments will
-   * always return the same value, i.e. 'sin()' is pure, 'random()' isn't.
-   * This is used to cache the result of the function.
-   */
-  isPure?: boolean;
-
   /**
-   * - **'none'**:  eval() is invoked for each argument.
-   * - **'all'**: The arguments will not be evaluated and will be passed as is
-   *  The function will be passed the result of the evaluation
-   * - **'first'**: The first argument is not evaluated, the others are
-   * - **'rest'**: The first argument is evaluated, the others aren't
+   * The scope this definition belongs to. This field is usually undefined,
+   * but its value is set by `getDefinition`, `getFunctionDefinition` and
+   * `getSymbolDefinition`.
    */
-
-  hold?: 'none' | 'all' | 'first' | 'rest';
-
-  /**
-   * If true, `Sequence` arguments are not automatically spliced in
-   */
-  sequenceHold?: boolean;
-
-  /**
-   * Number of arguments, or minimum or minimum and maximum number of arguments.
-   *
-   * These are the arguments in the expr representation (i.e. ["f", 1, 2])
-   * and if `requiredLatexArg` is 0 (or undefined), these are also the expected
-   * arguments in the latex stream, i.e. "f(1, 2)".
-   *
-   */
-  argCount?: number | [number] | [number, number];
-  argDomain?: Domain[];
-
-  /**
-   * Evaluate the arguments
-   */
-  apply?: (...args: Expression[]) => Expression;
+  scope?: Scope;
 };
 
-export type SymbolDefinition = {
+export type FunctionDefinition = Definition &
+  Partial<FunctionFeatures> & {
+    /**
+     * - **'none'**:  eval() is invoked for each argument.
+     * - **'all'**: The arguments will not be evaluated and will be passed as is
+     *  The function will be passed the result of the evaluation
+     * - **'first'**: The first argument is not evaluated, the others are
+     * - **'rest'**: The first argument is evaluated, the others aren't
+     */
+
+    hold?: 'none' | 'all' | 'first' | 'rest';
+
+    /**
+     * If true, `Sequence` arguments are not automatically spliced in
+     */
+    sequenceHold?: boolean;
+
+    /**
+     * Function signatures.
+     */
+    signatures?: {
+      /** Input arguments */
+      args?: (Domain | [name: string, domain: Domain])[];
+
+      /** If this signature accepts unlimited additional arguments after the
+       * named arguments, they should be of this domain */
+      rest?: Domain | [name: string, domain: Domain];
+
+      /** Domain result computation */
+      result:
+        | Domain
+        | ((engine: ComputeEngine, ...args: Expression[]) => Expression);
+
+      /** Dimensional analysis */
+      dimension?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
+      /** Return a compiled (optimized) function for evaluation */
+      compile?: (
+        engine: ComputeEngine,
+        ...args: CompiledExpression[]
+      ) => CompiledExpression;
+      /** */
+      evaluate?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
+    }[];
+  };
+
+export type SymbolFeatures = {
   /**
    * If true the value of the symbol is constant.
    *
    * If false, the symbol is a variable.
    */
-  isConstant: boolean;
+  constant: boolean;
+};
 
-  /**
-   * A short string indicating an entry in a wikibase. For example
-   * `"Q167"` is the [wikidata entry](https://www.wikidata.org/wiki/Q167)
-   *  for the Pi constant.
+export type SymbolDefinition = Definition &
+  SymbolFeatures & {
+    value?: Expression;
+    /** For dimensional analysis, e.g. "Scalar", "Meter", ["Divide", "Meter", "Second"] */
+    unit?: Expression;
+  };
+
+export type SetDefinition = Definition & {
+  /** The supersets of this set: they should be symbol with a 'Set' domain */
+  supersets: string[];
+
+  /** A predicate function that can be used to determine if an expression
+   * is a member of the set or not (answers "True", "False" or "Maybe").
    */
-  wikidata?: string;
-
-  domain?: Domain;
-  value?: Expression;
-  unit?: Expression;
+  isMemberOf?: Expression;
 };
 
 export type ErrorListener<T> = (err: {
@@ -92,8 +161,9 @@ export type ErrorListener<T> = (err: {
 /**
  * A dictionary maps a MathJSON name to a definition.
  *
- * A name can refer to a symbol, as in the expression `"Pi"`,
- * or to a function: "Add" in the expression `["Add", 2, 3]`.
+ * A named entry in a dictionary can refer to a symbol, as in the expression,
+ * `"Pi"`, to a function: "Add" in the expression `["Add", 2, 3]`, or
+ * to a `"Set`".
  *
  * The name can be an arbitrary string of Unicode characters, however
  * the following conventions are recommended:
@@ -102,9 +172,35 @@ export type ErrorListener<T> = (err: {
  * a letter: `/^[a-zA-Z][a-zA-Z0-9-]+/`
  * - Built-in functions and symbols should start with an uppercase letter
  *
+ * As a shorthand for a numeric symbol definition, a number can be used as
+ * well. In that case the domain is determined automatically.
+ *
+ * ```json
+ * { x: 1.0 }
+ * { x : { domain: "RealNumber", value: 1.0 } }
+ * ```
+ *
+ *
  */
 export type Dictionary = {
-  [name: string]: SymbolDefinition | FunctionDefinition;
+  [name: string]:
+    | number
+    | SymbolDefinition
+    | FunctionDefinition
+    | SetDefinition;
+};
+
+export type CompiledDictionary = Map<
+  string,
+  FunctionDefinition | SetDefinition | SymbolDefinition
+>;
+
+/**
+ * A dictionary that contains symbol definitions.
+ */
+export type Scope = {
+  parentScope: Scope;
+  dictionary: CompiledDictionary;
 };
 
 /**
@@ -178,7 +274,7 @@ export type ErrorCode =
   | 'postfix-operator-requires-one-operand'
   | 'associative-function-has-too-few-arguments'
   | 'commutative-function-has-too-few-arguments'
-  | 'listable-function-has-too-few-arguments'
+  | 'threadable-function-has-too-few-arguments'
   | 'hold-first-function-has-too-few-arguments'
   | 'hold-rest-function-has-too-few-arguments'
   | 'base-out-of-range'
@@ -247,7 +343,21 @@ export type Expression =
   // Shortcut for a MathJsonSymbol with no metadata. Or a string.
   | string
   | MathJsonFunction
-  | (Expression | string)[];
+  | Expression[];
+
+export type CompiledExpression = {
+  evaluate: (scope: { [symbol: string]: Expression }) => Expression;
+};
+
+/** A domain such as 'Number' or 'Boolean' represents a set of values.
+ *
+ * Domains can be defined as a union or intersection of domains:
+ * - `["Union", "Number", "Boolean"]` A number or a boolean.
+ * - `["SetMinus", "Number", 1]`  Any number except "1".
+ *
+ * Domains are defined in a hierarchy (a lattice).
+ */
+export type Domain = Expression;
 
 /**
  * A given mathematical expression can be represented in multiple equivalent
@@ -304,6 +414,7 @@ export type Form =
   | 'canonical'
   | 'canonical-add'
   | 'canonical-divide'
+  | 'canonical-domain'
   | 'canonical-exp'
   | 'canonical-list'
   | 'canonical-multiply'
@@ -365,16 +476,65 @@ export declare class ComputeEngine {
    */
   static getDictionary(category: DictionaryCategory | 'all'): Dictionary;
 
-  scope: Dictionary;
+  onError: ErrorListener<ErrorCode>;
 
   constructor(options?: {
     dictionary?: Dictionary;
     onError?: ErrorListener<ErrorCode>;
   });
 
-  format(expr: Expression | null, forms: Form[]): Expression | null;
+  /** Remove the topmost scope from the scope stack.
+   *
+   * A scope is a dictionary that contains the definition of local symbols.
+   *
+   */
+  popScope(): void;
 
-  evaluate(exp: Readonly<Expression>): Expression | null;
+  /** Create a new scope and add it to the top of the scope stack */
+  pushScope(dictionary?: Dictionary): void;
+
+  getFunctionDefinition(name: string): FunctionDefinition | null;
+  getSymbolDefinition(name: string): FunctionDefinition | null;
+  getDefinition(name: string): FunctionDefinition | null;
+
+  /** Return the variables (free or not) in this expression */
+  getVars(expr: Expression): Set<string>;
+
+  /** Format the expression according to the specified forms.
+   *
+   * If no form is provided, the expression is formatted with the 'canonical'
+   * form.
+   *
+   */
+  canonical(expr: Expression | null): Expression | null;
+  format(expr: Expression | null, forms?: Form | Form[]): Expression | null;
+
+  evaluate(exp: Expression): Expression | null;
+
+  /** Return the domain of the expression */
+  domain(expr: Expression): Expression;
+
+  /** Compare expression `lhs` with expression `rhs`.
+   *
+   * Return:
+   * - `undefined` if the expressions can't be compared
+   * - `-1` if `lhs` is less than `rhs`
+   * - `0` is `lhs` is equal to `rhs`
+   * - `1` if `lhs` is greater than `rhs`
+   *
+   * This is a structural comparison, i.e. `x+1` and `1+x` are different.
+   *
+   * Applying a canonical format (with `form()`) or evaluating the expressions
+   * (with `evaluate()`) before comparing will result in more matches.
+   *
+   *
+   */
+  compare(lhs: Expression, rhs: Expression): -1 | 0 | 1 | undefined;
+  equal(lhs: Expression, rhs: Expression): boolean | undefined;
+  less(lhs: Expression, rhs: Expression): boolean | undefined;
+  lessEqual(lhs: Expression, rhs: Expression): boolean | undefined;
+  greater(lhs: Expression, rhs: Expression): boolean | undefined;
+  greaterEqual(lhs: Expression, rhs: Expression): boolean | undefined;
 }
 
 /**

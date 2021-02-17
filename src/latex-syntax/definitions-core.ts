@@ -1,5 +1,12 @@
 import { LatexDictionary, LatexToken, Scanner, Serializer } from './public';
+import { Expression } from '../public';
 import {
+  getNumberValue,
+  getArg,
+  getArgCount,
+  getFunctionName,
+  getArgs,
+  getFunctionHead,
   LATEX,
   GROUP,
   LIST,
@@ -10,15 +17,6 @@ import {
   NOTHING,
   SEQUENCE,
   SEQUENCE2,
-} from '../dictionary/dictionary';
-import { Expression } from '../public';
-import {
-  getNumberValue,
-  getArg,
-  getArgCount,
-  getFunctionName,
-  getArgs,
-  getFunctionHead,
 } from '../utils';
 import { getGroupStyle } from './serializer-style';
 
@@ -205,8 +203,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         return [lhs, [LIST, seq]];
       }
       return [lhs, null];
-      // There is a lhs -> it might be an index accessor, i.e. `v[23]`
-      // @todo
+      // There is a lhs -> it might be an index accessor, i.e. `v[23]` @todo
     },
   },
   {

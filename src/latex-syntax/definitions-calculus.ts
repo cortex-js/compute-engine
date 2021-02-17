@@ -1,6 +1,6 @@
 import { Expression } from '../public';
+import { NOTHING } from '../utils';
 import { Scanner, Serializer, LatexDictionary } from './public';
-import { NOTHING } from '../dictionary/dictionary';
 
 function parseIntegral(
   lhs: Expression,

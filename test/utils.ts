@@ -19,9 +19,7 @@ export function expression(
   options?: { form: Form }
 ): Expression {
   errors = [];
-  const result = engine.format(defaultLatex.parse(latex), [
-    options?.form ?? 'canonical',
-  ]);
+  const result = engine.format(defaultLatex.parse(latex), options?.form);
   errors = errors.filter((x) => !/^unknown-symbol /.test(x));
   if (errors.length !== 0) return [result, ...errors];
   return result;

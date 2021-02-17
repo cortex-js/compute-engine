@@ -1,7 +1,14 @@
 import { LatexDictionary, Scanner, Serializer } from './public';
 import { Expression } from '../public';
-import { NOTHING, SEQUENCE, LIST } from '../dictionary/dictionary';
-import { getFunctionName, getArgs, getArg, getFunctionHead } from '../utils';
+import {
+  getFunctionName,
+  getArgs,
+  getArg,
+  getFunctionHead,
+  NOTHING,
+  SEQUENCE,
+  LIST,
+} from '../utils';
 
 export const DEFINITIONS_OTHERS: LatexDictionary = [
   {

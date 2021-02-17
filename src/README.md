@@ -130,6 +130,11 @@ Symbols represent constants and variables.
 Symbols are represented as arbitrary strings of Unicode characters, except
 **U+0020 (SPACE)**. However, the following naming convention are recommended.
 
+### Patterns
+
+Symbols that begin with `_` (**U+005F LOW LINE**) are reserved to denote pattern
+matches.
+
 ### Naming Convention for Variables
 
 - First character should match `/[a-zA-Z]/`

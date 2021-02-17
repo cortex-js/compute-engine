@@ -142,9 +142,9 @@ describe('FORMS', () => {
       // console.log(
       //     x[0] +
       //         ' cano -> ' +
-      //         JSON.stringify(expression(x[0], { form: 'canonical' }))
+      //         JSON.stringify(expression(x[0]))
       // );
-      expect(expression(x[0], { form: 'canonical' })).toStrictEqual(x[2]);
+      expect(expression(x[0])).toStrictEqual(x[2]);
     })
   );
 });
@@ -172,7 +172,7 @@ describe('ORDER', () => {
       [ADD, [MULTIPLY, 3, 'a'], [MULTIPLY, 5, 'a'], [MULTIPLY, 7, 'a']],
     ],
     // deglex sorting order
-    // by total degree, then lexigraphically
+    // by total degree, then lexicographically
 
     // If degree is the same, longest factor
     [
@@ -270,9 +270,9 @@ describe('ORDER', () => {
       // console.log(
       //     x[0] +
       //         ' order -> ' +
-      //         JSON.stringify(expression(x[0], { form: 'canonical' }))
+      //         JSON.stringify(expression(x[0]))
       // );
-      expect(expression(x[0], { form: 'canonical' })).toStrictEqual(x[1]);
+      expect(expression(x[0])).toStrictEqual(x[1]);
     })
   );
 });

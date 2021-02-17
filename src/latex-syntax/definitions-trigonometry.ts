@@ -1,6 +1,6 @@
 import { Expression } from '../public';
+import { DERIVATIVE, INVERSE_FUNCTION } from '../utils';
 import { Scanner, LatexDictionary } from './public';
-import { INVERSE_FUNCTION, DERIVATIVE } from '../dictionary/dictionary';
 
 /**
  * Trigonometric functions have some special conventions that require a

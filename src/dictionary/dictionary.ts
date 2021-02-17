@@ -1,46 +1,35 @@
 import type {
   Dictionary,
   DictionaryCategory,
-  SymbolDefinition,
+  ComputeEngine,
   FunctionDefinition,
+  SetDefinition,
+  SymbolDefinition,
+  CompiledDictionary,
+  Expression,
 } from '../public';
-import { ARITHMETIC_DICTIONARY } from './dictionary-arithmetic';
-import { CORE_DICTIONARY } from './dictionary-core';
-import { SETS_DICTIONARY } from './dictionary-sets';
-import { TRIGONOMETRY_DICTIONARY } from './dictionary-trigonometry';
-
-/**
- * These constants are the 'primitive' functions and constants that are used
- * for some basic manipulations such as parsing, and transforming to canonical
- * form.
- *
- */
-export const GROUP = 'Group';
-export const IDENTITY = 'Identity';
-export const LATEX = 'Latex';
-export const LIST = 'List';
-export const MISSING = 'Missing';
-export const NOTHING = 'Nothing';
-export const SEQUENCE = 'Sequence';
-export const SEQUENCE2 = 'Sequence2';
-
-export const ADD = 'Add';
-export const DERIVATIVE = 'Derivative';
-export const DIVIDE = 'Divide';
-export const EXP = 'Exp';
-export const INVERSE_FUNCTION = 'InverseFunction';
-export const MULTIPLY = 'Multiply';
-export const NEGATE = 'Negate';
-export const POWER = 'Power';
-export const PRIME = 'Prime';
-export const ROOT = 'Root';
-export const SQRT = 'Sqrt';
-export const SUBTRACT = 'Subtract';
-
-export const COMPLEX_INFINITY = 'ComplexInfinity';
-export const PI = 'Pi';
-export const EXPONENTIAL_E = 'ExponentialE';
-export const IMAGINARY_I = 'ImaginaryI';
+import {
+  COMPLEX_INFINITY,
+  DIVIDE,
+  getArg,
+  getFunctionName,
+  getNumberValue,
+  getRationalValue,
+  MULTIPLY,
+  POWER,
+} from '../utils';
+import { getDomainDictionary } from './domains';
+import { ARITHMETIC_DICTIONARY } from './arithmetic';
+import { CORE_DICTIONARY } from './core';
+import { LOGIC_DICTIONARY } from './logic';
+import { SETS_DICTIONARY } from './sets';
+import { TRIGONOMETRY_DICTIONARY } from './trigonometry';
+import { FIRST_1000_PRIMES, THOUSAND_TH_PRIME } from '../compute-engine/primes';
+import {
+  isSymbolDefinition,
+  isFunctionDefinition,
+  isSetDefinition,
+} from './utils';
 
 export function getDefaultDictionary(
   domain: DictionaryCategory | 'all' = 'all'
@@ -55,31 +44,6 @@ export function getDefaultDictionary(
     result = { ...DICTIONARY[domain] };
   }
   return result;
-}
-
-export function findInDictionary(
-  dic: Dictionary,
-  name: string
-): SymbolDefinition | FunctionDefinition | null {
-  return dic[name];
-}
-export function findFunctionInDictionary(
-  dic: Dictionary,
-  name: string
-): FunctionDefinition | null {
-  if (dic[name] && !('isConstant' in dic[name])) {
-    return dic[name] as FunctionDefinition;
-  }
-  return null;
-}
-export function findSymbolInDictionary(
-  dic: Dictionary,
-  name: string
-): SymbolDefinition | null {
-  if (dic[name] && 'isConstant' in dic[name]) {
-    return dic[name] as SymbolDefinition;
-  }
-  return null;
 }
 
 // export const ADD = 'Q32043';
@@ -158,7 +122,7 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
     // argument
     // conjugate
   },
-  'core': CORE_DICTIONARY,
+  'core': { ...CORE_DICTIONARY, ...getDomainDictionary() },
   'dimensions': {
     // volume, speed, area
   },
@@ -176,13 +140,7 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
     // sort
     // contains / find
   },
-  'logic': {
-    // true, false
-    // and, or, not, xor,, nand, nor, xnor,
-    // equivalent, implies
-    // for-all
-    // exists
-  },
+  'logic': LOGIC_DICTIONARY,
   'inequalities': {},
   'intervals': {
     // interval of integers vs interval of other sets (integer interval don't need to be open/closed)
@@ -224,7 +182,7 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
   },
   'physics': {
     'mu-0': {
-      isConstant: true,
+      constant: true,
       wikidata: 'Q1515261',
       domain: 'R+',
       value: 1.25663706212e-6,
@@ -262,3 +220,152 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
   'trigonometry': TRIGONOMETRY_DICTIONARY,
   'units': {},
 };
+
+/**
+ * Return a compiled and validated version of the dictionary.
+ *
+ * Specifically:
+ * - Expressions (for values, evaluate, domain, isMemberOf, etc..) are compiled
+ * when possible, put in canonical form otherwise
+ * - The domain of entries is inferred and validated:
+ *  - check that domains are in canonical form
+ *  - check that domains are consistent with declarations (for example that
+ * the signature of predicate have a MaybeBoolean codomain)
+ *
+ */
+export function compileDictionary(
+  dict: Dictionary,
+  engine: ComputeEngine
+): CompiledDictionary {
+  const result = new Map<
+    string,
+    FunctionDefinition | SetDefinition | SymbolDefinition
+  >();
+  for (const entryName of Object.keys(dict)) {
+    result.set(entryName, normalizeDefinition(dict[entryName]));
+  }
+  validateDictionary(engine, result);
+
+  // @todo: compile
+
+  return result;
+}
+
+function normalizeDefinition(
+  def: number | FunctionDefinition | SymbolDefinition | SetDefinition
+):
+  | Required<FunctionDefinition>
+  | Required<SymbolDefinition>
+  | Required<SetDefinition> {
+  if (typeof def === 'number') {
+    return {
+      domain: inferNumericDomain(def),
+      constant: false,
+      value: def,
+    } as Required<SymbolDefinition>;
+  }
+
+  if (isSymbolDefinition(def)) {
+    return {
+      domain: 'Anything',
+      constant: false,
+      ...def,
+    } as Required<SymbolDefinition>;
+  }
+
+  if (isFunctionDefinition(def)) {
+    return {
+      wikidata: '',
+
+      scope: null,
+      threadable: false,
+      associative: false,
+      commutative: false,
+      additive: false,
+      multiplicative: false,
+      outtative: false,
+      idempotent: false,
+      involution: false,
+      pure: true,
+
+      hold: 'none',
+      sequenceHold: false,
+
+      signatures: [],
+      ...def,
+    } as Required<FunctionDefinition>;
+  }
+
+  if (isSetDefinition(def)) {
+    return def as Required<SetDefinition>;
+  }
+
+  return undefined;
+}
+
+function validateDictionary(
+  engine: ComputeEngine,
+  dictionary: CompiledDictionary
+): void {
+  for (const [name, def] of dictionary) {
+    if (!/[A-Za-z][A-Za-z0-9-]*/.test(name) && name.length !== 1) {
+      engine.onError({ code: 'invalid-name', arg: name });
+    }
+    if (isSymbolDefinition(def)) {
+      // @todo: validate domain (make sure domain exists)
+      // @todo: for numeric domain, validate them: i.e. real are at least RealNumber, etc...
+      // using inferDomain
+    }
+    if (isFunctionDefinition(def)) {
+      // @todo: validate signatures: all arguments have known domains
+      // @todo result have a valid domain
+      // @todo: there is at least an evaluate or a compile property
+    }
+    if (isSetDefinition(def)) {
+      // @todo: check that all the elements of supersets are symbols of the Set domain
+      // @todo: could check that the domain of `isMemberOf` is MaybeBoolean
+    }
+  }
+}
+
+export function inferNumericDomain(value: Expression): string {
+  const [numer, denom] = getRationalValue(value);
+
+  if (!Number.isNaN(numer) && !Number.isNaN(denom)) {
+    if (numer === 0) return 'NumberZero';
+
+    // The value is a rational number
+    if (denom !== 1) return 'RationalNumber';
+
+    if (FIRST_1000_PRIMES.has(numer)) return 'PrimeNumber';
+
+    if (numer > 1 && numer < THOUSAND_TH_PRIME) return 'CompositeNumber';
+
+    if (numer > 0) return 'NaturalNumber';
+
+    return 'Integer';
+  }
+
+  if (value === COMPLEX_INFINITY) return 'ComplexInfinity';
+
+  const head = getFunctionName(value);
+  if (head === POWER) {
+    if (getFunctionName(getArg(value, 2)) === DIVIDE) {
+      if (
+        getArg(getArg(value, 2), 1) === 1 &&
+        getArg(getArg(value, 2), 2) === 2
+      ) {
+        // It's a square root...
+        if (FIRST_1000_PRIMES.has(getNumberValue(getArg(value, 1)))) {
+          // Square root of a prime is irrational
+          return 'IrrationalNumber';
+        }
+      }
+    }
+  }
+  // @todo: the log in a prime base of a prime number is irrational
+
+  if (!Number.isFinite(getNumberValue(value))) return 'SignedInfinity';
+
+  return 'RealNumber';
+}

@@ -1,6 +1,14 @@
 import { Expression } from '../public';
 import { Scanner, LatexDictionary, Serializer } from './public';
 import {
+  getFunctionName,
+  getArgs,
+  getArg,
+  getNumberValue,
+  getArgCount,
+  getRationalValue,
+  isNumberObject,
+  getFunctionHead,
   SQRT,
   ROOT,
   NOTHING,
@@ -16,16 +24,6 @@ import {
   POWER,
   MISSING,
   LIST,
-} from '../dictionary/dictionary';
-import {
-  getFunctionName,
-  getArgs,
-  getArg,
-  getNumberValue,
-  getArgCount,
-  getRationalValue,
-  isNumberObject,
-  getFunctionHead,
 } from '../utils';
 import { applyNegate } from '../forms';
 import { joinLatex } from '../core/tokenizer';

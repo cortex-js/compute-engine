@@ -12,11 +12,13 @@ import {
   getFunctionName,
   getArgs,
   isNumberObject,
+  GROUP,
+  DIVIDE,
+  LATEX,
 } from '../utils';
 import { tokensToString } from '../core/tokenizer';
 import { IndexedLatexDictionary } from './definitions';
 import { DEFAULT_PARSE_LATEX_OPTIONS } from './utils';
-import { GROUP, DIVIDE, LATEX } from '../dictionary/dictionary';
 
 export class Scanner implements Scanner {
   index = 0;

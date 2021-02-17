@@ -28,7 +28,7 @@
     </header>
     <main>
         <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
-            1+|a+|2|+b|
+            1+|(a+|2|+b)|
         </math-field>
         <!-- 1+|a+|2|+b| -->
         <!-- ,c,b -->
@@ -86,10 +86,10 @@
     </main>
 
     <script type="module">
-        import { ComputeEngine, Latex } from '../dist/math-json.js';
+        import { ComputeEngine, LatexSyntax } from '../dist/math-json.js';
 
         let errors = [];
-        const defaultLatex = new Latex(
+        const defaultLatex = new LatexSyntax(
             {
                 onError: (err) => {
                     if (err.before && err.after) {
@@ -111,7 +111,7 @@
                     }
                 }
             });
-        const rawLatex = new Latex(
+        const rawLatex = new LatexSyntax(
             {
                 invisibleOperator: '',
                 superscriptOperator: '',

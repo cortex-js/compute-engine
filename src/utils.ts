@@ -3,33 +3,40 @@ import {
   MathJsonRealNumber,
   MathJsonSymbol,
   MathJsonFunction,
-  FunctionDefinition,
-  SymbolDefinition,
-  ErrorCode,
-  Dictionary,
-  ErrorListener,
 } from './public';
-import {
-  findSymbolInDictionary,
-  NEGATE,
-  POWER,
-  DIVIDE,
-  MULTIPLY,
-  ADD,
-  SUBTRACT,
-  DERIVATIVE,
-  INVERSE_FUNCTION,
-  LATEX,
-  SQRT,
-  ROOT,
-  GROUP,
-  LIST,
-  MISSING,
-  PRIME,
-  IDENTITY,
-  SEQUENCE,
-  NOTHING,
-} from './dictionary/dictionary';
+
+/**
+ * These constants are the 'primitive' functions and constants that are used
+ * for some basic manipulations such as parsing, and transforming to canonical
+ * form.
+ *
+ */
+export const GROUP = 'Group';
+export const IDENTITY = 'Identity';
+export const LATEX = 'Latex';
+export const LIST = 'List';
+export const MISSING = 'Missing';
+export const NOTHING = 'Nothing';
+export const SEQUENCE = 'Sequence';
+export const SEQUENCE2 = 'Sequence2';
+
+export const ADD = 'Add';
+export const DERIVATIVE = 'Derivative';
+export const DIVIDE = 'Divide';
+export const EXP = 'Exp';
+export const INVERSE_FUNCTION = 'InverseFunction';
+export const MULTIPLY = 'Multiply';
+export const NEGATE = 'Negate';
+export const POWER = 'Power';
+export const PRIME = 'Prime';
+export const ROOT = 'Root';
+export const SQRT = 'Sqrt';
+export const SUBTRACT = 'Subtract';
+
+export const COMPLEX_INFINITY = 'ComplexInfinity';
+export const PI = 'Pi';
+export const EXPONENTIAL_E = 'ExponentialE';
+export const IMAGINARY_I = 'ImaginaryI';
 
 export function isNumberObject(expr: Expression): expr is MathJsonRealNumber {
   return Boolean(expr) && typeof expr === 'object' && 'num' in expr;
@@ -67,34 +74,49 @@ export function getNumberValue(expr: Expression): number {
  * - ["Multiply", n, ["Power", d, -1]]
  */
 export function getRationalValue(expr: Expression): [number, number] {
-  if (typeof expr === 'number') return [expr, 1];
-  if (isNumberObject(expr)) return [getNumberValue(expr), 1];
-  if (isAtomic(expr)) return [NaN, NaN];
-  const head = getFunctionName(expr);
+  let numer = NaN;
+  let denom = NaN;
 
-  if (head === POWER) {
-    const exponent = getNumberValue(getArg(expr, 2));
-    if (exponent === 1) {
-      return [getNumberValue(getArg(expr, 1)), 1];
-    } else if (exponent === -1) {
-      return [1, getNumberValue(getArg(expr, 1))];
-    }
+  if (typeof expr === 'number') {
+    numer = expr;
+    denom = 1;
+  } else if (isNumberObject(expr)) {
+    numer = getNumberValue(expr);
+    denom = 1;
+  } else if (isAtomic(expr)) {
     return [NaN, NaN];
-  }
+  } else {
+    const head = getFunctionName(expr);
 
-  if (head === DIVIDE) {
-    return [getNumberValue(getArg(expr, 1)), getNumberValue(getArg(expr, 2))];
+    if (head === POWER) {
+      const exponent = getNumberValue(getArg(expr, 2));
+      if (exponent === 1) {
+        numer = getNumberValue(getArg(expr, 1));
+        denom = 1;
+      } else if (exponent === -1) {
+        numer = 1;
+        denom = getNumberValue(getArg(expr, 1));
+      } else {
+        return [NaN, NaN];
+      }
+    } else if (head === DIVIDE) {
+      numer = getNumberValue(getArg(expr, 1));
+      denom = getNumberValue(getArg(expr, 2));
+    } else if (
+      head === MULTIPLY &&
+      getFunctionName(getArg(expr, 2)) === POWER &&
+      getNumberValue(getArg(getArg(expr, 2), 2)) === -1
+    ) {
+      numer = getNumberValue(getArg(expr, 1));
+      denom = getNumberValue(getArg(getArg(expr, 2), 1));
+    }
   }
-
-  if (
-    head === MULTIPLY &&
-    getFunctionName(getArg(expr, 2)) === POWER &&
-    getNumberValue(getArg(getArg(expr, 2), 2)) === -1
-  ) {
-    return [
-      getNumberValue(getArg(expr, 1)),
-      getNumberValue(getArg(getArg(expr, 2), 1)),
-    ];
+  if (Number.isInteger(numer) && Number.isInteger(denom)) {
+    if (denom < 0) {
+      denom = -denom;
+      numer = -numer;
+    }
+    return [numer, denom];
   }
 
   return [NaN, NaN];
@@ -121,11 +143,6 @@ export function getFunctionHead(expr: Expression): Expression {
  * True if the expression is a number or a symbol
  */
 export function isAtomic(expr: Expression): boolean {
-  // return (
-  //     typeof expr === 'string' ||
-  //     typeof expr === 'number' ||
-  //     (typeof expr === 'object' && ('num' in expr || 'sym' in expr))
-  // );
   return (
     expr === null ||
     (!Array.isArray(expr) && (typeof expr !== 'object' || !('fn' in expr)))
@@ -216,73 +233,6 @@ export function getArgCount(expr: Expression): number {
   return 0;
 }
 
-export function normalizeDefinition(
-  name: string,
-  def: FunctionDefinition | SymbolDefinition,
-  onError: ErrorListener<ErrorCode>
-): Required<FunctionDefinition> | Required<SymbolDefinition> {
-  if (!/[A-Za-z][A-Za-z0-9-]*/.test(name) && name.length !== 1) {
-    onError({ code: 'invalid-name', arg: name });
-  }
-
-  if ('isConstant' in def) {
-    return {
-      domain: 'any',
-      isConstant: false,
-      ...def,
-    } as Required<SymbolDefinition>;
-  }
-
-  const result: Required<FunctionDefinition> = {
-    optionalLatexArg: 0,
-    requiredLatexArg: 0,
-
-    domain: 'any',
-    isListable: false,
-    isAssociative: false,
-    isCommutative: false,
-    isIdempotent: false,
-    sequenceHold: false,
-    isPure: false,
-    hold: 'none',
-    argCount: def.isAssociative ?? false ? Infinity : 0,
-    argDomain: [],
-    ...def,
-  } as Required<FunctionDefinition>;
-  if (result.isAssociative && isFinite(Number(def.argCount))) {
-    onError({
-      code: 'associative-function-has-too-few-arguments',
-      arg: name,
-    });
-    result.argCount = Infinity;
-  }
-  if (result.isCommutative && result.argCount <= 1) {
-    onError({
-      code: 'commutative-function-has-too-few-arguments',
-      arg: name,
-    });
-  }
-  if (result.isListable && result.argCount === 0) {
-    onError({
-      code: 'listable-function-has-too-few-arguments',
-      arg: name,
-    });
-  }
-  if (result.hold === 'first' && result.argCount === 0) {
-    onError({
-      code: 'hold-first-function-has-too-few-arguments',
-      arg: name,
-    });
-  }
-  if (result.hold === 'rest' && result.argCount <= 1) {
-    onError({
-      code: 'hold-rest-function-has-too-few-arguments',
-      arg: name,
-    });
-  }
-  return result;
-}
-
 export function appendLatex(src: string, s: string): string {
   if (!s) return src;
 
@@ -326,40 +276,10 @@ export function replaceLatex(template: string, replacement: string[]): string {
 //     return null;
 // }
 
-export function varsRecursive(
-  dic: Dictionary,
-  vars: Set<string>,
-  expr: Expression
-): void {
-  const args = getArgs(expr);
-  if (args.length > 0) {
-    args.forEach((x) => varsRecursive(dic, vars, x));
-  } else {
-    // It has a name, but no arguments. It's a symbol
-    const name = getSymbolName(expr);
-    if (name && !vars.has(name)) {
-      const def = findSymbolInDictionary(dic, name);
-      if (!def || !def.isConstant) {
-        // It's not in the dictionary, or it's in the dictionary
-        // but not as a constant -> it's a variable
-        vars.add(name);
-      }
-    }
-  }
-}
-
-/**
- * Return an array of the non-constant symbols in the expression.
- */
-export function vars(dic: Dictionary, expr: Expression): Set<string> {
-  const result = new Set<string>();
-  varsRecursive(dic, result, expr);
-  return result;
-}
-
 /**
  * Return the coefficient of the expression, assuming vars are variables.
  */
 export function coef(_expr: Expression, _vars: string[]): Expression | null {
+  // @todo
   return null;
 }

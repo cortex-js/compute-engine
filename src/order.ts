@@ -1,4 +1,4 @@
-import { Expression, Dictionary } from './public';
+import { Expression, ComputeEngine } from './public';
 import {
   isNumberObject,
   isSymbolObject,
@@ -8,13 +8,10 @@ import {
   getSymbolName,
   getArg,
   getArgs,
-} from './utils';
-import {
-  findFunctionInDictionary,
   POWER,
   MULTIPLY,
   ADD,
-} from './dictionary/dictionary';
+} from './utils';
 
 export function order(a: Expression, b: Expression): number {
   const lexA = getLex(a);
@@ -182,7 +179,7 @@ export function deglex(
 }
 
 export function canonicalOrder(
-  dic: Dictionary,
+  engine: ComputeEngine,
   sortedVars: string[],
   expr: Expression
 ): Expression {
@@ -190,7 +187,7 @@ export function canonicalOrder(
   if (args.length === 0) return expr;
 
   // Sort each of the arguments
-  args = args.map((x) => canonicalOrder(dic, sortedVars, x));
+  args = args.map((x) => canonicalOrder(engine, sortedVars, x));
 
   const name: Expression = getFunctionName(expr);
   if (name === ADD) {
@@ -198,8 +195,8 @@ export function canonicalOrder(
     args.sort((a, b) => deglex(a, b, sortedVars));
   } else {
     // Is the function commutative?
-    const def = findFunctionInDictionary(dic, name);
-    if (def?.isCommutative ?? false) {
+    const def = engine.getFunctionDefinition(name);
+    if (def?.commutative ?? false) {
       // Sort the argument list
       args.sort(order);
     }

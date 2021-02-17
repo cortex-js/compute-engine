@@ -83,19 +83,19 @@ describe('SUPSUB', () => {
     );
   });
   test('Subscript', () => {
-    expect(expression('x_0')).toMatchInlineSnapshot(`['Subscript', 'x', 0]`); // @todo: nope...
+    expect(expression('x_0')).toMatchInlineSnapshot(`['Subscript', 'x', 0]`);
     expect(expression('x^2_0')).toMatchInlineSnapshot(
       `['Subscript', ['Power', 'x', 2], 0]`
-    ); // @todo: nope...
+    );
     expect(expression('x_0^2')).toMatchInlineSnapshot(
       `['Power', ['Subscript', 'x', 0], 2]`
-    ); // @todo: nope...
+    );
     expect(expression('x_{n+1}')).toMatchInlineSnapshot(
       `['Subscript', 'x', ['Add', 'n', 1]]`
-    ); // @todo: nope...
+    );
     expect(expression('x_n_{+1}')).toMatchInlineSnapshot(
       `['Subscript', ['Subscript', 'x', 'n'], 1]`
-    ); // @todo: nope...
+    );
   });
   test('Pre-sup, pre-sub', () => {
     expect(expression('_p^qx')).toMatchInlineSnapshot(

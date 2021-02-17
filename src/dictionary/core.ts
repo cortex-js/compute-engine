@@ -1,29 +1,58 @@
 import type { Dictionary } from '../public';
 
 export const CORE_DICTIONARY: Dictionary = {
-  // BaseForm: {
-  //   domain: ['number', 'number'],
-  // },
+  BaseForm: {
+    domain: 'Function',
+    signatures: [
+      {
+        args: [
+          ['value', 'Integer'],
+          ['base', ['Integer', 2, 16]],
+        ],
+        result: 'Integer',
+      },
+    ],
+  },
+  Block: {
+    /** Create a local scope. First argument is a dictionary of local variables.
+     * They are evaluated in the context of the parent scope. The second argument
+     * is an expression to be evaluated in the context of the new scope.
+     * ["Block", ["List", ["Equal", "x", 1]], [...]]
+     */
+    domain: 'Function',
+  },
+  Domain: {
+    /** Return the domain of an expression */
+    domain: 'Function',
+    signatures: [{ args: ['Expression'], result: 'Domain' }],
+  },
   Evaluate: {
-    // expr, [precision]
+    domain: 'Function',
+    signatures: [{ args: ['Expression'], result: 'Expression' }],
   },
   Group: {
-    domain: 'expression',
-    isListable: true,
+    domain: 'Function',
+    threadable: true,
     // To support `((a,b),(c,d))`, group is considered non associative
     // and non-idempotent
-    isPure: false,
+    pure: false,
+    signatures: [{ rest: ['expressions', 'Expression'], result: 'Expression' }],
+  },
+  Lambda: {
+    domain: 'Function',
+    wikidata: 'Q567612',
+    hold: 'all',
   },
   Latex: {
-    domain: 'string',
-    isListable: false,
-    isPure: true,
+    domain: 'Function',
+    signatures: [{ rest: ['tokens', 'String'], result: 'String' }],
   },
   String: {
-    domain: 'string',
-    isListable: true,
-    isPure: true,
+    domain: 'Function',
+    threadable: true,
+    signatures: [{ rest: ['string', 'String'], result: 'String' }],
   },
+  // Pattern: {},
 };
 
 // https://www.mathworks.com/help/referencelist.html?type=function&listtype=cat&category=&blocktype=&capability=&s_tid=CRUX_lftnav        // list

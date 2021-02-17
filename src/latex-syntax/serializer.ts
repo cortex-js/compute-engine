@@ -15,6 +15,7 @@ import {
   replaceLatex,
   getFunctionHead,
   isFunctionObject,
+  GROUP,
 } from '../utils';
 import {
   IndexedLatexDictionary,
@@ -23,7 +24,6 @@ import {
 import { joinLatex, tokensToString } from '../core/tokenizer';
 import { serializeNumber } from './serializer-number';
 import { getApplyFunctionStyle, getGroupStyle } from './serializer-style';
-import { GROUP } from '../dictionary/dictionary';
 
 function getSymbolStyle(expr: Expression, _level: number): 'asis' | 'upright' {
   console.assert(typeof expr === 'string' || isSymbolObject(expr));
