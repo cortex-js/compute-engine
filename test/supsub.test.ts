@@ -1,4 +1,4 @@
-import { INVERSE_FUNCTION, POWER } from '../src/dictionary/dictionary';
+import { POWER, INVERSE_FUNCTION } from '../src/utils';
 import { expression, latex, printExpression } from './utils';
 
 beforeEach(() => {

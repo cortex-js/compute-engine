@@ -1,14 +1,14 @@
+import { Expression } from '../src/public';
 import {
-  NEGATE,
   SUBTRACT,
   MULTIPLY,
   ADD,
   POWER,
   DIVIDE,
+  NEGATE,
   GROUP,
   PI,
-} from '../src/dictionary/dictionary';
-import { Expression } from '../src/public';
+} from '../src/utils';
 import { expression, printExpression, engine } from './utils';
 
 beforeEach(() => {

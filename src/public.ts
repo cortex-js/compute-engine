@@ -144,10 +144,27 @@ export type SetDefinition = Definition & {
   /** The supersets of this set: they should be symbol with a 'Set' domain */
   supersets: string[];
 
+  /** If a set can be defined explicitely in relation to other sets,
+   * the `value` represents that relationship.
+   * For example "NaturalNumber" = ["Union", "PrimeNumber", "CompositeNumber"].
+   */
+  value?: Expression;
+
   /** A predicate function that can be used to determine if an expression
    * is a member of the set or not (answers "True", "False" or "Maybe").
    */
   isMemberOf?: Expression;
+
+  /**
+   * A function that determins if a set is a subset of another.
+   * The `rhs` argument is either the name of the symbol, or a function
+   * with the head of the symbol.
+   */
+  isSubsetOf?: (
+    engine: ComputeEngine,
+    lhs: Expression,
+    rhs: Expression
+  ) => boolean;
 };
 
 export type ErrorListener<T> = (err: {
@@ -256,6 +273,8 @@ export type ErrorCode =
   | 'expected-operator'
   | 'expected-operand'
   | 'invalid-name'
+  | 'invalid-dictionary-entry'
+  | 'dictionary-entry-warning'
   | 'unknown-symbol'
   | 'unknown-operator'
   | 'unknown-function'
@@ -436,7 +455,9 @@ export type DictionaryCategory =
   | 'calculus'
   | 'complex'
   | 'combinatorics'
+  | 'core'
   | 'dimensions'
+  | 'domains'
   | 'inequalities'
   | 'intervals'
   | 'linear-algebra'
@@ -444,17 +465,15 @@ export type DictionaryCategory =
   | 'logic'
   | 'numeric'
   | 'other'
-  | 'quantifiers'
   | 'physics'
   | 'polynomials'
   | 'relations'
+  | 'rounding'
   | 'sets'
   | 'statistics'
   | 'symbols'
-  | 'core'
   | 'transcendentals'
   | 'trigonometry'
-  | 'rounding'
   | 'units';
 
 /**
@@ -467,19 +486,33 @@ export type DictionaryCategory =
  */
 export declare class ComputeEngine {
   /**
-   * Return a dictionary suitable for the specified category, or `"all"`
+   * Return dictionaries suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
    *
-   * The dictionary defines how the symbols and function names in a MathJSON
+   * A symbol dictionary defines how the symbols and function names in a MathJSON
    * expression should be interpreted, i.e. how to evaluate and manipulate them.
    *
    */
-  static getDictionary(category: DictionaryCategory | 'all'): Dictionary;
+  static getDictionaries(
+    categories: DictionaryCategory[] | 'all'
+  ): Readonly<Dictionary>[];
 
+  scope: Scope;
   onError: ErrorListener<ErrorCode>;
 
+  /**
+   * Construct a new ComputeEngine environment.
+   *
+   * If no `options.dictionaries` is provided a default set of dictionaries
+   * will be used. The `ComputeEngine.getDictionaries()` method can be called
+   * to access some subset of dictionaries, e.g. for arithmetic, calculus, etc...
+   * The order of the dictionaries matter: the definitions from the later ones
+   * override the definitions from earlier ones. The first dictionary should
+   * be the `'core'` dictionary which include some basic definitions such
+   * as domains ('Boolean', 'Number', etc...) that are used by later dictionaries.
+   */
   constructor(options?: {
-    dictionary?: Dictionary;
+    dictionaries?: Readonly<Dictionary>[];
     onError?: ErrorListener<ErrorCode>;
   });
 
@@ -495,6 +528,7 @@ export declare class ComputeEngine {
 
   getFunctionDefinition(name: string): FunctionDefinition | null;
   getSymbolDefinition(name: string): FunctionDefinition | null;
+  getSetDefinition(name: string): SetDefinition | null;
   getDefinition(name: string): FunctionDefinition | null;
 
   /** Return the variables (free or not) in this expression */
@@ -513,6 +547,14 @@ export declare class ComputeEngine {
 
   /** Return the domain of the expression */
   domain(expr: Expression): Expression;
+
+  /** Test if `lhs` is a subset of `rhs`.
+   *
+   * `lhs` and `rhs` can be set expressions, i.e.
+   * `["SetMinus", "ComplexNumber", 0]`
+   *
+   */
+  isSubsetOf(lhs: Domain, rhs: Domain): boolean;
 
   /** Compare expression `lhs` with expression `rhs`.
    *

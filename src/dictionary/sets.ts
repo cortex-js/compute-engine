@@ -34,7 +34,7 @@ export const SETS_DICTIONARY: Dictionary = {
   Intersection: {
     // notation: \Cap
     domain: 'Function',
-    wikidata: 'Q185359',
+    wikidata: 'Q185837',
     threadable: true,
     associative: true,
     commutative: true,
@@ -111,6 +111,7 @@ export const SETS_DICTIONARY: Dictionary = {
   },
   SetMinus: {
     domain: 'Function',
+    wikidata: 'Q18192442',
     signatures: [
       {
         args: [

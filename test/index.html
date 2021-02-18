@@ -28,7 +28,7 @@
     </header>
     <main>
         <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
-            1+|(a+|2|+b)|
+            yx5z
         </math-field>
         <!-- 1+|a+|2|+b| -->
         <!-- ,c,b -->
@@ -122,7 +122,7 @@
                 promoteUnknownSymbols: /./,
 
                 parseArgumentsOfUnknownLatexCommands: true,
-                parseNumbers: true,
+                parseNumbers: false,
                 onError: (err) =>
                     errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
             });

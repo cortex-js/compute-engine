@@ -1,12 +1,12 @@
 import type {
   Dictionary,
   DictionaryCategory,
-  ComputeEngine,
   FunctionDefinition,
   SetDefinition,
   SymbolDefinition,
   CompiledDictionary,
   Expression,
+  ComputeEngine,
 } from '../public';
 import {
   COMPLEX_INFINITY,
@@ -18,7 +18,7 @@ import {
   MULTIPLY,
   POWER,
 } from '../utils';
-import { getDomainDictionary } from './domains';
+import { getDomainsDictionary } from './domains';
 import { ARITHMETIC_DICTIONARY } from './arithmetic';
 import { CORE_DICTIONARY } from './core';
 import { LOGIC_DICTIONARY } from './logic';
@@ -31,17 +31,41 @@ import {
   isSetDefinition,
 } from './utils';
 
-export function getDefaultDictionary(
-  domain: DictionaryCategory | 'all' = 'all'
-): Readonly<Dictionary> {
-  let result: Dictionary;
-  if (domain === 'all') {
-    result = {};
-    Object.keys(DICTIONARY).forEach((x) => {
-      result = { ...result, ...DICTIONARY[x] };
-    });
-  } else {
-    result = { ...DICTIONARY[domain] };
+export function getDefaultDictionaries(
+  categories: DictionaryCategory[] | 'all' = 'all'
+): Readonly<Dictionary>[] {
+  if (categories === 'all') {
+    return getDefaultDictionaries([
+      'domains',
+      'core',
+      'algebra',
+      'arithmetic',
+      'calculus',
+      'complex',
+      'combinatorics',
+      'dimensions',
+      'inequalities',
+      'intervals',
+      'linear-algebra',
+      'lists',
+      'logic',
+      'numeric',
+      'other',
+      'physics',
+      'polynomials',
+      'relations',
+      'sets',
+      'statistics',
+      'symbols',
+      'transcendentals',
+      'trigonometry',
+      'rounding',
+      'units',
+    ]);
+  }
+  const result: Readonly<Dictionary>[] = [];
+  for (const category of categories) {
+    result.push(DICTIONARY[category]);
   }
   return result;
 }
@@ -122,7 +146,8 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
     // argument
     // conjugate
   },
-  'core': { ...CORE_DICTIONARY, ...getDomainDictionary() },
+  'core': CORE_DICTIONARY,
+  'domains': getDomainsDictionary(),
   'dimensions': {
     // volume, speed, area
   },
@@ -181,15 +206,14 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
     // roots
   },
   'physics': {
-    'mu-0': {
+    'Mu-0': {
       constant: true,
       wikidata: 'Q1515261',
-      domain: 'R+',
+      domain: 'RealNumber',
       value: 1.25663706212e-6,
       unit: [MULTIPLY, 'H', [POWER, 'm', -1]],
     },
   },
-  'quantifiers': {},
   'relations': {
     // eq, lt, leq, gt, geq, neq, approx
     //     shortLogicalImplies: 52, // ->
@@ -230,7 +254,7 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
  * - The domain of entries is inferred and validated:
  *  - check that domains are in canonical form
  *  - check that domains are consistent with declarations (for example that
- * the signature of predicate have a MaybeBoolean codomain)
+ * the signature of predicate have a "MaybeBoolean" codomain)
  *
  */
 export function compileDictionary(
@@ -242,39 +266,69 @@ export function compileDictionary(
     FunctionDefinition | SetDefinition | SymbolDefinition
   >();
   for (const entryName of Object.keys(dict)) {
-    result.set(entryName, normalizeDefinition(dict[entryName]));
+    const [def, error] = normalizeDefinition(dict[entryName], engine);
+    if (error) {
+      engine.onError({
+        code: def ? 'dictionary-entry-warning' : 'invalid-dictionary-entry',
+        arg: `${entryName}: ${error}`,
+      });
+    }
+    if (def) result.set(entryName, def);
   }
-  validateDictionary(engine, result);
+
+  // Temporarily put this dictionary in scope
+  // (this is required so that compilation and validation can success
+  // when symbols in this dictionary refer to *other* symbols int his dictionary)
+  engine.scope = { parentScope: engine.scope, dictionary: result };
 
   // @todo: compile
+
+  validateDictionary(engine, result);
+
+  // Restore the original scope
+  engine.scope = engine.scope.parentScope;
 
   return result;
 }
 
 function normalizeDefinition(
-  def: number | FunctionDefinition | SymbolDefinition | SetDefinition
-):
-  | Required<FunctionDefinition>
-  | Required<SymbolDefinition>
-  | Required<SetDefinition> {
+  def: number | FunctionDefinition | SymbolDefinition | SetDefinition,
+  engine: ComputeEngine
+): [
+  def: FunctionDefinition | SymbolDefinition | SetDefinition,
+  error?: string
+] {
   if (typeof def === 'number') {
-    return {
-      domain: inferNumericDomain(def),
-      constant: false,
-      value: def,
-    } as Required<SymbolDefinition>;
+    //  If the dictionary entry is provided as a number, assume it's a
+    // variable, and infer its type based on its value.
+    return [
+      {
+        domain: inferNumericDomain(def),
+        constant: false,
+        value: def,
+      },
+    ];
   }
+
+  let domain = def.domain;
 
   if (isSymbolDefinition(def)) {
-    return {
-      domain: 'Anything',
+    let warning;
+    if (!domain) {
+      warning = 'no domain provided.';
+      domain = 'Anything';
+    }
+
+    def = {
+      domain,
       constant: false,
       ...def,
-    } as Required<SymbolDefinition>;
+    };
+    return [def, warning];
   }
 
-  if (isFunctionDefinition(def)) {
-    return {
+  if (isFunctionDefinition(def) || engine.isSubsetOf(def.domain, 'Function')) {
+    def = {
       wikidata: '',
 
       scope: null,
@@ -293,37 +347,176 @@ function normalizeDefinition(
 
       signatures: [],
       ...def,
-    } as Required<FunctionDefinition>;
+    };
+    let warning: string;
+    if (def.signatures.length === 0) {
+      warning = `no function signature provided.`;
+    } else if (def.signatures.length === 1) {
+      const sig = def.signatures[0];
+      if (sig.result === 'Boolean' || sig.result === 'MaybeBoolean') {
+        if (sig.args.length === 2) {
+          if (
+            (sig.args[0] === 'Boolean' || sig.args[0] === 'MaybeBoolean') &&
+            (sig.args[1] === 'Boolean' || sig.args[1] === 'MaybeBoolean')
+          ) {
+            warning = `looks like a "LogicalFunction"?`;
+          }
+        }
+        if (!warning) warning = `looks like a "Predicate"?`;
+      }
+    }
+    return [def, warning];
   }
 
-  if (isSetDefinition(def)) {
-    return def as Required<SetDefinition>;
+  if (isSetDefinition(def) || engine.isSubsetOf(domain, 'Function')) {
+    return [def];
   }
 
-  return undefined;
+  if (def) {
+    // This might be a partial definition (missing `constant` for a symbol)
+    if (domain && engine.isSubsetOf(domain, 'Number')) {
+      if (typeof (def as SymbolDefinition).value === 'undefined') {
+        return [null, 'expected "value" property in definition'];
+      }
+      // That's a numeric variable definition
+      const inferredDomain = inferNumericDomain(
+        (def as SymbolDefinition).value
+      );
+      return [
+        {
+          domain: inferredDomain,
+          constant: false,
+          ...(def as SymbolDefinition),
+        },
+        inferredDomain !== domain ? 'inferred domain "${inferredDomain}"' : '',
+      ];
+    }
+    // This might be a partial definition (missing `signatures` for a Function)
+    if (domain && engine.isSubsetOf(domain, 'Function')) {
+      return [
+        {
+          signatures: [{ rest: 'Anything', result: 'Anything' }],
+          ...(def as FunctionDefinition),
+        },
+        'a "Function" should have a "signatures" property in its definition',
+      ];
+    }
+    // This might be a partial definition (missing `supersets` for a Set)
+    if (domain && engine.isSubsetOf(domain, 'Set')) {
+      return [
+        def,
+        'a "Set" should have a "supersets" property in its definition',
+      ];
+    }
+  }
+  return [def, 'could not be validate'];
 }
 
+/**
+ * Validate the contents of the dictionary.
+ *
+ * Unlike `normalizeDefinition` which only considers the properties of the
+ * definition entry, `validateDictionary` will consider the entries
+ * in relation to each other, for example validating that the referenced
+ * domains are valid.
+ */
 function validateDictionary(
   engine: ComputeEngine,
   dictionary: CompiledDictionary
 ): void {
+  const wikidata = new Set<string>();
   for (const [name, def] of dictionary) {
     if (!/[A-Za-z][A-Za-z0-9-]*/.test(name) && name.length !== 1) {
       engine.onError({ code: 'invalid-name', arg: name });
     }
+    if (def.wikidata) {
+      if (wikidata.has(def.wikidata)) {
+        engine.onError({
+          code: 'dictionary-entry-warning',
+          arg: `${name}: duplicate wikidata "${def.wikidata}"`,
+        });
+      }
+      wikidata.add(def.wikidata);
+    }
     if (isSymbolDefinition(def)) {
-      // @todo: validate domain (make sure domain exists)
+      // Validate domain (make sure domain exists)
+      if (!engine.isSubsetOf(def.domain, 'Anything')) {
+        engine.onError({
+          code: 'dictionary-entry-warning',
+          arg: `${name}: unknown domain "${def.domain}"`,
+        });
+      }
       // @todo: for numeric domain, validate them: i.e. real are at least RealNumber, etc...
       // using inferDomain
     }
     if (isFunctionDefinition(def)) {
-      // @todo: validate signatures: all arguments have known domains
-      // @todo result have a valid domain
-      // @todo: there is at least an evaluate or a compile property
+      // Validate signatures
+      for (const sig of def.signatures) {
+        if (
+          typeof sig.result !== 'function' &&
+          !engine.isSubsetOf(sig.result, 'Anything')
+        ) {
+          engine.onError({
+            code: 'dictionary-entry-warning',
+            arg: `${name}: unknown result domain "${sig.result}"`,
+          });
+        }
+        if (sig.rest && !engine.isSubsetOf(sig.rest, 'Anything')) {
+          engine.onError({
+            code: 'dictionary-entry-warning',
+            arg: `${name}: unknown rest domain "${def.domain}"`,
+          });
+        }
+        if (sig.args) {
+          for (const arg of sig.args) {
+            if (!engine.isSubsetOf(arg, 'Anything')) {
+              engine.onError({
+                code: 'dictionary-entry-warning',
+                arg: `${name}: unknown argument domain "${def.domain}"`,
+              });
+            }
+          }
+        }
+      }
+      // @todo could do some additional checks
+      // - if it's commutative it must have at least one signature with multiple arguments
+      // - if an involution, it's *not* idempotent
+      // - if it's threadable it must have at least one signature with a rest argument
     }
     if (isSetDefinition(def)) {
-      // @todo: check that all the elements of supersets are symbols of the Set domain
-      // @todo: could check that the domain of `isMemberOf` is MaybeBoolean
+      // Check there is at least one superset defined
+      if (def.supersets.length === 0 && name !== 'Anything') {
+        engine.onError({
+          code: 'dictionary-entry-warning',
+          arg: `${name}: expected supersets`,
+        });
+      }
+      // Check that all the parents are valid
+      for (const parent of def.supersets) {
+        if (!engine.isSubsetOf(parent, 'Anything')) {
+          engine.onError({
+            code: 'dictionary-entry-warning',
+            arg: `${name}: invalid superset "${parent}" is not "Anything": ${setParentsToString(
+              engine,
+              parent
+            )}`,
+          });
+        }
+        // Check for loops in set definition
+        if (engine.isSubsetOf(parent, name)) {
+          engine.onError({
+            code: 'invalid-dictionary-entry',
+            arg: `${name}: cyclic definition ${setParentsToString(
+              engine,
+              name
+            )}`,
+          });
+          // Remove entry from dictionary
+          dictionary.delete(name);
+        }
+      }
+      // @todo: could check that the domain of `isMemberOf` and `isSubsetOf` is
+      // MaybeBoolean
     }
   }
 }
@@ -339,7 +532,7 @@ export function inferNumericDomain(value: Expression): string {
 
     if (FIRST_1000_PRIMES.has(numer)) return 'PrimeNumber';
 
-    if (numer > 1 && numer < THOUSAND_TH_PRIME) return 'CompositeNumber';
+    if (numer >= 1 && numer < THOUSAND_TH_PRIME) return 'CompositeNumber';
 
     if (numer > 0) return 'NaturalNumber';
 
@@ -368,4 +561,34 @@ export function inferNumericDomain(value: Expression): string {
   if (!Number.isFinite(getNumberValue(value))) return 'SignedInfinity';
 
   return 'RealNumber';
+}
+
+function setParentsToString(
+  engine: ComputeEngine,
+  expr: Expression,
+  cycle?: string[]
+): string {
+  const result: string[] = [`${expr}`];
+
+  const name = typeof expr === 'string' ? expr : getFunctionName(expr);
+  if (cycle) {
+    if (cycle.includes(name)) return `${name} ↩︎ `;
+    cycle.push(name);
+  } else {
+    cycle = [name];
+  }
+  const def = engine.getSetDefinition(name);
+  if (!def) return `${name}?!`;
+  if (!def.supersets.length || def.supersets.length === 0) return '';
+
+  for (const parent of def?.supersets) {
+    if (typeof parent === 'string') {
+      result.push(setParentsToString(engine, parent, [...cycle]));
+    } else {
+    }
+  }
+  if (result.length <= 1) {
+    return result[0] ?? '';
+  }
+  return '[' + result.join(' ➔ ') + ']';
 }

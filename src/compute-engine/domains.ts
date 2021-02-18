@@ -1,5 +1,4 @@
-import { Domain, ComputeEngine, Expression, Dictionary } from '../public';
-import { isSetDefinition } from '../dictionary/utils';
+import { ComputeEngine, Expression } from '../public';
 
 export function domain(
   _expr: Expression,
@@ -9,19 +8,19 @@ export function domain(
   return null;
 }
 
-export function isSubdomainOf(
-  dict: Dictionary,
-  lhs: Domain,
-  rhs: Domain
-): boolean {
-  if (lhs === rhs) return true;
-  if (typeof lhs !== 'string') return false;
-  const def = dict[lhs];
-  if (!isSetDefinition(def)) return false;
+// export function isSubdomainOf(
+//   dict: Dictionary,
+//   lhs: Domain,
+//   rhs: Domain
+// ): boolean {
+//   if (lhs === rhs) return true;
+//   if (typeof lhs !== 'string') return false;
+//   const def = dict[lhs];
+//   if (!isSetDefinition(def)) return false;
 
-  for (const parent of def.supersets) {
-    if (isSubdomainOf(dict, parent, rhs)) return true;
-  }
+//   for (const parent of def.supersets) {
+//     if (isSubdomainOf(dict, parent, rhs)) return true;
+//   }
 
-  return false;
-}
+//   return false;
+// }

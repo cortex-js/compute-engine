@@ -1,4 +1,4 @@
-import { Expression, ComputeEngine } from './public';
+import { Expression, ComputeEngine } from '../public';
 import {
   isNumberObject,
   isSymbolObject,
@@ -11,7 +11,7 @@ import {
   POWER,
   MULTIPLY,
   ADD,
-} from './utils';
+} from '../utils';
 
 export function order(a: Expression, b: Expression): number {
   const lexA = getLex(a);

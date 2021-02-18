@@ -1,10 +1,4 @@
-import { isSubdomainOf } from '../compute-engine/domains';
-import {
-  Dictionary,
-  FunctionDefinition,
-  SetDefinition,
-  SymbolDefinition,
-} from '../public';
+import { Dictionary, Expression, SetDefinition } from '../public';
 
 // Other domains to consider:
 // - p-adic
@@ -34,6 +28,7 @@ import {
  */
 
 const DOMAIN_PARENT = {
+  Anything: [],
   Expression: 'Anything',
   Domain: ['Set', 'Symbol'],
   ParametricDomain: ['Domain', 'Function'],
@@ -74,7 +69,7 @@ const DOMAIN_PARENT = {
   ComplexNumber: 'ExtendedComplexNumber',
   ExtendedComplexNumber: 'Number',
   ComplexInfinity: 'ExtendedComplexNumber',
-  NumberZero: ['CompositeNumber', 'ImaginaryNumber'],
+  NumberZero: ['CompositeNumber', 'ImaginaryNumber', 'FiniteSet'],
   NaturalNumber: 'Integer',
   CompositeNumber: 'NaturalNumber',
   PrimeNumber: 'NaturalNumber',
@@ -91,6 +86,9 @@ const DOMAIN_PARENT = {
   SignedInfinity: 'ExtendedNaturalNumber',
   Tensor: 'Expression',
   Scalar: 'Tensor',
+  Vector: 'Matrix',
+  Row: 'Vector',
+  Column: 'Vector',
   Matrix: 'Tensor',
   // https://en.wikipedia.org/wiki/List_of_named_matrices
   ComplexTensor: 'Tensor',
@@ -108,16 +106,22 @@ const DOMAIN_PARENT = {
   ZeroMatrix: ['DiagonalMatrix', 'SymmetricMatrix', 'PermutationMatrix'],
   SymmetricMatrix: ['HermitianMatrix', 'SquareMatrix', 'RealTensor'],
   HermitianMatrix: 'ComplexTensor',
-  Vector: 'Matrix',
-  Row: 'Vector',
-  Column: 'Vector',
 };
 
 const DOMAIN_WIKIDATA: { [domain: string]: string } = {
-  NaturalNumber: 'Q28920052', //  0, 1, 2, 3...
+  // set of numbers: Q3054943, number: Q11563
+  Function: 'Q11348', // entry for 'function', not 'set of functions'
+  ComplexNumber: 'Q26851286', //set of complex numbers
   Integer: 'Q47007735', // ZZ ...-3, -2, -1, 0, 1, 2, 3, 4, ...
   ImaginaryNumber: 'Q47310259', // Numbers on the imaginary line // Q9165172
-  ComplexNumber: 'Q26851286',
+  NaturalNumber: 'Q28920052', //  0, 1, 2, 3...
+};
+
+const DOMAIN_VALUE: { [domain: string]: Expression } = {
+  NaturalNumber: ['Union', 'CompositeNumber', 'PrimeNumber'],
+  TriangularMatrix: ['Union', 'UpperTriangularMatrix', 'LowerTriangularMatrix'],
+  Vector: ['Union', 'Row', 'Column'],
+  Scalar: ['Intersection', 'Row', 'Column'],
 };
 
 const PARAMETRIC_DOMAIN = {
@@ -157,7 +161,7 @@ const PARAMETRIC_DOMAIN = {
   },
 };
 
-export function getDomainDictionary(): Dictionary {
+export function getDomainsDictionary(): Dictionary {
   const result: {
     [name: string]: SetDefinition;
   } = { Nothing: { supersets: [], domain: 'Domain' } };
@@ -172,10 +176,8 @@ export function getDomainDictionary(): Dictionary {
       domain: PARAMETRIC_DOMAIN[domain] ? 'ParametricDomain' : 'Domain',
       wikidata: DOMAIN_WIKIDATA[domain],
       supersets: parents,
-      ...(result[domain] as
-        | SymbolDefinition
-        | FunctionDefinition
-        | SetDefinition),
+      value: DOMAIN_VALUE,
+      ...(result[domain] as any),
     };
 
     for (const parent of parents) {
@@ -194,17 +196,17 @@ export function getDomainDictionary(): Dictionary {
   sets.delete('Nothing');
   result['Nothing'].supersets = [...sets.values()];
 
-  for (const domain of Object.keys(result)) {
-    for (const parent of result[domain].supersets) {
-      for (const candidate of result[domain].supersets) {
-        if (candidate !== parent && isSubdomainOf(result, candidate, parent)) {
-          throw new Error(
-            `In domain ${domain}, the parent ${candidate} is redundant with ${parent}`
-          );
-        }
-      }
-    }
-  }
+  // for (const domain of Object.keys(result)) {
+  //   for (const parent of result[domain].supersets) {
+  //     for (const candidate of result[domain].supersets) {
+  //       if (candidate !== parent && isSubdomainOf(result, candidate, parent)) {
+  //         throw new Error(
+  //           `In domain ${domain}, the parent ${candidate} is redundant with ${parent}`
+  //         );
+  //       }
+  //     }
+  //   }
+  // }
 
   for (const domain of Object.keys(result)) {
     let found = false;
@@ -233,7 +235,7 @@ export function getDomainDictionary(): Dictionary {
 //   for (const key of Object.keys(dict)) {
 //     const entry = dict[key];
 //     // Check: if function returns a MaybeBoolean (or Boolean), it's domain is "Predicate"
-//     // Check: if the arguments and result are a MaybeBoolean (or Boolean), it's domain is "LogicalFunction"
+//     // Check: if the arguments and result are a MaybeBoolean (or Boolean), its domain is "LogicalFunction"
 
 //     // Check strict monotonic functions always increase or stay the same (or decrease or stay the same)
 //     // Check  monotonic functions always increase (or decrease) (never stay the same)

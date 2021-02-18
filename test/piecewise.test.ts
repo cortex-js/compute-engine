@@ -1,5 +1,4 @@
-import { Expression } from '../src/public';
-import { expression, latex, printExpression } from './utils';
+import { expression, printExpression } from './utils';
 
 beforeEach(() => {
   jest.spyOn(console, 'assert').mockImplementation((assertion) => {

@@ -13,27 +13,36 @@ import {
 } from '../public';
 import {
   compileDictionary,
-  getDefaultDictionary,
+  getDefaultDictionaries,
 } from '../dictionary/dictionary';
-import { format as formatWithEngine } from '../forms';
+import { format as formatWithEngine } from './forms';
 import { compare } from './compare';
 import { evaluate as evaluateWithEngine } from './evaluate';
 import { domain as domainWithEngine } from './domains';
-import { getArgs, getSymbolName } from '../utils';
+import {
+  getArg,
+  getArgs,
+  getFunctionName,
+  getNumberValue,
+  getSymbolName,
+} from '../utils';
+import { isSetDefinition } from '../dictionary/utils';
 
 export class ComputeEngine {
-  static getDictionary(domain: DictionaryCategory | 'all' = 'all'): Dictionary {
-    return getDefaultDictionary(domain);
+  static getDictionaries(
+    categories: DictionaryCategory[] | 'all' = 'all'
+  ): Readonly<Dictionary>[] {
+    return getDefaultDictionaries(categories);
   }
-  private scope: Scope;
+  scope: Scope;
   onError: ErrorListener<ErrorCode>;
 
   constructor(options?: {
-    scopes?: Dictionary[];
+    dictionaries?: Readonly<Dictionary>[];
     onError?: ErrorListener<ErrorCode>;
   }) {
     const onError =
-      window === undefined
+      typeof window === 'undefined'
         ? () => {
             return;
           }
@@ -62,9 +71,10 @@ export class ComputeEngine {
             }
           };
     this.onError = options?.onError ?? onError;
-    if (options?.scopes) {
-      for (const scope of options.scopes) this.pushScope(scope);
-    }
+
+    const scopes = options?.dictionaries ?? ComputeEngine.getDictionaries();
+    for (const scope of scopes) this.pushScope(scope);
+
     // Push a fresh scope to protect global definitions.
     this.pushScope({});
   }
@@ -72,12 +82,14 @@ export class ComputeEngine {
   popScope(): void {
     this.scope = this.scope?.parentScope;
   }
-  pushScope(dictionary: Dictionary = {}): void {
+
+  pushScope(dictionary: Readonly<Dictionary> = {}): void {
     this.scope = {
       parentScope: this.scope,
       dictionary: compileDictionary(dictionary, this),
     };
   }
+
   getVars(expr: Expression): Set<string> {
     const result = new Set<string>();
     varsRecursive(expr, result, this);
@@ -106,6 +118,17 @@ export class ComputeEngine {
     if (def) def.scope = scope;
     return def;
   }
+  getSetDefinition(name: string): SetDefinition | null {
+    let scope = this.scope;
+    let def = null;
+    while (scope && !def) {
+      def = scope.dictionary.get(name);
+      if (!isSetDefinition(def)) def = null;
+      if (!def) scope = scope.parentScope;
+    }
+    if (def) def.scope = scope;
+    return def;
+  }
   getDefinition(
     name: string
   ): SymbolDefinition | FunctionDefinition | SetDefinition | null {
@@ -117,6 +140,84 @@ export class ComputeEngine {
     }
     if (def) def.scope = scope;
     return def;
+  }
+
+  /**
+   * Return true if lhs is a subset or equal  rhs
+   */
+  isSubsetOf(lhs: Expression, rhs: Expression): boolean {
+    if (!lhs || !rhs) return false;
+    if (typeof lhs === 'string' && lhs === rhs) return true;
+    if (rhs === 'Anything') return true;
+    if (rhs === 'Nothing') return false;
+
+    //
+    // 1. Set operations on lhs
+    //
+    // Union: lhs or rhs
+    // Intersection: lhs and rhs
+    // SetMinus: lhs and not rhs
+    // Complement: not lhs
+    const lhsFnName = getFunctionName(lhs);
+    if (lhsFnName === 'Union') {
+      return getArgs(lhs).some((x) => this.isSubsetOf(x, rhs));
+    } else if (lhsFnName === 'Intersection') {
+      return getArgs(lhs).every((x) => this.isSubsetOf(x, rhs));
+    } else if (lhsFnName === 'SetMinus') {
+      return (
+        this.isSubsetOf(getArg(lhs, 1), rhs) &&
+        !this.isSubsetOf(getArg(lhs, 2), rhs)
+      );
+    } else if (lhsFnName === 'Complement') {
+      return !this.isSubsetOf(getArg(lhs, 1), rhs);
+    }
+
+    //
+    // 2. Set operations on rhs
+    //
+    const rhsFnName = getFunctionName(rhs);
+    if (rhsFnName === 'Union') {
+      return getArgs(rhs).some((x) => this.isSubsetOf(lhs, x));
+    } else if (rhsFnName === 'Intersection') {
+      return getArgs(rhs).every((x) => this.isSubsetOf(lhs, x));
+    } else if (rhsFnName === 'SetMinus') {
+      return (
+        this.isSubsetOf(lhs, getArg(rhs, 1)) &&
+        !this.isSubsetOf(lhs, getArg(rhs, 2))
+      );
+    } else if (rhsFnName === 'Complement') {
+      return !this.isSubsetOf(lhs, getArg(rhs, 1));
+    }
+
+    //
+    // 3. Not a set operation: a domain or a parametric domain
+    //
+    const rhsDomainName = getSymbolName(rhs) ?? rhsFnName;
+    if (!rhsDomainName) {
+      const rhsVal = getNumberValue(rhs);
+      if (Number.isNaN(rhsVal)) return false;
+      // If the rhs is a number, 'upgrade' it to a set singleton
+      rhs = rhs === 0 ? 'NumberZero' : ['Set', rhs];
+    }
+
+    const rhsDef = this.getSetDefinition(rhsDomainName);
+    if (!rhsDef) return false;
+    if (typeof rhsDef.isSubsetOf === 'function') {
+      // 3.1 Parametric domain
+      return rhsDef.isSubsetOf(this, lhs, rhs);
+    }
+    const lhsDomainName = getSymbolName(lhs) ?? lhsFnName;
+    if (!lhsDomainName) return false;
+
+    const lhsDef = this.getSetDefinition(lhsDomainName);
+    if (!lhsDef) return false;
+
+    // 3.2 Non-parametric domain:
+    for (const parent of lhsDef.supersets) {
+      if (this.isSubsetOf(parent, rhs)) return true;
+    }
+
+    return false;
   }
 
   format(expr: Expression | null, forms?: Form | Form[]): Expression | null {

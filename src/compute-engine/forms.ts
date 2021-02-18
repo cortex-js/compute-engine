@@ -1,4 +1,4 @@
-import { Expression, Form, Domain, ComputeEngine } from './public';
+import { Expression, Form, Domain, ComputeEngine } from '../public';
 import {
   isNumberObject,
   isFunctionObject,
@@ -27,7 +27,7 @@ import {
   NOTHING,
   SEQUENCE,
   SEQUENCE2,
-} from './utils';
+} from '../utils';
 import { canonicalOrder } from './order';
 
 function ungroup(expr: Expression): Expression {

@@ -1,10 +1,4 @@
-import {
-  ADD,
-  DIVIDE,
-  SUBTRACT,
-  MULTIPLY,
-  POWER,
-} from '../src/dictionary/dictionary';
+import { ADD, DIVIDE, SUBTRACT, MULTIPLY, POWER } from '../src/utils';
 import { expression, expressionError, latex, printExpression } from './utils';
 
 beforeEach(() => {
@@ -202,7 +196,9 @@ describe('ALL OPERATORS', () => {
       `['Multiply', '\\partial', ['Power', ['Multiply', '\\partial', 'x'], -1], 'f']`
     );
   }); // @todo
-  test('Second order partial Derivative', () => {});
+  test('Second order partial Derivative', () => {
+    return; // @todo
+  });
 
   test('Second order mixed Derivative', () => {
     expect(expression('\\partial_{x,y} f(x,y)')).toMatchInlineSnapshot(

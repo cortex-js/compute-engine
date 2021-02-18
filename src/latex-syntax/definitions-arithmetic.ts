@@ -25,7 +25,7 @@ import {
   MISSING,
   LIST,
 } from '../utils';
-import { applyNegate } from '../forms';
+import { applyNegate } from '../compute-engine/forms';
 import { joinLatex } from '../core/tokenizer';
 import { getFractionStyle, getRootStyle } from './serializer-style';
 
