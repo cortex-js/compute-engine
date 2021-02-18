@@ -13,7 +13,7 @@ Absolute value, [magnitude](https://www.wikidata.org/wiki/Q3317982).
 
 ## `Add`
 
-[Addition[(https://www.wikidata.org/wiki/Q32043).
+[Addition](https://www.wikidata.org/wiki/Q32043).
 
 ## `Chop`
 

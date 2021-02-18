@@ -27,13 +27,12 @@ Parametric domains can be used as functions:
 
 Not all domains are parametric, and the precise semantic of the parametric form
 depends on the domain. For example, the `"Number"` parametric domain implies a
-result in `"ExtendedRealNumber"`, not `"ExtendedComplexNumber"`. The `"String"`
-parametric domain restrict the length of the string.
+result in `"ExtendedRealNumber"`, not `"ExtendedComplexNumber"`.
 
 Domains are defined in a hierarchy (a lattice). The upper bound of the domain
 lattice is `"Anything"` and the lower bound is `"Nothing"`. The 'parent' of a
-domain represent a 'is-a' relationship, for example, a `"List"` "is-a"
-`"Collection"`.
+domain represent a 'is-a'/'subset-of' relationship, for example, a `"List"` 
+"is-a" `"Collection"`.
 
 Domains can be converted to a canonical form using the `'canonical-domain'`
 form.
@@ -41,6 +40,7 @@ form.
 ```js
 format(['SetMinus', 'RealNumber', 'IrrationalNumber'], 'canonical-domain');
 // -> "RationalNumber"
+
 format(
   ['Union', ['Number', 0, '+Infinity'], ['Number', '-Infinity', 5]],
   'canonical-domain'
@@ -48,10 +48,10 @@ format(
 // -> "ExtendedRealNumber"
 ```
 
-![Anything domains](./domains.001.jpeg 'The Anything Domains')
-![Tensor domains](./domains.002.jpeg 'The Tensor Domains')
-![Function domains](./domains.003.jpeg 'The Function Domains')
-![Number domains](./domains.004.jpeg 'The Number Domains')
+![Anything domains](/assets/domains.001.jpeg 'The top-level domains')
+![Tensor domains](/assets/domains.002.jpeg 'The Tensor sub-domains')
+![Function domains](/assets/domains.003.jpeg 'The Function sub-domains')
+![Number domains](/assets/domains.004.jpeg 'The Number sub-domains')
 
 The implementation of the CortexJS domains is based on
 [Weibel, Trudy & Gonnet, Gaston. (1991). An Algebra of Properties.. 352-359. 10.1145/120694.120749. ](https://www.researchgate.net/publication/.221564157_An_Algebra_of_Properties)
@@ -71,23 +71,19 @@ for example `["Matrix", 5]` to define the domain of 5x5 matrices.
 A `"Symbol"` is a string used to represent the name of a constant, variable or
 function.
 
-`["String", `_`len`_`]` is the set of all the string of exactly length `len`.
-
-`["String", `_`min`_`, `_`max`_`]` is the set of all the string of length at
-least _min_ and at most _max_. _max_ can be equal to "+Infinity".
 
 ## `"Boolean"` and `"MaybeBoolean"`
 
-`"Boolean"` is the set of the values `"True"`, `"False"`.
+A `"Boolean"` is the set of the values `"True"`, `"False"`.
 
-`"MaybeBoolean"` is the set of the values `"True"`, `"False"` and `"Maybe"`.
+A `"MaybeBoolean"` is the set of the values `"True"`, `"False"` and `"Maybe"`.
 
 ## `"Function"`
 
 A function is an expression that maps some expressions, its arguments, to
 another expression.
 
-`["Function", ...`_`arg-domain`_`, `_`co-domain`_`]` is the parametric version
+- `["Function", ...`_`arg-domain`_`, `_`co-domain`_`]` is the parametric version
 of the `"Function"` domain. For example, `["Function", "Number", "Boolean"]` is
 the domain of the functions that have a single argument, a number, and return a
 boolean.
@@ -171,7 +167,7 @@ domain, for example the domain of `And` is `"LogicalFunction"`.
 
 ## `"Number"`
 
-Any numerical value
+Any numerical value.
 
 - `"PrimeNumber"` - An integer that cannot be produced as the product of 2 or
   more integers.

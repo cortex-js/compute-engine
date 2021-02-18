@@ -6,6 +6,10 @@ date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+<script type='module'>
+    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
+    renderMathInDocument();
+</script>
 
 # Compute Engine API
 
@@ -96,7 +100,7 @@ engine.evalue(['Add', 5, 2]);
 ## Comparing
 
 Use the `compare()` function to compare two expressions, or the shorthands
-`equal()`, `less()`, `lessEqual()`, `greater()`, `greaterEqual()`.
+ `equal()`, `less()`, `lessEqual()`, `greater()`, `greaterEqual()`.
 
 The comparison between expressions is structural so that $$x + 1$$ is not equal
 to $$1 + x$$. To obtain the desired result, you may need to apply a canonical

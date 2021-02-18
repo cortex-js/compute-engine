@@ -1,11 +1,17 @@
 ---
 title: MathJSON Arithmetic
-permalink: /guides/math-json-arithmetic/
+permalink: /guides/math-json-trigonometry/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+<script type='module'>
+    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
+    renderMathInDocument();
+</script>
+
+# Trigonometry
 
 | Function | Inverse                                                                                                | Hyperbolic | Inverse Hyperbolic |
 | :------- | :----------------------------------------------------------------------------------------------------- | :--------- | :----------------- |
@@ -15,17 +21,17 @@ sidebar:
 
 ## `Degrees`
 
-A constant, Pi divided by 180 = 0.017453292519943295769236907
+A constant, $$\frac{\pi}{180} = 0.017453292519943295769236907\cdot$$.
 
 ## `FromPolarCoordinates`
 
-Converts (radius, angle) -> (x, y
+Converts (radius, angle) -> (x, y)
 
 ## `Haversine`
 
 [Haversine function](https://www.wikidata.org/wiki/Q2528380)
 
-= sin(z/2)^2
+$$\operatorname{Haversine}(z) = \sin(\frac{z}{2})^2$$
 
 The haversine function was important in navigation because it appears in the
 haversine formula, which is used to reasonably accurately compute distances on
@@ -33,11 +39,12 @@ an astronomic spheroid given angular positions (e.g., longitude and latitude).
 
 ## `Hypot`
 
-sqrt(x*x + y*y)
+$$\operatorname{Hypot}(x,y) = \sqrt{x^2+y^2}$$
 
 ## `InverseHaversine`
 
-= 2 \* Arcsin(Sqrt(z))
+$$\operatorname{InverseHaversine}(z) = 2 \operatorname{Arcsin}(\sqrt{z})$$
+
 
 ## `ToPolarCoordinates`
 
