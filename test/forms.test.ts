@@ -8,7 +8,7 @@ import {
   NEGATE,
   GROUP,
   PI,
-} from '../src/utils';
+} from '../src/compute-engine/utils';
 import { expression, printExpression, engine } from './utils';
 
 beforeEach(() => {

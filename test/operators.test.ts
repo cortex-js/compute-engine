@@ -1,4 +1,10 @@
-import { ADD, DIVIDE, SUBTRACT, MULTIPLY, POWER } from '../src/utils';
+import {
+  ADD,
+  DIVIDE,
+  SUBTRACT,
+  MULTIPLY,
+  POWER,
+} from '../src/compute-engine/utils';
 import { expression, expressionError, latex, printExpression } from './utils';
 
 beforeEach(() => {

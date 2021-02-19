@@ -7,7 +7,7 @@ import {
   POWER,
   DIVIDE,
   LATEX,
-} from '../src/utils';
+} from '../src/compute-engine/utils';
 import { expression, latex, printExpression } from './utils';
 
 beforeEach(() => {

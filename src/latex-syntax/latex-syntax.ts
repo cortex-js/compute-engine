@@ -4,7 +4,7 @@ import {
   DictionaryCategory,
   Expression,
 } from '../../dist/types/public';
-import { tokenize } from '../core/tokenizer';
+import { tokenize } from './core/tokenizer';
 import {
   DEFAULT_LATEX_DICTIONARY,
   IndexedLatexDictionary,

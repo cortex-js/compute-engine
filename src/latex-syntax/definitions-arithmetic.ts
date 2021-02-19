@@ -24,9 +24,9 @@ import {
   POWER,
   MISSING,
   LIST,
-} from '../utils';
+} from '../compute-engine/utils';
 import { applyNegate } from '../compute-engine/forms';
-import { joinLatex } from '../core/tokenizer';
+import { joinLatex } from './core/tokenizer';
 import { getFractionStyle, getRootStyle } from './serializer-style';
 
 /**

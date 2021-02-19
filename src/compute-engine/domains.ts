@@ -1,4 +1,5 @@
-import { ComputeEngine, Expression } from '../public';
+import { Expression } from '../public';
+import { ComputeEngine } from './public';
 
 export function domain(
   _expr: Expression,

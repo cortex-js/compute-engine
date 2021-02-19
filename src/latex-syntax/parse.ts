@@ -15,8 +15,8 @@ import {
   GROUP,
   DIVIDE,
   LATEX,
-} from '../utils';
-import { tokensToString } from '../core/tokenizer';
+} from '../compute-engine/utils';
+import { tokensToString } from './core/tokenizer';
 import { IndexedLatexDictionary } from './definitions';
 import { DEFAULT_PARSE_LATEX_OPTIONS } from './utils';
 

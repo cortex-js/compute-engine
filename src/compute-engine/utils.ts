@@ -3,7 +3,7 @@ import {
   MathJsonRealNumber,
   MathJsonSymbol,
   MathJsonFunction,
-} from './public';
+} from '../public';
 
 /**
  * These constants are the 'primitive' functions and constants that are used

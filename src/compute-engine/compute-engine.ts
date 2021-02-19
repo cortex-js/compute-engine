@@ -1,22 +1,26 @@
 import {
   DictionaryCategory,
-  Dictionary,
   ErrorListener,
   ErrorCode,
   Expression,
+} from '../public';
+
+import {
   Form,
   Domain,
   FunctionDefinition,
   SymbolDefinition,
   SetDefinition,
   Scope,
-} from '../public';
+  Dictionary,
+} from './public';
+
 import {
   compileDictionary,
   getDefaultDictionaries,
-} from '../dictionary/dictionary';
+} from './dictionary/dictionary';
 import { format as formatWithEngine } from './forms';
-import { compare } from './compare';
+import { compare } from './dictionary/compare';
 import { evaluate as evaluateWithEngine } from './evaluate';
 import { domain as domainWithEngine } from './domains';
 import {
@@ -25,8 +29,9 @@ import {
   getFunctionName,
   getNumberValue,
   getSymbolName,
-} from '../utils';
-import { isSetDefinition } from '../dictionary/utils';
+} from './utils';
+import { isSetDefinition } from './dictionary/utils';
+import { same } from './same';
 
 export class ComputeEngine {
   static getDictionaries(
@@ -315,6 +320,9 @@ export class ComputeEngine {
   ): { [key: string]: Expression } | null {
     // @todo
     return null;
+  }
+  same(lhs: Expression, rhs: Expression): boolean {
+    return same(lhs, rhs);
   }
   compare(lhs: Expression, rhs: Expression): -1 | 0 | 1 | undefined {
     return compare(this, lhs, rhs);

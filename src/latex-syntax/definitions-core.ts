@@ -17,7 +17,7 @@ import {
   NOTHING,
   SEQUENCE,
   SEQUENCE2,
-} from '../utils';
+} from '../compute-engine/utils';
 import { getGroupStyle } from './serializer-style';
 
 function isSpacingToken(token: string): boolean {

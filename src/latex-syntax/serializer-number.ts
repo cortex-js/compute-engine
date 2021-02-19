@@ -1,5 +1,5 @@
 import { Expression } from '../public';
-import { isNumberObject } from '../utils';
+import { isNumberObject } from '../compute-engine/utils';
 import { LatexNumberOptions } from './public';
 
 /**

@@ -1,11 +1,10 @@
+import type { Expression, DictionaryCategory } from '../../public';
 import type {
   Dictionary,
-  DictionaryCategory,
   FunctionDefinition,
   SetDefinition,
   SymbolDefinition,
   CompiledDictionary,
-  Expression,
   ComputeEngine,
 } from '../public';
 import {
@@ -24,7 +23,7 @@ import { CORE_DICTIONARY } from './core';
 import { LOGIC_DICTIONARY } from './logic';
 import { SETS_DICTIONARY } from './sets';
 import { TRIGONOMETRY_DICTIONARY } from './trigonometry';
-import { FIRST_1000_PRIMES, THOUSAND_TH_PRIME } from '../compute-engine/primes';
+import { FIRST_1000_PRIMES, THOUSAND_TH_PRIME } from './primes';
 import {
   isSymbolDefinition,
   isFunctionDefinition,
@@ -327,7 +326,7 @@ function normalizeDefinition(
     return [def, warning];
   }
 
-  if (isFunctionDefinition(def) || engine.isSubsetOf(def.domain, 'Function')) {
+  if (isFunctionDefinition(def) || engine.isSubsetOf(domain, 'Function')) {
     def = {
       wikidata: '',
 
@@ -346,8 +345,8 @@ function normalizeDefinition(
       sequenceHold: false,
 
       signatures: [],
-      ...def,
-    };
+      ...(def as any),
+    } as FunctionDefinition;
     let warning: string;
     if (def.signatures.length === 0) {
       warning = `no function signature provided.`;

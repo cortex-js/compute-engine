@@ -12,7 +12,7 @@ import {
   SerializerFunction,
   LatexDictionaryEntry,
 } from './public';
-import { tokensToString } from '../core/tokenizer';
+import { tokensToString } from './core/tokenizer';
 import { DEFINITIONS_INEQUALITIES } from './definitions-inequalities';
 import { DEFINITIONS_OTHERS } from './definitions-other';
 import { DEFINITIONS_CORE } from './definitions-core';

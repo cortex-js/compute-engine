@@ -1,5 +1,5 @@
 import { Expression } from '../public';
-import { DERIVATIVE, INVERSE_FUNCTION } from '../utils';
+import { DERIVATIVE, INVERSE_FUNCTION } from '../compute-engine/utils';
 import { Scanner, LatexDictionary } from './public';
 
 /**

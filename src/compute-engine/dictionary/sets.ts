@@ -1,10 +1,5 @@
-import {
-  union,
-  intersection,
-  setminus,
-  cartesianProduct,
-} from '../compute-engine/sets';
-import type { Dictionary, Expression, ComputeEngine } from '../public';
+import type { Expression } from '../../public';
+import type { Dictionary, ComputeEngine } from '../public';
 
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
@@ -78,14 +73,7 @@ export const SETS_DICTIONARY: Dictionary = {
           ['rhs', 'Set'],
         ],
         result: 'MaybeBoolean',
-        evaluate: (
-          engine: ComputeEngine,
-          lhs: Expression,
-          rhs: Expression
-        ): Expression => {
-          const c = engine.compare(lhs, rhs);
-          return c < 0 ? 'True' : c >= 0 ? 'False' : 'Maybe';
-        },
+        evaluate: subset,
       },
     ],
   },
@@ -98,14 +86,7 @@ export const SETS_DICTIONARY: Dictionary = {
           ['rhs', 'Set'],
         ],
         result: 'MaybeBoolean',
-        evaluate: (
-          engine: ComputeEngine,
-          lhs: Expression,
-          rhs: Expression
-        ): Expression => {
-          const c = engine.compare(lhs, rhs);
-          return c <= 0 ? 'True' : c > 0 ? 'False' : 'Maybe';
-        },
+        evaluate: subsetEqual,
       },
     ],
   },
@@ -119,8 +100,49 @@ export const SETS_DICTIONARY: Dictionary = {
           ['rhs', 'Set'],
         ],
         result: 'Set',
-        evaluate: setminus,
+        evaluate: setMinus,
       },
     ],
   },
 };
+
+function subset(
+  _engine: ComputeEngine,
+  _lhs: Expression,
+  _rhs: Expression
+): Expression {
+  return 'False';
+}
+function subsetEqual(
+  _engine: ComputeEngine,
+  _lhs: Expression,
+  _rhs: Expression
+): Expression {
+  return 'False';
+}
+
+function union(_engine: ComputeEngine, ..._args: Expression[]): Expression {
+  return 'EmptySet';
+}
+
+function intersection(
+  _engine: ComputeEngine,
+  ..._args: Expression[]
+): Expression {
+  return 'EmptySet';
+}
+
+function setMinus(
+  _engine: ComputeEngine,
+  _lhs: Expression[],
+  _rhs: Expression[]
+): Expression {
+  return 'EmptySet';
+}
+function cartesianProduct(
+  _engine: ComputeEngine,
+  _lhs: Expression[],
+  _rhs: Expression[]
+): Expression {
+  return 'EmptySet';
+}

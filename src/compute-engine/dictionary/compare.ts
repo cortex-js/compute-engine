@@ -1,5 +1,6 @@
-import { ComputeEngine, Expression } from '../public';
-import { order } from './order';
+import { Expression } from '../../public';
+import { ComputeEngine } from '../public';
+import { order } from '../order';
 
 /**
  * Structural comparison between two expressions

@@ -1,5 +1,6 @@
 import { isNumberObject, isSymbolObject, isFunctionObject } from './utils';
-import { Dictionary, Expression } from './public';
+import { Expression } from '../public';
+import { Dictionary } from './public';
 
 export function getWikidata(dictionary: Dictionary, json: Expression): string {
   if (typeof json === 'number') return '';

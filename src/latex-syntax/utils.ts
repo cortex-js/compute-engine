@@ -1,4 +1,4 @@
-import { MULTIPLY, ADD } from '../utils';
+import { MULTIPLY, ADD } from '../compute-engine/utils';
 import {
   LatexNumberOptions,
   ParseLatexOptions,

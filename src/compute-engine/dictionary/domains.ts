@@ -1,4 +1,5 @@
-import { Dictionary, Expression, SetDefinition } from '../public';
+import { Expression } from '../../public';
+import { Dictionary, SetDefinition } from '../public';
 
 // Other domains to consider:
 // - p-adic

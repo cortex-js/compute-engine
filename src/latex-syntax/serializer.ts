@@ -16,12 +16,12 @@ import {
   getFunctionHead,
   isFunctionObject,
   GROUP,
-} from '../utils';
+} from '../compute-engine/utils';
 import {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
 } from './definitions';
-import { joinLatex, tokensToString } from '../core/tokenizer';
+import { joinLatex, tokensToString } from './core/tokenizer';
 import { serializeNumber } from './serializer-number';
 import { getApplyFunctionStyle, getGroupStyle } from './serializer-style';
 

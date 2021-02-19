@@ -8,7 +8,7 @@ import {
   NOTHING,
   SEQUENCE,
   LIST,
-} from '../utils';
+} from '../compute-engine/utils';
 
 export const DEFINITIONS_OTHERS: LatexDictionary = [
   {

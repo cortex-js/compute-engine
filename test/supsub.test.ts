@@ -1,4 +1,4 @@
-import { POWER, INVERSE_FUNCTION } from '../src/utils';
+import { POWER, INVERSE_FUNCTION } from '../src/compute-engine/utils';
 import { expression, latex, printExpression } from './utils';
 
 beforeEach(() => {
