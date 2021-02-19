@@ -141,12 +141,50 @@ export type Definition = {
   scope?: Scope;
 };
 
+/**
+ * Function signature.
+ *
+ * A function should have at least one signature.
+ *
+ * The signature of a function that accepts any input and may return
+ * anything is: `{ rest: "Anything", result: "Anything" }`.
+ *
+ * A function can have multiple signatures. For example:
+ * - `Add(RealNumber, RealNumber): RealNumber`
+ * - `Add(ComplexNumber, ComplexNumber): ComplexNumber`
+ * - etc..
+ */
+export type FunctionSignature = {
+  /** Input arguments */
+  args?: (Domain | [name: string, domain: Domain])[];
+
+  /** If this signature accepts unlimited additional arguments after the
+   * named arguments, they should be of this domain */
+  rest?: Domain | [name: string, domain: Domain];
+
+  /** Domain result computation */
+  result:
+    | Domain
+    | ((engine: ComputeEngine, ...args: Expression[]) => Expression);
+
+  /** Dimensional analysis */
+  dimension?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
+
+  /** Return a compiled (optimized) function for evaluation */
+  compile?: (
+    engine: ComputeEngine,
+    ...args: CompiledExpression[]
+  ) => CompiledExpression;
+
+  /** Evaluate the function with the passed in arguments and return a corresponding result. */
+  evaluate?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
+};
+
 export type FunctionDefinition = Definition &
   Partial<FunctionFeatures> & {
     /**
-     * - **'none'**:  eval() is invoked for each argument.
-     * - **'all'**: The arguments will not be evaluated and will be passed as is
-     *  The function will be passed the result of the evaluation
+     * - **'none'**: Each of the arguments is evaluated.
+     * - **'all'**: The arguments will not be evaluated and will be passed as is.
      * - **'first'**: The first argument is not evaluated, the others are
      * - **'rest'**: The first argument is evaluated, the others aren't
      */
@@ -158,32 +196,7 @@ export type FunctionDefinition = Definition &
      */
     sequenceHold?: boolean;
 
-    /**
-     * Function signatures.
-     */
-    signatures?: {
-      /** Input arguments */
-      args?: (Domain | [name: string, domain: Domain])[];
-
-      /** If this signature accepts unlimited additional arguments after the
-       * named arguments, they should be of this domain */
-      rest?: Domain | [name: string, domain: Domain];
-
-      /** Domain result computation */
-      result:
-        | Domain
-        | ((engine: ComputeEngine, ...args: Expression[]) => Expression);
-
-      /** Dimensional analysis */
-      dimension?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
-      /** Return a compiled (optimized) function for evaluation */
-      compile?: (
-        engine: ComputeEngine,
-        ...args: CompiledExpression[]
-      ) => CompiledExpression;
-      /** */
-      evaluate?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
-    }[];
+    signatures?: FunctionSignature[];
   };
 
 export type SymbolFeatures = {
@@ -411,20 +424,20 @@ export declare function evaluate(
  *      expression is removed.
  * - **`'object-literal'`**:  each term of an expression is expressed as an
  *      object literal: no shorthand representation is used.
- * - *`'canonical-add'`**: `addition of 0 is simplified, associativity rules
+ * - **`'canonical-add'`**: `addition of 0 is simplified, associativity rules
  *      are applied, unnecessary groups are moved, single argument 'add' are simplified
- * - *`'canonical-divide'`**: `divide` is replaced with `multiply` and `power',
+ * - **`'canonical-divide'`**: `divide` is replaced with `multiply` and `power',
  *       division by 1 is simplified,
- * - *`'canonical-exp'`**: `exp` is replaced with `power`
- * - *`'canonical-multiply'`**: multiplication by 1 or -1 is simplified
- * - *`'canonical-power'`**: `power` with a first or second argument of 1 is
+ * - **`'canonical-exp'`**: `exp` is replaced with `power`
+ * - **`'canonical-multiply'`**: multiplication by 1 or -1 is simplified
+ * - **`'canonical-power'`**: `power` with a first or second argument of 1 is
  *     simplified
- * - *`'canonical-negate'`**: real or complex number is replaced by the
+ * - **`'canonical-negate'`**: real or complex number is replaced by the
  * negative of that number. Negation of negation is simplified.
- * - *`'canonical-number'`**: complex numbers with no imaginary compnents are
+ * - **`'canonical-number'`**: complex numbers with no imaginary compnents are
  *    simplified
- * - *`'canonical-root'`**: `root` is replaced with `power`
- * - *`'canonical-subtract'`**: `subtract` is replaced with `add` and `negate`
+ * - **`'canonical-root'`**: `root` is replaced with `power`
+ * - **`'canonical-subtract'`**: `subtract` is replaced with `add` and `negate`
  * - **`'canonical'`**: the following transformations are performed, in this order:
  *      - 'canonical-number', // -> simplify number
  *      - 'canonical-exp', // -> power
