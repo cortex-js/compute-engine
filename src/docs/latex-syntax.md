@@ -20,11 +20,11 @@ import { parse, serialize } from 'math-json';
 
 const expr = parse('\\frac{\\pi}{2}');
 console.log(expr);
-// -> ["Divide", "Pi", 2]
+// ➔ ["Divide", "Pi", 2]
 
 const latex = serialize(expr);
 console.log(latex);
-// -> \frac{\pi}{2}
+// ➔ \frac{\pi}{2}
 ```
 
 The behavior of parse and serialize can be customized by passing an optional
@@ -37,7 +37,7 @@ console.log(serialize(1/3, {
     precision: 3,
     decimalMarker: ","
 }););
-// -> 0,333
+// ➔ 0,333
 ```
 
 ## Advanced Usage
@@ -72,5 +72,5 @@ const rawLatex = new LatexSyntax({
 });
 const expr = rawLatex.parse('\\frac{\\pi}{2}');
 console.log(expr);
-// -> ["Latex", "\frac", "<{>", "\pi", "<}>", "<{>",  2, "<}>"]
+// ➔ ["Latex", "\frac", "<{>", "\pi", "<}>", "<{>",  2, "<}>"]
 ```

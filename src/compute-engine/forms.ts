@@ -757,13 +757,13 @@ export function canonicalForm(
   engine: ComputeEngine
 ): Expression | null {
   return engine.format(expr, [
-    'canonical-number', // -> simplify number
-    'canonical-exp', // -> power
-    'canonical-root', // -> power, divide
-    'canonical-subtract', // -> add, negate, multiply,
-    'canonical-divide', // -> multiply, power
+    'canonical-number', // ➔ simplify number
+    'canonical-exp', // ➔ power
+    'canonical-root', // ➔ power, divide
+    'canonical-subtract', // ➔ add, negate, multiply,
+    'canonical-divide', // ➔ multiply, power
     'canonical-power', // simplify power
-    'canonical-multiply', // -> multiply, power,    (this might generate
+    'canonical-multiply', // ➔ multiply, power,    (this might generate
     // some POWER functions, but they are 'safe' (don't need simplification)
     'canonical-negate', // simplify negate
     'canonical-add', // simplify add

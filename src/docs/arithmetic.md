@@ -1,94 +1,73 @@
 ---
-title: MathJSON Arithmetic
-permalink: /guides/math-json-arithmetic/
+title: Arithmetic
+permalink: /guides/compute-engine-arithmetic/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+<script type='module'>
+    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
+    renderMathInDocument();
+</script>
 
-## `Abs`
+# Arithmetic
+- `Abs` - Absolute value, [magnitude](https://www.wikidata.org/wiki/Q3317982).
 
-Absolute value, [magnitude](https://www.wikidata.org/wiki/Q3317982).
+- `Add` - [Addition](https://www.wikidata.org/wiki/Q32043).
 
-## `Add`
+- `Chop`
 
-[Addition](https://www.wikidata.org/wiki/Q32043).
+- `Ceil` - Rounds a number up to the next largest integer.
 
-## `Chop`
+- `Equal` - Mathematical relationship asserting that two quantities have the same value.
 
-## `Ceil`
+- `ExponentialE` - [Euler's number](https://www.wikidata.org/wiki/Q82435).
 
-Rounds a number up to the next largest integer.
+- `Exp`
 
-## `Equal`
+- `Exp2`
 
-Mathematical relationship asserting that two quantities have the same value.
+- `Exp10`
 
-## `E`
+- `Erf` - Error function
 
-[Euler's number](https://www.wikidata.org/wiki/Q82435).
+- `Erfc` - Error function complement
 
-## `Exp`
+- `ExpMinusOne`
 
-## `Exp2`
+- `Factorial`
 
-## `Exp10`
+- `Floor`
 
-## `Erf`
+- `Gamma`
 
-Error function
+- `LogGamma`
 
-## `Erfc`
+- `Log`
 
-Error function complement
+- `Log2`
 
-## `ExpMinusOne`
+- `Log10`
 
-## `Factorial`
+- `LogOnePlus`
 
-## `Floor`
+- `MachineEpsilon` - The difference between 1 and the next larger floating point number: $$2^{−52}$$. See [WikiPedia](https://en.wikipedia.org/wiki/Machine_epsilon)
 
-## `Gamma`
+- `Multiply`
 
-## `LogGamma`
+- `NotEqual` - Q28113351
 
-## `Log`
+- `Negate` - The additive inverse. Q715358
 
-## `Log2`
+- `Power` - Q33456
 
-## `Log10`
+- `Round`
 
-## `LogOnePlus`
+- `SignGamma`
 
-## `MachineEpsilon`
+- `Sqrt`
 
-The difference between 1 and the next larger floating point number:
+- `Root`
 
-`2^{−52}`
-
-See https://en.wikipedia.org/wiki/Machine_epsilon
-
-## `Multiply`
-
-## `NotEqual`
-
-Q28113351
-
-## `Negate`
-
-Q715358
-
-## `Power`
-
-Q33456
-
-## `Round`
-
-## `SignGamma`
-
-## `Sqrt`
-
-## `Root`
-
-## `Subtract`
+- `Subtract`

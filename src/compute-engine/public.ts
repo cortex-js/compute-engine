@@ -247,10 +247,10 @@ export type CompiledExpression = {
 };
 
 /**
- * For best performance when calling repeatedly `format()` or `evalute()`,
+ * For best performance when calling repeatedly `format()` or `evaluate()`,
  * create an instance of `ComputeEngine` and call its methods. The constructor
  * of `ComputeEngine` will compile and optimize the dictionary so that calls of
- * the `format()` and `evalute()` methods will bypass that step. By contrast
+ * the `format()` and `evaluate()` methods will bypass that step. By contrast
  * invoking the `format()` and `evaluate()` functions will compile the
  * dictionary each time they are called.
  */
@@ -349,10 +349,10 @@ export declare class ComputeEngine {
    *
    * ```js
    * same(["Add", "x", 1], ["Add", 1,  "x"])
-   * // -> false
+   * // ➔ false
    *
    * same(canonical(["Add", "x", 1]), canonical(["Add", 1,  "x"]))`
-   * // -> true
+   * // ➔ true
    * ```
    */
   same(lhs: Expression, rhs: Expression): boolean;
@@ -439,13 +439,13 @@ export declare function evaluate(
  * - **`'canonical-root'`**: `root` is replaced with `power`
  * - **`'canonical-subtract'`**: `subtract` is replaced with `add` and `negate`
  * - **`'canonical'`**: the following transformations are performed, in this order:
- *      - 'canonical-number', // -> simplify number
- *      - 'canonical-exp', // -> power
- *      - 'canonical-root', // -> power, divide
- *      - 'canonical-subtract', // -> add, negate, multiply,
- *      - 'canonical-divide', // -> multiply, power
+ *      - 'canonical-number', // ➔ simplify number
+ *      - 'canonical-exp', // ➔ power
+ *      - 'canonical-root', // ➔ power, divide
+ *      - 'canonical-subtract', // ➔ add, negate, multiply,
+ *      - 'canonical-divide', // ➔ multiply, power
  *      - 'canonical-power', // simplify power
- *      - 'canonical-multiply', // -> multiply, power
+ *      - 'canonical-multiply', // ➔ multiply, power
  *      - 'canonical-negate', // simplify negate
  *      - 'canonical-add', // simplify add
  *      - 'flatten', // simplify associative, idempotent and groups

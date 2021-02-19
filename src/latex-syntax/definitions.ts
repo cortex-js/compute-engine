@@ -227,7 +227,7 @@ export function indexLatexDictionary(
 // ceiling
 
 // infix operators:
-// ->   rule
+//->   rule
 // :>   rule-delayed
 // ==   eq
 // !=   ne

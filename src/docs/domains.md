@@ -1,11 +1,15 @@
 ---
-title: MathJSON Core
-permalink: /guides/math-json-domains/
+title: Domains
+permalink: /guides/compute-engine-domains/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+<script type='module'>
+    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
+    renderMathInDocument();
+</script>
 
 # Domains
 
@@ -39,13 +43,13 @@ form.
 
 ```js
 format(['SetMinus', 'RealNumber', 'IrrationalNumber'], 'canonical-domain');
-// -> "RationalNumber"
+// ➔ "RationalNumber"
 
 format(
   ['Union', ['Number', 0, '+Infinity'], ['Number', '-Infinity', 5]],
   'canonical-domain'
 );
-// -> "ExtendedRealNumber"
+// ➔ "ExtendedRealNumber"
 ```
 
 ![Anything domains](/assets/domains.001.jpeg 'The top-level domains')
@@ -55,6 +59,23 @@ format(
 
 The implementation of the CortexJS domains is based on
 [Weibel, Trudy & Gonnet, Gaston. (1991). An Algebra of Properties.. 352-359. 10.1145/120694.120749. ](https://www.researchgate.net/publication/.221564157_An_Algebra_of_Properties)
+
+## Domains
+
+To obtain the domain of an expression, use the `ComputeEngine.domain()` function.
+
+```js
+const engine = new ComputeEngine();
+
+engine.domain('Pi');
+// ➔ "TranscendentalNumber"
+
+engine.domain(['Add', 5, 2]);
+// ➔ "Number"
+
+engine.domain(engine.evaluate(['Add', 5, 2]));
+// ➔ "PrimeNumber"
+```
 
 ## `"Domain"` and `"ParametricDomain"`
 
