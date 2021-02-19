@@ -20,7 +20,7 @@ Logical operators.
 `And` and `Or` are multivariate:
 
 ```json
-["And", x, y, z]
+["And", "x", "y", "z"]
 ```
 
 ## `Equal`, `NotEqual`
@@ -29,7 +29,7 @@ Use to test if the arguments are the same expression (not the same value).
 
 `Equal` and `NotEqual` are multivariates.
 
-`["NotEqual, x]` is equivalent to `["Not", ["Equal", x])`
+`["NotEqual, "x"]` is equivalent to `["Not", ["Equal", "x"])`
 
 ## `Equivalent`, `Implies`
 

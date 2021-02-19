@@ -193,8 +193,8 @@ export type ErrorListener<T> = (err: {
  * well. In that case the domain is determined automatically.
  *
  * ```json
- * { x: 1.0 }
- * { x : { domain: "RealNumber", value: 1.0 } }
+ * { "x": 1.0 }
+ * { "x" : { "domain": "RealNumber", "value": 1.0 } }
  * ```
  *
  *

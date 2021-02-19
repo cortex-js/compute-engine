@@ -118,10 +118,11 @@ const DOMAIN_WIKIDATA: { [domain: string]: string } = {
 };
 
 const DOMAIN_VALUE: { [domain: string]: Expression } = {
+  MaybeBoolean: ['Union', 'Boolean', ['Set', 'Maybe']],
   NaturalNumber: ['Union', 'CompositeNumber', 'PrimeNumber'],
+  Scalar: ['Intersection', 'Row', 'Column'],
   TriangularMatrix: ['Union', 'UpperTriangularMatrix', 'LowerTriangularMatrix'],
   Vector: ['Union', 'Row', 'Column'],
-  Scalar: ['Intersection', 'Row', 'Column'],
 };
 
 const PARAMETRIC_DOMAIN = {
