@@ -67,11 +67,13 @@ This section describe the symbols defined in the default dictionaries. For
 convenience, the information below combine the information included in the
 default Latex syntax dictionary and the default global dictionary.
 
-- [Arithmetic](/guides/math-json-arithmetic/): `Add`, `Multiply`, etc...
-- [Calculus](/guides/math-json-calculus/): `Derive`, `Integrate`, etc...
-- [Collections](/guides/math-json-collections/): `Sequence`, `List`, `Group`,
+- [Arithmetic](/guides/compute-engine-arithmetic/): `Add`, `Multiply`, etc...
+- [Calculus](/guides/compute-engine-calculus/): `Derive`, `Integrate`, etc...
+- [Collections](/guides/compute-engine-collections/): `Sequence`, `List`, `Group`,
   `Set`
-- [Core](/guides/math-json-core/) `Missing`, `Nothing`, `Identity`,
+- [Core](/guides/compute-engine-core/) `Missing`, `Nothing`, `Identity`,
   `InverseFunction`, `Latex`, etc...
-- [Forms](/guides/math-json-forms/) `BaseForm`
-- [Trigonometry](/guides/math-json-trigonometry/)
+- [Forms](/guides/compute-engine-forms/) `BaseForm`
+- [Logic](/guides/compute-engine-logic/) `And`, `Or`, `Not`, etc...
+- [Sets](/guides/compute-engine-sets/)
+- [Trigonometry](/guides/compute-engine-trigonometry/)

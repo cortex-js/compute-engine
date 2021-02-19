@@ -1,8 +1,10 @@
 ---
-title: MathJSON Sets
-permalink: /guides/math-json-sets/
+title: Sets
+permalink: /guides/compute-engine-sets/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+
+# Sets

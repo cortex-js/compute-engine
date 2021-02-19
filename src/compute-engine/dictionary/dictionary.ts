@@ -215,7 +215,7 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
   },
   'relations': {
     // eq, lt, leq, gt, geq, neq, approx
-    //     shortLogicalImplies: 52, // ->
+    //     shortLogicalImplies: 52, // ➔
     // shortImplies => 51
     // implies ==> 49
     //    impliedBy: 45, // <==

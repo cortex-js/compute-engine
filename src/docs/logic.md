@@ -1,12 +1,18 @@
 ---
-title: MathJSON Logic
-permalink: /guides/math-json-logic/
+title: Logic
+permalink: /guides/compute-engine-logic/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
 
+<script type='module'>
+    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
+    renderMathInDocument();
+</script>
+
+# Logic
 ## `True`, `False`, `Maybe`
 
 Boolean constants.
@@ -24,8 +30,6 @@ Logical operators.
 ```
 
 ## `Equal`, `NotEqual`
-
-Use to test if the arguments are the same expression (not the same value).
 
 `Equal` and `NotEqual` are multivariates.
 

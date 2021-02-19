@@ -1,11 +1,15 @@
 ---
-title: MathJSON Core
-permalink: /guides/math-json-core/
+title: Core
+permalink: /guides/compute-engine-core/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+<script type='module'>
+    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
+    renderMathInDocument();
+</script>
 
 # Core
 
@@ -60,7 +64,7 @@ To apply a Lambda-function to some arguments, use:
 
 ```json
 [["Lambda", ["List", "x"], ["Multiply", "x", "x"]], "2"]
-// -> 4
+// ➔ 4
 ```
 
 ## `Latex`
@@ -112,7 +116,7 @@ group **if** the subexpression matches any of the _`pattern-n`_.
 
 ```js
 match(["Add", ["Pattern"], ["Pattern"]], ["Add", 3, 5]))
-// -> {}
+// ➔ {}
 ```
 
 ## `Piecewise`

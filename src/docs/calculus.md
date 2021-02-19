@@ -1,12 +1,17 @@
 ---
-title: MathJSON Calculus
-permalink: /guides/math-json-calculus/
+title: Calculus
+permalink: /guides/compute-engine-calculus/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+<script type='module'>
+    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
+    renderMathInDocument();
+</script>
 
+# Calculus
 ### Lagrange Notation
 
 | Latex                 | MathJSON           |
