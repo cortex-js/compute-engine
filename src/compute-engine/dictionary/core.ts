@@ -1,6 +1,27 @@
 import type { Dictionary } from '../public';
 
 export const CORE_DICTIONARY: Dictionary = {
+  Apply: {
+    domain: 'Function',
+    signatures: [
+      {
+        args: [
+          ['head', 'Expression'],
+          ['tail', 'List'],
+        ],
+        result: 'Expression',
+      },
+    ],
+  },
+  About: {
+    domain: 'Function',
+    signatures: [
+      {
+        args: ['Expression'],
+        result: 'Dictionary',
+      },
+    ],
+  },
   BaseForm: {
     domain: 'Function',
     signatures: [
@@ -21,6 +42,9 @@ export const CORE_DICTIONARY: Dictionary = {
      */
     domain: 'Function',
   },
+  Dictionary: {
+    domain: 'Collection',
+  },
   Domain: {
     /** Return the domain of an expression */
     domain: 'Function',
@@ -37,6 +61,15 @@ export const CORE_DICTIONARY: Dictionary = {
     // and non-idempotent
     pure: false,
     signatures: [{ rest: ['expressions', 'Expression'], result: 'Expression' }],
+  },
+  Head: {
+    domain: 'Function',
+    signatures: [
+      {
+        args: ['Expression'],
+        result: 'Expression',
+      },
+    ],
   },
   Lambda: {
     domain: 'Function',
@@ -57,44 +90,63 @@ export const CORE_DICTIONARY: Dictionary = {
     threadable: true,
     signatures: [{ args: ['String'], result: 'Symbol' }],
   },
+  Tail: {
+    domain: 'Function',
+    signatures: [
+      {
+        args: ['Expression'],
+        result: 'List',
+      },
+    ],
+  },
   // Pattern: {},
 };
 
-// https://www.mathworks.com/help/referencelist.html?type=function&listtype=cat&category=&blocktype=&capability=&s_tid=CRUX_lftnav        // list
 // xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
 // https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1
 // length(expr, depth:integer) (for a list, an expression, etc..)
-// apply(expr:symbol, arguments) -> [expr, ...arguments] (but symbol is an expression that's evaluated...)
 // shape
 // length
 // depth
 
+/*
+ DICTIONARY
+ aka Association in Wolfram, Dictionary in Python and Swift, Record in Maple,
+ Map Containers in mathlab, Map in Javascript
+ Dictionary("field1", "value1", "field2", "value2"...)
+ Need a new atomic 'dict' MathJSON type?
+  {dict: {"field1": "value1", "field2": "value2"}}
+*/
+
+// LISTS
 // take(n, list) -> n first elements of the list
+// https://www.mathworks.com/help/referencelist.html?type=function&listtype=cat&category=&blocktype=&capability=&s_tid=CRUX_lftnav        // list
 // repeat(x) -> infinite list with "x" as argument
 // cycle(list) -> infinitely repeating list, i.e. cycle({1, 2, 3}) -> {1, 2, 3, 1, 2, 3, 1...}
 // iterate(f, acc) -> {f(acc), f(f(acc)), f(f(f(acc)))...}
 // == NestList ??
+// Append (python) / Push
+// Insert(i, x)
+// Pop(): remove last, Pop(i): remove item at [i]
 
-// identity
-// range
+// Range
 // index
-// evaluate
-// bind // replace  ( x-> 1)
-// domain
+// Evaluate
+// Bind // replace  ( x-> 1)
+// Domain
 // min, max
-// Nothing  -- constants, ignored in lists
 // None -- constant for some options
 // rule ->
 // delayed-rule: :> (value of replacement is recalculated each time)
 // set, set delayed
 // join
 // convert(expr, CONVERT_TO, OPTIONS) -- See Maple
+// convert(expr, options), with options such as 'cos', 'sin, 'trig, 'exp', 'ln', 'latex', 'string', etc...)
 // N
 // set, delayed-set
 // spread -> expand the elements of a list. If inside a list, insert the list into its parent
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
-// convert(expr, options), with options such as 'cos', 'sin, 'trig, 'exp', 'ln', 'latex', 'string', etc...)
 
-// symbol(x) -> x as a symbol, e.g. symbol('x' + 'y') -> `xy` (and registers it)
-// symbols() -> return list of all known symbols
+// Symbol(x) -> x as a symbol, e.g. symbol('x' + 'y') -> `xy` (and registers it)
+// Symbols() -> return list of all known symbols
 // variables() -> return list of all free variables

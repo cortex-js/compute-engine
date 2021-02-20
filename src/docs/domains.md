@@ -179,6 +179,9 @@ Any numerical value.
 - `"Scalar"` A tensor of rank 0.
 - `"Vector"`, `"Row"`, `"Column"` A tensor of rank 1. The argument of the
   parametric version specifies the number of elements in the vector.
+- `"Quaternion"`: A $$2\times2$$ matrix of complex elements.
+  [Quaternions](https://en.wikipedia.org/wiki/Quaternion) are frequently used to
+  represent vectors in 3D space ($$\mathbb{R}^3)$$).
 - `"Matrix"` A tensor of rank 2. The argument of the parametric version
   specifies the number of rows and columns in the matrix.
 - `"ComplexTensor"` a tensor whose elements are complex numbers.
@@ -188,6 +191,8 @@ Any numerical value.
 - `"SquareMatrix"` a tensor with the same number of rows and columns.
 - `"MonomialMatrix"` a square matrix with exactly one non-zero entry in each row
   and column.
+- `"OrthogonalMatrix"` a real square matrix whose transpose is equal to its
+  inverse: $$Q^T=Q^{-1}$$
 - `"PermutationMatrix"` a square matrix with with exactly one non-zero entry in
   each row and column.
 - `"DiagonalMatrix"` a matrix in which the elements outside the main diagonal

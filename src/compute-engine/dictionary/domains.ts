@@ -36,6 +36,7 @@ const DOMAIN_PARENT = {
   MaybeBoolean: 'Expression',
   Boolean: 'MaybeBoolean',
   Collection: 'Expression',
+  Dictionary: 'Collection',
   List: 'Collection',
   Sequence: 'Collection',
   Tuple: 'Collection',
@@ -101,12 +102,14 @@ const DOMAIN_PARENT = {
   TriangularMatrix: 'SquareMatrix',
   UpperTriangularMatrix: 'TriangularMatrix',
   LowerTriangularMatrix: 'TriangularMatrix',
-  PermutationMatrix: ['MonomialMatrix', 'LogicalTensor'],
+  PermutationMatrix: ['MonomialMatrix', 'LogicalTensor', 'OrthogonalMatrix'],
+  OrthogonalMatrix: ['SquareMatrix', 'RealTensor'],
   DiagonalMatrix: ['UpperTriangularMatrix', 'LowerTriangularMatrix'],
   IdentityMatrix: ['DiagonalMatrix', 'SymmetricMatrix', 'PermutationMatrix'],
   ZeroMatrix: ['DiagonalMatrix', 'SymmetricMatrix', 'PermutationMatrix'],
   SymmetricMatrix: ['HermitianMatrix', 'SquareMatrix', 'RealTensor'],
   HermitianMatrix: 'ComplexTensor',
+  Quaternion: ['SquareMatrix', 'Complextensor'],
 };
 
 const DOMAIN_WIKIDATA: { [domain: string]: string } = {
