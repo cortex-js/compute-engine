@@ -13,6 +13,7 @@ sidebar:
 </script>
 
 # Logic
+
 ## `True`, `False`, `Maybe`
 
 Boolean constants.
@@ -31,9 +32,32 @@ Logical operators.
 
 ## `Equal`, `NotEqual`
 
+`Equal` - Mathematical relationship asserting that two quantities have the same
+value.
+
+`["NotEqual, "x"]` is equivalent to `["Not", ["Equal", "x"])`. Q28113351
+
 `Equal` and `NotEqual` are multivariates.
 
-`["NotEqual, "x"]` is equivalent to `["Not", ["Equal", "x"])`
+Compare with `Same` which returns true only when two expressions are structural
+identical.
+
+```json
+["Same", ["Add", 2, 3], 5]]
+// ➔ False
+
+["Equal", ["Add", 2, 3], 5]
+// ➔ True
+```
+
+## Inequalities
+
+Compare two numerical expressions.
+
+- `Less`
+- `LessEqual`
+- `Greater`
+- `GreaterEqual`
 
 ## `Equivalent`, `Implies`
 

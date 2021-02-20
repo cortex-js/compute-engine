@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+
 <script type='module'>
     import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
     renderMathInDocument();
@@ -13,24 +14,31 @@ sidebar:
 
 # Core
 
+## Constants
 
-## `Missing`
+### `Missing`
 
-This symbol is used then a required expression is not present.
+This symbol is used when a required expression is not present.
 
 | MathJSON                   | Latex                      |
 | :------------------------- | :------------------------- |
 | `["Divide", 2, "Missing"]` | `\frac{2}{\placeholder{}}` |
 
-## `Nothing`
+### `Nothing`
 
-This symbol is used then an optional expression is not present.
+This symbol is used when an optional expression is not present.
 
 | MathJSON                    | Latex                  |
 | :-------------------------- | :--------------------- |
 | `["List", 2, "Nothing", 3]` | `\lrback 2,,3 \rbrack` |
 
-## `Identity`
+## Functions
+
+### `Evaluate`
+
+### `Group`
+
+### `Identity`
 
 The identity function, i.e. its value is its argument.
 
@@ -39,7 +47,7 @@ The identity function, i.e. its value is its argument.
 | `["Identity", "x"]` | `\operatorname{id}(x)` |
 | `"Identity"`        | `\operatorname{id}`    |
 
-## `InverseFunction`
+### `InverseFunction`
 
 The inverse function.
 
@@ -47,7 +55,7 @@ The inverse function.
 | :--------------------------- | :---------- |
 | `["InverseFunction", "Sin"]` | `\sin^{-1}` |
 
-## `Lambda`
+### `Lambda`
 
 - `["Lambda", `_`variables`_`, `_`expression`_`]`
 
@@ -63,11 +71,11 @@ variables of the Lambda-function.
 To apply a Lambda-function to some arguments, use:
 
 ```json
-[["Lambda", ["List", "x"], ["Multiply", "x", "x"]], "2"]
-// ➔ 4
+[["Lambda", ["List", "x"], ["Multiply", "x", "x"]], "3"]
+// ➔ 9
 ```
 
-## `Latex`
+### `Latex`
 
 - `["Latex", `_`token-1`_`, `_`token-2`_`, ...`_`token-n`_`]`
 
@@ -89,7 +97,7 @@ See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
 | :---------------------------------------------------------- | :-------------- |
 | `["Latex", "\frac", "<{>", "\pi","<}>", "<{>", "2", "<}>"]` | `\frac{\pi}{2}` |
 
-## `Pattern`
+### `Pattern`
 
 The `Pattern` function is used with the `match()` function to pattern-match an
 expresion. The pattern expression can include one or more `Pattern` function
@@ -119,57 +127,27 @@ match(["Add", ["Pattern"], ["Pattern"]], ["Add", 3, 5]))
 // ➔ {}
 ```
 
-## `Piecewise`
+### `Piecewise`
 
-## `Prime`
+### `Prime`
 
 | MathJSON            | Latex            |
 | :------------------ | :--------------- |
 | `["Prime", "f"]`    | `f^\prime`       |
 | `["Prime", "f", 2]` | `f^\doubleprime` |
 
-## `Subminus`
+### Superscript/subscript
 
-| MathJSON            | Latex |
-| :------------------ | :---- |
-| `["Subminus", "x"]` | `x_-` |
+- `Subminus` $$x_-$$
+- `Subplus` $$x_+$$
+- `Subscript`
+- `Substar` - $$x_*$$
+- `Superdagger` - $$x^\dagger$$
+- `Superminus` - $$x^-$$
+- `Superplus` - $$x^+$$
+- `Superstar` - $$x^*$$ When the argument is a complex number, indicate the
+  conjugate.
 
-## `Subplus`
+### `String`
 
-| MathJSON           | Latex |
-| :----------------- | :---- |
-| `["Subplus", "x"]` | `x_+` |
-
-## `Subscript`
-
-## `Substar`
-
-| MathJSON           | Latex |
-| :----------------- | :---- |
-| `["Substar", "x"]` | `x_*` |
-
-## `Superdagger`
-
-| MathJSON               | Latex       |
-| :--------------------- | :---------- |
-| `["Superdagger", "x"]` | `x^\dagger` |
-
-## `Superminus`
-
-| MathJSON              | Latex |
-| :-------------------- | :---- |
-| `["Superminus", "x"]` | `x^-` |
-
-## `Superplus`
-
-| MathJSON             | Latex |
-| :------------------- | :---- |
-| `["Superplus", "x"]` | `x^+` |
-
-## `Superstar`
-
-When the argument is a complex number, indicate the conjugate.
-
-| MathJSON             | Latex |
-| :------------------- | :---- |
-| `["Superplus", "x"]` | `x^*` |
+### `Symbol`

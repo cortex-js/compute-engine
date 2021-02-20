@@ -335,7 +335,7 @@ export type LatexNumberOptions = {
 export declare class LatexSyntax {
   /**
    *
-   * @pram onError - Called when a non-fatal error is encountered. When parsing,
+   * @param onError - Called when a non-fatal error is encountered. When parsing,
    * the parser will attempt to recover and continue.
    *
    */
@@ -343,7 +343,6 @@ export declare class LatexSyntax {
     options?: LatexNumberOptions &
       ParseLatexOptions &
       SerializeLatexOptions & {
-        dictionary?: Readonly<LatexDictionary>;
         onError?: ErrorListener<ErrorCode>;
       }
   );
@@ -512,7 +511,7 @@ export interface Scanner {
 /**
  * Parse a Latex string and return a corresponding MathJSON expression.
  *
- * @pram onError - Called when a non-fatal error is encountered while parsing.
+ * @param onError - Called when a non-fatal error is encountered while parsing.
  * The parsing will attempt to recover and continue.
  *
  */
@@ -520,7 +519,6 @@ export declare function parse(
   latex: LatexString,
   options?: LatexNumberOptions &
     ParseLatexOptions & {
-      dictionary?: Readonly<LatexDictionary>;
       onError?: ErrorListener<ErrorCode>;
     }
 ): Expression;

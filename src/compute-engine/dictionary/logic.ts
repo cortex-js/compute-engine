@@ -28,5 +28,12 @@ export const LOGIC_DICTIONARY: Dictionary = {
   Implies: { domain: 'LogicalFunction' },
   Exists: { domain: 'LogicalFunction' },
   Equal: { domain: 'LogicalFunction' },
-  NotEqual: { domain: 'LogicalFunction' },
+  NotEqual: {
+    domain: 'Function',
+    wikidata: 'Q28113351',
+    commutative: true,
+    signatures: [
+      { args: ['Expression', 'Expression'], result: 'MaybeBoolean' },
+    ],
+  },
 };

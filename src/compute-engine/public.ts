@@ -26,8 +26,6 @@ import {
  * { "x": 1.0 }
  * { "x" : { "domain": "RealNumber", "value": 1.0 } }
  * ```
- *
- *
  */
 export type Dictionary = {
   [name: string]:
@@ -36,20 +34,42 @@ export type Dictionary = {
     | FunctionDefinition
     | SetDefinition;
 };
-
+/**
+ * The entries of a `CompiledDictionary` have been validated and
+ * optimized for faster evaluation.
+ *
+ * When a new scope is created with `pushScope()` or when creating a new
+ * engine instance, new instances of `CompiledDictionary` are created as needed.
+ */
 export type CompiledDictionary = Map<
   string,
   FunctionDefinition | SetDefinition | SymbolDefinition
 >;
 
 /**
- * A dictionary that contains symbol definitions.
+ * A scope is a set of names in a dictionary that are bound (defined) in
+ * a MathJSON expression.
+ *
+ * Scopes are arranged in a stack structure. When an expression that defined
+ * a new scope is evaluated, the new scope is added to the scope stack.
+ * Outside of the expression, the scope is removed from the scope stack.
+ *
+ * The scope stack is used to resolve symbols, and it is possible for
+ * a scope to 'mask' definitions from previous scopes.
+ *
+ * Scopes are lexical (also called a static scope): they are defined based on
+ * where they are in an expression, they are not determined at runtime.
+ *
  */
 export type Scope = {
   parentScope: Scope;
   dictionary: CompiledDictionary;
 };
 
+/**
+ * A function definition can have some flags set indicating specific
+ * properties of the function.
+ */
 export type FunctionFeatures = {
   /**  If true, the function is applied element by element to lists, matrices
    * and equations.
@@ -75,6 +95,8 @@ export type FunctionFeatures = {
    *
    * When the function is multivariate, additivity is considered only on the
    * first argument: `[f, ["Add", x, c], y]` simplifies to `["Add", [f, x, y], c]`.
+   *
+   * Default: false
    */
   additive: boolean;
 
@@ -84,6 +106,8 @@ export type FunctionFeatures = {
    * When the function is multivariate, multipicativity is considered only on the
    * first argument: `[f, ["Multiply", x, y], z]` simplifies to
    * `["Multiply", [f, x, z], [f, y, z]]`
+   *
+   * Default: false
    */
   multiplicative: boolean;
 
@@ -93,16 +117,21 @@ export type FunctionFeatures = {
    * When the function is multivariate, multiplicativity is considered only on the
    * first argument: `[f, ["Multiply", x, y], z]` simplifies to
    * `["Multiply", [f, x, z], [f, y, z]]`
+   *
+   * Default: false
    */
   outtative: boolean;
 
-  /** If true, `[f, [f, x]]` simplifies to `[f, x]`
+  /** If true, `[f, [f, x]]` simplifies to `[f, x]`.
    *
    * Default: false
    */
   idempotent: boolean;
 
-  /** If true, `[f, [f, x]]` simplifies to `x` */
+  /** If true, `[f, [f, x]]` simplifies to `x`.
+   *
+   * Default: false
+   */
   involution: boolean;
 
   /** If true, invoking the function with a given set of arguments will
@@ -135,24 +164,23 @@ export type Definition = {
 
   /**
    * The scope this definition belongs to. This field is usually undefined,
-   * but its value is set by `getDefinition`, `getFunctionDefinition` and
-   * `getSymbolDefinition`.
+   * but its value is set by `getDefinition()`, `getFunctionDefinition()` and
+   * `getSymbolDefinition()`.
    */
   scope?: Scope;
 };
 
 /**
- * Function signature.
+ * Function signature: definition of the inputs and output of a function.
  *
- * A function should have at least one signature.
- *
- * The signature of a function that accepts any input and may return
- * anything is: `{ rest: "Anything", result: "Anything" }`.
- *
- * A function can have multiple signatures. For example:
+ * A function should have at least one signature, but can have several:
  * - `Add(RealNumber, RealNumber): RealNumber`
  * - `Add(ComplexNumber, ComplexNumber): ComplexNumber`
  * - etc..
+ *
+ * The signature of a function that accepts any input and may output
+ * anything is: `{ rest: "Anything", result: "Anything" }`.
+ *
  */
 export type FunctionSignature = {
   /** Input arguments */
@@ -267,7 +295,20 @@ export declare class ComputeEngine {
     categories: DictionaryCategory[] | 'all'
   ): Readonly<Dictionary>[];
 
+  /**
+   * The current scope.
+   *
+   * A scope is a dictionary that contains the definition of local symbols.
+   *
+   * Scopes form a stack, and definitions in more recent
+   * scopes can obscure definitions from older scopes.
+   *
+   */
   scope: Scope;
+
+  /**
+   * The `onError` function is called to signal an error
+   */
   onError: ErrorListener<ErrorCode>;
 
   /**
@@ -287,9 +328,6 @@ export declare class ComputeEngine {
   });
 
   /** Remove the topmost scope from the scope stack.
-   *
-   * A scope is a dictionary that contains the definition of local symbols.
-   *
    */
   popScope(): void;
 
@@ -342,9 +380,9 @@ export declare class ComputeEngine {
    *
    * Two expressions are the same if:
    * - they have the same domain
-   * - if they are numbers, if their value and domain is the identical.
-   * - if they are symbols, if the name of the symbols is identical.
-   * - if they are functions, if the head of the function is identical, and
+   * - if they are numbers, if their value and domain are identical.
+   * - if they are symbols, if their names are identical.
+   * - if they are functions, if the head of the functions are identical, and
    * if all the arguments are identical.
    *
    * ```js
@@ -387,6 +425,8 @@ export declare function format(
  *
  * Unlike `format` this may entail performing calculations and irreversible
  * transformations.
+ *
+ * See also `[ComputeEngine.evaluate()](#(ComputeEngine%3Aclass).(evaluate%3Ainstance))`.
  *
  * @param scope - An optional set of functions and constants to use
  * when evaluating the expression. Evaluating the expression may modify the

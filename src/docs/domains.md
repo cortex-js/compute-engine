@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+
 <script type='module'>
     import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
     renderMathInDocument();
@@ -35,7 +36,7 @@ result in `"ExtendedRealNumber"`, not `"ExtendedComplexNumber"`.
 
 Domains are defined in a hierarchy (a lattice). The upper bound of the domain
 lattice is `"Anything"` and the lower bound is `"Nothing"`. The 'parent' of a
-domain represent a 'is-a'/'subset-of' relationship, for example, a `"List"` 
+domain represent a 'is-a'/'subset-of' relationship, for example, a `"List"`
 "is-a" `"Collection"`.
 
 Domains can be converted to a canonical form using the `'canonical-domain'`
@@ -62,7 +63,8 @@ The implementation of the CortexJS domains is based on
 
 ## Domains
 
-To obtain the domain of an expression, use the `ComputeEngine.domain()` function.
+To obtain the domain of an expression, use the `ComputeEngine.domain()`
+function.
 
 ```js
 const engine = new ComputeEngine();
@@ -92,7 +94,6 @@ for example `["Matrix", 5]` to define the domain of 5x5 matrices.
 A `"Symbol"` is a string used to represent the name of a constant, variable or
 function.
 
-
 ## `"Boolean"` and `"MaybeBoolean"`
 
 A `"Boolean"` is the set of the values `"True"`, `"False"`.
@@ -101,81 +102,46 @@ A `"MaybeBoolean"` is the set of the values `"True"`, `"False"` and `"Maybe"`.
 
 ## `"Function"`
 
-A function is an expression that maps some expressions, its arguments, to
-another expression.
+A function maps some expressions, its arguments, to another expression.
 
 - `["Function", ...`_`arg-domain`_`, `_`co-domain`_`]` is the parametric version
-of the `"Function"` domain. For example, `["Function", "Number", "Boolean"]` is
-the domain of the functions that have a single argument, a number, and return a
-boolean.
+  of the `"Function"` domain. For example, `["Function", "Number", "Boolean"]`
+  is the domain of the functions that have a single argument, a number, and
+  return a boolean.
 
-## `"ContinuousFunction"`
-
-A [continuous function](https://en.wikipedia.org/wiki/Continuous_function) is a
-function that has no abrupt change in value (no discontinuity).
-
-The [Weirestrass function](https://en.wikipedia.org/wiki/Weierstrass_function)
-is continuous, but not differentiable.
-
-## `"TranscendentalFunction"`
-
-A function not expressible as a finite combination of the algebraic operations
-of addition, subtraction, multiplication, division, raising to a power, and
-extracting a root.
-
-Example: "Log", "Sin"...
-
-## `"AlgebraicFunction"`
-
-A function that can be defined as the root of a polynomial equation.
-
-## `"PeriodicFunction"`
-
-A function that repeats its values at regular intervals.
-
-## `"TrigonometricFunction"`
-
-Real functions which relate an angle of a right-angled triangle to ratios of two
-side lengths
-
-## `"HyperbolicFunction"`
-
-## `"MonotonicFunction"`
-
-A function that is either entirely non-increasing, or entirely non-decreasing.
-
-## `"StrictMonotonicFunction"`
-
-## `"DifferentiableFunction"`
-
-A function whose derivative exists at each point in its domain.
-
-## `"InfinitelyDifferentiableFunction"`
-
-## `"RationalFunction"`
-
-A function that can be expressed as the ratio of two polynomials.
-
-## `"PolynomialFunction"`
-
-A function expressed only with the operations of addition, subtraction,
-multiplication, and non-negative integer exponentiation.
-
-## `"QuadraticFunction"`
-
-A function that is of the form `f(x) = ax^2+ bx + c`
-
-## `"LinearFunction"`
-
-A function that is the product of an argument plus a constant, `f(x) = ax+ b`
-
-## `"ConstantFunction"`
-
-A function that always return the same value
-
-## `"MonotonicFunction"`
-
-## `"StrictMonotonicFunction"`
+- `"ContinuousFunction"` - A
+  [continuous function](https://en.wikipedia.org/wiki/Continuous_function) is a
+  function that has no abrupt change in value (no discontinuity). The
+  [Weirestrass function](https://en.wikipedia.org/wiki/Weierstrass_function) is
+  continuous, but not differentiable.
+- `"TranscendentalFunction"` - A function not expressible as a finite
+  combination of the algebraic operations of addition, subtraction,
+  multiplication, division, raising to a power, and extracting a root. Example:
+  "Log", "Sin"...
+- `"AlgebraicFunction"` - A function that can be defined as the root of a
+  polynomial equation.
+- `"PeriodicFunction"` - A function that repeats its values at regular
+  intervals.
+- `"TrigonometricFunction"` - Real functions which relate an angle of a
+  right-angled triangle to ratios of two side lengths
+- `"HyperbolicFunction"`
+- `"MonotonicFunction"` - A function that is either entirely non-increasing, or
+  entirely non-decreasing.
+- `"StrictMonotonicFunction"`
+- `"DifferentiableFunction"` - A function whose derivative exists at each point
+  in its domain.
+- `"InfinitelyDifferentiableFunction"`
+- `"RationalFunction"` - A function that can be expressed as the ratio of two
+  polynomials.
+- `"PolynomialFunction"` - A function expressed only with the operations of
+  addition, subtraction, multiplication, and non-negative integer
+  exponentiation.
+- `"QuadraticFunction"` - A function that is of the form `f(x) = ax^2+ bx + c`
+- `"LinearFunction"` - A function that is the product of an argument plus a
+  constant, `f(x) = ax+ b`
+- `"ConstantFunction"` - A function that always return the same value
+- `"MonotonicFunction"`
+- `"StrictMonotonicFunction"`
 
 ## `"Predicate"` and `"LogicalFunction"`
 

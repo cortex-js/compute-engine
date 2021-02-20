@@ -52,6 +52,11 @@ export const CORE_DICTIONARY: Dictionary = {
     threadable: true,
     signatures: [{ rest: ['string', 'String'], result: 'String' }],
   },
+  Symbol: {
+    domain: 'Function',
+    threadable: true,
+    signatures: [{ args: ['String'], result: 'Symbol' }],
+  },
   // Pattern: {},
 };
 
