@@ -109,7 +109,7 @@ const DOMAIN_PARENT = {
   ZeroMatrix: ['DiagonalMatrix', 'SymmetricMatrix', 'PermutationMatrix'],
   SymmetricMatrix: ['HermitianMatrix', 'SquareMatrix', 'RealTensor'],
   HermitianMatrix: 'ComplexTensor',
-  Quaternion: ['SquareMatrix', 'Complextensor'],
+  Quaternion: ['SquareMatrix', 'ComplexTensor'],
 };
 
 const DOMAIN_WIKIDATA: { [domain: string]: string } = {
