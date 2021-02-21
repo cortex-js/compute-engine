@@ -39,7 +39,7 @@ export class ComputeEngine {
   ): Readonly<Dictionary>[] {
     return getDefaultDictionaries(categories);
   }
-  scope: Scope;
+  context: Scope;
   onError: ErrorListener<ErrorCode>;
 
   constructor(options?: {
@@ -85,12 +85,12 @@ export class ComputeEngine {
   }
 
   popScope(): void {
-    this.scope = this.scope?.parentScope;
+    this.context = this.context?.parentScope;
   }
 
   pushScope(dictionary: Readonly<Dictionary> = {}): void {
-    this.scope = {
-      parentScope: this.scope,
+    this.context = {
+      parentScope: this.context,
       dictionary: compileDictionary(dictionary, this),
     };
   }
@@ -102,7 +102,7 @@ export class ComputeEngine {
   }
 
   getFunctionDefinition(name: string): FunctionDefinition | null {
-    let scope = this.scope;
+    let scope = this.context;
     let def = null;
     while (scope && !def) {
       def = scope.dictionary.get(name);
@@ -113,7 +113,7 @@ export class ComputeEngine {
     return def;
   }
   getSymbolDefinition(name: string): SymbolDefinition | null {
-    let scope = this.scope;
+    let scope = this.context;
     let def = null;
     while (scope && !def) {
       def = scope.dictionary.get(name);
@@ -124,7 +124,7 @@ export class ComputeEngine {
     return def;
   }
   getSetDefinition(name: string): SetDefinition | null {
-    let scope = this.scope;
+    let scope = this.context;
     let def = null;
     while (scope && !def) {
       def = scope.dictionary.get(name);
@@ -137,7 +137,7 @@ export class ComputeEngine {
   getDefinition(
     name: string
   ): SymbolDefinition | FunctionDefinition | SetDefinition | null {
-    let scope = this.scope;
+    let scope = this.context;
     let def = null;
     while (scope && !def) {
       def = scope.dictionary.get(name);

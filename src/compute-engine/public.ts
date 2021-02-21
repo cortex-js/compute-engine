@@ -304,7 +304,7 @@ export declare class ComputeEngine {
    * scopes can obscure definitions from older scopes.
    *
    */
-  scope: Scope;
+  context: Scope;
 
   /**
    * The `onError` function is called to signal an error

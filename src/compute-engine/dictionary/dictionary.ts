@@ -278,14 +278,14 @@ export function compileDictionary(
   // Temporarily put this dictionary in scope
   // (this is required so that compilation and validation can success
   // when symbols in this dictionary refer to *other* symbols int his dictionary)
-  engine.scope = { parentScope: engine.scope, dictionary: result };
+  engine.context = { parentScope: engine.context, dictionary: result };
 
   // @todo: compile
 
   validateDictionary(engine, result);
 
   // Restore the original scope
-  engine.scope = engine.scope.parentScope;
+  engine.context = engine.context.parentScope;
 
   return result;
 }
