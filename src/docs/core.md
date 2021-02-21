@@ -38,8 +38,8 @@ This symbol is used when an optional expression is not present.
 
 `["About", `_`symbol`_`]`
 
-Return information about a symbol such as its domain, its attributes, its 
-value, etc...
+Return information about a symbol such as its domain, its attributes, its value,
+etc...
 
 ### `Domain`
 
@@ -51,26 +51,31 @@ Return the domain of the expression.
 
 `["Evaluate", `_`expression`_`]`
 
-Apply a sequence of definitions to an expression in order to reduce and
-simplify it.
+Apply a sequence of definitions to an expression in order to reduce and simplify
+it.
 
 An evaluation can consist of:
+
 - a computation
+
 ```json
 ["Evaluate", ["Add", 2, 3]]
 // ➔ 5
 ```
+
 - an execution
+
 ```json
 ["Evaluate", ["Length", ["List", 5, 7]]]
 // ➔ 2
 ```
+
 - a simplification
+
 ```json
 ["Evaluate", ["Add", 2, ["Add", "x", 3]]]
 // ➔ ["Add", 5, "x"]
 ```
-
 
 ### `Identity`
 
@@ -140,12 +145,14 @@ expression. The pattern expression can include one or more `Pattern` function
 calls.
 
 - `["Pattern"]` - Any sub-expression at this position will match.
-- `["Pattern", `_`name`_`]` - Match and capture any subexpression at this position as the capture
-group _`name`_.
-- `["Pattern", `_`name`_`, `_`pattern`_`]` - Match and capture any subexpression at this position as the `_`name`_` capture
-group **if** the subexpression matches the _`pattern`_.
-- `["Pattern", `_`name`_`, `_`pattern-1`_`, `_`pattern-2`_`, `_`...`_`]` - Match and capture any subexpression at this position as the `_`name`_` capture
-group **if** the subexpression matches any of the _`pattern-n`_.
+- `["Pattern", `_`name`_`]` - Match and capture any subexpression at this
+  position as the capture group _`name`_.
+- `["Pattern", `_`name`_`, `_`pattern`_`]` - Match and capture any subexpression
+  at this position as the `_`name`_` capture group **if** the subexpression
+  matches the _`pattern`_.
+- `["Pattern", `_`name`_`, `_`pattern-1`_`, `_`pattern-2`_`, `_`...`_`]` - Match
+  and capture any subexpression at this position as the `_`name`_` capture group
+  **if** the subexpression matches any of the _`pattern-n`_.
 
 ```js
 match(["Add", ["Pattern"], ["Pattern"]], ["Add", 3, 5]))
@@ -160,6 +167,39 @@ match(["Add", ["Pattern"], ["Pattern"]], ["Add", 3, 5]))
 | :------------------ | :--------------- |
 | `["Prime", "f"]`    | `f^\prime`       |
 | `["Prime", "f", 2]` | `f^\doubleprime` |
+
+### `Same`
+
+Indicate if two expressions are structurally identical, using a literal symbolic
+identity.
+
+Two expressions are the same if:
+
+- they have the same domain.
+- if they are numbers, if their value and domain are identical.
+- if they are symbols, if their names are identical.
+- if they are functions, if the head of the functions are identical, and if all
+  the arguments are identical.
+
+Two expressions that have a different `wikidata` metadata will not be the same,
+even if they are otherwise identical. Other metadata does not affect the
+comparison.
+
+```js
+// Greek letter vs. ratio of the circumference of a circle to its diameter
+same({ sym: 'Pi', wikidata: 'Q168' }, { sym: 'Pi', wikidata: 'Q167' });
+// ➔ false
+```
+
+Using a canonical format will result in more positive matches.
+
+```js
+same(['Add', 'x', 1], ['Add', 1, 'x']);
+// ➔ false
+
+same(canonical(['Add', 'x', 1]), canonical(['Add', 1, 'x']));
+// ➔ true
+```
 
 ### Superscript/subscript
 
