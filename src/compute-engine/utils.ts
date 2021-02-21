@@ -11,7 +11,7 @@ import {
  * form.
  *
  */
-export const GROUP = 'Group';
+export const PARENTHESES = 'Parentheses';
 export const IDENTITY = 'Identity';
 export const LATEX = 'Latex';
 export const LIST = 'List';
@@ -163,7 +163,7 @@ export function getFunctionName(
   | typeof LATEX
   | typeof SQRT
   | typeof ROOT
-  | typeof GROUP
+  | typeof PARENTHESES
   | typeof LIST
   | typeof MISSING
   | typeof PRIME

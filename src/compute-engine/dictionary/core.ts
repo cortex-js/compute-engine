@@ -54,13 +54,11 @@ export const CORE_DICTIONARY: Dictionary = {
     domain: 'Function',
     signatures: [{ args: ['Expression'], result: 'Expression' }],
   },
-  Group: {
+  Parentheses: {
     domain: 'Function',
     threadable: true,
-    // To support `((a,b),(c,d))`, group is considered non associative
-    // and non-idempotent
     pure: false,
-    signatures: [{ rest: ['expressions', 'Expression'], result: 'Expression' }],
+    signatures: [{ rest: 'Expression', result: 'Expression' }],
   },
   Head: {
     domain: 'Function',

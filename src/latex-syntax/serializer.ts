@@ -15,7 +15,7 @@ import {
   replaceLatex,
   getFunctionHead,
   isFunctionObject,
-  GROUP,
+  PARENTHESES,
 } from '../compute-engine/utils';
 import {
   IndexedLatexDictionary,
@@ -158,7 +158,7 @@ export class Serializer implements Serializer {
       return this.serialize(expr);
     }
     const name = getFunctionName(expr);
-    if (name && name !== GROUP) {
+    if (name && name !== PARENTHESES) {
       const def = this.dictionary.name.get(name);
       if (def && def.precedence !== undefined && def.precedence < prec) {
         return this.wrapString(
@@ -176,7 +176,7 @@ export class Serializer implements Serializer {
   wrapShort(expr: Expression): string {
     const exprStr = this.serialize(expr);
 
-    if (getFunctionName(expr) === GROUP) return exprStr;
+    if (getFunctionName(expr) === PARENTHESES) return exprStr;
 
     if (
       typeof expr !== 'number' &&
@@ -242,7 +242,7 @@ export class Serializer implements Serializer {
       // It's a function we don't know.
       // Maybe it came from `promoteUnknownSymbols`
       // Serialize the arguments as function arguments
-      return this.serialize(head) + this.serialize([GROUP, ...args]);
+      return this.serialize(head) + this.serialize([PARENTHESES, ...args]);
     }
 
     if (def.requiredLatexArg > 0) {
@@ -278,7 +278,7 @@ export class Serializer implements Serializer {
         joinLatex(args.map((x) => this.serialize(x)))
       );
     }
-    return (def.serialize as string) + this.serialize([GROUP, ...args]);
+    return (def.serialize as string) + this.serialize([PARENTHESES, ...args]);
   }
 
   serialize(expr: Expression | null): LatexString {
