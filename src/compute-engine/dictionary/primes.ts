@@ -1,4 +1,4 @@
-export const FIRST_1000_PRIMES = new Set<number>([
+export const SMALL_PRIMES = new Set<number>([
   2,
   3,
   5,
@@ -1001,16 +1001,26 @@ export const FIRST_1000_PRIMES = new Set<number>([
   7919,
 ]);
 
-export const THOUSAND_TH_PRIME = 7919;
+export const LARGEST_SMALL_PRIME = 7919;
+export const LARGE_PRIME = 1125899906842597; // Largest prime < 2^50
 
-export function isPrime(n: number): boolean {
-  if (!Number.isInteger(n) || n <= 1 || isNaN(n) || !isFinite(n)) {
-    return false;
+export function isPrime(n: number): "True" | "False" | "Maybe" {
+  if (!Number.isInteger(n) || !isFinite(n)|| isNaN(n)|| n <= 1  ) {
+    return "False";
   }
 
-  if (n <= THOUSAND_TH_PRIME) return FIRST_1000_PRIMES.has(n);
+  // Is it a known small prime?
+  if (n <= LARGEST_SMALL_PRIME) return SMALL_PRIMES.has(n) ? "True" : "False";
 
-  return n === leastFactor(n);
+  // Is it a factor of a small known prime?
+  for (const smallPrime of SMALL_PRIMES) {
+    if (n % smallPrime === 0) return "False"
+  }
+
+  if (n >= LARGE_PRIME) {
+    return probablyPrime(n, 30) ? "Maybe": "False";
+  }
+    return (n === leastFactor(n)) ? "True": "False";
 }
 
 function leastFactor(n: number): number {
@@ -1032,4 +1042,42 @@ function leastFactor(n: number): number {
     i += 30;
   }
   return n;
+}
+
+
+/**
+ *  Miller-Rabin primality test
+ */
+function probablyPrime(n: number, k:number):boolean {
+	// if (n === 2 || n === 3)
+	// 	return true;
+	// if (n % 2 === 0 || n < 2)
+	// 	return false;
+ 
+	// Write (n - 1) as 2^s * d
+	var s = 0, d = n - 1;
+	while (d % 2 === 0) {
+		d /= 2;
+		++s;
+	}
+ 
+	WitnessLoop: do {
+		// A base between 2 and n - 2
+		var x = Math.pow(2 + Math.floor(Math.random() * (n - 3)), d) % n;
+ 
+		if (x === 1 || x === n - 1)
+			continue;
+ 
+		for (let i = s - 1; i--;) {
+			x = x * x % n;
+			if (x === 1)
+				return false;
+			if (x === n - 1)
+				continue WitnessLoop;
+		}
+ 
+		return false;
+	} while (--k);
+ 
+	return true;
 }

@@ -23,40 +23,40 @@ expect.addSnapshotSerializer({
   },
 });
 
-describe('SEQUENCES AND GROUPS', () => {
+describe('SEQUENCES AND PARENTHESES', () => {
   test('Valid groups', () => {
     expect(expression('(a+b)')).toMatchInlineSnapshot(
-      `['Group', ['Add', 'a', 'b']]`
+      `['Parentheses', ['Add', 'a', 'b']]`
     );
     expect(expression('-(a+b)')).toMatchInlineSnapshot(
       `['Multiply', -1, ['Add', 'a', 'b']]`
     );
     expect(expression('(a+(c+d))')).toMatchInlineSnapshot(
-      `['Group', ['Add', 'a', 'c', 'd']]`
+      `['Parentheses', ['Add', 'a', 'c', 'd']]`
     );
     expect(expression('(a\\times(c\\times d))')).toMatchInlineSnapshot(
-      `['Group', ['Multiply', 'a', 'c', 'd']]`
+      `['Parentheses', ['Multiply', 'a', 'c', 'd']]`
     );
     expect(expression('(a\\times(c+d))')).toMatchInlineSnapshot(
-      `['Group', ['Multiply', 'a', ['Add', 'c', 'd']]]`
+      `['Parentheses', ['Multiply', 'a', ['Add', 'c', 'd']]]`
     );
     // Sequence with empty element
     expect(expression('(a,,b)')).toMatchInlineSnapshot(
-      `['Group', 'a', 'Nothing', 'b']`
+      `['Parentheses', 'a', 'Nothing', 'b']`
     );
   });
   test('Groups', () => {
     expect(expression('(a, b, c)')).toMatchInlineSnapshot(
-      `['Group', 'a', 'b', 'c']`
+      `['Parentheses', 'a', 'b', 'c']`
     );
     expect(expression('(a, b; c, d, ;; n ,, m)')).toMatchInlineSnapshot(
-      `['Group', ['Sequence2', ['Sequence', 'a', 'b'], ['Sequence', 'c', 'd', 'Nothing'], 'Nothing', ['Sequence', 'n', 'Nothing', 'm']]]`
+      `['Parentheses', ['Sequence2', ['Sequence', 'a', 'b'], ['Sequence', 'c', 'd', 'Nothing'], 'Nothing', ['Sequence', 'n', 'Nothing', 'm']]]`
     );
     expect(expression('(a, (b, c))')).toMatchInlineSnapshot(
-      `['Group', 'a', ['Group', 'b', 'c']]`
+      `['Parentheses', 'a', ['Parentheses', 'b', 'c']]`
     );
     expect(expression('(a, (b; c))')).toMatchInlineSnapshot(
-      `['Group', 'a', ['Group', ['Sequence2', 'b', 'c']]]`
+      `['Parentheses', 'a', ['Parentheses', ['Sequence2', 'b', 'c']]]`
     );
   });
   test('Sequences', () => {
@@ -85,7 +85,7 @@ describe('SEQUENCES AND GROUPS', () => {
       `['Add', ['Abs', 'a'], 1, 2]`
     );
     expect(expression('|(1+|a|+2)|')).toMatchInlineSnapshot(
-      `[['Multiply', ['Abs', ['Group']], ['Abs', 2], 'a'], 'unbalanced-symbols ()', 'unbalanced-symbols ||', 'unbalanced-symbols ||']`
+      `[['Multiply', ['Abs', ['Parentheses']], ['Abs', 2], 'a'], 'unbalanced-symbols ()', 'unbalanced-symbols ||', 'unbalanced-symbols ||']`
     ); // @todo
     expect(expression('|1+|a|+2|')).toMatchInlineSnapshot(
       `[['Multiply', ['Abs', 1], ['Abs', 2], 'a'], 'unbalanced-symbols ||']`
@@ -97,7 +97,7 @@ describe('SEQUENCES AND GROUPS', () => {
   });
   test('Invalid groups', () => {
     expect(expression('(')).toMatchInlineSnapshot(
-      `[['Group'], 'unbalanced-symbols ()']`
+      `[['Parentheses'], 'unbalanced-symbols ()']`
     );
     expect(expression(')')).toMatchInlineSnapshot(`['', 'syntax-error']`);
     expect(expressionError('-(')).toMatchInlineSnapshot(

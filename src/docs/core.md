@@ -34,13 +34,47 @@ This symbol is used when an optional expression is not present.
 
 ## Functions
 
+### `About`
+
+`["About", `_`symbol`_`]`
+
+Return information about a symbol such as its domain, its attributes, its 
+value, etc...
+
+### `Domain`
+
+`["Domain", `_`expression`_`]`
+
+Return the domain of the expression.
+
 ### `Evaluate`
 
-### `Group`
+`["Evaluate", `_`expression`_`]`
+
+Apply a sequence of definitions to an expression in order to reduce and
+simplify it.
+
+An evaluation can consist of:
+- a computation
+```json
+["Evaluate", ["Add", 2, 3]]
+// ➔ 5
+```
+- an execution
+```json
+["Evaluate", ["Length", ["List", 5, 7]]]
+// ➔ 2
+```
+- a simplification
+```json
+["Evaluate", ["Add", 2, ["Add", "x", 3]]]
+// ➔ ["Add", 5, "x"]
+```
+
 
 ### `Identity`
 
-The identity function, i.e. its value is its argument.
+Always return its argument.
 
 | MathJSON            | Latex                  |
 | :------------------ | :--------------------- |
@@ -49,7 +83,7 @@ The identity function, i.e. its value is its argument.
 
 ### `InverseFunction`
 
-The inverse function.
+Return the inverse function of its argument.
 
 | MathJSON                     | Latex       |
 | :--------------------------- | :---------- |
@@ -57,7 +91,7 @@ The inverse function.
 
 ### `Lambda`
 
-- `["Lambda", `_`variables`_`, `_`expression`_`]`
+`["Lambda", `_`variables`_`, `_`expression`_`]`
 
 Create a [Lambda-function](https://en.wikipedia.org/wiki/Anonymous_function),
 also called anonymous function.
@@ -77,7 +111,7 @@ To apply a Lambda-function to some arguments, use:
 
 ### `Latex`
 
-- `["Latex", `_`token-1`_`, `_`token-2`_`, ...`_`token-n`_`]`
+`["Latex", `_`token-1`_`, `_`token-2`_`, ...`_`token-n`_`]`
 
 - _token-n_: one or more expressions that are serialized and concatenated as  
   Latex tokens. A Latex token is one of:
@@ -99,27 +133,18 @@ See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
 
 ### `Pattern`
 
+Work in progress{.notice--info}
+
 The `Pattern` function is used with the `match()` function to pattern-match an
-expresion. The pattern expression can include one or more `Pattern` function
+expression. The pattern expression can include one or more `Pattern` function
 calls.
 
-- `["Pattern"]`
-
-Indicate that any sub-expression at this position will match.
-
-- `["Pattern", `_`name`_`]`
-
-Match and capture any subexpression at this position as the _`name`_ capture
-group.
-
-- `["Pattern", `_`name`_`, `_`pattern`_`]`
-
-Match and capture any subexpression at this position as the `_`name`_` capture
+- `["Pattern"]` - Any sub-expression at this position will match.
+- `["Pattern", `_`name`_`]` - Match and capture any subexpression at this position as the capture
+group _`name`_.
+- `["Pattern", `_`name`_`, `_`pattern`_`]` - Match and capture any subexpression at this position as the `_`name`_` capture
 group **if** the subexpression matches the _`pattern`_.
-
-- `["Pattern", `_`name`_`, `_`pattern-1`_`, `_`pattern-2`_`, `_`...`_`]`
-
-Match and capture any subexpression at this position as the `_`name`_` capture
+- `["Pattern", `_`name`_`, `_`pattern-1`_`, `_`pattern-2`_`, `_`...`_`]` - Match and capture any subexpression at this position as the `_`name`_` capture
 group **if** the subexpression matches any of the _`pattern-n`_.
 
 ```js
@@ -138,14 +163,14 @@ match(["Add", ["Pattern"], ["Pattern"]], ["Add", 3, 5]))
 
 ### Superscript/subscript
 
-- `Subminus` $$x_-$$
-- `Subplus` $$x_+$$
+- `Subminus` - $$x_-$$
+- `Subplus` - $$x_+$$
 - `Subscript`
 - `Substar` - $$x_*$$
 - `Superdagger` - $$x^\dagger$$
 - `Superminus` - $$x^-$$
 - `Superplus` - $$x^+$$
-- `Superstar` - $$x^*$$ When the argument is a complex number, indicate the
+- `Superstar` - $$x^*$$. When the argument is a complex number, indicate the
   conjugate.
 
 ### `String`

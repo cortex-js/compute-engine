@@ -6,7 +6,7 @@ import {
   POWER,
   DIVIDE,
   NEGATE,
-  GROUP,
+  PARENTHESES,
   PI,
 } from '../src/compute-engine/utils';
 import { expression, printExpression, engine } from './utils';
@@ -74,14 +74,14 @@ describe('FORMS', () => {
       '(1+(2+(3+4)))(((5+6)+7)((8+(9+10)))(11+(12+13)+14))',
       [
         MULTIPLY,
-        [GROUP, [ADD, 1, [GROUP, [ADD, 2, [GROUP, [ADD, 3, 4]]]]]],
+        [PARENTHESES, [ADD, 1, [PARENTHESES, [ADD, 2, [PARENTHESES, [ADD, 3, 4]]]]]],
         [
-          GROUP,
+          PARENTHESES,
           [
             MULTIPLY,
-            [GROUP, [ADD, [GROUP, [ADD, 5, 6]], 7]],
-            [GROUP, [GROUP, [ADD, 8, [GROUP, [ADD, 9, 10]]]]],
-            [GROUP, [ADD, 11, [GROUP, [ADD, 12, 13]], 14]],
+            [PARENTHESES, [ADD, [PARENTHESES, [ADD, 5, 6]], 7]],
+            [PARENTHESES, [PARENTHESES, [ADD, 8, [PARENTHESES, [ADD, 9, 10]]]]],
+            [PARENTHESES, [ADD, 11, [PARENTHESES, [ADD, 12, 13]], 14]],
           ],
         ],
       ],
@@ -116,7 +116,7 @@ describe('FORMS', () => {
     ],
     [
       '2\\times(5-5)\\times5\\times4',
-      [MULTIPLY, 2, [GROUP, [SUBTRACT, 5, 5]], 5, 4],
+      [MULTIPLY, 2, [PARENTHESES, [SUBTRACT, 5, 5]], 5, 4],
       [MULTIPLY, 2, 4, 5, [ADD, -5, 5]],
     ],
 

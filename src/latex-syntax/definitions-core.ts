@@ -8,7 +8,7 @@ import {
   getArgs,
   getFunctionHead,
   LATEX,
-  GROUP,
+  PARENTHESES,
   LIST,
   MISSING,
   PRIME,
@@ -108,7 +108,7 @@ function serializeLatex(
 export const DEFINITIONS_CORE: LatexDictionary = [
   { name: LATEX, serialize: serializeLatex },
   {
-    name: GROUP,
+    name: PARENTHESES,
     trigger: { matchfix: '(' },
     parse: (
       lhs: Expression,
@@ -162,12 +162,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const seq = scanner.matchBalancedExpression('(', ')', scanner.onError);
 
       // If it's a simple sequence, 'upgrade it' to a group
-      if (!seq) return [lhs, [GROUP]];
+      if (!seq) return [lhs, [PARENTHESES]];
 
       if (getFunctionName(seq) === SEQUENCE) {
-        return [lhs, [GROUP, ...getArgs(seq)]];
+        return [lhs, [PARENTHESES, ...getArgs(seq)]];
       }
-      return [lhs, [GROUP, seq]];
+      return [lhs, [PARENTHESES, seq]];
     },
     serialize: (serializer, expr) =>
       serializer.wrapString(
@@ -259,7 +259,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // Unlike the matchfix version of List,
     // when the comma operator is used, the lhs and rhs are flattened,
     // i.e. `1,2,3` -> `["Sequence", 1, 2, 3],
-    // but `1, (2, 3)` -> ["Sequence", 1, ["Group", 2, 3]]`
+    // but `1, (2, 3)` -> ["Sequence", 1, ["Parentheses", 2, 3]]`
     parse: parseSequence(SEQUENCE, 20, ','),
     serialize: serializeSequence(', '),
     precedence: 20,

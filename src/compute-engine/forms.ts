@@ -12,7 +12,7 @@ import {
   getArgCount,
   getFunctionHead,
   isAtomic,
-  GROUP,
+  PARENTHESES,
   POWER,
   DIVIDE,
   MULTIPLY,
@@ -34,7 +34,7 @@ import { canonicalOrder } from './order';
 function ungroup(expr: Expression): Expression {
   const head = getFunctionHead(expr);
   if (!head) return expr;
-  if (head === GROUP && getArgCount(expr) === 1) {
+  if (head === PARENTHESES && getArgCount(expr) === 1) {
     return ungroup(getArg(expr, 1));
   }
   return mapArgs(expr, ungroup);
@@ -89,7 +89,7 @@ export function applyNegate(expr: Expression): Expression {
         arg = [NEGATE, arg];
       }
       return [MULTIPLY, arg, ...getArgs(expr).slice(1)];
-    } else if (name === GROUP && argCount === 1) {
+    } else if (name === PARENTHESES && argCount === 1) {
       return applyNegate(getArg(getArg(expr, 1), 1));
     }
 

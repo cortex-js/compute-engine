@@ -12,7 +12,7 @@ import {
   getFunctionName,
   getArgs,
   isNumberObject,
-  GROUP,
+  PARENTHESES,
   DIVIDE,
   LATEX,
 } from '../compute-engine/utils';
@@ -412,13 +412,13 @@ export class Scanner implements Scanner {
 
     const group = this.matchMatchfixOperator();
 
-    if (kind === 'group' && getFunctionName(group) === GROUP) {
+    if (kind === 'group' && getFunctionName(group) === PARENTHESES) {
       // We got a group i.e. `f(a, b, c)`
       result = getArgs(group);
     } else if (kind === 'implicit') {
       // Does this function allow arguments with optional parentheses?
       // (i.e. trig functions, as in `\cos x`.
-      if (getFunctionName(group) === GROUP) {
+      if (getFunctionName(group) === PARENTHESES) {
         result = getArgs(group);
       } else if (group !== null) {
         // There was a matchfix, the "group" is the argument, i.e.
@@ -510,7 +510,7 @@ export class Scanner implements Scanner {
         const group = this.matchMatchfixOperator();
         // If no arguments, return it as a symbol
         if (group === null) return name;
-        if (getFunctionName(group) !== GROUP) return null;
+        if (getFunctionName(group) !== PARENTHESES) return null;
         return [name, ...getArgs(group)];
       }
       if (this.options.promoteUnknownSymbols?.test(this.peek)) {
@@ -1097,7 +1097,7 @@ export class Scanner implements Scanner {
   /**
    *  Parse an expression:
    *
-   * <expresion> ::=
+   * <expression> ::=
    *  | <primary>
    *  | <prefix-op> <primary>
    *  | <primary> <infix-op> <expression>

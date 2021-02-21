@@ -490,7 +490,7 @@ export interface Scanner {
   /**
    *  Parse an expression:
    *
-   * <expresion> ::=
+   * <expression> ::=
    *  | <prefix-op> <expression>
    *  | <primary>
    *  | <primary> <infix-op> <expression>

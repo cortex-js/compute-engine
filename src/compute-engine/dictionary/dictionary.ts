@@ -23,7 +23,7 @@ import { CORE_DICTIONARY } from './core';
 import { LOGIC_DICTIONARY } from './logic';
 import { SETS_DICTIONARY } from './sets';
 import { TRIGONOMETRY_DICTIONARY } from './trigonometry';
-import { FIRST_1000_PRIMES, THOUSAND_TH_PRIME } from './primes';
+import { SMALL_PRIMES, LARGEST_SMALL_PRIME } from './primes';
 import {
   isSymbolDefinition,
   isFunctionDefinition,
@@ -529,9 +529,9 @@ export function inferNumericDomain(value: Expression): string {
     // The value is a rational number
     if (denom !== 1) return 'RationalNumber';
 
-    if (FIRST_1000_PRIMES.has(numer)) return 'PrimeNumber';
+    if (SMALL_PRIMES.has(numer)) return 'PrimeNumber';
 
-    if (numer >= 1 && numer < THOUSAND_TH_PRIME) return 'CompositeNumber';
+    if (numer >= 1 && numer < LARGEST_SMALL_PRIME) return 'CompositeNumber';
 
     if (numer > 0) return 'NaturalNumber';
 
@@ -548,7 +548,7 @@ export function inferNumericDomain(value: Expression): string {
         getArg(getArg(value, 2), 2) === 2
       ) {
         // It's a square root...
-        if (FIRST_1000_PRIMES.has(getNumberValue(getArg(value, 1)))) {
+        if (SMALL_PRIMES.has(getNumberValue(getArg(value, 1)))) {
           // Square root of a prime is irrational
           return 'IrrationalNumber';
         }

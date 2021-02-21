@@ -116,7 +116,7 @@ describe('SUPSUB', () => {
       `['Power', ['Add', 'x', 1], ['Add', 'n', -1]]`
     );
     expect(expression('(x+1)_{n-1}')).toMatchInlineSnapshot(
-      `['Subscript', ['Group', ['Add', 'x', 1]], ['Add', 'n', -1]]`
+      `['Subscript', ['Parentheses', ['Add', 'x', 1]], ['Add', 'n', -1]]`
     );
     expect(expression('(x+1)^n_0')).toMatchInlineSnapshot(
       `['Subscript', ['Power', ['Add', 'x', 1], 'n'], 0]`
