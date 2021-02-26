@@ -5,17 +5,17 @@ import {
   ParseLatexOptions,
   LatexDictionaryEntry,
   LatexToken,
-  LatexNumberOptions,
+  NumberFormattingOptions,
 } from './public';
 import {
   isFunctionObject,
   getFunctionName,
-  getArgs,
+  getTail,
   isNumberObject,
   PARENTHESES,
   DIVIDE,
   LATEX,
-} from '../compute-engine/utils';
+} from '../common/utils';
 import { tokensToString } from './core/tokenizer';
 import { IndexedLatexDictionary } from './definitions';
 import { DEFAULT_PARSE_LATEX_OPTIONS } from './utils';
@@ -29,13 +29,14 @@ export class Scanner implements Scanner {
 
   readonly dictionary: IndexedLatexDictionary;
 
-  readonly options: Required<LatexNumberOptions> & Required<ParseLatexOptions>;
+  readonly options: Required<NumberFormattingOptions> &
+    Required<ParseLatexOptions>;
 
   private invisibleOperatorPrecedence: number;
 
   constructor(
     tokens: LatexToken[],
-    options: Required<LatexNumberOptions> & Required<ParseLatexOptions>,
+    options: Required<NumberFormattingOptions> & Required<ParseLatexOptions>,
     dictionary: IndexedLatexDictionary,
     onError: ErrorListener<ErrorCode>
   ) {
@@ -414,12 +415,12 @@ export class Scanner implements Scanner {
 
     if (kind === 'group' && getFunctionName(group) === PARENTHESES) {
       // We got a group i.e. `f(a, b, c)`
-      result = getArgs(group);
+      result = getTail(group);
     } else if (kind === 'implicit') {
       // Does this function allow arguments with optional parentheses?
       // (i.e. trig functions, as in `\cos x`.
       if (getFunctionName(group) === PARENTHESES) {
-        result = getArgs(group);
+        result = getTail(group);
       } else if (group !== null) {
         // There was a matchfix, the "group" is the argument, i.e.
         // `\sin [a, b, c]`
@@ -511,7 +512,7 @@ export class Scanner implements Scanner {
         // If no arguments, return it as a symbol
         if (group === null) return name;
         if (getFunctionName(group) !== PARENTHESES) return null;
-        return [name, ...getArgs(group)];
+        return [name, ...getTail(group)];
       }
       if (this.options.promoteUnknownSymbols?.test(this.peek)) {
         // this.onError({ code: 'unknown-symbol', arg: this.peek });
@@ -858,10 +859,10 @@ export class Scanner implements Scanner {
           if (getFunctionName(rhs) === op) {
             // +(+(a, b), +(c, d)) -> +(a, b, c, d)
             if (Array.isArray(lhs)) {
-              return [null, lhs.concat(getArgs(rhs))];
+              return [null, lhs.concat(getTail(rhs))];
             }
             if (isFunctionObject(lhs)) {
-              return [null, lhs.fn.concat(getArgs(rhs))];
+              return [null, lhs.fn.concat(getTail(rhs))];
             }
           } else {
             if (Array.isArray(lhs)) {
@@ -957,13 +958,13 @@ export class Scanner implements Scanner {
     // No invisible operator, use 'Latex'
     let fn: Expression = [LATEX];
     if (getFunctionName(lhs) === LATEX) {
-      fn = fn.concat(getArgs(lhs));
+      fn = fn.concat(getTail(lhs));
     } else {
       fn.push(lhs);
     }
     if (rhs !== null) {
       if (getFunctionName(rhs) === LATEX) {
-        fn = fn.concat(getArgs(rhs));
+        fn = fn.concat(getTail(rhs));
       } else {
         fn.push(rhs);
       }

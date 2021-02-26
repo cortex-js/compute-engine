@@ -157,7 +157,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary = {
       { args: ['Number', 'Number'], result: 'Number' },
     ],
   },
-  // mod (modulo)
+  // mod (modulo). See https://numerics.diploid.ca/floating-point-part-4.html,
+  // regardin 'remainder' and 'truncatingRemainder'
   // lcm
   // gcd
   // root

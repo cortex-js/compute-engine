@@ -1,34 +1,6 @@
-import {
-  ADD,
-  DIVIDE,
-  SUBTRACT,
-  MULTIPLY,
-  POWER,
-} from '../src/compute-engine/utils';
-import { expression, expressionError, latex, printExpression } from './utils';
+import { ADD, DIVIDE, SUBTRACT, MULTIPLY, POWER } from '../src/common/utils';
+import { expression, expressionError, latex } from './utils';
 
-beforeEach(() => {
-  jest.spyOn(console, 'assert').mockImplementation((assertion) => {
-    if (!assertion) debugger;
-  });
-  jest.spyOn(console, 'log').mockImplementation(() => {
-    debugger;
-  });
-  jest.spyOn(console, 'warn').mockImplementation(() => {
-    debugger;
-  });
-  jest.spyOn(console, 'info').mockImplementation(() => {
-    debugger;
-  });
-});
-expect.addSnapshotSerializer({
-  // test: (val): boolean => Array.isArray(val) || typeof val === 'object',
-  test: (_val): boolean => true,
-
-  serialize: (val, _config, _indentation, _depth, _refs, _printer): string => {
-    return printExpression(val);
-  },
-});
 describe('ADD/SUBTRACT', () => {
   test('Add Valid forms', () => {
     expect(expression('1+2')).toMatchInlineSnapshot(`['Add', 1, 2]`);
@@ -58,7 +30,7 @@ describe('ADD/SUBTRACT', () => {
 });
 
 describe('MULTIPLY', () => {
-  test('Multiply Invalid forms', () => {
+  test('Multiply Valid forms', () => {
     expect(latex([MULTIPLY, 2, 3])).toMatchInlineSnapshot(`'2\\times3'`);
     expect(
       latex([MULTIPLY, [DIVIDE, 2, 'x'], [DIVIDE, 'x', 3]])
@@ -68,14 +40,19 @@ describe('MULTIPLY', () => {
     ).toMatchInlineSnapshot(`'\\frac{\\frac{2}{x}}{x^{2}}'`);
   });
   test('Multiply Invalid forms', () => {
-    expect(latex([MULTIPLY])).toMatchInlineSnapshot(`''`);
+    expect(latex([MULTIPLY])).toMatchInlineSnapshot(`'syntax-error'`);
     expect(latex([MULTIPLY, null])).toMatchInlineSnapshot(`''`);
-    expect(latex([MULTIPLY, undefined])).toMatchInlineSnapshot(
-      `'syntax-error'`
-    );
+    expect(latex([MULTIPLY, undefined])).toMatchInlineSnapshot(`
+      'syntax-error
+      syntax-error'
+    `);
     expect(latex([MULTIPLY, 1])).toMatchInlineSnapshot(`'1'`);
-    expect(latex([MULTIPLY, NaN])).toMatchInlineSnapshot(`'NaN'`);
-    expect(latex([MULTIPLY, Infinity])).toMatchInlineSnapshot(`'Infinity'`);
+    expect(latex([MULTIPLY, 'NaN'])).toMatchInlineSnapshot(
+      `'\\operatorname{NaN}'`
+    );
+    expect(latex([MULTIPLY, 'Infinity'])).toMatchInlineSnapshot(
+      `'\\operatorname{Infinity}'`
+    );
   });
 });
 
@@ -90,9 +67,16 @@ describe('DIVIDE', () => {
         `);
     expect(latex([DIVIDE, 1])).toMatchInlineSnapshot(`'1'`);
     expect(latex([DIVIDE, null])).toMatchInlineSnapshot(`''`);
-    expect(latex([DIVIDE, undefined])).toMatchInlineSnapshot(`'syntax-error'`);
-    expect(latex([DIVIDE, NaN])).toMatchInlineSnapshot(`'NaN'`);
-    expect(latex([DIVIDE, Infinity])).toMatchInlineSnapshot(`'Infinity'`);
+    expect(latex([DIVIDE, undefined])).toMatchInlineSnapshot(`
+      'syntax-error
+      syntax-error'
+    `);
+    expect(latex([DIVIDE, 'NaN'])).toMatchInlineSnapshot(
+      `'\\operatorname{NaN}'`
+    );
+    expect(latex([DIVIDE, 'Infinity'])).toMatchInlineSnapshot(
+      `'\\operatorname{Infinity}'`
+    );
   });
 });
 

@@ -16,10 +16,10 @@ sidebar:
 
 ## Constants
 
-- `ExponentialE` = $$2.7182818284590452354\ldots$$,
+- `ExponentialE` = $$2.7182818284590452354\ldots$$
   [Euler's number](https://www.wikidata.org/wiki/Q82435).
 - `ImaginaryI` - The imaginary unit, solution of $$x^2+1=0$$.
-- `MachineEpsilon` $$\approx 2^{−52}$$, the difference between 1 and the next
+- `MachineEpsilon` $$\approx 2^{−52}$$. The difference between 1 and the next
   larger floating point number. See
   [Wikipedia](https://en.wikipedia.org/wiki/Machine_epsilon)
 - `Pi` = $$\pi = 3.14159265358979323\ldots$$
@@ -30,9 +30,9 @@ sidebar:
 - `Negate` - The [additive inverse](https://www.wikidata.org/wiki/Q715358).
 - `Multiply` - [Multiplication](https://www.wikidata.org/wiki/Q40276)
 - `Power` - [Exponentiation](https://www.wikidata.org/wiki/Q33456)
-- `Root` = $$\sqrt[n]{x}=x^{\frac1n}$$ the
+- `Root` = $$\sqrt[n]{x}=x^{\frac1n}$$. The
   [n-th root](https://www.wikidata.org/wiki/Q601053)
-- `Sqrt` = $$\sqrt{x}=x^{\frac12}$$ the
+- `Sqrt` = $$\sqrt{x}=x^{\frac12}$$. The
   [square root](https://www.wikidata.org/wiki/Q134237).
 - `Subtract` - [Subtraction](https://www.wikidata.org/wiki/Q32043)
 
@@ -41,11 +41,12 @@ sidebar:
 - `Exp` = $$\exponentialE^{x}$$.
   [Exponential function](https://www.wikidata.org/wiki/Q168698)
 - `Log` = $$\ln(x)$$.
-  [Logarithm function](https://www.wikidata.org/wiki/Q11197), inverse of `Exp`.
+  [Logarithm function](https://www.wikidata.org/wiki/Q11197). The inverse of
+  `Exp`.
 - `Log2` = $$\ln_2(x)$$
-  [Binary logarithm function](https://www.wikidata.org/wiki/Q581168), base-2
+  [Binary logarithm function](https://www.wikidata.org/wiki/Q581168).The base-2
   logarithm
-- `Log10` = $$\ln_10(x)$$ [Common logarithm](Q966582), base-10 logarithm.
+- `Log10` = $$\ln_{10}(x)$$ [Common logarithm](Q966582). The base-10 logarithm.
 - `LogOnePlus`
 
 ---
@@ -60,10 +61,10 @@ sidebar:
 ---
 
 - `Erf` =
-  $$\operatorname {Erf} z={\frac {2}{\sqrt {\pi }}}\int _{0}^{z}e^{-t^{2}}\,dt.$$.
-  The [Error function](https://en.wikipedia.org/wiki/Error_function) is the
-  integral of the Gaussion distribution.
-- `Erfc` = $$\operatorname {Erfc} z=1-\operatorname {Erf} z$$ Complementary
+  $$\operatorname{Erf} z={\frac{2}{\sqrt {\pi }}}\int_{0}^{z}e^{-t^2}\,dt$$. The
+  [Error function](https://en.wikipedia.org/wiki/Error_function) is the integral
+  of the Gaussion distribution.
+- `Erfc` = $$\operatorname {Erfc} z=1-\operatorname {Erf} z$$. The Complementary
   Error Function.
 - `Factorial` = $$n!$$, the products of all positive integers less than or equal
   to $$n$$.

@@ -1,5 +1,6 @@
-import type { Expression, Form } from '../src/public';
+import type { Expression } from '../src/public';
 import { LatexSyntax, ComputeEngine } from '../src/math-json';
+import { Form } from '../src/compute-engine/public';
 
 let errors: string[] = [];
 
@@ -69,3 +70,26 @@ export function printExpression(expr: Expression): string {
   }
   return expr.toString();
 }
+
+// beforeEach(() => {
+//   jest.spyOn(console, 'assert').mockImplementation((assertion) => {
+//     if (!assertion) debugger;
+//   });
+//   jest.spyOn(console, 'log').mockImplementation(() => {
+//     debugger;
+//   });
+//   jest.spyOn(console, 'warn').mockImplementation(() => {
+//     debugger;
+//   });
+//   jest.spyOn(console, 'info').mockImplementation(() => {
+//     debugger;
+//   });
+// });
+expect.addSnapshotSerializer({
+  // test: (val): boolean => Array.isArray(val) || typeof val === 'object',
+  test: (_val): boolean => true,
+
+  serialize: (val, _config, _indentation, _depth, _refs, _printer): string => {
+    return printExpression(val);
+  },
+});

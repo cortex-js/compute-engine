@@ -6,9 +6,9 @@ import {
   isSymbolObject,
   getNumberValue,
   getFunctionName,
-  getArgs,
+  getTail,
   getArg,
-  mapArgs,
+  applyArgs,
   getArgCount,
   getFunctionHead,
   isAtomic,
@@ -28,7 +28,7 @@ import {
   NOTHING,
   SEQUENCE,
   SEQUENCE2,
-} from './utils';
+} from '../common/utils';
 import { canonicalOrder } from './order';
 
 function ungroup(expr: Expression): Expression {
@@ -37,7 +37,7 @@ function ungroup(expr: Expression): Expression {
   if (head === PARENTHESES && getArgCount(expr) === 1) {
     return ungroup(getArg(expr, 1));
   }
-  return mapArgs(expr, ungroup);
+  return applyArgs(expr, ungroup);
 }
 
 /**
@@ -88,7 +88,7 @@ export function applyNegate(expr: Expression): Expression {
       } else {
         arg = [NEGATE, arg];
       }
-      return [MULTIPLY, arg, ...getArgs(expr).slice(1)];
+      return [MULTIPLY, arg, ...getTail(expr).slice(1)];
     } else if (name === PARENTHESES && argCount === 1) {
       return applyNegate(getArg(getArg(expr, 1), 1));
     }
@@ -102,17 +102,17 @@ function flatten(expr: Expression | null, flatName: string): Expression | null {
   const head = getFunctionHead(expr);
   if (!head) return expr;
 
-  expr = mapArgs(expr, (x) => flatten(x, flatName));
+  expr = applyArgs(expr, (x) => flatten(x, flatName));
 
   if (head !== flatName) return expr;
 
-  const args = getArgs(expr);
+  const args = getTail(expr);
   let newArgs: Expression[] = [];
   for (let i = 0; i < args.length; i++) {
     if (getFunctionName(args[i]) === flatName) {
       // [f, a, [f, b, c]] -> [f, a, b, c]
       // or [f, f[a]] -> f[a]
-      newArgs = newArgs.concat(getArgs(args[i]));
+      newArgs = newArgs.concat(getTail(args[i]));
     } else {
       newArgs.push(args[i]);
     }
@@ -127,13 +127,13 @@ function flattenInvolution(
   const name = getFunctionName(expr);
   const def = engine.getFunctionDefinition(name);
   if (def?.involution) {
-    const args = getArgs(expr);
+    const args = getTail(expr);
     if (args.length === 1 && getFunctionName(args[0]) === name) {
       return flatten(args[0], name);
     }
   }
 
-  return mapArgs(expr, (x) => flattenInvolution(x, engine));
+  return applyArgs(expr, (x) => flattenInvolution(x, engine));
 }
 
 function flattenIdempotent(
@@ -144,7 +144,7 @@ function flattenIdempotent(
   const def = engine.getFunctionDefinition(name);
   if (def?.idempotent) return flatten(expr, name);
 
-  return mapArgs(expr, (x) => flattenIdempotent(x, engine));
+  return applyArgs(expr, (x) => flattenIdempotent(x, engine));
 }
 
 function flattenAssociative(
@@ -155,7 +155,7 @@ function flattenAssociative(
   const def = engine.getFunctionDefinition(name);
   if (def?.associative) return flatten(expr, name);
 
-  return mapArgs(expr, (x) => flattenAssociative(x, engine));
+  return applyArgs(expr, (x) => flattenAssociative(x, engine));
 }
 
 function canonicalAddForm(
@@ -165,10 +165,10 @@ function canonicalAddForm(
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== ADD) {
-    return mapArgs(expr, (x) => canonicalAddForm(x, engine));
+    return applyArgs(expr, (x) => canonicalAddForm(x, engine));
   }
   expr = flatten(ungroup(expr), ADD);
-  let args = getArgs(expr);
+  let args = getTail(expr);
   args = args
     .map((x) => canonicalAddForm(x, engine))
     .filter((x) => getNumberValue(x) !== 0);
@@ -185,17 +185,15 @@ function canonicalDivideForm(
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== DIVIDE) {
-    return mapArgs(expr, (x) => canonicalDivideForm(x, engine));
+    return applyArgs(expr, (x) => canonicalDivideForm(x, engine));
   }
 
   if (getArgCount(expr) !== 2) return expr;
 
   const arg1 = canonicalDivideForm(getArg(expr, 1), engine);
   const arg2 = canonicalDivideForm(getArg(expr, 2), engine);
-  const val2 = getNumberValue(arg2);
-  if (val2 === 1) return arg1;
-  const val1 = getNumberValue(arg1);
-  if (val1 === 1) return applyInvert(arg2);
+  if (getNumberValue(arg2) === 1) return arg1;
+  if (getNumberValue(arg1) === 1) return applyInvert(arg2);
   return [MULTIPLY, arg1, applyInvert(arg2)];
 }
 
@@ -206,7 +204,7 @@ function canonicalExpForm(
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== EXP) {
-    return mapArgs(expr, (x) => canonicalExpForm(x, engine));
+    return applyArgs(expr, (x) => canonicalExpForm(x, engine));
   }
 
   if (getArgCount(expr) !== 1) return expr;
@@ -222,11 +220,11 @@ function canonicalListForm(
 
   const rootName = getFunctionName(expr);
   if (rootName !== LIST && rootName !== SEQUENCE && rootName !== SEQUENCE2) {
-    return mapArgs(expr, (x) => canonicalListForm(x, engine));
+    return applyArgs(expr, (x) => canonicalListForm(x, engine));
   }
 
   const isList = rootName === LIST;
-  const args = getArgs(expr);
+  const args = getTail(expr);
   const newArgs: Expression[] = [];
 
   if (isList) {
@@ -258,9 +256,9 @@ function canonicalListForm(
       }
     } else if (name === rootName && !sequenceHold) {
       const head = getFunctionHead(expr);
-      for (const arg2 of getArgs(arg)) {
+      for (const arg2 of getTail(arg)) {
         if (getFunctionName(arg2) === name) {
-          newArgs.push([head, ...getArgs(arg2)]);
+          newArgs.push([head, ...getTail(arg2)]);
         } else {
           newArgs.push(arg2);
         }
@@ -276,7 +274,7 @@ function canonicalListForm(
 function getRootDegree(expr: Expression): number {
   const name = getFunctionName(expr);
   if (name === SQRT) return 2;
-  if (name === ROOT) return getNumberValue(getArg(expr, 2));
+  if (name === ROOT) return getNumberValue(getArg(expr, 2)) ?? NaN;
   if (name !== POWER) return 1;
   const exponent = getArg(expr, 2);
   if (!exponent) return 1;
@@ -284,7 +282,7 @@ function getRootDegree(expr: Expression): number {
     getFunctionName(exponent) === POWER &&
     getNumberValue(getArg(exponent, 2)) === -1
   ) {
-    const val = getNumberValue(getArg(exponent, 1));
+    const val = getNumberValue(getArg(exponent, 1)) ?? NaN;
     if (isFinite(val)) return val;
   }
   return 1;
@@ -297,7 +295,7 @@ function getRootDegree(expr: Expression): number {
  */
 
 function getSquareRoots(expr: Expression): [Expression[], Expression[]] {
-  const args = getArgs(expr);
+  const args = getTail(expr);
   const roots: Expression[] = [];
   const nonRoots: Expression[] = [];
   for (const arg of args) {
@@ -316,7 +314,7 @@ function canonicalMultiplyForm(
 ): Expression | null {
   const head = getFunctionHead(expr);
   if (!head) return expr;
-  expr = mapArgs(expr, (x) => canonicalMultiplyForm(x, engine));
+  expr = applyArgs(expr, (x) => canonicalMultiplyForm(x, engine));
   if (head !== MULTIPLY) return expr;
 
   expr = flatten(ungroup(expr), MULTIPLY);
@@ -332,14 +330,14 @@ function canonicalMultiplyForm(
       ...nonSquareRoots,
       [POWER, squareRoots[0], [POWER, 2, -1]],
     ];
-    args = getArgs(expr);
+    args = getTail(expr);
   } else {
     expr = [
       MULTIPLY,
       ...nonSquareRoots,
       [POWER, [MULTIPLY, ...squareRoots], [POWER, 2, -1]],
     ];
-    args = getArgs(expr);
+    args = getTail(expr);
   }
 
   // Hoist any negative (numbers or `"negate"` function)
@@ -351,7 +349,7 @@ function canonicalMultiplyForm(
       isNegative = !isNegative;
       return getArg(x, 1);
     }
-    const val = getNumberValue(x);
+    const val = getNumberValue(x) ?? NaN;
     if (val < 0) {
       hasNegative = true;
       isNegative = !isNegative;
@@ -360,19 +358,19 @@ function canonicalMultiplyForm(
     return x;
   });
   if (isNegative) {
-    const val = getNumberValue(args[0]);
+    const val = getNumberValue(args[0]) ?? NaN;
     if (isFinite(val)) {
       // If the first argument is a finite number, negate it
-      args = getArgs(flatten([MULTIPLY, -val, ...args.slice(1)], MULTIPLY));
+      args = getTail(flatten([MULTIPLY, -val, ...args.slice(1)], MULTIPLY));
     } else {
-      args = getArgs(flatten([MULTIPLY, -1, ...args], MULTIPLY));
+      args = getTail(flatten([MULTIPLY, -1, ...args], MULTIPLY));
     }
   } else if (hasNegative) {
     // At least one term was hoisted, it could require flatening
     // e.g. `[MULTIPLY, [NEGATE, [MULTIPLY, 2, 3]], 4]`
-    args = getArgs(flatten([MULTIPLY, ...args], MULTIPLY));
+    args = getTail(flatten([MULTIPLY, ...args], MULTIPLY));
   } else {
-    args = getArgs(flatten([MULTIPLY, ...args], MULTIPLY));
+    args = getTail(flatten([MULTIPLY, ...args], MULTIPLY));
   }
 
   // Any arg is 0? Return 0.
@@ -401,7 +399,7 @@ function canonicalPowerForm(
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== POWER) {
-    return mapArgs(expr, (x) => canonicalPowerForm(x, engine));
+    return applyArgs(expr, (x) => canonicalPowerForm(x, engine));
   }
 
   expr = ungroup(expr);
@@ -409,9 +407,9 @@ function canonicalPowerForm(
   if (getArgCount(expr) !== 2) return expr;
 
   const arg1 = canonicalPowerForm(getArg(expr, 1), engine);
-  const val1 = getNumberValue(arg1);
+  const val1 = getNumberValue(arg1) ?? NaN;
   const arg2 = canonicalPowerForm(getArg(expr, 2), engine);
-  const val2 = getNumberValue(arg2);
+  const val2 = getNumberValue(arg2) ?? NaN;
 
   if (val2 === 0) return 1;
   if (val2 === 1) return arg1;
@@ -477,14 +475,14 @@ function canonicalNegateForm(
           fact = { num: '-' + fact.num };
         }
       } else {
-        return [MULTIPLY, -1, fact, ...getArgs(arg).slice(1)];
+        return [MULTIPLY, -1, fact, ...getTail(arg).slice(1)];
       }
-      return [MULTIPLY, fact, ...getArgs(arg).slice(1)];
+      return [MULTIPLY, fact, ...getTail(arg).slice(1)];
     } else {
       return [MULTIPLY, -1, arg];
     }
   } else if (head) {
-    return mapArgs(expr, (x) => canonicalNegateForm(x, engine));
+    return applyArgs(expr, (x) => canonicalNegateForm(x, engine));
   }
   return expr;
 }
@@ -494,7 +492,7 @@ function canonicalNumberForm(
   engine: ComputeEngine
 ): Expression | null {
   if (getFunctionHead(expr)) {
-    return mapArgs(expr, (x) => canonicalNumberForm(x, engine));
+    return applyArgs(expr, (x) => canonicalNumberForm(x, engine));
   }
 
   if (typeof expr === 'number') {
@@ -534,7 +532,7 @@ function canonicalSubtractForm(
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== SUBTRACT) {
-    return mapArgs(expr, (x) => canonicalSubtractForm(x, engine));
+    return applyArgs(expr, (x) => canonicalSubtractForm(x, engine));
   }
 
   if (getArgCount(expr) !== 2) return expr;
@@ -558,7 +556,7 @@ function canonicalRootForm(
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== ROOT && head !== SQRT) {
-    return mapArgs(expr, (x) => canonicalRootForm(x, engine));
+    return applyArgs(expr, (x) => canonicalRootForm(x, engine));
   }
 
   if (getArgCount(expr) < 1) return expr;
@@ -569,8 +567,7 @@ function canonicalRootForm(
   if (getArgCount(expr) > 1) {
     arg2 = canonicalPowerForm(getArg(expr, 2), engine);
   }
-  const val2 = getNumberValue(arg2);
-  if (val2 === 1) {
+  if (getNumberValue(arg2) === 1) {
     return arg1;
   }
 
@@ -757,6 +754,8 @@ export function canonicalForm(
   engine: ComputeEngine
 ): Expression | null {
   return engine.format(expr, [
+    // @todo: canonical-boolean: transforms, Equivalent, Implies, Xor...
+    // in CNF (Conjunctive Normal Form: https://en.wikipedia.org/wiki/Conjunctive_normal_form)
     'canonical-number', // ➔ simplify number
     'canonical-exp', // ➔ power
     'canonical-root', // ➔ power, divide

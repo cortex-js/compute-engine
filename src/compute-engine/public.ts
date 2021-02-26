@@ -28,11 +28,7 @@ import {
  * ```
  */
 export type Dictionary = {
-  [name: string]:
-    | number
-    | SymbolDefinition
-    | FunctionDefinition
-    | SetDefinition;
+  [name: string]: number | Definition;
 };
 /**
  * The entries of a `CompiledDictionary` have been validated and
@@ -153,7 +149,7 @@ export type FunctionFeatures = {
  */
 export type Domain = Expression;
 
-export type Definition = {
+export type BaseDefinition = {
   domain: Domain;
   /**
    * A short string indicating an entry in a wikibase. For example
@@ -206,9 +202,15 @@ export type FunctionSignature = {
 
   /** Evaluate the function with the passed in arguments and return a corresponding result. */
   evaluate?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
+
+  /** Evaluate the function with the passed in arguments and return a corresponding result. */
+  asyncEvaluate?: (
+    engine: ComputeEngine,
+    ...args: Expression[]
+  ) => Promise<Expression>;
 };
 
-export type FunctionDefinition = Definition &
+export type FunctionDefinition = BaseDefinition &
   Partial<FunctionFeatures> & {
     /**
      * - **'none'**: Each of the arguments is evaluated.
@@ -236,14 +238,43 @@ export type SymbolFeatures = {
   constant: boolean;
 };
 
-export type SymbolDefinition = Definition &
+export type SymbolDefinition = BaseDefinition &
   SymbolFeatures & {
     value?: Expression;
     /** For dimensional analysis, e.g. "Scalar", "Meter", ["Divide", "Meter", "Second"] */
     unit?: Expression;
   };
 
-export type SetDefinition = Definition & {
+export type CollectionDefinition = BaseDefinition & {
+  /** If true, the elements of the collection can be iterated over using
+   * the `iterator() function
+   */
+  iterable?: boolean;
+  iterator?: {
+    next: () => Expression;
+    done: () => boolean;
+  };
+  /** If true, elements of the collection can be accessed with a numerical
+   * index with the `at()` function
+   */
+  indexable?: boolean;
+  at?: (index: number) => Expression;
+
+  /** If true, the size of the collection is finite.
+   *
+   */
+  countable: boolean;
+  /** Return the number of elements in the collection.
+   */
+  size?: () => number;
+
+  /** A predicate function that can be used to determine if an expression
+   * is a member of the collection or not (answers "True", "False" or "Maybe").
+   */
+  isElementOf?: (expr: Expression) => boolean;
+};
+
+export type SetDefinition = CollectionDefinition & {
   /** The supersets of this set: they should be symbol with a 'Set' domain */
   supersets: string[];
 
@@ -252,11 +283,6 @@ export type SetDefinition = Definition & {
    * For example "NaturalNumber" = ["Union", "PrimeNumber", "CompositeNumber"].
    */
   value?: Expression;
-
-  /** A predicate function that can be used to determine if an expression
-   * is a member of the set or not (answers "True", "False" or "Maybe").
-   */
-  isMemberOf?: Expression;
 
   /**
    * A function that determins if a set is a subset of another.
@@ -270,8 +296,17 @@ export type SetDefinition = Definition & {
   ) => boolean;
 };
 
+export type Definition =
+  | SymbolDefinition
+  | FunctionDefinition
+  | SetDefinition
+  | CollectionDefinition;
+
 export type CompiledExpression = {
-  evaluate: (scope: { [symbol: string]: Expression }) => Expression;
+  evaluate?: (scope: { [symbol: string]: Expression }) => Expression;
+  asyncEvaluate?: (scope: {
+    [symbol: string]: Expression;
+  }) => Promise<Expression>;
 };
 
 /**
@@ -359,7 +394,17 @@ export declare class ComputeEngine {
    */
   format(expr: Expression | null, forms?: Form | Form[]): Expression | null;
 
-  evaluate(exp: Expression): Expression | null;
+  /**
+   * Evaluate the expression `exp` asynchronously.
+   *
+   * Evaluating some expressions can take a very long time. Some can invole
+   * making network queries. Therefore to avoid blocking the main event loop,
+   * a promise is returned.
+   *
+   * Use `result = await engine.evaluate(expr)` to get the result without
+   * blocking.
+   */
+  evaluate(exp: Expression): Promise<Expression | null>;
 
   /** Return the domain of the expression */
   domain(expr: Expression): Expression;
@@ -428,18 +473,17 @@ export declare function format(
  *
  * See also `[ComputeEngine.evaluate()](#(ComputeEngine%3Aclass).(evaluate%3Ainstance))`.
  *
- * @param scope - An optional set of functions and constants to use
+ * @param dictionaries - An optional set of functions and constants to use
  * when evaluating the expression. Evaluating the expression may modify the
  * scope, for example if the expression is an assignment or definition.
  */
 export declare function evaluate(
   expr: Expression,
   options?: {
-    scope?: Dictionary;
-    dictionary?: Dictionary;
+    dictionaries?: Readonly<Dictionary>[];
     onError?: ErrorListener<ErrorCode>;
   }
-): Expression;
+): Promise<Expression | null>;
 
 /**
  * A given mathematical expression can be represented in multiple equivalent

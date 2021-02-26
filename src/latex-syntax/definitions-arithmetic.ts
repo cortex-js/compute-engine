@@ -2,7 +2,7 @@ import { Expression } from '../public';
 import { Scanner, LatexDictionary, Serializer } from './public';
 import {
   getFunctionName,
-  getArgs,
+  getTail,
   getArg,
   getNumberValue,
   getArgCount,
@@ -24,7 +24,7 @@ import {
   POWER,
   MISSING,
   LIST,
-} from '../compute-engine/utils';
+} from '../common/utils';
 import { applyNegate } from '../compute-engine/forms';
 import { joinLatex } from './core/tokenizer';
 import { getFractionStyle, getRootStyle } from './serializer-style';
@@ -40,13 +40,13 @@ function numeratorDenominator(
   if (getFunctionName(expr) !== MULTIPLY) return [null, null];
   const numerator: Expression[] = [];
   const denominator: Expression[] = [];
-  const args = getArgs(expr);
+  const args = getTail(expr);
   for (const arg of args) {
     if (getFunctionName(arg) === POWER) {
       if (getFunctionName(getArg(arg, 2)) === NEGATE) {
         denominator.push([POWER, getArg(arg, 1), getArg(getArg(arg, 2), 1)]);
       } else {
-        const exponentVal = getNumberValue(getArg(arg, 2));
+        const exponentVal = getNumberValue(getArg(arg, 2)) ?? NaN;
         if (exponentVal === -1) {
           denominator.push(getArg(arg, 1));
         } else if (exponentVal < 0) {
@@ -159,7 +159,7 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   const name = getFunctionName(expr);
   let result = '';
   let arg = getArg(expr, 1);
-  let argWasNumber = !isNaN(getNumberValue(arg));
+  let argWasNumber = !Number.isNaN(getNumberValue(arg) ?? NaN);
   if (name === NEGATE) {
     result = '-' + serializer.wrap(arg, 276);
   } else if (name === ADD) {
@@ -167,15 +167,26 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
     const last = getArgCount(expr) + 1;
     for (let i = 2; i < last; i++) {
       arg = getArg(expr, i);
-      const val = getNumberValue(arg);
-      const argIsNumber = !isNaN(val);
+      const val = getNumberValue(arg) ?? NaN;
+      const argIsNumber = !Number.isNaN(val);
+      let done = false;
       if (arg !== null) {
-        const [numer, denom] = getRationalValue(arg);
-        if (argWasNumber && isFinite(numer) && isFinite(denom) && denom !== 1) {
-          // Don't include the '+' sign, it's a rational, use 'invisible plus'
-          result +=
-            serializer.options.invisiblePlus + serializer.serialize(arg);
-        } else if (val < 0) {
+        if (argWasNumber) {
+          // Check if we can convert to an invisible plus, e.g. "1\frac{1}{2}"
+          const rational = getRationalValue(arg);
+          if (rational) {
+            const [numer, denom] = rational;
+            if (isFinite(numer) && isFinite(denom) && denom !== 1) {
+              // Don't include the '+' sign, it's a rational, use 'invisible plus'
+              result +=
+                serializer.options.invisiblePlus + serializer.serialize(arg);
+              done = true;
+            }
+          }
+        }
+      }
+      if (!done) {
+        if (val < 0) {
           // Don't include the minus sign, it will be serialized for the arg
           result += serializer.serialize(arg);
         } else if (getFunctionName(arg) === NEGATE) {
@@ -271,7 +282,7 @@ function serializeMultiply(
         }
       } else if (
         getFunctionName(arg) === POWER &&
-        !isNaN(getNumberValue(getArg(arg, 1)))
+        !isNaN(getNumberValue(getArg(arg, 1) ?? NaN))
       ) {
         // It's a power and the base is a number...
         // add a multiply...
@@ -345,7 +356,7 @@ function parseFraction(
     let vars: Expression[] = [];
     if (getFunctionName(denom) === MULTIPLY) {
       // ?/∂x∂y
-      for (const arg of getArgs(denom)) {
+      for (const arg of getTail(denom)) {
         if (getFunctionHead(arg) === 'PartialDerivative') {
           vars.push(getArg(arg, 2));
         }
@@ -474,7 +485,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: { prefix: '-' },
     parse: parseMinusSign,
     associativity: 'left', // prefix are always left-associative
-    precedence: 275,
+    precedence: 665, // ??? MathML: 275. Needs to be higher than add, multiply
   },
   {
     name: SUBTRACT,

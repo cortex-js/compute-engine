@@ -1,4 +1,8 @@
-import { isNumberObject, isSymbolObject, isFunctionObject } from './utils';
+import {
+  isNumberObject,
+  isSymbolObject,
+  isFunctionObject,
+} from '../common/utils';
 import { Expression } from '../public';
 import { Dictionary } from './public';
 

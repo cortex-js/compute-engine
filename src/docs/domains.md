@@ -23,26 +23,26 @@ to select appropriate algorithms, and to optimized compiled expressions.
 Domains can be defined as a union or intersection of domains:
 
 ```json
-["Union", "Number", "Boolean"] //  A number or a boolean.
-
-["SetMinus", "Number", 1] // Any number except "1".
+["Union", "Number", "Boolean"][("SetMinus", "Number", 1)] //  A number or a boolean. // Any number except "1".
 ```
 
 Parametric domains can be used as functions:
 
 ```json
-["Number", 0, "+Infinity"]
+["Number", 0, "+Infinity"] // Range of non-negative numbers
 ```
 
-Not all domains are parametric, and the precise semantic of the parametric form
-depends on the domain. For example, the `"Number"` parametric domain implies a
-result in `"ExtendedRealNumber"`, not `"ExtendedComplexNumber"`.
+Parametric domains define a subset or 'specialization' of a domain. Not all
+domains are parametric, and the precise semantic of the parametric form depends
+on the domain.
+
+For example, the `"Number"` parametric domain implies a result in
+`"ExtendedRealNumber"`, not `"ExtendedComplexNumber"`.
 
 Domains are defined in a hierarchy (a lattice). The upper bound of the domain
 lattice is `"Anything"` and the lower bound is `"Nothing"`. The 'parent' of a
 domain represent a 'is-a'/'subset-of' relationship, for example, a `"List"`
 "is-a" `"Collection"`.
-
 
 ![Anything domains](/assets/domains.001.jpeg 'The top-level domains')
 ![Tensor domains](/assets/domains.002.jpeg 'The Tensor sub-domains')
@@ -51,7 +51,6 @@ domain represent a 'is-a'/'subset-of' relationship, for example, a `"List"`
 
 The implementation of the CortexJS domains is based on
 [Weibel, Trudy & Gonnet, Gaston. (1991). An Algebra of Properties.. 352-359. 10.1145/120694.120749. ](https://www.researchgate.net/publication/.221564157_An_Algebra_of_Properties)
-
 
 ## Obtaining the Domain of an Expression
 
@@ -64,9 +63,12 @@ const engine = new ComputeEngine();
 engine.domain('Pi');
 // ➔ "TranscendentalNumber"
 
+engine.domain('Add');
+// ➔ "Function": domain of the symbol "Add"
+
 engine.domain(['Add', 5, 2]);
-// ➔ "Number" since the result of the "Add" function
-// in general is a "Number"
+// ➔ "Number": the result of the "Add" function
+// (its codomain) in general is a "Number"
 
 engine.domain(engine.evaluate(['Add', 5, 2]));
 // ➔ "PrimeNumber"
@@ -88,8 +90,8 @@ format(
 // ➔ "ExtendedRealNumber"
 ```
 
-
 ## List of Domains
+
 ### `"Boolean"` and `"MaybeBoolean"`
 
 A `"Boolean"` is either `"True"` or `"False"`.
@@ -111,20 +113,20 @@ Any numerical value.
   more integers.
 - `"CompositeNumber"` - An integer that can be produced by the product of 2 or
   more integers.
-- `"Integer"` $$= \mathbb{Z}$$. The set of whole numbers: $$0, 1, 2, 3\ldots$$ and their additive
-  inverse: $$-1, -2, -3, \ldots$$.
+- `"Integer"` $$= \mathbb{Z}$$. The set of whole numbers: $$0, 1, 2, 3\ldots$$
+  and their additive inverse: $$-1, -2, -3, \ldots$$.
 - `"NumberZero"` - The number $$0$$: a composite number and an imaginary number.
-- `"RationalNumber"` $$= \mathbb{Q}$$. A number which can be expressed as the quotient $$\frac{p}{q}$$ of
-  two integers $$p, q \in \mathbb{Z}$$.
+- `"RationalNumber"` $$= \mathbb{Q}$$. A number which can be expressed as the
+  quotient $$\frac{p}{q}$$ of two integers $$p, q \in \mathbb{Z}$$.
 - `"RealNumber"` $$= \mathbb{R}$$.
-- `"NaturalNumber"` $$= \mathbb{N}$$. Counting numbers, $$0, 1, 2, 3\ldots$$ Note that $$0$$
-  is included, following the convention from
+- `"NaturalNumber"` $$= \mathbb{N}$$. Counting numbers, $$0, 1, 2, 3\ldots$$
+  Note that $$0$$ is included, following the convention from
   [ISO/IEC 80000](https://en.wikipedia.org/wiki/ISO_80000-2).
-- `"IrrationalNumber"` $$= \mathbb{Q^{\prime}}$$. Numbers such as $$\sqrt{5}, \pi, \exponentialE$$ that cannot be written as a
-  quotient of two integers.
+- `"IrrationalNumber"` $$= \mathbb{Q^{\prime}}$$. Numbers such as
+  $$\sqrt{5}, \pi, \exponentialE$$ that cannot be written as a quotient of two
+  integers.
 - `"ImaginaryNumber"` - Any purely imaginary value (including zero).
 - `"ComplexNumber"` $$= \mathbb{C}$$. A real or imaginary number
-
 
 ### `"Tensor"`
 
@@ -141,18 +143,19 @@ Any numerical value.
   [Quaternions](https://en.wikipedia.org/wiki/Quaternion) are commonly used to
   represent vectors in 3D space ($$\mathbb{R}^3$$).
 - `"SquareMatrix"` - A tensor with the same number of rows and columns.
-- `"MonomialMatrix"` - A square matrix with exactly one non-zero entry in each row
-  and column.
+- `"MonomialMatrix"` - A square matrix with exactly one non-zero entry in each
+  row and column.
 - `"OrthogonalMatrix"` - A real square matrix whose transpose is equal to its
   inverse: $$Q^{\mathrm{T}}=Q^{-1}$$
-- `"PermutationMatrix"` - A square matrix with with exactly one non-zero entry in
-  each row and column.
+- `"PermutationMatrix"` - A square matrix with with exactly one non-zero entry
+  in each row and column.
 - `"DiagonalMatrix"` - A matrix in which the elements outside the main diagonal
   are zero.
 - `"IdentityMatrix"` - A diagonal matrix whose diagonal elements are 1.
 - `"ZeroMatrix"` a matrix whose elements are 0.
 - `"SymmetricMatrix"` - A real matrix that is equal to its transpose.
-- `"HermitianMatrix"` - A complex matrix that is equal to its conjugate transpose.
+- `"HermitianMatrix"` - A complex matrix that is equal to its conjugate
+  transpose.
 
 ### `"Function"`
 
@@ -190,7 +193,8 @@ A function maps some expressions, its arguments, to another expression.
   addition, subtraction, multiplication, and non-negative integer
   exponentiation.
 - `"QuadraticFunction"` - A function of the form $$f(x) = ax^2+ bx + c$$
-- `"LinearFunction"` = $$f(x) = ax+ b$$ A function that is the product of an argument plus a constant.
+- `"LinearFunction"` = $$f(x) = ax+ b$$ A function that is the product of an
+  argument plus a constant.
 - `"ConstantFunction"` - A function that always return the same value.
 - `"MonotonicFunction"`
 - `"StrictMonotonicFunction"`
@@ -203,6 +207,7 @@ It may have one, two or more arguments of any domain.
 
 A `LogicalFunction` is a predicate whose arguments are in the `MaybeBoolean`
 domain, for example the domain of `And` is `"LogicalFunction"`.
+
 ### `"Domain"` and `"ParametricDomain"`
 
 The domain of all the domains is `"Domain"`.

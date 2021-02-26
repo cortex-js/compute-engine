@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Cortex REPL</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="style.css" />
+
+    <style>
+        code {
+            white-space: pre-wrap;
+        }
+
+        h2 {
+            font-size: 1em;
+            padding: 0;
+            margin: 0;
+        }
+
+        textarea {
+            width: calc(100% - 8px);
+            height: 200px;
+            border-radius: 4px;
+            border-color: #ddd;
+            font-size: 24px;
+            color: #3f5b86;
+            padding: 8px;
+            resize: vertical;
+            margin-bottom: 10px;
+            font-family: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo, Monaco, 'Courier New', monospace;
+        }
+
+        .output {
+            font-family: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo, Monaco, 'Courier New', monospace;
+        }
+
+        #mathjson,
+        #result,
+        #cortex {
+            display: none;
+        }
+
+        #mathjson.visible,
+        #error.visible,
+        #cortex.visible,
+        #result.visible {
+            display: block;
+        }
+
+        #error {
+            display: none;
+            color: #ff5757;
+            background-color: #ffeae9;
+            border-color: #ff5757;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Cortex REPL</h1>
+    </header>
+    <main>
+        <textarea id='input' autocomplete='off' spellcheck='false' autofocus>Evaluate(2+1/2)</textarea>
+        <div class="output" id="cortex"></div>
+        <div class="output" id="mathjson"></div>
+        <div class="output" id="result"></div>
+        <div class="output" id="error"></div>
+    </main>
+
+    <script type="module">
+        import { ComputeEngine, LatexSyntax, parseCortex, serializeCortex } from '../dist/math-json.js';
+
+
+        const engine = new ComputeEngine();
+
+        const input = document.getElementById('input');
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter' && ev.shiftKey === false) {
+                updateContent();
+
+                ev.preventDefault();
+                ev.stopPropagation();
+            }
+        });
+        updateContent();
+
+
+
+        function updateContent() {
+            const cortex = input.value;
+            try {
+                const errors = [];
+                document.getElementById('cortex').classList.remove('visible');
+                document.getElementById('mathjson').classList.remove('visible');
+                document.getElementById('result').classList.remove('visible');
+                document.getElementById('error').classList.remove('visible');
+                function cortexError(err) {
+                    errors.push(err.code +
+                        (err.detail ? ': ' + err.detail : '') +
+                        '\n' +
+                        cortex +
+                        '|  ' +
+                        String(' ').repeat(err.pos) +
+                        '▲',
+                    )
+                }
+                function engineError(err) {
+                    if (err.before && err.after) {
+                        errors.push(err.code +
+                            (err.arg ? ': ' + err.arg : '') +
+                            '\n' +
+                            '|  ' +
+                            err.before +
+                            err.after +
+                            '\n' +
+                            '|  ' +
+                            String(' ').repeat(err.before.length) +
+                            '▲',
+                        )
+                    } else {
+                        errors.push(err.code +
+                            (err.arg ? ': ' + err.arg : '')
+                        )
+                    }
+                }
+                const expr = parseCortex(cortex, cortexError);
+                if (expr) {
+                    setTimeout(() => {
+                        document.getElementById('cortex').classList.add('visible');
+                        document.getElementById('mathjson').classList.add('visible');
+                        document.getElementById('result').classList.add('visible');
+                    }, 125);
+                    document.getElementById('mathjson').innerHTML =
+                        escapeHtml(JSON.stringify(expr, null, 2));
+
+                    document.getElementById('cortex').innerHTML =
+                        escapeHtml(serializeCortex(expr));
+
+                    document.getElementById('result').innerHTML =
+                        escapeHtml(serializeCortex(
+                            engine.evaluate(expr, engineError)
+                        )
+                        );
+
+                }
+                const error = document.getElementById('error');
+                if (errors.length > 0) {
+                    error.classList.add('visible');
+                    error.innerHTML = errors.join('<br>');
+                } else {
+                    error.classList.remove('visible');
+                }
+
+            } catch (e) {
+                const error = document.getElementById('error');
+                error.classList.add('visible');
+                error.innerHTML = `${e}`;
+            }
+        }
+
+
+        function escapeHtml(string) {
+            return String(string).replace(/[&<>"'`=/\u200b]/g, function (
+                s
+            ) {
+                return (
+                    {
+                        '&': '&amp;',
+                        '<': '&lt;',
+                        '>': '&gt;',
+                        '"': '&quot;',
+                        "'": '&#39;',
+                        '/': '&#x2F;',
+                        '`': '&#x60;',
+                        '=': '&#x3D;',
+                        '\u200b': '&amp;#zws;',
+                    }[s] || s
+                );
+            });
+        }
+    </script>
+</body>
+
+</html>

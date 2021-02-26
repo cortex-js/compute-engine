@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+
 <script type='module'>
     import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
     renderMathInDocument();
@@ -69,7 +70,6 @@ console.log(format(["Add", 2, "x", 3], 'canonical');
 // ➔ ["Add", 2, 3, "x"]
 ```
 
-
 ## `BaseForm`
 
 `["BaseForm", _value_, _base_]`
@@ -79,13 +79,21 @@ Format a _value_ in a specific _base_, such as hexadecimal or binary.
 - _value_ should be an integer.
 - _base_ should be an integer from 2 to 36.
 
-| MathJSON               | Latex                |
-| :--------------------- | :------------------- |
-| `["BaseForm", 42, 16]` | `(\mathtt(2a))_{16}` |
+```json
+["Latex", ["BaseForm", 42, 16]]
+// ➔ (\mathtt(2a))_{16}
+```
+
+```cortex
+Latex(BaseForm(42, 16))
+// ➔ (\mathtt(2a))_{16}
+BaseForm(42, 16)
+// ➔ 0x2a
+```
 
 ## `Derivative`
 
-`["Latex", _expression_, _order_]`
+`["Derivative", _expression_, _order_]`
 
 - _order_: default value is 1.
 

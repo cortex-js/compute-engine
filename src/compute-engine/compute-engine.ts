@@ -13,6 +13,7 @@ import {
   SetDefinition,
   Scope,
   Dictionary,
+  Definition,
 } from './public';
 
 import {
@@ -21,15 +22,15 @@ import {
 } from './dictionary/dictionary';
 import { format as formatWithEngine } from './forms';
 import { compare } from './dictionary/compare';
-import { evaluate as evaluateWithEngine } from './evaluate';
+import { evaluateWithEngine } from './evaluate';
 import { domain as domainWithEngine } from './domains';
 import {
   getArg,
-  getArgs,
   getFunctionName,
   getNumberValue,
   getSymbolName,
-} from './utils';
+  getTail,
+} from '../common/utils';
 import { isSetDefinition } from './dictionary/utils';
 import { same } from './same';
 
@@ -134,9 +135,7 @@ export class ComputeEngine {
     if (def) def.scope = scope;
     return def;
   }
-  getDefinition(
-    name: string
-  ): SymbolDefinition | FunctionDefinition | SetDefinition | null {
+  getDefinition(name: string): Definition | null {
     let scope = this.context;
     let def = null;
     while (scope && !def) {
@@ -165,16 +164,16 @@ export class ComputeEngine {
     // Complement: not lhs
     const lhsFnName = getFunctionName(lhs);
     if (lhsFnName === 'Union') {
-      return getArgs(lhs).some((x) => this.isSubsetOf(x, rhs));
+      return getTail(lhs).some((x) => this.isSubsetOf(x, rhs));
     } else if (lhsFnName === 'Intersection') {
-      return getArgs(lhs).every((x) => this.isSubsetOf(x, rhs));
+      return getTail(lhs).every((x) => this.isSubsetOf(x, rhs));
     } else if (lhsFnName === 'SetMinus') {
       return (
         this.isSubsetOf(getArg(lhs, 1), rhs) &&
         !this.isSubsetOf(getArg(lhs, 2), rhs)
       );
-    } else if (lhsFnName === 'Complement') {
-      return !this.isSubsetOf(getArg(lhs, 1), rhs);
+      // } else if (lhsFnName === 'Complement') {
+      //   return !this.isSubsetOf(getArg(lhs, 1), rhs);
     }
 
     //
@@ -182,16 +181,16 @@ export class ComputeEngine {
     //
     const rhsFnName = getFunctionName(rhs);
     if (rhsFnName === 'Union') {
-      return getArgs(rhs).some((x) => this.isSubsetOf(lhs, x));
+      return getTail(rhs).some((x) => this.isSubsetOf(lhs, x));
     } else if (rhsFnName === 'Intersection') {
-      return getArgs(rhs).every((x) => this.isSubsetOf(lhs, x));
+      return getTail(rhs).every((x) => this.isSubsetOf(lhs, x));
     } else if (rhsFnName === 'SetMinus') {
       return (
         this.isSubsetOf(lhs, getArg(rhs, 1)) &&
         !this.isSubsetOf(lhs, getArg(rhs, 2))
       );
-    } else if (rhsFnName === 'Complement') {
-      return !this.isSubsetOf(lhs, getArg(rhs, 1));
+      // } else if (rhsFnName === 'Complement') {
+      //   return !this.isSubsetOf(lhs, getArg(rhs, 1));
     }
 
     //
@@ -199,7 +198,7 @@ export class ComputeEngine {
     //
     const rhsDomainName = getSymbolName(rhs) ?? rhsFnName;
     if (!rhsDomainName) {
-      const rhsVal = getNumberValue(rhs);
+      const rhsVal = getNumberValue(rhs) ?? NaN;
       if (Number.isNaN(rhsVal)) return false;
       // If the rhs is a number, 'upgrade' it to a set singleton
       rhs = rhs === 0 ? 'NumberZero' : ['Set', rhs];
@@ -235,7 +234,7 @@ export class ComputeEngine {
   canonical(expr: Expression | null): Expression | null {
     return this.format(expr);
   }
-  evaluate(exp: Expression): Expression | null {
+  evaluate(exp: Expression): Promise<Expression | null> {
     return evaluateWithEngine(exp, this);
   }
 
@@ -359,7 +358,7 @@ function varsRecursive(
   vars: Set<string>,
   engine: ComputeEngine
 ): void {
-  const args = getArgs(expr);
+  const args = getTail(expr);
   if (args.length > 0) {
     args.forEach((x) => varsRecursive(x, vars, engine));
   } else {
@@ -394,10 +393,9 @@ export function format(
 export function evaluate(
   expr: Expression,
   options?: {
-    scope?: Dictionary;
-    dictionary?: Dictionary;
+    dictionaries?: Readonly<Dictionary>[];
     onError?: ErrorListener<ErrorCode>;
   }
-): Expression {
+): Promise<Expression | null> {
   return evaluateWithEngine(expr, new ComputeEngine(options));
 }

@@ -129,6 +129,15 @@ const DOMAIN_VALUE: { [domain: string]: Expression } = {
   Vector: ['Union', 'Row', 'Column'],
 };
 
+const DOMAIN_COUNT = {
+  Boolean: 2,
+  MaybeBoolean: 3,
+  EmptySet: 0,
+  IdentityMatrix: 1,
+  ZeroMatrix: 1,
+  NumberZero: 1,
+};
+
 const PARAMETRIC_DOMAIN = {
   String: {
     signatures: [
@@ -166,10 +175,41 @@ const PARAMETRIC_DOMAIN = {
   },
 };
 
+/* {
+	"resource": "/Users/arno/dev/math-json/src/compute-engine/dictionary/domains.ts",
+	"owner": "typescript",
+	"code": "2322",
+	"severity": 8,
+	"message": "Type '{ supersets: undefined[]; domain: string; }' is not
+   assignable to type 'SetDefinition'.\n  Type '{ supersets: undefined[]; 
+    domain: string; }' is missing the following properties from type 
+    '{ iterable: boolean; iterator?: { next: () => Expression; done: () => boolean; };
+     indexable: boolean; at: (index: number) => Expression; 
+     countable: boolean; size: () => number; 
+     isElementOf?: (expr: Expression) => boolean; }': iterable, 
+     indexable, at, countable, size",
+	"source": "ts",
+	"startLineNumber": 172,
+	"startColumn": 9,
+	"endLineNumber": 172,
+	"endColumn": 16,
+	"relatedInformation": [
+		{
+			"startLineNumber": 171,
+			"startColumn": 5,
+			"endLineNumber": 171,
+			"endColumn": 35,
+			"message": "The expected type comes from this index signature.",
+			"resource": "/Users/arno/dev/math-json/src/compute-engine/dictionary/domains.ts"
+		}
+	]
+}
+*/
+
 export function getDomainsDictionary(): Dictionary {
   const result: {
     [name: string]: SetDefinition;
-  } = { Nothing: { supersets: [], domain: 'Domain' } };
+  } = { Nothing: { countable: true, supersets: [], domain: 'Domain' } };
   for (const domain of Object.keys(DOMAIN_PARENT)) {
     const parents = Array.isArray(DOMAIN_PARENT[domain])
       ? DOMAIN_PARENT[domain]
@@ -182,6 +222,8 @@ export function getDomainsDictionary(): Dictionary {
       wikidata: DOMAIN_WIKIDATA[domain],
       supersets: parents,
       value: DOMAIN_VALUE,
+      countable: DOMAIN_COUNT[domain] !== undefined,
+      size: () => DOMAIN_COUNT[domain],
       ...(result[domain] as any),
     };
 

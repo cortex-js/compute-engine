@@ -33,13 +33,14 @@ The MathJSON library provides an implementation in Javascript/Typescript of
 utilities that parse Latex to MathJSON, serialize MathJSON to Latex, and provide
 a collection of functions for symbolic manipulation and numerical evaluations of
 MathJSON expressions. Read more about
-[MathJSON for Latex](./latex-syntax/README.md) and the
-[Compute Engine](./compute-engine/README.md).
+[MathJSON for Latex](/guides/math-json-dictionary/) and the
+[Compute Engine](/guides/compute-engine/).
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations
 are invented regularly and need to be represented. To address those needs
-MathJSON is flexible, extensible and customizable. Extensible dictionaries give
+MathJSON is flexible, extensible and customizable. Extensible dictionaries can
+be used to define new syntax and new semantic.
 
 MathJSON is not intended to be suitable as a visual representation of arbitrary
 mathematical notations, and as such is not a replacement for LaTeX or MathML.
@@ -54,46 +55,62 @@ mathematical notations, and as such is not a replacement for LaTeX or MathML.
 
 ## Structure of a MathJSON Expression
 
-A MathJSON expression is a combination of
+A MathJSON expression is a combination of **numbers**, **symbols** and
+**strings**, **functions**, **dictionaries**.
 
-- numbers
-- symbols and strings
-- functions
+**Number**
 
-| **Number**             |
-| :--------------------- |
-| `3.14`                 |
-| `314.e-2`              |
-| `{"num": "3.14"}`      |
-| `{"num": "-Infinity"}` |
+```json
+3.14
+314e-2
+{"num": "3.14"}
+{"num": "-Infinity"}
+```
 
-| **Symbol**                           |
-| :----------------------------------- |
-| `"x"`                                |
-| `"Pi"`                               |
-| `{"sym": "Pi", "wikidata": "Q167" }` |
+**Symbol**
 
-| **Function**                                     |
-| :----------------------------------------------- |
-| `["Add", 1, "x"]`                                |
-| `{"fn": [{sym: "Add"}, {num: "1"}, {sym: "x"}]}` |
+```json
+"x"
+"Pi"
+{"sym": "Pi", "wikidata": "Q167" }
+```
 
-Numbers, symbols and functions can be expressed either as an object literal with
-a `"num"`, `"sym"` or `"fn"` property, respectively, or as a short-hand notation
-using a number, string or array. The short-hand notation is more concise and
-easier to read, but cannot include metadata properties.
+**Function**
+
+```json
+["Add", 1, "x"]
+{"fn": [{sym: "Add"}, {num: "1"}, {sym: "x"}]}
+```
+
+**Dictionary**
+
+```json
+{
+  "dict": {
+    "hello": 3,
+    "world": ["Add", 5, 7]
+  }
+}
+```
+
+**Numbers**, **symbols** and **functions** can be expressed either as an object
+literal with a `"num"`, `"sym"` or `"fn"` property, respectively, or as a
+short-hand notation using a JSON number, string or array.
+
+The short-hand notation is more concise and easier to read, but cannot include
+metadata properties.
 
 ## Numbers
 
-A MathJSON number is either:
+A MathJSON **number** is either:
 
 - an object literal
 - a JSON number
 
 ### Numbers as Object Literals
 
-Numbers can be represented as an object literal with a `"num"` key. The value of
-the key is a string representation of the number.
+**Numbers** can be represented as an object literal with a `"num"` key. The
+value of the key is a string representation of the number.
 
 ```typescript
 {
@@ -103,13 +120,13 @@ the key is a string representation of the number.
 
 ### JSON numbers
 
-When a number has no extra metadata and is compatible with the JSON
-representation of numbers, a `number` can be used.
+When a **number** has no extra metadata and is compatible with the JSON
+representation of numbers, a JSON number can be used.
 
 Specifically:
 
-- the number has to fit in a 64-bit float (IEEE 754-2008, about 15 digits of
-  precision)
+- the number has to fit in a 64-bit float (IEEE 754-2008, 52-bit, about 15
+  digits of precision)
 - the number has to be finite (it cannot be `Infinity`, `-Infinity` or `NaN`)
 
 ### Examples
@@ -123,22 +140,49 @@ Specifically:
 
 { "num": "3.1415926535 8979323846 2643383279 5028841971 6939937510 5820974944" }
 
-
 { "num": "-Infinity" }
 
 ```
 
 ## Symbols and strings
 
-Symbols represent constants and variables.
+**Strings** are represented by a JSON string that begins and ends with **U+0027
+APOSTROPHE** : **`'`**.
 
-Symbols are represented as arbitrary strings of Unicode characters, except
-**U+0020 (SPACE)**. However, the following naming convention are recommended.
+```json
+"'Hello world'"
+```
+
+**Symbols** represent constants and variables.
+
+**Symbols** are arbitrary strings of Unicode characters, except the following:
+
+- **U+0000-U+0020**
+- **U+FFFE-U+FFFF**
+
+In addition, the first character of a symbol cannot be:
+
+- **U+0022 QUOTATION MARK** : **`"`**
+- **U+0023 NUMBER SIGN** : **`#`**
+- **U+0024 DOLLAR SIGN** : **`$`**
+- **U+0025 PERCENT** : **`%`**
+- **U+0027 APOSTROPHE** : **`'`**
+- **U+0040 COMMERCIAL AT** : **`@`**
+- **U+0060 GRAVE ACCENT** backtick : **`` ` ``**
+- **U+007E TILDE** : **`~`**
+- **U+00AB LEFT-POINTING DOUBLE ANGLE QUOTATION MARK** : **`«`**
+- **U+2018 LEFT SINGLE QUOTATION MARK** : **`‘`**
+- **U+201A SINGLE LOW-9 QUOTATION MARK** : **`‚`**
+- **U+201C LEFT DOUBLE QUOTATION MARK** : **`“`**
+- **U+201E DOUBLE LOW-9 QUOTATION MARK** : **`„`**
+- **U+2039 SINGLE LEFT-POINTING ANGLE QUOTATION MARK** : **`‹`**
+
+For symbols, the following naming convention are recommended.
 
 ### Patterns
 
-Symbols that begin with `_` (**U+005F LOW LINE**) are reserved to denote pattern
-matches.
+Symbols that begin with **`_`** (**U+005F LOW LINE**) are reserved to denote
+pattern matches.
 
 ### Naming Convention for Variables
 
@@ -175,9 +219,9 @@ A MathJSON function is either:
 
 ### Functions as Object Literal
 
-The default representations of functions is as an object literal with a `"fn"`
-key. The value of the key is an array representing the function head and its
-arguments.
+The default representations of **functions** is as an object literal with a
+`"fn"` key. The value of the key is an array representing the function head and
+its arguments.
 
 ```typescript
 {
@@ -191,7 +235,7 @@ required. It indicates the 'function name' or 'what' the function is about.
 It frequently is a string, but it can also be another expression.
 
 Following the head are zero or more **arguments** to the function, which are
-expressions as well.
+expressions as well. The **arguments** form the **tail** of the function.
 
 The expression corresponding to $$\sin^{-1}(x)$$ is
 
@@ -204,7 +248,7 @@ The head of this expression is `["InverseFunction", "Sin"]`, and the argument is
 
 ### JSON array
 
-If a function has no extra metadata it can be represented as a JSON array.
+If a **function** has no extra metadata it can be represented as a JSON array.
 
 For example these two expressions are equivalent:
 
@@ -214,16 +258,54 @@ For example these two expressions are equivalent:
 { "fn": ["Cos", ["Add", "x", 1]] }
 ```
 
+## Dictionary
+
+A **dictionary** is a collection of key-value pairs. In some languages it is
+called a map or associative array.
+
+The keys are strings and the values are MathJSON expressions.
+
+A **dictionary** is represented as an object literal with a `"dict"` key. The
+value of the key is an object literal holding the content of the dictionary.
+
+```json
+{
+  "dict": {
+    "one": 1,
+    "two": 2
+    "three": ["Add", 1, 2]
+  }
+}
+```
+
 ## Metadata
 
-MathJSON object literals can be annotated with supplemental information. If a
-number represented as a JSON number or a symbol represented as a string needs to
-be annotated, they must be transformed into the equivalent object literal first.
+MathJSON object literals can be annotated with supplemental information.
 
-The following properties are recommended to represent metadata:
+A **number** represented as a JSON number, a **symbol** represented as a string,
+or a **function** represented as a JSON array must be transformed into the
+equivalent object literal before being annotated.
 
-| Property   | Example  | Note                                                                                                                                                                    |
-| :--------- | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wikidata` | `"Q167"` | A short string indicating an entry in a wikibase. This information can be used to disambiguate the meaning of a symbol                                                  |
-| `comment`  |          | A human readable string to annotate an expression, since JSON does not allow comments in its encoding                                                                   |
-| `latex`    | `"\pi"`  | A visual representation in LaTeX of the expression. This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
+The following metadata properties are recommended:
+
+| Property   | Note                                                                                                                                                                    |
+| :--------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wikidata` | A short string indicating an entry in a wikibase. This information can be used to disambiguate the meaning of a symbol                                                  |
+| `comment`  | A human readable string to annotate an expression, since JSON does not allow comments in its encoding                                                                   |
+| `latex`    | A visual representation in LaTeX of the expression. This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
+
+```json
+// The ratio of the circumference of a circle to its diameter
+{
+  "sym": "Pi",
+  "wikidata": "Q167",
+  "latex": "\pi"
+}
+
+// The greek letter ∏
+{
+  "sym": "Pi",
+  "wikidata": "Q168",
+  "comment": "The greek letter π"
+}
+```

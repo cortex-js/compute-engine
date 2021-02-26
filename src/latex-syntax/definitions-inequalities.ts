@@ -170,7 +170,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     precedence: 250,
   },
   {
-    name: 'Unequal',
+    name: 'NotEqual',
     trigger: { infix: '\\ne' },
     associativity: 'right',
     precedence: 255,

@@ -2,13 +2,13 @@ import { LatexDictionary, Scanner, Serializer } from './public';
 import { Expression } from '../public';
 import {
   getFunctionName,
-  getArgs,
+  getTail,
   getArg,
   getFunctionHead,
   NOTHING,
   SEQUENCE,
   LIST,
-} from '../compute-engine/utils';
+} from '../common/utils';
 
 export const DEFINITIONS_OTHERS: LatexDictionary = [
   {
@@ -92,7 +92,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
         }
       }
       if (getFunctionName(sub) === SEQUENCE) {
-        sub = [LIST, ...getArgs(sub)];
+        sub = [LIST, ...getTail(sub)];
       }
       let rhs = scanner.matchRequiredLatexArgument() ?? NOTHING;
       if (rhs !== NOTHING) {
@@ -108,7 +108,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       if (vars !== null && vars !== NOTHING) {
         if (getFunctionHead(vars) === LIST) {
           result +=
-            '_{' + serializer.serialize([SEQUENCE, ...getArgs(vars)]) + '}';
+            '_{' + serializer.serialize([SEQUENCE, ...getTail(vars)]) + '}';
         } else {
           result += '_{' + serializer.serialize(vars) + '}';
         }

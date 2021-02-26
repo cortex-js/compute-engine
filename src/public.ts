@@ -91,37 +91,47 @@ export type Attributes = {
   comment?: string;
 
   /** A human readable string that can be used to indicate a syntax error or
-   *other problem when parsing or evaluating an expression.
+   * other problem when parsing or evaluating an expression.
    */
   error?: string;
 
-  /** A visual representation in LaTeX of the expression. This can be useful
-    to preserve non-semantic details, for example parentheses in an expression
-    or styling attributes */
+  /** A visual representation in LaTeX of the expression.
+   *
+   * This can be useful to preserve non-semantic details, for example
+   * parentheses in an expression or styling attributes
+   */
   latex?: string;
 
   /**
-   * A short string indicating an entry in a wikibase. For example
+   * A short string indicating an entry in a wikibase.
+   *
+   * For example
    * `"Q167"` is the [wikidata entry](https://www.wikidata.org/wiki/Q167)
    *  for the Pi constant.
    */
   wikidata?: string;
 
-  /** A base URL for the `wikidata` key. A full URL can be produced by
-    concatenating this key with the `wikidata` key. This key applies to this
-    node and all its children. The default value is
-    "https://www.wikidata.org/wiki/"
-     */
+  /** A base URL for the `wikidata` key.
+   *
+   * A full URL can be produced by concatenating this key with the `wikidata`
+   * key. This key applies to this node and all its children.
+   *
+   * The default value is "https://www.wikidata.org/wiki/"
+   */
   wikibase?: string;
 
-  /** A short string indicating an entry in an OpenMath Content
-    Dictionary. For example: `arith1/#abs`. */
+  /** A short string indicating an entry in an OpenMath Content Dictionary.
+   *
+   * For example: `arith1/#abs`.
+   *
+   */
   openmathSymbol?: string;
 
   /** A base URL for an OpenMath content dictionary. This key applies to this
-    node and all its children. The default value is
-    "http://www.openmath.org/cd".
-     */
+   * node and all its children.
+   *
+   * The default value is "http://www.openmath.org/cd".
+   */
   openmathCd?: string;
 };
 
@@ -139,6 +149,10 @@ export type MathJsonFunction = {
   fn: Expression[];
 } & Attributes;
 
+export type MathJsonDictionary = {
+  dict: { [key: string]: Expression };
+} & Attributes;
+
 export type Expression =
   | MathJsonRealNumber
   // Shortcut for MathJsonRealNumber without metadata and in the JavaScript
@@ -148,12 +162,14 @@ export type Expression =
   // Shortcut for a MathJsonSymbol with no metadata. Or a string.
   | string
   | MathJsonFunction
+  | MathJsonDictionary
   | Expression[];
 
 export type DictionaryCategory =
   | 'algebra'
   | 'arithmetic'
   | 'calculus'
+  | 'collections'
   | 'complex'
   | 'combinatorics'
   | 'core'
@@ -162,7 +178,6 @@ export type DictionaryCategory =
   | 'inequalities'
   | 'intervals'
   | 'linear-algebra'
-  | 'lists'
   | 'logic'
   | 'numeric'
   | 'other'
@@ -170,7 +185,6 @@ export type DictionaryCategory =
   | 'polynomials'
   | 'relations'
   | 'rounding'
-  | 'sets'
   | 'statistics'
   | 'symbols'
   | 'transcendentals'

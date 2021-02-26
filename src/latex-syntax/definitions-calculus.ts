@@ -1,5 +1,5 @@
 import { Expression } from '../public';
-import { NOTHING } from '../compute-engine/utils';
+import { NOTHING } from '../common/utils';
 import { Scanner, Serializer, LatexDictionary } from './public';
 
 function parseIntegral(

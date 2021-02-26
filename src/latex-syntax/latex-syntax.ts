@@ -12,12 +12,12 @@ import {
 } from './definitions';
 import { Scanner } from './parse';
 import {
-  LatexNumberOptions,
   ParseLatexOptions,
   SerializeLatexOptions,
   LatexDictionaryEntry,
   LatexDictionary,
   LatexString,
+  NumberFormattingOptions,
 } from './public';
 import { Serializer } from './serializer';
 import {
@@ -29,13 +29,13 @@ import {
 export class LatexSyntax {
   onError?: ErrorListener<ErrorCode>;
 
-  options: Required<LatexNumberOptions> &
+  options: Required<NumberFormattingOptions> &
     Required<ParseLatexOptions> &
     Required<SerializeLatexOptions>;
   private dictionary: IndexedLatexDictionary;
 
   constructor(
-    options?: LatexNumberOptions &
+    options?: NumberFormattingOptions &
       ParseLatexOptions &
       SerializeLatexOptions & {
         dictionary?: readonly LatexDictionaryEntry[];
@@ -128,7 +128,7 @@ export class LatexSyntax {
 
 export function parse(
   latex: LatexString,
-  options?: LatexNumberOptions &
+  options?: NumberFormattingOptions &
     ParseLatexOptions & {
       dictionary?: Readonly<LatexDictionary>;
       onError?: ErrorListener<ErrorCode>;
@@ -144,7 +144,7 @@ export function parse(
  */
 export function serialize(
   expr: Expression,
-  options?: LatexNumberOptions &
+  options?: NumberFormattingOptions &
     SerializeLatexOptions & {
       dictionary?: Readonly<LatexDictionary>;
       onError?: ErrorListener<ErrorCode>;

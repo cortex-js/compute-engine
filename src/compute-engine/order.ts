@@ -8,11 +8,11 @@ import {
   getNumberValue,
   getSymbolName,
   getArg,
-  getArgs,
+  getTail,
   POWER,
   MULTIPLY,
   ADD,
-} from './utils';
+} from '../common/utils';
 
 export function order(a: Expression, b: Expression): number {
   const lexA = getLex(a);
@@ -47,14 +47,13 @@ export function degree(expr: Expression, sortedVars: string[]): number {
   const name = getFunctionName(expr);
 
   if (name === POWER) {
-    const exponent = getNumberValue(getArg(expr, 2));
-    if (isFinite(exponent)) return exponent;
-    return 0;
+    const exponent = getNumberValue(getArg(expr, 2)) ?? NaN;
+    return isFinite(exponent) ? exponent : 0;
   }
 
   if (name === MULTIPLY) {
     let result = 0;
-    getArgs(expr).forEach((x) => {
+    getTail(expr).forEach((x) => {
       result += degree(x, sortedVars);
     });
     return result;
@@ -76,14 +75,14 @@ function getDegree(expr: Expression, v: string): number {
   const name = getFunctionName(expr);
   if (name === POWER) {
     if (getSymbolName(getArg(expr, 1)) === v) {
-      const exponent = getNumberValue(getArg(expr, 2));
+      const exponent = getNumberValue(getArg(expr, 2)) ?? NaN;
       if (isFinite(exponent)) return exponent;
     }
     return 0;
   }
   if (name === MULTIPLY) {
     let result = 0;
-    for (const arg of getArgs(expr)) {
+    for (const arg of getTail(expr)) {
       result += getDegree(arg, v);
     }
     return result;
@@ -100,11 +99,9 @@ function getDegree(expr: Expression, v: string): number {
  * have already been sorted.
  */
 function getLex(expr: Expression | null): string {
-  if (getFunctionHead(expr)) {
-    return getArgs(expr).map(getLex).join(' ');
-  }
   if (typeof expr === 'string') return expr;
   if (isSymbolObject(expr)) return expr.sym;
+  if (getFunctionHead(expr)) return getTail(expr).map(getLex).join(' ');
   return '';
 }
 
@@ -114,7 +111,7 @@ function getLex(expr: Expression | null): string {
  */
 function getExprLength(expr: Expression | null): number {
   if (getFunctionHead(expr)) {
-    return getArgs(expr)
+    return getTail(expr)
       .map(getExprLength)
       .reduce((acc: number, x: number) => acc + x, 0);
   }
@@ -127,7 +124,7 @@ function getExprValue(expr: Expression | null): number {
   if (getFunctionHead(expr)) return NaN;
 
   if (typeof expr === 'number') return expr;
-  if (isNumberObject(expr)) return getNumberValue(expr);
+  if (isNumberObject(expr)) return getNumberValue(expr) ?? NaN;
 
   return 0;
 }
@@ -184,7 +181,7 @@ export function canonicalOrder(
   sortedVars: string[],
   expr: Expression
 ): Expression {
-  let args: Expression[] = getArgs(expr);
+  let args: Expression[] = getTail(expr);
   if (args.length === 0) return expr;
 
   // Sort each of the arguments

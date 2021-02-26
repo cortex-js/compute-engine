@@ -32,6 +32,15 @@ This symbol is used when an optional expression is not present.
 | :-------------------------- | :--------------------- |
 | `["List", 2, "Nothing", 3]` | `\lrback 2,,3 \rbrack` |
 
+### `None`
+
+This symbol is used to indicate that out of multiple possible values, none
+apply.
+
+### `All`
+
+This symbol is used to indicate that out of multiple possible values, all apply.
+
 ## Functions
 
 ### `About`
@@ -116,25 +125,34 @@ To apply a Lambda-function to some arguments, use:
 
 ### `Latex`
 
-`["Latex", `_`token-1`_`, `_`token-2`_`, ...`_`token-n`_`]`
+`["Latex", `_`expr-1`_`, `_`expr-2`_`, ...`_`expr-n`_`]`
 
-- _token-n_: one or more expressions that are serialized and concatenated as  
-  Latex tokens. A Latex token is one of:
-  - `<{>`: begin group
-  - `<}>`: end group
-  - `<space>`: blank space
-  - `<$$>`: display mode shift
-  - `<$>`: inline mode shift
-  - `#0`-`#9`: argument
-  - `#?`: placeholder
-  - `\` + string: a command
-  - other: literal
+- _`expr-n`_: one or more expressions
+- Returns a string, a Latex string corresponding to the input expressions.
+
+```json
+["Latex", ["Divide", "Pi", 2]]
+// ➔ "'\frac{\pi}{2}'"
+```
+
+If the argument is a string, it is interpreted as a Latex token or fragment:
+
+- `<{>`: begin group
+- `<}>`: end group
+- `<space>`: blank space
+- `<$$>`: display mode shift
+- `<$>`: inline mode shift
+- `#0`-`#9`: argument
+- `#?`: placeholder
+- string that starts with `/`: a Latex command
+- other strings: ordinary symbols
+
+```json
+["Latex", "'\\frac'", "'<{>'", "'pi'", "'<}>'", "'<{>'", 2, "'<}>'"]
+// ➔ "'\frac{\pi}{2}'"
+```
 
 See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
-
-| MathJSON                                                    | Latex           |
-| :---------------------------------------------------------- | :-------------- |
-| `["Latex", "\frac", "<{>", "\pi","<}>", "<{>", "2", "<}>"]` | `\frac{\pi}{2}` |
 
 ### `Pattern`
 

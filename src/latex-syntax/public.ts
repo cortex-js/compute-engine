@@ -297,31 +297,34 @@ export type SerializeLatexOptions = {
   multiply?: LatexString; // e.g. '\\times', '\\cdot'
 };
 
-export type LatexNumberOptions = {
+export type NumberFormattingOptions = {
   precision?: number;
+  positiveInfinity?: string;
+  negativeInfinity?: string;
+  notANumber?: string;
   /**
-   * A latex string representing the decimal marker, the string separating
+   * A string representing the decimal marker, the string separating
    * the whole portion of a number from the fractional portion, i.e.
    * the '.' in '3.1415'.
    *
    * Default: `"."`
    */
-  decimalMarker?: LatexString;
+  decimalMarker?: string;
   /**
-   * A latex string representing the separator between groups of digits,
+   * A string representing the separator between groups of digits,
    * used to improve readability of numbers with lots of digits.
    *
    * Default: `","`
    */
-  groupSeparator?: LatexString;
-  exponentProduct?: LatexString;
-  beginExponentMarker?: LatexString;
-  endExponentMarker?: LatexString;
-  arcSeparator?: LatexString;
+  groupSeparator?: string;
+  exponentProduct?: string;
+  beginExponentMarker?: string;
+  endExponentMarker?: string;
   notation?: 'engineering' | 'auto' | 'scientific';
-  beginRepeatingDigits?: LatexString;
-  endRepeatingDigits?: LatexString;
-  imaginaryNumber?: LatexString;
+  truncationMarker?: string;
+  beginRepeatingDigits?: string;
+  endRepeatingDigits?: string;
+  imaginaryNumber?: string;
 };
 
 /**
@@ -340,7 +343,7 @@ export declare class LatexSyntax {
    *
    */
   constructor(
-    options?: LatexNumberOptions &
+    options?: NumberFormattingOptions &
       ParseLatexOptions &
       SerializeLatexOptions & {
         onError?: ErrorListener<ErrorCode>;
@@ -517,7 +520,7 @@ export interface Scanner {
  */
 export declare function parse(
   latex: LatexString,
-  options?: LatexNumberOptions &
+  options?: NumberFormattingOptions &
     ParseLatexOptions & {
       onError?: ErrorListener<ErrorCode>;
     }
@@ -529,7 +532,7 @@ export declare function parse(
  */
 export declare function serialize(
   expr: Expression,
-  options?: LatexNumberOptions &
+  options?: NumberFormattingOptions &
     SerializeLatexOptions & {
       dictionary?: Readonly<LatexDictionary>;
       onError?: ErrorListener<ErrorCode>;

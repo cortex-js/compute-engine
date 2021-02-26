@@ -1,27 +1,4 @@
-import { printExpression, rawExpression } from './utils';
-
-beforeEach(() => {
-  jest.spyOn(console, 'assert').mockImplementation((assertion) => {
-    if (!assertion) debugger;
-  });
-  jest.spyOn(console, 'log').mockImplementation(() => {
-    debugger;
-  });
-  jest.spyOn(console, 'warn').mockImplementation(() => {
-    debugger;
-  });
-  jest.spyOn(console, 'info').mockImplementation(() => {
-    debugger;
-  });
-});
-expect.addSnapshotSerializer({
-  // test: (val): boolean => Array.isArray(val) || typeof val === 'object',
-  test: (_val): boolean => true,
-
-  serialize: (val, _config, _indentation, _depth, _refs, _printer): string => {
-    return printExpression(val);
-  },
-});
+import { rawExpression } from './utils';
 
 describe('NO DICTIONARY/NO DEFAULTS', () => {
   test('Parsing', () => {

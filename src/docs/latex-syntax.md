@@ -72,5 +72,5 @@ const rawLatex = new LatexSyntax({
 });
 const expr = rawLatex.parse('\\frac{\\pi}{2}');
 console.log(expr);
-// ➔ ["Latex", "\frac", "<{>", "\pi", "<}>", "<{>",  2, "<}>"]
+// ➔ ["Latex", "'\frac'", "'<{>'", "'\pi'", "'<}>'", "'<{>'",  2, "'<}>'"]
 ```

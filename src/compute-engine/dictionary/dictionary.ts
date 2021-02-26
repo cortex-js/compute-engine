@@ -6,29 +6,27 @@ import type {
   SymbolDefinition,
   CompiledDictionary,
   ComputeEngine,
+  CollectionDefinition,
 } from '../public';
-import {
-  COMPLEX_INFINITY,
-  DIVIDE,
-  getArg,
-  getFunctionName,
-  getNumberValue,
-  getRationalValue,
-  MULTIPLY,
-  POWER,
-} from '../utils';
 import { getDomainsDictionary } from './domains';
 import { ARITHMETIC_DICTIONARY } from './arithmetic';
 import { CORE_DICTIONARY } from './core';
 import { LOGIC_DICTIONARY } from './logic';
 import { SETS_DICTIONARY } from './sets';
+import { COLLECTIONS_DICTIONARY } from './collections';
 import { TRIGONOMETRY_DICTIONARY } from './trigonometry';
-import { SMALL_PRIMES, LARGEST_SMALL_PRIME } from './primes';
 import {
   isSymbolDefinition,
   isFunctionDefinition,
   isSetDefinition,
+  isCollectionDefinition,
 } from './utils';
+import {
+  MULTIPLY,
+  POWER,
+  inferNumericDomain,
+  getFunctionName,
+} from '../../common/utils';
 
 export function getDefaultDictionaries(
   categories: DictionaryCategory[] | 'all' = 'all'
@@ -37,6 +35,7 @@ export function getDefaultDictionaries(
     return getDefaultDictionaries([
       'domains',
       'core',
+      'collections', // Dictionary, List, Sets
       'algebra',
       'arithmetic',
       'calculus',
@@ -46,14 +45,12 @@ export function getDefaultDictionaries(
       'inequalities',
       'intervals',
       'linear-algebra',
-      'lists',
       'logic',
       'numeric',
       'other',
       'physics',
       'polynomials',
       'relations',
-      'sets',
       'statistics',
       'symbols',
       'transcendentals',
@@ -146,23 +143,10 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
     // conjugate
   },
   'core': CORE_DICTIONARY,
+  'collections': { ...SETS_DICTIONARY, ...COLLECTIONS_DICTIONARY },
   'domains': getDomainsDictionary(),
   'dimensions': {
     // volume, speed, area
-  },
-  'lists': {
-    // first    or head
-    // rest     or tail
-    // cons -> cons(first (element), rest (list)) = list
-    // append -> append(list, list) -> list
-    // reverse
-    // rotate
-    // in
-    // map   ⁡ map(2x, x, list) ( 2 ⁢ x | x ∈ [ 0 , 10 ] )
-    // such-that {x ∈ Z | x ≥ 0 ∧ x < 100 ∧ x 2 ∈ Z}
-    // select : picks out all elements ei of list for which crit[ei] is True.
-    // sort
-    // contains / find
   },
   'logic': LOGIC_DICTIONARY,
   'inequalities': {},
@@ -228,7 +212,6 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
   'rounding': {
     // ceiling, floor, trunc, round,
   },
-  'sets': SETS_DICTIONARY,
   'statistics': {
     // average
     // mean
@@ -326,8 +309,20 @@ function normalizeDefinition(
     return [def, warning];
   }
 
+  if (isCollectionDefinition(def) || engine.isSubsetOf(domain, 'Collection')) {
+    let collectionDef = { ...(def as CollectionDefinition) };
+    collectionDef = {
+      iterable: collectionDef.iterator !== undefined,
+      indexable: collectionDef.at !== undefined,
+      countable: collectionDef.size !== undefined,
+      ...(def as CollectionDefinition),
+    };
+    return [collectionDef, undefined];
+  }
+
   if (isFunctionDefinition(def) || engine.isSubsetOf(domain, 'Function')) {
-    def = {
+    let functionDef = { ...(def as FunctionDefinition) };
+    functionDef = {
       wikidata: '',
 
       scope: null,
@@ -345,13 +340,13 @@ function normalizeDefinition(
       sequenceHold: false,
 
       signatures: [],
-      ...(def as any),
+      ...(def as FunctionDefinition),
     } as FunctionDefinition;
     let warning: string;
-    if (def.signatures.length === 0) {
+    if (functionDef.signatures.length === 0) {
       warning = `no function signature provided.`;
-    } else if (def.signatures.length === 1) {
-      const sig = def.signatures[0];
+    } else if (functionDef.signatures.length === 1) {
+      const sig = functionDef.signatures[0];
       if (sig.result === 'Boolean' || sig.result === 'MaybeBoolean') {
         if (sig.args.length === 2) {
           if (
@@ -364,10 +359,11 @@ function normalizeDefinition(
         if (!warning) warning = `looks like a "Predicate"?`;
       }
     }
-    return [def, warning];
+    return [functionDef, warning];
   }
 
   if (isSetDefinition(def) || engine.isSubsetOf(domain, 'Function')) {
+    // @todo
     return [def];
   }
 
@@ -448,6 +444,9 @@ function validateDictionary(
       // @todo: for numeric domain, validate them: i.e. real are at least RealNumber, etc...
       // using inferDomain
     }
+    if (isCollectionDefinition(def)) {
+      // @todo
+    }
     if (isFunctionDefinition(def)) {
       // Validate signatures
       for (const sig of def.signatures) {
@@ -518,48 +517,6 @@ function validateDictionary(
       // MaybeBoolean
     }
   }
-}
-
-export function inferNumericDomain(value: Expression): string {
-  const [numer, denom] = getRationalValue(value);
-
-  if (!Number.isNaN(numer) && !Number.isNaN(denom)) {
-    if (numer === 0) return 'NumberZero';
-
-    // The value is a rational number
-    if (denom !== 1) return 'RationalNumber';
-
-    if (SMALL_PRIMES.has(numer)) return 'PrimeNumber';
-
-    if (numer >= 1 && numer < LARGEST_SMALL_PRIME) return 'CompositeNumber';
-
-    if (numer > 0) return 'NaturalNumber';
-
-    return 'Integer';
-  }
-
-  if (value === COMPLEX_INFINITY) return 'ComplexInfinity';
-
-  const head = getFunctionName(value);
-  if (head === POWER) {
-    if (getFunctionName(getArg(value, 2)) === DIVIDE) {
-      if (
-        getArg(getArg(value, 2), 1) === 1 &&
-        getArg(getArg(value, 2), 2) === 2
-      ) {
-        // It's a square root...
-        if (SMALL_PRIMES.has(getNumberValue(getArg(value, 1)))) {
-          // Square root of a prime is irrational
-          return 'IrrationalNumber';
-        }
-      }
-    }
-  }
-  // @todo: the log in a prime base of a prime number is irrational
-
-  if (!Number.isFinite(getNumberValue(value))) return 'SignedInfinity';
-
-  return 'RealNumber';
 }
 
 function setParentsToString(

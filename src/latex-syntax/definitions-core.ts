@@ -5,7 +5,7 @@ import {
   getArg,
   getArgCount,
   getFunctionName,
-  getArgs,
+  getTail,
   getFunctionHead,
   LATEX,
   PARENTHESES,
@@ -17,7 +17,8 @@ import {
   NOTHING,
   SEQUENCE,
   SEQUENCE2,
-} from '../compute-engine/utils';
+  getStringValue,
+} from '../common/utils';
 import { getGroupStyle } from './serializer-style';
 
 function isSpacingToken(token: string): boolean {
@@ -79,7 +80,7 @@ function parseSequence(head: string, prec: number, sep: LatexToken) {
 
 function serializeSequence(sep: string) {
   return (serializer: Serializer, expr: Expression | null): string => {
-    return getArgs(expr)
+    return getTail(expr)
       .map((x) => serializer.serialize(x))
       .join(sep);
   };
@@ -89,20 +90,22 @@ function serializeLatex(
   serializer: Serializer,
   expr: Expression | null
 ): string {
-  if (expr === null) return '';
-  const head = getFunctionHead(expr);
-  if (head !== null) {
-    const args = getArgs(expr);
-    if (head === LATEX) {
-      return args.map((x) => serializeLatex(serializer, x)).join('');
-    }
-    if (args.length === 0) return serializer.serialize(head);
-    return (
-      serializer.serialize(head) +
-      args.map((x) => '{' + serializer.serialize(x) + '}').join('')
-    );
-  }
-  return serializer.serialize(expr);
+  console.assert(getFunctionHead(expr) === LATEX);
+
+  // @todo: add onError handler to serialize()
+  return getTail(expr)
+    .map((x) => {
+      const stringValue = getStringValue(x);
+      // If not a string, serialize the expression to Latex
+      if (stringValue === null) return serializer.serialize(x);
+      if (stringValue === '<{>') return '{';
+      if (stringValue === '<}>') return '}';
+      if (stringValue === '<$>') return '$';
+      if (stringValue === '<$$>') return '$$';
+      if (stringValue === "<space>'") return ' ';
+      return stringValue;
+    })
+    .join('');
 }
 
 export const DEFINITIONS_CORE: LatexDictionary = [
@@ -147,7 +150,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       }
       scanner.skipSpace();
       if (couldBeBaseNumber && scanner.match('_')) {
-        const radix = getNumberValue(scanner.matchRequiredLatexArgument());
+        const radix =
+          getNumberValue(scanner.matchRequiredLatexArgument()) ?? NaN;
         if (!isFinite(radix) || radix < 2 || radix > 36 || maxDigit >= radix) {
           scanner.onError({ code: 'base-out-of-range' });
           return [lhs, NOTHING];
@@ -165,7 +169,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (!seq) return [lhs, [PARENTHESES]];
 
       if (getFunctionName(seq) === SEQUENCE) {
-        return [lhs, [PARENTHESES, ...getArgs(seq)]];
+        return [lhs, [PARENTHESES, ...getTail(seq)]];
       }
       return [lhs, [PARENTHESES, seq]];
     },
@@ -198,7 +202,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         );
         if (!seq) return [null, [LIST]];
         if (getFunctionName(seq) === SEQUENCE) {
-          return [lhs, [LIST, ...getArgs(seq)]];
+          return [lhs, [LIST, ...getTail(seq)]];
         }
         return [lhs, [LIST, seq]];
       }
@@ -209,9 +213,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'BaseForm',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const radix = getNumberValue(getArg(expr, 2));
+      const radix = getNumberValue(getArg(expr, 2)) ?? NaN;
       if (isFinite(radix) && radix >= 2 && radix <= 36) {
-        const num = getNumberValue(getArg(expr, 1));
+        const num = getNumberValue(getArg(expr, 1)) ?? NaN;
         if (isFinite(num)) {
           let digits = Number(num).toString(radix);
           let groupLength = 0;
@@ -370,7 +374,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return [lhs, [DERIVATIVE, 1]];
     },
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const degree = getNumberValue(getArg(expr, 1));
+      const degree = getNumberValue(getArg(expr, 1)) ?? NaN;
       if (!isFinite(degree)) return '';
       const base = serializer.serialize(getArg(expr, 2));
       if (degree === 1) {
@@ -389,7 +393,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
     serialize: (serialize: Serializer, expr: Expression): string => {
       if (getFunctionName(getArg(expr, 1)) !== LIST) return '';
-      const rows = getArgs(getArg(expr, 1));
+      const rows = getTail(getArg(expr, 1));
       let body = '';
       let rowSep = '';
       for (const row of rows) {

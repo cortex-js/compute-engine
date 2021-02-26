@@ -1,28 +1,5 @@
 import { Expression } from '../src/public';
-import { expression, latex, printExpression } from './utils';
-
-beforeEach(() => {
-  jest.spyOn(console, 'assert').mockImplementation((assertion) => {
-    if (!assertion) debugger;
-  });
-  jest.spyOn(console, 'log').mockImplementation(() => {
-    debugger;
-  });
-  jest.spyOn(console, 'warn').mockImplementation(() => {
-    debugger;
-  });
-  jest.spyOn(console, 'info').mockImplementation(() => {
-    debugger;
-  });
-});
-expect.addSnapshotSerializer({
-  // test: (val): boolean => Array.isArray(val) || typeof val === 'object',
-  test: (_val): boolean => true,
-
-  serialize: (val, _config, _indentation, _depth, _refs, _printer): string => {
-    return printExpression(val);
-  },
-});
+import { expression, latex } from './utils';
 
 describe('NUMBERS', () => {
   test('Parsing', () => {
@@ -98,16 +75,18 @@ describe('NUMBERS', () => {
     expect(expression('\\frac{0}{0}')).toMatchInlineSnapshot(
       `['Multiply', 0, ['Power', 0, -1]]`
     );
-    expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(`'\\mathtt{NaN}'`);
+    expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(
+      `'\\operatorname{NaN}'`
+    );
     expect(latex({ num: 'Infinity' })).toMatchInlineSnapshot(`'\\infty'`);
   });
   test('Not numbers', () => {
-    expect(latex('NaN')).toMatchInlineSnapshot(`'\\operatorname{NaN}'`);
-    expect(latex(Infinity)).toMatchInlineSnapshot(`'Infinity'`);
+    expect(latex(NaN)).toMatchInlineSnapshot(`'\\operatorname{NaN}'`);
+    expect(latex(Infinity)).toMatchInlineSnapshot(`'\\infty'`);
     // Invalid expression
     expect(
       latex(({ num: Infinity } as any) as Expression)
-    ).toMatchInlineSnapshot(`'Infinity'`);
+    ).toMatchInlineSnapshot(`'\\infty'`);
     expect(latex({ num: 'infinity' })).toMatchInlineSnapshot(
       `'syntax-error {"num":"infinity"}'`
     );

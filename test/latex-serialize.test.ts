@@ -7,33 +7,10 @@ import {
   POWER,
   DIVIDE,
   LATEX,
-} from '../src/compute-engine/utils';
-import { expression, latex, printExpression } from './utils';
+} from '../src/common/utils';
+import { expression, latex } from './utils';
 
-beforeEach(() => {
-  jest.spyOn(console, 'assert').mockImplementation((assertion) => {
-    if (!assertion) debugger;
-  });
-  jest.spyOn(console, 'log').mockImplementation(() => {
-    debugger;
-  });
-  jest.spyOn(console, 'warn').mockImplementation(() => {
-    debugger;
-  });
-  jest.spyOn(console, 'info').mockImplementation(() => {
-    debugger;
-  });
-});
-expect.addSnapshotSerializer({
-  // test: (val): boolean => Array.isArray(val) || typeof val === 'object',
-  test: (_val): boolean => true,
-
-  serialize: (val, _config, _indentation, _depth, _refs, _printer): string => {
-    return printExpression(val);
-  },
-});
-
-describe('SERIALIZING', () => {
+describe('LATEX SERIALIZING', () => {
   test('Numbers', () => {
     expect(latex(1)).toMatchInlineSnapshot(`'1'`);
     expect(latex(+1)).toMatchInlineSnapshot(`'1'`);
@@ -52,7 +29,9 @@ describe('SERIALIZING', () => {
     );
     expect(latex({ num: 'Infinity' })).toMatchInlineSnapshot(`'\\infty'`);
     expect(latex({ num: '-Infinity' })).toMatchInlineSnapshot(`'-\\infty'`);
-    expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(`'\\mathtt{NaN}'`);
+    expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(
+      `'\\operatorname{NaN}'`
+    );
     expect(latex({ num: 'Infinity' })).toMatchInlineSnapshot(`'\\infty'`);
 
     // Repeating patern
@@ -87,7 +66,7 @@ describe('SERIALIZING', () => {
   });
 
   test('Functions', () => {
-    expect(latex(['f', 'x', 1, 0])).toMatchInlineSnapshot(`'f(x,1,0)'`);
+    expect(latex(['f', 'x', 1, 0])).toMatchInlineSnapshot(`'f(x, 1, 0)'`);
     expect(latex(['\\foo', 'x', 1, 0])).toMatchInlineSnapshot(
       `'\\foo{x}{1}{0}'`
     );
@@ -99,7 +78,7 @@ describe('SERIALIZING', () => {
 
     // Head as expression
     expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
-      `'g(f)(x,1,0)'`
+      `'g(f)(x, 1, 0)'`
     );
   });
 
@@ -138,8 +117,11 @@ describe('LATEX', () => {
   test('Latex Valid forms', () => {
     expect(latex([LATEX, 3, 4])).toMatchInlineSnapshot(`'34'`);
     expect(latex([LATEX, 'x', 3])).toMatchInlineSnapshot(`'x3'`);
-    expect(latex([LATEX, '\\frac', '<{>', 42.12, '<}'])).toMatchInlineSnapshot(
-      `'\\frac{42.12\\operatorname{<}}'`
+    expect(
+      latex([LATEX, "'\\frac'", "'<{>'", 42.12, "'<}>'"])
+    ).toMatchInlineSnapshot(`'\\frac{42.12}'`);
+    expect(latex([LATEX, ['Divide', 'Pi', 2]])).toMatchInlineSnapshot(
+      `'\\frac{\\pi}{2}'`
     );
   });
 });
