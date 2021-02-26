@@ -357,7 +357,7 @@ describe('CORTEX SERIALIZING', () => {
   });
 });
 
-describe('CORTEX PARSING', () => {
+describe.skip('CORTEX PARSING', () => {
   test('Comments', () => {});
 
   test('Numbers', () => {
