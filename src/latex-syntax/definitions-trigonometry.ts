@@ -55,7 +55,7 @@ function parseTrig(
   }
 
   // Note: names as per NIST-DLMF
-  let head =
+  let head: Expression =
     {
       '\\arcsin': 'Arcsin',
       '\\arccos': 'Arccos',

@@ -2,8 +2,8 @@ import { Expression } from '../public';
 import { ComputeEngine } from './public';
 
 export async function evaluateWithEngine(
-  expr: Expression,
-  engine: ComputeEngine
+  _expr: Expression,
+  _engine: ComputeEngine
 ): Promise<Expression | null> {
   // @todo: implement evaluation algorithm:
   // 1/ Convert to Canonical Form.
