@@ -21,6 +21,7 @@ import {
   Formatter,
   FormattingBlock,
 } from './formatter';
+import { INVISIBLE_CHARS } from './characters';
 
 export const NUMBER_FORMATTING_OPTIONS: Required<NumberFormattingOptions> = {
   precision: 15, // assume 2^53 bits floating points
@@ -45,9 +46,20 @@ export const NUMBER_FORMATTING_OPTIONS: Required<NumberFormattingOptions> = {
 export function serializeCortex(
   expr: Expression,
   onError?: CortexErrorListener,
-  options?: FormatingOptions
+  options?: FormatingOptions & {
+    fancySymbols?: boolean;
+  }
 ): string {
-  const fmt = new Formatter(options);
+  const fmt = new Formatter({
+    ...(options?.fancySymbols
+      ? {
+          aroundInfixOperator: '\u205f',
+          aroundRelationalOperator: '\u2005',
+          afterSeparator: '\u2009',
+        }
+      : {}),
+    ...options,
+  });
 
   function serializeExpression(expr: Expression): FormattingBlock {
     // Is this a string literal?
@@ -81,10 +93,17 @@ export function serializeCortex(
         const keyValues = Object.keys(dict).map((key) =>
           fmt.line(
             escapeString(key),
-            fmt.infixOperator('->'),
+            fmt.relationalOperator('->'),
             serializeExpression(dict[key])
           )
         );
+
+        if (keyValues.length === 0)
+          return fmt.line(
+            fmt.fence('{'),
+            fmt.relationalOperator('->'),
+            fmt.fence('}')
+          );
 
         body = fmt.fencedList('{', fmt.separator(','), '}', keyValues);
       }
@@ -116,29 +135,75 @@ export function serializeCortex(
     return fmt.text();
   }
 
-  const OPERATORS = {
-    NotElementOf: { symbol: '!in', precedence: 160 },
-    ElementOf: { symbol: 'in', precedence: 240 },
-    LessEqual: { symbol: '<=', precedence: 241 },
-    GreaterEqual: { symbol: '>=', precedence: 242 },
-    Less: { symbol: '<', precedence: 245 },
-    Greater: { symbol: '>', precedence: 245 },
-    NotEqual: { symbol: '!=', precedence: 255 },
-    Assign: { symbol: '=', precedence: 258 },
-    Equal: { symbol: '==', precedence: 260 },
-    Same: { symbol: '===', precedence: 260 },
-    KeyValue: { symbol: '->', precedence: 265 },
-    Add: { symbol: '+', precedence: 275 },
-    Subtract: { symbol: '-', precedence: 275 },
-    Multiply: { symbol: '*', precedence: 390 },
-    Divide: { symbol: '/', precedence: 660 },
-    Negate: { symbol: '-', precedence: 665 },
-    Power: { symbol: '^', precedence: 720 },
-    Or: { symbol: '||', precedence: 800 },
-    And: { symbol: '&&', precedence: 810 }, // @todo revisit precedence
-    Not: { symbol: '!', precedence: 820 },
+  type OperatorInfo = {
+    symbol: string;
+    fancySymbol?: string;
+    precedence: number;
+    unary?: boolean;
+    relational?: boolean;
   };
-  const UNARY_OPERATORS = ['Not', 'Negate'];
+
+  const OPERATORS: { [name: string]: OperatorInfo } = {
+    NotElementOf: {
+      symbol: '!in',
+      fancySymbol: '\u2209',
+      relational: true,
+      precedence: 160,
+    },
+    ElementOf: {
+      symbol: 'in',
+      fancySymbol: '\u2208',
+      relational: true,
+      precedence: 240,
+    },
+    LessEqual: {
+      symbol: '<=',
+      relational: true,
+      fancySymbol: '\u2A7d',
+      precedence: 241,
+    },
+    GreaterEqual: {
+      symbol: '>=',
+      fancySymbol: '\u2A7e',
+      relational: true,
+      precedence: 242,
+    },
+    Less: { symbol: '<', relational: true, precedence: 245 },
+    Greater: { symbol: '>', relational: true, precedence: 245 },
+    NotEqual: {
+      symbol: '!=',
+      fancySymbol: '\u2260',
+      relational: true,
+      precedence: 255,
+    },
+    Assign: { symbol: '=', relational: true, precedence: 258 },
+    Equal: { symbol: '==', relational: true, precedence: 260 },
+    Same: {
+      symbol: '===',
+      fancySymbol: '\u2263',
+      relational: true,
+      precedence: 260,
+    },
+    KeyValue: {
+      symbol: '->',
+      fancySymbol: '\u2192',
+      precedence: 265,
+    },
+    Add: { symbol: '+', precedence: 275 },
+    Subtract: { symbol: '-', fancySymbol: '\u2212', precedence: 275 },
+    Multiply: { symbol: '*', fancySymbol: '\u00d7', precedence: 390 },
+    Divide: { symbol: '/', fancySymbol: '\u00f7', precedence: 660 },
+    Negate: {
+      symbol: '-',
+      unary: true,
+      fancySymbol: '\u2212',
+      precedence: 665,
+    },
+    Power: { symbol: '^', precedence: 720 },
+    Or: { symbol: '||', fancySymbol: '\u22c1', precedence: 800 },
+    And: { symbol: '&&', fancySymbol: '\u22c0', precedence: 810 }, // @todo revisit precedence
+    Not: { symbol: '!', unary: true, fancySymbol: '\u00ac', precedence: 820 },
+  };
 
   //
   // Functions with a custom serializer: BaseForm, String, List, Set
@@ -251,16 +316,19 @@ export function serializeCortex(
 
     const op = OPERATORS[head];
     if (!op) return null;
+    const opSymbol = options?.fancySymbols
+      ? op.fancySymbol ?? op.symbol
+      : op.symbol;
 
-    if (UNARY_OPERATORS.includes(head)) {
+    if (op.unary) {
       if (getArgCount(expr) !== 1) return null;
       const arg = getArg(expr, 1);
       const argHead = getFunctionName(arg);
       const argOp = OPERATORS[argHead];
       if (argOp && argOp.precedence < op.precedence) {
-        return fmt.line(op.symbol, '(', serializeExpression(arg), ')');
+        return fmt.line(opSymbol, '(', serializeExpression(arg), ')');
       }
-      return fmt.line(op.symbol, serializeExpression(arg));
+      return fmt.line(opSymbol, serializeExpression(arg));
     }
 
     const operands = mapArgs<FormattingBlock>(expr, (arg) => {
@@ -274,61 +342,18 @@ export function serializeCortex(
 
     if (!operands) return null;
 
-    return fmt.list(fmt.infixOperator(op.symbol), operands);
+    return fmt.list(
+      op.relational
+        ? fmt.relationalOperator(opSymbol)
+        : fmt.infixOperator(opSymbol),
+      operands
+    );
   }
 
   // Main body of `serializeCortex()`
-  const result = serializeExpression(expr);
-  console.log(result.debug());
-  return result.serialize(0);
-  //return serializeExpression(expr).serialize(0);
+  return serializeExpression(expr).serialize(0);
 }
 function escapeInvisibleCharacter(code: number): string {
-  const INVISIBLE_CHARS = [
-    0x007f, // Delete
-    0x00a0, // NBS Non-Breaking Space
-    0x00ad, // Soft-hyphen
-    0x061c, // Arabic Letter Mark
-    0x180e, // Mongolian Vowel Separator
-    0x2000, // En Quad
-    0x2001, // Em Quad
-    0x2002, // En Space
-    0x2003, // Em Space
-    0x2004, // Three-per-em Space
-    0x2005, // Four-per-em Space
-    0x2006, // Six-per-em Space
-    0x2007, // Figure Space
-    0x2008, // Punctuation Space
-    0x2009, // Thin Space
-    0x200a, // Hair Space
-    0x200b, // Zero-Width Space
-    0x200c, // Zero-Width Non-Joiner
-    0x200d, // ZWJ, Zero-Width Joiner
-    0x200e, // Left-to-right Mark
-    0x200f, // Right-to-left Mark
-    0x2028, // Line Separator
-    0x202f, // Narrow No-break Space
-    0x205f, // Medium mathematical Space
-    0x2060, // Word Joiner
-    0x2061, // FUNCTION APPLICATION
-    0x2062, // INVISIBLE TIMES
-    0x2063, // INVISIBLE SEPARATOR
-    0x2064, // INVISIBLE PLUS
-    0x2066, // LEFT - TO - RIGHT ISOLATE
-    0x2067, // RIGHT - TO - LEFT ISOLATE
-    0x2068, // FIRST STRONG ISOLATE
-    0x2069, // POP DIRECTIONAL ISOLATE
-    0x206a, // INHIBIT SYMMETRIC SWAPPING
-    0x206b, // ACTIVATE SYMMETRIC SWAPPING
-    0x206c, // INHIBIT ARABIC FORM SHAPING
-    0x206d, // ACTIVATE ARABIC FORM SHAPING
-    0x206e, // NATIONAL DIGIT SHAPES
-    0x206f, // NOMINAL DIGIT SHAPES
-    0x2800, // Braille Pattern Blank
-    0x3000, // Ideographic Space
-    0xfeff, // Byte Order Mark
-    0xfffe, // Byte Order Mark
-  ];
   if (code < 31 || INVISIBLE_CHARS.includes(code)) {
     return `\\u{${('0000' + code.toString(16)).slice(-4)}}`;
   }
@@ -337,6 +362,7 @@ function escapeInvisibleCharacter(code: number): string {
 
 function escapeString(s: string): string {
   const ESCAPED_CHARS = {
+    '\u0020': ' ', // We dont' escape SPACE
     '\\': '\\\\',
     "'": "\\'",
     '"': '\\"',

@@ -2,6 +2,7 @@ import { Expression } from '../public';
 import {
   getArg,
   getArgCount,
+  getDictionary,
   getFunctionHead,
   getNumberValue,
   getSymbolName,
@@ -48,6 +49,21 @@ export function same(lhs: Expression, rhs: Expression): boolean {
   //
   const lhSymbol = getSymbolName(lhs);
   if (lhSymbol !== null) return lhSymbol === getSymbolName(rhs);
+
+  //
+  // Dictionary
+  //
+  const lhsDict = getDictionary(lhs);
+  if (lhsDict !== null) {
+    const rhsDict = getDictionary(rhs);
+    if (!rhsDict) return false;
+    const keys = Object.keys(lhsDict);
+    if (Object.keys(rhsDict).length !== keys.length) return false;
+    for (const key of keys) {
+      if (!same(lhsDict[key], rhsDict[key])) return false;
+    }
+    return true;
+  }
 
   //
   // Function

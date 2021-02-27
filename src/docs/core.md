@@ -45,20 +45,20 @@ This symbol is used to indicate that out of multiple possible values, all apply.
 
 ### `About`
 
-`["About", `_`symbol`_`]`
+`About(`_`symbol`_`)`
 
 Return information about a symbol such as its domain, its attributes, its value,
 etc...
 
 ### `Domain`
 
-`["Domain", `_`expression`_`]`
+`Domain(`_`expression`_`)`
 
 Return the domain of the expression.
 
 ### `Evaluate`
 
-`["Evaluate", `_`expression`_`]`
+`Evaluate(`_`expression`_`)` `Evaluate(`_`expr1`_`, `_`expr2`_`)`
 
 Apply a sequence of definitions to an expression in order to reduce and simplify
 it.
@@ -67,23 +67,23 @@ An evaluation can consist of:
 
 - a computation
 
-```json
-["Evaluate", ["Add", 2, 3]]
+```cortex
+Evaluate(2 + 3)
 // ➔ 5
 ```
 
 - an execution
 
-```json
-["Evaluate", ["Length", ["List", 5, 7]]]
+```cortext
+Evaluate(Length([5, 7]))
 // ➔ 2
 ```
 
 - a simplification
 
-```json
-["Evaluate", ["Add", 2, ["Add", "x", 3]]]
-// ➔ ["Add", 5, "x"]
+```cortex
+Evaluate(2 + x + 3)
+// ➔ 5 + x
 ```
 
 ### `Identity`
@@ -105,22 +105,42 @@ Return the inverse function of its argument.
 
 ### `Lambda`
 
-`["Lambda", `_`variables`_`, `_`expression`_`]`
+`Lambda"(`_`variables:List`_`, `_`expression`_`)`
 
 Create a [Lambda-function](https://en.wikipedia.org/wiki/Anonymous_function),
-also called anonymous function.
+also called **anonymous function**.
 
 The first argument is a symbol or a list of symbols which are the bound
-variables of the Lambda-function.
+variables (parameters) of the Lambda-function.
 
 The second argument is an expression expressed as a function of the bound
 variables of the Lambda-function.
 
 To apply a Lambda-function to some arguments, use:
 
-```json
-[["Lambda", ["List", "x"], ["Multiply", "x", "x"]], "3"]
+```cortex
+Lambda([x], x * x)(3)
 // ➔ 9
+```
+
+You can avoid naming the parameters by using the following shorthands:
+
+- `_` or `_0` : the first argument
+- `_1` : the second argument
+- `_2` : the third argument, etc...
+- `__`: the sequence of arguments, so `Length(__)` is the number of arguments
+
+```cortex
+Lambda(_ * _)(4)
+// ➔ 16
+```
+
+You can assign a Lambda expression to a symbol for later use:
+
+```cortex
+cube = Lambda(_ * _ * _)
+cube(5)
+// ➔ 125
 ```
 
 ### `Latex`
@@ -188,8 +208,14 @@ match(["Add", ["Pattern"], ["Pattern"]], ["Add", 3, 5]))
 
 ### `Same`
 
-Indicate if two expressions are structurally identical, using a literal symbolic
-identity.
+_`expr1`_ `===` _`expr2`_
+
+`Same(`_`expr1`_`, `_`expr2`_`)`
+
+`Same(`_`expr1`_`, `_`expr2`_`, ...`_`expr-n`_`)`
+
+Indicate if two (or more) expressions are structurally identical, using a
+literal symbolic identity.
 
 Two expressions are the same if:
 
@@ -212,11 +238,11 @@ same({ sym: 'Pi', wikidata: 'Q168' }, { sym: 'Pi', wikidata: 'Q167' });
 Using a canonical format will result in more positive matches.
 
 ```js
-same(['Add', 'x', 1], ['Add', 1, 'x']);
-// ➔ false
+Same(x + 1, 1 + x);
+// ➔ False
 
-same(canonical(['Add', 'x', 1]), canonical(['Add', 1, 'x']));
-// ➔ true
+Same(Canonical(x + 1, 1 + x));
+// ➔ True
 ```
 
 ### Superscript/subscript

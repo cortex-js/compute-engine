@@ -4,6 +4,7 @@ import {
   CortexErrorListener,
   CortexErrorMessage,
 } from './cortex-utils';
+import { WHITE_SPACE } from './characters';
 
 class CortexExpression {
   index = 0;
@@ -23,6 +24,9 @@ class CortexExpression {
   atEnd(): boolean {
     return this.index >= this.s.length;
   }
+  atWhiteSpace(): boolean {
+    return WHITE_SPACE.includes(this.s.charCodeAt(this.index));
+  }
   peek(n = 1): string {
     if (n === 1) return this.s[this.index];
     return this.s.slice(this.index, this.index + n);
@@ -30,13 +34,16 @@ class CortexExpression {
   skipWhitespace(): void {
     let done = false;
     while (!done) {
-      done = !this.match(' ') && !this.match('\t');
+      done = !WHITE_SPACE.includes(this.s.charCodeAt(this.index));
+      if (!done) this.index;
     }
   }
   skipLineComment(): void {
+    // @todo
     return;
   }
   skipBlockComment(): void {
+    // @todo
     return;
   }
 
@@ -63,9 +70,12 @@ class CortexExpression {
     this.index += target.length;
     return true;
   }
+  parseNumber(): Expression | null {
+    return null;
+  }
 
   parseExpression(): Expression {
-    return 'Nothing';
+    return this.parseNumber() ?? 'Nothing';
   }
 }
 

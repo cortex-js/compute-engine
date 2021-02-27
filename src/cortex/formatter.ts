@@ -22,8 +22,9 @@ export type FormatingOptions = {
   indentWidth: number; // How many indentChar for an indent?
   margin: number; // Maximum right column
   softMargin: number; // Column before `margin` to encourage breaking
-  aroundInfixOperator: string; // Spacing around infix operators. Default: '\u0020'
-  afterSeparator: string; // Spacing after separator (',', ';'). Default: '\u0020'
+  aroundInfixOperator: string; // Spacing around infix operators. Default: '\u0020' (fancy alternate: '\u205f')
+  aroundRelationalOperator: string; // Spacing around infix operators. Default: '\u0020' (fancy alternate: '\u2005')
+  afterSeparator: string; // Spacing after separator (',', ';'). Default: '\u0020' (fancy alt: '\u2009)
   cost: FormatingCosts;
 };
 
@@ -94,9 +95,6 @@ export class TextBlock extends FormattingBlock {
   s: string;
   constructor(fmt: Formatter, s: string) {
     super(fmt);
-    if (s.length === 0) {
-      console.log('Empty string');
-    }
     this.s = s;
   }
   debug(): string {
@@ -346,6 +344,7 @@ export class Formatter {
       margin: 80,
       softMargin: 50,
       aroundInfixOperator: '\u0020',
+      aroundRelationalOperator: '\u0020',
       afterSeparator: '\u0020',
       ...(options ?? {}),
     };
@@ -383,7 +382,7 @@ export class Formatter {
       .filter((x) => !(x instanceof EmptyBlock));
   }
 
-  /** A binary or ternary operator */
+  /** A binary or ternary operator: +, -, etc... */
   infixOperator(op: string): TextBlock {
     return new TextBlock(
       this,
@@ -391,8 +390,22 @@ export class Formatter {
     );
   }
 
+  /** A relational operator: =, <=, etc.. */
+  relationalOperator(op: string): TextBlock {
+    return new TextBlock(
+      this,
+      this.options.aroundRelationalOperator +
+        op +
+        this.options.aroundRelationalOperator
+    );
+  }
+
   separator(op: string): TextBlock {
     return new TextBlock(this, op + this.options.afterSeparator);
+  }
+
+  fence(f: string): TextBlock {
+    return new TextBlock(this, f);
   }
 
   /** A single line of unbroken text */
@@ -400,6 +413,7 @@ export class Formatter {
     if (!s || s.length === 0) return new EmptyBlock(this);
     return new TextBlock(this, s);
   }
+
   /** Horizontal juxtaposition of a list of blocks */
   line(...inBlocks: (string | FormattingBlock)[]): FormattingBlock {
     const blocks = this.normalizedBlocks(inBlocks);
@@ -427,12 +441,15 @@ export class Formatter {
 
     return new LineBlock(this, ...mergedBlocks);
   }
+
+  /** A list of block stacked on top of one another */
   stack(...inBlocks: (string | FormattingBlock)[]): FormattingBlock {
     const blocks = this.normalizedBlocks(inBlocks);
     if (blocks.length === 1) return blocks[0];
 
     return new StackBlock(this, ...blocks);
   }
+
   /** Packs its constituent layouts horizontally, inserting line breaks
    * between them so as to minimize the total cost of output, in a manner
    * analogous to the composition of words in paragraph.
@@ -446,6 +463,7 @@ export class Formatter {
 
     return new WrapBlock(this, ...blocks);
   }
+
   /** Indent a block by `indent` units. The value of a unit is specified in the options */
   indent(block: FormattingBlock, indent = 1): FormattingBlock {
     return new LineBlock(
@@ -454,6 +472,7 @@ export class Formatter {
       block
     );
   }
+
   choice(...inBlocks: (string | FormattingBlock)[]): FormattingBlock {
     const blocks = this.normalizedBlocks(inBlocks);
     if (blocks.length === 1) return blocks[0];
@@ -465,7 +484,7 @@ export class Formatter {
     block: FormattingBlock,
     close: string
   ): FormattingBlock {
-    if (!block) return this.text(open + close);
+    if (!block) return this.line(this.fence(open), this.fence(close));
     return this.fencedList(open, '', close, [block]);
   }
 
@@ -475,9 +494,13 @@ export class Formatter {
     close: string,
     blocks: FormattingBlock[]
   ): FormattingBlock {
-    if (blocks.length === 0) return this.text(open + close);
+    const openBlock = this.fence(open);
+    const closeBlock = this.fence(close);
+    if (blocks.length === 0) return this.line(openBlock, closeBlock);
 
-    if (blocks.length === 1) return this.line(open, blocks[0], close);
+    if (blocks.length === 1) {
+      return this.line(openBlock, blocks[0], closeBlock);
+    }
 
     // `sepBlocks` has all the elements followed by a separator
     const sepBlocks: FormattingBlock[] = blocks.map((block) =>
@@ -497,8 +520,8 @@ export class Formatter {
       );
     }
     return this.choice(
-      this.line(open, ...inlineSepBlocks, close),
-      this.stack(open, this.indent(this.stack(...sepBlocks)), close)
+      this.line(openBlock, ...inlineSepBlocks, closeBlock),
+      this.stack(openBlock, this.indent(this.stack(...sepBlocks)), closeBlock)
     );
   }
 

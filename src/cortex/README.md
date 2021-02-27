@@ -9,23 +9,36 @@ sidebar:
 
 # Cortex
 
-Cortex is a text-based programming language for scientific computing that
-outputs MathJSON expressions. Those expressions are then evaluated by the
-Compute Engine to produce a result.
+Cortex is a text-based programming language for scientific computing.
+
+Here is Hello World in Cortex:
+
+```cortex
+"Hello World"
+```
+
+A cortex program is an expression that gets desugared to MathJSON, compiled,
+evaluated by the Cortex Compute Engine before being displayed.
+
+Here are a few more examples:
 
 ```cortex
 Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
 // -> 4x^3 + 2x^2 + 3
 
-x := 2^11 - 1
+x = 2^11 - 1
 String(x , " is a ", Domain(x))
 // -> "x is a PrimeNumber"
 ```
 
-A Cortex program is a series of Cortex expressions. Each expression is one or
-more lines.
+Comments follow the C/JavaScript tradition.
+
+Each expression in a Cortex program is written one or more lines.
 
 If a line ends with a `\` character, the next line is considered a continuation.
+While this is not needed often as in most cases a new line is just considered
+whitespace that is skipped, it can come in handy when writing a very long
+string.
 
 ## Comments
 
@@ -121,3 +134,56 @@ excluded from all the lines before it.
 ## Lists
 
 ## Sets
+
+## Desugaring
+
+The process to convert a Cortex program into a MathJSON expression is pretty
+straightforward:
+
+- Comments get added as metadata to the nearest expression
+- Function calls gets converted into MathJSON functions:
+
+```cortex
+Print("x =", x)
+```
+
+```json
+["Print", "'x'", "x"]
+```
+
+- Collections (List, Set, Tuple, Sequence) get converted into a corresponding
+  MathJSON expression:
+
+```cortex
+set =  {2, 5, 7, 11, 13}
+list = [2, 7, 2, 4, 2]
+tuple = (1.5, 0.5)
+sequence = 2, 5, 7
+```
+
+```json
+["Equal", "set", ["Set", 2, 5, 7, 11, 13]][
+  ("Equal", "list", ["List", 2, 7, 2, 4, 2])
+][("Equal", "tuple", ["Tuple", 1.5, 0.5])][
+  ("Equal", "sequence", ["Sequence", 2, 5, 7])
+]
+```
+
+- Control structures also get converted to an appropriate expression:
+
+```cortex
+if (x in PrimeNumber) {
+  Print(x);
+   x += 1;
+} else {
+  x += 2;
+}
+```
+
+```MathJSON
+["If",
+  ["Element", "x", "PrimeNumber"],
+  ["Evaluate", ["Print", "x"], ["Equal", "x", ["Add", "x", 1]]],
+  ["Add", "x", 2]]
+]
+```

@@ -26,15 +26,16 @@ sidebar:
 
 ## Functions
 
-- `Add` - [Addition](https://www.wikidata.org/wiki/Q32043).
-- `Negate` - The [additive inverse](https://www.wikidata.org/wiki/Q715358).
-- `Multiply` - [Multiplication](https://www.wikidata.org/wiki/Q40276)
-- `Power` - [Exponentiation](https://www.wikidata.org/wiki/Q33456)
+- `Add` or `+` - [Addition](https://www.wikidata.org/wiki/Q32043).
+- `Subtract` or `-` - [Subtraction](https://www.wikidata.org/wiki/Q32043)
+- `Negate` or `-` - The
+  [additive inverse](https://www.wikidata.org/wiki/Q715358).
+- `Multiply` or `*` - [Multiplication](https://www.wikidata.org/wiki/Q40276)
+- `Power` or `^` - [Exponentiation](https://www.wikidata.org/wiki/Q33456)
 - `Root` = $$\sqrt[n]{x}=x^{\frac1n}$$. The
   [n-th root](https://www.wikidata.org/wiki/Q601053)
 - `Sqrt` = $$\sqrt{x}=x^{\frac12}$$. The
   [square root](https://www.wikidata.org/wiki/Q134237).
-- `Subtract` - [Subtraction](https://www.wikidata.org/wiki/Q32043)
 
 ---
 
