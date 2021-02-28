@@ -1,4 +1,10 @@
-import { DictionaryCategory, Expression } from '../public';
+import {
+  DictionaryCategory,
+  ErrorSignal,
+  Expression,
+  WarningSignal,
+  WarningSignalHandler,
+} from '../public';
 
 /**
  * A dictionary maps a MathJSON name to a definition.
@@ -36,56 +42,6 @@ export type CompiledDictionary = Map<
   string,
   FunctionDefinition | SetDefinition | SymbolDefinition
 >;
-
-export type SignalCode =
-  | 'timeout'
-  | 'out-of-memory'
-  | 'recursion-depth-exceeded'
-  | 'iteration-limit-exceeded'
-  | 'syntax-error'
-  | 'invalid-name'
-  | 'cyclic-definition' // arg: [cycle]
-  | 'invalid-supersets' // arg: [superset-domain]
-  | 'expected-supersets'
-  | 'unknown-domain' // arg: [domain]
-  | 'duplicate-wikidata' // arg: [wikidata]
-  | 'invalid-dictionary-entry'; // arg: [error]
-
-export type Signal = {
-  severity?: 'warning' | 'error';
-
-  code: SignalCode;
-
-  // Optional, one or more arguments specific to the signal code.
-  args?: string[];
-
-  // If applicable, the head of the function about which the
-  // signal was raised
-  head?: string;
-
-  // Location when the signal was raised.
-  origin?: {
-    filename?: string;
-    literal?: string;
-    line: number;
-    column: number;
-  };
-};
-
-export type ErrorSignal = Signal & {
-  severity: 'error';
-};
-
-export declare class CortexError extends Error {
-  constructor(errorSignal: Signal);
-}
-
-export type WarningSignal = Signal & {
-  severity: 'warning';
-};
-
-export type ErrorSignalHandler = (error: ErrorSignal) => void;
-export type WarningSignalHandler = (warnings: WarningSignal[]) => void;
 
 /**
  * A scope is a set of names in a dictionary that are bound (defined) in

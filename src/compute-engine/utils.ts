@@ -1,5 +1,4 @@
-import { Expression } from '../public';
-import { ErrorSignal, Signal } from './public';
+import { ErrorSignal, Expression, Signal } from '../public';
 
 export const MACHINE_PRECISION_BITS = 53;
 export const MACHINE_PRECISION = Math.log10(
@@ -41,5 +40,21 @@ export class CortexError {
   signal: ErrorSignal;
   constructor(errorSignal: Signal) {
     this.signal = { severity: 'error', ...errorSignal } as ErrorSignal;
+  }
+  toString(): string {
+    let result = '';
+    if (this.signal.head) {
+      result += this.signal.head + ': ';
+    }
+    result += this.signal.code;
+
+    if (this.signal.args) {
+      result += ' ';
+      for (const arg of this.signal.args) {
+        result += arg.toString() + ' ';
+      }
+    }
+
+    return result;
   }
 }

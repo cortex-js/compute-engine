@@ -86,7 +86,24 @@
         });
         updateContent();
 
-
+        function warningsToString(warnings) {
+            let errorMsg = '';
+            if (warnings && warnings.length > 0) {
+                for (const warning of warnings) {
+                    if (warning.signal.head) {
+                        errorMsg += warning.signal.head + ': ';
+                    }
+                    errorMsg += warning.signal.code;
+                    if (warning.signal.args) {
+                        for (const arg of warning.signal.args) {
+                            errorMsg += arg.toString() + ' ';
+                        }
+                    }
+                    errorMsg += '<br>'
+                }
+            }
+            return errorMsg;
+        }
 
         function updateContent() {
             const cortex = input.value;
@@ -96,59 +113,35 @@
                 document.getElementById('mathjson').classList.remove('visible');
                 document.getElementById('result').classList.remove('visible');
                 document.getElementById('error').classList.remove('visible');
-                function cortexError(err) {
-                    errors.push(err.code +
-                        (err.detail ? ': ' + err.detail : '') +
-                        '\n' +
-                        cortex +
-                        '|  ' +
-                        String(' ').repeat(err.pos) +
-                        '▲',
-                    )
-                }
-                function engineError(err) {
-                    if (err.before && err.after) {
-                        errors.push(err.code +
-                            (err.arg ? ': ' + err.arg : '') +
-                            '\n' +
-                            '|  ' +
-                            err.before +
-                            err.after +
-                            '\n' +
-                            '|  ' +
-                            String(' ').repeat(err.before.length) +
-                            '▲',
-                        )
-                    } else {
-                        errors.push(err.code +
-                            (err.arg ? ': ' + err.arg : '')
-                        )
+                let errorMsg = '';
+                try {
+                    const [expr, warnings] = parseCortex(cortex);
+                    errorMsg += warningsToString(warnings);
+                    if (expr) {
+                        setTimeout(() => {
+                            document.getElementById('cortex').classList.add('visible');
+                            document.getElementById('mathjson').classList.add('visible');
+                            document.getElementById('result').classList.add('visible');
+                        }, 125);
+                        document.getElementById('mathjson').innerHTML =
+                            escapeHtml(JSON.stringify(expr, null, 2));
+
+                        document.getElementById('cortex').innerHTML =
+                            escapeHtml(serializeCortex(expr));
+                        document.getElementById('result').innerHTML =
+                            escapeHtml(serializeCortex(engine.evaluate(expr)));
+                        errorMsg += warningsToString(engine.warnings);
                     }
+                } catch (err) {
+                    errorMsg += err.toString() + '<br>';
                 }
-                const expr = parseCortex(cortex, cortexError);
-                if (expr) {
-                    setTimeout(() => {
-                        document.getElementById('cortex').classList.add('visible');
-                        document.getElementById('mathjson').classList.add('visible');
-                        document.getElementById('result').classList.add('visible');
-                    }, 125);
-                    document.getElementById('mathjson').innerHTML =
-                        escapeHtml(JSON.stringify(expr, null, 2));
-
-                    document.getElementById('cortex').innerHTML =
-                        escapeHtml(serializeCortex(expr));
-
-                    document.getElementById('result').innerHTML =
-                        escapeHtml(serializeCortex(
-                            engine.evaluate(expr, engineError)
-                        )
-                        );
-
-                }
+                //
+                // Update the error message panel
+                //
                 const error = document.getElementById('error');
-                if (errors.length > 0) {
+                if (errorMsg) {
                     error.classList.add('visible');
-                    error.innerHTML = errors.join('<br>');
+                    error.innerHTML = errorMsg;
                 } else {
                     error.classList.remove('visible');
                 }

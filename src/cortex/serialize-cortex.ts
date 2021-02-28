@@ -14,7 +14,6 @@ import { splitGraphemes } from '../common/grapheme-splitter';
 import { NumberFormattingOptions } from '../latex-syntax/public';
 import { Expression } from '../public';
 import { serializeHexFloat, serializeNumber } from '../common/serialize-number';
-import { CortexErrorListener } from './cortex-utils';
 import {
   EmptyBlock,
   FormatingOptions,
@@ -45,7 +44,6 @@ export const NUMBER_FORMATTING_OPTIONS: Required<NumberFormattingOptions> = {
  */
 export function serializeCortex(
   expr: Expression,
-  onError?: CortexErrorListener,
   options?: FormatingOptions & {
     fancySymbols?: boolean;
   }
@@ -112,7 +110,6 @@ export function serializeCortex(
       if (comment instanceof EmptyBlock) return body;
       return fmt.choice(fmt.line(comment, body), fmt.stack(comment, body));
     }
-    onError?.({ code: 'syntax-error', pos: 0 });
     return fmt.text();
   }
 

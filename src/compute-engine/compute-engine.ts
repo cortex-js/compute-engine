@@ -1,18 +1,20 @@
-import { DictionaryCategory, Expression } from '../public';
+import {
+  DictionaryCategory,
+  ErrorSignal,
+  Expression,
+  WarningSignal,
+} from '../public';
 
 import {
-  CortexError,
   Definition,
   Dictionary,
   Domain,
-  ErrorSignal,
   Form,
   FunctionDefinition,
   RuntimeScope,
   Scope,
   SetDefinition,
   SymbolDefinition,
-  WarningSignal,
 } from './public';
 
 import {
@@ -32,6 +34,7 @@ import {
 } from '../common/utils';
 import { isSetDefinition } from './dictionary/utils';
 import { same } from './same';
+import { CortexError } from './utils';
 
 export class ComputeEngine {
   static getDictionaries(

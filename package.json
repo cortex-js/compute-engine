@@ -47,7 +47,6 @@
     "@typescript-eslint/eslint-plugin": "^4.14.1",
     "@typescript-eslint/parser": "^4.14.1",
     "@typescript-eslint/typescript-estree": "^4.14.1",
-    "chalk": "^4.1.0",
     "check-node-version": "^4.0.3",
     "child_process": "^1.0.2",
     "chokidar": "^3.5.1",
@@ -87,5 +86,8 @@
       "prettier --write",
       "git add"
     ]
+  },
+  "dependencies": {
+    "chalk": "^4.1.0"
   }
 }

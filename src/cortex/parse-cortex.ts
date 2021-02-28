@@ -1,25 +1,34 @@
-import { Expression } from '../public';
-import {
-  CortexErrorCode,
-  CortexErrorListener,
-  CortexErrorMessage,
-} from './cortex-utils';
+import { Expression, SignalCode, WarningSignal } from '../public';
 import { WHITE_SPACE } from './characters';
+import { Origin } from '../common/debug';
+import { CortexError } from '../compute-engine/utils';
 
 class CortexExpression {
   index = 0;
   s: string;
-  onError: CortexErrorListener;
-  constructor(s: string, onError: CortexErrorListener) {
+  origin: Origin;
+  warnings: WarningSignal[];
+
+  constructor(s: string, filepath?: string) {
     this.s = s;
-    this.onError = onError;
+    this.warnings = [];
+    this.origin = new Origin(s, filepath);
   }
-  error(error: CortexErrorCode | CortexErrorMessage): void {
-    const message =
-      typeof error !== 'string'
-        ? { ...error, pos: this.index }
-        : { code: error, pos: this.index };
-    this.onError(message);
+  warning(code: SignalCode, ...args: (string | number)[]): void {
+    this.warnings.push({
+      severity: 'warning',
+      code,
+      args,
+      origin: this.origin.signalOrigin(this.index),
+    });
+  }
+  error(code: SignalCode, ...args: (string | number)[]): void {
+    throw new CortexError({
+      severity: 'error',
+      code,
+      args,
+      origin: this.origin.signalOrigin(this.index),
+    });
   }
   atEnd(): boolean {
     return this.index >= this.s.length;
@@ -53,7 +62,7 @@ class CortexExpression {
     return true;
   }
 
-  until(target: string, error: CortexErrorCode | CortexErrorMessage) {
+  until(target: string, error: SignalCode) {
     let found = false;
     while (!found && !this.atEnd()) {}
     if (!found) {
@@ -62,7 +71,7 @@ class CortexExpression {
     }
   }
 
-  expect(target: string, errorCode: CortexErrorCode): boolean {
+  expect(target: string, errorCode: SignalCode): boolean {
     if (this.peek(target.length) !== target) {
       this.error(errorCode);
       return false;
@@ -79,10 +88,7 @@ class CortexExpression {
   }
 }
 
-export function parseCortex(
-  s: string,
-  onError?: CortexErrorListener
-): Expression {
-  const cortex = new CortexExpression(s, onError);
-  return cortex.parseExpression();
+export function parseCortex(s: string): [Expression, WarningSignal[]] {
+  const cortex = new CortexExpression(s);
+  return [cortex.parseExpression(), cortex.warnings];
 }

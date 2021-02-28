@@ -1,3 +1,67 @@
+export type ParsingSignalCode = 'parsing-error';
+
+export type RuntimeSignalCode =
+  | 'timeout'
+  | 'out-of-memory'
+  | 'recursion-depth-exceeded'
+  | 'iteration-limit-exceeded';
+
+export type SignalCode =
+  | ParsingSignalCode
+  | RuntimeSignalCode
+  | (
+      | 'syntax-error'
+      | 'invalid-name'
+      | 'cyclic-definition' // arg: [cycle]
+      | 'invalid-supersets' // arg: [superset-domain]
+      | 'expected-supersets'
+      | 'unknown-domain' // arg: [domain]
+      | 'duplicate-wikidata' // arg: [wikidata]
+      | 'invalid-dictionary-entry' // arg: [error]
+    );
+
+export type SignalOrigin = {
+  filepath?: string;
+  source?: string;
+  index?: number;
+  line?: number;
+  column?: number;
+};
+
+export type Signal = {
+  severity?: 'warning' | 'error';
+
+  code: SignalCode;
+
+  // Optional, one or more arguments specific to the signal code.
+  args?: (string | number)[];
+
+  // If applicable, the head of the function about which the
+  // signal was raised
+  head?: string;
+
+  // Location where the signal was raised.
+  origin?: SignalOrigin;
+};
+
+export type ErrorSignal = Signal & {
+  severity: 'error';
+};
+
+export declare class CortexError extends Error {
+  constructor(errorSignal: Signal);
+  toString(): string;
+}
+
+export type WarningSignal = Signal & {
+  severity: 'warning';
+};
+
+export type ErrorSignalHandler = (error: ErrorSignal) => void;
+export type WarningSignalHandler = (warnings: WarningSignal[]) => void;
+
+// @todo: remove
+// @deprecated
 export type ErrorListener<T> = (err: {
   code: T;
   arg?: string;
@@ -185,6 +249,7 @@ export type DictionaryCategory =
   | 'relations'
   | 'rounding'
   | 'statistics'
+  | 'symbols'
   | 'transcendentals'
   | 'trigonometry'
   | 'units';
