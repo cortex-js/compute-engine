@@ -60,7 +60,6 @@ export type ErrorCode =
   | 'expected-operand'
   | 'invalid-name'
   | 'invalid-dictionary-entry'
-  | 'dictionary-entry-warning'
   | 'unknown-symbol'
   | 'unknown-operator'
   | 'unknown-function'
@@ -186,7 +185,6 @@ export type DictionaryCategory =
   | 'relations'
   | 'rounding'
   | 'statistics'
-  | 'symbols'
   | 'transcendentals'
   | 'trigonometry'
   | 'units';

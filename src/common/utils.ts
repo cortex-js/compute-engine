@@ -13,7 +13,7 @@ import {
  */
 export const PARENTHESES = 'Parentheses';
 export const IDENTITY = 'Identity';
-export const LATEX = 'Latex';
+export const LATEX_TOKENS = 'LatexTokens';
 export const LIST = 'List';
 export const MISSING = 'Missing';
 export const NOTHING = 'Nothing';
@@ -196,7 +196,7 @@ export function getFunctionName(
   | typeof NEGATE
   | typeof DERIVATIVE
   | typeof INVERSE_FUNCTION
-  | typeof LATEX
+  | typeof LATEX_TOKENS
   | typeof SQRT
   | typeof ROOT
   | typeof PARENTHESES

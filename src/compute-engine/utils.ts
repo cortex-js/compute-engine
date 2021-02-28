@@ -1,4 +1,5 @@
 import { Expression } from '../public';
+import { ErrorSignal, Signal } from './public';
 
 export const MACHINE_PRECISION_BITS = 53;
 export const MACHINE_PRECISION = Math.log10(
@@ -34,4 +35,11 @@ export function chop(x: number): number {
 export function coef(_expr: Expression, _vars: string[]): Expression | null {
   // @todo
   return null;
+}
+
+export class CortexError {
+  signal: ErrorSignal;
+  constructor(errorSignal: Signal) {
+    this.signal = { severity: 'error', ...errorSignal } as ErrorSignal;
+  }
 }

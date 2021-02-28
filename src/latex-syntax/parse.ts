@@ -14,7 +14,7 @@ import {
   isNumberObject,
   PARENTHESES,
   DIVIDE,
-  LATEX,
+  LATEX_TOKENS,
 } from '../common/utils';
 import { tokensToString } from './core/tokenizer';
 import { IndexedLatexDictionary } from './definitions';
@@ -956,14 +956,14 @@ export class Scanner implements Scanner {
       return null;
     }
     // No invisible operator, use 'Latex'
-    let fn: Expression = [LATEX];
-    if (getFunctionName(lhs) === LATEX) {
+    let fn: Expression = [LATEX_TOKENS];
+    if (getFunctionName(lhs) === LATEX_TOKENS) {
       fn = fn.concat(getTail(lhs));
     } else {
       fn.push(lhs);
     }
     if (rhs !== null) {
-      if (getFunctionName(rhs) === LATEX) {
+      if (getFunctionName(rhs) === LATEX_TOKENS) {
         fn = fn.concat(getTail(rhs));
       } else {
         fn.push(rhs);

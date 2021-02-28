@@ -3,8 +3,12 @@ import { ComputeEngine } from './public';
 
 export async function evaluateWithEngine(
   _expr: Expression,
-  _engine: ComputeEngine
+  engine: ComputeEngine
 ): Promise<Expression | null> {
+  // Check if an error has been signaled, or if
+  // the time or memory budget have been exceeded.
+  if (!engine.shouldContinueExecution()) return null;
+
   // @todo: implement evaluation algorithm:
   // 1/ Convert to Canonical Form.
   // 2/ Is it a number?

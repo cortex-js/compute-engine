@@ -52,7 +52,6 @@ export function getDefaultDictionaries(
       'polynomials',
       'relations',
       'statistics',
-      'symbols',
       'transcendentals',
       'trigonometry',
       'rounding',
@@ -250,17 +249,19 @@ export function compileDictionary(
   for (const entryName of Object.keys(dict)) {
     const [def, error] = normalizeDefinition(dict[entryName], engine);
     if (error) {
-      engine.onError({
-        code: def ? 'dictionary-entry-warning' : 'invalid-dictionary-entry',
-        arg: `${entryName}: ${error}`,
+      engine.signal({
+        severity: def ? 'warning' : 'error',
+        code: 'invalid-dictionary-entry',
+        head: entryName,
+        args: [error],
       });
     }
     if (def) result.set(entryName, def);
   }
 
   // Temporarily put this dictionary in scope
-  // (this is required so that compilation and validation can success
-  // when symbols in this dictionary refer to *other* symbols int his dictionary)
+  // (this is required so that compilation and validation can succeed
+  // when symbols in this dictionary refer to *other* symbols from this dictionary)
   engine.context = { parentScope: engine.context, dictionary: result };
 
   // @todo: compile
@@ -422,13 +423,15 @@ function validateDictionary(
   const wikidata = new Set<string>();
   for (const [name, def] of dictionary) {
     if (!/[A-Za-z][A-Za-z0-9-]*/.test(name) && name.length !== 1) {
-      engine.onError({ code: 'invalid-name', arg: name });
+      engine.signal({ severity: 'error', code: 'invalid-name', head: name });
     }
     if (def.wikidata) {
       if (wikidata.has(def.wikidata)) {
-        engine.onError({
-          code: 'dictionary-entry-warning',
-          arg: `${name}: duplicate wikidata "${def.wikidata}"`,
+        engine.signal({
+          severity: 'warning',
+          code: 'duplicate-wikidata',
+          head: name,
+          args: [def.wikidata],
         });
       }
       wikidata.add(def.wikidata);
@@ -436,9 +439,11 @@ function validateDictionary(
     if (isSymbolDefinition(def)) {
       // Validate domain (make sure domain exists)
       if (!engine.isSubsetOf(def.domain, 'Anything')) {
-        engine.onError({
-          code: 'dictionary-entry-warning',
-          arg: `${name}: unknown domain "${def.domain}"`,
+        engine.signal({
+          severity: 'warning',
+          code: 'unknown-domain',
+          head: name,
+          args: [def.domain as string], //@todo might not be a string
         });
       }
       // @todo: for numeric domain, validate them: i.e. real are at least RealNumber, etc...
@@ -454,23 +459,29 @@ function validateDictionary(
           typeof sig.result !== 'function' &&
           !engine.isSubsetOf(sig.result, 'Anything')
         ) {
-          engine.onError({
-            code: 'dictionary-entry-warning',
-            arg: `${name}: unknown result domain "${sig.result}"`,
+          engine.signal({
+            severity: 'warning',
+            code: 'unknown-domain',
+            head: name,
+            args: [sig.result as string], //@todo might not be a string
           });
         }
         if (sig.rest && !engine.isSubsetOf(sig.rest, 'Anything')) {
-          engine.onError({
-            code: 'dictionary-entry-warning',
-            arg: `${name}: unknown rest domain "${def.domain}"`,
+          engine.signal({
+            severity: 'warning',
+            code: 'unknown-domain',
+            head: name,
+            args: [def.domain as string], //@todo might not be a string
           });
         }
         if (sig.args) {
           for (const arg of sig.args) {
             if (!engine.isSubsetOf(arg, 'Anything')) {
-              engine.onError({
-                code: 'dictionary-entry-warning',
-                arg: `${name}: unknown argument domain "${def.domain}"`,
+              engine.signal({
+                severity: 'warning',
+                code: 'unknown-domain',
+                head: name,
+                args: [def.domain as string], //@todo might not be a string
               });
             }
           }
@@ -484,31 +495,31 @@ function validateDictionary(
     if (isSetDefinition(def)) {
       // Check there is at least one superset defined
       if (def.supersets.length === 0 && name !== 'Anything') {
-        engine.onError({
-          code: 'dictionary-entry-warning',
-          arg: `${name}: expected supersets`,
+        engine.signal({
+          severity: 'warning',
+          code: 'expected-supersets',
+          head: name,
         });
       }
       // Check that all the parents are valid
       for (const parent of def.supersets) {
         if (!engine.isSubsetOf(parent, 'Anything')) {
-          engine.onError({
-            code: 'dictionary-entry-warning',
-            arg: `${name}: invalid superset "${parent}" is not "Anything": ${setParentsToString(
-              engine,
-              parent
-            )}`,
+          engine.signal({
+            severity: 'warning',
+            code: 'expected-supersets',
+            head: name,
+            args: [parent],
           });
         }
         // Check for loops in set definition
         if (engine.isSubsetOf(parent, name)) {
-          engine.onError({
-            code: 'invalid-dictionary-entry',
-            arg: `${name}: cyclic definition ${setParentsToString(
-              engine,
-              name
-            )}`,
+          engine.signal({
+            severity: 'warning',
+            code: 'cyclic-definition',
+            head: name,
+            args: [setParentsToString(engine, name)],
           });
+
           // Remove entry from dictionary
           dictionary.delete(name);
         }
@@ -519,6 +530,10 @@ function validateDictionary(
   }
 }
 
+/**
+ * For debugging purposes,  a textual representation of the inheritance
+ * chain of sets.
+ */
 function setParentsToString(
   engine: ComputeEngine,
   expr: Expression,

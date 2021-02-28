@@ -1,9 +1,4 @@
-import {
-  DictionaryCategory,
-  ErrorCode,
-  ErrorListener,
-  Expression,
-} from '../public';
+import { DictionaryCategory, Expression } from '../public';
 
 /**
  * A dictionary maps a MathJSON name to a definition.
@@ -42,6 +37,56 @@ export type CompiledDictionary = Map<
   FunctionDefinition | SetDefinition | SymbolDefinition
 >;
 
+export type SignalCode =
+  | 'timeout'
+  | 'out-of-memory'
+  | 'recursion-depth-exceeded'
+  | 'iteration-limit-exceeded'
+  | 'syntax-error'
+  | 'invalid-name'
+  | 'cyclic-definition' // arg: [cycle]
+  | 'invalid-supersets' // arg: [superset-domain]
+  | 'expected-supersets'
+  | 'unknown-domain' // arg: [domain]
+  | 'duplicate-wikidata' // arg: [wikidata]
+  | 'invalid-dictionary-entry'; // arg: [error]
+
+export type Signal = {
+  severity?: 'warning' | 'error';
+
+  code: SignalCode;
+
+  // Optional, one or more arguments specific to the signal code.
+  args?: string[];
+
+  // If applicable, the head of the function about which the
+  // signal was raised
+  head?: string;
+
+  // Location when the signal was raised.
+  origin?: {
+    filename?: string;
+    literal?: string;
+    line: number;
+    column: number;
+  };
+};
+
+export type ErrorSignal = Signal & {
+  severity: 'error';
+};
+
+export declare class CortexError extends Error {
+  constructor(errorSignal: Signal);
+}
+
+export type WarningSignal = Signal & {
+  severity: 'warning';
+};
+
+export type ErrorSignalHandler = (error: ErrorSignal) => void;
+export type WarningSignalHandler = (warnings: WarningSignal[]) => void;
+
 /**
  * A scope is a set of names in a dictionary that are bound (defined) in
  * a MathJSON expression.
@@ -58,8 +103,46 @@ export type CompiledDictionary = Map<
  *
  */
 export type Scope = {
-  parentScope: Scope;
-  dictionary: CompiledDictionary;
+  /** This handler is invoked when exiting this scope if there are any
+   * warnings pending. */
+  warn?: WarningSignalHandler;
+
+  /** Signal 'timeout' when the execution time for this scope is exceeded.
+   * Time in seconds, default 2s.
+   */
+  timeLimit?: number;
+  /** Signal 'out-of-memory' when the memory usage for this scope is exceeded.
+   * Memory in Megabytes, default: 1Mb.
+   */
+  memoryLimit?: number;
+  /** Signal 'recursion-depth-exceeded' when the recursion depth for this
+   * scope is exceeded. */
+  recursionLimit?: number;
+  /** Signal 'iteration-limit-exceeded' when the iteration limit for this
+   * scope is exceeded. Default: no limits.*/
+  iterationLimit?: number;
+};
+
+export type RuntimeScope = Scope & {
+  parentScope: RuntimeScope;
+
+  dictionary?: CompiledDictionary;
+
+  /** The location of the call site that created this scope */
+  origin?: {
+    name?: string;
+    line?: number;
+    column?: number;
+  };
+
+  /** Absolute time beyond which evaluation should not proceed */
+  deadline?: number;
+
+  /** Free memory should not go below this level for execution to proceed */
+  lowWaterMark?: number;
+
+  /** Set when one or more warning have been signaled in this scope */
+  warnings?: WarningSignal[];
 };
 
 /**
@@ -339,12 +422,7 @@ export declare class ComputeEngine {
    * scopes can obscure definitions from older scopes.
    *
    */
-  context: Scope;
-
-  /**
-   * The `onError` function is called to signal an error
-   */
-  onError: ErrorListener<ErrorCode>;
+  context: RuntimeScope;
 
   /**
    * Construct a new ComputeEngine environment.
@@ -357,17 +435,35 @@ export declare class ComputeEngine {
    * be the `'core'` dictionary which include some basic definitions such
    * as domains ('Boolean', 'Number', etc...) that are used by later dictionaries.
    */
-  constructor(options?: {
-    dictionaries?: Readonly<Dictionary>[];
-    onError?: ErrorListener<ErrorCode>;
-  });
+  constructor(options?: { dictionaries?: Readonly<Dictionary>[] });
+
+  /** Create a new scope and add it to the top of the scope stack */
+  pushScope(dictionary?: Dictionary): void;
 
   /** Remove the topmost scope from the scope stack.
    */
   popScope(): void;
 
-  /** Create a new scope and add it to the top of the scope stack */
-  pushScope(dictionary?: Dictionary): void;
+  /**
+   * Call this function if an unexpected condition occurs during execution a
+   * function in the engine.
+   *
+   * An `ErrorSignal` a problem that cannot be recovered from.
+   *
+   * A `WarningSignal` indicate a minor problem that should not
+   * prevent the execution to continue.
+   *
+   */
+  signal(sig: ErrorSignal | WarningSignal): void;
+
+  /**
+   * Return false if the execution should stop.
+   *
+   * This can occur if:
+   * - an error has been signaled
+   * - the time limit or memory limit has been exceeded
+   */
+  shouldContinueExecution(): boolean;
 
   getFunctionDefinition(name: string): FunctionDefinition | null;
   getSymbolDefinition(name: string): FunctionDefinition | null;
@@ -459,8 +555,7 @@ export declare function format(
   expr: Expression,
   forms: Form[],
   options?: {
-    dictionary?: Dictionary;
-    onError?: ErrorListener<ErrorCode>;
+    dictionaries?: Readonly<Dictionary>[];
   }
 ): Expression;
 
@@ -481,7 +576,6 @@ export declare function evaluate(
   expr: Expression,
   options?: {
     dictionaries?: Readonly<Dictionary>[];
-    onError?: ErrorListener<ErrorCode>;
   }
 ): Promise<Expression | null>;
 

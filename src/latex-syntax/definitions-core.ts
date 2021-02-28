@@ -7,7 +7,7 @@ import {
   getFunctionName,
   getTail,
   getFunctionHead,
-  LATEX,
+  LATEX_TOKENS,
   PARENTHESES,
   LIST,
   MISSING,
@@ -90,7 +90,7 @@ function serializeLatex(
   serializer: Serializer,
   expr: Expression | null
 ): string {
-  console.assert(getFunctionHead(expr) === LATEX);
+  console.assert(getFunctionHead(expr) === LATEX_TOKENS);
 
   // @todo: add onError handler to serialize()
   return getTail(expr)
@@ -109,7 +109,7 @@ function serializeLatex(
 }
 
 export const DEFINITIONS_CORE: LatexDictionary = [
-  { name: LATEX, serialize: serializeLatex },
+  { name: LATEX_TOKENS, serialize: serializeLatex },
   {
     name: PARENTHESES,
     trigger: { matchfix: '(' },

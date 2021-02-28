@@ -1,19 +1,18 @@
-import {
-  DictionaryCategory,
-  ErrorListener,
-  ErrorCode,
-  Expression,
-} from '../public';
+import { DictionaryCategory, Expression } from '../public';
 
 import {
-  Form,
-  Domain,
-  FunctionDefinition,
-  SymbolDefinition,
-  SetDefinition,
-  Scope,
-  Dictionary,
+  CortexError,
   Definition,
+  Dictionary,
+  Domain,
+  ErrorSignal,
+  Form,
+  FunctionDefinition,
+  RuntimeScope,
+  Scope,
+  SetDefinition,
+  SymbolDefinition,
+  WarningSignal,
 } from './public';
 
 import {
@@ -40,60 +39,82 @@ export class ComputeEngine {
   ): Readonly<Dictionary>[] {
     return getDefaultDictionaries(categories);
   }
-  context: Scope;
-  onError: ErrorListener<ErrorCode>;
+  context: RuntimeScope;
 
-  constructor(options?: {
-    dictionaries?: Readonly<Dictionary>[];
-    onError?: ErrorListener<ErrorCode>;
-  }) {
-    const onError =
-      typeof window === 'undefined'
-        ? () => {
-            return;
-          }
-        : (err) => {
-            if (!err.before || !err.after) {
-              console.warn(err.code + (err.arg ? ': ' + err.arg : ''));
-            } else {
-              console.warn(
-                err.code +
-                  (err.arg ? ': ' + err.arg : '') +
-                  '\n' +
-                  '%c' +
-                  '|  ' +
-                  err.before +
-                  '%c' +
-                  err.after +
-                  '\n' +
-                  '%c' +
-                  '|  ' +
-                  String(' ').repeat(err.before.length) +
-                  '▲',
-                'font-weight: bold',
-                'font-weight: normal; color: rgba(160, 160, 160)',
-                'font-weight: bold; color: hsl(4deg, 90%, 50%)'
-              );
+  constructor(options?: { dictionaries?: Readonly<Dictionary>[] }) {
+    const dicts = options?.dictionaries ?? ComputeEngine.getDictionaries();
+
+    for (const dict of dicts) {
+      if (!this.context) {
+        //
+        // The first, topmost, scope contains additional info
+        //
+        this.pushScope(dict, {
+          warn: (sigs: WarningSignal[]): void => {
+            for (const sig of sigs) {
+              console.warn(sig.code, ...(sig.args ? sig.args : []));
             }
-          };
-    this.onError = options?.onError ?? onError;
-
-    const scopes = options?.dictionaries ?? ComputeEngine.getDictionaries();
-    for (const scope of scopes) this.pushScope(scope);
+          },
+          timeLimit: 2.0, // execution time limit: 2.0s
+          memoryLimit: 1.0, // memory limit: 1.0 megabyte
+          recursionLimit: 1024,
+          // iterationLimit:    no iteration limit
+        });
+      } else {
+        this.pushScope(dict);
+      }
+    }
 
     // Push a fresh scope to protect global definitions.
     this.pushScope({});
   }
 
-  popScope(): void {
-    this.context = this.context?.parentScope;
-  }
-
-  pushScope(dictionary: Readonly<Dictionary> = {}): void {
+  pushScope(dictionary: Readonly<Dictionary>, scope?: Partial<Scope>): void {
     this.context = {
+      ...scope,
       parentScope: this.context,
       dictionary: compileDictionary(dictionary, this),
     };
+  }
+
+  popScope(): void {
+    const parentScope = this.context?.parentScope;
+
+    // If there are some warnings, handle them
+    if (this.context.warnings) {
+      const warnings = [...this.context.warnings];
+      this.context.warnings = [];
+      if (this.context.warn) {
+        this.context.warn(warnings);
+      }
+    }
+
+    // If there are some unhandled warnings, or warnings signaled during the
+    // warning handler, propagate them.
+    if (parentScope && this.context.warnings.length > 0) {
+      if (!parentScope.warnings) {
+        parentScope.warnings = [...this.context.warnings];
+      } else {
+        parentScope.warnings = [
+          ...parentScope.warnings,
+          ...this.context.warnings,
+        ];
+      }
+    }
+
+    this.context = parentScope;
+  }
+
+  shouldContinueExecution(): boolean {
+    if (this.context.timeLimit) {
+      if (this.context.deadline < global.performance.now()) {
+        throw new CortexError({
+          code: 'timeout',
+          args: [], // @todo: should capture stack
+        });
+      }
+    }
+    return true;
   }
 
   getVars(expr: Expression): Set<string> {
@@ -144,6 +165,11 @@ export class ComputeEngine {
     }
     if (def) def.scope = scope;
     return def;
+  }
+
+  signal(sig: ErrorSignal | WarningSignal): void {
+    // @todo
+    return;
   }
 
   /**
@@ -379,8 +405,7 @@ export function format(
   expr: Expression,
   forms: Form | Form[],
   options?: {
-    dictionary?: Dictionary;
-    onError?: ErrorListener<ErrorCode>;
+    dictionaries?: Readonly<Dictionary>[];
   }
 ): Expression {
   return formatWithEngine(
@@ -394,7 +419,6 @@ export function evaluate(
   expr: Expression,
   options?: {
     dictionaries?: Readonly<Dictionary>[];
-    onError?: ErrorListener<ErrorCode>;
   }
 ): Promise<Expression | null> {
   return evaluateWithEngine(expr, new ComputeEngine(options));

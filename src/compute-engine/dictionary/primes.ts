@@ -1,3 +1,5 @@
+import { LARGEST_SMALL_PRIME, SMALL_PRIMES } from '../../common/utils';
+
 export const LARGE_PRIME = 1125899906842597; // Largest prime < 2^50
 
 export function isPrime(n: number): 'True' | 'False' | 'Maybe' {

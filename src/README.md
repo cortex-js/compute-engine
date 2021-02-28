@@ -288,11 +288,17 @@ equivalent object literal before being annotated.
 
 The following metadata properties are recommended:
 
-| Property   | Note                                                                                                                                                                    |
-| :--------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wikidata` | A short string indicating an entry in a wikibase. This information can be used to disambiguate the meaning of a symbol                                                  |
-| `comment`  | A human readable string to annotate an expression, since JSON does not allow comments in its encoding                                                                   |
-| `latex`    | A visual representation in LaTeX of the expression. This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
+| Property        | Note                                                                                                                                                                         |
+| :-------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wikidata`      | A short string indicating an entry in a wikibase.<br>This information can be used to disambiguate the meaning of a symbol                                                    |
+| `comment`       | A human readable plain string to annotate an expression, since JSON does not allow comments in its encoding                                                                  |
+| `documentation` | A Markdown-encoded string providing documentation about this expression.                                                                                                     |
+| `latex`         | A visual representation in LaTeX of the expression. <br> This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
+| `origin-file`   | A file path to the source of this expression                                                                                                                                 |
+| `origin-source` | The source from which this expression was generated.<br> It could be a Latex expression, or some other source language.                                                      |
+| `origin-line`   | A line number (1-n) in the `origin-source` or `origin-file`                                                                                                                  |
+| `origin-column` | A column number (1-n) in the `origin-line`                                                                                                                                   |
+| `hash`          | A string representing a digest of this expression.                                                                                                                           |
 
 ```json
 // The ratio of the circumference of a circle to its diameter

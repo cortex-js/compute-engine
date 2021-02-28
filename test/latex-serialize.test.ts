@@ -6,7 +6,7 @@ import {
   NEGATE,
   POWER,
   DIVIDE,
-  LATEX,
+  LATEX_TOKENS,
 } from '../src/common/utils';
 import { expression, latex } from './utils';
 
@@ -115,12 +115,12 @@ describe('LATEX SERIALIZING', () => {
 
 describe('LATEX', () => {
   test('Latex Valid forms', () => {
-    expect(latex([LATEX, 3, 4])).toMatchInlineSnapshot(`'34'`);
-    expect(latex([LATEX, 'x', 3])).toMatchInlineSnapshot(`'x3'`);
+    expect(latex([LATEX_TOKENS, 3, 4])).toMatchInlineSnapshot(`'34'`);
+    expect(latex([LATEX_TOKENS, 'x', 3])).toMatchInlineSnapshot(`'x3'`);
     expect(
-      latex([LATEX, "'\\frac'", "'<{>'", 42.12, "'<}>'"])
+      latex([LATEX_TOKENS, "'\\frac'", "'<{>'", 42.12, "'<}>'"])
     ).toMatchInlineSnapshot(`'\\frac{42.12}'`);
-    expect(latex([LATEX, ['Divide', 'Pi', 2]])).toMatchInlineSnapshot(
+    expect(latex([LATEX_TOKENS, ['Divide', 'Pi', 2]])).toMatchInlineSnapshot(
       `'\\frac{\\pi}{2}'`
     );
   });
