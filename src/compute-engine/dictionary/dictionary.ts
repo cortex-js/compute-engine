@@ -251,9 +251,8 @@ export function compileDictionary(
     if (error) {
       engine.signal({
         severity: def ? 'warning' : 'error',
-        code: 'invalid-dictionary-entry',
+        code: ['invalid-dictionary-entry', error],
         head: entryName,
-        args: [error],
       });
     }
     if (def) result.set(entryName, def);
@@ -429,9 +428,8 @@ function validateDictionary(
       if (wikidata.has(def.wikidata)) {
         engine.signal({
           severity: 'warning',
-          code: 'duplicate-wikidata',
+          code: ['duplicate-wikidata', def.wikidata],
           head: name,
-          args: [def.wikidata],
         });
       }
       wikidata.add(def.wikidata);
@@ -441,9 +439,8 @@ function validateDictionary(
       if (!engine.isSubsetOf(def.domain, 'Anything')) {
         engine.signal({
           severity: 'warning',
-          code: 'unknown-domain',
+          code: ['unknown-domain', def.domain as string], //@todo might not be a string
           head: name,
-          args: [def.domain as string], //@todo might not be a string
         });
       }
       // @todo: for numeric domain, validate them: i.e. real are at least RealNumber, etc...
@@ -461,17 +458,15 @@ function validateDictionary(
         ) {
           engine.signal({
             severity: 'warning',
-            code: 'unknown-domain',
+            code: ['unknown-domain', sig.result as string], //@todo might not be a string
             head: name,
-            args: [sig.result as string], //@todo might not be a string
           });
         }
         if (sig.rest && !engine.isSubsetOf(sig.rest, 'Anything')) {
           engine.signal({
             severity: 'warning',
-            code: 'unknown-domain',
+            code: ['unknown-domain', def.domain as string], //@todo might not be a string
             head: name,
-            args: [def.domain as string], //@todo might not be a string
           });
         }
         if (sig.args) {
@@ -479,9 +474,8 @@ function validateDictionary(
             if (!engine.isSubsetOf(arg, 'Anything')) {
               engine.signal({
                 severity: 'warning',
-                code: 'unknown-domain',
+                code: ['unknown-domain', def.domain as string], //@todo might not be a string
                 head: name,
-                args: [def.domain as string], //@todo might not be a string
               });
             }
           }
@@ -506,18 +500,16 @@ function validateDictionary(
         if (!engine.isSubsetOf(parent, 'Anything')) {
           engine.signal({
             severity: 'warning',
-            code: 'expected-supersets',
+            code: ['expected-supersets', parent],
             head: name,
-            args: [parent],
           });
         }
         // Check for loops in set definition
         if (engine.isSubsetOf(parent, name)) {
           engine.signal({
             severity: 'warning',
-            code: 'cyclic-definition',
+            code: ['cyclic-definition', setParentsToString(engine, name)],
             head: name,
-            args: [setParentsToString(engine, name)],
           });
 
           // Remove entry from dictionary

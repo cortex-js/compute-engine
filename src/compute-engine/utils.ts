@@ -46,11 +46,12 @@ export class CortexError {
     if (this.signal.head) {
       result += this.signal.head + ': ';
     }
-    result += this.signal.code;
 
-    if (this.signal.args) {
+    if (typeof this.signal.code === 'string') {
+      result += this.signal.code;
+    } else {
       result += ' ';
-      for (const arg of this.signal.args) {
+      for (const arg of this.signal.code) {
         result += arg.toString() + ' ';
       }
     }

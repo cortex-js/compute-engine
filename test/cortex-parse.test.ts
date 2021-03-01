@@ -1,37 +1,46 @@
-import { parseCortex } from '../src/cortex/parse-cortex';
+// import { parseCortex } from '../src/cortex/parse-cortex';
+import { validCortex, invalidCortex } from './utils';
 
 describe.skip('CORTEX PARSING SPACES', () => {
   test('Symbols', () => {
-    expect(parseCortex(' ')).toMatchInlineSnapshot();
-    expect(parseCortex('x\ty')).toMatchInlineSnapshot();
-    expect(parseCortex('x\t+\ty')).toMatchInlineSnapshot();
-    expect(parseCortex(' x \t y')).toMatchInlineSnapshot();
+    expect(validCortex(' ')).toMatchInlineSnapshot(
+      `{severity: 'error', code: undefined}`
+    );
+    expect(validCortex('x\ty')).toMatchInlineSnapshot(
+      `{severity: 'error', code: undefined}`
+    );
+    expect(validCortex('x\t+\ty')).toMatchInlineSnapshot(
+      `{severity: 'error', code: undefined}`
+    );
+    expect(validCortex(' x \t y')).toMatchInlineSnapshot(
+      `{severity: 'error', code: undefined}`
+    );
   });
 });
 
 describe.skip('CORTEX PARSING COMMENTS', () => {
   test('Single-line comments;', () => {
-    expect(parseCortex('// Comment')).toMatchInlineSnapshot();
+    expect(validCortex('// Comment')).toMatchInlineSnapshot();
     expect(
-      parseCortex('/// Documentation **comment**')
+      validCortex('/// Documentation **comment**')
     ).toMatchInlineSnapshot();
-    expect(parseCortex('3.14 // Trailing comment')).toMatchInlineSnapshot();
+    expect(validCortex('3.14 // Trailing comment')).toMatchInlineSnapshot();
   });
   test('Multi-line comments;', () => {
     expect(
-      parseCortex(`3.14
+      validCortex(`3.14
 /*
  * Multi-line comment
  */`)
     ).toMatchInlineSnapshot();
     expect(
-      parseCortex(`3.14 +
+      validCortex(`3.14 +
 3.14 /*
  * Multi-line comment
  */`)
     ).toMatchInlineSnapshot();
     expect(
-      parseCortex(`3.14 +
+      validCortex(`3.14 +
 3.14 /*
  * Nested /* Comment */
  */`)
@@ -39,219 +48,232 @@ describe.skip('CORTEX PARSING COMMENTS', () => {
   });
 });
 
-describe.skip('CORTEX PARSING NUMBERS', () => {
+describe('CORTEX PARSING NUMBERS', () => {
   test('Constants', () => {
-    expect(parseCortex('NaN')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('+Infinity')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('Infinity')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('-Infinity')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('NaN')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('+Infinity')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('Infinity')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('-Infinity')).toMatchInlineSnapshot(`"Nothing"`);
   });
   test('Integers', () => {
-    expect(parseCortex('0')).toMatch('0');
-    expect(parseCortex('+0')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('-0')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('+62737547')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('+62_73_7__547')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('+62_73_7547.38383')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('0')).toMatch('0');
+    expect(validCortex('+0')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('-0')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('+62737547')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('+62_73_7__547')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('+62_73_7547.38383')).toMatchInlineSnapshot(`"Nothing"`);
   });
   test('Floating-point number', () => {
-    expect(parseCortex('1.2')).toMatchInlineSnapshot();
-    expect(parseCortex('-62_73_7547.38383e-13')).toMatchInlineSnapshot(
+    expect(validCortex('1.2')).toMatchInlineSnapshot();
+    expect(validCortex('-62_73_7547.38383e-13')).toMatchInlineSnapshot(
       `"Nothing"`
     );
-    expect(parseCortex('-62_73_7547.e-13')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('-.1e-13')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('-62_73_7547.e-13')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('-.1e-13')).toMatchInlineSnapshot(`"Nothing"`);
   });
 
-  test('Binary numbers', () => {
-    expect(parseCortex('0b0101001011')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('-0b0')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('-0b10')).toMatchInlineSnapshot(`"Nothing"`);
+  test.only('Binary numbers', () => {
+    expect(validCortex('0b0101001011')).toMatchInlineSnapshot(`331`);
+    expect(validCortex('0b0101001011.110101')).toMatchInlineSnapshot(
+      `331.828125`
+    );
+    expect(validCortex('0b0101001011.110101e-4')).toMatchInlineSnapshot(
+      `0.0331828125`
+    );
+    expect(validCortex('0b0101001011E-4')).toMatchInlineSnapshot(`0.0331`);
+    expect(validCortex('0b0101001011.001p-2')).toMatchInlineSnapshot(
+      `82.78125`
+    );
+    expect(validCortex('-0b0')).toMatchInlineSnapshot(`'syntax-error'`);
+    expect(validCortex('-0b10')).toMatchInlineSnapshot(`'syntax-error'`);
   });
   test('Hex numbers', () => {
-    expect(parseCortex('0x3.0cp2')).toMatch('12.1875');
-    expect(parseCortex('0xc.3p0')).toMatch('12.1875');
-    expect(parseCortex('0x3.23d70a3d70a3ep0')).toMatch('3.14');
-    expect(parseCortex('0x1.91eb851eb851fp+1')).toMatch('3.14');
-    expect(parseCortex('0x400')).toMatch('1024');
-    expect(parseCortex('0x1.0p-4')).toMatch('0.0625');
-    expect(parseCortex('0x1.0p-8')).toMatch('0.00390625');
-    expect(parseCortex('0x1.0p-10')).toMatch('0.0009765625');
+    expect(validCortex('0xdeadbeef')).toMatchInlineSnapshot();
+    expect(validCortex('-0xdeadbeef')).toMatchInlineSnapshot();
+    expect(validCortex('0xdead.beef')).toMatchInlineSnapshot();
+    expect(validCortex('0x3.0cp2')).toMatch('12.1875');
+    expect(validCortex('0xc.3p0')).toMatch('12.1875');
+    expect(validCortex('0x3.23d70a3d70a3ep0')).toMatch('3.14');
+    expect(validCortex('0x1.91eb851eb851fp+1')).toMatch('3.14');
+    expect(validCortex('0x400')).toMatch('1024');
+    expect(validCortex('0x1.0p-4')).toMatch('0.0625');
+    expect(validCortex('0x1.0p-8')).toMatch('0.00390625');
+    expect(validCortex('0x1.0p-10')).toMatch('0.0009765625');
   });
 });
 
 describe.skip('CORTEX PARSING SYMBOLS', () => {
   test('Symbols', () => {
-    expect(parseCortex('a')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('abcdef')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('ABcde')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('été')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('Thé')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('garçon')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('a01234')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('_abc')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('_01234')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('#abcd')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('$abcd')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('$ab_cd$')).toMatchInlineSnapshot(`"Nothing"`);
-    expect(parseCortex('👩🏻‍🎤🤯')).toMatchInlineSnapshot();
+    expect(validCortex('a')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('abcdef')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('ABcde')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('été')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('Thé')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('garçon')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('a01234')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('_abc')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('_01234')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('#abcd')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('$abcd')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('$ab_cd$')).toMatchInlineSnapshot(`"Nothing"`);
+    expect(validCortex('👩🏻‍🎤🤯')).toMatchInlineSnapshot();
   });
   test('Wrapped symbols', () => {
-    expect(parseCortex('`a`')).toMatchInlineSnapshot();
-    expect(parseCortex('`a+b`')).toMatchInlineSnapshot();
-    expect(parseCortex('`Mind 🤯`')).toMatchInlineSnapshot();
-    expect(parseCortex('`👩🏻‍🎤🤯`')).toMatchInlineSnapshot();
+    expect(validCortex('`a`')).toMatchInlineSnapshot();
+    expect(validCortex('`a+b`')).toMatchInlineSnapshot();
+    expect(validCortex('`Mind 🤯`')).toMatchInlineSnapshot();
+    expect(validCortex('`👩🏻‍🎤🤯`')).toMatchInlineSnapshot();
   });
 });
 
 describe.skip('CORTEX PARSING FANCY SYMBOLS', () => {
   test('Fancy symbols', () => {
-    expect(parseCortex('a ∧ ¬b ⋁ !c')).toMatchInlineSnapshot();
+    expect(validCortex('a ∧ ¬b ⋁ !c')).toMatchInlineSnapshot();
     // \u2212 2 \u00d7 x
-    expect(parseCortex('−2 × x >= 5')).toMatchInlineSnapshot();
-    expect(parseCortex('3πⅈ')).toMatchInlineSnapshot();
-    expect(parseCortex('3.1 ∈ ℝ')).toMatchInlineSnapshot();
+    expect(validCortex('−2 × x >= 5')).toMatchInlineSnapshot();
+    expect(validCortex('3πⅈ')).toMatchInlineSnapshot();
+    expect(validCortex('3.1 ∈ ℝ')).toMatchInlineSnapshot();
   });
 });
 
 describe.skip('CORTEX PARSING STRINGS', () => {
   test('Strings', () => {
-    expect(parseCortex('')).toMatchInlineSnapshot();
-    expect(parseCortex('"x"')).toMatchInlineSnapshot();
-    expect(parseCortex('"hello world"')).toMatchInlineSnapshot();
-    expect(parseCortex(`"C'est l'été!"`)).toMatchInlineSnapshot();
-    expect(parseCortex(`"Times: ×"`)).toMatchInlineSnapshot();
+    expect(validCortex('')).toMatchInlineSnapshot();
+    expect(validCortex('"x"')).toMatchInlineSnapshot();
+    expect(validCortex('"hello world"')).toMatchInlineSnapshot();
+    expect(validCortex(`"C'est l'été!"`)).toMatchInlineSnapshot();
+    expect(validCortex(`"Times: ×"`)).toMatchInlineSnapshot();
     expect(
-      parseCortex(`"The set of real  numbers is ℝ"`)
+      validCortex(`"The set of real  numbers is ℝ"`)
     ).toMatchInlineSnapshot();
   });
   test('Interpolated strings', () => {
-    expect(parseCortex('hello\\(world)')).toMatchInlineSnapshot();
-    expect(parseCortex('hello\\(2 + 3 + 5)')).toMatchInlineSnapshot();
-    expect(parseCortex('hello\\(2 + 3 + x)')).toMatchInlineSnapshot();
+    expect(validCortex('hello\\(world)')).toMatchInlineSnapshot();
+    expect(validCortex('hello\\(2 + 3 + 5)')).toMatchInlineSnapshot();
+    expect(validCortex('hello\\(2 + 3 + x)')).toMatchInlineSnapshot();
     expect(
-      parseCortex('hello \\(2 + 3 + x) is equal to \\(5 + x)')
+      validCortex('hello \\(2 + 3 + x) is equal to \\(5 + x)')
     ).toMatchInlineSnapshot();
   });
   test('String escaping', () => {
-    expect(parseCortex('Print("hello 21 \\"world")')).toMatchInlineSnapshot();
-    expect(parseCortex('Print("hello\\n world")')).toMatchInlineSnapshot();
+    expect(validCortex('Print("hello 21 \\"world")')).toMatchInlineSnapshot();
+    expect(validCortex('Print("hello\\n world")')).toMatchInlineSnapshot();
     expect(
-      parseCortex('Print("hello\\u{000a} world")')
+      validCortex('Print("hello\\u{000a} world")')
     ).toMatchInlineSnapshot();
-    expect(parseCortex('Print("Latex loves \\\\")')).toMatchInlineSnapshot();
-    expect(parseCortex('Print("hello", "\\nworld")')).toMatchInlineSnapshot();
+    expect(validCortex('Print("Latex loves \\\\")')).toMatchInlineSnapshot();
+    expect(validCortex('Print("hello", "\\nworld")')).toMatchInlineSnapshot();
   });
 });
 
 describe.skip('CORTEX PARSING DICTIONARY', () => {
   test('Empty dictionary', () => {
-    expect(parseCortex('{->}')).toMatchInlineSnapshot();
+    expect(validCortex('{->}')).toMatchInlineSnapshot();
   });
   test('Empty dictionary', () => {
-    expect(parseCortex('Dictionary()')).toMatchInlineSnapshot();
+    expect(validCortex('Dictionary()')).toMatchInlineSnapshot();
   });
 
   test('Dictionaries', () => {
-    expect(parseCortex('{x -> 1, y -> 2, z -> 2 + x}')).toMatchInlineSnapshot();
+    expect(validCortex('{x -> 1, y -> 2, z -> 2 + x}')).toMatchInlineSnapshot();
 
     expect(
-      parseCortex('{x -> {a -> 7, b -> 5}, y -> 2, z -> 2 + x}')
+      validCortex('{x -> {a -> 7, b -> 5}, y -> 2, z -> 2 + x}')
     ).toMatchInlineSnapshot();
   });
 });
 
 describe.skip('CORTEX PARSING COLLECTIONS', () => {
   test('Sets', () => {
-    expect(parseCortex('{}')).toMatchInlineSnapshot();
-    expect(parseCortex('{1}')).toMatchInlineSnapshot();
-    expect(parseCortex('{1, 2}')).toMatchInlineSnapshot();
-    expect(parseCortex('{1, {2, 3}, 4}')).toMatchInlineSnapshot();
-    expect(parseCortex('Set()')).toMatchInlineSnapshot();
-    expect(parseCortex('Set(1, 2, 3)')).toMatchInlineSnapshot();
-    expect(parseCortex('Set(1, {2, 3}, 3)')).toMatchInlineSnapshot();
+    expect(validCortex('{}')).toMatchInlineSnapshot();
+    expect(validCortex('{1}')).toMatchInlineSnapshot();
+    expect(validCortex('{1, 2}')).toMatchInlineSnapshot();
+    expect(validCortex('{1, {2, 3}, 4}')).toMatchInlineSnapshot();
+    expect(validCortex('Set()')).toMatchInlineSnapshot();
+    expect(validCortex('Set(1, 2, 3)')).toMatchInlineSnapshot();
+    expect(validCortex('Set(1, {2, 3}, 3)')).toMatchInlineSnapshot();
   });
   test('Lists', () => {
-    expect(parseCortex('[]')).toMatchInlineSnapshot();
-    expect(parseCortex('[1]')).toMatchInlineSnapshot();
-    expect(parseCortex('[1, 2]')).toMatchInlineSnapshot();
-    expect(parseCortex('[1, [2, 3], 4]')).toMatchInlineSnapshot();
-    expect(parseCortex('List()')).toMatchInlineSnapshot();
-    expect(parseCortex('List(2, 2x, 4)')).toMatchInlineSnapshot();
-    expect(parseCortex('List(2, [2x, 5], 4)')).toMatchInlineSnapshot();
+    expect(validCortex('[]')).toMatchInlineSnapshot();
+    expect(validCortex('[1]')).toMatchInlineSnapshot();
+    expect(validCortex('[1, 2]')).toMatchInlineSnapshot();
+    expect(validCortex('[1, [2, 3], 4]')).toMatchInlineSnapshot();
+    expect(validCortex('List()')).toMatchInlineSnapshot();
+    expect(validCortex('List(2, 2x, 4)')).toMatchInlineSnapshot();
+    expect(validCortex('List(2, [2x, 5], 4)')).toMatchInlineSnapshot();
   });
   test('Sequence', () => {
-    expect(parseCortex('1, 2, 3')).toMatchInlineSnapshot();
-    expect(parseCortex('1,, 3')).toMatchInlineSnapshot();
-    expect(parseCortex('1, 2,')).toMatchInlineSnapshot();
-    expect(parseCortex(', 2,')).toMatchInlineSnapshot();
-    expect(parseCortex('Sequence()')).toMatchInlineSnapshot();
-    expect(parseCortex('Sequence(1, 2, 3)')).toMatchInlineSnapshot();
-    expect(parseCortex('Sequence(1, 2x + 4, 3)')).toMatchInlineSnapshot();
+    expect(validCortex('1, 2, 3')).toMatchInlineSnapshot();
+    expect(validCortex('1,, 3')).toMatchInlineSnapshot();
+    expect(validCortex('1, 2,')).toMatchInlineSnapshot();
+    expect(validCortex(', 2,')).toMatchInlineSnapshot();
+    expect(validCortex('Sequence()')).toMatchInlineSnapshot();
+    expect(validCortex('Sequence(1, 2, 3)')).toMatchInlineSnapshot();
+    expect(validCortex('Sequence(1, 2x + 4, 3)')).toMatchInlineSnapshot();
   });
   test('Tuple', () => {
-    expect(parseCortex('()')).toMatchInlineSnapshot();
-    expect(parseCortex('(a,b)')).toMatchInlineSnapshot();
-    expect(parseCortex('(a,,b)')).toMatchInlineSnapshot();
-    expect(parseCortex('(a , , b)')).toMatchInlineSnapshot();
-    expect(parseCortex('Tuple()')).toMatchInlineSnapshot();
-    expect(parseCortex('Tuple(a, 2b, c^3)')).toMatchInlineSnapshot();
+    expect(validCortex('()')).toMatchInlineSnapshot();
+    expect(validCortex('(a,b)')).toMatchInlineSnapshot();
+    expect(validCortex('(a,,b)')).toMatchInlineSnapshot();
+    expect(validCortex('(a , , b)')).toMatchInlineSnapshot();
+    expect(validCortex('Tuple()')).toMatchInlineSnapshot();
+    expect(validCortex('Tuple(a, 2b, c^3)')).toMatchInlineSnapshot();
   });
 });
 
 describe.skip('CORTEX PARSING OPERATORS', () => {
   test('Unary Operators', () => {
-    expect(parseCortex('-x')).toMatchInlineSnapshot();
-    expect(parseCortex('-(2+1)')).toMatchInlineSnapshot();
-    expect(parseCortex('+(2+1)')).toMatchInlineSnapshot();
+    expect(validCortex('-x')).toMatchInlineSnapshot();
+    expect(validCortex('-(2+1)')).toMatchInlineSnapshot();
+    expect(validCortex('+(2+1)')).toMatchInlineSnapshot();
   });
   test('Arithmetic Operators', () => {
-    expect(parseCortex('2 * x')).toMatchInlineSnapshot();
-    expect(parseCortex('-1 + -2')).toMatchInlineSnapshot();
-    expect(parseCortex('-1 * -2')).toMatchInlineSnapshot();
-    expect(parseCortex('-x * -y')).toMatchInlineSnapshot();
-    expect(parseCortex('(x + 1) * (x - 1)')).toMatchInlineSnapshot();
-    expect(parseCortex('1 + (2 + 3)')).toMatchInlineSnapshot();
-    expect(parseCortex('2 * (2 + 3)')).toMatchInlineSnapshot();
-    expect(parseCortex('2 (2 + 3)')).toMatchInlineSnapshot();
-    expect(parseCortex('x * -1 + x * 2')).toMatchInlineSnapshot();
-    expect(parseCortex('-x - -1')).toMatchInlineSnapshot();
-    expect(parseCortex('x * y + a * b')).toMatchInlineSnapshot();
-    expect(parseCortex('(x + y) * (a + b)')).toMatchInlineSnapshot();
-    expect(parseCortex('x * y * a * b')).toMatchInlineSnapshot();
+    expect(validCortex('2 * x')).toMatchInlineSnapshot();
+    expect(validCortex('-1 + -2')).toMatchInlineSnapshot();
+    expect(validCortex('-1 * -2')).toMatchInlineSnapshot();
+    expect(validCortex('-x * -y')).toMatchInlineSnapshot();
+    expect(validCortex('(x + 1) * (x - 1)')).toMatchInlineSnapshot();
+    expect(validCortex('1 + (2 + 3)')).toMatchInlineSnapshot();
+    expect(validCortex('2 * (2 + 3)')).toMatchInlineSnapshot();
+    expect(validCortex('2 (2 + 3)')).toMatchInlineSnapshot();
+    expect(validCortex('x * -1 + x * 2')).toMatchInlineSnapshot();
+    expect(validCortex('-x - -1')).toMatchInlineSnapshot();
+    expect(validCortex('x * y + a * b')).toMatchInlineSnapshot();
+    expect(validCortex('(x + y) * (a + b)')).toMatchInlineSnapshot();
+    expect(validCortex('x * y * a * b')).toMatchInlineSnapshot();
   });
   test('Logic Operators', () => {
-    expect(parseCortex('x && y && (a || b)')).toMatchInlineSnapshot();
+    expect(validCortex('x && y && (a || b)')).toMatchInlineSnapshot();
   });
   test('Relational Operators', () => {
-    expect(parseCortex('x * y == a + b')).toMatchInlineSnapshot();
-    expect(parseCortex('0 > -1')).toMatchInlineSnapshot();
-    expect(parseCortex('0 >= -1')).toMatchInlineSnapshot();
+    expect(validCortex('x * y == a + b')).toMatchInlineSnapshot();
+    expect(validCortex('0 > -1')).toMatchInlineSnapshot();
+    expect(validCortex('0 >= -1')).toMatchInlineSnapshot();
   });
   test('Invisible Operators', () => {
-    expect(parseCortex('2x')).toMatchInlineSnapshot();
-    expect(parseCortex('x(2+1)')).toMatchInlineSnapshot();
-    expect(parseCortex('2(2+1)')).toMatchInlineSnapshot();
-    expect(parseCortex('(a+b)(2+1)')).toMatchInlineSnapshot();
-    expect(parseCortex('2 1/2')).toMatchInlineSnapshot();
-    expect(parseCortex('x 1/2')).toMatchInlineSnapshot();
+    expect(validCortex('2x')).toMatchInlineSnapshot();
+    expect(validCortex('x(2+1)')).toMatchInlineSnapshot();
+    expect(validCortex('2(2+1)')).toMatchInlineSnapshot();
+    expect(validCortex('(a+b)(2+1)')).toMatchInlineSnapshot();
+    expect(validCortex('2 1/2')).toMatchInlineSnapshot();
+    expect(validCortex('x 1/2')).toMatchInlineSnapshot();
   });
   test('Power', () => {
-    expect(parseCortex('x^2')).toMatchInlineSnapshot();
-    expect(parseCortex('x^1/2')).toMatchInlineSnapshot();
-    expect(parseCortex('x ^ 1 / 2')).toMatchInlineSnapshot();
-    expect(parseCortex('(x + 1) ^ (n - 1)')).toMatchInlineSnapshot();
+    expect(validCortex('x^2')).toMatchInlineSnapshot();
+    expect(validCortex('x^1/2')).toMatchInlineSnapshot();
+    expect(validCortex('x ^ 1 / 2')).toMatchInlineSnapshot();
+    expect(validCortex('(x + 1) ^ (n - 1)')).toMatchInlineSnapshot();
   });
 });
 
 describe.skip('CORTEX PARSING FUNCTIONS', () => {
   test('Functions', () => {
-    expect(parseCortex('f()')).toMatchInlineSnapshot();
-    expect(parseCortex('f(x)')).toMatchInlineSnapshot();
-    expect(parseCortex('f(x, y)')).toMatchInlineSnapshot();
-    expect(parseCortex('Add()')).toMatchInlineSnapshot();
-    expect(parseCortex('Add(2, 3)')).toMatchInlineSnapshot();
-    expect(parseCortex('`\\sin`(x)')).toMatchInlineSnapshot();
-    expect(parseCortex('Apply(g(f), [x, 1, 0])')).toMatchInlineSnapshot();
+    expect(validCortex('f()')).toMatchInlineSnapshot();
+    expect(validCortex('f(x)')).toMatchInlineSnapshot();
+    expect(validCortex('f(x, y)')).toMatchInlineSnapshot();
+    expect(validCortex('Add()')).toMatchInlineSnapshot();
+    expect(validCortex('Add(2, 3)')).toMatchInlineSnapshot();
+    expect(validCortex('`\\sin`(x)')).toMatchInlineSnapshot();
+    expect(validCortex('Apply(g(f), [x, 1, 0])')).toMatchInlineSnapshot();
   });
 });

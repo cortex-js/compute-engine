@@ -1,5 +1,5 @@
 import type { Expression } from '../src/public';
-import { LatexSyntax, ComputeEngine } from '../src/math-json';
+import { LatexSyntax, ComputeEngine, parseCortex } from '../src/math-json';
 import { Form } from '../src/compute-engine/public';
 
 let errors: string[] = [];
@@ -93,3 +93,14 @@ expect.addSnapshotSerializer({
     return printExpression(val);
   },
 });
+
+export function validCortex(s: string): Expression {
+  const [value, error] = parseCortex(s);
+  return (error?.code as any) ?? value;
+}
+
+export function invalidCortex(s: string): (string | number)[] {
+  const [value, error] = parseCortex(s);
+  if (!error) return ['succeeded-unexpectedly', value as any];
+  return error.code as any;
+}

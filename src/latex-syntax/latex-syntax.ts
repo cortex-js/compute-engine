@@ -1,9 +1,3 @@
-import {
-  ErrorListener,
-  ErrorCode,
-  DictionaryCategory,
-  Expression,
-} from '../../dist/types/public';
 import { tokenize } from './core/tokenizer';
 import {
   DEFAULT_LATEX_DICTIONARY,
@@ -25,7 +19,12 @@ import {
   DEFAULT_PARSE_LATEX_OPTIONS,
   DEFAULT_SERIALIZE_LATEX_OPTIONS,
 } from './utils';
-
+import {
+  DictionaryCategory,
+  Expression,
+  ErrorCode,
+  ErrorListener,
+} from '../public';
 export class LatexSyntax {
   onError?: ErrorListener<ErrorCode>;
 

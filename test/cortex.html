@@ -70,7 +70,12 @@
     </main>
 
     <script type="module">
-        import { ComputeEngine, LatexSyntax, parseCortex, serializeCortex } from '../dist/math-json.js';
+        import {
+            ComputeEngine,
+            LatexSyntax,
+            parseCortex,
+            serializeCortex
+        } from '../dist/cortex.js';
 
 
         const engine = new ComputeEngine();
@@ -90,12 +95,18 @@
             let errorMsg = '';
             if (warnings && warnings.length > 0) {
                 for (const warning of warnings) {
-                    if (warning.signal.head) {
-                        errorMsg += warning.signal.head + ': ';
+                    // if (warning.signal.head) {
+                    //     errorMsg += warning.signal.head + ': ';
+                    // }
+                    if (warning.origin) {
+                        errorMsg += `${warning.origin.line}:${warning.origin.column}<br>`;
+                        if (warning.origin.around) {
+                            errorMsg += warning.origin.around + '<br>';
+                        }
                     }
-                    errorMsg += warning.signal.code;
-                    if (warning.signal.args) {
-                        for (const arg of warning.signal.args) {
+                    errorMsg += warning.code;
+                    if (warning.args) {
+                        for (const arg of warning.args) {
                             errorMsg += arg.toString() + ' ';
                         }
                     }
@@ -116,7 +127,7 @@
                 let errorMsg = '';
                 try {
                     const [expr, warnings] = parseCortex(cortex);
-                    errorMsg += warningsToString(warnings);
+                    errorMsg += warningsToString(warnings ? [warnings] : []);
                     if (expr) {
                         setTimeout(() => {
                             document.getElementById('cortex').classList.add('visible');

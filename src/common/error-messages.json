@@ -1,0 +1,9 @@
+{
+  "en-us": {
+    "exponent-expected": "An exponent was expected",
+    "binary-number-expected": "A binary number was expected",
+    "eof-expected": "Nothing more was expected",
+    "expression-expected": "An expression was expected",
+    "closing-bracket-expected": "A %0 was expected"
+  }
+}

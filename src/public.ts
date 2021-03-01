@@ -1,4 +1,9 @@
-export type ParsingSignalCode = 'parsing-error';
+export type ParsingSignalCode =
+  | 'exponent-expected'
+  | 'binary-number-expected'
+  | 'eof-expected'
+  | 'expression-expected'
+  | 'closing-bracket-expected'; // arg: [bracket]
 
 export type RuntimeSignalCode =
   | 'timeout'
@@ -21,20 +26,20 @@ export type SignalCode =
     );
 
 export type SignalOrigin = {
-  filepath?: string;
+  url?: string;
   source?: string;
   index?: number;
   line?: number;
   column?: number;
+  around?: string;
 };
 
 export type Signal = {
   severity?: 'warning' | 'error';
 
-  code: SignalCode;
-
-  // Optional, one or more arguments specific to the signal code.
-  args?: (string | number)[];
+  // An error/warning code or, a code with one or more arguments specific to
+  // the signal code.
+  code: SignalCode | [SignalCode, ...(string | number)[]];
 
   // If applicable, the head of the function about which the
   // signal was raised

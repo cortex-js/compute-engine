@@ -41,12 +41,14 @@
   },
   "devDependencies": {
     "@cortex-js/prettier-config": "^1.1.0",
+    "@rollup/plugin-commonjs": "^17.1.0",
     "@rollup/plugin-node-resolve": "^11.1.1",
     "@types/jest": "^26.0.20",
     "@types/node": "^14.14.22",
     "@typescript-eslint/eslint-plugin": "^4.14.1",
     "@typescript-eslint/parser": "^4.14.1",
     "@typescript-eslint/typescript-estree": "^4.14.1",
+    "chalk": "^4.1.0",
     "check-node-version": "^4.0.3",
     "child_process": "^1.0.2",
     "chokidar": "^3.5.1",
@@ -88,6 +90,5 @@
     ]
   },
   "dependencies": {
-    "chalk": "^4.1.0"
   }
 }
