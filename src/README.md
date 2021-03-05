@@ -67,12 +67,13 @@ A MathJSON expression is a combination of **numbers**, **symbols** and
 {"num": "-Infinity"}
 ```
 
-**Symbol**
+**Symbol or String**
 
 ```json
 "x"
 "Pi"
 {"sym": "Pi", "wikidata": "Q167" }
+"'Diameter of a circle'"
 ```
 
 **Function**
@@ -93,9 +94,9 @@ A MathJSON expression is a combination of **numbers**, **symbols** and
 }
 ```
 
-**Numbers**, **symbols** and **functions** can be expressed either as an object
-literal with a `"num"`, `"sym"` or `"fn"` property, respectively, or as a
-short-hand notation using a JSON number, string or array.
+**Numbers**, **symbols**, **strings** and **functions** can be expressed either
+as an object literal with a `"num"`, `"sym"` or `"fn"` key, respectively, or as
+a short-hand notation using a JSON number, string or array.
 
 The short-hand notation is more concise and easier to read, but cannot include
 metadata properties.
@@ -104,7 +105,7 @@ metadata properties.
 
 A MathJSON **number** is either:
 
-- an object literal
+- an object literal with a `"num"` key
 - a JSON number
 
 ### Numbers as Object Literals
@@ -118,6 +119,9 @@ value of the key is a string representation of the number.
 }
 ```
 
+The string representing a number follows the
+[JSON syntax for number](https://tools.ietf.org/html/rfc7159#section-6).
+
 ### JSON numbers
 
 When a **number** has no extra metadata and is compatible with the JSON
@@ -125,9 +129,9 @@ representation of numbers, a JSON number can be used.
 
 Specifically:
 
-- the number has to fit in a 64-bit float (IEEE 754-2008, 52-bit, about 15
-  digits of precision)
-- the number has to be finite (it cannot be `Infinity`, `-Infinity` or `NaN`)
+- the number has to be in the range $$[-(2^{53})+1, (2^{53})-1]$$ to fit in a
+  64-bit float (**IEEE 754-2008**, 52-bit, about 15 digits of precision).
+- the number has to be finite: it cannot be `Infinity`, `-Infinity` or `NaN`.
 
 ### Examples
 
@@ -138,7 +142,10 @@ Specifically:
 
 { "num": "-234.534e-46" }
 
-{ "num": "3.1415926535 8979323846 2643383279 5028841971 6939937510 5820974944" }
+{
+  "num":
+    "3.141592653589793238462643383279502884197169399375105"
+}
 
 { "num": "-Infinity" }
 
@@ -146,48 +153,95 @@ Specifically:
 
 ## Symbols and strings
 
-**Strings** are represented by a JSON string that begins and ends with **U+0027
-APOSTROPHE** : **`'`**.
+A MathJSON **symbol** or **string** is either:
+
+- an object literal with a `"sym"` key
+- a JSON string
+
+### Strings
+
+**Strings** are represented by a
+[JSON string](https://tools.ietf.org/html/rfc7159#section-7) that begins and
+ends with **U+0027 APOSTROPHE** : **`'`**.
+
+String can contain any Unicode characters, but the following characters must be
+escaped as indicated:
+
+- **U+0000** to **U+001F**: `\u0000` to `\u001F`
+- **U+0008**, Backspace: `\b` or `\u0008`
+- **U+0009**, Tab : `\t` or `\u0009`
+- **U+000a**, Line feed: `\n` or `\u000a`
+- **U+000c**, Form Feed: `\f` or `\u000c`
+- **U+000d**, Carriage Return: `\r` or `\u000d`
+- **U+005c**, Backslash/Reverse Solidus: `\\` or `\u005c`
+- **U+0022**, Quotation mark: `\"` or `\u0022`
 
 ```json
 "'Hello world'"
 ```
 
-**Symbols** represent constants and variables.
+### Symbols
 
-**Symbols** are arbitrary strings of Unicode characters, except the following:
+**Symbols** are identifiers that represent the name of constants, variables and
+functions.
 
-- **U+0000-U+0020**
-- **U+FFFE-U+FFFF**
+Symbols are arbitrary strings of Unicode characters, except:
 
-In addition, the first character of a symbol cannot be:
+- **U+0000** to **U+0020**
+- **U+0022 DOUBLE QUOTE**: **`"`**
+- **U+005C REVERSE SOLIDUS** : **`\`**
+- **U+0060 GRAVE ACCENT** backtick : **`` ` ``**
+- **U+FFFE**
+- **U+FFFF**
 
+In addition, the first character of a symbol should not be:
+
+- **U+0021 EXCLAMATION MARK** : **`!`**
 - **U+0022 QUOTATION MARK** : **`"`**
 - **U+0023 NUMBER SIGN** : **`#`**
 - **U+0024 DOLLAR SIGN** : **`$`**
 - **U+0025 PERCENT** : **`%`**
+- **U+0026 AMPERSAND** : **`&`**
 - **U+0027 APOSTROPHE** : **`'`**
+- **U+0028 LEFT PARENTHESIS** : **`(`**
+- **U+0029 RIGHT PARENTHESIS** : **`)`**
+- **U+002E FULL STOP** : **`'`**
+- **U+003A COLON** : **`:`**
+- **U+003C LESS THAN SIGN** : **`:`**
+- **U+003F QUESTION MARK** : **`?`**
 - **U+0040 COMMERCIAL AT** : **`@`**
-- **U+0060 GRAVE ACCENT** backtick : **`` ` ``**
+- **U+005B LEFT SQUARE BRACKET** : **`[`**
+- **U+005D RIGHT SQUARE BRACKET** : **`]`**
+- **U+005E CIRCUMFLEX ACCENT** : **`^`**
+- **U+007B LEFT CURLY BRACKET** : **`{`**
+- **U+007D RIGHT CURLY BRACKET** : **`}`**
 - **U+007E TILDE** : **`~`**
-- **U+00AB LEFT-POINTING DOUBLE ANGLE QUOTATION MARK** : **`«`**
-- **U+2018 LEFT SINGLE QUOTATION MARK** : **`‘`**
-- **U+201A SINGLE LOW-9 QUOTATION MARK** : **`‚`**
-- **U+201C LEFT DOUBLE QUOTATION MARK** : **`“`**
-- **U+201E DOUBLE LOW-9 QUOTATION MARK** : **`„`**
-- **U+2039 SINGLE LEFT-POINTING ANGLE QUOTATION MARK** : **`‹`**
 
-For symbols, the following naming convention are recommended.
+Before they are used, symbols are normalized to the Unicode Normalization Form
+Canonical Composition (NFC). They are stored internally and compared using the
+NFC.
+
+In addition, JSON escape sequences are applied before Unicode normalization.
+
+These four strings represent the same symbol:
+
+- `"Å"`
+- `"A\u030a"`
+- `"\u00c5"` **LATIN CAPITAL LETTER A WITH RING ABOVE** ("Å") and
+- `"\u0041\u030a"` **LATIN CAPITAL LETTER A** + **COMBINING RING ABOVE** ("A‌ ̊")
+
+The following naming convention are recommended.
 
 ### Patterns
 
-Symbols that begin with **`_`** (**U+005F LOW LINE**) are reserved to denote
-pattern matches.
+Symbols that begin with **`_`** (**U+005F LOW LINE**, underscore) are reserved
+to denote pattern matches and other placeholders.
 
-### Naming Convention for Variables
+### Variables
 
-- First character should match `/[a-zA-Z]/`
-- Subsequent characters should match `/[a-zA-Z0-9_-]/`
+- The first character of a variable should be a lowercase or uppercase letter
+  (`a`-`z` or `A`-`Z`)
+- Subsequent characters should be a letter, digit (`0`-`9`) or underscore (`_`).
 
   So for example use, `Gamma` rather than `ɣ` and `Total` rather than `∑`
   (**U+2211 N-ARY SUMMATION**), which looks like `Σ` (**U+03A3 GREEK CAPITAL
@@ -204,17 +258,17 @@ pattern matches.
 - The following variables are usually complex numbers: `z`, `w`
 - The following variables are usually lists: `xs`, `ys`, `ns`
 
-### Naming Convention for Constants
+### Constants
 
-- First character of constants should match: `/[A-Z]/`
-- Subsequent characters of constants should match: `/[a-zA-Z0-9_]/`
+- The first character of a constant should an uppercase letter (`A`-`Z`)
+- Subsequent characters should a letter, digit (`0`-`9`) or underscore (`_`).
 - If a constant is made up of several words, use camelCase, e.g. `SpeedOfLight`
 
 ## Functions
 
 A MathJSON function is either:
 
-- an object literal
+- an object literal with a `"fn"` key.
 - a JSON array
 
 ### Functions as Object Literal
@@ -282,22 +336,21 @@ value of the key is an object literal holding the content of the dictionary.
 
 MathJSON object literals can be annotated with supplemental information.
 
-A **number** represented as a JSON number, a **symbol** represented as a string,
-or a **function** represented as a JSON array must be transformed into the
-equivalent object literal before being annotated.
+A **number** represented as a JSON number, a **symbol** represented as a JSON
+string, or a **function** represented as a JSON array must be transformed into
+the equivalent object literal before being annotated.
 
-The following metadata properties are recommended:
+The following metadata keys are recommended:
 
-| Property        | Note                                                                                                                                                                         |
+| Key             | Note                                                                                                                                                                         |
 | :-------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `wikidata`      | A short string indicating an entry in a wikibase.<br>This information can be used to disambiguate the meaning of a symbol                                                    |
 | `comment`       | A human readable plain string to annotate an expression, since JSON does not allow comments in its encoding                                                                  |
 | `documentation` | A Markdown-encoded string providing documentation about this expression.                                                                                                     |
 | `latex`         | A visual representation in LaTeX of the expression. <br> This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
-| `origin-file`   | A file path to the source of this expression                                                                                                                                 |
-| `origin-source` | The source from which this expression was generated.<br> It could be a Latex expression, or some other source language.                                                      |
-| `origin-line`   | A line number (1-n) in the `origin-source` or `origin-file`                                                                                                                  |
-| `origin-column` | A column number (1-n) in the `origin-line`                                                                                                                                   |
+| `originUrl`     | A URL to the source of this expression                                                                                                                                       |
+| `originSource`  | The source from which this expression was generated.<br> It could be a Latex expression, or some other source language.                                                      |
+| `originOffset`  | A character offset in `originSource` or `originUrl` from which this expression was produced                                                                                  |
 | `hash`          | A string representing a digest of this expression.                                                                                                                           |
 
 ```json
