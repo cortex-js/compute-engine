@@ -5,7 +5,8 @@ export function parseExponent(
   parser: ParserState,
   prefix: 'e' | 'p'
 ): Result<number> {
-  let i = parser.offset;
+  const start = parser.offset;
+  let i = start;
   if (i >= parser.length) return parser.failure();
   if (prefix === 'p') {
     if (parser.at(i) !== 0x0070 && parser.at(i) !== 0x0050)
@@ -29,7 +30,7 @@ export function parseExponent(
 
   if (parser.offset !== i && !DIGITS.has(parser.at(i))) {
     // There was a '+' or '-' followed by a non-digit
-    return parser.error(i, 0, 'exponent-expected');
+    return parser.error([start, i], 0, 'exponent-expected');
   }
 
   let result = 0;
@@ -37,14 +38,14 @@ export function parseExponent(
     result = result * 10 + DIGITS.get(parser.at(i++));
   }
 
-  return parser.success(i, sign * result);
+  return parser.success([start, i], sign * result);
 }
 
 export function applyExponent(
   parser: ParserState,
+  start: number,
   value: number
 ): Result<number> {
-  const start = parser.offset;
   let exp = parseExponent(parser, 'e');
   if (exp.kind === 'success') {
     // Note: using "Math.pow" loses some accuracy, i.e.:
@@ -59,11 +60,10 @@ export function applyExponent(
     }
   }
   const end = parser.offset;
-  parser.skipTo(start);
   if (exp.kind === 'success' || exp.kind === 'failure') {
-    return parser.success(end, value);
+    return parser.success([start, end], value);
   }
-  return parser.error(end, value, 'exponent-expected');
+  return parser.error([start, end], value, 'exponent-expected');
 }
 
 export function parseBinaryNumber(parser: ParserState): Result<number> {
@@ -116,7 +116,7 @@ export function parseBinaryNumber(parser: ParserState): Result<number> {
 
   // Exponent
   parser.skipTo(i);
-  return applyExponent(parser, result);
+  return applyExponent(parser, start, result);
 }
 
 export function parseHexadecimalNumber(parser: ParserState): Result<number> {
@@ -158,7 +158,7 @@ export function parseHexadecimalNumber(parser: ParserState): Result<number> {
         i -= 1;
       } else {
         return parser.error(
-          i,
+          [start, i],
           result + fracPart,
           'hexadecimal-number-expected'
         );
@@ -169,7 +169,7 @@ export function parseHexadecimalNumber(parser: ParserState): Result<number> {
 
   // Exponent
   parser.skipTo(i);
-  return applyExponent(parser, result);
+  return applyExponent(parser, start, result);
 }
 
 // export function parseSignedFloatingPointNumber(
@@ -214,7 +214,11 @@ export function parseFloatingPointNumber(parser: ParserState): Result<number> {
         done = true;
         i -= 1;
       } else {
-        return parser.error(i, result + fracPart, 'decimal-number-expected');
+        return parser.error(
+          [start, i],
+          result + fracPart,
+          'decimal-number-expected'
+        );
       }
     }
     result += fracPart;
@@ -222,7 +226,7 @@ export function parseFloatingPointNumber(parser: ParserState): Result<number> {
 
   // Exponent
   parser.skipTo(i);
-  return applyExponent(parser, result);
+  return applyExponent(parser, start, result);
 }
 
 export function parseNumber(parser: ParserState): Result<number> {
@@ -258,9 +262,15 @@ export function parseSignedNumber(parser: ParserState): Result<number> {
   if (result.kind === 'failure') result = parseHexadecimalNumber(parser);
   if (result.kind === 'failure') result = parseFloatingPointNumber(parser);
 
-  result.start = start;
-  if (result.kind === 'success' || result.kind === 'error') {
-    result.value = sign * result.value;
+  if (result.kind === 'success') {
+    return parser.success([start, result.next], sign * result.value);
+  }
+  if (result.kind === 'error') {
+    return parser.errors(
+      [start, result.next],
+      sign * result.value,
+      result.errors
+    );
   }
 
   return result;

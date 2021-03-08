@@ -4,19 +4,24 @@ import {
   isIdentifierContinueProhibited,
   isIdentifierStartProhibited,
   isBreak,
+  isNewline,
 } from './characters';
 import { ParserState, Result } from './parsers';
 
 /** Parse an escape sequence such as `\n` or `\u0041`*/
 export function parseEscapeSequence(parser: ParserState): Result<string> {
-  let code = parser.at(parser.offset);
+  const start = parser.offset;
+  let code = parser.at(start);
   // Is it a backslash?
   if (code !== 0x005c) return parser.failure();
 
   // Is is a common escape sequence? ("\b", "\n", etc...)
   const replacement = REVERSED_ESCAPED_CHARS.get(parser.at(parser.offset + 1));
   if (replacement !== undefined) {
-    return parser.success(parser.offset + 2, String.fromCodePoint(replacement));
+    return parser.success(
+      [start, start + 2],
+      String.fromCodePoint(replacement)
+    );
   }
 
   // It's a Unicode escape sequence: "\u0041", "\u{0041}"
@@ -51,7 +56,7 @@ export function parseEscapeSequence(parser: ParserState): Result<string> {
       done = i < parser.length;
     }
     if (invalidChar || !done) {
-      return parser.error(i, '\ufffd', [
+      return parser.error([start, i, start], '\ufffd', [
         'invalid-unicode-codepoint-string',
         codepointString,
       ]);
@@ -63,22 +68,22 @@ export function parseEscapeSequence(parser: ParserState): Result<string> {
     // as part of a UTF-16 encoding, but not as a standalone codepoint)
     // If not return `'\ufffd'`, the Unicode Replacement Character.
     if (code > 0x10ffff) {
-      return parser.error(i, '\ufffd', [
+      return parser.error([start, i, start], '\ufffd', [
         'invalid-unicode-codepoint',
         'U+' + ('00000' + code.toString(16)).slice(8),
       ]);
     }
     if (code >= 0xd800 && code <= 0xdfff) {
-      return parser.error(i, '\ufffd', [
+      return parser.error([start, i, start], '\ufffd', [
         'invalid-unicode-codepoint',
         'U+' + ('0000' + code.toString(16)).slice(4),
       ]);
     }
-    return parser.success(i, String.fromCodePoint(code));
+    return parser.success([start, i], String.fromCodePoint(code));
   }
 
   // Some unrecognized escape sequence, i.e. `\z`. Return "z" and an error.
-  return parser.error(i, String.fromCodePoint(escapeChar), [
+  return parser.error([start, i], String.fromCodePoint(escapeChar), [
     'invalid-escape-sequence',
     '\\' + String.fromCodePoint(escapeChar),
   ]);
@@ -128,10 +133,11 @@ export function parseMultilineString(
   return parser.failure();
 }
 
+/** A verbatim identifier is enclosed in backticks and can
+ * include characters that are otherwise invalid (such as `+`).
+ * It can also include escape sequences.
+ */
 export function parseVerbatimIdentifier(parser: ParserState): Result<string> {
-  //
-  // A verbatim identifier
-  //
   const start = parser.offset;
 
   // Is it a backtick?
@@ -140,38 +146,46 @@ export function parseVerbatimIdentifier(parser: ParserState): Result<string> {
   let invalidChar = false;
   let i = parser.offset + 1; // Skip the initial backtick
   let id = '';
-  while (!done && !invalidChar && i < parser.length) {
+  let atNewline = false;
+  while (!done && !atNewline && i < parser.length) {
     const code = parser.at(i);
+    atNewline = isNewline(code);
     done = code === 0x0060; // GRAVE ACCENT = backtick
-    if (code === 0x005c) {
-      // Escape sequence
-      parser.skipTo(i);
-      const escSequence = parseEscapeSequence(parser);
-      if (escSequence.kind === 'success') id += escSequence.value;
-      i = escSequence.next;
-    } else {
-      invalidChar = isIdentifierContinueProhibited(code);
-      if (!done) {
-        const s = String.fromCharCode(code);
+    if (!done) {
+      if (code === 0x005c) {
+        // Escape sequence
+        parser.skipTo(i);
+        const escSequence = parseEscapeSequence(parser);
+        if (escSequence.kind === 'success') id += escSequence.value;
+        i = escSequence.next;
+      } else {
+        invalidChar = invalidChar || isIdentifierContinueProhibited(code);
+        const s = String.fromCodePoint(code);
         id += s;
         i += s.length;
       }
     }
   }
 
-  parser.skipTo(start);
   if (!done) {
     // We reached the end of the line, or end of the source,
     // or found an invalid char without finding the closing '`'
-    return parser.error(i, id ?? 'Missing', ['unbalanced-verbatim-symbol', id]);
+    return parser.error([start, i, start], id ?? 'Missing', [
+      'unbalanced-verbatim-symbol',
+      id,
+    ]);
   }
   if (id.length === 0) {
-    return parser.error(i + 1, 'Missing', 'empty-verbatim-symbol');
+    return parser.error(
+      [start, i + 1, start],
+      'Missing',
+      'empty-verbatim-symbol'
+    );
   }
   if (invalidChar || isIdentifierStartProhibited(id.charCodeAt(0))) {
-    return parser.error(i + 1, 'Missing', ['invalid-symbol-name', id]);
+    return parser.error([start, i + 1], 'Missing', ['invalid-symbol-name', id]);
   }
-  return parser.success(i + 1, id);
+  return parser.success([start, i + 1], id);
 }
 
 export function parseIdentifier(parser: ParserState): Result<string> {
@@ -181,23 +195,24 @@ export function parseIdentifier(parser: ParserState): Result<string> {
   //
   // A non-verbatim identifier
   //
-  let code = parser.at(parser.offset);
+  const start = parser.offset;
+  let code = parser.at(start);
   if (isIdentifierStartProhibited(code) || isBreak(code)) {
     return parser.failure('symbol-expected');
   }
 
   let done = false;
-  let i = parser.offset;
+  let i = start;
   let id = '';
   while (!done && i < parser.length) {
     code = parser.at(i);
     done = isBreak(code) || isIdentifierContinueProhibited(code);
     if (!done) {
-      const s = String.fromCharCode(code);
+      const s = String.fromCodePoint(code);
       id += s;
       i += s.length;
     }
   }
   if (id.length === 0) return parser.failure('symbol-expected');
-  return parser.success(i, id);
+  return parser.success([start, i], id);
 }

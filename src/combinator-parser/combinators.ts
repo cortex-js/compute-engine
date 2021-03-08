@@ -92,8 +92,7 @@ export function reduce<T = string, U = T>(
     }
     // It's all ignores...
     console.assert(parser.offset !== minOffset);
-    parser.skipTo(minOffset);
-    return parser.ignore(maxOffset);
+    return parser.ignore([minOffset, maxOffset]);
   }
 
   // Apply the function to the values
@@ -104,8 +103,7 @@ export function reduce<T = string, U = T>(
   }
 
   console.assert(parser.offset !== minOffset);
-  parser.skipTo(minOffset);
-  return parser.success(maxOffset, value);
+  return parser.success([minOffset, maxOffset], value);
 }
 
 // export function accept<S>(value: S, error?: SignalMessage): Combinator<S> {}
@@ -121,9 +119,10 @@ export function codepoint(
   msg?: SignalMessage
 ): Combinator<string> {
   return (parser: ParserState): Result<string> => {
-    if (parser.at(parser.offset) === value) {
+    const start = parser.offset;
+    if (parser.at(start) === value) {
       return parser.success(
-        parser.offset + codePointLength(value),
+        [start, start + codePointLength(value)],
         String.fromCodePoint(value)
       );
     }
@@ -140,12 +139,13 @@ export function parseString(
 ): Result<string> {
   let i = 0;
   let match = true;
+  const start = parser.offset;
   while (i < value.length && match && i < parser.length) {
-    match = parser.at(parser.offset + i) === value.codePointAt(i);
+    match = parser.at(start + i) === value.codePointAt(i);
     i++;
   }
   if (match && i === value.length) {
-    return parser.success(parser.offset + value.length, value);
+    return parser.success([start, start + value.length], value);
   }
   return parser.failure(msg);
 }
@@ -186,9 +186,10 @@ export function fancyLiteral(
   if (REVERSE_FANCY_UNICODE.has(value)) {
     const fancyList = REVERSE_FANCY_UNICODE.get(value);
     return (parser) => {
+      const start = parser.offset;
       for (const fancy of fancyList) {
-        if (parser.at(parser.offset) === fancy) {
-          parser.success(parser.offset + codePointLength(fancy), value);
+        if (parser.at(start) === fancy) {
+          parser.success([start, start + codePointLength(fancy)], value);
         }
       }
       return parseString(parser, value, msg);
@@ -203,10 +204,14 @@ export function regex(regex: RegExp, msg?: SignalMessage): Combinator<string> {
   const anchoredRegex = new RegExp(`^${regex.source}`);
 
   return (parser: ParserState): Result<string> => {
-    const match = anchoredRegex.exec(parser.slice(parser.offset));
+    const start = parser.offset;
+    const match = anchoredRegex.exec(parser.slice(start));
     if (match != null) {
       const matchedText = match[0];
-      return parser.success(parser.offset + matchedText.length, matchedText);
+      return parser.success(
+        [start, parser.offset + matchedText.length],
+        matchedText
+      );
     }
     return parser.failure(msg);
   };
@@ -231,7 +236,7 @@ export function sequence<T, U extends any[]>(
     for (const c of cs) {
       let result: Result = parseWhitespace(parser);
       if (result.kind === 'error') errors = [...errors, ...result.errors];
-      result = c(parser.skipTo(result.next));
+      result = c(parser);
 
       if (result.kind === 'ignore') {
         // Do nothing
@@ -248,15 +253,13 @@ export function sequence<T, U extends any[]>(
       } else if (result.kind === 'success') {
         values.push(result.value);
       }
-      parser.skipTo(result.next);
     }
 
     const value = f(...values);
 
     const end = parser.offset;
-    parser.skipTo(start);
-    if (errors.length === 0) return parser.success<T>(end, value);
-    return parser.errors(end, value, errors);
+    if (errors.length === 0) return parser.success<T>([start, end], value);
+    return parser.errors([start, end], value, errors);
   };
 }
 
@@ -286,13 +289,16 @@ export function best<T>(cs: Combinator[], msg?: ParsingError): Combinator<T> {
  * Select the first one that matches.
  *
  */
-export function alt<T>(cs: Combinator[], msg?: ParsingError): Combinator<T> {
+export function alt<T>(cs: Combinator<T>[], msg?: ParsingError): Combinator<T> {
   return (parser: ParserState): Result<T> => {
     // Pick the first alternative that succeeds
+    let error: Error<T>;
     for (const c of cs) {
       const result = c(parser);
       if (result.kind === 'success') return result;
+      if (!error && result.kind === 'error') error = result;
     }
+    if (error) return error;
     // No alternative succeeded
     return parser.failure(msg);
   };
@@ -317,7 +323,6 @@ export function many<T>(
     }
     while (!done) {
       done = result.kind !== 'success';
-      parser.skipTo(result.next);
       if (!done) {
         results.push(result);
         result = something(parser);
@@ -325,9 +330,7 @@ export function many<T>(
     }
 
     console.assert(results.every((x) => x.kind === 'success'));
-    const end = parser.offset;
-    parser.skipTo(start);
-    return parser.success(end, f(results as Success<T>[]));
+    return parser.success([start, parser.offset], f(results as Success<T>[]));
   };
 }
 
@@ -342,47 +345,55 @@ export function some<T>(
 ): Combinator<T> {
   return (parser: ParserState): Result<T> => {
     const start = parser.offset;
-    let result = something(parser);
+    let errors: Signal[] = [];
+
+    let result: Result<T> = parseWhitespace(parser);
+    if (result.kind === 'error') errors = [...result.errors];
+    result = something(parser);
     if (result.kind === 'failure') {
-      return parser.success(result.next, undefined);
+      if (errors.length === 0) {
+        return parser.success([start, result.next], undefined);
+      }
+      return parser.errors([start, result.next], undefined, errors);
     }
     const results: (Success<T> | Error<T>)[] = [];
-    let errors: Signal[] = [];
-    let done = false;
 
-    while (!done) {
-      done = result.kind === 'failure';
-      if (!done) {
-        if (result.kind === 'ignore') {
-          // Do nothing
-        } else if (result.kind === 'success') {
-          results.push(result);
-        } else if (result.kind === 'error') {
-          results.push(result);
-          errors = [...errors, ...result.errors];
-        }
-        result = something(parser.skipTo(result.next));
+    let done = false;
+    while (result.kind !== 'failure' && !done) {
+      if (result.kind === 'ignore') {
+        // Do nothing
+      } else if (result.kind === 'success') {
+        results.push(result);
+      } else if (result.kind === 'error') {
+        results.push(result);
+        errors = [...errors, ...result.errors];
       }
+      // Skip Whitespace
+      result = parseWhitespace(parser);
+      if (result.kind === 'error') errors = [...errors, ...result.errors];
+      done = parser.offset >= parser.length;
+      // Parse something
+      if (!done) result = something(parser);
     }
 
     const value = f(...results);
 
     const end = parser.offset;
-    parser.skipTo(start);
-    if (errors.length === 0) return parser.success<T>(end, value);
-    return parser.errors(end, value, errors);
+    if (errors.length === 0) return parser.success<T>([start, end], value);
+    return parser.errors([start, end], value, errors);
   };
 }
 
 // Succeeds even if `something` fails
 export function maybe(something: Combinator): Combinator {
   return (parser: ParserState) => {
+    const start = parser.offset;
     const result = something(parser);
     if (result.kind === 'success') return result;
     if (result.kind === 'ignore') return result;
-    if (result.kind === 'failure') return parser.success(result.next);
+    if (result.kind === 'failure') return parser.ignore([start, result.next]);
     // This was an error, turn it into a success
-    return parser.success(result.next, result.value);
+    return parser.success([start, result.next], result.value);
   };
 }
 
@@ -399,7 +410,7 @@ export function must<T>(
     // @todo: we could propagate the value...?
     const result = something(parser);
     if (result.kind === 'failure') {
-      return parser.error<T>(result.next, defaultValue, msg);
+      return parser.error<T>([result.start, result.next], defaultValue, msg);
     }
     return result;
   };
@@ -433,7 +444,6 @@ export function between<T>(
       return parser.failure(msg ?? ['opening-bracket-expected', open]);
     }
     result = something(parser);
-    parser.skipTo(result.next);
     if (result.kind === 'error') {
       const closeResult = closeCombinator(parser);
       if (closeResult.kind !== 'success') {
@@ -447,14 +457,13 @@ export function between<T>(
     }
     if (result.kind !== 'success') {
       return parser.error<T>(
-        result.next,
+        [start, result.next],
         defaultValue,
         msg ?? ['closing-bracket-expected', close]
       );
     }
     if (closeCombinator(parser).kind === 'success') {
-      parser.skipTo(start);
-      return parser.success(result.next, result.value);
+      return parser.success([start, result.next], result.value);
     }
   };
 }
@@ -496,34 +505,31 @@ export function manySeparatedBetween<T>(
     let done = false;
     while (!done) {
       result = something(parser);
-      parser.skipTo(result.next);
       done = result.kind !== 'success';
       if (!done) {
         results.push(result);
         result = sep(parser);
-        parser.skipTo(result.next);
         done = result.kind !== 'success';
       }
     }
 
     if (results.length === 0) {
       return parser.error<T>(
-        result.next,
+        [start, result.next],
         defaultValue,
         msg ?? 'expression-expected'
       );
     }
 
     result = normalize(close)(parser);
-    parser.skipTo(start);
     if (result.kind !== 'success') {
       return parser.error<T>(
-        result.next,
+        [start, result.next],
         defaultValue,
         msg ?? ['closing-bracket-expected', close]
       );
     }
-    return parser.success(result.next, f(results as Success<T>[]));
+    return parser.success([start, result.next], f(results as Success<T>[]));
   };
 }
 
@@ -549,28 +555,26 @@ export function someSeparatedBetween<T>(
     const sep = normalize(separator);
     while (result.kind === 'success') {
       result = sep(parser);
-      parser.skipTo(result.next);
-      if (result.kind === 'success') {
-        results.push(something(parser));
-      }
+      if (result.kind === 'success') results.push(something(parser));
     }
 
     result = normalize(close)(parser);
     if (result.kind !== 'success') {
-      parser.skipTo(start);
       return parser.error<T>(
-        result.next,
+        [start, result.next],
         f(results),
         msg ?? ['closing-bracket-expected', close]
       );
     }
-    return parser.success(result.next, f(results));
+    return parser.success([start, result.next], f(results));
   };
 }
 
-export function eof<T>(msg?: SignalCode): Combinator<T> {
+export function eof(msg?: SignalCode): Combinator<void> {
   return (parser: ParserState) => {
-    if (parser.offset >= parser.length) return parser.success(parser.length);
+    if (parser.offset >= parser.length) {
+      return parser.success([parser.length, parser.length], undefined);
+    }
     return parser.failure(msg ?? 'eof-expected');
   };
 }

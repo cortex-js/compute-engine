@@ -7,6 +7,7 @@ import {
   Error,
 } from '../combinator-parser/parsers';
 import {
+  alt,
   Combinator,
   eof,
   must,
@@ -15,6 +16,7 @@ import {
   some,
 } from '../combinator-parser/combinators';
 import { parseSignedNumber } from '../combinator-parser/numeric-parsers';
+import { parseIdentifier } from '../combinator-parser/identifier-parsers';
 
 function signedNumber(): Combinator<Expression> {
   return (parser: ParserState): Result<Expression> => {
@@ -29,7 +31,7 @@ function signedNumber(): Combinator<Expression> {
       litResult = parseString(parser, '-Infinity');
     }
     if (litResult.kind === 'success') {
-      return parser.success<Expression>(litResult.next, {
+      return parser.success<Expression>([litResult.start, litResult.next], {
         num: litResult.value,
         originOffset: litResult.start,
       });
@@ -39,7 +41,7 @@ function signedNumber(): Combinator<Expression> {
     if (numResult.kind === 'success') {
       // Return a number expression
       // @todo: we could return a BaseForm() for hexadecimal and decimal
-      return parser.success<Expression>(numResult.next, {
+      return parser.success<Expression>([numResult.start, numResult.next], {
         num: numResult.value.toString(),
         originOffset: numResult.start,
       });
@@ -48,32 +50,60 @@ function signedNumber(): Combinator<Expression> {
   };
 }
 
-function primary(): Combinator<Expression> {
-  return signedNumber();
-}
+// function string(): Combinator<Expression> {
+//   return (parser: ParserState): Result<Expression> => {
+//     return parseSingleLineString(parser, ...)
 
-function exprOrigin(expr: Expression, offset: number): Expression {
-  if (Array.isArray(expr)) {
-    return {
-      fn: expr,
-      originOffset: offset,
-    };
-  } else if (typeof expr === 'object') {
-    return {
-      ...expr,
-      originOffset: offset,
-    };
-  } else if (typeof expr === 'number') {
-    return {
-      num: expr.toString(),
-      originOffset: offset,
-    };
-  }
-  return {
-    sym: expr,
-    originOffset: offset,
+//   };
+// }
+
+function symbol(): Combinator<Expression> {
+  return (parser: ParserState): Result<Expression> => {
+    const result = parseIdentifier(parser);
+    if (result.kind !== 'success' && result.kind !== 'error') return result;
+    if (result.kind === 'success') {
+      return parser.success([result.start, result.next], {
+        sym: result.value,
+        originOffset: result.start,
+      });
+    }
+    return parser.errors(
+      [result.start, result.next],
+      {
+        sym: result.value,
+        originOffset: result.start,
+      },
+      result.errors
+    );
   };
 }
+
+function primary(): Combinator<Expression> {
+  return alt<Expression>([signedNumber(), symbol()]);
+}
+
+// function exprOrigin(expr: Expression, offset: number): Expression {
+//   if (Array.isArray(expr)) {
+//     return {
+//       fn: expr,
+//       originOffset: offset,
+//     };
+//   } else if (typeof expr === 'object') {
+//     return {
+//       ...expr,
+//       originOffset: offset,
+//     };
+//   } else if (typeof expr === 'number') {
+//     return {
+//       num: expr.toString(),
+//       originOffset: offset,
+//     };
+//   }
+//   return {
+//     sym: expr,
+//     originOffset: offset,
+//   };
+// }
 
 function cortexGrammar(): Combinator<Expression> {
   return must(
@@ -83,18 +113,12 @@ function cortexGrammar(): Combinator<Expression> {
           primary(),
           (...results: (Success<Expression> | Error<Expression>)[]) => {
             console.assert(results && results.length > 0);
-            if (results.length === 1) {
-              return exprOrigin(results[0].value, results[0].start);
-            }
-            return exprOrigin(
-              [
-                'Do',
-                ...results.map((x: Success<Expression>) =>
-                  exprOrigin(x.value, x.start)
-                ),
-              ],
-              results[0].start
-            );
+            if (results.length === 1) return results[0].value;
+
+            return {
+              fn: ['Do', ...results.map((x) => x.value)],
+              originOffset: results[0].start,
+            };
           }
         ),
         eof(),
@@ -116,7 +140,8 @@ export function parseCortex(source: string): [Expression, Signal[]] {
   if (result.kind === 'success') {
     // Yay!
     return [result.value, []];
-  } else if (result.kind === 'error') {
+  }
+  if (result.kind === 'error') {
     // Something went wrong: 1 or more syntax errors
     return [
       result.value,
@@ -128,10 +153,12 @@ export function parseCortex(source: string): [Expression, Signal[]] {
         };
       }),
     ];
-  } else if (result.kind === 'ignore') {
+  }
+  if (result.kind === 'ignore') {
     // Should not happen
     return ['Nothing', []];
-  } else if (result.kind === 'failure') {
+  }
+  if (result.kind === 'failure') {
     // Should not happen (should get a hypothetical instead)
     return [
       'False',

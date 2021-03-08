@@ -93,13 +93,13 @@ let PATTERN_SYNTAX: (number | [number, number])[] = [
 ];
 
 // The following characters cannot be included in an identifier
-const IDENTIFIER_CONTINUE_PROHIBITED = [
+const IDENTIFIER_CONTINUE_PROHIBITED = Expand([
   [0x0000, 0x0020],
   [0x007f, 0x009f],
   0x005c,
   0x0060,
   [0xfffe, 0xffff],
-];
+]);
 
 // The following characters cannot be the first character of an identifier
 const IDENTIFIER_START_PROHIBITED = [

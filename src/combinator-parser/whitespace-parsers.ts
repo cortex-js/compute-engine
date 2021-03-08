@@ -1,5 +1,47 @@
 import { codePointLength, isWhitespace } from './characters';
-import { Ignore, Error, ParserState, skipUntilNewline } from './parsers';
+import { Ignore, Error, ParserState, Failure } from './parsers';
+
+export function skipInlineSpaces(state: ParserState): void {
+  let i = state.offset;
+  let done = false;
+  while (!done) {
+    const c = state.at(i);
+    done = c !== 0x0020 && c !== 0x0009;
+    if (!done) i += 1; // if not done, length of c === 1
+  }
+  state.skipTo(i);
+}
+
+// export function parseNewline(state: ParserState): Result<void> {
+//   let i = state.offset;
+//   const c = state.source[i++];
+//   if (c === '\r' || c === '\u2028' || c === '\u2029') {
+//     return success(state, i);
+//   }
+//   if (c === '\n') {
+//     if (state.source[i] === '\r') return success(state, i + 2);
+//     return success(state, i);
+//   }
+//   return failure(state);
+// }
+
+export function skipUntilNewline(state: ParserState): void {
+  let found = false;
+  let i = state.offset;
+  while (!found && i <= state.length) {
+    const c = state.at(i++);
+    if (c === 0x000d || c === 0x2028 || c === 0x2029) {
+      found = true;
+    }
+    if (c === 0x000a) {
+      if (state.at(i) === 0x00d) {
+        i += 1;
+      }
+      found = true;
+    }
+  }
+  state.skipTo(i);
+}
 
 /**
  * Whitespace includes space, tab, mathematical space, and comments.
@@ -9,19 +51,19 @@ export function parseWhitespace(parser: ParserState): Ignore | Error {
   const start = parser.offset;
   let i = start;
   while (!done && i < parser.length) {
+    const offset = parser.offset;
     while (!done) {
       const c = parser.at(i);
       done = !isWhitespace(c);
       if (!done) i += codePointLength(c);
     }
-    let result: Ignore | Error = parseLineComment(parser.skipTo(i));
+    let result: Ignore | Error | Failure = parseLineComment(parser.skipTo(i));
     result = parseBlockComment(parser.skipTo(result.next));
     if (result.kind === 'error') return result;
-    done = parser.offset === result.next;
-    parser.skipTo(result.next);
+    done = offset === result.next;
+    i = result.next;
   }
-  const end = parser.offset;
-  return parser.skipTo(start).ignore(end);
+  return parser.ignore([start, i]);
 }
 
 export function parseLineComment(parser: ParserState): Ignore {
@@ -30,15 +72,17 @@ export function parseLineComment(parser: ParserState): Ignore {
   if (parser.at(start) === 0x002f && parser.at(start + 1) === 0x002f) {
     skipUntilNewline(parser);
   }
-  const end = parser.offset;
-  return parser.skipTo(start).ignore(end);
+  return parser.ignore([start, parser.offset]);
 }
 
-export function parseBlockComment(parser: ParserState): Ignore | Error {
+export function parseBlockComment(
+  parser: ParserState
+): Ignore | Error | Failure {
   // `/*` prefix
-  let i = parser.offset;
+  const start = parser.offset;
+  let i = start;
   if (parser.at(i) !== 0x002f || parser.at(i + 1) !== 0x002a) {
-    return parser.ignore(parser.offset);
+    return parser.failure();
   }
   i += 2;
   let level = 1;
@@ -56,12 +100,12 @@ export function parseBlockComment(parser: ParserState): Ignore | Error {
   }
   if (level > 0) {
     return parser.error(
-      parser.offset + i,
+      [start, parser.offset + i, start],
       undefined,
       'end-of-comment-expected'
     );
   }
-  return parser.ignore(i);
+  return parser.ignore([start, i]);
 }
 
 /**

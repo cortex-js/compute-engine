@@ -11,6 +11,12 @@ export class ParserState {
   private source: string;
   protected _offset = 0;
   length = 0;
+
+  constructor(source: string) {
+    this.source = source;
+    this.length = source.length;
+  }
+
   at(offset: number): number {
     return this.source.codePointAt(offset);
   }
@@ -24,18 +30,13 @@ export class ParserState {
     this._offset = offset;
     return this;
   }
-  constructor(source: string) {
-    this.source = source;
-    this.length = source.length;
-  }
+
   /**
-   * Use when a portion of the source has been successfully reduced to a value
-   * (or just reduced, the value is optional)
+   * Use when a portion of the source has been successfully parsed.
    */
-  success<T = void>(next: number, value?: T): Success<T> {
-    const start = this._offset;
-    this._offset = next;
-    return { kind: 'success', next, value, start };
+  success<T = void>(range: [start: number, end: number], value: T): Success<T> {
+    this._offset = range[1];
+    return { kind: 'success', next: range[1], value, start: range[0] };
   }
 
   /** A failure is used to signal that an attempt to parse failed. This may be
@@ -65,14 +66,21 @@ export class ParserState {
    *
    * Nonetheless, an attempt is made to recover.
    *
+   * The range indicate the portion of the source covered by this result.
+   * The optional `pos` indicate where the error occurred. It's the `end`
+   * by default.
+   *
    */
-  error<T>(next: number, value: T, error?: ParsingError): Error<T> {
-    const start = this._offset;
-    this._offset = next;
+  error<T>(
+    range: [start: number, end: number, pos?: number],
+    value: T,
+    error?: ParsingError
+  ): Error<T> {
+    this._offset = range[1];
     return {
       kind: 'error',
-      start,
-      next,
+      start: range[0],
+      next: range[1],
       value,
       errors: [
         {
@@ -80,29 +88,31 @@ export class ParserState {
           message: error ?? 'syntax-error',
           origin: {
             source: this.source,
-            offset: start,
+            offset: range[2] ?? range[0],
           },
         },
       ],
     };
   }
 
-  errors<T>(next: number, value: T, errors: Signal[]): Error<T> {
-    const start = this._offset;
-    this._offset = next;
+  errors<T>(
+    range: [start: number, end: number],
+    value: T,
+    errors: Signal[]
+  ): Error<T> {
+    this._offset = range[1];
     return {
       kind: 'error',
-      start,
-      next,
+      start: range[0],
+      next: range[1],
       value,
       errors: [...errors],
     };
   }
 
-  ignore(next: number): Ignore {
-    const start = this._offset;
-    this._offset = next;
-    return { kind: 'ignore', next, start };
+  ignore(range: [start: number, end: number]): Ignore {
+    this._offset = range[1];
+    return { kind: 'ignore', next: range[1], start: range[0] };
   }
 }
 
@@ -190,48 +200,6 @@ export type Success<T = any> = {
   next: number;
   value: T;
 };
-
-export function skipInlineSpaces(state: ParserState): void {
-  let i = state.offset;
-  let done = false;
-  while (!done) {
-    const c = state.at(i);
-    done = c !== 0x0020 && c !== 0x0009;
-    if (!done) i += 1; // if not done, length of c === 1
-  }
-  state.skipTo(i);
-}
-
-// export function parseNewline(state: ParserState): Result<void> {
-//   let i = state.offset;
-//   const c = state.source[i++];
-//   if (c === '\r' || c === '\u2028' || c === '\u2029') {
-//     return success(state, i);
-//   }
-//   if (c === '\n') {
-//     if (state.source[i] === '\r') return success(state, i + 2);
-//     return success(state, i);
-//   }
-//   return failure(state);
-// }
-
-export function skipUntilNewline(state: ParserState): void {
-  let found = false;
-  let i = state.offset;
-  while (!found && i <= state.length) {
-    const c = state.at(i++);
-    if (c === 0x000d || c === 0x2028 || c === 0x2029) {
-      found = true;
-    }
-    if (c === 0x000a) {
-      if (state.at(i) === 0x00d) {
-        i += 1;
-      }
-      found = true;
-    }
-  }
-  state.skipTo(i);
-}
 
 export function skipUntil(state: ParserState, value: number): number {
   let i = state.offset;

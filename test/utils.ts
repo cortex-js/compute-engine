@@ -126,6 +126,11 @@ export function strip(expr: Expression): Expression {
       const val = isValidJSONNumber(expr.num);
       if (typeof val === 'number') return val.toString();
       return { num: val };
+    } else if ('sym' in expr) {
+      if (expr.sym[0] === "'" && expr.sym[expr.sym.length - 1] === "'") {
+        return expr.sym;
+      }
+      return { sym: expr.sym };
     } else if ('fn' in expr) {
       return expr.fn.map((x) => strip(x));
     } else if ('dict' in expr) {
