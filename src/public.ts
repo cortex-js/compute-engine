@@ -1,9 +1,21 @@
 export type ParsingSignalCode =
   | 'exponent-expected'
+  | 'literal-expected' // %0 = literal
   | 'binary-number-expected'
+  | 'decimal-number-expected'
+  | 'hexadecimal-number-expected'
   | 'eof-expected'
+  | 'end-of-comment-expected'
   | 'expression-expected'
-  | 'closing-bracket-expected'; // arg: [bracket]
+  | 'empty-verbatim-symbol'
+  | 'symbol-expected'
+  | 'invalid-symbol-name' // %0 = symbol name
+  | 'unbalanced-verbatim-symbol' // %0 = symbol name
+  | 'invalid-escape-sequence' // &0 = escape sequence char
+  | 'invalid-unicode-codepoint-string' // %0 = codepoint string
+  | 'invalid-unicode-codepoint' // %0 = codepoint
+  | 'opening-bracket-expected' // %0 = bracket
+  | 'closing-bracket-expected'; // %0 = bracket
 
 export type RuntimeSignalCode =
   | 'timeout'
@@ -25,10 +37,12 @@ export type SignalCode =
       | 'invalid-dictionary-entry' // arg: [error]
     );
 
+export type SignalMessage = SignalCode | [SignalCode, ...(string | number)[]];
+
 export type SignalOrigin = {
   url?: string;
   source?: string;
-  index?: number;
+  offset?: number;
   line?: number;
   column?: number;
   around?: string;
@@ -39,7 +53,7 @@ export type Signal = {
 
   // An error/warning code or, a code with one or more arguments specific to
   // the signal code.
-  code: SignalCode | [SignalCode, ...(string | number)[]];
+  message: SignalMessage;
 
   // If applicable, the head of the function about which the
   // signal was raised
@@ -158,6 +172,10 @@ export type Attributes = {
    * allow comments in its encoding */
   comment?: string;
 
+  /** A Markdown-encoded string providing documentation about this expression.
+   */
+  documentation?: string;
+
   /** A human readable string that can be used to indicate a syntax error or
    * other problem when parsing or evaluating an expression.
    */
@@ -201,6 +219,22 @@ export type Attributes = {
    * The default value is "http://www.openmath.org/cd".
    */
   openmathCd?: string;
+
+  /**  A url to the source of this expression.
+   */
+  originUrl?: string;
+
+  /** The source from which this expression was generated.
+   *
+   * It could be a Latex expression, or some other source language
+   */
+  originSource?: string;
+
+  /**
+   * A character offset in `originSource` or `originUrl` from which this
+   * expression was generated
+   */
+  originOffset?: number;
 };
 
 export type MathJsonBasicNumber = 'NaN' | '-Infinity' | '+Infinity' | string;

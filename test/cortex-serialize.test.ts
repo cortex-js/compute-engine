@@ -28,7 +28,7 @@ describe('CORTEX SERIALIZING', () => {
     ).toMatchInlineSnapshot(`"-123_456_789_012_345_678_901_234_567_890e-123"`);
     expect(serializeCortex({ num: 'Infinity' })).toMatch('Infinity');
     expect(serializeCortex({ num: '-Infinity' })).toMatch('-Infinity');
-    expect(serializeCortex({ num: 'NaN' })).toMatch('NotANumber');
+    expect(serializeCortex({ num: 'NaN' })).toMatch('NaN');
     expect(serializeCortex({ num: 'Infinity' })).toMatch('Infinity');
 
     // Repeating pattern
@@ -148,39 +148,60 @@ describe('CORTEX SERIALIZING SYMBOLS', () => {
     expect(serializeCortex('x')).toMatch('x');
     expect(serializeCortex('symbol')).toMatch('symbol');
     expect(serializeCortex('x12')).toMatch('x12');
+    expect(serializeCortex('😀')).toMatch('😀');
     expect(serializeCortex('👨🏻‍🎤')).toMatch('👨🏻‍🎤');
     expect(serializeCortex('🤯')).toMatch('🤯');
     expect(serializeCortex('🤯😭')).toMatch('🤯😭');
+    expect(serializeCortex('Mind🤯')).toMatch('Mind🤯'); // Mix of emojis and other things
     expect(serializeCortex({ sym: 'x' })).toMatch('x');
     expect(serializeCortex({ sym: '12' })).toMatch('12');
     expect(serializeCortex({ sym: 'symbol' })).toMatch('symbol');
+    // Not a reserved word
+    expect(serializeCortex('new2')).toMatch('new2');
+    expect(serializeCortex('_f')).toMatch('_f');
+    expect(serializeCortex('_')).toMatch('_');
   });
 
   test('Escaped Symbols', () => {
-    expect(serializeCortex('a\u0000b')).toMatch('`a\\u{0000}b`'); // Include a null char
+    expect(serializeCortex('a\u0000b')).toMatch('`a\\0b`'); // Include a null char
     expect(serializeCortex('a\tb')).toMatch('`a\\tb`'); // Include a tab
     expect(serializeCortex('a\nb')).toMatch('`a\\nb`'); // Include a newline
-    expect(serializeCortex('a\u0003b')).toMatch('`a\\u{0003}b`'); // Include a ETX (END OF TEXT)
-    expect(serializeCortex('a\u007fb')).toMatch('`a\\u{007f}b`'); // Include a delete char
-    expect(serializeCortex('f\u2061(x))')).toMatch('`f\\u{2061}(x))`'); // Include a FUNCTION APPLICATION char
+    expect(serializeCortex('a\u0003b')).toMatch('`a\\u0003b`'); // Include a ETX (END OF TEXT)
+    expect(serializeCortex('a\u007fb')).toMatch('`a\\u007fb`'); // Include a delete char
   });
 
-  test('Wrapped symbols', () => {
-    // Does not start with a letter
+  test('Verbatim symbols', () => {
+    // Reserved word
+    expect(serializeCortex('new')).toMatch('`new`');
+    // Start with a digit
     expect(serializeCortex('12x')).toMatch('`12x`');
+    // Contain a syntax character
+    expect(serializeCortex('x+y')).toMatch('`x+y`');
+    // Start with a Syntax character
+    expect(serializeCortex('+x')).toMatch('`+x`');
     expect(serializeCortex('\\sin')).toMatch('`\\\\sin`');
     expect(serializeCortex('~f')).toMatch('`~f`');
-    expect(serializeCortex('_f')).toMatch('`_f`');
-    expect(serializeCortex('_')).toMatch('`_`');
     expect(serializeCortex('`')).toMatch('```');
 
     // Contains a non-letter/non-digit
     expect(serializeCortex('a+b')).toMatch('`a+b`');
     expect(serializeCortex('a;b')).toMatch('`a;b`');
 
-    expect(serializeCortex('Mind🤯')).toMatch('`Mind🤯`'); // Mix of emojis and other things
     expect(serializeCortex('a b')).toMatch('`a b`'); // Includes a space
     expect(serializeCortex('a\nb')).toMatch('`a\\nb`');
+  });
+
+  test('Invalid Symbols', () => {
+    // Contain a SPACE
+    expect(serializeCortex('a b')).toMatchInlineSnapshot(`"\`a b\`"`);
+    // Contain a reverse solidus
+    expect(serializeCortex('a\\b')).toMatchInlineSnapshot(`"\`a\\\\\\\\b\`"`);
+    // First char is a dollar
+    expect(serializeCortex('$a')).toMatchInlineSnapshot(`"\`$a\`"`);
+    // First char is a left square bracket
+    expect(serializeCortex('[a')).toMatchInlineSnapshot(`"\`[a\`"`);
+    // First char is a right square bracket
+    expect(serializeCortex(']a')).toMatchInlineSnapshot(`"\`]a\`"`);
   });
 });
 

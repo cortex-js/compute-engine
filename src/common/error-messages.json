@@ -1,9 +1,21 @@
 {
   "en-us": {
     "exponent-expected": "An exponent was expected",
+    "literal-expected": "\"%0\" was expected",
     "binary-number-expected": "A binary number was expected",
+    "decimal-number-expected": "A decimal number was expected",
+    "hexadecimal-number-expected": "A hexadecimal number was expected",
     "eof-expected": "Nothing more was expected",
+    "end-of-comment-expected": "End of comment (\"*/\") was not found",
     "expression-expected": "An expression was expected",
-    "closing-bracket-expected": "A %0 was expected"
+    "empty-verbatim-symbol": "A symbol name was expected",
+    "symbol-expected": "A symbol name was expected",
+    "invalid-symbol-name": "\"%0\" is not a valid symbol name",
+    "unbalanced-verbatim-symbol": "Could not find closing \"`\" in \"%0\"",
+    "invalid-escape-sequence": "\"%0\" is not a valid escape sequence",
+    "invalid-unicode-codepoint-string": "\"%0\" is not a valid Unicode codepoint",
+    "invalid-unicode-codepoint": "\"%0\" is not a valid Unicode codepoint",
+    "opening-bracket-expected": "A \"%0\" was expected",
+    "closing-bracket-expected": "A \"%0\" was expected"
   }
 }

@@ -94,13 +94,66 @@ expect.addSnapshotSerializer({
   },
 });
 
-export function validCortex(s: string): Expression {
-  const [value, error] = parseCortex(s);
-  return (error?.code as any) ?? value;
+function isValidJSONNumber(num: string): string | number {
+  if (typeof num === 'string') {
+    const val = Number(num);
+    if (num[0] === '+') num = num.slice(1);
+    if (val.toString() === num) {
+      // If the number roundtrips, it can be represented by a
+      // JavaScript number
+      // However, NaN and Infinity cannot be represented by JSON
+      if (isNaN(val) || !isFinite(val)) {
+        return val.toString();
+      }
+      return val;
+    }
+  }
+  return num;
 }
 
-export function invalidCortex(s: string): (string | number)[] {
-  const [value, error] = parseCortex(s);
-  if (!error) return ['succeeded-unexpectedly', value as any];
-  return error.code as any;
+export function strip(expr: Expression): Expression {
+  if (typeof expr === 'number') {
+    return expr.toString();
+  }
+  if (typeof expr === 'string') {
+    return expr;
+  }
+  if (Array.isArray(expr)) {
+    return expr.map((x) => strip(x));
+  }
+  if (typeof expr === 'object') {
+    if ('num' in expr) {
+      const val = isValidJSONNumber(expr.num);
+      if (typeof val === 'number') return val.toString();
+      return { num: val };
+    } else if ('fn' in expr) {
+      return expr.fn.map((x) => strip(x));
+    } else if ('dict' in expr) {
+      return {
+        dict: Object.fromEntries(
+          Object.entries(expr.dict).map((keyValue) => {
+            return [keyValue[0], strip(keyValue[1])];
+          })
+        ),
+      };
+    }
+  }
+
+  return null;
+}
+
+export function validCortex(s: string): Expression {
+  const [value, errors] = parseCortex(s);
+  if (errors && errors.length > 0) {
+    return ['Error', ...errors.map((x) => x.message)];
+  }
+  return strip(value);
+}
+
+export function invalidCortex(s: string): Expression {
+  const [value, errors] = parseCortex(s);
+  if (errors && errors.length > 0) {
+    return ['Error', ...errors.map((x) => x.message)];
+  }
+  return ['UnexpectedSuccess', strip(value as Expression)];
 }

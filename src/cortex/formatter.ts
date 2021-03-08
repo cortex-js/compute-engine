@@ -16,7 +16,7 @@
 // 1980, Derek C. Oppen, "Prettyprinting"
 // https://www.cs.tufts.edu/~nr/cs257/archive/derek-oppen/prettyprinting.pdf
 
-export type FormatingOptions = {
+export type FormattingOptions = {
   indentChar: string; // Which char to use to represent indents? Default: '\u0020
   indentCharWidth: number; // How many spaces does an `indentChar` represent? Default: 1
   indentWidth: number; // How many indentChar for an indent?
@@ -25,10 +25,10 @@ export type FormatingOptions = {
   aroundInfixOperator: string; // Spacing around infix operators. Default: '\u0020' (fancy alternate: '\u205f')
   aroundRelationalOperator: string; // Spacing around infix operators. Default: '\u0020' (fancy alternate: '\u2005')
   afterSeparator: string; // Spacing after separator (',', ';'). Default: '\u0020' (fancy alt: '\u2009)
-  cost: FormatingCosts;
+  cost: FormattingCosts;
 };
 
-export type FormatingCosts = {
+export type FormattingCosts = {
   softMargin: number; // Cost per character beyond the soft margin
   margin: number; // Cost per char beyond the hard margin
   linebreak: number; // Cost per line break
@@ -320,8 +320,8 @@ export class ChoiceBlock extends FormattingBlock {
 }
 
 export class Formatter {
-  private options: FormatingOptions;
-  constructor(options?: FormatingOptions) {
+  private options: FormattingOptions;
+  constructor(options?: FormattingOptions) {
     if (options?.indentChar === 'space') {
       options.indentChar = '\u0020';
     } else if (options?.indentChar === 'tab') {
@@ -349,7 +349,7 @@ export class Formatter {
       ...(options ?? {}),
     };
   }
-  get cost(): FormatingCosts {
+  get cost(): FormattingCosts {
     return this.options.cost;
   }
   get margin(): number {

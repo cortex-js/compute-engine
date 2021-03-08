@@ -55,10 +55,10 @@ export class ComputeEngine {
         this.pushScope(dict, {
           warn: (sigs: WarningSignal[]): void => {
             for (const sig of sigs) {
-              if (typeof sig.code === 'string') {
-                console.warn(sig.code);
+              if (typeof sig.message === 'string') {
+                console.warn(sig.message);
               } else {
-                console.warn(...sig.code);
+                console.warn(...sig.message);
               }
             }
           },
@@ -116,7 +116,7 @@ export class ComputeEngine {
     if (this.context.timeLimit) {
       if (this.context.deadline < global.performance.now()) {
         throw new CortexError({
-          code: 'timeout', // @todo: should capture stack
+          message: 'timeout', // @todo: should capture stack
         });
       }
     }

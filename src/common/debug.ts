@@ -37,7 +37,7 @@ const htmlTerminal: Terminal = {
     return `<div>${lines.join('</div><div>')}</div>`;
   },
   grey(s: string): string {
-    return `<span style="color:#555">${s}</span>`;
+    return `<span style="opacity:.5">${s}</span>`;
   },
   red(s: string): string {
     return `<span style="color:#F33">${s}</span>`;
@@ -65,7 +65,7 @@ export class Origin {
     return this._lines;
   }
 
-  get lineOffsets() {
+  get lineOffsets(): number[] {
     if (this._lineOffsets == null) {
       const offsets = [];
       const text = this.source;
@@ -109,7 +109,7 @@ export class Origin {
     return {
       url: this.url,
       source: this.source,
-      index: offset,
+      offset: offset,
       line,
       column,
       around: this.sourceAround(line, column),
@@ -140,7 +140,7 @@ export class Origin {
     // index = 0..., start = 0... end = 0...
     for (let index = start; index <= end; index++) {
       const paddedNumber = ` ${index + 1}`.slice(-numberMaxWidth);
-      const gutter = ` ${paddedNumber} | `;
+      const gutter = ` ${paddedNumber} \u2506 `;
       let markerLine = '';
       if (index === line - 1) {
         if (hasColumn) {

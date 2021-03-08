@@ -47,11 +47,11 @@ export class CortexError {
       result += this.signal.head + ': ';
     }
 
-    if (typeof this.signal.code === 'string') {
-      result += this.signal.code;
+    if (typeof this.signal.message === 'string') {
+      result += this.signal.message;
     } else {
       result += ' ';
-      for (const arg of this.signal.code) {
+      for (const arg of this.signal.message) {
         result += arg.toString() + ' ';
       }
     }

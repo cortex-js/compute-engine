@@ -185,7 +185,7 @@ escaped as indicated:
 **Symbols** are identifiers that represent the name of constants, variables and
 functions.
 
-Symbols are arbitrary strings of Unicode characters, except:
+Symbols are strings of Unicode characters, except:
 
 - **U+0000** to **U+0020**
 - **U+0022 DOUBLE QUOTE**: **`"`**

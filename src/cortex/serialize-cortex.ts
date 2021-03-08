@@ -16,11 +16,17 @@ import { Expression } from '../public';
 import { serializeHexFloat, serializeNumber } from '../common/serialize-number';
 import {
   EmptyBlock,
-  FormatingOptions,
+  FormattingOptions,
   Formatter,
   FormattingBlock,
 } from './formatter';
-import { INVISIBLE_CHARS } from './characters';
+import {
+  DIGITS,
+  ESCAPED_CHARS,
+  isBreak,
+  isInvisible,
+} from '../combinator-parser/characters';
+import { RESERVED_WORDS } from './reserved-words';
 
 export const NUMBER_FORMATTING_OPTIONS: Required<NumberFormattingOptions> = {
   precision: 15, // assume 2^53 bits floating points
@@ -36,24 +42,33 @@ export const NUMBER_FORMATTING_OPTIONS: Required<NumberFormattingOptions> = {
   endRepeatingDigits: '',
   positiveInfinity: 'Infinity',
   negativeInfinity: '-Infinity',
-  notANumber: 'NotANumber',
+  notANumber: 'NaN',
 };
 
 /**
- * Generate Cortex code for an expression
+ * Serialize a MathJSON expression to Cortex.
+ *
+ * @param options.fancySymbols - If true, some operators are replaced
+ * with an equivalent Unicode character, for example: `*` -> `×`.
+ *
  */
 export function serializeCortex(
   expr: Expression,
-  options?: FormatingOptions & {
+  options?: FormattingOptions & {
     fancySymbols?: boolean;
   }
 ): string {
+  // To provide automatic formatting of the result, a Formatter is used.
+  // The result of the serialization is a series of `FormattingBlock`
+  // representing various layout options. They are then combined and arranged
+  // accounting for constraints such as a maximum width and other formatting
+  // options)
   const fmt = new Formatter({
     ...(options?.fancySymbols
       ? {
-          aroundInfixOperator: '\u205f',
-          aroundRelationalOperator: '\u2005',
-          afterSeparator: '\u2009',
+          aroundInfixOperator: '\u205f', // Four-Per-Em Space
+          aroundRelationalOperator: '\u2005', // Four-Per-Em Space
+          afterSeparator: '\u2009', // Thin Space
         }
       : {}),
     ...options,
@@ -206,6 +221,9 @@ export function serializeCortex(
   // Functions with a custom serializer: BaseForm, String, List, Set
   //
   const FUNCTIONS: { [key: string]: (exp: Expression) => FormattingBlock } = {
+    //
+    // BaseForm
+    //
     BaseForm: (expr: Expression): FormattingBlock => {
       const base = getNumberValue(getArg(expr, 2)) ?? 16;
       const arg1 = getArg(expr, 1);
@@ -241,6 +259,9 @@ export function serializeCortex(
       }
       return serializeGenericFunction(expr);
     },
+    //
+    // String
+    //
     // Interpolated string, e.g. `["String", "'hello '", "name"]`
     String: (expr: Expression): FormattingBlock =>
       fmt.wrap(
@@ -253,6 +274,10 @@ export function serializeCortex(
         '"'
       ),
 
+    //
+    // List
+    //
+    // Interpolated string, e.g. `["String", "'hello '", "name"]`
     List: (expr: Expression): FormattingBlock =>
       fmt.fencedList(
         '{',
@@ -261,6 +286,10 @@ export function serializeCortex(
         mapArgs<FormattingBlock>(expr, serializeExpression)
       ),
 
+    //
+    // Set
+    //
+    // Interpolated string, e.g. `["String", "'hello '", "name"]`
     Set: (expr: Expression): FormattingBlock => {
       if (getArgCount(expr) === 0) return fmt.text('EmptySet');
       return fmt.fencedList(
@@ -270,6 +299,8 @@ export function serializeCortex(
         mapArgs<FormattingBlock>(expr, serializeExpression)
       );
     },
+
+    // @todo: Dictionary, Do, If
   };
 
   function serializeFunction(expr: Expression): FormattingBlock | null {
@@ -351,33 +382,32 @@ export function serializeCortex(
   return serializeExpression(expr).serialize(0);
 }
 function escapeInvisibleCharacter(code: number): string {
-  if (code < 31 || INVISIBLE_CHARS.includes(code)) {
-    return `\\u{${('0000' + code.toString(16)).slice(-4)}}`;
+  if (ESCAPED_CHARS.has(code)) return ESCAPED_CHARS.get(code);
+  if (isInvisible(code)) {
+    if (code < 0x10000) {
+      return `\\u${('0000' + code.toString(16)).slice(-4)}`;
+    }
+    return `\\u{${('000000000' + code.toString(16)).slice(-8)}}`;
   }
   return String.fromCodePoint(code);
 }
 
+// Replace the characters in a raw string with escaped characters (`"`, `/`,
+// some invisible characters, etc...)
 function escapeString(s: string): string {
-  const ESCAPED_CHARS = {
-    '\u0020': ' ', // We dont' escape SPACE
-    '\\': '\\\\',
-    "'": "\\'",
-    '"': '\\"',
-    '\t': '\\t', // Tab
-    '\n': '\\n', // Newline
-    '\r': '\\r', // Return
-  };
   let result = '';
   const graphemes = splitGraphemes(s);
   if (typeof graphemes === 'string') {
     for (const c of graphemes) {
-      result += ESCAPED_CHARS[c] ?? escapeInvisibleCharacter(c.charCodeAt(0));
+      result += escapeInvisibleCharacter(c.codePointAt(0));
     }
   } else {
     for (const c of graphemes) {
       if (c.length === 1) {
-        result += ESCAPED_CHARS[c] ?? escapeInvisibleCharacter(c.charCodeAt(0));
+        result += escapeInvisibleCharacter(c.codePointAt(0));
       } else {
+        // @todo: we could check specifically for the emoji range, rather
+        // than anything outside the BMP.
         // If the grapheme is a multi-code point sequence (e.g. a combined emoji)
         // use the entire composed sequence, don't try to break it up
         // (which would break some emojis)
@@ -388,22 +418,28 @@ function escapeString(s: string): string {
   return result;
 }
 
+// Escape the name of a symbol.
+// Use a Verbatim Form when necessary
 function escapeSymbol(s: string): string {
-  s = escapeString(s);
-  const needWrapping = !/^[a-zA-Z][a-zA-Z\d_]*$/.test(s);
-  if (!needWrapping) return s;
+  // If it's a reserved word: it should be always be escaped
+  if (RESERVED_WORDS.has(s)) return `\`${s}\``;
 
-  // If the string is entirely composed of emojis (multi-code point sequences)
-  // don't wrap it
+  // Shortcut common case: all alphanumeric symbol => nothing to escape
+  if (/^[a-zA-Z][a-zA-Z\d_]*$/.test(s)) return s;
+
+  // If starts with a digit: need verbatim
+  const code = s.codePointAt(0);
+  if (DIGITS.has(code)) return `\`${escapeString(s)}\``;
+
+  let needVerbatim = false;
   const graphemes = splitGraphemes(s);
-  if (typeof graphemes === 'string') return `\`${s}\``;
-
-  let allEmoji = true;
   let i = 0;
-  while (i < graphemes.length && allEmoji) {
-    if (graphemes[i].length === 1) allEmoji = false;
-    i++;
+  while (!needVerbatim && i < graphemes.length) {
+    const c = graphemes[i].codePointAt(0);
+    needVerbatim = ESCAPED_CHARS.has(c) || isInvisible(c) || isBreak(c);
+    i += 1;
   }
-  if (allEmoji) return s;
-  return `\`${s}\``;
+
+  if (!needVerbatim) return s;
+  return `\`${escapeString(s)}\``;
 }

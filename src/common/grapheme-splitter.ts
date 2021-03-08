@@ -32,30 +32,23 @@ const ZWJ = 0x200d; // Zero-width joiner
 
 // const ZWSP = 0x200b; // Zero-width space
 
-/* The following codepoints should combine with the previous ones */
-const EMOJI_COMBINATOR = [
-  [ZWJ, 1],
-  [0xfe0e, 2], // VS-15: text presentation, VS-16: Emoji presentation
-  [0x1f3fb, 5], // EMOJI_MODIFIER_FITZPATRICK_TYPE 1-6
-  [0x1f9b0, 4], // Red hair..white hair
-  [0xe0020, 96], // EMOJI_TAG
-];
-let emojiCombinator: Record<number, boolean>;
-
 // Regional indicator: a pair of codepoints indicating some flags
 const REGIONAL_INDICATOR = [0x1f1e6, 0x1f1ff];
 
 function isEmojiCombinator(code: number): boolean {
-  if (emojiCombinator === undefined) {
-    emojiCombinator = {};
-    for (const x of EMOJI_COMBINATOR) {
-      for (let i = x[0]; i <= x[0] + x[1] - 1; i++) {
-        emojiCombinator[i] = true;
-      }
-    }
-  }
+  // Zero-width joiner
+  if (code === ZWJ) return true;
 
-  return emojiCombinator[code] ?? false;
+  // VS-15: text presentation, VS-16: Emoji presentation
+  if (code === 0xfe0e || code === 0xfe0f) return true;
+
+  // EMOJI_MODIFIER_FITZPATRICK_TYPE 1-6
+  if (code >= 0x1f3fb && code <= 0x1f3fb + 5) return true;
+  // Red hair..white hair
+  if (code >= 0x1f9b0 && code <= 0x1f9b0 + 4) return true;
+  // EMOJI_TAG
+  if (code >= 0xe0020 && code <= 0xe0020 + 96) return true;
+  return false;
 }
 
 function isRegionalIndicator(code: number): boolean {
@@ -64,6 +57,7 @@ function isRegionalIndicator(code: number): boolean {
 
 /**
  * Return a string or an array of graphemes.
+ *
  * This includes:
  * - emoji with skin and hair modifiers
  * - emoji combination (for example "female pilot")

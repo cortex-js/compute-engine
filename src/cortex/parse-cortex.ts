@@ -1,72 +1,141 @@
-import { ErrorSignal, Expression } from '../public';
+import { Expression, Signal } from '../public';
 import { Origin } from '../common/debug';
-import { binaryNumber, ParserState, Result } from './parsers';
+import {
+  ParserState,
+  Result,
+  Success,
+  Error,
+} from '../combinator-parser/parsers';
+import {
+  Combinator,
+  eof,
+  must,
+  parseString,
+  sequence,
+  some,
+} from '../combinator-parser/combinators';
+import { parseSignedNumber } from '../combinator-parser/numeric-parsers';
 
-// class CortexExpression {
-//   index = 0;
-//   s: string;
-//   origin: Origin;
-//   warnings: WarningSignal[];
+function signedNumber(): Combinator<Expression> {
+  return (parser: ParserState): Result<Expression> => {
+    let litResult = parseString(parser, 'NaN');
+    if (litResult.kind === 'failure') {
+      litResult = parseString(parser, 'Infinity');
+    }
+    if (litResult.kind === 'failure') {
+      litResult = parseString(parser, '+Infinity');
+    }
+    if (litResult.kind === 'failure') {
+      litResult = parseString(parser, '-Infinity');
+    }
+    if (litResult.kind === 'success') {
+      return parser.success<Expression>(litResult.next, {
+        num: litResult.value,
+        originOffset: litResult.start,
+      });
+    }
 
-//   constructor(s: string, filepath?: string) {
-//     this.s = s;
-//     this.warnings = [];
-//     this.origin = new Origin(s, filepath);
-//   }
-
-//   warning(code: SignalCode, ...args: (string | number)[]): void {
-//     this.warnings.push({
-//       severity: 'warning',
-//       code,
-//       args,
-//       origin: this.origin.signalOrigin(this.index),
-//     });
-//   }
-
-//   error(code: SignalCode, ...args: (string | number)[]): void {
-//     throw new CortexError({
-//       severity: 'error',
-//       code,
-//       args,
-//       origin: this.origin.signalOrigin(this.index),
-//     });
-//   }
-
-//   parseExpression(): Expression {
-//     // return this.parseNumber() ?? 'Nothing';
-//     return 'Nothing';
-//   }
-// }
-
-function primaryExpression(state: ParserState): Result<Expression> {
-  return binaryNumber(state);
+    const numResult = parseSignedNumber(parser);
+    if (numResult.kind === 'success') {
+      // Return a number expression
+      // @todo: we could return a BaseForm() for hexadecimal and decimal
+      return parser.success<Expression>(numResult.next, {
+        num: numResult.value.toString(),
+        originOffset: numResult.start,
+      });
+    }
+    return numResult;
+  };
 }
 
-function cortexExpression(state: ParserState): Result<Expression> {
-  return primaryExpression(state);
+function primary(): Combinator<Expression> {
+  return signedNumber();
 }
 
-export function parseCortex(s: string): [Expression, ErrorSignal] {
+function exprOrigin(expr: Expression, offset: number): Expression {
+  if (Array.isArray(expr)) {
+    return {
+      fn: expr,
+      originOffset: offset,
+    };
+  } else if (typeof expr === 'object') {
+    return {
+      ...expr,
+      originOffset: offset,
+    };
+  } else if (typeof expr === 'number') {
+    return {
+      num: expr.toString(),
+      originOffset: offset,
+    };
+  }
+  return {
+    sym: expr,
+    originOffset: offset,
+  };
+}
+
+function cortexGrammar(): Combinator<Expression> {
+  return must(
+    sequence(
+      [
+        some(
+          primary(),
+          (...results: (Success<Expression> | Error<Expression>)[]) => {
+            console.assert(results && results.length > 0);
+            if (results.length === 1) {
+              return exprOrigin(results[0].value, results[0].start);
+            }
+            return exprOrigin(
+              [
+                'Do',
+                ...results.map((x: Success<Expression>) =>
+                  exprOrigin(x.value, x.start)
+                ),
+              ],
+              results[0].start
+            );
+          }
+        ),
+        eof(),
+      ],
+      (result, _): Expression => result ?? 'Nothing'
+    )
+  );
+}
+
+const CORTEX_GRAMMAR = cortexGrammar();
+
+export function parseCortex(source: string): [Expression, Signal[]] {
   // const cortex = new CortexExpression(s);
   // return [cortex.parseExpression(), cortex.warnings];
-  const result = cortexExpression({ s, i: 0 });
-  if (result.kind === 'success') return [result.value, null];
+  const parser = new ParserState(source);
+  const result = CORTEX_GRAMMAR(parser);
+  const origin = new Origin(source);
 
-  let errorInfo: string[] = [];
-  if (typeof result.error === 'string') {
-    errorInfo = [result.error];
-  } else if (typeof result.error !== 'undefined') {
-    errorInfo = result.error.map((x) => `'${x.toString()}'`);
-  } else {
-    errorInfo = ['syntax-error'];
+  if (result.kind === 'success') {
+    // Yay!
+    return [result.value, []];
+  } else if (result.kind === 'error') {
+    // Something went wrong: 1 or more syntax errors
+    return [
+      result.value,
+      result.errors.map((x) => {
+        return {
+          ...x,
+          // Convert from offset to line/col
+          origin: origin.signalOrigin(x.origin.offset),
+        };
+      }),
+    ];
+  } else if (result.kind === 'ignore') {
+    // Should not happen
+    return ['Nothing', []];
+  } else if (result.kind === 'failure') {
+    // Should not happen (should get a hypothetical instead)
+    return [
+      'False',
+      [{ ...result.error, origin: origin.signalOrigin(result.next) }],
+    ];
   }
-  const origin = new Origin(s);
-  return [
-    ['Error', ...errorInfo],
-    {
-      severity: 'error',
-      code: result.error ?? 'syntax-error',
-      origin: origin.signalOrigin(result.state.i),
-    },
-  ];
 }

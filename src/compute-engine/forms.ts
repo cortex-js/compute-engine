@@ -664,6 +664,14 @@ export function strippedMetadataForm(
       return { num: val };
     } else if ('fn' in expr) {
       return expr.fn.map((x) => strippedMetadataForm(x, engine));
+    } else if ('dict' in expr) {
+      return {
+        dict: Object.fromEntries(
+          Object.entries(expr.dict).map((keyValue) => {
+            return [keyValue[0], strippedMetadataForm(keyValue[1], engine)];
+          })
+        ),
+      };
     }
   }
 

@@ -74,7 +74,7 @@ Evaluate(2 + 3)
 
 - an execution
 
-```cortext
+```cortex
 Evaluate(Length([5, 7]))
 // ➔ 2
 ```
