@@ -55,8 +55,8 @@ mathematical notations, and as such is not a replacement for LaTeX or MathML.
 
 ## Structure of a MathJSON Expression
 
-A MathJSON expression is a combination of **numbers**, **symbols** and
-**strings**, **functions**, **dictionaries**.
+A MathJSON expression is a combination of **numbers**, **strings**, **symbols**,
+**functions** and **dictionaries**.
 
 **Number**
 
@@ -67,13 +67,19 @@ A MathJSON expression is a combination of **numbers**, **symbols** and
 {"num": "-Infinity"}
 ```
 
-**Symbol or String**
+**Symbol**
 
 ```json
 "x"
 "Pi"
 {"sym": "Pi", "wikidata": "Q167" }
+```
+
+**String**
+
+```json
 "'Diameter of a circle'"
+{"str": "Radius" }
 ```
 
 **Function**
@@ -95,8 +101,8 @@ A MathJSON expression is a combination of **numbers**, **symbols** and
 ```
 
 **Numbers**, **symbols**, **strings** and **functions** can be expressed either
-as an object literal with a `"num"`, `"sym"` or `"fn"` key, respectively, or as
-a short-hand notation using a JSON number, string or array.
+as an object literal with a `"num"`, `"str"`, `"sym"` or `"fn"` key,
+respectively, or as a short-hand notation using a JSON number, string or array.
 
 The short-hand notation is more concise and easier to read, but cannot include
 metadata properties.
@@ -151,23 +157,19 @@ Specifically:
 
 ```
 
-## Symbols and strings
+## Strings
 
-A MathJSON **symbol** or **string** is either:
+A MathJSON **string** is either
 
-- an object literal with a `"sym"` key
-- a JSON string
+- an object literal with a `"str"` key
+- a [JSON string](https://tools.ietf.org/html/rfc7159#section-7) that starts and
+  ends with **U+0027 APOSTROPHE** : **`'`**.
 
-### Strings
+String can contain any valid Unicode characters (codepoints in the
+\[0...0x10FFFF\] range, except for \[0xD800...0xDFFF\]), but the following
+characters must be escaped as indicated:
 
-**Strings** are represented by a
-[JSON string](https://tools.ietf.org/html/rfc7159#section-7) that begins and
-ends with **U+0027 APOSTROPHE** : **`'`**.
-
-String can contain any Unicode characters, but the following characters must be
-escaped as indicated:
-
-- **U+0000** to **U+001F**: `\u0000` to `\u001F`
+- **U+0000** to **U+001F**: `\u0000` to `\u001f`
 - **U+0008**, Backspace: `\b` or `\u0008`
 - **U+0009**, Tab : `\t` or `\u0009`
 - **U+000a**, Line feed: `\n` or `\u000a`
@@ -176,16 +178,24 @@ escaped as indicated:
 - **U+005c**, Backslash/Reverse Solidus: `\\` or `\u005c`
 - **U+0022**, Quotation mark: `\"` or `\u0022`
 
+The encoding of the string follows the encoding of the JSON payload: UTF-8,
+UTF-16, etc...
+
 ```json
 "'Hello world'"
 ```
 
-### Symbols
+## Symbols
+
+A MathJSON **symbol** is either:
+
+- an object literal with a `"sym"` key
+- a JSON string
 
 **Symbols** are identifiers that represent the name of constants, variables and
 functions.
 
-Symbols are strings of Unicode characters, except:
+Symbols are strings of valid Unicode characters, except:
 
 - **U+0000** to **U+0020**
 - **U+0022 DOUBLE QUOTE**: **`"`**
@@ -217,11 +227,10 @@ In addition, the first character of a symbol should not be:
 - **U+007D RIGHT CURLY BRACKET** : **`}`**
 - **U+007E TILDE** : **`~`**
 
-Before they are used, symbols are normalized to the Unicode Normalization Form
-Canonical Composition (NFC). They are stored internally and compared using the
-NFC.
+Before they are used, symbols are normalized to the Unicode Normalization Form C
+(NFC). They must be stored internally and compared using the NFC.
 
-In addition, JSON escape sequences are applied before Unicode normalization.
+JSON escape sequences are applied before Unicode normalization.
 
 These four strings represent the same symbol:
 
@@ -320,13 +329,13 @@ called a map or associative array.
 The keys are strings and the values are MathJSON expressions.
 
 A **dictionary** is represented as an object literal with a `"dict"` key. The
-value of the key is an object literal holding the content of the dictionary.
+value of the key is a JSON object literal holding the content of the dictionary.
 
 ```json
 {
   "dict": {
     "one": 1,
-    "two": 2
+    "two": 2,
     "three": ["Add", 1, 2]
   }
 }
@@ -348,9 +357,9 @@ The following metadata keys are recommended:
 | `comment`       | A human readable plain string to annotate an expression, since JSON does not allow comments in its encoding                                                                  |
 | `documentation` | A Markdown-encoded string providing documentation about this expression.                                                                                                     |
 | `latex`         | A visual representation in LaTeX of the expression. <br> This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
-| `originUrl`     | A URL to the source of this expression                                                                                                                                       |
-| `originSource`  | The source from which this expression was generated.<br> It could be a Latex expression, or some other source language.                                                      |
-| `originOffset`  | A character offset in `originSource` or `originUrl` from which this expression was produced                                                                                  |
+| `sourceUrl`     | A URL to the source of this expression                                                                                                                                       |
+| `sourceContent` | The source from which this expression was generated.<br> It could be a Latex expression, or some other source language.                                                      |
+| `sourceOffsets` | A pairs of character offsets in `sourceContent` or `sourceUrl` from which this expression was produced                                                                       |
 | `hash`          | A string representing a digest of this expression.                                                                                                                           |
 
 ```json
@@ -358,7 +367,7 @@ The following metadata keys are recommended:
 {
   "sym": "Pi",
   "wikidata": "Q167",
-  "latex": "\pi"
+  "latex": "\\pi"
 }
 
 // The greek letter ∏
