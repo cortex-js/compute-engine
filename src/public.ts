@@ -6,6 +6,7 @@ export type ParsingSignalCode =
   | 'hexadecimal-number-expected'
   | 'eof-expected'
   | 'end-of-comment-expected'
+  | 'primary-expected'
   | 'expression-expected'
   | 'empty-verbatim-symbol'
   | 'symbol-expected'
@@ -15,7 +16,8 @@ export type ParsingSignalCode =
   | 'invalid-unicode-codepoint-string' // %0 = codepoint string
   | 'invalid-unicode-codepoint' // %0 = codepoint
   | 'opening-bracket-expected' // %0 = bracket
-  | 'closing-bracket-expected'; // %0 = bracket
+  | 'closing-bracket-expected' // %0 = bracket
+  | 'string-literal-end-expected';
 
 export type RuntimeSignalCode =
   | 'timeout'
@@ -222,19 +224,19 @@ export type Attributes = {
 
   /**  A url to the source of this expression.
    */
-  originUrl?: string;
+  sourceUrl?: string;
 
   /** The source from which this expression was generated.
    *
    * It could be a Latex expression, or some other source language
    */
-  originSource?: string;
+  sourceContent?: string;
 
   /**
-   * A character offset in `originSource` or `originUrl` from which this
+   * A character offset in `sourceContent` or `sourceUrl` from which this
    * expression was generated
    */
-  originOffset?: number;
+  sourceOffsets?: [start: number, end: number];
 };
 
 export type MathJsonBasicNumber = 'NaN' | '-Infinity' | '+Infinity' | string;
@@ -245,6 +247,10 @@ export type MathJsonRealNumber = {
 
 export type MathJsonSymbol = {
   sym: string;
+} & Attributes;
+
+export type MathJsonString = {
+  str: string;
 } & Attributes;
 
 export type MathJsonFunction = {
@@ -260,6 +266,7 @@ export type Expression =
   // Shortcut for MathJsonRealNumber without metadata and in the JavaScript
   // 64-bit float range.
   | number
+  | MathJsonString
   | MathJsonSymbol
   // Shortcut for a MathJsonSymbol with no metadata. Or a string.
   | string

@@ -70,9 +70,10 @@ export function getNumberValue(expr: Expression): number | null {
 /**  If expr is a string literal, return it.
  *
  * A string literal is a JSON string that begins and ends with
- * **U+0027 APOSTROPHE** : **`'`**
+ * **U+0027 APOSTROPHE** : **`'`** or an object literal with a `str` key.
  */
 export function getStringValue(expr: Expression): string | null {
+  if (typeof expr === 'object' && 'str' in expr) return expr.str;
   if (typeof expr !== 'string') return null;
   if (expr.length < 2) return null;
   if (expr[0] !== "'" || expr[expr.length - 1] !== "'") return null;
