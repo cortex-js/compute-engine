@@ -188,7 +188,7 @@ export class StackBlock extends FormattingBlock {
     let indent = '';
     for (const block of this.blocks) {
       result += indent + block.serialize(offset);
-      if (!indent) indent = this.fmt.newLine() + this.fmt.indentChars(offset);
+      if (!indent) indent = this.fmt.linebreak() + this.fmt.indentChars(offset);
     }
 
     return result;
@@ -366,13 +366,13 @@ export class Formatter {
   indentLength(n = 1): number {
     return n * this.options.indentWidth * this.options.indentCharWidth;
   }
-  newLine(a?: string, b?: string): string {
+  linebreak(a?: string, b?: string): string {
     if (!a && !b) return '\n';
     if (!b) return a + '\n';
     return a + '\n' + b;
   }
 
-  countNewlines(s: string): number {
+  countLinebreaks(s: string): number {
     return s.split(/\r\n|\r|\n/).length;
   }
 

@@ -165,7 +165,7 @@ describe('CORTEX SERIALIZING SYMBOLS', () => {
   test('Escaped Symbols', () => {
     expect(serializeCortex('a\u0000b')).toMatch('`a\\0b`'); // Include a null char
     expect(serializeCortex('a\tb')).toMatch('`a\\tb`'); // Include a tab
-    expect(serializeCortex('a\nb')).toMatch('`a\\nb`'); // Include a newline
+    expect(serializeCortex('a\nb')).toMatch('`a\\nb`'); // Include a linebreak
     expect(serializeCortex('a\u0003b')).toMatch('`a\\u0003b`'); // Include a ETX (END OF TEXT)
     expect(serializeCortex('a\u007fb')).toMatch('`a\\u007fb`'); // Include a delete char
   });

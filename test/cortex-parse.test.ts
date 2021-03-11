@@ -1,30 +1,44 @@
 // import { parseCortex } from '../src/cortex/parse-cortex';
 import { validCortex, invalidCortex } from './utils';
 
-describe.skip('CORTEX PARSING SPACES', () => {
-  test('Symbols', () => {
-    expect(validCortex(' ')).toMatch('Nothing');
-    expect(validCortex(' \t ')).toMatch('Nothing');
-    expect(validCortex(' \t\n ')).toMatch('Nothing');
-    expect(validCortex(' \u2000 ')).toMatch('Nothing');
-    expect(validCortex(' \u2009 ')).toMatch('Nothing');
-    expect(validCortex('1\t2')).toMatchInlineSnapshot();
-    expect(validCortex('1\t+\t2')).toMatchInlineSnapshot();
-    expect(validCortex(' 2 \t 1')).toMatchInlineSnapshot();
+describe.skip('CORTEX PARSING SHEBANG', () => {
+  test('Valid shebang', () => {
+    expect(validCortex('#! /bin/cortex\n3.14 ')).toMatchInlineSnapshot();
+  });
+  test('Invalid shebang', () => {
+    expect(invalidCortex('\n#! boo\n ')).toMatchInlineSnapshot();
   });
 });
+
+describe('CORTEX PARSING SPACES', () => {
+  test('Symbols', () => {
+    expect(validCortex(' ')).toBe('Nothing');
+    expect(validCortex(' \t ')).toBe('Nothing');
+    expect(validCortex(' \t\n ')).toBe('Nothing');
+    expect(validCortex(' \u2000 ')).toBe('Nothing');
+    expect(validCortex(' \u2009 ')).toBe('Nothing');
+    expect(validCortex('1\t2')).toStrictEqual(['Do', 1, 2]);
+    expect(validCortex('1\t+\t2')).toMatchInlineSnapshot(
+      `['Error', ['unexpected-symbol', '+']]`
+    );
+    expect(validCortex(' 2 \t 1')).toStrictEqual(['Do', 2, 1]);
+  });
+});
+
 describe('CORTEX PARSING COMMENTS', () => {
-  test('Single-line comments;', () => {
-    expect(validCortex('// Comment')).toMatch('Nothing');
-    expect(validCortex('/// Documentation **comment**')).toMatch('Nothing');
-    expect(validCortex('3.14 // Trailing comment')).toMatch('3.14');
-    expect(validCortex('   // inline // comment')).toMatch('Nothing');
-    expect(validCortex('  12 // inline // comment')).toMatch('12');
-    expect(validCortex('  12 // inline 👩🏻‍🎤 // comment')).toMatch('12');
-    expect(validCortex('  12 /// inline 👩🏻‍🎤 // documentation')).toMatch('12');
-    expect(
-      validCortex('  12 /// inline\n 👩🏻‍🎤 // documentation')
-    ).toMatchInlineSnapshot(`['Do', '12', {sym: '👩🏻‍🎤'}]`);
+  test('Single-line comments', () => {
+    expect(validCortex('// Comment')).toBe('Nothing');
+    expect(validCortex('/// Documentation **comment**')).toBe('Nothing');
+    expect(validCortex('3.14 // Trailing comment')).toBe(3.14);
+    expect(validCortex('   // inline // comment')).toBe('Nothing');
+    expect(validCortex('  12 // inline // comment')).toBe(12);
+    expect(validCortex('  12 // inline 👩🏻‍🎤 // comment')).toBe(12);
+    expect(validCortex('  12 /// inline 👩🏻‍🎤 // documentation')).toBe(12);
+    expect(validCortex('  12 /// inline\n 👩🏻‍🎤 // documentation')).toStrictEqual([
+      'Do',
+      12,
+      '👩🏻‍🎤',
+    ]);
   });
   test('Multi-line comments;', () => {
     expect(
@@ -32,19 +46,19 @@ describe('CORTEX PARSING COMMENTS', () => {
 /*
  * Multi-line comment
  */`)
-    ).toMatch('3.14');
+    ).toBe(3.14);
     expect(
       validCortex(`3.14 +
 3.14 /*
  * Multi-line comment
  */`)
-    ).toMatchInlineSnapshot(`['Error', 'eof-expected']`);
+    ).toMatchInlineSnapshot(`['Error', ['unexpected-symbol', '+']]`);
     expect(
       validCortex(`3.14 +
 3.14 /*
  * Nested /* Comment */
  */`)
-    ).toMatchInlineSnapshot(`['Error', 'eof-expected']`);
+    ).toMatchInlineSnapshot(`['Error', ['unexpected-symbol', '+']]`);
   });
   test('Invalid multiline comment', () => {
     expect(
@@ -52,80 +66,78 @@ describe('CORTEX PARSING COMMENTS', () => {
     ).toMatchInlineSnapshot(`['Error', 'end-of-comment-expected']`);
     expect(
       invalidCortex(`   /* over nested /* comment */ */ */`)
-    ).toMatchInlineSnapshot(`['Error', 'eof-expected']`);
+    ).toMatchInlineSnapshot(`['Error', ['unexpected-symbol', '*']]`);
   });
 });
 
 describe('CORTEX PARSING NUMBERS', () => {
   test('Constants', () => {
-    expect(validCortex('NaN')).toMatchObject({ num: 'NaN' });
-    expect(validCortex('+Infinity')).toMatchObject({ num: 'Infinity' });
-    expect(validCortex('Infinity')).toMatchObject({ num: 'Infinity' });
-    expect(validCortex('-Infinity')).toMatchObject({ num: '-Infinity' });
+    expect(validCortex('NaN')).toStrictEqual({ num: 'NaN' });
+    expect(validCortex('+Infinity')).toStrictEqual({ num: 'Infinity' });
+    expect(validCortex('Infinity')).toStrictEqual({ num: 'Infinity' });
+    expect(validCortex('-Infinity')).toStrictEqual({ num: '-Infinity' });
   });
   test('Integers', () => {
-    expect(validCortex('0')).toMatch('0');
-    expect(validCortex('1234')).toMatch('1234');
-    expect(validCortex('62737547')).toMatch('62737547');
-    expect(validCortex('62_73_7__547')).toMatch('62737547');
+    expect(validCortex('0')).toBe(0);
+    expect(validCortex('1234')).toBe(1234);
+    expect(validCortex('62737547')).toBe(62737547);
+    expect(validCortex('62_73_7__547')).toBe(62737547);
   });
   test('Signed Integers', () => {
-    expect(validCortex('+0')).toMatch('0');
-    expect(validCortex('-0')).toMatch('0');
-    expect(validCortex('+62737547')).toMatch('62737547');
-    expect(validCortex('-62_73_7__547')).toMatch('-62737547');
+    expect(validCortex('+0')).toBe(0);
+    expect(validCortex('-0')).toBe(0);
+    expect(validCortex('+62737547')).toBe(62737547);
+    expect(validCortex('-62_73_7__547')).toBe(-62737547);
   });
   test('Floating-point number', () => {
-    expect(validCortex('0.1e-4')).toMatch('0.00001');
-    expect(validCortex('1.2')).toMatch('1.2');
-    expect(validCortex('1.2000')).toMatch('1.2');
-    expect(validCortex('0001.2000')).toMatch('1.2');
-    expect(validCortex('62_73_7547.38383e-2')).toMatch('627375.4738383');
-    expect(validCortex('62_73_7547.38383')).toMatch('62737547.38383');
+    expect(validCortex('0.1e-4')).toBe(0.00001);
+    expect(validCortex('1.2')).toBe(1.2);
+    expect(validCortex('1.2000')).toBe(1.2);
+    expect(validCortex('0001.2000')).toBe(1.2);
+    expect(validCortex('62_73_7547.38383e-2')).toBe(627375.4738383);
+    expect(validCortex('62_73_7547.38383')).toBe(62737547.38383);
   });
   test('Signed Floating-point number', () => {
-    expect(validCortex('+1.2')).toMatch('1.2');
-    expect(validCortex('-62_73_7547.38383e-13')).toMatch(
-      '-0.000006273754738383'
-    );
-    expect(validCortex('+62_73_7547.38383')).toMatch('62737547.38383');
-    expect(validCortex('-62_73_7547.38383')).toMatch('-62737547.38383');
+    expect(validCortex('+1.2')).toBe(1.2);
+    expect(validCortex('-62_73_7547.38383e-13')).toBe(-0.000006273754738383);
+    expect(validCortex('+62_73_7547.38383')).toBe(62737547.38383);
+    expect(validCortex('-62_73_7547.38383')).toBe(-62737547.38383);
   });
 
   test('Binary numbers', () => {
-    expect(validCortex('0b0101001011')).toMatch('331');
-    expect(validCortex('0b0101001011.1')).toMatch('331.5');
-    expect(validCortex('0b0101001011.110101')).toMatch('331.828125');
-    expect(validCortex('0b10e2')).toMatch('200');
-    expect(validCortex('0b10p4')).toMatch('32');
-    expect(validCortex('0b0101001011.110101e-4')).toMatch('0.0331828125');
-    expect(validCortex('0b0101001011E-4')).toMatch('0.0331');
-    expect(validCortex('0b0101001011.001')).toMatch('331.125');
-    expect(validCortex('0b0101001011.001p-2')).toMatch('82.78125');
-    expect(validCortex('-0b0')).toMatch('0');
-    expect(validCortex('-0b10')).toMatch('-2');
+    expect(validCortex('0b0101001011')).toBe(331);
+    expect(validCortex('0b0101001011.1')).toBe(331.5);
+    expect(validCortex('0b0101001011.110101')).toBe(331.828125);
+    expect(validCortex('0b10e2')).toBe(200);
+    expect(validCortex('0b10p4')).toBe(32);
+    expect(validCortex('0b0101001011.110101e-4')).toBe(0.0331828125);
+    expect(validCortex('0b0101001011E-4')).toBe(0.0331);
+    expect(validCortex('0b0101001011.001')).toBe(331.125);
+    expect(validCortex('0b0101001011.001p-2')).toBe(82.78125);
+    expect(validCortex('-0b0')).toBe(0);
+    expect(validCortex('-0b10')).toBe(-2);
   });
   test('Invalid Floating-point number', () => {
     expect(invalidCortex('1.2.3')).toMatchInlineSnapshot(
-      `['Error', 'eof-expected']`
+      `['Error', ['unexpected-symbol', '.']]`
     );
     expect(invalidCortex('2et')).toMatchInlineSnapshot(
-      `['UnexpectedSuccess', {sym: 't'}]`
+      `['UnexpectedSuccess', '2et']`
     );
     expect(invalidCortex('62_73_7547.k-13')).toMatchInlineSnapshot(
-      `['UnexpectedSuccess', ['Do', '62737547', {sym: 'k'}, '-13']]`
+      `['UnexpectedSuccess', ['Do', 62737547, 'k', -13]]`
     );
     expect(invalidCortex('62_73_7547k-13')).toMatchInlineSnapshot(
-      `['UnexpectedSuccess', ['Do', '62737547', {sym: 'k'}, '-13']]`
+      `['UnexpectedSuccess', ['Do', 62737547, 'k', -13]]`
     );
     expect(invalidCortex('.1e-13')).toMatchInlineSnapshot(
-      `['Error', 'eof-expected']`
+      `['Error', ['unexpected-symbol', '.']]`
     );
     expect(invalidCortex('62_73_7547.e-13')).toMatchInlineSnapshot(
-      `['UnexpectedSuccess', '0.0000062737547']`
+      `['UnexpectedSuccess', 0.0000062737547]`
     );
     expect(invalidCortex('-62_73_7547.e-13')).toMatchInlineSnapshot(
-      `['UnexpectedSuccess', '-0.0000062737547']`
+      `['UnexpectedSuccess', -0.0000062737547]`
     );
   });
   test('Invalid Binary numbers', () => {
@@ -134,37 +146,37 @@ describe('CORTEX PARSING NUMBERS', () => {
     // expect(invalidCortex('0b01c')).toMatchInlineSnapshot();
   });
   test('Hex numbers', () => {
-    expect(validCortex('0xdeadbeef')).toMatch('3735928559');
-    expect(validCortex('-0xdeadbeef')).toMatch('-3735928559');
-    expect(validCortex('0xdead.beef')).toMatch('57005.745834350586');
-    expect(validCortex('0x3.0cp2')).toMatch('12.1875');
-    expect(validCortex('0xc.3p0')).toMatch('12.1875');
-    expect(validCortex('0x3.23d70a3d70a3ep0')).toMatch('3.14');
-    expect(validCortex('0x1.91eb851eb851fp+1')).toMatch('3.14');
-    expect(validCortex('0x400')).toMatch('1024');
-    expect(validCortex('0x1.0p-4')).toMatch('0.0625');
-    expect(validCortex('0x1.0p-8')).toMatch('0.00390625');
-    expect(validCortex('0x1.0p-10')).toMatch('0.0009765625');
+    expect(validCortex('0xdeadbeef')).toBe(3735928559);
+    expect(validCortex('-0xdeadbeef')).toBe(-3735928559);
+    expect(validCortex('0xdead.beef')).toBe(57005.745834350586);
+    expect(validCortex('0x3.0cp2')).toBe(12.1875);
+    expect(validCortex('0xc.3p0')).toBe(12.1875);
+    expect(validCortex('0x3.23d70a3d70a3ep0')).toBe(3.14);
+    expect(validCortex('0x1.91eb851eb851fp+1')).toBe(3.14);
+    expect(validCortex('0x400')).toBe(1024);
+    expect(validCortex('0x1.0p-4')).toBe(0.0625);
+    expect(validCortex('0x1.0p-8')).toBe(0.00390625);
+    expect(validCortex('0x1.0p-10')).toBe(0.0009765625);
   });
 });
 
 describe('CORTEX PARSING SYMBOLS', () => {
   test('Symbols', () => {
-    expect(validCortex('a')).toMatchObject({ sym: 'a' });
-    expect(validCortex('abcdef')).toMatchObject({ sym: 'abcdef' });
-    expect(validCortex('ABcde')).toMatchObject({ sym: 'ABcde' });
-    expect(validCortex('été')).toMatchObject({ sym: 'été' });
-    expect(validCortex('Thé')).toMatchObject({ sym: 'Thé' });
-    expect(validCortex('garçon')).toMatchObject({ sym: 'garçon' });
-    expect(validCortex('a01234')).toMatchObject({ sym: 'a01234' });
-    expect(validCortex('_abc')).toMatchObject({ sym: '_abc' });
-    expect(validCortex('_01234')).toMatchObject({ sym: '_01234' });
-    expect(validCortex('👩🏻‍🎤🤯')).toMatchInlineSnapshot(`{sym: '👩🏻‍🎤🤯'}`);
+    expect(validCortex('a')).toBe('a');
+    expect(validCortex('abcdef')).toBe('abcdef');
+    expect(validCortex('ABcde')).toBe('ABcde');
+    expect(validCortex('été')).toBe('été');
+    expect(validCortex('Thé')).toBe('Thé');
+    expect(validCortex('garçon')).toBe('garçon');
+    expect(validCortex('a01234')).toBe('a01234');
+    expect(validCortex('_abc')).toBe('_abc');
+    expect(validCortex('_01234')).toBe('_01234');
+    expect(validCortex('👩🏻‍🎤🤯')).toBe('👩🏻‍🎤🤯');
   });
   test('Verbatim symbols', () => {
-    expect(validCortex('`a`')).toMatchInlineSnapshot(`{sym: 'a'}`);
-    expect(validCortex('`a+b`')).toMatchInlineSnapshot(`{sym: 'a+b'}`);
-    expect(validCortex('`👩🏻‍🎤🤯`')).toMatchInlineSnapshot(`{sym: '👩🏻‍🎤🤯'}`);
+    expect(validCortex('`a`')).toBe('a');
+    expect(validCortex('`a+b`')).toBe('a+b');
+    expect(validCortex('`👩🏻‍🎤🤯`')).toBe('👩🏻‍🎤🤯');
   });
   test('Invalid Symbols', () => {
     expect(invalidCortex('`abc')).toMatchInlineSnapshot(
@@ -178,12 +190,15 @@ describe('CORTEX PARSING SYMBOLS', () => {
     expect(invalidCortex('``')).toMatchInlineSnapshot(
       `['Error', 'empty-verbatim-symbol']`
     );
+    // Start with a hash sign
     expect(invalidCortex('`#abcd`')).toMatchInlineSnapshot(
       `['Error', ['invalid-symbol-name', '#abcd']]`
     );
+    // Starts with a dollar sign:
     expect(invalidCortex('`$abcd`')).toMatchInlineSnapshot(
       `['Error', ['invalid-symbol-name', '$abcd']]`
     );
+    // Starts with a quotation mark:
     expect(invalidCortex('`"abcd`')).toMatchInlineSnapshot(
       `['Error', ['invalid-symbol-name', '"abcd']]`
     );
@@ -211,33 +226,182 @@ describe.skip('CORTEX PARSING FANCY SYMBOLS', () => {
   });
 });
 
-describe.skip('CORTEX PARSING STRINGS', () => {
-  test('Strings', () => {
-    expect(validCortex('')).toMatch('');
-    expect(validCortex('"x"')).toMatchInlineSnapshot();
-    expect(validCortex('"hello world"')).toMatchInlineSnapshot();
-    expect(validCortex(`"C'est l'été!"`)).toMatchInlineSnapshot();
-    expect(validCortex(`"Times: ×"`)).toMatchInlineSnapshot();
-    expect(
-      validCortex(`"The set of real  numbers is ℝ"`)
-    ).toMatchInlineSnapshot();
+describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
+  test('Valid string', () => {
+    expect(validCortex('""')).toStrictEqual({ str: '' });
+    expect(validCortex('"x"')).toStrictEqual({ str: 'x' });
+    expect(validCortex('"hello world"')).toStrictEqual({
+      str: 'hello world',
+    });
+    expect(validCortex(`"Ç‘est l’été!"`)).toStrictEqual({
+      str: 'Ç‘est l’été!',
+    });
+    expect(validCortex(`"The multiplication sign is ×"`)).toStrictEqual({
+      str: 'The multiplication sign is ×',
+    });
+    expect(validCortex(`"The set of real numbers is ℝ"`)).toStrictEqual({
+      str: 'The set of real numbers is ℝ',
+    });
   });
-  test('Interpolated strings', () => {
-    expect(validCortex('hello\\(world)')).toMatchInlineSnapshot();
-    expect(validCortex('hello\\(2 + 3 + 5)')).toMatchInlineSnapshot();
-    expect(validCortex('hello\\(2 + 3 + x)')).toMatchInlineSnapshot();
-    expect(
-      validCortex('hello \\(2 + 3 + x) is equal to \\(5 + x)')
-    ).toMatchInlineSnapshot();
-  });
+
   test('String escaping', () => {
-    expect(validCortex('Print("hello 21 \\"world")')).toMatchInlineSnapshot();
-    expect(validCortex('Print("hello\\n world")')).toMatchInlineSnapshot();
+    expect(validCortex('"hello\\t world"')).toStrictEqual({
+      str: 'hello\\t world',
+    });
+    expect(validCortex('"hello \\u0061 world"')).toStrictEqual({
+      str: 'hello a world',
+    });
+    expect(validCortex('"hello \\u{0061} world"')).toStrictEqual({
+      str: 'hello a world',
+    });
+    expect(validCortex('"hello \\u{1F30D}"')).toStrictEqual({
+      str: 'hello 🌍',
+    });
+    expect(validCortex('"hello \\\\ world"')).toStrictEqual({
+      str: 'hello \\\\ world',
+    });
+    expect(validCortex('"hello \\n world"')).toStrictEqual({
+      str: 'hello \\n world',
+    });
+  });
+
+  test('String interpolating', () => {
+    expect(validCortex('"hello\\(" world")"')).toStrictEqual({
+      str: 'hello world',
+    });
+    expect(validCortex('"hello \\(world)"')).toStrictEqual([
+      'String',
+      { str: 'hello ' },
+      'world',
+    ]);
+    expect(validCortex('"hello \\()"')).toStrictEqual({ str: 'hello ' });
+
+    expect(validCortex('"hello\\(3.1456)"')).toStrictEqual([
+      'String',
+      { str: 'hello' },
+      3.1456,
+    ]);
+    // expect(validCortex('"hello\\(2 + 3 + x)"')).toMatchInlineSnapshot();
+    // expect(
+    //   validCortex('"hello \\(2 + 3 + x) is equal to \\(5 + x)"')
+    // ).toMatchInlineSnapshot();
+  });
+
+  test('Invalid string', () => {
+    expect(invalidCortex('end"')).toMatchInlineSnapshot(
+      `['Error', ['string-literal-opening-delimiter-expected', '"']]`
+    );
+    expect(invalidCortex('end"\n')).toMatchInlineSnapshot(
+      `['Error', ['string-literal-opening-delimiter-expected', '"']]`
+    );
+    expect(invalidCortex('"start\nend"')).toMatchInlineSnapshot(
+      `['Error', ['string-literal-closing-delimiter-expected', '"'], ['string-literal-opening-delimiter-expected', '"']]`
+    );
+    expect(invalidCortex('"start')).toMatchInlineSnapshot(
+      `['Error', ['string-literal-closing-delimiter-expected', '"']]`
+    );
+    expect(invalidCortex('"invalid \\x escape "')).toMatchInlineSnapshot(
+      `['Error', ['invalid-escape-sequence', '\\x']]`
+    );
+    expect(invalidCortex('"invalid \\U0041 escape "')).toMatchInlineSnapshot(
+      `['Error', ['invalid-escape-sequence', '\\U']]`
+    );
+    expect(invalidCortex('"invalid \\u23ghjik escape "')).toMatchInlineSnapshot(
+      `['Error', ['invalid-unicode-codepoint-string', '23g']]`
+    );
     expect(
-      validCortex('Print("hello\\u{000a} world")')
-    ).toMatchInlineSnapshot();
-    expect(validCortex('Print("Latex loves \\\\")')).toMatchInlineSnapshot();
-    expect(validCortex('Print("hello", "\\nworld")')).toMatchInlineSnapshot();
+      invalidCortex('"invalid \\u{defughjik} escape "')
+    ).toMatchInlineSnapshot(
+      `['Error', ['invalid-unicode-codepoint-string', 'defughji']]`
+    );
+    expect(
+      invalidCortex('"invalid \\u{20ffff} escape "')
+    ).toMatchInlineSnapshot(
+      `['Error', ['invalid-unicode-codepoint-value', 'U+0020FFFF']]`
+    );
+    expect(invalidCortex('"invalid \\u{d888} escape "')).toMatchInlineSnapshot(
+      `['Error', ['invalid-unicode-codepoint-value', 'U+D888']]`
+    );
+    // Prematurely closed interpolated expression
+    expect(invalidCortex('"start \\("')).toMatchInlineSnapshot(
+      `['Error', ['string-literal-opening-delimiter-expected', '"'], ['closing-bracket-expected', ')'], ['string-literal-closing-delimiter-expected', '"']]`
+    );
+    expect(invalidCortex('"start \\(+"')).toMatchInlineSnapshot(
+      `['Error', ['closing-bracket-expected', ')']]`
+    );
+    expect(invalidCortex('"start \\(end"')).toMatchInlineSnapshot(
+      `['Error', ['closing-bracket-expected', ')'], ['string-literal-closing-delimiter-expected', '"']]`
+    );
+    expect(invalidCortex('"start \\( end"')).toMatchInlineSnapshot(
+      `['Error', ['closing-bracket-expected', ')']]`
+    );
+  });
+});
+
+describe('CORTEX PARSING MULTILINE STRINGS', () => {
+  test('Valid string', () => {
+    expect(validCortex('"""\nhello\nworld\n"""')).toStrictEqual({
+      str: 'hello\\nworld',
+    });
+
+    expect(validCortex('"""\nhello\n \\u{1F30D}\n"""')).toStrictEqual({
+      str: 'hello\\n 🌍',
+    });
+
+    expect(validCortex('"""\n   hello\n   world\n   """')).toStrictEqual({
+      str: 'hello\\nworld',
+    });
+
+    expect(validCortex('"""\n\t\thello\n\t\tworld\n\t\t"""')).toStrictEqual({
+      str: 'hello\\nworld',
+    });
+
+    expect(validCortex('"""\n\t  hello\n\t  world\n\t  """')).toStrictEqual({
+      str: 'hello\\nworld',
+    });
+
+    expect(validCortex('"""\n\t  hello\\\n\t  world\n\t  """')).toStrictEqual({
+      str: 'hello\\\\\\n\\t  world',
+    });
+  });
+  test('Invalid string', () => {
+    expect(invalidCortex('"""boo\nhello\nworld\n"""')).toStrictEqual([
+      'Error',
+      'multiline-string-expected',
+      'multiline-string-expected',
+    ]);
+
+    expect(invalidCortex('"""\nhello\nworld\n boo  """')).toStrictEqual([
+      'Error',
+      'multiline-whitespace-expected',
+    ]);
+  });
+});
+
+describe('CORTEX PARSING EXTENDED STRINGS', () => {
+  test('Valid string', () => {
+    expect(validCortex('#"hello world"#')).toStrictEqual({
+      str: 'hello world',
+    });
+    expect(validCortex('##"hello world"##')).toStrictEqual({
+      str: 'hello world',
+    });
+    expect(validCortex('#"hello "world""#')).toStrictEqual({
+      str: 'hello "world"',
+    });
+    expect(validCortex('#"hello \\n "world""#')).toStrictEqual({
+      str: 'hello \\n "world"',
+    });
+  });
+  test('Invalid string', () => {
+    expect(invalidCortex('#"hello world"')).toStrictEqual([
+      'Error',
+      ['string-literal-closing-delimiter-expected', '#"'],
+    ]);
+    expect(invalidCortex('##"hello world"#')).toStrictEqual([
+      'Error',
+      ['string-literal-closing-delimiter-expected', '##"'],
+    ]);
   });
 });
 
@@ -249,12 +413,23 @@ describe.skip('CORTEX PARSING DICTIONARY', () => {
     expect(validCortex('Dictionary()')).toMatchInlineSnapshot();
   });
 
-  test('Dictionaries', () => {
+  test('Valid dictionary', () => {
+    expect(validCortex('{ one -> 1)')).toMatchInlineSnapshot();
+    expect(validCortex('{ one -> 1, two -> 2)')).toMatchInlineSnapshot();
+    expect(validCortex('{ one -> 1, three -> 2 + 1)')).toMatchInlineSnapshot();
     expect(validCortex('{x -> 1, y -> 2, z -> 2 + x}')).toMatchInlineSnapshot();
+  });
 
+  test('Nested dictionary', () => {
     expect(
       validCortex('{x -> {a -> 7, b -> 5}, y -> 2, z -> 2 + x}')
     ).toMatchInlineSnapshot();
+  });
+
+  test('Invalid dictionary', () => {
+    expect(invalidCortex('{ one -> 1, one -> 2}')).toMatchInlineSnapshot();
+    expect(invalidCortex('{ one -> 1, two -> 2, }')).toMatchInlineSnapshot();
+    expect(invalidCortex('{ one -> 1, , two -> 2}')).toMatchInlineSnapshot();
   });
 });
 
@@ -294,6 +469,7 @@ describe.skip('CORTEX PARSING COLLECTIONS', () => {
     expect(validCortex('Tuple()')).toMatchInlineSnapshot();
     expect(validCortex('Tuple(a, 2b, c^3)')).toMatchInlineSnapshot();
   });
+  // Dictionaries: see above.
 });
 
 describe.skip('CORTEX PARSING OPERATORS', () => {

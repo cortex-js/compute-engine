@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: 'cortex'
 ---
+
 <script type='module'>
     import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
     renderMathInDocument();
@@ -32,8 +33,9 @@ String(x , " is a ", Domain(x))
 // -> "2047 is a PrimeNumber"
 ```
 
-A Cortex program is an expression that gets desugared to MathJSON, compiled,
-evaluated by the Cortex Compute Engine before being displayed.
+Read more about the [formal syntax of Cortex](/cortex/syntax), the
+[implementation of Cortex](/cortex/implementation) with MathJSON or continue
+below for an informal description of the language.
 
 ## Comments
 
@@ -378,56 +380,3 @@ are not indexable.
 The empty set is `{}`.
 
 ## Flow Control
-
-## Desugaring
-
-The process to convert a Cortex program into a MathJSON expression is pretty
-straightforward:
-
-- Comments get added as metadata to the nearest expression
-- Function calls gets converted into MathJSON functions:
-
-```cortex
-Print("x =", x)
-```
-
-```json
-["Print", "'x ='", "x"]
-```
-
-- Collections (List, Set, Tuple, Sequence) get converted into a corresponding
-  MathJSON expression:
-
-```cortex
-set =  {2, 5, 7, 11, 13}
-list = [2, 7, 2, 4, 2]
-tuple = (1.5, 0.5)
-sequence = 2, 5, 7
-```
-
-```json
-["Equal", "set", ["Set", 2, 5, 7, 11, 13]][
-  ("Equal", "list", ["List", 2, 7, 2, 4, 2])
-][("Equal", "tuple", ["Tuple", 1.5, 0.5])][
-  ("Equal", "sequence", ["Sequence", 2, 5, 7])
-]
-```
-
-- Control structures also get converted to an appropriate expression:
-
-```cortex
-if (x in PrimeNumber) {
-  Print(x);
-   x += 1;
-} else {
-  x += 2;
-}
-```
-
-```json
-["If",
-  ["Element", "x", "PrimeNumber"],
-  ["Do", ["Print", "x"], ["Equal", "x", ["Add", "x", 1]]],
-  ["Add", "x", 2]]
-]
-```

@@ -1,6 +1,6 @@
 import { SignalOrigin } from '../public';
 
-const NEWLINE = /\r\n|[\n\r\u2028\u2029]/;
+const LINEBREAK = /\r\n|[\n\r\u2028\u2029]/;
 
 const RESET = '\u001b[0m';
 const GREY = '\u001b[30;1m${s}';
@@ -61,7 +61,7 @@ export class Origin {
   }
 
   get lines(): string[] {
-    if (!this._lines) this._lines = this.source.split(NEWLINE);
+    if (!this._lines) this._lines = this.source.split(LINEBREAK);
     return this._lines;
   }
 

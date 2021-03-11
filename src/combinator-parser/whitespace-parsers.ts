@@ -1,15 +1,13 @@
 import { codePointLength, isWhitespace } from './characters';
-import { Ignore, Error, ParserState, Failure } from './parsers';
+import { Ignore, Error, Parser, Failure } from './parsers';
 
-export function skipInlineSpaces(state: ParserState): void {
-  let i = state.offset;
-  let done = false;
-  while (!done) {
-    const c = state.at(i);
-    done = c !== 0x0020 && c !== 0x0009;
-    if (!done) i += 1; // if not done, length of c === 1
-  }
-  state.skipTo(i);
+export function skipInlineSpaces(parser: Parser): void {
+  let i = parser.offset;
+  let c: number;
+  do {
+    c = parser.at(i++);
+  } while (c === 0x0020 || c === 0x0009);
+  parser.skipTo(i - 1);
 }
 
 // export function parseNewline(state: ParserState): Result<void> {
@@ -25,28 +23,45 @@ export function skipInlineSpaces(state: ParserState): void {
 //   return failure(state);
 // }
 
-export function skipUntilNewline(state: ParserState): void {
+/** Skip all characters until a linebreak */
+export function skipUntilLinebreak(parser: Parser): void {
   let found = false;
-  let i = state.offset;
-  while (!found && i <= state.length) {
-    const c = state.at(i++);
+  let i = parser.offset;
+  while (!found && i < parser.length) {
+    const c = parser.at(i++);
     if (c === 0x000d || c === 0x2028 || c === 0x2029) {
       found = true;
     }
     if (c === 0x000a) {
-      if (state.at(i) === 0x00d) {
+      if (parser.at(i) === 0x000d) {
         i += 1;
       }
       found = true;
     }
   }
-  state.skipTo(i);
+  parser.skipTo(i);
+}
+
+/** If we are on a linebreak, skip it */
+export function skipLinebreak(parser: Parser): void {
+  const c = parser.at(parser.offset);
+  if (c === 0x000d || c === 0x2028 || c === 0x2029) {
+    parser.skipTo(parser.offset + 1);
+    return;
+  }
+  if (c === 0x000a) {
+    if (parser.at(parser.offset + 1) === 0x000d) {
+      parser.skipTo(parser.offset + 2);
+    } else {
+      parser.skipTo(parser.offset + 1);
+    }
+  }
 }
 
 /**
  * Whitespace includes space, tab, mathematical space, and comments.
  */
-export function parseWhitespace(parser: ParserState): Ignore | Error {
+export function parseWhitespace(parser: Parser): Ignore | Error {
   let done = false;
   const start = parser.offset;
   let i = start;
@@ -58,7 +73,7 @@ export function parseWhitespace(parser: ParserState): Ignore | Error {
       if (!done) i += codePointLength(c);
     }
     let result: Ignore | Error | Failure = parseLineComment(parser.skipTo(i));
-    result = parseBlockComment(parser.skipTo(result.next));
+    result = parseBlockComment(parser);
     if (result.kind === 'error') return result;
     done = offset === result.next;
     i = result.next;
@@ -66,18 +81,16 @@ export function parseWhitespace(parser: ParserState): Ignore | Error {
   return parser.ignore([start, i]);
 }
 
-export function parseLineComment(parser: ParserState): Ignore {
+export function parseLineComment(parser: Parser): Ignore {
   const start = parser.offset;
   // Check for "//"
   if (parser.at(start) === 0x002f && parser.at(start + 1) === 0x002f) {
-    skipUntilNewline(parser);
+    skipUntilLinebreak(parser);
   }
   return parser.ignore([start, parser.offset]);
 }
 
-export function parseBlockComment(
-  parser: ParserState
-): Ignore | Error | Failure {
+export function parseBlockComment(parser: Parser): Ignore | Error | Failure {
   // `/*` prefix
   const start = parser.offset;
   let i = start;
@@ -106,6 +119,19 @@ export function parseBlockComment(
     );
   }
   return parser.ignore([start, i]);
+}
+
+export function parseShebang(parser: Parser): Ignore | Failure {
+  // Are the first two characters "#" and "!"?
+  if (
+    parser.offset !== 0 ||
+    parser.at(0) !== 0x0023 ||
+    parser.at(1) !== 0x0021
+  ) {
+    return parser.failure();
+  }
+  skipUntilLinebreak(parser);
+  return parser.ignore([0, parser.offset - 1]);
 }
 
 /**

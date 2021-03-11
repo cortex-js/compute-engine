@@ -1,8 +1,11 @@
 import { DIGITS, HEX_DIGITS } from './characters';
-import { ParserState, Result } from './parsers';
+import { Parser, Result } from './parsers';
+
+// @todo: the numeric parsers should return strings rather than
+// number to better support big numbers
 
 export function parseExponent(
-  parser: ParserState,
+  parser: Parser,
   prefix: 'e' | 'p'
 ): Result<number> {
   const start = parser.offset;
@@ -42,7 +45,7 @@ export function parseExponent(
 }
 
 export function applyExponent(
-  parser: ParserState,
+  parser: Parser,
   start: number,
   value: number
 ): Result<number> {
@@ -66,7 +69,7 @@ export function applyExponent(
   return parser.error([start, end], value, 'exponent-expected');
 }
 
-export function parseBinaryNumber(parser: ParserState): Result<number> {
+export function parseBinaryNumber(parser: Parser): Result<number> {
   const start = parser.offset;
   let i = start;
 
@@ -119,7 +122,7 @@ export function parseBinaryNumber(parser: ParserState): Result<number> {
   return applyExponent(parser, start, result);
 }
 
-export function parseHexadecimalNumber(parser: ParserState): Result<number> {
+export function parseHexadecimalNumber(parser: Parser): Result<number> {
   const start = parser.offset;
   let i = start;
 
@@ -172,13 +175,7 @@ export function parseHexadecimalNumber(parser: ParserState): Result<number> {
   return applyExponent(parser, start, result);
 }
 
-// export function parseSignedFloatingPointNumber(
-//   state: ParserState
-// ): Result<number> {
-//   return hypothetical(state, 0);
-// }
-
-export function parseFloatingPointNumber(parser: ParserState): Result<number> {
+export function parseFloatingPointNumber(parser: Parser): Result<number> {
   const start = parser.offset;
   if (!DIGITS.has(parser.at(start))) return parser.failure();
 
@@ -229,7 +226,7 @@ export function parseFloatingPointNumber(parser: ParserState): Result<number> {
   return applyExponent(parser, start, result);
 }
 
-export function parseNumber(parser: ParserState): Result<number> {
+export function parseNumber(parser: Parser): Result<number> {
   // Note: the order of the parsing matters.
   // Parse the numbers with a `0` prefix first (`0b`, `0x`)
   // then parse floating point number last.
@@ -241,7 +238,7 @@ export function parseNumber(parser: ParserState): Result<number> {
   return result;
 }
 
-export function parseSignedNumber(parser: ParserState): Result<number> {
+export function parseSignedNumber(parser: Parser): Result<number> {
   const start = parser.offset;
   let i = start;
   // Is it the minus sign (-)
@@ -254,13 +251,7 @@ export function parseSignedNumber(parser: ParserState): Result<number> {
     i++;
   }
   parser.skipTo(i);
-  // Note: the order of the parsing matters.
-  // Parse the numbers with a `0` prefix first (`0b`, `0x`)
-  // then parse floating point number last.
-  // Otherwise "0" is ambiguous.
-  let result = parseBinaryNumber(parser);
-  if (result.kind === 'failure') result = parseHexadecimalNumber(parser);
-  if (result.kind === 'failure') result = parseFloatingPointNumber(parser);
+  const result = parseNumber(parser);
 
   if (result.kind === 'success') {
     return parser.success([start, result.next], sign * result.value);
@@ -273,5 +264,6 @@ export function parseSignedNumber(parser: ParserState): Result<number> {
     );
   }
 
-  return result;
+  parser.skipTo(start);
+  return parser.failure();
 }

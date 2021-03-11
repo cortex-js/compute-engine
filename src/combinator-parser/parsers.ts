@@ -1,13 +1,13 @@
 import { Signal, SignalMessage } from '../public';
-import { codePointLength } from './characters';
+import { codePointLength, isLinebreak } from './characters';
 
 export type ParsingError = SignalMessage;
 
 /**
- * The `ParserState` keeps track of what we are parsing and what we have
+ * The `Parser` keeps track of what we are parsing (the source) and what we have
  * parsed so far (the offset).
  */
-export class ParserState {
+export class Parser {
   private source: string;
   protected _offset = 0;
   length = 0;
@@ -20,13 +20,19 @@ export class ParserState {
   at(offset: number): number {
     return this.source.codePointAt(offset);
   }
+  atEnd(): boolean {
+    return this.offset >= this.source.length;
+  }
+  atLinebreak(): boolean {
+    return isLinebreak(this.source.codePointAt(this.offset));
+  }
   slice(start: number, end?: number): string {
     return this.source.slice(start, end);
   }
   get offset(): number {
     return this._offset;
   }
-  skipTo(offset: number): ParserState {
+  skipTo(offset: number): Parser {
     this._offset = offset;
     return this;
   }
@@ -201,26 +207,26 @@ export type Success<T = any> = {
   value: T;
 };
 
-export function skipUntil(state: ParserState, value: number): number {
-  let i = state.offset;
-  while (i < state.length) {
-    const c = state.at(i);
+export function skipUntil(parser: Parser, value: number): number {
+  let i = parser.offset;
+  while (i < parser.length) {
+    const c = parser.at(i);
     if (c === value) return i;
     i += codePointLength(c);
   }
   return -1;
 }
 
-export function skipUntilString(state: ParserState, pattern: string): number {
-  let i = state.offset;
+export function skipUntilString(parser: Parser, pattern: string): number {
+  let i = parser.offset;
   const cps = [...pattern].map((x) => x.codePointAt(0));
   while (i < pattern.length - cps.length) {
-    let c = state.at(i);
+    let c = parser.at(i);
     if (c === cps[0]) {
       let match = true;
       let j = 1;
       while (match && j < cps.length) {
-        c = state.at(i);
+        c = parser.at(i);
         match = c === cps[j];
         if (match) {
           j += 1;

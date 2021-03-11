@@ -1,21 +1,25 @@
 {
   "en-us": {
-    "exponent-expected": "An exponent was expected",
-    "literal-expected": "\"%0\" was expected",
     "binary-number-expected": "A binary number was expected",
+    "closing-bracket-expected": "A \"%0\" was expected",
     "decimal-number-expected": "A decimal number was expected",
-    "hexadecimal-number-expected": "A hexadecimal number was expected",
-    "eof-expected": "Nothing more was expected",
-    "end-of-comment-expected": "End of comment (\"*/\") was not found",
-    "expression-expected": "An expression was expected",
+    "eof-expected": "Nothing more was expected, got \"%0\"",
     "empty-verbatim-symbol": "A symbol name was expected",
-    "symbol-expected": "A symbol name was expected",
+    "end-of-comment-expected": "End of comment (\"*/\") was not found",
+    "exponent-expected": "An exponent was expected",
+    "expression-expected": "An expression was expected",
+    "hexadecimal-number-expected": "A hexadecimal number was expected",
     "invalid-symbol-name": "\"%0\" is not a valid symbol name",
-    "unbalanced-verbatim-symbol": "Could not find closing \"`\" in \"%0\"",
     "invalid-escape-sequence": "\"%0\" is not a valid escape sequence",
     "invalid-unicode-codepoint-string": "\"%0\" is not a valid Unicode codepoint",
-    "invalid-unicode-codepoint": "\"%0\" is not a valid Unicode codepoint",
+    "invalid-unicode-codepoint-value": "\"%0\" is not a valid Unicode codepoint value",
+    "literal-expected": "\"%0\" was expected",
     "opening-bracket-expected": "A \"%0\" was expected",
-    "closing-bracket-expected": "A \"%0\" was expected"
+    "primary-expected": "A number, symbol, string or function call was expected",
+    "string-literal-opening-delimiter-expected": "An opening delimiter (%0) was expected at the start of the string, on the same line",
+    "string-literal-closing-delimiter-expected": "A closing delimiter (%0) was expected at the end of the string, on the same line",
+    "symbol-expected": "A symbol name was expected",
+    "unbalanced-verbatim-symbol": "Could not find closing \"`\" in \"%0\"",
+    "unexpected-symbol": "Unexpected symbol \"%0\""
   }
 }

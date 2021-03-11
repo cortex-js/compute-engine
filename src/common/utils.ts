@@ -3,6 +3,7 @@ import {
   MathJsonRealNumber,
   MathJsonSymbol,
   MathJsonFunction,
+  MathJsonString,
 } from '../public';
 
 /**
@@ -45,6 +46,11 @@ export function isNumberObject(expr: Expression): expr is MathJsonRealNumber {
 export function isSymbolObject(expr: Expression): expr is MathJsonSymbol {
   return Boolean(expr) && typeof expr === 'object' && 'sym' in expr;
 }
+
+export function isStringObject(expr: Expression): expr is MathJsonString {
+  return Boolean(expr) && typeof expr === 'object' && 'str' in expr;
+}
+
 export function isFunctionObject(expr: Expression): expr is MathJsonFunction {
   return Boolean(expr) && typeof expr === 'object' && 'fn' in expr;
 }

@@ -112,25 +112,22 @@ function isValidJSONNumber(num: string): string | number {
 }
 
 export function strip(expr: Expression): Expression {
-  if (typeof expr === 'number') {
-    return expr.toString();
-  }
+  if (typeof expr === 'number') return expr;
   if (typeof expr === 'string') {
+    if (expr[0] === "'" && expr[expr.length - 1] === "'") {
+      return { str: expr.slice(1, -1) };
+    }
     return expr;
   }
-  if (Array.isArray(expr)) {
-    return expr.map((x) => strip(x));
-  }
+  if (Array.isArray(expr)) return expr.map((x) => strip(x));
+
   if (typeof expr === 'object') {
     if ('num' in expr) {
       const val = isValidJSONNumber(expr.num);
-      if (typeof val === 'number') return val.toString();
+      if (typeof val === 'number') return val;
       return { num: val };
     } else if ('sym' in expr) {
-      if (expr.sym[0] === "'" && expr.sym[expr.sym.length - 1] === "'") {
-        return expr.sym;
-      }
-      return { sym: expr.sym };
+      return expr.sym;
     } else if ('fn' in expr) {
       return expr.fn.map((x) => strip(x));
     } else if ('dict' in expr) {
@@ -141,6 +138,10 @@ export function strip(expr: Expression): Expression {
           })
         ),
       };
+    } else if ('str' in expr) {
+      return { str: expr.str };
+    } else {
+      console.log('Unexpected object literal as an Expression');
     }
   }
 

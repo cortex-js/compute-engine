@@ -1,23 +1,27 @@
 export type ParsingSignalCode =
-  | 'exponent-expected'
-  | 'literal-expected' // %0 = literal
   | 'binary-number-expected'
+  | 'closing-bracket-expected' // %0 = bracket
   | 'decimal-number-expected'
-  | 'hexadecimal-number-expected'
-  | 'eof-expected'
-  | 'end-of-comment-expected'
-  | 'primary-expected'
-  | 'expression-expected'
+  | 'eof-expected' // %0 = unexpected symbol
   | 'empty-verbatim-symbol'
-  | 'symbol-expected'
+  | 'end-of-comment-expected'
+  | 'exponent-expected'
+  | 'expression-expected'
+  | 'hexadecimal-number-expected'
   | 'invalid-symbol-name' // %0 = symbol name
-  | 'unbalanced-verbatim-symbol' // %0 = symbol name
   | 'invalid-escape-sequence' // &0 = escape sequence char
   | 'invalid-unicode-codepoint-string' // %0 = codepoint string
-  | 'invalid-unicode-codepoint' // %0 = codepoint
+  | 'invalid-unicode-codepoint-value' // %0 = codepoint
+  | 'literal-expected' // %0 = literal
+  | 'multiline-string-expected'
+  | 'multiline-whitespace-expected'
   | 'opening-bracket-expected' // %0 = bracket
-  | 'closing-bracket-expected' // %0 = bracket
-  | 'string-literal-end-expected';
+  | 'primary-expected'
+  | 'string-literal-opening-delimiter-expected'
+  | 'string-literal-closing-delimiter-expected' // %0 = delimiter
+  | 'symbol-expected'
+  | 'unbalanced-verbatim-symbol' // %0 = symbol name
+  | 'unexpected-symbol'; // %0 symbol
 
 export type RuntimeSignalCode =
   | 'timeout'

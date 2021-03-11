@@ -1,6 +1,6 @@
 // https://unicode.org/reports/tr31/#R3
 
-const NEW_LINE_CHARACTERS = [
+const LINEBREAK_CHARACTER = [
   0x000a, // LINE FEED
   0x000d, // CARRIAGE RETURN
   0x2028, // LINE SEPARATOR
@@ -558,18 +558,23 @@ function Expand(source: (number | [start: number, end: number])[]): number[] {
   return result;
 }
 
-export function isNewline(c: number): boolean {
-  return NEW_LINE_CHARACTERS.includes(c);
+export function isLinebreak(c: number): boolean {
+  return LINEBREAK_CHARACTER.includes(c);
+}
+
+/** Most restrictive whitespace: tab or space */
+export function isInlineSpace(c: number): boolean {
+  return c === 0x0009 || c === 0x0020;
+}
+
+export function isPatternWhitespace(c: number): boolean {
+  return PATTERN_WHITE_SPACE.includes(c);
 }
 
 /** Everything in pattern white space, plus some other
  * characters considered whitespace */
 export function isWhitespace(c: number): boolean {
   return WHITE_SPACE.includes(c);
-}
-
-export function isPatternWhitespace(c: number): boolean {
-  return PATTERN_WHITE_SPACE.includes(c);
 }
 
 export function isSyntax(c: number): boolean {
