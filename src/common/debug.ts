@@ -17,7 +17,7 @@ export type Terminal = {
   highlightBackground(s: string): string;
 };
 
-const colorTerminal: Terminal = {
+export const colorTerminal: Terminal = {
   joinLines(lines: string[]): string {
     return lines.join('\n');
   },

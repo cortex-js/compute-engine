@@ -8,8 +8,8 @@ import {
   must,
   parseString,
   sequence,
-  some,
-} from '../combinator-parser/combinators';
+} from '../combinator-parser/core-combinators';
+import { some } from '../combinator-parser/combinators';
 import { parseSignedNumber } from '../combinator-parser/numeric-parsers';
 import { parseIdentifier } from '../combinator-parser/identifier-parsers';
 import {

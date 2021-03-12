@@ -1,4 +1,4 @@
-import { Combinator } from './combinators';
+import { Combinator } from './core-combinators';
 import { Parser, Result } from './parsers';
 
 export class Grammar<T> {
