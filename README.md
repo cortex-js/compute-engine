@@ -1,7 +1,10 @@
-# MathJSON
+<div align="center">
+    <img alt="math live" src="assets/math-json.jpg?raw=true">
+</div>
 
-The MathJSON format is a lightweight data interchange format for mathematical
-notation.
+<h3><strong>MathJSON</strong></h3>
+<h1>A lightweight data interchange format for mathematical
+notation</h1>
 
 | Latex                      | MathJSON                                                                  |
 | :------------------------- | :------------------------------------------------------------------------ |
@@ -11,6 +14,15 @@ notation.
 
 This repo contains the description of the format and a Javascript/Typescript
 library that can be used to manipulate MathJSON expressions.
+
+Reference documentation and guides at
+[cortexjs.io/math-json](https://cortexjs.io/math-json/).
+
+## Using MathJSON
+
+```bash
+npm install --save @cortex-js/math-json
+```
 
 ```js
 import { parse, serialize } from 'math-json';
@@ -25,7 +37,27 @@ console.log(serialize([["InverseFunction", "Sin"], "x"));
 
 # More
 
-- [MathJSON format](./src/README.md)
-- [MathJSON API](./src/API.md)
-- [MathJSON Default Dictionary](./src/dictionary/README.md)
+- [MathJSON format](https://cortexjs.io/guides/math-json-format/)
+- [MathJSON API](https://cortexjs.io/docs/mathjson/)
+- [MathJSON Default Dictionary](https://cortexjs.io/guides/math-json-dictionary/)
 - [Build](BUILD.md) instructions.
+
+## Related Projects
+
+<dl>
+  <dt><a href="https://cortexjs.io/mathlive">MathLive</a> (on <a href="https://github.com/arnog/mathlive">GitHub</a>)</dt>
+  <dd>A Web Component for math input.</dd>  
+  <dt><a href="https://cortexjs.io/compute-engine">Compute Engine</a> (on <a href="https://github.com/cortex-js/math-json/tree/master/src/compute-engine">GitHub</a>)</dt>
+  <dd>The CortexJS Compute Engine performs calculations on MathJSON expressions</dd>  
+  <dt><a href="https://cortexjs.io/cortex">Cortex</a> (on <a href="https://github.com/cortex-js/math-json/tree/master/src/cortex">GitHub</a>)</dt>
+  <dd>A programming language for scientific computing</dd>  
+</dl>
+
+## Contact Us
+
+- Join our [Gitter community](https://gitter.im/cortex-js/community)
+- Drop a line to arno@arno.org
+
+## License
+
+This project is licensed under the [MIT License](LICENSE.txt).
