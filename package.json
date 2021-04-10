@@ -10,7 +10,7 @@
     "start": "bash ./scripts/build.sh watch"
   },
   "name": "@cortex-js/math-json",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A JSON schema to represent math formulas",
   "repository": {
     "type": "git",
