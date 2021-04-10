@@ -8,40 +8,43 @@ export function parseExponent(
   parser: Parser,
   prefix: 'e' | 'p'
 ): Result<number> {
+  const result = new Result<number>(parser);
   const start = parser.offset;
   let i = start;
-  if (i >= parser.length) return parser.failure();
+  if (i >= parser.length) return result.failure();
   if (prefix === 'p') {
-    if (parser.at(i) !== 0x0070 && parser.at(i) !== 0x0050)
-      return parser.failure();
+    if (parser.get(i) !== 0x0070 && parser.get(i) !== 0x0050)
+      return result.failure();
   } else {
     // Prefix 'e' or 'E'
-    if (parser.at(i) !== 0x0065 && parser.at(i) !== 0x0045)
-      return parser.failure();
+    if (parser.get(i) !== 0x0065 && parser.get(i) !== 0x0045)
+      return result.failure();
   }
   i += 1;
 
   let sign = 1;
   // Is it the minus sign (-)
-  if (parser.at(i) === 0x002d) {
+  if (parser.get(i) === 0x002d) {
     i++;
     sign = -1;
-  } else if (parser.at(i) === 0x002b) {
+  } else if (parser.get(i) === 0x002b) {
     // It's the plus sign (+)
     i++;
   }
 
-  if (parser.offset !== i && !DIGITS.has(parser.at(i))) {
+  if (parser.offset !== i && !DIGITS.has(parser.get(i))) {
     // There was a '+' or '-' followed by a non-digit
-    return parser.error([start, i], 0, 'exponent-expected');
+    parser.skipTo(i);
+    return result.error(0, 'exponent-expected');
   }
 
-  let result = 0;
-  while (DIGITS.has(parser.at(i))) {
-    result = result * 10 + DIGITS.get(parser.at(i++));
+  let value = 0;
+  while (DIGITS.has(parser.get(i))) {
+    value = value * 10 + DIGITS.get(parser.get(i++));
   }
 
-  return parser.success([start, i], sign * result);
+  parser.skipTo(i);
+  return result.success(sign * value);
 }
 
 export function applyExponent(
@@ -49,44 +52,45 @@ export function applyExponent(
   start: number,
   value: number
 ): Result<number> {
+  const result = new Result<number>(parser);
   let exp = parseExponent(parser, 'e');
-  if (exp.kind === 'success') {
+  if (exp.isSuccess) {
     // Note: using "Math.pow" loses some accuracy, i.e.:
     // `0.1e-4 = 0.000009999999999999999`
     // Instead, use the Javascript parsing function
     // result = result * Math.pow(10, exp.value);
     value = Number.parseFloat(value.toString() + 'e' + exp.value.toString());
-  } else if (exp.kind === 'failure') {
+  } else if (exp.isFailure) {
     exp = parseExponent(parser, 'p');
-    if (exp.kind === 'success') {
+    if (exp.isSuccess) {
       value = value * Math.pow(2, exp.value);
     }
   }
-  const end = parser.offset;
-  if (exp.kind === 'success' || exp.kind === 'failure') {
-    return parser.success([start, end], value);
-  }
-  return parser.error([start, end], value, 'exponent-expected');
+  if (exp.isSuccess || exp.isFailure) return result.success(value);
+
+  return result.error(value, 'exponent-expected');
 }
 
 export function parseBinaryNumber(parser: Parser): Result<number> {
+  const result = new Result<number>(parser);
   const start = parser.offset;
   let i = start;
 
   // `0b` prefix
-  if (parser.at(i++) !== 0x0030 || parser.at(i++) !== 0x0062)
-    return parser.failure();
+  if (parser.get(i++) !== 0x0030 || parser.get(i++) !== 0x0062) {
+    return result.failure();
+  }
 
   // Whole part
-  let result = 0;
+  let value = 0;
   let done = false;
   while (!done && i < parser.length) {
-    const c = HEX_DIGITS.get(parser.at(i++));
+    const c = HEX_DIGITS.get(parser.get(i++));
     if (c === 0) {
-      result = result << 1;
+      value = value << 1;
     } else if (c === 1) {
-      result = (result << 1) + 1;
-    } else if (parser.at(i - 1) === 0x005f) {
+      value = (value << 1) + 1;
+    } else if (parser.get(i - 1) === 0x005f) {
       // It's an underscore, skip it
     } else {
       done = true;
@@ -95,49 +99,50 @@ export function parseBinaryNumber(parser: Parser): Result<number> {
   }
 
   // Fractional part. Check for '.'
-  if (parser.at(i) === 0x002e) {
+  if (parser.get(i) === 0x002e) {
     i += 1;
     let frac = 0.5;
     let fracPart = 0;
     done = false;
     while (!done && i < parser.length) {
-      const c = HEX_DIGITS.get(parser.at(i++));
+      const c = HEX_DIGITS.get(parser.get(i++));
       if (c === 0) {
         frac = frac / 2;
       } else if (c === 1) {
         fracPart += frac;
         frac = frac / 2;
-      } else if (parser.at(i - 1) === 0x005f) {
+      } else if (parser.get(i - 1) === 0x005f) {
         // It's an underscore, skip it
       } else {
         done = true;
         i -= 1;
       }
     }
-    result += fracPart;
+    value += fracPart;
   }
 
   // Exponent
   parser.skipTo(i);
-  return applyExponent(parser, start, result);
+  return applyExponent(parser, start, value);
 }
 
 export function parseHexadecimalNumber(parser: Parser): Result<number> {
+  const result = new Result<number>(parser);
   const start = parser.offset;
   let i = start;
 
   // `0x` prefix
-  if (parser.at(i++) !== 0x0030 || parser.at(i++) !== 0x0078) {
-    return parser.failure();
+  if (parser.get(i++) !== 0x0030 || parser.get(i++) !== 0x0078) {
+    return result.failure();
   }
 
   // Whole part
-  let result = 0;
+  let value = 0;
   let done = false;
   while (!done && i < parser.length) {
-    const c = parser.at(i++);
+    const c = parser.get(i++);
     if (HEX_DIGITS.has(c)) {
-      result = result * 16 + HEX_DIGITS.get(c);
+      value = value * 16 + HEX_DIGITS.get(c);
     } else if (c !== 0x005f) {
       // If it's neither a digit nor a "_" separator, we're done
       done = true;
@@ -146,12 +151,12 @@ export function parseHexadecimalNumber(parser: Parser): Result<number> {
   }
 
   // Fractional part
-  if (parser.at(i++) === 0x002e) {
+  if (parser.get(i++) === 0x002e) {
     let frac = 0.0625; // 1/16
     done = false;
     let fracPart = 0;
     while (!done && i < parser.length) {
-      const c = parser.at(i++);
+      const c = parser.get(i++);
       if (HEX_DIGITS.has(c)) {
         fracPart += frac * HEX_DIGITS.get(c);
         frac = frac / 16;
@@ -160,34 +165,32 @@ export function parseHexadecimalNumber(parser: Parser): Result<number> {
         done = true;
         i -= 1;
       } else {
-        return parser.error(
-          [start, i],
-          result + fracPart,
-          'hexadecimal-number-expected'
-        );
+        parser.skipTo(i);
+        return result.error(value + fracPart, 'hexadecimal-number-expected');
       }
     }
-    result += fracPart;
+    value += fracPart;
   }
 
   // Exponent
   parser.skipTo(i);
-  return applyExponent(parser, start, result);
+  return applyExponent(parser, start, value);
 }
 
 export function parseFloatingPointNumber(parser: Parser): Result<number> {
+  const result = new Result<number>(parser);
   const start = parser.offset;
-  if (!DIGITS.has(parser.at(start))) return parser.failure();
+  if (!DIGITS.has(parser.get(start))) return result.failure();
 
   let i = start;
 
   // Whole part
-  let result = 0;
+  let value = 0;
   let done = false;
   while (!done && i < parser.length) {
-    const c = parser.at(i++);
+    const c = parser.get(i++);
     if (DIGITS.has(c)) {
-      result = result * 10 + DIGITS.get(c);
+      value = value * 10 + DIGITS.get(c);
     } else if (c !== 0x005f) {
       // If it's neither a digit nor a "_" separator, we're done
       done = true;
@@ -196,13 +199,13 @@ export function parseFloatingPointNumber(parser: Parser): Result<number> {
   }
 
   // Fractional part
-  if (parser.at(i) === 0x002e) {
+  if (parser.get(i) === 0x002e) {
     i += 1;
     let frac = 0.1; // 1/10
     done = false;
     let fracPart = 0;
     while (!done && i < parser.length) {
-      const c = parser.at(i++);
+      const c = parser.get(i++);
       if (DIGITS.has(c)) {
         fracPart += frac * DIGITS.get(c);
         frac = frac / 10;
@@ -211,19 +214,16 @@ export function parseFloatingPointNumber(parser: Parser): Result<number> {
         done = true;
         i -= 1;
       } else {
-        return parser.error(
-          [start, i],
-          result + fracPart,
-          'decimal-number-expected'
-        );
+        parser.skipTo(i);
+        return result.error(value + fracPart, 'decimal-number-expected');
       }
     }
-    result += fracPart;
+    value += fracPart;
   }
 
   // Exponent
   parser.skipTo(i);
-  return applyExponent(parser, start, result);
+  return applyExponent(parser, start, value);
 }
 
 export function parseNumber(parser: Parser): Result<number> {
@@ -232,38 +232,31 @@ export function parseNumber(parser: Parser): Result<number> {
   // then parse floating point number last.
   // Otherwise "0" is ambiguous.
   let result = parseBinaryNumber(parser);
-  if (result.kind === 'failure') result = parseHexadecimalNumber(parser);
-  if (result.kind === 'failure') result = parseFloatingPointNumber(parser);
+  if (result.isFailure) result = parseHexadecimalNumber(parser);
+  if (result.isFailure) result = parseFloatingPointNumber(parser);
 
   return result;
 }
 
 export function parseSignedNumber(parser: Parser): Result<number> {
+  const result = new Result<number>(parser);
   const start = parser.offset;
   let i = start;
   // Is it the minus sign (-)
   let sign = 1;
-  if (parser.at(i) === 0x002d) {
+  if (parser.get(i) === 0x002d) {
     i++;
     sign = -1;
-  } else if (parser.at(i) === 0x002b) {
+  } else if (parser.get(i) === 0x002b) {
     // It's the plus sign (+)
     i++;
   }
   parser.skipTo(i);
-  const result = parseNumber(parser);
 
-  if (result.kind === 'success') {
-    return parser.success([start, result.next], sign * result.value);
+  const numResult = parseNumber(parser);
+  if (numResult.isSuccess) return result.success(sign * numResult.value);
+  if (numResult.isError) {
+    return result.errorFrom(numResult, sign * numResult.value);
   }
-  if (result.kind === 'error') {
-    return parser.errors(
-      [start, result.next],
-      sign * result.value,
-      result.errors
-    );
-  }
-
-  parser.skipTo(start);
-  return parser.failure();
+  return result.failure();
 }

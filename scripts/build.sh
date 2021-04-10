@@ -67,11 +67,12 @@ if [ "$BUILD" != "production" ]; then
 fi
 
 # Bundle declaration files (.d.ts)
+printf "$BASENAME$DOT Building declaration files (.d.ts)"
 # Even though we only generate declaration file, the target must be set high-enough
 # to prevent tsc from complaining (!)
-printf "$BASENAME$DOT Building declaration files (.d.ts)"
-npx tsc --target "es2020" -d --moduleResolution "node" --emitDeclarationOnly --outDir ./dist/types ./src/public.ts 
-echo -e "$LINECLEAR$BASENAME$CHECK Declaration files built"
+npx tsc --target "es2020" -d --moduleResolution "node" \
+  --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts 
+# echo -e "$LINECLEAR$BASENAME$CHECK Declaration files built"
 
 if [ "$BUILD" = "watch" ]; then
     # Do dev build and watch

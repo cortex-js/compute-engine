@@ -14,8 +14,9 @@ sidebar:
 
 # Inside Cortex
 
-A Cortex program is an expression that gets desugared to MathJSON, compiled,
-evaluated by the Cortex Compute Engine before its result is displayed.
+A Cortex program is an expression that gets transformed into an IR (Intermediate
+Representation) expressed in MathJSON, compiled and evaluated by the Cortex
+Compute Engine.
 
 The process to convert a Cortex program into a MathJSON expression is pretty
 straightforward:

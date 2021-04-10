@@ -165,7 +165,7 @@ A MathJSON **string** is either
 - a [JSON string](https://tools.ietf.org/html/rfc7159#section-7) that starts and
   ends with **U+0027 APOSTROPHE** : **`'`**.
 
-String can contain any valid Unicode characters (codepoints in the
+Strings can contain any character represented by a Unicode scalar value (in the
 \[0...0x10FFFF\] range, except for \[0xD800...0xDFFF\]), but the following
 characters must be escaped as indicated:
 
@@ -179,7 +179,7 @@ characters must be escaped as indicated:
 - **U+0022**, Quotation mark: `\"` or `\u0022`
 
 The encoding of the string follows the encoding of the JSON payload: UTF-8,
-UTF-16, etc...
+UTF-16LE, UTF-16BE, etc...
 
 ```json
 "'Hello world'"

@@ -21,6 +21,7 @@ In the grammar below, the following notation is used:
 - An arrow (→) marks grammar productions and can be read as "can consist of"
 - Syntactic categories are written in lowercase italic (_newline_) on both sides
   of a production rule.
+- Placeholders for recursive syntactic categories are indicated by _···_.
 - Literal words and punctuation are indicated in bold (**+**) or as a Unicode
   codepoint (U+00A0) or as a Unicode codepoint range (U+2000-U+200A).
 - Alternatives are indicated by a vertical bar (|)

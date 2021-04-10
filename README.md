@@ -13,7 +13,11 @@ notation</h1>
 | `\sin^{-1}\prime(x)`       | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                    |
 
 This repo contains the description of the format and a Javascript/Typescript
-library that can be used to manipulate MathJSON expressions.
+library to:
+
+- parse Latex to MathJSON
+- serialize MathJSON to Latex
+- manipulate MathJSON expressions
 
 Reference documentation and guides at
 [cortexjs.io/math-json](https://cortexjs.io/math-json/).
@@ -21,11 +25,11 @@ Reference documentation and guides at
 ## Using MathJSON
 
 ```bash
-npm install --save @cortex-js/math-json
+$ npm install --save @cortex-js/math-json
 ```
 
 ```js
-import { parse, serialize } from 'math-json';
+import { parse, serialize } from '@cortex-js/math-json';
 
 console.log(parse('\\frac{\\pi}{2}'));
 // ➔ ["Divide", "Pi", 2]
@@ -53,8 +57,9 @@ console.log(serialize([["InverseFunction", "Sin"], "x"));
   <dd>A programming language for scientific computing</dd>  
 </dl>
 
-## Contact Us
+## Support the Project
 
+- Star the GitHub repo (it really helps)
 - Join our [Gitter community](https://gitter.im/cortex-js/community)
 - Drop a line to arno@arno.org
 

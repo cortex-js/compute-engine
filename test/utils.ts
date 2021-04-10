@@ -1,6 +1,7 @@
 import type { Expression } from '../src/public';
 import { LatexSyntax, ComputeEngine, parseCortex } from '../src/math-json';
 import { Form } from '../src/compute-engine/public';
+import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
 
 let errors: string[] = [];
 
@@ -148,18 +149,31 @@ export function strip(expr: Expression): Expression {
   return null;
 }
 
+export function formatError(errors: ParsingDiagnostic[]): Expression {
+  return [
+    'Error',
+    ...errors.map((x) => {
+      // If we have an array as the last element, it's the trace. Remove it.
+      if (
+        Array.isArray(x.message) &&
+        Array.isArray(x.message[x.message.length - 1])
+      ) {
+        return x.message.slice(0, -1);
+      }
+
+      return x.message;
+    }),
+  ];
+}
+
 export function validCortex(s: string): Expression {
   const [value, errors] = parseCortex(s);
-  if (errors && errors.length > 0) {
-    return ['Error', ...errors.map((x) => x.message)];
-  }
+  if (errors && errors.length > 0) return formatError(errors);
   return strip(value);
 }
 
 export function invalidCortex(s: string): Expression {
   const [value, errors] = parseCortex(s);
-  if (errors && errors.length > 0) {
-    return ['Error', ...errors.map((x) => x.message)];
-  }
+  if (errors && errors.length > 0) return formatError(errors);
   return ['UnexpectedSuccess', strip(value as Expression)];
 }

@@ -29,13 +29,112 @@ Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
 // -> 4x^3 + 2x^2 + 3
 
 x = 2^11 - 1
-String(x , " is a ", Domain(x))
+"\(x) is a \(Domain(x))"
 // -> "2047 is a PrimeNumber"
 ```
 
 Read more about the [formal syntax of Cortex](/cortex/syntax), the
 [implementation of Cortex](/cortex/implementation) with MathJSON or continue
 below for an informal description of the language.
+
+## Pragmas
+
+Pragmas, or compiler directives, are annotations in the source code that provide
+instructions to the parser/compiler about how to interpret the source code.
+These instructions are executed during the parsing/compilation phase, not during
+the execution phase.
+
+### Environment Variables
+
+Environment variables are defined in the execution environment of the compiler
+process when executed from a `node` process. In Unix, they are set using a
+shell-specific syntax (`export VARIABLE=value` in bash shells, for example).
+
+Environment variables are not available when the compilation/parsing is taking
+place in a browser process.
+
+To access an environment variable, use the `#env()` pragma.
+
+```cortex
+#env("DEBUG")
+```
+
+Some common environment variables include:
+
+- `NO_COLOR`: if set, color output to the terminal should be avoided
+- `TERM`: describe the capabilities of the output terminal, e.g.
+  `xterm-256color`
+- `HOME`: path to the user home directory
+- `TEMP`: path to a temporary file directory
+
+### Navigator Properties
+
+The navigator properties are available when the compilation/parsing is taking
+place in a browser process.
+
+To access the properties of the `navigator` Javascript global object use the
+`#navigator()` pragma function. It returns 'Nothing' if the property is not
+available.
+
+```cortex
+#navigator("userAgent")
+```
+
+### Compile-Time Diagnostic Statement
+
+A compile-time diagnostic statement causes the compiler to emit an error or a
+warning during compilation.
+
+To output a message to the console and immediately interrupt the
+parsing/compilation, use the `#error()` pragma function.
+
+```cortex
+#error("File cannot be compiled")
+```
+
+To output a message to the console, but continue the parsing/compilation, use
+the `#warning()` pragma function.
+
+```cortex
+#warning("TODO: Implement function")
+```
+
+### Line Control Statements
+
+The name and URL of the source file being parsed/compiled can be accessed using
+the `#sourceFile` and `#sourceUrl` pragmas. The current line is indicated by
+`#line` and column by `#column`.
+
+When generating and pre-processing code, it might be useful to indicate the
+original source code and location, rather than the current one. To change the
+source URL and line of the current file, use the `#sourceLocation()` pragma
+function.
+
+```cortex
+#sourceLocation(145, "file://localhost/~user/dev/source.ctx")
+```
+
+To number the following line to 146, use:
+
+```cortex
+#sourceLocation(145)
+```
+
+To reset the source location to the actual source and line, use
+`#sourceLocation()`.
+
+### Other Pragmas
+
+The following pragmas are replaced with the indicated value:
+
+- `#line`: the current source line number, which is either the actual source
+  line number, or as calculated based on `#sourceLocation()`. The first line is
+  line 1.
+- `#column`: the current column number. The first column is column 1.
+- `#url`: the URL of the current source file.
+- `#filename`: the filename of the current source file.
+- `#date`: the current date in the `YYYY-MM-DD` format.
+- `#time`: the current time in the `HH:MM:SS` format.
 
 ## Comments
 
@@ -88,6 +187,19 @@ character:
 
 A multiline string is delimited by `"""` (three quotation marks).
 
+````cortex
+cortex = """
+      ,ad8888ba,
+    d8"'    `"8b                             ,d
+    d8'                                       88
+    88              ,adPPYba,   8b,dPPYba,  MM88MMM   ,adPPYba,  8b,     ,d8
+    88             a8"     "8a  88P'   "Y8    88     a8P_____88   `Y8, ,8P'
+    Y8,            8b       d8  88            88     8PP"""""""     )888(
+    Y8a.    .a8P  "8a,   ,a8"  88            88,    "8b,   ,aa   ,d8" "8b,
+      `"Y8888Y"'    `"YbbdP"'   88            "Y888   `"Ybbd8"'  8P'     `Y8
+    """
+```
+
 A multiline string can contain `"` or new line characters. It can't contain an
 unescaped sequence of `"""`.
 
@@ -118,7 +230,7 @@ also omitted.This can come in handy when using a very long string.
 ```cortex
 hello = "Hello \
 World"  // Same as "Hello World"
-```
+````
 
 ```cortex
 hello2 = """
@@ -319,23 +431,42 @@ value of the literal.
 +03.14_15_92_65
 ```
 
-## Arithmetic Operations
+## Operators
 
-### `+`, `-`, `/`, `*`, `^`
+Most operators are infix operators: they have two operands, a left-hand side
+(lhs) operand and a right-hand side operand (rhs).
 
-### `<`, `<=`, `=`, `>=`, '`>`, '!='
+An infix operator can either have whitespace before and after the operator or
+have no whitespace neither before nor after the operator.
 
-### `==`, '!=='
+Infix operators have a precedence that indicate how strongly they bind to their
+operand and a left or right associativity.
 
-## Logic Operations
+A few operators are prefix operators: they only have a right-hand side. Prefix
+operators are followed immediately by their operand: they cannot be separated by
+whitespace.
 
-### `&&`, `||`, `!`, `=>`, `<=>`
+The whitespace rules are necessary to support unambiguous parsing of expressions
+spanning multiple lines without requiring a separator between expressions
+{.notice--info}
+
+### Arithmetic Operations
+
+- `+`, `-`, `/`, `*`, `^`
+- `<`, `<=`, `=`, `>=`, '`>`, '!='
+- `==`, '!=='
+
+### Logic Operations
+
+- `and`, `or`, `not`, `=>`, `<=>`
 
 ## Functions
 
-## Tuples
+## Collections
 
-## Dictionaries
+### Tuples
+
+### Dictionaries
 
 A dictionary is a collection of set of key/value pairs separated with a comma
 (`,`) and surrounded by curly brackets.
@@ -355,7 +486,7 @@ if the quotation mark is omitted the character escape sequences are not applied.
 
 The empty dictionary is `{->}`.
 
-## Lists
+### Lists
 
 A list is a collection of expressions separated with a comma `,` and surrounded
 by square brackets: `[` and `]`
@@ -370,7 +501,7 @@ and indexable with a numeric value (their order in the list, start with 0).
 
 The empty list is `[]`.
 
-## Sets
+### Sets
 
 A set is a collection of expressions surrounded by curly brackets: `{` and `}`.
 

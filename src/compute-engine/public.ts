@@ -307,7 +307,7 @@ export type CollectionDefinition = BaseDefinition & {
    */
   size?: () => number;
 
-  /** A predicate function that can be used to determine if an expression
+  /** A predicate function to determine if an expression
    * is a member of the collection or not (answers "True", "False" or "Maybe").
    */
   isElementOf?: (expr: Expression) => boolean;

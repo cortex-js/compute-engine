@@ -1,5 +1,3 @@
-// https://unicode.org/reports/tr31/#R3
-
 const LINEBREAK_CHARACTER = [
   0x000a, // LINE FEED
   0x000d, // CARRIAGE RETURN
@@ -7,7 +5,10 @@ const LINEBREAK_CHARACTER = [
   0x2029, // PARAGRAPH SEPARATOR
 ];
 
-// Pattern_White_Space is an immutable set of characters defined by Unicode
+// UNICODE IDENTIFIER AND PATTERN SYNTAX:
+// https://unicode.org/reports/tr31/#R3
+
+// Pattern_White_Space is an immutable set of characters defined by Unicode.
 // See https://www.unicode.org/Public/UCD/latest/ucd/PropList.txt and
 // http://unicode.org/L2/L2005/05012r-pattern.html
 const PATTERN_WHITE_SPACE = [
@@ -30,24 +31,24 @@ const PATTERN_WHITE_SPACE = [
 //
 // See https://dev.kwayisi.org/apps/unicode/properties/pattern-syntax/true.html
 // Unicode characters with the Pattern_Syntax property are the operators,
-// fences and other punctuations. Identifiers are characters that are not
-// Pattern_White_Space or Pattern_Syntax
-let PATTERN_SYNTAX: (number | [number, number])[] = [
+// fences and other punctuations.
+// Identifiers are characters that are not Pattern_White_Space or Pattern_Syntax
+const PATTERN_SYNTAX: (number | [number, number])[] = expand([
   [0x0021, 0x002f], // !"#$%&'()*+,-./
   [0x003a, 0x0040], // :;<=>?@
   [0x005b, 0x005e], // [\]^
-  [0x0060, 0x0060], // `
+  0x0060, // `
   [0x007b, 0x007e], // {|}~
   [0x00a1, 0x00a7], // ¡¢£¤¥¦§
-  [0x00a9, 0x00a9], // ©
+  0x00a9, // ©
   [0x00ab, 0x00ac], // «¬
-  [0x00ae, 0x00ae], // ®
+  0x00ae, // ®
   [0x00b0, 0x00b1], // °±
-  [0x00b6, 0x00b6], // ¶
-  [0x00bb, 0x00bb], // »
-  [0x00bf, 0x00bf], // ¿
-  [0x00d7, 0x00d7], // ×
-  [0x00f7, 0x00f7], // ÷
+  0x00b6, // ¶
+  0x00bb, // »
+  0x00bf, // ¿
+  0x00d7, // ×
+  0x00f7, // ÷
   [0x2010, 0x203e], // ‐‑‒–—―‖‗‘’‚‛“”„‟†‡•‣․‥…‧‪‫‬‭‮ ‰‱′″‴‵‶‷‸‹›※‼‽‾
   [0x2041, 0x2053], // ⁁⁂⁃⁄⁅⁆⁇⁈⁉⁊⁋⁌⁍⁎⁏⁐⁑⁒⁓
   [0x2190, 0x221a], // ←↑→↓↔↕↖↗↘↙↚↛↜↝↞↟↠↡↢↣↤↥↦↧↨↩↪↫↬↭↮↯↰↱↲↳↴↵↶↷↸↹↺↻↼↽↾↿⇀⇁⇂⇃⇄⇅⇆
@@ -87,17 +88,17 @@ let PATTERN_SYNTAX: (number | [number, number])[] = [
   // ⸼⸽⸾⸿⹀⹁⹂⹃⹄⹅⹆⹇⹈⹉⹊⹋⹌⹍⹎⹏⹐⹑⹒⹓⹔⹕⹖⹗⹘⹙⹚⹛⹜⹝⹞⹟⹠⹡⹢⹣⹤⹥⹦⹧⹨⹩⹪⹫⹬⹭⹮⹯⹰⹱⹲⹳⹴⹵⹶⹷⹸⹹⹺⹻⹼⹽⹾⹿
   [0x3001, 0x3003], // 、。〃
   [0x3008, 0x3020], // 〈〉《》「」『』【】〒〓〔〕〖〗〘〙〚〛〜〝〞〟〠
-  [0x3030, 0x3030], // 〰
+  0x3030, // 〰
   [0xfd3e, 0xfd3f], // ﴾﴿
   [0xfe45, 0xfe46], // ﹅﹆
-];
+]);
 
 // The following characters cannot be included in an identifier
-const IDENTIFIER_CONTINUE_PROHIBITED = Expand([
+const IDENTIFIER_CONTINUE_PROHIBITED = expand([
   [0x0000, 0x0020],
   [0x007f, 0x009f],
-  0x005c,
-  0x0060,
+  0x005c, // \
+  0x0060, // `
   [0xfffe, 0xffff],
 ]);
 
@@ -202,7 +203,7 @@ const CONFUSABLE_CHARACTERS = [
 
 // In a string or symbol all these characters are escaped to a Unicode escape
 // sequence
-let INVISIBLE_CHARS: (number | [number, number])[] = [
+const INVISIBLE_CHARS: (number | [number, number])[] = expand([
   ...WHITE_SPACE,
   ...CONFUSABLE_CHARACTERS,
   [0x0000, 0x001f], // CC1
@@ -235,7 +236,7 @@ let INVISIBLE_CHARS: (number | [number, number])[] = [
   0xfeff, // Byte Order Mark
   0xfffe, // Byte Order Mark
   0xffff, // Non-character
-];
+]);
 
 // When escaped, these characters are escaped to the specified special escape
 // sequence
@@ -491,6 +492,13 @@ export const FANCY_UNICODE = new Map<number, string>([
   [0x226a, '<<'],
   [0x226b, '>>'],
 
+  [0x25b7, '|>'], // WHITE RIGHT-POINTING TRIANGLE
+  [0x25c1, '<|'], // WHITE LEFT-POINTING TRIANGLE
+  [0x29d0, '||>'], // VERTICAL BAR BESIDE RIGHT TRIANGLE
+  [0x29cf, '<||'], // LEFT TRIANGLE BESIDE VERTICAL BAR
+  [0x21dd, '~>'], // ⇝ RIGHTWARDS SQUIGGLE ARROW
+  [0x21dc, '<~'], // ⇜ LEFTWARDS SQUIGGLE ARROW
+
   //
   // Perl/Raku support a collection of infix operators
   //
@@ -524,25 +532,26 @@ export const FANCY_UNICODE = new Map<number, string>([
   [0x240d, '\\r'], // SYMBOL FOR CARRIAGE RETURN ␍
 ]);
 
-export const REVERSE_FANCY_UNICODE = new Map<string, number[]>();
+export const REVERSE_FANCY_UNICODE = reverse(FANCY_UNICODE);
 
 /**
  * Build the reverse fancy Unicode table from the FANCY_UNICODE table
  */
-
-function BuildReverseFancyUnicode(): void {
-  for (const [k, v] of Object.entries(FANCY_UNICODE)) {
-    if (REVERSE_FANCY_UNICODE.has(v)) {
-      const ks: number[] = REVERSE_FANCY_UNICODE.get(v);
+function reverse(table: Map<number, string>): Map<string, number[]> {
+  const result = new Map<string, number[]>();
+  for (const [k, v] of Object.entries(table)) {
+    if (result.has(v)) {
+      const ks: number[] = result.get(v);
       ks.push(parseInt(k));
-      REVERSE_FANCY_UNICODE.set(v, ks);
+      result.set(v, ks);
     } else {
-      REVERSE_FANCY_UNICODE.set(v, [parseInt(k)]);
+      result.set(v, [parseInt(k)]);
     }
   }
+  return result;
 }
 
-function Expand(source: (number | [start: number, end: number])[]): number[] {
+function expand(source: (number | [start: number, end: number])[]): number[] {
   const result = [];
 
   for (const entry of source) {
@@ -562,7 +571,7 @@ export function isLinebreak(c: number): boolean {
   return LINEBREAK_CHARACTER.includes(c);
 }
 
-/** Most restrictive whitespace: tab or space */
+/** Most restrictive whitespace only TAB or SPACE */
 export function isInlineSpace(c: number): boolean {
   return c === 0x0009 || c === 0x0020;
 }
@@ -604,7 +613,3 @@ export function codePointLength(code: number): number {
   console.assert(String.fromCodePoint(code).length === (code > 0xffff ? 2 : 1));
   return code > 0xffff ? 2 : 1;
 }
-
-BuildReverseFancyUnicode();
-PATTERN_SYNTAX = Expand(PATTERN_SYNTAX);
-INVISIBLE_CHARS = Expand(INVISIBLE_CHARS);

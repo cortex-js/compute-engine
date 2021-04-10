@@ -1,28 +1,3 @@
-export type ParsingSignalCode =
-  | 'binary-number-expected'
-  | 'closing-bracket-expected' // %0 = bracket
-  | 'decimal-number-expected'
-  | 'eof-expected' // %0 = unexpected symbol
-  | 'empty-verbatim-symbol'
-  | 'end-of-comment-expected'
-  | 'exponent-expected'
-  | 'expression-expected'
-  | 'hexadecimal-number-expected'
-  | 'invalid-symbol-name' // %0 = symbol name
-  | 'invalid-escape-sequence' // &0 = escape sequence char
-  | 'invalid-unicode-codepoint-string' // %0 = codepoint string
-  | 'invalid-unicode-codepoint-value' // %0 = codepoint
-  | 'literal-expected' // %0 = literal
-  | 'multiline-string-expected'
-  | 'multiline-whitespace-expected'
-  | 'opening-bracket-expected' // %0 = bracket
-  | 'primary-expected'
-  | 'string-literal-opening-delimiter-expected'
-  | 'string-literal-closing-delimiter-expected' // %0 = delimiter
-  | 'symbol-expected'
-  | 'unbalanced-verbatim-symbol' // %0 = symbol name
-  | 'unexpected-symbol'; // %0 symbol
-
 export type RuntimeSignalCode =
   | 'timeout'
   | 'out-of-memory'
@@ -30,7 +5,6 @@ export type RuntimeSignalCode =
   | 'iteration-limit-exceeded';
 
 export type SignalCode =
-  | ParsingSignalCode
   | RuntimeSignalCode
   | (
       | 'syntax-error'
@@ -43,7 +17,7 @@ export type SignalCode =
       | 'invalid-dictionary-entry' // arg: [error]
     );
 
-export type SignalMessage = SignalCode | [SignalCode, ...(string | number)[]];
+export type SignalMessage = SignalCode | [SignalCode, ...any[]];
 
 export type SignalOrigin = {
   url?: string;
@@ -182,7 +156,7 @@ export type Attributes = {
    */
   documentation?: string;
 
-  /** A human readable string that can be used to indicate a syntax error or
+  /** A human readable string to indicate a syntax error or
    * other problem when parsing or evaluating an expression.
    */
   error?: string;

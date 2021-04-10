@@ -1,17 +1,53 @@
 // import { parseCortex } from '../src/cortex/parse-cortex';
 import { validCortex, invalidCortex } from './utils';
 
-describe.skip('CORTEX PARSING SHEBANG', () => {
+describe('CORTEX PARSING SHEBANG', () => {
   test('Valid shebang', () => {
-    expect(validCortex('#! /bin/cortex\n3.14 ')).toMatchInlineSnapshot();
+    expect(validCortex('#! /bin/cortex\n3.14 ')).toBe(3.14);
   });
   test('Invalid shebang', () => {
-    expect(invalidCortex('\n#! boo\n ')).toMatchInlineSnapshot();
+    expect(invalidCortex('\n#! boo\n ')).toMatchInlineSnapshot(
+      `['Error', ['unexpected-symbol', '#']]`
+    );
+  });
+});
+
+describe('CORTEX PARSING DIRECTIVES', () => {
+  test('Navigator directive', () => {
+    // `navigator` is not available when running in a node environment
+    expect(validCortex('#navigator("userAgent")')).toBe('Nothing');
+  });
+  test('Environment variable directive', () => {
+    expect(validCortex('#env("TERM")')).toStrictEqual({
+      str: process.env['TERM'],
+    });
+  });
+  test('Warning directive', () => {
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    validCortex('#warning("hello")');
+    expect(spy).toHaveBeenLastCalledWith('hello');
+    spy.mockRestore();
+  });
+  test('Date directive', () => {
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    validCortex('#warning(#date)');
+    const today = new Date();
+    const expecteDate =
+      today.getFullYear() +
+      '-' +
+      ('00' + (1 + today.getMonth())).slice(-2) +
+      '-' +
+      ('00' + (1 + today.getDay())).slice(-2);
+
+    expect(spy).toHaveBeenLastCalledWith(expecteDate);
+    spy.mockRestore();
   });
 });
 
 describe('CORTEX PARSING SPACES', () => {
-  test('Symbols', () => {
+  test('Whitespace', () => {
     expect(validCortex(' ')).toBe('Nothing');
     expect(validCortex(' \t ')).toBe('Nothing');
     expect(validCortex(' \t\n ')).toBe('Nothing');
@@ -55,18 +91,19 @@ describe('CORTEX PARSING COMMENTS', () => {
     ).toMatchInlineSnapshot(`['Error', ['unexpected-symbol', '+']]`);
     expect(
       validCortex(`3.14 +
-3.14 /*
+5.67 /*
  * Nested /* Comment */
  */`)
     ).toMatchInlineSnapshot(`['Error', ['unexpected-symbol', '+']]`);
   });
   test('Invalid multiline comment', () => {
     expect(
-      invalidCortex(`   /* under nested /* comment */`)
-    ).toMatchInlineSnapshot(`['Error', 'end-of-comment-expected']`);
-    expect(
       invalidCortex(`   /* over nested /* comment */ */ */`)
     ).toMatchInlineSnapshot(`['Error', ['unexpected-symbol', '*']]`);
+
+    expect(
+      invalidCortex(`   /* under nested /* comment */`)
+    ).toMatchInlineSnapshot(`['Error', 'end-of-comment-expected']`);
   });
 });
 
@@ -121,6 +158,7 @@ describe('CORTEX PARSING NUMBERS', () => {
     expect(invalidCortex('1.2.3')).toMatchInlineSnapshot(
       `['Error', ['unexpected-symbol', '.']]`
     );
+    // @todo: revisit
     expect(invalidCortex('2et')).toMatchInlineSnapshot(
       `['UnexpectedSuccess', '2et']`
     );
@@ -185,7 +223,7 @@ describe('CORTEX PARSING SYMBOLS', () => {
     // Symbol must fit on a line
     expect(invalidCortex('`abc\nd`')).toMatchInlineSnapshot(`
       ['Error', ['unbalanced-verbatim-symbol', 'abc
-      '], ['unbalanced-verbatim-symbol', '']]
+      '], ['unexpected-symbol', 'd']]
     `);
     expect(invalidCortex('``')).toMatchInlineSnapshot(
       `['Error', 'empty-verbatim-symbol']`
@@ -288,6 +326,10 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
   });
 
   test('Invalid string', () => {
+    expect(invalidCortex('"invalid \\x escape "')).toMatchInlineSnapshot(
+      `['Error', ['invalid-escape-sequence', '\\x']]`
+    );
+
     expect(invalidCortex('end"')).toMatchInlineSnapshot(
       `['Error', ['string-literal-opening-delimiter-expected', '"']]`
     );
@@ -295,7 +337,7 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
       `['Error', ['string-literal-opening-delimiter-expected', '"']]`
     );
     expect(invalidCortex('"start\nend"')).toMatchInlineSnapshot(
-      `['Error', ['string-literal-closing-delimiter-expected', '"'], ['string-literal-opening-delimiter-expected', '"']]`
+      `['Error', ['string-literal-closing-delimiter-expected', '"'], ['unexpected-symbol', 'e']]`
     );
     expect(invalidCortex('"start')).toMatchInlineSnapshot(
       `['Error', ['string-literal-closing-delimiter-expected', '"']]`
@@ -330,7 +372,7 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
       `['Error', ['closing-bracket-expected', ')']]`
     );
     expect(invalidCortex('"start \\(end"')).toMatchInlineSnapshot(
-      `['Error', ['closing-bracket-expected', ')'], ['string-literal-closing-delimiter-expected', '"']]`
+      `['Error', ['closing-bracket-expected', ')']]`
     );
     expect(invalidCortex('"start \\( end"')).toMatchInlineSnapshot(
       `['Error', ['closing-bracket-expected', ')']]`
@@ -365,11 +407,9 @@ describe('CORTEX PARSING MULTILINE STRINGS', () => {
     });
   });
   test('Invalid string', () => {
-    expect(invalidCortex('"""boo\nhello\nworld\n"""')).toStrictEqual([
-      'Error',
-      'multiline-string-expected',
-      'multiline-string-expected',
-    ]);
+    expect(invalidCortex('"""abc\nhello\nworld\n"""')).toMatchInlineSnapshot(
+      `['Error', 'multiline-string-expected', ['unexpected-symbol', 'a']]`
+    );
 
     expect(invalidCortex('"""\nhello\nworld\n boo  """')).toStrictEqual([
       'Error',
@@ -474,34 +514,52 @@ describe.skip('CORTEX PARSING COLLECTIONS', () => {
 
 describe.skip('CORTEX PARSING OPERATORS', () => {
   test('Unary Operators', () => {
-    expect(validCortex('-x')).toMatchInlineSnapshot();
-    expect(validCortex('-(2+1)')).toMatchInlineSnapshot();
-    expect(validCortex('+(2+1)')).toMatchInlineSnapshot();
+    expect(validCortex('-x')).toStrictEqual(['Negate', 'x']);
+    // expect(validCortex('-(2+1)')).toMatchInlineSnapshot();
+    // expect(validCortex('+(2+1)')).toMatchInlineSnapshot();
+    expect(validCortex('!a')).toStrictEqual(['Not', 'a']);
+    expect(validCortex('!!a')).toMatchInlineSnapshot(`['Not', ['Not', 'a']]`);
   });
-  test('Arithmetic Operators', () => {
-    expect(validCortex('2 * x')).toMatchInlineSnapshot();
-    expect(validCortex('-1 + -2')).toMatchInlineSnapshot();
-    expect(validCortex('-1 * -2')).toMatchInlineSnapshot();
-    expect(validCortex('-x * -y')).toMatchInlineSnapshot();
-    expect(validCortex('(x + 1) * (x - 1)')).toMatchInlineSnapshot();
-    expect(validCortex('1 + (2 + 3)')).toMatchInlineSnapshot();
-    expect(validCortex('2 * (2 + 3)')).toMatchInlineSnapshot();
-    expect(validCortex('2 (2 + 3)')).toMatchInlineSnapshot();
-    expect(validCortex('x * -1 + x * 2')).toMatchInlineSnapshot();
-    expect(validCortex('-x - -1')).toMatchInlineSnapshot();
-    expect(validCortex('x * y + a * b')).toMatchInlineSnapshot();
-    expect(validCortex('(x + y) * (a + b)')).toMatchInlineSnapshot();
-    expect(validCortex('x * y * a * b')).toMatchInlineSnapshot();
+  test('Invalid unary Operators', () => {
+    // Must not have whitespace before term
+    expect(invalidCortex('- x')).toMatchInlineSnapshot(
+      `['Error', ['unexpected-symbol', '-']]`
+    );
   });
-  test('Logic Operators', () => {
+  test.skip('Arithmetic Operators', () => {
+    expect(validCortex('2 * x')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('2*x')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('-1 + -2')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('-1 * -2')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('-x * -y')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('(x + 1) * (x - 1)')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('1 + (2 + 3)')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('2 * (2 + 3)')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('2 (2 + 3)')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('x * -1 + x * 2')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('-x - -1')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('x * y + a * b')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('(x + y) * (a + b)')).toMatchInlineSnapshot(`'Nothing'`);
+    expect(validCortex('x * y * a * b')).toMatchInlineSnapshot(`'Nothing'`);
+  });
+  test.skip('Invalid Arithmetic Operators', () => {
+    // Must have whitespace on both sides, or no whitespace
+    expect(invalidCortex('2 *x')).toMatchInlineSnapshot();
+    expect(invalidCortex('2* x')).toMatchInlineSnapshot();
+    expect(invalidCortex('-1+-2')).toMatchInlineSnapshot();
+    expect(invalidCortex('-1+-2')).toMatchInlineSnapshot();
+  });
+  test.skip('Logic Operators', () => {
     expect(validCortex('x && y && (a || b)')).toMatchInlineSnapshot();
+    expect(validCortex('x && !y || !(a&&b)')).toMatchInlineSnapshot();
+    expect(validCortex('x && !y || !a&&b')).toMatchInlineSnapshot();
   });
-  test('Relational Operators', () => {
+  test.skip('Relational Operators', () => {
     expect(validCortex('x * y == a + b')).toMatchInlineSnapshot();
     expect(validCortex('0 > -1')).toMatchInlineSnapshot();
     expect(validCortex('0 >= -1')).toMatchInlineSnapshot();
   });
-  test('Invisible Operators', () => {
+  test.skip('Invisible Operators', () => {
     expect(validCortex('2x')).toMatchInlineSnapshot();
     expect(validCortex('x(2+1)')).toMatchInlineSnapshot();
     expect(validCortex('2(2+1)')).toMatchInlineSnapshot();
@@ -509,7 +567,7 @@ describe.skip('CORTEX PARSING OPERATORS', () => {
     expect(validCortex('2 1/2')).toMatchInlineSnapshot();
     expect(validCortex('x 1/2')).toMatchInlineSnapshot();
   });
-  test('Power', () => {
+  test.skip('Power', () => {
     expect(validCortex('x^2')).toMatchInlineSnapshot();
     expect(validCortex('x^1/2')).toMatchInlineSnapshot();
     expect(validCortex('x ^ 1 / 2')).toMatchInlineSnapshot();

@@ -13,12 +13,6 @@ const PRODUCTION = process.env.BUILD === 'production';
 const BUILD_DIR = 'dist/';
 const SDK_VERSION = pkg.version || 'v?.?.?';
 
-// const BUILD_ID =
-//     Date.now()
-//         .toString(36)
-//         .slice(-2) + Math.floor(Math.random() * 0x186a0).toString(36);
-// Use replace-in-file to replace BUILD_ID in source code
-
 const TYPESCRIPT_OPTIONS = {
   clean: PRODUCTION,
   tsconfigOverride: {
@@ -134,10 +128,11 @@ const ROLLUP = [
   {
     input: 'src/math-json.ts',
     output: {
-      file: BUILD_DIR + 'cortex.js',
-      format: 'es',
+      file: BUILD_DIR + 'math-json.js',
+      format: 'umd',
       sourcemap: !PRODUCTION,
       exports: 'named',
+      name: 'MathJson', // Required for UMD
     },
     plugins: [
       buildProgress(),
@@ -160,10 +155,11 @@ if (PRODUCTION) {
   ROLLUP.push({
     input: 'src/math-json.ts',
     output: {
-      file: BUILD_DIR + 'cortex.min.js',
-      format: 'es',
+      file: BUILD_DIR + 'math-json.min.js',
+      format: 'umd',
       sourcemap: false,
       exports: 'named',
+      name: 'MathJson', // Required for UMD
     },
     plugins: [
       buildProgress(),
@@ -175,11 +171,6 @@ if (PRODUCTION) {
       typescript(TYPESCRIPT_OPTIONS),
       terser(TERSER_OPTIONS),
     ],
-    watch: {
-      clearScreen: true,
-      exclude: 'node_modules/**',
-      include: ['src/**'],
-    },
   });
 }
 

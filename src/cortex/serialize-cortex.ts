@@ -25,7 +25,7 @@ import {
   ESCAPED_CHARS,
   isBreak,
   isInvisible,
-} from '../combinator-parser/characters';
+} from '../point-free-parser/characters';
 import { RESERVED_WORDS } from './reserved-words';
 
 export const NUMBER_FORMATTING_OPTIONS: Required<NumberFormattingOptions> = {

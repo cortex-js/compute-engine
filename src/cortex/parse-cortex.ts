@@ -1,28 +1,55 @@
-import { Expression, Signal } from '../public';
+import { Expression } from '../public';
 import { Origin } from '../common/debug';
-import { Parser, Result, Success, Error } from '../combinator-parser/parsers';
 import {
-  alt,
+  FatalParsingError,
+  Parser,
+  ParsingDiagnostic,
+  Result,
+} from '../point-free-parser/parsers';
+import {
+  either,
   eof,
+  literal,
   maybe,
   must,
   parseString,
   sequence,
-} from '../combinator-parser/core-combinators';
-import { some } from '../combinator-parser/combinators';
-import { parseSignedNumber } from '../combinator-parser/numeric-parsers';
-import { parseIdentifier } from '../combinator-parser/identifier-parsers';
+  some,
+} from '../point-free-parser/core-combinators';
+import {
+  between,
+  manySeparatedBetween,
+  operatorSequence,
+} from '../point-free-parser/combinators';
+import { parseSignedNumber } from '../point-free-parser/numeric-parsers';
+import { parseIdentifier } from '../point-free-parser/identifier-parsers';
 import {
   parseExtendedString,
   parseMultilineString,
   parseSingleLineString,
-} from '../combinator-parser/string-parsers';
-import { Grammar } from '../combinator-parser/grammar';
-import { parseShebang } from '../combinator-parser/whitespace-parsers';
-import { isStringObject } from '../common/utils';
+} from '../point-free-parser/string-parsers';
+import { Grammar } from '../point-free-parser/grammar';
+// import { parseShebang } from '../fixed-point-parser/whitespace-parsers';
+import {
+  getArg,
+  getNumberValue,
+  getStringValue,
+  isStringObject,
+  mapArgs,
+} from '../common/utils';
+import { parseWhitespace } from '../point-free-parser/whitespace-parsers';
 
 // eslint-disable-next-line prefer-const
 const grammar = new Grammar<Expression>();
+
+// For debugging purposes, output an expression as a string
+function expressionToString(expr: Expression): string {
+  const strValue = getStringValue(expr);
+  if (strValue !== null) return strValue;
+  const numValue = getNumberValue(expr);
+  if (numValue !== null) return Number(numValue).toString();
+  return expr.toString();
+}
 
 const JSON_ESCAPE_CHARS = {
   0x00: '\\u0000',
@@ -77,7 +104,7 @@ function exprOrigin(
   expr: Expression,
   offsets: [number, number] | Result
 ): Expression {
-  if (!Array.isArray(offsets)) offsets = [offsets.start, offsets.next];
+  if (!Array.isArray(offsets)) offsets = offsets.range;
   if (Array.isArray(expr)) return { fn: expr, sourceOffsets: offsets };
 
   if (typeof expr === 'object') return { ...expr, sourceOffsets: offsets };
@@ -96,162 +123,182 @@ function exprOrigin(
 }
 
 grammar.rule(
-  'quoted-text-item',
-  'U+0000-U+0009 U+000B-U+000C U+000E-U+0021 U+0023-U+2027 U+202A-U+D7FF | U+E000-U+10FFFF'
-);
-
-grammar.rule('linebreak', '(U+000A \\[U+000D\\]) | U+000D | U+2028 | U+2029');
-
-grammar.rule('unicode-char', '_quoted-text-item_ | _linebreak_ | U+0022');
-
-grammar.rule(
-  'pattern-syntax',
-  'U+0021-U+002F | U+003A-U+0040 | U+005b-U+005E | U+0060 | U+007b-U+007e | U+00A1-U+00A7 | U+00A9 | U+00AB-U+00AC | U+00AE | U+00B0-U+00B1 | U+00B6 | U+00BB | U+00BF | U+00D7 | U+00F7 | U+2010-U+203E | U+2041-U+2053 | U+2190-U+2775 | U+2794-U+27EF | U+3001-U+3003 | U+3008-U+3020 | U+3030 | U+FD3E | U+FD3F | U+FE45 | U+FE46'
-);
-
-grammar.rule('inline-space', 'U+0009 | U+0020');
-
-grammar.rule(
-  'pattern-whitespace',
-  '_inline-space_ | U+000A | U+000B | U+000C | U+000D | U+0085 | U+200E | U+200F | U+2028 | U+2029'
-);
-
-grammar.rule(
   'whitespace',
-  '_pattern-whitespace_ | U+0000 | U+00A0 | U+1680 | U+180E | U+2000-U+200A | U+202f | U+205f | U+3000'
+  (parser: Parser): Result<boolean> => parseWhitespace(parser)
 );
-
-grammar.rule('line-comment', '**`//`** (_unicode-char_)* _linebreak_)');
+grammar.rule('pragma', either(['pragma-symbol', 'pragma-function']));
 
 grammar.rule(
-  'block-comment',
-  '**`/*`** (((_unicode-char_)\\* _linebreak_)) | _block-comment_) **`*/`**'
+  'pragma-symbol',
+  either(
+    [
+      literal('#line'),
+      literal('#column'),
+      literal('#filename'),
+      literal('#url'),
+      literal('#date'),
+      literal('#time'),
+    ],
+    (fn: Result<string>): Expression => {
+      if (fn.value === '#date') {
+        const today = new Date();
+        return (
+          today.getFullYear() +
+          '-' +
+          ('00' + (1 + today.getMonth())).slice(-2) +
+          '-' +
+          ('00' + (1 + today.getDay())).slice(-2)
+        );
+      }
+      if (fn.value === '#time') {
+        const today = new Date();
+        return (
+          ('00' + today.getHours().toString()).slice(-2) +
+          ':' +
+          ('00' + today.getMinutes().toString()).slice(-2) +
+          ':' +
+          ('00' + today.getSeconds().toString()).slice(-2)
+        );
+      }
+      if (fn.value === '#url') {
+        return fn.parser.url ?? 'Nothing';
+      }
+      if (fn.value === '#filename') {
+        if (!fn.parser.url) return 'Nothing';
+        return fn.parser.url.substring(fn.parser.url.lastIndexOf('/') + 1);
+      }
+      if (fn.value === '#line') {
+        const origin = new Origin(fn.parser.source, fn.parser.url);
+        return origin.getLinecol(fn.parser.offset)[0];
+      }
+      if (fn.value === '#column') {
+        const origin = new Origin(fn.parser.source, fn.parser.url);
+        return origin.getLinecol(fn.parser.offset)[1];
+      }
+      // @todo: #time, #line, etc...
+      return 'Nothing';
+    }
+  )
 );
-
-grammar.rule('digit', 'U+0030-U+0039 | U+FF10-U+FF19');
 
 grammar.rule(
-  'hex-digit',
-  '_digit_ | U+0041-U+0046 | U+0061-U+0066 | U+FF21-FF26 | U+FF41-U+FF46'
+  'pragma-function',
+  sequence(
+    [
+      either([
+        literal('#warning'),
+        literal('#error'),
+        literal('#env'),
+        literal('#navigator'),
+      ]),
+      'function-call-argument-clause',
+    ],
+    (fn: Result<string>, args: Result<Expression>): Expression => {
+      if (fn.value === '#warning') {
+        const message = mapArgs<string>(args.value, (x) =>
+          expressionToString(x)
+        ).join(' ');
+        console.log(message);
+        return { str: message };
+      } else if (fn.value === '#error') {
+        const message = mapArgs<string>(args.value, (x) =>
+          expressionToString(x)
+        ).join(' ');
+        console.error(message);
+        throw new FatalParsingError(message);
+      } else if (fn.value === '#env') {
+        if ('process' in globalThis && process.env) {
+          return {
+            str: process.env[expressionToString(getArg(args.value, 1))],
+          };
+        }
+      } else if (fn.value === '#navigator') {
+        // eslint-disable-next-line no-restricted-globals
+        if ('navigator' in globalThis) {
+          // eslint-disable-next-line no-restricted-globals
+          return { str: navigator[expressionToString(getArg(args.value, 1))] };
+        }
+      }
+      return 'Nothing';
+    }
+  )
 );
-
-grammar.rule('binary-digit', 'U+0030 | U+0031 | U+FF10 | U+FF11');
 
 grammar.rule(
-  'numerical-constant',
-  '**`NaN`** | **`Infinity`** | **`+Infinity`** | **`-Infinity`**'
-);
-
-grammar.rule('base-10-exponent', '(**`e`** | **`E`**) \\[_sign_\\](_digit_)+');
-grammar.rule('base-2-exponent', '(**`p`** | **`P`**) \\[_sign_\\](_digit_)+');
-
-grammar.rule(
-  'binary-number',
-  '**`0b`** (_binary-digit_)+ \\[**`.`** (_binary-digit_)+ \\]\\[_exponent_\\]'
-);
-
-grammar.rule(
-  'hexadecimal-number',
-  '**`0x`** (_hex-digit_)+ \\[**`.`** (_hex-digit_)+ \\]\\[_exponent_\\]'
+  'function-call-argument-clause',
+  manySeparatedBetween(
+    '(',
+    'expression',
+    ',',
+    ')',
+    (values: Result<Expression>[]): Expression => {
+      return ['List', ...values.map((x) => x.value)];
+    }
+  )
 );
 
 grammar.rule(
-  'decimal-number',
-  '(_digit_)+ \\[**`.`** (_digit_)+ \\]\\[_exponent_\\]'
+  'signed-number',
+  '_numerical-constant_ | (\\[_sign_\\] (_binary-number_ | _hexadecimal-number_ | _decimal-number_)'
 );
 
-grammar.rule('sign', '**`+`** | **`-`**');
-
-const signedNumber = grammar.rule('signed-number', [
-  '_numerical-constant_ | (\\[_sign_\\] (_binary-number_ | _hexadecimal-number_ | _decimal-number_)',
+grammar.rule(
+  'signed-number',
   (parser: Parser): Result<Expression> => {
+    const result = new Result<Expression>(parser);
     let litResult = parseString(parser, 'NaN');
-    if (litResult.kind === 'failure') {
-      litResult = parseString(parser, 'Infinity');
-    }
-    if (litResult.kind === 'failure') {
-      litResult = parseString(parser, '+Infinity');
-    }
-    if (litResult.kind === 'failure') {
-      litResult = parseString(parser, '-Infinity');
-    }
-    if (litResult.kind === 'success') {
-      return parser.success<Expression>(
-        [litResult.start, litResult.next],
-        exprOrigin({ num: litResult.value }, litResult)
-      );
+    if (litResult.isFailure) litResult = parseString(parser, 'Infinity');
+    if (litResult.isFailure) litResult = parseString(parser, '+Infinity');
+    if (litResult.isFailure) litResult = parseString(parser, '-Infinity');
+
+    if (litResult.isSuccess) {
+      return result.success(exprOrigin({ num: litResult.value }, litResult));
     }
 
     const numResult = parseSignedNumber(parser);
-    if (numResult.kind === 'success') {
+    if (numResult.isSuccess) {
       // Return a number expression
       // @todo: we could return a BaseForm() for hexadecimal and decimal
-      return parser.success<Expression>(
-        [numResult.start, numResult.next],
-        exprOrigin(numResult.value, numResult)
-      );
+      return result.success(exprOrigin(numResult.value, numResult));
     }
     return numResult;
-  },
-]);
+  }
+);
 
 grammar.rule('symbol', '_verbatim-symbol_ | _inline-symbol_');
+
 grammar.rule(
-  'verbatim-symbol',
-  '**``` ` ```** (_escape-sequence_ | _symbol_start_) (_escape-sequence_ | _symbol_continue_)* **``` ` ```**'
-);
-grammar.rule('inline-symbol', '_symbol-start_ (_symbol_continue_)*');
-
-const symbol = grammar.rule('symbol', [
-  '_verbatim-symbol_ | _inline-symbol_',
+  'symbol',
   (parser: Parser): Result<Expression> => {
-    const result = parseIdentifier(parser);
-    if (result.kind !== 'success' && result.kind !== 'error') return result;
-    const value = exprOrigin(result.value, result);
-    if (result.kind === 'success') {
-      return parser.success([result.start, result.next], value);
+    const result = new Result<Expression>(parser);
+    const res = parseIdentifier(parser);
+    result.copyDiagnostics(res);
+    result.end = res.end;
+    if (res.isSuccess || res.isError) {
+      result.success(exprOrigin(res.value, res));
     }
-    return parser.errors([result.start, result.next], value, result.errors);
-  },
-]);
+    return result;
+  }
+);
 
-grammar.rule('escape-expression', '**`\\(`** _expression_ **`)`**');
 grammar.rule(
-  'single-line-string',
-  '**`"`** (_escape-sequence_ | _escape-expression_ | _quoted-text-item_)* **`"`**'
+  'string',
+  '_single-line-string_ | _multiline-string_ | _extended-string_'
 );
-grammar.rule('multiline-string', '**`"""`** _multiline-string-line_ **`"""`**');
-grammar.rule('extended-string', '');
-
-const string = grammar.rule('string', [
-  '_single-line-string_ | _multiline-string_ | _extended-string_',
+grammar.rule(
+  'string',
   (parser: Parser): Result<Expression> => {
-    let result:
-      | Result<string>
-      | Result<(string | Expression)[]> = parseSingleLineString<Expression>(
-      parser,
-      expression[1]
-    );
-    if (result.kind === 'failure') {
-      result = parseMultilineString(parser, expression[1]);
-    }
-    if (result.kind === 'failure') {
+    let result: Result<any> = parseSingleLineString(parser, 'expression');
+    if (result.isFailure) result = parseMultilineString(parser, 'expression');
+
+    if (result.isFailure) {
       result = parseExtendedString(parser);
-      if (result.kind === 'success') {
-        return parser.success(
-          [result.start, result.next],
-          exprOrigin({ str: result.value }, result)
-        );
-      } else if (result.kind === 'error') {
-        return parser.errors(
-          [result.start, result.next],
-          exprOrigin({ str: result.value }, result),
-          [...result.errors]
-        );
+      if (result.isSuccess) {
+        return result.success(exprOrigin({ str: result.value }, result));
       }
     }
 
-    if (result.kind !== 'success' && result.kind !== 'error') return result;
+    if (result.isFailure || result.isEmpty) return result;
 
     const values = [];
     let previousString: string | undefined;
@@ -287,90 +334,143 @@ const string = grammar.rule('string', [
         result
       );
     }
-
-    if (result.kind === 'success') {
-      return parser.success([result.start, result.next], value);
-    }
-    return parser.errors([result.start, result.next], value, result.errors);
-  },
-]);
-
-const primary = grammar.rule(
-  'primary',
-  alt<Expression>([signedNumber, symbol, string])
+    result.value = value;
+    return result;
+  }
 );
 
-const expression = grammar.rule('expression', primary);
+grammar.rule(
+  'primary',
+  either([
+    'pragma',
+    'signed-number',
+    'symbol',
+    'string',
+    'parenthesized-expression',
+  ])
+);
 
-const shebang = grammar.rule('shebang', [
-  '**`#!`** (unicode-char)* (_linebreak | _eof_)',
-  parseShebang,
-]);
+grammar.rule(
+  'expression',
+  operatorSequence<Expression, string>(
+    [
+      ['NotMemberOf', '!in', 160],
+      ['MemberOf', 'in', 240],
+      ['LessEqual', '<=', 241],
+      ['GreaterEqual', '>=', 242],
+      ['Less', '<', 245],
+      ['Greater', '>', 245],
+      ['NotEqual', '!=', 255],
+      ['Assign', '=', 258],
+      ['Equal', '==', 260],
+      ['Same', '===', 260],
+      ['KeyValue', '->', 265],
+      ['Add', '+', 275],
+      ['Subtract', '-', 275],
+      ['Multiply', '*', 390],
+      ['Divide', '/', 660],
+      ['Negate', '-', 665, 'prefix'],
+      ['Power', '^', 720, 'left'],
+      // ['Subscript', '_', 720, 'left'],
+      ['Pipe', '|>', 790],
+      ['BackPipe', '~>', 790],
+      ['Or', '||', 800],
+      ['And', '&&', 810],
+      ['Not', '!', 820, 'prefix'],
+    ],
+    'primary',
+    (op: string, lhs: Expression, rhs: Expression): Expression => {
+      if (!lhs && rhs) {
+        if (op === 'Negate') {
+          const val = getNumberValue(rhs);
+          if (val !== null && !Number.isNaN(val)) {
+            return { num: Number(-val).toString() };
+          }
+        }
+        return { fn: [op, rhs] };
+      }
+      return lhs;
+    }
+  )
+);
 
-// Define the top-level rule for the grammar
+grammar.rule('parenthesized-expression', between('(', 'expression', ')'));
+
+// Top-level rule for the Cortex grammar
 grammar.rule(
   'cortex',
   must(
     sequence(
       [
-        maybe(shebang),
+        maybe('shebang'),
         some(
-          expression,
-          (...results: (Success<Expression> | Error<Expression>)[]) => {
-            console.assert(results && results.length > 0);
-            if (results.length === 1) return results[0].value;
+          'expression',
+          (...expressions: Result<Expression>[]): Expression => {
+            console.assert(expressions && expressions.length > 0);
+            const exprs = expressions.filter((x) => !x.isEmpty && !x.isFailure);
+            if (exprs.length === 0) {
+              return exprOrigin('Nothing', expressions[0]);
+            }
+            if (exprs.length === 1) {
+              return exprOrigin(exprs[0].value ?? 'Nothing', exprs[0]);
+            }
 
             return exprOrigin(
-              ['Do', ...results.map((x) => x.value)],
-              [results[0].start, results[results.length - 1].next]
+              ['Do', ...exprs.map((x) => x.value)],
+              [exprs[0].start, exprs[exprs.length - 1].end]
             );
           }
         ),
-        eof('unexpected-symbol'),
+        must(eof()),
       ],
-      (result: Success<Expression> | Error<Expression>): Expression =>
-        exprOrigin(result.value ?? 'Nothing', result)
+      (
+        _shebang: Result<boolean>,
+        expr: Result<Expression>,
+        _eof: Result<boolean>
+      ): Expression => exprOrigin(expr.value ?? 'Nothing', expr)
     )
   )
 );
 
 /** Analyze the reported errors and combine them when possible */
-export function analyzeErrors(errors: Signal[]): Signal[] {
-  const result: Signal[] = [...errors];
+export function analyzeErrors(
+  errors: ParsingDiagnostic[]
+): ParsingDiagnostic[] {
+  const result: ParsingDiagnostic[] = [...errors];
   // @todo: could combine a 'string-literal-closing-delimiter-expected'
   // followed by a 'string-literal-opening-delimiter-expected'
   return result;
 }
 
-export function parseCortex(source: string): [Expression, Signal[]] {
-  const result = grammar.parse(source, 'cortex');
+export function parseCortex(
+  source: string,
+  url?: string
+): [Expression, ParsingDiagnostic[]] {
+  const result = grammar.parse('cortex', source, url);
 
   // Yay!
-  if (result.kind === 'success') return [result.value, []];
+  if (result.isSuccess) return [result.value, []];
 
   // Uh-oh.
   const origin = new Origin(source);
-  if (result.kind === 'error') {
+  if (result.isError) {
     // Something went wrong: 1 or more syntax errors
     return [
       result.value,
-      analyzeErrors(result.errors).map((x) => {
+      analyzeErrors(result.diagnostics).map((x) => {
         return {
           ...x,
           // Convert from offset to line/col
-          origin: origin.signalOrigin(x.origin.offset),
+          origin: origin.signalOrigin(x.range[2] ?? x.range[1]),
         };
       }),
     ];
   }
   // Should not happen
-  if (result.kind === 'ignore') return ['Nothing', []];
+  if (result.isEmpty) return ['Nothing', []];
 
-  if (result.kind === 'failure') {
+  if (result.isFailure) {
     // Should not happen (should get an error instead)
-    return [
-      'False',
-      [{ ...result.error, origin: origin.signalOrigin(result.next) }],
-    ];
+    return ['Nothing', []];
   }
 }
