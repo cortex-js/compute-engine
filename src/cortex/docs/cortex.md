@@ -8,7 +8,7 @@ sidebar:
 ---
 
 <script type='module'>
-    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.mjs';
+    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
     renderMathInDocument();
 </script>
 
