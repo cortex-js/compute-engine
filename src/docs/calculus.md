@@ -8,7 +8,14 @@ sidebar:
 ---
 <script type='module'>
     import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument();
+    renderMathInDocument({ 
+      renderAccessibleContent: false,
+      TeX: { 
+        delimiters: { display: [ ['$$', '$$'] ] },
+        processEnvironments : false 
+      },
+      asciiMath: null,
+    });
 </script>
 
 # Calculus
