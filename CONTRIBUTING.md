@@ -1,6 +1,6 @@
 # Contributing to the Project
 
-There are many ways you can get involved with the project. Contributing to an open source project is fun and rewarding.
+There are many ways to get involved with the project. Contributing to an open source project is fun and rewarding.
 
 ## Funding
 
