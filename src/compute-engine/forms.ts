@@ -28,10 +28,12 @@ import {
   NOTHING,
   SEQUENCE,
   SEQUENCE2,
+  MISSING,
 } from '../common/utils';
 import { canonicalOrder } from './order';
 
-function ungroup(expr: Expression): Expression {
+function ungroup(expr: Expression | null): Expression | null {
+  if (expr === null) return null;
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head === PARENTHESES && getArgCount(expr) === 1) {
@@ -49,16 +51,24 @@ function applyInvert(expr: Expression | null): Expression | null {
   if (expr === null) return null;
   expr = ungroup(expr);
   const head = getFunctionHead(expr);
-  if (head === POWER && getArgCount(expr) === 2) {
-    return [POWER, getArg(expr, 1), applyNegate(getArg(expr, 2))];
+  if (head === POWER && getArgCount(expr!) === 2) {
+    return [
+      POWER,
+      getArg(expr, 1) ?? NOTHING,
+      applyNegate(getArg(expr, 2)) ?? NOTHING,
+    ];
   }
-  if (head === DIVIDE && getArgCount(expr) === 2) {
-    return [MULTIPLY, [POWER, getArg(expr, 1), -1], getArg(expr, 2)];
+  if (head === DIVIDE && getArgCount(expr!) === 2) {
+    return [
+      MULTIPLY,
+      [POWER, getArg(expr, 1) ?? NOTHING, -1],
+      getArg(expr, 2) ?? NOTHING,
+    ];
   }
-  return [POWER, expr, -1];
+  return [POWER, expr!, -1];
 }
 
-export function applyNegate(expr: Expression): Expression {
+export function applyNegate(expr: Expression | null): Expression | null {
   if (expr === null) return expr;
   expr = ungroup(expr);
   if (typeof expr === 'number') {
@@ -72,11 +82,11 @@ export function applyNegate(expr: Expression): Expression {
   } else {
     // [NEGATE, [NEGATE, x]] -> x
     const name = getFunctionName(expr);
-    const argCount = getArgCount(expr);
+    const argCount = getArgCount(expr!);
     if (name === NEGATE && argCount === 1) {
       return getArg(expr, 1);
     } else if (name === MULTIPLY) {
-      let arg = getArg(expr, 1);
+      let arg = getArg(expr, 1) ?? MISSING;
       if (typeof arg === 'number') {
         arg = -arg;
       } else if (isNumberObject(arg)) {
@@ -93,7 +103,7 @@ export function applyNegate(expr: Expression): Expression {
       return applyNegate(getArg(getArg(expr, 1), 1));
     }
 
-    expr = [NEGATE, expr];
+    expr = [NEGATE, expr ?? MISSING];
   }
   return expr;
 }
@@ -170,7 +180,7 @@ function canonicalAddForm(
   expr = flatten(ungroup(expr), ADD);
   let args = getTail(expr);
   args = args
-    .map((x) => canonicalAddForm(x, engine))
+    .map((x) => canonicalAddForm(x, engine) ?? MISSING)
     .filter((x) => getNumberValue(x) !== 0);
   const argCount = args.length;
   if (argCount === 0) return 0;
@@ -182,6 +192,7 @@ function canonicalDivideForm(
   expr: Expression | null,
   engine: ComputeEngine
 ): Expression | null {
+  if (expr === null) return null;
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== DIVIDE) {
@@ -194,13 +205,14 @@ function canonicalDivideForm(
   const arg2 = canonicalDivideForm(getArg(expr, 2), engine);
   if (getNumberValue(arg2) === 1) return arg1;
   if (getNumberValue(arg1) === 1) return applyInvert(arg2);
-  return [MULTIPLY, arg1, applyInvert(arg2)];
+  return [MULTIPLY, arg1 ?? MISSING, applyInvert(arg2) ?? MISSING];
 }
 
 function canonicalExpForm(
   expr: Expression | null,
   engine: ComputeEngine
 ): Expression | null {
+  if (expr === null) return null;
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== EXP) {
@@ -209,13 +221,18 @@ function canonicalExpForm(
 
   if (getArgCount(expr) !== 1) return expr;
 
-  return [POWER, EXPONENTIAL_E, canonicalExpForm(getArg(expr, 1), engine)];
+  return [
+    POWER,
+    EXPONENTIAL_E,
+    canonicalExpForm(getArg(expr, 1), engine) ?? MISSING,
+  ];
 }
 
 function canonicalListForm(
   expr: Expression | null,
   engine: ComputeEngine
 ): Expression | null {
+  if (expr === null) return null;
   if (isAtomic(expr)) return expr;
 
   const rootName = getFunctionName(expr);
@@ -229,7 +246,7 @@ function canonicalListForm(
 
   if (isList) {
     for (let arg of args) {
-      arg = canonicalListForm(arg, engine);
+      arg = canonicalListForm(arg, engine)!;
       const name = getFunctionName(arg);
       if (name === IDENTITY) {
         const newArg = getArg(arg, 1);
@@ -247,7 +264,7 @@ function canonicalListForm(
   const sequenceHold = def?.sequenceHold ?? false;
 
   for (let arg of args) {
-    arg = canonicalListForm(arg, engine);
+    arg = canonicalListForm(arg, engine)!;
     const name = getFunctionName(arg);
     if (name === IDENTITY) {
       const newArg = getArg(arg, 1);
@@ -258,7 +275,7 @@ function canonicalListForm(
       const head = getFunctionHead(expr);
       for (const arg2 of getTail(arg)) {
         if (getFunctionName(arg2) === name) {
-          newArgs.push([head, ...getTail(arg2)]);
+          newArgs.push([head ?? MISSING, ...getTail(arg2)]);
         } else {
           newArgs.push(arg2);
         }
@@ -268,7 +285,7 @@ function canonicalListForm(
     }
   }
 
-  return [getFunctionHead(expr), ...newArgs];
+  return [getFunctionHead(expr) ?? MISSING, ...newArgs];
 }
 
 function getRootDegree(expr: Expression): number {
@@ -300,7 +317,7 @@ function getSquareRoots(expr: Expression): [Expression[], Expression[]] {
   const nonRoots: Expression[] = [];
   for (const arg of args) {
     if (getRootDegree(arg) === 2) {
-      roots.push(getArg(arg, 1));
+      roots.push(getArg(arg, 1) ?? MISSING);
     } else {
       nonRoots.push(arg);
     }
@@ -312,12 +329,13 @@ function canonicalMultiplyForm(
   expr: Expression | null,
   engine: ComputeEngine
 ): Expression | null {
+  if (expr === null) return null;
   const head = getFunctionHead(expr);
   if (!head) return expr;
   expr = applyArgs(expr, (x) => canonicalMultiplyForm(x, engine));
   if (head !== MULTIPLY) return expr;
 
-  expr = flatten(ungroup(expr), MULTIPLY);
+  expr = flatten(ungroup(expr), MULTIPLY)!;
 
   // Group all square roots together
   const [squareRoots, nonSquareRoots] = getSquareRoots(expr);
@@ -347,7 +365,7 @@ function canonicalMultiplyForm(
     if (getFunctionName(x) === NEGATE) {
       hasNegative = true;
       isNegative = !isNegative;
-      return getArg(x, 1);
+      return getArg(x, 1) ?? MISSING;
     }
     const val = getNumberValue(x) ?? NaN;
     if (val < 0) {
@@ -396,13 +414,14 @@ function canonicalPowerForm(
   expr: Expression | null,
   engine: ComputeEngine
 ): Expression | null {
+  if (expr === null) return null;
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== POWER) {
     return applyArgs(expr, (x) => canonicalPowerForm(x, engine));
   }
 
-  expr = ungroup(expr);
+  expr = ungroup(expr)!;
 
   if (getArgCount(expr) !== 2) return expr;
 
@@ -475,11 +494,11 @@ function canonicalNegateForm(
           fact = { num: '-' + fact.num };
         }
       } else {
-        return [MULTIPLY, -1, fact, ...getTail(arg).slice(1)];
+        return [MULTIPLY, -1, fact ?? MISSING, ...getTail(arg).slice(1)];
       }
       return [MULTIPLY, fact, ...getTail(arg).slice(1)];
     } else {
-      return [MULTIPLY, -1, arg];
+      return [MULTIPLY, -1, arg ?? MISSING];
     }
   } else if (head) {
     return applyArgs(expr, (x) => canonicalNegateForm(x, engine));
@@ -529,6 +548,7 @@ function canonicalSubtractForm(
   expr: Expression | null,
   engine: ComputeEngine
 ): Expression | null {
+  if (expr === null) return null;
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== SUBTRACT) {
@@ -537,22 +557,29 @@ function canonicalSubtractForm(
 
   if (getArgCount(expr) !== 2) return expr;
 
-  const arg1 = canonicalSubtractForm(getArg(expr, 1), engine);
+  const arg1 = canonicalSubtractForm(getArg(expr, 1), engine) ?? MISSING;
   const val1 = getNumberValue(arg1);
-  const arg2 = canonicalSubtractForm(getArg(expr, 2), engine);
+  const arg2 = canonicalSubtractForm(getArg(expr, 2), engine) ?? MISSING;
   const val2 = getNumberValue(arg2);
 
   if (val1 === 0) {
     if (val2 === 0) return 0;
-    return canonicalSubtractForm([ADD, arg1, applyNegate(arg2)], engine);
+    return canonicalSubtractForm(
+      [ADD, arg1, applyNegate(arg2) ?? MISSING],
+      engine
+    );
   }
-  return canonicalSubtractForm([ADD, arg1, applyNegate(arg2)], engine);
+  return canonicalSubtractForm(
+    [ADD, arg1, applyNegate(arg2) ?? MISSING],
+    engine
+  );
 }
 
 function canonicalRootForm(
   expr: Expression | null,
   engine: ComputeEngine
 ): Expression | null {
+  if (expr === null) return null;
   const head = getFunctionHead(expr);
   if (!head) return expr;
   if (head !== ROOT && head !== SQRT) {
@@ -563,7 +590,7 @@ function canonicalRootForm(
 
   const arg1 = canonicalRootForm(getArg(expr, 1), engine);
 
-  let arg2: Expression = 2;
+  let arg2: Expression | null = 2;
   if (getArgCount(expr) > 1) {
     arg2 = canonicalPowerForm(getArg(expr, 2), engine);
   }
@@ -571,7 +598,7 @@ function canonicalRootForm(
     return arg1;
   }
 
-  return [POWER, arg1, [DIVIDE, 1, arg2]];
+  return [POWER, arg1 ?? NOTHING, [DIVIDE, 1, arg2 ?? MISSING]];
 }
 
 /**
@@ -620,7 +647,7 @@ export function fullForm(
       if (i === 0) {
         return x;
       }
-      return fullForm(x, engine);
+      return fullForm(x, engine) ?? NOTHING;
     });
   }
   if (typeof expr === 'object') {
@@ -633,14 +660,14 @@ export function fullForm(
         return { num: val };
       }
       if (isFunctionObject(expr)) {
-        return expr.fn.map((x) => fullForm(x, engine));
+        return expr.fn.map((x) => fullForm(x, engine) ?? NOTHING);
       }
       if (isSymbolObject(expr)) {
         return expr.sym;
       }
     } else {
       if (isFunctionObject(expr)) {
-        expr.fn = expr.fn.map((x) => fullForm(x, engine));
+        expr.fn = expr.fn.map((x) => fullForm(x, engine) ?? NOTHING);
       }
     }
   }
@@ -648,14 +675,15 @@ export function fullForm(
 }
 
 export function strippedMetadataForm(
-  expr: Expression,
+  expr: Expression | null,
   engine: ComputeEngine
-): Expression {
+): Expression | null {
+  if (expr === null) return null;
   if (typeof expr === 'number' || typeof expr === 'string') {
     return expr;
   }
   if (Array.isArray(expr)) {
-    return expr.map((x) => strippedMetadataForm(x, engine));
+    return expr.map((x) => strippedMetadataForm(x, engine) ?? NOTHING);
   }
   if (typeof expr === 'object') {
     if ('num' in expr) {
@@ -663,12 +691,15 @@ export function strippedMetadataForm(
       if (typeof val === 'number') return val;
       return { num: val };
     } else if ('fn' in expr) {
-      return expr.fn.map((x) => strippedMetadataForm(x, engine));
+      return expr.fn.map((x) => strippedMetadataForm(x, engine) ?? NOTHING);
     } else if ('dict' in expr) {
       return {
         dict: Object.fromEntries(
           Object.entries(expr.dict).map((keyValue) => {
-            return [keyValue[0], strippedMetadataForm(keyValue[1], engine)];
+            return [
+              keyValue[0],
+              strippedMetadataForm(keyValue[1], engine) ?? NOTHING,
+            ];
           })
         ),
       };

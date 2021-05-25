@@ -409,7 +409,7 @@ export interface Serializer {
   /** Add a group fence around the expression if it is
    * short (not a function)
    */
-  wrapShort(expr: Expression): string;
+  wrapShort(expr: Expression | null): string;
 }
 
 export type SerializerFunction = (
@@ -453,7 +453,7 @@ export interface Scanner {
   matchExponent(): string;
   matchNumber(): string;
 
-  matchTabular(): Expression | null;
+  matchTabular(): null | Expression;
 
   applyOperator(
     op: string,

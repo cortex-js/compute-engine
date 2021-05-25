@@ -97,7 +97,7 @@ function serializeOperator(
       });
     }
     return replaceLatex(def.serialize as string, [
-      serializer.wrap(getArg(expr, 1), def.precedence + 1),
+      serializer.wrap(getArg(expr, 1), def.precedence! + 1),
     ]);
   }
   if (def.trigger.infix) {
@@ -116,7 +116,7 @@ function serializeOperator(
 }
 
 export class Serializer implements Serializer {
-  readonly dictionary?: IndexedLatexDictionary;
+  readonly dictionary: IndexedLatexDictionary;
   readonly onError: ErrorListener<ErrorCode>;
   readonly options: Required<NumberFormattingOptions> &
     Required<SerializeLatexOptions>;
@@ -176,7 +176,8 @@ export class Serializer implements Serializer {
   /** If this is a "short" expression (atomic), wrap it.
    *
    */
-  wrapShort(expr: Expression): string {
+  wrapShort(expr: Expression | null): string {
+    if (expr === null) return '';
     const exprStr = this.serialize(expr);
 
     if (getFunctionName(expr) === PARENTHESES) return exprStr;
@@ -355,7 +356,7 @@ export class Serializer implements Serializer {
         //
         const def = this.dictionary.name.get(fnName);
         if (def) {
-          let result: string;
+          let result = '';
           // If there is a custom serializer function, use it.
           if (typeof def.serialize === 'function') {
             result = def.serialize(this, expr);
@@ -397,6 +398,6 @@ export class Serializer implements Serializer {
       });
     })();
     this.level -= 1;
-    return result;
+    return result ?? '';
   }
 }

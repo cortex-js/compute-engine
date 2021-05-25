@@ -1,30 +1,29 @@
 <!DOCTYPE html>
 <html lang="en-US">
-
-<head>
+  <head>
     <meta charset="utf-8" />
     <title>MathJSON REPL</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="style.css" />
 
     <style>
-        code {
-            white-space: pre-wrap;
-        }
+      code {
+        white-space: pre-wrap;
+      }
 
-        h2 {
-            font-size: 1em;
-            padding: 0;
-            margin: 0;
-            color: #666;
-        }
+      h2 {
+        font-size: 1em;
+        padding: 0;
+        margin: 0;
+        color: #666;
+      }
     </style>
-    <script src='https://unpkg.com/mathlive/dist/mathlive.min.js'></script>
-</head>
+    <script src="https://unpkg.com/mathlive/dist/mathlive.min.js"></script>
+  </head>
 
-<body>
+  <body>
     <header>
-        <h1>MathJSON REPL</h1>
+      <h1>MathJSON REPL</h1>
     </header>
     <main>
         <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
@@ -48,41 +47,40 @@
         <!-- "\begin{align*}\dot{x} & =\sigma(y-x) \\ \dot{y} & =\rho x-y-xz \\ \dot{z} & =-\beta z+xy\end{align*}" ->
         <!-- 2{xy} should create group -->
 
-        <!-- -(x) -->
-        <!-- -5-3-2 -->
-        <!-- -123, +456.789, -->
-        <!-- x_{0} -->
-        <!-- -123, 456.789, -->
-        <!-- |(a+|b|+1)| -->
-        <!-- i, 2i, -i -->
-        <!-- (a,,b) -->
-        <!-- x_5 -->
-        <!-- (\mathtt{dead\;beef})_{16} -->
-        <!-- (x,,2) -->
-        <!-- $$(deadbeef)_{16}$$ -->
+      <!-- -(x) -->
+      <!-- -5-3-2 -->
+      <!-- -123, +456.789, -->
+      <!-- x_{0} -->
+      <!-- -123, 456.789, -->
+      <!-- |(a+|b|+1)| -->
+      <!-- i, 2i, -i -->
+      <!-- (a,,b) -->
+      <!-- x_5 -->
+      <!-- (\mathtt{dead\;beef})_{16} -->
+      <!-- (x,,2) -->
+      <!-- $$(deadbeef)_{16}$$ -->
 
+      <!-- \huge x \text{y} -->
+      <!-- \scriptscriptstyle x \text{y} -->
+      <!-- \sqrt[\Huge 3]{29} -->
+      <!-- x^{\binom{n}{k}} -->
+      <!-- \binom12 \textstyle \binom34 \scriptstyle \binom56 \displaystyle \binom78 \scriptstyle \binom90 -->
+      <!-- \int^b_a x^2 dx -->
+      <!-- \int^b_a\int^c_d x^2 dx dy -->
+      <!-- \int x^2 + x = 0 -->
+      <!-- \int x^2 + x dx = 0 -->
+      <!-- \int (x^2 + x) dx = 0 -->
 
-        <!-- \huge x \text{y} -->
-        <!-- \scriptscriptstyle x \text{y} -->
-        <!-- \sqrt[\Huge 3]{29} -->
-        <!-- x^{\binom{n}{k}} -->
-        <!-- \binom12 \textstyle \binom34 \scriptstyle \binom56 \displaystyle \binom78 \scriptstyle \binom90 -->
-        <!-- \int^b_a x^2 dx -->
-        <!-- \int^b_a\int^c_d x^2 dx dy -->
-        <!-- \int x^2 + x = 0 -->
-        <!-- \int x^2 + x dx = 0 -->
-        <!-- \int (x^2 + x) dx = 0 -->
-
-        <h2>Latex</h2>
-        <div class="output" id="latex"></div>
-        <h2>MathJSON Canonical Form</h2>
-        <div class="output" id="mathjson-canonical"></div>
-        <h2>MathJSON Full Form</h2>
-        <div class="output" id="mathjson-full"></div>
-        <h2>MathJSON Raw</h2>
-        <div class="output" id="mathjson-raw"></div>
-        <h2>MathASCII</h2>
-        <div class="output" id="mathascii"></div>
+      <h2>Latex</h2>
+      <div class="output" id="latex"></div>
+      <h2>MathJSON Canonical Form</h2>
+      <div class="output" id="mathjson-canonical"></div>
+      <h2>MathJSON Full Form</h2>
+      <div class="output" id="mathjson-full"></div>
+      <h2>MathJSON Raw</h2>
+      <div class="output" id="mathjson-raw"></div>
+      <h2>MathASCII</h2>
+      <div class="output" id="mathascii"></div>
     </main>
 
     <script type="module">
@@ -194,30 +192,25 @@
                     e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
             }
         }
+      }
 
-
-
-
-        function escapeHtml(string) {
-            return String(string).replace(/[&<>"'`=/\u200b]/g, function (
-                s
-            ) {
-                return (
-                    {
-                        '&': '&amp;',
-                        '<': '&lt;',
-                        '>': '&gt;',
-                        '"': '&quot;',
-                        "'": '&#39;',
-                        '/': '&#x2F;',
-                        '`': '&#x60;',
-                        '=': '&#x3D;',
-                        '\u200b': '&amp;#zws;',
-                    }[s] || s
-                );
-            });
-        }
+      function escapeHtml(string) {
+        return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {
+          return (
+            {
+              '&': '&amp;',
+              '<': '&lt;',
+              '>': '&gt;',
+              '"': '&quot;',
+              "'": '&#39;',
+              '/': '&#x2F;',
+              '`': '&#x60;',
+              '=': '&#x3D;',
+              '\u200b': '&amp;#zws;',
+            }[s] || s
+          );
+        });
+      }
     </script>
-</body>
-
+  </body>
 </html>

@@ -74,13 +74,13 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     name: 'PartialDerivative', // PartialDerivative(expr, {lists of vars}, degree)
     trigger: { prefix: '\\partial' },
     parse: (
-      _lhs: Expression,
+      lhs: Expression,
       scanner: Scanner,
       _minPrec: number
     ): [Expression | null, Expression | null] => {
       let done = false;
-      let sup: Expression = NOTHING;
-      let sub: Expression = NOTHING;
+      let sup: Expression | null = NOTHING;
+      let sub: Expression | null = NOTHING;
       while (!done) {
         scanner.skipSpace();
         if (scanner.match('_')) {
@@ -94,9 +94,11 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       if (getFunctionName(sub) === SEQUENCE) {
         sub = [LIST, ...getTail(sub)];
       }
+      if (!sub || !sup) return [lhs, null];
       let rhs = scanner.matchRequiredLatexArgument() ?? NOTHING;
       if (rhs !== NOTHING) {
-        rhs = [rhs, ...scanner.matchArguments('group')];
+        const arg = scanner.matchArguments('group') ?? NOTHING;
+        rhs = [rhs, ...arg];
       }
       return [null, ['PartialDerivative', rhs, sub, sup]];
     },

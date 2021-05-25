@@ -11,10 +11,10 @@
     // "newLine": "lf",
     "noImplicitAny": false,
     "noLib": false,
-    "removeComments": true,
+    "removeComments": false,
     "sourceMap": true,
-    // "strictNullChecks": true,
-    "target": "es2017",
+    "strictNullChecks": true,
+    "target": "es2019",
 
     "lib": ["es2019", "dom", "dom.iterable", "scripthost"]
   },

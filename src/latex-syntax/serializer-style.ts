@@ -15,7 +15,7 @@ export function getGroupStyle(
 }
 
 export function getRootStyle(
-  _expr: Expression,
+  _expr: Expression | null,
   level: number
 ): 'radical' | 'quotient' | 'solidus' {
   if (level > 1) return 'solidus';

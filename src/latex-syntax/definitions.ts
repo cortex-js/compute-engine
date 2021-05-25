@@ -35,13 +35,13 @@ export type IndexedLatexDictionaryEntry = {
   };
   parse: Expression | ParserFunction;
   serialize: SerializerFunction | LatexString;
-  associativity?: 'right' | 'left' | 'non' | 'both';
-  precedence?: number;
-  arguments?: 'group' | 'implicit' | '';
-  optionalLatexArg?: number;
-  requiredLatexArg?: number;
-  separator?: LatexString;
-  closeFence?: LatexString;
+  associativity: 'right' | 'left' | 'non' | 'both';
+  precedence: number;
+  arguments: 'group' | 'implicit' | '';
+  optionalLatexArg: number;
+  requiredLatexArg: number;
+  separator: LatexString;
+  closeFence: LatexString;
 };
 
 export type IndexedLatexDictionary = {
@@ -164,8 +164,7 @@ export function indexLatexDictionary(
       if (record.parse !== 'function' && !record.closeFence) {
         onError({
           code: 'syntax-error',
-          arg:
-            'Matchfix operators require a close fence or a custom parse function',
+          arg: 'Matchfix operators require a close fence or a custom parse function',
         });
       }
     }
@@ -180,12 +179,12 @@ export function indexLatexDictionary(
         'superfix',
         'subfix',
       ].forEach((x) => {
-        const n = triggerLength(record.trigger[x]);
+        const n = triggerLength(record.trigger![x]);
         result.lookahead = Math.max(result.lookahead, n);
         if (result[x][n] === undefined) {
           result[x][n] = new Map<string, IndexedLatexDictionaryEntry>();
         }
-        result[x][n].set(triggerString(record.trigger[x]), record);
+        result[x][n].set(triggerString(record.trigger![x]), record);
       });
       if (record.trigger.environment !== undefined) {
         result.environment.set(record.trigger.environment, record);

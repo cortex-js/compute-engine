@@ -26,7 +26,7 @@ import {
   ErrorListener,
 } from '../public';
 export class LatexSyntax {
-  onError?: ErrorListener<ErrorCode>;
+  onError: ErrorListener<ErrorCode>;
 
   options: Required<NumberFormattingOptions> &
     Required<ParseLatexOptions> &
@@ -95,7 +95,9 @@ export class LatexSyntax {
       return result;
     }
 
-    return [...DEFAULT_LATEX_DICTIONARY[domain]];
+    if (!DEFAULT_LATEX_DICTIONARY[domain]) return [];
+
+    return [...DEFAULT_LATEX_DICTIONARY[domain]!];
   }
 
   parse(latex: LatexString): Expression {

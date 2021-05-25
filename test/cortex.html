@@ -1,223 +1,225 @@
 <!DOCTYPE html>
 <html lang="en-US">
-
-<head>
+  <head>
     <meta charset="utf-8" />
     <title>Cortex REPL</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="style.css" />
 
     <style>
-        body>header {
-            justify-content: flex-start;
-        }
+      body > header {
+        justify-content: flex-start;
+      }
 
-        header h1 {
-            margin-left: 32px;
-        }
+      header h1 {
+        margin-left: 32px;
+      }
 
-        main {
-            padding-top: 0;
-            width: 100%;
-            margin: 0
-        }
+      main {
+        padding-top: 0;
+        width: 100%;
+        margin: 0;
+      }
 
-        code {
-            white-space: pre-wrap;
-        }
+      code {
+        white-space: pre-wrap;
+      }
 
-        h2 {
-            font-size: 1em;
-            padding: 0;
-            margin: 0;
-        }
+      h2 {
+        font-size: 1em;
+        padding: 0;
+        margin: 0;
+      }
 
-        textarea {
-            width: calc(100% - 40px);
-            height: 200px;
-            border-radius: 0;
-            border-color: #ddd;
-            font-size: 24px;
-            color: #3f5b86;
-            padding: 8px;
-            padding-left: 32px;
-            resize: vertical;
-            margin-bottom: 10px;
-            font-family: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo, Monaco, 'Courier New', monospace;
-            outline: none;
-        }
+      textarea {
+        width: calc(100% - 40px);
+        height: 200px;
+        border-radius: 0;
+        border-color: #ddd;
+        font-size: 24px;
+        color: #3f5b86;
+        padding: 8px;
+        padding-left: 32px;
+        resize: vertical;
+        margin-bottom: 10px;
+        font-family: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo,
+          Monaco, 'Courier New', monospace;
+        outline: none;
+      }
 
-        .output {
-            font-family: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo, Monaco, 'Courier New', monospace;
-        }
+      .output {
+        font-family: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo,
+          Monaco, 'Courier New', monospace;
+      }
 
-        #mathjson,
-        #error,
-        #result,
-        #cortex {
-            display: none;
-            margin-left: 32px;
-            width: calc(100% - 64px);
-        }
+      #mathjson,
+      #error,
+      #result,
+      #cortex {
+        display: none;
+        margin-left: 32px;
+        width: calc(100% - 64px);
+      }
 
-        #mathjson.visible,
-        #error.visible,
-        #cortex.visible,
-        #result.visible {
-            display: block;
-        }
+      #mathjson.visible,
+      #error.visible,
+      #cortex.visible,
+      #result.visible {
+        display: block;
+      }
 
-        #error {
-            display: none;
-            padding: 16px;
-            width: calc(100% - 96px);
-            color: #ff5757;
-            background-color: #ffeae9;
-            border-color: #ff5757;
-        }
+      #error {
+        display: none;
+        padding: 16px;
+        width: calc(100% - 96px);
+        color: #ff5757;
+        background-color: #ffeae9;
+        border-color: #ff5757;
+      }
 
-        #error hr {
-            border: none;
-            border-bottom: 1px solid rgba(255, 87, 87, .5);
-        }
+      #error hr {
+        border: none;
+        border-bottom: 1px solid rgba(255, 87, 87, 0.5);
+      }
     </style>
-</head>
+  </head>
 
-<body>
+  <body>
     <header>
-        <h1>Cortex REPL</h1>
+      <h1>Cortex REPL</h1>
     </header>
     <main>
-        <textarea id='input' autocomplete='off' spellcheck='false' autofocus>// Comment
+      <textarea id="input" autocomplete="off" spellcheck="false" autofocus>
+// Comment
             
 /** 
  * Nested /* comment */
  */
 0b10.1
-        </textarea>
-        <div class="output" id="cortex"></div>
-        <div class="output" id="mathjson"></div>
-        <div class="output" id="result"></div>
-        <div class="output" id="error"></div>
+        </textarea
+      >
+      <div class="output" id="cortex"></div>
+      <div class="output" id="mathjson"></div>
+      <div class="output" id="result"></div>
+      <div class="output" id="error"></div>
     </main>
 
     <script type="module">
-        import {
-            ComputeEngine,
-            LatexSyntax,
-            parseCortex,
-            serializeCortex
-        } from '../dist/cortex.js';
+      import {
+        ComputeEngine,
+        LatexSyntax,
+        parseCortex,
+        serializeCortex,
+      } from '../dist/cortex.js';
 
+      const engine = new ComputeEngine();
 
-        const engine = new ComputeEngine();
+      const input = document.getElementById('input');
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && ev.shiftKey === false) {
+          updateContent();
 
-        const input = document.getElementById('input');
-        input.addEventListener('keydown', (ev) => {
-            if (ev.key === 'Enter' && ev.shiftKey === false) {
-                updateContent();
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
+      });
+      updateContent();
 
-                ev.preventDefault();
-                ev.stopPropagation();
+      function warningsToString(warnings) {
+        let errorMsg = '';
+        if (warnings && warnings.length > 0) {
+          errorMsg += warnings
+            .map((warning) => {
+              // if (warning.signal.head) {
+              //     errorMsg += warning.signal.head + ': ';
+              // }
+              let result = '';
+              if (warning.origin) {
+                result += `(${warning.origin.line}:${warning.origin.column}) `;
+              }
+              result += `${warning.severity}: ${warning.message}`;
+              if (warning.args) {
+                for (const arg of warning.args) {
+                  result += arg.toString() + ' ';
+                }
+              }
+              if (warning.origin?.around) {
+                result += warning.origin.around + '<br>';
+              }
+              return result;
+            })
+            .join('<hr>');
+        }
+        return errorMsg;
+      }
+
+      function updateContent() {
+        const cortex = input.value;
+        try {
+          const errors = [];
+          document.getElementById('cortex').classList.remove('visible');
+          document.getElementById('mathjson').classList.remove('visible');
+          document.getElementById('result').classList.remove('visible');
+          document.getElementById('error').classList.remove('visible');
+          let errorMsg = '';
+          try {
+            const [expr, warnings] = parseCortex(cortex);
+            errorMsg += warningsToString(warnings ?? []);
+            if (expr) {
+              setTimeout(() => {
+                document.getElementById('cortex').classList.add('visible');
+                document.getElementById('mathjson').classList.add('visible');
+                document.getElementById('result').classList.add('visible');
+              }, 125);
+              document.getElementById('mathjson').innerHTML = escapeHtml(
+                JSON.stringify(expr, null, 2)
+              );
+
+              document.getElementById('cortex').innerHTML = escapeHtml(
+                serializeCortex(expr)
+              );
+              document.getElementById('result').innerHTML = escapeHtml(
+                serializeCortex(engine.evaluate(expr))
+              );
+              errorMsg += warningsToString(engine.warnings);
             }
+          } catch (err) {
+            errorMsg += err.toString() + '<br>';
+          }
+          //
+          // Update the error message panel
+          //
+          const error = document.getElementById('error');
+          if (errorMsg) {
+            error.classList.add('visible');
+            error.innerHTML = errorMsg;
+          } else {
+            error.classList.remove('visible');
+          }
+        } catch (e) {
+          const error = document.getElementById('error');
+          error.classList.add('visible');
+          error.innerHTML = `${e}`;
+        }
+      }
+
+      function escapeHtml(string) {
+        return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {
+          return (
+            {
+              '&': '&amp;',
+              '<': '&lt;',
+              '>': '&gt;',
+              '"': '&quot;',
+              "'": '&#39;',
+              '/': '&#x2F;',
+              '`': '&#x60;',
+              '=': '&#x3D;',
+              '\u200b': '&amp;#zws;',
+            }[s] || s
+          );
         });
-        updateContent();
-
-        function warningsToString(warnings) {
-            let errorMsg = '';
-            if (warnings && warnings.length > 0) {
-                errorMsg += warnings.map((warning) => {
-                    // if (warning.signal.head) {
-                    //     errorMsg += warning.signal.head + ': ';
-                    // }
-                    let result = '';
-                    if (warning.origin) {
-                        result += `(${warning.origin.line}:${warning.origin.column}) `;
-                    }
-                    result += `${warning.severity}: ${warning.message}`;
-                    if (warning.args) {
-                        for (const arg of warning.args) {
-                            result += arg.toString() + ' ';
-                        }
-                    }
-                    if (warning.origin?.around) {
-                        result += warning.origin.around + '<br>';
-                    }
-                    return result;
-                }).join('<hr>')
-            }
-            return errorMsg;
-        }
-
-        function updateContent() {
-            const cortex = input.value;
-            try {
-                const errors = [];
-                document.getElementById('cortex').classList.remove('visible');
-                document.getElementById('mathjson').classList.remove('visible');
-                document.getElementById('result').classList.remove('visible');
-                document.getElementById('error').classList.remove('visible');
-                let errorMsg = '';
-                try {
-                    const [expr, warnings] = parseCortex(cortex);
-                    errorMsg += warningsToString(warnings ?? []);
-                    if (expr) {
-                        setTimeout(() => {
-                            document.getElementById('cortex').classList.add('visible');
-                            document.getElementById('mathjson').classList.add('visible');
-                            document.getElementById('result').classList.add('visible');
-                        }, 125);
-                        document.getElementById('mathjson').innerHTML =
-                            escapeHtml(JSON.stringify(expr, null, 2));
-
-                        document.getElementById('cortex').innerHTML =
-                            escapeHtml(serializeCortex(expr));
-                        document.getElementById('result').innerHTML =
-                            escapeHtml(serializeCortex(engine.evaluate(expr)));
-                        errorMsg += warningsToString(engine.warnings);
-                    }
-                } catch (err) {
-                    errorMsg += err.toString() + '<br>';
-                }
-                //
-                // Update the error message panel
-                //
-                const error = document.getElementById('error');
-                if (errorMsg) {
-                    error.classList.add('visible');
-                    error.innerHTML = errorMsg;
-                } else {
-                    error.classList.remove('visible');
-                }
-
-            } catch (e) {
-                const error = document.getElementById('error');
-                error.classList.add('visible');
-                error.innerHTML = `${e}`;
-            }
-        }
-
-
-        function escapeHtml(string) {
-            return String(string).replace(/[&<>"'`=/\u200b]/g, function (
-                s
-            ) {
-                return (
-                    {
-                        '&': '&amp;',
-                        '<': '&lt;',
-                        '>': '&gt;',
-                        '"': '&quot;',
-                        "'": '&#39;',
-                        '/': '&#x2F;',
-                        '`': '&#x60;',
-                        '=': '&#x3D;',
-                        '\u200b': '&amp;#zws;',
-                    }[s] || s
-                );
-            });
-        }
+      }
     </script>
-</body>
-
+  </body>
 </html>
