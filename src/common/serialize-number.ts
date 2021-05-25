@@ -258,7 +258,7 @@ export function serializeAutoNotationNumber(
   options: Required<NumberFormattingOptions>
 ): string {
   let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/i);
-  let exponent: string;
+  let exponent: string | undefined = undefined;
   // if valString === '-1234567.89e-123'
   // m[1] = '-1234567.89'
   // m[2] = -123
@@ -271,7 +271,7 @@ export function serializeAutoNotationNumber(
   }
   let wholePart = valString;
   let fractionalPart = '';
-  m = (exponent ? m[1] : valString).match(/^(.*)\.(.*)$/);
+  m = (exponent ? m![1] : valString).match(/^(.*)\.(.*)$/);
   if (m?.[1] && m[2]) {
     wholePart = m[1];
     fractionalPart = m[2];

@@ -12,6 +12,7 @@ import {
   POWER,
   MULTIPLY,
   ADD,
+  MISSING,
 } from '../common/utils';
 
 export function order(a: Expression, b: Expression): number {
@@ -32,7 +33,7 @@ export function order(a: Expression, b: Expression): number {
   if (lenA === lenB) {
     // Order arg by arg
     for (let i = 1; i <= lenA; i++) {
-      const comp = order(getArg(a, i), getArg(b, i));
+      const comp = order(getArg(a, i) ?? MISSING, getArg(b, i) ?? MISSING);
       if (comp !== 0) return comp;
     }
   }
@@ -59,7 +60,7 @@ export function degree(expr: Expression, sortedVars: string[]): number {
     return result;
   }
 
-  if (sortedVars.includes(getSymbolName(expr))) return 1;
+  if (sortedVars.includes(getSymbolName(expr) ?? MISSING)) return 1;
   return 0;
 }
 
@@ -74,7 +75,7 @@ export function degree(expr: Expression, sortedVars: string[]): number {
 function getDegree(expr: Expression, v: string): number {
   const name = getFunctionName(expr);
   if (name === POWER) {
-    if (getSymbolName(getArg(expr, 1)) === v) {
+    if (getSymbolName(getArg(expr, 1) ?? MISSING) === v) {
       const exponent = getNumberValue(getArg(expr, 2)) ?? NaN;
       if (isFinite(exponent)) return exponent;
     }
@@ -116,7 +117,7 @@ function getExprLength(expr: Expression | null): number {
       .reduce((acc: number, x: number) => acc + x, 0);
   }
   if (typeof expr === 'string') return 1;
-  if (getSymbolName(expr)) return 1;
+  if (getSymbolName(expr) !== null) return 1;
   return 0;
 }
 
@@ -200,5 +201,5 @@ export function canonicalOrder(
     }
   }
 
-  return [getFunctionHead(expr), ...args];
+  return [getFunctionHead(expr) ?? MISSING, ...args];
 }

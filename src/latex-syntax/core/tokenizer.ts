@@ -59,7 +59,7 @@ class Tokenizer {
   /**
    * Return the next substring matching regEx and advance.
    */
-  match(regEx: RegExp): string {
+  match(regEx: RegExp): string | null {
     // this.s can either be a string, if it's made up only of ASCII chars
     // or an array of graphemes, if it's more complicated.
     let execResult: (string | null)[] | null;
@@ -235,7 +235,7 @@ function expand(lex: Tokenizer, args: string[]): Token[] {
 
       let command = '';
       let done = false;
-      let tokens = [];
+      let tokens: string[] = [];
       do {
         if (tokens.length === 0) {
           // We're out of tokens to look at, get some more
@@ -263,7 +263,7 @@ function expand(lex: Tokenizer, args: string[]): Token[] {
             token === '<$$>' ||
             token === '<{>' ||
             token === '<}>' ||
-            (token.length > 1 && token[0] === '\\');
+            (!!token && token.length > 1 && token[0] === '\\');
         }
         if (!done) {
           command += tokens.shift();

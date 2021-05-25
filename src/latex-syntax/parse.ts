@@ -15,6 +15,7 @@ import {
   PARENTHESES,
   DIVIDE,
   LATEX_TOKENS,
+  NOTHING,
 } from '../common/utils';
 import { tokensToString } from './core/tokenizer';
 import { IndexedLatexDictionary } from './definitions';
@@ -52,7 +53,7 @@ export class Scanner implements Scanner {
     };
     this.dictionary = dictionary;
 
-    let def: LatexDictionaryEntry;
+    let def: LatexDictionaryEntry | undefined;
     this.invisibleOperatorPrecedence = 0;
     if (this.options.invisibleOperator) {
       def = this.dictionary.name.get(this.options.invisibleOperator);
@@ -181,8 +182,8 @@ export class Scanner implements Scanner {
       | 'superfix'
       | 'subfix'
       | 'operator'
-  ): [LatexDictionaryEntry, number] {
-    let defs: LatexDictionaryEntry[];
+  ): [LatexDictionaryEntry | null, number] {
+    let defs: (undefined | LatexDictionaryEntry)[];
     if (kind === 'operator') {
       defs = this.lookAhead().map(
         (x, n) =>
@@ -194,7 +195,7 @@ export class Scanner implements Scanner {
       defs = this.lookAhead().map((x, n) => this.dictionary[kind][n]?.get(x));
     }
     for (let i = defs.length; i > 0; i--) {
-      if (defs[i] !== undefined) return [defs[i], i];
+      if (defs[i] !== undefined) return [defs[i]!, i];
     }
     return [null, 0];
   }
@@ -387,7 +388,7 @@ export class Scanner implements Scanner {
 
     if (typeof def.parse === 'function') {
       // Custom parser found
-      let rhs = null;
+      let rhs: Expression | null = null;
       [lhs, rhs] = def.parse(lhs, this, minPrec);
       if (rhs === null) return null;
 
@@ -395,7 +396,7 @@ export class Scanner implements Scanner {
     }
 
     let prec = def.precedence;
-    if (prec < minPrec) return null;
+    if (prec === undefined || prec < minPrec) return null;
     prec += def.associativity === 'left' ? 1 : 0;
 
     this.index += n;
@@ -405,7 +406,9 @@ export class Scanner implements Scanner {
     );
   }
 
-  matchArguments(kind: '' | 'group' | 'implicit'): Expression[] | null {
+  matchArguments(
+    kind: undefined | '' | 'group' | 'implicit'
+  ): Expression[] | null {
     if (!kind) return null;
 
     const savedIndex = this.index;
@@ -448,10 +451,13 @@ export class Scanner implements Scanner {
 
     if (typeof def.parse === 'function') {
       // Custom parser: invoke it.
-      return this.applyInvisibleOperator(...def.parse(null, this, 0));
+      return this.applyInvisibleOperator(
+        ...def.parse(null, this as Scanner, 0)
+      );
     }
     const trigger =
       typeof def.trigger === 'object' ? def.trigger.matchfix : def.trigger;
+    if (!trigger || !def.closeFence || !def.parse) return null;
     const arg = this.matchBalancedExpression(
       trigger,
       def.closeFence,
@@ -471,7 +477,7 @@ export class Scanner implements Scanner {
       | 'superfix'
       | 'subfix'
       | 'operator'
-  ): [LatexDictionaryEntry, Expression] {
+  ): [LatexDictionaryEntry | null, Expression | null] {
     // Find the longest string of tokens with a definition of the
     // specified kind
     const [def, tokenCount] = this.peekDefinition(kind);
@@ -590,12 +596,15 @@ export class Scanner implements Scanner {
   }
 
   matchSupsub(lhs: Expression | null): Expression | null {
+    if (lhs === null) return null;
     let result: Expression | null = null;
     this.skipSpace();
-    ([
-      ['^', 'superfix'],
-      ['_', 'subfix'],
-    ] as [string, 'superfix' | 'subfix'][]).forEach((x) => {
+    (
+      [
+        ['^', 'superfix'],
+        ['_', 'subfix'],
+      ] as [string, 'superfix' | 'subfix'][]
+    ).forEach((x) => {
       if (result !== null) return;
 
       const [triggerChar, opKind] = x;
@@ -605,7 +614,7 @@ export class Scanner implements Scanner {
       this.skipSpace();
 
       const savedIndex = this.index;
-      let def: LatexDictionaryEntry;
+      let def: LatexDictionaryEntry | null | undefined;
       let n = 0;
       if (this.match('<{>')) {
         // Supsub with an argument
@@ -621,7 +630,7 @@ export class Scanner implements Scanner {
           if (typeof def.parse === 'function') {
             result = def.parse(lhs, this, 0)[1];
           } else {
-            result = [(def.parse as string) ?? def.name, lhs];
+            result = [(def.parse as string) ?? def.name, lhs!];
           }
         } else {
           // Not a supfix/subfix
@@ -639,7 +648,7 @@ export class Scanner implements Scanner {
           if (typeof def.parse === 'function') {
             result = def.parse(lhs, this, 0)[1];
           } else {
-            result = [(def.parse as string) ?? def.name, lhs];
+            result = [(def.parse as string) ?? def.name, lhs!];
           }
         }
       }
@@ -672,7 +681,7 @@ export class Scanner implements Scanner {
     if (lhs === null) return null;
 
     const [def, n] = this.peekDefinition('postfix');
-    if (def === null) return null;
+    if (def === null || def === undefined) return null;
 
     if (typeof def.parse === 'function') {
       [, lhs] = def.parse(lhs, this, 0);
@@ -682,7 +691,7 @@ export class Scanner implements Scanner {
     }
 
     this.index += n;
-    return [def.parse, lhs];
+    return [def.parse!, lhs];
   }
 
   matchString(): string {
@@ -732,21 +741,20 @@ export class Scanner implements Scanner {
    * Match an expression in a tabular format,
    * where row are separated by `\\` and columns by `&`
    *
-   * Return rows of columns (might be sparse)
+   * Return rows of sparse columns as a list: empty rows are indicated with NOTHING,
+   * and empty cells are also indicated with NOTHING.
    */
-  matchTabular(): Expression[] | null {
-    // return null;
-    const result: Expression = ['list'];
+  matchTabular(): null | Expression {
+    const result: null | Expression = ['list'];
 
-    // debugger;
     let row: Expression[] = ['list'];
     let expr: Expression | null = null;
     let done = false;
     while (!this.atEnd && !done) {
       if (this.match('&')) {
         // new column
-        // Push even if expr is NULL (it represent a skipped column)
-        row.push(expr);
+        // Push even if expr is NULL (it represents a skipped column)
+        row.push(expr ?? NOTHING);
         expr = null;
       } else if (this.match('\\\\') || this.match('\\cr')) {
         // new row
@@ -1106,7 +1114,7 @@ export class Scanner implements Scanner {
    * Stop when an operator of precedence less than `minPrec` is encountered
    */
   matchExpression(minPrec = 0): Expression | null {
-    let lhs: Expression = null;
+    let lhs: Expression | null = null;
     const originalIndex = this.index;
 
     this.skipSpace();
@@ -1165,7 +1173,8 @@ export class Scanner implements Scanner {
   /**
    * Add latex or other requested metadata to the expression
    */
-  decorate(expr: Expression, start: number): Expression {
+  decorate(expr: Expression | null, start: number): Expression | null {
+    if (expr === null) return null;
     if (this.options.preserveLatex) {
       const latex = this.latex(start, this.index);
       if (Array.isArray(expr)) {

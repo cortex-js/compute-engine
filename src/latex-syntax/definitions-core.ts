@@ -301,7 +301,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       scanner: Scanner,
       _minPrec: number
     ): [Expression | null, Expression | null] => {
-      const rhs = scanner.matchRequiredLatexArgument();
+      const rhs = scanner.matchRequiredLatexArgument() ?? NOTHING;
       if (!lhs) return [null, ['Subscript', rhs]];
       return [null, ['Subscript', lhs, rhs]];
     },
@@ -356,7 +356,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     // name: 'prime',
     trigger: { superfix: '\\doubleprime' },
-    parse: (lhs: Expression, _scanner: Scanner): [Expression, Expression] => {
+    parse: (
+      lhs: Expression,
+      _scanner: Scanner
+    ): [Expression | null, Expression] => {
       return [null, [PRIME, lhs ?? NOTHING, 2]];
     },
     arguments: 'group',
@@ -389,7 +392,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Piecewise',
     trigger: { environment: 'cases' },
     parse: (lhs: Expression, scanner: Scanner): [Expression, Expression] => {
-      return [lhs, ['Piecewise', scanner.matchTabular()]];
+      return [lhs, ['Piecewise', scanner.matchTabular() ?? NOTHING]];
     },
     serialize: (serialize: Serializer, expr: Expression): string => {
       if (getFunctionName(getArg(expr, 1)) !== LIST) return '';

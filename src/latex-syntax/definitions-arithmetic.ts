@@ -44,16 +44,18 @@ function numeratorDenominator(
   for (const arg of args) {
     if (getFunctionName(arg) === POWER) {
       if (getFunctionName(getArg(arg, 2)) === NEGATE) {
-        denominator.push([POWER, getArg(arg, 1), getArg(getArg(arg, 2), 1)]);
+        const a = getArg(arg, 1) ?? NOTHING;
+        const b = getArg(getArg(arg, 2), 1) ?? NOTHING;
+        denominator.push([POWER, a, b]);
       } else {
         const exponentVal = getNumberValue(getArg(arg, 2)) ?? NaN;
         if (exponentVal === -1) {
-          denominator.push(getArg(arg, 1));
+          denominator.push(getArg(arg, 1) ?? NOTHING);
         } else if (exponentVal < 0) {
           denominator.push([
             POWER,
-            getArg(arg, 1),
-            applyNegate(getArg(arg, 2)),
+            getArg(arg, 1) ?? NOTHING,
+            applyNegate(getArg(arg, 2)!) ?? NOTHING,
           ]);
         } else {
           numerator.push(arg);
@@ -69,9 +71,10 @@ function numeratorDenominator(
 function serializeRoot(
   serializer: Serializer,
   style: 'radical' | 'quotient' | 'solidus',
-  base: Expression,
-  degree: Expression
+  base: Expression | null,
+  degree: Expression | null
 ): string {
+  if (base === null) return '\\sqrt{}';
   degree = degree ?? 2;
   if (style === 'solidus') {
     return (
@@ -282,7 +285,7 @@ function serializeMultiply(
         }
       } else if (
         getFunctionName(arg) === POWER &&
-        !isNaN(getNumberValue(getArg(arg, 1) ?? NaN))
+        !isNaN(getNumberValue(getArg(arg, 1)) ?? NaN)
       ) {
         // It's a power and the base is a number...
         // add a multiply...
@@ -348,7 +351,7 @@ function parseFraction(
     // `∂f(x)/∂x` or `∂^2f(x)/∂x∂y` or `∂/∂x f(x)`
     const degree: Expression = getArg(numer, 3) ?? NOTHING;
     // Expect: getArg(numer, 2) === NOTHING -- no args
-    let fn: Expression = getArg(numer, 1);
+    let fn = getArg(numer, 1);
     if (fn === null || fn === NOTHING) {
       fn = scanner.matchExpression() ?? NOTHING;
     }
@@ -358,12 +361,14 @@ function parseFraction(
       // ?/∂x∂y
       for (const arg of getTail(denom)) {
         if (getFunctionHead(arg) === 'PartialDerivative') {
-          vars.push(getArg(arg, 2));
+          const v = getArg(arg, 2);
+          if (v) vars.push(v);
         }
       }
     } else {
       // ?/∂x
-      vars.push(getArg(denom, 2));
+      const v = getArg(denom, 2);
+      if (v) vars.push(v);
     }
     if (vars.length > 1) {
       vars = [LIST, ...vars];
@@ -383,6 +388,7 @@ function serializeFraction(
   expr: Expression | null
 ): string {
   console.assert(getFunctionName(expr) === DIVIDE);
+  if (expr === null) return '';
   if (getArgCount(expr) === 1) return serializer.serialize(getArg(expr, 1));
   const style = getFractionStyle(expr, serializer.level);
   if (style === 'inline-solidus' || style === 'nice-solidus') {
@@ -434,7 +440,7 @@ function serializePower(
     const style = getRootStyle(expr, serializer.level);
     return serializeRoot(serializer, style, getArg(expr, 1), getArg(expr, 2));
   }
-  const val2 = getNumberValue(arg2);
+  const val2 = getNumberValue(arg2) ?? 1;
   if (val2 === -1) {
     return serializer.serialize([DIVIDE, '1', arg1]);
   } else if (val2 < 0) {

@@ -1,7 +1,10 @@
 import type { Expression } from '../src/public';
-import { LatexSyntax, ComputeEngine, parseCortex } from '../src/math-json';
+import { LatexSyntax } from '../src/math-json';
 import { Form } from '../src/compute-engine/public';
 import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
+import { ComputeEngine } from '../src/compute-engine/public';
+import { MISSING } from '../src/common/utils';
+import { parseCortex } from '../src/cortex';
 
 let errors: string[] = [];
 
@@ -15,15 +18,16 @@ const rawLatex = new LatexSyntax({
   promoteUnknownSymbols: /./,
   dictionary: [],
 });
+
 export const engine = new ComputeEngine();
 export function expression(
   latex: string,
   options?: { form: Form }
-): Expression {
+): Expression | null {
   errors = [];
   const result = engine.format(defaultLatex.parse(latex), options?.form);
   errors = errors.filter((x) => !/^unknown-symbol /.test(x));
-  if (errors.length !== 0) return [result, ...errors];
+  if (errors.length !== 0) return [result ?? MISSING, ...errors];
   return result;
 }
 
@@ -112,7 +116,7 @@ function isValidJSONNumber(num: string): string | number {
   return num;
 }
 
-export function strip(expr: Expression): Expression {
+export function strip(expr: Expression): Expression | null {
   if (typeof expr === 'number') return expr;
   if (typeof expr === 'string') {
     if (expr[0] === "'" && expr[expr.length - 1] === "'") {
@@ -120,7 +124,8 @@ export function strip(expr: Expression): Expression {
     }
     return expr;
   }
-  if (Array.isArray(expr)) return expr.map((x) => strip(x));
+  if (Array.isArray(expr))
+    return expr.map((x) => strip(x ?? MISSING) ?? MISSING);
 
   if (typeof expr === 'object') {
     if ('num' in expr) {
@@ -130,12 +135,12 @@ export function strip(expr: Expression): Expression {
     } else if ('sym' in expr) {
       return expr.sym;
     } else if ('fn' in expr) {
-      return expr.fn.map((x) => strip(x));
+      return expr.fn.map((x) => strip(x ?? MISSING) ?? MISSING);
     } else if ('dict' in expr) {
       return {
         dict: Object.fromEntries(
           Object.entries(expr.dict).map((keyValue) => {
-            return [keyValue[0], strip(keyValue[1])];
+            return [keyValue[0], strip(keyValue[1]) ?? MISSING];
           })
         ),
       };
@@ -166,14 +171,14 @@ export function formatError(errors: ParsingDiagnostic[]): Expression {
   ];
 }
 
-export function validCortex(s: string): Expression {
+export function validCortex(s: string): Expression | null {
   const [value, errors] = parseCortex(s);
   if (errors && errors.length > 0) return formatError(errors);
   return strip(value);
 }
 
-export function invalidCortex(s: string): Expression {
+export function invalidCortex(s: string): Expression | null {
   const [value, errors] = parseCortex(s);
   if (errors && errors.length > 0) return formatError(errors);
-  return ['UnexpectedSuccess', strip(value as Expression)];
+  return ['UnexpectedSuccess', strip(value as Expression) ?? MISSING];
 }
