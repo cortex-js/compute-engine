@@ -93,7 +93,7 @@ export function splitGraphemes(string: string): string | string[] {
 
       result.push(
         String.fromCodePoint(
-          ...codePoints.slice(baseIndex, index - baseIndex + 1)
+          ...codePoints.slice(baseIndex, 2 * index - baseIndex + 1)
         )
       );
     } else if (isEmojiCombinator(next)) {
@@ -105,7 +105,9 @@ export function splitGraphemes(string: string): string | string[] {
       }
 
       result.push(
-        String.fromCodePoint(...codePoints.slice(baseIndex, index - baseIndex))
+        String.fromCodePoint(
+          ...codePoints.slice(baseIndex, 2 * index - baseIndex - 1)
+        )
       );
     } else if (isRegionalIndicator(code)) {
       // Some (but not all) flags are represented by a sequence of two

@@ -226,7 +226,7 @@ export type ParseLatexOptions = {
 
   /**
    * When a token is encountered at a position where a symbol could be
-   * parsed, if the token matches `promoteUnknwonSymbols` it will be
+   * parsed, if the token matches `promoteUnknownSymbols` it will be
    * accepted as a symbol (an `unknown-symbol` error will still be triggered
    * so that the caller can be notified). Otherwise, the symbol is rejected.
    */

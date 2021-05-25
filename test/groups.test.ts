@@ -49,13 +49,17 @@ describe('SEQUENCES AND PARENTHESES', () => {
       `['Sequence', 'a', 'c', 'Nothing']`
     );
     // Sequence with missing initial element
-    expect(expression(',c,b')).toMatchInlineSnapshot(`['', 'syntax-error']`); // @todo: could match the initial ","
+    expect(expression(',c,b')).toMatchInlineSnapshot(
+      `['Sequence', 'Nothing', 'c', 'b']`
+    );
   });
   test('Subsequences', () => {
     expect(expression('a,b;c,d,e;f;g,h')).toMatchInlineSnapshot(
       `['Sequence2', ['Sequence', 'a', 'b'], ['Sequence', 'c', 'd', 'ExponentialE'], 'f', ['Sequence', 'g', 'h']]`
     );
-    expect(expression(';;a;')).toMatchInlineSnapshot(`['', 'syntax-error']`); // @todo: could match the initial ";"
+    expect(expression(';;a;')).toMatchInlineSnapshot(
+      `['Sequence2', 'Nothing', 'Nothing', 'a', 'Nothing']`
+    );
   });
   test('Absolute value & Norm', () => {
     expect(expression('1+|a|+2')).toMatchInlineSnapshot(

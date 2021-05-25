@@ -28,9 +28,9 @@
     </header>
     <main>
         <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
-            yx5z
+          x= speed
         </math-field>
-        <!-- 1+|a+|2|+b| -->
+        <!-- 2{xy}     1+|a+|2|+b| -->
         <!-- ,c,b -->
         <!-- a,c, -->
         <!-- a,, c -->
@@ -86,7 +86,7 @@
     </main>
 
     <script type="module">
-        import { ComputeEngine, LatexSyntax } from '../dist/math-json.js';
+        import { ComputeEngine, LatexSyntax } from '../dist/math-json.esm.js';
 
         let errors = [];
         const defaultLatex = new LatexSyntax(
@@ -109,8 +109,21 @@
                             (err.arg ? ': ' + err.arg : '')
                         )
                     }
-                }
-            });
+                },
+          promoteUnknownSymbols: /[a-z]+/,
+          dictionary: 
+            [...LatexSyntax.getDictionary(),
+              {
+                name: 'Missing',
+                serialize: ''
+              },
+              {
+                name:'Speed',
+                trigger: { symbol: ['s', 'p', 'e', 'e', 'd'] }
+              }
+          ]
+            
+        });
         const rawLatex = new LatexSyntax(
             {
                 invisibleOperator: '',

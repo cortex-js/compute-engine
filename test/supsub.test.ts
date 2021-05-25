@@ -99,10 +99,10 @@ describe('SUPSUB', () => {
       `['Subscript', ['Power', ['Add', 'x', 1], 'n'], 0]`
     );
     expect(expression('^p_q{x+1}^n_0')).toMatchInlineSnapshot(
-      `[['Subscript', 'q'], 'expected-operand', 'syntax-error']`
+      `[['Subscript', ['Power', 'Missing', 'p'], 'q'], 'syntax-error']`
     ); // @todo: nope...
     expect(expression('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(
-      `[['Multiply', ['Subscript', 34], ['Subscript', ['Power', ['Add', 'x', 1], 'n'], 0]], 'expected-operand']`
+      `['Multiply', ['Subscript', ['Power', 'Missing', 12], 34], ['Subscript', ['Power', ['Add', 'x', 1], 'n'], 0]]`
     ); // @todo: nope...
   });
   test('Accents', () => {

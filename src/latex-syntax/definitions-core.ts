@@ -50,6 +50,8 @@ function parseSequence(head: string, prec: number, sep: LatexToken) {
     scanner.skipSpace();
     scanner.match(sep);
 
+    if (lhs === 'Missing') lhs = NOTHING;
+
     const result: Expression[] = [head, lhs ?? NOTHING];
     let done = false;
     while (!done) {

@@ -388,10 +388,10 @@ export class Scanner implements Scanner {
     if (typeof def.parse === 'function') {
       // Custom parser found
       let rhs = null;
-      [lhs, rhs] = def.parse(lhs, this, minPrec);
+      [lhs, rhs] = def.parse(lhs ?? 'Missing', this, minPrec);
       if (rhs === null) return null;
 
-      return this.applyInvisibleOperator(lhs, rhs);
+      return this.applyInvisibleOperator(lhs ?? 'Missing', rhs);
     }
 
     let prec = def.precedence;
@@ -401,7 +401,7 @@ export class Scanner implements Scanner {
     this.index += n;
     const rhs = this.matchExpression(prec);
     return this.applyInvisibleOperator(
-      ...this.applyOperator(def.parse as string, lhs, rhs)
+      ...this.applyOperator(def.parse as string, lhs ?? 'Missing', rhs)
     );
   }
 
@@ -844,14 +844,12 @@ export class Scanner implements Scanner {
     }
 
     if (
-      (def.trigger?.matchfix !== undefined ||
-        def.trigger?.infix !== undefined) &&
-      lhs !== null &&
-      rhs !== null
+      def.trigger?.matchfix !== undefined ||
+      def.trigger?.infix !== undefined
     ) {
       // infix
       if (def.associativity === 'non') {
-        return [null, [op, lhs, rhs]];
+        return [null, [op, lhs ?? 'Missing', rhs ?? 'Missing']];
       }
       if (getFunctionName(lhs) === op) {
         // Possible associativity
@@ -908,12 +906,7 @@ export class Scanner implements Scanner {
         }
         return [null, rhs];
       }
-      return [null, [op, lhs, rhs]];
-    }
-    if (def.trigger.infix !== undefined) {
-      // Infix, but either right or left operand missing
-      this.onError({ code: 'expected-operand' });
-      return [lhs, null];
+      return [null, [op, lhs ?? 'Missing', rhs ?? 'Missing']];
     }
 
     return [lhs, null];
@@ -1122,8 +1115,6 @@ export class Scanner implements Scanner {
     // 2. Do we have a prefix operator?
     //
     if (lhs === null) lhs = this.matchOperator('prefix');
-
-    if (lhs === null) return null;
 
     //
     // 3. Are there some infix operators?

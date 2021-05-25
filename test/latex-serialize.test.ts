@@ -111,6 +111,11 @@ describe('LATEX SERIALIZING', () => {
       latex([POWER, [MULTIPLY, 2, 'x'], [SUBTRACT, 1, 'n']])
     ).toMatchInlineSnapshot(`'(2x)^{1-n}'`);
   });
+  test('Missing', () => {
+    expect(
+      latex(['Equal', ['Multiply', 2, 2], 'Missing'])
+    ).toMatchInlineSnapshot(`'2\\times2=\\placeholder'`);
+  });
 });
 
 describe('LATEX', () => {

@@ -5,7 +5,7 @@
  *
  */
 
-import { splitGraphemes } from './grapheme-splitter';
+import { splitGraphemes } from '../../common/grapheme-splitter';
 
 // The 'special' tokens must be of length > 1 to distinguish
 // them from literals.

@@ -34,6 +34,7 @@
     "/dist"
   ],
   "main": "./dist/math-json.js",
+  "module": "./dist/math-json.esm.js",
   "types": "./dist/types/math-json.d.ts",
   "engines": {
     "npm": ">=6.14.8",

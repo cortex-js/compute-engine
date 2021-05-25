@@ -26,7 +26,7 @@ describe('SYMBOLS', () => {
     );
   });
   test('Errors', () => {
-    expect(expressionError('=')).toMatchInlineSnapshot(`'syntax-error'`);
+    expect(expressionError('=')).toMatchInlineSnapshot(`[]`);
     expect(expressionError('x_5')).toMatchInlineSnapshot(`[]`);
   });
 });

@@ -127,13 +127,21 @@ function buildProgress() {
 const ROLLUP = [
   {
     input: 'src/math-json.ts',
-    output: {
-      file: BUILD_DIR + 'math-json.js',
-      format: 'umd',
-      sourcemap: !PRODUCTION,
-      exports: 'named',
-      name: 'MathJson', // Required for UMD
-    },
+    output: [
+      {
+        format: 'es',
+        file: BUILD_DIR + 'math-json.esm.js',
+        sourcemap: !PRODUCTION,
+        exports: 'named',
+      },
+      {
+        file: BUILD_DIR + 'math-json.js',
+        format: 'umd',
+        sourcemap: !PRODUCTION,
+        exports: 'named',
+        name: 'MathJson', // Required for UMD
+      },
+    ],
     plugins: [
       buildProgress(),
       resolve({
@@ -154,13 +162,22 @@ const ROLLUP = [
 if (PRODUCTION) {
   ROLLUP.push({
     input: 'src/math-json.ts',
-    output: {
-      file: BUILD_DIR + 'math-json.min.js',
-      format: 'umd',
-      sourcemap: false,
-      exports: 'named',
-      name: 'MathJson', // Required for UMD
-    },
+    output: [
+      {
+        format: 'es',
+        file: BUILD_DIR + 'math-json.min.esm.js',
+        sourcemap: false,
+        exports: 'named',
+      },
+      ,
+      {
+        file: BUILD_DIR + 'math-json.min.js',
+        format: 'umd',
+        sourcemap: false,
+        exports: 'named',
+        name: 'MathJson', // Required for UMD
+      },
+    ],
     plugins: [
       buildProgress(),
       eslint(),

@@ -1,6 +1,25 @@
 import { ADD, DIVIDE, SUBTRACT, MULTIPLY, POWER } from '../src/common/utils';
 import { expression, expressionError, latex } from './utils';
 
+describe('RELATIONAL', () => {
+  test('Complete', () => {
+    expect(expression('x=1')).toMatchInlineSnapshot(`['Equal', 'x', 1]`);
+    expect(expression('x=1+1')).toMatchInlineSnapshot(
+      `['Equal', 'x', ['Add', 1, 1]]`
+    );
+    expect(expression('x+y=1+1')).toMatchInlineSnapshot(
+      `['Equal', ['Add', 'x', 'y'], ['Add', 1, 1]]`
+    );
+  });
+  test('Partial', () => {
+    expect(expression('x=')).toMatchInlineSnapshot(`['Equal', 'x', 'Missing']`);
+    expect(expression('=x')).toMatchInlineSnapshot(`['Equal', 'Missing', 'x']`);
+    expect(expression('2 \\times 2 = ')).toMatchInlineSnapshot(
+      `['Equal', ['Multiply', 2, 2], 'Missing']`
+    );
+  });
+});
+
 describe('ADD/SUBTRACT', () => {
   test('Add Valid forms', () => {
     expect(expression('1+2')).toMatchInlineSnapshot(`['Add', 1, 2]`);
