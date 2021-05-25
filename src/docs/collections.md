@@ -20,7 +20,6 @@ A series of expressions separated by a `;`.
 
 An unordered collection of unique elements.
 
-
 | MathJSON            | Latex                 |
 | :------------------ | :-------------------- |
 | `["Set", "x", "y"]` | `\lbrack x, y\rbrack` |
@@ -42,10 +41,10 @@ One or more expressions in a sequence, enclosed with parentheses.
 
 Use to represent function arguments, or to group arithmetic expressions.
 
-| MathJSON                         | Latex                                                      |
-| :------------------------------- | :--------------------------------------------------------- |
-| `["Parentheses", "x", "y", "7", "11"]` | `(x, y, 7, 11)`                                            |
-| `()`                             | `["Parentheses"]`                                                |
-| `(a, b, c)`                      | `["Parentheses", "a", "b", "c"]`                                 |
-| `(a, b; c, d)`                   | `["Parentheses", ["Sequence, "a", "b"], ["Sequence", "c", "d"]]` |
-| `a, (b, c)`                      | `["Sequence", "a", ["Parentheses", "b", "c"]]`                   |
+| MathJSON                               | Latex                                                            |
+| :------------------------------------- | :--------------------------------------------------------------- |
+| `["Parentheses", "x", "y", "7", "11"]` | `(x, y, 7, 11)`                                                  |
+| `()`                                   | `["Parentheses"]`                                                |
+| `(a, b, c)`                            | `["Parentheses", "a", "b", "c"]`                                 |
+| `(a, b; c, d)`                         | `["Parentheses", ["Sequence, "a", "b"], ["Sequence", "c", "d"]]` |
+| `a, (b, c)`                            | `["Sequence", "a", ["Parentheses", "b", "c"]]`                   |

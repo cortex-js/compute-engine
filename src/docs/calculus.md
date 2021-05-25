@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: 'mathjson'
 ---
+
 <script type='module'>
     import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
     renderMathInDocument({ 
@@ -19,6 +20,7 @@ sidebar:
 </script>
 
 # Calculus
+
 ### Lagrange Notation
 
 | Latex                 | MathJSON           |

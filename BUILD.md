@@ -4,8 +4,8 @@
 
 After cloning the repo:
 
--   `npm install` to install all the necessary modules, then:
--   `npm start` to do a `build watch` and launch a local server
+- `npm install` to install all the necessary modules, then:
+- `npm start` to do a `build watch` and launch a local server
 
 | `npm run`         |                                                                            |
 | ----------------- | -------------------------------------------------------------------------- |

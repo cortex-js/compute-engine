@@ -1,210 +1,206 @@
 <!DOCTYPE html>
 <html lang="en-US">
-
-<head>
+  <head>
     <meta charset="utf-8" />
     <title>MathJSON REPL</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="style.css" />
 
     <style>
-        code {
-            white-space: pre-wrap;
-        }
+      code {
+        white-space: pre-wrap;
+      }
 
-        h2 {
-            font-size: 1em;
-            padding: 0;
-            margin: 0;
-            color: #666;
-        }
+      h2 {
+        font-size: 1em;
+        padding: 0;
+        margin: 0;
+        color: #666;
+      }
     </style>
-    <script src='https://unpkg.com/mathlive/dist/mathlive.min.js'></script>
-</head>
+    <script src="https://unpkg.com/mathlive/dist/mathlive.min.js"></script>
+  </head>
 
-<body>
+  <body>
     <header>
-        <h1>MathJSON REPL</h1>
+      <h1>MathJSON REPL</h1>
     </header>
     <main>
-        <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
-            yx5z
-        </math-field>
-        <!-- 1+|a+|2|+b| -->
-        <!-- ,c,b -->
-        <!-- a,c, -->
-        <!-- a,, c -->
-        <!-- x{}_{p+1}^{q+1}x_{r+1}^{s+1} -->
-        <!-- 12+ should generate ["Add", 12]-->
-        <!-- \lbrack\rbrack -->
-        <!-- \foo  -->
-        <!-- a\le b \overline{z} \overrightarrow{ABC} -->
-        <!-- \partial^2_{x,y} f(x,y) -->
-        <!-- -0+0(\frac{0}{\frac{0}{0}}-0)+x^\pi -->
-        <!-- -0+0(\frac{0}{\frac{0}{0}}-0) -->
-        <!-- x_0 + x_{0} +  x_n + x_{n+1}-->
-        <!-- -2x5z\sqrt{y}\frac{3}{4}3\pi y} -->
-        <!-- \sin^{-1}\prime(x)      \sin^{-1}'(x) -- >
+      <math-field
+        id="mf"
+        class="mathfield"
+        style="width: 100%"
+        tabindex="0"
+        virtual-keyboard-mode="manual"
+      >
+        yx5z
+      </math-field>
+      <!-- 1+|a+|2|+b| -->
+      <!-- ,c,b -->
+      <!-- a,c, -->
+      <!-- a,, c -->
+      <!-- x{}_{p+1}^{q+1}x_{r+1}^{s+1} -->
+      <!-- 12+ should generate ["Add", 12]-->
+      <!-- \lbrack\rbrack -->
+      <!-- \foo  -->
+      <!-- a\le b \overline{z} \overrightarrow{ABC} -->
+      <!-- \partial^2_{x,y} f(x,y) -->
+      <!-- -0+0(\frac{0}{\frac{0}{0}}-0)+x^\pi -->
+      <!-- -0+0(\frac{0}{\frac{0}{0}}-0) -->
+      <!-- x_0 + x_{0} +  x_n + x_{n+1}-->
+      <!-- -2x5z\sqrt{y}\frac{3}{4}3\pi y} -->
+      <!-- \sin^{-1}\prime(x)      \sin^{-1}'(x) -- >
         <!-- "\begin{align*}\dot{x} & =\sigma(y-x) \\ \dot{y} & =\rho x-y-xz \\ \dot{z} & =-\beta z+xy\end{align*}" ->
         <!-- 2{xy} should create group -->
 
-        <!-- -(x) -->
-        <!-- -5-3-2 -->
-        <!-- -123, +456.789, -->
-        <!-- x_{0} -->
-        <!-- -123, 456.789, -->
-        <!-- |(a+|b|+1)| -->
-        <!-- i, 2i, -i -->
-        <!-- (a,,b) -->
-        <!-- x_5 -->
-        <!-- (\mathtt{dead\;beef})_{16} -->
-        <!-- (x,,2) -->
-        <!-- $$(deadbeef)_{16}$$ -->
+      <!-- -(x) -->
+      <!-- -5-3-2 -->
+      <!-- -123, +456.789, -->
+      <!-- x_{0} -->
+      <!-- -123, 456.789, -->
+      <!-- |(a+|b|+1)| -->
+      <!-- i, 2i, -i -->
+      <!-- (a,,b) -->
+      <!-- x_5 -->
+      <!-- (\mathtt{dead\;beef})_{16} -->
+      <!-- (x,,2) -->
+      <!-- $$(deadbeef)_{16}$$ -->
 
+      <!-- \huge x \text{y} -->
+      <!-- \scriptscriptstyle x \text{y} -->
+      <!-- \sqrt[\Huge 3]{29} -->
+      <!-- x^{\binom{n}{k}} -->
+      <!-- \binom12 \textstyle \binom34 \scriptstyle \binom56 \displaystyle \binom78 \scriptstyle \binom90 -->
+      <!-- \int^b_a x^2 dx -->
+      <!-- \int^b_a\int^c_d x^2 dx dy -->
+      <!-- \int x^2 + x = 0 -->
+      <!-- \int x^2 + x dx = 0 -->
+      <!-- \int (x^2 + x) dx = 0 -->
 
-        <!-- \huge x \text{y} -->
-        <!-- \scriptscriptstyle x \text{y} -->
-        <!-- \sqrt[\Huge 3]{29} -->
-        <!-- x^{\binom{n}{k}} -->
-        <!-- \binom12 \textstyle \binom34 \scriptstyle \binom56 \displaystyle \binom78 \scriptstyle \binom90 -->
-        <!-- \int^b_a x^2 dx -->
-        <!-- \int^b_a\int^c_d x^2 dx dy -->
-        <!-- \int x^2 + x = 0 -->
-        <!-- \int x^2 + x dx = 0 -->
-        <!-- \int (x^2 + x) dx = 0 -->
-
-        <h2>Latex</h2>
-        <div class="output" id="latex"></div>
-        <h2>MathJSON Canonical Form</h2>
-        <div class="output" id="mathjson-canonical"></div>
-        <h2>MathJSON Full Form</h2>
-        <div class="output" id="mathjson-full"></div>
-        <h2>MathJSON Raw</h2>
-        <div class="output" id="mathjson-raw"></div>
-        <h2>MathASCII</h2>
-        <div class="output" id="mathascii"></div>
+      <h2>Latex</h2>
+      <div class="output" id="latex"></div>
+      <h2>MathJSON Canonical Form</h2>
+      <div class="output" id="mathjson-canonical"></div>
+      <h2>MathJSON Full Form</h2>
+      <div class="output" id="mathjson-full"></div>
+      <h2>MathJSON Raw</h2>
+      <div class="output" id="mathjson-raw"></div>
+      <h2>MathASCII</h2>
+      <div class="output" id="mathascii"></div>
     </main>
 
     <script type="module">
-        import { ComputeEngine, LatexSyntax } from '../dist/math-json.js';
+      import { ComputeEngine, LatexSyntax } from '../dist/math-json.js';
 
-        let errors = [];
-        const defaultLatex = new LatexSyntax(
-            {
-                onError: (err) => {
-                    if (err.before && err.after) {
-                        errors.push(err.code +
-                            (err.arg ? ': ' + err.arg : '') +
-                            '\n' +
-                            '|  ' +
-                            err.before +
-                            err.after +
-                            '\n' +
-                            '|  ' +
-                            String(' ').repeat(err.before.length) +
-                            '▲',
-                        )
-                    } else {
-                        errors.push(err.code +
-                            (err.arg ? ': ' + err.arg : '')
-                        )
-                    }
-                }
-            });
-        const rawLatex = new LatexSyntax(
-            {
-                invisibleOperator: '',
-                superscriptOperator: '',
-                subscriptOperator: '',
-                // parseArgumentsOfUnknownLatexCommands: false,
-                invisiblePlusOperator: '',
-                dictionary: [],
-                promoteUnknownSymbols: /./,
+      let errors = [];
+      const defaultLatex = new LatexSyntax({
+        onError: (err) => {
+          if (err.before && err.after) {
+            errors.push(
+              err.code +
+                (err.arg ? ': ' + err.arg : '') +
+                '\n' +
+                '|  ' +
+                err.before +
+                err.after +
+                '\n' +
+                '|  ' +
+                String(' ').repeat(err.before.length) +
+                '▲'
+            );
+          } else {
+            errors.push(err.code + (err.arg ? ': ' + err.arg : ''));
+          }
+        },
+      });
+      const rawLatex = new LatexSyntax({
+        invisibleOperator: '',
+        superscriptOperator: '',
+        subscriptOperator: '',
+        // parseArgumentsOfUnknownLatexCommands: false,
+        invisiblePlusOperator: '',
+        dictionary: [],
+        promoteUnknownSymbols: /./,
 
-                parseArgumentsOfUnknownLatexCommands: true,
-                parseNumbers: false,
-                onError: (err) =>
-                    errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
-            });
-        const computeEngine = new ComputeEngine();
+        parseArgumentsOfUnknownLatexCommands: true,
+        parseNumbers: false,
+        onError: (err) =>
+          errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
+      });
+      const computeEngine = new ComputeEngine();
 
-        const mf = document.getElementById('mf');
-        mf.addEventListener('input', (ev) => updateContent(mf));
-        updateContent(mf);
+      const mf = document.getElementById('mf');
+      mf.addEventListener('input', (ev) => updateContent(mf));
+      updateContent(mf);
 
-        function updateContent(mf) {
-            const latex = mf.getValue('latex-expanded');
-            try {
+      function updateContent(mf) {
+        const latex = mf.getValue('latex-expanded');
+        try {
+          document.getElementById('latex').innerHTML = escapeHtml(latex);
 
-                document.getElementById('latex').innerHTML = escapeHtml(
-                    latex
-                );
+          errors = [];
 
-                errors = [];
+          let expr = defaultLatex.parse(latex);
 
-                let expr = defaultLatex.parse(latex);
+          const canonicalExpr = computeEngine.format(expr, ['canonical']);
 
-                const canonicalExpr = computeEngine.format(expr, ['canonical']);
+          document.getElementById('mathjson-canonical').innerHTML =
+            escapeHtml(JSON.stringify(canonicalExpr, null, 2)) +
+            '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
+            errors.join('<br>') +
+            '</div><br><hr>' +
+            escapeHtml(defaultLatex.serialize(canonicalExpr)) +
+            '<br><hr>';
 
-                document.getElementById('mathjson-canonical').innerHTML =
-                    escapeHtml(JSON.stringify(canonicalExpr, null, 2)) +
-                    '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
-                    errors.join('<br>') +
-                    '</div><br><hr>' +
-                    escapeHtml(defaultLatex.serialize(canonicalExpr)) + '<br><hr>'
+          errors = [];
+          const fullFormExpr = computeEngine.format(expr, ['full']);
 
-                errors = [];
-                const fullFormExpr = computeEngine.format(expr, ['full']);
+          document.getElementById('mathjson-full').innerHTML =
+            escapeHtml(JSON.stringify(fullFormExpr, null, 2)) +
+            '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
+            errors.join('<br>') +
+            '</div><br><hr>' +
+            escapeHtml(defaultLatex.serialize(canonicalExpr)) +
+            '<br><hr>';
 
+          errors = [];
+          expr = computeEngine.format(rawLatex.parse(latex), ['full']);
 
-                document.getElementById('mathjson-full').innerHTML =
-                    escapeHtml(JSON.stringify(fullFormExpr, null, 2)) +
-                    '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
-                    errors.join('<br>') +
-                    '</div><br><hr>' +
-                    escapeHtml(defaultLatex.serialize(canonicalExpr)) + '<br><hr>'
+          document.getElementById('mathjson-raw').innerHTML =
+            escapeHtml(JSON.stringify(expr, null)) +
+            '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
+            errors.join('<br>') +
+            '</div>';
 
-                errors = [];
-                expr = computeEngine.format(rawLatex.parse(latex), ['full']);
-
-                document.getElementById('mathjson-raw').innerHTML =
-                    escapeHtml(JSON.stringify(expr, null)) +
-                    '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
-                    errors.join('<br>') +
-                    '</div>';
-
-                document.getElementById(
-                    'mathascii'
-                ).innerHTML = escapeHtml(mf.getValue('ASCIIMath'));
-            } catch (e) {
-                console.error("Error converting %c " + latex + '%c ' +
-                    e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
-            }
+          document.getElementById('mathascii').innerHTML = escapeHtml(
+            mf.getValue('ASCIIMath')
+          );
+        } catch (e) {
+          console.error(
+            'Error converting %c ' + latex + '%c ' + e.toString(),
+            'color: red;  background: hsla(0, 60%, 90%)',
+            'background: transparent'
+          );
         }
+      }
 
-
-
-
-        function escapeHtml(string) {
-            return String(string).replace(/[&<>"'`=/\u200b]/g, function (
-                s
-            ) {
-                return (
-                    {
-                        '&': '&amp;',
-                        '<': '&lt;',
-                        '>': '&gt;',
-                        '"': '&quot;',
-                        "'": '&#39;',
-                        '/': '&#x2F;',
-                        '`': '&#x60;',
-                        '=': '&#x3D;',
-                        '\u200b': '&amp;#zws;',
-                    }[s] || s
-                );
-            });
-        }
+      function escapeHtml(string) {
+        return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {
+          return (
+            {
+              '&': '&amp;',
+              '<': '&lt;',
+              '>': '&gt;',
+              '"': '&quot;',
+              "'": '&#39;',
+              '/': '&#x2F;',
+              '`': '&#x60;',
+              '=': '&#x3D;',
+              '\u200b': '&amp;#zws;',
+            }[s] || s
+          );
+        });
+      }
     </script>
-</body>
-
+  </body>
 </html>
