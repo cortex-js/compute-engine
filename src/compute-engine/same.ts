@@ -19,7 +19,8 @@ import { chop } from './utils';
  * `{ sym: 'Pi', wikidata: 'Q167' }`
  * are not the same (greek letter vs. 3.1415...)
  */
-export function same(lhs: Expression, rhs: Expression): boolean {
+export function same(lhs: Expression | null, rhs: Expression | null): boolean {
+  if (!lhs || !rhs) return false;
   if (
     typeof lhs === 'object' &&
     typeof rhs === 'object' &&

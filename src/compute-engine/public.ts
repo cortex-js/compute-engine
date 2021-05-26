@@ -38,10 +38,7 @@ export type Dictionary = {
  * When a new scope is created with `pushScope()` or when creating a new
  * engine instance, new instances of `CompiledDictionary` are created as needed.
  */
-export type CompiledDictionary = Map<
-  string,
-  FunctionDefinition | SetDefinition | SymbolDefinition
->;
+export type CompiledDictionary = Map<string, Definition>;
 
 /**
  * A scope is a set of names in a dictionary that are bound (defined) in
@@ -459,7 +456,7 @@ export declare class ComputeEngine {
   evaluate(exp: Expression): Promise<Expression | null>;
 
   /** Return the domain of the expression */
-  domain(expr: Expression): Expression;
+  domain(expr: Expression): Expression | null;
 
   /** Test if `lhs` is a subset of `rhs`.
    *

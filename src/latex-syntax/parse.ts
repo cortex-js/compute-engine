@@ -16,6 +16,7 @@ import {
   DIVIDE,
   LATEX_TOKENS,
   NOTHING,
+  MISSING,
 } from '../common/utils';
 import { tokensToString } from './core/tokenizer';
 import { IndexedLatexDictionary } from './definitions';
@@ -388,11 +389,11 @@ export class Scanner implements Scanner {
 
     if (typeof def.parse === 'function') {
       // Custom parser found
-      let rhs = null;
+      let rhs: Expression | null = null;
       [lhs, rhs] = def.parse(lhs ?? 'Missing', this, minPrec);
       if (rhs === null) return null;
 
-      return this.applyInvisibleOperator(lhs ?? 'Missing', rhs);
+      return this.applyInvisibleOperator(lhs, rhs);
     }
 
     let prec = def.precedence;
@@ -868,7 +869,7 @@ export class Scanner implements Scanner {
             if (isFunctionObject(lhs)) {
               return [null, lhs.fn.concat(getTail(rhs))];
             }
-          } else {
+          } else if (rhs) {
             if (Array.isArray(lhs)) {
               lhs.push(rhs);
             }
@@ -879,36 +880,36 @@ export class Scanner implements Scanner {
           return [null, lhs];
         }
         if (def.associativity === 'left') {
-          return [null, [op, lhs, rhs]];
+          return [null, [op, lhs ?? MISSING, rhs ?? MISSING]];
         }
         // Right-associative
         if (Array.isArray(lhs)) {
-          return [null, [op, lhs[1], [op, lhs[2], rhs]]];
+          return [null, [op, lhs[1], [op, lhs[2], rhs ?? MISSING]]];
         }
         if (isFunctionObject(lhs)) {
-          lhs.fn[2] = [op, lhs.fn[2], rhs];
+          lhs.fn[2] = [op, lhs.fn[2], rhs ?? MISSING];
         }
         return [null, lhs];
       } else if (getFunctionName(rhs) === op) {
         // Possible associativity
         if (def.associativity === 'both') {
           if (Array.isArray(rhs)) {
-            rhs.splice(1, 0, lhs);
+            rhs.splice(1, 0, lhs ?? MISSING);
           }
           if (isFunctionObject(rhs)) {
-            rhs.fn.splice(1, 0, lhs);
+            rhs.fn.splice(1, 0, lhs ?? MISSING);
           }
           return [null, rhs];
         }
         if (def.associativity === 'right') {
-          return [null, [op, lhs, rhs]];
+          return [null, [op, lhs ?? MISSING, rhs ?? MISSING]];
         }
         // Left-associative
         if (Array.isArray(rhs)) {
-          return [null, [op, rhs[1], [op, rhs[2], lhs]]];
+          return [null, [op, rhs[1], [op, rhs[2], lhs ?? MISSING]]];
         }
         if (isFunctionObject(rhs)) {
-          rhs.fn[2] = [op, rhs.fn[2], lhs];
+          rhs.fn[2] = [op, rhs.fn[2], lhs ?? MISSING];
         }
         return [null, rhs];
       }

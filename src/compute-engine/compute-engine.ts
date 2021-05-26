@@ -32,7 +32,11 @@ import {
   getSymbolName,
   getTail,
 } from '../common/utils';
-import { isSetDefinition } from './dictionary/utils';
+import {
+  isFunctionDefinition,
+  isSetDefinition,
+  isSymbolDefinition,
+} from './dictionary/utils';
 import { same } from './same';
 import { CortexError } from './utils';
 
@@ -98,7 +102,11 @@ export class ComputeEngine {
 
     // If there are some unhandled warnings, or warnings signaled during the
     // warning handler, propagate them.
-    if (parentScope && this.context.warnings.length > 0) {
+    if (
+      parentScope &&
+      this.context.warnings &&
+      this.context.warnings.length > 0
+    ) {
       if (!parentScope.warnings) {
         parentScope.warnings = [...this.context.warnings];
       } else {
@@ -114,7 +122,10 @@ export class ComputeEngine {
 
   shouldContinueExecution(): boolean {
     if (this.context.timeLimit) {
-      if (this.context.deadline < global.performance.now()) {
+      if (
+        this.context.deadline !== undefined &&
+        this.context.deadline < global.performance.now()
+      ) {
         throw new CortexError({
           message: 'timeout', // @todo: should capture stack
         });
@@ -131,49 +142,49 @@ export class ComputeEngine {
 
   getFunctionDefinition(name: string): FunctionDefinition | null {
     let scope = this.context;
-    let def = null;
+    let def: FunctionDefinition | undefined = undefined;
     while (scope && !def) {
-      def = scope.dictionary.get(name);
-      if (def && !('signatures' in def)) def = null;
+      def = scope.dictionary?.get(name);
+      if (!isFunctionDefinition(def)) def = undefined;
       if (!def) scope = scope.parentScope;
     }
     if (def) def.scope = scope;
-    return def;
+    return def ?? null;
   }
   getSymbolDefinition(name: string): SymbolDefinition | null {
     let scope = this.context;
-    let def = null;
+    let def: Definition | undefined = undefined;
     while (scope && !def) {
-      def = scope.dictionary.get(name);
-      if (def && !('constant' in def)) def = null;
+      def = scope.dictionary?.get(name);
+      if (!isSymbolDefinition(def)) def = undefined;
       if (!def) scope = scope.parentScope;
     }
     if (def) def.scope = scope;
-    return def;
+    return def ?? null;
   }
   getSetDefinition(name: string): SetDefinition | null {
     let scope = this.context;
-    let def = null;
+    let def: Definition | undefined = undefined;
     while (scope && !def) {
-      def = scope.dictionary.get(name);
-      if (!isSetDefinition(def)) def = null;
+      def = scope.dictionary?.get(name);
+      if (!isSetDefinition(def)) def = undefined;
       if (!def) scope = scope.parentScope;
     }
     if (def) def.scope = scope;
-    return def;
+    return def ?? null;
   }
   getDefinition(name: string): Definition | null {
     let scope = this.context;
-    let def = null;
+    let def: Definition | undefined = undefined;
     while (scope && !def) {
-      def = scope.dictionary.get(name);
+      def = scope.dictionary?.get(name);
       if (!def) scope = scope.parentScope;
     }
     if (def) def.scope = scope;
-    return def;
+    return def ?? null;
   }
 
-  signal(sig: ErrorSignal | WarningSignal): void {
+  signal(_sig: ErrorSignal | WarningSignal): void {
     // @todo
     return;
   }
@@ -181,7 +192,7 @@ export class ComputeEngine {
   /**
    * Return true if lhs is a subset or equal  rhs
    */
-  isSubsetOf(lhs: Expression, rhs: Expression): boolean {
+  isSubsetOf(lhs: Expression | null, rhs: Expression | null): boolean {
     if (!lhs || !rhs) return false;
     if (typeof lhs === 'string' && lhs === rhs) return true;
     if (rhs === 'Anything') return true;
@@ -413,7 +424,7 @@ export function format(
   options?: {
     dictionaries?: Readonly<Dictionary>[];
   }
-): Expression {
+): Expression | null {
   return formatWithEngine(
     expr,
     Array.isArray(forms) ? forms : [forms],

@@ -260,7 +260,7 @@ export function getDomainsDictionary(): Dictionary {
     let count = 0;
     let parents: string[] = [domain];
     while (count < 512 && !found) {
-      const parent = parents.pop();
+      const parent = parents.pop()!;
       found = parent === 'Anything';
       if (!found) parents = [...parent, ...result[parent].supersets];
       count++;

@@ -157,6 +157,38 @@ const ROLLUP = [
       include: ['src/**'],
     },
   },
+  {
+    input: 'src/compute-engine.ts',
+    output: [
+      {
+        format: 'es',
+        file: BUILD_DIR + 'compute-engine.esm.js',
+        sourcemap: !PRODUCTION,
+        exports: 'named',
+      },
+      {
+        file: BUILD_DIR + 'compute-engine.js',
+        format: 'umd',
+        sourcemap: !PRODUCTION,
+        exports: 'named',
+        name: 'ComputeEngine', // Required for UMD
+      },
+    ],
+    plugins: [
+      buildProgress(),
+      resolve({
+        browser: true,
+        // preferBuiltins: true,
+      }),
+      commonjs(),
+      typescript(TYPESCRIPT_OPTIONS),
+    ],
+    watch: {
+      clearScreen: true,
+      exclude: 'node_modules/**',
+      include: ['src/**'],
+    },
+  },
 ];
 
 if (PRODUCTION) {
@@ -176,6 +208,35 @@ if (PRODUCTION) {
         sourcemap: false,
         exports: 'named',
         name: 'MathJson', // Required for UMD
+      },
+    ],
+    plugins: [
+      buildProgress(),
+      eslint(),
+      resolve({
+        browser: true,
+      }),
+      commonjs(),
+      typescript(TYPESCRIPT_OPTIONS),
+      terser(TERSER_OPTIONS),
+    ],
+  });
+  ROLLUP.push({
+    input: 'src/compute-engine.ts',
+    output: [
+      {
+        format: 'es',
+        file: BUILD_DIR + 'compute-engine.min.esm.js',
+        sourcemap: false,
+        exports: 'named',
+      },
+      ,
+      {
+        file: BUILD_DIR + 'compute-engine.min.js',
+        format: 'umd',
+        sourcemap: false,
+        exports: 'named',
+        name: 'ComputeEngine', // Required for UMD
       },
     ],
     plugins: [

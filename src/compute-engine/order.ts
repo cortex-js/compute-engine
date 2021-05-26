@@ -30,7 +30,7 @@ export function order(a: Expression, b: Expression): number {
 
   const lenA = getExprLength(a);
   const lenB = getExprLength(b);
-  if (lenA === lenB) {
+  if (lenA === lenB && lenA > 0) {
     // Order arg by arg
     for (let i = 1; i <= lenA; i++) {
       const comp = order(getArg(a, i) ?? MISSING, getArg(b, i) ?? MISSING);
@@ -116,8 +116,6 @@ function getExprLength(expr: Expression | null): number {
       .map(getExprLength)
       .reduce((acc: number, x: number) => acc + x, 0);
   }
-  if (typeof expr === 'string') return 1;
-  if (getSymbolName(expr) !== null) return 1;
   return 0;
 }
 

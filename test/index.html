@@ -27,7 +27,7 @@
     </header>
     <main>
         <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
-          x= speed
+          3\times x+1
         </math-field>
         <!-- 2{xy}     1+|a+|2|+b| -->
         <!-- ,c,b -->
@@ -84,7 +84,8 @@
     </main>
 
     <script type="module">
-        import { ComputeEngine, LatexSyntax } from '../dist/math-json.esm.js';
+        import {  LatexSyntax } from '../dist/math-json.esm.js';
+        import { ComputeEngine } from '../dist/compute-engine.esm.js';
 
         let errors = [];
         const defaultLatex = new LatexSyntax(
@@ -139,6 +140,25 @@
             });
         const computeEngine = new ComputeEngine();
 
+        console.log(defaultLatex.parse('3\\times x + 1'));
+        console.log(defaultLatex.parse('1 + x + x + x'));
+
+        console.log(
+          computeEngine.canonical(defaultLatex.parse('3\\times x + 1'))
+        );
+        console.log(
+          computeEngine.canonical(defaultLatex.parse('1 + x + x + x'))
+        );
+        console.log(
+          await computeEngine.evaluate(defaultLatex.parse('3\\times x + 1')),
+          await computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
+        );
+
+        console.log(computeEngine.same(
+          computeEngine.evaluate(defaultLatex.parse('3\\times x + 1')),
+          computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
+        ));
+
         const mf = document.getElementById('mf');
         mf.addEventListener('input', (ev) => updateContent(mf));
         updateContent(mf);
@@ -192,7 +212,7 @@
                     e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
             }
         }
-      }
+      
 
       function escapeHtml(string) {
         return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {

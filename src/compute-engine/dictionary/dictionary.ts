@@ -60,7 +60,7 @@ export function getDefaultDictionaries(
   }
   const result: Readonly<Dictionary>[] = [];
   for (const category of categories) {
-    result.push(DICTIONARY[category]);
+    if (DICTIONARY[category]) result.push(DICTIONARY[category]!);
   }
   return result;
 }
@@ -277,7 +277,7 @@ function normalizeDefinition(
   def: number | FunctionDefinition | SymbolDefinition | SetDefinition,
   engine: ComputeEngine
 ): [
-  def: FunctionDefinition | SymbolDefinition | SetDefinition,
+  def: null | FunctionDefinition | SymbolDefinition | SetDefinition,
   error?: string
 ] {
   if (typeof def === 'number') {
@@ -295,7 +295,7 @@ function normalizeDefinition(
   let domain = def.domain;
 
   if (isSymbolDefinition(def)) {
-    let warning;
+    let warning: string | undefined;
     if (!domain) {
       warning = 'no domain provided.';
       domain = 'Anything';
@@ -304,20 +304,22 @@ function normalizeDefinition(
     def = {
       domain,
       constant: false,
-      ...def,
+      ...(def as Partial<SymbolDefinition>),
     };
     return [def, warning];
   }
 
   if (isCollectionDefinition(def) || engine.isSubsetOf(domain, 'Collection')) {
-    let collectionDef = { ...(def as CollectionDefinition) };
-    collectionDef = {
-      iterable: collectionDef.iterator !== undefined,
-      indexable: collectionDef.at !== undefined,
-      countable: collectionDef.size !== undefined,
-      ...(def as CollectionDefinition),
-    };
-    return [collectionDef, undefined];
+    return [
+      {
+        domain: 'Collection',
+        iterable: (def as CollectionDefinition).iterator !== undefined,
+        indexable: (def as CollectionDefinition).at !== undefined,
+        countable: (def as CollectionDefinition).size !== undefined,
+        ...(def as Partial<CollectionDefinition>),
+      },
+      undefined,
+    ];
   }
 
   if (isFunctionDefinition(def) || engine.isSubsetOf(domain, 'Function')) {
@@ -342,13 +344,13 @@ function normalizeDefinition(
       signatures: [],
       ...(def as FunctionDefinition),
     } as FunctionDefinition;
-    let warning: string;
-    if (functionDef.signatures.length === 0) {
+    let warning: string | undefined;
+    if (!functionDef.signatures || functionDef.signatures.length === 0) {
       warning = `no function signature provided.`;
     } else if (functionDef.signatures.length === 1) {
       const sig = functionDef.signatures[0];
       if (sig.result === 'Boolean' || sig.result === 'MaybeBoolean') {
-        if (sig.args.length === 2) {
+        if (sig.args && sig.args.length === 2) {
           if (
             (sig.args[0] === 'Boolean' || sig.args[0] === 'MaybeBoolean') &&
             (sig.args[1] === 'Boolean' || sig.args[1] === 'MaybeBoolean')
@@ -381,7 +383,7 @@ function normalizeDefinition(
         {
           domain: inferredDomain,
           constant: false,
-          ...(def as SymbolDefinition),
+          ...(def as Partial<SymbolDefinition>),
         },
         inferredDomain !== domain ? 'inferred domain "${inferredDomain}"' : '',
       ];
@@ -449,7 +451,7 @@ function validateDictionary(
     if (isCollectionDefinition(def)) {
       // @todo
     }
-    if (isFunctionDefinition(def)) {
+    if (isFunctionDefinition(def) && def.signatures) {
       // Validate signatures
       for (const sig of def.signatures) {
         if (
