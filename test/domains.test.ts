@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../src/math-json';
+import { ComputeEngine } from '../src/compute-engine';
 import './utils';
 
 const engine = new ComputeEngine();

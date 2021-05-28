@@ -1,4 +1,5 @@
-import { ComputeEngine } from '../src/math-json';
+import { ComputeEngine } from '../src/compute-engine';
+import type { Expression } from '../src/public';
 import { latex } from './utils';
 
 export const engine = new ComputeEngine();
@@ -6,7 +7,7 @@ export const engine = new ComputeEngine();
 /*
     [a, b, compare(a,b)]
 */
-const exprs = [
+const exprs: Expression[] = [
   [1, 1, 0], // 1 === 1
   [1, 0, 1], // 1 > 0
   [2, 5, -1],
@@ -19,11 +20,11 @@ const exprs = [
   ['Pi', 1, 1],
   ['Pi', 4, -1],
 
-  [1, 'x', undefined],
-  ['x', 1, undefined],
-  ['x', 'y', undefined],
-  ['x', ['Foo'], undefined],
-  [['Foo'], 'x', undefined],
+  [1, 'x', (undefined as unknown) as Expression],
+  ['x', 1, (undefined as unknown) as Expression],
+  ['x', 'y', (undefined as unknown) as Expression],
+  ['x', ['Foo'], (undefined as unknown) as Expression],
+  [['Foo'], 'x', (undefined as unknown) as Expression],
 
   [['Add', 'x', 1], ['Add', 'x', 1], 0],
   [['Add', 1, 'x'], ['Add', 'x', 1], -1],

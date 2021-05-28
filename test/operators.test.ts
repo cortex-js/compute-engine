@@ -1,4 +1,5 @@
 import { ADD, DIVIDE, SUBTRACT, MULTIPLY, POWER } from '../src/common/utils';
+import { Expression } from '../src/public';
 import { expression, expressionError, latex } from './utils';
 
 describe('RELATIONAL', () => {
@@ -39,10 +40,12 @@ describe('ADD/SUBTRACT', () => {
   });
   test('Subtract Invalid forms', () => {
     expect(latex([SUBTRACT])).toMatchInlineSnapshot(`'syntax-error'`);
-    expect(latex([SUBTRACT, null])).toMatchInlineSnapshot(`''`);
-    expect(latex([SUBTRACT, undefined])).toMatchInlineSnapshot(
-      `'syntax-error'`
-    );
+    expect(
+      latex([SUBTRACT, (null as unknown) as Expression])
+    ).toMatchInlineSnapshot(`''`);
+    expect(
+      latex([SUBTRACT, (undefined as unknown) as Expression])
+    ).toMatchInlineSnapshot(`'syntax-error'`);
     expect(latex([SUBTRACT, 1])).toMatchInlineSnapshot(`'1'`);
     expect(latex([SUBTRACT, 1, 2, 3])).toMatchInlineSnapshot(`'1-2-3'`);
   });
@@ -60,8 +63,11 @@ describe('MULTIPLY', () => {
   });
   test('Multiply Invalid forms', () => {
     expect(latex([MULTIPLY])).toMatchInlineSnapshot(`'syntax-error'`);
-    expect(latex([MULTIPLY, null])).toMatchInlineSnapshot(`''`);
-    expect(latex([MULTIPLY, undefined])).toMatchInlineSnapshot(`
+    expect(
+      latex([MULTIPLY, (null as unknown) as Expression])
+    ).toMatchInlineSnapshot(`''`);
+    expect(latex([MULTIPLY, (undefined as unknown) as Expression]))
+      .toMatchInlineSnapshot(`
       'syntax-error
       syntax-error'
     `);
@@ -85,8 +91,11 @@ describe('DIVIDE', () => {
             syntax-error'
         `);
     expect(latex([DIVIDE, 1])).toMatchInlineSnapshot(`'1'`);
-    expect(latex([DIVIDE, null])).toMatchInlineSnapshot(`''`);
-    expect(latex([DIVIDE, undefined])).toMatchInlineSnapshot(`
+    expect(
+      latex([DIVIDE, (null as unknown) as Expression])
+    ).toMatchInlineSnapshot(`''`);
+    expect(latex([DIVIDE, (undefined as unknown) as Expression]))
+      .toMatchInlineSnapshot(`
       'syntax-error
       syntax-error'
     `);

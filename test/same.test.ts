@@ -1,4 +1,5 @@
-import { ComputeEngine } from '../src/math-json';
+import { ComputeEngine } from '../src/compute-engine';
+import { Expression } from '../src/public';
 import { latex } from './utils';
 
 export const engine = new ComputeEngine();
@@ -26,7 +27,7 @@ const sameExprs = [
   [{ dict: { Alpha: 'a', Beta: 'b' } }, { dict: { Alpha: 'a', Beta: 'b' } }],
 ];
 
-const notSameExprs = [
+const notSameExprs: Expression[] = [
   [1, 0],
   [2, 5],
 
