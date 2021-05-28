@@ -1,4 +1,5 @@
 import { POWER, INVERSE_FUNCTION } from '../src/common/utils';
+import { Expression } from '../src/public';
 import { expression, latex } from './utils';
 
 describe('POWER', () => {
@@ -7,8 +8,11 @@ describe('POWER', () => {
             'syntax-error
             syntax-error'
         `);
-    expect(latex([POWER, null])).toMatchInlineSnapshot(`''`);
-    expect(latex([POWER, undefined])).toMatchInlineSnapshot(`
+    expect(
+      latex([POWER, (null as unknown) as Expression])
+    ).toMatchInlineSnapshot(`''`);
+    expect(latex([POWER, (undefined as unknown) as Expression]))
+      .toMatchInlineSnapshot(`
             'syntax-error
             syntax-error'
         `);

@@ -12,7 +12,6 @@ describe('ROOT FUNCTION', () => {
   test('Invalid forms', () => {
     expect(expression('\\sqrt')).toMatchInlineSnapshot(`['Sqrt']`);
     expect(expression('\\sqrt{}')).toMatchInlineSnapshot(`['Sqrt']`);
-    expect(expression('1-')).toMatchInlineSnapshot(`[1, 'syntax-error']`);
     expect(expression('\\sqrt{1}[3]')).toMatchInlineSnapshot(
       `[1, 'syntax-error']`
     );
