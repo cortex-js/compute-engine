@@ -115,7 +115,7 @@ export function combine<T>(
   // If we haven't captured any values, return an empty result (`value === null`)
   result.value = results.length > 0 ? f(...results) : null;
 
-  if (msg) result.error(result.value, msg);
+  if (msg) result.error(result.value!, msg);
 
   if (errors) for (const err of errors) result.copyDiagnostics(err);
 
@@ -153,7 +153,7 @@ export function literal(value: string): Combinator<string> {
   //
   // Special case when value is a single character
   //
-  if (value.length === 1) return codepoint(value.codePointAt(0));
+  if (value.length === 1) return codepoint(value.codePointAt(0)!);
 
   //
   // General case: value is more than a single char
@@ -174,7 +174,7 @@ export function literal(value: string): Combinator<string> {
  */
 export function fancyLiteral(value: string): Combinator<string> {
   if (REVERSE_FANCY_UNICODE.has(value)) {
-    const fancyList = REVERSE_FANCY_UNICODE.get(value);
+    const fancyList = REVERSE_FANCY_UNICODE.get(value)!;
     return [
       `**_\`${value}\`_**`,
       (parser) => {
@@ -272,7 +272,7 @@ export function best<IR>(cs: Combinator[]): Combinator<IR> {
     `best(${cs.map((x) => x[0]).join(' | ')})`,
     (parser: Parser): Result<IR> => {
       const result = new Result<IR>(parser);
-      let best: Result<IR> = null;
+      let best: Result<IR> | null = null;
       for (const c of cs) {
         const res = parser.parse(c);
         if (res.isSuccess && (!best || res.end > best.end)) best = res;
@@ -299,7 +299,7 @@ export function either<IR = any>(
     (parser: Parser): Result => {
       // Pick the first alternative that succeeds
       const start = parser.offset;
-      let error: Result;
+      let error: Result | undefined;
       for (const c of cs) {
         parser.skipTo(start);
         const result = parser.parse(c);
@@ -427,13 +427,13 @@ export function must<T>(
         parser.skipTo(parser.offset + 1);
         const res = parser.parse(something);
         if (res.isSuccess || res.isEmpty) {
-          result.errorAt(res.value, msg, pos);
+          result.errorAt(res.value!, msg, pos);
           result.copyDiagnostics(res);
           return result;
         }
         retryCount -= 1;
       }
-      return result.errorAt(result.value, msg, pos);
+      return result.errorAt(result.value!, msg, pos);
     },
   ];
 }

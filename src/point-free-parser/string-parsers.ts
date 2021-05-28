@@ -49,7 +49,7 @@ export function parseEscapeSequence(parser: Parser): Result<string> {
       const c = parser.get(i++);
       codepointString += String.fromCodePoint(c);
       invalidChar = invalidChar || !HEX_DIGITS.has(c);
-      if (!invalidChar) code = 16 * code + HEX_DIGITS.get(c);
+      if (!invalidChar) code = 16 * code + HEX_DIGITS.get(c)!;
       done = parser.get(i) === 0x007d; // "}"
     }
     if (done) i += 1;
@@ -59,7 +59,7 @@ export function parseEscapeSequence(parser: Parser): Result<string> {
       const c = parser.get(i++);
       codepointString += String.fromCodePoint(c);
       invalidChar = !HEX_DIGITS.has(c);
-      if (!invalidChar) code = 16 * code + HEX_DIGITS.get(c);
+      if (!invalidChar) code = 16 * code + HEX_DIGITS.get(c)!;
     }
     done = i <= parser.length;
   }
@@ -177,7 +177,7 @@ export function parseInterpolation<IR>(
 
   // After the expression, we should have a closing parenthesis
   if (parser.get(parser.offset) !== 0x0029) {
-    return result.error(expr.value, ['closing-bracket-expected', ')']);
+    return result.error(expr.value!, ['closing-bracket-expected', ')']);
   }
   parser.skipTo(parser.offset + 1);
 
@@ -228,7 +228,7 @@ export function parseSingleLineString<T>(
         values.push(value);
         value = '';
         result.copyDiagnostics(interpolation);
-        values.push(interpolation.value);
+        values.push(interpolation.value!);
       } else {
         const escape = parseEscapeSequence(parser);
         result.copyDiagnostics(escape);
@@ -337,7 +337,7 @@ export function parseMultilineString<T>(
             values.push(value);
             value = '';
             result.copyDiagnostics(interpolation);
-            values.push(interpolation.value);
+            values.push(interpolation.value!);
           } else {
             const escape = parseEscapeSequence(parser);
             i = parser.offset;
@@ -362,7 +362,7 @@ export function parseMultilineString<T>(
   if (prefix.length > 0) {
     // If there is a "prefix"...
     for (const c of prefix) {
-      if (!isInlineSpace(c.codePointAt(0))) validPrefix = false;
+      if (!isInlineSpace(c.codePointAt(0)!)) validPrefix = false;
     }
     if (validPrefix) {
       // Remove the prefix from all the other lines

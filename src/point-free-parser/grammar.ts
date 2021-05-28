@@ -97,7 +97,7 @@ export class Grammar<IR> implements Rules {
   /** Define a new rule or a rule description */
   rule<T = IR>(
     name: string,
-    def?: ((Parser) => Result<T>) | string | Combinator<T>
+    def: ((Parser) => Result<T>) | string | Combinator<T>
   ): void {
     if (typeof def === 'string') {
       this.ruleDescription[name] = def;
@@ -123,7 +123,7 @@ export class Grammar<IR> implements Rules {
   ): Result<T> {
     if (typeof parser === 'string') {
       // We're parsing some new source: create a parser
-      parser = new Parser(this, parser, url);
+      parser = new Parser(this, parser, url ?? '');
     }
 
     // We have a parsing in progress. Return a result of

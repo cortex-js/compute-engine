@@ -390,7 +390,7 @@ export class Scanner implements Scanner {
     if (typeof def.parse === 'function') {
       // Custom parser found
       let rhs: Expression | null = null;
-      [lhs, rhs] = def.parse(lhs ?? 'Missing', this, minPrec);
+      [lhs, rhs] = def.parse(lhs, this, minPrec);
       if (rhs === null) return null;
 
       return this.applyInvisibleOperator(lhs, rhs);
@@ -403,7 +403,7 @@ export class Scanner implements Scanner {
     this.index += n;
     const rhs = this.matchExpression(prec);
     return this.applyInvisibleOperator(
-      ...this.applyOperator(def.parse as string, lhs ?? 'Missing', rhs)
+      ...this.applyOperator(def.parse as string, lhs, rhs)
     );
   }
 
@@ -452,9 +452,7 @@ export class Scanner implements Scanner {
 
     if (typeof def.parse === 'function') {
       // Custom parser: invoke it.
-      return this.applyInvisibleOperator(
-        ...def.parse(null, this as Scanner, 0)
-      );
+      return this.applyInvisibleOperator(...def.parse(null, this, 0));
     }
     const trigger =
       typeof def.trigger === 'object' ? def.trigger.matchfix : def.trigger;
@@ -591,11 +589,14 @@ export class Scanner implements Scanner {
     if (/^[^\\#]$/.test(this.peek)) {
       return this.next();
     }
-    // @todo: check. An expression might be too much, i.e. it
-    // allows \frac{1}2+1. Maybe just match a primary?
-    return this.matchExpression();
+    // Otherwise, this can only be a symbol.
+    // `frac{1}2+1` is not valid, neither is `\frac\frac123`
+    return this.matchSymbol();
   }
 
+  /**
+   *  Match a superfix/subfix operator, e.g. `^{*}`
+   */
   matchSupsub(lhs: Expression | null): Expression | null {
     if (lhs === null) return null;
     let result: Expression | null = null;
@@ -608,20 +609,18 @@ export class Scanner implements Scanner {
 
       const [triggerChar, opKind] = x;
 
+      const beforeTrigger = this.index;
+
       if (!this.match(triggerChar)) return;
 
-      this.skipSpace();
-
       const savedIndex = this.index;
+
       let def: LatexDictionaryEntry | null | undefined;
       let n = 0;
       if (this.match('<{>')) {
         // Supsub with an argument
-        this.skipSpace();
         [def, n] = this.peekDefinition(opKind);
-        this.index += n;
-        this.skipSpace();
-        if (def?.name && this.match('<}>')) {
+        if (def) {
           //
           // It's a supfix/subfix operator (
           //  i.e. `^{*}` for `superstar`
@@ -629,12 +628,17 @@ export class Scanner implements Scanner {
           if (typeof def.parse === 'function') {
             result = def.parse(lhs, this, 0)[1];
           } else {
-            result = [(def.parse as string) ?? def.name, lhs!];
+            this.index += n;
+            if (this.match('<}>')) {
+              result = [(def.parse as string) ?? def.name, lhs!];
+            } else {
+              // Not a supfix/subfix
+              // For example, "^{-1}", start with `"-"` from `superminus`,
+              // but the "1" after it makes it not match
+              this.index = savedIndex;
+            }
           }
         } else {
-          // Not a supfix/subfix
-          // For example, "^{-1}", start with `"-"` from `superminus`,
-          // but the "1" after it makes it not match
           this.index = savedIndex;
         }
       } else {
@@ -642,18 +646,22 @@ export class Scanner implements Scanner {
         // Single token argument for a sup/subfix
         //
         [def, n] = this.peekDefinition(opKind);
-        if (def?.name) {
-          this.index += n;
+        if (def) {
           if (typeof def.parse === 'function') {
             result = def.parse(lhs, this, 0)[1];
           } else {
+            this.index += n;
             result = [(def.parse as string) ?? def.name, lhs!];
           }
+        } else {
+          this.index = savedIndex;
         }
       }
+
       if (result === null) {
         def = this.dictionary.infix[1]?.get(triggerChar);
         if (typeof def?.parse === 'function') {
+          this.index = beforeTrigger;
           result = def.parse(lhs, this, 0)[1];
         } else if (typeof def?.parse === 'string') {
           [lhs, result] = this.applyOperator(
@@ -893,11 +901,11 @@ export class Scanner implements Scanner {
       } else if (getFunctionName(rhs) === op) {
         // Possible associativity
         if (def.associativity === 'both') {
-          if (Array.isArray(rhs)) {
-            rhs.splice(1, 0, lhs ?? MISSING);
+          if (Array.isArray(rhs) && lhs) {
+            rhs.splice(1, 0, lhs);
           }
-          if (isFunctionObject(rhs)) {
-            rhs.fn.splice(1, 0, lhs ?? MISSING);
+          if (isFunctionObject(rhs) && lhs) {
+            rhs.fn.splice(1, 0, lhs);
           }
           return [null, rhs];
         }
@@ -1053,7 +1061,7 @@ export class Scanner implements Scanner {
     if (result === null) result = this.matchSymbol();
 
     //
-    // 4. Are there subsup or postfix operators?
+    // 5. Are there subsup or postfix operators?
     //
     let supsub: Expression | null = null;
     do {

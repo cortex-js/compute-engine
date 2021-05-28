@@ -36,24 +36,23 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: Required<ParseLatexOptions> = {
   preserveLatex: false,
 };
 
-export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> =
-  {
-    ...DEFAULT_LATEX_NUMBER_OPTIONS,
-    invisibleMultiply: '', // '\\cdot',
-    invisiblePlus: '', // '+',
-    // invisibleApply: '',
+export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> = {
+  ...DEFAULT_LATEX_NUMBER_OPTIONS,
+  invisibleMultiply: '', // '\\cdot',
+  invisiblePlus: '', // '+',
+  // invisibleApply: '',
 
-    multiply: '\\times',
+  multiply: '\\times',
 
-    // openGroup: '(',
-    // closeGroup: ')',
-    // divide: '\\frac{#1}{#2}',
-    // subtract: '#1-#2',
-    // add: '#1+#2',
-    // negate: '-#1',
-    // squareRoot: '\\sqrt{#1}',
-    // nthRoot: '\\sqrt[#2]{#1}',
-  };
+  // openGroup: '(',
+  // closeGroup: ')',
+  // divide: '\\frac{#1}{#2}',
+  // subtract: '#1-#2',
+  // add: '#1+#2',
+  // negate: '-#1',
+  // squareRoot: '\\sqrt{#1}',
+  // nthRoot: '\\sqrt[#2]{#1}',
+};
 
 export function appendLatex(src: string, s: string): string {
   if (!s) return src;

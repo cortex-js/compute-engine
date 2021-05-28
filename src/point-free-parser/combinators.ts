@@ -1,4 +1,4 @@
-import { REVERSE_FANCY_UNICODE } from './characters';
+// import { REVERSE_FANCY_UNICODE } from './characters';
 import { description, literal } from './core-combinators';
 import { Parser, Result, skipUntilString, Combinator } from './parsers';
 
@@ -37,7 +37,7 @@ export function between<IR>(
         return result;
       }
       if (!parser.atString(close)) {
-        return result.error(res.value, ['closing-bracket-expected', close]);
+        return result.error(res.value!, ['closing-bracket-expected', close]);
       }
 
       parser.skipTo(parser.offset + close.length);
@@ -112,7 +112,7 @@ export function someSeparatedBetween<IR>(
   something: string | Combinator<IR>,
   separator: string,
   close: string,
-  f: (values: IR[]) => IR
+  f: (values: (IR | undefined | null)[]) => IR
 ): Combinator<IR> {
   return [
     `**\`${open}\`** (${description(
@@ -123,7 +123,7 @@ export function someSeparatedBetween<IR>(
 
       if (parser.parse(open).isSuccess) return result.failure();
 
-      const values: IR[] = [];
+      const values: (IR | undefined | null)[] = [];
       let done = false;
       while (!done && !parser.atEnd()) {
         const res = parser.parse(something);
@@ -169,17 +169,17 @@ export type OpsTable<U> = OpRecord<U>[];
  * Return the ops sorted by length of the symbol so that,
  * e.g. '<<-' is before '<-'
  */
-function sortedOps<U>(ops: OpsTable<U>): OpsTable<U> {
-  return [...ops].sort((a: OpRecord<U>, b: OpRecord<U>): number => {
-    if (a[1].length === b[1].length) {
-      if (a[1] === b[1]) {
-        return b[2] - a[2];
-      }
-      return b[1] < a[1] ? -1 : +1;
-    }
-    return b[1].length - a[1].length;
-  });
-}
+// function sortedOps<U>(ops: OpsTable<U>): OpsTable<U> {
+//   return [...ops].sort((a: OpRecord<U>, b: OpRecord<U>): number => {
+//     if (a[1].length === b[1].length) {
+//       if (a[1] === b[1]) {
+//         return b[2] - a[2];
+//       }
+//       return b[1] < a[1] ? -1 : +1;
+//     }
+//     return b[1].length - a[1].length;
+//   });
+// }
 
 /**
  * A sequence of prefix, infix and suffix operators with `term`
@@ -214,42 +214,42 @@ export function operatorSequence<IR, U>(
   ];
 }
 
-function prefixOps<U>(ops: OpsTable<U>, minPrec: number): OpsTable<U> {
-  return ops.filter((x) => {
-    const [_data, _op, prec, assoc] = x;
-    return prec >= minPrec && assoc === 'prefix';
-  });
-}
-function suffixOps<U>(ops: OpsTable<U>, minPrec: number): OpsTable<U> {
-  return ops.filter((x) => {
-    const [_data, _op, prec, assoc] = x;
-    return prec >= minPrec && assoc === 'suffix';
-  });
-}
-function infixOps<U>(ops: OpsTable<U>, minPrec: number): OpsTable<U> {
-  return ops.filter((x) => {
-    const [_data, _op, prec, assoc] = x;
-    return prec >= minPrec && assoc !== 'suffix' && assoc !== 'prefix';
-  });
-}
+// function prefixOps<U>(ops: OpsTable<U>, minPrec: number): OpsTable<U> {
+//   return ops.filter((x) => {
+//     const [_data, _op, prec, assoc] = x;
+//     return prec >= minPrec && assoc === 'prefix';
+//   });
+// }
+// function suffixOps<U>(ops: OpsTable<U>, minPrec: number): OpsTable<U> {
+//   return ops.filter((x) => {
+//     const [_data, _op, prec, assoc] = x;
+//     return prec >= minPrec && assoc === 'suffix';
+//   });
+// }
+// function infixOps<U>(ops: OpsTable<U>, minPrec: number): OpsTable<U> {
+//   return ops.filter((x) => {
+//     const [_data, _op, prec, assoc] = x;
+//     return prec >= minPrec && assoc !== 'suffix' && assoc !== 'prefix';
+//   });
+// }
 
-function parseOp<T, U>(parser: Parser, ops: OpsTable<U>): OpRecord<U> {
-  for (const opRecord of ops) {
-    const [_data, op, _precedence, _assoc] = opRecord;
-    if (parser.atString(op)) {
-      parser.skipTo(parser.offset + op.length);
-      return opRecord;
-    }
-    if (
-      REVERSE_FANCY_UNICODE.has(op) &&
-      REVERSE_FANCY_UNICODE.get(op).includes(parser.get(parser.offset))
-    ) {
-      parser.skipTo(parser.offset + 1);
-      return opRecord;
-    }
-  }
-  return [undefined, undefined, undefined, undefined];
-}
+// function parseOp<T, U>(parser: Parser, ops: OpsTable<U>): OpRecord<U> {
+//   for (const opRecord of ops) {
+//     const [_data, op, _precedence, _assoc] = opRecord;
+//     if (parser.atString(op)) {
+//       parser.skipTo(parser.offset + op.length);
+//       return opRecord;
+//     }
+//     if (
+//       REVERSE_FANCY_UNICODE.has(op) &&
+//       REVERSE_FANCY_UNICODE.get(op).includes(parser.get(parser.offset))
+//     ) {
+//       parser.skipTo(parser.offset + 1);
+//       return opRecord;
+//     }
+//   }
+//   return [undefined, undefined, undefined, undefined];
+// }
 
 // if (prec < minPrec) return null;
 // prec += def.associativity === 'left' ? 1 : 0;
@@ -258,64 +258,64 @@ function parseWithPrecedence<IR, U>(
   parser: Parser,
   ops: OpsTable<U>,
   term: string | Combinator<IR>,
-  f: (op: U, lhs?: IR, rhs?: IR) => IR
+  _f: (op: U, lhs?: IR, rhs?: IR) => IR
 ): Result<IR> {
   return parser.parse(term);
 
-  const result = new Result<IR>(parser);
-  const start = parser.offset;
-  //
-  // Shunting-yard algorithm
-  //
+  // const result = new Result<IR>(parser);
+  // const start = parser.offset;
+  // //
+  // // Shunting-yard algorithm
+  // //
 
-  // Start off with an empty output stream and an empty stack.
-  const opStack = [];
-  const operandStack = [];
-  let lhs: IR;
+  // // Start off with an empty output stream and an empty stack.
+  // const opStack = [];
+  // const operandStack = [];
+  // let lhs: IR;
 
-  ops = sortedOps(infixOps(ops, 0));
+  // ops = sortedOps(infixOps(ops, 0));
 
-  // Repeatedly read a symbol from the input.
-  while (true) {
-    // 1. Is is an operand?
-    // If it is part of a number (i.e., a digit or a decimal separator),
-    //      then keep reading tokens until an operand or parenthesis is encountered,
-    //       and convert the entire string just read into a number,
-    //      and transfer the number to the output stream.
-    // parseOperand() = one or more infix, a term, one or more postfix
-    if (false) {
-      // push on output stream (= lhs)
-    } else {
-      const [data, op, precedecence, assoc] = parseOp(parser, ops);
-      if (!op) break;
-      console.assert(opStack.length > 0);
+  // // Repeatedly read a symbol from the input.
+  // while (true) {
+  //   // 1. Is is an operand?
+  //   // If it is part of a number (i.e., a digit or a decimal separator),
+  //   //      then keep reading tokens until an operand or parenthesis is encountered,
+  //   //       and convert the entire string just read into a number,
+  //   //      and transfer the number to the output stream.
+  //   // parseOperand() = one or more infix, a term, one or more postfix
+  //   if (false) {
+  //     // push on output stream (= lhs)
+  //   } else {
+  //     const [data, op, precedecence, assoc] = parseOp(parser, ops);
+  //     if (!op) break;
+  //     console.assert(opStack.length > 0);
 
-      // 2. Is it a left-associative infix operator?
-      if (assoc === 'left') {
-        // If it is a left-associative operator,
-        //      then repeatedly pop from the stack into the output stream
-        //      until either the stack becomes empty
-        //      or the top of the stack is a parenthesis
-        //      or a lower-precedence operator.
-        //      After that, push it onto the stack.
-      }
-      // 3. Is it a right-associative infix operator?
-      if (assoc === 'right') {
-        // If it is a right-associative operator,
-        //      then repeatedly pop from the stack into the output stream
-        //      until either the stack becomes empty
-        //      or the top of the stack is a parenthesis
-        //      or an operator of lower or equal precedence.
-        //      After that, push it onto the stack.
-      }
-      // If it is an opening parenthesis,
-      //      push it onto the stack.
-      // If it is a closing parenthesis,
-      //      repeatedly pop operators from the stack into the output stream until an opening parenthesis is encountered. Pop the opening parenthesis off the stack, but do not emit it into the output stream.
-    }
-  }
+  //     // 2. Is it a left-associative infix operator?
+  //     if (assoc === 'left') {
+  //       // If it is a left-associative operator,
+  //       //      then repeatedly pop from the stack into the output stream
+  //       //      until either the stack becomes empty
+  //       //      or the top of the stack is a parenthesis
+  //       //      or a lower-precedence operator.
+  //       //      After that, push it onto the stack.
+  //     }
+  //     // 3. Is it a right-associative infix operator?
+  //     if (assoc === 'right') {
+  //       // If it is a right-associative operator,
+  //       //      then repeatedly pop from the stack into the output stream
+  //       //      until either the stack becomes empty
+  //       //      or the top of the stack is a parenthesis
+  //       //      or an operator of lower or equal precedence.
+  //       //      After that, push it onto the stack.
+  //     }
+  //     // If it is an opening parenthesis,
+  //     //      push it onto the stack.
+  //     // If it is a closing parenthesis,
+  //     //      repeatedly pop operators from the stack into the output stream until an opening parenthesis is encountered. Pop the opening parenthesis off the stack, but do not emit it into the output stream.
+  //   }
+  // }
 
-  return result.success(lhs);
+  // return result.success(lhs);
 }
 
 // function parseWithPrecedence<T, U>(

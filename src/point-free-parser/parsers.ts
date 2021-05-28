@@ -95,7 +95,7 @@ export class Parser {
   }
 
   get(offset: number): number {
-    return this.source.codePointAt(offset);
+    return this.source.codePointAt(offset)!;
   }
 
   atEnd(): boolean {
@@ -103,7 +103,7 @@ export class Parser {
   }
 
   atLinebreak(): boolean {
-    return isLinebreak(this.source.codePointAt(this.offset));
+    return isLinebreak(this.source.codePointAt(this.offset)!);
   }
 
   atString(s: string): boolean {
@@ -206,13 +206,15 @@ export class Result<IR = any> {
   copyDiagnostics(from: Result<any>): void {
     if (!from.isError) return;
     if (this._diagnostics === undefined) this._diagnostics = [];
-    this._diagnostics = [...this._diagnostics, ...from._diagnostics];
+    if (from._diagnostics) {
+      this._diagnostics = [...this._diagnostics, ...from._diagnostics];
+    }
   }
   get parser(): Parser {
     return this._parser;
   }
   get diagnostics(): ParsingDiagnostic[] {
-    return this._diagnostics;
+    return this._diagnostics ?? [];
   }
   get isFailure(): boolean {
     return this._diagnostics === undefined && this._value === undefined;
@@ -242,10 +244,10 @@ export class Result<IR = any> {
   set range(val: [start: number, end: number]) {
     this._range = val;
   }
-  get value(): IR {
+  get value(): IR | undefined | null {
     return this._value;
   }
-  set value(val: IR) {
+  set value(val: IR | undefined | null) {
     this._value = val;
   }
   /**
@@ -325,7 +327,7 @@ export class Result<IR = any> {
     return this;
   }
   errorAt(
-    value: IR,
+    value: IR | null,
     msg: DiagnosticMessage | ((Parser) => DiagnosticMessage),
     pos: number,
     fixits?: Fixit[]
@@ -345,7 +347,9 @@ export class Result<IR = any> {
     this._value = value;
     this._range[1] = this._parser.offset - 1;
     if (!this._diagnostics) this._diagnostics = [];
-    this._diagnostics = [...this._diagnostics, ...result._diagnostics];
+    if (result._diagnostics) {
+      this._diagnostics = [...this._diagnostics, ...result._diagnostics];
+    }
     return this;
   }
   warning(msg: DiagnosticMessage, fixits?: Fixit[]): Result {

@@ -112,9 +112,10 @@ function getLex(expr: Expression | null): string {
  */
 function getExprLength(expr: Expression | null): number {
   if (getFunctionHead(expr)) {
-    return getTail(expr)
+    const tail = getTail(expr);
+    return tail
       .map(getExprLength)
-      .reduce((acc: number, x: number) => acc + x, 0);
+      .reduce((acc: number, x: number) => acc + x, tail.length);
   }
   return 0;
 }

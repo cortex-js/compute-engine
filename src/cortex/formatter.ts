@@ -297,7 +297,7 @@ export class ChoiceBlock extends FormattingBlock {
   }
   // Which block would be chosen if starting at column `offset`
   choice(offset: number): FormattingBlock {
-    let block: FormattingBlock;
+    let block: FormattingBlock | undefined;
     let minCost = Infinity;
     this.blocks.forEach((x) => {
       const cost = x.cost(offset);
@@ -306,7 +306,7 @@ export class ChoiceBlock extends FormattingBlock {
         block = x;
       }
     });
-    return block;
+    return block!;
   }
   serialize(offset: number): string {
     return this.choice(offset).serialize(offset);
@@ -321,7 +321,7 @@ export class ChoiceBlock extends FormattingBlock {
 
 export class Formatter {
   private options: FormattingOptions;
-  constructor(options?: FormattingOptions) {
+  constructor(options?: Partial<FormattingOptions>) {
     if (options?.indentChar === 'space') {
       options.indentChar = '\u0020';
     } else if (options?.indentChar === 'tab') {
@@ -419,7 +419,7 @@ export class Formatter {
     const blocks = this.normalizedBlocks(inBlocks);
 
     // Consecutive text blocks can be merged
-    const mergedBlocks = [];
+    const mergedBlocks: FormattingBlock[] = [];
     let previousText = '';
     for (const block of blocks) {
       if (block instanceof TextBlock) {
@@ -529,7 +529,7 @@ export class Formatter {
     sep: string | FormattingBlock,
     blocks: FormattingBlock[]
   ): FormattingBlock {
-    return this.fencedList(undefined, sep, undefined, blocks);
+    return this.fencedList('', sep, '', blocks);
   }
 
   /** A block that prints out several lines of text verbatim. */

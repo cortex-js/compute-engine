@@ -1,10 +1,10 @@
 import type { Expression } from '../src/public';
 import { LatexSyntax } from '../src/math-json';
-import { Form } from '../src/compute-engine/public';
 import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
-import { ComputeEngine } from '../src/compute-engine/public';
+import { ComputeEngine } from '../src/compute-engine';
 import { MISSING } from '../src/common/utils';
 import { parseCortex } from '../src/cortex';
+import { Form } from '../src/compute-engine/public';
 
 let errors: string[] = [];
 
@@ -31,7 +31,10 @@ export function expression(
   return result;
 }
 
-export function latex(expr: Expression): string {
+export function latex(expr: Expression | undefined | null): string {
+  if (expr === undefined) return 'undefined';
+  if (expr === null) return 'null';
+
   errors = [];
   const result = defaultLatex.serialize(expr);
   errors = errors.filter((x) => !/^unknown-symbol /.test(x));
@@ -55,8 +58,7 @@ export function printExpression(expr: Expression): string {
     return '[' + expr.map((x) => printExpression(x)).join(', ') + ']';
   }
   if (typeof expr === 'string') {
-    if (!expr) return "''";
-    return "'" + expr + "'";
+    return `'${expr}'`;
   }
   if (typeof expr === 'undefined') {
     return 'undefined';

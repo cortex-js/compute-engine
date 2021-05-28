@@ -74,13 +74,14 @@ export function serializeCortex(
     ...options,
   });
 
-  function serializeExpression(expr: Expression): FormattingBlock {
+  function serializeExpression(expr: Expression | null): FormattingBlock {
+    if (expr === null) return new EmptyBlock(this);
     // Is this a string literal?
     const stringValue = getStringValue(expr);
     if (stringValue !== null) return serializeString(stringValue);
 
     const comment = serializeComment(expr);
-    let body: FormattingBlock;
+    let body: FormattingBlock | undefined;
     const head = getFunctionHead(expr);
     if (head !== null) {
       body =
@@ -138,7 +139,7 @@ export function serializeCortex(
   function serializeComment(expr: Expression): FormattingBlock {
     if (!(typeof expr === 'object')) return fmt.text();
     if ('comment' in expr) {
-      if (expr.comment.length > 0) {
+      if (expr.comment && expr.comment.length > 0) {
         // @todo: could be more clever. Use /* */ or // depending on whether
         // comment is multiline
         return fmt.text(`/* ${expr.comment} */`);
@@ -382,7 +383,7 @@ export function serializeCortex(
   return serializeExpression(expr).serialize(0);
 }
 function escapeInvisibleCharacter(code: number): string {
-  if (ESCAPED_CHARS.has(code)) return ESCAPED_CHARS.get(code);
+  if (ESCAPED_CHARS.has(code)) return ESCAPED_CHARS.get(code)!;
   if (isInvisible(code)) {
     if (code < 0x10000) {
       return `\\u${('0000' + code.toString(16)).slice(-4)}`;
@@ -399,12 +400,12 @@ function escapeString(s: string): string {
   const graphemes = splitGraphemes(s);
   if (typeof graphemes === 'string') {
     for (const c of graphemes) {
-      result += escapeInvisibleCharacter(c.codePointAt(0));
+      result += escapeInvisibleCharacter(c.codePointAt(0)!);
     }
   } else {
     for (const c of graphemes) {
       if (c.length === 1) {
-        result += escapeInvisibleCharacter(c.codePointAt(0));
+        result += escapeInvisibleCharacter(c.codePointAt(0)!);
       } else {
         // @todo: we could check specifically for the emoji range, rather
         // than anything outside the BMP.
@@ -428,14 +429,14 @@ function escapeSymbol(s: string): string {
   if (/^[a-zA-Z][a-zA-Z\d_]*$/.test(s)) return s;
 
   // If starts with a digit: need verbatim
-  const code = s.codePointAt(0);
+  const code = s.codePointAt(0)!;
   if (DIGITS.has(code)) return `\`${escapeString(s)}\``;
 
   let needVerbatim = false;
   const graphemes = splitGraphemes(s);
   let i = 0;
   while (!needVerbatim && i < graphemes.length) {
-    const c = graphemes[i].codePointAt(0);
+    const c = graphemes[i].codePointAt(0)!;
     needVerbatim = ESCAPED_CHARS.has(c) || isInvisible(c) || isBreak(c);
     i += 1;
   }

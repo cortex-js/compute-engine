@@ -82,7 +82,7 @@ function parseFloatToPrecision(num: number): number {
  * `options`
  */
 export function serializeNumber(
-  expr: Expression,
+  expr: Expression | null,
   options: Required<NumberFormattingOptions>
 ): string {
   let num: string | number;

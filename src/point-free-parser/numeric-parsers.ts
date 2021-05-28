@@ -40,7 +40,7 @@ export function parseExponent(
 
   let value = 0;
   while (DIGITS.has(parser.get(i))) {
-    value = value * 10 + DIGITS.get(parser.get(i++));
+    value = value * 10 + DIGITS.get(parser.get(i++))!;
   }
 
   parser.skipTo(i);
@@ -59,11 +59,11 @@ export function applyExponent(
     // `0.1e-4 = 0.000009999999999999999`
     // Instead, use the Javascript parsing function
     // result = result * Math.pow(10, exp.value);
-    value = Number.parseFloat(value.toString() + 'e' + exp.value.toString());
+    value = Number.parseFloat(value.toString() + 'e' + exp.value!.toString());
   } else if (exp.isFailure) {
     exp = parseExponent(parser, 'p');
     if (exp.isSuccess) {
-      value = value * Math.pow(2, exp.value);
+      value = value * Math.pow(2, exp.value!);
     }
   }
   if (exp.isSuccess || exp.isFailure) return result.success(value);
@@ -142,7 +142,7 @@ export function parseHexadecimalNumber(parser: Parser): Result<number> {
   while (!done && i < parser.length) {
     const c = parser.get(i++);
     if (HEX_DIGITS.has(c)) {
-      value = value * 16 + HEX_DIGITS.get(c);
+      value = value * 16 + HEX_DIGITS.get(c)!;
     } else if (c !== 0x005f) {
       // If it's neither a digit nor a "_" separator, we're done
       done = true;
@@ -158,7 +158,7 @@ export function parseHexadecimalNumber(parser: Parser): Result<number> {
     while (!done && i < parser.length) {
       const c = parser.get(i++);
       if (HEX_DIGITS.has(c)) {
-        fracPart += frac * HEX_DIGITS.get(c);
+        fracPart += frac * HEX_DIGITS.get(c)!;
         frac = frac / 16;
       } else if (c !== 0x005f) {
         // If it's neither a digit nor a "_" separator, we're done
@@ -190,7 +190,7 @@ export function parseFloatingPointNumber(parser: Parser): Result<number> {
   while (!done && i < parser.length) {
     const c = parser.get(i++);
     if (DIGITS.has(c)) {
-      value = value * 10 + DIGITS.get(c);
+      value = value * 10 + DIGITS.get(c)!;
     } else if (c !== 0x005f) {
       // If it's neither a digit nor a "_" separator, we're done
       done = true;
@@ -207,7 +207,7 @@ export function parseFloatingPointNumber(parser: Parser): Result<number> {
     while (!done && i < parser.length) {
       const c = parser.get(i++);
       if (DIGITS.has(c)) {
-        fracPart += frac * DIGITS.get(c);
+        fracPart += frac * DIGITS.get(c)!;
         frac = frac / 10;
       } else if (c !== 0x005f) {
         // If it's neither a digit nor a "_" separator, we're done
@@ -254,9 +254,9 @@ export function parseSignedNumber(parser: Parser): Result<number> {
   parser.skipTo(i);
 
   const numResult = parseNumber(parser);
-  if (numResult.isSuccess) return result.success(sign * numResult.value);
+  if (numResult.isSuccess) return result.success(sign * numResult.value!);
   if (numResult.isError) {
-    return result.errorFrom(numResult, sign * numResult.value);
+    return result.errorFrom(numResult, sign * numResult.value!);
   }
   return result.failure();
 }

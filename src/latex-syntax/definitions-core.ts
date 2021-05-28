@@ -303,7 +303,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       scanner: Scanner,
       _minPrec: number
     ): [Expression | null, Expression | null] => {
-      const rhs = scanner.matchRequiredLatexArgument() ?? NOTHING;
+      if (!scanner.match('_')) return [lhs, null];
+      const rhs = scanner.matchRequiredLatexArgument() ?? MISSING;
       if (!lhs) return [null, ['Subscript', rhs]];
       return [null, ['Subscript', lhs, rhs]];
     },

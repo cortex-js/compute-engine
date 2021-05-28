@@ -541,7 +541,7 @@ function reverse(table: Map<number, string>): Map<string, number[]> {
   const result = new Map<string, number[]>();
   for (const [k, v] of Object.entries(table)) {
     if (result.has(v)) {
-      const ks: number[] = result.get(v);
+      const ks: number[] = result.get(v)!;
       ks.push(parseInt(k));
       result.set(v, ks);
     } else {
@@ -552,7 +552,7 @@ function reverse(table: Map<number, string>): Map<string, number[]> {
 }
 
 function expand(source: (number | [start: number, end: number])[]): number[] {
-  const result = [];
+  const result: number[] = [];
 
   for (const entry of source) {
     if (typeof entry === 'number') {

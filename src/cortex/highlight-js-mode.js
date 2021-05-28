@@ -136,8 +136,7 @@ const STRING = {
   variants: [MULTILINE_STRING(), SINGLE_LINE_STRING()],
 };
 
-const IDENTIFIER_INITIAL_CHARACTER =
-  /[^\u0000-\u0020\uFFFE\uFFFF#$%@_\u0060\u007E]/;
+const IDENTIFIER_INITIAL_CHARACTER = /[^\u0000-\u0020\uFFFE\uFFFF#$%@_\u0060\u007E]/;
 const IDENTIFIER_CHARACTER = /[^\u0000-\u0020\uFFFE\uFFFF]/;
 const IDENTIFIER_CHARACTERS = concat(
   IDENTIFIER_INITIAL_CHARACTER,
@@ -175,7 +174,8 @@ const BRACE = {
 /**
  * @returns {object}
  */
-export default function (hljs) {
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
+export default function (_hljs) {
   return {
     name: 'Cortex',
     aliases: ['cortex'],

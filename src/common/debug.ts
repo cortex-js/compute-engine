@@ -57,7 +57,7 @@ export class Origin {
 
   constructor(source: string, url?: string) {
     this.source = source;
-    this.url = url;
+    this.url = url ?? '';
   }
 
   get lines(): string[] {
@@ -67,7 +67,7 @@ export class Origin {
 
   get lineOffsets(): number[] {
     if (this._lineOffsets == null) {
-      const offsets = [];
+      const offsets: number[] = [];
       const text = this.source;
       let isLineStart = true;
       let i = 0;
@@ -136,7 +136,7 @@ export class Origin {
 
     const hasColumn = typeof column === 'number';
     const numberMaxWidth = String(end).length;
-    const result = [];
+    const result: string[] = [];
     // index = 0..., start = 0... end = 0...
     for (let index = start; index <= end; index++) {
       const paddedNumber = ` ${index + 1}`.slice(-numberMaxWidth);
@@ -206,7 +206,7 @@ export const wrapAnsiString = (
   }
 
   const ANSI_REGEXP = /[\u001b\u009b]\[\d{1,2}m/g;
-  const tokens = [];
+  const tokens: ['string' | 'ansi', string][] = [];
   let lastIndex = 0;
   let match;
 

@@ -27,7 +27,9 @@
     </header>
     <main>
         <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
-          3\times x+1
+          \sqrt{1}[3]
+          <!-- (b^3c^2d)(x^7y)(a^5f)(b^2x^5b3) -->
+          <!-- {}^3_2 -->
         </math-field>
         <!-- 2{xy}     1+|a+|2|+b| -->
         <!-- ,c,b -->
@@ -126,8 +128,8 @@
         const rawLatex = new LatexSyntax(
             {
                 invisibleOperator: '',
-                superscriptOperator: '',
-                subscriptOperator: '',
+                // superscriptOperator: '',
+                // subscriptOperator: '',
                 // parseArgumentsOfUnknownLatexCommands: false,
                 invisiblePlusOperator: '',
                 dictionary: [],
@@ -139,32 +141,32 @@
                     errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
             });
         const computeEngine = new ComputeEngine();
+        
+        // console.log(defaultLatex.parse('3\\times x + 1'));
+        // console.log(defaultLatex.parse('1 + x + x + x'));
 
-        console.log(defaultLatex.parse('3\\times x + 1'));
-        console.log(defaultLatex.parse('1 + x + x + x'));
+        // console.log(
+        //   computeEngine.canonical(defaultLatex.parse('3\\times x + 1'))
+        // );
+        // console.log(
+        //   computeEngine.canonical(defaultLatex.parse('1 + x + x + x'))
+        // );
+        // console.log(
+        //   await computeEngine.evaluate(defaultLatex.parse('3\\times x + 1')),
+        //   await computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
+        // );
 
-        console.log(
-          computeEngine.canonical(defaultLatex.parse('3\\times x + 1'))
-        );
-        console.log(
-          computeEngine.canonical(defaultLatex.parse('1 + x + x + x'))
-        );
-        console.log(
-          await computeEngine.evaluate(defaultLatex.parse('3\\times x + 1')),
-          await computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
-        );
-
-        console.log(computeEngine.same(
-          computeEngine.evaluate(defaultLatex.parse('3\\times x + 1')),
-          computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
-        ));
+        // console.log(computeEngine.same(
+        //   computeEngine.evaluate(defaultLatex.parse('3\\times x + 1')),
+        //   computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
+        // ));
 
         const mf = document.getElementById('mf');
         mf.addEventListener('input', (ev) => updateContent(mf));
         updateContent(mf);
 
         function updateContent(mf) {
-            const latex = mf.getValue('latex-expanded');
+            const latex = mf.getValue('latex');
             try {
 
                 document.getElementById('latex').innerHTML = escapeHtml(
