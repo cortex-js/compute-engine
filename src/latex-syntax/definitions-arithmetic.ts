@@ -501,6 +501,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: 275,
   },
   {
+    name: 'PlusMinus',
+    trigger: { infix: '\\pm' },
+    associativity: 'both',
+    precedence: 270,
+  },
+  {
+    name: 'MinusPlus',
+    trigger: { infix: '\\mp' },
+    associativity: 'both',
+    precedence: 270,
+  },
+  {
     name: MULTIPLY,
     trigger: { infix: '\\times' },
     serialize: serializeMultiply,
