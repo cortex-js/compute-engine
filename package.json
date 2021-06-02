@@ -1,13 +1,14 @@
 {
   "scripts": {
     "build": "bash ./scripts/build.sh",
-    "dist": "bash ./scripts/build.sh production",
     "clean": "bash ./scripts/clean.sh",
     "coverage": "bash ./scripts/test.sh coverage",
+    "dist": "bash ./scripts/build.sh production; bash ./scripts/test.sh",
     "lint": "eslint --fix src/",
+    "prepare": "bash ./scripts/build.sh production",
+    "start": "bash ./scripts/build.sh watch",
     "snapshot": "bash ./scripts/test.sh snapshot",
-    "test": "bash ./scripts/test.sh",
-    "start": "bash ./scripts/build.sh watch"
+    "test": "bash ./scripts/test.sh"
   },
   "name": "@cortex-js/math-json",
   "version": "0.2.2",

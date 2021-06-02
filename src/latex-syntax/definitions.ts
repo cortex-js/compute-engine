@@ -164,8 +164,7 @@ export function indexLatexDictionary(
       if (record.parse !== 'function' && !record.closeFence) {
         onError({
           code: 'syntax-error',
-          arg:
-            'Matchfix operators require a close fence or a custom parse function',
+          arg: 'Matchfix operators require a close fence or a custom parse function',
         });
       }
     }
