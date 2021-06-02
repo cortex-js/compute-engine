@@ -66,7 +66,7 @@ describe('SEQUENCES AND PARENTHESES', () => {
       `['Add', ['Abs', 'a'], 1, 2]`
     );
     expect(expression('|(1+|a|+2)|')).toMatchInlineSnapshot(
-      `[['Multiply', ['Abs', ['Parentheses']], ['Abs', 2], 'a'], 'unbalanced-symbols ()', 'unbalanced-symbols ||', 'unbalanced-symbols ||']`
+      `[['Multiply', ['Abs', 2], ['Abs', ['Parentheses']], 'a'], 'unbalanced-symbols ()', 'unbalanced-symbols ||', 'unbalanced-symbols ||']`
     ); // @todo
     expect(expression('|1+|a|+2|')).toMatchInlineSnapshot(
       `[['Multiply', ['Abs', 1], ['Abs', 2], 'a'], 'unbalanced-symbols ||']`

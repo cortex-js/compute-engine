@@ -601,10 +601,12 @@ export class Scanner implements Scanner {
     if (lhs === null) return null;
     let result: Expression | null = null;
     this.skipSpace();
-    ([
-      ['^', 'superfix'],
-      ['_', 'subfix'],
-    ] as [string, 'superfix' | 'subfix'][]).forEach((x) => {
+    (
+      [
+        ['^', 'superfix'],
+        ['_', 'subfix'],
+      ] as [string, 'superfix' | 'subfix'][]
+    ).forEach((x) => {
       if (result !== null) return;
 
       const [triggerChar, opKind] = x;
@@ -1138,7 +1140,7 @@ export class Scanner implements Scanner {
     while (!this.atEnd && !done) {
       this.skipSpace();
       let result = this.matchOperator('infix', lhs, minPrec);
-      if (result === null) {
+      if (result === null && lhs !== null) {
         // We've encountered something else than an infix operator
         // OR an infix operator with a lower priority.
         // Could be "y" after "x": time to apply the invisible operator
@@ -1150,9 +1152,7 @@ export class Scanner implements Scanner {
         const [op] = this.peekDefinition('operator');
         if (op === null) {
           const rhs = this.matchExpression(this.invisibleOperatorPrecedence);
-          if (rhs === null) {
-            done = true;
-          } else {
+          if (rhs !== null) {
             result = this.applyInvisibleOperator(lhs, rhs);
           }
         }

@@ -8,10 +8,10 @@ describe('POWER', () => {
             'syntax-error
             syntax-error'
         `);
-    expect(
-      latex([POWER, (null as unknown) as Expression])
-    ).toMatchInlineSnapshot(`''`);
-    expect(latex([POWER, (undefined as unknown) as Expression]))
+    expect(latex([POWER, null as unknown as Expression])).toMatchInlineSnapshot(
+      `''`
+    );
+    expect(latex([POWER, undefined as unknown as Expression]))
       .toMatchInlineSnapshot(`
             'syntax-error
             syntax-error'
@@ -80,13 +80,13 @@ describe('SUPSUB', () => {
   });
   test('Pre-sup, pre-sub', () => {
     expect(expression('_p^qx')).toMatchInlineSnapshot(
-      `['Multiply', ['Power', ['Subscript', 'p'], 'q'], 'x']`
+      `['Power', ['Subscript', 'p'], ['Multiply', 'q', 'x']]`
     ); // @todo: nope...
     expect(expression('_p^qx_r^s')).toMatchInlineSnapshot(
-      `['Multiply', ['Power', ['Subscript', 'p'], 'q'], ['Power', ['Subscript', 'x', 'r'], 's']]`
+      `['Power', ['Subscript', 'p'], ['Multiply', 'q', ['Power', ['Subscript', 'x', 'r'], 's']]]`
     ); // @todo: nope...
     expect(expression('_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(
-      `['Multiply', ['Power', ['Subscript', ['Add', 'p', 1]], ['Add', 'q', 1]], ['Power', ['Subscript', 'x', ['Add', 'r', 1]], ['Add', 's', 1]]]`
+      `[['Power', ['Subscript', ['Add', 'p', 1]], 'Missing'], 'syntax-error']`
     ); // @todo: nope...
     expect(expression('x{}_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(
       `['Multiply', ['Power', ['Subscript', 'x', ['Add', 'p', 1]], ['Add', 'q', 1]], ['Power', ['Subscript', 'x', ['Add', 'r', 1]], ['Add', 's', 1]]]`
@@ -103,10 +103,10 @@ describe('SUPSUB', () => {
       `['Subscript', ['Power', ['Add', 'x', 1], 'n'], 0]`
     );
     expect(expression('^p_q{x+1}^n_0')).toMatchInlineSnapshot(
-      `[['Subscript', ['Power', 'Missing', 'p'], 'q'], 'syntax-error']`
+      `[['Power', 'Missing', ['Subscript', 'p', 'q']], 'syntax-error']`
     ); // @todo: nope...
     expect(expression('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(
-      `['Multiply', ['Subscript', ['Power', 'Missing', 12], 34], ['Subscript', ['Power', ['Add', 'x', 1], 'n'], 0]]`
+      `[['Power', 'Missing', 'Missing'], 'syntax-error']`
     ); // @todo: nope...
   });
   test('Accents', () => {
@@ -145,7 +145,7 @@ describe('PRIME', () => {
       `['Power', 'f', ['Multiply', '\\prime', '\\prime', '\\prime']]`
     ); // @todo
     expect(expression('f^{\\doubleprime}')).toMatchInlineSnapshot(
-      `['Power', 'f', '\\doubleprime']`
+      `[['Multiply', '\\doubleprime', ['Prime', 'f', 2]], 'syntax-error']`
     );
   });
 });
