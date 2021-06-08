@@ -60,13 +60,8 @@ rm -rf ./coverage
 mkdir -p dist
 echo -e "$LINECLEAR$BASENAME$CHECK Output directories cleaned out"
 
-if [ "$BUILD" != "production" ]; then
-    # Write sentinel file. It will be checked in the pre-push.sh script
-    # to prevent commiting a dev build to the repo.
-    touch dist/DEVELOPMENT-BUILD
-fi
 
-# Bundle declaration files (.d.ts)
+# Build declaration files (.d.ts)
 printf "$BASENAME$DOT Building declaration files (.d.ts)"
 # Even though we only generate declaration file, the target must be set high-enough
 # to prevent tsc from complaining (!)
@@ -74,33 +69,26 @@ npx tsc --target "es2020" -d --moduleResolution "node" \
   --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts 
 # echo -e "$LINECLEAR$BASENAME$CHECK Declaration files built"
 
-if [ "$BUILD" = "watch" ]; then
-    # Do dev build and watch
-    printf "\033[32m ● \033[0m Making a \033[33mdevelopment\033[0m build"
-    npx rollup --silent --config config/rollup.config.js --watch
-    echo -e "$LINECLEAR$BASENAME$CHECK \033[33mdevelopment\033[0m build done"
-else
-    # Do build (development or production)
-    printf "\033[32m ● \033[0m Making a \033[33m%s\033[0m build" "$BUILD"
-    npx rollup --silent --config config/rollup.config.js
-    echo -e "$LINECLEAR$BASENAME$CHECK \033[33m" $BUILD "\033[0m build done"
+# Do build (development or production)
+printf "\033[32m ● \033[0m Making a \033[33m%s\033[0m build" "$BUILD"
+npx rollup --silent --config config/rollup.config.js
+echo -e "$LINECLEAR$BASENAME$CHECK \033[33m" $BUILD "\033[0m build done"
 
-    if [ "$BUILD" = "production" ]; then    
-        # Stamp the SDK version number
-        printf "$BASENAME$DOT Stamping output files"
-        find ./dist -type f \( -name '*.js' -o -name '*.js' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
-        find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "1s/^/\/\* $SDK_VERSION \*\/$(printf '"'"'\r'"'"')/" {}' \;
-        find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "s/{{SDK_VERSION}}/$SDK_VERSION/" {}' \;
-        echo -e "$LINECLEAR$BASENAME$CHECK Output files stamped"
+if [ "$BUILD" = "production" ]; then    
+    # Stamp the SDK version number
+    printf "$BASENAME$DOT Stamping output files"
+    find ./dist -type f \( -name '*.js' -o -name '*.js' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
+    find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "1s/^/\/\* $SDK_VERSION \*\/$(printf '"'"'\r'"'"')/" {}' \;
+    find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "s/{{SDK_VERSION}}/$SDK_VERSION/" {}' \;
+    echo -e "$LINECLEAR$BASENAME$CHECK Output files stamped"
 
-        # Linting
-        # echo -e "\033[40m`basename "$0"`\033[0m 🚀 Linting"
-        # npm run lint
+    # Linting
+    # echo -e "\033[40m`basename "$0"`\033[0m 🚀 Linting"
+    # npm run lint
 
-        # Run test suite
-        printf "$BASENAME$DOT Running test suite"
-        npx jest --config ./config/jest.config.js ./test --silent --reporters jest-silent-reporter
-        echo -e "$LINECLEAR$BASENAME$CHECK Test suite complete"
-    fi
+    # Run test suite
+    printf "$BASENAME$DOT Running test suite"
+    npx jest --config ./config/jest.config.js ./test --silent --reporters jest-silent-reporter
+    echo -e "$LINECLEAR$BASENAME$CHECK Test suite complete"
 fi
 
