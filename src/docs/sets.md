@@ -1,10 +1,10 @@
 ---
 title: Sets
-permalink: /guides/compute-engine-sets/
+permalink: /guides/compute-engine/sets/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'mathjson'
+  - nav: 'compute-engine'
 ---
 
 # Sets

@@ -1,22 +1,25 @@
 ---
 title: Domains
-permalink: /guides/compute-engine-domains/
+permalink: /guides/compute-engine/domains/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'mathjson'
+  - nav: 'compute-engine'
 ---
 
 <script type='module'>
-    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({ 
-      renderAccessibleContent: false,
-      TeX: { 
-        delimiters: { inline: [ ['\(', '\)'] ],
-        display: [ ['$$', '$$'] ] },
-        processEnvironments : false 
+    import {  renderMathInDocument } 
+      from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
+    renderMathInDocument({
+      TeX: {
+        delimiters: {
+          inline: [ ['$', '$'], ['\\(', '\\)']],
+          display: [['$$', '$$'],['\\[', '\\]']],
+        },
       },
       asciiMath: null,
+      processEnvironments : false,
+      renderAccessibleContent: false,
     });
 </script>
 
@@ -133,43 +136,43 @@ Any numerical value.
   integers.
 - `CompositeNumber` - An integer that can be produced by the product of 2 or
   more integers.
-- `Integer` $$= \mathbb{Z}$$. The set of whole numbers: $$0, 1, 2, 3\ldots$$ and
-  their additive inverse: $$-1, -2, -3, \ldots$$.
-- `NumberZero` - The number $$0$$: a composite number and an imaginary number.
-- `RationalNumber` $$= \mathbb{Q}$$. A number which can be expressed as the
-  quotient $$\frac{p}{q}$$ of two integers $$p, q \in \mathbb{Z}$$.
-- `RealNumber` $$= \mathbb{R}$$.
-- `NaturalNumber` $$= \mathbb{N}$$. Counting numbers, $$0, 1, 2, 3\ldots$$ Note
-  that $$0$$ is included, following the convention from
+- `"Integer"` \\(= \mathbb{Z}\\). The set of whole numbers: \\(0, 1, 2,
+  3\ldots\\) and their additive inverse: \\(-1, -2, -3, \ldots\\).
+- `"NumberZero"` - The number \\(0\\): a composite number and an imaginary
+  number.
+- `"RationalNumber"` \\(= \mathbb{Q}\\). A number which can be expressed as the
+  quotient \\(\frac{p}{q}\\) of two integers \\(p, q \in \mathbb{Z}\\).
+- `"RealNumber"` \\(= \mathbb{R}\\).
+- `"NaturalNumber"` \\(= \mathbb{N}\\). Counting numbers, \\(0, 1, 2, 3\ldots\\)
+  Note that \\(0\\) is included, following the convention from
   [ISO/IEC 80000](https://en.wikipedia.org/wiki/ISO_80000-2).
-- `IrrationalNumber` $$= \mathbb{Q^{\prime}}$$. Numbers such as
-  $$\sqrt{5}, \pi, \exponentialE$$ that cannot be written as a quotient of two
-  integers.
-- `ImaginaryNumber` - Any purely imaginary value (including zero).
-- `ComplexNumber` $$= \mathbb{C}$$. A real or imaginary number
+- `"IrrationalNumber"` \\(= \mathbb{Q^{\prime}}\\). Numbers such as \\(\sqrt{5},
+  \pi, \exponentialE\\) that cannot be written as a quotient of two integers.
+- `"ImaginaryNumber"` - Any purely imaginary value (including zero).
+- `"ComplexNumber"` \\(= \mathbb{C}\\). A real or imaginary number
 
-### `Tensor`
+### `"Tensor"`
 
-- `ComplexTensor` - A tensor whose elements are complex numbers.
-- `RealTensor` - A tensor whose elements are real numbers.
-- `IntegerTensor` - A tensor whose elements are integers.
-- `LogicalTensor` - A tensor whose elements are 0 or 1.
-- `Scalar` - A tensor of rank 0.
-- `Vector`, `Row`, `Column` - A tensor of rank 1. The argument of the parametric
-  version specifies the number of elements in the vector.
-- `Matrix` - A tensor of rank 2. The argument of the parametric version
+- `"ComplexTensor"` - A tensor whose elements are complex numbers.
+- `"RealTensor"` - A tensor whose elements are real numbers.
+- `"IntegerTensor"` - A tensor whose elements are integers.
+- `"LogicalTensor"` - A tensor whose elements are 0 or 1.
+- `"Scalar"` - A tensor of rank 0.
+- `"Vector"`, `"Row"`, `"Column"` - A tensor of rank 1. The argument of the
+  parametric version specifies the number of elements in the vector.
+- `"Matrix"` - A tensor of rank 2. The argument of the parametric version
   specifies the number of rows and columns in the matrix.
-- `Quaternion` - A $$2\times2$$ matrix of complex elements.
+- `"Quaternion"` - A \\(2\times2\\) matrix of complex elements.
   [Quaternions](https://en.wikipedia.org/wiki/Quaternion) are commonly used to
-  represent vectors in 3D space ($$\mathbb{R}^3$$).
-- `SquareMatrix` - A tensor with the same number of rows and columns.
-- `MonomialMatrix` - A square matrix with exactly one non-zero entry in each row
-  and column.
-- `OrthogonalMatrix` - A real square matrix whose transpose is equal to its
-  inverse: $$Q^{\mathrm{T}}=Q^{-1}$$
-- `PermutationMatrix` - A square matrix with with exactly one non-zero entry in
-  each row and column.
-- `DiagonalMatrix` - A matrix in which the elements outside the main diagonal
+  represent vectors in 3D space (\\(\mathbb{R}^3\\)).
+- `"SquareMatrix"` - A tensor with the same number of rows and columns.
+- `"MonomialMatrix"` - A square matrix with exactly one non-zero entry in each
+  row and column.
+- `"OrthogonalMatrix"` - A real square matrix whose transpose is equal to its
+  inverse: \\(Q^{\mathrm{T}}=Q^{-1}\\)
+- `"PermutationMatrix"` - A square matrix with with exactly one non-zero entry
+  in each row and column.
+- `"DiagonalMatrix"` - A matrix in which the elements outside the main diagonal
   are zero.
 - `IdentityMatrix` - A diagonal matrix whose diagonal elements are 1.
 - `ZeroMatrix` a matrix whose elements are 0.
@@ -209,8 +212,8 @@ A function maps some expressions, its arguments, to another expression.
 - `PolynomialFunction` - A function expressed only with the operations of
   addition, subtraction, multiplication, and non-negative integer
   exponentiation.
-- `QuadraticFunction` - A function of the form $$f(x) = ax^2+ bx + c$$
-- `LinearFunction` = $$f(x) = ax+ b$$ A function that is the product of an
+- `"QuadraticFunction"` - A function of the form \\(f(x) = ax^2+ bx + c\\)
+- `"LinearFunction"` = \\(f(x) = ax+ b\\) A function that is the product of an
   argument plus a constant.
 - `ConstantFunction` - A function that always return the same value.
 - `MonotonicFunction`

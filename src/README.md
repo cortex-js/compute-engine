@@ -1,10 +1,10 @@
 ---
 title: MathJSON Format
-permalink: /guides/math-json-format/
+permalink: /guides/math-json/format/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'mathjson'
+  - nav: 'compute-engine'
 ---
 
 <script type='module'>

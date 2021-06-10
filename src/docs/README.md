@@ -4,7 +4,7 @@ permalink: /guides/math-json-dictionary/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'mathjson'
+  - nav: 'compute-engine'
 ---
 
 <script type='module'>
