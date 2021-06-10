@@ -1,6 +1,6 @@
 ---
 title: Arithmetic
-permalink: /guides/compute-engine-arithmetic/
+permalink: /guides/compute-engine/arithmetic/
 layout: single
 date: Last Modified
 sidebar:
