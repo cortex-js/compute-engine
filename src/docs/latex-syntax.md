@@ -1,10 +1,10 @@
 ---
 title: MathJSON Core
-permalink: /guides/math-json-latex-syntax-api/
+permalink: /guides/math-json/latex-syntax-api/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'mathjson'
+  - nav: 'compute-engine'
 ---
 
 # MathJSON Latex Syntax API

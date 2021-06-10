@@ -1,21 +1,25 @@
 ---
 title: Calculus
-permalink: /guides/compute-engine-calculus/
+permalink: /guides/compute-engine/calculus/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'mathjson'
+  - nav: 'compute-engine'
 ---
 
 <script type='module'>
-    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({ 
-      renderAccessibleContent: false,
-      TeX: { 
-        delimiters: { display: [ ['$$', '$$'] ] },
-        processEnvironments : false 
+    import {  renderMathInDocument } 
+      from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
+    renderMathInDocument({
+      TeX: {
+        delimiters: {
+          inline: [ ['$', '$'], ['\\(', '\\)']],
+          display: [['$$', '$$'],['\\[', '\\]']],
+        },
       },
       asciiMath: null,
+      processEnvironments : false,
+      renderAccessibleContent: false,
     });
 </script>
 

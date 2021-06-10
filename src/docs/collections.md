@@ -1,3 +1,13 @@
+---
+title: Collections
+permalink: /guides/compute-engine/collections/
+layout: single
+date: Last Modified
+sidebar:
+  - nav: 'compute-engine'
+---
+# Collections
+
 ## `Sequence`
 
 The most primitive collection: a series of expressions separated by a `,`.
