@@ -9,6 +9,8 @@ export type SignalCode =
   | (
       | 'syntax-error'
       | 'invalid-name'
+      | 'expected-predicate'
+      | 'expected-symbol'
       | 'cyclic-definition' // arg: [cycle]
       | 'invalid-supersets' // arg: [superset-domain]
       | 'expected-supersets'

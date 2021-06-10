@@ -525,6 +525,7 @@ export class Scanner implements Scanner {
       }
 
       // Not a symbol (punctuation or fence, maybe?)...
+
       return this.matchUnknownLatexCommand();
     }
 
@@ -992,6 +993,19 @@ export class Scanner implements Scanner {
     }
 
     this.next();
+
+    if (command === '\\operatorname') {
+      this.skipSpace();
+      if (this.peek === '<{>') {
+        let result = '';
+        this.next();
+        while (!this.atEnd && this.tokens[this.index] !== '<}>') {
+          result += this.next();
+        }
+        return result;
+      }
+      return this.next() ?? MISSING;
+    }
 
     const optArgs: Expression[] = [];
     const reqArgs: Expression[] = [];

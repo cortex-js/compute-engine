@@ -81,6 +81,8 @@ export type RuntimeScope = Scope & {
 
   dictionary?: CompiledDictionary;
 
+  assumptions: null | Set<Expression>;
+
   /** The location of the call site that created this scope */
   origin?: {
     name?: string;
@@ -186,18 +188,20 @@ export type FunctionFeatures = {
 export type Domain = Expression;
 
 export type BaseDefinition = {
-  domain: Domain;
+  domain: Domain | ((...args: Expression[]) => Domain);
   /**
-   * A short string indicating an entry in a wikibase. For example
-   * `"Q167"` is the [wikidata entry](https://www.wikidata.org/wiki/Q167)
-   *  for the Pi constant.
+   * A short string representing an entry in a wikibase.
+   *
+   * For example `"Q167"` is the [wikidata entry](https://www.wikidata.org/wiki/Q167)
+   * for the Pi constant.
    */
   wikidata?: string;
 
   /**
-   * The scope this definition belongs to. This field is usually undefined,
-   * but its value is set by `getDefinition()`, `getFunctionDefinition()` and
-   * `getSymbolDefinition()`.
+   * The scope this definition belongs to.
+   *
+   * This field is usually undefined, but its value is set by `getDefinition()`,
+   * `getFunctionDefinition()` and `getSymbolDefinition()`.
    */
   scope?: Scope;
 };
@@ -238,6 +242,15 @@ export type FunctionSignature = {
 
   /** Evaluate the function with the passed in arguments and return a corresponding result. */
   evaluate?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
+
+  /** Evaluate the function with the passed in arguments and return a corresponding result. */
+  evaluateNumerically?: (
+    engine: ComputeEngine,
+    ...args: Expression[]
+  ) => Expression;
+
+  /** Return a simplified version of the expression */
+  simplify?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
 
   /** Evaluate the function with the passed in arguments and return a corresponding result. */
   asyncEvaluate?: (
@@ -397,14 +410,16 @@ export declare class ComputeEngine {
    */
   popScope(): void;
 
+  readonly assumptions: Set<Expression>;
+
   /**
-   * Call this function if an unexpected condition occurs during execution a
+   * Call this function if an unexpected condition occurs during execution of a
    * function in the engine.
    *
-   * An `ErrorSignal` a problem that cannot be recovered from.
+   * An `ErrorSignal` is a problem that cannot be recovered from.
    *
-   * A `WarningSignal` indicate a minor problem that should not
-   * prevent the execution to continue.
+   * A `WarningSignal` indicates a minor problem that does not prevent the
+   * execution to continue.
    *
    */
   signal(sig: ErrorSignal | WarningSignal): void;
@@ -453,7 +468,32 @@ export declare class ComputeEngine {
    * Use `result = await engine.evaluate(expr)` to get the result without
    * blocking.
    */
-  evaluate(exp: Expression): Promise<Expression | null>;
+  evaluate(expr: Expression): Promise<Expression | null>;
+
+  /**
+   * Determines if the predicate is satisfied. Return `undefined` if
+   * the value of the predicate cannot be determined.
+   *
+   * `ce.is(["Equal", "x", 0])`
+   * `ce.is(["Equal", 3, 4])`
+   *
+   */
+  is(predicate: Expression): boolean | undefined;
+
+  /**
+   * Add an assumption.
+   *
+   * Return `contradiction` if the new assumption is incompatible with previous
+   * ones.
+   *
+   * Return `tautology` if the new assumption is redundant with previous ones.
+   *
+   * Return `ok` if the assumption was successfully added to the assumption set.
+   *
+   * Note that the assumption is put into normal form before being added.
+   *
+   */
+  assume(predicate: Expression): 'contradiction' | 'tautology' | 'ok';
 
   /** Return the domain of the expression */
   domain(expr: Expression): Expression | null;
@@ -596,6 +636,7 @@ export type Form =
   | 'canonical-number'
   | 'canonical-root'
   | 'canonical-subtract'
+  | 'canonical-domain'
   | 'flatten' // simplify associative, idempotent and groups
   | 'full'
   | 'object-literal'

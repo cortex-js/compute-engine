@@ -39,6 +39,9 @@ import {
 } from './dictionary/utils';
 import { same } from './same';
 import { CortexError } from './utils';
+import { simplifyWithEngine } from './simplify';
+import { numericalEvalWithEngine } from './numerical-eval';
+import { assumeWithEngine, isWithEngine } from './assume';
 
 export class ComputeEngine {
   static getDictionaries(
@@ -85,6 +88,7 @@ export class ComputeEngine {
       ...scope,
       parentScope: this.context,
       dictionary: compileDictionary(dictionary, this),
+      assumptions: this.context ? new Set(this.context.assumptions) : new Set(),
     };
   }
 
@@ -120,6 +124,12 @@ export class ComputeEngine {
     this.context = parentScope;
   }
 
+  get assumptions(): Set<Expression> {
+    if (this.context.assumptions) return this.context.assumptions;
+    this.context.assumptions = new Set();
+    return this.context.assumptions;
+  }
+
   shouldContinueExecution(): boolean {
     if (this.context.timeLimit) {
       if (
@@ -134,6 +144,9 @@ export class ComputeEngine {
     return true;
   }
 
+  /**
+   * Return the set of free variables in an expression.
+   */
   getVars(expr: Expression): Set<string> {
     const result = new Set<string>();
     varsRecursive(expr, result, this);
@@ -269,20 +282,37 @@ export class ComputeEngine {
 
   format(expr: Expression | null, forms?: Form | Form[]): Expression | null {
     return formatWithEngine(
+      this,
       expr,
-      Array.isArray(forms) ? forms : [forms ?? 'canonical'],
-      this
+      Array.isArray(forms) ? forms : [forms ?? 'canonical']
     );
   }
+  /**
+   * Return a canonical form of an expression.
+   */
   canonical(expr: Expression | null): Expression | null {
     return this.format(expr);
   }
+  /**
+   * Return the (symbolic, exact) value of an expression.
+   */
   evaluate(exp: Expression): Promise<Expression | null> {
-    return evaluateWithEngine(exp, this);
+    return evaluateWithEngine(this, exp);
+  }
+
+  /**
+   * Return the numerical (approximate) value of an expression.
+   */
+  N(exp: Expression): Promise<Expression | null> {
+    return numericalEvalWithEngine(this, exp);
+  }
+
+  simplify(exp: Expression): Expression | null {
+    return simplifyWithEngine(this, exp);
   }
 
   domain(exp: Expression): Expression | null {
-    return domainWithEngine(exp, this);
+    return domainWithEngine(this, exp);
   }
 
   isInfinity(_expr: Expression): boolean | undefined {
@@ -363,6 +393,9 @@ export class ComputeEngine {
     // @todo
     return null;
   }
+  /**
+   * True if `lhs` and `rhs` are structurally equal
+   */
   same(lhs: Expression, rhs: Expression): boolean {
     return same(lhs, rhs);
   }
@@ -388,6 +421,32 @@ export class ComputeEngine {
   greaterEqual(lhs: Expression, rhs: Expression): boolean | undefined {
     const result = compare(this, lhs, rhs);
     return result === undefined ? undefined : result >= 0;
+  }
+
+  is(symbol: Expression, domain: Domain): boolean | undefined;
+  is(predicate: Expression): boolean | undefined;
+  is(arg1: Expression, arg2?: Domain): boolean | undefined {
+    let predicate: Expression = arg1;
+    if (arg2) {
+      predicate = ['MemberOf', arg1, arg2];
+    }
+    return isWithEngine(this, predicate);
+  }
+
+  assume(
+    symbol: Expression,
+    domain: Domain
+  ): 'contradiction' | 'tautology' | 'ok';
+  assume(predicate: Expression): 'contradiction' | 'tautology' | 'ok';
+  assume(
+    arg1: Expression,
+    arg2?: Domain
+  ): 'contradiction' | 'tautology' | 'ok' {
+    let predicate: Expression = arg1;
+    if (arg2) {
+      predicate = ['MemberOf', arg1, arg2];
+    }
+    return assumeWithEngine(this, predicate);
   }
 }
 
@@ -426,9 +485,9 @@ export function format(
   }
 ): Expression | null {
   return formatWithEngine(
+    new ComputeEngine(options),
     expr,
-    Array.isArray(forms) ? forms : [forms],
-    new ComputeEngine(options)
+    Array.isArray(forms) ? forms : [forms]
   );
 }
 
@@ -438,5 +497,5 @@ export function evaluate(
     dictionaries?: Readonly<Dictionary>[];
   }
 ): Promise<Expression | null> {
-  return evaluateWithEngine(expr, new ComputeEngine(options));
+  return evaluateWithEngine(new ComputeEngine(options), expr);
 }

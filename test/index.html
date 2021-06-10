@@ -18,6 +18,18 @@
       margin: 0;
       color: #666;
     }
+
+    .latex {
+      padding: 10px;
+      border-radius: 5px;
+      border: 1px solid #ddd;
+      margin-top: .5em;
+      background: #fdfdfd;
+
+    }
+
+    .output-section.is-visible { display: block; }
+    .output-section { display: none; } 
   </style>
   <script src="https://unpkg.com/mathlive/dist/mathlive.min.js"></script>
 </head>
@@ -28,7 +40,8 @@
   </header>
   <main>
     <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
-      \sqrt{1}[3]
+      \Z
+      <!-- \sqrt{1}[3] -->
       <!-- \sin(x -->
       <!-- x=\frac{-b\pm\sqrt{b^2-4ac}} {2a} -->
       <!-- 2^3^4 -->
@@ -80,21 +93,57 @@
     <!-- \int x^2 + x dx = 0 -->
     <!-- \int (x^2 + x) dx = 0 -->
 
-    <h2>Latex</h2>
+    <h2>Input Latex</h2>
     <div class="output" id="latex"></div>
-    <h2>MathJSON Canonical Form</h2>
-    <div class="output" id="mathjson-canonical"></div>
-    <h2>MathJSON Full Form</h2>
-    <div class="output" id="mathjson-full"></div>
-    <h2>MathJSON Raw</h2>
-    <div class="output" id="mathjson-raw"></div>
-    <h2>MathASCII</h2>
-    <div class="output" id="mathascii"></div>
+    <h2>Input ASCIIMath</h2>
+    <div class="output" id="asciimath"></div>
+
+    <div class="output-section" id='raw-form'>
+      <h2>MathJSON Raw</h2>
+      <div class="output mathjson"></div>  
+    </div>
+
+    <div class="output-section" id="full-form">
+      <h2>MathJSON Full Form</h2>
+      <div class="output mathjson"></div>  
+    </div>
+
+    <div class="output-section" id="canonical-form">
+      <h2>MathJSON Canonical Form</h2>
+      <div class="output mathjson"></div>
+    </div>
+
+    <div class="output-section" id="domain">
+      <h2>Domain</h2>
+      <div class="latex"></div>
+      <div class="output math-json"></div>
+    </div>
+
+    <div class="output-section" id="simplify">
+      <h2>Simplify</h2>
+      <div class="latex"></div>
+      <div class="output mathjson"></div>
+    </div>
+
+    <div class="output-section" id='evaluate'>
+      <h2>Evaluate</h2>
+      <div class="latex"></div>
+      <div class="output mathjson"></div>
+    </div>
+
+    <div class="output-section" id="evaluate-numerically">
+      <h2>Evaluate Numerically</h2>
+      <div class="latex"></div>
+      <div class="output math-json"></div>
+    </div>
   </main>
 
   <script type="module">
+    import { convertLatexToMarkup } from 
+      'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
     import { LatexSyntax } from '../dist/math-json.esm.js';
     import { ComputeEngine } from '../dist/compute-engine.esm.js';
+
 
     let errors = [];
     const defaultLatex = new LatexSyntax(
@@ -118,7 +167,7 @@
             )
           }
         },
-        promoteUnknownSymbols: /[a-z]+/,
+        promoteUnknownSymbols: /^[a-z]+/,
         dictionary:
           [...LatexSyntax.getDictionary(),
           {
@@ -135,9 +184,6 @@
     const rawLatex = new LatexSyntax(
       {
         invisibleOperator: '',
-        // superscriptOperator: '',
-        // subscriptOperator: '',
-        // parseArgumentsOfUnknownLatexCommands: false,
         invisiblePlusOperator: '',
         dictionary: [],
         promoteUnknownSymbols: /./,
@@ -147,7 +193,10 @@
         onError: (err) =>
           errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
       });
-    const computeEngine = new ComputeEngine();
+    const ce = new ComputeEngine();
+
+    ce.assume('x', ['Greater', 0]);
+    ce.assume('n', 'Integer');
 
     // console.log(defaultLatex.parse('3\\times x + 1'));
     // console.log(defaultLatex.parse('1 + x + x + x'));
@@ -168,60 +217,73 @@
     //   computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
     // ));
 
+
     const mf = document.getElementById('mf');
     mf.addEventListener('input', (ev) => updateContent(mf));
     updateContent(mf);
 
-    function updateContent(mf) {
+    async function updateContent(mf) {
       const latex = mf.getValue('latex');
       try {
 
-        document.getElementById('latex').innerHTML = escapeHtml(
-          latex
-        );
+        document.getElementById('latex').innerHTML = escapeHtml(latex);
 
-        errors = [];
+        document.getElementById('asciimath').innerHTML = 
+          escapeHtml(mf.getValue('ascii-math'));
+
 
         let expr = defaultLatex.parse(latex);
 
-        const canonicalExpr = computeEngine.format(expr, ['canonical']);
+        const canonicalExpr = ce.format(expr, ['canonical']);
 
-        document.getElementById('mathjson-canonical').innerHTML =
-          escapeHtml(JSON.stringify(canonicalExpr, null, 2)) +
-          '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
-          errors.join('<br>') +
-          '</div><br><hr>' +
-          escapeHtml(defaultLatex.serialize(canonicalExpr)) + '<br><hr>'
+        updateExpr(canonicalExpr, 'canonical-form');
 
-        errors = [];
-        const fullFormExpr = computeEngine.format(expr, ['full']);
+        updateExpr(ce.format(expr, ['full']), 'full-form');
 
+        updateExpr(ce.format(rawLatex.parse(latex), ['full']), 
+          'raw-form');
 
-        document.getElementById('mathjson-full').innerHTML =
-          escapeHtml(JSON.stringify(fullFormExpr, null, 2)) +
-          '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
-          errors.join('<br>') +
-          '</div><br><hr>' +
-          escapeHtml(defaultLatex.serialize(canonicalExpr)) + '<br><hr>'
+        updateExpr(await ce.domain(expr), 'domain');
 
-        errors = [];
-        expr = computeEngine.format(rawLatex.parse(latex), ['full']);
+        updateExpr(await ce.simplify(expr), 'simplify');
 
-        document.getElementById('mathjson-raw').innerHTML =
-          escapeHtml(JSON.stringify(expr, null)) +
-          '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
-          errors.join('<br>') +
-          '</div>';
+        updateExpr(await ce.evaluate(expr), 'evaluate');
 
-        document.getElementById(
-          'mathascii'
-        ).innerHTML = escapeHtml(mf.getValue('ASCIIMath'));
+        updateExpr(await ce.N(expr), 'evaluate-numerically');
+
       } catch (e) {
         console.error("Error converting %c " + latex + '%c ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
     }
 
+    function updateExpr(expr, id) {
+      errors = [];
+
+      const el = document.getElementById(id);
+      if (!el) return;
+
+      if (!expr) {
+        el.classList.remove('is-visible');
+      } else {
+        el.classList.add('is-visible');
+      }
+
+      const mathJsonEl = el.querySelector('.mathjson');
+      if (mathJsonEl) {
+        mathJsonEl.innerHTML =
+          escapeHtml(JSON.stringify(expr, null, 2)) +
+          '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
+          errors.join('<br>') + '</div>';
+      }
+      const latexEl = el.querySelector('.latex');
+      if (latexEl) {
+        latexEl.innerHTML =
+          convertLatexToMarkup(defaultLatex.serialize(expr));
+      }
+
+      errors = [];
+    }
 
     function escapeHtml(string) {
       return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {

@@ -139,40 +139,75 @@ const DOMAIN_COUNT = {
 };
 
 const PARAMETRIC_DOMAIN = {
-  String: {
+  Range: {
     signatures: [
       {
-        args: [],
-        result: 'Domain',
-        evaluate: () => 'String',
-      },
-      {
-        args: ['NaturalNumber'],
-        result: 'ParametricDomain',
-        evaluate: (_engine, min: number) => {
-          min = Math.round(min);
-          if (Number.isNaN(min)) return 'EmptySet';
-          if (min < 0) return 'EmptySet';
-          if (min === +Infinity) return 'EmptySet';
-          return ['String', min, min];
-        },
-      },
-      {
-        args: ['NaturalNumber'],
+        args: ['Integer', 'Integer'],
         result: 'ParametricDomain',
         evaluate: (_engine, min: number, max: number) => {
           min = Math.round(min);
           max = Math.round(max);
           if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
-          if (min < 0) return 'EmptySet';
-          if (min === +Infinity) return 'EmptySet';
           if (min > max) return 'EmptySet';
-          if (min === 0 && max === +Infinity) return 'EmptySet';
-          return ['String', min, max];
+          if (min === -Infinity && max === +Infinity) return 'Integer';
+          if (min === 0 && max === +Infinity) return 'NaturalNumber';
+          if (min === 0 && max === 0) return 'NumberZero';
+          return ['Range', min, max];
         },
       },
     ],
   },
+  Interval: {
+    signatures: [
+      {
+        args: ['RealNumber', 'RealNumber'],
+        result: 'ParametricDomain',
+        evaluate: (_engine, min: number, max: number) => {
+          if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
+          if (min > max) return 'EmptySet';
+          if (min === -Infinity && max === +Infinity) {
+            return 'RealNumber';
+          }
+          if (min === 0 && max === 0) return 'NumberZero';
+          return ['Interval', min, max];
+        },
+      },
+    ],
+  },
+  // String: {
+  //   signatures: [
+  //     {
+  //       args: [],
+  //       result: 'Domain',
+  //       evaluate: () => 'String',
+  //     },
+  //     {
+  //       args: ['NaturalNumber'],
+  //       result: 'ParametricDomain',
+  //       evaluate: (_engine, min: number) => {
+  //         min = Math.round(min);
+  //         if (Number.isNaN(min)) return 'EmptySet';
+  //         if (min < 0) return 'EmptySet';
+  //         if (min === +Infinity) return 'EmptySet';
+  //         return ['String', min, min];
+  //       },
+  //     },
+  //     {
+  //       args: ['NaturalNumber'],
+  //       result: 'ParametricDomain',
+  //       evaluate: (_engine, min: number, max: number) => {
+  //         min = Math.round(min);
+  //         max = Math.round(max);
+  //         if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
+  //         if (min < 0) return 'EmptySet';
+  //         if (min === +Infinity) return 'EmptySet';
+  //         if (min > max) return 'EmptySet';
+  //         if (min === 0 && max === +Infinity) return 'EmptySet';
+  //         return ['String', min, max];
+  //       },
+  //     },
+  //   ],
+  // },
 };
 
 /* {

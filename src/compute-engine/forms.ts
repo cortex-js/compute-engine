@@ -1,6 +1,7 @@
 import { Expression } from '../public';
 import { Form, Domain, ComputeEngine } from './public';
 import {
+  isAtomic,
   isNumberObject,
   isFunctionObject,
   isSymbolObject,
@@ -11,7 +12,6 @@ import {
   applyArgs,
   getArgCount,
   getFunctionHead,
-  isAtomic,
   PARENTHESES,
   POWER,
   DIVIDE,
@@ -852,9 +852,9 @@ export function escapeText(s: string): string {
  *
  */
 export function format(
+  engine: ComputeEngine,
   expr: Expression | null,
-  forms: Form[],
-  engine: ComputeEngine
+  forms: Form[]
 ): Expression | null {
   let result = expr;
   for (const form of forms) {

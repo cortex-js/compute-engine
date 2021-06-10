@@ -640,4 +640,28 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: { postfix: ['!', '!'] },
     precedence: 810,
   },
+  {
+    name: 'Lcm',
+    trigger: { symbol: ['\\operatorname', '<{>', 'l', 'c', 'm', '<}>'] },
+  },
+  {
+    name: 'Gcd',
+    trigger: { symbol: ['\\operatorname', '<{>', 'g', 'c', 'd', '<}>'] },
+  },
+  {
+    name: 'Ceil',
+    trigger: { symbol: ['\\operatorname', '<{>', 'c', 'e', 'i', 'l', '<}>'] },
+  },
+  {
+    name: 'Floor',
+    trigger: {
+      symbol: ['\\operatorname', '<{>', 'f', 'l', 'o', 'o', 'r', '<}>'],
+    },
+  },
+  {
+    name: 'Round',
+    trigger: {
+      symbol: ['\\operatorname', '<{>', 'r', 'o', 'u', 'n', 'd', '<}>'],
+    },
+  },
 ];

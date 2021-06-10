@@ -261,7 +261,11 @@ export function compileDictionary(
   // Temporarily put this dictionary in scope
   // (this is required so that compilation and validation can succeed
   // when symbols in this dictionary refer to *other* symbols from this dictionary)
-  engine.context = { parentScope: engine.context, dictionary: result };
+  engine.context = {
+    parentScope: engine.context,
+    dictionary: result,
+    assumptions: new Set(),
+  };
 
   // @todo: compile
 
@@ -309,7 +313,10 @@ function normalizeDefinition(
     return [def, warning];
   }
 
-  if (isCollectionDefinition(def) || engine.isSubsetOf(domain, 'Collection')) {
+  if (
+    isCollectionDefinition(def) ||
+    (typeof domain !== 'function' && engine.isSubsetOf(domain, 'Collection'))
+  ) {
     return [
       {
         domain: 'Collection',
@@ -322,7 +329,10 @@ function normalizeDefinition(
     ];
   }
 
-  if (isFunctionDefinition(def) || engine.isSubsetOf(domain, 'Function')) {
+  if (
+    isFunctionDefinition(def) ||
+    (typeof domain !== 'function' && engine.isSubsetOf(domain, 'Function'))
+  ) {
     let functionDef = { ...(def as FunctionDefinition) };
     functionDef = {
       wikidata: '',
@@ -364,14 +374,21 @@ function normalizeDefinition(
     return [functionDef, warning];
   }
 
-  if (isSetDefinition(def) || engine.isSubsetOf(domain, 'Function')) {
+  if (
+    isSetDefinition(def) ||
+    (typeof domain !== 'function' && engine.isSubsetOf(domain, 'Function'))
+  ) {
     // @todo
     return [def];
   }
 
   if (def) {
     // This might be a partial definition (missing `constant` for a symbol)
-    if (domain && engine.isSubsetOf(domain, 'Number')) {
+    if (
+      domain &&
+      typeof domain !== 'function' &&
+      engine.isSubsetOf(domain, 'Number')
+    ) {
       if (typeof (def as SymbolDefinition).value === 'undefined') {
         return [null, 'expected "value" property in definition'];
       }
@@ -389,7 +406,11 @@ function normalizeDefinition(
       ];
     }
     // This might be a partial definition (missing `signatures` for a Function)
-    if (domain && engine.isSubsetOf(domain, 'Function')) {
+    if (
+      domain &&
+      typeof domain !== 'function' &&
+      engine.isSubsetOf(domain, 'Function')
+    ) {
       return [
         {
           signatures: [{ rest: 'Anything', result: 'Anything' }],
@@ -399,7 +420,11 @@ function normalizeDefinition(
       ];
     }
     // This might be a partial definition (missing `supersets` for a Set)
-    if (domain && engine.isSubsetOf(domain, 'Set')) {
+    if (
+      domain &&
+      typeof domain !== 'function' &&
+      engine.isSubsetOf(domain, 'Set')
+    ) {
       return [
         def,
         'a "Set" should have a "supersets" property in its definition',
@@ -438,7 +463,10 @@ function validateDictionary(
     }
     if (isSymbolDefinition(def)) {
       // Validate domain (make sure domain exists)
-      if (!engine.isSubsetOf(def.domain, 'Anything')) {
+      if (
+        typeof def.domain !== 'function' &&
+        !engine.isSubsetOf(def.domain, 'Anything')
+      ) {
         engine.signal({
           severity: 'warning',
           message: ['unknown-domain', def.domain as string], //@todo might not be a string

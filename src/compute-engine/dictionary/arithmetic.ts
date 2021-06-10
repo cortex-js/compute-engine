@@ -105,7 +105,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary = {
         */
     domain: 'RealNumber',
     constant: true,
-    value: { num: '2.220446049250313e-16' },
+    value: { num: Number.EPSILON.toString() },
   },
   Multiply: {
     domain: 'Function',
