@@ -1,19 +1,21 @@
 ---
-title: MathJSON Core
-permalink: /guides/math-json/latex-syntax-api/
+title: Latex Syntax
+permalink: /guides/math-json/latex-syntax/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
 ---
 
-# MathJSON Latex Syntax API
+## Parsing and Serializing Latex
 
-## Parsing and Serializing
+The CortexJS Compute Engine manipulates MathJSON expressions. However, using
+other formats can be convenient. The Compute Engine can parse (transform to
+MathJSON) and serialize (transform from MathJSON) Latex strings.
 
-To transform Latex to MathJSON, use the `parse()` function.
+**To transform Latex to MathJSON**, use the `parse()` function.
 
-To transform MathJSON to Latex, use the `serialize()` function.
+**To transform MathJSON to Latex**, use the `serialize()` function.
 
 ```javascript
 import { parse, serialize } from 'math-json';
@@ -42,7 +44,7 @@ console.log(serialize(1/3, {
 
 ## Advanced Usage
 
-To improve performance, particularly when calling `parse()`/`serialize()`
+**To improve performance**, particularly when calling `parse()`/`serialize()`
 repeatedly, use an instance of the `LatexSyntax` class. When the instance is
 constructed, the dictionaries defining the syntax are compiled, and subsequent
 invocations of the `parse()` and `serialize()` methods can skip that step.
@@ -56,7 +58,8 @@ const latex = latexSyntax.serialize(expr);
 console.log(latex);
 ```
 
-To customize the syntax, provide options to the constructor of `LatexSyntax`.
+**To customize the syntax**, provide options to the constructor of
+`LatexSyntax`.
 
 For example, the configuration below will result in parsing a Latex string as a
 sequence of Latex tokens.

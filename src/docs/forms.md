@@ -1,5 +1,5 @@
 ---
-title: MathJSON Forms
+title: Canonical Forms
 permalink: /guides/compute-engine/forms/
 layout: single
 date: Last Modified
@@ -23,7 +23,7 @@ sidebar:
     });
 </script>
 
-# Compute Engine Forms
+# Canonical Forms
 
 A given mathematical expression can be represented in multiple equivalent ways
 as a MathJSON expression. A **form** is used to specify a representation:
@@ -71,7 +71,7 @@ as a MathJSON expression. A **form** is used to specify a representation:
   - `'sorted'`,
   - `'full'`,
 
-To transform an expression using the rules for a particular form, use the
+**To transform an expression using the rules for a particular form**, use the
 `format()` function.
 
 ```js

@@ -56,7 +56,7 @@ that \( \mathord{min} \le n \le \mathord{max}, n \in \N \).
 The `["Interval", _min_, _max_]` parametric domain defines a set of real numbers
 such that \( \mathord{min} \le x \le \mathord{max}, n \in \R \).
 
-To represent an open interval, use the `Open` function:
+**To represent an open interval**, use the `Open` function:
 `["Interval", ["Open", _min_], _max_]` \( \mathord{min} \lt x \le \mathord{max},
 n \in \R \) or \(x \in \rbrack \mathord{min}, \mathord{max} \rbrack \).
 
@@ -77,7 +77,7 @@ The implementation of the CortexJS domains is based on
 
 ## Obtaining the Domain of an Expression
 
-To obtain the domain of an expression, use the `ComputeEngine.domain()`
+**To obtain the domain of an expression**, use the `ComputeEngine.domain()`
 function.
 
 ```js

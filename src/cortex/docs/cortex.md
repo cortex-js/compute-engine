@@ -60,7 +60,7 @@ shell-specific syntax (`export VARIABLE=value` in bash shells, for example).
 Environment variables are not available when the compilation/parsing is taking
 place in a browser process.
 
-To access an environment variable, use the `#env()` pragma.
+**To access an environment variable**, use the `#env()` pragma.
 
 ```cortex
 #env("DEBUG")
@@ -79,8 +79,8 @@ Some common environment variables include:
 The navigator properties are available when the compilation/parsing is taking
 place in a browser process.
 
-To access the properties of the `navigator` Javascript global object use the
-`#navigator()` pragma function. It returns 'Nothing' if the property is not
+**To access the properties of the `navigator` Javascript global object**, use
+the `#navigator()` pragma function. It returns 'Nothing' if the property is not
 available.
 
 ```cortex
@@ -92,15 +92,15 @@ available.
 A compile-time diagnostic statement causes the compiler to emit an error or a
 warning during compilation.
 
-To output a message to the console and immediately interrupt the
-parsing/compilation, use the `#error()` pragma function.
+**To output a message to the console and immediately interrupt the
+parsing/compilation**, use the `#error()` pragma function.
 
 ```cortex
 #error("File cannot be compiled")
 ```
 
-To output a message to the console, but continue the parsing/compilation, use
-the `#warning()` pragma function.
+**To output a message to the console**, but continue the parsing/compilation,
+use the `#warning()` pragma function.
 
 ```cortex
 #warning("TODO: Implement function")
@@ -121,13 +121,13 @@ function.
 #sourceLocation(145, "file://localhost/~user/dev/source.ctx")
 ```
 
-To number the following line to 146, use:
+**To number the following line to 146**, use:
 
 ```cortex
 #sourceLocation(145)
 ```
 
-To reset the source location to the actual source and line, use
+**To reset the source location to the actual source and line**, use
 `#sourceLocation()`.
 
 ### Other Pragmas
@@ -151,8 +151,8 @@ end of the line.
 **Block (multi-line) Comments** start with `/*` and end with `*/`. Block
 comments can be nested.
 
-To indicate that a comment is part of the documentation and is formatted using
-markdown use `///` for single line comments and `/** */` for block comments.
+**To indicate that a comment is part of the documentation and is formatted using
+markdown**, use `///` for single line comments and `/** */` for block comments.
 
 **Hashbang Comment** can be included as the first line of a Cortex source file
 prefixed with `#!`. Its content indicate the command line interpreter to use:
@@ -379,7 +379,7 @@ The Verbatim Form must be used if:
   `throw`, `to`, `try`, `until`, `using`, `var`, `warn`, `when`, `where`,
   `while`, `with`, `xor`, `yield`.
 
-To write a symbol with the **Verbatim Form** put a backtick **`` ` ``**
+**To write a symbol with the _Verbatim Form_** , put a backtick **`` ` ``**
 (**U+0060 GRAVE ACCENT**) before and after its name.
 
 The string between the two backticks can be a reserved word or it can include

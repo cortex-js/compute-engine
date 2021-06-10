@@ -127,7 +127,7 @@ variables (parameters) of the Lambda-function.
 The second argument is an expression expressed as a function of the bound
 variables of the Lambda-function.
 
-To apply a Lambda-function to some arguments, use:
+**To apply a Lambda-function to some arguments**, use:
 
 ```cortex
 Lambda([x], x * x)(3)
