@@ -20,7 +20,7 @@ export function isSymbolDefinition(
 export function isFunctionDefinition(
   def: number | Definition | undefined | null
 ): def is FunctionDefinition {
-  return def !== null && typeof def === 'object' && 'signatures' in def;
+  return def !== null && typeof def === 'object' && 'range' in def;
 }
 
 export function isCollectionDefinition(

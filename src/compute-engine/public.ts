@@ -64,13 +64,16 @@ export type Scope = {
    * Time in seconds, default 2s.
    */
   timeLimit?: number;
+
   /** Signal 'out-of-memory' when the memory usage for this scope is exceeded.
    * Memory in Megabytes, default: 1Mb.
    */
   memoryLimit?: number;
+
   /** Signal 'recursion-depth-exceeded' when the recursion depth for this
    * scope is exceeded. */
   recursionLimit?: number;
+
   /** Signal 'iteration-limit-exceeded' when the iteration limit for this
    * scope is exceeded. Default: no limits.*/
   iterationLimit?: number;
@@ -90,13 +93,10 @@ export type RuntimeScope = Scope & {
     column?: number;
   };
 
-  /** Absolute time beyond which evaluation should not proceed */
-  deadline?: number;
-
   /** Free memory should not go below this level for execution to proceed */
   lowWaterMark?: number;
 
-  /** Set when one or more warning have been signaled in this scope */
+  /** Set when one or more warnings have been signaled in this scope */
   warnings?: WarningSignal[];
 };
 
@@ -168,6 +168,12 @@ export type FunctionFeatures = {
    */
   involution: boolean;
 
+  /** If true, the input arguments and the result are expected to be `Number`.
+   *
+   * Default: false
+   */
+  numeric: boolean;
+
   /** If true, invoking the function with a given set of arguments will
    * always return the same value, i.e. 'Sin' is pure, 'Random' isn't.
    * This is used to cache the result of the function.
@@ -207,58 +213,9 @@ export type BaseDefinition = {
 };
 
 /**
- * Function signature: definition of the inputs and output of a function.
  *
- * A function should have at least one signature, but can have several:
- * - `Add(RealNumber, RealNumber): RealNumber`
- * - `Add(ComplexNumber, ComplexNumber): ComplexNumber`
- * - etc..
- *
- * The signature of a function that accepts any input and may output
- * anything is: `{ rest: "Anything", result: "Anything" }`.
  *
  */
-export type FunctionSignature = {
-  /** Input arguments */
-  args?: (Domain | [name: string, domain: Domain])[];
-
-  /** If this signature accepts unlimited additional arguments after the
-   * named arguments, they should be of this domain */
-  rest?: Domain | [name: string, domain: Domain];
-
-  /** Domain result computation */
-  result:
-    | Domain
-    | ((engine: ComputeEngine, ...args: Expression[]) => Expression);
-
-  /** Dimensional analysis */
-  dimension?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
-
-  /** Return a compiled (optimized) function for evaluation */
-  compile?: (
-    engine: ComputeEngine,
-    ...args: CompiledExpression[]
-  ) => CompiledExpression;
-
-  /** Evaluate the function with the passed in arguments and return a corresponding result. */
-  evaluate?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
-
-  /** Evaluate the function with the passed in arguments and return a corresponding result. */
-  evaluateNumerically?: (
-    engine: ComputeEngine,
-    ...args: Expression[]
-  ) => Expression;
-
-  /** Return a simplified version of the expression */
-  simplify?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
-
-  /** Evaluate the function with the passed in arguments and return a corresponding result. */
-  asyncEvaluate?: (
-    engine: ComputeEngine,
-    ...args: Expression[]
-  ) => Promise<Expression>;
-};
-
 export type FunctionDefinition = BaseDefinition &
   Partial<FunctionFeatures> & {
     /**
@@ -275,7 +232,83 @@ export type FunctionDefinition = BaseDefinition &
      */
     sequenceHold?: boolean;
 
-    signatures?: FunctionSignature[];
+    /**
+     *
+     * Calculate the domain of the result.
+     *
+     * If `range` is a function, the arguments of `range()` are the
+     * the arguments of the function. The `range()` function can
+     * make use of available assumptions to determine its result.
+     *
+     * The range should be as precise as possible. A range of
+     * `Anything` is correct, but won't be very helpful.
+     *
+     * A range of `Number` is good, a range of `RealNumber` is better
+     * and a range of `["Interval", 0, "Infinity"]` is even better.
+     *
+     */
+    range:
+      | Domain
+      | ((engine: ComputeEngine, ...args: Expression[]) => Expression);
+
+    /**
+     * Rewrite the expression into a simplified form.
+     *
+     * If appropriate, make use of assumptions with `engine.is()`.
+     *
+     * Do not resolve the values of variables, that is `simplify("x+1")` is
+     * `x+1` even if `x = 0`. However, resolving constants is OK.
+     *
+     * Do not make approximate evaluations (i.e. floating point operations).
+     *
+     * Do not perform complex or lengthy operations: do these in `evaluate()`.
+     *
+     * Only make simple rewrites of the expression.
+     *
+     * The passed-in arguments have been simplified.
+     */
+    simplify?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
+
+    /**
+     * Make a numeric evaluation of the arguments, including floating
+     * point numbers.
+     *
+     * The passed-in arguments have been numerically evaluated
+     * already. However, there may still be symbols or expression, so if
+     * appropriate check the domain of the arguments.
+     */
+    evalf?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
+
+    /**
+     * Evaluate the arguments.
+     *
+     * This will be invoked by the `ComputeEngine.evaluate()` function, and
+     * after the `simplfy()` and `evalf()` methods have been called.
+     *
+     * If a function must perform any computations that may take a long time
+     * (>100ms), because they are computationally expensive, or because they
+     * require a network fetch, defer these computations to `evaluate()`
+     * rather than `simplify()`.
+     *
+     * If a synchronous `evaluate()` function is provided it will be used and
+     * `evaluateAsync()` will not be called.
+     *
+     * The arguments have been simplified and numerically evaluated.
+     */
+    evaluate?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
+    evaluateAsync?: (
+      engine: ComputeEngine,
+      ...args: Promise<Expression>[]
+    ) => Promise<Expression>;
+
+    /** Return a compiled (optimized) function. */
+    compile?: (
+      engine: ComputeEngine,
+      ...args: CompiledExpression[]
+    ) => CompiledExpression;
+
+    /** Dimensional analysis */
+    dimension?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
   };
 
 export type SymbolFeatures = {
@@ -390,6 +423,13 @@ export declare class ComputeEngine {
    */
   context: RuntimeScope;
 
+  /** Absolute time beyond which evaluation should not proceed */
+  deadline?: number;
+
+  readonly timeLimit?: number;
+  readonly iterationLimit?: number;
+  readonly recursionLimit?: number;
+
   /**
    * Construct a new ComputeEngine environment.
    *
@@ -434,9 +474,10 @@ export declare class ComputeEngine {
   shouldContinueExecution(): boolean;
 
   getFunctionDefinition(name: string): FunctionDefinition | null;
-  getSymbolDefinition(name: string): FunctionDefinition | null;
+  getSymbolDefinition(name: string): SymbolDefinition | null;
   getSetDefinition(name: string): SetDefinition | null;
-  getDefinition(name: string): FunctionDefinition | null;
+  getCollectionDefinition(name: string): CollectionDefinition | null;
+  getDefinition(name: string): Definition | null;
 
   /** Return the variables (free or not) in this expression */
   getVars(expr: Expression): Set<string>;

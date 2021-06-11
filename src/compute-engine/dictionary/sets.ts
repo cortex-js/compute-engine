@@ -15,16 +15,8 @@ export const SETS_DICTIONARY: Dictionary = {
     // Notation: \times
     domain: 'Function',
     wikidata: 'Q173740',
-    signatures: [
-      {
-        args: [
-          ['lhs', 'Set'],
-          ['rhs', 'Set'],
-        ],
-        result: 'Set',
-        evaluate: cartesianProduct,
-      },
-    ],
+    range: 'Set',
+    simplify: cartesianProduct,
   },
   Intersection: {
     // notation: \Cap
@@ -35,15 +27,15 @@ export const SETS_DICTIONARY: Dictionary = {
     commutative: true,
     idempotent: true,
     involution: true,
-    signatures: [
-      { rest: ['sets', 'Set'], result: 'Set', evaluate: intersection },
-    ],
+    range: 'Set',
+    simplify: intersection,
   },
   Complement: {
     // Return the elements of the first argument that are not in any of
     // the subsequent lists
     domain: 'Function',
     wikidata: 'Q242767',
+    range: 'Set',
   },
   Union: {
     // Works on set, but can also work on lists
@@ -54,7 +46,8 @@ export const SETS_DICTIONARY: Dictionary = {
     commutative: true,
     idempotent: true,
     involution: true,
-    signatures: [{ rest: ['sets', 'Set'], result: 'Set', evaluate: union }],
+    range: 'Set',
+    simplify: union,
   },
   // disjoint union Q842620 ⊔
   SymmetricDifference: {
@@ -63,46 +56,23 @@ export const SETS_DICTIONARY: Dictionary = {
     /* Corresponds to XOR in boolean logic */
     domain: 'Function',
     wikidata: 'Q1147242',
+    range: 'Set',
   },
   Subset: {
     domain: 'Predicate',
-    signatures: [
-      {
-        args: [
-          ['lhs', 'Set'],
-          ['rhs', 'Set'],
-        ],
-        result: 'MaybeBoolean',
-        evaluate: subset,
-      },
-    ],
+    range: 'MaybeBoolean',
+    simplify: subset,
   },
   SubsetEqual: {
     domain: 'Predicate',
-    signatures: [
-      {
-        args: [
-          ['lhs', 'Set'],
-          ['rhs', 'Set'],
-        ],
-        result: 'MaybeBoolean',
-        evaluate: subsetEqual,
-      },
-    ],
+    range: 'MaybeBoolean',
+    simplify: subsetEqual,
   },
   SetMinus: {
     domain: 'Function',
     wikidata: 'Q18192442',
-    signatures: [
-      {
-        args: [
-          ['lhs', 'Set'],
-          ['rhs', 'Set'],
-        ],
-        result: 'Set',
-        evaluate: setMinus,
-      },
-    ],
+    range: 'MaybeBoolean',
+    simplify: setMinus,
   },
 };
 
