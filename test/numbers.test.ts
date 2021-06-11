@@ -14,9 +14,7 @@ describe('NUMBERS', () => {
       `{num: '-1.1234e-5'}`
     );
     // Invalid expression (the argument of "num" should be a string)
-    expect(latex(({ num: 4 } as any) as Expression)).toMatchInlineSnapshot(
-      `'4'`
-    );
+    expect(latex({ num: 4 } as any as Expression)).toMatchInlineSnapshot(`'4'`);
     expect(expression('3\\times10^4')).toMatchInlineSnapshot(`{num: '3e4'}`);
   });
   test('Parsing plus/minus', () => {
@@ -66,10 +64,10 @@ describe('NUMBERS', () => {
   test('Non-finite numbers', () => {
     expect(expression('-\\infty')).toMatchInlineSnapshot(`{num: '-Infinity'}`);
     expect(expression('2+\\infty')).toMatchInlineSnapshot(
-      `['Add', 2, {num: '+Infinity'}]`
+      `['Add', 2, {num: 'Infinity'}]`
     );
     expect(expression('\\infty-\\infty')).toMatchInlineSnapshot(
-      `['Add', {num: '-Infinity'}, {num: 'Infinity'}]`
+      `['Add', {num: 'Infinity'}, {num: '-+Infinity'}]`
     );
     // Should not be interpreted as infinity
     expect(expression('\\frac{0}{0}')).toMatchInlineSnapshot(
@@ -84,9 +82,9 @@ describe('NUMBERS', () => {
     expect(latex(NaN)).toMatchInlineSnapshot(`'\\operatorname{NaN}'`);
     expect(latex(Infinity)).toMatchInlineSnapshot(`'\\infty'`);
     // Invalid expression
-    expect(
-      latex(({ num: Infinity } as any) as Expression)
-    ).toMatchInlineSnapshot(`'\\infty'`);
+    expect(latex({ num: Infinity } as any as Expression)).toMatchInlineSnapshot(
+      `'\\infty'`
+    );
     expect(latex({ num: 'infinity' })).toMatchInlineSnapshot(
       `'syntax-error {"num":"infinity"}'`
     );
@@ -105,8 +103,7 @@ describe('NUMBERS', () => {
     expect(latex({ num: '12n' })).toMatchInlineSnapshot(`'12'`);
     expect(
       latex({
-        num:
-          '18734619237861928346123987612981923064237689123876492384769123786412837040123612308964123876412307864012346012837491237864192837641923876419238764123987642198764987162398716239871236912347619238764192387641920836419238764123087641287642n',
+        num: '18734619237861928346123987612981923064237689123876492384769123786412837040123612308964123876412307864012346012837491237864192837641923876419238764123987642198764987162398716239871236912347619238764192387641920836419238764123087641287642n',
       })
     ).toMatchInlineSnapshot(
       `'1.873,461,923,786,1\\ldots\\ldots\\cdot10^{235}'`

@@ -17,7 +17,7 @@ export ERROR="\033[31m ERROR \033[0m"
 # On macOS, the -i switch must be followed by an extension argument (which can be empty)
 # On Windows, the argument of the -i switch is optional, but if present it must follow it immediately without a space in between
 sedi () {
-    sed --version >/dev/null 2>&1 && sed -i -- "$@" || sed -i "" "$@"
+    sed --version >/dev/null 2>&1 && sed -i -- "$@" || sed -i '' "$@"
 }
 export -f sedi
 
@@ -77,7 +77,7 @@ echo -e "$LINECLEAR$BASENAME$CHECK \033[33m" $BUILD "\033[0m build done"
 if [ "$BUILD" = "production" ]; then    
     # Stamp the SDK version number
     printf "$BASENAME$DOT Stamping output files"
-    find ./dist -type f \( -name '*.js' -o -name '*.js' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
+    find ./dist -type f \( -name '*.js' -o -name '*.mjs' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "1s/^/\/\* $SDK_VERSION \*\/$(printf '"'"'\r'"'"')/" {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "s/{{SDK_VERSION}}/$SDK_VERSION/" {}' \;
     echo -e "$LINECLEAR$BASENAME$CHECK Output files stamped"

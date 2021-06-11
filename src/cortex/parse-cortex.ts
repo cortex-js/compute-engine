@@ -243,102 +243,97 @@ grammar.rule(
   '_numerical-constant_ | (\\[_sign_\\] (_binary-number_ | _hexadecimal-number_ | _decimal-number_)'
 );
 
-grammar.rule(
-  'signed-number',
-  (parser: Parser): Result<Expression> => {
-    const result = new Result<Expression>(parser);
-    let litResult = parseString(parser, 'NaN');
-    if (litResult.isFailure) litResult = parseString(parser, 'Infinity');
-    if (litResult.isFailure) litResult = parseString(parser, '+Infinity');
-    if (litResult.isFailure) litResult = parseString(parser, '-Infinity');
-
-    if (litResult.isSuccess) {
-      return result.success(exprOrigin({ num: litResult.value! }, litResult));
-    }
-
-    const numResult = parseSignedNumber(parser);
-    if (numResult.isSuccess) {
-      // Return a number expression
-      // @todo: we could return a BaseForm() for hexadecimal and decimal
-      return result.success(exprOrigin(numResult.value!, numResult));
-    }
-    return numResult;
+grammar.rule('signed-number', (parser: Parser): Result<Expression> => {
+  const result = new Result<Expression>(parser);
+  let litResult = parseString(parser, 'NaN');
+  if (litResult.isFailure) litResult = parseString(parser, '+Infinity');
+  if (litResult.isFailure) litResult = parseString(parser, '-Infinity');
+  if (litResult.isSuccess) {
+    return result.success(exprOrigin({ num: litResult.value! }, litResult));
   }
-);
+
+  // `Infinity` is equal to `+Infinity`.
+  litResult = parseString(parser, 'Infinity');
+  if (litResult.isSuccess) {
+    return result.success(exprOrigin({ num: '+Infinity' }, litResult));
+  }
+
+  const numResult = parseSignedNumber(parser);
+  if (numResult.isSuccess) {
+    // Return a number expression
+    // @todo: we could return a BaseForm() for hexadecimal and decimal
+    return result.success(exprOrigin(numResult.value!, numResult));
+  }
+  return numResult;
+});
 
 grammar.rule('symbol', '_verbatim-symbol_ | _inline-symbol_');
 
-grammar.rule(
-  'symbol',
-  (parser: Parser): Result<Expression> => {
-    const result = new Result<Expression>(parser);
-    const res = parseIdentifier(parser);
-    result.copyDiagnostics(res);
-    result.end = res.end;
-    if (res.isSuccess || res.isError) {
-      result.success(exprOrigin(res.value!, res));
-    }
-    return result;
+grammar.rule('symbol', (parser: Parser): Result<Expression> => {
+  const result = new Result<Expression>(parser);
+  const res = parseIdentifier(parser);
+  result.copyDiagnostics(res);
+  result.end = res.end;
+  if (res.isSuccess || res.isError) {
+    result.success(exprOrigin(res.value!, res));
   }
-);
+  return result;
+});
 
 grammar.rule(
   'string',
   '_single-line-string_ | _multiline-string_ | _extended-string_'
 );
-grammar.rule(
-  'string',
-  (parser: Parser): Result<Expression> => {
-    let result: Result<any> = parseSingleLineString(parser, 'expression');
-    if (result.isFailure) result = parseMultilineString(parser, 'expression');
+grammar.rule('string', (parser: Parser): Result<Expression> => {
+  let result: Result<any> = parseSingleLineString(parser, 'expression');
+  if (result.isFailure) result = parseMultilineString(parser, 'expression');
 
-    if (result.isFailure) {
-      result = parseExtendedString(parser);
-      if (result.isSuccess) {
-        return result.success(exprOrigin({ str: result.value }, result));
-      }
+  if (result.isFailure) {
+    result = parseExtendedString(parser);
+    if (result.isSuccess) {
+      return result.success(exprOrigin({ str: result.value }, result));
     }
-
-    if (result.isFailure || result.isEmpty) return result;
-
-    const values: string[] = [];
-    let previousString: string | undefined;
-    for (const value of result.value) {
-      if (typeof value === 'string') {
-        previousString = (previousString ?? '') + value;
-      } else if (isStringObject(value)) {
-        previousString = (previousString ?? '') + value.str;
-      } else {
-        if (typeof previousString === 'string') {
-          values.push(previousString);
-          previousString = undefined;
-        }
-        values.push(value);
-      }
-    }
-
-    if (typeof previousString === 'string') values.push(previousString);
-
-    let value: Expression;
-    if (values.length === 1 && typeof values[0] === 'string') {
-      // It's a simple, non-interpolated string
-      value = exprOrigin({ str: escapeJsonString(values[0]) }, result);
-    } else {
-      // It's an interpolated string
-      value = exprOrigin(
-        [
-          'String',
-          ...values.map((x) => {
-            return typeof x === 'string' ? { str: x } : x;
-          }),
-        ],
-        result
-      );
-    }
-    result.value = value;
-    return result;
   }
-);
+
+  if (result.isFailure || result.isEmpty) return result;
+
+  const values: string[] = [];
+  let previousString: string | undefined;
+  for (const value of result.value) {
+    if (typeof value === 'string') {
+      previousString = (previousString ?? '') + value;
+    } else if (isStringObject(value)) {
+      previousString = (previousString ?? '') + value.str;
+    } else {
+      if (typeof previousString === 'string') {
+        values.push(previousString);
+        previousString = undefined;
+      }
+      values.push(value);
+    }
+  }
+
+  if (typeof previousString === 'string') values.push(previousString);
+
+  let value: Expression;
+  if (values.length === 1 && typeof values[0] === 'string') {
+    // It's a simple, non-interpolated string
+    value = exprOrigin({ str: escapeJsonString(values[0]) }, result);
+  } else {
+    // It's an interpolated string
+    value = exprOrigin(
+      [
+        'String',
+        ...values.map((x) => {
+          return typeof x === 'string' ? { str: x } : x;
+        }),
+      ],
+      result
+    );
+  }
+  result.value = value;
+  return result;
+});
 
 grammar.rule(
   'primary',
