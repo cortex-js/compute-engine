@@ -3,7 +3,13 @@
 </div>
 
 <h3><strong>Cortex Compute Engine</strong></h3>
-<h1>An engine for symbolic manipulation and numeric evaluation of math formulas expressed with MathJSONn</h1>
+<h1>Symbolic manipulation and numeric evaluation of MathJSON expressions</h1>
+
+[MathJSON](https://cortexjs.io/math-json/) is a lightweight data interchange
+format for mathematical notation, based on JSON.
+
+The Cortex Compute Engine can parse Latex to MathJSON, serialize MathJSON to
+Latex, format, simplify and evaluate MathJSON expressions.
 
 Reference documentation and guides at
 [cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/).
@@ -15,16 +21,20 @@ $ npm install --save @cortex-js/compute-engine
 ```
 
 ```js
-import { evaluate } from '@cortex-js/compute-engine';
+import { parse, evaluate } from '@cortex-js/compute-engine';
 
-console.log(evaluate(["MemberOf", ["Subtract", ["Power", 2, 11] , 1], "PrimeNumber"]);
+const expr = parse('2^{11}-1 \\in \\P');
+
+console.log(expr);
+// ➔ ["MemberOf", ["Subtract", ["Power", 2, 11] , 1], "PrimeNumber"]
+
+console.log(evaluate(expr));
 // ➔ "False"
-
 ```
 
 ## More
 
-- [Build](BUILD.md) instructions.
+- [Build](BUILD.md) instructions
 
 ## Related Projects
 
@@ -39,9 +49,10 @@ console.log(evaluate(["MemberOf", ["Subtract", ["Power", 2, 11] , 1], "PrimeNumb
 
 ## Support the Project
 
-- Star the GitHub repo (it really helps)
-- Join our [Gitter community](https://gitter.im/cortex-js/community)
-- Drop a line to arno@arno.org
+- <span style='font-size:1.5em'>🌟</span> Star the GitHub repo (it really helps)
+- <span style='font-size:1.5em'>💬</span> Join our
+  [Gitter community](https://gitter.im/cortex-js/community)
+- <span style='font-size:1.5em'>📨</span> Drop a line to arno@arno.org
 
 ## License
 
