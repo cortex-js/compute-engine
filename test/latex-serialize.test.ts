@@ -27,7 +27,7 @@ describe('LATEX SERIALIZING', () => {
     ).toMatchInlineSnapshot(
       `'-123,456,789,012,345,678,901,234,567,890\\cdot10^{-123}'`
     );
-    expect(latex({ num: 'Infinity' })).toMatchInlineSnapshot(`'\\infty'`);
+    expect(latex({ num: '+Infinity' })).toMatchInlineSnapshot(`'\\infty'`);
     expect(latex({ num: '-Infinity' })).toMatchInlineSnapshot(`'-\\infty'`);
     expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(
       `'\\operatorname{NaN}'`
