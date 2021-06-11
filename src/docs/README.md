@@ -12,7 +12,10 @@ sidebar:
     renderMathInDocument({ 
       renderAccessibleContent: false,
       TeX: { 
-        delimiters: { display: [ ['$$', '$$'] ] },
+        delimiters: {
+          inline: [['\\(', '\\)']],
+          display: [ ['$$', '$$'], ['\\[', '\\]']],
+        },
         processEnvironments : false 
       },
       asciiMath: null,
@@ -23,7 +26,7 @@ sidebar:
 
 ## Syntax and Symbol Dictionaries
 
-The MathJSON format is independent of any source or target language (Latex,
+The <a href ="/guides/math-json-format/">MathJSON format</a> is independent of any source or target language (Latex,
 MathASCII, etc...) or of any specific interpretation of the symbols used in a
 MathJSON expression (`"Pi"`, `"Sin"`, etc...).
 
@@ -52,14 +55,16 @@ For example:
 
 ## Domains
 
-A domain is roughly a combination of a type in a traditional programming
-language and an "assumption" in some CAS software. It can be associated with a
-symbol to provide some contextual information about this symbol, for example:
-_"x is an integer"_.
+A domain is similar to a type in a traditional programming
+language. 
+
+The domain of a symbol provides some contextual information about this symbol, for example: _"x is a positive integer"_. 
+
+The codomain of a function indicates the set of values that a function maps to, 
+or the domain of the "result" of the function.
 
 Each entry in the symbol dictionary indicate the domain of the symbol, and for
-functions the expected domain of its argument and the domain of its result (its
-codomain).
+functions its codomain.
 
 ## Customizing the Dictionaries
 

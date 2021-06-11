@@ -11,16 +11,13 @@ sidebar:
     import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
     renderMathInDocument({ 
       renderAccessibleContent: false,
-      TeX: {
+      TeX: { 
         delimiters: {
-          // Allow math formulas surround by $...$ or \(...\)
-          // to be rendered as textstyle content.
-          inline: [
-            ['$', '$'],
-            ['\\(', '\\)'],
-          ],
-          display: [],
+          inline: [['\\(', '\\)']],
+          display: [ ['$$', '$$'], ['\\[', '\\]']],
         },
+        processEnvironments : false 
+      },
       asciiMath: null,
     });
 </script>
@@ -94,8 +91,8 @@ Read more about [assumptions](/guides/compute-engine/assumptions),
   sometimes be surprising. For example, \\(0.1 + 0.2 = 0.30000000000000004 \\).
 - No rewriting of the expression is done before attempting to evaluate it.
   Because of the limitations on the representation of numbers, the result may
-  again be surprising, for example \\( x - x = 2.7755575615628914\cdot 10^{-17}
-  \text{when} x = 0.1 + 0.2\\). The result from `ComputeEngine.simplify()` would
+  again be surprising, for example \\( x - x = 2.7755575615628914\cdot 10^{-17}\\)
+   when \\( x = 0.1 + 0.2\\). The result from `ComputeEngine.simplify()` would
   be \\( 0 \\).
 
 ## Evaluation
@@ -105,3 +102,6 @@ the `ComputeEngine.evaluate()`.
 
 Invoking the `evaluate()` function is roughly equivalent to calling in sequence
 `simplify()`, `N()` then `format()`.
+
+Some functions may perform additional computations when `evaluate()` is 
+invoked.

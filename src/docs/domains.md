@@ -50,15 +50,15 @@ Parametric domains are functions that define a domain:
 ["Range", 0, "+Infinity"]
 ```
 
-The `["Range", _min_, _max_]` parametric domain defines a set of integers such
-that \( \mathord{min} \le n \le \mathord{max}, n \in \N \).
+The `["Range", <min>, <max>]` parametric domain defines a set of integers such
+that \\( \mathord{min} \le n \le \mathord{max}, n \in \N \\).
 
-The `["Interval", _min_, _max_]` parametric domain defines a set of real numbers
-such that \( \mathord{min} \le x \le \mathord{max}, n \in \R \).
+The `["Interval", <min>, <max>]` parametric domain defines a set of real numbers
+such that \\( \mathord{min} \le x \le \mathord{max}, n \in \R \\).
 
 **To represent an open interval**, use the `Open` function:
-`["Interval", ["Open", _min_], _max_]` \( \mathord{min} \lt x \le \mathord{max},
-n \in \R \) or \(x \in \rbrack \mathord{min}, \mathord{max} \rbrack \).
+`["Interval", ["Open", <min>], <max>]` \\( \operatorname{min} \lt x \le \operatorname{max},
+n \in \R \\) or \\(x \in \rbrack \operatorname{min}, \operatorname{max} \rbrack \\).
 
 ## Domains Lattice
 
