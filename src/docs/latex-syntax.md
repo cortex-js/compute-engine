@@ -9,9 +9,9 @@ sidebar:
 
 ## Parsing and Serializing Latex
 
-The CortexJS Compute Engine manipulates MathJSON expressions. However, using
-other formats can be convenient. The Compute Engine can parse (transform to
-MathJSON) and serialize (transform from MathJSON) Latex strings.
+The CortexJS Compute Engine manipulates MathJSON expressions. It can also
+convert Latex strings to MathJSON expression (parsing) and output MathJSON
+expressions as Latex string (serializing).
 
 **To transform Latex to MathJSON**, use the `parse()` function.
 
@@ -29,8 +29,8 @@ console.log(latex);
 // ➔ \frac{\pi}{2}
 ```
 
-The behavior of parse and serialize can be customized by passing an optional
-argument:
+The behavior of `parse()` and `serialize()` can be customized by passing an 
+optional argument:
 
 ```javascript
 import {  serialize } from 'math-json';
@@ -44,7 +44,7 @@ console.log(serialize(1/3, {
 
 ## Advanced Usage
 
-**To improve performance**, particularly when calling `parse()`/`serialize()`
+For improved performance, particularly when calling `parse()` or `serialize()`
 repeatedly, use an instance of the `LatexSyntax` class. When the instance is
 constructed, the dictionaries defining the syntax are compiled, and subsequent
 invocations of the `parse()` and `serialize()` methods can skip that step.

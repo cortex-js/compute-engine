@@ -102,7 +102,7 @@ describe('DIVIDE', () => {
     expect(latex([DIVIDE, 'NaN'])).toMatchInlineSnapshot(
       `'\\operatorname{NaN}'`
     );
-    expect(latex([DIVIDE, 'Infinity'])).toMatchInlineSnapshot(
+    expect(latex([DIVIDE, '+Infinity'])).toMatchInlineSnapshot(
       `'\\operatorname{Infinity}'`
     );
   });

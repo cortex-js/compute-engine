@@ -33,7 +33,7 @@ sidebar:
 - `MachineEpsilon` \\(\approx 2^{−52}\\). The difference between 1 and the next
   larger floating point number. See
   [Wikipedia](https://en.wikipedia.org/wiki/Machine_epsilon)
-- `Pi` = $$\pi = 3.14159265358979323\ldots$$
+- `Pi` = \\( \pi = 3.14159265358979323\ldots \\)
 
 ## Functions
 

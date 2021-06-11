@@ -110,8 +110,8 @@ describe('CORTEX PARSING COMMENTS', () => {
 describe('CORTEX PARSING NUMBERS', () => {
   test('Constants', () => {
     expect(validCortex('NaN')).toStrictEqual({ num: 'NaN' });
-    expect(validCortex('+Infinity')).toStrictEqual({ num: 'Infinity' });
-    expect(validCortex('Infinity')).toStrictEqual({ num: 'Infinity' });
+    expect(validCortex('+Infinity')).toStrictEqual({ num: '+Infinity' });
+    expect(validCortex('Infinity')).toStrictEqual({ num: '+Infinity' });
     expect(validCortex('-Infinity')).toStrictEqual({ num: '-Infinity' });
   });
   test('Integers', () => {

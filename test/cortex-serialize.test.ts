@@ -26,10 +26,10 @@ describe('CORTEX SERIALIZING', () => {
     expect(
       serializeCortex({ num: '-123456789012345678901234567890.890e-123' })
     ).toMatchInlineSnapshot(`"-123_456_789_012_345_678_901_234_567_890e-123"`);
-    expect(serializeCortex({ num: 'Infinity' })).toMatch('Infinity');
+    expect(serializeCortex({ num: '+Infinity' })).toMatch('+Infinity');
     expect(serializeCortex({ num: '-Infinity' })).toMatch('-Infinity');
     expect(serializeCortex({ num: 'NaN' })).toMatch('NaN');
-    expect(serializeCortex({ num: 'Infinity' })).toMatch('Infinity');
+    expect(serializeCortex({ num: 'Infinity' })).toMatch('+Infinity');
 
     // Repeating pattern
     expect(

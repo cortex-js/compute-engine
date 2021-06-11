@@ -66,7 +66,7 @@ describe('NUMBERS', () => {
   test('Non-finite numbers', () => {
     expect(expression('-\\infty')).toMatchInlineSnapshot(`{num: '-Infinity'}`);
     expect(expression('2+\\infty')).toMatchInlineSnapshot(
-      `['Add', 2, {num: 'Infinity'}]`
+      `['Add', 2, {num: '+Infinity'}]`
     );
     expect(expression('\\infty-\\infty')).toMatchInlineSnapshot(
       `['Add', {num: '-Infinity'}, {num: 'Infinity'}]`
