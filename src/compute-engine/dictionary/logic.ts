@@ -10,6 +10,7 @@ export const LOGIC_DICTIONARY: Dictionary = {
     associative: true,
     commutative: true,
     idempotent: true,
+    range: 'MaybeBoolean',
   },
   Or: {
     domain: 'LogicalFunction',
@@ -17,23 +18,24 @@ export const LOGIC_DICTIONARY: Dictionary = {
     associative: true,
     commutative: true,
     idempotent: true,
+    range: 'MaybeBoolean',
   },
   Not: {
     domain: 'LogicalFunction',
     involution: true,
+    range: 'MaybeBoolean',
   },
   Equivalent: {
     domain: 'LogicalFunction',
+    range: 'MaybeBoolean',
   },
-  Implies: { domain: 'LogicalFunction' },
-  Exists: { domain: 'LogicalFunction' },
-  Equal: { domain: 'LogicalFunction' },
+  Implies: { domain: 'LogicalFunction', range: 'MaybeBoolean' },
+  Exists: { domain: 'LogicalFunction', range: 'MaybeBoolean' },
+  Equal: { domain: 'LogicalFunction', range: 'MaybeBoolean' },
   NotEqual: {
     domain: 'Function',
     wikidata: 'Q28113351',
     commutative: true,
-    signatures: [
-      { args: ['Expression', 'Expression'], result: 'MaybeBoolean' },
-    ],
+    range: 'MaybeBoolean',
   },
 };

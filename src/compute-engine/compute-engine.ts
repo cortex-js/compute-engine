@@ -6,6 +6,7 @@ import {
 } from '../public';
 
 import {
+  CollectionDefinition,
   Definition,
   Dictionary,
   Domain,
@@ -33,6 +34,7 @@ import {
   getTail,
 } from '../common/utils';
 import {
+  isCollectionDefinition,
   isFunctionDefinition,
   isSetDefinition,
   isSymbolDefinition,
@@ -50,6 +52,7 @@ export class ComputeEngine {
     return getDefaultDictionaries(categories);
   }
   context: RuntimeScope;
+  deadline?: number;
 
   constructor(options?: { dictionaries?: Readonly<Dictionary>[] }) {
     const dicts = options?.dictionaries ?? ComputeEngine.getDictionaries();
@@ -130,18 +133,47 @@ export class ComputeEngine {
     return this.context.assumptions;
   }
 
+  get timeLimit(): undefined | number {
+    let scope = this.context;
+    while (scope) {
+      if (scope.timeLimit !== undefined) return scope.timeLimit;
+      scope = scope.parentScope;
+    }
+    return undefined;
+  }
+  get recursionLimit(): undefined | number {
+    let scope = this.context;
+    while (scope) {
+      if (scope.recursionLimit !== undefined) return scope.recursionLimit;
+      scope = scope.parentScope;
+    }
+    return undefined;
+  }
+  get iterationLimit(): undefined | number {
+    let scope = this.context;
+    while (scope) {
+      if (scope.iterationLimit !== undefined) return scope.iterationLimit;
+      scope = scope.parentScope;
+    }
+    return undefined;
+  }
+
   shouldContinueExecution(): boolean {
-    if (this.context.timeLimit) {
-      if (
-        this.context.deadline !== undefined &&
-        this.context.deadline < global.performance.now()
-      ) {
-        throw new CortexError({
-          message: 'timeout', // @todo: should capture stack
-        });
-      }
+    if (
+      this.deadline !== undefined &&
+      this.deadline < globalThis.performance.now()
+    ) {
+      return false;
     }
     return true;
+  }
+
+  checkContinueExecution(): void {
+    if (!this.shouldContinueExecution()) {
+      throw new CortexError({
+        message: 'timeout', // @todo: should capture stack
+      });
+    }
   }
 
   /**
@@ -155,7 +187,7 @@ export class ComputeEngine {
 
   getFunctionDefinition(name: string): FunctionDefinition | null {
     let scope = this.context;
-    let def: FunctionDefinition | undefined = undefined;
+    let def: Definition | undefined = undefined;
     while (scope && !def) {
       def = scope.dictionary?.get(name);
       if (!isFunctionDefinition(def)) def = undefined;
@@ -172,8 +204,9 @@ export class ComputeEngine {
       if (!isSymbolDefinition(def)) def = undefined;
       if (!def) scope = scope.parentScope;
     }
-    if (def) def.scope = scope;
-    return def ?? null;
+    if (!def) return null;
+    def.scope = scope;
+    return def;
   }
   getSetDefinition(name: string): SetDefinition | null {
     let scope = this.context;
@@ -183,8 +216,21 @@ export class ComputeEngine {
       if (!isSetDefinition(def)) def = undefined;
       if (!def) scope = scope.parentScope;
     }
-    if (def) def.scope = scope;
-    return def ?? null;
+    if (!def) return null;
+    def.scope = scope;
+    return def;
+  }
+  getCollectionDefinition(name: string): CollectionDefinition | null {
+    let scope = this.context;
+    let def: Definition | undefined = undefined;
+    while (scope && !def) {
+      def = scope.dictionary?.get(name);
+      if (!isCollectionDefinition(def)) def = undefined;
+      if (!def) scope = scope.parentScope;
+    }
+    if (!def) return null;
+    def.scope = scope;
+    return def;
   }
   getDefinition(name: string): Definition | null {
     let scope = this.context;
@@ -193,8 +239,9 @@ export class ComputeEngine {
       def = scope.dictionary?.get(name);
       if (!def) scope = scope.parentScope;
     }
-    if (def) def.scope = scope;
-    return def ?? null;
+    if (!def) return null;
+    def.scope = scope;
+    return def;
   }
 
   signal(_sig: ErrorSignal | WarningSignal): void {
@@ -288,27 +335,58 @@ export class ComputeEngine {
     );
   }
   /**
-   * Return a canonical form of an expression.
+   * Return the canonical form of an expression.
    */
   canonical(expr: Expression | null): Expression | null {
     return this.format(expr);
   }
-  /**
-   * Return the (symbolic, exact) value of an expression.
-   */
-  evaluate(exp: Expression): Promise<Expression | null> {
-    return evaluateWithEngine(this, exp);
-  }
 
   /**
-   * Return the numerical (approximate) value of an expression.
+   * Return a numerical approximation of an expression.
    */
   N(exp: Expression): Promise<Expression | null> {
     return numericalEvalWithEngine(this, exp);
   }
 
-  simplify(exp: Expression): Expression | null {
-    return simplifyWithEngine(this, exp);
+  /**
+   * Attempt to simplify an expression, that is rewrite it in a simpler form,
+   * making use of the available assumptions.
+   *
+   * The simplification steps will proceed multiple times until either:
+   * 1/ the expression stop changing
+   * 2/ the number of iteration exceeds `iterationLimit`
+   * 3/ the time to compute exceeds `timeLimit`, expressed in seconds
+   *
+   * If no `timeLimit` or `iterationLimit` are provided, the values
+   * from the current ComputeEngine context are used. By default those
+   * values are an infinite amount of iterations and a 2s time limit.
+   *
+   */
+  simplify(
+    exp: Expression,
+    options?: { timeLimit: number; iterationLimit: number }
+  ): Expression | null {
+    return simplifyWithEngine(this, exp, options);
+  }
+
+  /**
+   * Return a simplified and numerically approximation of an expression
+   * in canonical form.
+   *
+   * The simplification steps will proceed multiple times until either:
+   * 1/ the expression stop changing
+   * 2/ the number of iteration exceeds `iterationLimit`
+   * 3/ the time to compute exceeds `timeLimit`, expressed in seconds
+   *
+   * If no `timeLimit` or `iterationLimit` are provided, the values
+   * from the current ComputeEngine context are used. By default those
+   * values are an infinite amount of iterations and a 2s time limit.
+   */
+  evaluate(
+    exp: Expression,
+    options?: { timeLimit: number; iterationLimit: number }
+  ): Promise<Expression | null> {
+    return evaluateWithEngine(this, exp, options);
   }
 
   domain(exp: Expression): Expression | null {

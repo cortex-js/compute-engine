@@ -1,5 +1,5 @@
 import { Expression } from '../public';
-import { Form, Domain, ComputeEngine } from './public';
+import { Form, ComputeEngine } from './public';
 import {
   isAtomic,
   isNumberObject,
@@ -31,6 +31,7 @@ import {
   MISSING,
 } from '../common/utils';
 import { canonicalOrder } from './order';
+import { canonicalDomainForm } from './dictionary/domains';
 
 function ungroup(expr: Expression | null): Expression | null {
   if (expr === null) return null;
@@ -763,23 +764,6 @@ export function sortedForm(
 }
 
 /**
- * Return a canonical form of the domain
- *
- */
-export function canonicalDomainForm(
-  dom: Domain,
-  _engine: ComputeEngine
-): Domain {
-  // The canonical domain is calculated by evaluating the
-  // domain expression @todo
-
-  // @todo Deal with parametric domains
-  // when overlapping
-  // Simplify ranges: Real[-infinity, +infinity] (or does Real not include infinity?)
-  return dom;
-}
-
-/**
  *  Return the expression in canonical form:
  *
  * - `"divide"`, `"exp"`,` `"subtract"`, `"root"`, `"exp"` replaced with
@@ -865,6 +849,7 @@ export function format(
       'canonical': canonicalForm,
       'canonical-add': canonicalAddForm,
       'canonical-divide': canonicalDivideForm,
+      'canonical-domain': canonicalDomainForm,
       'canonical-exp': canonicalExpForm,
       'canonical-list': canonicalListForm,
       'canonical-multiply': canonicalMultiplyForm,
@@ -878,7 +863,6 @@ export function format(
       'sorted': sortedForm,
       'stripped-metadata': strippedMetadataForm,
       'object-literal': objectLiteralForm,
-      'canonical-domain': canonicalDomainForm,
       // 'sum-product': sumProductForm,
     }[form];
     if (!fn) {

@@ -1,5 +1,5 @@
 import { Expression } from '../../public';
-import { Dictionary, SetDefinition } from '../public';
+import { ComputeEngine, Dictionary, Domain, SetDefinition } from '../public';
 
 // Other domains to consider:
 // - p-adic
@@ -27,6 +27,16 @@ import { Dictionary, SetDefinition } from '../public';
  * The DOMAIN_PARENT table represents this lattice by indicating the parent(s)
  * for each domain.
  */
+
+/**
+ * These synonyms are shortcuts that get normalized to their definition.
+ */
+export const DOMAIN_SYNONYMS: { [synonym: string]: Expression } = {
+  NegativeRealNumber: ['Interval', -Infinity, 0],
+  NonNegativeRealNumber: ['Interval', 0, Infinity],
+  PositiveRealNumber: ['Interval', ['Open', 0], Infinity],
+  MinusOnePlusOne: ['Interval', -1, 1],
+};
 
 const DOMAIN_PARENT = {
   Anything: [],
@@ -140,39 +150,29 @@ const DOMAIN_COUNT = {
 
 const PARAMETRIC_DOMAIN = {
   Range: {
-    signatures: [
-      {
-        args: ['Integer', 'Integer'],
-        result: 'ParametricDomain',
-        evaluate: (_engine, min: number, max: number) => {
-          min = Math.round(min);
-          max = Math.round(max);
-          if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
-          if (min > max) return 'EmptySet';
-          if (min === -Infinity && max === +Infinity) return 'Integer';
-          if (min === 0 && max === +Infinity) return 'NaturalNumber';
-          if (min === 0 && max === 0) return 'NumberZero';
-          return ['Range', min, max];
-        },
-      },
-    ],
+    range: 'ParametricDomain',
+    evaluate: (_engine, min: number, max: number) => {
+      min = Math.round(min);
+      max = Math.round(max);
+      if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
+      if (min > max) return 'EmptySet';
+      if (min === -Infinity && max === +Infinity) return 'Integer';
+      if (min === 0 && max === +Infinity) return 'NaturalNumber';
+      if (min === 0 && max === 0) return 'NumberZero';
+      return ['Range', min, max];
+    },
   },
   Interval: {
-    signatures: [
-      {
-        args: ['RealNumber', 'RealNumber'],
-        result: 'ParametricDomain',
-        evaluate: (_engine, min: number, max: number) => {
-          if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
-          if (min > max) return 'EmptySet';
-          if (min === -Infinity && max === +Infinity) {
-            return 'RealNumber';
-          }
-          if (min === 0 && max === 0) return 'NumberZero';
-          return ['Interval', min, max];
-        },
-      },
-    ],
+    range: 'ParametricDomain',
+    evaluate: (_engine, min: number, max: number) => {
+      if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
+      if (min > max) return 'EmptySet';
+      if (min === -Infinity && max === +Infinity) {
+        return 'RealNumber';
+      }
+      if (min === 0 && max === 0) return 'NumberZero';
+      return ['Interval', min, max];
+    },
   },
   // String: {
   //   signatures: [
@@ -326,3 +326,20 @@ export function getDomainsDictionary(): Dictionary {
 
 //   return result;
 // }
+
+/**
+ * Return a canonical form of the domain
+ *
+ */
+export function canonicalDomainForm(
+  dom: Domain,
+  _engine: ComputeEngine
+): Domain {
+  // The canonical domain is calculated by evaluating the
+  // domain expression @todo
+
+  // @todo Deal with parametric domains
+  // when overlapping
+  // Simplify ranges: Real[-infinity, +infinity] (or does Real not include infinity?)
+  return dom;
+}

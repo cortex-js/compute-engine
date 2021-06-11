@@ -1,20 +1,22 @@
 import type { Dictionary } from '../public';
 
 export const COLLECTIONS_DICTIONARY: Dictionary = {
-  KeyValue: { domain: 'Function' },
-  Keys: { domain: 'Function' },
-  Entries: { domain: 'Function' },
-  Dictionary: { domain: 'Collection' },
-  List: { domain: 'Collection' },
-  Tuple: { domain: 'Collection' },
-  Sequence: { domain: 'Collection' },
-
+  // KeyValue: { domain: 'Function' },
+  // Keys: { domain: 'Function' },
+  // Entries: { domain: 'Function' },
+  // Dictionary: { domain: 'Collection' },
+  // Dictionary: {
+  //   domain: 'Function',
+  //   range: 'Dictionary',
+  // },
+  // List: { domain: 'Collection' },
+  // Tuple: { domain: 'Collection' },
+  // Sequence: { domain: 'Collection' },
   // Reverse
   // ForEach / Apply
   // Map
   // ReduceRight
   // ReduceLeft
-
   // first    or head
   // rest     or tail
   // cons -> cons(first (element), rest (list)) = list

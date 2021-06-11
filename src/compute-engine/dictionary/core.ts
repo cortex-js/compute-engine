@@ -3,99 +3,67 @@ import type { Dictionary } from '../public';
 export const CORE_DICTIONARY: Dictionary = {
   Apply: {
     domain: 'Function',
-    signatures: [
-      {
-        args: [
-          ['head', 'Expression'],
-          ['tail', 'List'],
-        ],
-        result: 'Expression',
-      },
-    ],
+    range: 'Anything',
   },
   About: {
     domain: 'Function',
-    signatures: [
-      {
-        args: ['Expression'],
-        result: 'Dictionary',
-      },
-    ],
+    range: 'Dictionary',
   },
   BaseForm: {
     domain: 'Function',
-    signatures: [
-      {
-        args: [
-          ['value', 'Integer'],
-          ['base', ['Integer', 2, 16]],
-        ],
-        result: 'Integer',
-      },
-    ],
+    range: 'Integer',
   },
+  /** Create a local scope. First argument is a dictionary of local variables.
+   * They are evaluated in the context of the parent scope. The second argument
+   * is an expression to be evaluated in the context of the new scope.
+   * ["Block", ["List", ["Equal", "x", 1]], [...]]
+   */
   Block: {
-    /** Create a local scope. First argument is a dictionary of local variables.
-     * They are evaluated in the context of the parent scope. The second argument
-     * is an expression to be evaluated in the context of the new scope.
-     * ["Block", ["List", ["Equal", "x", 1]], [...]]
-     */
     domain: 'Function',
+    range: 'Anything',
   },
-  Dictionary: {
-    domain: 'Collection',
-  },
+  /** Return the domain of an expression */
   Domain: {
-    /** Return the domain of an expression */
-    domain: 'Function',
-    signatures: [{ args: ['Expression'], result: 'Domain' }],
+    domain: 'ParametricDomain',
+    range: 'Domain',
   },
   Evaluate: {
     domain: 'Function',
-    signatures: [{ args: ['Expression'], result: 'Expression' }],
+    range: 'Anything',
   },
   Parentheses: {
     domain: 'Function',
     threadable: true,
     pure: false,
-    signatures: [{ rest: 'Expression', result: 'Expression' }],
+    range: 'Anything',
   },
   Head: {
     domain: 'Function',
-    signatures: [
-      {
-        args: ['Expression'],
-        result: 'Expression',
-      },
-    ],
+    range: 'Anything',
   },
   Lambda: {
     domain: 'Function',
     wikidata: 'Q567612',
     hold: 'all',
+    range: 'Anything',
   },
   Latex: {
     domain: 'Function',
-    signatures: [{ rest: ['tokens', 'String'], result: 'String' }],
+    range: 'String',
   },
   String: {
     domain: 'Function',
     threadable: true,
-    signatures: [{ rest: ['string', 'String'], result: 'String' }],
+    range: 'String',
   },
   Symbol: {
     domain: 'Function',
     threadable: true,
-    signatures: [{ args: ['String'], result: 'Symbol' }],
+    range: 'Symbol',
   },
   Tail: {
     domain: 'Function',
-    signatures: [
-      {
-        args: ['Expression'],
-        result: 'List',
-      },
-    ],
+    range: 'List',
   },
   // Pattern: {},
 };
