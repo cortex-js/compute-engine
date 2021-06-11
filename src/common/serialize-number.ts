@@ -94,7 +94,7 @@ export function serializeNumber(
     return '';
   }
 
-  if (num === Infinity || num === 'Infinity') {
+  if (num === Infinity || num === 'Infinity' || num === '+Infinity') {
     return options.positiveInfinity;
   } else if (num === -Infinity || num === '-Infinity') {
     return options.negativeInfinity;

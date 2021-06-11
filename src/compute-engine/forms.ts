@@ -518,7 +518,7 @@ function canonicalNumberForm(
     if (isNaN(expr)) {
       return { num: 'NaN' };
     } else if (!isFinite(expr) && expr > 0) {
-      return { num: 'Infinity' };
+      return { num: '+Infinity' };
     } else if (!isFinite(expr) && expr < 0) {
       return { num: '-Infinity' };
     }

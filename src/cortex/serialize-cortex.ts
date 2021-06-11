@@ -40,7 +40,7 @@ export const NUMBER_FORMATTING_OPTIONS: Required<NumberFormattingOptions> = {
   truncationMarker: '',
   beginRepeatingDigits: '',
   endRepeatingDigits: '',
-  positiveInfinity: 'Infinity',
+  positiveInfinity: '+Infinity',
   negativeInfinity: '-Infinity',
   notANumber: 'NaN',
 };

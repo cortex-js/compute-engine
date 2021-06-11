@@ -462,7 +462,7 @@ function serializePower(
 }
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
-  { trigger: { symbol: '\\infty' }, parse: { num: 'Infinity' } },
+  { trigger: { symbol: '\\infty' }, parse: { num: '+Infinity' } },
   {
     name: COMPLEX_INFINITY,
     trigger: { symbol: ['\\tilde', '\\infty'] },
