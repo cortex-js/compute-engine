@@ -7,6 +7,11 @@ sidebar:
   - nav: 'compute-engine'
 ---
 
-`timeLimit`
+<div class=symbols-table>
 
-`iterationLimit`
+| Symbol | Description |
+| :--- | :--- |
+| `timeLimit`|  |
+| `iterationLimit` |  |
+
+</div>

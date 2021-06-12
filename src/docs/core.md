@@ -27,90 +27,42 @@ sidebar:
 
 ## Constants
 
-### `Missing`
+<div class=symbols-table>
 
-This symbol is used when a required expression is not present.
+| Symbol | Description |
+| :--- | :--- |
+| `Missing`| A **required** expression is not present. |
+| `Nothing` | An **optional** expression is not present |
+|  `None` | None of the possible values, none apply | 
+| `All` | All the possible values apply |
 
-| MathJSON                   | Latex                      |
-| :------------------------- | :------------------------- |
-| `["Divide", 2, "Missing"]` | `\frac{2}{\placeholder{}}` |
+</div>
 
-### `Nothing`
 
-This symbol is used when an optional expression is not present.
+| Example | |
+| :--- | :--- |
+| `["Divide", 2, "Missing"]` | \\[\frac{2}{\unicode{"2B1A}}\\] |
+| `["List", 2, "Nothing", 3]` | \\[\lbrack 2, ,3 \rbrack\\] |
 
-| MathJSON                    | Latex                  |
-| :-------------------------- | :--------------------- |
-| `["List", 2, "Nothing", 3]` | `\lrback 2,,3 \rbrack` |
 
-### `None`
 
-This symbol is used to indicate that out of multiple possible values, none
-apply.
-
-### `All`
-
-This symbol is used to indicate that out of multiple possible values, all apply.
 
 ## Functions
 
-### `About`
+<div class=symbols-table>
 
-`About(`_`symbol`_`)`
+| Symbol | Operation |
+| :--- | :--- |
+| `About` | <code>(_symbol_)</code><br> Return information about a symbol such as its domain, its attributes, its value, etc... |
+| `Domain` | <code>(_expression_)</code><br> Return the domain of the expression|
+| `Evaluate` | <code>(_expression_)</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it|
+| `Identity` | <code>(_symbol_)</code><br> Always return its argument |
+| `InverseFunction` | <code>(_expression_)</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\) |
 
-Return information about a symbol such as its domain, its attributes, its value,
-etc...
+</div>
 
-### `Domain`
 
-`Domain(`_`expression`_`)`
-
-Return the domain of the expression.
-
-### `Evaluate`
-
-`Evaluate(`_`expression`_`)` `Evaluate(`_`expr1`_`, `_`expr2`_`)`
-
-Apply a sequence of definitions to an expression in order to reduce and simplify
-it.
-
-An evaluation can consist of:
-
-- a computation
-
-```cortex
-Evaluate(2 + 3)
-// ➔ 5
-```
-
-- an execution
-
-```cortex
-Evaluate(Length([5, 7]))
-// ➔ 2
-```
-
-- a simplification
-
-```cortex
-Evaluate(2 + x + 3)
-// ➔ 5 + x
-```
-
-### `Identity`
-
-Always return its argument.
-
-| MathJSON            | Latex                  |
-| :------------------ | :--------------------- |
-| `["Identity", "x"]` | `\operatorname{id}(x)` |
-| `"Identity"`        | `\operatorname{id}`    |
-
-### `InverseFunction`
-
-Return the inverse function of its argument.
-
-| MathJSON                     | Latex       |
+| Example | |
 | :--------------------------- | :---------- |
 | `["InverseFunction", "Sin"]` | `\sin^{-1}` |
 
@@ -154,15 +106,15 @@ cube(5)
 // ➔ 125
 ```
 
-### `Latex`
+### `LatexSymbols`
 
-`["Latex", `_`expr-1`_`, `_`expr-2`_`, ...`_`expr-n`_`]`
+`["LatexSymbols", `_`expr-1`_`, `_`expr-2`_`, ...`_`expr-n`_`]`
 
 - _`expr-n`_: one or more expressions
 - Returns a string, a Latex string corresponding to the input expressions.
 
 ```json
-["Latex", ["Divide", "Pi", 2]]
+["LatexSymbols", ["Divide", "Pi", 2]]
 // ➔ "'\frac{\pi}{2}'"
 ```
 
@@ -256,17 +208,23 @@ Same(Canonical(x + 1, 1 + x));
 // ➔ True
 ```
 
-### Superscript/subscript
+### Superscripts and Subscripts
 
-- `Subminus` - $$x_-$$
-- `Subplus` - $$x_+$$
-- `Subscript`
-- `Substar` - $$x_*$$
-- `Superdagger` - $$x^\dagger$$
-- `Superminus` - $$x^-$$
-- `Superplus` - $$x^+$$
-- `Superstar` - $$x^*$$. When the argument is a complex number, indicate the
-  conjugate.
+<div class=symbols-table>
+
+| Symbol |  | Description | 
+| :--- | :--- | :-- | 
+| `Subminus` | \\[ x_- \\] | |  
+| `Subplus` | \\[ x_+\\]| | 
+| `Subscript` | \\[ x_{n} \\] | |
+| `Substar` | \\[ x_*\\]| | 
+| `Superdagger` | \\[ x^\dagger\\]| | 
+| `Superminus` | \\[ x^-\\]| | 
+| `Superplus` | \\[ x^+\\]| | 
+| `Superstar` | \\[ x^*\\]| When the argument is a complex number, indicate the conjugate. |
+
+</div>
+
 
 ### `String`
 
