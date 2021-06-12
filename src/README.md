@@ -361,6 +361,8 @@ the equivalent object literal before being annotated.
 
 The following metadata keys are recommended:
 
+<div class=symbols-table>
+
 | Key             | Note                                                                                                                                                                         |
 | :-------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `wikidata`      | A short string indicating an entry in a wikibase.<br>This information can be used to disambiguate the meaning of a symbol                                                    |
@@ -371,6 +373,7 @@ The following metadata keys are recommended:
 | `sourceContent` | The source from which this expression was generated.<br> It could be a Latex expression, or some other source language.                                                      |
 | `sourceOffsets` | A pairs of character offsets in `sourceContent` or `sourceUrl` from which this expression was produced                                                                       |
 | `hash`          | A string representing a digest of this expression.                                                                                                                           |
+</div>
 
 ```json
 // The ratio of the circumference of a circle to its diameter

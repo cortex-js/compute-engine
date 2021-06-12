@@ -75,17 +75,18 @@ When no dictionaries are provided, default ones are used automatically.
 
 ## Default Dictionaries
 
-This section describe the symbols defined in the default dictionaries. For
-convenience, the information below combine the information included in the
-default Latex syntax dictionary and the default global dictionary.
+The default dictionaries are organized by topic as follow:
 
-- [Arithmetic](/guides/compute-engine-arithmetic/): `Add`, `Multiply`, etc...
-- [Calculus](/guides/compute-engine-calculus/): `Derive`, `Integrate`, etc...
-- [Collections](/guides/compute-engine-collections/): `Sequence`, `List`,
-  `Dictionary`, `Set`
-- [Core](/guides/compute-engine-core/) `Missing`, `Nothing`, `None`, `All`,
-  `Identity`, `InverseFunction`, `Latex`, etc...
-- [Forms](/guides/compute-engine-forms/) `BaseForm`
-- [Logic](/guides/compute-engine-logic/) `And`, `Or`, `Not`, etc...
-- [Sets](/guides/compute-engine-sets/)
-- [Trigonometry](/guides/compute-engine-trigonometry/)
+<div class=symbols-table>
+
+| Dictionary |  |
+|:---|:---|
+| [Arithmetic](/guides/compute-engine/arithmetic/) | `Add` `Multiply`...|
+| [Calculus](/guides/compute-engine/calculus/) | `Derive` `Integrate`, etc...|
+| [Collections](/guides/compute-engine/collections/)| `Sequence` `List` `Dictionary` `Set`... |
+| [Core](/guides/compute-engine/core/) | `Missing` `Nothing` `None` `All`  `Identity` `InverseFunction` `LatexTokens`... |
+| [Logic](/guides/compute-engine/logic/) |`And` `Or` `Not`...|
+| [Sets](/guides/compute-engine/sets/) | |
+| [Trigonometry](/guides/compute-engine/trigonometry/)  | `Cos` `Sin` `Tan`...| 
+
+</div>

@@ -40,13 +40,6 @@ sidebar:
 | `ExponentialE` |  \\(2.7182818284590452354\ldots\\) | [Euler's number](https://www.wikidata.org/wiki/Q82435) |
 | `ImaginaryI` | \\( \imaginaryI \\) | The imaginary unit, solution of \\(x^2+1=0\\) |
 | `MachineEpsilon` | \\[ 2^{−52}\\] | The difference between 1 and the next larger floating point number. <br>See [Wikipedia](https://en.wikipedia.org/wiki/Machine_epsilon) | 
-| `Pi` | \\[ \pi \approx 3.14159265358979323\ldots \\] | |
-| `MinusPi` | \\[ -\pi \\] | | 
-| `MinusHalfPi` | \\[ -\frac{\pi}{2} \\] | | 
-| `MinusTwoPi` | \\[ -2\pi \\] | | 
-| `QuarterPi` | \\[ \frac{\pi}{4} \\] | | 
-| `HalfPi` | \\[ \frac{\pi}{2} \\] | | 
-| `TwoPi` | \\[ 2\pi \\] | | 
 
 </div>
 
