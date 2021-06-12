@@ -7,49 +7,51 @@ import type { Dictionary } from '../public';
 // arcsech, arccsch, arccoth,
 
 export const TRIGONOMETRY_DICTIONARY: Dictionary = {
-  Arcosh: { domain: 'HyperbolicFunction' },
-  Arccos: { domain: 'TrigonometricFunction' },
-  Arcsin: { domain: 'TrigonometricFunction' },
-  Arctan: {
-    wikidata: 'Q2257242',
-    domain: 'TrigonometricFunction',
-  },
-  Arctan2: {
-    wikidata: 'Q776598',
-    domain: 'TrigonometricFunction',
-  },
-  Arsinh: { domain: 'HyperbolicFunction' },
-  Artanh: { domain: 'HyperbolicFunction' },
-  Cos: { domain: 'TrigonometricFunction' },
+  Arcosh: { domain: 'HyperbolicFunction', range: ['Interval', 0, Infinity] },
+  // Arccos: { domain: 'TrigonometricFunction' },
+  // Arcsin: { domain: 'TrigonometricFunction' },
+  // Arctan: {
+  //   wikidata: 'Q2257242',
+  //   domain: 'TrigonometricFunction',
+  // },
+  // Arctan2: {
+  //   wikidata: 'Q776598',
+  //   domain: 'TrigonometricFunction',
+  // },
+  // Arsinh: { domain: 'HyperbolicFunction' },
+  // Artanh: { domain: 'HyperbolicFunction' },
+  // Tanh: { domain: 'HyperbolicFunction' },
+  // Sinh: { domain: 'HyperbolicFunction' },
   Degrees: {
     /* = Pi / 180 */
     domain: 'Real',
     constant: true,
     value: 0.017453292519943295769236907,
   },
+  /* converts (radius, angle) -> (x, y) */
   FromPolarCoordinates: {
-    /* converts (radius, angle) -> (x, y) */
     domain: 'Function',
+    range: ['TupleOf', 'RealNumber', 'RealNumber'],
   },
+  /** = sin(z/2)^2 = (1 - cos z) / 2*/
   Haversine: {
-    /** = sin(z/2)^2 = (1 - cos z) / 2*/
     wikidata: 'Q2528380',
     domain: 'TrigonometricFunction',
+    range: ['Interval', 0, 1],
   },
-  Hypot: {
-    // sqrt(x*x + y*y)
-    domain: 'Function',
-  },
+  // sqrt(x*x + y*y)
+  Hypot: { domain: 'Function', range: ['Interval', 0, Infinity] },
+  /** = 2 * Arcsin(Sqrt(z)) */
   InverseHaversine: {
-    /** = 2 * Arcsin(Sqrt(z)) */
     domain: 'TrigonometricFunction',
+    range: ['Interval', ['Negate', 'Pi'], 'Pi'],
   },
-  Sin: { domain: 'TrigonometricFunction' },
-  Sinh: { domain: 'HyperbolicFunction' },
-  Tan: { domain: 'TrigonometricFunction' },
-  Tanh: { domain: 'HyperbolicFunction' },
+  Cos: { domain: 'TrigonometricFunction', range: ['Interval', -1, 1] },
+  Sin: { domain: 'TrigonometricFunction', range: ['Interval', -1, 1] },
+  Tan: { domain: 'TrigonometricFunction', range: 'RealNumber' },
+  /* converts (x, y) -> (radius, angle) */
   ToPolarCoordinates: {
-    /* converts (x, y) -> (radius, angle) */
     domain: 'Function',
+    range: ['TupleOf', 'RealNumber', 'RealNumber'],
   },
 };

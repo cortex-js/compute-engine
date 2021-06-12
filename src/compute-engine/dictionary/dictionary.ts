@@ -2,11 +2,11 @@ import type { Expression, DictionaryCategory } from '../../public';
 import type {
   Dictionary,
   FunctionDefinition,
-  SetDefinition,
   SymbolDefinition,
   CompiledDictionary,
   ComputeEngine,
   CollectionDefinition,
+  Definition,
 } from '../public';
 import { getDomainsDictionary } from './domains';
 import { ARITHMETIC_DICTIONARY } from './arithmetic';
@@ -242,10 +242,7 @@ export function compileDictionary(
   dict: Dictionary,
   engine: ComputeEngine
 ): CompiledDictionary {
-  const result = new Map<
-    string,
-    FunctionDefinition | SetDefinition | SymbolDefinition
-  >();
+  const result = new Map<string, Definition>();
   for (const entryName of Object.keys(dict)) {
     const [def, error] = normalizeDefinition(dict[entryName], engine);
     if (error) {
@@ -278,12 +275,9 @@ export function compileDictionary(
 }
 
 function normalizeDefinition(
-  def: number | FunctionDefinition | SymbolDefinition | SetDefinition,
+  def: number | Definition,
   engine: ComputeEngine
-): [
-  def: null | FunctionDefinition | SymbolDefinition | SetDefinition,
-  error?: string
-] {
+): [def: null | Definition, error?: string] {
   if (typeof def === 'number') {
     //  If the dictionary entry is provided as a number, assume it's a
     // variable, and infer its type based on its value.
@@ -346,6 +340,7 @@ function normalizeDefinition(
       outtative: false,
       idempotent: false,
       involution: false,
+      numeric: false,
       pure: true,
 
       hold: 'none',
@@ -355,20 +350,21 @@ function normalizeDefinition(
       ...(def as FunctionDefinition),
     } as FunctionDefinition;
     let warning: string | undefined;
-    if (!functionDef.signatures || functionDef.signatures.length === 0) {
-      warning = `no function signature provided.`;
-    } else if (functionDef.signatures.length === 1) {
-      const sig = functionDef.signatures[0];
-      if (sig.result === 'Boolean' || sig.result === 'MaybeBoolean') {
-        if (sig.args && sig.args.length === 2) {
-          if (
-            (sig.args[0] === 'Boolean' || sig.args[0] === 'MaybeBoolean') &&
-            (sig.args[1] === 'Boolean' || sig.args[1] === 'MaybeBoolean')
-          ) {
-            warning = `looks like a "LogicalFunction"?`;
-          }
-        }
-        if (!warning) warning = `looks like a "Predicate"?`;
+    if (!functionDef.range) {
+      warning = `no function range provided.`;
+    } else if (domain === 'LogicalFunction' || domain === 'Predicate') {
+      if (
+        functionDef.range !== 'Boolean' &&
+        functionDef.range !== 'MaybeBoolean'
+      ) {
+        warning = `A "LogicalFunction" or a "Predicate" should have a range of "Boolean" or "MaybeBoolean"`;
+      }
+    } else {
+      if (
+        functionDef.range === 'Boolean' ||
+        functionDef.range === 'MaybeBoolean'
+      ) {
+        warning = `looks like a "LogicalFunction" or a "Predicate"?`;
       }
     }
     return [functionDef, warning];
@@ -413,10 +409,10 @@ function normalizeDefinition(
     ) {
       return [
         {
-          signatures: [{ rest: 'Anything', result: 'Anything' }],
-          ...(def as FunctionDefinition),
-        },
-        'a "Function" should have a "signatures" property in its definition',
+          range: 'Anything',
+          ...(def as Partial<FunctionDefinition>),
+        } as FunctionDefinition,
+        'a "Function" should have a "range" property in its definition',
       ];
     }
     // This might be a partial definition (missing `supersets` for a Set)
@@ -479,38 +475,17 @@ function validateDictionary(
     if (isCollectionDefinition(def)) {
       // @todo
     }
-    if (isFunctionDefinition(def) && def.signatures) {
-      // Validate signatures
-      for (const sig of def.signatures) {
-        if (
-          typeof sig.result !== 'function' &&
-          !engine.isSubsetOf(sig.result, 'Anything')
-        ) {
-          engine.signal({
-            severity: 'warning',
-            message: ['unknown-domain', sig.result as string], //@todo might not be a string
-            head: name,
-          });
-        }
-        if (sig.rest && !engine.isSubsetOf(sig.rest, 'Anything')) {
-          engine.signal({
-            severity: 'warning',
-            message: ['unknown-domain', def.domain as string], //@todo might not be a string
-            head: name,
-          });
-        }
-        if (sig.args) {
-          for (const arg of sig.args) {
-            if (!engine.isSubsetOf(arg, 'Anything')) {
-              engine.signal({
-                severity: 'warning',
-                message: ['unknown-domain', def.domain as string], //@todo might not be a string
-                head: name,
-              });
-            }
-          }
-        }
+    if (isFunctionDefinition(def)) {
+      // Validate range
+      const sig = def.range;
+      if (typeof sig !== 'function' && !engine.isSubsetOf(sig, 'Anything')) {
+        engine.signal({
+          severity: 'warning',
+          message: ['unknown-domain', sig as string], //@todo might not be a string
+          head: name,
+        });
       }
+
       // @todo could do some additional checks
       // - if it's commutative it must have at least one signature with multiple arguments
       // - if an involution, it's *not* idempotent

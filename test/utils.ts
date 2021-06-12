@@ -109,9 +109,9 @@ function isValidJSONNumber(num: string): string | number {
       // If the number roundtrips, it can be represented by a
       // JavaScript number
       // However, NaN and Infinity cannot be represented by JSON
-      if (isNaN(val) || !isFinite(val)) {
-        return val.toString();
-      }
+      if (isNaN(val)) return 'NaN';
+      if (!isFinite(val) && val < 0) return '-Infinity';
+      if (!isFinite(val) && val > 0) return '+Infinity';
       return val;
     }
   }

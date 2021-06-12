@@ -1,67 +1,58 @@
 <div align="center">
-    <img alt="math live" src="assets/math-json.jpg?raw=true">
+    <img alt="math live" src="assets/compute-engine.jpg?raw=true">
 </div>
 
-<h3><strong>MathJSON</strong></h3>
-<h1>A lightweight data interchange format for mathematical
-notation</h1>
+<h3><strong>Cortex Compute Engine</strong></h3>
+<h1>Symbolic manipulation and numeric evaluation of MathJSON expressions</h1>
 
-| Latex                      | MathJSON                                                                  |
-| :------------------------- | :------------------------------------------------------------------------ |
-| `\frac{a}{1+x}`            | `["Divide", "a", ["Add", 1, "x"]]`                                        |
-| `e^{\imaginaryI \pi }+1=0` | `["Eq", ["Power", "E", ["Add", ["Multiply", "Pi", "ImaginaryI"], 1]], 0]` |
-| `\sin^{-1}\prime(x)`       | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                    |
+[MathJSON](https://cortexjs.io/math-json/) is a lightweight data interchange
+format for mathematical notation, based on JSON.
 
-This repo contains the description of the format and a Javascript/Typescript
-library to:
-
-- parse Latex to MathJSON
-- serialize MathJSON to Latex
-- manipulate MathJSON expressions
+The Cortex Compute Engine can parse Latex to MathJSON, serialize MathJSON to
+Latex, format, simplify and evaluate MathJSON expressions.
 
 Reference documentation and guides at
-[cortexjs.io/math-json](https://cortexjs.io/math-json/).
+[cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/).
 
-## Using MathJSON
+## Using Compute Engine
 
 ```bash
-$ npm install --save @cortex-js/math-json
+$ npm install --save @cortex-js/compute-engine
 ```
 
 ```js
-import { parse, serialize } from '@cortex-js/math-json';
+import { parse, evaluate } from '@cortex-js/compute-engine';
 
-console.log(parse('\\frac{\\pi}{2}'));
-// ➔ ["Divide", "Pi", 2]
+const expr = parse('2^{11}-1 \\in \\P');
 
-console.log(serialize([["InverseFunction", "Sin"], "x"));
-// ➔ \sin^{-1}x
+console.log(expr);
+// ➔ ["MemberOf", ["Subtract", ["Power", 2, 11] , 1], "PrimeNumber"]
 
+console.log(evaluate(expr));
+// ➔ "False"
 ```
 
-# More
+## More
 
-- [MathJSON format](https://cortexjs.io/guides/math-json-format/)
-- [MathJSON API](https://cortexjs.io/docs/mathjson/)
-- [MathJSON Default Dictionary](https://cortexjs.io/guides/math-json-dictionary/)
-- [Build](BUILD.md) instructions.
+- [Build](BUILD.md) instructions
 
 ## Related Projects
 
 <dl>
+  <dt><a href="https://cortexjs.io/math-json/">MathJSON</a></dt>
+  <dd>A lightweight data interchange format for mathematical notation</dd>  
   <dt><a href="https://cortexjs.io/mathlive">MathLive</a> (on <a href="https://github.com/arnog/mathlive">GitHub</a>)</dt>
   <dd>A Web Component for math input.</dd>  
-  <dt><a href="https://cortexjs.io/compute-engine">Compute Engine</a> (on <a href="https://github.com/cortex-js/math-json/tree/master/src/compute-engine">GitHub</a>)</dt>
-  <dd>The CortexJS Compute Engine performs calculations on MathJSON expressions</dd>  
   <dt><a href="https://cortexjs.io/cortex">Cortex</a> (on <a href="https://github.com/cortex-js/math-json/tree/master/src/cortex">GitHub</a>)</dt>
   <dd>A programming language for scientific computing</dd>  
 </dl>
 
 ## Support the Project
 
-- Star the GitHub repo (it really helps)
-- Join our [Gitter community](https://gitter.im/cortex-js/community)
-- Drop a line to arno@arno.org
+- <span style='font-size:1.5em'>🌟</span> Star the GitHub repo (it really helps)
+- <span style='font-size:1.5em'>💬</span> Join our
+  [Gitter community](https://gitter.im/cortex-js/community)
+- <span style='font-size:1.5em'>📨</span> Drop a line to arno@arno.org
 
 ## License
 

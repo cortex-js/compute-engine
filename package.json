@@ -1,4 +1,5 @@
 {
+  "version": "0.2.2",
   "scripts": {
     "build": "bash ./scripts/build.sh",
     "clean": "bash ./scripts/clean.sh",
@@ -13,7 +14,6 @@
     "test": "bash ./scripts/test.sh"
   },
   "name": "@cortex-js/math-json",
-  "version": "0.2.2",
   "description": "A JSON schema to represent math formulas",
   "repository": {
     "type": "git",

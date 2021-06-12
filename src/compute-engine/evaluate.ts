@@ -3,12 +3,9 @@ import { ComputeEngine } from './public';
 
 export async function evaluateWithEngine(
   engine: ComputeEngine,
-  _expr: Expression
+  expr: Expression,
+  _options?: { timeLimit: number; iterationLimit: number }
 ): Promise<Expression | null> {
-  // Check if an error has been signaled, or if
-  // the time or memory budget have been exceeded.
-  if (!engine.shouldContinueExecution()) return null;
-
   // @todo: implement evaluation algorithm:
   // 1/ Convert to Canonical Form.
   // 2/ Is it a number?
@@ -22,5 +19,5 @@ export async function evaluateWithEngine(
   // (respecting Hold)
 
   // 6/ Convert the result to canonical form (or some other form...)?
-  return 'Nothing';
+  return expr;
 }
