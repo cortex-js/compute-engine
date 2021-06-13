@@ -31,14 +31,17 @@ sidebar:
 
 | Symbol | Value |
 | :--- | :--- |
-|`Degrees`| $\frac{\pi}{180} = 0.017453292519943295769236907\ldots$ |
-| `Pi` | \\[ \pi \approx 3.14159265358979323\ldots \\] | |
+|`Degrees`| \\[ \frac{\pi}{180} = 0.017453292519943295769236907\ldots \\] |
+| `MinusDoublePi` | \\[ -2\pi \\] | | 
 | `MinusPi` | \\[ -\pi \\] | | 
 | `MinusHalfPi` | \\[ -\frac{\pi}{2} \\] | | 
-| `MinusTwoPi` | \\[ -2\pi \\] | | 
 | `QuarterPi` | \\[ \frac{\pi}{4} \\] | | 
+| `ThirdPi` | \\[ \frac{\pi}{3} \\] | | 
 | `HalfPi` | \\[ \frac{\pi}{2} \\] | | 
-| `TwoPi` | \\[ 2\pi \\] | | 
+| `TwoThirdPi` | \\[ 2\times \frac{\pi}{3} \\] | | 
+| `ThreeQuarterPi` | \\[ 3\times \frac{\pi}{4} \\] | | 
+| `Pi` | \\[ \pi \approx 3.14159265358979323\ldots \\] | |
+| `DoublePi` | \\[ 2\pi \\] | | 
 
 </div>
 

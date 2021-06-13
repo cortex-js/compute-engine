@@ -39,9 +39,13 @@ sidebar:
 | `Quarter`| \\[ \frac{1}{4} \\] | |
 | `ExponentialE` |  \\(2.7182818284590452354\ldots\\) | [Euler's number](https://www.wikidata.org/wiki/Q82435) |
 | `ImaginaryI` | \\( \imaginaryI \\) | The imaginary unit, solution of \\(x^2+1=0\\) |
-| `MachineEpsilon` | \\[ 2^{−52}\\] | The difference between 1 and the next larger floating point number. <br>See [Wikipedia](https://en.wikipedia.org/wiki/Machine_epsilon) | 
-
+| `MachineEpsilon` | \\[ 2^{−52}\\] | The difference between 1 and the next larger floating point number. <br>See [Machine Epsilon on Wikipedia](https://en.wikipedia.org/wiki/Machine_epsilon) |
+| `CatalanConstant` | \[ = 0.915965594177219015054603514932384110774\ldots \] | \[ \sum_{n=0}^{\infty} \frac{(-1)^{n}}{(2n+1)^2} \]. See [Catalan's Constant on Wikipedia](https://en.wikipedia.org/wiki/Catalan%27s_constant)| 
+| `GoldenRatio` | \[ = 1.61803398874989484820\ldots\] | \[ \frac{1+\sqrt{5}}{2} \] See [Golden Ratio on Wikipedia](https://en.wikipedia.org/wiki/Golden_ratio) |
+| `EulerGamma` | \[ = 0.577215664901532860606\ldots \]| See [Euler-Mascheroni Constant on Wikipedia](https://en.wikipedia.org/wiki/Euler%E2%80%93Mascheroni_constant) |
 </div>
+
+See also [Trigonometry](/guides/compute-engine/arithmetic/) for \( \pi \) and related constants.{.notice--info}
 
 ## Functions
 
