@@ -8,6 +8,10 @@
   <link rel="stylesheet" href="style.css" />
 
   <style>
+    :root {
+      /* --primary: #0066ce; */
+      --primary-light: #86a8cb;
+    }
     code {
       white-space: pre-wrap;
     }
@@ -19,28 +23,101 @@
       color: #666;
     }
 
+    h2 code {
+      font-family: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo,
+          Monaco, 'Courier New', monospace;
+      font-size: 1em;
+    }
+
     .latex {
       padding: 10px;
       border-radius: 5px;
       border: 1px solid #ddd;
-      margin-top: .5em;
       background: #fdfdfd;
+      width: 100%;
+      margin-right: .5em;
+    }
 
+
+    #input-label {
+      min-width: fit-content; 
+      margin-right: .5em;
+    }
+    #mf { width: 100% }
+
+    #assumptions ul {
+      padding-top: .25em;
+      border-left: 1px solid #333;
+      padding-left: 1em;
+      margin-bottom: 3em;
+    }
+
+    #assumptions ul li {
+      list-style: none;
+      margin-bottom: 1em;
+    }
+
+    button.toggle {
+      appearance: none;
+      border: none;
+      background: none;
+      border-radius: 4px;
+      width: 36px;
+      height: 36px;
+      color: #777;
+    }
+    button.toggle:hover, button.toggle:active {
+      background: #dadada;
+      color: #000;
+    } 
+    button.toggle.is-on {
+      color: #fff;
+      background: var(--primary);
+    }
+    button.toggle svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .row {
+      margin-top: .5em;
+      display: inline-flex;
+      align-items: center;
+      width: 100%;
     }
 
     .output-section.is-visible { display: block; }
-    .output-section { display: none; } 
+    .output-section { display: none; margin-bottom: 1em;} 
+    .output-section.is-visible .mathjson {
+      display: none;
+    }
+    .output-section.is-visible .mathjson.is-visible {
+      display: block;
+    }
   </style>
   <script src="https://unpkg.com/mathlive/dist/mathlive.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/mathlive/dist/mathlive-static.css">
 </head>
 
 <body>
+  <svg xmlns="http://www.w3.org/2000/svg" style='display:none'>
+  <defs>
+    <symbol id='info-circle' aria-hidden="true" focusable="false" data-prefix="fal" data-icon="info-circle" class="svg-inline--fa fa-info-circle fa-w-16" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="currentColor" d="M256 40c118.621 0 216 96.075 216 216 0 119.291-96.61 216-216 216-119.244 0-216-96.562-216-216 0-119.203 96.602-216 216-216m0-32C119.043 8 8 119.083 8 256c0 136.997 111.043 248 248 248s248-111.003 248-248C504 119.083 392.957 8 256 8zm-36 344h12V232h-12c-6.627 0-12-5.373-12-12v-8c0-6.627 5.373-12 12-12h48c6.627 0 12 5.373 12 12v140h12c6.627 0 12 5.373 12 12v8c0 6.627-5.373 12-12 12h-72c-6.627 0-12-5.373-12-12v-8c0-6.627 5.373-12 12-12zm36-240c-17.673 0-32 14.327-32 32s14.327 32 32 32 32-14.327 32-32-14.327-32-32-32z"></path></svg>
+   </symbol>
+    </defs>
+  </svg>
+
   <header>
     <h1>Cortex Compute Engine REPL</h1>
   </header>
   <main>
-    <math-field id="mf" class="mathfield" style="width:100%" tabindex="0" virtual-keyboard-mode="manual">
-      \Z
+    <div class='row'>
+      <div id='input-label'>a = </div>
+      <math-field id="mf" class="mathfield" tabindex="0" virtual-keyboard-mode="manual">
+      <!-- \operatorname{NonNegativeRealNumber} -->
+      <!-- 3 + 2x + 1 + x -->
+      3 (2x + 1)
+      <!-- 3 (2x + 1) + \frac{x}{2} + \frac{3x}{2} + 4\frac{x}{2} -->
       <!-- \sqrt{1}[3] -->
       <!-- \sin(x -->
       <!-- x=\frac{-b\pm\sqrt{b^2-4ac}} {2a} -->
@@ -51,6 +128,7 @@
       <!-- (b^3c^2d)(x^7y)(a^5f)(b^2x^5b3) -->
       <!-- {}_3^2 -->
     </math-field>
+  </div>
     <!-- 2{xy}     1+|a+|2|+b| -->
     <!-- ,c,b -->
     <!-- a,c, -->
@@ -93,49 +171,80 @@
     <!-- \int x^2 + x dx = 0 -->
     <!-- \int (x^2 + x) dx = 0 -->
 
-    <h2>Input Latex</h2>
-    <div class="output" id="latex"></div>
-    <h2>Input ASCIIMath</h2>
-    <div class="output" id="asciimath"></div>
-
-    <div class="output-section" id='raw-form'>
-      <h2>MathJSON Raw</h2>
-      <div class="output mathjson"></div>  
+    <div class='output-section is-visible'>
+      <div class='row'><div class="output" id="latex"></div></div>
     </div>
 
+    <div>
+      <h2>Assumptions</h2>      
+      <div id=assumptions></div>
+    </div>
+
+
+    <!-- <h2>Input ASCIIMath</h2>
+    <div class="output" id="asciimath"></div> -->
+
+    <!-- <div class="output-section" id='raw-form'>
+      <h2>Raw Form</h2>
+      <div class="output mathjson"></div>  
+    </div> -->
+
     <div class="output-section" id="full-form">
-      <h2>MathJSON Full Form</h2>
+      <h2><code>format(a, ['full-form'])</code></code></h2>
+      <div class='row'>
+        <div class="latex"></div>
+        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+      </div>
       <div class="output mathjson"></div>  
     </div>
 
     <div class="output-section" id="canonical-form">
-      <h2>MathJSON Canonical Form</h2>
+      <h2><code>canonical(a)</code></h2>
+      <div class='row'>
+        <div class="latex"></div>
+        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+      </div>
       <div class="output mathjson"></div>
     </div>
 
     <div class="output-section" id="domain">
-      <h2>Domain</h2>
-      <div class="latex"></div>
-      <div class="output math-json"></div>
+      <h2><code>domain(a)</code></h2>
+      <div class='row'>
+        <div class="latex"></div>
+        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+      </div>
+      <div class="output mathjson"></div>
     </div>
+
 
     <div class="output-section" id="simplify">
-      <h2>Simplify</h2>
-      <div class="latex"></div>
+      <h2><code>simplify(a)</code></h2>
+      <div class='row'>
+        <div class="latex"></div>
+        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+      </div>
       <div class="output mathjson"></div>
     </div>
 
-    <div class="output-section" id='evaluate'>
-      <h2>Evaluate</h2>
-      <div class="latex"></div>
-      <div class="output mathjson"></div>
-    </div>
 
     <div class="output-section" id="evaluate-numerically">
-      <h2>Evaluate Numerically</h2>
-      <div class="latex"></div>
-      <div class="output math-json"></div>
+      <h2><code>N(a)</code></h2>
+      <div class='row'>
+        <div class="latex"></div>
+        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+      </div>
+      <div class="output mathjson"></div>
     </div>
+
+    <div class="output-section" id="evaluate">
+      <h2><code>evaluate(a)</code></h2>
+      <div class='row'>
+        <div class="latex"></div>
+        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+      </div>
+      <div class="output mathjson"></div>
+    </div>
+
   </main>
 
   <script type="module">
@@ -144,6 +253,7 @@
     import { LatexSyntax } from '../dist/math-json.esm.js';
     import { ComputeEngine } from '../dist/compute-engine.esm.js';
 
+    const MAX_LINE_LENGTH = 64;
 
     let errors = [];
     const defaultLatex = new LatexSyntax(
@@ -198,6 +308,8 @@
     ce.assume('x', ['Greater', 0]);
     ce.assume('n', 'Integer');
 
+    updateAssumptions();
+
     // console.log(defaultLatex.parse('3\\times x + 1'));
     // console.log(defaultLatex.parse('1 + x + x + x'));
 
@@ -228,12 +340,15 @@
 
         document.getElementById('latex').innerHTML = escapeHtml(latex);
 
+        if (document.getElementById('asciimath')) {
         document.getElementById('asciimath').innerHTML = 
           escapeHtml(mf.getValue('ascii-math'));
+        }
 
+        errors = [];
 
         let expr = defaultLatex.parse(latex);
-
+        
         const canonicalExpr = ce.format(expr, ['canonical']);
 
         updateExpr(canonicalExpr, 'canonical-form');
@@ -244,13 +359,13 @@
         updateExpr(ce.format(rawLatex.parse(latex), ['full']), 
           'raw-form');
 
-        updateExpr(await ce.domain(expr), 'domain');
+        updateExpr(ce.domain(expr), 'domain');
 
         updateExpr(await ce.simplify(expr), 'simplify');
 
         updateExpr(await ce.evaluate(expr), 'evaluate');
 
-        updateExpr(await ce.N(expr), 'evaluate-numerically');
+        updateExpr(ce.N(expr), 'evaluate-numerically');
 
       } catch (e) {
         console.error("Error converting %c " + latex + '%c ' +
@@ -259,8 +374,6 @@
     }
 
     function updateExpr(expr, id) {
-      errors = [];
-
       const el = document.getElementById(id);
       if (!el) return;
 
@@ -273,7 +386,7 @@
       const mathJsonEl = el.querySelector('.mathjson');
       if (mathJsonEl) {
         mathJsonEl.innerHTML =
-          escapeHtml(JSON.stringify(expr, null, 2)) +
+          exprToString(expr) +
           '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
           errors.join('<br>') + '</div>';
       }
@@ -303,6 +416,73 @@
         );
       });
     }
+
+    function toggleVisibility(el) {
+      if (el) {
+        if (el.classList.contains('is-visible')) {
+          el.classList.remove('is-visible');
+        } else {
+          el.classList.add('is-visible');
+        }
+      }
+    }
+
+    [
+      'full-form', 
+      'canonical-form', 
+      'domain', 
+      'simplify', 
+      'evaluate-numerically', 
+      'evaluate'].forEach(id => {
+      const el = document.getElementById(id);
+      const toggle = el.querySelector('.toggle');
+      toggle.addEventListener('click', () => {
+        toggle.classList.toggle('is-on');
+        toggleVisibility(el.querySelector('.mathjson'));
+      });
+    });
+
+
+    function exprToStringRecursive(expr, start) {
+      const indent = ' '.repeat(start);
+      if (Array.isArray(expr)) {
+        const elements = expr.map(x => exprToStringRecursive(x, start + 2));
+        let result = `[${elements.join(', ')}]`;
+        if (start + result.length < MAX_LINE_LENGTH) return result;
+        return `[\n${indent}  ${elements.join(`,\n${indent}  `)}\n${indent}]`;
+      }
+      if (expr === null) return 'null';
+      if (typeof expr === 'object') {
+        const elements = {};
+        Object.keys(expr).forEach(x => 
+           elements[x] = exprToStringRecursive(expr[x], start + 2)
+        );
+        let result = `{${Object.keys(expr).map(key => {return `${key}: ${elements[key]}`}).join('; ')}}`;
+        if (start + result.length < MAX_LINE_LENGTH) return result;
+
+        return `{${Object.keys(expr).map(key => 
+            { return `${indent}${key}: ${elements[key]}` }
+          ).join(';\n${indent}')}}`;
+      }
+      return JSON.stringify(expr, null, 2);
+    }
+
+    function exprToString(expr) {
+      return escapeHtml(exprToStringRecursive(expr, 0));
+    }
+
+
+    function updateAssumptions() {
+      document.getElementById('assumptions').innerHTML = 
+      '<ul><li>' + 
+       [...ce.assumptions].map(assumption => 
+        convertLatexToMarkup(defaultLatex.serialize(assumption))
+      ).join('</li><li>') +
+      '</li></ul>'
+    }
+
+    console.log(ce.simplify(['Add', 1, 0]));
+
   </script>
 </body>
 
