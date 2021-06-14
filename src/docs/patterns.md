@@ -91,6 +91,24 @@ console.log(match(['Add', '1', 'x'], ['_f', '1', 'x']));
 // -> { "f": "Add" }
 ```
 
+## Substitution
+
+The return value of the `match()` function is a `Substitution` object, that is a 
+mapping from wildcard names to expressions.
+
+**To apply a substitution to a pattern**, and therefore recover the subject
+it was derived from, use the `substitute()` function.
+
+```js
+const subject = ["Add", 1, "x"];
+const pattern = ["Add", 1, "_a"];
+
+console.log(match(subject, pattern));
+// -> { a: "x" }
+
+console.log(substitute(pattern, { a: "x" }));
+// -> ["Add", 1, "x"]
+```
 
 ## `count()`
 
