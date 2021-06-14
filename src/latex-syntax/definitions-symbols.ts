@@ -68,14 +68,4 @@ export const DEFINITIONS_SYMBOLS: LatexDictionary = [
   { trigger: { symbol: '\\sharp' }, parse: '\u266f' },
   { trigger: { symbol: '\\flat' }, parse: '\u266d' },
   { trigger: { symbol: '\\natural' }, parse: '\u266e' },
-
-  // Sets
-  { trigger: { symbol: '\\N' }, parse: 'NaturalNumber' },
-  { trigger: { symbol: '\\Z' }, parse: 'Integer' },
-  { trigger: { symbol: '\\Q' }, parse: 'RationalNumber' },
-  { trigger: { symbol: '\\A' }, parse: 'AlgebraicNumber' },
-  { trigger: { symbol: '\\R' }, parse: 'RealNumber' },
-  { trigger: { symbol: '\\C' }, parse: 'ComplexNumber' },
-  { trigger: { symbol: '\\varnothing' }, parse: 'EmptySet' },
-  { trigger: { symbol: '\\emptyset' }, parse: 'EmptySet' },
 ];
