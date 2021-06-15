@@ -26,7 +26,7 @@ import { parse, evaluate } from '@cortex-js/compute-engine';
 const expr = parse('2^{11}-1 \\in \\P');
 
 console.log(expr);
-// ➔ ["MemberOf", ["Subtract", ["Power", 2, 11] , 1], "PrimeNumber"]
+// ➔ ["Element", ["Subtract", ["Power", 2, 11] , 1], "PrimeNumber"]
 
 console.log(evaluate(expr));
 // ➔ "False"

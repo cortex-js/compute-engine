@@ -40,20 +40,21 @@ For example, to indicate that \\(x\\) is a real number:
 ce.assume('x', 'RealNumber');
 ```
 
-If the `assume(_arg1_, _arg2_)` function is invoked with two arguments, it is equivalent
-to `ce.assume(["MemberOf", _arg1_, _arg2_]`.
+If the `assume(_arg1_, _arg2_)` function is invoked with two arguments, it is
+equivalent to `ce.assume(["Element", _arg1_, _arg2_]`.
 
-When there is a single argument, the head of the argument can be one of the following:
+When there is a single argument, the head of the argument can be one of the
+following:
 
-- `MemberOf`: indicate the domain of a symbol
-- Inequality such as `Less`, `LessEqual`, `Greater`, `GreaterEqual`. When an inequality
-  is used, both sides are assumed to be `RealNumber`.
+- `Element`: indicate the domain of a symbol
+- Inequality such as `Less`, `LessEqual`, `Greater`, `GreaterEqual`. When an
+  inequality is used, both sides are assumed to be `RealNumber`.
 - Equality: `Equal`
 - Boolean expression: `And`, `Or`, `Not`
 
 ## `forget()`
 
-Each call to `assume()` is additive: the previous assumptions are preserved. 
+Each call to `assume()` is additive: the previous assumptions are preserved.
 
 **To remove previous assumptions**, use `forget()`.
 
@@ -64,28 +65,25 @@ Each call to `assume()` is additive: the previous assumptions are preserved.
 The first argument of `is()` is a symbol, and the second argument is a domain.
 
 ```js
-ce.is("x", "RealNumber");
-ce.is("x", ["Range", 1, 5]);
+ce.is('x', 'RealNumber');
+ce.is('x', ['Range', 1, 5]);
 ```
 
-Alternatively, the `is()` function can be invoked with a single argument,
-a predicate:
+Alternatively, the `is()` function can be invoked with a single argument, a
+predicate:
 
 ```js
-ce.is(["MemberOf", "x", "RealNumber"]);
-
-
+ce.is(['Element', 'x', 'RealNumber']);
 ```
 
 The function `is()` return `true` if the assumption is true, `false` if it is
 not, and `undefined` if it cannot be determined.
-
 
 ## Domain
 
 **To query the domain of an expressio**, use the `domain()` function.
 
 ```js
-ce.domain("Pi");
+ce.domain('Pi');
 // -> IrrationallNumber
 ```
