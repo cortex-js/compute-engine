@@ -40,9 +40,9 @@ function serializeMatchfix(
   def: IndexedLatexDictionaryEntry
 ): string {
   let segments: string[] = [];
-  if (typeof def.trigger.matchfix === 'string') {
-    segments.push(def.trigger.matchfix);
-  } else if (Array.isArray(def.trigger.matchfix)) {
+  if (typeof def.trigger?.matchfix === 'string') {
+    segments.push(def.trigger?.matchfix);
+  } else if (def.trigger && Array.isArray(def.trigger.matchfix)) {
     segments = [...def.trigger.matchfix];
   }
   if (getArgCount(expr) >= 1) {
@@ -67,7 +67,7 @@ function serializeOperator(
   let result = '';
   const count = getArgCount(expr);
   const name = getFunctionName(expr);
-  if (def.trigger.superfix || def.trigger.subfix) {
+  if (def.trigger?.superfix || def.trigger?.subfix) {
     if (count !== 1) {
       serializer.onError({
         code: 'operator-requires-one-operand',
@@ -78,7 +78,7 @@ function serializeOperator(
       serializer.serialize(getArg(expr, 1)),
     ]);
   }
-  if (def.trigger.postfix) {
+  if (def.trigger?.postfix) {
     if (count !== 1) {
       serializer.onError({
         code: 'postfix-operator-requires-one-operand',
@@ -89,7 +89,7 @@ function serializeOperator(
       serializer.wrap(getArg(expr, 1), def.precedence),
     ]);
   }
-  if (def.trigger.prefix) {
+  if (def.trigger?.prefix) {
     if (count !== 1) {
       serializer.onError({
         code: 'prefix-operator-requires-one-operand',
@@ -100,7 +100,7 @@ function serializeOperator(
       serializer.wrap(getArg(expr, 1), def.precedence! + 1),
     ]);
   }
-  if (def.trigger.infix) {
+  if (def.trigger?.infix) {
     result = serializer.wrap(getArg(expr, 1), def.precedence);
     for (let i = 2; i < count + 1; i++) {
       const arg = getArg(expr, i);
@@ -364,15 +364,15 @@ export class Serializer implements Serializer {
           if (
             !result &&
             (def.precedence !== undefined ||
-              def.trigger.superfix ||
-              def.trigger.subfix)
+              def.trigger?.superfix ||
+              def.trigger?.subfix)
           ) {
             result = serializeOperator(this, expr, def);
           }
-          if (!result && def.trigger.matchfix) {
+          if (!result && def.trigger?.matchfix) {
             result = serializeMatchfix(this, expr, def);
           }
-          if (!result && def.trigger.symbol) {
+          if (!result && def.trigger?.symbol) {
             result = this.serializeSymbol(expr, def);
           }
           return result;

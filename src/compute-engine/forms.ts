@@ -9,10 +9,8 @@ import {
   getFunctionName,
   getTail,
   getArg,
-  applyArgs,
   getArgCount,
   getFunctionHead,
-  PARENTHESES,
   POWER,
   DIVIDE,
   MULTIPLY,
@@ -29,112 +27,67 @@ import {
   SEQUENCE,
   SEQUENCE2,
   MISSING,
+  applyRecursively,
+  getSymbolName,
+  getRationalValue,
 } from '../common/utils';
 import { canonicalOrder } from './order';
 import { canonicalDomainForm } from './dictionary/domains';
-
-function ungroup(expr: Expression | null): Expression | null {
-  if (expr === null) return null;
-  const head = getFunctionHead(expr);
-  if (!head) return expr;
-  if (head === PARENTHESES && getArgCount(expr) === 1) {
-    return ungroup(getArg(expr, 1));
-  }
-  return applyArgs(expr, ungroup);
-}
+import {
+  applyConstants,
+  applyNegate,
+  applyPower,
+  ungroup,
+} from './dictionary/arithmetic';
 
 /**
  * Return an expression that's the inverse (1/x) of the input
  *
  */
 
-function applyInvert(expr: Expression | null): Expression | null {
-  if (expr === null) return null;
+function applyInvert(expr: Expression): Expression {
   expr = ungroup(expr);
+  if (isAtomic(expr)) return [DIVIDE, 1, expr];
   const head = getFunctionHead(expr);
   if (head === POWER && getArgCount(expr!) === 2) {
-    return [
-      POWER,
-      getArg(expr, 1) ?? NOTHING,
-      applyNegate(getArg(expr, 2)) ?? NOTHING,
-    ];
+    return [POWER, getArg(expr, 1)!, applyNegate(getArg(expr, 2)!)];
   }
   if (head === DIVIDE && getArgCount(expr!) === 2) {
-    return [
-      MULTIPLY,
-      [POWER, getArg(expr, 1) ?? NOTHING, -1],
-      getArg(expr, 2) ?? NOTHING,
-    ];
+    return [DIVIDE, getArg(expr, 2)!, getArg(expr, 1)!];
   }
-  return [POWER, expr!, -1];
+  return [DIVIDE, 1, expr];
 }
 
-export function applyNegate(expr: Expression | null): Expression | null {
-  if (expr === null) return expr;
-  expr = ungroup(expr);
-  if (typeof expr === 'number') {
-    expr = -expr;
-  } else if (expr && isNumberObject(expr)) {
-    if (expr.num[0] === '-') {
-      expr = { num: expr.num.slice(1) };
-    } else {
-      expr = { num: '-' + expr.num };
-    }
-  } else {
-    // [NEGATE, [NEGATE, x]] -> x
-    const name = getFunctionName(expr);
-    const argCount = getArgCount(expr!);
-    if (name === NEGATE && argCount === 1) {
-      return getArg(expr, 1);
-    } else if (name === MULTIPLY) {
-      let arg = getArg(expr, 1) ?? MISSING;
-      if (typeof arg === 'number') {
-        arg = -arg;
-      } else if (isNumberObject(arg)) {
-        if (arg.num[0] === '-') {
-          arg = { num: arg.num.slice(1) };
-        } else {
-          arg = { num: '-' + arg.num };
-        }
-      } else {
-        arg = [NEGATE, arg];
-      }
-      return [MULTIPLY, arg, ...getTail(expr).slice(1)];
-    } else if (name === PARENTHESES && argCount === 1) {
-      return applyNegate(getArg(getArg(expr, 1), 1));
-    }
+/** Recursively flatten an expression with the head `head`, i.e.
+ * `f(x, f(y)) -> f(x, y)`
+ */
+function flatten(expr: Expression, head: string): Expression {
+  if (isAtomic(expr)) return expr;
 
-    expr = [NEGATE, expr ?? MISSING];
+  if (getFunctionName(expr) !== head) {
+    return applyRecursively(expr, (x) => flatten(x, head));
   }
-  return expr;
-}
-
-function flatten(expr: Expression | null, flatName: string): Expression | null {
-  const head = getFunctionHead(expr);
-  if (!head) return expr;
-
-  expr = applyArgs(expr, (x) => flatten(x, flatName));
-
-  if (head !== flatName) return expr;
 
   const args = getTail(expr);
-  let newArgs: Expression[] = [];
+  let result: Expression[] = [head];
   for (let i = 0; i < args.length; i++) {
-    if (getFunctionName(args[i]) === flatName) {
+    if (getFunctionName(args[i]) === head) {
       // [f, a, [f, b, c]] -> [f, a, b, c]
       // or [f, f[a]] -> f[a]
-      newArgs = newArgs.concat(getTail(args[i]));
+      result = result.concat(getTail(flatten(args[i], head)));
     } else {
-      newArgs.push(args[i]);
+      result.push(flatten(args[i], head));
     }
   }
-  return [head, ...newArgs];
+  return result;
 }
 
 function flattenInvolution(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
+): Expression {
+  if (isAtomic(expr)) return expr;
+
   const name = getFunctionName(expr);
   const def = engine.getFunctionDefinition(name);
   if (def?.involution) {
@@ -143,45 +96,44 @@ function flattenInvolution(
       return flatten(args[0], name);
     }
   }
-
-  return applyArgs(expr, (x) => flattenInvolution(x, engine));
+  return applyRecursively(expr, (x) => flattenInvolution(x, engine));
 }
 
 function flattenIdempotent(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
+): Expression {
+  if (isAtomic(expr)) return expr;
+
   const name = getFunctionName(expr);
   const def = engine.getFunctionDefinition(name);
   if (def?.idempotent) return flatten(expr, name);
 
-  return applyArgs(expr, (x) => flattenIdempotent(x, engine));
+  return applyRecursively(expr, (x) => flattenIdempotent(x, engine));
 }
 
 function flattenAssociative(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
+): Expression {
+  if (isAtomic(expr)) return expr;
+
   const name = getFunctionName(expr);
   const def = engine.getFunctionDefinition(name);
   if (def?.associative) return flatten(expr, name);
 
-  return applyArgs(expr, (x) => flattenAssociative(x, engine));
+  return applyRecursively(expr, (x) => flattenAssociative(x, engine));
 }
 
-function canonicalAddForm(
-  expr: Expression | null,
-  engine: ComputeEngine
-): Expression | null {
-  const head = getFunctionHead(expr);
-  if (!head) return expr;
-  if (head !== ADD) {
-    return applyArgs(expr, (x) => canonicalAddForm(x, engine));
+function canonicalAddForm(expr: Expression, engine: ComputeEngine): Expression {
+  if (isAtomic(expr)) return expr;
+  if (getFunctionHead(expr) !== ADD) {
+    return applyRecursively(expr, (x) => canonicalAddForm(x, engine));
   }
   expr = flatten(ungroup(expr), ADD);
   let args = getTail(expr);
   args = args
-    .map((x) => canonicalAddForm(x, engine) ?? MISSING)
+    .map((x) => canonicalAddForm(x, engine))
     .filter((x) => getNumberValue(x) !== 0);
   const argCount = args.length;
   if (argCount === 0) return 0;
@@ -190,116 +142,104 @@ function canonicalAddForm(
 }
 
 function canonicalDivideForm(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
-  if (expr === null) return null;
-  const head = getFunctionHead(expr);
-  if (!head) return expr;
-  if (head !== DIVIDE) {
-    return applyArgs(expr, (x) => canonicalDivideForm(x, engine));
+): Expression {
+  if (isAtomic(expr)) return expr;
+  if (getFunctionHead(expr) !== DIVIDE) {
+    return applyRecursively(expr, (x) => canonicalDivideForm(x, engine));
   }
 
   if (getArgCount(expr) !== 2) return expr;
 
-  const arg1 = canonicalDivideForm(getArg(expr, 1), engine);
-  const arg2 = canonicalDivideForm(getArg(expr, 2), engine);
+  const arg1 = canonicalDivideForm(getArg(expr, 1)!, engine);
+  const arg2 = canonicalDivideForm(getArg(expr, 2)!, engine);
   if (getNumberValue(arg2) === 1) return arg1;
   if (getNumberValue(arg1) === 1) return applyInvert(arg2);
-  return [MULTIPLY, arg1 ?? MISSING, applyInvert(arg2) ?? MISSING];
+  if (getNumberValue(arg1) === -1) return [NEGATE, applyInvert(arg2)];
+  return [DIVIDE, arg1, arg2];
 }
 
-function canonicalExpForm(
-  expr: Expression | null,
-  engine: ComputeEngine
-): Expression | null {
-  if (expr === null) return null;
-  const head = getFunctionHead(expr);
-  if (!head) return expr;
-  if (head !== EXP) {
-    return applyArgs(expr, (x) => canonicalExpForm(x, engine));
+function canonicalExpForm(expr: Expression, engine: ComputeEngine): Expression {
+  if (isAtomic(expr)) return expr;
+  if (getFunctionName(expr) === POWER) {
+    if (getSymbolName(getArg(expr, 1)) === EXPONENTIAL_E) {
+      return [EXP, canonicalExpForm(getArg(expr, 2)!, engine)];
+    }
   }
-
-  if (getArgCount(expr) !== 1) return expr;
-
-  return [
-    POWER,
-    EXPONENTIAL_E,
-    canonicalExpForm(getArg(expr, 1), engine) ?? MISSING,
-  ];
+  return applyRecursively(expr, (x) => canonicalExpForm(x, engine));
 }
 
 function canonicalListForm(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
-  if (expr === null) return null;
+): Expression {
   if (isAtomic(expr)) return expr;
 
-  const rootName = getFunctionName(expr);
-  if (rootName !== LIST && rootName !== SEQUENCE && rootName !== SEQUENCE2) {
-    return applyArgs(expr, (x) => canonicalListForm(x, engine));
+  const head = getFunctionName(expr);
+  if (head !== LIST && head !== SEQUENCE && head !== SEQUENCE2) {
+    return applyRecursively(expr, (x) => canonicalListForm(x, engine));
   }
 
-  const isList = rootName === LIST;
   const args = getTail(expr);
-  const newArgs: Expression[] = [];
+  let result: Expression[] = [getFunctionHead(expr)!];
 
-  if (isList) {
+  if (head === LIST) {
     for (let arg of args) {
-      arg = canonicalListForm(arg, engine)!;
+      arg = canonicalListForm(arg, engine);
       const name = getFunctionName(arg);
       if (name === IDENTITY) {
-        const newArg = getArg(arg, 1);
-        if (newArg !== null && newArg !== undefined) {
-          newArgs.push(newArg);
+        const arg1 = getArg(arg, 1);
+        if (arg1 !== null && arg1 !== undefined) {
+          result.push(arg1);
         }
-      } else if (name !== NOTHING) {
-        newArgs.push(arg);
+      } else {
+        result.push(arg);
       }
     }
-    return [LIST, ...newArgs];
+    return result;
   }
 
-  const def = engine.getFunctionDefinition(rootName);
+  const def = engine.getFunctionDefinition(head);
   const sequenceHold = def?.sequenceHold ?? false;
 
   for (let arg of args) {
-    arg = canonicalListForm(arg, engine)!;
+    arg = canonicalListForm(arg, engine);
     const name = getFunctionName(arg);
     if (name === IDENTITY) {
-      const newArg = getArg(arg, 1);
-      if (newArg !== null && newArg !== undefined) {
-        newArgs.push(newArg);
+      const arg1 = getArg(arg, 1);
+      if (arg1 !== null && arg1 !== undefined) {
+        result.push(arg1);
       }
-    } else if (name === rootName && !sequenceHold) {
-      const head = getFunctionHead(expr);
-      for (const arg2 of getTail(arg)) {
-        if (getFunctionName(arg2) === name) {
-          newArgs.push([head ?? MISSING, ...getTail(arg2)]);
+    } else if (name === head && !sequenceHold) {
+      for (let arg2 of getTail(arg)) {
+        arg2 = canonicalListForm(arg2, engine);
+        if (getFunctionName(arg2) === head) {
+          result = result.concat(getTail(arg2));
         } else {
-          newArgs.push(arg2);
+          result.push(arg2);
         }
       }
     } else {
-      newArgs.push(arg);
+      result.push(arg);
     }
   }
 
-  return [getFunctionHead(expr) ?? MISSING, ...newArgs];
+  return result;
 }
 
 function getRootDegree(expr: Expression): number {
   const name = getFunctionName(expr);
   if (name === SQRT) return 2;
-  if (name === ROOT) return getNumberValue(getArg(expr, 2)) ?? NaN;
+  if (name === ROOT) return getNumberValue(getArg(expr, 2)) ?? 2;
   if (name !== POWER) return 1;
   const exponent = getArg(expr, 2);
-  if (!exponent) return 1;
+  if (exponent === null) return 1;
   if (
     getFunctionName(exponent) === POWER &&
     getNumberValue(getArg(exponent, 2)) === -1
   ) {
+    // x^{n^{-1}}
     const val = getNumberValue(getArg(exponent, 1)) ?? NaN;
     if (isFinite(val)) return val;
   }
@@ -307,12 +247,13 @@ function getRootDegree(expr: Expression): number {
 }
 
 /**
- * Assuming that `expr` is a `"multiply"`, return in the first member
+ * Assuming that `expr` is a `"Multiply"`, return in the first member
  * of the tuples all the arguments that are square roots,
  * and in the second member of the tuples all those that aren't
  */
 
 function getSquareRoots(expr: Expression): [Expression[], Expression[]] {
+  console.assert(getFunctionName(expr) === MULTIPLY);
   const args = getTail(expr);
   const roots: Expression[] = [];
   const nonRoots: Expression[] = [];
@@ -327,39 +268,29 @@ function getSquareRoots(expr: Expression): [Expression[], Expression[]] {
 }
 
 function canonicalMultiplyForm(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
-  if (expr === null) return null;
-  const head = getFunctionHead(expr);
-  if (!head) return expr;
-  expr = applyArgs(expr, (x) => canonicalMultiplyForm(x, engine));
-  if (head !== MULTIPLY) return expr;
+): Expression {
+  if (isAtomic(expr)) return expr;
+  if (getFunctionHead(expr) !== MULTIPLY) {
+    return applyRecursively(expr, (x) => canonicalMultiplyForm(x, engine));
+  }
 
-  expr = flatten(ungroup(expr), MULTIPLY)!;
+  expr = flatten(ungroup(expr), MULTIPLY);
 
   // Group all square roots together
+  // \sqrt{2}\sqrt{x}y -> \sqrt{2x}y
   const [squareRoots, nonSquareRoots] = getSquareRoots(expr);
   let args: Expression[];
   if (squareRoots.length === 0) {
     args = nonSquareRoots;
   } else if (squareRoots.length === 1) {
-    expr = [
-      MULTIPLY,
-      ...nonSquareRoots,
-      [POWER, squareRoots[0], [POWER, 2, -1]],
-    ];
-    args = getTail(expr);
+    args = [...nonSquareRoots, [SQRT, squareRoots[0]]];
   } else {
-    expr = [
-      MULTIPLY,
-      ...nonSquareRoots,
-      [POWER, [MULTIPLY, ...squareRoots], [POWER, 2, -1]],
-    ];
-    args = getTail(expr);
+    args = [...nonSquareRoots, [SQRT, [MULTIPLY, ...squareRoots]]];
   }
 
-  // Hoist any negative (numbers or `"negate"` function)
+  // Hoist any negative (numbers or `"Negate"` function)
   let isNegative = false;
   let hasNegative = false;
   args = args.map((x) => {
@@ -394,7 +325,7 @@ function canonicalMultiplyForm(
 
   // Any arg is 0? Return 0.
   // WARNING: we can't do this. If any of the argument, or the result
-  // of the evaluation of any of the argument was non-finit, the
+  // of the evaluation of any of the argument was non-finite, the
   // result is undefined (NaN), not 0.
   // if (args.some((x) => getNumberValue(x) === 0)) return 0;
 
@@ -404,117 +335,103 @@ function canonicalMultiplyForm(
   // If no arguments left, return 1
   if (args.length === 0) return 1;
 
-  // Only one argument, return it (`"multiply"` is idempotent)
+  // Only one argument, return it (`"Multiply"` is idempotent)
   if (args.length === 1) return args[0];
 
   return [MULTIPLY, ...args];
 }
 
-// @todo: see https://docs.sympy.org/1.6/modules/core.html#pow
 function canonicalPowerForm(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
-  if (expr === null) return null;
-  const head = getFunctionHead(expr);
-  if (!head) return expr;
-  if (head !== POWER) {
-    return applyArgs(expr, (x) => canonicalPowerForm(x, engine));
-  }
+): Expression {
+  if (isAtomic(expr)) return expr;
 
-  expr = ungroup(expr)!;
+  expr = applyRecursively(expr, (x) => canonicalPowerForm(x, engine));
 
-  if (getArgCount(expr) !== 2) return expr;
-
-  const arg1 = canonicalPowerForm(getArg(expr, 1), engine);
-  const val1 = getNumberValue(arg1) ?? NaN;
-  const arg2 = canonicalPowerForm(getArg(expr, 2), engine);
-  const val2 = getNumberValue(arg2) ?? NaN;
-
-  if (val2 === 0) return 1;
-  if (val2 === 1) return arg1;
-  if (val1 === -1 && val2 === -1) return -1;
-  // -1 +oo           nan
-  // -1 -oo           nan
-
-  // 0 -1             zoo
-  // 0 oo             0
-  // 0 -oo            zoo
-
-  if (val1 === 1 && val2 === -1) return 1;
-  if (val1 === 1) return 1;
-  // 1 oo             nan
-  // 1 -oo            nan
-
-  // oo -1            0
-  // oo oo            oo
-  // oo -oo           0
-  // oo i             nan
-  // oo 1+i           zoo
-  // oo -1+i          0
-
-  // -oo -1           0
-  // -oo oo           nan
-  // -oo -oo          nan
-  // -oo i            nan
-  // -oo 1+i          zoo
-  // -oo -1+i         0
-
-  // b zoo            nan
+  if (getFunctionName(expr) === POWER) return applyPower(expr);
 
   return expr;
 }
 
 function canonicalNegateForm(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
+): Expression {
+  if (isAtomic(expr)) return expr;
   const head = getFunctionHead(expr);
-  if (head === NEGATE) {
-    expr = ungroup(expr);
-    const arg = getArg(expr, 1);
-    if (typeof arg === 'number') {
-      expr = -arg;
-    } else if (arg && isNumberObject(arg)) {
-      if (getNumberValue(arg) === 0) return 0;
-      if (arg.num[0] === '-') {
-        expr = { num: arg.num.slice(1) };
-      } else if (arg.num[0] === '+') {
-        expr = { num: '-' + arg.num.slice(1) };
-      } else {
-        expr = { num: '-' + arg.num };
-      }
-    } else if (getFunctionName(arg) === MULTIPLY) {
-      let fact = getArg(arg, 1);
-      if (typeof fact === 'number') {
-        fact = -fact;
-      } else if (isNumberObject(fact)) {
-        if (fact.num[0] === '-') {
-          fact = { num: fact.num.slice(1) };
-        } else {
-          fact = { num: '-' + fact.num };
-        }
-      } else {
-        return [MULTIPLY, -1, fact ?? MISSING, ...getTail(arg).slice(1)];
-      }
-      return [MULTIPLY, fact, ...getTail(arg).slice(1)];
+  if (head !== NEGATE) {
+    return applyRecursively(expr, (x) => canonicalNegateForm(x, engine));
+  }
+
+  expr = ungroup(expr);
+  const arg = getArg(expr, 1);
+  if (typeof arg === 'number') {
+    expr = -arg;
+  } else if (arg && isNumberObject(arg)) {
+    if (getNumberValue(arg) === 0) return 0;
+    if (arg.num[0] === '-') {
+      expr = { num: arg.num.slice(1) };
+    } else if (arg.num[0] === '+') {
+      expr = { num: '-' + arg.num.slice(1) };
     } else {
-      return [MULTIPLY, -1, arg ?? MISSING];
+      expr = { num: '-' + arg.num };
     }
-  } else if (head) {
-    return applyArgs(expr, (x) => canonicalNegateForm(x, engine));
+  } else if (getFunctionName(arg) === MULTIPLY) {
+    let fact = getArg(arg, 1);
+    if (typeof fact === 'number') {
+      fact = -fact;
+    } else if (isNumberObject(fact)) {
+      if (fact.num[0] === '-') {
+        fact = { num: fact.num.slice(1) };
+      } else {
+        fact = { num: '-' + fact.num };
+      }
+    } else {
+      return [MULTIPLY, -1, fact ?? MISSING, ...getTail(arg).slice(1)];
+    }
+    return [MULTIPLY, fact, ...getTail(arg).slice(1)];
+  } else {
+    return [MULTIPLY, -1, arg ?? MISSING];
   }
   return expr;
 }
 
-function canonicalNumberForm(
-  expr: Expression | null,
-  engine: ComputeEngine
-): Expression | null {
-  if (getFunctionHead(expr)) {
-    return applyArgs(expr, (x) => canonicalNumberForm(x, engine));
-  }
+function canonicalBooleanForm(
+  expr: Expression,
+  _engine: ComputeEngine
+): Expression {
+  // @todo
+  return expr;
+}
 
+function canonicalConstantsForm(
+  expr: Expression,
+  _engine: ComputeEngine
+): Expression {
+  return applyConstants(expr);
+}
+
+function canonicalRationalForm(
+  expr: Expression,
+  engine: ComputeEngine
+): Expression {
+  if (!isAtomic(expr)) {
+    return applyRecursively(expr, (x) => canonicalConstantsForm(x, engine));
+  }
+  const [numer, denom] = getRationalValue(expr);
+  if (isNaN(numer) || isNaN(denom)) return expr;
+  if (denom === 1) return numer;
+  return ['Divide', numer, denom];
+}
+
+function canonicalNumberForm(
+  expr: Expression,
+  engine: ComputeEngine
+): Expression {
+  if (!isAtomic(expr)) {
+    return applyRecursively(expr, (x) => canonicalNumberForm(x, engine));
+  }
   if (typeof expr === 'number') {
     if (isNaN(expr)) {
       return { num: 'NaN' };
@@ -541,65 +458,61 @@ function canonicalNumberForm(
     //     return { num: BigInt(expr.num).toString().slice(0, -1) };
     // }
   }
-
   return expr;
 }
 
 function canonicalSubtractForm(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
-  if (expr === null) return null;
-  const head = getFunctionHead(expr);
-  if (!head) return expr;
-  if (head !== SUBTRACT) {
-    return applyArgs(expr, (x) => canonicalSubtractForm(x, engine));
+): Expression {
+  if (isAtomic(expr)) return expr;
+  if (getFunctionHead(expr) !== SUBTRACT) {
+    return applyRecursively(expr, (x) => canonicalSubtractForm(x, engine));
   }
 
   if (getArgCount(expr) !== 2) return expr;
 
-  const arg1 = canonicalSubtractForm(getArg(expr, 1), engine) ?? MISSING;
+  const arg1 = canonicalSubtractForm(getArg(expr, 1)!, engine);
   const val1 = getNumberValue(arg1);
-  const arg2 = canonicalSubtractForm(getArg(expr, 2), engine) ?? MISSING;
+  const arg2 = canonicalSubtractForm(getArg(expr, 2)!, engine);
   const val2 = getNumberValue(arg2);
 
   if (val1 === 0) {
     if (val2 === 0) return 0;
-    return canonicalSubtractForm(
-      [ADD, arg1, applyNegate(arg2) ?? MISSING],
-      engine
-    );
+    return applyNegate(arg2);
   }
-  return canonicalSubtractForm(
-    [ADD, arg1, applyNegate(arg2) ?? MISSING],
-    engine
-  );
+  return [ADD, arg1, applyNegate(arg2)];
 }
 
 function canonicalRootForm(
-  expr: Expression | null,
+  expr: Expression,
   engine: ComputeEngine
-): Expression | null {
-  if (expr === null) return null;
+): Expression {
+  if (isAtomic(expr)) return expr;
   const head = getFunctionHead(expr);
-  if (!head) return expr;
-  if (head !== ROOT && head !== SQRT) {
-    return applyArgs(expr, (x) => canonicalRootForm(x, engine));
+  if (getArgCount(expr) < 2 && head !== ROOT && head !== POWER) {
+    return applyRecursively(expr, (x) => canonicalRootForm(x, engine));
   }
 
-  if (getArgCount(expr) < 1) return expr;
+  const arg2 = canonicalRootForm(getArg(expr, 2)!, engine);
+  const arg1 = canonicalRootForm(getArg(expr, 1)!, engine);
 
-  const arg1 = canonicalRootForm(getArg(expr, 1), engine);
-
-  let arg2: Expression | null = 2;
-  if (getArgCount(expr) > 1) {
-    arg2 = canonicalPowerForm(getArg(expr, 2), engine);
-  }
-  if (getNumberValue(arg2) === 1) {
-    return arg1;
+  if (head === ROOT) {
+    if (getNumberValue(arg2) === 2) return [SQRT, arg1];
+    return [ROOT, arg1, arg2];
   }
 
-  return [POWER, arg1 ?? NOTHING, [DIVIDE, 1, arg2 ?? MISSING]];
+  if (head === POWER) {
+    const [numer, denom] = getRationalValue(arg2);
+    if (numer === -1) {
+      if (denom === 2) return [SQRT, arg1];
+      return [ROOT, arg1, denom];
+    }
+    if (denom === 1) return [POWER, arg1, numer];
+    return [POWER, arg1, [DIVIDE, numer, denom]];
+  }
+
+  return expr;
 }
 
 /**
@@ -608,7 +521,7 @@ function canonicalRootForm(
  * as a string otherwise
  */
 
-function isValidJSONNumber(num: string): string | number {
+function asValidJSONNumber(num: string): string | number {
   if (typeof num === 'string') {
     const val = Number(num);
     if (num[0] === '+') num = num.slice(1);
@@ -631,6 +544,7 @@ function isValidJSONNumber(num: string): string | number {
  * metadata attributes. Otherwise, use a plain number, string or array
  *
  * For example:
+ *
  * ```
  * {num: 2} -> 2
  * {sym: "x"} -> "x"
@@ -638,7 +552,7 @@ function isValidJSONNumber(num: string): string | number {
  * ```
  *
  */
-export function fullForm(
+export function jsonForm(
   expr: Expression | null,
   engine: ComputeEngine
 ): Expression | null {
@@ -648,7 +562,7 @@ export function fullForm(
       if (i === 0) {
         return x;
       }
-      return fullForm(x, engine) ?? NOTHING;
+      return jsonForm(x, engine) ?? NOTHING;
     });
   }
   if (typeof expr === 'object') {
@@ -656,19 +570,19 @@ export function fullForm(
     if (keys.length === 1) {
       if (isNumberObject(expr)) {
         // Exclude NaN and Infinity, which are not valid numbers in JSON
-        const val = isValidJSONNumber(expr.num);
+        const val = asValidJSONNumber(expr.num);
         if (typeof val === 'number') return val;
         return { num: val };
       }
       if (isFunctionObject(expr)) {
-        return expr.fn.map((x) => fullForm(x, engine) ?? NOTHING);
+        return expr.fn.map((x) => jsonForm(x, engine) ?? NOTHING);
       }
       if (isSymbolObject(expr)) {
         return expr.sym;
       }
     } else {
       if (isFunctionObject(expr)) {
-        expr.fn = expr.fn.map((x) => fullForm(x, engine) ?? NOTHING);
+        expr.fn = expr.fn.map((x) => jsonForm(x, engine) ?? NOTHING);
       }
     }
   }
@@ -688,7 +602,7 @@ export function strippedMetadataForm(
   }
   if (typeof expr === 'object') {
     if ('num' in expr) {
-      const val = isValidJSONNumber(expr.num);
+      const val = asValidJSONNumber(expr.num);
       if (typeof val === 'number') return val;
       return { num: val };
     } else if ('fn' in expr) {
@@ -778,6 +692,7 @@ export function canonicalForm(
 ): Expression | null {
   return engine.format(expr, [
     // @todo: canonical-boolean: transforms, Equivalent, Implies, Xor...
+    'canonical-boolean',
     // in CNF (Conjunctive Normal Form: https://en.wikipedia.org/wiki/Conjunctive_normal_form)
     'canonical-number', // ➔ simplify number
     'canonical-exp', // ➔ power
@@ -787,20 +702,19 @@ export function canonicalForm(
     'canonical-power', // simplify power
     'canonical-multiply', // ➔ multiply, power,    (this might generate
     // some POWER functions, but they are 'safe' (don't need simplification)
-    'canonical-negate', // simplify negate
-    'canonical-add', // simplify add
+    'canonical-negate',
+    'canonical-add',
     'flatten', // associative, idempotent and groups
     'canonical-list', // 'Nothing', 'Identity' and 'Sequence'
     'canonical-domain',
+    'canonical-rational',
+    'canonical-constants',
     'sorted',
-    'full',
+    'json',
   ]);
 }
 
-function flattenForm(
-  expr: Expression | null,
-  engine: ComputeEngine
-): Expression | null {
+function flattenForm(expr: Expression, engine: ComputeEngine): Expression {
   return flattenAssociative(
     flattenIdempotent(flattenInvolution(expr, engine), engine),
     engine
@@ -848,6 +762,8 @@ export function format(
     ) => Expression | null = {
       'canonical': canonicalForm,
       'canonical-add': canonicalAddForm,
+      'canonical-boolean': canonicalBooleanForm,
+      'canonical-constants': canonicalConstantsForm,
       'canonical-divide': canonicalDivideForm,
       'canonical-domain': canonicalDomainForm,
       'canonical-exp': canonicalExpForm,
@@ -856,9 +772,10 @@ export function format(
       'canonical-power': canonicalPowerForm,
       'canonical-negate': canonicalNegateForm,
       'canonical-number': canonicalNumberForm,
+      'canonical-rational': canonicalRationalForm,
       'canonical-root': canonicalRootForm,
       'canonical-subtract': canonicalSubtractForm,
-      'full': fullForm,
+      'json': jsonForm,
       'flatten': flattenForm,
       'sorted': sortedForm,
       'stripped-metadata': strippedMetadataForm,
@@ -869,8 +786,8 @@ export function format(
       console.error('Unknown form ' + form);
       return null;
     }
+
     result = fn(result, engine);
-    // console.log(form + ' = ' + JSON.stringify(result));
   }
   return result;
 }

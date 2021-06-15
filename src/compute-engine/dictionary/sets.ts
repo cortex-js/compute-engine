@@ -16,7 +16,7 @@ export const SETS_DICTIONARY: Dictionary = {
     domain: 'Function',
     wikidata: 'Q173740',
     range: 'Set',
-    simplify: cartesianProduct,
+    evaluate: cartesianProduct,
   },
   Intersection: {
     // notation: \Cap
@@ -28,7 +28,7 @@ export const SETS_DICTIONARY: Dictionary = {
     idempotent: true,
     involution: true,
     range: 'Set',
-    simplify: intersection,
+    evaluate: intersection,
   },
   Complement: {
     // Return the elements of the first argument that are not in any of
@@ -47,7 +47,7 @@ export const SETS_DICTIONARY: Dictionary = {
     idempotent: true,
     involution: true,
     range: 'Set',
-    simplify: union,
+    evaluate: union,
   },
   // disjoint union Q842620 ⊔
   SymmetricDifference: {
@@ -61,18 +61,18 @@ export const SETS_DICTIONARY: Dictionary = {
   Subset: {
     domain: 'Predicate',
     range: 'MaybeBoolean',
-    simplify: subset,
+    evaluate: subset,
   },
   SubsetEqual: {
     domain: 'Predicate',
     range: 'MaybeBoolean',
-    simplify: subsetEqual,
+    evaluate: subsetEqual,
   },
   SetMinus: {
     domain: 'Function',
     wikidata: 'Q18192442',
     range: 'MaybeBoolean',
-    simplify: setMinus,
+    evaluate: setMinus,
   },
 };
 

@@ -5,10 +5,12 @@ import {
   getDictionary,
   getFunctionHead,
   getNumberValue,
+  getStringValue,
   getSymbolName,
   isNumberObject,
+  isStringObject,
 } from '../common/utils';
-import { chop } from './utils';
+import { chop } from './numeric';
 
 /**
  * Compare two expressions and return if they are structurally identical,
@@ -18,9 +20,12 @@ import { chop } from './utils';
  * `{ sym: 'Pi', wikidata: 'Q168' }`
  * `{ sym: 'Pi', wikidata: 'Q167' }`
  * are not the same (greek letter vs. 3.1415...)
+ *
+ * Compare with `equalExpr()` which does not ignore differences in
+ * representation.
  */
 export function same(lhs: Expression | null, rhs: Expression | null): boolean {
-  if (!lhs || !rhs) return false;
+  if (lhs === null || rhs == null) return false;
   if (
     typeof lhs === 'object' &&
     typeof rhs === 'object' &&
@@ -50,6 +55,13 @@ export function same(lhs: Expression | null, rhs: Expression | null): boolean {
   //
   const lhSymbol = getSymbolName(lhs);
   if (lhSymbol !== null) return lhSymbol === getSymbolName(rhs);
+
+  //
+  // String
+  //
+  if (isStringObject(lhs) && isStringObject(rhs!)) {
+    return getStringValue(lhs) === getStringValue(rhs!);
+  }
 
   //
   // Dictionary

@@ -1,4 +1,4 @@
-import { LARGEST_SMALL_PRIME, SMALL_PRIMES } from '../../common/utils';
+import { LARGEST_SMALL_PRIME, SMALL_PRIMES } from '../numeric';
 
 export const LARGE_PRIME = 1125899906842597; // Largest prime < 2^50
 

@@ -265,7 +265,7 @@ export type FunctionDefinition = BaseDefinition &
      *
      * Only make simple rewrites of the expression.
      *
-     * The passed-in arguments have been simplified.
+     * The passed-in arguments have **not** been simplified yet.
      */
     simplify?: (engine: ComputeEngine, ...args: Expression[]) => Expression;
 
@@ -509,17 +509,46 @@ export declare class ComputeEngine {
    * Use `result = await engine.evaluate(expr)` to get the result without
    * blocking.
    */
-  evaluate(expr: Expression): Promise<Expression | null>;
+  evaluate(
+    expr: Expression,
+    options?: { timeLimit?: number; iterationLimit?: number }
+  ): Promise<Expression | null>;
 
   /**
-   * Determines if the predicate is satisfied. Return `undefined` if
-   * the value of the predicate cannot be determined.
+   * Simplify an expression.
+   */
+  simplify(
+    exp: Expression,
+    options?: { timeLimit: number; iterationLimit: number }
+  ): Expression | null;
+
+  /**
+   * Return a numerical approximation of an expression.
+   */
+  N(exp: Expression): Expression | null;
+
+  /**
+   * Determines if the predicate is satisfied based on the known assumptions.
+   *
+   * Return `undefined` if the value of the predicate cannot be determined.
    *
    * `ce.is(["Equal", "x", 0])`
    * `ce.is(["Equal", 3, 4])`
    *
    */
   is(predicate: Expression): boolean | undefined;
+
+  /**
+   * Considering all the known assumptions, return a list of
+   * matches for the pattern.
+   *
+   * ```js
+   *  ce.assume(x, 'PositiveInteger');
+   *  ce.match(['Greater', 'x', '_val'])
+   *  //  -> [{'_val': 0}]
+   * ```
+   */
+  matchAssumptions(pattern: Expression): { [symbol: string]: Expression }[];
 
   /**
    * Add an assumption.
@@ -617,56 +646,13 @@ export declare function evaluate(
  * A given mathematical expression can be represented in multiple equivalent
  * ways as a MathJSON expression.
  *
- * `Form` is used to specify a representation:
- * - **`'full'`**: only transformations applied are those necessary to make it
- *      valid JSON (for example making sure that `Infinity` and `NaN` are
- *      represented as strings)
- * - **`'flatten'`**: associative functions are combined, e.g.
- *      f(f(a, b), c) -> f(a, b, c)
- * - **`'sorted'`**: the arguments of commutative functions are sorted such that:
- *       - numbers are first, sorted numerically
- *       - complex numbers are next, sorted numerically by imaginary value
- *       - symbols are next, sorted lexicographically
- *       - `add` functions are next
- *       - `multiply` functions are next
- *       - `power` functions are next, sorted by their first argument,
- *           then by their second argument
- *       - other functions follow, sorted lexicographically
- * - **`'stripped-metadata'`**: any metadata associated with elements of the
- *      expression is removed.
- * - **`'object-literal'`**:  each term of an expression is expressed as an
- *      object literal: no shorthand representation is used.
- * - **`'canonical-add'`**: `addition of 0 is simplified, associativity rules
- *      are applied, unnecessary groups are moved, single argument 'add' are simplified
- * - **`'canonical-divide'`**: `divide` is replaced with `multiply` and `power',
- *       division by 1 is simplified,
- * - **`'canonical-exp'`**: `exp` is replaced with `power`
- * - **`'canonical-multiply'`**: multiplication by 1 or -1 is simplified
- * - **`'canonical-power'`**: `power` with a first or second argument of 1 is
- *     simplified
- * - **`'canonical-negate'`**: real or complex number is replaced by the
- * negative of that number. Negation of negation is simplified.
- * - **`'canonical-number'`**: complex numbers with no imaginary compnents are
- *    simplified
- * - **`'canonical-root'`**: `root` is replaced with `power`
- * - **`'canonical-subtract'`**: `subtract` is replaced with `add` and `negate`
- * - **`'canonical'`**: the following transformations are performed, in this order:
- *      - 'canonical-number', // ➔ simplify number
- *      - 'canonical-exp', // ➔ power
- *      - 'canonical-root', // ➔ power, divide
- *      - 'canonical-subtract', // ➔ add, negate, multiply,
- *      - 'canonical-divide', // ➔ multiply, power
- *      - 'canonical-power', // simplify power
- *      - 'canonical-multiply', // ➔ multiply, power
- *      - 'canonical-negate', // simplify negate
- *      - 'canonical-add', // simplify add
- *      - 'flatten', // simplify associative, idempotent and groups
- *      - 'sorted',
- *      - 'full',
+ * Learn more about [Canonical Forms](https://cortexjs.io/guides/compute-engine/forms/).
  */
 export type Form =
   | 'canonical'
   | 'canonical-add'
+  | 'canonical-boolean'
+  | 'canonical-constants'
   | 'canonical-divide'
   | 'canonical-domain'
   | 'canonical-exp'
@@ -675,11 +661,12 @@ export type Form =
   | 'canonical-power'
   | 'canonical-negate'
   | 'canonical-number'
+  | 'canonical-rational'
   | 'canonical-root'
   | 'canonical-subtract'
   | 'canonical-domain'
-  | 'flatten' // simplify associative, idempotent and groups
-  | 'full'
+  | 'flatten'
+  | 'json'
   | 'object-literal'
   | 'sorted'
   | 'stripped-metadata'

@@ -112,9 +112,9 @@ describe('FORMS', () => {
       // console.log(
       //     x[0] +
       //         ' full -> ' +
-      //         JSON.stringify(expression(x[0], { form: 'full' }))
+      //         JSON.stringify(expression(x[0], { form: 'json' }))
       // );
-      expect(expression(x[0], { form: 'full' })).toStrictEqual(x[1]);
+      expect(expression(x[0], { form: 'json' })).toStrictEqual(x[1]);
     })
   );
   exprs.forEach((x) =>
@@ -283,45 +283,45 @@ describe('OBJECT LITERAL FORM', () => {
 
 describe('BASE FORM', () => {
   test('binary', () => {
-    expect(expression('(00111)_{2}', { form: 'full' })).toMatchInlineSnapshot(
+    expect(expression('(00111)_{2}', { form: 'json' })).toMatchInlineSnapshot(
       `['BaseForm', 7, 2]`
     );
-    expect(expression('(00111)_2', { form: 'full' })).toMatchInlineSnapshot(
+    expect(expression('(00111)_2', { form: 'json' })).toMatchInlineSnapshot(
       `['BaseForm', 7, 2]`
     );
-    expect(expression('(00\\;111)_2', { form: 'full' })).toMatchInlineSnapshot(
+    expect(expression('(00\\;111)_2', { form: 'json' })).toMatchInlineSnapshot(
       `['BaseForm', 7, 2]`
     );
     expect(
-      expression('(\\mathtt{00\\;111})_2', { form: 'full' })
+      expression('(\\mathtt{00\\;111})_2', { form: 'json' })
     ).toMatchInlineSnapshot(`['BaseForm', 7, 2]`);
   });
   test('decimal', () => {
-    expect(expression('(123)_{10}', { form: 'full' })).toMatchInlineSnapshot(
+    expect(expression('(123)_{10}', { form: 'json' })).toMatchInlineSnapshot(
       `['BaseForm', 123, 10]`
     );
-    expect(expression('(12c3)_{10}', { form: 'full' })).toMatchInlineSnapshot(
+    expect(expression('(12c3)_{10}', { form: 'json' })).toMatchInlineSnapshot(
       `['Nothing', 'base-out-of-range']`
     );
   });
   test('hexadecimal', () => {
-    expect(expression('(a1b23)_{16}', { form: 'full' })).toMatchInlineSnapshot(
+    expect(expression('(a1b23)_{16}', { form: 'json' })).toMatchInlineSnapshot(
       `['BaseForm', 662307, 16]`
     );
-    expect(expression('(1x2gc3)_{16}', { form: 'full' })).toMatchInlineSnapshot(
+    expect(expression('(1x2gc3)_{16}', { form: 'json' })).toMatchInlineSnapshot(
       `['Nothing', 'base-out-of-range']`
     );
   });
   test('base 36', () => {
     expect(
-      expression('(a1xy9zb23)_{36}', { form: 'full' })
+      expression('(a1xy9zb23)_{36}', { form: 'json' })
     ).toMatchInlineSnapshot(`['BaseForm', 28363369669563, 36]`);
   });
   test('base 37', () => {
-    expect(expression('(a1b23)_{37}', { form: 'full' })).toMatchInlineSnapshot(
+    expect(expression('(a1b23)_{37}', { form: 'json' })).toMatchInlineSnapshot(
       `['Nothing', 'base-out-of-range']`
     );
-    expect(expression('(1x2gc3)_{37}', { form: 'full' })).toMatchInlineSnapshot(
+    expect(expression('(1x2gc3)_{37}', { form: 'json' })).toMatchInlineSnapshot(
       `['Nothing', 'base-out-of-range']`
     );
   });

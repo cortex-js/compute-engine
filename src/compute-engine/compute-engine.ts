@@ -190,8 +190,8 @@ export class ComputeEngine {
     let def: Definition | undefined = undefined;
     while (scope && !def) {
       def = scope.dictionary?.get(name);
-      if (!isFunctionDefinition(def)) def = undefined;
-      if (!def) scope = scope.parentScope;
+      if (def !== undefined && !isFunctionDefinition(def)) def = undefined;
+      if (def === undefined) scope = scope.parentScope;
     }
     if (def) def.scope = scope;
     return def ?? null;
@@ -201,8 +201,8 @@ export class ComputeEngine {
     let def: Definition | undefined = undefined;
     while (scope && !def) {
       def = scope.dictionary?.get(name);
-      if (!isSymbolDefinition(def)) def = undefined;
-      if (!def) scope = scope.parentScope;
+      if (def !== undefined && !isSymbolDefinition(def)) def = undefined;
+      if (def === undefined) scope = scope.parentScope;
     }
     if (!def) return null;
     def.scope = scope;
@@ -213,8 +213,8 @@ export class ComputeEngine {
     let def: Definition | undefined = undefined;
     while (scope && !def) {
       def = scope.dictionary?.get(name);
-      if (!isSetDefinition(def)) def = undefined;
-      if (!def) scope = scope.parentScope;
+      if (def !== undefined && !isSetDefinition(def)) def = undefined;
+      if (def === undefined) scope = scope.parentScope;
     }
     if (!def) return null;
     def.scope = scope;
@@ -225,8 +225,8 @@ export class ComputeEngine {
     let def: Definition | undefined = undefined;
     while (scope && !def) {
       def = scope.dictionary?.get(name);
-      if (!isCollectionDefinition(def)) def = undefined;
-      if (!def) scope = scope.parentScope;
+      if (def !== undefined && !isCollectionDefinition(def)) def = undefined;
+      if (def === undefined) scope = scope.parentScope;
     }
     if (!def) return null;
     def.scope = scope;
@@ -237,7 +237,7 @@ export class ComputeEngine {
     let def: Definition | undefined = undefined;
     while (scope && !def) {
       def = scope.dictionary?.get(name);
-      if (!def) scope = scope.parentScope;
+      if (def === undefined) scope = scope.parentScope;
     }
     if (!def) return null;
     def.scope = scope;
@@ -344,7 +344,7 @@ export class ComputeEngine {
   /**
    * Return a numerical approximation of an expression.
    */
-  N(exp: Expression): Promise<Expression | null> {
+  N(exp: Expression): Expression | null {
     return numericalEvalWithEngine(this, exp);
   }
 
@@ -384,7 +384,7 @@ export class ComputeEngine {
    */
   evaluate(
     exp: Expression,
-    options?: { timeLimit: number; iterationLimit: number }
+    options?: { timeLimit?: number; iterationLimit?: number }
   ): Promise<Expression | null> {
     return evaluateWithEngine(this, exp, options);
   }
@@ -506,9 +506,18 @@ export class ComputeEngine {
   is(arg1: Expression, arg2?: Domain): boolean | undefined {
     let predicate: Expression = arg1;
     if (arg2) {
-      predicate = ['MemberOf', arg1, arg2];
+      predicate = ['Element', arg1, arg2];
     }
     return isWithEngine(this, predicate);
+  }
+
+  matchAssumptions(pattern: Expression): { [symbol: string]: Expression }[] {
+    const result: { [symbol: string]: Expression }[] = [];
+    this.assumptions.forEach((assumption) => {
+      const match = this.match(pattern, assumption);
+      if (match !== null) result.push(match);
+    });
+    return result;
   }
 
   assume(
@@ -522,7 +531,7 @@ export class ComputeEngine {
   ): 'contradiction' | 'tautology' | 'ok' {
     let predicate: Expression = arg1;
     if (arg2) {
-      predicate = ['MemberOf', arg1, arg2];
+      predicate = ['Element', arg1, arg2];
     }
     return assumeWithEngine(this, predicate);
   }

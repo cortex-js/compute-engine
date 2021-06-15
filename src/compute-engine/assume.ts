@@ -1,84 +1,19 @@
-import { getArg, getHead, getSymbolName } from '../common/utils';
+import {
+  equalExpr,
+  getArg,
+  getFunctionName,
+  getHead,
+  getSymbolName,
+} from '../common/utils';
 import { Expression } from '../public';
 import { ComputeEngine } from './public';
 import { CortexError } from './utils';
 
-// export function isInfinity(ce: ComputeEngine, _expr: Expression): boolean | undefined {
-//   // @todo inferDomainOf
-//   return undefined;
-// }
-// isZero(expr: Expression): boolean | undefined {
-//   return this.equal(expr, 0);
-// }
-// isOne(expr: Expression): boolean | undefined {
-//   return this.equal(expr, 1);
-// }
-// isMinusOne(expr: Expression): boolean | undefined {
-//   return this.equal(expr, -1);
-// }
-// /** Is `expr` >= 0? */
-// isNonNegative(expr: Expression): boolean | undefined {
-//   const result = this.isZero(expr);
-//   if (result === undefined) return undefined;
-//   if (result === true) return true;
-//   return this.isPositive(expr);
-// }
-// /** Is `expr` > 0? */
-// isPositive(_expr: Expression): boolean | undefined {
-//   // @todo
-//   return undefined;
-// }
-// /** Is `expr` < 0? */
-// isNegative(expr: Expression): boolean | undefined {
-//   const result = this.isNonNegative(expr);
-//   if (result === undefined) return undefined;
-//   return !result;
-// }
-// /** Is `expr` <= 0? */
-// isNonPositive(expr: Expression): boolean | undefined {
-//   const result = this.isPositive(expr);
-//   if (result === undefined) return undefined;
-//   return !result;
-// }
-// isInteger(_expr: Expression): boolean | undefined {
-//   // @todo
-//   return undefined;
-// }
-// /** Is `expr` an element of QQ (can be written as p/q)? */
-// isRational(_expr: Expression): boolean | undefined {
-//   // @todo
-//   return undefined;
-// }
-// /** Is `expr` an element of RR? */
-// isReal(_expr: Expression): boolean | undefined {
-//   // @todo
-//   return undefined;
-// }
-// /** Is `expr` an element of RR, including ±∞? */
-// isExtendedReal(_expr: Expression): boolean | undefined {
-//   // @todo
-//   return undefined;
-// }
-// /** Is `expr` an algebraic number, i.e. not transcendental (π, e)? */
-// isAlgebraic(_expr: Expression): boolean | undefined {
-//   // @todo
-//   return undefined;
-// }
-// /** Is `expr` a complex number? */
-// isComplex(_expr: Expression): boolean | undefined {
-//   // @todo
-//   return undefined;
-// }
-// /** Is `expr` an element of `dom`? */
-// isElement(_expr: Expression, _dom: Domain): boolean | undefined {
-//   // @todo
-//   return undefined;
-// }
-
 export function isInRange(
-  symbol: Expression,
-  expr: Expression
+  _symbol: Expression,
+  _expr: Expression
 ): boolean | undefined {
+  // @todo
   return undefined;
 }
 
@@ -88,16 +23,18 @@ export function isInRange(
  * a number, `Infinity` or `['Open', num]`
  */
 export function normalizeToRange(
-  engine: ComputeEngine,
-  expr: Expression
+  _engine: ComputeEngine,
+  _expr: Expression
 ): Expression | null {
+  // @todo
   return null;
 }
 
 export function isWithEngine(
-  engine: ComputeEngine,
-  predicate: Expression
+  _engine: ComputeEngine,
+  _predicate: Expression
 ): boolean | undefined {
+  //  @todo
   return undefined;
 }
 
@@ -113,8 +50,8 @@ export function assumeWithEngine(
 
   if (!arg) return 'contradiction';
 
-  const assumptions = getAssumptions(engine, arg);
   // @todo: check contradiction or tautology
+  // const assumptions = getAssumptions(engine, arg);
   engine.assumptions.add(predicate);
   return 'ok';
 }
@@ -122,11 +59,29 @@ export function assumeWithEngine(
 export function filterAssumptions(
   engine: ComputeEngine,
   head: Expression,
-  arg1?,
-  arg2?
+  arg1?: Expression,
+  arg2?: Expression
 ): Expression[] {
-  // @todo
-  return [];
+  const result: Expression[] = [];
+  const assumptions = engine.assumptions;
+  for (const assumption of assumptions) {
+    if (getFunctionName(assumption) === head) {
+      if (arg1 === undefined) {
+        result.push(assumption);
+      } else {
+        if (equalExpr(arg1, getArg(assumption, 1))) {
+          if (arg2 === undefined) {
+            result.push(assumption);
+          } else {
+            if (equalExpr(arg2, getArg(assumption, 2))) {
+              result.push(assumption);
+            }
+          }
+        }
+      }
+    }
+  }
+  return result;
 }
 
 export function getAssumptions(
