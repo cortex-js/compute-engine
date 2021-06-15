@@ -99,8 +99,7 @@ engine.domain(engine.evaluate(['Add', 5, 2]));
 
 ## Converting Domains to a Canonical Form
 
-Domains can be converted to a canonical form using the `'canonical-domain'`
-form.
+**To convert a domain to a canonical form**, use `ComputeEngine.format(<domain>, 'canonical-domain')`.
 
 ```js
 format(['SetMinus', 'RealNumber', 'IrrationalNumber'], 'canonical-domain');

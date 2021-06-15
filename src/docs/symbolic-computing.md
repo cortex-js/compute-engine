@@ -33,6 +33,7 @@ result:
 - Format
 - Simplify
 - Evaluate
+- Compare, find patterns and substitute
 
 ## Format with a Canonical Form
 
@@ -61,7 +62,8 @@ search and compare expressions.
 `ComputeEngine.canonical()` function.
 
 ```js
-ComputeEngine.canonical(expr);
+console.log(ce.canonical(["Add", 2, "x", 3]);
+// ➔ ["Add", 2, 3, "x"]
 ```
 
 Learn more about [Canonical Forms](/guides/compute-engine/forms/).
@@ -92,3 +94,6 @@ Invoking the `evaluate()` function is roughly equivalent to calling in sequence
 
 Some functions may perform additional computations when `evaluate()` is 
 invoked.
+
+## Comparing, Pattern Matching and Substitution
+
