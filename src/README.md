@@ -43,7 +43,7 @@ The MathJSON library provides an implementation in Javascript/Typescript of
 utilities that parse Latex to MathJSON, serialize MathJSON to Latex, and provide
 a collection of functions for symbolic manipulation and numerical evaluations of
 MathJSON expressions. Read more about
-[MathJSON for Latex](/guides/math-json-dictionary/) and the
+[MathJSON for Latex](/guides/compute-engine/dictionaries/) and the
 [Compute Engine](/guides/compute-engine/).
 
 Mathematical notation is used in a broad array of fields, from elementary school

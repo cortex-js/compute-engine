@@ -25,51 +25,74 @@ sidebar:
 
 # Canonical Forms
 
-A given mathematical expression can be represented in multiple equivalent ways
-as a MathJSON expression. A **form** is used to specify a representation:
+A mathematical expression has many equivalent representations. 
 
-- **`'full'`**: only transformations applied are those necessary to make it
-  valid JSON (for example making sure that `Infinity` and `NaN` are represented
-  as strings)
-- **`'flatten'`**: associative functions are combined, e.g. f(f(a, b), c) ->
-  f(a, b, c)
-- **`'sorted'`**: the arguments of commutative functions are sorted such that: -
-  numbers are first, sorted numerically - complex numbers are next, sorted
-  numerically by imaginary value - symbols are next, sorted lexicographically -
-  `add` functions are next - `multiply` functions are next - `power` functions
-  are next, sorted by their first argument, then by their second argument -
-  other functions follow, sorted lexicographically
-- **`'stripped-metadata'`**: any metadata associated with elements of the
-  expression is removed.
-- **`'object-literal'`**: each term of an expression is expressed as an object
-  literal: no shorthand representation is used.
-- **`'canonical-add'`**: `addition of 0 is simplified, associativity rules are
-  applied, unnecessary groups are moved, single argument 'add' are simplified
-- **`'canonical-divide'`**: `divide` is replaced with `multiply` and `power',
-  division by 1 is simplified,
+For example, the expressions in each row below represent the same mathematical 
+object:
+
+| | | | 
+| :-- | :-- | :-- |
+| \\[ 215.3465 \\]  | \\[ 2.15346\\mathrm{e}2 \\]    | \\[  2.15346 \\times 10^2\\]|
+| \\[ x - 1 \\]     | \\[-1 + x \\]        | \\[  -(1) + x\\]|
+| \\[ -2x^{-1}\\]   | \\[ -\frac{2}{x} \\] |  \\[ 2 \left( \frac{-1}{x} \right) \\]| 
+
+By applying some conventions, for example wether to write constants before 
+or after variables in a sum, how to sort variables and functions, we define a **canonical**
+representation. A canonical representation is somewhat arbitrary, but using 
+it consistently can make some operations easier, for example, comparing two
+expressions for equality.
+
+The canonical form used by the Compute Engine has been selected to follow 
+common (but by no mean universal)  conventions in writing mathematical 
+expressions, as well as expressing them in a way that can optimize their computation.
+
+**To obtain the canonical representation of an expression**, use the 
+`ComputeEngine.canonical()` function.
+
+The default canonical representation applies a series of transformation to 
+put sums, products, numbers, roots, etc... in canonical form. Each of
+these steps  can also be applied separately for more control over the result.
+The list of available formats is listed below.
+
+Applying a canonical form is applying some rewriting rules to an expression.
+In that sense, it is similar to simplifying an expression with 
+`ComputeEngine.simplify()`, but it is more conservative in which transformations
+it will consider, and it will not take into account any assumptions about 
+symbols.
+
+
+<div class=symbols-table>
+
+| Form | Description |
+| :--- | :--- |
+| `canonical` | Apply the following transformations, in order: <ul><li> `canonical-number`</li><li>`canonical-exp`</li><li>`canonical-root`</li><li>`canonical-subtract`</li><li>`canonical-divide`</li><li>`canonical-power`</li><li>`canonical-multiply`</li><li>`canonical-negate`</li><li>`canonical-add`</li><li>`flatten`</li><li>`sorted`</li><li>`full`</li></ul>|
+| `canonical-add` | Addition of 0 is simplified, associativity rules are applied, unnecessary groups are removed, single argument `Add` are simplified |
+| `canonical-boolean` ||
+| `canonical-divide` | Division by 1 is simplified |
+| `canonical-domain` | |
+| `canonical-multiply` | Multiplication by \\( 1 \\)  or \\( -1 \\) is simplified |
+| `canonical-negate` | `Negate` of a number is replaced by the negative of the number. Negation of negation is simplified |
+| `canonical-list` | | 
+| `canonical-number` | Complex numbers with no imaginary components are simplified |
+| `canonical-power` | `Power` with a first or second argument of 1 is simplified|
+| `canonical-subtract` | `Subtract` is replaced with `Add` and `Negate` |
+| `flatten` | Associative functions are combined, e.g. \\( f(f(a, b), c) \longrightarrow f(a, b, c) \\) |
+| `json` | Only transformations necessary to make the expression valid JSON, for example making sure that `Infinity` and `NaN` are represented as strings|
+| `object-literal` | Each term of the expression is expressed as an object literal: no shorthand representation is used. For example, the number \\( 4\\) is represented as `{ num: "4" }` not as `4`.|
+| `shorthand` | Each term of the expression is expressed as a shorthand when possible, for example a number or a string. |
+| `sorted` | The arguments of commutative functions are sorted such that: <ul><li> numbers are first, sorted numerically </li><li> complex numbers are next, sorted numerically by imaginary value </li><li> symbols are next, sorted lexicographically </li><li> `add` functions are next </li><li> `multiply` functions are next </li><li> `power` functions are next, sorted by their first argument, then by their second argument </li><li> other functions follow, sorted lexicographically</li></ul>|
+| `stripped-metadata` | Any metadata associated with elements of the expression is removed, for example associated WikiData or Latex properties |
+| `sum-product` | | 
+
+</div>
+
+
+
+
 - **`'canonical-exp'`**: `exp` is replaced with `power`
-- **`'canonical-multiply'`**: multiplication by 1 or -1 is simplified
-- **`'canonical-power'`**: `power` with a first or second argument of 1 is
-  simplified
-- **`'canonical-negate'`**: real or complex number is replaced by the negative
-  of that number. Negation of negation is simplified.
-- **`'canonical-number'`**: complex numbers with no imaginary compnents are
-  simplified
+
 - **`'canonical-root'`**: `root` is replaced with `power`
-- **`'canonical-subtract'`**: `subtract` is replaced with `add` and `negate`
-- **`'canonical'`**: the following transformations are performed, in this order:
-  - `'canonical-number'`, -> simplify number
-  - `'canonical-exp'`, -> power
-  - `'canonical-root'`, -> power, divide
-  - `'canonical-subtract'`, -> add, negate, multiply,
-  - `'canonical-divide'`, -> multiply, power
-  - `'canonical-power'`, -> simplify power
-  - `'canonical-multiply'`, -> multiply, power
-  - `'canonical-negate'`, -> simplify negate
-  - `'canonical-add'`, -> simplify add
-  - `'flatten'`, simplify associative, idempotent, involution and groups
-  - `'sorted'`,
-  - `'full'`,
+
 
 **To transform an expression using the rules for a particular form**, use the
 `format()` function.
@@ -101,15 +124,3 @@ Latex(BaseForm(42, 16))
 BaseForm(42, 16)
 // ➔ 0x2a
 ```
-
-## `Derivative`
-
-`["Derivative", _expression_, _order_]`
-
-- _order_: default value is 1.
-
-| MathJSON                   | Latex            |
-| :------------------------- | :--------------- |
-| `["Derivative", "f"]`      | `f^\prime`       |
-| `["Derivative", "f", 2]`   | `f^\doubleprime` |
-| `["Derivative", "f", "n"]` | `f^{(n)}`        |
