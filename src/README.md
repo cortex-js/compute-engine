@@ -254,7 +254,7 @@ The following naming convention are recommended.
 ### Patterns
 
 Symbols that begin with **`_`** (**U+005F LOW LINE**, underscore) are reserved
-to denote pattern matches and other placeholders.
+to denote wildcards and other placeholders.
 
 ### Variables
 
@@ -279,8 +279,8 @@ to denote pattern matches and other placeholders.
 
 ### Constants
 
-- The first character of a constant should an uppercase letter (`A`-`Z`)
-- Subsequent characters should a letter, digit (`0`-`9`) or underscore (`_`).
+- The first character of a constant should be an uppercase letter (`A`-`Z`)
+- Subsequent characters should be a letter, digit (`0`-`9`) or underscore (`_`).
 - If a constant is made up of several words, use camelCase, e.g. `SpeedOfLight`
 
 ## Functions
@@ -292,7 +292,7 @@ A MathJSON function is either:
 
 ### Functions as Object Literal
 
-The default representations of **functions** is as an object literal with a
+The default representation of **functions** is as an object literal with a
 `"fn"` key. The value of the key is an array representing the function head and
 its arguments.
 
@@ -305,10 +305,10 @@ its arguments.
 The **head** of the function is the first element in the array. Its presence is
 required. It indicates the 'function name' or 'what' the function is about.
 
-It frequently is a string, but it can also be another expression.
+The head is frequently is a string, but it can also be another expression.
 
-Following the head are zero or more **arguments** to the function, which are
-expressions as well. The **arguments** form the **tail** of the function.
+Following the head are zero or more **arguments**, which are expressions as 
+well. The arguments form the **tail** of the function.
 
 The expression corresponding to $$\sin^{-1}(x)$$ is
 
@@ -326,15 +326,15 @@ If a **function** has no extra metadata it can be represented as a JSON array.
 For example these two expressions are equivalent:
 
 ```json
-["Cos", ["Add", "x", 1]]
-
 { "fn": ["Cos", ["Add", "x", 1]] }
+
+["Cos", ["Add", "x", 1]]
 ```
 
 ## Dictionary
 
-A **dictionary** is a collection of key-value pairs. In some languages it is
-called a map or associative array.
+A **dictionary** is a collection of key-value pairs. In some progamming 
+languages it is called a map or associative array.
 
 The keys are strings and the values are MathJSON expressions.
 
@@ -344,9 +344,9 @@ value of the key is a JSON object literal holding the content of the dictionary.
 ```json
 {
   "dict": {
-    "one": 1,
-    "two": 2,
-    "three": ["Add", 1, 2]
+    "first": 1,
+    "second": 2,
+    "third": ["Add", 1, 2]
   }
 }
 ```
@@ -371,7 +371,7 @@ The following metadata keys are recommended:
 | `latex`         | A visual representation in LaTeX of the expression. <br> This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
 | `sourceUrl`     | A URL to the source of this expression                                                                                                                                       |
 | `sourceContent` | The source from which this expression was generated.<br> It could be a Latex expression, or some other source language.                                                      |
-| `sourceOffsets` | A pairs of character offsets in `sourceContent` or `sourceUrl` from which this expression was produced                                                                       |
+| `sourceOffsets` | A pair of character offsets in `sourceContent` or `sourceUrl` from which this expression was produced                                                                       |
 | `hash`          | A string representing a digest of this expression.                                                                                                                           |
 </div>
 
