@@ -118,7 +118,13 @@ console.log(substitute(pattern, { a: 'x' }));
 
 ## Comparing
 
-**To compare two expressions**, use the `ComputeEngine.same()` function.
+**To compare two expressions**, use the `match()` function. The function returns
+`null` if the two expressions do not match. It returns an object literal if the
+expressions do match. If the first argument included wildcards the resulting
+object literal indicate the substitutions for those wildcards. If no wildscards
+were used and the expressions matched, an empty object literal, `{}` is
+returned. To check if the expressions simply match or not, check if the return
+value is `null` (indicating not a match) or not (indicating a match).
 
 The comparison between expressions is structural so that \\(x + 1\\) is not
 equal to \\(1 + x\\). To obtain the desired result, you may need to apply a
@@ -129,27 +135,27 @@ them using `ComputeEngine.evaluate()`.
 const engine = new ComputeEngine();
 
 const variable = 'x';
-console.log(engine.same(['Add', 'x', 1], ['Add', variable, 1]));
-// ➔ true: the two expressions are the same
+console.log(match(['Add', 'x', 1], ['Add', variable, 1]));
+// ➔ {}: the two expressions are the same
 
-console.log(engine.same(['Add', 'x', 1], ['Add', 1, 'x']));
-// ➔ false: the two expressions are **not** the same
+console.log(match(['Add', 'x', 1], ['Add', 1, 'x']));
+// ➔ null: the two expressions are **not** the same
 
 console.log(
-  engine.same(
-    engine.canonical(['Add', 'x', 1]),
-    engine.canonical(['Add', 1, 'x'])
-  )
+  match(engine.canonical(['Add', 'x', 1]), engine.canonical(['Add', 1, 'x']))
 );
 // ➔ true: the two expressions are the same in canonical form
 
-console.log(engine.same(['Add', 2, 2], ['Add', 3, 1]));
-// ➔ false: the two expressions are **not** the same
+console.log(engine.match(parse('2 + 2'), parse('3 + 1')));
+// ➔ null: the two expressions are **not** the same
 
 console.log(
-  engine.same(engine.evaluate(['Add', 2, 2]), engine.evaluate(['Add', 3, 1]))
+  match(
+    engine.evaluate(parse('2 + 2 + x')),
+    engine.evaluate(parse('3 + 1 + x'))
+  )
 );
-// ➔ true: the two expressions are the same once evaluated
+// ➔ {}: the two expressions are the same once evaluated
 ```
 
 ## `count()`
