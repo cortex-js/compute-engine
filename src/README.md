@@ -59,14 +59,13 @@ mathematical notations, and as such is not a replacement for LaTeX or MathML.
 
 <div class=symbols-table>
 
-| Latex                        | MathJSON                                                                  |
-| :--------------------------- | :------------------------------------------------------------------------ |
-| $$\frac{a}{1+x}$$            | `["Divide", "a", ["Add", 1, "x"]]`                                        |
-| $$e^{\imaginaryI \pi }+1=0$$ | `["Equal", ["Add", ["Exp", ["Multiply", "Pi", "ImaginaryI"], 1], 0]` |
-| $$\sin^{-1\prime}(x)$$       | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                    |
+| Latex                        | MathJSON                                                                |
+| :--------------------------- | :---------------------------------------------------------------------- |
+| $$\frac{a}{1+x}$$            | `["Divide", "a", ["Add", 1, "x"]]`                                      |
+| $$e^{\imaginaryI \pi }+1=0$$ | `["Equal", ["Add", ["Exp", ["Multiply", "Pi", "ImaginaryUnit"], 1], 0]` |
+| $$\sin^{-1\prime}(x)$$       | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                  |
 
 </div>
-
 
 ## Structure of a MathJSON Expression
 
@@ -143,16 +142,17 @@ value of the key is a string representation of the number.
 The string representing a number follows the
 [JSON syntax for number](https://tools.ietf.org/html/rfc7159#section-6).
 
-The values `NaN`, `+Infinity` and `-Infinity` are used to represented 
-an undefined results, as per [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754),
+The values `NaN`, `+Infinity` and `-Infinity` are used to represented an
+undefined results, as per [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754),
 positive infinity and negative infinity, respectively.
 
-When a number is outside the bounds of a JSON number (i.e. a 64-bit 
-floating point representation), it is represented by a string of digits `0`...`9`, decimal
-point `.`, plus `+` and minus `-` sign  and exponent sign `e`, followed by a letter:
+When a number is outside the bounds of a JSON number (i.e. a 64-bit floating
+point representation), it is represented by a string of digits `0`...`9`,
+decimal point `.`, plus `+` and minus `-` sign and exponent sign `e`, followed
+by a letter:
 
 - `n` to indicate the number is a large integer (type `BigInt` in JavaScript)
-- `d` to indicate the number is an arbitrary precision floating point number 
+- `d` to indicate the number is an arbitrary precision floating point number
   (decimal).
 
 ### JSON numbers
@@ -199,16 +199,16 @@ characters must be escaped as indicated:
 
 <div class=symbols-table>
 
-| | | |
-| :--- | :--- | :--- |
-| **U+0000** to **U+001F** |   |  `\u0000` to `\u001f` |
-| **U+0008** |  **BACKSPACE** |  `\b` or `\u0008` |
-| **U+0009** |  **TAB**  |  `\t` or `\u0009` |
-| **U+000A** |  **LINE FEED** |  `\n` or `\u000a` |
-| **U+000C** |  **FORM FEED** |  `\f` or `\u000c` |
-| **U+000D** |  **CARRIAGE RETURN** |  `\r` or `\u000d` |
-| **U+005C** |  **REVERSE SOLIDUS** (backslash) |  `\\` or `\u005c` |
-| **U+0022** |  **QUOTATION MARK** |  `\"` or `\u0022` |
+|                          |                                 |                      |
+| :----------------------- | :------------------------------ | :------------------- |
+| **U+0000** to **U+001F** |                                 | `\u0000` to `\u001f` |
+| **U+0008**               | **BACKSPACE**                   | `\b` or `\u0008`     |
+| **U+0009**               | **TAB**                         | `\t` or `\u0009`     |
+| **U+000A**               | **LINE FEED**                   | `\n` or `\u000a`     |
+| **U+000C**               | **FORM FEED**                   | `\f` or `\u000c`     |
+| **U+000D**               | **CARRIAGE RETURN**             | `\r` or `\u000d`     |
+| **U+005C**               | **REVERSE SOLIDUS** (backslash) | `\\` or `\u005c`     |
+| **U+0022**               | **QUOTATION MARK**              | `\"` or `\u0022`     |
 
 </div>
 
@@ -233,14 +233,14 @@ Symbols are strings of valid Unicode characters, except:
 
 <div class=symbols-table>
 
-| | | |
-| :--- | :--- | :--- |
-| **U+0000** to **U+0020** | | | 
-| **U+0022** |  **DOUBLE QUOTE** |  `"` |
-| **U+005C** |  **REVERSE SOLIDUS**  |  `\` |
-| **U+0060** |  **GRAVE ACCENT** backtick  |  `` ` `` |
-| **U+FFFE**  | | |
-| **U+FFFF** | | | 
+|                          |                           |         |
+| :----------------------- | :------------------------ | :------ |
+| **U+0000** to **U+0020** |                           |         |
+| **U+0022**               | **DOUBLE QUOTE**          | `"`     |
+| **U+005C**               | **REVERSE SOLIDUS**       | `\`     |
+| **U+0060**               | **GRAVE ACCENT** backtick | `` ` `` |
+| **U+FFFE**               |                           |         |
+| **U+FFFF**               |                           |         |
 
 </div>
 
@@ -248,36 +248,36 @@ In addition, the first character of a symbol should not be:
 
 <div class=symbols-table>
 
-| | | |
-| :--- | :--- | :--- |
-| **U+0021** | **EXCLAMATION MARK** | `!` |
-| **U+0022** |  **QUOTATION MARK** | `"` |
-| **U+0021** |  **EXCLAMATION MARK**  |  `!` |
-| **U+0022** |  **QUOTATION MARK**  |  `"` |
-| **U+0023** |  **NUMBER SIGN**  |  `#` |
-| **U+0024** |  **DOLLAR SIGN**  |  `$` |
-| **U+0025** |  **PERCENT**  |  `%` |
-| **U+0026** |  **AMPERSAND**  |  `&` |
-| **U+0027** |  **APOSTROPHE**  |  `'` |
-| **U+0028** |  **LEFT PARENTHESIS**  |  `(` |
-| **U+0029** |  **RIGHT PARENTHESIS**  |  `)` |
-| **U+002E** |  **FULL STOP**  |  `'` |
-| **U+003A** |  **COLON**  |  `:` |
-| **U+003C** |  **LESS THAN SIGN**  |  `:` |
-| **U+003F** |  **QUESTION MARK**  |  `?` |
-| **U+0040** |  **COMMERCIAL AT**  |  `@` |
-| **U+005B** |  **LEFT SQUARE BRACKET**  |  `[` |
-| **U+005D** |  **RIGHT SQUARE BRACKET**  |  `]` |
-| **U+005E** |  **CIRCUMFLEX ACCENT**  |  `^` |
-| **U+007B** |  **LEFT CURLY BRACKET**  |  `{` |
-| **U+007D** |  **RIGHT CURLY BRACKET**  |  `}` |
-| **U+007E** |  **TILDE**  |  `~` |
+|            |                          |     |
+| :--------- | :----------------------- | :-- |
+| **U+0021** | **EXCLAMATION MARK**     | `!` |
+| **U+0022** | **QUOTATION MARK**       | `"` |
+| **U+0021** | **EXCLAMATION MARK**     | `!` |
+| **U+0022** | **QUOTATION MARK**       | `"` |
+| **U+0023** | **NUMBER SIGN**          | `#` |
+| **U+0024** | **DOLLAR SIGN**          | `$` |
+| **U+0025** | **PERCENT**              | `%` |
+| **U+0026** | **AMPERSAND**            | `&` |
+| **U+0027** | **APOSTROPHE**           | `'` |
+| **U+0028** | **LEFT PARENTHESIS**     | `(` |
+| **U+0029** | **RIGHT PARENTHESIS**    | `)` |
+| **U+002E** | **FULL STOP**            | `'` |
+| **U+003A** | **COLON**                | `:` |
+| **U+003C** | **LESS THAN SIGN**       | `:` |
+| **U+003F** | **QUESTION MARK**        | `?` |
+| **U+0040** | **COMMERCIAL AT**        | `@` |
+| **U+005B** | **LEFT SQUARE BRACKET**  | `[` |
+| **U+005D** | **RIGHT SQUARE BRACKET** | `]` |
+| **U+005E** | **CIRCUMFLEX ACCENT**    | `^` |
+| **U+007B** | **LEFT CURLY BRACKET**   | `{` |
+| **U+007D** | **RIGHT CURLY BRACKET**  | `}` |
+| **U+007E** | **TILDE**                | `~` |
 
 </div>
 
-
-Before they are used, symbols are normalized to the [Unicode Normalization Form C
-(NFC)](https://unicode.org/reports/tr15/). They must be stored internally and compared using the NFC.
+Before they are used, symbols are normalized to the
+[Unicode Normalization Form C (NFC)](https://unicode.org/reports/tr15/). They
+must be stored internally and compared using the NFC.
 
 JSON escape sequences are applied before Unicode normalization.
 
@@ -286,14 +286,15 @@ These four strings represent the same symbol:
 - `"Å"`
 - `"A\u030a"`
 - `"\u00c5"` **LATIN CAPITAL LETTER A WITH RING ABOVE** `Å` and
-- `"\u0041\u030a"` **LATIN CAPITAL LETTER A** + **COMBINING RING ABOVE** `A‌`  + ` ̊`
+- `"\u0041\u030a"` **LATIN CAPITAL LETTER A** + **COMBINING RING ABOVE** `A‌` +
+  ` ̊`
 
 The following naming convention are recommended.
 
 ### Patterns
 
-Symbols that begin with **U+005F LOW LINE** `_` (underscore) are reserved
-to denote wildcards and other placeholders.
+Symbols that begin with **U+005F LOW LINE** `_` (underscore) are reserved to
+denote wildcards and other placeholders.
 
 ### Variables
 
@@ -301,10 +302,10 @@ to denote wildcards and other placeholders.
   (`a`-`z` or `A`-`Z`)
 - Subsequent characters should be a letter, digit (`0`-`9`) or underscore (`_`).
 
-  So for example use, `Gamma` rather than `ɣ` and `Total` rather than 
-  **U+2211 N-ARY SUMMATION** `∑`, which looks like  **U+03A3 GREEK CAPITAL
-  LETTER SIGMA** `Σ`. This visual ambiguity of some Unicode symbols frequently used
-  in math is why we recommend a more restricted character set.
+  So for example use, `Gamma` rather than `ɣ` and `Total` rather than **U+2211
+  N-ARY SUMMATION** `∑`, which looks like **U+03A3 GREEK CAPITAL LETTER SIGMA**
+  `Σ`. This visual ambiguity of some Unicode symbols frequently used in math is
+  why we recommend a more restricted character set.
 
 - If a variable is made of several words, use camelCase, i.e. `newDeterminant`
 - Prefer clarity over brevity and avoid obscure abbreviations.
@@ -346,7 +347,7 @@ required. It indicates the 'function name' or 'what' the function is about.
 
 The head is frequently is a string, but it can also be another expression.
 
-Following the head are zero or more **arguments**, which are expressions as 
+Following the head are zero or more **arguments**, which are expressions as
 well. The arguments form the **tail** of the function.
 
 The expression corresponding to \\(\sin^{-1}(x)\\) is
@@ -372,7 +373,7 @@ For example these two expressions are equivalent:
 
 ## Dictionary
 
-A **dictionary** is a collection of key-value pairs. In some progamming 
+A **dictionary** is a collection of key-value pairs. In some progamming
 languages it is called a map or associative array.
 
 The keys are strings and the values are MathJSON expressions.
@@ -410,8 +411,9 @@ The following metadata keys are recommended:
 | `latex`         | A visual representation in LaTeX of the expression. <br> This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
 | `sourceUrl`     | A URL to the source of this expression                                                                                                                                       |
 | `sourceContent` | The source from which this expression was generated.<br> It could be a Latex expression, or some other source language.                                                      |
-| `sourceOffsets` | A pair of character offsets in `sourceContent` or `sourceUrl` from which this expression was produced                                                                       |
+| `sourceOffsets` | A pair of character offsets in `sourceContent` or `sourceUrl` from which this expression was produced                                                                        |
 | `hash`          | A string representing a digest of this expression.                                                                                                                           |
+
 </div>
 
 ```json
