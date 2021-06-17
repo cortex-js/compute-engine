@@ -138,6 +138,18 @@ value of the key is a string representation of the number.
 The string representing a number follows the
 [JSON syntax for number](https://tools.ietf.org/html/rfc7159#section-6).
 
+The values `NaN`, `+Infinity` and `-Infinity` are used to represented 
+an undefined results, as per [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754),
+positive infinity and negative infinity, respectively.
+
+When a number is outside the bounds of a JSON number (i.e. a 64-bit 
+floating point representation), it is represented by a string of digits, decimal
+point, plus and minus sign and exponent sign (`e`), followed by a letter:
+
+- `n` to indicate the number is a large integer (type `BigInt` in JavaScript)
+- `d` to indicate the number is an arbitrary precision floating point number 
+  (decimal).
+
 ### JSON numbers
 
 When a **number** has no extra metadata and is compatible with the JSON
@@ -160,8 +172,9 @@ Specifically:
 
 {
   "num":
-    "3.141592653589793238462643383279502884197169399375105"
+    "3.141592653589793238462643383279502884197169399375105d"
 }
+
 
 { "num": "-Infinity" }
 
