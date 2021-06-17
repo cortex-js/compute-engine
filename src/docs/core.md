@@ -29,40 +29,35 @@ sidebar:
 
 <div class=symbols-table>
 
-| Symbol | Description |
-| :--- | :--- |
-| `Missing`| A **required** expression is not present. |
+| Symbol    | Description                               |
+| :-------- | :---------------------------------------- |
+| `Missing` | A **required** expression is not present. |
 | `Nothing` | An **optional** expression is not present |
-|  `None` | None of the possible values, none apply | 
-| `All` | All the possible values apply |
+| `None`    | None of the possible values, none apply   |
+| `All`     | All the possible values apply             |
 
 </div>
 
-
-| Example | |
-| :--- | :--- |
-| `["Divide", 2, "Missing"]` | \\[\frac{2}{\unicode{"2B1A}}\\] |
-| `["List", 2, "Nothing", 3]` | \\[\lbrack 2, ,3 \rbrack\\] |
-
-
-
+| Example                     |                                 |
+| :-------------------------- | :------------------------------ |
+| `["Divide", 2, "Missing"]`  | \\[\frac{2}{\unicode{"2B1A}}\\] |
+| `["List", 2, "Nothing", 3]` | \\[\lbrack 2, ,3 \rbrack\\]     |
 
 ## Functions
 
 <div class=symbols-table>
 
-| Symbol | Operation |
-| :--- | :--- |
-| `About` | <code>(_symbol_)</code><br> Return information about a symbol such as its domain, its attributes, its value, etc... |
-| `Domain` | <code>(_expression_)</code><br> Return the domain of the expression|
-| `Evaluate` | <code>(_expression_)</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it|
-| `Identity` | <code>(_symbol_)</code><br> Always return its argument |
+| Symbol            | Operation                                                                                                               |
+| :---------------- | :---------------------------------------------------------------------------------------------------------------------- |
+| `About`           | <code>(_symbol_)</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...     |
+| `Domain`          | <code>(_expression_)</code><br> Return the domain of the expression                                                     |
+| `Evaluate`        | <code>(_expression_)</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it     |
+| `Identity`        | <code>(_symbol_)</code><br> Always return its argument                                                                  |
 | `InverseFunction` | <code>(_expression_)</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\) |
 
 </div>
 
-
-| Example | |
+| Example                      |             |
 | :--------------------------- | :---------- |
 | `["InverseFunction", "Sin"]` | `\sin^{-1}` |
 
@@ -194,17 +189,17 @@ comparison.
 
 ```js
 // Greek letter vs. ratio of the circumference of a circle to its diameter
-same({ sym: 'Pi', wikidata: 'Q168' }, { sym: 'Pi', wikidata: 'Q167' });
-// ➔ false
+match({ sym: 'Pi', wikidata: 'Q168' }, { sym: 'Pi', wikidata: 'Q167' });
+// ➔ null (does not match)
 ```
 
 Using a canonical format will result in more positive matches.
 
 ```js
-Same(x + 1, 1 + x);
-// ➔ False
+match(parse('x + 1'), parse('1 + x')));
+// ➔ null
 
-Same(Canonical(x + 1, 1 + x));
+match(ce.canonical(parse('x + 1'), parse('1 + x')));
 // ➔ True
 ```
 
@@ -212,19 +207,18 @@ Same(Canonical(x + 1, 1 + x));
 
 <div class=symbols-table>
 
-| Symbol |  | Description | 
-| :--- | :--- | :-- | 
-| `Subminus` | \\[ x_- \\] | |  
-| `Subplus` | \\[ x_+\\]| | 
-| `Subscript` | \\[ x_{n} \\] | |
-| `Substar` | \\[ x_*\\]| | 
-| `Superdagger` | \\[ x^\dagger\\]| | 
-| `Superminus` | \\[ x^-\\]| | 
-| `Superplus` | \\[ x^+\\]| | 
-| `Superstar` | \\[ x^*\\]| When the argument is a complex number, indicate the conjugate. |
+| Symbol        |                  | Description                                                    |
+| :------------ | :--------------- | :------------------------------------------------------------- |
+| `Subminus`    | \\[ x_- \\]      |                                                                |
+| `Subplus`     | \\[ x_+\\]       |                                                                |
+| `Subscript`   | \\[ x_{n} \\]    |                                                                |
+| `Substar`     | \\[ x_*\\]       |                                                                |
+| `Superdagger` | \\[ x^\dagger\\] |                                                                |
+| `Superminus`  | \\[ x^-\\]       |                                                                |
+| `Superplus`   | \\[ x^+\\]       |                                                                |
+| `Superstar`   | \\[ x^*\\]       | When the argument is a complex number, indicate the conjugate. |
 
 </div>
-
 
 ### `String`
 
