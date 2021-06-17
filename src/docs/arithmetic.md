@@ -38,7 +38,7 @@ sidebar:
 | `Third`| \\[ \frac{1}{3} \\] | |
 | `Quarter`| \\[ \frac{1}{4} \\] | |
 | `ExponentialE` |  \\(2.7182818284\ldots\\) | [Euler's number](https://www.wikidata.org/wiki/Q82435) |
-| `ImaginaryI` | \\( \imaginaryI \\) | The imaginary unit, solution of \\(x^2+1=0\\) |
+| `ImaginaryUnit` | \\( \imaginaryI \\) | The imaginary unit, solution of \\(x^2+1=0\\) |
 | `MachineEpsilon` | \\[ 2^{−52}\\] | The difference between 1 and the next larger floating point number. <br>See [Machine Epsilon on Wikipedia](https://en.wikipedia.org/wiki/Machine_epsilon) |
 | `CatalanConstant` | \\[ = 0.9159655941\ldots \\] | \\[ \sum_{n=0}^{\infty} \frac{(-1)^{n}}{(2n+1)^2} \\]. See [Catalan's Constant on Wikipedia](https://en.wikipedia.org/wiki/Catalan%27s_constant)| 
 | `GoldenRatio` | \\[ = 1.6180339887\ldots\\] | \\[ \frac{1+\sqrt{5}}{2} \\] See [Golden Ratio on Wikipedia](https://en.wikipedia.org/wiki/Golden_ratio) |

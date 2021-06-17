@@ -47,13 +47,14 @@ sidebar:
 
 <div class=symbols-table>
 
-| Symbol            | Operation                                                                                                               |
-| :---------------- | :---------------------------------------------------------------------------------------------------------------------- |
-| `About`           | <code>(_symbol_)</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...     |
-| `Domain`          | <code>(_expression_)</code><br> Return the domain of the expression                                                     |
-| `Evaluate`        | <code>(_expression_)</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it     |
-| `Identity`        | <code>(_symbol_)</code><br> Always return its argument                                                                  |
-| `InverseFunction` | <code>(_expression_)</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\) |
+| Symbol            | Operation                                                                                                                                                                |
+| :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `About`           | <code>(_symbol_)</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...                                                      |
+| `Domain`          | <code>(_expression_)</code><br> Return the domain of the expression                                                                                                      |
+| `Evaluate`        | <code>(_expression_)</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it. Overrides `Hold` and hold attributes of a function. |
+| `Hold`            | <code>(_expression_)</code><br> Maintain an expression in an unevaluated form.                                                                                           |
+| `Identity`        | <code>(_symbol_)</code><br> Always return its argument                                                                                                                   |
+| `InverseFunction` | <code>(_expression_)</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\)                                                  |
 
 </div>
 
@@ -101,59 +102,44 @@ cube(5)
 // ➔ 125
 ```
 
-### `LatexSymbols`
+### `Latex` and `LatexSymbols`
 
-`["LatexSymbols", `_`expr-1`_`, `_`expr-2`_`, ...`_`expr-n`_`]`
+`["Latex", `_`expr`_` `]`
 
-- _`expr-n`_: one or more expressions
-- Returns a string, a Latex string corresponding to the input expressions.
+- _`expr`_: a MathJSON expression
+- Returns a Latex string representing the expression.
 
 ```json
-["LatexSymbols", ["Divide", "Pi", 2]]
+["Latex", ["Divide", "Pi", 2]]
 // ➔ "'\frac{\pi}{2}'"
 ```
 
-If the argument is a string, it is interpreted as a Latex token or fragment:
+`["LatexSymbols", `_`str-1`_`, `_`str-2`_`, ...`_`str-n`_`]`
 
-- `<{>`: begin group
-- `<}>`: end group
-- `<space>`: blank space
-- `<$$>`: display mode shift
-- `<$>`: inline mode shift
-- `#0`-`#9`: argument
-- `#?`: placeholder
-- string that starts with `/`: a Latex command
-- other strings: ordinary symbols
+The arguments `_`str-n`_` are interpreted as Latex tokens:
+
+<div class=symbols-table>
+
+| Token                       |                    |
+| :-------------------------- | :----------------- |
+| `<{>`                       | begin group        |
+| `<}>`                       | end group          |
+| `<space>`                   | blank space        |
+| `<$$>`                      | display mode shift |
+| `<$>`                       | inline mode shift  |
+| `#0`-`#9`                   | argument           |
+| `#?`                        | placeholder        |
+| string that starts with `/` | a Latex command    |
+| other strings               | ordinary symbols   |
+
+</div>
 
 ```json
-["Latex", "'\\frac'", "'<{>'", "'pi'", "'<}>'", "'<{>'", 2, "'<}>'"]
+["LatexSymbols", "'\\frac'", "'<{>'", "'pi'", "'<}>'", "'<{>'", 2, "'<}>'"]
 // ➔ "'\frac{\pi}{2}'"
 ```
 
 See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
-
-### `Pattern`
-
-Work in progress{.notice--info}
-
-The `Pattern` function is used with the `match()` function to pattern-match an
-expression. The pattern expression can include one or more `Pattern` function
-calls.
-
-- `["Pattern"]` - Any sub-expression at this position will match.
-- `["Pattern", `_`name`_`]` - Match and capture any subexpression at this
-  position as the capture group _`name`_.
-- `["Pattern", `_`name`_`, `_`pattern`_`]` - Match and capture any subexpression
-  at this position as the `_`name`_` capture group **if** the subexpression
-  matches the _`pattern`_.
-- `["Pattern", `_`name`_`, `_`pattern-1`_`, `_`pattern-2`_`, `_`...`_`]` - Match
-  and capture any subexpression at this position as the `_`name`_` capture group
-  **if** the subexpression matches any of the _`pattern-n`_.
-
-```js
-match(["Add", ["Pattern"], ["Pattern"]], ["Add", 3, 5]))
-// ➔ {}
-```
 
 ### `Piecewise`
 
@@ -164,13 +150,13 @@ match(["Add", ["Pattern"], ["Pattern"]], ["Add", 3, 5]))
 | `["Prime", "f"]`    | `f^\prime`       |
 | `["Prime", "f", 2]` | `f^\doubleprime` |
 
-### `Same`
+### `Match`
 
 _`expr1`_ `===` _`expr2`_
 
-`Same(`_`expr1`_`, `_`expr2`_`)`
+`Match(`_`expr1`_`, `_`expr2`_`)`
 
-`Same(`_`expr1`_`, `_`expr2`_`, ...`_`expr-n`_`)`
+`Match(`_`expr1`_`, `_`expr2`_`, ...`_`expr-n`_`)`
 
 Indicate if two (or more) expressions are structurally identical, using a
 literal symbolic identity.
