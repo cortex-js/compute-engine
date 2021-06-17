@@ -38,14 +38,15 @@ sidebar:
 | `Third`| \\[ \frac{1}{3} \\] | |
 | `Quarter`| \\[ \frac{1}{4} \\] | |
 | `ExponentialE` |  \\(2.7182818284\ldots\\) | [Euler's number](https://www.wikidata.org/wiki/Q82435) |
-| `ImaginaryI` | \\( \imaginaryI \\) | The imaginary unit, solution of \\(x^2+1=0\\) |
+| `ImaginaryUnit` | \\( \imaginaryI \\) | The imaginary unit, solution of \\(x^2+1=0\\) |
 | `MachineEpsilon` | \\[ 2^{−52}\\] | The difference between 1 and the next larger floating point number. <br>See [Machine Epsilon on Wikipedia](https://en.wikipedia.org/wiki/Machine_epsilon) |
-| `CatalanConstant` | \\[ = 0.9159655941\ldots \\] | \\[ \sum_{n=0}^{\infty} \frac{(-1)^{n}}{(2n+1)^2} \\]. See [Catalan's Constant on Wikipedia](https://en.wikipedia.org/wiki/Catalan%27s_constant)| 
+| `CatalanConstant` | \\[ = 0.9159655941\ldots \\] | \\[ \sum_{n=0}^{\infty} \frac{(-1)^{n}}{(2n+1)^2} \\] <br> See [Catalan's Constant on Wikipedia](https://en.wikipedia.org/wiki/Catalan%27s_constant)| 
 | `GoldenRatio` | \\[ = 1.6180339887\ldots\\] | \\[ \frac{1+\sqrt{5}}{2} \\] See [Golden Ratio on Wikipedia](https://en.wikipedia.org/wiki/Golden_ratio) |
 | `EulerGamma` | \\[ = 0.5772156649\ldots \\]| See [Euler-Mascheroni Constant on Wikipedia](https://en.wikipedia.org/wiki/Euler%E2%80%93Mascheroni_constant) |
 </div>
 
-See also [Trigonometry](/guides/compute-engine/arithmetic/) for \\( \pi \\) and related constants.{.notice--info}
+See also [Trigonometry](/guides/compute-engine/trigonometry/) for \\( \pi \\) and 
+related constants.{.notice--info}
 
 ## Functions
 
@@ -60,6 +61,7 @@ See also [Trigonometry](/guides/compute-engine/arithmetic/) for \\( \pi \\) and 
 | `Power` | \\( a^b \\) | [Exponentiation](https://www.wikidata.org/wiki/Q33456)
 | `Root` | \\(\sqrt[n]{x}=x^{\frac1n}\\) | [n-th root](https://www.wikidata.org/wiki/Q601053) |
 | `Sqrt` |  \\(\sqrt{x}=x^{\frac12}\\) | [Square root](https://www.wikidata.org/wiki/Q134237)|
+| `Square` |  \\(\operatorname{Square}{x}=x^2\\) | |
 </div>
 
 ---
@@ -85,19 +87,5 @@ See also [Trigonometry](/guides/compute-engine/arithmetic/) for \\( \pi \\) and 
 | `Ceil` | | Rounds a number up to the next largest integer |
 | `Floor` | | Round a number to the greatest integer less than the input value. |
 | `Round` | | |
-
-</div>
-
----
-<div class=symbols-table>
-
-| Symbol | Operation | |
-| :--- | :--- | :--- |
-| `Erf` | \\(\operatorname{Erf}\\) | \\( z={\frac{2}{\sqrt {\pi }}}\int_{0}^{z}e^{-t^2}\\,dt\\), the [Error function](https://en.wikipedia.org/wiki/Error_function) is the integral of the Gaussian distribution |
-| `Erfc` | \\(\operatorname {Erfc} \\) | \\(z=1-\operatorname {Erf} z\\), the Complementary Error Function |
-| `Factorial` | \\(n!\\) | The products of all positive integers less than or equal to $$n$$ |
-| `Gamma` |  | \\((n-1)!\\) The [Gamma Function](https://en.wikipedia.org/wiki/Gamma_function), an extension of the factorial function to complex numbers [Q190573](https://www.wikidata.org/wiki/Q190573)|
-| `LogGamma` | | |
-| `SignGamma` | | |
 
 </div>

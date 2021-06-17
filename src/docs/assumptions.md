@@ -27,12 +27,12 @@ sidebar:
 The Cortex Compute Engine has a robust system to specify properties and
 relationship between symbols.
 
-The assumptions are used to select appropriate algorithms, to validate some
+These assumptions are used to select appropriate algorithms, to validate some
 simplifications and to optimize computation.
 
 ## Defining New Assumptions: `assume()`
 
-**To specify a predicate about a symbol**, use the `assume()` function.
+**To specify a predicate about a symbol**, use the `ce.assume()` function.
 
 For example, to indicate that \\(x\\) is a real number:
 
@@ -52,36 +52,44 @@ following:
 - Equality: `Equal`
 - Boolean expression: `And`, `Or`, `Not`
 
-## `forget()`
+## Forgetting Assumptions: `forget()`
 
-Each call to `assume()` is additive: the previous assumptions are preserved.
+Each call to `ce.assume()` is additive: the previous assumptions are preserved.
 
-**To remove previous assumptions**, use `forget()`.
+**To remove previous assumptions**, use `ce.forget()`.
 
-## Testing Assumptions: `is()`
+## Testing Assumptions: `is()` and `ask()`
 
-**To test if a particular assumption is valid**, use the `is()` function.
+**To test if a particular assumption is valid**, use the `ce.is()` function.
 
-The first argument of `is()` is a symbol, and the second argument is a domain.
+The first argument of `ce.is()` is a symbol, and the second argument is a domain.
 
 ```js
 ce.is('x', 'RealNumber');
 ce.is('x', ['Range', 1, 5]);
 ```
 
-Alternatively, the `is()` function can be invoked with a single argument, a
+Alternatively, the `ce.is()` function can be invoked with a single argument, a
 predicate:
 
 ```js
 ce.is(['Element', 'x', 'RealNumber']);
 ```
 
-The function `is()` return `true` if the assumption is true, `false` if it is
+The function `ce.is()` return `true` if the assumption is true, `false` if it is
 not, and `undefined` if it cannot be determined.
+
+While `ce.is()` is appropriate to get boolean answers, more complex queries
+can also be made.
+
+**To query the assumptions knowledge base** use the `ce.ask()` function.
+
+
+Learn more about [patterns](compute-engine/patterns).
 
 ## Domain
 
-**To query the domain of an expressio**, use the `domain()` function.
+**To query the domain of an expression**, use the `domain()` function.
 
 ```js
 ce.domain('Pi');

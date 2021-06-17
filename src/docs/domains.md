@@ -77,7 +77,7 @@ The implementation of the CortexJS domains is based on
 
 ## Obtaining the Domain of an Expression
 
-**To obtain the domain of an expression**, use the `ComputeEngine.domain()`
+**To obtain the domain of an expression**, use the `ce.domain()`
 function.
 
 ```js
@@ -99,7 +99,7 @@ engine.domain(engine.evaluate(['Add', 5, 2]));
 
 ## Converting Domains to a Canonical Form
 
-**To convert a domain to a canonical form**, use `ComputeEngine.format(<domain>, 'canonical-domain')`.
+**To convert a domain to a canonical form**, use `ce.format(<domain>, 'canonical-domain')`.
 
 ```js
 format(['SetMinus', 'RealNumber', 'IrrationalNumber'], 'canonical-domain');

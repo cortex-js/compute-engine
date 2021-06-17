@@ -59,7 +59,7 @@ alphabet is arbitrary, the canonical forms are nonetheless convenient to sort,
 search and compare expressions.
 
 **To obtain the canonical form of an expression**, use the
-`ComputeEngine.canonical()` function.
+`ce.canonical()` function.
 
 ```js
 console.log(ce.canonical(["Add", 2, "x", 3]);
@@ -71,7 +71,7 @@ Learn more about [Canonical Forms](/guides/compute-engine/forms/).
 ## Simplify
 
 **To obtain a simpler form of a symbolic expression**, use the
-`ComputeEngine.simplify()` function.
+`ce.simplify()` function.
 
 Assumptions are additional information available about some symbols, for example
 \\( x > 0 \\) or \\(n \in \\N\\). To apply some transformations, available
@@ -87,7 +87,7 @@ Read more about [assumptions](/guides/compute-engine/assumptions),
 ## Evaluate
 
 **To combine a symbolic simplification followed by a [numerical evaluation](/guides/compute-engine/numerical-evaluation)**, use
-the `ComputeEngine.evaluate()`.
+the `ce.evaluate()`.
 
 Invoking the `evaluate()` function is roughly equivalent to calling in sequence
 `simplify()`, `N()` then `format()`.
