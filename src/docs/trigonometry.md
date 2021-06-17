@@ -47,11 +47,14 @@ sidebar:
 
 ## Functions
 
-| Function | Inverse                                                                                                | Hyperbolic | Inverse Hyperbolic |
+| Function | Inverse                                                                                                | Hyperbolic | Area Hyperbolic |
 | :------- | :----------------------------------------------------------------------------------------------------- | :--------- | :----------------- |
-| `Cos`    | `Arccos`                                                                                               | `Cosh`     | `Arcosh`           |
 | `Sin`    | `Arcsin`                                                                                               | `Sinh`     | `Arsinh`           |
+| `Cos`    | `Arccos`                                                                                               | `Cosh`     | `Arcosh`           |
 | `Tan`    | [`Arctan`](https://www.wikidata.org/wiki/Q2257242) [`Arctan2`](https://www.wikidata.org/wiki/Q776598) | `Tanh`     | `Artanh`           |
+| `Cot`    | `Acot`                                                                                               | `Coth`     | `Arcoth`           |
+| `Sec`    | `Asec`                                                                                               | `Sech`     | `Asech`           |
+| `Csc`    | `Acsc`                                                                                               | `Csch`     | `Acsch`           |
 
 
 
