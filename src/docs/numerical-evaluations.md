@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: 'compute-engine'
 ---
+
 <script type='module'>
     import {  renderMathInDocument } 
       from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
@@ -22,16 +23,15 @@ sidebar:
     });
 </script>
 
-
 ## Numerical Evaluation
 
 **To obtain a numerical approximation of the value of an expression**, use the
 `ce.N()` function.
 
 **Due to limitations in the machine representation of numbers, some arithmetic
-operations cannot produce exact results.** 
+operations cannot produce exact results.**
 
-For example, \\(\frac{1}{3} \approx 1.333333333\\). 
+For example, \\(\frac{1}{3} \approx 1.333333333\\).
 
 The machine representation of floating point numbers is using
 a [binary format](https://en.wikipedia.org/wiki/IEEE_754) and not the base-10 we are used to, the results may
@@ -39,16 +39,15 @@ sometimes be surprising.
 
 For example, \\(0.1 + 0.2 = 0.30000000000000004 \\).
 
-
 **No rewriting of the expression is done before attempting to evaluate it.**
 
-Because of the limitations on the representation of numbers, this may
-again produce surprising results.
-  
-For example when \\( x = 0.1 + 0.2\\), \\( x - x = 2.7755575615628914\cdot 10^{-17}\\). 
+Because of the limitations on the representation of numbers, this may again
+produce surprising results.
 
-The result from `ce.simplify()` would  be \\( 0 \\).
+For example when \\( x = 0.1 + 0.2\\), \\( x - x = 2.7755575615628914\cdot
+10^{-17}\\).
 
+The result from `ComputeEngine.simplify()` would be \\( 0 \\).
 
 ## Choosing the Numeric Format and Precision
 
@@ -88,11 +87,13 @@ The `Complex` function is a convenient shorthand: `["Complex", 3, 5]`.
 
 ## Operations
 
+The functions in the category below can provide a numerical evaluation.
+
 <div class=symbols-table>
 
 | Numeric Format | | 
 | :--- | :--- | 
-| [Arithmetic](/guides/compute-engine/arithmetic/)  | `Add` `Multiply` `Sqrt` `Log` `Abd` `Round`... |
+| [Arithmetic](/guides/compute-engine/arithmetic/)  | `Add` `Multiply` `Sqrt` `Log` `Abs` `Round`... |
 | [Trigonometric](/guides/compute-engine/trigonometry/)  | `Sin` `Cos` `Tan` `Sinh` `Arcsin`...|
 | [Special Functions](/guides/compute-engine/special-functions/)  | `Erf` `Gamma` `Factorial`...|
 
