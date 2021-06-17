@@ -274,6 +274,7 @@ export type DictionaryCategory =
   | 'polynomials'
   | 'relations'
   | 'rounding'
+  | 'sets'
   | 'statistics'
   | 'symbols'
   | 'transcendentals'

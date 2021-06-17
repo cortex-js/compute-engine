@@ -25,9 +25,9 @@ import {
   MISSING,
   LIST,
 } from '../common/utils';
-import { applyNegate } from '../compute-engine/forms';
 import { joinLatex } from './core/tokenizer';
 import { getFractionStyle, getRootStyle } from './serializer-style';
+import { applyNegate } from '../compute-engine/dictionary/arithmetic';
 
 /**
  * If expression is a product, collect all the terms with a
@@ -176,9 +176,8 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
       if (arg !== null) {
         if (argWasNumber) {
           // Check if we can convert to an invisible plus, e.g. "1\frac{1}{2}"
-          const rational = getRationalValue(arg);
-          if (rational) {
-            const [numer, denom] = rational;
+          const [numer, denom] = getRationalValue(arg);
+          if (!isNaN(numer) && !isNaN(denom)) {
             if (isFinite(numer) && isFinite(denom) && denom !== 1) {
               // Don't include the '+' sign, it's a rational, use 'invisible plus'
               result +=
@@ -462,6 +461,24 @@ function serializePower(
 }
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
+  { name: 'ThreeQuarter', serialize: '\\frac{3}{4}' },
+  { name: 'TwoThird', serialize: '\\frac{2}{3}' },
+  { name: 'Half', serialize: '\\frac{1}{2}' },
+  { name: 'Third', serialize: '\\frac{1}{3}' },
+  { name: 'Quarter', serialize: '\\frac{1}{4}' },
+  { name: 'CatalanConstant', serialize: 'G' },
+  { name: 'GoldenRatio', serialize: '\\varphi' },
+  { name: 'EulerGamma', serialize: '\\gamma' },
+  { name: 'Degrees', serialize: '\\frac{\\pi}{180}' },
+  { name: 'MinusDoublePi', serialize: '-2\\pi' },
+  { name: 'MinusPi', serialize: '-\\pi' },
+  { name: 'MinusHalfPi', serialize: '-\\frac{\\pi}{2}' },
+  { name: 'QuarterPi', serialize: '\\frac{\\pi}{4}' },
+  { name: 'ThirdPi', serialize: '\\frac{\\pi}{3}' },
+  { name: 'HalfPi', serialize: '\\frac{\\pi}{2}' },
+  { name: 'TwoThirdPi', serialize: '\\frac{2\\pi}{3}' },
+  { name: 'ThreeQuarterPi', serialize: '\\frac{3\\pi}{4}' },
+  { name: 'DoublePi', serialize: '2\\pi' },
   { trigger: { symbol: '\\infty' }, parse: { num: '+Infinity' } },
   {
     name: COMPLEX_INFINITY,

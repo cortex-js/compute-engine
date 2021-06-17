@@ -350,8 +350,8 @@ grammar.rule(
   'expression',
   operatorSequence<Expression, string>(
     [
-      ['NotMemberOf', '!in', 160],
-      ['MemberOf', 'in', 240],
+      ['NotElement', '!in', 160],
+      ['Element', 'in', 240],
       ['LessEqual', '<=', 241],
       ['GreaterEqual', '>=', 242],
       ['Less', '<', 245],

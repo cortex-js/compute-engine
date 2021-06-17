@@ -21,12 +21,8 @@ import {
   isSetDefinition,
   isCollectionDefinition,
 } from './utils';
-import {
-  MULTIPLY,
-  POWER,
-  inferNumericDomain,
-  getFunctionName,
-} from '../../common/utils';
+import { MULTIPLY, POWER, getFunctionName } from '../../common/utils';
+import { inferNumericDomain } from '../domains';
 
 export function getDefaultDictionaries(
   categories: DictionaryCategory[] | 'all' = 'all'
@@ -230,7 +226,7 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
  * Return a compiled and validated version of the dictionary.
  *
  * Specifically:
- * - Expressions (for values, evaluate, domain, isMemberOf, etc..) are compiled
+ * - Expressions (for values, evaluate, domain, isElementOf, etc..) are compiled
  * when possible, put in canonical form otherwise
  * - The domain of entries is inferred and validated:
  *  - check that domains are in canonical form
@@ -521,7 +517,7 @@ function validateDictionary(
           dictionary.delete(name);
         }
       }
-      // @todo: could check that the domain of `isMemberOf` and `isSubsetOf` is
+      // @todo: could check that the domain of `isElementOf` and `isSubsetOf` is
       // MaybeBoolean
     }
   }

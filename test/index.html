@@ -115,8 +115,7 @@
       <div id='input-label'>a = </div>
       <math-field id="mf" class="mathfield" tabindex="0" virtual-keyboard-mode="manual">
       <!-- \operatorname{NonNegativeRealNumber} -->
-      <!-- 3 + 2x + 1 + x -->
-      3 (2x + 1)
+      \frac{2\pi}{4}
       <!-- 3 (2x + 1) + \frac{x}{2} + \frac{3x}{2} + 4\frac{x}{2} -->
       <!-- \sqrt{1}[3] -->
       <!-- \sin(x -->
@@ -189,14 +188,14 @@
       <div class="output mathjson"></div>  
     </div> -->
 
-    <div class="output-section" id="full-form">
-      <h2><code>format(a, ['full-form'])</code></code></h2>
+    <!-- <div class="output-section" id="json-form">
+      <h2><code>format(a, ['json'])</code></code></h2>
       <div class='row'>
         <div class="latex"></div>
         <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
       </div>
       <div class="output mathjson"></div>  
-    </div>
+    </div> -->
 
     <div class="output-section" id="canonical-form">
       <h2><code>canonical(a)</code></h2>
@@ -251,7 +250,7 @@
     import { convertLatexToMarkup } from 
       'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
     import { LatexSyntax } from '../dist/math-json.esm.js';
-    import { ComputeEngine } from '../dist/compute-engine.esm.js';
+    import { ComputeEngine, match } from '../dist/compute-engine.esm.js';
 
     const MAX_LINE_LENGTH = 64;
 
@@ -354,18 +353,18 @@
         updateExpr(canonicalExpr, 'canonical-form');
 
 
-        updateExpr(ce.format(expr, ['full']), 'full-form');
+        updateExpr(ce.format(expr, ['json']), 'json-form');
 
-        updateExpr(ce.format(rawLatex.parse(latex), ['full']), 
+        updateExpr(ce.format(rawLatex.parse(latex), ['json']), 
           'raw-form');
 
         updateExpr(ce.domain(expr), 'domain');
 
-        updateExpr(await ce.simplify(expr), 'simplify');
-
-        updateExpr(await ce.evaluate(expr), 'evaluate');
+        updateExpr(ce.simplify(expr), 'simplify');
 
         updateExpr(ce.N(expr), 'evaluate-numerically');
+
+        updateExpr(await ce.evaluate(expr), 'evaluate');
 
       } catch (e) {
         console.error("Error converting %c " + latex + '%c ' +
@@ -377,7 +376,7 @@
       const el = document.getElementById(id);
       if (!el) return;
 
-      if (!expr) {
+      if (expr === null) {
         el.classList.remove('is-visible');
       } else {
         el.classList.add('is-visible');
@@ -428,18 +427,20 @@
     }
 
     [
-      'full-form', 
+      'json-form', 
       'canonical-form', 
       'domain', 
       'simplify', 
       'evaluate-numerically', 
       'evaluate'].forEach(id => {
       const el = document.getElementById(id);
-      const toggle = el.querySelector('.toggle');
-      toggle.addEventListener('click', () => {
-        toggle.classList.toggle('is-on');
-        toggleVisibility(el.querySelector('.mathjson'));
-      });
+      if (el) {
+        const toggle = el.querySelector('.toggle');
+        toggle.addEventListener('click', () => {
+          toggle.classList.toggle('is-on');
+          toggleVisibility(el.querySelector('.mathjson'));
+        });
+      }
     });
 
 
@@ -481,7 +482,7 @@
       '</li></ul>'
     }
 
-    console.log(ce.simplify(['Add', 1, 0]));
+    console.log(match(["Add", 1, 4, 5], ["Add", 1, '__a', 4, 5]));
 
   </script>
 </body>

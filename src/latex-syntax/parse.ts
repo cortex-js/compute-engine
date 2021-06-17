@@ -13,10 +13,10 @@ import {
   getTail,
   isNumberObject,
   PARENTHESES,
-  DIVIDE,
   LATEX_TOKENS,
   NOTHING,
   MISSING,
+  isRationalNumber,
 } from '../common/utils';
 import { tokensToString } from './core/tokenizer';
 import { IndexedLatexDictionary } from './definitions';
@@ -935,8 +935,8 @@ export class Scanner implements Scanner {
    *
    * If no `invisibleOperator` was specified, use the `latex` operator.
    *
-   * If the lhs is a number and the rhs is a fraction, assume an
-   * 'invisible plus', that is '2 3/4' -> ['add', 2, [divide, 3, 4]]
+   * If the lhs is a number and the rhs is a fraction of integers,
+   * assume an 'invisible plus', that is '2 3/4' -> ['add', 2, [divide, 3, 4]]
    * unless `invisiblePlusOperator` is empty
    *
    */
@@ -950,7 +950,7 @@ export class Scanner implements Scanner {
     if (this.options.invisiblePlusOperator) {
       if (
         (typeof lhs === 'number' || isNumberObject(lhs)) &&
-        getFunctionName(rhs) === DIVIDE
+        isRationalNumber(rhs)
       ) {
         [lhs, rhs] = this.applyOperator(
           this.options.invisiblePlusOperator,

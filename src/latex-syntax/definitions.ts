@@ -19,12 +19,13 @@ import { DEFINITIONS_CORE } from './definitions-core';
 import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
 import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry';
 import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
+import { DEFINITIONS_SETS } from './definitions-sets';
 import { DEFINITIONS_CALCULUS } from './definitions-calculus';
 import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
 
 export type IndexedLatexDictionaryEntry = {
   name: string;
-  trigger: {
+  trigger?: {
     symbol?: LatexToken | LatexToken[];
     matchfix?: LatexToken | LatexToken[];
     infix?: LatexToken | LatexToken[];
@@ -190,8 +191,10 @@ export function indexLatexDictionary(
         result.environment.set(record.trigger.environment, record);
       }
     }
-    if (record.name) {
+    if (record.name !== undefined) {
       result.name.set(triggerString(record.name), record);
+    } else if (typeof record.parse === 'string') {
+      result.name.set(record.parse, record);
     }
     if (record.trigger === undefined && !record.name) {
       // A trigger OR a name is required.
@@ -247,6 +250,7 @@ export const DEFAULT_LATEX_DICTIONARY: {
       trigger: { symbol: ['\\mu', '_', '0'] },
     },
   ],
+  sets: DEFINITIONS_SETS,
   symbols: DEFINITIONS_SYMBOLS,
   trigonometry: DEFINITIONS_TRIGONOMETRY,
 };

@@ -313,7 +313,7 @@ describe('INVISIBLE OPERATOR', () => {
       `['Add', 2, ['Multiply', 3, ['Power', 4, -1]]]`
     );
     expect(expression('2\\frac{a}{b}')).toMatchInlineSnapshot(
-      `['Add', ['Multiply', 'a', ['Power', 'b', -1]], 2]`
+      `['Multiply', 2, 'a', ['Power', 'b', -1]]`
     );
   });
 });

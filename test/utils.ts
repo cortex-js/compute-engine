@@ -50,7 +50,7 @@ export function expressionError(latex: string): string | string[] {
 
 export function rawExpression(latex: string): Expression {
   errors = [];
-  return JSON.stringify(engine.format(rawLatex.parse(latex), ['full']));
+  return JSON.stringify(engine.format(rawLatex.parse(latex), ['json']));
 }
 
 export function printExpression(expr: Expression): string {
