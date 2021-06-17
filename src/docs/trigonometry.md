@@ -45,7 +45,7 @@ sidebar:
 
 </div>
 
-## Functions
+## Trigonometric Functions
 
 | Function | Inverse                                                                                                | Hyperbolic | Area Hyperbolic |
 | :------- | :----------------------------------------------------------------------------------------------------- | :--------- | :----------------- |
@@ -60,7 +60,7 @@ sidebar:
 
 <div class=symbols-table>
 
-| Symbol | |
+| Function | |
 | :--- | :--- | 
 | `FromPolarCoordinates` | Converts \\( (\operatorname{radius}, \operatorname{angle}) \longrightarrow (x, y)\\)|
 | `ToPolarCoordinates` | Converts \\((x, y) \longrightarrow (\operatorname{radius}, \operatorname{angle})\\)|

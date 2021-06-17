@@ -47,7 +47,7 @@ common (but by no mean universal)  conventions in writing mathematical
 expressions, as well as expressing them in a way that can optimize their computation.
 
 **To obtain the canonical representation of an expression**, use the 
-`ComputeEngine.canonical()` function.
+`ce.canonical()` function.
 
 The default canonical representation applies a series of transformation to 
 put sums, products, numbers, roots, etc... in canonical form. Each of
@@ -56,7 +56,7 @@ The list of available formats is listed below.
 
 Applying a canonical form is applying some rewriting rules to an expression.
 In that sense, it is similar to simplifying an expression with 
-`ComputeEngine.simplify()`, but it is more conservative in which transformations
+`ce.simplify()`, but it is more conservative in which transformations
 it will consider, and it will not take into account any assumptions about 
 symbols.
 

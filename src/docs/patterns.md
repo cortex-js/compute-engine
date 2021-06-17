@@ -51,9 +51,11 @@ can be used multiple times to match different values.
 
 **To check if an expression matches a pattern**, use the `match()` function.
 
-If there is a match, it returns an object literal with keys corresponding to the
+The functions `match()` and `substitute()` do not require a `ComputeEngine` instance. They are plain functions that can be called directly. {.notice--info}
+
+If there is a match, `match()` returns a `Substitution` object literal with keys corresponding to the
 matchign named wildcards. If no named wildcards are used and there is a match it
-returns an empty object literal.
+returns an empty object literal. If there is no match, it returns `null`.
 
 ```js
 import { match } from 'compute-engine';
@@ -61,22 +63,17 @@ import { match } from 'compute-engine';
 const pattern = ['Add', 'x', '_'];
 
 console.log(match(['Add', 'x', '1'], pattern));
-// -> { } : matched
-```
+// -> { } : the subject matched the pattern
 
-The `match()` function returns `null` if the expression does not match the
-pattern.
-
-```js
 console.log(match(['Multiply', 'x', '1'], pattern));
-// -> null : no match
+// -> null : the subject does not match the pattern
 ```
 
-The commutativity and associativity of operations such as `Add` is taken into
-account:
+To take into account the commutativity and associativity of operations such as `Add` apply a `ce.canonical()` on both the subject and the pattern:
 
 ```js
-console.log(match(['Add', '1', 'x'], pattern));
+const ce = new ComputeEngine();
+console.log(match(ce.canonical(['Add', '1', 'x'](, ce.canonical(pattern)));
 // -> { } : one match (commutative operation)
 ```
 
@@ -118,21 +115,24 @@ console.log(substitute(pattern, { a: 'x' }));
 
 ## Comparing
 
-**To compare two expressions**, use the `match()` function. The function returns
-`null` if the two expressions do not match. It returns an object literal if the
-expressions do match. If the first argument included wildcards the resulting
-object literal indicate the substitutions for those wildcards. If no wildscards
-were used and the expressions matched, an empty object literal, `{}` is
-returned. To check if the expressions simply match or not, check if the return
-value is `null` (indicating not a match) or not (indicating a match).
+**To compare two expressions**, use the `match()` function. 
+
+The function returns `null` if the two expressions do not match. It returns an 
+object literal if the expressions do match. 
+
+If the first argument included wildcards the resulting object literal indicate
+the substitutions for those wildcards. If no wildscards were used and the\
+expressions matched, an empty object literal, `{}` is returned. 
+To check if the expressions simply match or not, check if the return value is
+ `null` (indicating not a match) or not (indicating a match).
 
 The comparison between expressions is structural so that \\(x + 1\\) is not
 equal to \\(1 + x\\). To obtain the desired result, you may need to apply a
-canonical form to the expressions using `ComputeEngine.canonical()`, or evaluate
-them using `ComputeEngine.evaluate()`.
+canonical form to the expressions using `ce.canonical()`, or evaluate
+them using `ce.evaluate()`.
 
 ```js
-const engine = new ComputeEngine();
+const ce = new ComputeEngine();
 
 const variable = 'x';
 console.log(match(['Add', 'x', 1], ['Add', variable, 1]));
@@ -142,17 +142,17 @@ console.log(match(['Add', 'x', 1], ['Add', 1, 'x']));
 // ➔ null: the two expressions are **not** the same
 
 console.log(
-  match(engine.canonical(['Add', 'x', 1]), engine.canonical(['Add', 1, 'x']))
+  match(ce.canonical(['Add', 'x', 1]), ce.canonical(['Add', 1, 'x']))
 );
 // ➔ true: the two expressions are the same in canonical form
 
-console.log(engine.match(parse('2 + 2'), parse('3 + 1')));
+console.log(ce.match(parse('2 + 2'), parse('3 + 1')));
 // ➔ null: the two expressions are **not** the same
 
 console.log(
   match(
-    engine.evaluate(parse('2 + 2 + x')),
-    engine.evaluate(parse('3 + 1 + x'))
+    ce.evaluate(parse('2 + 2 + x')),
+    ce.evaluate(parse('3 + 1 + x'))
   )
 );
 // ➔ {}: the two expressions are the same once evaluated

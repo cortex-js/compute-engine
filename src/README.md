@@ -42,9 +42,12 @@ using a syntax specific to those formats.
 The MathJSON library provides an implementation in Javascript/Typescript of
 utilities that parse Latex to MathJSON, serialize MathJSON to Latex, and provide
 a collection of functions for symbolic manipulation and numerical evaluations of
-MathJSON expressions. Read more about
-[MathJSON for Latex](/guides/compute-engine/dictionaries/) and the
-[Compute Engine](/guides/compute-engine/).
+MathJSON expressions. 
+
+<div class='read-more'><a href="/guides/compute-engine/dictionaries/">Read more about <strong>MathJSON for Latex</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
+<div class='read-more'><a href="/guides/compute-engine/">Read more about the <strong>Compute Engine</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations
