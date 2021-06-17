@@ -44,7 +44,7 @@ sidebar:
 
 <div class=symbols-table>
 
-| Symbol | Operation | |
+| Function | Operation | |
 | :--- | :--- | :--- |
 | `CartesianProduct` |  | Aka the product set, the set direct product or cross product. [Q173740](https://www.wikidata.org/wiki/Q173740) |
 | `Intersection` | \\[ A \cap B \\]  |  [Q185837](https://www.wikidata.org/wiki/Q185837) |

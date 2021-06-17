@@ -25,15 +25,22 @@ sidebar:
 # Symbolic Computing
 
 The CortexJS Compute Engine essentially applies transformations to a MathJSON
-expression that results in another MathJSON expression.
+expression by applying rewriting rules.
 
-There are several ways to apply transformations, depending on the desired
+There are several kind of transformations, depending on the desired
 result:
 
-- Format
-- Simplify
-- Evaluate
-- Compare, find patterns and substitute
+<div class=symbols-table>
+
+| Transformation |  |
+| :--- | :--- |
+| **Format** | Put an expression in canonical ("standard") form, for easier sorting, comparing and computing | 
+| **Simplify** | Replace the expression with an equivalent, simpler one | 
+| **Evaluate** | Simplify, calculate, and evaluate numerically an expression| 
+| **Other** | Compare, find patterns and substitute parts of an expression |
+
+</div>
+
 
 
 The `evaluate()` function is a convenient shorthand to evaluate an expression
@@ -72,7 +79,9 @@ console.log(ce.canonical(["Add", 2, "x", 3]);
 // ➔ ["Add", 2, 3, "x"]
 ```
 
-Learn more about [Canonical Forms](/guides/compute-engine/forms/).{.notice--info}
+
+<div class='read-more'><a href="/guides/compute-engine/forms/">Read more about <strong>Canonical Forms</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
 
 ## Simplify
 
@@ -86,7 +95,8 @@ available the expression \\( \sqrt{x^2} \\) cannot be simplified. However, if an
 assumption that \\( x > 0 \\) is available, then the expression can be
 simplified to \\( x \\).
 
-Read more about [Assumptions](/guides/compute-engine/assumptions).{.notice--info}
+
+<div class='read-more'><a href="/guides/compute-engine/assumptions/">Read more about <strong>Assumptions</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 
 ## Evaluate
@@ -105,4 +115,5 @@ invoked.
 You can compare two expressions, check if an expression match a pattern or 
 apply a substitution to some elements in an expression.
 
-Learn more about using [Patterns](guides/compute-engine/patterns) for these operations.
+
+<div class='read-more'><a href="/guides/compute-engine/patterns/">Read more about using <strong>Patterns</strong> for these operations<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>

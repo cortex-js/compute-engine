@@ -44,9 +44,11 @@ x = 2^11 - 1
 // -> "2047 is a PrimeNumber"
 ```
 
-Read more about the [formal syntax of Cortex](/cortex/syntax), the
-[implementation of Cortex](/cortex/implementation) with MathJSON or continue
-below for an informal description of the language.
+<div class='read-more'><a href="/cortex/syntax/">Read more about the <strong>formal syntax of Cortex</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
+<div class='read-more'><a href="/cortex/implementation/">Read more about the <strong>implementation of Cortex</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
+
 
 ## Pragmas
 

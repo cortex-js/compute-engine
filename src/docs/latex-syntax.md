@@ -10,8 +10,8 @@ sidebar:
 ## Parsing and Serializing Latex
 
 The CortexJS Compute Engine manipulates MathJSON expressions. It can also
-convert Latex strings to MathJSON expression (parsing) and output MathJSON
-expressions as Latex string (serializing).
+convert Latex strings to MathJSON expressions (**parsing**) and output MathJSON
+expressions as Latex string (**serializing**).
 
 **To transform Latex to MathJSON**, use the `parse()` function.
 
@@ -44,10 +44,8 @@ console.log(serialize(1/3, {
 
 ## Advanced Usage
 
-For improved performance, particularly when calling `parse()` or `serialize()`
-repeatedly, use an instance of the `LatexSyntax` class. When the instance is
-constructed, the dictionaries defining the syntax are compiled, and subsequent
-invocations of the `parse()` and `serialize()` methods can skip that step.
+**To customize the Latex syntax**, including defining the vocabulary and syntax, create an instance of `LatexSyntax`.
+
 
 ```javascript
 import { LatexSyntax } from 'math-json';
@@ -57,12 +55,13 @@ console.log(expr);
 const latex = latexSyntax.serialize(expr);
 console.log(latex);
 ```
+The `LatexSyntax` constructor can be passed options to customize the parsing, as well as dictionaries defining the syntax and vocabulary.
 
-**To customize the syntax**, provide options to the constructor of
-`LatexSyntax`.
+<div class='read-more'><a href="/guides/compute-engine/dictionaries/">Read more about <strong>Dictionaries</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
 
 For example, the configuration below will result in parsing a Latex string as a
-sequence of Latex tokens.
+sequence of Latex tokens. It uses no dictionary (since only tokens are returned) and set the options to avoid modifying the raw stream of Latex tokens.
 
 ```js
 const rawLatex = new LatexSyntax({
@@ -75,5 +74,5 @@ const rawLatex = new LatexSyntax({
 });
 const expr = rawLatex.parse('\\frac{\\pi}{2}');
 console.log(expr);
-// ➔ ["Latex", "'\frac'", "'<{>'", "'\pi'", "'<}>'", "'<{>'",  2, "'<}>'"]
+// ➔ ["LatexTokens", "'\frac'", "'<{>'", "'\pi'", "'<}>'", "'<{>'",  2, "'<}>'"]
 ```

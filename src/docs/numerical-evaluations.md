@@ -53,7 +53,8 @@ of the expression is returned.
 
 ## Choosing the Numeric Format and Precision
 
-Numerical computations can be performed using one of these formats:
+**To change the numeric format for numeric computations**, set the `numericFormat`
+property of a `ComputeEngine` instance to one of these values:
 
 <div class=symbols-table>
 
@@ -62,10 +63,11 @@ Numerical computations can be performed using one of these formats:
 | `machine` | 64-bit IEEE floating point number with about 15 digits of precision. Fastest. |
 | `complex` | Two 64-bit floating point numbers. Support provided by the "complex.js" library. | 
 | `decimal` | Arbitrary precision floating point. Slower, but more precise, however computations with complex numbers cannot be performed. | 
+| `auto` | Determine the best numeric format based on the desired precision and the content of the expression. | 
 
 </div>
 
-**To change the number of significant digits of the numerical evaluations**, set the `precision` property of an instance of `ComputeEngine`. 
+**To change the number of significant digits of the numerical evaluations**, set the `precision` property of `ComputeEngine` instance.
 
 A value of 15 or less will automatically be set to 15 and use the `machine` 
 numeric format. A value over 1,000 will result in inaccurate results for 
@@ -88,14 +90,14 @@ The `Complex` function is a convenient shorthand: \\(5 + 3\imaginaryI = \\)`["Co
 
 ## Operations
 
-The functions in the category below can provide a numerical evaluation.
+The functions below can be numerically evaluated.
 
 <div class=symbols-table>
 
-| Numeric Format | | 
+|  | | 
 | :--- | :--- | 
 | [Arithmetic](/guides/compute-engine/arithmetic/)  | `Add` `Multiply` `Sqrt` `Log` `Abs` `Round`... |
-| [Trigonometric](/guides/compute-engine/trigonometry/)  | `Sin` `Cos` `Tan` `Sinh` `Arcsin`...|
+| [Trigonometry](/guides/compute-engine/trigonometry/)  | `Sin` `Cos` `Tan` `Sinh` `Arcsin`...|
 | [Special Functions](/guides/compute-engine/special-functions/)  | `Erf` `Gamma` `Factorial`...|
 
 </div>

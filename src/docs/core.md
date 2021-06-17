@@ -47,7 +47,7 @@ sidebar:
 
 <div class=symbols-table>
 
-| Symbol            | Operation                                                                                                                                                                |
+| Function            | Operation                                                                                                                                                                |
 | :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `About`           | <code>(_symbol_)</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...                                                      |
 | `Domain`          | <code>(_expression_)</code><br> Return the domain of the expression                                                                                                      |

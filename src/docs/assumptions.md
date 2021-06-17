@@ -85,7 +85,8 @@ can also be made.
 **To query the assumptions knowledge base** use the `ce.ask()` function.
 
 
-Learn more about [patterns](compute-engine/patterns).
+
+<div class='read-more'><a href="/guides/compute-engine/patterns/">Read more about using <strong>Patterns</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 ## Domain
 

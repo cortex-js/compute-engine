@@ -45,14 +45,15 @@ sidebar:
 | `EulerGamma` | \\[ = 0.5772156649\ldots \\]| See [Euler-Mascheroni Constant on Wikipedia](https://en.wikipedia.org/wiki/Euler%E2%80%93Mascheroni_constant) |
 </div>
 
-See also [Trigonometry](/guides/compute-engine/trigonometry/) for \\( \pi \\) and 
-related constants.{.notice--info}
+
+<div class='read-more'><a href="/guides/compute-engine/trigonometry/">See also <strong>Trigonometry</strong> for \( \pi \) and 
+related constants<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 ## Functions
 
 <div class=symbols-table>
 
-| Symbol | Operation | |
+| Function | Operation | |
 | :--- | :--- | :--- |
 | `Add` | \\( a + b\\) | [Addition](https://www.wikidata.org/wiki/Q32043) |
 | `Subtract` | \\( a - b\\) | [Subtraction](https://www.wikidata.org/wiki/Q32043)
@@ -61,13 +62,13 @@ related constants.{.notice--info}
 | `Power` | \\( a^b \\) | [Exponentiation](https://www.wikidata.org/wiki/Q33456)
 | `Root` | \\(\sqrt[n]{x}=x^{\frac1n}\\) | [n-th root](https://www.wikidata.org/wiki/Q601053) |
 | `Sqrt` |  \\(\sqrt{x}=x^{\frac12}\\) | [Square root](https://www.wikidata.org/wiki/Q134237)|
-| `Square` |  \\(\operatorname{Square}{x}=x^2\\) | |
+| `Square` |  \\(x^2\\) | |
 </div>
 
 ---
 <div class=symbols-table>
 
-| Symbol | Operation | |
+| Function | Operation | |
 | :--- | :--- | :--- |
 | `Exp` | \\(\exponentialE^{x}\\) |  [Exponential function](https://www.wikidata.org/wiki/Q168698) |
 | `Log` | \\(\ln(x)\\) | [Logarithm function](https://www.wikidata.org/wiki/Q11197), the inverse of `Exp` |
@@ -80,7 +81,7 @@ related constants.{.notice--info}
 
 <div class=symbols-table>
 
-| Symbol | Operation | |
+| Function | Operation | |
 | :--- | :--- | :--- |
 | `Abs` | \\(\|x\|  \\) | Absolute value, [magnitude](https://www.wikidata.org/wiki/Q3317982) |
 | `Chop` |  | Replace real numbers that are very close to 0 (less than \\(10^{-10}\\)) with 0 |
