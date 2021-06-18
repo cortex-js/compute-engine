@@ -1,4 +1,4 @@
-export * from './public';
+export { Expression } from './public';
 
 // MathJSON parse/serialize
 export { LatexSyntax, parse, serialize } from './latex-syntax/latex-syntax';

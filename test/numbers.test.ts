@@ -5,17 +5,17 @@ describe('NUMBERS', () => {
   test('Parsing', () => {
     expect(expression('1')).toMatchInlineSnapshot(`1`);
     expect(expression('-1')).toMatchInlineSnapshot(`-1`);
-    expect(expression('1.0')).toMatchInlineSnapshot(`{num: '1.0'}`);
-    expect(expression('-1.0')).toMatchInlineSnapshot(`{num: '-1.0'}`);
+    expect(expression('1.0')).toMatchInlineSnapshot(`1`);
+    expect(expression('-1.0')).toMatchInlineSnapshot(`-1`);
     expect(expression('-1.1234')).toMatchInlineSnapshot(`-1.1234`);
-    expect(expression('-1.1234e5')).toMatchInlineSnapshot(`{num: '-1.1234e5'}`);
-    expect(expression('-1.1234E5')).toMatchInlineSnapshot(`{num: '-1.1234e5'}`);
+    expect(expression('-1.1234e5')).toMatchInlineSnapshot(`-112340`);
+    expect(expression('-1.1234E5')).toMatchInlineSnapshot(`-112340`);
     expect(expression('-1.1234e-5')).toMatchInlineSnapshot(
       `{num: '-1.1234e-5'}`
     );
     // Invalid expression (the argument of "num" should be a string)
     expect(latex({ num: 4 } as any as Expression)).toMatchInlineSnapshot(`'4'`);
-    expect(expression('3\\times10^4')).toMatchInlineSnapshot(`{num: '3e4'}`);
+    expect(expression('3\\times10^4')).toMatchInlineSnapshot(`30000`);
   });
   test('Parsing plus/minus', () => {
     expect(expression('+1')).toMatchInlineSnapshot(`1`);
@@ -31,13 +31,11 @@ describe('NUMBERS', () => {
   });
   test('Parsing digits', () => {
     // Number with exactly three digits after the decimal point
-    expect(expression('3.423e4')).toMatchInlineSnapshot(`{num: '3.423e4'}`);
+    expect(expression('3.423e4')).toMatchInlineSnapshot(`34230`);
     // Number with more than three, less than six digits after the decimal point
     expect(expression('3.42334e4')).toMatchInlineSnapshot(`{num: '3.42334e4'}`);
     // Number with more then 6 digits after the decimal point
-    expect(expression('3.424242334e4')).toMatchInlineSnapshot(
-      `{num: '3.424242334e4'}`
-    );
+    expect(expression('3.424242334e4')).toMatchInlineSnapshot(`{num: 'NaN'}`);
   });
 
   test('Large numbers', () => {
@@ -45,21 +43,19 @@ describe('NUMBERS', () => {
       `{num: '421.35e1000'}`
     );
     expect(expression('9007199234534554740991')).toMatchInlineSnapshot(
-      `{num: '9007199234534554740991'}`
+      `{num: 'NaN'}`
     );
     expect(expression('900719923453434553453454740992')).toMatchInlineSnapshot(
-      `{num: '900719923453434553453454740992'}`
+      `{num: 'NaN'}`
     );
     expect(
       expression(
         '900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789'
       )
-    ).toMatchInlineSnapshot(
-      `{num: '900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789'}`
-    );
+    ).toMatchInlineSnapshot(`{num: 'NaN'}`);
     expect(
       expression('31324234.23423143\\times10^{5000}')
-    ).toMatchInlineSnapshot(`{num: '31324234.23423143e5000'}`);
+    ).toMatchInlineSnapshot(`{num: 'NaN'}`);
   });
   test('Non-finite numbers', () => {
     expect(expression('-\\infty')).toMatchInlineSnapshot(`{num: '-Infinity'}`);
@@ -67,11 +63,11 @@ describe('NUMBERS', () => {
       `['Add', 2, {num: 'Infinity'}]`
     );
     expect(expression('\\infty-\\infty')).toMatchInlineSnapshot(
-      `['Add', {num: 'Infinity'}, {num: '-+Infinity'}]`
+      `['Add', {num: '-Infinity'}, {num: 'Infinity'}]`
     );
     // Should not be interpreted as infinity
     expect(expression('\\frac{0}{0}')).toMatchInlineSnapshot(
-      `['Multiply', 0, ['Power', 0, -1]]`
+      `['Divide', 0, 0]`
     );
     expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(
       `'\\operatorname{NaN}'`

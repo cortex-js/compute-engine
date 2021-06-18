@@ -447,7 +447,7 @@ export const FANCY_UNICODE = new Map<number, string>([
   [0x03c0, 'Pi'], // GREEK SMALL LETTER PI
   [0x203c, '!!'], // DOUBLE EXCLAMATION MARK
 
-  [0x2148, 'ImaginaryI'], // ⅈ
+  [0x2148, 'ImaginaryUnit'], // ⅈ
   [0x2147, 'ExponentialE'], // ⅇ
   [0x2102, 'ComplexNumber'], // ℂ
   [0x211d, 'RealNumber'], // ℝ

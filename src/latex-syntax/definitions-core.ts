@@ -20,6 +20,7 @@ import {
   getStringValue,
 } from '../common/utils';
 import { getGroupStyle } from './serializer-style';
+import { Numeric } from '../compute-engine/public';
 
 function isSpacingToken(token: string): boolean {
   return (
@@ -80,17 +81,17 @@ function parseSequence(head: string, prec: number, sep: LatexToken) {
   };
 }
 
-function serializeSequence(sep: string) {
-  return (serializer: Serializer, expr: Expression | null): string => {
+function serializeSequence<T extends number = number>(sep: string) {
+  return (serializer: Serializer<T>, expr: Expression<T> | null): string => {
     return getTail(expr)
       .map((x) => serializer.serialize(x))
       .join(sep);
   };
 }
 
-function serializeLatex(
-  serializer: Serializer,
-  expr: Expression | null
+function serializeLatex<T extends number = number>(
+  serializer: Serializer<T>,
+  expr: Expression<T> | null
 ): string {
   console.assert(getFunctionHead(expr) === LATEX_TOKENS);
 
@@ -110,7 +111,7 @@ function serializeLatex(
     .join('');
 }
 
-export const DEFINITIONS_CORE: LatexDictionary = [
+export const DEFINITIONS_CORE: LatexDictionary<Numeric> = [
   { name: LATEX_TOKENS, serialize: serializeLatex },
   {
     name: PARENTHESES,
@@ -214,7 +215,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     name: 'BaseForm',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: Expression<Numeric>): string => {
       const radix = getNumberValue(getArg(expr, 2)) ?? NaN;
       if (isFinite(radix) && radix >= 2 && radix <= 36) {
         const num = getNumberValue(getArg(expr, 1)) ?? NaN;

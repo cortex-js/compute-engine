@@ -13,37 +13,41 @@ import { expression, engine } from './utils';
 
 describe('FORMS', () => {
   const exprs: [string, Expression, Expression][] = [
-    ['-0', { num: '-0' }, { num: '-0' }],
+    ['-0', { num: '-0' }, -0],
     ['a-0', [SUBTRACT, 'a', 0], 'a'],
-    ['0-a', [SUBTRACT, 0, 'a'], [MULTIPLY, -1, 'a']],
+    ['0-a', [SUBTRACT, 0, 'a'], ['Negate', 'a']],
     ['7+2+5', [ADD, 7, 2, 5], [ADD, 2, 5, 7]],
     // This one is tricky:
     // the simplifications of POWER and MULTIPLY
     // have to be done in the right order to get the correct result
-    ['1^2x', [MULTIPLY, [POWER, 1, 2], 'x'], 'x'],
+    [
+      '1^2x',
+      ['Multiply', ['Power', 1, 2], 'x'],
+      [MULTIPLY, ['Square', 1], 'x'],
+    ],
 
     // Negative sign on denom, numer or both
     [
       '\\frac{-x}{-n}',
       [DIVIDE, [NEGATE, 'x'], [NEGATE, 'n']],
-      [MULTIPLY, -1, [POWER, [MULTIPLY, -1, 'n'], -1], 'x'],
+      ['Divide', ['Negate', 'x'], ['Negate', 'n']],
     ],
     [
       '\\frac{x}{-n}',
       [DIVIDE, 'x', [NEGATE, 'n']],
-      [MULTIPLY, [POWER, [MULTIPLY, -1, 'n'], -1], 'x'],
+      ['Divide', 'x', ['Negate', 'n']],
     ],
     [
       '\\frac{-x}{n}',
       [DIVIDE, [NEGATE, 'x'], 'n'],
-      [MULTIPLY, -1, [POWER, 'n', -1], 'x'],
+      ['Divide', ['Negate', 'x'], 'n'],
     ],
 
     //
     [
       '\\frac{-101}{10^{\\frac{2}{3}}}',
       [DIVIDE, -101, [POWER, 10, [DIVIDE, 2, 3]]],
-      [MULTIPLY, -101, [POWER, 10, [MULTIPLY, -2, [POWER, 3, -1]]]],
+      ['Divide', -101, ['Power', 10, 'TwoThird']],
     ],
 
     // Flatten, to multiple levels
@@ -80,13 +84,13 @@ describe('FORMS', () => {
     [
       '2x\\frac{0}{5}',
       [MULTIPLY, 2, 'x', [DIVIDE, 0, 5]],
-      [MULTIPLY, 0, 2, [POWER, 5, -1], 'x'],
+      ['Multiply', 2, ['Divide', 0, 5], 'x'],
     ],
     // Negative exponents become fractions
     [
       '2xy^{-n}',
       [MULTIPLY, 2, 'x', [POWER, 'y', [NEGATE, 'n']]],
-      [MULTIPLY, 2, 'x', [POWER, 'y', [MULTIPLY, -1, 'n']]],
+      ['Multiply', 2, 'x', ['Power', 'y', ['Negate', 'n']]],
     ],
 
     [
@@ -103,27 +107,21 @@ describe('FORMS', () => {
     [
       '2\\frac{x}{a}\\frac{y}{b}',
       [MULTIPLY, 2, [DIVIDE, 'x', 'a'], [DIVIDE, 'y', 'b']],
-      [MULTIPLY, 2, [POWER, 'a', -1], [POWER, 'b', -1], 'x', 'y'],
+      ['Multiply', 2, ['Divide', 'x', 'a'], ['Divide', 'y', 'b']],
     ],
   ];
 
   exprs.forEach((x) =>
     test('Full form "' + x[0] + '"', () => {
       // console.log(
-      //     x[0] +
-      //         ' full -> ' +
-      //         JSON.stringify(expression(x[0], { form: 'json' }))
+      //   x[0] + ' full -> ' + JSON.stringify(expression(x[0], { form: 'json' }))
       // );
       expect(expression(x[0], { form: 'json' })).toStrictEqual(x[1]);
     })
   );
   exprs.forEach((x) =>
     test('Canonical form "' + x[0] + '"', () => {
-      // console.log(
-      //     x[0] +
-      //         ' cano -> ' +
-      //         JSON.stringify(expression(x[0]))
-      // );
+      // console.log(x[0] + ' cano -> ' + JSON.stringify(expression(x[0])));
       expect(expression(x[0])).toStrictEqual(x[2]);
     })
   );
@@ -174,13 +172,12 @@ describe('ORDER', () => {
         MULTIPLY,
         -2, // degree 0, -2 < 3
         3, // degree 0, 3 = 3
-        3, // degree 0, 3 = 3
         5, // degree 0, 5 > 3
-        [POWER, 4, -1], // degree 0,
         PI, // degree 0,
+        'ThreeQuarter', // degree 0,
         'x', // degree 1, x < y
         'y', // degree 1, y < z
-        [POWER, 'y', [POWER, 2, -1]], // degree 1, y >
+        ['Sqrt', 'y'], // degree 1, y >
         'z', // degree 1
       ],
     ],
@@ -190,10 +187,10 @@ describe('ORDER', () => {
       [
         ADD,
         [MULTIPLY, [POWER, 'x', 4], 'y'],
-        [MULTIPLY, [POWER, 'x', 3], [POWER, 'y', 2]],
-        [MULTIPLY, [POWER, 'x', 2], [POWER, 'y', 3]],
         [MULTIPLY, 'x', [POWER, 'y', 4]],
-        [MULTIPLY, [POWER, 'x', 2], [POWER, 'y', 2]],
+        [MULTIPLY, [POWER, 'x', 3], ['Square', 'y']],
+        [MULTIPLY, ['Square', 'x'], [POWER, 'y', 3]],
+        [MULTIPLY, ['Square', 'x'], ['Square', 'y']],
       ],
     ],
     [
@@ -203,9 +200,9 @@ describe('ORDER', () => {
         3,
         [POWER, 'a', 5],
         'b',
-        [POWER, 'b', 2],
+        ['Square', 'b'],
         [POWER, 'b', 3],
-        [POWER, 'c', 2],
+        ['Square', 'c'],
         'd',
         'f',
         [POWER, 'x', 5],
@@ -217,10 +214,10 @@ describe('ORDER', () => {
       '(b^3c^2d)+(x^7y)+(a^5f)+(b^2x^5b3)',
       [
         ADD,
-        [MULTIPLY, 3, 'b', [POWER, 'b', 2], [POWER, 'x', 5]],
         [MULTIPLY, [POWER, 'x', 7], 'y'],
         [MULTIPLY, [POWER, 'a', 5], 'f'],
-        [MULTIPLY, [POWER, 'b', 3], [POWER, 'c', 2], 'd'],
+        [MULTIPLY, 3, 'b', ['Square', 'b'], [POWER, 'x', 5]],
+        [MULTIPLY, [POWER, 'b', 3], ['Square', 'c'], 'd'],
       ],
     ],
     [
@@ -229,9 +226,9 @@ describe('ORDER', () => {
         ADD,
         [MULTIPLY, [POWER, 'a', 5], 'b'],
         [POWER, 'b', 6],
-        [MULTIPLY, [POWER, 'a', 2], [POWER, 'a', 3]],
         [POWER, 'a', 5],
-        [MULTIPLY, [POWER, 'b', 2], [POWER, 'b', 3]],
+        [MULTIPLY, ['Square', 'a'], [POWER, 'a', 3]],
+        [MULTIPLY, ['Square', 'b'], [POWER, 'b', 3]],
       ],
     ],
     [
@@ -239,7 +236,7 @@ describe('ORDER', () => {
       [
         ADD,
         [MULTIPLY, 2, [POWER, 'b', 8]],
-        [MULTIPLY, 5, [POWER, 'a', 4], [POWER, 'c', 2]],
+        [MULTIPLY, 5, [POWER, 'a', 4], ['Square', 'c']],
         [MULTIPLY, 7, 'a', [POWER, 'b', 3]],
       ],
     ],

@@ -25,19 +25,20 @@ import {
   ErrorCode,
   ErrorListener,
 } from '../public';
-export class LatexSyntax {
+import { Numeric } from '../compute-engine/public';
+export class LatexSyntax<T extends number = number> {
   onError: ErrorListener<ErrorCode>;
 
   options: Required<NumberFormattingOptions> &
     Required<ParseLatexOptions> &
     Required<SerializeLatexOptions>;
-  private dictionary: IndexedLatexDictionary;
+  private dictionary: IndexedLatexDictionary<T>;
 
   constructor(
     options?: NumberFormattingOptions &
       ParseLatexOptions &
       SerializeLatexOptions & {
-        dictionary?: readonly LatexDictionaryEntry[];
+        dictionary?: readonly LatexDictionaryEntry<T>[];
         onError?: ErrorListener<ErrorCode>;
       }
   ) {
@@ -86,9 +87,9 @@ export class LatexSyntax {
 
   static getDictionary(
     domain: DictionaryCategory | 'all' = 'all'
-  ): Readonly<LatexDictionary> {
+  ): Readonly<LatexDictionary<any>> {
     if (domain === 'all') {
-      let result: Readonly<LatexDictionary> = [];
+      let result: Readonly<LatexDictionary<any>> = [];
       for (const domain of Object.keys(DEFAULT_LATEX_DICTIONARY)) {
         result = [...result, ...DEFAULT_LATEX_DICTIONARY[domain]];
       }
@@ -117,7 +118,7 @@ export class LatexSyntax {
 
     return result ?? '';
   }
-  serialize(expr: Expression): LatexString {
+  serialize(expr: Expression<T>): LatexString {
     const serializer = new Serializer(
       this.options,
       this.dictionary,
@@ -127,11 +128,11 @@ export class LatexSyntax {
   }
 }
 
-export function parse(
+export function parse<T extends number = Numeric>(
   latex: LatexString,
   options?: NumberFormattingOptions &
     ParseLatexOptions & {
-      dictionary?: Readonly<LatexDictionary>;
+      dictionary?: Readonly<LatexDictionary<T>>;
       onError?: ErrorListener<ErrorCode>;
     }
 ): Expression {
@@ -143,11 +144,11 @@ export function parse(
  * Serialize a MathJSON expression as a Latex string.
  *
  */
-export function serialize(
-  expr: Expression,
+export function serialize<T extends number = number>(
+  expr: Expression<T>,
   options?: NumberFormattingOptions &
     SerializeLatexOptions & {
-      dictionary?: Readonly<LatexDictionary>;
+      dictionary?: Readonly<LatexDictionary<T>>;
       onError?: ErrorListener<ErrorCode>;
     }
 ): LatexString {

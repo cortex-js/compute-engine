@@ -9,8 +9,9 @@ import {
   SEQUENCE,
   LIST,
 } from '../common/utils';
+import { Numeric } from '../compute-engine/public';
 
-export const DEFINITIONS_OTHERS: LatexDictionary = [
+export const DEFINITIONS_OTHERS: LatexDictionary<Numeric> = [
   {
     name: 'Overscript',
     trigger: { infix: '\\overset' },

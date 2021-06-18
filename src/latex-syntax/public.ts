@@ -19,26 +19,27 @@ export type LatexString = string;
  * If it was in an infix or postfix context, `lhs` will represent the
  * left-hand side argument. In a prefix or matchfix context, `lhs` is `null`.
  *
- * The function should return a tuple whose first element is an unprocessed
- * left-hand side, if any. If the left-hand-side has been consumed (for example
- * if this was a valid infix operator), the first element of the tuple
- * should be `null`.
+ * The function should return a tuple:
  *
- * The second element is the resulting expression.
+ * - Its first element is an unprocessed left-hand side, if any. If the
+ * left-hand-side has been consumed (for example if this was a valid infix
+ * operator), the first element of the tuple should be `null`.
+ *
+ * - Its second element is the resulting expression.
  *
  */
-export type ParserFunction = (
-  lhs: Expression | null,
-  scanner: Scanner,
+export type ParserFunction<T extends number = number> = (
+  lhs: Expression<T> | null,
+  scanner: Scanner<T>,
   minPrec: number
   // latex: LatexString
-) => [lhs: Expression | null, result: Expression | null];
+) => [lhs: Expression<T> | null, result: Expression<T> | null];
 
 /**
  * Maps a string of Latex tokens to a function or symbol and vice-versa.
  *
  */
-export type LatexDictionaryEntry = {
+export type LatexDictionaryEntry<T extends number = number> = {
   /**
    * Map a function or symbol name to this record.
    *
@@ -98,12 +99,12 @@ export type LatexDictionaryEntry = {
   /**
    * A function that returns an expression, or an expression
    */
-  parse?: Expression | ParserFunction;
+  parse?: Expression<T> | ParserFunction<T>;
 
   /**
    * The Latex to serialize.
    */
-  serialize?: SerializerFunction | LatexString;
+  serialize?: SerializerFunction<T> | LatexString;
 
   /**
    * If `trigger` is `'infix'``
@@ -178,7 +179,8 @@ export type LatexDictionaryEntry = {
   closeFence?: LatexToken | LatexToken[];
 };
 
-export type LatexDictionary = LatexDictionaryEntry[];
+export type LatexDictionary<T extends number = number> =
+  LatexDictionaryEntry<T>[];
 
 export type ParseLatexOptions = {
   /**
@@ -231,6 +233,21 @@ export type ParseLatexOptions = {
    * so that the caller can be notified). Otherwise, the symbol is rejected.
    */
   promoteUnknownSymbols?: RegExp;
+
+  /**
+   * When one of these commands is encountered, it is skipped.
+   *
+   * Useful for purely presentational commands such as `\displaystyle`
+   */
+  ignoreCommands?: LatexToken[];
+
+  /**
+   * When one these commands is encountered, its argument is parsed,
+   * as if the command was not present.
+   *
+   * Useful for some presentational commands such as `\left`, `\bigl`, etc...
+   */
+  idempotentCommands?: LatexToken[];
 
   /**
    * When a token is encountered at a position that could match
@@ -328,14 +345,10 @@ export type NumberFormattingOptions = {
 };
 
 /**
- * For best performance when calling repeatedly `parse()` or `serialize()`,
- * create an instance of `LatexSyntax` and call its methods. The constructor
- * of `LatexSyntax` will compile and optimize the dictionary so that calls of
- * the `parse()` and `serialize()` methods will bypass that step. By contrast
- * invoking the `parse()` and `serialize()` functions will compile the
- * dictionary each time they are called.
+ * To customize the parsing and serializing of Latex syntax, create a `LatexSyntax`
+ * instance.
  */
-export declare class LatexSyntax {
+export declare class LatexSyntax<T extends number = number> {
   /**
    *
    * @param onError - Called when a non-fatal error is encountered. When parsing,
@@ -359,10 +372,10 @@ export declare class LatexSyntax {
    * Each entry in the dictionary indicate how a Latex token (or string of
    * tokens) should be parsed into a MathJSON expression.
    *
-   * For example an entry can define that the token `\pi` should map to the
-   * symbol `"pi"`, or that the token `-` should map to the function
-   * `["negate",...]` when in a prefix position and to the function
-   * `["subtract", ...]` when in an infix position.
+   * For example an entry can define that the `\pi` Latex token should map to the
+   * symbol `"Pi"`, or that the token `-` should map to the function
+   * `["Negate",...]` when in a prefix position and to the function
+   * `["Subtract", ...]` when in an infix position.
    *
    * Furthermore, the information in each dictionary entry is used to serialize
    * the Latex string corresponding to a MathJSON expression.
@@ -372,13 +385,13 @@ export declare class LatexSyntax {
    */
   static getDictionary(
     domain?: DictionaryCategory | 'all'
-  ): Readonly<LatexDictionary>;
+  ): Readonly<LatexDictionary<any>>;
 
-  parse(latex: LatexString): Expression;
-  serialize(expr: Expression): LatexString;
+  parse(latex: LatexString): Expression<T>;
+  serialize(expr: Expression<T>): LatexString;
 }
 
-export interface Serializer {
+export interface Serializer<T extends number = number> {
   readonly onError: ErrorListener<ErrorCode>;
 
   readonly options: Required<SerializeLatexOptions>;
@@ -396,7 +409,7 @@ export interface Serializer {
   level: number;
 
   /** Output a Latex string representing the expression */
-  serialize: (expr: Expression | null) => string;
+  serialize: (expr: Expression<T> | null) => string;
 
   wrapString(s: string, style: 'paren' | 'leftright' | 'big' | 'none'): string;
 
@@ -404,20 +417,20 @@ export interface Serializer {
    * an operator of precedence less than or equal to `prec`.
    */
 
-  wrap: (expr: Expression | null, prec?: number) => string;
+  wrap: (expr: Expression<T> | null, prec?: number) => string;
 
   /** Add a group fence around the expression if it is
    * short (not a function)
    */
-  wrapShort(expr: Expression | null): string;
+  wrapShort(expr: Expression<T> | null): string;
 }
 
-export type SerializerFunction = (
-  serializer: Serializer,
-  expr: Expression
+export type SerializerFunction<T extends number = number> = (
+  serializer: Serializer<T>,
+  expr: T | Expression<T>
 ) => string;
 
-export interface Scanner {
+export interface Scanner<T extends number = number> {
   readonly onError: ErrorListener<ErrorCode>;
   readonly options: Required<ParseLatexOptions>;
 
@@ -453,27 +466,27 @@ export interface Scanner {
   matchExponent(): string;
   matchNumber(): string;
 
-  matchTabular(): null | Expression;
+  matchTabular(): null | Expression<T>;
 
   applyOperator(
     op: string,
-    lhs: Expression | null,
-    rhs: Expression | null
-  ): NonNullable<[Expression | null, Expression | null]>;
+    lhs: Expression<T> | null,
+    rhs: Expression<T> | null
+  ): NonNullable<[Expression<T> | null, Expression<T> | null]>;
   applyInvisibleOperator(
-    lhs: Expression | null,
-    rhs: Expression | null
-  ): Expression | null;
+    lhs: Expression<T> | null,
+    rhs: Expression<T> | null
+  ): Expression<T> | null;
   /** If the next tokens correspond to an optional argument,
    * enclosed with `[` and `]` return the content of the argument
    * as an expression and advance the index past the closing `]`.
    * Otherwise, return null
    */
-  matchOptionalLatexArgument(): Expression | null;
-  matchRequiredLatexArgument(): Expression | null;
-  matchArguments(kind: '' | 'group' | 'implicit'): Expression[] | null;
+  matchOptionalLatexArgument(): Expression<T> | null;
+  matchRequiredLatexArgument(): Expression<T> | null;
+  matchArguments(kind: '' | 'group' | 'implicit'): Expression<T>[] | null;
 
-  matchSupsub(lhs: Expression | null): Expression | null;
+  matchSupsub(lhs: Expression<T> | null): Expression<T> | null;
 
   /**
    * <primary> :=
@@ -488,7 +501,7 @@ export interface Scanner {
    *
    * If not a primary, return `null` and do not advance the index.
    */
-  matchPrimary(minPrec?: number): Expression | null;
+  matchPrimary(minPrec?: number): Expression<T> | null;
 
   /**
    *  Parse an expression:
@@ -502,13 +515,13 @@ export interface Scanner {
    *
    * `minPrec` is 0 by default.
    */
-  matchExpression(minPrec?: number): Expression | null;
+  matchExpression(minPrec?: number): Expression<T> | null;
 
   matchBalancedExpression(
     open: LatexToken,
     close: LatexToken,
     onError?: ErrorListener<ErrorCode>
-  ): Expression | null;
+  ): Expression<T> | null;
 }
 
 /**
@@ -518,23 +531,23 @@ export interface Scanner {
  * The parsing will attempt to recover and continue.
  *
  */
-export declare function parse(
+export declare function parse<T extends number = number>(
   latex: LatexString,
   options?: NumberFormattingOptions &
     ParseLatexOptions & {
       onError?: ErrorListener<ErrorCode>;
     }
-): Expression;
+): Expression<T>;
 
 /**
  * Serialize a MathJSON expression as a Latex string.
  *
  */
-export declare function serialize(
-  expr: Expression,
+export declare function serialize<T extends number = number>(
+  expr: Expression<T>,
   options?: NumberFormattingOptions &
     SerializeLatexOptions & {
-      dictionary?: Readonly<LatexDictionary>;
+      dictionary?: Readonly<LatexDictionary<T>>;
       onError?: ErrorListener<ErrorCode>;
     }
 ): LatexString;

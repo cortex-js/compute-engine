@@ -114,8 +114,9 @@
     <div class='row'>
       <div id='input-label'>a = </div>
       <math-field id="mf" class="mathfield" tabindex="0" virtual-keyboard-mode="manual">
+     + \mleft(x)
       <!-- \operatorname{NonNegativeRealNumber} -->
-      \frac{2\pi}{4}
+      <!-- -\frac{50}{70}+\operatorname{GoldenRatio} -->
       <!-- 3 (2x + 1) + \frac{x}{2} + \frac{3x}{2} + 4\frac{x}{2} -->
       <!-- \sqrt{1}[3] -->
       <!-- \sin(x -->
@@ -188,14 +189,14 @@
       <div class="output mathjson"></div>  
     </div> -->
 
-    <!-- <div class="output-section" id="json-form">
+    <div class="output-section" id="json-form">
       <h2><code>format(a, ['json'])</code></code></h2>
       <div class='row'>
         <div class="latex"></div>
         <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
       </div>
       <div class="output mathjson"></div>  
-    </div> -->
+    </div>
 
     <div class="output-section" id="canonical-form">
       <h2><code>canonical(a)</code></h2>
@@ -249,7 +250,7 @@
   <script type="module">
     import { convertLatexToMarkup } from 
       'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
-    import { LatexSyntax } from '../dist/math-json.esm.js';
+    import { LatexSyntax, parse, serialize } from '../dist/math-json.esm.js';
     import { ComputeEngine, match } from '../dist/compute-engine.esm.js';
 
     const MAX_LINE_LENGTH = 64;
@@ -323,7 +324,7 @@
     //   await computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
     // );
 
-    // console.log(computeEngine.same(
+    // console.log(computeEngine.match(
     //   computeEngine.evaluate(defaultLatex.parse('3\\times x + 1')),
     //   computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
     // ));
@@ -335,6 +336,7 @@
 
     async function updateContent(mf) {
       const latex = mf.getValue('latex');
+      let expr;
       try {
 
         document.getElementById('latex').innerHTML = escapeHtml(latex);
@@ -346,30 +348,63 @@
 
         errors = [];
 
-        let expr = defaultLatex.parse(latex);
-        
+        expr = defaultLatex.parse(latex);
+      } catch (e) {
+        console.error("parse(%c " + latex + '%c) ' +
+          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      }
+      try {
         const canonicalExpr = ce.format(expr, ['canonical']);
 
         updateExpr(canonicalExpr, 'canonical-form');
-
-
-        updateExpr(ce.format(expr, ['json']), 'json-form');
-
-        updateExpr(ce.format(rawLatex.parse(latex), ['json']), 
-          'raw-form');
-
-        updateExpr(ce.domain(expr), 'domain');
-
-        updateExpr(ce.simplify(expr), 'simplify');
-
-        updateExpr(ce.N(expr), 'evaluate-numerically');
-
-        updateExpr(await ce.evaluate(expr), 'evaluate');
-
       } catch (e) {
-        console.error("Error converting %c " + latex + '%c ' +
+        console.error("canonical(%c " + latex + '%c) ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
+
+      // try {
+      //   updateExpr(ce.format(expr, ['json']), 'json-form');
+      // } catch (e) {
+      //   console.error("format(%c " + latex + '%c, [\'json\']) ' +
+      //     e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      // }
+
+      try {
+        updateExpr(ce.format(rawLatex.parse(latex), ['json']), 
+          'raw-form');
+        } catch (e) {
+        console.error("rawLatex.parse(%c " + latex + '%c) ' +
+          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      }
+
+      try {
+        updateExpr(ce.domain(expr), 'domain');
+      } catch (e) {
+        console.error("domain(%c " + latex + '%c) ' +
+          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      }
+
+      try {
+        updateExpr(ce.simplify(expr), 'simplify');
+      } catch (e) {
+        console.error("simplify(%c " + latex + '%c) ' +
+          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      }
+
+      try {
+        updateExpr(ce.N(expr), 'evaluate-numerically');
+      } catch (e) {
+        console.error("N(%c " + latex + '%c) ' +
+          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      }
+
+      try {
+        updateExpr(await ce.evaluate(expr), 'evaluate');
+      } catch (e) {
+        console.error("evaluate(%c " + latex + '%c) ' +
+          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      }
+
     }
 
     function updateExpr(expr, id) {
@@ -445,7 +480,7 @@
 
 
     function exprToStringRecursive(expr, start) {
-      const indent = ' '.repeat(start);
+      let indent = ' '.repeat(start);
       if (Array.isArray(expr)) {
         const elements = expr.map(x => exprToStringRecursive(x, start + 2));
         let result = `[${elements.join(', ')}]`;
@@ -458,12 +493,11 @@
         Object.keys(expr).forEach(x => 
            elements[x] = exprToStringRecursive(expr[x], start + 2)
         );
-        let result = `{${Object.keys(expr).map(key => {return `${key}: ${elements[key]}`}).join('; ')}}`;
+        let result = `\n${indent}{${Object.keys(expr).map(key => {return `${key}: ${elements[key]}`}).join('; ')}}`;
         if (start + result.length < MAX_LINE_LENGTH) return result;
-
-        return `{${Object.keys(expr).map(key => 
-            { return `${indent}${key}: ${elements[key]}` }
-          ).join(';\n${indent}')}}`;
+        return  `\n${indent}{\n` + Object.keys(expr).map(key => 
+            { return `${indent}  ${key}: ${elements[key]}` }
+          ).join(`;\n${indent}`) + '\n' + indent + '}';
       }
       return JSON.stringify(expr, null, 2);
     }
@@ -476,13 +510,25 @@
     function updateAssumptions() {
       document.getElementById('assumptions').innerHTML = 
       '<ul><li>' + 
-       [...ce.assumptions].map(assumption => 
-        convertLatexToMarkup(defaultLatex.serialize(assumption))
+       [...ce.assumptions].map(([assumption, val]) => { 
+         return convertLatexToMarkup(defaultLatex.serialize(assumption)) + 
+          '<span>' + (val ?  ' is true': ' is false') + '</span>'
+        }
       ).join('</li><li>') +
       '</li></ul>'
     }
 
     console.log(match(["Add", 1, 4, 5], ["Add", 1, '__a', 4, 5]));
+
+    let expr = parse('-90071922.1e12');
+    console.log(expr);
+
+ expr = parse(
+  '900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789'
+);
+
+console.log(expr);
+console.log(serialize(expr));
 
   </script>
 </body>

@@ -1,12 +1,12 @@
 import {
-  equalExpr,
   getArg,
   getFunctionName,
-  getHead,
   getSymbolName,
+  getTail,
+  MISSING,
 } from '../common/utils';
 import { Expression } from '../public';
-import { ComputeEngine } from './public';
+import { ComputeEngine, Numeric } from './public';
 import { CortexError } from './utils';
 
 export function isInRange(
@@ -38,72 +38,117 @@ export function isWithEngine(
   return undefined;
 }
 
-export function assumeWithEngine(
-  engine: ComputeEngine,
-  predicate: Expression
+export function internalAssume<T extends number = Numeric>(
+  engine: ComputeEngine<T>,
+  proposition: Expression<T>
 ): 'contradiction' | 'tautology' | 'ok' {
-  const head = getHead(predicate);
+  proposition = engine.canonical(proposition)!;
+
+  const head = getFunctionName(proposition);
 
   if (!head) throw new CortexError({ message: 'expected-predicate' });
 
-  const arg = getArg(predicate, 1);
+  let val = true;
 
-  if (!arg) return 'contradiction';
+  if (head === 'And') {
+    for (const prop of getTail(proposition)) {
+      const result = internalAssume(engine, prop);
+      if (result !== 'ok') return result;
+    }
+  } else if (head === 'Not') {
+    val = false;
+    proposition = getArg(proposition, 1) ?? MISSING;
+  } else if (head === 'NotEqual') {
+    val = false;
+    proposition = ['Equal', getArg(proposition, 1) ?? MISSING];
+  } else if (head === 'NotElement') {
+    val = false;
+    proposition = ['Element', getArg(proposition, 1) ?? MISSING];
+  }
 
-  // @todo: check contradiction or tautology
-  // const assumptions = getAssumptions(engine, arg);
-  engine.assumptions.add(predicate);
+  const v = engine.is(proposition);
+
+  // Is the proposition a contradiction or tautology?
+  if (v !== undefined) {
+    if (v === val) return 'tautology';
+    if (v !== val) return 'contradiction';
+  }
+
+  // Add a new assumption
+  engine.assumptions.set(proposition, val);
+
+  // @todo: could check any assumptions that have become tautologies
+  // (i.e. if `proposition` was more general than an existing assumption)
+  // and remove them.
+
   return 'ok';
 }
 
-export function filterAssumptions(
-  engine: ComputeEngine,
-  head: Expression,
-  arg1?: Expression,
-  arg2?: Expression
-): Expression[] {
-  const result: Expression[] = [];
-  const assumptions = engine.assumptions;
-  for (const assumption of assumptions) {
-    if (getFunctionName(assumption) === head) {
-      if (arg1 === undefined) {
-        result.push(assumption);
-      } else {
-        if (equalExpr(arg1, getArg(assumption, 1))) {
-          if (arg2 === undefined) {
-            result.push(assumption);
-          } else {
-            if (equalExpr(arg2, getArg(assumption, 2))) {
-              result.push(assumption);
-            }
-          }
-        }
-      }
-    }
-  }
-  return result;
-}
+// export function filterAssumptions<T extends number = Numeric>(
+//   engine: ComputeEngine<T>,
+//   head: Expression<T>,
+//   arg1?: Expression<T>,
+//   arg2?: Expression<T>
+// ): Expression<T>[] {
+//   const result: Expression<T>[] = [];
+//   const assumptions = engine.assumptions;
+//   for (const [assumption, val] of assumptions) {
+//     if (getFunctionName(assumption) === head) {
+//       if (arg1 === undefined) {
+//         result.push(assumption);
+//       } else {
+//         if (match(arg1, getArg(assumption, 1))) {
+//           if (arg2 === undefined) {
+//             result.push(assumption);
+//           } else {
+//             if (match(arg2, getArg(assumption, 2))) {
+//               result.push(assumption);
+//             }
+//           }
+//         }
+//       }
+//     }
+//   }
+//   return result;
+// }
 
-export function getAssumptions(
-  engine: ComputeEngine,
-  arg: Expression
-): Expression[] {
+function getAssumptionsAbout<T extends number = Numeric>(
+  engine: ComputeEngine<T>,
+  arg: Expression<T>
+): Expression<T>[] {
   const symbols: string[] = [...engine.getVars(arg)]
     .map((x) => getSymbolName(x))
     .filter((x) => x !== null) as string[];
 
   if (symbols.length === 0) return [];
 
-  const result: Expression[] = [];
-  for (const assumption of engine.assumptions) {
+  const result: Expression<T>[] = [];
+  for (const [assumption, val] of engine.assumptions) {
     const vars = engine.getVars(assumption);
     for (const symbol of symbols) {
       if (vars.has(symbol)) {
-        result.push(assumption);
+        if (val) {
+          result.push(assumption);
+        } else if (getFunctionName(assumption) === 'Equal') {
+          result.push(['NotEqual', assumption]);
+        } else if (getFunctionName(assumption) === 'Element') {
+          result.push(['NotElement', assumption]);
+        } else {
+          result.push(['Not', assumption]);
+        }
         break;
       }
     }
   }
 
   return [];
+}
+
+export function forget<T extends number = Numeric>(
+  engine: ComputeEngine<T>,
+  arg: Expression<T>
+): void {
+  for (const assumption of getAssumptionsAbout(engine, arg)) {
+    engine.assumptions.delete(assumption);
+  }
 }

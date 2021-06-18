@@ -6,10 +6,10 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
       `['Add', ['Cos', 'x'], 1]`
     );
     expect(expression('\\cos x - \\sin x')).toMatchInlineSnapshot(
-      `['Add', ['Cos', 'x'], ['Multiply', -1, ['Sin', 'x']]]`
+      `['Add', ['Negate', ['Sin', 'x']], ['Cos', 'x']]`
     );
     expect(expression('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(
-      `['Cos', ['Power', ['Multiply', ['Power', 2, -1], 'x'], 2]]`
+      `['Cos', ['Square', ['Divide', 'x', 2]]]`
     );
   });
   test('Trig functions with superscript', () => {

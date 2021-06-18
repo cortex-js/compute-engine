@@ -1,6 +1,6 @@
 import { LatexDictionary } from './public';
 
-export const DEFINITIONS_SETS: LatexDictionary = [
+export const DEFINITIONS_SETS: LatexDictionary<any> = [
   // Sets
   { trigger: { symbol: '\\N' }, parse: 'NaturalNumber' },
   { trigger: { symbol: '\\Z' }, parse: 'Integer' },
@@ -42,11 +42,6 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     precedence: 650,
   },
   {
-    name: 'Subset',
-    trigger: { infix: '\\subset' },
-    precedence: 240,
-  },
-  {
     name: 'SubsetEqual',
     trigger: { infix: '\\subseteq' },
     precedence: 240,
@@ -60,5 +55,101 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     name: 'Union',
     trigger: { infix: '\\cup' },
     precedence: 350,
+  },
+  {
+    name: 'Contains',
+    trigger: { infix: '\\ni' },
+    associativity: 'right',
+    precedence: 160, // As per MathML, lower precedence
+  },
+  {
+    name: 'Subset',
+    trigger: { infix: '\\subset' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'SquareSubset', // MathML: square image of
+    trigger: { infix: '\\sqsubset' },
+    associativity: 'right',
+    precedence: 265,
+  },
+  {
+    name: 'SquareSubsetEqual', // MathML: square image of or equal to
+    trigger: { infix: '\\sqsubseteq' },
+    associativity: 'right',
+    precedence: 265,
+  },
+  {
+    name: 'Superset',
+    trigger: { infix: '\\supset' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'SquareSuperset', // MathML: square original of
+    trigger: { infix: '\\sqsupset' },
+    associativity: 'right',
+    precedence: 265,
+  },
+  {
+    name: 'SquareSupersetEqual', // MathML: square original of or equal
+    trigger: { infix: '\\sqsupseteq' },
+    associativity: 'right',
+    precedence: 265,
+  },
+  {
+    name: 'NotSubset',
+    trigger: { infix: '\\nsubset' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'NotSuperset',
+    trigger: { infix: '\\nsupset' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'SupersetEqual',
+    trigger: { infix: '\\supseteq' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'NotSubsetNotEqual',
+    trigger: { infix: '\\nsubseteq' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'NotSupersetNotEqual',
+    trigger: { infix: '\\nsupseteq' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'SubsetNotEqual',
+    trigger: { infix: '\\subsetneq' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'SubsetNotEqual',
+    trigger: { infix: '\\varsupsetneqq' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'SupersetNotEqual',
+    trigger: { infix: '\\supsetneq' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'SupersetNotEqual',
+    trigger: { infix: '\\varsupsetneq' },
+    associativity: 'right',
+    precedence: 240,
   },
 ];

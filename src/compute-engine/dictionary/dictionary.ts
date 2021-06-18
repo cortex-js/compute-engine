@@ -7,6 +7,7 @@ import type {
   ComputeEngine,
   CollectionDefinition,
   Definition,
+  Numeric,
 } from '../public';
 import { getDomainsDictionary } from './domains';
 import { ARITHMETIC_DICTIONARY } from './arithmetic';
@@ -23,10 +24,11 @@ import {
 } from './utils';
 import { MULTIPLY, POWER, getFunctionName } from '../../common/utils';
 import { inferNumericDomain } from '../domains';
+import { ExpressionMap } from '../expression-map';
 
-export function getDefaultDictionaries(
+export function getDefaultDictionaries<T extends number = number>(
   categories: DictionaryCategory[] | 'all' = 'all'
-): Readonly<Dictionary>[] {
+): Readonly<Dictionary<T>>[] {
   if (categories === 'all') {
     return getDefaultDictionaries([
       'domains',
@@ -54,7 +56,7 @@ export function getDefaultDictionaries(
       'units',
     ]);
   }
-  const result: Readonly<Dictionary>[] = [];
+  const result: Readonly<Dictionary<T>>[] = [];
   for (const category of categories) {
     if (DICTIONARY[category]) result.push(DICTIONARY[category]!);
   }
@@ -98,7 +100,9 @@ export function getDefaultDictionaries(
 // - mathjs
 // - others...?
 
-export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
+export const DICTIONARY: {
+  [category in DictionaryCategory]?: Dictionary<Numeric>;
+} = {
   'arithmetic': ARITHMETIC_DICTIONARY,
   'algebra': {
     // polynomial([0, 2, 0, 4]:list, x:symbol) -> 2x + 4x^3
@@ -234,11 +238,11 @@ export const DICTIONARY: { [category in DictionaryCategory]?: Dictionary } = {
  * the signature of predicate have a "MaybeBoolean" codomain)
  *
  */
-export function compileDictionary(
-  dict: Dictionary,
-  engine: ComputeEngine
-): CompiledDictionary {
-  const result = new Map<string, Definition>();
+export function compileDictionary<T extends number = Numeric>(
+  dict: Dictionary<T>,
+  engine: ComputeEngine<T>
+): CompiledDictionary<T> {
+  const result = new Map<string, Definition<T>>();
   for (const entryName of Object.keys(dict)) {
     const [def, error] = normalizeDefinition(dict[entryName], engine);
     if (error) {
@@ -257,7 +261,7 @@ export function compileDictionary(
   engine.context = {
     parentScope: engine.context,
     dictionary: result,
-    assumptions: new Set(),
+    assumptions: new ExpressionMap(),
   };
 
   // @todo: compile
@@ -271,9 +275,9 @@ export function compileDictionary(
 }
 
 function normalizeDefinition(
-  def: number | Definition,
+  def: number | Definition<Numeric>,
   engine: ComputeEngine
-): [def: null | Definition, error?: string] {
+): [def: null | Definition<Numeric>, error?: string] {
   if (typeof def === 'number') {
     //  If the dictionary entry is provided as a number, assume it's a
     // variable, and infer its type based on its value.
@@ -294,12 +298,16 @@ function normalizeDefinition(
       warning = 'no domain provided.';
       domain = 'Anything';
     }
-
     def = {
       domain,
       constant: false,
       ...(def as Partial<SymbolDefinition>),
     };
+
+    if (def.hold === false && !def.value) {
+      def.hold = true;
+    }
+
     return [def, warning];
   }
 
@@ -434,9 +442,9 @@ function normalizeDefinition(
  * in relation to each other, for example validating that the referenced
  * domains are valid.
  */
-function validateDictionary(
-  engine: ComputeEngine,
-  dictionary: CompiledDictionary
+function validateDictionary<T extends number = number>(
+  engine: ComputeEngine<T>,
+  dictionary: CompiledDictionary<T>
 ): void {
   const wikidata = new Set<string>();
   for (const [name, def] of dictionary) {
@@ -465,6 +473,18 @@ function validateDictionary(
           head: name,
         });
       }
+
+      if (def.hold === false && !def.value) {
+        engine.signal({
+          severity: 'warning',
+          message: [
+            'invalid-dictionary-entry',
+            'symbol has hold = false, but no value',
+          ],
+          head: name,
+        });
+      }
+
       // @todo: for numeric domain, validate them: i.e. real are at least RealNumber, etc...
       // using inferDomain
     }
@@ -483,6 +503,7 @@ function validateDictionary(
       }
 
       // @todo could do some additional checks
+      // - if it's numeric, it can't have a 'hold' argument
       // - if it's commutative it must have at least one signature with multiple arguments
       // - if an involution, it's *not* idempotent
       // - if it's threadable it must have at least one signature with a rest argument

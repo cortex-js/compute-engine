@@ -21,20 +21,21 @@ export function evaluateOnce(
 
   return expr;
 }
+
 /**
  * Evaluate until:
  * - the timeLimit is reached
  * - the iterationLimit is reached
  * - the expression stops changing
  */
-export async function evaluateWithEngine(
+export async function internalEvaluate(
   engine: ComputeEngine,
   expr: Expression,
   options?: { timeLimit?: number; iterationLimit?: number }
 ): Promise<Expression | null> {
   const timeLimit = options?.timeLimit ?? engine.timeLimit ?? 2.0;
   if (timeLimit && isFinite(timeLimit)) {
-    engine.deadline = globalThis.performance.now() + timeLimit * 1000;
+    engine.deadline = Date.now() + timeLimit * 1000;
   }
   const iterationLimit =
     options?.iterationLimit ?? engine.iterationLimit ?? 1024;
@@ -50,6 +51,6 @@ export async function evaluateWithEngine(
     iterationCount += 1;
   }
 
-  // 6/ Convert the result to canonical form (or some other form...)?
-  return result;
+  // Convert the result to canonical form
+  return engine.canonical(result);
 }

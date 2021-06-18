@@ -1,6 +1,7 @@
 import { Expression } from '../public';
 import { DERIVATIVE, INVERSE_FUNCTION } from '../common/utils';
 import { Scanner, LatexDictionary } from './public';
+import { Numeric } from '../compute-engine/public';
 
 /**
  * Trigonometric functions have some special conventions that require a
@@ -104,7 +105,7 @@ function parseTrig(
   return [null, [head, ...args]];
 }
 
-export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
+export const DEFINITIONS_TRIGONOMETRY: LatexDictionary<Numeric> = [
   {
     name: 'Arcsin',
     trigger: '\\arcsin',
@@ -256,14 +257,14 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig,
   },
   {
-    name: 'Tanh',
-    trigger: '\\tanh',
+    name: 'Tan',
+    trigger: '\\tg',
     arguments: 'implicit',
     parse: parseTrig,
   },
   {
-    name: 'Tan',
-    trigger: '\\tg',
+    name: 'Tanh',
+    trigger: '\\tanh',
     arguments: 'implicit',
     parse: parseTrig,
   },
@@ -283,12 +284,6 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   {
     name: 'Sin',
     trigger: '\\sin',
-    arguments: 'implicit',
-    parse: parseTrig,
-  },
-  {
-    name: 'Tan',
-    trigger: '\\tan',
     arguments: 'implicit',
     parse: parseTrig,
   },

@@ -110,10 +110,8 @@ describe('DIVIDE', () => {
 
 describe('FRACTIONS', () => {
   test('Basic', () => {
-    expect(expression('\\frac12')).toMatchInlineSnapshot(`['Power', 2, -1]`);
-    expect(expression('\\frac{1}{2}')).toMatchInlineSnapshot(
-      `['Power', 2, -1]`
-    );
+    expect(expression('\\frac12')).toMatchInlineSnapshot(`'Half'`);
+    expect(expression('\\frac{1}{2}')).toMatchInlineSnapshot(`'Half'`);
   });
   test('Errors', () => {
     expect(expressionError('\\frac')).toMatchInlineSnapshot(`[]`);
@@ -133,26 +131,26 @@ describe('OPERATORS', () => {
   });
   test('Prefix', () => {
     expect(expression('-1')).toMatchInlineSnapshot(`-1`);
-    expect(expression('-x')).toMatchInlineSnapshot(`['Multiply', -1, 'x']`);
+    expect(expression('-x')).toMatchInlineSnapshot(`['Negate', 'x']`);
     expect(expression('-ab')).toMatchInlineSnapshot(
-      `['Multiply', -1, 'a', 'b']`
+      `['Multiply', ['Negate', 'a'], 'b']`
     );
     expect(expression('-(ab)')).toMatchInlineSnapshot(
-      `['Multiply', -1, 'a', 'b']`
+      `['Multiply', ['Negate', 'a'], 'b']`
     );
     expect(expression('-x-1')).toMatchInlineSnapshot(
-      `['Add', ['Multiply', -1, 'x'], -1]`
+      `['Add', ['Negate', 'x'], -1]`
     );
     expect(expression('-(x+1)')).toMatchInlineSnapshot(
-      `['Multiply', -1, ['Add', 'x', 1]]`
+      `['Negate', ['Add', 'x', 1]]`
     );
     expect(expression('-x+(-(x+1))')).toMatchInlineSnapshot(
-      `['Add', ['Multiply', -1, 'x'], ['Multiply', -1, ['Add', 'x', 1]]]`
+      `['Add', ['Negate', ['Add', 'x', 1]], ['Negate', 'x']]`
     );
     expect(
       expression('-\\frac{-x+2\\times x}{-2\\times x + 1}')
     ).toMatchInlineSnapshot(
-      `['Multiply', -1, ['Power', ['Add', ['Multiply', -2, 'x'], 1], -1], ['Add', ['Multiply', 2, 'x'], ['Negate', 'x']]]`
+      `['Negate', ['Divide', ['Add', ['Multiply', 2, 'x'], ['Negate', 'x']], ['Add', ['Multiply', -2, 'x'], 1]]]`
     );
   });
 
@@ -211,7 +209,7 @@ describe('ALL OPERATORS', () => {
     expect(
       expression('\\frac{\\partial f}{\\partial x} ')
     ).toMatchInlineSnapshot(
-      `['Multiply', '\\partial', ['Power', ['Multiply', '\\partial', 'x'], -1], 'f']`
+      `['Divide', ['Multiply', '\\partial', 'f'], ['Multiply', '\\partial', 'x']]`
     );
   }); // @todo
   test('Second order partial Derivative', () => {
@@ -223,17 +221,17 @@ describe('ALL OPERATORS', () => {
       `['Multiply', ['Subscript', '\\partial', ['Sequence', 'x', 'y']], ['f', 'x', 'y']]`
     ); // @todo
     expect(expression('\\partial^2_{x,y} f(x,y)')).toMatchInlineSnapshot(
-      `['Multiply', ['Subscript', ['Power', '\\partial', 2], ['Sequence', 'x', 'y']], ['f', 'x', 'y']]`
+      `['Multiply', ['Subscript', ['Square', '\\partial'], ['Sequence', 'x', 'y']], ['f', 'x', 'y']]`
     ); // @todo
     expect(
       expression('\\frac{\\partial^2}{\\partial_{x,y}} f(x,y)')
     ).toMatchInlineSnapshot(
-      `['Multiply', ['Power', '\\partial', 2], ['Power', ['Subscript', '\\partial', ['Sequence', 'x', 'y']], -1], ['f', 'x', 'y']]`
+      `['Multiply', ['Divide', ['Square', '\\partial'], ['Subscript', '\\partial', ['Sequence', 'x', 'y']]], ['f', 'x', 'y']]`
     ); // @todo
     expect(
       expression('\\frac{\\partial^2 f(x, y, z)}{\\partial_{x,y}} ')
     ).toMatchInlineSnapshot(
-      `['Multiply', ['Power', '\\partial', 2], ['Power', ['Subscript', '\\partial', ['Sequence', 'x', 'y']], -1], ['f', 'x', 'y', 'z']]`
+      `['Divide', ['Multiply', ['Square', '\\partial'], ['f', 'x', 'y', 'z']], ['Subscript', '\\partial', ['Sequence', 'x', 'y']]]`
     ); // @todo
   });
 });
@@ -248,20 +246,18 @@ describe('ARITHMETIC FUNCTIONS', () => {
   test('Negate', () => {
     expect(expression('-1')).toMatchInlineSnapshot(`-1`);
     expect(expression('-2+3-4')).toMatchInlineSnapshot(`['Add', -4, -2, 3]`);
-    expect(expression('-x')).toMatchInlineSnapshot(`['Multiply', -1, 'x']`);
+    expect(expression('-x')).toMatchInlineSnapshot(`['Negate', 'x']`);
     expect(expression('--x')).toMatchInlineSnapshot(`['PreDecrement', 'x']`);
-    expect(expression('-(-x)')).toMatchInlineSnapshot(
-      `['Multiply', -1, ['Negate', 'x']]`
-    ); // @todo ["Negate", ["Negate", "x"]] ?
+    expect(expression('-(-x)')).toMatchInlineSnapshot(`'x'`); // @todo ["Negate", ["Negate", "x"]] ?
     expect(expression('-i')).toMatchInlineSnapshot(
-      `['Multiply', -1, 'ImaginaryI']`
+      `['Negate', 'ImaginaryUnit']`
     );
     expect(expression('-\\infty')).toMatchInlineSnapshot(`{num: '-Infinity'}`);
   });
   test('Infix plus', () => {
     expect(expression('+1')).toMatchInlineSnapshot(`1`);
     expect(expression('+x')).toMatchInlineSnapshot(`'x'`);
-    expect(expression('+i')).toMatchInlineSnapshot(`'ImaginaryI'`);
+    expect(expression('+i')).toMatchInlineSnapshot(`'ImaginaryUnit'`);
     expect(expression('+\\infty')).toMatchInlineSnapshot(`{num: 'Infinity'}`);
   });
   test('Add/subtract', () => {
@@ -269,7 +265,7 @@ describe('ARITHMETIC FUNCTIONS', () => {
       `['Add', -4, -2, -1, 3]`
     );
     expect(expression('a-b+c-d')).toMatchInlineSnapshot(
-      `['Add', 'a', ['Multiply', -1, 'b'], 'c', ['Multiply', -1, 'd']]`
+      `['Add', 'a', 'c', ['Negate', 'd'], ['Negate', 'b']]`
     );
   });
   test('Precedence of add/multiply', () => {
@@ -292,28 +288,24 @@ describe('INVISIBLE OPERATOR', () => {
       `['Multiply', 2, ['Add', 'x', 1]]`
     );
     expect(expression('3\\pi')).toMatchInlineSnapshot(`['Multiply', 3, 'Pi']`);
-    expect(expression('\\frac{1}{2}\\pi')).toMatchInlineSnapshot(
-      `['Multiply', ['Power', 2, -1], 'Pi']`
-    );
+    expect(expression('\\frac{1}{2}\\pi')).toMatchInlineSnapshot(`'HalfPi'`);
     expect(expression('2\\sin(x)')).toMatchInlineSnapshot(
       `['Multiply', 2, ['Sin', 'x']]`
     );
     expect(expression('2x\\sin(x)\\frac{1}{2}')).toMatchInlineSnapshot(
-      `['Multiply', 2, ['Power', 2, -1], 'x', ['Sin', 'x']]`
+      `['Multiply', 2, 'Half', 'x', ['Sin', 'x']]`
     );
-    expect(expression('3\\pi5')).toMatchInlineSnapshot(
-      `['Multiply', 3, 5, 'Pi']`
-    );
+    expect(expression('3\\pi5')).toMatchInlineSnapshot(`['Multiply', 3, 'Pi']`);
     expect(expression('2\\times-x')).toMatchInlineSnapshot(
       `['Multiply', -2, 'x']`
     );
   });
   test('Invisible Plus', () => {
     expect(expression('2\\frac{3}{4}')).toMatchInlineSnapshot(
-      `['Add', 2, ['Multiply', 3, ['Power', 4, -1]]]`
+      `['Add', 'ThreeQuarter', 2]`
     );
     expect(expression('2\\frac{a}{b}')).toMatchInlineSnapshot(
-      `['Multiply', 2, 'a', ['Power', 'b', -1]]`
+      `['Multiply', 2, ['Divide', 'a', 'b']]`
     );
   });
 });

@@ -22,8 +22,9 @@ import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
 import { DEFINITIONS_SETS } from './definitions-sets';
 import { DEFINITIONS_CALCULUS } from './definitions-calculus';
 import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
+import { Numeric } from '../compute-engine/public';
 
-export type IndexedLatexDictionaryEntry = {
+export type IndexedLatexDictionaryEntry<T extends number = number> = {
   name: string;
   trigger?: {
     symbol?: LatexToken | LatexToken[];
@@ -34,8 +35,8 @@ export type IndexedLatexDictionaryEntry = {
     superfix?: LatexToken | LatexToken[];
     subfix?: LatexToken | LatexToken[];
   };
-  parse: Expression | ParserFunction;
-  serialize: SerializerFunction | LatexString;
+  parse: Expression<T> | ParserFunction<T>;
+  serialize: SerializerFunction<T> | LatexString;
   associativity: 'right' | 'left' | 'non' | 'both';
   precedence: number;
   arguments: 'group' | 'implicit' | '';
@@ -45,17 +46,17 @@ export type IndexedLatexDictionaryEntry = {
   closeFence: LatexString;
 };
 
-export type IndexedLatexDictionary = {
+export type IndexedLatexDictionary<T extends number = number> = {
   lookahead: number;
-  name: Map<string, IndexedLatexDictionaryEntry>;
-  prefix: (Map<LatexString, IndexedLatexDictionaryEntry> | null)[];
-  infix: (Map<LatexString, IndexedLatexDictionaryEntry> | null)[];
-  postfix: (Map<LatexString, IndexedLatexDictionaryEntry> | null)[];
-  matchfix: (Map<LatexString, IndexedLatexDictionaryEntry> | null)[];
-  superfix: (Map<LatexString, IndexedLatexDictionaryEntry> | null)[];
-  subfix: (Map<LatexString, IndexedLatexDictionaryEntry> | null)[];
-  symbol: (Map<LatexString, IndexedLatexDictionaryEntry> | null)[];
-  environment: Map<string, IndexedLatexDictionaryEntry>;
+  name: Map<string, IndexedLatexDictionaryEntry<T>>;
+  prefix: (Map<LatexString, IndexedLatexDictionaryEntry<T>> | null)[];
+  infix: (Map<LatexString, IndexedLatexDictionaryEntry<T>> | null)[];
+  postfix: (Map<LatexString, IndexedLatexDictionaryEntry<T>> | null)[];
+  matchfix: (Map<LatexString, IndexedLatexDictionaryEntry<T>> | null)[];
+  superfix: (Map<LatexString, IndexedLatexDictionaryEntry<T>> | null)[];
+  subfix: (Map<LatexString, IndexedLatexDictionaryEntry<T>> | null)[];
+  symbol: (Map<LatexString, IndexedLatexDictionaryEntry<T>> | null)[];
+  environment: Map<string, IndexedLatexDictionaryEntry<T>>;
 };
 
 function triggerLength(trigger: LatexToken | LatexToken[]): number {
@@ -90,10 +91,10 @@ function triggerString(trigger: LatexToken | LatexToken[]) {
 //     return result;
 // }
 
-export function indexLatexDictionary(
-  dic: readonly LatexDictionaryEntry[],
+export function indexLatexDictionary<T extends number = number>(
+  dic: readonly LatexDictionaryEntry<T>[],
   onError: ErrorListener<ErrorCode>
-): IndexedLatexDictionary {
+): IndexedLatexDictionary<T> {
   const result = {
     lookahead: 1,
     name: new Map(),
@@ -183,7 +184,7 @@ export function indexLatexDictionary(
         const n = triggerLength(record.trigger![x]);
         result.lookahead = Math.max(result.lookahead, n);
         if (result[x][n] === undefined) {
-          result[x][n] = new Map<string, IndexedLatexDictionaryEntry>();
+          result[x][n] = new Map<string, IndexedLatexDictionaryEntry<T>>();
         }
         result[x][n].set(triggerString(record.trigger![x]), record);
       });
@@ -236,7 +237,7 @@ export function indexLatexDictionary(
 // https://reference.wolfram.com/language/tutorial/OperatorInputForms.html
 
 export const DEFAULT_LATEX_DICTIONARY: {
-  [category in DictionaryCategory]?: LatexDictionary;
+  [category in DictionaryCategory]?: LatexDictionary<Numeric>;
 } = {
   algebra: DEFINITIONS_ALGEBRA,
   arithmetic: DEFINITIONS_ARITHMETIC,

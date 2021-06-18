@@ -1,6 +1,7 @@
 import { Expression } from '../../public';
 import {
   applyRecursively,
+  COMPLEX_INFINITY,
   DIVIDE,
   getArg,
   getArgCount,
@@ -19,144 +20,28 @@ import {
   NOTHING,
   PARENTHESES,
 } from '../../common/utils';
-import type { ComputeEngine, Dictionary } from '../public';
+import type { ComputeEngine, Dictionary, Numeric } from '../public';
+import { chop, factorial, gcd } from '../numeric';
+import {
+  DECIMAL_MINUS_ONE,
+  DECIMAL_ONE,
+  DECIMAL_ZERO,
+  factorial as factorialDecimal,
+} from '../numeric-decimal';
+import {
+  isInfinity,
+  isNegative,
+  isNotZero,
+  isPositive,
+  isZero,
+} from '../utils';
+import { Decimal } from 'decimal.js';
+import { Complex } from 'complex.js';
 
-export const ARITHMETIC_DICTIONARY: Dictionary = {
+export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
   //
   // Constants
   //
-
-  ImaginaryI: {
-    domain: 'ImaginaryNumber',
-    constant: true,
-    wikidata: 'Q193796',
-  },
-  ExponentialE: {
-    domain: 'IrrationalNumber',
-    wikidata: 'Q82435',
-    constant: true,
-    value: { num: '2.7182818284590452354' },
-  },
-  GoldenRatio: {
-    domain: 'IrrationalNumber',
-    wikidata: 'Q41690',
-    constant: true,
-    value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
-  },
-  CatalanConstant: {
-    domain: 'RealNumber', // Unproven if it is irrational
-    wikidata: 'Q855282',
-    constant: true,
-    value: { num: '0.91596559417721901505' },
-  },
-  EulerGamma: {
-    domain: 'RealNumber',
-    wikidata: 'Q273023',
-    constant: true,
-    value: { num: '0.577215664901532860606' },
-  },
-  Quarter: {
-    domain: 'RealNumber',
-    wikidata: 'Q2310416',
-    constant: true,
-    value: [DIVIDE, 3, 4],
-  },
-  Third: {
-    domain: 'RealNumber',
-    wikidata: 'Q20021125',
-    constant: true,
-    value: [DIVIDE, 1, 3],
-  },
-  Half: {
-    domain: 'RealNumber',
-    wikidata: 'Q2114394',
-    constant: true,
-    value: [DIVIDE, 1, 2],
-  },
-  TwoThird: {
-    domain: 'RealNumber',
-    constant: true,
-    value: [DIVIDE, 2, 3],
-  },
-  ThreeQuarter: {
-    domain: 'RealNumber',
-    constant: true,
-    value: [DIVIDE, 3, 4],
-  },
-
-  //
-  // Functions
-  //
-  Abs: {
-    domain: 'Function',
-    wikidata: 'Q3317982', //magnitude 'Q120812 (for reals)
-    threadable: true,
-    idempotent: true,
-    range: ['Interval', 0, Infinity],
-  },
-  Add: {
-    domain: 'Function',
-    wikidata: 'Q32043',
-    associative: true,
-    commutative: true,
-    threadable: true,
-    idempotent: true,
-    range: 'Number',
-    simplify: simplifyAdd,
-    evalf: evalfAdd,
-  },
-  Chop: {
-    domain: 'Function',
-    associative: true,
-    threadable: true,
-    idempotent: true,
-    range: 'Number',
-  },
-  Ceil: {
-    domain: 'Function',
-    range: 'Number',
-    /** rounds a number up to the next largest integer */
-  },
-  Exp: {
-    domain: ['ContinuousFunction', 'MonotonicFunction'],
-    wikidata: 'Q168698',
-    threadable: true,
-    range: 'Number',
-  },
-  Erf: {
-    // Error function
-    domain: ['ContinuousFunction', 'MonotonicFunction'],
-    range: 'Number',
-  },
-  Erfc: {
-    // Complementary Error Function
-    domain: ['ContinuousFunction', 'MonotonicFunction'],
-    range: 'Number',
-  },
-  Factorial: {
-    wikidata: 'Q120976',
-    domain: 'MonotonicFunction',
-    range: 'Integer',
-  },
-  Floor: { domain: 'Function', wikidata: 'Q56860783', range: 'Number' },
-  Gamma: { domain: 'Function', wikidata: 'Q190573', range: 'Number' },
-  LogGamma: { domain: 'Function', range: 'Number' },
-  Log: {
-    domain: 'Function',
-    wikidata: 'Q11197',
-    range: 'Number',
-  },
-  Log2: {
-    domain: 'Function',
-    wikidata: 'Q581168',
-    range: 'Number',
-  },
-  Log10: {
-    domain: 'Function',
-    wikidata: 'Q966582',
-    range: 'Number',
-  },
-  // LogOnePlus: { domain: 'Function' },
   MachineEpsilon: {
     /*
             The difference between 1 and the next larger floating point number
@@ -169,6 +54,221 @@ export const ARITHMETIC_DICTIONARY: Dictionary = {
     constant: true,
     value: { num: Number.EPSILON.toString() },
   },
+
+  ImaginaryUnit: {
+    domain: 'ImaginaryNumber',
+    constant: true,
+    wikidata: 'Q193796',
+  },
+  ExponentialE: {
+    domain: 'TranscendentalNumber',
+    wikidata: 'Q82435',
+    constant: true,
+    value: { num: '2.7182818284590452354' },
+  },
+  GoldenRatio: {
+    domain: 'IrrationalNumber',
+    wikidata: 'Q41690',
+    constant: true,
+    hold: false,
+    value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
+  },
+  CatalanConstant: {
+    domain: 'RealNumber', // Not proven irrational or transcendental
+    wikidata: 'Q855282',
+    constant: true,
+    value: { num: '0.91596559417721901505' },
+  },
+  EulerGamma: {
+    domain: 'RealNumber', // Not proven irrational
+    wikidata: 'Q273023',
+    constant: true,
+    value: { num: '0.577215664901532860606' },
+  },
+  Quarter: {
+    domain: 'RationalNumber',
+    wikidata: 'Q2310416',
+    constant: true,
+    hold: false,
+    value: [DIVIDE, 3, 4],
+  },
+  Third: {
+    domain: 'RationalNumber',
+    wikidata: 'Q20021125',
+    constant: true,
+    hold: false,
+    value: [DIVIDE, 1, 3],
+  },
+  Half: {
+    domain: 'RationalNumber',
+    wikidata: 'Q2114394',
+    constant: true,
+    hold: false,
+    value: [DIVIDE, 1, 2],
+  },
+  TwoThird: {
+    domain: 'RationalNumber',
+    constant: true,
+    hold: false,
+    value: [DIVIDE, 2, 3],
+  },
+  ThreeQuarter: {
+    domain: 'RationalNumber',
+    constant: true,
+    hold: false,
+    value: [DIVIDE, 3, 4],
+  },
+
+  //
+  // Functions
+  //
+  Abs: {
+    domain: 'Function',
+    wikidata: 'Q3317982', //magnitude 'Q120812 (for reals)
+    threadable: true,
+    idempotent: true,
+    numeric: true,
+    range: ['Interval', 0, Infinity],
+    evalNumber: (_ce, val: number): number => Math.abs(val),
+    evalDecimal: (_ce, n: Decimal): Decimal => n.abs(),
+  },
+  Add: {
+    domain: 'Function',
+    wikidata: 'Q32043',
+    associative: true,
+    commutative: true,
+    threadable: true,
+    idempotent: true,
+    range: 'Number',
+    numeric: true,
+    simplify: simplifyAdd,
+    evalNumber: (_ce: ComputeEngine, ...args: number[]): number => {
+      if (args.length === 0) return 0;
+
+      let c = 0;
+      for (const arg of args) c += arg;
+      return c;
+    },
+    evalComplex: (_ce: ComputeEngine, ...args: Complex[]): Complex => {
+      if (args.length === 0) return Complex.ZERO;
+
+      let c = Complex.ZERO;
+      for (const arg of args) c = c.add(arg);
+      return c;
+    },
+    evalDecimal: (
+      _ce: ComputeEngine,
+      ...args: (number | Decimal)[]
+    ): Decimal => {
+      if (args.length === 0) return DECIMAL_ZERO;
+
+      let c = DECIMAL_ZERO;
+      for (const arg of args) c = c.add(arg);
+      return c;
+    },
+  },
+  Chop: {
+    domain: 'Function',
+    associative: true,
+    threadable: true,
+    idempotent: true,
+    numeric: true,
+    range: 'Number',
+    evalNumber: (_ce, val: number): number => chop(val),
+  },
+  Ceil: {
+    domain: 'Function',
+    range: 'Number',
+    numeric: true,
+    /** rounds a number up to the next largest integer */
+    evalNumber: (_ce, val: number): number => Math.ceil(val),
+    evalDecimal: (_ce, n: Decimal): Decimal => n.ceil(),
+  },
+  Divide: {
+    domain: 'Function',
+    range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, lhs: number, rhs: number): number => lhs / rhs,
+    evalDecimal: (_ce, lhs: Decimal, rhs: Decimal): Decimal => lhs.div(rhs),
+  },
+  Exp: {
+    domain: ['ContinuousFunction', 'MonotonicFunction'],
+    wikidata: 'Q168698',
+    threadable: true,
+    range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, val: number): number => Math.exp(val),
+    evalDecimal: (_ce, val: Decimal): Decimal => val.exp(),
+  },
+  Erf: {
+    // Error function
+    domain: ['ContinuousFunction', 'MonotonicFunction'],
+    range: 'Number',
+    numeric: true,
+  },
+  Erfc: {
+    // Complementary Error Function
+    domain: ['ContinuousFunction', 'MonotonicFunction'],
+    range: 'Number',
+    numeric: true,
+  },
+  Factorial: {
+    wikidata: 'Q120976',
+    domain: 'MonotonicFunction',
+    range: 'Integer',
+    numeric: true,
+    evalNumber: (_ce, n: number): number => factorial(n),
+    evalDecimal: (_ce, n: Decimal): Decimal => factorialDecimal(n),
+  },
+  Floor: {
+    domain: 'Function',
+    wikidata: 'Q56860783',
+    range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, x: number): number => Math.floor(x),
+    evalDecimal: (_ce, x: Decimal): Decimal => x.floor(),
+  },
+  Gamma: {
+    domain: 'Function',
+    wikidata: 'Q190573',
+    range: 'Number',
+    numeric: true,
+  },
+  LogGamma: { domain: 'Function', range: 'Number', numeric: true },
+  Ln: {
+    domain: 'Function',
+    wikidata: 'Q11197',
+    range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, x: number): number => Math.log(x),
+    evalDecimal: (_ce, x: Decimal): Decimal => x.log(),
+  },
+  Log: {
+    domain: 'Function',
+    range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, base: number, x: number): number =>
+      Math.log(x) / Math.log(base),
+    evalDecimal: (_ce, base: Decimal, x: Decimal): Decimal =>
+      x.log().div(base.log()),
+  },
+  Lb: {
+    domain: 'Function',
+    wikidata: 'Q581168',
+    range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, x: number): number => Math.log2(x),
+    evalDecimal: (_ce, x: Decimal): Decimal => x.log().div(Decimal.log(2)),
+  },
+  Lg: {
+    domain: 'Function',
+    wikidata: 'Q966582',
+    range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, x: number): number => Math.log10(x),
+    evalDecimal: (_ce, x: Decimal): Decimal => x.log().div(Decimal.log(10)),
+  },
+  // LogOnePlus: { domain: 'Function' },
   Multiply: {
     domain: 'Function',
     wikidata: 'Q40276',
@@ -177,43 +277,100 @@ export const ARITHMETIC_DICTIONARY: Dictionary = {
     idempotent: true,
     range: 'Number',
     simplify: simplifyMultiply,
-    evalf: evalfMultiply,
+    numeric: true,
+    evalNumber: evalNumberMultiply,
+    evalDecimal: (
+      _ce: ComputeEngine,
+      ...args: (number | Decimal)[]
+    ): Decimal => {
+      if (args.length === 0) return DECIMAL_ONE;
+
+      let c = DECIMAL_ONE;
+      for (const arg of args) c = c.mul(arg);
+      return c;
+    },
   },
   Negate: {
     domain: 'Function',
     wikidata: 'Q715358',
     range: 'Number',
-    simplify: simplifyNegate,
+    simplify: (_ce: ComputeEngine, x: Expression): Expression =>
+      applyNegate(['Negate', x]) ?? ['Negate', x],
+    numeric: true,
+    evalNumber: (_ce, val: number) => -val,
+    evalDecimal: (_ce, x: Decimal): Decimal => x.neg(),
   },
   Power: {
     domain: 'Function',
     wikidata: 'Q33456',
     commutative: false,
+    numeric: true,
     range: 'Number',
+    simplify: (ce: ComputeEngine, ...args: Expression[]): Expression =>
+      applyPower(ce, ['Power', ...args]),
+    evalNumber: (_ce, base: number, power: number) => Math.pow(base, power),
+    evalDecimal: (_ce, base: Decimal, power: Decimal): Decimal =>
+      Decimal.pow(base, power),
   },
   Round: {
     domain: 'Function',
     range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, val: number) => Math.round(val),
+    evalDecimal: (_ce, val: Decimal): Decimal => val.round(),
+  },
+  Sign: {
+    domain: 'Function',
+    range: ['Range', -1, 1],
+    numeric: true,
+    simplify: (ce: ComputeEngine, x: Expression): Expression =>
+      isZero(ce, x) ? 0 : isNegative(ce, x) ? -1 : 1,
+    evalNumber: (_ce, val: number) => (val === 0 ? 0 : val < 0 ? -1 : 1),
+    evalDecimal: (_ce, val: Decimal) =>
+      val.isZero()
+        ? DECIMAL_ZERO
+        : val.isNeg()
+        ? DECIMAL_MINUS_ONE
+        : DECIMAL_ONE,
   },
   SignGamma: {
     domain: 'Function',
     range: 'Number',
+    numeric: true,
     /** The sign of the gamma function: -1 or +1 */
   },
   Sqrt: {
     domain: 'Function',
     wikidata: 'Q134237',
     range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, val: number) => Math.sqrt(val),
+    evalDecimal: (_ce, val: Decimal) => val.sqrt(),
+  },
+  Square: {
+    domain: 'Function',
+    wikidata: 'Q3075175',
+    range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, val: number) => val * val,
+    evalDecimal: (_ce, val: Decimal) => val.mul(val),
   },
   Root: {
     domain: 'Function',
     commutative: false,
     range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, base: number, power: number) => Math.pow(base, 1 / power),
+    evalDecimal: (_ce, base: Decimal, power: Decimal) =>
+      Decimal.pow(base, DECIMAL_ONE.div(power)),
   },
   Subtract: {
     domain: 'Function',
     wikidata: 'Q32043',
     range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, lhs: number, rhs: number) => lhs - rhs,
+    evalDecimal: (_ce, lhs: Decimal, rhs: Decimal) => lhs.minus(rhs),
   },
   // @todo
   // mod (modulo). See https://numerics.diploid.ca/floating-point-part-4.html,
@@ -227,26 +384,68 @@ export const ARITHMETIC_DICTIONARY: Dictionary = {
 
 function simplifyAdd(ce: ComputeEngine, ...args: Expression[]): Expression {
   if (args.length === 0) return 0;
-  if (args.length === 1) return ce.simplify(args[0]) ?? 0;
+  if (args.length === 1) return args[0];
 
-  let c = 0;
+  let numer = 0;
+  let denom = 1;
+  let posInfinity = false;
+  let negInfinity = false;
   const others: Expression[] = [];
 
   for (const arg of args) {
-    const simplifiedArg = ce.simplify(arg) ?? NOTHING;
-    const val = getNumberValue(simplifiedArg);
-    if (val !== null && (!Number.isFinite(val) || Number.isInteger(val))) {
-      c += val;
-    } else {
-      // @todo: if head is Subtract
-      others.push(simplifiedArg);
+    const symbol = getSymbolName(arg);
+    if (symbol === MISSING || symbol === NOTHING) return NaN;
+    if (symbol === COMPLEX_INFINITY) return COMPLEX_INFINITY;
+    if (isInfinity(ce, arg)) {
+      if (isPositive(ce, arg)) {
+        posInfinity = true;
+      } else {
+        negInfinity = true;
+      }
+    }
+    const [n, d] = getRationalValue(arg);
+    if (n !== null && d !== null) {
+      if (isNaN(n) || isNaN(d)) return NaN;
+      numer = numer * d + n * denom;
+      denom = denom * d;
+    } else if (isNotZero(ce, arg)) {
+      others.push(arg);
     }
   }
+  if (posInfinity && negInfinity) return NaN;
+  if (posInfinity) return Infinity;
+  if (negInfinity) return -Infinity;
 
-  if (others.length === 0) return c;
-  if (others.length === 1 && c === 0) return others[0];
-  if (c === 0) return ['Add', ...others];
-  return ['Add', ...others, c];
+  // Group similar terms
+  // @todo
+  const terms: { [term: string]: number } = {};
+  for (const [term, coeff] of forEachTermCoeff(others)) {
+  }
+
+  if (others.length === 0) {
+    if (numer === 0) return 0;
+    if (denom === 1) return numer;
+    return ['Divide', numer, denom];
+  }
+  if (others.length === 1 && numer === 0) return others[0];
+  if (numer !== 0) {
+    const g = gcd(numer, denom);
+    numer = numer / g;
+    denom = denom / g;
+    if (denom === 1) {
+      others.push(numer);
+    } else {
+      others.push(['Divide', numer, denom]);
+    }
+  }
+  if (others.length === 2 && getFunctionName(others[1]) === NEGATE) {
+    // a + (-b) -> a - b
+    return ['Subtract', others[0], getArg(others[1], 1) ?? MISSING];
+  } else if (others.length === 2 && getFunctionName(others[0]) === NEGATE) {
+    // (-a) + b -> b - a
+    return ['Subtract', others[1], getArg(others[0], 1) ?? MISSING];
+  }
+  return ['Add', ...others];
 }
 
 function simplifyMultiply(
@@ -254,20 +453,20 @@ function simplifyMultiply(
   ...args: Expression[]
 ): Expression {
   if (args.length === 0) return 1;
-  if (args.length === 1) return ce.simplify(args[0]) ?? 1;
+  if (args.length === 1) return args[0];
 
   const others: Expression[] = [];
   let c = 1;
 
   for (const arg of args) {
-    const simplifiedArg = ce.simplify(arg) ?? NOTHING;
-    const val = getNumberValue(simplifiedArg);
+    const val = getNumberValue(arg);
     if (val === 0) return 0;
     if (val !== null && (!Number.isFinite(val) || Number.isInteger(val))) {
       c *= val;
     } else {
       // @todo: consider distributing if the head of arg is Add or Negate or Subtract or Divide
-      others.push(simplifiedArg);
+      if (isZero(ce, arg)) return 0;
+      others.push(arg);
     }
   }
 
@@ -280,8 +479,8 @@ function simplifyMultiply(
   return ['Multiply', c, ...others];
 }
 
-function simplifyNegate(ce: ComputeEngine, arg: Expression): Expression {
-  return applyNegate(ce.simplify(arg) ?? NOTHING) ?? ['Negate', arg];
+function simplifyNegate(_ce: ComputeEngine, arg: Expression): Expression {
+  return applyNegate(arg) ?? ['Negate', arg];
 }
 
 /** Apply some simplifications for negate.
@@ -295,28 +494,25 @@ export function applyNegate(expr: Expression): Expression {
   } else if (expr && isNumberObject(expr)) {
     if (expr.num[0] === '-') {
       expr = { num: expr.num.slice(1) };
+    } else if (expr.num[0] === '+') {
+      expr = { num: '-' + expr.num.slice(1) };
     } else {
       expr = { num: '-' + expr.num };
     }
+  } else if (expr instanceof Decimal) {
+    const d = expr as Decimal;
+    expr = d.mul(-1) as unknown as Expression;
+  } else if (expr instanceof Complex) {
+    const c = expr as Complex;
+    expr = c.multiply(-1);
   } else {
-    // [NEGATE, [NEGATE, x]] -> x
     const name = getFunctionName(expr);
     const argCount = getArgCount(expr!);
     if (name === NEGATE && argCount === 1) {
-      return getArg(expr, 1)!;
+      // [NEGATE, [NEGATE, x]] -> x
+      return getArg(expr, 1) ?? MISSING;
     } else if (name === MULTIPLY) {
-      let arg = getArg(expr, 1) ?? MISSING;
-      if (typeof arg === 'number') {
-        arg = -arg;
-      } else if (isNumberObject(arg)) {
-        if (arg.num[0] === '-') {
-          arg = { num: arg.num.slice(1) };
-        } else {
-          arg = { num: '-' + arg.num };
-        }
-      } else {
-        arg = [NEGATE, arg];
-      }
+      const arg = applyNegate(getArg(expr, 1) ?? MISSING);
       return [MULTIPLY, arg, ...getTail(expr).slice(1)];
     } else if (name === PARENTHESES && argCount === 1) {
       return applyNegate(getArg(getArg(expr, 1)!, 1)!);
@@ -327,54 +523,14 @@ export function applyNegate(expr: Expression): Expression {
   return expr;
 }
 
-function evalfAdd(ce: ComputeEngine, ...args: Expression[]): Expression {
-  if (args.length === 0) return 0;
-  if (args.length === 1) return ce.N(args[1]) ?? args[1];
-
-  const others: Expression[] = [];
-  let c = 0;
-
-  for (const arg of args) {
-    const val = getNumberValue(arg) ?? getNumberValue(ce.N(arg));
-    if (val !== null) {
-      c += val;
-    } else {
-      // @todo: if head is Subtract
-      others.push(arg);
-    }
-  }
-
-  if (others.length === 0) return c;
-  if (others.length === 1 && c === 0) return others[0];
-  if (c === 0) return ['Add', ...others];
-  return ['Add', ...others, c];
-}
-
-function evalfMultiply(ce: ComputeEngine, ...args: Expression[]): Expression {
+// The function is `numeric` so it will be passed numbers
+function evalNumberMultiply(_ce: ComputeEngine, ...args: number[]): number {
   if (args.length === 0) return 1;
-  if (args.length === 1) return ce.simplify(args[0]) ?? 1;
+  if (args.length === 1) return args[0];
 
-  const others: Expression[] = [];
   let c = 1;
-
-  for (const arg of args) {
-    const val = getNumberValue(arg) ?? getNumberValue(ce.N(arg));
-    if (val === 0) return 0;
-    if (val !== null) {
-      c *= val;
-    } else {
-      // @todo: consider distributing if the head of arg is Add or Negate or Subtract or Divide
-      others.push(arg);
-    }
-  }
-
-  if (c === 0 || !isFinite(c)) return c;
-  if (others.length === 0) return c;
-  if (others.length === 1 && c === 1) return others[0];
-  if (others.length === 1 && c === -1) return ['Negate', others[0]];
-  if (c === 1) return ['Multiply', ...others];
-  if (c === -1) return ['Negate', ['Multiply', ...others]];
-  return ['Multiply', c, ...others];
+  for (const arg of args) c *= arg;
+  return c;
 }
 
 export function ungroup(expr: Expression | null): Expression {
@@ -389,7 +545,11 @@ export function ungroup(expr: Expression | null): Expression {
 // Used by `simplify()` and `canonical()`
 // @todo: see https://docs.sympy.org/1.6/modules/core.html#pow
 
-export function applyPower(expr: Expression): Expression {
+export function applyPower(
+  engine: ComputeEngine,
+  expr: Expression
+): Expression {
+  // @todo: using engine predicates (isEqual(x, 1)...)
   expr = ungroup(expr);
 
   console.assert(getFunctionName(expr) === 'Power');
@@ -404,12 +564,14 @@ export function applyPower(expr: Expression): Expression {
 
   const val2 = getNumberValue(arg2) ?? NaN;
 
-  if (val2 === 0) return 1;
+  if (isZero(engine, arg2)) return 1;
   if (val2 === 1) return arg1;
+  if (val2 === 2) return ['Square', arg1];
 
   if (val2 === -1) {
     if (val1 === -1 || val1 === 1) return -1;
     if (!Number.isFinite(val1)) return 0;
+    return ['Divide', 1, arg1];
   }
   if (!Number.isFinite(val2)) {
     if (val1 === 0 && val2 < 0) return 'ComplexInfinity';
@@ -439,7 +601,7 @@ export function applyConstants(expr: Expression): Expression {
 
   // Trigonometric constants: -π, π/4, etc...
   [numer, denom] = getRationalSymbolicValue(expr, 'Pi');
-  if (isNaN(numer) || isNaN(denom)) {
+  if (numer === null || denom === null) {
     return applyRecursively(expr, (x) => applyConstants(x));
   }
   if (numer === -2 && denom === 1) return 'MinusDoublePi';
@@ -454,4 +616,10 @@ export function applyConstants(expr: Expression): Expression {
   if (numer === 1) return ['Divide', 'Pi', denom];
   if (denom === 1) return ['Multiply', numer, 'Pi'];
   return ['Multiply', ['Divide', numer, denom], 'Pi'];
+}
+
+function* forEachTermCoeff(
+  terms: Expression[]
+): Generator<[term: Expression, coef: number]> {
+  return;
 }

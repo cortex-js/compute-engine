@@ -26,6 +26,7 @@ import { joinLatex, tokensToString } from './core/tokenizer';
 import { serializeNumber } from '../common/serialize-number';
 import { getApplyFunctionStyle, getGroupStyle } from './serializer-style';
 import { replaceLatex } from './utils';
+import { Numeric } from '../compute-engine/public';
 
 function getSymbolStyle(expr: Expression, _level: number): 'asis' | 'upright' {
   console.assert(typeof expr === 'string' || isSymbolObject(expr));
@@ -34,10 +35,10 @@ function getSymbolStyle(expr: Expression, _level: number): 'asis' | 'upright' {
   return sym.length > 1 ? 'upright' : 'asis';
 }
 
-function serializeMatchfix(
-  serializer: Serializer,
-  expr: Expression,
-  def: IndexedLatexDictionaryEntry
+function serializeMatchfix<T extends number = Numeric>(
+  serializer: Serializer<T>,
+  expr: Expression<T>,
+  def: IndexedLatexDictionaryEntry<T>
 ): string {
   let segments: string[] = [];
   if (typeof def.trigger?.matchfix === 'string') {
@@ -59,10 +60,10 @@ function serializeMatchfix(
   return joinLatex(segments);
 }
 
-function serializeOperator(
-  serializer: Serializer,
-  expr: Expression,
-  def: IndexedLatexDictionaryEntry
+function serializeOperator<T extends number = Numeric>(
+  serializer: Serializer<T>,
+  expr: Expression<T>,
+  def: IndexedLatexDictionaryEntry<T>
 ): string {
   let result = '';
   const count = getArgCount(expr);
@@ -75,7 +76,7 @@ function serializeOperator(
       });
     }
     return replaceLatex(def.serialize as string, [
-      serializer.serialize(getArg(expr, 1)),
+      serializer.serialize(getArg<T>(expr, 1)),
     ]);
   }
   if (def.trigger?.postfix) {
@@ -115,8 +116,8 @@ function serializeOperator(
   return result;
 }
 
-export class Serializer implements Serializer {
-  readonly dictionary: IndexedLatexDictionary;
+export class Serializer<T extends number = number> implements Serializer<T> {
+  readonly dictionary: IndexedLatexDictionary<T>;
   readonly onError: ErrorListener<ErrorCode>;
   readonly options: Required<NumberFormattingOptions> &
     Required<SerializeLatexOptions>;
@@ -124,7 +125,7 @@ export class Serializer implements Serializer {
   constructor(
     options: Required<NumberFormattingOptions> &
       Required<SerializeLatexOptions>,
-    dictionary: IndexedLatexDictionary,
+    dictionary: IndexedLatexDictionary<T>,
     onError: ErrorListener<ErrorCode>
   ) {
     this.options = options;
@@ -147,7 +148,7 @@ export class Serializer implements Serializer {
    * of precedence less than or equal to prec, wrap it in some paren.
    * @todo: don't wrap abs
    */
-  wrap(expr: Expression | null, prec?: number): string {
+  wrap(expr: Expression<T> | null, prec?: number): string {
     if (expr === null) return '';
     if (prec === undefined) {
       return '(' + this.serialize(expr) + ')';
@@ -176,7 +177,7 @@ export class Serializer implements Serializer {
   /** If this is a "short" expression (atomic), wrap it.
    *
    */
-  wrapShort(expr: Expression | null): string {
+  wrapShort(expr: Expression<T> | null): string {
     if (expr === null) return '';
     const exprStr = this.serialize(expr);
 
@@ -199,7 +200,10 @@ export class Serializer implements Serializer {
     return '(' + s + ')';
   }
 
-  serializeSymbol(expr: Expression, def?: IndexedLatexDictionaryEntry): string {
+  serializeSymbol(
+    expr: Expression<T>,
+    def?: IndexedLatexDictionaryEntry<T>
+  ): string {
     const head = getFunctionHead(expr);
     if (!head) {
       console.assert(typeof expr === 'string' || isSymbolObject(expr));
@@ -291,7 +295,7 @@ export class Serializer implements Serializer {
     return (def.serialize as string) + this.serialize([PARENTHESES, ...args]);
   }
 
-  serializeDictionary(dict: { [key: string]: Expression }): string {
+  serializeDictionary(dict: { [key: string]: Expression<T> }): string {
     return `\\left[\\begin{array}{lll}${Object.keys(dict)
       .map((x) => {
         return `\\textbf{${x}} & \\rightarrow & ${this.serialize(dict[x])}`;
@@ -299,7 +303,7 @@ export class Serializer implements Serializer {
       .join('\\\\')}\\end{array}\\right]`;
   }
 
-  serialize(expr: Expression | null): LatexString {
+  serialize(expr: T | Expression<T> | null): LatexString {
     if (expr === null) return '';
 
     this.level += 1;

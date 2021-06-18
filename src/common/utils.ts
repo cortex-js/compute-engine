@@ -1,10 +1,29 @@
-import {
+import type {
   Expression,
   MathJsonRealNumber,
   MathJsonSymbol,
   MathJsonFunction,
   MathJsonString,
 } from '../public';
+import { Decimal } from 'decimal.js';
+import { Complex } from 'complex.js';
+import {
+  DECIMAL_E,
+  DECIMAL_NAN,
+  DECIMAL_NEG_INFINITY,
+  DECIMAL_PI,
+  DECIMAL_POS_INFINITY,
+} from '../compute-engine/numeric-decimal';
+
+import { gcd } from '../compute-engine/numeric';
+import { Numeric } from '../compute-engine/public';
+
+/**
+ * The `ExpressionX` type is used internally to make computations with
+ * arbitrarily large floating point and complex numbers
+ *
+ */
+export type ExpressionX = Expression<Numeric>;
 
 /**
  * These constants are the 'primitive' functions and constants that are used
@@ -37,7 +56,7 @@ export const SUBTRACT = 'Subtract';
 export const COMPLEX_INFINITY = 'ComplexInfinity';
 export const PI = 'Pi';
 export const EXPONENTIAL_E = 'ExponentialE';
-export const IMAGINARY_I = 'ImaginaryI';
+export const IMAGINARY_UNIT = 'ImaginaryUnit';
 
 export function isNumberObject(
   expr: Expression | null
@@ -57,34 +76,150 @@ export function isStringObject(
   return expr !== null && typeof expr === 'object' && 'str' in expr;
 }
 
-export function isFunctionObject(
-  expr: Expression | null
-): expr is MathJsonFunction {
+export function isFunctionObject<T extends number = number>(
+  expr: Expression<T> | null
+): expr is MathJsonFunction<T> {
   return expr !== null && typeof expr === 'object' && 'fn' in expr;
 }
 
-export function isDictionaryObject(
-  expr: Expression
+export function isDictionaryObject<T extends number = number>(
+  expr: Expression<T>
 ): expr is MathJsonRealNumber {
   return expr !== null && typeof expr === 'object' && 'dict' in expr;
 }
 
-export function getNumberValue(expr: Expression | null): number | null {
+export function getNumberValue<T extends number = number>(
+  expr: Expression<T> | null
+): number | null {
   if (typeof expr === 'number') return expr;
   if (expr === null) return null;
 
-  if (isNumberObject(expr)) return parseFloat(expr.num);
+  if (isNumberObject(expr)) {
+    if (expr.num.endsWith('d') || expr.num.endsWith('n')) return null;
+    return parseFloat(expr.num);
+  }
+
+  const symbol = getSymbolName(expr);
+  if (symbol === null) return null;
+  if (symbol === 'NaN') return NaN;
+  if (symbol === '+Infinity') return Infinity;
+  if (symbol === '-Infinity') return -Infinity;
+
+  if (getFunctionName(expr) === 'Complex') {
+    if (getNumberValue(getArg(expr, 2)) === 0) {
+      return getNumberValue(getArg(expr, 1));
+    }
+  }
+
+  return null;
+}
+
+export function getComplexValue(
+  expr: Complex | Expression | null
+): Complex | null {
+  if (expr instanceof Complex) return expr;
+  if (typeof expr === 'number') {
+    if (expr === 0) return Complex.ZERO;
+    if (expr === 1) return Complex.ONE;
+    return new Complex(expr);
+  }
 
   const symbol = getSymbolName(expr);
   if (symbol !== null) {
-    if (symbol === '+Infinity') return Infinity;
-    if (symbol === '-Infinity') return -Infinity;
+    if (symbol === 'NaN') return Complex.NAN;
+    if (symbol === '+Infinity') return new Complex(Infinity);
+    if (symbol === '-Infinity') return new Complex(-Infinity);
+    if (symbol === 'ComplexInfinity') return Complex.INFINITY;
+    if (symbol === 'Pi') return Complex.PI;
+    if (symbol === IMAGINARY_UNIT) return Complex.I;
+    if (symbol === EXPONENTIAL_E) return Complex.E;
   }
 
-  // @todo: canonical form does not use Negate for negative numbers, so
-  // this should not be needed
-  // if (getFunctionName(expr) === NEGATE) return -getNumberValue(getArg(expr, 1));
+  const name = getFunctionName(expr);
+  if (name === 'Complex') {
+    return new Complex(getArg(expr, 1) ?? NaN, getArg(expr, 2) ?? NaN);
+  }
+  if (
+    name === 'Multiply' &&
+    getSymbolName(getArg(expr, 2)) === IMAGINARY_UNIT
+  ) {
+    const im = getNumberValue(getArg(expr, 1));
+    if (im !== null) return new Complex(0, im);
+  }
+  if (name === 'Add') {
+    const re = getNumberValue(getArg(expr, 1));
+    const arg2 = getArg(expr, 2);
+    if (re !== null) {
+      if (getSymbolName(arg2) === IMAGINARY_UNIT) {
+        return new Complex(re, 1);
+      }
+      if (
+        getFunctionName(arg2) === 'Multiply' &&
+        getArg(arg2, 2) === IMAGINARY_UNIT
+      ) {
+        const im = getNumberValue(getArg(arg2, 1));
+        if (im !== null) return new Complex(re, im);
+      }
+    }
+  }
+  if (name === 'Subtract') {
+    const re = getNumberValue(getArg(expr, 1));
+    const arg2 = getArg(expr, 2);
+    if (re !== null) {
+      if (getSymbolName(arg2) === IMAGINARY_UNIT) {
+        return new Complex(re, -1);
+      }
+      if (
+        getFunctionName(arg2) === 'Multiply' &&
+        getArg(arg2, 2) === IMAGINARY_UNIT
+      ) {
+        const im = getNumberValue(getArg(arg2, 1));
+        if (im !== null) return new Complex(re, -im);
+      }
+    }
+  }
+  if (name === 'Negate') {
+    if (getSymbolName(getArg(expr, 1)) === IMAGINARY_UNIT) {
+      return new Complex(0, -1);
+    }
+  }
 
+  return null;
+}
+
+export function getDecimalValue(
+  expr: Decimal | Expression | null
+): Decimal | null {
+  if (expr instanceof Decimal) return expr;
+  if (typeof expr === 'number') return new Decimal(expr);
+
+  const symbol = getSymbolName(expr);
+  if (symbol !== null) {
+    if (symbol === 'NaN') return DECIMAL_NAN;
+    if (symbol === '+Infinity') return DECIMAL_POS_INFINITY;
+    if (symbol === '-Infinity') return DECIMAL_NEG_INFINITY;
+    if (symbol === 'Pi') return DECIMAL_PI;
+    if (symbol === 'ExponentialE') return DECIMAL_E;
+  }
+
+  if (isNumberObject(expr)) {
+    if (expr.num.endsWith('d') || expr.num.endsWith('n')) {
+      return new Decimal(expr.num.slice(0, -1));
+    }
+    return new Decimal(getNumberValue(expr) ?? NaN);
+  }
+
+  if (expr !== null && expr instanceof Complex) {
+    const c = expr as Complex;
+    if (c.im === 0) return new Decimal(c.re);
+    return null;
+  }
+
+  if (getFunctionName(expr) === 'Complex') {
+    if (getNumberValue(getArg(expr, 2)) === 0) {
+      return new Decimal(getNumberValue(getArg(expr, 1)) ?? NaN);
+    }
+  }
   return null;
 }
 
@@ -104,19 +239,19 @@ export function getStringValue(expr: Expression | null): string | null {
 
 /**
  * Return a rational (numer over denom) representation of the expression,
- * if possible, `[NaN, NaN]` otherwise.
+ * if possible, `[null, null]` otherwise.
  *
  * The expression can be:
- * - an integer
+ * - an integer -> [n, 1]
  * - ["Power", d, -1]
  * - ["Power", n, 1]
  * - ["Divide", n, d]
- * - ["Multiply", n, ["Power", d, -1]]
  *
  * The denominator is always > 0.
- * The numerator and denominator are reduced (i.e. \frac{2}{4} -> \frac{1}{2})
  */
-export function getRationalValue(expr: Expression): [number, number] {
+export function getRationalValue(
+  expr: Expression
+): [number, number] | [null, null] {
   if (typeof expr === 'number' && Number.isInteger(expr)) {
     return [expr, 1];
   }
@@ -133,28 +268,28 @@ export function getRationalValue(expr: Expression): [number, number] {
   if (symbol === 'Third') return [1, 3];
   if (symbol === 'Quarter') return [1, 4];
 
-  if (isAtomic(expr)) return [NaN, NaN];
+  if (isAtomic(expr)) return [null, null];
 
   const head = getFunctionName(expr);
-  if (!head) return [NaN, NaN];
+  if (!head) return [null, null];
 
-  let numer = NaN;
-  let denom = NaN;
+  let numer: number | null = null;
+  let denom: number | null = null;
 
   if (head === POWER) {
     const exponent = getNumberValue(getArg(expr, 2));
     if (exponent === 1) {
-      numer = getNumberValue(getArg(expr, 1)) ?? NaN;
+      numer = getNumberValue(getArg(expr, 1)) ?? null;
       denom = 1;
     } else if (exponent === -1) {
       numer = 1;
-      denom = getNumberValue(getArg(expr, 1)) ?? NaN;
+      denom = getNumberValue(getArg(expr, 1)) ?? null;
     }
   }
 
   if (head === DIVIDE) {
-    numer = getNumberValue(getArg(expr, 1)) ?? NaN;
-    denom = getNumberValue(getArg(expr, 2)) ?? NaN;
+    numer = getNumberValue(getArg(expr, 1)) ?? null;
+    denom = getNumberValue(getArg(expr, 2)) ?? null;
   }
 
   if (
@@ -162,16 +297,29 @@ export function getRationalValue(expr: Expression): [number, number] {
     getFunctionName(getArg(expr, 2)) === POWER &&
     getNumberValue(getArg(getArg(expr, 2), 2)) === -1
   ) {
-    numer = getNumberValue(getArg(expr, 1)) ?? NaN;
-    denom = getNumberValue(getArg(getArg(expr, 2), 1)) ?? NaN;
+    numer = getNumberValue(getArg(expr, 1)) ?? null;
+    denom = getNumberValue(getArg(getArg(expr, 2), 1)) ?? null;
   }
 
+  if (numer === null || denom === null) return [null, null];
+
   if (Number.isInteger(numer) && Number.isInteger(denom)) {
-    const g = gcd(numer, denom);
-    if (denom < 0) return [-numer / g, -denom / g];
-    return [numer / g, denom / g];
+    return [numer, denom];
   }
-  return [NaN, NaN];
+  return [null, null];
+}
+
+/**
+ *  Reduce the numerator and denominator:
+ * `\frac{2}{4} -> \frac{1}{2})`
+ */
+export function simplifyRational([numer, denom]:
+  | [number, number]
+  | [null, null]): [number, number] | [null, null] {
+  if (numer === null || denom === null) return [null, null];
+  const g = gcd(numer, denom);
+  if (denom < 0) return [-numer / g, -denom / g];
+  return [numer / g, denom / g];
 }
 
 /**
@@ -184,17 +332,18 @@ export function getRationalValue(expr: Expression): [number, number] {
 export function getRationalSymbolicValue(
   expr: Expression,
   symbol: string
-): [number, number] {
+): [number, number] | [null, null] {
   if (getSymbolName(expr) === symbol) return [1, 1];
 
   const head = getFunctionName(expr);
   if (head === MULTIPLY) {
     // p/q * symbol
-    if (getSymbolName(getArg(expr, 2) ?? MISSING) !== symbol) return [NaN, NaN];
+    if (getSymbolName(getArg(expr, 2) ?? MISSING) !== symbol)
+      return [null, null];
     return getRationalValue(getArg(expr, 1) ?? MISSING);
   } else if (head === DIVIDE) {
     const denom = getNumberValue(getArg(expr, 2) ?? MISSING);
-    if (denom === null || isNaN(denom)) return [NaN, NaN];
+    if (denom === null || isNaN(denom)) return [null, null];
     const arg1 = getArg(expr, 1) ?? MISSING;
     const sym1 = getSymbolName(arg1);
     if (sym1 === symbol) return [1, denom];
@@ -206,25 +355,23 @@ export function getRationalSymbolicValue(
     } else if (sym1 === 'DoublePi') {
       numer = 2;
     } else {
-      if (getFunctionName(arg1) !== MULTIPLY) return [NaN, NaN];
-      if (getSymbolName(getArg(arg1, 2)) !== symbol) return [NaN, NaN];
+      if (getFunctionName(arg1) !== MULTIPLY) return [null, null];
+      if (getSymbolName(getArg(arg1, 2)) !== symbol) return [null, null];
 
       numer = getNumberValue(getArg(arg1, 1));
     }
-    if (numer === null) return [NaN, NaN];
-    const g = gcd(numer, denom);
-    if (denom < 0) return [-numer / g, -denom / g];
-    return [numer / g, denom / g];
+    if (numer === null) return [null, null];
+    return [numer, denom];
   } else if (head === NEGATE) {
     const [numer, denom] = getRationalSymbolicValue(
       getArg(expr, 1) ?? MISSING,
       symbol
     );
-    if (isNaN(numer)) return [NaN, NaN];
-    return [-numer, denom];
+    if (numer === null || isNaN(numer)) return [null, null];
+    return [-numer!, denom!];
   }
 
-  return [NaN, NaN];
+  return [null, null];
 }
 
 /** True if the expression is of the form \frac{n}{m} where n and m are both integers
@@ -269,7 +416,7 @@ export function getHead(expr: Expression): Expression | null {
 }
 
 /**
- * The head of a function can either be a string or an expression.
+ * The head of a function can be a string or an expression.
  *
  * Return `null` if the expression is not a function.
  *
@@ -277,7 +424,9 @@ export function getHead(expr: Expression): Expression | null {
  * * `["Negate", 5]`  -> `"Negate"`
  * * `[["Prime", "f"], "x"]` -> `["Prime", "f"]`
  */
-export function getFunctionHead(expr: Expression | null): Expression | null {
+export function getFunctionHead<T extends number = number>(
+  expr: Expression<T> | null
+): Expression<T> | null {
   if (expr === null) return null;
   if (Array.isArray(expr)) return expr[0];
   if (isFunctionObject(expr)) return expr.fn[0];
@@ -285,7 +434,8 @@ export function getFunctionHead(expr: Expression | null): Expression | null {
 }
 
 /**
- * True if the expression is a number, a symbol or a dictionary
+ * True if the expression is a number, a symbol or a string
+ * (i.e. not a function and not a dictionary)
  */
 export function isAtomic(expr: Expression): boolean {
   return (
@@ -295,8 +445,8 @@ export function isAtomic(expr: Expression): boolean {
   );
 }
 
-export function getFunctionName(
-  expr: Expression | null
+export function getFunctionName<T extends number = number>(
+  expr: Expression<T> | null
 ):
   | typeof MULTIPLY
   | typeof POWER
@@ -325,6 +475,15 @@ export function getFunctionName(
   | 'Cosh'
   | 'Exp'
   | 'Re'
+  | 'And'
+  | 'Not'
+  | 'Equal'
+  | 'NotEqual'
+  | 'Element'
+  | 'NotElement'
+  | 'Complex'
+  | 'Hold'
+  | 'Evaluate'
   | '' {
   if (expr === null) return '';
   const head = getFunctionHead(expr);
@@ -351,7 +510,9 @@ export function getSymbolName(expr: Expression | null): string | null {
  * Return all the elements but the first one, i.e. the arguments of a
  * function.
  */
-export function getTail(expr: Expression | null): Expression[] {
+export function getTail<T extends number = number>(
+  expr: Expression<T> | null
+): Expression<T>[] {
   if (Array.isArray(expr)) {
     return expr.slice(1);
   }
@@ -361,11 +522,11 @@ export function getTail(expr: Expression | null): Expression[] {
   return [];
 }
 
-export function applyRecursively(
-  expr: Expression,
-  fn: (x: Expression) => Expression
-): Expression {
-  const head = getFunctionHead(expr);
+export function applyRecursively<T extends number = number>(
+  expr: Expression<T>,
+  fn: (x: Expression<T>) => Expression<T>
+): Expression<T> {
+  const head = getFunctionHead<T>(expr);
   if (head !== null) {
     return [fn(head), ...getTail(expr).map((x) => fn(x))];
   }
@@ -397,7 +558,10 @@ export function mapArgs<T>(expr: Expression, fn: (x: Expression) => T): T[] {
   return result;
 }
 
-export function getArg(expr: Expression | null, n: number): Expression | null {
+export function getArg<T extends number = number>(
+  expr: Expression<T> | null,
+  n: number
+): Expression<T> | null {
   if (expr === null) return null;
   if (Array.isArray(expr)) {
     return expr[n];
@@ -408,7 +572,9 @@ export function getArg(expr: Expression | null, n: number): Expression | null {
   return null;
 }
 
-export function getArgCount(expr: Expression): number {
+export function getArgCount<T extends number = number>(
+  expr: Expression<T>
+): number {
   if (Array.isArray(expr)) {
     return Math.max(0, expr.length - 1);
   }
@@ -418,9 +584,9 @@ export function getArgCount(expr: Expression): number {
   return 0;
 }
 
-export function getDictionary(
-  expr: Expression
-): { [key: string]: Expression } | null {
+export function getDictionary<T extends number = number>(
+  expr: Expression<T>
+): { [key: string]: Expression<T> } | null {
   if (typeof expr === 'object' && 'dict' in expr) return expr.dict;
   return null;
 }
@@ -428,11 +594,13 @@ export function getDictionary(
 /**
  * Structurally compare two expressions, ignoring metadata.
  *
- * Compare with `same()` which ignores differences in representation.
+ * Compare with `match()` which ignores differences in representation.
+ *
+ * @revisit: is this really needed? Or just use `match()`?
  */
-export function equalExpr(
-  lhs: Expression | null,
-  rhs: Expression | null
+export function equalExpr<T extends number = number>(
+  lhs: Expression<T> | null,
+  rhs: Expression<T> | null
 ): boolean {
   if (typeof lhs !== typeof rhs) return false;
   if (lhs === null) return rhs === null;
@@ -508,8 +676,4 @@ export function equalExpr(
 export function coef(_expr: Expression, _vars: string[]): Expression | null {
   // @todo
   return null;
-}
-
-function gcd(a: number, b: number): number {
-  return b ? gcd(b, a % b) : a;
 }

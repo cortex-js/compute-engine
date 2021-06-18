@@ -14,7 +14,7 @@ import {
   POWER,
 } from '../common/utils';
 import { ErrorSignal, Expression, Signal } from '../public';
-import { ComputeEngine } from './public';
+import { ComputeEngine, Domain } from './public';
 
 export class CortexError {
   signal: ErrorSignal;
@@ -68,6 +68,7 @@ export function isZero(
 ): boolean | undefined {
   const val = getNumberValue(expr);
   if (val !== null) return val === 0;
+
   if (engine.is(['Equal', expr, 0])) return true;
   // @todo matchAssumptions() equal not zero.
   if (engine.is(['NotEqual', expr, 0])) return false;
@@ -99,11 +100,13 @@ export function isInfinity(
 ): boolean | undefined {
   if (expr === null) return undefined;
   const val = getNumberValue(expr);
-  if (!Number.isFinite(val)) return true;
+  if (val !== null && !Number.isFinite(val)) return true;
+  if (val !== null && isNaN(val)) return undefined;
   const symbol = getSymbolName(expr);
   if (symbol === COMPLEX_INFINITY) return true;
   if (symbol === MISSING || symbol === NOTHING) return false;
-  if (ce.is(['Element', expr, 'ComplexNumber'])) return false;
+
+  if (ce.is(expr, 'ComplexNumber')) return false;
 
   const name = getFunctionName(expr);
   if (name === 'Negate') {
@@ -118,6 +121,25 @@ export function isInfinity(
   }
 
   return val === null ? undefined : false;
+}
+export function isPosInfinity(
+  ce: ComputeEngine,
+  expr: Expression | null
+): boolean | undefined {
+  const result = isInfinity(ce, expr);
+  if (result === undefined) return undefined;
+  if (result === false) return false;
+  return isPositive(ce, expr);
+}
+
+export function isNegInfinity(
+  ce: ComputeEngine,
+  expr: Expression | null
+): boolean | undefined {
+  const result = isInfinity(ce, expr);
+  if (result === undefined) return undefined;
+  if (result === false) return false;
+  return isNegative(ce, expr!);
 }
 
 export function isPositive(
@@ -201,11 +223,16 @@ export function isPositive(
 //   return undefined;
 // }
 // /** Is `expr` < 0? */
-// isNegative(expr: Expression): boolean | undefined {
-//   const result = this.isNonNegative(expr);
-//   if (result === undefined) return undefined;
-//   return !result;
-// }
+export function isNegative(
+  ce: ComputeEngine,
+  expr: Expression
+): boolean | undefined {
+  const result = isPositive(ce, expr);
+  if (result === true) return false;
+  if (result === undefined) return undefined;
+  if (isZero(ce, expr) === false) return true;
+  return false;
+}
 // /** Is `expr` <= 0? */
 // isNonPositive(expr: Expression): boolean | undefined {
 //   const result = this.isPositive(expr);
@@ -246,3 +273,165 @@ export function isPositive(
 //   // @todo
 //   return undefined;
 // }
+
+/** Test if `lhs` is a subset of `rhs`.
+ *
+ * `lhs` and `rhs` can be set expressions, i.e.
+ * `["SetMinus", "ComplexNumber", 0]`
+ *
+ */
+export function isSubsetOf(
+  ce: ComputeEngine,
+  lhs: Domain | null,
+  rhs: Domain | null
+): boolean {
+  if (!lhs || !rhs) return false;
+  if (typeof lhs === 'string' && lhs === rhs) return true;
+  if (rhs === 'Anything') return true;
+  if (rhs === 'Nothing') return false;
+
+  //
+  // 1. Set operations on lhs
+  //
+  // Union: lhs or rhs
+  // Intersection: lhs and rhs
+  // SetMinus: lhs and not rhs
+  // Complement: not lhs
+  const lhsFnName = getFunctionName(lhs);
+  if (lhsFnName === 'Union') {
+    return getTail(lhs).some((x) => isSubsetOf(ce, x, rhs));
+  } else if (lhsFnName === 'Intersection') {
+    return getTail(lhs).every((x) => isSubsetOf(ce, x, rhs));
+  } else if (lhsFnName === 'SetMinus') {
+    return (
+      isSubsetOf(ce, getArg(lhs, 1), rhs) &&
+      !isSubsetOf(ce, getArg(lhs, 2), rhs)
+    );
+    // } else if (lhsFnName === 'Complement') {
+    //   return !ce.isSubsetOf(getArg(lhs, 1), rhs);
+  }
+
+  //
+  // 2. Set operations on rhs
+  //
+  const rhsFnName = getFunctionName(rhs);
+  if (rhsFnName === 'Union') {
+    return getTail(rhs).some((x) => isSubsetOf(ce, lhs, x));
+  } else if (rhsFnName === 'Intersection') {
+    return getTail(rhs).every((x) => isSubsetOf(ce, lhs, x));
+  } else if (rhsFnName === 'SetMinus') {
+    return (
+      isSubsetOf(ce, lhs, getArg(rhs, 1)) &&
+      !isSubsetOf(ce, lhs, getArg(rhs, 2))
+    );
+    // } else if (rhsFnName === 'Complement') {
+    //   return !ce.isSubsetOf(lhs, getArg(rhs, 1));
+  }
+
+  //
+  // 3. Not a set operation: a domain or a parametric domain
+  //
+  const rhsDomainName = getSymbolName(rhs) ?? rhsFnName;
+  if (!rhsDomainName) {
+    const rhsVal = getNumberValue(rhs) ?? NaN;
+    if (Number.isNaN(rhsVal)) return false;
+    // If the rhs is a number, 'upgrade' it to a set singleton
+    rhs = rhs === 0 ? 'NumberZero' : ['Set', rhs];
+  }
+
+  const rhsDef = ce.getSetDefinition(rhsDomainName);
+  if (!rhsDef) return false;
+  if (typeof rhsDef.isSubsetOf === 'function') {
+    // 3.1 Parametric domain
+    return rhsDef.isSubsetOf(this, lhs, rhs);
+  }
+  const lhsDomainName = getSymbolName(lhs) ?? lhsFnName;
+  if (!lhsDomainName) return false;
+
+  const lhsDef = ce.getSetDefinition(lhsDomainName);
+  if (!lhsDef) return false;
+
+  // 3.2 Non-parametric domain:
+  for (const parent of lhsDef.supersets) {
+    if (isSubsetOf(ce, parent, rhs)) return true;
+  }
+
+  return false;
+}
+
+// This return all the vars (free or not) in the expression.
+// Calculating the free vars is more difficult: to do so you need to know
+// which function create a scope, and when a symbol is added to a scope.
+// The better way to deal with it is to compile an expression and catch
+// the errors when an undefined symbol is encountered.
+function getVarsRecursive(
+  engine: ComputeEngine,
+  expr: Expression,
+  vars: Set<string>
+): void {
+  const args = getTail(expr);
+  if (args.length > 0) {
+    args.forEach((x) => getVarsRecursive(engine, x, vars));
+  } else {
+    // It has a name, but no arguments. It's a symbol
+    const name = getSymbolName(expr);
+    if (name && !vars.has(name)) {
+      const def = engine.getSymbolDefinition(name);
+      if (!def || def.constant === false) {
+        // It's not in the dictionary, or it's in the dictionary
+        // but not as a constant -> it's a variable
+        vars.add(name);
+      }
+    }
+  }
+}
+/**
+ * Return the set of free variables in an expression.
+ */
+export function getVars(ce: ComputeEngine, expr: Expression): Set<string> {
+  const result = new Set<string>();
+  getVarsRecursive(ce, expr, result);
+  return result;
+}
+
+export function isEqual(
+  _ce: ComputeEngine,
+  _lhs: Expression,
+  _rhs: Expression
+): boolean | undefined {
+  //@todo
+  return undefined;
+}
+
+export function isLess(
+  _ce: ComputeEngine,
+  _lhs: Expression,
+  _rhs: Expression
+): boolean | undefined {
+  //@todo
+  return undefined;
+}
+export function isLessEqual(
+  _ce: ComputeEngine,
+  _lhs: Expression,
+  _rhs: Expression
+): boolean | undefined {
+  //@todo
+  return undefined;
+}
+export function isGreater(
+  _ce: ComputeEngine,
+  _lhs: Expression,
+  _rhs: Expression
+): boolean | undefined {
+  //@todo
+  return undefined;
+}
+export function isGreaterEqual(
+  _ce: ComputeEngine,
+  _lhs: Expression,
+  _rhs: Expression
+): boolean | undefined {
+  //@todo
+  return undefined;
+}

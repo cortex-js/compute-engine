@@ -1,6 +1,6 @@
 import { LatexDictionary } from './public';
 
-export const DEFINITIONS_ALGEBRA: LatexDictionary = [
+export const DEFINITIONS_ALGEBRA: LatexDictionary<any> = [
   {
     name: 'To',
     trigger: { infix: '\\to' },

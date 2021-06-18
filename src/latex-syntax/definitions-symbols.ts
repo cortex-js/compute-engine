@@ -1,6 +1,7 @@
+import { Numeric } from '../compute-engine/public';
 import { LatexDictionary } from './public';
 
-export const DEFINITIONS_SYMBOLS: LatexDictionary = [
+export const DEFINITIONS_SYMBOLS: LatexDictionary<Numeric> = [
   // Greek
   { trigger: { symbol: '\\alpha' }, parse: '\u03b1' },
   { trigger: { symbol: '\\beta' }, parse: '\u03b2' },

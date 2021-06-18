@@ -6,6 +6,7 @@ import {
   LatexDictionaryEntry,
   LatexToken,
   NumberFormattingOptions,
+  ParserFunction,
 } from './public';
 import {
   isFunctionObject,
@@ -22,14 +23,14 @@ import { tokensToString } from './core/tokenizer';
 import { IndexedLatexDictionary } from './definitions';
 import { DEFAULT_PARSE_LATEX_OPTIONS } from './utils';
 
-export class Scanner implements Scanner {
+export class Scanner<T extends number = number> implements Scanner<T> {
   index = 0;
 
   readonly tokens: LatexToken[];
 
   readonly onError: ErrorListener<ErrorCode>;
 
-  readonly dictionary: IndexedLatexDictionary;
+  readonly dictionary: IndexedLatexDictionary<T>;
 
   readonly options: Required<NumberFormattingOptions> &
     Required<ParseLatexOptions>;
@@ -39,7 +40,7 @@ export class Scanner implements Scanner {
   constructor(
     tokens: LatexToken[],
     options: Required<NumberFormattingOptions> & Required<ParseLatexOptions>,
-    dictionary: IndexedLatexDictionary,
+    dictionary: IndexedLatexDictionary<T>,
     onError: ErrorListener<ErrorCode>
   ) {
     this.options = { ...DEFAULT_PARSE_LATEX_OPTIONS, ...options };
@@ -54,7 +55,7 @@ export class Scanner implements Scanner {
     };
     this.dictionary = dictionary;
 
-    let def: LatexDictionaryEntry | undefined;
+    let def: LatexDictionaryEntry<T> | undefined;
     this.invisibleOperatorPrecedence = 0;
     if (this.options.invisibleOperator) {
       def = this.dictionary.name.get(this.options.invisibleOperator);
@@ -74,8 +75,8 @@ export class Scanner implements Scanner {
     }
   }
 
-  clone(start: number, end: number): Scanner {
-    return new Scanner(
+  clone(start: number, end: number): Scanner<T> {
+    return new Scanner<T>(
       this.tokens.slice(start, end),
       this.options,
       this.dictionary,
@@ -87,7 +88,7 @@ export class Scanner implements Scanner {
     open: LatexToken | LatexToken[],
     close: LatexToken | LatexToken[],
     silentError = true
-  ): Scanner | null {
+  ): Scanner<T> | null {
     if (!this.matchAll(open)) {
       if (!silentError) {
         this.onError({
@@ -183,8 +184,8 @@ export class Scanner implements Scanner {
       | 'superfix'
       | 'subfix'
       | 'operator'
-  ): [LatexDictionaryEntry | null, number] {
-    let defs: (undefined | LatexDictionaryEntry)[];
+  ): [LatexDictionaryEntry<T> | null, number] {
+    let defs: (undefined | LatexDictionaryEntry<T>)[];
     if (kind === 'operator') {
       defs = this.lookAhead().map(
         (x, n) =>
@@ -209,18 +210,34 @@ export class Scanner implements Scanner {
     // Check if the have a `{}` token sequence.
     // Those are used in Latex to force an invisible separation between commands
     if (
-      this.peek === '<{>' &&
       !this.atEnd &&
+      this.peek === '<{>' &&
       this.tokens[this.index + 1] === '<}>'
     ) {
       this.index += 2;
+      this.skipSpace();
       return true;
     }
-    if (!this.options.skipSpace) return false;
+
     let result = false;
-    while (this.match('<space>')) {
+
+    // Check if we have an ignorable command (e.g. \displaystyle and other
+    // purely presentational commands)
+    while (
+      !this.atEnd &&
+      (this.options.ignoreCommands.includes(this.peek) ||
+        this.options.idempotentCommands.includes(this.peek))
+    ) {
+      this.index += 1;
+      this.skipSpace();
       result = true;
     }
+
+    if (!this.options.skipSpace) return false;
+    while (this.match('<space>')) result = true;
+
+    if (result) this.skipSpace();
+
     return result;
   }
 
@@ -366,13 +383,28 @@ export class Scanner implements Scanner {
       this.index = savedIndex;
       return '';
     }
+    result = (sign === '-' ? '-' : '') + result;
 
+    let hasDecimalMarker = false;
+    let hasExponent = false;
     if (this.match(this.options.decimalMarker ?? '')) {
-      result += '.' + (this.matchDecimalDigits() ?? '');
+      hasDecimalMarker = true;
+      result += '.' + (this.matchDecimalDigits() ?? '0');
     }
-    result += this.matchExponent() ?? '';
+    const exponent = this.matchExponent();
+    if (exponent) hasExponent = true;
 
-    if (result) return (sign === '-' ? '-' : '') + result;
+    if (result) {
+      // If the number has more than about 10 significant digits, use a Decimal or BigInt
+      if (result.length + exponent.length > 12) {
+        if (hasDecimalMarker || hasExponent) {
+          return result + exponent + 'd'; // Decimal number
+        } else {
+          return result + 'n'; // BigInt
+        }
+      }
+      return result + exponent;
+    }
 
     this.index = savedIndex;
     return '';
@@ -380,17 +412,17 @@ export class Scanner implements Scanner {
 
   matchOperator(
     kind: 'infix' | 'prefix' | 'postfix',
-    lhs: Expression | null = null,
+    lhs: Expression<T> | null = null,
     minPrec = 0
-  ): Expression | null {
+  ): Expression<T> | null {
     const [def, n] = this.peekDefinition(kind);
 
     if (def === null) return null;
 
     if (typeof def.parse === 'function') {
       // Custom parser found
-      let rhs: Expression | null = null;
-      [lhs, rhs] = def.parse(lhs, this, minPrec);
+      let rhs: Expression<T> | null = null;
+      [lhs, rhs] = (def.parse as ParserFunction<T>)(lhs, this, minPrec);
       if (rhs === null) return null;
 
       return this.applyInvisibleOperator(lhs, rhs);
@@ -409,11 +441,11 @@ export class Scanner implements Scanner {
 
   matchArguments(
     kind: undefined | '' | 'group' | 'implicit'
-  ): Expression[] | null {
+  ): Expression<T>[] | null {
     if (!kind) return null;
 
     const savedIndex = this.index;
-    let result: Expression[] | null = null;
+    let result: Expression<T>[] | null = null;
 
     const group = this.matchMatchfixOperator();
 
@@ -446,13 +478,15 @@ export class Scanner implements Scanner {
     return result;
   }
 
-  matchMatchfixOperator(): Expression | null {
+  matchMatchfixOperator(): Expression<T> | null {
     const [def] = this.peekDefinition('matchfix');
     if (def === null) return null;
 
     if (typeof def.parse === 'function') {
       // Custom parser: invoke it.
-      return this.applyInvisibleOperator(...def.parse(null, this, 0));
+      return this.applyInvisibleOperator(
+        ...(def.parse as ParserFunction<T>)(null, this, 0)
+      );
     }
     const trigger =
       typeof def.trigger === 'object' ? def.trigger.matchfix : def.trigger;
@@ -476,7 +510,7 @@ export class Scanner implements Scanner {
       | 'superfix'
       | 'subfix'
       | 'operator'
-  ): [LatexDictionaryEntry | null, Expression | null] {
+  ): [LatexDictionaryEntry<T> | null, Expression<T> | null] {
     // Find the longest string of tokens with a definition of the
     // specified kind
     const [def, tokenCount] = this.peekDefinition(kind);
@@ -484,7 +518,7 @@ export class Scanner implements Scanner {
     // If there is a custom parsing function associated with this
     // definition, invoke it.
     if (typeof def?.parse === 'function') {
-      const [, result] = def.parse(null, this, 0);
+      const [, result] = (def.parse as ParserFunction<T>)(null, this, 0);
       return [def, result];
     }
     this.index += tokenCount;
@@ -500,11 +534,11 @@ export class Scanner implements Scanner {
    * - a function with implicit arguments: `\cos x`
    * - a command: `\frac{2}{3}`
    */
-  matchSymbol(): Expression | null {
+  matchSymbol(): Expression<T> | null {
     const [def, result] = this.matchDefinition('symbol');
 
     // If a result is ready (because there was a parsing function associated
-    // with the definition), just
+    // with the definition), we're done
     if (result !== null) return result;
 
     if (def === null) {
@@ -532,9 +566,9 @@ export class Scanner implements Scanner {
     //
     // Is it a Latex function, e.g. `\frac{}{}`?
     //
-    const requiredArgs: Expression[] = [];
-    const optionalArgs: Expression[] = [];
-    let arg: Expression | null;
+    const requiredArgs: Expression<T>[] = [];
+    const optionalArgs: Expression<T>[] = [];
+    let arg: Expression<T> | null;
     let i = def.optionalLatexArg ?? 0;
     while (i > 0) {
       arg = this.matchOptionalLatexArgument();
@@ -563,7 +597,7 @@ export class Scanner implements Scanner {
     return [def.parse as string, ...requiredArgs, ...args, ...optionalArgs];
   }
 
-  matchOptionalLatexArgument(): Expression | null {
+  matchOptionalLatexArgument(): Expression<T> | null {
     this.skipSpace();
     return this.matchBalancedExpression('[', ']');
   }
@@ -576,7 +610,7 @@ export class Scanner implements Scanner {
    * Return null if an argument was not found
    * Return '' if an empty argument `{}` was found
    */
-  matchRequiredLatexArgument(): Expression | null {
+  matchRequiredLatexArgument(): Expression<T> | null {
     this.skipSpace();
     const expr = this.matchBalancedExpression('<{>', '<}>');
     if (expr) return expr;
@@ -584,7 +618,7 @@ export class Scanner implements Scanner {
     // Is it a single digit?
     if (/^[0-9]$/.test(this.peek)) {
       // ... only match the digit, i.e. `x^23` is `x^{2}3`, not x^{23}
-      return parseFloat(this.next());
+      return parseFloat(this.next()) as T;
     }
     // Is it a single letter (but not a special letter)?
     if (/^[^\\#]$/.test(this.peek)) {
@@ -598,9 +632,9 @@ export class Scanner implements Scanner {
   /**
    *  Match a superfix/subfix operator, e.g. `^{*}`
    */
-  matchSupsub(lhs: Expression | null): Expression | null {
+  matchSupsub(lhs: Expression<T> | null): Expression<T> | null {
     if (lhs === null) return null;
-    let result: Expression | null = null;
+    let result: Expression<T> | null = null;
     this.skipSpace();
     (
       [
@@ -618,7 +652,7 @@ export class Scanner implements Scanner {
 
       const savedIndex = this.index;
 
-      let def: LatexDictionaryEntry | null | undefined;
+      let def: LatexDictionaryEntry<T> | null | undefined;
       let n = 0;
       if (this.match('<{>')) {
         // Supsub with an argument
@@ -629,7 +663,7 @@ export class Scanner implements Scanner {
           //  i.e. `^{*}` for `superstar`
           //
           if (typeof def.parse === 'function') {
-            result = def.parse(lhs, this, 0)[1];
+            result = (def.parse as ParserFunction<T>)(lhs, this, 0)[1];
           } else {
             this.index += n;
             if (this.match('<}>')) {
@@ -651,7 +685,7 @@ export class Scanner implements Scanner {
         [def, n] = this.peekDefinition(opKind);
         if (def) {
           if (typeof def.parse === 'function') {
-            result = def.parse(lhs, this, 0)[1];
+            result = (def.parse as ParserFunction<T>)(lhs, this, 0)[1];
           } else {
             this.index += n;
             result = [(def.parse as string) ?? def.name, lhs!];
@@ -665,7 +699,7 @@ export class Scanner implements Scanner {
         def = this.dictionary.infix[1]?.get(triggerChar);
         if (typeof def?.parse === 'function') {
           this.index = beforeTrigger;
-          result = def.parse(lhs, this, 0)[1];
+          result = (def.parse as ParserFunction<T>)(lhs, this, 0)[1];
         } else if (typeof def?.parse === 'string') {
           [lhs, result] = this.applyOperator(
             def.parse,
@@ -687,14 +721,14 @@ export class Scanner implements Scanner {
     return result;
   }
 
-  matchPostfix(lhs: Expression | null): Expression | null {
+  matchPostfix(lhs: Expression<T> | null): Expression<T> | null {
     if (lhs === null) return null;
 
     const [def, n] = this.peekDefinition('postfix');
     if (def === null || def === undefined) return null;
 
     if (typeof def.parse === 'function') {
-      [, lhs] = def.parse(lhs, this, 0);
+      [, lhs] = (def.parse as ParserFunction<T>)(lhs, this, 0);
       if (lhs === null) return null;
 
       return lhs;
@@ -754,11 +788,11 @@ export class Scanner implements Scanner {
    * Return rows of sparse columns as a list: empty rows are indicated with NOTHING,
    * and empty cells are also indicated with NOTHING.
    */
-  matchTabular(): null | Expression {
-    const result: null | Expression = ['list'];
+  matchTabular(): null | Expression<T> {
+    const result: null | Expression<T> = ['list'];
 
-    let row: Expression[] = ['list'];
-    let expr: Expression | null = null;
+    let row: Expression<T>[] = ['list'];
+    let expr: Expression<T> | null = null;
     let done = false;
     while (!this.atEnd && !done) {
       if (this.match('&')) {
@@ -795,7 +829,7 @@ export class Scanner implements Scanner {
     return result;
   }
 
-  matchEnvironment(): Expression | null {
+  matchEnvironment(): Expression<T> | null {
     if (this.match('\\begin')) {
       if (this.match('<{>')) {
         const name = this.matchString();
@@ -844,9 +878,9 @@ export class Scanner implements Scanner {
    */
   applyOperator(
     op: string,
-    lhs: Expression | null,
-    rhs: Expression | null
-  ): NonNullable<[Expression | null, Expression | null]> {
+    lhs: Expression<T> | null,
+    rhs: Expression<T> | null
+  ): NonNullable<[Expression<T> | null, Expression<T> | null]> {
     const def = this.dictionary.name.get(op);
 
     if (def === undefined) {
@@ -941,9 +975,9 @@ export class Scanner implements Scanner {
    *
    */
   applyInvisibleOperator(
-    lhs: Expression | null,
-    rhs: Expression | null
-  ): Expression | null {
+    lhs: Expression<T> | null,
+    rhs: Expression<T> | null
+  ): Expression<T> | null {
     if (lhs === null) return rhs;
     if (rhs === null) return lhs;
     // @todo: handle invisible plus
@@ -967,7 +1001,7 @@ export class Scanner implements Scanner {
       return null;
     }
     // No invisible operator, use 'Latex'
-    let fn: Expression = [LATEX_TOKENS];
+    let fn: Expression<T> = [LATEX_TOKENS];
     if (getFunctionName(lhs) === LATEX_TOKENS) {
       fn = fn.concat(getTail(lhs));
     } else {
@@ -986,7 +1020,7 @@ export class Scanner implements Scanner {
     return fn;
   }
 
-  matchUnknownLatexCommand(): Expression | null {
+  matchUnknownLatexCommand(): Expression<T> | null {
     const command = this.peek;
     if (!command || command[0] !== '\\') {
       return null;
@@ -1007,8 +1041,8 @@ export class Scanner implements Scanner {
       return this.next() ?? MISSING;
     }
 
-    const optArgs: Expression[] = [];
-    const reqArgs: Expression[] = [];
+    const optArgs: Expression<T>[] = [];
+    const reqArgs: Expression<T>[] = [];
 
     let done = false;
     do {
@@ -1044,8 +1078,8 @@ export class Scanner implements Scanner {
    *  <matchfix-op-open> <expression> [<matchfix-op-separator> <expression>] <matchfix-op-close>
    *
    */
-  matchPrimary(_minPrec?: number): Expression | null {
-    let result: Expression | null = null;
+  matchPrimary(_minPrec?: number): Expression<T> | null {
+    let result: Expression<T> | null = null;
     const originalIndex = this.index;
 
     //
@@ -1079,13 +1113,13 @@ export class Scanner implements Scanner {
     //
     // 5. Are there subsup or postfix operators?
     //
-    let supsub: Expression | null = null;
+    let supsub: Expression<T> | null = null;
     do {
       supsub = this.matchSupsub(result);
       result = supsub ?? result;
     } while (supsub !== null);
 
-    let postfix: Expression | null = null;
+    let postfix: Expression<T> | null = null;
     do {
       postfix = this.matchPostfix(result);
       result = postfix ?? result;
@@ -1098,7 +1132,7 @@ export class Scanner implements Scanner {
     open: LatexToken | LatexToken[],
     close: LatexToken | LatexToken[],
     onError?: ErrorListener<ErrorCode>
-  ): Expression | null {
+  ): Expression<T> | null {
     const scanner = this.balancedClone(open, close);
     if (!scanner) {
       // eslint-disable-next-line no-unused-expressions
@@ -1129,8 +1163,8 @@ export class Scanner implements Scanner {
    *
    * Stop when an operator of precedence less than `minPrec` is encountered
    */
-  matchExpression(minPrec = 0): Expression | null {
-    let lhs: Expression | null = null;
+  matchExpression(minPrec = 0): Expression<T> | null {
+    let lhs: Expression<T> | null = null;
     const originalIndex = this.index;
 
     this.skipSpace();
@@ -1185,7 +1219,7 @@ export class Scanner implements Scanner {
   /**
    * Add latex or other requested metadata to the expression
    */
-  decorate(expr: Expression | null, start: number): Expression | null {
+  decorate(expr: Expression<T> | null, start: number): Expression<T> | null {
     if (expr === null) return null;
     if (this.options.preserveLatex) {
       const latex = this.latex(start, this.index);

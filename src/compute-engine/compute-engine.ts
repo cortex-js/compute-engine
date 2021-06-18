@@ -7,345 +7,117 @@ import {
 
 import {
   CollectionDefinition,
+  ComputeEngine as ComputeEngineInterface,
   Definition,
   Dictionary,
   Domain,
   Form,
   FunctionDefinition,
+  Numeric,
+  NumericFormat,
   RuntimeScope,
   Scope,
   SetDefinition,
+  Simplification,
   SymbolDefinition,
 } from './public';
 
-import {
-  compileDictionary,
-  getDefaultDictionaries,
-} from './dictionary/dictionary';
-import { format as formatWithEngine } from './forms';
-import { compare } from './dictionary/compare';
-import { evaluateWithEngine } from './evaluate';
-import { domain as domainWithEngine } from './domains';
-import {
-  getArg,
-  getFunctionName,
-  getNumberValue,
-  getSymbolName,
-  getTail,
-} from '../common/utils';
-import {
-  isCollectionDefinition,
-  isFunctionDefinition,
-  isSetDefinition,
-  isSymbolDefinition,
-} from './dictionary/utils';
-import { same } from './same';
-import { CortexError } from './utils';
-import { simplifyWithEngine } from './simplify';
-import { numericalEvalWithEngine } from './numerical-eval';
-import { assumeWithEngine, isWithEngine } from './assume';
+import { InternalComputeEngine } from './internal-compute-engine';
+import { equalExpr } from '../common/utils';
+import { ExpressionMap } from './expression-map';
 
-export class ComputeEngine {
+export class ComputeEngine<T extends number = number>
+  implements ComputeEngineInterface
+{
+  readonly internal: InternalComputeEngine;
+
   static getDictionaries(
     categories: DictionaryCategory[] | 'all' = 'all'
-  ): Readonly<Dictionary>[] {
-    return getDefaultDictionaries(categories);
-  }
-  context: RuntimeScope;
-  deadline?: number;
-
-  constructor(options?: { dictionaries?: Readonly<Dictionary>[] }) {
-    const dicts = options?.dictionaries ?? ComputeEngine.getDictionaries();
-
-    for (const dict of dicts) {
-      if (!this.context) {
-        //
-        // The first, topmost, scope contains additional info
-        //
-        this.pushScope(dict, {
-          warn: (sigs: WarningSignal[]): void => {
-            for (const sig of sigs) {
-              if (typeof sig.message === 'string') {
-                console.warn(sig.message);
-              } else {
-                console.warn(...sig.message);
-              }
-            }
-          },
-          timeLimit: 2.0, // execution time limit: 2.0s
-          memoryLimit: 1.0, // memory limit: 1.0 megabyte
-          recursionLimit: 1024,
-          // iterationLimit:    no iteration limit
-        });
-      } else {
-        this.pushScope(dict);
-      }
-    }
-
-    // Push a fresh scope to protect global definitions.
-    this.pushScope({});
+  ): Readonly<Dictionary<Numeric>>[] {
+    return InternalComputeEngine.getDictionaries(categories);
   }
 
-  pushScope(dictionary: Readonly<Dictionary>, scope?: Partial<Scope>): void {
-    this.context = {
-      ...scope,
-      parentScope: this.context,
-      dictionary: compileDictionary(dictionary, this),
-      assumptions: this.context ? new Set(this.context.assumptions) : new Set(),
-    };
+  constructor(options?: { dictionaries?: Readonly<Dictionary<Numeric>>[] }) {
+    this.internal = new InternalComputeEngine(options);
+  }
+
+  get precision(): number {
+    return this.internal.precision;
+  }
+  set precision(p: number | 'machine') {
+    this.internal.precision = p;
+  }
+
+  get numericFormat(): NumericFormat {
+    return this.internal.numericFormat;
+  }
+  set numericFormat(f: NumericFormat) {
+    this.internal.numericFormat = f;
+  }
+
+  get context(): RuntimeScope<Numeric> {
+    return this.internal.context;
+  }
+
+  pushScope(
+    dictionary: Readonly<Dictionary<Numeric>>,
+    scope?: Partial<Scope>
+  ): void {
+    this.internal.pushScope(dictionary, scope);
   }
 
   popScope(): void {
-    const parentScope = this.context?.parentScope;
-
-    // If there are some warnings, handle them
-    if (this.context.warnings) {
-      const warnings = [...this.context.warnings];
-      this.context.warnings = [];
-      if (this.context.warn) {
-        this.context.warn(warnings);
-      }
-    }
-
-    // If there are some unhandled warnings, or warnings signaled during the
-    // warning handler, propagate them.
-    if (
-      parentScope &&
-      this.context.warnings &&
-      this.context.warnings.length > 0
-    ) {
-      if (!parentScope.warnings) {
-        parentScope.warnings = [...this.context.warnings];
-      } else {
-        parentScope.warnings = [
-          ...parentScope.warnings,
-          ...this.context.warnings,
-        ];
-      }
-    }
-
-    this.context = parentScope;
+    this.internal.popScope();
   }
 
-  get assumptions(): Set<Expression> {
-    if (this.context.assumptions) return this.context.assumptions;
-    this.context.assumptions = new Set();
-    return this.context.assumptions;
-  }
-
-  get timeLimit(): undefined | number {
-    let scope = this.context;
-    while (scope) {
-      if (scope.timeLimit !== undefined) return scope.timeLimit;
-      scope = scope.parentScope;
-    }
-    return undefined;
-  }
-  get recursionLimit(): undefined | number {
-    let scope = this.context;
-    while (scope) {
-      if (scope.recursionLimit !== undefined) return scope.recursionLimit;
-      scope = scope.parentScope;
-    }
-    return undefined;
-  }
-  get iterationLimit(): undefined | number {
-    let scope = this.context;
-    while (scope) {
-      if (scope.iterationLimit !== undefined) return scope.iterationLimit;
-      scope = scope.parentScope;
-    }
-    return undefined;
+  get assumptions(): ExpressionMap<T, boolean> {
+    return this.internal.assumptions;
   }
 
   shouldContinueExecution(): boolean {
-    if (
-      this.deadline !== undefined &&
-      this.deadline < globalThis.performance.now()
-    ) {
-      return false;
-    }
-    return true;
+    return this.internal.shouldContinueExecution();
   }
 
   checkContinueExecution(): void {
-    if (!this.shouldContinueExecution()) {
-      throw new CortexError({
-        message: 'timeout', // @todo: should capture stack
-      });
-    }
+    this.internal.checkContinueExecution();
   }
 
-  /**
-   * Return the set of free variables in an expression.
-   */
-  getVars(expr: Expression): Set<string> {
-    const result = new Set<string>();
-    varsRecursive(expr, result, this);
-    return result;
+  signal(sig: ErrorSignal | WarningSignal): void {
+    this.internal.signal(sig);
   }
 
   getFunctionDefinition(name: string): FunctionDefinition | null {
-    let scope = this.context;
-    let def: Definition | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isFunctionDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (def) def.scope = scope;
-    return def ?? null;
+    return this.internal.getFunctionDefinition(name);
   }
-  getSymbolDefinition(name: string): SymbolDefinition | null {
-    let scope = this.context;
-    let def: Definition | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isSymbolDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def;
+  getSymbolDefinition(name: string): SymbolDefinition<Numeric> | null {
+    return this.internal.getSymbolDefinition(name);
   }
-  getSetDefinition(name: string): SetDefinition | null {
-    let scope = this.context;
-    let def: Definition | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isSetDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def;
+  getSetDefinition(name: string): SetDefinition<Numeric> | null {
+    return this.internal.getSetDefinition(name);
   }
-  getCollectionDefinition(name: string): CollectionDefinition | null {
-    let scope = this.context;
-    let def: Definition | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isCollectionDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def;
+  getCollectionDefinition(name: string): CollectionDefinition<Numeric> | null {
+    return this.internal.getCollectionDefinition(name);
   }
-  getDefinition(name: string): Definition | null {
-    let scope = this.context;
-    let def: Definition | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def;
-  }
-
-  signal(_sig: ErrorSignal | WarningSignal): void {
-    // @todo
-    return;
-  }
-
-  /**
-   * Return true if lhs is a subset or equal  rhs
-   */
-  isSubsetOf(lhs: Expression | null, rhs: Expression | null): boolean {
-    if (!lhs || !rhs) return false;
-    if (typeof lhs === 'string' && lhs === rhs) return true;
-    if (rhs === 'Anything') return true;
-    if (rhs === 'Nothing') return false;
-
-    //
-    // 1. Set operations on lhs
-    //
-    // Union: lhs or rhs
-    // Intersection: lhs and rhs
-    // SetMinus: lhs and not rhs
-    // Complement: not lhs
-    const lhsFnName = getFunctionName(lhs);
-    if (lhsFnName === 'Union') {
-      return getTail(lhs).some((x) => this.isSubsetOf(x, rhs));
-    } else if (lhsFnName === 'Intersection') {
-      return getTail(lhs).every((x) => this.isSubsetOf(x, rhs));
-    } else if (lhsFnName === 'SetMinus') {
-      return (
-        this.isSubsetOf(getArg(lhs, 1), rhs) &&
-        !this.isSubsetOf(getArg(lhs, 2), rhs)
-      );
-      // } else if (lhsFnName === 'Complement') {
-      //   return !this.isSubsetOf(getArg(lhs, 1), rhs);
-    }
-
-    //
-    // 2. Set operations on rhs
-    //
-    const rhsFnName = getFunctionName(rhs);
-    if (rhsFnName === 'Union') {
-      return getTail(rhs).some((x) => this.isSubsetOf(lhs, x));
-    } else if (rhsFnName === 'Intersection') {
-      return getTail(rhs).every((x) => this.isSubsetOf(lhs, x));
-    } else if (rhsFnName === 'SetMinus') {
-      return (
-        this.isSubsetOf(lhs, getArg(rhs, 1)) &&
-        !this.isSubsetOf(lhs, getArg(rhs, 2))
-      );
-      // } else if (rhsFnName === 'Complement') {
-      //   return !this.isSubsetOf(lhs, getArg(rhs, 1));
-    }
-
-    //
-    // 3. Not a set operation: a domain or a parametric domain
-    //
-    const rhsDomainName = getSymbolName(rhs) ?? rhsFnName;
-    if (!rhsDomainName) {
-      const rhsVal = getNumberValue(rhs) ?? NaN;
-      if (Number.isNaN(rhsVal)) return false;
-      // If the rhs is a number, 'upgrade' it to a set singleton
-      rhs = rhs === 0 ? 'NumberZero' : ['Set', rhs];
-    }
-
-    const rhsDef = this.getSetDefinition(rhsDomainName);
-    if (!rhsDef) return false;
-    if (typeof rhsDef.isSubsetOf === 'function') {
-      // 3.1 Parametric domain
-      return rhsDef.isSubsetOf(this, lhs, rhs);
-    }
-    const lhsDomainName = getSymbolName(lhs) ?? lhsFnName;
-    if (!lhsDomainName) return false;
-
-    const lhsDef = this.getSetDefinition(lhsDomainName);
-    if (!lhsDef) return false;
-
-    // 3.2 Non-parametric domain:
-    for (const parent of lhsDef.supersets) {
-      if (this.isSubsetOf(parent, rhs)) return true;
-    }
-
-    return false;
+  getDefinition(name: string): Definition<Numeric> | null {
+    return this.internal.getDefinition(name);
   }
 
   format(expr: Expression | null, forms?: Form | Form[]): Expression | null {
-    return formatWithEngine(
-      this,
-      expr,
-      Array.isArray(forms) ? forms : [forms ?? 'canonical']
-    );
+    return this.internal.format(expr, forms);
   }
+
   /**
    * Return the canonical form of an expression.
    */
   canonical(expr: Expression | null): Expression | null {
-    return this.format(expr);
+    return this.internal.format(expr, ['canonical']);
   }
 
   /**
    * Return a numerical approximation of an expression.
    */
-  N(exp: Expression): Expression | null {
-    return numericalEvalWithEngine(this, exp);
+  N(expr: Expression): Expression | null {
+    return this.internal.N(expr);
   }
 
   /**
@@ -363,10 +135,34 @@ export class ComputeEngine {
    *
    */
   simplify(
-    exp: Expression,
-    options?: { timeLimit: number; iterationLimit: number }
+    expr: Expression,
+    options?: {
+      timeLimit?: number;
+      iterationLimit?: number;
+      simplifications?: Simplification[];
+    }
   ): Expression | null {
-    return simplifyWithEngine(this, exp, options);
+    const simplifications: Simplification[] = options?.simplifications ?? [
+      'all',
+    ];
+    const timeLimit = options?.timeLimit ?? this.internal.timeLimit ?? 2.0;
+    if (timeLimit && isFinite(timeLimit)) {
+      this.internal.deadline = Date.now() + timeLimit * 1000;
+    }
+
+    const iterationLimit =
+      options?.iterationLimit ?? this.internal.iterationLimit ?? 1024;
+    let iterationCount = 0;
+    let result: Expression | null = this.canonical(expr);
+    let prevResult: Expression | null = null;
+    while (iterationCount < iterationLimit && this.shouldContinueExecution()) {
+      result = this.internal.simplify(result!, { simplifications });
+      if (result === null) return null;
+      if (equalExpr(prevResult, result)) return result;
+      prevResult = result;
+      iterationCount += 1;
+    }
+    return result;
   }
 
   /**
@@ -383,141 +179,47 @@ export class ComputeEngine {
    * values are an infinite amount of iterations and a 2s time limit.
    */
   evaluate(
-    exp: Expression,
+    expr: Expression,
     options?: { timeLimit?: number; iterationLimit?: number }
   ): Promise<Expression | null> {
-    return evaluateWithEngine(this, exp, options);
+    const timeLimit = options?.timeLimit ?? this.internal.timeLimit ?? 2.0;
+    if (timeLimit && isFinite(timeLimit)) {
+      // eslint-disable-next-line no-restricted-globals
+      this.internal.deadline = Date.now() + timeLimit * 1000;
+    }
+
+    const iterationLimit =
+      options?.iterationLimit ?? this.internal.iterationLimit ?? 1024;
+    let iterationCount = 0;
+    let result: Expression | null = this.canonical(expr);
+    let prevResult: Expression | null = null;
+    while (iterationCount < iterationLimit && this.shouldContinueExecution()) {
+      result = this.internal.simplify(result!);
+      if (result === null) break;
+      if (equalExpr(prevResult, result)) break;
+      prevResult = result;
+      iterationCount += 1;
+    }
+
+    result = this.internal.N(result ?? expr);
+
+    return this.internal.evaluate(result ?? expr);
   }
 
-  domain(exp: Expression): Expression | null {
-    return domainWithEngine(this, exp);
+  domain(expr: Expression): Expression | null {
+    return this.internal.domain(expr);
   }
 
-  isInfinity(_expr: Expression): boolean | undefined {
-    // @todo inferDomainOf
-    return undefined;
-  }
-  isZero(expr: Expression): boolean | undefined {
-    return this.equal(expr, 0);
-  }
-  isOne(expr: Expression): boolean | undefined {
-    return this.equal(expr, 1);
-  }
-  isMinusOne(expr: Expression): boolean | undefined {
-    return this.equal(expr, -1);
-  }
-  /** Is `expr` >= 0? */
-  isNonNegative(expr: Expression): boolean | undefined {
-    const result = this.isZero(expr);
-    if (result === undefined) return undefined;
-    if (result === true) return true;
-    return this.isPositive(expr);
-  }
-  /** Is `expr` > 0? */
-  isPositive(_expr: Expression): boolean | undefined {
-    // @todo
-    return undefined;
-  }
-  /** Is `expr` < 0? */
-  isNegative(expr: Expression): boolean | undefined {
-    const result = this.isNonNegative(expr);
-    if (result === undefined) return undefined;
-    return !result;
-  }
-  /** Is `expr` <= 0? */
-  isNonPositive(expr: Expression): boolean | undefined {
-    const result = this.isPositive(expr);
-    if (result === undefined) return undefined;
-    return !result;
-  }
-  isInteger(_expr: Expression): boolean | undefined {
-    // @todo
-    return undefined;
-  }
-  /** Is `expr` an element of QQ (can be written as p/q)? */
-  isRational(_expr: Expression): boolean | undefined {
-    // @todo
-    return undefined;
-  }
-  /** Is `expr` an element of RR? */
-  isReal(_expr: Expression): boolean | undefined {
-    // @todo
-    return undefined;
-  }
-  /** Is `expr` an element of RR, including ±∞? */
-  isExtendedReal(_expr: Expression): boolean | undefined {
-    // @todo
-    return undefined;
-  }
-  /** Is `expr` an algebraic number, i.e. not transcendental (π, e)? */
-  isAlgebraic(_expr: Expression): boolean | undefined {
-    // @todo
-    return undefined;
-  }
-  /** Is `expr` a complex number? */
-  isComplex(_expr: Expression): boolean | undefined {
-    // @todo
-    return undefined;
-  }
-  /** Is `expr` an element of `dom`? */
-  isElement(_expr: Expression, _dom: Domain): boolean | undefined {
-    // @todo
-    return undefined;
-  }
-  match(
-    _pattern: Expression,
-    _target: Expression
-  ): { [key: string]: Expression } | null {
-    // @todo
-    return null;
-  }
-  /**
-   * True if `lhs` and `rhs` are structurally equal
+  /** Query the assumption database
    */
-  same(lhs: Expression, rhs: Expression): boolean {
-    return same(lhs, rhs);
-  }
-  compare(lhs: Expression, rhs: Expression): -1 | 0 | 1 | undefined {
-    return compare(this, lhs, rhs);
-  }
-  equal(lhs: Expression, rhs: Expression): boolean | undefined {
-    const result = compare(this, lhs, rhs);
-    return result === undefined ? undefined : result === 0;
-  }
-  less(lhs: Expression, rhs: Expression): boolean | undefined {
-    const result = compare(this, lhs, rhs);
-    return result === undefined ? undefined : result < 0;
-  }
-  lessEqual(lhs: Expression, rhs: Expression): boolean | undefined {
-    const result = compare(this, lhs, rhs);
-    return result === undefined ? undefined : result <= 0;
-  }
-  greater(lhs: Expression, rhs: Expression): boolean | undefined {
-    const result = compare(this, lhs, rhs);
-    return result === undefined ? undefined : result > 0;
-  }
-  greaterEqual(lhs: Expression, rhs: Expression): boolean | undefined {
-    const result = compare(this, lhs, rhs);
-    return result === undefined ? undefined : result >= 0;
-  }
-
   is(symbol: Expression, domain: Domain): boolean | undefined;
   is(predicate: Expression): boolean | undefined;
   is(arg1: Expression, arg2?: Domain): boolean | undefined {
-    let predicate: Expression = arg1;
-    if (arg2) {
-      predicate = ['Element', arg1, arg2];
-    }
-    return isWithEngine(this, predicate);
+    return this.internal.is(arg1, arg2);
   }
 
-  matchAssumptions(pattern: Expression): { [symbol: string]: Expression }[] {
-    const result: { [symbol: string]: Expression }[] = [];
-    this.assumptions.forEach((assumption) => {
-      const match = this.match(pattern, assumption);
-      if (match !== null) result.push(match);
-    });
-    return result;
+  ask(pattern: Expression): { [symbol: string]: Expression }[] {
+    return this.internal.ask(pattern);
   }
 
   assume(
@@ -529,60 +231,44 @@ export class ComputeEngine {
     arg1: Expression,
     arg2?: Domain
   ): 'contradiction' | 'tautology' | 'ok' {
-    let predicate: Expression = arg1;
-    if (arg2) {
-      predicate = ['Element', arg1, arg2];
-    }
-    return assumeWithEngine(this, predicate);
+    return this.internal.assume(arg1, arg2);
+  }
+
+  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean {
+    return this.internal.isSubsetOf(lhs, rhs);
+  }
+
+  getVars(expr: Expression): Set<string> {
+    return this.internal.getVars(expr);
+  }
+  isEqual(lhs: Expression, rhs: Expression): boolean | undefined {
+    return this.internal.isEqual(lhs, rhs);
+  }
+  isLess(lhs: Expression, rhs: Expression): boolean | undefined {
+    return this.internal.isLess(lhs, rhs);
+  }
+  isLessEqual(lhs: Expression, rhs: Expression): boolean | undefined {
+    return this.internal.isLessEqual(lhs, rhs);
+  }
+  isGreater(lhs: Expression, rhs: Expression): boolean | undefined {
+    return this.internal.isGreater(lhs, rhs);
+  }
+  isGreaterEqual(lhs: Expression, rhs: Expression): boolean | undefined {
+    return this.internal.isGreaterEqual(lhs, rhs);
   }
 }
 
-// This return all the vars (free or not) in the expression.
-// Calculating the free vars is more difficult: to do so you need to know
-// which function create a scope, and when a symbol is added to a scope.
-// The better way to deal with it is to compile an expression and catch
-// the errors when an undefined symbol is encountered.
-function varsRecursive(
-  expr: Expression,
-  vars: Set<string>,
-  engine: ComputeEngine
-): void {
-  const args = getTail(expr);
-  if (args.length > 0) {
-    args.forEach((x) => varsRecursive(x, vars, engine));
-  } else {
-    // It has a name, but no arguments. It's a symbol
-    const name = getSymbolName(expr);
-    if (name && !vars.has(name)) {
-      const def = engine.getSymbolDefinition(name);
-      if (!def || def.constant === false) {
-        // It's not in the dictionary, or it's in the dictionary
-        // but not as a constant -> it's a variable
-        vars.add(name);
-      }
-    }
-  }
-}
+let gComputeEngine: ComputeEngine | null = null;
 
 export function format(
   expr: Expression,
-  forms: Form | Form[],
-  options?: {
-    dictionaries?: Readonly<Dictionary>[];
-  }
+  forms: Form | Form[]
 ): Expression | null {
-  return formatWithEngine(
-    new ComputeEngine(options),
-    expr,
-    Array.isArray(forms) ? forms : [forms]
-  );
+  if (gComputeEngine === null) gComputeEngine = new ComputeEngine();
+  return gComputeEngine.format(expr, forms);
 }
 
-export function evaluate(
-  expr: Expression,
-  options?: {
-    dictionaries?: Readonly<Dictionary>[];
-  }
-): Promise<Expression | null> {
-  return evaluateWithEngine(new ComputeEngine(options), expr);
+export function evaluate(expr: Expression): Promise<Expression | null> {
+  if (gComputeEngine === null) gComputeEngine = new ComputeEngine();
+  return gComputeEngine.evaluate(expr);
 }

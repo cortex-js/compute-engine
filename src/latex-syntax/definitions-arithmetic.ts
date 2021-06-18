@@ -18,16 +18,17 @@ import {
   COMPLEX_INFINITY,
   PI,
   EXPONENTIAL_E,
-  IMAGINARY_I,
   MULTIPLY,
   DIVIDE,
   POWER,
   MISSING,
   LIST,
+  IMAGINARY_UNIT,
 } from '../common/utils';
 import { joinLatex } from './core/tokenizer';
 import { getFractionStyle, getRootStyle } from './serializer-style';
 import { applyNegate } from '../compute-engine/dictionary/arithmetic';
+import { Numeric } from '../compute-engine/public';
 
 /**
  * If expression is a product, collect all the terms with a
@@ -177,7 +178,7 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
         if (argWasNumber) {
           // Check if we can convert to an invisible plus, e.g. "1\frac{1}{2}"
           const [numer, denom] = getRationalValue(arg);
-          if (!isNaN(numer) && !isNaN(denom)) {
+          if (numer !== null && denom !== null) {
             if (isFinite(numer) && isFinite(denom) && denom !== 1) {
               // Don't include the '+' sign, it's a rational, use 'invisible plus'
               result +=
@@ -262,6 +263,7 @@ function serializeMultiply(
   let isNegative = false;
   let arg: Expression | null = null;
   const count = getArgCount(expr) + 1;
+  let prevWasNumber = false;
   for (let i = 1; i < count; i++) {
     arg = getArg(expr, i);
     if (arg !== null) {
@@ -282,6 +284,7 @@ function serializeMultiply(
             ? joinLatex([result, serializer.options.multiply, term])
             : term;
         }
+        prevWasNumber = true;
       } else if (
         getFunctionName(arg) === POWER &&
         !isNaN(getNumberValue(getArg(arg, 1)) ?? NaN)
@@ -295,6 +298,7 @@ function serializeMultiply(
               serializer.serialize(arg),
             ])
           : serializer.serialize(arg);
+        prevWasNumber = true;
       } else {
         if (getFunctionName(arg) === NEGATE) {
           arg = getArg(arg, 1);
@@ -309,8 +313,13 @@ function serializeMultiply(
           // First term
           result = term;
         } else {
+          if (prevWasNumber && getFunctionName(arg) === DIVIDE) {
+            // Can't use an invisible multiply if a number
+            // multiplied by a fraction
+            result = joinLatex([result, '\\times', term]);
+          }
           // Not first term, use invisible multiply
-          if (!serializer.options.invisibleMultiply) {
+          else if (!serializer.options.invisibleMultiply) {
             // Replace, joining the terms correctly
             // i.e. inserting a space between '\pi' and 'x'
             result = joinLatex([result, term]);
@@ -322,6 +331,7 @@ function serializeMultiply(
             ]);
           }
         }
+        prevWasNumber = false;
       }
     }
   }
@@ -460,7 +470,7 @@ function serializePower(
   return serializer.wrapShort(arg1) + '^{' + serializer.serialize(arg2) + '}';
 }
 
-export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
+export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
   { name: 'ThreeQuarter', serialize: '\\frac{3}{4}' },
   { name: 'TwoThird', serialize: '\\frac{2}{3}' },
   { name: 'Half', serialize: '\\frac{1}{2}' },
@@ -479,6 +489,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   { name: 'TwoThirdPi', serialize: '\\frac{2\\pi}{3}' },
   { name: 'ThreeQuarterPi', serialize: '\\frac{3\\pi}{4}' },
   { name: 'DoublePi', serialize: '2\\pi' },
+
+  {
+    name: 'Square',
+    serialize: (
+      serializer: Serializer<Numeric>,
+      expr: Expression<Numeric>
+    ): string => serializer.wrapShort(getArg(expr, 1)) + '^2',
+  },
+
   { trigger: { symbol: '\\infty' }, parse: { num: '+Infinity' } },
   {
     name: COMPLEX_INFINITY,
@@ -493,8 +512,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   { name: PI, trigger: { symbol: '\\pi' } },
   { name: PI, trigger: { symbol: 'π' }, serialize: '\\pi' },
   { name: EXPONENTIAL_E, trigger: { symbol: 'e' }, serialize: 'e' },
-  { name: IMAGINARY_I, trigger: { symbol: 'i' }, serialize: '\\imaginaryI' },
-  { name: IMAGINARY_I, trigger: { symbol: '\\imaginaryI' } },
+  { name: IMAGINARY_UNIT, trigger: { symbol: 'i' }, serialize: '\\imaginaryI' },
+  { name: IMAGINARY_UNIT, trigger: { symbol: '\\imaginaryI' } },
   {
     name: ADD,
     trigger: { prefix: '+', infix: '+' },
@@ -508,7 +527,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: { prefix: '-' },
     parse: parseMinusSign,
     associativity: 'left', // prefix are always left-associative
-    precedence: 665, // ??? MathML: 275. Needs to be higher than add, multiply
+    precedence: 275,
   },
   {
     name: SUBTRACT,
@@ -679,6 +698,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Round',
     trigger: {
       symbol: ['\\operatorname', '<{>', 'r', 'o', 'u', 'n', 'd', '<}>'],
+    },
+  },
+  {
+    name: 'Sign',
+    trigger: {
+      // As per ISO 80000-2, "signum" is 'sgn'
+      symbol: ['\\operatorname', '<{>', 's', 'g', 'n', '<}>'],
     },
   },
 ];

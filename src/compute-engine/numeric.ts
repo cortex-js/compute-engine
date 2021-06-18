@@ -12,7 +12,7 @@ export const MACHINE_TOLERANCE = Math.pow(
 );
 
 // Positive values smaller than NUMERICAL_TOLERANCE are considered to be zero
-const NUMERICAL_TOLERANCE = Math.pow(10, -10);
+export const NUMERICAL_TOLERANCE = Math.pow(10, -10);
 
 export function chop(x: number): number {
   return Math.abs(x) < NUMERICAL_TOLERANCE ? 0 : x;
@@ -128,11 +128,24 @@ export const SMALL_PRIMES = new Set<number>([
 export const LARGEST_SMALL_PRIME = 7919;
 
 export function primeFactors(_n: number): { [factor: number]: number } {
-  //rosettacode.org/wiki/Prime_decomposition#JavaScript
-  https: return { 1: 1 };
+  //https:rosettacode.org/wiki/Prime_decomposition#JavaScript
+  return { 1: 1 };
 }
 
-export function gcd(_a: number, _b: number): number {
+export function gcd(a: number, b: number): number {
   //https://github.com/Yaffle/bigint-gcd/blob/main/gcd.js
-  return 1;
+  if (!Number.isInteger(a) || !Number.isInteger(b)) return NaN;
+  while (b !== 0) [a, b] = [b, a % b];
+  return a < 0 ? -a : a;
+}
+
+export function lcm(a: number, b: number): number {
+  return (a * b) / gcd(a, b);
+}
+
+export function factorial(n: number): number {
+  if (!Number.isInteger(n) || n < 0) return NaN;
+  let val = 1;
+  for (let i = 2; i <= n; i++) val = val * i;
+  return val;
 }

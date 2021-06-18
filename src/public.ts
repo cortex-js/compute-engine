@@ -233,26 +233,26 @@ export type MathJsonString = {
   str: string;
 } & Attributes;
 
-export type MathJsonFunction = {
-  fn: Expression[];
+export type MathJsonFunction<T extends number = number> = {
+  fn: Expression<T>[];
 } & Attributes;
 
-export type MathJsonDictionary = {
-  dict: { [key: string]: Expression };
+export type MathJsonDictionary<T extends number = number> = {
+  dict: { [key: string]: Expression<T> };
 } & Attributes;
 
-export type Expression =
-  | MathJsonRealNumber
+export type Expression<T extends number = number> =
   // Shortcut for MathJsonRealNumber without metadata and in the JavaScript
   // 64-bit float range.
-  | number
+  | T
+  | MathJsonRealNumber
   | MathJsonString
   | MathJsonSymbol
   // Shortcut for a MathJsonSymbol with no metadata. Or a string.
   | string
-  | MathJsonFunction
-  | MathJsonDictionary
-  | Expression[];
+  | MathJsonFunction<T>
+  | MathJsonDictionary<T>
+  | Expression<T>[];
 
 export type DictionaryCategory =
   | 'algebra'

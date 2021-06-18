@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../src/compute-engine';
+import { ComputeEngine, match } from '../src/compute-engine';
 import { Expression } from '../src/public';
 import { latex } from './utils';
 
@@ -20,7 +20,7 @@ const sameExprs = [
   [{ sym: 'Pi' }, { sym: 'Pi', wikidata: 'Q167' }],
 
   [
-    ['Add', 'x', 1],
+    ['Add', 1, 'x'],
     ['Add', 'x', 1],
   ],
   [{ fn: ['Add', 'x', 1] }, ['Add', 'x', 1]],
@@ -46,10 +46,6 @@ const notSameExprs: Expression[] = [
   ],
 
   [
-    ['Add', 1, 'x'],
-    ['Add', 'x', 1],
-  ],
-  [
     ['Add', 1],
     ['Add', 1, 2],
   ],
@@ -70,18 +66,22 @@ const notSameExprs: Expression[] = [
   [['Add', 2, 'x'], { dict: { Alpha: 'a', Beta: 'b', Gamma: 'g' } }],
 ];
 
-describe('SAME', () => {
+describe('MATCH', () => {
   for (const expr of sameExprs) {
-    test(`same(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.same(expr[0], expr[1])).toBeTruthy();
+    test(`match(${latex(expr[0])}, ${latex(expr[1])})`, () => {
+      expect(
+        match(engine.canonical(expr[0])!, engine.canonical(expr[1])!) !== null
+      ).toBeTruthy();
     });
   }
 });
 
 describe('NOT SAME', () => {
   for (const expr of notSameExprs) {
-    test(`same(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.same(expr[0], expr[1])).toBeFalsy();
+    test(`match(${latex(expr[0])}, ${latex(expr[1])})`, () => {
+      expect(
+        match(engine.canonical(expr[0])!, engine.canonical(expr[1])!)
+      ).toBeNull();
     });
   }
 });

@@ -39,6 +39,8 @@ import {
   applyPower,
   ungroup,
 } from './dictionary/arithmetic';
+import { Decimal } from 'decimal.js';
+import { Complex } from 'complex.js';
 
 /**
  * Return an expression that's the inverse (1/x) of the input
@@ -349,7 +351,7 @@ function canonicalPowerForm(
 
   expr = applyRecursively(expr, (x) => canonicalPowerForm(x, engine));
 
-  if (getFunctionName(expr) === POWER) return applyPower(expr);
+  if (getFunctionName(expr) === POWER) return applyPower(engine, expr);
 
   return expr;
 }
@@ -359,42 +361,11 @@ function canonicalNegateForm(
   engine: ComputeEngine
 ): Expression {
   if (isAtomic(expr)) return expr;
-  const head = getFunctionHead(expr);
-  if (head !== NEGATE) {
+  if (getFunctionHead(expr) !== NEGATE) {
     return applyRecursively(expr, (x) => canonicalNegateForm(x, engine));
   }
 
-  expr = ungroup(expr);
-  const arg = getArg(expr, 1);
-  if (typeof arg === 'number') {
-    expr = -arg;
-  } else if (arg && isNumberObject(arg)) {
-    if (getNumberValue(arg) === 0) return 0;
-    if (arg.num[0] === '-') {
-      expr = { num: arg.num.slice(1) };
-    } else if (arg.num[0] === '+') {
-      expr = { num: '-' + arg.num.slice(1) };
-    } else {
-      expr = { num: '-' + arg.num };
-    }
-  } else if (getFunctionName(arg) === MULTIPLY) {
-    let fact = getArg(arg, 1);
-    if (typeof fact === 'number') {
-      fact = -fact;
-    } else if (isNumberObject(fact)) {
-      if (fact.num[0] === '-') {
-        fact = { num: fact.num.slice(1) };
-      } else {
-        fact = { num: '-' + fact.num };
-      }
-    } else {
-      return [MULTIPLY, -1, fact ?? MISSING, ...getTail(arg).slice(1)];
-    }
-    return [MULTIPLY, fact, ...getTail(arg).slice(1)];
-  } else {
-    return [MULTIPLY, -1, arg ?? MISSING];
-  }
-  return expr;
+  return applyNegate(getArg(ungroup(expr), 1) ?? MISSING);
 }
 
 function canonicalBooleanForm(
@@ -420,8 +391,11 @@ function canonicalRationalForm(
     return applyRecursively(expr, (x) => canonicalConstantsForm(x, engine));
   }
   const [numer, denom] = getRationalValue(expr);
-  if (isNaN(numer) || isNaN(denom)) return expr;
+  if (numer === null || denom === null) return expr;
   if (denom === 1) return numer;
+  if (denom === -1) return -numer;
+  // Make the denominator > 0
+  if (denom < 0) return ['Divide', applyNegate(numer), applyNegate(denom)];
   return ['Divide', numer, denom];
 }
 
@@ -440,9 +414,12 @@ function canonicalNumberForm(
     } else if (!isFinite(expr) && expr < 0) {
       return { num: '-Infinity' };
     }
-    // } else if (typeof expr === 'bigint') {
-    //     return { num: BigInt(expr).toString().slice(0, -1) };
-    // }
+  } else if (expr instanceof Complex) {
+    const c = expr as Complex;
+    return ['Complex', c.re, c.im];
+  } else if (expr instanceof Decimal) {
+    const d = expr as Decimal;
+    return { num: d.toString() + 'd' };
   } else if (isNumberObject(expr)) {
     if (isNaN(Number(expr.num))) {
       // Only return true if it's not a number
@@ -450,14 +427,12 @@ function canonicalNumberForm(
       // If it's an underflow Number() is 0
       return { num: 'NaN' };
     }
-    if (expr.num.endsWith('n')) {
-      // It's a bigint string
-      return { num: expr.num.slice(0, -1) };
+  } else if (getFunctionName(expr) === 'Complex') {
+    if (getNumberValue(getArg(expr, 2)) === 0) {
+      return getNumberValue(getArg(expr, 1)) ?? NaN;
     }
-    // if (typeof expr.num === 'bigint') {
-    //     return { num: BigInt(expr.num).toString().slice(0, -1) };
-    // }
   }
+
   return expr;
 }
 
@@ -506,10 +481,12 @@ function canonicalRootForm(
     const [numer, denom] = getRationalValue(arg2);
     if (numer === -1) {
       if (denom === 2) return [SQRT, arg1];
-      return [ROOT, arg1, denom];
+      return [ROOT, arg1, denom!];
     }
-    if (denom === 1) return [POWER, arg1, numer];
-    return [POWER, arg1, [DIVIDE, numer, denom]];
+    if (denom === 1) return [POWER, arg1, numer!];
+    if (numer !== null && denom !== null) {
+      return [POWER, arg1, [DIVIDE, numer, denom]];
+    }
   }
 
   return expr;

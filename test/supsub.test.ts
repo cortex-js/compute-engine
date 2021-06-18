@@ -33,16 +33,16 @@ describe('INVERSE FUNCTION', () => {
 
 describe('SUPSUB', () => {
   test('Superscript', () => {
-    expect(expression('2^2')).toMatchInlineSnapshot(`['Power', 2, 2]`);
+    expect(expression('2^2')).toMatchInlineSnapshot(`['Square', 2]`);
     expect(expression('x^t')).toMatchInlineSnapshot(`['Power', 'x', 't']`);
     expect(expression('2^{10}')).toMatchInlineSnapshot(`['Power', 2, 10]`);
-    expect(expression('\\pi^2')).toMatchInlineSnapshot(`['Power', 'Pi', 2]`);
+    expect(expression('\\pi^2')).toMatchInlineSnapshot(`['Square', 'Pi']`);
     expect(expression('2^23')).toMatchInlineSnapshot(
-      `['Multiply', 3, ['Power', 2, 2]]`
+      `['Multiply', 3, ['Square', 2]]`
     );
     expect(expression('2^\\pi')).toMatchInlineSnapshot(`['Power', 2, 'Pi']`);
     expect(expression('2^\\frac12')).toMatchInlineSnapshot(
-      `['Power', 2, ['Power', 2, -1]]`
+      `['Power', 2, 'Half']`
     );
     expect(expression('2^{3^4}')).toMatchInlineSnapshot(
       `['Power', 2, ['Power', 3, 4]]`
@@ -58,7 +58,7 @@ describe('SUPSUB', () => {
     expect(expression('12^34.5')).toMatchInlineSnapshot(
       `['Multiply', 4.5, ['Power', 12, 3]]`
     );
-    expect(expression('x^2')).toMatchInlineSnapshot(`['Power', 'x', 2]`);
+    expect(expression('x^2')).toMatchInlineSnapshot(`['Square', 'x']`);
     expect(expression('x^{x+1}')).toMatchInlineSnapshot(
       `['Power', 'x', ['Add', 'x', 1]]`
     );
@@ -66,10 +66,10 @@ describe('SUPSUB', () => {
   test('Subscript', () => {
     expect(expression('x_0')).toMatchInlineSnapshot(`['Subscript', 'x', 0]`);
     expect(expression('x^2_0')).toMatchInlineSnapshot(
-      `['Subscript', ['Power', 'x', 2], 0]`
+      `['Subscript', ['Square', 'x'], 0]`
     );
     expect(expression('x_0^2')).toMatchInlineSnapshot(
-      `['Power', ['Subscript', 'x', 0], 2]`
+      `['Square', ['Subscript', 'x', 0]]`
     );
     expect(expression('x_{n+1}')).toMatchInlineSnapshot(
       `['Subscript', 'x', ['Add', 'n', 1]]`
@@ -115,7 +115,7 @@ describe('SUPSUB', () => {
       `['OverVector', ['Multiply', 'A', 'B']]`
     ); // @todo: nope...
     expect(expression('\\vec{AB}^{-1}')).toMatchInlineSnapshot(
-      `['Power', ['OverVector', ['Multiply', 'A', 'B']], -1]`
+      `['Root', ['OverVector', ['Multiply', 'A', 'B']], 1]`
     ); // @todo: nope...
   });
 });
