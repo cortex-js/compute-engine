@@ -408,7 +408,7 @@ function simplifyAdd(ce: ComputeEngine, ...args: Expression[]): Expression {
       if (isNaN(n) || isNaN(d)) return NaN;
       numer = numer * d + n * denom;
       denom = denom * d;
-    } else if (isNotZero(ce, arg) !== true) {
+    } else if (isNotZero(ce, arg) === true) {
       others.push(arg);
     }
   }
@@ -480,9 +480,9 @@ function simplifyMultiply(
   return ['Multiply', c, ...others];
 }
 
-function simplifyNegate(_ce: ComputeEngine, arg: Expression): Expression {
-  return applyNegate(arg) ?? ['Negate', arg];
-}
+// function simplifyNegate(_ce: ComputeEngine, arg: Expression): Expression {
+//   return applyNegate(arg) ?? ['Negate', arg];
+// }
 
 /** Apply some simplifications for negate.
  * Used by `canonical-negate` and `simplify`
@@ -619,8 +619,8 @@ export function applyConstants(expr: Expression): Expression {
   return ['Multiply', ['Divide', numer, denom], 'Pi'];
 }
 
-function* forEachTermCoeff(
-  terms: Expression[]
-): Generator<[term: Expression, coef: number]> {
-  return;
-}
+// function* forEachTermCoeff(
+//   terms: Expression[]
+// ): Generator<[term: Expression, coef: number]> {
+//   return;
+// }
