@@ -58,6 +58,40 @@ Each call to `ce.assume()` is additive: the previous assumptions are preserved.
 
 **To remove previous assumptions**, use `ce.forget()`.
 
+
+```js
+ce.assume("x", "RealNumber");
+ce.is(["Element", "x", "RealNumber"]);
+// ->  true
+
+ce.forget("x");
+
+ce.is(["Element", "x", "RealNumber"]);
+// ->  undefined
+```
+
+
+## Scopes
+
+When an assumption is made, it is only valid in the current scope.
+
+**To temporarily define define a series of assumptions**, create a new scope.
+
+```js
+
+ce.pushScope();
+
+ce.assume("x", "RealNumber");
+ce.is(["Element", "x", "RealNumber"]);
+// ->  true
+
+ce.popScope();  // all assumptions made in the current scope are forgotten
+
+ce.is(["Element", "x", "RealNumber"]);
+// ->  undefined
+
+```
+
 ## Testing Assumptions: `is()` and `ask()`
 
 **To test if a particular assumption is valid**, use the `ce.is()` function.
@@ -70,7 +104,7 @@ ce.is('x', ['Range', 1, 5]);
 ```
 
 Alternatively, the `ce.is()` function can be invoked with a single argument, a
-predicate:
+proposition:
 
 ```js
 ce.is(['Element', 'x', 'RealNumber']);
@@ -94,5 +128,5 @@ can also be made.
 
 ```js
 ce.domain('Pi');
-// -> IrrationallNumber
+// -> "IrrationalNumber"
 ```
