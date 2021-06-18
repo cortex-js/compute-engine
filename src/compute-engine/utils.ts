@@ -71,9 +71,9 @@ export function isZero(
 
   if (engine.is(['Equal', expr, 0])) return true;
   // @todo matchAssumptions() equal not zero.
-  if (engine.is(['NotEqual', expr, 0])) return false;
-  if (engine.is(['Greater', expr, 0])) return false;
-  if (engine.is(['Less', expr, 0])) return false;
+  if (engine.is(['NotEqual', expr, 0]) === true) return false;
+  if (engine.is(['Greater', expr, 0]) === true) return false;
+  if (engine.is(['Less', expr, 0]) === true) return false;
   // @todo
   // const match = engine.matchAssumptions(['Greater', expr, '_val']);
   // if (match.some((x) => x._val > 0)) return true;

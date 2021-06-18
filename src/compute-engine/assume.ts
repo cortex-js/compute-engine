@@ -9,33 +9,33 @@ import { Expression } from '../public';
 import { ComputeEngine, Numeric } from './public';
 import { CortexError } from './utils';
 
-export function isInRange(
-  _symbol: Expression,
-  _expr: Expression
+export function internalIs(
+  engine: ComputeEngine,
+  proposition: Expression
 ): boolean | undefined {
-  // @todo
-  return undefined;
+  let val = true;
+  [proposition, val] = normalizeProposition(proposition);
+  const result = engine.assumptions.get(proposition);
+  if (result === undefined) return undefined;
+  return result === val;
 }
 
-/**
- * Normalize an equality or inequality to a range expression:
- * `['RealRange', min, max]` where min and max are either
- * a number, `Infinity` or `['Open', num]`
- */
-export function normalizeToRange(
-  _engine: ComputeEngine,
-  _expr: Expression
-): Expression | null {
-  // @todo
-  return null;
-}
-
-export function isWithEngine(
-  _engine: ComputeEngine,
-  _predicate: Expression
-): boolean | undefined {
-  //  @todo
-  return undefined;
+export function normalizeProposition<T extends number = Numeric>(
+  proposition: Expression<T>
+): [Expression<T>, boolean] {
+  let val = true;
+  const head = getFunctionName(proposition);
+  if (head === 'Not') {
+    val = false;
+    proposition = getArg(proposition, 1) ?? MISSING;
+  } else if (head === 'NotEqual') {
+    val = false;
+    proposition = ['Equal', getArg(proposition, 1) ?? MISSING];
+  } else if (head === 'NotElement') {
+    val = false;
+    proposition = ['Element', getArg(proposition, 1) ?? MISSING];
+  }
+  return [proposition, val];
 }
 
 export function internalAssume<T extends number = Numeric>(
@@ -55,15 +55,8 @@ export function internalAssume<T extends number = Numeric>(
       const result = internalAssume(engine, prop);
       if (result !== 'ok') return result;
     }
-  } else if (head === 'Not') {
-    val = false;
-    proposition = getArg(proposition, 1) ?? MISSING;
-  } else if (head === 'NotEqual') {
-    val = false;
-    proposition = ['Equal', getArg(proposition, 1) ?? MISSING];
-  } else if (head === 'NotElement') {
-    val = false;
-    proposition = ['Element', getArg(proposition, 1) ?? MISSING];
+  } else {
+    [proposition, val] = normalizeProposition(proposition);
   }
 
   const v = engine.is(proposition);

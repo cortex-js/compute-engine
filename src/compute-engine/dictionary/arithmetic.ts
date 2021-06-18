@@ -408,19 +408,20 @@ function simplifyAdd(ce: ComputeEngine, ...args: Expression[]): Expression {
       if (isNaN(n) || isNaN(d)) return NaN;
       numer = numer * d + n * denom;
       denom = denom * d;
-    } else if (isNotZero(ce, arg)) {
+    } else if (isNotZero(ce, arg) !== true) {
       others.push(arg);
     }
   }
+
   if (posInfinity && negInfinity) return NaN;
   if (posInfinity) return Infinity;
   if (negInfinity) return -Infinity;
 
   // Group similar terms
   // @todo
-  const terms: { [term: string]: number } = {};
-  for (const [term, coeff] of forEachTermCoeff(others)) {
-  }
+  // const terms: { [term: string]: number } = {};
+  // for (const [term, coeff] of forEachTermCoeff(others)) {
+  // }
 
   if (others.length === 0) {
     if (numer === 0) return 0;

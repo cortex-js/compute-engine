@@ -328,18 +328,24 @@ export function getDomainsDictionary(): Dictionary {
 // }
 
 /**
- * Return a canonical form of the domain
+ * Return a simplified form of the domain
  *
  */
-export function canonicalDomainForm(
-  dom: Domain,
-  _engine: ComputeEngine
-): Domain {
-  // The canonical domain is calculated by evaluating the
+export function simplifyDomain(dom: Domain, _engine: ComputeEngine): Domain {
+  // The simplified domain is calculated by evaluating the
   // domain expression @todo
 
   // @todo Deal with parametric domains
   // when overlapping
   // Simplify ranges: Real[-infinity, +infinity] (or does Real not include infinity?)
   return dom;
+}
+
+export function canonicalDomain(
+  engine: ComputeEngine,
+  expr: Expression
+): Expression {
+  // @todo
+  // Handle ['Interval', -Infinity, Infinity], etc...
+  return expr;
 }

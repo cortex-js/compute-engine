@@ -4,7 +4,7 @@ import {
   ErrorSignal,
   WarningSignal,
 } from '../public';
-import { internalAssume, isWithEngine } from './assume';
+import { internalAssume, internalIs } from './assume';
 import {
   compileDictionary,
   getDefaultDictionaries,
@@ -323,17 +323,17 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
 
     this.precision = savedPrecision;
     this.numericFormat = savedNumericFormat;
-    return this.canonical(result);
+    return result ? this.canonical(result) : expr;
   }
 
   // is(symbol: Expression, domain: Domain): boolean | undefined;
-  // is(predicate: Expression): boolean | undefined;
+  // is(proposition: Expression): boolean | undefined;
   is(arg1: Expression, arg2?: Domain): boolean | undefined {
-    let predicate: Expression = arg1;
+    let proposition: Expression = arg1;
     if (arg2) {
-      predicate = ['Element', arg1, arg2];
+      proposition = ['Element', arg1, arg2];
     }
-    return isWithEngine(this, predicate);
+    return internalIs(this, proposition);
   }
 
   ask(pattern: Expression): { [symbol: string]: Expression }[] {

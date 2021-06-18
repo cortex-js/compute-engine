@@ -9,6 +9,7 @@ import {
   getNumberValue,
   getSymbolName,
   getTail,
+  MISSING,
   NOTHING,
 } from '../common/utils';
 import { Expression } from '../public';
@@ -39,7 +40,7 @@ export function internalEvaluateNumerically(
 
   // 4/ Is it a dictionary?
   if (getDictionary(expr) !== null) {
-    return applyRecursively(expr, (x) => engine.N(x) ?? NaN);
+    return applyRecursively(expr, (x) => engine.N(x) ?? x);
   }
 
   // 5/ Is it a function?
@@ -72,9 +73,9 @@ export function internalEvaluateNumerically(
       for (let i = 0; i < tail.length; i++) {
         const name = getFunctionName(tail[i]);
         if (name === 'Hold') {
-          args.push(getArg(tail[i], 1) ?? NaN);
+          args.push(getArg(tail[i], 1) ?? MISSING);
         } else if (name === 'Evaluate') {
-          args.push(engine.N(getArg(tail[i], 1) ?? NaN) ?? NaN);
+          args.push(engine.N(getArg(tail[i], 1) ?? NaN) ?? tail[i]);
         } else if (
           (i === 0 && def.hold === 'first') ||
           (i > 0 && def.hold === 'rest') ||
@@ -82,7 +83,7 @@ export function internalEvaluateNumerically(
         ) {
           args.push(tail[i]);
         } else {
-          args.push(engine.N(tail[i]) ?? NaN);
+          args.push(engine.N(tail[i]) ?? tail[i]);
         }
       }
 

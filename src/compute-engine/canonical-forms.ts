@@ -32,7 +32,6 @@ import {
   getRationalValue,
 } from '../common/utils';
 import { canonicalOrder } from './order';
-import { canonicalDomainForm } from './dictionary/domains';
 import {
   applyConstants,
   applyNegate,
@@ -41,6 +40,7 @@ import {
 } from './dictionary/arithmetic';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
+import { canonicalDomain } from './dictionary/domains';
 
 /**
  * Return an expression that's the inverse (1/x) of the input
@@ -767,4 +767,11 @@ export function format(
     result = fn(result, engine);
   }
   return result;
+}
+
+function canonicalDomainForm(
+  expr: Expression,
+  engine: ComputeEngine
+): Expression {
+  return canonicalDomain(engine, expr);
 }
