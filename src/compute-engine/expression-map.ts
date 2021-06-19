@@ -4,9 +4,11 @@ import { match } from './patterns';
 export class ExpressionMap<T extends number, U> {
   readonly _items: Map<Expression<T>, U>;
 
-  constructor(source?: ExpressionMap<T, U>) {
+  constructor(source?: ExpressionMap<T, U> | Iterable<[T, U]>) {
     this._items = source
-      ? new Map<Expression<T>, U>(source._items)
+      ? new Map<Expression<T>, U>(
+          source instanceof ExpressionMap ? source._items : source
+        )
       : new Map<Expression<T>, U>();
   }
 
