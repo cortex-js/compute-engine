@@ -188,12 +188,13 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
         ) {
           numerics.push(arg);
         } else {
-          others.push(args);
+          others.push(arg);
         }
       }
       if (numerics.length === 0) return ['Add', ...others];
-      if (others.length === 0) return ce.N(['Add', ...numerics]);
-      return ['Add', ...others, ce.N(['Add', ...numerics])];
+      const val = ce.N(['Add', ...numerics]);
+      if (others.length === 0) return val;
+      return ['Add', ...others, val];
     },
   },
   Chop: {
@@ -367,12 +368,13 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
         ) {
           numerics.push(arg);
         } else {
-          others.push(args);
+          others.push(arg);
         }
       }
       if (numerics.length === 0) return ['Multiply', ...others];
-      if (others.length === 0) return ce.N(['Multiply', ...numerics]);
-      return ['Multiply', ...others, ce.N(['Multiply', ...numerics])];
+      const val = ce.N(['Multiply', ...numerics]);
+      if (others.length === 0) val;
+      return ['Multiply', val, ...others];
     },
   },
   Negate: {
