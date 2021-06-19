@@ -25,6 +25,7 @@ import {
   FunctionDefinition,
   Numeric,
   NumericFormat,
+  RuleSet,
   RuntimeScope,
   Scope,
   SetDefinition,
@@ -49,6 +50,7 @@ import {
 import { internalEvaluate } from './evaluate';
 import { ExpressionMap } from './expression-map';
 import { MACHINE_PRECISION } from './numeric';
+import { replace } from './rules';
 
 /**
  * The internal  compute engine implements the ComputeEngine interface
@@ -362,6 +364,10 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
       predicate = ['Element', arg1, arg2];
     }
     return internalAssume(this, predicate);
+  }
+
+  replace(rules: RuleSet, expr: Expression<Numeric>): Expression<Numeric> {
+    return replace(this, rules, expr);
   }
 
   domain(expr: Expression): Domain | null {

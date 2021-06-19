@@ -238,10 +238,10 @@ export function matchList(
   return result;
 }
 
-export function substitute(
-  expr: Expression,
-  substitution: Substitution
-): Expression {
+export function substitute<T extends number = Numeric>(
+  expr: Expression<T>,
+  substitution: Substitution<T>
+): Expression<T> {
   //
   // Symbol
   //
@@ -270,7 +270,7 @@ export function substitute(
   //
   const head = getFunctionHead(expr);
   if (head !== null) {
-    let result: Expression = [substitute(head, substitution)];
+    let result: Expression<T> = [substitute(head, substitution)];
     for (const arg of getTail(expr)) {
       const symbol = getSymbolName(arg);
       if (symbol !== null && symbol.startsWith('__')) {
@@ -296,20 +296,4 @@ function getWildcardName(s: string): string {
   const m = s.match(/^__?_?([a-zA-Z0-9]+)/);
   if (m === null) return '';
   return m[1];
-}
-
-// @todo ['Alternatives', ...]:
-// @todo: ['Condition',...] : Conditional match
-// @todo: ['Repeated',...] : repeating match
-// @todo _x:Head or _x:RealNumber
-// replace() -> replace matching patterns with another expression
-// replaceAll(), replaceRepeated()
-export function replace(
-  expr: Expression,
-  _rules: Iterable<[pattern: Expression, rule: Expression]>
-): Expression {
-  // for (const rule of rules) {
-  // }
-
-  return expr;
 }
