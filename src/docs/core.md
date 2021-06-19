@@ -47,7 +47,7 @@ sidebar:
 
 <div class=symbols-table>
 
-| Function            | Operation                                                                                                                                                                |
+| Function          | Operation                                                                                                                                                                |
 | :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `About`           | <code>(_symbol_)</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...                                                      |
 | `Domain`          | <code>(_expression_)</code><br> Return the domain of the expression                                                                                                      |
@@ -84,9 +84,9 @@ Lambda([x], x * x)(3)
 
 You can avoid naming the parameters by using the following shorthands:
 
-- `_` or `_0` : the first argument
-- `_1` : the second argument
-- `_2` : the third argument, etc...
+- `_` or `_1` : the first argument
+- `_2` : the second argument
+- `_3` : the third argument, etc...
 - `__`: the sequence of arguments, so `Length(__)` is the number of arguments
 
 ```cortex

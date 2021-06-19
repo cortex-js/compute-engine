@@ -21,12 +21,14 @@ import {
   PARENTHESES,
 } from '../../common/utils';
 import type { ComputeEngine, Dictionary, Numeric } from '../public';
-import { chop, factorial, gcd } from '../numeric';
+import { chop, factorial, gamma, lngamma, gcd } from '../numeric';
 import {
   DECIMAL_MINUS_ONE,
   DECIMAL_ONE,
   DECIMAL_ZERO,
   factorial as factorialDecimal,
+  gamma as gammaDecimal,
+  lngamma as lngammaDecimal,
 } from '../numeric-decimal';
 import {
   isInfinity,
@@ -37,6 +39,7 @@ import {
 } from '../utils';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
+import { gamma as gammaComplex } from '../numeric-complex';
 
 export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
   //
@@ -130,6 +133,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     numeric: true,
     range: ['Interval', 0, Infinity],
     evalNumber: (_ce, val: number): number => Math.abs(val),
+    evalComplex: (_ce, n: Complex): Complex => n.abs(),
     evalDecimal: (_ce, n: Decimal): Decimal => n.abs(),
   },
   Add: {
@@ -166,6 +170,31 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       for (const arg of args) c = c.add(arg);
       return c;
     },
+    evaluate: (
+      ce: ComputeEngine,
+      ...args: Expression[]
+    ): Expression<Numeric> => {
+      // Some arguments could not be evaluated to numbers:
+      // still try to add the ones that are numeric, keep the others as is.
+      if (args.length === 0) return 0;
+      const numerics: (number | Decimal | Complex)[] = [];
+      const others: Expression[] = [];
+      for (const arg of args) {
+        if (
+          typeof arg === 'number' ||
+          arg instanceof Decimal ||
+          arg instanceof Complex ||
+          isNumberObject(arg)
+        ) {
+          numerics.push(arg);
+        } else {
+          others.push(args);
+        }
+      }
+      if (numerics.length === 0) return ['Add', ...others];
+      if (others.length === 0) return ce.N(['Add', ...numerics]);
+      return ['Add', ...others, ce.N(['Add', ...numerics])];
+    },
   },
   Chop: {
     domain: 'Function',
@@ -182,6 +211,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     numeric: true,
     /** rounds a number up to the next largest integer */
     evalNumber: (_ce, val: number): number => Math.ceil(val),
+    evalComplex: (_ce, n: Complex): Complex => n.ceil(),
     evalDecimal: (_ce, n: Decimal): Decimal => n.ceil(),
   },
   Divide: {
@@ -189,6 +219,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, lhs: number, rhs: number): number => lhs / rhs,
+    evalComplex: (_ce, lhs: Complex, rhs: Complex): Complex => lhs.div(rhs),
     evalDecimal: (_ce, lhs: Decimal, rhs: Decimal): Decimal => lhs.div(rhs),
   },
   Exp: {
@@ -198,6 +229,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, val: number): number => Math.exp(val),
+    evalComplex: (_ce, val: Complex): Complex => val.exp(),
     evalDecimal: (_ce, val: Decimal): Decimal => val.exp(),
   },
   Erf: {
@@ -218,7 +250,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Integer',
     numeric: true,
     evalNumber: (_ce, n: number): number => factorial(n),
-    evalDecimal: (_ce, n: Decimal): Decimal => factorialDecimal(n),
+    evalComplex: (_ce, c: Complex): Complex => gammaComplex(c.add(1)),
+    evalDecimal: (_ce, d: Decimal): Decimal => factorialDecimal(d),
   },
   Floor: {
     domain: 'Function',
@@ -233,14 +266,25 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     wikidata: 'Q190573',
     range: 'Number',
     numeric: true,
+    evalNumber: (_ce, n: number): number => gamma(n),
+    // evalComplex: (_ce, c: Complex): Complex => gammaComplex(c),
+    evalDecimal: (_ce, d: Decimal): Decimal => gammaDecimal(d),
   },
-  LogGamma: { domain: 'Function', range: 'Number', numeric: true },
+  LogGamma: {
+    domain: 'Function',
+    range: 'Number',
+    numeric: true,
+    evalNumber: (_ce, n: number): number => lngamma(n),
+    // evalComplex: (_ce, c: Complex): Complex => lngammaComplex(c),
+    evalDecimal: (_ce, d: Decimal): Decimal => lngammaDecimal(d),
+  },
   Ln: {
     domain: 'Function',
     wikidata: 'Q11197',
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, x: number): number => Math.log(x),
+    evalComplex: (_ce, c: Complex): Complex => c.log(),
     evalDecimal: (_ce, x: Decimal): Decimal => x.log(),
   },
   Log: {
@@ -249,6 +293,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     numeric: true,
     evalNumber: (_ce, base: number, x: number): number =>
       Math.log(x) / Math.log(base),
+    evalComplex: (_ce, base: Complex, x: Complex): Complex =>
+      x.log().div(base.log()),
     evalDecimal: (_ce, base: Decimal, x: Decimal): Decimal =>
       x.log().div(base.log()),
   },
@@ -258,6 +304,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, x: number): number => Math.log2(x),
+    evalComplex: (_ce, base: Complex, x: Complex): Complex =>
+      x.log().div(Complex.log(2)),
     evalDecimal: (_ce, x: Decimal): Decimal => x.log().div(Decimal.log(2)),
   },
   Lg: {
@@ -266,6 +314,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, x: number): number => Math.log10(x),
+    evalComplex: (_ce, base: Complex, x: Complex): Complex =>
+      x.log().div(Complex.log(10)),
     evalDecimal: (_ce, x: Decimal): Decimal => x.log().div(Decimal.log(10)),
   },
   // LogOnePlus: { domain: 'Function' },
@@ -279,6 +329,16 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     simplify: simplifyMultiply,
     numeric: true,
     evalNumber: evalNumberMultiply,
+    evalComplex: (
+      _ce: ComputeEngine,
+      ...args: (number | Complex)[]
+    ): Decimal => {
+      if (args.length === 0) return Complex.ONE;
+
+      let c = Complex.One;
+      for (const arg of args) c = c.mul(arg);
+      return c;
+    },
     evalDecimal: (
       _ce: ComputeEngine,
       ...args: (number | Decimal)[]
@@ -289,6 +349,31 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       for (const arg of args) c = c.mul(arg);
       return c;
     },
+    evaluate: (
+      ce: ComputeEngine,
+      ...args: Expression[]
+    ): Expression<Numeric> => {
+      // Some arguments could not be evaluated to numbers:
+      // still try to multiply the ones that are numeric, keep the others as is.
+      if (args.length === 0) return 0;
+      const numerics: (number | Decimal | Complex)[] = [];
+      const others: Expression[] = [];
+      for (const arg of args) {
+        if (
+          typeof arg === 'number' ||
+          arg instanceof Decimal ||
+          arg instanceof Complex ||
+          isNumberObject(arg)
+        ) {
+          numerics.push(arg);
+        } else {
+          others.push(args);
+        }
+      }
+      if (numerics.length === 0) return ['Multiply', ...others];
+      if (others.length === 0) return ce.N(['Multiply', ...numerics]);
+      return ['Multiply', ...others, ce.N(['Multiply', ...numerics])];
+    },
   },
   Negate: {
     domain: 'Function',
@@ -298,6 +383,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       applyNegate(['Negate', x]) ?? ['Negate', x],
     numeric: true,
     evalNumber: (_ce, val: number) => -val,
+    evalComplex: (_ce, x: Complex): Complex => x.neg(),
     evalDecimal: (_ce, x: Decimal): Decimal => x.neg(),
   },
   Power: {
@@ -309,6 +395,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     simplify: (ce: ComputeEngine, ...args: Expression[]): Expression =>
       applyPower(ce, ['Power', ...args]),
     evalNumber: (_ce, base: number, power: number) => Math.pow(base, power),
+    evalComplex: (_ce, base: Complex, power: Complex) =>
+      Complex.pow(base, power),
     evalDecimal: (_ce, base: Decimal, power: Decimal): Decimal =>
       Decimal.pow(base, power),
   },
@@ -317,6 +405,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, val: number) => Math.round(val),
+    evalComplex: (_ce, val: Complex): Complex => val.round(),
     evalDecimal: (_ce, val: Decimal): Decimal => val.round(),
   },
   Sign: {
@@ -326,6 +415,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     simplify: (ce: ComputeEngine, x: Expression): Expression =>
       isZero(ce, x) ? 0 : isNegative(ce, x) ? -1 : 1,
     evalNumber: (_ce, val: number) => (val === 0 ? 0 : val < 0 ? -1 : 1),
+    evalComplex: (_ce, z: Complex) => z.div(z.abs()),
     evalDecimal: (_ce, val: Decimal) =>
       val.isZero()
         ? DECIMAL_ZERO
@@ -345,6 +435,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, val: number) => Math.sqrt(val),
+    evalComplex: (_ce, z: Decimal) => z.sqrt(),
     evalDecimal: (_ce, val: Decimal) => val.sqrt(),
   },
   Square: {
@@ -353,6 +444,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, val: number) => val * val,
+    evalComplex: (_ce, z: Decimal) => z.mul(z),
     evalDecimal: (_ce, val: Decimal) => val.mul(val),
   },
   Root: {
@@ -361,6 +453,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, base: number, power: number) => Math.pow(base, 1 / power),
+    evalComplex: (_ce, base: Complex, power: Complex) =>
+      Complex.pow(base, power),
     evalDecimal: (_ce, base: Decimal, power: Decimal) =>
       Decimal.pow(base, DECIMAL_ONE.div(power)),
   },
@@ -370,6 +464,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, lhs: number, rhs: number) => lhs - rhs,
+    evalComplex: (_ce, lhs: Complex, rhs: Complex) => lhs.minus(rhs),
     evalDecimal: (_ce, lhs: Decimal, rhs: Decimal) => lhs.minus(rhs),
   },
   // @todo
@@ -408,7 +503,7 @@ function simplifyAdd(ce: ComputeEngine, ...args: Expression[]): Expression {
       if (isNaN(n) || isNaN(d)) return NaN;
       numer = numer * d + n * denom;
       denom = denom * d;
-    } else if (isNotZero(ce, arg) === true) {
+    } else if (isNotZero(ce, arg) !== false) {
       others.push(arg);
     }
   }

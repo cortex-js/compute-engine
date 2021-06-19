@@ -26,8 +26,10 @@ export function normalizeProposition<T extends number = Numeric>(
   let val = true;
   const head = getFunctionName(proposition);
   if (head === 'Not') {
-    val = false;
-    proposition = getArg(proposition, 1) ?? MISSING;
+    [proposition, val] = normalizeProposition(
+      getArg(proposition, 1) ?? MISSING
+    );
+    val = !val;
   } else if (head === 'NotEqual') {
     val = false;
     proposition = ['Equal', getArg(proposition, 1) ?? MISSING];

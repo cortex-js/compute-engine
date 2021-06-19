@@ -121,21 +121,26 @@ function apply(
           }
         }
       }
-      if (!allNumeric) return [head, ...args];
-      if (format == 'decimal') {
-        console.assert(typeof def.evalDecimal === 'function');
-        return {
-          num: def.evalDecimal!(engine, ...(args as (Decimal | number)[])),
-        };
+      if (allNumeric) {
+        if (format == 'decimal') {
+          console.assert(typeof def.evalDecimal === 'function');
+          return {
+            num: def.evalDecimal!(engine, ...(args as (Decimal | number)[])),
+          };
+        }
+        if (format == 'complex') {
+          console.assert(typeof def.evalComplex === 'function');
+          return {
+            num: def.evalComplex!(engine, ...(args as (Complex | number)[])),
+          };
+        }
+        if (typeof def.evalNumber !== 'function') return [head, ...args];
+        return def.evalNumber(engine, ...(args as number[]));
       }
-      if (format == 'complex') {
-        console.assert(typeof def.evalComplex === 'function');
-        return {
-          num: def.evalComplex!(engine, ...(args as (Complex | number)[])),
-        };
+      if (typeof def.evaluate === 'function') {
+        return def.evaluate(engine, ...args);
       }
-      if (typeof def.evalNumber !== 'function') return [head, ...args];
-      return def.evalNumber(engine, ...(args as number[]));
+      return [head, ...args];
     }
 
     //
@@ -171,15 +176,15 @@ function apply(
   // 3. The function is a lambda
   //    (the head is an expression)
   //
-  const args: { [symbol: string]: Expression } = {};
+  const args: { [symbol: string]: Expression } = {
+    __: ['Sequence', getTail(expr)],
+  };
   let n = 1;
   for (const arg of getTail(expr)) {
-    if (n === 1) {
-      args['_'] = arg;
-    } else {
-      args[`_${n}`] = arg;
-    }
+    if (n === 1) args['_'] = arg;
+    args[`_${n}`] = arg;
     n += 1;
   }
+  // @todo: this should probably be a call to evaluate()
   return internalEvaluateNumerically(engine, substitute(head, args));
 }

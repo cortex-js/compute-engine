@@ -87,6 +87,9 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     const dicts =
       options?.dictionaries ?? InternalComputeEngine.getDictionaries();
 
+    this.numericFormat = 'auto';
+    this.precision = MACHINE_PRECISION;
+
     for (const dict of dicts) {
       if (!this.context) {
         //

@@ -114,7 +114,8 @@
     <div class='row'>
       <div id='input-label'>a = </div>
       <math-field id="mf" class="mathfield" tabindex="0" virtual-keyboard-mode="manual">
-      0x^2 + 4x  + 2x + 2(x-1) + b(x - 1)
+        1 + 1 + x
+        <!-- 0x^2 + 4x  + 2x + 2(x-1) + b(x - 1) -->
       <!-- \operatorname{NonNegativeRealNumber} -->
       <!-- -\frac{50}{70}+\operatorname{GoldenRatio} -->
       <!-- 3 (2x + 1) + \frac{x}{2} + \frac{3x}{2} + 4\frac{x}{2} -->
@@ -171,9 +172,9 @@
     <!-- \int x^2 + x dx = 0 -->
     <!-- \int (x^2 + x) dx = 0 -->
 
-    <div class='output-section is-visible'>
+    <!-- <div class='output-section is-visible'>
       <div class='row'><div class="output" id="latex"></div></div>
-    </div>
+    </div> -->
 
     <div>
       <h2>Assumptions</h2>      
@@ -337,7 +338,8 @@
       let expr;
       try {
 
-        document.getElementById('latex').innerHTML = escapeHtml(latex);
+        const latexEl = document.getElementById('latex')
+        if (latexEl) latexEl.innerHTML = escapeHtml(latex);
 
         if (document.getElementById('asciimath')) {
         document.getElementById('asciimath').innerHTML = 
