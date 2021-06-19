@@ -12,6 +12,16 @@ import type { Complex } from 'complex.js';
 
 export type Numeric = number | Decimal | Complex;
 
+export type Pattern<T extends number = Numeric> = Expression<T>;
+
+export type Rule<T extends number = Numeric> = [
+  lhs: Pattern<T>,
+  rhs: Pattern<T>,
+  condition?: (ce: ComputeEngine<T>, sub: Substitution<T>) => boolean
+];
+
+export type RuleSet<T extends number = Numeric> = Iterable<Rule<T>>;
+
 /**
  * A dictionary maps a MathJSON name to a definition.
  *
@@ -652,8 +662,7 @@ export declare class ComputeEngine<T extends number = Numeric> {
   is(arg1: Expression<T>, arg2?: Domain): boolean | undefined;
 
   /**
-   * Considering all the known assumptions, return a list of
-   * those that match the pattern
+   * Return a list of all the assumptions that match a pattern.
    *
    * ```js
    *  ce.assume(x, 'PositiveInteger');
@@ -662,6 +671,11 @@ export declare class ComputeEngine<T extends number = Numeric> {
    * ```
    */
   ask(pattern: Expression<T>): Substitution<T>[];
+
+  /**
+   * Apply repeatedly a set of rules to an expression.
+   */
+  replace(rules: RuleSet<T>, expr: Expression<T>): Expression<T>;
 
   /**
    * Add an assumption.

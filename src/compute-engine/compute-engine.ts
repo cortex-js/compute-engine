@@ -15,6 +15,7 @@ import {
   FunctionDefinition,
   Numeric,
   NumericFormat,
+  RuleSet,
   RuntimeScope,
   Scope,
   SetDefinition,
@@ -232,6 +233,10 @@ export class ComputeEngine<T extends number = number>
     arg2?: Domain
   ): 'contradiction' | 'tautology' | 'ok' {
     return this.internal.assume(arg1, arg2);
+  }
+
+  replace(rules: RuleSet<T>, expr: Expression<T>): Expression<T> {
+    return this.internal.replace(rules, expr);
   }
 
   isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean {
