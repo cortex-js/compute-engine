@@ -126,7 +126,7 @@ function simplifyNumber(engine: ComputeEngine, expr: Expression) {
     console.assert(denom >= 0);
     if (denom === 1) return numer;
     if (numer === 0 && isFinite(denom)) return 0;
-    if (denom === -0 && isFinite(numer)) return -Infinity;
+    if (Object.is(denom, -0) && isFinite(numer)) return -Infinity;
     if (denom === 0 && isFinite(numer)) return +Infinity;
     return ['Divide', numer, denom];
   }
