@@ -171,30 +171,32 @@ A rewrite rule is a triplet of:
 
 - a left-hand-side pattern,  `lhs`
 - a right-hand-side pattern, `rhs`
-- a condition
+- an optional condition
 
 When a rule is applied to an expression `expr`, if `expr` matches `lhs` and
 the condition applies to the resulting substitution, the result of the 
 rule if the substitution applied to the `rhs`.
 
+**To apply a set of rules to an expression**, use the `ce.replace()` function.
+
 ```ts
-ce.rule([['Multiply', '_x', '_x'], ['Square', '_x']], ['Multiply', 4, 4]);
+const squareRule = [['Multiply', '_x', '_x'], ['Square', '_x']];
+
+ce.replace([squareRule], ['Multiply', 4, 4]);
 // -> ['Square', 4]
 
-ce.rule(
-  [
-    ['Sqrt', ['Square',  '_x']], 
-    '_x',
-    (ce, sub) => ce.isPositive(sub._x)
-  ],
-  ['Sqrt', ['Square', 17]]
-);
+const sqrtRule =   [
+  ['Sqrt', ['Square',  '_x']], 
+  '_x',
+  (ce, sub) => ce.isPositive(sub._x)
+];
+ce.replace([sqrtRule], ['Sqrt', ['Square', 17]]);
 // -> 17
 ```
 
 The `ce.simplify()` method applies a collection of built-in rewrite rules 
 to simplify an expression. You can define your own rules and apply them 
-using `ce.rule()`.
+using `ce.replace()`.
 
 
 
