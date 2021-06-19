@@ -76,7 +76,7 @@ symbols.
 | `canonical-negate` | `Negate` of a number is replaced by the negative of the number. Negation of negation is simplified |
 | `canonical-list` | In `List`, `Sequence` and `Sequence2`, simplify `Identity`. Flattens `Sequence` and `Sequence2`. | 
 | `canonical-number` | Complex numbers with no imaginary components are simplified |
-| `canonical-power` | <ul><li>$$x^{\tilde\infty} \rightarrow \operatorname{NaN}$$</li><li>$$x^0 \rightarrow 1$$</li><li>$$x^1 \rightarrow x$$</li><li>$$(\pm 1)^{-1} \rightarrow -1$$</li><li>$$(\pm\infty)^{-1} \rightarrow 0$$</li><li>$$0^{\infty} \rightarrow \tilde\infty$$</li><li>$$(\pm 1)^{\pm \infty} \rightarrow \operatorname{NaN}$$</li><li>$$\infty^{\infty} \rightarrow \infty$$</li><li>\infty^{-\infty} \rightarrow 0</li><li>$$(-\infty)^{\pm \infty} \rightarrow \operatorname{NaN}$$</li></ul|
+| `canonical-power` | <ul><li>\\[x^{\tilde\infty} \rightarrow \operatorname{NaN}\\]</li><li>\\[x^0 \rightarrow 1\\]</li><li>\\[x^1 \rightarrow x\\]</li><li>\\[(\pm 1)^{-1} \rightarrow -1\\]</li><li>\\[(\pm\infty)^{-1} \rightarrow 0\\]</li><li>\\[0^{\infty} \rightarrow \tilde\infty\\]</li><li>\\[(\pm 1)^{\pm \infty} \rightarrow \operatorname{NaN}\\]</li><li>\\[\infty^{\infty} \rightarrow \infty\\]</li><li>\\[\infty^{-\infty} \rightarrow 0\\]</li><li>\\[(-\infty)^{\pm \infty} \rightarrow \operatorname{NaN}\\]</li></ul> |
 | `canonical-root` | `Power` is replaced with `Root` and `Sqrt` or simplified|
 | `canonical-subtract` | `Subtract` is replaced with `Add` and `Negate` |
 | `flatten` | Associative functions are combined, e.g. \\( f(f(a, b), c) \longrightarrow f(a, b, c) \\) |
