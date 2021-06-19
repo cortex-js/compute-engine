@@ -8,10 +8,8 @@ import type {
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import {
-  DECIMAL_E,
   DECIMAL_NAN,
   DECIMAL_NEG_INFINITY,
-  DECIMAL_PI,
   DECIMAL_POS_INFINITY,
 } from '../compute-engine/numeric-decimal';
 
@@ -130,9 +128,9 @@ export function getComplexValue(
     if (symbol === '+Infinity') return new Complex(Infinity);
     if (symbol === '-Infinity') return new Complex(-Infinity);
     if (symbol === 'ComplexInfinity') return Complex.INFINITY;
-    if (symbol === 'Pi') return Complex.PI;
     if (symbol === IMAGINARY_UNIT) return Complex.I;
-    if (symbol === EXPONENTIAL_E) return Complex.E;
+    // if (symbol === PI) return Complex.PI;
+    // if (symbol === EXPONENTIAL_E) return Complex.E;
   }
 
   const name = getFunctionName(expr);
@@ -198,8 +196,8 @@ export function getDecimalValue(
     if (symbol === 'NaN') return DECIMAL_NAN;
     if (symbol === '+Infinity') return DECIMAL_POS_INFINITY;
     if (symbol === '-Infinity') return DECIMAL_NEG_INFINITY;
-    if (symbol === 'Pi') return DECIMAL_PI;
-    if (symbol === 'ExponentialE') return DECIMAL_E;
+    // if (symbol === 'Pi') return DECIMAL_PI;
+    // if (symbol === 'ExponentialE') return DECIMAL_E;
   }
 
   if (isNumberObject(expr)) {

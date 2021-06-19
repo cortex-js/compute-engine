@@ -1,5 +1,10 @@
 import {
+  applyRecursively,
+  getArg,
+  getComplexValue,
+  getDictionary,
   getFunctionHead,
+  getFunctionName,
   getRationalValue,
   getSymbolName,
   getTail,
@@ -46,39 +51,40 @@ export function internalSimplify(
   // 2/ Numeric simplifications
   //
   //
-  const [numer, denom] = simplifyRational(getRationalValue(expr));
-  if (numer !== null && denom !== null) {
-    if (denom === 1) return numer;
-    return ['Divide', numer, denom];
-  }
-  const symDef = engine.getSymbolDefinition(getSymbolName(expr) ?? '');
-  if (symDef) {
-    if (symDef.hold === false && symDef.value) {
-      // We can substitute the symbol for its value
-      return symDef.value;
-    }
-  }
+  expr = simplifyNumber(engine, expr) ?? expr;
 
-  if (isAtomic(expr)) return expr;
+  if (isAtomic(expr!)) return expr;
 
   // Dictionary
-  // isDictionaryObject(lhs)
-  // @todo
+  if (getDictionary(expr!) !== null) {
+    return applyRecursively(
+      expr!,
+      (x) => engine.simplify(x, { simplifications }) ?? x
+    );
+  }
 
   //
   // It's a function (not a dictionary and not atomic)
   //
 
-  const head = engine.simplify(getFunctionHead(expr) ?? MISSING, {
-    simplifications,
-  });
+  const head = internalSimplify(
+    engine,
+    getFunctionHead(expr) ?? MISSING,
+    simplifications
+  );
   if (typeof head === 'string') {
     const def = engine.getFunctionDefinition(head);
     if (def) {
-      // Calculate the arguments, accounting for `hold`
+      // Simplify the arguments, except those affected by `hold`
       const args: Expression[] = [];
       const tail = getTail(expr);
       for (let i = 0; i < tail.length; i++) {
+        const name = getFunctionName(tail[i]);
+        if (name === 'Hold') {
+          args.push(getArg(tail[i], 1) ?? MISSING);
+        } else if (name === 'Evaluate') {
+          args.push(engine.simplify(tail[i], { simplifications }) ?? tail[i]);
+        }
         if (
           (i === 0 && def.hold === 'first') ||
           (i > 0 && def.hold === 'rest') ||
@@ -101,4 +107,36 @@ export function internalSimplify(
     return [head, ...getTail(expr)];
   }
   return expr;
+}
+
+function simplifyNumber(engine: ComputeEngine, expr: Expression) {
+  //
+  // Replace constants by their value
+  const symDef = engine.getSymbolDefinition(getSymbolName(expr) ?? '');
+  if (symDef && symDef.hold === false && symDef.value) {
+    // If hold is false, we can substitute the symbol for its value
+    return internalSimplify(engine, symDef.value);
+  }
+
+  //
+  // Simplify rationals
+  //
+  const [numer, denom] = simplifyRational(getRationalValue(expr));
+  if (numer !== null && denom !== null) {
+    console.assert(denom >= 0);
+    if (denom === 1) return numer;
+    if (numer === 0 && isFinite(denom)) return 0;
+    if (denom === -0 && isFinite(numer)) return -Infinity;
+    if (denom === 0 && isFinite(numer)) return +Infinity;
+    return ['Divide', numer, denom];
+  }
+
+  // @todo could simplify Decimal rationals as well
+
+  const c = getComplexValue(expr);
+  if (c !== null) {
+    if (c.im === 0) return c.re;
+  }
+
+  return null;
 }
