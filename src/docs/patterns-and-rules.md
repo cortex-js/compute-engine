@@ -1,21 +1,24 @@
 ---
 title: Patterns
-permalink: /guides/compute-engine/patterns/
+permalink: /guides/compute-engine/patterns-and-rules/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
 ---
 
-# Patterns
+# Patterns and Rules
 
-Pattern matching is a powerful symbolic computing tool to identify the structure
-of expressions.
+Recognizing patterns and applying rules is a powerful symbolic computing tool 
+to identify and manipulate the structure of expressions.
 
-A pattern is an expression which can include one or more wildcard symbols.
+## Patterns
 
-Patterns in the Cortex Compute Engine are similar to Regular Expressions but
-they can be used to describe MathJSON expressions instead of strings.
+A pattern is an expression which can include one or more placeholders in the 
+form of wildcard symbols.
+
+Patterns are similar to Regular Expressions in traditional programming languages
+but they are tailored to deal with MathJSON expressions instead of strings.
 
 Given a pattern and an expression, usually called the **subject**, the goal of
 pattern matching is to find a substitution for all the wildcards such that the
@@ -31,7 +34,7 @@ pattern by replacing wildcard symbols.
 
 ## Wildcards
 
-Wildcard symbols start with a `_`.
+Wildcard symbols are placeholders in a pattern expression. They start with a `_`.
 
 The `"_"` wildcard matches anything that is in the corresponding position in the
 subject expression.
@@ -42,7 +45,7 @@ corresponding position. It is useful to capture the arguments of a function.
 The `"___"` wildcard matches any sequence of 0 or more expressions in its
 corresponding position.
 
-A wildcard symbol may include a name which will be used to "capture" the
+A wildcard symbol may include a name which will be used to _capture_ the
 matching expression. When using a named wildcard, all instances of the named
 wildcard must match. In contrast, an un-named wildcard (a universal wildcard)
 can be used multiple times to match different values.
@@ -51,11 +54,15 @@ can be used multiple times to match different values.
 
 **To check if an expression matches a pattern**, use the `match()` function.
 
-The functions `match()` and `substitute()` do not require a `ComputeEngine` instance. They are plain functions that can be called directly. {.notice--info}
+The functions `match()` and `substitute()` do not require a `ComputeEngine` 
+instance. They are plain functions that can be called directly. The `ce.match()`
+function on a `ComputeEngine` instance will take into account information 
+about the functions, such as which are commutative and associative {.notice--info}
 
-If there is a match, `match()` returns a `Substitution` object literal with keys corresponding to the
-matchign named wildcards. If no named wildcards are used and there is a match it
-returns an empty object literal. If there is no match, it returns `null`.
+If there is a match, `match()` returns a `Substitution` object literal with 
+keys corresponding to the matching named wildcards. If no named wildcards are 
+used and there is a match it returns an empty object literal. If there is no 
+match, it returns `null`.
 
 ```js
 import { match } from 'compute-engine';
@@ -158,6 +165,37 @@ console.log(
 // ➔ {}: the two expressions are the same once evaluated
 ```
 
-## `count()`
+## Rewrite Rules
 
-## `matchList()`
+A rewrite rule is a triplet of:
+
+- a left-hand-side pattern,  `lhs`
+- a right-hand-side pattern, `rhs`
+- a condition
+
+When a rule is applied to an expression `expr`, if `expr` matches `lhs` and
+the condition applies to the resulting substitution, the result of the 
+rule if the substitution applied to the `rhs`.
+
+```ts
+ce.rule([['Multiply', '_x', '_x'], ['Square', '_x']], ['Multiply', 4, 4]);
+// -> ['Square', 4]
+
+ce.rule(
+  [
+    ['Sqrt', ['Square',  '_x']], 
+    '_x',
+    (ce, sub) => ce.isPositive(sub._x)
+  ],
+  ['Sqrt', ['Square', 17]]
+);
+// -> 17
+```
+
+The `ce.simplify()` method applies a collection of built-in rewrite rules 
+to simplify an expression. You can define your own rules and apply them 
+using `ce.rule()`.
+
+
+
+## `count()`

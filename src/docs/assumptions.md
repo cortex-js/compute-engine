@@ -120,7 +120,7 @@ can also be made.
 
 
 
-<div class='read-more'><a href="/guides/compute-engine/patterns/">Read more about using <strong>Patterns</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/guides/compute-engine/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 ## Domain
 

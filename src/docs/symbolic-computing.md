@@ -116,4 +116,4 @@ You can compare two expressions, check if an expression match a pattern or
 apply a substitution to some elements in an expression.
 
 
-<div class='read-more'><a href="/guides/compute-engine/patterns/">Read more about using <strong>Patterns</strong> for these operations<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/guides/compute-engine/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong> for these operations<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
