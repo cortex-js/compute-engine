@@ -37,6 +37,7 @@ result:
 | **Format** | Put an expression in canonical ("standard") form, for easier sorting, comparing and computing | 
 | **Simplify** | Replace the expression with an equivalent, simpler one | 
 | **Evaluate** | Simplify, calculate, and evaluate numerically an expression| 
+| **Replace** | Apply conditional rewriting rules to an expression | 
 | **Other** | Compare, find patterns and substitute parts of an expression |
 
 </div>
@@ -112,8 +113,8 @@ invoked.
 
 ## Other Symbolic Manipulation
 
-You can compare two expressions, check if an expression match a pattern or 
-apply a substitution to some elements in an expression.
+You can compare two expressions, check if an expression match a pattern, 
+apply a substitution to some elements in an expression or apply a conditional rewriting rule to an expression.
 
 
 <div class='read-more'><a href="/guides/compute-engine/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong> for these operations<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>

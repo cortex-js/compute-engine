@@ -165,17 +165,17 @@ console.log(
 // ➔ {}: the two expressions are the same once evaluated
 ```
 
-## Rewrite Rules
+## Applying Rewrite Rules
 
 A rewrite rule is a triplet of:
 
 - a left-hand-side pattern,  `lhs`
 - a right-hand-side pattern, `rhs`
-- an optional condition
+- an optional `condition`
 
 When a rule is applied to an expression `expr`, if `expr` matches `lhs` and
-the condition applies to the resulting substitution, the result of the 
-rule if the substitution applied to the `rhs`.
+the `condition` applies to the resulting substitution, the result of the 
+rule is the substitution applied to the `rhs`.
 
 **To apply a set of rules to an expression**, use the `ce.replace()` function.
 
@@ -194,8 +194,9 @@ ce.replace([sqrtRule], ['Sqrt', ['Square', 17]]);
 // -> 17
 ```
 
-The `ce.simplify()` method applies a collection of built-in rewrite rules 
-to simplify an expression. You can define your own rules and apply them 
+The `ce.replace()` function continues applying all the rules in the ruleset until no rules are applicable.
+
+The `ce.simplify()` method applies a collection of built-in rewrite rules. You can define your own rules and apply them 
 using `ce.replace()`.
 
 
