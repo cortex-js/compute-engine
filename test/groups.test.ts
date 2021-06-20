@@ -6,7 +6,7 @@ describe('SEQUENCES AND PARENTHESES', () => {
       `['Parentheses', ['Add', 'a', 'b']]`
     );
     expect(expression('-(a+b)')).toMatchInlineSnapshot(
-      `['Negate', ['Add', 'a', 'b']]`
+      `['Add', ['Negate', 'b'], ['Negate', 'a']]`
     );
     expect(expression('(a+(c+d))')).toMatchInlineSnapshot(
       `['Parentheses', ['Add', 'a', 'c', 'd']]`

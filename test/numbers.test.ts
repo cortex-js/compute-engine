@@ -5,17 +5,17 @@ describe('NUMBERS', () => {
   test('Parsing', () => {
     expect(expression('1')).toMatchInlineSnapshot(`1`);
     expect(expression('-1')).toMatchInlineSnapshot(`-1`);
-    expect(expression('1.0')).toMatchInlineSnapshot(`1`);
-    expect(expression('-1.0')).toMatchInlineSnapshot(`-1`);
+    expect(expression('1.0')).toMatchInlineSnapshot(`{num: '1.0'}`);
+    expect(expression('-1.0')).toMatchInlineSnapshot(`{num: '-1.0'}`);
     expect(expression('-1.1234')).toMatchInlineSnapshot(`-1.1234`);
-    expect(expression('-1.1234e5')).toMatchInlineSnapshot(`-112340`);
-    expect(expression('-1.1234E5')).toMatchInlineSnapshot(`-112340`);
+    expect(expression('-1.1234e5')).toMatchInlineSnapshot(`{num: '-1.1234e5'}`);
+    expect(expression('-1.1234E5')).toMatchInlineSnapshot(`{num: '-1.1234e5'}`);
     expect(expression('-1.1234e-5')).toMatchInlineSnapshot(
       `{num: '-1.1234e-5'}`
     );
     // Invalid expression (the argument of "num" should be a string)
     expect(latex({ num: 4 } as any as Expression)).toMatchInlineSnapshot(`'4'`);
-    expect(expression('3\\times10^4')).toMatchInlineSnapshot(`30000`);
+    expect(expression('3\\times10^4')).toMatchInlineSnapshot(`{num: '3e4'}`);
   });
   test('Parsing plus/minus', () => {
     expect(expression('+1')).toMatchInlineSnapshot(`1`);
@@ -31,7 +31,7 @@ describe('NUMBERS', () => {
   });
   test('Parsing digits', () => {
     // Number with exactly three digits after the decimal point
-    expect(expression('3.423e4')).toMatchInlineSnapshot(`34230`);
+    expect(expression('3.423e4')).toMatchInlineSnapshot(`{num: '3.423e4'}`);
     // Number with more than three, less than six digits after the decimal point
     expect(expression('3.42334e4')).toMatchInlineSnapshot(`{num: '3.42334e4'}`);
     // Number with more then 6 digits after the decimal point

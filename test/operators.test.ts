@@ -142,10 +142,10 @@ describe('OPERATORS', () => {
       `['Add', ['Negate', 'x'], -1]`
     );
     expect(expression('-(x+1)')).toMatchInlineSnapshot(
-      `['Negate', ['Add', 'x', 1]]`
+      `['Add', ['Negate', 'x'], -1]`
     );
     expect(expression('-x+(-(x+1))')).toMatchInlineSnapshot(
-      `['Add', ['Negate', ['Add', 'x', 1]], ['Negate', 'x']]`
+      `['Add', ['Negate', 'x'], ['Negate', 'x'], -1]`
     );
     expect(
       expression('-\\frac{-x+2\\times x}{-2\\times x + 1}')
@@ -249,15 +249,13 @@ describe('ARITHMETIC FUNCTIONS', () => {
     expect(expression('-x')).toMatchInlineSnapshot(`['Negate', 'x']`);
     expect(expression('--x')).toMatchInlineSnapshot(`['PreDecrement', 'x']`);
     expect(expression('-(-x)')).toMatchInlineSnapshot(`'x'`); // @todo ["Negate", ["Negate", "x"]] ?
-    expect(expression('-i')).toMatchInlineSnapshot(
-      `['Negate', 'ImaginaryUnit']`
-    );
+    expect(expression('-i')).toMatchInlineSnapshot(`['Complex', 0, -1]`);
     expect(expression('-\\infty')).toMatchInlineSnapshot(`{num: '-Infinity'}`);
   });
   test('Infix plus', () => {
     expect(expression('+1')).toMatchInlineSnapshot(`1`);
     expect(expression('+x')).toMatchInlineSnapshot(`'x'`);
-    expect(expression('+i')).toMatchInlineSnapshot(`'ImaginaryUnit'`);
+    expect(expression('+i')).toMatchInlineSnapshot(`['Complex', 0, 1]`);
     expect(expression('+\\infty')).toMatchInlineSnapshot(`{num: 'Infinity'}`);
   });
   test('Add/subtract', () => {

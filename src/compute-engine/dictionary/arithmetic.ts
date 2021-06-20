@@ -520,14 +520,18 @@ function simplifyAdd(
     } else {
       const c = getComplexValue(arg);
       if (c !== null) {
-        cTotal = cTotal.add(c);
+        if (Number.isInteger(c.re) && Number.isInteger(c.im)) {
+          cTotal = cTotal.add(c);
+        } else {
+          others.push(arg);
+        }
       } else {
         const d = getDecimalValue(arg);
-        if (d !== null) {
+        if (d !== null && d.isInteger()) {
           dTotal = dTotal.add(d);
         } else {
           const val = getNumberValue(arg);
-          if (val !== null) {
+          if (val !== null && Number.isInteger(val)) {
             numerTotal += val;
           } else if (isNotZero(ce, arg) !== false) {
             others.push(arg);
