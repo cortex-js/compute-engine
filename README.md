@@ -43,7 +43,7 @@ console.log(evaluate(expr));
   <dd>A lightweight data interchange format for mathematical notation</dd>  
   <dt><a href="https://cortexjs.io/mathlive">MathLive</a> (on <a href="https://github.com/arnog/mathlive">GitHub</a>)</dt>
   <dd>A Web Component for math input.</dd>  
-  <dt><a href="https://cortexjs.io/cortex">Cortex</a> (on <a href="https://github.com/cortex-js/math-json/tree/master/src/cortex">GitHub</a>)</dt>
+  <dt><a href="https://cortexjs.io/cortex">Cortex</a> (on <a href="https://github.com/cortex-js/compute-engine/tree/master/src/cortex">GitHub</a>)</dt>
   <dd>A programming language for scientific computing</dd>  
 </dl>
 

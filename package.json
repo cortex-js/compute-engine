@@ -13,13 +13,13 @@
     "version": "bash ./scripts/version.sh",
     "test": "bash ./scripts/test.sh"
   },
-  "name": "@cortex-js/math-json",
+  "name": "@cortex-js/compute-engine",
   "description": "A JSON schema to represent math formulas",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cortex-js/math-json.git"
+    "url": "https://github.com/cortex-js/compute-engine.git"
   },
-  "bugs": "https://github.com/cortex-js/math-json/issues/",
+  "bugs": "https://github.com/cortex-js/compute-engine/issues/",
   "publishConfig": {
     "access": "public"
   },
@@ -37,7 +37,7 @@
     "/dist"
   ],
   "main": "./dist/math-json.min.js",
-  "module": "./dist/math-json.min.esm.js",
+  "module": "./src/public.js",
   "types": "./dist/types/math-json.d.ts",
   "engines": {
     "npm": ">=6.14.8",

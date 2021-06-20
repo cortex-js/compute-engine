@@ -41,11 +41,11 @@ console.log(serialize(1/3, {
 }););
 // ➔ 0,333
 ```
-<div class='read-more'><a href="/docs/mathjson/#(NumberFormattingOptions%3Atype)">Read more about <strong><kbd>NumberFormattingOptions</kbd></strong> which apply to both <kbd>parse()</kbd> and <kbd>serialize()</kbd><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/docs/compute-engine/#(NumberFormattingOptions%3Atype)">Read more about <strong><kbd>NumberFormattingOptions</kbd></strong> which apply to both <kbd>parse()</kbd> and <kbd>serialize()</kbd><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
-<div class='read-more'><a href="/docs/mathjson/#(ParseLatexOptions%3Atype)">Read more about <strong><kbd>ParseLatexOptions</kbd></strong> which apply to <kbd>parse()</kbd><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/docs/compute-engine/#(ParseLatexOptions%3Atype)">Read more about <strong><kbd>ParseLatexOptions</kbd></strong> which apply to <kbd>parse()</kbd><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
-<div class='read-more'><a href="/docs/mathjson/#(SerializeLatexOptions%3Atype)">Read more about <strong><kbd>SerializeLatexOptions</kbd></strong> which apply to <kbd>serialize()</kbd><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/docs/compute-engine/#(SerializeLatexOptions%3Atype)">Read more about <strong><kbd>SerializeLatexOptions</kbd></strong> which apply to <kbd>serialize()</kbd><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 
 ## Advanced Usage
