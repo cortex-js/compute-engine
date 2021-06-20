@@ -5,6 +5,7 @@ import {
   getDictionary,
   getFunctionHead,
   getFunctionName,
+  getNumberValue,
   getRationalValue,
   getSymbolName,
   getTail,
@@ -14,7 +15,91 @@ import {
   simplifyRational,
 } from '../common/utils';
 import { Expression } from '../public';
-import { ComputeEngine, Simplification } from './public';
+import { ComputeEngine, Rule, Simplification } from './public';
+import { isNegative, isNotZero, isPositive, isZero } from './predicates';
+import { Substitution } from './patterns';
+
+// A list of simplification rules.
+// The rules are expressed as
+//    [lhs, rhs, condition]
+// where `lhs` is rewritten as `rhs` if `condition` is true
+// `lhs` and `rhs` can be either an Expression or a Latex string.
+// If using an Expression, the expression is *not* canonicalized before being
+// used. Therefore in some cases using Expression, while more verbose,
+// may be necessary as the expression could be simplified by the canonicalization.
+export const SIMPLIFY_RULES: { [topic: string]: Rule[] } = {
+  'simplify-arithmetic': [
+    // `Subtract`
+    ['x - x', 0],
+    [['Subtract', '_x', 0], 'x'],
+    [['Subtract', 0, '_x'], '-x'],
+
+    // `Add`
+    [['Add', '_x', ['Negate', '_x']], 0],
+
+    // `Multiply`
+    [
+      'x \\times x ',
+      'x^2',
+      // ['Multiply', '_x', '_x'],
+      // ['Square', '_x'],
+    ],
+
+    // `Divide`
+    [['Divide', '_x', 1], { sym: '_x' }],
+    [
+      ['Divide', '_x', '_x'],
+      1,
+      (ce: ComputeEngine, sub: Substitution): boolean =>
+        isNotZero(ce, sub.x) ?? false,
+    ],
+    [
+      ['Divide', '_x', 0],
+      +Infinity,
+      (ce: ComputeEngine, sub: Substitution): boolean =>
+        isPositive(ce, sub.x) ?? false,
+    ],
+    [
+      ['Divide', '_x', 0],
+      -Infinity,
+      (ce: ComputeEngine, sub: Substitution): boolean =>
+        isNegative(ce, sub.x) ?? false,
+    ],
+    [['Divide', 0, 0], NaN],
+
+    // `Power`
+    [['Power', '_x', 'Half'], ['\\sqrt{x}']],
+    [['Power', '_x', ['Divide', 1, 2]], ['\\sqrt{x}']],
+    [
+      ['Power', '_x', 2],
+      ['Square', '_x'],
+    ],
+
+    // Complex
+    [
+      ['Divide', ['Complex', '_re', '_im'], '_x'],
+      ['Add', ['Divide', ['Complex', 0, '_im'], '_x'], ['Divide', '_re', '_x']],
+      (ce: ComputeEngine, sub: Substitution): boolean =>
+        (ce.isNotZero(sub.re) ?? false) &&
+        (ce.isInteger(sub.re) ?? false) &&
+        (ce.isInteger(sub.im) ?? false),
+    ],
+
+    // `Abs`
+    [
+      ['Abs', '_x'],
+      { sym: '_x' },
+      (ce: ComputeEngine, sub: Substitution): boolean =>
+        (isZero(ce, sub.x) ?? false) || (isPositive(ce, sub.x) ?? false),
+    ],
+    [
+      ['Abs', '_x'],
+      ['Negate', '_x'],
+      (ce: ComputeEngine, sub: Substitution): boolean =>
+        isNegative(ce, sub.x) ?? false,
+    ],
+  ],
+};
 
 export function internalSimplify(
   engine: ComputeEngine,
@@ -40,6 +125,10 @@ export function internalSimplify(
   // `trig`: Cos, Sin, etc...
   // etc...
 
+  expr = engine.replace(engine.getRules('simplify-all'), expr);
+
+  // expr = engine.replace(ARITHMETIC_RULES, expr);
+
   //
   // 1/ Simplify assumptions
   //
@@ -51,7 +140,7 @@ export function internalSimplify(
   // 2/ Numeric simplifications
   //
   //
-  expr = simplifyNumber(engine, expr) ?? expr;
+  expr = simplifyNumber(engine, expr!) ?? expr;
 
   if (isAtomic(expr!)) return expr;
 
@@ -84,8 +173,7 @@ export function internalSimplify(
           args.push(getArg(tail[i], 1) ?? MISSING);
         } else if (name === 'Evaluate') {
           args.push(engine.simplify(tail[i], { simplifications }) ?? tail[i]);
-        }
-        if (
+        } else if (
           (i === 0 && def.hold === 'first') ||
           (i > 0 && def.hold === 'rest') ||
           def.hold === 'all'
@@ -112,6 +200,7 @@ export function internalSimplify(
 function simplifyNumber(engine: ComputeEngine, expr: Expression) {
   //
   // Replace constants by their value
+  //
   const symDef = engine.getSymbolDefinition(getSymbolName(expr) ?? '');
   if (symDef && symDef.hold === false && symDef.value) {
     // If hold is false, we can substitute the symbol for its value
@@ -133,10 +222,28 @@ function simplifyNumber(engine: ComputeEngine, expr: Expression) {
 
   // @todo could simplify Decimal rationals as well
 
+  //
+  // Simplify complex numbers
+  //
   const c = getComplexValue(expr);
   if (c !== null) {
     if (c.im === 0) return c.re;
+    return ['Complex', c.re, c.im];
+  }
+  if (getFunctionName(expr) === 'Complex') {
+    console.log('stop');
+
+    const arg1 = getArg(expr, 1);
+
+    // This is a non-numerical Complex, i.e. ['Complex', ['Divide', 2, 3], 2]
+    const im = getNumberValue(arg1);
+
+    if (im === 0) return arg1;
+
+    const re = getNumberValue(arg1);
+    if (re === 0) return ['Multiply', getArg(expr, 2), 'ImaginaryUnit'];
+    return ['Add', re ?? arg1, ['Multiply', getArg(expr, 2), 'ImaginaryUnit']];
   }
 
-  return null;
+  return expr;
 }

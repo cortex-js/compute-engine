@@ -103,6 +103,10 @@ export class ComputeEngine<T extends number = number>
     return this.internal.getDefinition(name);
   }
 
+  getRules(topic: string | string[]): RuleSet {
+    return this.internal.getRules(topic);
+  }
+
   format(expr: Expression | null, forms?: Form | Form[]): Expression | null {
     return this.internal.format(expr, forms);
   }
@@ -155,15 +159,16 @@ export class ComputeEngine<T extends number = number>
       options?.iterationLimit ?? this.internal.iterationLimit ?? 1024;
     let iterationCount = 0;
     let result: Expression | null = this.canonical(expr);
-    let prevResult: Expression | null = null;
+    let prevResult: Expression | null = result;
     while (iterationCount < iterationLimit && this.shouldContinueExecution()) {
       result = this.internal.simplify(result!, { simplifications });
-      if (result === null) return null;
-      if (equalExpr(prevResult, result)) return result;
+      if (result === null) return prevResult;
+      if (equalExpr(prevResult, result)) return this.canonical(result);
       prevResult = result;
       iterationCount += 1;
     }
-    return result;
+    if (result === null) return null;
+    return this.canonical(result);
   }
 
   /**
@@ -179,32 +184,20 @@ export class ComputeEngine<T extends number = number>
    * from the current ComputeEngine context are used. By default those
    * values are an infinite amount of iterations and a 2s time limit.
    */
-  evaluate(
+  async evaluate(
     expr: Expression,
     options?: { timeLimit?: number; iterationLimit?: number }
   ): Promise<Expression | null> {
-    const timeLimit = options?.timeLimit ?? this.internal.timeLimit ?? 2.0;
-    if (timeLimit && isFinite(timeLimit)) {
-      // eslint-disable-next-line no-restricted-globals
-      this.internal.deadline = Date.now() + timeLimit * 1000;
-    }
+    const val = this.internal.evaluate(expr, options);
+    if (val === null) return null;
+    return this.canonical(await val);
+  }
 
-    const iterationLimit =
-      options?.iterationLimit ?? this.internal.iterationLimit ?? 1024;
-    let iterationCount = 0;
-    let result: Expression | null = this.canonical(expr);
-    let prevResult: Expression | null = null;
-    while (iterationCount < iterationLimit && this.shouldContinueExecution()) {
-      result = this.internal.simplify(result!);
-      if (result === null) break;
-      if (equalExpr(prevResult, result)) break;
-      prevResult = result;
-      iterationCount += 1;
-    }
-
-    result = this.internal.N(result ?? expr);
-
-    return this.internal.evaluate(result ?? expr);
+  parse(s: string): Expression {
+    return this.internal.parse(s);
+  }
+  serialize(x: Expression): string {
+    return this.serialize(x);
   }
 
   domain(expr: Expression): Expression | null {
@@ -239,13 +232,74 @@ export class ComputeEngine<T extends number = number>
     return this.internal.replace(rules, expr);
   }
 
+  getVars(expr: Expression): Set<string> {
+    return this.internal.getVars(expr);
+  }
+
+  isZero(x: Expression<T>): boolean | undefined {
+    return this.internal.isZero(x);
+  }
+  isNotZero(x: Expression<T>): boolean | undefined {
+    return this.internal.isNotZero(x);
+  }
+  isNumeric(x: Expression<T>): boolean | undefined {
+    return this.internal.isNumeric(x);
+  }
+  isInfinity(x: Expression<T>): boolean | undefined {
+    return this.internal.isInfinity(x);
+  }
+  // Not +- Infinity, not NaN
+  isFinite(x: Expression<T>): boolean | undefined {
+    return this.internal.isFinite(x);
+  }
+  // x >= 0
+  isNonNegative(x: Expression<T>): boolean | undefined {
+    return this.internal.isNonNegative(x);
+  }
+  // x > 0
+  isPositive(x: Expression<T>): boolean | undefined {
+    return this.internal.isPositive(x);
+  }
+  // x < 0
+  isNegative(x: Expression<T>): boolean | undefined {
+    return this.internal.isNegative(x);
+  }
+  // x <= 0
+  isNonPositive(x: Expression<T>): boolean | undefined {
+    return this.internal.isNonPositive(x);
+  }
+  isInteger(x: Expression<T>): boolean | undefined {
+    return this.internal.isInteger(x);
+  }
+  isRational(x: Expression<T>): boolean | undefined {
+    return this.internal.isRational(x);
+  }
+  isAlgebraic(x: Expression<T>): boolean | undefined {
+    return this.internal.isAlgebraic(x);
+  }
+  isReal(x: Expression<T>): boolean | undefined {
+    return this.internal.isReal(x);
+  }
+  // Real or +-Infinity
+  isExtendedReal(x: Expression<T>): boolean | undefined {
+    return this.internal.isExtendedReal(x);
+  }
+  isComplex(x: Expression<T>): boolean | undefined {
+    return this.internal.isComplex(x);
+  }
+  isOne(x: Expression<T>): boolean | undefined {
+    return this.internal.isOne(x);
+  }
+  isNegativeOne(x: Expression<T>): boolean | undefined {
+    return this.internal.isNegativeOne(x);
+  }
+  isElement(x: Expression<T>, set: Expression<T>): boolean | undefined {
+    return this.internal.isElement(x, set);
+  }
   isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean {
     return this.internal.isSubsetOf(lhs, rhs);
   }
 
-  getVars(expr: Expression): Set<string> {
-    return this.internal.getVars(expr);
-  }
   isEqual(lhs: Expression, rhs: Expression): boolean | undefined {
     return this.internal.isEqual(lhs, rhs);
   }

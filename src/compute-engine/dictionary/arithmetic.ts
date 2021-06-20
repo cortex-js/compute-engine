@@ -1,10 +1,13 @@
 import { Expression } from '../../public';
 import {
+  ADD,
   applyRecursively,
   COMPLEX_INFINITY,
   DIVIDE,
   getArg,
   getArgCount,
+  getComplexValue,
+  getDecimalValue,
   getFunctionHead,
   getFunctionName,
   getNumberValue,
@@ -14,11 +17,13 @@ import {
   getTail,
   isAtomic,
   isNumberObject,
+  mapArgs,
   MISSING,
   MULTIPLY,
   NEGATE,
   NOTHING,
   PARENTHESES,
+  SUBTRACT,
 } from '../../common/utils';
 import type { ComputeEngine, Dictionary, Numeric } from '../public';
 import { chop, factorial, gamma, lngamma, gcd } from '../numeric';
@@ -36,7 +41,7 @@ import {
   isNotZero,
   isPositive,
   isZero,
-} from '../utils';
+} from '../predicates';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { gamma as gammaComplex } from '../numeric-complex';
@@ -192,7 +197,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
         }
       }
       if (numerics.length === 0) return ['Add', ...others];
-      const val = ce.N(['Add', ...numerics]);
+      const val =
+        numerics.length === 1 ? numerics[0] : ce.N(['Add', ...numerics]);
       if (others.length === 0) return val;
       return ['Add', ...others, val];
     },
@@ -336,7 +342,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     ): Decimal => {
       if (args.length === 0) return Complex.ONE;
 
-      let c = Complex.One;
+      let c = Complex.ONE;
       for (const arg of args) c = c.mul(arg);
       return c;
     },
@@ -382,7 +388,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     wikidata: 'Q715358',
     range: 'Number',
     simplify: (_ce: ComputeEngine, x: Expression): Expression =>
-      applyNegate(['Negate', x]) ?? ['Negate', x],
+      applyNegate(x) ?? ['Negate', x],
     numeric: true,
     evalNumber: (_ce, val: number) => -val,
     evalComplex: (_ce, x: Complex): Complex => x.neg(),
@@ -479,15 +485,21 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
   // product
 };
 
-function simplifyAdd(ce: ComputeEngine, ...args: Expression[]): Expression {
+function simplifyAdd(
+  ce: ComputeEngine,
+  ...args: Expression<Numeric>[]
+): Expression<Numeric> {
   if (args.length === 0) return 0;
   if (args.length === 1) return args[0];
 
-  let numer = 0;
-  let denom = 1;
+  let numerTotal = 0;
+  let denomTotal = 1;
+  let dTotal = DECIMAL_ZERO;
+  let cTotal = Complex.ZERO;
+
   let posInfinity = false;
   let negInfinity = false;
-  const others: Expression[] = [];
+  const others: Expression<Numeric>[] = [];
 
   for (const arg of args) {
     const symbol = getSymbolName(arg);
@@ -503,10 +515,25 @@ function simplifyAdd(ce: ComputeEngine, ...args: Expression[]): Expression {
     const [n, d] = getRationalValue(arg);
     if (n !== null && d !== null) {
       if (isNaN(n) || isNaN(d)) return NaN;
-      numer = numer * d + n * denom;
-      denom = denom * d;
-    } else if (isNotZero(ce, arg) !== false) {
-      others.push(arg);
+      numerTotal = numerTotal * d + n * denomTotal;
+      denomTotal = denomTotal * d;
+    } else {
+      const c = getComplexValue(arg);
+      if (c !== null) {
+        cTotal = cTotal.add(c);
+      } else {
+        const d = getDecimalValue(arg);
+        if (d !== null) {
+          dTotal = dTotal.add(d);
+        } else {
+          const val = getNumberValue(arg);
+          if (val !== null) {
+            numerTotal += val;
+          } else if (isNotZero(ce, arg) !== false) {
+            others.push(arg);
+          }
+        }
+      }
     }
   }
 
@@ -520,22 +547,25 @@ function simplifyAdd(ce: ComputeEngine, ...args: Expression[]): Expression {
   // for (const [term, coeff] of forEachTermCoeff(others)) {
   // }
 
+  if (!dTotal.isZero()) others.push(dTotal);
+  if (!cTotal.isZero()) others.push(cTotal);
+
   if (others.length === 0) {
-    if (numer === 0) return 0;
-    if (denom === 1) return numer;
-    return ['Divide', numer, denom];
+    if (numerTotal === 0) return 0;
+    if (denomTotal === 1) return numerTotal;
+    return ['Divide', numerTotal, denomTotal];
   }
-  if (others.length === 1 && numer === 0) return others[0];
-  if (numer !== 0) {
-    const g = gcd(numer, denom);
-    numer = numer / g;
-    denom = denom / g;
-    if (denom === 1) {
-      others.push(numer);
+  if (numerTotal !== 0) {
+    const g = gcd(numerTotal, denomTotal);
+    numerTotal = numerTotal / g;
+    denomTotal = denomTotal / g;
+    if (denomTotal === 1) {
+      others.push(numerTotal);
     } else {
-      others.push(['Divide', numer, denom]);
+      others.push(['Divide', numerTotal, denomTotal]);
     }
   }
+  if (others.length === 1) return others[0];
   if (others.length === 2 && getFunctionName(others[1]) === NEGATE) {
     // a + (-b) -> a - b
     return ['Subtract', others[0], getArg(others[1], 1) ?? MISSING];
@@ -554,71 +584,111 @@ function simplifyMultiply(
   if (args.length === 1) return args[0];
 
   const others: Expression[] = [];
-  let c = 1;
+  let numer = 1;
+  let denom = 1;
+  let c = Complex.ONE;
 
   for (const arg of args) {
     const val = getNumberValue(arg);
     if (val === 0) return 0;
     if (val !== null && (!Number.isFinite(val) || Number.isInteger(val))) {
-      c *= val;
+      numer *= val;
     } else {
-      // @todo: consider distributing if the head of arg is Add or Negate or Subtract or Divide
-      if (isZero(ce, arg)) return 0;
-      others.push(arg);
+      const [n, d] = [null, null]; // getRationalValue(arg);
+
+      if (n !== null && d !== null) {
+        numer *= n!;
+        denom *= d!;
+      } else {
+        const cVal = getComplexValue(arg);
+        if (cVal !== null) {
+          if (Number.isInteger(cVal.re) && Number.isInteger(cVal.im)) {
+            c = c.mul(cVal);
+          } else {
+            others.push(arg);
+          }
+        } else {
+          // @todo: consider distributing if the head of arg is Add or Negate or Subtract or Divide
+          if (isZero(ce, arg)) return 0;
+          others.push(arg);
+        }
+      }
     }
   }
 
-  if (c === 0 || !isFinite(c)) return c;
-  if (others.length === 0) return c;
-  if (others.length === 1 && c === 1) return others[0];
-  if (others.length === 1 && c === -1) return ['Negate', others[0]];
-  if (c === 1) return ['Multiply', ...others];
-  if (c === -1) return ['Negate', ['Multiply', ...others]];
-  return ['Multiply', c, ...others];
+  if (c.im !== 0) {
+    c = c.mul(numer);
+    numer = 1;
+  } else {
+    numer = numer * c.re;
+    c = Complex.ONE;
+  }
+
+  // Divide numer by denom to get the proper signed infinite or NaN
+  if (numer === 0 || !isFinite(numer)) return numer / denom;
+
+  if (!c.equals(Complex.ONE)) {
+    others.push(['Complex', c.re, c.im]);
+  }
+  if (others.length === 0) {
+    if (denom === 1) return numer;
+    return ['Divide', numer, denom];
+  }
+  if (denom !== 1) {
+    others.unshift(['Divide', numer, denom]);
+    numer = 1;
+    denom = 1;
+  }
+  if (others.length === 1 && numer === 1) return others[0];
+  if (others.length === 1 && numer === -1) return ['Negate', others[0]];
+  if (numer === 1) return ['Multiply', ...others];
+  if (numer === -1) return ['Negate', ['Multiply', ...others]];
+  return ['Multiply', numer, ...others];
 }
 
-// function simplifyNegate(_ce: ComputeEngine, arg: Expression): Expression {
-//   return applyNegate(arg) ?? ['Negate', arg];
-// }
-
-/** Apply some simplifications for negate.
- * Used by `canonical-negate` and `simplify`
+/** Apply some simplifications for `Negate`.
+ *  Used by `canonical-negate` and `simplify`
  */
 export function applyNegate(expr: Expression): Expression {
   expr = ungroup(expr);
   if (typeof expr === 'number') {
     // Applying negation is safe on floating point numbers
-    expr = -expr;
-  } else if (expr && isNumberObject(expr)) {
-    if (expr.num[0] === '-') {
-      expr = { num: expr.num.slice(1) };
-    } else if (expr.num[0] === '+') {
-      expr = { num: '-' + expr.num.slice(1) };
-    } else {
-      expr = { num: '-' + expr.num };
-    }
-  } else if (expr instanceof Decimal) {
-    const d = expr as Decimal;
-    expr = d.mul(-1) as unknown as Expression;
-  } else if (expr instanceof Complex) {
-    const c = expr as Complex;
-    expr = c.multiply(-1);
-  } else {
-    const name = getFunctionName(expr);
-    const argCount = getArgCount(expr!);
-    if (name === NEGATE && argCount === 1) {
-      // [NEGATE, [NEGATE, x]] -> x
-      return getArg(expr, 1) ?? MISSING;
-    } else if (name === MULTIPLY) {
-      const arg = applyNegate(getArg(expr, 1) ?? MISSING);
-      return [MULTIPLY, arg, ...getTail(expr).slice(1)];
-    } else if (name === PARENTHESES && argCount === 1) {
-      return applyNegate(getArg(getArg(expr, 1)!, 1)!);
-    }
-
-    expr = [NEGATE, expr ?? MISSING];
+    return -expr;
   }
-  return expr;
+  if (expr && isNumberObject(expr)) {
+    if (expr.num[0] === '-') {
+      return { num: expr.num.slice(1) };
+    } else if (expr.num[0] === '+') {
+      return { num: '-' + expr.num.slice(1) };
+    } else {
+      return { num: '-' + expr.num };
+    }
+  }
+  if (expr instanceof Decimal) {
+    const d = expr as Decimal;
+    return d.mul(-1) as unknown as Expression;
+  }
+  if (expr instanceof Complex) {
+    const c = expr as Complex;
+    return c.mul(-1);
+  }
+  const name = getFunctionName(expr);
+  const argCount = getArgCount(expr!);
+  if (name === NEGATE && argCount === 1) {
+    // [NEGATE, [NEGATE, x]] -> x
+    return getArg(expr, 1) ?? MISSING;
+  } else if (name === MULTIPLY) {
+    const arg = applyNegate(getArg(expr, 1) ?? MISSING);
+    return [MULTIPLY, arg, ...getTail(expr).slice(1)];
+  } else if (name === ADD) {
+    return [ADD, ...mapArgs<Expression>(expr, applyNegate)];
+  } else if (name === SUBTRACT) {
+    return [SUBTRACT, getArg(expr, 2) ?? MISSING, getArg(expr, 1) ?? MISSING];
+  } else if (name === PARENTHESES && argCount === 1) {
+    return applyNegate(getArg(getArg(expr, 1)!, 1)!);
+  }
+
+  return [NEGATE, expr ?? MISSING];
 }
 
 // The function is `numeric` so it will be passed numbers

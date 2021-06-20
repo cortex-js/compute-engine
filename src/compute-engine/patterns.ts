@@ -174,10 +174,14 @@ export function matchRecursive(
       } else if (argName.startsWith('_')) {
         result = captureWildcard(argName, exprArgs.shift()!, result);
       } else {
-        if (match(arg, exprArgs.shift()!) === null) return null;
+        const sub = match(arg, exprArgs.shift()!);
+        if (sub === null) return null;
+        result = { ...result, ...sub! };
       }
     } else {
-      if (match(arg, exprArgs.shift()!) === null) return null;
+      const sub = match(arg, exprArgs.shift()!);
+      if (sub === null) return null;
+      result = { ...result, ...sub! };
     }
 
     if (result === null) return null;
@@ -188,8 +192,8 @@ export function matchRecursive(
 }
 
 export function match<T extends number = number>(
-  expr: Expression<T>,
   pattern: Expression<T>,
+  expr: Expression<T>,
   options?: { numericalTolerance: number }
 ): Substitution<T> | null {
   return matchRecursive(

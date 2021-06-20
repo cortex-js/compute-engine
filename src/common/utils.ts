@@ -112,54 +112,48 @@ export function getNumberValue<T extends number = number>(
   return null;
 }
 
+/** Only return non-null if the expression is a Complex number.
+ * Return null if it's a number, or a symbol (other than  `ImaginaryUnit` or
+ * `ComplexInfinity`)
+ *
+ */
 export function getComplexValue(
   expr: Complex | Expression | null
 ): Complex | null {
+  if (expr === null) return null;
   if (expr instanceof Complex) return expr;
-  if (typeof expr === 'number') {
-    if (expr === 0) return Complex.ZERO;
-    if (expr === 1) return Complex.ONE;
-    return new Complex(expr);
-  }
 
   const symbol = getSymbolName(expr);
   if (symbol !== null) {
-    if (symbol === 'NaN') return Complex.NAN;
-    if (symbol === '+Infinity') return new Complex(Infinity);
-    if (symbol === '-Infinity') return new Complex(-Infinity);
     if (symbol === 'ComplexInfinity') return Complex.INFINITY;
     if (symbol === IMAGINARY_UNIT) return Complex.I;
-    // if (symbol === PI) return Complex.PI;
-    // if (symbol === EXPONENTIAL_E) return Complex.E;
   }
 
   const name = getFunctionName(expr);
   if (name === 'Complex') {
-    return new Complex(getArg(expr, 1) ?? NaN, getArg(expr, 2) ?? NaN);
+    const re1 = getNumberValue(getArg(expr, 1));
+    const im1 = getNumberValue(getArg(expr, 2));
+    if (re1 === null || im1 === null) return null;
+    return new Complex(re1, im1);
   }
-  if (
-    name === 'Multiply' &&
-    getSymbolName(getArg(expr, 2)) === IMAGINARY_UNIT
-  ) {
-    const im = getNumberValue(getArg(expr, 1));
-    if (im !== null) return new Complex(0, im);
-  }
-  if (name === 'Add') {
-    const re = getNumberValue(getArg(expr, 1));
-    const arg2 = getArg(expr, 2);
+
+  let im = getImaginaryValue(expr);
+  if (im !== null) return new Complex(0, im);
+
+  if (name === 'Add' && getArgCount(expr) === 2) {
+    let re = getNumberValue(getArg(expr, 1));
     if (re !== null) {
-      if (getSymbolName(arg2) === IMAGINARY_UNIT) {
-        return new Complex(re, 1);
-      }
-      if (
-        getFunctionName(arg2) === 'Multiply' &&
-        getArg(arg2, 2) === IMAGINARY_UNIT
-      ) {
-        const im = getNumberValue(getArg(arg2, 1));
-        if (im !== null) return new Complex(re, im);
+      im = getImaginaryValue(getArg(expr, 2));
+    } else {
+      im = getImaginaryValue(getArg(expr, 1));
+      if (im !== null) {
+        re = getNumberValue(getArg(expr, 2));
       }
     }
+
+    if (re !== null && im !== null) return new Complex(re, im);
   }
+
   if (name === 'Subtract') {
     const re = getNumberValue(getArg(expr, 1));
     const arg2 = getArg(expr, 2);
@@ -176,20 +170,60 @@ export function getComplexValue(
       }
     }
   }
-  if (name === 'Negate') {
-    if (getSymbolName(getArg(expr, 1)) === IMAGINARY_UNIT) {
-      return new Complex(0, -1);
+
+  if (name === 'Multiply' && getArgCount(expr) === 2) {
+    let factor: number | null = null;
+    if (getSymbolName(getArg(expr, 2)) === IMAGINARY_UNIT) {
+      factor = getNumberValue(getArg(expr, 2));
+    } else if (getSymbolName(getArg(expr, 1)) === IMAGINARY_UNIT) {
+      factor = getNumberValue(getArg(expr, 1));
+    }
+    if (factor !== null && Number.isInteger(factor)) {
+      if (factor === 0) return Complex.ZERO;
+      if (factor === 1) return Complex.ONE;
+      if (factor === -1) return Complex.ONE.neg();
+      return new Complex(0, factor);
     }
   }
 
+  if (name === 'Negate') {
+    const c = getComplexValue(getArg(expr, 1));
+    if (c !== null) return c.neg();
+  }
+
   return null;
+}
+
+/**
+ * Return a multiple of the imaginary unit, e.g.
+ * - 'ImaginaryUnit'
+ * - ['Negate', 'ImaginaryUnit']
+ * - ['Multiply', 5, 'ImaginaryUnit']
+ * - ['Multiply', 'ImaginaryUnit', 5]
+ */
+export function getImaginaryValue(expr: Expression): number | null {
+  if (getSymbolName(expr) === 'ImaginaryUnit') return 1;
+
+  let val: number | null = null;
+  const name = getFunctionName(expr);
+  if (name === 'Multiply' && getArgCount(expr) === 2) {
+    if (getSymbolName(getArg(expr, 1)) === 'ImaginaryUnit') {
+      val = getNumberValue(getArg(expr, 2));
+    } else if (getSymbolName(getArg(expr, 2)) === 'ImaginaryUnit') {
+      val = getNumberValue(getArg(expr, 1));
+    }
+  } else if (name === 'Negate' && getArgCount(expr) === 1) {
+    if (getSymbolName(getArg(expr, 1)) === 'ImaginaryUnit') {
+      val = -1;
+    }
+  }
+  return val === 0 ? null : val;
 }
 
 export function getDecimalValue(
   expr: Decimal | Expression | null
 ): Decimal | null {
   if (expr instanceof Decimal) return expr;
-  if (typeof expr === 'number') return new Decimal(expr);
 
   const symbol = getSymbolName(expr);
   if (symbol !== null) {
@@ -240,7 +274,7 @@ export function getStringValue(expr: Expression | null): string | null {
  * if possible, `[null, null]` otherwise.
  *
  * The expression can be:
- * - an integer -> [n, 1]
+ * - Some symbols: "ThreeQuarte", "Half"...
  * - ["Power", d, -1]
  * - ["Power", n, 1]
  * - ["Divide", n, d]
@@ -250,15 +284,6 @@ export function getStringValue(expr: Expression | null): string | null {
 export function getRationalValue(
   expr: Expression
 ): [number, number] | [null, null] {
-  if (typeof expr === 'number' && Number.isInteger(expr)) {
-    return [expr, 1];
-  }
-
-  if (isNumberObject(expr)) {
-    const val = getNumberValue(expr);
-    if (val !== null && Number.isInteger(val)) return [val, 1];
-  }
-
   const symbol = getSymbolName(expr);
   if (symbol === 'ThreeQuarter') return [3, 4];
   if (symbol === 'TwoThird') return [2, 3];
@@ -336,9 +361,13 @@ export function getRationalSymbolicValue(
   const head = getFunctionName(expr);
   if (head === MULTIPLY) {
     // p/q * symbol
-    if (getSymbolName(getArg(expr, 2) ?? MISSING) !== symbol)
+    if (getSymbolName(getArg(expr, 2) ?? MISSING) !== symbol) {
       return [null, null];
-    return getRationalValue(getArg(expr, 1) ?? MISSING);
+    }
+    const arg1 = getArg(expr, 1);
+    const val = getNumberValue(arg1);
+    if (val !== null) return [val, 1];
+    return getRationalValue(arg1 ?? MISSING);
   } else if (head === DIVIDE) {
     const denom = getNumberValue(getArg(expr, 2) ?? MISSING);
     if (denom === null || isNaN(denom)) return [null, null];
@@ -435,7 +464,7 @@ export function getFunctionHead<T extends number = number>(
  * True if the expression is a number, a symbol or a string
  * (i.e. not a function and not a dictionary)
  */
-export function isAtomic(expr: Expression): boolean {
+export function isAtomic(expr: Expression | null): boolean {
   return (
     expr === null ||
     (!Array.isArray(expr) &&

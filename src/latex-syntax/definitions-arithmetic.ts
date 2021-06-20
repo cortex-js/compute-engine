@@ -491,6 +491,28 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
   { name: 'DoublePi', serialize: '2\\pi' },
 
   {
+    name: 'Complex',
+    precedence: 275, // Same precedence as `Add`
+    serialize: (
+      serializer: Serializer<Numeric>,
+      expr: Expression<Numeric>
+    ): string => {
+      const re = getNumberValue(getArg(expr, 1));
+      const im = getNumberValue(getArg(expr, 2));
+      if (im === 0) return serializer.serialize(getArg(expr, 1));
+
+      const imPart =
+        im === 1
+          ? '\\imaginaryI'
+          : im === -1
+          ? '-\\imaginaryI'
+          : joinLatex([serializer.serialize(getArg(expr, 2)), '\\imaginaryI']);
+      if (re === 0) return imPart;
+      return joinLatex([serializer.serialize(getArg(expr, 1)), '+', imPart]);
+    },
+  },
+
+  {
     name: 'Square',
     serialize: (
       serializer: Serializer<Numeric>,

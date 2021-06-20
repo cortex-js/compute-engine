@@ -15,9 +15,11 @@ export type Numeric = number | Decimal | Complex;
 export type Pattern<T extends number = Numeric> = Expression<T>;
 
 export type Rule<T extends number = Numeric> = [
-  lhs: Pattern<T>,
-  rhs: Pattern<T>,
-  condition?: (ce: ComputeEngine<T>, sub: Substitution<T>) => boolean
+  lhs: string | Pattern<T>,
+  rhs: string | Pattern<T>,
+  condition?:
+    | string
+    | ((ce: ComputeEngine<T>, args: Substitution<T>) => boolean)
 ];
 
 export type RuleSet<T extends number = Numeric> = Iterable<Rule<T>>;
@@ -700,11 +702,45 @@ export declare class ComputeEngine<T extends number = Numeric> {
     arg2?: Domain
   ): 'contradiction' | 'tautology' | 'ok';
 
+  // Convenience functions: using the same dictionary as the engine
+  // use a LatexParser to parse/serialize to Latex.
+  parse(s: string): Expression<T>;
+  serialize(x: Expression<T>): string;
+
+  getRules(topic: string | string[]): RuleSet;
+
   /** Return the domain of the expression */
   domain(expr: Expression<T>): Expression<T> | null;
 
-  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean;
+  /** Return the variables in the expression */
   getVars(expr: Expression<T>): Set<string>;
+
+  // Predicate: use assumptions, if available to answer
+  isZero(x: Expression<T>): boolean | undefined;
+  isNotZero(x: Expression<T>): boolean | undefined;
+  isNumeric(x: Expression<T>): boolean | undefined;
+  isInfinity(x: Expression<T>): boolean | undefined;
+  // Not +- Infinity, not NaN
+  isFinite(x: Expression<T>): boolean | undefined;
+  // x >= 0
+  isNonNegative(x: Expression<T>): boolean | undefined;
+  // x > 0
+  isPositive(x: Expression<T>): boolean | undefined;
+  // x < 0
+  isNegative(x: Expression<T>): boolean | undefined;
+  // x <= 0
+  isNonPositive(x: Expression<T>): boolean | undefined;
+  isInteger(x: Expression<T>): boolean | undefined;
+  isRational(x: Expression<T>): boolean | undefined;
+  isAlgebraic(x: Expression<T>): boolean | undefined;
+  isReal(x: Expression<T>): boolean | undefined;
+  // Real or +-Infinity
+  isExtendedReal(x: Expression<T>): boolean | undefined;
+  isComplex(x: Expression<T>): boolean | undefined;
+  isOne(x: Expression<T>): boolean | undefined;
+  isNegativeOne(x: Expression<T>): boolean | undefined;
+  isElement(x: Expression<T>, set: Expression<T>): boolean | undefined;
+  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean;
 
   isEqual(lhs: Expression<T>, rhs: Expression<T>): boolean | undefined;
   isLess(lhs: Expression<T>, rhs: Expression<T>): boolean | undefined;

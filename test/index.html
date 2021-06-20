@@ -114,7 +114,13 @@
     <div class='row'>
       <div id='input-label'>a = </div>
       <math-field id="mf" class="mathfield" tabindex="0" virtual-keyboard-mode="manual">
-        \frac{6 + 3\imaginaryI}{2}
+        \frac{5+3i}{2}
+        <!-- \frac{6}{2}+\frac{3i}{2} -->
+        <!-- \frac{3+2i}{2} -->
+        <!-- 2(-i)+i  -->
+        <!-- \frac{6}{2}+\frac{3\imaginaryI}{2} -->
+
+        <!-- \frac{6 + 3\imaginaryI}{2} -->
         <!-- 0x^2 + 4x  + 2x + 2(x-1) + b(x - 1) -->
       <!-- \operatorname{NonNegativeRealNumber} -->
       <!-- -\frac{50}{70}+\operatorname{GoldenRatio} -->
@@ -525,7 +531,7 @@
       '<ul><li>' + 
        [...ce.assumptions].map(([assumption, val]) => { 
          return convertLatexToMarkup(defaultLatex.serialize(assumption)) + 
-          '<span>' + (val ?  ' is true': ' is false') + '</span>'
+          '<span>' + (val ?  '': ' is false') + '</span>'
         }
       ).join('</li><li>') +
       '</li></ul>'

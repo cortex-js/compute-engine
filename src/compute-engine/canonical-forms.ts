@@ -30,6 +30,7 @@ import {
   applyRecursively,
   getSymbolName,
   getRationalValue,
+  getComplexValue,
 } from '../common/utils';
 import { canonicalOrder } from './order';
 import {
@@ -403,9 +404,6 @@ function canonicalNumberForm(
   expr: Expression,
   engine: ComputeEngine
 ): Expression {
-  if (!isAtomic(expr)) {
-    return applyRecursively(expr, (x) => canonicalNumberForm(x, engine));
-  }
   if (typeof expr === 'number') {
     if (isNaN(expr)) {
       return { num: 'NaN' };
@@ -431,6 +429,13 @@ function canonicalNumberForm(
     if (getNumberValue(getArg(expr, 2)) === 0) {
       return getNumberValue(getArg(expr, 1)) ?? NaN;
     }
+  }
+
+  const c = getComplexValue(expr);
+  if (c !== null) return ['Complex', c.re, c.im];
+
+  if (!isAtomic(expr)) {
+    return applyRecursively(expr, (x) => canonicalNumberForm(x, engine));
   }
 
   return expr;
