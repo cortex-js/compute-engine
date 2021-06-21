@@ -138,8 +138,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     numeric: true,
     range: ['Interval', 0, Infinity],
     evalNumber: (_ce, val: number): number => Math.abs(val),
-    evalComplex: (_ce, n: Complex): Complex => n.abs(),
-    evalDecimal: (_ce, n: Decimal): Decimal => n.abs(),
+    evalComplex: (_ce, n: Complex | number): Complex => Complex.abs(n),
+    evalDecimal: (_ce, n: Decimal | number): Decimal => Decimal.abs(n),
   },
   Add: {
     domain: 'Function',
@@ -158,7 +158,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       for (const arg of args) c += arg;
       return c;
     },
-    evalComplex: (_ce: ComputeEngine, ...args: Complex[]): Complex => {
+    evalComplex: (
+      _ce: ComputeEngine,
+      ...args: (Complex | number)[]
+    ): Complex => {
       if (args.length === 0) return Complex.ZERO;
 
       let c = Complex.ZERO;
@@ -218,16 +221,18 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     numeric: true,
     /** rounds a number up to the next largest integer */
     evalNumber: (_ce, val: number): number => Math.ceil(val),
-    evalComplex: (_ce, n: Complex): Complex => n.ceil(),
-    evalDecimal: (_ce, n: Decimal): Decimal => n.ceil(),
+    evalComplex: (_ce, n: Complex | number): Complex => Complex.ceil(n),
+    evalDecimal: (_ce, n: Decimal | number): Decimal => Decimal.ceil(n),
   },
   Divide: {
     domain: 'Function',
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, lhs: number, rhs: number): number => lhs / rhs,
-    evalComplex: (_ce, lhs: Complex, rhs: Complex): Complex => lhs.div(rhs),
-    evalDecimal: (_ce, lhs: Decimal, rhs: Decimal): Decimal => lhs.div(rhs),
+    evalComplex: (_ce, lhs: Complex | number, rhs: Complex | number): Complex =>
+      typeof lhs === 'number' ? new Complex(lhs).div(rhs) : lhs.div(rhs),
+    evalDecimal: (_ce, lhs: Decimal | number, rhs: Decimal | number): Decimal =>
+      Decimal.div(lhs, rhs),
   },
   Exp: {
     domain: ['ContinuousFunction', 'MonotonicFunction'],
@@ -236,8 +241,9 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, val: number): number => Math.exp(val),
-    evalComplex: (_ce, val: Complex): Complex => val.exp(),
-    evalDecimal: (_ce, val: Decimal): Decimal => val.exp(),
+    evalComplex: (_ce, val: Complex | number): Complex =>
+      typeof val === 'number' ? new Complex(val).exp() : val.exp(),
+    evalDecimal: (_ce, val: Decimal | number): Decimal => Decimal.exp(val),
   },
   Erf: {
     // Error function
@@ -257,8 +263,11 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Integer',
     numeric: true,
     evalNumber: (_ce, n: number): number => factorial(n),
-    evalComplex: (_ce, c: Complex): Complex => gammaComplex(c.add(1)),
-    evalDecimal: (_ce, d: Decimal): Decimal => factorialDecimal(d),
+    evalComplex: (_ce, c: Complex | number): Complex =>
+      typeof c === 'number'
+        ? gammaComplex(new Complex(c + 1))
+        : gammaComplex(c.add(1)),
+    evalDecimal: (_ce, d: Decimal | number): Decimal => factorialDecimal(d),
   },
   Floor: {
     domain: 'Function',
@@ -266,7 +275,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, x: number): number => Math.floor(x),
-    evalDecimal: (_ce, x: Decimal): Decimal => x.floor(),
+    evalDecimal: (_ce, x: Decimal | number): Decimal => Decimal.floor(x),
   },
   Gamma: {
     domain: 'Function',
@@ -275,7 +284,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     numeric: true,
     evalNumber: (_ce, n: number): number => gamma(n),
     // evalComplex: (_ce, c: Complex): Complex => gammaComplex(c),
-    evalDecimal: (_ce, d: Decimal): Decimal => gammaDecimal(d),
+    evalDecimal: (_ce, d: Decimal | number): Decimal => gammaDecimal(d),
   },
   LogGamma: {
     domain: 'Function',
@@ -283,7 +292,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     numeric: true,
     evalNumber: (_ce, n: number): number => lngamma(n),
     // evalComplex: (_ce, c: Complex): Complex => lngammaComplex(c),
-    evalDecimal: (_ce, d: Decimal): Decimal => lngammaDecimal(d),
+    evalDecimal: (_ce, d: Decimal | number): Decimal => lngammaDecimal(d),
   },
   Ln: {
     domain: 'Function',
@@ -291,8 +300,9 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, x: number): number => Math.log(x),
-    evalComplex: (_ce, c: Complex): Complex => c.log(),
-    evalDecimal: (_ce, x: Decimal): Decimal => x.log(),
+    evalComplex: (_ce, c: Complex | number): Complex =>
+      typeof c === 'number' ? new Complex(c).log() : c.log(),
+    evalDecimal: (_ce, x: Decimal | number): Decimal => Decimal.log(x),
   },
   Log: {
     domain: 'Function',
@@ -300,10 +310,17 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     numeric: true,
     evalNumber: (_ce, base: number, x: number): number =>
       Math.log(x) / Math.log(base),
-    evalComplex: (_ce, base: Complex, x: Complex): Complex =>
-      x.log().div(base.log()),
-    evalDecimal: (_ce, base: Decimal, x: Decimal): Decimal =>
-      x.log().div(base.log()),
+    evalComplex: (
+      _ce,
+      base: Complex | number,
+      x: Complex | number
+    ): Complex => {
+      const cBase = typeof base === 'number' ? new Complex(base) : base;
+      const cX = typeof x === 'number' ? new Complex(x) : x;
+      return cX.log().div(cBase.log());
+    },
+    evalDecimal: (_ce, base: Decimal | number, x: Decimal | number): Decimal =>
+      Decimal.log(x).div(Decimal.log(base)),
   },
   Lb: {
     domain: 'Function',
@@ -311,9 +328,12 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, x: number): number => Math.log2(x),
-    evalComplex: (_ce, base: Complex, x: Complex): Complex =>
-      x.log().div(Complex.log(2)),
-    evalDecimal: (_ce, x: Decimal): Decimal => x.log().div(Decimal.log(2)),
+    evalComplex: (_ce, base: Complex, x: Complex): Complex => {
+      const cX = typeof x === 'number' ? new Complex(x) : x;
+      return cX.log().div(Complex.log(2));
+    },
+    evalDecimal: (_ce, x: Decimal): Decimal =>
+      Decimal.log(x).div(Decimal.log(2)),
   },
   Lg: {
     domain: 'Function',
@@ -321,9 +341,12 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, x: number): number => Math.log10(x),
-    evalComplex: (_ce, base: Complex, x: Complex): Complex =>
-      x.log().div(Complex.log(10)),
-    evalDecimal: (_ce, x: Decimal): Decimal => x.log().div(Decimal.log(10)),
+    evalComplex: (_ce, base: Complex, x: Complex): Complex => {
+      const cX = typeof x === 'number' ? new Complex(x) : x;
+      return cX.log().div(Complex.log(10));
+    },
+    evalDecimal: (_ce, x: Decimal): Decimal =>
+      Decimal.log(x).div(Decimal.log(10)),
   },
   // LogOnePlus: { domain: 'Function' },
   Multiply: {
@@ -391,8 +414,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       applyNegate(x) ?? ['Negate', x],
     numeric: true,
     evalNumber: (_ce, val: number) => -val,
-    evalComplex: (_ce, x: Complex): Complex => x.neg(),
-    evalDecimal: (_ce, x: Decimal): Decimal => x.neg(),
+    evalComplex: (_ce, x: Complex | number): Complex =>
+      typeof x === 'number' ? new Complex(-x) : x.neg(),
+    evalDecimal: (_ce, x: Decimal | number): Decimal =>
+      typeof x === 'number' ? new Decimal(-x) : x.neg(),
   },
   Power: {
     domain: 'Function',
@@ -403,18 +428,25 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     simplify: (ce: ComputeEngine, ...args: Expression[]): Expression =>
       applyPower(ce, ['Power', ...args]),
     evalNumber: (_ce, base: number, power: number) => Math.pow(base, power),
-    evalComplex: (_ce, base: Complex, power: Complex) =>
-      Complex.pow(base, power),
-    evalDecimal: (_ce, base: Decimal, power: Decimal): Decimal =>
-      Decimal.pow(base, power),
+    evalComplex: (_ce, base: Complex | number, power: Complex | number) => {
+      const cBase = typeof base === 'number' ? new Complex(base) : base;
+      const cPower = typeof power === 'number' ? new Complex(power) : power;
+      return Complex.pow(cBase, cPower);
+    },
+    evalDecimal: (
+      _ce,
+      base: Decimal | number,
+      power: Decimal | number
+    ): Decimal => Decimal.pow(base, power),
   },
   Round: {
     domain: 'Function',
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, val: number) => Math.round(val),
-    evalComplex: (_ce, val: Complex): Complex => val.round(),
-    evalDecimal: (_ce, val: Decimal): Decimal => val.round(),
+    evalComplex: (_ce, val: Complex | number): Complex =>
+      typeof val === 'number' ? new Complex(val).round() : val.round(),
+    evalDecimal: (_ce, val: Decimal | number): Decimal => Decimal.round(val),
   },
   Sign: {
     domain: 'Function',
@@ -423,13 +455,24 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     simplify: (ce: ComputeEngine, x: Expression): Expression =>
       isZero(ce, x) ? 0 : isNegative(ce, x) ? -1 : 1,
     evalNumber: (_ce, val: number) => (val === 0 ? 0 : val < 0 ? -1 : 1),
-    evalComplex: (_ce, z: Complex) => z.div(z.abs()),
-    evalDecimal: (_ce, val: Decimal) =>
-      val.isZero()
+    evalComplex: (_ce, z: Complex | number): Complex => {
+      const cZ = typeof z === 'number' ? new Complex(z) : z;
+      return cZ.div(cZ.abs());
+    },
+    evalDecimal: (_ce, val: Decimal | number) => {
+      if (typeof val === 'number') {
+        return val === 0
+          ? DECIMAL_ZERO
+          : val < 0
+          ? DECIMAL_MINUS_ONE
+          : DECIMAL_ONE;
+      }
+      return val.isZero()
         ? DECIMAL_ZERO
         : val.isNeg()
         ? DECIMAL_MINUS_ONE
-        : DECIMAL_ONE,
+        : DECIMAL_ONE;
+    },
   },
   SignGamma: {
     domain: 'Function',
@@ -443,8 +486,9 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, val: number) => Math.sqrt(val),
-    evalComplex: (_ce, z: Decimal) => z.sqrt(),
-    evalDecimal: (_ce, val: Decimal) => val.sqrt(),
+    evalComplex: (_ce, z: Complex | number): Complex =>
+      typeof z === 'number' ? new Complex(z).sqrt() : z.sqrt(),
+    evalDecimal: (_ce, val: Decimal): Decimal => Decimal.sqrt(val),
   },
   Square: {
     domain: 'Function',
@@ -452,8 +496,9 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, val: number) => val * val,
-    evalComplex: (_ce, z: Decimal) => z.mul(z),
-    evalDecimal: (_ce, val: Decimal) => val.mul(val),
+    evalComplex: (_ce, z: Complex | number): Complex =>
+      typeof z === 'number' ? new Complex(z).multiply(z) : z.mul(z),
+    evalDecimal: (_ce, val: Decimal): Decimal => Decimal.mul(val, val),
   },
   Root: {
     domain: 'Function',
@@ -461,9 +506,15 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, base: number, power: number) => Math.pow(base, 1 / power),
-    evalComplex: (_ce, base: Complex, power: Complex) =>
-      Complex.pow(base, power),
-    evalDecimal: (_ce, base: Decimal, power: Decimal) =>
+    evalComplex: (_ce, base: Complex, power: Complex): Complex => {
+      const cBase = typeof base === 'number' ? new Complex(base) : base;
+      const cPower =
+        typeof power === 'number'
+          ? new Complex(1 / power)
+          : new Complex(Complex.ONE.div(power));
+      return Complex.pow(cBase, cPower);
+    },
+    evalDecimal: (_ce, base: Decimal, power: Decimal): Decimal =>
       Decimal.pow(base, DECIMAL_ONE.div(power)),
   },
   Subtract: {
@@ -472,8 +523,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, lhs: number, rhs: number) => lhs - rhs,
-    evalComplex: (_ce, lhs: Complex, rhs: Complex) => lhs.minus(rhs),
-    evalDecimal: (_ce, lhs: Decimal, rhs: Decimal) => lhs.minus(rhs),
+    evalComplex: (_ce, lhs: Complex | number, rhs: Complex | number): Complex =>
+      typeof lhs === 'number' ? new Complex(lhs).sub(rhs) : lhs.sub(rhs),
+    evalDecimal: (_ce, lhs: Decimal | number, rhs: Decimal | number): Decimal =>
+      Decimal.sub(lhs, rhs),
   },
   // @todo
   // mod (modulo). See https://numerics.diploid.ca/floating-point-part-4.html,
