@@ -230,8 +230,6 @@ export function getDecimalValue(
     if (symbol === 'NaN') return DECIMAL_NAN;
     if (symbol === '+Infinity') return DECIMAL_POS_INFINITY;
     if (symbol === '-Infinity') return DECIMAL_NEG_INFINITY;
-    // if (symbol === 'Pi') return DECIMAL_PI;
-    // if (symbol === 'ExponentialE') return DECIMAL_E;
   }
 
   if (isNumberObject(expr)) {

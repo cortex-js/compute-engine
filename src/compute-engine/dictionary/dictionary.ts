@@ -383,18 +383,19 @@ function normalizeDefinition(
   }
 
   if (def) {
+    const symDef = def as SymbolDefinition;
     // This might be a partial definition (missing `constant` for a symbol)
     if (
       domain &&
       typeof domain !== 'function' &&
       engine.isSubsetOf(domain, 'Number')
     ) {
-      if (typeof (def as SymbolDefinition).value === 'undefined') {
+      if (typeof symDef.value === 'undefined') {
         return [null, 'expected "value" property in definition'];
       }
       // That's a numeric variable definition
       const inferredDomain = inferNumericDomain(
-        (def as SymbolDefinition).value
+        typeof symDef.value === 'function' ? symDef.value(engine) : symDef.value
       );
       return [
         {

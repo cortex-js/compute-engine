@@ -397,7 +397,7 @@ export type SymbolFeatures = {
 
 export type SymbolDefinition<T extends number = number> = BaseDefinition<T> &
   SymbolFeatures & {
-    value?: Expression<T>;
+    value?: Expression<T> | ((ce: ComputeEngine) => Expression<T>);
     /** For dimensional analysis, e.g. `Scalar`, `Meter`, `["Divide", "Meter", "Second"]` */
     unit?: Expression<T>;
   };

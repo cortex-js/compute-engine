@@ -1,6 +1,5 @@
 import {
   applyRecursively,
-  EXPONENTIAL_E,
   getArg,
   getComplexValue,
   getDecimalValue,
@@ -11,13 +10,11 @@ import {
   getSymbolName,
   getTail,
   MISSING,
-  PI,
 } from '../common/utils';
 import { Expression } from '../public';
 import { ComputeEngine, Numeric } from './public';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
-import { DECIMAL_E, DECIMAL_PI } from './numeric-decimal';
 import { substitute } from './patterns';
 
 /**
@@ -30,7 +27,7 @@ export function internalN(
   // 2/ Is it a number?
   //
   const val =
-    getNumberValue(expr) ?? getComplexValue(expr) ?? getDecimalValue(expr);
+    getComplexValue(expr) ?? getDecimalValue(expr) ?? getNumberValue(expr);
   if (val !== null) return val;
 
   //
@@ -38,12 +35,12 @@ export function internalN(
   //
   const symbol = getSymbolName(expr);
   if (symbol !== null) {
-    if (engine.numericFormat === 'decimal') {
-      if (symbol === PI) return DECIMAL_PI;
-      if (symbol === EXPONENTIAL_E) return DECIMAL_E;
-    }
     const def = engine.getSymbolDefinition(symbol);
     if (def && def.value) {
+      if (typeof def.value === 'function') {
+        return internalN(engine, def.value(engine));
+      }
+
       return internalN(engine, def.value);
     }
     return expr;
@@ -106,9 +103,7 @@ function applyN(
           // call the evalNumber, evalDecimal or evalComplex functions.
           args.push(arg);
         } else {
-          let val = internalN(engine, arg);
-          val =
-            getDecimalValue(val) ?? getComplexValue(val) ?? getNumberValue(val);
+          const val = internalN(engine, arg);
           if (val instanceof Decimal) {
             decimalCount += 1;
             args.push(val);
@@ -119,7 +114,7 @@ function applyN(
             numberCount += 1;
             args.push(val);
           } else {
-            args.push(arg);
+            args.push(val ?? arg);
           }
         }
       }

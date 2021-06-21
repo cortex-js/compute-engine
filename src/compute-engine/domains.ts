@@ -18,7 +18,6 @@ import { ComputeEngine, FunctionDefinition } from './public';
 import { gcd, LARGEST_SMALL_PRIME, SMALL_PRIMES } from './numeric';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
-import { DECIMAL_E, DECIMAL_PI } from './numeric-decimal';
 
 export function internalDomain(
   engine: ComputeEngine,
@@ -64,6 +63,9 @@ export function internalDomain(
     } else if (def && def.domain) {
       return def.domain as Expression;
     } else if (def && 'value' in def && def.value) {
+      if (typeof def.value === 'function') {
+        return internalDomain(engine, def.value(engine));
+      }
       return internalDomain(engine, def.value);
     }
     return 'Anything';
@@ -151,9 +153,6 @@ export function inferNumericDomain(
       }
       if (value.isPositive()) return 'NaturalNumber';
       return 'Integer';
-    }
-    if (value === DECIMAL_PI || value === DECIMAL_E) {
-      return 'TranscendentalNumber';
     }
     if (value.isPositive()) return ['Interval', ['Open', 0], +Infinity];
     return 'RealNumber';

@@ -176,7 +176,8 @@
     <div class='row'>
       <div id='input-label'>a = </div>
       <math-field id="mf" class="mathfield" tabindex="0" virtual-keyboard-mode="manual">
-        e^{i\pi}
+        <!-- 2+3.001 -->
+         e^{i\pi}
         <!-- 1 + 2 + 3.001 -->
         <!-- \frac{5+3i}{2} -->
         <!-- \frac{6}{2}+\frac{3i}{2} -->
@@ -394,11 +395,6 @@
 
       });
 
-    console.log(defaultLatex.serialize({        
-      num: '3.123456785678567856785678567856785678'
-    }));
-
-
     const rawLatex = new LatexSyntax(
       {
         invisibleOperator: '',
@@ -414,6 +410,8 @@
 
     const ce = new ComputeEngine();
 
+    console.log(ce.parse('\\pi'));
+
     updateAssumptions();
 
     const mf = document.getElementById('mf');
@@ -421,7 +419,7 @@
     updateContent(mf);
 
     async function updateContent(mf) {
-      const latex = mf.getValue('latex');
+      const latex = mf.getValue('latex-expanded');
       let expr;
       try {
 
@@ -599,14 +597,6 @@
 
       ce.assume(['Greater', 'x', 4]);
       ce.assume(['Equal','a', 1]);
-
-      // console.log(ce.assumptions);
-      // console.log(ce.is(['Greater', "x", 0]));
-      // console.log(ce.is(['Equal', "x", 0]));
-
-      // console.log(ce.is(['Equal', "a", 1]));
-      // console.log(ce.is(['Greater', "a", 0]));
-
 
     document.getElementById('assumptions').innerHTML = 
       '<ul><li>' + 

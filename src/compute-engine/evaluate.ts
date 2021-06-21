@@ -26,7 +26,7 @@ export function evaluateOnce(
   // 1/ Is it a number?
   //
   const val =
-    getNumberValue(expr) ?? getComplexValue(expr) ?? getDecimalValue(expr);
+    getDecimalValue(expr) ?? getNumberValue(expr) ?? getComplexValue(expr);
   if (val !== null) return val;
 
   //
@@ -35,7 +35,10 @@ export function evaluateOnce(
   const symbol = getSymbolName(expr);
   if (symbol !== null) {
     const def = engine.getSymbolDefinition(symbol);
-    if (def && def.value) return def.value;
+    if (def && def.value) {
+      if (typeof def.value === 'function') return def.value(engine);
+      return def.value;
+    }
     return expr;
   }
 

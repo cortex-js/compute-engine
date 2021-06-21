@@ -72,7 +72,11 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     domain: 'TranscendentalNumber',
     wikidata: 'Q82435',
     constant: true,
-    value: { num: '2.7182818284590452354' },
+    value: (engine: ComputeEngine) => {
+      if (engine.numericFormat === 'decimal') return Decimal.exp(1);
+      if (engine.numericFormat === 'complex') return Complex.E;
+      return 2.7182818284590452354;
+    },
   },
   GoldenRatio: {
     domain: 'IrrationalNumber',
@@ -182,28 +186,51 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       ce: ComputeEngine,
       ...args: Expression[]
     ): Expression<Numeric> => {
-      // Some arguments could not be evaluated to numbers:
+      // Some arguments could not be evaluated to numbers or there's a mix
+      // of Decimal and Complex:
       // still try to add the ones that are numeric, keep the others as is.
+
       if (args.length === 0) return 0;
-      const numerics: (number | Decimal | Complex)[] = [];
-      const others: Expression[] = [];
-      for (const arg of args) {
-        if (
-          typeof arg === 'number' ||
-          arg instanceof Decimal ||
-          arg instanceof Complex ||
-          isNumberObject(arg)
-        ) {
-          numerics.push(arg);
+
+      let result: Expression[] = ['Add'];
+      const decimals = args.filter((x) => x instanceof Decimal);
+      if (decimals.length > 0) {
+        if (decimals.length === 1) {
+          result.push(ce.N(decimals[0]));
         } else {
-          others.push(arg);
+          result.push(ce.N(['Add', ...decimals]));
         }
       }
-      if (numerics.length === 0) return ['Add', ...others];
-      const val =
-        numerics.length === 1 ? numerics[0] : ce.N(['Add', ...numerics]);
-      if (others.length === 0) return val;
-      return ['Add', ...others, val];
+
+      const complexes = args.filter((x) => x instanceof Complex);
+      if (complexes.length > 0) {
+        if (complexes.length === 1) {
+          result.push(ce.N(complexes[0]));
+        } else {
+          result.push(ce.N(['Add', ...complexes]));
+        }
+      }
+
+      const numbers = args.filter((x) => typeof x === 'number');
+      if (numbers.length > 0) {
+        if (numbers.length === 1) {
+          result.push(ce.N(complexes[0]));
+        } else {
+          result.push(ce.N(['Add', ...numbers]));
+        }
+      }
+      const others = args.filter(
+        (x) =>
+          typeof x !== 'number' &&
+          !(x instanceof Decimal) &&
+          !(x instanceof Complex)
+      );
+
+      result = [...result, ...others];
+
+      if (result.length === 0) return 0;
+      if (result.length === 1) return result[1];
+      return result;
     },
   },
   Chop: {
@@ -387,27 +414,52 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       ce: ComputeEngine,
       ...args: Expression[]
     ): Expression<Numeric> => {
-      // Some arguments could not be evaluated to numbers:
-      // still try to multiply the ones that are numeric, keep the others as is.
+      // Some arguments could not be evaluated to numbers or there's a mix
+      // of Decimal and Complex:
+      // still try to add the ones that are numeric, keep the others as is.
+
       if (args.length === 0) return 0;
-      const numerics: (number | Decimal | Complex)[] = [];
-      const others: Expression[] = [];
-      for (const arg of args) {
-        if (
-          typeof arg === 'number' ||
-          arg instanceof Decimal ||
-          arg instanceof Complex ||
-          isNumberObject(arg)
-        ) {
-          numerics.push(arg);
+
+      let result: Expression[] = ['Multiply'];
+      const decimals = args.filter((x) => x instanceof Decimal);
+      if (decimals.length > 0) {
+        if (decimals.length === 1) {
+          result.push(ce.N(decimals[0]));
         } else {
-          others.push(arg);
+          result.push(ce.N(['Multiply', ...decimals]));
         }
       }
-      if (numerics.length === 0) return ['Multiply', ...others];
-      const val = ce.N(['Multiply', ...numerics]);
-      if (others.length === 0) val;
-      return ['Multiply', val, ...others];
+
+      const complexes = args.filter((x) => x instanceof Complex);
+      if (complexes.length > 0) {
+        if (complexes.length === 1) {
+          result.push(ce.N(complexes[0]));
+        } else {
+          result.push(ce.N(['Multiply', ...complexes]));
+        }
+      }
+
+      const numbers = args.filter((x) => typeof x === 'number');
+      if (numbers.length > 0) {
+        if (numbers.length === 1) {
+          result.push(ce.N(complexes[0]));
+        } else {
+          result.push(ce.N(['Multiply', ...numbers]));
+        }
+      }
+
+      const others = args.filter(
+        (x) =>
+          typeof x !== 'number' &&
+          !(x instanceof Decimal) &&
+          !(x instanceof Complex)
+      );
+
+      result = [...result, ...others];
+
+      if (result.length === 0) return 1;
+      if (result.length === 1) return result[1];
+      return result;
     },
   },
   Negate: {

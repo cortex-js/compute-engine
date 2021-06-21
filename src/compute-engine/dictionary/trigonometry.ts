@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { DIVIDE, getArg, MISSING, MULTIPLY, NEGATE } from '../../common/utils';
-import { Dictionary, Numeric } from '../public';
+import { ComputeEngine, Dictionary, Numeric } from '../public';
 import { ExpressionMap } from '../expression-map';
 import { Expression } from '../../public';
 import { DECIMAL_ONE } from '../numeric-decimal';
@@ -138,7 +138,11 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
     domain: 'TranscendentalNumber',
     constant: true,
     wikidata: 'Q167',
-    value: Math.PI,
+    value: (engine: ComputeEngine) => {
+      if (engine.numericFormat === 'decimal') return Decimal.acos(-1);
+      if (engine.numericFormat === 'complex') return Complex.PI;
+      return Math.PI;
+    },
   },
   DoublePi: {
     domain: 'TranscendentalNumber',

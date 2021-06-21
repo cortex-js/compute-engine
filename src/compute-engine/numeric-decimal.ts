@@ -6,8 +6,6 @@ export const DECIMAL_MINUS_ONE = new Decimal(-1);
 export const DECIMAL_NAN = new Decimal(NaN);
 export const DECIMAL_POS_INFINITY = new Decimal(+Infinity);
 export const DECIMAL_NEG_INFINITY = new Decimal(-Infinity);
-export const DECIMAL_PI = Decimal.acos(-1);
-export const DECIMAL_E = Decimal.exp(1);
 
 export function gcd(a: Decimal, b: Decimal): Decimal {
   //@todo: https://github.com/Yaffle/bigint-gcd/blob/main/gcd.js
@@ -82,7 +80,8 @@ export function lngamma(z: Decimal | number): Decimal {
     x = x.add(gammaPLn[i].div(z.add(i)));
   }
   const t = z.add(gammaGLn).add(0.5);
-  return DECIMAL_PI.mul(2)
+  return Decimal.acos(-1)
+    .mul(2)
     .log()
     .mul(0.5)
     .add(t.log().mul(z.add(0.5)).minus(t).add(x.log()).minus(z.log()));
@@ -92,8 +91,10 @@ export function lngamma(z: Decimal | number): Decimal {
 export function gamma(z: Decimal | number): Decimal {
   if (typeof z === 'number') z = new Decimal(z);
   if (z.lessThan(0.5)) {
-    return DECIMAL_PI.div(
-      DECIMAL_PI.mul(z)
+    const pi = Decimal.acos(-1);
+    return pi.div(
+      pi
+        .mul(z)
         .sin()
         .mul(gamma(Decimal.sub(1, z)))
     );
@@ -106,7 +107,8 @@ export function gamma(z: Decimal | number): Decimal {
       x = x.add(p[i].div(z.add(i)));
     }
     const t = z.add(gammaG).add(0.5);
-    return DECIMAL_PI.times(2)
+    return Decimal.acos(-1)
+      .times(2)
       .sqrt()
       .mul(x.mul(t.neg().exp()).mul(Decimal.pow(t, z.add(0.5))));
   }

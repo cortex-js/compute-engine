@@ -196,6 +196,9 @@ function simplifyNumber(engine: ComputeEngine, expr: Expression) {
   const symDef = engine.getSymbolDefinition(getSymbolName(expr) ?? '');
   if (symDef && symDef.hold === false && symDef.value) {
     // If hold is false, we can substitute the symbol for its value
+    if (typeof symDef.value === 'function') {
+      return internalSimplify(engine, symDef.value(engine));
+    }
     return internalSimplify(engine, symDef.value);
   }
 
