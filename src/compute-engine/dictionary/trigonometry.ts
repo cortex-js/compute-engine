@@ -1,6 +1,6 @@
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
-import { DIVIDE, MULTIPLY, NEGATE } from '../../common/utils';
+import { DIVIDE, getArg, MISSING, MULTIPLY, NEGATE } from '../../common/utils';
 import { Dictionary, Numeric } from '../public';
 import { ExpressionMap } from '../expression-map';
 import { Expression } from '../../public';
@@ -369,6 +369,39 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
       Decimal.sqrt(x.mul(x).add(y.mul(y))),
     evalComplex: (_ce, x: Complex, y: Complex) =>
       Complex.sqrt(x.mul(x).add(y.mul(y))),
+  },
+  InverseFunction: {
+    domain: 'Function',
+    range: 'Function',
+    simplify: (_ce, x: Expression): Expression => {
+      const fn = getArg(x, 1) ?? MISSING;
+      if (typeof fn !== 'string') return x;
+      return (
+        {
+          Sin: 'Arcsin',
+          Cos: 'Arccos',
+          Tan: 'Arctan',
+          Sec: 'Arcsec',
+          Csc: ' Arccsc',
+          Sinh: 'Arsinh',
+          Cosh: 'Arcosh',
+          Tanh: 'Artanh',
+          Sech: 'Arcsech',
+          Csch: 'Arcsch',
+          Arcosh: 'Cosh',
+          Arcos: 'Cos',
+          Arccsc: 'Csc',
+          Arcsch: 'Csch',
+          // '??': 'Cot',
+          // '??': 'Coth',
+          Arcsec: 'Sec',
+          Arcsin: 'Sin',
+          Arsinh: 'Sinh',
+          Arctan: 'Tan',
+          Artanh: 'Tanh',
+        }[fn] ?? x
+      );
+    },
   },
   /** = 2 * Arcsin(Sqrt(z)) */
   InverseHaversine: {
