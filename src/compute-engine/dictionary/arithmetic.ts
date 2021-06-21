@@ -26,7 +26,7 @@ import {
   SUBTRACT,
 } from '../../common/utils';
 import type { ComputeEngine, Dictionary, Numeric } from '../public';
-import { chop, factorial, gamma, lngamma, gcd } from '../numeric';
+import { factorial, gamma, lngamma, gcd } from '../numeric';
 import {
   DECIMAL_MINUS_ONE,
   DECIMAL_ONE,
@@ -213,7 +213,11 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     idempotent: true,
     numeric: true,
     range: 'Number',
-    evalNumber: (_ce, val: number): number => chop(val),
+    evalNumber: (ce: ComputeEngine, val: number): number => ce.chop(val),
+    evalComplex: (ce: ComputeEngine, n: Complex | number): Complex =>
+      ce.chop(n),
+    evalDecimal: (ce: ComputeEngine, n: Decimal | number): Decimal =>
+      ce.chop(n),
   },
   Ceil: {
     domain: 'Function',

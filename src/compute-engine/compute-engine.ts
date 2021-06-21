@@ -56,6 +56,13 @@ export class ComputeEngine<T extends number = number>
     this.internal.numericFormat = f;
   }
 
+  get tolerance(): number {
+    return this.internal.tolerance;
+  }
+  set tolerance(val: number) {
+    this.internal.tolerance = val;
+  }
+
   get context(): RuntimeScope<Numeric> {
     return this.internal.context;
   }
@@ -233,6 +240,9 @@ export class ComputeEngine<T extends number = number>
 
   getVars(expr: Expression): Set<string> {
     return this.internal.getVars(expr);
+  }
+  chop(n: Numeric): Numeric {
+    return this.internal.chop(n);
   }
 
   isZero(x: Expression<T>): boolean | undefined {

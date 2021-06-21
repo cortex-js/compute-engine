@@ -65,11 +65,13 @@ import {
 } from './predicates';
 import { internalEvaluate } from './evaluate';
 import { ExpressionMap } from './expression-map';
-import { MACHINE_PRECISION } from './numeric';
+import { MACHINE_PRECISION, NUMERICAL_TOLERANCE } from './numeric';
 import { replace, rules } from './rules';
 import { LatexSyntax } from '../latex-syntax/latex-syntax';
 import { internalN } from './numerical-eval';
 import { Decimal } from 'decimal.js';
+import { Complex } from 'complex.js';
+import { DECIMAL_ZERO } from './numeric-decimal';
 
 /**
  * The internal  compute engine implements the ComputeEngine interface
@@ -88,10 +90,12 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   }
 
   private _precision: number;
-  _numericFormat: NumericFormat;
-  _latexSyntax?: LatexSyntax; // To parse rules as Latex
+  private _numericFormat: NumericFormat;
+  private _latexSyntax?: LatexSyntax; // To parse rules as Latex
 
-  _rules?: { [topic: string]: RuleSet };
+  private _tolerance: number;
+
+  private _rules?: { [topic: string]: RuleSet };
 
   /**
    * The current scope.
@@ -112,6 +116,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
       options?.dictionaries ?? InternalComputeEngine.getDictionaries();
 
     this.numericFormat = 'auto';
+    this.tolerance = NUMERICAL_TOLERANCE;
 
     for (const dict of dicts) {
       if (!this.context) {
@@ -167,6 +172,12 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     this._numericFormat = f;
   }
 
+  get tolerance(): number {
+    return this._tolerance;
+  }
+  set tolerance(val: number) {
+    this._tolerance = Math.max(val, 0);
+  }
   /** Generator function (indicated by the leading '*') that returns all the
    *  rules in all the topics requested.
    */
@@ -384,10 +395,12 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     let result = this.canonical(internalSimplify(this, expr));
 
     if (result !== null) result = internalN(this, result);
+    if (result !== null) result = this.canonical(result);
 
     this.precision = savedPrecision;
     this.numericFormat = savedNumericFormat;
-    return result ? this.canonical(result) : expr;
+
+    return result ?? expr;
   }
 
   // is(symbol: Expression, domain: Domain): boolean | undefined;
@@ -403,7 +416,9 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   ask(pattern: Expression): { [symbol: string]: Expression }[] {
     const result: { [symbol: string]: Expression }[] = [];
     for (const assumption in this.assumptions) {
-      const m = match(pattern, assumption);
+      const m = match(pattern, assumption, {
+        numericalTolerance: this._tolerance,
+      });
       if (m !== null) result.push(m);
     }
     return result;
@@ -435,6 +450,24 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
 
   getVars(expr: Expression): Set<string> {
     return getVariables(this, expr);
+  }
+
+  chop(n: Numeric): Numeric {
+    if (typeof n === 'number') {
+      return Math.abs(n) <= this._tolerance ? 0 : n;
+    } else if (n instanceof Complex) {
+      if (
+        Math.abs(n.re) <= this._tolerance &&
+        Math.abs(n.im) <= this._tolerance
+      ) {
+        return 0;
+      } else {
+        return n;
+      }
+    } else if (n instanceof Decimal) {
+      return n.abs().lte(this._tolerance) ? DECIMAL_ZERO : n;
+    }
+    return n;
   }
 
   parse(s: string): Expression {

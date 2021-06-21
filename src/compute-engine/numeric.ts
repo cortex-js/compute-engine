@@ -14,10 +14,6 @@ export const MACHINE_TOLERANCE = Math.pow(
 // Positive values smaller than NUMERICAL_TOLERANCE are considered to be zero
 export const NUMERICAL_TOLERANCE = Math.pow(10, -10);
 
-export function chop(x: number): number {
-  return Math.abs(x) < NUMERICAL_TOLERANCE ? 0 : x;
-}
-
 /**
  * Returns the smallest floating-point number greater than x.
  * Denormalized values may not be supported.

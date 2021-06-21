@@ -280,7 +280,7 @@ function normalizeDefinition(
 ): [def: null | Definition<Numeric>, error?: string] {
   if (typeof def === 'number') {
     //  If the dictionary entry is provided as a number, assume it's a
-    // variable, and infer its type based on its value.
+    // variable, and infer its domain based on its value.
     return [
       {
         domain: inferNumericDomain(def),

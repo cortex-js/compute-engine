@@ -524,7 +524,7 @@ export declare class ComputeEngine<T extends number = Numeric> {
    * Trigonometric operations are accurate for precision up to 1,000.
    *
    * Some functions, such as `ce.N()` have an option to specify the precision.
-   * If no precision is specified in these functions, the default precision of
+   * If no precision is specified in these functions, the precision of
    * the compute engine is used.
    *
    */
@@ -544,6 +544,13 @@ export declare class ComputeEngine<T extends number = Numeric> {
    *
    */
   numericFormat: NumericFormat;
+
+  /**
+   * Values smaller than the tolerance are considered to be zero for the
+   * purpose of comparison, i.e. if `|b - a| <= tolerance`, `b` is considered
+   * equal to `a`.
+   */
+  tolerance: number;
 
   /**
    * Construct a new `ComputeEngine` environment.
@@ -714,6 +721,8 @@ export declare class ComputeEngine<T extends number = Numeric> {
 
   /** Return the variables in the expression */
   getVars(expr: Expression<T>): Set<string>;
+
+  chop(n: Numeric): Numeric;
 
   // Predicate: use assumptions, if available to answer
   isZero(x: Expression<T>): boolean | undefined;
