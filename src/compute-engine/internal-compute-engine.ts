@@ -36,7 +36,7 @@ import { internalSimplify, SIMPLIFY_RULES } from './simplify';
 import { internalDomain } from './domains';
 import { match } from './patterns';
 import { format } from './canonical-forms';
-import { CortexError, getVars } from './utils';
+import { CortexError, getVariables } from './utils';
 import {
   isEqual,
   isGreater,
@@ -69,6 +69,7 @@ import { MACHINE_PRECISION } from './numeric';
 import { replace, rules } from './rules';
 import { LatexSyntax } from '../latex-syntax/latex-syntax';
 import { internalN } from './numerical-eval';
+import { Decimal } from 'decimal.js';
 
 /**
  * The internal  compute engine implements the ComputeEngine interface
@@ -88,7 +89,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
 
   private _precision: number;
   _numericFormat: NumericFormat;
-  _latexSyntax?: LatexSyntax;
+  _latexSyntax?: LatexSyntax; // To parse rules as Latex
 
   _rules?: { [topic: string]: RuleSet };
 
@@ -145,10 +146,12 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     return this._precision;
   }
   set precision(p: number | 'machine') {
-    if (p === 'machine') p = Math.floor(MACHINE_PRECISION);
+    if (p === 'machine')
+      p = Math.min(MACHINE_PRECISION, Math.floor(MACHINE_PRECISION));
     if (p <= MACHINE_PRECISION) {
       this._numericFormat = 'machine';
     }
+    Decimal.set({ precision: p });
     this._precision = p;
   }
 
@@ -156,20 +159,18 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     return this._numericFormat;
   }
   set numericFormat(f: NumericFormat) {
-    if (f === 'machine' || f === 'complex') {
+    if (f === 'machine' || f === 'complex' || f === 'auto') {
       this._precision = Math.floor(MACHINE_PRECISION);
+    } else if (f === 'decimal') {
+      this._precision = Decimal.precision;
     }
     this._numericFormat = f;
   }
 
+  /** Generator function (indicated by the leading '*') that returns all the
+   *  rules in all the topics requested.
+   */
   *getRules(topics: string | string[]): RuleSet {
-    if (topics === 'simplify-all') {
-      topics = [
-        'simplify-arithmetic',
-        // 'simplify-logarithmic',
-        // 'simplify-trigonometric',
-      ];
-    }
     if (!this._rules) {
       this._rules = {};
       for (const topic of Object.keys(SIMPLIFY_RULES)) {
@@ -433,7 +434,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   }
 
   getVars(expr: Expression): Set<string> {
-    return getVars(this, expr);
+    return getVariables(this, expr);
   }
 
   parse(s: string): Expression {

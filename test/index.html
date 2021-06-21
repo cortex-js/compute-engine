@@ -38,6 +38,16 @@
       margin-right: .5em;
     }
 
+    .latex .ML__mathlive {
+      display: inline;
+      overflow-wrap: break-word;
+    }
+
+    .latex .ML__mathlive .ML__base {
+      display: inline;
+      white-space: normal;
+    }
+
 
     #input-label {
       min-width: fit-content; 
@@ -94,6 +104,53 @@
     .output-section.is-visible .mathjson.is-visible {
       display: block;
     }
+
+    .segmented-control {
+      display: flex;
+      width: 100%;
+      margin: 0 auto;
+      font-size: 1rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
+    'Helvetica Neue', sans-serif;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #eee;
+    }
+
+    .segmented-control > input {
+      display: none;
+    }
+    .segmented-control > input:checked + label {
+      background: var(--primary);
+      color: #fff;
+      border-radius: 8px;
+    }
+
+    .segmented-control label {
+      flex: 1;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+
+
+      padding: 8px 4px;
+      transition: color 250ms cubic-bezier(0,.95,.38,.98);
+
+      width : calc(100% / var(--segments));
+    }
+
+    .segmented-control label:before {
+      background: #fff;
+      transition: all 250ms cubic-bezier(0,.95,.38,.98)
+    }
+    /* .segmented-control label:not(:last-child) {
+      border-right: 1px solid #ddd;
+    } */
+
+
   </style>
   <script src="https://unpkg.com/mathlive/dist/mathlive.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/mathlive/dist/mathlive-static.css">
@@ -238,6 +295,18 @@
     <div class="output-section" id="evaluate-numerically">
       <h2><code>N(a)</code></h2>
       <div class='row'>
+        <div class="segmented-control" style="--segments: 4">
+          <input type="radio" name="numeric-format" value="auto" id="numeric-format-auto" checked />
+          <label for="numeric-format-auto">auto</label>
+          <input type="radio" name="numeric-format" value="machine" id="numeric-format-machine" />
+          <label for="numeric-format-machine">machine</label>
+          <input type="radio" name="numeric-format" value="decimal" id="numeric-format-decimal" />
+          <label for="numeric-format-decimal">decimal</label>
+          <input type="radio" name="numeric-format" value="complex" id="numeric-format-complex" />
+          <label for="numeric-format-complex">complex</label>
+        </div>      
+      </div>
+      <div class='row'>
         <div class="latex"></div>
         <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
       </div>
@@ -320,21 +389,38 @@
     // console.log(defaultLatex.parse('1 + x + x + x'));
 
     // console.log(
-    //   computeEngine.canonical(defaultLatex.parse('3\\times x + 1'))
+    //   ce.canonical(defaultLatex.parse('3\\times x + 1'))
     // );
     // console.log(
-    //   computeEngine.canonical(defaultLatex.parse('1 + x + x + x'))
+    //   ce.canonical(defaultLatex.parse('1 + x + x + x'))
     // );
     // console.log(
-    //   await computeEngine.evaluate(defaultLatex.parse('3\\times x + 1')),
-    //   await computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
+    //   await ce.evaluate(defaultLatex.parse('3\\times x + 1')),
+    //   await ce.evaluate(defaultLatex.parse('1 + x + x + x'))
     // );
 
-    // console.log(computeEngine.match(
-    //   computeEngine.evaluate(defaultLatex.parse('3\\times x + 1')),
-    //   computeEngine.evaluate(defaultLatex.parse('1 + x + x + x'))
+    // console.log(ce.match(
+    //   ce.evaluate(defaultLatex.parse('3\\times x + 1')),
+    //   ce.evaluate(defaultLatex.parse('1 + x + x + x'))
     // ));
 
+
+    document.querySelectorAll('input[name=numeric-format]').forEach(x => {
+      x.addEventListener('click', (evt) => {
+        if (evt.target.id === 'numeric-format-auto') {
+          ce.numericFormat = 'auto';
+        } else if (evt.target.id === 'numeric-format-machine') {
+          ce.numericFormat = 'machine';
+        } else if (evt.target.id === 'numeric-format-decimal') {
+          ce.numericFormat = 'decimal';
+          ce.precision = 1000;
+        } else if (evt.target.id === 'numeric-format-complex') {
+          ce.numericFormat = 'complex';
+        }
+        defaultLatex.options.precision = ce.precision;
+        updateContent(mf);
+      });
+    });
 
     const mf = document.getElementById('mf');
     mf.addEventListener('input', (ev) => updateContent(mf));

@@ -555,7 +555,7 @@ export function applyRecursively<T extends number = number>(
 ): Expression<T> {
   const head = getFunctionHead<T>(expr);
   if (head !== null) {
-    return [fn(head), ...getTail(expr).map((x) => fn(x))];
+    return [fn(head), ...getTail(expr).map(fn)];
   }
   const dict = getDictionary(expr);
   if (dict !== null) {
@@ -590,12 +590,11 @@ export function getArg<T extends number = number>(
   n: number
 ): Expression<T> | null {
   if (expr === null) return null;
-  if (Array.isArray(expr)) {
-    return expr[n];
-  }
-  if (isFunctionObject(expr)) {
-    return expr.fn[n];
-  }
+
+  if (Array.isArray(expr)) return expr[n] ?? null;
+
+  if (isFunctionObject(expr)) return expr.fn[n] ?? null;
+
   return null;
 }
 

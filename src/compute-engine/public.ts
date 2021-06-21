@@ -468,7 +468,7 @@ export type CompiledExpression<T extends number = number> = {
   }) => Promise<T | Expression<T>>;
 };
 
-export type Simplification = 'all' | 'arithmetic';
+export type Simplification = 'simplify-all' | 'simplify-arithmetic';
 
 export type NumericFormat = 'auto' | 'machine' | 'decimal' | 'complex';
 

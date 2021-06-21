@@ -33,6 +33,9 @@ export function rules<T extends number = Numeric>(
 ): RuleSet {
   const result = new Set<Rule>();
   for (const [lhs, rhs, condition] of rs) {
+    // The `lhs` when given as an expression (and not a Latex string)
+    // may not be in canonical form: this is used to rewrite some non-canonical
+    // expression to canonical form.
     const xlhs =
       typeof lhs === 'string'
         ? ce.canonical(substituteSymbols(ce.parse(lhs), SUBS))

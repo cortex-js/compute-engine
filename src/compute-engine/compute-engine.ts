@@ -147,9 +147,6 @@ export class ComputeEngine<T extends number = number>
       simplifications?: Simplification[];
     }
   ): Expression | null {
-    const simplifications: Simplification[] = options?.simplifications ?? [
-      'all',
-    ];
     const timeLimit = options?.timeLimit ?? this.internal.timeLimit ?? 2.0;
     if (timeLimit && isFinite(timeLimit)) {
       this.internal.deadline = Date.now() + timeLimit * 1000;
@@ -161,7 +158,9 @@ export class ComputeEngine<T extends number = number>
     let result: Expression | null = this.canonical(expr);
     let prevResult: Expression | null = result;
     while (iterationCount < iterationLimit && this.shouldContinueExecution()) {
-      result = this.internal.simplify(result!, { simplifications });
+      result = this.internal.simplify(result!, {
+        simplifications: options?.simplifications,
+      });
       if (result === null) return prevResult;
       if (equalExpr(prevResult, result)) return this.canonical(result);
       prevResult = result;

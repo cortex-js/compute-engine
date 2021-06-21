@@ -193,9 +193,7 @@ function canonicalListForm(
       const name = getFunctionName(arg);
       if (name === IDENTITY) {
         const arg1 = getArg(arg, 1);
-        if (arg1 !== null && arg1 !== undefined) {
-          result.push(arg1);
-        }
+        if (arg1 !== null) result.push(arg1);
       } else {
         result.push(arg);
       }
@@ -211,9 +209,7 @@ function canonicalListForm(
     const name = getFunctionName(arg);
     if (name === IDENTITY) {
       const arg1 = getArg(arg, 1);
-      if (arg1 !== null && arg1 !== undefined) {
-        result.push(arg1);
-      }
+      if (arg1 !== null) result.push(arg1);
     } else if (name === head && !sequenceHold) {
       for (let arg2 of getTail(arg)) {
         arg2 = canonicalListForm(arg2, engine);

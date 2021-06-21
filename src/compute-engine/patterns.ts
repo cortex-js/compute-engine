@@ -11,6 +11,7 @@ import {
 import { Expression } from '../public';
 import { NUMERICAL_TOLERANCE } from './numeric';
 import { Numeric } from './public';
+import { hasWildcards } from './utils';
 
 export type Substitution<T extends number = number> = {
   [symbol: string]: Expression<T>;
@@ -52,7 +53,6 @@ export function matchRecursive(
   if (val !== null) {
     // Two numbers are considered the same if they are close in value
     // (< 10^(-10) by default).
-
     if (
       Math.abs(val - (getNumberValue(expr) ?? NaN)) <=
       options.numericalTolerance
@@ -196,6 +196,7 @@ export function match<T extends number = number>(
   expr: Expression<T>,
   options?: { numericalTolerance: number }
 ): Substitution<T> | null {
+  console.assert(!hasWildcards(expr) || hasWildcards(pattern));
   return matchRecursive(
     expr,
     pattern,

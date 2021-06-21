@@ -11,7 +11,6 @@ import {
   getTail,
   isAtomic,
   MISSING,
-  NOTHING,
   simplifyRational,
 } from '../common/utils';
 import { Expression } from '../public';
@@ -107,44 +106,37 @@ export function internalSimplify(
   simplifications?: Simplification[]
 ): Expression | null {
   if (expr === null) return null;
-  if (simplifications === undefined || simplifications[0] === 'all') {
-    simplifications = ['arithmetic'];
+
+  //
+  // 1/ Apply simplification rules
+  //
+  simplifications = simplifications ?? ['simplify-all'];
+  if (simplifications.length === 1 && simplifications[0] === 'simplify-all') {
+    simplifications = [
+      'simplify-arithmetic',
+      // 'simplify-logarithmic',
+      // 'simplify-trigonometric',
+    ];
   }
-  if (simplifications.length > 1) {
-    let result = expr!;
-    for (const simplification of simplifications) {
-      result =
-        engine.simplify(result, { simplifications: [simplification] }) ??
-        NOTHING;
-    }
-    return result;
-  }
-
-  // @todo: use `simplification` to filter which functions this applies to:
-  // `arithmetic`: Add, Multiply, Negate, Power, etc..
-  // `trig`: Cos, Sin, etc...
-  // etc...
-
-  expr = engine.replace(engine.getRules('simplify-all'), expr);
-
-  // expr = engine.replace(ARITHMETIC_RULES, expr);
-
-  //
-  // 1/ Simplify assumptions
-  //
-  // If the expression is a predicate which is an assumption, return `True`
-  //
-  if (engine.is(expr)) return 'True';
+  expr = engine.replace(engine.getRules(simplifications), expr);
 
   //
   // 2/ Numeric simplifications
   //
-  //
   expr = simplifyNumber(engine, expr!) ?? expr;
+
+  //
+  // 3/ Simplify assumptions
+  //
+  // If the expression is a predicate which is an assumption, return `True`
+  //
+  if (engine.is(expr) === true) return 'True';
 
   if (isAtomic(expr!)) return expr;
 
-  // Dictionary
+  //
+  // 4/ Simplify Dictionary
+  //
   if (getDictionary(expr!) !== null) {
     return applyRecursively(
       expr!,
@@ -153,7 +145,7 @@ export function internalSimplify(
   }
 
   //
-  // It's a function (not a dictionary and not atomic)
+  // 5/ It's a function (not a dictionary and not atomic)
   //
 
   const head = internalSimplify(
@@ -169,10 +161,10 @@ export function internalSimplify(
       const tail = getTail(expr);
       for (let i = 0; i < tail.length; i++) {
         const name = getFunctionName(tail[i]);
-        if (name === 'Hold') {
-          args.push(getArg(tail[i], 1) ?? MISSING);
-        } else if (name === 'Evaluate') {
+        if (name === 'Evaluate') {
           args.push(engine.simplify(tail[i], { simplifications }) ?? tail[i]);
+        } else if (name === 'Hold') {
+          args.push(getArg(tail[i], 1) ?? MISSING);
         } else if (
           (i === 0 && def.hold === 'first') ||
           (i > 0 && def.hold === 'rest') ||
@@ -231,18 +223,18 @@ function simplifyNumber(engine: ComputeEngine, expr: Expression) {
     return ['Complex', c.re, c.im];
   }
   if (getFunctionName(expr) === 'Complex') {
-    console.log('stop');
-
     const arg1 = getArg(expr, 1);
+    const arg2 = getArg(expr, 2);
 
-    // This is a non-numerical Complex, i.e. ['Complex', ['Divide', 2, 3], 2]
-    const im = getNumberValue(arg1);
-
+    const im = getNumberValue(arg2);
     if (im === 0) return arg1;
 
     const re = getNumberValue(arg1);
-    if (re === 0) return ['Multiply', getArg(expr, 2), 'ImaginaryUnit'];
-    return ['Add', re ?? arg1, ['Multiply', getArg(expr, 2), 'ImaginaryUnit']];
+    if (re === 0) return ['Multiply', arg2, 'ImaginaryUnit'];
+
+    // This may be a non-numerical Complex,
+    // i.e. ['Complex', ['Divide', 2, 3], 2]
+    return ['Add', re ?? arg1, ['Multiply', im ?? arg2, 'ImaginaryUnit']];
   }
 
   return expr;

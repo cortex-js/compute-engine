@@ -20,7 +20,8 @@ export function lcm(a: Decimal, b: Decimal): Decimal {
   return a.mul(b).div(gcd(a, b));
 }
 
-export function factorial(n: Decimal): Decimal {
+export function factorial(n: Decimal | number): Decimal {
+  if (typeof n === 'number') n = new Decimal(n);
   if (!n.isInteger() || n.isNegative()) return DECIMAL_NAN;
   if (n.lessThan(10)) {
     return new Decimal(
@@ -73,7 +74,8 @@ const gammaPLn: Decimal[] = [
 ].map((x) => new Decimal(x));
 
 // Spouge approximation (suitable for large arguments)
-export function lngamma(z: Decimal): Decimal {
+export function lngamma(z: Decimal | number): Decimal {
+  if (typeof z === 'number') z = new Decimal(z);
   if (z.isNegative()) return DECIMAL_NAN;
   let x = gammaPLn[0];
   for (let i = gammaPLn.length - 1; i > 0; --i) {
@@ -87,7 +89,8 @@ export function lngamma(z: Decimal): Decimal {
 }
 
 // From https://github.com/substack/gamma.js/blob/master/index.js
-export function gamma(z: Decimal): Decimal {
+export function gamma(z: Decimal | number): Decimal {
+  if (typeof z === 'number') z = new Decimal(z);
   if (z.lessThan(0.5)) {
     return DECIMAL_PI.div(
       DECIMAL_PI.mul(z)
