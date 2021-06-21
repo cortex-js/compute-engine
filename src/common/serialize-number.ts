@@ -21,10 +21,11 @@ function formatFractionalPart(
   options: Required<NumberFormattingOptions>
 ): string {
   const originalLength = m.length;
+  const originalM = m;
 
   // The last digit may have been rounded off, if it exceeds the precision,
   // which could throw off the repeating pattern detection. Ignore it.
-  m = m.substr(0, options.precision - 2);
+  m = m.slice(0, -1);
 
   for (let i = 0; i < m.length - 16; i++) {
     // Offset is the part of the fractional part that is not repeating
@@ -44,21 +45,33 @@ function formatFractionalPart(
           return (
             offset.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
             options.beginRepeatingDigits +
-            cycle.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
+            cycle +
+            // cycle.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
             options.endRepeatingDigits
           );
         }
       }
     }
   }
+
+  // There was no repeating pattern we could find...
+
   // Are we displaying fewer digits than were provided?
   // Display a truncation marker.
-  const hasDots = originalLength !== m.length;
-  m = m.replace(/(\d{3})/g, '$1' + options.groupSeparator);
-  if (m.endsWith(options.groupSeparator)) {
-    m = m.slice(0, -1);
+  const extraDigits = originalLength > options.precision - 1;
+  m = originalM;
+  if (extraDigits) {
+    m = m.substr(0, options.precision - 1);
   }
-  return m + (hasDots ? options.truncationMarker : '');
+  // Insert group separators if necessary
+  if (options.groupSeparator) {
+    m = m.replace(/(\d{3})/g, '$1' + options.groupSeparator);
+    if (m.endsWith(options.groupSeparator)) {
+      m = m.slice(0, -options.groupSeparator.length);
+    }
+  }
+  if (extraDigits) return m + options.truncationMarker;
+  return m;
 }
 
 function formatExponent(exp: string, options: NumberFormattingOptions): string {
@@ -69,10 +82,6 @@ function formatExponent(exp: string, options: NumberFormattingOptions): string {
     );
   }
   return '10^{' + exp + '}';
-}
-
-function parseFloatToPrecision(num: number): number {
-  return parseFloat(Number(num).toPrecision(15));
 }
 
 /*
@@ -104,13 +113,14 @@ export function serializeNumber(
 
   if (typeof num === 'number') {
     if (options.notation === 'engineering') {
-      return serializeEngineeringNotationNumber(
-        parseFloatToPrecision(num),
-        options
-      );
+      return serializeEngineeringNotationNumber(num, options);
     }
     return serializeAutoNotationNumber(num.toString(), options);
   }
+
+  // If we end with a letter ('n' or 'd' for bigint or decimal)
+  // remove it.
+  if (/[a-zA-Z]$/.test(num)) num = num.slice(0, -1);
 
   let sign = '';
   if (num[0] === '-') {
@@ -124,7 +134,7 @@ export function serializeNumber(
   while (num[0] === '0') {
     num = num.substr(1);
   }
-  if (num.length === 0) return '0';
+  if (num.length === 0) return sign + '0';
   if (num[0] === '.') num = '0' + num;
 
   let exponent = '';
@@ -132,10 +142,7 @@ export function serializeNumber(
     const m = num.match(/(\d*)\.(\d*)([e|E]([-+]?[0-9]*))?/);
     if (!m) return '';
     const base = m[1];
-    const fractionalPart = m[2].substring(
-      0,
-      Math.min(options.precision - base.length, m[2].length)
-    );
+    const fractionalPart = m[2];
     exponent = m[4] ?? '';
 
     if (base === '0') {
@@ -164,7 +171,8 @@ export function serializeNumber(
           !(
             options.endRepeatingDigits && r.endsWith(options.endRepeatingDigits)
           ) &&
-          !(options.truncationMarker && r.endsWith(options.truncationMarker))
+          options.truncationMarker &&
+          !r.endsWith(options.truncationMarker)
         ) {
           r += options.truncationMarker;
         }
@@ -191,11 +199,13 @@ export function serializeNumber(
     const f = formatFractionalPart(num.substr(1), options);
     if (f) {
       r += options.decimalMarker + f;
-      if (
-        options.endRepeatingDigits &&
-        !r.endsWith(options.endRepeatingDigits)
-      ) {
-        r += options.truncationMarker;
+      if (options.truncationMarker && !r.endsWith(options.truncationMarker)) {
+        if (
+          options.endRepeatingDigits &&
+          !r.endsWith(options.endRepeatingDigits)
+        ) {
+          r += options.truncationMarker;
+        }
       }
     }
     if (r !== '1') {
@@ -203,7 +213,7 @@ export function serializeNumber(
     } else {
       r = '';
     }
-    num = r + formatExponent((len - 2).toString(), options);
+    num = r + formatExponent((len - 1).toString(), options);
   } else {
     const m = num.match(/([0-9]*)\.?([0-9]*)([e|E]([-+]?[0-9]+))?/);
     if (m) {

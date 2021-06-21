@@ -11,6 +11,11 @@
     :root {
       /* --primary: #0066ce; */
       --primary-light: #86a8cb;
+      --monospace: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo,
+          Monaco, 'Courier New', monospace;
+      --system: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+        'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
+        'Helvetica Neue', sans-serif;
     }
     code {
       white-space: pre-wrap;
@@ -24,8 +29,7 @@
     }
 
     h2 code {
-      font-family: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo,
-          Monaco, 'Courier New', monospace;
+      font-family: var(--monospace);
       font-size: 1em;
     }
 
@@ -38,6 +42,7 @@
       margin-right: .5em;
     }
 
+    /* Wrap mathlive content */
     .latex .ML__mathlive {
       display: inline;
       overflow-wrap: break-word;
@@ -49,11 +54,12 @@
     }
 
 
+    #mf { width: 100% }
+
     #input-label {
       min-width: fit-content; 
       margin-right: .5em;
     }
-    #mf { width: 100% }
 
     #assumptions ul {
       padding-top: .25em;
@@ -110,12 +116,12 @@
       width: 100%;
       margin: 0 auto;
       font-size: 1rem;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
-    'Helvetica Neue', sans-serif;
+      font-family: var(--system);
+      font-weight: 600;
       border: 1px solid #ddd;
       border-radius: 8px;
       background: #eee;
+      padding: 4px;
     }
 
     .segmented-control > input {
@@ -134,22 +140,21 @@
       overflow: hidden;
       text-overflow: ellipsis;
       cursor: pointer;
+      user-select: none;
+      border-radius: 8px;
 
-
-      padding: 8px 4px;
-      transition: color 250ms cubic-bezier(0,.95,.38,.98);
+      padding: 8px 0;
+      transition: all 250ms cubic-bezier(0,.95,.38,.98);
 
       width : calc(100% / var(--segments));
+      margin-left: 2px;
     }
-
-    .segmented-control label:before {
-      background: #fff;
-      transition: all 250ms cubic-bezier(0,.95,.38,.98)
+    .segmented-control label:first {
+      margin-left: 0;
     }
-    /* .segmented-control label:not(:last-child) {
-      border-right: 1px solid #ddd;
-    } */
-
+    .segmented-control label:hover {
+      background: #dadada;
+    }
 
   </style>
   <script src="https://unpkg.com/mathlive/dist/mathlive.min.js"></script>
@@ -171,7 +176,8 @@
     <div class='row'>
       <div id='input-label'>a = </div>
       <math-field id="mf" class="mathfield" tabindex="0" virtual-keyboard-mode="manual">
-        1 + 2 + 3.001
+        e^{i\pi}
+        <!-- 1 + 2 + 3.001 -->
         <!-- \frac{5+3i}{2} -->
         <!-- \frac{6}{2}+\frac{3i}{2} -->
         <!-- \frac{3+2i}{2} -->
@@ -332,6 +338,25 @@
 
     const MAX_LINE_LENGTH = 64;
 
+    //
+    // Numeric format segmented control
+    //
+    document.querySelectorAll('input[name=numeric-format]').forEach(x => {
+      x.addEventListener('click', (evt) => {
+        if (evt.target.id === 'numeric-format-auto') {
+          ce.numericFormat = 'auto';
+        } else if (evt.target.id === 'numeric-format-machine') {
+          ce.numericFormat = 'machine';
+        } else if (evt.target.id === 'numeric-format-decimal') {
+          ce.numericFormat = 'decimal';
+          ce.precision = 1000;
+        } else if (evt.target.id === 'numeric-format-complex') {
+          ce.numericFormat = 'complex';
+        }
+        defaultLatex.options.precision = ce.precision;
+        updateContent(mf);
+      });
+    });
     let errors = [];
     const defaultLatex = new LatexSyntax(
       {
@@ -368,6 +393,12 @@
           ]
 
       });
+
+    console.log(defaultLatex.serialize({        
+      num: '3.123456785678567856785678567856785678'
+    }));
+
+
     const rawLatex = new LatexSyntax(
       {
         invisibleOperator: '',
@@ -380,47 +411,10 @@
         onError: (err) =>
           errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
       });
+
     const ce = new ComputeEngine();
 
-
     updateAssumptions();
-
-    // console.log(defaultLatex.parse('3\\times x + 1'));
-    // console.log(defaultLatex.parse('1 + x + x + x'));
-
-    // console.log(
-    //   ce.canonical(defaultLatex.parse('3\\times x + 1'))
-    // );
-    // console.log(
-    //   ce.canonical(defaultLatex.parse('1 + x + x + x'))
-    // );
-    // console.log(
-    //   await ce.evaluate(defaultLatex.parse('3\\times x + 1')),
-    //   await ce.evaluate(defaultLatex.parse('1 + x + x + x'))
-    // );
-
-    // console.log(ce.match(
-    //   ce.evaluate(defaultLatex.parse('3\\times x + 1')),
-    //   ce.evaluate(defaultLatex.parse('1 + x + x + x'))
-    // ));
-
-
-    document.querySelectorAll('input[name=numeric-format]').forEach(x => {
-      x.addEventListener('click', (evt) => {
-        if (evt.target.id === 'numeric-format-auto') {
-          ce.numericFormat = 'auto';
-        } else if (evt.target.id === 'numeric-format-machine') {
-          ce.numericFormat = 'machine';
-        } else if (evt.target.id === 'numeric-format-decimal') {
-          ce.numericFormat = 'decimal';
-          ce.precision = 1000;
-        } else if (evt.target.id === 'numeric-format-complex') {
-          ce.numericFormat = 'complex';
-        }
-        defaultLatex.options.precision = ce.precision;
-        updateContent(mf);
-      });
-    });
 
     const mf = document.getElementById('mf');
     mf.addEventListener('input', (ev) => updateContent(mf));

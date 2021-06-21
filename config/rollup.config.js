@@ -110,7 +110,7 @@ function buildProgress() {
         console.log(chalk.green(' ✔') + '  Build complete ');
         console.log(' 🚀 Launching server');
         exec(
-          "npx http-server . -s -c-1 --cors='*' -o /test/index.html",
+          "npx http-server . -s -c-1 --cors='*' -o /test/compute-engine.html",
           (error, stdout, stderr) => {
             if (error) {
               console.error(`http-server error: ${error}`);

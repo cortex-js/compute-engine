@@ -90,19 +90,18 @@ describe('NUMBERS', () => {
     expect(expression('3\\times10^n')).toMatchInlineSnapshot(
       `['Multiply', 3, ['Power', 10, 'n']]`
     );
-    expect(expression('NaN')).toMatchInlineSnapshot(
-      `['Multiply', 'N', 'N', 'a']`
+    expect(expression('\\operatorname{NaN}')).toMatchInlineSnapshot(
+      `['NaN', 'syntax-error']`
     );
   });
   test('Bigints', () => {
     // expect(latex({ num: 12n })).toMatchInlineSnapshot();
     expect(latex({ num: '12n' })).toMatchInlineSnapshot(`'12'`);
+    // 1.8734619237861928346123987612981923064237689123876492384769... × 10^196
     expect(
       latex({
-        num: '18734619237861928346123987612981923064237689123876492384769123786412837040123612308964123876412307864012346012837491237864192837641923876419238764123987642198764987162398716239871236912347619238764192387641920836419238764123087641287642n',
+        num: '18734619237861928346123987612981923064237689123876492384769123786412837040123612308964123876412307864012346012837491237864192837641923876419238764123987642198764987162398716239871236912347619238764n',
       })
-    ).toMatchInlineSnapshot(
-      `'1.873,461,923,786,1\\ldots\\ldots\\cdot10^{235}'`
-    );
+    ).toMatchInlineSnapshot(`'1.873,461,923,786,19\\ldots\\cdot10^{196}'`);
   });
 });

@@ -25,7 +25,9 @@ describe('CORTEX SERIALIZING', () => {
     );
     expect(
       serializeCortex({ num: '-123456789012345678901234567890.890e-123' })
-    ).toMatchInlineSnapshot(`"-123_456_789_012_345_678_901_234_567_890e-123"`);
+    ).toMatchInlineSnapshot(
+      `"-123_456_789_012_345_678_901_234_567_890.890e-123"`
+    );
     expect(serializeCortex({ num: '+Infinity' })).toMatch('+Infinity');
     expect(serializeCortex({ num: '-Infinity' })).toMatch('-Infinity');
     expect(serializeCortex({ num: 'NaN' })).toMatch('NaN');
@@ -34,11 +36,11 @@ describe('CORTEX SERIALIZING', () => {
     // Repeating pattern
     expect(
       serializeCortex({ num: '3.123456785678567856785678567856785678' })
-    ).toMatchInlineSnapshot(`"3.123_456_785_678_5"`);
+    ).toMatchInlineSnapshot(`"3.123_45678"`);
 
     expect(
       serializeCortex({ num: '0.1234567872368237462387623876' })
-    ).toMatchInlineSnapshot(`"0.123_456_787_236_8"`);
+    ).toMatchInlineSnapshot(`"0.123_456_787_236_82"`);
   });
 
   test('BaseForm', () => {

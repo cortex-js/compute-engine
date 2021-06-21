@@ -4,21 +4,16 @@ import { expression, latex } from './utils';
 
 describe('POWER', () => {
   test('Power Invalid forms', () => {
-    expect(latex([POWER])).toMatchInlineSnapshot(`
-            'syntax-error
-            syntax-error'
-        `);
+    expect(latex([POWER])).toMatchInlineSnapshot(`''`);
     expect(latex([POWER, null as unknown as Expression])).toMatchInlineSnapshot(
       `''`
     );
-    expect(latex([POWER, undefined as unknown as Expression]))
-      .toMatchInlineSnapshot(`
-            'syntax-error
-            syntax-error'
-        `);
-    expect(latex([POWER, 1])).toMatchInlineSnapshot(`'syntax-error'`);
-    expect(latex([POWER, NaN])).toMatchInlineSnapshot(`'syntax-error'`);
-    expect(latex([POWER, Infinity])).toMatchInlineSnapshot(`'syntax-error'`);
+    expect(
+      latex([POWER, undefined as unknown as Expression])
+    ).toMatchInlineSnapshot(`''`);
+    expect(latex([POWER, 1])).toMatchInlineSnapshot(`'1'`);
+    expect(latex([POWER, NaN])).toMatchInlineSnapshot(`'\\operatorname{NaN}'`);
+    expect(latex([POWER, Infinity])).toMatchInlineSnapshot(`'\\infty'`);
   });
 });
 

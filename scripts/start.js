@@ -38,7 +38,7 @@ build({
   ...buildOptions,
   onEnd: (_config, buildResult, _ctx) => {
     if (server === null && buildResult.errors.length === 0) {
-      const url = `http://localhost:8080/test/`;
+      const url = `http://localhost:8080/test/compute-engine.html`;
       console.log(` 🚀 Server ready:\u001b[1;35m ${url}\u001b[0m`);
 
       // eslint-disable-next-line import/no-extraneous-dependencies

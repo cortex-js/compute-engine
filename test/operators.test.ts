@@ -39,13 +39,13 @@ describe('ADD/SUBTRACT', () => {
     expect(latex([SUBTRACT, -1, -2])).toMatchInlineSnapshot(`'-1--2'`);
   });
   test('Subtract Invalid forms', () => {
-    expect(latex([SUBTRACT])).toMatchInlineSnapshot(`'syntax-error'`);
+    expect(latex([SUBTRACT])).toMatchInlineSnapshot(`''`);
     expect(
       latex([SUBTRACT, null as unknown as Expression])
     ).toMatchInlineSnapshot(`''`);
     expect(
       latex([SUBTRACT, undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(`'syntax-error'`);
+    ).toMatchInlineSnapshot(`''`);
     expect(latex([SUBTRACT, 1])).toMatchInlineSnapshot(`'1'`);
     expect(latex([SUBTRACT, 1, 2, 3])).toMatchInlineSnapshot(`'1-2-3'`);
   });
@@ -62,15 +62,13 @@ describe('MULTIPLY', () => {
     ).toMatchInlineSnapshot(`'\\frac{\\frac{2}{x}}{x^{2}}'`);
   });
   test('Multiply Invalid forms', () => {
-    expect(latex([MULTIPLY])).toMatchInlineSnapshot(`'syntax-error'`);
+    expect(latex([MULTIPLY])).toMatchInlineSnapshot(`''`);
     expect(
       latex([MULTIPLY, null as unknown as Expression])
     ).toMatchInlineSnapshot(`''`);
-    expect(latex([MULTIPLY, undefined as unknown as Expression]))
-      .toMatchInlineSnapshot(`
-      'syntax-error
-      syntax-error'
-    `);
+    expect(
+      latex([MULTIPLY, undefined as unknown as Expression])
+    ).toMatchInlineSnapshot(`''`);
     expect(latex([MULTIPLY, 1])).toMatchInlineSnapshot(`'1'`);
     expect(latex([MULTIPLY, 'NaN'])).toMatchInlineSnapshot(
       `'\\operatorname{NaN}'`
@@ -86,19 +84,14 @@ describe('DIVIDE', () => {
     expect(latex([DIVIDE, 2, 3])).toMatchInlineSnapshot(`'\\frac{2}{3}'`);
   });
   test('Divide Invalid forms', () => {
-    expect(latex([DIVIDE])).toMatchInlineSnapshot(`
-            'syntax-error
-            syntax-error'
-        `);
+    expect(latex([DIVIDE])).toMatchInlineSnapshot(`'\\frac{}{}'`);
     expect(latex([DIVIDE, 1])).toMatchInlineSnapshot(`'1'`);
     expect(
       latex([DIVIDE, null as unknown as Expression])
     ).toMatchInlineSnapshot(`''`);
-    expect(latex([DIVIDE, undefined as unknown as Expression]))
-      .toMatchInlineSnapshot(`
-      'syntax-error
-      syntax-error'
-    `);
+    expect(
+      latex([DIVIDE, undefined as unknown as Expression])
+    ).toMatchInlineSnapshot(`''`);
     expect(latex([DIVIDE, 'NaN'])).toMatchInlineSnapshot(
       `'\\operatorname{NaN}'`
     );
@@ -249,13 +242,15 @@ describe('ARITHMETIC FUNCTIONS', () => {
     expect(expression('-x')).toMatchInlineSnapshot(`['Negate', 'x']`);
     expect(expression('--x')).toMatchInlineSnapshot(`['PreDecrement', 'x']`);
     expect(expression('-(-x)')).toMatchInlineSnapshot(`'x'`); // @todo ["Negate", ["Negate", "x"]] ?
-    expect(expression('-i')).toMatchInlineSnapshot(`['Complex', 0, -1]`);
+    expect(expression('-i')).toMatchInlineSnapshot(
+      `['Negate', 'ImaginaryUnit']`
+    );
     expect(expression('-\\infty')).toMatchInlineSnapshot(`{num: '-Infinity'}`);
   });
   test('Infix plus', () => {
     expect(expression('+1')).toMatchInlineSnapshot(`1`);
     expect(expression('+x')).toMatchInlineSnapshot(`'x'`);
-    expect(expression('+i')).toMatchInlineSnapshot(`['Complex', 0, 1]`);
+    expect(expression('+i')).toMatchInlineSnapshot(`'ImaginaryUnit'`);
     expect(expression('+\\infty')).toMatchInlineSnapshot(`{num: 'Infinity'}`);
   });
   test('Add/subtract', () => {

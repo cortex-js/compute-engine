@@ -25,7 +25,7 @@ describe('LATEX SERIALIZING', () => {
     expect(
       latex({ num: '-123456789012345678901234567890.890e-123' })
     ).toMatchInlineSnapshot(
-      `'-123,456,789,012,345,678,901,234,567,890\\cdot10^{-123}'`
+      `'-123,456,789,012,345,678,901,234,567,890.890\\cdot10^{-123}'`
     );
     expect(latex({ num: '+Infinity' })).toMatchInlineSnapshot(`'\\infty'`);
     expect(latex({ num: '-Infinity' })).toMatchInlineSnapshot(`'-\\infty'`);
@@ -37,11 +37,11 @@ describe('LATEX SERIALIZING', () => {
     // Repeating patern
     expect(
       latex({ num: '3.123456785678567856785678567856785678' })
-    ).toMatchInlineSnapshot(`'3.123,456,785,678,5\\ldots'`);
+    ).toMatchInlineSnapshot(`'3.123,4\\overline{5678}'`);
 
     expect(
       latex({ num: '0.1234567872368237462387623876' })
-    ).toMatchInlineSnapshot(`'0.123,456,787,236,8\\ldots'`);
+    ).toMatchInlineSnapshot(`'0.123,456,787,236,82\\ldots'`);
 
     expect(expression('  - 1 2')).toMatchInlineSnapshot(`['Multiply', -1, 2]`);
     expect(expression('-123,456.789,012')).toMatchInlineSnapshot(

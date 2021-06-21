@@ -35,10 +35,8 @@ import { Numeric } from '../compute-engine/public';
  * negative exponents in the denominator, and all the terms
  * with a positive exponent (or no exponent) in the numerator.
  */
-function numeratorDenominator(
-  expr: Expression
-): [Expression[] | null, Expression[] | null] {
-  if (getFunctionName(expr) !== MULTIPLY) return [null, null];
+function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
+  if (getFunctionName(expr) !== MULTIPLY) return [[], []];
   const numerator: Expression[] = [];
   const denominator: Expression[] = [];
   const args = getTail(expr);
@@ -226,7 +224,7 @@ function serializeMultiply(
 ): string {
   if (expr === null) return '';
 
-  // "multiply" doesn't increase the "level" for styling purposes
+  // "Multiply" doesn't increase the "level" for styling purposes
   // so, preventively decrease it now.
   serializer.level -= 1;
 
@@ -237,7 +235,7 @@ function serializeMultiply(
   // (i.e. does it have a denominator, i.e. some factors with a negative power)
   //
   const [numer, denom] = numeratorDenominator(expr);
-  if (numer !== null && denom !== null && denom.length > 0) {
+  if (denom.length > 0) {
     if (denom.length === 1 && denom[0] === 1) {
       if (numer.length === 0) {
         result = '1';
@@ -497,6 +495,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
       serializer: Serializer<Numeric>,
       expr: Expression<Numeric>
     ): string => {
+      // Note: we should not have ['Complex'] functions in canonical expressions
+      // but this is just in case...
+
       const re = getNumberValue(getArg(expr, 1));
       const im = getNumberValue(getArg(expr, 2));
       if (im === 0) return serializer.serialize(getArg(expr, 1));
@@ -511,7 +512,19 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
       return joinLatex([serializer.serialize(getArg(expr, 1)), '+', imPart]);
     },
   },
-
+  {
+    name: 'Exp',
+    serialize: (
+      serializer: Serializer<Numeric>,
+      expr: Expression<Numeric>
+    ): string => {
+      return joinLatex([
+        '\\exponentialE^{',
+        serializer.serialize(getArg(expr, 1) ?? NOTHING),
+        '}',
+      ]);
+    },
+  },
   {
     name: 'Square',
     serialize: (

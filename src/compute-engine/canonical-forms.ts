@@ -40,7 +40,6 @@ import {
   ungroup,
 } from './dictionary/arithmetic';
 import { Decimal } from 'decimal.js';
-import { Complex } from 'complex.js';
 import { canonicalDomain } from './dictionary/domains';
 
 /**
@@ -396,7 +395,7 @@ function canonicalRationalForm(
   return ['Divide', numer, denom];
 }
 
-function canonicalNumberForm(
+export function canonicalNumberForm(
   expr: Expression,
   engine: ComputeEngine
 ): Expression {
@@ -408,9 +407,6 @@ function canonicalNumberForm(
     } else if (!isFinite(expr) && expr < 0) {
       return { num: '-Infinity' };
     }
-  } else if (expr instanceof Complex) {
-    const c = expr as Complex;
-    return ['Complex', c.re, c.im];
   } else if (expr instanceof Decimal) {
     const d = expr as Decimal;
     return { num: d.toString() + 'd' };
@@ -421,14 +417,33 @@ function canonicalNumberForm(
       // If it's an underflow Number() is 0
       return { num: 'NaN' };
     }
-  } else if (getFunctionName(expr) === 'Complex') {
-    if (getNumberValue(getArg(expr, 2)) === 0) {
-      return getNumberValue(getArg(expr, 1)) ?? NaN;
-    }
   }
 
+  // Note: we don't use ['Complex'] in canonical form:
+  // its precedence is sometimes the precedence of Add (when re and im != 0)
+  // sometimes the precedence of Multiply (when im or re === 0).
+  // Using Add/Multiply produces the correct serialization.
+  if (expr === 'ImaginaryUnit') return expr;
   const c = getComplexValue(expr);
-  if (c !== null) return ['Complex', c.re, c.im];
+  if (c !== null) {
+    if (engine.chop(c.im) === 0 && engine.chop(c.re) === 0) return 0;
+
+    if (engine.chop(c.im) === 0) return c.re;
+
+    let imaginaryPart: Expression | null = null;
+
+    if (engine.chop(c.im + 1) === 0) {
+      imaginaryPart = ['Negate', 'ImaginaryUnit'];
+    } else if (engine.chop(c.im - 1) === 0) {
+      imaginaryPart = 'ImaginaryUnit';
+    } else {
+      imaginaryPart = ['Multiply', c.im, 'ImaginaryUnit'];
+    }
+
+    if (engine.chop(c.re) === 0) return imaginaryPart;
+
+    return ['Add', c.re, imaginaryPart];
+  }
 
   if (!isAtomic(expr)) {
     return applyRecursively(expr, (x) => canonicalNumberForm(x, engine));

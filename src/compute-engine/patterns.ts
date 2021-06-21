@@ -136,7 +136,7 @@ export function matchRecursive(
   } else {
     const exprHead = getFunctionHead(expr);
     if (exprHead === null) return null;
-    if (match(head, exprHead) === null) return null;
+    if (match(head, exprHead, options) === null) return null;
   }
 
   // Match the arguments
@@ -160,7 +160,7 @@ export function matchRecursive(
           // Capture till the next matching arg
           let found = false;
           while (!found && j < exprArgs.length) {
-            found = match(args[i + 1], exprArgs[j]) !== null;
+            found = match(args[i + 1], exprArgs[j], options) !== null;
             j += 1;
           }
           if (!found) return null;
@@ -174,12 +174,12 @@ export function matchRecursive(
       } else if (argName.startsWith('_')) {
         result = captureWildcard(argName, exprArgs.shift()!, result);
       } else {
-        const sub = match(arg, exprArgs.shift()!);
+        const sub = match(arg, exprArgs.shift()!, options);
         if (sub === null) return null;
         result = { ...result, ...sub! };
       }
     } else {
-      const sub = match(arg, exprArgs.shift()!);
+      const sub = match(arg, exprArgs.shift()!, options);
       if (sub === null) return null;
       result = { ...result, ...sub! };
     }

@@ -181,12 +181,14 @@ export function indexLatexDictionary<T extends number = number>(
         'superfix',
         'subfix',
       ].forEach((x) => {
-        const n = triggerLength(record.trigger![x]);
-        result.lookahead = Math.max(result.lookahead, n);
-        if (result[x][n] === undefined) {
-          result[x][n] = new Map<string, IndexedLatexDictionaryEntry<T>>();
+        if (record.trigger![x]) {
+          const n = triggerLength(record.trigger![x]);
+          result.lookahead = Math.max(result.lookahead, n);
+          if (result[x][n] === undefined) {
+            result[x][n] = new Map<string, IndexedLatexDictionaryEntry<T>>();
+          }
+          result[x][n].set(triggerString(record.trigger![x]), record);
         }
-        result[x][n].set(triggerString(record.trigger![x]), record);
       });
       if (record.trigger.environment !== undefined) {
         result.environment.set(record.trigger.environment, record);
