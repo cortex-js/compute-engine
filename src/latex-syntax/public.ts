@@ -201,8 +201,8 @@ export type ParseLatexOptions = {
    * When an unknown latex command is encountered, attempt to parse
    * any arguments it may have.
    *
-   * For example, `\foo{x+1}` would produce `['\foo', ['add', 'x', 1]]` if
-   * this property is true, `['latex', '\foo', '<{>', 'x', '+', 1, '<{>']`
+   * For example, `\foo{x+1}` would produce `['\foo', ['Add', 'x', 1]]` if
+   * this property is true, `['LatexSymbols', '\foo', '<{>', 'x', '+', 1, '<{>']`
    * otherwise.
    */
   parseArgumentsOfUnknownLatexCommands?: boolean;
@@ -258,12 +258,12 @@ export type ParseLatexOptions = {
    * While this is a convenient shortcut, it is recommended to more explicitly
    * define custom functions by providing an entry for them in a function
    * dictionary (providing additional information about their arguments, etc...)
-   * and in a Latex translation dictonary (indicating what Latex markup
+   * and in a Latex translation dictionary (indicating what Latex markup
    * corresponds to the function).
    *
    * Example:
    *
-   * By default, `f(x)` is parsed as ["multiply", "f", "x"].
+   * By default, `f(x)` is parsed as `["Multiply", "f", "x"]`.
    *
    * After...
    *
@@ -271,7 +271,7 @@ export type ParseLatexOptions = {
    *      promoteUnknownFunctions = /^[fg]$/
    * ```
    *
-   * ... `f(x)` is parsed as ["f", "x"]
+   * ... `f(x)` is parsed as `["f", "x"]`
    *
    *
    */
