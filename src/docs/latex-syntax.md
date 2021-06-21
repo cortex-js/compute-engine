@@ -61,13 +61,76 @@ console.log(expr);
 const latex = latexSyntax.serialize(expr);
 console.log(latex);
 ```
-The `LatexSyntax` constructor can be passed options to customize the parsing, as well as dictionaries defining the syntax and vocabulary.
+The `LatexSyntax` constructor can be passed some options to customize the 
+parsing and serializing, as well as dictionaries defining the syntax and vocabulary.
 
 <div class='read-more'><a href="/guides/compute-engine/dictionaries/">Read more about <strong>Dictionaries</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
+**To change the Latex syntax options after a `LatexSyntax` instance has been
+created**, change the `options` property.
 
-For example, the configuration below will result in parsing a Latex string as a
-sequence of Latex tokens. It uses no dictionary (since only tokens are returned) and set the options to avoid modifying the raw stream of Latex tokens.
+The `LatexSyntax` class has an `options` property with the following keys.
+
+### Number Formatting Options 
+
+<div class=symbols-table>
+
+| Option |  |
+| :--- | :--- |
+| `precision` | |
+| `positiveInfinity` | |
+| `negativeInfinity` | | 
+| `notANumber` | |
+| `decimalMarker` | The string separating the whole portion of a number from the fractional portion, i.e. the '.' in `3.1415`. |
+| `groupSeparator` | The separator between groups of digits, used to improve readability of numbers with many digits |
+| `exponentProduct` | |
+| `beginExponentMarker` | |
+| `endExponentMarker` | |
+| `notation`| `engineering` `auto` `scientific` |
+| `truncationMarker` | |
+| `beginRepeatingDigits` | | 
+| `endRepeatingDigits` | | 
+| `imaginaryNumber`| |
+
+</div>
+
+
+### Serialization Options
+
+
+<div class=symbols-table>
+
+| Option |  |
+| :--- | :--- |
+| `invisibleMultiply` | Latex string used to render an invisible multiply, e.g. in `2x`. Leave it empty to join the adjacent terms, or use `\cdot` to insert a `\cdot` operator between them, i.e. `2\cdot x` | 
+| `invisiblePlus` | Latex string used for an invisible plus, e.g. in '1 3/4'. Leave it empty to join the main number and the fraction, i.e. render it as `1\frac{3}{4}`, or use `+` to insert a `+` operator between them, i.e. `1+\frac{3}{4}` | 
+| `multiply` | Latex string used for an explicit multiply operator: for example `\times` or `\cdot` |
+</div>
+
+### Parsing Options
+
+
+<div class=symbols-table>
+
+| Option |  |
+| :--- | :--- |
+| `invisibleOperator` | If a symbol follows a number, consider them separated by this invisible operator. Default: `Multiply` |
+| `skipSpace` | If true, ignore space characters | 
+| `parseArgumentsOfUnknownLatexCommands` | When an unknown latex command is encountered, attempt to parse any arguments it may have.<br> For example, `\foo{x+1}` would produce `['\foo', ['add', 'x', 1]]` if this property is true, `['LatexSymbols', '\foo', '<{>', 'x', '+', 1, '<{>']` otherwise. | 
+| `parseNumbers` |  When a number is encountered, parse it.<br> Otherwise, return each token making up the number (minus sign, digits, decimal separator, etc...) |
+|  `invisiblePlusOperator` | If this setting is not empty, when a number is immediately followed by a fraction, assume that the fraction should be added to the number, that is that there is an invisible plus operator between the two.<br> For example with `2\frac{3}{4}`<ul><li> when `invisiblePlusOperator` is `"add"` : `["add", 2, ["divide", 3, 4]]`</li><li> when `invisiblePlusOperator` is `""`: `["multiply", 2, ["divide", 3, 4]]`</li></ul> |
+| `promoteUnknownSymbols` | When a token is encountered at a position where a symbol could be parsed, if the token matches `promoteUnknownSymbols` it will be accepted as a symbol (an `unknown-symbol` error will still be triggered so that the caller can be notified). Otherwise, the symbol is rejected. |
+| `ignoreCommands` | When one of these commands is encountered, it is skipped.<br> Useful for purely presentational commands such as `\displaystyle`| 
+| `idempotentCommands` | When one these commands is encountered, its argument is parsed, as if the command was not present.<br> Useful for some presentational commands such as `\left`, `\bigl`, etc... |
+| `promoteUnknownFunctions` | When a token is encountered at a position that could match a function call, and it is followed by an apply function operator (typically, parentheses), consider them to a be a function if the string of tokens match this regular expression.<br>While this is a convenient shortcut, it is recommended to more explicitly define custom functions by providing an entry for them in a function dictionary (providing additional information about their arguments, etc...) and in a Latex translation dictionary (indicating what Latex markup corresponds to the function).<br>Example:<br> By default, `f(x)` is parsed as `["multiply", "f", "x"]`.<br>After `promoteUnknownFunctions = /^[fg]$/``` , `f(x)` is parsed as `["f", "x"]`|
+| `preserveLatex` | If true, the expression will be decorated with the Latex fragments corresponding to each elements of the expression | 
+</div>
+
+
+### Example: Parsing Raw Latex
+
+The configuration below will result in parsing a Latex string as a
+sequence of Latex tokens, without any interpration. It uses no dictionary (since only tokens are returned) and set the options to avoid modifying the raw stream of Latex tokens.
 
 ```js
 const rawLatex = new LatexSyntax({
