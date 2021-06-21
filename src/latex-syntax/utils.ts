@@ -23,8 +23,6 @@ export const DEFAULT_LATEX_NUMBER_OPTIONS: Required<NumberFormattingOptions> = {
 };
 
 export const DEFAULT_PARSE_LATEX_OPTIONS: Required<ParseLatexOptions> = {
-  ...DEFAULT_LATEX_NUMBER_OPTIONS,
-
   invisibleOperator: MULTIPLY,
   skipSpace: true,
 
@@ -79,7 +77,6 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: Required<ParseLatexOptions> = {
 
 export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> =
   {
-    ...DEFAULT_LATEX_NUMBER_OPTIONS,
     invisibleMultiply: '', // '\\cdot',
     invisiblePlus: '', // '+',
     // invisibleApply: '',

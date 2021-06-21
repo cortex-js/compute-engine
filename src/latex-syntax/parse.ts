@@ -21,7 +21,10 @@ import {
 } from '../common/utils';
 import { tokensToString } from './core/tokenizer';
 import { IndexedLatexDictionary } from './definitions';
-import { DEFAULT_PARSE_LATEX_OPTIONS } from './utils';
+import {
+  DEFAULT_LATEX_NUMBER_OPTIONS,
+  DEFAULT_PARSE_LATEX_OPTIONS,
+} from './utils';
 
 export class Scanner<T extends number = number> implements Scanner<T> {
   index = 0;
@@ -43,7 +46,11 @@ export class Scanner<T extends number = number> implements Scanner<T> {
     dictionary: IndexedLatexDictionary<T>,
     onError: ErrorListener<ErrorCode>
   ) {
-    this.options = { ...DEFAULT_PARSE_LATEX_OPTIONS, ...options };
+    this.options = {
+      ...DEFAULT_LATEX_NUMBER_OPTIONS,
+      ...DEFAULT_PARSE_LATEX_OPTIONS,
+      ...options,
+    };
     this.tokens = tokens;
 
     this.onError = (err) => {
