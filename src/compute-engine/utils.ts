@@ -1,4 +1,10 @@
-import { getSymbolName, getTail } from '../common/utils';
+import {
+  equalExpr,
+  getDictionary,
+  getFunctionHead,
+  getSymbolName,
+  getTail,
+} from '../common/utils';
 import { ErrorSignal, Expression, Signal } from '../public';
 import { ComputeEngine } from './public';
 
@@ -54,10 +60,32 @@ function getVarsRecursive(
 }
 
 /**
- * Return the set of free variables in an expression.
+ * Return the set of variables (free or not) in an expression.
+ * Doesn't return free varas because doesn't account for variable declaration
+ * and scopes.
  */
-export function getVars(ce: ComputeEngine, expr: Expression): Set<string> {
+export function getVariables(ce: ComputeEngine, expr: Expression): Set<string> {
   const result = new Set<string>();
   getVarsRecursive(ce, expr, result);
   return result;
+}
+
+export function isCanonical(ce: ComputeEngine, expr: Expression): boolean {
+  const canon = ce.canonical(expr);
+  return equalExpr(canon, expr);
+}
+
+export function hasWildcards(expr: Expression): boolean {
+  const symbol = getSymbolName(expr);
+  if (symbol?.startsWith('_')) return true;
+
+  const head = getFunctionHead(expr);
+  if (head !== null) {
+    return hasWildcards(head) || getTail(expr).some(hasWildcards);
+  }
+  const dict = getDictionary(expr);
+  if (dict !== null) {
+    return Object.keys(dict).some((key) => hasWildcards(dict[key]));
+  }
+  return false;
 }
