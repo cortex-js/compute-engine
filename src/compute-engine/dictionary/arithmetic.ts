@@ -196,7 +196,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       const decimals = args.filter((x) => x instanceof Decimal);
       if (decimals.length > 0) {
         if (decimals.length === 1) {
-          result.push(ce.N(decimals[0]));
+          result.push(decimals[0]);
         } else {
           result.push(ce.N(['Add', ...decimals]));
         }
@@ -205,7 +205,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       const complexes = args.filter((x) => x instanceof Complex);
       if (complexes.length > 0) {
         if (complexes.length === 1) {
-          result.push(ce.N(complexes[0]));
+          result.push(complexes[0]);
         } else {
           result.push(ce.N(['Add', ...complexes]));
         }
@@ -214,7 +214,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       const numbers = args.filter((x) => typeof x === 'number');
       if (numbers.length > 0) {
         if (numbers.length === 1) {
-          result.push(ce.N(complexes[0]));
+          result.push(numbers[0]);
         } else {
           result.push(ce.N(['Add', ...numbers]));
         }
@@ -424,7 +424,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       const decimals = args.filter((x) => x instanceof Decimal);
       if (decimals.length > 0) {
         if (decimals.length === 1) {
-          result.push(ce.N(decimals[0]));
+          result.push(decimals[0]);
         } else {
           result.push(ce.N(['Multiply', ...decimals]));
         }
@@ -433,7 +433,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       const complexes = args.filter((x) => x instanceof Complex);
       if (complexes.length > 0) {
         if (complexes.length === 1) {
-          result.push(ce.N(complexes[0]));
+          result.push(complexes[0]);
         } else {
           result.push(ce.N(['Multiply', ...complexes]));
         }
@@ -442,7 +442,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       const numbers = args.filter((x) => typeof x === 'number');
       if (numbers.length > 0) {
         if (numbers.length === 1) {
-          result.push(ce.N(complexes[0]));
+          result.push(numbers[0]);
         } else {
           result.push(ce.N(['Multiply', ...numbers]));
         }

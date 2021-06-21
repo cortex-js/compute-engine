@@ -411,12 +411,13 @@ export function canonicalNumberForm(
     const d = expr as Decimal;
     return { num: d.toString() + 'd' };
   } else if (isNumberObject(expr)) {
-    if (isNaN(Number(expr.num))) {
-      // Only return true if it's not a number
-      // If it's an overflow, Number() is Infinity
-      // If it's an underflow Number() is 0
-      return { num: 'NaN' };
-    }
+    // Validate that the payload is a legit number
+    if (
+      /([+-]Infinity|NaN)/.test(expr.num) ||
+      /[+-]?\d*\.?\d*([eE][+-]?\d+)?[dn]?/.test(expr.num)
+    )
+      return expr;
+    return { num: 'NaN' };
   }
 
   // Note: we don't use ['Complex'] in canonical form:
