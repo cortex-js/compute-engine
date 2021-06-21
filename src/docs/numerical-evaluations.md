@@ -92,6 +92,21 @@ the `machine` numeric format is used, unless the computations require some
 calculations with complex numbers. If the precision is greater than 15,
 the `decimal` numeric format is used.
 
+
+### Tolerance
+
+Two numbers that are sufficiently close to each other are considered equal.
+
+**To control how close two numbers have to be before they are considered equal**,
+set the `tolerance` property of a `ComputeEngine` instance.
+
+By default, the tolerance is \\( 10^{-10} \\).
+
+The tolerance is accounted for by the `Chop` function to determine when to 
+replace a number with a small magnitude with the exact integer 0. It is also
+used when doing some comparison to zero: a number smaller than the tolerance
+will be considered equal to 0.
+
 ## Complex Numbers
 
 Many operations can be performed on Real or Complex numbers.
