@@ -7,7 +7,7 @@ sidebar:
   - nav: 'compute-engine'
 ---
 
-## Parsing and Serializing Latex
+# Parsing and Serializing Latex
 
 The CortexJS Compute Engine manipulates MathJSON expressions. It can also
 convert Latex strings to MathJSON expressions (**parsing**) and output MathJSON

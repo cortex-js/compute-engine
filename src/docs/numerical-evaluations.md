@@ -23,7 +23,7 @@ sidebar:
     });
 </script>
 
-## Numerical Evaluation
+# Numerical Evaluation
 
 **To obtain a numerical approximation of the value of an expression**, use the
 `ce.N()` function.
