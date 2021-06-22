@@ -6,7 +6,6 @@
     "coverage": "bash ./scripts/test.sh coverage",
     "dist": "bash ./scripts/build.sh production; bash ./scripts/test.sh",
     "lint": "eslint --fix src/",
-    "postinstall": "bash ./scripts/postinstall.sh",
     "prepare": "bash ./scripts/build.sh production",
     "start": "bash ./scripts/start.sh",
     "snapshot": "bash ./scripts/test.sh snapshot",
