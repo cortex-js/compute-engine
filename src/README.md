@@ -1,6 +1,6 @@
 ---
 title: MathJSON Format
-permalink: /guides/math-json/format/
+permalink: /math-json/
 layout: single
 date: Last Modified
 sidebar:
@@ -22,10 +22,21 @@ sidebar:
     });
 </script>
 
-# MathJSON Format
+<img src='/assets/MathJSON-1.png' style='margin-bottom:2em;  border-radius:8px; border:1px solid #203346'>
 
 The MathJSON format is a lightweight data interchange format for mathematical
 notation.
+
+<div class=symbols-table>
+
+| Math                      | MathJSON                                                                  |
+| :------------------------- | :------------------------------------------------------------------------ |
+| \\[\frac{n}{1+n}\\]            | `["Divide", "n", ["Add", 1, "n"]]`                                        |
+| \\[e^{\imaginaryI \pi }+1=0\\] | `["Equal",  ["Add", ["Exp", ["Multiply", "Pi", "ImaginaryUnit"], 1]], 0]` |
+| \\[\sin^{-1}^\prime(x)\\]      | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                    |
+
+</div>
+
 
 MathJSON is built on the [JSON format](https://www.json.org/). Its focus is on
 interoperability between software programs to facilitate the exchange of
@@ -46,7 +57,7 @@ MathJSON expressions.
 
 <div class='read-more'><a href="/guides/compute-engine/dictionaries/">Read more about <strong>MathJSON for Latex</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
-<div class='read-more'><a href="/guides/compute-engine/">Read more about the <strong>Compute Engine</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/">Read more about the <strong>Compute Engine</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 
 Mathematical notation is used in a broad array of fields, from elementary school
@@ -58,17 +69,6 @@ be used to define new syntax and new semantic.
 MathJSON is not intended to be suitable as a visual representation of arbitrary
 mathematical notations, and as such is not a replacement for LaTeX or MathML.
 
-## Examples
-
-<div class=symbols-table>
-
-| Latex                        | MathJSON                                                                |
-| :--------------------------- | :---------------------------------------------------------------------- |
-| $$\frac{a}{1+x}$$            | `["Divide", "a", ["Add", 1, "x"]]`                                      |
-| $$e^{\imaginaryI \pi }+1=0$$ | `["Equal", ["Add", ["Exp", ["Multiply", "Pi", "ImaginaryUnit"], 1], 0]` |
-| $$\sin^{-1\prime}(x)$$       | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                  |
-
-</div>
 
 ## Structure of a MathJSON Expression
 
