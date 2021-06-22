@@ -1,10 +1,10 @@
 import type { Expression } from '../src/public';
-import { LatexSyntax } from '../src/math-json';
 import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
 import { ComputeEngine } from '../src/compute-engine';
 import { MISSING } from '../src/common/utils';
 import { parseCortex } from '../src/cortex';
 import { Form } from '../src/compute-engine/public';
+import { LatexSyntax } from '../src/latex-syntax/latex-syntax';
 
 let errors: string[] = [];
 

@@ -360,6 +360,7 @@ export declare class LatexSyntax<T extends number = number> {
       ParseLatexOptions &
       SerializeLatexOptions & {
         onError?: ErrorListener<ErrorCode>;
+        dictionary?: LatexDictionary;
       }
   );
 

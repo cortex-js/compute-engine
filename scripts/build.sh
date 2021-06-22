@@ -5,7 +5,7 @@ set -o nounset   # abort on unbound variable
 set -o pipefail  # don't hide errors within pipes
 # set -x    # for debuging, trace what is being executed.
 
-export BASENAME="\033[40m"MathJSON"\033[0m" # `basename "$0"`
+export BASENAME="\033[40mCompute Engine\033[0m" # `basename "$0"`
 export DOT="\033[32m ● \033[0m"
 export CHECK="\033[32m ✔ \033[0m"
 export LINECLEAR="\033[1G\033[2K" # position to column 1; erase whole line
@@ -37,8 +37,9 @@ if [ ! -d "./node_modules" ]; then
     echo -e "$LINECLEAR$BASENAME$CHECK Dependencies installed"
 fi
 
-# Read the first argument, set it to "development" if not set
-export BUILD="${1-development}"
+# Read the first argument, set it to "production" if not set
+# (Note: we use es-build (via `npm start`) for development builds usually)
+export BUILD="${1-production}"
 
 
 # export GIT_VERSION=`git describe --long --dirty`
@@ -61,20 +62,32 @@ mkdir -p dist
 echo -e "$LINECLEAR$BASENAME$CHECK Output directories cleaned out"
 
 
+#
 # Build declaration files (.d.ts)
+#
 printf "$BASENAME$DOT Building declaration files (.d.ts)"
 # Even though we only generate declaration file, the target must be set high-enough
 # to prevent tsc from complaining (!)
 npx tsc --target "es2020" -d --moduleResolution "node" \
   --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts 
-# echo -e "$LINECLEAR$BASENAME$CHECK Declaration files built"
+npx tsc --target "es2020" -d --moduleResolution "node" \
+  --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts 
+npx tsc --target "es2020" -d --moduleResolution "node" \
+  --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts 
+echo -e "$LINECLEAR$BASENAME$CHECK Declaration files built"
 
+#
 # Do build (development or production)
+#
 printf "\033[32m ● \033[0m Making a \033[33m%s\033[0m build" "$BUILD"
 npx rollup --silent --config config/rollup.config.js
 echo -e "$LINECLEAR$BASENAME$CHECK \033[33m" $BUILD "\033[0m build done"
 
 if [ "$BUILD" = "production" ]; then    
+    # Linting
+    # echo -e "\033[40m`basename "$0"`\033[0m 🚀 Linting"
+    # npm run lint
+
     # Stamp the SDK version number
     printf "$BASENAME$DOT Stamping output files"
     find ./dist -type f \( -name '*.js' -o -name '*.mjs' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
@@ -82,9 +95,6 @@ if [ "$BUILD" = "production" ]; then
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "s/{{SDK_VERSION}}/$SDK_VERSION/" {}' \;
     echo -e "$LINECLEAR$BASENAME$CHECK Output files stamped"
 
-    # Linting
-    # echo -e "\033[40m`basename "$0"`\033[0m 🚀 Linting"
-    # npm run lint
 
     # Run test suite
     printf "$BASENAME$DOT Running test suite"

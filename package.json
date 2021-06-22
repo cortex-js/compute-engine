@@ -14,7 +14,8 @@
     "test": "bash ./scripts/test.sh"
   },
   "name": "@cortex-js/compute-engine",
-  "description": "A JSON schema to represent math formulas",
+  "description": "Symbolic computing and numeric evaluations for JavaScript and Node.js",
+  "homepage": "https://cortexjs.io/compute-engine/",
   "repository": {
     "type": "git",
     "url": "https://github.com/cortex-js/compute-engine.git"
@@ -26,19 +27,21 @@
   "keywords": [
     "math",
     "JSON",
-    "latex",
-    "tex",
-    "mathjax",
-    "katex",
-    "mathquill"
+    "mathjs",
+    "mathematica",
+    "maple",
+    "algebra",
+    "symbolic computing",
+    "scientific computing",
+    "sympy"
   ],
   "license": "MIT",
   "files": [
     "/dist"
   ],
-  "main": "./dist/math-json.min.js",
-  "module": "./src/public.js",
-  "types": "./dist/types/math-json.d.ts",
+  "main": "./dist/compute-engine.min.js",
+  "module": "./dist/compute-engine.min.esm.js",
+  "types": "./dist/types/compute-engine.d.ts",
   "engines": {
     "npm": ">=6.14.8",
     "node": ">=12.0.0"

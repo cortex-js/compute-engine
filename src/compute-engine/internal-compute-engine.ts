@@ -306,7 +306,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
       if (def === undefined) scope = scope.parentScope;
     }
     if (def) def.scope = scope;
-    return def ?? null;
+    return (def as FunctionDefinition) ?? null;
   }
   getSymbolDefinition(name: string): SymbolDefinition<Numeric> | null {
     let scope = this.context;
@@ -318,7 +318,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     }
     if (!def) return null;
     def.scope = scope;
-    return def;
+    return def as SymbolDefinition<Numeric>;
   }
   getSetDefinition(name: string): SetDefinition<Numeric> | null {
     let scope = this.context;
@@ -330,7 +330,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     }
     if (!def) return null;
     def.scope = scope;
-    return def;
+    return def as SetDefinition<Numeric>;
   }
   getCollectionDefinition(name: string): CollectionDefinition<Numeric> | null {
     let scope = this.context;
@@ -342,7 +342,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     }
     if (!def) return null;
     def.scope = scope;
-    return def;
+    return def as CollectionDefinition<Numeric>;
   }
   getDefinition(name: string): Definition<Numeric> | null {
     let scope = this.context;

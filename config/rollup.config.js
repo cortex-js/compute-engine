@@ -51,7 +51,9 @@ function timestamp() {
   );
 }
 
+//
 // Rollup plugin to display build progress and launch server
+//
 function buildProgress() {
   return {
     name: 'rollup.config.js',
@@ -124,6 +126,15 @@ function buildProgress() {
     },
   };
 }
+
+//
+// The build targets.
+//
+// We have three (main) build targets:
+// - MathJSON (the library to parse/serialize MathJSON)
+// - ComputeEngine (includes MathJSON)
+// - Cortex (the language, includes ComputeEngine)
+//
 const ROLLUP = [
   {
     input: 'src/math-json.ts',
@@ -189,8 +200,43 @@ const ROLLUP = [
       include: ['src/**'],
     },
   },
+  {
+    input: 'src/cortex.ts',
+    output: [
+      {
+        format: 'es',
+        file: BUILD_DIR + 'cortex.esm.js',
+        sourcemap: !PRODUCTION,
+        exports: 'named',
+      },
+      {
+        file: BUILD_DIR + 'cortex.js',
+        format: 'umd',
+        sourcemap: !PRODUCTION,
+        exports: 'named',
+        name: 'Cortex', // Required for UMD
+      },
+    ],
+    plugins: [
+      buildProgress(),
+      resolve({
+        browser: true,
+        // preferBuiltins: true,
+      }),
+      commonjs(),
+      typescript(TYPESCRIPT_OPTIONS),
+    ],
+    watch: {
+      clearScreen: true,
+      exclude: 'node_modules/**',
+      include: ['src/**'],
+    },
+  },
 ];
 
+//
+// Minimized version of the targets
+//
 if (PRODUCTION) {
   ROLLUP.push({
     input: 'src/math-json.ts',
@@ -212,7 +258,7 @@ if (PRODUCTION) {
     ],
     plugins: [
       buildProgress(),
-      eslint(),
+      // eslint(),
       resolve({
         browser: true,
       }),
@@ -237,6 +283,35 @@ if (PRODUCTION) {
         sourcemap: false,
         exports: 'named',
         name: 'ComputeEngine', // Required for UMD
+      },
+    ],
+    plugins: [
+      buildProgress(),
+      // eslint(),
+      resolve({
+        browser: true,
+      }),
+      commonjs(),
+      typescript(TYPESCRIPT_OPTIONS),
+      terser(TERSER_OPTIONS),
+    ],
+  });
+  ROLLUP.push({
+    input: 'src/cortex.ts',
+    output: [
+      {
+        format: 'es',
+        file: BUILD_DIR + 'cortex.min.esm.js',
+        sourcemap: false,
+        exports: 'named',
+      },
+      ,
+      {
+        file: BUILD_DIR + 'cortex.min.js',
+        format: 'umd',
+        sourcemap: false,
+        exports: 'named',
+        name: 'cortex', // Required for UMD
       },
     ],
     plugins: [

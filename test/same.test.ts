@@ -1,4 +1,5 @@
-import { ComputeEngine, match } from '../src/compute-engine';
+import { ComputeEngine } from '../src/compute-engine';
+import { match } from '../src/compute-engine/patterns';
 import { Expression } from '../src/public';
 import { latex } from './utils';
 
