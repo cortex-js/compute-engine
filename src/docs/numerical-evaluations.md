@@ -28,27 +28,35 @@ sidebar:
 **To obtain a numerical approximation of the value of an expression**, use the
 `ce.N()` function.
 
-If `ce.N()` cannot provide a numerical evaluation, a symbolic representation
-of the expression is returned. 
+If `ce.N()` cannot provide a numerical evaluation, a [canonical](/guides/compute-engine/forms/) symbolic representation
+of the partially evaluated expression is returned.
 
-## Precision of Floating Point Numbers
+```ts
+console.log(ce.N(parse('\\sqrt{5} + 7^3'))
+// -> 345.2360679774998
 
-Depending on  the settings of the Compute Engine, three numeric formats may be used to perform numerical evaluations.
+console.log(ce.N(parse('\\sqrt{x} + 7^3'));
+// -> ["Add", ["Sqrt", "x"], 343]
+```
+<div class='read-more'><a href="/guides/compute-engine/symbolic-computing/">Read more about <strong>Symbolic Computing</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
+
+## Numeric Formats
+
+Three numeric formats may be used to perform numerical evaluations with the Compute Engine: `machine` `decimal` and `complex`.
 ### Machine Numbers
 
-A common representation of floating point numbers in computers use a fixed amount of memory, typically a [64-bit binary format](https://en.wikipedia.org/wiki/IEEE_754). This is called a **machine** format, as it is well
-adapted for the CPU to do fast computations.
+The `machine` format uses a common representation of numbers in computers: a [64-bit binary floating point format](https://en.wikipedia.org/wiki/IEEE_754). It is well suited for the CPU to do fast computations. It uses a fixed amount of memory and represent significant digits in base-2. This numeric format has about 15 signficant digits.
 
-**Due to limitations of this machine format, some numerical
-evaluations cannot produce exact results.**
+**Using the `machine` numeric format some numerical evaluations cannot produce exact results.**
 
 For example: \\(0.1 + 0.2 = 0.30000000000000004 \\).
 
-Indeed, while `0.1`and `0.2` look like "round numbers" in base-10, they are only represented approximately in base-2.
+Indeed, while \\(0.1\\) and \\(0.2\\) look like "round numbers" in base-10, they are only represented approximately in base-2.
 
 ### Decimal Numbers
 
-The Compute Engine can also do numerical evaluations using a arbitrary-precision representation of floating points, called the `decimal` format. In this format, floating point numbers are represented in base-10, and use a variable amount of memory depending on the number of significant digits (**precision**) desired.
+The `decimal` numeric format is an arbitrary-precision representation of floating points. In this format, floating point numbers are represented in base-10, and use a variable amount of memory depending on the number of significant digits (**precision**) desired.
 
 When using Decimal numbers, the return value of `ce.N()` may be a MathJSON number that looks like this: 
 
@@ -58,13 +66,13 @@ When using Decimal numbers, the return value of `ce.N()` may be a MathJSON numbe
 }
 ```
 
-Note that the string of digits ends with a `d` indicating this is a **decimal** number.
+Note that the string of digits ends with a `d` indicating this is a `decimal` number.
 
 ### Complex Numbers
 
-Another numeric format available is the `complex` format, used to represent Complex numbers as a pair of real and imaginary components. The real and imaginary components are stored as 64-bit floating point numbers and have thus the same limitations as the `machine` format.
+The `complex` numeric format can represent complex numbers as a pair of real and imaginary components. The real and imaginary components are stored as 64-bit floating point numbers and have thus the same limitations as the `machine` format.
 
-The complex number \\(1 + 2\imaginaryI\\) is represented as `["Complex", 1, 2]`. This is convenient shorthand for `["Add", 1, ["Multiply", 2, "ImaginaryUnit"]]`.
+The complex number \\(1 + 2\imaginaryI\\) is represented as `["Complex", 1, 2]`. This is a convenient shorthand for `["Add", 1, ["Multiply", 2, "ImaginaryUnit"]]`.
 
 ## Choosing the Numeric Format and Precision
 
@@ -77,20 +85,20 @@ property of a `ComputeEngine` instance to one of these values:
 | :--- | :--- | 
 | `machine` | 64-bit IEEE floating point number with about 15 digits of precision. Fastest. |
 | `complex` | Two 64-bit floating point numbers. Support provided by the "complex.js" library. | 
-| `decimal` | Arbitrary precision floating point. Slower, but more precise, however computations with complex numbers cannot be performed | 
+| `decimal` | Arbitrary precision floating point. Slower, but more precise, however computations with complex numbers cannot be performed. Support provided by the "decimal.js" library | 
 | `auto` | Use `number` `machine` or `auto` based on the desired precision and the content of the expression  | 
 
 </div>
 
-**To change the number of significant digits of numerical evaluations**, set the `precision` property of a `ComputeEngine` instance.
+**To change the number of significant digits for numerical evaluations**, set the `precision` property of a `ComputeEngine` instance.
 
 A value of 15 or less will automatically be set to 15 and use the `machine` 
 numeric format. 
 
 A value over 1,000 will result in inaccurate results for trigonometric functions. Other arithmetic operations are not affected.
 
-By default, the numeric format is `auto`: if the precision is 15 or less
-the `machine` numeric format is used, unless the computations require some
+The default numeric format is `auto`: if the precision is 15 or less
+the `machine` numeric format is used, unless the computations requires some
 calculations with complex numbers. If the precision is greater than 15,
 the `decimal` numeric format is used.
 
@@ -101,12 +109,24 @@ the `decimal` numeric format is used.
 Because of the limitations of machine numbers, this may produce surprising
 results.
 
-For example when \\( x = 0.1 + 0.2\\), the evaluation of \\( x - x \\) with `ce.N()` produces \\( 2.7755575615628914\cdot10^{-17}\\).
+For example:
 
-However, the result of \\( x - x \\) from `ce.simplify()` is \\( 0 \\) since the simplification is done symbolically, before any floating point calculation are made.
+```js
+const x = ce.N(parse('0.1 + 0.2'));
+console.log(N(['Subtract', x, x]));
+// -> 2.7755575615628914e-17
+```
+
+
+However, the result of \\( x - x \\) from `ce.simplify()` is \\( 0 \\) since the simplification is done symbolically, before any floating point calculations are made.
+
+```js
+const x = ce.N(parse('0.1 + 0.2'));
+console.log(simplify(['Subtract', x, x]));
+// -> 0
+```
 
 In some cases, it may be advantageous to invoke `ce.simplify()` before using `ce.N()`.
-
 
 
 ## Tolerance
@@ -121,12 +141,12 @@ By default, the tolerance is \\( 10^{-10} \\).
 The tolerance is accounted for by the `Chop` function to determine when to 
 replace a number of a small magnitude with the exact integer 0. 
 
-It is also used when doing some comparison to zero: a number smaller than the tolerance
+It is also used when doing some comparison to zero: a number whose absolute value is smaller than the tolerance
 will be considered equal to 0.
 
-## Operations
+## Numeric Functions
 
-The functions in the dictionaries below can provide numerical evaluations for their numeric functions:
+The dictionaries below can provide numerical evaluations for their numeric functions:
 
 <div class=symbols-table>
 
