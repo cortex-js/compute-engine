@@ -1,6 +1,6 @@
 ---
 title: Cortex Syntax
-permalink: /cortex/syntax
+permalink: /cortex/syntax/
 layout: single
 date: Last Modified
 sidebar:

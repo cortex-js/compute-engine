@@ -25,7 +25,11 @@ sidebar:
 
 # Cortex
 
-Cortex is a programming language for scientific computing.
+Cortex is a programming language for scientific computing built on the Cortex
+Compute Engine.
+
+The Cortex language is a work in progress. The information below reflects the
+current thinking and may change.{notice--warning}
 
 Here is "Hello World" in Cortex:
 

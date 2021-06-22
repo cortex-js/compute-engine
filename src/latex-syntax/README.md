@@ -38,7 +38,7 @@ console.log(serialize([["InverseFunction", "Sin"], "x"));
 
 # More
 
-- [MathJSON format](https://cortexjs.io/guides/math-json/format/)
+- [MathJSON format](https://cortexjs.io/math-json/format/)
 - [MathJSON Dictionaries](https://cortexjs.io/compute-engine/dictionaries/)
 
 ## Related Projects

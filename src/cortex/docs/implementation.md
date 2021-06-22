@@ -1,6 +1,6 @@
 ---
 title: Inside Cortex
-permalink: /cortex/implementation
+permalink: /cortex/implementation/
 layout: single
 date: Last Modified
 sidebar:

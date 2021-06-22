@@ -48,7 +48,7 @@ The `evaluate()` function is a convenient shorthand to evaluate an expression
 with a single call. Other functions such as `ce.simplify()`, `ce.is()`, `ce.N()`, `ce.canonical()`, etc... require a `ComputeEngine` instance which is denoted by the `ce.` prefix.{.notice--info}
 
 ```ts
-import { ComputeEngine, parse } from 'compute-engine';
+import { ComputeEngine, parse } from '@cortex-js/compute-engine';
 const ce = new ComputeEngine();
 ce.simplify(parse('3x^2 + 2x^2 + x + 5'));
 ```
