@@ -4,7 +4,39 @@
 // See `compute-engine.ts` for the root of the library that includes
 // **both** MathJSON and the Compute Engine.
 
-export { Expression } from './public';
+export {
+  RuntimeSignalCode,
+  SignalCode,
+  SignalMessage,
+  SignalOrigin,
+  Signal,
+  WarningSignal,
+  ErrorSignalHandler,
+  WarningSignalHandler,
+  ErrorListener,
+  ErrorCode,
+  Attributes,
+  Expression,
+  MathJsonBasicNumber,
+  MathJsonRealNumber,
+  MathJsonSymbol,
+  MathJsonString,
+  MathJsonFunction,
+  MathJsonDictionary,
+  DictionaryCategory,
+} from './public';
+
+export {
+  LatexDictionary,
+  LatexDictionaryEntry,
+  LatexString,
+  LatexToken,
+  NumberFormattingOptions,
+  ParseLatexOptions,
+  ParserFunction,
+  SerializeLatexOptions,
+  SerializerFunction,
+} from './latex-syntax/public';
 
 // MathJSON parse/serialize
 export { LatexSyntax, parse, serialize } from './latex-syntax/latex-syntax';
