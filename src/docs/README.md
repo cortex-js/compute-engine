@@ -26,7 +26,7 @@ sidebar:
 
 ## Syntax and Symbol Dictionaries
 
-The <a href ="/guides/math-json/format/">MathJSON format</a> is independent of any source or target language (Latex,
+The <a href ="/math-json/format/">MathJSON format</a> is independent of any source or target language (Latex,
 MathASCII, etc...) or of any specific interpretation of the symbols used in a
 MathJSON expression (`"Pi"`, `"Sin"`, etc...).
 

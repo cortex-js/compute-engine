@@ -100,7 +100,7 @@ The list of available formats is listed below.
 `format()` function.
 
 ```js
-import { format } from 'math-json';
+import { format } from '@cortex-js/compute-engine'
 
 console.log(format(["Add", 2, "x", 3], 'canonical');
 // ➔ ["Add", 2, 3, "x"]

@@ -65,7 +65,7 @@ used and there is a match it returns an empty object literal. If there is no
 match, it returns `null`.
 
 ```js
-import { match } from 'compute-engine';
+import { match } from '@cortex-js/compute-engine';
 
 const pattern = ['Add', 'x', '_'];
 
