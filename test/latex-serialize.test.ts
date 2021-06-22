@@ -45,10 +45,10 @@ describe('LATEX SERIALIZING', () => {
 
     expect(expression('  - 1 2')).toMatchInlineSnapshot(`['Multiply', -1, 2]`);
     expect(expression('-123,456.789,012')).toMatchInlineSnapshot(
-      `{num: 'NaN'}`
+      `{num: '-123456.789012d'}`
     );
     expect(expression('-1,23456.7890,12')).toMatchInlineSnapshot(
-      `{num: 'NaN'}`
+      `{num: '-123456.789012d'}`
     );
   });
   // Leave space between pi and x

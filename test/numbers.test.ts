@@ -34,8 +34,10 @@ describe('NUMBERS', () => {
     expect(expression('3.423e4')).toMatchInlineSnapshot(`{num: '3.423e4'}`);
     // Number with more than three, less than six digits after the decimal point
     expect(expression('3.42334e4')).toMatchInlineSnapshot(`{num: '3.42334e4'}`);
-    // Number with more then 6 digits after the decimal point
-    expect(expression('3.424242334e4')).toMatchInlineSnapshot(`{num: 'NaN'}`);
+    // Number with more than 6 digits after the decimal point
+    expect(expression('3.424242334e4')).toMatchInlineSnapshot(
+      `{num: '3.424242334e4d'}`
+    );
   });
 
   test('Large numbers', () => {
@@ -43,19 +45,21 @@ describe('NUMBERS', () => {
       `{num: '421.35e1000'}`
     );
     expect(expression('9007199234534554740991')).toMatchInlineSnapshot(
-      `{num: 'NaN'}`
+      `{num: '9007199234534554740991n'}`
     );
     expect(expression('900719923453434553453454740992')).toMatchInlineSnapshot(
-      `{num: 'NaN'}`
+      `{num: '900719923453434553453454740992n'}`
     );
     expect(
       expression(
         '900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789'
       )
-    ).toMatchInlineSnapshot(`{num: 'NaN'}`);
+    ).toMatchInlineSnapshot(
+      `{num: '900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789n'}`
+    );
     expect(
       expression('31324234.23423143\\times10^{5000}')
-    ).toMatchInlineSnapshot(`{num: 'NaN'}`);
+    ).toMatchInlineSnapshot(`{num: '31324234.23423143e5000d'}`);
   });
   test('Non-finite numbers', () => {
     expect(expression('-\\infty')).toMatchInlineSnapshot(`{num: '-Infinity'}`);
