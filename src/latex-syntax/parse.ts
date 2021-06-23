@@ -383,14 +383,17 @@ export class Scanner<T extends number = number> implements Scanner<T> {
     if (!this.options.parseNumbers) return '';
     const savedIndex = this.index;
 
-    const sign = this.matchSign();
+    this.skipSpace();
+    // Skip an optional '+' sign.
+    // Important: the `-` sign is not handled as part of a number:
+    // this is so we can correctly parse `-1^2` as `['Negate', ['Square', 1]]`
+    this.match('+');
 
     let result = this.matchDecimalDigits();
     if (!result) {
       this.index = savedIndex;
       return '';
     }
-    result = (sign === '-' ? '-' : '') + result;
 
     let hasDecimalMarker = false;
     let hasExponent = false;

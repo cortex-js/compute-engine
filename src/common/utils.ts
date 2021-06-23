@@ -1,27 +1,14 @@
 import type {
   Expression,
-  MathJsonRealNumber,
+  MathJsonNumber,
   MathJsonSymbol,
   MathJsonFunction,
   MathJsonString,
 } from '../public';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
-import {
-  DECIMAL_NAN,
-  DECIMAL_NEG_INFINITY,
-  DECIMAL_POS_INFINITY,
-} from '../compute-engine/numeric-decimal';
 
 import { gcd } from '../compute-engine/numeric';
-import { Numeric } from '../compute-engine/public';
-
-/**
- * The `ExpressionX` type is used internally to make computations with
- * arbitrarily large floating point and complex numbers
- *
- */
-export type ExpressionX = Expression<Numeric>;
 
 /**
  * These constants are the 'primitive' functions and constants that are used
@@ -58,7 +45,7 @@ export const IMAGINARY_UNIT = 'ImaginaryUnit';
 
 export function isNumberObject(
   expr: Expression | null
-): expr is MathJsonRealNumber {
+): expr is MathJsonNumber {
   return expr !== null && typeof expr === 'object' && 'num' in expr;
 }
 
@@ -82,39 +69,49 @@ export function isFunctionObject<T extends number = number>(
 
 export function isDictionaryObject<T extends number = number>(
   expr: Expression<T>
-): expr is MathJsonRealNumber {
+): expr is MathJsonNumber {
   return expr !== null && typeof expr === 'object' && 'dict' in expr;
 }
 
+// Return a `number` if the expression is:
+// - a machine number
+// - a `Complex` with an imaginary value of 0
+// Otherwise, return `null`.
 export function getNumberValue<T extends number = number>(
   expr: Expression<T> | null
 ): number | null {
-  if (typeof expr === 'number') return expr;
   if (expr === null) return null;
+  if (typeof expr === 'number') return expr;
 
   if (isNumberObject(expr)) {
     if (expr.num.endsWith('d') || expr.num.endsWith('n')) return null;
     return parseFloat(expr.num);
   }
 
-  const symbol = getSymbolName(expr);
-  if (symbol === null) return null;
-  if (symbol === 'NaN') return NaN;
-  if (symbol === '+Infinity') return Infinity;
-  if (symbol === '-Infinity') return -Infinity;
-
-  if (getFunctionName(expr) === 'Complex') {
+  const name = getFunctionName(expr);
+  if (name === NEGATE) {
+    // The `-` sign is not considered part of numbers when parsed, instead a
+    // ['Negate'...] is generated. This is to correctly support `-1^2`
+    const val = getNumberValue(getArg(expr, 1));
+    return val === null ? null : -val;
+  } else if (name === 'Complex') {
     if (getNumberValue(getArg(expr, 2)) === 0) {
       return getNumberValue(getArg(expr, 1));
     }
   }
 
+  const symbol = getSymbolName(expr);
+  if (symbol === 'NaN') return NaN;
+  if (symbol === '+Infinity') return Infinity;
+  if (symbol === '-Infinity') return -Infinity;
+
   return null;
 }
 
-/** Only return non-null if the expression is a Complex number.
- * Return null if it's a number, or a symbol (other than  `ImaginaryUnit` or
- * `ComplexInfinity`)
+/**
+ * Only return non-null if the expression is a Complex number.
+ * Return `null` if it's a machine number, a decimal, a symbol other than
+ * `ImaginaryUnit` or `ComplexInfinity` or something else.
  *
  */
 export function getComplexValue(
@@ -213,9 +210,8 @@ export function getImaginaryValue(expr: Expression): number | null {
       val = getNumberValue(getArg(expr, 1));
     }
   } else if (name === 'Negate' && getArgCount(expr) === 1) {
-    if (getSymbolName(getArg(expr, 1)) === 'ImaginaryUnit') {
-      val = -1;
-    }
+    val = getImaginaryValue(getArg(expr, 1)!);
+    if (val !== null) return -val;
   }
   return val === 0 ? null : val;
 }
@@ -223,33 +219,16 @@ export function getImaginaryValue(expr: Expression): number | null {
 export function getDecimalValue(
   expr: Decimal | Expression | null
 ): Decimal | null {
+  if (expr === null) return null;
   if (expr instanceof Decimal) return expr;
 
-  const symbol = getSymbolName(expr);
-  if (symbol !== null) {
-    if (symbol === 'NaN') return DECIMAL_NAN;
-    if (symbol === '+Infinity') return DECIMAL_POS_INFINITY;
-    if (symbol === '-Infinity') return DECIMAL_NEG_INFINITY;
+  if (
+    isNumberObject(expr) &&
+    (expr.num.endsWith('d') || expr.num.endsWith('n'))
+  ) {
+    return new Decimal(expr.num.slice(0, -1));
   }
 
-  if (isNumberObject(expr)) {
-    if (expr.num.endsWith('d') || expr.num.endsWith('n')) {
-      return new Decimal(expr.num.slice(0, -1));
-    }
-    return new Decimal(getNumberValue(expr) ?? NaN);
-  }
-
-  if (expr !== null && expr instanceof Complex) {
-    const c = expr as Complex;
-    if (c.im === 0) return new Decimal(c.re);
-    return null;
-  }
-
-  if (getFunctionName(expr) === 'Complex') {
-    if (getNumberValue(getArg(expr, 2)) === 0) {
-      return new Decimal(getNumberValue(getArg(expr, 1)) ?? NaN);
-    }
-  }
   return null;
 }
 
@@ -497,6 +476,7 @@ export function getFunctionName<T extends number = number>(
   | 'Union'
   | 'Intersection'
   | 'SetMinus'
+  | 'Complement'
   | 'Cosh'
   | 'Exp'
   | 'Re'
@@ -504,11 +484,16 @@ export function getFunctionName<T extends number = number>(
   | 'Not'
   | 'Equal'
   | 'NotEqual'
+  | 'Set'
   | 'Element'
   | 'NotElement'
   | 'Complex'
   | 'Hold'
   | 'Evaluate'
+  | 'Range'
+  | 'Interval'
+  | 'Open'
+  | 'Multiple'
   | '' {
   if (expr === null) return '';
   const head = getFunctionHead(expr);
