@@ -7,8 +7,8 @@ sidebar:
   - nav: 'compute-engine'
 ---
 
-<script type='module'>
-    import {  renderMathInDocument } 
+<script defer type='module'>
+    import { renderMathInDocument } 
       from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
     renderMathInDocument({
       TeX: {
