@@ -14,12 +14,12 @@ import { Numeric } from '../compute-engine/public';
 export const DEFINITIONS_OTHERS: LatexDictionary<Numeric> = [
   {
     name: 'Overscript',
-    trigger: { infix: '\\overset' },
+    trigger: { infix: ['\\overset'] },
     precedence: 700, // @todo: not in MathML
   },
   {
     name: 'Underscript',
-    trigger: { infix: '\\underset' },
+    trigger: { infix: ['\\underset'] },
     precedence: 700, // @todo: not in MathML
   },
   {
@@ -44,18 +44,18 @@ export const DEFINITIONS_OTHERS: LatexDictionary<Numeric> = [
   },
   {
     name: 'Ring', // Aka 'Composition', i.e. function composition
-    trigger: { infix: '\\circ' },
+    trigger: { infix: ['\\circ'] },
     precedence: 265,
   },
   {
     // @todo: if lhs is a list/tensor
     name: 'Transpose',
-    trigger: { superfix: 'T' },
+    trigger: { superfix: ['T'] },
   },
   {
     // @todo: if lhs is a list/tensor
     name: 'ConjugateTranspose',
-    trigger: { superfix: 'H' },
+    trigger: { superfix: ['H'] },
   },
   {
     name: 'StringJoin', // @todo From Mathematica...?
@@ -73,7 +73,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary<Numeric> = [
     // (the Euler notation uses `D_1f(x)` where "1" is for the first variable
     // For the Leibniz notation see 'Divide' that handles `∂f/∂x`
     name: 'PartialDerivative', // PartialDerivative(expr, {lists of vars}, degree)
-    trigger: { prefix: '\\partial' },
+    trigger: { prefix: ['\\partial'] },
     parse: (
       lhs: Expression,
       scanner: Scanner,
@@ -128,88 +128,88 @@ export const DEFINITIONS_OTHERS: LatexDictionary<Numeric> = [
   },
   {
     name: 'OverBar',
-    trigger: { symbol: '\\overline' },
+    trigger: { symbol: ['\\overline'] },
     requiredLatexArg: 1,
   },
   {
     name: 'UnderBar',
-    trigger: { symbol: '\\underline' },
+    trigger: { symbol: ['\\underline'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverVector',
-    trigger: { symbol: '\\vec' },
+    trigger: { symbol: ['\\vec'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverTile',
-    trigger: { symbol: '\\tilde' },
+    trigger: { symbol: ['\\tilde'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverHat',
-    trigger: { symbol: '\\hat' },
+    trigger: { symbol: ['\\hat'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverHat',
-    trigger: { symbol: '\\hat' },
+    trigger: { symbol: ['\\hat'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverRightArrow',
-    trigger: { symbol: '\\overrightarrow' },
+    trigger: { symbol: ['\\overrightarrow'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverLeftArrow',
-    trigger: { symbol: '\\overleftarrow' },
+    trigger: { symbol: ['\\overleftarrow'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverRightDoubleArrow',
-    trigger: { symbol: '\\Overrightarrow' },
+    trigger: { symbol: ['\\Overrightarrow'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverLeftHarpoon',
-    trigger: { symbol: '\\overleftharpoon' },
+    trigger: { symbol: ['\\overleftharpoon'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverRightHarpoon',
-    trigger: { symbol: '\\overrightharpoon' },
+    trigger: { symbol: ['\\overrightharpoon'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverLeftRightArrow',
-    trigger: { symbol: '\\overleftrightarrow' },
+    trigger: { symbol: ['\\overleftrightarrow'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverBrace',
-    trigger: { symbol: '\\overbrace' },
+    trigger: { symbol: ['\\overbrace'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverLineSegment',
-    trigger: { symbol: '\\overlinesegment' },
+    trigger: { symbol: ['\\overlinesegment'] },
     requiredLatexArg: 1,
   },
   {
     name: 'OverGroup',
-    trigger: { symbol: '\\overgroup' },
+    trigger: { symbol: ['\\overgroup'] },
     requiredLatexArg: 1,
   },
 
   // {
   //     name: '',
-  //     trigger: { symbol: '\\mathring' },
+  //     trigger: { symbol: ['\\mathring'] },
   //     requiredLatexArg: 1,
   // },
   // {
   //     name: '',
-  //     trigger: { symbol: '\\check' },
+  //     trigger: { symbol: ['\\check'] },
   //     requiredLatexArg: 1,
   // },
 ];

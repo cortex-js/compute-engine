@@ -533,7 +533,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
     ): string => serializer.wrapShort(getArg(expr, 1)) + '^2',
   },
 
-  { trigger: { symbol: '\\infty' }, parse: { num: '+Infinity' } },
+  { trigger: { symbol: ['\\infty'] }, parse: { num: '+Infinity' } },
   {
     name: COMPLEX_INFINITY,
     trigger: { symbol: ['\\tilde', '\\infty'] },
@@ -544,14 +544,31 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
     trigger: { symbol: ['\\tilde', '<{>', '\\infty', '<}>'] },
     serialize: '\\tilde\\infty',
   },
-  { name: PI, trigger: { symbol: '\\pi' } },
-  { name: PI, trigger: { symbol: 'π' }, serialize: '\\pi' },
-  { name: EXPONENTIAL_E, trigger: { symbol: 'e' }, serialize: 'e' },
-  { name: IMAGINARY_UNIT, trigger: { symbol: 'i' }, serialize: '\\imaginaryI' },
-  { name: IMAGINARY_UNIT, trigger: { symbol: '\\imaginaryI' } },
+  { name: PI, trigger: { symbol: ['\\pi'] } },
+  { name: PI, trigger: { symbol: ['π'] }, serialize: '\\pi' },
+  { name: EXPONENTIAL_E, trigger: { symbol: ['e'] }, serialize: 'e' },
+  {
+    name: IMAGINARY_UNIT,
+    trigger: { symbol: ['i'] },
+    serialize: '\\imaginaryI',
+  },
+  {
+    name: IMAGINARY_UNIT,
+    trigger: { symbol: ['\\mathrm', '<{>', 'i', '<}>'] },
+    serialize: '\\imaginaryI',
+  },
+  { name: IMAGINARY_UNIT, trigger: { symbol: ['\\imaginaryI'] } },
+
+  {
+    name: EXPONENTIAL_E,
+    trigger: { symbol: ['\\mathrm', '<{>', 'e', '<}>'] },
+    serialize: '\\exponentialE',
+  },
+  { name: EXPONENTIAL_E, trigger: { symbol: ['\\exponentialE'] } },
+
   {
     name: ADD,
-    trigger: { prefix: '+', infix: '+' },
+    trigger: { prefix: ['+'], infix: ['+'] },
     parse: parsePlusSign,
     serialize: serializeAdd,
     associativity: 'both',
@@ -559,47 +576,47 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
   },
   {
     name: NEGATE,
-    trigger: { prefix: '-' },
+    trigger: { prefix: ['-'] },
     parse: parseMinusSign,
     associativity: 'left', // prefix are always left-associative
     precedence: 275,
   },
   {
     name: SUBTRACT,
-    trigger: { infix: '-' },
+    trigger: { infix: ['-'] },
     parse: parseMinusSign,
     associativity: 'both',
     precedence: 275,
   },
   {
     name: 'PlusMinus',
-    trigger: { infix: '\\pm' },
+    trigger: { infix: ['\\pm'] },
     associativity: 'both',
     precedence: 270,
   },
   {
     name: 'MinusPlus',
-    trigger: { infix: '\\mp' },
+    trigger: { infix: ['\\mp'] },
     associativity: 'both',
     precedence: 270,
   },
   {
     name: MULTIPLY,
-    trigger: { infix: '\\times' },
+    trigger: { infix: ['\\times'] },
     serialize: serializeMultiply,
     associativity: 'both',
     precedence: 390,
   },
   {
     name: MULTIPLY,
-    trigger: { infix: '\\cdot' },
+    trigger: { infix: ['\\cdot'] },
     serialize: serializeMultiply,
     associativity: 'both',
     precedence: 390,
   },
   {
     name: MULTIPLY,
-    trigger: { infix: '*' },
+    trigger: { infix: ['*'] },
     serialize: serializeMultiply,
     associativity: 'both',
     precedence: 390,
@@ -615,7 +632,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
   },
   {
     name: DIVIDE,
-    trigger: { infix: '\\/' },
+    trigger: { infix: ['\\/'] },
     serialize: serializeFraction,
     associativity: 'non',
     precedence: 660, // ??? MathML has 265, but it's wrong.
@@ -624,21 +641,21 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
   },
   {
     name: DIVIDE,
-    trigger: { infix: '/' },
+    trigger: { infix: ['/'] },
     serialize: serializeFraction,
     associativity: 'non',
     precedence: 660,
   },
   {
     name: DIVIDE,
-    trigger: { infix: '\\div' },
+    trigger: { infix: ['\\div'] },
     serialize: serializeFraction,
     associativity: 'non',
     precedence: 660, // ??? according to MathML
   },
   {
     name: POWER,
-    trigger: { infix: '^' },
+    trigger: { infix: ['^'] },
     associativity: 'non',
     precedence: 720,
     serialize: serializePower,
@@ -670,14 +687,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
     /** If the argument is a vector */
     /** @todo: domain check */
     name: 'Norm',
-    trigger: { matchfix: '\\lVert' },
+    trigger: { matchfix: ['\\lVert'] },
     closeFence: '\\rVert',
   },
   {
     /** If the argument is a vector */
     /** @todo: domain check */
     name: 'Norm',
-    trigger: { matchfix: '\\|' },
+    trigger: { matchfix: ['\\|'] },
     closeFence: '\\|',
   },
   {
@@ -693,17 +710,17 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
     /** If a literal matrix, the `serialize` should be custom, the parens are
      * replaced with bars */
     name: 'Abs',
-    trigger: { matchfix: '|' },
+    trigger: { matchfix: ['|'] },
     closeFence: '|',
   },
   {
     name: 'Abs',
-    trigger: { matchfix: '\\lvert' },
+    trigger: { matchfix: ['\\lvert'] },
     closeFence: '\\rvert',
   },
   {
     name: 'Factorial',
-    trigger: { postfix: '!' },
+    trigger: { postfix: ['!'] },
     precedence: 810,
   },
   {
@@ -713,33 +730,27 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary<Numeric> = [
   },
   {
     name: 'Lcm',
-    trigger: { symbol: ['\\operatorname', '<{>', 'l', 'c', 'm', '<}>'] },
+    trigger: '\\operatorname{lcm}',
   },
   {
     name: 'Gcd',
-    trigger: { symbol: ['\\operatorname', '<{>', 'g', 'c', 'd', '<}>'] },
+    trigger: '\\operatorname{gcd}',
   },
   {
     name: 'Ceil',
-    trigger: { symbol: ['\\operatorname', '<{>', 'c', 'e', 'i', 'l', '<}>'] },
+    trigger: '\\operatorname{ceil}',
   },
   {
     name: 'Floor',
-    trigger: {
-      symbol: ['\\operatorname', '<{>', 'f', 'l', 'o', 'o', 'r', '<}>'],
-    },
+    trigger: '\\operatorname{floor}',
   },
   {
     name: 'Round',
-    trigger: {
-      symbol: ['\\operatorname', '<{>', 'r', 'o', 'u', 'n', 'd', '<}>'],
-    },
+    trigger: '\\operatorname{round}',
   },
   {
     name: 'Sign',
-    trigger: {
-      // As per ISO 80000-2, "signum" is 'sgn'
-      symbol: ['\\operatorname', '<{>', 's', 'g', 'n', '<}>'],
-    },
+    // As per ISO 80000-2, "signum" is 'sgn'
+    trigger: '\\operatorname{sgn}',
   },
 ];

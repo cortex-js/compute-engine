@@ -9,19 +9,19 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary<number> = [
   },
   {
     name: 'NotLess',
-    trigger: { infix: '\\nless' },
+    trigger: { infix: ['\\nless'] },
     associativity: 'right',
     precedence: 246,
   },
   {
     name: 'Less',
-    trigger: { infix: '<' },
+    trigger: { infix: ['<'] },
     associativity: 'right',
     precedence: 245,
   },
   {
     name: 'Less',
-    trigger: { infix: '\\lt' },
+    trigger: { infix: ['\\lt'] },
     associativity: 'right',
     precedence: 245,
   },
@@ -33,49 +33,49 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary<number> = [
   },
   {
     name: 'LessEqual',
-    trigger: { infix: '\\le' },
+    trigger: { infix: ['\\le'] },
     associativity: 'right',
     precedence: 241,
   },
   {
     name: 'LessEqual',
-    trigger: { infix: '\\leq' },
+    trigger: { infix: ['\\leq'] },
     associativity: 'right',
     precedence: 241,
   },
   {
     name: 'LessEqual',
-    trigger: { infix: '\\leqslant' },
+    trigger: { infix: ['\\leqslant'] },
     associativity: 'right',
     precedence: 265, // Note different precendence than `<=` as per MathML
   },
   {
     name: 'LessNotEqual',
-    trigger: { infix: '\\lneqq' },
+    trigger: { infix: ['\\lneqq'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'NotLessNotEqual',
-    trigger: { infix: '\\nleqq' },
+    trigger: { infix: ['\\nleqq'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'LessOverEqual',
-    trigger: { infix: '\\leqq' },
+    trigger: { infix: ['\\leqq'] },
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'GreaterOverEqual',
-    trigger: { infix: '\\geqq' },
+    trigger: { infix: ['\\geqq'] },
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'Equal',
-    trigger: { infix: '=' },
+    trigger: { infix: ['='] },
     associativity: 'right',
     precedence: 260,
   },
@@ -123,13 +123,13 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary<number> = [
   },
   {
     name: 'TildeFullEqual', // MathML: approximately equal to
-    trigger: { infix: '\\cong' },
+    trigger: { infix: ['\\cong'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'NotTildeFullEqual', // MathML: approximately but not actually equal to
-    trigger: { infix: '\\ncong' },
+    trigger: { infix: ['\\ncong'] },
     associativity: 'right',
     precedence: 260,
   },
@@ -141,25 +141,25 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary<number> = [
   },
   {
     name: 'Assign',
-    trigger: { infix: '\\coloneq' },
+    trigger: { infix: ['\\coloneq'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'Approx', // Note: Mathematica TildeTilde
-    trigger: { infix: '\\approx' },
+    trigger: { infix: ['\\approx'] },
     associativity: 'right',
     precedence: 247,
   },
   {
     name: 'NotApprox', // Note: Mathematica TildeTilde
-    trigger: { infix: '\\approx' },
+    trigger: { infix: ['\\approx'] },
     associativity: 'right',
     precedence: 247,
   },
   {
     name: 'ApproxEqual', // Note: Mathematica TildeEqual, MathML: `asymptotically equal to`
-    trigger: { infix: '\\approxeq' },
+    trigger: { infix: ['\\approxeq'] },
     associativity: 'right',
     precedence: 260,
   },
@@ -171,7 +171,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary<number> = [
   },
   {
     name: 'NotEqual',
-    trigger: { infix: '\\ne' },
+    trigger: { infix: ['\\ne'] },
     associativity: 'right',
     precedence: 255,
   },
@@ -183,13 +183,13 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary<number> = [
   },
   {
     name: 'GreaterEqual',
-    trigger: { infix: '\\ge' },
+    trigger: { infix: ['\\ge'] },
     associativity: 'right',
     precedence: 242, // Note: different precendence than `>=` as per MathML
   },
   {
     name: 'GreaterEqual',
-    trigger: { infix: '\\geq' },
+    trigger: { infix: ['\\geq'] },
     associativity: 'right',
     precedence: 242, // Note: different precendence than `>=` as per MathML
   },
@@ -201,37 +201,37 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary<number> = [
   },
   {
     name: 'GreaterEqual',
-    trigger: { infix: '\\geqslant' },
+    trigger: { infix: ['\\geqslant'] },
     associativity: 'right',
     precedence: 265, // Note: different precendence than `>=` as per MathML
   },
   {
     name: 'GreaterNotEqual',
-    trigger: { infix: '\\gneqq' },
+    trigger: { infix: ['\\gneqq'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'NotGreaterNotEqual',
-    trigger: { infix: '\\ngeqq' },
+    trigger: { infix: ['\\ngeqq'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'Greater',
-    trigger: { infix: '>' },
+    trigger: { infix: ['>'] },
     associativity: 'right',
     precedence: 245,
   },
   {
     name: 'Greater',
-    trigger: { infix: '\\gt' },
+    trigger: { infix: ['\\gt'] },
     associativity: 'right',
     precedence: 245,
   },
   {
     name: 'NotGreater',
-    trigger: { infix: '\\ngtr' },
+    trigger: { infix: ['\\ngtr'] },
     associativity: 'right',
     precedence: 244,
   },
@@ -243,104 +243,104 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary<number> = [
   },
   {
     name: 'RingEqual',
-    trigger: { infix: '\\circeq' },
+    trigger: { infix: ['\\circeq'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'TriangleEqual', // MathML: delta equal to
-    trigger: { infix: '\\triangleq' },
+    trigger: { infix: ['\\triangleq'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'DotEqual', // MathML: approaches the limit
-    trigger: { infix: '\\doteq' },
+    trigger: { infix: ['\\doteq'] },
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'DotEqualDot', // MathML: Geometrically equal
-    trigger: { infix: '\\doteqdot' },
+    trigger: { infix: ['\\doteqdot'] },
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'FallingDotEqual', // MathML: approximately equal to or the image of
-    trigger: { infix: '\\fallingdotseq' },
+    trigger: { infix: ['\\fallingdotseq'] },
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'RisingDotEqual', // MathML: image of or approximately equal to
-    trigger: { infix: '\\fallingdotseq' },
+    trigger: { infix: ['\\fallingdotseq'] },
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'QuestionEqual',
-    trigger: { infix: '\\questeq' },
+    trigger: { infix: ['\\questeq'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'Equivalent', // MathML: identical to, Mathematica: Congruent
-    trigger: { infix: '\\equiv' },
+    trigger: { infix: ['\\equiv'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'MuchLess',
-    trigger: { infix: '\\ll' },
+    trigger: { infix: ['\\ll'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'MuchGreater',
-    trigger: { infix: '\\gg' },
+    trigger: { infix: ['\\gg'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'Precedes',
-    trigger: { infix: '\\prec' },
+    trigger: { infix: ['\\prec'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'Succeeds',
-    trigger: { infix: '\\succ' },
+    trigger: { infix: ['\\succ'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'PrecedesEqual',
-    trigger: { infix: '\\preccurlyeq' },
+    trigger: { infix: ['\\preccurlyeq'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'SucceedsEqual',
-    trigger: { infix: '\\curlyeqprec' },
+    trigger: { infix: ['\\curlyeqprec'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'NotPrecedes',
-    trigger: { infix: '\\nprec' },
+    trigger: { infix: ['\\nprec'] },
     associativity: 'right',
     precedence: 260,
   },
   {
     name: 'NotSucceeds',
-    trigger: { infix: '\\nsucc' },
+    trigger: { infix: ['\\nsucc'] },
     associativity: 'right',
     precedence: 260,
   },
 
   {
     name: 'Between',
-    trigger: { infix: '\\between' },
+    trigger: { infix: ['\\between'] },
     associativity: 'right',
     precedence: 265,
   },

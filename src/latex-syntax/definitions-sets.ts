@@ -5,165 +5,172 @@ export const DEFINITIONS_SETS: LatexDictionary<any> = [
   // Sets
   {
     name: 'AlgebraicNumber',
-    trigger: { symbol: ['\\mathbb', '<{>', 'A', '<}>'] },
+    trigger: '\\mathbb{A}',
   },
-  { name: 'ComplexNumber', trigger: { symbol: '\\C' } },
+  { name: 'ComplexNumber', trigger: { symbol: ['\\C'] } },
 
-  { trigger: { symbol: '\\varnothing' }, parse: 'EmptySet' }, // Parsing only
-  { name: 'EmptySet', trigger: { symbol: '\\emptyset' } },
+  { trigger: { symbol: ['\\varnothing'] }, parse: 'EmptySet' }, // Parsing only
+  { name: 'EmptySet', trigger: { symbol: ['\\emptyset'] } },
 
   {
     name: 'Complement',
-    trigger: { infix: '\\complement' },
+    trigger: { infix: ['\\complement'] },
     precedence: 240,
   },
   {
     name: 'Contains',
-    trigger: { infix: '\\ni' },
+    trigger: { infix: ['\\ni'] },
     associativity: 'right',
     precedence: 160, // As per MathML, lower precedence
   },
 
   {
     name: 'Element',
-    trigger: { infix: '\\in' },
+    trigger: { infix: ['\\in'] },
     precedence: 240,
   },
-  { name: 'Integer', trigger: { symbol: '\\Z' } },
+  { name: 'Integer', trigger: { symbol: ['\\Z'] } },
   {
     name: 'Intersection',
-    trigger: { infix: '\\Cap' },
+    trigger: { infix: ['\\Cap'] },
     precedence: 350,
   },
-  { name: 'NaturalNumber', trigger: { symbol: '\\N' } },
+  {
+    name: 'Interval',
+    serialize: serializeInterval,
+  },
+  {
+    name: 'Range',
+    serialize: serializeInterval,
+  },
+  { name: 'NaturalNumber', trigger: { symbol: ['\\N'] } },
 
   {
     name: 'NotElement',
-    trigger: { infix: '\\notin' },
+    trigger: { infix: ['\\notin'] },
     precedence: 240,
   },
   {
     name: 'NotSubset',
-    trigger: { infix: '\\nsubset' },
+    trigger: { infix: ['\\nsubset'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'NotSuperset',
-    trigger: { infix: '\\nsupset' },
+    trigger: { infix: ['\\nsupset'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'SupersetEqual',
-    trigger: { infix: '\\supseteq' },
+    trigger: { infix: ['\\supseteq'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'NotSubsetNotEqual',
-    trigger: { infix: '\\nsubseteq' },
+    trigger: { infix: ['\\nsubseteq'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'NotSupersetNotEqual',
-    trigger: { infix: '\\nsupseteq' },
+    trigger: { infix: ['\\nsupseteq'] },
     associativity: 'right',
     precedence: 240,
   },
-  { name: 'RationalNumber', trigger: { symbol: '\\Q' } },
-  { name: 'RealNumber', trigger: { symbol: '\\R' } },
+  { name: 'RationalNumber', trigger: { symbol: ['\\Q'] } },
+  { name: 'RealNumber', trigger: { symbol: ['\\R'] } },
   {
     name: 'SetMinus',
-    trigger: { infix: '\\setminus' },
+    trigger: { infix: ['\\setminus'] },
     precedence: 650,
   },
   {
     name: 'SubsetEqual',
-    trigger: { infix: '\\subseteq' },
+    trigger: { infix: ['\\subseteq'] },
     precedence: 240,
   },
   {
     name: 'SymmetricDifference',
-    trigger: { infix: '\\triangle' }, // or \\ominus
+    trigger: { infix: ['\\triangle'] }, // or \\ominus
     precedence: 260,
   },
   {
     name: 'Subset',
-    trigger: { infix: '\\subset' },
+    trigger: { infix: ['\\subset'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'SquareSubset', // MathML: square image of
-    trigger: { infix: '\\sqsubset' },
+    trigger: { infix: ['\\sqsubset'] },
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'SquareSubsetEqual', // MathML: square image of or equal to
-    trigger: { infix: '\\sqsubseteq' },
+    trigger: { infix: ['\\sqsubseteq'] },
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'Superset',
-    trigger: { infix: '\\supset' },
+    trigger: { infix: ['\\supset'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'SquareSuperset', // MathML: square original of
-    trigger: { infix: '\\sqsupset' },
+    trigger: { infix: ['\\sqsupset'] },
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'SquareSupersetEqual', // MathML: square original of or equal
-    trigger: { infix: '\\sqsupseteq' },
+    trigger: { infix: ['\\sqsupseteq'] },
     associativity: 'right',
     precedence: 265,
   },
 
   {
     name: 'SubsetNotEqual',
-    trigger: { infix: '\\subsetneq' },
+    trigger: { infix: ['\\subsetneq'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'SubsetNotEqual',
-    trigger: { infix: '\\varsupsetneqq' },
+    trigger: { infix: ['\\varsupsetneqq'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'SupersetNotEqual',
-    trigger: { infix: '\\supsetneq' },
+    trigger: { infix: ['\\supsetneq'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'SupersetNotEqual',
-    trigger: { infix: '\\varsupsetneq' },
+    trigger: { infix: ['\\varsupsetneq'] },
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'TranscendentalNumber',
-    trigger: { symbol: ['\\mathbb', '<{>', 'T', '<}>'] },
+    trigger: '\\mathbb{T}',
   },
   {
     name: 'Union',
-    trigger: { infix: '\\cup' },
+    trigger: { infix: ['\\cup'] },
     precedence: 350,
   },
 ];
 
 function serializeInterval(
   _serializer: Serializer,
-  _style: 'radical' | 'quotient' | 'solidus',
   _expr: Expression | null
 ): LatexString {
   return '';

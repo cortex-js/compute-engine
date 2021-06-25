@@ -3,7 +3,6 @@
 import { Expression, ErrorCode, ErrorListener } from '../public';
 import {
   ParseLatexOptions,
-  LatexDictionaryEntry,
   LatexToken,
   NumberFormattingOptions,
   ParserFunction,
@@ -20,7 +19,10 @@ import {
   isRationalNumber,
 } from '../common/utils';
 import { tokensToString } from './core/tokenizer';
-import { IndexedLatexDictionary } from './definitions';
+import {
+  IndexedLatexDictionary,
+  IndexedLatexDictionaryEntry,
+} from './definitions';
 import {
   DEFAULT_LATEX_NUMBER_OPTIONS,
   DEFAULT_PARSE_LATEX_OPTIONS,
@@ -62,9 +64,10 @@ export class Scanner<T extends number = number> implements Scanner<T> {
     };
     this.dictionary = dictionary;
 
-    let def: LatexDictionaryEntry<T> | undefined;
+    let def: IndexedLatexDictionaryEntry<T> | undefined;
     this.invisibleOperatorPrecedence = 0;
     if (this.options.invisibleOperator) {
+      // Check that the specified invisible operator is valid.
       def = this.dictionary.name.get(this.options.invisibleOperator);
       if (def === undefined) {
         onError({
@@ -191,8 +194,8 @@ export class Scanner<T extends number = number> implements Scanner<T> {
       | 'superfix'
       | 'subfix'
       | 'operator'
-  ): [LatexDictionaryEntry<T> | null, number] {
-    let defs: (undefined | LatexDictionaryEntry<T>)[];
+  ): [IndexedLatexDictionaryEntry<T> | null, number] {
+    let defs: (undefined | IndexedLatexDictionaryEntry<T>)[];
     if (kind === 'operator') {
       defs = this.lookAhead().map(
         (x, n) =>
@@ -520,7 +523,7 @@ export class Scanner<T extends number = number> implements Scanner<T> {
       | 'superfix'
       | 'subfix'
       | 'operator'
-  ): [LatexDictionaryEntry<T> | null, Expression<T> | null] {
+  ): [IndexedLatexDictionaryEntry<T> | null, Expression<T> | null] {
     // Find the longest string of tokens with a definition of the
     // specified kind
     const [def, tokenCount] = this.peekDefinition(kind);
@@ -662,7 +665,7 @@ export class Scanner<T extends number = number> implements Scanner<T> {
 
       const savedIndex = this.index;
 
-      let def: LatexDictionaryEntry<T> | null | undefined;
+      let def: IndexedLatexDictionaryEntry<T> | null | undefined;
       let n = 0;
       if (this.match('<{>')) {
         // Supsub with an argument

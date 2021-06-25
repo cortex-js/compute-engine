@@ -36,7 +36,7 @@ function serializeIntegral(_serializer: Serializer, _expr: Expression): string {
 
 export const DEFINITIONS_CALCULUS: LatexDictionary<any> = [
   {
-    trigger: { symbol: '\\int' },
+    trigger: { symbol: ['\\int'] },
     parse: parseIntegral,
     serialize: serializeIntegral,
   },

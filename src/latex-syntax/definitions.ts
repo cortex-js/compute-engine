@@ -12,7 +12,7 @@ import {
   SerializerFunction,
   LatexDictionaryEntry,
 } from './public';
-import { tokensToString } from './core/tokenizer';
+import { tokenize, tokensToString } from './core/tokenizer';
 import { DEFINITIONS_INEQUALITIES } from './definitions-inequalities';
 import { DEFINITIONS_OTHERS } from './definitions-other';
 import { DEFINITIONS_CORE } from './definitions-core';
@@ -110,12 +110,20 @@ export function indexLatexDictionary<T extends number = number>(
 
   for (const record of dic) {
     if (record.parse === undefined) {
-      // By default, when a latex string triggers, the generated
-      // output is the name of this record, i.e. MULTIPLY
+      // By default, when a LaTeX string triggers, the generated
+      // output is the name of this record, i.e. 'Multiply'
       record.parse = record.name;
     }
-    // If the trigger is a string, it's a shortcut for a symbol
+    // If the trigger is a string, it's a LaTeX string which
+    // is a shortcut for an array of LaTeX tokens assigned to `symbol`
+    // This is convenient to define common long symbols, such as `\operator{gcd}`...
     if (typeof record.trigger === 'string') {
+      record.trigger = { symbol: tokenize(record.trigger, []) };
+      console.assert(
+        record.trigger.symbol?.length ?? 0 > 1,
+        'trigger shortcut should produce more than one token. Otherwise, not worth using the shortcut.'
+      );
+    } else if (Array.isArray(record.trigger)) {
       record.trigger = { symbol: record.trigger };
     }
     if (typeof record.serialize === 'string') {
@@ -126,7 +134,7 @@ export function indexLatexDictionary<T extends number = number>(
       }
     }
     if (record.serialize === undefined) {
-      // By default, when latex is serialized for this record,
+      // By default, when LaTeX is serialized for this record,
       // it is the same as the trigger (note there could be multiple
       // triggers, so we just pick one)
       if (record.trigger?.postfix !== undefined) {
@@ -201,8 +209,8 @@ export function indexLatexDictionary<T extends number = number>(
     }
     if (record.trigger === undefined && !record.name) {
       // A trigger OR a name is required.
-      // The trigger maps latex -> json
-      // The name maps json -> latex
+      // The trigger maps LaTeX -> json
+      // The name maps json -> LaTeX
       onError({
         code: 'syntax-error',
         arg: 'Need at least a trigger or a name',

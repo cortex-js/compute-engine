@@ -115,7 +115,7 @@ export const DEFINITIONS_CORE: LatexDictionary<Numeric> = [
   { name: LATEX_TOKENS, serialize: serializeLatex },
   {
     name: PARENTHESES,
-    trigger: { matchfix: '(' },
+    trigger: { matchfix: ['('] },
     parse: (
       lhs: Expression,
       scanner: Scanner,
@@ -187,7 +187,7 @@ export const DEFINITIONS_CORE: LatexDictionary<Numeric> = [
   },
   {
     name: LIST,
-    trigger: { matchfix: '\\lbrack' },
+    trigger: { matchfix: ['\\lbrack'] },
     separator: ',',
     closeFence: '\\rbrack',
     precedence: 20,
@@ -255,14 +255,14 @@ export const DEFINITIONS_CORE: LatexDictionary<Numeric> = [
   },
   {
     name: 'Set',
-    trigger: { matchfix: '\\lbrace' },
+    trigger: { matchfix: ['\\lbrace'] },
     separator: ',',
     closeFence: '\\rbrace',
     precedence: 20,
   },
   {
     name: SEQUENCE,
-    trigger: { infix: ',' },
+    trigger: { infix: [','] },
     // Unlike the matchfix version of List,
     // when the comma operator is used, the lhs and rhs are flattened,
     // i.e. `1,2,3` -> `["Sequence", 1, 2, 3],
@@ -273,7 +273,7 @@ export const DEFINITIONS_CORE: LatexDictionary<Numeric> = [
   },
   {
     name: SEQUENCE2,
-    trigger: { infix: ';' },
+    trigger: { infix: [';'] },
     parse: parseSequence(SEQUENCE2, 19, ';'),
     serialize: serializeSequence('; '),
     precedence: 19,
@@ -286,7 +286,7 @@ export const DEFINITIONS_CORE: LatexDictionary<Numeric> = [
   },
   {
     name: 'Subscript',
-    trigger: { infix: '_' },
+    trigger: { infix: ['_'] },
     precedence: 720,
     serialize: (serializer: Serializer, expr: Expression): string => {
       if (getArgCount(expr) === 2) {
@@ -312,54 +312,54 @@ export const DEFINITIONS_CORE: LatexDictionary<Numeric> = [
   },
   {
     name: 'Superplus',
-    trigger: { superfix: '+' },
+    trigger: { superfix: ['+'] },
   },
   {
     name: 'Subplus',
-    trigger: { subfix: '+' },
+    trigger: { subfix: ['+'] },
   },
   {
     name: 'Superminus',
-    trigger: { superfix: '-' },
+    trigger: { superfix: ['-'] },
   },
   {
     name: 'Subminus',
-    trigger: { subfix: '-' },
+    trigger: { subfix: ['-'] },
   },
   {
     // @todo: when lhs is a complex number, 'Conjugate'
     name: 'Superstar',
-    trigger: { superfix: '*' },
+    trigger: { superfix: ['*'] },
   },
   {
     // @todo: when lhs is a complex number, 'Conjugate'
     name: 'Superstar',
-    trigger: { superfix: '\\star' },
+    trigger: { superfix: ['\\star'] },
   },
   {
     name: 'Substar',
-    trigger: { subfix: '*' },
+    trigger: { subfix: ['*'] },
   },
   {
     name: 'Substar',
-    trigger: { subfix: '\\star' },
+    trigger: { subfix: ['\\star'] },
   },
   {
     name: 'Superdagger',
-    trigger: { superfix: '\\dagger' },
+    trigger: { superfix: ['\\dagger'] },
   },
   {
     name: 'Superdagger',
-    trigger: { superfix: '\\dag' },
+    trigger: { superfix: ['\\dag'] },
   },
   {
     name: PRIME,
-    trigger: { superfix: '\\prime' },
+    trigger: { superfix: ['\\prime'] },
     arguments: 'group',
   },
   {
     // name: 'prime',
-    trigger: { superfix: '\\doubleprime' },
+    trigger: { superfix: ['\\doubleprime'] },
     parse: (
       lhs: Expression,
       _scanner: Scanner
@@ -376,7 +376,7 @@ export const DEFINITIONS_CORE: LatexDictionary<Numeric> = [
   },
   {
     name: DERIVATIVE,
-    trigger: 'D',
+    trigger: { symbol: ['D'] },
     parse: (lhs: Expression, _scanner: Scanner): [Expression, Expression] => {
       return [lhs, [DERIVATIVE, 1]];
     },

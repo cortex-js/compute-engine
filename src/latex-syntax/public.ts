@@ -58,53 +58,60 @@ export type LatexDictionaryEntry<T extends number = number> = {
    * for definitions that are only for parsing a symbol, but not serializing,
    * for example when there are synonyms for the same symbol (e.g. `\varnothing`
    * and `\emptyset`).
+   *
+   * The name is used when serializing to select the appropriate record
+   * and call its `serialize` function.
    */
   name?: string;
 
   /**
-   * Map one or more LaTeX tokens to this record.
+   * The trigger is the first token (or set of tokens) that will make this
+   * record eligible for attempting to parse the stream and generate an
+   * expression. After trigger matches, the `parse` function is called,
+   * if available. If there is no `parse` function, but there is a `parse`
+   * property, the value of that property is the resuluting output.
    *
-   * As a shortcut, if the trigger is `trigger: value`, it is equivalent to
-   * `trigger: { symbol: value }`.
+   * As a shortcut, if the trigger is `trigger: <string>`, it is equivalent to
+   * `trigger: { symbol: [<tokens of string>] }`.
    *
    * There can be multiple entries, for example `+` is both an infix and a
    * prefix.
    */
   trigger?:
-    | LatexToken
+    | LatexString
     | {
-        symbol?: LatexToken | LatexToken[];
-        matchfix?: LatexToken | LatexToken[];
+        symbol?: LatexToken[];
+        matchfix?: LatexToken[];
         /**
          * Infix position, with an operand before and an operand after: `a ⊛ b`.
          *
          * Example: `+`, `\times`
          */
-        infix?: LatexToken | LatexToken[];
+        infix?: LatexToken[];
 
         /**
          * Prefix position, with an operand after: `⊛ a`
          *
          * Example: `-`, `\not`
          */
-        prefix?: LatexToken | LatexToken[];
+        prefix?: LatexToken[];
 
         /**
          * Postfix position, with an operand before: `a ⊛`
          */
-        postfix?: LatexToken | LatexToken[];
+        postfix?: LatexToken[];
 
         /**
          * Superfix position (in a superscript), with the base of the
          * superscript as the operand: `a^{⊛}`
          */
-        superfix?: LatexToken | LatexToken[];
+        superfix?: LatexToken[];
 
         /**
          * Subfix position (in a subscript), with the base of the
          * subscript as the operand: `a_{⊛}`
          */
-        subfix?: LatexToken | LatexToken[];
+        subfix?: LatexToken[];
 
         /**
          * The name of an environment, as used in `\begin{matrix}` where
