@@ -4,6 +4,15 @@ import {
   ParseLatexOptions,
   SerializeLatexOptions,
 } from './public';
+import {
+  getApplyFunctionStyle,
+  getGroupStyle,
+  getRootStyle,
+  getFractionStyle,
+  getLogicStyle,
+  getPowerStyle,
+  getNumericSetStyle,
+} from './serializer-style';
 
 export const DEFAULT_LATEX_NUMBER_OPTIONS: Required<NumberFormattingOptions> = {
   precision: 15, // assume 2^53 bits floating points
@@ -91,6 +100,13 @@ export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> =
     // negate: '-#1',
     // squareRoot: '\\sqrt{#1}',
     // nthRoot: '\\sqrt[#2]{#1}',
+    applyFunctionStyle: getApplyFunctionStyle,
+    groupStyle: getGroupStyle,
+    rootStyle: getRootStyle,
+    fractionStyle: getFractionStyle,
+    logicStyle: getLogicStyle,
+    powerStyle: getPowerStyle,
+    numericSetStyle: getNumericSetStyle,
   };
 
 export function appendLatex(src: string, s: string): string {

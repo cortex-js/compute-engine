@@ -1,20 +1,14 @@
-import { LatexDictionary } from './public';
+import { Expression } from '../public';
+import { LatexDictionary, LatexString, Serializer } from './public';
 
 export const DEFINITIONS_SETS: LatexDictionary<any> = [
   // Sets
-  { name: 'NaturalNumber', trigger: { symbol: '\\N' } },
-  { name: 'Integer', trigger: { symbol: '\\Z' } },
-  { name: 'RationalNumber', trigger: { symbol: '\\Q' } },
   {
     name: 'AlgebraicNumber',
     trigger: { symbol: ['\\mathbb', '<{>', 'A', '<}>'] },
   },
-  {
-    name: 'TranscendentalNumber',
-    trigger: { symbol: ['\\mathbb', '<{>', 'T', '<}>'] },
-  },
-  { name: 'RealNumber', trigger: { symbol: '\\R' } },
   { name: 'ComplexNumber', trigger: { symbol: '\\C' } },
+
   { trigger: { symbol: '\\varnothing' }, parse: 'EmptySet' }, // Parsing only
   { name: 'EmptySet', trigger: { symbol: '\\emptyset' } },
 
@@ -23,23 +17,63 @@ export const DEFINITIONS_SETS: LatexDictionary<any> = [
     trigger: { infix: '\\complement' },
     precedence: 240,
   },
+  {
+    name: 'Contains',
+    trigger: { infix: '\\ni' },
+    associativity: 'right',
+    precedence: 160, // As per MathML, lower precedence
+  },
 
   {
     name: 'Element',
     trigger: { infix: '\\in' },
     precedence: 240,
   },
+  { name: 'Integer', trigger: { symbol: '\\Z' } },
   {
     name: 'Intersection',
     trigger: { infix: '\\Cap' },
     precedence: 350,
   },
+  { name: 'NaturalNumber', trigger: { symbol: '\\N' } },
 
   {
     name: 'NotElement',
     trigger: { infix: '\\notin' },
     precedence: 240,
   },
+  {
+    name: 'NotSubset',
+    trigger: { infix: '\\nsubset' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'NotSuperset',
+    trigger: { infix: '\\nsupset' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'SupersetEqual',
+    trigger: { infix: '\\supseteq' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'NotSubsetNotEqual',
+    trigger: { infix: '\\nsubseteq' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  {
+    name: 'NotSupersetNotEqual',
+    trigger: { infix: '\\nsupseteq' },
+    associativity: 'right',
+    precedence: 240,
+  },
+  { name: 'RationalNumber', trigger: { symbol: '\\Q' } },
+  { name: 'RealNumber', trigger: { symbol: '\\R' } },
   {
     name: 'SetMinus',
     trigger: { infix: '\\setminus' },
@@ -54,17 +88,6 @@ export const DEFINITIONS_SETS: LatexDictionary<any> = [
     name: 'SymmetricDifference',
     trigger: { infix: '\\triangle' }, // or \\ominus
     precedence: 260,
-  },
-  {
-    name: 'Union',
-    trigger: { infix: '\\cup' },
-    precedence: 350,
-  },
-  {
-    name: 'Contains',
-    trigger: { infix: '\\ni' },
-    associativity: 'right',
-    precedence: 160, // As per MathML, lower precedence
   },
   {
     name: 'Subset',
@@ -102,36 +125,7 @@ export const DEFINITIONS_SETS: LatexDictionary<any> = [
     associativity: 'right',
     precedence: 265,
   },
-  {
-    name: 'NotSubset',
-    trigger: { infix: '\\nsubset' },
-    associativity: 'right',
-    precedence: 240,
-  },
-  {
-    name: 'NotSuperset',
-    trigger: { infix: '\\nsupset' },
-    associativity: 'right',
-    precedence: 240,
-  },
-  {
-    name: 'SupersetEqual',
-    trigger: { infix: '\\supseteq' },
-    associativity: 'right',
-    precedence: 240,
-  },
-  {
-    name: 'NotSubsetNotEqual',
-    trigger: { infix: '\\nsubseteq' },
-    associativity: 'right',
-    precedence: 240,
-  },
-  {
-    name: 'NotSupersetNotEqual',
-    trigger: { infix: '\\nsupseteq' },
-    associativity: 'right',
-    precedence: 240,
-  },
+
   {
     name: 'SubsetNotEqual',
     trigger: { infix: '\\subsetneq' },
@@ -156,4 +150,21 @@ export const DEFINITIONS_SETS: LatexDictionary<any> = [
     associativity: 'right',
     precedence: 240,
   },
+  {
+    name: 'TranscendentalNumber',
+    trigger: { symbol: ['\\mathbb', '<{>', 'T', '<}>'] },
+  },
+  {
+    name: 'Union',
+    trigger: { infix: '\\cup' },
+    precedence: 350,
+  },
 ];
+
+function serializeInterval(
+  _serializer: Serializer,
+  _style: 'radical' | 'quotient' | 'solidus',
+  _expr: Expression | null
+): LatexString {
+  return '';
+}

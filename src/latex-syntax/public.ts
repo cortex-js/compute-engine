@@ -338,6 +338,42 @@ export type SerializeLatexOptions = {
    * Default: `\times`
    */
   multiply?: LatexString; // e.g. '\\times', '\\cdot'
+
+  // Styles
+  applyFunctionStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'paren' | 'leftright' | 'big' | 'none';
+
+  groupStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'paren' | 'leftright' | 'big' | 'none';
+
+  rootStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'radical' | 'quotient' | 'solidus';
+
+  fractionStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'quotient' | 'inline-solidus' | 'nice-solidus' | 'reciprocal' | 'factor';
+
+  logicStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'word' | 'boolean' | 'uppercase-word' | 'punctuation';
+
+  powerStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'root' | 'solidus' | 'quotient';
+
+  numericSetStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'compact' | 'regular' | 'interval' | 'set-builder';
 };
 
 export type NumberFormattingOptions = {
@@ -450,6 +486,42 @@ export interface Serializer<T extends number = number> {
    * short (not a function)
    */
   wrapShort(expr: Expression<T> | null): string;
+
+  /** Styles */
+  applyFunctionStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'paren' | 'leftright' | 'big' | 'none';
+
+  groupStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'paren' | 'leftright' | 'big' | 'none';
+
+  rootStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'radical' | 'quotient' | 'solidus';
+
+  fractionStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'quotient' | 'inline-solidus' | 'nice-solidus' | 'reciprocal' | 'factor';
+
+  logicStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'word' | 'boolean' | 'uppercase-word' | 'punctuation';
+
+  powerStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'root' | 'solidus' | 'quotient';
+
+  numericSetStyle?: (
+    expr: Expression,
+    level: number
+  ) => 'compact' | 'regular' | 'interval' | 'set-builder';
 }
 
 export type SerializerFunction<T extends number = number> = (

@@ -18,24 +18,8 @@ import {
   SetDefinition,
 } from '../public';
 
-// Other domains to consider:
-// - p-adic
-// - SERIE power series (finite Laurent series)
-// DOMAIN_RULE // a pattern and an expression
-// DOMAIN_ARRAY
-// DOMAIN_DICTIONARY
-//  * - "table"        JS object literal, key (string)/ value (any) pairs
-
 // See also sympy 'assumptions'
 // https://docs.sympy.org/latest/modules/core.html#module-sympy.core.assumptions
-
-//  * - "N"           Q28920044 Natural numbers (positive integers): 1, 2, 3, 4, ...
-//  * - "Z*"          Non-Zero integers: -2, -1, 1, 2, 3, ...
-//  * - "R-":         Q200227 Negative real number <0
-//  * - "R+"          Q3176558 Positive real numbers (JS float) >0
-//  * - "R0-":        Q47341108 Non-positive real number <= 0
-//  * - "R0+"         Q13896108 Non-negative real numbers (JS float) >=0
-//  * - "R"           Real numbers (JS float)
 
 /**
  * The set of domains form a lattice with 'Anything' at the top and 'Nothing'
@@ -44,16 +28,6 @@ import {
  * The DOMAIN_PARENT table represents this lattice by indicating the parent(s)
  * for each domain.
  */
-
-/**
- * These synonyms are shortcuts that get normalized to their definition.
- */
-export const DOMAIN_SYNONYMS: { [synonym: string]: Expression } = {
-  NegativeRealNumber: ['Interval', -Infinity, 0],
-  NonNegativeRealNumber: ['Interval', 0, Infinity],
-  PositiveRealNumber: ['Interval', ['Open', 0], Infinity],
-  MinusOnePlusOne: ['Interval', -1, 1],
-};
 
 const DOMAIN_PARENT = {
   Anything: [],

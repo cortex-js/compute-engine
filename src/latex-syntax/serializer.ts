@@ -24,7 +24,6 @@ import {
 } from './definitions';
 import { joinLatex, tokensToString } from './core/tokenizer';
 import { serializeNumber } from '../common/serialize-number';
-import { getApplyFunctionStyle, getGroupStyle } from './serializer-style';
 import { replaceLatex } from './utils';
 import { Numeric } from '../compute-engine/public';
 
@@ -167,7 +166,7 @@ export class Serializer<T extends number = number> implements Serializer<T> {
       if (def && def.precedence !== undefined && def.precedence < prec) {
         return this.wrapString(
           this.serialize(expr),
-          getApplyFunctionStyle(expr, this.level)
+          this.options.applyFunctionStyle(expr, this.level)
         );
       }
     }
@@ -189,7 +188,10 @@ export class Serializer<T extends number = number> implements Serializer<T> {
       !/(^(.|\\[a-zA-Z*]+))$/.test(exprStr)
     ) {
       // It's a long expression, wrap it
-      return this.wrapString(exprStr, getGroupStyle(expr, this.level + 1));
+      return this.wrapString(
+        exprStr,
+        this.options.groupStyle(expr, this.level + 1)
+      );
     }
 
     return exprStr;
@@ -285,7 +287,7 @@ export class Serializer<T extends number = number> implements Serializer<T> {
     //
     // 4. Is it a known function?
     //
-    const style = getApplyFunctionStyle(expr, this.level);
+    const style = this.options.applyFunctionStyle(expr, this.level);
     if (style === 'none') {
       return (
         (def.serialize as string) +
