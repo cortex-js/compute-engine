@@ -33,15 +33,17 @@ export type SignalOrigin = {
 export type Signal = {
   severity?: 'warning' | 'error';
 
-  // An error/warning code or, a code with one or more arguments specific to
-  // the signal code.
+  /** An error/warning code or, a code with one or more arguments specific to
+   * the signal code.
+   */
   message: SignalMessage;
 
-  // If applicable, the head of the function about which the
-  // signal was raised
+  /** If applicable, the head of the function about which the
+   * signal was raised
+   */
   head?: string;
 
-  // Location where the signal was raised.
+  /** Location where the signal was raised. */
   origin?: SignalOrigin;
 };
 
@@ -78,10 +80,10 @@ export type ErrorListener<T> = (err: {
  * * `unknown-operator`: a presumed operator was encountered which does not
  * have a definition.
  *
- * * `unknown-function`: a Latex command was encountered which does not
+ * * `unknown-function`: a LaTeX command was encountered which does not
  * have a definition.
  *
- * * `unexpected-command`: a Latex command was encountered when only a string
+ * * `unexpected-command`: a LaTeX command was encountered when only a string
  * was expected
  *
  * * `unexpected-superscript`: a superscript was encountered in an unexpected
@@ -99,7 +101,7 @@ export type ErrorListener<T> = (err: {
  * can't be combined. The default `invisibleOperator` is `multiply`, but you
  * can also use `list`.
  *
- * * `expected-argument`: a Latex command that requires one or more argument
+ * * `expected-argument`: a LaTeX command that requires one or more argument
  * was encountered without the required arguments.
  *
  * * `expected-operand`: an operator was encountered without its required
@@ -175,7 +177,7 @@ export type Attributes = {
    *
    * For example
    * `"Q167"` is the [wikidata entry](https://www.wikidata.org/wiki/Q167)
-   *  for the Pi constant.
+   *  for the `Pi` constant.
    */
   wikidata?: string;
 
@@ -208,7 +210,7 @@ export type Attributes = {
 
   /** The source from which this expression was generated.
    *
-   * It could be a Latex expression, or some other source language
+   * It could be a LaTeX expression, or some other source language
    */
   sourceContent?: string;
 
@@ -219,10 +221,23 @@ export type Attributes = {
   sourceOffsets?: [start: number, end: number];
 };
 
-export type MathJsonBasicNumber = 'NaN' | '-Infinity' | '+Infinity' | string;
-
-export type MathJsonRealNumber = {
-  num: MathJsonBasicNumber;
+/**
+ * A MathJSON numeric quantity.
+ *
+ * The string is a string of:
+ * - an optional `-` minus sign
+ * - a string of decimal digits
+ * - an optional fraction part (a `.` decimal point followed by decimal digits)
+ * - an optional exponent part (a `e` or `E` exponent marker followed by an
+ *   optional `-` minus sign, followed by a string of digits).
+ * - an optional format indicator:
+ *    - `n` to indicate the preceding is a BigInt
+ *    - `d` to indicate the preceding is an arbitrary precision Decimal number
+ *
+ * For example: `-12.34`, `0.234e-56`, `123454d`.
+ */
+export type MathJsonNumber = {
+  num: 'NaN' | '-Infinity' | '+Infinity' | string;
 } & Attributes;
 
 export type MathJsonSymbol = {
@@ -241,11 +256,23 @@ export type MathJsonDictionary<T extends number = number> = {
   dict: { [key: string]: Expression<T> };
 } & Attributes;
 
+/**
+ * A MathJSON expression is a recursive data structure.
+ *
+ * The leaf nodes of an expression are numbers, strings and symbols.
+ * The dictionary and function nodes can contain expressions themselves.
+ *
+ * The type variable `T` indicates which numeric type are valid. For a
+ * canonical, well-formed, MathJSON expression, this is limited to the
+ * `number` type. However, for the purpose of internal calculations this can
+ * be extended to other numeric types. For example, internally the
+ * Compute Engine also uses `Decimal` and `Complex` classes.
+ */
 export type Expression<T extends number = number> =
-  // Shortcut for MathJsonRealNumber without metadata and in the JavaScript
+  // Shortcut for MathJsonNumber without metadata and in the JavaScript
   // 64-bit float range.
   | T
-  | MathJsonRealNumber
+  | MathJsonNumber
   | MathJsonString
   | MathJsonSymbol
   // Shortcut for a MathJsonSymbol with no metadata. Or a string.

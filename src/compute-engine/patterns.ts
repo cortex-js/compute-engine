@@ -1,5 +1,4 @@
 import {
-  ExpressionX,
   getDictionary,
   getFunctionHead,
   getFunctionName,
@@ -41,8 +40,8 @@ function captureWildcard<T extends number = number>(
 }
 
 export function matchRecursive(
-  expr: ExpressionX,
-  pattern: ExpressionX,
+  expr: Expression<Numeric>,
+  pattern: Expression<Numeric>,
   substitution: Substitution<Numeric>,
   options: { numericalTolerance: number }
 ): Substitution<Numeric> | null {
@@ -191,14 +190,30 @@ export function matchRecursive(
   return result;
 }
 
+/**
+ * The function attempts to match a [pattern](http://cortexjs.io/guides/compute-engine/patterns-and-rules/)
+ * with a subject expression.
+ *
+ * If the match is successful, it returns a `Substitution` indicating how to
+ * transform the pattern to become the subject.
+ *
+ * If the pattern is not a match, it returns `null`.
+ *
+ * This function attempts the match purely structurally, without any
+ * knowledge about commutative and associative properties of functions.
+ *
+ * In most cases, you'll want to account for these properties. To do so,
+ * use the `ce.match()` function instead.
+ *
+ */
 export function match<T extends number = number>(
   pattern: Expression<T>,
-  expr: Expression<T>,
+  subject: Expression<T>,
   options?: { numericalTolerance: number }
 ): Substitution<T> | null {
-  console.assert(!hasWildcards(expr) || hasWildcards(pattern));
+  console.assert(!hasWildcards(subject) || hasWildcards(pattern));
   return matchRecursive(
-    expr,
+    subject,
     pattern,
     {},
     options ?? { numericalTolerance: NUMERICAL_TOLERANCE }

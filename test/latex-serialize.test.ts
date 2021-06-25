@@ -119,7 +119,7 @@ describe('LATEX SERIALIZING', () => {
 });
 
 describe('LATEX', () => {
-  test('Latex Valid forms', () => {
+  test('LaTeX Valid forms', () => {
     expect(latex([LATEX_TOKENS, 3, 4])).toMatchInlineSnapshot(`'34'`);
     expect(latex([LATEX_TOKENS, 'x', 3])).toMatchInlineSnapshot(`'x3'`);
     expect(

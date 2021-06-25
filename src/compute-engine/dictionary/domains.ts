@@ -1,5 +1,22 @@
+import {
+  getArg,
+  getDecimalValue,
+  getFunctionName,
+  getNumberValue,
+  getRationalValue,
+  getSymbolName,
+  getTail,
+  MISSING,
+} from '../../common/utils';
 import { Expression } from '../../public';
-import { ComputeEngine, Dictionary, Domain, SetDefinition } from '../public';
+import { order } from '../order';
+import {
+  ComputeEngine,
+  Dictionary,
+  Domain,
+  Numeric,
+  SetDefinition,
+} from '../public';
 
 // Other domains to consider:
 // - p-adic
@@ -50,13 +67,14 @@ const DOMAIN_PARENT = {
   List: 'Collection',
   Sequence: 'Collection',
   Tuple: 'Collection',
-  Set: 'Collection',
-  FiniteSet: 'Set',
-  InfiniteSet: 'Set',
-  // https://en.wikipedia.org/wiki/Category_of_sets
-  EmptySet: 'FiniteSet',
   String: 'Expression',
   Symbol: 'String',
+  Set: 'Collection',
+  EmptySet: 'Set',
+
+  //
+  // Function Domains
+  //
   Function: 'Expression',
   Predicate: 'Function',
   LogicalFunction: 'Predicate',
@@ -76,26 +94,26 @@ const DOMAIN_PARENT = {
   QuadraticFunction: 'PolynomialFunction',
   LinearFunction: ['QuadraticFunction', 'MonotonicFunction'],
   ConstantFunction: 'LinearFunction',
-  Number: 'Set', // Careful: not all Number sets are infinite, i.e. NumberZero
-  ImaginaryNumber: ['ComplexNumber', 'InfiniteSet'],
+
+  //
+  // Numeric Domains
+  //
+  // https://en.wikipedia.org/wiki/Category_of_sets
+  Number: 'Set',
+  ImaginaryNumber: 'ComplexNumber',
   ComplexNumber: 'ExtendedComplexNumber',
   ExtendedComplexNumber: 'Number',
-  ComplexInfinity: 'ExtendedComplexNumber',
-  NumberZero: ['CompositeNumber', 'ImaginaryNumber', 'FiniteSet'],
   NaturalNumber: 'Integer',
-  CompositeNumber: 'NaturalNumber',
-  PrimeNumber: 'NaturalNumber',
-  Integer: ['RationalNumber', 'ExtendedInteger'],
-  ExtendedInteger: 'ExtendedRationalNumber',
-  RationalNumber: ['AlgebraicNumber', 'ExtendedRationalNumber'],
-  IrrationalNumber: 'RealNumber',
-  TranscendentalNumber: ['IrrationalNumber', 'ImaginaryNumber'],
-  AlgebraicNumber: 'IrrationalNumber',
+  Integer: 'RationalNumber',
+  RationalNumber: 'AlgebraicNumber',
+  TranscendentalNumber: 'RealNumber',
+  AlgebraicNumber: 'RealNumber',
   RealNumber: ['ComplexNumber', 'ExtendedRealNumber'],
   ExtendedRealNumber: 'ExtendedComplexNumber',
-  ExtendedNaturalNumber: 'ExtendedInteger',
-  ExtendedRationalNumber: 'ExtendedRealNumber',
-  SignedInfinity: 'ExtendedNaturalNumber',
+
+  //
+  // Tensor
+  //
   Tensor: 'Expression',
   Scalar: 'Tensor',
   Vector: 'Matrix',
@@ -133,7 +151,6 @@ const DOMAIN_WIKIDATA: { [domain: string]: string } = {
 
 const DOMAIN_VALUE: { [domain: string]: Expression } = {
   MaybeBoolean: ['Union', 'Boolean', ['Set', 'Maybe']],
-  NaturalNumber: ['Union', 'CompositeNumber', 'PrimeNumber'],
   Scalar: ['Intersection', 'Row', 'Column'],
   TriangularMatrix: ['Union', 'UpperTriangularMatrix', 'LowerTriangularMatrix'],
   Vector: ['Union', 'Row', 'Column'],
@@ -145,12 +162,12 @@ const DOMAIN_COUNT = {
   EmptySet: 0,
   IdentityMatrix: 1,
   ZeroMatrix: 1,
-  NumberZero: 1,
 };
 
-const PARAMETRIC_DOMAIN = {
+const DOMAIN_INFO = {
   Range: {
-    range: 'ParametricDomain',
+    domain: 'ParametricDomain',
+    range: 'Domain',
     evaluate: (_engine, min: number, max: number) => {
       min = Math.round(min);
       max = Math.round(max);
@@ -158,57 +175,223 @@ const PARAMETRIC_DOMAIN = {
       if (min > max) return 'EmptySet';
       if (min === -Infinity && max === +Infinity) return 'Integer';
       if (min === 0 && max === +Infinity) return 'NaturalNumber';
-      if (min === 0 && max === 0) return 'NumberZero';
       return ['Range', min, max];
     },
-  },
-  Interval: {
-    range: 'ParametricDomain',
-    evaluate: (_engine, min: number, max: number) => {
-      if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
-      if (min > max) return 'EmptySet';
-      if (min === -Infinity && max === +Infinity) {
-        return 'RealNumber';
+    isElementOf: (
+      expr: Expression<Numeric>,
+      min: Expression<Numeric>,
+      max: Expression<Numeric>
+    ) => {
+      min = getNumberValue(min);
+      if (min === null) return undefined;
+
+      max = getNumberValue(max);
+      if (max === null) return undefined;
+
+      //
+      // Compare a number
+      //
+      let val = getNumberValue(expr);
+      if (val === null) {
+        // Is it a rational, perhaps?
+        const [numer, denom] = getRationalValue(expr);
+        if (numer !== null && denom !== null) {
+          val = numer / denom;
+        }
       }
-      if (min === 0 && max === 0) return 'NumberZero';
-      return ['Interval', min, max];
+      if (val !== null) {
+        if (!Number.isInteger(val)) return false;
+        if (val < min) return false;
+        if (val > max) return false;
+
+        return true;
+      }
+    },
+
+    Interval: {
+      domain: 'ParametricDomain',
+      range: 'Domain',
+      evaluate: (_engine, min: number, max: number) => {
+        if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
+        if (min > max) return 'EmptySet';
+        if (min === -Infinity && max === +Infinity) {
+          return 'RealNumber';
+        }
+        return ['Interval', min, max];
+      },
+      // isSubsetOf: (expr: Expression<Numeric>) =>
+      //   isNumericSubset(expr, 'ImaginaryNumber'),
+
+      isElementOf: (
+        expr: Expression<Numeric>,
+        min: Expression<Numeric>,
+        max: Expression<Numeric>
+      ) => {
+        let openLeft = false;
+        let openRight = false;
+        if (getFunctionName(min) === 'Open') {
+          openLeft = true;
+          min = getArg(min, 1);
+        }
+        min = getNumberValue(min);
+        if (min === null) return undefined;
+
+        if (getFunctionName(max) === 'Open') {
+          openRight = true;
+          max = getArg(max, 1);
+        }
+        max = getNumberValue(max);
+        if (max === null) return undefined;
+
+        //
+        // Compare a number
+        //
+        let val = getNumberValue(expr);
+        if (val === null) {
+          // Is it a rational, perhaps?
+          const [numer, denom] = getRationalValue(expr);
+          if (numer !== null && denom !== null) {
+            val = numer / denom;
+          }
+        }
+        if (val !== null) {
+          if (openLeft) {
+            if (val < min) return false;
+          } else {
+            if (val <= min) return false;
+          }
+          if (openRight) {
+            if (val > max) return false;
+          } else {
+            if (val >= max) return false;
+          }
+
+          return true;
+        }
+
+        //
+        // Compare a decimal
+        //
+        const d = getDecimalValue(expr);
+        if (d !== null) {
+          if (openLeft) {
+            if (d.lt(min)) return false;
+          } else {
+            if (d.lte(min)) return false;
+          }
+          if (openRight) {
+            if (d.gt(max)) return false;
+          } else {
+            if (d.gte(max)) return false;
+          }
+          return true;
+        }
+
+        //
+        // Complex numbers are not ordered, so return undefined as well.
+        //
+
+        return undefined;
+      },
     },
   },
-  // String: {
-  //   signatures: [
-  //     {
-  //       args: [],
-  //       result: 'Domain',
-  //       evaluate: () => 'String',
-  //     },
-  //     {
-  //       args: ['NaturalNumber'],
-  //       result: 'ParametricDomain',
-  //       evaluate: (_engine, min: number) => {
-  //         min = Math.round(min);
-  //         if (Number.isNaN(min)) return 'EmptySet';
-  //         if (min < 0) return 'EmptySet';
-  //         if (min === +Infinity) return 'EmptySet';
-  //         return ['String', min, min];
-  //       },
-  //     },
-  //     {
-  //       args: ['NaturalNumber'],
-  //       result: 'ParametricDomain',
-  //       evaluate: (_engine, min: number, max: number) => {
-  //         min = Math.round(min);
-  //         max = Math.round(max);
-  //         if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
-  //         if (min < 0) return 'EmptySet';
-  //         if (min === +Infinity) return 'EmptySet';
-  //         if (min > max) return 'EmptySet';
-  //         if (min === 0 && max === +Infinity) return 'EmptySet';
-  //         return ['String', min, max];
-  //       },
-  //     },
-  //   ],
-  // },
 };
+
+// ImaginaryNumber: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// ComplexNumber: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// ExtendedComplexNumber: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// NaturalNumber: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// Integer: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// RationalNumber: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// TranscendentalNumber: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// AlgebraicNumber: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// RealNumber: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// ExtendedRealNumber: {
+//   isSubsetOf: (expr: Expression<Numeric>) =>
+//     isNumericSubset(expr, 'ImaginaryNumber'),
+//   isElementOf: (expr: Expression<Numeric>) =>
+//     isNumericElement(expr, 'ImaginaryNumber'),
+// },
+// String: {
+//   signatures: [
+//     {
+//       args: [],
+//       result: 'Domain',
+//       evaluate: () => 'String',
+//     },
+//     {
+//       args: ['NaturalNumber'],
+//       result: 'ParametricDomain',
+//       evaluate: (_engine, min: number) => {
+//         min = Math.round(min);
+//         if (Number.isNaN(min)) return 'EmptySet';
+//         if (min < 0) return 'EmptySet';
+//         if (min === +Infinity) return 'EmptySet';
+//         return ['String', min, min];
+//       },
+//     },
+//     {
+//       args: ['NaturalNumber'],
+//       result: 'ParametricDomain',
+//       evaluate: (_engine, min: number, max: number) => {
+//         min = Math.round(min);
+//         max = Math.round(max);
+//         if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
+//         if (min < 0) return 'EmptySet';
+//         if (min === +Infinity) return 'EmptySet';
+//         if (min > max) return 'EmptySet';
+//         if (min === 0 && max === +Infinity) return 'EmptySet';
+//         return ['String', min, max];
+//       },
+//     },
+//   ],
+// },
 
 /* {
 	"resource": "/Users/arno/dev/math-json/src/compute-engine/dictionary/domains.ts",
@@ -250,10 +433,10 @@ export function getDomainsDictionary(): Dictionary {
       ? DOMAIN_PARENT[domain]
       : [DOMAIN_PARENT[domain]];
 
-    result[domain] = PARAMETRIC_DOMAIN[domain] ?? {};
+    result[domain] = DOMAIN_INFO[domain] ?? {};
 
     result[domain] = {
-      domain: PARAMETRIC_DOMAIN[domain] ? 'ParametricDomain' : 'Domain',
+      domain: DOMAIN_INFO[domain] ?? 'Domain',
       wikidata: DOMAIN_WIKIDATA[domain],
       supersets: parents,
       value: DOMAIN_VALUE,
@@ -328,24 +511,114 @@ export function getDomainsDictionary(): Dictionary {
 // }
 
 /**
- * Return a simplified form of the domain
+ * Simplify the domain (reduce it to its simplest form).
+ *
+ * Note: compare with `internalDomain()` which calculate the domain of an expression.
  *
  */
-export function simplifyDomain(dom: Domain, _engine: ComputeEngine): Domain {
-  // The simplified domain is calculated by evaluating the
-  // domain expression @todo
+export function simplifyDomain(dom: Domain): Domain {
+  const name = getFunctionName(dom);
+  if (name === 'Union') {
+    let [rangeMin, rangeMax] = [+Infinity, -Infinity];
+    // let [intervalMin, intervalMax, intervalOpen] = [
+    //   +Infinity,
+    //   -Infinity,
+    //   undefined,
+    // ];
+    const others: Domain[] = [];
+    for (const arg of getTail(dom)) {
+      const [min, max] = domainAsRange(arg);
+      if (min !== null && max !== null) {
+        rangeMin = Math.max(rangeMin, min);
+        rangeMax = Math.max(rangeMax, max);
+      }
+      others.push(arg);
+    }
+  } else if (name === 'Intersection') {
+  } else if (name === 'Set') {
+  } else if (name === 'SetMinus') {
+    const arg1 = simplifyDomain(getArg(dom, 1) ?? MISSING);
+    const arg2 = simplifyDomain(getArg(dom, 1) ?? MISSING);
+    return [name, arg1, arg2];
+  } else if (name === 'Complement') {
+    const arg1 = simplifyDomain(getArg(dom, 1) ?? MISSING);
+    const arg2 = simplifyDomain(getArg(dom, 1) ?? MISSING);
+    return [name, arg1, arg2];
+  } else if (name === 'Range') {
+    // Subset of `Integer`
+    const min = getNumberValue(getArg(dom, 1) ?? MISSING);
+    const max = getNumberValue(getArg(dom, 2) ?? MISSING);
 
-  // @todo Deal with parametric domains
-  // when overlapping
-  // Simplify ranges: Real[-infinity, +infinity] (or does Real not include infinity?)
+    if (min === -Infinity && max == Infinity) return 'Integer';
+    return dom;
+  } else if (name === 'Interval') {
+    // Subset of RealNumber
+    const min = getNumberValue(getArg(dom, 1) ?? MISSING);
+    const max = getNumberValue(getArg(dom, 2) ?? MISSING);
+    if (min === -Infinity && max == Infinity) return 'RealNumber';
+    return dom;
+  } else if (name === 'Multiple') {
+  }
+  // @todo? `SymmetricDifference`
+
+  const sym = getSymbolName(dom);
+  if (sym === 'EmptySet') {
+  }
+
   return dom;
+}
+
+function domainAsRange(dom: Domain): [min: number | null, max: number | null] {
+  // @todo!
+  return [null, null];
+}
+
+function domainAsInterval(
+  dom: Domain
+): [min: number | null, max: number | null, open?: 'left' | 'right' | 'both'] {
+  if (getFunctionName(dom) !== 'Interval') return [null, null];
+  let openLeft = false;
+  let openRight = false;
+  let min = getArg(dom, 1);
+  let max = getArg(dom, 2);
+  if (getFunctionName(min) === 'Open') {
+    openLeft = true;
+    min = getArg(min, 1);
+  }
+  min = getNumberValue(min);
+  if (min === null) return [null, null];
+
+  if (getFunctionName(max) === 'Open') {
+    openRight = true;
+    max = getArg(max, 1);
+  }
+  max = getNumberValue(max);
+  if (max === null) return [null, null];
+  return [
+    min,
+    max,
+    openLeft && openRight
+      ? 'both'
+      : openLeft
+      ? 'left'
+      : openRight
+      ? 'right'
+      : undefined,
+  ];
 }
 
 export function canonicalDomain(
   engine: ComputeEngine,
-  expr: Expression
+  dom: Expression
 ): Expression {
-  // @todo
-  // Handle ['Interval', -Infinity, Infinity], etc...
-  return expr;
+  // @todo: same as commutative functions
+  const name = getFunctionName(dom);
+  if (name === 'Union' || name === 'Intersection') {
+    // If a Union or Intersection sort the arguments...
+    return [name, ...getTail(dom).sort(order)];
+  } else if (name === 'SetMinus' || name === 'Complement') {
+    return [name, canonicalDomain(engine, getArg(dom, 1) ?? MISSING)];
+  }
+
+  return dom;
 }

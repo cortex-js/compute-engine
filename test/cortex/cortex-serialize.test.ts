@@ -1,13 +1,13 @@
 import {
-  MULTIPLY,
-  PI,
   ADD,
-  SUBTRACT,
-  NEGATE,
-  POWER,
   DIVIDE,
-} from '../src/common/utils';
-import { serializeCortex } from '../src/cortex/serialize-cortex';
+  MULTIPLY,
+  NEGATE,
+  PI,
+  POWER,
+  SUBTRACT,
+} from '../../src/common/utils';
+import { serializeCortex } from '../../src/cortex/serialize-cortex';
 
 describe('CORTEX SERIALIZING', () => {
   test('Numbers', () => {
@@ -137,8 +137,8 @@ describe('CORTEX SERIALIZING STRINGS', () => {
     expect(serializeCortex(['Print', "'hello\u000a world'"])).toMatch(
       'Print("hello\\n world")'
     );
-    expect(serializeCortex(['Print', "'Latex loves \\'"])).toMatch(
-      'Print("Latex loves \\\\")'
+    expect(serializeCortex(['Print', "'LaTeX loves \\'"])).toMatch(
+      'Print("LaTeX loves \\\\")'
     );
     expect(serializeCortex(['Print', "'hello'", "'\nworld'"])).toMatch(
       'Print("hello", "\\nworld")'

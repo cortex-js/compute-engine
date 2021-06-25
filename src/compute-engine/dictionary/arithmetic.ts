@@ -24,6 +24,7 @@ import {
   NOTHING,
   PARENTHESES,
   SUBTRACT,
+  UNDEFINED,
 } from '../../common/utils';
 import type { ComputeEngine, Dictionary, Numeric } from '../public';
 import { factorial, gamma, lngamma, gcd } from '../numeric';
@@ -36,15 +37,18 @@ import {
   lngamma as lngammaDecimal,
 } from '../numeric-decimal';
 import {
+  isEqual,
   isInfinity,
   isNegative,
   isNotZero,
+  isOne,
   isPositive,
   isZero,
 } from '../predicates';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { gamma as gammaComplex } from '../numeric-complex';
+import { internalDomain } from '../domains';
 
 export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
   //
@@ -79,7 +83,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     },
   },
   GoldenRatio: {
-    domain: 'IrrationalNumber',
+    domain: 'AlgebraicNumber',
     wikidata: 'Q41690',
     constant: true,
     hold: false,
@@ -152,7 +156,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     commutative: true,
     threadable: true,
     idempotent: true,
-    range: 'Number',
+    range: domainAdd,
     numeric: true,
     simplify: simplifyAdd,
     evalNumber: (_ce: ComputeEngine, ...args: number[]): number => {
@@ -291,7 +295,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
   Factorial: {
     wikidata: 'Q120976',
     domain: 'MonotonicFunction',
-    range: 'Integer',
+    range: domainFactorial,
     numeric: true,
     evalNumber: (_ce, n: number): number => factorial(n),
     evalComplex: (_ce, c: Complex | number): Complex =>
@@ -594,6 +598,27 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
   // product
 };
 
+function domainFactorial(
+  ce: ComputeEngine,
+  arg: Expression<Numeric>
+): Expression<Numeric> {
+  if (ce.isInteger(arg) && ce.isPositive(arg)) return 'Integer';
+  return 'Nothing';
+}
+
+function domainAdd(
+  ce: ComputeEngine,
+  ...args: Expression<Numeric>[]
+): Expression<Numeric> | null {
+  let dom: Expression<Numeric> | null = null;
+  for (const arg of args) {
+    const argDom = internalDomain(ce, arg);
+    if (ce.isSubsetOf(argDom, 'Number') === false) return 'Nothing';
+    if (!ce.isSubsetOf(argDom, dom)) dom = argDom;
+  }
+  return dom;
+}
+
 function simplifyAdd(
   ce: ComputeEngine,
   ...args: Expression<Numeric>[]
@@ -612,7 +637,8 @@ function simplifyAdd(
 
   for (const arg of args) {
     const symbol = getSymbolName(arg);
-    if (symbol === MISSING || symbol === NOTHING) return NaN;
+    if (symbol === MISSING || symbol === NOTHING || symbol === UNDEFINED)
+      return NaN;
     if (symbol === COMPLEX_INFINITY) return COMPLEX_INFINITY;
     if (isInfinity(ce, arg)) {
       if (isPositive(ce, arg)) {
@@ -738,7 +764,7 @@ function simplifyMultiply(
   }
 
   // Divide numer by denom to get the proper signed infinite or NaN
-  if (numer === 0 || !isFinite(numer)) return numer / denom;
+  if (numer === 0 || !Number.isFinite(numer)) return numer / denom;
 
   if (!c.equals(Complex.ONE)) {
     others.push(['Complex', c.re, c.im]);
@@ -824,46 +850,46 @@ export function ungroup(expr: Expression | null): Expression {
 }
 
 // Used by `simplify()` and `canonical()`
-// @todo: see https://docs.sympy.org/1.6/modules/core.html#pow
+// See https://docs.sympy.org/1.6/modules/core.html#pow
 
 export function applyPower(
   engine: ComputeEngine,
   expr: Expression
 ): Expression {
-  // @todo: using engine predicates (isEqual(x, 1)...)
   expr = ungroup(expr);
 
   console.assert(getFunctionName(expr) === 'Power');
 
   if (getArgCount(expr) !== 2) return expr;
 
-  const arg1 = getArg(expr, 1)!;
-  const val1 = getNumberValue(arg1) ?? NaN;
   const arg2 = getArg(expr, 2)!;
-
   if (getSymbolName(arg2) === 'ComplexInfinity') return NaN;
-
-  const val2 = getNumberValue(arg2) ?? NaN;
-
   if (isZero(engine, arg2)) return 1;
-  if (val2 === 1) return arg1;
-  if (val2 === 2) return ['Square', arg1];
 
-  if (val2 === -1) {
-    if (val1 === -1 || val1 === 1) return -1;
-    if (!Number.isFinite(val1)) return 0;
+  const arg1 = getArg(expr, 1)!;
+
+  if (isOne(engine, arg2)) return arg1;
+  if (isEqual(engine, arg2, 2)) return ['Square', arg1];
+
+  if (isEqual(engine, arg2, -1)) {
+    if (isEqual(engine, arg1, -1) || isEqual(engine, arg1, 1)) return -1;
+    if (engine.isInfinity(arg1)) return 0;
     return ['Divide', 1, arg1];
   }
-  if (!Number.isFinite(val2)) {
-    if (val1 === 0 && val2 < 0) return 'ComplexInfinity';
-
-    if (val1 === 1 || val1 === -1) return NaN;
-
-    if (val1 === Infinity) {
-      if (val2 > 0) return Infinity;
-      if (val2 < 0) return 0;
+  if (engine.isInfinity(arg2)) {
+    if (engine.isZero(arg1) && engine.isNegative(arg1)) {
+      return 'ComplexInfinity';
     }
-    if (val1 === -Infinity && !Number.isFinite(val2)) return NaN;
+
+    if (engine.isOne(arg1) || engine.isEqual(arg1, -1)) return NaN;
+
+    if (engine.isInfinity(arg1)) {
+      if (engine.isPositive(arg1)) {
+        if (engine.isPositive(arg2)) return Infinity;
+        return 0;
+      }
+      return NaN;
+    }
   }
   return expr;
 }

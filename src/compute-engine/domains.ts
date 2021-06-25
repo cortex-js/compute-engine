@@ -14,13 +14,27 @@ import {
   POWER,
 } from '../common/utils';
 import { Expression } from '../public';
-import { ComputeEngine, FunctionDefinition } from './public';
-import { gcd, LARGEST_SMALL_PRIME, SMALL_PRIMES } from './numeric';
+import { ComputeEngine } from './public';
+import { gcd, SMALL_PRIMES } from './numeric';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
+import { evaluateOnce } from './evaluate';
 
+export type NumericDomain =
+  | 'Number'
+  | 'ExtendedComplexNumber'
+  | 'ExtendedRealNumber'
+  | 'ComplexNumber'
+  | 'ImaginaryNumber'
+  | 'RealNumber'
+  | 'TranscendentalNumber'
+  | 'AlgebraicNumber'
+  | 'RationalNumber'
+  | 'Integer';
+
+/** Calculate the Domain of an expression */
 export function internalDomain(
-  engine: ComputeEngine,
+  ce: ComputeEngine,
   expr: Expression
 ): Expression | null {
   //
@@ -31,42 +45,45 @@ export function internalDomain(
 
   //
   // 2. Is it a symbol?
+  //
   // (Note, we've already handled well-known symbols in `inferNumericDomain()`
   //
   const symName = getSymbolName(expr);
   if (symName !== null) {
     // 2.1 Do we have an Element assumption about this symbol
-    const domains = engine.ask(['Element', expr, '_domain']);
+    const domains = ce.ask(['Element', expr, '_domain']);
     if (domains.length > 0) {
-      // @todo: we could handle more complex assumptions, i.e. conjunctions, etc...
-      if (domains.length === 1) {
-        return domains[0]['domain'];
-      }
-      // @todo Could query the negative and return:
-      //      return ['SetMinus', domain.getArg(domain, 2)];
-
-      return 'Anything';
+      // There should be a single `Element` assumption...
+      console.assert(domains.length === 1);
+      return domains[0]['domain'];
     }
+    // @todo Could query the negative and return:
+    //      return ['Complement', domain.getArg(domain, 2)];
+
     // 2.2 Do we have an equality assumption about this symbol?
     // @todo: we could do more:
     // - search for ['Equal', x, '_expr'] and get the domain of expr
 
     // 2.3 Do we have an inequality assumption about this model?
+    // @todo
     // - search for ['Less', x '_expr'], etc... => implies RealNumber
 
     // 2.4 Does the symbol definition have a domain?
     // (we look for 'Definition' in general, because Domains do not have a
     // SymbolDefinition (they don't necessarily have a value).
-    const def = engine.getDefinition(symName);
+    const def = ce.getDefinition(symName);
+
     if (def && typeof def.domain === 'function') {
-      return def.domain(expr) ?? 'Anything';
-    } else if (def && def.domain) {
-      return def.domain as Expression;
-    } else if (def && 'value' in def && def.value) {
+      return def.domain() ?? 'Anything';
+    }
+
+    if (def && def.domain) return def.domain as Expression;
+
+    if (def && 'value' in def && def.value) {
       if (typeof def.value === 'function') {
-        return internalDomain(engine, def.value(engine));
+        return internalDomain(ce, def.value(ce));
       }
-      return internalDomain(engine, def.value);
+      return internalDomain(ce, def.value);
     }
     return 'Anything';
   }
@@ -77,14 +94,16 @@ export function internalDomain(
 
   const head = getFunctionHead(expr);
   if (typeof head === 'string') {
-    const def: FunctionDefinition | null = engine.getFunctionDefinition(head);
+    const def = ce.getFunctionDefinition(head);
     if (def) {
       if (typeof def.range === 'function') {
-        return def.range(engine, ...getTail(expr));
+        return def.range(ce, ...getTail(expr));
       } else if (def.range !== undefined) {
         return def.range;
       } else if (def.value !== undefined) {
-        return internalDomain(engine, def.value);
+        const val = evaluateOnce(ce, [def.value, ...getTail(expr)]);
+        if (val === null) return 'Anything';
+        return internalDomain(ce, val);
       }
     }
   }
@@ -98,26 +117,9 @@ export function internalDomain(
   return null;
 }
 
-// export function isSubdomainOf(
-//   dict: Dictionary,
-//   lhs: Domain,
-//   rhs: Domain
-// ): boolean {
-//   if (lhs === rhs) return true;
-//   if (typeof lhs !== 'string') return false;
-//   const def = dict[lhs];
-//   if (!isSetDefinition(def)) return false;
-
-//   for (const parent of def.supersets) {
-//     if (isSubdomainOf(dict, parent, rhs)) return true;
-//   }
-
-//   return false;
-// }
-
 export function inferNumericDomain(
   value: Expression | undefined
-): Expression | null {
+): NumericDomain | null {
   if (value === undefined) return null;
 
   //
@@ -125,17 +127,9 @@ export function inferNumericDomain(
   //
   const numVal = getNumberValue(value);
   if (numVal !== null && !isNaN(numVal)) {
-    if (numVal === 0) return 'NumberZero';
-    if (!isFinite(numVal)) return 'SignedInfinity';
+    if (!isFinite(numVal)) return 'ExtendedRealNumber';
 
-    if (Number.isInteger(numVal)) {
-      if (SMALL_PRIMES.has(numVal)) return 'PrimeNumber';
-      if (numVal >= 1 && numVal < LARGEST_SMALL_PRIME) return 'CompositeNumber';
-      if (numVal > 0) return 'NaturalNumber';
-      return 'Integer';
-    }
-
-    if (numVal > 0) return ['Interval', ['Open', 0], +Infinity];
+    if (Number.isInteger(numVal)) return 'Integer';
 
     return 'RealNumber';
   }
@@ -145,16 +139,8 @@ export function inferNumericDomain(
   //
   if (value instanceof Decimal) {
     if (value.isNaN()) return 'Number';
-    if (value.isZero()) return 'NumberZero';
-    if (!value.isFinite()) return 'SignedInfinity';
-    if (value.isInteger()) {
-      if (value.abs().lessThan(Number.MAX_SAFE_INTEGER)) {
-        return inferNumericDomain(value.toNumber());
-      }
-      if (value.isPositive()) return 'NaturalNumber';
-      return 'Integer';
-    }
-    if (value.isPositive()) return ['Interval', ['Open', 0], +Infinity];
+    if (!value.isFinite()) return 'ExtendedRealNumber';
+    if (value.isInteger()) return 'Integer';
     return 'RealNumber';
   }
 
@@ -186,12 +172,10 @@ export function inferNumericDomain(
     numer = numer / g;
     denom = denom / g;
     if (!Number.isNaN(numer) && !Number.isNaN(denom)) {
-      if (numer === 0) return 'NumberZero';
-
       // The value is a rational number
       if (denom !== 1 && denom !== -1) return 'RationalNumber';
 
-      return inferNumericDomain(numer);
+      return 'Integer';
     }
   }
 
@@ -202,9 +186,9 @@ export function inferNumericDomain(
   if (symbol !== null) {
     if (symbol === 'NaN') return 'Number';
     if (symbol === '+Infinity' || symbol === '-Infinity') {
-      return 'SignedInfinity';
+      return 'ExtendedRealNumber';
     }
-    if (symbol === COMPLEX_INFINITY) return 'ComplexInfinity';
+    if (symbol === COMPLEX_INFINITY) return 'ExtendedComplexNumber';
     if (symbol === IMAGINARY_UNIT) return 'ImaginaryNumber';
     if (
       ['Quarter', 'Third', 'Half', 'TwoThird', 'ThreeQuarter'].includes(symbol)
@@ -227,15 +211,8 @@ export function inferNumericDomain(
     ) {
       return 'TranscendentalNumber';
     }
-    if (
-      [
-        'MachineEpsilon',
-        'CatalanConstant',
-        'GoldenRatio',
-        'EulerGamma',
-      ].includes(symbol)
-    ) {
-      return 'RealNumber';
+    if (['GoldenRatio'].includes(symbol)) {
+      return 'AlgebraicNumber';
     }
   }
 
@@ -256,12 +233,12 @@ export function inferNumericDomain(
         if (num !== null && SMALL_PRIMES.has(num)) {
           // Square root of a prime is irrational
           // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
-          return 'IrrationalNumber';
+          return 'AlgebraicNumber';
         }
       }
     }
   }
   // @todo: the log in a prime base of a prime number is irrational
 
-  return 'RealNumber';
+  return null;
 }

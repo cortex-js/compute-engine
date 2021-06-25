@@ -19,7 +19,7 @@ describe('SYMBOLS', () => {
       `['Multiply', 2, ['Power', 'x', 3]]`
     );
   });
-  test('Latex concatenation', () => {
+  test('LaTeX concatenation', () => {
     // Letter following command
     expect(expression('\\alpha b')).toMatchInlineSnapshot(
       `['Multiply', 'b', 'α']`

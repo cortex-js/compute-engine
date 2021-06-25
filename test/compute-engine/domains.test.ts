@@ -1,5 +1,5 @@
-import { ComputeEngine } from '../src/compute-engine';
-import type { Expression } from '../src/public';
+import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/public';
 
 export const engine = new ComputeEngine();
 
@@ -10,12 +10,9 @@ export const engine = new ComputeEngine();
 const domains: Expression[] = [
   0,
   5,
-  'NumberZero',
-  'NaturalNumber',
   'Integer',
   'RationalNumber',
   'AlgebraicNumber',
-  'IrrationalNumber',
   'RealNumber',
   'ComplexNumber',
   'Number',

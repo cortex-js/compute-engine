@@ -1,5 +1,5 @@
 // import { parseCortex } from '../src/cortex/parse-cortex';
-import { validCortex, invalidCortex } from './utils';
+import { validCortex, invalidCortex } from '../utils';
 
 describe('CORTEX PARSING SHEBANG', () => {
   test('Valid shebang', () => {

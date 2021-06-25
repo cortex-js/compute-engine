@@ -14,15 +14,16 @@ import {
   simplifyRational,
 } from '../common/utils';
 import { Expression } from '../public';
-import { ComputeEngine, Rule, Simplification } from './public';
+import { ComputeEngine, Rule, RuleSet, Simplification } from './public';
 import { isNegative, isNotZero, isPositive, isZero } from './predicates';
 import { Substitution } from './patterns';
+import { rules } from './rules';
 
 // A list of simplification rules.
 // The rules are expressed as
 //    [lhs, rhs, condition]
 // where `lhs` is rewritten as `rhs` if `condition` is true
-// `lhs` and `rhs` can be either an Expression or a Latex string.
+// `lhs` and `rhs` can be either an Expression or a LaTeX string.
 // If using an Expression, the expression is *not* canonicalized before being
 // used. Therefore in some cases using Expression, while more verbose,
 // may be necessary as the expression could be simplified by the canonicalization.
@@ -101,7 +102,7 @@ export const SIMPLIFY_RULES: { [topic: string]: Rule[] } = {
 };
 
 export function internalSimplify(
-  engine: ComputeEngine,
+  ce: ComputeEngine,
   expr: Expression | null,
   simplifications?: Simplification[]
 ): Expression | null {
@@ -118,19 +119,26 @@ export function internalSimplify(
       // 'simplify-trigonometric',
     ];
   }
-  expr = engine.replace(engine.getRules(simplifications), expr);
-
+  for (const simplification of simplifications) {
+    expr = ce.replace(
+      ce.cache<RuleSet>(
+        simplification,
+        (): RuleSet => rules(ce, SIMPLIFY_RULES[simplification])
+      ),
+      expr
+    );
+  }
   //
   // 2/ Numeric simplifications
   //
-  expr = simplifyNumber(engine, expr!) ?? expr;
+  expr = simplifyNumber(ce, expr!) ?? expr;
 
   //
   // 3/ Simplify assumptions
   //
   // If the expression is a predicate which is an assumption, return `True`
   //
-  if (engine.is(expr) === true) return 'True';
+  if (ce.is(expr) === true) return 'True';
 
   if (isAtomic(expr!)) return expr;
 
@@ -140,7 +148,7 @@ export function internalSimplify(
   if (getDictionary(expr!) !== null) {
     return applyRecursively(
       expr!,
-      (x) => engine.simplify(x, { simplifications }) ?? x
+      (x) => ce.simplify(x, { simplifications }) ?? x
     );
   }
 
@@ -149,12 +157,12 @@ export function internalSimplify(
   //
 
   const head = internalSimplify(
-    engine,
+    ce,
     getFunctionHead(expr) ?? MISSING,
     simplifications
   );
   if (typeof head === 'string') {
-    const def = engine.getFunctionDefinition(head);
+    const def = ce.getFunctionDefinition(head);
     if (def) {
       // Simplify the arguments, except those affected by `hold`
       const args: Expression[] = [];
@@ -162,7 +170,7 @@ export function internalSimplify(
       for (let i = 0; i < tail.length; i++) {
         const name = getFunctionName(tail[i]);
         if (name === 'Evaluate') {
-          args.push(engine.simplify(tail[i], { simplifications }) ?? tail[i]);
+          args.push(ce.simplify(tail[i], { simplifications }) ?? tail[i]);
         } else if (name === 'Hold') {
           args.push(getArg(tail[i], 1) ?? MISSING);
         } else if (
@@ -172,11 +180,11 @@ export function internalSimplify(
         ) {
           args.push(tail[i]);
         } else {
-          args.push(engine.simplify(tail[i], { simplifications }) ?? tail[i]);
+          args.push(ce.simplify(tail[i], { simplifications }) ?? tail[i]);
         }
       }
       if (typeof def.simplify === 'function') {
-        return def.simplify(engine, ...args);
+        return def.simplify(ce, ...args);
       }
       return [head, ...args];
     }

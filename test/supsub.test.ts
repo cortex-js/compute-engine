@@ -46,7 +46,7 @@ describe('SUPSUB', () => {
     expect(expression('2^{-2}')).toMatchInlineSnapshot(`['Power', 2, -2]`);
     expect(expression('2^3^4')).toMatchInlineSnapshot(
       `['Power', ['Power', 2, 3], 4]`
-    ); // @todo: unclear what the right answer is... (and it's invalid Latex)
+    ); // @todo: unclear what the right answer is... (and it's invalid LaTeX)
     expect(expression('2^{3^4}')).toMatchInlineSnapshot(
       `['Power', 2, ['Power', 3, 4]]`
     );

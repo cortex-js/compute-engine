@@ -730,25 +730,13 @@ export function escapeText(s: string): string {
     .replace(/[\t]/g, '\\t');
 }
 
-/**
- * Transform an expression by applying one or more rewriting rules to it,
- * recursively.
- *
- * There are many ways to symbolically manipulate an expression, but
- * transformations with `form` have the following characteristics:
- *
- * - they don't require calculations or assumptions about the domain of free
- * variables or the value of constants
- * - the output expression is expressed with more primitive functions,
- * for example subtraction is replaced with addition
- *
- */
 export function format(
   engine: ComputeEngine,
   expr: Expression | null,
   forms: Form[]
 ): Expression | null {
   let result = expr;
+  // console.log('format(', expr, forms, ')');
   for (const form of forms) {
     const fn: (
       expr: Expression | null,
@@ -780,8 +768,9 @@ export function format(
       console.error('Unknown form ' + form);
       return null;
     }
-
+    // const before = result;
     result = fn(result, engine);
+    // console.log('form ', form, before, result);
   }
   return result;
 }

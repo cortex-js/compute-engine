@@ -17,8 +17,6 @@ export {
   ErrorCode,
   Attributes,
   Expression,
-  MathJsonBasicNumber,
-  MathJsonRealNumber,
   MathJsonSymbol,
   MathJsonString,
   MathJsonFunction,

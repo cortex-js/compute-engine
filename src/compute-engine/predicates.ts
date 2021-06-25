@@ -3,31 +3,121 @@ import {
   COMPLEX_INFINITY,
   DIVIDE,
   getArg,
+  getComplexValue,
+  getDecimalValue,
   getFunctionName,
   getNumberValue,
+  getRationalValue,
   getSymbolName,
   getTail,
   MISSING,
   MULTIPLY,
   NOTHING,
   POWER,
+  UNDEFINED,
 } from '../common/utils';
 import { Expression } from '../public';
+import { checkAssumption, checkAtomic } from './assume';
+import { gcd } from './numeric';
 import { ComputeEngine, Domain } from './public';
 
-export function isInteger(ce: ComputeEngine, expr: Expression): boolean {
-  // @todo
-  const val = getNumberValue(expr);
-  if (val === null) return false;
-  return Number.isInteger(val);
+export function isNumeric(
+  ce: ComputeEngine,
+  expr: Expression | null
+): boolean | undefined {
+  const val =
+    getNumberValue(expr) ?? getDecimalValue(expr) ?? getComplexValue(expr);
+  if (val !== null) return true;
+
+  const dom = ce.domain(expr);
+  if (dom) return ce.isSubsetOf(dom, 'Number');
+
+  return undefined;
 }
 
-export function isNumeric(
-  _ce: ComputeEngine,
-  _expr: Expression | null
+/** Is `expr` a complex number? */
+export function isComplex(
+  ce: ComputeEngine,
+  expr: Expression
+): boolean | undefined {
+  const val = ce.domain(expr);
+  if (val === null) return undefined;
+
+  return isSubsetOf(ce, val, 'ComplexNumber');
+}
+
+export function isReal(
+  ce: ComputeEngine,
+  expr: Expression
+): boolean | undefined {
+  const val = ce.domain(expr);
+  if (val === null) return undefined;
+
+  return isSubsetOf(ce, val, 'RealNumber');
+}
+
+/** Is `expr` an element of RR, including ±∞? */
+export function isExtendedReal(
+  ce: ComputeEngine,
+  expr: Expression
+): boolean | undefined {
+  if (expr === 'ComplexInfinity') return false;
+  let result = isInfinity(ce, expr);
+  if (result !== true) result = isReal(ce, expr);
+
+  return result;
+}
+
+/** Is `expr` an element of QQ (can be written as p/q)? */
+export function isRational(
+  ce: ComputeEngine,
+  expr: Expression
+): boolean | undefined {
+  const [numer, denom] = getRationalValue(expr);
+  if (numer !== null && denom !== null) return true;
+
+  const d = getDecimalValue(expr);
+  if (d !== null) return d.isInteger();
+
+  const c = getComplexValue(expr);
+  // Don't need to check if it was a real, getNumberValue() would have
+  // handled it.
+  if (c !== null) return false;
+
+  const dom = ce.domain(expr);
+  if (dom) return ce.isSubsetOf(dom, 'RationalNumber');
+
+  return undefined;
+}
+
+/** Is `expr` an algebraic number, i.e. not transcendental (π, e)? */
+export function isAlgebraic(
+  ce: ComputeEngine,
+  expr: Expression
 ): boolean | undefined {
   // @todo
-  return false;
+  const dom = ce.domain(expr);
+  if (dom) return ce.isSubsetOf(dom, 'AlgebraicNumber');
+}
+
+export function isInteger(
+  ce: ComputeEngine,
+  expr: Expression
+): boolean | undefined {
+  const val = getNumberValue(expr);
+  if (val !== null) return Number.isInteger(val);
+  const d = getDecimalValue(expr);
+  if (d !== null) return d.isInteger();
+
+  const c = getComplexValue(expr);
+  // Don't need to check if it was a real, getNumberValue() would have
+  // handled it.
+  if (c !== null) return false;
+
+  const dom = ce.domain(expr);
+  if (dom) return ce.isSubsetOf(dom, 'Integer');
+
+  return undefined;
 }
 
 export function isZero(
@@ -37,21 +127,24 @@ export function isZero(
   const val = getNumberValue(expr);
   if (val !== null) return val === 0;
 
-  if (ce.is(['Equal', expr, 0])) return true;
+  const d = getDecimalValue(expr);
+  if (d !== null) return d.isZero();
+
+  const c = getComplexValue(expr);
+  // No need to check for 0: a real number would have been handled by
+  // getNumberValue()
+  if (c !== null) return false;
+
+  if (checkAssumption(ce, ['Equal', expr, 0])) return true;
   // @todo matchAssumptions() equal not zero.
-  if (ce.is(['NotEqual', expr, 0]) === true) return false;
-  if (ce.is(['Greater', expr, 0]) === true) return false;
-  if (ce.is(['Less', expr, 0]) === true) return false;
+  // if (ce.is(['NotEqual', expr, 0]) === true) return false;
+  // if (ce.is(['Greater', expr, 0]) === true) return false;
+  if (checkAssumption(ce, ['Less', expr, 0]) === true) return false;
   // @todo
   // const match = engine.matchAssumptions(['Greater', expr, '_val']);
   // if (match.some((x) => x._val > 0)) return true;
 
-  // If this is not a number, and there are no assumptions
-  // about it, we can't tell if it's zero or not.
-  if (val === null) return undefined;
-
-  // It was a number, but not 0
-  return false;
+  return undefined;
 }
 
 export function isNotZero(
@@ -72,9 +165,11 @@ export function isInfinity(
   if (val !== null && isNaN(val)) return undefined;
   const symbol = getSymbolName(expr);
   if (symbol === COMPLEX_INFINITY) return true;
-  if (symbol === MISSING || symbol === NOTHING) return false;
+  if (symbol === MISSING || symbol === NOTHING || symbol === UNDEFINED) {
+    return false;
+  }
 
-  if (ce.is(expr, 'ComplexNumber')) return false;
+  if (checkAssumption(ce, ['Element', expr, 'ComplexNumber'])) return false;
 
   const name = getFunctionName(expr);
   if (name === 'Negate') {
@@ -91,12 +186,13 @@ export function isInfinity(
   return val === null ? undefined : false;
 }
 
-// @todo
 export function isFinite(
-  _ce: ComputeEngine,
-  _expr: Expression | null
+  ce: ComputeEngine,
+  expr: Expression | null
 ): boolean | undefined {
-  return undefined;
+  const p = isInfinity(ce, expr);
+  if (p === undefined) return p;
+  return !p;
 }
 
 export function isPosInfinity(
@@ -153,14 +249,13 @@ export function isPositive(
   ) {
     return true;
   }
-  if (ce.is(['Greater', expr, 0])) return true;
-  if (ce.is(['LessEqual', expr, 0])) return false;
-  if (ce.is(['Less', expr, 0])) return false;
+  if (checkAssumption(ce, ['LessEqual', expr, 0])) return false;
+  if (checkAssumption(ce, ['Less', expr, 0])) return false;
 
   const name = getFunctionName(expr);
   if (name) {
     if (name === 'Cosh' || name === 'Exp') {
-      if (isReal(ce, getArg(expr, 1))) return true;
+      if (isReal(ce, getArg(expr, 1) ?? MISSING)) return true;
     }
     if (name === 'Sqrt') {
       if (isPositive(ce, getArg(expr, 1))) return true;
@@ -228,59 +323,24 @@ export function isNonPositive(
   return !result;
 }
 
-export function isReal(
-  _ce: ComputeEngine,
-  expr: Expression | null
-): boolean | undefined {
-  // @todo
-  if (expr === null) return false;
-  const val = getNumberValue(expr);
-  if (val === null) return false;
-  return true;
-}
-/** Is `expr` an element of RR, including ±∞? */
-export function isExtendedReal(
-  _ce: ComputeEngine,
-  _expr: Expression
-): boolean | undefined {
-  // @todo
-  return undefined;
-}
-
-/** Is `expr` an element of QQ (can be written as p/q)? */
-export function isRational(
-  _ce: ComputeEngine,
-  _expr: Expression
-): boolean | undefined {
-  // @todo
-  return undefined;
-}
-
-/** Is `expr` an algebraic number, i.e. not transcendental (π, e)? */
-export function isAlgebraic(
-  _ce: ComputeEngine,
-  _expr: Expression
-): boolean | undefined {
-  // @todo
-  return undefined;
-}
-/** Is `expr` a complex number? */
-export function isComplex(
-  _ce: ComputeEngine,
-  _expr: Expression
-): boolean | undefined {
-  // @todo
-  return undefined;
-}
 /** Is `expr` an element of `dom`? */
 export function isElement(
-  _ce: ComputeEngine,
-
-  _expr: Expression,
-  _set: Expression
+  ce: ComputeEngine,
+  expr: Expression,
+  set: Expression
 ): boolean | undefined {
-  // @todo
-  return undefined;
+  //
+  // 1/ Check assumptions
+  //
+  const result = checkAssumption(ce, ['Element', expr, set]);
+  if (result !== undefined) return result;
+
+  //
+  // 2/ Check domain
+  //
+  const dom = ce.domain(expr);
+  if (dom === null) return undefined;
+  return isSubsetOf(ce, dom, set);
 }
 
 /** Test if `lhs` is a subset of `rhs`.
@@ -293,11 +353,19 @@ export function isSubsetOf(
   ce: ComputeEngine,
   lhs: Domain | null,
   rhs: Domain | null
-): boolean {
-  if (!lhs || !rhs) return false;
-  if (typeof lhs === 'string' && lhs === rhs) return true;
+): boolean | undefined {
+  if (lhs === null || rhs === null) return undefined;
+
   if (rhs === 'Anything') return true;
-  if (rhs === 'Nothing') return false;
+
+  if (rhs === 'Nothing') {
+    if (isSubsetOf(ce, lhs, 'Anything')) return false;
+    return undefined;
+  }
+  if (typeof lhs === 'string' && lhs === rhs) {
+    if (isSubsetOf(ce, lhs, 'Anything')) return true;
+    return undefined;
+  }
 
   //
   // 1. Set operations on lhs
@@ -308,13 +376,13 @@ export function isSubsetOf(
   // Complement: not lhs
   const lhsFnName = getFunctionName(lhs);
   if (lhsFnName === 'Union') {
-    return getTail(lhs).some((x) => isSubsetOf(ce, x, rhs));
+    return getTail(lhs).some((x) => isSubsetOf(ce, x, rhs) === true);
   } else if (lhsFnName === 'Intersection') {
-    return getTail(lhs).every((x) => isSubsetOf(ce, x, rhs));
+    return getTail(lhs).every((x) => isSubsetOf(ce, x, rhs) === true);
   } else if (lhsFnName === 'SetMinus') {
     return (
-      isSubsetOf(ce, getArg(lhs, 1), rhs) &&
-      !isSubsetOf(ce, getArg(lhs, 2), rhs)
+      isSubsetOf(ce, getArg(lhs, 1), rhs) === true &&
+      isSubsetOf(ce, getArg(lhs, 2), rhs) === false
     );
     // } else if (lhsFnName === 'Complement') {
     //   return !ce.isSubsetOf(getArg(lhs, 1), rhs);
@@ -325,13 +393,13 @@ export function isSubsetOf(
   //
   const rhsFnName = getFunctionName(rhs);
   if (rhsFnName === 'Union') {
-    return getTail(rhs).some((x) => isSubsetOf(ce, lhs, x));
+    return getTail(rhs).some((x) => isSubsetOf(ce, lhs, x) === true);
   } else if (rhsFnName === 'Intersection') {
-    return getTail(rhs).every((x) => isSubsetOf(ce, lhs, x));
+    return getTail(rhs).every((x) => isSubsetOf(ce, lhs, x) === true);
   } else if (rhsFnName === 'SetMinus') {
     return (
-      isSubsetOf(ce, lhs, getArg(rhs, 1)) &&
-      !isSubsetOf(ce, lhs, getArg(rhs, 2))
+      isSubsetOf(ce, lhs, getArg(rhs, 1)) === true &&
+      isSubsetOf(ce, lhs, getArg(rhs, 2)) === false
     );
     // } else if (rhsFnName === 'Complement') {
     //   return !ce.isSubsetOf(lhs, getArg(rhs, 1));
@@ -369,43 +437,123 @@ export function isSubsetOf(
 }
 
 export function isEqual(
-  _ce: ComputeEngine,
-  _lhs: Expression,
-  _rhs: Expression
+  ce: ComputeEngine,
+  lhs: Expression,
+  rhs: Expression
 ): boolean | undefined {
-  //@todo
-  return undefined;
+  //
+  // 1/ Check numeric
+  //
+
+  const val1 = getNumberValue(lhs);
+  if (val1 !== null) {
+    const val2 = getNumberValue(rhs);
+    if (val2 !== null) return val1 === val2;
+  }
+
+  let [numer1, denom1] = getRationalValue(lhs);
+  if (numer1 !== null && denom1 !== null) {
+    let [numer2, denom2] = getRationalValue(rhs);
+    if (numer2 !== null && denom2 !== null) {
+      const gcd1 = gcd(numer1, denom1);
+      [numer1, denom1] = [numer1 / gcd1, denom1 / gcd1];
+      const gcd2 = gcd(numer1, denom1);
+      [numer2, denom2] = [numer1 / gcd2, denom1 / gcd2];
+      return numer1 === numer2 && denom1 === denom2;
+    }
+  }
+
+  const d1 = getDecimalValue(lhs);
+  if (d1 !== null) {
+    const d2 = getDecimalValue(rhs);
+    if (d2 !== null) return d1.eq(d2);
+  }
+
+  const c1 = getComplexValue(lhs);
+  if (c1 !== null) {
+    const c2 = getComplexValue(rhs);
+    if (c2 !== null) return c1.eq(c2);
+  }
+
+  //
+  // 2. Check assumptions
+  //
+  // @todo: normal form: rhs = 0
+  const result = checkAtomic(ce, lhs, '=', rhs);
+  if (result !== null) return result;
+  return checkAssumption(ce, ['Equal', ['Subtract', lhs, rhs], 0]);
 }
 
 export function isLess(
-  _ce: ComputeEngine,
-  _lhs: Expression,
-  _rhs: Expression
+  ce: ComputeEngine,
+  lhs: Expression,
+  rhs: Expression
 ): boolean | undefined {
-  //@todo
-  return undefined;
+  //
+  // 1/ Check numeric
+  //
+
+  const val1 = getNumberValue(lhs);
+  if (val1 !== null) {
+    const val2 = getNumberValue(rhs);
+    if (val2 !== null) return val1 < val2;
+  }
+
+  const [numer1, denom1] = getRationalValue(lhs);
+  if (numer1 !== null && denom1 !== null) {
+    const [numer2, denom2] = getRationalValue(rhs);
+    if (numer2 !== null && denom2 !== null) {
+      return numer1 * denom2 < numer2 * denom1;
+    }
+  }
+
+  const d1 = getDecimalValue(lhs);
+  if (d1 !== null) {
+    const d2 = getDecimalValue(rhs);
+    if (d2 !== null) return d1.lt(d2);
+  }
+
+  const c1 = getComplexValue(lhs);
+  if (c1 !== null) {
+    const c2 = getComplexValue(rhs);
+    if (c2 !== null) return c1.lt(c2);
+  }
+
+  //
+  // 2. Check assumptions
+  //
+  // @todo: normal form, rhs = 0
+  return checkAssumption(ce, ['Less', lhs, rhs]);
 }
+
 export function isLessEqual(
-  _ce: ComputeEngine,
-  _lhs: Expression,
-  _rhs: Expression
+  ce: ComputeEngine,
+  lhs: Expression,
+  rhs: Expression
 ): boolean | undefined {
-  //@todo
-  return undefined;
+  const eq = isEqual(ce, lhs, rhs);
+  if (eq !== undefined) return true;
+  return isLess(ce, lhs, rhs);
 }
+
 export function isGreater(
-  _ce: ComputeEngine,
-  _lhs: Expression,
-  _rhs: Expression
+  ce: ComputeEngine,
+  lhs: Expression,
+  rhs: Expression
 ): boolean | undefined {
-  //@todo
-  return undefined;
+  const lt = isLess(ce, lhs, rhs);
+  if (lt === undefined) return undefined;
+  return !lt;
 }
+
 export function isGreaterEqual(
-  _ce: ComputeEngine,
-  _lhs: Expression,
-  _rhs: Expression
+  ce: ComputeEngine,
+  lhs: Expression,
+  rhs: Expression
 ): boolean | undefined {
-  //@todo
-  return undefined;
+  const eq = isEqual(ce, lhs, rhs);
+  if (eq !== undefined) return true;
+  const lt = isLess(ce, lhs, rhs);
+  if (lt === undefined) return undefined;
+  return !lt;
 }

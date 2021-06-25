@@ -8,8 +8,9 @@ import type {
   CollectionDefinition,
   Definition,
   Numeric,
+  SetDefinition,
 } from '../public';
-import { getDomainsDictionary } from './domains';
+import { getDomainsDictionary, simplifyDomain } from './domains';
 import { ARITHMETIC_DICTIONARY } from './arithmetic';
 import { CORE_DICTIONARY } from './core';
 import { LOGIC_DICTIONARY } from './logic';
@@ -25,6 +26,9 @@ import {
 import { MULTIPLY, POWER, getFunctionName } from '../../common/utils';
 import { inferNumericDomain } from '../domains';
 import { ExpressionMap } from '../expression-map';
+import { Decimal } from 'decimal.js';
+import { Complex } from 'complex.js';
+import { parse } from '../../latex-syntax/latex-syntax';
 
 export function getDefaultDictionaries<T extends number = number>(
   categories: DictionaryCategory[] | 'all' = 'all'
@@ -235,7 +239,7 @@ export const DICTIONARY: {
  * - The domain of entries is inferred and validated:
  *  - check that domains are in canonical form
  *  - check that domains are consistent with declarations (for example that
- * the signature of predicate have a "MaybeBoolean" codomain)
+ * the signature of predicate have a `MaybeBoolean` range)
  *
  */
 export function compileDictionary<T extends number = Numeric>(
@@ -255,9 +259,11 @@ export function compileDictionary<T extends number = Numeric>(
     if (def) result.set(entryName, def);
   }
 
-  // Temporarily put this dictionary in scope
-  // (this is required so that compilation and validation can succeed
-  // when symbols in this dictionary refer to *other* symbols from this dictionary)
+  // Temporarily put this dictionary in scope.
+  //
+  // This is required so that compilation and validation can succeed
+  // when symbols in this dictionary refer to *other* symbols from this
+  // dictionary
   engine.context = {
     parentScope: engine.context,
     dictionary: result,
@@ -278,8 +284,11 @@ function normalizeDefinition(
   def: number | Definition<Numeric>,
   engine: ComputeEngine
 ): [def: null | Definition<Numeric>, error?: string] {
+  //
+  // 1/ Is is a number?
+  //
   if (typeof def === 'number') {
-    //  If the dictionary entry is provided as a number, assume it's a
+    // If the dictionary entry is provided as a number, assume it's a
     // variable, and infer its domain based on its value.
     return [
       {
@@ -290,8 +299,32 @@ function normalizeDefinition(
     ];
   }
 
-  let domain = def.domain;
+  //
+  // 2/ Is it a string?
+  //
+  // It's a LaTeX string defining the value of the variable
+  if (typeof def === 'string') {
+    const value = parse(def);
+    if (value === null) {
+      return [def, 'string could not be parsed'];
+    }
+    return [
+      {
+        domain: engine.domain(value),
+        constant: false,
+        value,
+      },
+    ];
+  }
 
+  let domain =
+    typeof def.domain !== 'function'
+      ? simplifyDomain(def.domain ?? null)
+      : def.domain;
+
+  //
+  // 3. Is it a Symbol definition
+  //
   if (isSymbolDefinition(def)) {
     let warning: string | undefined;
     if (!domain) {
@@ -304,35 +337,42 @@ function normalizeDefinition(
       ...(def as Partial<SymbolDefinition>),
     };
 
-    if (def.hold === false && !def.value) {
-      def.hold = true;
-    }
+    if (def.value) def.value = engine.canonical(def.value);
+    if (def.unit) def.unit = engine.canonical(def.unit);
+
+    if (!def.value) def.hold = true;
 
     return [def, warning];
   }
 
+  //
+  // 4. Is it a Collection definition
+  //
   if (
     isCollectionDefinition(def) ||
     (typeof domain !== 'function' && engine.isSubsetOf(domain, 'Collection'))
   ) {
+    const collectionDef = def as CollectionDefinition;
     return [
       {
-        domain: 'Collection',
-        iterable: (def as CollectionDefinition).iterator !== undefined,
-        indexable: (def as CollectionDefinition).at !== undefined,
-        countable: (def as CollectionDefinition).size !== undefined,
+        domain,
+        iterable: collectionDef.iterator !== undefined,
+        indexable: collectionDef.at !== undefined,
+        countable: collectionDef.size !== undefined,
         ...(def as Partial<CollectionDefinition>),
       },
       undefined,
     ];
   }
 
+  //
+  // 5. Is it a Function definition
+  //
   if (
     isFunctionDefinition(def) ||
     (typeof domain !== 'function' && engine.isSubsetOf(domain, 'Function'))
   ) {
-    let functionDef = { ...(def as FunctionDefinition) };
-    functionDef = {
+    const functionDef: FunctionDefinition = {
       wikidata: '',
 
       scope: null,
@@ -350,9 +390,32 @@ function normalizeDefinition(
       hold: 'none',
       sequenceHold: false,
 
-      signatures: [],
       ...(def as FunctionDefinition),
+
+      domain,
     } as FunctionDefinition;
+
+    if (functionDef.inputDomain) {
+      functionDef.inputDomain = functionDef.inputDomain.map((x) =>
+        simplifyDomain(x)
+      );
+    }
+    if (functionDef.range && typeof functionDef.range !== 'function') {
+      functionDef.range = simplifyDomain(functionDef.range);
+    }
+
+    if (functionDef.value) {
+      let value = functionDef.value;
+      if (
+        typeof value !== 'number' &&
+        !(value instanceof Decimal) &&
+        !(value instanceof Complex)
+      ) {
+        value = engine.canonical(value);
+      }
+      functionDef.value = value;
+    }
+
     let warning: string | undefined;
     if (!functionDef.range) {
       warning = `no function range provided.`;
@@ -378,8 +441,12 @@ function normalizeDefinition(
     isSetDefinition(def) ||
     (typeof domain !== 'function' && engine.isSubsetOf(domain, 'Function'))
   ) {
-    // @todo
-    return [def];
+    const setDefinition = def as SetDefinition;
+    // @todo: could check the validity of setDefinition.supersets
+    if (setDefinition.value) {
+      setDefinition.value = simplifyDomain(setDefinition.value);
+    }
+    return [setDefinition];
   }
 
   if (def) {
@@ -432,7 +499,7 @@ function normalizeDefinition(
       ];
     }
   }
-  return [def, 'could not be validate'];
+  return [def, 'could not be validated'];
 }
 
 /**
@@ -503,11 +570,30 @@ function validateDictionary<T extends number = number>(
         });
       }
 
-      // @todo could do some additional checks
-      // - if it's numeric, it can't have a 'hold' argument
-      // - if it's commutative it must have at least one signature with multiple arguments
-      // - if an involution, it's *not* idempotent
-      // - if it's threadable it must have at least one signature with a rest argument
+      // Additional checks:
+
+      // a/ if it's numeric, it can't have a 'hold' argument
+      if (def.numeric && def.hold !== 'none') {
+        engine.signal({
+          severity: 'warning',
+          message: [
+            'invalid-dictionary-entry',
+            "`numeric` functions can't have an argument `hold`",
+          ],
+          head: name,
+        });
+      }
+
+      if (def.idempotent && def.involution) {
+        engine.signal({
+          severity: 'warning',
+          message: [
+            'invalid-dictionary-entry',
+            'an `idempotent` function cannot be an `involution`',
+          ],
+          head: name,
+        });
+      }
     }
     if (isSetDefinition(def)) {
       // Check there is at least one superset defined

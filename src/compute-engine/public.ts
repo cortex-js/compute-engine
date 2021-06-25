@@ -158,7 +158,7 @@ export type FunctionFeatures = {
   /** If true, when the function is univariate, `[f, ["Multiply", x, y]]`
    * simplifies to `["Multiply", [f, x], [f, y]]`.
    *
-   * When the function is multivariate, multipicativity is considered only on the
+   * When the function is multivariate, multiplicativity is considered only on the
    * first argument: `[f, ["Multiply", x, y], z]` simplifies to
    * `["Multiply", [f, x, z], [f, y, z]]`
    *
@@ -434,12 +434,11 @@ export type CollectionDefinition<T extends number = number> =
 
 export type SetDefinition<T extends number = number> =
   CollectionDefinition<T> & {
-    /** The supersets of this set: they should be symbol with a `Set` domain */
+    /** The supersets of this set: they should be symbols with a `Set` domain */
     supersets: string[];
 
     /** If a set can be defined explicitely in relation to other sets,
      * the `value` represents that relationship.
-     * For example `"NaturalNumber"` = `["Union", "PrimeNumber", "CompositeNumber"]`.
      */
     value?: Expression<T>;
 
@@ -472,35 +471,11 @@ export type Simplification = 'simplify-all' | 'simplify-arithmetic';
 
 export type NumericFormat = 'auto' | 'machine' | 'decimal' | 'complex';
 
-/**
- * Create a `CustomEngine` instance to customize its behavior and the syntax
- * and operation dictionaries it uses.
- *
- * The constructor of `ComputeEngine` will compile and optimize the dictionary
- * upfront.
- */
 export declare class ComputeEngine<T extends number = Numeric> {
-  /**
-   * Return dictionaries suitable for the specified categories, or `"all"`
-   * for all categories (`"arithmetic"`, `"algebra"`, etc...).
-   *
-   * A symbol dictionary defines how the symbols and function names in a MathJSON
-   * expression should be interpreted, i.e. how to evaluate and manipulate them.
-   *
-   */
   static getDictionaries(
     categories: DictionaryCategory[] | 'all'
   ): Readonly<Dictionary<any>>[];
 
-  /**
-   * The current scope.
-   *
-   * A scope is a dictionary that contains the definition of local symbols.
-   *
-   * Scopes form a stack, and definitions in more recent
-   * scopes can obscure definitions from older scopes.
-   *
-   */
   context: RuntimeScope<T>;
 
   readonly assumptions: ExpressionMap<T, boolean>;
@@ -512,85 +487,21 @@ export declare class ComputeEngine<T extends number = Numeric> {
   readonly iterationLimit?: number;
   readonly recursionLimit?: number;
 
-  /** The default precision of the compute engine: the number of significant
-   * digits when performing numeric evaluations, such as when calling `ce.N()`.
-   *
-   * To make calculations using machine floating point representation, set
-   * `precision` to `"machine"`  (15 by default).
-   *
-   * To  make calculations using more digits, at the cost of expended memory
-   * usage and slower computations, set the `precision` higher.
-   *
-   * Trigonometric operations are accurate for precision up to 1,000.
-   *
-   * Some functions, such as `ce.N()` have an option to specify the precision.
-   * If no precision is specified in these functions, the precision of
-   * the compute engine is used.
-   *
-   */
   set precision(p: number | 'machine');
   get precision(): number;
 
-  /**
-   * Internal format to represent numbers:
-   * - `auto`: the best format is determined based on the calculations to perform
-   * and the requested precision.
-   * - `number`: use the machine format (64-bit float, 52-bit, about 15 digits
-   * of precision).
-   * - `decimal`: arbitrary precision floating-point numbers, as provided by the
-   * "decimal.js" library
-   * - `complex`: complex numbers: two 64-bit float, as provided by the
-   * "complex.js" library
-   *
-   */
   numericFormat: NumericFormat;
 
-  /**
-   * Values smaller than the tolerance are considered to be zero for the
-   * purpose of comparison, i.e. if `|b - a| <= tolerance`, `b` is considered
-   * equal to `a`.
-   */
   tolerance: number;
 
-  /**
-   * Construct a new `ComputeEngine` environment.
-   *
-   * If no `options.dictionaries` is provided a default set of dictionaries
-   * is used. The `ComputeEngine.getDictionaries()` method can be called
-   * to access some subset of dictionaries, e.g. for arithmetic, calculus, etc...
-   * The order of the dictionaries matter: the definitions from the later ones
-   * override the definitions from earlier ones. The first dictionary should
-   * be the `'core'` dictionary which include some basic definitions such
-   * as domains (`Boolean`, `Number`, etc...) that are used by later dictionaries.
-   */
   constructor(options?: { dictionaries?: Readonly<Dictionary<T>>[] });
 
-  /** Create a new scope and add it to the top of the scope stack */
   pushScope(dictionary: Readonly<Dictionary<T>>, scope?: Partial<Scope>): void;
 
-  /** Remove the topmost scope from the scope stack.
-   */
   popScope(): void;
 
-  /**
-   * Call this function if an unexpected condition occurs during execution of a
-   * function in the engine.
-   *
-   * An `ErrorSignal` is a problem that cannot be recovered from.
-   *
-   * A `WarningSignal` indicates a minor problem that does not prevent the
-   * execution to continue.
-   *
-   */
   signal(sig: ErrorSignal | WarningSignal): void;
 
-  /**
-   * Return false if the execution should stop.
-   *
-   * This can occur if:
-   * - an error has been signaled
-   * - the time limit or memory limit has been exceeded
-   */
   shouldContinueExecution(): boolean;
   checkContinueExecution(): void;
 
@@ -600,13 +511,6 @@ export declare class ComputeEngine<T extends number = Numeric> {
   getCollectionDefinition(name: string): CollectionDefinition<T> | null;
   getDefinition(name: string): Definition<T> | null;
 
-  /** Format the expression to the canonical form.
-   *
-   * In the canonical form, some operations are simplified (subtractions
-   * becomes additions of negative, division become multiplications of inverse,
-   * etc...) and terms are ordered using a deglex order. This can make
-   * subsequent operations easier.
-   */
   canonical(expr: Expression<T> | null): Expression<T> | null;
 
   /** Format the expression according to the specified forms.
@@ -620,24 +524,11 @@ export declare class ComputeEngine<T extends number = Numeric> {
     forms?: Form | Form[]
   ): Expression<T> | null;
 
-  /**
-   * Evaluate the expression `exp` asynchronously.
-   *
-   * Evaluating some expressions can take a very long time. Some can invole
-   * making network queries. Therefore to avoid blocking the main event loop,
-   * a promise is returned.
-   *
-   * Use `result = await engine.evaluate(expr)` to get the result without
-   * blocking.
-   */
   evaluate(
     expr: Expression<T>,
     options?: { timeLimit?: number; iterationLimit?: number }
   ): Promise<Expression<T> | null>;
 
-  /**
-   * Simplify an expression.
-   */
   simplify(
     exp: Expression<T>,
     options?: {
@@ -647,79 +538,42 @@ export declare class ComputeEngine<T extends number = Numeric> {
     }
   ): Expression<T> | null;
 
-  /**
-   * Return a numerical approximation of an expression.
-   */
   N(
     exp: Expression<T>,
     options?: { precision?: number }
   ): T | Expression<T> | null;
 
-  /**
-   * Determines if the predicate is satisfied based on the known assumptions.
-   *
-   * Return `undefined` if the value of the predicate cannot be determined.
-   *
-   * ```js
-   * ce.is(["Equal", "x", 0]);
-   * ce.is(["Equal", 3, 4]);
-   * ```
-   *
-   */
+  solve(exp: Expression<T>, vars: string[]): null | Expression<T>[];
+
   is(symbol: Expression<T>, domain: Domain): boolean | undefined;
   is(predicate: Expression<T>): boolean | undefined;
   is(arg1: Expression<T>, arg2?: Domain): boolean | undefined;
 
-  /**
-   * Return a list of all the assumptions that match a pattern.
-   *
-   * ```js
-   *  ce.assume(x, 'PositiveInteger');
-   *  ce.ask(['Greater', 'x', '_val'])
-   *  //  -> [{'val': 0}]
-   * ```
-   */
   ask(pattern: Expression<T>): Substitution<T>[];
 
-  /**
-   * Apply repeatedly a set of rules to an expression.
-   */
   replace(rules: RuleSet<T>, expr: Expression<T>): Expression<T>;
 
-  /**
-   * Add an assumption.
-   *
-   * Return `contradiction` if the new assumption is incompatible with previous
-   * ones.
-   *
-   * Return `tautology` if the new assumption is redundant with previous ones.
-   *
-   * Return `ok` if the assumption was successfully added to the assumption set.
-   *
-   * Note that the assumption is put into normal form before being added.
-   *
-   */
   assume(
     symbol: Expression<T>,
     domain: Domain
-  ): 'contradiction' | 'tautology' | 'ok';
-  assume(predicate: Expression<T>): 'contradiction' | 'tautology' | 'ok';
+  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok';
+  assume(
+    predicate: Expression<T>
+  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok';
   assume(
     arg1: Expression<T>,
     arg2?: Domain
-  ): 'contradiction' | 'tautology' | 'ok';
+  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok';
 
   // Convenience functions: using the same dictionary as the engine
-  // use a LatexParser to parse/serialize to Latex.
+  // use a LatexParser to parse/serialize to LaTeX.
   parse(s: string): Expression<T>;
   serialize(x: Expression<T>): string;
 
-  getRules(topic: string | string[]): RuleSet;
+  cache<T>(entry: string, fn: () => T): T;
 
-  /** Return the domain of the expression */
   domain(expr: Expression<T>): Expression<T> | null;
 
-  /** Return the variables in the expression */
   getVars(expr: Expression<T>): Set<string>;
 
   chop(n: Numeric): Numeric;
@@ -749,7 +603,7 @@ export declare class ComputeEngine<T extends number = Numeric> {
   isOne(x: Expression<T>): boolean | undefined;
   isNegativeOne(x: Expression<T>): boolean | undefined;
   isElement(x: Expression<T>, set: Expression<T>): boolean | undefined;
-  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean;
+  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean | undefined;
 
   isEqual(lhs: Expression<T>, rhs: Expression<T>): boolean | undefined;
   isLess(lhs: Expression<T>, rhs: Expression<T>): boolean | undefined;
@@ -758,20 +612,6 @@ export declare class ComputeEngine<T extends number = Numeric> {
   isGreaterEqual(lhs: Expression<T>, rhs: Expression<T>): boolean | undefined;
 }
 
-/**
- * Transform an expression by applying one or more rewriting rules to it,
- * recursively.
- *
- * There are many ways to symbolically manipulate an expression, but
- * transformations with `form` have the following characteristics:
- *
- * - they don't require calculations or assumptions about the domain of free
- *    variables or the value of constants
- * - the output expression is expressed with more primitive functions,
- *    for example subtraction is replaced with addition
- *
- *
- */
 export declare function format<T extends number = number>(
   expr: Expression<T>,
   forms: Form[],
@@ -780,19 +620,6 @@ export declare function format<T extends number = number>(
   }
 ): Expression<T>;
 
-/**
- * Apply the definitions in the supplied dictionary to an expression
- * and return the result.
- *
- * Unlike `format` this may entail performing calculations and irreversible
- * transformations.
- *
- * See also `[ComputeEngine.evaluate()](#(ComputeEngine%3Aclass).(evaluate%3Ainstance))`.
- *
- * @param dictionaries - An optional set of functions and constants to use
- * when evaluating the expression. Evaluating the expression may modify the
- * scope, for example if the expression is an assignment or definition.
- */
 export declare function evaluate<T extends number = number>(
   expr: Expression<T>,
   options?: {

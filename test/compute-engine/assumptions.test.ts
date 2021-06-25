@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 
 export const ce = new ComputeEngine();
 
@@ -39,16 +39,6 @@ describe.skip('is() values', () => {
   ce.assume('n', 'Integer');
   ce.assume('p', 11);
   ce.assume('r', ['Interval', ['Open', 0], +Infinity]);
-
-  test(`is prime`, () => {
-    expect(ce.is(['Element', 'n', 'PrimeNumber'])).toBeFalsy();
-    expect(ce.is(['Element', 'p', 'PrimeNumber'])).toBeTruthy();
-  });
-
-  test(`is composite`, () => {
-    expect(ce.is(['Element', 'n', 'CompositeNumber'])).toBeTruthy();
-    expect(ce.is(['Element', 'p', 'CompositeNumber'])).toBeFalsy();
-  });
 
   test(`is positive`, () => {
     expect(ce.is(['Element', 'r', 'RealNumber'])).toBeTruthy();

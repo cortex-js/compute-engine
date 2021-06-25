@@ -2,17 +2,21 @@ import { LatexDictionary } from './public';
 
 export const DEFINITIONS_SETS: LatexDictionary<any> = [
   // Sets
-  { trigger: { symbol: '\\N' }, parse: 'NaturalNumber' },
-  { trigger: { symbol: '\\Z' }, parse: 'Integer' },
-  { trigger: { symbol: '\\Q' }, parse: 'RationalNumber' },
+  { name: 'NaturalNumber', trigger: { symbol: '\\N' } },
+  { name: 'Integer', trigger: { symbol: '\\Z' } },
+  { name: 'RationalNumber', trigger: { symbol: '\\Q' } },
   {
+    name: 'AlgebraicNumber',
     trigger: { symbol: ['\\mathbb', '<{>', 'A', '<}>'] },
-    parse: 'AlgebraicNumber',
   },
-  { trigger: { symbol: '\\R' }, parse: 'RealNumber' },
-  { trigger: { symbol: '\\C' }, parse: 'ComplexNumber' },
-  { trigger: { symbol: '\\varnothing' }, parse: 'EmptySet' },
-  { trigger: { symbol: '\\emptyset' }, parse: 'EmptySet' },
+  {
+    name: 'TranscendentalNumber',
+    trigger: { symbol: ['\\mathbb', '<{>', 'T', '<}>'] },
+  },
+  { name: 'RealNumber', trigger: { symbol: '\\R' } },
+  { name: 'ComplexNumber', trigger: { symbol: '\\C' } },
+  { trigger: { symbol: '\\varnothing' }, parse: 'EmptySet' }, // Parsing only
+  { name: 'EmptySet', trigger: { symbol: '\\emptyset' } },
 
   {
     name: 'Complement',

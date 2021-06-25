@@ -22,6 +22,7 @@ export const LATEX_TOKENS = 'LatexTokens';
 export const LIST = 'List';
 export const MISSING = 'Missing';
 export const NOTHING = 'Nothing';
+export const UNDEFINED = 'Undefined';
 export const SEQUENCE = 'Sequence';
 export const SEQUENCE2 = 'Sequence2';
 
@@ -276,6 +277,13 @@ export function getRationalValue(
   let numer: number | null = null;
   let denom: number | null = null;
 
+  if (head === NEGATE) {
+    [numer, denom] = getRationalValue(getArg(expr, 1) ?? MISSING);
+    if (numer !== null && denom !== null) {
+      return [-numer, denom];
+    }
+  }
+
   if (head === POWER) {
     const exponent = getNumberValue(getArg(expr, 2));
     if (exponent === 1) {
@@ -481,11 +489,17 @@ export function getFunctionName<T extends number = number>(
   | 'Exp'
   | 'Re'
   | 'And'
+  | 'Or'
   | 'Not'
   | 'Equal'
+  | 'Less'
+  | 'LessEqual'
+  | 'Greater'
+  | 'GreaterEqual'
   | 'NotEqual'
   | 'Set'
   | 'Element'
+  | 'Subset'
   | 'NotElement'
   | 'Complex'
   | 'Hold'
@@ -685,4 +699,44 @@ export function equalExpr<T extends number = number>(
 export function coef(_expr: Expression, _vars: string[]): Expression | null {
   // @todo
   return null;
+}
+export type FilteredNumerics = {
+  others: Expression[];
+  numbers: number[];
+  decimals: Decimal[];
+  complexes: Complex[];
+  rationals: [numer: number, denom: number][];
+};
+export function filterNumerics(args: Expression[]): FilteredNumerics {
+  const result: FilteredNumerics = {
+    others: [],
+    numbers: [],
+    decimals: [],
+    complexes: [],
+    rationals: [],
+  };
+  for (const arg of args) {
+    const val = getNumberValue(arg);
+    if (val !== null) {
+      result.numbers.push(val);
+    } else {
+      const [numer, denom] = getRationalValue(arg);
+      if (numer !== null && denom !== null) {
+        result.rationals.push([numer, denom]);
+      } else {
+        const d = getDecimalValue(arg);
+        if (d) {
+          result.decimals.push(d);
+        } else {
+          const c = getComplexValue(arg);
+          if (c !== null) {
+            result.complexes.push(c);
+          } else {
+            result.others.push(arg);
+          }
+        }
+      }
+    }
+  }
+  return result;
 }

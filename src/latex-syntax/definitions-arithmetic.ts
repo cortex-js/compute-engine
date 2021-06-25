@@ -359,7 +359,7 @@ function parseFraction(
     const degree: Expression = getArg(numer, 3) ?? NOTHING;
     // Expect: getArg(numer, 2) === NOTHING -- no args
     let fn = getArg(numer, 1);
-    if (fn === null || fn === NOTHING) {
+    if (fn === null || fn === MISSING) {
       fn = scanner.matchExpression() ?? NOTHING;
     }
 
@@ -383,7 +383,7 @@ function parseFraction(
 
     return [
       lhs,
-      ['PartialDerivative', fn, vars, degree === NOTHING ? 1 : degree],
+      ['PartialDerivative', fn, vars, degree === MISSING ? 1 : degree],
     ];
   }
 

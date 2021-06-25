@@ -32,9 +32,9 @@ import {
   Simplification,
   SymbolDefinition,
 } from './public';
-import { internalSimplify, SIMPLIFY_RULES } from './simplify';
+import { internalSimplify } from './simplify';
 import { internalDomain } from './domains';
-import { match } from './patterns';
+import { match, Substitution } from './patterns';
 import { format } from './canonical-forms';
 import { CortexError, getVariables } from './utils';
 import {
@@ -66,12 +66,13 @@ import {
 import { internalEvaluate } from './evaluate';
 import { ExpressionMap } from './expression-map';
 import { MACHINE_PRECISION, NUMERICAL_TOLERANCE } from './numeric';
-import { replace, rules } from './rules';
+import { replace } from './rules';
 import { LatexSyntax } from '../latex-syntax/latex-syntax';
 import { internalN } from './numerical-eval';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { DECIMAL_ZERO } from './numeric-decimal';
+import { solve } from './solve';
 
 /**
  * The internal  compute engine implements the ComputeEngine interface
@@ -91,11 +92,12 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
 
   private _precision: number;
   private _numericFormat: NumericFormat;
-  private _latexSyntax?: LatexSyntax; // To parse rules as Latex
+  private _latexSyntax?: LatexSyntax; // To parse rules as LaTeX
 
   private _tolerance: number;
 
   private _rules?: { [topic: string]: RuleSet };
+  private _cache: { [key: string]: any } = {};
 
   /**
    * The current scope.
@@ -147,6 +149,11 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     this.pushScope({});
   }
 
+  cache<T>(key: string, fn: () => T): T {
+    if (this._cache[key] === undefined) this._cache[key] = fn();
+    return this._cache[key];
+  }
+
   get precision(): number {
     return this._precision;
   }
@@ -175,27 +182,9 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   get tolerance(): number {
     return this._tolerance;
   }
+
   set tolerance(val: number) {
     this._tolerance = Math.max(val, 0);
-  }
-  /** Generator function (indicated by the leading '*') that returns all the
-   *  rules in all the topics requested.
-   */
-  *getRules(topics: string | string[]): RuleSet {
-    if (!this._rules) {
-      this._rules = {};
-      for (const topic of Object.keys(SIMPLIFY_RULES)) {
-        this._rules[topic] = rules(this, SIMPLIFY_RULES[topic]);
-      }
-    }
-    if (typeof topics === 'string') topics = [topics];
-    for (const topic of topics) {
-      if (this._rules[topic]) {
-        for (const rule of this._rules[topic]) yield rule;
-      } else {
-        console.error('Unknown rules topic ', topic);
-      }
-    }
   }
 
   get latexSyntax(): LatexSyntax {
@@ -251,6 +240,11 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
 
   get assumptions(): ExpressionMap<Numeric, boolean> {
     if (this.context.assumptions) return this.context.assumptions;
+    // When creating a new context, the assumptions of this context
+    // are a copy of all the previous assumptions
+    // (as a result, there's no need to check parent assumptions,
+    // and it solves the assumptions in a scope that could be contradictory
+    // or complementary to previous assumptions).
     this.context.assumptions = new ExpressionMap<Numeric, boolean>();
     return this.context.assumptions;
   }
@@ -403,6 +397,13 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     return result ?? expr;
   }
 
+  solve(
+    expr: Expression<Numeric>,
+    vars: string[]
+  ): null | Expression<Numeric>[] {
+    return solve(this, expr, vars);
+  }
+
   // is(symbol: Expression, domain: Domain): boolean | undefined;
   // is(proposition: Expression): boolean | undefined;
   is(arg1: Expression, arg2?: Domain): boolean | undefined {
@@ -413,7 +414,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     return internalIs(this, proposition);
   }
 
-  ask(pattern: Expression): { [symbol: string]: Expression }[] {
+  ask(pattern: Expression): Substitution[] {
     const result: { [symbol: string]: Expression }[] = [];
     for (const assumption in this.assumptions) {
       const m = match(pattern, assumption, {
@@ -432,7 +433,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   assume(
     arg1: Expression,
     arg2?: Domain
-  ): 'contradiction' | 'tautology' | 'ok' {
+  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok' {
     let predicate: Expression = arg1;
     if (arg2) {
       predicate = ['Element', arg1, arg2];
@@ -538,7 +539,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   isElement(x: Expression, set: Expression): boolean | undefined {
     return isElement(this, x, set);
   }
-  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean {
+  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean | undefined {
     return isSubsetOf(this, lhs, rhs);
   }
 
