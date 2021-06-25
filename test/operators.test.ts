@@ -161,9 +161,11 @@ describe('OPERATORS', () => {
   });
   test('Postfix', () => {
     expect(expression('-2!-2')).toMatchInlineSnapshot(
-      `['Add', -2, ['Factorial', -2]]`
+      `['Add', -2, ['Negate', ['Factorial', 2]]]`
     );
-    expect(expression('-2!')).toMatchInlineSnapshot(`['Factorial', -2]`);
+    expect(expression('-2!')).toMatchInlineSnapshot(
+      `['Negate', ['Factorial', 2]]`
+    );
     expect(expression('2+n!')).toMatchInlineSnapshot(
       `['Add', ['Factorial', 'n'], 2]`
     );

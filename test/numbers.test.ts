@@ -19,15 +19,15 @@ describe('NUMBERS', () => {
   });
   test('Parsing plus/minus', () => {
     expect(expression('+1')).toMatchInlineSnapshot(`1`);
-    expect(expression('++1')).toMatchInlineSnapshot(`1`);
+    expect(expression('++1')).toMatchInlineSnapshot(`['PreIncrement', 1]`);
     expect(expression('-1')).toMatchInlineSnapshot(`-1`);
-    expect(expression('--1')).toMatchInlineSnapshot(`1`);
+    expect(expression('--1')).toMatchInlineSnapshot(`['PreDecrement', 1]`);
     expect(expression('-+-1')).toMatchInlineSnapshot(`1`);
   });
   test('Parsing whitepsace with number sign', () => {
     expect(expression('  1')).toMatchInlineSnapshot(`1`);
     expect(expression('+ 1')).toMatchInlineSnapshot(`1`);
-    expect(expression(' -  +   -   -1')).toMatchInlineSnapshot(`-1`);
+    expect(expression(' -  +   -   -1')).toMatchInlineSnapshot(`['Negate', 1]`);
   });
   test('Parsing digits', () => {
     // Number with exactly three digits after the decimal point

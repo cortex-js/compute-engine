@@ -52,9 +52,6 @@ describe('SUBSETS', () => {
       engine.isSubsetOf('NaturalNumber', 'ExtendedRealNumber')
     ).toBeTruthy();
     expect(engine.isSubsetOf('RealNumber', 'Integer')).toBeFalsy();
-    expect(engine.isSubsetOf('NumberZero', 'Number')).toBeTruthy();
-    // expect(engine.isSubsetOf('NumberZero', 0)).toBeTruthy();
-    // expect(engine.isSubsetOf('NumberZero', ['Set', 0])).toBeTruthy();
     expect(
       engine.isSubsetOf(
         ['Intersection', 'RationalNumber', 'NaturalNumber'],

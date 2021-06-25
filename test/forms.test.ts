@@ -13,7 +13,7 @@ import { expression, engine } from './utils';
 
 describe('FORMS', () => {
   const exprs: [string, Expression, Expression][] = [
-    ['-0', { num: '-0' }, { num: '-0' }],
+    ['-0', ['Negate', 0], { num: '-0' }],
     ['a-0', [SUBTRACT, 'a', 0], 'a'],
     ['0-a', [SUBTRACT, 0, 'a'], ['Negate', 'a']],
     ['7+2+5', [ADD, 7, 2, 5], [ADD, 2, 5, 7]],
@@ -46,7 +46,7 @@ describe('FORMS', () => {
     //
     [
       '\\frac{-101}{10^{\\frac{2}{3}}}',
-      [DIVIDE, -101, [POWER, 10, [DIVIDE, 2, 3]]],
+      [DIVIDE, ['Negate', 101], [POWER, 10, [DIVIDE, 2, 3]]],
       ['Divide', -101, ['Power', 10, 'TwoThird']],
     ],
 

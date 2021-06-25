@@ -43,7 +43,7 @@ describe('LATEX SERIALIZING', () => {
       latex({ num: '0.1234567872368237462387623876' })
     ).toMatchInlineSnapshot(`'0.123,456,787,236,82\\ldots'`);
 
-    expect(expression('  - 1 2')).toMatchInlineSnapshot(`['Multiply', -1, 2]`);
+    expect(expression('  - 1 2')).toMatchInlineSnapshot(`-2`);
     expect(expression('-123,456.789,012')).toMatchInlineSnapshot(
       `{num: '-123456.789012d'}`
     );

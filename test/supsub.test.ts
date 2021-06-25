@@ -109,7 +109,9 @@ describe('SUPSUB', () => {
     expect(expression('\\vec{AB}')).toMatchInlineSnapshot(
       `['OverVector', ['Multiply', 'A', 'B']]`
     ); // @todo: nope...
-    expect(expression('\\vec{AB}^{-1}')).toMatchInlineSnapshot(`0`);
+    expect(expression('\\vec{AB}^{-1}')).toMatchInlineSnapshot(
+      `['Divide', 1, ['OverVector', ['Multiply', 'A', 'B']]]`
+    );
   });
 });
 
