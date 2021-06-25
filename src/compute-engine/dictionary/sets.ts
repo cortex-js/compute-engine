@@ -6,9 +6,11 @@ import type { Dictionary, ComputeEngine } from '../public';
 
 export const SETS_DICTIONARY: Dictionary = {
   EmptySet: {
-    domain: 'EmptySet',
+    domain: 'Set',
     constant: true,
     wikidata: 'Q226183',
+    isElementOf: () => false,
+    isSubsetOf: () => false,
   },
   CartesianProduct: {
     // Aka the product set, the set direct product or cross product
