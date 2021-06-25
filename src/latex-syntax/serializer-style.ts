@@ -29,10 +29,16 @@ export function getFractionStyle(
   if (level > 3) return 'inline-solidus';
   return 'quotient';
 }
+
+// https://en.wikipedia.org/wiki/Logical_connective
 export function getLogicStyle(
   _expr: Expression,
   _level: number
 ): 'word' | 'boolean' | 'uppercase-word' | 'punctuation' {
+  // punctuation = & | !
+  // word = and or not
+  // uppercase-word = AND OR NOT
+  // boolean = ∧ ∨ ¬
   return 'boolean';
 }
 
