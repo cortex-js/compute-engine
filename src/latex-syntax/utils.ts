@@ -96,7 +96,7 @@ export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> =
 export function appendLatex(src: string, s: string): string {
   if (!s) return src;
 
-  // If the source end in a Latex command,
+  // If the source end in a LaTeX command,
   // and the appended string begins with a letter
   if (/\\[a-zA-Z]+\*?$/.test(src) && /[a-zA-Z*]/.test(s[0])) {
     // Add a space between them
@@ -107,8 +107,8 @@ export function appendLatex(src: string, s: string): string {
 }
 
 /**
- * Replace '#1', '#2' in the latex template stings with the corresponding
- * values from `replacement`, in a Latex syntax safe manner (i.e. inserting spaces when needed)
+ * Replace '#1', '#2' in the LaTeX template stings with the corresponding
+ * values from `replacement`, in a LaTeX syntax safe manner (i.e. inserting spaces when needed)
  */
 export function replaceLatex(template: string, replacement: string[]): string {
   console.assert(typeof template === 'string');

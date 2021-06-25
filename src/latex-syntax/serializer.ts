@@ -233,10 +233,10 @@ export class Serializer<T extends number = number> implements Serializer<T> {
       // We don't know anything about this function
       if (typeof head === 'string' && head.length > 0 && head[0] === '\\') {
         //
-        // 1. Is is an unknown latex command?
+        // 1. Is is an unknown LaTeX command?
         //
-        // This looks like a Latex command. Serialize
-        // the arguments as Latex arguments
+        // This looks like a LaTeX command. Serialize
+        // the arguments as LaTeX arguments
         let result: string = head;
         for (const arg of args) {
           result += '{' + this.serialize(arg) + '}';
@@ -261,9 +261,9 @@ export class Serializer<T extends number = number> implements Serializer<T> {
 
     if (def.requiredLatexArg > 0) {
       //
-      // 3. Is it a known Latex command?
+      // 3. Is it a known LaTeX command?
       //
-      // This looks like a Latex command. Serialize the arguments as Latex
+      // This looks like a LaTeX command. Serialize the arguments as LaTeX
       // arguments
       let optionalArg = '';
       let requiredArg = '';
@@ -340,8 +340,8 @@ export class Serializer<T extends number = number> implements Serializer<T> {
       const fnName = getFunctionName(expr);
       if (fnName) {
         if (fnName[0] === '\\') {
-          // 5.1 An unknown Latex command, possibly with arguments.
-          // This can happen if we encountered an unrecognized Latex command
+          // 5.1 An unknown LaTeX command, possibly with arguments.
+          // This can happen if we encountered an unrecognized LaTeX command
           // during parsing, e.g. "\foo{x + 1}"
           const args = getTail(expr);
           if (args.length === 0) return fnName;

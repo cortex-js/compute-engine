@@ -8,8 +8,8 @@
 [MathJSON](https://cortexjs.io/math-json/) is a lightweight data interchange
 format for mathematical notation, based on JSON.
 
-The Cortex Compute Engine can parse Latex to MathJSON, serialize MathJSON to
-Latex, format, simplify and evaluate MathJSON expressions.
+The Cortex Compute Engine can parse LaTeX to MathJSON, serialize MathJSON to
+LaTeX, format, simplify and evaluate MathJSON expressions.
 
 Reference documentation and guides at
 [cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/).

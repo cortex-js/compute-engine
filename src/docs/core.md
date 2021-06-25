@@ -29,12 +29,13 @@ sidebar:
 
 <div class=symbols-table>
 
-| Symbol    | Description                               |
-| :-------- | :---------------------------------------- |
-| `Missing` | A **required** expression is not present. |
-| `Nothing` | An **optional** expression is not present |
-| `None`    | None of the possible values, none apply   |
-| `All`     | All the possible values apply             |
+| Symbol      | Description                                                                                                                                                             |
+| :---------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Missing`   | A **required** expression is not present.                                                                                                                               |
+| `Nothing`   | An **optional** expression is not present                                                                                                                               |
+| `Undefined` | The result is not defined. For example, the `domain()` of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` and for booleans, `Maybe` |
+| `None`      | None of the possible values apply                                                                                                                                       |
+| `All`       | All the possible values apply                                                                                                                                           |
 
 </div>
 
@@ -107,7 +108,7 @@ cube(5)
 `["Latex", `_`expr`_` `]`
 
 - _`expr`_: a MathJSON expression
-- Returns a Latex string representing the expression.
+- Returns a LaTeX string representing the expression.
 
 ```json
 ["Latex", ["Divide", "Pi", 2]]
@@ -116,7 +117,7 @@ cube(5)
 
 `["LatexSymbols", `_`str-1`_`, `_`str-2`_`, ...`_`str-n`_`]`
 
-The arguments `_`str-n`_` are interpreted as Latex tokens:
+The arguments `_`str-n`_` are interpreted as LaTeX tokens:
 
 <div class=symbols-table>
 
@@ -129,7 +130,7 @@ The arguments `_`str-n`_` are interpreted as Latex tokens:
 | `<$>`                       | inline mode shift  |
 | `#0`-`#9`                   | argument           |
 | `#?`                        | placeholder        |
-| string that starts with `/` | a Latex command    |
+| string that starts with `/` | a LaTeX command    |
 | other strings               | ordinary symbols   |
 
 </div>
@@ -145,7 +146,7 @@ See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
 
 ### `Prime`
 
-| MathJSON            | Latex            |
+| MathJSON            | LaTeX            |
 | :------------------ | :--------------- |
 | `["Prime", "f"]`    | `f^\prime`       |
 | `["Prime", "f", 2]` | `f^\doubleprime` |

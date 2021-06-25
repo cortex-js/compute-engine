@@ -27,7 +27,7 @@ sidebar:
 
 ### Lagrange Notation
 
-| Latex                 | MathJSON           |
+| LaTeX                 | MathJSON           |
 | :-------------------- | :----------------- |
 | `f'(x)`               | `["Derive", f, x]` |
 | `f''(x)`              |                    |
@@ -42,7 +42,7 @@ sidebar:
 
 ## Leibniz Notation
 
-| Latex                                       | MathJSON |
+| LaTeX                                       | MathJSON |
 | :------------------------------------------ | :------- |
 | `\frac{\partial f}{\partial x}`             |          |
 | `\frac{\partial^2 f}{\partial x\partial y}` |
@@ -52,7 +52,7 @@ sidebar:
 This notation is used by Mathematica. The Euler notation uses `D` instead of
 `\partial`
 
-| Latex              | MathJSON |
+| LaTeX              | MathJSON |
 | :----------------- | :------- |
 | `\partial_{x} f`   |          |
 | `\partial_{x,y} f` |          |

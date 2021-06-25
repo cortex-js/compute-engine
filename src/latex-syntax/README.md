@@ -2,10 +2,10 @@
     <img alt="math live" src="../../assets/math-json.jpg?raw=true">
 </div>
 
-<h3><strong>Latex Syntax</strong></h3>
+<h3><strong>LaTeX Syntax</strong></h3>
 <h1>Parse and Serialize MathJSON</h1>
 
-| Latex                      | MathJSON                                                                  |
+| LaTeX                      | MathJSON                                                                  |
 | :------------------------- | :------------------------------------------------------------------------ |
 | `\frac{a}{1+x}`            | `["Divide", "a", ["Add", 1, "x"]]`                                        |
 | `e^{\imaginaryI \pi }+1=0` | `["Eq", ["Power", "E", ["Add", ["Multiply", "Pi", "ImaginaryI"], 1]], 0]` |
@@ -13,13 +13,13 @@
 
 This section of the repo contains code to:
 
-- parse Latex to MathJSON
-- serialize MathJSON to Latex
+- parse LaTeX to MathJSON
+- serialize MathJSON to LaTeX
 
 Reference documentation and guides at
 [cortexjs.io/math-json](https://cortexjs.io/math-json/).
 
-## Using the Latex Parser/Serializer
+## Using the LaTeX Parser/Serializer
 
 ```bash
 $ npm install --save @cortex-js/compute-engine

@@ -215,7 +215,7 @@ export class Scanner<T extends number = number> implements Scanner<T> {
 
   skipSpace(): boolean {
     // Check if the have a `{}` token sequence.
-    // Those are used in Latex to force an invisible separation between commands
+    // Those are used in LaTeX to force an invisible separation between commands
     if (
       !this.atEnd &&
       this.peek === '<{>' &&
@@ -574,7 +574,7 @@ export class Scanner<T extends number = number> implements Scanner<T> {
     }
 
     //
-    // Is it a Latex function, e.g. `\frac{}{}`?
+    // Is it a LaTeX command, e.g. `\frac{}{}`?
     //
     const requiredArgs: Expression<T>[] = [];
     const optionalArgs: Expression<T>[] = [];
@@ -1010,7 +1010,7 @@ export class Scanner<T extends number = number> implements Scanner<T> {
       if (lhs === null) return rhs;
       return null;
     }
-    // No invisible operator, use 'Latex'
+    // No invisible operator, use 'LatexTokens'
     let fn: Expression<T> = [LATEX_TOKENS];
     if (getFunctionName(lhs) === LATEX_TOKENS) {
       fn = fn.concat(getTail(lhs));
@@ -1113,7 +1113,7 @@ export class Scanner<T extends number = number> implements Scanner<T> {
     if (result === null) result = this.matchEnvironment();
 
     //
-    // 4. Is it a symbol, a Latex command or a function call?
+    // 4. Is it a symbol, a LaTeX command or a function call?
     //    `x` or `\pi'
     //    `f(x)` or `\sin(\pi)
     //    `\frac{1}{2}`

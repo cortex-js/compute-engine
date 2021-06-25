@@ -165,7 +165,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary<number> = [
   },
   {
     name: 'NotApproxEqual', // Note: Mathematica NotTildeEqual
-    trigger: { infix: ['!', '\\approxeq'] }, // Note: no Latex symbol for char U+2249
+    trigger: { infix: ['!', '\\approxeq'] }, // Note: no LaTeX symbol for char U+2249
     associativity: 'right',
     precedence: 250,
   },

@@ -5,15 +5,25 @@ import {
   ErrorListener,
 } from '../public';
 
+/**
+ * A `LatexToken` is a token as returned by `Scanner.peek`.
+ *
+ * It can be one of the indicated constants, or a string that starts with a
+ * `\` for LaTeX commands, or another LaTeX characters, which include digits,
+ * letters and punctuation.
+ */
 export type LatexToken = string | '<{>' | '<}>' | '<space>' | '<$>' | '<$$>';
 
+/** A LatexString is a regular string of LaTeX, for example:
+ * `\frac{\pi}{2}`
+ */
 export type LatexString = string;
 
 /**
  * Custom parser function.
  *
- * It is triggered by a latex fragment (the `latex` argument). When invoked,
- * the scanner points right after that latex fragment. The scanner should be
+ * It is triggered by a LaTeX fragment (the `latex` argument). When invoked,
+ * the scanner points right after that LaTeX fragment. The scanner should be
  * moved, by calling `scanner.next()` for every consumed token.
  *
  * If it was in an infix or postfix context, `lhs` will represent the
@@ -36,24 +46,29 @@ export type ParserFunction<T extends number = number> = (
 ) => [lhs: Expression<T> | null, result: Expression<T> | null];
 
 /**
- * Maps a string of Latex tokens to a function or symbol and vice-versa.
+ * Maps a string of LaTeX tokens to a function or symbol and vice-versa.
  *
  */
 export type LatexDictionaryEntry<T extends number = number> = {
   /**
    * Map a function or symbol name to this record.
    *
-   * Each record should have at least a `name` or a `trigger`
+   * Each record should have at least a `name` or a `parse`. If no `name`
+   * is provided, the `name` is the same as `parse`.  This may be useful
+   * for definitions that are only for parsing a symbol, but not serializing,
+   * for example when there are synonyms for the same symbol (e.g. `\varnothing`
+   * and `\emptyset`).
    */
   name?: string;
 
   /**
-   * Map one or more latex tokens to this record.
+   * Map one or more LaTeX tokens to this record.
    *
-   * As a shortcut, if the trigger is a LatexToken, it is assumed to be a symbol.
+   * As a shortcut, if the trigger is `trigger: value`, it is equivalent to
+   * `trigger: { symbol: value }`.
    *
-   * There can be multiple entries (for example '+' is both an infix and a
-   * prefix)
+   * There can be multiple entries, for example `+` is both an infix and a
+   * prefix.
    */
   trigger?:
     | LatexToken
@@ -75,19 +90,22 @@ export type LatexDictionaryEntry<T extends number = number> = {
         prefix?: LatexToken | LatexToken[];
 
         /**
-         * Postfix position, with an operand before: `a⊛`
+         * Postfix position, with an operand before: `a ⊛`
          */
         postfix?: LatexToken | LatexToken[];
+
         /**
          * Superfix position (in a superscript), with the base of the
          * superscript as the operand: `a^{⊛}`
          */
         superfix?: LatexToken | LatexToken[];
+
         /**
          * Subfix position (in a subscript), with the base of the
          * subscript as the operand: `a_{⊛}`
          */
         subfix?: LatexToken | LatexToken[];
+
         /**
          * The name of an environment, as used in `\begin{matrix}` where
          * `"matrix"` is the name of the environment.
@@ -97,12 +115,16 @@ export type LatexDictionaryEntry<T extends number = number> = {
       };
 
   /**
-   * A function that returns an expression, or an expression
+   * The `Expression` that is the result of parsing. If providing a parser
+   * function, the context can be considered, for example accounting for
+   * the left-hand-side expression, or the current precedence level.
+   *
+   * If the `parse` property is not provided, the `name` is used instead.
    */
-  parse?: Expression<T> | ParserFunction<T>;
+  parse?: ParserFunction<T> | Expression<T>;
 
   /**
-   * The Latex to serialize.
+   * The LaTeX to serialize.
    */
   serialize?: SerializerFunction<T> | LatexString;
 
@@ -151,7 +173,7 @@ export type LatexDictionaryEntry<T extends number = number> = {
   /**
    * If `trigger` is `'symbol'``.
    *
-   * If a Latex command (i.e. the trigger starts with `\`, e.g. `\sqrt`)
+   * If a LaTeX command (i.e. the trigger starts with `\`, e.g. `\sqrt`)
    * indicates the number of optional arguments expected (indicate with
    * square brackets).
    *
@@ -163,7 +185,7 @@ export type LatexDictionaryEntry<T extends number = number> = {
   /**
    * If `trigger` is `'symbol'``.
    *
-   * If a Latex command (i.e. the trigger starts with `\`, e.g. `\frac`)
+   * If a LaTeX command (i.e. the trigger starts with `\`, e.g. `\frac`)
    * indicates the number of required arguments expected (indicated with
    * curly braces).
    *
@@ -187,18 +209,20 @@ export type ParseLatexOptions = {
    * If a symbol follows a number, consider them separated by this
    * invisible operator.
    *
-   * Default: `"Multiply"`
+   * Default: `Multiply`
    */
   invisibleOperator?: string;
 
   /**
    * If true, ignore space characters.
    *
+   * Default: `true`
+   *
    */
   skipSpace?: boolean;
 
   /**
-   * When an unknown latex command is encountered, attempt to parse
+   * When an unknown LaTeX command is encountered, attempt to parse
    * any arguments it may have.
    *
    * For example, `\foo{x+1}` would produce `['\foo', ['Add', 'x', 1]]` if
@@ -211,7 +235,9 @@ export type ParseLatexOptions = {
    * When a number is encountered, parse it.
    *
    * Otherwise, return each token making up the number (minus sign, digits,
-   * decimal separator, etc...)
+   * decimal separator, etc...).
+   *
+   * Default: `true`
    */
   parseNumbers?: boolean;
 
@@ -258,7 +284,7 @@ export type ParseLatexOptions = {
    * While this is a convenient shortcut, it is recommended to more explicitly
    * define custom functions by providing an entry for them in a function
    * dictionary (providing additional information about their arguments, etc...)
-   * and in a Latex translation dictionary (indicating what Latex markup
+   * and in a LaTeX translation dictionary (indicating what LaTeX markup
    * corresponds to the function).
    *
    * Example:
@@ -278,7 +304,7 @@ export type ParseLatexOptions = {
   promoteUnknownFunctions?: RegExp;
 
   /**
-   * If true, the expression will be decorated with the Latex
+   * If true, the expression will be decorated with the LaTeX
    * fragments corresponding to each elements of the expression
    */
   preserveLatex?: boolean;
@@ -286,7 +312,7 @@ export type ParseLatexOptions = {
 
 export type SerializeLatexOptions = {
   /**
-   * Latex string used to render an invisible multiply, e.g. in '2x'.
+   * LaTeX string used to render an invisible multiply, e.g. in '2x'.
    * Leave it empty to join the adjacent terms, or use `\cdot` to insert
    * a `\cdot` operator between them, i.e. `2\cdot x`.
    *
@@ -295,7 +321,7 @@ export type SerializeLatexOptions = {
   invisibleMultiply?: LatexString;
 
   /**
-   * Latex string used for an invisible plus, e.g. in '1 3/4'.
+   * LaTeX string used for an invisible plus, e.g. in '1 3/4'.
    * Leave it empty to join the main number and the fraction, i.e. render it
    * as `1\frac{3}{4}`, or use `+` to insert a `+` operator between them, i.e.
    * `1+\frac{3}{4}`
@@ -307,7 +333,7 @@ export type SerializeLatexOptions = {
   // @todo: consider invisibleApply?: string;
 
   /**
-   * Latex string used for an explicit multiply operator,
+   * LaTeX string used for an explicit multiply operator,
    *
    * Default: `\times`
    */
@@ -345,7 +371,7 @@ export type NumberFormattingOptions = {
 };
 
 /**
- * To customize the parsing and serializing of Latex syntax, create a `LatexSyntax`
+ * To customize the parsing and serializing of LaTeX syntax, create a `LatexSyntax`
  * instance.
  */
 export declare class LatexSyntax<T extends number = number> {
@@ -365,21 +391,21 @@ export declare class LatexSyntax<T extends number = number> {
   );
 
   /**
-   * Return a Latex dictionary suitable for the specified category, or `"all"`
+   * Return a LaTeX dictionary suitable for the specified category, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
    *
-   * A Latex dictionary is needed to translate between Latex and MathJSON.
+   * A LaTeX dictionary is needed to translate between LaTeX and MathJSON.
    *
-   * Each entry in the dictionary indicate how a Latex token (or string of
+   * Each entry in the dictionary indicate how a LaTeX token (or string of
    * tokens) should be parsed into a MathJSON expression.
    *
-   * For example an entry can define that the `\pi` Latex token should map to the
+   * For example an entry can define that the `\pi` LaTeX token should map to the
    * symbol `"Pi"`, or that the token `-` should map to the function
    * `["Negate",...]` when in a prefix position and to the function
    * `["Subtract", ...]` when in an infix position.
    *
    * Furthermore, the information in each dictionary entry is used to serialize
-   * the Latex string corresponding to a MathJSON expression.
+   * the LaTeX string corresponding to a MathJSON expression.
    *
    * Use the value returned by this function to the `options` argument of the
    * constructor.
@@ -403,13 +429,13 @@ export interface Serializer<T extends number = number> {
    * - 2 for the arguments of the arguments of the root
    * - etc...
    *
-   * This allows for variation of the Latex serialized based
+   * This allows for variation of the LaTeX serialized based
    * on the depth of the expression, for example using `\Bigl(`
    * for the top level, and `\bigl(` or `(` for others.
    */
   level: number;
 
-  /** Output a Latex string representing the expression */
+  /** Output a LaTeX string representing the expression */
   serialize: (expr: Expression<T> | null) => string;
 
   wrapString(s: string, style: 'paren' | 'leftright' | 'big' | 'none'): string;
@@ -447,9 +473,9 @@ export interface Scanner<T extends number = number> {
   lookAhead(): string[];
   /** Return the next token and advance the index */
   next(): LatexToken;
-  /** Return a latex string before the index */
+  /** Return a LaTeX string before the index */
   latexBefore(): string;
-  /** Return a latex string after the index */
+  /** Return a LaTeX string after the index */
   latexAfter(): string;
   /** If there are any space, advance the index until a non-space is encountered */
   skipSpace(): boolean;
@@ -526,7 +552,7 @@ export interface Scanner<T extends number = number> {
 }
 
 /**
- * Parse a Latex string and return a corresponding MathJSON expression.
+ * Parse a LaTeX string and return a corresponding MathJSON expression.
  *
  * @param onError - Called when a non-fatal error is encountered while parsing.
  * The parsing will attempt to recover and continue.
@@ -541,7 +567,7 @@ export declare function parse<T extends number = number>(
 ): Expression<T>;
 
 /**
- * Serialize a MathJSON expression as a Latex string.
+ * Serialize a MathJSON expression as a LaTeX string.
  *
  */
 export declare function serialize<T extends number = number>(

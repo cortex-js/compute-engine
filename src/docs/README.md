@@ -26,9 +26,10 @@ sidebar:
 
 ## Syntax and Symbol Dictionaries
 
-The <a href ="/math-json/format/">MathJSON format</a> is independent of any source or target language (Latex,
-MathASCII, etc...) or of any specific interpretation of the symbols used in a
-MathJSON expression (`"Pi"`, `"Sin"`, etc...).
+The <a href ="/math-json/format/">MathJSON format</a> is independent of any
+source or target language (LaTeX, MathASCII, etc...) or of any specific
+interpretation of the symbols used in a MathJSON expression (`"Pi"`, `"Sin"`,
+etc...).
 
 A **syntax dictionary** defines how a MathJSON expression can be expressed into
 a specific target language (**serialization**) or constructed from a source
@@ -55,12 +56,12 @@ For example:
 
 ## Domains
 
-A domain is similar to a type in a traditional programming
-language. 
+A domain is similar to a type in a traditional programming language.
 
-The domain of a symbol provides some contextual information about this symbol, for example: _"x is a positive integer"_. 
+The domain of a symbol provides some contextual information about this symbol,
+for example: _"x is a positive integer"_.
 
-The codomain of a function indicates the set of values that a function maps to, 
+The codomain of a function indicates the set of values that a function maps to,
 or the domain of the "result" of the function.
 
 Each entry in the symbol dictionary indicate the domain of the symbol, and for
@@ -79,15 +80,15 @@ The default dictionaries are organized by topic as follow:
 
 <div class=symbols-table>
 
-| Dictionary |  |
-|:---|:---|
-| [Arithmetic](/guides/compute-engine/arithmetic/) | `Add` `Multiply`...|
-| [Calculus](/guides/compute-engine/calculus/) | `Derive` `Integrate`...|
-| [Collections](/guides/compute-engine/collections/)| `Sequence` `List` `Dictionary` `Set`... |
-| [Core](/guides/compute-engine/core/) | `Missing` `Nothing` `None` `All`  `Identity` `InverseFunction` `LatexTokens`... |
-| [Logic](/guides/compute-engine/logic/) |`And` `Or` `Not`...|
-| [Sets](/guides/compute-engine/sets/) | `Union` `Intersection`...|
-| [Special Functions](/guides/compute-engine/special-functions/) | `Erf` `Gamma` `Factorial`...|
-| [Trigonometry](/guides/compute-engine/trigonometry/)  | `Cos` `Sin` `Tan`...| 
+| Dictionary                                                     |                                                                                |
+| :------------------------------------------------------------- | :----------------------------------------------------------------------------- |
+| [Arithmetic](/guides/compute-engine/arithmetic/)               | `Add` `Multiply`...                                                            |
+| [Calculus](/guides/compute-engine/calculus/)                   | `Derive` `Integrate`...                                                        |
+| [Collections](/guides/compute-engine/collections/)             | `Sequence` `List` `Dictionary` `Set`...                                        |
+| [Core](/guides/compute-engine/core/)                           | `Missing` `Nothing` `None` `All` `Identity` `InverseFunction` `LatexTokens`... |
+| [Logic](/guides/compute-engine/logic/)                         | `And` `Or` `Not`...                                                            |
+| [Sets](/guides/compute-engine/sets/)                           | `Union` `Intersection`...                                                      |
+| [Special Functions](/guides/compute-engine/special-functions/) | `Erf` `Gamma` `Factorial`...                                                   |
+| [Trigonometry](/guides/compute-engine/trigonometry/)           | `Cos` `Sin` `Tan`...                                                           |
 
 </div>

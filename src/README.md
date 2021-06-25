@@ -29,14 +29,13 @@ notation.
 
 <div class=symbols-table>
 
-| Math                      | MathJSON                                                                  |
-| :------------------------- | :------------------------------------------------------------------------ |
-| \\[\frac{n}{1+n}\\]            | `["Divide", "n", ["Add", 1, "n"]]`                                        |
-| \\[e^{\imaginaryI \pi }+1=0\\] | `["Equal",  ["Add", ["Exp", ["Multiply", "Pi", "ImaginaryUnit"], 1]], 0]` |
-| \\[\sin^{-1}^\prime(x)\\]      | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                    |
+| Math                           | MathJSON                                                                 |
+| :----------------------------- | :----------------------------------------------------------------------- |
+| \\[\frac{n}{1+n}\\]            | `["Divide", "n", ["Add", 1, "n"]]`                                       |
+| \\[e^{\imaginaryI \pi }+1=0\\] | `["Equal", ["Add", ["Exp", ["Multiply", "Pi", "ImaginaryUnit"], 1]], 0]` |
+| \\[\sin^{-1}^\prime(x)\\]      | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                   |
 
 </div>
-
 
 MathJSON is built on the [JSON format](https://www.json.org/). Its focus is on
 interoperability between software programs to facilitate the exchange of
@@ -51,14 +50,13 @@ MathJSON can be transformed from (parsing) and to (serialization) other formats,
 using a syntax specific to those formats.
 
 The MathJSON library provides an implementation in Javascript/Typescript of
-utilities that parse Latex to MathJSON, serialize MathJSON to Latex, and provide
+utilities that parse LaTeX to MathJSON, serialize MathJSON to LaTeX, and provide
 a collection of functions for symbolic manipulation and numerical evaluations of
-MathJSON expressions. 
+MathJSON expressions.
 
-<div class='read-more'><a href="/guides/compute-engine/dictionaries/">Read more about <strong>MathJSON for Latex</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/guides/compute-engine/dictionaries/">Read more about <strong>MathJSON for LaTeX</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 <div class='read-more'><a href="/compute-engine/">Read more about the <strong>Compute Engine</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
-
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations
@@ -68,7 +66,6 @@ be used to define new syntax and new semantic.
 
 MathJSON is not intended to be suitable as a visual representation of arbitrary
 mathematical notations, and as such is not a replacement for LaTeX or MathML.
-
 
 ## Structure of a MathJSON Expression
 
@@ -413,7 +410,7 @@ The following metadata keys are recommended:
 | `documentation` | A Markdown-encoded string providing documentation about this expression.                                                                                                     |
 | `latex`         | A visual representation in LaTeX of the expression. <br> This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
 | `sourceUrl`     | A URL to the source of this expression                                                                                                                                       |
-| `sourceContent` | The source from which this expression was generated.<br> It could be a Latex expression, or some other source language.                                                      |
+| `sourceContent` | The source from which this expression was generated.<br> It could be a LaTeX expression, or some other source language.                                                      |
 | `sourceOffsets` | A pair of character offsets in `sourceContent` or `sourceUrl` from which this expression was produced                                                                        |
 | `hash`          | A string representing a digest of this expression.                                                                                                                           |
 

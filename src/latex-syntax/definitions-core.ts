@@ -99,7 +99,7 @@ function serializeLatex<T extends number = number>(
   return getTail(expr)
     .map((x) => {
       const stringValue = getStringValue(x);
-      // If not a string, serialize the expression to Latex
+      // If not a string, serialize the expression to LaTeX
       if (stringValue === null) return serializer.serialize(x);
       if (stringValue === '<{>') return '{';
       if (stringValue === '<}>') return '}';

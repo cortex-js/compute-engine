@@ -141,7 +141,7 @@ export function parse<T extends number = Numeric>(
 }
 
 /**
- * Serialize a MathJSON expression as a Latex string.
+ * Serialize a MathJSON expression as a LaTeX string.
  *
  */
 export function serialize<T extends number = number>(
