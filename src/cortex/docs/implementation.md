@@ -7,7 +7,7 @@ sidebar:
   - nav: 'cortex'
 ---
 
-<script type='module'>
+<script defer type='module'>
     import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
     renderMathInDocument({ 
       renderAccessibleContent: false,
