@@ -27,18 +27,19 @@ import {
   DEFAULT_LATEX_NUMBER_OPTIONS,
   DEFAULT_PARSE_LATEX_OPTIONS,
 } from './utils';
+import { ComputeEngine } from '../compute-engine/public';
 
 export class Scanner<T extends number = number> implements Scanner<T> {
-  index = 0;
-
-  readonly tokens: LatexToken[];
-
   readonly onError: ErrorListener<ErrorCode>;
+  readonly options: Required<NumberFormattingOptions> &
+    Required<ParseLatexOptions>;
+  readonly computeEngine?: ComputeEngine;
 
   readonly dictionary: IndexedLatexDictionary<T>;
 
-  readonly options: Required<NumberFormattingOptions> &
-    Required<ParseLatexOptions>;
+  index = 0;
+
+  readonly tokens: LatexToken[];
 
   private invisibleOperatorPrecedence: number;
 
@@ -46,6 +47,7 @@ export class Scanner<T extends number = number> implements Scanner<T> {
     tokens: LatexToken[],
     options: Required<NumberFormattingOptions> & Required<ParseLatexOptions>,
     dictionary: IndexedLatexDictionary<T>,
+    computeEngine: undefined | ComputeEngine,
     onError: ErrorListener<ErrorCode>
   ) {
     this.options = {
@@ -53,6 +55,7 @@ export class Scanner<T extends number = number> implements Scanner<T> {
       ...DEFAULT_PARSE_LATEX_OPTIONS,
       ...options,
     };
+    this.computeEngine = computeEngine;
     this.tokens = tokens;
 
     this.onError = (err) => {
@@ -90,6 +93,7 @@ export class Scanner<T extends number = number> implements Scanner<T> {
       this.tokens.slice(start, end),
       this.options,
       this.dictionary,
+      this.computeEngine,
       this.onError
     );
   }

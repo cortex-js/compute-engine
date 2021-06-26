@@ -25,19 +25,21 @@ import {
   ErrorCode,
   ErrorListener,
 } from '../public';
-import { Numeric } from '../compute-engine/public';
+import { ComputeEngine, Numeric } from '../compute-engine/public';
 export class LatexSyntax<T extends number = number> {
   onError: ErrorListener<ErrorCode>;
-
   options: Required<NumberFormattingOptions> &
     Required<ParseLatexOptions> &
     Required<SerializeLatexOptions>;
+  readonly computeEngine?: ComputeEngine;
+
   private dictionary: IndexedLatexDictionary<T>;
 
   constructor(
     options?: NumberFormattingOptions &
       ParseLatexOptions &
       SerializeLatexOptions & {
+        computeEngine?: ComputeEngine;
         dictionary?: readonly LatexDictionaryEntry<T>[];
         onError?: ErrorListener<ErrorCode>;
       }
@@ -70,6 +72,7 @@ export class LatexSyntax<T extends number = number> {
       return;
     };
     this.onError = options?.onError ?? onError;
+    this.computeEngine = options?.computeEngine;
     const opts = { ...(options ?? {}) };
     delete opts.dictionary;
     delete opts.onError;
@@ -106,6 +109,7 @@ export class LatexSyntax<T extends number = number> {
       tokenize(latex, []),
       this.options,
       this.dictionary,
+      this.computeEngine,
       this.onError
     );
 
@@ -122,6 +126,7 @@ export class LatexSyntax<T extends number = number> {
     const serializer = new Serializer(
       this.options,
       this.dictionary,
+      this.computeEngine,
       this.onError
     );
     return serializer.serialize(expr);

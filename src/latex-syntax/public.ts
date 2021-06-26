@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../compute-engine/public';
 import {
   Expression,
   ErrorCode,
@@ -463,8 +464,8 @@ export declare class LatexSyntax<T extends number = number> {
 
 export interface Serializer<T extends number = number> {
   readonly onError: ErrorListener<ErrorCode>;
-
   readonly options: Required<SerializeLatexOptions>;
+  readonly computeEngine?: ComputeEngine;
 
   /** "depth" of the expression:
    * - 0 for the root
@@ -495,37 +496,37 @@ export interface Serializer<T extends number = number> {
   wrapShort(expr: Expression<T> | null): string;
 
   /** Styles */
-  applyFunctionStyle?: (
+  applyFunctionStyle: (
     expr: Expression,
     level: number
   ) => 'paren' | 'leftright' | 'big' | 'none';
 
-  groupStyle?: (
+  groupStyle: (
     expr: Expression,
     level: number
   ) => 'paren' | 'leftright' | 'big' | 'none';
 
-  rootStyle?: (
+  rootStyle: (
     expr: Expression,
     level: number
   ) => 'radical' | 'quotient' | 'solidus';
 
-  fractionStyle?: (
+  fractionStyle: (
     expr: Expression,
     level: number
   ) => 'quotient' | 'inline-solidus' | 'nice-solidus' | 'reciprocal' | 'factor';
 
-  logicStyle?: (
+  logicStyle: (
     expr: Expression,
     level: number
   ) => 'word' | 'boolean' | 'uppercase-word' | 'punctuation';
 
-  powerStyle?: (
+  powerStyle: (
     expr: Expression,
     level: number
   ) => 'root' | 'solidus' | 'quotient';
 
-  numericSetStyle?: (
+  numericSetStyle: (
     expr: Expression,
     level: number
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
@@ -539,6 +540,7 @@ export type SerializerFunction<T extends number = number> = (
 export interface Scanner<T extends number = number> {
   readonly onError: ErrorListener<ErrorCode>;
   readonly options: Required<ParseLatexOptions>;
+  readonly computeEngine?: ComputeEngine;
 
   index: number;
   readonly atEnd: boolean;
@@ -550,14 +552,19 @@ export interface Scanner<T extends number = number> {
    * The index is unchanged.
    */
   lookAhead(): string[];
+
   /** Return the next token and advance the index */
   next(): LatexToken;
+
   /** Return a LaTeX string before the index */
   latexBefore(): string;
+
   /** Return a LaTeX string after the index */
   latexAfter(): string;
+
   /** If there are any space, advance the index until a non-space is encountered */
   skipSpace(): boolean;
+
   /** If the next token matches the target advance and return true. Otherwise
    * return false */
   match(target: LatexToken): boolean;

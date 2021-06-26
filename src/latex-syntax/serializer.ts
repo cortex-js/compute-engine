@@ -25,7 +25,7 @@ import {
 import { joinLatex, tokensToString } from './core/tokenizer';
 import { serializeNumber } from '../common/serialize-number';
 import { replaceLatex } from './utils';
-import { Numeric } from '../compute-engine/public';
+import { ComputeEngine, Numeric } from '../compute-engine/public';
 
 function getSymbolStyle(expr: Expression, _level: number): 'asis' | 'upright' {
   console.assert(typeof expr === 'string' || isSymbolObject(expr));
@@ -116,18 +116,21 @@ function serializeOperator<T extends number = Numeric>(
 }
 
 export class Serializer<T extends number = number> implements Serializer<T> {
-  readonly dictionary: IndexedLatexDictionary<T>;
   readonly onError: ErrorListener<ErrorCode>;
   readonly options: Required<NumberFormattingOptions> &
     Required<SerializeLatexOptions>;
+  readonly computeEngine?: ComputeEngine;
+  readonly dictionary: IndexedLatexDictionary<T>;
   level = -1;
   constructor(
     options: Required<NumberFormattingOptions> &
       Required<SerializeLatexOptions>,
     dictionary: IndexedLatexDictionary<T>,
+    computeEngine: undefined | ComputeEngine,
     onError: ErrorListener<ErrorCode>
   ) {
     this.options = options;
+    this.computeEngine = computeEngine;
     if (options.invisibleMultiply) {
       if (
         !/#1/.test(options.invisibleMultiply) ||
@@ -405,5 +408,50 @@ export class Serializer<T extends number = number> implements Serializer<T> {
     })();
     this.level -= 1;
     return result ?? '';
+  }
+  applyFunctionStyle(
+    expr: Expression,
+    level: number
+  ): 'paren' | 'leftright' | 'big' | 'none' {
+    return this.options.applyFunctionStyle(expr, level);
+  }
+
+  groupStyle(
+    expr: Expression,
+    level: number
+  ): 'paren' | 'leftright' | 'big' | 'none' {
+    return this.options.groupStyle(expr, level);
+  }
+
+  rootStyle(
+    expr: Expression,
+    level: number
+  ): 'radical' | 'quotient' | 'solidus' {
+    return this.options.rootStyle(expr, level);
+  }
+
+  fractionStyle(
+    expr: Expression,
+    level: number
+  ): 'quotient' | 'inline-solidus' | 'nice-solidus' | 'reciprocal' | 'factor' {
+    return this.options.fractionStyle(expr, level);
+  }
+
+  logicStyle(
+    expr: Expression,
+    level: number
+  ): 'word' | 'boolean' | 'uppercase-word' | 'punctuation' {
+    return this.options.logicStyle(expr, level);
+  }
+
+  powerStyle(expr: Expression, level: number): 'root' | 'solidus' | 'quotient' {
+    return this.options.powerStyle(expr, level);
+  }
+
+  numericSetStyle(
+    expr: Expression,
+    level: number
+  ): 'compact' | 'regular' | 'interval' | 'set-builder' {
+    return this.options.numericSetStyle(expr, level);
   }
 }
