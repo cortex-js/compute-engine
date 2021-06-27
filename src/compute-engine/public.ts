@@ -205,7 +205,7 @@ export type FunctionFeatures = {
   pure: boolean;
 };
 
-/** A domain such as 'Number' or 'Boolean' represents a set of values.
+/** A domain such as `Number` or `Boolean` represents a set of values.
  *
  * Domains can be defined as a union or intersection of domains:
  * - `["Union", "Number", "Boolean"]` A number or a boolean.
@@ -216,6 +216,9 @@ export type FunctionFeatures = {
 export type Domain<T extends number = number> = Expression<T>;
 
 export type BaseDefinition<T extends number = number> = {
+  /**
+   * The domain of this item.
+   */
   domain: Domain<T> | ((...args: Expression<T>[]) => Domain<T>);
   /**
    * A short string representing an entry in a wikibase.
@@ -255,31 +258,6 @@ export type FunctionDefinition<T extends number = number> = BaseDefinition<T> &
     sequenceHold?: boolean;
 
     /**
-     * The number and domains of the arguments for this function.
-     *
-     */
-    inputDomain?: Domain[];
-
-    /**
-     *
-     * The domain of the result.
-     *
-     * If `range` is a function, the arguments of `range()` are the
-     * the arguments of the function. The `range()` function can
-     * make use of available assumptions to determine its result.
-     *
-     * The range should be as precise as possible. A range of
-     * `Anything` is correct, but won't be very helpful.
-     *
-     * A range of `Number` is good, a range of `RealNumber` is better
-     * and a range of `["Interval", 0, "+Infinity"]` is even better.
-     *
-     */
-    range:
-      | Domain<T>
-      | ((engine: ComputeEngine, ...args: Expression<T>[]) => Expression<T>);
-
-    /**
      * The value of this function, as a lambda function.
      * The arguments are `_`, `_2`, `_3`, etc...
      *
@@ -292,6 +270,8 @@ export type FunctionDefinition<T extends number = number> = BaseDefinition<T> &
     /**
      * Rewrite the expression into a simplified form.
      *
+     * Only make simple rewrites of the expression.
+     *
      * If appropriate, make use of assumptions with `ce.is()`.
      *
      * Do not resolve the values of variables, that is `ce.simplify("x+1")` is
@@ -301,15 +281,32 @@ export type FunctionDefinition<T extends number = number> = BaseDefinition<T> &
      *
      * Do not perform complex or lengthy operations: do these in `ce.evaluate()`.
      *
-     * Only make simple rewrites of the expression.
-     *
      * The passed-in arguments have been simplified already,
      * except for those to which a `hold` apply.
      */
     simplify?: (
       engine: ComputeEngine,
       ...args: Expression<T>[]
-    ) => Expression<T>;
+    ) => null | Expression<T>;
+
+    /**
+     *
+     * Calculate the domain of the result, based on the input domains.
+     *
+     * `doms` is the domain of the arguments. They can be a domain constant
+     * such as `ComplexNumber` or `Integer`, a `Interval` or `Range`
+     * parametric domain, or a domain expression using `Union`, `Intersection`,
+     * `SetMinus`. Use `ce.isSubsetOf()` if necessary.
+     *
+     * The return value is null if the input of the corresponding domain cannot
+     * be handled by the definition.
+     *
+     * Otherwise, the return value is the expected domain of the result.
+     * This function is used to select an appropriate definition, in case there
+     * are multiple available.
+     *
+     */
+    evalDomain: (ce: ComputeEngine, ...doms: Domain<T>[]) => null | Domain<T>;
 
     /**
      * Make a numeric evaluation of the arguments.
@@ -340,9 +337,7 @@ export type FunctionDefinition<T extends number = number> = BaseDefinition<T> &
     /**
      * Evaluate the arguments.
      *
-     * This will be invoked by the `ce.evaluate()` function, and
-     * after the `simplify()` and `evalNumber()` definition methods have been
-     * called.
+     * This will be invoked by the `ce.evaluate()` function.
      *
      * If a function must perform any computations that may take a long time
      * (>100ms), because they are computationally expensive, or because they
@@ -471,6 +466,13 @@ export type Simplification = 'simplify-all' | 'simplify-arithmetic';
 
 export type NumericFormat = 'auto' | 'machine' | 'decimal' | 'complex';
 
+export type AssumeResult =
+  | 'internal-error'
+  | 'not-a-predicate'
+  | 'contradiction'
+  | 'tautology'
+  | 'ok';
+
 export declare class ComputeEngine<T extends number = Numeric> {
   static getDictionaries(
     categories: DictionaryCategory[] | 'all'
@@ -483,9 +485,9 @@ export declare class ComputeEngine<T extends number = Numeric> {
   /** Absolute time beyond which evaluation should not proceed */
   deadline?: number;
 
-  readonly timeLimit?: number;
-  readonly iterationLimit?: number;
-  readonly recursionLimit?: number;
+  readonly timeLimit: number;
+  readonly iterationLimit: number;
+  readonly recursionLimit: number;
 
   set precision(p: number | 'machine');
   get precision(): number;
@@ -505,7 +507,11 @@ export declare class ComputeEngine<T extends number = Numeric> {
   shouldContinueExecution(): boolean;
   checkContinueExecution(): void;
 
-  getFunctionDefinition(name: string): FunctionDefinition | null;
+  getFunctionDefinition(expr: Expression): FunctionDefinition | null;
+  getFunctionDefinition(
+    name: string,
+    domains: Domain[]
+  ): FunctionDefinition | null;
   getSymbolDefinition(name: string): SymbolDefinition<T> | null;
   getSetDefinition(name: string): SetDefinition | null;
   getCollectionDefinition(name: string): CollectionDefinition<T> | null;
@@ -553,17 +559,9 @@ export declare class ComputeEngine<T extends number = Numeric> {
 
   replace(rules: RuleSet<T>, expr: Expression<T>): Expression<T>;
 
-  assume(
-    symbol: Expression<T>,
-    domain: Domain
-  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok';
-  assume(
-    predicate: Expression<T>
-  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok';
-  assume(
-    arg1: Expression<T>,
-    arg2?: Domain
-  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok';
+  assume(symbol: Expression<T>, domain: Domain): AssumeResult;
+  assume(predicate: Expression<T>): AssumeResult;
+  assume(arg1: Expression<T>, arg2?: Domain): AssumeResult;
 
   // Convenience functions: using the same dictionary as the engine
   // use a LatexParser to parse/serialize to LaTeX.

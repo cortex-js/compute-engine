@@ -90,9 +90,9 @@ function flattenInvolution(
 ): Expression {
   if (isAtomic(expr)) return expr;
 
-  const name = getFunctionName(expr);
-  const def = engine.getFunctionDefinition(name);
+  const def = engine.getFunctionDefinition(expr);
   if (def?.involution) {
+    const name = getFunctionName(expr);
     const args = getTail(expr);
     if (args.length === 1 && getFunctionName(args[0]) === name) {
       return flatten(args[0], name);
@@ -368,7 +368,9 @@ function canonicalBooleanForm(
   expr: Expression,
   _engine: ComputeEngine
 ): Expression {
-  // @todo
+  // @todo We should sort arguments of And, Or...
+  // But not do more. Use `refine()`, i.e. "simplify booleans",
+  // for further simplifications (i.e. ["And", "False", X] = "False")
   return expr;
 }
 

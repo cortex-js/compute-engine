@@ -13,7 +13,7 @@ import {
 } from '../common/utils';
 import { Expression } from '../public';
 import { internalN } from './numerical-eval';
-import { substitute } from './patterns';
+import { substitute, Substitution } from './patterns';
 import { ComputeEngine } from './public';
 
 export function evaluateOnce(
@@ -55,7 +55,7 @@ export function evaluateOnce(
   if (head !== null) {
     if (typeof head === 'string') {
       const def = engine.getFunctionDefinition(head);
-      // If it's an unknown functin, we don't know how to handle the arguments
+      // If it's an unknown function, we don't know how to handle the arguments
       if (def === null) return expr;
 
       //
@@ -87,19 +87,15 @@ export function evaluateOnce(
       }
       return [head, ...args];
     }
+
     //
     // 4.2/ It's a lambda function
     //
 
-    const args: { [symbol: string]: Expression } = {
-      __: ['Sequence', getTail(expr)],
-    };
+    const args: Substitution = { __: ['Sequence', getTail(expr)] };
     let n = 1;
-    for (const arg of getTail(expr)) {
-      if (n === 1) args['_'] = arg;
-      args[`_${n}`] = arg;
-      n += 1;
-    }
+    for (const arg of getTail(expr)) args[`_${n++}`] = arg;
+    args['_'] = args['_1'];
 
     return evaluateOnce(engine, substitute(head, args));
   }
