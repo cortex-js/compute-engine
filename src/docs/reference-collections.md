@@ -1,6 +1,6 @@
 ---
 title: Collections
-permalink: /guides/compute-engine/collections/
+permalink: /compute-engine/reference/collections/
 layout: single
 date: Last Modified
 sidebar:

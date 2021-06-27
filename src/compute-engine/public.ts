@@ -631,7 +631,7 @@ export declare function evaluate<T extends number = number>(
  * A given mathematical expression can be represented in multiple equivalent
  * ways as a MathJSON expression.
  *
- * Learn more about [Canonical Forms](https://cortexjs.io/guides/compute-engine/forms/).
+ * Learn more about [Canonical Forms](https://cortexjs.io/compute-engine/guides/forms/).
  */
 export type Form =
   | 'canonical'

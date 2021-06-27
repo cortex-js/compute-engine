@@ -1,6 +1,6 @@
 ---
 title: Core
-permalink: /guides/compute-engine/core/
+permalink: /compute-engine/reference/core/
 layout: single
 date: Last Modified
 sidebar:

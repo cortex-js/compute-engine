@@ -1,6 +1,6 @@
 ---
 title: Symbolic Computing
-permalink: /guides/compute-engine/numerical-evaluation/
+permalink: /compute-engine/guides/numerical-evaluation/
 layout: single
 date: Last Modified
 sidebar:
@@ -28,7 +28,7 @@ sidebar:
 **To obtain a numerical approximation of the value of an expression**, use the
 `ce.N()` function.
 
-If `ce.N()` cannot provide a numerical evaluation, a [canonical](/guides/compute-engine/forms/) symbolic representation
+If `ce.N()` cannot provide a numerical evaluation, a [canonical](/compute-engine/guides/forms/) symbolic representation
 of the partially evaluated expression is returned.
 
 ```ts
@@ -38,7 +38,7 @@ console.log(ce.N(parse('\\sqrt{5} + 7^3'))
 console.log(ce.N(parse('\\sqrt{x} + 7^3'));
 // -> ["Add", ["Sqrt", "x"], 343]
 ```
-<div class='read-more'><a href="/guides/compute-engine/symbolic-computing/">Read more about <strong>Symbolic Computing</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/guides/symbolic-computing/">Read more about <strong>Symbolic Computing</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 
 ## Numeric Formats
@@ -152,8 +152,8 @@ The dictionaries below can provide numerical evaluations for their numeric funct
 
 |  | | 
 | :--- | :--- | 
-| [Arithmetic](/guides/compute-engine/arithmetic/)  | `Add` `Multiply` `Sqrt` `Log` `Abs` `Round`... |
-| [Trigonometry](/guides/compute-engine/trigonometry/)  | `Sin` `Cos` `Tan` `Sinh` `Arcsin`...|
-| [Special Functions](/guides/compute-engine/special-functions/)  | `Erf` `Gamma` `Factorial`...|
+| [Arithmetic](/compute-engine/reference/arithmetic/)  | `Add` `Multiply` `Sqrt` `Log` `Abs` `Round`... |
+| [Trigonometry](/compute-engine/reference/trigonometry/)  | `Sin` `Cos` `Tan` `Sinh` `Arcsin`...|
+| [Special Functions](/compute-engine/reference/special-functions/)  | `Erf` `Gamma` `Factorial`...|
 
 </div>

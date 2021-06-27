@@ -1,6 +1,6 @@
 ---
 title: Patterns
-permalink: /guides/compute-engine/patterns-and-rules/
+permalink: /compute-engine/guides/patterns-and-rules/
 layout: single
 date: Last Modified
 sidebar:

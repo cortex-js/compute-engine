@@ -1,6 +1,6 @@
 ---
 title: Arithmetic
-permalink: /guides/compute-engine/arithmetic/
+permalink: /compute-engine/reference/arithmetic/
 layout: single
 date: Last Modified
 sidebar:
@@ -46,14 +46,30 @@ sidebar:
 </div>
 
 
-<div class='read-more'><a href="/guides/compute-engine/trigonometry/">See also <strong>Trigonometry</strong> for \( \pi \) and 
+<div class='read-more'><a href="/compute-engine/reference/trigonometry/">See also <strong>Trigonometry</strong> for \( \pi \) and 
 related constants<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
+## Predicates
+
+<div class=symbols-table>
+
+| Function | Notation | |
+| :--- | :--- | :--- |
+| `Equal` | \\( x = y \\) |  Mathematical relationship asserting that two quantities have the same value |
+| `Greater` | \\( x \gt y \\) | | 
+| `GreaterEqual` | \\( x \geq y \\) | | 
+| `Less` | \\( x \lt y \\) | | 
+| `LessEqual` | \\( x \leq y \\) | | 
+| `NotEqual` | \\( x \ne y \\) | |
+
+</div>
+
 
 ## Functions
 
 <div class=symbols-table>
 
-| Function | Operation | |
+| Function | Notation | |
 | :--- | :--- | :--- |
 | `Add` | \\( a + b\\) | [Addition](https://www.wikidata.org/wiki/Q32043) |
 | `Subtract` | \\( a - b\\) | [Subtraction](https://www.wikidata.org/wiki/Q32043)
@@ -65,10 +81,12 @@ related constants<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use>
 | `Square` |  \\(x^2\\) | |
 </div>
 
----
+
+### Transcendental Functions
+
 <div class=symbols-table>
 
-| Function | Operation | |
+| Function | Notation | |
 | :--- | :--- | :--- |
 | `Exp` | \\(\exponentialE^{x}\\) |  [Exponential function](https://www.wikidata.org/wiki/Q168698) |
 | `Log` | \\(\ln(x)\\) | [Logarithm function](https://www.wikidata.org/wiki/Q11197), the inverse of `Exp` |
@@ -77,15 +95,19 @@ related constants<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use>
 | `LogOnePlus` | | |
 </div>
 
----
+<div class='read-more'><a href="/compute-engine/reference/trigonometry/">See also <strong>Trigonometry</strong> for trigonometric functions<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
+
+
+### Rounding
 
 <div class=symbols-table>
 
-| Function | Operation | |
+| Function | Notation | |
 | :--- | :--- | :--- |
 | `Abs` | \\(\|x\|  \\) | Absolute value, [magnitude](https://www.wikidata.org/wiki/Q3317982) |
-| `Chop` |  | Replace real numbers that are very close to 0 (less than \\(10^{-10}\\)) with 0 |
 | `Ceil` | | Rounds a number up to the next largest integer |
+| `Chop` |  | Replace real numbers that are very close to 0 (less than \\(10^{-10}\\)) with 0 |
 | `Floor` | | Round a number to the greatest integer less than the input value. |
 | `Round` | | |
 

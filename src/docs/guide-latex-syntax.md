@@ -1,6 +1,6 @@
 ---
 title: LaTeX Syntax
-permalink: /guides/math-json/latex-syntax/
+permalink: /compute-engine/guides/latex-syntax/
 layout: single
 date: Last Modified
 sidebar:
@@ -66,7 +66,7 @@ The `LatexSyntax` constructor can be passed some options to customize the
 parsing and serializing, as well as dictionaries defining the syntax and
 vocabulary.
 
-<div class='read-more'><a href="/guides/compute-engine/dictionaries/">Read more about <strong>Dictionaries</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/guides/dictionaries/">Read more about <strong>Dictionaries</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 **To change the LaTeX syntax options after a `LatexSyntax` instance has been
 created**, change the `options` property.

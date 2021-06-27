@@ -1,6 +1,6 @@
 ---
 title: Special Functions
-permalink: /guides/compute-engine/special-functions/
+permalink: /compute-engine/reference/special-functions/
 layout: single
 date: Last Modified
 sidebar:
@@ -27,7 +27,7 @@ sidebar:
 
 <div class=symbols-table>
 
-| Function | Operation | |
+| Function | Notation | |
 | :--- | :--- | :--- |
 | `Erf` | \\(\operatorname{Erf}\\) | \\( z={\frac{2}{\sqrt {\pi }}}\int_{0}^{z}e^{-t^2}\\,dt\\), the [Error function](https://en.wikipedia.org/wiki/Error_function) is the integral of the Gaussian distribution |
 | `Erfc` | \\(\operatorname {Erfc} \\) | \\(z=1-\operatorname {Erf} z\\), the Complementary Error Function |

@@ -1,6 +1,6 @@
 ---
 title: Trigonometry
-permalink: /guides/compute-engine/trigonometry/
+permalink: /compute-engine/reference/trigonometry/
 layout: single
 date: Last Modified
 sidebar:

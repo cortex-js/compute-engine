@@ -54,7 +54,7 @@ utilities that parse LaTeX to MathJSON, serialize MathJSON to LaTeX, and provide
 a collection of functions for symbolic manipulation and numerical evaluations of
 MathJSON expressions.
 
-<div class='read-more'><a href="/guides/compute-engine/dictionaries/">Read more about <strong>MathJSON for LaTeX</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/guides/dictionaries/">Read more about <strong>MathJSON for LaTeX</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 <div class='read-more'><a href="/compute-engine/">Read more about the <strong>Compute Engine</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 

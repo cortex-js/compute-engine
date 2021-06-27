@@ -191,7 +191,7 @@ export function matchRecursive(
 }
 
 /**
- * The function attempts to match a [pattern](http://cortexjs.io/guides/compute-engine/patterns-and-rules/)
+ * The function attempts to match a [pattern](http://cortexjs.io/compute-engine/guides/patterns-and-rules/)
  * with a subject expression.
  *
  * If the match is successful, it returns a `Substitution` indicating how to

@@ -1,6 +1,6 @@
 ---
 title: Execution Constraints
-permalink: /guides/compute-engine/execution-constraints/
+permalink: /compute-engine/guides/execution-constraints/
 layout: single
 date: Last Modified
 sidebar:

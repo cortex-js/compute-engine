@@ -1,6 +1,6 @@
 ---
 title: Domains
-permalink: /guides/compute-engine/domains/
+permalink: /compute-engine/reference/domains/
 layout: single
 date: Last Modified
 sidebar:
@@ -23,123 +23,6 @@ sidebar:
     });
 </script>
 
-# Domains
-
-A **domain**, such as `Integer` `Boolean`, is a **set** used to represent the possible values of an expression.
-
-
-**Domains are similar to _types_ in programming languages.** They are used to 
-select the correct function definition. For example a function `Add` could operate
-either on numbers or matrixes. The domain of the arguments is used to
-select the appropriate function definition. Domains are also used in symbolic manipulation
-algorithm to decide when certain manipulations are possible.
-
-The list below includes the domains that are included in the standard dictionary of the Compute Engine.
-
-
-
-## Domains Lattice
-
-**Domains are defined in a hierarchy (a lattice).** The upper bound of the
-lattice is `Anything` and the lower bound is `Nothing`. 
-
-The _parent_ of a domain represents a _is-a_/_subset-of_ relationship, for example, a `List` _is-a_ `Collection`.
-
-![Anything domains](/assets/domains.001.jpeg 'The top-level domains')
-![Tensor domains](/assets/domains.002.jpeg 'The Tensor sub-domains')
-![Function domains](/assets/domains.003.jpeg 'The Function sub-domains')
-![Number domains](/assets/domains.004.jpeg 'The Number sub-domains')
-
-The implementation of the CortexJS domains is based on
-[Weibel, Trudy & Gonnet, Gaston. (1991). An Algebra of Properties.. 352-359. 10.1145/120694.120749. ](https://www.researchgate.net/publication/.221564157_An_Algebra_of_Properties).{.notice--info}
-
-## Obtaining the Domain of an Expression
-
-**To obtain the domain of an expression**, use the `ce.domain()` function.
-
-```js
-const ce = new ComputeEngine();
-
-ce.domain('Pi');
-// ➔ "TranscendentalNumber"
-
-ce.domain('Add');
-// ➔ "Function": domain of the symbol "Add"
-
-ce.domain(['Add', 5, 2]);
-// ➔ "Number": the result of the "Add" function
-// (its codomain) in general is a "Number"
-
-ce.domain(ce.evaluate(['Add', 5, 2]));
-// ➔ "Integer": once evaluated, the domain of the result may be more specific
-```
-
-## Defining New Domains
-
-A new domain can be defined using a **domain expression**, that is a set 
-expression using any of the any of the **set functions**: `Union` 
-`Intersection` `SetMinus`..., combined with domains and **parametric domain** functions.
-
-
-```json
-//  A number or a boolean.
-["Union", "Number", "Boolean"]
-
-// Any number except "1".
-["SetMinus", "Number", 1]
-```
-
-<div class='read-more'><a href="/guides/compute-engine/sets/">Learn more about <strong>Sets</strong> and the set functions<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
-
-
-**Parametric domains** are functions that define a domain:
-
-```json
-// Range of non-negative integers
-["Range", 0, "+Infinity"]
-```
-
-The `["Range", <min>, <max>]` parametric domain defines a set of integers such
-that \\( \mathord{min} \le n \le \mathord{max}, n \in \N \\).
-
-The `["Interval", <min>, <max>]` parametric domain defines a set of real numbers
-such that \\( \mathord{min} \le x \le \mathord{max}, n \in \R \\).
-
-**To represent an open interval**, use the `Open` function:
-`["Interval", ["Open", <min>], <max>]` \\( \operatorname{min} \lt x \le \operatorname{max},
-n \in \R \\) or \\(x \in \rbrack \operatorname{min}, \operatorname{max} \rbrack \\).
-
-
-<div class=symbols-table>
-
-| Parametric Domain | Description |
-| :--- | :--- |
-| `Function` | `["Function", ...<arg-domain>, <co-domain>]` <br> For example, `["Function", "Number", "Boolean"]` is the domain of the functions that have a single argument, a number, and return a boolean (has a boolean codomain). |
-| `Interval` | `["Interval", <min>, <max>]` <br> The set of real numbers between `<min>` and `<max>`. Use `["Interval", ["Open", <min>], <max>]` to indicate an  open interval. |
-| `Multiple` | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integer", 1]`|
-| `Range` | `["Range", <min>, <max>]` <br> The set of integers from `<min>` to `<max>` (inclusive). |
-
-</div>
-
-
-
-
-
-## Simplifying Domains
-
-**To simplify a domain expression**, use `ce.simplify(<domain>)`.
-
-```js
-ce.simplify(["SetMinus", "Integer", ["Range", "-Infinity", 0]]);
-// ➔ ["Range", 1, "+Infinity]]
-
-ce.simplify(
-  ["Union", ["Number", 0, "+Infinity"], ["Number", "-Infinity", 5]],
-);
-// ➔ "ExtendedRealNumber"
-```
-
-## List of Domains
 
 ### Numeric Domains
 
@@ -149,10 +32,19 @@ ce.simplify(
 | :--- | :--- | :--- |
 | `AlgebraicNumber`| \\[ \mathbb{A} \\] | Elements are the root of a polynomial |
 | `ComplexNumber` | \\(\mathbb{C}\\) | A real or imaginary number |
-| `Integer` | \\(\mathbb{Z}\\) | The set of whole numbers: \\(\lbrace 0, 1, 2, 3\ldots\rbrace\\) and their additive inverse: \\(\lbrace -1, -2, -3\ldots\rbrace\\) |
+| `Integer` | \\(\mathbb{Z}\\) | The set of whole numbers and their additive inverse \\(\lbrace \ldots -3, -2, -1,0, 1, 2, 3\ldots\rbrace\\) |
+| `NegativeInteger` | \\( \\Z^-  \\) | Integers \\( \lt 0 \\) |
+| `NegativeNumber` | \\( \\R^-  \\) | Real numbers \\( \lt 0 \\) |
+| `NonNegativeInteger` | \\( \\Z^{0+}  \\) | Integers \\( \geq 0 \\) |
+| `NonNegativeNumber` | \\( \\R^{0+}  \\) | Real numbers \\( \geq 0 \\) |
+| `NonPositiveInteger` | \\( \\Z^{0-}  \\) | Integers \\( \leq 0 \\) |
+| `NonPositiveNumber` | \\( \\R^{0-}  \\) | Real numbers \\( \leq 0 \\) |
 | `Number` |  | Any number, real or complex |
+| `PositiveInteger` | \\( \\Z^{+}  \\) | Integers \\( \gt 0 \\) |
+| `PositiveNumber` | \\( \\R^{+}  \\) | Real numbers \\( \gt 0 \\) |
 | `RationalNumber` | \\(\mathbb{Q}\\) | A number which can be expressed as the quotient \\(p / q\\) of two integers \\(p, q \in \mathbb{Z}\\). |
 | `RealNumber` |\\(\mathbb{R}\\) | |
+| `TranscendentalNumber`| \\[ \mathbb{T} \\] | Real numbers that are not algebraic |
 
 </div>
 

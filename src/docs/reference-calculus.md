@@ -1,6 +1,6 @@
 ---
 title: Calculus
-permalink: /guides/compute-engine/calculus/
+permalink: /compute-engine/reference/calculus/
 layout: single
 date: Last Modified
 sidebar:

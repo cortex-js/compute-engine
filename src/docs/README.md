@@ -1,6 +1,6 @@
 ---
 title: MathJSON Dictionary
-permalink: /guides/compute-engine/dictionaries/
+permalink: /compute-engine/guides/dictionaries/
 layout: single
 date: Last Modified
 sidebar:
@@ -82,13 +82,13 @@ The default dictionaries are organized by topic as follow:
 
 | Dictionary                                                     |                                                                                |
 | :------------------------------------------------------------- | :----------------------------------------------------------------------------- |
-| [Arithmetic](/guides/compute-engine/arithmetic/)               | `Add` `Multiply`...                                                            |
-| [Calculus](/guides/compute-engine/calculus/)                   | `Derive` `Integrate`...                                                        |
-| [Collections](/guides/compute-engine/collections/)             | `Sequence` `List` `Dictionary` `Set`...                                        |
-| [Core](/guides/compute-engine/core/)                           | `Missing` `Nothing` `None` `All` `Identity` `InverseFunction` `LatexTokens`... |
-| [Logic](/guides/compute-engine/logic/)                         | `And` `Or` `Not`...                                                            |
-| [Sets](/guides/compute-engine/sets/)                           | `Union` `Intersection`...                                                      |
-| [Special Functions](/guides/compute-engine/special-functions/) | `Erf` `Gamma` `Factorial`...                                                   |
-| [Trigonometry](/guides/compute-engine/trigonometry/)           | `Cos` `Sin` `Tan`...                                                           |
+| [Arithmetic](/compute-engine/reference/arithmetic/)               | `Add` `Multiply`...                                                            |
+| [Calculus](/compute-engine/reference/calculus/)                   | `Derive` `Integrate`...                                                        |
+| [Collections](/compute-engine/reference/collections/)             | `Sequence` `List` `Dictionary` `Set`...                                        |
+| [Core](/compute-engine/reference/core/)                           | `Missing` `Nothing` `None` `All` `Identity` `InverseFunction` `LatexTokens`... |
+| [Logic](/compute-engine/reference/logic/)                         | `And` `Or` `Not`...                                                            |
+| [Sets](/compute-engine/reference/sets/)                           | `Union` `Intersection`...                                                      |
+| [Special Functions](/compute-engine/reference/special-functions/) | `Erf` `Gamma` `Factorial`...                                                   |
+| [Trigonometry](/compute-engine/reference/trigonometry/)           | `Cos` `Sin` `Tan`...                                                           |
 
 </div>

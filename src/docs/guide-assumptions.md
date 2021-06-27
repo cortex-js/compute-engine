@@ -1,6 +1,6 @@
 ---
 title: Assumptions
-permalink: /guides/compute-engine/assumptions/
+permalink: /compute-engine/guides/assumptions/
 layout: single
 date: Last Modified
 sidebar:
@@ -120,13 +120,5 @@ can also be made.
 
 
 
-<div class='read-more'><a href="/guides/compute-engine/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/guides/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
-## Domain
-
-**To query the domain of an expression**, use the `domain()` function.
-
-```js
-ce.domain('Pi');
-// -> "IrrationalNumber"
-```

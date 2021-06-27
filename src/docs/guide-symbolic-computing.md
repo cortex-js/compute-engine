@@ -1,6 +1,6 @@
 ---
 title: Symbolic Computing
-permalink: /guides/compute-engine/symbolic-computing/
+permalink: /compute-engine/guides/symbolic-computing/
 layout: single
 date: Last Modified
 sidebar:
@@ -81,7 +81,7 @@ console.log(ce.canonical(["Add", 2, "x", 3]);
 ```
 
 
-<div class='read-more'><a href="/guides/compute-engine/forms/">Read more about <strong>Canonical Forms</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/guides/forms/">Read more about <strong>Canonical Forms</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 
 ## Simplify
@@ -97,12 +97,12 @@ assumption that \\( x > 0 \\) is available, then the expression can be
 simplified to \\( x \\).
 
 
-<div class='read-more'><a href="/guides/compute-engine/assumptions/">Read more about <strong>Assumptions</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/guides/assumptions/">Read more about <strong>Assumptions</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 
 ## Evaluate
 
-**To combine a symbolic simplification followed by a [numerical evaluation](/guides/compute-engine/numerical-evaluation)**, use
+**To combine a symbolic simplification followed by a [numerical evaluation](/compute-engine/guides/numerical-evaluation)**, use
 the `ce.evaluate()` function.
 
 Invoking the `ce.evaluate()` function is roughly equivalent to calling in sequence
@@ -117,4 +117,4 @@ You can compare two expressions, check if an expression match a pattern,
 apply a substitution to some elements in an expression or apply a conditional rewriting rule to an expression.
 
 
-<div class='read-more'><a href="/guides/compute-engine/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong> for these operations<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/guides/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong> for these operations<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>

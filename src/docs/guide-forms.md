@@ -1,6 +1,6 @@
 ---
 title: Canonical Forms
-permalink: /guides/compute-engine/forms/
+permalink: /compute-engine/guides/forms/
 layout: single
 date: Last Modified
 sidebar:
@@ -133,4 +133,4 @@ String(BaseForm(42, 16))
 You can define and apply your own custom rewriting rules using patterns,
 rules and the `ce.replace()` function.
 
-<div class='read-more'><a href="/guides/compute-engine/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/guides/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>

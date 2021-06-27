@@ -1,6 +1,6 @@
 ---
 title: Sets
-permalink: /guides/compute-engine/sets/
+permalink: /compute-engine/reference/sets/
 layout: single
 date: Last Modified
 sidebar:
@@ -27,7 +27,7 @@ A **set** is a collection of distinct elements.
 
 A **domain**, such as `Integer` `Boolean`, is a **set** used to represent the possible values of an expression.
 
-<div class='read-more'><a href="/guides/compute-engine/domains/">Learn more about <strong>Domains</strong> <svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+<div class='read-more'><a href="/compute-engine/reference/domains/">Read more about <strong>Domains</strong> <svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
 
 
 ## Constants
@@ -41,7 +41,7 @@ A **domain**, such as `Integer` `Boolean`, is a **set** used to represent the po
 
 </div>
 
-The [domains](/guides/compute-engine/domains/) also define a number of sets.
+The [domains](/compute-engine/reference/domains/) also define a number of sets.
 ## Functions
 
 New sets can be defined using a **set expression**. A set expression is an expression with one of the following head functions.
