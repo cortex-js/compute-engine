@@ -23,37 +23,57 @@ sidebar:
 </script>
 # Sets
 
+A **set** is a collection of distinct elements.
+
+A **domain**, such as `Integer` `Boolean`, is a **set** used to represent the possible values of an expression.
+
+<div class='read-more'><a href="/guides/compute-engine/domains/">Learn more about <strong>Domains</strong> <svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+
+
 ## Constants
 
 
 <div class=symbols-table>
 
-| Symbol | Value | |
+| Symbol | Notation | Definition |
 | :--- | :--- | :--- |
-| `NaturalNumber`| \\[ \N \\] | \\[ 0, 1, 2, 3...\\] |
-| `Integer`| \\[ \Z \\] | \\[ ... -2, -1, 0, 1, 2...\\] |
-| `RationalNumber`| \\[ \Q \\] | Can be written as \\( \frac{p}{q} \\) where \\( p, q \in \Z \\)|
-| `AlgebraicNumber`| \\[ \mathbb{A} \\] | Is the root of a polynomial |
-| `RealNumber`| \\[ \R \\] | |
-| `ComplexNumber`| \\[ \C \\] | |
 | `EmptySet`| \\( \varnothing \\) or \\( \emptyset \\)  | |
 
 </div>
 
+The [domains](/guides/compute-engine/domains/) also define a number of sets.
 ## Functions
+
+New sets can be defined using a **set expression**. A set expression is an expression with one of the following head functions.
 
 <div class=symbols-table>
 
 | Function | Operation | |
 | :--- | :--- | :--- |
-| `CartesianProduct` |  | Aka the product set, the set direct product or cross product. [Q173740](https://www.wikidata.org/wiki/Q173740) |
-| `Intersection` | \\[ A \cap B \\]  |  [Q185837](https://www.wikidata.org/wiki/Q185837) |
-| `Complement` | \\[ A \complement B\\]  |  Return the elements of the first argument that are not in any of  the subsequent sets.  [Q242767](https://www.wikidata.org/wiki/Q242767) |
-| `Union` | \\[ A \cup B \\]  |  [Q173740](https://www.wikidata.org/wiki/Q173740) |
-| `SymmetricDifference` | \\[  A \triangle B \\]  | Disjunctive union = \\( (A \setminus B) \cup (B \setminus A)\\) [Q1147242](https://www.wikidata.org/wiki/Q1147242) |
-| `Subset` | \\[ A \subset B \\]  |  |
-| `SubsetEqual` | \\[ A \subseteq B \\]  |  |
-| `SetMinus` | \\[ A \setminus B \\]  |  [Q18192442](https://www.wikidata.org/wiki/Q18192442) |
+| `CartesianProduct` | \\[ \mathrm{A} \times \mathrm{B} \\] | A.k.a the product set, the set direct product or cross product. [Q173740](https://www.wikidata.org/wiki/Q173740) |
+| `Complement` | \\[ \mathrm{A}^\complement \\]  |  The set of elements that are not in \\( \mathrm{A} \\). If \\(\mathrm{A}\\) is a numeric domain, the universe is assumed to be the set of all numbers. [Q242767](https://www.wikidata.org/wiki/Q242767) |
+| `Intersection` | \\[ \mathrm{A} \cap \mathrm{B} \\]  | The set of elements that are in  \\(\mathrm{A}\\) and in \\(\mathrm{B}\\) [Q185837](https://www.wikidata.org/wiki/Q185837) |
+| `Union` | \\[ \mathrm{A} \cup \mathrm{B} \\]  | The set of elements that are in \\(\mathrm{A}\\) or in \\(\mathrm{B}\\) [Q173740](https://www.wikidata.org/wiki/Q173740) |
+| `Set` | \\(\lbrace 1, 2, 3 \rbrace \\) |  Set builder notation |
+| `SetMinus` | \\[ \mathrm{A} \setminus \mathrm{B} \\]  |  [Q18192442](https://www.wikidata.org/wiki/Q18192442) |
+| `SymmetricDifference` | \\[  \mathrm{A} \triangle \mathrm{B} \\]  | Disjunctive union = \\( (\mathrm{A} \setminus \mathrm{B}) \cup (\mathrm{B} \setminus \mathrm{A})\\) [Q1147242](https://www.wikidata.org/wiki/Q1147242) |
 
 </div>
 
+
+## Relations
+
+<div class=symbols-table>
+
+| Function |  | |
+| :--- | :--- | :--- |
+| `Element` | \\[ x \in \mathrm{A} \\]  |  |
+| `NotElement` | \\[ x \not\in \mathrm{A} \\]  |  |
+| `NotSubset` | \\[ A \nsubset \mathrm{B} \\]  |  |
+| `NotSuperset` | \\[ A \nsupset \mathrm{B} \\]  |  |
+| `Subset` | \\[ \mathrm{A} \subset \mathrm{B} \\] <br> \\[ \mathrm{A} \subsetneq \mathrm{B} \\] <br> \\[ \mathrm{A} \varsubsetneqq \mathrm{B} \\]|  |
+| `SubsetEqual` | \\[ \mathrm{A} \subseteq \mathrm{B} \\]  |  |
+| `Superset` | \\[ \mathrm{A} \supset \mathrm{B} \\]<br>  \\[ \mathrm{A} \supsetneq \mathrm{B} \\]<br>\\[ \mathrm{A} \varsupsetneq \mathrm{B} \\] |  |
+| `SupersetEqual` | \\[ \mathrm{A} \supseteq \mathrm{B} \\]  |  |
+
+</div>
