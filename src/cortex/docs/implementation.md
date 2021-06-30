@@ -6,22 +6,6 @@ date: Last Modified
 sidebar:
   - nav: 'cortex'
 ---
-
-<script defer type='module'>
-    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({ 
-      renderAccessibleContent: false,
-      TeX: { 
-        delimiters: {
-          inline: [['\\(', '\\)']],
-          display: [ ['$$', '$$'], ['\\[', '\\]']],
-        },
-        processEnvironments : false 
-      },
-      asciiMath: null,
-    });
-</script>
-
 # Inside Cortex
 
 A Cortex program is an expression that gets transformed into an IR (Intermediate

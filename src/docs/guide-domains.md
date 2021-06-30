@@ -6,23 +6,6 @@ date: Last Modified
 sidebar:
   - nav: 'compute-engine'
 ---
-
-<script defer type='module'>
-    import {  renderMathInDocument } 
-      from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({
-      TeX: {
-        delimiters: {
-          inline: [ ['$', '$'], ['\\(', '\\)']],
-          display: [['$$', '$$'],['\\[', '\\]']],
-        },
-      },
-      asciiMath: null,
-      processEnvironments : false,
-      renderAccessibleContent: false,
-    });
-</script>
-
 # Domains
 
 A **domain**, such as `Integer` `Boolean`, is a **set** used to represent the possible values of an expression.

@@ -6,21 +6,6 @@ date: Last Modified
 sidebar:
   - nav: 'compute-engine'
 ---
-<script defer type='module'>
-    import {  renderMathInDocument } 
-      from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({
-      TeX: {
-        delimiters: {
-          inline: [ ['$', '$'], ['\\(', '\\)']],
-          display: [['$$', '$$'],['\\[', '\\]']],
-        },
-      },
-      asciiMath: null,
-      processEnvironments : false,
-      renderAccessibleContent: false,
-    });
-</script>
 # Sets
 
 A **set** is a collection of distinct elements.

@@ -7,22 +7,6 @@ sidebar:
   - nav: 'cortex'
 ---
 
-<script defer type='module'>
-    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({     renderMathInDocument({ 
-      renderAccessibleContent: false,
-      TeX: { 
-        delimiters: {
-          inline: [['\\(', '\\)']],
-          display: [ ['$$', '$$'], ['\\[', '\\]']],
-        },
-        processEnvironments : false 
-      },
-      asciiMath: null,
-    });
-
-</script>
-
 # Cortex
 
 Cortex is a programming language for scientific computing built on the Cortex
