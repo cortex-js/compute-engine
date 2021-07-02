@@ -12,6 +12,25 @@ sidebar:
 Recognizing patterns and applying rules is a powerful symbolic computing tool 
 to identify and manipulate the structure of expressions.
 
+## Wildcards
+
+Wildcard symbols are placeholders in an expression. They start with a `_`.
+
+The `"_"` wildcard matches anything that is in the corresponding position in an
+expression.
+
+The `"__"` wildcard matches any sequence of 1 or more expressions in its
+corresponding position. It is useful to capture the arguments of a function.
+
+The `"___"` wildcard matches any sequence of 0 or more expressions in its
+corresponding position.
+
+A wildcard symbol may include a name which is used to _capture_ the
+matching expression. When using a named wildcard, all instances of the named
+wildcard must match. In contrast, an un-named wildcard (a universal wildcard 
+such as `"_"` `"__"` or `"___"`) can be used multiple times to match 
+different values.
+
 ## Patterns
 
 A pattern is an expression which can include one or more placeholders in the 
@@ -20,77 +39,56 @@ form of wildcard symbols.
 Patterns are similar to Regular Expressions in traditional programming languages
 but they are tailored to deal with MathJSON expressions instead of strings.
 
-Given a pattern and an expression, usually called the **subject**, the goal of
-pattern matching is to find a substitution for all the wildcards such that the
-pattern becomes the subject.
+Given a pattern and an expression the goal of pattern matching is to find a 
+substitution for all the wildcards such that the pattern becomes the expression.
 
-For example, the subject `["Add", 3, "x"]` can become the pattern
-`["Add", 3, "_"]` by replacing the wildcard `"_"` with `"x"`. The subject is
-then said to match the pattern.
+An expression is said to match a pattern if there exists a set of values such
+that replacing the wildcards with those values match the expression. This set
+of values is called a **substitution**.
 
-On the other hand, the subject `["Divide", "x", 2]` does not match the pattern
-`["Add", 3, "_"]`: no substitution exist to transform the subject into the
-pattern by replacing wildcard symbols.
+For example, the pattern `["Add", 3, "_c"]` becomes the expression
+`["Add", 3, "x"]` by replacing the wildcard `"_c"` with `"x"`. The substitution
+is `{"c" : "x"}`.
 
-## Wildcards
+On the other hand, the expression `["Divide", "x", 2]` does not match the pattern
+`["Add", 3, "_c"]`: no substitution exists to transform the expression into the
+pattern by replacing the wildcards.
 
-Wildcard symbols are placeholders in a pattern expression. They start with a `_`.
-
-The `"_"` wildcard matches anything that is in the corresponding position in the
-subject expression.
-
-The `"__"` wildcard matches any sequence of 1 or more expressions in its
-corresponding position. It is useful to capture the arguments of a function.
-
-The `"___"` wildcard matches any sequence of 0 or more expressions in its
-corresponding position.
-
-A wildcard symbol may include a name which will be used to _capture_ the
-matching expression. When using a named wildcard, all instances of the named
-wildcard must match. In contrast, an un-named wildcard (a universal wildcard)
-can be used multiple times to match different values.
 
 ## Matching an Expression to a Pattern
 
-**To check if an expression matches a pattern**, use the `match()` function.
+**To check if an expression matches a pattern**, use the 
+`ce.match(<expression>, <pattern>)` function.
 
-The functions `match()` and `substitute()` do not require a `ComputeEngine` 
-instance. They are plain functions that can be called directly. The `ce.match()`
-function on a `ComputeEngine` instance will take into account information 
-about the functions, such as which are commutative and associative {.notice--info}
+The `ce.match()` function is not recursive.
 
-If there is a match, `match()` returns a `Substitution` object literal with 
+The `ce.match()` function takes into account information about the functions, 
+such as which are commutative and associative.
+
+If there is a match, `ce.match()` returns a `Substitution` object literal with 
 keys corresponding to the matching named wildcards. If no named wildcards are 
 used and there is a match it returns an empty object literal. If there is no 
 match, it returns `null`.
 
-```js
-import { match } from '@cortex-js/compute-engine';
 
+```js
 const pattern = ['Add', 'x', '_'];
 
-console.log(match(['Add', 'x', '1'], pattern));
+console.log(ce.match(['Add', 'x', '1'], pattern));
 // -> { } : the subject matched the pattern
 
-console.log(match(['Multiply', 'x', '1'], pattern));
+console.log(ce.match(['Multiply', 'x', '1'], pattern));
 // -> null : the subject does not match the pattern
 ```
 
-To take into account the commutativity and associativity of operations such as `Add` apply a `ce.canonical()` on both the subject and the pattern:
-
-```js
-const ce = new ComputeEngine();
-console.log(match(ce.canonical(['Add', '1', 'x'](, ce.canonical(pattern)));
-// -> { } : one match (commutative operation)
-```
 
 If the same named wildcard is used multiple times, all its values must match.
 
 ```js
-console.log(match(['Add', '1', 'x'], ['Add', '_a', '_a']));
+console.log(ce.match(['Add', '1', 'x'], ['Add', '_a', '_a']));
 // -> null
 
-console.log(match(['Add', 'x', 'x'], ['Add', '_a', '_a']));
+console.log(ce.match(['Add', 'x', 'x'], ['Add', '_a', '_a']));
 // -> { "a": "x" }
 ```
 
@@ -103,10 +101,10 @@ console.log(match(['Add', '1', 'x'], ['_f', '1', 'x']));
 
 ## Substitution
 
-The return value of the `match()` function is a `Substitution` object, that is a
+The return value of the `match()` function is a `Substitution` object: a
 mapping from wildcard names to expressions.
 
-**To apply a substitution to a pattern**, and therefore recover the subject it
+**To apply a substitution to a pattern**, and therefore recover the expression it
 was derived from, use the `substitute()` function.
 
 ```js
@@ -127,34 +125,25 @@ console.log(substitute(pattern, { a: 'x' }));
 The function returns `null` if the two expressions do not match. It returns an 
 object literal if the expressions do match. 
 
-If the first argument included wildcards the resulting object literal indicate
-the substitutions for those wildcards. If no wildscards were used and the\
+If the second argument included wildcards the resulting object literal indicate
+the substitutions for those wildcards. If no wildcards were used and the
 expressions matched, an empty object literal, `{}` is returned. 
 To check if the expressions simply match or not, check if the return value is
  `null` (indicating not a match) or not (indicating a match).
 
-The comparison between expressions is structural so that \\(x + 1\\) is not
-equal to \\(1 + x\\). To obtain the desired result, you may need to apply a
-canonical form to the expressions using `ce.canonical()`, or evaluate
-them using `ce.evaluate()`.
 
 ```js
 const ce = new ComputeEngine();
 
 const variable = 'x';
-console.log(match(['Add', 'x', 1], ['Add', variable, 1]));
+console.log(ce.match(['Add', 'x', 1], ['Add', variable, 1]));
 // ➔ {}: the two expressions are the same
 
-console.log(match(['Add', 'x', 1], ['Add', 1, 'x']));
-// ➔ null: the two expressions are **not** the same
+console.log(ce.match(['Add', 'x', 1], ['Add', 1, 'x']));
+// ➔ null: the two expressions are the same because `Add` is commutative
 
-console.log(
-  match(ce.canonical(['Add', 'x', 1]), ce.canonical(['Add', 1, 'x']))
-);
-// ➔ true: the two expressions are the same in canonical form
-
-console.log(ce.match(parse('2 + 2'), parse('3 + 1')));
-// ➔ null: the two expressions are **not** the same
+console.log(ce.match(parse('2 + 2 + x'), parse('3 + 1 + x')));
+// ➔ null: the two expressions are **not** the same: they are not evaluated
 
 console.log(
   match(
@@ -194,11 +183,11 @@ ce.replace([sqrtRule], ['Sqrt', ['Square', 17]]);
 // -> 17
 ```
 
-The `ce.replace()` function continues applying all the rules in the ruleset until no rules are applicable.
+The `ce.replace()` function continues applying all the rules in the ruleset 
+until no rules are applicable.
 
-The `ce.simplify()` method applies a collection of built-in rewrite rules. You can define your own rules and apply them 
-using `ce.replace()`.
-
+The `ce.simplify()` method applies a collection of built-in rewrite rules. 
+You can define your own rules and apply them using `ce.replace()`.
 
 
 ## `count()`
