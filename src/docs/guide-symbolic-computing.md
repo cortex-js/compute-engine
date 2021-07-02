@@ -19,14 +19,27 @@ result:
 
 | Transformation |  |
 | :--- | :--- |
-| **Format** | Put an expression in canonical ("standard") form, for easier sorting, comparing and computing | 
-| **Simplify** | Replace the expression with an equivalent, simpler one | 
-| **Evaluate** | Simplify, calculate, and evaluate numerically an expression| 
-| **Replace** | Apply conditional rewriting rules to an expression | 
-| **Other** | Compare, find patterns and substitute parts of an expression |
+| **Format** | Put an expression in canonical ("standard") form, for easier sorting, comparing and computing. Typically limited to accounting for the flags `associative` `idempotent` `involution` and for sorting the arguments if `commutative`. Independent of the assumptions. | 
+| **Simplify** | Apply rewriting rules specific to each function, eliminating constants and common sub-expressions. Use available assumptions to determine which rules are applicable. Limit calculations to exact results using integers. The result is in canonical format. | 
+| **Evaluate** | Calculate the value of an expression and all its terms. Replace symbols with their value. Can perform approximate calculations using floating point numbers. The result is simplified and canonical. | 
 
 </div>
 
+
+Example, given `f` is \\( 2 + (\sqrt{x^2 \times 4} + 1) \\) and `x` is 3:
+
+<div class=symbols-table>
+
+|  |  | |
+| :--- | :--- | :--- |
+| `ce.format(f)` | `1 + 2 + \sqrt{4x^2}` | Arguments sorted, distributed |
+| `ce.simplify(f)`| `2 + 2x` | Exact calculations of numeric constants,  simplification |
+| `ce.evaluate(f)` | `8` | Evaluation of symbols |
+
+</div>
+
+
+Other operations can be performed on an expression: comparing it to a pattern, replacing part of it, and applying conditional rewrite rules.
 
 
 The `evaluate()` function is a convenient shorthand to evaluate an expression
