@@ -60,11 +60,6 @@ pattern by replacing the wildcards.
 **To check if an expression matches a pattern**, use the 
 `ce.match(<expression>, <pattern>)` function.
 
-The `ce.match()` function is not recursive.
-
-The `ce.match()` function takes into account information about the functions, 
-such as which are commutative and associative.
-
 If there is a match, `ce.match()` returns a `Substitution` object literal with 
 keys corresponding to the matching named wildcards. If no named wildcards are 
 used and there is a match it returns an empty object literal. If there is no 
@@ -74,18 +69,42 @@ match, it returns `null`.
 ```js
 const pattern = ['Add', 'x', '_'];
 
-console.log(ce.match(['Add', 'x', '1'], pattern));
-// -> { } : the subject matched the pattern
+console.log(ce.match(['Add', 'x', 1], pattern));
+// -> { } : the expression matches the pattern
 
-console.log(ce.match(['Multiply', 'x', '1'], pattern));
-// -> null : the subject does not match the pattern
+console.log(ce.match(['Multiply', 'x', 1], pattern));
+// -> null : the expression does not match the pattern
+```
+
+The `ce.match()` function accounts for the commutativity and associativity
+of functions.
+
+
+```js
+const pattern = ['Add', 'x', '_'];
+
+console.log(ce.match(['Add', 'x', 1], pattern));
+// -> { } : the expression matches the pattern
+
+console.log(ce.match(['Add', 1, 'x'], pattern));
+// -> { } : the expression matches the pattern by commutativity
+```
+
+
+The `ce.match()` does not consider sub-expressions, it is not recursive.
+
+```js
+const pattern = ['Add', 'x', '_'];
+
+console.log(ce.match(['Multiply', 2, ['Add', 'x', 1]], pattern));
+// -> null : the expression does not match the pattern
 ```
 
 
 If the same named wildcard is used multiple times, all its values must match.
 
 ```js
-console.log(ce.match(['Add', '1', 'x'], ['Add', '_a', '_a']));
+console.log(ce.match(['Add', 1, 'x'], ['Add', '_a', '_a']));
 // -> null
 
 console.log(ce.match(['Add', 'x', 'x'], ['Add', '_a', '_a']));
@@ -95,7 +114,7 @@ console.log(ce.match(['Add', 'x', 'x'], ['Add', '_a', '_a']));
 Wildcards can be used to capture the head of functions:
 
 ```js
-console.log(match(['Add', '1', 'x'], ['_f', '1', 'x']));
+console.log(match(['Add', 1, 'x'], ['_f', 1, 'x']));
 // -> { "f": "Add" }
 ```
 
@@ -108,10 +127,10 @@ mapping from wildcard names to expressions.
 was derived from, use the `substitute()` function.
 
 ```js
-const subject = ['Add', 1, 'x'];
+const expression = ['Add', 1, 'x'];
 const pattern = ['Add', 1, '_a'];
 
-console.log(match(subject, pattern));
+console.log(match(expression, pattern));
 // -> { a: "x" }
 
 console.log(substitute(pattern, { a: 'x' }));
