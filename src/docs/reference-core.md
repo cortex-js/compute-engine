@@ -16,18 +16,22 @@ sidebar:
 
 | Symbol      | Description                                                                                                                                                             |
 | :---------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `All`       | All the possible values apply                                                                                                                                           |
 | `Missing`   | A **required** expression is not present.                                                                                                                               |
+| `None`      | None of the possible values apply                                                                                                                                       |
 | `Nothing`   | An **optional** expression is not present                                                                                                                               |
 | `Undefined` | The result is not defined. For example, the `domain()` of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` and for booleans, `Maybe` |
-| `None`      | None of the possible values apply                                                                                                                                       |
-| `All`       | All the possible values apply                                                                                                                                           |
 
 </div>
+
+<div class=symbols-table>
 
 | Example                     |                                 |
 | :-------------------------- | :------------------------------ |
 | `["Divide", 2, "Missing"]`  | \\[\frac{2}{\unicode{"2B1A}}\\] |
 | `["List", 2, "Nothing", 3]` | \\[\lbrack 2, ,3 \rbrack\\]     |
+
+</div>
 
 ## Functions
 
@@ -35,22 +39,27 @@ sidebar:
 
 | Function          | Operation                                                                                                                                                                |
 | :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `About`           | <code>(_symbol_)</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...                                                      |
-| `Domain`          | <code>(_expression_)</code><br> Return the domain of the expression                                                                                                      |
-| `Evaluate`        | <code>(_expression_)</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it. Overrides `Hold` and hold attributes of a function. |
-| `Hold`            | <code>(_expression_)</code><br> Maintain an expression in an unevaluated form.                                                                                           |
-| `Identity`        | <code>(_symbol_)</code><br> Always return its argument                                                                                                                   |
-| `InverseFunction` | <code>(_expression_)</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\)                                                  |
+| `About`           | <code>["About", _symbol_]</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...                                                      |
+| `Domain`          | <code>["Domain", _expression_]</code><br> Return the domain of the expression                                                                                                      |
+| `Evaluate`        | <code>["Evaluate", _expression_]</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it. Overrides `Hold` and hold attributes of a function. |
+| `Error` | <code>["Error", _expression_]</code><br>The expression could not be interpreted correctly. It may have a syntax error, a reference to an unknwon symbol or function or some other problem. |
+| `Hold`            | <code>["Hold", _expression_]</code><br> Maintain an expression in an unevaluated form (inert function)                                                                                           |
+| `Identity`        | <code>["Identity", _symbol_]</code><br> Always return its argument                                                                                                                   |
+| `InverseFunction` | <code>["InverseFunction", _expression_]</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\)                                                  |
+| `Latex`        | <code>["Latex", _expr_]</code><br> Return a string which is the expression serialized to LaTeX                                                                                                                   |
+| `LatexString`        | <code>["LatexTokens", _string_]</code><br> A LaTeX string (inert function)                                                                                                                   |
+| `LatexTokens`        | <code>["LatexTokens", ..._token_\[\]]</code><br> A sequence of LaTeX tokens. See below (inert function)                                                                                                                   |
+| `Parse`        | <code>["Parse", _expr_]</code><br> `expr` should be a `LatexString` or `LatexTokens` and the result is an expression corresponding to the parsing of the LaTeX string                                                                                                                   |
 
 </div>
 
 | Example                      |             |
 | :--------------------------- | :---------- |
-| `["InverseFunction", "Sin"]` | `\sin^{-1}` |
+| `["InverseFunction", "Sin"]` | \\[ \sin^{-1} \\] |
 
 ### `Lambda`
 
-`Lambda"(`_`variables:List`_`, `_`expression`_`)`
+<code>["Lambda", _variables:List_, _expression_]</code>
 
 Create a [Lambda-function](https://en.wikipedia.org/wiki/Anonymous_function),
 also called **anonymous function**.
@@ -88,11 +97,11 @@ cube(5)
 // ➔ 125
 ```
 
-### `Latex` and `LatexSymbols`
+### `Parse`, `Latex`, `LatexTokens` and `LatexString`
 
-`["Latex", `_`expr`_` `]`
+<code>["Latex", _expr_ ]</code>
 
-- _`expr`_: a MathJSON expression
+- <code>_expr_</code>: a MathJSON expression
 - Returns a LaTeX string representing the expression.
 
 ```json
@@ -100,9 +109,9 @@ cube(5)
 // ➔ "'\frac{\pi}{2}'"
 ```
 
-`["LatexSymbols", `_`str-1`_`, `_`str-2`_`, ...`_`str-n`_`]`
+<code>["LatexTokens", _token-1_, _token-2_, ..._token-n_]</code>
 
-The arguments `_`str-n`_` are interpreted as LaTeX tokens:
+The arguments <code>_token-n_</code> are interpreted as LaTeX tokens:
 
 <div class=symbols-table>
 
@@ -121,11 +130,14 @@ The arguments `_`str-n`_` are interpreted as LaTeX tokens:
 </div>
 
 ```json
-["LatexSymbols", "'\\frac'", "'<{>'", "'pi'", "'<}>'", "'<{>'", 2, "'<}>'"]
+["LatexTokens", "'\\frac'", "'<{>'", "'pi'", "'<}>'", "'<{>'", 2, "'<}>'"]
 // ➔ "'\frac{\pi}{2}'"
 ```
 
 See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
+
+This function can be returned when the parser fails to parse a sequence of
+LaTeX tokens.
 
 ### `Piecewise`
 
