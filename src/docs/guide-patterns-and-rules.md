@@ -12,6 +12,8 @@ sidebar:
 Recognizing patterns and applying rules is a powerful symbolic computing tool 
 to identify and manipulate the structure of expressions.
 
+<section id='wildcards'>
+
 ## Wildcards
 
 Wildcard symbols are placeholders in an expression. They start with a `_`.
@@ -30,6 +32,10 @@ matching expression. When using a named wildcard, all instances of the named
 wildcard must match. In contrast, an un-named wildcard (a universal wildcard 
 such as `"_"` `"__"` or `"___"`) can be used multiple times to match 
 different values.
+
+</section>
+
+<section id='patterns'>
 
 ## Patterns
 
@@ -54,6 +60,9 @@ On the other hand, the expression `["Divide", "x", 2]` does not match the patter
 `["Add", 3, "_c"]`: no substitution exists to transform the expression into the
 pattern by replacing the wildcards.
 
+</section>
+
+<section id='matching-an-expression-to-a-pattern'>
 
 ## Matching an Expression to a Pattern
 
@@ -117,6 +126,9 @@ Wildcards can be used to capture the head of functions:
 console.log(match(['Add', 1, 'x'], ['_f', 1, 'x']));
 // -> { "f": "Add" }
 ```
+</section>
+
+<section id='substitution'>
 
 ## Substitution
 
@@ -136,6 +148,10 @@ console.log(match(expression, pattern));
 console.log(substitute(pattern, { a: 'x' }));
 // -> ["Add", 1, "x"]
 ```
+
+</section>
+
+<section id='comparing'>
 
 ## Comparing
 
@@ -173,6 +189,10 @@ console.log(
 // ➔ {}: the two expressions are the same once evaluated
 ```
 
+</section>
+
+<section id='applying-rewrite-rules'>
+
 ## Applying Rewrite Rules
 
 A rewrite rule is a triplet of:
@@ -208,5 +228,10 @@ until no rules are applicable.
 The `ce.simplify()` method applies a collection of built-in rewrite rules. 
 You can define your own rules and apply them using `ce.replace()`.
 
+</section>
+
+<section id='count'>
 
 ## `count()`
+
+</section>

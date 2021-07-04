@@ -22,7 +22,9 @@ console.log(ce.N(parse('\\sqrt{5} + 7^3'))
 console.log(ce.N(parse('\\sqrt{x} + 7^3'));
 // -> ["Add", ["Sqrt", "x"], 343]
 ```
-<div class='read-more'><a href="/compute-engine/guides/symbolic-computing/">Read more about <strong>Symbolic Computing</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/guides/symbolic-computing/" %}
+Read more about <strong>Symbolic Computing</strong>
+{% endreadmore %}
 
 
 ## Numeric Formats

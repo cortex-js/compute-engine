@@ -10,6 +10,7 @@ sidebar:
 
 # Core
 
+<section id='constants'>
 ## Constants
 
 <div class=symbols-table>
@@ -32,6 +33,9 @@ sidebar:
 | `["List", 2, "Nothing", 3]` | \\[\lbrack 2, ,3 \rbrack\\]     |
 
 </div>
+</section>
+
+<section id='functions'>
 
 ## Functions
 
@@ -42,14 +46,16 @@ sidebar:
 | `About`           | <code>["About", _symbol_]</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...                                                      |
 | `Domain`          | <code>["Domain", _expression_]</code><br> Return the domain of the expression                                                                                                      |
 | `Evaluate`        | <code>["Evaluate", _expression_]</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it. Overrides `Hold` and hold attributes of a function. |
-| `Error` | <code>["Error", _expression_]</code><br>The expression could not be interpreted correctly. It may have a syntax error, a reference to an unknwon symbol or function or some other problem. |
-| `Hold`            | <code>["Hold", _expression_]</code><br> Maintain an expression in an unevaluated form (inert function)                                                                                           |
+| `Error` | <code>["Error", _expression_]</code>{% tags "inert" %}<br>The expression could not be interpreted correctly. It may have a syntax error, a reference to an unknown symbol or function or some other problem. |
+| `Hold`            | <code>["Hold", _expression_]</code>{% tags "inert" %}<br> Maintain an expression in an unevaluated form (inert function)                                                                                           |
 | `Identity`        | <code>["Identity", _symbol_]</code><br> Always return its argument                                                                                                                   |
 | `InverseFunction` | <code>["InverseFunction", _expression_]</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\)                                                  |
 | `Latex`        | <code>["Latex", _expr_]</code><br> Return a string which is the expression serialized to LaTeX                                                                                                                   |
-| `LatexString`        | <code>["LatexTokens", _string_]</code><br> A LaTeX string (inert function)                                                                                                                   |
-| `LatexTokens`        | <code>["LatexTokens", ..._token_\[\]]</code><br> A sequence of LaTeX tokens. See below (inert function)                                                                                                                   |
+| `LatexString`        | <code>["LatexString", _string_]</code>{% tags "inert" %}<br> A LaTeX string                                                                                                                   |
+| `LatexTokens`        | <code>["LatexTokens", ..._token_\[\]]</code>{% tags "inert" %}<br><br> A sequence of LaTeX tokens.                                                                                                                    |
 | `Parse`        | <code>["Parse", _expr_]</code><br> `expr` should be a `LatexString` or `LatexTokens` and the result is an expression corresponding to the parsing of the LaTeX string                                                                                                                   |
+| `String`        | <code>["String", ..._expr_\[\]]</code>{% tags "constructor" %}<br> Return a string made from the concatenation of the arguments.                                                          |
+| `Symbol`        | <code>["Symbol", ..._expr_\[\]]</code>{% tags "constructor" %}<br> Return a new symbol made of a concatenation of the arguments. For example `["Symbol", "x", 2] -> "x2"`                                                          |
 
 </div>
 
@@ -148,50 +154,14 @@ LaTeX tokens.
 | `["Prime", "f"]`    | `f^\prime`       |
 | `["Prime", "f", 2]` | `f^\doubleprime` |
 
-### `Match`
-
-_`expr1`_ `===` _`expr2`_
-
-`Match(`_`expr1`_`, `_`expr2`_`)`
-
-`Match(`_`expr1`_`, `_`expr2`_`, ...`_`expr-n`_`)`
-
-Indicate if two (or more) expressions are structurally identical, using a
-literal symbolic identity.
-
-Two expressions are the same if:
-
-- they have the same domain.
-- if they are numbers, if their value and domain are identical.
-- if they are symbols, if their names are identical.
-- if they are functions, if the head of the functions are identical, and if all
-  the arguments are identical.
-
-Two expressions that have a different `wikidata` metadata will not be the same,
-even if they are otherwise identical. Other metadata does not affect the
-comparison.
-
-```js
-// Greek letter vs. ratio of the circumference of a circle to its diameter
-match({ sym: 'Pi', wikidata: 'Q168' }, { sym: 'Pi', wikidata: 'Q167' });
-// ➔ null (does not match)
-```
-
-Using a canonical format will result in more positive matches.
-
-```js
-match(parse('x + 1'), parse('1 + x')));
-// ➔ null
-
-match(ce.canonical(parse('x + 1'), parse('1 + x')));
-// ➔ True
-```
 
 ### Superscripts and Subscripts
 
+These functions are all inert functions, that is they evaluate to themselves.
+
 <div class=symbols-table>
 
-| Symbol        |                  | Description                                                    |
+| Function        |                  | Description                                                    |
 | :------------ | :--------------- | :------------------------------------------------------------- |
 | `Subminus`    | \\[ x_- \\]      |                                                                |
 | `Subplus`     | \\[ x_+\\]       |                                                                |
@@ -203,7 +173,4 @@ match(ce.canonical(parse('x + 1'), parse('1 + x')));
 | `Superstar`   | \\[ x^*\\]       | When the argument is a complex number, indicate the conjugate. |
 
 </div>
-
-### `String`
-
-### `Symbol`
+</section>

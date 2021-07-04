@@ -42,11 +42,17 @@ console.log(serialize(1/3, {
 // ➔ 0,333
 ```
 
-<div class='read-more'><a href="/docs/compute-engine/#(NumberFormattingOptions%3Atype)">Read more about <strong><kbd>NumberFormattingOptions</kbd></strong> which apply to both <kbd>parse()</kbd> and <kbd>serialize()</kbd><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/docs/compute-engine/#(NumberFormattingOptions%3Atype)" %}
+Read more about <strong><kbd>NumberFormattingOptions</kbd></strong> which apply to both <kbd>parse()</kbd> and <kbd>serialize()</kbd>
+{% endreadmore %}
 
-<div class='read-more'><a href="/docs/compute-engine/#(ParseLatexOptions%3Atype)">Read more about <strong><kbd>ParseLatexOptions</kbd></strong> which apply to <kbd>parse()</kbd><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/docs/compute-engine/#(ParseLatexOptions%3Atype)" %}
+Read more about <strong><kbd>ParseLatexOptions</kbd></strong> which apply to <kbd>parse()</kbd>
+{% endreadmore %}
 
-<div class='read-more'><a href="/docs/compute-engine/#(SerializeLatexOptions%3Atype)">Read more about <strong><kbd>SerializeLatexOptions</kbd></strong> which apply to <kbd>serialize()</kbd><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/docs/compute-engine/#(SerializeLatexOptions%3Atype)" %}
+Read more about <strong><kbd>SerializeLatexOptions</kbd></strong> which apply to <kbd>serialize()</kbd>
+{% endreadmore %}
 
 ## Advanced Usage
 
@@ -66,7 +72,9 @@ The `LatexSyntax` constructor can be passed some options to customize the
 parsing and serializing, as well as dictionaries defining the syntax and
 vocabulary.
 
-<div class='read-more'><a href="/compute-engine/guides/dictionaries/">Read more about <strong>Dictionaries</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/guides/dictionaries/" %}
+Read more about **Dictionaries**
+{% endreadmore %}
 
 **To change the LaTeX syntax options after a `LatexSyntax` instance has been
 created**, change the `options` property.

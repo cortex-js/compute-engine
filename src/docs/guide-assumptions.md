@@ -15,6 +15,8 @@ relationships between symbols.
 These assumptions are used to select algorithms, to validate some 
 simplifications and to optimize computations.
 
+<section id='defining-new-assumptions'>
+
 ## Defining New Assumptions
 
 **To make an assumption about a symbol**, use the `ce.assume()` function.
@@ -62,6 +64,7 @@ ce.assume(["Greater", "x", 0]);
 // ... or ...
 ce.assume(["Element", "x", ["Interval", ["Open", 0], "Infinity"]]);
 ```
+<section id='multivariate-assumptions'>
 
 ### Multivariate Assumptions
 
@@ -71,6 +74,9 @@ is also possible to describe relationships betwen multiple symbols.
 ```js
 ce.assume(parse('xy + 1 = 0'))'
 ```
+</section>
+
+<section id='using-assumptions-to-declare-symbols'>
 
 ### Using Assumptions to Declare Symbols
 
@@ -78,6 +84,9 @@ Before a symbol can be used in an expression, the symbol must be known by the
 Compute Engine. A dictionary definition of a symbol can be used for this 
 purpose, but an assumption that defines a domain for the symbol is sufficient.
 
+</section>
+
+<section id='default-assumptions'>
 
 ### Default Assumptions
 
@@ -111,6 +120,10 @@ To have no assumptions at all, set the `assumptions` option to `null`:
 ```js
 const ce = new ComputeEngine({assumptions: null});
 ```
+</section>
+</section>
+
+<section id='testing-assumptions'>
 
 ## Testing Assumptions
 
@@ -152,7 +165,13 @@ ce.ask(['Greater', 'x', '_val'])
 //  -> [{'val': 0}] "It is greater than 0"
 ```
 
-<div class='read-more'><a href="/compute-engine/guides/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/guides/patterns-and-rules/" %}
+Read more about <strong>Patterns and Rules</strong>
+{% endreadmore %}
+
+</section>
+
+<section id='forgetting-assumptions'>
 
 ## Forgetting Assumptions
 
@@ -176,7 +195,9 @@ ce.is(["Element", "\\alpha", "RealNumber"]);
 // ->  undefined
 ```
 
+</section>
 
+<section id='scoped-assumptions'>
 
 ## Scoped Assumptions
 
@@ -222,4 +243,4 @@ ce.is(["Element", "\\alpha", "RealNumber"]);
 // ->  undefined
 ```
 
-
+</section>

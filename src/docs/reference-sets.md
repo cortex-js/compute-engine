@@ -12,7 +12,9 @@ A **set** is a collection of distinct elements.
 
 A **domain**, such as `Integer` `Boolean`, is a **set** used to represent the possible values of an expression.
 
-<div class='read-more'><a href="/compute-engine/reference/domains/">Read more about <strong>Domains</strong> <svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/reference/domains/" %}
+Read more about <strong>Domains</strong> 
+{% endreadmore %}
 
 
 ## Constants

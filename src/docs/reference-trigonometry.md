@@ -47,8 +47,8 @@ sidebar:
 | :--- | :--- | 
 | `FromPolarCoordinates` | Converts \\( (\operatorname{radius}, \operatorname{angle}) \longrightarrow (x, y)\\)|
 | `ToPolarCoordinates` | Converts \\((x, y) \longrightarrow (\operatorname{radius}, \operatorname{angle})\\)|
-| `Hypot` | \\(\operatorname{Hypot}(x,y) = \sqrt{x^2+y^2}\\) |
-| `Haversine` | \\( \operatorname{Haversine}(z) = \sin(\frac{z}{2})^2 \\).<br>The  [Haversine function](https://www.wikidata.org/wiki/Q2528380) was important in  navigation because it appears in the haversine formula, which is used to  reasonably accurately compute distances on an astronomic spheroid given angular positions (e.g., longitude and latitude).|
-| `InverseHaversine` |\\(\operatorname{InverseHaversine}(z) = 2 \operatorname{Arcsin}(\sqrt{z})\\) |
+| `Hypot` | {% tags "numeric" %}<br>\\(\operatorname{Hypot}(x,y) = \sqrt{x^2+y^2}\\) |
+| `Haversine` | {% tags "numeric" %}<br>\\( \operatorname{Haversine}(z) = \sin(\frac{z}{2})^2 \\).<br>The  [Haversine function](https://www.wikidata.org/wiki/Q2528380) was important in  navigation because it appears in the haversine formula, which is used to  reasonably accurately compute distances on an astronomic spheroid given angular positions (e.g., longitude and latitude).|
+| `InverseHaversine` | {% tags "numeric" %}<br>\\(\operatorname{InverseHaversine}(z) = 2 \operatorname{Arcsin}(\sqrt{z})\\) |
 
 </div>

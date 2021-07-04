@@ -17,7 +17,9 @@ either on numbers or matrixes. The domain of the arguments indicates the appropr
 \\( \sqrt{x^2} = x\\) only if \\(x \geq 0\\)
 
 
-<div class='read-more'><a href="/compute-engine/reference/domains/">Read more about the <strong>Domains</strong> included in the standard dictionary of the Compute Engine<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/reference/domains/" %}
+Read more about the <strong>Domains</strong> included in the standard dictionary of the Compute Engine
+{% endreadmore %}
 
 
 **To query the domain of an expression**, use the `domain()` function.
@@ -27,13 +29,16 @@ ce.domain('Pi');
 // -> "IrrationalNumber"
 ```
 
+<section id='domain-lattice'>
 
-## Domains Lattice
+## Domain Lattice
 
 **Domains are defined in a hierarchy (a lattice).** The upper bound of the
-lattice is `Anything` and the lower bound is `Nothing`. 
+domain lattice is the `Anything` domain and its lower bound is the `Nothing` 
+domain.
 
-The _parent_ of a domain represents a _is-a_/_subset-of_ relationship, for example, a `List` _is-a_ `Collection`.
+The _parent_ of a domain represents a _is-a_/_subset-of_ relationship, 
+for example, a `List` _is-a_ `Collection`.
 
 ![Anything domains](/assets/domains.001.jpeg 'The top-level domains')
 ![Tensor domains](/assets/domains.002.jpeg 'The Tensor sub-domains')
@@ -42,6 +47,10 @@ The _parent_ of a domain represents a _is-a_/_subset-of_ relationship, for examp
 
 The implementation of the CortexJS domains is based on
 [Weibel, Trudy & Gonnet, Gaston. (1991). An Algebra of Properties.. 352-359. 10.1145/120694.120749. ](https://www.researchgate.net/publication/.221564157_An_Algebra_of_Properties).{.notice--info}
+
+</section>
+
+<section id='obtaining-the-domain-of-an-expression>
 
 ## Obtaining the Domain of an Expression
 
@@ -63,6 +72,9 @@ ce.domain(['Add', 5, 2]);
 ce.domain(ce.evaluate(['Add', 5, 2]));
 // ➔ "Integer": once evaluated, the domain of the result may be more specific
 ```
+</section>
+
+<section id='defining-new-domains'>
 
 ## Defining New Domains
 
@@ -79,7 +91,9 @@ expression** using any of the **set functions**: `Union`
 ["SetMinus", "Number", 1]
 ```
 
-<div class='read-more'><a href="/compute-engine/reference/sets/">Read more about <strong>Sets</strong> and the set functions<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/reference/sets/" %}
+Read more about <strong>Sets</strong> and the set functions
+{% endreadmore %}
 
 
 **Parametric domains** are functions that define a domain:
@@ -112,8 +126,9 @@ n \in \R \\) or \\(x \in \rbrack \operatorname{min}, \operatorname{max} \rbrack 
 </div>
 
 
+</section>
 
-
+<section id='simplifying-domains'>
 
 ## Simplifying Domains
 
@@ -128,3 +143,4 @@ ce.simplify(
 );
 // ➔ "ExtendedRealNumber"
 ```
+</section>

@@ -117,4 +117,6 @@ String(BaseForm(42, 16))
 You can define and apply your own custom rewriting rules using patterns,
 rules and the `ce.replace()` function.
 
-<div class='read-more'><a href="/compute-engine/guides/patterns-and-rules/">Read more about <strong>Patterns and Rules</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/guides/patterns-and-rules/" %}
+Read more about <strong>Patterns and Rules</strong>
+{% endreadmore %}
