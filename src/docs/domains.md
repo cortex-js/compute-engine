@@ -114,7 +114,7 @@ such that \\( \mathord{min} \le x \le \mathord{max}, n \in \R \\).
 | :---------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Function`        | `["Function", ...<arg-domain>, <co-domain>]` <br> For example, `["Function", "Number", "Boolean"]` is the domain of the functions that have a single argument, a number, and return a boolean (has a boolean codomain). |
 | `Interval`        | `["Interval", <min>, <max>]` <br> The set of real numbers between `<min>` and `<max>`. Use `["Interval", ["Open", <min>], <max>]` to indicate an open interval.                                                         |
-| `Multiple`        | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integer", 1]`                |
+| `Multiple`        | `["Multiple", <period>, <domain>, <phase>]` <br> The set of numbers that satisfy `<period> * x + <phase>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integer", 1]`                  |
 | `Range`           | `["Range", <min>, <max>]` <br> The set of integers from `<min>` to `<max>` (inclusive).                                                                                                                                 |
 
 </div>
