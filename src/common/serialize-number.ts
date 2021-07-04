@@ -1,6 +1,6 @@
-import { Expression } from '../public';
+import { Expression } from '../math-json/math-json-format';
 import { isNumberObject } from './utils';
-import { NumberFormattingOptions } from '../latex-syntax/public';
+import { NumberFormattingOptions } from '../math-json/public';
 
 // Some vocabulary:
 // 123.456e78
@@ -275,11 +275,8 @@ export function serializeAutoNotationNumber(
   if (m?.[1] && m[2]) {
     // There is an exponent...
     exponent = formatExponent(m[2], options);
-    if (exponent) {
-      exponent = options.exponentProduct + exponent;
-    }
   }
-  let wholePart = valString;
+  let wholePart = m?.[1] ?? valString;
   let fractionalPart = '';
   m = (exponent ? m![1] : valString).match(/^(.*)\.(.*)$/);
   if (m?.[1] && m[2]) {
@@ -294,7 +291,10 @@ export function serializeAutoNotationNumber(
     fractionalPart = formatFractionalPart(fractionalPart, options);
   }
   if (fractionalPart) fractionalPart = options.decimalMarker + fractionalPart;
-  return wholePart + fractionalPart + (exponent ?? '');
+  if (exponent && (wholePart !== '1' || fractionalPart)) {
+    return wholePart + fractionalPart + options.exponentProduct + exponent;
+  }
+  return fractionalPart + (exponent ?? '');
 }
 
 /**
