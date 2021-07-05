@@ -226,6 +226,8 @@ export function serializeNumber(
   }
   const exponentString = formatExponent(exponent, options);
 
+  if (num === '1' && exponentString) return sign + exponentString;
+
   return (
     sign +
     num +
@@ -291,10 +293,10 @@ export function serializeAutoNotationNumber(
     fractionalPart = formatFractionalPart(fractionalPart, options);
   }
   if (fractionalPart) fractionalPart = options.decimalMarker + fractionalPart;
-  if (exponent && (wholePart !== '1' || fractionalPart)) {
-    return wholePart + fractionalPart + options.exponentProduct + exponent;
-  }
-  return fractionalPart + (exponent ?? '');
+
+  if (!exponent) return wholePart + fractionalPart;
+  if (wholePart === '1' && !fractionalPart) return exponent;
+  return wholePart + fractionalPart + options.exponentProduct + exponent;
 }
 
 /**
