@@ -42,13 +42,14 @@ Example, given `f` is \\( 2 + (\sqrt{x^2 \times 4} + 1) \\) and `x` is 3:
 Other operations can be performed on an expression: comparing it to a pattern, replacing part of it, and applying conditional rewrite rules.
 
 
-The `evaluate()` function is a convenient shorthand to evaluate an expression
-with a single call. Other functions such as `ce.simplify()`, `ce.is()`, `ce.N()`, `ce.canonical()`, etc... require a `ComputeEngine` instance which is denoted by the `ce.` prefix.{.notice--info}
+Functions such as `ce.simplify()`, `ce.evaluate()`, `ce.is()`, `ce.N()`, 
+`ce.canonical()`, etc... require a `ComputeEngine` instance which is denoted by
+the `ce.` prefix.{.notice--info}
 
 ```ts
 import { ComputeEngine, parse } from '@cortex-js/compute-engine';
 const ce = new ComputeEngine();
-ce.simplify(parse('3x^2 + 2x^2 + x + 5'));
+ce.simplify(ce.parse('3x^2 + 2x^2 + x + 5'));
 ```
 
 ## Format with a Canonical Form
@@ -89,16 +90,13 @@ Read more about <strong>Canonical Forms</strong>
 **To obtain a simpler expression of a symbolic expression**, use the
 `ce.simplify()` function.
 
-Assumptions are additional information available about some symbols, for example
-\\( x > 0 \\) or \\(n \in \\N\\). To apply some transformations, available
-assumptions may be used. For example, if no assumptions about \\(x \\) is
-available the expression \\( \sqrt{x^2} \\) cannot be simplified. However, if an
-assumption that \\( x > 0 \\) is available, then the expression can be
-simplified to \\( x \\).
+The `ce.simplify()` function makes use of available assumptions about symbols
+and return an exact result: there are no numerical evaluation done that could
+result in a loss of precision.
 
 
-{% readmore "/compute-engine/guides/assumptions/" %}
-Read more about <strong>Assumptions</strong>
+{% readmore "/compute-engine/guides/simplify/" %}
+Read more about <strong>Simplify</strong>
 {% endreadmore %}
 
 
