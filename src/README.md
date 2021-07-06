@@ -7,7 +7,7 @@ sidebar:
   - nav: 'compute-engine'
 ---
 
-<img src='/assets/MathJSON-1.jpg' style='margin-bottom:2em;  border-radius:8px; border:1px solid #203346'>
+<img src='/assets/MathJSON-1.jpg' class='full-width' style='border-radius:8px 8px 0 0; border:1px solid #203346; margin-bottom: 2em'>
 
 The MathJSON format is a lightweight data interchange format for mathematical
 notation.
