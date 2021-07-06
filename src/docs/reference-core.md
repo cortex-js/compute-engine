@@ -7,13 +7,11 @@ sidebar:
   - nav: 'compute-engine'
 ---
 
-
 # Core
 
 <section id='constants'>
 ## Constants
 
-<div class=symbols-table>
 
 | Symbol      | Description                                                                                                                                                             |
 | :---------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -23,45 +21,73 @@ sidebar:
 | `Nothing`   | An **optional** expression is not present                                                                                                                               |
 | `Undefined` | The result is not defined. For example, the `domain()` of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` and for booleans, `Maybe` |
 
-</div>
 
-<div class=symbols-table>
 
 | Example                     |                                 |
 | :-------------------------- | :------------------------------ |
 | `["Divide", 2, "Missing"]`  | \\[\frac{2}{\unicode{"2B1A}}\\] |
 | `["List", 2, "Nothing", 3]` | \\[\lbrack 2, ,3 \rbrack\\]     |
 
-</div>
 </section>
 
-<section id='functions'>
+<section id='core-functions'>
 
-## Functions
+## Core Functions
 
-<div class=symbols-table>
 
-| Function          | Operation                                                                                                                                                                |
-| :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `About`           | <code>["About", _symbol_]</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...                                                      |
-| `Domain`          | <code>["Domain", _expression_]</code><br> Return the domain of the expression                                                                                                      |
-| `Evaluate`        | <code>["Evaluate", _expression_]</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it. Overrides `Hold` and hold attributes of a function. |
-| `Error` | <code>["Error", _expression_]</code>{% tags "inert" %}<br>The expression could not be interpreted correctly. It may have a syntax error, a reference to an unknown symbol or function or some other problem. |
-| `Hold`            | <code>["Hold", _expression_]</code>{% tags "inert" %}<br> Maintain an expression in an unevaluated form (inert function)                                                                                           |
-| `Identity`        | <code>["Identity", _symbol_]</code><br> Always return its argument                                                                                                                   |
-| `InverseFunction` | <code>["InverseFunction", _expression_]</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\)                                                  |
-| `Latex`        | <code>["Latex", _expr_]</code><br> Return a string which is the expression serialized to LaTeX                                                                                                                   |
-| `LatexString`        | <code>["LatexString", _string_]</code>{% tags "inert" %}<br> A LaTeX string                                                                                                                   |
-| `LatexTokens`        | <code>["LatexTokens", ..._token_\[\]]</code>{% tags "inert" %}<br><br> A sequence of LaTeX tokens.                                                                                                                    |
-| `Parse`        | <code>["Parse", _expr_]</code><br> `expr` should be a `LatexString` or `LatexTokens` and the result is an expression corresponding to the parsing of the LaTeX string                                                                                                                   |
-| `String`        | <code>["String", ..._expr_\[\]]</code>{% tags "constructor" %}<br> Return a string made from the concatenation of the arguments.                                                          |
-| `Symbol`        | <code>["Symbol", ..._expr_\[\]]</code>{% tags "constructor" %}<br> Return a new symbol made of a concatenation of the arguments. For example `["Symbol", "x", 2] -> "x2"`                                                          |
+| Function          | Operation                                                                                                                                                                                                            |
+| :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `About`           | <code>["About", _symbol_]</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...                                                                                         |
+| `Domain`          | <code>["Domain", _expression_]</code><br> Return the domain of the expression                                                                                                                                        |
+| `Evaluate`        | <code>["Evaluate", _expression_]</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it. Overrides `Hold` and hold attributes of a function.                                 |
+| `Error`           | <code>["Error", _expression_]</code>{% tags "inert" %}<br>The expression could not be interpreted correctly. It may have a syntax error, a reference to an unknown symbol or function or some other problem.         |
+| `Hold`            | <code>["Hold", _expression_]</code>{% tags "inert" %}<br> Maintain an expression in an unevaluated form (inert function)                                                                                             |
+| `Html`            | <code>["Html", _expr_]</code><br> Evaluate to a string which is the HTML markup corresponding to the expression. If the head of _expr_ is `LatexString`, `Latex` or `LatexTokens`, renders the LaTeX to HTML markup. |
+| `Identity`        | <code>["Identity", _symbol_]</code><br> Always return its argument                                                                                                                                                   |
+| `InverseFunction` | <code>["InverseFunction", _expression_]</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\)                                                                           |
+| `Latex`           | <code>["Latex", _expr_]</code><br> Evaluate to a `LatexString` which is the expression serialized to LaTeX                                                                                                           |
+| `LatexString`     | <code>["LatexString", _string_]</code>{% tags "inert" %}<br> A LaTeX string                                                                                                                                          |
+| `LatexTokens`     | <code>["LatexTokens", ..._token_\[\]]</code><br> Evaluate to a `LatexString` made of the concatenation of the tokens                                                                                                 |
+| `Parse`           | <code>["Parse", _expr_]</code><br> `expr` should be a `LatexString` or `LatexTokens` and the result is an expression corresponding to the parsing of the LaTeX string                                                |
+| `String`          | <code>["String", ..._expr_\[\]]</code>{% tags "constructor" %}<br> Return a string made from the concatenation of the arguments.                                                                                     |
+| `Symbol`          | <code>["Symbol", ..._expr_\[\]]</code>{% tags "constructor" %}<br> Return a new symbol made of a concatenation of the arguments. For example `["Symbol", "x", 2] -> "x2"`                                            |
 
-</div>
 
-| Example                      |             |
-| :--------------------------- | :---------- |
+| Example                      |                   |
+| :--------------------------- | :---------------- |
 | `["InverseFunction", "Sin"]` | \\[ \sin^{-1} \\] |
+
+<section id='core-functions'>
+
+## Styling Functions
+
+The functions in this section represent a visual difference that is not usually
+material to the interpretation of an expression such as text color and size or
+other typographic variations.
+
+
+{% defs "Function" "Operation" %}
+{% def "Style" %}
+  <code>["Style", _expr_, _css_]</code><span class='float-right'>{% tags "inert" %}</span>
+  
+  Apply CSS styles to an expression
+
+{% enddef %}
+{% def "Delimiter" %}
+  <code>["Delimiter", _expr_]</code><span class='float-right'>{% tags "inert" %}</span>
+
+  <code>["Delimiter", _expr_, _sep_]</code>
+  
+  <code>["Delimiter", _expr_, _open_, _close_]</code>
+  
+  <code>["Delimiter", _expr_, _open_, _sep_, _close_]</code>
+  
+  Display _expr_ wrapped in a delimiter.
+
+{% enddef %}
+{% enddefs %}
+
+
 
 ### `Lambda`
 
@@ -142,8 +168,8 @@ The arguments <code>_token-n_</code> are interpreted as LaTeX tokens:
 
 See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
 
-This function can be returned when the parser fails to parse a sequence of
-LaTeX tokens.
+This function can be returned when the parser fails to parse a sequence of LaTeX
+tokens.
 
 ### `Piecewise`
 
@@ -154,14 +180,13 @@ LaTeX tokens.
 | `["Prime", "f"]`    | `f^\prime`       |
 | `["Prime", "f", 2]` | `f^\doubleprime` |
 
-
 ### Superscripts and Subscripts
 
 These functions are all inert functions, that is they evaluate to themselves.
 
 <div class=symbols-table>
 
-| Function        |                  | Description                                                    |
+| Function      |                  | Description                                                    |
 | :------------ | :--------------- | :------------------------------------------------------------- |
 | `Subminus`    | \\[ x_- \\]      |                                                                |
 | `Subplus`     | \\[ x_+\\]       |                                                                |
