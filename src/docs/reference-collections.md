@@ -11,21 +11,13 @@ sidebar:
 
 ## `Sequence`
 
-The most primitive collection: a series of expressions separated by a `,`.
+The most primitive collection: a series of expressions.
 
 | MathJSON                             | LaTeX            |
 | :----------------------------------- | :--------------- |
-| `["Sequence", "x", "y"]`             | \\( x, y \\)     |
-| `["Sequence", ["Add", "x", 1], "y"]` | \\( x + 1, y \\) |
+| `["Sequence", 1, 2]`             | \\( 1 2 \\)     |
+| `["Sequence", ["Add", "x", 1], "y"]` | \\( x + 1 y \\) |
 
-## `Sequence2`
-
-A series of expressions separated by a `;`.
-
-| MathJSON                                     | LaTeX          |
-| :------------------------------------------- | :------------- |
-| `["Sequence2", "x", "y"]`                    | \\( x; y \\)   |
-| `["Sequence2", ["Sequence", "a", "b"], "y"]` | \\(a, b; y \\) |
 
 ## `Set`
 
@@ -46,16 +38,15 @@ Use to represent a data structure, as opposed to `Parentheses` or `Sequence`.
 | `["List", "x", "y", "7", "11"]` | \\([x, y, 7, 11]\\) |
 | `["List", "x", "Nothing", "y"]` | \\([x,,y]\\)        |
 
-## `Parentheses`
+## `Delimiter`
 
-One or more expressions in a sequence, enclosed with parentheses.
+One or more expressions in a sequence, enclosed with some delimiters and
+separated by a separator
 
-Use to represent function arguments, or to group arithmetic expressions.
+Use to represent function arguments and to group arithmetic expressions.
 
 | MathJSON                                                         | LaTeX           |
 | :--------------------------------------------------------------- | :-------------- |
-| `["Parentheses", "x", "y", "7", "11"]`                           | `(x, y, 7, 11)` |
-| `["Parentheses"]`                                                | `()`            |
-| `["Parentheses", "a", "b", "c"]`                                 | `(a, b, c)`     |
-| `["Parentheses", ["Sequence, "a", "b"], ["Sequence", "c", "d"]]` | `(a, b; c, d)`  |
-| `["Sequence", "a", ["Parentheses", "b", "c"]]`                   | `a, (b, c)`     |
+| `["Parentheses", ["Sequence", "x", "y", "7", "11"]`              | `(x, y, 7, 11)` |
+| `["Delimiter"]`                                                  | `()`            |
+| `["Delimiter", "a", "b", "c"]`                                 | `(a, b, c)`     |

@@ -10,16 +10,16 @@ sidebar:
 # Core
 
 <section id='constants'>
-## Constants
 
+## Constants
 
 | Symbol      | Description                                                                                                                                                             |
 | :---------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `All`       | All the possible values apply                                                                                                                                           |
-| `Missing`   | A **required** expression is not present.                                                                                                                               |
+| `Missing`   | A **required** expression is not present                                                                                                                               |
 | `None`      | None of the possible values apply                                                                                                                                       |
 | `Nothing`   | An **optional** expression is not present                                                                                                                               |
-| `Undefined` | The result is not defined. For example, the `domain()` of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` and for booleans, `Maybe` |
+| `Undefined` | The result is not defined. For example, the `domain()` of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` (Not a Number) and for booleans, `Maybe` |
 
 
 
@@ -34,23 +34,84 @@ sidebar:
 
 ## Core Functions
 
+{% defs "Function" "Operation" %}
+{% def "About" %}
+  <code>["About", _symbol_]</code>
+  
+  Evaluate to a dictionary containing information about a symbol such as its domain, its attributes, its value, etc...
+{% enddef %}
+{% def "Domain" %}
+ <code>["Domain", _expression_]</code>
+  
+  Evaluate to the domain of _expression_
+{% enddef %}
+{% def "Evaluate" %}
+ <code>["Evaluate", _expression_]</code>
+  
+  Apply a sequence of definitions to an expression in order to reduce, simplify
+  and calculate its value. Overrides `Hold` and hold attributes of a function.
+{% enddef %}
+{% def "Error" %}
+ <code>["Error", _expression_, _string_]</code>{% tags "inert" "float-right" %}
+  
+  Tag an expression that could not be interpreted correctly. It may have a syntax error, a reference to an unknown symbol or function or some other problem.
+{% enddef %}
+{% def "Hold" %}
+ <code>["Hold", _expression_]</code>{% tags "inert" "float-right" %}
+  
+  Tag an expression that should be kept in an unevaluated form
+{% enddef %}
+{% def "Html" %}
+ <code>["Html", _expr_]</code>
+  
+  Evaluate to a string which is the HTML markup corresponding to the expression. If the head of _expr_ is `LatexString`, `Latex` or `LatexTokens`, renders the LaTeX to HTML markup
+{% enddef %}
+{% def "Identity" %}
+ <code>["Identity", _expression_]</code>
+  
+  Evaluate to its argument
+{% enddef %}
+{% def "InverseFunction" %}
+ <code>["InverseFunction", _expression_]</code>
+  
+  Evaluate to the inverse function of its argument for example `Arcsin` for `Sin`
+{% enddef %}
+{% def "Latex" %}
+ <code>["Latex", _expr_]</code>
+  
+  Evaluate to a `LatexString` which is the expression serialized to LaTeX
+{% enddef %}
+{% def "LatexString" %}
+ <code>["LatexString", _string_]</code>{% tags "inert" "float-right" %}
+  
+  Tag a string as a LaTeX string
+{% enddef %}
+{% def "LatexTokens" %}
+ <code>["LatexTokens", ..._token_\[\]]</code>
+  
+  Evaluate to a `LatexString` made of the concatenation of the token arguments
+{% enddef %}
+{% def "Parse" %}
+ <code>["Parse", _expr_]</code>
+  
+  If _expr_ is a `LatexString` or `LatexTokens`, evaluate to a MathJSON expression 
+  corresponding to the LaTeX string.
+{% enddef %}
+{% def "String" %}
+ <code>["String", ..._expr_\[\]]</code>{% tags "constructor" "float-right"%}
+  
+  Evaluate to a string made from the concatenation of the arguments converted 
+  to string
+{% enddef %}
+{% def "Symbol" %}
+ <code>["Symbol", ..._expr_\[\]]</code>{% tags "constructor" "float-right"%}
+  
+  Evaluate to a new symbol made of a concatenation of the arguments. 
+  
+  For example `["Symbol", "x", 2] -> "x2"
+{% enddef %}
+{% enddefs %}
 
-| Function          | Operation                                                                                                                                                                                                            |
-| :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `About`           | <code>["About", _symbol_]</code><br> Return information about a symbol such as its domain, its attributes, its value, etc...                                                                                         |
-| `Domain`          | <code>["Domain", _expression_]</code><br> Return the domain of the expression                                                                                                                                        |
-| `Evaluate`        | <code>["Evaluate", _expression_]</code><br> Apply a sequence of definitions to an expression in order to reduce and simplify it. Overrides `Hold` and hold attributes of a function.                                 |
-| `Error`           | <code>["Error", _expression_]</code>{% tags "inert" %}<br>The expression could not be interpreted correctly. It may have a syntax error, a reference to an unknown symbol or function or some other problem.         |
-| `Hold`            | <code>["Hold", _expression_]</code>{% tags "inert" %}<br> Maintain an expression in an unevaluated form (inert function)                                                                                             |
-| `Html`            | <code>["Html", _expr_]</code><br> Evaluate to a string which is the HTML markup corresponding to the expression. If the head of _expr_ is `LatexString`, `Latex` or `LatexTokens`, renders the LaTeX to HTML markup. |
-| `Identity`        | <code>["Identity", _symbol_]</code><br> Always return its argument                                                                                                                                                   |
-| `InverseFunction` | <code>["InverseFunction", _expression_]</code><br> Return the inverse function of its argument, for example \\( \arcsin \\) for \\(\sin\\)                                                                           |
-| `Latex`           | <code>["Latex", _expr_]</code><br> Evaluate to a `LatexString` which is the expression serialized to LaTeX                                                                                                           |
-| `LatexString`     | <code>["LatexString", _string_]</code>{% tags "inert" %}<br> A LaTeX string                                                                                                                                          |
-| `LatexTokens`     | <code>["LatexTokens", ..._token_\[\]]</code><br> Evaluate to a `LatexString` made of the concatenation of the tokens                                                                                                 |
-| `Parse`           | <code>["Parse", _expr_]</code><br> `expr` should be a `LatexString` or `LatexTokens` and the result is an expression corresponding to the parsing of the LaTeX string                                                |
-| `String`          | <code>["String", ..._expr_\[\]]</code>{% tags "constructor" %}<br> Return a string made from the concatenation of the arguments.                                                                                     |
-| `Symbol`          | <code>["Symbol", ..._expr_\[\]]</code>{% tags "constructor" %}<br> Return a new symbol made of a concatenation of the arguments. For example `["Symbol", "x", 2] -> "x2"`                                            |
 
 
 | Example                      |                   |
@@ -68,13 +129,13 @@ other typographic variations.
 
 {% defs "Function" "Operation" %}
 {% def "Style" %}
-  <code>["Style", _expr_, _css_]</code><span class='float-right'>{% tags "inert" %}</span>
+  <code>["Style", _expr_, _css_]</code>{% tags "inert" "float-right" %}
   
   Apply CSS styles to an expression
 
 {% enddef %}
 {% def "Delimiter" %}
-  <code>["Delimiter", _expr_]</code><span class='float-right'>{% tags "inert" %}</span>
+  <code>["Delimiter", _expr_]</code>{% tags "inert" "float-right" %}
 
   <code>["Delimiter", _expr_, _sep_]</code>
   

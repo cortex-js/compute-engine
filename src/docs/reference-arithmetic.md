@@ -55,14 +55,14 @@ related constants<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use>
 
 | Function | Notation | |
 | :--- | :--- | :--- |
-| `Add` | \\( a + b\\) | {% tags "numeric" %}<br>[Addition](https://www.wikidata.org/wiki/Q32043) |
-| `Subtract` | \\( a - b\\) | {% tags "numeric" %}<br>[Subtraction](https://www.wikidata.org/wiki/Q32043)
-| `Negate` | \\(-a\\) | {% tags "numeric" %}<br>[Additive inverse](https://www.wikidata.org/wiki/Q715358)|
-| `Multiply` | \\( a\times b \\) | {% tags "numeric" %}<br>[Multiplication](https://www.wikidata.org/wiki/Q40276) |
-| `Power` | \\( a^b \\) | {% tags "numeric" %}<br>[Exponentiation](https://www.wikidata.org/wiki/Q33456)
-| `Root` | \\(\sqrt[n]{x}=x^{\frac1n}\\) | {% tags "numeric" %}<br>[n-th root](https://www.wikidata.org/wiki/Q601053) |
-| `Sqrt` |  \\(\sqrt{x}=x^{\frac12}\\) | {% tags "numeric" %}<br>[Square root](https://www.wikidata.org/wiki/Q134237)|
-| `Square` |  \\(x^2\\) | {% tags "numeric" %}|
+| `Add` | \\( a + b\\) | [Addition](https://www.wikidata.org/wiki/Q32043) {% tags "numeric" "float-right"%}|
+| `Subtract` | \\( a - b\\) | [Subtraction](https://www.wikidata.org/wiki/Q32043) {% tags "numeric" "float-right"%}
+| `Negate` | \\(-a\\) | [Additive inverse](https://www.wikidata.org/wiki/Q715358){% tags "numeric" "float-right"%}|
+| `Multiply` | \\( a\times b \\) | [Multiplication](https://www.wikidata.org/wiki/Q40276) {% tags "numeric" "float-right"%}|
+| `Power` | \\( a^b \\) | [Exponentiation](https://www.wikidata.org/wiki/Q33456) {% tags "numeric" "float-right"%} |
+| `Root` | \\(\sqrt[n]{x}=x^{\frac1n}\\) | [n-th root](https://www.wikidata.org/wiki/Q601053) {% tags "numeric" "float-right"%}|
+| `Sqrt` |  \\(\sqrt{x}=x^{\frac12}\\) | [Square root](https://www.wikidata.org/wiki/Q134237){% tags "numeric" "float-right"%}|
+| `Square` |  \\(x^2\\) | {% tags "numeric" "float-right"%}
 </div>
 
 
@@ -72,11 +72,11 @@ related constants<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use>
 
 | Function | Notation | |
 | :--- | :--- | :--- |
-| `Exp` | \\(\exponentialE^{x}\\) |  {% tags "numeric" %}<br>[Exponential function](https://www.wikidata.org/wiki/Q168698) |
-| `Log` | \\(\ln(x)\\) | {% tags "numeric" %}<br>[Logarithm function](https://www.wikidata.org/wiki/Q11197), the inverse of `Exp` |
-| `Log2` | \\(\ln_2(x)\\) | {% tags "numeric" %}<br>[Binary logarithm function](https://www.wikidata.org/wiki/Q581168), the base-2 logarithm |
-| `Log10` | \\(\ln_{10}(x)\\) | [{% tags "numeric" %}<br>Common logarithm](Q966582), the base-10 logarithm  |
-| `LogOnePlus` | | {% tags "numeric" %}<br>|
+| `Exp` | \\(\exponentialE^{x}\\) |  [Exponential function](https://www.wikidata.org/wiki/Q168698) {% tags "numeric" "float-right"%}|
+| `Log` | \\(\ln(x)\\) | [Logarithm function](https://www.wikidata.org/wiki/Q11197), the inverse of `Exp` {% tags "numeric" "float-right"%}|
+| `Log2` | \\(\ln_2(x)\\) | [Binary logarithm function](https://www.wikidata.org/wiki/Q581168), the base-2 logarithm {% tags "numeric" "float-right"%} |
+| `Log10` | \\(\ln_{10}(x)\\) | [Common logarithm](Q966582), the base-10 logarithm  {% tags "numeric" "float-right"%}|
+| `LogOnePlus` | | {% tags "numeric" "float-right"%}|
 </div>
 
 {% readmore "/compute-engine/reference/trigonometry/" %}
@@ -91,10 +91,10 @@ See also <strong>Trigonometry</strong> for trigonometric functions
 
 | Function | Notation | |
 | :--- | :--- | :--- |
-| `Abs` | \\(\|x\|  \\) | {% tags "numeric" %}<br>Absolute value, [magnitude](https://www.wikidata.org/wiki/Q3317982) |
-| `Ceil` | | {% tags "numeric" %}<br>Rounds a number up to the next largest integer |
-| `Chop` |  | {% tags "numeric" %}<br>Replace real numbers that are very close to 0 (less than \\(10^{-10}\\)) with 0 |
-| `Floor` | | {% tags "numeric" %}<br>Round a number to the greatest integer less than the input value. |
-| `Round` | | {% tags "numeric" %}<br>|
+| `Abs` | \\(\|x\|  \\) | Absolute value, [magnitude](https://www.wikidata.org/wiki/Q3317982) {% tags "numeric" "float-right"%}|
+| `Ceil` | | Rounds a number up to the next largest integer {% tags "numeric" "float-right"%}|
+| `Chop` |  | Replace real numbers that are very close to 0 (less than \\(10^{-10}\\)) with 0 {% tags "numeric" "float-right"%}|
+| `Floor` | | Round a number to the greatest integer less than the input value {% tags "numeric" "float-right"%}|
+| `Round` | | {% tags "numeric" "float-right"%}|
 
 </div>

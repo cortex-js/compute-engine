@@ -29,11 +29,11 @@ sidebar:
 
 | Symbol | Notation | |
 | :--- | :--- | :--- |
-| `And` | \\( p \land q\\) | {% tags "logic" %}<br>Conjunction | 
-| `Or` | \\( p \lor q\\) | {% tags "logic" %}<br>Disjunction | 
-| `Not` | \\( \lnot p\\) | {% tags "logic" %}<br>Negation | 
-| `Equivalent` | \\( p \Leftrightarrow q\\) |{% tags "logic" %}| 
-| `Implies` | \\(p \implies q \\) | {% tags "logic" %}| 
+| `And` | \\( p \land q\\) | Conjunction {% tags "logic" "float-right" %}| 
+| `Or` | \\( p \lor q\\) | Disjunction {% tags "logic" "float-right" %}| 
+| `Not` | \\( \lnot p\\) | Negation {% tags "logic" "float-right" %}| 
+| `Equivalent` | \\( p \Leftrightarrow q\\) |{% tags "logic" "float-right" %}| 
+| `Implies` | \\(p \implies q \\) | {% tags "logic" "float-right" %}| 
 
 </div>
 
