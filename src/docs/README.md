@@ -1,26 +1,11 @@
 ---
 title: MathJSON Dictionary
-permalink: /guides/compute-engine/dictionaries/
+permalink: /compute-engine/guides/dictionaries/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
 ---
-
-<script defer type='module'>
-    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({ 
-      renderAccessibleContent: false,
-      TeX: { 
-        delimiters: {
-          inline: [['\\(', '\\)']],
-          display: [ ['$$', '$$'], ['\\[', '\\]']],
-        },
-        processEnvironments : false 
-      },
-      asciiMath: null,
-    });
-</script>
 
 # Dictionaries
 
@@ -67,28 +52,43 @@ or the domain of the "result" of the function.
 Each entry in the symbol dictionary indicate the domain of the symbol, and for
 functions its codomain.
 
+## Functions
+
+A MathJSON function such as `Add`, `Sin` or `Equal` can be used for a variety
+of purposes. It can be helpful to classify them in some broad categories:
+
+
+<div class=symbols-table>
+
+| Category |  |
+|:---|:---|
+| {% tags "inert" %} | The result of evaluating an inert function is the function and its arguments. This is more useful than it sounds: it can be used to 'tag' an input an indicate how it should be interpreted. Examples: `Hold` `Evaluate` `Complex` `LatexString`|
+| {% tags "constructor" %} | A function that takes a variety of inputs and return a new kind of object. Examples: `Symbol` `String` `Interval` `Range` |
+| {% tags "numeric" %} | A function whose arguments and return value are all numeric. Examples: `Add` `Sin` `Exp` `Sqrt`|
+| {% tags "predicate" %} | A predicate function returns a boolean. It can evaluate if a proposition is true or false. Examples: `Equal` `IsPrime`|
+| {% tags "logical" %} | A predicate whose arguments are also booleans. Examples: `And` `Not` `Or`|
+
+
+</div>
+
 ## Customizing the Dictionaries
 
-It is possible to provide custom syntax and symbol dictionaries, or to modify
-the default ones.
+**To define a custom syntax**, provide custom syntax and custom symbol
+dictionaries when creating a `ComputeEngine` instance.
 
-When no dictionaries are provided, default ones are used automatically.
-
-## Default Dictionaries
-
-The default dictionaries are organized by topic as follow:
+If no custom dictionaries are provided, the default ones are used. They are organized by topic as follow:
 
 <div class=symbols-table>
 
 | Dictionary                                                     |                                                                                |
 | :------------------------------------------------------------- | :----------------------------------------------------------------------------- |
-| [Arithmetic](/guides/compute-engine/arithmetic/)               | `Add` `Multiply`...                                                            |
-| [Calculus](/guides/compute-engine/calculus/)                   | `Derive` `Integrate`...                                                        |
-| [Collections](/guides/compute-engine/collections/)             | `Sequence` `List` `Dictionary` `Set`...                                        |
-| [Core](/guides/compute-engine/core/)                           | `Missing` `Nothing` `None` `All` `Identity` `InverseFunction` `LatexTokens`... |
-| [Logic](/guides/compute-engine/logic/)                         | `And` `Or` `Not`...                                                            |
-| [Sets](/guides/compute-engine/sets/)                           | `Union` `Intersection`...                                                      |
-| [Special Functions](/guides/compute-engine/special-functions/) | `Erf` `Gamma` `Factorial`...                                                   |
-| [Trigonometry](/guides/compute-engine/trigonometry/)           | `Cos` `Sin` `Tan`...                                                           |
+| [Arithmetic](/compute-engine/reference/arithmetic/)               | `Add` `Multiply`...                                                            |
+| [Calculus](/compute-engine/reference/calculus/)                   | `Derive` `Integrate`...                                                        |
+| [Collections](/compute-engine/reference/collections/)             | `Sequence` `List` `Dictionary` `Set`...                                        |
+| [Core](/compute-engine/reference/core/)                           | `Missing` `Nothing` `None` `All` `Identity` `InverseFunction` `LatexTokens`... |
+| [Logic](/compute-engine/reference/logic/)                         | `And` `Or` `Not`...                                                            |
+| [Sets](/compute-engine/reference/sets/)                           | `Union` `Intersection`...                                                      |
+| [Special Functions](/compute-engine/reference/special-functions/) | `Erf` `Gamma` `Factorial`...                                                   |
+| [Trigonometry](/compute-engine/reference/trigonometry/)           | `Cos` `Sin` `Tan`...                                                           |
 
 </div>

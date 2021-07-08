@@ -7,22 +7,7 @@ sidebar:
   - nav: 'compute-engine'
 ---
 
-<script defer type="module">
-    import { renderMathInDocument } from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({ 
-      renderAccessibleContent: false,
-      TeX: { 
-        delimiters: {
-          inline: [['\\(', '\\)']],
-          display: [ ['$$', '$$'], ['\\[', '\\]']],
-        },
-        processEnvironments : false 
-      },
-      asciiMath: null,
-    });
-</script>
-
-<img src='/assets/MathJSON-1.png' style='margin-bottom:2em;  border-radius:8px; border:1px solid #203346'>
+<img src='/assets/MathJSON-1.jpg' class='full-width' style='border-radius:8px 8px 0 0; border:1px solid #203346; margin-bottom: 2em'>
 
 The MathJSON format is a lightweight data interchange format for mathematical
 notation.
@@ -54,9 +39,13 @@ utilities that parse LaTeX to MathJSON, serialize MathJSON to LaTeX, and provide
 a collection of functions for symbolic manipulation and numerical evaluations of
 MathJSON expressions.
 
-<div class='read-more'><a href="/guides/compute-engine/dictionaries/">Read more about <strong>MathJSON for LaTeX</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/guides/dictionaries/" %}
+Read more about <strong>MathJSON for LaTeX</strong>
+{% endreadmore %}
 
-<div class='read-more'><a href="/compute-engine/">Read more about the <strong>Compute Engine</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/" %}
+Read more about the <strong>Compute Engine</strong>
+{% endreadmore %}
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations

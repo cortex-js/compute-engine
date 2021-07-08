@@ -7,22 +7,6 @@ sidebar:
   - nav: 'cortex'
 ---
 
-<script defer type='module'>
-    import {renderMathInDocument} from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({     renderMathInDocument({ 
-      renderAccessibleContent: false,
-      TeX: { 
-        delimiters: {
-          inline: [['\\(', '\\)']],
-          display: [ ['$$', '$$'], ['\\[', '\\]']],
-        },
-        processEnvironments : false 
-      },
-      asciiMath: null,
-    });
-
-</script>
-
 # Cortex
 
 Cortex is a programming language for scientific computing built on the Cortex
@@ -48,9 +32,13 @@ x = 2^11 - 1
 // -> "2047 is a PrimeNumber"
 ```
 
-<div class='read-more'><a href="/cortex/syntax/">Read more about the <strong>formal syntax of Cortex</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/cortex/syntax/" %}
+Read more about the <strong>formal syntax of Cortex</strong>
+{% endreadmore %}
 
-<div class='read-more'><a href="/cortex/implementation/">Read more about the <strong>implementation of Cortex</strong><svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/cortex/implementation/" %}
+Read more about the <strong>implementation of Cortex</strong>
+{% endreadmore %}
 
 
 

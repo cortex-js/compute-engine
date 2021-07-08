@@ -1,27 +1,11 @@
 ---
 title: Sets
-permalink: /guides/compute-engine/sets/
+permalink: /compute-engine/reference/sets/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
 ---
-
-<script defer type='module'>
-    import {  renderMathInDocument } 
-      from '//unpkg.com/mathlive/dist/mathlive.min.mjs';
-    renderMathInDocument({
-      TeX: {
-        delimiters: {
-          inline: [ ['$', '$'], ['\\(', '\\)']],
-          display: [['$$', '$$'],['\\[', '\\]']],
-        },
-      },
-      asciiMath: null,
-      processEnvironments : false,
-      renderAccessibleContent: false,
-    });
-</script>
 
 # Sets
 
@@ -30,7 +14,8 @@ A **set** is a collection of distinct elements.
 A **domain**, such as `Integer` `Boolean`, is a **set** used to represent the
 possible values of an expression.
 
-<div class='read-more'><a href="/guides/compute-engine/domains/">Learn more about <strong>Domains</strong> <svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/reference/domains/" %} Read more about
+<strong>Domains</strong> {% endreadmore %}
 
 ## Constants
 
@@ -42,7 +27,7 @@ possible values of an expression.
 
 </div>
 
-The [domains](/guides/compute-engine/domains/) also define a number of sets.
+The [domains](/compute-engine/reference/domains/) also define a number of sets.
 
 ## Functions
 
