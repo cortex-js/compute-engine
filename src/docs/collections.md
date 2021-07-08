@@ -27,21 +27,13 @@ sidebar:
 
 ## `Sequence`
 
-The most primitive collection: a series of expressions separated by a `,`.
+The most primitive collection: a series of expressions. They can be optionally
+separated by a separator such as `,` or `;`.
 
 | MathJSON                             | LaTeX            |
 | :----------------------------------- | :--------------- |
 | `["Sequence", "x", "y"]`             | \\( x, y \\)     |
 | `["Sequence", ["Add", "x", 1], "y"]` | \\( x + 1, y \\) |
-
-## `Sequence2`
-
-A series of expressions separated by a `;`.
-
-| MathJSON                                     | LaTeX          |
-| :------------------------------------------- | :------------- |
-| `["Sequence2", "x", "y"]`                    | \\( x; y \\)   |
-| `["Sequence2", ["Sequence", "a", "b"], "y"]` | \\(a, b; y \\) |
 
 ## `Set`
 
