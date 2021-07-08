@@ -11,8 +11,8 @@ import {
   mapArgs,
 } from '../common/utils';
 import { splitGraphemes } from '../common/grapheme-splitter';
-import { NumberFormattingOptions } from '../latex-syntax/public';
-import { Expression } from '../public';
+import { NumberFormattingOptions } from '../math-json/public';
+import { Expression } from '../math-json/math-json-format';
 import { serializeHexFloat, serializeNumber } from '../common/serialize-number';
 import {
   EmptyBlock,

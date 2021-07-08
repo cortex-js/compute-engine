@@ -11,11 +11,11 @@ import {
   getTail,
   MISSING,
 } from '../common/utils';
-import { Expression } from '../public';
-import { ComputeEngine, Numeric } from './public';
+import { Expression, Substitution } from '../math-json/math-json-format';
+import { ComputeEngine, Numeric } from '../math-json/compute-engine-interface';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
-import { substitute, Substitution } from './patterns';
+import { substitute } from './patterns';
 
 /**
  */

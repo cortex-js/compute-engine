@@ -170,13 +170,13 @@
   </svg>
 
   <header>
-    <h1>Cortex Compute Engine REPL</h1>
+    <h1>Compute Engine REPL</h1>
   </header>
   <main>
     <div class='row'>
       <div id='input-label'>a = </div>
       <math-field id="mf" class="mathfield" tabindex="0" virtual-keyboard-mode="manual">
-        1 + 2 
+        <!-- 1 + 2  -->
         <!-- 2+3.001 -->
           <!-- -1^2 -->
          <!-- 1^{2^3} -->
@@ -330,13 +330,22 @@
       <div class="output mathjson"></div>
     </div>
 
+    <div class="output-section" id="solve">
+      <div class='row'>
+        <code class="label">solve(f, ["x"]))&nbsp;=&nbsp;</code>
+        <math-field class="latex" read-only></math-field>
+        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+      </div>
+      <div class="output mathjson toggle-field"></div>
+    </div>
+
   </main>
 
   <script defer type="module">
     import { convertLatexToMarkup } from 
       'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
     import { 
-      LatexSyntax, parse, serialize, ComputeEngine, match 
+      LatexSyntax, ComputeEngine, match 
     } from '../dist/compute-engine.esm.js';
 
     const MAX_LINE_LENGTH = 64;
@@ -381,20 +390,7 @@
               (err.arg ? ': ' + err.arg : '')
             )
           }
-        },
-        promoteUnknownSymbols: /^[a-z]+/,
-        dictionary:
-          [...LatexSyntax.getDictionary(),
-          {
-            name: 'Missing',
-            serialize: ''
-          },
-          {
-            name: 'Speed',
-            trigger: 'speed'
-          }
-          ]
-
+        }
       });
 
     const rawLatex = new LatexSyntax(
@@ -402,7 +398,7 @@
         invisibleOperator: '',
         invisiblePlusOperator: '',
         dictionary: [],
-        promoteUnknownSymbols: /./,
+        parseUnknownToken: () => 'symbol',
 
         parseArgumentsOfUnknownLatexCommands: true,
         parseNumbers: false,
@@ -412,8 +408,8 @@
 
     const ce = new ComputeEngine();
 
-    console.log(ce.is(['Element', 2, ['Interval', 1, 5]]));
-    console.log(ce.solve(parse('3x^2+2x-1'), 'x'));
+    // console.log(ce.is(['Element', 2, ['Interval', 1, 5]]));
+    // console.log(ce.solve(parse('3x^2+2x-1'), 'x'));
 
     updateAssumptions();
 
@@ -492,6 +488,12 @@
         console.error("evaluate(%c " + latex + '%c) ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
+      try {
+        updateExpr(await ce.solve(expr, ['x']), 'solve');
+      } catch (e) {
+        console.error("solve(%c " + latex + '%c, ["x"]) ' +
+          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      }
 
     }
 
@@ -555,7 +557,7 @@
       'domain', 
       'simplify', 
       'evaluate-numerically', 
-      'evaluate'].forEach(id => {
+      'evaluate', 'solve'].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         const toggle = el.querySelector('.toggle');
@@ -602,13 +604,13 @@
       ce.assume(['Equal','a', 1]);
 
     document.getElementById('assumptions').innerHTML = 
-      '<ul><li>' + 
+      '' + 
        [...ce.assumptions].map(([assumption, val]) => { 
          return convertLatexToMarkup(defaultLatex.serialize(assumption)) + 
           '<span>' + (val ?  '': ' is false') + '</span>'
         }
-      ).join('</li><li>') +
-      '</li></ul>'
+      ).join(', ') +
+      ''
     }
 
 

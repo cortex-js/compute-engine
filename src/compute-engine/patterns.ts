@@ -7,14 +7,10 @@ import {
   getSymbolName,
   getTail,
 } from '../common/utils';
-import { Expression } from '../public';
+import { Expression, Substitution } from '../math-json/math-json-format';
 import { NUMERICAL_TOLERANCE } from './numeric';
-import { Numeric } from './public';
+import { Numeric } from '../math-json/compute-engine-interface';
 import { hasWildcards } from './utils';
-
-export type Substitution<T extends number = number> = {
-  [symbol: string]: Expression<T>;
-};
 
 function captureWildcard<T extends number = number>(
   wildcard: string,
@@ -43,7 +39,7 @@ export function matchRecursive(
   expr: Expression<Numeric>,
   pattern: Expression<Numeric>,
   substitution: Substitution<Numeric>,
-  options: { numericalTolerance: number }
+  options: { numericTolerance: number }
 ): Substitution<Numeric> | null {
   //
   // Match a number
@@ -53,8 +49,7 @@ export function matchRecursive(
     // Two numbers are considered the same if they are close in value
     // (< 10^(-10) by default).
     if (
-      Math.abs(val - (getNumberValue(expr) ?? NaN)) <=
-      options.numericalTolerance
+      Math.abs(val - (getNumberValue(expr) ?? NaN)) <= options.numericTolerance
     ) {
       return substitution;
     }
@@ -173,12 +168,12 @@ export function matchRecursive(
       } else if (argName.startsWith('_')) {
         result = captureWildcard(argName, exprArgs.shift()!, result);
       } else {
-        const sub = match(arg, exprArgs.shift()!, options);
+        const sub = match(exprArgs.shift()!, arg, options);
         if (sub === null) return null;
         result = { ...result, ...sub! };
       }
     } else {
-      const sub = match(arg, exprArgs.shift()!, options);
+      const sub = match(exprArgs.shift()!, arg, options);
       if (sub === null) return null;
       result = { ...result, ...sub! };
     }
@@ -207,23 +202,23 @@ export function matchRecursive(
  *
  */
 export function match<T extends number = number>(
-  pattern: Expression<T>,
   subject: Expression<T>,
-  options?: { numericalTolerance: number }
+  pattern: Expression<T>,
+  options?: { numericTolerance?: number }
 ): Substitution<T> | null {
   console.assert(!hasWildcards(subject) || hasWildcards(pattern));
   return matchRecursive(
     subject,
     pattern,
     {},
-    options ?? { numericalTolerance: NUMERICAL_TOLERANCE }
+    { numericTolerance: options?.numericTolerance ?? NUMERICAL_TOLERANCE }
   );
 }
 
 export function match1(
   expr: Expression,
   pattern: Expression,
-  options: { numericalTolerance: number }
+  options: { numericTolerance: number }
 ): Expression | null {
   const result = match(pattern, expr, options);
   if (result === null) return null;
@@ -235,7 +230,7 @@ export function match1(
 export function count(
   exprs: Iterable<Expression>,
   pattern: Expression,
-  options: { numericalTolerance: number }
+  options: { numericTolerance: number }
 ): number {
   let result = 0;
   for (const expr of exprs) {
@@ -247,7 +242,7 @@ export function count(
 export function matchList(
   exprs: Iterable<Expression>,
   pattern: Expression,
-  options: { numericalTolerance: number }
+  options: { numericTolerance: number }
 ): Substitution[] {
   const result: Substitution[] = [];
   for (const expr of exprs) {

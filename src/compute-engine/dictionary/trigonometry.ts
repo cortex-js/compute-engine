@@ -1,11 +1,16 @@
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { DIVIDE, getArg, MISSING, MULTIPLY, NEGATE } from '../../common/utils';
-import { ComputeEngine, Dictionary, Numeric } from '../public';
-import { ExpressionMap } from '../expression-map';
-import { Expression } from '../../public';
+import {
+  ComputeEngine,
+  Dictionary,
+  Domain,
+  Numeric,
+} from '../../math-json/compute-engine-interface';
+import { ExpressionMap } from '../../math-json/expression-map';
+import { Expression } from '../../math-json/math-json-format';
 import { DECIMAL_ONE } from '../numeric-decimal';
-import { isNumeric } from '../predicates';
+import { isNumericSubdomain } from './domains';
 
 // Names after ISO 80000 Section 13
 
@@ -82,7 +87,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   //
   Degrees: {
     /* = Pi / 180 */
-    domain: 'Real',
+    domain: 'RealNumber',
     constant: true,
     value: 0.017453292519943295769236907,
   },
@@ -157,8 +162,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   //
   Arccos: {
     domain: 'TrigonometricFunction',
-    evalDomain: (ce: ComputeEngine, dom: Expression) =>
-      isNumericDomain(dom) ? ['Interval', 0, 'Pi'] : null,
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     numeric: true,
     value: ['Subtract', 'HalfPi', ['Arcsin', '_']],
     simplify: (_ce, x: Expression) =>
@@ -173,7 +178,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Arcosh: {
     domain: 'HyperbolicFunction',
-    outputDomain: ['Interval', 0, Infinity],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     numeric: true,
     value: ['Ln', ['Add', '_', ['Sqrt', ['Subtract', ['Square', '_'], 1]]]],
     simplify: (_ce, x: Expression) =>
@@ -212,7 +218,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   // },
   Arcsin: {
     domain: 'TrigonometricFunction',
-    outputDomain: ['Interval', 'MinusHalfPi', 'HalfPi'],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Arcsin'] ?? [
@@ -232,7 +239,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   //Note: Arsinh, not Arcsinh
   Arsinh: {
     domain: 'HyperbolicFunction',
-    outputDomain: ['Interval', -Infinity, Infinity],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Arsinh'] ?? [
@@ -247,7 +255,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   Arctan: {
     wikidata: 'Q2257242',
     domain: 'TrigonometricFunction',
-    outputDomain: ['Interval', 'MinusHalfPi', 'HalfPi'],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     numeric: true,
     simplify: (_ce, x: Expression) => SPECIAL_VALUES.get(x)?.['Arctan'] ?? x,
     evalNumber: (_ce, x: number) => Math.atan(x),
@@ -256,7 +265,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Arctan2: {
     wikidata: 'Q776598',
-    outputDomain: ['Interval', 'MinusPi', 'Pi'],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     domain: 'TrigonometricFunction',
     numeric: true,
     evalNumber: (_ce, x: number, y: number) => Math.atan2(x, y),
@@ -265,7 +275,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Artanh: {
     domain: 'HyperbolicFunction',
-    outputDomain: ['Interval', -Infinity, Infinity],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Artanh'] ?? [
@@ -285,7 +296,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
 
   Cosh: {
     domain: 'HyperbolicFunction',
-    outputDomain: ['Interval', 1, Infinity],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'PositiveNumber' : null,
     numeric: true,
     simplify: (_ce, x: Expression) => SPECIAL_VALUES.get(x)?.['Cosh'] ?? x,
     value: [
@@ -299,7 +311,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Cos: {
     domain: 'TrigonometricFunction',
-    outputDomain: ['Interval', -1, 1],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Cos'] ?? ['Sin', ['Add', x, 'HalfPi']],
@@ -310,7 +323,12 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Cot: {
     domain: 'TrigonometricFunction',
-    outputDomain: 'ComplexNumber',
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'RealNumber')
+        ? 'RealNumber'
+        : isNumericSubdomain(dom, 'ComplexNumber')
+        ? 'ComplexNumber'
+        : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Cot'] ?? ['Divide', ['Cos', x], ['Sin', x]],
@@ -321,7 +339,12 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Coth: {
     domain: 'HyperbolicFunction',
-    outputDomain: 'ComplexNumber',
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'RealNumber')
+        ? 'RealNumber'
+        : isNumericSubdomain(dom, 'ComplexNumber')
+        ? 'ComplexNumber'
+        : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Coth'] ?? ['Divide', 1, ['Tanh', x]],
@@ -332,7 +355,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Csc: {
     domain: 'TrigonometricFunction',
-    outputDomain: ['Interval', -1, 1],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Csc'] ?? ['Divide', 1, ['Sin', x]],
@@ -343,7 +367,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Csch: {
     domain: 'HyperbolicFunction',
-    outputDomain: ['Interval', -1, 1],
+    evalDomain: (ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'RealNumber' : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Csch'] ?? ['Divide', 1, ['Sinh', x]],
@@ -353,23 +378,29 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
     evalComplex: (_ce, x: Complex) => Complex.ONE.div(Complex.sinh(x)),
   },
   /* converts (radius, angle) -> (x, y) */
-  FromPolarCoordinates: {
-    domain: 'Function',
-    outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
-  },
+  // FromPolarCoordinates: {
+  //   domain: 'Function',
+  //   outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
+  // },
   /** = sin(z/2)^2 = (1 - cos z) / 2*/
   Haversine: {
     wikidata: 'Q2528380',
     domain: 'TrigonometricFunction',
-    outputDomain: ['Interval', 0, 1],
+    // Range ['Interval', 0, 1],
+    evalDomain: (_ce: ComputeEngine, dom: Domain) =>
+      isNumericSubdomain(dom, 'Number') ? 'NonNegativeNumber' : null,
     value: ['Divide', ['Subtract', 1, ['Cos', '_']], 2],
     numeric: true,
   },
   // sqrt(x*x + y*y)
   Hypot: {
     domain: 'Function',
-    outputDomain: ['Interval', 0, Infinity],
+    // Range: ['Interval', 0, Infinity],
     value: ['Sqrt', ['Square', '_'], ['Square', '_2']],
+    evalDomain: (_ce: ComputeEngine, arg1: Domain, arg2: Domain) =>
+      isNumericSubdomain(arg1, 'Number') && isNumericSubdomain(arg2, 'Number')
+        ? 'NonNegativeNumber'
+        : null,
     evalNumber: (_ce, x: number, y: number) => Math.sqrt(x * x * +y * y),
     evalDecimal: (_ce, x: Decimal, y: Decimal) =>
       Decimal.sqrt(x.mul(x).add(y.mul(y))),
@@ -378,7 +409,10 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   InverseFunction: {
     domain: 'Function',
-    outputDomain: 'Function',
+    evalDomain: (_ce: ComputeEngine, arg: Domain) =>
+      arg === 'TrigonometricFunction' || arg === 'HyperbolicFunction'
+        ? arg
+        : null,
     simplify: (_ce, x: Expression): Expression => {
       const fn = getArg(x, 1) ?? MISSING;
       if (typeof fn !== 'string') return x;
@@ -412,13 +446,25 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   /** = 2 * Arcsin(Sqrt(z)) */
   InverseHaversine: {
     domain: 'TrigonometricFunction',
-    outputDomain: ['Interval', ['MinusPi'], 'Pi'],
+    //  Range ['Interval', ['MinusPi'], 'Pi'],
+    evalDomain: (_ce: ComputeEngine, arg: Domain) =>
+      isNumericSubdomain(arg, 'RealNumber')
+        ? 'RealNumber'
+        : isNumericSubdomain(arg, 'ComplexNumber')
+        ? 'ComplexNumber'
+        : null,
     numeric: true,
     value: ['Multiply', 2, ['Arcsin', ['Sqrt', '_']]],
   },
   Sec: {
     domain: 'TrigonometricFunction',
-    outputDomain: ['Interval', -1, 1],
+    // Range: ['Interval', -1, 1],
+    evalDomain: (_ce: ComputeEngine, arg: Domain) =>
+      isNumericSubdomain(arg, 'RealNumber')
+        ? 'RealNumber'
+        : isNumericSubdomain(arg, 'ComplexNumber')
+        ? 'ComplexNumber'
+        : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Sec'] ?? ['Divide', 1, ['Cos', x]],
@@ -429,7 +475,13 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Sech: {
     domain: 'HyperbolicFunction',
-    outputDomain: ['Interval', -1, 1],
+    // Range: ['Interval', -1, 1],
+    evalDomain: (_ce: ComputeEngine, arg: Domain) =>
+      isNumericSubdomain(arg, 'RealNumber')
+        ? 'RealNumber'
+        : isNumericSubdomain(arg, 'ComplexNumber')
+        ? 'ComplexNumber'
+        : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Sech'] ?? ['Divide', 1, ['Cosh', x]],
@@ -440,7 +492,13 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Sinh: {
     domain: 'HyperbolicFunction',
-    outputDomain: ['Interval', -Infinity, Infinity],
+    // Range: ['Interval', -Infinity, Infinity],
+    evalDomain: (_ce: ComputeEngine, arg: Domain) =>
+      isNumericSubdomain(arg, 'Number')
+        ? 'RealNumber'
+        : isNumericSubdomain(arg, 'ComplexNumber')
+        ? 'ComplexNumber'
+        : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Sinh'] ?? [
@@ -456,7 +514,13 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Sin: {
     domain: 'TrigonometricFunction',
-    outputDomain: ['Interval', -1, 1],
+    // outputDomain: ['Interval', -1, 1],
+    evalDomain: (_ce: ComputeEngine, arg: Domain) =>
+      isNumericSubdomain(arg, 'RealNumber')
+        ? 'RealNumber'
+        : isNumericSubdomain(arg, 'ComplexNumber')
+        ? 'ComplexNumber'
+        : null,
     numeric: true,
     simplify: (_ce, x: Expression) => SPECIAL_VALUES.get(x)?.['Sin'] ?? x,
     value: [
@@ -475,7 +539,13 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
   },
   Tanh: {
     domain: 'HyperbolicFunction',
-    outputDomain: ['Interval', -Infinity, Infinity],
+    // Range: ['Interval', -Infinity, Infinity],
+    evalDomain: (_ce: ComputeEngine, arg: Domain) =>
+      isNumericSubdomain(arg, 'RealNumber')
+        ? 'RealNumber'
+        : isNumericSubdomain(arg, 'ComplexNumber')
+        ? 'ComplexNumber'
+        : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Tanh'] ?? ['Divide', ['Sinh', x], ['Cosh', x]],
@@ -487,7 +557,13 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
 
   Tan: {
     domain: 'TrigonometricFunction',
-    outputDomain: 'RealNumber',
+    // Range: 'RealNumber',
+    evalDomain: (_ce: ComputeEngine, arg: Domain) =>
+      isNumericSubdomain(arg, 'RealNumber')
+        ? 'RealNumber'
+        : isNumericSubdomain(arg, 'ComplexNumber')
+        ? 'ComplexNumber'
+        : null,
     numeric: true,
     simplify: (_ce, x: Expression) =>
       SPECIAL_VALUES.get(x)?.['Tan'] ?? ['Divide', ['Sin', x], ['Cos', x]],
@@ -497,8 +573,8 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary = {
     evalComplex: (_ce, x: Complex) => x.tan(),
   },
   /* converts (x, y) -> (radius, angle) */
-  ToPolarCoordinates: {
-    domain: 'Function',
-    outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
-  },
+  // ToPolarCoordinates: {
+  //   domain: 'Function',
+  //   outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
+  // },
 };

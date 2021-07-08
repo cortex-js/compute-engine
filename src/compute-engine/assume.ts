@@ -1,167 +1,52 @@
 import {
+  applyRecursively,
   getArg,
-  getComplexValue,
-  getDecimalValue,
+  getDictionary,
   getFunctionName,
-  getNumberValue,
-  getRationalValue,
   getSymbolName,
   getTail,
+  isAtomic,
   MISSING,
-  NOTHING,
   UNDEFINED,
 } from '../common/utils';
-import { Expression } from '../public';
-import { inferNumericDomain, NumericDomain } from './domains';
-import { match, Substitution } from './patterns';
-import { ComputeEngine, Numeric } from './public';
+import { Expression } from '../math-json/math-json-format';
+import {
+  asNumber,
+  compareNumericDomainInfo,
+  inferNumericDomainInfo,
+  NumericDomainInfo,
+  NUMERIC_DOMAIN_INFO,
+} from './dictionary/domains';
+import {
+  AssumeResult,
+  ComputeEngine,
+  Numeric,
+} from '../math-json/compute-engine-interface';
 import { CortexError } from './utils';
+import { match } from './patterns';
 
 /**
- * Simple assumptions about symbols or numbers (their domain, min value, max value and'
- * the values they are **not**) are kept in a `AtomicInfo` cache.
- */
-export type AtomicInfo = {
-  domain?: NumericDomain;
-  min: number;
-  max: number;
-  open?: 'left' | 'right' | 'both';
-  excludedValues?: number[];
-};
-
-/**
- * Provide an answer to questions about
- * - equality
- * - inequality
- * - set/domain membership
- * - subset of
- *
- * Consider assumptions and evaluate boolean expressions.
- *
- * The proposition can be a boolean expression including:
- * - `And`
- * - `Or`
- * - `Not`
+ * `lhs` is a symbol or a number.
+ * `rhs` is what we're comparing it with.
  *
  */
-export function internalIs(
+export function checkCachedInfo(
   ce: ComputeEngine,
-  proposition: Expression
-): boolean | undefined {
-  //
-  // Constants
-  //
-  if (
-    proposition === null ||
-    proposition === UNDEFINED ||
-    proposition === MISSING ||
-    proposition === NOTHING
-  ) {
-    return undefined;
-  }
-  if (proposition === 'True') return true;
-  if (proposition === 'False') return false;
-  if (proposition === 'Maybe') return undefined;
+  lhs: null | Expression,
+  op: string, // 'Equal' | 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual' | 'Element',
+  rhs: null | Expression
+): boolean | undefined | null {
+  if (lhs === null || rhs === null) return null;
 
-  //
-  // `And`: conjunction, all must be true
-  //
-  let name = getFunctionName(proposition);
-  if (name === 'And') {
-    for (const p of getTail(proposition)) {
-      const v = internalIs(ce, p);
-      if (v !== true) return v;
-    }
-    return true;
-  }
+  // If we couldn't get or calculate a NumericDomainInfo,
+  // bail.
+  const lhsInfo = getCachedNumericDomainInfo(ce, lhs);
+  if (lhsInfo === null) return null;
 
-  //
-  // `Or`: disjunction, any must be true
-  //
-  if (name === 'Or') {
-    for (const p of getTail(proposition)) {
-      const v = internalIs(ce, p);
-      if (v !== false) return v;
-    }
-    return true;
-  }
+  const rhsInfo = getCachedNumericDomainInfo(ce, rhs);
+  if (rhsInfo === null) return null;
 
-  const prop = normalizeProposition(ce, proposition);
-  if (prop === null) return undefined;
-
-  name = getFunctionName(prop);
-
-  // @todo: we could:
-  // 1/ check the list of variables in the proposition
-  // 2/ if a single variable, solve() for this var
-  // 3/ if multiple vars, solve for each var, then `["And"...]` the solutions
-
-  //
-  // `Not`: negation
-  //
-  if (name === 'Not') {
-    const v = internalIs(ce, getArg(prop, 1) ?? MISSING);
-    if (v === undefined) return undefined;
-    return !v;
-  }
-
-  //
-  // Check symbol info
-  //
-  let sub = match(['Equal', ['Subtract', '_x', '_a'], 0], prop);
-  if (sub) return checkAtomic(ce, sub.x, '=', sub.a) ?? undefined;
-  sub = match(['Equal', ['Add', '_x', '_a'], 0], prop);
-  if (sub) return checkAtomic(ce, sub.x, '=', ['Negate', sub.a]) ?? undefined;
-  sub = match(['Equal', '_x', 0], prop);
-  if (sub) return checkAtomic(ce, sub.x, '=', 0) ?? undefined;
-  sub = match(['Less', ['Add', '_x', '_a'], 0], prop);
-  if (sub) return checkAtomic(ce, sub.x, '<', ['Negate', sub.a]) ?? undefined;
-  sub = match(['Less', '_x', 0], prop);
-  if (sub) return checkAtomic(ce, sub.x, '<', 0) ?? undefined;
-  sub = match(['LessEqual', ['Add', '_x', '_a'], 0], prop);
-  if (sub) return checkAtomic(ce, sub.x, '<=', ['Negate', sub.a]) ?? undefined;
-  sub = match(['LessEqual', '_x', 0], prop);
-  if (sub) return checkAtomic(ce, sub.x, '<=', 0) ?? undefined;
-  sub = match(['Element', '_x', '_a'], prop);
-  if (sub) return checkAtomic(ce, sub.x, 'in', sub.a) ?? undefined;
-
-  //
-  // Check exact assumptions...
-  //
-  const v = checkAssumption(ce, prop);
-  if (v !== undefined) return v;
-
-  // Consider evaluating, and checking more general assumptions
-  // e.g. match('Element', lhs, x)
-
-  // const vars = ce.getVars(prop);
-  // if (vars.size === 1) {
-  //   const x = vars.entries[0];
-  //   let sub: Substitution<Numeric> | null = null;
-  //   if (name === 'Equal') {
-  //     let lhsSub = match(['Equal', ['Add', x, '_a']], prop);
-  //     let a: number | null = null;
-  //     if (lhsSub) {
-  //       a = getNumberValue(lhsSub.a);
-  //     } else {
-  //       lhsSub = match(['Equal', ['Subtract', x, '_a']], prop);
-  //       if (lhsSub) {
-  //         a = -(getNumberValue(lhsSub.a) ?? NaN);
-  //       }
-  //     }
-
-  //     if (a !== null) {
-  //       sub = ce.ask(['Equal', ['Add', x, '_a']]);
-  //       if (sub) {
-  //         if (a !== getNumberValue(x)) return false;
-  //       }
-  //     }
-  //   } else if (name === 'Less') {
-  //   } else if (name === 'Element') {
-  //   } else if (name === 'Subset') {
-  //   }
-  // }
-  return undefined;
+  return compareNumericDomainInfo(lhsInfo, op, rhsInfo);
 }
 
 /** Assume proposition is in normalizeProposition form already */
@@ -169,364 +54,244 @@ export function checkAssumption(
   ce: ComputeEngine,
   proposition: Expression
 ): boolean | undefined {
-  console.assert(assertNormalProposition(proposition));
+  // During constructions of the context, no assumptions to check
+  if (!ce.context || !ce.context.assumptions) return false;
+  console.assert(
+    assertNormalProposition(proposition),
+    'Expected a proposition in normal form',
+    proposition
+  );
 
   return ce.assumptions.get(proposition);
 }
 
-/** Check a simple proposition about a number or symbol
- * - lhs is a symbol or number
- * - rhs is a number or a Range/Interval or a NumericDomain
- *
- */
-export function checkAtomic(
-  ce: ComputeEngine,
-  lhs: Expression,
-  op: '=' | '<' | '<=' | '>' | '>=' | 'in',
-  rhs: Expression
-): boolean | undefined | null {
-  // If lhs is a symbol, `getAtomicInfo()` returns cached info about the symbol
-  // If lhs is a number, it returns a synthetic info
-  const lhsInfo = getAtomicInfo(ce, lhs);
-  if (lhsInfo === null) return null;
-
-  //
-  // Is it a domain check?
-  //
-  if (op === 'in') {
-    if (lhsInfo.domain === undefined) return null;
-
-    const name = getFunctionName(rhs);
-
-    // Check if lhs is element of a rhs range/interval
-    if (name === 'Range' || name === 'Interval') {
-      if (name === 'Range' && lhsInfo.domain !== 'Integer') return false;
-
-      // Could be Open left or Open right
-      const rhsInfo = getAtomicInfo(ce, rhs);
-      if (rhsInfo === null) return null;
-
-      let cmp = compare(lhsInfo.min, rhsInfo);
-      if (cmp !== 'in') return false;
-
-      cmp = compare(lhsInfo.max, rhsInfo);
-      if (cmp !== 'in') return false;
-
-      return true;
-    } else if (name === 'Multiple') {
-      // @todo
-    } else if (name === null) {
-      // Check if element of a domain
-      if (rhs === lhsInfo.domain) return true;
-      const dom = getSymbolName(rhs);
-      if (dom !== null) return isSubdomain(dom, lhsInfo.domain);
-    }
-    return null;
-  }
-
-  if (op === '=' && lhsInfo.excludedValues) {
-    const rhsVal = asNumber(rhs);
-    if (rhsVal !== null && lhsInfo.excludedValues.includes(rhsVal))
-      return false;
-  }
-
-  const rhsInfo = getAtomicInfo(ce, rhs);
-  if (rhsInfo === null) return null;
-
-  const cmp = compare(lhs, rhsInfo);
-
-  if (cmp === 'in') return undefined;
-
-  if (op === '=') {
-    return cmp === '=';
-  } else if (op === '<') {
-    return cmp === '<';
-  } else if (op === '>') {
-    return cmp === '>';
-  } else if (op === '<=') {
-    return cmp === '<' || cmp === '=';
-  } else if (op === '>=') {
-    return cmp === '>' || cmp === '=';
-  }
-  return null;
-}
-
-/** Get some basic info about
- * - a symbol
- * - a numeric
- * - a range/interval
- */
-export function getAtomicInfo(
+function getCachedNumericDomainInfo(
   ce: ComputeEngine,
   expr: Expression
-): AtomicInfo | null {
+): NumericDomainInfo | null {
+  //  During construction, no context and no assumptions.
+  if (!ce.context) return inferNumericDomainInfo(expr);
+
   const symbol = getSymbolName(expr);
-  if (symbol !== null) return getSymbols(ce).get(symbol) ?? null;
-  const head = getFunctionName(expr);
-  if (head === 'Range' || head == 'Interval') {
-    let open: 'both' | 'left' | 'right' | undefined = undefined;
-    const arg1 = getArg(expr, 1);
-    const arg2 = getArg(expr, 2);
-    let min: number | null = null;
-    let max: number | null = null;
-    if (getFunctionName(getFunctionName(arg1)) === 'Open') {
-      open = 'left';
-      min = asNumber(getArg(arg1, 1));
-    } else {
-      min = asNumber(arg1);
-    }
-    if (getFunctionName(getFunctionName(getArg(expr, 2))) === 'Open') {
-      open = open === undefined ? 'right' : 'both';
-      max = asNumber(getArg(arg2, 1));
-    } else {
-      max = asNumber(arg2);
-    }
-    if (min === null || max === null) return null;
-    return {
-      min,
-      max,
-      open,
-      domain: head === 'Range' ? 'Number' : 'RealNumber',
-    };
+  if (symbol === null) {
+    // It's not a symbol, it's not going to be cached
+    return inferNumericDomainInfo(expr);
   }
-  const val = asNumber(expr);
-  if (val !== null) {
-    return { min: val, max: val, domain: inferNumericDomain(val) ?? 'Number' };
+  const cache = getNumericDomainInfoCache(ce);
+
+  let result = cache.get(symbol) ?? null;
+  if (result === null) {
+    // It wasn't in the cache: add it.
+    result = inferNumericDomainInfo(expr);
+    if (result !== null) cache.set(symbol, result);
   }
-  return null;
+
+  return result;
 }
 
-export function setAtomicInfo(
-  ce: ComputeEngine,
-  symbol: Expression,
-  value: AtomicInfo
-): void {
-  const name = getSymbolName(symbol);
-  console.assert(name !== null);
-  getSymbols(ce).set(name!, value);
-}
-
-/** Compare the value of `expr` with the min/max value of the info.
- * Ignore the domain.
+/**
+ * Return the cache of `NumericDomainInfo` indexed by symbol
  */
-function compare(
-  expr: Expression,
-  info: AtomicInfo
-): '=' | '!=' | '<' | '>' | 'in' | undefined {
-  const val = asNumber(expr);
-  if (val === null) return undefined;
-  if (info.max === info.min && val === info.min) return '=';
-  if (info.max === info.min && val !== info.min) return '!=';
-  if (info.open === 'both') {
-    if (val < info.min) return '<';
-    if (val > info.max) return '>';
-    return 'in';
-  } else if (info.open === 'left') {
-    if (val <= info.min) return '<';
-    if (val > info.max) return '>';
-    return 'in';
-  } else if (info.open === 'right') {
-    if (val < info.min) return '<';
-    if (val >= info.max) return '>';
-    return 'in';
-  }
-  if (val <= info.min) return '<';
-  if (val >= info.max) return '>';
-  return 'in';
-}
-
-function getSymbols(ce: ComputeEngine): Map<string, AtomicInfo> {
-  return ce.cache<Map<string, AtomicInfo>>('symbols', () => {
-    const result = new Map<string, AtomicInfo>();
+function getNumericDomainInfoCache(
+  ce: ComputeEngine
+): Map<string, NumericDomainInfo> {
+  return ce.cache<Map<string, NumericDomainInfo>>('numeric-domain-info', () => {
+    const result = new Map<string, NumericDomainInfo>();
     for (const [assumption, val] of ce.assumptions) {
-      cacheSymbolInfo(result, assumption, val);
+      if (val) cacheProposition(result, assumption);
     }
     return result;
   });
 }
 
-function cacheSymbolInfo(
-  cache: Map<string, AtomicInfo>,
-  assumption: Expression,
-  positive: boolean
-): void {
-  let op: null | '=' | '!=' | '<' | '<=' | '>' | '>=' | 'in' = null;
-  let val: null | Expression = null;
-
-  let sub = match(['Equal', '_x', 0], assumption);
-  if (sub !== null) {
-    val = 0;
-    op = positive ? '=' : '!=';
-  }
-  if (sub === null) {
-    sub = match(['Equal', ['Add', '_x', '_c'], 0], assumption);
-    if (sub !== null) {
-      val = ['Negate', sub.c];
-      op = positive ? '=' : '!=';
-    }
-  }
-  // @todo! other kind of assumptions: Less, LessEqual, Element, Multiple
-
-  // @todo: deal with negative assertions ("x is not in [1, 5]")
-
-  if (sub !== null && op !== null && val !== null) {
-    const symbol = getSymbolName(sub.x);
-    if (symbol !== null) setSymbolValue(cache, symbol, op, val);
-  }
+function resetNumericDomainInfoCache(ce: ComputeEngine): void {
+  ce.cache<Map<string, NumericDomainInfo>>('numeric-domain-info', null);
 }
 
 /**
- *
- * @todo: we could handle '!in'
+ * Convert a proposition to a `NumericDomainInfo`, if possible.
+ * The proposition can have a shape of:
+ * [`Equal`, x, c]
+ * [`Less`, x, c]
+ * [`LessEqual`, x, c]
+ * [`Greater`, x, c]
+ * [`GreaterEqual`, x, c]
+ * [`Element`, x, ["Interval"...]]
+ * [`Element`, x, ["Range"...]]
+ * [`Element`, x, ["Set"...]]
+ * [`Element`, x, ["Multiple"...]]
+ * [`Element`, x, _numeric_domain_]
  */
-function setSymbolValue(
-  symbols: Map<string, AtomicInfo>,
-  symbol: string,
-  op: '=' | '!=' | '<' | '<=' | '>' | '>=' | 'in',
-  value: Expression
-) {
-  if (op === 'in') {
-    // Range
-    // Interval
-    // Numeric Domain
-    // @todo!
-  }
 
-  //
-  // It's a numeric assertion (equality or inequality)
-  //
-  const domain = inferNumericDomain(value);
-  if (domain === null) return;
+function getNumericDomainInfoFromProposition(
+  prop: Expression
+): [symbol: null | string, info: NumericDomainInfo | null] {
+  console.assert(
+    assertNormalProposition(prop),
+    'Expected a proposition in normal form',
+    prop
+  );
 
-  const val = asNumber(value) ?? getComplexValue(value);
-  if (val === null) return;
+  const head = getFunctionName(prop);
+  const symbol = getSymbolName(getArg(prop, 1));
+  if (symbol === null) return [null, null];
+  const rhs = getArg(prop, 2);
 
-  const info = symbols.get(symbol) ?? { min: -Infinity, max: +Infinity };
+  if (head === 'Element') {
+    const rhsName = getFunctionName(rhs);
+    if (rhsName === 'Interval') {
+      let min: number | null = null;
+      const arg1 = getArg(rhs, 1);
+      let open: 'left' | 'right' | 'both' | undefined = undefined;
+      if (getFunctionName(arg1) === 'Open') {
+        min = asNumber(getArg(arg1, 1));
+        open = 'left';
+      } else {
+        min = asNumber(arg1);
+      }
+      if (min === null) return [null, null];
 
-  if (op === '!=') {
-    if (info.excludedValues === undefined) {
-      info.excludedValues = [val];
-    } else {
-      info.excludedValues.push(val);
+      const arg2 = getArg(rhs, 2);
+      let max: number | null = null;
+      if (getFunctionName(arg2) === 'Open') {
+        max = asNumber(getArg(arg2, 1));
+        open = open === 'left' ? 'both' : 'right';
+      } else {
+        max = asNumber(arg2);
+      }
+
+      if (max === null) return [null, null];
+      return [symbol, { domain: 'Integer', min, max, open }];
     }
-  } else if (op === '=') {
-    symbols.set(symbol, { ...info, domain, min: val, max: val });
-  } else if (op === '<') {
-    // @todo!
-  } else if (op === '<=') {
-    // @todo!
-  } else if (op === '>') {
-    // @todo!
-  } else if (op === '>=') {
-    // @todo!
+
+    if (rhsName === 'Range') {
+      const min = asNumber(getArg(rhs, 1));
+      if (min === null) return [null, null];
+      const max = asNumber(getArg(rhs, 2));
+      if (max === null) return [null, null];
+      return [symbol, { domain: 'Integer', min, max }];
+    }
+
+    if (rhsName === 'Set') {
+      // @todo
+      return [null, null];
+    }
+
+    if (rhsName === 'Multiple') {
+      // @todo
+      return [null, null];
+    }
+
+    const info = NUMERIC_DOMAIN_INFO[getSymbolName(rhs) ?? MISSING];
+    if (info === null) return [null, null];
+    return [symbol, info];
   }
+
+  if (head === 'Equal') {
+    const c = asNumber(rhs);
+    if (c === null) return [null, null];
+    return [symbol, { domain: 'RealNumber', min: c, max: c }];
+  }
+
+  if (head === 'Less') {
+    const c = asNumber(rhs);
+    if (c === null) return [null, null];
+    return [
+      symbol,
+      { domain: 'RealNumber', min: -Infinity, max: c, open: 'right' },
+    ];
+  }
+
+  if (head === 'LessEqual') {
+    const c = asNumber(rhs);
+    if (c === null) return [null, null];
+    return [symbol, { domain: 'RealNumber', min: -Infinity, max: c }];
+  }
+
+  if (head === 'Greater') {
+    const c = asNumber(rhs);
+    if (c === null) return [null, null];
+    return [
+      symbol,
+      { domain: 'RealNumber', min: c, max: +Infinity, open: 'right' },
+    ];
+  }
+
+  if (head === 'GreaterEqual') {
+    const c = asNumber(rhs);
+    if (c === null) return [null, null];
+    return [symbol, { domain: 'RealNumber', min: c, max: +Infinity }];
+  }
+
+  return [null, null];
+}
+
+/**
+ * Add an assumption to a cache of `NumericDomainInfo`.
+ *
+ * Note that this cache only contains "positive" assertions, i.e.
+ * "x = 0", not the negative ones ("x ≠ 0") which are only stored in the
+ * knowledge base.
+ *
+ * `proposition` is normalized and can have the shape:
+ * [`Equal`, x, c]
+ * [`Less`, x, c]
+ * [`LessEqual`, x, c]
+ * [`Greater`, x, c]
+ * [`GreaterEqual`, x, c]
+ * [`Element`, x, ["Interval"...]]
+ * [`Element`, x, ["Range"...]]
+ * [`Element`, x, ["Set"...]]
+ * [`Element`, x, ["Multiple"...]]
+ * [`Element`, x, _numeric_domain_]
+ */
+function cacheProposition(
+  cache: Map<string, NumericDomainInfo>,
+  proposition: Expression
+): void {
+  console.assert(
+    assertNormalProposition(proposition),
+    'Expected a proposition in normal form',
+    proposition
+  );
+  const [symbol, info] = getNumericDomainInfoFromProposition(proposition);
+  if (symbol === null || info === null) return;
+  cache.set(symbol, info);
 }
 
 function assertNormalProposition(prop: Expression): boolean {
   const name = getFunctionName(prop);
-  if (name === 'Equal' || name === 'Less' || name === 'LessEqual') {
-    if (getNumberValue(getArg(prop, 2)) === 0) return true;
-    return false;
-  }
+
   if (
     name === 'Not' ||
     name === 'And' ||
     name === 'Or' ||
     name === 'Element' ||
-    name === 'Subset'
+    name === 'Subset' ||
+    name === 'SubsetEqual'
   ) {
     return true;
   }
+
+  if (
+    name === 'Equal' ||
+    name === 'NotEqual' ||
+    name === 'Less' ||
+    name === 'LessEqual' ||
+    name === 'Greater' ||
+    name === 'GreaterEqual'
+  ) {
+    // The first argument should be a symbol.
+    if (getSymbolName(getArg(prop, 1)) !== null) return true;
+    return false;
+  }
   return false;
-}
-
-/**
- * Attempts to put the proposition in normal form:
- * - ['Not', f] -> [f, false]
- * - ['NotEqual', f] -> [['Equal', f], false]
- * - ['Greater', lhs, rhs] -> ['Less', rhs, lhs]
- * - ['GreaterEqual', lhs, rhs] -> ['LessEqual', rhs, lhs]
- * - lhs = rhs => lhs - rhs = 0 (or lhs/rhs = 1 & rhs !== 0)
- * - ['Equal', [Square, f], g] => ...
- *
- *
- * Note: this function is not recursive, it only normalizes the first level:
- * since it might not be necessary to consider all the elements (first 'Or'
- * that returns true succeeds), save time by only doing the minimum necessary.
- *
- * Returns `null` if this is not in fact a proposition
- *
- * @todo
- */
-export function normalizeProposition<T extends number = Numeric>(
-  ce: ComputeEngine,
-  proposition: Expression<T>
-): null | Expression<T> {
-  const symbol = getSymbolName(proposition);
-  if (symbol === 'True' || symbol === 'False' || symbol === 'Maybe') {
-    return symbol;
-  }
-
-  const head = getFunctionName(proposition);
-
-  if (head === 'And' || head == 'Or') return proposition;
-
-  if (head === 'Not') {
-    const arg = ce.canonical(ce.simplify(getArg(proposition, 1))) ?? MISSING;
-    if (getFunctionName(arg) === 'Not') return getArg(arg, 1);
-    return ['Not', arg];
-  }
-
-  if (head === 'NotEqual') {
-    const arg = ce.canonical(
-      ce.simplify([
-        'Subtract',
-        getArg(proposition, 1) ?? MISSING,
-        getArg(proposition, 2) ?? MISSING,
-      ])
-    );
-    return ['Not', ['Equal', arg, 0]];
-  }
-
-  if (head === 'NotElement') {
-    const arg1 = ce.simplify(getArg(proposition, 1)) ?? MISSING;
-    const arg2 = ce.simplify(getArg(proposition, 2)) ?? MISSING;
-    return ['Not', ['Element', ce.canonical(arg1), ce.canonical(arg2)]];
-  }
-
-  if (head === 'Greater' || head === 'GreaterEqual') {
-    const arg =
-      ce.canonical(
-        ce.simplify([
-          'Subtract',
-          getArg(proposition, 2),
-          getArg(proposition, 1),
-        ])
-      ) ?? MISSING;
-    return [head === 'Greater' ? 'Less' : 'LessEqual', arg, 0];
-  }
-
-  if (head === 'Equal' || head === 'Less' || head === 'LessEqual') {
-    const arg =
-      ce.canonical(
-        ce.simplify([
-          'Subtract',
-          getArg(proposition, 1),
-          getArg(proposition, 2),
-        ])
-      ) ?? MISSING;
-    return [head, arg, 0];
-  }
-
-  if (head === 'Element') return proposition;
-
-  return null;
 }
 
 export function internalAssume<T extends number = Numeric>(
   ce: ComputeEngine<T>,
   proposition: Expression<T>
-): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok' {
+): AssumeResult {
   const head = getFunctionName(proposition);
 
   if (!head) throw new CortexError({ message: 'expected-predicate' });
@@ -540,15 +305,14 @@ export function internalAssume<T extends number = Numeric>(
     if (v === true) return 'tautology';
     if (v === false) return 'contradiction';
     for (const prop of getTail(proposition)) {
-      // @todo: could use an internalRecursive that assumes a normalized prop
       const result = internalAssume(ce, prop);
       if (result !== 'ok') return result;
     }
     return 'ok';
   } else {
-    prop = normalizeProposition(ce, prop);
-    if (prop !== null && head === 'Not') {
-      prop = normalizeProposition(ce, getArg(prop, 1) ?? MISSING);
+    prop = evaluateBoolean(ce, prop);
+    if (prop !== null && getFunctionName(prop) === 'Not') {
+      prop = getArg(prop, 1);
       val = false;
     }
   }
@@ -563,11 +327,13 @@ export function internalAssume<T extends number = Numeric>(
     if (v !== val) return 'contradiction';
   }
 
-  // Add a new assumption
+  // Add a new assumption to the `assumptions` knowledge base
   ce.assumptions.set(prop, val);
 
-  // And cache it
-  cacheSymbolInfo(getSymbols(ce), prop, val);
+  // And invalidate the symbols cache
+  // (other cache entries may have become out of date because of this
+  // new assumption. We'll repopulate the cache on demand later)
+  resetNumericDomainInfoCache(ce);
 
   // @todo: could check any assumptions that have become tautologies
   // (i.e. if `proposition` was more general than an existing assumption)
@@ -576,173 +342,295 @@ export function internalAssume<T extends number = Numeric>(
   return 'ok';
 }
 
-function getAssumptionsAbout<T extends number = Numeric>(
-  engine: ComputeEngine<T>,
-  arg: Expression<T>
+export function getAssumptionsAbout<T extends number = Numeric>(
+  ce: ComputeEngine<T>,
+  symbol: string
 ): Expression<T>[] {
-  const symbols: string[] = [...engine.getVars(arg)]
-    .map((x) => getSymbolName(x))
-    .filter((x) => x !== null) as string[];
-
-  if (symbols.length === 0) return [];
-
   const result: Expression<T>[] = [];
-  for (const [assumption, val] of engine.assumptions) {
-    const vars = engine.getVars(assumption);
-    for (const symbol of symbols) {
-      if (vars.has(symbol)) {
-        if (val) {
-          result.push(assumption);
-        } else if (getFunctionName(assumption) === 'Equal') {
-          result.push(['NotEqual', assumption]);
-        } else if (getFunctionName(assumption) === 'Element') {
-          result.push(['NotElement', assumption]);
-        } else if (getFunctionName(assumption) === 'Less') {
-          result.push(['GreaterEqual', assumption]);
-        } else if (getFunctionName(assumption) === 'LessEqual') {
-          result.push(['Greater', assumption]);
-        } else {
-          result.push(['Not', assumption]);
-        }
-        break;
-      }
+  for (const [assumption, val] of ce.assumptions) {
+    const vars = ce.getVars(assumption);
+    if (vars.has(symbol)) {
+      result.push(val ? assumption : ['Not', assumption]);
     }
   }
 
   return [];
 }
 
+export function forgetAll(ce: ComputeEngine): void {
+  ce.assumptions.clear();
+  resetNumericDomainInfoCache(ce);
+}
+
 export function forget<T extends number = Numeric>(
-  engine: ComputeEngine<T>,
-  arg: Expression<T>
+  ce: ComputeEngine<T>,
+  symbol: string
 ): void {
-  for (const assumption of getAssumptionsAbout(engine, arg)) {
-    engine.assumptions.delete(assumption);
+  for (const [assumption, _val] of ce.assumptions) {
+    const vars = ce.getVars(assumption);
+    if (vars.has(symbol)) ce.assumptions.delete(assumption);
   }
+  resetNumericDomainInfoCache(ce);
 }
 
-function asNumber(x: Expression<Numeric>): number | null {
-  const val = getNumberValue(x);
-  if (val !== null) return val;
+/**
+ * Return a simplified expression of a canonical boolean expression
+ *
+ * - Not(Not(x)) = x
+ * - Not(True) = False
+ * - Not(False) = True
+ * - Not(Maybe) = Maybe
+ * - And(x, True) = x
+ * - Or(x, False) = x
+ * - And(And(x, y), z) = And(x, y, z)
+ * - Or(Or(x, y), z) = Or(x, y, z)
+ *
+ * Call evaluatePredicate() to attempt to resolve
+ *
+ */
+export function simplifyBoolean<T extends number = Numeric>(
+  ce: ComputeEngine<T>,
+  expr: Expression<T>
+): Expression<T> {
+  const originalExpr = expr;
+  //
+  // Constants, numbers...
+  //
+  if (isAtomic(expr)) return expr;
 
-  const [numer, denom] = getRationalValue(x);
-  if (numer !== null && denom !== null) {
-    return numer / denom;
+  //
+  // Dictionaries
+  //
+  if (getDictionary(expr) !== null) {
+    return applyRecursively(expr, (x) => simplifyBoolean(ce, x));
   }
-  const d = getDecimalValue(x);
-  if (d !== null) return d.toNumber();
 
-  return null;
-}
-
-function expressionToSymbolInfo(
-  symbols: Map<string, AtomicInfo>,
-  expr: Expression
-): [symbol: string | null, info: AtomicInfo | null] {
   const name = getFunctionName(expr);
-  let sub: Substitution | null = null;
-  let val: Expression | null = null;
+
+  if (name === 'NotEqual') return ['Not', ['Equal', ...getTail(expr)]];
+  if (name === 'NotElement') return ['Not', ['Element', ...getTail(expr)]];
+
+  //
+  // `And`: conjunction, all must be true
+  //
+  if (name === 'And') {
+    const args: Expression<T>[] = [];
+    for (const p of getTail(expr)) {
+      let v: null | Expression<T> = simplifyBoolean(ce, p);
+      if (v === 'False') return 'False';
+      if (v !== 'True') {
+        // Check  if `v` matches one of the existing args
+        for (const arg of args) {
+          if (match(arg, v)) {
+            v = null;
+            break;
+          } else if (match(['Not', arg], v) || match(arg, ['Not', v])) {
+            // And(a, Not(a))
+            return 'False';
+          }
+        }
+      }
+      if (v !== null) args.push(v);
+    }
+    if (args.length === 0) return 'True';
+    if (args.length === 1) return args[0];
+    return ['And', ...args];
+  }
+
+  //
+  // `Or`: disjunction, any must be true
+  //
+  if (name === 'Or') {
+    const args: Expression<T>[] = [];
+    for (const p of getTail(expr)) {
+      let v: null | Expression<T> = simplifyBoolean(ce, p);
+      if (v === 'True') return 'True';
+      if (v !== 'False') {
+        // Check  if `v` matches one of the existing args
+        for (const arg of args) {
+          if (match(arg, v)) {
+            v = null;
+            break;
+          } else if (match(['Not', arg], v) || match(arg, ['Not', v])) {
+            // Or(a, Not(a))
+            return 'True';
+          }
+        }
+      }
+    }
+
+    if (args.length === 0) return 'False';
+    if (args.length === 1) return args[0];
+    return ['Or', ...args];
+  }
+
+  if (name === 'Implies') {
+    // p => q := (not p) or q
+    // if           Q=F & P= T      F
+    // otherwise                    T
+
+    const lhs = simplifyBoolean(ce, getArg(expr, 1) ?? MISSING);
+    const rhs = simplifyBoolean(ce, getArg(expr, 2) ?? MISSING);
+    if (rhs === 'True') return 'True';
+    if (
+      (lhs === 'True' || lhs === 'False' || lhs === 'Maybe') &&
+      (rhs === 'True' || rhs === 'False' || rhs === 'Maybe')
+    ) {
+      if (lhs === 'True' && rhs === 'False') return 'False';
+      return 'True';
+    }
+
+    return ['Implies', lhs, rhs];
+  }
+
+  if (name === 'Equivalent') {
+    // p <=> q := (p and q) or (not p and not q)
+    // (aka \iff)
+    // if (q = p), T. Otherwise, F
+
+    const lhs = simplifyBoolean(ce, getArg(expr, 1) ?? MISSING);
+    const rhs = simplifyBoolean(ce, getArg(expr, 2) ?? MISSING);
+    if (
+      (lhs === 'True' || lhs === 'False' || lhs === 'Maybe') &&
+      (rhs === 'True' || rhs === 'False' || rhs === 'Maybe')
+    ) {
+      return lhs === rhs ? 'True' : 'False';
+    }
+    return ['Equivalent', lhs, rhs];
+  }
+
+  // if (name === 'Xor') {
+  // p XOR q := T
+  // if (p != q) (true if an odd number of e are True) \veebar or \oplus
+
+  // @todo
+  // }
+
+  let sub = match(expr, ['Not', 'True']);
+  if (sub) return 'False';
+  sub = match(expr, ['Not', 'False']);
+  if (sub) return 'True';
+  sub = match(expr, ['Not', 'Maybe']);
+  if (sub) return 'Maybe';
+
+  // DeMorgan's Laws
+  sub = match(expr, ['Not', ['And', ['Not', '_a'], ['Not', '_b']]]);
+  if (sub) return simplifyBoolean(ce, ['Or', sub.a, sub.b]);
+
+  sub = match(expr, ['And', ['Not', '_a'], ['Not', '_b']]);
+  if (sub) return simplifyBoolean(ce, ['Not', ['Or', sub.a, sub.b]]);
+
+  sub = match(expr, ['Not', ['Or', ['Not', '_a'], ['Not', '_b']]]);
+  if (sub) return simplifyBoolean(ce, ['And', sub.a, sub.b]);
+
+  sub = match(expr, ['Or', ['Not', '_a'], ['Not', '_b']]);
+  if (sub) return simplifyBoolean(ce, ['Not', ['And', sub.a, sub.b]]);
+
+  sub = match(expr, ['Not', ['Not', '_a']]);
+  if (sub) return simplifyBoolean(ce, sub.a);
+
+  if (ce.cost(expr) > ce.cost(originalExpr)) return originalExpr;
+  return expr;
+}
+
+/**
+ * Evaluate this expression as a predicate:
+ * - equality: `Equal`, `NotEqual`
+ * - inequality: `Less`, `LessEqual`, `Greater`, `GreaterEqual`
+ * - set membership: `Element`, `NotElement`
+ *
+ * Attempts to put equalities and inequalities in normal form with
+ * the lhs a symbol.
+ *
+ * Call `checkCachedInfo()` and `checkAssumption()` to attempt
+ * to evaluate.
+ *
+ * @todo evaluate other operations: NotSubsetEqual, Superset, etc...
+ * @todo: call evaluate on function that have a dictionary def and are
+ * a predicate.
+ */
+function evaluateBooleanRecursive<T extends number = Numeric>(
+  ce: ComputeEngine,
+  expr: null | Expression<T>
+): Expression<T> {
+  if (expr === null) return UNDEFINED;
+  if (isAtomic(expr)) return expr;
+
+  if (getDictionary(expr) !== null) {
+    return applyRecursively(expr, (x) => evaluateBooleanRecursive(ce, x));
+  }
+
+  const head = getFunctionName(expr);
+
+  //
+  // `Equal`, `Less`, `LessEqual`, `Greater`, `GreaterEqual`
+  //
+  // Solve for univariate
+  //
   if (
-    name === 'Less' ||
-    name === 'LessEqual' ||
-    name === 'Greater' ||
-    name === 'GreaterEqual'
+    head === 'Equal' ||
+    head === 'Less' ||
+    head === 'LessEqual' ||
+    head === 'Greater' ||
+    head === 'GreaterEqual'
   ) {
-    sub = match([name, ['Add', '_x', '_a'], 0], expr);
-    if (sub !== null) {
-      val = -(asNumber(sub.a) ?? NaN);
-    } else {
-      sub = match([name, '_x', '_a'], expr);
-      if (sub) {
-        console.assert(sub.a === 0);
-        val = 0;
+    const vars = ce.getVars(expr);
+    if (vars !== null && vars.size === 1) {
+      const solutions = ce.solve(expr, vars);
+      if (solutions !== null) {
+        if (solutions.length === 1) return solutions[0];
+
+        return ['Or', ...solutions];
       }
     }
   }
-  if (sub === null) return [null, null];
-  const symbol = getSymbolName(sub.x);
-  if (symbol === null) return [null, null];
 
-  const info = symbols.get(symbol) ?? { min: -Infinity, max: Infinity };
-
-  if (name === 'Less') {
-    if (val === null) return [null, null];
-    info.max = val;
-    if (info.open === 'left') info.open = 'both';
-    else if (info.open !== 'both') info.open = 'right';
-  } else if (name === 'LessEqual') {
-    if (val === null) return [null, null];
-    info.max = val;
-    if (info.open === 'both') info.open = 'left';
-    else if (info.open === 'right') info.open = undefined;
-  } else if (name === 'Greater') {
-    if (val === null) return [null, null];
-    info.min = val;
-    if (info.open === 'right') info.open = 'both';
-    else if (info.open !== 'both') info.open = 'left';
-  } else if (name === 'GreaterEqual') {
-    if (val === null) return [null, null];
-    info.min = val;
-    if (info.open === 'both') info.open = 'right';
-    else if (info.open === 'left') info.open = undefined;
-  } else if (name === 'Element') {
-    const dom = getSymbolName(val);
-    if (dom !== null) {
-      if (info.domain && isSubdomain(dom, info.domain)) return [symbol, info];
-    } else {
-      // Check for 'Range' and 'Interval'`
+  // Note: we don't need to check NotEqual and NotElement: they have been
+  // handled above
+  if (
+    [
+      'Equal',
+      'Element',
+      'Subset',
+      'SubsetEqual',
+      'Greater',
+      'GreaterEqual',
+      'Less',
+      'LessEqual',
+    ].includes(head)
+  ) {
+    //
+    // Check cached `NumericDomainInfo` or exact assumption
+    //
+    const arg1 = evaluateBooleanRecursive(ce, getArg(expr, 1));
+    const arg2 = evaluateBooleanRecursive(ce, getArg(expr, 2));
+    if (head === 'Element') {
+      // @todo check if arg1 matches the set definition (extension or condition)
+      // by calling def[head].elementOf(arg1, arg2)
+    }
+    if (head === 'SubsetEqual' || head === 'Subset') {
+      // @todo check if arg1 matches the set definition (extension or condition)
+      // by calling def[head].elementOf(arg1, arg2)
+    }
+    let result = checkCachedInfo(ce, arg1, head, arg2);
+    if (result === null && getSymbolName(arg1) !== null) {
+      result = checkAssumption(ce, [head, arg1, arg2]);
     }
 
-    info.domain = dom as NumericDomain; // @todo: check that it's actually a NumericDomain
+    if (result === true) return 'True';
+    if (result === false) return 'False';
+    return [head, arg1, arg2];
   }
 
-  return [symbol, info];
+  return applyRecursively(expr, (x) => evaluateBooleanRecursive(ce, x));
 }
 
-function isSubdomain(lhs: string, rhs: NumericDomain): boolean | undefined {
-  return (
-    {
-      Number: [
-        'ExtendedComplexNumber',
-        'ExtendedRealNumber',
-        'ComplexNumber',
-        'ImaginaryNumber',
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-      ],
-      ExtendedComplexNumber: [
-        'Number',
-        'ExtendedRealNumber',
-        'ComplexNumber',
-        'ImaginaryNumber',
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-      ],
-      ExtendedRealNumber: [
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-      ],
-      ComplexNumber: ['ImaginaryNumber'],
-      ImaginaryNumber: ['ImaginaryNumber'],
-      RealNumber: [
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-      ],
-      TranscendentalNumber: ['TranscendentalNumber'],
-      AlgebraicNumber: ['RationalNumber', 'Integer'],
-      RationalNumber: ['RationalNumber', 'Integer'],
-      Integer: ['Integer'],
-    }[lhs]?.includes(rhs) ?? undefined
-  );
+export function evaluateBoolean<T extends number = Numeric>(
+  ce: ComputeEngine,
+  expr: null | Expression<T>
+): Expression<T> | null {
+  if (expr === null) return null;
+  expr = evaluateBooleanRecursive(ce, expr);
+  expr = ce.format(expr, 'canonical-boolean');
+  return simplifyBoolean(ce, expr);
 }

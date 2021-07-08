@@ -5,8 +5,10 @@ import {
   getSymbolName,
   getTail,
 } from '../common/utils';
-import { ErrorSignal, Expression, Signal } from '../public';
-import { ComputeEngine } from './public';
+import { Expression } from '../math-json/math-json-format';
+import { ComputeEngine, Domain } from '../math-json/compute-engine-interface';
+import { Signal } from '../math-json';
+import { ErrorSignal } from '../math-json/public';
 
 export class CortexError {
   signal: ErrorSignal;
@@ -61,7 +63,7 @@ function getVarsRecursive(
 
 /**
  * Return the set of variables (free or not) in an expression.
- * Doesn't return free varas because doesn't account for variable declaration
+ * Doesn't return free vars because doesn't account for variable declaration
  * and scopes.
  */
 export function getVariables(ce: ComputeEngine, expr: Expression): Set<string> {
@@ -88,4 +90,12 @@ export function hasWildcards(expr: Expression): boolean {
     return Object.keys(dict).some((key) => hasWildcards(dict[key]));
   }
   return false;
+}
+
+/** If the expression is a function, return the domains of its arguments. */
+export function getDomains(
+  ce: ComputeEngine,
+  expr: Expression
+): null | Domain[] {
+  return getTail(expr)?.map((x) => ce.domain(x)) ?? null;
 }

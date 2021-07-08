@@ -3,8 +3,8 @@ import {
   isSymbolObject,
   isFunctionObject,
 } from '../common/utils';
-import { Expression } from '../public';
-import { Dictionary } from './public';
+import { Expression } from '../math-json/math-json-format';
+import { Dictionary } from '../math-json/compute-engine-interface';
 
 export function getWikidata(dictionary: Dictionary, json: Expression): string {
   if (typeof json === 'number') return '';

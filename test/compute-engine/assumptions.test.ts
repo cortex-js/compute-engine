@@ -5,7 +5,7 @@ export const ce = new ComputeEngine();
 describe.skip('is() values', () => {
   ce.assume(['Greater', 'x', 4]);
   ce.assume(['Equal', 'a', 1]);
-  ce.assume('o', 1);
+  ce.assume(['Equal', 'o', 1]);
 
   test(`> 0`, () => {
     expect(ce.is(['Greater', 'x', 0])).toBeFalsy();
@@ -37,8 +37,8 @@ describe.skip('is() values', () => {
 
 describe.skip('is() values', () => {
   ce.assume('n', 'Integer');
-  ce.assume('p', 11);
-  ce.assume('r', ['Interval', ['Open', 0], +Infinity]);
+  ce.assume(['Equal', 'p', 11]);
+  ce.assume(['Element', 'r', ['Interval', ['Open', 0], +Infinity]]);
 
   test(`is positive`, () => {
     expect(ce.is(['Element', 'r', 'RealNumber'])).toBeTruthy();

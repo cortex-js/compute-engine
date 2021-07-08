@@ -1,16 +1,17 @@
-import {
-  DictionaryCategory,
-  ErrorSignal,
-  Expression,
-  WarningSignal,
-} from '../public';
+//
+// This is the implementation of the `ComputeEngine`.
+//
+
+import { Expression, Substitution } from '../math-json/math-json-format';
 
 import {
+  AssumeResult,
   CollectionDefinition,
   ComputeEngine as ComputeEngineInterface,
   Definition,
   Dictionary,
   Domain,
+  DomainExpression,
   Form,
   FunctionDefinition,
   Numeric,
@@ -21,12 +22,18 @@ import {
   SetDefinition,
   Simplification,
   SymbolDefinition,
-} from './public';
+} from '../math-json/compute-engine-interface';
 
 import { InternalComputeEngine } from './internal-compute-engine';
 import { equalExpr } from '../common/utils';
-import { ExpressionMap } from './expression-map';
-import { Substitution } from './patterns';
+import { ExpressionMap } from '../math-json/expression-map';
+import {
+  DictionaryCategory,
+  ErrorSignal,
+  LatexString,
+  Serializer,
+  WarningSignal,
+} from '../math-json/public';
 
 /**
  * Create a `CustomEngine` instance to customize its behavior and the syntax
@@ -92,6 +99,16 @@ export class ComputeEngine<T extends number = number>
     this.internal.precision = p;
   }
 
+  get iterationLimit(): number {
+    return this.internal.iterationLimit;
+  }
+  get recursionLimit(): number {
+    return this.internal.recursionLimit;
+  }
+  get timeLimit(): number {
+    return this.internal.timeLimit;
+  }
+
   /**
    * Internal format to represent numbers:
    * - `auto`: the best format is determined based on the calculations to perform
@@ -123,6 +140,14 @@ export class ComputeEngine<T extends number = number>
     this.internal.tolerance = val;
   }
 
+  set cost(fn: ((expr: Expression) => number) | undefined) {
+    this.internal.cost = fn;
+  }
+
+  get cost(): (expr: Expression) => number {
+    return this.internal.cost;
+  }
+
   /**
    * The current executin context, a runtime scope.
    *
@@ -137,11 +162,12 @@ export class ComputeEngine<T extends number = number>
   }
 
   /** Create a new scope and add it to the top of the scope stack */
-  pushScope(
-    dictionary: Readonly<Dictionary<Numeric>>,
-    scope?: Partial<Scope>
-  ): void {
-    this.internal.pushScope(dictionary, scope);
+  pushScope(options?: {
+    dictionary?: Readonly<Dictionary<Numeric>>;
+    assumptions?: (LatexString | Expression)[];
+    scope?: Partial<Scope>;
+  }): void {
+    this.internal.pushScope(options);
   }
 
   /** Remove the topmost scope from the scope stack.
@@ -199,10 +225,23 @@ export class ComputeEngine<T extends number = number>
     return this.internal.getDefinition(name);
   }
 
-  cache<T>(key: string, fn: () => T): T {
+  cache<T>(key: string, fn: null | (() => T)): T {
     return this.internal.cache(key, fn);
   }
 
+  /**
+   * Transform an expression by applying one or more rewriting rules to it,
+   * recursively.
+   *
+   * There are many ways to symbolically manipulate an expression, but
+   * transformations with `form` have the following characteristics:
+   *
+   * - they don't require calculations or assumptions about the domain of free
+   * variables or the value of constants
+   * - the output expression is expressed with more primitive functions,
+   * for example subtraction is replaced with addition
+   *
+   */
   format(expr: Expression | null, forms?: Form | Form[]): Expression | null {
     return this.internal.format(expr, forms);
   }
@@ -221,8 +260,8 @@ export class ComputeEngine<T extends number = number>
   /**
    * Return a numerical approximation of an expression.
    */
-  N(expr: Expression): Expression | null {
-    return this.internal.N(expr);
+  N(expr: Expression, options?: { precision?: number }): Expression | null {
+    return this.internal.N(expr, options);
   }
 
   solve(expr: Expression<T>, vars: string[]): null | Expression<T>[] {
@@ -251,13 +290,13 @@ export class ComputeEngine<T extends number = number>
       simplifications?: Simplification[];
     }
   ): Expression | null {
-    const timeLimit = options?.timeLimit ?? this.internal.timeLimit ?? 2.0;
+    const timeLimit = options?.timeLimit ?? this.internal.timeLimit;
     if (timeLimit && isFinite(timeLimit)) {
       this.internal.deadline = Date.now() + timeLimit * 1000;
     }
 
     const iterationLimit =
-      options?.iterationLimit ?? this.internal.iterationLimit ?? 1024;
+      options?.iterationLimit ?? this.internal.iterationLimit;
     let iterationCount = 0;
     let result: Expression | null = this.canonical(expr);
     let prevResult: Expression | null = result;
@@ -275,17 +314,9 @@ export class ComputeEngine<T extends number = number>
   }
 
   /**
-   * Return a simplified and numerically approximation of an expression
-   * in canonical form.
+   * Apply the definitions in the supplied dictionary to an expression
+   * and return the result.
    *
-   * The simplification steps will proceed multiple times until either:
-   * 1/ the expression stop changing
-   * 2/ the number of iteration exceeds `iterationLimit`
-   * 3/ the time to compute exceeds `timeLimit`, expressed in seconds
-   *
-   * If no `timeLimit` or `iterationLimit` are provided, the values
-   * from the current ComputeEngine context are used. By default those
-   * values are an infinite amount of iterations and a 2s time limit.
    *
    * Evaluating some expressions can take a very long time. Some can invole
    * making network queries. To avoid blocking the main event loop,
@@ -307,7 +338,11 @@ export class ComputeEngine<T extends number = number>
     return this.internal.parse(s);
   }
   serialize(x: Expression): string {
-    return this.serialize(x);
+    return this.internal.serialize(x);
+  }
+
+  get serializer(): Serializer {
+    return this.internal.serializer;
   }
 
   /** Return the domain of the expression */
@@ -358,25 +393,32 @@ export class ComputeEngine<T extends number = number>
    * Note that the assumption is put into normal form before being added.
    *
    */
-  assume(
-    symbol: Expression,
-    domain: Domain
-  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok';
-  assume(
-    predicate: Expression
-  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok';
-  assume(
-    arg1: Expression,
-    arg2?: Domain
-  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok' {
+  assume(symbol: Expression, domain: Domain): AssumeResult;
+  assume(predicate: Expression): AssumeResult;
+  assume(arg1: Expression, arg2?: Domain): AssumeResult {
     return this.internal.assume(arg1, arg2);
+  }
+
+  forget(symbol?: string | string[]): void {
+    this.internal.forget(symbol);
+  }
+
+  match(
+    expr: Expression<T>,
+    pattern: Expression<T>,
+    options?: {
+      numericTolerance?: number;
+      exact?: boolean;
+    }
+  ): Substitution | null {
+    return this.internal.match(expr, pattern, options);
   }
 
   /**
    * Apply repeatedly a set of rules to an expression.
    */
-  replace(rules: RuleSet<T>, expr: Expression<T>): Expression<T> {
-    return this.internal.replace(rules, expr);
+  replace(expr: Expression<T>, rules: RuleSet<T>): Expression<T> {
+    return this.internal.replace(expr, rules);
   }
 
   /** Return the variables in the expression */
@@ -399,23 +441,23 @@ export class ComputeEngine<T extends number = number>
   isInfinity(x: Expression<T>): boolean | undefined {
     return this.internal.isInfinity(x);
   }
-  // Not +- Infinity, not NaN
+  /** Not +- Infinity, not NaN  */
   isFinite(x: Expression<T>): boolean | undefined {
     return this.internal.isFinite(x);
   }
-  // x >= 0
+  /** x >= 0 */
   isNonNegative(x: Expression<T>): boolean | undefined {
     return this.internal.isNonNegative(x);
   }
-  // x > 0
+  /** x > 0 */
   isPositive(x: Expression<T>): boolean | undefined {
     return this.internal.isPositive(x);
   }
-  // x < 0
+  /** x < 0 */
   isNegative(x: Expression<T>): boolean | undefined {
     return this.internal.isNegative(x);
   }
-  // x <= 0
+  /** x <= 0 */
   isNonPositive(x: Expression<T>): boolean | undefined {
     return this.internal.isNonPositive(x);
   }
@@ -447,7 +489,10 @@ export class ComputeEngine<T extends number = number>
   isElement(x: Expression<T>, set: Expression<T>): boolean | undefined {
     return this.internal.isElement(x, set);
   }
-  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean | undefined {
+  isSubsetOf(
+    lhs: DomainExpression | null,
+    rhs: DomainExpression | null
+  ): boolean | undefined {
     return this.internal.isSubsetOf(lhs, rhs);
   }
 
@@ -466,45 +511,4 @@ export class ComputeEngine<T extends number = number>
   isGreaterEqual(lhs: Expression, rhs: Expression): boolean | undefined {
     return this.internal.isGreaterEqual(lhs, rhs);
   }
-}
-
-let gComputeEngine: ComputeEngine | null = null;
-
-/**
- * Transform an expression by applying one or more rewriting rules to it,
- * recursively.
- *
- * There are many ways to symbolically manipulate an expression, but
- * transformations with `form` have the following characteristics:
- *
- * - they don't require calculations or assumptions about the domain of free
- * variables or the value of constants
- * - the output expression is expressed with more primitive functions,
- * for example subtraction is replaced with addition
- *
- */
-export function format(
-  expr: Expression,
-  forms: Form | Form[]
-): Expression | null {
-  if (gComputeEngine === null) gComputeEngine = new ComputeEngine();
-  return gComputeEngine.format(expr, forms);
-}
-
-/**
- * Apply the definitions in the supplied dictionary to an expression
- * and return the result.
- *
- * Unlike `format` this may entail performing calculations and irreversible
- * transformations.
- *
- * See also `[ComputeEngine.evaluate()](#(ComputeEngine%3Aclass).(evaluate%3Ainstance))`.
- *
- * @param dictionaries - An optional set of functions and constants to use
- * when evaluating the expression. Evaluating the expression may modify the
- * scope, for example if the expression is an assignment or definition.
- */
-export function evaluate(expr: Expression): Promise<Expression | null> {
-  if (gComputeEngine === null) gComputeEngine = new ComputeEngine();
-  return gComputeEngine.evaluate(expr);
 }

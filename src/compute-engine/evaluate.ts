@@ -11,10 +11,10 @@ import {
   getArg,
   MISSING,
 } from '../common/utils';
-import { Expression } from '../public';
+import { Expression, Substitution } from '../math-json/math-json-format';
 import { internalN } from './numerical-eval';
-import { substitute, Substitution } from './patterns';
-import { ComputeEngine } from './public';
+import { substitute } from './patterns';
+import { ComputeEngine } from '../math-json/compute-engine-interface';
 
 export function evaluateOnce(
   engine: ComputeEngine,
