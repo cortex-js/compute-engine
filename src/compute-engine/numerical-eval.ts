@@ -16,6 +16,7 @@ import { ComputeEngine, Numeric } from '../math-json/compute-engine-interface';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { substitute } from './patterns';
+import { isSymbolDefinition } from './dictionary/utils';
 
 /**
  */
@@ -35,8 +36,8 @@ export function internalN(
   //
   const symbol = getSymbolName(expr);
   if (symbol !== null) {
-    const def = engine.getSymbolDefinition(symbol);
-    if (def && def.value) {
+    const def = engine.getDefinition(symbol);
+    if (def && isSymbolDefinition(def) && def.value) {
       if (typeof def.value === 'function') {
         return internalN(engine, def.value(engine));
       }

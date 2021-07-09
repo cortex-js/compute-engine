@@ -6,7 +6,6 @@ import { Expression, Substitution } from '../math-json/math-json-format';
 
 import {
   AssumeResult,
-  CollectionDefinition,
   ComputeEngine as ComputeEngineInterface,
   Definition,
   Dictionary,
@@ -19,9 +18,7 @@ import {
   RuleSet,
   RuntimeScope,
   Scope,
-  SetDefinition,
   Simplification,
-  SymbolDefinition,
 } from '../math-json/compute-engine-interface';
 
 import { InternalComputeEngine } from './internal-compute-engine';
@@ -211,15 +208,6 @@ export class ComputeEngine<T extends number = number>
 
   getFunctionDefinition(name: string): FunctionDefinition | null {
     return this.internal.getFunctionDefinition(name);
-  }
-  getSymbolDefinition(name: string): SymbolDefinition<Numeric> | null {
-    return this.internal.getSymbolDefinition(name);
-  }
-  getSetDefinition(name: string): SetDefinition<Numeric> | null {
-    return this.internal.getSetDefinition(name);
-  }
-  getCollectionDefinition(name: string): CollectionDefinition<Numeric> | null {
-    return this.internal.getCollectionDefinition(name);
   }
   getDefinition(name: string): Definition<Numeric> | null {
     return this.internal.getDefinition(name);

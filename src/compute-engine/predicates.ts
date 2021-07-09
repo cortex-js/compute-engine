@@ -25,6 +25,7 @@ import {
   Domain,
   DomainExpression,
 } from '../math-json/compute-engine-interface';
+import { isSetDefinition } from './dictionary/utils';
 
 export function isFunction(
   ce: ComputeEngine,
@@ -436,8 +437,8 @@ export function isSubsetOf(
     rhs = ['Set', rhs];
   }
 
-  const rhsDef = ce.getSetDefinition(rhsDomainName);
-  if (!rhsDef) return false;
+  const rhsDef = ce.getDefinition(rhsDomainName);
+  if (!rhsDef || !isSetDefinition(rhsDef)) return false;
   if (typeof rhsDef.isSubsetOf === 'function') {
     // 3.1 Parametric domain
     return rhsDef.isSubsetOf(this, lhs, rhs);
@@ -445,8 +446,8 @@ export function isSubsetOf(
   const lhsDomainName = getSymbolName(lhs) ?? lhsFnName;
   if (!lhsDomainName) return false;
 
-  const lhsDef = ce.getSetDefinition(lhsDomainName);
-  if (!lhsDef) return false;
+  const lhsDef = ce.getDefinition(lhsDomainName);
+  if (!lhsDef || !isSetDefinition(lhsDef)) return false;
 
   // 3.2 Non-parametric domain:
   for (const parent of lhsDef.supersets) {

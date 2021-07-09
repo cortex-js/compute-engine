@@ -25,6 +25,7 @@ import { isNegative, isNotZero, isPositive, isZero } from './predicates';
 import { rules } from './rules';
 import { simplifyRational } from './numeric';
 import { simplifyBoolean } from './assume';
+import { isSymbolDefinition } from './dictionary/utils';
 
 // A list of simplification rules.
 // The rules are expressed as
@@ -212,8 +213,13 @@ function simplifyNumber<T extends number = Numeric>(
   //
   // Replace constants by their value
   //
-  const symDef = engine.getSymbolDefinition(getSymbolName(expr) ?? '');
-  if (symDef && symDef.value && symDef.hold === false) {
+  const symDef = engine.getDefinition(getSymbolName(expr) ?? '');
+  if (
+    symDef &&
+    isSymbolDefinition(symDef) &&
+    symDef.value &&
+    symDef.hold === false
+  ) {
     // If hold is false, we can substitute the symbol for its value
     if (typeof symDef.value === 'function') return symDef.value(engine);
     return symDef.value;

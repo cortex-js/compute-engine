@@ -285,7 +285,7 @@ export type BaseDefinition = {
    * The scope this definition belongs to.
    *
    * This field is usually undefined, but its value is set by `getDefinition()`,
-   * `getFunctionDefinition()` and `getSymbolDefinition()`.
+   * `getFunctionDefinition()`
    */
   scope?: Scope;
 };
@@ -570,13 +570,6 @@ export declare class ComputeEngine<T extends number = Numeric> {
   checkContinueExecution(): void;
 
   getFunctionDefinition(expr: Expression): FunctionDefinition<T> | null;
-  getFunctionDefinition(
-    name: string,
-    domains: Domain[]
-  ): FunctionDefinition<T> | null;
-  getSymbolDefinition(name: string): SymbolDefinition<T> | null;
-  getSetDefinition(name: string): SetDefinition | null;
-  getCollectionDefinition(name: string): CollectionDefinition<T> | null;
   getDefinition(name: string): Definition<T> | null;
 
   canonical(expr: Expression<T> | null): Expression<T> | null;
@@ -642,6 +635,8 @@ export declare class ComputeEngine<T extends number = Numeric> {
 
   chop(n: Numeric): Numeric;
 
+  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean | undefined;
+
   // Predicate: use assumptions, if available to answer
   isZero(x: Expression<T>): boolean | undefined;
   isNotZero(x: Expression<T>): boolean | undefined;
@@ -667,7 +662,6 @@ export declare class ComputeEngine<T extends number = Numeric> {
   isOne(x: Expression<T>): boolean | undefined;
   isNegativeOne(x: Expression<T>): boolean | undefined;
   isElement(x: Expression<T>, set: Expression<T>): boolean | undefined;
-  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean | undefined;
 
   isEqual(lhs: Expression<T>, rhs: Expression<T>): boolean | undefined;
   isLess(lhs: Expression<T>, rhs: Expression<T>): boolean | undefined;
@@ -675,21 +669,6 @@ export declare class ComputeEngine<T extends number = Numeric> {
   isGreater(lhs: Expression<T>, rhs: Expression<T>): boolean | undefined;
   isGreaterEqual(lhs: Expression<T>, rhs: Expression<T>): boolean | undefined;
 }
-
-export declare function format<T extends number = number>(
-  expr: Expression<T>,
-  forms: Form[],
-  options?: {
-    dictionaries?: Readonly<Dictionary<T>>[];
-  }
-): Expression<T>;
-
-export declare function evaluate<T extends number = number>(
-  expr: Expression<T>,
-  options?: {
-    dictionaries?: Readonly<Dictionary<T>>[];
-  }
-): Promise<Expression<T> | null>;
 
 /**
  * A given mathematical expression can be represented in multiple equivalent

@@ -22,7 +22,7 @@ export function isFunctionDefinition(
   def: number | Definition<any> | undefined | null
 ): def is FunctionDefinition<Numeric> {
   if (def === null || typeof def !== 'object') return false;
-  if ('evalDomain' in def) return true;
+  if ('numeric' in def || 'evalDomain' in def) return true;
   return [
     'Function',
     'Predicate',

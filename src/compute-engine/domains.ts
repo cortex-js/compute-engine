@@ -107,7 +107,7 @@ export function internalDomain(
 
 /** Quickly determine the numeric domain of a number or constant
  * For the symbols, this is a hard-coded optimization that doesn't rely on the
- * dictionaries. The regulat path is in `internalDomain()`
+ * dictionaries. The regular path is in `internalDomain()`
  */
 export function inferNumericDomain(
   value: Expression | undefined

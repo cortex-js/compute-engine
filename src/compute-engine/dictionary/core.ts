@@ -34,6 +34,11 @@ export const CORE_DICTIONARY: Dictionary = {
     domain: 'Function',
     evalDomain: () => 'Anything',
   },
+  Delimiter: {
+    domain: 'Function',
+    evalDomain: (ce, arg: Expression) => ce.domain(arg),
+    evaluate: (_ce: ComputeEngine, arg: Expression) => arg,
+  },
   /** Return the domain of an expression */
   Domain: {
     domain: 'ParametricDomain',
@@ -41,20 +46,16 @@ export const CORE_DICTIONARY: Dictionary = {
   },
   Evaluate: {
     domain: 'Function',
+    hold: 'all',
     evalDomain: () => 'Anything',
   },
   Error: {
     domain: 'Function',
+    hold: 'all',
     evalDomain: () => 'Anything',
     /* Inert function. The first argument is typically a `LatexString` or 
       `LatexTokens` representing a parsing error. 
     */
-  },
-  Parentheses: {
-    domain: 'Function',
-    threadable: true,
-    pure: false,
-    evalDomain: (_ce, arg: Domain) => arg,
   },
   Head: {
     domain: 'Function',

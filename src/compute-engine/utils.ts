@@ -9,6 +9,7 @@ import { Expression } from '../math-json/math-json-format';
 import { ComputeEngine, Domain } from '../math-json/compute-engine-interface';
 import { Signal } from '../math-json';
 import { ErrorSignal } from '../math-json/public';
+import { isSymbolDefinition } from './dictionary/utils';
 
 export class CortexError {
   signal: ErrorSignal;
@@ -51,8 +52,8 @@ function getVarsRecursive(
     // It has a name, but no arguments. It's a symbol
     const name = getSymbolName(expr);
     if (name && !vars.has(name)) {
-      const def = engine.getSymbolDefinition(name);
-      if (!def || def.constant === false) {
+      const def = engine.getDefinition(name);
+      if (!def || !isSymbolDefinition(def) || def.constant === false) {
         // It's not in the dictionary, or it's in the dictionary
         // but not as a constant -> it's a variable
         vars.add(name);

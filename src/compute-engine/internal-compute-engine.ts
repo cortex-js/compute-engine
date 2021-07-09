@@ -9,7 +9,6 @@ import {
 } from '../math-json/public';
 import {
   AssumeResult,
-  CollectionDefinition,
   ComputeEngine,
   Definition,
   Dictionary,
@@ -22,9 +21,7 @@ import {
   RuleSet,
   RuntimeScope,
   Scope,
-  SetDefinition,
   Simplification,
-  SymbolDefinition,
 } from '../math-json/compute-engine-interface';
 
 import { evaluateBoolean, forget, forgetAll, internalAssume } from './assume';
@@ -71,12 +68,7 @@ import {
   compileDictionary,
   getDefaultDictionaries,
 } from './dictionary/dictionary';
-import {
-  isFunctionDefinition,
-  isSymbolDefinition,
-  isSetDefinition,
-  isCollectionDefinition,
-} from './dictionary/utils';
+import { isFunctionDefinition } from './dictionary/utils';
 
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
@@ -422,50 +414,12 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     return (def as FunctionDefinition) ?? null;
   }
 
-  getSymbolDefinition(name: string): SymbolDefinition<Numeric> | null {
-    let scope = this.context;
-    let def: Definition<Numeric> | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isSymbolDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def as SymbolDefinition<Numeric>;
-  }
-
-  getSetDefinition(name: string): SetDefinition<Numeric> | null {
-    let scope = this.context;
-    let def: Definition<any> | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isSetDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def as SetDefinition<Numeric>;
-  }
-
-  getCollectionDefinition(name: string): CollectionDefinition<Numeric> | null {
-    let scope = this.context;
-    let def: Definition<any> | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isCollectionDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def as CollectionDefinition<Numeric>;
-  }
-
   getDefinition(name: string): Definition<Numeric> | null {
     let scope = this.context;
     let def: Definition<Numeric> | undefined = undefined;
     while (scope && !def) {
       def = scope.dictionary?.get(name);
+      if (def !== undefined && isFunctionDefinition(def)) def = undefined;
       if (def === undefined) scope = scope.parentScope;
     }
     if (!def) return null;

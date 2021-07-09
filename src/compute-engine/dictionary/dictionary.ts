@@ -392,6 +392,11 @@ function normalizeDefinition(
       }
       functionDef.value = value;
     }
+    if (def.evalDomain === undefined && def.numeric !== true)
+      return [
+        functionDef,
+        'a "Function" should either have a "numeric" property set or an "evalDomain" method',
+      ];
 
     return [functionDef, undefined];
   }
@@ -615,8 +620,8 @@ function setParentsToString(
   } else {
     cycle = [name];
   }
-  const def = engine.getSetDefinition(name);
-  if (!def) return `${name}?!`;
+  const def = engine.getDefinition(name);
+  if (!def || !isSetDefinition(def)) return `${name}?!`;
   if (!def.supersets.length || def.supersets.length === 0) return '';
 
   for (const parent of def?.supersets) {

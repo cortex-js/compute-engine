@@ -244,11 +244,11 @@ export const DEFINITIONS_CORE: LatexDictionary<Numeric> = [
   },
   {
     name: 'Error',
-    serialize: (_serializer: Serializer, expr: Expression<Numeric>): string => {
-      if (getArgCount(expr) === 0) return '';
-      if (getFunctionName(getArg(expr, 1)) === 'LatexString') {
-        return getStringValue(getArg(getArg(expr, 1), 1)) ?? '';
+    serialize: (serializer: Serializer, expr: Expression<Numeric>): string => {
+      if (getArgCount(expr) >= 1) {
+        return serializeLatex(serializer, getArg(expr, 1));
       }
+
       return '\\text{error}';
     },
   },
