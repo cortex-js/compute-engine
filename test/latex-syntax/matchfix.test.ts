@@ -19,7 +19,7 @@ describe('MATCHFIX', () => {
     expect(
       expression('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack')
     ).toMatchInlineSnapshot(
-      `['Sequence', ['Sin', ['Error', ['LatexString', {str: '\\lbrack'}], 'unknown-command']], ['Error', ['LatexString', {str: 'a, \\lbrack b, c\\rbrack\\rbrack'}], ''syntax-error'']]`
+      `['Sequence', ['Sequence', ['Multiply', ['Sin', ['Error', ['LatexString', {str: '\\lbrack'}], 'unknown-command']], 'a'], ['Error', ['LatexString', {str: '\\lbrack'}], 'unknown-command']], ['Error', ['LatexString', {str: 'b, c\\rbrack\\rbrack'}], ''syntax-error'']]`
     ); // @todo
   });
   test('Serialize valid matchfix', () => {

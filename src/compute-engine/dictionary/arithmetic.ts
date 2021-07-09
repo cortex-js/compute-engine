@@ -52,7 +52,7 @@ import {
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { gamma as gammaComplex } from '../numeric-complex';
-import { internalDomain } from '../domains';
+import { box } from '../../math-json/boxed/expression';
 
 // @todo
 // Re or RealPart
@@ -499,6 +499,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     simplify: (ce: ComputeEngine, ...args: Expression[]): Expression =>
       applyPower(ce, ['Power', ...args]),
+    // Defined as RealNumber for all power in RealNumber when base > 0;
+    // when x < 0, only defined if n is an integer
+    // if x is a non-zero complex, defined as ComplexNumber
+    // evalDomain: (ce, base: Expression, power: Expression) ;
     evalNumber: (_ce, base: number, power: number) => Math.pow(base, power),
     evalComplex: (_ce, base: Complex | number, power: Complex | number) => {
       const cBase = typeof base === 'number' ? new Complex(base) : base;
@@ -624,7 +628,7 @@ function domainAdd(
 ): Expression<Numeric> | null {
   let dom: Expression<Numeric> | null = null;
   for (const arg of args) {
-    const argDom = internalDomain(ce, arg);
+    const argDom = box(arg, ce).domain;
     if (ce.isSubsetOf(argDom, 'Number') === false) return 'Nothing';
     if (!ce.isSubsetOf(argDom, dom)) dom = argDom;
   }

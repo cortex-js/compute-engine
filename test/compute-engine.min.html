@@ -69,6 +69,11 @@
 
 // console.log(ce.parse('\\frac'));
 
+    console.log(ce.parse('2x^3'));
+    // console.log(ce.parse('2^3x'));
+    
+    console.log('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack');
+
     // sorting: put Nothing, Missing, Undefined, True, False, at the end
     // For equalities and inequalities: 
     // x+1 = 0      // if constant, second arg
@@ -76,14 +81,14 @@
     // x = x + 1    // if symbol, first arg
     // f(x) = x + 1 // if Apply -> first arg
     // otherwise more costly arg second
-    console.log(ce.serialize(['Equal', 'x', 'Missing']));
+    // console.log(ce.serialize(['Equal', 'x', 'Missing']));
 
-    console.log(ce.parse('\\ln(3)'));
+    // console.log(ce.parse('\\ln(3)'));
 
-    console.log(ce.parse('2(1+1)'));
-    console.log(ce.parse('|x|'));
-    console.log(ce.parse('|x+|y|+1|'));
-    console.log(ce.parse('(5+1)(2+3)'));
+    // console.log(ce.parse('2(1+1)'));
+    // console.log(ce.parse('|x|'));
+    // console.log(ce.parse('|x+|y|+1|'));
+    // console.log(ce.parse('(5+1)(2+3)'));
 
 
   </script>

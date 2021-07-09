@@ -26,7 +26,6 @@ import {
 
 import { evaluateBoolean, forget, forgetAll, internalAssume } from './assume';
 import { DEFAULT_COST_FUNCTION, internalSimplify } from './simplify';
-import { internalDomain } from './domains';
 import { match } from './patterns';
 import { format } from './canonical-forms';
 import { CortexError, getVariables } from './utils';
@@ -73,6 +72,7 @@ import { isFunctionDefinition } from './dictionary/utils';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { unstyle } from './dictionary/arithmetic';
+import { box } from '../math-json/boxed/expression';
 
 /**
  * The internal  compute engine implements the ComputeEngine interface
@@ -592,7 +592,7 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   }
 
   domain(expr: Expression): Domain | null {
-    return internalDomain(this, expr);
+    return box(expr, this).domain;
   }
 
   getVars(expr: Expression): Set<string> {
