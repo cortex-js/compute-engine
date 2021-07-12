@@ -9,11 +9,67 @@ sidebar:
 
 # Calculus
 
+
+### Functions
+
+{% defs "Function" "Operation" %}
+{% def "Integrate" %}
+<code>["Integrate", _expression_]</code>
+
+<code>["Integrate", _expression_, _symbol_]</code>
+
+  Indefinite integral
+
+  ```["Integrate", ["Sin", x], "x"]```
+
+  $$ \int \sin x \,\mathrm{d}x $$
+
+  
+----
+
+<code>["Integrate", _expression_, _predicate_]</code>
+
+  Definite integral.
+
+  ```["Integrate", ["Sin", "x"], ["Element", x, ["Interval", 0, +Infinity]]]```
+
+  $$ \int_0^\infty \sin x \,\mathrm{d}x $$
+
+----
+
+<code>["Integrate", _expression_, _predicate1_, _predicate2_...]</code>
+
+  Multiple integral.
+
+  ```["Integrate", ['"Multiply",  x ["Sin", "y"]], ["Element", x, ["Interval", 0, 2]], ["Element", y, ["Interval", 0, 1]]]```
+
+  $$ \int_0^1 \int_0^2 x\sin y \,\mathrm{d}x\,\mathrm{d}y $$
+
+
+{% enddef %}
+
+{% def "D" %}
+
+<code>["D", _f_, _x_]</code>
+
+Evaluate to the partial derivative \\( \frac{\partialD f}{\partialD x} \\) or \\( f^{\prime}(x) \\)
+
+----
+
+<code>["D", _f_, ["Tuple", _x_, _n_]]</code>
+
+Evaluate to the multiple derivative \\( \frac{\partialD^n f}{\partialD x^n} \\) (Leibniz notation) or \\( f^{(n)}(x) \\) (Lagrange notation)
+
+
+{% enddef %}
+
+{% enddefs %}
+
 ### Lagrange Notation
 
 | LaTeX                 | MathJSON           |
 | :-------------------- | :----------------- |
-| `f'(x)`               | `["Derive", f, x]` |
+| `f'(x)`               | `["D", f, x]` |
 | `f''(x)`              |                    |
 | `f\prime(x)`          |                    |
 | `f\prime\prime(x)`    |                    |

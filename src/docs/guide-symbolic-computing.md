@@ -102,14 +102,27 @@ Read more about <strong>Simplify</strong>
 
 ## Evaluate
 
-**To combine a symbolic simplification followed by a [numerical evaluation](/compute-engine/guides/numerical-evaluation)**, use
-the `ce.evaluate()` function.
+**To apply a sequence of definitions to an expression in order to reduce,
+simplify and calculate its value**, use the `ce.evaluate()` function.
 
-Invoking the `ce.evaluate()` function is roughly equivalent to calling in sequence
-`ce.simplify()`, `ce.N()` then `ce.canonical()`.
+An expression to be evaluated will also be simplified, evaluated numerically and put into canonical form.
 
-Some functions may perform additional computations when `ce.evaluate()` is 
-invoked.
+When a function is evaluated, its arguments are first evaluated left to right,
+the the function is applied to the arguments.
+
+However, a function definition can specify that some or all of its arguments
+should not be evaluated. This can be useful for a function that needs to 
+perform symbolic manipulation of an expression: otherwise, the expression would
+be evaluated without giving a chance to the function to access the symbolic 
+expression.
+
+While a function definition will usually indicate which arguments should be
+evaluated or not, it is possible to override this.
+
+**To prevent an argument from being evaluated**, use the `Hold` function.
+
+**To force an argument to be evaluated**, use the `Evaluate` function.
+
 
 ## Other Symbolic Manipulation
 
