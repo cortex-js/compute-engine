@@ -1,4 +1,4 @@
-import type { Dictionary } from '../public';
+import type { Dictionary } from '../../math-json/compute-engine-interface';
 
 export const COLLECTIONS_DICTIONARY: Dictionary = {
   // KeyValue: { domain: 'Function' },

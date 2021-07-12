@@ -1,26 +1,19 @@
+import { Expression, Substitution } from '../math-json/math-json-format';
+import { LatexSyntax } from '../math-json/latex-syntax';
 import {
   DictionaryCategory,
-  Expression,
   ErrorSignal,
+  LatexString,
+  Serializer,
   WarningSignal,
-} from '../public';
-import { internalAssume, internalIs } from './assume';
+} from '../math-json/public';
 import {
-  compileDictionary,
-  getDefaultDictionaries,
-} from './dictionary/dictionary';
-import {
-  isFunctionDefinition,
-  isSymbolDefinition,
-  isSetDefinition,
-  isCollectionDefinition,
-} from './dictionary/utils';
-import {
-  CollectionDefinition,
+  AssumeResult,
   ComputeEngine,
   Definition,
   Dictionary,
   Domain,
+  DomainExpression,
   Form,
   FunctionDefinition,
   Numeric,
@@ -28,13 +21,12 @@ import {
   RuleSet,
   RuntimeScope,
   Scope,
-  SetDefinition,
   Simplification,
-  SymbolDefinition,
-} from './public';
-import { internalSimplify } from './simplify';
-import { internalDomain } from './domains';
-import { match, Substitution } from './patterns';
+} from '../math-json/compute-engine-interface';
+
+import { evaluateBoolean, forget, forgetAll, internalAssume } from './assume';
+import { DEFAULT_COST_FUNCTION, internalSimplify } from './simplify';
+import { match } from './patterns';
 import { format } from './canonical-forms';
 import { CortexError, getVariables } from './utils';
 import {
@@ -64,15 +56,23 @@ import {
   isNegativeOne,
 } from './predicates';
 import { internalEvaluate } from './evaluate';
-import { ExpressionMap } from './expression-map';
+import { ExpressionMap } from '../math-json/expression-map';
 import { MACHINE_PRECISION, NUMERICAL_TOLERANCE } from './numeric';
 import { replace } from './rules';
-import { LatexSyntax } from '../latex-syntax/latex-syntax';
 import { internalN } from './numerical-eval';
+import { DECIMAL_ZERO } from './numeric-decimal';
+import { univariateSolve } from './solve';
+
+import {
+  compileDictionary,
+  getDefaultDictionaries,
+} from './dictionary/dictionary';
+import { isFunctionDefinition } from './dictionary/utils';
+
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
-import { DECIMAL_ZERO } from './numeric-decimal';
-import { solve } from './solve';
+import { unstyle } from './dictionary/arithmetic';
+import { box } from '../math-json/boxed/expression';
 
 /**
  * The internal  compute engine implements the ComputeEngine interface
@@ -96,8 +96,9 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
 
   private _tolerance: number;
 
-  private _rules?: { [topic: string]: RuleSet };
   private _cache: { [key: string]: any } = {};
+
+  private _cost?: (expr: Expression) => number;
 
   /**
    * The current scope.
@@ -113,70 +114,138 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   /** Absolute time beyond which evaluation should not proceed */
   deadline?: number;
 
-  constructor(options?: { dictionaries?: Readonly<Dictionary<Numeric>>[] }) {
+  constructor(options?: {
+    dictionaries?: Readonly<Dictionary<Numeric>>[];
+    numericFormat?: NumericFormat;
+    assumptions?: (LatexString | Expression)[];
+    numericPrecision?: number;
+    tolerance?: number;
+  }) {
     const dicts =
       options?.dictionaries ?? InternalComputeEngine.getDictionaries();
 
-    this.numericFormat = 'auto';
-    this.tolerance = NUMERICAL_TOLERANCE;
+    this.numericFormat = options?.numericFormat ?? 'auto';
+    this.tolerance = options?.tolerance ?? NUMERICAL_TOLERANCE;
 
     for (const dict of dicts) {
       if (!this.context) {
         //
         // The first, topmost, scope contains additional info
         //
-        this.pushScope(dict, {
-          warn: (sigs: WarningSignal[]): void => {
-            for (const sig of sigs) {
-              if (typeof sig.message === 'string') {
-                console.warn(sig.message);
-              } else {
-                console.warn(...sig.message);
+        this.pushScope({
+          dictionary: dict,
+          scope: {
+            warn: (sigs: WarningSignal[]): void => {
+              for (const sig of sigs) {
+                if (typeof sig.message === 'string') {
+                  console.warn(sig.message);
+                } else {
+                  console.warn(...sig.message);
+                }
               }
-            }
+            },
+            timeLimit: 2.0, // execution time limit: 2.0 seconds
+            memoryLimit: 1.0, // memory limit: 1.0 megabyte
+            recursionLimit: 1024,
+            // iterationLimit:    no iteration limit
           },
-          timeLimit: 2.0, // execution time limit: 2.0s
-          memoryLimit: 1.0, // memory limit: 1.0 megabyte
-          recursionLimit: 1024,
-          // iterationLimit:    no iteration limit
         });
       } else {
-        this.pushScope(dict);
+        if (Object.keys(dict).length > 0) this.pushScope({ dictionary: dict });
       }
     }
 
-    // Push a fresh scope to protect global definitions.
-    this.pushScope({});
+    // Push a fresh scope to protect global definitions:
+    // this will be the "user" scope
+    if (options?.assumptions === null) {
+      // If `assumptions` is set to null: no assumptions
+      this.pushScope();
+    } else {
+      this.pushScope({
+        assumptions: options?.assumptions ?? [
+          ['Element', 'a', 'RealNumber'],
+          ['Element', 'b', 'RealNumber'],
+          ['Element', 'c', 'RealNumber'],
+          ['Element', 'd', 'RealNumber'],
+          ['Equal', 'e', 'ExponentialE'],
+          ['Element', 'f', 'Function'],
+          ['Element', 'g', 'Function'],
+          ['Element', 'h', 'Function'],
+          ['Element', 'i', 'RealNumber'], // Could also be ImaginaryUnit
+          ['Element', 'j', 'RealNumber'],
+          ['Element', 'k', 'RealNumber'],
+          ['Element', 'l', 'RealNumber'], //? Length or a prime number
+          ['Element', 'm', 'Integer'],
+          ['Element', 'n', 'Integer'],
+          // ['Element', 'o', 'RealNumber'], // ?
+          ['Element', 'p', 'Integer'], // Could also be Boolean or probability or prime number
+          ['Element', 'q', 'Integer'], // Could also be Boolean, prime power or quotient
+          ['Element', 'r', 'RealNumber'], // Radius, remainder or correlation coefficient
+          // ['Element', 's', 'RealNumber'],
+          ['Element', 't', 'RealNumber'],
+          // ['Element', 'u', 'RealNumber'], // Could be vectors
+          // ['Element', 'v', 'RealNumber'],
+          ['Element', 'w', 'ComplexNumber'],
+          ['Element', 'x', 'RealNumber'],
+          ['Element', 'y', 'RealNumber'],
+          ['Element', 'z', 'ComplexNumber'],
+        ],
+      });
+    }
   }
 
-  cache<T>(key: string, fn: () => T): T {
-    if (this._cache[key] === undefined) this._cache[key] = fn();
-    return this._cache[key];
+  cache<T>(cacheName: string, fn: null | (() => T)): T {
+    if (this._cache[cacheName] === undefined && fn !== null) {
+      try {
+        this._cache[cacheName] = fn();
+      } catch (e) {
+        console.error(
+          `Fatal error building cache "${cacheName}":\n\t ${e.toString()}`
+        );
+      }
+    }
+    // Reset the cache if `fn` is null
+    if (fn === null) this._cache[cacheName] = undefined;
+
+    return this._cache[cacheName];
   }
 
   get precision(): number {
     return this._precision;
   }
   set precision(p: number | 'machine') {
-    if (p === 'machine')
+    const currentPrecision = this._precision;
+    if (p === 'machine') {
       p = Math.min(MACHINE_PRECISION, Math.floor(MACHINE_PRECISION));
-    if (p <= MACHINE_PRECISION) {
-      this._numericFormat = 'machine';
     }
-    Decimal.set({ precision: p });
-    this._precision = p;
+    if (p !== currentPrecision) {
+      if (p <= MACHINE_PRECISION) this._numericFormat = 'machine';
+
+      Decimal.set({ precision: p });
+      this._precision = p;
+
+      // Reset the caches
+      // (some of the values in the cache may depend on the current precision)
+      this._cache = {};
+    }
   }
 
   get numericFormat(): NumericFormat {
     return this._numericFormat;
   }
   set numericFormat(f: NumericFormat) {
-    if (f === 'machine' || f === 'complex' || f === 'auto') {
-      this._precision = Math.floor(MACHINE_PRECISION);
-    } else if (f === 'decimal') {
-      this._precision = Decimal.precision;
+    if (f !== this._numericFormat) {
+      if (f === 'machine' || f === 'complex' || f === 'auto') {
+        this._precision = Math.floor(MACHINE_PRECISION);
+      } else if (f === 'decimal') {
+        this._precision = Decimal.precision;
+      }
+      this._numericFormat = f;
+
+      // Reset the caches
+      // (some of the values in the cache may depend on the current precision)
+      this._cache = {};
     }
-    this._numericFormat = f;
   }
 
   get tolerance(): number {
@@ -184,26 +253,67 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   }
 
   set tolerance(val: number) {
-    this._tolerance = Math.max(val, 0);
+    if (typeof val === 'number' && Number.isFinite(val))
+      this._tolerance = Math.max(val, 0);
+    else this._tolerance = NUMERICAL_TOLERANCE;
   }
 
   get latexSyntax(): LatexSyntax {
-    if (!this._latexSyntax) this._latexSyntax = new LatexSyntax();
+    // We'll use this LatexSyntax instance internally, for example to parse
+    // rules, etc... Use our own custom error handler, which will throw
+    // on any error.
+    if (!this._latexSyntax)
+      this._latexSyntax = new LatexSyntax({
+        computeEngine: this,
+        onError: (err) => {
+          throw new Error(err[0].message.toString());
+        },
+      });
     return this._latexSyntax;
   }
 
-  pushScope(
-    dictionary: Readonly<Dictionary<Numeric>>,
-    scope?: Partial<Scope>
-  ): void {
+  get serializer(): Serializer {
+    return this.latexSyntax.serializer;
+  }
+
+  set cost(fn: ((expr: Expression) => number) | undefined) {
+    if (typeof fn !== 'function') this._cost = DEFAULT_COST_FUNCTION;
+    this._cost = fn;
+  }
+
+  get cost(): (expr: Expression) => number {
+    return this._cost ?? DEFAULT_COST_FUNCTION;
+  }
+
+  pushScope(options?: {
+    dictionary?: Readonly<Dictionary<Numeric>>;
+    assumptions?: (LatexString | Expression)[];
+    scope?: Partial<Scope>;
+  }): void {
     this.context = {
-      ...scope,
+      ...options?.scope,
       parentScope: this.context,
-      dictionary: compileDictionary(dictionary, this),
+      dictionary: compileDictionary(this, options?.dictionary),
+      // We always copy the current assumptions in the new scope.
+      // This make is much easier to deal with 'inherited' assumptions
+      // (and potentially modifying them later) without having to walk back
+      // into parent contexts. In other words, calling `ce.forget()` will
+      // forget everything **in the current scope**. When exiting the scope,
+      // the previous assumptions are restored.
       assumptions: this.context
         ? new ExpressionMap(this.context.assumptions)
         : new ExpressionMap(),
     };
+    // Add any user-specified assumptions
+    if (options?.assumptions !== undefined) {
+      for (const assumption of options.assumptions) {
+        if (typeof assumption === 'string') {
+          this.assume(this.latexSyntax.parse(assumption));
+        } else {
+          this.assume(assumption);
+        }
+      }
+    }
   }
 
   popScope(): void {
@@ -249,34 +359,35 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     return this.context.assumptions;
   }
 
-  signal(_sig: ErrorSignal | WarningSignal): void {
+  signal(sig: ErrorSignal | WarningSignal): void {
     // @todo
+    console.error(...sig.message);
     return;
   }
 
-  get timeLimit(): undefined | number {
+  get timeLimit(): number {
     let scope = this.context;
     while (scope) {
       if (scope.timeLimit !== undefined) return scope.timeLimit;
       scope = scope.parentScope;
     }
-    return undefined;
+    return 2.0; // 2s
   }
-  get recursionLimit(): undefined | number {
+  get recursionLimit(): number {
     let scope = this.context;
     while (scope) {
       if (scope.recursionLimit !== undefined) return scope.recursionLimit;
       scope = scope.parentScope;
     }
-    return undefined;
+    return 1024;
   }
-  get iterationLimit(): undefined | number {
+  get iterationLimit(): number {
     let scope = this.context;
     while (scope) {
       if (scope.iterationLimit !== undefined) return scope.iterationLimit;
       scope = scope.parentScope;
     }
-    return undefined;
+    return 1024;
   }
 
   shouldContinueExecution(): boolean {
@@ -302,47 +413,13 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
     if (def) def.scope = scope;
     return (def as FunctionDefinition) ?? null;
   }
-  getSymbolDefinition(name: string): SymbolDefinition<Numeric> | null {
-    let scope = this.context;
-    let def: Definition<Numeric> | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isSymbolDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def as SymbolDefinition<Numeric>;
-  }
-  getSetDefinition(name: string): SetDefinition<Numeric> | null {
-    let scope = this.context;
-    let def: Definition<any> | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isSetDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def as SetDefinition<Numeric>;
-  }
-  getCollectionDefinition(name: string): CollectionDefinition<Numeric> | null {
-    let scope = this.context;
-    let def: Definition<any> | undefined = undefined;
-    while (scope && !def) {
-      def = scope.dictionary?.get(name);
-      if (def !== undefined && !isCollectionDefinition(def)) def = undefined;
-      if (def === undefined) scope = scope.parentScope;
-    }
-    if (!def) return null;
-    def.scope = scope;
-    return def as CollectionDefinition<Numeric>;
-  }
+
   getDefinition(name: string): Definition<Numeric> | null {
     let scope = this.context;
     let def: Definition<Numeric> | undefined = undefined;
     while (scope && !def) {
       def = scope.dictionary?.get(name);
+      if (def !== undefined && isFunctionDefinition(def)) def = undefined;
       if (def === undefined) scope = scope.parentScope;
     }
     if (!def) return null;
@@ -355,72 +432,112 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   }
 
   format(expr: Expression | null, forms?: Form | Form[]): Expression | null {
-    return format(
-      this,
-      expr,
-      Array.isArray(forms) ? forms : [forms ?? 'canonical']
-    );
+    try {
+      return format(
+        this,
+        expr,
+        Array.isArray(forms) ? forms : [forms ?? 'canonical']
+      );
+    } catch {
+      return null;
+    }
   }
 
   evaluate(
     expr: Expression,
     options?: { timeLimit?: number; iterationLimit?: number }
   ): Promise<Expression | null> {
-    return internalEvaluate(this, expr, options);
+    try {
+      return internalEvaluate(this, unstyle(expr), options);
+    } catch {
+      return Promise.resolve(null);
+    }
   }
 
   simplify(
     expr: Expression,
     options?: { simplifications?: Simplification[] }
   ): Expression | null {
-    return internalSimplify(this, expr, options?.simplifications);
+    try {
+      return internalSimplify(this, unstyle(expr), options?.simplifications);
+    } catch {
+      return null;
+    }
   }
 
   N(expr: Expression, options?: { precision?: number }): Expression | null {
-    const savedPrecision = this.precision;
-    const savedNumericFormat = this.numericFormat;
+    try {
+      const savedPrecision = this.precision;
+      const savedNumericFormat = this.numericFormat;
 
-    if (options?.precision) this.precision = options.precision;
-    //
-    // 1/ Prepare the expression by simplifying it
-    // (this will simplify things like `Parentheses` and other things\
-    // that could throw us off)
-    //
-    let result = this.canonical(internalSimplify(this, expr));
+      if (options?.precision !== undefined) this.precision = options.precision;
+      //
+      // 1/ Prepare the expression by simplifying it
+      // (this will simplify things like `Parentheses` and other things
+      // that could throw us off)
+      //
+      let result = this.canonical(internalSimplify(this, unstyle(expr)));
 
-    if (result !== null) result = internalN(this, result);
-    if (result !== null) result = this.canonical(result);
+      if (result !== null) result = internalN(this, result);
+      if (result !== null) result = this.canonical(result);
 
-    this.precision = savedPrecision;
-    this.numericFormat = savedNumericFormat;
+      this.precision = savedPrecision;
+      this.numericFormat = savedNumericFormat;
 
-    return result ?? expr;
+      return result ?? expr;
+    } catch {
+      return null;
+    }
   }
 
   solve(
     expr: Expression<Numeric>,
     vars: string[]
   ): null | Expression<Numeric>[] {
-    return solve(this, expr, vars);
+    // @todo: multivariate solving
+    if (vars.length !== 1) return null;
+    try {
+      return univariateSolve(this, expr, vars[0]);
+    } catch {
+      return null;
+    }
   }
 
   // is(symbol: Expression, domain: Domain): boolean | undefined;
   // is(proposition: Expression): boolean | undefined;
+  /**
+   * Provide an answer to questions about
+   * - equality
+   * - inequality
+   * - set/domain membership
+   * - subset of
+   *
+   * Consider assumptions and evaluate boolean expressions.
+   *
+   * The proposition can be a boolean expression including:
+   * - `And`
+   * - `Or`
+   * - `Not`
+   *
+   */
   is(arg1: Expression, arg2?: Domain): boolean | undefined {
     let proposition: Expression = arg1;
     if (arg2) {
       proposition = ['Element', arg1, arg2];
     }
-    return internalIs(this, proposition);
+    const result = evaluateBoolean(this, proposition);
+    if (result === 'True') return true;
+    if (result === 'False') return false;
+    return undefined;
   }
 
   ask(pattern: Expression): Substitution[] {
     const result: { [symbol: string]: Expression }[] = [];
-    for (const assumption in this.assumptions) {
-      const m = match(pattern, assumption, {
-        numericalTolerance: this._tolerance,
+    for (const [assumption, val] of this.assumptions) {
+      const m = match(assumption, pattern, {
+        numericTolerance: this._tolerance,
       });
-      if (m !== null) result.push(m);
+      if (m !== null && val === true) result.push(m);
     }
     return result;
   }
@@ -430,23 +547,52 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   //   domain: Domain
   // ): 'contradiction' | 'tautology' | 'ok';
   // assume(predicate: Expression): 'contradiction' | 'tautology' | 'ok';
-  assume(
-    arg1: Expression,
-    arg2?: Domain
-  ): 'not-a-predicate' | 'contradiction' | 'tautology' | 'ok' {
-    let predicate: Expression = arg1;
-    if (arg2) {
-      predicate = ['Element', arg1, arg2];
+  assume(arg1: Expression, arg2?: Domain): AssumeResult {
+    try {
+      let predicate: Expression = arg1;
+      if (arg2) {
+        predicate = ['Element', arg1, arg2];
+      }
+      return internalAssume(this, predicate);
+    } catch {
+      return 'internal-error';
     }
-    return internalAssume(this, predicate);
   }
 
-  replace(rules: RuleSet, expr: Expression<Numeric>): Expression<Numeric> {
-    return replace(this, rules, expr);
+  forget(symbol?: string | string[]): void {
+    if (symbol === undefined) {
+      forgetAll(this);
+      return;
+    }
+    if (Array.isArray(symbol)) {
+      for (const x of symbol) forget(this, x);
+    }
+    if (typeof symbol === 'string') forget(this, symbol);
+  }
+
+  match(
+    expr: Expression<Numeric>,
+    pattern: Expression<Numeric>,
+    options?: {
+      numericTolerance?: number;
+      exact?: boolean;
+    }
+  ): Substitution | null {
+    if (!(options?.exact ?? false)) {
+      expr = this.canonical(expr);
+      pattern = this.canonical(pattern);
+    }
+    return match(expr, pattern, {
+      numericTolerance: options?.numericTolerance ?? this.tolerance,
+    });
+  }
+
+  replace(expr: Expression<Numeric>, rules: RuleSet): Expression<Numeric> {
+    return replace(this, expr, rules);
   }
 
   domain(expr: Expression): Domain | null {
-    return internalDomain(this, expr);
+    return box(expr, this).domain;
   }
 
   getVars(expr: Expression): Set<string> {
@@ -539,7 +685,10 @@ export class InternalComputeEngine implements ComputeEngine<Numeric> {
   isElement(x: Expression, set: Expression): boolean | undefined {
     return isElement(this, x, set);
   }
-  isSubsetOf(lhs: Domain | null, rhs: Domain | null): boolean | undefined {
+  isSubsetOf(
+    lhs: DomainExpression | null,
+    rhs: DomainExpression | null
+  ): boolean | undefined {
     return isSubsetOf(this, lhs, rhs);
   }
 

@@ -16,10 +16,25 @@ import {
   POWER,
   UNDEFINED,
 } from '../common/utils';
-import { Expression } from '../public';
-import { checkAssumption, checkAtomic } from './assume';
+import { Expression } from '../math-json/math-json-format';
+import { checkAssumption, evaluateBoolean } from './assume';
+import { isNumericSubdomain } from './dictionary/domains';
 import { gcd } from './numeric';
-import { ComputeEngine, Domain } from './public';
+import {
+  ComputeEngine,
+  Domain,
+  DomainExpression,
+} from '../math-json/compute-engine-interface';
+import { isSetDefinition } from './dictionary/utils';
+
+export function isFunction(
+  ce: ComputeEngine,
+  expr: Expression | null
+): boolean | undefined {
+  const dom = ce.domain(expr);
+  if (!dom) return undefined;
+  return ce.isSubsetOf(dom, 'Function');
+}
 
 export function isNumeric(
   ce: ComputeEngine,
@@ -30,6 +45,8 @@ export function isNumeric(
   if (val !== null) return true;
 
   const dom = ce.domain(expr);
+  if (typeof dom === 'string')
+    return isNumericSubdomain(dom as Domain, 'Number');
   if (dom) return ce.isSubsetOf(dom, 'Number');
 
   return undefined;
@@ -40,20 +57,22 @@ export function isComplex(
   ce: ComputeEngine,
   expr: Expression
 ): boolean | undefined {
-  const val = ce.domain(expr);
-  if (val === null) return undefined;
-
-  return isSubsetOf(ce, val, 'ComplexNumber');
+  const dom = ce.domain(expr);
+  if (dom === null) return undefined;
+  if (typeof dom === 'string')
+    return isNumericSubdomain(dom as Domain, 'ComplexNumber');
+  return isSubsetOf(ce, dom, 'ComplexNumber');
 }
 
 export function isReal(
   ce: ComputeEngine,
   expr: Expression
 ): boolean | undefined {
-  const val = ce.domain(expr);
-  if (val === null) return undefined;
-
-  return isSubsetOf(ce, val, 'RealNumber');
+  const dom = ce.domain(expr);
+  if (dom === null) return undefined;
+  if (typeof dom === 'string')
+    return isNumericSubdomain(dom as Domain, 'RealNumber');
+  return isSubsetOf(ce, dom, 'RealNumber');
 }
 
 /** Is `expr` an element of RR, including ±∞? */
@@ -115,6 +134,8 @@ export function isInteger(
   if (c !== null) return false;
 
   const dom = ce.domain(expr);
+  if (typeof dom === 'string')
+    return isNumericSubdomain(dom as Domain, 'Integer');
   if (dom) return ce.isSubsetOf(dom, 'Integer');
 
   return undefined;
@@ -135,15 +156,17 @@ export function isZero(
   // getNumberValue()
   if (c !== null) return false;
 
-  if (checkAssumption(ce, ['Equal', expr, 0])) return true;
-  // @todo matchAssumptions() equal not zero.
-  // if (ce.is(['NotEqual', expr, 0]) === true) return false;
-  // if (ce.is(['Greater', expr, 0]) === true) return false;
-  if (checkAssumption(ce, ['Less', expr, 0]) === true) return false;
-  // @todo
-  // const match = engine.matchAssumptions(['Greater', expr, '_val']);
-  // if (match.some((x) => x._val > 0)) return true;
-
+  // `checkAssumption` require a  normalized prop
+  const sym = getSymbolName(expr);
+  if (sym) {
+    if (checkAssumption(ce, ['Equal', sym, 0])) return true;
+    if (checkAssumption(ce, ['NotEqual', sym, 0])) return false;
+    if (checkAssumption(ce, ['Greater', sym, 0])) return true;
+    if (checkAssumption(ce, ['Less', sym, 0])) return true;
+    // @todo
+    // const match = engine.matchAssumptions(['Greater', expr, '_val']);
+    // if (match.some((x) => x._val > 0)) return true;
+  }
   return undefined;
 }
 
@@ -323,24 +346,22 @@ export function isNonPositive(
   return !result;
 }
 
-/** Is `expr` an element of `dom`? */
+/** Is `expr` an element of `set`? */
 export function isElement(
   ce: ComputeEngine,
   expr: Expression,
   set: Expression
 ): boolean | undefined {
   //
-  // 1/ Check assumptions
   //
-  const result = checkAssumption(ce, ['Element', expr, set]);
-  if (result !== undefined) return result;
 
   //
-  // 2/ Check domain
+  // 2/ Check assumptions
   //
-  const dom = ce.domain(expr);
-  if (dom === null) return undefined;
-  return isSubsetOf(ce, dom, set);
+  const result = evaluateBoolean(ce, ['Element', expr, set]);
+  if (result === 'True') return true;
+  if (result === 'False') return false;
+  return undefined;
 }
 
 /** Test if `lhs` is a subset of `rhs`.
@@ -351,8 +372,8 @@ export function isElement(
  */
 export function isSubsetOf(
   ce: ComputeEngine,
-  lhs: Domain | null,
-  rhs: Domain | null
+  lhs: DomainExpression | null,
+  rhs: DomainExpression | null
 ): boolean | undefined {
   if (lhs === null || rhs === null) return undefined;
 
@@ -413,11 +434,11 @@ export function isSubsetOf(
     const rhsVal = getNumberValue(rhs) ?? NaN;
     if (Number.isNaN(rhsVal)) return false;
     // If the rhs is a number, 'upgrade' it to a set singleton
-    rhs = rhs === 0 ? 'NumberZero' : ['Set', rhs];
+    rhs = ['Set', rhs];
   }
 
-  const rhsDef = ce.getSetDefinition(rhsDomainName);
-  if (!rhsDef) return false;
+  const rhsDef = ce.getDefinition(rhsDomainName);
+  if (!rhsDef || !isSetDefinition(rhsDef)) return false;
   if (typeof rhsDef.isSubsetOf === 'function') {
     // 3.1 Parametric domain
     return rhsDef.isSubsetOf(this, lhs, rhs);
@@ -425,8 +446,8 @@ export function isSubsetOf(
   const lhsDomainName = getSymbolName(lhs) ?? lhsFnName;
   if (!lhsDomainName) return false;
 
-  const lhsDef = ce.getSetDefinition(lhsDomainName);
-  if (!lhsDef) return false;
+  const lhsDef = ce.getDefinition(lhsDomainName);
+  if (!lhsDef || !isSetDefinition(lhsDef)) return false;
 
   // 3.2 Non-parametric domain:
   for (const parent of lhsDef.supersets) {
@@ -478,10 +499,10 @@ export function isEqual(
   //
   // 2. Check assumptions
   //
-  // @todo: normal form: rhs = 0
-  const result = checkAtomic(ce, lhs, '=', rhs);
-  if (result !== null) return result;
-  return checkAssumption(ce, ['Equal', ['Subtract', lhs, rhs], 0]);
+  const result = evaluateBoolean(ce, ['Equal', lhs, rhs]);
+  if (result === 'True') return true;
+  if (result === 'False') return false;
+  return undefined;
 }
 
 export function isLess(
@@ -522,8 +543,10 @@ export function isLess(
   //
   // 2. Check assumptions
   //
-  // @todo: normal form, rhs = 0
-  return checkAssumption(ce, ['Less', lhs, rhs]);
+  const result = evaluateBoolean(ce, ['Less', lhs, rhs]);
+  if (result === 'True') return true;
+  if (result === 'False') return false;
+  return undefined;
 }
 
 export function isLessEqual(
@@ -531,6 +554,7 @@ export function isLessEqual(
   lhs: Expression,
   rhs: Expression
 ): boolean | undefined {
+  // @todo add a fastpath
   const eq = isEqual(ce, lhs, rhs);
   if (eq !== undefined) return true;
   return isLess(ce, lhs, rhs);
@@ -541,6 +565,7 @@ export function isGreater(
   lhs: Expression,
   rhs: Expression
 ): boolean | undefined {
+  // @todo add a fastpath
   const lt = isLess(ce, lhs, rhs);
   if (lt === undefined) return undefined;
   return !lt;
@@ -551,6 +576,7 @@ export function isGreaterEqual(
   lhs: Expression,
   rhs: Expression
 ): boolean | undefined {
+  // @todo add a fastpath
   const eq = isEqual(ce, lhs, rhs);
   if (eq !== undefined) return true;
   const lt = isLess(ce, lhs, rhs);

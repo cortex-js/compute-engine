@@ -285,12 +285,6 @@ describe('CORTEX SERIALIZING COLLECTIONS', () => {
     expect(
       serializeCortex(['Sequence', 2, ['Sequence', 3, 4], 5])
     ).toMatchInlineSnapshot(`"Sequence(2, Sequence(3, 4), 5)"`);
-    expect(
-      serializeCortex(['Sequence2', 2, ['Sequence', 3, 4], 5])
-    ).toMatchInlineSnapshot(`"Sequence2(2, Sequence(3, 4), 5)"`);
-    expect(
-      serializeCortex(['Sequence', 2, ['Sequence2', 3, 4], 5])
-    ).toMatchInlineSnapshot(`"Sequence(2, Sequence2(3, 4), 5)"`);
   });
 
   test('Tuple', () => {

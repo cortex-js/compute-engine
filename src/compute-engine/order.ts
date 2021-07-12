@@ -1,5 +1,5 @@
-import { Expression } from '../public';
-import { ComputeEngine } from './public';
+import { Expression } from '../math-json/math-json-format';
+import { ComputeEngine } from '../math-json/compute-engine-interface';
 import {
   isNumberObject,
   isSymbolObject,

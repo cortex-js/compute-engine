@@ -1,10 +1,8 @@
-import { Expression } from '../public';
-import { Form, ComputeEngine } from './public';
+import { Expression } from '../math-json/math-json-format';
+import { Form, ComputeEngine } from '../math-json/compute-engine-interface';
 import {
   isAtomic,
   isNumberObject,
-  isFunctionObject,
-  isSymbolObject,
   getNumberValue,
   getFunctionName,
   getTail,
@@ -24,15 +22,15 @@ import {
   ROOT,
   SUBTRACT,
   NOTHING,
-  SEQUENCE,
-  SEQUENCE2,
   MISSING,
   applyRecursively,
   getSymbolName,
   getRationalValue,
   getComplexValue,
+  asValidJSONNumber,
+  jsonForm,
 } from '../common/utils';
-import { canonicalOrder } from './order';
+import { canonicalOrder, order } from './order';
 import {
   applyConstants,
   applyNegate,
@@ -90,9 +88,9 @@ function flattenInvolution(
 ): Expression {
   if (isAtomic(expr)) return expr;
 
-  const name = getFunctionName(expr);
-  const def = engine.getFunctionDefinition(name);
+  const def = engine.getFunctionDefinition(expr);
   if (def?.involution) {
+    const name = getFunctionName(expr);
     const args = getTail(expr);
     if (args.length === 1 && getFunctionName(args[0]) === name) {
       return flatten(args[0], name);
@@ -179,7 +177,7 @@ function canonicalListForm(
   if (isAtomic(expr)) return expr;
 
   const head = getFunctionName(expr);
-  if (head !== LIST && head !== SEQUENCE && head !== SEQUENCE2) {
+  if (head !== LIST) {
     return applyRecursively(expr, (x) => canonicalListForm(x, engine));
   }
 
@@ -368,7 +366,9 @@ function canonicalBooleanForm(
   expr: Expression,
   _engine: ComputeEngine
 ): Expression {
-  // @todo
+  // @todo We should sort arguments of And, Or...
+  // But not do more. Use `refine()`, i.e. "simplify booleans",
+  // for further simplifications (i.e. ["And", "False", X] = "False")
   return expr;
 }
 
@@ -509,80 +509,6 @@ function canonicalRootForm(
   return expr;
 }
 
-/**
- * Return num as a number if it's a valid JSON number (that is
- * a valid JavaScript number but not NaN or +/-Infinity) or
- * as a string otherwise
- */
-
-function asValidJSONNumber(num: string): string | number {
-  if (typeof num === 'string') {
-    const val = Number(num);
-    if (num[0] === '+') num = num.slice(1);
-    if (val.toString() === num) {
-      // If the number roundtrips, it can be represented by a
-      // JavaScript number
-      // However, NaN and Infinity cannot be represented by JSON
-      if (isNaN(val) || !isFinite(val)) {
-        return val.toString();
-      }
-      return val;
-    }
-  }
-  return num;
-}
-
-/**
- * Transform the expression so that object literals for numbers, symbols and
- * functions are used only when necessary, i.e. when they have associated
- * metadata attributes. Otherwise, use a plain number, string or array
- *
- * For example:
- *
- * ```
- * {num: 2} -> 2
- * {sym: "x"} -> "x"
- * {fn:['add', {num: 1}, {sym: "x"}]} -> ['add', 1, "x"]
- * ```
- *
- */
-export function jsonForm(
-  expr: Expression | null,
-  engine: ComputeEngine
-): Expression | null {
-  if (expr === null) return null;
-  if (Array.isArray(expr)) {
-    return (expr as Expression[]).map((x, i) => {
-      if (i === 0) {
-        return x;
-      }
-      return jsonForm(x, engine) ?? NOTHING;
-    });
-  }
-  if (typeof expr === 'object') {
-    const keys = Object.keys(expr);
-    if (keys.length === 1) {
-      if (isNumberObject(expr)) {
-        // Exclude NaN and Infinity, which are not valid numbers in JSON
-        const val = asValidJSONNumber(expr.num);
-        if (typeof val === 'number') return val;
-        return { num: val };
-      }
-      if (isFunctionObject(expr)) {
-        return expr.fn.map((x) => jsonForm(x, engine) ?? NOTHING);
-      }
-      if (isSymbolObject(expr)) {
-        return expr.sym;
-      }
-    } else {
-      if (isFunctionObject(expr)) {
-        expr.fn = expr.fn.map((x) => jsonForm(x, engine) ?? NOTHING);
-      }
-    }
-  }
-  return expr;
-}
-
 export function strippedMetadataForm(
   expr: Expression | null,
   engine: ComputeEngine
@@ -700,6 +626,7 @@ export function canonicalForm(
     'canonical-add',
     'flatten', // associative, idempotent and groups
     'canonical-list', // 'Nothing', 'Identity' and 'Sequence'
+    'canonical-set',
     'canonical-domain',
     'canonical-rational',
     'canonical-constants',
@@ -738,39 +665,75 @@ export function format(
   let result = expr;
   // console.log('format(', expr, forms, ')');
   for (const form of forms) {
-    const fn: (
-      expr: Expression | null,
-      engine: ComputeEngine
-    ) => Expression | null = {
-      'canonical': canonicalForm,
-      'canonical-add': canonicalAddForm,
-      'canonical-boolean': canonicalBooleanForm,
-      'canonical-constants': canonicalConstantsForm,
-      'canonical-divide': canonicalDivideForm,
-      'canonical-domain': canonicalDomainForm,
-      'canonical-exp': canonicalExpForm,
-      'canonical-list': canonicalListForm,
-      'canonical-multiply': canonicalMultiplyForm,
-      'canonical-power': canonicalPowerForm,
-      'canonical-negate': canonicalNegateForm,
-      'canonical-number': canonicalNumberForm,
-      'canonical-rational': canonicalRationalForm,
-      'canonical-root': canonicalRootForm,
-      'canonical-subtract': canonicalSubtractForm,
-      'json': jsonForm,
-      'flatten': flattenForm,
-      'sorted': sortedForm,
-      'stripped-metadata': strippedMetadataForm,
-      'object-literal': objectLiteralForm,
-      // 'sum-product': sumProductForm,
-    }[form];
-    if (!fn) {
-      console.error('Unknown form ' + form);
-      return null;
+    if (result === null) return null;
+    switch (form) {
+      case 'canonical':
+        result = canonicalForm(result, engine);
+        break;
+      case 'canonical-add':
+        result = canonicalAddForm(result, engine);
+        break;
+      case 'canonical-boolean':
+        result = canonicalBooleanForm(result, engine);
+        break;
+      case 'canonical-constants':
+        result = canonicalConstantsForm(result, engine);
+        break;
+      case 'canonical-divide':
+        result = canonicalDivideForm(result, engine);
+        break;
+      case 'canonical-domain':
+        result = canonicalDomainForm(result, engine);
+        break;
+      case 'canonical-exp':
+        result = canonicalExpForm(result, engine);
+        break;
+      case 'canonical-list':
+        result = canonicalListForm(result, engine);
+        break;
+      case 'canonical-multiply':
+        result = canonicalMultiplyForm(result, engine);
+        break;
+      case 'canonical-power':
+        result = canonicalPowerForm(result, engine);
+        break;
+      case 'canonical-negate':
+        result = canonicalNegateForm(result, engine);
+        break;
+      case 'canonical-number':
+        result = canonicalNumberForm(result, engine);
+        break;
+      case 'canonical-rational':
+        result = canonicalRationalForm(result, engine);
+        break;
+      case 'canonical-root':
+        result = canonicalRootForm(result, engine);
+        break;
+      case 'canonical-set':
+        result = canonicalSetForm(result, engine);
+        break;
+      case 'canonical-subtract':
+        result = canonicalSubtractForm(result, engine);
+        break;
+      case 'json':
+        result = jsonForm(result);
+        break;
+      case 'flatten':
+        result = flattenForm(result, engine);
+        break;
+      case 'sorted':
+        result = sortedForm(result, engine);
+        break;
+      case 'stripped-metadata':
+        result = strippedMetadataForm(result, engine);
+        break;
+      case 'object-literal':
+        result = objectLiteralForm(result, engine);
+        break;
+      default:
+        console.error('Unknown form ' + form);
+        return null;
     }
-    // const before = result;
-    result = fn(result, engine);
-    // console.log('form ', form, before, result);
   }
   return result;
 }
@@ -780,4 +743,32 @@ function canonicalDomainForm(
   engine: ComputeEngine
 ): Expression {
   return canonicalDomain(engine, expr);
+}
+
+function canonicalSetForm(expr: Expression, ce: ComputeEngine): Expression {
+  // `CartesianProduct` is not associative, nor commutative
+  // `Complement`:  not commutative
+  // `SetMinus`: not associative, commutative
+
+  // `Intersection` and `Union`: commutative, associative
+  // `SymmetricDifference`: commutative
+  const name = getFunctionName(expr);
+  if (
+    name === 'Union' ||
+    name === 'Intersection' ||
+    name === 'SymmetricDifference'
+  ) {
+    const args = getTail(expr).map((x) => canonicalSetForm(x, ce));
+    return [name, ...args.sort(order)];
+  }
+
+  // @todo
+  // `Set`:
+  // 1/ if single argument (sequence), sort elements of sequence
+  // 2/ if two arguments (sequence/set) + `Condition`,
+  // sort the content of the first argument, but keep the order the same
+  // (sequence + condition)
+
+  if (isAtomic(expr)) return expr;
+  return applyRecursively(expr, (x) => canonicalSetForm(x, ce));
 }

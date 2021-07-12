@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { Expression } from '../../src/public';
+import type { Expression } from '../../src/math-json/math-json-format';
 
 export const engine = new ComputeEngine();
 
@@ -34,3 +34,31 @@ describe('canonicalDomainForm', () => {
     expect(engine.format(domain, 'canonical-domain')).toMatchSnapshot();
   });
 });
+
+describe.skip('PARAMETRIC SIMPLIFICATION', () => {
+  test('Valid groups', () => {
+    expect(
+      engine.evaluate(['Union', 'RealNumber', 'Integer'])
+    ).toMatchInlineSnapshot(``);
+  });
+});
+
+describe('SUBSETS', () => {
+  test('Numbers', () => {
+    expect(engine.isSubsetOf('RealNumber', 'RealNumber')).toBeTruthy();
+    expect(engine.isSubsetOf('Integer', 'RealNumber')).toBeTruthy();
+    expect(
+      engine.isSubsetOf('NaturalNumber', 'ExtendedRealNumber')
+    ).toBeTruthy();
+    expect(engine.isSubsetOf('RealNumber', 'Integer')).toBeFalsy();
+    expect(
+      engine.isSubsetOf(
+        ['Intersection', 'RationalNumber', 'NaturalNumber'],
+        'RealNumber'
+      )
+    ).toBeTruthy();
+  });
+});
+// describe('DOMAIN UNIONS', () => {
+//   test('Valid groups', () => {});
+// });

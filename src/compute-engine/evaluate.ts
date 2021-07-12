@@ -11,10 +11,11 @@ import {
   getArg,
   MISSING,
 } from '../common/utils';
-import { Expression } from '../public';
+import { Expression, Substitution } from '../math-json/math-json-format';
 import { internalN } from './numerical-eval';
 import { substitute } from './patterns';
-import { ComputeEngine } from './public';
+import { ComputeEngine } from '../math-json/compute-engine-interface';
+import { isSymbolDefinition } from './dictionary/utils';
 
 export function evaluateOnce(
   engine: ComputeEngine,
@@ -34,8 +35,8 @@ export function evaluateOnce(
   //
   const symbol = getSymbolName(expr);
   if (symbol !== null) {
-    const def = engine.getSymbolDefinition(symbol);
-    if (def && def.value) {
+    const def = engine.getDefinition(symbol);
+    if (def && isSymbolDefinition(def) && def.value) {
       if (typeof def.value === 'function') return def.value(engine);
       return def.value;
     }
@@ -55,7 +56,7 @@ export function evaluateOnce(
   if (head !== null) {
     if (typeof head === 'string') {
       const def = engine.getFunctionDefinition(head);
-      // If it's an unknown functin, we don't know how to handle the arguments
+      // If it's an unknown function, we don't know how to handle the arguments
       if (def === null) return expr;
 
       //
@@ -87,19 +88,15 @@ export function evaluateOnce(
       }
       return [head, ...args];
     }
+
     //
     // 4.2/ It's a lambda function
     //
 
-    const args: { [symbol: string]: Expression } = {
-      __: ['Sequence', getTail(expr)],
-    };
+    const args: Substitution = { __: ['Sequence', getTail(expr)] };
     let n = 1;
-    for (const arg of getTail(expr)) {
-      if (n === 1) args['_'] = arg;
-      args[`_${n}`] = arg;
-      n += 1;
-    }
+    for (const arg of getTail(expr)) args[`_${n++}`] = arg;
+    args['_'] = args['_1'];
 
     return evaluateOnce(engine, substitute(head, args));
   }
@@ -126,14 +123,22 @@ export async function internalEvaluate(
     options?.iterationLimit ?? engine.iterationLimit ?? 1024;
   let iterationCount = 0;
   let result: Expression | null = expr;
-  let prevResult = JSON.stringify(result);
-  while (iterationCount < iterationLimit && engine.shouldContinueExecution()) {
-    result = evaluateOnce(engine, result);
-    if (result === null) return null;
-    const curResult = JSON.stringify(result);
-    if (prevResult === curResult) return result;
-    prevResult = curResult;
-    iterationCount += 1;
+  try {
+    let prevResult = JSON.stringify(result);
+    while (
+      iterationCount < iterationLimit &&
+      engine.shouldContinueExecution()
+    ) {
+      result = evaluateOnce(engine, result);
+      if (result === null) return null;
+      const curResult = JSON.stringify(result);
+      if (prevResult === curResult) break;
+      prevResult = curResult;
+      iterationCount += 1;
+    }
+  } catch (e) {
+    console.error(e);
+    result = expr;
   }
 
   // Convert the result to canonical form

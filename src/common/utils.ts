@@ -4,11 +4,10 @@ import type {
   MathJsonSymbol,
   MathJsonFunction,
   MathJsonString,
-} from '../public';
+} from '../math-json/math-json-format';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
-
-import { gcd } from '../compute-engine/numeric';
+import { Numeric } from '../math-json/compute-engine-interface';
 
 /**
  * These constants are the 'primitive' functions and constants that are used
@@ -16,15 +15,11 @@ import { gcd } from '../compute-engine/numeric';
  * form.
  *
  */
-export const PARENTHESES = 'Parentheses';
 export const IDENTITY = 'Identity';
-export const LATEX_TOKENS = 'LatexTokens';
 export const LIST = 'List';
 export const MISSING = 'Missing';
 export const NOTHING = 'Nothing';
 export const UNDEFINED = 'Undefined';
-export const SEQUENCE = 'Sequence';
-export const SEQUENCE2 = 'Sequence2';
 
 export const ADD = 'Add';
 export const DERIVATIVE = 'Derivative';
@@ -318,19 +313,6 @@ export function getRationalValue(
 }
 
 /**
- *  Reduce the numerator and denominator:
- * `\frac{2}{4} -> \frac{1}{2})`
- */
-export function simplifyRational([numer, denom]:
-  | [number, number]
-  | [null, null]): [number, number] | [null, null] {
-  if (numer === null || denom === null) return [null, null];
-  const g = gcd(numer, denom);
-  if (denom < 0) return [-numer / g, -denom / g];
-  return [numer / g, denom / g];
-}
-
-/**
  * Return the numerator and denominator of a product with the specified symbol.
  * For example:
  * `3π` -> [3, 1]
@@ -460,6 +442,7 @@ export function isAtomic(expr: Expression | null): boolean {
 export function getFunctionName<T extends number = number>(
   expr: Expression<T> | null
 ):
+  | 'Error'
   | typeof MULTIPLY
   | typeof POWER
   | typeof DIVIDE
@@ -468,46 +451,51 @@ export function getFunctionName<T extends number = number>(
   | typeof NEGATE
   | typeof DERIVATIVE
   | typeof INVERSE_FUNCTION
-  | typeof LATEX_TOKENS
+  | 'LatexString'
   | typeof SQRT
   | typeof ROOT
-  | typeof PARENTHESES
   | typeof LIST
   | typeof MISSING
   | typeof PRIME
   | typeof IDENTITY
   | typeof NOTHING
-  | typeof SEQUENCE
-  | typeof SEQUENCE2
   | typeof PRIME
-  | 'PartialDerivative'
-  | 'Union'
-  | 'Intersection'
-  | 'SetMinus'
-  | 'Complement'
-  | 'Cosh'
-  | 'Exp'
-  | 'Re'
   | 'And'
-  | 'Or'
-  | 'Not'
+  | 'Complement'
+  | 'Complex'
+  | 'Condition'
+  | 'Cosh'
+  | 'Delimiter'
+  | 'Element'
   | 'Equal'
-  | 'Less'
-  | 'LessEqual'
+  | 'Equivalent'
+  | 'Evaluate'
+  | 'Exp'
   | 'Greater'
   | 'GreaterEqual'
-  | 'NotEqual'
-  | 'Set'
-  | 'Element'
-  | 'Subset'
-  | 'NotElement'
-  | 'Complex'
   | 'Hold'
-  | 'Evaluate'
-  | 'Range'
+  | 'Implies'
+  | 'Intersection'
   | 'Interval'
-  | 'Open'
+  | 'LatexTokens'
+  | 'Less'
+  | 'LessEqual'
   | 'Multiple'
+  | 'Not'
+  | 'NotElement'
+  | 'NotEqual'
+  | 'Open'
+  | 'Or'
+  | 'PartialDerivative'
+  | 'Range'
+  | 'Re'
+  | 'Set'
+  | 'SetMinus'
+  | 'Sequence'
+  | 'Subset'
+  | 'SubsetEqual'
+  | 'SymmetricDifference'
+  | 'Union'
   | '' {
   if (expr === null) return '';
   const head = getFunctionHead(expr);
@@ -534,7 +522,7 @@ export function getSymbolName(expr: Expression | null): string | null {
  * Return all the elements but the first one, i.e. the arguments of a
  * function.
  */
-export function getTail<T extends number = number>(
+export function getTail<T extends number = Numeric>(
   expr: Expression<T> | null
 ): Expression<T>[] {
   if (Array.isArray(expr)) {
@@ -546,7 +534,7 @@ export function getTail<T extends number = number>(
   return [];
 }
 
-export function applyRecursively<T extends number = number>(
+export function applyRecursively<T extends number = Numeric>(
   expr: Expression<T>,
   fn: (x: Expression<T>) => Expression<T>
 ): Expression<T> {
@@ -739,4 +727,124 @@ export function filterNumerics(args: Expression[]): FilteredNumerics {
     }
   }
   return result;
+}
+
+/**
+ * Apply the operator `op` to the left-hand-side and right-hand-side
+ * expression. Applies the associativity rule specified by the definition,
+ * i.e. 'op(a, op(b, c))` -> `op(a, b, c)`, etc...
+ *
+ */
+export function applyAssociativeOperator<T extends number = Numeric>(
+  op: string,
+  lhs: Expression<T>,
+  rhs: Expression<T>,
+  associativity: 'right' | 'left' | 'non' | 'both' = 'both'
+): Expression<T> {
+  if (associativity === 'non') return [op, lhs, rhs];
+
+  const lhsName = getFunctionName(lhs);
+  const rhsName = getFunctionName(rhs);
+
+  if (associativity === 'left') {
+    if (lhsName === op) return [op, ...getTail(lhs), rhs];
+    return [op, lhs, rhs];
+  }
+
+  if (associativity === 'right') {
+    if (rhsName === op) return [op, lhs, ...getTail(rhs)];
+    return [op, lhs, rhs];
+  }
+
+  // Associativity: 'both'
+  if (lhsName === op && rhsName === op) {
+    return [op, ...getTail(lhs), ...getTail(rhs)];
+  }
+  if (lhsName === op) return [op, ...getTail(lhs), rhs];
+  if (rhsName === op) return [op, lhs, ...getTail(rhs)];
+  return [op, lhs, rhs];
+}
+
+/**
+ * Return num as a number if it's a valid JSON number (that is
+ * a valid JavaScript number but not NaN or +/-Infinity) or
+ * as a string otherwise
+ */
+
+export function asValidJSONNumber(num: string): string | number {
+  if (typeof num === 'string') {
+    const val = Number(num);
+    if (num[0] === '+') num = num.slice(1);
+    if (val.toString() === num) {
+      // If the number roundtrips, it can be represented by a
+      // JavaScript number
+      // However, NaN and Infinity cannot be represented by JSON
+      if (isNaN(val) || !isFinite(val)) {
+        return val.toString();
+      }
+      return val;
+    }
+  }
+  return num;
+}
+
+/**
+ * Transform the expression so that object literals for numbers, symbols and
+ * functions are used only when necessary, i.e. when they have associated
+ * metadata attributes. Otherwise, use a plain number, string or array
+ *
+ * For example:
+ *
+ * ```
+ * {num: 2} -> 2
+ * {sym: "x"} -> "x"
+ * {fn:['add', {num: 1}, {sym: "x"}]} -> ['add', 1, "x"]
+ * ```
+ *
+ */
+export function jsonForm(expr: Expression | null): Expression | null {
+  if (expr === null) return null;
+  if (Array.isArray(expr)) {
+    return (expr as Expression[]).map((x, i) => {
+      if (i === 0) {
+        return x;
+      }
+      return jsonForm(x) ?? NOTHING;
+    });
+  }
+  if (typeof expr === 'object') {
+    const keys = Object.keys(expr);
+    if (keys.length === 1) {
+      if (isNumberObject(expr)) {
+        // Exclude NaN and Infinity, which are not valid numbers in JSON
+        const val = asValidJSONNumber(expr.num);
+        if (typeof val === 'number') return val;
+        return { num: val };
+      }
+      if (isFunctionObject(expr)) {
+        return expr.fn.map((x) => jsonForm(x) ?? NOTHING);
+      }
+      if (isSymbolObject(expr)) {
+        return expr.sym;
+      }
+    } else {
+      if (isFunctionObject(expr)) {
+        expr.fn = expr.fn.map((x) => jsonForm(x) ?? NOTHING);
+      }
+    }
+  }
+  return expr;
+}
+
+export function getSequence<T extends number = Numeric>(
+  expr: Expression<T> | null
+): Expression<T>[] | null {
+  if (expr === null) return null;
+  const head = getFunctionName(expr);
+  if (head === null) return null;
+
+  if (head === 'Delimiter') expr = getArg(expr, 1);
+
+  if (getFunctionName(expr) === 'Sequence') return getTail(expr);
+  return null;
 }

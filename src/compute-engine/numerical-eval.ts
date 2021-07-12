@@ -11,11 +11,12 @@ import {
   getTail,
   MISSING,
 } from '../common/utils';
-import { Expression } from '../public';
-import { ComputeEngine, Numeric } from './public';
+import { Expression, Substitution } from '../math-json/math-json-format';
+import { ComputeEngine, Numeric } from '../math-json/compute-engine-interface';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { substitute } from './patterns';
+import { isSymbolDefinition } from './dictionary/utils';
 
 /**
  */
@@ -35,8 +36,8 @@ export function internalN(
   //
   const symbol = getSymbolName(expr);
   if (symbol !== null) {
-    const def = engine.getSymbolDefinition(symbol);
-    if (def && def.value) {
+    const def = engine.getDefinition(symbol);
+    if (def && isSymbolDefinition(def) && def.value) {
       if (typeof def.value === 'function') {
         return internalN(engine, def.value(engine));
       }
@@ -200,15 +201,10 @@ function applyN(
   // 3. The function is a lambda
   //    (the head is an expression)
   //
-  const args: { [symbol: string]: Expression } = {
-    __: ['Sequence', getTail(expr)],
-  };
+  const args: Substitution = { __: ['Sequence', getTail(expr)] };
   let n = 1;
-  for (const arg of getTail(expr)) {
-    if (n === 1) args['_'] = arg;
-    args[`_${n}`] = arg;
-    n += 1;
-  }
+  for (const arg of getTail(expr)) args[`_${n++}`] = arg;
+  args['_'] = args['_1'];
 
   return internalN(engine, substitute(head, args));
 }

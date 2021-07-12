@@ -7,38 +7,29 @@ import {
   getNumberValue,
   getRationalValue,
   getSymbolName,
-  getTail,
   IMAGINARY_UNIT,
   isDictionaryObject,
   isStringObject,
   POWER,
 } from '../common/utils';
-import { Expression } from '../public';
-import { ComputeEngine } from './public';
+import { Expression } from '../math-json/math-json-format';
+import {
+  ComputeEngine,
+  Domain,
+  NumericDomain,
+} from '../math-json/compute-engine-interface';
 import { gcd, SMALL_PRIMES } from './numeric';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
-import { evaluateOnce } from './evaluate';
+import { getDomains } from './utils';
 
-export type NumericDomain =
-  | 'Number'
-  | 'ExtendedComplexNumber'
-  | 'ExtendedRealNumber'
-  | 'ComplexNumber'
-  | 'ImaginaryNumber'
-  | 'RealNumber'
-  | 'TranscendentalNumber'
-  | 'AlgebraicNumber'
-  | 'RationalNumber'
-  | 'Integer';
-
-/** Calculate the Domain of an expression */
+/** Calculate the domain of an expression */
 export function internalDomain(
   ce: ComputeEngine,
   expr: Expression
-): Expression | null {
+): Domain | null {
   //
-  // 1. Is it a numeric domain (number, Decimal, Complex)?
+  // 1. Is the expression a number or a well-known numeric constant?
   //
   const result = inferNumericDomain(expr);
   if (result !== null) return result;
@@ -46,10 +37,12 @@ export function internalDomain(
   //
   // 2. Is it a symbol?
   //
-  // (Note, we've already handled well-known symbols in `inferNumericDomain()`
+  // Note: we've already handled some well-known symbols in
+  // `inferNumericDomain()`. This is the regular code path which will look
+  // up symbols in the dictionaries.
   //
-  const symName = getSymbolName(expr);
-  if (symName !== null) {
+  const symbol = getSymbolName(expr);
+  if (symbol !== null) {
     // 2.1 Do we have an Element assumption about this symbol
     const domains = ce.ask(['Element', expr, '_domain']);
     if (domains.length > 0) {
@@ -67,23 +60,22 @@ export function internalDomain(
     // 2.3 Do we have an inequality assumption about this model?
     // @todo
     // - search for ['Less', x '_expr'], etc... => implies RealNumber
+    // @todo! alternative: when calling assume('x > 0'), assume could add
+    // an assumption that assume(x, 'RealNumber')
 
     // 2.4 Does the symbol definition have a domain?
     // (we look for 'Definition' in general, because Domains do not have a
     // SymbolDefinition (they don't necessarily have a value).
-    const def = ce.getDefinition(symName);
+    const def = ce.getDefinition(symbol);
+    if (def) {
+      if (def.domain) return def.domain;
 
-    if (def && typeof def.domain === 'function') {
-      return def.domain() ?? 'Anything';
-    }
-
-    if (def && def.domain) return def.domain as Expression;
-
-    if (def && 'value' in def && def.value) {
-      if (typeof def.value === 'function') {
-        return internalDomain(ce, def.value(ce));
+      if ('value' in def && def.value) {
+        return internalDomain(
+          ce,
+          typeof def.value === 'function' ? def.value(ce) : def.value
+        );
       }
-      return internalDomain(ce, def.value);
     }
     return 'Anything';
   }
@@ -96,15 +88,11 @@ export function internalDomain(
   if (typeof head === 'string') {
     const def = ce.getFunctionDefinition(head);
     if (def) {
-      if (typeof def.range === 'function') {
-        return def.range(ce, ...getTail(expr));
-      } else if (def.range !== undefined) {
-        return def.range;
-      } else if (def.value !== undefined) {
-        const val = evaluateOnce(ce, [def.value, ...getTail(expr)]);
-        if (val === null) return 'Anything';
-        return internalDomain(ce, val);
+      if (typeof def.evalDomain === 'function') {
+        return def.evalDomain(ce, ...getDomains(ce, expr)!);
       }
+      if (def.numeric) return 'Number';
+      if (def.value !== undefined) return internalDomain(ce, def.value);
     }
   }
 
@@ -117,6 +105,10 @@ export function internalDomain(
   return null;
 }
 
+/** Quickly determine the numeric domain of a number or constant
+ * For the symbols, this is a hard-coded optimization that doesn't rely on the
+ * dictionaries. The regular path is in `internalDomain()`
+ */
 export function inferNumericDomain(
   value: Expression | undefined
 ): NumericDomain | null {
@@ -129,7 +121,16 @@ export function inferNumericDomain(
   if (numVal !== null && !isNaN(numVal)) {
     if (!isFinite(numVal)) return 'ExtendedRealNumber';
 
-    if (Number.isInteger(numVal)) return 'Integer';
+    if (numVal === 0) return 'NonNegativeInteger'; // Bias: Could be NonPositiveInteger
+
+    if (Number.isInteger(numVal)) {
+      if (numVal > 0) return 'PositiveInteger';
+      if (numVal < 0) return 'NegativeInteger';
+      return 'Integer';
+    }
+
+    if (numVal > 0) return 'PositiveNumber';
+    if (numVal < 0) return 'NegativeNumber';
 
     return 'RealNumber';
   }
@@ -140,7 +141,16 @@ export function inferNumericDomain(
   if (value instanceof Decimal) {
     if (value.isNaN()) return 'Number';
     if (!value.isFinite()) return 'ExtendedRealNumber';
-    if (value.isInteger()) return 'Integer';
+    if (value.isZero()) return 'NonNegativeInteger'; // Bias: Could be NonPositiveInteger
+
+    if (value.isInteger()) {
+      if (value.gt(0)) return 'PositiveInteger';
+      if (value.lt(0)) return 'NegativeInteger';
+      return 'Integer';
+    }
+
+    if (value.gt(0)) return 'PositiveNumber';
+    if (value.lt(0)) return 'NegativeNumber';
     return 'RealNumber';
   }
 
@@ -173,18 +183,22 @@ export function inferNumericDomain(
     denom = denom / g;
     if (!Number.isNaN(numer) && !Number.isNaN(denom)) {
       // The value is a rational number
-      if (denom !== 1 && denom !== -1) return 'RationalNumber';
+      if (denom !== 1) return 'RationalNumber';
 
-      return 'Integer';
+      return inferNumericDomain(numer);
     }
   }
 
   //
   // 5. Symbol
   //
+  // (We handle these common symbols here for performance only.
+  // The general case is handled by looking up the definition of the symbol and
+  // using its `domain` property)
+  //
   const symbol = getSymbolName(value);
   if (symbol !== null) {
-    if (symbol === 'NaN') return 'Number';
+    if (symbol === 'NaN') return 'Number'; // Yes, `Not A Number` is a `Number`. Bite me.
     if (symbol === '+Infinity' || symbol === '-Infinity') {
       return 'ExtendedRealNumber';
     }

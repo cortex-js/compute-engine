@@ -1,31 +1,32 @@
-import type { Expression } from '../src/public';
+import type { Expression } from '../src/math-json/math-json-format';
 import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
 import { ComputeEngine } from '../src/compute-engine';
 import { MISSING } from '../src/common/utils';
 import { parseCortex } from '../src/cortex';
-import { Form } from '../src/compute-engine/public';
-import { LatexSyntax } from '../src/latex-syntax/latex-syntax';
+import { Form } from '../src/math-json/compute-engine-interface';
+import { LatexSyntax } from '../src/math-json/latex-syntax';
 
 let errors: string[] = [];
 
-const defaultLatex = new LatexSyntax({
-  onError: (err) => errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
-});
+// const defaultLatex = new LatexSyntax({
+//   onError: (warnings) => {
+//     for (const warning of warnings) errors.push(warning.message.toString());
+//   },
+// });
 const rawLatex = new LatexSyntax({
-  invisibleOperator: '',
   parseArgumentsOfUnknownLatexCommands: false,
-  invisiblePlusOperator: '',
-  promoteUnknownSymbols: /./,
+  parseUnknownToken: () => 'symbol',
   dictionary: [],
 });
 
 export const engine = new ComputeEngine();
+
 export function expression(
   latex: string,
   options?: { form: Form }
 ): Expression | null {
   errors = [];
-  const result = engine.format(defaultLatex.parse(latex), options?.form);
+  const result = engine.format(engine.parse(latex), options?.form);
   errors = errors.filter((x) => !/^unknown-symbol /.test(x));
   if (errors.length !== 0) return [result ?? MISSING, ...errors];
   return result;
@@ -36,15 +37,19 @@ export function latex(expr: Expression | undefined | null): string {
   if (expr === null) return 'null';
 
   errors = [];
-  const result = defaultLatex.serialize(expr);
-  errors = errors.filter((x) => !/^unknown-symbol /.test(x));
+  let result = '';
+  try {
+    result = engine.serialize(expr);
+  } catch (e) {
+    errors.push(e.toString());
+  }
   if (errors.length !== 0) return errors.join('\n');
   return result;
 }
 
 export function expressionError(latex: string): string | string[] {
   errors = [];
-  defaultLatex.parse(latex);
+  engine.parse(latex);
   return errors.length === 1 ? errors[0] : errors;
 }
 

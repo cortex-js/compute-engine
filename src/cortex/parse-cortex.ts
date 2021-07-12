@@ -1,4 +1,4 @@
-import { Expression } from '../public';
+import { Expression } from '../math-json/math-json-format';
 import { Origin } from '../common/debug';
 import {
   FatalParsingError,

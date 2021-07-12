@@ -1,4 +1,4 @@
-import type { Expression, DictionaryCategory } from '../../public';
+import type { Expression } from '../../math-json/math-json-format';
 import type {
   Dictionary,
   FunctionDefinition,
@@ -9,8 +9,9 @@ import type {
   Definition,
   Numeric,
   SetDefinition,
-} from '../public';
-import { getDomainsDictionary, simplifyDomain } from './domains';
+  Domain,
+} from '../../math-json/compute-engine-interface';
+import { getDomainsDictionary } from './domains';
 import { ARITHMETIC_DICTIONARY } from './arithmetic';
 import { CORE_DICTIONARY } from './core';
 import { LOGIC_DICTIONARY } from './logic';
@@ -25,15 +26,18 @@ import {
 } from './utils';
 import { MULTIPLY, POWER, getFunctionName } from '../../common/utils';
 import { inferNumericDomain } from '../domains';
-import { ExpressionMap } from '../expression-map';
+import { ExpressionMap } from '../../math-json/expression-map';
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
-import { parse } from '../../latex-syntax/latex-syntax';
+import { DictionaryCategory } from '../../math-json/public';
 
 export function getDefaultDictionaries<T extends number = number>(
   categories: DictionaryCategory[] | 'all' = 'all'
 ): Readonly<Dictionary<T>>[] {
   if (categories === 'all') {
+    // Note that the order of the dictionaries matter:
+    //  earlier dictionaries cannot reference definitions in later
+    //  dictionaries.
     return getDefaultDictionaries([
       'domains',
       'core',
@@ -41,11 +45,9 @@ export function getDefaultDictionaries<T extends number = number>(
       'algebra',
       'arithmetic',
       'calculus',
-      'complex',
       'combinatorics',
       'dimensions',
       'inequalities',
-      'intervals',
       'linear-algebra',
       'logic',
       'numeric',
@@ -54,14 +56,16 @@ export function getDefaultDictionaries<T extends number = number>(
       'polynomials',
       'relations',
       'statistics',
-      'transcendentals',
       'trigonometry',
-      'rounding',
       'units',
     ]);
   }
   const result: Readonly<Dictionary<T>>[] = [];
   for (const category of categories) {
+    console.assert(
+      DICTIONARY[category],
+      'Unknown dictionary ' + DICTIONARY[category]
+    );
     if (DICTIONARY[category]) result.push(DICTIONARY[category]!);
   }
   return result;
@@ -137,14 +141,6 @@ export const DICTIONARY: {
     // def-int
   },
   'combinatorics': {}, // fibonacci, binomial, etc...
-  'complex': {
-    // real
-    // imaginary
-    // complex-cartesian (constructor)
-    // complex-polar
-    // argument
-    // conjugate
-  },
   'core': CORE_DICTIONARY,
   'collections': { ...SETS_DICTIONARY, ...COLLECTIONS_DICTIONARY },
   'domains': getDomainsDictionary(),
@@ -153,13 +149,6 @@ export const DICTIONARY: {
   },
   'logic': LOGIC_DICTIONARY,
   'inequalities': {},
-  'intervals': {
-    // interval of integers vs interval of other sets (integer interval don't need to be open/closed)
-    // interval vs. ranges
-    // interval, open-interval, etc..
-    // upper     or min?
-    // lower    or max?
-  },
   'linear-algebra': {
     // matrix
     // transpose
@@ -212,9 +201,6 @@ export const DICTIONARY: {
     // greater-than: Q47035128  243
     // less-than: Q52834024 245
   },
-  'rounding': {
-    // ceiling, floor, trunc, round,
-  },
   'statistics': {
     // average
     // mean
@@ -222,9 +208,6 @@ export const DICTIONARY: {
     // stddev
     // median
     // quantile
-  },
-  'transcendentals': {
-    // log, ln, exp,
   },
   'trigonometry': TRIGONOMETRY_DICTIONARY,
   'units': {},
@@ -243,17 +226,17 @@ export const DICTIONARY: {
  *
  */
 export function compileDictionary<T extends number = Numeric>(
-  dict: Dictionary<T>,
-  engine: ComputeEngine<T>
-): CompiledDictionary<T> {
-  const result = new Map<string, Definition<T>>();
+  engine: ComputeEngine<T>,
+  dict: Dictionary<T> | undefined
+): CompiledDictionary<T> | undefined {
+  if (dict === undefined) return undefined;
+  const result: CompiledDictionary<T> = new Map<string, Definition<T>>();
   for (const entryName of Object.keys(dict)) {
     const [def, error] = normalizeDefinition(dict[entryName], engine);
     if (error) {
       engine.signal({
         severity: def ? 'warning' : 'error',
-        message: ['invalid-dictionary-entry', error],
-        head: entryName,
+        message: ['invalid-dictionary-entry', error, entryName],
       });
     }
     if (def) result.set(entryName, def);
@@ -292,7 +275,7 @@ function normalizeDefinition(
     // variable, and infer its domain based on its value.
     return [
       {
-        domain: inferNumericDomain(def),
+        domain: inferNumericDomain(def) ?? 'Number',
         constant: false,
         value: def,
       },
@@ -304,7 +287,7 @@ function normalizeDefinition(
   //
   // It's a LaTeX string defining the value of the variable
   if (typeof def === 'string') {
-    const value = parse(def);
+    const value = engine.parse(def);
     if (value === null) {
       return [def, 'string could not be parsed'];
     }
@@ -319,7 +302,7 @@ function normalizeDefinition(
 
   let domain =
     typeof def.domain !== 'function'
-      ? simplifyDomain(def.domain ?? null)
+      ? engine.simplify(def.domain ?? null)
       : def.domain;
 
   //
@@ -327,8 +310,12 @@ function normalizeDefinition(
   //
   if (isSymbolDefinition(def)) {
     let warning: string | undefined;
-    if (!domain) {
-      warning = 'no domain provided.';
+    if (def.domain && !domain) {
+      warning = `unknown domain "${def.domain}"`;
+      domain = engine.simplify(def.domain);
+      domain = def.domain;
+    } else if (!domain) {
+      warning = 'expected a domain';
       domain = 'Anything';
     }
     def = {
@@ -338,7 +325,6 @@ function normalizeDefinition(
     };
 
     if (def.value) def.value = engine.canonical(def.value);
-    if (def.unit) def.unit = engine.canonical(def.unit);
 
     if (!def.value) def.hold = true;
 
@@ -395,15 +381,6 @@ function normalizeDefinition(
       domain,
     } as FunctionDefinition;
 
-    if (functionDef.inputDomain) {
-      functionDef.inputDomain = functionDef.inputDomain.map((x) =>
-        simplifyDomain(x)
-      );
-    }
-    if (functionDef.range && typeof functionDef.range !== 'function') {
-      functionDef.range = simplifyDomain(functionDef.range);
-    }
-
     if (functionDef.value) {
       let value = functionDef.value;
       if (
@@ -415,26 +392,13 @@ function normalizeDefinition(
       }
       functionDef.value = value;
     }
+    if (def.evalDomain === undefined && def.numeric !== true)
+      return [
+        functionDef,
+        'a "Function" should either have a "numeric" property set or an "evalDomain" method',
+      ];
 
-    let warning: string | undefined;
-    if (!functionDef.range) {
-      warning = `no function range provided.`;
-    } else if (domain === 'LogicalFunction' || domain === 'Predicate') {
-      if (
-        functionDef.range !== 'Boolean' &&
-        functionDef.range !== 'MaybeBoolean'
-      ) {
-        warning = `A "LogicalFunction" or a "Predicate" should have a range of "Boolean" or "MaybeBoolean"`;
-      }
-    } else {
-      if (
-        functionDef.range === 'Boolean' ||
-        functionDef.range === 'MaybeBoolean'
-      ) {
-        warning = `looks like a "LogicalFunction" or a "Predicate"?`;
-      }
-    }
-    return [functionDef, warning];
+    return [functionDef, undefined];
   }
 
   if (
@@ -444,7 +408,7 @@ function normalizeDefinition(
     const setDefinition = def as SetDefinition;
     // @todo: could check the validity of setDefinition.supersets
     if (setDefinition.value) {
-      setDefinition.value = simplifyDomain(setDefinition.value);
+      setDefinition.value = engine.simplify(setDefinition.value);
     }
     return [setDefinition];
   }
@@ -461,9 +425,12 @@ function normalizeDefinition(
         return [null, 'expected "value" property in definition'];
       }
       // That's a numeric variable definition
-      const inferredDomain = inferNumericDomain(
-        typeof symDef.value === 'function' ? symDef.value(engine) : symDef.value
-      );
+      const inferredDomain =
+        inferNumericDomain(
+          typeof symDef.value === 'function'
+            ? symDef.value(engine)
+            : symDef.value
+        ) ?? 'Anything';
       return [
         {
           domain: inferredDomain,
@@ -481,7 +448,7 @@ function normalizeDefinition(
     ) {
       return [
         {
-          range: 'Anything',
+          outputDomain: 'Anything',
           ...(def as Partial<FunctionDefinition>),
         } as FunctionDefinition,
         'a "Function" should have a "range" property in its definition',
@@ -561,11 +528,14 @@ function validateDictionary<T extends number = number>(
     }
     if (isFunctionDefinition(def)) {
       // Validate range
-      const sig = def.range;
-      if (typeof sig !== 'function' && !engine.isSubsetOf(sig, 'Anything')) {
+      const evalDomain = def.evalDomain;
+      if (
+        typeof evalDomain !== 'function' &&
+        !engine.isSubsetOf(evalDomain, 'Anything')
+      ) {
         engine.signal({
           severity: 'warning',
-          message: ['unknown-domain', sig as string], //@todo might not be a string
+          message: ['unknown-domain', evalDomain as string], //@todo might not be a string
           head: name,
         });
       }
@@ -578,9 +548,9 @@ function validateDictionary<T extends number = number>(
           severity: 'warning',
           message: [
             'invalid-dictionary-entry',
-            "`numeric` functions can't have an argument `hold`",
+            'Unexpected `hold` attribute on a `numeric` function',
+            name,
           ],
-          head: name,
         });
       }
 
@@ -590,8 +560,8 @@ function validateDictionary<T extends number = number>(
           message: [
             'invalid-dictionary-entry',
             'an `idempotent` function cannot be an `involution`',
+            name,
           ],
-          head: name,
         });
       }
     }
@@ -600,8 +570,7 @@ function validateDictionary<T extends number = number>(
       if (def.supersets.length === 0 && name !== 'Anything') {
         engine.signal({
           severity: 'warning',
-          message: 'expected-supersets',
-          head: name,
+          message: ['expected-supersets', name],
         });
       }
       // Check that all the parents are valid
@@ -609,16 +578,18 @@ function validateDictionary<T extends number = number>(
         if (!engine.isSubsetOf(parent, 'Anything')) {
           engine.signal({
             severity: 'warning',
-            message: ['expected-supersets', parent],
-            head: name,
+            message: ['expected-supersets', parent, name],
           });
         }
         // Check for loops in set definition
-        if (engine.isSubsetOf(parent, name)) {
+        if (engine.isSubsetOf(parent, name as Domain)) {
           engine.signal({
             severity: 'warning',
-            message: ['cyclic-definition', setParentsToString(engine, name)],
-            head: name,
+            message: [
+              'cyclic-definition',
+              setParentsToString(engine, name),
+              name,
+            ],
           });
 
           // Remove entry from dictionary
@@ -649,8 +620,8 @@ function setParentsToString(
   } else {
     cycle = [name];
   }
-  const def = engine.getSetDefinition(name);
-  if (!def) return `${name}?!`;
+  const def = engine.getDefinition(name);
+  if (!def || !isSetDefinition(def)) return `${name}?!`;
   if (!def.supersets.length || def.supersets.length === 0) return '';
 
   for (const parent of def?.supersets) {

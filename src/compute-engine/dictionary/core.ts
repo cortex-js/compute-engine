@@ -1,17 +1,29 @@
-import type { Dictionary } from '../public';
+import {
+  getNumberValue,
+  getStringValue,
+  getSymbolName,
+} from '../../common/utils';
+import { Expression } from '../../math-json';
+import type {
+  ComputeEngine,
+  Dictionary,
+  Domain,
+} from '../../math-json/compute-engine-interface';
+import { joinLatex } from '../../math-json/core/tokenizer';
+import { serializeLatex } from '../../math-json/definitions-core';
 
 export const CORE_DICTIONARY: Dictionary = {
   Apply: {
     domain: 'Function',
-    range: 'Anything',
+    evalDomain: () => 'Anything',
   },
   About: {
     domain: 'Function',
-    range: 'Dictionary',
+    evalDomain: () => 'Dictionary',
   },
   BaseForm: {
     domain: 'Function',
-    range: 'Integer',
+    evalDomain: () => 'Integer',
   },
   /** Create a local scope. First argument is a dictionary of local variables.
    * They are evaluated in the context of the parent scope. The second argument
@@ -20,50 +32,152 @@ export const CORE_DICTIONARY: Dictionary = {
    */
   Block: {
     domain: 'Function',
-    range: 'Anything',
+    evalDomain: () => 'Anything',
+  },
+  Delimiter: {
+    domain: 'Function',
+    evalDomain: (ce, arg: Expression) => ce.domain(arg),
+    evaluate: (_ce: ComputeEngine, arg: Expression) => arg,
   },
   /** Return the domain of an expression */
   Domain: {
     domain: 'ParametricDomain',
-    range: 'Domain',
+    evalDomain: () => 'Domain',
   },
   Evaluate: {
     domain: 'Function',
-    range: 'Anything',
+    hold: 'all',
+    evalDomain: () => 'Anything',
   },
-  Parentheses: {
+  Error: {
     domain: 'Function',
-    threadable: true,
-    pure: false,
-    range: 'Anything',
+    hold: 'all',
+    evalDomain: () => 'Anything',
+    /* Inert function. The first argument is typically a `LatexString` or 
+      `LatexTokens` representing a parsing error. 
+    */
   },
   Head: {
     domain: 'Function',
-    range: 'Anything',
+    evalDomain: (_ce, _arg: Domain) => 'Expression',
+  },
+  Html: {
+    domain: 'Function',
+    evalDomain: () => 'String',
+    evaluate: (ce: ComputeEngine, ...args: Expression[]): Expression => {
+      if (args.length === 0) return { str: '' };
+      // @todo if head(arg[0]) === 'LatexString', call MathLive renderToMarkup()
+      return { str: '' };
+    },
   },
   Lambda: {
     domain: 'Function',
     wikidata: 'Q567612',
     hold: 'all',
-    range: 'Anything',
+    evalDomain: () => 'Anything',
   },
   Latex: {
     domain: 'Function',
-    range: 'String',
+    evalDomain: () => 'Function',
+    evaluate: (ce: ComputeEngine, ...args: Expression[]): Expression => {
+      if (args.length === 0) return ['LatexString'];
+      return [
+        'LatexString',
+        { str: joinLatex(args.map((x) => ce.serialize(x))) },
+      ];
+    },
+  },
+  LatexString: {
+    domain: 'Function',
+    evalDomain: () => 'Function',
+    evaluate: (ce: ComputeEngine, ...args: Expression[]): Expression => {
+      if (args.length === 0) return ['LatexString'];
+      return [
+        'LatexString',
+        joinLatex(args.map((x) => serializeLatex(ce.serializer, x))),
+      ];
+    },
+  },
+  LatexTokens: {
+    domain: 'Function',
+    evalDomain: () => 'Function',
+    evaluate: (ce: ComputeEngine, ...args: Expression[]): Expression => {
+      if (args.length === 0) return ['LatexString'];
+      return [
+        'LatexString',
+        joinLatex(args.map((x) => serializeLatex(ce.serializer, x))),
+      ];
+    },
+  },
+  Parse: {
+    domain: 'Function',
+    evalDomain: () => 'Anything',
+    evaluate: (ce: ComputeEngine, ...args: Expression[]): Expression => {
+      if (args.length === 0) return 'Nothing';
+      const latex = joinLatex(
+        args.map((x) => serializeLatex(ce.serializer, x))
+      );
+      return ce.parse(latex);
+    },
   },
   String: {
     domain: 'Function',
     threadable: true,
-    range: 'String',
+    evalDomain: () => 'String',
+    evaluate: (ce: ComputeEngine, ...args: Expression[]): Expression => {
+      if (args.length === 0) return { str: '' };
+      return {
+        str: args
+          .map((x) => {
+            const strValue = getStringValue(x);
+            if (x !== null) return strValue;
+            const numValue = getNumberValue(x);
+            if (numValue !== null) return numValue.toString();
+            return JSON.stringify(ce.format(x, 'json'));
+          })
+          .join(''),
+      };
+    },
+  },
+  Style: {
+    domain: 'Function',
+    evalDomain: (ce: ComputeEngine, expr: Domain) => expr,
+    // @todo: simplify: merge Style(Style(x, s1), s2),  Style(x) -> x
+    evaluate: (
+      _ce: ComputeEngine,
+      expr: Expression,
+      _dic: Expression
+    ): Expression => expr,
   },
   Symbol: {
     domain: 'Function',
     threadable: true,
-    range: 'Symbol',
+    evalDomain: () => 'Symbol',
+    evaluate: (_ce: ComputeEngine, ...args: Expression[]): Expression => {
+      if (args.length === 0) return 'Nothing';
+      const arg = args
+        .map((x) => {
+          const symName = getSymbolName(x);
+          if (symName !== null) return symName;
+
+          const stringValue = getStringValue(arg);
+          if (stringValue !== null) return stringValue;
+
+          const numValue = getNumberValue(arg);
+          if (numValue !== null) return numValue.toString();
+
+          return '';
+        })
+        .join('');
+
+      if (arg.length > 0) return { sym: arg };
+
+      return 'Nothing';
+    },
   },
   Tail: {
     domain: 'Function',
-    range: 'List',
+    evalDomain: () => 'List',
   },
   // Pattern: {},
 };

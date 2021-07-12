@@ -5,8 +5,11 @@ import {
   getSymbolName,
   getTail,
 } from '../common/utils';
-import { ErrorSignal, Expression, Signal } from '../public';
-import { ComputeEngine } from './public';
+import { Expression } from '../math-json/math-json-format';
+import { ComputeEngine, Domain } from '../math-json/compute-engine-interface';
+import { Signal } from '../math-json';
+import { ErrorSignal } from '../math-json/public';
+import { isSymbolDefinition } from './dictionary/utils';
 
 export class CortexError {
   signal: ErrorSignal;
@@ -49,8 +52,8 @@ function getVarsRecursive(
     // It has a name, but no arguments. It's a symbol
     const name = getSymbolName(expr);
     if (name && !vars.has(name)) {
-      const def = engine.getSymbolDefinition(name);
-      if (!def || def.constant === false) {
+      const def = engine.getDefinition(name);
+      if (!def || !isSymbolDefinition(def) || def.constant === false) {
         // It's not in the dictionary, or it's in the dictionary
         // but not as a constant -> it's a variable
         vars.add(name);
@@ -61,7 +64,7 @@ function getVarsRecursive(
 
 /**
  * Return the set of variables (free or not) in an expression.
- * Doesn't return free varas because doesn't account for variable declaration
+ * Doesn't return free vars because doesn't account for variable declaration
  * and scopes.
  */
 export function getVariables(ce: ComputeEngine, expr: Expression): Set<string> {
@@ -88,4 +91,12 @@ export function hasWildcards(expr: Expression): boolean {
     return Object.keys(dict).some((key) => hasWildcards(dict[key]));
   }
   return false;
+}
+
+/** If the expression is a function, return the domains of its arguments. */
+export function getDomains(
+  ce: ComputeEngine,
+  expr: Expression
+): null | Domain[] {
+  return getTail(expr)?.map((x) => ce.domain(x)) ?? null;
 }

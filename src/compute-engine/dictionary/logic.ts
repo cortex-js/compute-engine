@@ -1,4 +1,18 @@
-import type { Dictionary } from '../public';
+import type {
+  ComputeEngine,
+  Dictionary,
+  Domain,
+} from '../../math-json/compute-engine-interface';
+
+const logicalFunction = (
+  ce: ComputeEngine,
+  ...doms: Domain[]
+): Domain | null => {
+  if (doms.every((x) => x === 'Boolean')) return 'Boolean';
+  if (doms.every((x) => x === 'Boolean' || x === 'MaybeBoolean'))
+    return 'MaybeBoolean';
+  return null;
+};
 
 export const LOGIC_DICTIONARY: Dictionary = {
   True: { domain: 'Boolean', constant: true },
@@ -10,7 +24,7 @@ export const LOGIC_DICTIONARY: Dictionary = {
     associative: true,
     commutative: true,
     idempotent: true,
-    range: 'MaybeBoolean',
+    evalDomain: logicalFunction,
   },
   Or: {
     domain: 'LogicalFunction',
@@ -18,24 +32,28 @@ export const LOGIC_DICTIONARY: Dictionary = {
     associative: true,
     commutative: true,
     idempotent: true,
-    range: 'MaybeBoolean',
+    evalDomain: logicalFunction,
   },
   Not: {
     domain: 'LogicalFunction',
     involution: true,
-    range: 'MaybeBoolean',
+    evalDomain: logicalFunction,
   },
   Equivalent: {
     domain: 'LogicalFunction',
-    range: 'MaybeBoolean',
+    evalDomain: logicalFunction,
   },
-  Implies: { domain: 'LogicalFunction', range: 'MaybeBoolean' },
-  Exists: { domain: 'LogicalFunction', range: 'MaybeBoolean' },
-  Equal: { domain: 'LogicalFunction', range: 'MaybeBoolean' },
+  Implies: { domain: 'LogicalFunction', evalDomain: logicalFunction },
+  Exists: { domain: 'LogicalFunction', evalDomain: logicalFunction },
+  Equal: {
+    domain: 'Function',
+    commutative: true,
+    evalDomain: () => 'MaybeBoolean',
+  },
   NotEqual: {
     domain: 'Function',
     wikidata: 'Q28113351',
     commutative: true,
-    range: 'MaybeBoolean',
+    evalDomain: () => 'MaybeBoolean',
   },
 };

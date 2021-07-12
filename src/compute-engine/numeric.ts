@@ -14,6 +14,11 @@ export const MACHINE_TOLERANCE = Math.pow(
 // Positive values smaller than NUMERICAL_TOLERANCE are considered to be zero
 export const NUMERICAL_TOLERANCE = Math.pow(10, -10);
 
+// When applying simplifications, only considers integers whose absolute value
+// is less than SMALL_INTEGERS. This avoid loss of precision by preventing
+// simplification for `1e199 + 1`.
+export const SMALL_INTEGERS = 10000;
+
 /**
  * Returns the smallest floating-point number greater than x.
  * Denormalized values may not be supported.
@@ -195,4 +200,17 @@ export function gamma(z: number): number {
 
     return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * x;
   }
+}
+
+/**
+ *  Reduce the numerator and denominator:
+ * `\frac{2}{4} -> \frac{1}{2})`
+ */
+export function simplifyRational([numer, denom]:
+  | [number, number]
+  | [null, null]): [number, number] | [null, null] {
+  if (numer === null || denom === null) return [null, null];
+  const g = gcd(numer, denom);
+  if (denom < 0) return [-numer / g, -denom / g];
+  return [numer / g, denom / g];
 }

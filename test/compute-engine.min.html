@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+  <meta charset="utf-8" />
+</head>
+
+<body>
+  <script defer type="module">
+    import {  
+      LatexSyntax, ComputeEngine
+    } from '../dist/compute-engine.esm.js';
+
+    const ce = new ComputeEngine();
+    // console.log(parse('x'));
+    // console.log(ce.parse('x+1'));
+    // console.log(ce.parse('-5-3-2'));
+    // console.log(ce.parse('-2!'));
+    // console.log(ce.serialize(1e199);
+    // const t = ce.simplify(ce.parse('1e199+1'));
+    // console.log(t);
+    // console.log(ce.serialize(t));
+    // console.log(ce.parse('2(x+1)'));
+    // console.log(ce.parse('-123456.789012'));
+    // console.log(ce.parse('\\infty'));
+    // console.log(ce.parse('( 1 + 2)'));
+
+    // console.log(ce.parse('\\cos x + 1'));
+
+    // console.log(ce.parse('x^{2^3}'));
+    // console.log(ce.parse('-1^{2^3}'));
+
+    // ++ should be handled as PreIncrement in prefix, Increment in postfix
+    // console.log(ce.parse('++x'));
+    // console.log(ce.parse('x++'));
+
+
+    // console.log(ce.parse('e^{i\\pi}'));
+
+    // console.log(ce.parse('x \\text{hello} y'));
+    // console.log(ce.parse('x \\textcolor{red}{=} y'));
+    
+
+    // console.log(ce.parse('2x'));
+
+    // console.log(ce.parse('2\\times-x'));
+
+
+    // console.log(ce.parse('\\lbrack 1 \\rbrack'));
+
+    // applyInvisibleOperator(5, a+1)
+    // console.log(ce.parse('5a+1'));
+
+    // console.log(ce.simplify(['Add', 1, 2, 1.0001]));
+
+    // console.log(ce.parse('\\frac{-x}{-n}'));
+    
+    // console.log(ce.format(ce.parse('1^2x'), 'json'));
+
+// console.log(ce.parse('a^2b^2'));
+
+    // console.log(ce.parse('(b^3b^2)+(a^3a^2)+(b^6)+(a^5b)+(a^5)'));
+
+    // Base Form (with '(' trigger: check if rest matches sequence of digits, then sub, then index)
+// console.log(ce.parse('(00111)_{2}'));
+
+
+// console.log(ce.parse('(a, b, c)')); // Should have Delimiter(Sequence())?
+
+
+// console.log(ce.parse('\\frac'));
+
+    console.log(ce.parse('2x^3'));
+    // console.log(ce.parse('2^3x'));
+    
+    console.log('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack');
+
+    // sorting: put Nothing, Missing, Undefined, True, False, at the end
+    // For equalities and inequalities: 
+    // x+1 = 0      // if constant, second arg
+    // x = 0
+    // x = x + 1    // if symbol, first arg
+    // f(x) = x + 1 // if Apply -> first arg
+    // otherwise more costly arg second
+    // console.log(ce.serialize(['Equal', 'x', 'Missing']));
+
+    // console.log(ce.parse('\\ln(3)'));
+
+    // console.log(ce.parse('2(1+1)'));
+    // console.log(ce.parse('|x|'));
+    // console.log(ce.parse('|x+|y|+1|'));
+    // console.log(ce.parse('(5+1)(2+3)'));
+
+
+  </script>
+</body>
+
+</html>

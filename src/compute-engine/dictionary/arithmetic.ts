@@ -1,4 +1,4 @@
-import { Expression } from '../../public';
+import { Expression } from '../../math-json/math-json-format';
 import {
   ADD,
   applyRecursively,
@@ -22,12 +22,15 @@ import {
   MULTIPLY,
   NEGATE,
   NOTHING,
-  PARENTHESES,
   SUBTRACT,
   UNDEFINED,
 } from '../../common/utils';
-import type { ComputeEngine, Dictionary, Numeric } from '../public';
-import { factorial, gamma, lngamma, gcd } from '../numeric';
+import type {
+  ComputeEngine,
+  Dictionary,
+  Numeric,
+} from '../../math-json/compute-engine-interface';
+import { factorial, gamma, lngamma, SMALL_INTEGERS } from '../numeric';
 import {
   DECIMAL_MINUS_ONE,
   DECIMAL_ONE,
@@ -35,6 +38,7 @@ import {
   factorial as factorialDecimal,
   gamma as gammaDecimal,
   lngamma as lngammaDecimal,
+  gcd as decimalGcd,
 } from '../numeric-decimal';
 import {
   isEqual,
@@ -48,7 +52,15 @@ import {
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { gamma as gammaComplex } from '../numeric-complex';
-import { internalDomain } from '../domains';
+import { box } from '../../math-json/boxed/expression';
+
+// @todo
+// Re or RealPart
+// Im or ImaginaryPart
+// Arg or Argument
+// Conjugate
+// complex-cartesian (constructor)
+// complex-polar
 
 export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
   //
@@ -270,7 +282,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
       Decimal.div(lhs, rhs),
   },
   Exp: {
-    domain: ['ContinuousFunction', 'MonotonicFunction'],
+    domain: 'Function',
     wikidata: 'Q168698',
     threadable: true,
     range: 'Number',
@@ -282,19 +294,19 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
   },
   Erf: {
     // Error function
-    domain: ['ContinuousFunction', 'MonotonicFunction'],
+    domain: 'Function',
     range: 'Number',
     numeric: true,
   },
   Erfc: {
     // Complementary Error Function
-    domain: ['ContinuousFunction', 'MonotonicFunction'],
+    domain: 'Function',
     range: 'Number',
     numeric: true,
   },
   Factorial: {
     wikidata: 'Q120976',
-    domain: 'MonotonicFunction',
+    domain: 'Function',
     range: domainFactorial,
     numeric: true,
     evalNumber: (_ce, n: number): number => factorial(n),
@@ -487,6 +499,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
     range: 'Number',
     simplify: (ce: ComputeEngine, ...args: Expression[]): Expression =>
       applyPower(ce, ['Power', ...args]),
+    // Defined as RealNumber for all power in RealNumber when base > 0;
+    // when x < 0, only defined if n is an integer
+    // if x is a non-zero complex, defined as ComplexNumber
+    // evalDomain: (ce, base: Expression, power: Expression) ;
     evalNumber: (_ce, base: number, power: number) => Math.pow(base, power),
     evalComplex: (_ce, base: Complex | number, power: Complex | number) => {
       const cBase = typeof base === 'number' ? new Complex(base) : base;
@@ -579,7 +595,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
   },
   Subtract: {
     domain: 'Function',
-    wikidata: 'Q32043',
+    wikidata: 'Q40754',
     range: 'Number',
     numeric: true,
     evalNumber: (_ce, lhs: number, rhs: number) => lhs - rhs,
@@ -612,7 +628,7 @@ function domainAdd(
 ): Expression<Numeric> | null {
   let dom: Expression<Numeric> | null = null;
   for (const arg of args) {
-    const argDom = internalDomain(ce, arg);
+    const argDom = box(arg, ce).domain;
     if (ce.isSubsetOf(argDom, 'Number') === false) return 'Nothing';
     if (!ce.isSubsetOf(argDom, dom)) dom = argDom;
   }
@@ -626,9 +642,9 @@ function simplifyAdd(
   if (args.length === 0) return 0;
   if (args.length === 1) return args[0];
 
-  let numerTotal = 0;
-  let denomTotal = 1;
-  let dTotal = DECIMAL_ZERO;
+  // To avoid underflows (i.e. '1+1e199'), use Decimal for accumulated sum
+  let numerTotal = DECIMAL_ZERO;
+  let denomTotal = DECIMAL_ONE;
   let cTotal = Complex.ZERO;
 
   let posInfinity = false;
@@ -647,27 +663,50 @@ function simplifyAdd(
         negInfinity = true;
       }
     }
-    const [n, d] = getRationalValue(arg);
-    if (n !== null && d !== null) {
-      if (isNaN(n) || isNaN(d)) return NaN;
-      numerTotal = numerTotal * d + n * denomTotal;
-      denomTotal = denomTotal * d;
+
+    const dValue = getDecimalValue(arg);
+    if (dValue !== null) {
+      if (dValue.isInteger() && dValue.abs().lte(SMALL_INTEGERS)) {
+        numerTotal = numerTotal.add(dValue.mul(denomTotal));
+      } else {
+        others.push(dValue);
+      }
     } else {
       const c = getComplexValue(arg);
       if (c !== null) {
-        if (Number.isInteger(c.re) && Number.isInteger(c.im)) {
+        if (
+          Number.isInteger(c.re) &&
+          Number.isInteger(c.im) &&
+          Math.abs(c.re) <= SMALL_INTEGERS &&
+          Math.abs(c.im) <= SMALL_INTEGERS
+        ) {
           cTotal = cTotal.add(c);
         } else {
           others.push(arg);
         }
       } else {
-        const d = getDecimalValue(arg);
-        if (d !== null && d.isInteger()) {
-          dTotal = dTotal.add(d);
+        const [n, d] = getRationalValue(arg);
+        if (
+          n !== null &&
+          d !== null &&
+          Math.abs(n) <= SMALL_INTEGERS &&
+          Math.abs(d) <= SMALL_INTEGERS
+        ) {
+          const nDecimal = new Decimal(n);
+          const dDecimal = new Decimal(d);
+          numerTotal = Decimal.add(
+            numerTotal.mul(dDecimal),
+            denomTotal.mul(nDecimal)
+          );
+          denomTotal = denomTotal.mul(dDecimal);
         } else {
           const val = getNumberValue(arg);
-          if (val !== null && Number.isInteger(val)) {
-            numerTotal += val;
+          if (
+            val !== null &&
+            Number.isInteger(val) &&
+            Math.abs(val) < SMALL_INTEGERS
+          ) {
+            numerTotal = numerTotal.add(denomTotal.mul(val));
           } else if (isNotZero(ce, arg) !== false) {
             others.push(arg);
           }
@@ -686,24 +725,27 @@ function simplifyAdd(
   // for (const [term, coeff] of forEachTermCoeff(others)) {
   // }
 
-  if (!dTotal.isZero()) others.push(dTotal);
   if (!cTotal.isZero()) others.push(cTotal);
 
-  if (others.length === 0) {
-    if (numerTotal === 0) return 0;
-    if (denomTotal === 1) return numerTotal;
-    return ['Divide', numerTotal, denomTotal];
-  }
-  if (numerTotal !== 0) {
-    const g = gcd(numerTotal, denomTotal);
-    numerTotal = numerTotal / g;
-    denomTotal = denomTotal / g;
-    if (denomTotal === 1) {
-      others.push(numerTotal);
+  const g = decimalGcd(numerTotal, denomTotal);
+  numerTotal = numerTotal.div(g);
+  denomTotal = denomTotal.div(g);
+
+  if (!numerTotal.isZero()) {
+    if (denomTotal.equals(DECIMAL_ONE)) {
+      if (numerTotal.abs().lt(SMALL_INTEGERS))
+        others.push(numerTotal.toNumber());
+      else others.push(numerTotal);
     } else {
-      others.push(['Divide', numerTotal, denomTotal]);
+      if (
+        numerTotal.abs().lt(SMALL_INTEGERS) &&
+        denomTotal.abs().lt(SMALL_INTEGERS)
+      )
+        others.push(['Divide', numerTotal.toNumber(), denomTotal.toNumber()]);
+      else others.push(['Divide', numerTotal, denomTotal]);
     }
   }
+
   if (others.length === 1) return others[0];
   if (others.length === 2 && getFunctionName(others[1]) === NEGATE) {
     // a + (-b) -> a - b
@@ -730,18 +772,33 @@ function simplifyMultiply(
   for (const arg of args) {
     const val = getNumberValue(arg);
     if (val === 0) return 0;
-    if (val !== null && (!Number.isFinite(val) || Number.isInteger(val))) {
-      numer *= val;
+    if (val !== null) {
+      if (
+        !Number.isFinite(val) ||
+        (Number.isInteger(val) && Math.abs(val) < SMALL_INTEGERS)
+      )
+        numer *= val;
+      else others.push(arg);
     } else {
       const [n, d] = [null, null]; // getRationalValue(arg);
 
-      if (n !== null && d !== null) {
+      if (
+        n !== null &&
+        d !== null &&
+        Math.abs(d!) < SMALL_INTEGERS &&
+        Math.abs(n!) < SMALL_INTEGERS
+      ) {
         numer *= n!;
         denom *= d!;
       } else {
         const cVal = getComplexValue(arg);
         if (cVal !== null) {
-          if (Number.isInteger(cVal.re) && Number.isInteger(cVal.im)) {
+          if (
+            Number.isInteger(cVal.re) &&
+            Number.isInteger(cVal.im) &&
+            Math.abs(cVal.re) < SMALL_INTEGERS &&
+            Math.abs(cVal.im) < SMALL_INTEGERS
+          ) {
             c = c.mul(cVal);
           } else {
             others.push(arg);
@@ -823,7 +880,7 @@ export function applyNegate(expr: Expression): Expression {
     return [ADD, ...mapArgs<Expression>(expr, applyNegate)];
   } else if (name === SUBTRACT) {
     return [SUBTRACT, getArg(expr, 2) ?? MISSING, getArg(expr, 1) ?? MISSING];
-  } else if (name === PARENTHESES && argCount === 1) {
+  } else if (name === 'Delimiter' && argCount === 1) {
     return applyNegate(getArg(getArg(expr, 1)!, 1)!);
   }
 
@@ -843,10 +900,17 @@ function evalNumberMultiply(_ce: ComputeEngine, ...args: number[]): number {
 export function ungroup(expr: Expression | null): Expression {
   if (expr === null) return NOTHING;
   if (isAtomic(expr)) return expr;
-  if (getFunctionHead(expr) === PARENTHESES && getArgCount(expr) === 1) {
+  if (getFunctionHead(expr) === 'Delimiter' && getArgCount(expr) === 1) {
     return ungroup(getArg(expr, 1));
   }
   return applyRecursively(expr, ungroup);
+}
+
+export function unstyle(expr: Expression | null): Expression {
+  if (expr === null) return NOTHING;
+  if (isAtomic(expr)) return expr;
+  if (getFunctionHead(expr) === 'Style') return getArg(expr, 1) ?? NOTHING;
+  return applyRecursively(expr, unstyle);
 }
 
 // Used by `simplify()` and `canonical()`

@@ -7,17 +7,25 @@ import {
   getFunctionName,
   getNumberValue,
   getRationalValue,
+  getStringValue,
   getSymbolName,
   getTail,
   isAtomic,
   MISSING,
-  simplifyRational,
 } from '../common/utils';
-import { Expression } from '../public';
-import { ComputeEngine, Rule, RuleSet, Simplification } from './public';
+import { Expression, Substitution } from '../math-json/math-json-format';
+import {
+  ComputeEngine,
+  Numeric,
+  Rule,
+  RuleSet,
+  Simplification,
+} from '../math-json/compute-engine-interface';
 import { isNegative, isNotZero, isPositive, isZero } from './predicates';
-import { Substitution } from './patterns';
 import { rules } from './rules';
+import { simplifyRational } from './numeric';
+import { simplifyBoolean } from './assume';
+import { isSymbolDefinition } from './dictionary/utils';
 
 // A list of simplification rules.
 // The rules are expressed as
@@ -101,11 +109,11 @@ export const SIMPLIFY_RULES: { [topic: string]: Rule[] } = {
   ],
 };
 
-export function internalSimplify(
-  ce: ComputeEngine,
-  expr: Expression | null,
+export function internalSimplify<T extends number = Numeric>(
+  ce: ComputeEngine<T>,
+  expr: Expression<T> | null,
   simplifications?: Simplification[]
-): Expression | null {
+): Expression<T> | null {
   if (expr === null) return null;
 
   //
@@ -121,24 +129,24 @@ export function internalSimplify(
   }
   for (const simplification of simplifications) {
     expr = ce.replace(
+      expr,
       ce.cache<RuleSet>(
         simplification,
         (): RuleSet => rules(ce, SIMPLIFY_RULES[simplification])
-      ),
-      expr
+      )
     );
   }
+
   //
   // 2/ Numeric simplifications
   //
   expr = simplifyNumber(ce, expr!) ?? expr;
 
   //
-  // 3/ Simplify assumptions
+  // 3/ Simplify boolean expressions, using assumptions.
   //
-  // If the expression is a predicate which is an assumption, return `True`
   //
-  if (ce.is(expr) === true) return 'True';
+  expr = simplifyBoolean(ce, expr);
 
   if (isAtomic(expr!)) return expr;
 
@@ -148,7 +156,7 @@ export function internalSimplify(
   if (getDictionary(expr!) !== null) {
     return applyRecursively(
       expr!,
-      (x) => ce.simplify(x, { simplifications }) ?? x
+      (x) => internalSimplify(ce, x, simplifications) ?? x
     );
   }
 
@@ -165,12 +173,12 @@ export function internalSimplify(
     const def = ce.getFunctionDefinition(head);
     if (def) {
       // Simplify the arguments, except those affected by `hold`
-      const args: Expression[] = [];
+      const args: Expression<T>[] = [];
       const tail = getTail(expr);
       for (let i = 0; i < tail.length; i++) {
         const name = getFunctionName(tail[i]);
         if (name === 'Evaluate') {
-          args.push(ce.simplify(tail[i], { simplifications }) ?? tail[i]);
+          args.push(internalSimplify(ce, tail[i], simplifications) ?? tail[i]);
         } else if (name === 'Hold') {
           args.push(getArg(tail[i], 1) ?? MISSING);
         } else if (
@@ -180,13 +188,14 @@ export function internalSimplify(
         ) {
           args.push(tail[i]);
         } else {
-          args.push(ce.simplify(tail[i], { simplifications }) ?? tail[i]);
+          args.push(internalSimplify(ce, tail[i], simplifications) ?? tail[i]);
         }
       }
-      if (typeof def.simplify === 'function') {
-        return def.simplify(ce, ...args);
-      }
-      return [head, ...args];
+      const result =
+        typeof def.simplify === 'function'
+          ? def.simplify(ce, ...args) ?? expr
+          : [head, ...args];
+      return ce.cost(result) <= ce.cost(expr) ? result : expr;
     }
   }
   if (head !== null) {
@@ -197,17 +206,23 @@ export function internalSimplify(
   return expr;
 }
 
-function simplifyNumber(engine: ComputeEngine, expr: Expression) {
+function simplifyNumber<T extends number = Numeric>(
+  engine: ComputeEngine<T>,
+  expr: Expression<T>
+): Expression<T> | null {
   //
   // Replace constants by their value
   //
-  const symDef = engine.getSymbolDefinition(getSymbolName(expr) ?? '');
-  if (symDef && symDef.hold === false && symDef.value) {
+  const symDef = engine.getDefinition(getSymbolName(expr) ?? '');
+  if (
+    symDef &&
+    isSymbolDefinition(symDef) &&
+    symDef.value &&
+    symDef.hold === false
+  ) {
     // If hold is false, we can substitute the symbol for its value
-    if (typeof symDef.value === 'function') {
-      return internalSimplify(engine, symDef.value(engine));
-    }
-    return internalSimplify(engine, symDef.value);
+    if (typeof symDef.value === 'function') return symDef.value(engine);
+    return symDef.value;
   }
 
   //
@@ -216,11 +231,11 @@ function simplifyNumber(engine: ComputeEngine, expr: Expression) {
   const [numer, denom] = simplifyRational(getRationalValue(expr));
   if (numer !== null && denom !== null) {
     console.assert(denom >= 0);
-    if (denom === 1) return numer;
-    if (numer === 0 && isFinite(denom)) return 0;
-    if (Object.is(denom, -0) && isFinite(numer)) return -Infinity;
-    if (denom === 0 && isFinite(numer)) return +Infinity;
-    return ['Divide', numer, denom];
+    if (denom === 1) return numer as T;
+    if (numer === 0 && isFinite(denom)) return 0 as T;
+    if (Object.is(denom, -0) && isFinite(numer)) return -Infinity as T;
+    if (denom === 0 && isFinite(numer)) return +Infinity as T;
+    return ['Divide', numer, denom] as Expression<T>;
   }
 
   // @todo could simplify Decimal rationals as well
@@ -241,12 +256,55 @@ function simplifyNumber(engine: ComputeEngine, expr: Expression) {
     if (im === 0) return arg1;
 
     const re = getNumberValue(arg1);
-    if (re === 0) return ['Multiply', arg2, 'ImaginaryUnit'];
+    if (re === 0) return ['Multiply', arg2, 'ImaginaryUnit'] as Expression<T>;
 
     // This may be a non-numerical Complex,
     // i.e. ['Complex', ['Divide', 2, 3], 2]
-    return ['Add', re ?? arg1, ['Multiply', im ?? arg2, 'ImaginaryUnit']];
+    return [
+      'Add',
+      re ?? arg1,
+      ['Multiply', im ?? arg2, 'ImaginaryUnit'],
+    ] as Expression<T>;
   }
 
   return expr;
 }
+
+export function costFunction(expr: Expression): number {
+  const numValue = getNumberValue(expr);
+  if (numValue !== null) return numValue.toString().length;
+
+  const strValue = getStringValue(expr);
+  if (strValue) return strValue.length;
+
+  const sym = getSymbolName(expr);
+  if (sym) return sym.length;
+
+  const head = getFunctionName(expr);
+
+  if (head) {
+    if (['Add', 'Multiply', 'Divide'].includes(head)) return 100;
+    if (['Negate', 'Subtract'].includes(head)) return 110;
+    if (['Sqrt', 'Root'].includes(head)) return 120;
+    if (['Power', 'Ln'].includes(head)) return 130;
+    if (['Tan'].includes(head)) return 140;
+    if (['Sin', 'Cos'].includes(head)) return 150;
+    if (['Arcsin', 'Arccos', 'Arctan'].includes(head)) return 160;
+  }
+
+  if (getFunctionHead(expr)) {
+    return getTail(expr).reduce<number>((acc, x) => acc + costFunction(x), 200);
+  }
+
+  const dict = getDictionary(expr);
+  if (dict) {
+    return Object.values(dict).reduce<number>(
+      (acc, x) => acc + costFunction(x),
+      200
+    );
+  }
+
+  return 1_000_000;
+}
+
+export const DEFAULT_COST_FUNCTION = costFunction;

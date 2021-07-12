@@ -5,15 +5,29 @@ import {
   getTail,
   isAtomic,
 } from '../common/utils';
-import { Expression } from '../public';
-import { match, substitute, Substitution } from './patterns';
-import { ComputeEngine, Numeric, Rule, RuleSet } from './public';
+import { Expression, Substitution } from '../math-json/math-json-format';
+import { match, substitute } from './patterns';
+import {
+  ComputeEngine,
+  Numeric,
+  Rule,
+  RuleSet,
+} from '../math-json/compute-engine-interface';
 
-// Generator functions
-
+// @future Generator functions
 // export function fixPoint(rule: Rule);
 // export function chain(rules: RuleSet);
 
+// @future load rules from JSONC
+// - describe conditions with a condition expression:
+//    "isInteger(x) && isFreeOf(y, x)"
+//  or"x:integer && y:freeOf(x)"
+// function parseCondition(s:string, lhs: (sub)=> boolean) =>
+//    [rest: string, fn: (sub) => boolean]
+
+// @future: priority for rules, sort and apply rules by priority
+
+// @todo don't hardcode the SUBS
 const SUBS = {
   x: '_x',
   y: '_y',
@@ -93,12 +107,13 @@ export function applyRule<T extends number = Numeric>(
   [lhs, rhs, condition]: Rule<T>,
   expr: Expression<T>
 ): Expression<T> | null {
-  const sub = match(lhs, expr);
+  const sub = match(expr, lhs);
   if (sub === null) return null;
 
   if (typeof condition === 'function' && !condition(ce, sub)) return null;
 
   console.log('Applying rule ', ce.serialize(lhs), '->', ce.serialize(rhs));
+
   return substitute<T>(rhs, sub);
 }
 
@@ -107,10 +122,11 @@ export function applyRule<T extends number = Numeric>(
  */
 export function replace<T extends number = Numeric>(
   ce: ComputeEngine,
-  rules: RuleSet,
-  expr: Expression<T>
+  expr: Expression<T>,
+  rules: RuleSet
 ): Expression<T> | null {
   let done = false;
+  let iter = 0;
   while (!done) {
     done = true;
     for (const rule of rules) {
@@ -119,6 +135,13 @@ export function replace<T extends number = Numeric>(
         done = false;
         expr = result;
       }
+    }
+    iter += 1;
+    if (iter > ce.iterationLimit) {
+      console.log('replace(): Maximum iteration exceeded');
+      debugger;
+      window['foo'].bar = 0;
+      done = true;
     }
   }
   return expr;
