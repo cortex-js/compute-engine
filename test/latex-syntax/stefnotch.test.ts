@@ -92,4 +92,22 @@ describe.skip('STEFNOTCH #13', () => {
   test('/7', () => {
     expect(expression('3\\equiv5\\mod7')).toMatchInlineSnapshot();
   });
+
+  test('/8', () => {
+    expect(
+      expression('a={\displaystyle \lim_{n\to\infin}a_n}')
+    ).toMatchInlineSnapshot();
+  });
+
+  test('/9', () => {
+    expect(
+      expression('\forall x\in\C^2:|x|<0')
+    ).toMatchInlineSnapshot();
+  });
+
+  test('/10', () => {
+    expect(
+      expression('\forall n\colon a_n\le c_n\le b_n\implies\lim_{n\to\infin}c_n=a')
+    ).toMatchInlineSnapshot();
+  });
 });
