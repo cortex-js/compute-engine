@@ -107,6 +107,9 @@ A MathJSON expression is a combination of **numbers**, **strings**, **symbols**,
 as an object literal with a `"num"`, `"str"`, `"sym"` or `"fn"` key,
 respectively, or as a short-hand notation using a JSON number, string or array.
 
+**Dictionaries** do not have a short-hand notation and are always expressed
+as an object literal with a `"dict"` key.
+
 The short-hand notation is more concise and easier to read, but cannot include
 metadata properties.
 
@@ -131,7 +134,7 @@ value of the key is a string representation of the number.
 The string representing a number follows the
 [JSON syntax for number](https://tools.ietf.org/html/rfc7159#section-6).
 
-The values `NaN`, `+Infinity` and `-Infinity` are used to represented an
+The values `NaN`, `+Infinity` and `-Infinity` are used to represent an
 undefined results, as per [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754),
 positive infinity and negative infinity, respectively.
 
@@ -218,7 +221,9 @@ A MathJSON **symbol** is either:
 **Symbols** are identifiers that represent the name of constants, variables and
 functions.
 
-Symbols are strings of valid Unicode characters, except:
+Symbols are strings of valid Unicode characters (including Greek, Cyrillic,
+Hebrew, Arabic, mathematical symbols, Ideographic and CJK symbols and emojis), 
+except:
 
 <div class=symbols-table>
 
@@ -232,6 +237,7 @@ Symbols are strings of valid Unicode characters, except:
 | **U+FFFF**               |                           |         |
 
 </div>
+
 
 In addition, the first character of a symbol should not be:
 
@@ -327,14 +333,14 @@ its arguments.
 
 ```typescript
 {
-    "fn": Expression[]
+    "fn": [Expression, ...Expression[]]
 }
 ```
 
 The **head** of the function is the first element in the array. Its presence is
 required. It indicates the 'function name' or 'what' the function is about.
 
-The head is frequently is a string, but it can also be another expression.
+The head is frequently a string, but it can be another expression.
 
 Following the head are zero or more **arguments**, which are expressions as
 well. The arguments form the **tail** of the function.
@@ -359,6 +365,9 @@ For example these two expressions are equivalent:
 
 ["Cos", ["Add", "x", 1]]
 ```
+
+Note that an array representing a function must have at least one element,
+the head of the function. Therefore `[]` is not a valid expression.
 
 ## Dictionary
 
