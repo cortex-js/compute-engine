@@ -10,6 +10,7 @@ import {
   getArg,
   getTail,
   POWER,
+  SQUARE,
   MULTIPLY,
   ADD,
   MISSING,
@@ -52,6 +53,8 @@ export function degree(expr: Expression, sortedVars: string[]): number {
     return isFinite(exponent) ? exponent : 0;
   }
 
+  if (name == SQUARE) return 2;
+
   if (name === MULTIPLY) {
     let result = 0;
     getTail(expr).forEach((x) => {
@@ -78,6 +81,12 @@ function getDegree(expr: Expression, v: string): number {
     if (getSymbolName(getArg(expr, 1) ?? MISSING) === v) {
       const exponent = getNumberValue(getArg(expr, 2)) ?? NaN;
       if (isFinite(exponent)) return exponent;
+    }
+    return 0;
+  }
+  if (name == SQUARE) {
+    if (getSymbolName(getArg(expr, 1) ?? MISSING) === v) {
+      return 2;
     }
     return 0;
   }

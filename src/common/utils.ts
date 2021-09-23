@@ -32,6 +32,7 @@ export const POWER = 'Power';
 export const PRIME = 'Prime';
 export const ROOT = 'Root';
 export const SQRT = 'Sqrt';
+export const SQUARE = 'Square';
 export const SUBTRACT = 'Subtract';
 
 export const COMPLEX_INFINITY = 'ComplexInfinity';
@@ -453,6 +454,7 @@ export function getFunctionName<T extends number = number>(
   | typeof INVERSE_FUNCTION
   | 'LatexString'
   | typeof SQRT
+  | typeof SQUARE
   | typeof ROOT
   | typeof LIST
   | typeof MISSING
