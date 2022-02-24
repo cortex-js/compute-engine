@@ -39,13 +39,11 @@ utilities that parse LaTeX to MathJSON, serialize MathJSON to LaTeX, and provide
 a collection of functions for symbolic manipulation and numerical evaluations of
 MathJSON expressions.
 
-{% readmore "/compute-engine/guides/dictionaries/" %}
-Read more about <strong>MathJSON for LaTeX</strong>
-{% endreadmore %}
+{% readmore "/compute-engine/guides/dictionaries/" %} Read more about
+<strong>MathJSON for LaTeX</strong> {% endreadmore %}
 
-{% readmore "/compute-engine/" %}
-Read more about the <strong>Compute Engine</strong>
-{% endreadmore %}
+{% readmore "/compute-engine/" %} Read more about the <strong>Compute
+Engine</strong> {% endreadmore %}
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations
@@ -107,8 +105,8 @@ A MathJSON expression is a combination of **numbers**, **strings**, **symbols**,
 as an object literal with a `"num"`, `"str"`, `"sym"` or `"fn"` key,
 respectively, or as a short-hand notation using a JSON number, string or array.
 
-**Dictionaries** do not have a short-hand notation and are always expressed
-as an object literal with a `"dict"` key.
+**Dictionaries** do not have a short-hand notation and are always expressed as
+an object literal with a `"dict"` key.
 
 The short-hand notation is more concise and easier to read, but cannot include
 metadata properties.
@@ -134,18 +132,12 @@ value of the key is a string representation of the number.
 The string representing a number follows the
 [JSON syntax for number](https://tools.ietf.org/html/rfc7159#section-6).
 
-The values `NaN`, `+Infinity` and `-Infinity` are used to represent an
-undefined results, as per [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754),
-positive infinity and negative infinity, respectively.
+The range of MathJSON numbers may be greater than the range supported by
+[IEEE 754](https://en.wikipedia.org/wiki/IEEE_754) 64-bit float.
 
-When a number is outside the bounds of a JSON number (i.e. a 64-bit floating
-point representation), it is represented by a string of digits `0`...`9`,
-decimal point `.`, plus `+` and minus `-` sign and exponent sign `e`, followed
-by a letter:
-
-- `n` to indicate the number is a large integer (type `BigInt` in JavaScript)
-- `d` to indicate the number is an arbitrary precision floating point number
-  (decimal).
+The values `NaN`, `+Infinity` and `-Infinity` are used to represent an undefined
+result, as per [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754), positive
+infinity and negative infinity, respectively.
 
 ### JSON numbers
 
@@ -169,7 +161,7 @@ Specifically:
 
 {
   "num":
-    "3.141592653589793238462643383279502884197169399375105d"
+    "3.141592653589793238462643383279502884197169399375105"
 }
 
 
@@ -222,31 +214,27 @@ A MathJSON **symbol** is either:
 functions.
 
 Symbols are strings of valid Unicode characters (including Greek, Cyrillic,
-Hebrew, Arabic, mathematical symbols, Ideographic and CJK symbols and emojis), 
+Hebrew, Arabic, mathematical symbols, ideographic and CJK symbols and emojis),
 except:
 
 <div class=symbols-table>
 
-|                          |                           |         |
-| :----------------------- | :------------------------ | :------ |
-| **U+0000** to **U+0020** |                           |         |
-| **U+0022**               | **DOUBLE QUOTE**          | `"`     |
-| **U+005C**               | **REVERSE SOLIDUS**       | `\`     |
-| **U+0060**               | **GRAVE ACCENT** backtick | `` ` `` |
-| **U+FFFE**               |                           |         |
-| **U+FFFF**               |                           |         |
+| Codepoint                | Name                         |         |
+| :----------------------- | :--------------------------- | :------ |
+| **U+0000** to **U+0020** |                              |         |
+| **U+0022**               | **QUOTATION MARK**           | `"`     |
+| **U+0060**               | **GRAVE ACCENT**<br>backtick | `` ` `` |
+| **U+FFFE**               | **BYTE ORDER MARK**          |         |
+| **U+FFFF**               | **INVALID BYTE ORDER MARK**  |         |
 
 </div>
 
-
-In addition, the first character of a symbol should not be:
+In addition, the first character of a symbol must not be:
 
 <div class=symbols-table>
 
-|            |                          |     |
+| Codepoint  | Name                     |     |
 | :--------- | :----------------------- | :-- |
-| **U+0021** | **EXCLAMATION MARK**     | `!` |
-| **U+0022** | **QUOTATION MARK**       | `"` |
 | **U+0021** | **EXCLAMATION MARK**     | `!` |
 | **U+0022** | **QUOTATION MARK**       | `"` |
 | **U+0023** | **NUMBER SIGN**          | `#` |
@@ -284,12 +272,24 @@ These four strings represent the same symbol:
 - `"\u0041\u030a"` **LATIN CAPITAL LETTER A** + **COMBINING RING ABOVE** `A‌` +
   ` ̊`
 
-The following naming convention are recommended.
+The following naming convention for wildcards, variables, constants and
+functions are recommendations.
 
-### Patterns
+### Wildcards
 
-Symbols that begin with **U+005F LOW LINE** `_` (underscore) are reserved to
-denote wildcards and other placeholders.
+Symbols that begin with **U+005F LOW LINE** `_` (underscore) should be used to
+denote wildcards and other placeholders:
+
+<div class=symbols-table>
+
+| Wildcards |                                              |
+| :-------: | :------------------------------------------- |
+|    `_`    | Wildcard for a single symbol                 |
+|   `__`    | Wildcard for a sequence of 1 or more symbols |
+|   `___`   | Wildcard for a sequence of 0 or more symbols |
+|   `_a`    | Capturing wildcard named `a`                 |
+
+</div>
 
 ### Variables
 
@@ -297,26 +297,57 @@ denote wildcards and other placeholders.
   (`a`-`z` or `A`-`Z`)
 - Subsequent characters should be a letter, digit (`0`-`9`) or underscore (`_`).
 
-  So for example use, `Gamma` rather than `ɣ` and `Total` rather than **U+2211
-  N-ARY SUMMATION** `∑`, which looks like **U+03A3 GREEK CAPITAL LETTER SIGMA**
-  `Σ`. This visual ambiguity of some Unicode symbols frequently used in math is
-  why we recommend a more restricted character set.
+  For example, it is recommended to us `gamma` rather than `ɣ` and `Total`
+  rather than **U+2211 N-ARY SUMMATION** `∑`, which looks like **U+03A3 GREEK
+  CAPITAL LETTER SIGMA** `Σ`. Using a more limited set of common characters
+  avoids visual ambiguity issues that might otherwise arise with some Unicode
+  symbols.
 
 - If a variable is made of several words, use camelCase, i.e. `newDeterminant`
 - Prefer clarity over brevity and avoid obscure abbreviations.
 
   Use `newDeterminant` rather than `newDet` or `nDet`
 
-- The following variables are usually real numbers: `x`, `y`, `t`
-- The following variables are usually integers: `i`, `n`, `p`, `q`
-- The following variables are usually complex numbers: `z`, `w`
-- The following variables are usually lists: `xs`, `ys`, `ns`
-
 ### Constants
 
 - The first character of a constant should be an uppercase letter `A`-`Z`
 - Subsequent characters should be a letter, digit `0`-`9` or underscore `_`.
 - If a constant is made up of several words, use camelCase, e.g. `SpeedOfLight`
+
+### Rendering Conventions
+
+The following recommendations may be followed by clients displaying MathJSON
+symbols. They do not affect computation or manipulation of expressions following
+these conventions.
+
+- Multi-letter variables, that is symbols with more than one character, may be
+  rendered in LaTeX with a `\mathit{}` or `\mathrm{}` command.
+- Symbol names containing a `_` may be split in a suffix (part before the `_`)
+  and a prefix (part after the `_`) and the prefix may be displayed as a
+  subscript of the suffix. A symbol fragment is either the entire symbol, or a
+  suffix or a prefix of a symbol.
+- The following common names, when they appear as a fragment, may be replaced
+  with a corresponding LaTeX command: `alpha`, `beta`, `gamma`, `Gamma`,
+  `delta`, `Delta`, `epsilon`, `zeta`, `eta`, `theta`, `Theta`, `iota`, `kappa`,
+  `lambda`, `Lambda`, `mu`, `nu`, `xi`, `Xi`, `pi`, `Pi`, `rho`, `sigma`,
+  `Sigma`, `tau`, `upsilon`, `phi`, `Phi`, `varphi`, `chi`, `psi`, `Psi`,
+  `omega`, `Omega`, `aleph`, `ast`, `blacksquare`, `bot`, `bullet`, `circ`,
+  `diamond`, `times`, `top`, `square`, `star`.
+- Symbol fragments ending in digits may be displayed with a corresponding
+  subscript
+
+<div class=symbols-table>
+
+|  Symbol   | LaTeX                  |                               |
+| :-------: | :--------------------- | ----------------------------- |
+|  `time`   | `\mathit{time}`        | \\( \mathit{time} \\)         |
+|  `alpha`  | `\alpha`               | \\( \alpha \\)                |
+|   `m56`   | `m_{56}`               | \\( m\_{56} \\)               |
+| `alpha0`  | `\alpha_0`             | \\( \alpha_0 \\)              |
+| `m56_max` | `m_{56_{\mathit{max}}` | \\( m*{56*{\mathit{max}}} \\) |
+|  `c_max`  | `c_{\mathit{max}}`     | \\( c\_{\mathit{max}} \\)     |
+
+</div>
 
 ## Functions
 
@@ -340,7 +371,9 @@ its arguments.
 The **head** of the function is the first element in the array. Its presence is
 required. It indicates the 'function name' or 'what' the function is about.
 
-The head is frequently a string, but it can be another expression.
+The head is frequently a string, but it can be another expression. If it is a
+string, it should follow the conventions for constants in the section above on
+Symbols.
 
 Following the head are zero or more **arguments**, which are expressions as
 well. The arguments form the **tail** of the function.
@@ -366,8 +399,8 @@ For example these two expressions are equivalent:
 ["Cos", ["Add", "x", 1]]
 ```
 
-Note that an array representing a function must have at least one element,
-the head of the function. Therefore `[]` is not a valid expression.
+Note that an array representing a function must have at least one element, the
+head of the function. Therefore `[]` is not a valid expression.
 
 ## Dictionary
 
