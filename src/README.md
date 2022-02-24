@@ -130,14 +130,36 @@ value of the key is a string representation of the number.
 ```
 
 The string representing a number follows the
-[JSON syntax for number](https://tools.ietf.org/html/rfc7159#section-6).
+[JSON syntax for number](https://tools.ietf.org/html/rfc7159#section-6), with
+the following differences.
 
-The range of MathJSON numbers may be greater than the range supported by
-[IEEE 754](https://en.wikipedia.org/wiki/IEEE_754) 64-bit float.
+The range or precision of MathJSON numbers may be greater than the range and
+precision supported by [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754) 64-bit
+float.
 
 The values `NaN`, `+Infinity` and `-Infinity` are used to represent an undefined
 result, as per [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754), positive
 infinity and negative infinity, respectively.
+
+The following characters in the string are ignored:
+
+<div class=symbols-table>
+
+|            |                       |
+| :--------- | :-------------------- |
+| **U+0009** | **TAB**               |
+| **U+000A** | **LINE FEED**         |
+| **U+000B** | **VERTICAL TAB**      |
+| **U+000C** | **FORM FEED**         |
+| **U+000D** | **CARRIAGE RETURN**   |
+| **U+0020** | **SPACE**             |
+| **U+00A0** | **UNBREAKABLE SPACE** |
+
+</div>
+
+If the string ends with the pattern `/\([0-9]+\)/` (that is a series of one or
+more digits enclosed in parentheses), that pattern should be interpreted as
+repeating digits.
 
 ### JSON numbers
 
@@ -148,7 +170,7 @@ Specifically:
 
 - the number has to be in the range \\([-(2^{53})+1, (2^{53})-1]\\) to fit in a
   64-bit float (**IEEE 754-2008**, 52-bit, about 15 digits of precision).
-- the number has to be finite: it cannot be `Infinity`, `-Infinity` or `NaN`.
+- the number has to be finite: it cannot be `+Infinity`, `-Infinity` or `NaN`.
 
 ### Examples
 
