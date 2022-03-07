@@ -227,7 +227,7 @@ describe('ORDER', () => {
 
   test(`Canonical form 'x^2y^3+x^3y^2+xy^4+x^4y+x^2y^2'`, () => {
     expect(expression('x^2y^3+x^3y^2+xy^4+x^4y+x^2y^2')).toMatchInlineSnapshot(
-      `['Add', ['Multiply', ['Power', 'x', 4], 'y'], ['Multiply', 'x', ['Power', 'y', 4]], ['Multiply', ['Power', 'x', 3], ['Square', 'y']], ['Multiply', ['Square', 'x'], ['Power', 'y', 3]], ['Multiply', ['Square', 'x'], ['Square', 'y']]]`
+      `['Add', ['Multiply', ['Power', 'x', 4], 'y'], ['Multiply', ['Power', 'x', 3], ['Square', 'y']], ['Multiply', ['Square', 'x'], ['Power', 'y', 3]], ['Multiply', 'x', ['Power', 'y', 4]], ['Multiply', ['Square', 'x'], ['Square', 'y']]]`
     );
   });
 
@@ -241,7 +241,7 @@ describe('ORDER', () => {
     expect(
       expression('(b^3b^2)+(a^3a^2)+(b^6)+(a^5b)+(a^5)')
     ).toMatchInlineSnapshot(
-      `['Add', ['Multiply', ['Power', 'a', 5], 'b'], ['Power', 'b', 6], ['Power', 'a', 5], ['Multiply', ['Square', 'a'], ['Power', 'a', 3]], ['Multiply', ['Square', 'b'], ['Power', 'b', 3]]]`
+      `['Add', ['Multiply', ['Power', 'a', 5], 'b'], ['Power', 'b', 6], ['Multiply', ['Square', 'a'], ['Power', 'a', 3]], ['Power', 'a', 5], ['Multiply', ['Square', 'b'], ['Power', 'b', 3]]]`
     );
   });
 
@@ -250,6 +250,37 @@ describe('ORDER', () => {
       `['Add', ['Multiply', 2, ['Power', 'b', 8]], ['Multiply', 5, ['Power', 'a', 4], ['Square', 'c']], ['Multiply', 7, 'a', ['Power', 'b', 3]]]`
     );
   });
+
+  test(`Canonial form 'x^2+x^3+x'`, () => {
+    expect(expression('x^2+x^3+x')).toMatchInlineSnapshot(
+      `['Add', ['Power', 'x', 3], ['Square', 'x'], 'x']`
+    )
+  })
+
+  test(`Canonical form '(b^3b^3)+(a^3a^3)+(b^6)+(a^5b)+(a^5)'`, () => {
+    expect(
+      expression('(b^3b^3)+(a^3a^3)+(b^6)+(a^5b)+(a^5)')
+    ).toMatchInlineSnapshot(
+      `['Add', ['Multiply', ['Power', 'a', 3], ['Power', 'a', 3]], ['Multiply', ['Power', 'a', 5], 'b'], ['Multiply', ['Power', 'b', 3], ['Power', 'b', 3]], ['Power', 'b', 6], ['Power', 'a', 5]]`
+    );
+  });
+
+  test(`Canonical form 'x^2+x^3+\\sin(x)'`, () => {
+    expect(
+      expression('x^2+x^3+\\sin(x)')
+    ).toMatchInlineSnapshot(
+      `['Add', ['Power', 'x', 3], ['Square', 'x'], ['Sin', 'x']]`
+    )
+  })
+
+  // Below expression with aboive expression must have same canoical form
+  test(`Canonical form '\\sin(x)+x^2+x^3'`, () => {
+    expect(
+      expression('\\sin(x)+x^2+x^3')
+    ).toMatchInlineSnapshot(
+      `['Add', ['Power', 'x', 3], ['Square', 'x'], ['Sin', 'x']]`
+    )
+  })
 });
 
 describe('OBJECT LITERAL FORM', () => {
