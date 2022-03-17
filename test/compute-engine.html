@@ -36,8 +36,8 @@
     .latex {
       padding: 10px;
       border-radius: 5px;
-      border: 1px solid #ddd;
-      background: #fdfdfd;
+      border: 1px solid var(--secondary-surface-border);
+      background: var(--secondary-surface);
       width: 100%;
       margin-right: .5em;
     }
@@ -161,9 +161,9 @@
 </head>
 
 <body>
-  <svg xmlns="http://www.w3.org/2000/svg" style='display:none'>
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
   <defs>
-    <symbol id='info-circle' aria-hidden="true" focusable="false" data-prefix="fal" data-icon="info-circle" class="svg-inline--fa fa-info-circle fa-w-16" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="currentColor" d="M256 40c118.621 0 216 96.075 216 216 0 119.291-96.61 216-216 216-119.244 0-216-96.562-216-216 0-119.203 96.602-216 216-216m0-32C119.043 8 8 119.083 8 256c0 136.997 111.043 248 248 248s248-111.003 248-248C504 119.083 392.957 8 256 8zm-36 344h12V232h-12c-6.627 0-12-5.373-12-12v-8c0-6.627 5.373-12 12-12h48c6.627 0 12 5.373 12 12v140h12c6.627 0 12 5.373 12 12v8c0 6.627-5.373 12-12 12h-72c-6.627 0-12-5.373-12-12v-8c0-6.627 5.373-12 12-12zm36-240c-17.673 0-32 14.327-32 32s14.327 32 32 32 32-14.327 32-32-14.327-32-32-32z"></path></svg>
+    <symbol id="info-circle" aria-hidden="true" focusable="false" data-prefix="fal" data-icon="info-circle" class="svg-inline--fa fa-info-circle fa-w-16" role="img" xmlns="http://www.w3.org/2000/svg" viewbox="0 0 512 512"><path fill="currentColor" d="M256 40c118.621 0 216 96.075 216 216 0 119.291-96.61 216-216 216-119.244 0-216-96.562-216-216 0-119.203 96.602-216 216-216m0-32C119.043 8 8 119.083 8 256c0 136.997 111.043 248 248 248s248-111.003 248-248C504 119.083 392.957 8 256 8zm-36 344h12V232h-12c-6.627 0-12-5.373-12-12v-8c0-6.627 5.373-12 12-12h48c6.627 0 12 5.373 12 12v140h12c6.627 0 12 5.373 12 12v8c0 6.627-5.373 12-12 12h-72c-6.627 0-12-5.373-12-12v-8c0-6.627 5.373-12 12-12zm36-240c-17.673 0-32 14.327-32 32s14.327 32 32 32 32-14.327 32-32-14.327-32-32-32z"></path>
    </symbol>
     </defs>
   </svg>
@@ -172,8 +172,8 @@
     <h1>Compute Engine REPL</h1>
   </header>
   <main>
-    <div class='row'>
-      <div id='input-label'>a = </div>
+    <div class="row">
+      <div id="input-label">expr = </div>
       <math-field id="mf" class="mathfield" tabindex="0" virtual-keyboard-mode="manual">
         <!-- 1 + 2  -->
         <!-- 2+3.001 -->
@@ -244,64 +244,94 @@
     <!-- \int (x^2 + x) dx = 0 -->
 
     <!-- <div class='output-section is-visible'>
-      <div class='row'><div class="output" id="latex"></div></div>
+      <div class="row"><div class="output" id="latex"></div></div>
     </div> -->
 
     <div>
       <h2>Assumptions</h2>      
-      <div id=assumptions></div>
+      <div id="assumptions"></div>
     </div>
 
 
     <!-- <h2>Input ASCIIMath</h2>
     <div class="output" id="asciimath"></div> -->
 
-    <!-- <div class="output-section" id='raw-form'>
+    <!-- <div class="output-section" id="raw-form">
       <h2>Raw Form</h2>
       <div class="output mathjson"></div>  
     </div> -->
 
     <div class="output-section" id="json-form">
-      <h2><code>format(a, ['json'])</code></code></h2>
-      <div class='row'>
+      <h2><code>expr.json</code></h2>
+      <div class="row">
         <div class="latex"></div>
-        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+        <button class="toggle"><svg><use xlink:href="#info-circle" /></svg></button>
       </div>
       <div class="output mathjson"></div>  
     </div>
 
     <div class="output-section" id="canonical-form">
-      <h2><code>canonical(a)</code></h2>
-      <div class='row'>
+      <h2><code>expr.canonical</code></h2>
+      <div class="row">
         <div class="latex"></div>
-        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+        <button class="toggle"><svg><use xlink:href="#info-circle" /></svg></button>
       </div>
       <div class="output mathjson"></div>
     </div>
 
     <div class="output-section" id="domain">
-      <h2><code>domain(a)</code></h2>
-      <div class='row'>
+      <h2><code>expr.domain</code></h2>
+      <div class="row">
         <div class="latex"></div>
-        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+        <button class="toggle"><svg><use xlink:href="#info-circle" /></svg></button>
       </div>
       <div class="output mathjson"></div>
     </div>
 
 
     <div class="output-section" id="simplify">
-      <h2><code>simplify(a)</code></h2>
-      <div class='row'>
+      <h2><code>expr.simplify()</code></h2>
+      <div class="row">
         <div class="latex"></div>
-        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+        <button class="toggle"><svg><use xlink:href="#info-circle" /></svg></button>
       </div>
       <div class="output mathjson"></div>
     </div>
 
 
+    <div class="output-section" id="evaluate">
+      <h2><code>expr.evaluate()</code></h2>
+      <div class="row">
+        <div class="latex"></div>
+        <button class="toggle"><svg><use xlink:href="#info-circle" /></svg></button>
+      </div>
+      <div class="output mathjson"></div>
+    </div>
+
+    <div class="output-section" id="expand">
+      <h2><code>Expand()</code></h2>
+      <div class="row">
+        <div class="latex"></div>
+        <button class="toggle"><svg><use xlink:href="#info-circle" /></svg></button>
+      </div>
+      <div class="output mathjson"></div>
+    </div>
+
+
+    <div class="output-section" id="solve">
+      <div class="row">
+        <code class="label">solve(f, ["x"]))&nbsp;=&nbsp;</code>
+        <math-field class="latex" read-only></math-field>
+        <button class="toggle"><svg><use xlink:href="#info-circle" /></svg></button>
+      </div>
+      <div class="output mathjson toggle-field"></div>
+    </div>
+
+
+
     <div class="output-section" id="evaluate-numerically">
-      <h2><code>N(a)</code></h2>
-      <div class='row'>
+      <h2><code>expr.N()</code></h2>
+      <div class="row">
         <div class="segmented-control" style="--segments: 4">
           <input type="radio" name="numeric-format" value="auto" id="numeric-format-auto" checked />
           <label for="numeric-format-auto">auto</label>
@@ -313,30 +343,15 @@
           <label for="numeric-format-complex">complex</label>
         </div>      
       </div>
-      <div class='row'>
+      <div class="row">
         <div class="latex"></div>
-        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
+        <button class="toggle"><svg><use xlink:href="#info-circle" /></svg></button>
       </div>
       <div class="output mathjson"></div>
     </div>
 
-    <div class="output-section" id="evaluate">
-      <h2><code>evaluate(a)</code></h2>
-      <div class='row'>
-        <div class="latex"></div>
-        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
-      </div>
-      <div class="output mathjson"></div>
-    </div>
 
-    <div class="output-section" id="solve">
-      <div class='row'>
-        <code class="label">solve(f, ["x"]))&nbsp;=&nbsp;</code>
-        <math-field class="latex" read-only></math-field>
-        <button class='toggle'><svg><use xlink:href='#info-circle' /></svg></button>
-      </div>
-      <div class="output mathjson toggle-field"></div>
-    </div>
+
 
   </main>
 
@@ -344,7 +359,7 @@
     import { convertLatexToMarkup } from 
       'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
     import { 
-      LatexSyntax, ComputeEngine, match 
+       ComputeEngine 
     } from '../dist/compute-engine.esm.js';
 
     const MAX_LINE_LENGTH = 64;
@@ -356,56 +371,37 @@
       x.addEventListener('click', (evt) => {
         if (evt.target.id === 'numeric-format-auto') {
           ce.numericFormat = 'auto';
+          ce.precision = 200;
         } else if (evt.target.id === 'numeric-format-machine') {
           ce.numericFormat = 'machine';
+          ce.precision = 15;
         } else if (evt.target.id === 'numeric-format-decimal') {
           ce.numericFormat = 'decimal';
-          ce.precision = 1000;
+          ce.precision = 200;
         } else if (evt.target.id === 'numeric-format-complex') {
           ce.numericFormat = 'complex';
+          ce.precision = 15;
         }
-        defaultLatex.options.precision = ce.precision;
+        // defaultLatex.options.precision = ce.precision;
         updateContent(mf);
       });
     });
+
     let errors = [];
-    const defaultLatex = new LatexSyntax(
-      {
-        onError: (err) => {
-          if (err.before && err.after) {
-            errors.push(err.code +
-              (err.arg ? ': ' + err.arg : '') +
-              '\n' +
-              '|  ' +
-              err.before +
-              err.after +
-              '\n' +
-              '|  ' +
-              String(' ').repeat(err.before.length) +
-              '▲',
-            )
-          } else {
-            errors.push(err.code +
-              (err.arg ? ': ' + err.arg : '')
-            )
-          }
-        }
-      });
-
-    const rawLatex = new LatexSyntax(
-      {
-        invisibleOperator: '',
-        invisiblePlusOperator: '',
-        dictionary: [],
-        parseUnknownToken: () => 'symbol',
-
-        parseArgumentsOfUnknownLatexCommands: true,
-        parseNumbers: false,
-        onError: (err) =>
-          errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
-      });
 
     const ce = new ComputeEngine();
+    // const rawLatex = new LatexSyntax({
+    //   invisibleOperator: '',
+    //   invisiblePlusOperator: '',
+    //   dictionary: [],
+    //   computeEngine: ce,
+    //   parseUnknownToken: () => 'symbol',
+
+    //   parseArgumentsOfUnknownLatexCommands: true,
+    //   parseNumbers: false,
+    //   onError: (err) =>
+    //     errors.push(err.code + (err.arg ? ' ' + err.arg : '')),
+    // });
 
     // console.log(ce.is(['Element', 2, ['Interval', 1, 5]]));
     // console.log(ce.solve(parse('3x^2+2x-1'), 'x'));
@@ -416,7 +412,7 @@
     mf.addEventListener('input', (ev) => updateContent(mf));
     updateContent(mf);
 
-    async function updateContent(mf) {
+   function updateContent(mf) {
       const latex = mf.getValue('latex-expanded');
       let expr;
       try {
@@ -431,66 +427,74 @@
 
         errors = [];
 
-        expr = defaultLatex.parse(latex);
+        expr = ce.parse(latex);
       } catch (e) {
         console.error("parse(%c " + latex + '%c) ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
-      try {
-        const canonicalExpr = ce.format(expr, ['canonical']);
 
+      try {
+        updateExpr(expr, 'json-form');
+      } catch (e) {
+        console.error("format(%c " + latex + '%c, [\'json\']) ' +
+          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      }
+
+      const canonicalExpr = expr.canonical;
+      try {
         updateExpr(canonicalExpr, 'canonical-form');
       } catch (e) {
         console.error("canonical(%c " + latex + '%c) ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
 
+
       // try {
-      //   updateExpr(ce.format(expr, ['json']), 'json-form');
-      // } catch (e) {
-      //   console.error("format(%c " + latex + '%c, [\'json\']) ' +
+      //   updateExpr(rawLatex.parse(latex));
+      //   } catch (e) {
+      //   console.error("rawLatex.parse(%c " + latex + '%c) ' +
       //     e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       // }
 
       try {
-        updateExpr(ce.format(rawLatex.parse(latex), ['json']), 
-          'raw-form');
-        } catch (e) {
-        console.error("rawLatex.parse(%c " + latex + '%c) ' +
-          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
-      }
-
-      try {
-        updateExpr(ce.domain(expr), 'domain');
+        updateExpr(canonicalExpr.domain, 'domain');
       } catch (e) {
         console.error("domain(%c " + latex + '%c) ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
 
       try {
-        updateExpr(ce.simplify(expr), 'simplify');
+        updateExpr(canonicalExpr.simplify(), 'simplify');
       } catch (e) {
         console.error("simplify(%c " + latex + '%c) ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
 
       try {
-        updateExpr(ce.N(expr), 'evaluate-numerically');
+        updateExpr(canonicalExpr.N(), 'evaluate-numerically');
       } catch (e) {
         console.error("N(%c " + latex + '%c) ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
 
       try {
-        updateExpr(await ce.evaluate(expr), 'evaluate');
+        updateExpr(canonicalExpr.evaluate(), 'evaluate');
       } catch (e) {
         console.error("evaluate(%c " + latex + '%c) ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
       try {
-        updateExpr(await ce.solve(expr, ['x']), 'solve');
+        updateExpr(canonicalExpr.solve(['x']), 'solve');
       } catch (e) {
         console.error("solve(%c " + latex + '%c, ["x"]) ' +
+          e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+      }
+
+      try {
+        const e = ce.box(['Expand', canonicalExpr]);
+        updateExpr(e.evaluate(), 'expand');
+      } catch (e) {
+        console.error("expand(%c " + latex + '%c, ["x"]) ' +
           e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
       }
 
@@ -514,10 +518,9 @@
           errors.join('<br>') + '</div>';
       }
       const latexEl = el.querySelector('.latex');
-      if (latexEl) {
-        latexEl.innerHTML =
-          convertLatexToMarkup(defaultLatex.serialize(expr));
-      }
+      if (latexEl && expr) {
+        latexEl.innerHTML =  convertLatexToMarkup(expr.latex);
+      } else latexEl.innerHTML = '';
 
       errors = [];
     }
@@ -556,7 +559,7 @@
       'domain', 
       'simplify', 
       'evaluate-numerically', 
-      'evaluate', 'solve'].forEach(id => {
+      'evaluate', 'solve', 'expand'].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         const toggle = el.querySelector('.toggle');
@@ -592,7 +595,8 @@
     }
 
     function exprToString(expr) {
-      return escapeHtml(exprToStringRecursive(expr, 0));
+      if (!expr) return '';
+      return escapeHtml(exprToStringRecursive(expr.json, 0));
     }
 
 
@@ -605,7 +609,7 @@
     document.getElementById('assumptions').innerHTML = 
       '' + 
        [...ce.assumptions].map(([assumption, val]) => { 
-         return convertLatexToMarkup(defaultLatex.serialize(assumption)) + 
+         return convertLatexToMarkup(assumption.latex) + 
           '<span>' + (val ?  '': ' is false') + '</span>'
         }
       ).join(', ') +

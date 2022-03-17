@@ -1,18 +1,13 @@
 import {
-  applyRecursively,
-  getFunctionName,
-  getSymbolName,
-  getTail,
-  isAtomic,
-} from '../common/utils';
-import { Expression, Substitution } from '../math-json/math-json-format';
-import { match, substitute } from './patterns';
-import {
-  ComputeEngine,
-  Numeric,
+  BoxedExpression,
+  BoxedRule,
+  IComputeEngine,
   Rule,
-  RuleSet,
-} from '../math-json/compute-engine-interface';
+  BoxedRuleSet,
+  Substitution,
+  ReplaceOptions,
+} from './public';
+import { getVars, isLatexString, latexString } from './boxed-expression/utils';
 
 // @future Generator functions
 // export function fixPoint(rule: Rule);
@@ -20,136 +15,161 @@ import {
 
 // @future load rules from JSONC
 // - describe conditions with a condition expression:
-//    "isInteger(x) && isFreeOf(y, x)"
+//    "x.isInteger && y.isFreeOf('x')"
 //  or"x:integer && y:freeOf(x)"
 // function parseCondition(s:string, lhs: (sub)=> boolean) =>
 //    [rest: string, fn: (sub) => boolean]
 
 // @future: priority for rules, sort and apply rules by priority
 
-// @todo don't hardcode the SUBS
-const SUBS = {
-  x: '_x',
-  y: '_y',
-  z: '_z',
-  a: '_a',
-  b: '_b',
-  c: '_c',
-  m: '_m',
-  n: '_n',
-  i: '_i',
-  j: '_j',
-};
+export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
+  const result = new Set<BoxedRule>();
+  for (const [rawLhs, rawRhs, options] of rs) {
+    // Any unbound variables in the `lhs` is used as a wildcard
+    let lhs = ce.pattern(rawLhs);
+    const wildcards = {};
+    for (const v of getVars(lhs)) wildcards[v] = ce.symbol('_' + v);
+    lhs = lhs.subs(wildcards);
 
-export function rules<T extends number = Numeric>(
-  ce: ComputeEngine<T>,
-  rs: Iterable<Rule>
-): RuleSet {
-  const result = new Set<Rule>();
-  for (const [lhs, rhs, condition] of rs) {
-    // The `lhs` when given as an expression (and not a LaTeX string)
-    // may not be in canonical form: this is used to rewrite some non-canonical
-    // expression to canonical form.
-    const xlhs =
-      typeof lhs === 'string'
-        ? ce.canonical(substituteSymbols(ce.parse(lhs), SUBS))
-        : substituteSymbols(lhs, SUBS);
-    const xrhs =
-      typeof rhs === 'string'
-        ? ce.canonical(substituteSymbols(ce.parse(rhs), SUBS))
-        : substituteSymbols(rhs, SUBS);
+    // Normalize the condition to a function
+    let cond: undefined | ((x: Substitution) => boolean);
+    const latex = latexString(options?.condition);
+    if (latex) {
+      // Substitute any unbound vars in the condition to a wildcard
+      const condPattern = ce.parse(latex)!.subs(wildcards);
+      cond = (x: Substitution): boolean =>
+        condPattern.subs(x).value?.symbol === 'True';
+    } else cond = options?.condition as (x: Substitution) => boolean;
 
-    if (typeof condition === 'function' || typeof condition === 'undefined') {
-      result.add([xlhs, xrhs, condition]);
-    } else if (typeof condition === 'string') {
-      const xcond = ce.parse(condition);
-      result.add([
-        xlhs,
-        xrhs,
-        (ce: ComputeEngine, sub: Substitution) =>
-          ce.is(substitute(xcond, sub)) ?? false,
-      ]);
+    const rhs = isLatexString(rawRhs) ? ce.parse(rawRhs) : ce.box(rawRhs);
+    if (!rhs) {
+      console.error('Invalid rhs');
+      continue;
     }
+    result.add([lhs, rhs.subs(wildcards), options?.priority ?? 0, cond]);
   }
   return result;
 }
 
-function substituteSymbols<T extends number = Numeric>(
-  expr: Expression<T>,
-  sub: Substitution<T>
-): Expression<T> {
-  for (const [symbol, replacement] of Object.entries(sub)) {
-    console.assert(typeof replacement === 'string');
-    expr = substituteSymbol<T>(expr, symbol, replacement as string);
-  }
-  return expr;
-}
-
-function substituteSymbol<T extends number = Numeric>(
-  expr: Expression<T>,
-  symbol: string,
-  replacement: string
-): Expression<T> {
-  const sym = getSymbolName(expr);
-  if (sym === symbol) return replacement;
-  const name = getFunctionName(expr);
-  if (name === symbol) {
-    return [replacement, getTail(expr)];
-  }
-  if (isAtomic(expr)) return expr;
-  return applyRecursively(expr, (x) =>
-    substituteSymbol(x, symbol, replacement)
-  );
-}
-
-export function applyRule<T extends number = Numeric>(
-  ce: ComputeEngine<T>,
-  [lhs, rhs, condition]: Rule<T>,
-  expr: Expression<T>
-): Expression<T> | null {
-  const sub = match(expr, lhs);
+function applyRule(
+  [lhs, rhs, _priority, condition]: BoxedRule,
+  expr: BoxedExpression,
+  options?: ReplaceOptions
+): BoxedExpression | null {
+  const sub = lhs.match(expr, options);
+  // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return null;
 
-  if (typeof condition === 'function' && !condition(ce, sub)) return null;
+  // If the condition doesn't match, the rule doesn't apply
+  if (typeof condition === 'function' && !condition(sub)) return null;
 
-  console.log('Applying rule ', ce.serialize(lhs), '->', ce.serialize(rhs));
+  // @debug
+  // console.log('Applying rule ', lhs.latex, '->', rhs.latex);
 
-  return substitute<T>(rhs, sub);
+  return rhs.subs(sub);
 }
 
 /**
- * Repeatedely apply rules in the ruleset until no rules apply
+ * Apply the rules in the ruleset and return a modified expression.
+ *
+ * If no rule applied, return `null`.
  */
-export function replace<T extends number = Numeric>(
-  ce: ComputeEngine,
-  expr: Expression<T>,
-  rules: RuleSet
-): Expression<T> | null {
+export function replace(
+  expr: BoxedExpression,
+  ruleSet: BoxedRuleSet,
+  options?: ReplaceOptions
+): BoxedExpression | null {
+  const iterationLimit = options?.iterationLimit ?? 1;
+  let iterationCount = 0;
+  const once = options?.once ?? false;
+
   let done = false;
-  let iter = 0;
-  while (!done) {
-    done = true;
-    for (const rule of rules) {
-      const result = applyRule(ce, rule, expr);
-      if (result !== null) {
-        done = false;
-        expr = result;
-      }
-    }
-    iter += 1;
-    if (iter > ce.iterationLimit) {
-      console.log('replace(): Maximum iteration exceeded');
-      debugger;
-      window['foo'].bar = 0;
+  let atLeastOneRule = false;
+  try {
+    while (!done && iterationCount < iterationLimit) {
       done = true;
+      for (const rule of ruleSet) {
+        const result = applyRule(rule, expr, options);
+        if (result !== null && result !== expr) {
+          // If once flag is set, bail on first matching rule
+          if (once) return result;
+          done = false;
+          atLeastOneRule = true;
+          expr = result;
+        }
+      }
+      iterationCount += 1;
     }
+  } catch (e) {
+    console.error(e);
   }
-  return expr;
+  return atLeastOneRule ? expr : null;
+}
+
+/**
+ * Substitute some symbols with an expression.
+ *
+ * This is applied recursively to all subexpressions.
+ *
+ * While `replace()` applies a rule which may include expressions in
+ * its `lhs` to an expression, `substitute` is a specialized version
+ * that only apply rules that have a `lhs` made of a symbol.
+ */
+// export function substitute(
+//   expr: BoxedExpression,
+//   substitution: Substitution
+// ): Pattern {
+//   //
+//   // Symbol
+//   //
+//   const symbol = expr.symbol;
+//   if (symbol !== null) return expr.engine.pattern(substitution[symbol] ?? expr);
+
+//   const ce = expr.engine;
+
+//   //
+//   // Dictionary
+//   //
+//   const keys = expr.keys;
+//   if (keys !== null) {
+//     const result = {};
+//     for (const key of keys) result[key] = substitute(keys[key], substitution);
+
+//     return ce.pattern({ dict: result });
+//   }
+
+//   // Not a function (or a dictionary or a symbol) => atomic
+//   if (expr.ops === null) return ce.pattern(expr);
+
+//   //
+//   // Function
+//   //
+//   const tail: SemiBoxedExpression = [];
+//   for (const arg of expr.ops) {
+//     const symbol = arg.symbol;
+//     if (symbol !== null && symbol.startsWith('__')) {
+//       // Wildcard sequence: `__` or `___`
+//       const seq = substitution[getWildcardName(symbol)];
+//       if (seq === undefined || seq.head !== 'Sequence') {
+//         tail.push(symbol);
+//       } else {
+//         tail.push(...seq.ops!);
+//       }
+//     } else {
+//       tail.push(substitute(arg, substitution));
+//     }
+//   }
+
+//   return ce.pattern(ce.fn(substitute(ce.box(expr.head), substitution), tail));
+// }
+
+export function getWildcardName(s: string): string {
+  const m = s.match(/^__?_?([a-zA-Z0-9]+)/);
+  if (m === null) return '';
+  return m[1];
 }
 
 // @todo ['Alternatives', ...]:
 // @todo: ['Condition',...] : Conditional match
 // @todo: ['Repeated',...] : repeating match
 // @todo _x:Head or _x:RealNumber
-// replace() -> replace matching patterns with another expression
-// replaceAll(), replaceRepeated()

@@ -1,3 +1,5 @@
 {
-  "editor.formatOnSave": true
+  "editor.formatOnSave": true,
+  "cSpell.words": ["canonicalization", "canonicalize", "Mathematica", "nops"],
+  "editor.defaultFormatter": "esbenp.prettier-vscode"
 }

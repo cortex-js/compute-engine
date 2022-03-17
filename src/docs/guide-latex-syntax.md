@@ -13,9 +13,9 @@ The CortexJS Compute Engine manipulates MathJSON expressions. It can also
 convert LaTeX strings to MathJSON expressions (**parsing**) and output MathJSON
 expressions as LaTeX string (**serializing**).
 
-**To transform LaTeX to MathJSON**, use the `parse()` function.
+**To transform LaTeX to MathJSON**, call the `ce.parse()` function.
 
-**To transform MathJSON to LaTeX**, use the `serialize()` function.
+**To transform MathJSON to LaTeX**, read the `expr.latex` property.
 
 ```javascript
 import { parse, serialize } from '@cortex-js/compute-engine';
@@ -42,17 +42,17 @@ console.log(serialize(1/3, {
 // ➔ 0,333
 ```
 
-{% readmore "/docs/compute-engine/#(NumberFormattingOptions%3Atype)" %}
-Read more about <strong><kbd>NumberFormattingOptions</kbd></strong> which apply to both <kbd>parse()</kbd> and <kbd>serialize()</kbd>
-{% endreadmore %}
+{% readmore "/docs/compute-engine/#(NumberFormattingOptions%3Atype)" %} Read
+more about <strong><kbd>NumberFormattingOptions</kbd></strong> which apply to
+both <kbd>parse()</kbd> and <kbd>serialize()</kbd> {% endreadmore %}
 
-{% readmore "/docs/compute-engine/#(ParseLatexOptions%3Atype)" %}
-Read more about <strong><kbd>ParseLatexOptions</kbd></strong> which apply to <kbd>parse()</kbd>
-{% endreadmore %}
+{% readmore "/docs/compute-engine/#(ParseLatexOptions%3Atype)" %} Read more
+about <strong><kbd>ParseLatexOptions</kbd></strong> which apply to
+<kbd>parse()</kbd> {% endreadmore %}
 
-{% readmore "/docs/compute-engine/#(SerializeLatexOptions%3Atype)" %}
-Read more about <strong><kbd>SerializeLatexOptions</kbd></strong> which apply to <kbd>serialize()</kbd>
-{% endreadmore %}
+{% readmore "/docs/compute-engine/#(SerializeLatexOptions%3Atype)" %} Read more
+about <strong><kbd>SerializeLatexOptions</kbd></strong> which apply to
+<kbd>serialize()</kbd> {% endreadmore %}
 
 ## Advanced Usage
 
@@ -72,9 +72,8 @@ The `LatexSyntax` constructor can be passed some options to customize the
 parsing and serializing, as well as dictionaries defining the syntax and
 vocabulary.
 
-{% readmore "/compute-engine/guides/dictionaries/" %}
-Read more about **Dictionaries**
-{% endreadmore %}
+{% readmore "/compute-engine/guides/dictionaries/" %} Read more about
+**Dictionaries** {% endreadmore %}
 
 **To change the LaTeX syntax options after a `LatexSyntax` instance has been
 created**, change the `options` property.
@@ -144,6 +143,7 @@ const rawLatex = new LatexSyntax({
   parseUnknownToken: () => 'symbol',
   invisibleOperator: '',
   invisiblePlusOperator: '',
+  missingSymbol: '',
   dictionary: [],
   skipSpace: false,
 });

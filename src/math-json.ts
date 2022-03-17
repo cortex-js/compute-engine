@@ -6,35 +6,45 @@
 // **both** MathJSON and the Compute Engine.
 
 export type {
+  LatexToken,
+  ParseHandler,
+  SerializeHandler,
+  LatexDictionaryEntry,
+  LatexDictionary,
+  ParseLatexOptions,
+  SerializeLatexOptions,
+  NumberFormattingOptions,
+} from './compute-engine/latex-syntax/public';
+
+export { LatexSyntax } from './compute-engine/latex-syntax/latex-syntax';
+
+export type {
   Attributes,
   Expression,
+  MathJsonNumber,
   MathJsonSymbol,
   MathJsonString,
   MathJsonFunction,
   MathJsonDictionary,
 } from './math-json/math-json-format';
 
-export type {
-  RuntimeSignalCode,
-  SignalCode,
-  SignalMessage,
-  SignalOrigin,
-  Signal,
-  WarningSignal,
-  WarningSignalHandler,
-  ErrorCode,
-  LatexDictionary,
-  LatexDictionaryEntry,
-  LatexString,
-  LatexToken,
-  NumberFormattingOptions,
-  ParseLatexOptions,
-  ParserFunction,
-  SerializeLatexOptions,
-  SerializerFunction,
-} from './math-json/public';
-
-// MathJSON parse/serialize
-export { LatexSyntax } from './math-json/latex-syntax';
+export {
+  isAtomic,
+  isSymbolObject,
+  isStringObject,
+  isFunctionObject,
+  isDictionaryObject,
+  stringValue as getStringValue,
+  head,
+  headName,
+  symbol,
+  tail,
+  applyRecursively,
+  mapArgs,
+  op,
+  nops,
+  dictionary as getDictionary,
+  asValidJSONNumber,
+} from './math-json/utils';
 
 export const version = '{{SDK_VERSION}}';

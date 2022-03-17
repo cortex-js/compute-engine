@@ -7,6 +7,8 @@ const open = require('open');
 let server = null;
 
 const buildOptions = {
+  // debug: true,
+  // define: { DEBUG: false },
   format: 'esm',
   bundle: true,
   plugins: [],

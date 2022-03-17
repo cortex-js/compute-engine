@@ -25,22 +25,18 @@ Here are a few more examples:
 
 ```cortex
 Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
-// -> 4x^3 + 2x^2 + 3
+// ➔ 4x^3 + 2x^2 + 3
 
 x = 2^11 - 1
 "\(x) is a \(Domain(x))"
-// -> "2047 is a PrimeNumber"
+// ➔ "2047 is a PrimeNumber"
 ```
 
-{% readmore "/cortex/syntax/" %}
-Read more about the <strong>formal syntax of Cortex</strong>
-{% endreadmore %}
+{% readmore "/cortex/syntax/" %} Read more about the <strong>formal syntax of
+Cortex</strong> {% endreadmore %}
 
-{% readmore "/cortex/implementation/" %}
-Read more about the <strong>implementation of Cortex</strong>
-{% endreadmore %}
-
-
+{% readmore "/cortex/implementation/" %} Read more about the
+<strong>implementation of Cortex</strong> {% endreadmore %}
 
 ## Pragmas
 
@@ -310,7 +306,6 @@ The name of a symbol cannot contain any of the following characters:
 
 - **U+0000** to **U+0020**
 - **U+0022 QUOTATION MARK**: **`"`**
-- **U+005C REVERSE SOLIDUS** : **`\`**
 - **U+0060 GRAVE ACCENT** backtick : **`` ` ``**
 - **U+2028 LINE SEPARATOR**
 - **U+2029 PARAGRAPH SEPARATOR**

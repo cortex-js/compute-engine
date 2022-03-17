@@ -11,10 +11,9 @@ sidebar:
 
 ## Syntax and Symbol Dictionaries
 
-The <a href ="/math-json/format/">MathJSON format</a> is independent of any
-source or target language (LaTeX, MathASCII, etc...) or of any specific
-interpretation of the symbols used in a MathJSON expression (`"Pi"`, `"Sin"`,
-etc...).
+The <a href ="/math-json/">MathJSON format</a> is independent of any source or
+target language (LaTeX, MathASCII, etc...) or of any specific interpretation of
+the symbols used in a MathJSON expression (`"Pi"`, `"Sin"`, etc...).
 
 A **syntax dictionary** defines how a MathJSON expression can be expressed into
 a specific target language (**serialization**) or constructed from a source
@@ -54,20 +53,18 @@ functions its codomain.
 
 ## Functions
 
-A MathJSON function such as `Add`, `Sin` or `Equal` can be used for a variety
-of purposes. It can be helpful to classify them in some broad categories:
-
+A MathJSON function such as `Add`, `Sin` or `Equal` can be used for a variety of
+purposes. It can be helpful to classify them in some broad categories:
 
 <div class=symbols-table>
 
-| Category |  |
-|:---|:---|
-| {% tags "inert" %} | The result of evaluating an inert function is the function and its arguments. This is more useful than it sounds: it can be used to 'tag' an input an indicate how it should be interpreted. Examples: `Hold` `Evaluate` `Complex` `LatexString`|
-| {% tags "constructor" %} | A function that takes a variety of inputs and return a new kind of object. Examples: `Symbol` `String` `Interval` `Range` |
-| {% tags "numeric" %} | A function whose arguments and return value are all numeric. Examples: `Add` `Sin` `Exp` `Sqrt`|
-| {% tags "predicate" %} | A predicate function returns a boolean. It can evaluate if a proposition is true or false. Examples: `Equal` `IsPrime`|
-| {% tags "logical" %} | A predicate whose arguments are also booleans. Examples: `And` `Not` `Or`|
-
+| Category                 |                                                                                                                                                                                                                                                  |
+| :----------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| {% tags "inert" %}       | The result of evaluating an inert function is the function and its arguments. This is more useful than it sounds: it can be used to 'tag' an input an indicate how it should be interpreted. Examples: `Hold` `Evaluate` `Complex` `LatexString` |
+| {% tags "constructor" %} | A function that takes a variety of inputs and return a new kind of object. Examples: `Symbol` `String` `Interval` `Range`                                                                                                                        |
+| {% tags "numeric" %}     | A function whose arguments and return value are all numeric. Examples: `Add` `Sin` `Exp` `Sqrt`                                                                                                                                                  |
+| {% tags "predicate" %}   | A predicate function returns a boolean. It can evaluate if a proposition is true or false. Examples: `Equal` `IsPrime`                                                                                                                           |
+| {% tags "logical" %}     | A predicate whose arguments are also booleans. Examples: `And` `Not` `Or`                                                                                                                                                                        |
 
 </div>
 
@@ -76,12 +73,13 @@ of purposes. It can be helpful to classify them in some broad categories:
 **To define a custom syntax**, provide custom syntax and custom symbol
 dictionaries when creating a `ComputeEngine` instance.
 
-If no custom dictionaries are provided, the default ones are used. They are organized by topic as follow:
+If no custom dictionaries are provided, the default ones are used. They are
+organized by topic as follow:
 
 <div class=symbols-table>
 
-| Dictionary                                                     |                                                                                |
-| :------------------------------------------------------------- | :----------------------------------------------------------------------------- |
+| Dictionary                                                        |                                                                                |
+| :---------------------------------------------------------------- | :----------------------------------------------------------------------------- |
 | [Arithmetic](/compute-engine/reference/arithmetic/)               | `Add` `Multiply`...                                                            |
 | [Calculus](/compute-engine/reference/calculus/)                   | `Derive` `Integrate`...                                                        |
 | [Collections](/compute-engine/reference/collections/)             | `Sequence` `List` `Dictionary` `Set`...                                        |

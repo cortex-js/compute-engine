@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -e  # exit immediately on error
+# set -x              # for debuging, trace what is being executed.
 
 # export DOT="\033[32m ● \033[0m"
 # export CHECK="\033[32m ✔ \033[0m"
@@ -20,7 +21,7 @@ git config advice.addEmptyPathspec false
 
 echo "${LINECLEAR}${CHECK} Linting Typescript files"
 exit_code=1
-export all_ts_files=$(git diff --cached --diff-filter=d --name-only | grep .ts$)
+export all_ts_files=$(git diff --cached --diff-filter=d --name-only | { grep \.ts || true; }$)
 
 if [ ${#all_ts_files} -gt 0 ]; then
   npx eslint ${all_ts_files} --quiet --fix
@@ -41,7 +42,7 @@ fi
 
 echo "${LINECLEAR}${CHECK} Linting other files"
 exit_code=1
-export all_other_files=$(git diff --cached --diff-filter=d --name-only | grep -E '(.css|.json|.less|.md)$')
+export all_other_files=$(git diff --cached --diff-filter=d --name-only | { grep -E '(.css|.json|.less|.md)$ || true }')
 if [ ${#all_other_files} -gt 0 ]; then
   npx prettier ${all_other_files} --write
   exit_code=$?
@@ -58,8 +59,10 @@ if [ ${#all_other_files} -gt 0 ]; then
   fi
 fi
 
+echo "${LINECLEAR}${CHECK} Running test suite"
+
 exit_code=1
-npm run test
+# npm run test
 exit_code=$?
 
 if [ $exit_code -ne 0 ]

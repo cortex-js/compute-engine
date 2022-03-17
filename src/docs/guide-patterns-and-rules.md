@@ -9,8 +9,8 @@ sidebar:
 
 # Patterns and Rules
 
-Recognizing patterns and applying rules is a powerful symbolic computing tool 
-to identify and manipulate the structure of expressions.
+Recognizing patterns and applying rules is a powerful symbolic computing tool to
+identify and manipulate the structure of expressions.
 
 <section id='wildcards'>
 
@@ -27,11 +27,10 @@ corresponding position. It is useful to capture the arguments of a function.
 The `"___"` wildcard matches any sequence of 0 or more expressions in its
 corresponding position.
 
-A wildcard symbol may include a name which is used to _capture_ the
-matching expression. When using a named wildcard, all instances of the named
-wildcard must match. In contrast, an un-named wildcard (a universal wildcard 
-such as `"_"` `"__"` or `"___"`) can be used multiple times to match 
-different values.
+A wildcard symbol may include a name which is used to _capture_ the matching
+expression. When using a named wildcard, all instances of the named wildcard
+must match. In contrast, an un-named wildcard (a universal wildcard such as
+`"_"` `"__"` or `"___"`) can be used multiple times to match different values.
 
 </section>
 
@@ -39,26 +38,26 @@ different values.
 
 ## Patterns
 
-A pattern is an expression which can include one or more placeholders in the 
+A pattern is an expression which can include one or more placeholders in the
 form of wildcard symbols.
 
 Patterns are similar to Regular Expressions in traditional programming languages
 but they are tailored to deal with MathJSON expressions instead of strings.
 
-Given a pattern and an expression the goal of pattern matching is to find a 
+Given a pattern and an expression the goal of pattern matching is to find a
 substitution for all the wildcards such that the pattern becomes the expression.
 
 An expression is said to match a pattern if there exists a set of values such
-that replacing the wildcards with those values match the expression. This set
-of values is called a **substitution**.
+that replacing the wildcards with those values match the expression. This set of
+values is called a **substitution**.
 
 For example, the pattern `["Add", 3, "_c"]` becomes the expression
 `["Add", 3, "x"]` by replacing the wildcard `"_c"` with `"x"`. The substitution
 is `{"c" : "x"}`.
 
-On the other hand, the expression `["Divide", "x", 2]` does not match the pattern
-`["Add", 3, "_c"]`: no substitution exists to transform the expression into the
-pattern by replacing the wildcards.
+On the other hand, the expression `["Divide", "x", 2]` does not match the
+pattern `["Add", 3, "_c"]`: no substitution exists to transform the expression
+into the pattern by replacing the wildcards.
 
 </section>
 
@@ -66,39 +65,36 @@ pattern by replacing the wildcards.
 
 ## Matching an Expression to a Pattern
 
-**To check if an expression matches a pattern**, use the 
+**To check if an expression matches a pattern**, use the
 `ce.match(<expression>, <pattern>)` function.
 
-If there is a match, `ce.match()` returns a `Substitution` object literal with 
-keys corresponding to the matching named wildcards. If no named wildcards are 
-used and there is a match it returns an empty object literal. If there is no 
+If there is a match, `ce.match()` returns a `Substitution` object literal with
+keys corresponding to the matching named wildcards. If no named wildcards are
+used and there is a match it returns an empty object literal. If there is no
 match, it returns `null`.
 
-
 ```js
 const pattern = ['Add', 'x', '_'];
 
 console.log(ce.match(['Add', 'x', 1], pattern));
-// -> { } : the expression matches the pattern
+// ➔ { } : the expression matches the pattern
 
 console.log(ce.match(['Multiply', 'x', 1], pattern));
-// -> null : the expression does not match the pattern
+// ➔ null : the expression does not match the pattern
 ```
 
-The `ce.match()` function accounts for the commutativity and associativity
-of functions.
-
+The `ce.match()` function accounts for the commutativity and associativity of
+functions.
 
 ```js
 const pattern = ['Add', 'x', '_'];
 
 console.log(ce.match(['Add', 'x', 1], pattern));
-// -> { } : the expression matches the pattern
+// ➔ { } : the expression matches the pattern
 
 console.log(ce.match(['Add', 1, 'x'], pattern));
-// -> { } : the expression matches the pattern by commutativity
+// ➔ { } : the expression matches the pattern by commutativity
 ```
-
 
 The `ce.match()` does not consider sub-expressions, it is not recursive.
 
@@ -106,47 +102,47 @@ The `ce.match()` does not consider sub-expressions, it is not recursive.
 const pattern = ['Add', 'x', '_'];
 
 console.log(ce.match(['Multiply', 2, ['Add', 'x', 1]], pattern));
-// -> null : the expression does not match the pattern
+// ➔ null : the expression does not match the pattern
 ```
-
 
 If the same named wildcard is used multiple times, all its values must match.
 
 ```js
 console.log(ce.match(['Add', 1, 'x'], ['Add', '_a', '_a']));
-// -> null
+// ➔ null
 
 console.log(ce.match(['Add', 'x', 'x'], ['Add', '_a', '_a']));
-// -> { "a": "x" }
+// ➔ { "a": "x" }
 ```
 
 Wildcards can be used to capture the head of functions:
 
 ```js
 console.log(match(['Add', 1, 'x'], ['_f', 1, 'x']));
-// -> { "f": "Add" }
+// ➔ { "f": "Add" }
 ```
+
 </section>
 
 <section id='substitution'>
 
 ## Substitution
 
-The return value of the `match()` function is a `Substitution` object: a
-mapping from wildcard names to expressions.
+The return value of the `match()` function is a `Substitution` object: a mapping
+from wildcard names to expressions.
 
-**To apply a substitution to a pattern**, and therefore recover the expression it
-was derived from, use the `substitute()` function.
+**To apply a substitution to a pattern**, and therefore recover the expression
+it was derived from, use the `substitute()` function.
 
 ```js
 const expression = ['Add', 1, 'x'];
 const pattern = ['Add', 1, '_a'];
 
 console.log(match(expression, pattern));
-// -> { a: "x" }
+// ➔ { a: "x" }
 
 console.log(substitute(pattern, { a: 'x' }));
-// -> ["Add", 1, "x"]
+// ➔ ["Add", 1, "x"]
 ```
 
 </section>
@@ -155,17 +151,17 @@ console.log(substitute(pattern, { a: 'x' }));
 
 ## Comparing
 
-**To compare two expressions**, use the `match()` function. 
+**To check if an expression matches a pattern**, use the `pattern.match()`
+function.
 
-The function returns `null` if the two expressions do not match. It returns an 
-object literal if the expressions do match. 
+The function returns `null` if the two expressions do not match. It returns an
+object literal if the expressions do match.
 
-If the second argument included wildcards the resulting object literal indicate
-the substitutions for those wildcards. If no wildcards were used and the
-expressions matched, an empty object literal, `{}` is returned. 
-To check if the expressions simply match or not, check if the return value is
- `null` (indicating not a match) or not (indicating a match).
-
+If the argument to `match()` included wildcards the resulting object literal
+indicate the substitutions for those wildcards. If no wildcards were used and
+the expressions matched, an empty object literal, `{}` is returned. To check if
+the expressions simply match or not, check if the return value is `null`
+(indicating not a match) or not (indicating a match).
 
 ```js
 const ce = new ComputeEngine();
@@ -181,10 +177,7 @@ console.log(ce.match(parse('2 + 2 + x'), parse('3 + 1 + x')));
 // ➔ null: the two expressions are **not** the same: they are not evaluated
 
 console.log(
-  match(
-    ce.evaluate(parse('2 + 2 + x')),
-    ce.evaluate(parse('3 + 1 + x'))
-  )
+  match(ce.evaluate(parse('2 + 2 + x')), ce.evaluate(parse('3 + 1 + x')))
 );
 // ➔ {}: the two expressions are the same once evaluated
 ```
@@ -197,36 +190,40 @@ console.log(
 
 A rewrite rule is a triplet of:
 
-- a left-hand-side pattern,  `lhs`
+- a left-hand-side pattern, `lhs`
 - a right-hand-side pattern, `rhs`
 - an optional `condition`
 
-When a rule is applied to an expression `expr`, if `expr` matches `lhs` and
-the `condition` applies to the resulting substitution, the result of the 
-rule is the substitution applied to the `rhs`.
+When a rule is applied to an expression `expr`, if `expr` matches `lhs` and the
+`condition` applies to the resulting substitution, the result of the rule is the
+substitution applied to the `rhs`.
 
-**To apply a set of rules to an expression**, use the `ce.replace()` function.
+**To apply a set of rules to an expression**, call the `expr.replace()`
+function.
 
 ```ts
-const squareRule = [['Multiply', '_x', '_x'], ['Square', '_x']];
-
-ce.replace([squareRule], ['Multiply', 4, 4]);
-// -> ['Square', 4]
-
-const sqrtRule =   [
-  ['Sqrt', ['Square',  '_x']], 
-  '_x',
-  (ce, sub) => ce.isPositive(sub._x)
+const squareRule = [
+  ['Multiply', '_x', '_x'],
+  ['Square', '_x'],
 ];
-ce.replace([sqrtRule], ['Sqrt', ['Square', 17]]);
-// -> 17
+
+ce.box([squareRule], ['Multiply', 4, 4]).replace();
+// ➔ ['Square', 4]
+
+const sqrtRule = [
+  ['Sqrt', ['Square', '_x']],
+  '_x',
+  (ce, sub) => ce.isPositive(sub._x),
+];
+ce.box(['Sqrt', ['Square', 17]]).replace([sqrtRule]);
+// ➔ 17
 ```
 
-The `ce.replace()` function continues applying all the rules in the ruleset 
+The `expr.replace()` function continues applying all the rules in the ruleset
 until no rules are applicable.
 
-The `ce.simplify()` method applies a collection of built-in rewrite rules. 
-You can define your own rules and apply them using `ce.replace()`.
+The `expr.simplify()` function applies a collection of built-in rewrite rules.
+You can define your own rules and apply them using `expr.replace()`.
 
 </section>
 

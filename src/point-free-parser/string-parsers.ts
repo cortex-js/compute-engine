@@ -273,7 +273,7 @@ export function parseSingleLineString<T>(
  * A multiline line string begins and end with a triple quotation mark """
  * It can span multiple lines and contain escape sequences.
  *
- * @param expression - a function that parses an expresion inside a `\()`
+ * @param expression - a function that parses an expression inside a `\()`
  * escape sequence
  *
  */

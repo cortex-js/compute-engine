@@ -12,11 +12,11 @@ VARIANT="${1-coverage}"
 
 export TEST="true"
 
-if [ "$VARIANT" = "coverage" ]; then
+if [ "$VARIANT" = "coverage" ] || [ "$VARIANT" = "-coverage" ]; then
     npx jest --config ./config/jest.config.js --coverage --no-cache
-elif [ "$VARIANT" = "snapshot" ]; then
+elif [ "$VARIANT" = "snapshot" ]  || [ "$VARIANT" = "-snapshot" ]; then
     npx jest --config ./config/jest.config.js  --updateSnapshot
 else
     echo "${1}".test.ts
-    npx jest --config ./config/jest.config.js ./test/"${1}"
+    npx jest --config ./config/jest.config.js ./test/"${1}" --verbose false
 fi

@@ -14,6 +14,7 @@ module.exports = {
     '<rootDir>/../test',
     //, '<rootDir>/../src'
   ],
+  setupFilesAfterEnv: ['../test/jest-config.ts'],
   //   reporters: ['jest-silent-reporter'],
   globals: {
     'ts-jest': {

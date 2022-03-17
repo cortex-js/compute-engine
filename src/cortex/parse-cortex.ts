@@ -31,13 +31,14 @@ import {
 import { Grammar } from '../point-free-parser/grammar';
 // import { parseShebang } from '../fixed-point-parser/whitespace-parsers';
 import {
-  getArg,
-  getNumberValue,
-  getStringValue,
+  op,
+  machineValue,
+  stringValue,
   isStringObject,
   mapArgs,
-} from '../common/utils';
+} from '../math-json/utils';
 import { parseWhitespace } from '../point-free-parser/whitespace-parsers';
+import { escapeJsonString } from '../common/json';
 
 // eslint-disable-next-line prefer-const
 const grammar = new Grammar<Expression>();
@@ -45,57 +46,11 @@ const grammar = new Grammar<Expression>();
 // For debugging purposes, output an expression as a string
 function expressionToString(expr: Expression | undefined | null): string {
   if (expr === undefined || expr === null) return '';
-  const strValue = getStringValue(expr);
+  const strValue = stringValue(expr);
   if (strValue !== null) return strValue;
-  const numValue = getNumberValue(expr);
+  const numValue = machineValue(expr);
   if (numValue !== null) return Number(numValue).toString();
   return expr.toString();
-}
-
-const JSON_ESCAPE_CHARS = {
-  0x00: '\\u0000',
-  0x01: '\\u0001',
-  0x02: '\\u0002',
-  0x03: '\\u0003',
-  0x04: '\\u0004',
-  0x05: '\\u0005',
-  0x06: '\\u0006',
-  0x07: '\\u0007',
-  0x08: '\\b',
-  0x09: '\\t',
-  0x0a: '\\n',
-  0x0b: '\\u000b',
-  0x0c: '\\f',
-  0x0d: '\\r',
-  0x0e: '\\u000e',
-  0x0f: '\\u000f',
-  0x10: '\\u0010',
-  0x11: '\\u0011',
-  0x12: '\\u0012',
-  0x13: '\\u0013',
-  0x14: '\\u0014',
-  0x15: '\\u0015',
-  0x16: '\\u0016',
-  0x17: '\\u0017',
-  0x18: '\\u0018',
-  0x19: '\\u0019',
-  0x1a: '\\u001a',
-  0x1b: '\\u001b',
-  0x1c: '\\u001c',
-  0x1d: '\\u001d',
-  0x1e: '\\u001e',
-  0x1f: '\\u001f',
-  0x22: '\\"',
-  0x2f: '\\/',
-  0x5c: '\\\\',
-};
-/**
- * Escape a string according to the JSON string requirements
- */
-function escapeJsonString(s: string): string {
-  let result = '';
-  for (const c of s) result += JSON_ESCAPE_CHARS[c.codePointAt(0)!] ?? c;
-  return result;
 }
 
 /** Decorate an expression with a source origin
@@ -210,14 +165,14 @@ grammar.rule(
       } else if (fn.value === '#env') {
         if ('process' in globalThis && process.env) {
           return {
-            str: process.env[expressionToString(getArg(args.value!, 1))] ?? '',
+            str: process.env[expressionToString(op(args.value!, 1))] ?? '',
           };
         }
       } else if (fn.value === '#navigator') {
         // eslint-disable-next-line no-restricted-globals
         if ('navigator' in globalThis) {
           // eslint-disable-next-line no-restricted-globals
-          return { str: navigator[expressionToString(getArg(args.value!, 1))] };
+          return { str: navigator[expressionToString(op(args.value!, 1))] };
         }
       }
       return 'Nothing';
@@ -261,7 +216,7 @@ grammar.rule('signed-number', (parser: Parser): Result<Expression> => {
   const numResult = parseSignedNumber(parser);
   if (numResult.isSuccess) {
     // Return a number expression
-    // @todo: we could return a BaseForm() for hexadecimal and decimal
+    // @todo: we could return a FromDigits() for hexadecimal and decimal
     return result.success(exprOrigin(numResult.value!, numResult));
   }
   return numResult;
@@ -360,7 +315,7 @@ grammar.rule(
       ['Assign', '=', 258],
       ['Equal', '==', 260],
       ['Same', '===', 260],
-      ['KeyValue', '->', 265],
+      ['KeyValuePair', '->', 265],
       ['Add', '+', 275],
       ['Subtract', '-', 275],
       ['Multiply', '*', 390],
@@ -378,7 +333,7 @@ grammar.rule(
     (op: string, lhs: Expression, rhs: Expression): Expression => {
       if (!lhs && rhs) {
         if (op === 'Negate') {
-          const val = getNumberValue(rhs);
+          const val = machineValue(rhs);
           if (val !== null && !Number.isNaN(val)) {
             return { num: Number(-val).toString() };
           }

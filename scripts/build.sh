@@ -5,11 +5,15 @@ set -o nounset   # abort on unbound variable
 set -o pipefail  # don't hide errors within pipes
 # set -x    # for debuging, trace what is being executed.
 
-export BASENAME="\033[40mCompute Engine\033[0m" # `basename "$0"`
-export DOT="\033[32m ● \033[0m"
-export CHECK="\033[32m ✔ \033[0m"
+export BASENAME="\033[40m Compute Engine \033[0;0m " # `basename "$0"`
+# export DOT="\033[32m  \033[0m" # Gear
+#  export DOT="\033[32m  \033[0m" # Watch 
+export DOT="\033[32m 羽 \033[0;0m" # Hourglass
+export CHECK="\033[32m ✔ \033[0;0m"
+export ERROR="\033[31;7m ERROR \033[0;0m"
 export LINECLEAR="\033[1G\033[2K" # position to column 1; erase whole line
-export ERROR="\033[31m ERROR \033[0m"
+export DIM="\033[0;2m"
+export RESET="\033[0;0m"
 
 
 # Note on the `sed` command:
@@ -32,15 +36,17 @@ npx check-node-version --package
 
 # If no "node_modules" directory, do an install first
 if [ ! -d "./node_modules" ]; then
-    printf "$BASENAME$DOT Installing dependencies"
+    printf "$BASENAME${DOT}Installing dependencies"
     npm install
-    echo -e "$LINECLEAR$BASENAME$CHECK Dependencies installed"
+    echo -e "$LINECLEAR$BASENAME${CHECK}Dependencies installed"
 fi
 
 # Read the first argument, set it to "production" if not set
 # (Note: we use es-build (via `npm start`) for development builds usually)
 export BUILD="${1-production}"
 
+# export TARGETS="math-json cortex compute-engine"
+export TARGETS="math-json compute-engine"
 
 # export GIT_VERSION=`git describe --long --dirty`
 
@@ -52,36 +58,48 @@ export SDK_VERSION=$(cat package.json \
 | tr -d '[[:space:]]')
 
 # Clean output directories
-printf "$BASENAME$DOT Cleaning output directories"
+printf "$BASENAME$DOT${RESET}Cleaning output directories"
 rm -rf ./dist
 rm -rf ./declarations
 rm -rf ./build
 rm -rf ./coverage
 
 mkdir -p dist
-echo -e "$LINECLEAR$BASENAME$CHECK Output directories cleaned out"
+echo -e  $LINECLEAR$BASENAME$CHECK${DIM}"Cleaning output directories"$RESET
 
 
 #
 # Build declaration files (.d.ts)
 #
-printf "$BASENAME$DOT Building declaration files (.d.ts)"
+printf "$BASENAME$DOT Building TypeScript declaration files (.d.ts)"
 # Even though we only generate declaration file, the target must be set high-enough
 # to prevent tsc from complaining (!)
-npx tsc --target "es2020" -d --moduleResolution "node" \
-  --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts 
-npx tsc --target "es2020" -d --moduleResolution "node" \
-  --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts 
-npx tsc --target "es2020" -d --moduleResolution "node" \
-  --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts 
-echo -e "$LINECLEAR$BASENAME$CHECK Declaration files built"
+if [[ "$TARGETS" == *math-json* ]]; then
+  npx tsc --target "es2020" -d --moduleResolution "node" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts 
+fi
+if [[ "$TARGETS" == *compute-engine* ]]; then
+  npx tsc --target "es2020" -d --moduleResolution "node" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts 
+fi
+if [[ "$TARGETS" == *cortex* ]]; then
+  npx tsc --target "es2020" -d --moduleResolution "node" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts 
+fi
+echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RESET"
 
 #
 # Do build (development or production)
 #
-printf "\033[32m ● \033[0m Making a \033[33m%s\033[0m build" "$BUILD"
-npx rollup --silent --config config/rollup.config.js
-echo -e "$LINECLEAR$BASENAME$CHECK \033[33m" $BUILD "\033[0m build done"
+echo -e $BASENAME$DOT$RESET"Making a \033[33m$BUILD\033[0m build"
+
+# use -experimental-json-modules for now instead of:
+# npx rollup --silent --config config/rollup.config.mjs
+
+node --experimental-json-modules ./node_modules/.bin/rollup --config config/rollup.config.mjs
+# node rollup --config config/rollup.config.js
+
+echo -e "$BASENAME$CHECK$DIM \033[33m"$BUILD$DIM" build done$RESET"
 
 if [ "$BUILD" = "production" ]; then    
     # Linting
@@ -93,12 +111,12 @@ if [ "$BUILD" = "production" ]; then
     find ./dist -type f \( -name '*.js' -o -name '*.mjs' \) -exec bash -c 'sedi s/{{SDK_VERSION}}/$SDK_VERSION/g {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "1s/^/\/\* $SDK_VERSION \*\/$(printf '"'"'\r'"'"')/" {}' \;
     find ./dist -type f -name '*.d.ts' -exec bash -c 'sedi "s/{{SDK_VERSION}}/$SDK_VERSION/" {}' \;
-    echo -e "$LINECLEAR$BASENAME$CHECK Output files stamped"
+    echo -e "$LINECLEAR$BASENAME$CHECK$DIM Output files stamped$RESET"
 
 
     # Run test suite
-    printf "$BASENAME$DOT Running test suite"
-    npx jest --config ./config/jest.config.js ./test --silent --reporters jest-silent-reporter
-    echo -e "$LINECLEAR$BASENAME$CHECK Test suite complete"
+    # printf "$BASENAME$DOT Running test suite"
+    # npx jest --config ./config/jest.config.js ./test --silent --reporters jest-silent-reporter
+    # echo -e "$LINECLEAR$BASENAME$CHECK$DIM Test suite complete$RESET"
 fi
 

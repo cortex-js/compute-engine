@@ -71,17 +71,19 @@ export type Attributes = {
 /**
  * A MathJSON numeric quantity.
  *
- * The string is a string of:
+ * The string is made of:
  * - an optional `-` minus sign
  * - a string of decimal digits
  * - an optional fraction part (a `.` decimal point followed by decimal digits)
  * - an optional exponent part (a `e` or `E` exponent marker followed by an
  *   optional `-` minus sign, followed by a string of digits).
- * - an optional format indicator:
- *    - `n` to indicate the preceding is a BigInt
- *    - `d` to indicate the preceding is an arbitrary precision Decimal number
+ * - an optional format suffix:
+ *    - `n` to indicate the number is a BigInt
+ *    - `d` to indicate the number is an arbitrary precision Decimal number
+ *      and may contain more digits or exponents with a greater magnitude than
+ *      can be represented with a 64-bit floating point number.
  *
- * For example: `-12.34`, `0.234e-56`, `123454d`.
+ * For example: `-12.34`, `0.234e-56`, `123454e9999d`.
  */
 export type MathJsonNumber = {
   num: 'NaN' | '-Infinity' | '+Infinity' | string;
@@ -95,12 +97,12 @@ export type MathJsonString = {
   str: string;
 } & Attributes;
 
-export type MathJsonFunction<T extends number = number> = {
-  fn: Expression<T>[];
+export type MathJsonFunction = {
+  fn: [Expression, ...Expression[]];
 } & Attributes;
 
-export type MathJsonDictionary<T extends number = number> = {
-  dict: { [key: string]: Expression<T> };
+export type MathJsonDictionary = {
+  dict: { [key: string]: Expression };
 } & Attributes;
 
 /**
@@ -109,25 +111,16 @@ export type MathJsonDictionary<T extends number = number> = {
  * The leaf nodes of an expression are numbers, strings and symbols.
  * The dictionary and function nodes can contain expressions themselves.
  *
- * The type variable `T` indicates which numeric type are valid. For a
- * canonical, well-formed, MathJSON expression, this is limited to the
- * `number` type. However, for the purpose of internal calculations this can
- * be extended to other numeric types. For example, internally the
- * Compute Engine also uses `Decimal` and `Complex` classes.
  */
-export type Expression<T extends number = number> =
+export type Expression =
   // Shortcut for MathJsonNumber without metadata and in the JavaScript
   // 64-bit float range.
-  | T
+  | number
   | MathJsonNumber
   | MathJsonString
   | MathJsonSymbol
   // Shortcut for a MathJsonSymbol with no metadata. Or a string.
   | string
-  | MathJsonFunction<T>
-  | MathJsonDictionary<T>
-  | Expression<T>[];
-
-export type Substitution<T extends number = number> = {
-  [symbol: string]: Expression<T>;
-};
+  | MathJsonFunction
+  | MathJsonDictionary
+  | [Expression, ...Expression[]];

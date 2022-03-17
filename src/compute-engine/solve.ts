@@ -1,30 +1,32 @@
 import {
-  getArg,
-  getFunctionName,
-  getNumberValue,
-  MISSING,
-} from '../common/utils';
-import { Expression, Substitution } from '../math-json/math-json-format';
-import { match, substitute } from './patterns';
-import {
-  ComputeEngine,
-  Numeric,
+  BoxedExpression,
+  IComputeEngine,
+  LatexString,
   Pattern,
-} from '../math-json/compute-engine-interface';
+  SemiBoxedExpression,
+  Substitution,
+} from './public';
+import { isLatexString } from './boxed-expression/utils';
 
 // https://en.wikipedia.org/wiki/Equation_solving
 
 export type Solution = [
-  lhs: string | Pattern<Numeric>,
-  solutions: (string | Pattern<Numeric>)[],
-  condition?: (ce: ComputeEngine<Numeric>, vars: Substitution) => boolean
+  lhs: LatexString | Pattern,
+  solutions: (LatexString | Pattern)[],
+  condition?: (ce: IComputeEngine, vars: Substitution) => boolean
+];
+
+export type BoxedSolution = [
+  lhs: Pattern,
+  solutions: Pattern[],
+  condition?: (ce: IComputeEngine, vars: Substitution) => boolean
 ];
 
 //
 // UNIVARIATE_ROOTS is a collection of rules that find the roots for
 // various expressions.
 //
-// The lhs pattern is a function of (x, y, z)
+// The lhs pattern is a function of (x, a, b)
 //
 // @todo: MOAR RULES
 // x^2, x^2 + a,  a x^2 + b
@@ -35,83 +37,93 @@ export type Solution = [
 // a e^x + b
 //
 // cos x, acos x, n cos x + a
-export const UNIVARIATE_ROOTS: Solution[] = [
-  ['x + a', ['-a']],
 
-  ['ax + b', ['\\frac{-b}{a}']],
+// Set of rules to find the root(s) for `x`
+// Note: this is not a RuleSet because for each matching pattern, there
+// may be more than one solution/root
+export const UNIVARIATE_ROOTS: Solution[] = [
+  ['$x + a$', ['$-a$']],
+  ['$-x + a$', ['$a$']],
+
+  ['$\\frac{x}{a} - 1$', ['$a$']],
+  ['$1 - \\frac{x}{a}$', ['$a$']],
+  ['$\\frac{-x}{a} - 1$', ['$-a$']],
+
+  ['$ax + b$', ['$\\frac{-b}{a}$']],
+  ['$ax$', ['$0$']],
 
   // Quadratic formula (real)
   // @todo: add rule for when b or c is 0
   [
-    'ax^2 + bx + c',
+    '$ax^2 + bx + c$',
     [
-      '\\frac{{ - b + \\sqrt{b^2 - 4ac} }}{{2a}}',
-      '\\frac{{ - b - \\sqrt{b^2 - 4ac} }}{{2a}}',
+      '$\\frac{{ - b + \\sqrt{b^2 - 4ac} }}{{2a}}$',
+      '$\\frac{{ - b - \\sqrt{b^2 - 4ac} }}{{2a}}$',
     ],
-    (ce: ComputeEngine, vars: Substitution): boolean =>
-      ce.isReal(vars.x) === true,
+    (_ce, vars): boolean => vars.x.isReal === true,
   ],
 
   // Quadratic formula (complex)
   [
-    'ax^2 + bx + c',
+    '$ax^2 + bx + c$',
     [
-      '-\\frac{b}{2a} - \\imaginaryI \\frac{\\sqrt{4ac - b^2}}{2a}',
-      '-\\frac{b}{2a} + \\imaginaryI \\frac{\\sqrt{4ac - b^2}}{2a}',
+      '$-\\frac{b}{2a} - \\imaginaryI \\frac{\\sqrt{4ac - b^2}}{2a}$',
+      '$-\\frac{b}{2a} + \\imaginaryI \\frac{\\sqrt{4ac - b^2}}{2a}$',
     ],
-    (ce: ComputeEngine, vars: Substitution): boolean =>
-      ce.isComplex(vars.x) === true && ce.isReal(vars.x) === false,
+    (_ce, vars): boolean => vars.x.isImaginary === true,
   ],
 ];
 
 /**
- * Compile a set of solution rules
+ * Compile a set of rules for solving equations
  */
-export function solutions(
-  ce: ComputeEngine<Numeric>,
+export function boxSolutions(
+  ce: IComputeEngine,
   rs: Iterable<Solution>
-): Solution[] {
-  const result: Solution[] = [];
-  for (const r of rs) {
-    let lhs = r[0];
-    if (typeof lhs === 'string') lhs = ce.parse(lhs);
-    const sols: Pattern<Numeric>[] = [];
-    for (const sol of rs[1]) {
-      if (typeof sol === 'string') {
-        sols.push(ce.parse(sol));
-      } else {
-        sols.push(sol);
-      }
-    }
-    result.push([lhs, sols, r[2]]);
-  }
+): BoxedSolution[] {
+  const result: BoxedSolution[] = [];
+  for (const [lhs, rhss, cond] of rs)
+    result.push([
+      ce.pattern(lhs),
+      rhss.map((x) => ce.pattern(isLatexString(x) ? ce.parse(x)! : x)),
+      cond,
+    ]);
 
   return result;
 }
 
 /**
- * Expression is a function of x.
+ * Expression is a function of a single variable (`x`)
  *
- * Return the roots of x.
+ * Return the roots of that variable
  *
  */
 function findUnivariateRoots(
-  ce: ComputeEngine,
-  expr: Expression<Numeric>,
+  expr: BoxedExpression,
   x: string
-): Expression<Numeric>[] {
-  const sols = ce.cache('roots-rules', () => solutions(ce, UNIVARIATE_ROOTS));
-  const result: Expression<Numeric>[] = [];
-  for (const solution of sols) {
-    const [lhs, rhss, cond] = solution;
-    const sub = match<Numeric>(substitute(lhs, { x }), expr);
+): BoxedExpression[] {
+  const ce = expr.engine;
+  const rules = ce.cache(
+    'univariate-roots-rules',
+    () => boxSolutions(ce, UNIVARIATE_ROOTS),
+    (rules) => {
+      for (const r of rules) r._purge();
+      return rules;
+    }
+  );
+  const result: BoxedExpression[] = [];
+  const unknown = { x: ce.symbol(x) };
+  for (const [lhs, rhss, cond] of rules) {
+    // Replace the `x` in `lhs` with the actual symbol we're looking for
+    // and attempt to match
+    const sub = lhs.subs(unknown)?.match(expr);
     if (sub && (!cond || cond(ce, sub))) {
       for (const rhs of rhss) {
         let found = false;
         // Check that the solution is not a duplicate
-        const sol = ce.simplify(substitute(rhs, sub));
+        const sol = rhs.subs(sub).simplify();
         for (const x of result) {
-          if (match(x, sol)) {
+          if (sol.isSame(x)) {
             found = true;
             break;
           }
@@ -132,30 +144,28 @@ function findUnivariateRoots(
  * `2x < 4` => `x < 2`
  */
 export function univariateSolve(
-  ce: ComputeEngine,
-  expr: Expression<Numeric>,
+  expr: BoxedExpression,
   x: string
-): Expression<Numeric>[] | null {
-  const name = getFunctionName(expr);
+): SemiBoxedExpression[] | null {
+  const ce = expr.engine;
+  const name = expr.head;
   if (name === 'And') {
     // @todo: System of equations
   }
 
   if (
     name === null ||
-    !['Equal', 'Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(name)
+    (typeof name === 'string' &&
+      !['Equal', 'Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(name))
   ) {
     return null;
   }
 
-  const rhs = getArg(expr, 2) ?? MISSING;
-  let lhs = getArg(expr, 1) ?? MISSING;
-  if (getNumberValue(rhs) !== 0) {
-    lhs = ['Subtract', lhs, rhs];
-  }
+  const rhs = expr.op2;
+  let lhs: SemiBoxedExpression = expr.op1;
+  if (rhs.isNotZero === true) lhs = ['Subtract', lhs, rhs];
 
-  const roots = findUnivariateRoots(ce, lhs, x);
+  const roots = findUnivariateRoots(ce.box(lhs), x);
   if (roots.length === 0) return null;
-  if (roots.length > 1) return ['Or', ...roots];
-  return roots[0];
+  return roots;
 }

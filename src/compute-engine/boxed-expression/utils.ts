@@ -1,0 +1,96 @@
+import { MACHINE_PRECISION } from '../numerics/numeric';
+import { BoxedExpression, IComputeEngine } from '../public';
+
+export function isLatexString(s: any): s is string {
+  if (typeof s === 'string') return s.startsWith('$') && s.endsWith('$');
+  return false;
+}
+
+export function latexString(s: any): string | null {
+  if (typeof s === 'string' && s.startsWith('$') && s.endsWith('$'))
+    return s.slice(1, -1);
+
+  return null;
+}
+
+/**
+ * Return a multiple of the imaginary unit, e.g.
+ * - 'ImaginaryUnit'
+ * - ['Negate', 'ImaginaryUnit']
+ * - ['Negate', ['Multiply', 3, 'ImaginaryUnit']]
+ * - ['Multiply', 5, 'ImaginaryUnit']
+ * - ['Multiply', 'ImaginaryUnit', 5]
+ */
+export function getImaginaryCoef(expr: BoxedExpression): number {
+  if (expr.symbol === 'ImaginaryUnit') return 1;
+  const z = expr.complexValue;
+  if (z && z.re === 0) return z.im;
+  if (expr.head === 'Negate') return -getImaginaryCoef(expr.op1);
+
+  let f = 0;
+
+  if (expr.head === 'Multiply' && expr.nops === 2) {
+    let m: BoxedExpression | undefined;
+    if (expr.op1.symbol === 'ImaginaryUnit') m = expr.op2;
+    else if (expr.op2.symbol === 'ImaginaryUnit') m = expr.op1;
+
+    if (m && m.isLiteral) f = m.asFloat ?? 0;
+  }
+
+  return f;
+}
+
+/**
+ * Return the free symbols in the expression, recursively.
+ * A variable, or free symbol,is a symbol that is not bound to a value.
+ */
+export function getVars(expr: BoxedExpression): string[] {
+  if (expr.symbol) {
+    const def = expr.symbolDefinition;
+    return def?.constant ? [] : [expr.symbol];
+  }
+
+  if (!expr.ops && !expr.keys) return [];
+
+  const result: string[] = [];
+
+  if (expr.ops) for (const op of expr.ops) result.push(...getVars(op));
+
+  if (expr.keys)
+    for (const key of expr.keys) result.push(...getVars(expr.getKey(key)!));
+
+  return result;
+}
+
+/**
+ * For any numeric result, or when boxing numbers,
+ * if `ce.useDecimal` is true, create them as Decimal number
+ * if `ce.useDecimal` is false, create them as machine number
+ */
+export function useDecimal(ce: IComputeEngine) {
+  return (
+    ce.numericMode === 'decimal' ||
+    (ce.numericMode === 'auto' && ce.precision > Math.floor(MACHINE_PRECISION))
+  );
+}
+
+/** If result of a numeric evaluation is a complex number,
+ * return `NaN` if `ce.useComplex` is false
+ */
+
+export function complexAllowed(ce: IComputeEngine) {
+  return ce.numericMode === 'auto' || ce.numericMode === 'complex';
+}
+
+/**
+ * Assert that `expr` is  in fact canonical.
+ *
+ * Called for example from within a `canonical` handler.
+ *
+ * To make an expression whose canonical status is unknown, canonical, call
+ * `expr.canonical`.
+ */
+export function asCanonical(expr: BoxedExpression): BoxedExpression {
+  expr.isCanonical = true;
+  return expr;
+}

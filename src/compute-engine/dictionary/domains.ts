@@ -1,43 +1,8 @@
-import {
-  getArg,
-  getDecimalValue,
-  getFunctionName,
-  getNumberValue,
-  getRationalValue,
-  getTail,
-  MISSING,
-} from '../../common/utils';
 import { Expression } from '../../math-json/math-json-format';
-import { inferNumericDomain } from '../domains';
-import { order } from '../order';
-import {
-  ComputeEngine,
-  Dictionary,
-  Domain,
-  Numeric,
-  NumericDomain,
-  SetDefinition,
-} from '../../math-json/compute-engine-interface';
+import { Dictionary } from '../public';
+import { NumericDomainInfo } from '../domain-utils';
 
-/**
- * Simple description of a numeric domain as a base domain, a min and
- * max value, possibly open ends, and some excluded values.
- */
-export type NumericDomainInfo = {
-  domain?: NumericDomain; // Integer, RealNumber, ComplexNumber...
-  // (not one of the 'shortcuts', i.e. PositiveInteger)
-  min?: number; // Min and Max are not defined for ComplexNumbers
-  max?: number;
-  open?: 'left' | 'right' | 'both'; // For RealNumbers
-  /** Values from _excludedValues_ are considered not in this domain */
-  excludedValues?: number[];
-  /** If defined, the values in this domain must follow the relation
-   * _period_ * _n_ + _phase_ when _n_ is in _domain_.
-   */
-  multiple?: [period: Numeric, domain: Domain, phase: Numeric];
-};
-
-export const NUMERIC_DOMAIN_INFO = {
+export const NUMERIC_DOMAIN_INFO: { [name: string]: NumericDomainInfo } = {
   Number: { domain: 'ExtendedComplexNumber' },
   ExtendedComplexNumber: { domain: 'ExtendedComplexNumber' },
   ExtendedRealNumber: {
@@ -95,7 +60,7 @@ export const NUMERIC_DOMAIN_INFO = {
  * The set of domains form a lattice with 'Anything' at the top and 'Nothing'
  * at the bottom.
  *
- * The DOMAIN_PARENT table represents this lattice by indicating the parent(s)
+ * The DOMAIN_PARENT table represents this lattice by indicating the parents
  * for each domain.
  */
 
@@ -147,7 +112,7 @@ const DOMAIN_PARENT = {
   ImaginaryNumber: 'ComplexNumber',
   ComplexNumber: 'ExtendedComplexNumber',
   ExtendedComplexNumber: 'Number',
-  NaturalNumber: 'Integer',
+  // NaturalNumber: 'Integer',
   Integer: 'RationalNumber',
   RationalNumber: 'AlgebraicNumber',
   TranscendentalNumber: 'RealNumber',
@@ -155,15 +120,15 @@ const DOMAIN_PARENT = {
   RealNumber: ['ComplexNumber', 'ExtendedRealNumber'],
   ExtendedRealNumber: 'ExtendedComplexNumber',
 
-  PositiveNumber: 'NonNegativeNumber',
-  NonNegativeNumber: 'RealNumber',
-  NonPositiveNumber: 'NegativeNumber',
-  NegativeNumber: 'RealNumber',
+  // PositiveNumber: 'NonNegativeNumber',
+  // NonNegativeNumber: 'RealNumber',
+  // NonPositiveNumber: 'NegativeNumber',
+  // NegativeNumber: 'RealNumber',
 
-  PositiveInteger: 'NonNegativeInteger',
-  NonNegativeInteger: 'Integer',
-  NonPositiveInteger: 'NegativeInteger',
-  NegativeInteger: 'Integer',
+  // PositiveInteger: 'NonNegativeInteger',
+  // NonNegativeInteger: 'Integer',
+  // NonPositiveInteger: 'NegativeInteger',
+  // NegativeInteger: 'Integer',
 
   //
   // Tensorial Domains
@@ -197,10 +162,12 @@ const DOMAIN_PARENT = {
 const DOMAIN_WIKIDATA: { [domain: string]: string } = {
   // set of numbers: Q3054943, number: Q11563
   Function: 'Q11348', // entry for 'function', not 'set of functions'
-  ComplexNumber: 'Q26851286', //set of complex numbers
+  ComplexNumber: 'Q26851286',
+  RealNumber: 'Q26851380',
+  RationalNumber: 'Q1244890',
   Integer: 'Q47007735', // ZZ ...-3, -2, -1, 0, 1, 2, 3, 4, ...
   ImaginaryNumber: 'Q47310259', // Numbers on the imaginary line // Q9165172
-  NaturalNumber: 'Q28920052', //  0, 1, 2, 3...
+  // NaturalNumber: 'Q28920052', //  0, 1, 2, 3...
 };
 
 const DOMAIN_VALUE: { [domain: string]: Expression } = {
@@ -218,201 +185,169 @@ const DOMAIN_COUNT = {
   ZeroMatrix: 1,
 };
 
-const DOMAIN_INFO = {
-  Range: {
-    domain: 'ParametricDomain',
-    range: 'Domain',
-    evaluate: (_engine, min: number, max: number) => {
-      min = Math.round(min);
-      max = Math.round(max);
-      if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
-      if (min > max) return 'EmptySet';
-      if (min === -Infinity && max === +Infinity) return 'Integer';
-      if (min === 0 && max === +Infinity) return 'NaturalNumber';
-      return ['Range', min, max];
-    },
-    isElementOf: (
-      expr: Expression<Numeric>,
-      min: Expression<Numeric>,
-      max: Expression<Numeric>
-    ) => {
-      min = getNumberValue(min);
-      if (min === null) return undefined;
-
-      max = getNumberValue(max);
-      if (max === null) return undefined;
-
-      //
-      // Compare a number
-      //
-      let val = getNumberValue(expr);
-      if (val === null) {
-        // Is it a rational, perhaps?
-        const [numer, denom] = getRationalValue(expr);
-        if (numer !== null && denom !== null) {
-          val = numer / denom;
-        }
-      }
-      if (val !== null) {
-        if (!Number.isInteger(val)) return false;
-        if (val < min) return false;
-        if (val > max) return false;
-
-        return true;
-      }
+const DOMAIN_INFO: Dictionary = {
+  functions: [
+    {
+      // Integer, withing a min..max range
+      name: 'Range',
+      domain: 'Domain',
+      // evaluate: ( min: number, max: number) => {
+      //   min = Math.round(min);
+      //   max = Math.round(max);
+      //   if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
+      //   if (min > max) return 'EmptySet';
+      //   if (min === -Infinity && max === +Infinity) return 'Integer';
+      //   if (min === 0 && max === +Infinity) return 'NaturalNumber';
+      //   return ['Range', min, max];
+      // },
+      // isElementOf: () => {}
     },
 
-    Interval: {
-      domain: 'ParametricDomain',
-      range: 'Domain',
+    {
+      // Interval, can be open, closed, open/close or close/open
+      name: 'Interval',
+      domain: 'Domain',
       // @todo!! this should be simplify()
-      evaluate: (_engine, min: number, max: number) => {
-        if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
-        if (min > max) return 'EmptySet';
-        if (min === -Infinity && max === +Infinity) {
-          return 'RealNumber';
-        }
-        return ['Interval', min, max];
-      },
-      // isSubsetOf: (expr: Expression<Numeric>) =>
+      // evaluate: (min: number, max: number) => {
+      //   if (Number.isNaN(min) || Number.isNaN(max)) return 'EmptySet';
+      //   if (min > max) return 'EmptySet';
+      //   if (min === -Infinity && max === +Infinity) {
+      //     return 'RealNumber';
+      //   }
+      //   return ['Interval', min, max];
+      // },
+      // isSubsetOf: (expr: BoxedExpression) =>
       //   isNumericSubset(expr, 'ImaginaryNumber'),
 
       // @todo!! this should have a lhs (an expr) and a rhs (the interval)
       // then call NumericDomainInfo to ascertain
-      isElementOf: (
-        expr: Expression<Numeric>,
-        min: Expression<Numeric>,
-        max: Expression<Numeric>
-      ) => {
-        let openLeft = false;
-        let openRight = false;
-        if (getFunctionName(min) === 'Open') {
-          openLeft = true;
-          min = getArg(min, 1);
-        }
-        min = getNumberValue(min);
-        if (min === null) return undefined;
+      // isElementOf: (
+      //   expr: BoxedExpression,
+      //   min: BoxedExpression,
+      //   max: BoxedExpression
+      // ) => {
+      //   let openLeft = false;
+      //   let openRight = false;
+      //   if (min.head === 'Open') {
+      //     openLeft = true;
+      //     min = min.op(1);
+      //   }
+      //   min = min.numericValue;
+      //   if (min === null) return undefined;
 
-        if (getFunctionName(max) === 'Open') {
-          openRight = true;
-          max = getArg(max, 1);
-        }
-        max = getNumberValue(max);
-        if (max === null) return undefined;
+      //   if (max.head === 'Open') {
+      //     openRight = true;
+      //     max = max.op(1);
+      //   }
+      //   max = max.numericValue;
+      //   if (max === null) return undefined;
 
-        //
-        // Compare a number
-        //
-        let val = getNumberValue(expr);
-        if (val === null) {
-          // Is it a rational, perhaps?
-          const [numer, denom] = getRationalValue(expr);
-          if (numer !== null && denom !== null) {
-            val = numer / denom;
-          }
-        }
-        if (val !== null) {
-          if (openLeft) {
-            if (val < min) return false;
-          } else {
-            if (val <= min) return false;
-          }
-          if (openRight) {
-            if (val > max) return false;
-          } else {
-            if (val >= max) return false;
-          }
+      //   //
+      //   // Compare a number
+      //   //
+      //   const val = expr.numericValue;
+      //   if (val !== null) {
+      //     if (openLeft) {
+      //       if (val < min) return false;
+      //     } else {
+      //       if (val <= min) return false;
+      //     }
+      //     if (openRight) {
+      //       if (val > max) return false;
+      //     } else {
+      //       if (val >= max) return false;
+      //     }
 
-          return true;
-        }
+      //     return true;
+      //   }
 
-        //
-        // Compare a decimal
-        //
-        const d = getDecimalValue(expr);
-        if (d !== null) {
-          if (openLeft) {
-            if (d.lt(min)) return false;
-          } else {
-            if (d.lte(min)) return false;
-          }
-          if (openRight) {
-            if (d.gt(max)) return false;
-          } else {
-            if (d.gte(max)) return false;
-          }
-          return true;
-        }
+      //   //
+      //   // Compare a decimal
+      //   //
+      //   const d = getDecimalValue(expr);
+      //   if (d !== null) {
+      //     if (openLeft) {
+      //       if (d.lt(min)) return false;
+      //     } else {
+      //       if (d.lte(min)) return false;
+      //     }
+      //     if (openRight) {
+      //       if (d.gt(max)) return false;
+      //     } else {
+      //       if (d.gte(max)) return false;
+      //     }
+      //     return true;
+      //   }
 
-        //
-        // Complex numbers are not ordered, so return undefined as well.
-        //
+      //   //
+      //   // Complex numbers are not ordered, so return undefined as well.
+      //   //
 
-        return undefined;
-      },
+      //   return undefined;
+      // },
     },
-  },
+  ],
 };
 
 // ImaginaryNumber: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 // ComplexNumber: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
 
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 // ExtendedComplexNumber: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 // NaturalNumber: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 // Integer: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 // RationalNumber: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 // TranscendentalNumber: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 // AlgebraicNumber: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 // RealNumber: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 // ExtendedRealNumber: {
-//   isSubsetOf: (expr: Expression<Numeric>) =>
+//   isSubsetOf: (expr: BoxedExpression) =>
 //     isNumericSubset(expr, 'ImaginaryNumber'),
-//   isElementOf: (expr: Expression<Numeric>) =>
+//   isElementOf: (expr: BoxedExpression) =>
 //     isNumericElement(expr, 'ImaginaryNumber'),
 // },
 
@@ -447,362 +382,182 @@ const DOMAIN_INFO = {
 }
 */
 
-export function getDomainsDictionary(): Dictionary {
-  const result: {
-    [name: string]: SetDefinition;
-  } = { Nothing: { countable: true, supersets: [], domain: 'Domain' } };
-  for (const domain of Object.keys(DOMAIN_PARENT)) {
-    const parents = Array.isArray(DOMAIN_PARENT[domain])
-      ? DOMAIN_PARENT[domain]
-      : [DOMAIN_PARENT[domain]];
+// export function getDomainsDictionary(): Dictionary {
+//   const result: {
+//     [name: string]: SetDefinition;
+//   } = { Nothing: { supersets: [], domain: 'Domain' } };
+//   for (const domain of Object.keys(DOMAIN_PARENT)) {
+//     const parents = Array.isArray(DOMAIN_PARENT[domain])
+//       ? DOMAIN_PARENT[domain]
+//       : [DOMAIN_PARENT[domain]];
 
-    result[domain] = DOMAIN_INFO[domain] ?? {};
+//     result[domain] = DOMAIN_INFO[domain] ?? {};
 
-    result[domain] = {
-      domain: DOMAIN_INFO[domain] ?? 'Domain',
-      wikidata: DOMAIN_WIKIDATA[domain],
-      supersets: parents,
-      value: DOMAIN_VALUE,
-      countable: DOMAIN_COUNT[domain] !== undefined,
-      size: () => DOMAIN_COUNT[domain],
-      ...(result[domain] as any),
-    };
+//     result[domain] = {
+//       domain: DOMAIN_INFO[domain] ?? 'Domain',
+//       wikidata: DOMAIN_WIKIDATA[domain],
+//       supersets: parents,
+//       value: DOMAIN_VALUE,
+//       countable: DOMAIN_COUNT[domain] !== undefined,
+//       size: () => DOMAIN_COUNT[domain],
+//       ...(result[domain] as any),
+//     };
 
-    for (const parent of parents) {
-      if (parent !== 'Anything' && !DOMAIN_PARENT[parent]) {
-        throw new Error(`Unknown parent of domain "${domain}": "${parent}"`);
-      }
-    }
-  }
+//     for (const parent of parents) {
+//       if (parent !== 'Anything' && !DOMAIN_PARENT[parent]) {
+//         throw new Error(`Unknown parent of domain "${domain}": "${parent}"`);
+//       }
+//     }
+//   }
 
-  // Add all the supersets of Nothing: all the sets that are not the parent of anyone
-  const sets = new Set<Domain>();
-  for (const domain of Object.keys(result)) sets.add(domain as Domain);
-  for (const domain of Object.keys(result)) {
-    for (const parent of result[domain].supersets) sets.delete(parent);
-  }
-  sets.delete('Nothing');
-  result['Nothing'].supersets = [...sets.values()];
+//   // Add all the supersets of Nothing: all the sets that are not the parent of anyone
+//   const sets = new Set<Domain>();
+//   for (const domain of Object.keys(result)) sets.add(domain as Domain);
+//   for (const domain of Object.keys(result)) {
+//     for (const parent of result[domain].supersets) sets.delete(parent);
+//   }
+//   sets.delete('Nothing');
+//   result['Nothing'].supersets = [...sets.values()];
 
-  // for (const domain of Object.keys(result)) {
-  //   for (const parent of result[domain].supersets) {
-  //     for (const candidate of result[domain].supersets) {
-  //       if (candidate !== parent && isSubdomainOf(result, candidate, parent)) {
-  //         throw new Error(
-  //           `In domain ${domain}, the parent ${candidate} is redundant with ${parent}`
-  //         );
-  //       }
-  //     }
-  //   }
-  // }
+//   // for (const domain of Object.keys(result)) {
+//   //   for (const parent of result[domain].supersets) {
+//   //     for (const candidate of result[domain].supersets) {
+//   //       if (candidate !== parent && isSubdomainOf(result, candidate, parent)) {
+//   //         throw new Error(
+//   //           `In domain ${domain}, the parent ${candidate} is redundant with ${parent}`
+//   //         );
+//   //       }
+//   //     }
+//   //   }
+//   // }
 
-  for (const domain of Object.keys(result)) {
-    let found = false;
-    let count = 0;
-    let parents: string[] = [domain];
-    while (count < 512 && !found) {
-      const parent = parents.pop()!;
-      found = parent === 'Anything';
-      if (!found) parents = [...parent, ...result[parent].supersets];
-      count++;
-    }
-    if (!found) {
-      throw new Error(`The "${domain}" domain cannot reach "Anything"`);
-    }
-  }
-  return result;
-}
+//   for (const domain of Object.keys(result)) {
+//     let found = false;
+//     let count = 0;
+//     let parents: string[] = [domain];
+//     while (count < 512 && !found) {
+//       const parent = parents.pop()!;
+//       found = parent === 'Anything';
+//       if (!found) parents = [...parent, ...result[parent].supersets];
+//       count++;
+//     }
+//     if (!found) {
+//       throw new Error(`The "${domain}" domain cannot reach "Anything"`);
+//     }
+//   }
+//   return result;
+// }
 
-/**
- * Return a canonical representation of a domain.
- *
- * Convert Range/Interval to constants
- */
-export function canonicalDomain(
-  engine: ComputeEngine,
-  dom: Expression
-): Expression {
-  // @todo: same as commutative functions
-  const name = getFunctionName(dom);
-  if (name === 'Union' || name === 'Intersection') {
-    // If a Union or Intersection sort the arguments...
-    return [name, ...getTail(dom).sort(order)];
-  } else if (name === 'SetMinus' || name === 'Complement') {
-    return [name, canonicalDomain(engine, getArg(dom, 1) ?? MISSING)];
-  }
+// /**
+//  * Return a canonical representation of a domain.
+//  *
+//  * Convert Range/Interval to constants
+//  */
+// // export function canonicalDomain(
+// //   ce: ComputeEngineInterface,
+// //   dom: BoxedExpression
+// // ): BoxedExpression {
+// //   // @todo: same as commutative functions
+// //   const name = dom.head;
+// //   if (name === 'Union' || name === 'Intersection') {
+// //     // If a Union or Intersection sort the arguments...
+// //     return ce.boxFunction(name, [...[...dom.tail!].sort(order)]);
+// //   } else if (name === 'SetMinus' || name === 'Complement') {
+// //     const op1 = dom.op(1);
+// //     const op2 = dom.op(2);
+// //     if (!op1 || !op2) return dom;
+// //     return ce.boxFunction(name, [op1, op2]);
+// //   }
 
-  return dom;
-}
+// //   return dom;
+// // }
 
-export function asNumber(x: Expression<Numeric>): number | null {
-  const val = getNumberValue(x);
-  if (val !== null) return val;
+// /**
+//  * Check two `NumericDomainInfo` against each other
+//  */
+// export function compareNumericDomainInfo(
+//   lhs: NumericDomainInfo,
+//   op: string, // 'Equal' | 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual' | 'Element',
+//   rhs: NumericDomainInfo
+// ): boolean | undefined | null {
+//   //
+//   // Is it a domain check?
+//   //
+//   if (op === 'Element') {
+//     // Check if element of a domain
+//     // lhs must be a subdomain of rhs, and lhs.min and lhs.max have to
+//     // be in the range of rhs
+//     if (!lhs.domain || !rhs.domain) return null;
+//     if (!isNumericSubdomain(lhs.domain, rhs.domain)) return false;
 
-  const [numer, denom] = getRationalValue(x);
-  if (numer !== null && denom !== null) {
-    return numer / denom;
-  }
-  const d = getDecimalValue(x);
-  if (d !== null) return d.toNumber();
+//     // If there's no min/max, it's a complex number
+//     if (!rhs.min || !rhs.max || !lhs.min || !lhs.max) return true;
 
-  return null;
-}
+//     return isValueInDomain(lhs.min, rhs)! && isValueInDomain(lhs.max, rhs)!;
+//   }
 
-/**
- * Return an efficient data structure describing a numeric domain,
- * an `Interval` or `Range`
- * @todo could also check for `Multiple`
- */
-export function inferNumericDomainInfo(
-  expr: Expression
-): NumericDomainInfo | null {
-  const head = getFunctionName(expr);
-  if (head === 'Range' || head == 'Interval') {
-    let open: 'both' | 'left' | 'right' | undefined = undefined;
-    const arg1 = getArg(expr, 1);
-    const arg2 = getArg(expr, 2);
-    let min: number | null = null;
-    let max: number | null = null;
-    if (getFunctionName(arg1) === 'Open') {
-      open = 'left';
-      min = asNumber(getArg(arg1, 1));
-    } else {
-      min = asNumber(arg1);
-    }
-    if (getFunctionName(getArg(expr, 2)) === 'Open') {
-      open = open === undefined ? 'right' : 'both';
-      max = asNumber(getArg(arg2, 1));
-    } else {
-      max = asNumber(arg2);
-    }
-    if (min === null || max === null) return null;
-    return {
-      min,
-      max,
-      open,
-      domain: head === 'Range' ? 'Integer' : 'RealNumber',
-    };
-  }
-  const val = asNumber(expr);
-  if (val !== null) {
-    return { min: val, max: val, domain: inferNumericDomain(val) ?? 'Number' };
-  }
-  return null;
-}
+//   if (op === 'Equal') {
+//     return (
+//       lhs.domain === rhs.domain && lhs.min === rhs.min && lhs.max == rhs.max
+//     );
+//   }
 
-/**
- * Check two `NumericDomainInfo` against each other
- */
-export function compareNumericDomainInfo(
-  lhs: NumericDomainInfo,
-  op: string, // 'Equal' | 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual' | 'Element',
-  rhs: NumericDomainInfo
-): boolean | undefined | null {
-  //
-  // Is it a domain check?
-  //
-  if (op === 'Element') {
-    // Check if element of a domain
-    // lhs must be a subdomain of rhs, and lhs.min and lhs.max have to
-    // be in the range of rhs
-    if (!lhs.domain || !rhs.domain) return null;
-    if (!isNumericSubdomain(lhs.domain, rhs.domain)) return false;
+//   if (op === 'Less') {
+//     if (!lhs.domain || !rhs.domain) return null;
+//     if (!lhs.min || !lhs.max || !rhs.min || !rhs.max) return null;
+//     if (isNumericSubdomain(lhs.domain, rhs.domain)) {
+//       return lhs.max < rhs.min;
+//     }
+//     return false;
+//   }
 
-    // If there's no min/max, it's a complex number
-    if (!rhs.min || !rhs.max || !lhs.min || !lhs.max) return true;
+//   if (op === 'LessEqual') {
+//     if (!lhs.domain || !rhs.domain) return null;
+//     if (!lhs.min || !lhs.max || !rhs.min || !rhs.max) return null;
+//     if (isNumericSubdomain(lhs.domain, rhs.domain)) {
+//       if (rhs.open === 'left' || rhs.open === 'both') {
+//         return lhs.max <= rhs.min;
+//       } else {
+//         return lhs.max < rhs.min;
+//       }
+//     }
+//     return false;
+//   }
 
-    return isValueInDomain(lhs.min, rhs)! && isValueInDomain(lhs.max, rhs)!;
-  }
+//   if (op === 'Greater') {
+//     if (!lhs.domain || !rhs.domain) return null;
+//     if (!lhs.min || !lhs.max || !rhs.min || !rhs.max) return null;
+//     if (isNumericSubdomain(lhs.domain, rhs.domain)) {
+//       return lhs.min > rhs.max;
+//     }
+//     return false;
+//   }
 
-  if (op === 'Equal') {
-    return (
-      lhs.domain === rhs.domain && lhs.min === rhs.min && lhs.max == rhs.max
-    );
-  }
+//   if (op === 'GreaterEqual') {
+//     if (!lhs.domain || !rhs.domain) return null;
+//     if (!lhs.min || !lhs.max || !rhs.min || !rhs.max) return null;
+//     if (isNumericSubdomain(lhs.domain, rhs.domain)) {
+//       if (rhs.open === 'right' || rhs.open === 'both') {
+//         return lhs.min >= rhs.max;
+//       } else {
+//         return lhs.min > rhs.max;
+//       }
+//     }
+//     return false;
+//   }
 
-  if (op === 'Less') {
-    if (!lhs.domain || !rhs.domain) return null;
-    if (!lhs.min || !lhs.max || !rhs.min || !rhs.max) return null;
-    if (isNumericSubdomain(lhs.domain, rhs.domain)) {
-      return lhs.max < rhs.min;
-    }
-    return false;
-  }
+//   return null;
+// }
 
-  if (op === 'LessEqual') {
-    if (!lhs.domain || !rhs.domain) return null;
-    if (!lhs.min || !lhs.max || !rhs.min || !rhs.max) return null;
-    if (isNumericSubdomain(lhs.domain, rhs.domain)) {
-      if (rhs.open === 'left' || rhs.open === 'both') {
-        return lhs.max <= rhs.min;
-      } else {
-        return lhs.max < rhs.min;
-      }
-    }
-    return false;
-  }
+// /**
+//  * Return true if the lhs is in the rhs (regardless of domain compatibility)
+//  */
+// function isValueInDomain(lhs: number, rhs: NumericDomainInfo): boolean | null {
+//   if (typeof rhs.min !== 'number' || typeof rhs.max !== 'number') return null;
 
-  if (op === 'Greater') {
-    if (!lhs.domain || !rhs.domain) return null;
-    if (!lhs.min || !lhs.max || !rhs.min || !rhs.max) return null;
-    if (isNumericSubdomain(lhs.domain, rhs.domain)) {
-      return lhs.min > rhs.max;
-    }
-    return false;
-  }
+//   if (rhs.open === 'both') return lhs > rhs.min && lhs < rhs.max;
+//   if (rhs.open === 'left') return lhs > rhs.min && lhs <= rhs.max;
+//   if (rhs.open === 'right') return lhs >= rhs.min && lhs < rhs.max;
 
-  if (op === 'GreaterEqual') {
-    if (!lhs.domain || !rhs.domain) return null;
-    if (!lhs.min || !lhs.max || !rhs.min || !rhs.max) return null;
-    if (isNumericSubdomain(lhs.domain, rhs.domain)) {
-      if (rhs.open === 'right' || rhs.open === 'both') {
-        return lhs.min >= rhs.max;
-      } else {
-        return lhs.min > rhs.max;
-      }
-    }
-    return false;
-  }
-
-  return null;
-}
-
-/**
- * Return true if the lhs is in the rhs (regardless of domain compatibility)
- */
-function isValueInDomain(lhs: number, rhs: NumericDomainInfo): boolean | null {
-  if (!rhs.min || !rhs.max) return null;
-
-  if (rhs.open === 'both') return lhs > rhs.min && lhs < rhs.max;
-  if (rhs.open === 'left') return lhs > rhs.min && lhs <= rhs.max;
-  if (rhs.open === 'right') return lhs >= rhs.min && lhs < rhs.max;
-
-  return lhs >= rhs.min && lhs <= rhs.max;
-}
-
-/** Return true if lhs is a numeric subdomain (or equal to) rhs
- */
-export function isNumericSubdomain(
-  lhs: Domain,
-  rhs: NumericDomain
-): boolean | undefined {
-  return (
-    {
-      Number: [
-        'Number',
-        'ExtendedComplexNumber',
-        'ExtendedRealNumber',
-        'ComplexNumber',
-        'ImaginaryNumber',
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NegativeNumber',
-        'NonNegativeNumber',
-        'NonNegativeInteger',
-        'NonPositiveNumber',
-        'NonPositiveInteger',
-        'PositiveInteger',
-        'PositiveNumber',
-      ],
-      ExtendedComplexNumber: [
-        'Number', // Since `Number` and `ComplexNumber` are synonyms
-        'ExtendedRealNumber',
-        'ComplexNumber',
-        'ImaginaryNumber',
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NegativeNumber',
-        'NonNegativeNumber',
-        'NonNegativeInteger',
-        'NonPositiveNumber',
-        'NonPositiveInteger',
-        'PositiveInteger',
-        'PositiveNumber',
-      ],
-      ExtendedRealNumber: [
-        'ExtendedRealNumber',
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NegativeNumber',
-        'NonNegativeNumber',
-        'NonNegativeInteger',
-        'NonPositiveNumber',
-        'NonPositiveInteger',
-        'PositiveInteger',
-        'PositiveNumber',
-      ],
-      ComplexNumber: ['ComplexNumber', 'ImaginaryNumber'],
-      ImaginaryNumber: ['ImaginaryNumber'],
-      RealNumber: [
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NegativeNumber',
-        'NonNegativeNumber',
-        'NonNegativeInteger',
-        'NonPositiveNumber',
-        'NonPositiveInteger',
-        'PositiveInteger',
-        'PositiveNumber',
-      ],
-      TranscendentalNumber: ['TranscendentalNumber'],
-      AlgebraicNumber: [
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NonNegativeInteger',
-        'NonPositiveInteger',
-        'PositiveInteger',
-      ],
-      RationalNumber: [
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NonNegativeInteger',
-        'NonPositiveInteger',
-        'PositiveInteger',
-      ],
-      Integer: [
-        'Integer',
-        'NegativeInteger',
-        'NonNegativeInteger',
-        'NonPositiveInteger',
-        'PositiveInteger',
-      ],
-      NegativeNumber: ['NegativeNumber', 'NegativeInteger'],
-      NonNegativeNumber: [
-        'NonNegativeNumber',
-        'PositiveNumber',
-        'NonNegativeInteger',
-        'PositiveInteger',
-      ],
-      NonPositiveNumber: [
-        'NonPositiveNumber',
-        'NegativeNumber',
-        'NegativeInteger',
-      ],
-      PositiveNumber: ['PositiveNumber', 'PositiveInteger'],
-
-      NegativeInteger: ['NegativeInteger'],
-      PositiveInteger: ['PositiveInteger'],
-      NonNegativeInteger: ['NonNegativeInteger', 'PositiveInteger'],
-      NonPositiveInteger: ['NegativeInteger'],
-    }[rhs]?.includes(lhs) ?? undefined
-  );
-}
+//   return lhs >= rhs.min && lhs <= rhs.max;
+// }

@@ -1,996 +1,850 @@
-import { Expression } from '../../math-json/math-json-format';
+import { Complex } from 'complex.js';
 import {
-  ADD,
-  applyRecursively,
-  COMPLEX_INFINITY,
-  DIVIDE,
-  getArg,
-  getArgCount,
-  getComplexValue,
-  getDecimalValue,
-  getFunctionHead,
-  getFunctionName,
-  getNumberValue,
-  getRationalSymbolicValue,
-  getRationalValue,
-  getSymbolName,
-  getTail,
-  isAtomic,
-  isNumberObject,
-  mapArgs,
-  MISSING,
-  MULTIPLY,
-  NEGATE,
-  NOTHING,
-  SUBTRACT,
-  UNDEFINED,
-} from '../../common/utils';
-import type {
-  ComputeEngine,
-  Dictionary,
-  Numeric,
-} from '../../math-json/compute-engine-interface';
-import { factorial, gamma, lngamma, SMALL_INTEGERS } from '../numeric';
+  gamma as gammaComplex,
+  lngamma as lngammaComplex,
+} from '../numerics/numeric-complex';
 import {
-  DECIMAL_MINUS_ONE,
-  DECIMAL_ONE,
-  DECIMAL_ZERO,
   factorial as factorialDecimal,
   gamma as gammaDecimal,
   lngamma as lngammaDecimal,
-  gcd as decimalGcd,
-} from '../numeric-decimal';
+} from '../numerics/numeric-decimal';
 import {
-  isEqual,
-  isInfinity,
-  isNegative,
-  isNotZero,
-  isOne,
-  isPositive,
-  isZero,
-} from '../predicates';
-import { Decimal } from 'decimal.js';
-import { Complex } from 'complex.js';
-import { gamma as gammaComplex } from '../numeric-complex';
-import { box } from '../../math-json/boxed/expression';
+  factorial,
+  factorPower,
+  fromDigits,
+  gamma,
+  lngamma,
+  rationalize,
+} from '../numerics/numeric';
+import { BoxedExpression, Dictionary, IComputeEngine } from '../public';
+import { complexAllowed, useDecimal } from '../boxed-expression/utils';
+import { canonicalNegate, processNegate } from '../symbolic/negate';
+import {
+  canonicalAdd,
+  domainAdd,
+  numEvalAdd,
+  processAdd,
+} from './arithmetic-add';
+import {
+  canonicalMultiply,
+  numEvalMultiply,
+  processMultiply,
+} from './arithmetic-multiply';
+import { canonicalDivide } from './arithmetic-divide';
+import { canonicalPower, processPower } from './arithmetic-power';
 
-// @todo
-// Re or RealPart
-// Im or ImaginaryPart
-// Arg or Argument
-// Conjugate
+// @todo Future additions to the dictionary
+// Re: real part
+// Im: imaginary part
+// Arg: argument (phase angle in radians)
+// Conjugate: complex conjugate
 // complex-cartesian (constructor)
 // complex-polar
+// LogOnePlus: { domain: 'Number' },
+// mod (modulo). See https://numerics.diploid.ca/floating-point-part-4.html,
+// regarding 'remainder' and 'truncatingRemainder'
+// Lcm
+// Gcd
+// Sum
+// Product
+// Numerator
+// Denominator
+// Rationalize: convert an approximate number to a nearby rational
+// Mod: modulo
+// Boole
 
-export const ARITHMETIC_DICTIONARY: Dictionary<Numeric> = {
-  //
-  // Constants
-  //
-  MachineEpsilon: {
-    /*
-            The difference between 1 and the next larger floating point number
-            
-            2^{−52}
-            
-            See https://en.wikipedia.org/wiki/Machine_epsilon
-        */
-    domain: 'RealNumber',
-    constant: true,
-    value: { num: Number.EPSILON.toString() },
-  },
+// # Prime Numbers:
+// Prime: gives the nth prime number
+// NextPrime: the smallest prime larger than `n`
+// PrimeFactors
+// Divisors
 
-  ImaginaryUnit: {
-    domain: 'ImaginaryNumber',
-    constant: true,
-    wikidata: 'Q193796',
-  },
-  ExponentialE: {
-    domain: 'TranscendentalNumber',
-    wikidata: 'Q82435',
-    constant: true,
-    value: (engine: ComputeEngine) => {
-      if (engine.numericFormat === 'decimal') return Decimal.exp(1);
-      if (engine.numericFormat === 'complex') return Complex.E;
-      return 2.7182818284590452354;
-    },
-  },
-  GoldenRatio: {
-    domain: 'AlgebraicNumber',
-    wikidata: 'Q41690',
-    constant: true,
-    hold: false,
-    value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
-  },
-  CatalanConstant: {
-    domain: 'RealNumber', // Not proven irrational or transcendental
-    wikidata: 'Q855282',
-    constant: true,
-    value: { num: '0.91596559417721901505' },
-  },
-  EulerGamma: {
-    domain: 'RealNumber', // Not proven irrational
-    wikidata: 'Q273023',
-    constant: true,
-    value: { num: '0.577215664901532860606' },
-  },
-  Quarter: {
-    domain: 'RationalNumber',
-    wikidata: 'Q2310416',
-    constant: true,
-    hold: false,
-    value: [DIVIDE, 3, 4],
-  },
-  Third: {
-    domain: 'RationalNumber',
-    wikidata: 'Q20021125',
-    constant: true,
-    hold: false,
-    value: [DIVIDE, 1, 3],
-  },
-  Half: {
-    domain: 'RationalNumber',
-    wikidata: 'Q2114394',
-    constant: true,
-    hold: false,
-    value: [DIVIDE, 1, 2],
-  },
-  TwoThird: {
-    domain: 'RationalNumber',
-    constant: true,
-    hold: false,
-    value: [DIVIDE, 2, 3],
-  },
-  ThreeQuarter: {
-    domain: 'RationalNumber',
-    constant: true,
-    hold: false,
-    value: [DIVIDE, 3, 4],
-  },
+// # Combinatorials
+// Binomial
+// Fibonacci
 
-  //
-  // Functions
-  //
-  Abs: {
-    domain: 'Function',
-    wikidata: 'Q3317982', //magnitude 'Q120812 (for reals)
-    threadable: true,
-    idempotent: true,
-    numeric: true,
-    range: ['Interval', 0, Infinity],
-    evalNumber: (_ce, val: number): number => Math.abs(val),
-    evalComplex: (_ce, n: Complex | number): Complex => Complex.abs(n),
-    evalDecimal: (_ce, n: Decimal | number): Decimal => Decimal.abs(n),
-  },
-  Add: {
-    domain: 'Function',
-    wikidata: 'Q32043',
-    associative: true,
-    commutative: true,
-    threadable: true,
-    idempotent: true,
-    range: domainAdd,
-    numeric: true,
-    simplify: simplifyAdd,
-    evalNumber: (_ce: ComputeEngine, ...args: number[]): number => {
-      if (args.length === 0) return 0;
+export const ARITHMETIC_DICTIONARY: Dictionary[] = [
+  {
+    //
+    // Functions
+    //
+    functions: [
+      {
+        name: 'Abs',
+        domain: 'Number',
+        range: [0, +Infinity],
+        wikidata: 'Q3317982', // magnitude 'Q120812 (for reals)
+        threadable: true,
+        idempotent: true,
+        numeric: true,
+        complexity: 1200,
+        simplify: (ce, ops) => processAbs(ce, ops[0], 'simplify'),
+        evaluate: (ce, ops) => processAbs(ce, ops[0], 'evaluate'),
+        N: (ce, ops) => processAbs(ce, ops[0], 'N'),
+      },
 
-      let c = 0;
-      for (const arg of args) c += arg;
-      return c;
-    },
-    evalComplex: (
-      _ce: ComputeEngine,
-      ...args: (Complex | number)[]
-    ): Complex => {
-      if (args.length === 0) return Complex.ZERO;
+      {
+        name: 'Add',
+        wikidata: 'Q32043',
+        associative: true,
+        commutative: true,
+        threadable: true,
+        idempotent: true,
+        evalDomain: domainAdd,
+        numeric: true,
+        complexity: 1300,
+        canonical: (ce, args) => canonicalAdd(ce, args),
+        simplify: (ce, ops) => processAdd(ce, ops, 'simplify'),
+        evaluate: (ce, ops) => processAdd(ce, ops, 'evaluate'),
+        N: (ce, ops) => numEvalAdd(ce, ops),
+      },
 
-      let c = Complex.ZERO;
-      for (const arg of args) c = c.add(arg);
-      return c;
-    },
-    evalDecimal: (
-      _ce: ComputeEngine,
-      ...args: (number | Decimal)[]
-    ): Decimal => {
-      if (args.length === 0) return DECIMAL_ZERO;
+      {
+        name: 'Ceil',
+        description: 'Rounds a number up to the next largest integer',
+        numeric: true,
+        complexity: 1250,
+        evalDomain: (ce, ops) =>
+          ops[0].isNumber ? ce.symbol('Integer') : ce.symbol('Nothing'),
+        evaluate: (ce, ops) => {
+          const op1 = ops[0];
+          if (op1.decimalValue) return ce.number(op1.decimalValue.ceil());
+          if (op1.complexValue) return ce.number(op1.complexValue.ceil(0));
+          if (op1.asFloat !== null) return ce.number(Math.ceil(op1.asFloat));
 
-      let c = DECIMAL_ZERO;
-      for (const arg of args) c = c.add(arg);
-      return c;
-    },
-    evaluate: (
-      ce: ComputeEngine,
-      ...args: Expression[]
-    ): Expression<Numeric> => {
-      // Some arguments could not be evaluated to numbers or there's a mix
-      // of Decimal and Complex:
-      // still try to add the ones that are numeric, keep the others as is.
+          return undefined;
+        },
+      },
 
-      if (args.length === 0) return 0;
+      {
+        name: 'Chop',
+        associative: true,
+        threadable: true,
+        idempotent: true,
+        numeric: true,
+        complexity: 1200,
+        evalDomain: (ce, ops) =>
+          ops[0].isNumber ? ops[0].domain : ce.symbol('Nothing'),
+        N: (ce, ops) => {
+          const op1 = ops[0];
+          if (op1.decimalValue) return ce.number(ce.chop(op1.decimalValue));
+          if (op1.complexValue) return ce.number(ce.chop(op1.complexValue));
+          if (op1.asFloat !== null) return ce.number(ce.chop(op1.asFloat));
 
-      let result: Expression[] = ['Add'];
-      const decimals = args.filter((x) => x instanceof Decimal);
-      if (decimals.length > 0) {
-        if (decimals.length === 1) {
-          result.push(decimals[0]);
-        } else {
-          result.push(ce.N(['Add', ...decimals]));
-        }
-      }
+          return undefined;
+        },
+      },
 
-      const complexes = args.filter((x) => x instanceof Complex);
-      if (complexes.length > 0) {
-        if (complexes.length === 1) {
-          result.push(complexes[0]);
-        } else {
-          result.push(ce.N(['Add', ...complexes]));
-        }
-      }
+      {
+        // This function is converted during boxing, so unlikely to encounter
+        name: 'Complex',
+        wikidata: 'Q11567',
+        domain: 'ComplexNumber',
+        complexity: 500,
+      },
 
-      const numbers = args.filter((x) => typeof x === 'number');
-      if (numbers.length > 0) {
-        if (numbers.length === 1) {
-          result.push(numbers[0]);
-        } else {
-          result.push(ce.N(['Add', ...numbers]));
-        }
-      }
-      const others = args.filter(
-        (x) =>
-          typeof x !== 'number' &&
-          !(x instanceof Decimal) &&
-          !(x instanceof Complex)
-      );
+      {
+        name: 'Divide',
+        wikidata: 'Q1226939',
+        domain: 'Number',
+        numeric: true,
+        complexity: 2500,
+        // - if numer product of numbers, or denom product of numbers,
+        // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
+        canonical: (ce, args) => canonicalDivide(ce, args[0], args[1]),
+      },
 
-      result = [...result, ...others];
+      {
+        name: 'Exp',
+        domain: 'Number',
+        wikidata: 'Q168698',
+        threadable: true,
+        numeric: true,
+        complexity: 3500,
+        // Exp(x) -> e^x
+        canonical: (ce, args) => ce.power(ce.symbol('ExponentialE'), args[0]),
+      },
 
-      if (result.length === 0) return 0;
-      if (result.length === 1) return result[1];
-      return result;
-    },
-  },
-  Chop: {
-    domain: 'Function',
-    associative: true,
-    threadable: true,
-    idempotent: true,
-    numeric: true,
-    range: 'Number',
-    evalNumber: (ce: ComputeEngine, val: number): number => ce.chop(val),
-    evalComplex: (ce: ComputeEngine, n: Complex | number): Complex =>
-      ce.chop(n),
-    evalDecimal: (ce: ComputeEngine, n: Decimal | number): Decimal =>
-      ce.chop(n),
-  },
-  Ceil: {
-    domain: 'Function',
-    range: 'Number',
-    numeric: true,
-    /** rounds a number up to the next largest integer */
-    evalNumber: (_ce, val: number): number => Math.ceil(val),
-    evalComplex: (_ce, n: Complex | number): Complex => Complex.ceil(n),
-    evalDecimal: (_ce, n: Decimal | number): Decimal => Decimal.ceil(n),
-  },
-  Divide: {
-    domain: 'Function',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, lhs: number, rhs: number): number => lhs / rhs,
-    evalComplex: (_ce, lhs: Complex | number, rhs: Complex | number): Complex =>
-      typeof lhs === 'number' ? new Complex(lhs).div(rhs) : lhs.div(rhs),
-    evalDecimal: (_ce, lhs: Decimal | number, rhs: Decimal | number): Decimal =>
-      Decimal.div(lhs, rhs),
-  },
-  Exp: {
-    domain: 'Function',
-    wikidata: 'Q168698',
-    threadable: true,
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, val: number): number => Math.exp(val),
-    evalComplex: (_ce, val: Complex | number): Complex =>
-      typeof val === 'number' ? new Complex(val).exp() : val.exp(),
-    evalDecimal: (_ce, val: Decimal | number): Decimal => Decimal.exp(val),
-  },
-  Erf: {
-    // Error function
-    domain: 'Function',
-    range: 'Number',
-    numeric: true,
-  },
-  Erfc: {
-    // Complementary Error Function
-    domain: 'Function',
-    range: 'Number',
-    numeric: true,
-  },
-  Factorial: {
-    wikidata: 'Q120976',
-    domain: 'Function',
-    range: domainFactorial,
-    numeric: true,
-    evalNumber: (_ce, n: number): number => factorial(n),
-    evalComplex: (_ce, c: Complex | number): Complex =>
-      typeof c === 'number'
-        ? gammaComplex(new Complex(c + 1))
-        : gammaComplex(c.add(1)),
-    evalDecimal: (_ce, d: Decimal | number): Decimal => factorialDecimal(d),
-  },
-  Floor: {
-    domain: 'Function',
-    wikidata: 'Q56860783',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, x: number): number => Math.floor(x),
-    evalDecimal: (_ce, x: Decimal | number): Decimal => Decimal.floor(x),
-  },
-  Gamma: {
-    domain: 'Function',
-    wikidata: 'Q190573',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, n: number): number => gamma(n),
-    // evalComplex: (_ce, c: Complex): Complex => gammaComplex(c),
-    evalDecimal: (_ce, d: Decimal | number): Decimal => gammaDecimal(d),
-  },
-  LogGamma: {
-    domain: 'Function',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, n: number): number => lngamma(n),
-    // evalComplex: (_ce, c: Complex): Complex => lngammaComplex(c),
-    evalDecimal: (_ce, d: Decimal | number): Decimal => lngammaDecimal(d),
-  },
-  Ln: {
-    domain: 'Function',
-    wikidata: 'Q11197',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, x: number): number => Math.log(x),
-    evalComplex: (_ce, c: Complex | number): Complex =>
-      typeof c === 'number' ? new Complex(c).log() : c.log(),
-    evalDecimal: (_ce, x: Decimal | number): Decimal => Decimal.log(x),
-  },
-  Log: {
-    domain: 'Function',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, base: number, x: number): number =>
-      Math.log(x) / Math.log(base),
-    evalComplex: (
-      _ce,
-      base: Complex | number,
-      x: Complex | number
-    ): Complex => {
-      const cBase = typeof base === 'number' ? new Complex(base) : base;
-      const cX = typeof x === 'number' ? new Complex(x) : x;
-      return cX.log().div(cBase.log());
-    },
-    evalDecimal: (_ce, base: Decimal | number, x: Decimal | number): Decimal =>
-      Decimal.log(x).div(Decimal.log(base)),
-  },
-  Lb: {
-    domain: 'Function',
-    wikidata: 'Q581168',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, x: number): number => Math.log2(x),
-    evalComplex: (_ce, base: Complex, x: Complex): Complex => {
-      const cX = typeof x === 'number' ? new Complex(x) : x;
-      return cX.log().div(Complex.log(2));
-    },
-    evalDecimal: (_ce, x: Decimal): Decimal =>
-      Decimal.log(x).div(Decimal.log(2)),
-  },
-  Lg: {
-    domain: 'Function',
-    wikidata: 'Q966582',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, x: number): number => Math.log10(x),
-    evalComplex: (_ce, base: Complex, x: Complex): Complex => {
-      const cX = typeof x === 'number' ? new Complex(x) : x;
-      return cX.log().div(Complex.log(10));
-    },
-    evalDecimal: (_ce, x: Decimal): Decimal =>
-      Decimal.log(x).div(Decimal.log(10)),
-  },
-  // LogOnePlus: { domain: 'Function' },
-  Multiply: {
-    domain: 'Function',
-    wikidata: 'Q40276',
-    associative: true,
-    commutative: true,
-    idempotent: true,
-    range: 'Number',
-    simplify: simplifyMultiply,
-    numeric: true,
-    evalNumber: evalNumberMultiply,
-    evalComplex: (
-      _ce: ComputeEngine,
-      ...args: (number | Complex)[]
-    ): Decimal => {
-      if (args.length === 0) return Complex.ONE;
+      {
+        name: 'Erf',
+        description: 'Complementary Error Function',
+        domain: 'Number',
+        numeric: true,
+        complexity: 7500,
+      },
 
-      let c = Complex.ONE;
-      for (const arg of args) c = c.mul(arg);
-      return c;
-    },
-    evalDecimal: (
-      _ce: ComputeEngine,
-      ...args: (number | Decimal)[]
-    ): Decimal => {
-      if (args.length === 0) return DECIMAL_ONE;
+      {
+        name: 'Erfc',
+        description: 'Complementary Error Function',
+        domain: 'Number',
+        numeric: true,
+        complexity: 7500,
+      },
 
-      let c = DECIMAL_ONE;
-      for (const arg of args) c = c.mul(arg);
-      return c;
-    },
-    evaluate: (
-      ce: ComputeEngine,
-      ...args: Expression[]
-    ): Expression<Numeric> => {
-      // Some arguments could not be evaluated to numbers or there's a mix
-      // of Decimal and Complex:
-      // still try to add the ones that are numeric, keep the others as is.
+      {
+        name: 'Factorial',
+        description: 'The factorial function',
+        wikidata: 'Q120976',
+        numeric: true,
+        complexity: 9000,
+        evalDomain: (ce, ops) => {
+          if (ops[0].isInteger && ops[0].isPositive)
+            return ce.symbol('Integer');
+          return ce.symbol('ComplexNumber');
+        },
+        evaluate: (ce, ops) => {
+          const n = ops[0].asSmallInteger;
+          if (n !== null && n >= 0) {
+            if (!useDecimal(ce)) return ce.number(factorial(n));
+            return ce.number(factorialDecimal(ce, ce.decimal(n)));
+          }
+          if (ops[0].complexValue)
+            return ce.number(gammaComplex(ops[0].complexValue.add(1)));
+          else if (ops[0].asFloat !== null)
+            return ce.number(gamma(1 + ops[0].asFloat));
 
-      if (args.length === 0) return 0;
+          return undefined;
+        },
+      },
 
-      let result: Expression[] = ['Multiply'];
-      const decimals = args.filter((x) => x instanceof Decimal);
-      if (decimals.length > 0) {
-        if (decimals.length === 1) {
-          result.push(decimals[0]);
-        } else {
-          result.push(ce.N(['Multiply', ...decimals]));
-        }
-      }
+      {
+        name: 'Floor',
+        domain: 'Number',
+        wikidata: 'Q56860783',
+        numeric: true,
+        complexity: 1250,
+        evaluate: (ce, ops) => {
+          if (ops[0].decimalValue)
+            return ce.number(ops[0].decimalValue.floor());
+          if (ops[0].complexValue)
+            return ce.number(ops[0].complexValue.floor(0));
+          if (ops[0].asFloat !== null)
+            return ce.number(Math.floor(ops[0].asFloat));
+          return undefined;
+        },
+      },
 
-      const complexes = args.filter((x) => x instanceof Complex);
-      if (complexes.length > 0) {
-        if (complexes.length === 1) {
-          result.push(complexes[0]);
-        } else {
-          result.push(ce.N(['Multiply', ...complexes]));
-        }
-      }
+      {
+        name: 'Gamma',
+        domain: 'Number',
+        wikidata: 'Q190573',
+        numeric: true,
+        complexity: 8000,
+        N: (ce, ops) => {
+          if (ops[0].decimalValue)
+            return ce.number(gammaDecimal(ce, ops[0].decimalValue));
+          // @todo: should gammaComplex() be always called if complexAllowed()?
+          if (ops[0].complexValue)
+            return ce.number(gammaComplex(ops[0].complexValue));
+          if (ops[0].asFloat !== null) return ce.number(gamma(ops[0].asFloat));
+          return undefined;
+        },
+      },
 
-      const numbers = args.filter((x) => typeof x === 'number');
-      if (numbers.length > 0) {
-        if (numbers.length === 1) {
-          result.push(numbers[0]);
-        } else {
-          result.push(ce.N(['Multiply', ...numbers]));
-        }
-      }
+      {
+        name: 'LogGamma',
+        domain: 'Number',
+        numeric: true,
+        complexity: 8000,
+        N: (ce, ops) => {
+          if (ops[0].decimalValue)
+            return ce.number(lngammaDecimal(ce, ops[0].decimalValue));
+          // @todo: should lngammaComplex() be always called if complexAllowed()?
+          if (ops[0].complexValue)
+            return ce.number(lngammaComplex(ops[0].complexValue));
+          if (ops[0].asFloat !== null)
+            return ce.number(lngamma(ops[0].asFloat));
+          return undefined;
+        },
+      },
 
-      const others = args.filter(
-        (x) =>
-          typeof x !== 'number' &&
-          !(x instanceof Decimal) &&
-          !(x instanceof Complex)
-      );
+      {
+        name: 'Ln',
+        description: 'Natural Logarithm',
+        domain: 'Number',
+        wikidata: 'Q204037',
+        numeric: true,
+        complexity: 4000,
+        N: (ce, ops) => {
+          if (ops[0].decimalValue) return ce.number(ops[0].decimalValue.log());
+          if (ops[0].complexValue) return ce.number(ops[0].complexValue.log());
+          if (ops[0].asFloat !== null)
+            return ce.number(Math.log(ops[0].asFloat));
+          return undefined;
+        },
+      },
 
-      result = [...result, ...others];
+      {
+        name: 'Log',
+        description: 'Log(b, z) = Logarithm of base b',
+        domain: 'Number',
+        wikidata: 'Q11197',
+        numeric: true,
+        complexity: 4100,
+        N: (ce, ops) => {
+          const exponent = ops[0];
+          const base = ops[1];
+          if (exponent.decimalValue) {
+            return ce.number(
+              exponent.decimalValue
+                .log()
+                .div(base.decimalValue ?? base.asFloat ?? NaN)
+            );
+          }
+          if (exponent.complexValue) {
+            return ce.number(
+              exponent.complexValue
+                .log()
+                .div(base.complexValue ?? base.asFloat ?? NaN)
+            );
+          }
+          if (exponent.asFloat !== null) {
+            return ce.number(
+              Math.log(exponent.asFloat) / Math.log(base.asFloat ?? NaN)
+            );
+          }
+          return undefined;
+        },
+      },
 
-      if (result.length === 0) return 1;
-      if (result.length === 1) return result[1];
-      return result;
-    },
-  },
-  Negate: {
-    domain: 'Function',
-    wikidata: 'Q715358',
-    range: 'Number',
-    simplify: (_ce: ComputeEngine, x: Expression): Expression =>
-      applyNegate(x) ?? ['Negate', x],
-    numeric: true,
-    evalNumber: (_ce, val: number) => -val,
-    evalComplex: (_ce, x: Complex | number): Complex =>
-      typeof x === 'number' ? new Complex(-x) : x.neg(),
-    evalDecimal: (_ce, x: Decimal | number): Decimal =>
-      typeof x === 'number' ? new Decimal(-x) : x.neg(),
-  },
-  Power: {
-    domain: 'Function',
-    wikidata: 'Q33456',
-    commutative: false,
-    numeric: true,
-    range: 'Number',
-    simplify: (ce: ComputeEngine, ...args: Expression[]): Expression =>
-      applyPower(ce, ['Power', ...args]),
-    // Defined as RealNumber for all power in RealNumber when base > 0;
-    // when x < 0, only defined if n is an integer
-    // if x is a non-zero complex, defined as ComplexNumber
-    // evalDomain: (ce, base: Expression, power: Expression) ;
-    evalNumber: (_ce, base: number, power: number) => Math.pow(base, power),
-    evalComplex: (_ce, base: Complex | number, power: Complex | number) => {
-      const cBase = typeof base === 'number' ? new Complex(base) : base;
-      const cPower = typeof power === 'number' ? new Complex(power) : power;
-      return Complex.pow(cBase, cPower);
-    },
-    evalDecimal: (
-      _ce,
-      base: Decimal | number,
-      power: Decimal | number
-    ): Decimal => Decimal.pow(base, power),
-  },
-  Round: {
-    domain: 'Function',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, val: number) => Math.round(val),
-    evalComplex: (_ce, val: Complex | number): Complex =>
-      typeof val === 'number' ? new Complex(val).round() : val.round(),
-    evalDecimal: (_ce, val: Decimal | number): Decimal => Decimal.round(val),
-  },
-  Sign: {
-    domain: 'Function',
-    range: ['Range', -1, 1],
-    numeric: true,
-    simplify: (ce: ComputeEngine, x: Expression): Expression =>
-      isZero(ce, x) ? 0 : isNegative(ce, x) ? -1 : 1,
-    evalNumber: (_ce, val: number) => (val === 0 ? 0 : val < 0 ? -1 : 1),
-    evalComplex: (_ce, z: Complex | number): Complex => {
-      const cZ = typeof z === 'number' ? new Complex(z) : z;
-      return cZ.div(cZ.abs());
-    },
-    evalDecimal: (_ce, val: Decimal | number) => {
-      if (typeof val === 'number') {
-        return val === 0
-          ? DECIMAL_ZERO
-          : val < 0
-          ? DECIMAL_MINUS_ONE
-          : DECIMAL_ONE;
-      }
-      return val.isZero()
-        ? DECIMAL_ZERO
-        : val.isNeg()
-        ? DECIMAL_MINUS_ONE
-        : DECIMAL_ONE;
-    },
-  },
-  SignGamma: {
-    domain: 'Function',
-    range: 'Number',
-    numeric: true,
-    /** The sign of the gamma function: -1 or +1 */
-  },
-  Sqrt: {
-    domain: 'Function',
-    wikidata: 'Q134237',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, val: number) => Math.sqrt(val),
-    evalComplex: (_ce, z: Complex | number): Complex =>
-      typeof z === 'number' ? new Complex(z).sqrt() : z.sqrt(),
-    evalDecimal: (_ce, val: Decimal): Decimal => Decimal.sqrt(val),
-  },
-  Square: {
-    domain: 'Function',
-    wikidata: 'Q3075175',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, val: number) => val * val,
-    evalComplex: (_ce, z: Complex | number): Complex =>
-      typeof z === 'number' ? new Complex(z).multiply(z) : z.mul(z),
-    evalDecimal: (_ce, val: Decimal): Decimal => Decimal.mul(val, val),
-  },
-  Root: {
-    domain: 'Function',
-    commutative: false,
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, base: number, power: number) => Math.pow(base, 1 / power),
-    evalComplex: (_ce, base: Complex, power: Complex): Complex => {
-      const cBase = typeof base === 'number' ? new Complex(base) : base;
-      const cPower =
-        typeof power === 'number'
-          ? new Complex(1 / power)
-          : new Complex(Complex.ONE.div(power));
-      return Complex.pow(cBase, cPower);
-    },
-    evalDecimal: (_ce, base: Decimal, power: Decimal): Decimal =>
-      Decimal.pow(base, DECIMAL_ONE.div(power)),
-  },
-  Subtract: {
-    domain: 'Function',
-    wikidata: 'Q40754',
-    range: 'Number',
-    numeric: true,
-    evalNumber: (_ce, lhs: number, rhs: number) => lhs - rhs,
-    evalComplex: (_ce, lhs: Complex | number, rhs: Complex | number): Complex =>
-      typeof lhs === 'number' ? new Complex(lhs).sub(rhs) : lhs.sub(rhs),
-    evalDecimal: (_ce, lhs: Decimal | number, rhs: Decimal | number): Decimal =>
-      Decimal.sub(lhs, rhs),
-  },
-  // @todo
-  // mod (modulo). See https://numerics.diploid.ca/floating-point-part-4.html,
-  // regarding 'remainder' and 'truncatingRemainder'
-  // lcm
-  // gcd
-  // root
-  // sum
-  // product
-};
+      {
+        name: 'Lb',
+        description: 'Base-2 Logarithm',
+        domain: 'Number',
+        wikidata: 'Q581168',
+        numeric: true,
+        complexity: 4100,
+        N: (ce, ops) => {
+          const exponent = ops[0];
+          if (exponent.decimalValue)
+            return ce.number(exponent.decimalValue.log().div(ce.DECIMAL_TWO));
+          if (exponent.complexValue)
+            return ce.number(exponent.complexValue.log().div(ce.complex(2)));
 
-function domainFactorial(
-  ce: ComputeEngine,
-  arg: Expression<Numeric>
-): Expression<Numeric> {
-  if (ce.isInteger(arg) && ce.isPositive(arg)) return 'Integer';
-  return 'Nothing';
-}
+          if (exponent.asFloat !== null)
+            return ce.number(Math.log2(exponent.asFloat));
+          return undefined;
+        },
+      },
 
-function domainAdd(
-  ce: ComputeEngine,
-  ...args: Expression<Numeric>[]
-): Expression<Numeric> | null {
-  let dom: Expression<Numeric> | null = null;
-  for (const arg of args) {
-    const argDom = box(arg, ce).domain;
-    if (ce.isSubsetOf(argDom, 'Number') === false) return 'Nothing';
-    if (!ce.isSubsetOf(argDom, dom)) dom = argDom;
-  }
-  return dom;
-}
+      {
+        name: 'Lg',
+        description: 'Base-10 Logarithm',
+        domain: 'Number',
+        wikidata: 'Q966582',
+        numeric: true,
+        complexity: 4100,
+        N: (ce, ops) => {
+          const exponent = ops[0];
+          if (exponent.decimalValue)
+            return ce.number(exponent.decimalValue.log().div(ce.decimal(10)));
+          if (exponent.complexValue)
+            return ce.number(exponent.complexValue.log().div(ce.complex(10)));
 
-function simplifyAdd(
-  ce: ComputeEngine,
-  ...args: Expression<Numeric>[]
-): Expression<Numeric> {
-  if (args.length === 0) return 0;
-  if (args.length === 1) return args[0];
+          if (exponent.asFloat !== null)
+            return ce.number(Math.log10(exponent.asFloat));
 
-  // To avoid underflows (i.e. '1+1e199'), use Decimal for accumulated sum
-  let numerTotal = DECIMAL_ZERO;
-  let denomTotal = DECIMAL_ONE;
-  let cTotal = Complex.ZERO;
+          return undefined;
+        },
+      },
 
-  let posInfinity = false;
-  let negInfinity = false;
-  const others: Expression<Numeric>[] = [];
+      {
+        name: 'Multiply',
+        domain: 'Number',
+        wikidata: 'Q40276',
+        associative: true,
+        commutative: true,
+        idempotent: true,
+        numeric: true,
+        complexity: 2100,
+        canonical: (ce, args) => canonicalMultiply(ce, args),
+        simplify: (ce, ops) => processMultiply(ce, ops, 'simplify'),
+        evaluate: (ce, ops) => processMultiply(ce, ops, 'evaluate'),
+        N: (ce, ops) => numEvalMultiply(ce, ops),
+      },
 
-  for (const arg of args) {
-    const symbol = getSymbolName(arg);
-    if (symbol === MISSING || symbol === NOTHING || symbol === UNDEFINED)
-      return NaN;
-    if (symbol === COMPLEX_INFINITY) return COMPLEX_INFINITY;
-    if (isInfinity(ce, arg)) {
-      if (isPositive(ce, arg)) {
-        posInfinity = true;
-      } else {
-        negInfinity = true;
-      }
-    }
+      {
+        name: 'Negate',
+        description: 'Additive Inverse',
+        domain: 'Number',
+        wikidata: 'Q715358',
+        numeric: true,
+        complexity: 2000,
+        canonical: (_ce, args) => canonicalNegate(args[0]),
+        simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
+        evaluate: (ce, ops) => processNegate(ce, ops[0], 'evaluate'),
+        N: (ce, ops) => processNegate(ce, ops[0], 'N'),
+        sgn: (_ce, args): -1 | 0 | 1 | undefined => {
+          const arg = args[0];
+          if (arg.isZero) return 0;
+          if (arg.isPositive) return -1;
+          if (arg.isNegative) return +1;
+          return undefined;
+        },
+      },
 
-    const dValue = getDecimalValue(arg);
-    if (dValue !== null) {
-      if (dValue.isInteger() && dValue.abs().lte(SMALL_INTEGERS)) {
-        numerTotal = numerTotal.add(dValue.mul(denomTotal));
-      } else {
-        others.push(dValue);
-      }
-    } else {
-      const c = getComplexValue(arg);
-      if (c !== null) {
-        if (
-          Number.isInteger(c.re) &&
-          Number.isInteger(c.im) &&
-          Math.abs(c.re) <= SMALL_INTEGERS &&
-          Math.abs(c.im) <= SMALL_INTEGERS
-        ) {
-          cTotal = cTotal.add(c);
-        } else {
-          others.push(arg);
-        }
-      } else {
-        const [n, d] = getRationalValue(arg);
-        if (
-          n !== null &&
-          d !== null &&
-          Math.abs(n) <= SMALL_INTEGERS &&
-          Math.abs(d) <= SMALL_INTEGERS
-        ) {
-          const nDecimal = new Decimal(n);
-          const dDecimal = new Decimal(d);
-          numerTotal = Decimal.add(
-            numerTotal.mul(dDecimal),
-            denomTotal.mul(nDecimal)
+      {
+        name: 'Power',
+        domain: 'Number',
+        wikidata: 'Q33456',
+        commutative: false,
+        numeric: true,
+        complexity: 3500,
+        canonical: (ce, args) =>
+          args[0] && args[1]
+            ? canonicalPower(ce, args[0], args[1]) ?? ce._fn('Power', args)
+            : ce._fn('Power', args),
+        simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
+        evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
+        N: (ce, ops) => processPower(ce, ops[0], ops[1], 'N'),
+        // Defined as RealNumber for all power in RealNumber when base > 0;
+        // when x < 0, only defined if n is an integer
+        // if x is a non-zero complex, defined as ComplexNumber
+        // Square root of a prime is irrational (AlgebraicNumber)
+        // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
+        // evalDomain: (ce, base: BoxedExpression, power: BoxedExpression) ;
+      },
+
+      {
+        name: 'Rational',
+        domain: 'RationalNumber',
+        numeric: true,
+        complexity: 2400,
+        canonical: (ce, args) =>
+          args.length === 2
+            ? canonicalDivide(ce, args[0], args[1])
+            : ce._fn('Rational', args),
+        simplify: (ce, ops) => {
+          if (ops.length !== 2) return undefined;
+          if (ops[0].asSmallInteger !== null && ops[1].asSmallInteger !== null)
+            return ce.number([ops[0].asSmallInteger, ops[1].asSmallInteger]);
+          return undefined;
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 2) {
+            if (
+              ops[0].asSmallInteger !== null &&
+              ops[1].asSmallInteger !== null
+            )
+              return ce.number([ops[0].asSmallInteger, ops[1].asSmallInteger]);
+            return undefined;
+          }
+          const f = ops[0].asFloat;
+          if (f === null) return ops[0];
+
+          const r = rationalize(f);
+          if (typeof r === 'number') return ce.number(r);
+          return ce.number([r[0], r[1]]);
+        },
+        N: (ce, ops) => {
+          if (ops.length === 2) {
+            if (
+              ops[0].asSmallInteger === null ||
+              ops[1].asSmallInteger === null
+            )
+              return undefined;
+            return ce.number(ops[0].asSmallInteger / ops[1].asSmallInteger);
+          }
+
+          return undefined;
+        },
+      },
+
+      {
+        name: 'Root',
+        domain: 'Number',
+        numeric: true,
+        complexity: 3200,
+        canonical: (ce, args) => {
+          const exp = ce.inverse(args[1]);
+          return (
+            canonicalPower(ce, args[0], exp) ?? ce._fn('Power', [args[0], exp])
           );
-          denomTotal = denomTotal.mul(dDecimal);
-        } else {
-          const val = getNumberValue(arg);
-          if (
-            val !== null &&
-            Number.isInteger(val) &&
-            Math.abs(val) < SMALL_INTEGERS
-          ) {
-            numerTotal = numerTotal.add(denomTotal.mul(val));
-          } else if (isNotZero(ce, arg) !== false) {
-            others.push(arg);
+        },
+        N: (ce, ops) => {
+          const base = ops[0];
+          const root = ops[1];
+          if (base.decimalValue)
+            return ce.number(
+              base.decimalValue.pow(ce.DECIMAL_ONE.div(root.asFloat ?? NaN))
+            );
+          if (base.complexValue) {
+            const complexRoot = root.complexValue
+              ? Complex.ONE.div(root.complexValue)
+              : ce.complex(1 / (root.asFloat ?? NaN));
+            return ce.number(base.complexValue.pow(complexRoot));
           }
-        }
-      }
-    }
-  }
+          if (base.asFloat !== null)
+            return ce.number(Math.pow(base.asFloat, root.asFloat ?? NaN));
+          return undefined;
+        },
+      },
 
-  if (posInfinity && negInfinity) return NaN;
-  if (posInfinity) return Infinity;
-  if (negInfinity) return -Infinity;
+      {
+        name: 'Round',
+        domain: 'Number',
+        numeric: true,
+        complexity: 1250,
+        N: (ce, ops) => {
+          if (ops[0].decimalValue)
+            return ce.number(ops[0].decimalValue.round());
+          if (ops[0].complexValue)
+            return ce.number(ops[0].complexValue.round(0));
+          if (ops[0].asFloat !== null)
+            return ce.number(Math.round(ops[0].asFloat));
+          return undefined;
+        },
+      },
 
-  // Group similar terms
-  // @todo
-  // const terms: { [term: string]: number } = {};
-  // for (const [term, coeff] of forEachTermCoeff(others)) {
-  // }
+      {
+        name: 'Sign',
+        domain: 'Number',
+        range: [-1, 1],
+        numeric: true,
+        complexity: 1200,
+        simplify: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === 0) return ce.ZERO;
+          if (s === 1) return ce.ONE;
+          if (s === -1) return ce.NEGATIVE_ONE;
+          return undefined;
+        },
+        evaluate: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === 0) return ce.ZERO;
+          if (s === 1) return ce.ONE;
+          if (s === -1) return ce.NEGATIVE_ONE;
+          return undefined;
+        },
+        N: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === 0) return ce.ZERO;
+          if (s === 1) return ce.ONE;
+          if (s === -1) return ce.NEGATIVE_ONE;
+          return undefined;
+        },
+      },
 
-  if (!cTotal.isZero()) others.push(cTotal);
+      {
+        name: 'SignGamma',
+        description: 'The sign of the gamma function: -1 or +1',
+        domain: 'Number',
+        numeric: true,
+        complexity: 7900,
+        range: [-1, 1],
+        // @todo
+      },
+      {
+        name: 'Sqrt',
+        description: 'Square Root',
+        domain: 'Number',
+        wikidata: 'Q134237',
+        numeric: true,
+        complexity: 3000,
+        canonical: (ce, args) =>
+          canonicalPower(ce, args[0], ce.HALF) ??
+          ce._fn('Power', [args[0], ce.HALF]),
+        simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
+        evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
+        N: (ce, ops) => processSqrt(ce, ops[0], 'N'),
+        // evalDomain: Square root of a prime is irrational
+        // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
+      },
 
-  const g = decimalGcd(numerTotal, denomTotal);
-  numerTotal = numerTotal.div(g);
-  denomTotal = denomTotal.div(g);
-
-  if (!numerTotal.isZero()) {
-    if (denomTotal.equals(DECIMAL_ONE)) {
-      if (numerTotal.abs().lt(SMALL_INTEGERS))
-        others.push(numerTotal.toNumber());
-      else others.push(numerTotal);
-    } else {
-      if (
-        numerTotal.abs().lt(SMALL_INTEGERS) &&
-        denomTotal.abs().lt(SMALL_INTEGERS)
-      )
-        others.push(['Divide', numerTotal.toNumber(), denomTotal.toNumber()]);
-      else others.push(['Divide', numerTotal, denomTotal]);
-    }
-  }
-
-  if (others.length === 1) return others[0];
-  if (others.length === 2 && getFunctionName(others[1]) === NEGATE) {
-    // a + (-b) -> a - b
-    return ['Subtract', others[0], getArg(others[1], 1) ?? MISSING];
-  } else if (others.length === 2 && getFunctionName(others[0]) === NEGATE) {
-    // (-a) + b -> b - a
-    return ['Subtract', others[1], getArg(others[0], 1) ?? MISSING];
-  }
-  return ['Add', ...others];
-}
-
-function simplifyMultiply(
-  ce: ComputeEngine,
-  ...args: Expression[]
-): Expression {
-  if (args.length === 0) return 1;
-  if (args.length === 1) return args[0];
-
-  const others: Expression[] = [];
-  let numer = 1;
-  let denom = 1;
-  let c = Complex.ONE;
-
-  for (const arg of args) {
-    const val = getNumberValue(arg);
-    if (val === 0) return 0;
-    if (val !== null) {
-      if (
-        !Number.isFinite(val) ||
-        (Number.isInteger(val) && Math.abs(val) < SMALL_INTEGERS)
-      )
-        numer *= val;
-      else others.push(arg);
-    } else {
-      const [n, d] = [null, null]; // getRationalValue(arg);
-
-      if (
-        n !== null &&
-        d !== null &&
-        Math.abs(d!) < SMALL_INTEGERS &&
-        Math.abs(n!) < SMALL_INTEGERS
-      ) {
-        numer *= n!;
-        denom *= d!;
-      } else {
-        const cVal = getComplexValue(arg);
-        if (cVal !== null) {
-          if (
-            Number.isInteger(cVal.re) &&
-            Number.isInteger(cVal.im) &&
-            Math.abs(cVal.re) < SMALL_INTEGERS &&
-            Math.abs(cVal.im) < SMALL_INTEGERS
-          ) {
-            c = c.mul(cVal);
-          } else {
-            others.push(arg);
+      {
+        name: 'Square',
+        domain: 'Number',
+        wikidata: 'Q3075175',
+        numeric: true,
+        complexity: 3100,
+        canonical: (ce, args) =>
+          canonicalPower(ce, args[0], ce.TWO) ??
+          ce._fn('Power', [args[0], ce.TWO]),
+        N: (ce, ops) => {
+          if (ops[0].decimalValue)
+            return ce.number(ops[0].decimalValue.mul(ops[0].decimalValue));
+          if (ops[0].complexValue)
+            return ce.number(ops[0].complexValue.mul(ops[0].complexValue));
+          if (ops[0].asFloat !== null)
+            return ce.number(ops[0].asFloat * ops[0].asFloat);
+          return undefined;
+        },
+      },
+      {
+        /**
+         * The `Subscript` function can take several forms:
+         *
+         * If `op1` is a string, the string is interpreted as a number in
+         * base `op2` (2 to 36).
+         *
+         * If `op1` is an indexable collection, `x`:
+         * - `x_*` -> `At(x, *)`
+         *
+         * Otherwise:
+         * - `x_0` -> Symbol "x_0"
+         * - `x_n` -> Symbol "x_n"
+         * - `x_{\text{max}}` -> Symbol `x_max`
+         * - `x_{(n+1)}` -> `At(x, n+1)`
+         * - `x_{n+1}` ->  `Subscript(x, n+1)`
+         */
+        name: 'Subscript',
+        // The last (subscript) argument can include a delimiter that
+        // needs to be interpreted. Without the hold, it would get
+        // removed during canonicalization.
+        hold: 'last',
+        canonical: (ce, args) => {
+          // Is it a string in a base form:
+          // `"deadbeef"_{16}` `"0101010"_2?
+          if (args[0].string) {
+            if (args[1].isLiteral && args[1].asSmallInteger !== null) {
+              const base = args[1].asSmallInteger;
+              if (base > 1 && base <= 36) {
+                const [value, rest] = fromDigits(args[0].string, base);
+                if (rest) {
+                  return ce._fn('Error', [
+                    ce.number(value),
+                    ce.string('unexpected-digits'),
+                    ce._fn('LatexForm', [ce.string(rest)]),
+                  ]);
+                }
+                return ce.number(value);
+              }
+            }
           }
-        } else {
-          // @todo: consider distributing if the head of arg is Add or Negate or Subtract or Divide
-          if (isZero(ce, arg)) return 0;
-          others.push(arg);
-        }
-      }
-    }
-  }
+          // Is it a compound symbol `x_\text{max}`, `\mu_0`
+          // or an indexable collection?
+          if (args[0].symbol) {
+            // Indexable collection?
+            if (args[0].symbolDefinition?.at) {
+              return ce._fn('At', [args[0], args[1]]);
+            }
+            // Maybe a compound symbol
+            let sub = args[1].string ?? args[1].symbol;
+            if (!sub) {
+              if (args[1].asSmallInteger !== null)
+                sub = args[1].asSmallInteger.toString();
+            }
+            if (sub) return ce.symbol(args[0].symbol + '_' + sub);
+          }
+          return ce._fn('Subscript', args);
+        },
+      },
+      {
+        name: 'Subtract',
+        domain: 'Number',
+        wikidata: 'Q40754',
+        numeric: true,
+        complexity: 1350,
+        canonical: (ce, args) => {
+          if (args.length === 0) return ce.symbol('Nothing');
+          // Not necessarily legal, but probably what was intended:
+          // ['Subtract', 'x'] -> ['Negate', 'x']
+          if (args.length === 1) return canonicalNegate(args[0]);
+          return canonicalAdd(ce, [args[0], canonicalNegate(args[1])]);
+        },
+        N: (ce, ops) => {
+          const lhs = ops[0];
+          const rhs = ops[1];
 
-  if (c.im !== 0) {
-    c = c.mul(numer);
-    numer = 1;
-  } else {
-    numer = numer * c.re;
-    c = Complex.ONE;
-  }
+          // Prioritize complex
+          if (lhs.complexValue || rhs.complexValue) {
+            return ce.number(
+              ce
+                .complex(lhs.complexValue ?? lhs.asFloat!)
+                .sub(rhs.complexValue ?? rhs.asFloat)
+            );
+          }
+          if (lhs.decimalValue || rhs.decimalValue) {
+            return ce.number(
+              ce
+                .decimal(lhs.decimalValue ?? lhs.asFloat ?? NaN)
+                .sub(rhs.decimalValue ?? rhs.asFloat ?? NaN)
+            );
+          }
+          if (lhs.asFloat !== null && rhs.asFloat !== null)
+            return ce.number(lhs.asFloat - rhs.asFloat);
+          return undefined;
+        },
+      },
+    ],
+  },
+  {
+    //
+    // Constants
+    // Note: constants are put in a separate, subsequent, dictionary because
+    // some of the values (CatalanConstant) reference some function names (Add...)
+    // that are defined above. This avoid circular references.
+    //
+    symbols: [
+      {
+        /**
+         * The difference between 1 and the next larger floating point number
+         *
+         *    2^{−52}
+         *
+         * See https://en.wikipedia.org/wiki/Machine_epsilon
+         */
+        name: 'MachineEpsilon',
+        domain: 'RealNumber',
+        constant: true,
+        real: true,
+        value: { num: Number.EPSILON.toString() },
+      },
+      {
+        name: 'Half',
+        constant: true,
+        hold: false,
+        value: ['Rational', 1, 2],
+      },
+      {
+        name: 'ImaginaryUnit',
+        domain: 'ImaginaryNumber',
+        constant: true,
+        hold: true,
+        wikidata: 'Q193796',
+        imaginary: true,
+        value: ['Complex', 0, 1],
+      },
+      {
+        name: 'ExponentialE',
+        domain: 'TranscendentalNumber',
+        algebraic: false,
+        wikidata: 'Q82435',
+        constant: true,
+        hold: true,
+        real: true,
+        value: (engine) =>
+          useDecimal(engine) ? engine.DECIMAL_ONE.exp() : Math.exp(1),
+      },
+      {
+        name: 'GoldenRatio',
+        domain: 'AlgebraicNumber',
+        wikidata: 'Q41690',
+        constant: true,
+        algebraic: true,
+        hold: false,
+        value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
+      },
+      {
+        name: 'CatalanConstant',
+        domain: 'RealNumber',
+        algebraic: undefined, // Not proven irrational or transcendental
+        wikidata: 'Q855282',
+        constant: true,
+        value: {
+          // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants1.html
+          num: `0.91596559417721901505460351493238411077414937428167
+                  21342664981196217630197762547694793565129261151062
+                  48574422619196199579035898803325859059431594737481
+                  15840699533202877331946051903872747816408786590902
+                  47064841521630002287276409423882599577415088163974
+                  70252482011560707644883807873370489900864775113225
+                  99713434074854075532307685653357680958352602193823
+                  23950800720680355761048235733942319149829836189977
+                  06903640418086217941101917532743149978233976105512
+                  24779530324875371878665828082360570225594194818097
+                  53509711315712615804242723636439850017382875977976
+                  53068370092980873887495610893659771940968726844441
+                  66804621624339864838916280448281506273022742073884
+                  31172218272190472255870531908685735423498539498309
+                  91911596738846450861515249962423704374517773723517
+                  75440708538464401321748392999947572446199754961975
+                  87064007474870701490937678873045869979860644874974
+                  64387206238513712392736304998503539223928787979063
+                  36440323547845358519277777872709060830319943013323
+                  16712476158709792455479119092126201854803963934243
+                  `,
+        },
+      },
+      {
+        // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants2.html
+        name: 'EulerGamma',
+        domain: 'RealNumber',
+        algebraic: undefined, // Not proven irrational or transcendental
+        wikidata: 'Q273023',
+        constant: true,
+        value: {
+          num: `0.57721566490153286060651209008240243104215933593992359880576723488486772677766
+          467093694706329174674951463144724980708248096050401448654283622417399764492353
+          625350033374293733773767394279259525824709491600873520394816567085323315177661
+          152862119950150798479374508570574002992135478614669402960432542151905877553526
+          733139925401296742051375413954911168510280798423487758720503843109399736137255
+          306088933126760017247953783675927135157722610273492913940798430103417771778088
+          154957066107501016191663340152278935867965497252036212879226555953669628176388
+          792726801324310104765059637039473949576389065729679296010090151251959509222435
+          014093498712282479497471956469763185066761290638110518241974448678363808617494
+          551698927923018773910729457815543160050021828440960537724342032854783670151773
+          943987003023703395183286900015581939880427074115422278197165230110735658339673`,
+        },
+      },
+    ],
+  },
+  {
+    functions: [
+      {
+        name: 'PreIncrement',
+        domain: 'Number',
+        numeric: true,
+      },
+      {
+        name: 'PreDecrement',
+        domain: 'Number',
+        numeric: true,
+      },
+    ],
+  },
+];
 
-  // Divide numer by denom to get the proper signed infinite or NaN
-  if (numer === 0 || !Number.isFinite(numer)) return numer / denom;
-
-  if (!c.equals(Complex.ONE)) {
-    others.push(['Complex', c.re, c.im]);
+function processAbs(
+  ce: IComputeEngine,
+  op1: BoxedExpression,
+  mode: 'simplify' | 'evaluate' | 'N'
+): BoxedExpression | undefined {
+  if (mode !== 'simplify' || op1.isLiteral) {
+    if (op1.machineValue !== null) return ce.number(Math.abs(op1.machineValue));
+    if (op1.decimalValue) return ce.number(op1.decimalValue.abs());
+    if (op1.complexValue) return ce.number(op1.complexValue.abs());
+    const [n, d] = op1.rationalValue;
+    if (n === null || d === null) return undefined;
+    return ce.number(mode === 'N' ? Math.abs(n / d) : [Math.abs(n), d]);
   }
-  if (others.length === 0) {
-    if (denom === 1) return numer;
-    return ['Divide', numer, denom];
-  }
-  if (denom !== 1) {
-    others.unshift(['Divide', numer, denom]);
-    numer = 1;
-    denom = 1;
-  }
-  if (others.length === 1 && numer === 1) return others[0];
-  if (others.length === 1 && numer === -1) return ['Negate', others[0]];
-  if (numer === 1) return ['Multiply', ...others];
-  if (numer === -1) return ['Negate', ['Multiply', ...others]];
-  return ['Multiply', numer, ...others];
+  if (op1.isMissing) return undefined;
+  if (op1.isNonNegative) return op1;
+  if (op1.isNegative) return ce.negate(op1);
+  return undefined;
 }
 
-/** Apply some simplifications for `Negate`.
- *  Used by `canonical-negate` and `simplify`
- */
-export function applyNegate(expr: Expression): Expression {
-  expr = ungroup(expr);
-  if (typeof expr === 'number') {
-    // Applying negation is safe on floating point numbers
-    return -expr;
-  }
-  if (expr && isNumberObject(expr)) {
-    if (expr.num[0] === '-') {
-      return { num: expr.num.slice(1) };
-    } else if (expr.num[0] === '+') {
-      return { num: '-' + expr.num.slice(1) };
+function processSqrt(
+  ce: IComputeEngine,
+  base: BoxedExpression,
+  mode: 'simplify' | 'evaluate' | 'N'
+): BoxedExpression | undefined {
+  if (base.isOne) return ce.ONE;
+  if (base.isZero) return ce.ZERO;
+
+  if (mode === 'N') {
+    if (base.complexValue) return ce.number(base.complexValue.sqrt());
+    if (base.isNonNegative) {
+      if (base.decimalValue) return ce.number(base.decimalValue.sqrt());
+      if (base.asFloat !== null) return ce.number(Math.sqrt(base.asFloat));
+    } else if (complexAllowed(ce)) {
+      // Need to potentially do a complex operation
+      return ce.number(ce.complex(base.asFloat!).sqrt());
     } else {
-      return { num: '-' + expr.num };
+      return ce.NAN;
     }
-  }
-  if (expr instanceof Decimal) {
-    const d = expr as Decimal;
-    return d.mul(-1) as unknown as Expression;
-  }
-  if (expr instanceof Complex) {
-    const c = expr as Complex;
-    return c.mul(-1);
-  }
-  const name = getFunctionName(expr);
-  const argCount = getArgCount(expr!);
-  if (name === NEGATE && argCount === 1) {
-    // [NEGATE, [NEGATE, x]] -> x
-    return getArg(expr, 1) ?? MISSING;
-  } else if (name === MULTIPLY) {
-    const arg = applyNegate(getArg(expr, 1) ?? MISSING);
-    return [MULTIPLY, arg, ...getTail(expr).slice(1)];
-  } else if (name === ADD) {
-    return [ADD, ...mapArgs<Expression>(expr, applyNegate)];
-  } else if (name === SUBTRACT) {
-    return [SUBTRACT, getArg(expr, 2) ?? MISSING, getArg(expr, 1) ?? MISSING];
-  } else if (name === 'Delimiter' && argCount === 1) {
-    return applyNegate(getArg(getArg(expr, 1)!, 1)!);
+    return undefined;
   }
 
-  return [NEGATE, expr ?? MISSING];
+  if (base.asSmallInteger !== null) {
+    const [factor, root] = factorPower(base.asSmallInteger, 2);
+    if (root === 1) return ce.number(factor);
+    if (factor !== 1)
+      return this._fn('Multiply', [
+        factor,
+        ce._fn('Sqrt', [ce.box(root).canonical]),
+      ]);
+  }
+
+  return undefined;
 }
-
-// The function is `numeric` so it will be passed numbers
-function evalNumberMultiply(_ce: ComputeEngine, ...args: number[]): number {
-  if (args.length === 0) return 1;
-  if (args.length === 1) return args[0];
-
-  let c = 1;
-  for (const arg of args) c *= arg;
-  return c;
-}
-
-export function ungroup(expr: Expression | null): Expression {
-  if (expr === null) return NOTHING;
-  if (isAtomic(expr)) return expr;
-  if (getFunctionHead(expr) === 'Delimiter' && getArgCount(expr) === 1) {
-    return ungroup(getArg(expr, 1));
-  }
-  return applyRecursively(expr, ungroup);
-}
-
-export function unstyle(expr: Expression | null): Expression {
-  if (expr === null) return NOTHING;
-  if (isAtomic(expr)) return expr;
-  if (getFunctionHead(expr) === 'Style') return getArg(expr, 1) ?? NOTHING;
-  return applyRecursively(expr, unstyle);
-}
-
-// Used by `simplify()` and `canonical()`
-// See https://docs.sympy.org/1.6/modules/core.html#pow
-
-export function applyPower(
-  engine: ComputeEngine,
-  expr: Expression
-): Expression {
-  expr = ungroup(expr);
-
-  console.assert(getFunctionName(expr) === 'Power');
-
-  if (getArgCount(expr) !== 2) return expr;
-
-  const arg2 = getArg(expr, 2)!;
-  if (getSymbolName(arg2) === 'ComplexInfinity') return NaN;
-  if (isZero(engine, arg2)) return 1;
-
-  const arg1 = getArg(expr, 1)!;
-
-  if (isOne(engine, arg2)) return arg1;
-  if (isEqual(engine, arg2, 2)) return ['Square', arg1];
-
-  if (isEqual(engine, arg2, -1)) {
-    if (isEqual(engine, arg1, -1) || isEqual(engine, arg1, 1)) return -1;
-    if (engine.isInfinity(arg1)) return 0;
-    return ['Divide', 1, arg1];
-  }
-  if (engine.isInfinity(arg2)) {
-    if (engine.isZero(arg1) && engine.isNegative(arg1)) {
-      return 'ComplexInfinity';
-    }
-
-    if (engine.isOne(arg1) || engine.isEqual(arg1, -1)) return NaN;
-
-    if (engine.isInfinity(arg1)) {
-      if (engine.isPositive(arg1)) {
-        if (engine.isPositive(arg2)) return Infinity;
-        return 0;
-      }
-      return NaN;
-    }
-  }
-  return expr;
-}
-
-/** Used by `simplify` and `canonical` to simplify some arithmetic
- * and trigonometric constants */
-
-export function applyConstants(expr: Expression): Expression {
-  if (isAtomic(expr)) return expr;
-
-  let [numer, denom] = getRationalValue(expr);
-  if (numer === 3 && denom === 4) return 'ThreeQuarter';
-  if (numer === 2 && denom === 3) return 'TwoThird';
-  if (numer === 1 && denom === 2) return 'Half';
-  if (numer === 1 && denom === 4) return 'Quarter';
-
-  // Trigonometric constants: -π, π/4, etc...
-  [numer, denom] = getRationalSymbolicValue(expr, 'Pi');
-  if (numer === null || denom === null) {
-    return applyRecursively(expr, (x) => applyConstants(x));
-  }
-  if (numer === -2 && denom === 1) return 'MinusDoublePi';
-  if (numer === -1 && denom === 2) return 'MinusHalfPi';
-  if (numer === 1 && denom === 4) return 'QuarterPi';
-  if (numer === 1 && denom === 3) return 'ThirdPi';
-  if (numer === 1 && denom === 2) return 'HalfPi';
-  if (numer === 2 && denom === 3) return 'TwoThirdPi';
-  if (numer === 3 && denom === 4) return 'ThreeQuarterPi';
-  if (numer === 2 && denom === 1) return 'DoublePi';
-  if (numer === 1 && denom === 1) return 'Pi';
-  if (numer === 1) return ['Divide', 'Pi', denom];
-  if (denom === 1) return ['Multiply', numer, 'Pi'];
-  return ['Multiply', ['Divide', numer, denom], 'Pi'];
-}
-
-// function* forEachTermCoeff(
-//   terms: Expression[]
-// ): Generator<[term: Expression, coef: number]> {
-//   return;
-// }

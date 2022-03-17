@@ -259,7 +259,6 @@ In addition, the first character of a symbol must not be:
 | :--------- | :----------------------- | :-- |
 | **U+0021** | **EXCLAMATION MARK**     | `!` |
 | **U+0022** | **QUOTATION MARK**       | `"` |
-| **U+0023** | **NUMBER SIGN**          | `#` |
 | **U+0024** | **DOLLAR SIGN**          | `$` |
 | **U+0025** | **PERCENT**              | `%` |
 | **U+0026** | **AMPERSAND**            | `&` |
@@ -268,7 +267,6 @@ In addition, the first character of a symbol must not be:
 | **U+0029** | **RIGHT PARENTHESIS**    | `)` |
 | **U+002E** | **FULL STOP**            | `'` |
 | **U+003A** | **COLON**                | `:` |
-| **U+003C** | **LESS THAN SIGN**       | `:` |
 | **U+003F** | **QUESTION MARK**        | `?` |
 | **U+0040** | **COMMERCIAL AT**        | `@` |
 | **U+005B** | **LEFT SQUARE BRACKET**  | `[` |

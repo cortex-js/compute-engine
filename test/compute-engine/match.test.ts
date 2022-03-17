@@ -1,13 +1,12 @@
-import { ComputeEngine } from '../../src/compute-engine';
-import { match } from '../../src/compute-engine/patterns';
-import { Expression } from '../../src/math-json/math-json-format';
-import { latex } from '../utils';
+import { ComputeEngine, SemiBoxedExpression } from '../../src/compute-engine';
+import { Expression } from '../../src/math-json';
+import { engine, latex } from '../utils';
 
-export const engine = new ComputeEngine();
+export const ce = new ComputeEngine();
 
 const TOLERANCE = 2.220446049250313e-16;
 
-const sameExprs = [
+const sameExprs: [SemiBoxedExpression, SemiBoxedExpression][] = [
   [1, 1],
   [3.14159265, 3.14159265],
   [3.14159265, { num: '3.14159265' }],
@@ -28,7 +27,7 @@ const sameExprs = [
   [{ dict: { Alpha: 'a', Beta: 'b' } }, { dict: { Alpha: 'a', Beta: 'b' } }],
 ];
 
-const notSameExprs: Expression[] = [
+const notSameExprs: [Expression, Expression][] = [
   [1, 0],
   [2, 5],
 
@@ -67,22 +66,21 @@ const notSameExprs: Expression[] = [
   [['Add', 2, 'x'], { dict: { Alpha: 'a', Beta: 'b', Gamma: 'g' } }],
 ];
 
-describe('MATCH', () => {
+describe.skip('MATCH', () => {
   for (const expr of sameExprs) {
-    test(`match(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(
-        match(engine.canonical(expr[0])!, engine.canonical(expr[1])!) !== null
-      ).toBeTruthy();
+    const lhs = ce.box(expr[0]).canonical;
+    const rhs = ce.box(expr[1]).canonical;
+    test(`match(${lhs.latex}, ${rhs.latex})`, () => {
+      expect(ce.pattern(lhs).match(rhs) !== null).toBeTruthy();
     });
   }
 });
 
-describe('NOT SAME', () => {
+describe.skip('NOT SAME', () => {
   for (const expr of notSameExprs) {
-    test(`match(${latex(expr[0])}, ${latex(expr[1])})`, () => {
+    test(`match(${latex(expr[0])}, ${latex(expr[1])})`, () =>
       expect(
-        match(engine.canonical(expr[0])!, engine.canonical(expr[1])!)
-      ).toBeNull();
-    });
+        engine.box(expr[0]).canonical.isSame(engine.box(expr[1]).canonical)
+      ).toBeFalsy());
   }
 });

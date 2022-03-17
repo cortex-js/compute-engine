@@ -1,4 +1,4 @@
-import { SignalOrigin } from '../math-json';
+import { SignalOrigin } from './signals';
 
 const LINEBREAK = /\r\n|[\n\r\u2028\u2029]/;
 

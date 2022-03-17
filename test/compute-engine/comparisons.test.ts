@@ -41,7 +41,7 @@ const exprs: Expression[] = [
 describe.skip('EQUAL', () => {
   for (const expr of exprs) {
     test(`equal(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.isEqual(expr[0], expr[1])).toEqual(
+      expect(engine.box(expr[0]).isEqual(engine.box(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] === 0 ? true : false
       );
     });
@@ -51,7 +51,7 @@ describe.skip('EQUAL', () => {
 describe.skip('LESS THAN', () => {
   for (const expr of exprs) {
     test(`less(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.isLess(expr[0], expr[1])).toEqual(
+      expect(engine.box(expr[0]).isLess(engine.box(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] < 0 ? true : false
       );
     });
@@ -61,7 +61,7 @@ describe.skip('LESS THAN', () => {
 describe.skip('LESS EQUAL', () => {
   for (const expr of exprs) {
     test(`lessEqual(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.isLessEqual(expr[0], expr[1])).toEqual(
+      expect(engine.box(expr[0]).isLessEqual(engine.box(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] <= 0 ? true : false
       );
     });
@@ -71,7 +71,7 @@ describe.skip('LESS EQUAL', () => {
 describe.skip('GREATER', () => {
   for (const expr of exprs) {
     test(`greater(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.isGreater(expr[0], expr[1])).toEqual(
+      expect(engine.box(expr[0]).isGreater(engine.box(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] > 0 ? true : false
       );
     });
@@ -81,7 +81,7 @@ describe.skip('GREATER', () => {
 describe.skip('GREATER EQUAL', () => {
   for (const expr of exprs) {
     test(`greaterEqual(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.isGreaterEqual(expr[0], expr[1])).toEqual(
+      expect(engine.box(expr[0]).isGreaterEqual(engine.box(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] >= 0 ? true : false
       );
     });

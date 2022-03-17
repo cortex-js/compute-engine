@@ -6,7 +6,7 @@ import {
   PI,
   POWER,
   SUBTRACT,
-} from '../../src/common/utils';
+} from '../../src/math-json/utils';
 import { serializeCortex } from '../../src/cortex/serialize-cortex';
 
 describe('CORTEX SERIALIZING', () => {
@@ -381,8 +381,8 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
     ).toMatch('(x * y)(3 + 4)');
   });
   test.skip('Invisible Plus', () => {
-    expect(serializeCortex(['Add', 2, ['Divide', 1, 2]])).toMatch('2 1 / 2');
-    expect(serializeCortex(['Add', 'x', ['Divide', 1, 2]])).toMatch(
+    expect(serializeCortex(['Add', 2, ['Rational', 1, 2]])).toMatch('2 1 / 2');
+    expect(serializeCortex(['Add', 'x', ['Rational', 1, 2]])).toMatch(
       'x + 1 / 2'
     );
   });

@@ -1,5 +1,5 @@
-// This is the root of the package for the Cortex language
-// It include everything that's needed for Cortex
+// This is the root of the package for the Cortex language.
+// It include everything that's needed to parse, serialize and execute Cortex.
 
 export * from './math-json/math-json-format';
 
@@ -8,15 +8,12 @@ export * from './math-json/math-json-format';
 //
 // 1/ MathJSON parse/serialize
 //
-export { LatexSyntax } from './math-json/latex-syntax';
+export { LatexSyntax } from './compute-engine/latex-syntax/latex-syntax';
 
 //
 // 2/ Compute Engine
 //
-export { ExpressionMap } from './math-json/expression-map';
 export { ComputeEngine } from './compute-engine/compute-engine';
-
-export { match, substitute, count } from './compute-engine/patterns';
 
 //
 // 3/ The Cortex language
