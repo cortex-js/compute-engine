@@ -77,8 +77,8 @@ test(`(a+b)^10`, () => {
   expect(
     benchmark(() => expand(engine.parse('(a+b)^{10}')), {
       mem: 3000000,
-      time: 11,
-      exprs: 900, // 670,
+      time: 10,
+      exprs: 1000, // 670,
     })
   ).toBeLessThan(0.1);
 });
@@ -87,8 +87,8 @@ test(`(a+b)^20`, () => {
   expect(
     benchmark(() => expand(engine.parse('(a+b)^{20}')), {
       mem: 2022480,
-      time: 30, // 8.3,
-      exprs: 3300, // 1456,
+      time: 36, // 8.3,
+      exprs: 3800, // 1456,
     })
   ).toBeLessThan(0.1);
 });
@@ -97,8 +97,8 @@ test(`(a+b)^40`, () => {
   expect(
     benchmark(() => expand(engine.parse('(a+b)^{40}')), {
       mem: 8714104,
-      time: 100, // 22.12,
-      exprs: 10000, // 7932,
+      time: 176, // 22.12,
+      exprs: 15000, // 7932,
     })
   ).toBeLessThan(0.5);
 });
@@ -107,8 +107,8 @@ test(`(a+b)^80`, () => {
   expect(
     benchmark(() => expand(engine.parse('(a+b)^{80}')), {
       mem: 1900000,
-      time: 140000, // 65.98,
-      exprs: 1000754, // 38076,
+      time: 17000, // 65.98,
+      exprs: 639636, // 38076,
     })
   ).toBeLessThan(0.1);
 });

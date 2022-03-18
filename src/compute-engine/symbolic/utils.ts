@@ -1,5 +1,6 @@
 import { BoxedExpression, SemiBoxedExpression } from '../public';
 import { factorPower, reducedRational } from '../numerics/numeric';
+import { isInMachineRange } from '../numerics/numeric-decimal';
 
 /**
  * If expression is a product or a division, collect all the terms with a
@@ -182,19 +183,23 @@ export function asCoefficient(
   // Literal
   //
   if (expr.isLiteral) {
-    // Consider "small" rationals (<10,000), and factor them
-    let [a, b] = expr.asRational;
+    if (expr.decimalValue) {
+      if (expr.decimalValue.isInteger() && isInMachineRange(expr.decimalValue))
+        return [[expr.decimalValue.toNumber(), 1], ce.ONE];
+      if (expr.decimalValue?.isNegative())
+        return [[-1, 1], ce.number(expr.decimalValue.neg())];
+    }
+
+    if (expr.machineValue !== null) {
+      if (Number.isInteger(expr.machineValue)) {
+        return [[expr.machineValue, 1], ce.ONE];
+      }
+      if (expr.machineValue < 0)
+        return [[-1, 1], ce.number(-expr.machineValue)];
+    }
+
+    const [a, b] = expr.rationalValue;
     if (a !== null && b !== null) return [[a, b], ce.ONE];
-
-    // Consider other, potentially large, rationals. Only extract their sign
-    [a, b] = expr.rationalValue;
-    if (a !== null && b !== null && a < 0) return [[-1, 1], ce.number([-a, b])];
-
-    if (expr.machineValue !== null && expr.machineValue < 0)
-      return [[-1, 1], ce.number(-expr.machineValue)];
-
-    if (expr.decimalValue?.isNegative())
-      return [[-1, 1], ce.number(expr.decimalValue.neg())];
 
     if (expr.complexValue !== null) {
       const c = expr.complexValue!;

@@ -17,6 +17,7 @@ import { replace } from '../rules';
 import { domainToFlags } from './boxed-symbol-definition';
 import { serializeJsonSymbol } from './serialize';
 import { isValidSymbolName } from '../../math-json/utils';
+import { hashCode } from './utils';
 
 /**
  * BoxedSymbol
@@ -28,6 +29,7 @@ import { isValidSymbolName } from '../../math-json/utils';
 
 export class BoxedSymbol extends AbstractBoxedExpression {
   protected _name: string;
+  private _hash: number | undefined;
   // Note: a `BoxedSymbol` is not always bound to a definition.
   // This can happen (temporarily) during the creation of a scope
   // to avoid circular references. The symbols are then "repaired"
@@ -57,6 +59,11 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     this._repairDefinition();
 
     ce._register(this);
+  }
+
+  get hash(): number {
+    if (this._hash === undefined) this._hash = hashCode(this._name);
+    return this._hash;
   }
 
   _purge(): undefined {

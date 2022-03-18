@@ -6,6 +6,7 @@ import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
 import { flattenOps } from '../symbolic/flatten';
 import { isInMachineRange } from '../numerics/numeric-decimal';
+import { square } from './arithmetic-power';
 
 /** The canonical form of `Multiply`:
  * - remove `1`
@@ -24,6 +25,7 @@ export function canonicalMultiply(
   ce: IComputeEngine,
   ops: BoxedExpression[]
 ): BoxedExpression {
+  console.assert(ops.every((x) => x.isCanonical));
   //
   // Apply associativity
   //
@@ -151,14 +153,24 @@ function multiply2(
 ): BoxedExpression {
   console.assert(op1.isCanonical);
   console.assert(op2.isCanonical);
+
+  const ce = op1.engine;
+
+  if (op1.isLiteral && op2.isLiteral) {
+    if (op1.isInteger && op2.isInteger) {
+      if (op1.decimalValue && op2.decimalValue)
+        return ce.number(op1.decimalValue.mul(op2.decimalValue));
+      if (op1.machineValue && op2.machineValue)
+        return ce.number(op1.machineValue * op2.machineValue);
+    }
+  }
+
   if (op1.symbol === 'Nothing') return op2;
   if (op2.symbol === 'Nothing') return op1;
   if (op1.isLiteral && op1.isOne) return op2;
   if (op2.isLiteral && op2.isOne) return op1;
   if (op1.isLiteral && op1.isNegativeOne) return canonicalNegate(op2);
   if (op2.isLiteral && op2.isNegativeOne) return canonicalNegate(op1);
-
-  const ce = op1.engine;
 
   if (op1.isMissing || op2.isMissing) return ce._fn('Multiply', [op1, op2]);
 
@@ -200,7 +212,9 @@ function multiply2(
     return ce._fn('Multiply', [c, t], metadata);
   }
 
-  if (c.isSame(t)) return ce.power(c, 2);
+  if (c.hash === t.hash && c.isSame(t)) {
+    return square(ce, c);
+  }
 
   const product = new Product(ce, [c, t]);
 

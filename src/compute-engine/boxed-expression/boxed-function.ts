@@ -22,7 +22,7 @@ import {
   serializeJsonCanonicalFunction,
   serializeJsonFunction,
 } from './serialize';
-import { complexAllowed, useDecimal } from './utils';
+import { complexAllowed, hashCode, useDecimal } from './utils';
 import { flattenOps } from '../symbolic/flatten';
 
 /**
@@ -68,6 +68,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
    */
   private _value: BoxedExpression | undefined;
   private _numericValue: BoxedExpression | undefined;
+  private _hash: number | undefined;
 
   constructor(
     ce: IComputeEngine,
@@ -93,6 +94,18 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // Note: _isPure is computed on demand and cached
 
     ce._register(this);
+  }
+
+  get hash(): number {
+    if (this._hash !== undefined) return this._hash;
+
+    let h = 0;
+    for (const op of this._ops) h = ((h << 1) ^ op.hash) | 0;
+
+    if (typeof this._head === 'string') h = (h ^ hashCode(this._head)) | 0;
+    else h = (h ^ this._head.hash) | 0;
+    this._hash = h;
+    return h;
   }
 
   _purge(): undefined {

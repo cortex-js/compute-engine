@@ -51,13 +51,12 @@ import { BoxedNumber } from './boxed-expression/boxed-number';
 import { BoxedSymbolDefinitionImpl } from './boxed-expression/boxed-symbol-definition';
 import { canonicalNegate } from './symbolic/negate';
 import { canonicalPower } from './dictionary/arithmetic-power';
-import { BoxedFunction, holdMap } from './boxed-expression/boxed-function';
+import { BoxedFunction } from './boxed-expression/boxed-function';
 import { canonicalMultiply } from './dictionary/arithmetic-multiply';
 import { canonicalAdd } from './dictionary/arithmetic-add';
 import { canonicalDivide } from './dictionary/arithmetic-divide';
 import { BoxedSymbol } from './boxed-expression/boxed-symbol';
 import { BoxedDictionary } from './boxed-expression/boxed-dictionary';
-import { flattenOps } from './symbolic/flatten';
 
 /**
  * Create a `CustomEngine` instance to customize its behavior and the syntax
@@ -954,19 +953,13 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
-    console.assert(ops.every((x) => x.isCanonical));
-    if (ops.length === 1) return ops[0];
     const result = canonicalAdd(this, ops);
-    console.assert(result.isCanonical); // @debug
     if (metadata?.latex) result.latex = metadata.latex;
     if (metadata?.wikidata) result.wikidata = metadata.wikidata;
     return result;
   }
   mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
-    console.assert(ops.every((x) => x.isCanonical));
-    if (ops.length === 1) return ops[0];
     const result = canonicalMultiply(this, ops);
-    console.assert(result.isCanonical); // @debug
     if (metadata?.latex) result.latex = metadata.latex;
     if (metadata?.wikidata) result.wikidata = metadata.wikidata;
     return result;

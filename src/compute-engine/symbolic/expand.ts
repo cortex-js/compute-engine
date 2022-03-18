@@ -26,22 +26,25 @@ export function expand2(
 }
 
 export function expandN(expr: BoxedExpression, n: number): BoxedExpression {
-  if (n === 1) return expr;
-  if (n === 2) return expand2(expr, expr);
-  if (n % 2 === 0) {
-    // expr^ = (expr^2)^(n/2) = (expr^{n/2})^2
-    const x = expand2(expr, expr);
-    return expandN(x, n / 2);
-    // const x = expandN(expr, n / 2);
-    // return expand2(x, x);
-  } else {
-    const x2 = expand2(expr, expr);
-    const x = expandN(x2, Math.round(n / 2) - 1);
-    return expand2(x, expr);
+  // if (n === 1) return expr;
+  // if (n === 2) return expand2(expr, expr);
+  // let e = expr;
+  // while (n > 1) {
+  //   e = expand2(e, expr);
+  //   n -= 1;
+  // }
+  // return e;
 
-    // const x = expandN(expr, Math.round(n / 2) - 1);
-    // return expand2(expand2(x, x), expr);
-  }
+  if (n === 1) return expr;
+
+  const x2 = expand2(expr, expr);
+
+  if (n === 2) return x2;
+
+  if (n % 2 === 0) return expandN(x2, n / 2);
+
+  const x = expandN(x2, Math.round(n / 2) - 1);
+  return expand2(x, expr);
 }
 
 export function expand(expr: BoxedExpression): BoxedExpression {

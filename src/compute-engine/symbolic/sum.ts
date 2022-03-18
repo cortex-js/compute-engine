@@ -93,16 +93,35 @@ export class Sum {
 
     let hasTerm = false;
     if (!term.isLiteral) {
-      for (let i = 0; i < this._terms.length; i++) {
-        if (
-          !this._terms[i].term.isLiteral &&
-          term.isSame(this._terms[i].term)
-        ) {
-          const [a, b] = this._terms[i].coef;
-          const [c, d] = coef;
-          this._terms[i].coef = [a * d + b * c, b * d];
-          hasTerm = true;
-          break;
+      // There's an overhead to calculate the has.
+      // For best results, only use the hash if there are many terms
+      if (this._terms.length > 500) {
+        const h = term.hash;
+        for (let i = 0; i < this._terms.length; i++) {
+          if (
+            !this._terms[i].term.isLiteral &&
+            h === this._terms[i].term.hash &&
+            term.isSame(this._terms[i].term)
+          ) {
+            const [a, b] = this._terms[i].coef;
+            const [c, d] = coef;
+            this._terms[i].coef = [a * d + b * c, b * d];
+            hasTerm = true;
+            break;
+          }
+        }
+      } else {
+        for (let i = 0; i < this._terms.length; i++) {
+          if (
+            !this._terms[i].term.isLiteral &&
+            term.isSame(this._terms[i].term)
+          ) {
+            const [a, b] = this._terms[i].coef;
+            const [c, d] = coef;
+            this._terms[i].coef = [a * d + b * c, b * d];
+            hasTerm = true;
+            break;
+          }
         }
       }
     }

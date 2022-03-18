@@ -2,6 +2,7 @@ import { Expression } from '../../math-json/math-json-format';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { serializeJsonString } from './serialize';
+import { hashCode } from './utils';
 
 /**
  * BoxedString
@@ -16,6 +17,9 @@ export class BoxedString extends AbstractBoxedExpression {
     this._string = expr.normalize();
 
     ce._register(this);
+  }
+  get hash(): number {
+    return hashCode('String' + this._string);
   }
   get json(): Expression {
     return serializeJsonString(this.engine, this._string);

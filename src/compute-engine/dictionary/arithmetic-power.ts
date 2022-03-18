@@ -140,6 +140,33 @@ export function canonicalPower(
   return null;
 }
 
+export function square(
+  ce: IComputeEngine,
+  base: BoxedExpression
+): BoxedExpression {
+  if (base.machineValue) return ce.number(Math.pow(base.machineValue, 2));
+  if (base.decimalValue) return ce.number(base.decimalValue.pow(2));
+  if (base.complexValue) return ce.number(base.complexValue.pow(2));
+  const [n, d] = base.rationalValue;
+  if (n !== null && d !== null)
+    return ce.number([Math.pow(d, 2), Math.pow(n, 2)]);
+
+  if (base.head === 'Multiply') {
+    return ce._fn(
+      'Multiply',
+      base.ops!.map((x) => square(ce, x))
+    );
+  }
+
+  if (base.head === 'Power') {
+    const exp = base.op2.asSmallInteger;
+    if (exp !== null) return ce._fn('Power', [base.op1, ce.number(exp * 2)]);
+    return ce._fn('Power', [base.op1, ce.mul([ce.TWO, base.op2])]);
+  }
+
+  return ce._fn('Power', [base, ce.TWO]);
+}
+
 export function processPower(
   ce: IComputeEngine,
   base: BoxedExpression,

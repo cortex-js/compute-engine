@@ -12,7 +12,7 @@ import {
   SemiBoxedExpression,
   Substitution,
 } from '../public';
-import { isLatexString } from './utils';
+import { hashCode, isLatexString } from './utils';
 import { serializeJsonFunction } from './serialize';
 
 export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
@@ -31,6 +31,10 @@ export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
       : ce.box(pattern);
 
     ce._register(this);
+  }
+
+  get hash(): number {
+    return hashCode('Pattern') ^ this._pattern.hash;
   }
 
   _purge(): undefined {

@@ -14,7 +14,7 @@ import { inferNumericDomain } from '../domain-utils';
 import { isPrime } from '../numerics/primes';
 import { isInMachineRange } from '../numerics/numeric-decimal';
 import { serializeJsonNumber } from './serialize';
-import { complexAllowed, useDecimal } from './utils';
+import { complexAllowed, hashCode, useDecimal } from './utils';
 
 /**
  * BoxedNumber
@@ -26,8 +26,9 @@ export class BoxedNumber extends AbstractBoxedExpression {
     | Decimal
     | Complex
     | [numer: number, denom: number];
-  _domain: BoxedExpression;
-  _head: string;
+  private _domain: BoxedExpression | undefined;
+  private _head: string;
+  private _hash: number | undefined;
   protected _isCanonical = true;
 
   /**
@@ -90,9 +91,25 @@ export class BoxedNumber extends AbstractBoxedExpression {
       else this._head = 'RealNumber';
     } else this._head = 'Number';
 
-    this._domain = ce.domain(inferNumericDomain(this._value));
-
     ce._register(this);
+  }
+
+  get hash(): number {
+    if (this._hash !== undefined) return this._hash;
+    let h = 0;
+    if (typeof this._value === 'number') h = hashCode(this._value.toString());
+    else if (this._value instanceof Complex)
+      h = hashCode(
+        this._value.re.toString() + ' +i ' + this._value.im.toString()
+      );
+    else if (this._value instanceof Decimal)
+      h = hashCode(this._value.toString());
+    else
+      h = hashCode(
+        this._value[0].toString() + ' / ' + this._value[1].toString()
+      );
+    this._hash = h;
+    return h;
   }
 
   get head(): string {
@@ -206,6 +223,8 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get domain(): BoxedExpression {
+    if (this._domain === undefined)
+      this._domain = this.engine.domain(inferNumericDomain(this._value));
     return this._domain;
   }
 

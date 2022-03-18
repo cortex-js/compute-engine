@@ -221,6 +221,8 @@ export interface BoxedExpression {
   /** From Object.is(). Equivalent to `isSame()` */
   is(rhs: any): boolean;
 
+  get hash(): number;
+
   /** A short description of the symbol or function head. May include markdown.
    * Each string is a paragraph. */
   readonly description: string[];

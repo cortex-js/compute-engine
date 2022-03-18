@@ -13,6 +13,7 @@ import {
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonFunction } from './serialize';
+import { hashCode } from './utils';
 
 /**
  * BoxedDictionary
@@ -40,6 +41,12 @@ export class BoxedDictionary extends AbstractBoxedExpression {
     return undefined;
   }
 
+  get hash(): number {
+    let h = hashCode('Dictionary');
+    for (const [k, v] of this._value) h ^= hashCode(k) ^ v.hash;
+    return h;
+  }
+
   get complexity(): number {
     return 97;
   }
@@ -62,7 +69,6 @@ export class BoxedDictionary extends AbstractBoxedExpression {
   }
 
   get keys(): IterableIterator<string> {
-    // @todo: revisit: return an iterator instead of an array
     return this._value.keys();
   }
 
@@ -122,7 +128,9 @@ export class BoxedDictionary extends AbstractBoxedExpression {
 
   /** Mathematical equality */
   isEqual(rhs: BoxedExpression): boolean {
-    if (!rhs.keys || this._value.size !== rhs.keysCount) return false;
+    if (this === rhs) return true;
+    if (!(rhs instanceof BoxedDictionary)) return false;
+    if (!rhs.keys || this._value.size !== rhs._value.size) return false;
 
     for (const [k, v] of this._value) {
       const rhsV = rhs.getKey(k);

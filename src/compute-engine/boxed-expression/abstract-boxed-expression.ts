@@ -29,6 +29,7 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   abstract isEqual(rhs: BoxedExpression): boolean;
   abstract get isCanonical();
   abstract set isCanonical(_val: boolean);
+  abstract get hash(): number;
 
   readonly engine: IComputeEngine;
   /** Authentic LaTeX, obtained from a source, i.e. from parsing, not generated
