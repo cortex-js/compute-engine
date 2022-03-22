@@ -13,6 +13,7 @@ import {
   LatexString,
   Metadata,
   NOptions,
+  PatternMatchOption,
   SemiBoxedExpression,
   SimplifyOptions,
   Substitution,
@@ -30,6 +31,10 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   abstract get isCanonical();
   abstract set isCanonical(_val: boolean);
   abstract get hash(): number;
+  abstract match(
+    rhs: BoxedExpression,
+    options?: PatternMatchOption
+  ): Substitution | null;
 
   readonly engine: IComputeEngine;
   /** Authentic LaTeX, obtained from a source, i.e. from parsing, not generated

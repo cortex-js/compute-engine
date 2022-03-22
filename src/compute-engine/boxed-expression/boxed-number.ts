@@ -7,7 +7,9 @@ import {
   IComputeEngine,
   Metadata,
   NOptions,
+  PatternMatchOption,
   SimplifyOptions,
+  Substitution,
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { inferNumericDomain } from '../domain-utils';
@@ -321,6 +323,52 @@ export class BoxedNumber extends AbstractBoxedExpression {
     const rhsV = n.asFloat;
     if (lhsV !== null && rhsV !== null)
       return this.engine.chop(rhsV - lhsV) === 0;
+
+    return false;
+  }
+
+  match(
+    rhs: BoxedExpression,
+    options?: PatternMatchOption
+  ): Substitution | null {
+    if (this.isEqualWithTolerance(rhs, options?.numericTolerance ?? 0))
+      return {};
+    return null;
+  }
+
+  /** Compare this with another BoxedNumber.
+   * `rhs` must be a BoxedNumber. Use `isEqualWithTolerance(rhs.numericValue)`
+   * if necessary.
+   */
+  isEqualWithTolerance(rhs: BoxedExpression, tolerance: number): boolean {
+    if (this === rhs) return true;
+    if (!(rhs instanceof BoxedNumber)) return false;
+
+    if (Array.isArray(this._value)) {
+      const v = rhs.asFloat;
+      if (v === null) return false;
+      return Math.abs(this._value[0] / this._value[1] - v) <= tolerance;
+    }
+
+    if (this._value instanceof Decimal)
+      return this._value
+        .sub(rhs.decimalValue ?? rhs.asFloat ?? NaN)
+        .abs()
+        .lte(tolerance);
+
+    if (this._value instanceof Complex) {
+      if (rhs._value instanceof Complex)
+        return (
+          Math.abs(rhs._value.re - this._value.re) <= tolerance &&
+          Math.abs(rhs._value.im - this._value.im) <= tolerance
+        );
+      if (this._value.im !== 0) return false;
+    }
+
+    const lhsV = this.asFloat;
+    const rhsV = rhs.asFloat;
+    if (lhsV !== null && rhsV !== null)
+      return Math.abs(rhsV - lhsV) <= tolerance;
 
     return false;
   }

@@ -139,18 +139,22 @@ export function asCoefficient(
     const e = exponent.asSmallInteger;
     if (e !== null) {
       if (e === -1) return [[denom, numer], ce.inverse(base)];
-      // The exponent is an integer literal, apply it directly to numerator/denominator
-      if (e > 0)
+      if (
+        Math.log10(Math.abs(numer)) * Math.abs(e) < 15 &&
+        Math.log10(Math.abs(denom)) * Math.abs(e) < 15
+      ) {
+        // The exponent is an integer literal, apply it directly to numerator/denominator
+        if (e > 0)
+          return [
+            [Math.pow(numer, e), Math.pow(denom, e)],
+            ce.power(base, exponent),
+          ];
         return [
-          [Math.pow(numer, e), Math.pow(denom, e)],
+          [Math.pow(denom, -e), Math.pow(numer, -e)],
           ce.power(base, exponent),
         ];
-      return [
-        [Math.pow(denom, -e), Math.pow(numer, -e)],
-        ce.power(base, exponent),
-      ];
+      }
     }
-
     // The exponent might be a rational (square root, cubic root...)
     const [en, ed] = exponent.rationalValue;
     if (en !== null && ed !== null) {

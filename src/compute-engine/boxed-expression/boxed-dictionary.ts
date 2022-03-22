@@ -10,6 +10,7 @@ import {
   ReplaceOptions,
   Substitution,
   Metadata,
+  PatternMatchOption,
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonFunction } from './serialize';
@@ -124,6 +125,25 @@ export class BoxedDictionary extends AbstractBoxedExpression {
       if (!rhsV || !v.isSame(rhsV)) return false;
     }
     return true;
+  }
+
+  match(
+    rhs: BoxedExpression,
+    _options?: PatternMatchOption
+  ): Substitution | null {
+    if (!(rhs instanceof BoxedDictionary)) return null;
+
+    if (this._value.size !== rhs._value.size) return null;
+
+    let result = {};
+    for (const [k, v] of this._value) {
+      const rhsV = rhs.getKey(k);
+      if (!rhsV) return null;
+      const m = v.match(rhsV);
+      if (m === null) return null;
+      result = { ...result, ...m };
+    }
+    return result;
   }
 
   /** Mathematical equality */

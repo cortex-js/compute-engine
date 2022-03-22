@@ -1,6 +1,12 @@
 import { Expression } from '../../math-json/math-json-format';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
-import { BoxedExpression, IComputeEngine, Metadata } from '../public';
+import {
+  BoxedExpression,
+  IComputeEngine,
+  Metadata,
+  PatternMatchOption,
+  Substitution,
+} from '../public';
 import { serializeJsonString } from './serialize';
 import { hashCode } from './utils';
 
@@ -53,5 +59,13 @@ export class BoxedString extends AbstractBoxedExpression {
   }
   isSame(rhs: BoxedExpression): boolean {
     return rhs.string === this._string;
+  }
+  match(
+    rhs: BoxedExpression,
+    _options?: PatternMatchOption
+  ): Substitution | null {
+    if (!(rhs instanceof BoxedString)) return null;
+    if (this._string === rhs._string) return {};
+    return null;
   }
 }

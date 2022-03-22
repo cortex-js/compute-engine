@@ -12,6 +12,7 @@ import {
   SimplifyOptions,
   Substitution,
   Metadata,
+  PatternMatchOption,
 } from '../public';
 import { replace } from '../rules';
 import { domainToFlags } from './boxed-symbol-definition';
@@ -255,6 +256,15 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   isSame(rhs: BoxedExpression): boolean {
     if (!(rhs instanceof BoxedSymbol)) return false;
     return this._name === rhs._name;
+  }
+
+  match(
+    rhs: BoxedExpression,
+    _options?: PatternMatchOption
+  ): Substitution | null {
+    if (!(rhs instanceof BoxedSymbol)) return null;
+    if (this._name === rhs._name) return {};
+    return null;
   }
 
   isEqual(rhs: BoxedExpression): boolean {

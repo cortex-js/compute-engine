@@ -14,23 +14,21 @@ import {
 } from '../public';
 import { hashCode, isLatexString } from './utils';
 import { serializeJsonFunction } from './serialize';
+import { BoxedNumber } from './boxed-number';
 
 export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
   _pattern: BoxedExpression;
+  _canonicalPattern: BoxedExpression | undefined;
   constructor(
     ce: IComputeEngine,
     pattern: LatexString | SemiBoxedExpression,
     metadata?: Metadata
   ) {
     super(ce, metadata);
-    // If the `pattern` is a LaTeX string, put it in canonical form.
-    // Otherwise, take is as is and *do not* put it into canonical form:
-    // sometimes we need to match non-canonical patterns
     this._pattern = isLatexString(pattern)
-      ? ce.parse(pattern)!.canonical
+      ? ce.parse(pattern)!
       : ce.box(pattern);
-
-    ce._register(this);
+    if (this._pattern.isCanonical) this._canonicalPattern = this._pattern;
   }
 
   get hash(): number {
@@ -38,7 +36,9 @@ export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
   }
 
   _purge(): undefined {
-    return this._pattern._purge();
+    this._pattern._purge();
+    this._canonicalPattern?._purge();
+    return undefined;
   }
 
   get json(): Expression {
@@ -53,10 +53,10 @@ export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
     return this.engine.domain('Pattern');
   }
   get isCanonical(): boolean {
-    return this._pattern.isCanonical;
+    return true;
   }
-  set isCanonical(val: boolean) {
-    this._pattern.isCanonical = val;
+  set isCanonical(_val: boolean) {
+    return;
   }
 
   isSame(rhs: BoxedExpression): boolean {
@@ -76,12 +76,13 @@ export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
 
     let pattern = this._pattern;
     if (!(options?.exact ?? false)) {
-      expr = expr.canonical;
-      pattern = this._pattern.canonical;
+      if (!this._canonicalPattern)
+        this._canonicalPattern = this._pattern.canonical;
+      pattern = this._canonicalPattern;
     }
-    return match(expr, this.engine.pattern(pattern), {
+    return match(expr, pattern, {
       recursive: options?.recursive ?? false,
-      numericTolerance: options?.numericTolerance ?? this.engine?.tolerance,
+      numericTolerance: options?.numericTolerance ?? 0,
     });
   }
 
@@ -145,7 +146,7 @@ function captureWildcard(
 
 function matchOnce(
   expr: BoxedExpression,
-  pattern: Pattern,
+  pattern: BoxedExpression,
   substitution: Substitution,
   options: { numericTolerance: number }
 ): Substitution | null {
@@ -153,16 +154,14 @@ function matchOnce(
   //
   // Match a number
   //
-  const val = pattern.asFloat;
-  if (val !== null) {
-    if (expr.asFloat === null) return null;
-    // Two numbers are considered the same if they are close in value
-    // (< 10^(-10) by default).
-    if (Math.abs(val - expr.asFloat) > options.numericTolerance) return null;
-
-    return substitution;
+  if (pattern instanceof BoxedNumber) {
+    if (!(expr instanceof BoxedNumber)) return null;
+    if (options.numericTolerance === 0)
+      return pattern.isSame(expr) ? substitution : null;
+    return pattern.isEqualWithTolerance(expr, options.numericTolerance)
+      ? substitution
+      : null;
   }
-  // @todo: match Complex
 
   //
   // Match a string
@@ -296,10 +295,11 @@ function matchOnce(
  */
 function match(
   subject: BoxedExpression,
-  pattern: Pattern,
+  pattern: BoxedExpression,
   options: { recursive: boolean; numericTolerance: number }
 ): Substitution | null {
-  console.assert(!hasWildcards(subject) || hasWildcards(pattern));
+  console.assert(!hasWildcards(subject));
+  console.assert(hasWildcards(pattern));
   const substitution = matchOnce(
     subject,
     pattern,

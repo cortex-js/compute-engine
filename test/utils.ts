@@ -386,7 +386,7 @@ export function benchmark(
   const variance =
     1.0 - Math.max(delta.time / expected.time, delta.exprs / expected.exprs);
 
-  if (Math.abs(variance) > 0.1) {
+  if (true || Math.abs(variance) > 0.1) {
     console.error(
       `Variance ${(variance * 100).toFixed(1)}%`,
       '\n   mem:',

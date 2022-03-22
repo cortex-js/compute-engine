@@ -14,6 +14,7 @@ import {
   ReplaceOptions,
   DEFAULT_COMPLEXITY,
   Metadata,
+  PatternMatchOption,
 } from '../public';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
@@ -400,6 +401,38 @@ export class BoxedFunction extends AbstractBoxedExpression {
       if (!lhsTail[i].isSame(rhsTail[i])) return false;
 
     return true;
+  }
+
+  match(
+    rhs: BoxedExpression,
+    options?: PatternMatchOption
+  ): Substitution | null {
+    if (!(rhs instanceof BoxedFunction)) return null;
+
+    let result: Substitution = {};
+
+    // Head must match
+    if (typeof this.head === 'string') {
+      if (this.head !== rhs.head) return null;
+    } else {
+      if (typeof rhs.head === 'string') return null;
+      else {
+        if (!rhs.head) return null;
+        const m = this.head.match(rhs.head, options);
+        if (m === null) return null;
+        result = { ...result, ...m };
+      }
+    }
+
+    // Each argument must match
+    const lhsTail = this._ops;
+    const rhsTail = rhs._ops;
+    for (let i = 0; i < lhsTail.length; i++) {
+      const m = lhsTail[i].match(rhsTail[i], options);
+      if (m === null) return null;
+      result = { ...result, ...m };
+    }
+    return result;
   }
 
   /** `isEqual` is mathematical equality */

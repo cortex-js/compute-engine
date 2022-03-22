@@ -535,6 +535,19 @@ export interface BoxedExpression {
    */
   has(v: string | string[]): boolean;
 
+  /** Attempt to match this pattern to the `rhs`.
+   *
+   * If `rhs` does not match, return `null`.
+   * Otherwise return an object literal, with a prop for
+   * each matching named wildcard. If `rhs` matches
+   * this pattern but there are no named wildcards, return
+   * the empty object literal, `{}`.
+   */
+  match(
+    rhs: BoxedExpression,
+    options?: PatternMatchOption
+  ): Substitution | null;
+
   /** Mathematical equality (strong equality), that is the value
    * of this expression and of `rhs` are numerically equal.
    *

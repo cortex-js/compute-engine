@@ -35,6 +35,9 @@ const ce = engine;
 // f = f.simplify();
 // console.log(f.toJSON());
 
+const q = ce.parse('12345678^3 + \\frac13');
+console.log(q.N().json);
+
 //
 // BOXING
 //
