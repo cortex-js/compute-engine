@@ -33,7 +33,7 @@ console.log(ce.parse('\\sqrt{5} + 7^3').numericValue?.latex);
 console.log(ce.parse('\\sqrt{x} + 7^3').N().latex);
 // ➔ "\sqrt{x} + 343"
 
-console.log(ce.parse('\\sqrt{5} + 7^3').numericValue?.latex);
+console.log(ce.parse('\\sqrt{x} + 7^3').numericValue?.latex);
 // ➔ undefined
 ```
 
