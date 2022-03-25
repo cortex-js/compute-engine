@@ -1,11 +1,11 @@
 import type { Decimal } from 'decimal.js';
 import type { Complex } from 'complex.js';
-import {
+import type {
   SignalMessage,
   WarningSignal,
   WarningSignalHandler,
 } from '../common/signals';
-import {
+import type {
   Expression,
   MathJsonDictionary,
   MathJsonFunction,
@@ -13,15 +13,11 @@ import {
   MathJsonString,
   MathJsonSymbol,
 } from '../math-json/math-json-format';
-import {
+import type {
   NumberFormattingOptions,
   ParseLatexOptions,
   SerializeLatexOptions,
-} from '../math-json';
-
-export const DEFAULT_COMPLEXITY = 100000;
-
-export const DEBUG = true;
+} from './latex-syntax/public';
 
 /**
  * Metadata that can be associated with a BoxedExpression
@@ -194,12 +190,12 @@ export type JsonSerializationOptions = {
 /**
  * **Theory of Operations**
  *
- * The `BoxedExpression` interface includes most of the methods applicable
- * to any kind of expression, for example `get string()` or
- * `get machineValue()`.
+ * The `BoxedExpression` interface includes most of the member functions
+ * applicable to any kind of expression, for example `get symbol()` or
+ * `get ops()`.
  *
- * When they are not applicable, for example `get string()` on a
- * `BoxedNumber`, they return `null`.
+ * When a member function is not applicable to this `BoxedExpression`,
+ * for example `get symbol()` on a `BoxedNumber`, it returns `null`.
  *
  * This convention makes it convenient to manipulate expressions without
  * having to check what kind of instance they are before manipulating them.
@@ -212,22 +208,34 @@ export interface BoxedExpression {
    */
   readonly engine: IComputeEngine;
 
-  /** From Object.valueOf() */
+  /** From `Object.valueOf()`, return a primitive value for the object.
+   *
+   * If the expression is a machine number, or a Decimal that can be
+   * converted to a machine number, return a `number`.
+   *
+   * If the expression is a rational number, return `[number, number]`.
+   *
+   * If the expression is a symbol, return the name of the symbol as a `string`.
+   *
+   * Otherwise return a LaTeX representation of the expression.
+   *
+   */
   valueOf(): number | string | [number, number];
-  /** From Object.toString() */
+  /** From `Object.toString()`, return a LaTeX representation of the expression. */
   toString(): string;
-  /** From Object.toJSON(), equivalent to `JSON.stringify(this.json)` */
+  /** From `Object.toJSON()`, equivalent to `JSON.stringify(this.json)` */
   toJSON(): string;
-  /** From Object.is(). Equivalent to `isSame()` */
+  /** From `Object.is()`. Equivalent to `expr.isSame()` */
   is(rhs: any): boolean;
 
   get hash(): number;
 
-  /** A short description of the symbol or function head. May include markdown.
-   * Each string is a paragraph. */
+  /** An optional short description of the symbol or function head.
+   *
+   * May include markdown. Each string is a paragraph. */
   readonly description: string[];
 
-  /** A URL pointing to more information about the symbol or function head */
+  /** An optional URL pointing to more information about the symbol or function head */
   readonly url: string;
 
   /** All boxed expressions have a head.
@@ -303,10 +311,19 @@ export interface BoxedExpression {
 
   // ----- DICTIONARY
 
-  /** The keys of the dictionary. If this expression not a dictionary, return `null` */
+  /** The keys of the dictionary.
+   *
+   * If this expression not a dictionary, return `null` */
   get keys(): IterableIterator<string> | null;
   get keysCount(): number;
+  /**
+   * If this expression is a dictionary, return the value of the `key` entry.
+   */
   getKey(key: string): BoxedExpression | undefined;
+  /**
+   * If this expression is a dictionary, return true if the dictionary has a
+   * `key` entry.
+   */
   hasKey(key: string): boolean;
 
   // ----- NUMBER/SYMBOL
@@ -438,7 +455,7 @@ export interface BoxedExpression {
   // positively or negatively (i.e. "maybe").
   //
 
-  /** True if this domain is a subset of domain d */
+  /** True if this domain is a subset of domain `d` */
   isSubsetOf(d: BoxedExpression | string): undefined | boolean;
 
   /** True if the value of this expression is a number.
@@ -525,22 +542,27 @@ export interface BoxedExpression {
 
   /** Structural/symbolic equality (weak equality).
    *
-   * `ce.parse('1+x').isSame(ce.parse('x+1'))` is `true`
+   * `ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`
    *
    */
   isSame(rhs: BoxedExpression): boolean;
 
   /**
-   * True if the expression includes a symbol `v`, or a function head `v`.
+   * True if the expression includes a symbol `v` or a function head `v`.
    */
   has(v: string | string[]): boolean;
 
-  /** Attempt to match this pattern to the `rhs`.
+  /** Attempt to match this expression to the `rhs` expression.
    *
    * If `rhs` does not match, return `null`.
-   * Otherwise return an object literal, with a prop for
-   * each matching named wildcard. If `rhs` matches
-   * this pattern but there are no named wildcards, return
+   *
+   * Otherwise return an object literal.
+   *
+   * If this expression includes wildcards (symbols with a name that starts
+   * with `_`), the object literal will include a prop for each matching named
+   * wildcard.
+   *
+   * If `rhs` matches this pattern but there are no named wildcards, return
    * the empty object literal, `{}`.
    */
   match(
@@ -554,7 +576,7 @@ export interface BoxedExpression {
    * Both expressions are numerically evaluated.
    *
    * Numbers whose difference is less than `engine.tolerance` are
-   * considered equal. This value is set when the `engine.precision` is
+   * considered equal. This tolerance is set when the `engine.precision` is
    * changed to be such that the last two digits are ignored.
    */
   isEqual(rhs: BoxedExpression): boolean;
@@ -667,7 +689,7 @@ export interface BoxedExpression {
    * example modifying the `ComputeEngine` environment, such as its set of assumptions.
    *
    * Only exact calculations are performed, no floating point calculations.
-   * To perform approximate floating point calculations, use `N()` instead.
+   * To perform approximate floating point calculations, use `expr.N()` instead.
    *
    * The result of `expr.evaluate()` may be the same as `expr.simplify()`.
    *
@@ -684,7 +706,10 @@ export interface BoxedExpression {
    * are performed. The calculations are performed according
    * to the `numericMode` and `precision` properties of the `ComputeEngine`.
    *
-   * If the function is not numeric, this is equivalent to `expr.evaluate()`.
+   * To only perform exact calculations, use `expr.evaluate()` instead.
+   *
+   * If the function is not numeric, the result of `expr.N()` is the same as
+   * `expr.evaluate()`.
    *
    * The result is in canonical form.
    */
@@ -712,6 +737,8 @@ export interface BoxedExpression {
    * the matching `lhs` of a rule is replaced by its `rhs`.
    *
    * If no rules apply, return `null`.
+   *
+   * See also `subs` for a simple substitution.
    */
   replace(
     rules: BoxedRuleSet,
@@ -722,7 +749,7 @@ export interface BoxedExpression {
    * Replace all the symbols in the expression as indicated.
    *
    * Note the same effect can be achieved with `expr.replace()`, but
-   * this is more efficient, and simpler.
+   * using `expr.subs()` is more efficient, and simpler.
    *
    */
   subs(sub: Substitution): BoxedExpression;
@@ -735,7 +762,10 @@ export interface BoxedExpression {
    */
   _repairDefinition(): void;
 
-  /** Purge any cached values */
+  /** Purge any cached values.
+   *
+   * For internal use only.
+   */
   _purge(): undefined;
 }
 
@@ -1081,7 +1111,7 @@ export type FunctionDefinition = BaseDefinition &
      * Logic: 10000-10999
      * Relational: 11000-11999
      *
-     * **Default**: 100,000 (DEFAULT_COMPLEXITY)
+     * **Default**: 100,000
      */
     complexity?: number;
 

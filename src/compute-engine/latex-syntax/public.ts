@@ -1,6 +1,6 @@
 import { WarningSignalHandler } from '../../common/signals';
 import { Expression } from '../../math-json/math-json-format';
-import { IComputeEngine } from '../public';
+import type { IComputeEngine } from '../public';
 
 /**
  * A `LatexToken` is a token as returned by `Scanner.peek`.

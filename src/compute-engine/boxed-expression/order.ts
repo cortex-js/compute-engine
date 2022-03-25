@@ -1,6 +1,5 @@
 import {
   BoxedExpression,
-  DEFAULT_COMPLEXITY,
   IComputeEngine,
   SemiBoxedExpression,
 } from '../public';
@@ -8,6 +7,8 @@ import { lex, maxDegree, totalDegree } from '../symbolic/polynomials';
 import { getVars } from './utils';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
+
+export const DEFAULT_COMPLEXITY = 100000;
 
 /**
  * Sort by higher total degree (sum of degree), if tied, sort by max degree,

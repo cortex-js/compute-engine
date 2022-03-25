@@ -12,13 +12,12 @@ import {
   SimplifyOptions,
   Substitution,
   ReplaceOptions,
-  DEFAULT_COMPLEXITY,
   Metadata,
   PatternMatchOption,
 } from '../public';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
-import { order } from './order';
+import { DEFAULT_COMPLEXITY, order } from './order';
 import {
   serializeJsonCanonicalFunction,
   serializeJsonFunction,

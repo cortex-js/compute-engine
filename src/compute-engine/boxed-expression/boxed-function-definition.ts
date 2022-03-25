@@ -2,13 +2,13 @@ import {
   IComputeEngine,
   FunctionDefinition,
   BoxedFunctionDefinition,
-  DEFAULT_COMPLEXITY,
   BoxedExpression,
   BoxedLambdaExpression,
   CompiledExpression,
   SemiBoxedExpression,
   RuntimeScope,
 } from '../public';
+import { DEFAULT_COMPLEXITY } from './order';
 
 class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
   name: string;

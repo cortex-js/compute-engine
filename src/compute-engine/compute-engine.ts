@@ -6,6 +6,7 @@ import { Expression, MathJsonNumber } from '../math-json/math-json-format';
 
 import {
   DictionaryCategory,
+  LatexDictionaryEntry,
   LatexString,
   NumberFormattingOptions,
   ParseLatexOptions,
@@ -160,6 +161,8 @@ export class ComputeEngine implements IComputeEngine {
     PositiveNumber: null,
   };
 
+  private _latexDictionary?: readonly LatexDictionaryEntry[];
+
   /**
    * The current scope.
    *
@@ -191,8 +194,11 @@ export class ComputeEngine implements IComputeEngine {
    * Construct a new `ComputeEngine` environment.
    *
    * If no `options.dictionaries` is provided a default set of dictionaries
-   * is used. The `ComputeEngine.getDictionaries()` method can be called
-   * to access some subset of dictionaries, e.g. for arithmetic, calculus, etc...
+   * is used.
+   *
+   * The `ComputeEngine.getDictionaries()` method can be called
+   * to access a subset of dictionaries, e.g. for arithmetic, calculus, etc...
+   *
    * The order of the dictionaries matter: the definitions from the later ones
    * override the definitions from earlier ones. The first dictionary should
    * be the `'core'` dictionary which include some basic definitions such
@@ -200,12 +206,15 @@ export class ComputeEngine implements IComputeEngine {
    */
   constructor(options?: {
     dictionaries?: Readonly<Dictionary>[];
+    latexDictionary?: readonly LatexDictionaryEntry[];
     numericMode?: NumericMode;
-    assumptions?: (LatexString | Expression)[];
     numericPrecision?: number;
     tolerance?: number;
+    assumptions?: (LatexString | Expression)[];
     defaultDomain?: string;
   }) {
+    this._latexDictionary = options?.latexDictionary;
+
     this._jsonSerializationOptions = {
       exclude: [],
       shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
@@ -431,10 +440,12 @@ export class ComputeEngine implements IComputeEngine {
 
     // Set the display precision as requested.
     // It may be less than the effective precision, which is never less than 15
-    this.latexSyntax.updateOptions({
-      precision: p,
-      avoidExponentsInRange: [-6, p],
-    });
+    if (this._latexSyntax) {
+      this.latexSyntax.updateOptions({
+        precision: p,
+        avoidExponentsInRange: [-6, p],
+      });
+    }
 
     this._precision = Math.max(p, Math.floor(MACHINE_PRECISION));
     this._decimal = this._decimal.config({ precision: this._precision });
@@ -468,7 +479,10 @@ export class ComputeEngine implements IComputeEngine {
       this._precision = Math.floor(MACHINE_PRECISION);
 
     // Make sure the display precision is not larger than the computation precision
-    if (this.latexSyntax.options.precision > this._precision)
+    if (
+      this._latexSyntax &&
+      this.latexSyntax.options.precision > this._precision
+    )
       this.latexSyntax.updateOptions({ precision: this._precision });
 
     // Reset the caches: the values in the cache depend on the numeric mode)
@@ -541,14 +555,12 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   private get latexSyntax(): LatexSyntax {
-    // We'll use this LatexSyntax instance internally, for example to parse
-    // rules, etc... Use our own custom error handler, which will throw
-    // on any error.
     if (!this._latexSyntax)
       this._latexSyntax = new LatexSyntax({
+        computeEngine: this,
+        dictionary: this._latexDictionary,
         precision: this.precision,
         avoidExponentsInRange: [-6, this.precision],
-        computeEngine: this,
         onError: (err) => {
           throw new Error(err[0].message.toString());
         },
