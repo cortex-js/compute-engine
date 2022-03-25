@@ -58,7 +58,9 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return this.latex;
   }
   /** Object.valueOf(): return a primitive value for the object */
-  valueOf(): any {
+  valueOf(): number | string | [number, number] {
+    const [n, d] = this.rationalValue;
+    if (n !== null && d !== null) return [n, d];
     return this.asFloat ?? this.string ?? this.symbol ?? this.toString();
   }
   /** Object.is() */
