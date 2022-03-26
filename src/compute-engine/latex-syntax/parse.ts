@@ -105,7 +105,7 @@ const CLOSE_DELIMITERS = {
   '\\lmoustache': '\\rmoustache',
 };
 
-export const DEFAULT_LATEX_NUMBER_OPTIONS: Required<NumberFormattingOptions> = {
+export const DEFAULT_LATEX_NUMBER_OPTIONS: NumberFormattingOptions = {
   precision: 6, // with machine numbers, up to 15 assuming 2^53 bits floating points
   positiveInfinity: '\\infty',
   negativeInfinity: '-\\infty',
@@ -123,7 +123,7 @@ export const DEFAULT_LATEX_NUMBER_OPTIONS: Required<NumberFormattingOptions> = {
   avoidExponentsInRange: [-7, 20],
 };
 
-export const DEFAULT_PARSE_LATEX_OPTIONS: Required<ParseLatexOptions> = {
+export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
   applyInvisibleOperator: 'auto',
   skipSpace: true,
 
@@ -166,8 +166,7 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: Required<ParseLatexOptions> = {
 
 export class _Parser implements Parser {
   readonly onError: WarningSignalHandler;
-  readonly options: Required<NumberFormattingOptions> &
-    Required<ParseLatexOptions>;
+  readonly options: NumberFormattingOptions & ParseLatexOptions;
   readonly engine: IComputeEngine;
 
   readonly _dictionary: IndexedLatexDictionary;
@@ -182,7 +181,7 @@ export class _Parser implements Parser {
 
   constructor(
     tokens: LatexToken[],
-    options: Required<NumberFormattingOptions> & Required<ParseLatexOptions>,
+    options: NumberFormattingOptions & ParseLatexOptions,
     dictionary: IndexedLatexDictionary,
     computeEngine: IComputeEngine,
     onError: WarningSignalHandler
@@ -1043,9 +1042,9 @@ export class _Parser implements Parser {
           sub = this.matchString({ tokens: ['<}>'] });
           if (sub) this.match('<}>');
         }
-        subscripts.push(sub ?? 'Nothing');
+        subscripts.push(sub ?? 'Missing');
       } else if (this.match('^'))
-        superscripts.push(this.matchRequiredLatexArgument() ?? 'Nothing');
+        superscripts.push(this.matchRequiredLatexArgument() ?? 'Missing');
       this.skipSpace();
     }
 
@@ -1325,13 +1324,13 @@ export class _Parser implements Parser {
       if (tokens.length === 0)
         return [
           'Error',
-          'Nothing',
+          'Missing',
           { str: 'syntax-error' },
           ['LatexForm', { str: command }],
         ];
       return [
         'Error',
-        'Nothing',
+        'Missing',
         { str: 'unknown-command' },
         ['LatexForm', { str: `${command}{${tokensToString(tokens)}}` }],
       ];
@@ -1369,7 +1368,7 @@ export class _Parser implements Parser {
 
     return [
       'Error',
-      'Nothing',
+      'Missing',
       { str: 'unknown-command' },
       ['LatexForm', { str: `${command}${tokensToString(tokens)}` }],
     ];

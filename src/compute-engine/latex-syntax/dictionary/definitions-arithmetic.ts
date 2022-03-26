@@ -39,15 +39,15 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
   for (const arg of args) {
     if (head(arg) === 'Power') {
       if (head(op(arg, 2)) === 'Negate') {
-        const a = op(arg, 1) ?? 'Nothing';
-        const b = op(op(arg, 2), 1) ?? 'Nothing';
+        const a = op(arg, 1) ?? 'Missing';
+        const b = op(op(arg, 2), 1) ?? 'Missing';
         denominator.push([POWER, a, b]);
       } else {
         const exponentVal = machineValue(op(arg, 2)) ?? NaN;
         if (exponentVal === -1) {
-          denominator.push(op(arg, 1) ?? 'Nothing');
+          denominator.push(op(arg, 1) ?? 'Missing');
         } else if (exponentVal < 0) {
-          denominator.push([POWER, op(arg, 1) ?? 'Nothing', -exponentVal]);
+          denominator.push([POWER, op(arg, 1) ?? 'Missing', -exponentVal]);
         } else {
           numerator.push(arg);
         }
@@ -63,8 +63,8 @@ function parseRoot(parser: Parser): Expression | null {
   const degree = parser.matchOptionalLatexArgument();
   const base = parser.matchRequiredLatexArgument();
   if (base === null) {
-    if (degree !== null) return [ROOT, 'Nothing', degree];
-    return [SQRT, 'Nothing'];
+    if (degree !== null) return [ROOT, 'Missing', degree];
+    return [SQRT, 'Missing'];
   }
   if (degree !== null) return [ROOT, base, degree];
   return [SQRT, base];
@@ -318,11 +318,11 @@ function parseFraction(parser: Parser): Expression | null {
   ) {
     // It's a Leibniz notation partial derivative
     // `∂f(x)/∂x` or `∂^2f(x)/∂x∂y` or `∂/∂x f(x)`
-    const degree: Expression = op(numer, 3) ?? 'Nothing';
+    const degree: Expression = op(numer, 3) ?? 'Missing';
     // Expect: getArg(numer, 2) === 'Nothing' -- no args
     let fn = op(numer, 1);
     if (fn === null || fn === 'Missing') {
-      fn = parser.matchExpression() ?? 'Nothing';
+      fn = parser.matchExpression() ?? 'Missing';
     }
 
     let vars: Expression[] = [];
@@ -574,7 +574,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string =>
       joinLatex([
         '\\exponentialE^{',
-        serializer.serialize(op(expr, 1) ?? 'Nothing'),
+        serializer.serialize(op(expr, 1) ?? 'Missing'),
         '}',
       ]),
   },
