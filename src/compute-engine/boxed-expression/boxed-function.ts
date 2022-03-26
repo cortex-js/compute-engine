@@ -81,13 +81,9 @@ export class BoxedFunction extends AbstractBoxedExpression {
     this._head = typeof head === 'string' ? head : head.symbol ?? head;
     this._ops = ops;
 
-    if (typeof this._head === 'string') {
-      const def = ce.getFunctionDefinition(this._head, metadata?.wikidata);
-      if (def === null)
-        throw new Error(`Function \`${this._head}\` is not defined`);
-
-      this._def = def;
-    }
+    if (typeof this._head === 'string') 
+      this._def = ce.getFunctionDefinition(this._head, metadata?.wikidata);
+    
 
     this._isCanonical = false;
 
