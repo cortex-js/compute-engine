@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### Improvements
+
+- Added option to specify custom LaTeX dictionaries in `ComputeEngine`
+  constructor
+- `expr.valueOf` returns rational numbers as `[number, number]` when applicable
+- The non-ESM builds (`compute-engine.min.js`) now targets vintage JavaScript
+  for improved compatibility with outdated toolchains (e.g. Webpack 4) and
+  environments. The ESM build (`compute-engine.min.esm.js`) targets evergreen
+  JavaScript (currently ECMAScript 2020).
+
 ## 0.4.3 (2022-03-21)
 
 ### Transition Guide from 0.4.2
