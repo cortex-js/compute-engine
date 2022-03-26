@@ -208,7 +208,7 @@ export interface BoxedExpression {
    */
   readonly engine: IComputeEngine;
 
-  /** From `Object.valueOf()`, return a primitive value for the object.
+  /** From `Object.valueOf()`, return a primitive value for the expression.
    *
    * If the expression is a machine number, or a Decimal that can be
    * converted to a machine number, return a `number`.

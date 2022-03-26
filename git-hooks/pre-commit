@@ -19,7 +19,7 @@ export RESET=""
 
 git config advice.addEmptyPathspec false
 
-echo "${LINECLEAR}${CHECK} Linting Typescript files"
+echo "${LINECLEAR}${CHECK} Linting TypeScript files"
 exit_code=1
 export all_ts_files=$(git diff --cached --diff-filter=d --name-only | { grep \.ts || true; }$)
 

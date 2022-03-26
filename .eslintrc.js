@@ -5,13 +5,13 @@ module.exports = {
     'plugin:import/errors',
     'plugin:import/warnings',
     'plugin:import/typescript',
-    // Uses the recommended rules for Typescript
+    // Uses the recommended rules for TypeScript
     'plugin:@typescript-eslint/recommended',
     // Disable rules that conflict with prettier
     // See https://prettier.io/docs/en/integrating-with-linters.html
     'plugin:prettier/recommended',
   ],
-  // Use the Typescript parser:
+  // Use the TypeScript parser:
   parser: '@typescript-eslint/parser',
   parserOptions: {
     project: './tsconfig.json',

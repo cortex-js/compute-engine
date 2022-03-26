@@ -382,7 +382,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
 /*
  DICTIONARY
  aka Association in Wolfram, Dictionary in Python and Swift, Record in Maple,
- Map Containers in mathlab, Map in Javascript
+ Map Containers in mathlab, Map in JavaScript
  Dictionary("field1", "value1", "field2", "value2"...)
  Need a new atomic 'dict' MathJSON type?
   {{name: 'dict',"field1": "value1", "field2": "value2"}}
