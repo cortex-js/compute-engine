@@ -73,7 +73,7 @@ Some common environment variables include:
 The navigator properties are available when the compilation/parsing is taking
 place in a browser process.
 
-**To access the properties of the `navigator` Javascript global object**, use
+**To access the properties of the `navigator` JavaScript global object**, use
 the `#navigator()` pragma function. It returns 'Nothing' if the property is not
 available.
 

@@ -10,7 +10,7 @@ sidebar:
 # Expressions
 
 The CortexJS Compute Engine produces and manipulates
-[symbolic expressions](<https://en.wikipedia.org/wiki/Expression_(mathematics)>),
+[symbolic expressions](<https://en.wikipedia.org/wiki/Expression_(mathematics)>)
 such as numbers, constants, variables and functions.
 
 Expressions are represented using the [MathJSON format](/math-json/).
@@ -23,17 +23,16 @@ Unlike the plain data types used by JSON, Boxed Expressions allow an IDE, such
 as VSCode Studio, to provide suitable hints in the editor, and to check that the
 correct functions and properties are used, particularly when using TypeScript.
 
-Boxed Expressions are also used to implement caching and avoid repetitive
-calculations.
-
-For example, the expression \\( x + 1\\) can be represented in MathJSON as
-`["Add", "x", 1]` or `{"fn": ["Add", "x", 1]}` or `["Add", "x", {"num": "1"}]`.
-But \\(1729\\) has a single representation as a `BoxedExpression`.
+Boxed Expressions also improve performance by implementing caching and 
+avoiding repetitive calculations.
 
 ## Boxing
 
-**To create a boxed expression from a MathJSON expression**, use the `ce.box()`
+**To create a Boxed Expression from a MathJSON expression**, use the `ce.box()`
 function.
+
+The result is an instance of a subclass of `BoxedExpression`, such as 
+`BoxedNumber` `BoxedFunction` etc...
 
 ```js
 let expr = ce.box(1.729e3);
@@ -55,7 +54,7 @@ console.log(expr.isPositive);
 // undefined
 ```
 
-**To create a boxed expression from a LaTeX string**, call the `ce.parse()`
+**To create a Boxed Expression from a LaTeX string**, call the `ce.parse()`
 function.
 
 ```js
@@ -67,6 +66,46 @@ console.log(expr.json);
 // ➔ ["Add", 3, "x", "y"]
 ```
 
+## Unboxing
+
+**To access the MathJSON expression of a boxed expression**, use the `expr.json`
+property. Use this property to "look inside the box".
+
+```js
+const expr = ce.box(['Add', 3, 'x']);
+console.log(expr.json);
+// ➔ ['Add', 3, 'x']
+```
+
+**To customize the format of the MathJSON expression** use the 
+`ce.jsonSerializationOptions` property.
+
+You can use this option to control which metadata, if any, should be included,
+whether to use shorthand notation, and to exclude some functions.
+
+```ts
+const expr = ce.parse('2 + \\frac{q}{p}');
+console.log(expr.canonical.json);
+// ➔ ["Add", 2, ["Divide", "q", "p"]]
+
+ce.jsonSerializationOptions = {
+  exclude: ['Divide'],  // Don't use `Divide` functions, 
+                        // use `Multiply`/`Power` instead
+  shorthands: [],     // Don't use any shorthands
+};
+
+console.log(expr.canonical.json);
+// ➔ ["fn": ["Add", ["num": "2"], 
+//      ["fn": ["Multiply", 
+//        ["sym": "q"], 
+//        ["fn": ["Power", ["sym": "p"], ["num": "-1"]]]]
+//      ]
+//    ]]
+```
+
+
+<section id='pure'>
+
 ## Immutability
 
 **Boxed expressions are immutable**. Once a Boxed Expression has been created it
@@ -75,9 +114,8 @@ cannot be changed to represent a different mathematical object.
 The functions that manipulate Boxed Expressions, such as `expr.simplify()`,
 return a new Boxed Expression, without modifying `expr`.
 
-However, this doesn't imply that the properties of the expression will not
-change, since some of them may depend on contextual information which can change
-over time.
+However, the properties of the expression may change, since some of them may 
+depend on contextual information which can change over time.
 
 For example, `expr.isPositive` may return `undefined` if nothing is known about
 a symbol. But if an assumption about the symbol is made later, or a value
@@ -95,38 +133,18 @@ console.log(expr.isPositive);
 
 What doesn't change is the fact that `expr` represents the symbol `"x"`.
 
-## Unboxing
 
-**To access the MathJSON expression of a boxed expression**, use the `expr.json`
-property. Use this property to "look inside the box".
-
-```js
-const expr = ce.box(['Add', 3, 'x']);
-console.log(expr.json);
-// ➔ ['Add', 3, 'x']
-```
-
-There are other properties on a Boxed Expression that allows you to access the
-content of the expression or part of it, in a convenient way. For example:
-
-- **expr.symbol** the name of a symbol
-- **expr.head** the head of an expression, that is, when then expression is a
-  function, the name of the function, `Symbol` for a boxed symbol, `String` for
-  a boxed string, etc...
-- **expr.tail** the arguments of a function
-- **expr.machinevalue** the value of the expression when stored as a machine
-  number.
-
-<section id='pure'>
 
 ## Pure Expressions
 
-A pure expression is one whose value is fixed. Evaluating it produces no side
-effect (doesn't change something outside its arguments to do something).
+A pure expression is an expression whose value is fixed. Evaluating it produces
+no side effect (doesn't change something outside its arguments to do something).
 
-The \\( \sin \\) function is pure: if you invoke it with the same arguments, it
-will have the same value. On the other hand, \\( \mathrm{random} \\) is not
-pure: by it's nature it returns a different result on every call.
+The \\( \sin() \\) function is pure: if you invoke it with the same arguments, it
+will have the same value. 
+
+On the other hand, \\( \mathrm{random}() \\) is not
+pure: by its nature it returns a different result on every call.
 
 Numbers, symbols and strings are pure. A function expression is pure if the
 function itself is pure, and all its arguments are pure as well.
@@ -139,9 +157,9 @@ function itself is pure, and all its arguments are pure as well.
 
 ## Literal Expressions
 
-A literal expression is one that has a fixed value that was provided directly.
-Numbers and strings are literal. Symbols and functions are not. They may have a
-value, but their value is calculated indirectly.
+A literal expression is one that has a fixed value that was provided directly
+when the expression was defined. Numbers and strings are literal. Symbols and 
+functions are not. They may have a value, but their value is calculated indirectly.
 
 **To check if an expression is a literal**, use `expr.isLiteral`.
 
@@ -183,7 +201,7 @@ dictionary, use the following boolean expressions:
 
 Note that symbols or functions can return `true` for `isNumber`, if their value
 is a number. Use `isLiteral` to distinguish literal numbers from other
-expressions that may have a number as their value.
+expressions that may have a numeric value.
 
 ## Name Binding
 
@@ -191,11 +209,11 @@ expressions that may have a number as their value.
 with a definition.**
 
 The definition of symbols and functions is set when an instance of a Compute
-Engine is created. It is also possible to provide dictionaries that contain
-additional definitions, when the Compute Engine is first created, or later at
-runtime.
+Engine is created. 
 
-The definition records contain information such as the domain or value of a
+Dictionaries that contain additional definitions can be provided when the Compute Engine is first created, or later at runtime.
+
+The definitions record contain information such as the domain or value of a
 symbol, or how to simplify or evaluate functions.
 
 ### Symbol Binding
@@ -218,12 +236,15 @@ a **free variable**. It will have a domain of `ce.defaultDomain'.
 If `ce.defaultDomain` is `null`, no definition is created, and the symbol is not
 bound to any definition. This will severely limit the usefulness of the symbol.
 
-By default, `defaultDomain` is `RealNumber`.
+By default, `defaultDomain` is `ExtendedRealNumber` so any unknown variables is 
+automatically assumed to be a real number.
 
 ```js
 const symbol = ce.box('m'); // m for mystery
+console.log(symbol.domain.symbol);
+// ➔ "ExtendedRealNumber"
 symbol.value = 5;
-console.log(symbol.numericValue);
+console.log(symbol.numericValue?.json);
 // ➔ 5
 ```
 
@@ -372,99 +393,6 @@ the resulting expression.
 
 </section>
 
-## `BoxedExpression` Methods and Properties
-
-<div class=symbols-table>
-
-| Symbol          | Description |
-| :-------------- | :---------- |
-| `json`          |             |
-| `latex`         |             |
-| `complexity`    |             |
-| `domain`        |             |
-| `head`          |             |
-| `tail`          |             |
-| `nops`          |             |
-| `op(n: number)` |             |
-| `canonical`     |             |
-| `simplify()`    |             |
-| `evalutate()`   |             |
-| `N()`           |             |
-| `solve()`       |             |
-| `apply()`       |             |
-| `replace()`     |             |
-| `value`         |             |
-| `numericValue`  |             |
-
-</div>
-
-### Number
-
-<div class=symbols-table>
-
-| Symbol          | Description |
-| :-------------- | :---------- |
-| `machineValue`  |             |
-| `rationalValue` |             |
-| `decimalValue`  |             |
-| `complexValue`  |             |
-| `sgn`           |             |
-
-</div>
-
-### Symbol
-
-<div class=symbols-table>
-
-| Symbol          | Description |
-| :-------------- | :---------- |
-| `symbol`        |             |
-| `def`           |             |
-| `value`         |             |
-| `machineValue`  |             |
-| `rationalValue` |             |
-| `decimalValue`  |             |
-| `complexValue`  |             |
-| `numericValue`  |             |
-| `sgn`           |             |
-
-</div>
-
-### Functions
-
-<div class=symbols-table>
-
-| Symbol          | Description |
-| :-------------- | :---------- |
-| `tail`          |             |
-| `nops`          |             |
-| `op(n: number)` |             |
-| `def`           |             |
-
-</div>
-
-### Dictionary
-
-<div class=symbols-table>
-
-| Symbol            | Description |
-| :---------------- | :---------- |
-| `keys`            |             |
-| `keysCount`       |             |
-| `get(key:string)` |             |
-| `has(key:string)` |             |
-
-</div>
-
-### String
-
-<div class=symbols-table>
-
-| Symbol   | Description |
-| :------- | :---------- |
-| `string` |             |
-
-</div>
 
 ## Return Value Conventions
 

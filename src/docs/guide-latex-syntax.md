@@ -18,16 +18,26 @@ expressions as LaTeX string (**serializing**).
 **To transform MathJSON to LaTeX**, read the `expr.latex` property.
 
 ```javascript
-import { parse, serialize } from '@cortex-js/compute-engine';
+import { ComputeEngine } from '@cortex-js/compute-engine';
 
-const expr = parse('\\frac{\\pi}{2}');
-console.log(expr);
-// ➔ ["Divide", "Pi", 2]
+const ce = new ComputeEngine();
 
-const latex = serialize(expr);
-console.log(latex);
-// ➔ \frac{\pi}{2}
+console.log(ce.parse('5x + 1'));
+// ➔  ["Add", ["Multiply", 5, "x"], 1]
+
+console.log(ce.serialize(["Add", ["Power", "x", 3], 2]));
+// ➔  x^3 + 2
 ```
+
+**To input math using an interactive mathfield**, use [MathLive](/mathlive/).
+
+A MathLive mathfield works like a textarea in HTML, but for math. It provides 
+its content as a LaTeX string or a MathJSON expression, ready to be used with the Compute Engine.
+
+{% readmore "/mathlive/" %}
+Read more about <strong>MathLive</strong>
+{% endreadmore %}
+
 
 The behavior of `parse()` and `serialize()` can be customized by passing an
 optional argument:
