@@ -42,8 +42,8 @@
   "module": "./dist/compute-engine.min.esm.js",
   "types": "./dist/types/compute-engine.d.ts",
   "engines": {
-    "npm": ">=6.14.8",
-    "node": ">=12.0.0"
+    "npm": ">=8.5.5",
+    "node": ">=17.8.0"
   },
   "devDependencies": {
     "@cortex-js/prettier-config": "^1.1.1",
