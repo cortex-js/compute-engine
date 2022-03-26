@@ -254,7 +254,7 @@ export interface BoxedExpression {
   get value(): BoxedExpression | undefined;
 
   /** Only the value of variables can be changed (symbols that are not constants) */
-  set value(value: BoxedExpression | undefined);
+  set value(value: BoxedExpression | number | undefined);
 
   /** Return an approximation of the value of this expression. Floating-point
    * operations may be performed.

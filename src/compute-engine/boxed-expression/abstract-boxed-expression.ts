@@ -191,7 +191,7 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   get value(): BoxedExpression | undefined {
     return this;
   }
-  set value(_value: BoxedExpression | undefined) {
+  set value(_value: BoxedExpression | number | undefined) {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 

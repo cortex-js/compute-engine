@@ -393,12 +393,12 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     return this._value;
   }
 
-  set value(val: BoxedExpression | undefined) {
+  set value(val: BoxedExpression | number | undefined) {
     if (this.constant)
       throw new Error(
         `The value of the constant "${this.name}" cannot be changed`
       );
-
+    if (typeof val === 'number') val = this._engine.box(val);
     this._value = val;
     if (val) this.setProps(valueToFlags(val));
   }

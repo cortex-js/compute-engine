@@ -229,17 +229,27 @@ console.log(symbol.numericValue);
 
 ### Symbol Binding: Bound Variables, Free Variables and Constants
 
+When discussing **binding** and symbols, this can either relate to
+[**name binding**](https://en.wikipedia.org/wiki/Name_binding) (associating a
+definition with the name of a symbol) or
+[**value binding**](https://en.wikipedia.org/wiki/Free_variables_and_bound_variables)
+(associating a value with the definition of a symbol).
+
 If the definition of a symbol has a value, the symbol is said to be a **bound
-variable**.
+variable** (value binding).
 
 This is in opposition to **free variables** which are symbols that have a
 definition, but no values, and **constants** which are symbols that have a value
 that cannot be altered.
 
-The property `expr.isBound` indicate if a symbol is a bound variable (if it has
-a value), and `expr.isConstant` if it is a constant.
+The property `expr.symbolDefinition` is not `undefined` if a symbol is a bound
+variable (name binding, it has a definition).
 
-Assigning a value to a free variable makes it a bound variable.
+The property `expr.symbolDefinition?.constant` is true if a symbol is a
+constant.
+
+Assigning a value to a free variable makes it a bound variable (name binding and
+value binding).
 
 The value of constants is determined at the time of name binding. The value of
 some symbols — `Pi`, for example — may be determined based on settings of the
@@ -262,12 +272,6 @@ ce.precision = 100; // Future computations will be done with 100 digits
 console.log('pi = ', smallPi.numericValue, '=', bigPi.numericValue);
 // ➔ pi  = 3.1415 = 3.1415926535
 ```
-
-When discussing **binding** and symbols, this can either relate to
-[**name binding**](https://en.wikipedia.org/wiki/Name_binding) (associating a
-definition with the name of a symbol) or
-[**value binding**](https://en.wikipedia.org/wiki/Free_variables_and_bound_variables)
-(associating a value with the definition of a symbol).
 
 ### Declaring a Symbol
 

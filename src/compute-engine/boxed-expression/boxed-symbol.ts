@@ -173,7 +173,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return this._def?.value;
   }
 
-  set value(value: SemiBoxedExpression | undefined) {
+  set value(value: BoxedExpression | number | undefined) {
     // Symbol that start with `_` are wildcards and can never have an associated value
     if (this._name[0] === '_')
       throw new Error(
