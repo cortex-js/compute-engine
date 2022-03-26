@@ -5,8 +5,7 @@
 <h3><strong>Cortex Compute Engine</strong></h3>
 <h1>Symbolic manipulation and numeric evaluation of MathJSON expressions</h1>
 
-[MathJSON](https://cortexjs.io/math-json/) is a lightweight data interchange
-format for mathematical notation, based on JSON.
+[MathJSON](https://cortexjs.io/math-json/) is a lightweight mathematical notation interchange format based on JSON.
 
 The Cortex Compute Engine can parse LaTeX to MathJSON, serialize MathJSON to
 LaTeX, format, simplify and evaluate MathJSON expressions.
@@ -40,7 +39,7 @@ console.log(evaluate(expr));
 
 <dl>
   <dt><a href="https://cortexjs.io/math-json/">MathJSON</a></dt>
-  <dd>A lightweight data interchange format for mathematical notation</dd>  
+  <dd>A lightweight mathematical notation interchange format</dd>  
   <dt><a href="https://cortexjs.io/mathlive">MathLive</a> (on <a href="https://github.com/arnog/mathlive">GitHub</a>)</dt>
   <dd>A Web Component for math input.</dd>  
   <dt><a href="https://cortexjs.io/cortex">Cortex</a> (on <a href="https://github.com/cortex-js/compute-engine/tree/master/src/cortex">GitHub</a>)</dt>
