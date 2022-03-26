@@ -1676,11 +1676,13 @@ export interface IComputeEngine {
    */
   serialize(expr: SemiBoxedExpression): LatexString;
 
-  get latexOptions(): Required<NumberFormattingOptions> &
-    Required<ParseLatexOptions> &
-    Required<SerializeLatexOptions>;
+  get latexOptions(): NumberFormattingOptions &
+    ParseLatexOptions &
+    SerializeLatexOptions;
   set latexOptions(
-    opts: NumberFormattingOptions & ParseLatexOptions & SerializeLatexOptions
+    opts: Partial<NumberFormattingOptions> &
+      Partial<ParseLatexOptions> &
+      Partial<SerializeLatexOptions>
   );
 
   get jsonSerializationOptions(): JsonSerializationOptions;

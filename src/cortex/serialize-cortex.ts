@@ -31,7 +31,7 @@ import {
 } from '../point-free-parser/characters';
 import { RESERVED_WORDS } from './reserved-words';
 
-export const NUMBER_FORMATTING_OPTIONS: Required<NumberFormattingOptions> = {
+export const NUMBER_FORMATTING_OPTIONS: NumberFormattingOptions = {
   precision: 15, // with machine numbers, up to 15 assuming 2^53 bits floating points
   decimalMarker: '.',
   groupSeparator: '_', // for thousands, etc...

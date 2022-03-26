@@ -97,13 +97,12 @@ function serializeOperator(
 
 export class Serializer {
   readonly onError: WarningSignalHandler;
-  options: Required<NumberFormattingOptions> & Required<SerializeLatexOptions>;
+  options: NumberFormattingOptions & SerializeLatexOptions;
   readonly computeEngine?: IComputeEngine;
   readonly dictionary: IndexedLatexDictionary;
   level = -1;
   constructor(
-    options: Required<NumberFormattingOptions> &
-      Required<SerializeLatexOptions>,
+    options: NumberFormattingOptions & SerializeLatexOptions,
     dictionary: IndexedLatexDictionary,
     computeEngine: undefined | IComputeEngine,
     onError: WarningSignalHandler

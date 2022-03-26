@@ -17,7 +17,7 @@ import { NumberFormattingOptions } from './public';
  */
 function formatFractionalPart(
   m: string,
-  options: Required<NumberFormattingOptions>
+  options: NumberFormattingOptions
 ): string {
   const originalLength = m.length;
   const originalM = m;
@@ -91,7 +91,7 @@ function formatExponent(exp: string, options: NumberFormattingOptions): string {
  */
 export function serializeNumber(
   expr: Expression | null,
-  options: Required<NumberFormattingOptions>
+  options: NumberFormattingOptions
 ): string {
   if (expr === null) return '';
   let num: string | number;
@@ -121,6 +121,15 @@ export function serializeNumber(
   // If we end with a letter ('n' or 'd' for bigint or decimal)
   // remove it (legacy format)
   if (/[0-9][nd]$/.test(num)) num = num.slice(0, -1);
+
+  // Remove any whitespace
+  num = num.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+
+  // Do we have repeating digits?
+  if (/\([0-9]+\)$/.test(num)) {
+    const [_, body, repeat] = num.match(/(.+)\(([0-9]+)\)$/) ?? [];
+    num = body + repeat.repeat(Math.ceil(options.precision / repeat.length));
+  }
 
   let sign = '';
   if (num[0] === '-') {
@@ -234,7 +243,7 @@ export function serializeNumber(
 
 export function serializeEngineeringNotationNumber(
   value: number,
-  options: Required<NumberFormattingOptions>
+  options: NumberFormattingOptions
 ): string {
   if (value === 0) return '0';
 
@@ -268,7 +277,7 @@ export function serializeEngineeringNotationNumber(
 
 function serializeAutoNotationNumber(
   valString: string,
-  options: Required<NumberFormattingOptions>
+  options: NumberFormattingOptions
 ): string {
   let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/i);
   let exponent: string | undefined = undefined;

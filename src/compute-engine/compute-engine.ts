@@ -1138,16 +1138,18 @@ export class ComputeEngine implements IComputeEngine {
     return this.latexSyntax.serialize(x as Expression);
   }
 
-  get latexOptions(): Required<NumberFormattingOptions> &
-    Required<ParseLatexOptions> &
-    Required<SerializeLatexOptions> {
+  get latexOptions(): NumberFormattingOptions &
+    ParseLatexOptions &
+    SerializeLatexOptions {
     return {
       ...this.latexSyntax.options,
       ...this.latexSyntax.serializer.options,
     };
   }
   set latexOptions(
-    opts: NumberFormattingOptions & ParseLatexOptions & SerializeLatexOptions
+    opts: Partial<NumberFormattingOptions> &
+      Partial<ParseLatexOptions> &
+      Partial<SerializeLatexOptions>
   ) {
     this.latexSyntax.updateOptions(opts);
   }

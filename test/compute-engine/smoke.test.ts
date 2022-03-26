@@ -35,8 +35,23 @@ const ce = engine;
 // f = f.simplify();
 // console.log(f.toJSON());
 
-const q = ce.parse('12345678^3 + \\frac13');
-console.log(q.N().json);
+let q = ce.parse('\\frac{1}');
+console.log(q.json);
+q = ce.parse('\\sqrt{}');
+console.log(q.json);
+q = ce.parse('\\sqrt');
+console.log(q.json);
+q = ce.parse('\\sqrt{');
+console.log(q.json);
+q = ce.parse('2 \\times');
+console.log(q.json);
+
+ce.latexOptions = {
+  precision: 3,
+  decimalMarker: ',',
+};
+
+console.log(ce.parse('\\frac{1}{7}').N().latex);
 
 //
 // BOXING

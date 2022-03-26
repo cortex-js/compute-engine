@@ -62,9 +62,7 @@ export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> =
 
 export class LatexSyntax {
   onError: WarningSignalHandler;
-  options: Required<NumberFormattingOptions> &
-    Required<ParseLatexOptions> &
-    Required<SerializeLatexOptions>;
+  options: NumberFormattingOptions & ParseLatexOptions & SerializeLatexOptions;
   readonly computeEngine: IComputeEngine;
 
   private dictionary: IndexedLatexDictionary;
