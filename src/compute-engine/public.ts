@@ -19,6 +19,8 @@ import type {
   SerializeLatexOptions,
 } from './latex-syntax/public';
 
+export type { Parser } from './latex-syntax/public';
+
 /**
  * Metadata that can be associated with a BoxedExpression
  */
