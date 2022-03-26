@@ -43,6 +43,18 @@ export function serializeJsonCanonicalFunction(
   }
 
   if (
+    head === 'Divide' &&
+    ce.jsonSerializationOptions.exclude.includes('Divide')
+  ) {
+    return serializeJsonFunction(
+      ce,
+      'Multiply',
+      [args[0], ce._fn('Power', [args[1], ce.NEGATIVE_ONE])],
+      metadata
+    );
+  }
+
+  if (
     head === 'Multiply' &&
     !ce.jsonSerializationOptions.exclude.includes('Divide')
   ) {
@@ -64,18 +76,24 @@ export function serializeJsonCanonicalFunction(
       if (!exclusions.includes('Square') && exp === 2)
         return serializeJsonFunction(ce, 'Square', [args[0]], metadata);
 
-      if (exp === -1)
-        return serializeJsonFunction(ce, 'Divide', [ce.ONE, args[0]], metadata);
+      if (!ce.jsonSerializationOptions.exclude.includes('Divide')) {
+        if (exp === -1)
+          return serializeJsonFunction(
+            ce,
+            'Divide',
+            [ce.ONE, args[0]],
+            metadata
+          );
 
-      if (exp !== null && exp < 0) {
-        return serializeJsonFunction(
-          ce,
-          'Divide',
-          [ce.ONE, ce.power(args[0], -exp)],
-          metadata
-        );
+        if (exp !== null && exp < 0) {
+          return serializeJsonFunction(
+            ce,
+            'Divide',
+            [ce.ONE, ce.power(args[0], -exp)],
+            metadata
+          );
+        }
       }
-
       const [n, d] = args[1].rationalValue;
       if (n === 1) {
         if (!exclusions.includes('Sqrt') && d === 2)
@@ -438,7 +456,9 @@ export function serializeJsonNumber(
   if (shorthandAllowed) return value;
 
   const num = repeatingDecimal(ce, value.toString());
-  return metadata.latex !== num ? { latex: metadata.latex, num } : { num };
+  return metadata.latex.length > 0 && metadata.latex !== num
+    ? { latex: metadata.latex, num }
+    : { num };
 }
 
 function _escapeJsonString(s: string): string {
