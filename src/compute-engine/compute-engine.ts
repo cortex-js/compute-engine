@@ -619,7 +619,7 @@ export class ComputeEngine implements IComputeEngine {
 
     if (defs) return defs[0];
 
-    // If no definition matching the domain of the arguments, return `undefined`
+    // If no matching definition
     return undefined;
   }
 
