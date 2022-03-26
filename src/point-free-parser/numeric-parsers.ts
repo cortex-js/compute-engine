@@ -57,7 +57,7 @@ export function applyExponent(
   if (exp.isSuccess) {
     // Note: using "Math.pow" loses some accuracy, i.e.:
     // `0.1e-4 = 0.000009999999999999999`
-    // Instead, use the Javascript parsing function
+    // Instead, use the JavaScript parsing function
     // result = result * Math.pow(10, exp.value);
     value = Number.parseFloat(value.toString() + 'e' + exp.value!.toString());
   } else if (exp.isFailure) {
