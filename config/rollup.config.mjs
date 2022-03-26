@@ -24,6 +24,21 @@ const TYPESCRIPT_OPTIONS = {
   },
 };
 
+// Options to target "vintage" environments, for example environments that
+// don't support optional chaining.
+// This is mostly an issue with toolchains, not so much target environments.
+// For example Webpack 4 doesn't support optional chaining, even though it
+// targets environments that do.
+const TYPESCRIPT_VINTAGE_OPTIONS = {
+  clean: true,
+  tsconfigOverride: {
+    compilerOptions: {
+      declaration: false,
+      target: 'es2017',
+    },
+  },
+};
+
 function preamble(moduleName) {
   return `/** ${moduleName} ${SDK_VERSION} ${
     process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
@@ -31,7 +46,7 @@ function preamble(moduleName) {
 }
 
 const TERSER_OPTIONS = {
-  ecma: 2017, // Use "5" to support older browsers
+  ecma: 2020, // Use "5" to support older browsers
   compress: {
     drop_console: true,
     drop_debugger: true,
@@ -41,7 +56,7 @@ const TERSER_OPTIONS = {
       GIT_VERSION: process.env.GIT_VERSION ?? '?.?.?',
     },
     module: true,
-    passes: 1,
+    passes: 3,
     unsafe: true,
     // unsafe_arrows: true,
     // unsafe_comps: true,
@@ -67,15 +82,6 @@ function clearLine() {
   }
 }
 
-function timestamp() {
-  const now = new Date();
-  return chalk.green(
-    `${now.getHours()}:${('0' + now.getMinutes()).slice(-2)}:${(
-      '0' + now.getSeconds()
-    ).slice(-2)}`
-  );
-}
-
 //
 // Rollup plugin to display build progress
 //
@@ -84,9 +90,7 @@ function buildProgress() {
     name: 'rollup.config.js',
     transform(_code, id) {
       const file = normalizePath(id);
-      if (file.includes(':')) {
-        return;
-      }
+      if (file.includes(':')) return;
 
       clearLine();
       if (process.stdout.isTTY) {
@@ -125,26 +129,15 @@ if (targets.includes('math-json')) {
         exports: 'named',
         banner: preamble('MathJSON'),
       },
-      {
-        file: BUILD_DIR + 'math-json.js',
-        format: 'umd',
-        sourcemap: !PRODUCTION,
-        exports: 'named',
-        name: 'MathJson', // Required for UMD
-        banner: preamble('MathJSON'),
-      },
     ],
     plugins: [
       buildProgress(),
-      resolve({
-        browser: true,
-        // preferBuiltins: true,
-      }),
+      resolve({ browser: true }),
       commonjs(),
       typescript(TYPESCRIPT_OPTIONS),
     ],
   });
-  if (PRODUCTION)
+  if (PRODUCTION) {
     ROLLUP.push({
       input: 'src/math-json.ts',
       output: [
@@ -153,14 +146,6 @@ if (targets.includes('math-json')) {
           file: BUILD_DIR + 'math-json.min.esm.js',
           sourcemap: false,
           exports: 'named',
-        },
-        ,
-        {
-          file: BUILD_DIR + 'math-json.min.js',
-          format: 'umd',
-          sourcemap: false,
-          exports: 'named',
-          name: 'MathJson', // Required for UMD
         },
       ],
       plugins: [
@@ -174,6 +159,31 @@ if (targets.includes('math-json')) {
         }),
       ],
     });
+
+    ROLLUP.push({
+      input: 'src/math-json.ts',
+      output: [
+        {
+          file: BUILD_DIR + 'math-json.min.js',
+          format: 'umd',
+          sourcemap: false,
+          exports: 'named',
+          name: 'MathJson', // Required for UMD
+        },
+      ],
+      plugins: [
+        buildProgress(),
+        resolve({ browser: true }),
+        commonjs(),
+        typescript(TYPESCRIPT_VINTAGE_OPTIONS),
+        terser({
+          ...TERSER_OPTIONS,
+          ecma: 2017,
+          format: { ...TERSER_OPTIONS.format, preamble: preamble('MathJSON') },
+        }),
+      ],
+    });
+  }
 }
 
 if (targets.includes('compute-engine')) {
@@ -187,14 +197,6 @@ if (targets.includes('compute-engine')) {
         exports: 'named',
         banner: preamble('CortexJS Compute Engine'),
       },
-      {
-        file: BUILD_DIR + 'compute-engine.js',
-        format: 'umd',
-        sourcemap: !PRODUCTION,
-        exports: 'named',
-        name: 'ComputeEngine', // Required for UMD
-        banner: preamble('CortexJS Compute Engine'),
-      },
     ],
     plugins: [
       buildProgress(),
@@ -206,7 +208,7 @@ if (targets.includes('compute-engine')) {
       typescript(TYPESCRIPT_OPTIONS),
     ],
   });
-  if (PRODUCTION)
+  if (PRODUCTION) {
     ROLLUP.push({
       input: 'src/compute-engine.ts',
       output: [
@@ -215,14 +217,6 @@ if (targets.includes('compute-engine')) {
           file: BUILD_DIR + 'compute-engine.min.esm.js',
           sourcemap: false,
           exports: 'named',
-        },
-        ,
-        {
-          file: BUILD_DIR + 'compute-engine.min.js',
-          format: 'umd',
-          sourcemap: false,
-          exports: 'named',
-          name: 'ComputeEngine', // Required for UMD
         },
       ],
       plugins: [
@@ -241,6 +235,36 @@ if (targets.includes('compute-engine')) {
         }),
       ],
     });
+
+    ROLLUP.push({
+      input: 'src/compute-engine.ts',
+      output: [
+        {
+          file: BUILD_DIR + 'compute-engine.min.js',
+          format: 'umd',
+          sourcemap: false,
+          exports: 'named',
+          name: 'ComputeEngine', // Required for UMD
+        },
+      ],
+      plugins: [
+        buildProgress(),
+        resolve({
+          browser: true,
+        }),
+        commonjs(),
+        typescript(TYPESCRIPT_VINTAGE_OPTIONS),
+        terser({
+          ...TERSER_OPTIONS,
+          ecma: 2017,
+          format: {
+            ...TERSER_OPTIONS.format,
+            preamble: preamble('CortexJS Compute Engine'),
+          },
+        }),
+      ],
+    });
+  }
 }
 
 if (targets.includes('cortex')) {
@@ -252,14 +276,6 @@ if (targets.includes('cortex')) {
         file: BUILD_DIR + 'cortex.esm.js',
         sourcemap: !PRODUCTION,
         exports: 'named',
-        banner: preamble('Cortex'),
-      },
-      {
-        file: BUILD_DIR + 'cortex.js',
-        format: 'umd',
-        sourcemap: !PRODUCTION,
-        exports: 'named',
-        name: 'Cortex', // Required for UMD
         banner: preamble('Cortex'),
       },
     ],
@@ -274,7 +290,7 @@ if (targets.includes('cortex')) {
     ],
   });
 
-  if (PRODUCTION)
+  if (PRODUCTION) {
     ROLLUP.push({
       input: 'src/cortex.ts',
       output: [
@@ -284,7 +300,22 @@ if (targets.includes('cortex')) {
           sourcemap: false,
           exports: 'named',
         },
-        ,
+      ],
+      plugins: [
+        buildProgress(),
+        resolve({ browser: true }),
+        commonjs(),
+        typescript(TYPESCRIPT_OPTIONS),
+        terser({
+          ...TERSER_OPTIONS,
+          format: { ...TERSER_OPTIONS.format, preamble: preamble('Cortex') },
+        }),
+      ],
+    });
+
+    ROLLUP.push({
+      input: 'src/cortex.ts',
+      output: [
         {
           file: BUILD_DIR + 'cortex.min.js',
           format: 'umd',
@@ -295,15 +326,15 @@ if (targets.includes('cortex')) {
       ],
       plugins: [
         buildProgress(),
-        resolve({
-          browser: true,
-        }),
+        resolve({ browser: true }),
         commonjs(),
-        typescript(TYPESCRIPT_OPTIONS),
+        typescript(TYPESCRIPT_VINTAGE_OPTIONS),
         terser({
           ...TERSER_OPTIONS,
+          ecma: 2017,
           format: { ...TERSER_OPTIONS.format, preamble: preamble('Cortex') },
         }),
       ],
     });
+  }
 }
