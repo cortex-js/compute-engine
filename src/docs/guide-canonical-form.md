@@ -14,15 +14,19 @@ Some mathematical objects can be represented by several equivalent expressions.
 For example, the expressions in each row below represent the same mathematical
 object:
 
+<div class="equal-width-columns">
+
 |                  |                            |                            |
-| :--------------- | :------------------------- | :------------------------- |
+| --------------- | ------------------------- | ------------------------- |
 | \\[ 215.3465 \\] | \\[ 2.15346\mathrm{e}2 \\] | \\[ 2.15346 \times 10^2\\] |
 | \\[ 1 - x \\]    | \\[-x + 1 \\]              | \\[ 1 + (-x)\\]            |
 | \\[ -2x^{-1}\\]  | \\[ -\frac{2}{x} \\]       | \\[ \frac{-2}{x} \\]       |
 
+</div>
+
 By applying some conventions &mdash; for example sorting variables and functions
-operands in a commutative function &mdash; we define a **canonical**
-representation.
+operands in a commutative function or flattening associative functions &mdash; 
+we define a **canonical** representation.
 
 A canonical representation is somewhat arbitrary, but using it consistently make
 some operations easier, for example, comparing two expressions for equality.

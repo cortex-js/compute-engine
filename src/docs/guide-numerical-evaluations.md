@@ -17,7 +17,7 @@ of the partially evaluated expression is returned.
 
 ```ts
 console.log(ce.parse('3 + 5 + x').N().latex);
-// ➔ "8  + x"
+// ➔ "8 + x"
 ```
 
 If the expression is [pure](/compute-engine/guides/expressions#pure/), the value

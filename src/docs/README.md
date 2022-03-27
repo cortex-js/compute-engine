@@ -78,15 +78,15 @@ organized by topic as follow:
 
 <div class=symbols-table>
 
-| Dictionary                                                        |                                                                                |
-| :---------------------------------------------------------------- | :----------------------------------------------------------------------------- |
-| [Arithmetic](/compute-engine/reference/arithmetic/)               | `Add` `Multiply`...                                                            |
-| [Calculus](/compute-engine/reference/calculus/)                   | `Derive` `Integrate`...                                                        |
-| [Collections](/compute-engine/reference/collections/)             | `Sequence` `List` `Dictionary` `Set`...                                        |
-| [Core](/compute-engine/reference/core/)                           | `Missing` `Nothing` `None` `All` `Identity` `InverseFunction` `LatexTokens`... |
-| [Logic](/compute-engine/reference/logic/)                         | `And` `Or` `Not`...                                                            |
-| [Sets](/compute-engine/reference/sets/)                           | `Union` `Intersection`...                                                      |
-| [Special Functions](/compute-engine/reference/special-functions/) | `Erf` `Gamma` `Factorial`...                                                   |
-| [Trigonometry](/compute-engine/reference/trigonometry/)           | `Cos` `Sin` `Tan`...                                                           |
+| Dictionary | Symbols/Functions |
+|:---|:---|
+| [Arithmetic](/compute-engine/reference/arithmetic/) | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`...|
+| [Calculus](/compute-engine/reference/calculus/) | `Derive` `Integrate`...|
+| [Collections](/compute-engine/reference/collections/)| `Sequence` `List` `Dictionary` `Set`... |
+| [Core](/compute-engine/reference/core/) | `Missing` `Nothing` `None` `All`  `Identity` `InverseFunction` `LatexTokens`... |
+| [Logic](/compute-engine/reference/logic/) |`And` `Or` `Not` `True` `False` `Maybe` ...|
+| [Sets](/compute-engine/reference/sets/) | `Union` `Intersection` `EmptySet` ...|
+| [Special Functions](/compute-engine/reference/special-functions/) | `Erf` `Gamma` `Factorial`...|
+| [Trigonometry](/compute-engine/reference/trigonometry/)  | `Pi` `Cos` `Sin` `Tan`...| 
 
 </div>

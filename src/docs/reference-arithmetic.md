@@ -52,7 +52,6 @@ If two arguments, the first argument is the numerator, the second is the
 denominator. If a single argument, will evaluate to a rational approximating the
 value of the argument.
 
-</div>
 
 ## `BaseForm`
 

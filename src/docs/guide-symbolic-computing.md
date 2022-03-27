@@ -9,23 +9,26 @@ sidebar:
 
 # Symbolic Computing
 
-The CortexJS Compute Engine essentially transform a MathJSON expression by
-applying rewriting rules.
+The CortexJS Compute Engine essentially perform computation by 
+applying rewriting rules to a MathJSON expression.
 
-There are several kind of transformations, depending on the desired result:
+There are several categories of transformations, depending on the desired result:
 
 <div class=symbols-table>
 
 | Transformation   |                                                                                                                                                                                                                                                                                         |
 | :--------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Canonicalize** | Put an expression in canonical ("standard") form, for easier sorting, comparing and computing.<br> Modify expressions according to the `associative` `idempotent` and `involution` function flags. Sort the arguments if the `commutative` flag is set. Independent of the assumptions. |
-| **Simplify**     | Apply rewriting rules specific to each function, eliminating constants and common sub-expressions. Use available assumptions to determine which rules are applicable. Limit calculations to exact results using integers.                                                               |
+| **Canonicalize** | Put an expression in canonical ("standard") form, for easier sorting, comparing and computing. |
+| **Simplify**     | Eliminate constants and common sub-expressions. Use available assumptions to determine which rules are applicable. Limit calculations to exact results using integers.                                                               |
 | **Evaluate**     | Calculate the value of an expression. Replace symbols with their value. Perform exact calculations using integers.                                                                                                                                                                      |
 | **N**            | Calculate a numerical approximation of an expression using floating point numbers.                                                                                                                                                                                                      |
+</div>
 
-<div class=symbols-table>
 
-|                               | `canonicalize` | `simplify` | `evaluate` | `N` |
+<div class="">
+
+
+|                               | Canonicalize | Simplify | Evaluate | N |
 | :---------------------------- | :------------- | :--------- | :--------- | :-- |
 | Exact calculations            | ✔︎             | ✔︎         | ✔︎         | ✔︎  |
 | Use assumptions on symbols    |                | ✔︎         | ✔︎         | ✔︎  |
@@ -33,7 +36,6 @@ There are several kind of transformations, depending on the desired result:
 
 </div>
 
-</div>
 
 For example, given `f` is \\( 2 + (\sqrt{x^2 \times 4} + 1) \\) and `x` is 3:
 
@@ -41,11 +43,31 @@ For example, given `f` is \\( 2 + (\sqrt{x^2 \times 4} + 1) \\) and `x` is 3:
 
 |                |                           |                                                              |
 | :------------- | :------------------------ | :----------------------------------------------------------- |
-| `f.canonical`  | \\(1 + 2 + \sqrt{4x^2}\\) | Arguments sorted, distributed                                |
-| `f.simplify()` | \\(2 + 2x\\)              | Exact calculations of some integer constants, simplification |
-| `f.evaluate()` | \\(8\\)                   | Evaluation of symbols                                        |
+| `f.canonical`  | \\[1 + 2 + \sqrt{4x^2}\\] | Arguments sorted, distributed                                |
+| `f.simplify()` | \\[2 + 2x\\]              | Exact calculations of some integer constants, simplification |
+| `f.evaluate()` | \\[8\\]                   | Evaluation of symbols                                        |
 
 </div>
+
+{% readmore "/compute-engine/guides/canonical-form/" %} 
+  Read more about the <strong>Canonical Form</strong> 
+{% endreadmore %}
+
+{% readmore "/compute-engine/guides/simplify/" %} 
+  Read more about <strong>Simplify</strong> 
+{% endreadmore %}
+
+{% readmore "/compute-engine/guides/evaluate/" %} 
+  Read more about <strong>Evaluate</strong> 
+{% endreadmore %}
+
+{% readmore "/compute-engine/guides/numerical-evaluation/" %} 
+  Read more about <strong>Numerical Evaluation</strong> 
+{% endreadmore %}
+
+
+
+
 
 Other operations can be performed on an expression: comparing it to a pattern,
 replacing part of it, and applying conditional rewrite rules.
@@ -56,9 +78,10 @@ expression, such as `expr.simplify()` are denoted with a `expr.` prefix.
 {.notice--info}
 
 ```ts
-import { ComputeEngine } from '@cortex-js/compute-engine';
+import { ComputeEngine } from '@cortex-js/compute-engine?module';
 const ce = new ComputeEngine();
-ce.parse('3x^2 + 2x^2 + x + 5').simplify();
+console.log(ce.parse('3x^2 + 2x^2 + x + 5').simplify().latex);
+// ➔ "5x^2 + x + 5"
 ```
 
 ## Format with a Canonical Form
@@ -89,8 +112,6 @@ console.log(ce.box(['Add', 2, 'x', 3]).canonical);
 // ➔ ["Add", 5, "x"]
 ```
 
-{% readmore "/compute-engine/guides/forms/" %} Read more about <strong>Canonical
-Forms</strong> {% endreadmore %}
 
 ## Simplify
 
@@ -101,8 +122,6 @@ The `expr.simplify()` function makes use of available assumptions about symbols
 and return an exact result: there are no numerical evaluation done that could
 result in a loss of precision.
 
-{% readmore "/compute-engine/guides/simplify/" %} Read more about
-<strong>Simplify</strong> {% endreadmore %}
 
 ## Evaluate
 
@@ -136,36 +155,40 @@ console.log(expr.evaluate().latex);
 console.log(expr.N().latex);
 // ➔ "0.33333333333333"
 ```
+<section id='comparing'>
 
-## Comparing
+## Comparing Expressions
 
 There are two useful ways to compare symbolic expressions:
 
 - structural equality
 - mathematical equality
 
-### Structural Equality
+### Structural Equality: `isSame()`
 
-Structural equality (or syntactic) consider the symbolic structure used to
-represent an expression. If a symbol, is it the same symbol, if a function, does
-it have the same head, and are each arguments structurally equal, etc...
+Structural equality (or syntactic equality) consider the symbolic structure
+used to represent an expression. If a symbol, is it the same symbol, if a 
+function, does it have the same head, and are each arguments structurally 
+equal, etc...
 
-Structural equality is very precise. `x + 1` and `1 + x` are structurally
-different, since the order of the arguments matter. \\( x^2 \\) and \\( x \times
-x \\) are structurally different since one is a multiplication and the other a
-power operation.
+The `lhs.isSame(rhs)` function return true if `lhs` and `rhs` are structurally
+exactly identical, that is each sub-expression is recursively identical in
+`lhs` and `rhs`.
 
-**To check if two expressions are structurally equal, use `expr.isSame()`**
+- \\(1 + 1 \\) and \\( 2 \\) are not structurally equal, one is a sum of two integers,
+the other is an integer
+-  \\(x + 1 \\) and \\( 1 + x \\) are not structurally equal, the order of the 
+  arguments is different
+- \\( (x + 1)^2 \\) and \\( x^2 + 2x + 1 \\) are not structural equal, one is a 
+  power of a sum, the other a sum of terms.
 
-```js
-console.log(ce.parse('2 + 2').isSame('4'));
-// ➔ false
+For a less strict version of `isSame()`, you can use the canonical version
+of both expressions, that is `lhs.canonical.isSame(rhs.canonical)`. In this
+case, because the arguments are ordered in a standard way, the canonical 
+form of \\( x + 1 \\) and  the canonical form of \\(1 + x \\) would be the same.
+However, \\( (x + 1)^2 \\) and \\( x^2 + 2x + 1 \\) would still be considered different.
 
-console.log(ce.parse('x + 1').isSame('1 + x'));
-// ➔ false
-```
-
-### Mathematical Equality
+### Mathematical Equality: `isEqual()`
 
 It turns out that comparing two arbitrary mathematical expressions is a complex
 problem. In fact,
@@ -176,20 +199,37 @@ identical in general.
 However, there are many cases where it is possible to make a comparison between
 two expressions to check if they represent the same mathematical object.
 
-**To check if two expressions are mathematically equal, use `expr.isEqual()`**
-
-```js
-console.log(ce.parse('2 + 2').isEqual('4'));
-// ➔ true
-
-console.log(ce.parse('x + 1').isEqual('1 + x'));
-// ➔ true
-```
+The `lhs.isEqual(rhs)` function return true if `lhs` and `rhs` represent the 
+same mathematical object. If `lhs` and `rhs` are numeric expressions, they 
+are evaluated before being compared. They are considered equal if the 
+absolute value of the difference between them  is less than `ce.tolerance`.
 
 Note that unlike `expr.isSame()`, `expr.isEqual()` can return `true`, `false` or
 `undefined`. The latter value indicates that there is not enough information to
 determine if the two expressions are mathematically equal. Adding some
 assumptions may result in a different answer.
+
+### Other Comparisons
+
+<div class=symbols-table>
+
+|        |                                      |
+| :--------- | :----------------------------------------------------- |
+| `lhs === rhs` | If true, same box expression instances|
+| `lhs.isSame(rhs)`     | Structural equality |
+| `lhs.isEqual(rhs)`| Mathematical equality |
+| `lhs.match(rhs) !== null` | Pattern match | 
+| `lhs.is(rhs)` | Synonym for `isSame()` | 
+| `ce.box(['Equal', lhs, rhs]).evaluate()` | Synonym for `isEqual()` | 
+| `ce.box(['Same', lhs, rhs]).evaluate()` | Synonym for `isSame()` |
+
+</div>
+
+
+</section>
+
+
+
 
 ## Other Symbolic Manipulation
 

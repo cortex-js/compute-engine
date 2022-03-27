@@ -319,27 +319,13 @@ console.log(n.domain);
 
 ### Function Binding
 
-The definition of a function determines how it is put in canonical form,
+The definition associated with a function determines how it is put in canonical form,
 simplified and evaluated.
 
-When a function is boxed, that is when `ce.box()` is called on an expression
-that includes the name of the function, the domain of the arguments of the
-function are used to determine which definition applies. If the domain of the
-arguments cannot be determined, binding (and boxing) will fail and an exception
-will get thrown. This can happen for example if one of the arguments is a symbol
-that has no definition and no assumptions. @todo
+When a function is boxed, for example when `ce.box()` is called on an expression
+that includes the name of the function, a function definition matching the 
+function name is looked for in the current context, then in any parent scope.
 
-```js
-console.log(ce.parse('m + 3').json);
-// ➔ Error: Function Add is not defined for those arguments
-```
-
-```js
-// Assume that the domain of the symbol 'm' is 'Integer'
-ce.assume('m', 'Integer');
-console.log(ce.parse('m + 3').json);
-// ➔ ['Add', 'm', 3']
-```
 
 ### Scoping
 
@@ -349,15 +335,7 @@ the current scope is used first.
 If no matching definition is found, the parent scope is searched, and so on
 until a definition is found.
 
-## Comparing Expressions
 
-- `lhs.isSame(rhs)`
-- `lhs.isEqual(rhs)`
-- `lhs.match(rhs) !== null`
-- `lhs.is(rhs)`
-- `ce.ask(['Equal', lhs, rhs])`
-- `ce.ask(['Same', lhs, rhs])`
-- `lhs === rhs`
 
 <section id='incomplete-expressions'>
 
@@ -371,19 +349,19 @@ If required operands are missing (the denominator of a fraction, for example), a
 `Missing` symbol is inserted where the missing operand should have been.
 
 ```ts
-ce.parse('\\frac{1}').json;
-// ➔
+console.log(ce.parse('\\frac{1}').json);
+// ➔ ["Divide", 1, "Missing"]
 
-ce.parse('\\sqrt{}').json;
-// ➔
+console.log(ce.parse('\\sqrt{}').json);
+// ➔  ["Sqrt", "Missing"]
 
-ce.parse('\\sqrt').json;
-// ➔
+console.log(ce.parse('\\sqrt').json);
+// ➔ ["Sqrt", "Missing"]
 
-ce.parse('\\sqrt{').json;
-// ➔
+console.log(ce.parse('\\sqrt{').json);
+// ➔  ["Error", ["Sqrt", "Missing"], "'syntax-error'", ["LatexForm", "'{'"]]
 
-ce.parse('2 \\times').json;
+console.log(ce.parse('2 \\times').json);
 // ➔ ["Multiply", 2, "Missing"]
 ```
 

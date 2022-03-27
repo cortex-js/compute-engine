@@ -9,7 +9,6 @@ sidebar:
 
 # Evaluation of Expressions
 
-## Using Assumptions
 
 ## Evaluating the Arguments of a Function
 
@@ -23,12 +22,3 @@ sidebar:
 | `Simplify`    |             |
 
 </div>
-
-## Simplifying
-
-Before simplifying, the expression is reduced to a canonical form.
-
-Note: the same basic loop is used when simplifying an expression.
-
-{% readmore "/compute-engine/guides/simplify/" %} Read more about
-<strong>Simplifying</strong> {% endreadmore %}

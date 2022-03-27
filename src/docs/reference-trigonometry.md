@@ -22,6 +22,8 @@ sidebar:
 
 ## Trigonometric Functions
 
+<div class='equal-width-columns'>
+
 | Function | Inverse                                                                                                   | Hyperbolic | Area Hyperbolic |
 | :------- | :-------------------------------------------------------------------------------------------------------- | :--------- | :-------------- |
 | `Sin`    | `Arcsin`                                                                                                  | `Sinh`     | `Arsinh`        |
@@ -30,6 +32,8 @@ sidebar:
 | `Cot`    | `Acot`                                                                                                    | `Coth`     | `Arcoth`        |
 | `Sec`    | `Asec`                                                                                                    | `Sech`     | `Asech`         |
 | `Csc`    | `Acsc`                                                                                                    | `Csch`     | `Acsch`         |
+
+</div>
 
 <div class=symbols-table>
 
