@@ -81,9 +81,8 @@ export class BoxedFunction extends AbstractBoxedExpression {
     this._head = typeof head === 'string' ? head : head.symbol ?? head;
     this._ops = ops;
 
-    if (typeof this._head === 'string') 
+    if (typeof this._head === 'string')
       this._def = ce.getFunctionDefinition(this._head, metadata?.wikidata);
-    
 
     this._isCanonical = false;
 
@@ -557,39 +556,18 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // 1/ Get the canonical form of the arguments
     //
     let tail = this._def?.associative
-      ? flattenOps(this._ops!, this.head as string) ?? this._ops!
+      ? flattenOps(this._ops!, this._def.name) ?? this._ops!
       : this._ops!;
-    tail = holdMap(tail, this._def?.hold ?? 'none', (arg) => {
-      if (arg.symbol === 'Nothing') return null; // remove argument from list
-      return arg.canonical;
-    });
+    tail = holdMap(tail, this._def?.hold ?? 'none', (arg) => arg.canonical);
 
-    if (this._def?.associative)
-      tail = flattenOps(tail, this.head as string) ?? tail;
+    // f(a, f(b, c), d) -> f(a, b, c, d)
+    if (this._def?.associative) tail = flattenOps(tail, this._def.name) ?? tail;
 
     //
     // 2/ Apply `canonical` handler
     //
-    if (this._def?.canonical) {
-      const result = this._def.canonical(this.engine, tail);
-      // The `canonical` handler must ensure that all (non-held) arguments
-      // of the returned expression are canonical
-      // @debug-begin
-      // if (result.ops) {
-      //   holdMap(result.ops, result.functionDefinition?.hold ?? 'none', (x) => {
-      //     if (!x.isCanonical) {
-      //       console.error(
-      //         `Canonical handler for "${
-      //           result.functionDefinition!.name
-      //         }" returned non-canonical argument ${x.toJSON()}`
-      //       );
-      //     }
-      //     return x;
-      //   });
-      // }
-      // @debug-end
-      return result;
-    }
+    if (this._def?.canonical) return this._def.canonical(this.engine, tail);
+
     //
     // 3/ No canonical handler, use def attributes
     //
@@ -606,16 +584,6 @@ export class BoxedFunction extends AbstractBoxedExpression {
       if (this._def.idempotent) tail = tail[0].ops!;
       // f(f(x)) -> x
       else if (this._def.involution) return tail[0].op1;
-    }
-
-    //
-    // 3.3/ Apply associativity
-    //
-    if (tail.length > 1 && this._def.associative) {
-      // If there is a definition, the head must be a string, not a lambda
-      console.assert(typeof this._head === 'string');
-      // f(a, f(b, c), d) -> f(a, b, c, d)
-      tail = flattenOps(tail, this._head as string) ?? tail;
     }
 
     //
@@ -652,49 +620,35 @@ export class BoxedFunction extends AbstractBoxedExpression {
     if (!this.isCanonical) return this.canonical.simplify(options);
 
     //
-    // 2/  Hold  functions are not evaluated (or simplified)
+    // 2/ Simplify the applicable operands
     //
-    if (this.head === 'Hold') return this;
-    if (this.head === 'ReleaseHold') {
-      const op1 = this.op1;
-      if (op1.head !== 'Hold') return op1.simplify(options);
-      return op1.op1.isMissing
-        ? this.engine.symbol('Nothing')
-        : op1.op1.simplify(options);
+    const def = this._def;
+    let tail = this._ops!;
+    if (def) {
+      if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
+      tail = holdMap(tail, def.hold, (arg) => arg.simplify(options));
+      if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
+    } else {
+      tail = holdMap(this._ops!, 'none', (arg) => arg.simplify(options));
     }
 
     //
-    // 3/ Does it have a definition?
-    //    If not, we don't know how to simplify it
-    //
-    if (!this._def) return this;
-
-    //
-    // 4/ Simplify all the arguments (unless a Hold applies)
-    //
-    let tail = this._def?.associative
-      ? flattenOps(this._ops!, this.head as string) ?? this._ops!
-      : this._ops!;
-    tail = holdMap(tail, this._def.hold, (x) => x.simplify(options).canonical);
-
-    if (this._def?.associative)
-      tail = flattenOps(tail, this.head as string) ?? tail;
-
-    //
-    // 5/ If a lambda, apply the arguments, and simplify the result
+    // 3/ If a lambda, apply the arguments, and simplify the result
     //
     if (typeof this._head !== 'string')
       return lambda(this._head, tail).simplify(options);
 
     //
-    // 6/ Apply `simplify` handler
+    // 4/ Apply `simplify` handler
     //
-    let expr =
-      this._def.simplify?.(this.engine, tail) ??
-      this.engine.fn(this._head, tail).canonical;
+    let expr: BoxedExpression | undefined;
+
+    if (def) expr = def.simplify?.(this.engine, tail);
+
+    if (!expr) expr = this.engine.fn(this._head, tail).canonical;
 
     //
-    // 7/ Apply rules, until no rules can be applied
+    // 5/ Apply rules, until no rules can be applied
     //
     const rules =
       options?.rules ??
@@ -743,56 +697,47 @@ export class BoxedFunction extends AbstractBoxedExpression {
     if (!this.isCanonical) return this.canonical.evaluate(options);
 
     //
-    // 2/ Handle `Hold` and `ReleaseHold`
+    // 2/ Evaluate the applicable operands
     //
-    if (this.head === 'Hold') return this;
-    if (this.head === 'ReleaseHold') {
-      const op1 = this.op1;
-      if (op1.head !== 'Hold') return op1.evaluate(options);
-      return op1.op1.isMissing
-        ? this.engine.symbol('Nothing')
-        : op1.op1.evaluate(options);
+    const def = this._def;
+    let tail: BoxedExpression[];
+    if (def) {
+      tail = holdMap(
+        def.associative
+          ? flattenOps(this._ops!, def.name) ?? this._ops!
+          : this._ops!,
+        def.hold,
+        (arg) => arg.evaluate(options)
+      );
+      if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
+    } else {
+      tail = holdMap(this._ops!, 'none', (arg) => arg.evaluate(options));
     }
 
     //
-    // 3/ Does it have a definition?
-    //    If not, we don't know how to evaluate it
-    //
-    if (!this._def) return this;
-    const def = this._def;
-
-    //
-    // 4/ Evaluate the applicable operands
-    //
-    let tail = holdMap(
-      def.associative
-        ? flattenOps(this._ops!, this.head as string) ?? this._ops!
-        : this._ops!,
-      def.hold,
-      (arg) => arg.evaluate(options) ?? arg
-    );
-
-    if (def.associative) tail = flattenOps(tail, this.head as string) ?? tail;
-
-    //
-    // 5/ Is it a Lambda?
+    // 3/ Is it a Lambda?
     //
     if (typeof this._head !== 'string')
       return lambda(this._head, tail).evaluate(options);
 
     //
-    // 6/ Call the `evaluate` handler
+    // 4/ No def? We're done.
+    //
+    if (!def) return this.engine.fn(this._head, tail).canonical;
+
+    //
+    // 5/ Call the `evaluate` handler
     //
 
-    // 6.1/ No evaluate handler, we're done
+    // 5.1/ No evaluate handler, we're done
     if (def.evaluate === undefined)
       return this.engine.fn(this._head, tail).canonical;
 
-    // 6.2/ A lambda-function handler
+    // 5.2/ A lambda-function handler
     if (typeof def.evaluate !== 'function')
       return lambda(def.evaluate, tail).canonical;
 
-    // 6.3/ A regular function handler
+    // 5.3/ A regular function handler
     return (
       def.evaluate(this.engine, tail) ??
       this.engine.fn(this._head, tail).canonical
@@ -807,44 +752,40 @@ export class BoxedFunction extends AbstractBoxedExpression {
     if (!this.isCanonical) return this.canonical.N(options);
 
     //
-    // 2/ Handle `Hold` and `ReleaseHold`
+    // 2/ Evaluate the applicable operands
     //
-    if (this.head === 'Hold') return this;
-    if (this.head === 'ReleaseHold') {
-      const op1 = this.op1;
-      if (op1.head !== 'Hold') return op1.N(options);
-      return op1.op1.isMissing
-        ? this.engine.symbol('Nothing')
-        : op1.op1.N(options);
+    const def = this._def;
+    let tail: BoxedExpression[];
+    if (def) {
+      tail = holdMap(
+        def.associative
+          ? flattenOps(this._ops!, def.name) ?? this._ops!
+          : this._ops!,
+        def.hold,
+        (arg) => arg.N(options)
+      );
+      if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
+    } else {
+      tail = holdMap(this._ops!, 'none', (arg) => arg.N(options));
     }
 
     //
-    // 3/ Does it have a definition?
-    //    If not, we don't know how to evaluate it
-    //
-    if (!this._def) return this;
-    const def = this._def;
-
-    // 4/ Evaluate numerically all the arguments (unless a Hold applies)
-    //
-    let tail = def.associative
-      ? flattenOps(this._ops!, this.head as string) ?? this._ops!
-      : this._ops!;
-    tail = holdMap(tail, this._def.hold, (arg) => arg.N(options));
-
-    if (def.associative) tail = flattenOps(tail, this.head as string) ?? tail;
-
-    //
-    // 5/ Is it a Lambda?
+    // 3/ Is it a Lambda?
     //
     if (typeof this._head !== 'string')
       return lambda(this._head, tail).N(options);
 
     //
-    // 6/ Call `N` handler
+    // 4/ No def? We're done.
+    //
+    if (!def) return this.engine.fn(this._head, tail).canonical;
+
+    //
+    // 5/ Call `N` handler  (or `evaluate`)
     //
 
-    const result = def.N?.(this.engine, tail) ?? this.evaluate();
+    const result =
+      def.N?.(this.engine, tail) ?? this.engine.fn(this._head, tail).evaluate();
 
     if (result.isLiteral) {
       if (!complexAllowed(this.engine) && result.complexValue)
@@ -911,6 +852,8 @@ export function ungroup(expr: BoxedExpression): BoxedExpression {
  * - 'last': apply `f` to all elements except the last
  * - 'most': apply `f` to the last elements, skip the others
  *
+ * Account for `Hold`, `ReleaseHold` and  `Nothing`.
+ *
  * If `f` returns `null`, the element is not added to the result
  */
 export function holdMap(
@@ -922,32 +865,40 @@ export function holdMap(
 
   const result: BoxedExpression[] = [];
 
-  if (skip === 'all') return xs;
-  else if (skip === 'none')
-    for (let i = 0; i < xs.length; i++) {
-      const x = f(xs[i]);
-      if (x !== null) result.push(x);
+  for (let i = 0; i < xs.length; i++) {
+    if (xs[i].symbol !== 'Nothing') {
+      if (xs[i].head === 'Hold') {
+        result.push(xs[i].op1);
+      } else if (xs[i].head === 'ReleaseHold') {
+        const x = f(xs[i].op1);
+        if (x !== null && x.symbol !== 'Nothing') result.push(x);
+      } else if (applicable(xs, skip, i)) {
+        const x = f(xs[i]);
+        if (x !== null && x.symbol !== 'Nothing') result.push(x);
+      } else {
+        result.push(xs[i]);
+      }
     }
-  else if (skip === 'first') {
-    result.push(xs[0]);
-    for (let i = 1; i < xs.length; i++) {
-      const x = f(xs[i]);
-      if (x !== null) result.push(x);
-    }
-  } else if (skip === 'rest') {
-    const x = f(xs[0]);
-    if (x !== null) result.push(x);
-    for (let i = 1; i < xs.length; i++) result.push(xs[i]);
-  } else if (skip === 'last') {
-    for (let i = 0; i < xs.length - 1; i++) {
-      const x = f(xs[i]);
-      if (x !== null) result.push(x);
-    }
-    result.push(xs[xs.length - 1]);
-  } else if (skip === 'most') {
-    for (let i = 0; i < xs.length - 1; i++) result.push(xs[i]);
-    const x = f(xs[xs.length - 1]);
-    if (x !== null) result.push(x);
   }
   return result;
+}
+
+function applicable(
+  xs: BoxedExpression[],
+  skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most',
+  index: number
+): boolean {
+  if (skip === 'all') return false;
+
+  if (skip === 'none') return true;
+
+  if (skip === 'first') return index !== 0;
+
+  if (skip === 'rest') return index === 0;
+
+  if (skip === 'last') return index !== xs.length - 1;
+
+  if (skip === 'most') return index === xs.length - 1;
+
+  return false;
 }
