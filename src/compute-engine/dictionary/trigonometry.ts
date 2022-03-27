@@ -785,8 +785,9 @@ function constructibleValues(
         const boxedResults = {};
         for (const head of Object.keys(results)) {
           // console.log(`Caching  ${head}(${val}) = ${results[head]}`);
-          boxedResults[head] =
-            ce.parse(latexString(results[head])) ?? ce.box(results[head]);
+          boxedResults[head] = (
+            ce.parse(latexString(results[head])) ?? ce.box(results[head])
+          ).canonical;
         }
 
         values.push([val, boxedResults]);

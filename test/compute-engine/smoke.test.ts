@@ -30,28 +30,10 @@ import {
   simplifyToJson,
 } from '../utils';
 
-const ce = engine;
+// const ce = engine;
 // let f = ce.parse('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}');
 // f = f.simplify();
 // console.log(f.toJSON());
-
-let q = ce.parse('\\frac{1}');
-console.log(q.json);
-q = ce.parse('\\sqrt{}');
-console.log(q.json);
-q = ce.parse('\\sqrt');
-console.log(q.json);
-q = ce.parse('\\sqrt{');
-console.log(q.json);
-q = ce.parse('2 \\times');
-console.log(q.json);
-
-ce.latexOptions = {
-  precision: 3,
-  decimalMarker: ',',
-};
-
-console.log(ce.parse('\\frac{1}{7}').N().latex);
 
 //
 // BOXING
@@ -411,17 +393,13 @@ describe('SIMPLIFICATION multiply', () => {
 
 describe('SYMBOLIC EVALUATION trigonometric functions', () => {
   test(`\\sin\\frac\\pi3 // constructible values`, () =>
-    expect(evaluateToJson('\\sin\\frac\\pi3')).toMatchObject([
-      'Divide',
-      ['Sqrt', 3],
-      2,
-    ]));
+    expect(evaluateToJson('\\sin\\frac\\pi3')).toMatchInlineSnapshot(
+      `['Multiply', ['Rational', 1, 2], ['Sqrt', 3]]`
+    ));
   test(`\\sin(\\frac13\\pi) // constructible values`, () =>
-    expect(evaluateToJson('\\sin(\\frac13\\pi)')).toMatchObject([
-      'Divide',
-      ['Sqrt', 3],
-      2,
-    ]));
+    expect(evaluateToJson('\\sin(\\frac13\\pi)')).toMatchInlineSnapshot(
+      `['Multiply', ['Rational', 1, 2], ['Sqrt', 3]]`
+    ));
 });
 
 describe('SYMBOLIC EVALUATION Other functions', () => {
