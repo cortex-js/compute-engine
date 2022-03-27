@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.4.4 (2022-03-27)
 
 ### Improvements
 
