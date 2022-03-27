@@ -1,4 +1,11 @@
-## 0.4.4 (2022-03-27)
+## [Unreleased]
+
+- Ensure constructible trigonometric values are canonical
+- Correct and simplify evaluation loop for `simplify()`, `evaluate()` and `N()`.
+
+## 0.4.4
+
+**Release Date**: 2022-03-27
 
 ### Improvements
 
@@ -10,7 +17,9 @@
   environments. The ESM build (`compute-engine.min.esm.js`) targets evergreen
   JavaScript (currently ECMAScript 2020).
 
-## 0.4.3 (2022-03-21)
+## 0.4.3
+
+**Release Date**: 2022-03-21
 
 ### Transition Guide from 0.4.2
 
@@ -149,7 +158,9 @@ console.log(expr.isEqual(ce.box(2)));
 | `ce.domain(expr)`                         | `expr.domain`                           |
 | `ce.format(expr...)`                      | `expr.canonical` <br> `expr.simplify()` |
 
-## 0.3.0 (2021-06-18)
+## 0.3.0
+
+**Release Date**: 2021-06-18
 
 ### Improvements
 
