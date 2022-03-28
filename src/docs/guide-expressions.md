@@ -336,7 +336,6 @@ If no matching definition is found, the parent scope is searched, and so on
 until a definition is found.
 
 
-
 <section id='incomplete-expressions'>
 
 ## Incomplete Expressions
@@ -371,6 +370,18 @@ the resulting expression.
 
 </section>
 
+
+## Errors
+
+If an expression can only be partially parsed, a function with a `Error` head
+is returned.
+
+The `Error` function has the following arguments:
+- A partial result,  i.e. the part that was successfully parsed. When an error
+ expression is evaluated, its value is its first argument
+- A error code, as a string
+- An expression representing where the error occured,  for example a LaTeX 
+  string representing where the LaTeX parsing failed.
 
 ## Return Value Conventions
 
