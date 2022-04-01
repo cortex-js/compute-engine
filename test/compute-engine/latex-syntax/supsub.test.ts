@@ -174,13 +174,13 @@ describe('PRIME', () => {
       '[
         "Power",
         "f",
-        ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\prime'"]]
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\prime'"]]
       ]'
     `);
     expect(parse('f^{\\prime\\prime}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Power", "f", "Nothing"],
+        ["Power", "f", "Missing"],
         "'syntax-error'",
         ["LatexForm", "'{\\\\prime\\\\prime}'"]
       ]'
@@ -188,7 +188,7 @@ describe('PRIME', () => {
     expect(parse('f^{\\prime\\prime\\prime}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Power", "f", "Nothing"],
+        ["Power", "f", "Missing"],
         "'syntax-error'",
         ["LatexForm", "'{\\\\prime\\\\prime\\\\prime}'"]
       ]'
@@ -199,7 +199,7 @@ describe('PRIME', () => {
         "f",
         [
           "Error",
-          "Nothing",
+          "Missing",
           "'unknown-command'",
           ["LatexForm", "'\\\\doubleprime'"]
         ]

@@ -93,7 +93,7 @@ describe('NUMBERS', () => {
     expect(parse('\\operatorname{NaN}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        "Nothing",
+        "Missing",
         "'unknown-command'",
         ["LatexForm", "'\\\\operatorname{NaN}'"]
       ]'

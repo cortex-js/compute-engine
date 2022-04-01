@@ -1,10 +1,11 @@
-import { LatexSyntax } from './latex-syntax/latex-syntax';
-
-import { assume } from './assume';
+import { Decimal } from 'decimal.js';
+import { Complex } from 'complex.js';
 
 import { Expression, MathJsonNumber } from '../math-json/math-json-format';
+import { SignalMessage, WarningSignal } from '../common/signals';
 
-import {
+import { LatexSyntax } from './latex-syntax/latex-syntax';
+import type {
   DictionaryCategory,
   LatexDictionaryEntry,
   LatexString,
@@ -12,10 +13,10 @@ import {
   ParseLatexOptions,
   SerializeLatexOptions,
 } from './latex-syntax/public';
-import { MACHINE_PRECISION, NUMERICAL_TOLERANCE } from './numerics/numeric';
-import { Decimal } from 'decimal.js';
-import { Complex } from 'complex.js';
-import { SignalMessage, WarningSignal } from '../common/signals';
+
+import { assume } from './assume';
+
+import { MACHINE_PRECISION, NUMERIC_TOLERANCE } from './numerics/numeric';
 import {
   AssumeResult,
   BoxedExpression,
@@ -67,23 +68,40 @@ import { BoxedDictionary } from './boxed-expression/boxed-dictionary';
  * upfront.
  */
 export class ComputeEngine implements IComputeEngine {
+  /** @internal */
   readonly ZERO: BoxedExpression;
+  /** @internal */
   readonly ONE: BoxedExpression;
+  /** @internal */
   readonly TWO: BoxedExpression;
+  /** @internal */
   readonly HALF: BoxedExpression;
+  /** @internal */
   readonly NEGATIVE_ONE: BoxedExpression;
+  /** @internal */
   readonly I: BoxedExpression;
+  /** @internal */
   readonly NAN: BoxedExpression;
+  /** @internal */
   readonly POSITIVE_INFINITY: BoxedExpression;
+  /** @internal */
   readonly NEGATIVE_INFINITY: BoxedExpression;
+  /** @internal */
   readonly COMPLEX_INFINITY: BoxedExpression;
 
+  /** @internal */
   DECIMAL_NAN: Decimal;
+  /** @internal */
   DECIMAL_ZERO: Decimal;
+  /** @internal */
   DECIMAL_ONE: Decimal;
+  /** @internal */
   DECIMAL_TWO: Decimal;
+  /** @internal */
   DECIMAL_HALF: Decimal;
+  /** @internal */
   DECIMAL_PI: Decimal;
+  /** @internal */
   DECIMAL_NEGATIVE_ONE: Decimal;
 
   private _precision: number;
@@ -176,6 +194,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /** Absolute time beyond which evaluation should not proceed */
   deadline?: number;
+
   /**
    * Return dictionaries suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
@@ -243,7 +262,7 @@ export class ComputeEngine implements IComputeEngine {
     this.decimal = (a) => new this._decimal(a);
     this.complex = (a, b) => new Complex(a, b);
 
-    this.tolerance = options?.tolerance ?? NUMERICAL_TOLERANCE;
+    this.tolerance = options?.tolerance ?? NUMERIC_TOLERANCE;
 
     this.ZERO = new BoxedNumber(this, 0);
     this.ONE = new BoxedNumber(this, 1);
@@ -312,6 +331,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    * This needs to happen for example when the numeric precision changes.
    *
+   * @internal
    */
   purge() {
     // Recreate the Decimal constants (they depend on the engine's precision)
@@ -356,6 +376,7 @@ export class ComputeEngine implements IComputeEngine {
       }
   }
 
+  /** @internal */
   _register(expr: BoxedExpression): void {
     // @debug
     // if (this._stats.expressions === null) return;
@@ -370,6 +391,7 @@ export class ComputeEngine implements IComputeEngine {
     this._stats.highwaterMark += 1;
   }
 
+  /** @internal */
   _unregister(expr: BoxedExpression): void {
     // @debug
     // if (this._stats.expressions === null) return;
@@ -417,11 +439,14 @@ export class ComputeEngine implements IComputeEngine {
     } as ComputeEngineStats;
   }
 
+  /** @internal */
   _decimal: Decimal.Constructor;
+  /** @internal */
   decimal: (a: Decimal.Value) => Decimal;
+  /** @internal */
   complex: (a: number | Complex, b?: number) => Complex;
 
-  /** The precision, or number of significant digits, for numerical calculations
+  /** The precision, or number of significant digits, for numeric calculations
    * such as when calling `ce.N()`.
    *
    * To  make calculations using more digits, at the cost of expended memory
@@ -455,22 +480,10 @@ export class ComputeEngine implements IComputeEngine {
     this.purge();
   }
 
-  /**
-   * Mode to use for numerical calculations:
-   *
-   * - `auto`:  use machine number if the precision is 15 or less, Decimal
-   * otherwise. Complex numbers are allowed.
-   * - `number`: use the machine format (64-bit float, 52-bit mantissa, about
-   * 15 digits of precision).
-   * - `decimal`: arbitrary precision floating-point numbers, as provided by the
-   * "decimal.js" library
-   * - `complex`: machine and complex numbers: two 64-bit float, as provided by the
-   * "complex.js" library
-   *
-   */
   get numericMode(): NumericMode {
     return this._numericMode;
   }
+
   set numericMode(f: NumericMode) {
     if (f === this._numericMode) return;
 
@@ -532,7 +545,7 @@ export class ComputeEngine implements IComputeEngine {
   set tolerance(val: number) {
     if (typeof val === 'number' && Number.isFinite(val))
       this._tolerance = Math.max(val, 0);
-    else this._tolerance = NUMERICAL_TOLERANCE;
+    else this._tolerance = NUMERIC_TOLERANCE;
     this._decimalTolerance = this.decimal(this._tolerance);
   }
 
@@ -928,6 +941,7 @@ export class ComputeEngine implements IComputeEngine {
     return result.canonical;
   }
 
+  /** @internal */
   _fn(
     head: string | BoxedExpression,
     ops: BoxedExpression[],

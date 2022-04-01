@@ -48,7 +48,7 @@ export class Grammar<IR> implements Rules {
     this.rule('binary-digit', 'U+0030 | U+0031 | U+FF10 | U+FF11');
 
     this.rule(
-      'numerical-constant',
+      'numeric-constant',
       '**`NaN`** | **`Infinity`** | **`+Infinity`** | **`-Infinity`**'
     );
 

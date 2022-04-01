@@ -23,7 +23,7 @@ describe('STEFNOTCH #10', () => {
     ).toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\left'"]],
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\left'"]],
         "'syntax-error'",
         ["LatexForm", "'(\\\\sin^{-1}\\\\mleft(x\\\\mright)\\\\right)^{\\\\prime}'"]
       ]'
@@ -48,7 +48,7 @@ describe('STEFNOTCH #10', () => {
         "Error",
         [
           "Error",
-          "Nothing",
+          "Missing",
           "'unknown-command'",
           ["LatexForm", "'\\\\color{red}'"]
         ],
@@ -62,7 +62,7 @@ describe('STEFNOTCH #10', () => {
     expect(parse('\\ln(3)')).toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\ln'"]],
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\ln'"]],
         "'syntax-error'",
         ["LatexForm", "'(3)'"]
       ]'
@@ -81,13 +81,13 @@ describe('STEFNOTCH #10', () => {
         "Error",
         [
           "Subscript",
-          ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\lim'"]],
+          ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\lim'"]],
           [
             "To",
             "n",
             [
               "Error",
-              "Nothing",
+              "Missing",
               "'unknown-command'",
               ["LatexForm", "'\\\\infin'"]
             ]
@@ -111,7 +111,7 @@ describe('STEFNOTCH #12', () => {
     expect(parse('e^{i\\pi\\text{nope!?\\lparen sum}}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Power", "ExponentialE", "Nothing"],
+        ["Power", "ExponentialE", "Missing"],
         "'syntax-error'",
         ["LatexForm", "'{i\\\\pi\\\\text{nope!?\\\\lparen sum}}'"]
       ]'
@@ -131,7 +131,7 @@ describe('STEFNOTCH #13', () => {
           ["Multiply", "N", ["Delimiter", "EpsilonSymbol"]],
           [
             "Error",
-            "Nothing",
+            "Missing",
             "'unknown-command'",
             ["LatexForm", "'\\\\lceil'"]
           ]
@@ -152,7 +152,7 @@ describe('STEFNOTCH #13', () => {
     expect(parse('\\{1,2\\}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
         "'syntax-error'",
         ["LatexForm", "'1,2\\\\}'"]
       ]'
@@ -220,7 +220,7 @@ describe('STEFNOTCH #13', () => {
         "Error",
         [
           "Error",
-          "Nothing",
+          "Missing",
           "'unknown-command'",
           ["LatexForm", "'\\\\forall'"]
         ],
@@ -240,7 +240,7 @@ describe('STEFNOTCH #13', () => {
         "Error",
         [
           "Error",
-          "Nothing",
+          "Missing",
           "'unknown-command'",
           ["LatexForm", "'\\\\forall'"]
         ],

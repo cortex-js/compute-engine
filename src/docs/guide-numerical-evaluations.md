@@ -1,6 +1,6 @@
 ---
 title: Numerical Evaluation
-permalink: /compute-engine/guides/numerical-evaluation/
+permalink: /compute-engine/guides/numeric-evaluation/
 layout: single
 date: Last Modified
 sidebar:
@@ -9,11 +9,11 @@ sidebar:
 
 # Numerical Evaluation
 
-**To obtain a numerical approximation of the value of an expression**, call the
+**To obtain a numeric approximation of the value of an expression**, call the
 `expr.N()` function.
 
-If `expr.N()` cannot provide a numerical evaluation, a symbolic representation
-of the partially evaluated expression is returned.
+If `expr.N()` cannot provide a numeric evaluation, a symbolic representation of
+the partially evaluated expression is returned.
 
 ```ts
 console.log(ce.parse('3 + 5 + x').N().latex);
@@ -42,7 +42,7 @@ console.log(ce.parse('\\sqrt{x} + 7^3').numericValue?.latex);
 
 ## Numeric Modes
 
-Four numeric modes may be used to perform numerical evaluations with the Compute
+Four numeric modes may be used to perform numeric evaluations with the Compute
 Engine: `machine` `decimal` `complex` and `auto`. The default mode is `auto`.
 
 <section id='machine-numeric-mode'>
@@ -68,8 +68,8 @@ return `NaN`. Some calculations that have a value very close to 0 may return 0.
 Some calculations that have a value greater than the maximum value representable
 by a machine number may return \\( \pm\infty \\).
 
-**Warning** Some numerical evaluations using machine numbers cannot produce
-exact results..{notice--warning}
+**Warning** Some numeric evaluations using machine numbers cannot produce exact
+results..{notice--warning}
 
 ```ts
 ce.numericMode = 'machine';
@@ -234,7 +234,7 @@ value is smaller than the tolerance will be considered equal to 0.
 
 ## Numeric Functions
 
-The dictionaries below can provide numerical evaluations for their numeric
+The dictionaries below can provide numeric evaluations for their numeric
 functions:
 
 <div class=symbols-table>

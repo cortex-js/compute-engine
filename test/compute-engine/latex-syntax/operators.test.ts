@@ -188,7 +188,8 @@ describe('OPERATOR infix', () => {
   test('- // Invalid negate', () =>
     expect(check('-')).toMatchInlineSnapshot(`
       'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'-'"]]
-      evaluate  = "Nothing"'
+      canonical = ["Error", "'syntax-error'", ["LatexForm", "'-'"]]
+      evaluate  = "'syntax-error'"'
     `));
   test('1- // Invalid subtract', () =>
     expect(check('1-')).toMatchInlineSnapshot(`

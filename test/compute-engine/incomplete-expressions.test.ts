@@ -51,9 +51,9 @@ describe('basic', () => {
         ["LatexForm", "'{2'"]
       ]'
     `);
-    expect(parse('\\sqrt{}')).toMatchInlineSnapshot(`'["Sqrt", "Nothing"]'`);
-    expect(parse('\\sqrt{}{}')).toMatchInlineSnapshot(`'["Sqrt", "Nothing"]'`);
-    expect(parse('\\sqrt')).toMatchInlineSnapshot(`'["Sqrt", "Nothing"]'`);
+    expect(parse('\\sqrt{}')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
+    expect(parse('\\sqrt{}{}')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
+    expect(parse('\\sqrt')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
   });
 
   test('Semantic Errors', () => {
@@ -64,12 +64,12 @@ describe('basic', () => {
       `'["Multiply", 1, "Missing"]'`
     );
     expect(parse('\\times')).toMatchInlineSnapshot(
-      `'["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\times'"]]'`
+      `'["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\times'"]]'`
     );
     expect(parse('\\times3')).toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\times'"]],
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\times'"]],
         "'syntax-error'",
         ["LatexForm", "'3'"]
       ]'

@@ -676,7 +676,7 @@ export interface Parser {
   /** Return the next token, without advancing the index */
   readonly peek: LatexToken;
 
-  /** Return true if the terminator conditin is met */
+  /** Return true if the terminator condition is met */
   atTerminator(t: Terminator): boolean;
 
   /** Return an array of string corresponding to tokens ahead.

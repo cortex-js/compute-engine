@@ -30,10 +30,14 @@ import {
   simplifyToJson,
 } from '../utils';
 
-// const ce = engine;
+const ce = engine;
 // let f = ce.parse('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}');
 // f = f.simplify();
 // console.log(f.toJSON());
+
+console.log(ce.parse('1/x').json);
+ce.jsonSerializationOptions.metadata = ['latex'];
+console.log(ce.parse('1/x').json);
 
 //
 // BOXING

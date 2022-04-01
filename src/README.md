@@ -34,10 +34,10 @@ programming languages.
 MathJSON can be transformed from (parsing) and to (serialization) other formats,
 using a syntax specific to those formats.
 
-The **Cortex Compute Engine** library provides an implementation in 
-JavaScript/TypeScript of utilities that parse LaTeX to MathJSON, serialize 
-MathJSON to LaTeX, and provide a collection of functions for symbolic 
-manipulation and numerical evaluations of MathJSON expressions.
+The **Cortex Compute Engine** library provides an implementation in
+JavaScript/TypeScript of utilities that parse LaTeX to MathJSON, serialize
+MathJSON to LaTeX, and provide a collection of functions for symbolic
+manipulation and numeric evaluations of MathJSON expressions.
 
 {% readmore "/compute-engine/guides/dictionaries/" %} Read more about
 <strong>MathJSON for LaTeX</strong> {% endreadmore %}
@@ -47,8 +47,8 @@ Engine</strong> {% endreadmore %}
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations
-are invented regularly and need to be represented with MathJSON. To address 
-those needs MathJSON is flexible, extensible and customizable. Extensible 
+are invented regularly and need to be represented with MathJSON. To address
+those needs MathJSON is flexible, extensible and customizable. Extensible
 dictionaries can be used to define new syntax and new semantic.
 
 MathJSON is not intended to be suitable as a visual representation of arbitrary
@@ -56,7 +56,7 @@ mathematical notations, and as such is not a replacement for LaTeX or MathML.
 
 ## Structure of a MathJSON Expression
 
-A MathJSON expression is a combination of **numbers**, **symbols**, **strings**, 
+A MathJSON expression is a combination of **numbers**, **symbols**, **strings**,
 **functions** and **dictionaries**.
 
 **Number**
@@ -102,11 +102,11 @@ A MathJSON expression is a combination of **numbers**, **symbols**, **strings**,
 ```
 
 **Numbers**, **symbols**, **strings** and **functions** can be expressed either
-as an object literal with a `"num"` `"str"` `"sym"` or `"fn"` key,
-respectively, or as a shorthand notation using a JSON number, string or array.
+as an object literal with a `"num"` `"str"` `"sym"` or `"fn"` key, respectively,
+or as a shorthand notation using a JSON number, string or array.
 
-**Dictionaries** do not have a shorthand notation and are always expressed as
-an object literal with a `"dict"` key.
+**Dictionaries** do not have a shorthand notation and are always expressed as an
+object literal with a `"dict"` key.
 
 The shorthand notation is more concise and easier to read, but cannot include
 metadata properties.
@@ -133,25 +133,24 @@ The string representing a number follows the
 [JSON syntax for number](https://tools.ietf.org/html/rfc7159#section-6), with
 the following differences:
 
-* The range or precision of MathJSON numbers may be greater than the range and
-precision supported by [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754) 64-bit
-float.
+- The range or precision of MathJSON numbers may be greater than the range and
+  precision supported by [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754)
+  64-bit float.
 
-* The values `NaN` `+Infinity` and `-Infinity` are used to represent an undefined
-result, as per [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754), positive
-infinity and negative infinity, respectively.
+- The values `NaN` `+Infinity` and `-Infinity` are used to represent an
+  undefined result, as per [IEEE 754](https://en.wikipedia.org/wiki/IEEE_754),
+  positive infinity and negative infinity, respectively.
 
-* If the string ends with the pattern `/\([0-9]+\)/` (that is a series of one or
-more digits enclosed in parentheses), that pattern should be interpreted as
-repeating digits.
+- If the string ends with the pattern `/\([0-9]+\)/` (that is a series of one or
+  more digits enclosed in parentheses), that pattern should be interpreted as
+  repeating digits.
 
 ```json
 {  "num": "1.(3)" }
 {  "num": "0.(142857)" }
 ```
 
-
-* The following characters in the string are ignored:
+- The following characters in the string are ignored:
 
 <div class=symbols-table>
 
@@ -167,7 +166,6 @@ repeating digits.
 
 </div>
 
-
 ### JSON numbers
 
 When a **number** has no extra metadata and is compatible with the JSON
@@ -175,8 +173,8 @@ representation of numbers, a JSON number can be used.
 
 Specifically:
 
-- the number is in the range \\([-(2^{53})+1, (2^{53})-1]\\) to fit in a
-  64-bit float (**IEEE 754-2008**, 52-bit, about 15 digits of precision).
+- the number is in the range \\([-(2^{53})+1, (2^{53})-1]\\) to fit in a 64-bit
+  float (**IEEE 754-2008**, 52-bit, about 15 digits of precision).
 - the number is finite: it cannot be `+Infinity` `-Infinity` or `NaN`.
 
 ```json
@@ -204,8 +202,8 @@ A MathJSON **string** is either
 - a [JSON string](https://tools.ietf.org/html/rfc7159#section-7) that starts and
   ends with **U+0027 APOSTROPHE** `'`.
 
-Strings can contain any character represented by a Unicode scalar value (a 
-codepoint in the `[0...0x10FFFF]` range, except for `[0xD800...0xDFFF]`), but 
+Strings can contain any character represented by a Unicode scalar value (a
+codepoint in the `[0...0x10FFFF]` range, except for `[0xD800...0xDFFF]`), but
 the following characters must be escaped as indicated:
 
 <div class=symbols-table>
@@ -250,7 +248,7 @@ except:
 | :----------------------- | :--------------------------- | :------ |
 | **U+0000** to **U+0020** |                              |         |
 | **U+0022**               | **QUOTATION MARK**           | `"`     |
-| **U+0060**               | **GRAVE ACCENT**<br>backtick | `` ` ``  
+| **U+0060**               | **GRAVE ACCENT**<br>backtick | `` ` `` |
 | **U+FFFE**               | **BYTE ORDER MARK**          |         |
 | **U+FFFF**               | **INVALID BYTE ORDER MARK**  |         |
 
@@ -307,12 +305,12 @@ denote wildcards and other placeholders:
 
 <div class=symbols-table>
 
-| Wildcard  |                                              |
-| :-------  | :------------------------------------------- |
-|    `_`    | Wildcard for a single symbol                 |
-|   `__`    | Wildcard for a sequence of 1 or more symbols |
-|   `___`   | Wildcard for a sequence of 0 or more symbols |
-|   `_a`    | Capturing wildcard named `a`                 |
+| Wildcard |                                              |
+| :------- | :------------------------------------------- |
+| `_`      | Wildcard for a single symbol                 |
+| `__`     | Wildcard for a sequence of 1 or more symbols |
+| `___`    | Wildcard for a sequence of 0 or more symbols |
+| `_a`     | Capturing wildcard named `a`                 |
 
 </div>
 
@@ -324,9 +322,9 @@ denote wildcards and other placeholders:
 
   For example, it is recommended to use `gamma` rather than `ɣ` and `Total`
   rather than **U+2211 N-ARY SUMMATION** `∑`, which can be confused with
-   **U+03A3 GREEK CAPITAL LETTER SIGMA** `Σ`. 
-   
-  Using a more limited set of common characters avoids visual ambiguity issues 
+  **U+03A3 GREEK CAPITAL LETTER SIGMA** `Σ`.
+
+  Using a more limited set of common characters avoids visual ambiguity issues
   that might otherwise arise with some Unicode symbols.
 
 - If a variable is made of several words, use camelCase, i.e. `newDeterminant`
@@ -365,14 +363,14 @@ these conventions.
 
 <div class=symbols-table>
 
-|  Symbol   | LaTeX                  |                               |
-| :------- | :--------------------- | ----------------------------- |
-|  `time`   | `\mathit{time}`        | \\( \mathit{time} \\)         |
-|  `alpha`  | `\alpha`               | \\( \alpha \\)                |
-|   `m56`   | `m_{56}`               | \\( m_{56} \\)               |
+| Symbol    | LaTeX                  |                               |
+| :-------- | :--------------------- | ----------------------------- |
+| `time`    | `\mathit{time}`        | \\( \mathit{time} \\)         |
+| `alpha`   | `\alpha`               | \\( \alpha \\)                |
+| `m56`     | `m_{56}`               | \\( m\_{56} \\)               |
 | `alpha0`  | `\alpha_0`             | \\( \alpha_0 \\)              |
-| `m56_max` | `m_{56_{\mathit{max}}` | \\( m_{56_{\mathit{max}}} \\) |
-|  `c_max`  | `c_{\mathit{max}}`     | \\( c_{\mathit{max}} \\)     |
+| `m56_max` | `m_{56_{\mathit{max}}` | \\( m*{56*{\mathit{max}}} \\) |
+| `c_max`   | `c_{\mathit{max}}`     | \\( c\_{\mathit{max}} \\)     |
 
 </div>
 

@@ -12,7 +12,7 @@ describe('SYMBOLS', () => {
     );
     // Unknown symbol is OK
     expect(parse('\\foo')).toMatchInlineSnapshot(
-      `'["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\foo'"]]'`
+      `'["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\foo'"]]'`
     );
   });
   test('Symbol expressions', () => {

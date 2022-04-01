@@ -13,8 +13,8 @@ describe('ROOT FUNCTION', () => {
     );
   });
   test('Invalid forms', () => {
-    expect(parse('\\sqrt')).toMatchInlineSnapshot(`'["Sqrt", "Nothing"]'`);
-    expect(parse('\\sqrt{}')).toMatchInlineSnapshot(`'["Sqrt", "Nothing"]'`);
+    expect(parse('\\sqrt')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
+    expect(parse('\\sqrt{}')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
     expect(parse('\\sqrt{1}[3]')).toMatchInlineSnapshot(
       `'["Error", ["Sqrt", 1], "'syntax-error'", ["LatexForm", "'[3]'"]]'`
     );

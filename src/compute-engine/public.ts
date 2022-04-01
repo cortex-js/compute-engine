@@ -19,7 +19,8 @@ import type {
   SerializeLatexOptions,
 } from './latex-syntax/public';
 
-export type { Parser } from './latex-syntax/public';
+// export type { Parser } from './latex-syntax/public';
+export * from './latex-syntax/public';
 
 /**
  * Metadata that can be associated with a BoxedExpression
@@ -33,11 +34,13 @@ export type Metadata = {
 /**
  * The numeric evaluation mode:
  *
- * - `machine`: 64-bit float, **IEEE 754-2008**, 52-bit, about 15 digits of precision
- * - `decimal`: arbitrary precision floating point numbers
- * - `complex`: complex number represented by two machine numbers, a real and
- * an imaginary part
  * - `auto`: use machine number if precision is 15 or less, allow complex numbers.
+ * - `machine`: 64-bit float, **IEEE 754-2008**, 64-bit float, 52-bit mantissa,
+ *    about 15 digits of precision
+ * - `decimal`: arbitrary precision floating point numbers, as provided by the
+ * "decimal.js" library
+ * - `complex`: complex number represented by two machine numbers, a real and
+ * an imaginary part, as provided by the "complex.js" library
  */
 export type NumericMode = 'auto' | 'machine' | 'decimal' | 'complex';
 
@@ -143,6 +146,9 @@ export type BoxedRuleSet = Set<BoxedRule>;
  */
 export type DomainExpression = BoxedExpression;
 
+/**
+ * Options to control the serialization to MathJSON when using `expr.json`.
+ */
 export type JsonSerializationOptions = {
   /** A list of space separated function names that should be excluded from
    * the JSON output.
@@ -288,7 +294,9 @@ export interface BoxedExpression {
   /** If `true`, this expression is in a canonical form */
   get isCanonical(): boolean;
 
-  /** For internal use only, set when a canonical expression is created. */
+  /** For internal use only, set when a canonical expression is created.
+   * @internal
+   */
   set isCanonical(val: boolean);
 
   // ----- FUNCTION
@@ -700,7 +708,7 @@ export interface BoxedExpression {
    */
   evaluate(options?: EvaluateOptions): BoxedExpression;
 
-  /** Return a numerical approximation of this expression.
+  /** Return a numeric approximation of this expression.
    *
    * The expression is first converted to canonical form.
    *
@@ -760,13 +768,13 @@ export interface BoxedExpression {
    * Update the definition associated with this expression, taking
    * into account the current context.
    *
-   * For internal use only.
+   * @internal
    */
   _repairDefinition(): void;
 
   /** Purge any cached values.
    *
-   * For internal use only.
+   * @internal
    */
   _purge(): undefined;
 }
@@ -1482,26 +1490,45 @@ export interface ComputeEngineStats {
   highwaterMark: number;
 }
 
+/** @internal */
 export interface IComputeEngine {
+  /** @internal */
   readonly ZERO: BoxedExpression;
+  /** @internal */
   readonly ONE: BoxedExpression;
+  /** @internal */
   readonly TWO: BoxedExpression;
+  /** @internal */
   readonly HALF: BoxedExpression;
+  /** @internal */
   readonly NEGATIVE_ONE: BoxedExpression;
+  /** @internal */
   readonly I: BoxedExpression;
+  /** @internal */
   readonly NAN: BoxedExpression;
+  /** @internal */
   readonly POSITIVE_INFINITY: BoxedExpression;
+  /** @internal */
   readonly NEGATIVE_INFINITY: BoxedExpression;
+  /** @internal */
   readonly COMPLEX_INFINITY: BoxedExpression;
 
+  /** @internal */
   readonly DECIMAL_NAN: Decimal;
+  /** @internal */
   readonly DECIMAL_ZERO: Decimal;
+  /** @internal */
   readonly DECIMAL_ONE: Decimal;
+  /** @internal */
   readonly DECIMAL_TWO: Decimal;
+  /** @internal */
   readonly DECIMAL_HALF: Decimal;
+  /** @internal */
   readonly DECIMAL_PI: Decimal;
+  /** @internal */
   readonly DECIMAL_NEGATIVE_ONE: Decimal;
 
+  /** The current scope */
   context: RuntimeScope;
 
   /** Absolute time beyond which evaluation should not proceed */
@@ -1512,6 +1539,7 @@ export interface IComputeEngine {
   readonly recursionLimit: number;
   readonly defaultDomain: null | BoxedExpression;
 
+  /** {@inheritDoc  NumericMode} */
   numericMode: NumericMode;
 
   tolerance: number;
@@ -1678,6 +1706,12 @@ export interface IComputeEngine {
    */
   serialize(expr: SemiBoxedExpression): LatexString;
 
+  /**
+   * {@inheritDoc  NumberFormattingOptions}
+   * {@inheritDoc  ParseLatexOptions}
+   * {@inheritDoc  SerializeLatexOptions}
+   *
+   */
   get latexOptions(): NumberFormattingOptions &
     ParseLatexOptions &
     SerializeLatexOptions;
@@ -1687,6 +1721,7 @@ export interface IComputeEngine {
       Partial<SerializeLatexOptions>
   );
 
+  /** {@inheritDoc  JsonSerializationOptions} */
   get jsonSerializationOptions(): JsonSerializationOptions;
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>);
 

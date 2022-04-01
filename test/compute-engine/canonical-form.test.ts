@@ -138,7 +138,7 @@ describe('COMMUTATIVE ORDER', () => {
       'box      = ["Negate", ["Multiply", 2, "x", 5, "z", ["Sqrt", "y"], ["Rational", 3, 4], 3, "Pi", "y"]]
       canonical = ["Negate", ["Multiply", ["Rational", 45, 2], "Pi", "x", "z", ["Power", "y", ["Rational", 3, 2]]]]
       simplify  = ["Multiply", ["Rational", -45, 2], "Pi", "x", "z", ["Power", "y", ["Rational", 3, 2]]]
-      N         = ["Multiply", -1, ["num": "70.68583470577034786540947612378881489443631148593988097193625332692586914143970246913078357019763403"], "x", "z", ["Power", "y", ["Rational", 3, 2]]]'
+      N         = ["Multiply", -1, ["num": "70.68583470577034786540947612378881489443631148593988097193625332692586914143970246913078357019763403"], "x", "z", ["Power", "y", 1.5]]'
     `);
   });
 

@@ -273,7 +273,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     // Idempotency ('x' = 'x')
     if (rhs.symbol !== null) return rhs.symbol === this._name;
 
-    // Mathematical/numerical equality
+    // Mathematical/numeric equality
     const val = this._def?.value;
     if (val) return val.isEqual(rhs);
 
@@ -459,7 +459,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   N(options?: NOptions): BoxedExpression {
-    // If we're doing a numerical evaluation, the `hold` does not apply,
+    // If we're doing a numeric evaluation, the `hold` does not apply,
     // so call the evaluate handler directly (if the `N` handler doesn't work)
     const value = this._def?.value;
     return value?.N(options) ?? value?.evaluate(options) ?? value ?? this;

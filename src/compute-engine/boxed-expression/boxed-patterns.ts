@@ -1,5 +1,5 @@
 import { Expression } from '../../math-json/math-json-format';
-import { NUMERICAL_TOLERANCE } from '../numerics/numeric';
+import { NUMERIC_TOLERANCE } from '../numerics/numeric';
 import { getWildcardName } from '../rules';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import {
@@ -305,7 +305,7 @@ function match(
     pattern,
     {},
     {
-      numericTolerance: options?.numericTolerance ?? NUMERICAL_TOLERANCE,
+      numericTolerance: options?.numericTolerance ?? NUMERIC_TOLERANCE,
     }
   );
   if (substitution) return substitution;

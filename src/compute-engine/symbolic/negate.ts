@@ -8,7 +8,7 @@ function negateLiteral(
   expr: BoxedExpression,
   metadata?: Metadata
 ): BoxedExpression | null {
-  // Applying negation is safe (doesn't introduce numerical errors)
+  // Applying negation is safe (doesn't introduce numeric errors)
   // even on floating point numbers
   if (!expr.isLiteral) return null;
 

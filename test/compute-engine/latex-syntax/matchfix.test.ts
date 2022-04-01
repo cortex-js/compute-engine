@@ -3,35 +3,35 @@ import { latex, expressionError, check } from '../../utils';
 describe('MATCHFIX', () => {
   test('\\lbrack\\rbrack', () =>
     expect(check('\\lbrack\\rbrack')).toMatchInlineSnapshot(`
-      'box      = ["Error", ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'\\rbrack'"]]
-      evaluate  = "Nothing"'
+      'box      = ["Error", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'\\rbrack'"]]
+      evaluate  = "Missing"'
     `));
 
   test('\\lbrack a\\rbrack', () =>
     expect(check('\\lbrack a\\rbrack')).toMatchInlineSnapshot(`
-      'box      = ["Error", ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'a\\rbrack'"]]
-      evaluate  = "Nothing"'
+      'box      = ["Error", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'a\\rbrack'"]]
+      evaluate  = "Missing"'
     `));
 
   test('\\lbrack a, b\\rbrack', () =>
     expect(check('\\lbrack a, b\\rbrack')).toMatchInlineSnapshot(`
-      'box      = ["Error", ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'a, b\\rbrack'"]]
-      evaluate  = "Nothing"'
+      'box      = ["Error", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'a, b\\rbrack'"]]
+      evaluate  = "Missing"'
     `));
 
   test('\\lbrack a, \\lbrack b, c\\rbrack\\rbrack', () =>
     expect(check('\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'))
       .toMatchInlineSnapshot(`
-      'box      = ["Error", ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'a, \\lbrack b, c\\rbrack\\rbrack'"]]
-      evaluate  = "Nothing"'
+      'box      = ["Error", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'a, \\lbrack b, c\\rbrack\\rbrack'"]]
+      evaluate  = "Missing"'
     `));
 
   test('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack', () =>
-    expect(
-      check('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack')
-    ).toMatchInlineSnapshot(
-      `'TypeError: Cannot read properties of undefined (reading 'head')'`
-    )); // @todo
+    expect(check('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'))
+      .toMatchInlineSnapshot(`
+      'box      = ["Error", ["Sin", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]]], "'syntax-error'", ["LatexForm", "'a, \\lbrack b, c\\rbrack\\rbrack'"]]
+      evaluate  = ["Divide", ["Subtract", ["Exp", ["Multiply", "ImaginaryUnit", "Missing"]], ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "Missing"]]]], ["Complex", 0, 2]]'
+    `)); // @todo
 });
 
 describe('MATCHFIX serialize', () => {
@@ -103,24 +103,28 @@ describe('MATCHFIX abs and norm', () => {
   test('1+|a|+2', () =>
     expect(check('|(1+|a|+2)|')).toMatchInlineSnapshot(`
       'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'|(1+|a|+2)|'"]]
-      evaluate  = "Nothing"'
+      canonical = ["Error", "'syntax-error'", ["LatexForm", "'|(1+|a|+2)|'"]]
+      evaluate  = "'syntax-error'"'
     `)); // @todo
 
   test('|1+|a|+2|', () =>
     expect(check('|1+|a|+2|')).toMatchInlineSnapshot(`
       'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'|1+|a|+2|'"]]
-      evaluate  = "Nothing"'
+      canonical = ["Error", "'syntax-error'", ["LatexForm", "'|1+|a|+2|'"]]
+      evaluate  = "'syntax-error'"'
     `));
 
   test('||a||', () =>
     expect(check('||a||')).toMatchInlineSnapshot(`
       'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'||a||'"]]
-      evaluate  = "Nothing"'
+      canonical = ["Error", "'syntax-error'", ["LatexForm", "'||a||'"]]
+      evaluate  = "'syntax-error'"'
     `));
   test('||a||+|b|', () =>
     expect(check('||a||+|b|')).toMatchInlineSnapshot(`
       'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'||a||+|b|'"]]
-      evaluate  = "Nothing"'
+      canonical = ["Error", "'syntax-error'", ["LatexForm", "'||a||+|b|'"]]
+      evaluate  = "'syntax-error'"'
     `));
 });
 
@@ -128,13 +132,15 @@ describe('MATCHFIX invalid', () => {
   test('( // missing closing fence', () => {
     expect(check('(')).toMatchInlineSnapshot(`
       'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'('"]]
-      evaluate  = "Nothing"'
+      canonical = ["Error", "'syntax-error'", ["LatexForm", "'('"]]
+      evaluate  = "'syntax-error'"'
     `);
   });
   test(') // missing opening fence', () => {
     expect(check(')')).toMatchInlineSnapshot(`
       'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "')'"]]
-      evaluate  = "Nothing"'
+      canonical = ["Error", "'syntax-error'", ["LatexForm", "')'"]]
+      evaluate  = "'syntax-error'"'
     `);
   });
 

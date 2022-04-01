@@ -13,7 +13,7 @@ describe('BASIC PARSING', () => {
 describe('UNKNOWN COMMANDS', () => {
   test('Parse', () => {
     expect(parse('\\foo')).toMatchInlineSnapshot(
-      `'["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\foo'"]]'`
+      `'["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\foo'"]]'`
     );
     expect(parse('x=\\foo+1')).toMatchInlineSnapshot(`
       '[
@@ -21,7 +21,7 @@ describe('UNKNOWN COMMANDS', () => {
         "x",
         [
           "Add",
-          ["Error", "Nothing", "'unknown-command'", ["LatexForm", "'\\\\foo'"]],
+          ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\foo'"]],
           1
         ]
       ]'
@@ -34,7 +34,7 @@ describe('UNKNOWN COMMANDS', () => {
           "x",
           [
             "Error",
-            "Nothing",
+            "Missing",
             "'unknown-command'",
             ["LatexForm", "'\\\\foo{1}'"]
           ]

@@ -11,8 +11,8 @@ export const MACHINE_TOLERANCE = Math.pow(
   -(MACHINE_PRECISION_BITS - MACHINE_TOLERANCE_BITS)
 );
 
-// Positive values smaller than NUMERICAL_TOLERANCE are considered to be zero
-export const NUMERICAL_TOLERANCE = Math.pow(10, -10);
+// Positive values smaller than NUMERIC_TOLERANCE are considered to be zero
+export const NUMERIC_TOLERANCE = Math.pow(10, -10);
 
 // When applying simplifications, only considers integers whose absolute value
 // is less than SMALL_INTEGERS. This avoid loss of precision by preventing

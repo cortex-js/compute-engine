@@ -42,7 +42,7 @@ describe('LATEX SERIALIZING', () => {
     // Repeating patern
     expect(
       latex({ num: '3.123456785678567856785678567856785678' })
-    ).toMatchInlineSnapshot(`'3.123\\,4'`);
+    ).toMatchInlineSnapshot(`'3.123\\,4\\overline{5678}'`);
 
     expect(
       latex({ num: '0.1234567872368237462387623876' })
@@ -84,7 +84,7 @@ describe('LATEX SERIALIZING', () => {
     expect(parse('\\foo[0]{1}{2}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        "Nothing",
+        "Missing",
         "'unknown-command'",
         ["LatexForm", "'\\\\foo[0]{1}{2}'"]
       ]'
