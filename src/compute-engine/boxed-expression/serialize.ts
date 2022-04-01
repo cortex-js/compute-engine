@@ -271,7 +271,7 @@ export function serializeJsonFunction(
 
   // Determine if we need some LaTeX metadata
   if (ce.jsonSerializationOptions.metadata.includes('latex')) {
-    md.latex = _escapeJsonString(md.latex ?? ce.serialize(fn));
+    md.latex = _escapeJsonString(md.latex ?? ce.serialize({ fn }));
   } else md.latex = '';
 
   // Determine if we have some wikidata metadata
@@ -355,6 +355,9 @@ export function serializeJsonNumber(
 ): Expression {
   metadata = { ...metadata };
 
+  if (!ce.jsonSerializationOptions.metadata.includes('latex'))
+    metadata.latex = '';
+
   const shorthandAllowed =
     !metadata.latex &&
     !ce.jsonSerializationOptions.metadata.includes('latex') &&
@@ -388,8 +391,7 @@ export function serializeJsonNumber(
     }
 
     if (ce.jsonSerializationOptions.metadata.includes('latex'))
-      metadata.latex = metadata.latex ?? ce.serialize(num);
-    else metadata.latex = '';
+      metadata.latex = metadata.latex ?? ce.serialize({ num });
 
     return metadata.latex ? { num, latex: metadata.latex } : { num };
   }
@@ -403,8 +405,7 @@ export function serializeJsonNumber(
     if (value.isNaN()) {
       num = 'NaN';
       if (ce.jsonSerializationOptions.metadata.includes('latex'))
-        metadata.latex = metadata.latex ?? ce.serialize(num);
-      else metadata.latex = '';
+        metadata.latex = metadata.latex ?? ce.serialize({ num });
 
       return metadata.latex ? { num, latex: metadata.latex } : { num };
     }
@@ -453,8 +454,7 @@ export function serializeJsonNumber(
     num = repeatingDecimal(ce, value.toString());
   }
   if (ce.jsonSerializationOptions.metadata.includes('latex'))
-    metadata.latex = metadata.latex ?? ce.serialize(num);
-  else metadata.latex = '';
+    metadata.latex = metadata.latex ?? ce.serialize({ num });
 
   return metadata.latex ? { num, latex: metadata.latex } : { num };
 }
