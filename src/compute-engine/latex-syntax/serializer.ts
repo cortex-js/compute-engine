@@ -292,113 +292,120 @@ export class Serializer {
   }
 
   serialize(expr: Expression | null): LatexString {
-    if (expr === null) return '';
+    if (expr === null || expr === undefined) return '';
 
     this.level += 1;
-    const result = (() => {
-      //
-      // 1. Is it a number
-      //
-      const numericValue = serializeNumber(expr, this.options);
-      if (numericValue) return numericValue;
-
-      //
-      // 2. Is it a string?
-      //
-      const s = stringValue(expr);
-      if (s !== null) return `\\text{${s}}`;
-
-      //
-      // 3. Is it a symbol?
-      //
-      const symbolName = symbol(expr);
-      if (symbolName !== null) {
-        const def = this.dictionary.name.get(symbolName);
-        if (def?.kind === 'symbol') return this.serializeSymbol(expr, def);
-      }
-
-      //
-      // 4. Is it a dictionary?
-      //
-      const dict = dictionary(expr);
-      if (dict !== null) return this.serializeDictionary(dict);
-
-      //
-      // 5. Is it a named function?
-      //
-      const fnName = headName(expr);
-      if (fnName) {
-        if (fnName[0] === '\\') {
-          // 5.1 An unknown LaTeX command, possibly with arguments.
-          // This can happen if we encountered an unrecognized LaTeX command
-          // during parsing, e.g. "\foo{x + 1}"
-          const args = tail(expr);
-          if (args.length === 0) return fnName;
-          return (
-            fnName +
-            '{' +
-            args
-              .map((x) => this.serialize(x))
-              .filter((x) => Boolean(x))
-              .join('}{') +
-            '}'
-          );
-        }
+    try {
+      const result = (() => {
         //
-        // 5.2 A function, operator or matchfix operator
+        // 1. Is it a number
         //
-        const def = this.dictionary.name.get(fnName);
-        if (def) {
-          let result = '';
-          // If there is a custom serializer function, use it.
-          if (typeof def.serialize === 'function') {
-            result = def.serialize(this, expr);
-          }
-          if (
-            !result &&
-            (def.kind === 'infix' ||
-              def.kind === 'postfix' ||
-              def.kind === 'prefix')
-          ) {
-            result = serializeOperator(this, expr, def);
-          }
-          if (!result && def.kind === 'matchfix') {
-            result = serializeMatchfix(this, expr, def);
-          }
-          if (!result && def.kind === 'symbol') {
-            result = this.serializeSymbol(expr, def);
-          }
-          return result;
+        const numericValue = serializeNumber(expr, this.options);
+        if (numericValue) return numericValue;
+
+        //
+        // 2. Is it a string?
+        //
+        const s = stringValue(expr);
+        if (s !== null) return `\\text{${s}}`;
+
+        //
+        // 3. Is it a symbol?
+        //
+        const symbolName = symbol(expr);
+        if (symbolName !== null) {
+          const def = this.dictionary.name.get(symbolName);
+          if (def?.kind === 'symbol') return this.serializeSymbol(expr, def);
         }
-      }
 
-      if (
-        Array.isArray(expr) ||
-        isFunctionObject(expr) ||
-        symbol(expr) !== null
-      ) {
-        // It's a function or a symbol, but without definition.
-        // It could be a [['derive', "f"], x]
-        // serializeSymbol() will take care of it.
-        return this.serializeSymbol(expr);
-      }
+        //
+        // 4. Is it a dictionary?
+        //
+        const dict = dictionary(expr);
+        if (dict !== null) return this.serializeDictionary(dict);
 
-      // This doesn't look like a symbol, or a function,
-      // or anything we were expecting.
-      // This is an invalid expression, for example an
-      // object literal with no known fields, or an invalid number:
-      // `{num: 'not a number'}`
-      // `{foo: 'not an expression}`
+        //
+        // 5. Is it a named function?
+        //
+        const fnName = headName(expr);
+        if (fnName) {
+          if (fnName[0] === '\\') {
+            // 5.1 An unknown LaTeX command, possibly with arguments.
+            // This can happen if we encountered an unrecognized LaTeX command
+            // during parsing, e.g. "\foo{x + 1}"
+            const args = tail(expr);
+            if (args.length === 0) return fnName;
+            return (
+              fnName +
+              '{' +
+              args
+                .map((x) => this.serialize(x))
+                .filter((x) => Boolean(x))
+                .join('}{') +
+              '}'
+            );
+          }
+          //
+          // 5.2 A function, operator or matchfix operator
+          //
+          const def = this.dictionary.name.get(fnName);
+          if (def) {
+            let result = '';
+            // If there is a custom serializer function, use it.
+            if (typeof def.serialize === 'function') {
+              result = def.serialize(this, expr);
+            }
+            if (
+              !result &&
+              (def.kind === 'infix' ||
+                def.kind === 'postfix' ||
+                def.kind === 'prefix')
+            ) {
+              result = serializeOperator(this, expr, def);
+            }
+            if (!result && def.kind === 'matchfix') {
+              result = serializeMatchfix(this, expr, def);
+            }
+            if (!result && def.kind === 'symbol') {
+              result = this.serializeSymbol(expr, def);
+            }
+            return result;
+          }
+        }
 
-      this.onError([
-        {
-          severity: 'warning',
-          message: ['syntax-error', JSON.stringify(expr)],
-        },
-      ]);
-    })();
+        if (
+          Array.isArray(expr) ||
+          isFunctionObject(expr) ||
+          symbol(expr) !== null
+        ) {
+          // It's a function or a symbol, but without definition.
+          // It could be a [['derive', "f"], x]
+          // serializeSymbol() will take care of it.
+          return this.serializeSymbol(expr);
+        }
+
+        // This doesn't look like a symbol, or a function,
+        // or anything we were expecting.
+        // This is an invalid expression, for example an
+        // object literal with no known fields, or an invalid number:
+        // `{num: 'not a number'}`
+        // `{foo: 'not an expression}`
+
+        this.onError([
+          {
+            severity: 'warning',
+            message: [
+              'syntax-error',
+              expr ? JSON.stringify(expr) : 'undefined',
+            ],
+          },
+        ]);
+      })();
+      this.level -= 1;
+      return result ?? '';
+    } catch (e) {}
     this.level -= 1;
-    return result ?? '';
+    return '';
   }
   applyFunctionStyle(
     expr: Expression,

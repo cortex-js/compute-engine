@@ -354,45 +354,43 @@ export function serializeJsonNumber(
   metadata?: Metadata
 ): Expression {
   metadata = { ...metadata };
-  if (ce.jsonSerializationOptions.metadata.includes('latex'))
-    metadata.latex = metadata.latex ?? ce.serialize(this);
-  else metadata.latex = '';
 
   const shorthandAllowed =
     !metadata.latex &&
+    !ce.jsonSerializationOptions.metadata.includes('latex') &&
     ce.jsonSerializationOptions.shorthands.includes('number');
 
   //
   // Decimal
   //
+  let num = '';
   if (value instanceof Decimal) {
-    if (value.isNaN())
-      return metadata.latex
-        ? { num: 'NaN', latex: metadata.latex }
-        : { num: 'NaN' };
-    if (!value.isFinite()) {
-      if (value.isPositive())
-        return metadata.latex
-          ? { num: '+Infinity', latex: metadata.latex }
-          : { num: '+Infinity' };
-      return metadata.latex
-        ? { num: '-Infinity', latex: metadata.latex }
-        : { num: '-Infinity' };
+    if (value.isNaN()) num = 'NaN';
+    else if (!value.isFinite()) {
+      if (value.isPositive()) num = '+Infinity';
+      else num = '-Infinity';
     }
 
     // Use the number shorthand if:
     // - it is allowed
     // - there is no metadata to include
     // - the number can be represented as a machine number
-    if (shorthandAllowed && isInMachineRange(value) && value.precision() < 15)
-      return value.toNumber();
+    if (!num) {
+      if (shorthandAllowed && isInMachineRange(value) && value.precision() < 15)
+        return value.toNumber();
 
-    // Use the scientific notation only if the resulting integer is not
-    // too big...
-    const num =
-      value.isInteger() && value.e < value.precision() + 4
-        ? value.toFixed(0)
-        : repeatingDecimal(ce, value.toJSON());
+      // Use the scientific notation only if the resulting integer is not
+      // too big...
+      num =
+        value.isInteger() && value.e < value.precision() + 4
+          ? value.toFixed(0)
+          : repeatingDecimal(ce, value.toJSON());
+    }
+
+    if (ce.jsonSerializationOptions.metadata.includes('latex'))
+      metadata.latex = metadata.latex ?? ce.serialize(num);
+    else metadata.latex = '';
+
     return metadata.latex ? { num, latex: metadata.latex } : { num };
   }
 
@@ -402,10 +400,15 @@ export function serializeJsonNumber(
   if (value instanceof Complex) {
     if (value.isInfinite())
       return serializeJsonSymbol(ce, 'ComplexInfinity', metadata);
-    if (value.isNaN())
-      return metadata.latex
-        ? { num: 'NaN', latex: metadata.latex }
-        : { num: 'NaN' };
+    if (value.isNaN()) {
+      num = 'NaN';
+      if (ce.jsonSerializationOptions.metadata.includes('latex'))
+        metadata.latex = metadata.latex ?? ce.serialize(num);
+      else metadata.latex = '';
+
+      return metadata.latex ? { num, latex: metadata.latex } : { num };
+    }
+
     return serializeJsonFunction(
       ce,
       'Complex',
@@ -424,6 +427,7 @@ export function serializeJsonNumber(
     if (
       !metadata.latex &&
       !metadata.wikidata &&
+      !ce.jsonSerializationOptions.metadata.includes('latex') &&
       ce.jsonSerializationOptions.shorthands.includes('function') &&
       ce.jsonSerializationOptions.shorthands.includes('number')
     ) {
@@ -440,25 +444,19 @@ export function serializeJsonNumber(
   //
   // Machine number
   //
-  if (Number.isNaN(value))
-    return metadata.latex
-      ? { latex: metadata.latex, num: 'NaN' }
-      : { num: 'NaN' };
-  if (!Number.isFinite(value) && value > 0)
-    return metadata.latex
-      ? { latex: metadata.latex, num: '+Infinity' }
-      : { num: '+Infinity' };
-  if (!Number.isFinite(value) && value < 0)
-    return metadata.latex
-      ? { latex: metadata.latex, num: '-Infinity' }
-      : { num: '-Infinity' };
+  if (Number.isNaN(value)) num = 'NaN';
+  if (!Number.isFinite(value) && value > 0) num = '+Infinity';
+  if (!Number.isFinite(value) && value < 0) num = '-Infinity';
 
-  if (shorthandAllowed) return value;
+  if (!num) {
+    if (shorthandAllowed) return value;
+    num = repeatingDecimal(ce, value.toString());
+  }
+  if (ce.jsonSerializationOptions.metadata.includes('latex'))
+    metadata.latex = metadata.latex ?? ce.serialize(num);
+  else metadata.latex = '';
 
-  const num = repeatingDecimal(ce, value.toString());
-  return metadata.latex.length > 0 && metadata.latex !== num
-    ? { latex: metadata.latex, num }
-    : { num };
+  return metadata.latex ? { num, latex: metadata.latex } : { num };
 }
 
 function _escapeJsonString(s: string): string {
