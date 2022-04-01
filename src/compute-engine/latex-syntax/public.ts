@@ -420,7 +420,13 @@ export type ParseLatexOptions = {
 
   /**
    * If true, the expression will be decorated with the LaTeX
-   * fragments corresponding to each elements of the expression
+   * fragments corresponding to each elements of the expression.
+   *
+   * The top-level expression, that is the one returned by `parse()`, will
+   * include the verbatim LaTeX input that was parsed. The sub-expressions
+   * may contain a slightly different LaTeX, for example with consecutive spaces
+   * replaced by one, with comments removed and with some low-level LaTeX
+   * commands replaced, for example `\egroup` and `\bgroup`.
    */
   preserveLatex: boolean;
 };

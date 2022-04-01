@@ -309,10 +309,10 @@ export function tokenize(s: string, args: string[]): Token[] {
   }
 
   const tokenizer = new Tokenizer(stream);
-  let result: Token[] = [];
-  do {
-    result = result.concat(expand(tokenizer, args));
-  } while (!tokenizer.end());
+  const result: Token[] = [];
+
+  do result.push(...expand(tokenizer, args));
+  while (!tokenizer.end());
 
   return result;
 }
