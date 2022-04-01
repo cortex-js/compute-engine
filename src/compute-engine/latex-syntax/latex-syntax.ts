@@ -138,20 +138,29 @@ export class LatexSyntax {
       this.onError
     );
 
-    let result = scanner.matchExpression();
+    let expr = scanner.matchExpression();
 
     if (!scanner.atEnd) {
       const rest: LatexToken[] = [];
       while (!scanner.atEnd) rest.push(scanner.next());
-      result = [
+      expr = [
         'Error',
-        result ?? 'Nothing',
+        expr ?? 'Nothing',
         { str: 'syntax-error' },
         ['LatexForm', { str: tokensToString(rest) }],
       ];
     }
 
-    return result ?? 'Nothing';
+    if (!expr) expr = 'Nothing';
+
+    if (this.options.preserveLatex) {
+      if (Array.isArray(expr)) expr = { latex, fn: expr };
+      else if (typeof expr === 'number')
+        expr = { latex, num: Number(expr).toString() };
+      else if (typeof expr === 'string') expr = { latex, sym: expr };
+      else if (typeof expr === 'object' && expr !== null) expr.latex = latex;
+    }
+    return expr ?? 'Nothing';
   }
   serialize(expr: Expression): LatexString {
     return this.serializer.serialize(expr);
