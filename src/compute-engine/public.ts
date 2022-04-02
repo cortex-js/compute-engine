@@ -54,20 +54,25 @@ export type Metadata = {
  */
 export type NumericMode = 'auto' | 'machine' | 'decimal' | 'complex';
 
-/** Options for `expr.simplify()` */
+/** Options for `BoxedExpression.simplify()`
+ *
+ */
 export type SimplifyOptions = EvaluateOptions & {
   recursive?: boolean;
   rules?: BoxedRuleSet;
 };
 
-/** Options for `expr.evaluate()` */
+/** Options for `BoxedExpression.evaluate()`
+ *
+ * @internal
+ */
 export type EvaluateOptions = {
-  // recursive?: boolean;
-  // timeLimit?: number;
-  // iterationLimit?: number;
+  //
 };
 
-/** Options for `expr.N()` */
+/** Options for `BoxedExpression.N()`
+ * @internal
+ */
 export type NOptions = {
   //
 };
@@ -157,7 +162,7 @@ export type BoxedRuleSet = Set<BoxedRule>;
 export type DomainExpression = BoxedExpression;
 
 /**
- * Options to control the serialization to MathJSON when using `expr.json`.
+ * Options to control the serialization to MathJSON when using `BoxedExpression.json`.
  */
 export type JsonSerializationOptions = {
   /** A list of space separated function names that should be excluded from
@@ -250,7 +255,7 @@ export interface BoxedExpression {
    * @category Object Methods
    */
   toJSON(): string;
-  /** From `Object.is()`. Equivalent to `expr.isSame()`
+  /** From `Object.is()`. Equivalent to `BoxedExpression.isSame()`
    *
    * @category Object Methods
    *
@@ -278,7 +283,7 @@ export interface BoxedExpression {
   get head(): BoxedExpression | string;
 
   /**
-   * If `expr.isPure` is `true`, this is a synonym for `expr.evaluate()`.
+   * If `this.isPure` is `true`, this is a synonym for `this.evaluate()`.
    * Otherwise, it returns `undefined`.
    */
   get value(): BoxedExpression | undefined;
@@ -289,7 +294,7 @@ export interface BoxedExpression {
   /** Return an approximation of the value of this expression. Floating-point
    * operations may be performed.
    *
-   * Just like `expr.value`, it returns `undefined` for impure expressions.
+   * Just like `this.value`, it returns `undefined` for impure expressions.
    */
   get numericValue(): BoxedExpression | undefined;
 
@@ -298,8 +303,8 @@ export interface BoxedExpression {
    * If false, the value of the expression may change, if the
    * value of other expression changes or for other reasons.
    *
-   * If `expr.isPure` is `false`, `expr.value` is undefined. Call
-   * `expr.evaluate()` to determine the value of the expression instead.
+   * If `this.isPure` is `false`, `this.value` is undefined. Call
+   * `this.evaluate()` to determine the value of the expression instead.
    *
    * As an example, the `Random` function is not pure.
    */
@@ -330,19 +335,17 @@ export interface BoxedExpression {
    */
   get ops(): null | BoxedExpression[];
 
-  /** If a function, the number of operands, otherwise 0.
-   *
+  /** If this expression is a function, the number of operands, otherwise 0.
    *
    * Note that a function can have 0 operands, so to check if this expression
-   * is a function, check if `expr.tail !== null` instead.
-   *
+   * is a function, check if `this.ops !== null` instead.
    *
    * @category Function Expression
    *
    */
   get nops(): number;
 
-  /** First operand, i.e. first element of `this.tail`
+  /** First operand, i.e.`this.ops[0]`
    *
    *
    * @category Function Expression
@@ -351,7 +354,7 @@ export interface BoxedExpression {
    */
   get op1(): BoxedExpression;
 
-  /** Second operand, i.e. second element of `this.tail`
+  /** Second operand, i.e.`this.ops[0]`
    *
    *
    * @category Function Expression
@@ -360,7 +363,7 @@ export interface BoxedExpression {
    */
   get op2(): BoxedExpression;
 
-  /** Third operand, i.e. third element of `this.tail`
+  /** Third operand, i.e. `this.ops[2]`
    *
    *
    * @category Function Expression
@@ -502,19 +505,19 @@ export interface BoxedExpression {
   /**
    * Return the following, depending on the value of this expression:
    *
-   * * `-1`: if it is < 0
-   * * `0`: if it is = 0
-   * * `+1`: if it is > 0
-   * * `undefined`: this value may be positive, negative or zero. We don't know
+   * * `-1` if it is < 0
+   * * `0` if it is = 0
+   * * `+1` if it is > 0
+   * * `undefined` this value may be positive, negative or zero. We don't know
    *    right now (a symbol with an Integer domain, but no currently assigned
    *    value, for example)
-   * * `null`: this value will never be positive, negative or zero (`NaN`,
+   * * `null` this value will never be positive, negative or zero (`NaN`,
    *     a string or a complex number for example)
    *
    * Note that complex numbers have no natural ordering,
    * so if the value is a complex number, `sgn` is either 0, or `null`
    *
-   * If a symbol, this does take assumptions into account, that is `expr.sgn` will return
+   * If a symbol, this does take assumptions into account, that is `this.sgn` will return
    * `1` if `isPositive` is `true`, even if this expression has no value
    *
    * @category Numeric Expression
@@ -532,7 +535,7 @@ export interface BoxedExpression {
    */
   get symbol(): string | null;
 
-  /**  Shortcut for `this.symbol === 'Missing'`
+  /**  Shortcut for `this.symbol === "Missing"`
    *
    * @category Symbol Expression
    *
@@ -683,16 +686,17 @@ export interface BoxedExpression {
    * "Not a Number".
    *
    * A value representing undefined result of computations, such as `0/0`,
-   * as per the the floating point format standard IEEE-754.
+   * as per the floating point format standard IEEE-754.
    *
-   * Note that if `isNaN` is true, `isNumber` is also true.
+   * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
+   * number).
    *
    * @category Expression Properties
    *
    */
   get isNaN(): boolean | undefined;
 
-  /** Not ±Infinity and not NaN
+  /** Not ±Infinity and not `NaN`
    *
    * @category Expression Properties
    */
@@ -884,16 +888,16 @@ export interface BoxedExpression {
    * The expression is first converted to canonical form.
    *
    * A pure expression always return the same value and has no side effects.
-   * If `expr.isPure` is `true`, `expr.value` and `expr.evaluate()` are synonyms.
-   * For an impure expression, `expr.value` is undefined.
+   * If `this.isPure` is `true`, `this.value` and `this.evaluate()` are synonyms.
+   * For an impure expression, `this.value` is undefined.
    *
    * Evaluating an impure expression may have some side effects, for
    * example modifying the `ComputeEngine` environment, such as its set of assumptions.
    *
    * Only exact calculations are performed, no floating point calculations.
-   * To perform approximate floating point calculations, use `expr.N()` instead.
+   * To perform approximate floating point calculations, use `this.N()` instead.
    *
-   * The result of `expr.evaluate()` may be the same as `expr.simplify()`.
+   * The result of `this.evaluate()` may be the same as `this.simplify()`.
    *
    * The result is in canonical form.
    *
@@ -908,10 +912,10 @@ export interface BoxedExpression {
    * are performed. The calculations are performed according
    * to the `numericMode` and `precision` properties of the `ComputeEngine`.
    *
-   * To only perform exact calculations, use `expr.evaluate()` instead.
+   * To only perform exact calculations, use `this.evaluate()` instead.
    *
-   * If the function is not numeric, the result of `expr.N()` is the same as
-   * `expr.evaluate()`.
+   * If the function is not numeric, the result of `this.N()` is the same as
+   * `this.evaluate()`.
    *
    * The result is in canonical form.
    */
@@ -950,8 +954,8 @@ export interface BoxedExpression {
   /**
    * Replace all the symbols in the expression as indicated.
    *
-   * Note the same effect can be achieved with `expr.replace()`, but
-   * using `expr.subs()` is more efficient, and simpler.
+   * Note the same effect can be achieved with `this.replace()`, but
+   * using `this.subs()` is more efficient, and simpler.
    *
    */
   subs(sub: Substitution): BoxedExpression;
@@ -1002,6 +1006,7 @@ export type PatternMatchOption = {
 export interface Pattern extends BoxedExpression {
   /**
    * If `expr` does not match the pattern, return `null`.
+   *
    * Otherwise, return a substitution describing the values that the named
    * wildcard in the pattern should be changed to in order for the pattern to be
    * equal to the expression. If there are no named wildcards and the expression
@@ -1292,37 +1297,37 @@ export type FunctionDefinitionFlags = {
 };
 
 /**
- *
+ * Definition record for a function.
  *
  */
 export type FunctionDefinition = BaseDefinition &
   Partial<FunctionDefinitionFlags> & {
     /**
-     * A number used to order expressions. Expressions with higher
-     * complexity are placed after expressions with lower complexity when
-     * ordered canonically.
+     * A number used to order arguments. Argument with higher
+     * complexity are placed after arguments with lower complexity when
+     * ordered canonically in commutative functions.
      *
-     * Additive functions: 1000-1999
-     * Multiplicative functions: 2000-2999
-     * Root and power functions: 3000-3999
-     * Log functions: 4000-4999
-     * Trigonometric functions: 5000-5999
-     * Hypertrigonometric functions: 6000-6999
-     * Special functions (factorial, Gamma, ...): 7000-7999
-     * Collections: 8000-8999
-     * Inert and styling:  9000-9999
-     * Logic: 10000-10999
-     * Relational: 11000-11999
+     * - Additive functions: 1000-1999
+     * - Multiplicative functions: 2000-2999
+     * - Root and power functions: 3000-3999
+     * - Log functions: 4000-4999
+     * - Trigonometric functions: 5000-5999
+     * - Hypertrigonometric functions: 6000-6999
+     * - Special functions (factorial, Gamma, ...): 7000-7999
+     * - Collections: 8000-8999
+     * - Inert and styling:  9000-9999
+     * - Logic: 10000-10999
+     * - Relational: 11000-11999
      *
      * **Default**: 100,000
      */
     complexity?: number;
 
     /**
-     * - `none`: Each of the arguments is evaluated (default)
-     * - `all`: None of the arguments are evaluated and they are passed as is
-     * - `first`: The first argument is not evaluated, the others are
-     * - `rest`: The first argument is evaluated, the others aren't
+     * - `none` Each of the arguments is evaluated (default)
+     * - `all` None of the arguments are evaluated and they are passed as is
+     * - `first` The first argument is not evaluated, the others are
+     * - `rest` The first argument is evaluated, the others aren't
      */
 
     hold?: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
@@ -1379,12 +1384,12 @@ export type FunctionDefinition = BaseDefinition &
      * `arg.isPositive`.
      *
      * Even though a symbol may not have a value, there may be some information
-     * about it reflected for example in `expr.isZero` or `expr.isPrime`.
+     * about it reflected for example in `this.isZero` or `this.isPrime`.
      *
      * The handler should not perform approximate numeric calculations, such
      * as calculations involving floating point numbers. Making exact
      * calculations on integers or rationals is OK. It is recommended, but not
-     * required, that the calculations be limited to `expr.smallIntegerValue`
+     * required, that the calculations be limited to `this.smallIntegerValue`
      * (i.e. numeric representations of the expression as an integer of small
      * magnitude).
      *
@@ -1422,12 +1427,12 @@ export type FunctionDefinition = BaseDefinition &
         ) => BoxedExpression | undefined);
 
     /**
-     * Evaluate numerically `expr`.
+     * Evaluate numerically an expression.
      *
-     * The arguments of `expr` have been simplified and evaluated, numerically
+     * The arguments `args` have been simplified and evaluated, numerically
      * if possible, except the arguments to which a `hold` apply.
      *
-     * The arguments of `expr` may be a combination of numbers, symbolic
+     * The arguments may be a combination of numbers, symbolic
      * expressions and other expressions.
      *
      * Perform as many calculations as possible, and return the result.
@@ -1445,13 +1450,13 @@ export type FunctionDefinition = BaseDefinition &
      * number, but complex numbers are not allowed (the `engine.numericMode`
      * is not `complex` or `auto`).
      *
-     * If the `expr.engine.numericMode` is `auto` or `complex`, you may return
+     * If the `ce.numericMode` is `auto` or `complex`, you may return
      * a Complex number as a result. Otherwise, if the result is a complex
      * value, return `NaN`. If Complex are not allowed, none of the arguments
      * will be complex literals.
      *
-     * If the `expr.engine.numericMode` is `decimal` or `auto` and
-     * `expr.engine.precision` is > 15, you may return a Decimal number.
+     * If the `ce.numericMode` is `decimal` or `auto` and
+     * `this.engine.precision` is > 15, you may return a Decimal number.
      * Otherwise, return a `machine` number approximation. If Decimal are
      * not allowed, none of the arguments will be Decimal literal.
      *
@@ -1478,7 +1483,7 @@ export type FunctionDefinition = BaseDefinition &
      *
      * Otherwise, the return value is the domain of the result.
      *
-     * Return `Nothing` if the arguments are acceptable, but the evaluation
+     * Return `"Nothing"` if the arguments are acceptable, but the evaluation
      * will fail, for example in some cases if there are missing arguments.
      *
      * This function is used to select the correct definition when there are
@@ -1493,7 +1498,9 @@ export type FunctionDefinition = BaseDefinition &
       args: BoxedExpression[]
     ) => BoxedExpression | string | null;
 
-    /** Dimensional analysis */
+    /** Dimensional analysis
+     * @experimental
+     */
     evalDimension?: (
       ce: IComputeEngine,
       args: BoxedExpression[]
@@ -1552,6 +1559,7 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
 
 /**
  * When used in a `SymbolDefinition`, these flags are optional.
+ *
  * If provided, they will override the value derived from
  * the symbol's value.
  *
@@ -1807,7 +1815,7 @@ export interface IComputeEngine {
    * Note that the result may not be a function, or may have a different
    * `head` than the one specified.
    *
-   * For example `ce.fn('Add', [ce.number(2),  ce.number(3)]))` -> 5
+   * For example `ce.fn("Add", [ce.number(2),  ce.number(3)]))` -> 5
    *
    */
   fn(
@@ -1832,23 +1840,23 @@ export interface IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression;
 
-  /** Shortcut for `fn('Error'...)`.
+  /** Shortcut for `this.fn("Error"...)`.
    *
    * The result is canonical.
    */
   error(val: BoxedExpression, message: string, messageArg: SemiBoxedExpression);
 
-  /** Shortcut for `fn('Add'...)`.
+  /** Shortcut for `this.fn("Add"...)`.
    *
    * The result is canonical.
    */
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression;
-  /** Shortcut for `fn('Multiply'...)`
+  /** Shortcut for `this.fn("Multiply"...)`
    *
    * The result is canonical.
    */
   mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression;
-  /** Shortcut for `fn('Power'...)`
+  /** Shortcut for `this.fn("Power"...)`
    *
    * The result is canonical.
    */
@@ -1857,17 +1865,17 @@ export interface IComputeEngine {
     exponent: number | [number, number] | BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression;
-  /** Shortcut for `fn('Divide', 1, expr)`
+  /** Shortcut for `this.fn("Divide", [1, expr])`
    *
    * The result is canonical.
    */
   inverse(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
-  /** Shortcut for `fn('Negate'...)`
+  /** Shortcut for `this.fn("Negate", [expr])`
    *
    * The result is canonical.
    */
   negate(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
-  /** Shortcut for `fn('Divide'...)`
+  /** Shortcut for `this.fn("Divide", [num, denom])`
    *
    * The result is canonical.
    */
@@ -1876,7 +1884,8 @@ export interface IComputeEngine {
     denom: BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression;
-  /** Shortcut for `fn('Pair'...)`
+
+  /** Shortcut for `this.fn("Pair"...)`
    *
    * The result is canonical.
    */
@@ -1885,7 +1894,8 @@ export interface IComputeEngine {
     second: BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression;
-  /** Shortcut for `fn('Tuple'...)`
+
+  /** Shortcut for `this.fn("Tuple"...)`
    *
    * The result is canonical.
    */
@@ -1911,7 +1921,7 @@ export interface IComputeEngine {
 
   /**
    * Options to control the serailization of MathJSON expression to LaTeX
-   * when using `expr.latex` or `ce.serialize()`.
+   * when using `this.latex` or `this.engine.serialize()`.
    *
    *
    * {@inheritDoc  NumberFormattingOptions}
@@ -1984,15 +1994,21 @@ export interface IComputeEngine {
   );
   signal(expr: BoxedExpression, msg: string, code?: SignalMessage): void;
   signal(sig: WarningSignal): void;
+  /** @internal */
   shouldContinueExecution(): boolean;
+  /** @internal */
   checkContinueExecution(): void;
 
+  /** @internal */
   cache<T>(name: string, build: () => T, purge?: (T) => T | undefined): T;
 
   readonly stats: ComputeEngineStats;
 
+  /** @internal */
   purge(): void;
+  /** @internal */
   _register(expr: BoxedExpression): void;
+  /** @internal */
   _unregister(expr: BoxedExpression): void;
 }
 

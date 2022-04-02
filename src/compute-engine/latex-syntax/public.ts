@@ -16,20 +16,24 @@ export type LatexToken = string | '<{>' | '<}>' | '<space>' | '<$>' | '<$$>';
  */
 export type LatexString = string;
 
+/**
+ * Open and close delimiters that can be used with {@link MatchfixEntry}
+ * record to define new LaTeX dictionary entries.
+ */
 export type Delimiter =
   | ')'
   | '('
   | ']'
   | '['
-  | '{' // \lbrace
-  | '<' // \langle
-  | '>' // \rangle
-  | '}' // \rbrace
+  | '{' /** \lbrace */
+  | '}' /** \rbrace */
+  | '<' /** \langle  */
+  | '>' /** \rangle  */
   | '|'
   | '||'
   | '\\lceil'
-  | '\\lfloor'
   | '\\rceil'
+  | '\\lfloor'
   | '\\rfloor';
 
 export type DictionaryCategory =
@@ -232,19 +236,19 @@ export type PrefixEntry = BaseEntry & {
   parse: PrefixParseHandler;
 };
 
+/**
+ * A LaTeX dictionary entry for an environment, that is a LaTeX
+ * construct using `\begin{...}...\end{...}`.
+ */
 export type EnvironmentEntry = BaseEntry & {
-  /**
-   * The name of an environment, as used in `\begin{matrix}` where
-   * `"matrix"` is the name of the environment.
-   */
   kind: 'environment';
-
   parse: EnvironmentParseHandler;
 };
 
 export type SymbolEntry = BaseEntry & {
   kind: 'symbol';
-  // Used for appropriate wrapping (i.e. when to surround it with parens)
+
+  /** Used for appropriate wrapping (i.e. when to surround it with parens) */
   precedence?: number;
 
   /**
@@ -299,6 +303,9 @@ export type SymbolEntry = BaseEntry & {
   parse: Expression | SymbolParseHandler;
 };
 
+/**
+ * A simple LaTeX dictionary entry, for example for a command like `\pi`.
+ */
 export type DefaultEntry = BaseEntry & {
   precedence?: number;
   arguments?: 'group' | 'implicit' | '';
