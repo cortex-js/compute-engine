@@ -881,6 +881,7 @@ export type Scope = {
 
   /** Signal `timeout` when the execution time for this scope is exceeded.
    * Time in seconds, default 2s.
+   * 
    */
   timeLimit?: number;
 
@@ -1534,10 +1535,14 @@ export interface IComputeEngine {
   /** Absolute time beyond which evaluation should not proceed */
   deadline?: number;
 
+  /** @alpha */
   readonly timeLimit: number;
+  /** @alpha */
   readonly iterationLimit: number;
+  /** @alpha */
+  /** @alpha */
   readonly recursionLimit: number;
-  readonly defaultDomain: null | BoxedExpression;
+  defaultDomain: null | BoxedExpression;
 
   /** {@inheritDoc  NumericMode} */
   numericMode: NumericMode;
@@ -1700,13 +1705,19 @@ export interface IComputeEngine {
    * The result may not be canonical.
    *
    */
-  parse(s: null | string | LatexString): BoxedExpression | null;
-  /** Serialize a `BoxedExpression` or a `MathJSON` expression to
+   parse(s: LatexString | string): BoxedExpression;
+   parse(s: null): null;
+ 
+   /** Serialize a `BoxedExpression` or a `MathJSON` expression to
    * a LaTeX string
    */
   serialize(expr: SemiBoxedExpression): LatexString;
 
   /**
+   * Options to control the serailization of MathJSON expression to LaTeX 
+   * when using `expr.latex` or `ce.serialize()`.
+   * 
+   * 
    * {@inheritDoc  NumberFormattingOptions}
    * {@inheritDoc  ParseLatexOptions}
    * {@inheritDoc  SerializeLatexOptions}
@@ -1725,7 +1736,19 @@ export interface IComputeEngine {
   get jsonSerializationOptions(): JsonSerializationOptions;
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>);
 
-  assume(
+  /**
+   * Add an assumption.
+   *
+   * Note that the assumption is put into canonical form before being added.
+   * 
+   * @return - `contradiction` if the new assumption is incompatible with previous
+   * ones.
+   * - `tautology` if the new assumption is redundant with previous ones.
+   * - `ok` if the assumption was successfully added to the assumption set.
+   *
+   *
+   */
+   assume(
     symbol: LatexString | SemiBoxedExpression,
     domain: BoxedExpression
   ): AssumeResult;
@@ -1734,6 +1757,8 @@ export interface IComputeEngine {
     arg1: LatexString | SemiBoxedExpression,
     arg2?: BoxedExpression
   ): AssumeResult;
+
+  /** Remove all assumptions about one or more symbols */
   forget(symbol?: string | string[]): void;
 
   get assumptions(): ExpressionMapInterface<boolean>;

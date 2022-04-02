@@ -17,5 +17,5 @@
     "strictNullChecks": true,
     "target": "es2020"
   },
-  "exclude": ["node_modules", "**/*.spec.ts", "bin", "dist"]
+  "include": ["src/**/*"]
 }

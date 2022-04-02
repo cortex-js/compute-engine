@@ -184,12 +184,12 @@ export type InfixEntry = BaseEntry & {
   /**
    * Infix position, with an operand before and an operand after: `a ⊛ b`.
    *
-   *      Example: `+`, `\times`
+   * Example: `+`, `\times`.
    */
   kind: 'infix';
 
   /**
-   * - **`both`**: a + b + c -> +(a, b, c)
+   * - **`both`**: a + b + c  +(a, b, c)
    * - **`left`**: a / b / c -> /(/(a, b), c)
    * - **`right`**: a = b = c -> =(a, =(b, c))
    * - **`non`**: a < b < c -> syntax error
@@ -211,7 +211,7 @@ export type PostfixEntry = BaseEntry & {
   /**
    * Postfix position, with an operand before: `a ⊛`
    *
-   *      Example: `!`
+   * Example: `!`.
    */
   kind: 'postfix';
 
@@ -224,7 +224,7 @@ export type PrefixEntry = BaseEntry & {
   /**
    * Prefix position, with an operand after: `⊛ a`
    *
-   *      Example: `-`, `\not`
+   * Example: `-`, `\not`.
    */
   kind: 'prefix';
   precedence: number;
@@ -316,29 +316,35 @@ export type LatexDictionaryEntry =
   | SymbolEntry
   | EnvironmentEntry;
 
+/** @internal */
 export function isSymbolEntry(
   entry: LatexDictionaryEntry
 ): entry is SymbolEntry {
   return !('kind' in entry) || entry.kind === 'symbol';
 }
+/** @internal */
 export function isMatchfixEntry(
   entry: LatexDictionaryEntry
 ): entry is MatchfixEntry {
   return 'kind' in entry && entry.kind === 'matchfix';
 }
+/** @internal */
 export function isInfixEntry(entry: LatexDictionaryEntry): entry is InfixEntry {
   return 'kind' in entry && entry.kind === 'infix';
 }
+/** @internal */
 export function isPrefixEntry(
   entry: LatexDictionaryEntry
 ): entry is PrefixEntry {
   return 'kind' in entry && entry.kind === 'prefix';
 }
+/** @internal */
 export function isPostfixEntry(
   entry: LatexDictionaryEntry
 ): entry is PostfixEntry {
   return 'kind' in entry && entry.kind === 'postfix';
 }
+/** @internal */
 export function isEnvironmentEntry(
   entry: LatexDictionaryEntry
 ): entry is EnvironmentEntry {
