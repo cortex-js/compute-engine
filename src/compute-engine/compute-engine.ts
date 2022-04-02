@@ -61,22 +61,22 @@ import { BoxedSymbol } from './boxed-expression/boxed-symbol';
 import { BoxedDictionary } from './boxed-expression/boxed-dictionary';
 
 /**
- * 
+ *
  * To use the CortexJS Compute Engine, create a `ComputeEngine` instance.
- * 
+ *
  * Use the instance to create expressions with `ce.parse()` and `ce.box()`.
- * 
- * 
+ *
+ *
  * ```ts
  * const ce = new ComputeEngine();
  * let expr = ce.parse("e^{i\\pi}");
  * console.log(expr.N().latex);
  * // ➔ "-1"
- * 
+ *
  * expr = ce.box(["Expand", ["Power", ["Add", "a", "b"], 2]]);
  * console.log(expr.evaluate().latex);
  * // ➔ "a^2 +  2ab + b^2"
- * 
+ *
  * ```
  */
 export class ComputeEngine implements IComputeEngine {
@@ -200,7 +200,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Scopes form a stack, and definitions in more recent
    * scopes can obscure definitions from older scopes.
-   * 
+   *
    * The `ce.context` property represents the current scope.
    *
    */
@@ -229,24 +229,24 @@ export class ComputeEngine implements IComputeEngine {
    * Construct a new `ComputeEngine` instance.
    *
    * Dictionaries define functions and symbols (in `options.dictionaries`) and
-   * the LaTeX syntax (in `options.latexDictionaries`). If no dictionaries 
+   * the LaTeX syntax (in `options.latexDictionaries`). If no dictionaries
    * are provided, the default ones are used.
    *
    * The order of the dictionaries matter: the definitions from the later ones
    * override the definitions from earlier ones. The first dictionary should
    * be the `'core'` dictionary which include some basic definitions such
    * as domains (`Boolean`, `Number`, etc...) that are used by later dictionaries.
-   * 
+   *
    * @param options.numericMode The default mode is `auto`. Use `machine` to only
-   * use 64-bit float, use `decimal` to always use arbitrary precision floating 
+   * use 64-bit float, use `decimal` to always use arbitrary precision floating
    * point numbers or `complex` for complex numbers.
-   * 
-   * @param options.numericPrecision Specific how many digits of precision for the 
+   *
+   * @param options.numericPrecision Specific how many digits of precision for the
    * numeric calculations. Default is 100.
-   * 
+   *
    * @param options.tolerance If the absolute value of the difference of two numbers
    * is less than `toleranc`, they are considered equal. Used by `chop()` as well.
-   * 
+   *
    * @param options.defaultDomain If an unknown symbol is encountered, assume it should
    * be a variable in this domain. **Default** `ExtendedRealNumber`
    */
@@ -468,8 +468,10 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   _decimal: Decimal.Constructor;
+
   /** @internal */
   decimal: (a: Decimal.Value) => Decimal;
+
   /** @internal */
   complex: (a: number | Complex, b?: number) => Complex;
 
@@ -529,6 +531,7 @@ export class ComputeEngine implements IComputeEngine {
     this.purge();
   }
 
+  /** @experimental */
   get timeLimit(): number {
     let scope = this.context;
     while (scope) {
@@ -537,6 +540,7 @@ export class ComputeEngine implements IComputeEngine {
     }
     return 2.0; // 2s
   }
+  /** @experimental */
   get iterationLimit(): number {
     let scope = this.context;
     while (scope) {
@@ -545,6 +549,7 @@ export class ComputeEngine implements IComputeEngine {
     }
     return 1024;
   }
+  /** @experimental */
   get recursionLimit(): number {
     let scope = this.context;
     while (scope) {
@@ -557,10 +562,10 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * If an unknown symbol is encountered, assume it should
    * be a variable in this domain.
-   * 
+   *
    * If set to `null`, unknown symbols will trigger an error.
-   * 
-   * **Default:** `"ExtendedRealNumber"` 
+   *
+   * **Default:** `"ExtendedRealNumber"`
    */
   get defaultDomain(): BoxedExpression | null {
     return this._defaultDomain;
@@ -585,6 +590,10 @@ export class ComputeEngine implements IComputeEngine {
     this._decimalTolerance = this.decimal(this._tolerance);
   }
 
+  /** Replace a number that is close to 0 with the exact integer 0.
+   *
+   * How close to 0 the number has to be to be considered 0 is determined by {@link tolerance}.
+   */
   chop(n: number): number;
   chop(n: Decimal): Decimal | 0;
   chop(n: Complex): Complex | 0;
@@ -786,11 +795,14 @@ export class ComputeEngine implements IComputeEngine {
    * This can occur if:
    * - an error has been signaled
    * - the time limit or memory limit has been exceeded
+   *
+   * @internal
    */
   shouldContinueExecution(): boolean {
     return this.deadline === undefined || this.deadline >= Date.now();
   }
 
+  /** @internal */
   checkContinueExecution(): void {
     if (!this.shouldContinueExecution()) {
       // @todo: should capture stack
@@ -846,6 +858,7 @@ export class ComputeEngine implements IComputeEngine {
     return;
   }
 
+  /** @internal */
   cache<T>(cacheName: string, build: () => T, purge: (T) => T | undefined): T {
     if (this._cache[cacheName] === undefined) {
       try {

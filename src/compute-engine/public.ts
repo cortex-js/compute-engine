@@ -1,3 +1,13 @@
+/**
+ * The most important classes are {@link ComputeEngine} and
+ * {@link BoxedExpression}.
+ *
+ * With `ComputeEngine` you create `BoxedExpression` objects. With
+ * `BoxedExpression` you simplify, evaluate and serialize expressions.
+ *
+ * @module ComputeEngine
+ */
+
 import type { Decimal } from 'decimal.js';
 import type { Complex } from 'complex.js';
 import type {
@@ -227,15 +237,27 @@ export interface BoxedExpression {
    *
    * Otherwise return a LaTeX representation of the expression.
    *
+   * @category Object Methods
    */
   valueOf(): number | string | [number, number];
-  /** From `Object.toString()`, return a LaTeX representation of the expression. */
+  /** From `Object.toString()`, return a LaTeX representation of the expression.
+   *
+   * @category Object Methods
+   */
   toString(): string;
-  /** From `Object.toJSON()`, equivalent to `JSON.stringify(this.json)` */
+  /** From `Object.toJSON()`, equivalent to `JSON.stringify(this.json)`
+   *
+   * @category Object Methods
+   */
   toJSON(): string;
-  /** From `Object.is()`. Equivalent to `expr.isSame()` */
+  /** From `Object.is()`. Equivalent to `expr.isSame()`
+   *
+   * @category Object Methods
+   *
+   */
   is(rhs: any): boolean;
 
+  /** @internal */
   get hash(): number;
 
   /** An optional short description of the symbol or function head.
@@ -301,38 +323,81 @@ export interface BoxedExpression {
 
   // ----- FUNCTION
 
-  /** `ops` is the list of arguments of the function, its "tail" */
+  /** `ops` is the list of arguments of the function, its "tail"
+   *
+   * @category Function Expression
+   *
+   */
   get ops(): null | BoxedExpression[];
 
   /** If a function, the number of operands, otherwise 0.
    *
+   *
    * Note that a function can have 0 operands, so to check if this expression
-   * is a function, check if `expr.tail !== null` instead. */
+   * is a function, check if `expr.tail !== null` instead.
+   *
+   *
+   * @category Function Expression
+   *
+   */
   get nops(): number;
 
-  /** First operand, i.e. first element of `this.tail` */
+  /** First operand, i.e. first element of `this.tail`
+   *
+   *
+   * @category Function Expression
+   *
+   *
+   */
   get op1(): BoxedExpression;
 
-  /** Second operand, i.e. second element of `this.tail` */
+  /** Second operand, i.e. second element of `this.tail`
+   *
+   *
+   * @category Function Expression
+   *
+   *
+   */
   get op2(): BoxedExpression;
 
-  /** Third operand, i.e. third element of `this.tail` */
+  /** Third operand, i.e. third element of `this.tail`
+   *
+   *
+   * @category Function Expression
+   *
+   *
+   */
   get op3(): BoxedExpression;
 
   // ----- DICTIONARY
 
   /** The keys of the dictionary.
    *
-   * If this expression not a dictionary, return `null` */
+   * If this expression not a dictionary, return `null`
+   *
+   * @category Dictionary Expression
+   *
+   */
   get keys(): IterableIterator<string> | null;
+
+  /**
+   *
+   * @category Dictionary Expression
+   */
   get keysCount(): number;
   /**
    * If this expression is a dictionary, return the value of the `key` entry.
+   *
+   * @category Dictionary Expression
+   *
    */
   getKey(key: string): BoxedExpression | undefined;
   /**
    * If this expression is a dictionary, return true if the dictionary has a
    * `key` entry.
+   *
+   * @category Dictionary Expression
+   *
    */
   hasKey(key: string): boolean;
 
@@ -347,6 +412,8 @@ export interface BoxedExpression {
    * If `machineValue` is not `null`, then `decimalValue`, `rationalValue`
    * and `complexValue` are `null.
    *
+   * @category Numeric Expression
+   *
    */
   get machineValue(): number | null;
 
@@ -355,6 +422,9 @@ export interface BoxedExpression {
    *
    * If `rationalValue` is not `[null, null]`, then `machineValue`, `decimalValue`
    * and `complexValue` are `null.
+   *
+   * @category Numeric Expression
+   *
    */
   get rationalValue(): [numer: number, denom: number] | [null, null];
 
@@ -365,6 +435,9 @@ export interface BoxedExpression {
    *
    * If `decimalValue` is not `null`, then `machineValue`
    * and `complexValue` are `null` and `rationalValue` is `[null, null]`.
+   *
+   * @category Numeric Expression
+   *
    */
   get decimalValue(): Decimal | null;
 
@@ -373,6 +446,9 @@ export interface BoxedExpression {
    *
    * If `complexValue` is not `null`, then `machineValue`, `rationalValue`
    * and `decimalValue` are `null.
+   *
+   * @category Numeric Expression
+   *
    *
    */
   get complexValue(): Complex | null;
@@ -393,6 +469,9 @@ export interface BoxedExpression {
    * If the value of this expression cannot be represented by a float,
    * return `null`.
    *
+   * @category Numeric Expression
+   *
+   *
    */
   get asFloat(): number | null;
 
@@ -405,12 +484,18 @@ export interface BoxedExpression {
    * to check for this, whether the value is a Decimal or a number.
    *
    * By default, "small" is less than 10,000.
+   *
+   * @category Numeric Expression
+   *
    */
   get asSmallInteger(): number | null;
 
   /**
    * If the value of this an expression is a small integer or a rational,
    * return this value. Otherwise, return `[null, null`].
+   *
+   * @category Numeric Expression
+   *
    */
   get asRational(): [number, number] | [null, null];
 
@@ -431,22 +516,36 @@ export interface BoxedExpression {
    *
    * If a symbol, this does take assumptions into account, that is `expr.sgn` will return
    * `1` if `isPositive` is `true`, even if this expression has no value
+   *
+   * @category Numeric Expression
+   *
    */
   get sgn(): -1 | 0 | 1 | undefined | null;
 
   // ----- SYMBOL
 
   /** If this expression is a symbol, return the name of the symbol as a string.
-   * Otherwise, return `null`. */
+   * Otherwise, return `null`.
+   *
+   * @category Symbol Expression
+   *
+   */
   get symbol(): string | null;
 
-  /**  Shortcut for `this.symbol === 'Missing'` */
+  /**  Shortcut for `this.symbol === 'Missing'`
+   *
+   * @category Symbol Expression
+   *
+   */
   get isMissing(): boolean;
 
   // ----- STRING
 
   /** If this expression is a string, return the value of the string.
    * Otherwise, return `null`.
+   *
+   * @category String Expression
+   *
    */
   get string(): string | null;
 
@@ -465,7 +564,11 @@ export interface BoxedExpression {
   // positively or negatively (i.e. "maybe").
   //
 
-  /** True if this domain is a subset of domain `d` */
+  /** True if this domain is a subset of domain `d`
+   *
+   * @category Expression Properties
+   *
+   */
   isSubsetOf(d: BoxedExpression | string): undefined | boolean;
 
   /** True if the value of this expression is a number.
@@ -474,15 +577,25 @@ export interface BoxedExpression {
    *
    * Note that in a fateful twist of cosmic irony, `NaN` ("Not a Number")
    * is a number.
+   *
+   * @category Expression Properties
    */
   get isNumber(): boolean | undefined;
 
-  /** The value of this expression is an element of the set ℤ: ...,-2, -1, 0, 1, 2... */
+  /** The value of this expression is an element of the set ℤ: ...,-2, -1, 0, 1, 2...
+   *
+   *
+   * @category Expression Properties
+   *
+   */
   get isInteger(): boolean | undefined;
 
   /** The value of this expression is an element of the set ℚ, p/q with p ∈ ℕ, q ∈ ℤ ⃰  q >= 1
    *
    * Note that every integer is also a rational.
+   *
+   *
+   * @category Expression Properties
    *
    */
   get isRational(): boolean | undefined;
@@ -495,18 +608,27 @@ export interface BoxedExpression {
    *
    * Transcendental numbers, such as \\( \pi \\) or \\( e \\) are not algebraic.
    *
+   *
+   * @category Expression Properties
+   *
    */
   get isAlgebraic(): boolean | undefined;
   /**
    * The value of this expression is real number: finite and not imaginary.
    *
    * `isFinite && !isImaginary`
+   *
+   *
+   * @category Expression Properties
    */
   get isReal(): boolean | undefined;
 
   /** Real or ±Infinity
    *
    * `isReal || isInfinity`
+   *
+   *
+   * @category Expression Properties
    */
   get isExtendedReal(): boolean | undefined;
 
@@ -515,21 +637,47 @@ export interface BoxedExpression {
    *
    * `isReal || isImaginary`
    *
+   *
+   * @category Expression Properties
+   *
    */
   get isComplex(): boolean | undefined;
 
-  /** `isReal || isImaginary || isInfinity` */
+  /** `isReal || isImaginary || isInfinity`
+   *
+   *
+   * @category Expression Properties
+   */
   get isExtendedComplex(): boolean | undefined;
 
-  /** The value of this expression is a number with a imaginary part */
+  /** The value of this expression is a number with a imaginary part
+   *
+   *
+   * @category Expression Properties
+   */
   get isImaginary(): boolean | undefined;
 
+  /**
+   * @category Expression Properties
+   */
   get isZero(): boolean | undefined;
+  /**
+   * @category Expression Properties
+   */
   get isNotZero(): boolean | undefined;
+  /**
+   * @category Expression Properties
+   */
   get isOne(): boolean | undefined;
+  /**
+   * @category Expression Properties
+   */
   get isNegativeOne(): boolean | undefined;
 
-  /** ±Infinity or Complex Infinity */
+  /** ±Infinity or Complex Infinity
+   *
+   * @category Expression Properties
+   */
   get isInfinity(): boolean | undefined;
   /**
    * "Not a Number".
@@ -539,21 +687,39 @@ export interface BoxedExpression {
    *
    * Note that if `isNaN` is true, `isNumber` is also true.
    *
+   * @category Expression Properties
+   *
    */
   get isNaN(): boolean | undefined;
 
-  /** Not ±Infinity and not NaN */
+  /** Not ±Infinity and not NaN
+   *
+   * @category Expression Properties
+   */
   get isFinite(): boolean | undefined;
 
+  /**
+   * @category Expression Properties
+   */
   get isEven(): boolean | undefined;
+  /**
+   * @category Expression Properties
+   */
   get isOdd(): boolean | undefined;
+  /**
+   * @category Expression Properties
+   */
   get isPrime(): boolean | undefined;
+  /**
+   * @category Expression Properties
+   */
   get isComposite(): boolean | undefined;
 
   /** Structural/symbolic equality (weak equality).
    *
    * `ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`
    *
+   * @category Relational Operator
    */
   isSame(rhs: BoxedExpression): boolean;
 
@@ -588,25 +754,51 @@ export interface BoxedExpression {
    * Numbers whose difference is less than `engine.tolerance` are
    * considered equal. This tolerance is set when the `engine.precision` is
    * changed to be such that the last two digits are ignored.
+   *
+   * @category Relational Operator
    */
   isEqual(rhs: BoxedExpression): boolean;
 
-  /** If the expressions cannot be compared, `undefined` is returned */
+  /** If the expressions cannot be compared, `undefined` is returned
+   *
+   * @category Relational Operator
+   */
   isLess(rhs: BoxedExpression): boolean | undefined;
+  /**
+   * @category Relational Operator
+   */
   isLessEqual(rhs: BoxedExpression): boolean | undefined;
+  /**
+   * @category Relational Operator
+   */
   isGreater(rhs: BoxedExpression): boolean | undefined;
+  /**
+   * @category Relational Operator
+   */
   isGreaterEqual(rhs: BoxedExpression): boolean | undefined;
 
-  /** The value of this expression is > 0, same as `isGreater(0)` */
+  /** The value of this expression is > 0, same as `isGreater(0)`
+   *
+   * @category Expression Properties
+   */
   get isPositive(): boolean | undefined;
 
-  /** The value of this expression is  >= 0, same as `isGreaterEqual(0)` */
+  /** The value of this expression is  >= 0, same as `isGreaterEqual(0)`
+   *
+   * @category Expression Properties
+   */
   get isNonNegative(): boolean | undefined;
 
-  /** The value of this expression is  < 0, same as `isLess(0)` */
+  /** The value of this expression is  < 0, same as `isLess(0)`
+   *
+   * @category Expression Properties
+   */
   get isNegative(): boolean | undefined;
 
-  /** The value of this expression is  <= 0, same as `isLessEqual(0)` */
+  /** The value of this expression is  <= 0, same as `isLessEqual(0)`
+   *
+   * @category Expression Properties
+   */
   get isNonPositive(): boolean | undefined;
 
   //
@@ -881,7 +1073,7 @@ export type Scope = {
 
   /** Signal `timeout` when the execution time for this scope is exceeded.
    * Time in seconds, default 2s.
-   * 
+   *
    */
   timeLimit?: number;
 
@@ -1532,15 +1724,16 @@ export interface IComputeEngine {
   /** The current scope */
   context: RuntimeScope;
 
-  /** Absolute time beyond which evaluation should not proceed */
+  /** Absolute time beyond which evaluation should not proceed
+   * @internal
+   */
   deadline?: number;
 
-  /** @alpha */
+  /** @experimental */
   readonly timeLimit: number;
-  /** @alpha */
+  /** @experimental */
   readonly iterationLimit: number;
-  /** @alpha */
-  /** @alpha */
+  /** @experimental */
   readonly recursionLimit: number;
   defaultDomain: null | BoxedExpression;
 
@@ -1553,7 +1746,9 @@ export interface IComputeEngine {
   chop(n: Complex): Complex | 0;
   chop(n: number | Decimal | Complex): number | Decimal | Complex;
 
+  /** @internal */
   decimal: (a: Decimal.Value) => Decimal;
+  /** @internal */
   complex: (a: number | Complex, b?: number) => Complex;
 
   set precision(p: number | 'machine');
@@ -1705,19 +1900,20 @@ export interface IComputeEngine {
    * The result may not be canonical.
    *
    */
-   parse(s: LatexString | string): BoxedExpression;
-   parse(s: null): null;
- 
-   /** Serialize a `BoxedExpression` or a `MathJSON` expression to
+  parse(s: LatexString | string): BoxedExpression;
+  parse(s: null): null;
+  parse(s: LatexString | string | null): null | BoxedExpression;
+
+  /** Serialize a `BoxedExpression` or a `MathJSON` expression to
    * a LaTeX string
    */
   serialize(expr: SemiBoxedExpression): LatexString;
 
   /**
-   * Options to control the serailization of MathJSON expression to LaTeX 
+   * Options to control the serailization of MathJSON expression to LaTeX
    * when using `expr.latex` or `ce.serialize()`.
-   * 
-   * 
+   *
+   *
    * {@inheritDoc  NumberFormattingOptions}
    * {@inheritDoc  ParseLatexOptions}
    * {@inheritDoc  SerializeLatexOptions}
@@ -1740,15 +1936,16 @@ export interface IComputeEngine {
    * Add an assumption.
    *
    * Note that the assumption is put into canonical form before being added.
-   * 
-   * @return - `contradiction` if the new assumption is incompatible with previous
+   *
+   * @param symbol - The symbol to make an assumption about
+   * @returns `contradiction` if the new assumption is incompatible with previous
    * ones.
    * - `tautology` if the new assumption is redundant with previous ones.
    * - `ok` if the assumption was successfully added to the assumption set.
    *
    *
    */
-   assume(
+  assume(
     symbol: LatexString | SemiBoxedExpression,
     domain: BoxedExpression
   ): AssumeResult;
@@ -1772,6 +1969,13 @@ export interface IComputeEngine {
   }): void;
   popScope(): void;
 
+  /**
+   * When `condition` is false, signal.
+   *
+   * condition - If `true`, do nothing. If `false`, signal.
+   *
+   * @experimental
+   */
   assert(
     condition: boolean,
     expr: BoxedExpression,

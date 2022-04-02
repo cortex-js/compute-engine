@@ -781,16 +781,22 @@ export interface Parser {
   matchSupsub(lhs: Expression | null): Expression | null;
 
   /**
-   * <primary> :=
-   * (<number> | <symbol> | <latex-command> | <function-call> | <matchfix-expr>)
-   * (<subsup> | <postfix-operator>)*
    *
-   * <matchfix-expr> :=
-   *  <matchfix-op-open> <expression> <matchfix-op-close>
+   * ```
+   *    <primary> :=
+   *       (<number> | <symbol> | <latex-command> | <function-call> | <matchfix-expr>)
+   *       (<subsup> | <postfix-operator>)*
+   * ```
    *
-   * <function-call> ::=
-   *  | <function><matchfix-op-group-open><expression>[',' <expression>]<matchfix-op-group-close>
+   * ```
+   *    <matchfix-expr> :=
+   *        <matchfix-op-open> <expression> <matchfix-op-close>
+   *```
    *
+   *```
+   *    <function-call> ::=
+   *      | <function><matchfix-op-group-open><expression>[',' <expression>]<matchfix-op-group-close>
+   *```
    * If not a primary, return `null` and do not advance the index.
    */
   matchPrimary(): Expression | null;
