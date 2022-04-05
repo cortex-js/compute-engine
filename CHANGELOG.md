@@ -3,7 +3,7 @@
 ### Improvements
 
 - Correctly parse tabular content (for example in
-  `\begin{patrix}...\end{pmatrix}`
+  `\begin{pmatrix}...\end{pmatrix}`
 - Correctly parse LaTeX groups, i.e. `{...}`
 - Ensure constructible trigonometric values are canonical
 - Correct and simplify evaluation loop for `simplify()`, `evaluate()` and `N()`.
