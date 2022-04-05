@@ -222,11 +222,18 @@ export class _Parser implements Parser {
   get peek(): LatexToken {
     if (this._tokens[this.index] === this._lastPeek) this._peekCounter += 1;
     else this._peekCounter = 0;
-    console.assert(
-      this._peekCounter < 1024,
-      'Infinite loop detected in the scanner'
-    );
-    if (this._peekCounter >= 1024) throw new Error('Infinite loop');
+    if (this._peekCounter >= 1024) {
+      console.error(
+        `Infinite loop detected while parsing "${this.latex(0)}" at ${
+          this._lastPeek
+        } (index ${this.index})`
+      );
+      throw new Error(
+        `Infinite loop detected while parsing "${this.latex(0)}" at ${
+          this._lastPeek
+        } (index ${this.index})`
+      );
+    }
     this._lastPeek = this._tokens[this.index];
     return this._tokens[this.index];
   }
@@ -1177,6 +1184,8 @@ export class _Parser implements Parser {
     let row: [Expression, ...Expression[]] = ['List'];
     let expr: Expression | null = null;
     while (!this.atTerminator(until)) {
+      this.skipSpace();
+
       if (this.match('&')) {
         // new column
         // Push even if expr is NULL (it represents a skipped column)
@@ -1193,12 +1202,16 @@ export class _Parser implements Parser {
         result.push(row as Expression);
         row = ['List'];
         expr = null;
+      } else {
+        expr = this.matchExpression({
+          ...until,
+          condition: (p) =>
+            p.peek === '&' || p.peek === '\\\\' || p.peek === '\\cr',
+        });
       }
     }
     // Capture any leftover row
-    if (row.length > 1) {
-      result.push(row as Expression);
-    }
+    if (row.length > 1) result.push(row as Expression);
 
     return result;
   }
@@ -1274,7 +1287,7 @@ export class _Parser implements Parser {
     // If the `lhs` is a symbol that has a function definition, do a
     // functional application
     const symbolName = symbol(rawLhs);
-    if (symbolName) {
+    if (symbolName && this.engine) {
       const def = this.engine.getFunctionDefinition(symbolName);
       if (def) {
         let ops: BoxedExpression[] = [];
@@ -1389,27 +1402,40 @@ export class _Parser implements Parser {
     const start = this.index;
 
     //
-    // 1. Is it a number?
+    // 1. Is it a group? (i.e. `{...}`)
     //
-    const num = this.matchNumber();
-    if (num) result = { num };
+
+    if (this.match('<{>')) {
+      result = this.matchExpression({ tokens: ['<}>'] });
+      this.match('<}>');
+    } else if (this.match('<}>')) {
+      // That's a syntax error, probably a missing `{`. Ignore it.
+    }
 
     //
-    // 2. Is it an enclosure, i.e. a matchfix expression?
+    // 2. Is it a number?
+    //
+    if (result === null) {
+      const num = this.matchNumber();
+      if (num) result = { num };
+    }
+
+    //
+    // 3. Is it an enclosure, i.e. a matchfix expression?
     //    (group fence, absolute value, integral, etc...)
     // (check before other latex commands)
     //
     if (result === null) result = this.matchEnclosure();
 
     //
-    // 3. Is it an environment?
+    // 4. Is it an environment?
     // `\begin{...}...\end{...}`
     // (check before other latex commands)
     //
     if (result === null) result = this.matchEnvironment();
 
     //
-    // 4. Is it a symbol, a LaTeX command or a function call?
+    // 5. Is it a symbol, a LaTeX command or a function call?
     //    `x` or `\pi'
     //    `f(x)` or `\sin(\pi)
     //    `\frac{1}{2}`
@@ -1417,7 +1443,7 @@ export class _Parser implements Parser {
     if (result === null) result = this.matchSymbol();
 
     //
-    // 5. Are there postfix operators ?
+    // 6. Are there postfix operators ?
     //
     if (result !== null) {
       result = this.decorate(result, start);
@@ -1435,7 +1461,7 @@ export class _Parser implements Parser {
     }
 
     //
-    // 5. Are there superscript or subfix operators?
+    // 7. Are there superscript or subfix operators?
     //
     if (result !== null) result = this.matchSupsub(result);
 
@@ -1455,7 +1481,7 @@ export class _Parser implements Parser {
   matchExpression(until?: Partial<Terminator>): Expression | null {
     const start = this.index;
     if (!until) until = { minPrec: 0 };
-    if (!until.minPrec) until = { ...until, minPrec: 0 };
+    if (until.minPrec === undefined) until.minPrec = 0;
 
     this.skipSpace();
 
@@ -1477,6 +1503,7 @@ export class _Parser implements Parser {
       let done = false;
       while (!this.atTerminator(until as Terminator) && !done) {
         this.skipSpace();
+
         let result = this.matchInfixOperator(lhs, until as Terminator);
         if (result === null) {
           // We've encountered something else than an infix operator
