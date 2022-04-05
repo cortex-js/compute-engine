@@ -171,7 +171,6 @@ export class LatexSyntax {
     this._serializer = new Serializer(
       this.options,
       this.dictionary,
-      this.computeEngine,
       this.onError
     );
     return this._serializer;

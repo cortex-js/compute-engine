@@ -28,7 +28,6 @@ import {
   isSymbolObject,
 } from '../../math-json/utils';
 import { WarningSignalHandler } from '../../common/signals';
-import { IComputeEngine } from '../public';
 
 function serializeMatchfix(
   serializer: Serializer,
@@ -98,17 +97,14 @@ function serializeOperator(
 export class Serializer {
   readonly onError: WarningSignalHandler;
   options: NumberFormattingOptions & SerializeLatexOptions;
-  readonly computeEngine?: IComputeEngine;
   readonly dictionary: IndexedLatexDictionary;
   level = -1;
   constructor(
     options: NumberFormattingOptions & SerializeLatexOptions,
     dictionary: IndexedLatexDictionary,
-    computeEngine: undefined | IComputeEngine,
     onError: WarningSignalHandler
   ) {
     this.options = options;
-    this.computeEngine = computeEngine;
     if (options.invisibleMultiply) {
       if (
         !/#1/.test(options.invisibleMultiply) ||
