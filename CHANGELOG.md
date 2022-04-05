@@ -1,7 +1,16 @@
 ## [Unreleased]
 
+### Improvements
+
+- Correctly parse tabular content (for example in
+  `\begin{patrix}...\end{pmatrix}`
+- Correctly parse LaTeX groups, i.e. `{...}`
 - Ensure constructible trigonometric values are canonical
 - Correct and simplify evaluation loop for `simplify()`, `evaluate()` and `N()`.
+- **#41** Preserve the parsed LaTeX verbatim for top-level expressions
+- **#40** Correctly calculate the synthetic LaTeX metadata for numbers
+- Only require Node LTS (16.14.2)
+- Improved documentation, including Dark Mode support
 
 ## 0.4.4
 
