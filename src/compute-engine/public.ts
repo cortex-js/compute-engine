@@ -29,11 +29,10 @@ import type {
   SerializeLatexOptions,
 } from './latex-syntax/public';
 
-// export type { Parser } from './latex-syntax/public';
 export * from './latex-syntax/public';
 
 /**
- * Metadata that can be associated with a BoxedExpression
+ * Metadata that can be associated with a `BoxedExpression`
  */
 
 export type Metadata = {
@@ -81,12 +80,16 @@ export type ReplaceOptions = {
   /** If true, apply replacement rules to all sub-expressions.
    * If false, only consider the top-level expression.
    *
-   * **Default**: true*/
+   * **Default**: `true`
+   */
   recursive?: boolean;
-  /** If true, stop after the first rule that matches.
+  /**
+   * If true, stop after the first rule that matches.
+   *
    * If false, apply all the remaining rules even after the first match.
    *
-   * **Default**: true*/
+   * **Default**: `true`
+   */
   once?: boolean;
   /**
    * If `iterationLimit` > 1, the rules will be repeatedly applied
@@ -94,7 +97,7 @@ export type ReplaceOptions = {
    *
    * Note that if `once` is true, `maxIterations` has no effect.
    *
-   * **Default**: 1
+   * **Default**: `1`
    */
   iterationLimit?: number;
 };
@@ -119,8 +122,8 @@ export type LatexString = string;
  *  A rule describes how to modify an expressions that matches a `lhs` pattern
  * into a new expressions matching `rhs`.
  *
- * `x-1` -> `1-x`
- * `(x+1)(x-1)` -> `x^2-1
+ * `x-1` \( \to \) `1-x`
+ * `(x+1)(x-1)` \( \to \) `x^2-1
  *
  * The `lhs` can be expressed as a LaTeX string or a MathJSON expression.
  *
@@ -196,14 +199,14 @@ export type JsonSerializationOptions = {
    * included in the MathJSON. If metadata is included, shorthand notation
    * is not used.
    *
-   * **Default**: `[]`
+   * **Default**: `[]`  (none)
    */
   metadata: ('all' | 'wikidata' | 'latex')[];
 
   /** If true, repeating decimals are detected and serialized accordingly
    * For example:
-   * - `1.3333333333333333` -> `1.(3)`
-   * - `0.142857142857142857142857142857142857142857142857142` -> `0.(1428571)`
+   * - `1.3333333333333333` \( \to \) `1.(3)`
+   * - `0.142857142857142857142857142857142857142857142857142` \( \to \) `0.(1428571)`
    *
    * **Default**: `true`
    */
@@ -1079,20 +1082,29 @@ export type Scope = {
   /** Signal `timeout` when the execution time for this scope is exceeded.
    * Time in seconds, default 2s.
    *
+   * @experimental
    */
   timeLimit?: number;
 
   /** Signal `out-of-memory` when the memory usage for this scope is exceeded.
    * Memory in Megabytes, default: 1Mb.
+   *
+   * @experimental
    */
   memoryLimit?: number;
 
   /** Signal `recursion-depth-exceeded` when the recursion depth for this
-   * scope is exceeded. */
+   * scope is exceeded.
+   *
+   * @experimental
+   */
   recursionLimit?: number;
 
   /** Signal `iteration-limit-exceeded` when the iteration limit for this
-   * scope is exceeded. Default: no limits.*/
+   * scope is exceeded. Default: no limits.
+   *
+   * @experimental
+   */
   iterationLimit?: number;
 };
 
@@ -1146,9 +1158,13 @@ export type BaseDefinition = {
 
   /**
    * The domain of this item.
-   * For dictionaries, this is the domain of all the items in the dictionary
-   * For strings, it's always 'String'
+   *
+   * For dictionaries, this is the domain of all the items in the dictionary.
+   *
+   * For strings, it's always 'String'.
+   *
    * For symbols, this is the domain of their value.
+   *
    * For functions, this is the domain of their result (aka codomain)
    */
   domain?: BoxedExpression | string;
@@ -1178,66 +1194,66 @@ export type FunctionDefinitionFlags = {
   /**  If true, the function is applied element by element to lists, matrices
    * and equations.
    *
-   * Default: false
+   * **Default**: `false`
    */
   threadable: boolean;
 
-  /** If true, [f, [f, a], b] simplifies to [f, a, b]
+  /** If true, `["f", ["f", a], b]` simplifies to `["f", a, b]`
    *
-   * Default: false
+   * **Default**: `false`
    */
   associative: boolean;
 
-  /** If true, `[f, a, b]` equals `[f, b, a]`. The canonical
+  /** If true, `["f", a, b]` equals `["f", b, a]`. The canonical
    * version of the function will order the arguments.
    *
-   * Default: false
+   * **Default**: `false`
    */
   commutative: boolean;
 
-  /** If true, when the function is univariate, `[f, ["Add", x, c]]` where `c`
-   * is constant, is simplified to `["Add", [f, x], c]`.
+  /** If true, when the function is univariate, `["f", ["Add", x, c]]` where `c`
+   * is constant, is simplified to `["Add", ["f", x], c]`.
    *
    * When the function is multivariate, additivity is considered only on the
-   * first argument: `[f, ["Add", x, c], y]` simplifies to `["Add", [f, x, y], c]`.
+   * first argument: `["f", ["Add", x, c], y]` simplifies to `["Add", ["f", x, y], c]`.
    *
-   * For example, `log` is additive.
+   * For example, `Log` is additive.
    *
-   * Default: false
+   * **Default**: `false`
    */
   // additive: boolean;
 
-  /** If true, when the function is univariate, `[f, ["Multiply", x, y]]`
-   * simplifies to `["Multiply", [f, x], [f, y]]`.
+  /** If true, when the function is univariate, `["f", ["Multiply", x, y]]`
+   * simplifies to `["Multiply", ["f", x], ["f", y]]`.
    *
    * When the function is multivariate, multiplicativity is considered only on the
-   * first argument: `[f, ["Multiply", x, y], z]` simplifies to
-   * `["Multiply", [f, x, z], [f, y, z]]`
+   * first argument: `["f", ["Multiply", x, y], z]` simplifies to
+   * `["Multiply", ["f", x, z], ["f", y, z]]`
    *
-   * Default: false
+   * **Default**: `false`
    */
   // multiplicative: boolean;
 
-  /** If true, when the function is univariate, `[f, ["Multiply", x, c]]`
-   * simplifies to `["Multiply", [f, x], c]` where `c` is constant
+  /** If true, when the function is univariate, `["f", ["Multiply", x, c]]`
+   * simplifies to `["Multiply", ["f", x], c]` where `c` is constant
    *
    * When the function is multivariate, multiplicativity is considered only on the
-   * first argument: `[f, ["Multiply", x, y], z]` simplifies to
-   * `["Multiply", [f, x, z], [f, y, z]]`
+   * first argument: `["f", ["Multiply", x, y], z]` simplifies to
+   * `["Multiply", ["f", x, z], ["f", y, z]]`
    *
-   * Default: false
+   * Default: `false`
    */
   // outtative: boolean;
 
-  /** If true, `[f, [f, x]]` simplifies to `[f, x]`.
+  /** If true, `["f", ["f", x]]` simplifies to `["f", x]`.
    *
-   * Default: false
+   * **Default**: `false`
    */
   idempotent: boolean;
 
-  /** If true, `[f, [f, x]]` simplifies to `x`.
+  /** If true, `["f", ["f", x]]` simplifies to `x`.
    *
-   * Default: false
+   * **Default**: `false`
    */
   involution: boolean;
 
@@ -1815,7 +1831,7 @@ export interface IComputeEngine {
    * Note that the result may not be a function, or may have a different
    * `head` than the one specified.
    *
-   * For example `ce.fn("Add", [ce.number(2),  ce.number(3)]))` -> 5
+   * For example `ce.fn("Add", [ce.number(2),  ce.number(3)]))` \( \to \) 5
    *
    */
   fn(
@@ -1948,7 +1964,9 @@ export interface IComputeEngine {
    * Note that the assumption is put into canonical form before being added.
    *
    * @param symbol - The symbol to make an assumption about
-   * @returns `contradiction` if the new assumption is incompatible with previous
+   *
+   * Returns:
+   * - `contradiction` if the new assumption is incompatible with previous
    * ones.
    * - `tautology` if the new assumption is redundant with previous ones.
    * - `ok` if the assumption was successfully added to the assumption set.
@@ -1982,7 +2000,7 @@ export interface IComputeEngine {
   /**
    * When `condition` is false, signal.
    *
-   * condition - If `true`, do nothing. If `false`, signal.
+   * - `condition` - If `true`, do nothing. If `false`, signal.
    *
    * @experimental
    */
