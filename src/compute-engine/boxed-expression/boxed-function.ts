@@ -640,7 +640,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     let expr: BoxedExpression | undefined;
 
-    if (def) expr = def.simplify?.(this.engine, tail);
+    if (def) {
+      if (def.simplify) expr = def.simplify(this.engine, tail);
+      else if (def.inert) expr = tail[0] ?? this.engine.symbol('Missing');
+    }
 
     if (!expr) expr = this.engine.fn(this._head, tail).canonical;
 
@@ -727,9 +730,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
 
     // 5.1/ No evaluate handler, we're done
-    if (def.evaluate === undefined)
+    if (def.evaluate === undefined) {
+      if (def.inert) return tail[0] ?? this.engine.symbol('Missing');
       return this.engine.fn(this._head, tail).canonical;
-
+    }
     // 5.2/ A lambda-function handler
     if (typeof def.evaluate !== 'function')
       return lambda(def.evaluate, tail).canonical;

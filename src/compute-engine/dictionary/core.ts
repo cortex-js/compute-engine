@@ -57,7 +57,6 @@ export const CORE_DICTIONARY: Dictionary[] = [
         description: '`BaseForm(expr, base=10)`',
         complexity: 9000,
         inert: true,
-        simplify: (_ce, ops) => ops[0],
       },
       {
         name: 'Delimiter',
@@ -67,8 +66,6 @@ export const CORE_DICTIONARY: Dictionary[] = [
           !ops[0] || ops[0].isMissing ? 'Nothing' : ops[0].domain,
         canonical: (ce, args) =>
           !args[0] || args[0].isMissing ? ce.symbol('Nothing') : args[0],
-        simplify: (_ce, ops) => ops[0],
-        evaluate: (_ce, ops) => ops[0],
       },
       {
         /**
@@ -84,6 +81,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
          */
         name: 'Error',
         complexity: 500,
+        inert: true,
         hold: 'all',
         evalDomain: (_ce, ops) =>
           !ops[0] || ops[0].isMissing ? 'Nothing' : ops[0].domain,
@@ -92,10 +90,10 @@ export const CORE_DICTIONARY: Dictionary[] = [
       {
         name: 'Style',
         complexity: 9000,
+        inert: true,
         evalDomain: (_ce, ops) =>
           !ops[0] || ops[0].isMissing ? 'Nothing' : ops[0].domain,
         // @todo: simplify: merge Style(Style(x, s1), s2),  Style(x) -> x
-        evaluate: (_ce, ops) => ops[0],
       },
     ],
   },
