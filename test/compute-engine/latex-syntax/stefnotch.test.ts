@@ -99,10 +99,14 @@ describe('STEFNOTCH #10', () => {
     `);
   });
 
-  test.skip('8/ \\begin{cases} 3 & x < 5 \\ 7 & else \\end{cases}', () => {
-    expect(
-      parse('\\begin{cases} 3 & x < 5 \\ 7 & else \\end{cases}')
-    ).toMatchInlineSnapshot();
+  test('8/ \\begin{cases} 3 & x < 5 \\\\ 7 & \\text{else} \\end{cases}', () => {
+    expect(parse('\\begin{cases} 3 & x < 5 \\\\ 7 & \\text{else} \\end{cases}'))
+      .toMatchInlineSnapshot(`
+      '[
+        "Piecewise",
+        ["List", ["List", 3, ["Less", "x", 5]], ["List", 7, "'else'"]]
+      ]'
+    `);
   });
 });
 

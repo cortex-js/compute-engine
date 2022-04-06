@@ -1229,12 +1229,15 @@ export class _Parser implements Parser {
       } else {
         expr = this.matchExpression({
           ...until,
-          condition: (p) =>
-            p.peek === '&' || p.peek === '\\\\' || p.peek === '\\cr',
+          condition: (p) => {
+            const peek = p.peek;
+            return peek === '&' || peek === '\\\\' || peek === '\\cr';
+          },
         });
       }
     }
-    // Capture any leftover row
+    // Capture any leftover columns or row
+    if (expr !== null) row.push(expr);
     if (row.length > 1) result.push(row as Expression);
 
     return result;
@@ -1249,11 +1252,13 @@ export class _Parser implements Parser {
         // @todo:parse optional and required arguments.
 
         const def = this._dictionary.environment.get(name);
-        if (def) return def.parse(this, [], []);
 
-        // Unknown environment. Attempt to parse as tabular
-        const expr = this.matchTabular(name);
-        if (expr !== null) return expr;
+        // If unknown environment, attempt to parse as tabular
+        const expr = def ? def.parse(this, [], []) : this.matchTabular(name);
+
+        this.skipSpace();
+        this.matchAll(['\\end', '<{>', ...name.split(''), '<}>']);
+        if (expr !== null) return this.decorate(expr, start);
       }
     }
 
