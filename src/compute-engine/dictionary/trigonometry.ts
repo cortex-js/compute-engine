@@ -20,7 +20,7 @@ const domainNumberToRealNumber = (
 ) => {
   if (!ops[0]) return null;
   const domain = ops[0].domain;
-  return domain.isSubsetOf('Number') ? ce.symbol('RealNumber') : null;
+  return domain.isSubsetOf('Number') ? ce.symbol('ExtendedRealNumber') : null;
 };
 const domainRealToRealComplexToComplex = (
   ce: IComputeEngine,
@@ -29,9 +29,9 @@ const domainRealToRealComplexToComplex = (
   if (!ops[0]) return null;
   const domain = ops[0].domain;
 
-  return domain.isSubsetOf('RealNumber')
+  return domain.isSubsetOf('ExtendedRealNumber')
     ? ce.symbol('RealNumber')
-    : domain.isSubsetOf('ComplexNumber')
+    : domain.isSubsetOf('ExtendedComplexNumber')
     ? ce.symbol('ComplexNumber')
     : null;
 };

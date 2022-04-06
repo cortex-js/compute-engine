@@ -210,18 +210,15 @@ export class BoxedFunction extends AbstractBoxedExpression {
 
     if (typeof def.evalDomain === 'function') {
       const result = def.evalDomain(this.engine, this._ops);
-      if (typeof result === 'string') return this.engine.domain(result);
-      return result ?? this.engine.domain('Nothing');
+      if (!result) return this.engine.domain('Nothing');
+      return this.engine.domain(result);
     }
 
     console.assert(def.evalDomain === undefined);
 
-    return (
-      def.domain ??
-      (def.numeric
-        ? this.engine.domain('Number')
-        : this.engine.domain('Nothing'))
-    );
+    if (def.domain) return def.domain;
+    if (def.numeric) return this.engine.domain('Number');
+    return this.engine.domain('Nothing');
   }
 
   isLess(rhs: BoxedExpression): boolean | undefined {

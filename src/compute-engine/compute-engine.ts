@@ -1159,7 +1159,9 @@ export class ComputeEngine implements IComputeEngine {
     domain: BoxedExpression | string,
     metadata?: Metadata
   ): BoxedExpression {
+    if (typeof domain !== 'string' && domain.symbol) domain = domain.symbol;
     if (typeof domain !== 'string') return domain;
+
     if (this._commonDomains[domain]) return this._commonDomains[domain]!;
     if (this._commonDomains[domain] === null) {
       this._commonDomains[domain] = boxDomain(this, domain, metadata);
