@@ -346,26 +346,23 @@ export class Serializer {
           //
           const def = this.dictionary.name.get(fnName);
           if (def) {
-            let result = '';
             // If there is a custom serializer function, use it.
-            if (typeof def.serialize === 'function') {
-              result = def.serialize(this, expr);
-            }
+            if (typeof def.serialize === 'function')
+              return def.serialize(this, expr);
+
             if (
-              !result &&
-              (def.kind === 'infix' ||
-                def.kind === 'postfix' ||
-                def.kind === 'prefix')
-            ) {
-              result = serializeOperator(this, expr, def);
-            }
-            if (!result && def.kind === 'matchfix') {
-              result = serializeMatchfix(this, expr, def);
-            }
-            if (!result && def.kind === 'symbol') {
-              result = this.serializeSymbol(expr, def);
-            }
-            return result;
+              def.kind === 'infix' ||
+              def.kind === 'postfix' ||
+              def.kind === 'prefix'
+            )
+              return serializeOperator(this, expr, def);
+
+            if (def.kind === 'matchfix')
+              return serializeMatchfix(this, expr, def);
+
+            if (def.kind === 'symbol') return this.serializeSymbol(expr, def);
+
+            return '';
           }
         }
 

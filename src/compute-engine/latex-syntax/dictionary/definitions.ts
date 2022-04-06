@@ -333,7 +333,7 @@ function makeIndexedEntry(
 
   if (result.kind === 'symbol' && isSymbolEntry(entry)) {
     result.arguments = entry.arguments ?? '';
-    result.precedence = entry.precedence ?? 0;
+    result.precedence = entry.precedence ?? 10000;
     result.optionalLatexArg = entry.optionalLatexArg ?? 0;
     result.requiredLatexArg = entry.requiredLatexArg ?? 0;
   }
@@ -350,7 +350,7 @@ function makeIndexedEntry(
   ) {
     if (trigger && (trigger[0] === '^' || trigger[0] === '_'))
       result.precedence = 720;
-    else result.precedence = entry.precedence ?? 0;
+    else result.precedence = entry.precedence ?? 10000;
   }
 
   if (result.kind === 'infix' && isInfixEntry(entry)) {
