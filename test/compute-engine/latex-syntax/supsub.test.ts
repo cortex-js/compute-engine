@@ -130,14 +130,12 @@ describe('SUPSUB', () => {
     `); // @todo: nope...
   });
   test('Accents', () => {
-    expect(parse('\\vec{x}')).toMatchInlineSnapshot(
-      `'["Error", "OverVector", "'syntax-error'", ["LatexForm", "'{x}'"]]'`
-    );
+    expect(parse('\\vec{x}')).toMatchInlineSnapshot(`'["OverVector", "x"]'`);
     expect(parse('\\vec{AB}')).toMatchInlineSnapshot(
-      `'["Error", "OverVector", "'syntax-error'", ["LatexForm", "'{AB}'"]]'`
+      `'["OverVector", ["Multiply", "A", "B"]]'`
     ); // @todo: nope...
     expect(parse('\\vec{AB}^{-1}')).toMatchInlineSnapshot(
-      `'["Error", "OverVector", "'syntax-error'", ["LatexForm", "'{AB}^{-1}'"]]'`
+      `'["Power", ["OverVector", ["Multiply", "A", "B"]], -1]'`
     );
   });
 });

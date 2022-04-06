@@ -940,7 +940,31 @@ export class _Parser implements Parser {
         if (typeof def.parse === 'function') {
           result = def.parse(this);
           if (result) return result;
-        } else return def.name!;
+        } else if (def.optionalLatexArg === 0 && def.requiredLatexArg === 0) {
+          return def.name!;
+        } else {
+          const optionalArgs: Expression[] = [];
+          let i = def.optionalLatexArg;
+          while (i !== 0) {
+            const arg = this.matchOptionalLatexArgument();
+            if (arg === null) break;
+            optionalArgs.push(arg);
+            i -= 1;
+          }
+          i = def.requiredLatexArg;
+          const requiredArgs: Expression[] = [];
+          while (i !== 0) {
+            const arg = this.matchRequiredLatexArgument();
+            if (arg === null) break;
+            requiredArgs.push(arg);
+            i -= 1;
+          }
+          if (requiredArgs.length === def.requiredLatexArg) {
+            return [def.name!, ...requiredArgs, ...optionalArgs];
+          }
+
+          return def.name!;
+        }
       }
     }
 
@@ -1423,14 +1447,14 @@ export class _Parser implements Parser {
     //
     // 3. Is it an enclosure, i.e. a matchfix expression?
     //    (group fence, absolute value, integral, etc...)
-    // (check before other latex commands)
+    // (check before other LaTeX commands)
     //
     if (result === null) result = this.matchEnclosure();
 
     //
     // 4. Is it an environment?
     // `\begin{...}...\end{...}`
-    // (check before other latex commands)
+    // (check before other LaTeX commands)
     //
     if (result === null) result = this.matchEnvironment();
 
@@ -1529,7 +1553,7 @@ export class _Parser implements Parser {
   }
 
   /**
-   * Add latex or other requested metadata to the expression
+   * Add LaTeX or other requested metadata to the expression
    */
   decorate(expr: Expression | null, start: number): Expression | null {
     if (expr === null) return null;

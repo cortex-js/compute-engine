@@ -6,9 +6,9 @@ describe('STEFNOTCH #9', () => {
       .toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Integral", "", "Nothing", "Nothing"],
+        ["Integral", "Missing", "Nothing", "Nothing"],
         "'syntax-error'",
-        ["LatexForm", "'{\\\\placeholder{⬚}}^{\\\\placeholder{⬚}}3x'"]
+        ["LatexForm", "'{⬚}}^{\\\\placeholder{⬚}}3x'"]
       ]'
     `);
   });
@@ -111,9 +111,14 @@ describe('STEFNOTCH #12', () => {
     expect(parse('e^{i\\pi\\text{nope!?\\lparen sum}}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Power", "ExponentialE", "Missing"],
+        [
+          "Multiply",
+          ["Power", "ExponentialE", "Missing"],
+          "ImaginaryUnit",
+          "Pi"
+        ],
         "'syntax-error'",
-        ["LatexForm", "'{i\\\\pi\\\\text{nope!?\\\\lparen sum}}'"]
+        ["LatexForm", "'\\\\text{nope!?\\\\lparen sum}}'"]
       ]'
     `);
   });
@@ -204,12 +209,26 @@ describe('STEFNOTCH #13', () => {
   });
 
   test('8/ a={displaystyle lim_{n\toinfin}a_n}', () => {
-    expect(parse('a={displaystyle lim_{n\toinfin}a_n}')).toMatchInlineSnapshot(`
+    expect(parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}'))
+      .toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Equal", "a", "Missing"],
+        [
+          "Equal",
+          "a",
+          [
+            "Subscript",
+            [
+              "Error",
+              "Missing",
+              "'unknown-command'",
+              ["LatexForm", "'\\\\lim'"]
+            ],
+            ["To", "n", {num: "+Infinity"}]
+          ]
+        ],
         "'syntax-error'",
-        ["LatexForm", "'{displaystyle lim_{n oinfin}a_n}'"]
+        ["LatexForm", "'a_n}'"]
       ]'
     `);
   });

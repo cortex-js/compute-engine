@@ -35,9 +35,7 @@ const ce = engine;
 // f = f.simplify();
 // console.log(f.toJSON());
 
-console.log(ce.parse('1/x').json);
-ce.jsonSerializationOptions.metadata = ['latex'];
-console.log(ce.parse('1/x').json);
+console.log(ce.parse('\\sqrt{3^2}').simplify().latex);
 
 //
 // BOXING

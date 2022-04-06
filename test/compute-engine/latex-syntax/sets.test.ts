@@ -76,39 +76,56 @@ describe('SERIALIZING SETS', () => {
 describe('PARSING SETS', () => {
   test('Set', () => {
     // Empty set
-    expect(parse('{}')).toMatchInlineSnapshot(`'"Nothing"'`);
+    expect(parse('\\{\\}')).toMatchInlineSnapshot(`
+      '[
+        "Error",
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
+        "'syntax-error'",
+        ["LatexForm", "'\\\\}'"]
+      ]'
+    `);
 
     // Finite set
-    expect(parse('{1, 2, 3}')).toMatchInlineSnapshot(
-      `'["Error", "Nothing", "'syntax-error'", ["LatexForm", "'{1, 2, 3}'"]]'`
-    );
+    expect(parse('\\{1, 2, 3\\}')).toMatchInlineSnapshot(`
+      '[
+        "Error",
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
+        "'syntax-error'",
+        ["LatexForm", "'1, 2, 3\\\\}'"]
+      ]'
+    `);
 
     // Infinite sets
-    expect(parse('{1, 2, 3...}')).toMatchInlineSnapshot(
-      `'["Error", "Nothing", "'syntax-error'", ["LatexForm", "'{1, 2, 3...}'"]]'`
-    );
-    expect(parse('{1, 2, 3, ...}')).toMatchInlineSnapshot(`
+    expect(parse('\\{1, 2, 3...\\}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        "Nothing",
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
         "'syntax-error'",
-        ["LatexForm", "'{1, 2, 3, ...}'"]
+        ["LatexForm", "'1, 2, 3...\\\\}'"]
       ]'
     `);
-    expect(parse('{...-2, -1, 0, 1, 2, 3...}')).toMatchInlineSnapshot(`
+    expect(parse('\\{1, 2, 3, ...\\}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        "Nothing",
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
         "'syntax-error'",
-        ["LatexForm", "'{...-2, -1, 0, 1, 2, 3...}'"]
+        ["LatexForm", "'1, 2, 3, ...\\\\}'"]
       ]'
     `);
-    expect(parse('{...-2, -1, 0}')).toMatchInlineSnapshot(`
+    expect(parse('\\{...-2, -1, 0, 1, 2, 3...\\}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        "Nothing",
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
         "'syntax-error'",
-        ["LatexForm", "'{...-2, -1, 0}'"]
+        ["LatexForm", "'...-2, -1, 0, 1, 2, 3...\\\\}'"]
+      ]'
+    `);
+    expect(parse('\\{...-2, -1, 0\\}')).toMatchInlineSnapshot(`
+      '[
+        "Error",
+        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
+        "'syntax-error'",
+        ["LatexForm", "'...-2, -1, 0\\\\}'"]
       ]'
     `);
   });

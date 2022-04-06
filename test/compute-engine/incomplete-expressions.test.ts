@@ -43,14 +43,9 @@ describe('basic', () => {
         ["LatexForm", "'}'"]
       ]'
     `);
-    expect(parse('\\frac{1}{2')).toMatchInlineSnapshot(`
-      '[
-        "Error",
-        ["Divide", 1, "Missing"],
-        "'syntax-error'",
-        ["LatexForm", "'{2'"]
-      ]'
-    `);
+    expect(parse('\\frac{1}{2')).toMatchInlineSnapshot(
+      `'["Multiply", ["Divide", 1, "Missing"], 2]'`
+    );
     expect(parse('\\sqrt{}')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
     expect(parse('\\sqrt{}{}')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
     expect(parse('\\sqrt')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);

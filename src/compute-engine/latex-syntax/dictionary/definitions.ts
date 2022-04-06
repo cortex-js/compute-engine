@@ -437,9 +437,6 @@ function makeIndexedEntry(
           const rhs = parser.matchExpression({ ...terminator, minPrec: prec });
           return rhs === null ? null : [head, rhs];
         };
-      } else {
-        // Symbol
-        result.parse = () => entry.name as Expression;
       }
     }
   }

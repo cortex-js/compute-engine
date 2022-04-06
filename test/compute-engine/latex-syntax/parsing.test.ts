@@ -4,9 +4,7 @@ describe('BASIC PARSING', () => {
   test('', () => {
     expect(parse('')).toMatchInlineSnapshot(`'"Nothing"'`);
     expect(parse('1')).toMatchInlineSnapshot(`'1'`);
-    expect(parse('2{xy}')).toMatchInlineSnapshot(
-      `'["Error", 2, "'syntax-error'", ["LatexForm", "'{xy}'"]]'`
-    ); // @todo: interpret as a group?
+    expect(parse('2{xy}')).toMatchInlineSnapshot(`'["Multiply", 2, "x", "y"]'`);
   });
 });
 
