@@ -2029,5 +2029,3 @@ export interface IComputeEngine {
   /** @internal */
   _unregister(expr: BoxedExpression): void;
 }
-
-export declare function getVars(expr: BoxedExpression): string[];

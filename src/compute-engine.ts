@@ -11,3 +11,5 @@ export * from './compute-engine/public';
 export { ComputeEngine } from './compute-engine/compute-engine';
 
 export const version = '{{SDK_VERSION}}';
+
+export { getVars } from './compute-engine/boxed-expression/utils';

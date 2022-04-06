@@ -7,6 +7,7 @@ import { SignalMessage, WarningSignal } from '../common/signals';
 import { LatexSyntax } from './latex-syntax/latex-syntax';
 import type {
   DictionaryCategory,
+  LatexDictionary,
   LatexDictionaryEntry,
   LatexString,
   NumberFormattingOptions,
@@ -624,6 +625,12 @@ export class ComputeEngine implements IComputeEngine {
         },
       });
     return this._latexSyntax;
+  }
+
+  static getLatexDictionary(
+    domain: DictionaryCategory | 'all' = 'all'
+  ): Readonly<LatexDictionary> {
+    return LatexSyntax.getDictionary(domain);
   }
 
   set costFunction(fn: ((expr: BoxedExpression) => number) | undefined) {
