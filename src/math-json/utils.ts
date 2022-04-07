@@ -130,15 +130,58 @@ export function nops(expr: Expression): number {
 
 export function symbol(expr: Expression | null): string | null {
   if (expr === null) return null;
-  if (typeof expr === 'string') {
-    if (expr.length >= 2 && expr[0] === "'" && expr[expr.length - 1] === "'") {
-      // It's a string literal, not a symbol
-      return null;
-    }
-    return expr;
+  const s = isSymbolObject(expr) ? expr.sym : expr;
+  if (typeof s !== 'string') return null;
+  if (s.length >= 2 && s[0] === "'" && s[s.length - 1] === "'") {
+    // It's a string literal, not a symbol
+    return null;
+  }
+  return s;
+}
+
+export function string(expr: Expression | null): string | null {
+  if (expr === null) return null;
+  const s = isSymbolObject(expr) ? expr.sym : expr;
+  if (typeof s !== 'string') return null;
+  if (s.length < 2 || s[0] !== "'" || s[s.length - 1] !== "'") {
+    // It's a symbol
+    return null;
+  }
+  return s.slice(1, -1);
+}
+
+function keyValuePair(
+  expr: Expression | null
+): null | [key: string, value: Expression] {
+  const h = head(expr);
+  if (h === 'KeyValuePair' || h === 'Tuple' || h === 'Pair') {
+    const key = string(op(expr, 1));
+    if (!key) return null;
+    return [key, op(expr, 2) ?? 'Nothing'];
   }
 
-  if (isSymbolObject(expr)) return expr.sym;
+  return null;
+}
+
+export function dictionary(
+  expr: Expression | null
+): null | Record<string, Expression> {
+  if (expr === null) return null;
+  if (typeof expr === 'object' && 'dict' in expr) return expr.dict;
+
+  const kv = keyValuePair(expr);
+  if (kv) return { [kv[0]]: kv[1] };
+
+  const h = head(expr);
+  if (h === 'List' || h === 'Dictionary') {
+    const result = {};
+    for (let i = 1; i < nops(expr); i++) {
+      const kv = keyValuePair(op(expr, i));
+      if (kv) result[kv[0]] = kv[1];
+    }
+
+    return result;
+  }
 
   return null;
 }
@@ -282,12 +325,6 @@ export function mapArgs<T>(expr: Expression, fn: (x: Expression) => T): T[] {
   return result;
 }
 
-export function dictionary(
-  expr: Expression
-): { [key: string]: Expression } | null {
-  if (typeof expr === 'object' && 'dict' in expr) return expr.dict;
-  return null;
-}
 /**
  * Return num as a number if it's a valid JSON number (that is
  * a valid JavaScript number but not NaN or +/-Infinity) or
