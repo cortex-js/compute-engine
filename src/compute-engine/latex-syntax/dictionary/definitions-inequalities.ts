@@ -339,6 +339,13 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     precedence: 260,
   },
   {
+    trigger: ['\\iff'],
+    kind: 'infix',
+    parse: 'Equivalent',
+    associativity: 'right',
+    precedence: 260,
+  },
+  {
     name: 'MuchLess',
     trigger: ['\\ll'],
     kind: 'infix',
