@@ -11,7 +11,7 @@ import { BoxedDictionary } from './boxed-dictionary';
 import { BoxedFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
-import { Domain } from './boxed-domain';
+import { _Domain } from './boxed-domain';
 import { complexAllowed, useDecimal } from './utils';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
 import { reducedRational } from '../numerics/numeric';
@@ -231,21 +231,6 @@ export function boxNumber(
   }
 
   return null;
-}
-
-/**
- * Note that `boxDomain()` should only be called from `ComputeEngine`
- */
-export function boxDomain(
-  ce: IComputeEngine,
-  dom: string | BoxedExpression,
-  metadata?: Metadata
-): BoxedExpression {
-  if (typeof dom === 'string') return new Domain(ce, dom, metadata);
-  if (dom instanceof Domain) return dom;
-  if (!dom.symbol) throw new Error('Unexpected domain expression' + dom.json);
-
-  return new Domain(ce, dom.symbol, metadata);
 }
 
 function boxHold(ce: IComputeEngine, expr: SemiBoxedExpression) {

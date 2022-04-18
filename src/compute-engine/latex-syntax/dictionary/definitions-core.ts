@@ -301,9 +301,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string => {
       const args = tail(expr);
       if (args === null || args.length === 0) return '\\text{}';
-      return (
-        '\\text{' + args.map((x) => serializer.serialize(x)).join('') + '}'
-      );
+      return joinLatex([
+        '\\text{',
+        args.map((x) => serializer.serialize(x)).join(''),
+        '}',
+      ]);
     },
   },
   {

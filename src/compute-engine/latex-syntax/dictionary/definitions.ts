@@ -45,14 +45,6 @@ export type SymbolEntry = CommonEntry & {
   // The 'precedence' of symbols is used to determine appropriate wrapping
   precedence: number;
 
-  // If this is the symbol for a function (e.g. `\\sqrt`, `\\sin`, `f`)
-  // arguments describe what kind of arguments are expected to follow:
-  // 'group': a sequence of arguments in parens
-  // `implicit`: a single argument, with optional parens
-  // `''`: no arguments expected to follow, not a function-like symbol
-  // (could be `\\pi`, for example).
-  arguments: 'group' | 'implicit' | '';
-
   optionalLatexArg: number;
   requiredLatexArg: number;
 
@@ -332,7 +324,6 @@ function makeIndexedEntry(
   }
 
   if (result.kind === 'symbol' && isSymbolEntry(entry)) {
-    result.arguments = entry.arguments ?? '';
     result.precedence = entry.precedence ?? 10000;
     result.optionalLatexArg = entry.optionalLatexArg ?? 0;
     result.requiredLatexArg = entry.requiredLatexArg ?? 0;

@@ -1,4 +1,4 @@
-import { BoxedExpression, Dictionary } from '../public';
+import { BoxedExpression, Dictionary, DomainExpression } from '../public';
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { fromDigits } from '../numerics/numeric';
 
@@ -7,7 +7,7 @@ import { fromDigits } from '../numerics/numeric';
 export const CORE_DICTIONARY: Dictionary[] = [
   {
     symbols: [
-      { name: 'Missing', domain: 'Nothing' },
+      { name: 'Missing', domain: 'Anything' },
       { name: 'Nothing', domain: 'Nothing' },
     ],
   },
@@ -18,30 +18,55 @@ export const CORE_DICTIONARY: Dictionary[] = [
     functions: [
       {
         name: 'KeyValuePair',
+        domain: [
+          'Function',
+          'String',
+          'Anything',
+          ['Tuple', 'String', 'Anything'],
+        ],
         description: 'A key/value pair',
         complexity: 8200,
         canonical: (ce, args) => ce.tuple(args),
       },
       {
         name: 'Single',
+        domain: ['Function', 'Anything', ['Tuple', 'Anything']],
         description: 'A tuple with a single element',
         complexity: 8200,
         canonical: (ce, args) => ce.tuple(args),
       },
       {
         name: 'Pair',
+        domain: [
+          'Function',
+          'Anything',
+          'Anything',
+          ['Tuple', 'Anything', 'Anything'],
+        ],
         description: 'A tuple of two elements',
         complexity: 8200,
         canonical: (ce, args) => ce.tuple(args),
       },
       {
         name: 'Triple',
+        domain: [
+          'Function',
+          'Anything',
+          'Anything',
+          'Anything',
+          ['Tuple', 'Anything', 'Anything', 'Anything'],
+        ],
         description: 'A tuple of three elements',
         complexity: 8200,
         canonical: (ce, args) => ce.tuple(args),
       },
       {
         name: 'Tuple',
+        domain: [
+          'Function',
+          ['Some', 'Anything'],
+          ['Tuple', ['Some', 'Anything']],
+        ],
         description: 'A fixed number of heterogeneous elements',
         complexity: 8200,
       },
@@ -54,16 +79,20 @@ export const CORE_DICTIONARY: Dictionary[] = [
     functions: [
       {
         name: 'BaseForm',
+        domain: ['Function', 'Anything', ['Optional', 'Integer'], 'String'],
         description: '`BaseForm(expr, base=10)`',
         complexity: 9000,
         inert: true,
       },
       {
         name: 'Delimiter',
+        domain: (ce, args): DomainExpression => {
+          if (!args[0]) return 'Nothing';
+          const dom = args[0].domain.domainExpression;
+          return ['Function', dom, ['Optional', 'String'], dom];
+        },
         complexity: 9000,
         inert: true,
-        evalDomain: (_ce, ops) =>
-          !ops[0] || ops[0].isMissing ? 'Nothing' : ops[0].domain,
         canonical: (ce, args) =>
           !args[0] || args[0].isMissing ? ce.symbol('Nothing') : args[0],
       },
@@ -80,38 +109,55 @@ export const CORE_DICTIONARY: Dictionary[] = [
          * for example, the argument will be a `LatexForm` expression.
          */
         name: 'Error',
+        domain: (ce, args): DomainExpression => {
+          if (!args[0]) return 'Nothing';
+          const dom = args[0].domain.domainExpression;
+          return [
+            'Function',
+            dom,
+            ['Optional', 'String'],
+            ['Optional', 'Expression'],
+            dom,
+          ];
+        },
         complexity: 500,
         inert: true,
         hold: 'all',
-        evalDomain: (_ce, ops) =>
-          !ops[0] || ops[0].isMissing ? 'Nothing' : ops[0].domain,
         evaluate: (_ce, ops) => ops[0].evaluate(),
       },
       {
         name: 'Style',
+        domain: (ce, args): DomainExpression => {
+          if (!args[0]) return 'Nothing';
+          const dom = args[0].domain.domainExpression;
+          return [
+            'Function',
+            dom,
+            ['Optional', ['Head', 'Dictionary']], // @todo
+            dom,
+          ];
+        },
         complexity: 9000,
         inert: true,
-        evalDomain: (_ce, ops) =>
-          !ops[0] || ops[0].isMissing ? 'Nothing' : ops[0].domain,
         // @todo: simplify: merge Style(Style(x, s1), s2),  Style(x) -> x
       },
     ],
   },
   {
     functions: [
-      { name: 'Apply', evalDomain: () => 'Anything' },
-      { name: 'About', evalDomain: () => 'Dictionary' },
+      { name: 'Apply', domain: 'Function' },
+      { name: 'About', domain: 'Function' },
       /** Create a local scope. First argument is a dictionary of local variables.
        * They are evaluated in the context of the parent scope. The second argument
        * is an expression to be evaluated in the context of the new scope.
        * ["Block", ["List", ["Equal", "x", 1]], [...]]
        */
-      { name: 'Block', evalDomain: () => 'Anything' },
+      { name: 'Block', domain: 'Function' },
       /** Return the domain of an expression */
-      { name: 'Domain', evalDomain: () => 'Domain' },
+      { name: 'Domain', domain: 'Function' },
       {
         name: 'Evaluate',
-        domain: 'Anything',
+        domain: 'Function',
         hold: 'all',
         evaluate: (ce, ops) => ops[0].evaluate(),
       },
@@ -165,7 +211,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'Head',
-        domain: 'Expression',
+        domain: 'Function',
         evaluate: (ce, ops) => {
           const op1 = ops[0];
           if (typeof op1.head === 'string') return ce.symbol(op1.head);
@@ -174,7 +220,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'Html',
-        domain: 'String',
+        domain: ['Function', 'Expression', 'String'],
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.string('');
           // @todo if head(arg[0]) === 'LatexString', call MathLive renderToMarkup()
@@ -184,6 +230,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
 
       {
         name: 'IntegerString',
+        domain: ['Function', 'Integer', ['Optional', 'Integer'], 'String'],
         description: `\`IntegerString(n, base=10)\` \
       return a string representation of the integer \`n\` in base \`base\`.`,
         // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
@@ -234,13 +281,13 @@ export const CORE_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Lambda',
+        domain: 'Function',
         wikidata: 'Q567612',
         hold: 'all',
-        evalDomain: () => 'Anything',
       },
       {
         name: 'Latex',
-        domain: 'LatexString',
+        domain: 'Function',
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce._fn('LatexString', []);
           return ce._fn('LatexString', [
@@ -250,7 +297,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'LatexString',
-        domain: 'LatexString',
+        domain: 'Function',
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce._fn('LatexString', []);
           return ce._fn('LatexString', [
@@ -260,7 +307,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'LatexTokens',
-        evalDomain: () => 'LatexString',
+        domain: 'Function',
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce._fn('LatexString', []);
           return ce._fn('LatexString', [
@@ -270,7 +317,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'Parse',
-        domain: 'Anything',
+        domain: 'Function',
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.symbol('Nothing');
           const latex = joinLatex(ops.map((x) => ce.serialize(x)));
@@ -279,7 +326,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'String',
-        domain: 'String',
+        domain: ['Function', ['Some', 'Anything'], 'String'],
         threadable: true,
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.string('');
@@ -293,7 +340,7 @@ export const CORE_DICTIONARY: Dictionary[] = [
         complexity: 500,
         description:
           'Construct a new symbol with a name formed by concatenating the arguments',
-        domain: 'Symbol',
+        domain: ['Function', ['Some', 'Anything'], 'Symbol'],
         threadable: true,
         // evalDomain: () => 'Symbol',
         evaluate: (ce, ops) => {
@@ -321,19 +368,20 @@ export const CORE_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'SymbolName',
+        domain: ['Function', 'Anything', 'String'],
         evaluate: (ce, ops) =>
           ops[0].symbol ? ce.string(ops[0].symbol) : ce.symbol('Nothing'),
       },
       {
         name: 'Tail',
-        evalDomain: () => 'List',
+        domain: ['Function', 'Expression', ['List', 'Expression]']],
         evaluate: (ce, ops) => ce._fn('List', ops[0].ops ?? []),
       },
       {
         name: 'Timing',
         description:
           '`Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation',
-        domain: 'Pair',
+        domain: ['Function', 'Expression', ['Tuple', 'Expression', 'Number']],
         evaluate: (ce, ops) => {
           if (!ops[1] || ops[1].isMissing) {
             // Evaluate once

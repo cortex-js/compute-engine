@@ -4,6 +4,7 @@ import { getWildcardName } from '../rules';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
+  Domain,
   IComputeEngine,
   LatexString,
   Metadata,
@@ -49,7 +50,7 @@ export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
     return 'Pattern';
   }
 
-  get domain(): BoxedExpression {
+  get valueDomain(): Domain {
     return this.engine.domain('Pattern');
   }
   get isCanonical(): boolean {

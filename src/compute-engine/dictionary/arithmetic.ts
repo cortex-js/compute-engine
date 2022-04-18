@@ -71,12 +71,11 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
     functions: [
       {
         name: 'Abs',
-        domain: 'Number',
+        domain: ['Function', 'ExtendedRealNumber', 'ExtendedRealNumber'],
         range: [0, +Infinity],
         wikidata: 'Q3317982', // magnitude 'Q120812 (for reals)
         threadable: true,
         idempotent: true,
-        numeric: true,
         complexity: 1200,
         simplify: (ce, ops) => processAbs(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processAbs(ce, ops[0], 'evaluate'),
@@ -90,8 +89,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         commutative: true,
         threadable: true,
         idempotent: true,
-        evalDomain: domainAdd,
-        numeric: true,
+        domain: 'NumericFunction',
         complexity: 1300,
         canonical: (ce, args) => canonicalAdd(ce, args),
         simplify: (ce, ops) => processAdd(ce, ops, 'simplify'),
@@ -102,10 +100,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       {
         name: 'Ceil',
         description: 'Rounds a number up to the next largest integer',
-        numeric: true,
         complexity: 1250,
-        evalDomain: (ce, ops) =>
-          ops[0].isNumber ? ce.symbol('Integer') : ce.symbol('Nothing'),
+        domain: 'NumericFunction',
         evaluate: (ce, ops) => {
           const op1 = ops[0];
           if (op1.decimalValue) return ce.number(op1.decimalValue.ceil());
@@ -121,10 +117,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         associative: true,
         threadable: true,
         idempotent: true,
-        numeric: true,
         complexity: 1200,
-        evalDomain: (ce, ops) =>
-          ops[0].isNumber ? ops[0].domain : ce.symbol('Nothing'),
+        domain: 'NumericFunction',
         N: (ce, ops) => {
           const op1 = ops[0];
           if (op1.decimalValue) return ce.number(ce.chop(op1.decimalValue));
@@ -139,15 +133,14 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         // This function is converted during boxing, so unlikely to encounter
         name: 'Complex',
         wikidata: 'Q11567',
-        domain: 'ComplexNumber',
+        domain: 'NumericFunction',
         complexity: 500,
       },
 
       {
         name: 'Divide',
         wikidata: 'Q1226939',
-        domain: 'Number',
-        numeric: true,
+        domain: 'NumericFunction',
         complexity: 2500,
         // - if numer product of numbers, or denom product of numbers,
         // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
@@ -156,10 +149,9 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Exp',
-        domain: 'Number',
+        domain: 'NumericFunction',
         wikidata: 'Q168698',
         threadable: true,
-        numeric: true,
         complexity: 3500,
         // Exp(x) -> e^x
         canonical: (ce, args) => ce.power(ce.symbol('ExponentialE'), args[0]),
@@ -168,16 +160,14 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       {
         name: 'Erf',
         description: 'Complementary Error Function',
-        domain: 'Number',
-        numeric: true,
+        domain: 'NumericFunction',
         complexity: 7500,
       },
 
       {
         name: 'Erfc',
         description: 'Complementary Error Function',
-        domain: 'Number',
-        numeric: true,
+        domain: 'NumericFunction',
         complexity: 7500,
       },
 
@@ -185,13 +175,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         name: 'Factorial',
         description: 'The factorial function',
         wikidata: 'Q120976',
-        numeric: true,
         complexity: 9000,
-        evalDomain: (ce, ops) => {
-          if (ops[0].isInteger && ops[0].isPositive)
-            return ce.symbol('Integer');
-          return ce.symbol('ComplexNumber');
-        },
+        domain: 'NumericFunction',
         evaluate: (ce, ops) => {
           const n = ops[0].asSmallInteger;
           if (n !== null && n >= 0) {
@@ -209,9 +194,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Floor',
-        domain: 'Number',
         wikidata: 'Q56860783',
-        numeric: true,
+        domain: ['Function', 'ExtendedRealNumber', 'ExtendedRealNumber'],
         complexity: 1250,
         evaluate: (ce, ops) => {
           if (ops[0].decimalValue)
@@ -226,9 +210,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Gamma',
-        domain: 'Number',
         wikidata: 'Q190573',
-        numeric: true,
+        domain: ['Function', 'Number', 'Number'],
         complexity: 8000,
         N: (ce, ops) => {
           if (ops[0].decimalValue)
@@ -243,8 +226,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'LogGamma',
-        domain: 'Number',
-        numeric: true,
+        domain: ['Function', 'Number', 'Number'],
         complexity: 8000,
         N: (ce, ops) => {
           if (ops[0].decimalValue)
@@ -261,9 +243,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       {
         name: 'Ln',
         description: 'Natural Logarithm',
-        domain: 'Number',
+        domain: ['Function', 'Number', 'Number'],
         wikidata: 'Q204037',
-        numeric: true,
         complexity: 4000,
         N: (ce, ops) => {
           if (ops[0].decimalValue) return ce.number(ops[0].decimalValue.log());
@@ -277,9 +258,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       {
         name: 'Log',
         description: 'Log(b, z) = Logarithm of base b',
-        domain: 'Number',
         wikidata: 'Q11197',
-        numeric: true,
+        domain: ['Function', 'Number', 'Number', 'Number'],
         complexity: 4100,
         N: (ce, ops) => {
           const exponent = ops[0];
@@ -310,9 +290,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       {
         name: 'Lb',
         description: 'Base-2 Logarithm',
-        domain: 'Number',
+        domain: ['Function', 'Number', 'Number'],
         wikidata: 'Q581168',
-        numeric: true,
         complexity: 4100,
         N: (ce, ops) => {
           const exponent = ops[0];
@@ -330,9 +309,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       {
         name: 'Lg',
         description: 'Base-10 Logarithm',
-        domain: 'Number',
+        domain: ['Function', 'Number', 'Number'],
         wikidata: 'Q966582',
-        numeric: true,
         complexity: 4100,
         N: (ce, ops) => {
           const exponent = ops[0];
@@ -350,12 +328,11 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Multiply',
-        domain: 'Number',
+        domain: 'NumericFunction',
         wikidata: 'Q40276',
         associative: true,
         commutative: true,
         idempotent: true,
-        numeric: true,
         complexity: 2100,
         canonical: (ce, args) => canonicalMultiply(ce, args),
         simplify: (ce, ops) => processMultiply(ce, ops, 'simplify'),
@@ -366,9 +343,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       {
         name: 'Negate',
         description: 'Additive Inverse',
-        domain: 'Number',
         wikidata: 'Q715358',
-        numeric: true,
+        domain: ['Function', 'Number', 'Number'],
         complexity: 2000,
         canonical: (_ce, args) => canonicalNegate(args[0]),
         simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
@@ -385,10 +361,9 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Power',
-        domain: 'Number',
+        domain: ['Function', 'Number', 'Number', 'Number'],
         wikidata: 'Q33456',
         commutative: false,
-        numeric: true,
         complexity: 3500,
         canonical: (ce, args) =>
           args[0] && args[1]
@@ -407,8 +382,12 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Rational',
-        domain: 'RationalNumber',
-        numeric: true,
+        domain: [
+          'Function',
+          'Number',
+          ['Optional', 'Number'],
+          'RationalNumber',
+        ],
         complexity: 2400,
         canonical: (ce, args) =>
           args.length === 2
@@ -452,8 +431,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Root',
-        domain: 'Number',
-        numeric: true,
+        domain: ['Function', 'Number', 'RationalNumber', 'Number'],
         complexity: 3200,
         canonical: (ce, args) => {
           const exp = ce.inverse(args[1]);
@@ -482,8 +460,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Round',
-        domain: 'Number',
-        numeric: true,
+        domain: ['Function', 'Number', 'Number'],
         complexity: 1250,
         N: (ce, ops) => {
           if (ops[0].decimalValue)
@@ -498,9 +475,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Sign',
-        domain: 'Number',
+        domain: ['Function', 'Number', 'Integer'],
         range: [-1, 1],
-        numeric: true,
         complexity: 1200,
         simplify: (ce, ops) => {
           const s = ops[0].sgn;
@@ -528,8 +504,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       {
         name: 'SignGamma',
         description: 'The sign of the gamma function: -1 or +1',
-        domain: 'Number',
-        numeric: true,
+        domain: ['Function', 'Number', 'Integer'],
         complexity: 7900,
         range: [-1, 1],
         // @todo
@@ -537,9 +512,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       {
         name: 'Sqrt',
         description: 'Square Root',
-        domain: 'Number',
+        domain: ['Function', 'Number', 'Number'],
         wikidata: 'Q134237',
-        numeric: true,
         complexity: 3000,
         canonical: (ce, args) =>
           canonicalPower(ce, args[0], ce.HALF) ??
@@ -553,9 +527,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Square',
-        domain: 'Number',
+        domain: ['Function', 'Number', 'Number'],
         wikidata: 'Q3075175',
-        numeric: true,
         complexity: 3100,
         canonical: (ce, args) =>
           canonicalPower(ce, args[0], ce.TWO) ??
@@ -588,6 +561,7 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
          * - `x_{n+1}` ->  `Subscript(x, n+1)`
          */
         name: 'Subscript',
+        domain: ['Function', 'Anything', 'Anything', 'Anything'],
         // The last (subscript) argument can include a delimiter that
         // needs to be interpreted. Without the hold, it would get
         // removed during canonicalization.
@@ -631,9 +605,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'Subtract',
-        domain: 'Number',
+        domain: ['Function', 'Number', 'Number', 'Number'],
         wikidata: 'Q40754',
-        numeric: true,
         complexity: 1350,
         canonical: (ce, args) => {
           if (args.length === 0) return ce.symbol('Nothing');
@@ -783,13 +756,11 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
     functions: [
       {
         name: 'PreIncrement',
-        domain: 'Number',
-        numeric: true,
+        domain: ['Function', 'Number', 'Number'],
       },
       {
         name: 'PreDecrement',
-        domain: 'Number',
-        numeric: true,
+        domain: ['Function', 'Number', 'Number'],
       },
     ],
   },

@@ -1,6 +1,19 @@
-## 0.5.0 
+## [Unreleased]
 
- **Release Date:** 2022-04-05
+### Improvements
+
+- Parse more cases of tabular environments
+- Handle simplify and evaluate of inert functions by default
+- Avoid unnecessary wrapping of functins when serializing LaTeX
+- Parse arguments of LaTeX commands (e.g. `\vec{}`)
+- **#42** Export static `ComputeEngine.getLatexDictionary`
+- Parse multi-character constants and variables, e.g. `\mathit{speed}` and
+  `\mathrm{radius}`
+- Parse/serialize some LaTeX styling commands: `\displaystyle`, `\tiny` and more
+
+## 0.5.0
+
+**Release Date:** 2022-04-05
 
 ### Improvements
 

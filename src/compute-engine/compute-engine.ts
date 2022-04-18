@@ -38,8 +38,10 @@ import {
   JsonSerializationOptions,
   ComputeEngineStats,
   Metadata,
+  Domain,
+  DomainExpression,
 } from './public';
-import { box, boxDomain, boxNumber } from './boxed-expression/box';
+import { box, boxNumber } from './boxed-expression/box';
 import {
   setCurrentContextDictionary,
   getDefaultDictionaries,
@@ -60,6 +62,8 @@ import { canonicalAdd } from './dictionary/arithmetic-add';
 import { canonicalDivide } from './dictionary/arithmetic-divide';
 import { BoxedSymbol } from './boxed-expression/boxed-symbol';
 import { BoxedDictionary } from './boxed-expression/boxed-dictionary';
+import { boxDomain, _Domain } from './boxed-expression/boxed-domain';
+import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expression';
 
 /**
  *
@@ -128,11 +132,11 @@ export class ComputeEngine implements IComputeEngine {
     [key: string]: {
       value: any;
       build: () => any;
-      purge: (v: any) => void;
+      purge: (v: unknown) => void;
     };
   } = {};
 
-  private _stats: ComputeEngineStats & { [key: string]: any };
+  private _stats: ComputeEngineStats & { [key: string]: unknown };
 
   private _cost?: (expr: BoxedExpression) => number;
 
@@ -141,7 +145,7 @@ export class ComputeEngine implements IComputeEngine {
   /** The domain of unknown symbols. If `null` unknown symbols do not have a
    * definition automatically associated with them.
    */
-  private _defaultDomain: null | BoxedExpression;
+  private _defaultDomain: null | Domain;
 
   private _commonSymbols: { [symbol: string]: null | BoxedExpression } = {
     True: null,
@@ -170,7 +174,7 @@ export class ComputeEngine implements IComputeEngine {
     9: null,
     10: null,
   };
-  private _commonDomains: { [dom: string]: null | BoxedExpression } = {
+  private _commonDomains: { [dom: string]: null | Domain } = {
     Anything: null,
     Nothing: null,
     Boolean: null,
@@ -190,6 +194,17 @@ export class ComputeEngine implements IComputeEngine {
     PositiveInteger: null,
     TranscendentalNumber: null,
     PositiveNumber: null,
+    Function: null, // (Anything^n) -> Anything
+    NumericFunction: null, // (Number^n) -> Number
+    RealFunction: null, // (ExtendedRealNumber^n) -> ExtendRealNumber
+    TrigonometricFunction: null, // (ComplexNumber) -> ComplexNumber
+    HyperbolicFunction: null,
+    LogicOperator: null, // (Boolean, Boolean) -> Boolean
+    Predicate: null, // (Anything^n) -> MaybeBoolean
+    RelationalOperator: null, // (Anything, Anything) -> MaybeBoolean
+    Expression: null, // () -> Anything
+    BooleanExpression: null, // () -> MaybeBoolean
+    NumericExpression: null, // () -> Number
   };
 
   private _latexDictionary?: readonly LatexDictionaryEntry[];
@@ -568,10 +583,10 @@ export class ComputeEngine implements IComputeEngine {
    *
    * **Default:** `"ExtendedRealNumber"`
    */
-  get defaultDomain(): BoxedExpression | null {
+  get defaultDomain(): Domain | null {
     return this._defaultDomain;
   }
-  set defaultDomain(domain: BoxedExpression | string | null) {
+  set defaultDomain(domain: Domain | string | null) {
     if (domain === null) this._defaultDomain = null;
     else this._defaultDomain = this.domain(domain);
   }
@@ -670,21 +685,46 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Return the definition for a function matching this head.
+   * Return the definition for a function matching this head and
+   * these arguments.
    *
    * Start looking in the current scope, than up the scope chain.
    */
-  getFunctionDefinition(head: string): undefined | BoxedFunctionDefinition {
+  getFunctionDefinition(
+    head: string,
+    args?: BoxedExpression[]
+  ): undefined | BoxedFunctionDefinition {
+    if (!args) {
+      let scope = this.context;
+      while (scope) {
+        const defs = scope.dictionary?.functions.get(head);
+        if (defs) return defs[0];
+        scope = scope.parentScope;
+      }
+      return undefined;
+    }
+
+    const sig = this.domain([
+      'Function',
+      ...args?.map((x) => x.domain.json as DomainExpression),
+    ]);
+
     let scope = this.context;
-    let defs: undefined | BoxedFunctionDefinition[] = undefined;
-    while (scope && !defs) {
-      defs = scope.dictionary?.functions.get(head);
+    while (scope) {
+      const defs = scope.dictionary?.functions.get(head);
+      if (defs)
+        for (const def of defs) {
+          if (def.domain) {
+            if (typeof def.domain === 'function') {
+              const domain = this.domain(def.domain(this, args));
+              if (domain && sig.isSubdomainOf(domain)) return def;
+            } else if (sig.isSubdomainOf(def.domain)) return def;
+          }
+        }
+
       scope = scope.parentScope;
     }
 
-    if (defs) return defs[0];
-
-    // If no matching definition
     return undefined;
   }
 
@@ -1156,19 +1196,23 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedSymbol(this, sym, metadata);
   }
   domain(
-    domain: BoxedExpression | string,
+    domain: BoxedExpression | DomainExpression | Domain,
     metadata?: Metadata
-  ): BoxedExpression {
-    if (typeof domain !== 'string' && domain.symbol) domain = domain.symbol;
-    if (typeof domain !== 'string') return domain;
-
-    if (this._commonDomains[domain]) return this._commonDomains[domain]!;
-    if (this._commonDomains[domain] === null) {
-      this._commonDomains[domain] = boxDomain(this, domain, metadata);
-      return this._commonDomains[domain]!;
+  ): Domain {
+    if (domain instanceof _Domain) return domain;
+    if (domain instanceof AbstractBoxedExpression && domain.symbol)
+      domain = domain.symbol;
+    if (typeof domain === 'string') {
+      if (this._commonDomains[domain] === null)
+        this._commonDomains[domain] = boxDomain(this, domain, metadata);
+      if (this._commonDomains[domain]) this._commonDomains[domain];
     }
 
-    return boxDomain(this, domain, metadata);
+    // @todo: could do some kind of translation from Expression to DomainExpression...?
+    if (domain instanceof AbstractBoxedExpression)
+      return boxDomain(this, 'Anything');
+
+    return boxDomain(this, domain as DomainExpression | Domain, metadata);
   }
   number(
     value:

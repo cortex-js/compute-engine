@@ -11,6 +11,7 @@ import {
   Substitution,
   Metadata,
   PatternMatchOption,
+  Domain,
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonFunction } from './serialize';
@@ -82,8 +83,11 @@ export class BoxedDictionary extends AbstractBoxedExpression {
     return false;
   }
 
-  get domain(): BoxedExpression {
-    return this.engine.domain('Collection');
+  get domain(): Domain {
+    const result: SemiBoxedExpression[] = ['Dictionary'];
+    for (const [k, v] of this._value) result.push(['Tuple', k, v.domain]);
+
+    return this.engine.domain(result);
   }
 
   get json(): Expression {

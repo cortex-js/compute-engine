@@ -1,7 +1,18 @@
 import { LatexDictionary, Serializer } from '../public';
 
-import { LIST, op, head, tail, getSequence } from '../../../math-json/utils';
+import {
+  LIST,
+  op,
+  head,
+  tail,
+  getSequence,
+  dictionary,
+  string,
+  machineValue,
+  symbol,
+} from '../../../math-json/utils';
 import { Expression } from '../../../math-json/math-json-format';
+import { joinLatex } from '../tokenizer';
 
 export const DEFINITIONS_OTHERS: LatexDictionary = [
   {
@@ -99,7 +110,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       if (!sub || !sup) return null;
       let rhs = parser.matchRequiredLatexArgument() ?? 'Nothing';
       if (rhs !== 'Nothing') {
-        const arg = parser.matchArguments('group') ?? 'Nothing';
+        const arg = parser.matchArguments('enclosure') ?? 'Nothing';
         rhs = [rhs, ...arg];
       }
       return ['PartialDerivative', rhs, sub, sup] as Expression;
@@ -197,6 +208,252 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     trigger: ['\\overgroup'],
     requiredLatexArg: 1,
   },
+
+  {
+    trigger: ['\\displaystyle'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return [
+        'Style',
+        ...arg,
+        ['KeyValuePair', "'display'", "'block'"],
+      ] as Expression;
+    },
+  },
+  {
+    trigger: ['\\textstyle'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return [
+        'Style',
+        ...arg,
+        ['KeyValuePair', "'display'", "'inline'"],
+      ] as Expression;
+    },
+  },
+  {
+    trigger: ['\\scriptstyle'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return [
+        'Style',
+        ...arg,
+        ['KeyValuePair', "'display'", "'script'"],
+      ] as Expression;
+    },
+  },
+  {
+    trigger: ['\\scriptscriptstyle'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return [
+        'Style',
+        ...arg,
+        ['KeyValuePair', "'display'", "'scriptscript'"],
+      ] as Expression;
+    },
+  },
+
+  {
+    trigger: ['\\tiny'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 1]] as Expression;
+    },
+  },
+  {
+    trigger: ['\\scriptsize'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 2]] as Expression;
+    },
+  },
+  {
+    trigger: ['\\footnotesize'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 3]] as Expression;
+    },
+  },
+  {
+    trigger: ['\\small'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 4]] as Expression;
+    },
+  },
+  {
+    trigger: ['\\normalsize'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 5]] as Expression;
+    },
+  },
+  {
+    trigger: ['\\large'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 6]] as Expression;
+    },
+  },
+  {
+    trigger: ['\\Large'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 7]] as Expression;
+    },
+  },
+  {
+    trigger: ['\\LARGE'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 8]] as Expression;
+    },
+  },
+  {
+    trigger: ['\\huge'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 9]] as Expression;
+    },
+  },
+  {
+    trigger: ['\\Huge'],
+    parse: (parser) => {
+      const arg = parser.matchArguments('group');
+      if (arg === null) return null;
+      return ['Style', ...arg, ['KeyValuePair', "'size'", 10]] as Expression;
+    },
+  },
+
+  {
+    name: 'Style',
+    serialize: (serializer, expr): string => {
+      let result = serializer.serialize(op(expr, 1));
+
+      const dict = dictionary(op(expr, 2));
+      if (dict === null) return result;
+
+      if (string(dict.display) === 'block')
+        result = joinLatex(['{\\displaystyle', result, '}']);
+      else if (string(dict.display) === 'inline')
+        result = joinLatex(['{\\textstyle', result, '}']);
+      else if (string(dict.display) === 'script')
+        result = joinLatex(['{\\scriptstyle', result, '}']);
+      else if (string(dict.display) === 'scriptscript')
+        result = joinLatex(['{\\scriptscriptstyle', result, '}']);
+
+      const v = machineValue(dict.size);
+      if (v !== null && v >= 1 && v <= 10) {
+        result = joinLatex([
+          '{',
+          {
+            1: '\\tiny',
+            2: '\\scriptsize',
+            3: '\\footnotesize',
+            4: '\\small',
+            5: '\\normalsize',
+            6: '\\large',
+            7: '\\Large',
+            8: '\\LARGE',
+            9: '\\huge',
+            10: '\\Huge',
+          }[v]!,
+          result,
+          '}',
+        ]);
+      }
+      return result;
+    },
+  },
+  {
+    trigger: ['\\!'],
+    parse: () => ['HorizontalSpacing', 'Nothing', -3] as Expression,
+  },
+  {
+    trigger: ['\\ '],
+    parse: () => ['HorizontalSpacing', 'Nothing', 6] as Expression,
+  },
+  {
+    trigger: ['\\:'],
+    parse: () => ['HorizontalSpacing', 'Nothing', 4] as Expression,
+  },
+  {
+    trigger: ['\\enskip'],
+    parse: () => ['HorizontalSpacing', 'Nothing', 9] as Expression,
+  },
+  {
+    trigger: ['\\quad'],
+    parse: () => ['HorizontalSpacing', 'Nothing', 18] as Expression,
+  },
+  {
+    trigger: ['\\qquad'],
+    parse: () => ['HorizontalSpacing', 'Nothing', 36] as Expression,
+  },
+  {
+    trigger: ['\\,'],
+    parse: () => ['HorizontalSpacing', 'Nothing', 3] as Expression,
+  },
+  {
+    trigger: ['\\;'],
+    parse: () => ['HorizontalSpacing', 'Nothing', 5] as Expression,
+  },
+  {
+    trigger: ['\\enspace'],
+    parse: () => ['HorizontalSpacing', 'Nothing', 9] as Expression,
+  },
+  {
+    name: 'HorizontalSpacing',
+    serialize: (serializer, expr): string => {
+      const content = op(expr, 1);
+      if (symbol(content) === 'Nothing') {
+        const v = machineValue(op(expr, 2));
+        if (v === null) return '';
+        return (
+          {
+            '-3': '\\!',
+            6: '\\ ',
+            3: '\\,',
+            4: '\\:',
+            5: '\\;',
+            9: '\\enspace',
+            18: '\\quad',
+            36: '\\qquad',
+          }[v] ?? ''
+        );
+      }
+      // @todo: handle op(expr,2) == 'op', 'bin', etc...
+      return '';
+    },
+  },
+  // if (
+  //   [
+  //     '\\!',
+  //     '\\:',
+  //     '\\enskip',
+  //     '\\quad',
+  //     '\\,',
+  //     '\\;',
+  //     '\\enspace',
+  //     '\\qquad',
+  //     '\\selectfont',
+  //   ].includes(token)
+  // ) {
+  //   return 'skip';
+  // }
 
   // {
   //     name: '',

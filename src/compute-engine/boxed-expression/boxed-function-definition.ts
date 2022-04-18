@@ -7,6 +7,8 @@ import {
   CompiledExpression,
   SemiBoxedExpression,
   RuntimeScope,
+  Domain,
+  DomainExpression,
 } from '../public';
 import { DEFAULT_COMPLEXITY } from './order';
 
@@ -15,15 +17,17 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
   description?: string | string[];
   wikidata?: string;
   scope: RuntimeScope;
-  domain: BoxedExpression;
+  domain:
+    | Domain
+    | ((
+        ce: IComputeEngine,
+        args: BoxedExpression[]
+      ) => Domain | DomainExpression);
   threadable: boolean;
   associative: boolean;
   commutative: boolean;
   idempotent: boolean;
   involution: boolean;
-  numeric: boolean;
-  logic: boolean;
-  relationalOperator: boolean;
   pure: boolean;
   inert: boolean;
 
@@ -48,10 +52,6 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     args: BoxedExpression[]
   ) => BoxedExpression | undefined;
 
-  evalDomain?: (
-    ce: IComputeEngine,
-    args: BoxedExpression[]
-  ) => BoxedExpression | string | null;
   evalDimension?: (
     ce: IComputeEngine,
     args: BoxedExpression[]
@@ -62,24 +62,18 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
   order?: (expr: BoxedExpression) => SemiBoxedExpression;
 
   constructor(ce: IComputeEngine, def: FunctionDefinition) {
-    const numeric = def.numeric ?? false;
+    const domain = def.domain
+      ? typeof def.domain === 'function'
+        ? def.domain
+        : ce.domain(def.domain)
+      : ce.domain('Function');
     const hold = def.hold ?? 'none';
     const idempotent = def.idempotent ?? false;
     const involution = def.involution ?? false;
 
-    // a/ if it's numeric, it can't have a 'hold' argument
-    if (numeric && hold !== 'none')
-      throw new Error(
-        `Function Definition "${def.name}": unexpected 'hold' attribute on a 'numeric' function`
-      );
     if (idempotent && involution)
       throw new Error(
         `Function Definition "${def.name}": the 'idempotent' and 'involution' flags are mutually exclusive in function `
-      );
-
-    if (def.domain && def.evalDomain)
-      throw new Error(
-        `Function definition "${def.name}" should include either 'domain' or 'evalDomain', not both `
       );
 
     this.name = def.name;
@@ -92,9 +86,6 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     this.commutative = def.commutative ?? false;
     this.idempotent = idempotent;
     this.involution = involution;
-    this.numeric = numeric;
-    this.logic = def.logic ?? false;
-    this.relationalOperator = def.relationalOperator ?? false;
     this.inert = def.inert ?? false;
     this.pure = def.pure ?? true;
     this.complexity = def.complexity ?? DEFAULT_COMPLEXITY;
@@ -103,11 +94,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     this.sequenceHold = def.sequenceHold ?? false;
     this.range = def.range;
 
-    this.domain = def.domain
-      ? ce.domain(def.domain)
-      : def.numeric
-      ? ce.domain('Number')
-      : ce.domain('Anything');
+    this.domain = domain;
 
     this.canonical = def.canonical;
     this.simplify = def.simplify;
@@ -117,13 +104,11 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
       ? def.evaluate
       : ce.box(def.evaluate).canonical;
     this.N = def.N;
-    this.evalDomain = def.evalDomain;
     this.evalDimension = def.evalDimension;
     this.sgn = def.sgn;
     this.compile = def.compile;
   }
   _purge() {
-    this.domain._purge();
     return undefined;
   }
 }

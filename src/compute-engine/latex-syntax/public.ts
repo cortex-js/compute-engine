@@ -253,6 +253,7 @@ export type SymbolEntry = BaseEntry & {
 
   /**
    * Indicate if this symbol can be followed by arguments.
+   *
    * The presence of arguments will indicate that the arguments should be
    * applied to the symbol. Otherwise, the invisible operator is applied
    * to the symbol and the arguments.
@@ -260,14 +261,14 @@ export type SymbolEntry = BaseEntry & {
    * If `arguments` is `"group"`:
    *
    * "f(x)" -> `["f", "x"]`
-   * "f x" -> `["multiply", "f", "x"]`
+   * "f x" -> `["Multiply", "f", "x"]`
    *
    * If `arguments` is `""`:
    *
-   * "f(x)" -> `["multiply", "f", ["group", "x"]]`
-   * "f x" -> `["multiply", "f", "x"]`
+   * "f(x)" -> `["Multiply", "f", "x"]`
+   * "f x" -> `["Multiply", "f", "x"]`
    *
-   * If `arguments` is `"group/primary"` and the symbol is followed either
+   * If `arguments` is `"implicit"` and the symbol is followed either
    * by a group or by a primary (prefix + symbol + subsupfix + postfix).
    * Used for trig functions. i.e. `\sin x` vs `\sin(x)`:
    *
@@ -275,9 +276,9 @@ export type SymbolEntry = BaseEntry & {
    * "f x" -> `["f", "x"]`
    *
    */
-  arguments?: 'group' | 'implicit' | '';
+  // arguments?: 'group' | 'implicit' | '';
+
   /**
-   * Applicable when `kind` is `"symbol"`.
    *
    * If a LaTeX command (i.e. the trigger starts with `\`, e.g. `\sqrt`)
    * indicates the number of optional arguments expected (indicate with
@@ -289,7 +290,6 @@ export type SymbolEntry = BaseEntry & {
   optionalLatexArg?: number;
 
   /**
-   * Applicable when `kind` is `"symbol"`.
    *
    * If a LaTeX command (i.e. the trigger starts with `\`, e.g. `\frac`)
    * indicates the number of required arguments expected (indicated with
@@ -308,7 +308,6 @@ export type SymbolEntry = BaseEntry & {
  */
 export type DefaultEntry = BaseEntry & {
   precedence?: number;
-  arguments?: 'group' | 'implicit' | '';
   optionalLatexArg?: number;
   requiredLatexArg?: number;
   parse?: Expression | SymbolParseHandler;
@@ -411,25 +410,25 @@ export type ParseLatexOptions = {
   parseNumbers: boolean;
 
   /**
-   * The `parseUnknownToken`  function is invoked when a token (`a`,
-   * `\alpha`...) is encountered at a position where a symbol or a function
-   * could be parsed.
+   * This handler is invoked when the parser encounter a set of tokens
+   * at a position that could be a symbol or function.
    *
-   * If it returns `symbol` or `function`, the token is interpreted as a symbol
-   * or function, respectively.
+   * The `symbol` argument is one or more tokens.
    *
-   * If a `function` and the token is followed by an apply function operator
-   * (typically, parentheses), parse them as arguments to the function.
+   * The handler can return:
    *
-   * If `skip`, the token is skipped as if it was not present. This is
-   * convenient for purely presentational commands, such as `\displaystyle`.
+   * - `symbol` to indicate the string represent a constant or variable.
    *
-   * If `error`, an error condition is raised.
+   * - `function` to indicate the string is a function name. If an apply
+   * function operator (typically, parentheses) follow, parse them as arguments
+   * to the function.
+   *
+   * - `error`, an error condition is raised.
    */
-  parseUnknownToken: (
-    token: LatexToken,
+  parseUnknownSymbol: (
+    symbol: string,
     parser: Parser
-  ) => 'symbol' | 'function' | 'skip' | 'error';
+  ) => 'symbol' | 'function' | 'unknown';
 
   /**
    * If true, the expression will be decorated with the LaTeX
@@ -760,16 +759,20 @@ export interface Parser {
   /** If the next tokens correspond to an optional LaTeX argument,
    * enclosed with `[` and `]` return the content of the argument
    * as an expression and advance the index past the closing `]`.
+   *
    * Otherwise, return `null`.
    */
   matchOptionalLatexArgument(): Expression | null;
   matchRequiredLatexArgument(): Expression | null;
   /**
-   * 'group' : will look for an argument inside a pair of `()`
-   * 'implicit': either an expression inside a pair of `()`, or just a primary
-   *  (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
+   * - 'enclosure' : will look for an argument inside an enclosure (an open/close fence)
+   * - 'group': arguments follow directly the symbol, until an end of group token `<}>`
+   * - 'implicit': either an expression inside a pair of `()`, or just a primary
+   *    (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
    */
-  matchArguments(kind: '' | 'group' | 'implicit'): Expression[] | null;
+  matchArguments(
+    kind: '' | 'group' | 'implicit' | 'enclosure'
+  ): Expression[] | null;
 
   /** If matches the normalized open delimiter, returns the
    * expected closing delimiter.

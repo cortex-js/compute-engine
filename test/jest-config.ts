@@ -102,7 +102,7 @@ class CortexConsole extends CustomConsole {
   }
 }
 
-function recursiveSerialize(x: any): string {
+function recursiveSerialize(x: unknown): string {
   if (x === null) return 'null';
   if (
     typeof x === 'object' &&

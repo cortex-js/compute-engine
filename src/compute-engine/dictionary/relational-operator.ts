@@ -14,10 +14,9 @@ export const RELOP_DICTIONARY: Dictionary = {
   functions: [
     {
       name: 'Equal',
-      domain: 'MaybeBoolean',
+      domain: 'RelationalOperator',
       commutative: true,
       complexity: 11000,
-      relationalOperator: true,
       evaluate: (ce, ops) => {
         if (ops.length < 2) return ce.symbol('True');
         let lhs: BoxedExpression | undefined = undefined;
@@ -33,11 +32,10 @@ export const RELOP_DICTIONARY: Dictionary = {
     },
     {
       name: 'NotEqual',
-      domain: 'MaybeBoolean',
       wikidata: 'Q28113351',
       commutative: true,
       complexity: 11000,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       evaluate: (ce, ops) => {
         if (ops.length < 2) return ce.symbol('False');
         let lhs: BoxedExpression | undefined = undefined;
@@ -53,9 +51,8 @@ export const RELOP_DICTIONARY: Dictionary = {
     },
     {
       name: 'Less',
-      domain: 'MaybeBoolean',
       complexity: 11000,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       evaluate: (ce, ops) => {
         if (ops.length < 2) return ce.symbol('True');
         let lhs: BoxedExpression | undefined = undefined;
@@ -74,16 +71,14 @@ export const RELOP_DICTIONARY: Dictionary = {
     },
     {
       name: 'NotLess',
-      domain: 'MaybeBoolean',
       complexity: 11000,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('Less', args)]),
     },
     {
       name: 'Greater',
-      domain: 'MaybeBoolean',
       complexity: 11000,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Less', args.reverse()),
 
       evaluate: (ce, ops) => {
@@ -104,16 +99,14 @@ export const RELOP_DICTIONARY: Dictionary = {
     },
     {
       name: 'NotGreater',
-      domain: 'MaybeBoolean',
       complexity: 11000,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('Greater', args)]),
     },
     {
       name: 'LessEqual',
-      domain: 'MaybeBoolean',
       complexity: 11000,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       evaluate: (ce, ops) => {
         if (ops.length < 2) return ce.symbol('True');
         let lhs: BoxedExpression | undefined = undefined;
@@ -132,16 +125,14 @@ export const RELOP_DICTIONARY: Dictionary = {
     },
     {
       name: 'NotLessNotEqual',
-      domain: 'MaybeBoolean',
       complexity: 11000,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('LessEqual', args)]),
     },
     {
       name: 'GreaterEqual',
-      domain: 'MaybeBoolean',
       complexity: 11000,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('LessEqual', args.reverse()),
       evaluate: (ce, ops) => {
         if (ops.length < 2) return ce.symbol('True');
@@ -161,106 +152,92 @@ export const RELOP_DICTIONARY: Dictionary = {
     },
     {
       name: 'NotGreaterNotEqual',
-      domain: 'MaybeBoolean',
       complexity: 11000,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('GreaterEqual', args)]),
     },
     {
       name: 'TildeFullEqual',
       description: 'Indicate isomorphism, congruence and homotopic equivalence',
-      domain: 'MaybeBoolean',
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
     },
     {
       name: 'NotTildeFullEqual',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('TildeFullEqual', args)]),
     },
     {
       name: 'TildeEqual',
       description: 'Approximately or asymptotically equal',
-      domain: 'MaybeBoolean',
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       complexity: 11000,
       // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
     },
     {
       name: 'NotTildeEqual',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('TildeEqual', args)]),
     },
     {
       name: 'Approx',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
     },
     {
       name: 'NotApprox',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('Approx', args)]),
     },
     {
       name: 'ApproxEqual',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
     },
     {
       name: 'NotApproxEqual',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('ApproxEqual', args)]),
     },
     {
       name: 'ApproxNotEqual',
-      domain: 'MaybeBoolean',
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       complexity: 11100,
       // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
     },
     {
       name: 'NotApproxNotEqual',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('ApproxNotEqual', args)]),
     },
     {
       name: 'Precedes',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
     },
     {
       name: 'NotPrecedes',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('Precedes', args)]),
     },
     {
       name: 'Succeeds',
-      domain: 'MaybeBoolean',
+      domain: 'RelationalOperator',
       // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
     },
     {
       name: 'NotSucceeds',
-      domain: 'MaybeBoolean',
       complexity: 11100,
-      relationalOperator: true,
+      domain: 'RelationalOperator',
       canonical: (ce, args) => ce._fn('Not', [ce._fn('Succeeds', args)]),
     },
   ],

@@ -1,5 +1,5 @@
 import { Complex } from 'complex.js';
-import { BoxedExpression, IComputeEngine } from '../public';
+import { BoxedExpression, Domain, IComputeEngine } from '../public';
 import {
   complexAllowed,
   getImaginaryCoef,
@@ -64,14 +64,14 @@ export function canonicalAdd(
 }
 
 export function domainAdd(
-  ce: IComputeEngine,
+  _ce: IComputeEngine,
   args: BoxedExpression[]
-): BoxedExpression | string {
-  let dom: BoxedExpression | string = 'Nothing';
+): Domain | string | null {
+  let dom: Domain | string | null = null;
   for (const arg of args) {
-    const argDom = arg.domain;
-    if (!argDom.isSubsetOf('Number')) return 'Nothing';
-    if (!argDom.isSubsetOf(dom)) dom = argDom;
+    const argDom = arg.valueDomain;
+    if (!argDom.isSubdomainOf('Number')) return null;
+    if (!dom || !argDom.isSubdomainOf(dom)) dom = argDom;
   }
   return dom;
 }

@@ -278,7 +278,7 @@ export function serializeJsonFunction(
   if (ce.jsonSerializationOptions.metadata.includes('wikidata')) {
     if (!metadata?.wikidata && typeof head === 'string')
       md.wikidata = _escapeJsonString(
-        ce.getFunctionDefinition(head)?.wikidata ?? ''
+        ce.getFunctionDefinition(head, args)?.wikidata ?? ''
       );
   } else md.wikidata = '';
 

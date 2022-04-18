@@ -8,11 +8,11 @@ import {
   EvaluateOptions,
   NOptions,
   ReplaceOptions,
-  SemiBoxedExpression,
   SimplifyOptions,
   Substitution,
   Metadata,
   PatternMatchOption,
+  Domain,
 } from '../public';
 import { replace } from '../rules';
 import { domainToFlags } from './boxed-symbol-definition';
@@ -205,11 +205,13 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return this._def?.value?.numericValue;
   }
 
-  get domain(): BoxedExpression {
+  get domain(): Domain {
+    if (typeof this._def?.domain === 'function')
+      return this.engine.domain(this._def.domain(this.engine, []));
     return this._def?.domain ?? this.engine.domain('Anything');
   }
 
-  set domain(d: BoxedExpression) {
+  set domain(d: Domain) {
     if (this._name[0] === '_')
       throw new Error(
         `The domain of the wildcard "${this._name}" cannot be changed`

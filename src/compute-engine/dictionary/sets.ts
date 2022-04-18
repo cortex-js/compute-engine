@@ -23,65 +23,65 @@ export const SETS_DICTIONARY: Dictionary = {
     //
     {
       name: 'Element',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       // evaluate: subset,
     },
     {
       name: 'NotElement',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
       // evaluate: subset,
     },
     {
       name: 'Subset',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       // evaluate: subset,
     },
     {
       name: 'NotSubset',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       canonical: (ce, args) => ce.fn('Not', [ce.fn('Subset', args)]),
       // evaluate: subset,
     },
     {
       name: 'Superset',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       // evaluate: subset,
     },
     {
       name: 'SupersetEqual',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       // evaluate: subset,
     },
     {
       name: 'NotSuperset',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       canonical: (ce, args) => ce.fn('Not', [ce.fn('Superset', args)]),
       // evaluate: subset,
     },
     {
       name: 'NotSupersetEqual',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       canonical: (ce, args) => ce.fn('Not', [ce.fn('SupersetEqual', args)]),
       // evaluate: subset,
     },
     {
       name: 'SubsetEqual',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       // evaluate: subsetEqual,
     },
     {
       name: 'NotSubsetNotEqual',
-      domain: 'MaybeBoolean',
+      domain: 'Predicate',
       complexity: 11200,
       canonical: (ce, args) => ce.fn('Not', [ce.fn('SubsetEqual', args)]),
     },
@@ -94,7 +94,7 @@ export const SETS_DICTIONARY: Dictionary = {
       name: 'CartesianProduct',
       // Aka the product set, the set direct product or cross product
       // Notation: \times
-      domain: 'Set',
+      domain: ['Function', ['Some', 'Set'], 'Set'],
       wikidata: 'Q173740',
       // evaluate: cartesianProduct,
     },
@@ -102,13 +102,13 @@ export const SETS_DICTIONARY: Dictionary = {
       name: 'Complement',
       // Return the elements of the first argument that are not in any of
       // the subsequent lists
-      domain: 'Set',
+      domain: ['Function', 'Set', 'Set'],
       wikidata: 'Q242767',
     },
     {
       name: 'Intersection',
       // notation: \cap
-      domain: 'Set',
+      domain: ['Function', ['Some', 'Set'], 'Set'],
       wikidata: 'Q185837',
       threadable: true,
       associative: true,
@@ -119,7 +119,7 @@ export const SETS_DICTIONARY: Dictionary = {
     {
       name: 'Union',
       // Works on set, but can also work on lists
-      domain: 'Set',
+      domain: ['Function', ['Some', 'Set'], 'Set'],
       wikidata: 'Q185359',
       threadable: true,
       associative: true,
@@ -129,7 +129,7 @@ export const SETS_DICTIONARY: Dictionary = {
     },
     {
       name: 'Set',
-      domain: 'Set',
+      domain: ['Function', ['Some', 'Anything'], 'Set'],
       // @todo! set has multiple forms
       // Set(Sequence)
       // Set(Sequence, Condition)
@@ -137,7 +137,7 @@ export const SETS_DICTIONARY: Dictionary = {
     }, // disjoint union Q842620 ⊔
     {
       name: 'SetMinus',
-      domain: 'Set',
+      domain: ['Function', 'Set', 'Expresison', 'Set'],
       wikidata: 'Q18192442',
       evaluate: setMinus,
     },
@@ -146,7 +146,7 @@ export const SETS_DICTIONARY: Dictionary = {
       // symmetric difference = disjunctive union  (circled minus)
       /* = Union(Complement(a, b), Complement(b, a) */
       /* Corresponds to XOR in boolean logic */
-      domain: 'Set',
+      domain: ['Function', ['Some', 'Set'], 'Set'],
       wikidata: 'Q1147242',
     },
   ],

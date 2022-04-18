@@ -14,6 +14,7 @@ import {
   ReplaceOptions,
   Metadata,
   PatternMatchOption,
+  Domain,
 } from '../public';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
@@ -82,7 +83,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     this._ops = ops;
 
     if (typeof this._head === 'string')
-      this._def = ce.getFunctionDefinition(this._head, metadata?.wikidata);
+      this._def = ce.getFunctionDefinition(this._head, ops);
 
     this._isCanonical = false;
 
@@ -194,7 +195,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
       // Function names that start with `_` are wildcards and never have a definition
       if (this._head[0] === '_') return;
 
-      this._def = this.engine.getFunctionDefinition(this._head, this._wikidata);
+      this._def = this.engine.getFunctionDefinition(this._head, this._ops);
       if (this._def) {
         // In case the def was found by the wikidata, and the name does not
         // match the one in our dictionary, make sure to update it.
@@ -203,22 +204,28 @@ export class BoxedFunction extends AbstractBoxedExpression {
     }
   }
 
-  /** Domain of the value of the function */
-  get domain(): BoxedExpression {
-    const def = this._def;
-    if (!def) return this.engine.domain('Anything');
-
-    if (typeof def.evalDomain === 'function') {
-      const result = def.evalDomain(this.engine, this._ops);
-      if (!result) return this.engine.domain('Nothing');
-      return this.engine.domain(result);
+  /** Signature of the function */
+  get domain(): Domain {
+    // If there is a definition, we'll return the domain provided by
+    // the definition
+    if (this._def?.domain) {
+      if (typeof this._def.domain === 'function')
+        return this.engine.domain(this._def.domain(this.engine, this._ops));
+      return this.engine.domain(this._def.domain);
     }
 
-    console.assert(def.evalDomain === undefined);
+    // Without a definition, we return a domain based on the
+    // actual arguments
+    const result: SemiBoxedExpression[] = [this.head];
+    for (const arg of this._ops) result.push(arg.domain);
+    result.push(this.engine.domain('Anything'));
 
-    if (def.domain) return def.domain;
-    if (def.numeric) return this.engine.domain('Number');
-    return this.engine.domain('Nothing');
+    return this.engine.domain(result);
+  }
+
+  /** Domain of the value of the function */
+  get valueDomain(): Domain {
+    return this.domain.codomain ?? this.engine.domain('Nothing');
   }
 
   isLess(rhs: BoxedExpression): boolean | undefined {
@@ -321,28 +328,28 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
-    return this.domain.isSubsetOf('Number');
+    return this.valueDomain.isSubdomainOf('Number');
   }
   get isInteger(): boolean | undefined {
-    return this.domain.isSubsetOf('Integer');
+    return this.valueDomain.isSubdomainOf('Integer');
   }
   get isRational(): boolean | undefined {
-    return this.domain.isSubsetOf('RationalNumber');
+    return this.valueDomain.isSubdomainOf('RationalNumber');
   }
   get isAlgebraic(): boolean | undefined {
-    return this.domain.isSubsetOf('AlgebraicNumber');
+    return this.valueDomain.isSubdomainOf('AlgebraicNumber');
   }
   get isReal(): boolean | undefined {
-    return this.domain.isSubsetOf('RealNumber');
+    return this.valueDomain.isSubdomainOf('RealNumber');
   }
   get isExtendedReal(): boolean | undefined {
-    return this.domain.isSubsetOf('ExtendedRealNumber');
+    return this.valueDomain.isSubdomainOf('ExtendedRealNumber');
   }
   get isComplex(): boolean | undefined {
-    return this.domain.isSubsetOf('ComplexNumber');
+    return this.valueDomain.isSubdomainOf('ComplexNumber');
   }
   get isImaginary(): boolean | undefined {
-    return this.domain.isSubsetOf('ImaginaryNumber');
+    return this.valueDomain.isSubdomainOf('ImaginaryNumber');
   }
 
   get json(): Expression {
@@ -444,10 +451,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
       return this.evaluate().isSame(rhs.evaluate());
     }
 
-    if (
-      this._def?.relationalOperator &&
-      rhs.functionDefinition?.relationalOperator
-    ) {
+    if (this.domain.isRelationalOperator && rhs.domain.isRelationalOperator) {
       return this.evaluate().isSame(rhs.evaluate());
     }
 

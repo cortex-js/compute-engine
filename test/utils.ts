@@ -3,6 +3,7 @@ import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
 import { BoxedExpression, ComputeEngine } from '../src/compute-engine';
 import { parseCortex } from '../src/cortex';
 import { LatexSyntax } from '../src/compute-engine/latex-syntax/latex-syntax';
+import { AnyTxtRecord } from 'dns';
 
 let errors: string[] = [];
 
@@ -16,7 +17,7 @@ export const engine = new ComputeEngine();
 const rawLatex = new LatexSyntax({
   computeEngine: engine,
   parseArgumentsOfUnknownLatexCommands: false,
-  parseUnknownToken: () => 'symbol',
+  parseUnknownSymbol: () => 'symbol',
   applyInvisibleOperator: null,
   dictionary: [],
 });
@@ -406,7 +407,7 @@ export function benchmark(
   return variance;
 }
 
-function recursiveSerialize(x: any): string {
+function recursiveSerialize(x: unknown): string {
   if (x === null) return 'null';
   if (
     typeof x === 'object' &&

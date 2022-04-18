@@ -2,6 +2,7 @@ import { Decimal } from 'decimal.js';
 import {
   BoxedExpression,
   Dictionary,
+  DomainExpression,
   IComputeEngine,
   LatexString,
 } from '../public';
@@ -13,28 +14,22 @@ import {
 import { Expression } from '../../math-json/math-json-format';
 import { canonicalNegate } from '../symbolic/negate';
 
-// Names of trigonometric functions follow ISO 80000 Section 13
-const domainNumberToRealNumber = (
-  ce: IComputeEngine,
-  ops: BoxedExpression[]
-) => {
-  if (!ops[0]) return null;
-  const domain = ops[0].domain;
-  return domain.isSubsetOf('Number') ? ce.symbol('ExtendedRealNumber') : null;
-};
-const domainRealToRealComplexToComplex = (
-  ce: IComputeEngine,
-  ops: BoxedExpression[]
-) => {
-  if (!ops[0]) return null;
-  const domain = ops[0].domain;
+//
+//Note: Names of trigonometric functions follow ISO 80000 Section 13
+//
 
-  return domain.isSubsetOf('ExtendedRealNumber')
-    ? ce.symbol('RealNumber')
-    : domain.isSubsetOf('ExtendedComplexNumber')
-    ? ce.symbol('ComplexNumber')
-    : null;
+const domainNumberToRealNumber = (_head: string): DomainExpression => {
+  return ['Function', 'Number', 'ExtendedRealNumber'];
 };
+
+const trigFunction = (_head: string): DomainExpression => {
+  return ['Function', 'Number', 'Number'];
+};
+
+const hyperbolicFunction = (_head: string): DomainExpression => {
+  return ['Function', 'Number', 'Number'];
+};
+
 export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
   {
     //
@@ -65,7 +60,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
         name: 'Hypot',
         // Range: ['Interval', 0, Infinity],
         evaluate: ['Sqrt', ['Square', '_1'], ['Square', '_2']],
-        evalDomain: domainNumberToRealNumber,
+        domain: ['Function', 'Number', 'Number', 'Number'],
         // machineN: (x: number, y: number) => Math.sqrt(x * x * +y * y),
         // decimalN: (x: Decimal | number, y: Decimal | number) =>
         //   Decimal.sqrt(Decimal.mul(x, y).add(Decimal.mul(x, y))),
@@ -75,8 +70,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       {
         name: 'Sin',
         // outputDomain: ['Interval', -1, 1],
-        evalDomain: domainRealToRealComplexToComplex,
-        numeric: true,
+        domain: trigFunction('Sin'),
         complexity: 5000,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Sin', ops[0]) ??
@@ -125,8 +119,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       {
         name: 'Arctan',
         wikidata: 'Q2257242',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: domainNumberToRealNumber('Arctan'),
         complexity: 5200,
         simplify: (ce, ops) => constructibleValues(ce, 'Arctan', ops[0]),
         N: (ce, ops) => {
@@ -140,8 +133,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       {
         name: 'Arctan2',
         wikidata: 'Q776598',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: ['Function', 'Number', 'Number', 'Number'],
         complexity: 5200,
         N: (ce, ops) => {
           if (ops[0].decimalValue && ops[1].decimalValue)
@@ -156,8 +148,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'Cos',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: trigFunction('Cos'),
         complexity: 5050,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Cos', ops[0]) ??
@@ -176,8 +167,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       {
         name: 'Tan',
         // Range: 'RealNumber',
-        evalDomain: domainRealToRealComplexToComplex,
-        numeric: true,
+        domain: trigFunction('Tan'),
         complexity: 5100,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Tan', ops[0]) ??
@@ -206,8 +196,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
     functions: [
       {
         name: 'Arcosh',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: hyperbolicFunction('Arcosh'),
         complexity: 6200,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Arcoshh', ops[0]) ??
@@ -231,8 +220,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'Arcsin',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: hyperbolicFunction('Arcsin'),
         complexity: 5500,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Arcsin', ops[0]) ??
@@ -265,8 +253,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       //Note: Arsinh, not Arcsinh
       {
         name: 'Arsinh',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: hyperbolicFunction('Arsinh'),
         complexity: 6100,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Arsinh', ops[0]) ??
@@ -287,8 +274,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'Artanh',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: hyperbolicFunction('Artanh'),
         complexity: 6300,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Artanh', ops[0]) ??
@@ -314,8 +300,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'Cosh',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: hyperbolicFunction('Cosh'),
         complexity: 6050,
         simplify: (ce, ops) => constructibleValues(ce, 'Cosh', ops[0]),
         evaluate: [
@@ -333,8 +318,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       },
       {
         name: 'Cot',
-        evalDomain: domainRealToRealComplexToComplex,
-        numeric: true,
+        domain: trigFunction('Cot'),
         complexity: 5600,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Cot', ops[0]) ??
@@ -353,8 +337,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       {
         name: 'Csc',
         description: 'Cosecant',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: trigFunction('Csc'),
         complexity: 5600,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Csc', ops[0]) ??
@@ -375,23 +358,20 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
         name: 'Haversine',
         wikidata: 'Q2528380',
         // Range ['Interval', 0, 1],
-        evalDomain: domainNumberToRealNumber,
+        domain: ['Function', 'ExtendedRealNumber', 'RealNumber'],
         evaluate: ['Divide', ['Subtract', 1, ['Cos', '_1']], 2],
-        numeric: true,
       },
       /** = 2 * Arcsin(Sqrt(z)) */
       {
         name: 'InverseHaversine',
         //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
-        evalDomain: domainRealToRealComplexToComplex,
-        numeric: true,
+        domain: ['Function', 'ExtendedRealNumber', 'RealNumber'],
         evaluate: ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]],
       },
       {
         name: 'Sec',
         description: 'Secant, inverse of cosine',
-        evalDomain: domainRealToRealComplexToComplex,
-        numeric: true,
+        domain: trigFunction('Sec'),
         complexity: 5500,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Sec', ops[0]) ??
@@ -410,8 +390,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       {
         name: 'Sinh',
         // Range: ['Interval', -Infinity, Infinity],
-        evalDomain: domainRealToRealComplexToComplex,
-        numeric: true,
+        domain: hyperbolicFunction('Sinh'),
         complexity: 6000,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Sinh', ops[0]) ??
@@ -432,8 +411,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
     functions: [
       {
         name: 'Csch',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: domainNumberToRealNumber('Csch'),
         complexity: 6200,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Csch', ops[0]) ??
@@ -452,8 +430,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       {
         name: 'Sech',
         // Range: ['Interval', -1, 1],
-        evalDomain: domainRealToRealComplexToComplex,
-        numeric: true,
+        domain: trigFunction('Sech'),
         complexity: 6200,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Sech', ops[0]) ??
@@ -472,8 +449,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       {
         name: 'Tanh',
         // Range: ['Interval', -Infinity, Infinity],
-        evalDomain: domainRealToRealComplexToComplex,
-        numeric: true,
+        domain: hyperbolicFunction('Tanh'),
         complexity: 6200,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Tanh', ops[0]) ??
@@ -493,8 +469,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
     functions: [
       {
         name: 'Arccos',
-        evalDomain: domainNumberToRealNumber,
-        numeric: true,
+        domain: domainNumberToRealNumber('Arccos'),
         complexity: 5550,
         evaluate: ['Subtract', ['Divide', 'Pi', 2], ['Arcsin', '_1']],
         simplify: (ce, ops) =>
@@ -537,8 +512,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Coth',
-        evalDomain: domainRealToRealComplexToComplex,
-        numeric: true,
+        domain: hyperbolicFunction('Coth'),
         complexity: 6300,
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Coth', ops[0]) ??
@@ -561,7 +535,7 @@ export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
       // },
       {
         name: 'InverseFunction',
-        domain: 'Number',
+        domain: 'Function',
         // evalDomain: () => 'RealNumber', //@todo ExtendedRealNumber?
         simplify: (ce, ops) => processInverseFunction(ce, ops[0]),
         evaluate: (ce, ops) => processInverseFunction(ce, ops[0]),

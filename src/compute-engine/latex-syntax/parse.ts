@@ -129,36 +129,10 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
 
   parseArgumentsOfUnknownLatexCommands: true,
   parseNumbers: true,
-  parseUnknownToken: (token: LatexToken) => {
-    if (
-      [
-        '\\displaystyle',
-        '\\!',
-        '\\:',
-        '\\enskip',
-        '\\quad',
-        '\\,',
-        '\\;',
-        '\\enspace',
-        '\\qquad',
-        '\\selectfont',
-        '\\tiny',
-        '\\scriptsize',
-        '\\footnotesize',
-        '\\small',
-        '\\normalsize',
-        '\\large',
-        '\\Large',
-        '\\LARGE',
-        '\\huge',
-        '\\Huge',
-      ].includes(token)
-    ) {
-      return 'skip';
-    }
-    if (/^[fg]$/.test(token)) return 'function';
-    if (/^[a-zA-Z]$/.test(token)) return 'symbol';
-    return 'error';
+  parseUnknownSymbol: (s: string) => {
+    if (/^[fg]$/.test(s)) return 'function';
+    if (/^[a-zA-Z]+$/.test(s)) return 'symbol';
+    return 'unknown';
   },
 
   preserveLatex: true,
@@ -345,17 +319,6 @@ export class _Parser implements Parser {
     }
 
     let result = false;
-
-    // Check if we have an ignorable command (e.g. \displaystyle and other
-    // purely presentational commands)
-    while (
-      !this.atEnd &&
-      this.options.parseUnknownToken?.(this.peek, this) === 'skip'
-    ) {
-      this.index += 1;
-      this.skipSpace();
-      result = true;
-    }
 
     if (!this.options.skipSpace) return false;
     while (this.match('<space>')) result = true;
@@ -736,46 +699,56 @@ export class _Parser implements Parser {
   }
 
   /**
-   * 'group' : will look for an argument inside a pair of `()`
-   * 'implicit': either an expression inside a pair of `()`, or just a primary
+   * - 'enclosure' : will look for an argument inside an enclosure (open/close fence)
+   * - 'implicit': either an expression inside a pair of `()`, or just a primary
    *  (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
+   * - 'group': the arguments follow until an end of group, `<}>`. This is the
+   * case for example for `\displaystyle`
    */
   matchArguments(
-    kind: undefined | '' | 'group' | 'implicit'
+    kind: undefined | '' | 'enclosure' | 'implicit' | 'group'
   ): Expression[] | null {
     if (!kind) return null;
 
     const savedIndex = this.index;
-    let result: Expression[] | null = null;
 
     const group = this.matchEnclosure();
 
-    if (kind === 'group' && head(group) === 'Delimiter') {
-      // We got a group i.e. `f(a, b, c)`
-      result = tail(group);
-    } else if (kind === 'implicit') {
+    if (kind === 'enclosure' && head(group) === 'Delimiter') {
+      // We got an enclosure i.e. `f(a, b, c)`
+      return tail(group);
+    }
+
+    if (kind === 'group') {
+      // The argument is everything that follows until an end of group token, `<}>`
+
+      const arg = this.matchExpression({ tokens: ['<}>'] });
+      return arg === null ? [] : [arg];
+    }
+
+    if (kind === 'implicit') {
       // We are looking for an expression inside an optional pair of `()`
       // (i.e. trig functions, as in `\cos x`.)
-      if (head(group) === 'Delimiter') {
-        result = tail(group);
-      } else if (group !== null) {
+      if (head(group) === 'Delimiter') return tail(group);
+
+      if (group !== null) {
         // There was a matchfix, the "group" is the argument, i.e.
         // `\sin [a, b, c]`
-        result = [group];
-      } else {
-        // No group, but arguments without parentheses are allowed
-        // Read a primary
-        const primary = this.matchPrimary();
-        if (primary !== null) result = [primary];
+        return [group];
       }
-    } else {
-      // The element following the function does not match
-      // a possible argument list
-      // That's OK, but need to undo the parsing of the matchfix
-      // This is the case: `f[a]` or `f|a|`
-      this.index = savedIndex;
+      // No group, but arguments without parentheses are allowed
+      // Read a primary
+      const primary = this.matchPrimary();
+      if (primary !== null) return [primary];
+      return null;
     }
-    return result;
+
+    // The element following the function does not match
+    // a possible argument list
+    // That's OK, but need to undo the parsing of the matchfix
+    // This is the case: `f[a]` or `f|a|`
+    this.index = savedIndex;
+    return null;
   }
 
   /** If matches the normalized open delimiter, returns the
@@ -922,7 +895,8 @@ export class _Parser implements Parser {
   /**
    * A symbol can be:
    * - a constant: `\pi`
-   * - a variable: `x`
+   * - a single-letter variable: `x`
+   * - a multi-letter variable: `\mathit{speed}` or `\mathrm{speed}`
    * - a function with explicit arguments `f(x)`
    * - a function with implicit arguments: `\cos x`
    * - a command: `\frac{2}{3}`
@@ -970,25 +944,37 @@ export class _Parser implements Parser {
 
     this.index = start;
 
+    let symbol = '';
+
+    if (
+      this.matchAll(['\\operatorname', '<{>']) ||
+      this.matchAll(['\\mathit', '<{>']) ||
+      this.matchAll(['\\mathrm', '<{>'])
+    ) {
+      symbol = this.matchString({ tokens: ['<}>'] });
+      if (!symbol || !this.match('<}>')) this.index = start;
+    }
+
+    if (!symbol) symbol = this.next();
+
     // This is an unknown symbol.
     // Can we promote it?
-    const action = this.options.parseUnknownToken?.(this.peek, this);
+    const action = this.options.parseUnknownSymbol?.(symbol, this);
+
+    if (action === 'symbol') return symbol;
+
     if (action === 'function') {
-      const name = this.next();
       // this.onError({ code: 'unknown-function', arg: name });
       const enclosure = this.matchEnclosure();
       // If no arguments, return it as a symbol
-      if (enclosure === null) return name;
+      if (enclosure === null) return symbol;
       if (head(enclosure) !== 'Delimiter') return null;
-      return [name, ...tail(enclosure)];
+      return [symbol, ...tail(enclosure)];
     }
-    if (action === 'symbol') {
-      // this.onError({ code: 'unknown-symbol', arg: this.peek });
-      return this.next();
-    }
+
+    this.index = start;
 
     // Not a symbol (punctuation or fence, maybe?)...
-
     return this.matchUnknownLatexCommand();
   }
 
@@ -1151,7 +1137,7 @@ export class _Parser implements Parser {
     return null;
   }
 
-  matchString(until: { tokens: LatexToken[] } & Partial<Terminator>): string {
+  matchString(until: Partial<Terminator>): string {
     if (!until.minPrec) until = { ...until, minPrec: 0 };
     console.assert(until.tokens);
     let result = '';
@@ -1340,7 +1326,10 @@ export class _Parser implements Parser {
     // If the value of `lhs` is a number and the value of `rhs` is a number
     // (but they may not be literal)
     // -> Apply Invisible Multiply
-    if (lhs.isNumber && rhs.isNumber) {
+    if (
+      (lhs.isMissing || lhs.symbol === 'Nothing' || lhs.isNumber) &&
+      (rhs.isMissing || rhs.symbol === 'Nothing' || rhs.isNumber)
+    ) {
       return applyAssociativeOperator('Multiply', rawLhs, rawRhs);
     }
 

@@ -156,13 +156,75 @@ export type BoxedRule = [
 
 export type BoxedRuleSet = Set<BoxedRule>;
 
+export type ParametricDomainFunction =
+  | 'Function'
+  | 'Union'
+  | 'List'
+  | 'Record'
+  | 'Tuple'
+  | 'Intersection'
+  | 'Range'
+  | 'Interval'
+  | 'Optional'
+  | 'Some'
+  | 'Head'
+  | 'Symbol'
+  | 'Literal';
+
+export type ParametricDomain = [
+  ParametricDomainFunction,
+  ...DomainExpression[]
+];
+
+export type DomainExpression = string | ParametricDomain;
+
 /**
  * Domains can be defined as a union or intersection of domains:
  * - `["Union", "Number", "Boolean"]` A number or a boolean.
  * - `["SetMinus", "Number", 1]`  Any number except "1".
  *
  */
-export type DomainExpression = BoxedExpression;
+export interface Domain extends BoxedExpression {
+  isSubdomainOf(dom: Domain | string): boolean;
+  isMemberOf(expr: BoxedExpression): boolean;
+  readonly domainExpression: DomainExpression;
+  codomain: Domain | null;
+  readonly isNothing: boolean;
+  is(s: BoxedExpression): boolean;
+  readonly isBoolean: boolean;
+  readonly isNumeric: boolean;
+  readonly isFunction: boolean;
+  readonly isPredicate: boolean;
+  /**
+   * If true, when all the arguments are numeric, the result of the
+   * evaluation is numeric. Numeric is any value with a domain of `Number`.
+   *
+   * Example of numeric functions: `Add`, `Multiply`, `Power`, `Abs`
+   *
+   * Default: false
+   */
+  readonly isNumericFunction: boolean;
+  readonly isRealFunction: boolean;
+  /**
+   * If true, when all the arguments are boolean, the result of the
+   * evaluation is a boolean. Boolean is any value with a domain of `MaybeBoolean`.
+   *
+   * Example of logic functions: `And`, `Or`, `Not`, `Implies`
+   *
+   * **Default:** false
+   */
+  readonly isLogicOperator: boolean;
+  /**
+   * The function represent a relation between the first argument and
+   * the second argument, and evaluates to a boolean indicating if the relation
+   * is satisfied.
+   *
+   * For example, `Equal`, `Less`, `Approx`, etc...
+   *
+   * **Default:** false
+   */
+  readonly isRelationalOperator: boolean;
+}
 
 /**
  * Options to control the serialization to MathJSON when using `BoxedExpression.json`.
@@ -263,7 +325,7 @@ export interface BoxedExpression {
    * @category Object Methods
    *
    */
-  is(rhs: any): boolean;
+  is(rhs: unknown): boolean;
 
   /** @internal */
   get hash(): number;
@@ -558,24 +620,6 @@ export interface BoxedExpression {
   //
   // --- PREDICATES
   //
-  // Use the value to answer.
-  //
-  // If no value is available (for example a symbol with no associated
-  // definition), use assumptions or the definition associated with this
-  // expression, if one is available, to answer.
-  //
-  // Return `undefined` if the predicate does not apply, for example
-  // `get isZero()` on a string or a symbol with an unknown value and no
-  // assumption or definition, or if no information is available to answer
-  // positively or negatively (i.e. "maybe").
-  //
-
-  /** True if this domain is a subset of domain `d`
-   *
-   * @category Expression Properties
-   *
-   */
-  isSubsetOf(d: BoxedExpression | string): undefined | boolean;
 
   /** True if the value of this expression is a number.
    *
@@ -828,12 +872,19 @@ export interface BoxedExpression {
    */
   get complexity(): number;
 
-  /** The domain of this expression, using the value of the expression,
-   * definitions associated with this expression and assumptions if necessary */
-  get domain(): BoxedExpression;
+  /** The domain of this expression. */
+  get domain(): Domain;
 
   /** Symbols that represent a variable, can have their domain modified */
-  set domain(domain: BoxedExpression | string);
+  set domain(domain: Domain | string);
+
+  /** The domain of the value of this expression, using the value of the expression,
+   * definitions associated with this expression and assumptions if necessary.
+   *
+   * For symbols, the `domain` and `valueDomain` are the same.  For functions,
+   * the `valueDomain` is the codomain of the function.
+   */
+  get valueDomain(): Domain;
 
   /** For symbols and functions, a possible definition associated with the expression */
   get functionDefinition(): BoxedFunctionDefinition | undefined;
@@ -1165,9 +1216,21 @@ export type BaseDefinition = {
    *
    * For symbols, this is the domain of their value.
    *
-   * For functions, this is the domain of their result (aka codomain)
+   * For functions, this is the signature of the function
+   *
+   * When `domain` is a handler, calculate the domain (or signature) based on
+   * the arguments (for expressions others than functions, `args` is an empty
+   * array). If the function cannot be applied to the arguments, return
+   * `null`.
    */
-  domain?: BoxedExpression | string;
+  domain?:
+    | Domain
+    | DomainExpression
+    | string
+    | ((
+        ce: IComputeEngine,
+        args: BoxedExpression[]
+      ) => Domain | DomainExpression);
 };
 
 export type BoxedBaseDefinition = {
@@ -1181,7 +1244,12 @@ export type BoxedBaseDefinition = {
    * This field is usually undefined, but its value is set by `getDefinition()`
    */
   scope: RuntimeScope | undefined;
-  domain?: BoxedExpression;
+  domain?:
+    | Domain
+    | ((
+        ce: IComputeEngine,
+        args: BoxedExpression[]
+      ) => Domain | DomainExpression);
 
   _purge(): undefined;
 };
@@ -1256,37 +1324,6 @@ export type FunctionDefinitionFlags = {
    * **Default**: `false`
    */
   involution: boolean;
-
-  /**
-   * If true, when all the arguments are numeric, the result of the
-   * evaluation is numeric. Numeric is any value with a domain of `Number`.
-   *
-   * Example of numeric functions: `Add`, `Multiply`, `Power`, `Abs`
-   *
-   * Default: false
-   */
-  numeric: boolean;
-
-  /**
-   * If true, when all the arguments are boolean, the result of the
-   * evaluation is a boolean. Boolean is any value with a domain of `MaybeBoolean`.
-   *
-   * Example of logic functions: `And`, `Or`, `Not`, `Implies`
-   *
-   * **Default:** false
-   */
-  logic: boolean;
-
-  /**
-   * The function represent a relation between the first argument and
-   * the second argument, and evaluates to a boolean indicating if the relation
-   * is satisfied.
-   *
-   * For example, `Equal`, `Less`, `Approx`, etc...
-   *
-   * **Default:** false
-   */
-  relationalOperator: boolean;
 
   /** If true, the value of this function is always the same for a given
    * set of arguments and it has no side effects.
@@ -1485,35 +1522,6 @@ export type FunctionDefinition = BaseDefinition &
       args: BoxedExpression[]
     ) => BoxedExpression | undefined;
 
-    /**
-     *
-     * Calculate the domain of the result, based on the value of the arguments.
-     *
-     * If the domain of the result is always the same, use the `domain` property
-     * instead.
-     *
-     * The argument `args` represent the arguments of the function.
-     *
-     * The return value is `null` if the input arguments cannot be handled by
-     * this definition.
-     *
-     * Otherwise, the return value is the domain of the result.
-     *
-     * Return `"Nothing"` if the arguments are acceptable, but the evaluation
-     * will fail, for example in some cases if there are missing arguments.
-     *
-     * This function is used to select the correct definition when there are
-     * multiple definitions for the same function name.
-     *
-     * For example it allows to distinguish between a `Add` function that
-     * applies to numbers and an `Add` function that applies to tensors.
-     *
-     */
-    evalDomain?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression | string | null;
-
     /** Dimensional analysis
      * @experimental
      */
@@ -1557,10 +1565,6 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
       ce: IComputeEngine,
       args: BoxedExpression[]
     ) => BoxedExpression | undefined;
-    evalDomain?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression | string | null;
     evalDimension?: (
       ce: IComputeEngine,
       args: BoxedExpression[]
@@ -1647,7 +1651,7 @@ export type SymbolDefinition = BaseDefinition &
       | SemiBoxedExpression
       | ((ce: IComputeEngine) => SemiBoxedExpression | null);
 
-    domain?: string | BoxedExpression;
+    domain?: string | Domain;
 
     /**
      * If this symbol is an indexable collection, return the
@@ -1759,7 +1763,7 @@ export interface IComputeEngine {
   readonly iterationLimit: number;
   /** @experimental */
   readonly recursionLimit: number;
-  defaultDomain: null | BoxedExpression;
+  defaultDomain: null | Domain;
 
   /** {@inheritDoc  NumericMode} */
   numericMode: NumericMode;
@@ -1795,7 +1799,7 @@ export interface IComputeEngine {
    */
   getFunctionDefinition(
     head: string,
-    wikidata?: string
+    args?: BoxedExpression[]
   ): undefined | BoxedFunctionDefinition;
 
   /**
@@ -1822,9 +1826,9 @@ export interface IComputeEngine {
   string(s: string, metadata?: Metadata): BoxedExpression;
   /** Return a canonical boxed domain */
   domain(
-    domain: BoxedExpression | string,
+    domain: SemiBoxedExpression | Domain | string,
     metadata?: Metadata
-  ): BoxedExpression;
+  ): Domain;
 
   /** Return a canonical expression.
    *
@@ -1975,7 +1979,7 @@ export interface IComputeEngine {
    */
   assume(
     symbol: LatexString | SemiBoxedExpression,
-    domain: BoxedExpression
+    domain: Domain
   ): AssumeResult;
   assume(predicate: LatexString | SemiBoxedExpression): AssumeResult;
   assume(

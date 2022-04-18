@@ -599,7 +599,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     trigger: '\\operatorname{floor}',
     parse: (parser) => {
-      const arg = parser.matchArguments('group');
+      const arg = parser.matchArguments('enclosure');
       return arg === null ? null : (['Floor', ...arg] as Expression);
     },
   },
@@ -607,7 +607,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Gcd',
     trigger: '\\operatorname{gcd}',
     parse: (parser) => {
-      const arg = parser.matchArguments('group');
+      const arg = parser.matchArguments('enclosure');
       return arg === null ? null : (['Gcd', ...arg] as Expression);
     },
     serialize: (serializer, expr): string =>

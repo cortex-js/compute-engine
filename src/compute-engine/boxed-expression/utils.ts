@@ -1,12 +1,12 @@
 import { MACHINE_PRECISION } from '../numerics/numeric';
 import { BoxedExpression, IComputeEngine } from '../public';
 
-export function isLatexString(s: any): s is string {
+export function isLatexString(s: unknown): s is string {
   if (typeof s === 'string') return s.startsWith('$') && s.endsWith('$');
   return false;
 }
 
-export function latexString(s: any): string | null {
+export function latexString(s: unknown): string | null {
   if (typeof s === 'string' && s.startsWith('$') && s.endsWith('$'))
     return s.slice(1, -1);
 

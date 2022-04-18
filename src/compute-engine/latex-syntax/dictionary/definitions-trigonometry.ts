@@ -105,176 +105,176 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   {
     name: 'Arcsin',
     trigger: ['\\arcsin'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arcsin'),
   },
   {
     name: 'Arccos',
     trigger: ['\\arccos'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arccos'),
   },
   {
     name: 'Arctan',
     trigger: ['\\arctan'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arctan'),
   },
   {
     trigger: ['\\arctg'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arctan'),
   },
   {
     name: 'Arccot',
     trigger: ['\\arcctg'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arccot'),
   },
   {
     name: 'Arcsec',
     trigger: ['\\arcsec'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arcsec'),
   },
   {
     name: 'Arccsc',
     trigger: ['\\arccsc'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arccsc'),
   },
   {
     name: 'Arsinh',
     trigger: ['\\arsinh'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arsinh'),
   },
   {
     name: 'Arcosh',
     trigger: ['\\arcosh'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arcosh'),
   },
   {
     name: 'Artanh',
     trigger: ['\\artanh'],
-    arguments: 'implicit',
+
     parse: parseTrig('Artanh'),
   },
   {
     name: 'Arsech',
     trigger: ['\\arsech'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arsech'),
   },
   {
     name: 'Arcsch',
     trigger: ['\\arcsch'],
-    arguments: 'implicit',
+
     parse: parseTrig('Arcsch'),
   },
   {
     // Rusian hyperbolic cosine
     trigger: ['\\ch'],
-    arguments: 'implicit',
+
     parse: parseTrig('Cosh'),
   },
   {
     name: 'Cosec',
     trigger: ['\\cosec'],
-    arguments: 'implicit',
+
     parse: parseTrig('Cosec'),
   },
   {
     name: 'Cosh',
     trigger: ['\\cosh'],
-    arguments: 'implicit',
+
     parse: parseTrig('Cosh'),
   },
   {
     name: 'Cot',
     trigger: ['\\cot'],
-    arguments: 'implicit',
+
     parse: parseTrig('Cot'),
   },
   {
     trigger: ['\\cotg'],
-    arguments: 'implicit',
+
     parse: parseTrig('Cot'),
   },
   {
     name: 'Coth',
     trigger: ['\\coth'],
-    arguments: 'implicit',
+
     parse: parseTrig('Coth'),
   },
   {
     name: 'Csc',
     trigger: ['\\csc'],
-    arguments: 'implicit',
+
     parse: parseTrig('Csc'),
   },
   {
     // Rusian cotangent
     trigger: ['\\ctg'],
-    arguments: 'implicit',
+
     parse: parseTrig('Cot'),
   },
   {
     trigger: ['\\cth'],
-    arguments: 'implicit',
+
     parse: parseTrig('Cotanh'),
   },
   {
     name: 'Sec',
     trigger: ['\\sec'],
-    arguments: 'implicit',
+
     parse: parseTrig('Sec'),
   },
   {
     name: 'Sinh',
     trigger: ['\\sinh'],
-    arguments: 'implicit',
+
     parse: parseTrig('Sinh'),
   },
   {
     trigger: ['\\sh'],
-    arguments: 'implicit',
+
     parse: parseTrig('Sinh'),
   },
   {
     name: 'Tan',
     trigger: ['\\tan'],
-    arguments: 'implicit',
+
     parse: parseTrig('Tan'),
   },
   {
     trigger: ['\\tg'],
-    arguments: 'implicit',
+
     parse: parseTrig('Tan'),
   },
   {
     name: 'Tanh',
     trigger: ['\\tanh'],
-    arguments: 'implicit',
+
     parse: parseTrig('Tanh'),
   },
   {
     trigger: ['\\th'],
-    arguments: 'implicit',
+
     parse: parseTrig('Tanh'),
   },
 
   {
     name: 'Cos',
     trigger: ['\\cos'],
-    arguments: 'implicit',
+
     parse: parseTrig('Cos'),
   },
   {
     name: 'Sin',
     trigger: ['\\sin'],
-    arguments: 'implicit',
+
     parse: parseTrig('Sin'),
   },
 ];

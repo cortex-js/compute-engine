@@ -4,6 +4,7 @@ import { Expression } from '../../math-json/math-json-format';
 import { gcd, reducedRational, SMALL_INTEGERS } from '../numerics/numeric';
 import {
   BoxedExpression,
+  Domain,
   IComputeEngine,
   Metadata,
   NOptions,
@@ -28,7 +29,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     | Decimal
     | Complex
     | [numer: number, denom: number];
-  private _domain: BoxedExpression | undefined;
+  private _domain: Domain | undefined;
   private _head: string;
   private _hash: number | undefined;
   protected _isCanonical = true;
@@ -224,7 +225,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     return [null, null];
   }
 
-  get domain(): BoxedExpression {
+  get domain(): Domain {
     if (this._domain === undefined)
       this._domain = this.engine.domain(inferNumericDomain(this._value));
     return this._domain;

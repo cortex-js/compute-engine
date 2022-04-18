@@ -112,9 +112,9 @@ export class LatexSyntax {
   }
 
   static getDictionary(
-    domain: DictionaryCategory | 'all' = 'all'
+    category: DictionaryCategory | 'all' = 'all'
   ): Readonly<LatexDictionary> {
-    if (domain === 'all') {
+    if (category === 'all') {
       let result: Readonly<LatexDictionary> = [];
       for (const domain of Object.keys(DEFAULT_LATEX_DICTIONARY)) {
         if (DEFAULT_LATEX_DICTIONARY[domain]) {
@@ -124,9 +124,9 @@ export class LatexSyntax {
       return result;
     }
 
-    if (!DEFAULT_LATEX_DICTIONARY[domain]) return [];
+    if (!DEFAULT_LATEX_DICTIONARY[category]) return [];
 
-    return [...DEFAULT_LATEX_DICTIONARY[domain]!];
+    return [...DEFAULT_LATEX_DICTIONARY[category]!];
   }
 
   parse(latex: LatexString): Expression {

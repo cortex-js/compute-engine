@@ -8,6 +8,7 @@ import {
   BoxedFunctionDefinition,
   BoxedRuleSet,
   BoxedSymbolDefinition,
+  Domain,
   EvaluateOptions,
   IComputeEngine,
   LatexString,
@@ -65,6 +66,7 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   }
   /** Object.is() */
   is(rhs: any): boolean {
+    if (rhs === null || rhs === undefined) return false;
     return this.isSame(this.engine.box(rhs));
   }
 
@@ -199,14 +201,18 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  isSubsetOf(_d: BoxedExpression | string): undefined | boolean {
+  isSubdomainOf(_d: BoxedExpression | string): undefined | boolean {
     return undefined;
   }
-  get domain(): BoxedExpression {
+  get domain(): Domain {
     return this.engine.domain('Nothing');
   }
-  set domain(_domain: BoxedExpression) {
+  set domain(_domain: Domain) {
     throw new Error(`Can't change the domain of \\(${this.latex}\\)`);
+  }
+
+  get valueDomain(): Domain {
+    return this.domain;
   }
 
   get string(): string | null {

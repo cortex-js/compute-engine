@@ -3,6 +3,7 @@ import {
   BoxedExpression,
   BoxedFunctionDefinition,
   BoxedSymbolDefinition,
+  Domain,
   IComputeEngine,
   RuntimeScope,
   SemiBoxedExpression,
@@ -11,7 +12,7 @@ import {
 } from '../public';
 import { isLatexString } from './utils';
 
-function definedProperties(def: { [key: string]: any }): {
+function definedProperties(def: { [key: string]: unknown }): {
   [key: string]: any;
 } {
   return Object.fromEntries(
@@ -140,13 +141,13 @@ function normalizeFlags(flags: Partial<SymbolFlags>): SymbolFlags {
 }
 
 export function domainToFlags(
-  dom: BoxedExpression | undefined | null
+  dom: Domain | undefined | null
 ): Partial<SymbolFlags> {
   if (!dom) return {};
-  const domain = dom.symbol;
+  const domain = dom.domainExpression;
   const result: Partial<SymbolFlags> = {};
 
-  if (dom.isSubsetOf('Number')) {
+  if (dom.isSubdomainOf('Number')) {
     result.number = true;
     if (domain === 'Integer') result.integer = true;
     if (domain === 'RationalNumber') result.rational = true;
@@ -232,7 +233,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   description?: string | string[];
   readonly scope: RuntimeScope | undefined;
 
-  private _domain: BoxedExpression | undefined;
+  private _domain: Domain | undefined;
   // readonly unit?: BoxedExpression;
 
   private _number: boolean | undefined;
@@ -273,7 +274,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   private _def: SymbolDefinition;
 
   prototype?: BoxedFunctionDefinition; // @todo for collections and other special data structures
-  self?: any; // @todo
+  self?: unknown; // @todo
 
   constructor(ce: IComputeEngine, def: SymbolDefinition) {
     this._engine = ce;
@@ -291,6 +292,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     // this._domain = this._domain?._purge();
 
     const def = this._def;
+    const ce = this._engine;
 
     const result = definedProperties({
       description: def.description,
@@ -322,13 +324,12 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     if ('value' in def && typeof def.value === 'number') {
       // If the dictionary entry is provided as a number, assume it's a
       // variable, and infer its domain based on its value.
-      const value = this._engine.number(def.value);
-      let domain: BoxedExpression;
-      const defDomain = def.domain
-        ? this._engine.domain(def.domain)
-        : undefined;
-      if (defDomain && value.domain.isSubsetOf(defDomain)) domain = defDomain;
-      else domain = value.domain;
+      const value = ce.number(def.value);
+      let domain: Domain;
+      const defDomain = def.domain ? ce.domain(def.domain) : undefined;
+      if (defDomain && value.valueDomain.isSubdomainOf(defDomain))
+        domain = defDomain;
+      else domain = value.valueDomain;
 
       this._value = value;
       this._domain = domain;
@@ -344,10 +345,10 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     //
 
     let value: BoxedExpression | undefined;
-    if (isLatexString(def.value)) value = this._engine.parse(def.value)!;
+    if (isLatexString(def.value)) value = ce.parse(def.value)!;
     else if (typeof def.value === 'function')
-      value = this._engine.box(def.value(this._engine) ?? 'Undefined');
-    else if (def.value) value = this._engine.box(def.value);
+      value = ce.box(def.value(ce) ?? 'Undefined');
+    else if (def.value) value = ce.box(def.value);
 
     if (!value && def.hold === false)
       throw new Error(
@@ -362,15 +363,12 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     // Otherwise, adopt the domain of the value, if there is one.
     // Otherwise, the default domain if there is one.
     // Otherwise 🤷 'Anything'
-    let domain: BoxedExpression;
-    const defDomain = def.domain ? this._engine.domain(def.domain) : undefined;
-    if (defDomain && (!value || value.domain.isSubsetOf(defDomain)))
+    let domain: Domain;
+    const defDomain = def.domain ? ce.domain(def.domain) : undefined;
+    if (defDomain && (!value || value.valueDomain.isSubdomainOf(defDomain)))
       domain = defDomain;
     else
-      domain =
-        value?.domain ??
-        this._engine.defaultDomain ??
-        this._engine.domain('Anything');
+      domain = value?.valueDomain ?? ce.defaultDomain ?? ce.domain('Anything');
 
     if (!value) {
       this._value = undefined;
@@ -403,11 +401,11 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     if (val) this.setProps(valueToFlags(val));
   }
 
-  get domain(): BoxedExpression | undefined {
+  get domain(): Domain | undefined {
     return this._domain;
   }
 
-  set domain(domain: BoxedExpression | undefined | string) {
+  set domain(domain: Domain | undefined | string) {
     if (!domain) {
       this._domain = undefined;
       return;
@@ -417,8 +415,8 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
 
     // Ensure the domain is compatible with the domain of the value,
     // if there is one
-    const valDomain = this.value?.domain;
-    if (valDomain && !valDomain.isSubsetOf(domain)) domain = valDomain;
+    const valDomain = this.value?.valueDomain;
+    if (valDomain && !valDomain.isSubdomainOf(domain)) domain = valDomain;
 
     this._domain = domain;
     this.setProps(domainToFlags(domain));

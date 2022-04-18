@@ -31,11 +31,25 @@ import {
 } from '../utils';
 
 const ce = engine;
+
+// let a = ce.parse('\\frac{5}{\\frac{7}{x}}');
+let a = ce.box(['Power', ['Power', 'x', -1], -1]);
+a = a.simplify();
+console.log(a.json);
+
+const b = ce.parse('\\frac{8}{10}');
+console.log(b.json);
 // let f = ce.parse('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}');
 // f = f.simplify();
 // console.log(f.toJSON());
 
-console.log(ce.parse('\\sqrt{3^2}').simplify().latex);
+const q = ce.box(['Divide', 'weight', ['Square', 'height']]);
+console.log(q.latex);
+console.log(ce.parse(q.latex).toJSON());
+
+// console.log(ce.parse('f(x)').toJSON());
+// console.log(ce.parse('f_{n - 1}(x)').toJSON());
+// console.log(ce.parse('x \\times f_{n - 1}(x) + f_{n - 2}(x)').toJSON());
 
 //
 // BOXING
