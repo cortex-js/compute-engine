@@ -75,7 +75,7 @@ export class Sum {
           im = 0;
         }
         if (re === 0 && im === 0) return;
-        term = this.engine.number(this.engine.complex(re, im));
+        term = this.engine.number(this.engine.complex(re, im)).canonical;
       }
     }
 
@@ -139,16 +139,16 @@ export class Sum {
 
     if (this._terms.length === 0) {
       if (this._literal[0] === 0 && this._imaginary === 0) return [];
-      if (this._imaginary === 0) return [ce.number(this._literal)];
+      if (this._imaginary === 0) return [ce.number(this._literal).canonical];
 
       // if (!complexAllowed(ce)) return [ce.NAN];
 
       if (this._literal[0] === 0)
-        return [ce.number(ce.complex(0, this._imaginary))];
+        return [ce.number(ce.complex(0, this._imaginary)).canonical];
 
       return [
-        ce.number(this._literal),
-        ce.number(ce.complex(0, this._imaginary)),
+        ce.number(this._literal).canonical,
+        ce.number(ce.complex(0, this._imaginary)).canonical,
       ];
     }
 
@@ -160,15 +160,15 @@ export class Sum {
       if (n !== 0) {
         if (n === d) xs.push(term);
         else if (n === -d) xs.push(ce.negate(term));
-        else if (d === 1) xs.push(ce.mul([ce.number(n), term]));
-        else if (n === 1) xs.push(ce.divide(term, ce.number(d)));
-        else if (n !== 0) xs.push(ce.mul([ce.number([n, d]), term]));
+        else if (d === 1) xs.push(ce.mul([ce.number(n).canonical, term]));
+        else if (n === 1) xs.push(ce.divide(term, ce.number(d).canonical));
+        else if (n !== 0) xs.push(ce.mul([ce.number([n, d]).canonical, term]));
       }
     }
 
-    if (this._literal[0] !== 0) xs.push(ce.number(this._literal));
+    if (this._literal[0] !== 0) xs.push(ce.number(this._literal).canonical);
     if (this._imaginary !== 0)
-      xs.push(ce.number(ce.complex(0, this._imaginary)));
+      xs.push(ce.number(ce.complex(0, this._imaginary)).canonical);
 
     return flattenOps(xs, 'Add') ?? xs;
   }

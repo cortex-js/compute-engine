@@ -131,11 +131,15 @@ export class Product {
 
     if (this._literal[0] !== 1 || this._literal[1] !== 1) {
       if (options?.splitRational) {
-        if (this._literal[0] !== 1) unitTerms.push(ce.number(this._literal[0]));
+        if (this._literal[0] !== 1)
+          unitTerms.push(ce.number(this._literal[0]).canonical);
         if (this._literal[1] !== 1)
-          xs.push({ exponent: [-1, 1], terms: [ce.number(this._literal[1])] });
+          xs.push({
+            exponent: [-1, 1],
+            terms: [ce.number(this._literal[1]).canonical],
+          });
       } else {
-        unitTerms.push(ce.number(this._literal));
+        unitTerms.push(ce.number(this._literal).canonical);
       }
     }
 
@@ -221,7 +225,7 @@ export class Product {
 
     if (this._hasZero) return ce.ZERO;
 
-    if (this._terms.length === 0) return ce.number(this._literal);
+    if (this._terms.length === 0) return ce.number(this._literal).canonical;
 
     let terms = termsAsExpressions(
       ce,

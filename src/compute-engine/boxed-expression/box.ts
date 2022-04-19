@@ -14,7 +14,6 @@ import { BoxedString } from './boxed-string';
 import { _Domain } from './boxed-domain';
 import { complexAllowed, useDecimal } from './utils';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
-import { reducedRational } from '../numerics/numeric';
 import { machineValue } from '../../math-json/utils';
 
 /**
@@ -127,6 +126,8 @@ export function box(
  *
  *
  * Note that `boxNumber()` should only be called from `ComputeEngine`
+ *
+ * The result may not be canonical
  */
 export function boxNumber(
   ce: IComputeEngine,
@@ -144,7 +145,7 @@ export function boxNumber(
   if (Array.isArray(num)) {
     if (num.length !== 2)
       throw new Error('Array argument to boxNumber() should be two integers');
-    const [n, d] = reducedRational(num);
+    const [n, d] = num;
     if (typeof n !== 'number' || typeof d !== 'number')
       throw new Error('Array argument to boxNumber() should be two integers');
     if (!Number.isInteger(n) || !Number.isInteger(d))

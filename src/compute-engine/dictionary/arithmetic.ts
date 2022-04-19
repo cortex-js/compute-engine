@@ -144,7 +144,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         complexity: 2500,
         // - if numer product of numbers, or denom product of numbers,
         // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
-        canonical: (ce, args) => canonicalDivide(ce, args[0], args[1]),
+        canonical: (ce, args) =>
+          !args[0] || !args[1]
+            ? ce.symbol('Missing')
+            : canonicalDivide(ce, args[0], args[1]),
       },
 
       {
@@ -154,7 +157,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         threadable: true,
         complexity: 3500,
         // Exp(x) -> e^x
-        canonical: (ce, args) => ce.power(ce.symbol('ExponentialE'), args[0]),
+        canonical: (ce, args) =>
+          !args[0]
+            ? ce.symbol('Missing')
+            : ce.power(ce.symbol('ExponentialE'), args[0]),
       },
 
       {
@@ -346,12 +352,13 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         wikidata: 'Q715358',
         domain: ['Function', 'Number', 'Number'],
         complexity: 2000,
-        canonical: (_ce, args) => canonicalNegate(args[0]),
+        canonical: (ce, args) =>
+          args[0] ? canonicalNegate(args[0]) : ce.box('Missing'),
         simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processNegate(ce, ops[0], 'evaluate'),
         N: (ce, ops) => processNegate(ce, ops[0], 'N'),
-        sgn: (_ce, args): -1 | 0 | 1 | undefined => {
-          const arg = args[0];
+        sgn: (ce, args): -1 | 0 | 1 | undefined => {
+          const arg = args[0] ?? ce.symbol('Missing');
           if (arg.isZero) return 0;
           if (arg.isPositive) return -1;
           if (arg.isNegative) return +1;
@@ -365,10 +372,11 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         wikidata: 'Q33456',
         commutative: false,
         complexity: 3500,
-        canonical: (ce, args) =>
-          args[0] && args[1]
-            ? canonicalPower(ce, args[0], args[1]) ?? ce._fn('Power', args)
-            : ce._fn('Power', args),
+        canonical: (ce, args) => {
+          const op1 = args[0] ?? ce.symbol('Missing');
+          const op2 = args[1] ?? ce.symbol('Missing');
+          return canonicalPower(ce, op1, op2) ?? ce._fn('Power', args);
+        },
         simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
         evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
         N: (ce, ops) => processPower(ce, ops[0], ops[1], 'N'),
@@ -434,10 +442,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         domain: ['Function', 'Number', 'RationalNumber', 'Number'],
         complexity: 3200,
         canonical: (ce, args) => {
-          const exp = ce.inverse(args[1]);
-          return (
-            canonicalPower(ce, args[0], exp) ?? ce._fn('Power', [args[0], exp])
-          );
+          const op1 = args[0] ?? ce.symbol('Missing');
+          const op2 = args[1] ?? ce.symbol('Missing');
+          const exp = ce.inverse(op2);
+          return canonicalPower(ce, op1, exp) ?? ce._fn('Power', [op1, exp]);
         },
         N: (ce, ops) => {
           const base = ops[0];
@@ -516,8 +524,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         wikidata: 'Q134237',
         complexity: 3000,
         canonical: (ce, args) =>
-          canonicalPower(ce, args[0], ce.HALF) ??
-          ce._fn('Power', [args[0], ce.HALF]),
+          args[0]
+            ? canonicalPower(ce, args[0], ce.HALF) ??
+              ce._fn('Power', [args[0], ce.HALF])
+            : ce._fn('Power', [ce.symbol('Missing'), ce.HALF]),
         simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
         N: (ce, ops) => processSqrt(ce, ops[0], 'N'),
@@ -531,8 +541,10 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         wikidata: 'Q3075175',
         complexity: 3100,
         canonical: (ce, args) =>
-          canonicalPower(ce, args[0], ce.TWO) ??
-          ce._fn('Power', [args[0], ce.TWO]),
+          args[0]
+            ? canonicalPower(ce, args[0], ce.TWO) ??
+              ce._fn('Power', [args[0], ce.TWO])
+            : ce._fn('Power', [ce.symbol('Missing'), ce.TWO]),
         N: (ce, ops) => {
           if (ops[0].decimalValue)
             return ce.number(ops[0].decimalValue.mul(ops[0].decimalValue));
@@ -567,13 +579,15 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
         // removed during canonicalization.
         hold: 'last',
         canonical: (ce, args) => {
+          const op1 = args[0] ?? ce.symbol('Missing');
+          const op2 = args[1] ?? ce.symbol('Missing');
           // Is it a string in a base form:
           // `"deadbeef"_{16}` `"0101010"_2?
-          if (args[0].string) {
-            if (args[1].isLiteral && args[1].asSmallInteger !== null) {
-              const base = args[1].asSmallInteger;
+          if (op1.string) {
+            if (op2.isLiteral && op2.asSmallInteger !== null) {
+              const base = op2.asSmallInteger;
               if (base > 1 && base <= 36) {
-                const [value, rest] = fromDigits(args[0].string, base);
+                const [value, rest] = fromDigits(op1.string, base);
                 if (rest) {
                   return ce._fn('Error', [
                     ce.number(value),
@@ -587,18 +601,18 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
           }
           // Is it a compound symbol `x_\text{max}`, `\mu_0`
           // or an indexable collection?
-          if (args[0].symbol) {
+          if (op1.symbol) {
             // Indexable collection?
-            if (args[0].symbolDefinition?.at) {
-              return ce._fn('At', [args[0], args[1]]);
+            if (op1.symbolDefinition?.at) {
+              return ce._fn('At', [op1, op2]);
             }
             // Maybe a compound symbol
-            let sub = args[1].string ?? args[1].symbol;
+            let sub = op2.string ?? op2.symbol;
             if (!sub) {
-              if (args[1].asSmallInteger !== null)
-                sub = args[1].asSmallInteger.toString();
+              if (op2.asSmallInteger !== null)
+                sub = op2.asSmallInteger.toString();
             }
-            if (sub) return ce.symbol(args[0].symbol + '_' + sub);
+            if (sub) return ce.symbol(op1.symbol + '_' + sub);
           }
           return ce._fn('Subscript', args);
         },
