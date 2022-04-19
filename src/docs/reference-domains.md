@@ -14,19 +14,19 @@ sidebar:
 | Domain                 | Notation           | Description                                                                                                 |
 | :--------------------- | :----------------- | :---------------------------------------------------------------------------------------------------------- |
 | `AlgebraicNumber`      | \\[ \mathbb{A} \\] | Elements are the root of a polynomial                                                                       |
-| `ComplexNumber`        | \\[ \mathbb{C}\\   | A real or imaginary number                                                                                  |
+| `ComplexNumber`        | \\[ \mathbb{C} \\]   | A real or imaginary number                                                                                  |
 | `Integer`              | \\[ \mathbb{Z}\\]  | The set of whole numbers and their additive inverse \\(\lbrace \ldots -3, -2, -1,0, 1, 2, 3\ldots\rbrace\\) |
-| `NegativeInteger`      | \\[ \Z^- \\]       | Integers \\( \lt 0 \\)                                                                                      |
+| `NegativeInteger`      | \\[ \Z^- \\]       | Integers \\( \lt 0\\), \\(\lbrace \ldots -3, -2, -1\rbrace\\)                                                                                      |
 | `NegativeNumber`       | \\[ \R^- \\]       | Real numbers \\( \lt 0 \\)                                                                                  |
-| `NonNegativeInteger`   | \\[ \Z^{0+} \\]    | Integers \\( \geq 0 \\)                                                                                     |
+| `NonNegativeInteger`   | \\[ \Z^{0+} \\]    | Integers \\( \geq 0 \\), \\(\lbrace 0, 1, 2, 3\ldots\rbrace\\)                                                                                     |
 | `NonNegativeNumber`    | \\[ \R^{0+} \\]    | Real numbers \\( \geq 0 \\)                                                                                 |
-| `NonPositiveInteger`   | \\[ \Z^{0-} \\]    | Integers \\( \leq 0 \\)                                                                                     |
+| `NonPositiveInteger`   | \\[ \Z^{0-} \\]    | Integers \\( \leq 0 \\), \\(\lbrace \ldots -3, -2, -1, 0\rbrace\\)                                                                                     |
 | `NonPositiveNumber`    | \\[ \R^{0-} \\]    | Real numbers \\( \leq 0 \\)                                                                                 |
 | `Number`               |                    | Any number, real or complex                                                                                 |
-| `PositiveInteger`      | \\[ \Z^{+} \\]     | Integers \\( \gt 0 \\)                                                                                      |
+| `PositiveInteger`      | \\[ \Z^{+} \\]     | Integers \\( \gt 0 \\), \\(\lbrace 1, 2, 3\ldots\rbrace\\)                                                                                      |
 | `PositiveNumber`       | \\[ \R^{+} \\]     | Real numbers \\( \gt 0 \\)                                                                                  |
 | `RationalNumber`       | \\[ \mathbb{Q}\\]  | A number which can be expressed as the quotient \\(p / q\\) of two integers \\(p, q \in \mathbb{Z}\\).      |
-| `RealNumber`           | \\[ \mathbb{R} \\] |                                                                                                             |
+| `RealNumber`           | \\[ \mathbb{R} \\] | Numbers that form the unique Dedekind-complete ordered field (\\( \mathbb {R}  ; + ; · ; <\\)), up to an isomorphism                                                                                                            |
 | `TranscendentalNumber` | \\[ \mathbb{T} \\] | Real numbers that are not algebraic                                                                         |
 
 </div>
@@ -89,9 +89,11 @@ sidebar:
 
 | Domain             | Description                                                                                      |
 | :----------------- | :----------------------------------------------------------------------------------------------- |
+| `Anything`          | The universal domain, it conaints all possible values                                                                            |
 | `Boolean`          | `True` or `False`                                                                                |
 | `Domain`           | The domain of all the domains                                                                    |
 | `MaybeBoolean`     | `True` `False` or `Maybe`                                                                        |
+| `Nothing`          | The domain whose only member is the symbol `Nothing` |
 | `ParametricDomain` | The domain of all the parametric domains, that is the functions that can define a domain         |
 | `String`           | A string of Unicode characters                                                                   |
 | `Symbol`           | A string used to represent the name of a constant, variable or function in a MathJSON expression |
