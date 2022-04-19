@@ -187,14 +187,13 @@ describe('OPERATOR prefix', () => {
 describe('OPERATOR infix', () => {
   test('- // Invalid negate', () =>
     expect(check('-')).toMatchInlineSnapshot(`
-      'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'-'"]]
-      canonical = ["Error", "'syntax-error'", ["LatexForm", "'-'"]]
-      evaluate  = "'syntax-error'"'
+      'box      = ["Negate", "Nothing"]
+      canonical = "Missing"'
     `));
   test('1- // Invalid subtract', () =>
     expect(check('1-')).toMatchInlineSnapshot(`
-      'box      = ["Error", 1, "'syntax-error'", ["LatexForm", "'-'"]]
-      evaluate  = 1'
+      'box      = ["Subtract", 1, "Nothing"]
+      canonical = -1'
     `));
 
   test('-1+2+3-4 // Add', () =>
@@ -234,13 +233,14 @@ describe('OPERATOR multiply', () => {
 
   test('2\\sin(x), function apply', () =>
     expect(check('2\\sin(x)')).toMatchInlineSnapshot(`
-      'box      = ["Error", 2, "'syntax-error'", ["LatexForm", "'\\sin(x)'"]]
-      evaluate  = 2'
+      'box      = ["Multiply", 2, ["Sin", "x"]]
+      simplify  = ["Divide", ["Multiply", 2, ["Subtract", ["Exp", ["Multiply", "ImaginaryUnit", "x"]], ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "x"]]]]], ["Complex", 0, 2]]'
     `));
   test('2\\sin(x)\\frac12, function apply', () =>
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
-      'box      = ["Error", 2, "'syntax-error'", ["LatexForm", "'\\sin(x)\\frac12'"]]
-      evaluate  = 2'
+      'box      = ["Multiply", 2, ["Sin", "x"], ["Rational", 1, 2]]
+      canonical = ["Sin", "x"]
+      simplify  = ["Divide", ["Subtract", ["Exp", ["Multiply", "ImaginaryUnit", "x"]], ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "x"]]]], ["Complex", 0, 2]]'
     `));
   test('3\\pi5', () =>
     expect(check('3\\pi5')).toMatchInlineSnapshot(`
@@ -264,7 +264,10 @@ describe('OPERATOR divide', () => {
       N         = 1.4'
     `));
   test('\\frac{10}{5}', () =>
-    expect(check('\\frac{10}{5}')).toMatchInlineSnapshot(`'2'`));
+    expect(check('\\frac{10}{5}')).toMatchInlineSnapshot(`
+      'box      = ["Rational", 10, 5]
+      canonical = 2'
+    `));
   test('\\frac{18}{-3}', () =>
     expect(check('\\frac{18}{-3}')).toMatchInlineSnapshot(`
       'box      = ["Divide", 18, -3]

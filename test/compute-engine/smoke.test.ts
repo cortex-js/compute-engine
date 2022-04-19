@@ -32,13 +32,11 @@ import {
 
 const ce = engine;
 
-// let a = ce.parse('\\frac{5}{\\frac{7}{x}}');
-let a = ce.box(['Power', ['Power', 'x', -1], -1]);
-a = a.simplify();
-console.log(a.json);
-
-const b = ce.parse('\\frac{8}{10}');
-console.log(b.json);
+const b = ce.parse('-');
+console.log(b.canonical.toJSON());
+console.log(b.simplify().toJSON());
+console.log(b.evaluate().toJSON());
+console.log(b.N().toJSON());
 // let f = ce.parse('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}');
 // f = f.simplify();
 // console.log(f.toJSON());

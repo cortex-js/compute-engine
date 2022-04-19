@@ -23,7 +23,16 @@ describe('STEFNOTCH #10', () => {
     ).toMatchInlineSnapshot(`
       '[
         "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\left'"]],
+        [
+          "Style",
+          [
+            "Error",
+            "Missing",
+            "'unknown-command'",
+            ["LatexForm", "'\\\\left'"]
+          ],
+          ["KeyValuePair", "'display'", "'block'"]
+        ],
         "'syntax-error'",
         ["LatexForm", "'(\\\\sin^{-1}\\\\mleft(x\\\\mright)\\\\right)^{\\\\prime}'"]
       ]'
@@ -221,14 +230,18 @@ describe('STEFNOTCH #13', () => {
           "Equal",
           "a",
           [
-            "Subscript",
+            "Style",
             [
-              "Error",
-              "Missing",
-              "'unknown-command'",
-              ["LatexForm", "'\\\\lim'"]
+              "Subscript",
+              [
+                "Error",
+                "Missing",
+                "'unknown-command'",
+                ["LatexForm", "'\\\\lim'"]
+              ],
+              ["To", "n", {num: "+Infinity"}]
             ],
-            ["To", "n", {num: "+Infinity"}]
+            ["KeyValuePair", "'display'", "'block'"]
           ]
         ],
         "'syntax-error'",

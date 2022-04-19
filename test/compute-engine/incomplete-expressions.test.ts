@@ -11,38 +11,18 @@ describe('basic', () => {
     expect(parse('\\frac')).toMatchInlineSnapshot(
       `'["Divide", "Missing", "Missing"]'`
     );
-    expect(parse('\\frac{')).toMatchInlineSnapshot(`
-      '[
-        "Error",
-        ["Divide", "Missing", "Missing"],
-        "'syntax-error'",
-        ["LatexForm", "'{'"]
-      ]'
-    `);
-    expect(parse('\\frac{{')).toMatchInlineSnapshot(`
-      '[
-        "Error",
-        ["Divide", "Missing", "Missing"],
-        "'syntax-error'",
-        ["LatexForm", "'{{'"]
-      ]'
-    `);
-    expect(parse('\\frac{}}')).toMatchInlineSnapshot(`
-      '[
-        "Error",
-        ["Divide", "Missing", "Missing"],
-        "'syntax-error'",
-        ["LatexForm", "'}'"]
-      ]'
-    `);
-    expect(parse('\\frac{1}}')).toMatchInlineSnapshot(`
-      '[
-        "Error",
-        ["Divide", 1, "Missing"],
-        "'syntax-error'",
-        ["LatexForm", "'}'"]
-      ]'
-    `);
+    expect(parse('\\frac{')).toMatchInlineSnapshot(
+      `'["Multiply", ["Divide", "Missing", "Missing"], "Nothing"]'`
+    );
+    expect(parse('\\frac{{')).toMatchInlineSnapshot(
+      `'["Multiply", ["Divide", "Missing", "Missing"], "Nothing"]'`
+    );
+    expect(parse('\\frac{}}')).toMatchInlineSnapshot(
+      `'["Multiply", ["Divide", "Missing", "Missing"], "Nothing"]'`
+    );
+    expect(parse('\\frac{1}}')).toMatchInlineSnapshot(
+      `'["Multiply", ["Divide", 1, "Missing"], "Nothing"]'`
+    );
     expect(parse('\\frac{1}{2')).toMatchInlineSnapshot(
       `'["Multiply", ["Divide", 1, "Missing"], 2]'`
     );
@@ -52,9 +32,7 @@ describe('basic', () => {
   });
 
   test('Semantic Errors', () => {
-    expect(parse('1+')).toMatchInlineSnapshot(
-      `'["Error", 1, "'syntax-error'", ["LatexForm", "'+'"]]'`
-    );
+    expect(parse('1+')).toMatchInlineSnapshot(`'["Add", 1, "Nothing"]'`);
     expect(parse('1\\times')).toMatchInlineSnapshot(
       `'["Multiply", 1, "Missing"]'`
     );
@@ -69,9 +47,7 @@ describe('basic', () => {
         ["LatexForm", "'3'"]
       ]'
     `);
-    expect(parse('2*')).toMatchInlineSnapshot(
-      `'["Error", 2, "'syntax-error'", ["LatexForm", "'*'"]]'`
-    );
+    expect(parse('2*')).toMatchInlineSnapshot(`'["Multiply", 2, "Nothing"]'`);
     expect(parse('\\frac{}{}')).toMatchInlineSnapshot(
       `'["Divide", "Missing", "Missing"]'`
     );

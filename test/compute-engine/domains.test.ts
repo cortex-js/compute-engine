@@ -45,12 +45,14 @@ const domains: Expression[] = [
 
 describe('SUBSETS', () => {
   test('Numbers', () => {
-    expect(engine.domain('RealNumber').isSubsetOf('RealNumber')).toBeTruthy();
-    expect(engine.domain('Integer').isSubsetOf('RealNumber')).toBeTruthy();
     expect(
-      engine.domain('RationalNumber').isSubsetOf('ExtendedRealNumber')
+      engine.domain('RealNumber').isSubdomainOf('RealNumber')
     ).toBeTruthy();
-    expect(engine.domain('RealNumber').isSubsetOf('Integer')).toBeFalsy();
+    expect(engine.domain('Integer').isSubdomainOf('RealNumber')).toBeTruthy();
+    expect(
+      engine.domain('RationalNumber').isSubdomainOf('ExtendedRealNumber')
+    ).toBeTruthy();
+    expect(engine.domain('RealNumber').isSubdomainOf('Integer')).toBeFalsy();
     // expect(
     //   engine.isSubsetOf(
     //     ['Intersection', 'RationalNumber', 'NaturalNumber'],

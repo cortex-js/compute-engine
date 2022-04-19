@@ -16,7 +16,7 @@ function isEqual(a: string, b: string): boolean {
   return ce.parse(a).isEqual(ce.parse(b));
 }
 
-describe(`numbers (integers, floats, operators +-*/,)`, () => {
+describe.skip(`numbers (integers, floats, operators +-*/,)`, () => {
   //     #numbers (integers, floats, operators +-*/,)
   test(`isEquivalent('2', '1+1')`, () =>
     expect(isEquivalent('1+1', '2')).toBeTruthy());
@@ -38,7 +38,7 @@ describe(`numbers (integers, floats, operators +-*/,)`, () => {
     expect(isEquivalent('2x+4 = 2', 'x + 2 = 1')).toBeTruthy());
 });
 
-describe(`arithmetic equalities`, () => {
+describe.skip(`arithmetic equalities`, () => {
   test(`isEquivalent('Eq(1,5-4+3-2-1)','Eq(1,1)', allowSimplify = True)`, () =>
     expect(
       isEquivalentSimplify('1 = 1', '1 = 5 - 4 + 3 - 2 - 1')
@@ -121,7 +121,7 @@ describe(`arithmetic equalities`, () => {
     ).toBeTruthy());
 });
 
-describe(`reloaded division operator to float division`, () => {
+describe.skip(`reloaded division operator to float division`, () => {
   test(`isEquivalent('Eq(x,0.5)', 'Eq(x,1/2)')`, () =>
     expect(isEquivalent('x = 0.5', 'x = \\frac12')).toBeTruthy());
 
@@ -135,7 +135,7 @@ describe(`reloaded division operator to float division`, () => {
     expect(isEquivalent('x^{\\frac12}', 'x^{0.5}')).toBeTruthy());
 });
 
-describe(`multiplication expansion`, () => {
+describe.skip(`multiplication expansion`, () => {
   test(`isEquivalent('a*(a+b)', 'a**2+a*b', allowSimplify = True)`, () =>
     expect(isEquivalentSimplify('a(a+b)', 'a^2+ab')).toBeTruthy());
 
@@ -166,7 +166,7 @@ describe(`multiplication expansion`, () => {
     expect(isEquivalent('a = 2b+1', '-2b -1 = -a + 1')).toBeFalsy());
 });
 
-describe(`Trig functions and identities`, () => {
+describe.skip(`Trig functions and identities`, () => {
   test(`isEquivalent('cos(t)', 'sin(t+pi/2)')`, () =>
     expect(isEquivalent('\\cos(t)', '\\sin(t+\\frac\\pi2)')).toBeTruthy());
 
@@ -188,7 +188,7 @@ describe(`Trig functions and identities`, () => {
     expect(isEquivalent('sin(x)^2+cos(x)^2', '1')).toBeTruthy());
 });
 
-describe(`Log functions and identities`, () => {
+describe.skip(`Log functions and identities`, () => {
   test(`isEquivalent('exp(2*x)','(exp(x))**2')`, () =>
     expect(
       isEquivalent('\\exponentialE^{2x}', '(\\exponentialE^x)^2')
@@ -201,7 +201,7 @@ describe(`Log functions and identities`, () => {
     expect(isEquivalent('\\log(x^2)', '2\\log(x)')).toBeTruthy());
 });
 
-describe(`Solve system of equations/inequalities`, () => {
+describe.skip(`Solve system of equations/inequalities`, () => {
   test(`not isEquivalent("Eq(28.80*y*3*h,86.4*y*h)", "Eq(y,9.6*h)")`, () =>
     expect(isEquivalent('28.80y3h = 86.4yh', 'y = 9.6h')).toBeFalsy());
 
@@ -214,7 +214,7 @@ describe(`Solve system of equations/inequalities`, () => {
     ).toBeFalsy());
 });
 
-describe(`Rounding error`, () => {
+describe.skip(`Rounding error`, () => {
   test(`isEquivalent('Eq(x,7)','Eq(3.45*x,24.15)')`, () =>
     expect(isEquivalent('x = 7', '3.45x = 24.15')).toBeTruthy());
 
@@ -222,7 +222,7 @@ describe(`Rounding error`, () => {
     expect(isEquivalent('x = 7.1', '3.45x = 24.15')).toBeFalsy());
 });
 
-describe(`Relational equivalence`, () => {
+describe.skip(`Relational equivalence`, () => {
   test(`isEquivalent('Eq(x,1)', 'Eq(1,x)')`, () =>
     expect(isEquivalent('x =  1', '1 = x')).toBeTruthy());
 
@@ -256,7 +256,7 @@ describe(`Relational equivalence`, () => {
     expect(isEquivalent('x \\lt 225', '4x \\gt 900')).toBeFalsy());
 });
 
-describe(`adding second representation for exponentials`, () => {
+describe.skip(`adding second representation for exponentials`, () => {
   test(`isEquivalent('Eq(y,(x)**(1/3))', 'Eq(y,(x)**(1/3))', allowSimplify = True)`, () =>
     expect(
       isEquivalentSimplify('y = x^\\frac13', 'y = x^\\frac13')

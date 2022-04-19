@@ -21,7 +21,7 @@ console.log(expand(engine.parse('(a+b)^{10}')).latex);
 
 // Sympy benchmarks.
 // Source: https://github.com/sympy/sympy/blob/master/sympy/core/benchmarks/bench_expand.py
-describe('SymPy Benchmarks', () => {
+describe.skip('SymPy Benchmarks', () => {
   test(`Expand(3x^2yz^7 + 7xyz^2 + 4x + xy^4)`, () => {
     expect(
       benchmark(() => expand(p), {
@@ -73,7 +73,7 @@ describe('SymPy Benchmarks', () => {
 // Custom benchmarks
 //
 
-test(`(a+b)^10`, () => {
+test.skip(`(a+b)^10`, () => {
   expect(
     benchmark(() => expand(engine.parse('(a+b)^{10}')), {
       mem: 3000000,
@@ -83,7 +83,7 @@ test(`(a+b)^10`, () => {
   ).toBeLessThan(0.1);
 });
 
-test(`(a+b)^20`, () => {
+test.skip(`(a+b)^20`, () => {
   expect(
     benchmark(() => expand(engine.parse('(a+b)^{20}')), {
       mem: 2022480,
@@ -93,7 +93,7 @@ test(`(a+b)^20`, () => {
   ).toBeLessThan(0.1);
 });
 
-test(`(a+b)^40`, () => {
+test.skip(`(a+b)^40`, () => {
   expect(
     benchmark(() => expand(engine.parse('(a+b)^{40}')), {
       mem: 8714104,
@@ -103,7 +103,7 @@ test(`(a+b)^40`, () => {
   ).toBeLessThan(0.5);
 });
 
-test(`(a+b)^80`, () => {
+test.skip(`(a+b)^80`, () => {
   expect(
     benchmark(() => expand(engine.parse('(a+b)^{80}')), {
       mem: 1900000,
