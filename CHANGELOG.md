@@ -1,4 +1,6 @@
-## [Unreleased]
+## 0.6.0 
+
+ **Release Date:** 2022-04-18
 
 ### Improvements
 
