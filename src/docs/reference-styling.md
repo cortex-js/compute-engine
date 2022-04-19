@@ -11,7 +11,7 @@ sidebar:
 
 ## `Style(`_`expr`_`, `_`dictionary`_`)`
 
-{% tags "inert" }
+{% tags "inert" %}
 
 - _`expr`_ an expression
 - _`dictionary`_ a dictionary with one or more of the following keys:
