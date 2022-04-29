@@ -38,16 +38,18 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   ): Substitution | null;
 
   readonly engine: IComputeEngine;
-  /** Authentic LaTeX, obtained from a source, i.e. from parsing, not generated
-   * synthetically */
+
+  /** Verbatim LaTeX, obtained from a source, i.e. from parsing, not generated
+   * synthetically
+   */
   protected _latex?: string;
 
   protected _wikidata?: string;
 
   constructor(ce: IComputeEngine, metadata?: Metadata) {
     this.engine = ce;
-    if (metadata?.latex) this._latex = metadata.latex;
-    if (metadata?.wikidata) this._wikidata = metadata.wikidata;
+    if (metadata?.latex !== undefined) this._latex = metadata.latex;
+    if (metadata?.wikidata !== undefined) this._wikidata = metadata.wikidata;
   }
 
   /** Object.toJSON(), called by JSON.Stringify */

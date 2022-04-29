@@ -318,33 +318,32 @@ export function serializeJsonSymbol(
   if (ce.jsonSerializationOptions.metadata.includes('latex')) {
     metadata.latex = metadata.latex ?? ce.serialize({ sym });
 
-    // Only keep the latex if it's different from the plain symbol.
-    // For example, keep it for `\Pi` but not for `x`
-    if (metadata.latex === sym) metadata.latex = '';
-
-    metadata.latex = _escapeJsonString(metadata.latex);
-  } else metadata.latex = '';
+    if (metadata.latex !== undefined)
+      metadata.latex = _escapeJsonString(metadata.latex);
+  } else metadata.latex = undefined;
 
   if (ce.jsonSerializationOptions.metadata.includes('wikidata')) {
-    if (!metadata.wikidata)
-      metadata.wikidata = _escapeJsonString(
-        ce.getSymbolDefinition(sym)?.wikidata ?? ''
-      );
-  } else metadata.wikidata = '';
+    if (metadata.wikidata === undefined) {
+      const wikidata = ce.getSymbolDefinition(sym)?.wikidata;
+      if (wikidata !== undefined)
+        metadata.wikidata = _escapeJsonString(wikidata);
+    }
+  } else metadata.wikidata = undefined;
 
-  sym = _escapeJsonString(sym);
+  sym = _escapeJsonString(sym!);
 
   if (
-    !metadata.latex &&
-    !metadata.wikidata &&
+    metadata.latex === undefined &&
+    metadata.wikidata === undefined &&
     ce.jsonSerializationOptions.shorthands.includes('symbol')
   )
     return sym;
 
-  if (metadata.latex && metadata.wikidata)
+  if (metadata.latex !== undefined && metadata.wikidata !== undefined)
     return { sym, latex: metadata.latex, wikidata: metadata.wikidata };
-  if (metadata.latex) return { sym, latex: metadata.latex };
-  if (metadata.wikidata) return { sym, wikidata: metadata.wikidata };
+  if (metadata.latex !== undefined) return { sym, latex: metadata.latex };
+  if (metadata.wikidata !== undefined)
+    return { sym, wikidata: metadata.wikidata };
   return { sym };
 }
 
@@ -356,10 +355,10 @@ export function serializeJsonNumber(
   metadata = { ...metadata };
 
   if (!ce.jsonSerializationOptions.metadata.includes('latex'))
-    metadata.latex = '';
+    metadata.latex = undefined;
 
   const shorthandAllowed =
-    !metadata.latex &&
+    metadata.latex === undefined &&
     !ce.jsonSerializationOptions.metadata.includes('latex') &&
     ce.jsonSerializationOptions.shorthands.includes('number');
 
@@ -393,7 +392,9 @@ export function serializeJsonNumber(
     if (ce.jsonSerializationOptions.metadata.includes('latex'))
       metadata.latex = metadata.latex ?? ce.serialize({ num });
 
-    return metadata.latex ? { num, latex: metadata.latex } : { num };
+    return metadata.latex !== undefined
+      ? { num, latex: metadata.latex }
+      : { num };
   }
 
   //
@@ -407,7 +408,9 @@ export function serializeJsonNumber(
       if (ce.jsonSerializationOptions.metadata.includes('latex'))
         metadata.latex = metadata.latex ?? ce.serialize({ num });
 
-      return metadata.latex ? { num, latex: metadata.latex } : { num };
+      return metadata.latex !== undefined
+        ? { num, latex: metadata.latex }
+        : { num };
     }
 
     return serializeJsonFunction(
@@ -426,8 +429,8 @@ export function serializeJsonNumber(
   //
   if (Array.isArray(value)) {
     if (
-      !metadata.latex &&
-      !metadata.wikidata &&
+      metadata.latex === undefined &&
+      metadata.wikidata === undefined &&
       !ce.jsonSerializationOptions.metadata.includes('latex') &&
       ce.jsonSerializationOptions.shorthands.includes('function') &&
       ce.jsonSerializationOptions.shorthands.includes('number')
@@ -456,10 +459,14 @@ export function serializeJsonNumber(
   if (ce.jsonSerializationOptions.metadata.includes('latex'))
     metadata.latex = metadata.latex ?? ce.serialize({ num });
 
-  return metadata.latex ? { num, latex: metadata.latex } : { num };
+  return metadata.latex !== undefined
+    ? { num, latex: metadata.latex }
+    : { num };
 }
 
-function _escapeJsonString(s: string): string {
+function _escapeJsonString(s: undefined): undefined;
+function _escapeJsonString(s: string): string;
+function _escapeJsonString(s: string | undefined): string | undefined {
   return s;
 }
 

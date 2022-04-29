@@ -36,8 +36,8 @@ export * from './latex-syntax/public';
  */
 
 export type Metadata = {
-  latex?: string;
-  wikidata?: string;
+  latex?: string | undefined;
+  wikidata?: string | undefined;
 };
 
 /**

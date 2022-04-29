@@ -32,6 +32,11 @@ import {
 
 const ce = engine;
 
+ce.jsonSerializationOptions.metadata = ['latex'];
+const v = ce.parse('').json;
+console.log(v);
+ce.jsonSerializationOptions.metadata = [];
+
 const b = ce.parse('-');
 console.log(b.canonical.toJSON());
 console.log(b.simplify().toJSON());

@@ -231,6 +231,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
   get json(): Expression {
     return serializeJsonSymbol(this.engine, this._name, {
+      latex: this._latex,
       wikidata: this._wikidata,
     });
   }

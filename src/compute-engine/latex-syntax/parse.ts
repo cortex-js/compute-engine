@@ -135,7 +135,7 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
     return 'unknown';
   },
 
-  preserveLatex: true,
+  preserveLatex: false,
 };
 
 export class _Parser implements Parser {

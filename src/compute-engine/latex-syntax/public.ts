@@ -384,7 +384,7 @@ export type ParseLatexOptions = {
   /**
    * If true, ignore space characters.
    *
-   * Default: `true`
+   * **Default**: `true`
    *
    */
   skipSpace: boolean;
@@ -405,7 +405,7 @@ export type ParseLatexOptions = {
    * Otherwise, return each token making up the number (minus sign, digits,
    * decimal separator, etc...).
    *
-   * Default: `true`
+   * **Default**: `true`
    */
   parseNumbers: boolean;
 
@@ -439,6 +439,8 @@ export type ParseLatexOptions = {
    * may contain a slightly different LaTeX, for example with consecutive spaces
    * replaced by one, with comments removed and with some low-level LaTeX
    * commands replaced, for example `\egroup` and `\bgroup`.
+   *
+   * **Default:** `false`
    */
   preserveLatex: boolean;
 };

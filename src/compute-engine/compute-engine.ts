@@ -1076,14 +1076,14 @@ export class ComputeEngine implements IComputeEngine {
 
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
     const result = canonicalAdd(this, ops);
-    if (metadata?.latex) result.latex = metadata.latex;
-    if (metadata?.wikidata) result.wikidata = metadata.wikidata;
+    if (metadata?.latex !== undefined) result.latex = metadata.latex;
+    if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
   mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
     const result = canonicalMultiply(this, ops);
-    if (metadata?.latex) result.latex = metadata.latex;
-    if (metadata?.wikidata) result.wikidata = metadata.wikidata;
+    if (metadata?.latex !== undefined) result.latex = metadata.latex;
+    if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
   power(
@@ -1145,8 +1145,8 @@ export class ComputeEngine implements IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression {
     const result = canonicalDivide(this, num, denom);
-    if (metadata?.latex) result.latex = metadata.latex;
-    if (metadata?.wikidata) result.wikidata = metadata.wikidata;
+    if (metadata?.latex !== undefined) result.latex = metadata.latex;
+    if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
   pair(
@@ -1175,6 +1175,9 @@ export class ComputeEngine implements IComputeEngine {
 
     // `Half` is a synonym for the rational 1/2
     if (sym === 'Half') return this.HALF;
+
+    if (metadata?.latex !== undefined)
+      return new BoxedSymbol(this, sym, metadata);
 
     let result = this._commonSymbols[sym];
     if (result) {

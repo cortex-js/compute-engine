@@ -1,6 +1,18 @@
-## 0.6.0 
+## [Unreleased]
 
- **Release Date:** 2022-04-18
+### Breaking Changes
+
+- The `ce.latexOptions.preserveLatex` default value is now `false`
+
+### Bug Fixed
+
+- **#43** If the input of `ce.parse()` is an empty string, return an empty
+  string for `expr.latex` or `expr.json.latex`: that is, ensure verbatim LaTeX
+  round-tripping
+
+## 0.6.0
+
+**Release Date:** 2022-04-18
 
 ### Improvements
 
