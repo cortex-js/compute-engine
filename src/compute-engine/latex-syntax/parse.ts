@@ -9,7 +9,7 @@ import {
   Terminator,
   Parser,
 } from './public';
-import { tokensToString } from './tokenizer';
+import { tokenize, tokensToString } from './tokenizer';
 import {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
@@ -141,6 +141,7 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
 export class _Parser implements Parser {
   readonly onError: WarningSignalHandler;
   readonly options: NumberFormattingOptions & ParseLatexOptions;
+  private _decimalMarkerTokens: LatexToken[];
   readonly engine: IComputeEngine;
 
   readonly _dictionary: IndexedLatexDictionary;
@@ -165,6 +166,7 @@ export class _Parser implements Parser {
       ...DEFAULT_PARSE_LATEX_OPTIONS,
       ...options,
     };
+    this._decimalMarkerTokens = tokenize(this.options.decimalMarker, []);
     this.engine = computeEngine;
     this._tokens = tokens;
 
@@ -175,7 +177,14 @@ export class _Parser implements Parser {
   updateOptions(
     opt: Partial<NumberFormattingOptions> & Partial<ParseLatexOptions>
   ) {
-    for (const [k, v] of Object.entries(opt)) this.options[k] = v;
+    for (const [k, v] of Object.entries(opt)) {
+      if (k in this.options) {
+        this.options[k] = v;
+        if (k === 'decimalMarker' && typeof v === 'string') {
+          this._decimalMarkerTokens = tokenize(v, []);
+        }
+      }
+    }
   }
 
   // @todo: deprecate it (use terminator)
@@ -553,7 +562,7 @@ export class _Parser implements Parser {
     // Does the number start with a dot prefix? i.e. `.5`
     let dotPrefix = false;
 
-    if (this.match(this.options.decimalMarker)) {
+    if (this.matchAll(this._decimalMarkerTokens)) {
       const i = this.index;
       if (!this.matchAny(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])) {
         // A decimal marker followed by not a digit -> not a number
@@ -571,7 +580,7 @@ export class _Parser implements Parser {
       return '';
     }
 
-    if (!dotPrefix && this.match(this.options.decimalMarker ?? '')) {
+    if (!dotPrefix && this.matchAll(this._decimalMarkerTokens)) {
       result += '.' + (this.matchDecimalDigits() ?? '0');
     }
 
@@ -1144,8 +1153,10 @@ export class _Parser implements Parser {
     let done = this.atEnd;
     while (!done) {
       const token = this.peek;
-      if (token === '<space>') result += ' ';
-      else if (token[0] === '\\') {
+      if (token === '<space>') {
+        this.next();
+        result += ' ';
+      } else if (token[0] === '\\') {
         // TeX will give a 'Missing \endcsname inserted' error
         // if it encounters any command when expecting a string.
         // We're a bit more lax.

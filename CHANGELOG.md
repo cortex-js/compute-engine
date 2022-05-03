@@ -9,6 +9,8 @@
 - **#43** If the input of `ce.parse()` is an empty string, return an empty
   string for `expr.latex` or `expr.json.latex`: that is, ensure verbatim LaTeX
   round-tripping
+- Evaluating some functions, such as `\arccos` would result in a crash
+- Correctly handle parsing of multi-token decimal markers, e.g. `{,}`
 
 ## 0.6.0
 

@@ -1260,10 +1260,20 @@ export class ComputeEngine implements IComputeEngine {
   get latexOptions(): NumberFormattingOptions &
     ParseLatexOptions &
     SerializeLatexOptions {
-    return {
-      ...this.latexSyntax.options,
-      ...this.latexSyntax.serializer.options,
-    };
+    const latexSyntax = this.latexSyntax;
+    return new Proxy(
+      {
+        ...this.latexSyntax.options,
+        ...this.latexSyntax.serializer.options,
+      },
+      {
+        set(options, prop, value): boolean {
+          if (!(prop in options)) return false;
+          latexSyntax.updateOptions({ [prop]: value });
+          return true;
+        },
+      }
+    );
   }
   set latexOptions(
     opts: Partial<NumberFormattingOptions> &

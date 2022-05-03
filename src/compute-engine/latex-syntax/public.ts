@@ -531,7 +531,7 @@ export type NumberFormattingOptions = {
    * recommended to use `"{,}"` as the marker: the surrounding bracket ensure
    * there is no additional gap after the comma.
    *
-   * Default: `"."`
+   * **Default**: `"."`
    */
   decimalMarker: LatexString;
 
@@ -544,10 +544,10 @@ export type NumberFormattingOptions = {
    * `x_{1,2}` will parse as `x` with a subscript of `1.2`, rather than `x`
    * with two subscripts, `1` and `2`.
    *
-   * Default: `"\\,"` (thin space, 3/18mu) (Resolution 7 of the 1948 CGPM)
+   * **Default**: `"\\,"` (thin space, 3/18mu) (Resolution 7 of the 1948 CGPM)
    */
-
   groupSeparator: LatexString;
+
   exponentProduct: LatexString;
   beginExponentMarker: LatexString;
   endExponentMarker: LatexString;

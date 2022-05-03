@@ -32,10 +32,23 @@ import {
 
 const ce = engine;
 
-ce.jsonSerializationOptions.metadata = ['latex'];
-const v = ce.parse('').json;
+console.log(ce.latexOptions.decimalMarker);
+ce.latexOptions.decimalMarker = '{,}';
+console.log(ce.latexOptions.decimalMarker);
+
+console.log(ce.parse('3{,}1415').toJSON());
+
+// \frac{x}{} \text{ cm}
+// ce.jsonSerializationOptions.metadata = ['latex'];
+const v = ce.parse('\\frac{x}{} \\text{ cm}').json;
 console.log(v);
-ce.jsonSerializationOptions.metadata = [];
+
+let w = ce.parse('\\mathrm{ invalid name}').json;
+console.log(w);
+w = ce.parse('\\mathrm{$invalid}').json;
+console.log(w);
+
+// ce.jsonSerializationOptions.metadata = [];
 
 const b = ce.parse('-');
 console.log(b.canonical.toJSON());

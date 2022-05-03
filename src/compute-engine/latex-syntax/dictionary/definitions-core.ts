@@ -238,7 +238,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     name: 'FromLatex',
-    serialize: (serializer, expr) => {
+    serialize: (_serializer, expr) => {
       return `\\texttt{${sanitizeLatex(stringValue(op(expr, 1)))}}`;
     },
   },
@@ -493,14 +493,16 @@ function parseTextRun(
 
   // Apply leftovers
   if (runinStyle !== null && text) {
-    runs.push(['Style', text, { dict: runinStyle }]);
+    runs.push(['Style', `'${text}'`, { dict: runinStyle }]);
   } else if (text) {
-    runs.push(['String', text]);
+    runs.push(`'${text}'`);
   }
 
-  return style
-    ? ['Style', ['String', ...runs], { dict: style }]
-    : ['String', ...runs];
+  let body: Expression;
+  if (runs.length === 1) body = runs[0];
+  else body = ['String', ...runs];
+
+  return style ? ['Style', body, { dict: style }] : body;
 }
 
 // parse: (
