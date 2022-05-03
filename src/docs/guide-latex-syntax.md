@@ -15,7 +15,8 @@ expressions as LaTeX string (**serializing**).
 
 **To parse a LaTeX string to MathJSON**, call the `ce.parse()` function.
 
-**To serialize an expression to a LaTeX string**, read the `expr.latex` property.
+**To serialize an expression to a LaTeX string**, read the `expr.latex`
+property.
 
 ```javascript
 const ce = new ComputeEngine();
@@ -23,20 +24,18 @@ const ce = new ComputeEngine();
 console.log(ce.parse('5x + 1').json);
 // ➔  ["Add", ["Multiply", 5, "x"], 1]
 
-console.log(ce.serialize(["Add", ["Power", "x", 3], 2]));
+console.log(ce.serialize(['Add', ['Power', 'x', 3], 2]));
 // ➔  "x^3 + 2"
 ```
 
 **To input math using an interactive mathfield**, use [MathLive](/mathlive/).
 
-A MathLive mathfield works like a textarea in HTML, but for math. It provides 
-its content as a LaTeX string or a MathJSON expression, ready to be used with 
+A MathLive mathfield works like a textarea in HTML, but for math. It provides
+its content as a LaTeX string or a MathJSON expression, ready to be used with
 the Compute Engine.
 
-{% readmore "/mathlive/" %}
-Read more about <strong>MathLive</strong>
+{% readmore "/mathlive/" %} Read more about <strong>MathLive</strong>
 {% endreadmore %}
-
 
 The behavior of `expr.parse()` and `expr.latex` can be customized by setting
 `ce.latexOptions`.
@@ -45,26 +44,42 @@ The behavior of `expr.parse()` and `expr.latex` can be customized by setting
 const ce = new ComputeEngine();
 ce.latexOptions = {
   precision: 3,
-  decimalMarker: ","
+  decimalMarker: '{,}',
 };
 
-console.log(ce.parse("\\frac{1}{7}").N().latex);
-// ➔ "0,14\\ldots"
+console.log(ce.parse('\\frac{1}{7}').N().latex);
+// ➔ "0{,}14\\ldots"
 ```
 
+## Customizing the Decimal Marker
+
+The world is
+[about evenly split](https://en.wikipedia.org/wiki/Decimal_separator#/media/File:DecimalSeparator.svg)
+between using a dot or a comma as a decimal marker.
+
+By default, the ComputeEngine is configured to use a dot.
+
+**To use a comma as a decimal marker**, set the `decimalMarker` option:
+
+```ts
+ce.latexOptions.decimalMarker = '{,}';
+```
+
+Note that in LaTeX, in order to get the correct spacing around the comma, it
+must be surrounded by curly brackets.
 
 ## Advanced Usage
 
 The LaTeX that can be parsed or serialized is defined by some dictionary
-entries. While the Compute Engine function and symbol definitions define
-the semantic of the MathJSON expressions, the LaTeX dictionary define the
-LaTeX syntax that can be parsed and serialized.
+entries. While the Compute Engine function and symbol definitions define the
+semantic of the MathJSON expressions, the LaTeX dictionary define the LaTeX
+syntax that can be parsed and serialized.
 
-The Compute Engine include some default dictionaries to parse a number
-of common math expressions.
+The Compute Engine include some default dictionaries to parse a number of common
+math expressions.
 
-**To extend the LaTeX syntax** pass a `latexDictionary` option the the 
-Compute Engine constructor.
+**To extend the LaTeX syntax** pass a `latexDictionary` option the the Compute
+Engine constructor.
 
 ```javascript
 const ce = new ComputeEngine({
@@ -86,4 +101,3 @@ const ce = new ComputeEngine({
 console.log(ce.parse('\\smoll{1}{5}').json);
 // ➔ ["Rational", 1, 5]
 ```
-
