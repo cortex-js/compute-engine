@@ -788,7 +788,7 @@ function constructibleValues(
   theta = theta % (Math.PI / 2);
 
   let sign: number;
-  [sign, head] = TRIG_IDENTITIES[head][quadrant];
+  [sign, head] = TRIG_IDENTITIES[head]?.[quadrant] ?? [1, head];
   sign = sign * identitySign;
   for (const [[n, d], result] of specialValues) {
     if (ce.chop(theta - (Math.PI * n) / d) === 0) {
@@ -796,6 +796,7 @@ function constructibleValues(
       return sign < 0 ? canonicalNegate(result[head]) : result[head];
     }
   }
+  return undefined;
 }
 
 function processInverseFunction(
