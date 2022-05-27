@@ -21,6 +21,7 @@ sidebar:
 | `Nothing`   | An **optional** expression is not present                                                                                                                                              |
 | `Undefined` | The result is not defined. For example, the `domain()` of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` (Not a Number) and for booleans, `Maybe` |
 
+
 | Example                     |                                 |
 | :-------------------------- | :------------------------------ |
 | `["Divide", 2, "Missing"]`  | \\[\frac{2}{\unicode{"2B1A}}\\] |
@@ -32,24 +33,41 @@ sidebar:
 
 ## Core Functions
 
-{% defs "Function" "Operation" %} {% def "About" %} <code>["About",
-_symbol_]</code>
+{% defs "Function" "Operation" %} 
+
+{% def "About" %} `["About", _symbol_]`
 
 Evaluate to a dictionary containing information about a symbol such as its
-domain, its attributes, its value, etc... {% enddef %} {% def "Domain" %}
+domain, its attributes, its value, etc... {% enddef %} 
+
+{% def "Domain" %}
 <code>["Domain", _expression_]</code>
 
-Evaluate to the domain of _expression_ {% enddef %} {% def "Evaluate" %}
+Evaluate to the domain of _expression_ {% enddef %} 
+
+{% def "Evaluate" %}
 <code>["Evaluate", _expression_]</code>
 
 Apply a sequence of definitions to an expression in order to reduce, simplify
 and calculate its value. Overrides `Hold` and hold attributes of a function.
-{% enddef %} {% def "Error" %} <code>["Error", _expression_,
-_string_]</code>{% tags "inert" "float-right" %}
+{% enddef %} 
+
+{% def "Error" %} `["Error", _expression_, _string_, _rest_]`
+
+{% tags "inert" "float-right" %}
 
 Tag an expression that could not be interpreted correctly. It may have a syntax
 error, a reference to an unknown symbol or function or some other problem.
-{% enddef %} {% def "Hold" %} <code>["Hold",
+
+Note that an `Error` expression can be a sub-expression.
+
+The second argument is a string indicating the problem.
+
+The third argument, if present, is an expression describing what could not be parsed.
+{% enddef %} 
+
+
+{% def "Hold" %} <code>["Hold",
 _expression_]</code>{% tags "inert" "float-right" %}
 
 Tag an expression that should be kept in an unevaluated form {% enddef %}

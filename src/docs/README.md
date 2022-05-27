@@ -83,7 +83,7 @@ organized by topic as follow:
 | [Arithmetic](/compute-engine/reference/arithmetic/) | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`...|
 | [Calculus](/compute-engine/reference/calculus/) | `Derive` `Integrate`...|
 | [Collections](/compute-engine/reference/collections/)| `Sequence` `List` `Dictionary` `Set`... |
-| [Core](/compute-engine/reference/core/) | `Missing` `Nothing` `None` `All`  `Identity` `InverseFunction` `LatexTokens`... |
+| [Core](/compute-engine/reference/core/) | `Missing` `Nothing` `None` `All` `Error` `Identity` `InverseFunction` `LatexTokens`... |
 | [Logic](/compute-engine/reference/logic/) |`And` `Or` `Not` `True` `False` `Maybe` ...|
 | [Sets](/compute-engine/reference/sets/) | `Union` `Intersection` `EmptySet` ...|
 | [Special Functions](/compute-engine/reference/special-functions/) | `Erf` `Gamma` `Factorial`...|
