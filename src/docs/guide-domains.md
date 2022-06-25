@@ -9,13 +9,12 @@ sidebar:
 
 # Domains
 
-A **domain** is a **set** used to represent the possible values of an
-expression.
+A **domain** is a **set** of the possible values of an expression.
 
-A domain is represented by a **domain expression**, such as `Integer` `Boolean`
+A domain is represented by a **domain expression**, such as `Integer`, `Boolean`
 or `["Range", ["Literal", -1], ["Literal", +1]]`. `Integer` and `Boolean` are
 domain literals, while `["Range", ["Literal", -1], ["Literal", +1]]` is a
-parametric domain.
+parametric domain expression.
 
 Domains are similar to _types_ in programming languages. Amongst other things,
 they are used to select the correct function definition.
@@ -29,16 +28,34 @@ transformations are applicable.
 For example, \\( \sqrt{x^2} = x\\) only if \\(x \geq 0\\)
 
 {% readmore "/compute-engine/reference/domains/" %} Read more about the
-<strong>Domains</strong> included in the standard dictionary of the Compute
-Engine {% endreadmore %}
+<strong>Domain Literals</strong> included in the standard dictionary of the
+Compute Engine {% endreadmore %}
 
-**To query the domain of an expression**, use the `domain` property of the
+<section id='obtaining-the-domain-of-an-expression'>
+
+## Obtaining the Domain of an Expression
+
+**To query the domain of an expression**, read the `domain` property of the
 expression.
 
 ```js
-console.log(ce.parse('\\pi').domain);
-// ➔ "IrrationalNumber"
+const ce = new ComputeEngine();
+
+ce.box('Pi').domain;
+// ➔ "TranscendentalNumber"
+
+ce.box('Divide').domain;
+// ➔ '["Function",  "Number", "Number", "Number]': domain of the function "Divide"
+
+ce.box(['Add', 5, 2]).domain;
+// ➔ "Number": the result of the "Add" function
+// (its codomain) in general is a "Number"
+
+ce.box(['Add', 5, 2]).evaluate().domain;
+// ➔ "Integer": once evaluated, the domain of the result may be more specific
 ```
+
+</section>
 
 <section id='domain-lattice'>
 
@@ -51,8 +68,9 @@ the `Void` domain (the bottom domain).
 - The **`Anything`** domain contains all possible values and all possible
   domains. It is used when not much is known about the possible value of an
   expression. In some languages, this is called the _universal_ type.
-- The **`Void`** domain contains no value. It is rarely used, but it could for
-  example indicate the return domain of a function that never returns.
+- The **`Void`** domain contains no value. It is the subdomain of all domains.
+  Also called the zero or empty domain. It is rarely used, but it could indicate
+  the return domain of a function that never returns.
 
 There are a few other important domains:
 
@@ -70,9 +88,13 @@ The _parent_ of a domain represents a _is-a_/_subset-of_ relationship, for
 example, a `List` _is-a_ `Collection`.
 
 ![Anything domains](/assets/domains.001.jpeg 'The top-level domains')
+
 ![Valud domains](/assets/domains.002.jpeg 'The Value sub-domains')
+
 ![Tensor domains](/assets/domains.003.jpeg 'The Tensor sub-domains')
+
 ![Function domains](/assets/domains.004.jpeg 'The Function sub-domains')
+
 ![Number domains](/assets/domains.005.jpeg 'The Number sub-domains')
 
 The implementation of the CortexJS domains is based on
@@ -80,110 +102,67 @@ The implementation of the CortexJS domains is based on
 
 </section>
 
-<section id='parametric-domain'>
+<section id='domain-compatibility'>
+
+## Domain Compatibility
+
+Two domains can be evaluated for their **compatibility**.
+
+There are three kinds of
+[compatibility](<https://en.wikipedia.org/wiki/Covariance_and_contravariance_(computer_science)>)
+that can be determined:
+
+- **Invariance**: the two domains represent exactly the same set of values
+- **Covariance**: **A** is covariant with **B** if all the values in the domain
+  **A** are also in the domain **B**. For example `Integer` is covariant with
+  `Number`
+- **Contravariant**: **A** is contravariant with **B** if all the values in the
+  domain **B** are in the domain **A**. For example `Anything` is contravariant
+  with every domain.
+
+</section>
+
+<section id='parametric-domains'>
 
 ## Parametric Domains
 
-Parametric domains are complex domains that are defined as a combination of
-other domains.
-
-For example `["Function", "RealNumber", "Integer"]` is a parametric domain
-representing functions that have a single real number as input and that return
-an integer.
-
-Parametric domains are represented as special expressions: they are functions
-with one of the following heads:
-
-- **`Function`**
-- **`List`**
-- **`Record`**
-- **`Tuple`**
-- **`Range`**
-- **`Interval`**
-- **`Intersection`**
-- **`Union`**
-- **`Optional`**
-- **`Some`**
-- **`Head`**
-- **`Symbol`**
-- **`Literal`**
-- **`Covariant`**
-- **`Contravariant`**
-- **`Invariant`**
-
-</section>
-
-<section id='obtaining-the-domain-of-an-expression'>
-
-## Obtaining the Domain of an Expression
-
-**To query the domain of an expression**, read the `domain` property of the
-expression.
-
-```js
-const ce = new ComputeEngine();
-
-ce.box('Pi').domain;
-// ➔ "TranscendentalNumber"
-
-ce.box('Add').domain;
-// ➔ "Function": domain of the symbol "Add"
-
-ce.box(['Add', 5, 2]).domain;
-// ➔ "Number": the result of the "Add" function
-// (its codomain) in general is a "Number"
-
-ce.box(['Add', 5, 2]).evaluate().domain;
-// ➔ "Integer": once evaluated, the domain of the result may be more specific
-```
-
-</section>
-
-<section id='defining-new-domains'>
-
-## Defining New Domains
-
-A new domain can be defined using a **domain expression**, that is a **set
-expression** using any of the **set functions**: `Union` `Intersection`
-`SetMinus`..., combined with domains and **parametric domain** functions.
-
-```json
-//  A number or a boolean.
-["Union", "Number", "Boolean"]
-
-// Any number except "1".
-["SetMinus", "Number", 1]
-```
-
-{% readmore "/compute-engine/reference/sets/" %} Read more about
-<strong>Sets</strong> and the set functions {% endreadmore %}
-
-**Parametric domains** are functions that define a domain:
+A new domain can be defined using a parametric domain expression.
 
 ```json
 // Range of non-negative integers
-["Range", 0, "+Infinity"]
+["Range", ["Literal", 0], ["Literal", "+Infinity"]]
+
+// Functions with a single real number argument and that return an integer
+["Function", "RealNumber", "Integer"]
 ```
 
-The `["Range", <min>, <max>]` parametric domain defines a set of integers such
-that \\( \mathord{min} \le n \le \mathord{max}, n \in \N \\).
+Parametric domains are represented as special expressions: they are functions
+with one of the domain constructors below.
 
-The `["Interval", <min>, <max>]` parametric domain defines a set of real numbers
-such that \\( \mathord{min} \le x \le \mathord{max}, n \in \R \\).
-
-**To represent an open interval**, use the `Open` function:
-`["Interval", ["Open", <min>], <max>]` \\( \operatorname{min} \lt x \le
-\operatorname{max}, n \in \R \\) or \\(x \in \rbrack \operatorname{min},
-\operatorname{max} \rbrack \\).
+By default, compatibility is determined by using invariance of the arguments of
+the parametric domain function.
 
 <div class=symbols-table>
 
-| Parametric Domain | Description                                                                                                                                                                                                             |
-| :---------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Function`        | `["Function", ...<arg-domain>, <co-domain>]` <br> For example, `["Function", "Number", "Boolean"]` is the domain of the functions that have a single argument, a number, and return a boolean (has a boolean codomain). |
-| `Interval`        | `["Interval", <min>, <max>]` <br> The set of real numbers between `<min>` and `<max>`.<br> Use `["Interval", ["Open", <min>], <max>]` to indicate a open-left interval.                                                 |
-| `Multiple`        | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integer", 1]`                |
-| `Range`           | `["Range", <min>, <max>]` <br> The set of integers from `<min>` to `<max>` (inclusive).                                                                                                                                 |
+| Domain Constructor | Description                                                                                                                                                                                                                                                                                                                                                        |
+| :----------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Function`         | `["Function", ...<arg-domain>, <co-domain>]` <br> For example, `["Function", "Number", "Boolean"]` is the domain of the functions that have a single argument, a number, and return a boolean (has a boolean codomain).<br>By default, compatibility is determined by using covariance, excluding`Nothing, for the arguments and contravariance for the co-domain. |
+| `List`             |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Record`           |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Tuple`            |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Intersection`     |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Union`            |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Optional`         |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Some`             |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Head`             |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Symbol`           |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Literal`          |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Covariant`        |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Contravariant`    |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Invariant`        |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Interval`         | `["Interval", <min>, <max>]` <br> The set of real numbers between `<min>` and `<max>`.<br> Use `["Interval", ["Open", <min>], <max>]` to indicate a open-left interval.                                                                                                                                                                                            |
+| `Range`            | `["Range", <min>, <max>]` <br> The set of integers from `<min>` to `<max>` (inclusive).                                                                                                                                                                                                                                                                            |
+| `Multiple`         | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integer", 1]`                                                                                                                                                           |
 
 </div>
 
