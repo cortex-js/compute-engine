@@ -24,8 +24,9 @@ sidebar:
 
 </div>
 
-<div class='read-more'><a href="/compute-engine/reference/trigonometry/">See also <strong>Trigonometry</strong> for \( \pi \) and 
-related constants<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use></svg></a></div>
+{% readmore "/compute-engine/reference/trigonometry/" %} See also
+<strong>Trigonometry</strong> for \( \pi \) and related
+constants{% endreadmore %}
 
 ## Relational Operators
 
@@ -51,7 +52,6 @@ related constants<svg class="svg-chevron" ><use xlink:href="#svg-chevron"></use>
 If two arguments, the first argument is the numerator, the second is the
 denominator. If a single argument, will evaluate to a rational approximating the
 value of the argument.
-
 
 ## `BaseForm`
 
