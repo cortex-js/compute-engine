@@ -9,6 +9,25 @@ sidebar:
 
 # Symbols
 
+A symbol is a named mathematical object. It belongs to a domain and it may 
+hold a value. A symbol without a value represents a mathematical unknown
+in an expression.
+
+**To change the value or domain of a symbol**, use the `value` and `domain` 
+properties of the symbol.
+
+```ts
+const n = ce.box('n');
+n.domain = 'Integer';
+n.value = 5;
+```
+
+Symbols do not need to be declared before they can be used. A previously 
+unknown symbol will have a domain of `ce.defaultDomain`. 
+A previously unknown symbol has no value.
+
+Symbols exist within a **scope**.
+
 ## Scopes
 
 The Compute Engine supports
@@ -134,25 +153,41 @@ console.log('pi = ', smallPi.numericValue, '=', bigPi.numericValue);
 ### Declaring a Symbol
 
 Declaring a symbol is providing some information about this symbol, such as its
-domain or whether it is positive, without providing a value for the symbol.
+domain or whether it is positive.
 
 If the symbol had not been used before, a new definition record for this symbol
 is created, and the symbol is bound to it.
 
 **To declare a symbol** use `ce.assume()`.
 
-For example:
-
 ```ts
+// Making an assumption using an expression
+ce.assume(['Element', 'n', 'Integer']);
+
+// As a shortcut, an assumption about a symbol can be made with two arguments
 ce.assume('n', 'Integer');
-ce.assume('n > 0');
+
+// Making  an assumption using a LaTeX expression
+ce.assume('$n > 0$');
+
+// Assumption about the value of a symbol
+ce.assume('n', 5);
 
 const symbol = ce.box('n');
+
 console.log(n.isPositive);
 // ➔ true
+
 console.log(n.domain);
 // ➔ Integer
+
+console.log(n).latex;
+// ➔ 5
+
 ```
+
+Note that `ce.assume('n', 5)` is equivalent to `ce.box('n').value = 5`.
+
 
 ### Function Binding
 
