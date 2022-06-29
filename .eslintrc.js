@@ -1,4 +1,4 @@
-const path = require('path');
+// const path = require('path');
 module.exports = {
   root: true,
   extends: [
@@ -14,10 +14,15 @@ module.exports = {
   // Use the TypeScript parser:
   parser: '@typescript-eslint/parser',
   parserOptions: {
-    project: './tsconfig.json',
+    // Use a custom project that includes test files, etc...
+    // otherwise, lint gives errors on those files because they are
+    // not part of the regular tsconfig build target
+    project: './tsconfig.eslint.json',
+
     // Configure the parser with the tsconfig file in the root project
     // (not the one in the local workspace)
     // tsconfigRootDir: path.resolve(__dirname, './src/'),
+
     // Allows for the parsing of modern ECMAScript features
     ecmaVersion: 2018,
     // Allows for the use of module imports
