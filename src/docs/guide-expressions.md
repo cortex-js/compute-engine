@@ -256,7 +256,7 @@ The `Error` function has the following arguments:
 - A partial result, i.e. the part that was successfully parsed. When an error
   expression is evaluated, its value is its first argument
 - A error code, as a string
-- An expression representing where the error occured, for example a LaTeX string
+- An expression representing where the error occurred, for example a LaTeX string
   representing where the LaTeX parsing failed.
 
 ## Return Value Conventions

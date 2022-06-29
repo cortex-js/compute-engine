@@ -89,7 +89,7 @@ sidebar:
 
 | Domain             | Description                                                                                      |
 | :----------------- | :----------------------------------------------------------------------------------------------- |
-| `Anything`          | The universal domain, it conaints all possible values                                                                            |
+| `Anything`          | The universal domain, it contains all possible values                                                                            |
 | `Boolean`          | `True` or `False`                                                                                |
 | `Domain`           | The domain of all the domains                                                                    |
 | `MaybeBoolean`     | `True` `False` or `Maybe`                                                                        |

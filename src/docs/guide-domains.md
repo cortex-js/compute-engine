@@ -89,7 +89,7 @@ example, a `List` _is-a_ `Collection`.
 
 ![Anything domains](/assets/domains.001.jpeg 'The top-level domains')
 
-![Valud domains](/assets/domains.002.jpeg 'The Value sub-domains')
+![Value domains](/assets/domains.002.jpeg 'The Value sub-domains')
 
 ![Tensor domains](/assets/domains.003.jpeg 'The Tensor sub-domains')
 
