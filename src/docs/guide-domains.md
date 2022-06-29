@@ -9,12 +9,12 @@ sidebar:
 
 # Domains
 
-A **domain** is a **set** of the possible values of an expression.
+A **domain** is the set of the possible values of an expression.
 
 A domain is represented by a **domain expression**, such as `Integer`, `Boolean`
 or `["Range", ["Literal", -1], ["Literal", +1]]`. `Integer` and `Boolean` are
-domain literals, while `["Range", ["Literal", -1], ["Literal", +1]]` is a
-parametric domain expression.
+**domain literals**, while `["Range", ["Literal", -1], ["Literal", +1]]` is a
+**parametric domain expression**.
 
 Domains are similar to _types_ in programming languages. Amongst other things,
 they are used to select the correct function definition.
@@ -112,13 +112,20 @@ There are three kinds of
 [compatibility](<https://en.wikipedia.org/wiki/Covariance_and_contravariance_(computer_science)>)
 that can be determined:
 
-- **Invariance**: the two domains represent exactly the same set of values
-- **Covariance**: **A** is covariant with **B** if all the values in the domain
-  **A** are also in the domain **B**. For example `Integer` is covariant with
-  `Number`
-- **Contravariant**: **A** is contravariant with **B** if all the values in the
-  domain **B** are in the domain **A**. For example `Anything` is contravariant
-  with every domain.
+- **Invariance**: two domains are invariant if they represent exactly the same
+  set of values
+- **Covariance**: domain **A** is covariant with domain **B** if all the values
+  in **A** are also in **B**. For example `Integer` is covariant with `Number`
+- **Contravariant**: domain **A** is contravariant with domain **B** if all the
+  values in **B** are in **A**. For example `Anything` is contravariant with
+  every domain.
+
+**To evaluate the compatibility of two domains** use `domain.isCompatible()`
+
+```ts
+ce.domain('Integer').isCompatible('PositiveNumber');
+// ➔ true
+```
 
 </section>
 
@@ -137,7 +144,8 @@ A new domain can be defined using a parametric domain expression.
 ```
 
 Parametric domains are represented as special expressions: they are functions
-with one of the domain constructors below.
+with one of the domain constructors below and their arguments are domain
+literals or other parametric domain expressions.
 
 By default, compatibility is determined by using invariance of the arguments of
 the parametric domain function.
@@ -156,10 +164,10 @@ the parametric domain function.
 | `Some`             |                                                                                                                                                                                                                                                                                                                                                                    |
 | `Head`             |                                                                                                                                                                                                                                                                                                                                                                    |
 | `Symbol`           |                                                                                                                                                                                                                                                                                                                                                                    |
-| `Literal`          |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Literal`          | This constructor defines a domain with a single value, the value of its argument. `                                                                                                                                                                                                                                                                                |
 | `Covariant`        |                                                                                                                                                                                                                                                                                                                                                                    |
 | `Contravariant`    |                                                                                                                                                                                                                                                                                                                                                                    |
-| `Invariant`        |                                                                                                                                                                                                                                                                                                                                                                    |
+| `Invariant`        | This constructor indicate that two domains are compatible only if they are invariants with regard to each other.                                                                                                                                                                                                                                                   |
 | `Interval`         | `["Interval", <min>, <max>]` <br> The set of real numbers between `<min>` and `<max>`.<br> Use `["Interval", ["Open", <min>], <max>]` to indicate a open-left interval.                                                                                                                                                                                            |
 | `Range`            | `["Range", <min>, <max>]` <br> The set of integers from `<min>` to `<max>` (inclusive).                                                                                                                                                                                                                                                                            |
 | `Multiple`         | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integer", 1]`                                                                                                                                                           |
