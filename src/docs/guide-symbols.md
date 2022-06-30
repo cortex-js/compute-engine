@@ -58,16 +58,32 @@ functions.
 associated with the scope, and restore definitions from previous scopes that may
 have been shadowed by the current scope.
 
+## Forgetting a Symbol
+
+**To _reset_ what is known about a symbol** use the `ce.forget()` function.
+
+The `ce.forget()` function will remove any domain/value associated with a 
+symbol, and any [assumption](/compute-engine/guides/assumptions) about the symbol.
+
+To forget about a specific symbol, pass the name of the symbol as an argument 
+to `ce.forget()`.
+
+To forget about all the symbols in the current scope, use `ce.forget()` without
+any arguments.
+
+Note that only symbols in the current scope are forgotten. If a definition
+for the symbol existed in a previous scope, that definition will now
+be in effect.
+
 ## Name Binding
 
-**Name Binding is the process of associating the name of a function or symbol
-with a definition.**
+**[Name Binding](https://en.wikipedia.org/wiki/Name_binding) is the process of
+associating the name of a function or symbol with a definition.**
 
 The definition of symbols and functions is set when an instance of a Compute
-Engine is created.
-
-Dictionaries that contain additional definitions can be provided when the
-Compute Engine is first created, or later at runtime.
+Engine is created. Dictionaries that map names to definitions can be provided 
+when the Compute Engine is created. Additional dictionaries can be
+provided later using the `ce.pushScope()` function.
 
 The definitions record contain information such as the domain or value of a
 symbol, or how to simplify or evaluate functions.
@@ -82,7 +98,7 @@ scope is searched recursively until one is found or the root scope is reached.
 If a definition is found, the symbol is associated with (bound to) the
 definition.
 
-### Auto-binding
+### Symbol Auto-binding
 
 If no definition is found for the symbol, a new one is created automatically.
 
@@ -90,9 +106,9 @@ The new definition will have no value associated with it, so the symbol will be
 a **free variable**. It will have a domain of `ce.defaultDomain'.
 
 If `ce.defaultDomain` is `null`, no definition is created, and the symbol is not
-bound to any definition. This will severely limit the usefulness of the symbol.
+bound to any definition. This will limit the usefulness of the symbol.
 
-By default, `defaultDomain` is `ExtendedRealNumber` so any unknown variables is
+By default, `defaultDomain` is `ExtendedRealNumber` so any unknown variable is
 automatically assumed to be a real number.
 
 ```js
@@ -104,9 +120,9 @@ console.log(symbol.numericValue?.json);
 // ➔ 5
 ```
 
-### Symbol Binding: Bound Variables, Free Variables and Constants
+### Bound Variables, Free Variables and Constants
 
-When discussing **binding** and symbols, this can either relate to
+**Symbol binding** can either refer to
 [**name binding**](https://en.wikipedia.org/wiki/Name_binding) (associating a
 definition with the name of a symbol) or
 [**value binding**](https://en.wikipedia.org/wiki/Free_variables_and_bound_variables)
@@ -116,7 +132,7 @@ If the definition of a symbol has a value, the symbol is said to be a **bound
 variable** (value binding).
 
 This is in opposition to **free variables** which are symbols that have a
-definition, but no values, and **constants** which are symbols that have a value
+definition, but no value, and **constants** which are symbols that have a value
 that cannot be altered.
 
 The property `expr.symbolDefinition` is not `undefined` if a symbol is a bound
@@ -155,7 +171,7 @@ console.log('pi = ', smallPi.numericValue, '=', bigPi.numericValue);
 Declaring a symbol is providing some information about this symbol, such as its
 domain or whether it is positive.
 
-If the symbol had not been used before, a new definition record for this symbol
+If the symbol has not been used before, a new definition record for this symbol
 is created, and the symbol is bound to it.
 
 **To declare a symbol** use `ce.assume()`.
@@ -195,5 +211,16 @@ The definition associated with a function determines how it is put in canonical
 form, simplified and evaluated.
 
 When a function is boxed, for example when `ce.box()` is called on an expression
-that includes the name of the function, a function definition matching the
-function name is looked for in the current context, then in any parent scope.
+that includes the name of the function, a dictionary entry for the function is 
+looked up in the current context, then recursively in the parent scope.
+
+When a matching entry is found, the definitions associated with it are 
+bound with the boxed function. Note that unlike a symbol, a function may 
+have multiple definitions in a given scope. In this way, function can support
+[ad-hoc polymorphism](https://en.wikipedia.org/wiki/Ad_hoc_polymorphism), that
+is have multiple implementations depending on the values or domains of their 
+arguments.
+
+When an expression containing a function is put in canonical form, 
+simplified or evaluated, the appropriate definition is selected based on 
+the domain and value of its arguments.
