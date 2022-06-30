@@ -21,6 +21,8 @@ import {
   nops,
   head,
   tail,
+  op1,
+  op2,
 } from '../../../math-json/utils';
 import { Serializer, Parser, LatexDictionary } from '../public';
 import { getFractionStyle, getRootStyle } from '../serializer-style';
@@ -623,6 +625,53 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: '\\frac12',
   },
   {
+    name: 'Lg',
+    trigger: '\\ln_{10}',
+  },
+  {
+    name: 'Lb',
+    parse: '\\lb',
+  },
+  {
+    name: 'Ln',
+    parse: '\\ln',
+  },
+  {
+    name: 'Log',
+    trigger: '\\ln',
+    parse: (parser) => {
+      let sub: string | null = null;
+      if (parser.match('_')) {
+        sub = parser.matchRequiredLatexArgument() ?? '10';
+      }
+      const arg = parser.matchArguments('implicit');
+      if (arg === null) return null;
+      if (sub === '10') return ['Lg', ...arg] as Expression;
+      if (sub === '2') return ['Lb', ...arg] as Expression;
+      if (sub === null) return ['Ln', ...arg] as Expression;
+      return ['Log', ...arg, sub] as Expression;
+    },
+    serialize: (serializer, expr): string => {
+      const base = op2(expr);
+      if (base)
+        return joinLatex([
+          '\\ln_{',
+          serializer.serialize(base),
+          '}',
+          '\\left(',
+          serializer.serialize(op1(expr)),
+          '\\right)',
+        ]);
+      return joinLatex([
+        '\\ln_',
+        '\\left(',
+        serializer.serialize(op1(expr)),
+        '\\right)',
+      ]);
+    },
+  },
+
+  {
     name: 'Lcm',
     trigger: '\\operatorname{lcm}',
     // @todo!
@@ -636,7 +685,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: 270,
   },
   {
-    name: MULTIPLY,
+    name: 'Multiply',
     trigger: ['\\times'],
     kind: 'infix',
     associativity: 'both',
@@ -668,13 +717,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
   },
   {
-    name: NEGATE,
+    name: 'Negate',
     trigger: ['-'],
     kind: 'prefix',
     parse: (parser, terminator) => {
       if (276 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 400 });
-      return rhs === null ? null : ([NEGATE, rhs] as Expression);
+      return rhs === null ? null : (['Negate', rhs] as Expression);
     },
     precedence: 275,
   },

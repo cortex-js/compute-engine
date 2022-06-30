@@ -263,26 +263,23 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
 
       {
         name: 'Log',
-        description: 'Log(b, z) = Logarithm of base b',
+        description: 'Log(z, b = 10) = Logarithm of base b',
         wikidata: 'Q11197',
         domain: ['Function', 'Number', 'Number', 'Number'],
         complexity: 4100,
         N: (ce, ops) => {
           const exponent = ops[0];
-          const base = ops[1];
+          const base = ops[1] ?? ce.number(10);
           if (exponent.decimalValue) {
-            return ce.number(
-              exponent.decimalValue
-                .log()
-                .div(base.decimalValue ?? base.asFloat ?? NaN)
-            );
+            const decimalBase =
+              base.decimalValue?.log() ?? ce.decimal(base.asFloat ?? NaN).log();
+            return ce.number(exponent.decimalValue.log().div(decimalBase));
           }
           if (exponent.complexValue) {
-            return ce.number(
-              exponent.complexValue
-                .log()
-                .div(base.complexValue ?? base.asFloat ?? NaN)
-            );
+            const complexBase =
+              base.complexValue?.log() ?? ce.complex(base.asFloat ?? NaN).log();
+
+            return ce.number(exponent.complexValue.log().div(complexBase));
           }
           if (exponent.asFloat !== null) {
             return ce.number(

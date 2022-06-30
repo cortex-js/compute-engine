@@ -118,6 +118,14 @@ export function op(expr: Expression | null, n: number): Expression | null {
   return null;
 }
 
+export function op1(expr: Expression): Expression | null {
+  return op(expr, 1);
+}
+
+export function op2(expr: Expression): Expression | null {
+  return op(expr, 2);
+}
+
 export function nops(expr: Expression): number {
   if (Array.isArray(expr)) {
     return Math.max(0, expr.length - 1);
