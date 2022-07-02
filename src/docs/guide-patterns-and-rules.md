@@ -229,6 +229,6 @@ You can define your own rules and apply them using `expr.replace()`.
 
 <section id='count'>
 
-## `count()`
+## `Count`
 
 </section>

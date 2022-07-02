@@ -13,19 +13,314 @@ sidebar:
 
 ## Constants
 
+The constants below are **inert**. They are used as tokens and have no 
+value other than themselves.
+
 | Symbol      | Description                                                                                                                                                                            |
 | :---------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `All`       | All the possible values apply                                                                                                                                                          |
-| `Missing`   | A **required** expression is not present                                                                                                                                               |
-| `None`      | None of the possible values apply                                                                                                                                                      |
-| `Nothing`   | An **optional** expression is not present                                                                                                                                              |
-| `Undefined` | The result is not defined. For example, the `domain()` of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` (Not a Number) and for booleans, `Maybe` |
+| `All`       | {% tags "inert" "float-right" %} All the possible values apply                                                                                                                                                          |
+| `Missing`   | {% tags "inert" "float-right" %}A **required** expression is not present                                                                                                                                               |
+| `None`      | {% tags "inert" "float-right" %}None of the possible values apply                                                                                                                                                      |
+| `Nothing`   | {% tags "inert" "float-right" %}An **optional** expression is not present                                                                                                                                              |
+| `Undefined` | {% tags "inert" "float-right" %}The result is not defined. For example, the domain of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` (Not a Number) and for booleans, `Maybe` |
 
 
-| Example                     |                                 |
+| MathJSON                     | LaTeX                                |
 | :-------------------------- | :------------------------------ |
 | `["Divide", 2, "Missing"]`  | \\[\frac{2}{\unicode{"2B1A}}\\] |
 | `["List", 2, "Nothing", 3]` | \\[\lbrack 2, ,3 \rbrack\\]     |
+
+</section>
+
+<section id='control-structures'>
+
+## Control Structures
+
+Control Structures, along with Loops, define how a sequence of expressions
+is evaluated.
+
+A `["Block"]` expression defines a sequential control structure and `["If"]`
+expression defines a conditional control structure.
+
+{% defs "Function" "Operation" %} 
+
+{% def "Block" %}
+<code>["Block", _expr1_, ..._expr2_]</code><br>
+<code>["Block", _dictionary_, _expr1_, ..._expr2_]</code>
+
+When a `["Block"]` expression is evaluated, the following steps are followed:
+
+1. Create a new scope
+2. Set the value of the symbols in _dictionary_ in this scope
+3. Evaluate each _expr_ sequentially
+
+The _dictionary_ argument can be a `["Dictionary"]` expression, a 
+`["KeyValuePair"]` expression, a `["Pair"]` expression or a `["Tuple"]` expression.
+
+The value of the `Block` expression is the value of the last expression, or the 
+value of the first `["Break"]` expression.
+
+```json
+["Block", ["Tuple", "c", 5], ["Multiply", "c", 2]]
+// ➔ 10
+```
+
+{% enddef %} 
+
+
+{% def "If" %}
+<code>["If", _condition_, _expr-1_, _expr-2_]</code><br>
+<code>["If", _condition_, _expr-1_]</code>
+
+If the value of _condition_ is the symbol `True`, the value of the `If` 
+expression is _expr-1_. Otherwise, it is _expr-2_ or `Nothing` if _expr-2_ 
+is not provided.
+
+```json
+["Set", "n", -10]
+["If", ["Greater", "n", 0], "n", ["Negate", "n"]]
+// ➔ 10
+```
+{% enddef %} 
+
+{% enddefs %}
+
+
+</section>
+
+<section id='loops'>
+
+## Loops
+
+The `Loop`, `Sum` and `Product` functions are iteration functions that share a
+similar form. 
+
+Their first argument, _body_ is an expression that gets evaluated repeatedly.
+In the case of `Sum`, each value of _body_  is summed, and the 
+value of the loop function is the sum. Similarly for `Product`. For `Loop`, the
+value of the loop function is the last value of _body_ or the value of a `["Break"]` expression.
+
+The other arguments indicate how the iteration should be performed:
+- if no other argument is specified, the _body_ expression is evaluated until
+its value is a `["Break"]` expression.
+- _max-iterations_: indicates how many times the _body_ expression will be evaluated
+- _var_, _list-of-value_: the symbol _var_ is assigned in turn the values in 
+_list-of-values_
+- _var_, _range_: the symbol _var_ is assigned the values from the minimum to
+the maximum in the range, with a step of 1.
+- _var_, _max_: the symbol _var_ is assigned a value of 1, then incremented
+by 1 until it reaches at least _max_
+- _var_, _min_, _max_: the symbol _var_ is assigned a value of _min_, then 
+incremented by 1 until it reaches at least _max_
+- _var_, _min_, _max_, _step_: the symbol _var_ is assigned a value of _min_, then 
+incremented by _step_ until it reaches at least _max_
+
+The `Loop`, `Sum` and `Product` functions create a new scope. If _var_ is 
+specified, it is defined in this new scope.
+
+
+{% defs "Function" "Operation" %} 
+
+{% def "FixedPoint" %}
+<code>["FixedPoint", _body_, _initial-value_]</code><br>
+<code>["FixedPoint", _body_, _initial-value_, _max-iterations_]</code>
+
+
+Apply _body_ to _initial-value_, then apply _body_ to the result until
+the result no longer changes.
+
+
+To determine if a fixed point has been reached and the loop should terminate, 
+the previous and current values are compared with `Same`.
+
+
+Use `["Break"]` to exit the loop immediately.
+
+
+
+{% enddef %} 
+
+{% def "Loop" %}
+<code>["Loop", _body_]</code><br>
+<code>["Loop", _body_, _max-iterations_]</code><br>
+<code>["Loop", _body_, _var_, _list-of-values_]</code><br>
+<code>["Loop", _body_, _var_, _range_]</code><br>
+<code>["Loop", _body_, _var_, _max_]</code><br>
+<code>["Loop", _body_, _var_, _min_, _max_]</code><br>
+<code>["Loop", _body_, _var_, _min_, _max_, _step_]</code><br>
+
+Repeatedly evaluate _body_ until either _max-iterations_ is reached (or 
+`ce.iterationLimit` if _max-iteration_ is not specified), or the value of _body_ is
+a `["Break"]` expression.
+
+{% enddef %} 
+
+{% def "Product" %}
+<code>["Product", _body_, _max-iterations_]</code><br>
+<code>["Product", _body_, _var_, _list-of-values_]</code><br>
+<code>["Product", _body_, _var_, _range_]</code><br>
+<code>["Product", _body_, _var_, _max_]</code><br>
+<code>["Product", _body_, _var_, _min_, _max_]</code><br>
+<code>["Product", _body_, _var_, _min_, _max_, _step_]</code><br>
+
+Evaluate _body_ and make a product of the result.
+
+{% enddef %} 
+
+
+{% def "Sum" %}
+<code>["Sum", _body_, _max_]</code><br>
+<code>["Sum", _body_, _var_, _list-of-values_]</code><br>
+<code>["Sum", _body_, _var_, _range_]</code><br>
+<code>["Sum", _body_, _var_, _max_]</code><br>
+<code>["Sum", _body_, _var_, _min_, _max_]</code><br>
+<code>["Sum", _body_, _var_, _min_, _max_, _step_]</code><br>
+
+Evaluate _body_ and make a sum of the result.
+
+{% enddef %} 
+
+{% enddefs %}
+
+
+**To control the flow of a loop function**, use `["Break"]` and `["Continue"]`.
+
+
+{% defs "Function" "Operation" %} 
+
+{% def "Break" %}
+<code>["Break"]</code><br>
+<code>["Break", _expr_]</code><br>
+
+When in a loop, exit the loop immediately. The final value of the loop 
+expression is _expr_ or `Nothing` if not provided.
+
+`["Break"]` expressions can also be used in a `["Block"]` expression.
+
+{% enddef %} 
+
+{% def "Continue" %}
+<code>["Continue"]</code><br>
+<code>["Continue", _expr_]</code><br>
+
+When in a loop, skip to the next iteration of the loop. The value of the 
+iteration is _expr_ or `Nothing` if not provided.
+
+{% enddef %} 
+
+{% enddefs %}
+
+
+</section>
+
+
+
+<section id='variables'>
+
+## Variables
+
+{% defs "Function" "Operation" %} 
+
+{% def "Let" %}
+<code>["Let", _symbol_, _domain_]</code><br>
+<code>["Let", _symbol_, _value_]</code><br>
+<code>["Let", _symbol_, _value_, _domain_]</code>
+
+Define a new symbol in the current scope, and set its value or domain.
+
+If the symbol already had a definition in the current scope, replace it.
+
+{% enddef %} 
+
+{% def "Set" %}
+<code>["Set", _symbol_, _value_]</code>
+
+Set the value of _symbol_ to _value_.
+
+If _symbol_ does not exist in the current context, consider parent scopes until
+a definition for the symbol is found.
+
+If no definition for the symbol is found add one in the current scope.
+
+{% enddef %} 
+
+{% enddefs %}
+
+</section>
+
+
+<section id='functions'>
+
+## Functions
+
+{% defs "Function" "Operation" %} 
+
+{% def "Function" %}
+
+<code>["Function", list-of-variables_, _body_]</code><br>
+<code>["Function", _variable_, _body_]</code>
+
+Create a [Lambda-function](https://en.wikipedia.org/wiki/Anonymous_function),
+also called **anonymous function**.
+
+The first argument is a symbol or a list of symbols which are the bound
+variables (parameters) of the Lambda-function.
+
+The others arguments are expressions which are evaluated sequentially, or until
+a `["Return"]` expression is encountered.
+
+The `["Function"]` expression creates a new scope.
+
+**To apply some arguments to a function expression**, use `["Apply"]`.
+
+{% enddef %} 
+
+
+{% def "Apply" %}
+<code>["Apply", _body_, _expr-1_, ..._expr-n_]</code>
+
+[Apply](https://en.wikipedia.org/wiki/Apply) a list of arguments to a lambda expression or function.
+
+The following wildcards in _body_ are replaced as indicated
+
+- `\_` or `\_1` : the first argument
+- `\_2` : the second argument
+- `\_3` : the third argument, etc...
+- `\_`: the sequence of arguments, so `["Length", "&#95;"]` is the number of arguments
+
+If _body_ is a `["Function"]` expression, the named arguments of `["Function"]`
+are replaced by the wildcards.
+
+
+```json
+["Apply", ["Multiply", "\_", "\_"], 3]
+// ➔ 9
+["Apply", ["Function", "x", ["Multiply", "x", "x"]], 3]
+// ➔ 9
+```
+
+You can assign a Lambda expression to a symbol for later use:
+
+```cortex
+cube = Lambda(_ * _ * _)
+cube(5)
+// ➔ 125
+```
+
+{% enddef %} 
+
+
+{% def "Return" %}
+<code>["Return", _expression_]</code>
+
+If in an `["Function"]` expression, interupts the evaluation of the function. 
+The value of the `["Function"]` expression is _expression_
+
+{% enddef %} 
+
+
+{% enddefs %}
+
 
 </section>
 
@@ -38,23 +333,29 @@ sidebar:
 {% def "About" %} `["About", _symbol_]`
 
 Evaluate to a dictionary containing information about a symbol such as its
-domain, its attributes, its value, etc... {% enddef %} 
+domain, its attributes, its value, etc... 
+
+{% enddef %} 
 
 {% def "Domain" %}
 <code>["Domain", _expression_]</code>
 
-Evaluate to the domain of _expression_ {% enddef %} 
+Evaluate to the domain of _expression_ 
+
+{% enddef %} 
 
 {% def "Evaluate" %}
 <code>["Evaluate", _expression_]</code>
 
 Apply a sequence of definitions to an expression in order to reduce, simplify
 and calculate its value. Overrides `Hold` and hold attributes of a function.
+
 {% enddef %} 
 
-{% def "Error" %} `["Error", _expression_, _string_, _rest_]`
-
+{% def "Error" %} 
 {% tags "inert" "float-right" %}
+<code>["Error", _expression_, _string_, _rest_]</code>
+
 
 Tag an expression that could not be interpreted correctly. It may have a syntax
 error, a reference to an unknown symbol or function or some other problem.
@@ -82,35 +383,60 @@ Evaluate to its argument {% enddef %} {% def "InverseFunction" %}
 <code>["InverseFunction", _expression_]</code>
 
 Evaluate to the inverse function of its argument for example `Arcsin` for `Sin`
-{% enddef %} {% def "Latex" %} <code>["Latex", _expr_]</code>
+{% enddef %} 
+
+{% def "Latex" %} <code>["Latex", _expr_]</code>
 
 Evaluate to a `LatexString` which is the expression serialized to LaTeX
-{% enddef %} {% def "LatexString" %} <code>["LatexString",
-_string_]</code>{% tags "inert" "float-right" %}
+{% enddef %} 
 
-Tag a string as a LaTeX string {% enddef %} {% def "LatexTokens" %}
+{% def "LatexString" %} 
+{% tags "inert" "float-right" %}<code>["LatexString", _string_]</code>
+
+Tag a string as a LaTeX string 
+
+{% enddef %} 
+
+
+{% def "LatexTokens" %}
 <code>["LatexTokens", ..._token_\[\]]</code>
 
 Evaluate to a `LatexString` made of the concatenation of the token arguments
-{% enddef %} {% def "Parse" %} <code>["Parse", _expr_]</code>
+{% enddef %} 
+
+
+{% def "Parse" %} <code>["Parse", _expr_]</code>
 
 If _expr_ is a `LatexString` or `LatexTokens`, evaluate to a MathJSON expression
-corresponding to the LaTeX string. {% enddef %} {% def "String" %}
-<code>["String", ..._expr_\[\]]</code>{% tags "constructor" "float-right"%}
+corresponding to the LaTeX string. 
+{% enddef %} 
+
+
+{% def "String" %}
+<code>["String", ..._expr_]</code>{% tags "constructor" "float-right"%}
 
 Evaluate to a string made from the concatenation of the arguments converted to
-string {% enddef %} {% def "Symbol" %} <code>["Symbol",
-..._expr_\[\]]</code>{% tags "constructor" "float-right"%}
+string 
+{% enddef %} 
+
+{% def "Symbol" %}
+<code>["Symbol", ..._expr_]</code>{% tags "constructor" "float-right"%}
 
 Evaluate to a new symbol made of a concatenation of the arguments.
 
-For example `["Symbol", "x", 2] -> "x2" {% enddef %} {% enddefs %}
+For example `["Symbol", "x", 2] -> "x2"`
 
-| Example                      |                   |
-| :--------------------------- | :---------------- |
-| `["InverseFunction", "Sin"]` | \\[ \sin^{-1} \\] |
+{% enddef %}
 
-<section id='core-functions'>
+{% enddefs %}
+
+
+</section>
+
+
+
+
+<section id='styling-functions'>
 
 ## Styling Functions
 
@@ -118,8 +444,9 @@ The functions in this section represent a visual difference that is not usually
 material to the interpretation of an expression such as text color and size or
 other typographic variations.
 
-{% defs "Function" "Operation" %} {% def "Style" %} <code>["Style", _expr_,
-_css_]</code>{% tags "inert" "float-right" %}
+{% defs "Function" "Operation" %} 
+
+{% def "Style" %} <code>["Style", _expr_, _css_]</code>{% tags "inert" "float-right" %}
 
 Apply CSS styles to an expression
 
@@ -136,45 +463,8 @@ Display _expr_ wrapped in a delimiter.
 
 {% enddef %} {% enddefs %}
 
-### `Lambda`
+</section>
 
-<code>["Lambda", _variables:List_, _expression_]</code>
-
-Create a [Lambda-function](https://en.wikipedia.org/wiki/Anonymous_function),
-also called **anonymous function**.
-
-The first argument is a symbol or a list of symbols which are the bound
-variables (parameters) of the Lambda-function.
-
-The second argument is an expression expressed as a function of the bound
-variables of the Lambda-function.
-
-**To apply a Lambda-function to some arguments**, use:
-
-```cortex
-Lambda([x], x * x)(3)
-// ➔ 9
-```
-
-You can avoid naming the parameters by using the following shorthands:
-
-- `_` or `_1` : the first argument
-- `_2` : the second argument
-- `_3` : the third argument, etc...
-- `__`: the sequence of arguments, so `Length(__)` is the number of arguments
-
-```cortex
-Lambda(_ * _)(4)
-// ➔ 16
-```
-
-You can assign a Lambda expression to a symbol for later use:
-
-```cortex
-cube = Lambda(_ * _ * _)
-cube(5)
-// ➔ 125
-```
 
 ### `Parse`, `Latex`, `LatexTokens` and `LatexString`
 
