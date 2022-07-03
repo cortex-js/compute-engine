@@ -72,9 +72,10 @@ constants{% endreadmore %}
 | Function     | Notation                |                                                                                                                            |
 | :----------- | :---------------------- | :------------------------------------------------------------------------------------------------------------------------- |
 | `Exp`        | \\(\exponentialE^{x}\\) | [Exponential function](https://www.wikidata.org/wiki/Q168698) {% tags "numeric" "float-right"%}                            |
-| `Log`        | \\(\ln(x)\\)            | [Logarithm function](https://www.wikidata.org/wiki/Q11197), the inverse of `Exp` {% tags "numeric" "float-right"%}         |
-| `Log2`       | \\(\ln_2(x)\\)          | [Binary logarithm function](https://www.wikidata.org/wiki/Q581168), the base-2 logarithm {% tags "numeric" "float-right"%} |
-| `Log10`      | \\(\ln\_{10}(x)\\)      | [Common logarithm](Q966582), the base-10 logarithm {% tags "numeric" "float-right"%}                                       |
+| `Ln`        | \\(\ln(x)\\)            | [Logarithm function](https://www.wikidata.org/wiki/Q11197), the inverse of `Exp` {% tags "numeric" "float-right"%}         |
+| `Log`        | \\(\ln(x)\\)            | `["Log", _v_, _b_]` logarithm of base _b_, default 10 {% tags "numeric" "float-right"%}         |
+| `Lb`       | \\(\ln_2(x)\\)          | [Binary logarithm function](https://www.wikidata.org/wiki/Q581168), the base-2 logarithm {% tags "numeric" "float-right"%} |
+| `Lg`      | \\(\ln\_{10}(x)\\)      | [Common logarithm](Q966582), the base-10 logarithm {% tags "numeric" "float-right"%}                                       |
 | `LogOnePlus` |                         | {% tags "numeric" "float-right"%}                                                                                          |
 
 </div>
@@ -139,15 +140,16 @@ _lower_, otherwise to _upper_.
 
 If _lower_ and _upper_ are not provided, they take the default values of -1 and +1.
 
-{% enddef %} 
-
-
-{% def "Min" %}
-<code>["Min", _expr1_, ..._expr-n_]</code><br>
-<code>["Min", _list-of-values_]</code>
-
-If all the arguments are real numbers, excluding `NaN`, evaluate to the smallest of the arguments. Otherwise, simplify the expression by removing values that are
-greater or equal to the smallest real number.
+```json
+["Clamp", 0.42]
+// ➔ 5
+["Clamp", 4.2]
+// ➔ 1
+["Clamp", -5, 0, "+Infinity"]
+// ➔ 0
+["Clamp", 100, 0, 11]
+// ➔ 11
+```
 
 {% enddef %} 
 
@@ -155,8 +157,27 @@ greater or equal to the smallest real number.
 <code>["Max", _expr1_, ..._expr-n_]</code><br>
 <code>["Max", _list-of-values_]</code>
 
-If all the arguments are real numbers, excluding `NaN`, evaluate to the largest of the arguments. Otherwise, simplify the expression by removing values that are
-smaller or equal to the largest real number.
+If all the arguments are real numbers, excluding `NaN`, evaluate to the largest 
+of the arguments. Otherwise, simplify the expression by removing values that are
+smaller than or equal to the largest real number.
+
+```json
+["Max", 5, 2, -1]
+// ➔ 5
+["Max", 0, 7.1, "NaN", "x", 3]
+// ➔ ["Max", 7.1, "NaN", "x"]
+```
+
+{% enddef %} 
+
+
+{% def "Min" %}
+<code>["Min", _expr1_, ..._expr-n_]</code><br>
+<code>["Min", _list-of-values_]</code>
+
+If all the arguments are real numbers, excluding `NaN`, evaluate to the 
+smallest of the arguments. Otherwise, simplify the expression by removing 
+values that are greater than or equal to the smallest real number.
 
 {% enddef %} 
 
