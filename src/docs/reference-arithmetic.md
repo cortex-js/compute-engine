@@ -34,12 +34,12 @@ constants{% endreadmore %}
 
 | Function       | Notation         |                                                                                                       |
 | :------------- | :--------------- | :---------------------------------------------------------------------------------------------------- |
-| `Equal`        | \\( x = y \\)    | {% tags "predicate" %}<br>Mathematical relationship asserting that two quantities have the same value |
-| `Greater`      | \\( x \gt y \\)  | {% tags "predicate" %}                                                                                |
-| `GreaterEqual` | \\( x \geq y \\) | {% tags "predicate" %}                                                                                |
-| `Less`         | \\( x \lt y \\)  | {% tags "predicate" %}                                                                                |
-| `LessEqual`    | \\( x \leq y \\) | {% tags "predicate" %}                                                                                |
-| `NotEqual`     | \\( x \ne y \\)  | {% tags "predicate" %}                                                                                |
+| `Equal`        | \\( x = y \\)    | {% tags "predicate" "float-right" %}<br>Mathematical relationship asserting that two quantities have the same value |
+| `Greater`      | \\( x \gt y \\)  | {% tags "predicate" "float-right" %}                                                                                |
+| `GreaterEqual` | \\( x \geq y \\) | {% tags "predicate" "float-right" %}                                                                                |
+| `Less`         | \\( x \lt y \\)  | {% tags "predicate" "float-right" %}                                                                                |
+| `LessEqual`    | \\( x \leq y \\) | {% tags "predicate" "float-right" %}                                                                                |
+| `NotEqual`     | \\( x \ne y \\)  | {% tags "predicate" "float-right" %}                                                                                |
 
 </div>
 
@@ -132,13 +132,13 @@ String(BaseForm(42, 16))
 
 {% def "Clamp" %}
 <code>["Clamp", _value_]</code><br>
-<code>["Clamp", _value_, _lower_, _upper_]</code><br>
+<code>["Clamp", _value_, _lower_, _upper_]</code>
 
-This function evaluates to _value_ if _value_ is greater than _lower_ and less
-than _upper_. Otherwise it evaluates to _lower_ if _value_ is less than
-_lower_, otherwise to _upper_.
+- If `_value_` is less than `_lower_`, evaluate to `_lower_`
+- If `_value_` is greater than `_upper_`, evaluate to `_upper_`
+- Otherwise, evaluate to `_value_`
 
-If _lower_ and _upper_ are not provided, they take the default values of -1 and +1.
+If `_lower_` and `_upper_` are not provided, they take the default values of -1 and +1.
 
 ```json
 ["Clamp", 0.42]
@@ -158,7 +158,9 @@ If _lower_ and _upper_ are not provided, they take the default values of -1 and 
 <code>["Max", _list-of-values_]</code>
 
 If all the arguments are real numbers, excluding `NaN`, evaluate to the largest 
-of the arguments. Otherwise, simplify the expression by removing values that are
+of the arguments. 
+
+Otherwise, simplify the expression by removing values that are
 smaller than or equal to the largest real number.
 
 ```json
@@ -176,7 +178,9 @@ smaller than or equal to the largest real number.
 <code>["Min", _list-of-values_]</code>
 
 If all the arguments are real numbers, excluding `NaN`, evaluate to the 
-smallest of the arguments. Otherwise, simplify the expression by removing 
+smallest of the arguments. 
+
+Otherwise, simplify the expression by removing 
 values that are greater than or equal to the smallest real number.
 
 {% enddef %} 
@@ -184,13 +188,14 @@ values that are greater than or equal to the smallest real number.
 
 {% def "Rational" %}
 <code>["Rational", _n:Number_]</code><br>
+
+Evaluate to a rational approximating the value of the `_n_`.
+
+<br>
+
 <code>["Rational", _numerator:Integer_, _denominator:Integer_]</code>
 
-If two arguments, the first argument is the numerator, the second is the
-denominator. 
-
-If a single argument, will evaluate to a rational approximating the
-value of the argument.
+Represent a rational number equal to `_numerator_` over `_denominator_`.
 
 {% enddef %} 
 

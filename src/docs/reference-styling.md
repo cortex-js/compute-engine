@@ -9,20 +9,52 @@ sidebar:
 
 # Styling
 
-## `Style(`_`expr`_`, `_`dictionary`_`)`
+The functions in this section represent a visual difference that is not usually
+material to the interpretation of an expression such as text color and size or
+other typographic variations.
 
-{% tags "inert" %}
+{% defs "Function" "Operation" %} 
 
-- _`expr`_ an expression
-- _`dictionary`_ a dictionary with one or more of the following keys:
+{% def "Delimiter" %} 
+{% tags "inert" "float-right" %}<code>["Delimiter", _expr_]</code><br>
+<code>["Delimiter", _expr_, _sep_]</code><br>
+<code>["Delimiter", _expr_, _open_, _close_]</code><br>
+<code>["Delimiter", _expr_, _open_, _sep_, _close_]</code>
+
+Display _expr_ wrapped in a delimiter.
+
+{% enddef %}
+
+{% def "Spacing" %} 
+{% tags "inert" "float-right" %}<code>["Spacing", _width_]</code>
+
+- `_width_` dimension of the spacing, in 1/18 em
+
+{% enddef %}
+
+
+
+{% def "Style" %} 
+{% tags "inert" "float-right" %}<code>["Style", _expr_, _dictionary_]</code><br>
+
+
+- `_expr_` an expression
+- `_dictionary_` a dictionary with one or more of the following keys:
   - _`"display"`_:
     - `"inline"` for `\textstyle`
     - `"block"` for `\displaystyle`
     - `"script"` for `\scriptstyle`
     - `"scriptscript"` for `\scriptscriptstyle`
-  - _`"size"`_: `1`...`10`. Size `5` is normal, size `1` is smallest
-  - _`"color"`_
+  - `_"size"_`: `1`...`10`. Size `5` is normal, size `1` is smallest
+  - `_"color"_`
+{% enddef %}
 
-## `Spacing(`_`width`_`)`
 
-- _`width`_ dimension of the spacing, in 1/18 em.
+
+{% enddefs %}
+
+</section>
+
+
+
+

@@ -39,14 +39,15 @@ value other than themselves.
 Control Structures, along with Loops, define how a sequence of expressions
 is evaluated.
 
-A `["Block"]` expression defines a sequential control structure and `["If"]`
-expression defines a conditional control structure.
+- A `["Block"]` expression defines a **sequential** control structure
+- An `["If"]` expression defines a **conditional** control structure.
+- A `["Loop"]`, `["FixedPoint"]`, `["Sum"]`, `["Product"]` expression defines an **iterative** control structure.
 
 {% defs "Function" "Operation" %} 
 
 {% def "Block" %}
-<code>["Block", _expr1_, ..._expr2_]</code><br>
-<code>["Block", _dictionary_, _expr1_, ..._expr2_]</code>
+<code>["Block", _expr-1_, ..._expr-n_]</code><br>
+<code>["Block", _dictionary_, _expr1_, ..._expr-n_]</code>
 
 When a `["Block"]` expression is evaluated, the following steps are followed:
 
@@ -57,7 +58,7 @@ When a `["Block"]` expression is evaluated, the following steps are followed:
 The _dictionary_ argument can be a `["Dictionary"]` expression, a 
 `["KeyValuePair"]` expression, a `["Pair"]` expression or a `["Tuple"]` expression.
 
-The value of the `Block` expression is the value of the last expression, or the 
+The value of the `["Block"]` expression is the value of the last expression, or the 
 value of the first `["Break"]` expression.
 
 ```json
@@ -72,9 +73,9 @@ value of the first `["Break"]` expression.
 <code>["If", _condition_, _expr-1_, _expr-2_]</code><br>
 <code>["If", _condition_, _expr-1_]</code>
 
-If the value of _condition_ is the symbol `True`, the value of the `If` 
-expression is _expr-1_. Otherwise, it is _expr-2_ or `Nothing` if _expr-2_ 
-is not provided.
+- If the value of `_condition_` is the symbol `True`, the value of the `["If"]` 
+expression is `_expr-1_`. 
+- Otherwise, it is `_expr-2_` or `Nothing` if `_expr-2_`  is not provided.
 
 ```json
 ["Set", "n", -10]
@@ -95,28 +96,31 @@ is not provided.
 The `Loop`, `Sum` and `Product` functions are iteration functions that share a
 similar form. 
 
-Their first argument, _body_ is an expression that gets evaluated repeatedly.
-In the case of `Sum`, each value of _body_  is summed, and the 
-value of the loop function is the sum. Similarly for `Product`. For `Loop`, the
-value of the loop function is the last value of _body_ or the value of a `["Break"]` expression.
+Their first argument, `body` is an expression that gets evaluated repeatedly.
+
+In the case of `Sum`, each value of `body`  is summed, and the 
+value of the loop function is the sum. Similarly for `Product`. 
+
+For `["Loop"]` expressions, the value of the loop expression is the last value 
+of `body` or the value of a `["Break"]` expression.
 
 The other arguments indicate how the iteration should be performed:
-- if no other argument is specified, the _body_ expression is evaluated until
+- if no other argument is specified, the `body` expression is evaluated until
 its value is a `["Break"]` expression.
-- _max-iterations_: indicates how many times the _body_ expression will be evaluated
-- _var_, _list-of-value_: the symbol _var_ is assigned in turn the values in 
-_list-of-values_
-- _var_, _range_: the symbol _var_ is assigned the values from the minimum to
-the maximum in the range, with a step of 1.
-- _var_, _max_: the symbol _var_ is assigned a value of 1, then incremented
-by 1 until it reaches at least _max_
-- _var_, _min_, _max_: the symbol _var_ is assigned a value of _min_, then 
-incremented by 1 until it reaches at least _max_
-- _var_, _min_, _max_, _step_: the symbol _var_ is assigned a value of _min_, then 
-incremented by _step_ until it reaches at least _max_
+- `max-iterations`: indicates how many times the _body_ expression will be evaluated
+- `var`, `list-of-values`: the symbol `var` is assigned, in turn, the values in 
+`_list-of-values_`
+- `var`, `range`: the symbol `var` is assigned the values from the lower 
+bound to the upper bound of the range, with a step of 1.
+- `var`, `max`: the symbol `var` is assigned a value of 1, then incremented
+by 1 until it reaches at least `max`
+- `var`, `min`, `max`: the symbol `var` is assigned a value of `min`, then 
+incremented by 1 until it reaches at least `max`
+- `var`, `min`, `max`, `step`: the symbol `var` is assigned a value 
+of `min`, then incremented by `step` until it reaches at least `max`
 
-The `Loop`, `Sum` and `Product` functions create a new scope. If _var_ is 
-specified, it is defined in this new scope.
+The `FixedPoint`, `Loop`, `Sum` and `Product` functions create a new scope. If
+ `var` is specified, it is defined in this new scope.
 
 
 {% defs "Function" "Operation" %} 
@@ -126,9 +130,8 @@ specified, it is defined in this new scope.
 <code>["FixedPoint", _body_, _initial-value_, _max-iterations_]</code>
 
 
-Apply _body_ to _initial-value_, then apply _body_ to the result until
+Apply `_body_` to `_initial-value_`, then apply `_body_` to the result until
 the result no longer changes.
-
 
 To determine if a fixed point has been reached and the loop should terminate, 
 the previous and current values are compared with `Same`.
@@ -149,9 +152,9 @@ Use `["Break"]` to exit the loop immediately.
 <code>["Loop", _body_, _var_, _min_, _max_]</code><br>
 <code>["Loop", _body_, _var_, _min_, _max_, _step_]</code><br>
 
-Repeatedly evaluate _body_ until either _max-iterations_ is reached (or 
-`ce.iterationLimit` if _max-iteration_ is not specified), or the value of _body_ is
-a `["Break"]` expression.
+Repeatedly evaluate `_body_` until either `_max-iterations_` is reached (or 
+`ce.iterationLimit` if `_max-iteration_` is not specified), or the value of 
+`_body_` is a `["Break"]` expression.
 
 {% enddef %} 
 
@@ -163,7 +166,7 @@ a `["Break"]` expression.
 <code>["Product", _body_, _var_, _min_, _max_]</code><br>
 <code>["Product", _body_, _var_, _min_, _max_, _step_]</code><br>
 
-Evaluate _body_ and make a product of the result.
+Evaluate `_body_` and make a product of the result.
 
 {% enddef %} 
 
@@ -176,7 +179,7 @@ Evaluate _body_ and make a product of the result.
 <code>["Sum", _body_, _var_, _min_, _max_]</code><br>
 <code>["Sum", _body_, _var_, _min_, _max_, _step_]</code><br>
 
-Evaluate _body_ and make a sum of the result.
+Evaluate `_body_` and make a sum of the result.
 
 {% enddef %} 
 
@@ -193,7 +196,7 @@ Evaluate _body_ and make a sum of the result.
 <code>["Break", _expr_]</code><br>
 
 When in a loop, exit the loop immediately. The final value of the loop 
-expression is _expr_ or `Nothing` if not provided.
+expression is `_expr_` or `Nothing` if not provided.
 
 `["Break"]` expressions can also be used in a `["Block"]` expression.
 
@@ -204,7 +207,7 @@ expression is _expr_ or `Nothing` if not provided.
 <code>["Continue", _expr_]</code><br>
 
 When in a loop, skip to the next iteration of the loop. The value of the 
-iteration is _expr_ or `Nothing` if not provided.
+iteration is `_expr_` or `Nothing` if not provided.
 
 {% enddef %} 
 
@@ -222,22 +225,27 @@ iteration is _expr_ or `Nothing` if not provided.
 {% defs "Function" "Operation" %} 
 
 {% def "Let" %}
-<code>["Let", _symbol_, _domain_]</code><br>
 <code>["Let", _symbol_, _value_]</code><br>
 <code>["Let", _symbol_, _value_, _domain_]</code>
 
-Define a new symbol in the current scope, and set its value or domain.
+Define a new symbol in the current scope, and set its value and domain.
+If `domain` is not provided, the domain is inferred based on the value.
 
 If the symbol already had a definition in the current scope, replace it.
 
 {% enddef %} 
 
-{% def "Set" %}
-<code>["Set", _symbol_, _value_]</code>
+{% def "Value" %}
+<code>["Value", _symbol_]</code>
 
-Set the value of _symbol_ to _value_.
+Evaluate to the value of `_symbol_`.
 
-If _symbol_ does not exist in the current context, consider parent scopes until
+
+<code>["Value", _symbol_, _value_]</code>
+
+Set the value of `_symbol_` to `_value_`.
+
+If `_symbol_` does not exist in the current context, consider parent scopes until
 a definition for the symbol is found.
 
 If no definition for the symbol is found add one in the current scope.
@@ -436,34 +444,7 @@ For example `["Symbol", "x", 2] -> "x2"`
 
 
 
-<section id='styling-functions'>
 
-## Styling Functions
-
-The functions in this section represent a visual difference that is not usually
-material to the interpretation of an expression such as text color and size or
-other typographic variations.
-
-{% defs "Function" "Operation" %} 
-
-{% def "Style" %} <code>["Style", _expr_, _css_]</code>{% tags "inert" "float-right" %}
-
-Apply CSS styles to an expression
-
-{% enddef %} {% def "Delimiter" %} <code>["Delimiter",
-_expr_]</code>{% tags "inert" "float-right" %}
-
-<code>["Delimiter", _expr_, _sep_]</code>
-
-<code>["Delimiter", _expr_, _open_, _close_]</code>
-
-<code>["Delimiter", _expr_, _open_, _sep_, _close_]</code>
-
-Display _expr_ wrapped in a delimiter.
-
-{% enddef %} {% enddefs %}
-
-</section>
 
 
 ### `Parse`, `Latex`, `LatexTokens` and `LatexString`
@@ -516,6 +497,9 @@ tokens.
 | :------------------ | :--------------- |
 | `["Prime", "f"]`    | `f^\prime`       |
 | `["Prime", "f", 2]` | `f^\doubleprime` |
+
+
+<section id='supsub'>
 
 ### Superscripts and Subscripts
 
