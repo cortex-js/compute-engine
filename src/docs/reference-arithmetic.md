@@ -25,7 +25,7 @@ sidebar:
 </div>
 
 {% readmore "/compute-engine/reference/trigonometry/" %} See also
-<strong>Trigonometry</strong> for \( \pi \) and related
+<strong>Trigonometry</strong> for `Pi` and related
 constants{% endreadmore %}
 
 ## Relational Operators
@@ -43,38 +43,7 @@ constants{% endreadmore %}
 
 </div>
 
-## Rational
 
-`Rational(`_`n:Number`_`)`
-
-`Rational(`_`numerator:Integer`_`, `_`denominator:Integer `_`)`
-
-If two arguments, the first argument is the numerator, the second is the
-denominator. If a single argument, will evaluate to a rational approximating the
-value of the argument.
-
-## `BaseForm`
-
-`BaseForm(_n:Integer_, _base_=10)`
-
-Format an _integer_ in a specific _base_, such as hexadecimal or binary.
-
-The sign of _integer_ is ignored.
-
-- _value_ should be an integer.
-- _base_ should be an integer from 2 to 36.
-
-```json
-["Latex", ["BaseForm", 42, 16]]
-// ➔ (\text(2a))_{16}
-```
-
-```cortex
-Latex(BaseForm(42, 16))
-// ➔ (\text(2a))_{16}
-String(BaseForm(42, 16))
-// ➔ "'0x2a'"
-```
 
 ## Functions
 
@@ -92,6 +61,9 @@ String(BaseForm(42, 16))
 | `Square`   | \\(x^2\\)                     | {% tags "numeric" "float-right"%}                                                          |
 
 </div>
+
+
+
 
 ### Transcendental Functions
 
@@ -123,3 +95,84 @@ String(BaseForm(42, 16))
 | `Round`  |              | {% tags "numeric" "float-right"%}                                                                                 |
 
 </div>
+
+### Other Functions
+
+
+{% defs "Function" "Operation" %} 
+
+{% def "BaseForm" %}
+
+<code>["BaseForm", _value:Integer_]</code><br>
+<code>["BaseForm", _value:Integer_, _base_]</code>
+
+Format an _integer_ in a specific _base_, such as hexadecimal or binary.
+
+If no _base_ is specified, use base-10.
+
+The sign of _integer_ is ignored.
+
+- _value_ should be an integer.
+- _base_ should be an integer from 2 to 36.
+
+```json
+["Latex", ["BaseForm", 42, 16]]
+// ➔ (\text(2a))_{16}
+```
+
+```cortex
+Latex(BaseForm(42, 16))
+// ➔ (\text(2a))_{16}
+String(BaseForm(42, 16))
+// ➔ "'0x2a'"
+```
+
+{% enddef %}
+
+{% def "Clamp" %}
+<code>["Clamp", _value_]</code><br>
+<code>["Clamp", _value_, _lower_, _upper_]</code><br>
+
+This function evaluates to _value_ if _value_ is greater than _lower_ and less
+than _upper_. Otherwise it evaluates to _lower_ if _value_ is less than
+_lower_, otherwise to _upper_.
+
+If _lower_ and _upper_ are not provided, they take the default values of -1 and +1.
+
+{% enddef %} 
+
+
+{% def "Min" %}
+<code>["Min", _expr1_, ..._expr-n_]</code><br>
+<code>["Min", _list-of-values_]</code>
+
+If all the arguments are real numbers, excluding `NaN`, evaluate to the smallest of the arguments. Otherwise, simplify the expression by removing values that are
+greater or equal to the smallest real number.
+
+{% enddef %} 
+
+{% def "Max" %}
+<code>["Max", _expr1_, ..._expr-n_]</code><br>
+<code>["Max", _list-of-values_]</code>
+
+If all the arguments are real numbers, excluding `NaN`, evaluate to the largest of the arguments. Otherwise, simplify the expression by removing values that are
+smaller or equal to the largest real number.
+
+{% enddef %} 
+
+
+{% def "Rational" %}
+<code>["Rational", _n:Number_]</code><br>
+<code>["Rational", _numerator:Integer_, _denominator:Integer_]</code>
+
+If two arguments, the first argument is the numerator, the second is the
+denominator. 
+
+If a single argument, will evaluate to a rational approximating the
+value of the argument.
+
+{% enddef %} 
+
+
+
+{% enddefs %} 
