@@ -90,7 +90,7 @@ main > div.frame {
 }
 
 kbd {
-  font-family: 'IBM Plex mono', 'Source Code Pro', Menlo,
+  font-family:  'JetBrains Mono', 'IBM Plex mono', 'Source Code Pro', Menlo,
     'Bitstream Vera Sans Mono', Monaco, Courier, 'Andale Mono', monospace;
   background: #f4f4f4;
   color: #333;
