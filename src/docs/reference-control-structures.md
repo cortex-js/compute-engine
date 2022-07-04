@@ -25,17 +25,22 @@ is evaluated.
 <code>["Block", _expr-1_, ..._expr-n_]</code><br>
 <code>["Block", _dictionary_, _expr1_, ..._expr-n_]</code>
 
-When a `["Block"]` expression is evaluated, the following steps are followed:
+The evaluation of a `["Block"]` expression follows these steps:
 
-1. Create a new scope
-2. Set the value of the symbols in _dictionary_ in this scope
-3. Evaluate each _expr_ sequentially
+1) Create a new scope
+2) Set the value of the symbols in `_dictionary_` in this scope.
 
-The _dictionary_ argument can be a `["Dictionary"]` expression, a 
+    The _dictionary_ argument can be a `["Dictionary"]` expression, a 
 `["KeyValuePair"]` expression, a `["Pair"]` expression or a `["Tuple"]` expression.
 
-The value of the `["Block"]` expression is the value of the last expression, or the 
-value of the first `["Break"]` expression.
+3) Evaluate each _expr_ sequentially.
+
+    If the value of an expression is a `["Return"]` expression, a `["Break"]` 
+    expression or a `["Continue"]` expression, no more expressions are 
+    evaluated and the value of the `["Block"]` is this expression.
+    
+    Otherwise, the value of the `["Block"]` expression is the value of the last 
+    expression
 
 ```json
 ["Block", ["Tuple", "c", 5], ["Multiply", "c", 2]]
@@ -46,12 +51,16 @@ value of the first `["Break"]` expression.
 
 
 {% def "If" %}
-<code>["If", _condition_, _expr-1_, _expr-2_]</code><br>
 <code>["If", _condition_, _expr-1_]</code>
 
 - If the value of `_condition_` is the symbol `True`, the value of the `["If"]` 
-expression is `_expr-1_`. 
-- Otherwise, it is `_expr-2_` or `Nothing` if `_expr-2_`  is not provided.
+expression is `_expr-1_`, otherwise `Nothing`.
+
+<code>["If", _condition_, _expr-1_, _expr-2_]</code>
+
+- If the value of `_condition_` is the symbol `True`, the value of the `["If"]` 
+expression is `_expr-1_`, otherwise `_expr-2_`.
+
 
 ```json
 ["Value", "n", -10]
@@ -110,7 +119,8 @@ To determine if a fixed point has been reached and the loop should terminate,
 the previous and current values are compared with `Same`.
 
 
-Use `["Break"]` to exit the loop immediately.
+Use `["Break"]` to exit the loop immediately or `["Continue"]` to skip to
+the next iteration.
 
 
 
@@ -127,7 +137,8 @@ Use `["Break"]` to exit the loop immediately.
 
 Repeatedly evaluate `_body_` until either `_max-iterations_` is reached (or 
 `ce.iterationLimit` if `_max-iteration_` is not specified), or the value of 
-`_body_` is a `["Break"]` expression.
+`_body_` is a `["Break"]` expression, a `["Continue"]` expression or a 
+`["Return"]` expression.
 
 {% enddef %} 
 
@@ -161,7 +172,7 @@ Evaluate `_body_` and make a sum of the result.
 
 ## Break and Continue
 
-**To control the flow of a loop function**, use `["Break"]` and `["Continue"]`.
+**To control the flow of a loop expression**, use `["Break"]` and `["Continue"]`.
 
 
 {% defs "Function" "Operation" %} 
@@ -170,10 +181,12 @@ Evaluate `_body_` and make a sum of the result.
 <code>["Break"]</code><br>
 <code>["Break", _expr_]</code><br>
 
-When in a loop, exit the loop immediately. The final value of the loop 
-expression is `_expr_` or `Nothing` if not provided.
+When in a block, exit the block immediately. The value of the `["Block"]` 
+expression is the `["Break"]` expression.
 
-`["Break"]` expressions can also be used in a `["Block"]` expression.
+When  in a loop exit the loop immediately. The final value of the loop is 
+`_expr_` or `Nothing` if not provided.
+
 
 {% enddef %} 
 
@@ -183,6 +196,9 @@ expression is `_expr_` or `Nothing` if not provided.
 
 When in a loop, skip to the next iteration of the loop. The value of the 
 iteration is `_expr_` or `Nothing` if not provided.
+
+When in a block, exit the block immediately, and return the `["Continue"]`
+expression as the value of the block.
 
 {% enddef %} 
 
