@@ -5,9 +5,8 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Assumptions
 
 The Cortex Compute Engine has a robust system to specify properties and
 relationships between symbols.

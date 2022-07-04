@@ -5,9 +5,8 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Simplify
 
 A complicated mathematical expression can often be transformed into a form that
 is easier to understand.

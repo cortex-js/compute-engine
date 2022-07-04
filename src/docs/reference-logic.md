@@ -5,9 +5,8 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Logic
 
 ## Constants
 

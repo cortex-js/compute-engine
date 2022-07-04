@@ -5,11 +5,10 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
 
-# Symbolic Computing
-
-The CortexJS Compute Engine essentially perform computation by applying
+The CortexJS Compute Engine essentially performs computation by applying
 rewriting rules to a MathJSON expression.
 
 There are several categories of transformations, depending on the desired

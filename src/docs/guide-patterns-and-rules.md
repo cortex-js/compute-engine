@@ -1,13 +1,12 @@
 ---
-title: Patterns
+title: Patterns and Rules
 permalink: /compute-engine/guides/patterns-and-rules/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Patterns and Rules
 
 Recognizing patterns and applying rules is a powerful symbolic computing tool to
 identify and manipulate the structure of expressions.

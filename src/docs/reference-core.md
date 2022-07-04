@@ -5,9 +5,8 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Core
 
 <section id='constants'>
 
@@ -78,7 +77,7 @@ expression is `_expr-1_`.
 - Otherwise, it is `_expr-2_` or `Nothing` if `_expr-2_`  is not provided.
 
 ```json
-["Set", "n", -10]
+["Value", "n", -10]
 ["If", ["Greater", "n", 0], "n", ["Negate", "n"]]
 // ➔ 10
 ```
@@ -447,7 +446,7 @@ For example `["Symbol", "x", 2] -> "x2"`
 
 
 
-### `Parse`, `Latex`, `LatexTokens` and `LatexString`
+## `Parse`, `Latex`, `LatexTokens` and `LatexString`
 
 <code>["Latex", _expr_ ]</code>
 
@@ -489,9 +488,9 @@ See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
 This function can be returned when the parser fails to parse a sequence of LaTeX
 tokens.
 
-### `Piecewise`
+## `Piecewise`
 
-### `Prime`
+## `Prime`
 
 | MathJSON            | LaTeX            |
 | :------------------ | :--------------- |
@@ -501,7 +500,7 @@ tokens.
 
 <section id='supsub'>
 
-### Superscripts and Subscripts
+## Superscripts and Subscripts
 
 These functions are all inert functions, that is they evaluate to themselves.
 

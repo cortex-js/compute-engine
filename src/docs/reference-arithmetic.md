@@ -5,9 +5,8 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Arithmetic
 
 ## Constants
 
@@ -55,6 +54,7 @@ constants{% endreadmore %}
 | `Subtract` | \\( a - b\\)                  | [Subtraction](https://www.wikidata.org/wiki/Q32043) {% tags "numeric" "float-right"%}      |
 | `Negate`   | \\(-a\\)                      | [Additive inverse](https://www.wikidata.org/wiki/Q715358){% tags "numeric" "float-right"%} |
 | `Multiply` | \\( a\times b \\)             | [Multiplication](https://www.wikidata.org/wiki/Q40276) {% tags "numeric" "float-right"%}   |
+| `Divide` | \\( \frac{a}{b} \\)             | [Divide](https://www.wikidata.org/wiki/Q1226939) {% tags "numeric" "float-right"%}   |
 | `Power`    | \\( a^b \\)                   | [Exponentiation](https://www.wikidata.org/wiki/Q33456) {% tags "numeric" "float-right"%}   |
 | `Root`     | \\(\sqrt[n]{x}=x^{\frac1n}\\) | [n-th root](https://www.wikidata.org/wiki/Q601053) {% tags "numeric" "float-right"%}       |
 | `Sqrt`     | \\(\sqrt{x}=x^{\frac12}\\)    | [Square root](https://www.wikidata.org/wiki/Q134237){% tags "numeric" "float-right"%}      |

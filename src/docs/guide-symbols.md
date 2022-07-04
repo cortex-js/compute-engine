@@ -5,9 +5,8 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Symbols
 
 A symbol is a named mathematical object. It belongs to a domain and it may 
 hold a value. A symbol without a value represents a mathematical unknown

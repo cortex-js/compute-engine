@@ -1,13 +1,13 @@
 ---
-title: LaTeX Syntax
+title: Parsing and Serializing LaTeX
 permalink: /compute-engine/guides/latex-syntax/
 layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
 
-# Parsing and Serializing LaTeX
 
 The CortexJS Compute Engine manipulates MathJSON expressions. It can also
 convert LaTeX strings to MathJSON expressions (**parsing**) and output MathJSON

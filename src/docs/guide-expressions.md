@@ -5,9 +5,8 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Expressions
 
 The CortexJS Compute Engine produces and manipulates
 [symbolic expressions](<https://en.wikipedia.org/wiki/Expression_(mathematics)>)

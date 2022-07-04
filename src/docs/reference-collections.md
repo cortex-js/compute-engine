@@ -5,10 +5,8 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Collections
-
 ## `Sequence`
 
 The most primitive collection: a series of expressions.

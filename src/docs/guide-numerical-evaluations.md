@@ -5,9 +5,8 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
 ---
-
-# Numerical Evaluation
 
 **To obtain a numeric approximation of the value of an expression**, call the
 `expr.N()` function.
