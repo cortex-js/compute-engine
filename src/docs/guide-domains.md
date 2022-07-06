@@ -8,7 +8,7 @@ sidebar:
 toc: true
 ---
 
-A **domain** is the set of the possible values of an expression.
+A **domain** is the set of the possible values of an expression.{.xl}
 
 A domain is represented by a **domain expression**, such as `Integer`, `Boolean`
 or `["Range", ["Literal", -1], ["Literal", +1]]`. `Integer` and `Boolean` are

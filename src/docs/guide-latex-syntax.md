@@ -11,7 +11,7 @@ toc: true
 
 The CortexJS Compute Engine manipulates MathJSON expressions. It can also
 convert LaTeX strings to MathJSON expressions (**parsing**) and output MathJSON
-expressions as LaTeX string (**serializing**).
+expressions as LaTeX string (**serializing**).{.xl}
 
 **To parse a LaTeX string to MathJSON**, call the `ce.parse()` function.
 

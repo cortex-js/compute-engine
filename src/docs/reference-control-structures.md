@@ -8,12 +8,12 @@ sidebar:
 toc: true
 ---
 
-Control Structures, along with Loops, define how a sequence of expressions
-is evaluated.
+Control Structures define how a sequence of expressions is evaluated.{.xl}
 
 - A `["Block"]` expression defines a **sequential** control structure
 - An `["If"]` expression defines a **conditional** control structure.
-- A `["Loop"]`, `["FixedPoint"]`, `["Sum"]`, `["Product"]` expression defines an **iterative** control structure.
+- A `["FixedPoint"]`, `["Loop"]`, `["Sum"]` or `["Product"]` expression 
+  defines an **iterative** control structure.
 
 
 ## Block and If
@@ -75,35 +75,32 @@ expression is `_expr-1_`, otherwise `_expr-2_`.
 
 ## Loops
 
-The `Loop`, `Sum` and `Product` functions are iteration functions that share a
-similar form. 
+The `Fold`, `Loop`, `Sum` and `Product` functions are iteration control 
+structures that share a similar form. 
 
 Their first argument, `body` is an expression that gets evaluated repeatedly.
+The `body` expression is evaluated with an implicit argument `_` whose value is
+the current iteration element.
 
-In the case of `Sum`, each value of `body`  is summed, and the 
-value of the loop function is the sum. Similarly for `Product`. 
+Their second argument, `iterator` can take the following shapes:
 
-For `["Loop"]` expressions, the value of the loop expression is the last value 
-of `body` or the value of a `["Break"]` expression.
+- `["List", _expr-1_, ..._expr-n]`: the `_` implicit argument takes in turn each
+element
+- `["Range", _upper_]`: the `_` implicit argument is assigned 
+  the value 1, then incremented by 1 until it reaches at least _upper_.
+- `["Range", _lower_, _upper_]`: the `_` implicit argument is assigned 
+  the values from the lower bound to the upper bound of the range, with a step of 1.
+- `["Range", _lower_, _upper_, _step_]`: the `_` implicit argument is assigned 
+  the value _lower_ then incremented by _step_ until it reaches at least _upper_.
 
-The other arguments indicate how the iteration should be performed:
-- if no other argument is specified, the `body` expression is evaluated until
-its value is a `["Break"]` expression.
-- `max-iterations`: indicates how many times the _body_ expression will be evaluated
-- `var`, `list-of-values`: the symbol `var` is assigned, in turn, the values in 
-`_list-of-values_`
-- `var`, `range`: the symbol `var` is assigned the values from the lower 
-bound to the upper bound of the range, with a step of 1.
-- `var`, `max`: the symbol `var` is assigned a value of 1, then incremented
-by 1 until it reaches at least `max`
-- `var`, `min`, `max`: the symbol `var` is assigned a value of `min`, then 
-incremented by 1 until it reaches at least `max`
-- `var`, `min`, `max`, `step`: the symbol `var` is assigned a value 
-of `min`, then incremented by `step` until it reaches at least `max`
+To use a named argument, use a `["Function"]` expression for the `body`.
 
-The `FixedPoint`, `Loop`, `Sum` and `Product` functions create a new scope. If
- `var` is specified, it is defined in this new scope.
-
+```json
+["Loop", ["Print", ["Square", "_"]], ["Range", 5]]
+// ➔ 1 4 9 16 25
+["Loop", ["Function", "x", ["Print", ["Square", "x"]]], ["Range", 5]]
+// ➔ 1 4 9 16 25
+```
 
 {% defs "Function" "Operation" %} 
 
@@ -111,6 +108,7 @@ The `FixedPoint`, `Loop`, `Sum` and `Product` functions create a new scope. If
 <code>["FixedPoint", _body_, _initial-value_]</code><br>
 <code>["FixedPoint", _body_, _initial-value_, _max-iterations_]</code>
 
+Assumes `_body_` is an expression using an implicit argument `_`.
 
 Apply `_body_` to `_initial-value_`, then apply `_body_` to the result until
 the result no longer changes.
@@ -119,51 +117,99 @@ To determine if a fixed point has been reached and the loop should terminate,
 the previous and current values are compared with `Same`.
 
 
-Use `["Break"]` to exit the loop immediately or `["Continue"]` to skip to
-the next iteration.
+Inside `_body_`, use `["Break"]` to exit the loop immediately or `["Continue"]` 
+to skip to the next iteration.
 
 
 
 {% enddef %} 
 
+{% def "Fold" %}
+<code>["Fold", _body_, _iterator_]</code><br>
+<code>["Fold", _body_, _initial-value_, _iterator_]</code>
+
+Evaluate to `[_body_, [_body_, _initial-value_, _elem-1_], _elem-2]]...` where
+_elem-1_ and _elem-2_ are the first two elements from the iterator.
+
+```json
+["Fold", "Multiply", ["List", 5, 7, 11]]
+// ➔ 385
+```
+
+See above for the definition of _iterator_.
+
+{% enddef %} 
+
+
+
 {% def "Loop" %}
 <code>["Loop", _body_]</code><br>
-<code>["Loop", _body_, _max-iterations_]</code><br>
-<code>["Loop", _body_, _var_, _list-of-values_]</code><br>
-<code>["Loop", _body_, _var_, _range_]</code><br>
-<code>["Loop", _body_, _var_, _max_]</code><br>
-<code>["Loop", _body_, _var_, _min_, _max_]</code><br>
-<code>["Loop", _body_, _var_, _min_, _max_, _step_]</code><br>
+<code>["Loop", _body_, _iterator_]</code><br>
 
-Repeatedly evaluate `_body_` until either `_max-iterations_` is reached (or 
-`ce.iterationLimit` if `_max-iteration_` is not specified), or the value of 
-`_body_` is a `["Break"]` expression, a `["Continue"]` expression or a 
-`["Return"]` expression.
+Repeatedly evaluate `_body_` until the last element of the iterator is reached.
+
+See above for the definition of _iterator_.
+
+To exit the loop early, _body_ should evaluate to a `["Break"]` expression, 
+a `["Continue"]` expression or a `["Return"]` expression.
+
+```json
+["Loop", ["Print", ["Square", "_"]], ["Range", 5]]
+// ➔ 1 4 9 16 25
+["Loop", ["Function", "x", ["Print", ["Square", "x"]]], ["Range", 5]]
+// ➔ 1 4 9 16 25
+```
+
 
 {% enddef %} 
 
 {% def "Product" %}
-<code>["Product", _body_, _max-iterations_]</code><br>
-<code>["Product", _body_, _var_, _list-of-values_]</code><br>
-<code>["Product", _body_, _var_, _range_]</code><br>
-<code>["Product", _body_, _var_, _max_]</code><br>
-<code>["Product", _body_, _var_, _min_, _max_]</code><br>
-<code>["Product", _body_, _var_, _min_, _max_, _step_]</code><br>
+<code>["Product", _iterator_]</code>
+
+Evaluate to a product of all the elements in `_iterator_`. If all the
+elements are numbers, the result is a number. Otherwise it is a simplified list.
+
+Equivalent to `["Fold", "Multiply", _iterator_]`.
+
+```json
+["Product", ["List", 5, 7, 11]]
+// ➔ 385
+["Product", ["List", 5, "x", 11]]
+// ➔ ["List", 55, "x"]
+```
+
+<code>["Product", _body_, _iterator_]</code>
 
 Evaluate `_body_` and make a product of the result.
+
+Equivalent to `["Fold", ["Multiply", _1, [_body_, _2]], _iterator_]`.
+
+See above for the definition of _iterator_.
 
 {% enddef %} 
 
 
 {% def "Sum" %}
-<code>["Sum", _body_, _max_]</code><br>
-<code>["Sum", _body_, _var_, _list-of-values_]</code><br>
-<code>["Sum", _body_, _var_, _range_]</code><br>
-<code>["Sum", _body_, _var_, _max_]</code><br>
-<code>["Sum", _body_, _var_, _min_, _max_]</code><br>
-<code>["Sum", _body_, _var_, _min_, _max_, _step_]</code><br>
+<code>["Sum", _iterator_]</code>
+
+Evaluate to a sum of all the elements in `_iterator_`. If all the
+elements are numbers, the result is a number. Otherwise it is a simplified list.
+
+
+Equivalent to `["Fold", "Add", _iterator_]`.
+
+```json
+["Sum", ["List", 5, 7, 11]]
+// ➔ 23
+["Sum", ["List", 5, "x", 11]]
+// ➔ ["List", 16, "x"]
+```
+
+<code>["Sum", _body_, _iterator_]</code>
 
 Evaluate `_body_` and make a sum of the result.
+
+Equivalent to `["Fold", ["Add", _1, [_body_, _2]], _iterator_]`.
 
 {% enddef %} 
 

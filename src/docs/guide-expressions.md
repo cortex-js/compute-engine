@@ -10,7 +10,7 @@ toc: true
 
 The CortexJS Compute Engine produces and manipulates
 [symbolic expressions](<https://en.wikipedia.org/wiki/Expression_(mathematics)>)
-such as numbers, constants, variables and functions.
+such as numbers, constants, variables and functions.{.xl}
 
 Expressions are represented using the [MathJSON format](/math-json/).
 

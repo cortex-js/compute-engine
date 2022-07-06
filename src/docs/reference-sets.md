@@ -8,13 +8,7 @@ sidebar:
 toc: true
 ---
 
-A **set** is a collection of distinct elements.
-
-A **domain**, such as `Integer` `Boolean`, is a **set** used to represent the
-possible values of an expression.
-
-{% readmore "/compute-engine/reference/domains/" %} Read more about
-<strong>Domains</strong> {% endreadmore %}
+A **set** is a collection of distinct elements.{.xl}
 
 ## Constants
 
@@ -25,8 +19,6 @@ possible values of an expression.
 | `EmptySet` | \\( \varnothing \\) or \\( \emptyset \\) |            |
 
 </div>
-
-The [domains](/compute-engine/reference/domains/) also define a number of sets.
 
 ## Functions
 

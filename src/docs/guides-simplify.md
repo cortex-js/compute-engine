@@ -9,7 +9,7 @@ toc: true
 ---
 
 A complicated mathematical expression can often be transformed into a form that
-is easier to understand.
+is easier to understand.{.xl}
 
 The `expr.simplify()` function tries expanding, factoring and applying many
 other transformations to find a simple a simpler form of a symbolic expression.

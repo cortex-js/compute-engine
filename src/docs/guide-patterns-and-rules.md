@@ -9,7 +9,7 @@ toc: true
 ---
 
 Recognizing patterns and applying rules is a powerful symbolic computing tool to
-identify and manipulate the structure of expressions.
+identify and manipulate the structure of expressions.{.xl}
 
 <section id='wildcards'>
 

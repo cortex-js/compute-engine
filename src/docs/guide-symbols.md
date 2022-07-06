@@ -8,9 +8,9 @@ sidebar:
 toc: true
 ---
 
-A symbol is a named mathematical object. It belongs to a domain and it may 
+A **symbol** is a named mathematical object. It belongs to a domain and it may 
 hold a value. A symbol without a value represents a mathematical unknown
-in an expression.
+in an expression.{.xl}
 
 **To change the value or domain of a symbol**, use the `value` and `domain` 
 properties of the symbol.

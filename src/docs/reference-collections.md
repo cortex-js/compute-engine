@@ -7,44 +7,36 @@ sidebar:
   - nav: 'compute-engine'
 toc: true
 ---
-## `Sequence`
-
-The most primitive collection: a series of expressions.
-
-| MathJSON                             | LaTeX            |
-| :----------------------------------- | :--------------- |
-| `["Sequence", 1, 2]`             | \\( 1 2 \\)     |
-| `["Sequence", ["Add", "x", 1], "y"]` | \\( x + 1 y \\) |
 
 
-## `Set`
+{% defs "Function" "Operation" %} 
 
-An unordered collection of unique elements.
+{% def "List" %} 
+<code>["List", _expr-1_, ..._expr-2_]</code>
 
-| MathJSON            | LaTeX                       |
-| :------------------ | :-------------------------- |
-| `["Set", "x", "y"]` | \\( \lbrack x, y\rbrack \\) |
+An **ordered** collection of elements.
 
-## `List`
-
-An ordered collection of elements.
-
-Use to represent a data structure, as opposed to `Parentheses` or `Sequence`.
+Use to represent a data structure, unlike `Delimiter` which is just a visual styling.
 
 | MathJSON                        | LaTeX               |
 | :------------------------------ | :------------------ |
-| `["List", "x", "y", "7", "11"]` | \\([x, y, 7, 11]\\) |
-| `["List", "x", "Nothing", "y"]` | \\([x,,y]\\)        |
+| `["List", "x", "y", "7", "11"]` | \\( \lbrack x, y, 7, 11\rbrack \\) |
+| `["List", "x", "Nothing", "y"]` | \\( \lbrack x,,y\rbrack \\)        |
 
-## `Delimiter`
+{% enddef %}
 
-One or more expressions in a sequence, enclosed with some delimiters and
-separated by a separator
 
-Use to represent function arguments and to group arithmetic expressions.
+{% def "Set" %} 
+<code>["Set", _expr-1_, ..._expr-2_]</code>
 
-| MathJSON                                                         | LaTeX           |
-| :--------------------------------------------------------------- | :-------------- |
-| `["Parentheses", ["Sequence", "x", "y", "7", "11"]`              | `(x, y, 7, 11)` |
-| `["Delimiter"]`                                                  | `()`            |
-| `["Delimiter", "a", "b", "c"]`                                 | `(a, b, c)`     |
+An **unordered** collection of unique elements.
+
+| MathJSON            | LaTeX                       |
+| :------------------ | :-------------------------- |
+| `["Set", "x", "y"]` | \\( \lbrace x, y\rbrace \\) |
+
+{% enddef %}
+
+
+{% enddefs %}
+

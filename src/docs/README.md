@@ -83,10 +83,14 @@ organized by topic as follow:
 | [Arithmetic](/compute-engine/reference/arithmetic/) | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`...|
 | [Calculus](/compute-engine/reference/calculus/) | `Derive` `Integrate`...|
 | [Collections](/compute-engine/reference/collections/)| `Sequence` `List` `Dictionary` `Set`... |
-| [Core](/compute-engine/reference/core/) | `Missing` `Nothing` `None` `All` `Error` `Identity` `InverseFunction` `LatexTokens`... |
+| [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` `Sum`  ... |
+| [Core](/compute-engine/reference/core/) | `Missing` `InverseFunction` `LatexTokens`... |
+| [Domains](/compute-engine/reference/domains/) | `Anything` `Nothing` `Number` `Integer` ... |
+| [Functions](/compute-engine/reference/functions/) | `Function` `Apply` `Return`  ... |
 | [Logic](/compute-engine/reference/logic/) |`And` `Or` `Not` `True` `False` `Maybe` ...|
 | [Sets](/compute-engine/reference/sets/) | `Union` `Intersection` `EmptySet` ...|
 | [Special Functions](/compute-engine/reference/special-functions/) | `Erf` `Gamma` `Factorial`...|
+| [Styling](/compute-engine/reference/styling/) | `Delimiter` `Style`...|
 | [Trigonometry](/compute-engine/reference/trigonometry/)  | `Pi` `Cos` `Sin` `Tan`...| 
 
 </div>
