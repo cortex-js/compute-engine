@@ -41,17 +41,18 @@ JavaScript/TypeScript of utilities that parse LaTeX to MathJSON, serialize
 MathJSON to LaTeX, and provide a collection of functions for symbolic
 manipulation and numeric evaluations of MathJSON expressions.
 
-{% readmore "/compute-engine/guides/dictionaries/" %} Read more about
-<strong>MathJSON for LaTeX</strong> {% endreadmore %}
-
-{% readmore "/compute-engine/" %} Read more about the <strong>Compute
-Engine</strong> {% endreadmore %}
+{% readmore "/compute-engine/guides/latex-syntax/" %} Read more about the <strong>Compute
+Engine</strong> LaTeX syntax parsing and serializing.{% endreadmore %}
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations
 are invented regularly and need to be represented with MathJSON. To address
 those needs MathJSON is flexible, extensible and customizable. Extensible
 dictionaries can be used to define new syntax and new semantic.
+
+{% readmore "/compute-engine/guides/dictionaries/" %} Read more about the
+<strong>Cortex Compute Engine Standard Dictionaries</strong> {% endreadmore %}
+
 
 MathJSON is not intended to be suitable as a visual representation of arbitrary
 mathematical notations, and as such is not a replacement for LaTeX or MathML.
@@ -168,15 +169,15 @@ the following differences:
 
 </div>
 
-### JSON Numbers
+### Numbers as Number Literals
 
 When a **number** has no extra metadata and is compatible with the JSON
-representation of numbers, a JSON number can be used.
+representation of numbers, a JSON number literal can be used.
 
 Specifically:
 
-- the number is in the range \\([-(2^{53})+1, (2^{53})-1]\\) to fit in a 64-bit
-  float (**IEEE 754-2008**, 52-bit, about 15 digits of precision).
+- the number is in the range \\([-(2^{53})+1, (2^{53})-1]\\) so it can fit in
+  a 64-bit float (**IEEE 754-2008**, 52-bit, about 15 digits of precision).
 - the number is finite: it cannot be `+Infinity` `-Infinity` or `NaN`.
 
 ```json
@@ -184,6 +185,7 @@ Specifically:
 
 -234.534e-46
 
+// The numbers below cannot be represented as JSON number literals
 { "num": "-234.534e-46" }
 
 {
@@ -453,7 +455,7 @@ The expression corresponding to \\(\sin^{-1}(x)\\) is:
 The head of this expression is `["InverseFunction", "Sin"]` and the argument is
 `"x"`.
 
-### JSON Array
+### Functions as JSON Arrays
 
 If a **function** has no extra metadata it can be represented as a JSON array.
 
@@ -488,13 +490,24 @@ value of the key is a JSON object literal holding the content of the dictionary.
 }
 ```
 
+An alternate representation of a dictionary is as a `["Dictionary"]` function expression, but this is quite a bit more verbose:
+
+```json
+["Dictionary",
+  ["KeyValuePair", "'first'", 1],
+  ["KeyValuePair", "'second'", 2],
+  ["KeyValuePair", "'third'", ["Add", 1, 2]],
+]
+```
+
 ## Metadata
 
 MathJSON object literals can be annotated with supplemental information.
 
-A **number** represented as a JSON number, a **symbol** represented as a JSON
-string, or a **function** represented as a JSON array must be transformed into
-the equivalent object literal before being annotated.
+A **number** represented as a JSON number literal, a **symbol** or **string**
+represented as a JSON string literal, or a **function** represented as a 
+JSON array must be transformed into the equivalent object literal to be
+annotated.
 
 The following metadata keys are recommended:
 
@@ -514,17 +527,16 @@ The following metadata keys are recommended:
 </div>
 
 ```json
-// The ratio of the circumference of a circle to its diameter
 {
   "sym": "Pi",
+  "comment": "The ratio of the circumference of a circle to its diameter",
   "wikidata": "Q167",
   "latex": "\\pi"
 }
 
-// The greek letter ∏
 {
   "sym": "Pi",
+  "comment": "The greek letter ∏",
   "wikidata": "Q168",
-  "comment": "The greek letter π"
 }
 ```

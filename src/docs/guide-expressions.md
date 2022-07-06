@@ -272,6 +272,5 @@ function and the values of an object property:
 - **`this`**: this function was not applicable, or there was nothing to do. For
   example, invoking `expr.simplify()` on a boxed string.
 
-{% readmore "/compute-engine/guides/symbols/" %} See also
-<strong>symbols</strong> to read about defining and changing the value of
-symbols{% endreadmore %}
+{% readmore "/compute-engine/guides/symbols/" %} Read more about defining and 
+changing the value of <strong>symbols</strong> {% endreadmore %}
