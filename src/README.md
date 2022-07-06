@@ -5,12 +5,14 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'compute-engine'
+toc: true
+toc-options: '{"tags":["h2"]}'
+preamble: "<img src='/assets/MathJSON-1.jpg' class='full-width' style='border-radius:8px 8px 0 0; border:1px solid #203346; margin-bottom: 2em'>
+  <p class=xl>The MathJSON format is a lightweight data interchange format for mathematical
+notation.</p>"
 ---
 
-<img src='/assets/MathJSON-1.jpg' class='full-width' style='border-radius:8px 8px 0 0; border:1px solid #203346; margin-bottom: 2em'>
 
-The MathJSON format is a lightweight data interchange format for mathematical
-notation.
 
 <div class=symbols-table>
 
@@ -166,7 +168,7 @@ the following differences:
 
 </div>
 
-### JSON numbers
+### JSON Numbers
 
 When a **number** has no extra metadata and is compatible with the JSON
 representation of numbers, a JSON number can be used.
@@ -248,7 +250,7 @@ except:
 | :----------------------- | :--------------------------- | :------ |
 | **U+0000** to **U+0020** |                              |         |
 | **U+0022**               | **QUOTATION MARK**           | `"`     |
-| **U+0060**               | **GRAVE ACCENT**<br>backtick | `` ` `` |
+| **U+0060**               | **GRAVE ACCENT**<br>backtick | <code>&#96;</code> |
 | **U+FFFE**               | **BYTE ORDER MARK**          |         |
 | **U+FFFF**               | **INVALID BYTE ORDER MARK**  |         |
 
@@ -301,16 +303,21 @@ functions are recommendations.
 ### Wildcards
 
 Symbols that begin with **U+005F LOW LINE** `_` (underscore) should be used to
-denote wildcards and other placeholders:
+denote wildcards and other placeholders.
+
+For example, they can be used to denote the positional arguments in an 
+expression with some arguments. They can also be used to denote placeholders
+and captured expression in patterns.
 
 <div class=symbols-table>
 
-| Wildcard |                                              |
-| :------- | :------------------------------------------- |
-| `_`      | Wildcard for a single symbol                 |
-| `__`     | Wildcard for a sequence of 1 or more symbols |
-| `___`    | Wildcard for a sequence of 0 or more symbols |
-| `_a`     | Capturing wildcard named `a`                 |
+| Wildcard |                                                 |
+| :------- | :---------------------------------------------- |
+| `_`      | Wildcard for a single expression                |
+| `_1`     | Wildcard for a positional argument              |
+| <code>&#95;&#x200A;&#95;</code>     | Wildcard for a sequence of 1 or more expression |
+| `___`    | Wildcard for a sequence of 0 or more expression |
+| `_a`     | Capturing an expression as a wildcard named `a` |
 
 </div>
 
@@ -396,9 +403,14 @@ its arguments.
 The **head** of the function is the first element in the array. Its presence is
 required. It indicates the "function name" or "what" the function is about.
 
-The head is frequently a string, but it can be another expression. If it is a
-string, it should follow the conventions for constants in the section above on
-Symbols.
+The head is frequently a string, but it can be another expression. 
+
+If it is a string, it should follow the conventions for constants in the 
+section above on Symbols.
+
+If it is an expression, it may include the wildcard `_` or `_1` to represent 
+the first argument, `_2`, etc... to represent the second and other arguments. 
+The wildcard `__` represents the sequence of all the arguments.
 
 Following the head are zero or more **arguments**, which are expressions as
 well. The arguments, or **operands**, form the **tail** of the function.
@@ -412,7 +424,7 @@ The expression corresponding to \\(\sin^{-1}(x)\\) is:
 The head of this expression is `["InverseFunction", "Sin"]` and the argument is
 `"x"`.
 
-### JSON array
+### JSON Array
 
 If a **function** has no extra metadata it can be represented as a JSON array.
 
