@@ -237,11 +237,11 @@ A MathJSON **symbol** is either:
 - an object literal with a `"sym"` key
 - a JSON string
 
-**Symbols** are identifiers that represent the name of constants, variables and
-functions.
+**Symbols** are identifiers that represent the name of variables, wildcards,
+constants and functions.
 
 Symbols are strings of valid Unicode characters, including Greek, Cyrillic,
-Hebrew, Arabic, mathematical symbols, ideographic and CJK symbols and emojis,
+Hebrew, Arabic, ideographic and CJK symbols, mathematical symbols and emojis,
 except:
 
 <div class=symbols-table>
@@ -292,15 +292,40 @@ JSON escape sequences are applied before Unicode normalization.
 These four strings represent the same symbol:
 
 - `"Å"`
-- `"A\u030a"`
-- `"\u00c5"` **LATIN CAPITAL LETTER A WITH RING ABOVE** `Å` and
+- `"A\u030a"` `A‌` + **COMBINING RING ABOVE**
+- `"\u00c5"` **LATIN CAPITAL LETTER A WITH RING ABOVE** `Å`
 - `"\u0041\u030a"` **LATIN CAPITAL LETTER A** + **COMBINING RING ABOVE** `A‌` +
   ` ̊`
 
 The following naming convention for wildcards, variables, constants and
-functions are recommendations.
+function names are recommendations.
 
-### Wildcards
+
+### Variables Naming Convention
+
+- Avoid mixing latin characters and non-latin characters. 
+  
+  For example, use `"半径"`, `"🍕"` or `"🐕🐄"`, but avoid `"🍕slice"`
+  
+  Carefully consider when to use non-latin characters. 
+  
+  For example:
+    - prefer using `"gamma"` rather than `"ɣ"` (**LATIN SMALL LETTER GAMMA**) or `"γ"` (**GREEK SMALL LETTER GAMMA**) 
+    - prefer using `"Total"` rather than `"∑"` **U+2211 N-ARY SUMMATION**, which can be visually confused with `"Σ"` **U+03A3 GREEK CAPITAL LETTER SIGMA**.
+- If using latin characters, the first character of a variable should be a
+ lowercase or uppercase letter: `a`-`z` or `A`-`Z`
+- Subsequent characters should be a letter, digit (`0`-`9`) or underscore (`_`).
+
+  Using a more limited set of common characters avoids visual ambiguity issues
+  that might otherwise arise with some Unicode symbols.
+
+- If a variable is made of several words, use camelCase, i.e. `"newDeterminant"`
+
+- Prefer clarity over brevity and avoid obscure abbreviations.
+
+  Use `"newDeterminant"` rather than `"newDet"` or `"nDet"`
+
+### Wildcards Naming Convention
 
 Symbols that begin with **U+005F LOW LINE** `_` (underscore) should be used to
 denote wildcards and other placeholders.
@@ -313,38 +338,28 @@ and captured expression in patterns.
 
 | Wildcard |                                                 |
 | :------- | :---------------------------------------------- |
-| `_`      | Wildcard for a single expression                |
-| `_1`     | Wildcard for a positional argument              |
-| <code>&#95;&#x200A;&#95;</code>     | Wildcard for a sequence of 1 or more expression |
-| `___`    | Wildcard for a sequence of 0 or more expression |
-| `_a`     | Capturing an expression as a wildcard named `a` |
+| `"_"`      | Wildcard for a single expression                |
+| `"_1"`     | Wildcard for a positional argument              |
+| <code>"&#95;&#x200A;&#95;"</code>     | Wildcard for a sequence of 1 or more expression |
+| `"___"`    | Wildcard for a sequence of 0 or more expression |
+| `"_a"`     | Capturing an expression as a wildcard named `a` |
 
 </div>
 
-### Variables
+### Constants Naming Convention
 
-- The first character of a variable should be a lowercase or uppercase letter
-  (`a`-`z` or `A`-`Z`)
-- Subsequent characters should be a letter, digit (`0`-`9`) or underscore (`_`).
-
-  For example, it is recommended to use `gamma` rather than `ɣ` and `Total`
-  rather than **U+2211 N-ARY SUMMATION** `∑`, which can be confused with
-  **U+03A3 GREEK CAPITAL LETTER SIGMA** `Σ`.
-
-  Using a more limited set of common characters avoids visual ambiguity issues
-  that might otherwise arise with some Unicode symbols.
-
-- If a variable is made of several words, use camelCase, i.e. `newDeterminant`
-
-- Prefer clarity over brevity and avoid obscure abbreviations.
-
-  Use `newDeterminant` rather than `newDet` or `nDet`
-
-### Constants
-
-- The first character of a constant should be an uppercase letter `A`-`Z`
+- Avoid mixing latin characters and non-latin characters.
+- If using latin characters, the first character of a constant should be an uppercase letter `A`-`Z`
 - Subsequent characters should be a letter, digit `0`-`9` or underscore `_`.
-- If a constant is made up of several words, use camelCase, e.g. `SpeedOfLight`
+- If a constant is made up of several words, use camelCase, e.g. `"SpeedOfLight"`
+
+### Function Names Naming Convention
+
+- Avoid mixing latin characters and non-latin characters.
+- The names of the function in the standard dictionary start with an uppercase letter `A`-`Z`, for example `"Sin"`, `"Fold"`.
+- Subsequent characters should be a letter, digit `0`-`9` or underscore `_`.
+- If a function name is made up of several words, use camelCase, e.g. `"InverseFunction"`
+
 
 ### Rendering Conventions
 
@@ -374,9 +389,9 @@ these conventions.
 | :-------- | :--------------------- | ----------------------------- |
 | `time`    | `\mathit{time}`        | \\( \mathit{time} \\)         |
 | `alpha`   | `\alpha`               | \\( \alpha \\)                |
+| `alpha0`  | `\alpha_0`             | \\( \alpha\_0 \\)              |
 | `m56`     | `m_{56}`               | \\( m\_{56} \\)               |
-| `alpha0`  | `\alpha_0`             | \\( \alpha_0 \\)              |
-| `m56_max` | `m_{56_{\mathit{max}}` | \\( m*{56*{\mathit{max}}} \\) |
+| `m56_max` | `m_{56_{\mathit{max}}` | \\( m\_{56\_{\mathit{max}}} \\) |
 | `c_max`   | `c_{\mathit{max}}`     | \\( c\_{\mathit{max}} \\)     |
 
 </div>
@@ -390,30 +405,44 @@ A MathJSON function is either:
 
 ### Functions as Object Literal
 
-The default representation of **functions** is as an object literal with a
-`"fn"` key. The value of the key is an array representing the function head and
-its arguments.
+The default representation of **function** expressions is an object literal
+with a `"fn"` key. The value of the key is an array representing the function
+head and its arguments.
 
-```typescript
+```js
 {
-    "fn": [Expression, ...Expression[]]
+  "fn": [Expression, ...Expression[]]
 }
 ```
 
-The **head** of the function is the first element in the array. Its presence is
-required. It indicates the "function name" or "what" the function is about.
+The **head** of the function expression is the first element in the array. 
+Its presence is required. It indicates the **name of the function** or "what" the function is about.
 
 The head is frequently a string, but it can be another expression. 
 
-If it is a string, it should follow the conventions for constants in the 
-section above on Symbols.
+- If it is a string, it should follow the conventions for function names. 
 
-If it is an expression, it may include the wildcard `_` or `_1` to represent 
-the first argument, `_2`, etc... to represent the second and other arguments. 
+  ```json
+  // Apply the function "Sin" to the argument "x"
+  ["Sin", "x"]
+  // Apply "Cos" to a function expression
+  ["Cos", ["Divide", "Pi", 2]]
+  ```
+
+- If it is an expression, it may include the wildcard `_` or `_1` to represent 
+the first argument, `_2` to represent the second, etc... 
 The wildcard `__` represents the sequence of all the arguments.
+
+  ```json
+  [["Multiply", "_", "_"], 4]
+  ```
 
 Following the head are zero or more **arguments**, which are expressions as
 well. The arguments, or **operands**, form the **tail** of the function.
+
+**CAUTION** the arguments of a function are expressions. To represent an argument which is a list, use a `["List"]` expression, do not use an array. {.notice--warning}
+
+
 
 The expression corresponding to \\(\sin^{-1}(x)\\) is:
 
@@ -436,8 +465,8 @@ For example these two expressions are equivalent:
 ["Cos", ["Add", "x", 1]]
 ```
 
-Note that an array representing a function must have at least one element, the
-head of the function. Therefore `[]` is not a valid expression.
+An array representing a function must have at least one element, the
+head of the function. Therefore `[]` is not a valid expression.{.notice--info}
 
 ## Dictionary
 
