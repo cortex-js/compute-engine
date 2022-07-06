@@ -409,11 +409,7 @@ export function isValidSymbolName(s: string): boolean {
   if (/[\u0000-\u0020\u0022\u0060\ufffe\uffff]/.test(s)) return false;
 
   // A symbol name must not start with one these characters
-  if (
-    /^[\u0021\u0022\u0024-\u002e\u003a\u003f\u0040\u005b\u005d\u005e\u007b\u007d\u007e]$/.test(
-      s[0]
-    )
-  )
-    return false;
-  return true;
+  return !/^[\u0021\u0022\u0024-\u0029\u002e\u003a\u003f\u0040\u005b\u005d\u005e\u007b\u007d\u007e]/.test(
+    s
+  );
 }
