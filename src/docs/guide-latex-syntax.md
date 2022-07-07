@@ -34,7 +34,7 @@ A MathLive mathfield works like a textarea in HTML, but for math. It provides
 its content as a LaTeX string or a MathJSON expression, ready to be used with
 the Compute Engine.
 
-{% readmore "/mathlive/" %} Read more about <strong>MathLive</strong>
+{% readmore "/mathlive/" %} Read more about the MathLive <strong>mathfield element</strong>
 {% endreadmore %}
 
 The behavior of `expr.parse()` and `expr.latex` can be customized by setting

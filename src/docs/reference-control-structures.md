@@ -6,9 +6,9 @@ date: Last Modified
 sidebar:
   - nav: 'compute-engine'
 toc: true
+preamble: '<h1>Control Structures</h1><p class=xl>Control Structures define how a sequence of expressions is evaluated</p>'
 ---
 
-Control Structures define how a sequence of expressions is evaluated.{.xl}
 
 - A `["Block"]` expression defines a **sequential** control structure
 - An `["If"]` expression defines a **conditional** control structure.
