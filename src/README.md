@@ -3,13 +3,17 @@ title: MathJSON Format
 permalink: /math-json/
 layout: single
 date: Last Modified
+seo_description: The MathJSON format is a lightweight data interchange format for mathematical notation
 sidebar:
   - nav: 'compute-engine'
 toc: true
 toc-options: '{"tags":["h2"]}'
-preamble: "<img src='/assets/MathJSON-1.jpg' class='full-width' style='border-radius:8px 8px 0 0; border:1px solid #203346; margin-bottom: 2em'>
-  <p class=xl>The MathJSON format is a lightweight data interchange format for mathematical
-notation.</p>"
+preamble: "<picture class=full-width style='aspect-ratio:1.775;clip-path: inset(0 0 0 0 round 8px 8px 0 0); margin-bottom: 2em'>
+  <source srcset=/assets/MathJSON@1x.webp type=image/webp>
+  <source srcset=/assets/MathJSON@1x.jpg type=image/jpeg> 
+  <img src=/assets/MathJSON@1x.jpg alt='MathJSON'>
+</picture>
+<p class=xl>The MathJSON format is a lightweight data interchange format for mathematical notation."
 ---
 
 
@@ -313,7 +317,7 @@ function names are recommendations.
   
   For example:
     - prefer using `"gamma"` rather than `"ɣ"` (**LATIN SMALL LETTER GAMMA**) or `"γ"` (**GREEK SMALL LETTER GAMMA**) 
-    - prefer using `"Total"` rather than `"∑"` **U+2211 N-ARY SUMMATION**, which can be visually confused with `"Σ"` **U+03A3 GREEK CAPITAL LETTER SIGMA**.
+    - prefer using `"Sum"` rather than `"∑"` **U+2211 N-ARY SUMMATION**, which can be visually confused with `"Σ"` **U+03A3 GREEK CAPITAL LETTER SIGMA**.
 - If using latin characters, the first character of a variable should be a
  lowercase or uppercase letter: `a`-`z` or `A`-`Z`
 - Subsequent characters should be a letter, digit (`0`-`9`) or underscore (`_`).
@@ -329,18 +333,18 @@ function names are recommendations.
 
 ### Wildcards Naming Convention
 
-Symbols that begin with **U+005F LOW LINE** `_` (underscore) should be used to
+Symbols that begin with `_` **U+005F LOW LINE**  (underscore) should be used to
 denote wildcards and other placeholders.
 
-For example, they can be used to denote the positional arguments in an 
-expression with some arguments. They can also be used to denote placeholders
+For example, they can be used to denote the positional arguments in a function 
+expression. They can also be used to denote placeholders
 and captured expression in patterns.
 
 <div class=symbols-table>
 
 | Wildcard |                                                 |
 | :------- | :---------------------------------------------- |
-| `"_"`      | Wildcard for a single expression                |
+| `"_"`      | Wildcard for a single expression or for the first positional argument               |
 | `"_1"`     | Wildcard for a positional argument              |
 | <code>"&#95;&#x200A;&#95;"</code>     | Wildcard for a sequence of 1 or more expression |
 | `"___"`    | Wildcard for a sequence of 0 or more expression |
