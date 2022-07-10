@@ -6,7 +6,23 @@ date: Last Modified
 sidebar:
   - nav: 'compute-engine'
 toc: true
+head:
+  stylesheets:
+    - https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.3/codemirror.min.css
+  scripts:
+    - https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.3/codemirror.min.js
+    - https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.3/mode/javascript/javascript.min.js
+    - https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.3/mode/xml/xml.min.js
+  modules:
+    - /assets/js/code-playground.min.js
+    - //unpkg.com/@cortex-js/compute-engine?module
 ---
+<script>
+moduleMap = {
+  "compute-engine": "//unpkg.com/@cortex-js/compute-engine?module",
+};
+// const ce = 
+</script>
 
 The CortexJS Compute Engine essentially performs computation by applying
 rewriting rules to a MathJSON expression.
@@ -67,14 +83,12 @@ which is denoted by a `ce.` prefix.<br>Functions that apply to a boxed
 expression, such as `expr.simplify()` are denoted with a `expr.` prefix.
 {.notice--info}
 
-```ts
-import { ComputeEngine } from '@cortex-js/compute-engine?module';
+<code-playground layout="stack" show-line-numbers>
+<div slot="javascript">import { ComputeEngine } from 'compute-engine';
 const ce = new ComputeEngine();
-console.log(ce.parse('3x^2 + 2x^2 + x + 5').simplify().latex);
-// ➔ "5x^2 + x + 5"
-```
+console.log(ce.parse('3x^2 + 2x^2 + x + 5').simplify().latex);</div>
+</code-playground>
 
-<section id='comparing'>
 
 ## Comparing Expressions
 
@@ -143,7 +157,33 @@ assumptions may result in a different answer.
 
 </div>
 
-</section>
+
+## Replacing a Symbol in an Expresssion
+
+**To replace a symbol in an expression** use the `subs()` function.
+
+The argument of the `subs()` function is an object literal. Each key value
+pairs represent the name of a symbol and the value (as an expression) to be
+substituted with.
+
+
+
+<code-playground layout="stack" show-line-numbers>
+<div slot="javascript">import { ComputeEngine } from 'compute-engine';
+const ce = new ComputeEngine();
+let expr = ce.parse('\\sqrt{\\frac{1}{x+1}}');
+console.log(expr.json);
+//
+console.log("Substitute x -> 3")
+expr = expr.subs({x: ce.box(3)});
+console.log(expr.json);
+//
+console.log("Numerical Evaluation");
+console.log(expr.N().latex);</div>
+</code-playground>
+
+
+
 
 ## Other Symbolic Manipulation
 
