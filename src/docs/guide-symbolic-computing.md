@@ -83,12 +83,11 @@ which is denoted by a `ce.` prefix.<br>Functions that apply to a boxed
 expression, such as `expr.simplify()` are denoted with a `expr.` prefix.
 {.notice--info}
 
-```ts
-import { ComputeEngine } from '@cortex-js/compute-engine?module';
+<code-playground layout="stack" show-line-numbers>
+<div slot="javascript">import { ComputeEngine } from 'compute-engine';
 const ce = new ComputeEngine();
-console.log(ce.parse('3x^2 + 2x^2 + x + 5').simplify().latex);
-// ➔ "5x^2 + x + 5"
-```
+console.log(ce.parse('3x^2 + 2x^2 + x + 5').simplify().latex);</div>
+</code-playground>
 
 
 ## Comparing Expressions
@@ -168,8 +167,9 @@ pairs represent the name of a symbol and the value (as an expression) to be
 substituted with.
 
 
-<code-playground layout="stack">
-    <div slot="javascript">import { ComputeEngine } from 'compute-engine';
+
+<code-playground layout="stack" show-line-numbers>
+<div slot="javascript">import { ComputeEngine } from 'compute-engine';
 const ce = new ComputeEngine();
 let expr = ce.parse('\\sqrt{\\frac{1}{x+1}}');
 console.log(expr.json);
@@ -179,8 +179,7 @@ expr = expr.subs({x: ce.box(3)});
 console.log(expr.json);
 //
 console.log("Numerical Evaluation");
-console.log(expr.N().latex);
-</div>
+console.log(expr.N().latex);</div>
 </code-playground>
 
 
