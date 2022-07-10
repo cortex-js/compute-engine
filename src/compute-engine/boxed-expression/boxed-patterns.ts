@@ -4,6 +4,7 @@ import { getWildcardName } from '../rules';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
+  BoxedSubstitution,
   Domain,
   IComputeEngine,
   LatexString,
@@ -72,7 +73,7 @@ export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
   match(
     expr: BoxedExpression,
     options?: PatternMatchOption
-  ): Substitution | null {
+  ): BoxedSubstitution | null {
     // console.assert(!hasWildcards(expr));
 
     let pattern = this._pattern;
@@ -125,8 +126,8 @@ function hasWildcards(expr: string | BoxedExpression): boolean {
 function captureWildcard(
   wildcard: string,
   expr: BoxedExpression,
-  substitution: Substitution
-): Substitution | null {
+  substitution: BoxedSubstitution
+): BoxedSubstitution | null {
   // if (expr === null) return null;
 
   const name = getWildcardName(wildcard);
@@ -137,7 +138,7 @@ function captureWildcard(
 
   if (substitution[name]) {
     // There was already a matching wildcard, make sure this one is identical
-    if (!expr.isSame(substitution[name])) return null;
+    if (!expr.isSame(expr.engine.box(substitution[name]))) return null;
     return substitution;
   } else {
     substitution[name] = expr;
@@ -150,7 +151,7 @@ function matchOnce(
   pattern: BoxedExpression,
   substitution: Substitution,
   options: { numericTolerance: number }
-): Substitution | null {
+): BoxedSubstitution | null {
   const ce = expr.engine;
   //
   // Match a number
@@ -158,9 +159,9 @@ function matchOnce(
   if (pattern instanceof BoxedNumber) {
     if (!(expr instanceof BoxedNumber)) return null;
     if (options.numericTolerance === 0)
-      return pattern.isSame(expr) ? substitution : null;
+      return pattern.isSame(expr) ? boxedSubstitution(ce, substitution) : null;
     return pattern.isEqualWithTolerance(expr, options.numericTolerance)
-      ? substitution
+      ? boxedSubstitution(ce, substitution)
       : null;
   }
 
@@ -169,7 +170,8 @@ function matchOnce(
   //
 
   const str = pattern.string;
-  if (str !== null) return expr.string === str ? substitution : null;
+  if (str !== null)
+    return expr.string === str ? boxedSubstitution(ce, substitution) : null;
 
   //
   // Match a symbol or capture symbol
@@ -177,9 +179,9 @@ function matchOnce(
   const symbol = pattern.symbol;
   if (symbol !== null) {
     if (symbol.startsWith('_'))
-      return captureWildcard(symbol, expr, substitution);
+      return captureWildcard(symbol, expr, boxedSubstitution(ce, substitution));
 
-    return symbol === expr.symbol ? substitution : null;
+    return symbol === expr.symbol ? boxedSubstitution(ce, substitution) : null;
   }
 
   // If the number of operands or keys don't match, it's not a match
@@ -197,7 +199,7 @@ function matchOnce(
       if (r === null) return null;
       substitution = r;
     }
-    return substitution;
+    return boxedSubstitution(ce, substitution);
   }
 
   //
@@ -209,7 +211,11 @@ function matchOnce(
 
     // Match the function head
     if (typeof head === 'string' && head.startsWith('_'))
-      return captureWildcard(head, ce.box(expr.head), substitution);
+      return captureWildcard(
+        head,
+        ce.box(expr.head),
+        boxedSubstitution(ce, substitution)
+      );
     else {
       const r = matchOnce(
         ce.box(expr.head),
@@ -255,10 +261,14 @@ function matchOnce(
           result = captureWildcard(
             argName,
             ce.fn('Sequence', exprArgs.splice(0, j - 1)),
-            result!
+            boxedSubstitution(ce, result!)
           );
         } else if (argName.startsWith('_')) {
-          result = captureWildcard(argName, exprArgs.shift()!, result);
+          result = captureWildcard(
+            argName,
+            exprArgs.shift()!,
+            boxedSubstitution(ce, result!)
+          );
         } else {
           const sub = matchOnce(exprArgs.shift()!, arg, substitution, options);
           if (sub === null) return null;
@@ -273,7 +283,7 @@ function matchOnce(
       if (result === null) return null;
       i += 1;
     }
-    return result;
+    return boxedSubstitution(ce, result);
   }
 
   return null; // no match
@@ -298,7 +308,7 @@ function match(
   subject: BoxedExpression,
   pattern: BoxedExpression,
   options: { recursive: boolean; numericTolerance: number }
-): Substitution | null {
+): BoxedSubstitution | null {
   console.assert(!hasWildcards(subject));
   console.assert(hasWildcards(pattern));
   const substitution = matchOnce(
@@ -319,29 +329,17 @@ function match(
   return null;
 }
 
-// export function match1(
-//   expr: Expression,
-//   pattern: Expression,
-//   options: { numericTolerance: number }
-// ): Expression | null {
-//   const result = match(pattern, expr, options);
-//   if (result === null) return null;
-//   const keys = Object.keys(result);
-//   if (keys.length !== 1) return null;
-//   return result[keys[0]];
-// }
-
-// export function matchList(
-//   ce: ComputeEngineInterface,
-//   exprs: Iterable<BoxedExpression>,
-//   pattern: BoxedPattern,
-//   options: { numericTolerance: number }
-// ): Substitution[] {
-//   const result: Substitution[] = [];
-//   for (const expr of exprs) {
-//     const r = match(ce, expr, pattern, options);
-//     if (r !== null) result.push(r);
-//   }
-
-//   return result;
-// }
+function boxedSubstitution(ce: IComputeEngine, sub: null): null;
+function boxedSubstitution(
+  ce: IComputeEngine,
+  sub: Substitution
+): BoxedSubstitution;
+function boxedSubstitution(
+  ce: IComputeEngine,
+  sub: Substitution | null
+): BoxedSubstitution | null {
+  if (sub === null) return null;
+  return Object.fromEntries(
+    Object.entries(sub).map(([k, v]) => [k, ce.box(v)])
+  );
+}

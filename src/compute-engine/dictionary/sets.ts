@@ -23,67 +23,79 @@ export const SETS_DICTIONARY: Dictionary = {
     //
     {
       name: 'Element',
-      domain: 'Predicate',
       complexity: 11200,
-      // evaluate: subset,
+      signatures: [{ domain: 'Predicate' }],
     },
     {
       name: 'NotElement',
-      domain: 'Predicate',
       complexity: 11200,
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
-      // evaluate: subset,
+      signatures: [
+        {
+          domain: 'Predicate',
+          canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
+        },
+      ],
     },
     {
       name: 'Subset',
-      domain: 'Predicate',
       complexity: 11200,
-      // evaluate: subset,
+      signatures: [{ domain: 'Predicate' }],
     },
     {
       name: 'NotSubset',
-      domain: 'Predicate',
       complexity: 11200,
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('Subset', args)]),
-      // evaluate: subset,
+      signatures: [
+        {
+          domain: 'Predicate',
+          canonical: (ce, args) => ce.fn('Not', [ce.fn('Subset', args)]),
+        },
+      ],
     },
     {
       name: 'Superset',
-      domain: 'Predicate',
       complexity: 11200,
-      // evaluate: subset,
+      signatures: [{ domain: 'Predicate' }],
     },
     {
       name: 'SupersetEqual',
-      domain: 'Predicate',
       complexity: 11200,
-      // evaluate: subset,
+      signatures: [{ domain: 'Predicate' }],
     },
     {
       name: 'NotSuperset',
-      domain: 'Predicate',
       complexity: 11200,
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('Superset', args)]),
-      // evaluate: subset,
+      signatures: [
+        {
+          domain: 'Predicate',
+          canonical: (ce, args) => ce.fn('Not', [ce.fn('Superset', args)]),
+        },
+      ],
     },
     {
       name: 'NotSupersetEqual',
-      domain: 'Predicate',
       complexity: 11200,
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('SupersetEqual', args)]),
-      // evaluate: subset,
+      signatures: [
+        {
+          domain: 'Predicate',
+          canonical: (ce, args) => ce.fn('Not', [ce.fn('SupersetEqual', args)]),
+        },
+      ],
     },
     {
       name: 'SubsetEqual',
-      domain: 'Predicate',
       complexity: 11200,
+      signatures: [{ domain: 'Predicate' }],
       // evaluate: subsetEqual,
     },
     {
       name: 'NotSubsetNotEqual',
-      domain: 'Predicate',
       complexity: 11200,
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('SubsetEqual', args)]),
+      signatures: [
+        {
+          domain: 'Predicate',
+          canonical: (ce, args) => ce.fn('Not', [ce.fn('SubsetEqual', args)]),
+        },
+      ],
     },
 
     //
@@ -94,60 +106,69 @@ export const SETS_DICTIONARY: Dictionary = {
       name: 'CartesianProduct',
       // Aka the product set, the set direct product or cross product
       // Notation: \times
-      domain: ['Function', ['Some', 'Set'], 'Set'],
       wikidata: 'Q173740',
+      signatures: [{ domain: ['Function', 'Set', ['Some', 'Set'], 'Set'] }],
       // evaluate: cartesianProduct,
     },
     {
       name: 'Complement',
       // Return the elements of the first argument that are not in any of
       // the subsequent lists
-      domain: ['Function', 'Set', 'Set'],
       wikidata: 'Q242767',
+      signatures: [{ domain: ['Function', 'Set', 'Set'] }],
     },
     {
       name: 'Intersection',
       // notation: \cap
-      domain: ['Function', ['Some', 'Set'], 'Set'],
       wikidata: 'Q185837',
       threadable: true,
       associative: true,
       commutative: true,
       involution: true,
-      evaluate: intersection,
+      signatures: [
+        {
+          domain: ['Function', 'Set', ['Some', 'Set'], 'Set'],
+          evaluate: intersection,
+        },
+      ],
     },
     {
       name: 'Union',
       // Works on set, but can also work on lists
-      domain: ['Function', ['Some', 'Set'], 'Set'],
       wikidata: 'Q185359',
       threadable: true,
       associative: true,
       commutative: true,
       involution: true,
-      evaluate: union,
+      signatures: [
+        {
+          domain: ['Function', 'Set', ['Some', 'Set'], 'Set'],
+          evaluate: union,
+        },
+      ],
     },
-    {
-      name: 'Set',
-      domain: ['Function', ['Some', 'Anything'], 'Set'],
-      // @todo! set has multiple forms
-      // Set(Sequence)
-      // Set(Sequence, Condition)
-      // Set(Set, Condition)
-    }, // disjoint union Q842620 ⊔
+    // {
+    //   name: 'Set',
+    //   domain: ['Function', ['Some', 'Anything'], 'Set'],
+    //   // @todo! set has multiple forms
+    //   // Set(Sequence)
+    //   // Set(Sequence, Condition)
+    //   // Set(Set, Condition)
+    // }, // disjoint union Q842620 ⊔
     {
       name: 'SetMinus',
-      domain: ['Function', 'Set', 'Expresison', 'Set'],
       wikidata: 'Q18192442',
-      evaluate: setMinus,
+      signatures: [
+        { domain: ['Function', 'Set', 'Value', 'Set'], evaluate: setMinus },
+      ],
     },
     {
       name: 'SymmetricDifference',
       // symmetric difference = disjunctive union  (circled minus)
       /* = Union(Complement(a, b), Complement(b, a) */
       /* Corresponds to XOR in boolean logic */
-      domain: ['Function', ['Some', 'Set'], 'Set'],
       wikidata: 'Q1147242',
+      signatures: [{ domain: ['Function', 'Set', ['Some', 'Set'], 'Set'] }],
     },
   ],
 };

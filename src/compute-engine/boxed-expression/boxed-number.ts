@@ -491,7 +491,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (typeof this._value === 'number') return this._value === 1;
 
     if (this._value instanceof Decimal)
-      return this._value.equals(this.engine.DECIMAL_ONE);
+      return this._value.equals(this.engine._DECIMAL_ONE);
 
     if (Array.isArray(this._value)) {
       const [numer, denom] = this._value;
@@ -505,7 +505,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (typeof this._value === 'number') return this._value === -1;
 
     if (this._value instanceof Decimal)
-      return this._value.equals(this.engine.DECIMAL_NEGATIVE_ONE);
+      return this._value.equals(this.engine._DECIMAL_NEGATIVE_ONE);
 
     if (Array.isArray(this._value)) {
       const [numer, denom] = this._value;
@@ -677,14 +677,14 @@ export class BoxedNumber extends AbstractBoxedExpression {
       // Note already in normal form (denom > 0) due to boxing
       const [numer, denom] = reducedRational(this._value);
 
-      if (Number.isNaN(numer) || Number.isNaN(denom)) return this.engine.NAN;
+      if (Number.isNaN(numer) || Number.isNaN(denom)) return this.engine._NAN;
       if (denom === 1) return this.engine.number(numer);
       if (denom === 0) {
-        if (numer === 0 || !Number.isFinite(numer)) return this.engine.NAN;
-        if (numer < 0) return this.engine.NEGATIVE_INFINITY;
-        return this.engine.POSITIVE_INFINITY;
+        if (numer === 0 || !Number.isFinite(numer)) return this.engine._NAN;
+        if (numer < 0) return this.engine._NEGATIVE_INFINITY;
+        return this.engine._POSITIVE_INFINITY;
       }
-      if (numer === 0) return this.engine.ZERO;
+      if (numer === 0) return this.engine._ZERO;
 
       return this.engine.number([numer, denom]);
     }

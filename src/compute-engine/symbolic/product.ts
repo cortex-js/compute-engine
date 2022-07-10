@@ -125,7 +125,7 @@ export class Product {
 
     // Terms of degree 1 (exponent = [1,1])
     const unitTerms: BoxedExpression[] = [];
-    if (this._hasInfinity) unitTerms.push(ce.POSITIVE_INFINITY);
+    if (this._hasInfinity) unitTerms.push(ce._POSITIVE_INFINITY);
 
     this._literal = reducedRational(this._literal);
 
@@ -196,7 +196,7 @@ export class Product {
 
     let numeratorTerms = termsAsExpressions(ce, xsNumerator);
     numeratorTerms = flattenOps(numeratorTerms, 'Multiply') ?? numeratorTerms;
-    let numerator = ce.ONE;
+    let numerator = ce._ONE;
     if (numeratorTerms.length === 1) numerator = numeratorTerms[0];
     else if (numeratorTerms.length > 0)
       numerator = ce._fn('Multiply', numeratorTerms);
@@ -204,7 +204,7 @@ export class Product {
     let denominatorTerms = termsAsExpressions(ce, xsDenominator);
     denominatorTerms =
       flattenOps(denominatorTerms, 'Multiply') ?? denominatorTerms;
-    let denominator = ce.ONE;
+    let denominator = ce._ONE;
     if (denominatorTerms.length === 1) denominator = denominatorTerms[0];
     else if (denominatorTerms.length > 0)
       denominator = ce._fn('Multiply', denominatorTerms);
@@ -216,14 +216,14 @@ export class Product {
     const ce = this.engine;
 
     if (this._hasInfinity) {
-      if (this._hasZero) return ce.NAN;
+      if (this._hasZero) return ce._NAN;
       if (this._terms.length === 0) {
-        if (this._literal[0] > 0) return ce.POSITIVE_INFINITY;
-        return ce.NEGATIVE_INFINITY;
+        if (this._literal[0] > 0) return ce._POSITIVE_INFINITY;
+        return ce._NEGATIVE_INFINITY;
       }
     }
 
-    if (this._hasZero) return ce.ZERO;
+    if (this._hasZero) return ce._ZERO;
 
     if (this._terms.length === 0) return ce.number(this._literal).canonical;
 
@@ -232,10 +232,10 @@ export class Product {
       this.groupedByDegrees({ splitRational: false })
     );
 
-    if (this._hasInfinity) terms.push(ce.POSITIVE_INFINITY);
+    if (this._hasInfinity) terms.push(ce._POSITIVE_INFINITY);
 
     terms = flattenOps(terms, 'Multiply') ?? terms;
-    if (terms.length === 0) return ce.ONE;
+    if (terms.length === 0) return ce._ONE;
     if (terms.length === 1) return terms[0];
     return this.engine._fn('Multiply', terms);
   }

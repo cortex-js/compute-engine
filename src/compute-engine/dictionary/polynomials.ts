@@ -7,7 +7,12 @@ export const POLYNOMIALS_DICTIONARY: Dictionary[] = [
       {
         name: 'Expand',
         description: 'Expand out products and positive integer powers',
-        evaluate: (ce, ops) => (ops[0] ? expand(ops[0]) : ce.symbol('Nothing')),
+        signatures: [
+          {
+            evaluate: (ce, ops) =>
+              ops[0] ? expand(ops[0]) : ce.symbol('Nothing'),
+          },
+        ],
       },
     ],
   },

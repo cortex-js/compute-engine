@@ -4,8 +4,8 @@ import {
   IComputeEngine,
   Rule,
   BoxedRuleSet,
-  Substitution,
   ReplaceOptions,
+  BoxedSubstitution,
 } from './public';
 import { getVars, isLatexString, latexString } from './boxed-expression/utils';
 
@@ -32,14 +32,14 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
     lhs = lhs.subs(wildcards);
 
     // Normalize the condition to a function
-    let cond: undefined | ((x: Substitution) => boolean);
+    let cond: undefined | ((x: BoxedSubstitution) => boolean);
     const latex = latexString(options?.condition);
     if (latex) {
       // Substitute any unbound vars in the condition to a wildcard
       const condPattern = ce.parse(latex)!.subs(wildcards);
-      cond = (x: Substitution): boolean =>
+      cond = (x: BoxedSubstitution): boolean =>
         condPattern.subs(x).value?.symbol === 'True';
-    } else cond = options?.condition as (x: Substitution) => boolean;
+    } else cond = options?.condition as (x: BoxedSubstitution) => boolean;
 
     const rhs = isLatexString(rawRhs) ? ce.parse(rawRhs) : ce.box(rawRhs);
     if (!rhs) {

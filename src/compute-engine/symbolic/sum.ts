@@ -133,9 +133,9 @@ export class Sum {
     const ce = this.engine;
 
     if (this._posInfinityCount > 0 && this._negInfinityCount > 0)
-      return [ce.NAN];
-    if (this._posInfinityCount > 0) return [ce.POSITIVE_INFINITY];
-    if (this._negInfinityCount > 0) return [ce.NEGATIVE_INFINITY];
+      return [ce._NAN];
+    if (this._posInfinityCount > 0) return [ce._POSITIVE_INFINITY];
+    if (this._negInfinityCount > 0) return [ce._NEGATIVE_INFINITY];
 
     if (this._terms.length === 0) {
       if (this._literal[0] === 0 && this._imaginary === 0) return [];
@@ -177,7 +177,7 @@ export class Sum {
     const ce = this.engine;
 
     const xs = this.terms();
-    if (xs.length === 0) return ce.ZERO;
+    if (xs.length === 0) return ce._ZERO;
     if (xs.length === 1) return xs[0];
 
     return ce._fn('Add', sortAdd(ce, xs));

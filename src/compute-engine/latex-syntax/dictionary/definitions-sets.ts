@@ -89,14 +89,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       // accept arguments that are `Set`
       const ce = parser.computeEngine!;
 
-      if (!ce || !ce.box(lhs).valueDomain.isSubdomainOf('Set')) return null;
+      if (!ce || !ce.box(lhs).valueDomain.isCompatible('Set')) return null;
 
       const index = parser.index;
       const rhs = parser.matchExpression({ ...until, minPrec: 390 });
       // If the rhs argument is not a set, bail
       if (
         rhs === null ||
-        ce.box(lhs).valueDomain.isSubdomainOf('Set') !== true
+        ce.box(lhs).valueDomain.isCompatible('Set') !== true
       ) {
         parser.index = index;
         return null;

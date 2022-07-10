@@ -32,11 +32,7 @@ import {
 
 const ce = engine;
 
-console.log(ce.latexOptions.decimalMarker);
-ce.latexOptions.decimalMarker = '{,}';
-console.log(ce.latexOptions.decimalMarker);
-
-console.log(ce.parse('3{,}1415').toJSON());
+console.log(ce.box(['Equal', 5, 5]).evaluate().toJSON());
 
 // \frac{x}{} \text{ cm}
 // ce.jsonSerializationOptions.metadata = ['latex'];

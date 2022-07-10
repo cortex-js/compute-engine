@@ -206,8 +206,6 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   get domain(): Domain {
-    if (typeof this._def?.domain === 'function')
-      return this.engine.domain(this._def.domain(this.engine, []));
     return this._def?.domain ?? this.engine.domain('Anything');
   }
 
@@ -457,7 +455,6 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
-    if (this.symbolDefinition?.hold === true) return this;
     return this._def?.value?.evaluate(options) ?? this;
   }
 
@@ -476,6 +473,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   subs(sub: Substitution): BoxedExpression {
-    return sub[this._name] ?? this;
+    if (!sub[this._name]) return this;
+    return this.engine.box(sub[this._name]);
   }
 }

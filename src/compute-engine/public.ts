@@ -43,12 +43,12 @@ export type Metadata = {
 /**
  * The numeric evaluation mode:
  *
- * - `auto`: use machine number if precision is 15 or less, allow complex numbers.
- * - `machine`: 64-bit float, **IEEE 754-2008**, 64-bit float, 52-bit mantissa,
+ * - `"auto"`: use machine number if precision is 15 or less, allow complex numbers.
+ * - `"machine"`: 64-bit float, **IEEE 754-2008**, 64-bit float, 52-bit mantissa,
  *    about 15 digits of precision
- * - `decimal`: arbitrary precision floating point numbers, as provided by the
+ * - `"decimal"`: arbitrary precision floating point numbers, as provided by the
  * "decimal.js" library
- * - `complex`: complex number represented by two machine numbers, a real and
+ * - `"complex"`: complex number represented by two machine numbers, a real and
  * an imaginary part, as provided by the "complex.js" library
  */
 export type NumericMode = 'auto' | 'machine' | 'decimal' | 'complex';
@@ -77,16 +77,16 @@ export type NOptions = {
 };
 
 export type ReplaceOptions = {
-  /** If true, apply replacement rules to all sub-expressions.
-   * If false, only consider the top-level expression.
+  /** If `true`, apply replacement rules to all sub-expressions.
+   * If `false`, only consider the top-level expression.
    *
    * **Default**: `true`
    */
   recursive?: boolean;
   /**
-   * If true, stop after the first rule that matches.
+   * If `true`, stop after the first rule that matches.
    *
-   * If false, apply all the remaining rules even after the first match.
+   * If `false`, apply all the remaining rules even after the first match.
    *
    * **Default**: `true`
    */
@@ -110,6 +110,10 @@ export type ReplaceOptions = {
  * rule whose `lhs` is always a symbol.
  */
 export type Substitution = {
+  [symbol: string]: SemiBoxedExpression;
+};
+
+export type BoxedSubstitution = {
   [symbol: string]: BoxedExpression;
 };
 
@@ -142,7 +146,7 @@ export type Rule = [
   lhs: LatexString | SemiBoxedExpression | Pattern,
   rhs: LatexString | SemiBoxedExpression,
   options?: {
-    condition?: LatexString | ((wildcards: Substitution) => boolean);
+    condition?: LatexString | ((wildcards: BoxedSubstitution) => boolean);
     priority?: number;
   }
 ];
@@ -151,69 +155,103 @@ export type BoxedRule = [
   lhs: Pattern,
   rhs: BoxedExpression,
   priority: number,
-  condition: undefined | ((wildcards: Substitution) => boolean)
+  condition: undefined | ((wildcards: BoxedSubstitution) => boolean)
 ];
 
 export type BoxedRuleSet = Set<BoxedRule>;
 
-export type ParametricDomainFunction =
-  | 'Function'
-  | 'Union'
-  | 'List'
-  | 'Record'
+/** A domain constructor is the head of a function used in a parametric domain expression. */
+export type DomainConstructor =
+  | 'Matrix' // <domain-of-elements> <dimension>*
+  | 'SquareMatrix' // <domain-of-elements> <dimension>
+  | 'Vector' // <domain-of-elements> <length>?
+  | 'Function' // <domain-of-args>* <co-domain>
+  | 'List' // <domain-of-elements>
+  | 'Dictionary'
   | 'Tuple'
+  | 'Range' // <min-value> <max-value> (inclusive)
+  | 'Interval' // <min-value> <max-value> (inclusive, unless Open constructor)
   | 'Intersection'
-  | 'Range'
-  | 'Interval'
+  | 'Union'
   | 'Optional'
   | 'Some'
   | 'Head'
   | 'Symbol'
-  | 'Literal';
+  | 'Literal'
+  | 'Covariant'
+  | 'Contravariant'
+  | 'Invariant';
 
-export type ParametricDomain = [
-  ParametricDomainFunction,
-  ...DomainExpression[]
-];
+export type ParametricDomain =
+  | [
+      Exclude<
+        DomainConstructor,
+        'Literal' | 'Range' | 'Interval' | 'Head' | 'Symbol'
+      >,
+      ...DomainExpression[]
+    ]
+  | ['Range', Expression]
+  | ['Range', Expression, Expression]
+  | ['Range', Expression, Expression, Expression]
+  | ['Interval', Expression, Expression]
+  | ['Interval', ['Open', Expression], Expression]
+  | ['Interval', Expression, ['Open', Expression]]
+  | ['Interval', ['Open', Expression], ['Open', Expression]]
+  | ['Head', string]
+  | ['Symbol', string]
+  | ['Literal', Expression];
 
-export type DomainExpression = string | ParametricDomain;
+export type DomainLiteral = string;
 
-/**
- * Domains can be defined as a union or intersection of domains:
- * - `["Union", "Number", "Boolean"]` A number or a boolean.
- * - `["SetMinus", "Number", 1]`  Any number except "1".
- *
- */
+export type DomainExpression = DomainLiteral | ParametricDomain;
+
+export type BoxedParametricDomain = [DomainConstructor, ...Domain[]];
+
+export type BoxedDomainExpression = Domain | BoxedParametricDomain;
+
+export type DomainCompatibility =
+  | 'covariant' // A <: B
+  | 'contravariant' // A :> B
+  | 'bivariant' // A <: B and A :>B, A := B
+  | 'invariant'; // Neither A <: B, nor A :> B
+
 export interface Domain extends BoxedExpression {
-  isSubdomainOf(dom: Domain | string): boolean;
-  isMemberOf(expr: BoxedExpression): boolean;
+  readonly domainLiteral: DomainLiteral | null;
+  readonly parametricDomain: BoxedParametricDomain | null;
   readonly domainExpression: DomainExpression;
-  codomain: Domain | null;
-  readonly isNothing: boolean;
+
   is(s: BoxedExpression): boolean;
-  readonly isBoolean: boolean;
+  isCompatible(
+    dom: Domain | DomainLiteral,
+    kind?: DomainCompatibility
+  ): boolean;
+
+  get canonical(): Domain;
+
+  readonly isNothing: boolean;
+  // readonly isBoolean: boolean;
   readonly isNumeric: boolean;
   readonly isFunction: boolean;
-  readonly isPredicate: boolean;
+  // readonly isPredicate: boolean;
   /**
    * If true, when all the arguments are numeric, the result of the
    * evaluation is numeric. Numeric is any value with a domain of `Number`.
    *
    * Example of numeric functions: `Add`, `Multiply`, `Power`, `Abs`
    *
-   * Default: false
+   * Default: `false`
    */
-  readonly isNumericFunction: boolean;
-  readonly isRealFunction: boolean;
+  // readonly isNumericFunction: boolean;
+  // readonly isRealFunction: boolean;
   /**
    * If true, when all the arguments are boolean, the result of the
    * evaluation is a boolean. Boolean is any value with a domain of `MaybeBoolean`.
    *
    * Example of logic functions: `And`, `Or`, `Not`, `Implies`
    *
-   * **Default:** false
+   * **Default:** `false`
    */
-  readonly isLogicOperator: boolean;
+  // readonly isLogicOperator: boolean;
   /**
    * The function represent a relation between the first argument and
    * the second argument, and evaluates to a boolean indicating if the relation
@@ -221,7 +259,7 @@ export interface Domain extends BoxedExpression {
    *
    * For example, `Equal`, `Less`, `Approx`, etc...
    *
-   * **Default:** false
+   * **Default:** `false`
    */
   readonly isRelationalOperator: boolean;
 }
@@ -246,7 +284,7 @@ export type JsonSerializationOptions = {
   /** A list of space separated keywords indicating which MathJSON expressions
    * can use a shorthand.
    *
-   * **Default**: `['all']`
+   * **Default**: `["all"]`
    */
   shorthands: (
     | 'all'
@@ -582,8 +620,9 @@ export interface BoxedExpression {
    * Note that complex numbers have no natural ordering,
    * so if the value is a complex number, `sgn` is either 0, or `null`
    *
-   * If a symbol, this does take assumptions into account, that is `this.sgn` will return
-   * `1` if `isPositive` is `true`, even if this expression has no value
+   * If a symbol, this does take assumptions into account, that is `this.sgn`
+   * will return `1` if `isPositive` is `true`, even if this expression has
+   * no value
    *
    * @category Numeric Expression
    *
@@ -626,7 +665,7 @@ export interface BoxedExpression {
    * `isExtendedComplex || isNaN` = `isReal || isImaginary || isInfinity || isNaN`
    *
    * Note that in a fateful twist of cosmic irony, `NaN` ("Not a Number")
-   * is a number.
+   * **is** a number.
    *
    * @category Expression Properties
    */
@@ -743,7 +782,7 @@ export interface BoxedExpression {
    */
   get isNaN(): boolean | undefined;
 
-  /** Not ±Infinity and not `NaN`
+  /** This expression is a number, but not ±Infinity and not `NaN`
    *
    * @category Expression Properties
    */
@@ -810,7 +849,7 @@ export interface BoxedExpression {
    */
   isEqual(rhs: BoxedExpression): boolean;
 
-  /** If the expressions cannot be compared, `undefined` is returned
+  /** If the expressions cannot be compared, return `undefined`
    *
    * @category Relational Operator
    */
@@ -834,19 +873,19 @@ export interface BoxedExpression {
    */
   get isPositive(): boolean | undefined;
 
-  /** The value of this expression is  >= 0, same as `isGreaterEqual(0)`
+  /** The value of this expression is >= 0, same as `isGreaterEqual(0)`
    *
    * @category Expression Properties
    */
   get isNonNegative(): boolean | undefined;
 
-  /** The value of this expression is  < 0, same as `isLess(0)`
+  /** The value of this expression is < 0, same as `isLess(0)`
    *
    * @category Expression Properties
    */
   get isNegative(): boolean | undefined;
 
-  /** The value of this expression is  <= 0, same as `isLessEqual(0)`
+  /** The value of this expression is <= 0, same as `isLessEqual(0)`
    *
    * @category Expression Properties
    */
@@ -881,8 +920,7 @@ export interface BoxedExpression {
   /** The domain of the value of this expression, using the value of the expression,
    * definitions associated with this expression and assumptions if necessary.
    *
-   * For symbols, the `domain` and `valueDomain` are the same.  For functions,
-   * the `valueDomain` is the codomain of the function.
+   * For functions, the `valueDomain` is the codomain of the function.
    */
   get valueDomain(): Domain;
 
@@ -979,6 +1017,7 @@ export interface BoxedExpression {
 
   /**
    * If this expression is a function, apply the function `fn` to all its operands.
+   *
    * Replace the head of this expression with `head`, if defined.
    *
    * If this expression is a dictionary, return a new dictionary with the values
@@ -1069,7 +1108,7 @@ export interface Pattern extends BoxedExpression {
   match(
     expr: BoxedExpression,
     options?: PatternMatchOption
-  ): Substitution | null;
+  ): BoxedSubstitution | null;
   /** If `expr` matches the pattern, return `true`, otherwise `false` */
   test(expr: BoxedExpression, options?: PatternMatchOption): boolean;
   /** Return the number of exprs that matched the pattern */
@@ -1106,7 +1145,7 @@ export type Dictionary = {
 export type RuntimeDictionary = {
   symbols: Map<string, BoxedSymbolDefinition>;
   symbolWikidata: Map<string, BoxedSymbolDefinition>;
-  functions: Map<string, BoxedFunctionDefinition[]>;
+  functions: Map<string, BoxedFunctionDefinition>;
   functionWikidata: Map<string, BoxedFunctionDefinition>;
 };
 
@@ -1206,31 +1245,6 @@ export type BaseDefinition = {
    * for the `Pi` constant.
    */
   wikidata?: string;
-
-  /**
-   * The domain of this item.
-   *
-   * For dictionaries, this is the domain of all the items in the dictionary.
-   *
-   * For strings, it's always 'String'.
-   *
-   * For symbols, this is the domain of their value.
-   *
-   * For functions, this is the signature of the function
-   *
-   * When `domain` is a handler, calculate the domain (or signature) based on
-   * the arguments (for expressions others than functions, `args` is an empty
-   * array). If the function cannot be applied to the arguments, return
-   * `null`.
-   */
-  domain?:
-    | Domain
-    | DomainExpression
-    | string
-    | ((
-        ce: IComputeEngine,
-        args: BoxedExpression[]
-      ) => Domain | DomainExpression);
 };
 
 export type BoxedBaseDefinition = {
@@ -1244,12 +1258,6 @@ export type BoxedBaseDefinition = {
    * This field is usually undefined, but its value is set by `getDefinition()`
    */
   scope: RuntimeScope | undefined;
-  domain?:
-    | Domain
-    | ((
-        ce: IComputeEngine,
-        args: BoxedExpression[]
-      ) => Domain | DomainExpression);
 
   _purge(): undefined;
 };
@@ -1259,27 +1267,28 @@ export type BoxedBaseDefinition = {
  * properties of the function.
  */
 export type FunctionDefinitionFlags = {
-  /**  If true, the function is applied element by element to lists, matrices
-   * and equations.
+  /**  If `true`, the function is applied element by element to lists, matrices
+   * (`["List"]` or `["Tuple"]` expressions) and equations (relational
+   * operators).
    *
    * **Default**: `false`
    */
   threadable: boolean;
 
-  /** If true, `["f", ["f", a], b]` simplifies to `["f", a, b]`
+  /** If `true`, `["f", ["f", a], b]` simplifies to `["f", a, b]`
    *
    * **Default**: `false`
    */
   associative: boolean;
 
-  /** If true, `["f", a, b]` equals `["f", b, a]`. The canonical
+  /** If `true`, `["f", a, b]` equals `["f", b, a]`. The canonical
    * version of the function will order the arguments.
    *
    * **Default**: `false`
    */
   commutative: boolean;
 
-  /** If true, when the function is univariate, `["f", ["Add", x, c]]` where `c`
+  /** If `true`, when the function is univariate, `["f", ["Add", x, c]]` where `c`
    * is constant, is simplified to `["Add", ["f", x], c]`.
    *
    * When the function is multivariate, additivity is considered only on the
@@ -1291,7 +1300,7 @@ export type FunctionDefinitionFlags = {
    */
   // additive: boolean;
 
-  /** If true, when the function is univariate, `["f", ["Multiply", x, y]]`
+  /** If `true`, when the function is univariate, `["f", ["Multiply", x, y]]`
    * simplifies to `["Multiply", ["f", x], ["f", y]]`.
    *
    * When the function is multivariate, multiplicativity is considered only on the
@@ -1300,32 +1309,30 @@ export type FunctionDefinitionFlags = {
    *
    * **Default**: `false`
    */
-  // multiplicative: boolean;
 
-  /** If true, when the function is univariate, `["f", ["Multiply", x, c]]`
+  /** If `true`, when the function is univariate, `["f", ["Multiply", x, c]]`
    * simplifies to `["Multiply", ["f", x], c]` where `c` is constant
    *
-   * When the function is multivariate, multiplicativity is considered only on the
-   * first argument: `["f", ["Multiply", x, y], z]` simplifies to
+   * When the function is multivariate, multiplicativity is considered only on
+   * the first argument: `["f", ["Multiply", x, y], z]` simplifies to
    * `["Multiply", ["f", x, z], ["f", y, z]]`
    *
    * Default: `false`
    */
-  // outtative: boolean;
 
-  /** If true, `["f", ["f", x]]` simplifies to `["f", x]`.
+  /** If `true`, `["f", ["f", x]]` simplifies to `["f", x]`.
    *
    * **Default**: `false`
    */
   idempotent: boolean;
 
-  /** If true, `["f", ["f", x]]` simplifies to `x`.
+  /** If `true`, `["f", ["f", x]]` simplifies to `x`.
    *
    * **Default**: `false`
    */
   involution: boolean;
 
-  /** If true, the value of this function is always the same for a given
+  /** If `true`, the value of this function is always the same for a given
    * set of arguments and it has no side effects.
    *
    * An expression using this function is pure if the function and all its
@@ -1335,7 +1342,7 @@ export type FunctionDefinitionFlags = {
    *
    * This information may be used to cache the value of expressions.
    *
-   * **Default:** true
+   * **Default:** `true`
    */
   pure: boolean;
 
@@ -1347,6 +1354,191 @@ export type FunctionDefinitionFlags = {
    * **Default:** false
    */
   inert: boolean;
+
+  /**
+   * All the arguments of a numeric function are numeric,
+   * and its value is numeric.
+   */
+  numeric: boolean;
+};
+
+/**
+ *
+ */
+
+export type FunctionSignature = {
+  /** The signature this applies to. A domain compatible with the `Function`
+   * domain) */
+  domain?: Domain | DomainExpression;
+
+  /** The minimum and maximum values of the result of the function */
+  // range?: [min: number, max: number];
+
+  /**
+   * Return the canonical form of the expression with the arguments `args`.
+   *
+   * All the arguments that are not subject to a hold are in canonical form.
+   * Any `Nothing` argument has been removed.
+   *
+   * If the function is associative, idempotent or an involution,
+   * it should handle its arguments accordingly. Notably, if it
+   * is commutative, the arguments should be sorted in canonical order.
+   *
+   * The handler can make transformations based on the value of the arguments
+   * that are literal and either rational numbers (i.e.
+   * `arg.isLiteral && arg.isRational`) or integers (i.e.
+   * `isLiteral && arg.isInteger`).
+   *
+   * The handler should not consider the value of the arguments
+   * that are symbols or functions.
+   *
+   * The handler should not consider any assumptions about any of the
+   * arguments that are symbols or functions i.e. `arg.isZero`,
+   * `arg.isInteger`, etc...
+   *
+   * The handler should not make transformations based on the value of
+   * floating point numbers.
+   *
+   * The result of the handler should be a canonical expression.
+   *
+   */
+  canonical?: (ce: IComputeEngine, args: BoxedExpression[]) => BoxedExpression;
+
+  /**
+   * Rewrite an expression into a simpler form.
+   *
+   * The arguments are in canonical form and have been simplified.
+   *
+   * The handler can use the values assigned to symbols and the assumptions about
+   * symbols, for example with `arg.machineValue`, `arg.isInteger` or
+   * `arg.isPositive`.
+   *
+   * Even though a symbol may not have a value, there may be some information
+   * about it reflected for example in `this.isZero` or `this.isPrime`.
+   *
+   * The handler should not perform approximate numeric calculations, such
+   * as calculations involving floating point numbers. Making exact
+   * calculations on integers or rationals is OK. It is recommended, but not
+   * required, that the calculations be limited to `this.smallIntegerValue`
+   * (i.e. numeric representations of the expression as an integer of small
+   * magnitude).
+   *
+   * This handler should not have any side-effects: do not modify
+   * the environment of the `ComputeEngine` instance, do not perform I/O,
+   * do not do calculations that depend on random values.
+   *
+   * If no simplification can be performed due to the values, domains or assumptions
+   * about its arguments, for example, return `undefined`.
+   *
+   */
+  simplify?: (
+    ce: IComputeEngine,
+    args: BoxedExpression[]
+  ) => BoxedExpression | undefined;
+
+  /**
+   * Evaluate symbolically an expression.
+   *
+   * The arguments have been symbolically evaluated, except the arguments to
+   * which a `hold` apply.
+   *
+   * It is not necessary to further simplify or evaluate the arguments.
+   *
+   * If the expression cannot be evaluated, due to the values, domains, or
+   * assumptions about its arguments, for example, return `undefined`.
+   *
+   *
+   */
+  evaluate?:
+    | LambdaExpression
+    | ((
+        ce: IComputeEngine,
+        args: BoxedExpression[]
+      ) => BoxedExpression | undefined);
+
+  /**
+   * Evaluate numerically an expression.
+   *
+   * The arguments `args` have been simplified and evaluated, numerically
+   * if possible, except the arguments to which a `hold` apply.
+   *
+   * The arguments may be a combination of numbers, symbolic
+   * expressions and other expressions.
+   *
+   * Perform as many calculations as possible, and return the result.
+   *
+   * Return `undefined` if there isn't enough information to perform
+   * the evaluation, for example one of the arguments is a symbol with
+   * no value. If the handler returns `undefined`, symbolic evaluation of
+   * the expression will be returned instead to the caller.
+   *
+   * Return `NaN` if there is enough information to  perform the
+   * evaluation, but a literal argument is out of range or
+   * not of the expected type.
+   *
+   * Also return `NaN` if the result of the evaluation would be a complex
+   * number, but complex numbers are not allowed (the `engine.numericMode`
+   * is not `complex` or `auto`).
+   *
+   * If the `ce.numericMode` is `auto` or `complex`, you may return
+   * a Complex number as a result. Otherwise, if the result is a complex
+   * value, return `NaN`. If Complex are not allowed, none of the arguments
+   * will be complex literals.
+   *
+   * If the `ce.numericMode` is `decimal` or `auto` and
+   * `this.engine.precision` is > 15, you may return a Decimal number.
+   * Otherwise, return a `machine` number approximation. If Decimal are
+   * not allowed, none of the arguments will be Decimal literal.
+   *
+   * You may perform any necessary computations, including approximate
+   * calculations on floating point numbers.
+   *
+   */
+  N?: (
+    ce: IComputeEngine,
+    args: BoxedExpression[]
+  ) => BoxedExpression | undefined;
+
+  /** Dimensional analysis
+   * @experimental
+   */
+  evalDimension?: (
+    ce: IComputeEngine,
+    args: BoxedExpression[]
+  ) => BoxedExpression;
+
+  /** Return the sign of the function given a list of arguments. */
+  sgn?: (ce: IComputeEngine, args: BoxedExpression[]) => -1 | 0 | 1 | undefined;
+
+  /** Return a compiled (optimized) expression. */
+  compile?: (expr: BoxedExpression) => CompiledExpression;
+};
+
+export type BoxedFunctionSignature = {
+  domain: Domain;
+
+  canonical?: (ce: IComputeEngine, args: BoxedExpression[]) => BoxedExpression;
+  simplify?: (
+    ce: IComputeEngine,
+    args: BoxedExpression[]
+  ) => BoxedExpression | undefined;
+  evaluate?:
+    | BoxedLambdaExpression
+    | ((
+        ce: IComputeEngine,
+        args: BoxedExpression[]
+      ) => BoxedExpression | undefined);
+  N?: (
+    ce: IComputeEngine,
+    args: BoxedExpression[]
+  ) => BoxedExpression | undefined;
+  evalDimension?: (
+    ce: IComputeEngine,
+    args: BoxedExpression[]
+  ) => BoxedExpression;
+  sgn?: (ce: IComputeEngine, args: BoxedExpression[]) => -1 | 0 | 1 | undefined;
+
+  compile?: (expr: BoxedExpression) => CompiledExpression;
 };
 
 /**
@@ -1356,9 +1548,10 @@ export type FunctionDefinitionFlags = {
 export type FunctionDefinition = BaseDefinition &
   Partial<FunctionDefinitionFlags> & {
     /**
-     * A number used to order arguments. Argument with higher
-     * complexity are placed after arguments with lower complexity when
-     * ordered canonically in commutative functions.
+     * A number used to order arguments.
+     *
+     * Argument with higher complexity are placed after arguments with lower
+     * complexity when ordered canonically in commutative functions.
      *
      * - Additive functions: 1000-1999
      * - Multiplicative functions: 2000-2999
@@ -1377,204 +1570,32 @@ export type FunctionDefinition = BaseDefinition &
     complexity?: number;
 
     /**
-     * - `none` Each of the arguments is evaluated (default)
-     * - `all` None of the arguments are evaluated and they are passed as is
-     * - `first` The first argument is not evaluated, the others are
-     * - `rest` The first argument is evaluated, the others aren't
+     * - `"none"` Each of the arguments is evaluated (default)
+     * - `"all"` None of the arguments are evaluated and they are passed as is
+     * - `"first"` The first argument is not evaluated, the others are
+     * - `"rest"` The first argument is evaluated, the others aren't
+     * - `"last"`: The last argument is not evaluated, the others are
+     * - `"most"`: All the arguments are evaluated, except the last one
+     *
+     * **Default**: `"none"`
      */
 
     hold?: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
-    /**
-     * If true, `Sequence` arguments appearing in the arguments of a function
-     * should not automatically be flattened out
-     */
-    sequenceHold?: boolean;
-
-    /** The minimum and maximum values of the result of the function */
-    range?: [min: number, max: number];
-
-    /**
-     * Return the canonical form of the expression with the arguments `args`.
-     *
-     * All the arguments that are not subject to a hold are in canonical form.
-     * Any `Nothing` argument has been removed.
-     *
-     * If the function is associative, idempotent or an involution,
-     * it should handle its arguments accordingly. Notably, if it
-     * is commutative, the arguments should be sorted in canonical order.
-     *
-     * The handler can make transformations based on the value of the arguments
-     * that are literal and either rational numbers (i.e.
-     * `arg.isLiteral && arg.isRational`) or integers (i.e.
-     * `isLiteral && arg.isInteger`).
-     *
-     * The handler should not consider the value of the arguments
-     * that are symbols or functions.
-     *
-     * The handler should not consider any assumptions about any of the
-     * arguments that are symbols or functions i.e. `arg.isZero`,
-     * `arg.isInteger`, etc...
-     *
-     * The handler should not make transformations based on the value of
-     * floating point numbers.
-     *
-     * The result of the handler should be a canonical expression.
-     *
-     */
-    canonical?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression;
-
-    /**
-     * Rewrite an expression into a simpler form.
-     *
-     * The arguments are in canonical form and have been simplified.
-     *
-     * The handler can use the values assigned to symbols and the assumptions about
-     * symbols, for example with `arg.machineValue`, `arg.isInteger` or
-     * `arg.isPositive`.
-     *
-     * Even though a symbol may not have a value, there may be some information
-     * about it reflected for example in `this.isZero` or `this.isPrime`.
-     *
-     * The handler should not perform approximate numeric calculations, such
-     * as calculations involving floating point numbers. Making exact
-     * calculations on integers or rationals is OK. It is recommended, but not
-     * required, that the calculations be limited to `this.smallIntegerValue`
-     * (i.e. numeric representations of the expression as an integer of small
-     * magnitude).
-     *
-     * This handler should not have any side-effects: do not modify
-     * the environment of the `ComputeEngine` instance, do not perform I/O,
-     * do not do calculations that depend on random values.
-     *
-     * If no simplification can be performed due to the values, domains or assumptions
-     * about its arguments, for example, return `undefined`.
-     *
-     */
-    simplify?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression | undefined;
-
-    /**
-     * Evaluate symbolically an expression.
-     *
-     * The arguments have been symbolically evaluated, except the arguments to
-     * which a `hold` apply.
-     *
-     * It is not necessary to further simplify or evaluate the arguments.
-     *
-     * If the expression cannot be evaluated, due to the values, domains, or
-     * assumptions about its arguments, for example, return `undefined`.
-     *
-     *
-     */
-    evaluate?:
-      | LambdaExpression
-      | ((
-          ce: IComputeEngine,
-          args: BoxedExpression[]
-        ) => BoxedExpression | undefined);
-
-    /**
-     * Evaluate numerically an expression.
-     *
-     * The arguments `args` have been simplified and evaluated, numerically
-     * if possible, except the arguments to which a `hold` apply.
-     *
-     * The arguments may be a combination of numbers, symbolic
-     * expressions and other expressions.
-     *
-     * Perform as many calculations as possible, and return the result.
-     *
-     * Return `undefined` if there isn't enough information to perform
-     * the evaluation, for example one of the arguments is a symbol with
-     * no value. If the handler returns `undefined`, symbolic evaluation of
-     * the expression will be returned instead to the caller.
-     *
-     * Return `NaN` if there is enough information to  perform the
-     * evaluation, but a literal argument is out of range or
-     * not of the expected type.
-     *
-     * Also return `NaN` if the result of the evaluation would be a complex
-     * number, but complex numbers are not allowed (the `engine.numericMode`
-     * is not `complex` or `auto`).
-     *
-     * If the `ce.numericMode` is `auto` or `complex`, you may return
-     * a Complex number as a result. Otherwise, if the result is a complex
-     * value, return `NaN`. If Complex are not allowed, none of the arguments
-     * will be complex literals.
-     *
-     * If the `ce.numericMode` is `decimal` or `auto` and
-     * `this.engine.precision` is > 15, you may return a Decimal number.
-     * Otherwise, return a `machine` number approximation. If Decimal are
-     * not allowed, none of the arguments will be Decimal literal.
-     *
-     * You may perform any necessary computations, including approximate
-     * calculations on floating point numbers.
-     *
-     */
-    N?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression | undefined;
-
-    /** Dimensional analysis
-     * @experimental
-     */
-    evalDimension?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression;
-
-    /** Return the sign of the function given a list of arguments. */
-    sgn?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => -1 | 0 | 1 | undefined;
-
-    /** Return a compiled (optimized) expression. */
-    compile?: (expr: BoxedExpression) => CompiledExpression;
+    signatures?: FunctionSignature[];
   };
 
 export type BoxedFunctionDefinition = BoxedBaseDefinition &
   FunctionDefinitionFlags & {
     complexity: number;
     hold: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
-    sequenceHold: boolean;
-    range?: [min: number, max: number];
 
-    canonical?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression;
-    simplify?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression | undefined;
-    evaluate?:
-      | BoxedLambdaExpression
-      | ((
-          ce: IComputeEngine,
-          args: BoxedExpression[]
-        ) => BoxedExpression | undefined);
-    N?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression | undefined;
-    evalDimension?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => BoxedExpression;
-    sgn?: (
-      ce: IComputeEngine,
-      args: BoxedExpression[]
-    ) => -1 | 0 | 1 | undefined;
+    // `valueDomain` is the (computed) common ancestor of the return value
+    // of all the signatures
+    valueDomain: Domain;
+    signatures: BoxedFunctionSignature[];
 
-    compile?: (expr: BoxedExpression) => CompiledExpression;
+    getSignature(domains: Domain[]): BoxedFunctionSignature | null;
   };
 
 /**
@@ -1687,6 +1708,9 @@ export interface BoxedSymbolDefinition
     SymbolDefinitionFlags {
   get value(): BoxedExpression | undefined;
   set value(val: BoxedExpression | undefined);
+
+  domain: Domain | undefined;
+
   // @todo unit?: BoxedExpression;
 
   at?: (index: string | number) => undefined | BoxedExpression;
@@ -1714,40 +1738,40 @@ export interface ComputeEngineStats {
 /** @internal */
 export interface IComputeEngine {
   /** @internal */
-  readonly ZERO: BoxedExpression;
+  readonly _ZERO: BoxedExpression;
   /** @internal */
-  readonly ONE: BoxedExpression;
+  readonly _ONE: BoxedExpression;
   /** @internal */
-  readonly TWO: BoxedExpression;
+  readonly _TWO: BoxedExpression;
   /** @internal */
-  readonly HALF: BoxedExpression;
+  readonly _HALF: BoxedExpression;
   /** @internal */
-  readonly NEGATIVE_ONE: BoxedExpression;
+  readonly _NEGATIVE_ONE: BoxedExpression;
   /** @internal */
-  readonly I: BoxedExpression;
+  readonly _I: BoxedExpression;
   /** @internal */
-  readonly NAN: BoxedExpression;
+  readonly _NAN: BoxedExpression;
   /** @internal */
-  readonly POSITIVE_INFINITY: BoxedExpression;
+  readonly _POSITIVE_INFINITY: BoxedExpression;
   /** @internal */
-  readonly NEGATIVE_INFINITY: BoxedExpression;
+  readonly _NEGATIVE_INFINITY: BoxedExpression;
   /** @internal */
-  readonly COMPLEX_INFINITY: BoxedExpression;
+  readonly _COMPLEX_INFINITY: BoxedExpression;
 
   /** @internal */
-  readonly DECIMAL_NAN: Decimal;
+  readonly _DECIMAL_NAN: Decimal;
   /** @internal */
-  readonly DECIMAL_ZERO: Decimal;
+  readonly _DECIMAL_ZERO: Decimal;
   /** @internal */
-  readonly DECIMAL_ONE: Decimal;
+  readonly _DECIMAL_ONE: Decimal;
   /** @internal */
-  readonly DECIMAL_TWO: Decimal;
+  readonly _DECIMAL_TWO: Decimal;
   /** @internal */
-  readonly DECIMAL_HALF: Decimal;
+  readonly _DECIMAL_HALF: Decimal;
   /** @internal */
-  readonly DECIMAL_PI: Decimal;
+  readonly _DECIMAL_PI: Decimal;
   /** @internal */
-  readonly DECIMAL_NEGATIVE_ONE: Decimal;
+  readonly _DECIMAL_NEGATIVE_ONE: Decimal;
 
   /** The current scope */
   context: RuntimeScope;
@@ -1797,10 +1821,7 @@ export interface IComputeEngine {
   /**
    * Return `undefined` if no definition exist for this `head.
    */
-  getFunctionDefinition(
-    head: string,
-    args?: BoxedExpression[]
-  ): undefined | BoxedFunctionDefinition;
+  getFunctionDefinition(head: string): undefined | BoxedFunctionDefinition;
 
   /**
    * Returned a boxed expression from the input.
@@ -1940,7 +1961,7 @@ export interface IComputeEngine {
   serialize(expr: SemiBoxedExpression): LatexString;
 
   /**
-   * Options to control the serailization of MathJSON expression to LaTeX
+   * Options to control the serialization of MathJSON expression to LaTeX
    * when using `this.latex` or `this.engine.serialize()`.
    *
    *

@@ -1,10 +1,10 @@
 import {
   BoxedExpression,
+  BoxedSubstitution,
   IComputeEngine,
   LatexString,
   Pattern,
   SemiBoxedExpression,
-  Substitution,
 } from './public';
 import { isLatexString } from './boxed-expression/utils';
 
@@ -13,13 +13,13 @@ import { isLatexString } from './boxed-expression/utils';
 export type Solution = [
   lhs: LatexString | Pattern,
   solutions: (LatexString | Pattern)[],
-  condition?: (ce: IComputeEngine, vars: Substitution) => boolean
+  condition?: (ce: IComputeEngine, vars: BoxedSubstitution) => boolean
 ];
 
 export type BoxedSolution = [
   lhs: Pattern,
   solutions: Pattern[],
-  condition?: (ce: IComputeEngine, vars: Substitution) => boolean
+  condition?: (ce: IComputeEngine, vars: BoxedSubstitution) => boolean
 ];
 
 //

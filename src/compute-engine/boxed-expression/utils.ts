@@ -102,3 +102,47 @@ export function hashCode(s: string): number {
 
   return Math.abs(hash);
 }
+
+export function isDictionaryLike(expr: BoxedExpression): boolean {
+  if (expr.keys) return true;
+  const head = expr.head;
+  if (
+    typeof head === 'string' &&
+    ['KeyValuePair', 'Pair', 'Tuple'].includes(head)
+  )
+    return true;
+  return false;
+}
+
+export function getDictionaryLike(expr: BoxedExpression): {
+  [key: string]: BoxedExpression;
+} {
+  const keys = expr.keys;
+  if (keys) {
+    const result: { [key: string]: BoxedExpression } = {};
+    for (const key of keys) result[key] = expr.getKey(key)!;
+    return result;
+  }
+
+  const head = expr.head;
+  if (
+    typeof head === 'string' &&
+    ['KeyValuePair', 'Pair', 'Tuple'].includes(head)
+  ) {
+    const key = expr.op1.string ?? expr.op1.symbol;
+    if (typeof key === 'string') return { [key]: expr.op2 };
+  }
+  // The dictionary argument can be a ["Dictionary"] expression, a ["KeyValuePair"] expression, a ["Pair"] expression or a ["Tuple"] expression.
+
+  return {};
+}
+
+export function isListLike(expr: BoxedExpression): boolean {
+  if (expr.head === 'List') return true;
+  return false;
+}
+
+export function getListLike(expr: BoxedExpression): BoxedExpression[] {
+  if (expr.head === 'List') return expr.ops!;
+  return [];
+}

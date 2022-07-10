@@ -206,6 +206,13 @@ export function machineValue(expr: Expression | null): number | null {
   return null;
 }
 
+export function number(expr: Expression | null): number | string | null {
+  if (expr === null) return null;
+  if (typeof expr === 'number') return expr;
+  if (isNumberObject(expr)) return expr.num;
+  return null;
+}
+
 /**
  * Return a rational (numer over denom) representation of the expression,
  * if possible, `[null, null]` otherwise.
@@ -412,4 +419,33 @@ export function isValidSymbolName(s: string): boolean {
   return !/^[\u0021\u0022\u0024-\u0029\u002e\u003a\u003f\u0040\u005b\u005d\u005e\u007b\u007d\u007e]/.test(
     s
   );
+}
+
+export function isEqual(lhs: Expression, rhs: Expression): boolean {
+  const symbLhs = symbol(lhs);
+  if (symbLhs) return symbLhs === symbol(rhs);
+
+  const strLhs = string(lhs);
+  if (strLhs) return strLhs === string(rhs);
+
+  if (Array.isArray(lhs) || isFunctionObject(lhs)) {
+    if (!(Array.isArray(rhs) || isFunctionObject(rhs))) return false;
+    if (nops(lhs) !== nops(rhs)) return false;
+    if (!isEqual(head(lhs)!, head(rhs)!)) return false;
+    const lhsTail = tail(lhs);
+    const rhsTail = tail(rhs);
+    for (let i = 0; i <= nops(lhs); i += 1)
+      if (!isEqual(lhsTail[i], rhsTail[i])) return false;
+    return true;
+  }
+
+  if (typeof lhs === 'number' || isNumberObject(lhs)) {
+    if (!(typeof rhs === 'number' || isNumberObject(rhs))) return false;
+    const mLhs = number(lhs);
+    const mRhs = number(rhs);
+    if (mLhs !== null) return mLhs === mRhs;
+    return false;
+  }
+
+  return false;
 }

@@ -10,9 +10,9 @@
       :root {
         /* --primary: #0066ce; */
         --primary-light: #86a8cb;
-        --monospace: var(--monospace-font), 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo,
+        --monospace: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo,
           Monaco, 'Courier New', monospace;
-        --system: var(--system-font), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+        --system: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
           'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
           'Helvetica Neue', sans-serif;
       }
@@ -59,6 +59,14 @@
       #input-label {
         min-width: fit-content;
         margin-right: 0.5em;
+      }
+
+      #assumptions-section {
+        display: none;
+      }
+
+      #assumptions-section.visible {
+        display: block;
       }
 
       #assumptions ul {
@@ -195,7 +203,9 @@
     </header>
     <main>
       <div class="row">
-        <div id="input-label">expr =</div>
+        <div id="input-label">
+          <h2><code>expr =</code></h2>
+        </div>
         <math-field
           id="mf"
           class="mathfield"
@@ -242,9 +252,9 @@
       <!-- -0+0(\frac{0}{\frac{0}{0}}-0) -->
       <!-- x_0 + x_{0} +  x_n + x_{n+1}-->
       <!-- -2x5z\sqrt{y}\frac{3}{4}3\pi y} -->
-      <!-- \sin^{-1}\prime(x)      \sin^{-1}'(x) -- >
-        <!-- "\begin{align*}\dot{x} & =\sigma(y-x) \\ \dot{y} & =\rho x-y-xz \\ \dot{z} & =-\beta z+xy\end{align*}" ->
-        <!-- 2{xy} should create group -->
+      <!-- \sin^{-1}\prime(x)      \sin^{-1}'(x) -->
+      <!-- "\begin{align*}\dot{x} & =\sigma(y-x) \\ \dot{y} & =\rho x-y-xz \\ \dot{z} & =-\beta z+xy\end{align*}" -->
+      <!-- 2{xy} should create group -->
 
       <!-- -(x) -->
       <!-- -5-3-2 -->
@@ -274,7 +284,7 @@
       <div class="row"><div class="output" id="latex"></div></div>
     </div> -->
 
-      <div>
+      <div id="assumptions-section">
         <h2>Assumptions</h2>
         <div id="assumptions"></div>
       </div>
@@ -452,6 +462,13 @@
       let errors = [];
 
       const ce = new ComputeEngine();
+      ce.defaultDomain = null;
+
+      ce.pushScope({
+        dictionary: {
+          symbols: [{ name: 'd', value: 500 }],
+        },
+      });
 
       updateAssumptions();
 
@@ -698,23 +715,32 @@
 
       function updateAssumptions() {
         ce.assume('n', 'Integer');
+        ce.assume('six', 6);
+        ce.assume('y', 5);
 
         ce.assume(['Greater', 'x', 4]);
         ce.assume(['Equal', 'a', 1]);
 
-        document.getElementById('assumptions').innerHTML =
-          '' +
-          [...ce.assumptions]
-            .map(([assumption, val]) => {
-              return (
-                convertLatexToMarkup(assumption.latex) +
-                '<span>' +
-                (val ? '' : ' is false') +
-                '</span>'
-              );
-            })
-            .join(', ') +
-          '';
+        const content = [...ce.assumptions]
+          .map(([assumption, val]) => {
+            return (
+              convertLatexToMarkup(assumption.latex) +
+              '<span>' +
+              (val ? '' : ' is false') +
+              '</span>'
+            );
+          })
+          .join(', ');
+
+        if (content) {
+          document.getElementById('assumptions').innerHTML = content;
+          document
+            .getElementById('assumptions-section')
+            .classList.add('visible');
+        } else
+          document
+            .getElementById('assumptions-section')
+            .classList.remove('visible');
       }
     </script>
   </body>

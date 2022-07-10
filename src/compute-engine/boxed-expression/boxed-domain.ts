@@ -1,10 +1,21 @@
 import { Expression } from '../../math-json/math-json-format';
 import {
+  DOMAIN_ALIAS,
+  DOMAIN_CONSTRUCTORS,
+  DOMAIN_EXPRESSION_CONSTRUCTORS,
+  isDomainLiteral,
+  isSubdomainOf,
+} from '../dictionary/domains';
+import {
+  BoxedDomainExpression,
   BoxedExpression,
+  BoxedParametricDomain,
   Domain,
+  DomainCompatibility,
   DomainExpression,
   IComputeEngine,
   Metadata,
+  ParametricDomain,
   PatternMatchOption,
   Substitution,
 } from '../public';
@@ -13,212 +24,205 @@ import { serializeJsonSymbol } from './serialize';
 import { hashCode } from './utils';
 
 export class _Domain extends AbstractBoxedExpression implements Domain {
-  _value: DomainExpression;
+  _value: string | BoxedParametricDomain;
+  private _isCanonical: boolean;
   private _hash: number;
 
-  constructor(ce: IComputeEngine, dom: DomainExpression, metadata?: Metadata) {
+  constructor(
+    ce: IComputeEngine,
+    dom: string | BoxedParametricDomain,
+    metadata?: Metadata
+  ) {
     super(ce, metadata);
     this._value = dom;
-  }
-
-  get domainExpression(): DomainExpression {
-    return this._value;
-  }
-
-  get hash(): number {
-    if (this._hash === undefined) this._hash = hash(this._value);
-    return this._hash;
+    this._isCanonical = typeof dom === 'string' && isDomainLiteral(dom);
   }
 
   get isCanonical(): boolean {
-    return true;
+    return this._isCanonical;
+  }
+
+  get canonical(): _Domain {
+    if (this._isCanonical) return this;
+    const result = new _Domain(
+      this.engine,
+      makeCanonical(this.engine, this._value)
+    );
+    result._isCanonical = true;
+    return result;
+  }
+
+  get domainExpression(): DomainExpression {
+    return asDomainExpression(this);
+  }
+
+  get domainLiteral(): string | null {
+    if (typeof this._value === 'string') return this._value;
+    return null;
+  }
+
+  get domainConstructor(): string | null {
+    if (Array.isArray(this._value)) return this._value[0];
+    return null;
+  }
+
+  get domainParams(): Domain[] | null {
+    if (Array.isArray(this._value)) return this._value.slice(1) as Domain[];
+    return null;
+  }
+
+  get parametricDomain(): BoxedParametricDomain | null {
+    if (Array.isArray(this._value)) return this._value;
+    return null;
+  }
+
+  get hash(): number {
+    if (this._hash !== undefined) this._hash;
+    this._hash = hash(this._value);
+    return this._hash;
   }
 
   isEqual(rhs: BoxedExpression): boolean {
-    return false; // @todo
+    if (!(rhs instanceof _Domain)) return false;
+    const lhsDomainLiteral = this.domainLiteral;
+    if (lhsDomainLiteral) return lhsDomainLiteral === rhs.domainLiteral;
+
+    // A domain constructor
+    if (this.domainConstructor !== rhs.domainConstructor) return false;
+    const rhsParams = rhs.domainParams!;
+    const lhsParams = this.domainParams!;
+    if (rhsParams.length !== lhsParams.length) return false;
+    for (let i = 0; i <= lhsParams.length - 1; i++) {
+      const lhsParam = lhsParams[i];
+      const rhsParam = rhsParams[i];
+
+      if (typeof lhsParam === 'string') {
+        if (lhsParam !== rhsParam) return false;
+      } else if (typeof rhsParam === 'string' || !lhsParam.isEqual(rhsParam))
+        return false;
+    }
+
+    return true;
   }
 
   isSame(rhs: BoxedExpression): boolean {
-    return false; // @todo
+    return this.canonical.isEqual(rhs.canonical);
   }
 
-  isSubdomainOf(rhs: _Domain | string): boolean {
-    return isSubdomainOf(this, rhs);
-  }
+  isCompatible(
+    rhs: Domain | string,
+    compatibility: DomainCompatibility = 'covariant'
+  ): boolean {
+    const rhsExpr = asDomainExpression(rhs);
+    const thisExpr = asDomainExpression(this);
+    if (compatibility === 'covariant') return isSubdomainOf(thisExpr, rhsExpr);
+    if (compatibility === 'contravariant')
+      return isSubdomainOf(rhsExpr, thisExpr);
+    if (compatibility === 'bivariant')
+      return (
+        isSubdomainOf(rhsExpr, thisExpr) && isSubdomainOf(thisExpr, rhsExpr)
+      );
 
-  isMemberOf(expr: BoxedExpression): boolean {
-    // @todo
-    return false;
+    // Invariant
+    return (
+      !isSubdomainOf(rhsExpr, thisExpr) && !isSubdomainOf(thisExpr, rhsExpr)
+    );
   }
 
   get json(): Expression {
-    // @todo
-    if (typeof this._value === 'string') {
-      return serializeJsonSymbol(this.engine, this._value, {
-        wikidata: this._wikidata,
-      });
-    }
-    return ['Domain', this._value];
+    return serializeJsonDomainExpression(this.engine, this);
   }
 
   match(
     rhs: BoxedExpression,
-    _options?: PatternMatchOption
+    options?: PatternMatchOption
   ): Substitution | null {
-    if (rhs instanceof _Domain && this.isSame(rhs)) return {};
+    if (!(rhs instanceof _Domain)) return null;
+    if (options?.exact && this.isEqual(rhs)) return {};
+    if (this.isSame(rhs)) return {};
     return null;
   }
 
   get head(): string {
     return 'Domain';
   }
+
   get domain(): Domain {
     return this.engine.domain('Domain');
   }
-  get codomain(): Domain | null {
-    if (typeof this._value === 'string') return null;
-    if (this._value[0] !== 'Function') return null;
-    return this.engine.domain(this._value[this._value.length - 1]);
+
+  get valueDomain(): Domain {
+    if (this.domainConstructor !== 'Function')
+      return this.engine.domain('Domain');
+    const de = this._value as BoxedParametricDomain;
+    return de[de.length - 1] as Domain;
   }
+
   is(rhs: BoxedExpression): boolean {
     return this.isSame(rhs);
   }
+
   get isNothing(): boolean {
-    return this._value === 'Nothing';
+    return this.domainLiteral === 'Nothing';
   }
   get isFunction(): boolean {
-    if (typeof this._value === 'string') return false;
-    return this._value[0] === 'Function';
+    return (
+      this.domainConstructor === 'Function' || this.domainLiteral === 'Function'
+    );
   }
-  get isPredicate(): boolean {
-    if (typeof this._value === 'string') return false;
-    if (this._value[0] !== 'Function') return false;
-    const resultDomain = this._value[this._value.length];
-    if (!(resultDomain instanceof _Domain)) return false;
-    return resultDomain.isBoolean;
-  }
-  get isNumericFunction(): boolean {
-    if (typeof this._value === 'string') return false;
-    if (this._value[0] !== 'Function') return false;
-    for (const arg of this._value) {
-      if (!isNumericSubdomain(arg, 'Number')) return false;
-    }
-    return true;
-  }
-  get isBoolean(): boolean {
-    return isBooleanDomain(this._value);
-  }
-  get isRealFunction(): boolean {
-    if (typeof this._value === 'string') return false;
-    if (this._value[0] !== 'Function') return false;
-    for (const arg of this._value) {
-      if (!isNumericSubdomain(arg, 'ExtendedRealNumber')) return false;
-    }
-    return true;
-  }
-  get isNumeric(): boolean {
-    return this.isSubdomainOf('Number');
-  }
-  get isLogicOperator(): boolean {
-    if (typeof this._value === 'string') return false;
-    if (this._value[0] !== 'Function') return false;
-    if (this._value.length < 2 || this._value.length > 3) return false;
-    const resultDomain = this._value[this._value.length - 1];
-    if (!isBooleanDomain(resultDomain)) return false;
-    const op1 = this._value[1];
-    if (!isBooleanDomain(op1)) return false;
-    if (this._value.length !== 3) return true;
+  // get isPredicate(): boolean {
+  //   if (this.domainLiteral === 'Predicate') return true;
+  //   if (this.domainConstructor !== 'Function') return false;
+  //   const resultDomain = this._value[this._value.length];
+  //   if (!(resultDomain instanceof _Domain)) return false;
+  //   return resultDomain.isBoolean;
+  // }
+  // get isNumericFunction(): boolean {
+  //   if (this.domainLiteral === 'NumericFunction') return true;
+  //   if (this.domainConstructor !== 'Function') return false;
+  //   for (const arg of this.domainParams!)
+  //     if (!isNumericSubdomain(arg, 'Number')) return false;
 
-    const op2 = this._value[2];
-    if (!isBooleanDomain(op2)) return false;
-    return true;
-  }
-  get isRelationalOperator(): boolean {
-    if (typeof this._value === 'string') return false;
-    if (this._value[0] !== 'Function') return false;
-    if (this._value.length !== 3) return false;
-    const resultDomain = this._value[this._value.length - 1];
-    if (!isBooleanDomain(resultDomain)) return false;
-
-    return true;
-  }
-}
-
-function isSubdomainOf(
-  inLhs: _Domain | BoxedExpression,
-  inRhs: _Domain | BoxedExpression | string
-): boolean {
-  const rhs = inRhs instanceof _Domain ? inRhs._value : inRhs;
-  const lhs = inLhs instanceof _Domain ? inLhs._value : inLhs;
-
-  if (typeof lhs === 'string' && typeof rhs === 'string') {
-    const result = isNumericSubdomain(lhs, rhs);
-    if (typeof result === 'boolean') return result;
-  }
-
-  return true; // @todo
-
-  // // If inRhs is a signature or modifier...
-  // if (typeof rhs !== 'string' && typeof rhs.head === 'string') {
-  //   const h = rhs.head;
-
-  //   if (h === 'Union') {
-  //     // If any of the members of the union match, it's a match
-  //     for (const arg of rhs.ops!) {
-  //       if (arg instanceof _Domain) {
-  //         if (this.isSubdomainOf(arg)) return true;
-  //       } else if (this.isSame(arg)) return true;
-  //     }
-  //     return false;
-  //   }
-
-  //   if (
-  //     [
-  //       'FunctionSignature',
-  //       'TupleSignature',
-  //       'RecordSignature',
-  //       'ListSignature',
-  //     ].includes(h)
-  //   ) {
-  //     // Check if each argument matches
-  //     let il = 0;
-  //     let ir = 0;
-  //     let match = true;
-  //     while (match && il < this.nops && ir < rhs.nops) {
-  //       const argl = this.ops![il];
-  //       const argr = rhs.ops![ir];
-  //       if (argl.head === 'Optional') {
-  //         if (argl.op1.isSubdomainOf(argr)) ir += 1;
-  //       } else if (argl.head === 'Some') {
-  //         if (!argl.op1.isSubdomainOf(argr)) {
-  //           match = false;
-  //         } else {
-  //           while (argl.op1.isSubdomainOf(argr)) {
-  //             ir += 1;
-  //           }
-  //         }
-  //       } else if (argl.head === 'Head') {
-  //         match = (argl.op1.symbol ?? argl.op1.string) === argr.head;
-  //         ir += 1;
-  //       } else if (argl.head === 'Symbol') {
-  //         match = (argl.op1.symbol ?? argl.op1.string) === argr.symbol;
-  //         ir += 1;
-  //       } else {
-  //         if (argl instanceof _Domain) match = argl.isSubdomainOf(argr);
-  //         else match = argl.isSame(argr);
-  //         ir += 1;
-  //       }
-  //       il += 1;
-  //     }
-  //     return match && il === rhs.nops;
-  //   }
+  //   return true;
+  // }
+  // get isBoolean(): boolean {
+  //   const dom = this.domainLiteral;
+  //   return dom === 'Boolean' || dom === 'MaybeBoolean';
   // }
 
-  // // Check for structural equality...
-  // if (typeof rhs === 'string') return this._value === rhs;
-  // return this.isSame(rhs);
+  // get isRealFunction(): boolean {
+  //   if (this.domainLiteral === 'RealFunction') return true;
+  //   if (this.domainConstructor !== 'Function') return false;
+  //   for (const arg of this.domainParams!)
+  //     if (!isNumericSubdomain(arg, 'ExtendedRealNumber')) return false;
+  //   return true;
+  // }
 
-  // return false;
+  get isNumeric(): boolean {
+    return this.isCompatible('Number');
+  }
+
+  // get isLogicOperator(): boolean {
+  //   if (this.domainLiteral === 'LogicOperator') return true;
+  //   if (!this.codomain?.isBoolean) return false;
+
+  //   const params = this.domainParams!;
+  //   if (params.length < 1 || params.length > 2) return false;
+
+  //   if (!params[0].isBoolean) return false;
+  //   if (params.length === 1) return true;
+
+  //   if (!params[1].isBoolean) return false;
+  //   return true;
+  // }
+
+  get isRelationalOperator(): boolean {
+    if (this.domainLiteral === 'RelationalOperator') return true;
+    if (!this.valueDomain?.isCompatible('MaybeBoolean')) return false;
+    if (this.domainParams!.length !== 2) return false;
+
+    return true;
+  }
 }
 
 /**
@@ -227,177 +231,137 @@ function isSubdomainOf(
 
 export function boxDomain(
   ce: IComputeEngine,
-  dom: Domain | DomainExpression,
+  dom: BoxedDomainExpression | DomainExpression,
   metadata?: Metadata
 ): Domain {
   if (dom instanceof _Domain) return dom;
-  let result: Domain | undefined;
-  if (!result && typeof dom === 'string') {
-    const expr = {
-      Function: ['Function', ['Optional', ['Some', 'Anything']], 'Anything'],
-      NumericFunction: ['Function', ['Optional', ['Some', 'Number']], 'Number'],
-      RealFunction: [
-        'Function',
-        ['Optional', ['Some', 'ExtendedRealNumber']],
-        'ExtendedRealNumber',
-      ],
-      TrigonometricFunction: ['Function', 'Number', 'Number'],
-      HyperbolicFunction: ['Function', 'Number', 'Number'],
-      LogicOperator: [
-        'Function',
-        'MaybeBoolean',
-        ['Optional', 'MaybeBoolean'],
-        'MaybeBoolean',
-      ],
-      Predicate: [
-        'Function',
-        ['Optional', ['Some', 'Anything']],
-        'MaybeBoolean',
-      ],
-      RelationalOperator: ['Function', 'Anything', 'Anything', 'MaybeBoolean'],
-    }[dom] as DomainExpression | undefined;
-    if (expr) result = new _Domain(ce, expr, metadata);
+
+  if (typeof dom === 'string') {
+    if (!isDomainLiteral(dom))
+      throw Error('Expected domain literal, got ' + dom);
+    return new _Domain(ce, dom, metadata);
   }
-  if (!result) result = new _Domain(ce, dom as DomainExpression, metadata);
-  return result;
-}
 
-/** Return true if `lhs` is a numeric subdomain (or equal to) `rhs`
- */
-function isNumericSubdomain(
-  lhs: DomainExpression,
-  rhs: string
-): boolean | undefined {
-  if (typeof lhs !== 'string') return false;
-  return (
-    {
-      Number: [
-        'Number',
-        'ExtendedComplexNumber',
-        'ExtendedRealNumber',
-        'ComplexNumber',
-        'ImaginaryNumber',
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NegativeNumber',
-        'NonNegativeNumber',
-        'NonNegativeInteger',
-        'NonPositiveNumber',
-        'NonPositiveInteger',
-        'PositiveInteger',
-        'PositiveNumber',
-      ],
-      ExtendedComplexNumber: [
-        'Number', // Since `Number` and `ComplexNumber` are synonyms
-        'ExtendedRealNumber',
-        'ComplexNumber',
-        'ImaginaryNumber',
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NegativeNumber',
-        'NonNegativeNumber',
-        'NonNegativeInteger',
-        'NonPositiveNumber',
-        'NonPositiveInteger',
-        'PositiveInteger',
-        'PositiveNumber',
-      ],
-      ExtendedRealNumber: [
-        'ExtendedRealNumber',
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NegativeNumber',
-        'NonNegativeNumber',
-        'NonNegativeInteger',
-        'NonPositiveNumber',
-        'NonPositiveInteger',
-        'PositiveInteger',
-        'PositiveNumber',
-      ],
-      ComplexNumber: ['ComplexNumber', 'ImaginaryNumber'],
-      ImaginaryNumber: ['ImaginaryNumber'],
-      RealNumber: [
-        'RealNumber',
-        'TranscendentalNumber',
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NegativeNumber',
-        'NonNegativeNumber',
-        'NonNegativeInteger',
-        'NonPositiveNumber',
-        'NonPositiveInteger',
-        'PositiveInteger',
-        'PositiveNumber',
-      ],
-      TranscendentalNumber: ['TranscendentalNumber'],
-      AlgebraicNumber: [
-        'AlgebraicNumber',
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NonNegativeInteger',
-        'NonPositiveInteger',
-        'PositiveInteger',
-      ],
-      RationalNumber: [
-        'RationalNumber',
-        'Integer',
-        'NegativeInteger',
-        'NonNegativeInteger',
-        'NonPositiveInteger',
-        'PositiveInteger',
-      ],
-      Integer: [
-        'Integer',
-        'NegativeInteger',
-        'NonNegativeInteger',
-        'NonPositiveInteger',
-        'PositiveInteger',
-      ],
-      NegativeNumber: ['NegativeNumber', 'NegativeInteger'],
-      NonNegativeNumber: [
-        'NonNegativeNumber',
-        'PositiveNumber',
-        'NonNegativeInteger',
-        'PositiveInteger',
-      ],
-      NonPositiveNumber: [
-        'NonPositiveNumber',
-        'NegativeNumber',
-        'NegativeInteger',
-      ],
-      PositiveNumber: ['PositiveNumber', 'PositiveInteger'],
+  const constructor = dom[0];
+  if (!DOMAIN_CONSTRUCTORS.includes(constructor))
+    throw Error('Expected domain constructor, got ' + constructor);
 
-      NegativeInteger: ['NegativeInteger'],
-      PositiveInteger: ['PositiveInteger'],
-      NonNegativeInteger: ['NonNegativeInteger', 'PositiveInteger'],
-      NonPositiveInteger: ['NegativeInteger'],
-    }[rhs]?.includes(lhs) ?? undefined
+  const params = (dom as BoxedParametricDomain | ParametricDomain).slice(1);
+
+  if (DOMAIN_EXPRESSION_CONSTRUCTORS.includes(constructor))
+    return new _Domain(
+      ce,
+      [constructor, ...params.map((x) => ce.box(x) as any)],
+      metadata
+    );
+
+  return new _Domain(
+    ce,
+    [constructor, ...params.map((x) => ce.domain(x))],
+    metadata
   );
 }
 
-function isBooleanDomain(dom: DomainExpression): boolean {
-  if (typeof dom !== 'string') return false;
-  return ['Boolean', 'MaybeBoolean', 'True', 'False', 'Maybe'].includes(dom);
+/** Validate that `expr` is a Domain */
+export function isDomain(
+  expr: Expression | BoxedExpression | Domain | DomainExpression
+): expr is Domain | DomainExpression {
+  if (expr instanceof _Domain) return true;
+
+  if (Array.isArray(expr)) {
+    if (expr.length <= 1) return false;
+    // Could be a parametric domain expression
+    const fn = expr[0];
+    if (typeof fn !== 'string' || !DOMAIN_CONSTRUCTORS.includes(fn))
+      return false;
+    if (
+      fn === 'Head' ||
+      fn === 'Symbol' ||
+      fn === 'Literal' ||
+      fn === 'Range' ||
+      fn === 'Interval'
+    ) {
+      return true;
+    }
+    for (let i = 1; i <= expr.length - 1; i++)
+      if (!isDomain(expr[i])) return false;
+    return true;
+  }
+  if (typeof expr === 'string') return isDomainLiteral(expr);
+
+  if (!(expr instanceof AbstractBoxedExpression)) return false;
+
+  if (typeof expr.head === 'string' && DOMAIN_CONSTRUCTORS.includes(expr.head))
+    return expr.ops!.every((x) => isDomain(x));
+
+  return isDomainLiteral(expr.symbol);
 }
 
-function hash(dom: DomainExpression): number {
+function hash(dom: string | BoxedParametricDomain): number {
   if (typeof dom === 'string') return hashCode('domain:' + dom);
-  let s = '';
-  for (const arg of dom) s += '' + hash(arg);
+  const [constructor, ...params] = dom;
+  let s = 'domain:' + hashCode(constructor);
+  for (const arg of params)
+    s += ':' + hash(arg.domainLiteral ?? arg.parametricDomain!);
   return hashCode(s);
+}
+
+export function serializeJsonDomainExpression(
+  ce: IComputeEngine,
+  dom: Domain
+): Expression {
+  if (dom.domainLiteral)
+    return serializeJsonSymbol(ce, dom.domainLiteral, {
+      wikidata: dom.wikidata,
+    });
+
+  const [head, ...params] = dom.parametricDomain!;
+
+  const fn: Expression = [
+    serializeJsonSymbol(ce, head),
+    ...params.map((x: Domain) => serializeJsonDomainExpression(ce, x)),
+  ];
+
+  if (ce.jsonSerializationOptions.shorthands.includes('function')) return fn;
+  return { fn };
+}
+
+function asDomainExpression(dom: string | Domain): DomainExpression {
+  if (typeof dom === 'string') return dom;
+  if (dom.domainLiteral) return dom.domainLiteral;
+
+  const [head, ...params] = dom.parametricDomain!;
+  if (DOMAIN_EXPRESSION_CONSTRUCTORS.includes(head))
+    return [
+      head,
+      ...params.map((x: BoxedExpression) => x.json),
+    ] as DomainExpression;
+
+  return [
+    head,
+    ...params.map((x: Domain) => asDomainExpression(x)),
+  ] as DomainExpression;
+}
+
+function makeCanonical(
+  ce: IComputeEngine,
+  dom: string | BoxedParametricDomain
+): string | BoxedParametricDomain {
+  // @todo:
+  // - Range[-Infinity, +Infinity]
+  // - Range[0, +Infinity]
+  // Multiple `Optional`, `Some` in arguments
+  // Multiple Invariant, Covariant, Contravariant in argument
+  // Multiple Open
+  // Normalize attributes: Open, Optional, Invariant, Some, etc...
+
+  // A required argument cannot follow an Optional one
+  // A rest argument (Some) must be the last one
+
+  if (typeof dom === 'string') {
+    const expr = DOMAIN_ALIAS[dom] as ParametricDomain | undefined;
+    if (expr) return [expr[0], ...expr.slice(1).map((x) => ce.domain(x))];
+    return dom;
+  }
+  return dom;
 }

@@ -82,8 +82,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     this._head = typeof head === 'string' ? head : head.symbol ?? head;
     this._ops = ops;
 
-    if (typeof this._head === 'string')
-      this._def = ce.getFunctionDefinition(this._head, ops);
+    this._repairDefinition();
 
     this._isCanonical = false;
 
@@ -191,41 +190,22 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   _repairDefinition(): void {
+    this._def = undefined;
     if (typeof this._head === 'string') {
-      // Function names that start with `_` are wildcards and never have a definition
-      if (this._head[0] === '_') return;
-
-      this._def = this.engine.getFunctionDefinition(this._head, this._ops);
-      if (this._def) {
-        // In case the def was found by the wikidata, and the name does not
-        // match the one in our dictionary, make sure to update it.
-        this._head = this._def.name;
-      }
+      this._def = this.engine.getFunctionDefinition(this._head);
+      // In case the def was found by the wikidata, and the name does not
+      // match the one in our dictionary, make sure to update it.
+      if (this._def) this._head = this._def.name;
     }
   }
 
-  /** Signature of the function */
   get domain(): Domain {
-    // If there is a definition, we'll return the domain provided by
-    // the definition
-    if (this._def?.domain) {
-      if (typeof this._def.domain === 'function')
-        return this.engine.domain(this._def.domain(this.engine, this._ops));
-      return this.engine.domain(this._def.domain);
-    }
-
-    // Without a definition, we return a domain based on the
-    // actual arguments
-    const result: SemiBoxedExpression[] = [this.head];
-    for (const arg of this._ops) result.push(arg.domain);
-    result.push(this.engine.domain('Anything'));
-
-    return this.engine.domain(result);
+    return this.engine.domain('Function');
   }
 
   /** Domain of the value of the function */
   get valueDomain(): Domain {
-    return this.domain.codomain ?? this.engine.domain('Nothing');
+    return this.domain.valueDomain ?? this.engine.domain('Void');
   }
 
   isLess(rhs: BoxedExpression): boolean | undefined {
@@ -328,28 +308,28 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
-    return this.valueDomain.isSubdomainOf('Number');
+    return this.valueDomain.isCompatible('Number');
   }
   get isInteger(): boolean | undefined {
-    return this.valueDomain.isSubdomainOf('Integer');
+    return this.valueDomain.isCompatible('Integer');
   }
   get isRational(): boolean | undefined {
-    return this.valueDomain.isSubdomainOf('RationalNumber');
+    return this.valueDomain.isCompatible('RationalNumber');
   }
   get isAlgebraic(): boolean | undefined {
-    return this.valueDomain.isSubdomainOf('AlgebraicNumber');
+    return this.valueDomain.isCompatible('AlgebraicNumber');
   }
   get isReal(): boolean | undefined {
-    return this.valueDomain.isSubdomainOf('RealNumber');
+    return this.valueDomain.isCompatible('RealNumber');
   }
   get isExtendedReal(): boolean | undefined {
-    return this.valueDomain.isSubdomainOf('ExtendedRealNumber');
+    return this.valueDomain.isCompatible('ExtendedRealNumber');
   }
   get isComplex(): boolean | undefined {
-    return this.valueDomain.isSubdomainOf('ComplexNumber');
+    return this.valueDomain.isCompatible('ComplexNumber');
   }
   get isImaginary(): boolean | undefined {
-    return this.valueDomain.isSubdomainOf('ImaginaryNumber');
+    return this.valueDomain.isCompatible('ImaginaryNumber');
   }
 
   get json(): Expression {
@@ -550,52 +530,6 @@ export class BoxedFunction extends AbstractBoxedExpression {
     this._isCanonical = val;
   }
 
-  get canonical(): BoxedExpression {
-    if (this.isCanonical) return this;
-
-    //
-    // 1/ Get the canonical form of the arguments
-    //
-    let tail = this._def?.associative
-      ? flattenOps(this._ops!, this._def.name) ?? this._ops!
-      : this._ops!;
-    tail = holdMap(tail, this._def?.hold ?? 'none', (arg) => arg.canonical);
-
-    // f(a, f(b, c), d) -> f(a, b, c, d)
-    if (this._def?.associative) tail = flattenOps(tail, this._def.name) ?? tail;
-
-    //
-    // 2/ Apply `canonical` handler
-    //
-    if (this._def?.canonical) return this._def.canonical(this.engine, tail);
-
-    //
-    // 3/ No canonical handler, use def attributes
-    //
-
-    // 3.1 / If no definition (i.e. function `g`...), we're done
-
-    if (!this._def) return this.engine._fn(this._head, tail);
-
-    //
-    // 3.2/ Apply `idempotent` and `involution`
-    //
-    if (tail.length === 1 && tail[0].head === this._head) {
-      // f(f(x)) -> f(x)
-      if (this._def.idempotent) tail = tail[0].ops!;
-      // f(f(x)) -> x
-      else if (this._def.involution) return tail[0].op1;
-    }
-
-    //
-    // 5/ Sort the arguments
-    //
-    if (tail.length > 1 && this._def.commutative === true)
-      tail = tail.sort(order);
-
-    return this.engine._fn(this._head, tail);
-  }
-
   apply(
     fn: (x: BoxedExpression) => SemiBoxedExpression,
     head?: string
@@ -614,6 +548,55 @@ export class BoxedFunction extends AbstractBoxedExpression {
     return this.engine.fn(newHead, ops);
   }
 
+  get canonical(): BoxedExpression {
+    if (this.isCanonical) return this;
+
+    //
+    // 1/ Get the canonical form of the arguments
+    //
+    let tail = this._def?.associative
+      ? flattenOps(this._ops!, this._def.name) ?? this._ops!
+      : this._ops!;
+    tail = holdMap(tail, this._def?.hold ?? 'none', (arg) => arg.canonical);
+
+    // f(a, f(b, c), d) -> f(a, b, c, d)
+    if (this._def?.associative) tail = flattenOps(tail, this._def.name) ?? tail;
+
+    //
+    // 2/ Apply `canonical` handler
+    //
+
+    // 2.1 / If no definition (i.e. function `g`...) or an inert function, we're done
+
+    if (!this._def || this._def.inert) return this.engine._fn(this._head, tail);
+
+    // 2.2/ Find a matching signature
+    const sig = this._def.getSignature(holdMapDomain(tail, this._def.hold));
+    if (sig?.canonical) return sig.canonical(this.engine, tail);
+
+    //
+    // 3/ No canonical handler, use def attributes
+    //
+
+    //
+    // 3.1/ Apply `idempotent` and `involution`
+    //
+    if (tail.length === 1 && tail[0].head === this._head) {
+      // f(f(x)) -> f(x)
+      if (this._def.idempotent) tail = tail[0].ops!;
+      // f(f(x)) -> x
+      else if (this._def.involution) return tail[0].op1;
+    }
+
+    //
+    // 4/ Sort the arguments
+    //
+    if (tail.length > 1 && this._def.commutative === true)
+      tail = tail.sort(order);
+
+    return this.engine._fn(this._head, tail);
+  }
+
   simplify(options?: SimplifyOptions): BoxedExpression {
     //
     // 1/ Use the canonical form
@@ -630,7 +613,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
       tail = holdMap(tail, def.hold, (arg) => arg.simplify(options));
       if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
     } else {
-      tail = holdMap(this._ops!, 'none', (arg) => arg.simplify(options));
+      tail = holdMap(tail, 'none', (arg) => arg.simplify(options));
     }
 
     //
@@ -645,8 +628,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     let expr: BoxedExpression | undefined;
 
     if (def) {
-      if (def.simplify) expr = def.simplify(this.engine, tail);
-      else if (def.inert) expr = tail[0] ?? this.engine.symbol('Missing');
+      if (def.inert) expr = tail[0]?.canonical ?? this.engine.symbol('Missing');
+      else {
+        const sig = def.getSignature(holdMapDomain(tail, def.hold));
+        if (sig?.simplify) expr = sig.simplify(this.engine, tail);
+      }
     }
 
     if (!expr) expr = this.engine.fn(this._head, tail).canonical;
@@ -704,18 +690,16 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // 2/ Evaluate the applicable operands
     //
     const def = this._def;
-    let tail: BoxedExpression[];
+    let tail = this._ops!;
     if (def) {
       tail = holdMap(
-        def.associative
-          ? flattenOps(this._ops!, def.name) ?? this._ops!
-          : this._ops!,
+        def.associative ? flattenOps(tail, def.name) ?? tail : tail,
         def.hold,
         (arg) => arg.evaluate(options)
       );
       if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
     } else {
-      tail = holdMap(this._ops!, 'none', (arg) => arg.evaluate(options));
+      tail = holdMap(tail, 'none', (arg) => arg.evaluate(options));
     }
 
     //
@@ -725,26 +709,32 @@ export class BoxedFunction extends AbstractBoxedExpression {
       return lambda(this._head, tail).evaluate(options);
 
     //
-    // 4/ No def? We're done.
+    // 4/ No def? Inert? We're done.
     //
     if (!def) return this.engine.fn(this._head, tail).canonical;
 
+    if (def.inert) return tail[0] ?? this.engine.symbol('Missing');
+
     //
-    // 5/ Call the `evaluate` handler
+    // 5/ Find a matching signature
+    //
+    const sig = def.getSignature(holdMapDomain(tail, def.hold));
+
+    //
+    // 6/ Call the `evaluate` handler
     //
 
     // 5.1/ No evaluate handler, we're done
-    if (def.evaluate === undefined) {
-      if (def.inert) return tail[0] ?? this.engine.symbol('Missing');
+    if (!sig || !sig?.evaluate)
       return this.engine.fn(this._head, tail).canonical;
-    }
+
     // 5.2/ A lambda-function handler
-    if (typeof def.evaluate !== 'function')
-      return lambda(def.evaluate, tail).canonical;
+    if (typeof sig.evaluate !== 'function')
+      return lambda(sig.evaluate, tail).canonical;
 
     // 5.3/ A regular function handler
     return (
-      def.evaluate(this.engine, tail) ??
+      sig.evaluate(this.engine, tail) ??
       this.engine.fn(this._head, tail).canonical
     );
   }
@@ -760,18 +750,16 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // 2/ Evaluate the applicable operands
     //
     const def = this._def;
-    let tail: BoxedExpression[];
+    let tail = this._ops!;
     if (def) {
       tail = holdMap(
-        def.associative
-          ? flattenOps(this._ops!, def.name) ?? this._ops!
-          : this._ops!,
+        def.associative ? flattenOps(tail, def.name) ?? tail : tail,
         def.hold,
         (arg) => arg.N(options)
       );
       if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
     } else {
-      tail = holdMap(this._ops!, 'none', (arg) => arg.N(options));
+      tail = holdMap(tail, 'none', (arg) => arg.N(options));
     }
 
     //
@@ -781,20 +769,24 @@ export class BoxedFunction extends AbstractBoxedExpression {
       return lambda(this._head, tail).N(options);
 
     //
-    // 4/ No def? We're done.
+    // 4/ No def? Inert? We're done.
     //
     if (!def) return this.engine.fn(this._head, tail).canonical;
 
+    if (def.inert) return tail[0] ?? this.engine.symbol('Missing');
+
     //
-    // 5/ Call `N` handler  (or `evaluate`)
+    // 5/ Call `N` handler or fallback to `evaluate`
     //
+    const sig = def.getSignature(holdMapDomain(tail, def.hold));
 
     const result =
-      def.N?.(this.engine, tail) ?? this.engine.fn(this._head, tail).evaluate();
+      sig?.N?.(this.engine, tail) ??
+      this.engine.fn(this._head, tail).evaluate();
 
     if (result.isLiteral) {
       if (!complexAllowed(this.engine) && result.complexValue)
-        return this.engine.NAN;
+        return this.engine._NAN;
 
       if (!useDecimal(this.engine) && result.decimalValue)
         return this.engine.number(result.decimalValue.toNumber());
@@ -842,11 +834,11 @@ export function lambda(
   return fn.subs(subs);
 }
 
-export function ungroup(expr: BoxedExpression): BoxedExpression {
-  if (!expr.ops) return expr;
-  if (expr.head === 'Delimiter' && expr.nops >= 1) return ungroup(expr.op1);
-  return expr.apply(ungroup);
-}
+// export function ungroup(expr: BoxedExpression): BoxedExpression {
+//   if (!expr.ops) return expr;
+//   if (expr.head === 'Delimiter' && expr.nops >= 1) return ungroup(expr.op1);
+//   return expr.apply(ungroup);
+// }
 
 /** Apply the function `f` to elements of `xs`, except to the elements
  * described by `skip`:
@@ -877,7 +869,7 @@ export function holdMap(
       } else if (xs[i].head === 'ReleaseHold') {
         const x = f(xs[i].op1);
         if (x !== null && x.symbol !== 'Nothing') result.push(x);
-      } else if (applicable(xs, skip, i)) {
+      } else if (applicable(skip, xs.length - 1, i)) {
         const x = f(xs[i]);
         if (x !== null && x.symbol !== 'Nothing') result.push(x);
       } else {
@@ -888,9 +880,9 @@ export function holdMap(
   return result;
 }
 
-function applicable(
-  xs: BoxedExpression[],
+export function applicable(
   skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most',
+  count: number,
   index: number
 ): boolean {
   if (skip === 'all') return false;
@@ -901,9 +893,28 @@ function applicable(
 
   if (skip === 'rest') return index === 0;
 
-  if (skip === 'last') return index !== xs.length - 1;
+  if (skip === 'last') return index !== count;
 
-  if (skip === 'most') return index === xs.length - 1;
+  if (skip === 'most') return index === count;
 
   return false;
+}
+
+function holdMapDomain(
+  xs: BoxedExpression[],
+  skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most'
+): Domain[] {
+  if (xs.length === 0) return [];
+
+  const result: Domain[] = [];
+
+  for (let i = 0; i < xs.length; i++) {
+    const arg = xs[i];
+    if (applicable(skip, xs.length - 1, i)) {
+      result.push(arg.valueDomain ?? arg.domain);
+    } else {
+      result.push(arg.domain);
+    }
+  }
+  return result;
 }

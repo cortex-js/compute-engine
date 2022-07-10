@@ -4,6 +4,20 @@
 
 - The `ce.latexOptions.preserveLatex` default value is now `false`
 
+### Features
+
+- Implemented new domain computation system
+- Added support for multiple signatures per function (ad-hoc polymorphism)
+- Added `FixedPoint`, `Loop`, `Product`, `Sum`, `Break`, `Continue`, `Block`,
+  `If`, `Let`, `Set`, `Function`, `Apply`, `Return`
+- Added `Min`, `Max`, `Clamp`
+- Added parsing of log functions, `\lb`, `\ln`, `\ln_{10}`, `\ln_2`, etc...
+
+Read more at
+[Core Reference](https://cortexjs.io/compute-engine/reference/core/) and
+[Arithmetic Reference]
+(https://cortexjs.io/compute-engine/reference/arithmetic/)
+
 ### Bug Fixed
 
 - **#43** If the input of `ce.parse()` is an empty string, return an empty
@@ -20,7 +34,7 @@
 
 - Parse more cases of tabular environments
 - Handle simplify and evaluate of inert functions by default
-- Avoid unnecessary wrapping of functins when serializing LaTeX
+- Avoid unnecessary wrapping of functions when serializing LaTeX
 - Parse arguments of LaTeX commands (e.g. `\vec{}`)
 - **#42** Export static `ComputeEngine.getLatexDictionary`
 - Parse multi-character constants and variables, e.g. `\mathit{speed}` and
@@ -76,7 +90,7 @@ MathJSON `Expression`. It provides some member functions that can be used to
 manipulate the expression, for example `expr.simplify()` or `expr.evaluate()`.
 
 The boxed expresson itself is immutable. For example, calling `expr.simplify()`
-will return a new, simplfied, expression, without modifying `expr`.
+will return a new, simplified, expression, without modifying `expr`.
 
 To create a "boxed" expression from a "raw" MathJSON expression, use `ce.box()`.
 To create a boxed expression from a LaTeX string, use `ce.parse()`.
@@ -188,7 +202,7 @@ console.log(expr.isEqual(ce.box(2)));
 | Before                                    | After                                   |
 | :---------------------------------------- | :-------------------------------------- |
 | `expr = ["Add", 1, 2]`                    | `expr = ce.box(["Add", 1, 2])`          |
-| `expr = ce.evaluatate(expr)`              | `expr = expr.evaluate()`                |
+| `expr = ce.evaluate(expr)`                | `expr = expr.evaluate()`                |
 | `console.log(expr)`                       | `console.log(expr.json)`                |
 | `expr = new LatexSyntax().parse("x^2+1")` | `expr = ce.parse("x^2+1")`              |
 | `new LatexSyntax().serialize(expr)`       | `expr.latex`                            |

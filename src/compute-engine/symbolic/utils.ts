@@ -105,7 +105,7 @@ export function asCoefficient(
     [numer, denom] = reducedRational([numer, denom]);
 
     if (numer === denom) return [[1, 1], expr];
-    if (rest.length === 0) return [[numer, denom], ce.ONE];
+    if (rest.length === 0) return [[numer, denom], ce._ONE];
     if (rest.length === 1) return [[numer, denom], rest[0]];
     return [[numer, denom], ce.mul(rest)];
   }
@@ -118,7 +118,7 @@ export function asCoefficient(
     let [[n1, d1], numer] = asCoefficient(expr.op1);
     const [[n2, d2], denom] = asCoefficient(expr.op2);
     const [n, d] = reducedRational([n1 * d2, n2 * d1]);
-    if (numer.isOne && denom.isOne) return [[n, d], ce.ONE];
+    if (numer.isOne && denom.isOne) return [[n, d], ce._ONE];
     if (denom.isOne) return [[n, d], numer];
     return [[n, d], ce.fn('Divide', [numer, denom]).canonical];
   }
@@ -189,21 +189,21 @@ export function asCoefficient(
   if (expr.isLiteral) {
     if (expr.decimalValue) {
       if (expr.decimalValue.isInteger() && isInMachineRange(expr.decimalValue))
-        return [[expr.decimalValue.toNumber(), 1], ce.ONE];
+        return [[expr.decimalValue.toNumber(), 1], ce._ONE];
       if (expr.decimalValue?.isNegative())
         return [[-1, 1], ce.number(expr.decimalValue.neg())];
     }
 
     if (expr.machineValue !== null) {
       if (Number.isInteger(expr.machineValue)) {
-        return [[expr.machineValue, 1], ce.ONE];
+        return [[expr.machineValue, 1], ce._ONE];
       }
       if (expr.machineValue < 0)
         return [[-1, 1], ce.number(-expr.machineValue)];
     }
 
     const [a, b] = expr.rationalValue;
-    if (a !== null && b !== null) return [[a, b], ce.ONE];
+    if (a !== null && b !== null) return [[a, b], ce._ONE];
 
     if (expr.complexValue !== null) {
       const c = expr.complexValue!;

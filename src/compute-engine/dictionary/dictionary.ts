@@ -1,8 +1,12 @@
 import { ARITHMETIC_DICTIONARY } from './arithmetic';
+import { COLLECTIONS_DICTIONARY } from './collections';
 import { CORE_DICTIONARY } from './core';
 import { LOGIC_DICTIONARY } from './logic';
-import { TRIGONOMETRY_DICTIONARY } from './trigonometry';
+import { POLYNOMIALS_DICTIONARY } from './polynomials';
+import { RELOP_DICTIONARY } from './relational-operator';
 import { SETS_DICTIONARY } from './sets';
+import { TRIGONOMETRY_DICTIONARY } from './trigonometry';
+
 import { DictionaryCategory } from '../latex-syntax/public';
 
 import {
@@ -12,45 +16,44 @@ import {
   BoxedFunctionDefinition,
   BaseDefinition,
 } from '../public';
-import { COLLECTIONS_DICTIONARY } from './collections';
 import { BoxedSymbolDefinitionImpl } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
-import { RELOP_DICTIONARY } from './relational-operator';
-import { POLYNOMIALS_DICTIONARY } from './polynomials';
+import { isValidSymbolName } from '../../math-json/utils';
 
 export function getDefaultDictionaries(
-  categories: DictionaryCategory[] | 'all' = 'all'
+  categories: DictionaryCategory[] | DictionaryCategory | 'all'
 ): Readonly<Dictionary>[] {
   if (categories === 'all') {
-    // Note that the order of the dictionaries matter:
-    //  earlier dictionaries cannot reference definitions in later
-    //  dictionaries.
+    // **Note** the order of the dictionaries matter:
+    // earlier dictionaries cannot reference definitions in later dictionaries.
     return getDefaultDictionaries([
       'domains',
       'core',
+      'control-structures', // If, Block, Loop
+      'logic',
       'collections', // Dictionary, List, Sets
-      'algebra',
+      'relop',
+      'numeric',
       'arithmetic',
+      'algebra',
       'calculus',
       'combinatorics',
-      'dimensions',
       'linear-algebra',
-      'logic',
-      'numeric',
       'other',
       'physics',
       'polynomials',
-      'relop',
       'statistics',
       'trigonometry',
+      'dimensions',
       'units',
     ]);
-  }
+  } else if (typeof categories === 'string') categories = [categories];
   const result: Readonly<Dictionary>[] = [];
   for (const category of categories) {
     const dict = DICTIONARIES[category];
-    if (dict && Array.isArray(dict)) result.push(...dict);
-    else if (dict) result.push(dict as Readonly<Dictionary>);
+    if (!dict) throw Error(`Unknown dictionary category ${category}`);
+    if (Array.isArray(dict)) result.push(...dict);
+    else result.push(dict);
   }
   return result;
 }
@@ -60,8 +63,7 @@ export const DICTIONARIES: {
     | Readonly<Dictionary>
     | Readonly<Dictionary>[];
 } = {
-  arithmetic: ARITHMETIC_DICTIONARY,
-  // @todo more dictionaries
+  'algebra': [],
   // 'algebra': [
   //   // polynomial([0, 2, 0, 4]:list, x:symbol) -> 2x + 4x^3
   //   // polynomial(2x + 4x^3, x) -> {0, 2, 0, 4}
@@ -78,8 +80,10 @@ export const DICTIONARIES: {
   //   // - factor
   //   // - simplify
   // ],
-
-  // 'calculus': [
+  'arithmetic': ARITHMETIC_DICTIONARY,
+  'calculus': [],
+  'combinatorics': [], // @todo fibonacci, binomial, etc...
+  'control-structures': [],
   //   // D
   //   // Derivative (mathematica)
   //   // diff (macsyma)
@@ -90,16 +94,12 @@ export const DICTIONARIES: {
   //   // - integrate(expression, range1, range2) -- multiple integral
   //   // def-int
   // ],
-  // 'combinatorics': [], // fibonacci, binomial, etc...
-  core: CORE_DICTIONARY,
-  collections: [SETS_DICTIONARY, COLLECTIONS_DICTIONARY],
+  'dimensions': [], // @todo // volume, speed, area
+  'domains': [],
+  'core': CORE_DICTIONARY,
+  'collections': [SETS_DICTIONARY, COLLECTIONS_DICTIONARY],
   // 'domains': getDomainsDictionary(),
-  // 'dimensions': [
-  //   // volume, speed, area
-  // ],
-  logic: LOGIC_DICTIONARY,
-  relop: RELOP_DICTIONARY,
-  // 'linear-algebra': [
+  'linear-algebra': [], //@todo   // 'linear-algebra': [
   //   // matrix
   //   // transpose
   //   // cross-product
@@ -112,7 +112,9 @@ export const DICTIONARIES: {
   //   // constant-matrix
   //   // identity-matrix
   // ],
-  // 'numeric': [
+
+  'logic': LOGIC_DICTIONARY,
+  'numeric': [], // @todo   // 'numeric': [
   //   // Gamma function
   //   // Zeta function
   //   // erf function
@@ -123,9 +125,11 @@ export const DICTIONARIES: {
   //   // random
   //   // hash
   // ],
-  // 'other': [],
-  polynomials: POLYNOMIALS_DICTIONARY,
-  physics: {
+
+  'other': [],
+  'relop': RELOP_DICTIONARY,
+  'polynomials': POLYNOMIALS_DICTIONARY,
+  'physics': {
     symbols: [
       {
         name: 'Mu-0',
@@ -138,7 +142,7 @@ export const DICTIONARIES: {
       },
     ],
   },
-  // statistics: [
+  'statistics': [], // @todo statistics: [
   //   // average
   //   // mean
   //   // variance = size(l) * stddev(l)^2 / (size(l) - 1)
@@ -146,19 +150,16 @@ export const DICTIONARIES: {
   //   // median
   //   // quantile
   // ],
-  trigonometry: TRIGONOMETRY_DICTIONARY,
-  // units: [],
+  'trigonometry': TRIGONOMETRY_DICTIONARY,
+  'units': [],
 };
 
-function validateDefinitionName(
-  _engine: IComputeEngine,
-  def: BaseDefinition
-): void {
+function validateDefinitionName(def: BaseDefinition): void {
   if (typeof def !== 'object' || !('name' in def) || !def.name)
-    throw new Error(`Missing name for definition ${JSON.stringify(def)}`);
+    throw new Error('Missing name for definition' + JSON.stringify(def)); // @todo cause
 
-  if (!/[A-Za-z][A-Za-z0-9-]*/.test(def.name) && def.name.length !== 1)
-    throw new Error(`Invalid definition name ${def.name}`);
+  if (!isValidSymbolName(def.name))
+    throw Error(`Invalid definition name ${def.name}`); // @todo cause
 }
 
 /**
@@ -166,44 +167,32 @@ function validateDefinitionName(
  *
  * `dicts` can be an array of dictionaries, in order to deal with circular
  * dependencies: it is possible to partition a dictionary into multiple
- * sub-dictionary, to control the order in which they are processe and
+ * sub-dictionary, to control the order in which they are processed and
  * avoid having expressions in the definition of an entry reference a symbol
  * or function name that has not yet been added to the dictionary.
- *
- * Specifically:
- * - Expressions (for values, evaluate, domain, isElementOf, etc..) are boxed
- * - The domain of entries is inferred and validated:
- *  - check that domains are in canonical form
- *  - check that domains are consistent with declarations
  *
  */
 export function setCurrentContextDictionary(
   engine: IComputeEngine,
-  dicts: Dictionary | Dictionary[] | undefined
+  dict: Dictionary
 ): void {
-  if (dicts === undefined) return;
-
-  // If we are passed multiple dictionaries, add them in order, one by one
-  // This is important to do to avoid definitions with circular dependencies.
-  if (Array.isArray(dicts)) {
-    for (const dict of dicts) setCurrentContextDictionary(engine, dict);
-    return;
-  }
-
   // If this is the first dictionary, setup the context.dictionary
   if (!engine.context.dictionary)
     engine.context.dictionary = {
       symbols: new Map<string, BoxedSymbolDefinition>(),
-      functions: new Map<string, BoxedFunctionDefinition[]>(),
+      functions: new Map<string, BoxedFunctionDefinition>(),
       symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
       functionWikidata: new Map<string, BoxedFunctionDefinition>(),
     };
 
-  const dictionary = engine.context.dictionary!;
+  const dictionary = engine.context.dictionary;
 
-  if (dicts.symbols)
-    for (const entry of dicts.symbols) {
-      validateDefinitionName(engine, entry);
+  //
+  // Validate and add the symbols from the dictionary
+  //
+  if (dict.symbols)
+    for (const entry of dict.symbols) {
+      validateDefinitionName(entry);
 
       const def = new BoxedSymbolDefinitionImpl(engine, entry);
 
@@ -228,20 +217,14 @@ export function setCurrentContextDictionary(
       dictionary.symbols.set(entry.name, def);
     }
 
-  if (dicts.functions)
-    for (const entry of dicts.functions) {
-      validateDefinitionName(engine, entry);
+  //
+  // Validate and add the functions from the dictionary
+  //
+  if (dict.functions)
+    for (const entry of dict.functions) {
+      validateDefinitionName(entry);
 
       const def = makeFunctionDefinition(engine, entry);
-
-      if (!dictionary.functions.has(entry.name))
-        dictionary.functions.set(entry.name, [def]);
-      else {
-        dictionary.functions.set(entry.name, [
-          ...dictionary.functions.get(entry.name)!,
-          def,
-        ]);
-      }
 
       if (entry.wikidata) {
         if (dictionary.functionWikidata.has(entry.wikidata))
@@ -252,40 +235,16 @@ export function setCurrentContextDictionary(
           );
         dictionary.functionWikidata.set(entry.wikidata, def);
       }
+
+      if (dictionary.functions.has(entry.name))
+        throw new Error(
+          `Duplicate function definition ${entry.name}:\n${JSON.stringify(
+            dictionary.symbols.get(entry.name)!
+          )}\n${JSON.stringify(entry)}`
+        );
+
+      dictionary.functions.set(entry.name, def);
     }
 
   // @todo: take dict.rules into consideration
 }
-
-/**
- * For debugging: a textual representation of the inheritance chain of sets.
- */
-// function setParentsToString(
-//   engine: ComputeEngineInterface,
-//   expr: Expression,
-//   cycle?: string[]
-// ): string {
-//   const result: string[] = [`${expr}`];
-
-//   const name = typeof expr === 'string' ? expr : head(expr);
-//   if (cycle) {
-//     if (cycle.includes(name)) return `${name} ↩︎ `;
-//     cycle.push(name);
-//   } else {
-//     cycle = [name];
-//   }
-//   const def = engine.getSymbolDefinition(name);
-//   if (!def || !isSetDefinition(def)) return `${name}?!`;
-//   if (!def.supersets.length || def.supersets.length === 0) return '';
-
-//   for (const parent of def?.supersets) {
-//     if (typeof parent === 'string') {
-//       result.push(setParentsToString(engine, parent, [...cycle]));
-//     } else {
-//     }
-//   }
-//   if (result.length <= 1) {
-//     return result[0] ?? '';
-//   }
-//   return '[' + result.join(' ➔ ') + ']';
-// }

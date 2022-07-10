@@ -2,11 +2,48 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 export const ce = new ComputeEngine();
 
-describe.skip('is() values', () => {
-  ce.assume(['Greater', 'x', 4]);
-  ce.assume(['Equal', 'a', 1]);
-  ce.assume(['Equal', 'o', 1]);
+ce.assume('a', 1);
+ce.assume('i', 'Integer');
+ce.assume(['Greater', 'x', 4]);
+ce.assume(['Element', 'm', ['Range', -Infinity, Infinity]]);
+ce.assume(['Element', 'n', ['Range', 0, Infinity]]);
+ce.assume(['Equal', 'o', 1]);
+ce.assume(['Equal', 'p', 11]);
+ce.assume(['Element', 'q', ['Range', -Infinity, 0]]);
+ce.assume(['Element', 'r', ['Interval', ['Open', 0], +Infinity]]);
 
+ce.assume(['Greater', 's', 5]);
+ce.assume(['Greater', 't', 0]);
+
+// console.log([...ce.context!.dictionary!.symbols.keys()]);
+
+describe('TAUTOLOGY a = 1', () => {
+  test(`a.value`, () => {
+    expect(ce.box('a').evaluate()).toMatchInlineSnapshot(`"\\"a\\""`);
+  });
+  test(`a.domain`, () => {
+    expect(ce.box('a').domain.domainExpression).toMatchInlineSnapshot(
+      `"ExtendedRealNumber"`
+    );
+  });
+  test(`a > 0`, () => {
+    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot();
+  });
+  test(`a >= 1`, () => {
+    expect(ce.assume(['GreaterEqual', 'a', 1])).toMatchInlineSnapshot();
+  });
+  test(`a = 1`, () => {
+    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot();
+  });
+});
+
+describe.skip('CONTRADICTIONS', () => {
+  test(`a < 0`, () => {
+    expect(ce.assume(['LessThan', 'a', 0])).toMatchInlineSnapshot();
+  });
+});
+
+describe.skip('is() values', () => {
   test(`> 0`, () => {
     // expect(ce.is(['Greater', 'x', 0])).toBeFalsy();
     // expect(ce.is(['Greater', 'a', 0])).toBeTruthy();
@@ -36,10 +73,6 @@ describe.skip('is() values', () => {
 });
 
 describe.skip('is() values', () => {
-  ce.assume('n', 'Integer');
-  ce.assume(['Equal', 'p', 11]);
-  ce.assume(['Element', 'r', ['Interval', ['Open', 0], +Infinity]]);
-
   test(`is positive`, () => {
     // expect(ce.is(['Element', 'r', 'RealNumber'])).toBeTruthy();
     // expect(ce.is(['Greater', 'r', 0])).toBeTruthy();
@@ -47,21 +80,24 @@ describe.skip('is() values', () => {
 });
 
 describe.skip('canonical domains', () => {
-  ce.assume(['Element', 'm', ['Range', -Infinity, Infinity]]);
-  ce.assume(['Element', 'n', ['Range', 0, Infinity]]);
-  ce.assume(['Element', 'q', ['Range', -Infinity, 0]]);
-
-  ce.assume(['Greater', 't', 0]);
-  ce.assume(['Greater', 's', 5]);
-
   test(`Range domains`, () => {
-    expect(ce.box('m').domain.symbol).toMatchInlineSnapshot(`"RealNumber"`);
-    expect(ce.box('n').domain.symbol).toMatchInlineSnapshot(`"RealNumber"`);
-    expect(ce.box('q').domain.symbol).toMatchInlineSnapshot(`"RealNumber"`);
+    expect(ce.box('m').domain.domainExpression).toMatchInlineSnapshot(
+      `"RealNumber"`
+    );
+    expect(ce.box('n').domain.domainExpression).toMatchInlineSnapshot(
+      `"RealNumber"`
+    );
+    expect(ce.box('q').domain.domainExpression).toMatchInlineSnapshot(
+      `"RealNumber"`
+    );
   });
 
   test(`Interval domains`, () => {
-    expect(ce.box('t').domain.symbol).toMatchInlineSnapshot(`"RealNumber"`);
-    expect(ce.box('s').domain.symbol).toMatchInlineSnapshot(`"RealNumber"`);
+    expect(ce.box('t').domain.domainExpression).toMatchInlineSnapshot(
+      `"RealNumber"`
+    );
+    expect(ce.box('s').domain.domainExpression).toMatchInlineSnapshot(
+      `"RealNumber"`
+    );
   });
 });

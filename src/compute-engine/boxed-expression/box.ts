@@ -150,32 +150,32 @@ export function boxNumber(
       throw new Error('Array argument to boxNumber() should be two integers');
     if (!Number.isInteger(n) || !Number.isInteger(d))
       throw new Error('Array argument to boxNumber() should be two integers');
-    if (d === n) return d === 0 ? ce.NAN : ce.ONE;
+    if (d === n) return d === 0 ? ce._NAN : ce._ONE;
     if (d === 1) num = n;
     else if (d === -1) num = -n;
-    else if (n === 1 && d === 2) return ce.HALF;
+    else if (n === 1 && d === 2) return ce._HALF;
     else return new BoxedNumber(ce, [n, d], metadata);
   }
 
   if (num instanceof Complex) {
-    if (num.isNaN()) return ce.NAN;
-    if (num.isZero()) return ce.ZERO;
-    if (num.isInfinite()) return ce.COMPLEX_INFINITY;
+    if (num.isNaN()) return ce._NAN;
+    if (num.isZero()) return ce._ZERO;
+    if (num.isInfinite()) return ce._COMPLEX_INFINITY;
     if (num.im === 0) num = num.re;
     else {
       // Only create complex number if the numericMode is `auto` or `complex`
-      return complexAllowed(ce) ? new BoxedNumber(ce, num, metadata) : ce.NAN;
+      return complexAllowed(ce) ? new BoxedNumber(ce, num, metadata) : ce._NAN;
     }
   }
 
   if (num instanceof Decimal) {
-    if (num.isNaN()) return ce.NAN;
-    if (num.equals(ce.DECIMAL_NEGATIVE_ONE)) return ce.NEGATIVE_ONE;
-    if (num.isZero()) return ce.ZERO;
-    if (num.equals(ce.DECIMAL_ONE)) return ce.ONE;
-    if (num.equals(ce.DECIMAL_TWO)) return ce.TWO;
-    if (!num.isFinite() && num.isPositive()) return ce.POSITIVE_INFINITY;
-    if (!num.isFinite() && num.isNegative()) return ce.NEGATIVE_INFINITY;
+    if (num.isNaN()) return ce._NAN;
+    if (num.equals(ce._DECIMAL_NEGATIVE_ONE)) return ce._NEGATIVE_ONE;
+    if (num.isZero()) return ce._ZERO;
+    if (num.equals(ce._DECIMAL_ONE)) return ce._ONE;
+    if (num.equals(ce._DECIMAL_TWO)) return ce._TWO;
+    if (!num.isFinite() && num.isPositive()) return ce._POSITIVE_INFINITY;
+    if (!num.isFinite() && num.isNegative()) return ce._NEGATIVE_INFINITY;
 
     // Use a Decimal if in `decimal` mode, or `auto` with precision > 15
     return new BoxedNumber(ce, useDecimal(ce) ? num : num.toNumber(), metadata);
@@ -204,27 +204,27 @@ export function boxNumber(
       }
 
       // Special case some common values to share boxed instances
-      if (strNum === 'nan') return ce.NAN;
+      if (strNum === 'nan') return ce._NAN;
       if (strNum === 'infinity' || strNum === '+infinity')
-        return ce.POSITIVE_INFINITY;
-      if (strNum === '-infinity') return ce.NEGATIVE_INFINITY;
-      if (strNum === '0') return ce.ZERO;
-      if (strNum === '1') return ce.ONE;
-      if (strNum === '-1') return ce.NEGATIVE_ONE;
-      if (strNum === '2') return ce.TWO;
+        return ce._POSITIVE_INFINITY;
+      if (strNum === '-infinity') return ce._NEGATIVE_INFINITY;
+      if (strNum === '0') return ce._ZERO;
+      if (strNum === '1') return ce._ONE;
+      if (strNum === '-1') return ce._NEGATIVE_ONE;
+      if (strNum === '2') return ce._TWO;
 
       return new BoxedNumber(ce, strNum, metadata);
     }
   }
 
   if (typeof num === 'number') {
-    if (Number.isNaN(num)) return ce.NAN;
-    if (!Number.isFinite(num) && num > 0) ce.POSITIVE_INFINITY;
-    if (!Number.isFinite(num) && num < 0) ce.NEGATIVE_INFINITY;
-    if (num === -1) return ce.NEGATIVE_ONE;
-    if (num === 0) return ce.ZERO;
-    if (num === 1) return ce.ONE;
-    if (num === 2) return ce.TWO;
+    if (Number.isNaN(num)) return ce._NAN;
+    if (!Number.isFinite(num) && num > 0) ce._POSITIVE_INFINITY;
+    if (!Number.isFinite(num) && num < 0) ce._NEGATIVE_INFINITY;
+    if (num === -1) return ce._NEGATIVE_ONE;
+    if (num === 0) return ce._ZERO;
+    if (num === 1) return ce._ONE;
+    if (num === 2) return ce._TWO;
   }
 
   if (typeof num === 'number') {
@@ -326,7 +326,7 @@ export function boxFunction(
       const im = op1.asFloat;
       if (im !== null && im !== 0)
         return new BoxedNumber(ce, ce.complex(0, im), metadata);
-      return ce.mul([op1, ce.I]);
+      return ce.mul([op1, ce._I]);
     }
     if (ops.length === 2) {
       const op1 = box(ce, ops[0]);
@@ -334,12 +334,12 @@ export function boxFunction(
       const re = op1.asFloat;
       const im = op2.asFloat;
       if (im !== null && re !== null) {
-        if (im === 0 && re === 0) return ce.ZERO;
+        if (im === 0 && re === 0) return ce._ZERO;
         if (im !== null && im !== 0)
           return new BoxedNumber(ce, ce.complex(re, im), metadata);
         return op1;
       }
-      return ce.add([op1, ce.mul([op2, ce.I])], metadata);
+      return ce.add([op1, ce.mul([op2, ce._I])], metadata);
     }
   }
 

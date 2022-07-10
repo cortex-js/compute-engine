@@ -13,15 +13,15 @@ export function lcm(a: Decimal, b: Decimal): Decimal {
 }
 
 export function factorial(ce: IComputeEngine, n: Decimal): Decimal {
-  if (!n.isInteger() || n.isNegative()) return ce.DECIMAL_NAN;
+  if (!n.isInteger() || n.isNegative()) return ce._DECIMAL_NAN;
   if (n.lessThan(10))
     return ce.decimal(
       [1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800][n.toNumber()]
     );
 
   if (n.gt(Number.MAX_SAFE_INTEGER)) {
-    let val = ce.DECIMAL_ONE;
-    let i = ce.DECIMAL_TWO;
+    let val = ce._DECIMAL_ONE;
+    let i = ce._DECIMAL_TWO;
     while (i.lessThan(n)) {
       val = val.mul(i);
       i = i.add(1);
@@ -49,7 +49,7 @@ const gammaG = 7;
 
 // Spouge approximation (suitable for large arguments)
 export function lngamma(ce: IComputeEngine, z: Decimal): Decimal {
-  if (z.isNegative()) return ce.DECIMAL_NAN;
+  if (z.isNegative()) return ce._DECIMAL_NAN;
 
   const GAMMA_P_LN = ce.cache<Decimal[]>('gamma-p-ln', () => {
     return [
@@ -78,25 +78,26 @@ export function lngamma(ce: IComputeEngine, z: Decimal): Decimal {
 
   const GAMMA_G_LN = ce.cache('gamma-g-ln', () => ce.decimal(607).div(128));
 
-  const t = z.add(GAMMA_G_LN).add(ce.DECIMAL_HALF);
-  return ce.DECIMAL_NEGATIVE_ONE.acos()
-    .mul(ce.DECIMAL_TWO)
+  const t = z.add(GAMMA_G_LN).add(ce._DECIMAL_HALF);
+  return ce._DECIMAL_NEGATIVE_ONE
+    .acos()
+    .mul(ce._DECIMAL_TWO)
     .log()
-    .mul(ce.DECIMAL_HALF)
+    .mul(ce._DECIMAL_HALF)
     .add(
-      t.log().mul(z.add(ce.DECIMAL_HALF)).minus(t).add(x.log()).minus(z.log())
+      t.log().mul(z.add(ce._DECIMAL_HALF)).minus(t).add(x.log()).minus(z.log())
     );
 }
 
 // From https://github.com/substack/gamma.js/blob/master/index.js
 export function gamma(ce: IComputeEngine, z: Decimal): Decimal {
-  if (z.lessThan(ce.DECIMAL_HALF)) {
-    const pi = ce.DECIMAL_NEGATIVE_ONE.acos();
+  if (z.lessThan(ce._DECIMAL_HALF)) {
+    const pi = ce._DECIMAL_NEGATIVE_ONE.acos();
     return pi.div(
       pi
         .mul(z)
         .sin()
-        .mul(gamma(ce, ce.DECIMAL_ONE.sub(z)))
+        .mul(gamma(ce, ce._DECIMAL_ONE.sub(z)))
     );
   }
 
@@ -123,11 +124,12 @@ export function gamma(ce: IComputeEngine, z: Decimal): Decimal {
   let x = LANCZOS_7_C[0];
   for (let i = 1; i < gammaG + 2; i++) x = x.add(LANCZOS_7_C[i].div(z.add(i)));
 
-  const t = z.add(gammaG).add(ce.DECIMAL_HALF);
-  return ce.DECIMAL_NEGATIVE_ONE.acos()
-    .times(ce.DECIMAL_TWO)
+  const t = z.add(gammaG).add(ce._DECIMAL_HALF);
+  return ce._DECIMAL_NEGATIVE_ONE
+    .acos()
+    .times(ce._DECIMAL_TWO)
     .sqrt()
-    .mul(x.mul(t.neg().exp()).mul(t.pow(z.add(ce.DECIMAL_HALF))));
+    .mul(x.mul(t.neg().exp()).mul(t.pow(z.add(ce._DECIMAL_HALF))));
 }
 
 /**

@@ -70,8 +70,8 @@ export function domainAdd(
   let dom: Domain | string | null = null;
   for (const arg of args) {
     const argDom = arg.valueDomain;
-    if (!argDom.isSubdomainOf('Number')) return null;
-    if (!dom || !argDom.isSubdomainOf(dom)) dom = argDom;
+    if (!argDom.isNumeric) return null;
+    if (!dom || !argDom.isCompatible(dom)) dom = argDom;
   }
   return dom;
 }
@@ -82,12 +82,13 @@ export function numEvalAdd(
 ): BoxedExpression {
   for (const arg of args) {
     if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined') return ce.NAN;
+    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
+      return ce._NAN;
   }
   // Accumulate rational, machine, decimal, complex and symbolic products
   let [numer, denom] = [0, 1];
   let machineSum = 0;
-  let decimalSum = ce.DECIMAL_ZERO;
+  let decimalSum = ce._DECIMAL_ZERO;
   let complexSum = Complex.ZERO;
   const sum = new Sum(ce);
 
@@ -107,7 +108,7 @@ export function numEvalAdd(
     }
   }
 
-  if (!complexAllowed(ce) && complexSum.im !== 0) return ce.NAN;
+  if (!complexAllowed(ce) && complexSum.im !== 0) return ce._NAN;
 
   if (useDecimal(ce) || ce.chop(decimalSum) !== 0) {
     // Fold into decimal
@@ -151,7 +152,8 @@ export function processAdd(
   const sum = new Sum(ce);
   for (const arg of args) {
     if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined') return ce.NAN;
+    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
+      return ce._NAN;
     sum.addTerm(arg);
   }
 

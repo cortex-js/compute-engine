@@ -62,7 +62,7 @@ import { canonicalAdd } from './dictionary/arithmetic-add';
 import { canonicalDivide } from './dictionary/arithmetic-divide';
 import { BoxedSymbol } from './boxed-expression/boxed-symbol';
 import { BoxedDictionary } from './boxed-expression/boxed-dictionary';
-import { boxDomain, _Domain } from './boxed-expression/boxed-domain';
+import { boxDomain, isDomain, _Domain } from './boxed-expression/boxed-domain';
 import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expression';
 
 /**
@@ -86,48 +86,54 @@ import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expre
  */
 export class ComputeEngine implements IComputeEngine {
   /** @internal */
-  readonly ZERO: BoxedExpression;
+  readonly _ZERO: BoxedExpression;
   /** @internal */
-  readonly ONE: BoxedExpression;
+  readonly _ONE: BoxedExpression;
   /** @internal */
-  readonly TWO: BoxedExpression;
+  readonly _TWO: BoxedExpression;
   /** @internal */
-  readonly HALF: BoxedExpression;
+  readonly _HALF: BoxedExpression;
   /** @internal */
-  readonly NEGATIVE_ONE: BoxedExpression;
+  readonly _NEGATIVE_ONE: BoxedExpression;
   /** @internal */
-  readonly I: BoxedExpression;
+  readonly _I: BoxedExpression;
   /** @internal */
-  readonly NAN: BoxedExpression;
+  readonly _NAN: BoxedExpression;
   /** @internal */
-  readonly POSITIVE_INFINITY: BoxedExpression;
+  readonly _POSITIVE_INFINITY: BoxedExpression;
   /** @internal */
-  readonly NEGATIVE_INFINITY: BoxedExpression;
+  readonly _NEGATIVE_INFINITY: BoxedExpression;
   /** @internal */
-  readonly COMPLEX_INFINITY: BoxedExpression;
+  readonly _COMPLEX_INFINITY: BoxedExpression;
 
   /** @internal */
-  DECIMAL_NAN: Decimal;
+  _DECIMAL_NAN: Decimal;
   /** @internal */
-  DECIMAL_ZERO: Decimal;
+  _DECIMAL_ZERO: Decimal;
   /** @internal */
-  DECIMAL_ONE: Decimal;
+  _DECIMAL_ONE: Decimal;
   /** @internal */
-  DECIMAL_TWO: Decimal;
+  _DECIMAL_TWO: Decimal;
   /** @internal */
-  DECIMAL_HALF: Decimal;
+  _DECIMAL_HALF: Decimal;
   /** @internal */
-  DECIMAL_PI: Decimal;
+  _DECIMAL_PI: Decimal;
   /** @internal */
-  DECIMAL_NEGATIVE_ONE: Decimal;
+  _DECIMAL_NEGATIVE_ONE: Decimal;
 
+  /** @internal */
   private _precision: number;
+  /** @internal */
   private _numericMode: NumericMode;
+  /** @internal */
   private _latexSyntax?: LatexSyntax; // To parse rules as LaTeX
 
+  /** @internal */
   private _tolerance: number;
+  /** @internal */
   private _decimalTolerance: Decimal;
 
+  /** @internal */
   private _cache: {
     [key: string]: {
       value: any;
@@ -136,17 +142,23 @@ export class ComputeEngine implements IComputeEngine {
     };
   } = {};
 
+  /** @internal */
   private _stats: ComputeEngineStats & { [key: string]: unknown };
 
+  /** @internal */
   private _cost?: (expr: BoxedExpression) => number;
 
+  /** @internal */
   private _jsonSerializationOptions: JsonSerializationOptions;
 
   /** The domain of unknown symbols. If `null` unknown symbols do not have a
    * definition automatically associated with them.
+   *
+   *  @internal
    */
   private _defaultDomain: null | Domain;
 
+  /** @internal */
   private _commonSymbols: { [symbol: string]: null | BoxedExpression } = {
     True: null,
     False: null,
@@ -161,6 +173,7 @@ export class ComputeEngine implements IComputeEngine {
     Pi: null,
     ImaginaryUnit: null,
   };
+  /** @internal */
   private _commonNumbers: { [num: number]: null | BoxedExpression } = {
     0: null,
     1: null,
@@ -174,6 +187,7 @@ export class ComputeEngine implements IComputeEngine {
     9: null,
     10: null,
   };
+  /** @internal */
   private _commonDomains: { [dom: string]: null | Domain } = {
     Anything: null,
     Nothing: null,
@@ -207,6 +221,7 @@ export class ComputeEngine implements IComputeEngine {
     NumericExpression: null, // () -> Number
   };
 
+  /** @internal */
   private _latexDictionary?: readonly LatexDictionaryEntry[];
 
   /**
@@ -231,12 +246,12 @@ export class ComputeEngine implements IComputeEngine {
    * Return dictionaries suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
    *
-   * A symbol dictionary defines how the symbols and function names in a MathJSON
+   * A dictionary defines how the symbols and function names in a MathJSON
    * expression should be interpreted, i.e. how to evaluate and manipulate them.
    *
    */
   static getDictionaries(
-    categories: DictionaryCategory[] | 'all' = 'all'
+    categories: DictionaryCategory[] | DictionaryCategory | 'all' = 'all'
   ): Readonly<Dictionary>[] {
     return getDefaultDictionaries(categories);
   }
@@ -261,7 +276,7 @@ export class ComputeEngine implements IComputeEngine {
    * numeric calculations. Default is 100.
    *
    * @param options.tolerance If the absolute value of the difference of two numbers
-   * is less than `toleranc`, they are considered equal. Used by `chop()` as well.
+   * is less than `tolerance`, they are considered equal. Used by `chop()` as well.
    *
    * @param options.defaultDomain If an unknown symbol is encountered, assume it should
    * be a variable in this domain. **Default** `ExtendedRealNumber`
@@ -302,21 +317,19 @@ export class ComputeEngine implements IComputeEngine {
     );
 
     this._decimal = Decimal.clone({ precision: this._precision });
-    this.decimal = (a) => new this._decimal(a);
-    this.complex = (a, b) => new Complex(a, b);
 
     this.tolerance = options?.tolerance ?? NUMERIC_TOLERANCE;
 
-    this.ZERO = new BoxedNumber(this, 0);
-    this.ONE = new BoxedNumber(this, 1);
-    this.TWO = new BoxedNumber(this, 2);
-    this.HALF = new BoxedNumber(this, [1, 2]);
-    this.NEGATIVE_ONE = new BoxedNumber(this, -1);
-    this.I = new BoxedNumber(this, Complex.I);
-    this.NAN = new BoxedNumber(this, Number.NaN);
-    this.POSITIVE_INFINITY = new BoxedNumber(this, Number.POSITIVE_INFINITY);
-    this.NEGATIVE_INFINITY = new BoxedNumber(this, Number.NEGATIVE_INFINITY);
-    this.COMPLEX_INFINITY = new BoxedNumber(this, Complex.INFINITY);
+    this._ZERO = new BoxedNumber(this, 0);
+    this._ONE = new BoxedNumber(this, 1);
+    this._TWO = new BoxedNumber(this, 2);
+    this._HALF = new BoxedNumber(this, [1, 2]);
+    this._NEGATIVE_ONE = new BoxedNumber(this, -1);
+    this._I = new BoxedNumber(this, Complex.I);
+    this._NAN = new BoxedNumber(this, Number.NaN);
+    this._POSITIVE_INFINITY = new BoxedNumber(this, Number.POSITIVE_INFINITY);
+    this._NEGATIVE_INFINITY = new BoxedNumber(this, Number.NEGATIVE_INFINITY);
+    this._COMPLEX_INFINITY = new BoxedNumber(this, Complex.INFINITY);
 
     // Reset the caches/create numeric constants
     this.purge();
@@ -377,14 +390,15 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   purge() {
+    console.assert(this._decimal);
     // Recreate the Decimal constants (they depend on the engine's precision)
-    this.DECIMAL_NEGATIVE_ONE = this.decimal(-1);
-    this.DECIMAL_NAN = this.decimal(NaN);
-    this.DECIMAL_ZERO = this.decimal(0);
-    this.DECIMAL_ONE = this.decimal(1);
-    this.DECIMAL_TWO = this.decimal(2);
-    this.DECIMAL_HALF = this.DECIMAL_ONE.div(this.DECIMAL_TWO);
-    this.DECIMAL_PI = this.DECIMAL_NEGATIVE_ONE.acos();
+    this._DECIMAL_NEGATIVE_ONE = this.decimal(-1);
+    this._DECIMAL_NAN = this.decimal(NaN);
+    this._DECIMAL_ZERO = this.decimal(0);
+    this._DECIMAL_ONE = this.decimal(1);
+    this._DECIMAL_TWO = this.decimal(2);
+    this._DECIMAL_HALF = this._DECIMAL_ONE.div(this._DECIMAL_TWO);
+    this._DECIMAL_PI = this._DECIMAL_NEGATIVE_ONE.acos();
 
     // Purge all the known expressions/symbols
     const symbols = this._stats.symbols.values();
@@ -402,8 +416,7 @@ export class ComputeEngine implements IComputeEngine {
     let scope = this.context;
     while (scope) {
       if (scope.dictionary?.functions)
-        for (const [_k, v] of scope.dictionary.functions)
-          for (const d of v) d._purge();
+        for (const [_k, v] of scope.dictionary.functions) v._purge();
       if (scope.dictionary?.symbols)
         for (const [_k, v] of scope.dictionary.symbols) v._purge();
 
@@ -420,7 +433,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal */
-  _register(expr: BoxedExpression): void {
+  _register(_expr: BoxedExpression): void {
     // @debug
     // if (this._stats.expressions === null) return;
     // if (expr.symbol) {
@@ -435,7 +448,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal */
-  _unregister(expr: BoxedExpression): void {
+  _unregister(_expr: BoxedExpression): void {
     // @debug
     // if (this._stats.expressions === null) return;
     // if (expr.symbol) {
@@ -484,12 +497,6 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   _decimal: Decimal.Constructor;
-
-  /** @internal */
-  decimal: (a: Decimal.Value) => Decimal;
-
-  /** @internal */
-  complex: (a: number | Complex, b?: number) => Complex;
 
   /** The precision, or number of significant digits, for numeric calculations
    * such as when calling `ce.N()`.
@@ -606,6 +613,16 @@ export class ComputeEngine implements IComputeEngine {
     this._decimalTolerance = this.decimal(this._tolerance);
   }
 
+  /** @internal */
+  decimal(a: Decimal.Value): Decimal {
+    return new this._decimal(a);
+  }
+
+  /** @internal */
+  complex(a: number | Complex, b?: number): Complex {
+    return new Complex(a, b);
+  }
+
   /** Replace a number that is close to 0 with the exact integer 0.
    *
    * How close to 0 the number has to be to be considered 0 is determined by {@link tolerance}.
@@ -685,46 +702,20 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Return the definition for a function matching this head and
-   * these arguments.
+   * Return the definition for a function matching this head.
    *
-   * Start looking in the current scope, than up the scope chain.
+   * Start looking in the current context, than up the scope chain.
    */
-  getFunctionDefinition(
-    head: string,
-    args?: BoxedExpression[]
-  ): undefined | BoxedFunctionDefinition {
-    if (!args) {
-      let scope = this.context;
-      while (scope) {
-        const defs = scope.dictionary?.functions.get(head);
-        if (defs) return defs[0];
-        scope = scope.parentScope;
-      }
-      return undefined;
-    }
-
-    const sig = this.domain([
-      'Function',
-      ...args?.map((x) => x.domain.json as DomainExpression),
-    ]);
+  getFunctionDefinition(head: string): undefined | BoxedFunctionDefinition {
+    // Wildcards never have definitions
+    if (head.startsWith('_')) return undefined;
 
     let scope = this.context;
     while (scope) {
-      const defs = scope.dictionary?.functions.get(head);
-      if (defs)
-        for (const def of defs) {
-          if (def.domain) {
-            if (typeof def.domain === 'function') {
-              const domain = this.domain(def.domain(this, args));
-              if (domain && sig.isSubdomainOf(domain)) return def;
-            } else if (sig.isSubdomainOf(def.domain)) return def;
-          }
-        }
-
+      const def = scope.dictionary?.functions.get(head);
+      if (def) return def;
       scope = scope.parentScope;
     }
-
     return undefined;
   }
 
@@ -736,7 +727,7 @@ export class ComputeEngine implements IComputeEngine {
     if (!this.context.dictionary) {
       this.context.dictionary = {
         symbols: new Map<string, BoxedSymbolDefinition>(),
-        functions: new Map<string, BoxedFunctionDefinition[]>(),
+        functions: new Map<string, BoxedFunctionDefinition>(),
         symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
         functionWikidata: new Map<string, BoxedFunctionDefinition>(),
       };
@@ -779,8 +770,12 @@ export class ComputeEngine implements IComputeEngine {
     // `setCurrentContextDictionary` will associate the definitions in the
     // dictionary with the current scope, so we need to set the scope first
     // above(`this.context =...`);
-    setCurrentContextDictionary(this, options?.dictionary);
-
+    if (options?.dictionary) {
+      if (Array.isArray(options.dictionary))
+        for (const dict of options.dictionary)
+          setCurrentContextDictionary(this, dict);
+      else setCurrentContextDictionary(this, options.dictionary);
+    }
     // Add any user-specified assumptions
     // (those assumptions may use the definitions from the dictionary,
     // so set those up *after* setting up the dictionary)
@@ -969,7 +964,7 @@ export class ComputeEngine implements IComputeEngine {
         const [n, d] = x.rationalValue;
         if (n !== null && d !== null) return this.number([n, d]);
       }
-      return this.NAN;
+      return this._NAN;
     }
 
     if (head === 'Complex') {
@@ -977,13 +972,13 @@ export class ComputeEngine implements IComputeEngine {
         // If single argument, assume it's imaginary
         const val = ops[0].asFloat;
         if (val !== null) return this.number(this.complex(0, val));
-        return this.mul([ops[0], this.I]);
+        return this.mul([ops[0], this._I]);
       } else if (ops.length === 2) {
         const re = ops[0].asFloat;
         const im = ops[1].asFloat;
         if (re !== null && im !== null) this.number(this.complex(re, im));
         if (im === 0) return ops[0];
-        return this.add([ops[0], this.mul([ops[1], this.I])], metadata);
+        return this.add([ops[0], this.mul([ops[1], this._I])], metadata);
       }
     }
 
@@ -1118,7 +1113,7 @@ export class ComputeEngine implements IComputeEngine {
   inverse(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
     console.assert(expr.isCanonical); // @debug
 
-    let e = this.NEGATIVE_ONE;
+    let e = this._NEGATIVE_ONE;
 
     if (expr.head === 'Power') {
       // Inverse(x^{-1}) -> x
@@ -1169,12 +1164,12 @@ export class ComputeEngine implements IComputeEngine {
   symbol(sym: string, metadata?: Metadata): BoxedExpression {
     // These three are not symbols (one of them are not even valid symbol names)
     // but they're a common type
-    if (sym === 'Infinity') return this.POSITIVE_INFINITY;
-    if (sym === '+Infinity') return this.POSITIVE_INFINITY;
-    if (sym === '-Infinity') return this.NEGATIVE_INFINITY;
+    if (sym === 'Infinity') return this._POSITIVE_INFINITY;
+    if (sym === '+Infinity') return this._POSITIVE_INFINITY;
+    if (sym === '-Infinity') return this._NEGATIVE_INFINITY;
 
     // `Half` is a synonym for the rational 1/2
-    if (sym === 'Half') return this.HALF;
+    if (sym === 'Half') return this._HALF;
 
     if (metadata?.latex !== undefined)
       return new BoxedSymbol(this, sym, metadata);
@@ -1211,9 +1206,12 @@ export class ComputeEngine implements IComputeEngine {
       if (this._commonDomains[domain]) this._commonDomains[domain];
     }
 
-    // @todo: could do some kind of translation from Expression to DomainExpression...?
-    if (domain instanceof AbstractBoxedExpression)
-      return boxDomain(this, 'Anything');
+    if (!isDomain(domain)) {
+      console.log(isDomain(domain));
+    }
+
+    if (!isDomain(domain))
+      throw TypeError('Expected a domain, got ' + JSON.stringify(domain));
 
     return boxDomain(this, domain as DomainExpression | Domain, metadata);
   }
@@ -1228,13 +1226,13 @@ export class ComputeEngine implements IComputeEngine {
   ): BoxedExpression {
     if (Array.isArray(value) && value[1] === 1) value = value[0];
     if (typeof value === 'number') {
-      if (value === -1) return this.NEGATIVE_ONE;
+      if (value === -1) return this._NEGATIVE_ONE;
       if (this._commonNumbers[value] === null)
         this._commonNumbers[value] = boxNumber(this, value) ?? null;
 
       if (this._commonNumbers[value]) return this._commonNumbers[value]!;
     }
-    return boxNumber(this, value, metadata) ?? this.NAN;
+    return boxNumber(this, value, metadata) ?? this._NAN;
   }
   rules(rules: Rule[]): BoxedRuleSet {
     return boxRules(this, rules);
@@ -1333,22 +1331,38 @@ export class ComputeEngine implements IComputeEngine {
     return result;
   }
 
+  // Based on contextual usage, infer domain of a symbol
+  infer(
+    symbol: BoxedExpression | string,
+    domain: Domain | DomainExpression
+  ): AssumeResult {
+    if (typeof symbol !== 'string') {
+      if (!symbol.symbol) return 'internal-error';
+      symbol = symbol.symbol;
+    }
+    // @todo
+    return 'ok';
+  }
+
   assume(
     symbol: LatexString | SemiBoxedExpression,
-    domain: string | BoxedExpression
+    domainValue: Domain | DomainExpression | Expression | BoxedExpression
   ): AssumeResult;
   assume(predicate: LatexString | SemiBoxedExpression): AssumeResult;
   assume(
     arg1: LatexString | SemiBoxedExpression,
-    arg2?: string | BoxedExpression
+    arg2?: Domain | DomainExpression | Expression | BoxedExpression
   ): AssumeResult {
     try {
       const latex = latexString(arg1);
+      const predicate = latex ? this.parse(latex) : this.box(arg1);
 
-      let predicate = latex ? this.parse(latex) : this.box(arg1);
-      if (arg2) predicate = this.box(['Element', arg1, this.domain(arg2)]);
+      if (!arg2) return assume(predicate);
 
-      return assume(predicate);
+      if (isDomain(arg2))
+        return assume(this.box(['Element', predicate, this.domain(arg2)]));
+
+      return assume(this.box(['Equal', predicate, arg2]));
     } catch {
       return 'internal-error';
     }

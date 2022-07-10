@@ -25,54 +25,123 @@ export const LOGIC_DICTIONARY: Dictionary = {
     {
       name: 'And',
       wikidata: 'Q191081',
-      domain: 'LogicOperator',
       threadable: true,
       associative: true,
       commutative: true,
       idempotent: true,
       complexity: 10000,
-      simplify: processAnd,
-      evaluate: processAnd,
+      signatures: [
+        { domain: 'LogicOperator', simplify: processAnd, evaluate: processAnd },
+      ],
     },
     {
       name: 'Or',
       wikidata: 'Q1651704',
-      domain: 'LogicOperator',
       threadable: true,
       associative: true,
       commutative: true,
       idempotent: true,
       complexity: 10000,
-      simplify: processOr,
-      evaluate: processOr,
+      signatures: [
+        { domain: 'LogicOperator', simplify: processOr, evaluate: processOr },
+      ],
     },
     {
       name: 'Not',
       wikidata: 'Q190558',
-      domain: 'LogicOperator',
       involution: true,
       complexity: 10100,
       // @todo: this may not be needed, since we also have rules.
-      simplify: processNot,
-      evaluate: processNot,
+      signatures: [
+        { domain: 'LogicOperator', simplify: processNot, evaluate: processNot },
+      ],
     },
     {
       name: 'Equivalent',
       wikidata: 'Q220433',
-      domain: 'LogicOperator',
       complexity: 10200,
-      simplify: processEquivalent,
-      evaluate: processEquivalent,
+      signatures: [
+        {
+          domain: 'LogicOperator',
+          simplify: processEquivalent,
+          evaluate: processEquivalent,
+        },
+      ],
     },
     {
       name: 'Implies',
       wikidata: 'Q7881229',
-      domain: 'LogicOperator',
       complexity: 10200,
-      simplify: processImplies,
-      evaluate: processImplies,
+      signatures: [
+        {
+          domain: 'LogicOperator',
+          simplify: processImplies,
+          evaluate: processImplies,
+        },
+      ],
     },
-    { name: 'Exists', domain: 'MaybeBoolean' },
+    { name: 'Exists', signatures: [{ domain: 'MaybeBoolean' }] },
+
+    {
+      name: 'If',
+      hold: 'rest',
+      signatures: [
+        {
+          domain: 'Predicate',
+          simplify: (ce, ops) => {
+            const cond = ops[0];
+            if (cond && cond.symbol === 'True')
+              return ops[1] ? ops[1].simplify() : ce.box('Nothing');
+            return ops[2] ? ops[2].simplify() : ce.box('Nothing');
+          },
+          evaluate: (ce, ops) => {
+            const cond = ops[0];
+            if (cond && cond.symbol === 'True')
+              return ops[1] ? ops[1].evaluate() : ce.box('Nothing');
+            return ops[2] ? ops[2].evaluate() : ce.box('Nothing');
+          },
+          N: (ce, ops) => {
+            const cond = ops[0];
+            if (cond && cond.symbol === 'True')
+              return ops[1] ? ops[1].N() : ce.box('Nothing');
+            return ops[2] ? ops[2].N() : ce.box('Nothing');
+          },
+        },
+      ],
+    },
+
+    {
+      name: 'Loop',
+      hold: 'all',
+      signatures: [
+        {
+          domain: 'Function',
+          simplify: (ce, ops) => ops[0]?.simplify() ?? ce.box('Nothing'),
+          evaluate: (ce, ops) => {
+            const body = ops[0] ?? ce.box('Nothing');
+            if (body.symbol === 'Nothing') return body;
+            let result: BoxedExpression;
+            let i = 0;
+            do {
+              result = body.evaluate();
+              i += 1;
+            } while (result.head !== 'Return' && i < ce.iterationLimit);
+            if (result.head === 'Return') return result.op1;
+            return ce.error(
+              result ?? ce.box('Nothing'),
+              'iteration-limit-exceeded',
+              ''
+            );
+          },
+          N: (ce, ops) => {
+            const cond = ops[0];
+            if (cond && cond.symbol === 'True')
+              return ops[1] ? ops[1].N() : ce.box('Nothing');
+            return ops[2] ? ops[2].N() : ce.box('Nothing');
+          },
+        },
+      ],
+    },
   ],
 };
 

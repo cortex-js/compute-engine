@@ -52,7 +52,7 @@ export function expand(expr: BoxedExpression): BoxedExpression {
 
   if (expr.head === 'Multiply') {
     if (expr.nops === 2) return expand2(expr.op1, expr.op2);
-    return expr.ops!.reduce((acc, v) => expand2(acc, v), expr.engine.ONE);
+    return expr.ops!.reduce((acc, v) => expand2(acc, v), expr.engine._ONE);
   }
 
   if (expr.head === 'Power') {

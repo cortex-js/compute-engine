@@ -1,3 +1,4 @@
+import { isDomain } from './boxed-expression/boxed-domain';
 import { AssumeResult, BoxedExpression } from './public';
 
 function assertNormalProposition(prop: BoxedExpression): boolean {
@@ -49,7 +50,53 @@ function assertNormalProposition(prop: BoxedExpression): boolean {
  *
  */
 
-export function assume(_proposition: BoxedExpression): AssumeResult {
+export function assume(proposition: BoxedExpression): AssumeResult {
+  const ce = proposition.engine;
+  const head = proposition.head;
+  if (head && proposition.op1.symbol) {
+    const name = proposition.op1.symbol;
+    let def = proposition.op1.symbolDefinition; // ce.getSymbolDefinition(name);
+
+    // We are making an assumption about a previously unknown symbol...
+    if (!def) def = ce.defineSymbol({ name });
+
+    if (head === 'Equal') {
+      proposition.op1.value = proposition.op2.evaluate();
+
+      // Note: Above will forget() assumptions about symbol.
+      // Alternatively, only change the definition value with:
+      //      def.value = proposition.op2.evaluate();
+      return 'ok';
+    } else if (head === 'Element') {
+      const dom = proposition.op2;
+      if (isDomain(dom)) {
+        proposition.op1.domain = ce.domain(dom);
+        return 'ok';
+      }
+    } else if (head === 'Greater') {
+      const val = proposition.op2.evaluate();
+      if (def.value) {
+        if (def.value.isGreater(val)) return 'tautology';
+        // clear the value?
+        return 'contradiction';
+      }
+      if (val.isZero) {
+        def.positive = true;
+        return 'ok';
+      }
+    } else if (head === 'GreaterEqual') {
+      // @todo
+    } else if (head === 'Less') {
+      // @todo
+    } else if (head === 'LessEqual') {
+      // @todo
+    }
+  }
+
+  //       ce.context.dictionary?.symbols.delete(symbol);
+  //       for (const [assumption, _val] of ce.assumptions) {
+
+  // @todo: decode some predicates:  [Element, ], [Equal, x, y], [LessThan, x, y]...
   return 'not-a-predicate';
   // if (!proposition.tail) throw new Error('assume(): expected predicate');
 

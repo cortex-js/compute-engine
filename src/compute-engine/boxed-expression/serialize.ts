@@ -49,7 +49,7 @@ export function serializeJsonCanonicalFunction(
     return serializeJsonFunction(
       ce,
       'Multiply',
-      [args[0], ce._fn('Power', [args[1], ce.NEGATIVE_ONE])],
+      [args[0], ce._fn('Power', [args[1], ce._NEGATIVE_ONE])],
       metadata
     );
   }
@@ -81,7 +81,7 @@ export function serializeJsonCanonicalFunction(
           return serializeJsonFunction(
             ce,
             'Divide',
-            [ce.ONE, args[0]],
+            [ce._ONE, args[0]],
             metadata
           );
 
@@ -89,7 +89,7 @@ export function serializeJsonCanonicalFunction(
           return serializeJsonFunction(
             ce,
             'Divide',
-            [ce.ONE, ce.power(args[0], -exp)],
+            [ce._ONE, ce.power(args[0], -exp)],
             metadata
           );
         }
@@ -111,14 +111,14 @@ export function serializeJsonCanonicalFunction(
           return serializeJsonFunction(
             ce,
             'Divide',
-            [ce.ONE, ce._fn('Sqrt', [args[0]])],
+            [ce._ONE, ce._fn('Sqrt', [args[0]])],
             metadata
           );
         if (!exclusions.includes('Root'))
           return serializeJsonFunction(
             ce,
             'Divide',
-            [ce.ONE, ce._fn('Root', [args[0], ce.number(d!)])],
+            [ce._ONE, ce._fn('Root', [args[0], ce.number(d!)])],
             metadata
           );
       }
@@ -181,7 +181,7 @@ export function serializeJsonFunction(
     return serializeJsonFunction(
       ce,
       'Power',
-      [args[0], exclusions.includes('Half') ? ce.number([1, 2]) : ce.HALF],
+      [args[0], exclusions.includes('Half') ? ce.number([1, 2]) : ce._HALF],
       metadata
     );
   }
@@ -195,7 +195,7 @@ export function serializeJsonFunction(
         return serializeJsonFunction(
           ce,
           'Divide',
-          [ce.ONE, ce._fn('Power', [args[0], ce.number([1, -n])])],
+          [ce._ONE, ce._fn('Power', [args[0], ce.number([1, -n])])],
           metadata
         );
 
@@ -209,7 +209,7 @@ export function serializeJsonFunction(
   }
 
   if (head === 'Square' && exclusions.includes(head)) {
-    return serializeJsonFunction(ce, 'Power', [args[0], ce.TWO], metadata);
+    return serializeJsonFunction(ce, 'Power', [args[0], ce._TWO], metadata);
   }
 
   if (head === 'Exp' && exclusions.includes(head)) {
@@ -278,18 +278,18 @@ export function serializeJsonFunction(
   if (ce.jsonSerializationOptions.metadata.includes('wikidata')) {
     if (!metadata?.wikidata && typeof head === 'string')
       md.wikidata = _escapeJsonString(
-        ce.getFunctionDefinition(head, args)?.wikidata ?? ''
+        ce.getFunctionDefinition(head)?.wikidata ?? ''
       );
   } else md.wikidata = '';
 
+  //  Is shorthand allowed, and no metadata to include
   if (
     !md.latex &&
     !md.wikidata &&
     ce.jsonSerializationOptions.shorthands.includes('function')
-  ) {
-    //  Shorthand allowed, and no metadata to include
+  )
     return fn;
-  }
+
   // No shorthand allowed, or some metadata to include
   if (md.latex && md.wikidata)
     return { fn, latex: md.latex, wikidata: md.wikidata };

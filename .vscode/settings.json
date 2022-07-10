@@ -1,5 +1,15 @@
 {
   "editor.formatOnSave": true,
-  "cSpell.words": ["canonicalization", "canonicalize", "Mathematica", "nops"],
+  "cSpell.words": [
+    "bivariant",
+    "canonicalization",
+    "canonicalize",
+    "lngamma",
+    "macsyma",
+    "Mathematica",
+    "nops",
+    "quantile",
+    "relop"
+  ],
   "editor.defaultFormatter": "esbenp.prettier-vscode"
 }

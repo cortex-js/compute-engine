@@ -286,7 +286,7 @@ function parseWithPrecedence<IR, U>(
   //   if (false) {
   //     // push on output stream (= lhs)
   //   } else {
-  //     const [data, op, precedecence, assoc] = parseOp(parser, ops);
+  //     const [data, op, precedence, assoc] = parseOp(parser, ops);
   //     if (!op) break;
   //     console.assert(opStack.length > 0);
 

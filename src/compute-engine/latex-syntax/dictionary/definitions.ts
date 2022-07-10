@@ -318,8 +318,8 @@ function makeIndexedEntry(
 
   if (typeof entry.trigger === 'string') {
     console.assert(
-      trigger!.length > 1,
-      'trigger shortcut should produce more than one token. Otherwise, not worth using the shortcut.'
+      entry.parse || trigger!.length > 1,
+      `Trigger shortcut should produce more than one token. Otherwise, not worth using the shortcut. (${triggerString})`
     );
   }
 

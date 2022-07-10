@@ -41,6 +41,7 @@ export type DictionaryCategory =
   | 'arithmetic'
   | 'calculus'
   | 'collections'
+  | 'control-structures'
   | 'combinatorics'
   | 'core'
   | 'dimensions'
@@ -54,6 +55,7 @@ export type DictionaryCategory =
   | 'relop'
   | 'sets'
   | 'statistics'
+  | 'styling'
   | 'symbols'
   | 'trigonometry'
   | 'units';

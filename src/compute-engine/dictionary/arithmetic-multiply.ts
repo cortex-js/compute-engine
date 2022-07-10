@@ -49,7 +49,8 @@ export function processMultiply(
 
   const product = new Product(ce);
   for (const arg of ops) {
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined') return ce.NAN;
+    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
+      return ce._NAN;
     product.addTerm(arg);
   }
 
@@ -66,7 +67,8 @@ export function numEvalMultiply(
   // First pass: looking for early exits
   //
   for (const arg of ops)
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined') return ce.NAN;
+    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
+      return ce._NAN;
 
   console.assert(flattenOps(ops, 'Multiply') === null);
 
@@ -77,7 +79,7 @@ export function numEvalMultiply(
   // Accumulate rational, machine, decimal, complex and symbolic products
   let [numer, denom] = [1, 1];
   let machineProduct = 1;
-  let decimalProduct = ce.DECIMAL_ONE;
+  let decimalProduct = ce._DECIMAL_ONE;
   let complexProduct = Complex.ONE;
   const product = new Product(ce);
 
@@ -98,9 +100,9 @@ export function numEvalMultiply(
     }
   }
 
-  if (!complexAllowed(ce) && complexProduct.im !== 0) return ce.NAN;
+  if (!complexAllowed(ce) && complexProduct.im !== 0) return ce._NAN;
 
-  if (useDecimal(ce) || !decimalProduct.eq(ce.DECIMAL_ONE)) {
+  if (useDecimal(ce) || !decimalProduct.eq(ce._DECIMAL_ONE)) {
     // Fold into decimal
     const d = decimalProduct.mul(numer).div(denom).mul(machineProduct);
 
@@ -191,7 +193,7 @@ function multiply2(
   const [n, d] = c.asRational;
   if (c.isLiteral && n !== null && d !== null) {
     if (n === d) return t;
-    if (n === 0) return ce.ZERO;
+    if (n === 0) return ce._ZERO;
     if (t.head === 'Add') {
       if (sign < 0) c = canonicalNegate(c);
       return ce.add(
