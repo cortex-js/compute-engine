@@ -240,7 +240,7 @@ footer a:active {
     --surface: hsl(var(--hue), 19%, 26%);
     --surface-border: hsl(0, 0%, 20%);
     --on-surface: hsl(0, 0%, 98%);
-    --primary: hsl(var(--hue), 100%, 50%);
+    --primary: hsl(var(--hue), 100%, 55%);
 
     --secondary-surface: hsl(0, 0%, 19%, 0.3);
     --secondary-surface-border: hsl(0, 0%, 22%);

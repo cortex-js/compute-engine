@@ -168,18 +168,17 @@ substituted with.
 
 
 
-<code-playground layout="stack" show-line-numbers>
+<code-playground layout="stack" show-line-numbers mark-line="7">
 <div slot="javascript">import { ComputeEngine } from 'compute-engine';
 const ce = new ComputeEngine();
+//
 let expr = ce.parse('\\sqrt{\\frac{1}{x+1}}');
 console.log(expr.json);
 //
-console.log("Substitute x -> 3")
 expr = expr.subs({x: ce.box(3)});
-console.log(expr.json);
 //
-console.log("Numerical Evaluation");
-console.log(expr.N().latex);</div>
+console.log("Substitute x -> 3\t", expr.json);
+console.log("Numerical Evaluation\t", expr.N().latex);</div>
 </code-playground>
 
 
