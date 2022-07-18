@@ -4,7 +4,7 @@ permalink: /cortex/implementation/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'cortex'
+  - nav: "universal"
 ---
 # Inside Cortex
 

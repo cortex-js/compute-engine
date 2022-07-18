@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/special-functions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'compute-engine'
+  - nav: "universal"
 toc: false
 ---
 

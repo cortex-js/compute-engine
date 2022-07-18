@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/domains/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'compute-engine'
+  - nav: "universal"
 toc: true
 ---
 

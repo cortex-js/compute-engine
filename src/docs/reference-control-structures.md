@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/control-structures/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'compute-engine'
+  - nav: "universal"
 toc: true
 preamble: '<h1>Control Structures</h1><p class=xl>Control Structures define how a sequence of expressions is evaluated</p>'
 ---

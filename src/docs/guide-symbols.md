@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/symbols/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'compute-engine'
+  - nav: "universal"
 toc: true
 preamble: '<p class="xl">A <b>symbol</b> is a named mathematical object. It 
   belongs to a domain and it may hold a value. A symbol without a value 

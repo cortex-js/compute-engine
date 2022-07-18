@@ -5,7 +5,7 @@ layout: single
 date: Last Modified
 seo_description: The MathJSON format is a lightweight data interchange format for mathematical notation
 sidebar:
-  - nav: 'compute-engine'
+  - nav: "universal"
 chapter: compute-engine
 toc: true
 toc-options: '{"tags":["h2"]}'

@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/symbolic-computing/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'compute-engine'
+  - nav: "universal"
 toc: true
 head:
   stylesheets:
@@ -45,9 +45,9 @@ result:
 
 |                               | Canonicalize | Simplify | Evaluate |  N  |
 | :---------------------------- | :----------: | :------: | :------: | :-: |
-| Exact calculations            |      ✔︎      |    ✔︎    |    ✔︎    | ✔︎  |
-| Use assumptions on symbols    |              |    ✔︎    |    ✔︎    | ✔︎  |
-| Floating-point approximations |              |          |          | ✔︎  |
+| Exact calculations            |      {% icon "circle-check" "green-700" %}      |    {% icon "circle-check" "green-700" %}   |    {% icon "circle-check" "green-700" %}    | {% icon "circle-check" "green-700" %}  |
+| Use assumptions on symbols    |              |    {% icon "circle-check" "green-700" %}    |    {% icon "circle-check" "green-700" %}    | {% icon "circle-check" "green-700" %}  |
+| Floating-point approximations |              |          |          | {% icon circle-check "green-700" %}  |
 
 </div>
 
