@@ -3,7 +3,7 @@ title: MathJSON Format
 permalink: /math-json/
 layout: single
 date: Last Modified
-seo_description: The MathJSON format is a lightweight data interchange format for mathematical notation
+seo_description: MathJSON is a lightweight data interchange format for mathematical notation
 sidebar:
   - nav: "universal"
 chapter: compute-engine
@@ -14,20 +14,119 @@ preamble: "<picture class=full-width style='aspect-ratio:1.775;clip-path: inset(
   <source srcset=/assets/MathJSON@1x.jpg type=image/jpeg> 
   <img src=/assets/MathJSON@1x.jpg alt='MathJSON'>
 </picture>
-<p class=xl>The MathJSON format is a lightweight data interchange format for mathematical notation."
+<p class=xl>MathJSON is a lightweight data interchange format for mathematical notation."
 ---
+<style>
+  .math-json {
+    background: var(--console-background);
+    color: var(--base-0a);
+    padding: 4px;
+  }
+  .mathfield {
+    border: var(--ui-border);
+    padding: 5px;
+    margin: 10px 0 10px 0;
+    border-radius: 5px;
+  }
+  .output {
+    font-family: var(--monospace-font-family);
+    color: var(--base-0a); /* #f0c674; */
 
+    background: var(--console-background);
+
+    padding: 5px;
+    margin: 10px 0 10px 0;
+    border-radius: 5px;
+    border: var(--ui-border);
+
+    min-height: 1em;
+    padding-top: 0.5em;
+    padding-bottom: 0.5em;
+
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+</style>
 
 
 <div class=symbols-table>
 
 | Math                           | MathJSON                                                                 |
 | :----------------------------- | :----------------------------------------------------------------------- |
-| \\[\frac{n}{1+n}\\]            | `["Divide", "n", ["Add", 1, "n"]]`                                       |
-| \\[e^{\imaginaryI \pi }+1=0\\] | `["Equal", ["Add", ["Exp", ["Multiply", "Pi", "ImaginaryUnit"], 1]], 0]` |
-| \\[\sin^{-1}^\prime(x)\\]      | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                   |
+| \\[\frac{n}{1+n}\\]            | `["Divide", "n", ["Add", 1, "n"]]`{.math-json}                                       |
+| \\[\sin^{-1}^\prime(x)\\]      | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`{.math-json}                   |
 
 </div>
+
+
+<math-field id="mf" class="mathfield" virtual-keyboard-mode="manual">e^{i\pi}+1=0</math-field>
+<div id="mathfield-json" class="output"></div>
+
+<script type="module">
+    // import 'https://unpkg.com/mathlive?module';
+    const mf = document.getElementById('mf');
+
+    window.customElements.whenDefined("math-field").then(() => {
+      document.getElementById('mathfield-json').innerHTML = exprToString(mf.expression.json);
+      mf.addEventListener('input', (ev) => {
+        document.getElementById('mathfield-json').innerHTML = exprToString(mf.expression.json);
+      });
+    });
+
+    const MAX_LINE_LENGTH = 64;
+    function exprToStringRecursive(expr, start) {
+      let indent = ' '.repeat(start);
+      if (Array.isArray(expr)) {
+        const elements = expr.map(x => exprToStringRecursive(x, start + 2));
+        let result = `[${elements.join(', ')}]`;
+        if (start + result.length < MAX_LINE_LENGTH) return result;
+        return `[\n${indent}  ${elements.join(`,\n${indent}  `)}\n${indent}]`;
+      }
+      if (expr === null) return 'null';
+      if (typeof expr === 'object') {
+        const elements = {};
+        Object.keys(expr).forEach(x => 
+           elements[x] = exprToStringRecursive(expr[x], start + 2)
+        );
+        let result = `\n${indent}{${Object.keys(expr).map(key => {return `${key}: ${elements[key]}`}).join('; ')}}`;
+        if (start + result.length < MAX_LINE_LENGTH) return result;
+        return  `\n${indent}{\n` + Object.keys(expr).map(key => 
+            { return `${indent}  ${key}: ${elements[key]}` }
+          ).join(`;\n${indent}`) + '\n' + indent + '}';
+      }
+      return JSON.stringify(expr, null, 2);
+    }
+
+    function escapeHtml(string) {
+      return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {
+        return (
+          {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+            '/': '&#x2F;',
+            '`': '&#x60;',
+            '=': '&#x3D;',
+            '\u200b': '&amp;#zws;',
+          }[s] || s
+        );
+      });
+    }
+
+    function exprToString(expr) {
+      return escapeHtml(exprToStringRecursive(expr, 0));
+    }
+</script>
+
+<br>
+
+{% readmore "/compute-engine/demo/" %}
+Try a demo of the **Compute Engine**.
+{% endreadmore %}
+
 
 MathJSON is built on the [JSON format](https://www.json.org/). Its focus is on
 interoperability between software programs to facilitate the exchange of
@@ -48,6 +147,8 @@ manipulation and numeric evaluations of MathJSON expressions.
 
 {% readmore "/compute-engine/guides/latex-syntax/" %} Read more about the <strong>Compute
 Engine</strong> LaTeX syntax parsing and serializing.{% endreadmore %}
+
+
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations
