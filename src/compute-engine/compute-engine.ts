@@ -290,6 +290,9 @@ export class ComputeEngine implements IComputeEngine {
     assumptions?: (LatexString | Expression)[];
     defaultDomain?: string;
   }) {
+    if (options !== undefined && typeof options !== 'object')
+      throw Error('Unexpected argument');
+
     this._latexDictionary = options?.latexDictionary;
 
     this._jsonSerializationOptions = {
@@ -510,10 +513,14 @@ export class ComputeEngine implements IComputeEngine {
   get precision(): number {
     return this._precision;
   }
+
   set precision(p: number | 'machine') {
-    const currentPrecision = this._precision;
     if (p === 'machine') p = Math.floor(MACHINE_PRECISION);
+    const currentPrecision = this._precision;
     if (p === currentPrecision) return;
+
+    if (typeof p !== 'number' || p <= 0)
+      throw Error('Expected "machine" or a positive number');
 
     // Set the display precision as requested.
     // It may be less than the effective precision, which is never less than 15
@@ -538,6 +545,8 @@ export class ComputeEngine implements IComputeEngine {
 
   set numericMode(f: NumericMode) {
     if (f === this._numericMode) return;
+
+    if (typeof f !== 'string') throw Error('Expected a string');
 
     this._numericMode = f;
     if (f === 'complex' || f === 'machine')
@@ -682,6 +691,7 @@ export class ComputeEngine implements IComputeEngine {
     symbol: string,
     wikidata?: string
   ): undefined | BoxedSymbolDefinition {
+    if (typeof symbol !== 'string') throw Error('Expected a string');
     let scope = this.context;
     let def: undefined | BoxedSymbolDefinition = undefined;
 
@@ -707,6 +717,7 @@ export class ComputeEngine implements IComputeEngine {
    * Start looking in the current context, than up the scope chain.
    */
   getFunctionDefinition(head: string): undefined | BoxedFunctionDefinition {
+    if (typeof head !== 'string') throw Error('Expected a string');
     // Wildcards never have definitions
     if (head.startsWith('_')) return undefined;
 
@@ -753,6 +764,8 @@ export class ComputeEngine implements IComputeEngine {
     assumptions?: (LatexString | Expression)[];
     scope?: Partial<Scope>;
   }): void {
+    if (options !== undefined && typeof options !== 'object')
+      throw Error('Expected an object literal');
     this.context = {
       ...options?.scope,
       parentScope: this.context,
@@ -1039,24 +1052,6 @@ export class ComputeEngine implements IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression {
     const result = new BoxedFunction(this, head, ops, metadata);
-    // @debug-begin
-    // if (
-    //   (head === 'Multiply' || head === 'Add') &&
-    //   flattenOps(ops, head) !== null
-    // ) {
-    //   const tail = flattenOps(ops, head);
-    //   console.error(
-    //     `_fn("${head}") called with non-associative argument ${tail}`
-    //   );
-    // }
-    // holdMap(ops, result.functionDefinition?.hold ?? 'none', (x) => {
-    //   if (!x.isCanonical)
-    //     console.error(
-    //       `_fn("${head}" called with non-canonical argument ${x.toJSON()}`
-    //     );
-    //   return x;
-    // });
-    // @debug-end
     result.isCanonical = true;
     return result;
   }
@@ -1234,19 +1229,21 @@ export class ComputeEngine implements IComputeEngine {
     }
     return boxNumber(this, value, metadata) ?? this._NAN;
   }
+
   rules(rules: Rule[]): BoxedRuleSet {
     return boxRules(this, rules);
   }
+
   pattern(expr: LatexString | SemiBoxedExpression): Pattern {
     return new BoxedPattern(this, expr);
   }
 
-  parse(s: LatexString | string): BoxedExpression;
+  parse(latex: LatexString | string): BoxedExpression;
   parse(s: null): null;
-  parse(s: LatexString | string | null): null | BoxedExpression;
-  parse(s: LatexString | null | string): BoxedExpression | null {
-    if (s === null) return null;
-    return this.box(this.latexSyntax.parse(latexString(s) ?? s));
+  parse(latex: LatexString | string | null): null | BoxedExpression;
+  parse(latex: LatexString | null | string): BoxedExpression | null {
+    if (typeof latex !== 'string') return null;
+    return this.box(this.latexSyntax.parse(latexString(latex) ?? latex));
   }
   serialize(x: Expression | BoxedExpression): string {
     if (typeof x === 'object' && 'json' in x)
