@@ -152,7 +152,7 @@ export function serializeJsonFunction(
     });
   }
 
-  if (head === 'Negate' && args[0].isLiteral) {
+  if (head === 'Negate' && args[0]?.isLiteral) {
     if (args[0].machineValue !== null)
       return serializeJsonNumber(ce, -args[0].machineValue);
     if (args[0].decimalValue !== null)
@@ -172,7 +172,10 @@ export function serializeJsonFunction(
     return serializeJsonFunction(
       ce,
       'Add',
-      [args[0], ce._fn('Multiply', [args[1], ce.symbol('ImaginaryUnit')])],
+      [
+        args[0] ?? 'Missing',
+        ce._fn('Multiply', [args[1], ce.symbol('ImaginaryUnit')]),
+      ],
       metadata
     );
   }
@@ -181,12 +184,15 @@ export function serializeJsonFunction(
     return serializeJsonFunction(
       ce,
       'Power',
-      [args[0], exclusions.includes('Half') ? ce.number([1, 2]) : ce._HALF],
+      [
+        args[0] ?? 'Missing',
+        exclusions.includes('Half') ? ce.number([1, 2]) : ce._HALF,
+      ],
       metadata
     );
   }
 
-  if (head === 'Root' && exclusions.includes(head) && args[1].isLiteral) {
+  if (head === 'Root' && exclusions.includes(head) && args[1]?.isLiteral) {
     const n = args[1].asSmallInteger;
     if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]]);
 
@@ -195,28 +201,36 @@ export function serializeJsonFunction(
         return serializeJsonFunction(
           ce,
           'Divide',
-          [ce._ONE, ce._fn('Power', [args[0], ce.number([1, -n])])],
+          [
+            ce._ONE,
+            ce._fn('Power', [args[0] ?? 'Missing', ce.number([1, -n])]),
+          ],
           metadata
         );
 
       return serializeJsonFunction(
         ce,
         'Power',
-        [args[0], ce.number([1, -n])],
+        [args[0] ?? 'Missing', ce.number([1, -n])],
         metadata
       );
     }
   }
 
   if (head === 'Square' && exclusions.includes(head)) {
-    return serializeJsonFunction(ce, 'Power', [args[0], ce._TWO], metadata);
+    return serializeJsonFunction(
+      ce,
+      'Power',
+      [args[0] ?? 'Missing', ce._TWO],
+      metadata
+    );
   }
 
   if (head === 'Exp' && exclusions.includes(head)) {
     return serializeJsonFunction(
       ce,
       'Power',
-      [ce.symbol('ExponentialE'), args[0]],
+      [ce.symbol('ExponentialE'), args[0] ?? 'Missing'],
       metadata
     );
   }
@@ -227,13 +241,13 @@ export function serializeJsonFunction(
     return serializeJsonFunction(
       ce,
       'Add',
-      [args[0], ce._fn('Negate', [args[1]])],
+      [args[0] ?? 'Missing', ce._fn('Negate', [args[1] ?? 'Missing'])],
       metadata
     );
   }
 
   if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
-    if (args[1].isLiteral) {
+    if (args[1]?.isLiteral) {
       const t1 = args[1].asSmallInteger;
       if (t1 !== null && t1 < 0)
         return serializeJsonFunction(
@@ -243,11 +257,11 @@ export function serializeJsonFunction(
           metadata
         );
     }
-    if (args[1].head === 'Negate') {
+    if (args[1]?.head === 'Negate') {
       return serializeJsonFunction(
         ce,
         'Subtract',
-        [args[0], args[1].op1],
+        [args[0] ?? 'Missing', args[1]?.op1 ?? 'Missing'],
         metadata
       );
     }
