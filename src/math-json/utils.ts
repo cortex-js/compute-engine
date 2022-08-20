@@ -228,10 +228,10 @@ export function number(expr: Expression | null): number | string | null {
 export function rationalValue(
   expr: Expression
 ): [number, number] | [null, null] {
-  // const symbol = getSymbolName(expr);
+  const s = symbol(expr);
   // if (symbol === 'ThreeQuarter') return [3, 4];
   // if (symbol === 'TwoThird') return [2, 3];
-  // if (symbol === 'Half') return [1, 2];
+  if (s === 'Half') return [1, 2];
   // if (symbol === 'Third') return [1, 3];
   // if (symbol === 'Quarter') return [1, 4];
 

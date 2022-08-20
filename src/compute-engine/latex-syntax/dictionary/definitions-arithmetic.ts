@@ -116,7 +116,11 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   const name = head(expr);
   let result = '';
   let arg = op(expr, 1);
-  let argWasNumber = !Number.isNaN(machineValue(arg) ?? NaN);
+  const argVal = machineValue(arg) ?? NaN;
+  let argWasNumber =
+    !Number.isNaN(argVal) &&
+    Number.isInteger(argVal) &&
+    Math.abs(argVal) <= 100;
   if (name === NEGATE) {
     result = '-' + serializer.wrap(arg, 276);
   } else if (name === ADD) {
@@ -125,14 +129,19 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
     for (let i = 2; i < last; i++) {
       arg = op(expr, i);
       const val = machineValue(arg) ?? NaN;
-      const argIsNumber = !Number.isNaN(val);
+      const argIsNumber = !Number.isNaN(val) && Math.abs(val) <= 100;
       let done = false;
       if (arg !== null) {
         if (argWasNumber) {
           // Check if we can convert to an invisible plus, e.g. "1\frac{1}{2}"
           const [numer, denom] = rationalValue(arg);
           if (numer !== null && denom !== null) {
-            if (isFinite(numer) && isFinite(denom) && denom !== 1) {
+            if (
+              isFinite(numer) &&
+              isFinite(denom) &&
+              denom !== 1 &&
+              denom <= 100
+            ) {
               // Don't include the '+' sign, it's a rational, use 'invisible plus'
               result +=
                 serializer.options.invisiblePlus + serializer.serialize(arg);
