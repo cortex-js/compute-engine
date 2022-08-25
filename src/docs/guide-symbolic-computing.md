@@ -27,27 +27,33 @@ moduleMap = {
 The CortexJS Compute Engine essentially performs computation by applying
 rewriting rules to a MathJSON expression.
 
-There are several categories of transformations, depending on the desired
-result:
+In this documentation, functions such as `ce.box()` and `ce.parse()` require 
+a `ComputeEngine` instance which is denoted by a `ce.` prefix.<br>Functions 
+that apply to a boxed expression, such as `expr.simplify()` are denoted with a 
+`expr.` prefix.{.notice--info}
+
+There are four common transformations that can be applied to an expression:
 
 <div class=symbols-table>
 
-| Transformation   |                                                                                                                                                                        |
-| :--------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Canonicalize** | Put an expression in canonical ("standard") form, for easier sorting, comparing and computing.                                                                         |
-| **Simplify**     | Eliminate constants and common sub-expressions. Use available assumptions to determine which rules are applicable. Limit calculations to exact results using integers. |
-| **Evaluate**     | Calculate the value of an expression. Replace symbols with their value. Perform exact calculations using integers.                                                     |
-| **N**            | Calculate a numeric approximation of an expression using floating point numbers.                                                                                       |
+| Transformation    |                                                                                                                                                                        |
+| :---------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `expr.canonical`  | Put an expression in canonical ("standard") form, for easier sorting, comparing and computing.                                                                         |
+| `expr.simplify()` | Eliminate constants and common sub-expressions. Use available assumptions to determine which rules are applicable. Limit calculations to exact results using integers. |
+| `expr.evaluate()` | Calculate the value of an expression. Replace symbols with their value. Perform exact calculations using integers.                                                     |
+| `expr.N()`        | Calculate a numeric approximation of an expression using floating point numbers.                                                                                       |
 
 </div>
 
+
+
 <div class="">
 
-|                               | Canonicalize | Simplify | Evaluate |  N  |
+|                               | `expr.canonical` | `expr.simplify()` | `expr.evaluate()` |  `expr.N()`  |
 | :---------------------------- | :----------: | :------: | :------: | :-: |
-| Exact calculations            |      {% icon "circle-check" "green-700" %}      |    {% icon "circle-check" "green-700" %}   |    {% icon "circle-check" "green-700" %}    | {% icon "circle-check" "green-700" %}  |
+| Exact calculations            | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} |   |
 | Use assumptions on symbols    |              |    {% icon "circle-check" "green-700" %}    |    {% icon "circle-check" "green-700" %}    | {% icon "circle-check" "green-700" %}  |
-| Floating-point approximations |              |          |          | {% icon circle-check "green-700" %}  |
+| Floating-point approximations |              |          |          | {% icon "circle-check" "green-700" %}  |
 
 </div>
 
@@ -62,6 +68,16 @@ For example, if `f` is \\( 2 + (\sqrt{x^2 \times 4} + 1) \\) and `x` is 3:
 | `f.evaluate()` | \\[ 8 \\]                   | Evaluation of symbols                                        |
 
 </div>
+
+When `ce.numericFormat` is `"machine"`, `expr.evaluate()` behaves
+as `expr.simplify()`: only calculations on "small integers" are performed.
+What is a small integer, it's an integer less than 10<sup>6</sup>. This is 
+to ensure that the product of two of those integers would not cause any loss
+in precision, since a machine number has about 15 digits of precision.
+
+To ensure that all integer calculations are performed when using `expr.evaluate()`
+make sure that `ce.numericFormat` is `auto` or `decimal`.
+
 
 {% readmore "/compute-engine/guides/canonical-form/" %} Read more about the
 <strong>Canonical Form</strong> {% endreadmore %}
@@ -78,10 +94,6 @@ For example, if `f` is \\( 2 + (\sqrt{x^2 \times 4} + 1) \\) and `x` is 3:
 Other operations can be performed on an expression: comparing it to a pattern,
 replacing part of it, and applying conditional rewrite rules.
 
-Functions such as `ce.box()` and `ce.parse()` require a `ComputeEngine` instance
-which is denoted by a `ce.` prefix.<br>Functions that apply to a boxed
-expression, such as `expr.simplify()` are denoted with a `expr.` prefix.
-{.notice--info}
 
 <code-playground layout="stack" show-line-numbers>
 <div slot="javascript">import { ComputeEngine } from 'compute-engine';
