@@ -1,36 +1,21 @@
 ---
-title: MathJSON Dictionary
-permalink: /compute-engine/guides/dictionaries/
+title: Standard Library
+permalink: /compute-engine/guides/standard-library/
 layout: single
 date: Last Modified
 sidebar:
   - nav: "universal"
 ---
 
-# Dictionaries
+# Standard Library
 
-## Syntax and Symbol Dictionaries
 
-The <a href ="/math-json/">MathJSON format</a> is independent of any source or
-target language (LaTeX, MathASCII, etc...) or of any specific interpretation of
-the symbols used in a MathJSON expression (`"Pi"`, `"Sin"`, etc...).
-
-A **syntax dictionary** defines how a MathJSON expression can be expressed into
-a specific target language (**serialization**) or constructed from a source
-language (**parsing**).
-
-It includes definitions such as:
-
-- "_The `Power` function is represented as "`x^{n}`"_"
-- "_The `Divide` function is represented as "`\frac{x}{y}`"_".
-
-A **symbol dictionary** defines the **vocabulary** used by a MathJSON
+The **standard library** defines the **vocabulary** used by a MathJSON
 expression. This dictionary is independent of the syntax used to parse/serialize
 from another language but it defines the meaning of the symbols used in a
 MathJSON expression.
 
-An entry in a symbol dictionary includes information necessary to correctly
-interpret it.
+A library contains definitions for symbols and functions, for example:
 
 For example:
 
@@ -68,7 +53,7 @@ purposes. It can be helpful to classify them in some broad categories:
 
 </div>
 
-## Customizing the Dictionaries
+## Custom Library
 
 **To define a custom syntax**, provide custom syntax and custom symbol
 dictionaries when creating a `ComputeEngine` instance.

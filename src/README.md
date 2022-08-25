@@ -152,12 +152,12 @@ Engine</strong> LaTeX syntax parsing and serializing.{% endreadmore %}
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations
-are invented regularly and need to be represented with MathJSON. To address
-those needs MathJSON is flexible, extensible and customizable. Extensible
-dictionaries can be used to define new syntax and new semantic.
+are invented regularly and need to be represented with MathJSON. The Compute
+Engine includes a standard library of functions and symbols which can be
+extended with custom libraries.
 
-{% readmore "/compute-engine/guides/dictionaries/" %} Read more about the
-<strong>Cortex Compute Engine Standard Dictionaries</strong> {% endreadmore %}
+{% readmore "/compute-engine/guides/standard-library/" %} Read more about the
+<strong>Cortex Compute Engine Standard Library</strong> {% endreadmore %}
 
 
 MathJSON is not intended to be suitable as a visual representation of arbitrary

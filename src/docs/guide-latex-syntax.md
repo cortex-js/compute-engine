@@ -68,22 +68,33 @@ ce.latexOptions.decimalMarker = '{,}';
 Note that in LaTeX, in order to get the correct spacing around the comma, it
 must be surrounded by curly brackets.
 
-## Advanced Usage
+## Custom LaTeX Dictionary
 
-The LaTeX that can be parsed or serialized is defined by some dictionary
-entries. While the Compute Engine function and symbol definitions define the
-semantic of the MathJSON expressions, the LaTeX dictionary define the LaTeX
-syntax that can be parsed and serialized.
+The <a href ="/math-json/">MathJSON format</a> is independent of any source or
+target language (LaTeX, MathASCII, etc...) or of any specific interpretation of
+the symbols used in a MathJSON expression (`"Pi"`, `"Sin"`, etc...).
 
-The Compute Engine include some default dictionaries to parse a number of common
+A **LaTeX dictionary** defines how a MathJSON expression can be expressed into
+a LaTeX (**serialization**) or constructed LaTeX (**parsing**).
+
+It includes definitions such as:
+
+- "_The `Power` function is represented as "`x^{n}`"_"
+- "_The `Divide` function is represented as "`\frac{x}{y}`"_".
+
+
+The Compute Engine includes a default LaTeX dictionary to parse a number of common
 math expressions.
 
-**To extend the LaTeX syntax** pass a `latexDictionary` option the the Compute
+**To extend the LaTeX syntax** pass a `latexDictionary` option to the Compute
 Engine constructor.
+
+To extend the default dictionary, call `ComputeEngine.getLatexDictionary()`.
 
 ```javascript
 const ce = new ComputeEngine({
   latexDictionary: [
+    ...ComputeEngine.getLatexDictionary(),
     {
       trigger: ['\\smoll'],
       requiredLatexArg: 2,
