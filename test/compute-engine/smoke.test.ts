@@ -34,6 +34,10 @@ const ce = engine;
 
 console.log(ce.box(['Equal', 5, 5]).evaluate().toJSON());
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+console.log(ce.parse());
+
 // \frac{x}{} \text{ cm}
 // ce.jsonSerializationOptions.metadata = ['latex'];
 const v = ce.parse('\\frac{x}{} \\text{ cm}').json;
@@ -46,10 +50,10 @@ console.log(w);
 
 // ce.jsonSerializationOptions.metadata = [];
 
-const b = ce.parse('-');
+const b = ce.parse('88441888+\\frac{85}{7}');
 console.log(b.canonical.toJSON());
-console.log(b.simplify().toJSON());
-console.log(b.evaluate().toJSON());
+console.log('simplify', b.simplify().toJSON());
+console.log('evaluate', b.evaluate().toJSON());
 console.log(b.N().toJSON());
 // let f = ce.parse('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}');
 // f = f.simplify();

@@ -1,9 +1,9 @@
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
-import { BoxedExpression, Dictionary, IComputeEngine } from '../public';
+import { BoxedExpression, SymbolTable, IComputeEngine } from '../public';
 
-export const SETS_DICTIONARY: Dictionary = {
+export const SETS_LIBRARY: SymbolTable = {
   symbols: [
     //
     // Constants

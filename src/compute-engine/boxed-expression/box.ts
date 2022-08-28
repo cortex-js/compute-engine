@@ -11,7 +11,7 @@ import { BoxedDictionary } from './boxed-dictionary';
 import { BoxedFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
-import { _Domain } from './boxed-domain';
+import { _BoxedDomain } from './boxed-domain';
 import { complexAllowed, useDecimal } from './utils';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
 import { machineValue } from '../../math-json/utils';

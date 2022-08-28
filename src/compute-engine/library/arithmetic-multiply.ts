@@ -38,12 +38,11 @@ export function canonicalMultiply(
   return new Product(ce, ops).asExpression();
 }
 
-export function processMultiply(
+export function simplifyMultiply(
   ce: IComputeEngine,
-  ops: BoxedExpression[],
-  _mode: 'simplify' | 'evaluate'
+  ops: BoxedExpression[]
 ): BoxedExpression | undefined {
-  console.assert(ops.length > 1, 'processMultiply(): no arguments');
+  console.assert(ops.length > 1, 'simplifyMultiply(): no arguments');
 
   console.assert(flattenOps(ops, 'Multiply') === null);
 
@@ -57,11 +56,51 @@ export function processMultiply(
   return product.asExpression();
 }
 
+export function evalMultiply(
+  ce: IComputeEngine,
+  ops: BoxedExpression[]
+): BoxedExpression | undefined {
+  if (!useDecimal(ce)) return simplifyMultiply(ce, ops);
+
+  // If we can use Decimal, we can do some more aggressive exact numeric computations with integers
+
+  for (const op of ops)
+    if (op.isNaN || op.isMissing || op.symbol === 'Undefined') return ce._NAN;
+
+  // Accumulate rational and **integer** decimal
+  let numer = ce._DECIMAL_ONE;
+  let denom = ce._DECIMAL_ONE;
+  const product = new Product(ce);
+
+  for (const arg of ops) {
+    if (arg.symbol !== 'Nothing' && !arg.isZero) {
+      const [n, d] = arg.rationalValue;
+      if (n !== null && d !== null) {
+        numer = numer.mul(n);
+        denom = denom.mul(d);
+      } else if (arg.decimalValue !== null && arg.decimalValue.isInteger()) {
+        numer = numer.mul(arg.decimalValue);
+      } else if (
+        arg.machineValue !== null &&
+        Number.isInteger(arg.machineValue)
+      ) {
+        numer = numer.mul(arg.machineValue);
+      } else product.addTerm(arg);
+    }
+  }
+
+  const c = ce.divide(ce.number(numer), ce.number(denom));
+  if (product.isEmpty) return c;
+
+  product.addTerm(c);
+  return product.asExpression();
+}
+
 export function numEvalMultiply(
   ce: IComputeEngine,
   ops: BoxedExpression[]
 ): BoxedExpression | undefined {
-  console.assert(ops.length > 1, 'processMultiply(): no arguments');
+  console.assert(ops.length > 1, 'numEvalMultiply(): no arguments');
 
   //
   // First pass: looking for early exits

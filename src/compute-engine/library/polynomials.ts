@@ -1,7 +1,7 @@
-import { Dictionary } from '../public';
+import { SymbolTable } from '../public';
 import { expand } from '../symbolic/expand';
 
-export const POLYNOMIALS_DICTIONARY: Dictionary[] = [
+export const POLYNOMIALS_LIBRARY: SymbolTable[] = [
   {
     functions: [
       {

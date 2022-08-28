@@ -16,7 +16,7 @@ import {
   LatexDictionary,
   LatexString,
   NumberFormattingOptions,
-  DictionaryCategory,
+  LibraryCategory,
   LatexToken,
 } from './public';
 import { Serializer } from './serializer';
@@ -114,15 +114,14 @@ export class LatexSyntax {
   }
 
   static getDictionary(
-    category: DictionaryCategory | 'all' = 'all'
+    category: LibraryCategory | 'all' = 'all'
   ): Readonly<LatexDictionary> {
     if (category === 'all') {
-      let result: Readonly<LatexDictionary> = [];
-      for (const domain of Object.keys(DEFAULT_LATEX_DICTIONARY)) {
-        if (DEFAULT_LATEX_DICTIONARY[domain]) {
-          result = [...result, ...DEFAULT_LATEX_DICTIONARY[domain]!];
-        }
-      }
+      const result: LatexDictionaryEntry[] = [];
+      for (const domain of Object.keys(DEFAULT_LATEX_DICTIONARY))
+        if (DEFAULT_LATEX_DICTIONARY[domain])
+          result.push(...DEFAULT_LATEX_DICTIONARY[domain]!);
+
       return result;
     }
 

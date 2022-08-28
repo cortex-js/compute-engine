@@ -1,15 +1,13 @@
-import { sharedAncestorDomain } from '../dictionary/domains';
 import {
   IComputeEngine,
   FunctionDefinition,
   BoxedFunctionDefinition,
   BoxedLambdaExpression,
   RuntimeScope,
-  Domain,
-  DomainExpression,
+  BoxedDomain,
   BoxedFunctionSignature,
 } from '../public';
-import { _Domain } from './boxed-domain';
+import { sharedAncestorDomain, _BoxedDomain } from './boxed-domain';
 import { DEFAULT_COMPLEXITY } from './order';
 
 class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
@@ -30,7 +28,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
   complexity: number;
   hold: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
-  valueDomain: Domain;
+  valueDomain: BoxedDomain;
 
   signatures: BoxedFunctionSignature[];
 
@@ -111,14 +109,10 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
         );
     }
     if (def.signatures) {
-      let valueDomain: DomainExpression = 'Void';
+      let valueDomain = ce.domain('Void');
       const sigs: BoxedFunctionSignature[] = [];
       for (const sig of def.signatures) {
-        const dom = !sig.domain
-          ? ce.domain('Function')
-          : sig.domain instanceof _Domain
-          ? sig.domain.canonical
-          : ce.domain(sig.domain).canonical;
+        const dom = !sig.domain ? ce.domain('Function') : ce.domain(sig.domain);
         sigs.push({
           domain: dom,
           simplify: sig.simplify,
@@ -132,7 +126,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
           sgn: sig.sgn,
           compile: sig.compile,
         });
-        valueDomain = sharedAncestorDomain(valueDomain, dom.domainExpression);
+        valueDomain = sharedAncestorDomain(valueDomain, dom);
       }
       this.signatures = sigs;
     }
@@ -140,7 +134,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
   _purge() {
     return undefined;
   }
-  getSignature(domains: Domain[]): BoxedFunctionSignature | null {
+  getSignature(domains: BoxedDomain[]): BoxedFunctionSignature | null {
     const sig = this.engine.domain(['Function', ...domains, 'Anything']);
     return this.signatures?.find((x) => sig.isCompatible(x.domain)) ?? null;
   }

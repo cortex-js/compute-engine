@@ -16,6 +16,7 @@ preamble: "<picture class=full-width style='aspect-ratio:1.775;clip-path: inset(
 </picture>
 <p class=xl>MathJSON is a lightweight data interchange format for mathematical notation."
 ---
+
 <style>
   .math-json {
     background: var(--console-background);
@@ -49,18 +50,17 @@ preamble: "<picture class=full-width style='aspect-ratio:1.775;clip-path: inset(
 
 </style>
 
-
 <div class=symbols-table>
 
-| Math                           | MathJSON                                                                 |
-| :----------------------------- | :----------------------------------------------------------------------- |
-| \\[\frac{n}{1+n}\\]            | `["Divide", "n", ["Add", 1, "n"]]`{.math-json}                                       |
-| \\[\sin^{-1}^\prime(x)\\]      | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`{.math-json}                   |
+| Math                      | MathJSON                                                           |
+| :------------------------ | :----------------------------------------------------------------- |
+| \\[\frac{n}{1+n}\\]       | `["Divide", "n", ["Add", 1, "n"]]`{.math-json}                     |
+| \\[\sin^{-1}^\prime(x)\\] | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`{.math-json} |
 
 </div>
 
-
 <math-field id="mf" class="mathfield" virtual-keyboard-mode="manual">e^{i\pi}+1=0</math-field>
+
 <div id="mathfield-json" class="output"></div>
 
 <script type="module">
@@ -123,10 +123,8 @@ preamble: "<picture class=full-width style='aspect-ratio:1.775;clip-path: inset(
 
 <br>
 
-{% readmore "/compute-engine/demo/" %}
-Try a demo of the **Compute Engine**.
+{% readmore "/compute-engine/demo/" %} Try a demo of the **Compute Engine**.
 {% endreadmore %}
-
 
 MathJSON is built on the [JSON format](https://www.json.org/). Its focus is on
 interoperability between software programs to facilitate the exchange of
@@ -145,10 +143,9 @@ JavaScript/TypeScript of utilities that parse LaTeX to MathJSON, serialize
 MathJSON to LaTeX, and provide a collection of functions for symbolic
 manipulation and numeric evaluations of MathJSON expressions.
 
-{% readmore "/compute-engine/guides/latex-syntax/" %} Read more about the <strong>Compute
-Engine</strong> LaTeX syntax parsing and serializing.{% endreadmore %}
-
-
+{% readmore "/compute-engine/guides/latex-syntax/" %} Read more about the
+<strong>Compute Engine</strong> LaTeX syntax parsing and
+serializing.{% endreadmore %}
 
 Mathematical notation is used in a broad array of fields, from elementary school
 arithmetic, engineering, applied mathematics to physics and more. New notations
@@ -158,7 +155,6 @@ dictionaries can be used to define new syntax and new semantic.
 
 {% readmore "/compute-engine/guides/dictionaries/" %} Read more about the
 <strong>Cortex Compute Engine Standard Dictionaries</strong> {% endreadmore %}
-
 
 MathJSON is not intended to be suitable as a visual representation of arbitrary
 mathematical notations, and as such is not a replacement for LaTeX or MathML.
@@ -282,8 +278,8 @@ representation of numbers, a JSON number literal can be used.
 
 Specifically:
 
-- the number is in the range \\([-(2^{53})+1, (2^{53})-1]\\) so it can fit in
-  a 64-bit float (**IEEE 754-2008**, 52-bit, about 15 digits of precision).
+- the number is in the range \\([-(2^{53})+1, (2^{53})-1]\\) so it can fit in a
+  64-bit float (**IEEE 754-2008**, 52-bit, about 15 digits of precision).
 - the number is finite: it cannot be `+Infinity` `-Infinity` or `NaN`.
 
 ```json
@@ -354,13 +350,13 @@ except:
 
 <div class=symbols-table>
 
-| Codepoint                | Name                         |         |
-| :----------------------- | :--------------------------- | :------ |
-| **U+0000** to **U+0020** |                              |         |
-| **U+0022**               | **QUOTATION MARK**           | `"`     |
+| Codepoint                | Name                         |                    |
+| :----------------------- | :--------------------------- | :----------------- |
+| **U+0000** to **U+0020** |                              |                    |
+| **U+0022**               | **QUOTATION MARK**           | `"`                |
 | **U+0060**               | **GRAVE ACCENT**<br>backtick | <code>&#96;</code> |
-| **U+FFFE**               | **BYTE ORDER MARK**          |         |
-| **U+FFFF**               | **INVALID BYTE ORDER MARK**  |         |
+| **U+FFFE**               | **BYTE ORDER MARK**          |                    |
+| **U+FFFF**               | **INVALID BYTE ORDER MARK**  |                    |
 
 </div>
 
@@ -405,23 +401,26 @@ These four strings represent the same symbol:
 - `"\u0041\u030a"` **LATIN CAPITAL LETTER A** + **COMBINING RING ABOVE** `A‌` +
   ` ̊`
 
-The following naming convention for wildcards, variables, constants and
-function names are recommendations.
-
+The following naming convention for wildcards, variables, constants and function
+names are recommendations.
 
 ### Variables Naming Convention
 
-- Avoid mixing latin characters and non-latin characters. 
-  
+- Avoid mixing latin characters and non-latin characters.
+
   For example, use `"半径"`, `"🍕"` or `"🐕🐄"`, but avoid `"🍕slice"`
-  
-  Carefully consider when to use non-latin characters. 
-  
+
+  Carefully consider when to use non-latin characters.
+
   For example:
-    - prefer using `"gamma"` rather than `"ɣ"` (**LATIN SMALL LETTER GAMMA**) or `"γ"` (**GREEK SMALL LETTER GAMMA**) 
-    - prefer using `"Sum"` rather than `"∑"` **U+2211 N-ARY SUMMATION**, which can be visually confused with `"Σ"` **U+03A3 GREEK CAPITAL LETTER SIGMA**.
+
+  - prefer using `"gamma"` rather than `"ɣ"` (**LATIN SMALL LETTER GAMMA**) or
+    `"γ"` (**GREEK SMALL LETTER GAMMA**)
+  - prefer using `"Sum"` rather than `"∑"` **U+2211 N-ARY SUMMATION**, which can
+    be visually confused with `"Σ"` **U+03A3 GREEK CAPITAL LETTER SIGMA**.
+
 - If using latin characters, the first character of a variable should be a
- lowercase or uppercase letter: `a`-`z` or `A`-`Z`
+  lowercase or uppercase letter: `a`-`z` or `A`-`Z`
 - Subsequent characters should be a letter, digit (`0`-`9`) or underscore (`_`).
 
   Using a more limited set of common characters avoids visual ambiguity issues
@@ -435,39 +434,42 @@ function names are recommendations.
 
 ### Wildcards Naming Convention
 
-Symbols that begin with `_` **U+005F LOW LINE**  (underscore) should be used to
+Symbols that begin with `_` **U+005F LOW LINE** (underscore) should be used to
 denote wildcards and other placeholders.
 
-For example, they can be used to denote the positional arguments in a function 
-expression. They can also be used to denote placeholders
-and captured expression in patterns.
+For example, they can be used to denote the positional arguments in a function
+expression. They can also be used to denote placeholders and captured expression
+in patterns.
 
 <div class=symbols-table>
 
-| Wildcard |                                                 |
-| :------- | :---------------------------------------------- |
-| `"_"`      | Wildcard for a single expression or for the first positional argument               |
-| `"_1"`     | Wildcard for a positional argument              |
-| <code>"&#95;&#x200A;&#95;"</code>     | Wildcard for a sequence of 1 or more expression |
-| `"___"`    | Wildcard for a sequence of 0 or more expression |
-| `"_a"`     | Capturing an expression as a wildcard named `a` |
+| Wildcard                    |                                                                       |
+| :-------------------------- | :-------------------------------------------------------------------- |
+| `"_"`                       | Wildcard for a single expression or for the first positional argument |
+| `"_1"`                      | Wildcard for a positional argument                                    |
+| <code>"\_&#x200A;\_"</code> | Wildcard for a sequence of 1 or more expression                       |
+| `"___"`                     | Wildcard for a sequence of 0 or more expression                       |
+| `"_a"`                      | Capturing an expression as a wildcard named `a`                       |
 
 </div>
 
 ### Constants Naming Convention
 
 - Avoid mixing latin characters and non-latin characters.
-- If using latin characters, the first character of a constant should be an uppercase letter `A`-`Z`
+- If using latin characters, the first character of a constant should be an
+  uppercase letter `A`-`Z`
 - Subsequent characters should be a letter, digit `0`-`9` or underscore `_`.
-- If a constant is made up of several words, use camelCase, e.g. `"SpeedOfLight"`
+- If a constant is made up of several words, use camelCase, e.g.
+  `"SpeedOfLight"`
 
 ### Function Names Naming Convention
 
 - Avoid mixing latin characters and non-latin characters.
-- The names of the function in the standard dictionary start with an uppercase letter `A`-`Z`, for example `"Sin"`, `"Fold"`.
+- The names of the function in the standard library start with an uppercase
+  letter `A`-`Z`, for example `"Sin"`, `"Fold"`.
 - Subsequent characters should be a letter, digit `0`-`9` or underscore `_`.
-- If a function name is made up of several words, use camelCase, e.g. `"InverseFunction"`
-
+- If a function name is made up of several words, use camelCase, e.g.
+  `"InverseFunction"`
 
 ### Rendering Conventions
 
@@ -493,14 +495,14 @@ these conventions.
 
 <div class=symbols-table>
 
-| Symbol    | LaTeX                  |                               |
-| :-------- | :--------------------- | ----------------------------- |
-| `time`    | `\mathit{time}`        | \\( \mathit{time} \\)         |
-| `alpha`   | `\alpha`               | \\( \alpha \\)                |
-| `alpha0`  | `\alpha_0`             | \\( \alpha\_0 \\)              |
-| `m56`     | `m_{56}`               | \\( m\_{56} \\)               |
+| Symbol    | LaTeX                  |                                 |
+| :-------- | :--------------------- | ------------------------------- |
+| `time`    | `\mathit{time}`        | \\( \mathit{time} \\)           |
+| `alpha`   | `\alpha`               | \\( \alpha \\)                  |
+| `alpha0`  | `\alpha_0`             | \\( \alpha_0 \\)                |
+| `m56`     | `m_{56}`               | \\( m\_{56} \\)                 |
 | `m56_max` | `m_{56_{\mathit{max}}` | \\( m\_{56\_{\mathit{max}}} \\) |
-| `c_max`   | `c_{\mathit{max}}`     | \\( c\_{\mathit{max}} \\)     |
+| `c_max`   | `c_{\mathit{max}}`     | \\( c\_{\mathit{max}} \\)       |
 
 </div>
 
@@ -513,9 +515,9 @@ A MathJSON function is either:
 
 ### Functions as Object Literal
 
-The default representation of **function** expressions is an object literal
-with a `"fn"` key. The value of the key is an array representing the function
-head and its arguments.
+The default representation of **function** expressions is an object literal with
+a `"fn"` key. The value of the key is an array representing the function head
+and its arguments.
 
 ```js
 {
@@ -523,12 +525,13 @@ head and its arguments.
 }
 ```
 
-The **head** of the function expression is the first element in the array. 
-Its presence is required. It indicates the **name of the function** or "what" the function is about.
+The **head** of the function expression is the first element in the array. Its
+presence is required. It indicates the **name of the function** or "what" the
+function is about.
 
-The head is frequently a string, but it can be another expression. 
+The head is frequently a string, but it can be another expression.
 
-- If it is a string, it should follow the conventions for function names. 
+- If it is a string, it should follow the conventions for function names.
 
   ```json
   // Apply the function "Sin" to the argument "x"
@@ -537,9 +540,9 @@ The head is frequently a string, but it can be another expression.
   ["Cos", ["Divide", "Pi", 2]]
   ```
 
-- If it is an expression, it may include the wildcard `_` or `_1` to represent 
-the first argument, `_2` to represent the second, etc... 
-The wildcard `__` represents the sequence of all the arguments.
+- If it is an expression, it may include the wildcard `_` or `_1` to represent
+  the first argument, `_2` to represent the second, etc... The wildcard `__`
+  represents the sequence of all the arguments.
 
   ```json
   [["Multiply", "_", "_"], 4]
@@ -548,9 +551,9 @@ The wildcard `__` represents the sequence of all the arguments.
 Following the head are zero or more **arguments**, which are expressions as
 well. The arguments, or **operands**, form the **tail** of the function.
 
-**CAUTION** the arguments of a function are expressions. To represent an argument which is a list, use a `["List"]` expression, do not use an array. {.notice--warning}
-
-
+**CAUTION** the arguments of a function are expressions. To represent an
+argument which is a list, use a `["List"]` expression, do not use an array.
+{.notice--warning}
 
 The expression corresponding to \\(\sin^{-1}(x)\\) is:
 
@@ -573,8 +576,8 @@ For example these two expressions are equivalent:
 ["Cos", ["Add", "x", 1]]
 ```
 
-An array representing a function must have at least one element, the
-head of the function. Therefore `[]` is not a valid expression.{.notice--info}
+An array representing a function must have at least one element, the head of the
+function. Therefore `[]` is not a valid expression.{.notice--info}
 
 ## Dictionary
 
@@ -596,13 +599,15 @@ value of the key is a JSON object literal holding the content of the dictionary.
 }
 ```
 
-An alternate representation of a dictionary is as a `["Dictionary"]` function expression, but this is quite a bit more verbose:
+An alternate representation of a dictionary is as a `["Dictionary"]` function
+expression, but this is quite a bit more verbose:
 
 ```json
-["Dictionary",
+[
+  "Dictionary",
   ["KeyValuePair", "'first'", 1],
   ["KeyValuePair", "'second'", 2],
-  ["KeyValuePair", "'third'", ["Add", 1, 2]],
+  ["KeyValuePair", "'third'", ["Add", 1, 2]]
 ]
 ```
 
@@ -611,9 +616,8 @@ An alternate representation of a dictionary is as a `["Dictionary"]` function ex
 MathJSON object literals can be annotated with supplemental information.
 
 A **number** represented as a JSON number literal, a **symbol** or **string**
-represented as a JSON string literal, or a **function** represented as a 
-JSON array must be transformed into the equivalent object literal to be
-annotated.
+represented as a JSON string literal, or a **function** represented as a JSON
+array must be transformed into the equivalent object literal to be annotated.
 
 The following metadata keys are recommended:
 

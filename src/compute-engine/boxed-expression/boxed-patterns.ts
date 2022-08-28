@@ -5,7 +5,7 @@ import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
   BoxedSubstitution,
-  Domain,
+  BoxedDomain,
   IComputeEngine,
   LatexString,
   Metadata,
@@ -51,7 +51,7 @@ export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
     return 'Pattern';
   }
 
-  get valueDomain(): Domain {
+  get valueDomain(): BoxedDomain {
     return this.engine.domain('Pattern');
   }
   get isCanonical(): boolean {

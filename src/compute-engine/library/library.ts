@@ -1,17 +1,17 @@
-import { ARITHMETIC_DICTIONARY } from './arithmetic';
-import { COLLECTIONS_DICTIONARY } from './collections';
-import { CORE_DICTIONARY } from './core';
-import { LOGIC_DICTIONARY } from './logic';
-import { POLYNOMIALS_DICTIONARY } from './polynomials';
-import { RELOP_DICTIONARY } from './relational-operator';
-import { SETS_DICTIONARY } from './sets';
-import { TRIGONOMETRY_DICTIONARY } from './trigonometry';
+import { ARITHMETIC_LIBRARY } from './arithmetic';
+import { COLLECTIONS_LIBRARY } from './collections';
+import { CORE_LIBRARY } from './core';
+import { LOGIC_LIBRARY } from './logic';
+import { POLYNOMIALS_LIBRARY } from './polynomials';
+import { RELOP_LIBRARY } from './relational-operator';
+import { SETS_LIBRARY } from './sets';
+import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
-import { DictionaryCategory } from '../latex-syntax/public';
+import { LibraryCategory } from '../latex-syntax/public';
 
 import {
   IComputeEngine,
-  Dictionary,
+  SymbolTable,
   BoxedSymbolDefinition,
   BoxedFunctionDefinition,
   BaseDefinition,
@@ -20,13 +20,13 @@ import { BoxedSymbolDefinitionImpl } from '../boxed-expression/boxed-symbol-defi
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
 import { isValidSymbolName } from '../../math-json/utils';
 
-export function getDefaultDictionaries(
-  categories: DictionaryCategory[] | DictionaryCategory | 'all'
-): Readonly<Dictionary>[] {
+export function getStandardLibrary(
+  categories: LibraryCategory[] | LibraryCategory | 'all'
+): Readonly<SymbolTable>[] {
   if (categories === 'all') {
-    // **Note** the order of the dictionaries matter:
-    // earlier dictionaries cannot reference definitions in later dictionaries.
-    return getDefaultDictionaries([
+    // **Note** the order of the libraries matter:
+    // earlier libraries cannot reference definitions in later libraries.
+    return getStandardLibrary([
       'domains',
       'core',
       'control-structures', // If, Block, Loop
@@ -48,20 +48,20 @@ export function getDefaultDictionaries(
       'units',
     ]);
   } else if (typeof categories === 'string') categories = [categories];
-  const result: Readonly<Dictionary>[] = [];
+  const result: Readonly<SymbolTable>[] = [];
   for (const category of categories) {
-    const dict = DICTIONARIES[category];
-    if (!dict) throw Error(`Unknown dictionary category ${category}`);
+    const dict = LIBRARIES[category];
+    if (!dict) throw Error(`Unknown library category ${category}`);
     if (Array.isArray(dict)) result.push(...dict);
     else result.push(dict);
   }
   return result;
 }
 
-export const DICTIONARIES: {
-  [category in DictionaryCategory]?:
-    | Readonly<Dictionary>
-    | Readonly<Dictionary>[];
+export const LIBRARIES: {
+  [category in LibraryCategory]?:
+    | Readonly<SymbolTable>
+    | Readonly<SymbolTable>[];
 } = {
   'algebra': [],
   // 'algebra': [
@@ -80,7 +80,7 @@ export const DICTIONARIES: {
   //   // - factor
   //   // - simplify
   // ],
-  'arithmetic': ARITHMETIC_DICTIONARY,
+  'arithmetic': ARITHMETIC_LIBRARY,
   'calculus': [],
   'combinatorics': [], // @todo fibonacci, binomial, etc...
   'control-structures': [],
@@ -96,8 +96,8 @@ export const DICTIONARIES: {
   // ],
   'dimensions': [], // @todo // volume, speed, area
   'domains': [],
-  'core': CORE_DICTIONARY,
-  'collections': [SETS_DICTIONARY, COLLECTIONS_DICTIONARY],
+  'core': CORE_LIBRARY,
+  'collections': [SETS_LIBRARY, COLLECTIONS_LIBRARY],
   // 'domains': getDomainsDictionary(),
   'linear-algebra': [], //@todo   // 'linear-algebra': [
   //   // matrix
@@ -113,7 +113,7 @@ export const DICTIONARIES: {
   //   // identity-matrix
   // ],
 
-  'logic': LOGIC_DICTIONARY,
+  'logic': LOGIC_LIBRARY,
   'numeric': [], // @todo   // 'numeric': [
   //   // Gamma function
   //   // Zeta function
@@ -127,8 +127,8 @@ export const DICTIONARIES: {
   // ],
 
   'other': [],
-  'relop': RELOP_DICTIONARY,
-  'polynomials': POLYNOMIALS_DICTIONARY,
+  'relop': RELOP_LIBRARY,
+  'polynomials': POLYNOMIALS_LIBRARY,
   'physics': {
     symbols: [
       {
@@ -150,7 +150,7 @@ export const DICTIONARIES: {
   //   // median
   //   // quantile
   // ],
-  'trigonometry': TRIGONOMETRY_DICTIONARY,
+  'trigonometry': TRIGONOMETRY_LIBRARY,
   'units': [],
 };
 
@@ -163,87 +163,87 @@ function validateDefinitionName(def: BaseDefinition): void {
 }
 
 /**
- * Set the dictionary of the current context (`engine.context`) to `dicts`
+ * Set the symbol table of the current context (`engine.context`) to `table`
  *
- * `dicts` can be an array of dictionaries, in order to deal with circular
- * dependencies: it is possible to partition a dictionary into multiple
- * sub-dictionary, to control the order in which they are processed and
+ * `table` can be an array of symbol tables, in order to deal with circular
+ * dependencies: it is possible to partition a library into multiple
+ * symbol tables, to control the order in which they are processed and
  * avoid having expressions in the definition of an entry reference a symbol
- * or function name that has not yet been added to the dictionary.
+ * or function name that has not yet been added to the symbol table.
  *
  */
-export function setCurrentContextDictionary(
+export function setCurrentContextSymbolTable(
   engine: IComputeEngine,
-  dict: Dictionary
+  table: SymbolTable
 ): void {
-  // If this is the first dictionary, setup the context.dictionary
-  if (!engine.context.dictionary)
-    engine.context.dictionary = {
+  // If this is the first symbol table, setup the context
+  if (!engine.context.symbolTable)
+    engine.context.symbolTable = {
       symbols: new Map<string, BoxedSymbolDefinition>(),
       functions: new Map<string, BoxedFunctionDefinition>(),
       symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
       functionWikidata: new Map<string, BoxedFunctionDefinition>(),
     };
 
-  const dictionary = engine.context.dictionary;
+  const symbolTable = engine.context.symbolTable;
 
   //
-  // Validate and add the symbols from the dictionary
+  // Validate and add the symbols from the symbol table
   //
-  if (dict.symbols)
-    for (const entry of dict.symbols) {
+  if (table.symbols)
+    for (const entry of table.symbols) {
       validateDefinitionName(entry);
 
       const def = new BoxedSymbolDefinitionImpl(engine, entry);
 
       if (entry.wikidata) {
-        if (dictionary.symbolWikidata.has(entry.wikidata))
+        if (symbolTable.symbolWikidata.has(entry.wikidata))
           throw new Error(
             `Duplicate symbol with wikidata ${entry.wikidata}, ${
               entry.name
-            } and ${dictionary.symbolWikidata.get(entry.wikidata)!.name}`
+            } and ${symbolTable.symbolWikidata.get(entry.wikidata)!.name}`
           );
-        dictionary.symbolWikidata.set(entry.wikidata, def);
+        symbolTable.symbolWikidata.set(entry.wikidata, def);
       }
 
-      if (dictionary.symbols.has(entry.name)) {
+      if (symbolTable.symbols.has(entry.name)) {
         throw new Error(
           `Duplicate symbol definition ${entry.name}:\n${JSON.stringify(
-            dictionary.symbols.get(entry.name)!
+            symbolTable.symbols.get(entry.name)!
           )}\n${JSON.stringify(entry)}`
         );
       }
 
-      dictionary.symbols.set(entry.name, def);
+      symbolTable.symbols.set(entry.name, def);
     }
 
   //
-  // Validate and add the functions from the dictionary
+  // Validate and add the functions from the symbol table
   //
-  if (dict.functions)
-    for (const entry of dict.functions) {
+  if (table.functions)
+    for (const entry of table.functions) {
       validateDefinitionName(entry);
 
       const def = makeFunctionDefinition(engine, entry);
 
       if (entry.wikidata) {
-        if (dictionary.functionWikidata.has(entry.wikidata))
+        if (symbolTable.functionWikidata.has(entry.wikidata))
           throw new Error(
             `Duplicate function with wikidata ${entry.wikidata}, ${
               entry.name
-            } and ${dictionary.functionWikidata.get(entry.wikidata)!.name}`
+            } and ${symbolTable.functionWikidata.get(entry.wikidata)!.name}`
           );
-        dictionary.functionWikidata.set(entry.wikidata, def);
+        symbolTable.functionWikidata.set(entry.wikidata, def);
       }
 
-      if (dictionary.functions.has(entry.name))
+      if (symbolTable.functions.has(entry.name))
         throw new Error(
           `Duplicate function definition ${entry.name}:\n${JSON.stringify(
-            dictionary.symbols.get(entry.name)!
+            symbolTable.symbols.get(entry.name)!
           )}\n${JSON.stringify(entry)}`
         );
 
-      dictionary.functions.set(entry.name, def);
+      symbolTable.functions.set(entry.name, def);
     }
 
   // @todo: take dict.rules into consideration

@@ -2,6 +2,7 @@ import { BoxedExpression, IComputeEngine } from '../public';
 import { makePositive } from '../symbolic/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { reducedRational } from '../numerics/numeric';
+import { reducedRational as reducedRationalDecimal } from '../numerics/numeric-decimal';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -39,6 +40,16 @@ export function canonicalDivide(
 
   n = n.canonical;
   d = d.canonical;
+
+  if (d.isLiteral && n.isLiteral) {
+    let decimalN = n.decimalValue;
+    let decimalD = d.decimalValue;
+    if (decimalN && decimalD) {
+      [decimalN, decimalD] = reducedRationalDecimal([decimalN, decimalD]);
+      n = ce.number(decimalN);
+      d = ce.number(decimalD);
+    }
+  }
 
   if (d.isLiteral && d.isOne) return nSign * dSign < 0 ? canonicalNegate(n) : n;
 

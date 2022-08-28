@@ -15,9 +15,11 @@ export const MACHINE_TOLERANCE = Math.pow(
 export const NUMERIC_TOLERANCE = Math.pow(10, -10);
 
 // When applying simplifications, only considers integers whose absolute value
-// is less than SMALL_INTEGERS. This avoid loss of precision by preventing
+// is less than SMALL_INTEGER. This avoid loss of precision by preventing
 // simplification for `1e199 + 1`.
-export const SMALL_INTEGERS = 1000000;
+// Note: SMALL_INTEGER ≈ 10^(MACHINE_PRECISION / 2)
+// so that the product of two small integers does not lose precision
+export const SMALL_INTEGER = 1000000;
 
 /**
  * Returns the smallest floating-point number greater than x.

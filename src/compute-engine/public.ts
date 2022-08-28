@@ -160,7 +160,13 @@ export type BoxedRule = [
 
 export type BoxedRuleSet = Set<BoxedRule>;
 
-/** A domain constructor is the head of a function used in a parametric domain expression. */
+export type DomainCompatibility =
+  | 'covariant' // A <: B
+  | 'contravariant' // A :> B
+  | 'bivariant' // A <: B and A :>B, A := B
+  | 'invariant'; // Neither A <: B, nor A :> B
+
+/** A domain constructor is the head of a domain expression. */
 export type DomainConstructor =
   | 'Matrix' // <domain-of-elements> <dimension>*
   | 'SquareMatrix' // <domain-of-elements> <dimension>
@@ -170,7 +176,7 @@ export type DomainConstructor =
   | 'Dictionary'
   | 'Tuple'
   | 'Range' // <min-value> <max-value> (inclusive)
-  | 'Interval' // <min-value> <max-value> (inclusive, unless Open constructor)
+  | 'Interval' // <min-value> <max-value> (inclusive, unless Open domain expression)
   | 'Intersection'
   | 'Union'
   | 'Optional'
@@ -182,14 +188,18 @@ export type DomainConstructor =
   | 'Contravariant'
   | 'Invariant';
 
-export type ParametricDomain =
+export type DomainLiteral = string;
+
+export type DomainExpression =
+  | DomainLiteral
   | [
       Exclude<
         DomainConstructor,
-        'Literal' | 'Range' | 'Interval' | 'Head' | 'Symbol'
+        'Literal' | 'Range' | 'Interval' | 'Head' | 'Symbol' | 'Matrix'
       >,
       ...DomainExpression[]
     ]
+  | ['Matrix', DomainExpression, Expression]
   | ['Range', Expression]
   | ['Range', Expression, Expression]
   | ['Range', Expression, Expression, Expression]
@@ -201,32 +211,19 @@ export type ParametricDomain =
   | ['Symbol', string]
   | ['Literal', Expression];
 
-export type DomainLiteral = string;
-
-export type DomainExpression = DomainLiteral | ParametricDomain;
-
-export type BoxedParametricDomain = [DomainConstructor, ...Domain[]];
-
-export type BoxedDomainExpression = Domain | BoxedParametricDomain;
-
-export type DomainCompatibility =
-  | 'covariant' // A <: B
-  | 'contravariant' // A :> B
-  | 'bivariant' // A <: B and A :>B, A := B
-  | 'invariant'; // Neither A <: B, nor A :> B
-
-export interface Domain extends BoxedExpression {
-  readonly domainLiteral: DomainLiteral | null;
-  readonly parametricDomain: BoxedParametricDomain | null;
-  readonly domainExpression: DomainExpression;
-
-  is(s: BoxedExpression): boolean;
+export interface BoxedDomain extends BoxedExpression {
+  is(s: BoxedDomain): boolean;
   isCompatible(
-    dom: Domain | DomainLiteral,
+    dom: BoxedDomain | DomainLiteral,
     kind?: DomainCompatibility
   ): boolean;
 
-  get canonical(): Domain;
+  get domainLiteral(): string | null;
+  get domainConstructor(): DomainConstructor | null;
+  get domainParams(): BoxedExpression[] | null;
+
+  get canonical(): BoxedDomain;
+  get json(): DomainExpression;
 
   readonly isNothing: boolean;
   // readonly isBoolean: boolean;
@@ -912,17 +909,18 @@ export interface BoxedExpression {
   get complexity(): number;
 
   /** The domain of this expression. */
-  get domain(): Domain;
+  get domain(): BoxedDomain;
 
   /** Symbols that represent a variable, can have their domain modified */
-  set domain(domain: Domain | string);
+  set domain(domain: BoxedDomain | string);
 
-  /** The domain of the value of this expression, using the value of the expression,
-   * definitions associated with this expression and assumptions if necessary.
+  /** The domain of the value of this expression, using the value of the
+   * expression, definitions associated with this expression and assumptions
+   * if necessary.
    *
    * For functions, the `valueDomain` is the codomain of the function.
    */
-  get valueDomain(): Domain;
+  get valueDomain(): BoxedDomain;
 
   /** For symbols and functions, a possible definition associated with the expression */
   get functionDefinition(): BoxedFunctionDefinition | undefined;
@@ -1126,23 +1124,23 @@ export interface ExpressionMapInterface<U> {
 }
 
 /**
- * A dictionary contains definitions for symbols, functions and rules.
+ * A symbol table contains definitions for symbols, functions and rules.
  *
  */
-export type Dictionary = {
+export type SymbolTable = {
   symbols?: SymbolDefinition[];
   functions?: FunctionDefinition[];
   simplifyRules?: BoxedRuleSet;
 };
 
 /**
- * The entries of a `CompiledDictionary` have been validated and
+ * The entries of a `RuntimeSymbolTable` have been validated and
  * optimized for faster evaluation.
  *
  * When a new scope is created with `pushScope()` or when creating a new
  * engine instance, new instances of `RuntimeDictionary` are created as needed.
  */
-export type RuntimeDictionary = {
+export type RuntimeSymbolTable = {
   symbols: Map<string, BoxedSymbolDefinition>;
   symbolWikidata: Map<string, BoxedSymbolDefinition>;
   functions: Map<string, BoxedFunctionDefinition>;
@@ -1201,7 +1199,7 @@ export type Scope = {
 export type RuntimeScope = Scope & {
   parentScope: RuntimeScope;
 
-  dictionary?: RuntimeDictionary;
+  symbolTable?: RuntimeSymbolTable;
 
   assumptions: undefined | ExpressionMapInterface<boolean>;
 
@@ -1369,7 +1367,7 @@ export type FunctionDefinitionFlags = {
 export type FunctionSignature = {
   /** The signature this applies to. A domain compatible with the `Function`
    * domain) */
-  domain?: Domain | DomainExpression;
+  domain?: BoxedDomain | DomainExpression;
 
   /** The minimum and maximum values of the result of the function */
   // range?: [min: number, max: number];
@@ -1515,7 +1513,7 @@ export type FunctionSignature = {
 };
 
 export type BoxedFunctionSignature = {
-  domain: Domain;
+  domain: BoxedDomain;
 
   canonical?: (ce: IComputeEngine, args: BoxedExpression[]) => BoxedExpression;
   simplify?: (
@@ -1592,10 +1590,10 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
 
     // `valueDomain` is the (computed) common ancestor of the return value
     // of all the signatures
-    valueDomain: Domain;
+    valueDomain: BoxedDomain;
     signatures: BoxedFunctionSignature[];
 
-    getSignature(domains: Domain[]): BoxedFunctionSignature | null;
+    getSignature(domains: BoxedDomain[]): BoxedFunctionSignature | null;
   };
 
 /**
@@ -1672,7 +1670,7 @@ export type SymbolDefinition = BaseDefinition &
       | SemiBoxedExpression
       | ((ce: IComputeEngine) => SemiBoxedExpression | null);
 
-    domain?: string | Domain;
+    domain?: string | BoxedDomain;
 
     /**
      * If this symbol is an indexable collection, return the
@@ -1709,7 +1707,7 @@ export interface BoxedSymbolDefinition
   get value(): BoxedExpression | undefined;
   set value(val: BoxedExpression | undefined);
 
-  domain: Domain | undefined;
+  domain: BoxedDomain | undefined;
 
   // @todo unit?: BoxedExpression;
 
@@ -1787,7 +1785,7 @@ export interface IComputeEngine {
   readonly iterationLimit: number;
   /** @experimental */
   readonly recursionLimit: number;
-  defaultDomain: null | Domain;
+  defaultDomain: null | BoxedDomain;
 
   /** {@inheritDoc  NumericMode} */
   numericMode: NumericMode;
@@ -1847,9 +1845,9 @@ export interface IComputeEngine {
   string(s: string, metadata?: Metadata): BoxedExpression;
   /** Return a canonical boxed domain */
   domain(
-    domain: SemiBoxedExpression | Domain | string,
+    domain: SemiBoxedExpression | BoxedDomain | string,
     metadata?: Metadata
-  ): Domain;
+  ): BoxedDomain;
 
   /** Return a canonical expression.
    *
@@ -2000,7 +1998,7 @@ export interface IComputeEngine {
    */
   assume(
     symbol: LatexString | SemiBoxedExpression,
-    domain: Domain
+    domain: BoxedDomain
   ): AssumeResult;
   assume(predicate: LatexString | SemiBoxedExpression): AssumeResult;
   assume(
@@ -2016,7 +2014,7 @@ export interface IComputeEngine {
   ask(pattern: LatexString | SemiBoxedExpression): Substitution[];
 
   pushScope(options?: {
-    dictionary?: Readonly<Dictionary> | Readonly<Dictionary>[];
+    symbolTable?: Readonly<SymbolTable> | Readonly<SymbolTable>[];
     assumptions?: (LatexString | Expression | BoxedExpression)[];
     scope?: Partial<Scope>;
   }): void;

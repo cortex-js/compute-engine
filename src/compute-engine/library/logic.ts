@@ -1,6 +1,6 @@
-import { BoxedExpression, Dictionary, IComputeEngine } from '../public';
+import { BoxedExpression, SymbolTable, IComputeEngine } from '../public';
 
-export const LOGIC_DICTIONARY: Dictionary = {
+export const LOGIC_LIBRARY: SymbolTable = {
   symbols: [
     { name: 'True', wikidata: 'Q16751793', domain: 'Boolean', constant: true },
     {

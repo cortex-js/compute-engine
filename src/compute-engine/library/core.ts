@@ -1,10 +1,10 @@
-import { BoxedExpression, Dictionary } from '../public';
+import { BoxedExpression, SymbolTable } from '../public';
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { fromDigits } from '../numerics/numeric';
 
 //   // := assign 80 // @todo
 
-export const CORE_DICTIONARY: Dictionary[] = [
+export const CORE_LIBRARY: SymbolTable[] = [
   {
     symbols: [
       { name: 'Missing', domain: 'Anything' },

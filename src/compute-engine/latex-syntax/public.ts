@@ -36,7 +36,7 @@ export type Delimiter =
   | '\\lfloor'
   | '\\rfloor';
 
-export type DictionaryCategory =
+export type LibraryCategory =
   | 'algebra'
   | 'arithmetic'
   | 'calculus'
@@ -530,7 +530,7 @@ export type NumberFormattingOptions = {
    * the '.' in '3.1415'.
    *
    * Some countries use a comma rather than a dot. In this case it is
-   * recommended to use `"{,}"` as the marker: the surrounding bracket ensure
+   * recommended to use `"{,}"` as the marker: the surrounding brackets ensure
    * there is no additional gap after the comma.
    *
    * **Default**: `"."`
@@ -603,7 +603,7 @@ export declare class LatexSyntax {
    * constructor.
    */
   static getDictionary(
-    domain?: DictionaryCategory | 'all'
+    domain?: LibraryCategory | 'all'
   ): Readonly<LatexDictionary>;
 
   parse(latex: LatexString): Expression;

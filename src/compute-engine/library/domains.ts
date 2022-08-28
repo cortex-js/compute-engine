@@ -3,21 +3,26 @@ import { isEqual } from '../../math-json/utils';
 import { DomainExpression } from '../public';
 
 export const DOMAIN_CONSTRUCTORS = [
-  'Function',
-  'Union',
-  'List',
   'Dictionary',
+  'Function',
+  'List',
   'Tuple',
+
   'Intersection',
-  'Range',
-  'Interval',
+  'Union',
+
   'Optional',
   'Some',
+
+  'Interval',
+  'Range',
+
   'Head',
   'Symbol',
   'Literal',
 ];
 
+/** The set of domain constructors whose arguments are an expression (not a domain expression) */
 export const DOMAIN_EXPRESSION_CONSTRUCTORS = [
   'Range',
   'Interval',
@@ -246,9 +251,8 @@ export function isDomainLiteral(s: string | null): boolean {
 
 /** Return all the domain literals that are an ancestor of `dom`
  */
-function ancestors(dom: DomainExpression): string[] {
-  if (typeof dom === 'string' && gDomainLiterals[dom])
-    return Array.from(gDomainLiterals[dom]);
+export function ancestors(dom: string): string[] {
+  if (gDomainLiterals[dom]) return Array.from(gDomainLiterals[dom]);
 
   let result: string[] = [];
   if (typeof dom !== 'string' || !DOMAIN_LITERAL[dom]) {
@@ -284,153 +288,193 @@ function ancestors(dom: DomainExpression): string[] {
   return result;
 }
 
-/** Return the domain that is shared by both `a` and `b` */
-export function sharedAncestorDomain(
-  a: DomainExpression,
-  b: DomainExpression
-): DomainExpression {
-  const aAncestors = ancestors(a);
-  const bAncestors = ancestors(b);
+// /** Return all the domain literals that are an ancestor of `dom`
+//  */
+// function ancestors(dom: DomainExpression): string[] {
+//   if (typeof dom === 'string' && gDomainLiterals[dom])
+//     return Array.from(gDomainLiterals[dom]);
 
-  while (!includesDomain(bAncestors, aAncestors[0])) aAncestors.shift();
+//   let result: string[] = [];
+//   if (typeof dom !== 'string' || !DOMAIN_LITERAL[dom]) {
+//     // Not a domain literal, it should be a constructor
+//     if (!Array.isArray(dom)) throw Error(`Unknown domain literal ${dom}`);
+//     if (!DOMAIN_CONSTRUCTORS.includes(dom[0]))
+//       throw Error(`Unknown domain constructor ${dom[0]}`);
+//     if (dom[0] === 'Function' || dom[0] === 'Head')
+//       return ancestors('Function');
+//     if (dom[0] === 'Symbol') return ancestors('Symbol');
+//     if (dom[0] === 'Tuple') return ancestors('Tuple');
+//     if (dom[0] === 'List') return ancestors('List');
+//     if (dom[0] === 'Dictionary') return ancestors('Dictionary');
+//     if (dom[0] === 'Range') return ancestors('Integer');
+//     if (dom[0] === 'Interval') return ancestors('RealNumberExtended');
+//     if (dom[0] === 'Optional' || dom[0] === 'Some') return ancestors(dom[1]);
 
-  return aAncestors[0];
-}
+//     if (dom[0] === 'Literal') return ['Anything']; // @todo could do better
+//     if (dom[0] === 'Union') return ['Anything']; // @todo could do better
+//     if (dom[0] === 'Intersection') return ['Anything']; // @todo could do better
+//     return ['Anything'];
+//   }
 
-function includesDomain(xs: string[], y: string): boolean {
-  for (const x of xs) if (isSameDomain(x, y)) return true;
-  return false;
-}
+//   if (typeof DOMAIN_LITERAL[dom] === 'string')
+//     result = [DOMAIN_LITERAL[dom], ...ancestors(DOMAIN_LITERAL[dom])];
+//   else if (Array.isArray(DOMAIN_LITERAL[dom]))
+//     for (const parent of DOMAIN_LITERAL[dom]) {
+//       result.push(parent);
+//       result.push(...ancestors(parent));
+//     }
 
-function isSameDomain(a: DomainExpression, b: DomainExpression): boolean {
-  if (typeof a === 'string' && typeof b === 'string' && a === b) return true;
-  if (typeof a === 'string' || typeof b === 'string') return false;
+//   gDomainLiterals[dom] = new Set(result);
+//   return result;
+// }
 
-  // Two domain expressions...
-  if (a.length !== b.length) return false;
+// /** Return the domain that is shared by both `a` and `b` */
+// export function sharedAncestorDomain(
+//   a: DomainExpression,
+//   b: DomainExpression
+// ): DomainExpression {
+//   const aAncestors = ancestors(a);
+//   const bAncestors = ancestors(b);
 
-  const ctor = a[0];
-  if (b[0] !== ctor) return false;
-  if (DOMAIN_EXPRESSION_CONSTRUCTORS.includes(ctor)) {
-    return a.every((x, i) => isEqual(x, b[i] as Expression));
-  }
+//   while (!includesDomain(bAncestors, aAncestors[0])) aAncestors.shift();
 
-  return a.every((x, i) =>
-    isSameDomain(x as DomainExpression, b[i] as DomainExpression)
-  );
-}
+//   return aAncestors[0];
+// }
 
-export function isSubdomainOf(
-  lhs: DomainExpression,
-  rhs: DomainExpression
-): boolean {
-  // Build the domain lattice if necessary, by calculating all the ancestors of
-  // `Void` (the bottom domain)
-  if (!gDomainLiterals) {
-    gDomainLiterals = {};
-    ancestors('Void');
-  }
+// function includesDomain(xs: string[], y: string): boolean {
+//   for (const x of xs) if (isSameDomain(x, y)) return true;
+//   return false;
+// }
 
-  //
-  // 1/ Compare two domain literals
-  //
-  if (typeof rhs === 'string' && typeof lhs === 'string') {
-    if (!gDomainLiterals[rhs])
-      throw Error('Expected a domain literal, got ' + rhs);
-    if (!gDomainLiterals[lhs])
-      throw Error('Expected a domain literal, got ' + lhs);
+// function isSameDomain(a: DomainExpression, b: DomainExpression): boolean {
+//   if (typeof a === 'string' && typeof b === 'string' && a === b) return true;
+//   if (typeof a === 'string' || typeof b === 'string') return false;
 
-    if (lhs === rhs) return true;
-    if (gDomainLiterals[lhs].has(rhs)) return true;
-    return false;
-  }
+//   // Two domain expressions...
+//   if (a.length !== b.length) return false;
 
-  //
-  // 2/ Compare a rhs domain literal to a domain expression
-  //
-  if (typeof rhs === 'string') {
-    if (!gDomainLiterals[rhs])
-      throw Error('Expected a domain literal, got ' + rhs);
-    const lhsConstructor = lhs[0];
-    if (!DOMAIN_CONSTRUCTORS.includes(lhsConstructor))
-      throw Error('Expected domain constructor, got ' + lhsConstructor);
-    if (lhsConstructor === 'Function') {
-      return rhs === 'Function';
-      // @todo
-    }
-    // @todo handle domain constructors
-    // 'Union',
-    // 'List',
-    // 'Record',
-    // 'Tuple',
-    // 'Intersection',
-    // 'Range',
-    // 'Interval',
-    // 'Optional',
-    // 'Some',
-    // 'Head',
-    // 'Symbol',
-    // 'Literal',
-    return true;
-  }
+//   const ctor = a[0];
+//   if (b[0] !== ctor) return false;
+//   if (DOMAIN_EXPRESSION_CONSTRUCTORS.includes(ctor)) {
+//     return a.every((x, i) => isEqual(x, b[i] as Expression));
+//   }
 
-  //
-  // 3/ Compare a rhs domain expression with a domain literal or expression
-  //
-  const rhsConstructor = rhs[0];
-  if (!DOMAIN_CONSTRUCTORS.includes(rhsConstructor))
-    throw Error('Expected domain constructor, got ' + rhsConstructor);
+//   return a.every((x, i) =>
+//     isSameDomain(x as DomainExpression, b[i] as DomainExpression)
+//   );
+// }
 
-  if (rhsConstructor === 'Function') {
-    // True if LHS is a function, or an alias to a function
-    if (typeof lhs === 'string') {
-      if (lhs === 'Function') return true;
-      lhs = DOMAIN_ALIAS[lhs];
-      if (!lhs) return false;
-    }
-    if (lhs[0] !== 'Function') return false;
+// export function isSubdomainOf(
+//   lhs: DomainExpression,
+//   rhs: DomainExpression
+// ): boolean {
+//   // Build the domain lattice if necessary, by calculating all the ancestors of
+//   // `Void` (the bottom domain)
+//   if (!gDomainLiterals) {
+//     gDomainLiterals = {};
+//     ancestors('Void');
+//   }
 
-    // Both constructors are 'Function':
-    // Check that the arguments and return values are compatible
-    // Parameters should be contravariant, return values should be covariant
-    if (!isSubdomainOf(rhs[rhs.length - 1], lhs[lhs.length - 1])) return false;
-    for (let i = 1; i < rhs.length - 1; i++) {
-      if (Array.isArray(rhs[i])) {
-        const ctor = rhs[i][0];
-        if (ctor === 'Optional') {
-          if (lhs[i] && !isSubdomainOf(lhs[i], rhs[i][1] as DomainExpression))
-            return false;
-          if (!lhs[i] && lhs.length - 1 === i) return true;
-        } else if (ctor === 'Some') {
-          const param = rhs[i][1];
-          if (!lhs[i] && lhs.length - 1 === i) return true;
-          do {
-            if (!isSubdomainOf(lhs[i], param as DomainExpression)) return false;
-            i += 1;
-          } while (i < lhs.length - 1);
-          return true;
-        } else if (!lhs[i] || !isSubdomainOf(lhs[i], rhs[i])) return false;
-      } else if (!lhs[i] || !isSubdomainOf(lhs[i], rhs[i])) return false;
-    }
-    return true;
-  }
-  // @todo handle domain constructors
-  // 'Function',
-  // 'Union',
-  // 'List',
-  // 'Record',
-  // 'Tuple',
-  // 'Intersection',
-  // 'Range',
-  // 'Interval',
-  // 'Optional',
-  // 'Some',
-  // 'Head',
-  // 'Symbol',
-  // 'Literal',
+//   //
+//   // 1/ Compare two domain literals
+//   //
+//   if (typeof rhs === 'string' && typeof lhs === 'string') {
+//     if (!gDomainLiterals[rhs])
+//       throw Error('Expected a domain literal, got ' + rhs);
+//     if (!gDomainLiterals[lhs])
+//       throw Error('Expected a domain literal, got ' + lhs);
 
-  return false;
-}
+//     if (lhs === rhs) return true;
+//     if (gDomainLiterals[lhs].has(rhs)) return true;
+//     return false;
+//   }
+
+//   //
+//   // 2/ Compare a rhs domain literal to a domain expression
+//   //
+//   if (typeof rhs === 'string') {
+//     if (!gDomainLiterals[rhs])
+//       throw Error('Expected a domain literal, got ' + rhs);
+//     const lhsConstructor = lhs[0];
+//     if (!DOMAIN_CONSTRUCTORS.includes(lhsConstructor))
+//       throw Error('Expected domain constructor, got ' + lhsConstructor);
+//     if (lhsConstructor === 'Function') {
+//       return rhs === 'Function';
+//       // @todo
+//     }
+//     // @todo handle domain constructors
+//     // 'Union',
+//     // 'List',
+//     // 'Record',
+//     // 'Tuple',
+//     // 'Intersection',
+//     // 'Range',
+//     // 'Interval',
+//     // 'Optional',
+//     // 'Some',
+//     // 'Head',
+//     // 'Symbol',
+//     // 'Literal',
+//     return true;
+//   }
+
+//   //
+//   // 3/ Compare a rhs domain expression with a domain literal or expression
+//   //
+//   const rhsConstructor = rhs[0];
+//   if (!DOMAIN_CONSTRUCTORS.includes(rhsConstructor))
+//     throw Error('Expected domain constructor, got ' + rhsConstructor);
+
+//   if (rhsConstructor === 'Function') {
+//     // True if LHS is a function, or an alias to a function
+//     if (typeof lhs === 'string') {
+//       if (lhs === 'Function') return true;
+//       lhs = DOMAIN_ALIAS[lhs];
+//       if (!lhs) return false;
+//     }
+//     if (lhs[0] !== 'Function') return false;
+
+//     // Both constructors are 'Function':
+//     // Check that the arguments and return values are compatible
+//     // Parameters should be contravariant, return values should be covariant
+//     if (!isSubdomainOf(rhs[rhs.length - 1], lhs[lhs.length - 1])) return false;
+//     for (let i = 1; i < rhs.length - 1; i++) {
+//       if (Array.isArray(rhs[i])) {
+//         const ctor = rhs[i][0];
+//         if (ctor === 'Optional') {
+//           if (lhs[i] && !isSubdomainOf(lhs[i], rhs[i][1] as DomainExpression))
+//             return false;
+//           if (!lhs[i] && lhs.length - 1 === i) return true;
+//         } else if (ctor === 'Some') {
+//           const param = rhs[i][1];
+//           if (!lhs[i] && lhs.length - 1 === i) return true;
+//           do {
+//             if (!isSubdomainOf(lhs[i], param as DomainExpression)) return false;
+//             i += 1;
+//           } while (i < lhs.length - 1);
+//           return true;
+//         } else if (!lhs[i] || !isSubdomainOf(lhs[i], rhs[i])) return false;
+//       } else if (!lhs[i] || !isSubdomainOf(lhs[i], rhs[i])) return false;
+//     }
+//     return true;
+//   }
+//   // @todo handle domain constructors
+//   // 'Function',
+//   // 'Union',
+//   // 'List',
+//   // 'Record',
+//   // 'Tuple',
+//   // 'Intersection',
+//   // 'Range',
+//   // 'Interval',
+//   // 'Optional',
+//   // 'Some',
+//   // 'Head',
+//   // 'Symbol',
+//   // 'Literal',
+
+//   return false;
+// }
 
 // const DOMAIN_WIKIDATA: { [domain: string]: string } = {
 //   // set of numbers: Q3054943, number: Q11563

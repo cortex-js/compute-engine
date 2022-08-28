@@ -2,7 +2,7 @@ import { Expression } from '../../math-json/math-json-format';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
-  Domain,
+  BoxedDomain,
   IComputeEngine,
   Metadata,
   PatternMatchOption,
@@ -46,7 +46,7 @@ export class BoxedString extends AbstractBoxedExpression {
   set isCanonical(_va: boolean) {
     return;
   }
-  get domain(): Domain {
+  get domain(): BoxedDomain {
     return this.engine.domain('String');
   }
   get complexity(): number {

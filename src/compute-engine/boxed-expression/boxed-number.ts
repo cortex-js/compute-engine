@@ -1,10 +1,10 @@
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { Expression } from '../../math-json/math-json-format';
-import { gcd, reducedRational, SMALL_INTEGERS } from '../numerics/numeric';
+import { gcd, reducedRational, SMALL_INTEGER } from '../numerics/numeric';
 import {
   BoxedExpression,
-  Domain,
+  BoxedDomain,
   IComputeEngine,
   Metadata,
   NOptions,
@@ -29,7 +29,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     | Decimal
     | Complex
     | [numer: number, denom: number];
-  private _domain: Domain | undefined;
+  private _domain: BoxedDomain | undefined;
   private _head: string;
   private _hash: number | undefined;
   protected _isCanonical = true;
@@ -184,8 +184,8 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (typeof this._value === 'number') {
       if (
         Number.isInteger(this._value) &&
-        this._value >= -SMALL_INTEGERS &&
-        this._value <= SMALL_INTEGERS
+        this._value >= -SMALL_INTEGER &&
+        this._value <= SMALL_INTEGER
       )
         return this._value;
       return null;
@@ -193,23 +193,23 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (this._value instanceof Decimal) {
       if (
         this._value.isInteger() &&
-        this._value.gte(-SMALL_INTEGERS) &&
-        this._value.lte(SMALL_INTEGERS)
+        this._value.gte(-SMALL_INTEGER) &&
+        this._value.lte(SMALL_INTEGER)
       )
         return this._value.toNumber();
       return null;
     }
     if (Array.isArray(this._value)) {
       const v = this._value[0] / this._value[1];
-      if (Number.isInteger(v) && v >= -SMALL_INTEGERS && v <= SMALL_INTEGERS)
+      if (Number.isInteger(v) && v >= -SMALL_INTEGER && v <= SMALL_INTEGER)
         return v;
       return null;
     }
     if (this.engine.chop(this._value.im) === 0) {
       if (
         Number.isInteger(this._value.re) &&
-        this._value.re >= -SMALL_INTEGERS &&
-        this._value.re <= SMALL_INTEGERS
+        this._value.re >= -SMALL_INTEGER &&
+        this._value.re <= SMALL_INTEGER
       )
         return this._value.re;
       return null;
@@ -225,7 +225,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     return [null, null];
   }
 
-  get domain(): Domain {
+  get domain(): BoxedDomain {
     if (this._domain === undefined)
       this._domain = this.engine.domain(inferNumericDomain(this._value));
     return this._domain;

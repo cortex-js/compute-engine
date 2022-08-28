@@ -14,7 +14,7 @@ import {
   ReplaceOptions,
   Metadata,
   PatternMatchOption,
-  Domain,
+  BoxedDomain,
 } from '../public';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
@@ -199,12 +199,12 @@ export class BoxedFunction extends AbstractBoxedExpression {
     }
   }
 
-  get domain(): Domain {
+  get domain(): BoxedDomain {
     return this.engine.domain('Function');
   }
 
   /** Domain of the value of the function */
-  get valueDomain(): Domain {
+  get valueDomain(): BoxedDomain {
     return this.domain.valueDomain ?? this.engine.domain('Void');
   }
 
@@ -903,10 +903,10 @@ export function applicable(
 function holdMapDomain(
   xs: BoxedExpression[],
   skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most'
-): Domain[] {
+): BoxedDomain[] {
   if (xs.length === 0) return [];
 
-  const result: Domain[] = [];
+  const result: BoxedDomain[] = [];
 
   for (let i = 0; i < xs.length; i++) {
     const arg = xs[i];

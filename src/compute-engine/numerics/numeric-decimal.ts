@@ -12,6 +12,20 @@ export function lcm(a: Decimal, b: Decimal): Decimal {
   return a.mul(b).div(gcd(a, b));
 }
 
+//  Return the "reduced form" of the rational, that is a rational
+// such that gcd(numer, denom) = 1 and denom > 0
+export function reducedRational([a, b]: [Decimal, Decimal]): [
+  Decimal,
+  Decimal
+] {
+  if (a.equals(1) || b.equals(1)) return [a, b];
+  if (b.lessThan(0)) [a, b] = [a.neg(), b.neg()];
+  const g = gcd(a, b);
+  //  If the gcd is 0, return the rational unchanged
+  if (g.lessThanOrEqualTo(1)) return [a, b];
+  return [a.div(g), b.div(g)];
+}
+
 export function factorial(ce: IComputeEngine, n: Decimal): Decimal {
   if (!n.isInteger() || n.isNegative()) return ce._DECIMAL_NAN;
   if (n.lessThan(10))

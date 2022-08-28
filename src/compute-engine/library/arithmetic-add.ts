@@ -1,5 +1,5 @@
 import { Complex } from 'complex.js';
-import { BoxedExpression, Domain, IComputeEngine } from '../public';
+import { BoxedExpression, BoxedDomain, IComputeEngine } from '../public';
 import {
   complexAllowed,
   getImaginaryCoef,
@@ -8,6 +8,7 @@ import {
 import { flattenOps } from '../symbolic/flatten';
 import { Sum } from '../symbolic/sum';
 import { isInMachineRange } from '../numerics/numeric-decimal';
+import { reducedRational } from '../numerics/numeric';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -66,14 +67,76 @@ export function canonicalAdd(
 export function domainAdd(
   _ce: IComputeEngine,
   args: BoxedExpression[]
-): Domain | string | null {
-  let dom: Domain | string | null = null;
+): BoxedDomain | string | null {
+  let dom: BoxedDomain | string | null = null;
   for (const arg of args) {
     const argDom = arg.valueDomain;
     if (!argDom.isNumeric) return null;
     if (!dom || !argDom.isCompatible(dom)) dom = argDom;
   }
   return dom;
+}
+
+export function simplifyAdd(
+  ce: IComputeEngine,
+  args: BoxedExpression[]
+): BoxedExpression | undefined {
+  console.assert(args.length > 1, `simplifyAdd: not enough args`);
+
+  const sum = new Sum(ce);
+  for (const arg of args) {
+    if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
+    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
+      return ce._NAN;
+    sum.addTerm(arg);
+  }
+
+  return sum.asExpression();
+}
+
+export function evalAdd(
+  ce: IComputeEngine,
+  args: BoxedExpression[]
+): BoxedExpression | undefined {
+  if (!useDecimal(ce)) return simplifyAdd(ce, args);
+
+  // If we can use Decimal, we can do some more aggressive exact numeric computations with integers
+
+  for (const arg of args) {
+    if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
+    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
+      return ce._NAN;
+  }
+
+  // Accumulate rational and integer decimal
+  let [numer, denom] = [0, 1];
+  let decimalSum = ce._DECIMAL_ZERO;
+  const sum = new Sum(ce);
+
+  for (const arg of args) {
+    if (arg.symbol !== 'Nothing' && !arg.isZero) {
+      const [n, d] = arg.rationalValue;
+      if (n !== null && d !== null) {
+        [numer, denom] = [numer * d + denom * n, denom * d];
+      } else if (arg.decimalValue !== null && arg.decimalValue.isInteger()) {
+        decimalSum = decimalSum.add(arg.decimalValue);
+      } else if (
+        arg.machineValue !== null &&
+        Number.isInteger(arg.machineValue)
+      ) {
+        decimalSum = decimalSum.add(arg.machineValue);
+      } else sum.addTerm(arg);
+    }
+  }
+
+  // Fold into decimal
+  [numer, denom] = reducedRational([numer, denom]);
+  if (denom === 1) decimalSum = decimalSum.add(numer);
+  else sum.addTerm(ce.number([numer, denom]));
+
+  if (sum.isEmpty) return ce.number(decimalSum);
+  sum.addTerm(ce.number(decimalSum));
+  return sum.asExpression();
 }
 
 export function numEvalAdd(
@@ -137,24 +200,6 @@ export function numEvalAdd(
     );
     if (sum.isEmpty) return c;
     sum.addTerm(c);
-  }
-
-  return sum.asExpression();
-}
-
-export function processAdd(
-  ce: IComputeEngine,
-  args: BoxedExpression[],
-  _mode: 'simplify' | 'evaluate'
-): BoxedExpression | undefined {
-  console.assert(args.length > 1, `ProcessAdd: not enough args`);
-
-  const sum = new Sum(ce);
-  for (const arg of args) {
-    if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
-      return ce._NAN;
-    sum.addTerm(arg);
   }
 
   return sum.asExpression();

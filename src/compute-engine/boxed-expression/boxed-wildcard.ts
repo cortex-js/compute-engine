@@ -8,7 +8,7 @@ import {
   Metadata,
   Substitution,
   PatternMatchOption,
-  Domain,
+  BoxedDomain,
 } from '../public';
 import { serializeJsonSymbol } from './serialize';
 import { BoxedSymbol } from './boxed-symbol';
@@ -96,7 +96,7 @@ export class BoxedWildcard extends BoxedSymbol {
     return 'Wildcard';
   }
 
-  get domain(): Domain {
+  get domain(): BoxedDomain {
     return this.engine.domain('Anything'); // @todo
   }
 

@@ -8,7 +8,7 @@ import {
   BoxedFunctionDefinition,
   BoxedRuleSet,
   BoxedSymbolDefinition,
-  Domain,
+  BoxedDomain,
   EvaluateOptions,
   IComputeEngine,
   LatexString,
@@ -206,14 +206,14 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   isSubdomainOf(_d: BoxedExpression | string): undefined | boolean {
     return undefined;
   }
-  get domain(): Domain {
+  get domain(): BoxedDomain {
     return this.engine.domain('Nothing');
   }
-  set domain(_domain: Domain) {
+  set domain(_domain: BoxedDomain) {
     throw new Error(`Can't change the domain of \\(${this.latex}\\)`);
   }
 
-  get valueDomain(): Domain {
+  get valueDomain(): BoxedDomain {
     return this.domain;
   }
 

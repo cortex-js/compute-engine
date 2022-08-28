@@ -12,7 +12,7 @@ import {
   Substitution,
   Metadata,
   PatternMatchOption,
-  Domain,
+  BoxedDomain,
 } from '../public';
 import { replace } from '../rules';
 import { domainToFlags } from './boxed-symbol-definition';
@@ -205,11 +205,11 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return this._def?.value?.numericValue;
   }
 
-  get domain(): Domain {
+  get domain(): BoxedDomain {
     return this._def?.domain ?? this.engine.domain('Anything');
   }
 
-  set domain(d: Domain) {
+  set domain(d: BoxedDomain) {
     if (this._name[0] === '_')
       throw new Error(
         `The domain of the wildcard "${this._name}" cannot be changed`

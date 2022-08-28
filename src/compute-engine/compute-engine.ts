@@ -6,7 +6,7 @@ import { SignalMessage, WarningSignal } from '../common/signals';
 
 import { LatexSyntax } from './latex-syntax/latex-syntax';
 import type {
-  DictionaryCategory,
+  LibraryCategory,
   LatexDictionary,
   LatexDictionaryEntry,
   LatexString,
@@ -24,7 +24,7 @@ import {
   BoxedFunctionDefinition,
   BoxedSymbolDefinition,
   IComputeEngine,
-  Dictionary,
+  SymbolTable,
   ExpressionMapInterface,
   NumericMode as NumericMode,
   Pattern,
@@ -38,14 +38,14 @@ import {
   JsonSerializationOptions,
   ComputeEngineStats,
   Metadata,
-  Domain,
+  BoxedDomain,
   DomainExpression,
 } from './public';
 import { box, boxNumber } from './boxed-expression/box';
 import {
-  setCurrentContextDictionary,
-  getDefaultDictionaries,
-} from './dictionary/dictionary';
+  setCurrentContextSymbolTable,
+  getStandardLibrary,
+} from './library/library';
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 import { ExpressionMap } from './boxed-expression/expression-map';
 import { BoxedPattern } from './boxed-expression/boxed-patterns';
@@ -55,14 +55,18 @@ import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber } from './boxed-expression/boxed-number';
 import { BoxedSymbolDefinitionImpl } from './boxed-expression/boxed-symbol-definition';
 import { canonicalNegate } from './symbolic/negate';
-import { canonicalPower } from './dictionary/arithmetic-power';
+import { canonicalPower } from './library/arithmetic-power';
 import { BoxedFunction } from './boxed-expression/boxed-function';
-import { canonicalMultiply } from './dictionary/arithmetic-multiply';
-import { canonicalAdd } from './dictionary/arithmetic-add';
-import { canonicalDivide } from './dictionary/arithmetic-divide';
+import { canonicalMultiply } from './library/arithmetic-multiply';
+import { canonicalAdd } from './library/arithmetic-add';
+import { canonicalDivide } from './library/arithmetic-divide';
 import { BoxedSymbol } from './boxed-expression/boxed-symbol';
 import { BoxedDictionary } from './boxed-expression/boxed-dictionary';
-import { boxDomain, isDomain, _Domain } from './boxed-expression/boxed-domain';
+import {
+  boxDomain,
+  isDomain,
+  _BoxedDomain,
+} from './boxed-expression/boxed-domain';
 import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expression';
 
 /**
@@ -156,7 +160,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    *  @internal
    */
-  private _defaultDomain: null | Domain;
+  private _defaultDomain: null | BoxedDomain;
 
   /** @internal */
   private _commonSymbols: { [symbol: string]: null | BoxedExpression } = {
@@ -188,7 +192,7 @@ export class ComputeEngine implements IComputeEngine {
     10: null,
   };
   /** @internal */
-  private _commonDomains: { [dom: string]: null | Domain } = {
+  private _commonDomains: { [dom: string]: null | BoxedDomain } = {
     Anything: null,
     Nothing: null,
     Boolean: null,
@@ -243,17 +247,17 @@ export class ComputeEngine implements IComputeEngine {
   deadline?: number;
 
   /**
-   * Return dictionaries suitable for the specified categories, or `"all"`
+   * Return symbol tables suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
    *
-   * A dictionary defines how the symbols and function names in a MathJSON
+   * A symbol table defines how the symbols and function names in a MathJSON
    * expression should be interpreted, i.e. how to evaluate and manipulate them.
    *
    */
-  static getDictionaries(
-    categories: DictionaryCategory[] | DictionaryCategory | 'all' = 'all'
-  ): Readonly<Dictionary>[] {
-    return getDefaultDictionaries(categories);
+  static getSymbolTables(
+    categories: LibraryCategory[] | LibraryCategory | 'all' = 'all'
+  ): Readonly<SymbolTable>[] {
+    return getStandardLibrary(categories);
   }
 
   /**
@@ -282,7 +286,7 @@ export class ComputeEngine implements IComputeEngine {
    * be a variable in this domain. **Default** `ExtendedRealNumber`
    */
   constructor(options?: {
-    dictionaries?: Readonly<Dictionary>[];
+    symbolTables?: Readonly<SymbolTable>[];
     latexDictionary?: readonly LatexDictionaryEntry[];
     numericMode?: NumericMode;
     numericPrecision?: number;
@@ -340,9 +344,9 @@ export class ComputeEngine implements IComputeEngine {
     //
     // The first, topmost, scope contains additional info
     //
-    const dicts = options?.dictionaries ?? ComputeEngine.getDictionaries();
+    const tables = options?.symbolTables ?? ComputeEngine.getSymbolTables();
     this.pushScope({
-      dictionary: dicts,
+      symbolTable: tables,
       scope: {
         warn: (sigs: WarningSignal[]): void => {
           for (const sig of sigs) {
@@ -418,10 +422,10 @@ export class ComputeEngine implements IComputeEngine {
     // Purge all the definitions
     let scope = this.context;
     while (scope) {
-      if (scope.dictionary?.functions)
-        for (const [_k, v] of scope.dictionary.functions) v._purge();
-      if (scope.dictionary?.symbols)
-        for (const [_k, v] of scope.dictionary.symbols) v._purge();
+      if (scope.symbolTable?.functions)
+        for (const [_k, v] of scope.symbolTable.functions) v._purge();
+      if (scope.symbolTable?.symbols)
+        for (const [_k, v] of scope.symbolTable.symbols) v._purge();
 
       // @todo purge assumptions
       scope = scope.parentScope;
@@ -599,10 +603,10 @@ export class ComputeEngine implements IComputeEngine {
    *
    * **Default:** `"ExtendedRealNumber"`
    */
-  get defaultDomain(): Domain | null {
+  get defaultDomain(): BoxedDomain | null {
     return this._defaultDomain;
   }
-  set defaultDomain(domain: Domain | string | null) {
+  set defaultDomain(domain: BoxedDomain | string | null) {
     if (domain === null) this._defaultDomain = null;
     else this._defaultDomain = this.domain(domain);
   }
@@ -669,7 +673,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   static getLatexDictionary(
-    domain: DictionaryCategory | 'all' = 'all'
+    domain: LibraryCategory | 'all' = 'all'
   ): Readonly<LatexDictionary> {
     return LatexSyntax.getDictionary(domain);
   }
@@ -698,14 +702,14 @@ export class ComputeEngine implements IComputeEngine {
     // Try to find a match by wikidata
     if (wikidata)
       while (scope && !def) {
-        def = scope.dictionary?.symbolWikidata.get(wikidata);
+        def = scope.symbolTable?.symbolWikidata.get(wikidata);
         scope = scope.parentScope;
       }
 
     // Match by name
     while (scope && !def) {
-      if (wikidata) def = scope.dictionary?.symbolWikidata.get(wikidata);
-      if (!def) def = scope.dictionary?.symbols.get(symbol);
+      if (wikidata) def = scope.symbolTable?.symbolWikidata.get(wikidata);
+      if (!def) def = scope.symbolTable?.symbols.get(symbol);
       scope = scope.parentScope;
     }
     return def;
@@ -723,7 +727,7 @@ export class ComputeEngine implements IComputeEngine {
 
     let scope = this.context;
     while (scope) {
-      const def = scope.dictionary?.functions.get(head);
+      const def = scope.symbolTable?.functions.get(head);
       if (def) return def;
       scope = scope.parentScope;
     }
@@ -735,8 +739,8 @@ export class ComputeEngine implements IComputeEngine {
    */
   defineSymbol(def: SymbolDefinition): BoxedSymbolDefinition {
     const boxedDef = new BoxedSymbolDefinitionImpl(this, def);
-    if (!this.context.dictionary) {
-      this.context.dictionary = {
+    if (!this.context.symbolTable) {
+      this.context.symbolTable = {
         symbols: new Map<string, BoxedSymbolDefinition>(),
         functions: new Map<string, BoxedFunctionDefinition>(),
         symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
@@ -744,9 +748,9 @@ export class ComputeEngine implements IComputeEngine {
       };
     }
 
-    if (def.name) this.context.dictionary.symbols.set(def.name, boxedDef);
+    if (def.name) this.context.symbolTable.symbols.set(def.name, boxedDef);
     if (def.wikidata)
-      this.context.dictionary.symbolWikidata.set(def.wikidata, boxedDef);
+      this.context.symbolTable.symbolWikidata.set(def.wikidata, boxedDef);
 
     return boxedDef;
   }
@@ -760,7 +764,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
   pushScope(options?: {
-    dictionary?: Readonly<Dictionary> | Readonly<Dictionary>[];
+    symbolTable?: Readonly<SymbolTable> | Readonly<SymbolTable>[];
     assumptions?: (LatexString | Expression)[];
     scope?: Partial<Scope>;
   }): void {
@@ -783,11 +787,11 @@ export class ComputeEngine implements IComputeEngine {
     // `setCurrentContextDictionary` will associate the definitions in the
     // dictionary with the current scope, so we need to set the scope first
     // above(`this.context =...`);
-    if (options?.dictionary) {
-      if (Array.isArray(options.dictionary))
-        for (const dict of options.dictionary)
-          setCurrentContextDictionary(this, dict);
-      else setCurrentContextDictionary(this, options.dictionary);
+    if (options?.symbolTable) {
+      if (Array.isArray(options.symbolTable))
+        for (const dict of options.symbolTable)
+          setCurrentContextSymbolTable(this, dict);
+      else setCurrentContextSymbolTable(this, options.symbolTable);
     }
     // Add any user-specified assumptions
     // (those assumptions may use the definitions from the dictionary,
@@ -1189,26 +1193,24 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedSymbol(this, sym, metadata);
   }
   domain(
-    domain: BoxedExpression | DomainExpression | Domain,
+    domain: BoxedExpression | DomainExpression | BoxedDomain,
     metadata?: Metadata
-  ): Domain {
-    if (domain instanceof _Domain) return domain;
+  ): BoxedDomain {
+    if (domain instanceof _BoxedDomain) return domain;
     if (domain instanceof AbstractBoxedExpression && domain.symbol)
       domain = domain.symbol;
     if (typeof domain === 'string') {
       if (this._commonDomains[domain] === null)
         this._commonDomains[domain] = boxDomain(this, domain, metadata);
-      if (this._commonDomains[domain]) this._commonDomains[domain];
+      if (this._commonDomains[domain]) return this._commonDomains[domain]!;
     }
 
     if (!isDomain(domain)) {
-      console.log(isDomain(domain));
+      console.assert(isDomain(domain));
+      throw TypeError('Expected a domain, got ' + JSON.stringify(domain));
     }
 
-    if (!isDomain(domain))
-      throw TypeError('Expected a domain, got ' + JSON.stringify(domain));
-
-    return boxDomain(this, domain as DomainExpression | Domain, metadata);
+    return boxDomain(this, domain, metadata);
   }
   number(
     value:
@@ -1331,7 +1333,7 @@ export class ComputeEngine implements IComputeEngine {
   // Based on contextual usage, infer domain of a symbol
   infer(
     symbol: BoxedExpression | string,
-    domain: Domain | DomainExpression
+    _domain: BoxedDomain | DomainExpression
   ): AssumeResult {
     if (typeof symbol !== 'string') {
       if (!symbol.symbol) return 'internal-error';
@@ -1343,12 +1345,12 @@ export class ComputeEngine implements IComputeEngine {
 
   assume(
     symbol: LatexString | SemiBoxedExpression,
-    domainValue: Domain | DomainExpression | Expression | BoxedExpression
+    domainValue: BoxedDomain | DomainExpression | Expression | BoxedExpression
   ): AssumeResult;
   assume(predicate: LatexString | SemiBoxedExpression): AssumeResult;
   assume(
     arg1: LatexString | SemiBoxedExpression,
-    arg2?: Domain | DomainExpression | Expression | BoxedExpression
+    arg2?: BoxedDomain | DomainExpression | Expression | BoxedExpression
   ): AssumeResult {
     try {
       const latex = latexString(arg1);
@@ -1376,7 +1378,7 @@ export class ComputeEngine implements IComputeEngine {
     }
     if (typeof symbol === 'string') {
       // Remove symbol definition in the current scope (if any)
-      this.context.dictionary?.symbols.delete(symbol);
+      this.context.symbolTable?.symbols.delete(symbol);
 
       // Remove any assumptions that make a reference to this symbol
       // (note that when a scope if created, any assumptions from the

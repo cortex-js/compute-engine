@@ -16,14 +16,20 @@ import {
   lngamma,
   rationalize,
 } from '../numerics/numeric';
-import { BoxedExpression, Dictionary, IComputeEngine } from '../public';
+import { BoxedExpression, SymbolTable, IComputeEngine } from '../public';
 import { complexAllowed, useDecimal } from '../boxed-expression/utils';
 import { canonicalNegate, processNegate } from '../symbolic/negate';
-import { canonicalAdd, numEvalAdd, processAdd } from './arithmetic-add';
+import {
+  canonicalAdd,
+  numEvalAdd,
+  simplifyAdd,
+  evalAdd,
+} from './arithmetic-add';
 import {
   canonicalMultiply,
   numEvalMultiply,
-  processMultiply,
+  simplifyMultiply,
+  evalMultiply,
 } from './arithmetic-multiply';
 import { canonicalDivide } from './arithmetic-divide';
 import { canonicalPower, processPower } from './arithmetic-power';
@@ -58,7 +64,7 @@ import { canonicalPower, processPower } from './arithmetic-power';
 // Binomial
 // Fibonacci
 
-export const ARITHMETIC_DICTIONARY: Dictionary[] = [
+export const ARITHMETIC_LIBRARY: SymbolTable[] = [
   {
     //
     // Functions
@@ -92,8 +98,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
           {
             domain: 'NumericFunction',
             canonical: (ce, args) => canonicalAdd(ce, args),
-            simplify: (ce, ops) => processAdd(ce, ops, 'simplify'),
-            evaluate: (ce, ops) => processAdd(ce, ops, 'evaluate'),
+            simplify: (ce, ops) => simplifyAdd(ce, ops),
+            evaluate: (ce, ops) => evalAdd(ce, ops),
             N: (ce, ops) => numEvalAdd(ce, ops),
           },
         ],
@@ -470,8 +476,8 @@ export const ARITHMETIC_DICTIONARY: Dictionary[] = [
           {
             domain: 'NumericFunction',
             canonical: (ce, args) => canonicalMultiply(ce, args),
-            simplify: (ce, ops) => processMultiply(ce, ops, 'simplify'),
-            evaluate: (ce, ops) => processMultiply(ce, ops, 'evaluate'),
+            simplify: (ce, ops) => simplifyMultiply(ce, ops),
+            evaluate: (ce, ops) => evalMultiply(ce, ops),
             N: (ce, ops) => numEvalMultiply(ce, ops),
           },
         ],

@@ -5,7 +5,7 @@ import {
   LatexToken,
   SerializeHandler,
   LatexDictionaryEntry,
-  DictionaryCategory,
+  LibraryCategory,
   Serializer,
   Delimiter,
   PostfixParseHandler,
@@ -647,7 +647,7 @@ function entryIsValid(
 // https://reference.wolfram.com/language/tutorial/OperatorInputForms.html
 
 export const DEFAULT_LATEX_DICTIONARY: {
-  [category in DictionaryCategory]?: LatexDictionary;
+  [category in LibraryCategory]?: LatexDictionary;
 } = {
   algebra: DEFINITIONS_ALGEBRA,
   arithmetic: DEFINITIONS_ARITHMETIC,

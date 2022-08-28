@@ -1,4 +1,4 @@
-import { BoxedExpression, Dictionary } from '../public';
+import { BoxedExpression, SymbolTable } from '../public';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔
@@ -10,7 +10,7 @@ import { BoxedExpression, Dictionary } from '../public';
 //   // greater-than: Q47035128  243
 //   // less-than: Q52834024 245
 
-export const RELOP_DICTIONARY: Dictionary = {
+export const RELOP_LIBRARY: SymbolTable = {
   functions: [
     {
       name: 'Equal',

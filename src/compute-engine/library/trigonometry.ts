@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import {
   BoxedExpression,
-  Dictionary,
+  SymbolTable,
   DomainExpression,
   IComputeEngine,
   LatexString,
@@ -30,7 +30,7 @@ const hyperbolicFunction = (_head: string): DomainExpression => {
   return ['Function', 'Number', 'Number'];
 };
 
-export const TRIGONOMETRY_DICTIONARY: Dictionary[] = [
+export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
   {
     //
     // Constants

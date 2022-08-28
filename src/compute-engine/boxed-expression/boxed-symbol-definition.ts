@@ -3,7 +3,7 @@ import {
   BoxedExpression,
   BoxedFunctionDefinition,
   BoxedSymbolDefinition,
-  Domain,
+  BoxedDomain,
   DomainExpression,
   IComputeEngine,
   RuntimeScope,
@@ -142,13 +142,13 @@ function normalizeFlags(flags: Partial<SymbolFlags>): SymbolFlags {
 }
 
 export function domainToFlags(
-  dom: Domain | undefined | null
+  dom: BoxedDomain | undefined | null
 ): Partial<SymbolFlags> {
   if (!dom) return {};
-  const domain = dom.domainExpression;
   const result: Partial<SymbolFlags> = {};
 
   if (dom.isNumeric) {
+    const domain = dom.symbol;
     result.number = true;
     if (domain === 'Integer') result.integer = true;
     if (domain === 'RationalNumber') result.rational = true;
@@ -234,8 +234,8 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   description?: string | string[];
   readonly scope: RuntimeScope | undefined;
 
-  private _domain: Domain | undefined;
-  private _inferedDomain: [Domain, Domain] | undefined;
+  private _domain: BoxedDomain | undefined;
+  private _inferedDomain: [BoxedDomain, BoxedDomain] | undefined;
   // readonly unit?: BoxedExpression;
 
   private _number: boolean | undefined;
@@ -327,7 +327,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
       // If the dictionary entry is provided as a number, assume it's a
       // variable, and infer its domain based on its value.
       const value = ce.number(def.value);
-      let domain: Domain;
+      let domain: BoxedDomain;
       const defDomain = def.domain ? ce.domain(def.domain) : undefined;
       if (defDomain && value.valueDomain!.isCompatible(defDomain))
         domain = defDomain;
@@ -365,7 +365,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     // Otherwise, adopt the domain of the value, if there is one.
     // Otherwise, the default domain if there is one.
     // Otherwise 🤷 'Anything'
-    let domain: Domain;
+    let domain: BoxedDomain;
     const defDomain = def.domain ? ce.domain(def.domain) : undefined;
     if (defDomain && (!value || value.valueDomain!.isCompatible(defDomain)))
       domain = defDomain;
@@ -403,11 +403,11 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     if (val) this.setProps(valueToFlags(val));
   }
 
-  get domain(): Domain | undefined {
+  get domain(): BoxedDomain | undefined {
     return this._domain;
   }
 
-  set domain(domain: Domain | undefined | DomainExpression) {
+  set domain(domain: BoxedDomain | undefined | DomainExpression) {
     if (!domain) {
       this._domain = undefined;
       return;

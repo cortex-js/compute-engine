@@ -1,6 +1,6 @@
-import { Dictionary } from '../public';
+import { SymbolTable } from '../public';
 
-export const COLLECTIONS_DICTIONARY: Dictionary = {
+export const COLLECTIONS_LIBRARY: SymbolTable = {
   functions: [{ name: 'Sequence' }],
 };
 // Keys: { domain: 'Function' },

@@ -2,12 +2,12 @@ import { BoxedExpression, IComputeEngine } from '../public';
 import { sortAdd } from '../boxed-expression/order';
 import { asCoefficient } from './utils';
 import { flattenOps } from './flatten';
-import { SMALL_INTEGERS } from '../numerics/numeric';
+import { SMALL_INTEGER } from '../numerics/numeric';
 
 export class Sum {
   private engine: IComputeEngine;
 
-  // Factor out "small" rationals (numer or denom < 10,000).
+  // Factor out "small" rationals (numer and denom < SMALL_INTEGER).
   private _literal: [number, number] = [0, 1];
   private _imaginary = 0;
 
@@ -34,7 +34,7 @@ export class Sum {
   /**
    * Add a new term to the sum.
    * A term is a rational coefficient and an expression.
-   * Optinally, the term is multiplied by the constant `c` before beind added.
+   * Optionally, the term is multiplied by the constant `c` before being added.
    *
    * If the sum already has this term, the coefficient is added
    * to the previous one. Otherwise, a new entry is added.
@@ -66,11 +66,11 @@ export class Sum {
       if (term.complexValue) {
         let re = term.complexValue.re;
         let im = term.complexValue.im;
-        if (Number.isInteger(re) && Math.abs(re) <= SMALL_INTEGERS) {
+        if (Number.isInteger(re) && Math.abs(re) <= SMALL_INTEGER) {
           this._literal[0] += (this._literal[1] * re * c[0]) / c[1];
           re = 0;
         }
-        if (Number.isInteger(im) && Math.abs(im) <= SMALL_INTEGERS) {
+        if (Number.isInteger(im) && Math.abs(im) <= SMALL_INTEGER) {
           this._imaginary += (im * c[0]) / c[1];
           im = 0;
         }
@@ -93,7 +93,7 @@ export class Sum {
 
     let hasTerm = false;
     if (!term.isLiteral) {
-      // There's an overhead to calculate the has.
+      // There's an overhead to calculate the hash.
       // For best results, only use the hash if there are many terms
       if (this._terms.length > 500) {
         const h = term.hash;
