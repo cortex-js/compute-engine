@@ -1225,7 +1225,7 @@ export type BaseDefinition = {
    *
    * - Use only letters, digits and `-`, and the first character should be
    * a letter: `/^[a-zA-Z][a-zA-Z0-9-]+/`
-   * - Built-in functions and symbols should start with an uppercase letter
+   * - Functions and symbols exported from a library should start with an uppercase letter
    *
    */
   name: string;
