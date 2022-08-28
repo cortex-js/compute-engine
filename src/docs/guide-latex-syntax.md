@@ -4,10 +4,9 @@ permalink: /compute-engine/guides/latex-syntax/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 ---
-
 
 The CortexJS Compute Engine manipulates MathJSON expressions. It can also
 convert LaTeX strings to MathJSON expressions (**parsing**) and output MathJSON
@@ -34,8 +33,8 @@ A MathLive mathfield works like a textarea in HTML, but for math. It provides
 its content as a LaTeX string or a MathJSON expression, ready to be used with
 the Compute Engine.
 
-{% readmore "/mathlive/" %} Read more about the MathLive <strong>mathfield element</strong>
-{% endreadmore %}
+{% readmore "/mathlive/" %} Read more about the MathLive <strong>mathfield
+element</strong> {% endreadmore %}
 
 The behavior of `expr.parse()` and `expr.latex` can be customized by setting
 `ce.latexOptions`.
@@ -71,9 +70,9 @@ must be surrounded by curly brackets.
 ## Advanced Usage
 
 The LaTeX that can be parsed or serialized is defined by some dictionary
-entries. While the Compute Engine function and symbol definitions define the
-semantic of the MathJSON expressions, the LaTeX dictionary define the LaTeX
-syntax that can be parsed and serialized.
+entries. While the Compute Engine standard library define the semantic of the
+MathJSON expressions, the LaTeX dictionary define the LaTeX syntax that can be
+parsed and serialized.
 
 The Compute Engine include some default dictionaries to parse a number of common
 math expressions.

@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/domains/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 ---
 
@@ -12,23 +12,23 @@ toc: true
 
 <div class=symbols-table>
 
-| Domain                 | Notation           | Description                                                                                                 |
-| :--------------------- | :----------------- | :---------------------------------------------------------------------------------------------------------- |
-| `AlgebraicNumber`      | \\[ \mathbb{A} \\] | Elements are the root of a polynomial                                                                       |
-| `ComplexNumber`        | \\[ \mathbb{C} \\]   | A real or imaginary number                                                                                  |
-| `Integer`              | \\[ \mathbb{Z}\\]  | The set of whole numbers and their additive inverse \\(\lbrace \ldots -3, -2, -1,0, 1, 2, 3\ldots\rbrace\\) |
-| `NegativeInteger`      | \\[ \Z^- \\]       | Integers \\( \lt 0\\), \\(\lbrace \ldots -3, -2, -1\rbrace\\)                                                                                      |
-| `NegativeNumber`       | \\[ \R^- \\]       | Real numbers \\( \lt 0 \\)                                                                                  |
-| `NonNegativeInteger`   | \\[ \Z^{0+} \\]    | Integers \\( \geq 0 \\), \\(\lbrace 0, 1, 2, 3\ldots\rbrace\\)                                                                                     |
-| `NonNegativeNumber`    | \\[ \R^{0+} \\]    | Real numbers \\( \geq 0 \\)                                                                                 |
-| `NonPositiveInteger`   | \\[ \Z^{0-} \\]    | Integers \\( \leq 0 \\), \\(\lbrace \ldots -3, -2, -1, 0\rbrace\\)                                                                                     |
-| `NonPositiveNumber`    | \\[ \R^{0-} \\]    | Real numbers \\( \leq 0 \\)                                                                                 |
-| `Number`               |                    | Any number, real or complex                                                                                 |
-| `PositiveInteger`      | \\[ \Z^{+} \\]     | Integers \\( \gt 0 \\), \\(\lbrace 1, 2, 3\ldots\rbrace\\)                                                                                      |
-| `PositiveNumber`       | \\[ \R^{+} \\]     | Real numbers \\( \gt 0 \\)                                                                                  |
-| `RationalNumber`       | \\[ \mathbb{Q}\\]  | A number which can be expressed as the quotient \\(p / q\\) of two integers \\(p, q \in \mathbb{Z}\\).      |
-| `RealNumber`           | \\[ \mathbb{R} \\] | Numbers that form the unique Dedekind-complete ordered field (\\( \mathbb {R}  ; + ; · ; <\\)), up to an isomorphism                                                                                                            |
-| `TranscendentalNumber` | \\[ \mathbb{T} \\] | Real numbers that are not algebraic                                                                         |
+| Domain                 | Notation           | Description                                                                                                         |
+| :--------------------- | :----------------- | :------------------------------------------------------------------------------------------------------------------ |
+| `AlgebraicNumber`      | \\[ \mathbb{A} \\] | Elements are the root of a polynomial                                                                               |
+| `ComplexNumber`        | \\[ \mathbb{C} \\] | A real or imaginary number                                                                                          |
+| `Integer`              | \\[ \mathbb{Z}\\]  | The set of whole numbers and their additive inverse \\(\lbrace \ldots -3, -2, -1,0, 1, 2, 3\ldots\rbrace\\)         |
+| `NegativeInteger`      | \\[ \Z^- \\]       | Integers \\( \lt 0\\), \\(\lbrace \ldots -3, -2, -1\rbrace\\)                                                       |
+| `NegativeNumber`       | \\[ \R^- \\]       | Real numbers \\( \lt 0 \\)                                                                                          |
+| `NonNegativeInteger`   | \\[ \Z^{0+} \\]    | Integers \\( \geq 0 \\), \\(\lbrace 0, 1, 2, 3\ldots\rbrace\\)                                                      |
+| `NonNegativeNumber`    | \\[ \R^{0+} \\]    | Real numbers \\( \geq 0 \\)                                                                                         |
+| `NonPositiveInteger`   | \\[ \Z^{0-} \\]    | Integers \\( \leq 0 \\), \\(\lbrace \ldots -3, -2, -1, 0\rbrace\\)                                                  |
+| `NonPositiveNumber`    | \\[ \R^{0-} \\]    | Real numbers \\( \leq 0 \\)                                                                                         |
+| `Number`               |                    | Any number, real or complex                                                                                         |
+| `PositiveInteger`      | \\[ \Z^{+} \\]     | Integers \\( \gt 0 \\), \\(\lbrace 1, 2, 3\ldots\rbrace\\)                                                          |
+| `PositiveNumber`       | \\[ \R^{+} \\]     | Real numbers \\( \gt 0 \\)                                                                                          |
+| `RationalNumber`       | \\[ \mathbb{Q}\\]  | A number which can be expressed as the quotient \\(p / q\\) of two integers \\(p, q \in \mathbb{Z}\\).              |
+| `RealNumber`           | \\[ \mathbb{R} \\] | Numbers that form the unique Dedekind-complete ordered field (\\( \mathbb {R} ; + ; · ; <\\)), up to an isomorphism |
+| `TranscendentalNumber` | \\[ \mathbb{T} \\] | Real numbers that are not algebraic                                                                                 |
 
 </div>
 
@@ -71,8 +71,8 @@ toc: true
 | `IntegerTensor`               | A tensor whose elements are integers                                                                                                                                         |
 | `LogicalTensor`               | A tensor whose elements are 0 or 1                                                                                                                                           |
 | `Scalar`                      | A tensor of rank 0                                                                                                                                                           |
-| `Vector`<br>`Row`<br>`Column` | A tensor of rank 1. The argument of the parametric version specifies the number of elements in the vector.                                                                   |
-| `Matrix`                      | A tensor of rank 2. The argument of the parametric version specifies the number of rows and columns in the matrix.                                                           |
+| `Vector`<br>`Row`<br>`Column` | A tensor of rank 1. The argument of the domain expression specifies the number of elements in the vector.                                                                    |
+| `Matrix`                      | A tensor of rank 2. The argument of the domain expression specifies the number of rows and columns in the matrix.                                                            |
 | `Quaternion`                  | A \\(2\times2\\) matrix of complex elements. [Quaternions](https://en.wikipedia.org/wiki/Quaternion) are commonly used to represent vectors in 3D space (\\(\mathbb{R}^3\\)) |
 | `SquareMatrix`                | A tensor with the same number of rows and columns                                                                                                                            |
 | `MonomialMatrix`              | A square matrix with exactly one non-zero entry in each row and column                                                                                                       |
@@ -88,15 +88,14 @@ toc: true
 
 <div class=symbols-table>
 
-| Domain             | Description                                                                                      |
-| :----------------- | :----------------------------------------------------------------------------------------------- |
-| `Anything`          | The universal domain, it contains all possible values                                                                            |
-| `Boolean`          | `True` or `False`                                                                                |
-| `Domain`           | The domain of all the domains                                                                    |
-| `MaybeBoolean`     | `True` `False` or `Maybe`                                                                        |
-| `Nothing`          | The domain whose only member is the symbol `Nothing` |
-| `ParametricDomain` | The domain of all the parametric domains, that is the functions that can define a domain         |
-| `String`           | A string of Unicode characters                                                                   |
-| `Symbol`           | A string used to represent the name of a constant, variable or function in a MathJSON expression |
+| Domain         | Description                                                                                      |
+| :------------- | :----------------------------------------------------------------------------------------------- |
+| `Anything`     | The universal domain, it contains all possible values                                            |
+| `Boolean`      | `True` or `False`                                                                                |
+| `Domain`       | The domain of all the domains                                                                    |
+| `MaybeBoolean` | `True` `False` or `Maybe`                                                                        |
+| `Nothing`      | The domain whose only member is the symbol `Nothing`                                             |
+| `String`       | A string of Unicode characters                                                                   |
+| `Symbol`       | A string used to represent the name of a constant, variable or function in a MathJSON expression |
 
 </div>

@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/domains/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 ---
 
@@ -12,14 +12,14 @@ A **domain** is the set of the possible values of an expression.{.xl}
 
 A domain is represented by a **domain expression**, such as `Integer`, `Boolean`
 or `["Range", ["Literal", -1], ["Literal", +1]]`. `Integer` and `Boolean` are
-**domain literals**, while `["Range", ["Literal", -1], ["Literal", +1]]` is a
-**parametric domain expression**.
+**domain literals**.
 
 Domains are similar to _types_ in programming languages. Amongst other things,
 they are used to select the correct function definition.
 
 For example a function `Add` could operate either on numbers or matrixes. The
-domain of the arguments is used to select the appropriate function definition.
+domain of the arguments would be used to select the appropriate function
+definition.
 
 Symbolic manipulation algorithms also use domains to decide when certain
 transformations are applicable.
@@ -27,8 +27,8 @@ transformations are applicable.
 For example, \\( \sqrt{x^2} = x\\) only if \\(x \geq 0\\)
 
 {% readmore "/compute-engine/reference/domains/" %} Read more about the
-<strong>Domain Literals</strong> included in the standard dictionary of the
-Compute Engine {% endreadmore %}
+<strong>Domain Literals</strong> included in the standard library of the Compute
+Engine {% endreadmore %}
 
 <section id='obtaining-the-domain-of-an-expression'>
 
@@ -73,8 +73,7 @@ the `Void` domain (the bottom domain).
 
 There are a few other important domains:
 
-- The **`Domain`** domain contains all the domain literals and all the
-  parametric domains.
+- The **`Domain`** domain contains all the domain expressions.
 - The **`Value`** domain contains all the objects which are not domains, such as
   `Number`, `String`, `Symbol`, `Tuple`, etc...
 - The **`Nothing`** domain has exactly one value, the symbol `Nothing`. It is
@@ -128,11 +127,9 @@ ce.domain('Integer').isCompatible('PositiveNumber');
 
 </section>
 
-<section id='parametric-domains'>
+## Constructing New Domains
 
-## Parametric Domains
-
-A new domain can be defined using a parametric domain expression.
+A new domain can be defined using a domain expression.
 
 ```json
 // Range of non-negative integers
@@ -142,12 +139,11 @@ A new domain can be defined using a parametric domain expression.
 ["Function", "RealNumber", "Integer"]
 ```
 
-Parametric domains are represented as special expressions: they are functions
-with one of the domain constructors below and their arguments are domain
-literals or other parametric domain expressions.
+Domain expressions are functions with one of the domain constructors below as
+their head.
 
-By default, compatibility is determined by using invariance of the arguments of
-the parametric domain function.
+By default, compatibility between two domains is determined by using invariance
+of the arguments of the domain function.
 
 <div class=symbols-table>
 
@@ -172,8 +168,6 @@ the parametric domain function.
 | `Multiple`         | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integer", 1]`                                                                                                                                                           |
 
 </div>
-
-</section>
 
 <section id='simplifying-domains'>
 

@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/assumptions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 ---
 
@@ -82,8 +82,8 @@ ce.assume(parse('xy + 1 = 0'))'
 ### Using Assumptions to Declare Symbols
 
 Before a symbol can be used in an expression, the symbol must be known by the
-Compute Engine. A dictionary definition of a symbol can be used for this
-purpose, but an assumption that defines a domain for the symbol is sufficient.
+Compute Engine. The definition of a symbol can be used for this purpose, but an
+assumption that defines a domain for the symbol is sufficient.
 
 </section>
 

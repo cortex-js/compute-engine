@@ -4,16 +4,18 @@ permalink: /compute-engine/guides/symbols/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
-preamble: '<p class="xl">A <b>symbol</b> is a named mathematical object. It 
-  belongs to a domain and it may hold a value. A symbol without a value 
-  represents a mathematical unknown in an expression.</p>'
+preamble:
+  '<p class="xl">A <b>symbol</b> is a named mathematical object. It belongs to a
+  domain and it may hold a value. A symbol without a value represents a
+  mathematical unknown in an expression.</p>'
 head:
   modules:
     - /assets/js/code-playground.min.js
     - //unpkg.com/@cortex-js/compute-engine?module
 ---
+
 <script src="//unpkg.com/@cortex-js/compute-engine"></script>
 <script>
 moduleMap = {
@@ -22,8 +24,7 @@ moduleMap = {
  const ce = new ComputeEngine.ComputeEngine()
 </script>
 
-
-**To change the value or domain of a symbol**, use the `value` and `domain` 
+**To change the value or domain of a symbol**, use the `value` and `domain`
 properties of the symbol.
 
 <code-playground layout="stack" show-line-numbers>
@@ -33,8 +34,8 @@ n.domain = 'Integer';
 n.value = 5;
 console.log("n: ", n.value.json, n.domain.toString());</div></code-playground>
 
-A symbol can be used before being declared.  A previously unknown symbol has
-a domain of `ce.defaultDomain` and no value.
+A symbol can be used before being declared. A previously unknown symbol has a
+domain of `ce.defaultDomain` and no value.
 
 Symbols exist within a **scope**.
 
@@ -43,11 +44,11 @@ Symbols exist within a **scope**.
 The Compute Engine supports
 [lexical scoping](<https://en.wikipedia.org/wiki/Scope_(computer_science)>).
 
-The **context** of the Compute Engine is a stack of scopes that define the 
+The **context** of the Compute Engine is a stack of scopes that define the
 current symbol and function definitions.
 
-To locate the definition of a symbol or function, the dictionary associated with
-the current (top-most) scope is used first.
+To locate the definition of a symbol or function, the symbol table associated
+with the current (top-most) scope are used first.
 
 If no matching definition is found, the parent scope is searched, and so on
 until a definition is found.
@@ -56,44 +57,44 @@ until a definition is found.
 
 ```ts
 ce.pushScope({
-  dictionary: {
+  symbolTable: {
     symbols: [{ name: 'd', value: 500 }],
   },
 });
 ```
 
-The `dictionary` property of a scope contains bindings for symbols and
+The `symbolTable` property of a scope contains bindings for symbols and
 functions.
 
 **To exit a scope** use `ce.popScope()`. This will invalidate any definition
-associated with the scope, and restore definitions from previous scopes that may
-have been shadowed by the current scope.
+associated with the scope, and restore the symbol table from previous scopes
+that may have been shadowed by the current scope.
 
 ## Forgetting a Symbol
 
 **To _reset_ what is known about a symbol** use the `ce.forget()` function.
 
-The `ce.forget()` function will remove any domain/value associated with a 
-symbol, and any [assumption](/compute-engine/guides/assumptions) about the symbol.
+The `ce.forget()` function will remove any domain/value associated with a
+symbol, and any [assumption](/compute-engine/guides/assumptions) about the
+symbol.
 
-To forget about a specific symbol, pass the name of the symbol as an argument 
-to `ce.forget()`.
+To forget about a specific symbol, pass the name of the symbol as an argument to
+`ce.forget()`.
 
 To forget about all the symbols in the current scope, use `ce.forget()` without
 any arguments.
 
-Note that only symbols in the current scope are forgotten. If a definition
-for the symbol existed in a previous scope, that definition will now
-be in effect.
+Note that only symbols in the current scope are forgotten. If a definition for
+the symbol existed in a previous scope, that definition will now be in effect.
 
 ## Name Binding
 
 **[Name Binding](https://en.wikipedia.org/wiki/Name_binding) is the process of
 associating the name of a function or symbol with a definition.**
 
-The definition of symbols and functions is initially set when an instance of a 
-Compute Engine is created. Dictionaries that map names to definitions can be 
-provided  when the Compute Engine is created. Additional dictionaries can be
+The definition of symbols and functions is initially set when an instance of a
+Compute Engine is created. Dictionaries that map names to definitions can be
+provided when the Compute Engine is created. Additional dictionaries can be
 provided later using the `ce.pushScope()` function.
 
 The definitions record contain information such as the domain or value of a
@@ -103,8 +104,8 @@ symbol, or how to simplify or evaluate functions.
 
 When a symbol is boxed, that is when `ce.box()` is called on an expression that
 contains the symbol, a definition matching the name of the symbol is searched in
-the symbol dictionary of the current scope (`ce.context`). If none is found, the 
-parent scope is searched recursively until one is found or the root scope is 
+the symbol table of the current scope (`ce.context`). If none is found, the
+parent scope is searched recursively until one is found or the root scope is
 reached.
 
 If a definition is found, the symbol is associated with (bound to) the
@@ -113,15 +114,14 @@ definition.
 ### Symbol Auto-binding
 
 If `ce.defaultDomain` is `null`, and no definition exist for the symbol, the
-symbol is unbound. This will limit the usefulness of the symbol, although
-the symbol can still be used to represent unknowns.
+symbol is unbound. This will limit the usefulness of the symbol, although the
+symbol can still be used to represent unknowns.
 
-If `ce.defaultDomain` is not`null` and no definition is found for the symbol, 
-a new one is created automatically.
+If `ce.defaultDomain` is not`null` and no definition is found for the symbol, a
+new one is created automatically.
 
-The new definition has a domain of `ce.defaultDomain' and no value associated 
+The new definition has a domain of `ce.defaultDomain' and no value associated
 with it, so the symbol will be a **free variable**.
-
 
 By default, `defaultDomain` is `"ExtendedRealNumber"` so any unknown variable is
 automatically assumed to be a real number.
@@ -214,11 +214,9 @@ console.log(n.domain);
 
 console.log(n).latex;
 // ➔ 5
-
 ```
 
 Note that `ce.assume('n', 5)` is equivalent to `ce.box('n').value = 5`.
-
 
 ### Function Binding
 
@@ -226,16 +224,16 @@ The definition associated with a function determines how it is put in canonical
 form, simplified and evaluated.
 
 When a function is boxed, for example when `ce.box()` is called on an expression
-that includes the name of the function, a dictionary entry for the function is 
-looked up in the current context, then recursively in the parent scope.
+that includes the name of the function, a definition for the function is looked
+up in the current context, then recursively in the parent scope.
 
-When a matching entry is found, the definitions associated with it are 
-bound with the boxed function. Note that unlike a symbol, a function may 
-have multiple definitions in a given scope. In this way, function can support
+When a matching entry is found, the definitions associated with it are bound
+with the boxed function. Note that unlike a symbol, a function may have multiple
+definitions in a given scope. In this way, function can support
 [ad-hoc polymorphism](https://en.wikipedia.org/wiki/Ad_hoc_polymorphism), that
-is have multiple implementations depending on the values or domains of their 
+is have multiple implementations depending on the values or domains of their
 arguments.
 
-When an expression containing a function is put in canonical form, 
-simplified or evaluated, the appropriate definition is selected based on 
-the domain and value of its arguments.
+When an expression containing a function is put in canonical form, simplified or
+evaluated, the appropriate definition is selected based on the domain and value
+of its arguments.

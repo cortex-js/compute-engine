@@ -1,10 +1,10 @@
 ---
-title: Canonical Forms
+title: Canonical Form
 permalink: /compute-engine/guides/canonical-form/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 ---
 
@@ -16,34 +16,34 @@ object:
 <div class="equal-width-columns">
 
 |                  |                            |                            |
-| :---------------: | :-----------------------: | :------------------------: |
+| :--------------: | :------------------------: | :------------------------: |
 | \\[ 215.3465 \\] | \\[ 2.15346\mathrm{e}2 \\] | \\[ 2.15346 \times 10^2\\] |
-| \\[ 1 - x \\]    | \\[-x + 1 \\]              | \\[ 1 + (-x)\\]            |
-| \\[ -2x^{-1}\\]  | \\[ -\frac{2}{x} \\]       | \\[ \frac{-2}{x} \\]       |
+|  \\[ 1 - x \\]   |       \\[-x + 1 \\]        |      \\[ 1 + (-x)\\]       |
+| \\[ -2x^{-1}\\]  |    \\[ -\frac{2}{x} \\]    |    \\[ \frac{-2}{x} \\]    |
 
 </div>
 
-By applying some conventions &mdash; for example sorting operands of 
-commutative functions or flattening associative functions &mdash; 
-we define a **canonical** representation.
+By applying some conventions &mdash; for example sorting operands of commutative
+functions or flattening associative functions &mdash; we define a **canonical**
+representation.
 
 A canonical representation is somewhat arbitrary, but using it consistently make
 some operations easier, for example, comparing two expressions for equality.
 
 The canonical form used by the Compute Engine follows common (but certainly not
 universal) conventions in writing mathematical expressions, and expresses them
-in a way that optimize their computation. It is not necessarily "the simplest" way
-to represent an expression.
+in a way that optimize their computation. It is not necessarily "the simplest"
+way to represent an expression.
 
 The canonical form of an expression is always the same when used with a given
 Compute Engine instance. However, do not rely on the canonical form as future
 versions of the Compute Engine could provide a different result.
 
-The `ce.box()` and `ce.parse()` function return a non-canonical expression. 
-This may be desirable for example to compare a "raw" user input.
+The `ce.box()` and `ce.parse()` function return a non-canonical expression. This
+may be desirable for example to compare a "raw" user input.
 
-The output of `expr.simplify()`, `expr.evaluate()` and `expr.N()` are
-canonical expressions.
+The output of `expr.simplify()`, `expr.evaluate()` and `expr.N()` are canonical
+expressions.
 
 **To obtain the canonical representation of an expression**, use the
 `expr.canonical` property.
@@ -53,9 +53,8 @@ console.log(ce.box(['Add', 2, 'x', 3]).canonical);
 // ➔ ["Add", 5, "x"]
 ```
 
-If the expression is already canonical, `expr.canonical` immediately return 
+If the expression is already canonical, `expr.canonical` immediately return
 `expr`.
-
 
 Calculating the canonical form of an expression is applying some rewriting rules
 to an expression. In that sense, it is similar to simplifying an expression with
@@ -63,8 +62,8 @@ to an expression. In that sense, it is similar to simplifying an expression with
 applies, and it will not take into account any assumptions about symbols.
 
 The default canonical representation applies a series of transformation to put
-sums, products, numbers, roots, etc... in canonical form. Below is a list
-of some of the transformations applied to obtain the canonical form:
+sums, products, numbers, roots, etc... in canonical form. Below is a list of
+some of the transformations applied to obtain the canonical form:
 
 - Idempotency: \\( f(f(x)) \to f(x) \\)
 - Involution: \\( f(f(x)) \to x \\)
@@ -72,8 +71,8 @@ of some of the transformations applied to obtain the canonical form:
 - Commutativity: sorted arguments
 - Some operations may be substituted with others, for example substraction
   replaced by addition. \\(1 + 2 - 3 \longrightarrow Add(1, 2, -3)\\)
-- For `Add`, literal 0 is removed, small integers and small rationals are 
-  added together.
+- For `Add`, literal 0 is removed, small integers and small rationals are added
+  together.
 - For `Multiply`, literal 1 is removed, small integers and small rations are
   multiplied together.
 - For `Divide`, replaced by `Multiply` / `Power`
@@ -92,6 +91,3 @@ of some of the transformations applied to obtain the canonical form:
   - \\[\infty^{\infty} \longrightarrow \infty\\]
   - \\[\infty^{-\infty} \longrightarrow 0\\]
   - \\[(-\infty)^{\pm \infty} \longrightarrow \operatorname{NaN}\\]
-
-
-                                                                                                          
