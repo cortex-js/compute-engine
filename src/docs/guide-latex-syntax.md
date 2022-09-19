@@ -12,7 +12,30 @@ The CortexJS Compute Engine manipulates MathJSON expressions. It can also
 convert LaTeX strings to MathJSON expressions (**parsing**) and output MathJSON
 expressions as LaTeX string (**serializing**).{.xl}
 
-**To parse a LaTeX string to MathJSON**, call the `ce.parse()` function.
+**To input math using an interactive mathfield**, use [MathLive](/mathlive/).
+
+A MathLive `<mathfield>` element works like a `<textarea>` in HTML, but for 
+math. It provides its content as a LaTeX string or a MathJSON expression, ready
+to be used with the Compute Engine.
+
+{% readmore "/mathlive/" %} Read more about the MathLive <strong>mathfield
+element</strong> {% endreadmore %}
+
+
+**To parse a LaTeX string**, call the `ce.parse()` function.
+
+The Compute Engine will apply maximum effort to parse the input string as 
+LaTeX, even if it includes errors. If errors are encountered, the 
+resulting expression will have its `expr.isValid` property set to `false`.
+An `["Error"]` expression will be produced where a problem was encountered.
+To get the list of all the errors in an expression, use `expr.errors` which
+will return an array of `["Error"]` expressions.
+
+{% readmore "/compute-engine/guides/expressions/#errors" %}
+Read more about the **errors** that can be returned.
+{% endreadmore %}
+
+
 
 **To serialize an expression to a LaTeX string**, read the `expr.latex`
 property.
@@ -27,17 +50,24 @@ console.log(ce.serialize(['Add', ['Power', 'x', 3], 2]));
 // ➔  "x^3 + 2"
 ```
 
-**To input math using an interactive mathfield**, use [MathLive](/mathlive/).
 
-A MathLive mathfield works like a textarea in HTML, but for math. It provides
-its content as a LaTeX string or a MathJSON expression, ready to be used with
-the Compute Engine.
+**To customize the behavior of `expr.parse()` and `expr.latex`** set the 
+`ce.latexOptions` property.
 
-{% readmore "/mathlive/" %} Read more about the MathLive <strong>mathfield
-element</strong> {% endreadmore %}
+Example of customization:
+- whether to use an invisible multiply operator between expressions
+- whether the input LaTeX should be preserved as metadata in the output expression
+- how to handle encountering unknown symbols while parsing
+- whether to use a dot or a comma as a decimal marker
+- how to display imaginary numbers and infinity
+- whether to format numbers using engineering or scientific format
+- what precision to use when formatting numbers
+- how to serialize an explicit or implicit multiplication (using `\times`, `\cdot`, etc...)
+- how to serialize functions, fractions, groups, logical operators, intervals, roots and powers.
 
-The behavior of `expr.parse()` and `expr.latex` can be customized by setting
-`ce.latexOptions`.
+
+The type of `ce.latexOptions` is <kbd>[NumberFormattingOptions](/docs/compute-engine/?q=NumberFormattingOptions) & [ParseLatexOptions](/docs/compute-engine/?q=ParseLatexOptions) & [SerializeLatexOptions](/docs/compute-engine/?q=SerializeLatexOptions)</kbd>. Refer to these interfaces for more details.
+
 
 ```javascript
 const ce = new ComputeEngine();
@@ -73,8 +103,8 @@ The <a href ="/math-json/">MathJSON format</a> is independent of any source or
 target language (LaTeX, MathASCII, etc...) or of any specific interpretation of
 the symbols used in a MathJSON expression (`"Pi"`, `"Sin"`, etc...).
 
-A **LaTeX dictionary** defines how a MathJSON expression can be expressed into a
-LaTeX (**serialization**) or constructed LaTeX (**parsing**).
+A **LaTeX dictionary** defines how a MathJSON expression can be expressed as a
+LaTeX string (**serialization**) or constructed from a LaTeX string (**parsing**).
 
 It includes definitions such as:
 
@@ -89,18 +119,21 @@ Engine constructor.
 
 To extend the default dictionary, call `ComputeEngine.getLatexDictionary()`.
 
+To remove entries from the default dictionary, filter them.
+
 ```javascript
+// Remove the `PlusMinus` entry, and add one for the `\\smoll` command
 const ce = new ComputeEngine({
   latexDictionary: [
-    ...ComputeEngine.getLatexDictionary(),
+    ...ComputeEngine.getLatexDictionary().filter(x => x.name !== 'PlusMinus),
     {
       trigger: ['\\smoll'],
       requiredLatexArg: 2,
       parse: (parser: Parser): Expression => {
         return [
           'Divide',
-          parser.matchRequiredLatexArgument() ?? 'Missing',
-          parser.matchRequiredLatexArgument() ?? 'Missing',
+          parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"],
+          parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"]
         ];
       },
     },
