@@ -67,7 +67,7 @@ some of the transformations applied to obtain the canonical form:
 
 - Idempotency: \\( f(f(x)) \to f(x) \\)
 - Involution: \\( f(f(x)) \to x \\)
-- Associativity: \\( f(a, f(b), c) \to f(a, b, c) \\)
+- Associativity: \\( f(a, f(b, c)) \to f(a, b, c) \\)
 - Commutativity: sorted arguments
 - Some operations may be substituted with others, for example substraction
   replaced by addition. \\(1 + 2 - 3 \longrightarrow Add(1, 2, -3)\\)
