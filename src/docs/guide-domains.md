@@ -47,7 +47,7 @@ Engine {% endreadmore %}
 
 ## Obtaining the Domain of an Expression
 
-**To query the domain of an expression**, read the `domain` property of the
+**To query the domain of an expression** read the `domain` property of the
 expression.
 
 ```js
@@ -135,8 +135,13 @@ that can be determined:
 
 **To evaluate the compatibility of two domains** use `domain.isCompatible()`
 
+By default, `domain.isCompatible()` will check for covariant compatibility.
+
 ```ts
-ce.domain('Integer').isCompatible('PositiveNumber');
+ce.domain('PositiveNumber').isCompatible('Integer');
+// ➔ true
+
+ce.domain('Number').isCompatible('RealNumber', 'contravariant');
 // ➔ true
 ```
 
@@ -144,7 +149,9 @@ ce.domain('Integer').isCompatible('PositiveNumber');
 
 ## Constructing New Domains
 
-A new domain can be defined using a domain expression.
+A domain constructor is a function with one of the heads below.
+
+**To define a new domain** use a domain constructor.
 
 ```json
 // Range of non-negative integers
@@ -153,12 +160,8 @@ A new domain can be defined using a domain expression.
 // Functions with a single real number argument and that return an integer
 ["Function", "RealNumber", "Integer"]
 ```
+When a domain expression is boxed, it is automatically put in canonical form.
 
-Domain expressions are functions with one of the domain constructors below as
-their head.
-
-By default, compatibility between two domains is determined by using invariance
-of the arguments of the domain function and contravariance for the co-domain.
 
 <div class=symbols-table>
 
@@ -183,23 +186,3 @@ of the arguments of the domain function and contravariance for the co-domain.
 | `Multiple`         | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integer", 1]`                                                                                                                                       |
 
 </div>
-
-<section id='simplifying-domains'>
-
-## Simplifying Domains
-
-**To simplify a domain expression**, call `domain.simplify()`.
-
-```js
-ce.box(['SetMinus', 'Integer', ['Range', '-Infinity', 0]]).simplify();
-// ➔ ["Range", 1, "+Infinity]]
-
-ce.box([
-  'Union',
-  ['Number', 0, '+Infinity'],
-  ['Number', '-Infinity', 5],
-]).simplify();
-// ➔ "ExtendedRealNumber"
-```
-
-</section>
