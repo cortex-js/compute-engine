@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/expressions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 ---
 
@@ -90,10 +90,10 @@ console.log(expr.json);
 **To customize the format of the MathJSON expression** use the
 `ce.jsonSerializationOptions` property )
 
-Use this option to control which metadata, if any, should be included,
-whether to use shorthand notation, and to exclude some functions. See 
-[JsonSerializationOptions](/docs/compute-engine/?q=JsonSerializationOptions) 
-for more info about what can be customized.
+Use this option to control which metadata, if any, should be included, whether
+to use shorthand notation, and to exclude some functions. See
+[JsonSerializationOptions](/docs/compute-engine/?q=JsonSerializationOptions) for
+more info about what can be customized.
 
 ```ts
 const expr = ce.parse('2 + \\frac{q}{p}');
@@ -115,18 +115,15 @@ console.log(expr.canonical.json);
 //    ]]
 ```
 
-
 ## Literal Expressions
 
 A literal expression is one that has a fixed value that was provided directly
-when the expression was defined. 
+when the expression was defined.
 
-Numbers and strings are literals. Symbols and functions are not. They may have 
-a value, but their value is calculated indirectly.
+Numbers and strings are literals. Symbols and functions are not. They may have a
+value, but their value is calculated indirectly.
 
 **To check if an expression is a literal**, use `expr.isLiteral`.
-
-
 
 ## Immutability
 
@@ -142,7 +139,6 @@ depend on contextual information which can change over time.
 For example, `expr.isPositive` may return `undefined` if nothing is known about
 a symbol. But if an assumption about the symbol is made later, or a value
 assigned to it, then `expr.isPositive` may take a different value.
-
 
 ```js
 const expr = ce.box('x');
@@ -161,19 +157,16 @@ What doesn't change is the fact that `expr` represents the symbol `"x"`.
 A pure expression is an expression whose value is fixed. Evaluating it produces
 no side effect.
 
-The \\( \sin() \\) function is pure: it evaluates to the same value when the 
+The \\( \sin() \\) function is pure: it evaluates to the same value when the
 same arguments are applied to it.
 
-On the other hand, the \\( \mathrm{random}() \\) function is not pure: by its 
+On the other hand, the \\( \mathrm{random}() \\) function is not pure: by its
 nature it evaluates to a different value on every evaluation.
 
 Numbers, symbols and strings are pure. A function expression is pure if the
 function itself is pure, and all its arguments are pure as well.
 
 **To check if an expression is pure**, use `expr.isPure`.
-
-
-
 
 <section id='canonical'>
 
@@ -182,7 +175,8 @@ function itself is pure, and all its arguments are pure as well.
 The canonical form of an expression is a "standard" way of writing an
 expression.
 
-**To check if an expression is already in canonical form**, use `expr.isCanonical`.
+**To check if an expression is already in canonical form**, use
+`expr.isCanonical`.
 
 **To obtain the canonical representation of an expression**, use
 `expr.canonical`.
@@ -214,9 +208,7 @@ is a number. Use `isLiteral` to distinguish literal numbers from other
 expressions that may have a numeric value.
 
 A symbol may have a value if it represents a bound variable, but it may also
-have no value if it represents a free variable. 
-
-
+have no value if it represents a free variable.
 
 <section id=errors>
 
@@ -224,19 +216,19 @@ have no value if it represents a free variable.
 
 Sometimes, things go wrong.
 
-When something goes wrong an `["Error"]` expression is returned. 
+When something goes wrong the Compute Engine uses an `["Error"]` expression.
 
-The **first argument** of an `["Error"]` expression provides details about the 
-nature of the problem. This can be either a string or an `["ErrorCode"]` 
+The **first argument** of an `["Error"]` expression provides details about the
+nature of the problem. This can be either a string or an `["ErrorCode"]`
 expression if there are additional arguments to the error.
 
 For example if the problem is that an argument of a function expression is not
-of the expected domain, an expression such as 
-`["Error", ["ErrorCode", "'expected-argument-domain'", ["Domain", "Number"]]]`
+of the expected domain, an expression such as
+`["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", "Number"]]]`
 could be returned to indicate that a value of domain `"Number"` was expected.
 
-The **second argument** of an `["Error"]` expression indicate the context of 
-the error. This can be a `["Latex"]` expression when the problem occurred while
+The **second argument** of an `["Error"]` expression indicate the context of the
+error. This can be a `["Latex"]` expression when the problem occurred while
 parsing a LaTeX string, or another expression if the problem was detected later.
 
 ### Parsing Errors
@@ -246,77 +238,109 @@ doctrine. That is, even partially complete expressions are parsed, and as much
 of the input as possible is reflected in the MathJSON result.
 
 If required operands are missing (the denominator of a fraction, for example), a
-`["Error", "'missing'"]` error expression is inserted where the missing operand 
+`["Error", "'missing'"]` error expression is inserted where the missing operand
 should have been.
 
-Problems that occur while parsing a LaTeX string will usually indicate a 
-LaTeX syntax error or typo: missing `}`, mistyped command name, etc...
-
-
+Problems that occur while parsing a LaTeX string will usually indicate a LaTeX
+syntax error or typo: missing `}`, mistyped command name, etc...
 
 ### Semantic Errors
 
-Some errors are not caught until an expression is bound, that is until
-an attempt is made to associate its symbol and function identifiers to 
-definitions. This could include missing or mismatched arguments. 
+Some errors are not caught until an expression is bound, that is until an
+attempt is made to associate its symbol or function identifiers to a definition.
+This could include errors such as missing or mismatched arguments.
 
-Some errors that could be considered LaTeX syntax errors may not surface until 
-binding occurs. 
+Some errors that could be considered LaTeX syntax errors may not surface until
+binding occurs.
 
-For example `\frac{1}{2=x}` (instead of `\frac{1}{2}=x`) will be parsed as 
-`["Divide", 1, ["Equal", 2, x]]`. The fact that the second argument of the `"Divide"` 
-function is a boolean and not a number will not be detected until the definition
-for `"Divide"` has been located.
+For example `\frac{1}{2=x}` (instead of `\frac{1}{2}=x`) will be parsed as
+`["Divide", 1, ["Equal", 2, x]]`. The fact that the second argument of the
+`"Divide"` function is a boolean and not a number will not be detected until the
+definition for `"Divide"` has been located.
 
-Name binding is done lazily, not upon boxing. To force the binding to occur, 
+Name binding is done lazily, not upon boxing. To force the binding to occur,
 request the canonical version of the expression.
 
-**To check if an expression includes an `["Error"]` subexpression** check
-the `expr.isValid` property.
+**To check if an expression includes an `["Error"]` subexpression** check the
+`expr.isValid` property.
 
-**To get the list of all the `["Error"]` subexpression** use the 
-`expr.errors` property.
+**To get the list of all the `["Error"]` subexpression** use the `expr.errors`
+property.
 
 <div class=symbols-table>
 
-| Error Code       | Meaning                                     |
-| :--------- | :----------------------------------------------------- |
-| `syntax-error` | the parsing could not continue |
-| `missing` | an expression was expected |
-| `expected-expression` | an expression was expected inside an enclosure (parentheses) |
-| `unexpected-command` | the command is unknown, or not applicable in the current parsing context |
-| `unexpected-token` | the character does not apply to the current parsing context |
-| `expected-argument-domain` | the argument provided does not match the expected domain |
-| `expected-closing-delimiter` | a closing `}` was expected, but is missing |
-| `unexpected-closing-delimiter` | a closing `}` was encountered, but not expected |
-| `expected-environment-name` | the name of an environment should be provided with a `\begin` or `\end` command |
-| `unknown-environment` | the environment name provided cannot be parsed |
-| `unbalanced-environment` | the named used with the `\begin` and `\end` commands should match | 
-| `unexpected-operator` | the operator does not apply to the current parsing context. Could be a infix or postfix operator without a rhs. |
-| `unexpected-digit` | the string included some characters outside of the range of expected digits |
-| `expected-string-argument` | the argument was expected to be a string |
-| `unexpected-base` | the base is outside of the expected range (2..36) |
-| `iteration-limit-exceeded` | a loop has reached the maximum iteration limit |
+| Error Code                     | Meaning                                                                                                          |
+| :----------------------------- | :--------------------------------------------------------------------------------------------------------------- |
+| `syntax-error`                 | the parsing could not continue                                                                                   |
+| `missing`                      | an expression was expected                                                                                       |
+| `expected-expression`          | an expression was expected inside an enclosure (parentheses)                                                     |
+| `unexpected-command`           | the command is unknown, or not applicable in the current parsing context                                         |
+| `unexpected-token`             | the character does not apply to the current parsing context                                                      |
+| `mismatched-argument-domain`   | the argument provided does not match the expected domain                                                         |
+| `unexpected-argument`          | an argument is provided when one was not expected                                                                |
+| `expected-closing-delimiter`   | a closing `}` was expected, but is missing                                                                       |
+| `unexpected-closing-delimiter` | a closing `}` was encountered, but not expected                                                                  |
+| `expected-environment-name`    | the name of an environment should be provided with a `\begin` or `\end` command                                  |
+| `unknown-environment`          | the environment name provided cannot be parsed                                                                   |
+| `unbalanced-environment`       | the named used with the `\begin` and `\end` commands should match                                                |
+| `unexpected-operator`          | the operator does not apply to the current parsing context. Could be an infix or postfix operator without a rhs. |
+| `unexpected-digit`             | the string included some characters outside of the range of expected digits                                      |
+| `expected-string-argument`     | the argument was expected to be a string                                                                         |
+| `unexpected-base`              | the base is outside of the expected range (2..36)                                                                |
+| `iteration-limit-exceeded`     | a loop has reached the maximum iteration limit                                                                   |
+
 </div>
 
-
 ```ts
-console.log(ce.parse('\\frac{1}').json);
-// ➔ ["Divide", 1, ["Error", "'missing'"]]
+console.log(ce.parse('\\oops').json);
+// ➔ ["Error", ["ErrorCode","'unexpected-command'","'\\oops'"], ["Latex","'\\oops'"]
 
-console.log(ce.parse('\\sqrt{}').json);
-// ➔  ["Sqrt", ["Error", "'missing'"]]
+console.log(ce.parse('\\oops{bar}+2').json);
+// ➔  ["Add",
+//        ["Error",
+//          ["ErrorCode","'unexpected-command'","'\\oops'"],
+//          ["Latex","'\\oops{bar}'"]
+//        ],
+//        2
+//    ]
 
-console.log(ce.parse('\\sqrt').json);
-// ➔ ["Sqrt", ["Error", "'missing'"]]
+console.log(ce.parse('\\begin{oops}\\end{oops}').json);
+// ➔ ["Error",["ErrorCode","'unknown-environment'","'oops'"],["Latex","'\\\\begin{oops}\\\\end{oops}'"]
 
-console.log(ce.parse('\\sqrt{').json);
-// ➔  ["Error", ["Sqrt", ["Error", "'missing'"]], "'syntax-error'", ["Latex", "'{'"]]
+console.log(ce.parse('1+\\sqrt').json);
+// ➔ ["Add", 1 ,["Sqrt", ["Error", "'missing'"]]]
 
-console.log(ce.parse('\\times 2').json);
-// ➔ ["Error", "'unexpected-operator'"]
+console.log(ce.parse('1+\\frac{2}').json);
+// ➔ ["Add", 1, ["Divide", 2, ["Error","'missing'"]]]
+
+console.log(ce.parse('1+(2=2)+2').json);
+// ➔ ["Add", 1, ["Delimiter", ["Equal", 2, 2]]]
+
+console.log(ce.parse('1+(2=2)+3').canonical.json);
+// ➔ ["Add",
+//      1,
+//      ["Error",
+//          ["ErrorCode", "'mismatched-argument-domain'", ["Domain", "Number"]],
+//          ["Delimiter",["Equal", 2, 2]]
+//      ],
+//      3
+//    ]
+
+console.log(ce.parse('\\times 3').json);
+// ➔ ["Sequence", ["Error", ["ErrorCode", "'unexpected-operator'", "'\\times'"], ["Latex","'\\times'"]], 3]
+
+console.log(ce.parse('x__+1').json);
+// ➔ ["Add", ["Subscript", "x", ["Error","'syntax-error'", ["Latex","'_'"]]], 1]
+
+console.log(ce.parse('x_{a').json);
+// ➔ ["Subscript", "x", ["Error", "'expected-closing-delimiter'", ["Latex","'{a'"]]]
+
+console.log(ce.parse('1()').json);
+// ➔ ["Multiply",1,["Error","'expected-expression'",["Latex","'()'"]]]
+
+console.log(ce.parse('x@2').json);
+// ➔ ["Sequence", "x", ["Error", ["ErrorCode", "'unexpected-token'", "'@'"], ["Latex", "'@2'"]]]
 ```
-
 
 </section>
 
@@ -333,6 +357,3 @@ function and the values of an object property:
   `expr.sgn` for a symbol with no assigned value and no assumptions.
 - **`this`**: this function was not applicable, or there was nothing to do. For
   example, invoking `expr.simplify()` on a boxed string.
-
-{% readmore "/compute-engine/guides/symbols/" %} Read more about defining and 
-changing the value of <strong>symbols</strong> {% endreadmore %}
