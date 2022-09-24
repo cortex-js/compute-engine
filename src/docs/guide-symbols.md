@@ -7,7 +7,7 @@ sidebar:
   - nav: 'universal'
 toc: true
 preamble:
-  '<p class="xl">A <b>symbol</b> is a named mathematical object. It belongs to a
+  '<h1>Symbols</h1><p class="xl">A <b>symbol</b> is a named mathematical object. It belongs to a
   domain and it may hold a value. A symbol without a value represents a
   mathematical unknown in an expression.</p>'
 head:
