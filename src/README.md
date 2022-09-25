@@ -287,15 +287,15 @@ Specifically:
 
 -234.534e-46
 
-// The numbers below cannot be represented as JSON number literals
-{ "num": "-234.534e-46" }
+// The numbers below cannot be represented as JSON number literals:
 
-{
-  "num":
-    "3.141592653589793238462643383279502884197169399375105"
-}
+// Exponent out of bounds
+{ "num": "5.78e309" }
 
+// Too many digits
+{ "num": "3.14159265358979323846264338327950288419716" }
 
+// Non-finite number
 { "num": "-Infinity" }
 
 ```
@@ -525,11 +525,28 @@ and its arguments.
 }
 ```
 
+### Functions as JSON Arrays
+
+If a **function** has no extra metadata it can be represented as a JSON array.
+
+For example these two expressions are equivalent:
+
+```json
+{ "fn": ["Cos", ["Add", "x", 1]] }
+
+["Cos", ["Add", "x", 1]]
+```
+
+An array representing a function must have at least one element, the head of the
+function. Therefore `[]` is not a valid expression.{.notice--info}
+
+### Function Head
+
 The **head** of the function expression is the first element in the array. Its
 presence is required. It indicates the **name of the function** or "what" the
 function is about.
 
-The head is frequently a string, but it can be another expression.
+The head is usually a string, but it can be another expression.
 
 - If it is a string, it should follow the conventions for function names.
 
@@ -541,8 +558,8 @@ The head is frequently a string, but it can be another expression.
   ```
 
 - If it is an expression, it may include the wildcard `_` or `_1` to represent
-  the first argument, `_2` to represent the second, etc... The wildcard `__`
-  represents the sequence of all the arguments.
+  the first argument, `_2` to represent the second argument, etc... The wildcard
+  `__` represents the sequence of all the arguments.
 
   ```json
   [["Multiply", "_", "_"], 4]
@@ -563,21 +580,6 @@ The expression corresponding to \\(\sin^{-1}(x)\\) is:
 
 The head of this expression is `["InverseFunction", "Sin"]` and the argument is
 `"x"`.
-
-### Functions as JSON Arrays
-
-If a **function** has no extra metadata it can be represented as a JSON array.
-
-For example these two expressions are equivalent:
-
-```json
-{ "fn": ["Cos", ["Add", "x", 1]] }
-
-["Cos", ["Add", "x", 1]]
-```
-
-An array representing a function must have at least one element, the head of the
-function. Therefore `[]` is not a valid expression.{.notice--info}
 
 ## Dictionary
 
