@@ -9,70 +9,109 @@ export const ce = new ComputeEngine();
 describe('basic', () => {
   test('LaTex Syntax Errors', () => {
     expect(parse('\\frac')).toMatchInlineSnapshot(
-      `'["Divide", "Missing", "Missing"]'`
+      `'["Divide", ["Error", "'missing'"], ["Error", "'missing'"]]'`
     );
-    expect(parse('\\frac{')).toMatchInlineSnapshot(
-      `'["Multiply", ["Divide", "Missing", "Missing"], "Nothing"]'`
+    expect(parse('\\frac{')).toMatchInlineSnapshot(`
+      '[
+        "Divide",
+        ["Error", "'expected-closing-delimiter'", ["Latex", "''"]],
+        ["Error", "'missing'"]
+      ]'
+    `);
+    expect(parse('\\frac{{')).toMatchInlineSnapshot(`
+      '[
+        "Divide",
+        ["Error", "'expected-closing-delimiter'", ["Latex", "'{'"]],
+        ["Error", "'missing'"]
+      ]'
+    `);
+    expect(parse('\\frac{}}')).toMatchInlineSnapshot(`
+      '[
+        "Sequence",
+        ["Divide", ["Error", "'missing'"], ["Error", "'missing'"]],
+        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+      ]'
+    `);
+    expect(parse('\\frac{1}}')).toMatchInlineSnapshot(`
+      '[
+        "Sequence",
+        ["Divide", 1, ["Error", "'missing'"]],
+        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+      ]'
+    `);
+    expect(parse('\\frac{1}{2')).toMatchInlineSnapshot(`
+      '[
+        "Divide",
+        1,
+        ["Error", "'expected-closing-delimiter'", ["Latex", "'2'"]]
+      ]'
+    `);
+    expect(parse('\\sqrt{}')).toMatchInlineSnapshot(
+      `'["Sqrt", ["Error", "'missing'"]]'`
     );
-    expect(parse('\\frac{{')).toMatchInlineSnapshot(
-      `'["Multiply", ["Divide", "Missing", "Missing"], "Nothing"]'`
+    expect(parse('\\sqrt{}{}')).toMatchInlineSnapshot(
+      `'["Sqrt", ["Error", "'missing'"]]'`
     );
-    expect(parse('\\frac{}}')).toMatchInlineSnapshot(
-      `'["Multiply", ["Divide", "Missing", "Missing"], "Nothing"]'`
+    expect(parse('\\sqrt')).toMatchInlineSnapshot(
+      `'["Sqrt", ["Error", "'missing'"]]'`
     );
-    expect(parse('\\frac{1}}')).toMatchInlineSnapshot(
-      `'["Multiply", ["Divide", 1, "Missing"], "Nothing"]'`
-    );
-    expect(parse('\\frac{1}{2')).toMatchInlineSnapshot(
-      `'["Multiply", ["Divide", 1, "Missing"], 2]'`
-    );
-    expect(parse('\\sqrt{}')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
-    expect(parse('\\sqrt{}{}')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
-    expect(parse('\\sqrt')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
   });
 
   test('Semantic Errors', () => {
-    expect(parse('1+')).toMatchInlineSnapshot(`'["Add", 1, "Nothing"]'`);
+    expect(parse('1+')).toMatchInlineSnapshot(
+      `'["Add", 1, ["Error", "'missing'", ["Latex", "'+'"]]]'`
+    );
     expect(parse('1\\times')).toMatchInlineSnapshot(
-      `'["Multiply", 1, "Missing"]'`
+      `'["Multiply", 1, ["Error", "'missing'"]]'`
     );
-    expect(parse('\\times')).toMatchInlineSnapshot(
-      `'["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\times'"]]'`
-    );
-    expect(parse('\\times3')).toMatchInlineSnapshot(`
+    expect(parse('\\times')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\times'"]],
-        "'syntax-error'",
-        ["LatexForm", "'3'"]
+        "Multiply",
+        ["Error", "'missing'", ["Latex", "'\\\\times'"]],
+        ["Error", "'missing'"]
       ]'
     `);
-    expect(parse('2*')).toMatchInlineSnapshot(`'["Multiply", 2, "Nothing"]'`);
+    expect(parse('\\times3')).toMatchInlineSnapshot(
+      `'["Multiply", ["Error", "'missing'", ["Latex", "'\\\\times'"]], 3]'`
+    );
+    expect(parse('2*')).toMatchInlineSnapshot(`
+      '[
+        "Sequence",
+        2,
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'*'"],
+          ["Latex", "'*'"]
+        ]
+      ]'
+    `);
     expect(parse('\\frac{}{}')).toMatchInlineSnapshot(
-      `'["Divide", "Missing", "Missing"]'`
+      `'["Divide", ["Error", "'missing'"], ["Error", "'missing'"]]'`
     );
     expect(parse('\\frac{1}{}')).toMatchInlineSnapshot(
-      `'["Divide", 1, "Missing"]'`
+      `'["Divide", 1, ["Error", "'missing'"]]'`
     );
     expect(parse('\\frac{}{2}')).toMatchInlineSnapshot(
-      `'["Divide", 2, "Missing"]'`
+      `'["Divide", ["Error", "'missing'"], 2]'`
     );
 
     expect(parse('=x')).toMatchInlineSnapshot(
-      `'["Error", "Nothing", "'syntax-error'", ["LatexForm", "'=x'"]]'`
+      `'["Equal", ["Error", "'missing'", ["Latex", "'='"]], "x"]'`
     );
   });
 
   test('Valid Incomplete', () => {
-    expect(parse('x=')).toMatchInlineSnapshot(`'["Equal", "x", "Missing"]'`);
+    expect(parse('x=')).toMatchInlineSnapshot(
+      `'["Equal", "x", ["Error", "'missing'"]]'`
+    );
     expect(parse('2 \\times 2 = ')).toMatchInlineSnapshot(
-      `'["Equal", ["Multiply", 2, 2], "Missing"]'`
+      `'["Equal", ["Multiply", 2, 2], ["Error", "'missing'"]]'`
     );
     expect(parse('x+1=')).toMatchInlineSnapshot(
-      `'["Equal", ["Add", "x", 1], "Missing"]'`
+      `'["Equal", ["Add", "x", 1], ["Error", "'missing'"]]'`
     );
     expect(parse('2+1\\le')).toMatchInlineSnapshot(
-      `'["LessEqual", ["Add", 2, 1], "Missing"]'`
+      `'["LessEqual", ["Add", 2, 1], ["Error", "'missing'"]]'`
     );
   });
 });

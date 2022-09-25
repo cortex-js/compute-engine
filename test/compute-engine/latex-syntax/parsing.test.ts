@@ -1,4 +1,4 @@
-import { parse, expressionError } from '../../utils';
+import { parse } from '../../utils';
 
 describe('BASIC PARSING', () => {
   test('', () => {
@@ -8,45 +8,57 @@ describe('BASIC PARSING', () => {
   });
 });
 
+describe('ADVANCED PARSING', () => {
+  // Empty argument should not be interpreted as space group when argument is
+  // expected
+  test('\\frac{x}{} y', () =>
+    expect(parse('\\frac{x}{} \\text{ cm}')).toMatchInlineSnapshot(
+      `'["Multiply", ["Divide", "x", ["Error", "'missing'"]], "' cm'"]'`
+    ));
+});
+
 describe('UNKNOWN COMMANDS', () => {
   test('Parse', () => {
-    expect(parse('\\foo')).toMatchInlineSnapshot(
-      `'["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\foo'"]]'`
-    );
+    expect(parse('\\foo')).toMatchInlineSnapshot(`
+      '[
+        "Error",
+        ["ErrorCode", "'unexpected-command'", "'\\\\foo'"],
+        ["Latex", "'\\\\foo'"]
+      ]'
+    `);
     expect(parse('x=\\foo+1')).toMatchInlineSnapshot(`
       '[
         "Equal",
         "x",
         [
           "Add",
-          ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\foo'"]],
+          [
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\\\foo'"],
+            ["Latex", "'\\\\foo'"]
+          ],
           1
         ]
       ]'
     `);
     expect(parse('x=\\foo   {1}  {x+1}+1')).toMatchInlineSnapshot(`
       '[
-        "Error",
+        "Add",
         [
-          "Equal",
-          "x",
+          "Multiply",
           [
-            "Error",
-            "Missing",
-            "'unknown-command'",
-            ["LatexForm", "'\\\\foo{1}'"]
-          ]
+            "Equal",
+            "x",
+            [
+              "Error",
+              ["ErrorCode", "'unexpected-command'", "'\\\\foo'"],
+              ["Latex", "'\\\\foo{1}'"]
+            ]
+          ],
+          ["Add", "x", 1]
         ],
-        "'syntax-error'",
-        ["LatexForm", "'{x+1}+1'"]
+        1
       ]'
     `);
-  });
-  test('Errors', () => {
-    expect(expressionError('\\foo')).toMatchInlineSnapshot(`[]`);
-    expect(expressionError('x=\\foo+1')).toMatchInlineSnapshot(`[]`);
-    expect(expressionError('x=\\foo   {1}  {x+1}+1')).toMatchInlineSnapshot(
-      `[]`
-    );
   });
 });

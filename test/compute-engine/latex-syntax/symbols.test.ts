@@ -10,10 +10,13 @@ describe('SYMBOLS', () => {
     expect(parse('x \\beta \\alpha ')).toMatchInlineSnapshot(
       `'["Multiply", "x", "Beta", "Alpha"]'`
     );
-    // Unknown symbol is OK
-    expect(parse('\\foo')).toMatchInlineSnapshot(
-      `'["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\foo'"]]'`
-    );
+    expect(parse('\\foo')).toMatchInlineSnapshot(`
+      '[
+        "Error",
+        ["ErrorCode", "'unexpected-command'", "'\\\\foo'"],
+        ["Latex", "'\\\\foo'"]
+      ]'
+    `);
   });
   test('Symbol expressions', () => {
     expect(parse('2x')).toMatch('["Multiply", 2, "x"]');

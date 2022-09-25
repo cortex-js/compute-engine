@@ -99,9 +99,9 @@ describe('CORTEX SERIALIZING SPACES', () => {
 describe('CORTEX SERIALIZING STRINGS', () => {
   test('Strings', () => {
     expect(serializeCortex("''")).toMatch('');
-    expect(serializeCortex("'x'")).toMatchInlineSnapshot(`"\\"x\\""`);
+    expect(serializeCortex("'x'")).toMatchInlineSnapshot(`""x""`);
     expect(serializeCortex("'hello world'")).toMatchInlineSnapshot(
-      `"\\"hello world\\""`
+      `""hello world""`
     );
   });
 
@@ -197,7 +197,7 @@ describe('CORTEX SERIALIZING SYMBOLS', () => {
     // Contain a SPACE
     expect(serializeCortex('a b')).toMatchInlineSnapshot(`"\`a b\`"`);
     // Contain a reverse solidus
-    expect(serializeCortex('a\\b')).toMatchInlineSnapshot(`"\`a\\\\\\\\b\`"`);
+    expect(serializeCortex('a\\b')).toMatchInlineSnapshot(`"\`a\\\\b\`"`);
     // First char is a dollar
     expect(serializeCortex('$a')).toMatchInlineSnapshot(`"\`$a\`"`);
     // First char is a left square bracket
@@ -214,10 +214,10 @@ describe('CORTEX SERIALIZING FUNCTIONS', () => {
       `"f(x, 1, 0)"`
     );
     expect(serializeCortex(['\\foo', 'x', 1, 0])).toMatchInlineSnapshot(
-      `"\`\\\\\\\\foo\`(x, 1, 0)"`
+      `"\`\\\\foo\`(x, 1, 0)"`
     );
     expect(serializeCortex(['\\frac', 'n', 4])).toMatchInlineSnapshot(
-      `"\`\\\\\\\\frac\`(n, 4)"`
+      `"\`\\\\frac\`(n, 4)"`
     );
 
     // Head as expression

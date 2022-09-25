@@ -5,13 +5,13 @@ describe('NUMBERS', () => {
   test('Parsing', () => {
     expect(parse('1')).toMatch('1');
     expect(parse('-1')).toMatch('-1');
-    expect(parse('1.0')).toMatchInlineSnapshot(`'1'`);
-    expect(parse('-1.0')).toMatchInlineSnapshot(`'-1'`);
+    expect(parse('1.0')).toMatch('1');
+    expect(parse('-1.0')).toMatch('-1');
     expect(parse('-1.1234')).toMatch('-1.1234');
     expect(parse('-1.1234e5')).toMatch('-112340');
     expect(parse('-1.1234E5')).toMatch('-112340');
     expect(parse('-1.1234e-5')).toMatchInlineSnapshot(`'-0.000011234'`);
-    // Invalid box (the argument of "num" should be a string)
+    // Invalid box (the argument of "num" should be a string), but accepted
     expect(box({ num: 4 } as any as Expression)).toMatch('4');
     expect(parse('3\\times10^4')).toMatch('30000');
   });
@@ -21,6 +21,21 @@ describe('NUMBERS', () => {
     expect(parse('-1')).toMatchInlineSnapshot(`'-1'`);
     expect(parse('--1')).toMatchInlineSnapshot(`'["PreDecrement", 1]'`);
     expect(parse('-+-1')).toMatchInlineSnapshot(`'["Negate", -1]'`);
+  });
+  test('Parsing numbers with repeating pattern', () => {
+    expect(parse('1.(3)')).toMatchInlineSnapshot(
+      `'["Multiply", 1, ["Delimiter", 3]]'`
+    ); // @todo
+    expect(parse('0.(142857)')).toMatchInlineSnapshot(
+      `'["Multiply", 0, ["Delimiter", 142857]]'`
+    ); // @todo
+    expect(box({ num: '1.(3)' })).toMatch('{num: "1.(3)"}');
+    expect(box({ num: '0.(142857)' })).toMatch('{num: "0.(142857)"}');
+  });
+  test('Parsing numbers including whitespace', () => {
+    expect(
+      box({ num: '\u00091\u000a2\u000b3\u000c4\u000d5 6\u00a07.2' })
+    ).toMatch('1234567.2');
   });
   test('Parsing whitespace with number sign', () => {
     expect(parse('  1')).toMatch('1');
@@ -90,7 +105,7 @@ describe('NUMBERS', () => {
     expect(parse('3\\times10^n')).toMatchInlineSnapshot(
       `'["Multiply", 3, ["Power", 10, "n"]]'`
     );
-    expect(parse('\\operatorname{NaN}')).toMatchInlineSnapshot(`'"NaN"'`);
+    expect(parse('\\operatorname{NaN}')).toMatch('{num: "NaN"}');
   });
   test('Bigints', () => {
     // expect(latex({ num: 12n })).toMatchInlineSnapshot();

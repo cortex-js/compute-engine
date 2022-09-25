@@ -13,10 +13,22 @@ describe('ROOT FUNCTION', () => {
     );
   });
   test('Invalid forms', () => {
-    expect(parse('\\sqrt')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
-    expect(parse('\\sqrt{}')).toMatchInlineSnapshot(`'["Sqrt", "Missing"]'`);
-    expect(parse('\\sqrt{1}[3]')).toMatchInlineSnapshot(
-      `'["Error", ["Sqrt", 1], "'syntax-error'", ["LatexForm", "'[3]'"]]'`
+    expect(parse('\\sqrt')).toMatchInlineSnapshot(
+      `'["Sqrt", ["Error", "'missing'"]]'`
     );
+    expect(parse('\\sqrt{}')).toMatchInlineSnapshot(
+      `'["Sqrt", ["Error", "'missing'"]]'`
+    );
+    expect(parse('\\sqrt{1}[3]')).toMatchInlineSnapshot(`
+      '[
+        "Sequence",
+        ["Sqrt", 1],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'['"],
+          ["Latex", "'[3]'"]
+        ]
+      ]'
+    `);
   });
 });

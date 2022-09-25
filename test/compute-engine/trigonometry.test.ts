@@ -39,7 +39,8 @@ describe('TRIGONOMETRY constructible values', () => {
           ['Multiply', 'Pi', ['Rational', n, d]],
         ];
 
-        let f = engine.box([h, arg]).N().asFloat!;
+        const f1 = engine.box([h, arg]).N();
+        let f = f1.asFloat ?? f1.decimalValue!.toNumber();
 
         if (Math.abs(f) > 1000000) f = +Infinity;
         if (Math.abs(v) > 1000000) v = +Infinity;

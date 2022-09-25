@@ -17,7 +17,7 @@ const e = engine.parse(`(x + y +  z + 1)^{32}`);
 
 // console.log(expand(e).toJSON());
 
-console.log(expand(engine.parse('(a+b)^{10}')).latex);
+// console.log(expand(engine.parse('(a+b)^{10}')).latex);
 
 // Sympy benchmarks.
 // Source: https://github.com/sympy/sympy/blob/master/sympy/core/benchmarks/bench_expand.py

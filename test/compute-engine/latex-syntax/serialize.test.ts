@@ -84,15 +84,14 @@ describe('LATEX SERIALIZING', () => {
     expect(parse('\\foo[0]{1}{2}')).toMatchInlineSnapshot(`
       '[
         "Error",
-        "Missing",
-        "'unknown-command'",
-        ["LatexForm", "'\\\\foo[0]{1}{2}'"]
+        ["ErrorCode", "'unexpected-command'", "'\\\\foo'"],
+        ["Latex", "'\\\\foo[0]{1}{2}'"]
       ]'
     `);
 
     // Head as expression
     expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
-      `'\\operatorname{Apply}(g(f), \\left[\\begin{array}{lll}\\end{array}\\right])'`
+      `'\\operatorname{Apply}(g(f), \\lbrack x, 1, 0\\rbrack)'`
     );
   });
 
@@ -113,22 +112,22 @@ describe('LATEX SERIALIZING', () => {
   test('Power', () => {
     expect(latex([POWER, 'x', -2])).toMatchInlineSnapshot(`'\\frac{1}{x^{2}}'`);
     expect(latex([POWER, 'x', [DIVIDE, 1, 2]])).toMatchInlineSnapshot(
-      `'x^{\\frac12}'`
+      `'\\sqrt{x}'`
     );
     expect(latex([POWER, [ADD, 'x', 1], [DIVIDE, 1, 2]])).toMatchInlineSnapshot(
-      `'(x+1)^{\\frac12}'`
+      `'\\sqrt{x+1}'`
     );
     expect(
       latex([POWER, [MULTIPLY, 2, 'x'], [DIVIDE, 1, 2]])
-    ).toMatchInlineSnapshot(`'(2x)^{\\frac12}'`);
+    ).toMatchInlineSnapshot(`'\\sqrt{2x}'`);
     expect(
       latex([POWER, [MULTIPLY, 2, 'x'], [SUBTRACT, 1, 'n']])
     ).toMatchInlineSnapshot(`'(2x)^{1-n}'`);
   });
   test('Missing', () => {
     expect(
-      latex(['Equal', ['Multiply', 2, 2], 'Missing'])
-    ).toMatchInlineSnapshot(`'2\\times2=\\placeholder{}'`);
+      latex(['Equal', ['Multiply', 2, 2], ['Error', "'missing'"]])
+    ).toMatchInlineSnapshot(`'2\\times2=\\textcolor{red}{\\blacksquare}'`);
   });
 });
 

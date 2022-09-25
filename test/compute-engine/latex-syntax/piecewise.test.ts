@@ -12,9 +12,9 @@ describe('CASES/PIECEWISE', () => {
         "Piecewise",
         [
           "List",
-          ["List", 0, ["Equal", "n", 0]],
-          ["List", 1, ["Equal", "n", 1]],
-          ["List", ["GreaterEqual", "n", 2], ["Add", ["Power", "n", 2], 1]]
+          ["Pair", ["Equal", "n", 0], 0],
+          ["Pair", ["Equal", "n", 1], 1],
+          ["Pair", ["Add", ["Power", "n", 2], 1], ["GreaterEqual", "n", 2]]
         ]
       ]'
     `);

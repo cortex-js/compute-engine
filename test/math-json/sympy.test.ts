@@ -7,11 +7,10 @@ console.log('Sympy test: ', k);
 describe('Sympy parsing identifiers', () => {
   test('abcde_fgh9', () => {
     expect(parse('abcde_fgh9')).toMatchInlineSnapshot(`
-      Array [
+      [
         "Error",
-        "Nothing",
-        Object {
-          "str": "Unexpected token",
+        {
+          "str": "unexpected-token",
         },
         "abcde_fgh9",
       ]
@@ -19,11 +18,10 @@ describe('Sympy parsing identifiers', () => {
   });
   test('_890', () => {
     expect(parse('_890')).toMatchInlineSnapshot(`
-      Array [
+      [
         "Error",
-        "Nothing",
-        Object {
-          "str": "Unexpected token",
+        {
+          "str": "unexpected-token",
         },
         "_890",
       ]
@@ -31,11 +29,10 @@ describe('Sympy parsing identifiers', () => {
   });
   test('a234_890_', () => {
     expect(parse('a234_890_')).toMatchInlineSnapshot(`
-      Array [
+      [
         "Error",
-        "Nothing",
-        Object {
-          "str": "Unexpected token",
+        {
+          "str": "unexpected-token",
         },
         "a234_890_",
       ]
@@ -43,11 +40,10 @@ describe('Sympy parsing identifiers', () => {
   });
   test('a123456', () => {
     expect(parse('a123456')).toMatchInlineSnapshot(`
-      Array [
+      [
         "Error",
-        "Nothing",
-        Object {
-          "str": "Unexpected token",
+        {
+          "str": "unexpected-token",
         },
         "a123456",
       ]
@@ -57,11 +53,10 @@ describe('Sympy parsing identifiers', () => {
 describe('Sympy parsing unicode identifiers', () => {
   test('Unicode Identifiers', () => {
     expect(parse('abcde_fgh9')).toMatchInlineSnapshot(`
-      Array [
+      [
         "Error",
-        "Nothing",
-        Object {
-          "str": "Unexpected token",
+        {
+          "str": "unexpected-token",
         },
         "abcde_fgh9",
       ]
@@ -136,11 +131,10 @@ describe('Sympy parsing Imaginary literals', () => {
 describe('Sympy parsing Numeric expressions', () => {
   test('2**2 / 3 + 5', () => {
     expect(parse('2**2 / 3 + 5')).toMatchInlineSnapshot(`
-      Array [
+      [
         "Error",
-        2,
-        Object {
-          "str": "Unexpected token",
+        {
+          "str": "unexpected-token",
         },
         "**2 / 3 + 5",
       ]
@@ -149,11 +143,10 @@ describe('Sympy parsing Numeric expressions', () => {
   test('-2*(-(-x + 1/x)/(x*(x - 1/x)**2) - 1/(x*(x - 1/x))) - 1', () => {
     expect(parse('-2*(-(-x + 1/x)/(x*(x - 1/x)**2) - 1/(x*(x - 1/x))) - 1'))
       .toMatchInlineSnapshot(`
-      Array [
+      [
         "Error",
-        "Nothing",
-        Object {
-          "str": "Unexpected token",
+        {
+          "str": "unexpected-token",
         },
         "-2*(-(-x + 1/x)/(x*(x - 1/x)**2) - 1/(x*(x - 1/x))) - 1",
       ]
