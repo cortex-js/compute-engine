@@ -277,7 +277,10 @@ property.
 | `unexpected-command`           | the command is unknown, or not applicable in the current parsing context                                         |
 | `unexpected-token`             | the character does not apply to the current parsing context                                                      |
 | `mismatched-argument-domain`   | the argument provided does not match the expected domain                                                         |
-| `unexpected-argument`          | an argument is provided when one was not expected                                                                |
+| `unexpected-argument`          | too many arguments provided                                                                                      |
+| `expected-argument`            | not enough arguments provided                                                                                    |
+| `invalid-symbol-name`          | the name of the symbol cannot be used (see [MathJSON Symbols](/math-json/#symbols))                              |
+| `invalid-domain`               | the domain is not a valid domain literal or domain expression                                                    |
 | `expected-closing-delimiter`   | a closing `}` was expected, but is missing                                                                       |
 | `unexpected-closing-delimiter` | a closing `}` was encountered, but not expected                                                                  |
 | `expected-environment-name`    | the name of an environment should be provided with a `\begin` or `\end` command                                  |
