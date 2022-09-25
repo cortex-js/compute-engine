@@ -16,11 +16,17 @@ module.exports = {
   ],
   setupFilesAfterEnv: ['../test/jest-config.ts'],
   //   reporters: ['jest-silent-reporter'],
-  globals: {
-    'ts-jest': {
-      tsconfig: {
-        module: 'system',
+  transform: {
+    '^.+\\.js$': [
+      'ts-jest',
+      {
+        useESM: true,
+        isolatedModules: true,
+        tsconfig: {
+          allowJs: true,
+          module: 'system',
+        },
       },
-    },
+    ],
   },
 };
