@@ -2,20 +2,18 @@ import {
   IComputeEngine,
   FunctionDefinition,
   BoxedFunctionDefinition,
-  BoxedLambdaExpression,
   RuntimeScope,
-  BoxedDomain,
   BoxedFunctionSignature,
+  BoxedDomain,
 } from '../public';
-import { sharedAncestorDomain, _BoxedDomain } from './boxed-domain';
 import { DEFAULT_COMPLEXITY } from './order';
 
 class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
   engine: IComputeEngine;
+  scope: RuntimeScope;
   name: string;
   description?: string | string[];
   wikidata?: string;
-  scope: RuntimeScope;
   threadable: boolean;
   associative: boolean;
   commutative: boolean;
@@ -27,15 +25,16 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
 
   complexity: number;
   hold: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
+  dynamic: boolean;
 
-  valueDomain: BoxedDomain;
-
-  signatures: BoxedFunctionSignature[];
+  signature: BoxedFunctionSignature;
 
   constructor(ce: IComputeEngine, def: FunctionDefinition) {
-    this.engine = ce;
+    if (!ce.context) throw Error('No context available');
 
-    const hold = def.hold ?? 'none';
+    this.engine = ce;
+    this.scope = ce.context;
+
     const idempotent = def.idempotent ?? false;
     const involution = def.involution ?? false;
 
@@ -47,7 +46,6 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     this.name = def.name;
     this.description = def.description;
     this.wikidata = def.wikidata;
-    this.scope = ce.context;
 
     this.threadable = def.threadable ?? false;
     this.associative = def.associative ?? false;
@@ -59,7 +57,8 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     this.pure = def.pure ?? true;
     this.complexity = def.complexity ?? DEFAULT_COMPLEXITY;
 
-    this.hold = hold;
+    this.hold = def.hold ?? 'none';
+    this.dynamic = def.dynamic ?? false;
 
     if (this.inert) {
       if (def.hold)
@@ -67,21 +66,24 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
           `Function Definition "${def.name}": an inert function should not have a hold`
         );
       this.hold = 'rest';
-      if (def.signatures) {
-        for (const sig of def.signatures) {
-          // `canonical` is OK for an inert function, but none of the others
-          if (
-            'simplify' in sig ||
-            'evaluate' in sig ||
-            'N' in sig ||
-            'evalDimension' in sig ||
-            'sgn' in sig ||
-            'compile' in sig
-          )
-            throw Error(
-              `Function Definition "${def.name}": an inert function should not have any signatures`
-            );
-        }
+      if (def.dynamic)
+        throw Error(
+          `Function Definition "${def.name}": an inert function should not be dynamic`
+        );
+      if (def.signature) {
+        const sig = def.signature;
+        // `canonical` and `domain` is OK for an inert function, but none of the others
+        if (
+          'simplify' in sig ||
+          'evaluate' in sig ||
+          'N' in sig ||
+          'evalDimension' in sig ||
+          'sgn' in sig ||
+          'compile' in sig
+        )
+          throw Error(
+            `Function Definition "${def.name}": an inert function should only have 'canonical' or 'codomain' handlers`
+          );
       }
       if (this.threadable)
         throw Error(
@@ -108,35 +110,44 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
           `Function Definition "${def.name}": an inert function should be pure`
         );
     }
-    if (def.signatures) {
-      let valueDomain = ce.domain('Void');
-      const sigs: BoxedFunctionSignature[] = [];
-      for (const sig of def.signatures) {
-        const dom = !sig.domain ? ce.domain('Function') : ce.domain(sig.domain);
-        sigs.push({
-          domain: dom,
-          simplify: sig.simplify,
-          evaluate: !sig.evaluate
-            ? undefined
-            : typeof sig.evaluate === 'function'
-            ? sig.evaluate
-            : (ce.box(sig.evaluate).canonical as BoxedLambdaExpression),
-          N: sig.N,
-          evalDimension: sig.evalDimension,
-          sgn: sig.sgn,
-          compile: sig.compile,
-        });
-        valueDomain = sharedAncestorDomain(valueDomain, dom);
-      }
-      this.signatures = sigs;
+    if (def.signature) {
+      const sig = def.signature;
+      const domain = ce.domain(sig.domain ?? 'Function');
+      if (!domain.isValid)
+        throw Error(
+          `Function Definition "${def.name}": invalid domain ${JSON.stringify(
+            sig.domain
+          )}`
+        );
+
+      const codomain =
+        sig.codomain ??
+        domain.codomain ??
+        (ce.domain('Anything') as BoxedDomain);
+      this.signature = {
+        domain,
+        codomain,
+        canonical: sig.canonical,
+        simplify: sig.simplify,
+        evaluate: !sig.evaluate
+          ? undefined
+          : typeof sig.evaluate === 'function'
+          ? sig.evaluate
+          : ce.lambda(sig.evaluate, domain),
+        N: sig.N,
+        evalDimension: sig.evalDimension,
+        sgn: sig.sgn,
+        compile: sig.compile,
+      };
+    } else {
+      this.signature = {
+        domain: ce.domain('Function') as BoxedDomain,
+        codomain: ce.domain('Anything') as BoxedDomain,
+      };
     }
   }
-  _purge() {
-    return undefined;
-  }
-  getSignature(domains: BoxedDomain[]): BoxedFunctionSignature | null {
-    const sig = this.engine.domain(['Function', ...domains, 'Anything']);
-    return this.signatures?.find((x) => sig.isCompatible(x.domain)) ?? null;
+  reset() {
+    return;
   }
 }
 

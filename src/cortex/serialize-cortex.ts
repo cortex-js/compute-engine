@@ -230,6 +230,8 @@ export function serializeCortex(
     // BaseForm
     //
     BaseForm: (expr: Expression): FormattingBlock => {
+      // CAUTION: machineValue will truncate number expessions to a machine
+      // number, which may result in a loss of precision
       const base = machineValue(op(expr, 2)) ?? 16;
       const arg1 = op(expr, 1);
       const value = machineValue(arg1);

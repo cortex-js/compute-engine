@@ -75,8 +75,8 @@ export function expand(expr: BoxedExpression): BoxedExpression {
     if (op1head === 'Add') {
       const n = expr.op2.asSmallInteger;
       if (n !== null) {
-        if (n > 0) return expandN(expr.op1, n);
-        return expr.engine.inverse(expandN(expr.op1, -n));
+        if (n > 0) return expandN(expr.op1, n).simplify();
+        return expr.engine.inverse(expandN(expr.op1, -n).simplify());
       }
     }
   }

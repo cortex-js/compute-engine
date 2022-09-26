@@ -1,14 +1,10 @@
-import { parse } from '../../utils';
+import { check } from '../../utils';
 
 describe('STYLE - MATH MODE', () => {
   test('\\textcolor', () => {
-    expect(parse('x \\textcolor{red}{=} y')).toMatchInlineSnapshot(`
-      '[
-        "Error",
-        "x",
-        "'syntax-error'",
-        ["LatexForm", "'\\\\textcolor{red}{=} y'"]
-      ]'
+    expect(check('x \\textcolor{red}{=} y')).toMatchInlineSnapshot(`
+      'box      = ["Multiply", ["Sequence", "x", ["Error", ["ErrorCode", "'unexpected-command'", "'\\textcolor'"], ["Latex", "'\\textcolor{red}{=}'"]]], "y"]
+      canonical = ["Multiply", "x", ["Error", ["ErrorCode", "'unexpected-command'", "'\\textcolor'"], ["Latex", "'\\textcolor{red}{=}'"]], "y"]'
     `);
   });
 });
@@ -16,46 +12,34 @@ describe('STYLE - MATH MODE', () => {
 describe('STYLE - TEXT MODE', () => {
   test('\\text', () => {
     // Whitespace should be preserved
-    expect(parse('a\\text{ and }b')).toMatchInlineSnapshot(
-      `'["Error", "a", "'syntax-error'", ["LatexForm", "'\\\\text{ and }b'"]]'`
-    );
+    expect(check('a\\text{ and }b')).toMatchInlineSnapshot(`
+      'box      = ["Multiply", "a", "' and '", "b"]
+      canonical = ["Multiply", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", "Number"]], ["Hold", "' and '"]], "b"]'
+    `);
 
     // Math mode inside text mode
-    expect(parse('a\\text{ in $x$ }b')).toMatchInlineSnapshot(
-      `'["Error", "a", "'syntax-error'", ["LatexForm", "'\\\\text{ in $x$ }b'"]]'`
-    );
-
-    expect(parse('a\\text{ black \\textcolor{red}{RED} }b'))
-      .toMatchInlineSnapshot(`
-      '[
-        "Error",
-        "a",
-        "'syntax-error'",
-        ["LatexForm", "'\\\\text{ black \\\\textcolor{red}{RED} }b'"]
-      ]'
+    expect(check('a\\text{ in $x$ }b')).toMatchInlineSnapshot(`
+      'box      = ["Multiply", "a", "'x' in  ''", "b"]
+      canonical = ["Multiply", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", "Number"]], ["Hold", "'x' in  ''"]], "b"]'
     `);
 
-    expect(parse('a\\text{ black \\color{red}RED\\color{blue}BLUE} }b'))
+    expect(check('a\\text{ black \\textcolor{red}{RED} }b'))
       .toMatchInlineSnapshot(`
-      '[
-        "Error",
-        "a",
-        "'syntax-error'",
-        ["LatexForm", "'\\\\text{ black \\\\color{red}RED\\\\color{blue}BLUE} }b'"]
-      ]'
-    `);
-    expect(parse('a\\text{ black \\textcolor{red}{RED} black} }b'))
-      .toMatchInlineSnapshot(`
-      '[
-        "Error",
-        "a",
-        "'syntax-error'",
-        ["LatexForm", "'\\\\text{ black \\\\textcolor{red}{RED} black} }b'"]
-      ]'
+      'box      = ["Multiply", "a", "''red''RED'' black \\textcolor ''", "b"]
+      canonical = ["Multiply", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", "Number"]], ["Hold", "''red''RED'' black \\textcolor ''"]], "b"]'
     `);
 
     expect(
-      parse(
+      check('a\\text{ black \\color{red}RED\\color{blue}BLUE} }b')
+    ).toMatchInlineSnapshot(`'["Multiply", "a", "' black '"]'`);
+    expect(check('a\\text{ black \\textcolor{red}{RED} black} }b'))
+      .toMatchInlineSnapshot(`
+      'box      = ["Multiply", "a", ["Sequence", "''red''RED'' black \\textcolor black''", ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]], "b"]
+      canonical = ["Multiply", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", "Number"]], ["Hold", "''red''RED'' black \\textcolor black''"]], ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]], "b"]'
+    `);
+
+    expect(
+      check(
         '\\text{ abc \\color{blue} b \\color{yellow} y {y \\color{green} g} \\textcolor{red}{r} g}'
       )
     ).toMatchInlineSnapshot(`'"' abc '"'`);

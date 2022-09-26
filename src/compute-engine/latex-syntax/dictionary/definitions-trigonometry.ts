@@ -96,7 +96,7 @@ function parseTrig(op: string) {
     }
 
     const args = parser.matchArguments('implicit');
-    if (args === null) return [head, 'Nothing'];
+    if (args === null) return head;
 
     return [head, ...args];
   };

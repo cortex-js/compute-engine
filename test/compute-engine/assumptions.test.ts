@@ -19,21 +19,23 @@ ce.assume(['Greater', 't', 0]);
 
 describe('TAUTOLOGY a = 1', () => {
   test(`a.value`, () => {
-    expect(ce.box('a').evaluate()).toMatchInlineSnapshot(`"\\"a\\""`);
+    expect(ce.box('a').evaluate()).toMatchInlineSnapshot(`""a""`);
   });
   test(`a.domain`, () => {
-    expect(ce.box('a').domain.domainExpression).toMatchInlineSnapshot(
-      `"ExtendedRealNumber"`
+    expect(ce.box('a').domain.toJSON()).toMatchInlineSnapshot(
+      `"["Domain","ExtendedRealNumber"]"`
     );
   });
   test(`a > 0`, () => {
-    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot();
+    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot(`"tautology"`);
   });
   test(`a >= 1`, () => {
-    expect(ce.assume(['GreaterEqual', 'a', 1])).toMatchInlineSnapshot();
-  });
+    expect(ce.assume(['GreaterEqual', 'a', 1])).toMatchInlineSnapshot(
+      `"not-a-predicate"`
+    );
+  }); // @todo: should be valid
   test(`a = 1`, () => {
-    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot();
+    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot(`"ok"`);
   });
 });
 
@@ -79,25 +81,25 @@ describe.skip('is() values', () => {
   });
 });
 
-describe.skip('canonical domains', () => {
+describe('canonical domains', () => {
   test(`Range domains`, () => {
-    expect(ce.box('m').domain.domainExpression).toMatchInlineSnapshot(
-      `"RealNumber"`
+    expect(ce.box('m').domain.toJSON()).toMatchInlineSnapshot(
+      `"["Domain","Integer"]"`
     );
-    expect(ce.box('n').domain.domainExpression).toMatchInlineSnapshot(
-      `"RealNumber"`
-    );
-    expect(ce.box('q').domain.domainExpression).toMatchInlineSnapshot(
-      `"RealNumber"`
+    expect(ce.box('n').domain.toJSON()).toMatchInlineSnapshot(
+      `"["Domain","NonNegativeInteger"]"`
+    ); // @todo should  be Integer
+    expect(ce.box('q').domain.toJSON()).toMatchInlineSnapshot(
+      `"["Domain","NonPositiveInteger"]"`
     );
   });
 
   test(`Interval domains`, () => {
-    expect(ce.box('t').domain.domainExpression).toMatchInlineSnapshot(
-      `"RealNumber"`
-    );
-    expect(ce.box('s').domain.domainExpression).toMatchInlineSnapshot(
-      `"RealNumber"`
-    );
+    expect(ce.box('t').domain.toJSON()).toMatchInlineSnapshot(
+      `"["Domain","ExtendedRealNumber"]"`
+    ); //@todo should be NonNegativeNumber
+    expect(ce.box('s').domain.toJSON()).toMatchInlineSnapshot(
+      `"["Domain","ExtendedRealNumber"]"`
+    ); // @todo: should be Interval[5, +Infinity]
   });
 });

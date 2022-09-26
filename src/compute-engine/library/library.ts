@@ -154,12 +154,14 @@ export const LIBRARIES: {
   'units': [],
 };
 
-function validateDefinitionName(def: BaseDefinition): void {
+function validateDefinitionName(def: BaseDefinition): string {
   if (typeof def !== 'object' || !('name' in def) || !def.name)
     throw new Error('Missing name for definition' + JSON.stringify(def)); // @todo cause
 
-  if (!isValidSymbolName(def.name))
-    throw Error(`Invalid definition name ${def.name}`); // @todo cause
+  const name = def.name.normalize();
+  if (!isValidSymbolName(name)) throw Error(`Invalid definition name ${name}`); // @todo cause
+
+  return name;
 }
 
 /**
@@ -176,14 +178,15 @@ export function setCurrentContextSymbolTable(
   engine: IComputeEngine,
   table: SymbolTable
 ): void {
+  if (!engine.context) throw Error('No context available');
+
   // If this is the first symbol table, setup the context
-  if (!engine.context.symbolTable)
-    engine.context.symbolTable = {
-      symbols: new Map<string, BoxedSymbolDefinition>(),
-      functions: new Map<string, BoxedFunctionDefinition>(),
-      symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
-      functionWikidata: new Map<string, BoxedFunctionDefinition>(),
-    };
+  engine.context.symbolTable ??= {
+    symbols: new Map<string, BoxedSymbolDefinition>(),
+    functions: new Map<string, BoxedFunctionDefinition>(),
+    symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
+    functionWikidata: new Map<string, BoxedFunctionDefinition>(),
+  };
 
   const symbolTable = engine.context.symbolTable;
 
@@ -192,29 +195,29 @@ export function setCurrentContextSymbolTable(
   //
   if (table.symbols)
     for (const entry of table.symbols) {
-      validateDefinitionName(entry);
+      const name = validateDefinitionName(entry);
 
       const def = new BoxedSymbolDefinitionImpl(engine, entry);
 
       if (entry.wikidata) {
         if (symbolTable.symbolWikidata.has(entry.wikidata))
           throw new Error(
-            `Duplicate symbol with wikidata ${entry.wikidata}, ${
-              entry.name
-            } and ${symbolTable.symbolWikidata.get(entry.wikidata)!.name}`
+            `Duplicate symbol with wikidata ${entry.wikidata}, ${name} and ${
+              symbolTable.symbolWikidata.get(entry.wikidata)!.name
+            }`
           );
         symbolTable.symbolWikidata.set(entry.wikidata, def);
       }
 
-      if (symbolTable.symbols.has(entry.name)) {
+      if (symbolTable.symbols.has(name)) {
         throw new Error(
-          `Duplicate symbol definition ${entry.name}:\n${JSON.stringify(
-            symbolTable.symbols.get(entry.name)!
+          `Duplicate symbol definition ${name}:\n${JSON.stringify(
+            symbolTable.symbols.get(name)!
           )}\n${JSON.stringify(entry)}`
         );
       }
 
-      symbolTable.symbols.set(entry.name, def);
+      symbolTable.symbols.set(name, def);
     }
 
   //
@@ -222,29 +225,29 @@ export function setCurrentContextSymbolTable(
   //
   if (table.functions)
     for (const entry of table.functions) {
-      validateDefinitionName(entry);
+      const name = validateDefinitionName(entry);
 
       const def = makeFunctionDefinition(engine, entry);
 
       if (entry.wikidata) {
         if (symbolTable.functionWikidata.has(entry.wikidata))
           throw new Error(
-            `Duplicate function with wikidata ${entry.wikidata}, ${
-              entry.name
-            } and ${symbolTable.functionWikidata.get(entry.wikidata)!.name}`
+            `Duplicate function with wikidata ${entry.wikidata}, ${name} and ${
+              symbolTable.functionWikidata.get(entry.wikidata)!.name
+            }`
           );
         symbolTable.functionWikidata.set(entry.wikidata, def);
       }
 
-      if (symbolTable.functions.has(entry.name))
+      if (symbolTable.functions.has(name))
         throw new Error(
-          `Duplicate function definition ${entry.name}:\n${JSON.stringify(
-            symbolTable.symbols.get(entry.name)!
+          `Duplicate function definition ${name}:\n${JSON.stringify(
+            symbolTable.symbols.get(name)!
           )}\n${JSON.stringify(entry)}`
         );
 
-      symbolTable.functions.set(entry.name, def);
+      symbolTable.functions.set(name, def);
     }
 
-  // @todo: take dict.rules into consideration
+  // @todo: take table.rules into consideration
 }

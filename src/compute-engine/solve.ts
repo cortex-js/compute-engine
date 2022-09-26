@@ -107,7 +107,7 @@ function findUnivariateRoots(
     'univariate-roots-rules',
     () => boxSolutions(ce, UNIVARIATE_ROOTS),
     (rules) => {
-      for (const r of rules) r._purge();
+      for (const r of rules) r.unbind();
       return rules;
     }
   );

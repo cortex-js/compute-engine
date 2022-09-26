@@ -40,6 +40,8 @@ import {
   Metadata,
   BoxedDomain,
   DomainExpression,
+  BoxedLambdaExpression,
+  FunctionDefinition,
 } from './public';
 import { box, boxNumber } from './boxed-expression/box';
 import {
@@ -68,6 +70,8 @@ import {
   _BoxedDomain,
 } from './boxed-expression/boxed-domain';
 import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expression';
+import { isValidSymbolName } from '../math-json/utils';
+import { makeFunctionDefinition } from './boxed-expression/boxed-function-definition';
 
 /**
  *
@@ -169,7 +173,6 @@ export class ComputeEngine implements IComputeEngine {
     Maybe: null,
 
     All: null,
-    Missing: null,
     Nothing: null,
     None: null,
     Undefined: null,
@@ -239,7 +242,7 @@ export class ComputeEngine implements IComputeEngine {
    * The `ce.context` property represents the current scope.
    *
    */
-  context: RuntimeScope;
+  context: RuntimeScope | null;
 
   /** Absolute time beyond which evaluation should not proceed.
    * @internal
@@ -339,7 +342,7 @@ export class ComputeEngine implements IComputeEngine {
     this._COMPLEX_INFINITY = new BoxedNumber(this, Complex.INFINITY);
 
     // Reset the caches/create numeric constants
-    this.purge();
+    this.reset();
 
     //
     // The first, topmost, scope contains additional info
@@ -375,18 +378,22 @@ export class ComputeEngine implements IComputeEngine {
     // 'forward-declared')
     for (const d of Object.keys(this._commonDomains))
       if (this._commonDomains[d] && !this._commonDomains[d]!.symbolDefinition)
-        this._commonDomains[d]!._repairDefinition();
+        this._commonDomains[d]!.bind(this.context);
 
     for (const d of Object.keys(this._commonSymbols))
       if (this._commonSymbols[d] && !this._commonSymbols[d]!.symbolDefinition)
-        this._commonSymbols[d]!._repairDefinition();
+        this._commonSymbols[d]!.bind(this.context);
 
     // Once a scope is set and the default dictionaries)
     // we can reference symbols for the domain names and other constants
-    this._defaultDomain =
-      options?.defaultDomain === null
-        ? null
-        : this.domain(options?.defaultDomain ?? 'ExtendedRealNumber');
+    if (options?.defaultDomain) {
+      const defaultDomain = this.domain(options.defaultDomain);
+      if (defaultDomain.isValid)
+        this._defaultDomain = defaultDomain as BoxedDomain;
+      else
+        this._defaultDomain = this.domain('ExtendedRealNumber') as BoxedDomain;
+    } else
+      this._defaultDomain = this.domain('ExtendedRealNumber') as BoxedDomain;
   }
 
   /** After the configuration of the engine has changed, clear the caches
@@ -396,8 +403,9 @@ export class ComputeEngine implements IComputeEngine {
    *
    * @internal
    */
-  purge() {
+  reset() {
     console.assert(this._decimal);
+
     // Recreate the Decimal constants (they depend on the engine's precision)
     this._DECIMAL_NEGATIVE_ONE = this.decimal(-1);
     this._DECIMAL_NAN = this.decimal(NaN);
@@ -407,25 +415,25 @@ export class ComputeEngine implements IComputeEngine {
     this._DECIMAL_HALF = this._DECIMAL_ONE.div(this._DECIMAL_TWO);
     this._DECIMAL_PI = this._DECIMAL_NEGATIVE_ONE.acos();
 
-    // Purge all the known expressions/symbols
+    // Unbind all the known expressions/symbols
     const symbols = this._stats.symbols.values();
     const expressions = this._stats.expressions!.values();
     this._stats.symbols = new Set<BoxedExpression>();
     this._stats.expressions = new Set<BoxedExpression>();
-    for (const s of symbols) s._purge();
-    for (const s of expressions) s._purge();
+    for (const s of symbols) s.unbind();
+    for (const s of expressions) s.unbind();
 
-    // Purge all the common  expression (probably not necessary)
-    for (const d of Object.values(this._commonDomains)) d?._purge();
-    for (const d of Object.values(this._commonSymbols)) d?._purge();
+    // Unbind all the common  expressions (probably not necessary)
+    for (const d of Object.values(this._commonDomains)) d?.unbind();
+    for (const d of Object.values(this._commonSymbols)) d?.unbind();
 
-    // Purge all the definitions
+    // Reset all the definitions
     let scope = this.context;
     while (scope) {
       if (scope.symbolTable?.functions)
-        for (const [_k, v] of scope.symbolTable.functions) v._purge();
+        for (const [_k, v] of scope.symbolTable.functions) v.reset();
       if (scope.symbolTable?.symbols)
-        for (const [_k, v] of scope.symbolTable.symbols) v._purge();
+        for (const [_k, v] of scope.symbolTable.symbols) v.reset();
 
       // @todo purge assumptions
       scope = scope.parentScope;
@@ -540,7 +548,7 @@ export class ComputeEngine implements IComputeEngine {
 
     // Reset the caches
     // (the values in the cache depend on the current precision)
-    this.purge();
+    this.reset();
   }
 
   get numericMode(): NumericMode {
@@ -564,7 +572,7 @@ export class ComputeEngine implements IComputeEngine {
       this.latexSyntax.updateOptions({ precision: this._precision });
 
     // Reset the caches: the values in the cache depend on the numeric mode)
-    this.purge();
+    this.reset();
   }
 
   /** @experimental */
@@ -608,7 +616,11 @@ export class ComputeEngine implements IComputeEngine {
   }
   set defaultDomain(domain: BoxedDomain | string | null) {
     if (domain === null) this._defaultDomain = null;
-    else this._defaultDomain = this.domain(domain);
+    else {
+      const defaultDomain = this.domain(domain);
+      if (!defaultDomain.isValid) throw Error(`Invalid domain ${domain}`);
+      this._defaultDomain = defaultDomain as BoxedDomain;
+    }
   }
 
   /**
@@ -689,17 +701,23 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    * Return a matching symbol definition, starting with the current
-   * scope and going up the scope chain.
+   * scope and going up the scope chain. Prioritize finding a match by
+   * wikidata, if provided.
    */
-  getSymbolDefinition(
+  lookupSymbol(
     symbol: string,
-    wikidata?: string
+    wikidata?: string,
+    scope?: RuntimeScope
   ): undefined | BoxedSymbolDefinition {
     if (typeof symbol !== 'string') throw Error('Expected a string');
-    let scope = this.context;
+
+    // Wildcards never have definitions
+    if (symbol.startsWith('_') || !this.context) return undefined;
+
     let def: undefined | BoxedSymbolDefinition = undefined;
 
     // Try to find a match by wikidata
+    scope ??= this.context;
     if (wikidata)
       while (scope && !def) {
         def = scope.symbolTable?.symbolWikidata.get(wikidata);
@@ -707,10 +725,12 @@ export class ComputeEngine implements IComputeEngine {
       }
 
     // Match by name
-    while (scope && !def) {
-      if (wikidata) def = scope.symbolTable?.symbolWikidata.get(wikidata);
-      if (!def) def = scope.symbolTable?.symbols.get(symbol);
-      scope = scope.parentScope;
+    if (symbol.length > 0) {
+      scope = this.context;
+      while (scope && !def) {
+        def = scope.symbolTable?.symbols.get(symbol);
+        scope = scope.parentScope;
+      }
     }
     return def;
   }
@@ -719,13 +739,20 @@ export class ComputeEngine implements IComputeEngine {
    * Return the definition for a function matching this head.
    *
    * Start looking in the current context, than up the scope chain.
+   *
+   * This is a very rough lookup, since it doesn't account for the domain
+   * of the argument or the codomain. However, it is useful during parsing
+   * to differentiate between symbols that might represent a function application, e.g. `f` vs `x`.
    */
-  getFunctionDefinition(head: string): undefined | BoxedFunctionDefinition {
+  lookupFunctionName(
+    head: string,
+    scope?: RuntimeScope
+  ): undefined | BoxedFunctionDefinition {
     if (typeof head !== 'string') throw Error('Expected a string');
     // Wildcards never have definitions
-    if (head.startsWith('_')) return undefined;
+    if (head.startsWith('_') || !this.context) return undefined;
 
-    let scope = this.context;
+    scope ??= this.context;
     while (scope) {
       const def = scope.symbolTable?.functions.get(head);
       if (def) return def;
@@ -735,9 +762,50 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * Return a function definition matching the name and argument domains.
+   */
+  lookupFunctionSignature(
+    head: string,
+    ops: BoxedDomain[],
+    codomain?: BoxedDomain,
+    scope?: RuntimeScope
+  ): BoxedFunctionDefinition | undefined {
+    if (typeof head !== 'string') throw Error('Expected a string');
+
+    // Wildcards never have definitions
+    if (head.startsWith('_') || !this.context) return undefined;
+
+    scope ??= this.context;
+    let def: BoxedFunctionDefinition | undefined = undefined;
+
+    const targetSig = this.domain(['Function', ...ops, codomain ?? 'Anything']);
+
+    while (scope) {
+      def = scope.symbolTable?.functions.get(head);
+      if (def) {
+        const sig = def.signature;
+        console.assert(sig.domain);
+        if (sig.domain.isCompatible(targetSig)) {
+          // Double-check that the codomain, if it is computed, is compatible
+          if (!codomain) return def;
+          const effectiveCodomain =
+            typeof sig.codomain === 'function'
+              ? sig.codomain(this, ops)
+              : sig.codomain;
+          if (effectiveCodomain?.isCompatible(codomain)) return def;
+        }
+      }
+      scope = scope.parentScope;
+    }
+    return undefined;
+  }
+
+  /**
    * Add (or replace) a definition for a symbol in the current scope.
    */
   defineSymbol(def: SymbolDefinition): BoxedSymbolDefinition {
+    if (!this.context)
+      throw Error('Symbol cannot be defined: no scope available');
     const boxedDef = new BoxedSymbolDefinitionImpl(this, def);
     if (!this.context.symbolTable) {
       this.context.symbolTable = {
@@ -748,9 +816,36 @@ export class ComputeEngine implements IComputeEngine {
       };
     }
 
-    if (def.name) this.context.symbolTable.symbols.set(def.name, boxedDef);
-    if (def.wikidata)
-      this.context.symbolTable.symbolWikidata.set(def.wikidata, boxedDef);
+    if (boxedDef.name)
+      this.context.symbolTable.symbols.set(boxedDef.name, boxedDef);
+    if (boxedDef.wikidata)
+      this.context.symbolTable.symbolWikidata.set(boxedDef.wikidata, boxedDef);
+
+    return boxedDef;
+  }
+
+  defineFunction(def: FunctionDefinition): BoxedFunctionDefinition {
+    if (!this.context)
+      throw Error('Function cannot be defined: no scope available');
+
+    const boxedDef = makeFunctionDefinition(this, def);
+
+    if (!this.context.symbolTable) {
+      this.context.symbolTable = {
+        symbols: new Map<string, BoxedSymbolDefinition>(),
+        functions: new Map<string, BoxedFunctionDefinition>(),
+        symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
+        functionWikidata: new Map<string, BoxedFunctionDefinition>(),
+      };
+    }
+
+    if (boxedDef.name)
+      this.context.symbolTable.functions.set(def.name, boxedDef);
+    if (boxedDef.wikidata)
+      this.context.symbolTable.functionWikidata.set(
+        boxedDef.wikidata,
+        boxedDef
+      );
 
     return boxedDef;
   }
@@ -770,6 +865,7 @@ export class ComputeEngine implements IComputeEngine {
   }): void {
     if (options !== undefined && typeof options !== 'object')
       throw Error('Expected an object literal');
+    if (this.context === null) throw Error('No parent scope available');
     this.context = {
       ...options?.scope,
       parentScope: this.context,
@@ -806,6 +902,8 @@ export class ComputeEngine implements IComputeEngine {
   /** Remove the topmost scope from the scope stack.
    */
   popScope(): void {
+    if (!this.context) throw Error('No scope available');
+
     const parentScope = this.context?.parentScope;
 
     // If there are some warnings, handle them
@@ -838,6 +936,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   get assumptions(): ExpressionMapInterface<boolean> {
+    if (!this.context) throw Error('No scope available');
     if (this.context.assumptions) return this.context.assumptions;
     // When creating a new context, the assumptions of this context
     // are a copy of all the previous assumptions
@@ -961,8 +1060,10 @@ export class ComputeEngine implements IComputeEngine {
       );
 
     if ((head === 'Divide' || head === 'Rational') && ops.length === 2) {
-      const n = ops[0].asSmallInteger;
-      const d = ops[1].asSmallInteger;
+      const [n, d] = [
+        ops[0].machineValue ?? ops[0].asSmallInteger,
+        ops[1].machineValue ?? ops[1].asSmallInteger,
+      ];
       if (
         n !== null &&
         d !== null &&
@@ -1000,7 +1101,7 @@ export class ComputeEngine implements IComputeEngine {
     }
 
     if (head === 'Negate' && ops.length === 1)
-      return canonicalNegate(ops[0] ?? this.symbol('Missing'), metadata);
+      return canonicalNegate(ops[0] ?? this.error('missing'), metadata);
 
     if (
       head === 'Single' ||
@@ -1015,7 +1116,7 @@ export class ComputeEngine implements IComputeEngine {
       for (const op of ops) {
         if (op.head === 'Tuple') {
           const key = op.op1;
-          if (!key.isMissing) {
+          if (key.isValid && key.symbol !== 'Nothing') {
             const val = op.op2;
             let k = key.symbol ?? key.string;
             if (!k && key.isLiteral) {
@@ -1034,14 +1135,14 @@ export class ComputeEngine implements IComputeEngine {
     if (head === 'Multiply') return this.mul(ops, metadata);
     if (head === 'Divide')
       return this.divide(
-        ops[0] ?? this.symbol('Missing'),
-        ops[1] ?? this.symbol('Missing'),
+        ops[0] ?? this.error('missing'),
+        ops[1] ?? this.error('missing'),
         metadata
       );
     if (head === 'Power')
       return this.power(
-        ops[0] ?? this.symbol('Missing'),
-        ops[1] ?? this.symbol('Missing'),
+        ops[0] ?? this.error('missing'),
+        ops[1] ?? this.error('missing'),
         metadata
       );
 
@@ -1054,18 +1155,52 @@ export class ComputeEngine implements IComputeEngine {
     head: string | BoxedExpression,
     ops: BoxedExpression[],
     metadata?: Metadata
-  ): BoxedExpression {
+  ): BoxedFunction {
+    // if (!ops.every((x) => x.isCanonical))    debugger;
+
     const result = new BoxedFunction(this, head, ops, metadata);
     result.isCanonical = true;
     return result;
   }
 
   error(
-    val: BoxedExpression,
-    message: string,
-    messageArg: SemiBoxedExpression
-  ) {
-    return this._fn('Error', [val, this.string(message), this.box(messageArg)]);
+    message: ['invalid-domain', ...SemiBoxedExpression[]],
+    where?: SemiBoxedExpression
+  ): BoxedDomain;
+  error(
+    message: string | [string, ...SemiBoxedExpression[]],
+    where?: SemiBoxedExpression
+  ): BoxedExpression;
+  error(
+    message: string | [string, ...SemiBoxedExpression[]],
+    where?: SemiBoxedExpression
+  ): BoxedExpression {
+    if (where && Array.isArray(where) && where[0] === 'Latex') {
+      if (where[1] === undefined || !where[1]) where = '';
+      if (typeof where[1] === 'object' && 'str' in where[1] && !where[1].str)
+        where = '';
+    }
+
+    if (Array.isArray(message) && message[0] === 'invalid-domain') {
+      return boxDomain(this, [
+        'Error',
+        ['ErrorCode', "'invalid-domain'", message[1]],
+      ]);
+    }
+    const msg =
+      typeof message === 'string'
+        ? this.string(message)
+        : this._fn('ErrorCode', [
+            this.string(message[0]),
+            ...message.slice(1).map((x) => this.box(x).canonical),
+          ]);
+
+    if (!where) return this._fn('Error', [msg]);
+
+    if (where && where[0] === 'Latex')
+      return this._fn('Error', [msg, this.box(where).canonical]);
+
+    return this._fn('Error', [msg, this.box(['Hold', where])]);
   }
 
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
@@ -1149,49 +1284,67 @@ export class ComputeEngine implements IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression {
     // @todo: fast path
-    return this._fn('Tuple', [first, second], metadata);
+    return this._fn('Tuple', [first.canonical, second.canonical], metadata);
   }
   tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression {
     // @todo: fast path
-    return this._fn('Tuple', elements, metadata);
+    return this._fn(
+      'Tuple',
+      elements.map((x) => x.canonical),
+      metadata
+    );
   }
 
   string(s: string, metadata?: Metadata): BoxedExpression {
     return new BoxedString(this, s, metadata);
   }
 
-  symbol(sym: string, metadata?: Metadata): BoxedExpression {
-    // These three are not symbols (one of them are not even valid symbol names)
-    // but they're a common type
-    if (sym === 'Infinity') return this._POSITIVE_INFINITY;
-    if (sym === '+Infinity') return this._POSITIVE_INFINITY;
-    if (sym === '-Infinity') return this._NEGATIVE_INFINITY;
+  symbol(name: string, metadata?: Metadata): BoxedExpression {
+    // Symbol names should use the Unicode NFC canonical form
+    name = name.normalize();
+
+    // These three are not symbols (some of them are not even valid symbol
+    // names) but they're a common type
+    if (name === 'NaN') return this._NAN;
+    if (name === 'Infinity') return this._POSITIVE_INFINITY;
+    if (name === '+Infinity') return this._POSITIVE_INFINITY;
+    if (name === '-Infinity') return this._NEGATIVE_INFINITY;
 
     // `Half` is a synonym for the rational 1/2
-    if (sym === 'Half') return this._HALF;
+    if (name === 'Half') return this._HALF;
 
+    if (!isValidSymbolName(name)) {
+      return this.error(
+        ['invalid-symbol-name', { str: name }],
+        ['Latex', { str: metadata?.latex ?? '' }]
+      );
+    }
+
+    // If there is some LaTeX metadata provided, we can't use the
+    // `_commonSymbols` cache, as their LaTeX metadata may not match.
     if (metadata?.latex !== undefined)
-      return new BoxedSymbol(this, sym, metadata);
+      return new BoxedSymbol(this, name, metadata);
 
-    let result = this._commonSymbols[sym];
+    let result = this._commonSymbols[name];
     if (result) {
+      // Only use the cache if there is no metadata or it matches
       if (
         !metadata?.wikidata ||
         !result.wikidata ||
         result.wikidata === metadata.wikidata
       )
         return result;
-      return new BoxedSymbol(this, sym, metadata);
+      return new BoxedSymbol(this, name, metadata);
     }
     if (result === null) {
-      // If `null`, the symbol is in `_commonSymbols`, but not
-      // yet cached
-      result = new BoxedSymbol(this, sym);
-      this._commonSymbols[sym] = result;
+      // If `null`, the symbol is in `_commonSymbols`, but not yet cached
+      result = new BoxedSymbol(this, name);
+      this._commonSymbols[name] = result;
       return result;
     }
-    return new BoxedSymbol(this, sym, metadata);
+    return new BoxedSymbol(this, name, metadata);
   }
+
   domain(
     domain: BoxedExpression | DomainExpression | BoxedDomain,
     metadata?: Metadata
@@ -1206,12 +1359,24 @@ export class ComputeEngine implements IComputeEngine {
     }
 
     if (!isDomain(domain)) {
-      console.assert(isDomain(domain));
-      throw TypeError('Expected a domain, got ' + JSON.stringify(domain));
+      return this.error(
+        ['invalid-domain', { str: JSON.stringify(domain) }],
+        ['Latex', { str: metadata?.latex ?? '' }]
+      );
     }
-
     return boxDomain(this, domain, metadata);
   }
+
+  lambda(expr: SemiBoxedExpression, sig: BoxedDomain): BoxedLambdaExpression {
+    console.assert(sig.ctor === 'Function');
+    console.assert(sig.domainArgs);
+    const context = this.context;
+    this.context = null;
+    const result = this.box(expr);
+    this.context = context;
+    return result;
+  }
+
   number(
     value:
       | number
@@ -1247,6 +1412,7 @@ export class ComputeEngine implements IComputeEngine {
     if (typeof latex !== 'string') return null;
     return this.box(this.latexSyntax.parse(latexString(latex) ?? latex));
   }
+
   serialize(x: Expression | BoxedExpression): string {
     if (typeof x === 'object' && 'json' in x)
       return this.latexSyntax.serialize(x.json);
@@ -1272,6 +1438,7 @@ export class ComputeEngine implements IComputeEngine {
       }
     );
   }
+
   set latexOptions(
     opts: Partial<NumberFormattingOptions> &
       Partial<ParseLatexOptions> &
@@ -1283,6 +1450,7 @@ export class ComputeEngine implements IComputeEngine {
   get jsonSerializationOptions(): JsonSerializationOptions {
     return this._jsonSerializationOptions;
   }
+
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>) {
     if (val.exclude) this._jsonSerializationOptions.exclude = [...val.exclude];
     if (val.shorthands) {
@@ -1362,28 +1530,38 @@ export class ComputeEngine implements IComputeEngine {
         return assume(this.box(['Element', predicate, this.domain(arg2)]));
 
       return assume(this.box(['Equal', predicate, arg2]));
-    } catch {
+    } catch (e) {
+      console.error(e);
       return 'internal-error';
     }
   }
 
   forget(symbol: undefined | string | string[]): void {
+    if (!this.context) throw Error('No scope available');
+
     if (symbol === undefined) {
+      this.context.symbolTable = undefined;
       this.assumptions.clear();
       return;
     }
+
     if (Array.isArray(symbol)) {
       for (const x of symbol) this.forget(x);
       return;
     }
+
     if (typeof symbol === 'string') {
       // Remove symbol definition in the current scope (if any)
-      this.context.symbolTable?.symbols.delete(symbol);
-
+      if (this.context.symbolTable) {
+        this.context.symbolTable.symbols.delete(symbol);
+        this.context.symbolTable.symbolWikidata.delete(symbol);
+        this.context.symbolTable.functions.delete(symbol);
+        this.context.symbolTable.functionWikidata.delete(symbol);
+      }
       // Remove any assumptions that make a reference to this symbol
       // (note that when a scope if created, any assumptions from the
-      // parent scope are copied over, so this effectively remove any
-      // reference to this symbol, even if they are assumptions about
+      // parent scope are copied over, so this effectively removes any
+      // reference to this symbol, even if there are assumptions about
       // it in a parent scope. However, when the current scope exits,
       // any previous assumptions about the symbol will be restored).
       for (const [assumption, _val] of this.assumptions) {

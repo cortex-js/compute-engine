@@ -1,11 +1,14 @@
 import { Complex } from 'complex.js';
 import { reducedRational } from '../numerics/numeric';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
-import { complexAllowed, useDecimal } from '../boxed-expression/utils';
+import { complexAllowed, preferDecimal } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
 import { flattenOps } from '../symbolic/flatten';
-import { isInMachineRange } from '../numerics/numeric-decimal';
+import {
+  isInMachineRange,
+  reducedRational as reducedRationalDecimal,
+} from '../numerics/numeric-decimal';
 import { square } from './arithmetic-power';
 
 /** The canonical form of `Multiply`:
@@ -31,7 +34,7 @@ export function canonicalMultiply(
   //
   ops = flattenOps(ops, 'Multiply') ?? ops;
 
-  if (ops.length === 0) return ce.symbol('Nothing');
+  if (ops.length === 0) return ce.number(1);
   if (ops.length === 1) return ops[0];
   if (ops.length === 2) return multiply2(ops[0], ops[1]);
 
@@ -48,8 +51,7 @@ export function simplifyMultiply(
 
   const product = new Product(ce);
   for (const arg of ops) {
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
-      return ce._NAN;
+    if (arg.isNaN || arg.symbol === 'Undefined') return ce._NAN;
     product.addTerm(arg);
   }
 
@@ -58,56 +60,16 @@ export function simplifyMultiply(
 
 export function evalMultiply(
   ce: IComputeEngine,
-  ops: BoxedExpression[]
+  ops: BoxedExpression[],
+  mode: 'N' | 'evaluate' = 'evaluate'
 ): BoxedExpression | undefined {
-  if (!useDecimal(ce)) return simplifyMultiply(ce, ops);
-
-  // If we can use Decimal, we can do some more aggressive exact numeric computations with integers
-
-  for (const op of ops)
-    if (op.isNaN || op.isMissing || op.symbol === 'Undefined') return ce._NAN;
-
-  // Accumulate rational and **integer** decimal
-  let numer = ce._DECIMAL_ONE;
-  let denom = ce._DECIMAL_ONE;
-  const product = new Product(ce);
-
-  for (const arg of ops) {
-    if (arg.symbol !== 'Nothing' && !arg.isZero) {
-      const [n, d] = arg.rationalValue;
-      if (n !== null && d !== null) {
-        numer = numer.mul(n);
-        denom = denom.mul(d);
-      } else if (arg.decimalValue !== null && arg.decimalValue.isInteger()) {
-        numer = numer.mul(arg.decimalValue);
-      } else if (
-        arg.machineValue !== null &&
-        Number.isInteger(arg.machineValue)
-      ) {
-        numer = numer.mul(arg.machineValue);
-      } else product.addTerm(arg);
-    }
-  }
-
-  const c = ce.divide(ce.number(numer), ce.number(denom));
-  if (product.isEmpty) return c;
-
-  product.addTerm(c);
-  return product.asExpression();
-}
-
-export function numEvalMultiply(
-  ce: IComputeEngine,
-  ops: BoxedExpression[]
-): BoxedExpression | undefined {
-  console.assert(ops.length > 1, 'numEvalMultiply(): no arguments');
+  console.assert(ops.length > 1, 'evalMultiply(): no arguments');
 
   //
   // First pass: looking for early exits
   //
-  for (const arg of ops)
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
-      return ce._NAN;
+  for (const op of ops)
+    if (op.isNaN || op.symbol === 'Undefined') return ce._NAN;
 
   console.assert(flattenOps(ops, 'Multiply') === null);
 
@@ -117,22 +79,35 @@ export function numEvalMultiply(
 
   // Accumulate rational, machine, decimal, complex and symbolic products
   let [numer, denom] = [1, 1];
+  let [decimalNumer, decimalDenom] = [ce._DECIMAL_ONE, ce._DECIMAL_ONE];
   let machineProduct = 1;
   let decimalProduct = ce._DECIMAL_ONE;
   let complexProduct = Complex.ONE;
   const product = new Product(ce);
 
   for (const arg of ops) {
-    if (arg.symbol !== 'Nothing' && !arg.isOne) {
+    if (arg.symbol === 'Nothing' || arg.isOne) continue;
+    if (!arg.isLiteral) {
+      product.addTerm(arg);
+    } else {
       const [n, d] = arg.rationalValue;
       if (n !== null && d !== null) {
-        [numer, denom] = [numer * n, denom * d];
+        if (preferDecimal(ce)) {
+          [decimalNumer, decimalDenom] = reducedRationalDecimal([
+            decimalNumer.mul(n),
+            decimalDenom.mul(d),
+          ]);
+        } else [numer, denom] = reducedRational([numer * n, denom * d]);
       } else if (arg.decimalValue !== null) {
-        decimalProduct = decimalProduct.mul(arg.decimalValue);
+        if (arg.decimalValue.isInteger())
+          decimalNumer = decimalNumer.mul(arg.decimalValue);
+        else decimalProduct = decimalProduct.mul(arg.decimalValue);
       } else if (arg.machineValue !== null) {
-        if (useDecimal(ce))
-          decimalProduct = decimalProduct.mul(arg.machineValue);
-        else machineProduct *= arg.machineValue;
+        if (preferDecimal(ce)) {
+          if (Number.isInteger(arg.machineValue))
+            decimalNumer = decimalNumer.mul(arg.machineValue);
+          else decimalProduct = decimalProduct.mul(arg.machineValue);
+        } else machineProduct *= arg.machineValue;
       } else if (arg.complexValue !== null) {
         complexProduct = complexProduct.mul(arg.complexValue);
       } else product.addTerm(arg);
@@ -141,9 +116,41 @@ export function numEvalMultiply(
 
   if (!complexAllowed(ce) && complexProduct.im !== 0) return ce._NAN;
 
-  if (useDecimal(ce) || !decimalProduct.eq(ce._DECIMAL_ONE)) {
+  if (decimalDenom.eq(ce._DECIMAL_ONE) && isInMachineRange(decimalNumer)) {
+    numer = denom * decimalNumer.toNumber();
+    decimalNumer = ce._DECIMAL_ONE;
+  }
+
+  if (
+    preferDecimal(ce) ||
+    !decimalProduct.eq(ce._DECIMAL_ONE) ||
+    !(decimalNumer.eq(ce._DECIMAL_ONE) && decimalDenom.eq(ce._DECIMAL_ONE))
+  ) {
     // Fold into decimal
-    const d = decimalProduct.mul(numer).div(denom).mul(machineProduct);
+    let d = decimalProduct.mul(machineProduct);
+    if (mode === 'N') {
+      d = d.mul(numer).div(denom);
+      d = d.mul(decimalNumer).div(decimalDenom);
+    } else {
+      if (denom === 1) {
+        if (decimalDenom.eq(1)) {
+          d = d.mul(decimalNumer).mul(numer);
+        } else
+          product.addTerm(
+            ce.box([
+              'Rational',
+              ce.number(decimalNumer.mul(numer)),
+              ce.number(decimalDenom),
+            ])
+          );
+      } else {
+        product.addTerm(ce.number([numer, denom]));
+        product.addTerm(
+          ce.box(['Rational', ce.number(decimalNumer), ce.number(decimalDenom)])
+            .canonical
+        );
+      }
+    }
 
     if (complexProduct.re !== 1 || complexProduct.im !== 0) {
       // We potentially have a complex result;
@@ -164,8 +171,13 @@ export function numEvalMultiply(
       product.addTerm(ce.number(d));
     }
   } else {
-    // Fold into complex
-    const a = (machineProduct * numer) / denom;
+    // Fold into complex (there is no decimal component)
+    let a = machineProduct;
+    if (mode === 'N') {
+      a = (a * numer) / denom;
+    } else {
+      product.addTerm(ce.number([numer, denom]));
+    }
     let c: BoxedExpression;
     if (complexProduct.re !== 1 || complexProduct.im !== 0)
       c = ce.number(complexProduct.mul(a));
@@ -213,8 +225,6 @@ function multiply2(
   if (op1.isLiteral && op1.isNegativeOne) return canonicalNegate(op2);
   if (op2.isLiteral && op2.isNegativeOne) return canonicalNegate(op1);
 
-  if (op1.isMissing || op2.isMissing) return ce._fn('Multiply', [op1, op2]);
-
   let sign = 1;
   let c = op1;
   let t = op2;
@@ -229,28 +239,31 @@ function multiply2(
     sign = -sign;
   }
 
-  const [n, d] = c.asRational;
-  if (c.isLiteral && n !== null && d !== null) {
-    if (n === d) return t;
-    if (n === 0) return ce._ZERO;
-    if (t.head === 'Add') {
-      if (sign < 0) c = canonicalNegate(c);
-      return ce.add(
-        t.ops!.map((x) => multiply2(c, x)),
-        metadata
-      );
-    }
-
-    if (t.isLiteral) {
-      const [numer, denom] = t.asRational;
-      if (numer !== null && denom !== null)
-        return ce.number(
-          reducedRational([sign * n * numer, denom * d]),
+  if (c.isLiteral) {
+    const [n, d] = c.asRational;
+    if (n !== null && d !== null) {
+      if (n === d) return t;
+      if (n === 0) return ce._ZERO;
+      if (t.head === 'Add') {
+        if (sign < 0) c = canonicalNegate(c);
+        return ce.add(
+          t.ops!.map((x) => multiply2(c, x)),
           metadata
         );
+      }
+
+      if (t.isLiteral) {
+        const [numer, denom] = t.asRational;
+        if (numer !== null && denom !== null)
+          return ce.number(
+            reducedRational([sign * n * numer, denom * d]),
+            metadata
+          );
+      }
+      if (sign < 0)
+        return ce._fn('Multiply', [canonicalNegate(c), t], metadata);
+      return ce._fn('Multiply', [c, t], metadata);
     }
-    if (sign < 0) return ce._fn('Multiply', [canonicalNegate(c), t], metadata);
-    return ce._fn('Multiply', [c, t], metadata);
   }
 
   if (c.hash === t.hash && c.isSame(t)) {

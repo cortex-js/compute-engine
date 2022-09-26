@@ -23,8 +23,12 @@ function parseIntegral(parser: Parser): Expression | null {
 
   // @todo: that's not quite right: the integral of the function is denoted
   // by a `...dx` pattern, e.g. `\int \sin(x)dx`
-  const fn = parser.matchExpression({ tokens: ['d'] });
+  parser.addBoundary(['d']);
+  const fn = parser.matchExpression();
+  if (parser.matchBoundary())
+    return ['Integral', fn ?? '', sup ?? 'Nothing', sub ?? 'Nothing'];
 
+  parser.removeBoundary();
   return ['Integral', fn ?? '', sup ?? 'Nothing', sub ?? 'Nothing'];
 }
 

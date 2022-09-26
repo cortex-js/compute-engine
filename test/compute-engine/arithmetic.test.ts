@@ -273,7 +273,7 @@ describe('Max', () => {
   test(`Max`, () =>
     expect(
       ce.box(['Max', 2.5, -1.1, 'NaN', 18.4]).evaluate()
-    ).toMatchInlineSnapshot(`"["Max",18.4,"NaN"]"`));
+    ).toMatchInlineSnapshot(`"18.4"`));
   test(`Max`, () =>
     expect(
       ce.box(['Max', 2.5, -1.1, 'foo', 18.4]).evaluate()
@@ -298,7 +298,7 @@ describe('Min', () => {
   test(`Min`, () =>
     expect(
       ce.box(['Min', 2.5, -1.1, 'NaN', 18.4]).evaluate()
-    ).toMatchInlineSnapshot(`"["Min",-1.1,"NaN"]"`));
+    ).toMatchInlineSnapshot(`"-1.1"`));
   test(`Min`, () =>
     expect(
       ce.box(['Min', 2.5, -1.1, 'foo', 18.4]).evaluate()

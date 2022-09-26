@@ -1,34 +1,34 @@
 import { isDomain } from './boxed-expression/boxed-domain';
 import { AssumeResult, BoxedExpression } from './public';
 
-function assertNormalProposition(prop: BoxedExpression): boolean {
-  const head = prop.head;
+// function assertNormalProposition(prop: BoxedExpression): boolean {
+//   const head = prop.head;
 
-  if (
-    head === 'Not' ||
-    head === 'And' ||
-    head === 'Or' ||
-    head === 'Element' ||
-    head === 'Subset' ||
-    head === 'SubsetEqual'
-  ) {
-    return true;
-  }
+//   if (
+//     head === 'Not' ||
+//     head === 'And' ||
+//     head === 'Or' ||
+//     head === 'Element' ||
+//     head === 'Subset' ||
+//     head === 'SubsetEqual'
+//   ) {
+//     return true;
+//   }
 
-  if (
-    head === 'Equal' ||
-    head === 'NotEqual' ||
-    head === 'Less' ||
-    head === 'LessEqual' ||
-    head === 'Greater' ||
-    head === 'GreaterEqual'
-  ) {
-    // The first argument should be a symbol.
-    if (!prop.op1.symbol) return true;
-    return false;
-  }
-  return false;
-}
+//   if (
+//     head === 'Equal' ||
+//     head === 'NotEqual' ||
+//     head === 'Less' ||
+//     head === 'LessEqual' ||
+//     head === 'Greater' ||
+//     head === 'GreaterEqual'
+//   ) {
+//     // The first argument should be a symbol.
+//     if (!prop.op1.symbol) return true;
+//     return false;
+//   }
+//   return false;
+// }
 
 /**
  * Add an assumption, in the form of a predicate, for example:
@@ -55,9 +55,11 @@ export function assume(proposition: BoxedExpression): AssumeResult {
   const head = proposition.head;
   if (head && proposition.op1.symbol) {
     const name = proposition.op1.symbol;
-    let def = proposition.op1.symbolDefinition; // ce.getSymbolDefinition(name);
+    let def = ce.lookupSymbol(name);
 
     // We are making an assumption about a previously unknown symbol...
+    // @todo: handle defining a function (defineFunction) when the
+    // domain of the second argument of proposition is compatible with 'Function'
     if (!def) def = ce.defineSymbol({ name });
 
     if (head === 'Equal') {
@@ -68,7 +70,10 @@ export function assume(proposition: BoxedExpression): AssumeResult {
       //      def.value = proposition.op2.evaluate();
       return 'ok';
     } else if (head === 'Element') {
-      const dom = proposition.op2;
+      let dom = proposition.op2;
+      if (dom.head !== 'Domain') {
+        dom = ce.domain(dom.json);
+      }
       if (isDomain(dom)) {
         proposition.op1.domain = ce.domain(dom);
         return 'ok';

@@ -76,56 +76,98 @@ describe('SERIALIZING SETS', () => {
 describe('PARSING SETS', () => {
   test('Set', () => {
     // Empty set
-    expect(parse('\\{\\}')).toMatchInlineSnapshot(`
+    expect(parse('\\lbrace\\rbrace')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
-        "'syntax-error'",
-        ["LatexForm", "'\\\\}'"]
+        "Sequence",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\\\lbrace'"],
+          ["Latex", "'\\\\lbrace'"]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\\\rbrace'"],
+          ["Latex", "'\\\\rbrace'"]
+        ]
       ]'
     `);
 
     // Finite set
     expect(parse('\\{1, 2, 3\\}')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
-        "'syntax-error'",
-        ["LatexForm", "'1, 2, 3\\\\}'"]
+        "Sequence",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\\\{'"],
+          ["Latex", "'\\\\{'"]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'1'"],
+          ["Latex", "'1, 2, 3\\\\}'"]
+        ]
       ]'
     `);
 
     // Infinite sets
     expect(parse('\\{1, 2, 3...\\}')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
-        "'syntax-error'",
-        ["LatexForm", "'1, 2, 3...\\\\}'"]
+        "Sequence",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\\\{'"],
+          ["Latex", "'\\\\{'"]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'1'"],
+          ["Latex", "'1, 2, 3...\\\\}'"]
+        ]
       ]'
     `);
     expect(parse('\\{1, 2, 3, ...\\}')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
-        "'syntax-error'",
-        ["LatexForm", "'1, 2, 3, ...\\\\}'"]
+        "Sequence",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\\\{'"],
+          ["Latex", "'\\\\{'"]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'1'"],
+          ["Latex", "'1, 2, 3, ...\\\\}'"]
+        ]
       ]'
     `);
     expect(parse('\\{...-2, -1, 0, 1, 2, 3...\\}')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
-        "'syntax-error'",
-        ["LatexForm", "'...-2, -1, 0, 1, 2, 3...\\\\}'"]
+        "Sequence",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\\\{'"],
+          ["Latex", "'\\\\{'"]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'.'"],
+          ["Latex", "'...-2, -1, 0, 1, 2, 3...\\\\}'"]
+        ]
       ]'
     `);
     expect(parse('\\{...-2, -1, 0\\}')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
-        "'syntax-error'",
-        ["LatexForm", "'...-2, -1, 0\\\\}'"]
+        "Sequence",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\\\{'"],
+          ["Latex", "'\\\\{'"]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'.'"],
+          ["Latex", "'...-2, -1, 0\\\\}'"]
+        ]
       ]'
     `);
   });

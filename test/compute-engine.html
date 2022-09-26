@@ -330,17 +330,6 @@
         <div class="output mathjson"></div>
       </div>
 
-      <div class="output-section" id="valueDomain">
-        <h2><code>expr.valueDomain</code></h2>
-        <div class="row">
-          <div class="latex"></div>
-          <button class="toggle">
-            <svg><use xlink:href="#info-circle" /></svg>
-          </button>
-        </div>
-        <div class="output mathjson"></div>
-      </div>
-
       <div class="output-section" id="simplify">
         <h2><code>expr.simplify()</code></h2>
         <div class="row">
@@ -462,7 +451,7 @@
       let errors = [];
 
       const ce = new ComputeEngine();
-      ce.defaultDomain = null;
+      // ce.defaultDomain = null;
 
       ce.pushScope({
         dictionary: {
@@ -473,6 +462,20 @@
       updateAssumptions();
 
       const mf = document.getElementById('mf');
+      mf.setOptions({
+        onInlineShortcut: (_mf, s) => {
+          if (/^[a-zA-Z][a-zA-Z0-9]*'?(_[a-zA-Z0-9]+'?)?$/.test(s)) {
+            const m = s.match(/^([a-zA-Z]+)([0-9]+)$/);
+            if (m) {
+              if (['alpha', 'beta', 'gamma'].includes(m[1]))
+                return `\\${m[1]}_{${m[2]}}`;
+              return `\\mathrm{${m[1]}}_{${m[2]}}`;
+            }
+            return '\\mathrm{' + s + '}';
+          }
+          return '';
+        },
+      });
       mf.addEventListener('input', (ev) => updateContent(mf));
       updateContent(mf);
 
@@ -500,6 +503,15 @@
           );
         }
 
+        updateExpr(null, 'json-form');
+        updateExpr(null, 'canonical-form');
+        updateExpr(null, 'domain');
+        updateExpr(null, 'simplify');
+        updateExpr(null, 'evaluate-numerically');
+        updateExpr(null, 'evaluate');
+        updateExpr(null, 'solve');
+        updateExpr(null, 'expand');
+
         try {
           updateExpr(expr, 'json-form');
         } catch (e) {
@@ -510,93 +522,85 @@
           );
         }
 
-        const canonicalExpr = expr.canonical;
         try {
-          updateExpr(canonicalExpr, 'canonical-form');
-        } catch (e) {
-          console.error(
-            'canonical(%c ' + latex + '%c) ' + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
-          );
-        }
+          const canonicalExpr = expr.canonical;
+          try {
+            updateExpr(canonicalExpr, 'canonical-form');
+          } catch (e) {
+            console.error(
+              'canonical(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
 
-        // try {
-        //   updateExpr(rawLatex.parse(latex));
-        //   } catch (e) {
-        //   console.error("rawLatex.parse(%c " + latex + '%c) ' +
-        //     e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
-        // }
+          // try {
+          //   updateExpr(rawLatex.parse(latex));
+          //   } catch (e) {
+          //   console.error("rawLatex.parse(%c " + latex + '%c) ' +
+          //     e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+          // }
 
-        try {
-          updateExpr(canonicalExpr.domain, 'domain');
-        } catch (e) {
-          console.error(
-            'domain(%c ' + latex + '%c) ' + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
-          );
-        }
+          try {
+            updateExpr(canonicalExpr.domain, 'domain');
+          } catch (e) {
+            console.error(
+              'domain(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
 
-        try {
-          updateExpr(canonicalExpr.valueDomain, 'valueDomain');
-        } catch (e) {
-          console.error(
-            'valueDomain(%c ' + latex + '%c) ' + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
-          );
-        }
+          try {
+            updateExpr(canonicalExpr.simplify(), 'simplify');
+          } catch (e) {
+            console.error(
+              'simplify(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
 
-        try {
-          updateExpr(canonicalExpr.simplify(), 'simplify');
-        } catch (e) {
-          console.error(
-            'simplify(%c ' + latex + '%c) ' + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
-          );
-        }
+          try {
+            updateExpr(canonicalExpr.N(), 'evaluate-numerically');
+          } catch (e) {
+            console.error(
+              'N(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
 
-        try {
-          updateExpr(canonicalExpr.N(), 'evaluate-numerically');
-        } catch (e) {
-          console.error(
-            'N(%c ' + latex + '%c) ' + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
-          );
-        }
+          try {
+            updateExpr(canonicalExpr.evaluate(), 'evaluate');
+          } catch (e) {
+            console.error(
+              'evaluate(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
+          try {
+            updateExpr(canonicalExpr.solve(['x']), 'solve');
+          } catch (e) {
+            console.error(
+              'solve(%c ' + latex + '%c, ["x"]) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
 
-        try {
-          updateExpr(canonicalExpr.evaluate(), 'evaluate');
-        } catch (e) {
-          console.error(
-            'evaluate(%c ' + latex + '%c) ' + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
-          );
-        }
-        try {
-          updateExpr(canonicalExpr.solve(['x']), 'solve');
-        } catch (e) {
-          console.error(
-            'solve(%c ' + latex + '%c, ["x"]) ' + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
-          );
-        }
-
-        try {
-          const e = ce.box(['Expand', canonicalExpr]);
-          updateExpr(e.evaluate(), 'expand');
-        } catch (e) {
-          console.error(
-            'expand(%c ' + latex + '%c, ["x"]) ' + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
-          );
-        }
+          try {
+            const e = ce.box(['Expand', canonicalExpr]);
+            updateExpr(e.evaluate(), 'expand');
+          } catch (e) {
+            console.error(
+              'expand(%c ' + latex + '%c, ["x"]) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
+        } catch (e) {}
       }
 
       function updateExpr(expr, id) {
@@ -679,7 +683,7 @@
           const elements = expr.map((x) => exprToStringRecursive(x, start + 2));
           let result = `[${elements.join(', ')}]`;
           if (start + result.length < MAX_LINE_LENGTH) return result;
-          return `[\n${indent}  ${elements.join(`,\n${indent}  `)}\n${indent}]`;
+          return `[\n${indent}  ${elements.join(`,  `)}\n${indent}]`;
         }
         if (expr === null) return 'null';
         if (typeof expr === 'object') {
@@ -716,10 +720,10 @@
       function updateAssumptions() {
         ce.assume('n', 'Integer');
         ce.assume('six', 6);
-        ce.assume('y', 5);
+        // ce.assume('y', 5);
 
-        ce.assume(['Greater', 'x', 4]);
-        ce.assume(['Equal', 'a', 1]);
+        // ce.assume(['Greater', 'x', 4]);
+        // ce.assume(['Equal', 'a', 1]);
 
         const content = [...ce.assumptions]
           .map(([assumption, val]) => {

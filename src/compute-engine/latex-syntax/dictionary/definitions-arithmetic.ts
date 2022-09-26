@@ -20,9 +20,9 @@ import {
   op,
   nops,
   head,
-  tail,
   op1,
   op2,
+  ops,
 } from '../../../math-json/utils';
 import { Serializer, Parser, LatexDictionary } from '../public';
 import { getFractionStyle, getRootStyle } from '../serializer-style';
@@ -37,19 +37,20 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
   if (head(expr) !== 'Multiply') return [[], []];
   const numerator: Expression[] = [];
   const denominator: Expression[] = [];
-  const args = tail(expr);
+  const args = ops(expr) ?? [];
   for (const arg of args) {
     if (head(arg) === 'Power') {
-      if (head(op(arg, 2)) === 'Negate') {
-        const a = op(arg, 1) ?? 'Missing';
-        const b = op(op(arg, 2), 1) ?? 'Missing';
-        denominator.push([POWER, a, b]);
+      const op1 = op(arg, 1);
+      const op2 = op(arg, 2);
+      if (head(op2) === 'Negate') {
+        const b = op(op2, 1);
+        if (op1 && b) denominator.push([POWER, op1, b]);
       } else {
-        const exponentVal = machineValue(op(arg, 2)) ?? NaN;
+        const exponentVal = machineValue(op2) ?? NaN;
         if (exponentVal === -1) {
-          denominator.push(op(arg, 1) ?? 'Missing');
+          if (op1) denominator.push(op1);
         } else if (exponentVal < 0) {
-          denominator.push([POWER, op(arg, 1) ?? 'Missing', -exponentVal]);
+          if (op1) denominator.push([POWER, op1, -exponentVal]);
         } else {
           numerator.push(arg);
         }
@@ -65,8 +66,8 @@ function parseRoot(parser: Parser): Expression | null {
   const degree = parser.matchOptionalLatexArgument();
   const base = parser.matchRequiredLatexArgument();
   if (base === null) {
-    if (degree !== null) return [ROOT, 'Missing', degree];
-    return [SQRT, 'Missing'];
+    if (degree !== null) return [ROOT, ['Error', "'missing'"], degree];
+    return ['Sqrt', ['Error', "'missing'"]];
   }
   if (degree !== null) return [ROOT, base, degree];
   return [SQRT, base];
@@ -94,9 +95,7 @@ function serializeRoot(
   }
 
   const degreeValue = machineValue(degree);
-  if (degreeValue === 2) {
-    return '\\sqrt{' + serializer.serialize(base) + '}';
-  }
+  if (degreeValue === 2) return '\\sqrt{' + serializer.serialize(base) + '}';
 
   // It's the n-th root
   return (
@@ -116,38 +115,44 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   const name = head(expr);
   let result = '';
   let arg = op(expr, 1);
-  const argVal = machineValue(arg) ?? NaN;
-  let argWasNumber =
-    !Number.isNaN(argVal) &&
-    Number.isInteger(argVal) &&
-    Math.abs(argVal) <= 100;
   if (name === NEGATE) {
     result = '-' + serializer.wrap(arg, 276);
   } else if (name === ADD) {
+    let val = machineValue(arg) ?? NaN;
+    let argWasInteger =
+      !Number.isNaN(val) && Number.isInteger(val) && Math.abs(val) <= 1000;
     result = serializer.serialize(arg);
     const last = nops(expr) + 1;
     for (let i = 2; i < last; i++) {
       arg = op(expr, i);
-      const val = machineValue(arg) ?? NaN;
-      const argIsNumber = !Number.isNaN(val) && Math.abs(val) <= 100;
+      val = machineValue(arg) ?? NaN;
+      const argIsInteger =
+        !Number.isNaN(val) && Number.isInteger(val) && Math.abs(val) <= 1000;
       let done = false;
-      if (arg !== null) {
-        if (argWasNumber) {
-          // Check if we can convert to an invisible plus, e.g. "1\frac{1}{2}"
-          const [numer, denom] = rationalValue(arg);
-          if (numer !== null && denom !== null) {
-            if (
-              isFinite(numer) &&
-              isFinite(denom) &&
-              denom !== 1 &&
-              denom <= 100
-            ) {
-              // Don't include the '+' sign, it's a rational, use 'invisible plus'
-              result +=
-                serializer.options.invisiblePlus + serializer.serialize(arg);
-              done = true;
-            }
-          }
+      if (arg !== null && argWasInteger) {
+        // Check if we can convert to an invisible plus, e.g. "1\frac{1}{2}"
+        // CAUTION: rationalValue() only parses rationals with a
+        // denominator and numerator in the machine range.
+        // Since we are only considering small fractions with a
+        // numerator and denominator of less than 100, that's OK.
+        const [numer, denom] = rationalValue(arg);
+        if (
+          numer !== null &&
+          denom !== null &&
+          isFinite(numer) &&
+          isFinite(denom) &&
+          denom > 1 &&
+          denom <= 100 &&
+          numer > 0 &&
+          numer <= 100
+        ) {
+          // Don't include the '+' sign, it's a rational, use 'invisible plus'
+          result = joinLatex([
+            result,
+            serializer.options.invisiblePlus,
+            serializer.serialize(arg),
+          ]);
+          done = true;
         }
       }
       if (!done) {
@@ -158,21 +163,20 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
           result += serializer.wrap(arg, 275);
         } else {
           const term = serializer.wrap(arg, 275);
-          if (term[0] === '-' || term[0] === '+') {
-            result += term;
-          } else {
-            result = result + '+' + term;
-          }
+          if (term[0] === '-' || term[0] === '+') result += term;
+          else result = result + '+' + term;
         }
       }
-      argWasNumber = argIsNumber;
+      argWasInteger = argIsInteger;
     }
   } else if (name === SUBTRACT) {
+    result = serializer.wrap(arg, 275);
     const arg2 = op(expr, 2);
     if (arg2 !== null) {
-      result = serializer.wrap(arg, 275) + '-' + serializer.wrap(arg2, 275);
-    } else {
-      result = serializer.wrap(arg, 275);
+      const term = serializer.wrap(arg2, 275);
+      if (term[0] === '-') result += '+' + term.slice(1);
+      else if (term[0] === '+') result += '-' + term.slice(1);
+      else result = result + '-' + term;
     }
   }
 
@@ -236,7 +240,8 @@ function serializeMultiply(
     if (typeof arg === 'number' || isNumberObject(arg)) {
       term = serializer.serialize(arg);
       if (term === '-1' && !result) {
-        result = '-';
+        result = '';
+        isNegative = !isNegative;
       } else {
         if (term[0] === '-') {
           term = term.slice(1);
@@ -253,7 +258,7 @@ function serializeMultiply(
     if (head(arg) === 'Power') {
       // It's a power with a fractional exponent,
       // it's a nth-root
-      const [n, d] = rationalValue(op(arg, 2) ?? NaN);
+      const [n, d] = rationalValue(op(arg, 2));
       if (n === 1 && d !== null) {
         result += serializeRoot(
           serializer,
@@ -319,8 +324,8 @@ function serializeMultiply(
 }
 
 function parseFraction(parser: Parser): Expression | null {
-  const numer = parser.matchRequiredLatexArgument() ?? 'Missing';
-  const denom = parser.matchRequiredLatexArgument() ?? 'Missing';
+  const numer = parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"];
+  const denom = parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"];
   if (
     head(numer) === 'PartialDerivative' &&
     (head(denom) === 'PartialDerivative' ||
@@ -329,17 +334,17 @@ function parseFraction(parser: Parser): Expression | null {
   ) {
     // It's a Leibniz notation partial derivative
     // `∂f(x)/∂x` or `∂^2f(x)/∂x∂y` or `∂/∂x f(x)`
-    const degree: Expression = op(numer, 3) ?? 'Missing';
+    const degree = op(numer, 3) ?? null;
     // Expect: getArg(numer, 2) === 'Nothing' -- no args
     let fn = op(numer, 1);
-    if (fn === null || fn === 'Missing') {
-      fn = parser.matchExpression() ?? 'Missing';
+    if (fn === null) {
+      fn = parser.matchExpression() ?? ['Error', "'missing'"];
     }
 
     let vars: Expression[] = [];
     if (head(denom) === 'Multiply') {
       // ?/∂x∂y
-      for (const arg of tail(denom)) {
+      for (const arg of ops(denom) ?? []) {
         if (head(arg) === 'PartialDerivative') {
           const v = op(arg, 2);
           if (v) vars.push(v);
@@ -354,12 +359,7 @@ function parseFraction(parser: Parser): Expression | null {
       vars = [LIST, ...vars];
     }
 
-    return [
-      'PartialDerivative',
-      fn,
-      ...vars,
-      degree === 'Missing' ? 1 : degree,
-    ];
+    return ['PartialDerivative', fn, ...vars, degree === null ? 1 : degree];
   }
 
   return [DIVIDE, numer, denom];
@@ -372,8 +372,8 @@ function serializeFraction(
   // console.assert(getFunctionName(expr) === DIVIDE);
   if (expr === null) return '';
 
-  const numer = op(expr, 1) ?? 'Missing';
-  const denom = op(expr, 2) ?? 'Missing';
+  const numer = op(expr, 1) ?? ['Error', "'missing'"];
+  const denom = op(expr, 2) ?? ['Error', "'missing'"];
 
   if (nops(expr) === 1) return serializer.serialize(numer);
   const style = getFractionStyle(expr, serializer.level);
@@ -401,8 +401,8 @@ function serializePower(
   expr: Expression | null
 ): string {
   const name = head(expr);
-  const arg1 = op(expr, 1) ?? 'Missing';
-  const arg2 = op(expr, 2) ?? 'Missing';
+  const arg1 = op(expr, 1) ?? ['Error', "'missing'"];
+  const arg2 = op(expr, 2) ?? ['Error', "'missing'"];
 
   if (name === 'Sqrt') {
     return serializeRoot(
@@ -485,16 +485,17 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
 
   // Operations
-  // {
-  //   /** Could be the determinant if the argument is a matrix */
-  //   /** @todo: domain check */
-  //   /** If a literal matrix, the `serialize` should be custom, the parens are
-  //    * replaced with bars */
-  //   name: 'Abs',
-  //   kind: 'matchfix',
-  //   openDelimiter: '|',
-  //   closeDelimiter: '|',
-  // },
+  {
+    /** Could be the determinant if the argument is a matrix */
+    /** @todo: domain check */
+    /** If a literal matrix, the `serialize` should be custom, the parens are
+     * replaced with bars */
+    name: 'Abs',
+    kind: 'matchfix',
+    openDelimiter: '|',
+    closeDelimiter: '|',
+    parse: (_parser, expr) => (expr === 'Nothing' ? null : ['Abs', expr]),
+  },
   {
     name: 'Add',
     trigger: ['+'],
@@ -520,12 +521,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return parser.matchExpression({ ...until, minPrec: 400 });
     },
   },
-  // {
-  //   name: 'Ceil',
-  //   kind: 'matchfix',
-  //   openDelimiter: '\\lceil',
-  //   closeDelimiter: '\\rceil',
-  // },
+  {
+    name: 'Ceil',
+    kind: 'matchfix',
+    openDelimiter: '\\lceil',
+    closeDelimiter: '\\rceil',
+  },
   {
     name: 'Complex',
     precedence: 274, // Same precedence as `Add`: used for correct wrapping
@@ -550,12 +551,17 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Divide',
     trigger: ['\\frac'],
-    requiredLatexArg: 2,
     precedence: 660,
     // For \frac specifically, not for \div, etc..
     // handles Leibnitz notation for partial derivatives
     parse: parseFraction,
     serialize: serializeFraction,
+  },
+  {
+    kind: 'infix',
+    trigger: '\\over',
+    precedence: 660,
+    parse: 'Divide',
   },
   {
     trigger: ['\\/'],
@@ -585,7 +591,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string =>
       joinLatex([
         '\\exponentialE^{',
-        serializer.serialize(op(expr, 1) ?? 'Missing'),
+        serializer.serialize(op(expr, 1) ?? ['Error', "'missing'"]),
         '}',
       ]),
   },
@@ -601,12 +607,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'postfix',
     precedence: 810,
   },
-  // {
-  //   name: 'Floor',
-  //   kind: 'matchfix',
-  //   openDelimiter: '\\lfloor',
-  //   closeDelimiter: '\\rfloor',
-  // },
+  {
+    name: 'Floor',
+    kind: 'matchfix',
+    openDelimiter: '\\lfloor',
+    closeDelimiter: '\\rfloor',
+  },
   {
     trigger: '\\operatorname{floor}',
     parse: (parser) => {
@@ -752,14 +758,22 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   //   openDelimiter: '|',
   //   closeDelimiter: '|',
   // },
-  // {
-  //   /** If the argument is a vector */
-  //   /** @todo: domain check */
-  //   name: 'Norm',
-  //   kind: 'matchfix',
-  //   openDelimiter: '||',
-  //   closeDelimiter: '||',
-  // },
+  {
+    //   /** If the argument is a vector */
+    /** @todo: domain check */
+    kind: 'matchfix',
+    openDelimiter: '||',
+    closeDelimiter: '||',
+    parse: (_parser, expr) => ['Norm', expr],
+  },
+  {
+    //   /** If the argument is a vector */
+    /** @todo: domain check */
+    name: 'Norm',
+    kind: 'matchfix',
+    openDelimiter: ['\\left', '\\Vert'],
+    closeDelimiter: ['\\right', '\\Vert'],
+  },
   {
     name: 'PlusMinus',
     trigger: ['\\pm'],
@@ -805,15 +819,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     // @todo parse args
   },
   {
-    name: SQRT,
+    name: 'Sqrt',
     trigger: ['\\sqrt'],
-    optionalLatexArg: 1,
-    requiredLatexArg: 1,
     parse: parseRoot,
     serialize: serializePower,
   },
   {
-    name: SUBTRACT,
+    name: 'Subtract',
     trigger: ['-'],
     kind: 'infix',
     associativity: 'both',
@@ -821,7 +833,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator, lhs) => {
       if (276 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 277 });
-      return rhs === null ? null : ([SUBTRACT, lhs, rhs] as Expression);
+      return rhs === null ? null : (['Subtract', lhs, rhs] as Expression);
     },
   },
 ];

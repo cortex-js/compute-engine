@@ -3,18 +3,20 @@ import { BoxedExpression, BoxedDomain, IComputeEngine } from '../public';
 import {
   complexAllowed,
   getImaginaryCoef,
-  useDecimal,
+  preferDecimal,
 } from '../boxed-expression/utils';
 import { flattenOps } from '../symbolic/flatten';
 import { Sum } from '../symbolic/sum';
-import { isInMachineRange } from '../numerics/numeric-decimal';
+import {
+  isInMachineRange,
+  reducedRational as reducedRationalDecimal,
+} from '../numerics/numeric-decimal';
 import { reducedRational } from '../numerics/numeric';
+import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
 
 /** The canonical form of `Add`:
  * - removes `0`
- * - adds up small integers and rational numbers
  * - capture complex numbers (a + ib or ai +b)
- * - groups repeated terms (a + a -> 2a)
  * */
 export function canonicalAdd(
   ce: IComputeEngine,
@@ -23,8 +25,10 @@ export function canonicalAdd(
   console.assert(ops.every((x) => x.isCanonical));
   ops = flattenOps(ops, 'Add') ?? ops;
 
-  if (ops.length <= 1) return ops[0] ?? ce.symbol('Nothing');
+  ops = ops.filter((x) => !(x.isLiteral && x.isZero));
 
+  if (ops.length === 0) return ce.number(0);
+  if (ops.length === 1) return ops[0];
   if (ops.length === 2) {
     //
     // Is this a  complex number, i.e. `a + ib` or `ai + b`?
@@ -33,46 +37,32 @@ export function canonicalAdd(
     let re: number | null = 0;
     if (ops[0].isLiteral) {
       re = ops[0].machineValue;
-      if (re === null && ops[0].decimalValue) re = ops[0].asFloat ?? 0;
-      else re = 0;
+      if (re === null && ops[0].decimalValue) re = ops[0].asFloat;
     }
-    if (re !== 0) im = getImaginaryCoef(ops[1]);
+    if (re !== null && re !== 0) im = getImaginaryCoef(ops[1]);
     else {
       im = getImaginaryCoef(ops[0]);
       if (im !== 0) {
         re = ops[1].machineValue;
-        if (re === null && ops[1].decimalValue) re = ops[1].asFloat ?? 0;
-        else re = 0;
+        if (re === null && ops[1].decimalValue) re = ops[1].asFloat;
       }
     }
-    if (im !== 0) return ce.number(ce.complex(re, im));
-
-    //
-    // Shortcuts
-    //
-    if (ops[0].isLiteral && ops[1].isLiteral) {
-      if (ops[0].isZero) return ops[1];
-      if (ops[1].isZero) return ops[0];
-
-      const [n1, d1] = ops[0].asRational;
-      const [n2, d2] = ops[1].asRational;
-      if (n1 !== null && d1 !== null && n2 !== null && d2 !== null)
-        return ce.number([n1 * d2 + n2 * d1, d1 * d2]);
-    }
+    if (re !== null && im !== null && im !== 0)
+      return ce.number(ce.complex(re, im));
   }
 
-  return new Sum(ce, ops).asExpression();
+  return ce._fn('Add', ops);
 }
 
 export function domainAdd(
   _ce: IComputeEngine,
-  args: BoxedExpression[]
-): BoxedDomain | string | null {
-  let dom: BoxedDomain | string | null = null;
+  args: BoxedDomain[]
+): BoxedDomain | null {
+  let dom: BoxedDomain | null = null;
   for (const arg of args) {
-    const argDom = arg.valueDomain;
-    if (!argDom.isNumeric) return null;
-    if (!dom || !argDom.isCompatible(dom)) dom = argDom;
+    if (!arg.isNumeric) return null;
+    if (!dom) dom = arg;
+    else dom = sharedAncestorDomain(dom, arg);
   }
   return dom;
 }
@@ -86,9 +76,8 @@ export function simplifyAdd(
   const sum = new Sum(ce);
   for (const arg of args) {
     if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
-      return ce._NAN;
-    sum.addTerm(arg);
+    if (arg.isNaN || arg.symbol === 'Undefined') return ce._NAN;
+    if (!arg.isZero) sum.addTerm(arg);
   }
 
   return sum.asExpression();
@@ -96,105 +85,154 @@ export function simplifyAdd(
 
 export function evalAdd(
   ce: IComputeEngine,
-  args: BoxedExpression[]
-): BoxedExpression | undefined {
-  if (!useDecimal(ce)) return simplifyAdd(ce, args);
-
-  // If we can use Decimal, we can do some more aggressive exact numeric computations with integers
-
+  args: BoxedExpression[],
+  mode: 'N' | 'eval' = 'eval'
+): BoxedExpression {
+  //
+  // First pass: looking for early exits
+  //
   for (const arg of args) {
     if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
-      return ce._NAN;
+    if (arg.isNaN || arg.symbol === 'Undefined') return ce._NAN;
   }
 
-  // Accumulate rational and integer decimal
-  let [numer, denom] = [0, 1];
-  let decimalSum = ce._DECIMAL_ZERO;
+  console.assert(flattenOps(args, 'Add') === null);
+
   const sum = new Sum(ce);
 
-  for (const arg of args) {
-    if (arg.symbol !== 'Nothing' && !arg.isZero) {
-      const [n, d] = arg.rationalValue;
-      if (n !== null && d !== null) {
-        [numer, denom] = [numer * d + denom * n, denom * d];
-      } else if (arg.decimalValue !== null && arg.decimalValue.isInteger()) {
-        decimalSum = decimalSum.add(arg.decimalValue);
-      } else if (
-        arg.machineValue !== null &&
-        Number.isInteger(arg.machineValue)
-      ) {
-        decimalSum = decimalSum.add(arg.machineValue);
-      } else sum.addTerm(arg);
-    }
-  }
-
-  // Fold into decimal
-  [numer, denom] = reducedRational([numer, denom]);
-  if (denom === 1) decimalSum = decimalSum.add(numer);
-  else sum.addTerm(ce.number([numer, denom]));
-
-  if (sum.isEmpty) return ce.number(decimalSum);
-  sum.addTerm(ce.number(decimalSum));
-  return sum.asExpression();
-}
-
-export function numEvalAdd(
-  ce: IComputeEngine,
-  args: BoxedExpression[]
-): BoxedExpression {
-  for (const arg of args) {
-    if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
-    if (arg.isNaN || arg.isMissing || arg.symbol === 'Undefined')
-      return ce._NAN;
-  }
-  // Accumulate rational, machine, decimal, complex and symbolic products
+  //
+  // Accumulate rational, machine, decimal, complex and symbolic terms
+  //
   let [numer, denom] = [0, 1];
+  let [decimalNumer, decimalDenom] = [ce._DECIMAL_ZERO, ce._DECIMAL_ONE];
   let machineSum = 0;
+  let machineIntegerSum = 0;
   let decimalSum = ce._DECIMAL_ZERO;
   let complexSum = Complex.ZERO;
-  const sum = new Sum(ce);
 
   for (const arg of args) {
-    if (arg.symbol !== 'Nothing' && !arg.isZero) {
+    if (arg.symbol === 'Nothing' || arg.isZero) continue;
+    if (arg.isLiteral) {
       const [n, d] = arg.rationalValue;
       if (n !== null && d !== null) {
-        [numer, denom] = [numer * d + denom * n, denom * d];
+        [numer, denom] = reducedRational([numer * d + denom * n, denom * d]);
       } else if (arg.decimalValue !== null) {
-        decimalSum = decimalSum.add(arg.decimalValue);
+        if (arg.decimalValue.isInteger())
+          decimalNumer = decimalNumer.add(decimalDenom.mul(arg.decimalValue));
+        else decimalSum = decimalSum.add(arg.decimalValue);
       } else if (arg.machineValue !== null) {
-        if (useDecimal(ce)) decimalSum = decimalSum.add(arg.machineValue);
-        else machineSum += arg.machineValue;
+        if (preferDecimal(ce)) {
+          if (Number.isInteger(arg.machineValue))
+            decimalNumer = decimalNumer.add(decimalDenom.mul(arg.machineValue));
+          else decimalSum = decimalSum.add(arg.machineValue);
+        } else {
+          if (Number.isInteger(arg.machineValue))
+            machineIntegerSum += arg.machineValue;
+          else machineSum += arg.machineValue;
+        }
       } else if (arg.complexValue !== null) {
         complexSum = complexSum.add(arg.complexValue);
       } else sum.addTerm(arg);
-    }
+    } else if (arg.head === 'Rational' && arg.nops === 2) {
+      // If this is a Rational head, it's a rational of Decimal values
+      const [dn, dd] = [
+        arg.op1.decimalValue ?? arg.op1.machineValue,
+        arg.op2.decimalValue ?? arg.op1.machineValue,
+      ];
+      if (dn !== null && dd !== null) {
+        decimalNumer = decimalNumer.mul(dd).add(decimalDenom.mul(dn));
+        decimalDenom = decimalDenom.mul(dd);
+      } else sum.addTerm(arg);
+    } else sum.addTerm(arg);
   }
 
+  // If we have an imaginary term, but complex are not allowed, return NaN
   if (!complexAllowed(ce) && complexSum.im !== 0) return ce._NAN;
 
-  if (useDecimal(ce) || ce.chop(decimalSum) !== 0) {
-    // Fold into decimal
+  //
+  // If we prefer to use Decimal, or if we had any decimal term,
+  // do Decimal calculations
+  //
+  if (
+    preferDecimal(ce) ||
+    ce.chop(decimalSum) !== 0 ||
+    !decimalNumer.isZero()
+  ) {
     let d = decimalSum;
-    if (numer !== 0) d = d.mul(denom).add(numer).div(denom);
     if (machineSum !== 0) d = d.add(machineSum);
     if (complexSum.re !== 0) d = d.add(complexSum.re);
+
+    decimalNumer = decimalNumer.add(decimalDenom.mul(machineIntegerSum));
+    decimalNumer = decimalNumer.mul(denom).add(decimalDenom.mul(numer));
+    decimalDenom = decimalDenom.mul(denom);
+    [decimalNumer, decimalDenom] = reducedRationalDecimal([
+      decimalNumer,
+      decimalDenom,
+    ]);
+
+    // machineSum = 0;
+    // numer = 0;
+    // denom = 1;
+    // machineIntegerSum = 0;
+
+    if (decimalDenom.eq(1)) d = d.add(decimalNumer);
+    else {
+      // In 'N' mode we should divide the numerator and denominator
+      if (mode === 'N') d = d.add(decimalNumer.div(decimalDenom));
+      else {
+        // In 'eval' mode, preserve a rational
+        sum.addTerm(
+          ce.box(['Rational', ce.number(decimalNumer), ce.number(decimalDenom)])
+            .canonical
+        );
+      }
+    }
 
     // Fold in any remaining imaginary part
     if (complexSum.im !== 0) {
       if (isInMachineRange(d)) {
+        // We can fold into a Complex Number
         const c = ce.number(ce.complex(d.toNumber(), complexSum.im));
         if (sum.isEmpty) return c;
         sum.addTerm(c);
       } else {
+        // We have to keep a complex and Decimal term
         sum.addTerm(ce.number(ce.complex(0, complexSum.im)));
         sum.addTerm(ce.number(d));
       }
     } else if (sum.isEmpty) return ce.number(d);
     else sum.addTerm(ce.number(d));
+
+    return sum.asExpression();
+  }
+
+  //
+  // Machine Number calculation
+  //
+  // Fold into machine: we don't prefer decimal and we had no Decimal terms
+
+  if (mode === 'N' || denom === 1) {
+    const re = machineSum + machineIntegerSum + complexSum.re + numer / denom;
+    const c = ce.number(
+      complexSum.im === 0 ? re : ce.complex(re, complexSum.im)
+    );
+    if (sum.isEmpty) return c;
+    sum.addTerm(c);
   } else {
-    // Fold into machine
-    const re = machineSum + complexSum.re + numer / denom;
+    if (numer !== 0) {
+      if (denom === 1) {
+        machineSum += machineIntegerSum + numer;
+      } else {
+        [numer, denom] = reducedRational([
+          numer + denom * machineIntegerSum,
+          denom,
+        ]);
+        sum.addTerm(ce.number([numer, denom]));
+      }
+    } else {
+      machineSum += machineIntegerSum;
+    }
+    const re = machineSum + complexSum.re;
     const c = ce.number(
       complexSum.im === 0 ? re : ce.complex(re, complexSum.im)
     );

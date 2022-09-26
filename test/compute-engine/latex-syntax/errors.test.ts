@@ -72,9 +72,9 @@ check('Missing all arguments with \\frac custom parser', () =>
   )
 );
 
-check('Missing argument with generic parser', () =>
+check('Missing argument with \\placeholder parser', () =>
   expect(engine.parse('1+\\placeholder')).toMatchInlineSnapshot(
-    `["Add",1,["Error",["ErrorCode","'unexpected-command'","'\\\\placeholder'"],["Latex","'\\\\placeholder'"]]]`
+    `["Add",1,"Nothing"]`
   )
 );
 
@@ -90,7 +90,6 @@ check('Invalid argument positional', () =>
   )
 );
 
-// @todo
 check('Invalid infix operator', () =>
   expect(engine.parse('\\times 3')).toMatchInlineSnapshot(
     `["Multiply",["Error","'missing'",["Latex","'\\\\times'"]],3]`
@@ -200,13 +199,13 @@ check('Invalid empty delimiter expression', () =>
 
 check('Invalid delimiter: expected closing', () =>
   expect(engine.parse('1\\left(')).toMatchInlineSnapshot(
-    `["Multiply",1,["Delimiter",["Error","'expected-closing-delimiter'",["Latex","''"]]]]`
+    `["Sequence",1,["Error",["ErrorCode","'unexpected-command'","'\\\\left'"],["Latex","'\\\\left('"]]]`
   )
 );
 
 check('Invalid delimiter: expected closing', () =>
   expect(engine.parse('1(')).toMatchInlineSnapshot(
-    `["Multiply",1,["Delimiter",["Error","'expected-closing-delimiter'",["Latex","''"]]]]`
+    `["Sequence",1,["Error",["ErrorCode","'unexpected-token'","'('"],["Latex","'('"]]]`
   )
 );
 
@@ -236,7 +235,7 @@ check('Invalid double superscript', () =>
 
 check('Double superscript: invalid domain', () =>
   expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(
-    `["Power","x",["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],["Hold",["Sequence",1,2]]]]`
+    `["Power","x",1,["Error","'unexpected-argument'",["Hold",2]]]`
   )
 );
 

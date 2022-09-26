@@ -1,63 +1,47 @@
-import { latex, expressionError, check } from '../../utils';
+import { latex, check, engine } from '../../utils';
 
 describe('MATCHFIX', () => {
   test('\\lbrack\\rbrack', () =>
-    expect(check('\\lbrack\\rbrack')).toMatchInlineSnapshot(`
-      'box      = ["Error", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'\\rbrack'"]]
-      simplify  = ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]]
-      evaluate  = "Missing"'
-    `));
+    expect(check('\\lbrack\\rbrack')).toMatchInlineSnapshot(
+      `'["List", "Nothing"]'`
+    ));
 
   test('\\lbrack a\\rbrack', () =>
-    expect(check('\\lbrack a\\rbrack')).toMatchInlineSnapshot(`
-      'box      = ["Error", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'a\\rbrack'"]]
-      simplify  = ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]]
-      evaluate  = "Missing"'
-    `));
+    expect(check('\\lbrack a\\rbrack')).toMatchInlineSnapshot(
+      `'["List", "a"]'`
+    ));
 
   test('\\lbrack a, b\\rbrack', () =>
-    expect(check('\\lbrack a, b\\rbrack')).toMatchInlineSnapshot(`
-      'box      = ["Error", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'a, b\\rbrack'"]]
-      simplify  = ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]]
-      evaluate  = "Missing"'
-    `));
+    expect(check('\\lbrack a, b\\rbrack')).toMatchInlineSnapshot(
+      `'["List", "a", "b"]'`
+    ));
 
   test('\\lbrack a, \\lbrack b, c\\rbrack\\rbrack', () =>
-    expect(check('\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'))
-      .toMatchInlineSnapshot(`
-      'box      = ["Error", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]], "'syntax-error'", ["LatexForm", "'a, \\lbrack b, c\\rbrack\\rbrack'"]]
-      simplify  = ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]]
-      evaluate  = "Missing"'
-    `));
+    expect(
+      check('\\lbrack a, \\lbrack b, c\\rbrack\\rbrack')
+    ).toMatchInlineSnapshot(`'["List", "a", ["List", "b", "c"]]'`));
 
   test('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack', () =>
-    expect(check('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'))
-      .toMatchInlineSnapshot(`
-      'box      = ["Error", ["Sequence", ["Multiply", ["Sin", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]]], "a"], ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]]], "'syntax-error'", ["LatexForm", "'b, c\\rbrack\\rbrack'"]]
-      simplify  = ["Sequence", ["Multiply", ["Sin", ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]]], "a"], ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\lbrack'"]]]
-      evaluate  = ["Sequence", ["Divide", ["Multiply", "a", ["Subtract", ["Exp", ["Multiply", "ImaginaryUnit", "Missing"]], ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "Missing"]]]]], ["Complex", 0, 2]], "Missing"]'
-    `)); // @todo
+    expect(
+      check('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack')
+    ).toMatchInlineSnapshot(`'["Sin", ["List", "a", ["List", "b", "c"]]]'`));
 });
 
 describe('MATCHFIX serialize', () => {
   test('[List]', () =>
-    expect(latex(['List'])).toMatchInlineSnapshot(
-      `'\\left[\\begin{array}{lll}\\end{array}\\right]'`
-    ));
+    expect(latex(['List'])).toMatchInlineSnapshot(`'\\lbrack\\rbrack'`));
 
   test('[List, "a"]', () =>
-    expect(latex(['List', 'a'])).toMatchInlineSnapshot(
-      `'\\left[\\begin{array}{lll}\\end{array}\\right]'`
-    ));
+    expect(latex(['List', 'a'])).toMatchInlineSnapshot(`'\\lbrack a\\rbrack'`));
 
   test(`['List', 'a', 'b']`, () =>
     expect(latex(['List', 'a', 'b'])).toMatchInlineSnapshot(
-      `'\\left[\\begin{array}{lll}\\end{array}\\right]'`
+      `'\\lbrack a, b\\rbrack'`
     ));
 
   test(`['List', 'a', ['List', 'b', 'c']`, () =>
     expect(latex(['List', 'a', ['List', 'b', 'c']])).toMatchInlineSnapshot(
-      `'\\left[\\begin{array}{lll}\\end{array}\\right]'`
+      `'\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'`
     ));
 });
 
@@ -70,94 +54,87 @@ describe('MATCHFIX synonyms', () => {
 
   test('(a, b, c)', () =>
     expect(check(`(a, b, c)`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", "a", "b", "c"]
-      canonical = "a"'
+      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      canonical = ["Delimiter", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "b"]], ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "c"]]]'
     `));
 
   test('\\left(a, b, c\\right)', () =>
     expect(check(`\\left(a, b, c\\right)`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", "a", "b", "c"]
-      canonical = "a"'
+      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      canonical = ["Delimiter", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "b"]], ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "c"]]]'
     `));
   test('\\bigl(a, b, c\\bigr)', () =>
     expect(check(`\\bigl(a, b, c\\bigr)`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", "a", "b", "c"]
-      canonical = "a"'
+      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      canonical = ["Delimiter", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "b"]], ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "c"]]]'
     `));
   test('\\big(a, b, c\\big)', () =>
     expect(check(`\\big(a, b, c\\big)`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", "a", "b", "c"]
-      canonical = "a"'
+      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      canonical = ["Delimiter", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "b"]], ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "c"]]]'
     `));
   test('\\lparen a, b, c\\rparen', () =>
     expect(check(`\\lparen a, b, c\\rparen`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", "a", "b", "c"]
-      canonical = "a"'
+      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      canonical = ["Delimiter", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "b"]], ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "c"]]]'
     `));
   test('\\left\\lparen a, b, c\\right\\rparen', () =>
     expect(check(`\\left\\lparen a, b, c\\right\\rparen`))
       .toMatchInlineSnapshot(`
-      'box      = ["Delimiter", "a", "b", "c"]
-      canonical = "a"'
+      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      canonical = ["Delimiter", "a", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "b"]], ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Domain", "String"]]]], ["Hold", "c"]]]'
     `));
 });
 
 describe('MATCHFIX abs and norm', () => {
   test('1+|a|+2', () =>
     expect(check('1+|a|+2')).toMatchInlineSnapshot(`
-      'box      = ["Error", 1, "'syntax-error'", ["LatexForm", "'+|a|+2'"]]
-      simplify  = 1'
+      'box      = ["Add", 1, ["Abs", "a"], 2]
+      simplify  = ["Add", 3, ["Abs", "a"]]'
     `));
 
   test('1+|a|+2', () =>
     expect(check('|(1+|a|+2)|')).toMatchInlineSnapshot(`
-      'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'|(1+|a|+2)|'"]]
-      canonical = ["Error", "'syntax-error'", ["LatexForm", "'|(1+|a|+2)|'"]]
-      simplify  = "'syntax-error'"'
-    `)); // @todo
+      'box      = ["Abs", ["Delimiter", ["Add", 1, ["Abs", "a"], 2]]]
+      canonical = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
+      simplify  = ["Add", 3, ["Abs", "a"]]
+      evaluate  = ["Abs", ["Add", 3, ["Abs", "a"]]]'
+    `));
 
   test('|1+|a|+2|', () =>
     expect(check('|1+|a|+2|')).toMatchInlineSnapshot(`
-      'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'|1+|a|+2|'"]]
-      canonical = ["Error", "'syntax-error'", ["LatexForm", "'|1+|a|+2|'"]]
-      simplify  = "'syntax-error'"'
+      'box      = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
+      simplify  = ["Add", 3, ["Abs", "a"]]
+      evaluate  = ["Abs", ["Add", 3, ["Abs", "a"]]]'
     `));
 
   test('||a||', () =>
-    expect(check('||a||')).toMatchInlineSnapshot(`
-      'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'||a||'"]]
-      canonical = ["Error", "'syntax-error'", ["LatexForm", "'||a||'"]]
-      simplify  = "'syntax-error'"'
-    `));
+    expect(check('||a||')).toMatchInlineSnapshot(`'["Norm", "a"]'`));
   test('||a||+|b|', () =>
-    expect(check('||a||+|b|')).toMatchInlineSnapshot(`
-      'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'||a||+|b|'"]]
-      canonical = ["Error", "'syntax-error'", ["LatexForm", "'||a||+|b|'"]]
-      simplify  = "'syntax-error'"'
-    `));
+    expect(check('||a||+|b|')).toMatchInlineSnapshot(
+      `'["Add", ["Norm", "a"], ["Abs", "b"]]'`
+    ));
 });
 
 describe('MATCHFIX invalid', () => {
   test('( // missing closing fence', () => {
-    expect(check('(')).toMatchInlineSnapshot(`
-      'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "'('"]]
-      canonical = ["Error", "'syntax-error'", ["LatexForm", "'('"]]
-      simplify  = "'syntax-error'"'
-    `);
+    expect(check('(')).toMatchInlineSnapshot(`'"Nothing"'`);
   });
   test(') // missing opening fence', () => {
-    expect(check(')')).toMatchInlineSnapshot(`
-      'box      = ["Error", "Nothing", "'syntax-error'", ["LatexForm", "')'"]]
-      canonical = ["Error", "'syntax-error'", ["LatexForm", "')'"]]
-      simplify  = "'syntax-error'"'
-    `);
+    expect(check(')')).toMatchInlineSnapshot(
+      `'["Error", ["ErrorCode", "'unexpected-token'", "')'"], ["Latex", "')'"]]'`
+    );
   });
 
   test('-( // missing closing fence', () => {
-    expect(expressionError('-(')).toMatchInlineSnapshot(`[]`);
+    expect(engine.parse('-(').json).toMatchInlineSnapshot(
+      `['Negate', ['Error', ''missing'', ['Latex', ''-('']]]`
+    );
   });
 
   test('(3+x // missing closing fence', () => {
-    expect(expressionError('(3+x')).toMatchInlineSnapshot(`[]`);
+    expect(engine.parse('(3+x').json).toMatchInlineSnapshot(
+      `['Error', ['ErrorCode', ''unexpected-token'', ''3''], ['Latex', ''3+x'']]`
+    );
   });
 });

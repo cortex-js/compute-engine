@@ -1,4 +1,4 @@
-import { useDecimal } from '../boxed-expression/utils';
+import { preferDecimal } from '../boxed-expression/utils';
 import { factorPower } from '../numerics/numeric';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 
@@ -173,13 +173,13 @@ export function processPower(
   exponent: BoxedExpression,
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
-  if (mode === 'N' && base.isLiteral && exponent.isLiteral) {
-    if (base.complexValue) {
+  if (mode !== 'simplify' && base.isLiteral && exponent.isLiteral) {
+    if (base.complexValue)
       return ce.number(
         base.complexValue.pow(exponent.complexValue ?? exponent.asFloat ?? NaN)
       );
-    }
-    if (exponent.complexValue && base.asFloat)
+
+    if (exponent.complexValue && base.asFloat !== null)
       return ce.number(ce.complex(base.asFloat).pow(exponent.complexValue));
 
     if (base.decimalValue) {
@@ -187,7 +187,8 @@ export function processPower(
         base.decimalValue.pow(exponent.decimalValue ?? exponent.asFloat!)
       );
     }
-    if (base.asFloat && (exponent.decimalValue || useDecimal(ce))) {
+
+    if (base.asFloat !== null && (exponent.decimalValue || preferDecimal(ce))) {
       return ce.number(
         ce.decimal(base.asFloat).pow(exponent.decimalValue ?? exponent.asFloat!)
       );
@@ -198,7 +199,7 @@ export function processPower(
   //
   // Handle some specific cases: square root and cube root
   //
-  if (base.asSmallInteger !== null) {
+  if (base.isLiteral && base.asSmallInteger !== null) {
     const [n, d] = exponent.rationalValue;
     if ((n === 1 || n === -1) && (d === 2 || d === 3)) {
       //  @todo: handle rationalValue
@@ -211,6 +212,12 @@ export function processPower(
 
       return ce.mul([ce.number(factor), ce.power(ce.number(root), exponent)]);
     }
+  }
+
+  if (base.head === 'Power') {
+    // a^-1^-1 -> a
+    if (base.op2.asSmallInteger === -1 && exponent.asSmallInteger === -1)
+      return base.op1;
   }
 
   return undefined;

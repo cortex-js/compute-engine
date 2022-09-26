@@ -22,10 +22,10 @@ import {
   head,
   headName,
   symbol,
-  tail,
   isFunctionObject,
   isNumberObject,
   isSymbolObject,
+  ops,
 } from '../../math-json/utils';
 import { WarningSignalHandler } from '../../common/signals';
 
@@ -211,7 +211,7 @@ export class Serializer {
     //
     // It's a function
     //
-    const args = tail(expr);
+    const args = ops(expr) ?? [];
     if (!def) {
       // We don't know anything about this function
       if (typeof h === 'string' && h.length > 0 && h[0] === '\\') {
@@ -220,11 +220,10 @@ export class Serializer {
         //
         // This looks like a LaTeX command. Serialize
         // the arguments as LaTeX arguments
-        let result: string = h;
-        for (const arg of args) {
-          result += '{' + this.serialize(arg) + '}';
-        }
-        return result;
+        const result: string[] = [h];
+        for (const arg of args) result.push(`{${this.serialize(arg)}}}`);
+
+        return joinLatex(result);
       }
 
       //
@@ -243,48 +242,24 @@ export class Serializer {
       ])})`;
     }
 
-    if (def.requiredLatexArg > 0) {
-      //
-      // 3. Is it a known LaTeX command?
-      //
-      // This looks like a LaTeX command. Serialize the arguments as LaTeX
-      // arguments
-      let optionalArg = '';
-      let requiredArg = '';
-      let i = 0;
-      while (i < def.requiredLatexArg) {
-        requiredArg += '{' + this.serialize(args[i++]) + '}';
-      }
-      while (
-        i < Math.min(args.length, def.optionalLatexArg + def.requiredLatexArg)
-      ) {
-        const optValue = this.serialize(args[1 + i++]);
-        if (optValue) {
-          optionalArg += '[' + optValue + ']';
-        }
-      }
-      return (def.serialize as string) + (optionalArg + requiredArg);
-    }
+    //
+    // 3. Is it a known function?
+    //
+    if (typeof def.serialize === 'function') return def.serialize(this, expr);
 
-    //
-    // 4. Is it a known function?
-    //
-    if (typeof def.serialize === 'function') {
-      return def.serialize(this, expr);
-    }
     const style = this.options.applyFunctionStyle(expr, this.level);
-    if (style === 'none') {
-      return def.serialize + joinLatex(args.map((x) => this.serialize(x)));
-    }
-    return def.serialize + this.serialize(['Delimiter', ...args]);
+    if (style === 'none')
+      return joinLatex([def.serialize, ...args.map((x) => this.serialize(x))]);
+
+    return joinLatex([def.serialize, this.serialize(['Delimiter', ...args])]);
   }
 
   serializeDictionary(dict: { [key: string]: Expression }): string {
-    return `\\left[\\begin{array}{lll}${Object.keys(dict)
+    return `\\left\\lbrack\\begin{array}{lll}${Object.keys(dict)
       .map((x) => {
         return `\\textbf{${x}} & \\rightarrow & ${this.serialize(dict[x])}`;
       })
-      .join('\\\\')}\\end{array}\\right]`;
+      .join('\\\\')}\\end{array}\\right\\rbrack`;
   }
 
   serialize(expr: Expression | null): LatexString {
@@ -329,7 +304,7 @@ export class Serializer {
             // 5.1 An unknown LaTeX command, possibly with arguments.
             // This can happen if we encountered an unrecognized LaTeX command
             // during parsing, e.g. "\foo{x + 1}"
-            const args = tail(expr);
+            const args = ops(expr) ?? [];
             if (args.length === 0) return fnName;
             return (
               fnName +
@@ -347,6 +322,7 @@ export class Serializer {
           const def = this.dictionary.name.get(fnName);
           if (def) {
             // If there is a custom serializer function, use it.
+            // (note: 'matchfix' entries always have a default serializer)
             if (typeof def.serialize === 'function')
               return def.serialize(this, expr);
 
@@ -356,9 +332,6 @@ export class Serializer {
               def.kind === 'prefix'
             )
               return serializeOperator(this, expr, def);
-
-            if (def.kind === 'matchfix')
-              return serializeMatchfix(this, expr, def);
 
             if (def.kind === 'symbol') return this.serializeSymbol(expr, def);
 

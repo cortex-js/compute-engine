@@ -17,7 +17,7 @@ import { inferNumericDomain } from '../domain-utils';
 import { isPrime } from '../numerics/primes';
 import { isInMachineRange } from '../numerics/numeric-decimal';
 import { serializeJsonNumber } from './serialize';
-import { complexAllowed, hashCode, useDecimal } from './utils';
+import { complexAllowed, hashCode, preferDecimal } from './utils';
 
 /**
  * BoxedNumber
@@ -69,14 +69,14 @@ export class BoxedNumber extends AbstractBoxedExpression {
       }
     } else if (value instanceof Decimal) {
       // Only use a Decimal if in `decimal` mode or `auto` with precision > 15
-      this._value = useDecimal(ce) ? value : value.toNumber();
+      this._value = preferDecimal(ce) ? value : value.toNumber();
     } else {
       // Note: by the time we reach here, NaN and +/-Infinity have
       // been handled by `boxNumber()`. So the string should be ready
       // to be parsed by `Decimal` or `Number`
       if (typeof value === 'number') {
         this._value = value;
-      } else if (useDecimal(ce)) {
+      } else if (preferDecimal(ce)) {
         // Use a Decimal if in `decimal` mode or `auto` with precision > 15
         this._value = ce.decimal(value);
       } else if (typeof value === 'string') {
@@ -141,7 +141,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     const [numer, denom] = this._value;
     const ce = this.engine;
 
-    if (!useDecimal(ce)) return new BoxedNumber(ce, numer / denom);
+    if (!preferDecimal(ce)) return new BoxedNumber(ce, numer / denom);
     return new BoxedNumber(ce, ce.decimal(numer).div(denom));
   }
 
@@ -709,7 +709,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
       const ce = this.engine;
       const [numer, denom] = this._value;
       // Account for the desired precision/numeric mode
-      if (useDecimal(ce)) return ce.number(ce.decimal(numer).div(denom));
+      if (preferDecimal(ce)) return ce.number(ce.decimal(numer).div(denom));
 
       return ce.number(numer / denom);
     }

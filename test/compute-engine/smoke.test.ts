@@ -21,7 +21,6 @@ import {
   engine,
   evaluateToJson,
   expand,
-  latex,
   N,
   NToJson,
   parse,
@@ -32,40 +31,44 @@ import {
 
 const ce = engine;
 
-console.log(ce.box(['Equal', 5, 5]).evaluate().toJSON());
+ce.assume(['Element', 'f', 'Function']);
 
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
-console.log(ce.parse());
+// When to apply Sequence/Nothing? Need definition to know what to hold...
+console.log(ce.parse('x_{a,b}').toJSON());
 
-// \frac{x}{} \text{ cm}
-// ce.jsonSerializationOptions.metadata = ['latex'];
-const v = ce.parse('\\frac{x}{} \\text{ cm}').json;
-console.log(v);
+console.log(
+  ce
+    .domain(['Function', 'PositiveInteger', 'Anything'])
+    .isCompatible(engine.domain(['Function', 'Number', 'Number']))
+);
 
-let w = ce.parse('\\mathrm{ invalid name}').json;
-console.log(w);
-w = ce.parse('\\mathrm{$invalid}').json;
-console.log(w);
+// Outputs unexpected command, \\left...
+// because there is no matchfix for \\left(\\right.
+console.log(ce.parse('\\sin\\left(x\\right.').toJSON());
 
-// ce.jsonSerializationOptions.metadata = [];
+// Better if error out with unary minus (prefix priority over infix)
+console.log(ce.parse('-').toJSON());
 
-const b = ce.parse('88441888+\\frac{85}{7}');
-console.log(b.canonical.toJSON());
-console.log('simplify', b.simplify().toJSON());
-console.log('evaluate', b.evaluate().toJSON());
-console.log(b.N().toJSON());
-// let f = ce.parse('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}');
-// f = f.simplify();
-// console.log(f.toJSON());
+console.log(ce.parse('(').toJSON());
 
-const q = ce.box(['Divide', 'weight', ['Square', 'height']]);
-console.log(q.latex);
-console.log(ce.parse(q.latex).toJSON());
+// Gives unexpected-token. Should be expected closing boundary?
+console.log(ce.parse('(3+x').toJSON());
 
-// console.log(ce.parse('f(x)').toJSON());
-// console.log(ce.parse('f_{n - 1}(x)').toJSON());
-// console.log(ce.parse('x \\times f_{n - 1}(x) + f_{n - 2}(x)').toJSON());
+// Give unexpected token. SHould be unexpected closing boundary?
+console.log(ce.parse(')').toJSON());
+
+// ; is parsed as Sequence Sequence?
+console.log(ce.parse('(a, b; c, d, ;; n ,, m)').toJSON());
+
+// Subscript parsing: not parsing single token (i.e. x_{0} works)
+console.log(ce.parse('x_0').toJSON());
+
+// The invalid `$` is not handled very well. Should return an error 'unexpected-mode-shift'
+// const w = ce.parse('\\mathrm{$invalid}').json;
+// console.log(w);
+
+console.log(ce.parse('f_{n - 1}(x)').toJSON());
+console.log(ce.parse('x \\times f_{n - 1}(x) + f_{n - 2}(x)').toJSON());
 
 //
 // BOXING
@@ -91,26 +94,27 @@ describe('PARSING numbers', () => {
   test(`-i`, () => {
     expect(parseToJson('-i')).toMatchObject(['Negate', 'ImaginaryUnit']);
   });
-  test(`3.424242334e4`, () => {
-    expect(parseToJson('3.424242334e4')).toEqual(34242.42334);
-    // Should not sum, loss of precision (very big intger + small integer)
-  });
-  test(`1 + 1e199`, () => {
-    expect(parse('1 + 1e199')).toMatch('["Add", 1, 1e+199]');
-    // @fixme
-  });
-  test(`421.35e+1000`, () => {
-    expect(parse('421.35e+1000')).toMatch('{num: "4.2135e+1002"}');
-  });
-  // @todo Add should get flattened (as part of boxing?)
+
+  test(`3.424242334e4`, () =>
+    expect(parseToJson('3.424242334e4')).toEqual(34242.42334));
+
+  // Should not sum, loss of precision (very big intger + small integer)
+  test(`1 + 1e199`, () =>
+    expect(parse('1 + 1e199')).toMatch('["Add", 1, 1e+199]'));
+
+  test(`421.35e+1000`, () =>
+    expect(parse('421.35e+1000')).toMatch('{num: "4.2135e+1002"}'));
+
   test(`\\frac34 + 1e199`, () =>
     expect(parse('\\frac34 + 1e199')).toMatch(
       '["Add", ["Rational", 3, 4], 1e+199]'
     ));
+
   test(`-5-3-2`, () =>
     expect(parse('-5-3-2')).toMatchInlineSnapshot(
       `'["Subtract", ["Subtract", -5, 3], 2]'`
     ));
+
   test(`5+3+2`, () => {
     expect(parseToJson('5+3+2')).toMatchObject(['Add', 5, 3, 2]);
   });
@@ -147,15 +151,13 @@ describe('SERIALIZING Incomplete expressions', () => {
     ).toMatchInlineSnapshot(`'2\\times\\frac{1}{3}'`);
   });
   test(`['Divide']`, () => {
-    expect(latex(['Divide'])).toMatchInlineSnapshot(
-      `'\\frac{\\placeholder{}}{\\placeholder{}}'`
-    );
+    expect(ce.box(['Divide']).toJSON()).toMatchInlineSnapshot(`'["Divide"]'`);
   });
   test(`['Power', undefined]`, () => {
     expect(
-      latex(['Power', undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(`'(\\mathrm{Nothing})^{\\placeholder{}}'`);
-  }); // @fixme
+      ce.box(['Power', undefined as unknown as Expression]).toJSON()
+    ).toMatchInlineSnapshot(`'["Power","Nothing"]'`);
+  });
 });
 
 describe('SERIALIZING Negative factors', () => {
@@ -184,23 +186,27 @@ describe('CANONICALIZATION negate', () => {
 });
 describe('CANONICALIZATION Add', () => {
   test('7 + 2 + 5', () =>
-    expect(canonical('7 + 2 + 5')).toMatchInlineSnapshot(`'14'`));
+    expect(canonical('7 + 2 + 5')).toMatchInlineSnapshot(`'["Add", 7, 2, 5]'`));
 
   test(`7 + \\frac12`, () =>
     expect(canonical('7 + \\frac12')).toMatchInlineSnapshot(
-      `'["Rational", 15, 2]'`
+      `'["Add", 7, ["Rational", 1, 2]]'`
     ));
 
   test(`1 + 2 + x`, () =>
-    expect(canonical('1 + 2 + x')).toMatchInlineSnapshot(`'["Add", 3, "x"]'`));
+    expect(canonical('1 + 2 + x')).toMatchInlineSnapshot(
+      `'["Add", 1, 2, "x"]'`
+    ));
 
   test(`1 + \\infty`, () =>
     expect(canonical('1 + \\infty')).toMatchInlineSnapshot(
-      `'{num: "+Infinity"}'`
+      `'["Add", 1, {num: "+Infinity"}]'`
     ));
 
   test(`7 + (2 + 5) // Associative`, () =>
-    expect(canonical('7 + (2 + 5)')).toMatchInlineSnapshot(`'14'`));
+    expect(canonical('7 + (2 + 5)')).toMatchInlineSnapshot(
+      `'["Add", 7, 2, 5]'`
+    ));
 
   test(`-2+a+b`, () =>
     expect(canonical('-2+a+b')).toMatchInlineSnapshot(
@@ -209,7 +215,7 @@ describe('CANONICALIZATION Add', () => {
 
   test(`-2+a^2+a+a^2`, () =>
     expect(canonical('-2+a^2+a+a^2')).toMatchInlineSnapshot(
-      `'["Add", -2, ["Multiply", 2, ["Square", "a"]], "a"]'`
+      `'["Add", -2, ["Square", "a"], "a", ["Square", "a"]]'`
     ));
 });
 describe('CANONICALIZATION multiply', () => {
@@ -231,7 +237,7 @@ describe('CANONICALIZATION multiply', () => {
   test(`2\\times(5-5)\\times5\\times4`, () =>
     expect(
       canonicalToJson('2\\times(5-5)\\times5\\times4')
-    ).toMatchInlineSnapshot(`0`));
+    ).toMatchInlineSnapshot(`['Multiply', 40, ['Subtract', 5, 5]]`));
 
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () =>
     expect(
@@ -282,7 +288,7 @@ describe('CANONICALIZATION invisible operators', () => {
   });
   test(`'3\\frac18 // invisible add`, () => {
     expect(canonicalToJson('3\\frac18')).toMatchInlineSnapshot(
-      `['Rational', 25, 8]`
+      `['Add', 3, ['Rational', 1, 8]]`
     );
   });
   test(`2(x)`, () => {
@@ -293,7 +299,7 @@ describe('CANONICALIZATION invisible operators', () => {
   });
   test(`2x+x`, () =>
     expect(canonicalToJson('2x+x')).toMatchInlineSnapshot(
-      `['Multiply', 3, 'x']`
+      `['Add', ['Multiply', 2, 'x'], 'x']`
     ));
 });
 
@@ -310,10 +316,14 @@ describe('SIMPLIFICATION add', () => {
       `'["Negate", "ImaginaryUnit"]'`
     )); // @fixme ['Complex', 0, -1]?
   test(`3-i`, () => expect(simplifyToJson('3-i')).toEqual(['Complex', 3, -1]));
+
   test(`2\\sqrt{3}+\\sqrt{1+2}`, () =>
     expect(simplify('2\\sqrt{3}+\\sqrt{1+2}')).toMatchInlineSnapshot(
       `'["Add", ["Multiply", 2, ["Sqrt", 3]], ["Sqrt", 3]]'`
     ));
+
+  test(`2x+x`, () =>
+    expect(simplify('2x+x')).toMatchInlineSnapshot(`'["Multiply", 3, "x"]'`));
 });
 
 describe('SIMPLIFICATION divide', () => {
@@ -360,7 +370,17 @@ describe('SIMPLIFICATION sqrt', () => {
       2,
       ['Sqrt', 3],
     ]));
+
+  // A math olympiad problem
+  // that other CAS don't simplify: Simplify[ToExpression["\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}", TeXForm]]
+  test(`simplify('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')`, () =>
+    expect(
+      simplifyToJson('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')
+    ).toMatchInlineSnapshot(
+      `['Multiply', ['Rational', 1, 15], ['Subtract', ['Sqrt', ['Add', 4, ['Multiply', 2, ['Sqrt', 3]]]], ['Sqrt', ['Add', 28, ['Multiply', 10, ['Sqrt', 3]]]]]]`
+    ));
 });
+
 describe('SIMPLIFICATION negate', () => {
   test(`simplify('-(-x)')`, () => expect(simplifyToJson('-(-x)')).toMatch('x'));
 
@@ -441,6 +461,13 @@ describe('SYMBOLIC EVALUATION Other functions', () => {
     expect(evaluateToJson('50!')).toMatchInlineSnapshot(
       `{num: '3.0414093201713378043612608166064768844377641568960512e+64'}`
     ));
+
+  test(`eval('8844418+\\frac{85}{7}')`, () =>
+    expect(evaluateToJson('8844418+\\frac{85}{7}')).toEqual([
+      'Rational',
+      61911011,
+      7,
+    ]));
 });
 
 //
@@ -448,23 +475,39 @@ describe('SYMBOLIC EVALUATION Other functions', () => {
 //
 
 describe('NUMERIC EVALUATION arithmetic', () => {
-  test(`N('1 + \\frac{1}{3}')`, () => {
-    expect(NToJson('1 + \\frac{1}{3}')).toMatchObject({});
+  test(`N('88444111111113418+8')`, () => {
+    expect(NToJson('88444111111113418+8')).toEqual({
+      num: '88444111111113426',
+    });
   });
-  test(`N('\\frac34 + 1e98')`, () =>
-    expect(NToJson('\\frac34 + 1e98')).toEqual({
-      num: '1.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008e+98',
+
+  test(`N('1 + \\frac{1}{3}')`, () => {
+    expect(NToJson('1 + \\frac{1}{3}')).toEqual({ num: '1.(3)' });
+  });
+
+  test(`N('8844418+\\frac{85}{7}')`, () =>
+    expect(NToJson('8844418+\\frac{85}{7}')).toEqual({
+      num: '8844430.(142857)',
     }));
+
+  test(`N('\\frac34 + 1e30')`, () =>
+    expect(NToJson('\\frac34 + 1e30')).toEqual({
+      num: '1.00000000000000000000000000000075e+30',
+    }));
+
   test(`N('\\frac34 + 1e99') // Precision is at 100 digits, so loss of 3/4 is expected`, () =>
     expect(N('\\frac34 + 1e199')).toMatch('1e+199'));
+
   test(`NToJson('12345678^3 + \\frac{1}{3}')`, () =>
     expect(NToJson('12345678^3 + \\frac{1}{3}')).toMatchInlineSnapshot(
       `{num: '1.881675960266558605752(3)e+21'}`
     ));
+
   test(`NToJson('50!')`, () =>
     expect(NToJson('50!')).toMatchObject({
       num: '3.0414093201713378043612608166064768844377641568960512e+64',
     }));
+
   test(`Wester-3`, () =>
     expect(
       NToJson(
@@ -476,9 +519,7 @@ describe('NUMERIC EVALUATION arithmetic', () => {
 describe('NUMERIC EVALUATION trigonometry', () => {
   test(`N('\\sin\\pi')`, () => expect(N('\\sin\\pi')).toEqual('0'));
   test(`N('\\cos\\frac{\\pi}{7}')`, () =>
-    expect(N('\\cos\\frac{\\pi}{7}')).toMatchInlineSnapshot(`
-      '{
-        num: "0.9009688679024191262361023195074450511659191621318571500535624231994324204279399655013614547185124153"
-      }'
-    `));
+    expect(NToJson('\\cos\\frac{\\pi}{7}')).toMatchInlineSnapshot(
+      `{num: '0.9009688679024191262361023195074450511659191621318571500535624231994324204279399655013614547185124153'}`
+    ));
 });

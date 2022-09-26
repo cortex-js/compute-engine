@@ -48,8 +48,8 @@ function expressionToString(expr: Expression | undefined | null): string {
   if (expr === undefined || expr === null) return '';
   const strValue = stringValue(expr);
   if (strValue !== null) return strValue;
-  const numValue = machineValue(expr);
-  if (numValue !== null) return Number(numValue).toString();
+  if (typeof expr === 'number') return Number(expr).toString();
+  if (typeof expr === 'object' && 'num' in expr) return expr.num;
   return expr.toString();
 }
 

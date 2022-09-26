@@ -26,7 +26,6 @@ export {
   head,
   headName,
   symbol,
-  tail,
   applyRecursively,
   mapArgs,
   op,

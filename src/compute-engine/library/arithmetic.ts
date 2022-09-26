@@ -17,21 +17,20 @@ import {
   rationalize,
 } from '../numerics/numeric';
 import { BoxedExpression, SymbolTable, IComputeEngine } from '../public';
-import { complexAllowed, useDecimal } from '../boxed-expression/utils';
+import { complexAllowed, preferDecimal } from '../boxed-expression/utils';
 import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
   canonicalAdd,
-  numEvalAdd,
   simplifyAdd,
   evalAdd,
+  domainAdd,
 } from './arithmetic-add';
 import {
   canonicalMultiply,
-  numEvalMultiply,
   simplifyMultiply,
   evalMultiply,
 } from './arithmetic-multiply';
-import { canonicalDivide } from './arithmetic-divide';
+import { canonicalDivide, simplifyDivide } from './arithmetic-divide';
 import { canonicalPower, processPower } from './arithmetic-power';
 
 // @todo Future additions to the dictionary
@@ -76,14 +75,12 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         threadable: true,
         idempotent: true,
         complexity: 1200,
-        signatures: [
-          {
-            domain: ['Function', 'ExtendedRealNumber', 'ExtendedRealNumber'],
-            simplify: (ce, ops) => processAbs(ce, ops[0], 'simplify'),
-            evaluate: (ce, ops) => processAbs(ce, ops[0], 'evaluate'),
-            N: (ce, ops) => processAbs(ce, ops[0], 'N'),
-          },
-        ],
+        signature: {
+          domain: ['Function', 'ExtendedRealNumber', 'NonNegativeNumber'],
+          simplify: (ce, ops) => processAbs(ce, ops[0], 'simplify'),
+          evaluate: (ce, ops) => processAbs(ce, ops[0], 'evaluate'),
+          N: (ce, ops) => processAbs(ce, ops[0], 'N'),
+        },
       },
 
       {
@@ -94,35 +91,31 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         threadable: true,
         idempotent: true,
         complexity: 1300,
-        signatures: [
-          {
-            domain: 'NumericFunction',
-            canonical: (ce, args) => canonicalAdd(ce, args),
-            simplify: (ce, ops) => simplifyAdd(ce, ops),
-            evaluate: (ce, ops) => evalAdd(ce, ops),
-            N: (ce, ops) => numEvalAdd(ce, ops),
-          },
-        ],
+        signature: {
+          domain: 'NumericFunction',
+          codomain: (ce, args) => domainAdd(ce, args),
+          canonical: (ce, args) => canonicalAdd(ce, args),
+          simplify: (ce, ops) => simplifyAdd(ce, ops),
+          evaluate: (ce, ops) => evalAdd(ce, ops),
+          N: (ce, ops) => evalAdd(ce, ops, 'N'),
+        },
       },
 
       {
         name: 'Ceil',
         description: 'Rounds a number up to the next largest integer',
         complexity: 1250,
-        signatures: [
-          {
-            domain: 'NumericFunction',
-            evaluate: (ce, ops) => {
-              const op1 = ops[0];
-              if (op1.decimalValue) return ce.number(op1.decimalValue.ceil());
-              if (op1.complexValue) return ce.number(op1.complexValue.ceil(0));
-              if (op1.asFloat !== null)
-                return ce.number(Math.ceil(op1.asFloat));
+        signature: {
+          domain: ['Function', 'Number', 'Integer'],
+          evaluate: (ce, ops) => {
+            const op1 = ops[0];
+            if (op1.decimalValue) return ce.number(op1.decimalValue.ceil());
+            if (op1.complexValue) return ce.number(op1.complexValue.ceil(0));
+            if (op1.asFloat !== null) return ce.number(Math.ceil(op1.asFloat));
 
-              return undefined;
-            },
+            return undefined;
           },
-        ],
+        },
       },
 
       {
@@ -132,19 +125,17 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         idempotent: true,
         complexity: 1200,
 
-        signatures: [
-          {
-            domain: 'NumericFunction',
-            N: (ce, ops) => {
-              const op1 = ops[0];
-              if (op1.decimalValue) return ce.number(ce.chop(op1.decimalValue));
-              if (op1.complexValue) return ce.number(ce.chop(op1.complexValue));
-              if (op1.asFloat !== null) return ce.number(ce.chop(op1.asFloat));
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          evaluate: (ce, ops) => {
+            const op1 = ops[0];
+            if (op1.decimalValue) return ce.number(ce.chop(op1.decimalValue));
+            if (op1.complexValue) return ce.number(ce.chop(op1.complexValue));
+            if (op1.asFloat !== null) return ce.number(ce.chop(op1.asFloat));
 
-              return undefined;
-            },
+            return undefined;
           },
-        ],
+        },
       },
 
       {
@@ -161,15 +152,11 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         // - if numer product of numbers, or denom product of numbers,
         // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
 
-        signatures: [
-          {
-            domain: 'NumericFunction',
-            canonical: (ce, args) =>
-              !args[0] || !args[1]
-                ? ce.symbol('Missing')
-                : canonicalDivide(ce, args[0], args[1]),
-          },
-        ],
+        signature: {
+          domain: ['Function', 'Number', 'Number', 'Number'],
+          canonical: (ce, args) => canonicalDivide(ce, args[0], args[1]),
+          simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
+        },
       },
 
       {
@@ -179,15 +166,10 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         complexity: 3500,
         // Exp(x) -> e^x
 
-        signatures: [
-          {
-            domain: 'NumericFunction',
-            canonical: (ce, args) =>
-              !args[0]
-                ? ce.symbol('Missing')
-                : ce.power(ce.symbol('ExponentialE'), args[0]),
-          },
-        ],
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          canonical: (ce, args) => ce.power(ce.symbol('ExponentialE'), args[0]),
+        },
       },
 
       {
@@ -210,24 +192,22 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q120976',
         complexity: 9000,
 
-        signatures: [
-          {
-            domain: 'NumericFunction',
-            evaluate: (ce, ops) => {
-              const n = ops[0].asSmallInteger;
-              if (n !== null && n >= 0) {
-                if (!useDecimal(ce)) return ce.number(factorial(n));
-                return ce.number(factorialDecimal(ce, ce.decimal(n)));
-              }
-              if (ops[0].complexValue)
-                return ce.number(gammaComplex(ops[0].complexValue.add(1)));
-              else if (ops[0].asFloat !== null)
-                return ce.number(gamma(1 + ops[0].asFloat));
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          evaluate: (ce, ops) => {
+            const n = ops[0].asSmallInteger;
+            if (n !== null && n >= 0) {
+              if (!preferDecimal(ce)) return ce.number(factorial(n));
+              return ce.number(factorialDecimal(ce, ce.decimal(n)));
+            }
+            if (ops[0].complexValue)
+              return ce.number(gammaComplex(ops[0].complexValue.add(1)));
+            else if (ops[0].asFloat !== null)
+              return ce.number(gamma(1 + ops[0].asFloat));
 
-              return undefined;
-            },
+            return undefined;
           },
-        ],
+        },
       },
 
       {
@@ -235,20 +215,18 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q56860783',
         complexity: 1250,
 
-        signatures: [
-          {
-            domain: ['Function', 'ExtendedRealNumber', 'ExtendedRealNumber'],
-            evaluate: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.floor());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.floor(0));
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.floor(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'ExtendedRealNumber', 'ExtendedRealNumber'],
+          evaluate: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.floor());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.floor(0));
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.floor(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
 
       {
@@ -256,42 +234,38 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q190573',
         complexity: 8000,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number', 'Number'],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(gammaDecimal(ce, ops[0].decimalValue));
-              // @todo: should gammaComplex() be always called if complexAllowed()?
-              if (ops[0].complexValue)
-                return ce.number(gammaComplex(ops[0].complexValue));
-              if (ops[0].asFloat !== null)
-                return ce.number(gamma(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', 'Number', 'Number'],
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(gammaDecimal(ce, ops[0].decimalValue));
+            // @todo: should gammaComplex() be always called if complexAllowed()?
+            if (ops[0].complexValue)
+              return ce.number(gammaComplex(ops[0].complexValue));
+            if (ops[0].asFloat !== null)
+              return ce.number(gamma(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
 
       {
         name: 'LogGamma',
         complexity: 8000,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number', 'Number'],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(lngammaDecimal(ce, ops[0].decimalValue));
-              // @todo: should lngammaComplex() be always called if complexAllowed()?
-              if (ops[0].complexValue)
-                return ce.number(lngammaComplex(ops[0].complexValue));
-              if (ops[0].asFloat !== null)
-                return ce.number(lngamma(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', 'Number', 'Number'],
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(lngammaDecimal(ce, ops[0].decimalValue));
+            // @todo: should lngammaComplex() be always called if complexAllowed()?
+            if (ops[0].complexValue)
+              return ce.number(lngammaComplex(ops[0].complexValue));
+            if (ops[0].asFloat !== null)
+              return ce.number(lngamma(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
 
       {
@@ -300,20 +274,18 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q204037',
         complexity: 4000,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number', 'Number'],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.log());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.log());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.log(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', 'Number', 'Number'],
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.log());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.log());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.log(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
 
       {
@@ -322,34 +294,32 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q11197',
         complexity: 4100,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number', 'Number'],
-            N: (ce, ops) => {
-              const exponent = ops[0];
-              const base = ops[1] ?? ce.number(10);
-              if (exponent.decimalValue) {
-                const decimalBase =
-                  base.decimalValue?.log() ??
-                  ce.decimal(base.asFloat ?? NaN).log();
-                return ce.number(exponent.decimalValue.log().div(decimalBase));
-              }
-              if (exponent.complexValue) {
-                const complexBase =
-                  base.complexValue?.log() ??
-                  ce.complex(base.asFloat ?? NaN).log();
+        signature: {
+          domain: ['Function', 'Number', 'Number', 'Number'],
+          N: (ce, ops) => {
+            const exponent = ops[0];
+            const base = ops[1] ?? ce.number(10);
+            if (exponent.decimalValue) {
+              const decimalBase =
+                base.decimalValue?.log() ??
+                ce.decimal(base.asFloat ?? NaN).log();
+              return ce.number(exponent.decimalValue.log().div(decimalBase));
+            }
+            if (exponent.complexValue) {
+              const complexBase =
+                base.complexValue?.log() ??
+                ce.complex(base.asFloat ?? NaN).log();
 
-                return ce.number(exponent.complexValue.log().div(complexBase));
-              }
-              if (exponent.asFloat !== null) {
-                return ce.number(
-                  Math.log(exponent.asFloat) / Math.log(base.asFloat ?? NaN)
-                );
-              }
-              return undefined;
-            },
+              return ce.number(exponent.complexValue.log().div(complexBase));
+            }
+            if (exponent.asFloat !== null) {
+              return ce.number(
+                Math.log(exponent.asFloat) / Math.log(base.asFloat ?? NaN)
+              );
+            }
+            return undefined;
           },
-        ],
+        },
       },
 
       {
@@ -358,26 +328,22 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q581168',
         complexity: 4100,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number'],
-            N: (ce, ops) => {
-              const exponent = ops[0];
-              if (exponent.decimalValue)
-                return ce.number(
-                  exponent.decimalValue.log().div(ce._DECIMAL_TWO)
-                );
-              if (exponent.complexValue)
-                return ce.number(
-                  exponent.complexValue.log().div(ce.complex(2))
-                );
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          N: (ce, ops) => {
+            const exponent = ops[0];
+            if (exponent.decimalValue)
+              return ce.number(
+                exponent.decimalValue.log().div(ce._DECIMAL_TWO)
+              );
+            if (exponent.complexValue)
+              return ce.number(exponent.complexValue.log().div(ce.complex(2)));
 
-              if (exponent.asFloat !== null)
-                return ce.number(Math.log2(exponent.asFloat));
-              return undefined;
-            },
+            if (exponent.asFloat !== null)
+              return ce.number(Math.log2(exponent.asFloat));
+            return undefined;
           },
-        ],
+        },
       },
 
       {
@@ -386,54 +352,51 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q966582',
         complexity: 4100,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number'],
-            N: (ce, ops) => {
-              const exponent = ops[0];
-              if (exponent.decimalValue)
-                return ce.number(
-                  exponent.decimalValue.log().div(ce.decimal(10))
-                );
-              if (exponent.complexValue)
-                return ce.number(
-                  exponent.complexValue.log().div(ce.complex(10))
-                );
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          N: (ce, ops) => {
+            const exponent = ops[0];
+            if (exponent.decimalValue)
+              return ce.number(exponent.decimalValue.log().div(ce.decimal(10)));
+            if (exponent.complexValue)
+              return ce.number(exponent.complexValue.log().div(ce.complex(10)));
 
-              if (exponent.asFloat !== null)
-                return ce.number(Math.log10(exponent.asFloat));
+            if (exponent.asFloat !== null)
+              return ce.number(Math.log10(exponent.asFloat));
 
-              return undefined;
-            },
+            return undefined;
           },
-        ],
+        },
       },
 
       {
         name: 'Max',
         description: 'Maximum of two or more numbers',
         complexity: 1200,
-        signatures: [
-          {
-            domain: ['Function', ['Some', 'Anything'], 'Anything'],
-            N: (ce, ops) => {
-              if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-
-              let result: BoxedExpression | undefined = undefined;
-              const rest: BoxedExpression[] = [];
-
-              for (const op of ops) {
-                if (!op.isNumber) rest.push(op);
-                else if (!result || op.isGreater(result)) result = op;
-              }
-              if (rest.length > 0)
-                return ce.box(
-                  result ? ['Max', result, ...rest] : ['Max', ...rest]
-                );
-              return result ?? ce._NAN;
-            },
+        signature: {
+          domain: ['Function', ['Sequence', 'Number'], 'Number'],
+          simplify: (ce, ops) => {
+            if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+            if (ops.length === 1) return ops[0];
+            return ce.box(['Max', ...ops]);
           },
-        ],
+          evaluate: (ce, ops) => {
+            if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+
+            let result: BoxedExpression | undefined = undefined;
+            const rest: BoxedExpression[] = [];
+
+            for (const op of ops) {
+              if (!op.isNumber || op.value === undefined) rest.push(op);
+              else if (!result || op.isGreater(result)) result = op;
+            }
+            if (rest.length > 0)
+              return ce.box(
+                result ? ['Max', result, ...rest] : ['Max', ...rest]
+              );
+            return result ?? ce._NAN;
+          },
+        },
       },
 
       {
@@ -441,27 +404,30 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         description: 'Minimum of two or more numbers',
         complexity: 1200,
 
-        signatures: [
-          {
-            domain: ['Function', ['Some', 'Anything'], 'Anything'],
-            N: (ce, ops) => {
-              if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-
-              let result: BoxedExpression | undefined = undefined;
-              const rest: BoxedExpression[] = [];
-
-              for (const op of ops) {
-                if (!op.isNumber) rest.push(op);
-                else if (!result || op.isLess(result)) result = op;
-              }
-              if (rest.length > 0)
-                return ce.box(
-                  result ? ['Min', result, ...rest] : ['Min', ...rest]
-                );
-              return result ?? ce._NAN;
-            },
+        signature: {
+          domain: ['Function', ['Sequence', 'Number'], 'Number'],
+          simplify: (ce, ops) => {
+            if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+            if (ops.length === 1) return ops[0];
+            return ce.box(['Min', ...ops]);
           },
-        ],
+          evaluate: (ce, ops) => {
+            if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+
+            let result: BoxedExpression | undefined = undefined;
+            const rest: BoxedExpression[] = [];
+
+            for (const op of ops) {
+              if (!op.isNumber || op.value === undefined) rest.push(op);
+              else if (!result || op.isLess(result)) result = op;
+            }
+            if (rest.length > 0)
+              return ce.box(
+                result ? ['Min', result, ...rest] : ['Min', ...rest]
+              );
+            return result ?? ce._NAN;
+          },
+        },
       },
 
       {
@@ -472,15 +438,13 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         idempotent: true,
         complexity: 2100,
 
-        signatures: [
-          {
-            domain: 'NumericFunction',
-            canonical: (ce, args) => canonicalMultiply(ce, args),
-            simplify: (ce, ops) => simplifyMultiply(ce, ops),
-            evaluate: (ce, ops) => evalMultiply(ce, ops),
-            N: (ce, ops) => numEvalMultiply(ce, ops),
-          },
-        ],
+        signature: {
+          domain: 'NumericFunction',
+          canonical: (ce, args) => canonicalMultiply(ce, args),
+          simplify: (ce, ops) => simplifyMultiply(ce, ops),
+          evaluate: (ce, ops) => evalMultiply(ce, ops),
+          N: (ce, ops) => evalMultiply(ce, ops, 'N'),
+        },
       },
 
       {
@@ -489,23 +453,35 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q715358',
         complexity: 2000,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number'],
-            canonical: (ce, args) =>
-              args[0] ? canonicalNegate(args[0]) : ce.box('Missing'),
-            simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
-            evaluate: (ce, ops) => processNegate(ce, ops[0], 'evaluate'),
-            N: (ce, ops) => processNegate(ce, ops[0], 'N'),
-            sgn: (ce, args): -1 | 0 | 1 | undefined => {
-              const arg = args[0] ?? ce.symbol('Missing');
-              if (arg.isZero) return 0;
-              if (arg.isPositive) return -1;
-              if (arg.isNegative) return +1;
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          codomain: (ce, args) => {
+            if (!args[0].literal) return args[0];
+            const negDomain = {
+              PositiveNumber: 'NegativeNumber',
+              NonNegativeNumber: 'NonPositiveNumber',
+              NonPositiveNumber: 'NonNegativeNumber',
+              NegativeNumber: 'PositiveNumber',
+              PositiveInteger: 'NegativeInteger',
+              NonNegativeInteger: 'NonPositiveInteger',
+              NonPositiveInteger: 'NonNegativeInteger',
+              NegativeInteger: 'PositiveInteger',
+            }[args[0].literal];
+            if (negDomain) return ce.domain(negDomain);
+            return args[0];
           },
-        ],
+          canonical: (_ce, args) => canonicalNegate(args[0]),
+          simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
+          evaluate: (ce, ops) => processNegate(ce, ops[0], 'evaluate'),
+          N: (ce, ops) => processNegate(ce, ops[0], 'N'),
+          sgn: (_ce, args): -1 | 0 | 1 | undefined => {
+            const arg = args[0];
+            if (arg.isZero) return 0;
+            if (arg.isPositive) return -1;
+            if (arg.isNegative) return +1;
+            return undefined;
+          },
+        },
       },
 
       {
@@ -513,178 +489,160 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q33456',
         commutative: false,
         complexity: 3500,
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number', 'Number'],
-            canonical: (ce, args) => {
-              const op1 = args[0] ?? ce.symbol('Missing');
-              const op2 = args[1] ?? ce.symbol('Missing');
-              return canonicalPower(ce, op1, op2) ?? ce._fn('Power', args);
-            },
-            simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
-            evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
-            N: (ce, ops) => processPower(ce, ops[0], ops[1], 'N'),
-            // Defined as RealNumber for all power in RealNumber when base > 0;
-            // when x < 0, only defined if n is an integer
-            // if x is a non-zero complex, defined as ComplexNumber
-            // Square root of a prime is irrational (AlgebraicNumber)
-            // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
-            // evalDomain: (ce, base: BoxedExpression, power: BoxedExpression) ;
+        signature: {
+          domain: ['Function', 'Number', 'Number', 'Number'],
+          canonical: (ce, args) => {
+            return (
+              canonicalPower(ce, args[0], args[1]) ?? ce._fn('Power', args)
+            );
           },
-        ],
+          simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
+          evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
+          N: (ce, ops) => processPower(ce, ops[0], ops[1], 'N'),
+          // Defined as RealNumber for all power in RealNumber when base > 0;
+          // when x < 0, only defined if n is an integer
+          // if x is a non-zero complex, defined as ComplexNumber
+          // Square root of a prime is irrational (AlgebraicNumber)
+          // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
+          // evalDomain: (ce, base: BoxedExpression, power: BoxedExpression) ;
+        },
       },
 
       {
         name: 'Rational',
         complexity: 2400,
 
-        signatures: [
-          {
-            domain: [
-              'Function',
-              'Number',
-              ['Optional', 'Number'],
-              'RationalNumber',
-            ],
-            canonical: (ce, args) =>
-              args.length === 2
-                ? canonicalDivide(ce, args[0], args[1])
-                : ce._fn('Rational', args),
-            simplify: (ce, ops) => {
-              if (ops.length !== 2) return undefined;
-              if (
-                ops[0].asSmallInteger !== null &&
-                ops[1].asSmallInteger !== null
-              )
-                return ce.number([
-                  ops[0].asSmallInteger,
-                  ops[1].asSmallInteger,
-                ]);
-              return undefined;
-            },
-            evaluate: (ce, ops) => {
-              if (ops.length === 2) {
-                if (
-                  ops[0].asSmallInteger !== null &&
-                  ops[1].asSmallInteger !== null
-                )
-                  return ce.number([
-                    ops[0].asSmallInteger,
-                    ops[1].asSmallInteger,
-                  ]);
-                return undefined;
-              }
-              const f = ops[0].asFloat;
-              if (f === null) return ops[0];
-
-              const r = rationalize(f);
-              if (typeof r === 'number') return ce.number(r);
-              return ce.number([r[0], r[1]]);
-            },
-            N: (ce, ops) => {
-              if (ops.length === 2) {
-                if (
-                  ops[0].asSmallInteger === null ||
-                  ops[1].asSmallInteger === null
-                )
-                  return undefined;
-                return ce.number(ops[0].asSmallInteger / ops[1].asSmallInteger);
-              }
-
-              return undefined;
-            },
+        signature: {
+          domain: [
+            'Function',
+            'RealNumber',
+            ['Maybe', 'Integer'],
+            'RationalNumber',
+          ],
+          canonical: (ce, args) =>
+            args.length === 2
+              ? canonicalDivide(ce, args[0], args[1])
+              : ce._fn('Rational', args),
+          simplify: (ce, ops) => {
+            if (ops.length !== 2) return undefined;
+            return simplifyDivide(ce, ops[0], ops[1]);
           },
-        ],
+          evaluate: (ce, ops) => {
+            if (ops.length === 2) {
+              const [n, d] = [ops[0].asSmallInteger, ops[1].asSmallInteger];
+              if (n !== null && d !== null) return ce.number([n, d]);
+              return undefined;
+            }
+            // If there is a single argument, i.e. `['Rational', 'Pi']`
+            // the function evaluates to a rational expression of the argument
+            const f = ops[0].asFloat ?? ops[0].decimalValue?.toNumber() ?? null;
+            if (f === null) return ops[0];
+
+            const r = rationalize(f);
+            if (typeof r === 'number') return ce.number(r);
+            return ce.number([r[0], r[1]]);
+          },
+          N: (ce, ops) => {
+            if (ops.length === 2) {
+              const [n, d] = [ops[0].machineValue, ops[1].machineValue];
+              if (n !== null && d !== null) return ce.number(n / d);
+              const [dn, dd] = [
+                ops[0].decimalValue ??
+                  (ops[0].asFloat ? ce.decimal(ops[0].asFloat) : null),
+                ops[1].decimalValue ??
+                  (ops[1].asFloat ? ce.decimal(ops[1].asFloat) : null),
+              ];
+              if (dn !== null && dd !== null) return ce.number(dn.div(dd));
+            }
+
+            return undefined;
+          },
+        },
       },
 
       {
         name: 'Root',
         complexity: 3200,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'RationalNumber', 'Number'],
-            canonical: (ce, args) => {
-              const op1 = args[0] ?? ce.symbol('Missing');
-              const op2 = args[1] ?? ce.symbol('Missing');
-              const exp = ce.inverse(op2);
-              return (
-                canonicalPower(ce, op1, exp) ?? ce._fn('Power', [op1, exp])
-              );
-            },
-            N: (ce, ops) => {
-              const base = ops[0];
-              const root = ops[1];
-              if (base.decimalValue)
-                return ce.number(
-                  base.decimalValue.pow(
-                    ce._DECIMAL_ONE.div(root.asFloat ?? NaN)
-                  )
-                );
-              if (base.complexValue) {
-                const complexRoot = root.complexValue
-                  ? Complex.ONE.div(root.complexValue)
-                  : ce.complex(1 / (root.asFloat ?? NaN));
-                return ce.number(base.complexValue.pow(complexRoot));
-              }
-              if (base.asFloat !== null)
-                return ce.number(Math.pow(base.asFloat, root.asFloat ?? NaN));
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', 'RationalNumber', 'Number'],
+          canonical: (ce, args) => {
+            const exp = ce.inverse(args[1]);
+            return (
+              canonicalPower(ce, args[0], exp) ??
+              ce._fn('Power', [args[0], exp])
+            );
           },
-        ],
+          N: (ce, ops) => {
+            // @todo: because the canonical form is `Power`, this code is never reached
+            console.error(
+              'unexpected Root.N(). should have been canonicalized'
+            );
+            const base = ops[0];
+            const root = ops[1];
+            if (base.decimalValue)
+              return ce.number(
+                base.decimalValue.pow(ce._DECIMAL_ONE.div(root.asFloat ?? NaN))
+              );
+            if (base.complexValue) {
+              const complexRoot = root.complexValue
+                ? Complex.ONE.div(root.complexValue)
+                : ce.complex(1 / (root.asFloat ?? NaN));
+              return ce.number(base.complexValue.pow(complexRoot));
+            }
+            if (base.asFloat !== null)
+              return ce.number(Math.pow(base.asFloat, root.asFloat ?? NaN));
+            return undefined;
+          },
+        },
       },
 
       {
         name: 'Round',
         complexity: 1250,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number'],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.round());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.round(0));
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.round(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          evaluate: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.round());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.round(0));
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.round(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
 
       {
         name: 'Sign',
         complexity: 1200,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Integer'],
-            simplify: (ce, ops) => {
-              const s = ops[0].sgn;
-              if (s === 0) return ce._ZERO;
-              if (s === 1) return ce._ONE;
-              if (s === -1) return ce._NEGATIVE_ONE;
-              return undefined;
-            },
-            evaluate: (ce, ops) => {
-              const s = ops[0].sgn;
-              if (s === 0) return ce._ZERO;
-              if (s === 1) return ce._ONE;
-              if (s === -1) return ce._NEGATIVE_ONE;
-              return undefined;
-            },
-            N: (ce, ops) => {
-              const s = ops[0].sgn;
-              if (s === 0) return ce._ZERO;
-              if (s === 1) return ce._ONE;
-              if (s === -1) return ce._NEGATIVE_ONE;
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', ['Range', -1, 1]],
+          simplify: (ce, ops) => {
+            const s = ops[0].sgn;
+            if (s === 0) return ce._ZERO;
+            if (s === 1) return ce._ONE;
+            if (s === -1) return ce._NEGATIVE_ONE;
+            return undefined;
           },
-        ],
+          evaluate: (ce, ops) => {
+            const s = ops[0].sgn;
+            if (s === 0) return ce._ZERO;
+            if (s === 1) return ce._ONE;
+            if (s === -1) return ce._NEGATIVE_ONE;
+            return undefined;
+          },
+          N: (ce, ops) => {
+            const s = ops[0].sgn;
+            if (s === 0) return ce._ZERO;
+            if (s === 1) return ce._ONE;
+            if (s === -1) return ce._NEGATIVE_ONE;
+            return undefined;
+          },
+        },
       },
 
       {
@@ -700,21 +658,17 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q134237',
         complexity: 3000,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number'],
-            canonical: (ce, args) =>
-              args[0]
-                ? canonicalPower(ce, args[0], ce._HALF) ??
-                  ce._fn('Power', [args[0], ce._HALF])
-                : ce._fn('Power', [ce.symbol('Missing'), ce._HALF]),
-            simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
-            evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
-            N: (ce, ops) => processSqrt(ce, ops[0], 'N'),
-            // evalDomain: Square root of a prime is irrational
-            // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
-          },
-        ],
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          canonical: (ce, args) =>
+            canonicalPower(ce, args[0], ce._HALF) ??
+            ce._fn('Power', [args[0], ce._HALF]),
+          simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
+          evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
+          N: (ce, ops) => processSqrt(ce, ops[0], 'N'),
+          // evalDomain: Square root of a prime is irrational
+          // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
+        },
       },
 
       {
@@ -722,25 +676,22 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         wikidata: 'Q3075175',
         complexity: 3100,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number'],
-            canonical: (ce, args) =>
-              args[0]
-                ? canonicalPower(ce, args[0], ce._TWO) ??
-                  ce._fn('Power', [args[0], ce._TWO])
-                : ce._fn('Power', [ce.symbol('Missing'), ce._TWO]),
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.mul(ops[0].decimalValue));
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.mul(ops[0].complexValue));
-              if (ops[0].asFloat !== null)
-                return ce.number(ops[0].asFloat * ops[0].asFloat);
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          canonical: (ce, args) =>
+            canonicalPower(ce, args[0], ce._TWO) ??
+            ce._fn('Power', [args[0], ce._TWO]),
+          evaluate: (ce, ops) => {
+            console.error('unexpected evaluate: should be decanonicalized');
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.mul(ops[0].decimalValue));
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.mul(ops[0].complexValue));
+            if (ops[0].asFloat !== null)
+              return ce.number(ops[0].asFloat * ops[0].asFloat);
+            return undefined;
           },
-        ],
+        },
       },
       {
         /**
@@ -760,95 +711,98 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
          * - `x_{n+1}` ->  `Subscript(x, n+1)`
          */
         name: 'Subscript',
+
         // The last (subscript) argument can include a delimiter that
         // needs to be interpreted. Without the hold, it would get
         // removed during canonicalization.
         hold: 'last',
 
-        signatures: [
-          {
-            domain: ['Function', 'Anything', 'Anything', 'Anything'],
-            canonical: (ce, args) => {
-              const op1 = args[0] ?? ce.symbol('Missing');
-              const op2 = args[1] ?? ce.symbol('Missing');
-              // Is it a string in a base form:
-              // `"deadbeef"_{16}` `"0101010"_2?
-              if (op1.string) {
-                if (op2.isLiteral && op2.asSmallInteger !== null) {
-                  const base = op2.asSmallInteger;
-                  if (base > 1 && base <= 36) {
-                    const [value, rest] = fromDigits(op1.string, base);
-                    if (rest) {
-                      return ce._fn('Error', [
-                        ce.number(value),
-                        ce.string('unexpected-digits'),
-                        ce._fn('LatexForm', [ce.string(rest)]),
-                      ]);
-                    }
-                    return ce.number(value);
-                  }
-                }
-              }
-              // Is it a compound symbol `x_\text{max}`, `\mu_0`
-              // or an indexable collection?
-              if (op1.symbol) {
-                // Indexable collection?
-                if (op1.symbolDefinition?.at) {
-                  return ce._fn('At', [op1, op2]);
-                }
-                // Maybe a compound symbol
-                let sub = op2.string ?? op2.symbol;
-                if (!sub) {
-                  if (op2.asSmallInteger !== null)
-                    sub = op2.asSmallInteger.toString();
-                }
-                if (sub) return ce.symbol(op1.symbol + '_' + sub);
-              }
-              return ce._fn('Subscript', args);
-            },
+        // The codomain of the function needs to be determined by considering
+        // the value of its arguments
+        dynamic: true,
+
+        signature: {
+          domain: ['Function', 'Anything', 'Anything', 'Anything'],
+          codomain: (ce, args) => {
+            if (args[0].isFunction) return args[0];
+            return args[0];
           },
-        ],
+          canonical: (ce, args) => {
+            const op1 = args[0];
+            const op2 = args[1];
+            // Is it a string in a base form:
+            // `"deadbeef"_{16}` `"0101010"_2?
+            if (op1.string) {
+              if (op2.isLiteral && op2.asSmallInteger !== null) {
+                const base = op2.asSmallInteger;
+                if (base > 1 && base <= 36) {
+                  const [value, rest] = fromDigits(op1.string, base);
+                  if (rest) {
+                    return ce.error(
+                      ['unexpected-digit', rest[0]],
+                      ['Latex', ce.string(op1.string)]
+                    );
+                  }
+                  return ce.number(value);
+                }
+              }
+            }
+            // Is it a compound symbol `x_\mathrm{max}`, `\mu_0`
+            // or an indexable collection?
+            if (op1.symbol) {
+              // Indexable collection?
+              if (op1.symbolDefinition?.at) {
+                return ce._fn('At', [op1, op2]);
+              }
+              // Maybe a compound symbol
+              let sub = op2.string ?? op2.symbol;
+              if (!sub) {
+                if (op2.asSmallInteger !== null)
+                  sub = op2.asSmallInteger.toString();
+              }
+              if (sub) return ce.symbol(op1.symbol + '_' + sub);
+            }
+            return ce._fn('Subscript', args);
+          },
+        },
       },
       {
         name: 'Subtract',
         wikidata: 'Q40754',
         complexity: 1350,
 
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number', 'Number'],
-            canonical: (ce, args) => {
-              if (args.length === 0) return ce.symbol('Nothing');
-              // Not necessarily legal, but probably what was intended:
-              // ['Subtract', 'x'] -> ['Negate', 'x']
-              if (args.length === 1) return canonicalNegate(args[0]);
-              return canonicalAdd(ce, [args[0], canonicalNegate(args[1])]);
-            },
-            N: (ce, ops) => {
-              const lhs = ops[0];
-              const rhs = ops[1];
-
-              // Prioritize complex
-              if (lhs.complexValue || rhs.complexValue) {
-                return ce.number(
-                  ce
-                    .complex(lhs.complexValue ?? lhs.asFloat!)
-                    .sub(rhs.complexValue ?? rhs.asFloat)
-                );
-              }
-              if (lhs.decimalValue || rhs.decimalValue) {
-                return ce.number(
-                  ce
-                    .decimal(lhs.decimalValue ?? lhs.asFloat ?? NaN)
-                    .sub(rhs.decimalValue ?? rhs.asFloat ?? NaN)
-                );
-              }
-              if (lhs.asFloat !== null && rhs.asFloat !== null)
-                return ce.number(lhs.asFloat - rhs.asFloat);
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', ['Maybe', 'Number'], 'Number'],
+          canonical: (ce, args) => {
+            // Not necessarily legal, but probably what was intended:
+            // ['Subtract', 'x'] -> ['Negate', 'x']
+            if (args.length === 1) return canonicalNegate(args[0]);
+            return canonicalAdd(ce, [args[0], canonicalNegate(args[1])]);
           },
-        ],
+          evaluate: (ce, ops) => {
+            const lhs = ops[0];
+            const rhs = ops[1];
+
+            // Prioritize complex
+            if (lhs.complexValue || rhs.complexValue) {
+              return ce.number(
+                ce
+                  .complex(lhs.complexValue ?? lhs.asFloat!)
+                  .sub(rhs.complexValue ?? rhs.asFloat)
+              );
+            }
+            if (lhs.decimalValue || rhs.decimalValue) {
+              return ce.number(
+                ce
+                  .decimal(lhs.decimalValue ?? lhs.asFloat ?? NaN)
+                  .sub(rhs.decimalValue ?? rhs.asFloat ?? NaN)
+              );
+            }
+            if (lhs.asFloat !== null && rhs.asFloat !== null)
+              return ce.number(lhs.asFloat - rhs.asFloat);
+            return undefined;
+          },
+        },
       },
     ],
   },
@@ -898,7 +852,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         hold: true,
         real: true,
         value: (engine) =>
-          useDecimal(engine) ? engine._DECIMAL_ONE.exp() : Math.exp(1),
+          preferDecimal(engine) ? engine._DECIMAL_ONE.exp() : Math.exp(1),
       },
       {
         name: 'GoldenRatio',
@@ -967,19 +921,11 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
     functions: [
       {
         name: 'PreIncrement',
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number'],
-          },
-        ],
+        signature: { domain: ['Function', 'Number', 'Number'] },
       },
       {
         name: 'PreDecrement',
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number'],
-          },
-        ],
+        signature: { domain: ['Function', 'Number', 'Number'] },
       },
     ],
   },
@@ -998,7 +944,6 @@ function processAbs(
     if (n === null || d === null) return undefined;
     return ce.number(mode === 'N' ? Math.abs(n / d) : [Math.abs(n), d]);
   }
-  if (op1.isMissing) return undefined;
   if (op1.isNonNegative) return op1;
   if (op1.isNegative) return ce.negate(op1);
   return undefined;
@@ -1012,7 +957,7 @@ function processSqrt(
   if (base.isOne) return ce._ONE;
   if (base.isZero) return ce._ZERO;
 
-  if (mode === 'N') {
+  if (mode !== 'simplify') {
     if (base.complexValue) return ce.number(base.complexValue.sqrt());
     if (base.isNonNegative) {
       if (base.decimalValue) return ce.number(base.decimalValue.sqrt());

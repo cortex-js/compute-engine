@@ -3,7 +3,6 @@ import {
   ancestors,
   DOMAIN_ALIAS,
   DOMAIN_CONSTRUCTORS,
-  DOMAIN_EXPRESSION_CONSTRUCTORS,
   isDomainLiteral,
 } from '../library/domains';
 import {
@@ -12,27 +11,33 @@ import {
   DomainCompatibility,
   DomainConstructor,
   DomainExpression,
+  DomainLiteral,
   IComputeEngine,
   Metadata,
   PatternMatchOption,
+  SemiBoxedExpression,
   Substitution,
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
-import { BoxedFunction } from './boxed-function';
 import { serializeJsonSymbol } from './serialize';
 import { hashCode } from './utils';
 
 /**
  * A `_BoxedDomain` is a wrapper around a boxed, canonical, domain expression.
+ *
+ * If could also be an error, in which case, `isValid` is `false`.
+ *
  */
 export class _BoxedDomain
   extends AbstractBoxedExpression
   implements BoxedDomain
 {
-  /** The boxed domain is either a string if a domain literal, or a boxed
-   * function if a domain constructor (a non-literal domain expression).
+  /** The value of a boxed domain is either a string if a domain literal, or a
+   * domain constructor function.
+   * Since the domains are alway canonicalized when boxed, their value can
+   * be represented by a simple array, without the need for extra boxing.
    */
-  _value: string | BoxedFunction;
+  _value: DomainExpression<BoxedExpression>;
   private _hash: number;
 
   constructor(ce: IComputeEngine, dom: DomainExpression, metadata?: Metadata) {
@@ -49,90 +54,95 @@ export class _BoxedDomain
     return this;
   }
 
-  get json(): DomainExpression {
-    if (typeof this._value === 'string')
-      return serializeJsonSymbol(this.engine, this._value) as DomainExpression;
-
-    return [
-      serializeJsonSymbol(
-        this.engine,
-        this._value.head! as string
-      ) as DomainConstructor,
-      ...this._value.ops!.map((x) => x.json),
-    ] as DomainExpression;
+  get isValid(): boolean {
+    return this.ctor !== 'Error';
   }
 
-  get domainLiteral(): string | null {
+  get json(): Expression {
+    return serialize(this.engine, this._value);
+  }
+
+  get literal(): string | null {
     if (typeof this._value === 'string') return this._value;
     return null;
   }
 
-  get domainConstructor(): DomainConstructor | null {
+  get ctor(): DomainConstructor | null {
     if (typeof this._value === 'string') return null;
-    return this._value.head as DomainConstructor;
+    return this._value[0] as DomainConstructor;
   }
 
-  get domainParams(): BoxedExpression[] | null {
+  get domainArgs():
+    | (string | BoxedExpression | DomainExpression<BoxedExpression>)[]
+    | null {
     if (typeof this._value === 'string') return null;
-    return this._value.ops!;
+    return this._value.slice(1) as (
+      | string
+      | BoxedExpression
+      | DomainExpression<BoxedExpression>
+    )[];
+  }
+
+  get domainArg1():
+    | string
+    | BoxedExpression
+    | DomainExpression<BoxedExpression>
+    | null {
+    if (typeof this._value === 'string') return null;
+    return this._value[1] as
+      | string
+      | BoxedExpression
+      | DomainExpression<BoxedExpression>;
+  }
+
+  get codomain(): BoxedDomain | null {
+    if (typeof this._value === 'string') return null;
+    //  The codomain is the last argumentof the `['Function']` expression
+    return this.engine.domain(this._value[this._value.length - 1]);
   }
 
   get hash(): number {
-    if (this._hash !== undefined) this._hash;
-
-    if (typeof this._value === 'string')
-      return hashCode('domain:' + this._value);
-    let s = 'domain:' + hashCode(this._value.head! as string);
-    for (const arg of this._value.ops!) s += ':' + arg.hash;
-
-    this._hash = hashCode(s);
+    if (this._hash === undefined) this._hash = hashCode(hash(this._value));
     return this._hash;
   }
 
   isEqual(rhs: BoxedExpression): boolean {
-    if (!(rhs instanceof _BoxedDomain)) return false;
-
-    // Is it a domain literal?
-    if (typeof this._value === 'string') return this._value === rhs._value;
-
-    // It's not a domain literal
-    if (this.domainConstructor !== rhs.domainConstructor) return false;
-
-    const rhsParams = rhs.domainParams!;
-    const lhsParams = this.domainParams!;
-    if (rhsParams.length !== lhsParams.length) return false;
-    for (let i = 0; i <= lhsParams.length - 1; i++)
-      if (!lhsParams[i].isEqual(rhsParams[i])) return false;
-
-    return true;
+    return isEqual(this._value, rhs);
   }
 
   isSame(rhs: BoxedExpression): boolean {
-    return this.isEqual(rhs);
+    return isEqual(this._value, rhs);
   }
 
-  is(rhs: BoxedExpression): boolean {
-    return this.isEqual(rhs);
+  is(rhs: any): boolean {
+    return isEqual(this._value, rhs);
   }
 
   isCompatible(
-    rhs: BoxedDomain | string,
+    dom: BoxedDomain | DomainLiteral,
     compatibility: DomainCompatibility = 'covariant'
   ): boolean {
-    const rhsExpr = asDomainExpression(rhs);
-    const thisExpr = asDomainExpression(this);
-    if (compatibility === 'covariant') return isSubdomainOf(thisExpr, rhsExpr);
-    if (compatibility === 'contravariant')
-      return isSubdomainOf(rhsExpr, thisExpr);
+    const lhs = this._value;
+    const rhs =
+      dom instanceof _BoxedDomain ? dom._value : (dom as DomainLiteral);
+    const rhsCtor = Array.isArray(rhs) ? rhs[0] : null;
+    if (rhsCtor) {
+      const rhsParam = rhs[1] as DomainExpression<BoxedExpression>;
+      if (rhsCtor === 'Invariant')
+        return !isSubdomainOf(rhsParam, lhs) && !isSubdomainOf(lhs, rhsParam);
+      if (rhsCtor === 'Covariant') return isSubdomainOf(lhs, rhsParam);
+      if (rhsCtor === 'Contravariant') return isSubdomainOf(rhsParam, lhs);
+      if (rhsCtor === 'Bivariant')
+        return isSubdomainOf(lhs, rhsParam) && isSubdomainOf(rhsParam, lhs);
+    }
+
+    if (compatibility === 'covariant') return isSubdomainOf(lhs, rhs);
+    if (compatibility === 'contravariant') return isSubdomainOf(rhs, lhs);
     if (compatibility === 'bivariant')
-      return (
-        isSubdomainOf(rhsExpr, thisExpr) && isSubdomainOf(thisExpr, rhsExpr)
-      );
+      return isSubdomainOf(rhs, lhs) && isSubdomainOf(lhs, rhs);
 
     // Invariant
-    return (
-      !isSubdomainOf(rhsExpr, thisExpr) && !isSubdomainOf(thisExpr, rhsExpr)
-    );
+    return !isSubdomainOf(rhs, lhs) && !isSubdomainOf(lhs, rhs);
   }
 
   match(
@@ -152,16 +162,12 @@ export class _BoxedDomain
     return this.engine.domain('Domain');
   }
 
-  get valueDomain(): BoxedDomain {
-    return this.engine.domain('Domain');
-  }
-
   get isNothing(): boolean {
     return this._value === 'Nothing';
   }
 
   get isFunction(): boolean {
-    return this.domainConstructor === 'Function' || this._value === 'Function';
+    return this.ctor === 'Function' || this._value === 'Function';
   }
 
   // get isPredicate(): boolean {
@@ -193,7 +199,7 @@ export class _BoxedDomain
   // }
 
   get isNumeric(): boolean {
-    return this.isCompatible('Number');
+    return this.isCompatible(this.engine.domain('Number'));
   }
 
   // get isLogicOperator(): boolean {
@@ -212,15 +218,17 @@ export class _BoxedDomain
 
   get isRelationalOperator(): boolean {
     if (this._value === 'RelationalOperator') return true;
-    if (!this.valueDomain?.isCompatible('MaybeBoolean')) return false;
-    if (this.domainParams!.length !== 2) return false;
+    if (this.ctor !== 'Function') return false;
+    if (this.domainArgs!.length !== 2) return false;
+    if (!this.codomain!.isCompatible('MaybeBoolean')) return false;
 
     return true;
   }
 }
 
 /**
- * Note that `boxDomain()` should only be called from `ComputeEngine`
+ * Note that `boxDomain()` should only be called from `ComputeEngine`.
+ * This gives a chance for `ComputeEngine` to substitute cached objects.
  */
 
 export function boxDomain(
@@ -231,29 +239,193 @@ export function boxDomain(
   if (dom instanceof _BoxedDomain) return dom;
 
   if (typeof dom === 'string') {
+    const expr = DOMAIN_ALIAS[dom];
+    if (expr) return boxDomain(ce, expr);
     if (!isDomainLiteral(dom))
-      throw Error('Expected domain literal, got ' + dom);
+      throw Error('Expected a domain literal, got ' + dom);
     return new _BoxedDomain(ce, dom, metadata);
   }
+  if (!Array.isArray(dom) || dom.length === 0)
+    throw Error('Expected a valid domain');
 
   const constructor = dom[0];
   if (!DOMAIN_CONSTRUCTORS.includes(constructor))
     throw Error('Expected domain constructor, got ' + constructor);
 
-  const params = (dom as BoxedParametricDomain | ParametricDomain).slice(1);
+  return new _BoxedDomain(ce, dom, metadata);
+}
 
-  if (DOMAIN_EXPRESSION_CONSTRUCTORS.includes(constructor))
-    return new _BoxedDomain(
-      ce,
-      [constructor, ...params.map((x) => ce.box(x) as any)],
-      metadata
-    );
+/** Turn a valid domain expression into a canonical domain expression */
+function makeCanonical(
+  ce: IComputeEngine,
+  dom: DomainExpression
+): DomainExpression<BoxedExpression> {
+  if (typeof dom === 'string') {
+    if (!isDomainLiteral(dom)) throw Error('Unknown domain literal');
+    return dom;
+  }
+  if (dom instanceof _BoxedDomain) return dom._value;
 
-  return new _BoxedDomain(
-    ce,
-    [constructor, ...params.map((x) => ce.domain(x))],
-    metadata
-  );
+  const ctor = dom[0];
+
+  //
+  // Range
+  //
+  if (ctor === 'Range') {
+    if (dom.length === 1) return 'Integer';
+    let first: BoxedExpression = ce._ONE;
+    let last: BoxedExpression = ce._POSITIVE_INFINITY;
+    if (dom.length === 2) {
+      last = ce.box(dom[1]).evaluate();
+    } else if (dom.length === 3) {
+      first = ce.box(dom[1]).evaluate();
+      last = ce.box(dom[2]).evaluate();
+    }
+    const firstNum = asRangeBound(first);
+    const lastNum = asRangeBound(last);
+    if (firstNum === null || lastNum === null)
+      throw Error(`Invalid range [${firstNum}, ${lastNum}] `);
+    if (lastNum < firstNum) [first, last] = [last, first];
+    if (firstNum === -Infinity && lastNum === Infinity) return 'Integer';
+
+    if (firstNum === 1 && lastNum === Infinity) return 'PositiveInteger';
+    if (firstNum === 0 && lastNum === Infinity) return 'NonNegativeInteger';
+    if (firstNum === -Infinity && lastNum === -1) return 'NegativeInteger';
+    if (firstNum === -Infinity && lastNum === 0) return 'NonPositiveInteger';
+
+    return ['Range', ce.number(firstNum), ce.number(lastNum)];
+  }
+
+  //
+  // Interval
+  //
+  if (ctor === 'Interval') {
+    if (dom.length !== 3) throw Error('Invalid range ' + dom);
+    let [isLeftOpen, first] = maybeOpen(ce, dom[1]);
+    let [isRightOpen, last] = maybeOpen(ce, dom[2]);
+
+    if (first === null || last === null) throw Error('Invalid range ' + dom);
+    if (last < first) {
+      [first, last] = [last, first];
+      [isLeftOpen, isRightOpen] = [isRightOpen, isLeftOpen];
+    }
+
+    if (first === 0 && last === Infinity)
+      return isLeftOpen ? 'PositiveNumber' : 'NonNegativeNumber';
+    if (first === -Infinity && last === 0)
+      return isRightOpen ? 'NegativeNumber' : 'NonPositiveNumber';
+
+    return [
+      'Interval',
+      isLeftOpen ? ['Open', ce.number(first)] : ce.number(first),
+      isRightOpen ? ['Open', ce.number(last)] : ce.number(last),
+    ] as DomainExpression<BoxedExpression>;
+  }
+
+  //
+  // Function
+  //
+  if (ctor === 'Function') {
+    // @todo:
+    // Multiple `Maybe`, `Sequence` in arguments
+    // Multiple Invariant, Covariant, Contravariant in argument
+    // Normalize attributes: Open, Maybe, Invariant, Sequence, etc...
+    // A rest argument (Sequence) must be the last one
+    return [
+      'Function',
+      ...dom.slice(1).map((x) => makeCanonical(ce, x as DomainExpression)),
+    ];
+  }
+
+  if (ctor === 'Dictionary') {
+    return ['Dictionary', makeCanonical(ce, dom[1] as DomainExpression)];
+  }
+
+  if (ctor === 'List') {
+    return ['List', makeCanonical(ce, dom[1] as DomainExpression)];
+  }
+
+  if (ctor === 'Tuple') {
+    return [
+      'Tuple',
+      ...dom.slice(1).map((x) => makeCanonical(ce, x as DomainExpression)),
+    ];
+  }
+
+  if (ctor === 'Union') {
+    return [
+      'Union',
+      ...dom.slice(1).map((x) => makeCanonical(ce, x as DomainExpression)),
+    ];
+  }
+
+  if (ctor === 'Intersection') {
+    return [
+      'Intersection',
+      ...dom.slice(1).map((x) => makeCanonical(ce, x as DomainExpression)),
+    ];
+  }
+
+  if (
+    ctor === 'Covariant' ||
+    ctor === 'Contravariant' ||
+    ctor === 'Invariant'
+  ) {
+    return [ctor, makeCanonical(ce, dom[1] as DomainExpression)];
+  }
+
+  if (ctor === 'Maybe') {
+    return ['Maybe', makeCanonical(ce, dom[1] as DomainExpression)];
+  }
+
+  if (ctor === 'Sequence') {
+    return ['Sequence', makeCanonical(ce, dom[1] as DomainExpression)];
+  }
+
+  if (ctor === 'Head') {
+    return ['Head', dom[1] as string];
+  }
+
+  if (ctor === 'Symbol') {
+    return ['Symbol', dom[1] as string];
+  }
+
+  if (ctor === 'Value') {
+    return ['Value', ce.box(dom[1])];
+  }
+
+  if (ctor === 'Error') {
+    return ['Error', ...dom.slice(1).map((x) => ce.box(x))];
+  }
+
+  throw Error('Unexpected domain constructor ' + ctor);
+}
+
+function asRangeBound(expr: BoxedExpression): number | null {
+  return expr.isInfinity
+    ? expr.isPositive
+      ? +Infinity
+      : -Infinity
+    : expr.asSmallInteger;
+}
+
+// function asIntervalBound(ce: IComputeEngine, expr: Expression): number | null {
+//   const val = ce.box(open(expr) ?? expr).evaluate();
+
+//   return (
+//     val.asSmallInteger ??
+//     (val.isInfinity ? (val.isPositive ? +Infinity : -Infinity) : null)
+//   );
+// }
+
+function maybeOpen(
+  ce: IComputeEngine,
+  expr: string | SemiBoxedExpression | DomainExpression
+): [open: boolean, value: number | null] {
+  // @todo: Multiple Open
+  if (Array.isArray(expr) && expr[0] === 'Open')
+    return [true, asRangeBound(ce.box(expr[1]).evaluate())];
+  return [false, asRangeBound(ce.box(expr).evaluate())];
 }
 
 /** Validate that `expr` is a Domain */
@@ -262,169 +434,147 @@ export function isDomain(
 ): expr is BoxedDomain | DomainExpression {
   if (expr instanceof _BoxedDomain) return true;
 
+  if (typeof expr === 'string') return isDomainLiteral(expr);
+
   if (Array.isArray(expr)) {
     if (expr.length <= 1) return false;
     // Could be a domain expression
     const fn = expr[0];
     if (typeof fn !== 'string' || !DOMAIN_CONSTRUCTORS.includes(fn))
       return false;
-    if (
-      fn === 'Head' ||
-      fn === 'Symbol' ||
-      fn === 'Literal' ||
-      fn === 'Range' ||
-      fn === 'Interval'
-    ) {
-      return true;
-    }
-    for (let i = 1; i <= expr.length - 1; i++)
-      if (!isDomain(expr[i])) return false;
-    return true;
-  }
-  if (typeof expr === 'string') return isDomainLiteral(expr);
 
-  if (!(expr instanceof AbstractBoxedExpression)) return false;
-
-  if (typeof expr.head === 'string' && DOMAIN_CONSTRUCTORS.includes(expr.head))
-    return expr.ops!.every((x) => isDomain(x));
-
-  return isDomainLiteral(expr.symbol);
-}
-
-/** Turn a domain expression into a canonical boxed expression */
-function makeCanonical(
-  ce: IComputeEngine,
-  dom: DomainExpression
-): string | BoxedFunction {
-  if (typeof dom === 'string') {
-    const expr = DOMAIN_ALIAS[dom];
-    if (expr) return [expr[0], ...expr.slice(1).map((x) => ce.domain(x))];
-    if (!isDomainLiteral(dom)) throw Error('Unknown domain ' + dom);
-    return dom;
+    return expr.every((x) => x !== null);
   }
 
-  // @todo:
-  // - Range[-Infinity, +Infinity]
-  // - Range[0, +Infinity]
-  // Multiple `Optional`, `Some` in arguments
-  // Multiple Invariant, Covariant, Contravariant in argument
-  // Multiple Open
-  // Normalize attributes: Open, Optional, Invariant, Some, etc...
-
-  // A required argument cannot follow an Optional one
-  // A rest argument (Some) must be the last one
-
-  return dom;
+  return false;
 }
 
+// Return `true` if `lhs` is a sub domain of, or equal to, `rhs`
+// `lhs` is the "template" that `rhs` is checked against
 export function isSubdomainOf(
-  lhs: DomainExpression,
-  rhs: DomainExpression
+  lhs: DomainExpression<BoxedExpression>,
+  rhs: DomainExpression<BoxedExpression>
 ): boolean {
-  // Build the domain lattice if necessary, by calculating all the ancestors of
-  // `Void` (the bottom domain)
-  if (!gDomainLiterals) {
-    gDomainLiterals = {};
-    ancestors('Void');
-  }
+  const rhsLiteral = typeof rhs === 'string' ? rhs : null;
+  if (rhsLiteral === 'Anything') return true;
+  const lhsLiteral = typeof lhs === 'string' ? lhs : null;
 
   //
   // 1/ Compare two domain literals
   //
-  if (typeof rhs === 'string' && typeof lhs === 'string') {
-    if (!gDomainLiterals[rhs])
-      throw Error('Expected a domain literal, got ' + rhs);
-    if (!gDomainLiterals[lhs])
-      throw Error('Expected a domain literal, got ' + lhs);
-
-    if (lhs === rhs) return true;
-    if (gDomainLiterals[lhs].has(rhs)) return true;
-    return false;
+  if (lhsLiteral && rhsLiteral) {
+    if (lhsLiteral === rhsLiteral) return true;
+    return includesDomain(ancestors(lhsLiteral), rhsLiteral);
   }
 
   //
-  // 2/ Compare a rhs domain literal to a domain expression
+  // 2/ Is the lhs domain constructor a subdomain of the rhs domain literal?
   //
-  if (typeof rhs === 'string') {
-    if (!gDomainLiterals[rhs])
-      throw Error('Expected a domain literal, got ' + rhs);
+  if (rhsLiteral) {
     const lhsConstructor = lhs[0];
-    if (!DOMAIN_CONSTRUCTORS.includes(lhsConstructor))
-      throw Error('Expected domain constructor, got ' + lhsConstructor);
-    if (lhsConstructor === 'Function') {
-      return rhs === 'Function';
-      // @todo
+    if (lhsConstructor === 'Function') return rhsLiteral === 'Function';
+    if (lhsConstructor === 'Dictionary') return rhsLiteral === 'Dictionary';
+    if (lhsConstructor === 'List') return rhsLiteral === 'List';
+    if (lhsConstructor === 'Tuple') return rhsLiteral === 'Tuple';
+    if (lhsConstructor === 'Intersection') {
     }
     // @todo handle domain constructors
-    // 'Union',
-    // 'List',
-    // 'Record',
-    // 'Tuple',
+
     // 'Intersection',
-    // 'Range',
-    // 'Interval',
-    // 'Optional',
-    // 'Some',
+    // 'Union',
+
+    // 'Maybe',
+    // 'Sequence',
+
+    if (lhsConstructor === 'Interval')
+      return isSubdomainOf('ExtendedRealNumber', rhsLiteral);
+
+    if (lhsConstructor === 'Range') return isSubdomainOf('Integer', rhsLiteral);
+
     // 'Head',
     // 'Symbol',
-    // 'Literal',
+    // 'Value',
     return true;
   }
 
   //
   // 3/ Compare a rhs domain expression with a domain literal or expression
   //
-  const rhsConstructor = rhs[0];
-  if (!DOMAIN_CONSTRUCTORS.includes(rhsConstructor))
-    throw Error('Expected domain constructor, got ' + rhsConstructor);
+  const rhsConstructor = rhs[0]!;
 
   if (rhsConstructor === 'Function') {
-    // True if LHS is a function, or an alias to a function
-    if (typeof lhs === 'string') {
-      if (lhs === 'Function') return true;
-      lhs = DOMAIN_ALIAS[lhs];
-      if (!lhs) return false;
-    }
+    // See https://www.stephanboyer.com/post/132/what-are-covariance-and-contravariance
+    if (lhsLiteral === 'Function') return true;
+    if (lhsLiteral) return false;
+
+    // Only a `Function` ctor can be a subdomain of a `Function`
     if (lhs[0] !== 'Function') return false;
 
     // Both constructors are 'Function':
+
     // Check that the arguments and return values are compatible
     // Parameters should be contravariant, return values should be covariant
-    if (!isSubdomainOf(rhs[rhs.length - 1], lhs[lhs.length - 1])) return false;
-    for (let i = 1; i < rhs.length - 1; i++) {
-      if (Array.isArray(rhs[i])) {
-        const ctor = rhs[i][0];
-        if (ctor === 'Optional') {
-          if (lhs[i] && !isSubdomainOf(lhs[i], rhs[i][1] as DomainExpression))
-            return false;
-          if (!lhs[i] && lhs.length - 1 === i) return true;
-        } else if (ctor === 'Some') {
-          const param = rhs[i][1];
-          if (!lhs[i] && lhs.length - 1 === i) return true;
-          do {
-            if (!isSubdomainOf(lhs[i], param as DomainExpression)) return false;
-            i += 1;
-          } while (i < lhs.length - 1);
-          return true;
-        } else if (!lhs[i] || !isSubdomainOf(lhs[i], rhs[i])) return false;
-      } else if (!lhs[i] || !isSubdomainOf(lhs[i], rhs[i])) return false;
+
+    const lhsReturnDomain = lhs[
+      lhs.length - 1
+    ] as DomainExpression<BoxedExpression>;
+    const rhsReturnDomain = rhs[
+      rhs.length - 1
+    ] as DomainExpression<BoxedExpression>;
+    if (!isSubdomainOf(lhsReturnDomain, rhsReturnDomain)) return false;
+
+    const lhsParams = lhs.slice(1, -1) as DomainExpression<BoxedExpression>[];
+    const rhsParams = rhs.slice(1, -1) as DomainExpression<BoxedExpression>[];
+    for (let i = 0; i <= lhsParams.length - 1; i++) {
+      // `rhs` is not expected to include a `Sequence`, `Contravariant`, etc... ctor, but `lhs` might
+      const lhsCtor = Array.isArray(lhsParams[i]) ? lhsParams[i][0] : null;
+      if (rhsParams[i] === undefined) {
+        if (lhsCtor !== 'Maybe') return false;
+        return true;
+      }
+      if (lhsCtor === 'Sequence') {
+        const seq = lhsParams[i][1] as DomainExpression<BoxedExpression>;
+        for (let j = i; j < rhsParams.length - 1; j++)
+          if (!isSubdomainOf(rhsParams[j], seq)) return false;
+        return true;
+      }
+      if (!isSubdomainOf(rhsParams[i], lhsParams[i])) return false;
     }
+    if (rhsParams.length > lhsParams.length) return false;
     return true;
   }
+
   // @todo handle domain constructors
-  // 'Function',
-  // 'Union',
+  // 'Dictionary',
   // 'List',
-  // 'Record',
   // 'Tuple',
-  // 'Intersection',
-  // 'Range',
+
+  if (rhsConstructor === 'Intersection') {
+    return (rhs as DomainExpression<BoxedExpression>[])
+      .slice(1, -1)
+      .every((x: DomainExpression<BoxedExpression>) => isSubdomainOf(lhs, x));
+  }
+
+  if (rhsConstructor === 'Union') {
+    return (rhs as DomainExpression<BoxedExpression>[])
+      .slice(1, -1)
+      .some((x: DomainExpression<BoxedExpression>) => isSubdomainOf(lhs, x));
+  }
+
+  if (rhsConstructor === 'Maybe') {
+    if (lhsLiteral === 'Nothing') return true;
+    return isSubdomainOf(lhs, rhs[1]! as DomainExpression<BoxedExpression>);
+  }
+
   // 'Interval',
-  // 'Optional',
-  // 'Some',
+  // 'Range',
+  if (rhsConstructor === 'Range') {
+    // @todo
+  }
+
   // 'Head',
   // 'Symbol',
-  // 'Literal',
+  // 'Value',
 
   return false;
 }
@@ -434,8 +584,10 @@ export function sharedAncestorDomain(
   a: BoxedDomain,
   b: BoxedDomain
 ): BoxedDomain {
-  const aAncestors = ancestors(domainLiteralAncestor(a));
-  const bAncestors = ancestors(domainLiteralAncestor(b));
+  const aLiteral = domainLiteralAncestor(a);
+  const bLiteral = domainLiteralAncestor(b);
+  const aAncestors = [aLiteral, ...ancestors(aLiteral)];
+  const bAncestors = [bLiteral, ...ancestors(bLiteral)];
 
   while (!includesDomain(bAncestors, aAncestors[0])) aAncestors.shift();
 
@@ -444,14 +596,83 @@ export function sharedAncestorDomain(
 
 // Return the domain literal that is the closest ancestor to `dom`
 function domainLiteralAncestor(dom: BoxedDomain): string {
-  let result = dom.domainLiteral;
+  let result = dom.literal;
   if (result) return result;
-  result = dom.domainConstructor!;
 
-  if (result === 'Optional') return result;
+  result = dom.ctor!;
+
+  if (result === 'Maybe') return 'Anything';
+  if (result === 'Interval') return 'RealNumber';
+  if (result === 'Range') return 'Integer';
+  if (result === 'Head') return 'Function';
+
+  if (result === 'Union') return 'Anything'; // @todo could be more narrow
+  if (result === 'Intersection') return 'Anything'; // @todo could be more narrow
+
+  return result;
 }
 
 function includesDomain(xs: string[], y: string): boolean {
   for (const x of xs) if (x === y) return true;
   return false;
+}
+
+function serialize(
+  ce: IComputeEngine,
+  dom: DomainExpression<BoxedExpression>
+): Expression {
+  if (typeof dom === 'string') return ['Domain', serializeJsonSymbol(ce, dom)];
+
+  if (dom[0] === 'Error') {
+    if (dom[2]) return ['Error', dom[1] as Expression, dom[2] as Expression];
+    return ['Error', dom[1] as Expression];
+  }
+
+  const result: Expression = [serializeJsonSymbol(ce, dom[0])];
+
+  for (let i = 1; i <= dom.length - 1; i++) {
+    if (dom[i] instanceof AbstractBoxedExpression)
+      result.push((dom[i] as BoxedExpression).json);
+    else
+      result.push(serialize(ce, dom[i] as DomainExpression<BoxedExpression>));
+  }
+  return ['Domain', result];
+}
+
+function hash(dom: DomainExpression<BoxedExpression>): string {
+  if (typeof dom === 'string') return 'domain:' + dom;
+
+  let s = 'domain:' + this.ctor!;
+  for (const arg of this.domainArgs!) s += ':' + hash(arg);
+
+  return s;
+}
+
+function isEqual(lhs: DomainExpression<BoxedExpression>, rhs: any): boolean {
+  if (typeof rhs === 'string') return this._value === rhs;
+
+  if (rhs instanceof _BoxedDomain) return isEqual(lhs, rhs._value);
+
+  // Is it a domain literal?
+  if (typeof lhs === 'string') return lhs === rhs;
+
+  console.assert(Array.isArray(lhs));
+
+  if (!Array.isArray(rhs)) return false;
+
+  // It's not a domain literal
+  if (lhs[0] !== rhs[0]) return false;
+
+  if (rhs.length !== lhs.length) return false;
+  for (let i = 1; i <= lhs.length - 1; i++) {
+    if (lhs[i] instanceof AbstractBoxedExpression) {
+      if (!(rhs[i] instanceof AbstractBoxedExpression)) return false;
+      if (!rhs[i].isEqual(rhs[i])) return false;
+    } else if (typeof lhs[i] === 'string') {
+      if (typeof rhs[i] !== 'string') return false;
+      if (lhs[i] !== rhs[i]) return false;
+    } else if (!isEqual(lhs[i] as DomainExpression<BoxedExpression>, rhs[i]))
+      return false;
+  }
+  return true;
 }

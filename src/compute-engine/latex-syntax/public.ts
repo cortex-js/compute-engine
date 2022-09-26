@@ -62,14 +62,12 @@ export type LibraryCategory =
 
 /**
  * This indicates a condition under which parsing should stop:
- * - a specific string of tokens has been encountered
  * - an operator of a precedence higher than specified has been encountered
  * - the last token has been reached
  * - or if a function is provided, the function returns true;
  */
 export type Terminator = {
   minPrec: number;
-  tokens?: LatexToken[];
   condition?: (parser: Parser) => boolean;
 };
 
@@ -131,6 +129,20 @@ export type ParseHandler =
   | PrefixParseHandler
   | InfixParseHandler
   | MatchfixParseHandler;
+
+export type LatexArgumentType =
+  | '{expression}' /** A required math mode expression */
+  | '[expression]' /** An optional math mode expression */
+  | '{text}' /** A required expression in text mode */
+  | '[text]' /** An optional expression in text mode */
+  | '{unit}' /** A required unit expression, e.g. `3em` */
+  | '[unit]' /** An optional unit expression, e.g. `3em` */
+  | '{glue}' /** A required glue expression, e.g. `25 mu plus 3em ` */
+  | '[glue]' /** An optional glue expression, e.g. `25 mu plus 3em ` */
+  | '{string}' /** A required text string, terminated by a non-literal token */
+  | '[string]' /** An optional text string, terminated by a non-literal token */
+  | '{color}' /** A required color expression, e.g. `red` or `#00ff00` */
+  | '[color]'; /** An optional color expression, e.g. `red` or `#00ff00` */
 
 /**
  * Maps a string of LaTeX tokens to a function or symbol and vice-versa.
@@ -280,28 +292,6 @@ export type SymbolEntry = BaseEntry & {
    */
   // arguments?: 'group' | 'implicit' | '';
 
-  /**
-   *
-   * If a LaTeX command (i.e. the trigger starts with `\`, e.g. `\sqrt`)
-   * indicates the number of optional arguments expected (indicate with
-   * square brackets).
-   *
-   * For example, for the `\sqrt` command, 1: `\sqrt[3]{x}`
-   *
-   */
-  optionalLatexArg?: number;
-
-  /**
-   *
-   * If a LaTeX command (i.e. the trigger starts with `\`, e.g. `\frac`)
-   * indicates the number of required arguments expected (indicated with
-   * curly braces).
-   *
-   * For example, for the `\frac` command, 2: `\frac{1}{n}`
-   *
-   */
-  requiredLatexArg?: number;
-
   parse: Expression | SymbolParseHandler;
 };
 
@@ -310,8 +300,6 @@ export type SymbolEntry = BaseEntry & {
  */
 export type DefaultEntry = BaseEntry & {
   precedence?: number;
-  optionalLatexArg?: number;
-  requiredLatexArg?: number;
   parse?: Expression | SymbolParseHandler;
 };
 
@@ -477,8 +465,8 @@ export type SerializeLatexOptions = {
   multiply: LatexString; // e.g. '\\times', '\\cdot'
 
   /**
-   * When an expression contains the symbol `Missing`, serialize it
-   * with this LaTeX string
+   * When an expression contains the error expression `["Error", 'missing']`,
+   * serialize it with this LaTeX string
    */
   missingSymbol: LatexString; // e.g. '\\placeholder{}'
 
@@ -686,7 +674,6 @@ export type SerializeHandler = (
 ) => string;
 
 export interface Parser {
-  readonly onError: WarningSignalHandler;
   readonly options: Required<ParseLatexOptions>;
   readonly computeEngine?: IComputeEngine;
 
@@ -718,6 +705,11 @@ export interface Parser {
   /** If there are any space, advance the index until a non-space is encountered */
   skipSpace(): boolean;
 
+  addBoundary(boundary: LatexToken[]): void;
+  removeBoundary(): void;
+  matchBoundary(): boolean;
+  boundaryError(msg: string | [string, ...Expression[]]): Expression;
+
   /** If the next token is a character, return it and advance the index
    * This includes plain characters (e.g. 'a', '+'...), characters
    * defined in hex (^^ and ^^^^), the `\char` and `\unicode` command.
@@ -740,11 +732,11 @@ export interface Parser {
   match(tokens: LatexToken): boolean;
   matchAll(tokens: LatexToken | LatexToken[]): boolean;
   matchAny(tokens: LatexToken[]): LatexToken;
-  matchWhile(tokens: LatexToken[]): LatexToken[];
+  matchSequence(tokens: LatexToken[]): LatexToken[];
 
   /** If the next token matches a `+` or `-` sign, return it and advance the index.
    * Otherwise return `''` and do not advance */
-  matchSign(): string;
+  matchOptionalSign(): string;
 
   matchDecimalDigits(): string;
   matchSignedInteger(): string;
@@ -753,7 +745,7 @@ export interface Parser {
 
   /** Parse a tabular environment, until `\end{endName}`
    */
-  matchTabular(endName: string): null | Expression;
+  matchTabular(endName: string): null | Expression[][];
 
   applyInvisibleOperator(
     terminator: Terminator,
@@ -770,13 +762,10 @@ export interface Parser {
   matchRequiredLatexArgument(): Expression | null;
   /**
    * - 'enclosure' : will look for an argument inside an enclosure (an open/close fence)
-   * - 'group': arguments follow directly the symbol, until an end of group token `<}>`
    * - 'implicit': either an expression inside a pair of `()`, or just a primary
    *    (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
    */
-  matchArguments(
-    kind: '' | 'group' | 'implicit' | 'enclosure'
-  ): Expression[] | null;
+  matchArguments(kind: '' | 'implicit' | 'enclosure'): Expression[] | null;
 
   /** If matches the normalized open delimiter, returns the
    * expected closing delimiter.
@@ -833,4 +822,10 @@ export interface Parser {
    * `until` is `{ minPrec:0 }` by default.
    */
   matchExpression(until?: Partial<Terminator>): Expression | null;
+
+  /** Return an error expression with the specified code and arguments */
+  error(
+    code: string | [string, ...Expression[]],
+    fromToken: number
+  ): Expression;
 }

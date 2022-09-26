@@ -1,8 +1,8 @@
-import { Expression } from '../../math-json';
-import { isEqual } from '../../math-json/utils';
-import { DomainExpression } from '../public';
+import { DomainLiteral } from '../public';
 
 export const DOMAIN_CONSTRUCTORS = [
+  'Error',
+
   'Dictionary',
   'Function',
   'List',
@@ -11,32 +11,23 @@ export const DOMAIN_CONSTRUCTORS = [
   'Intersection',
   'Union',
 
-  'Optional',
-  'Some',
+  'Maybe',
+  'Sequence',
 
   'Interval',
   'Range',
 
   'Head',
   'Symbol',
-  'Literal',
-];
-
-/** The set of domain constructors whose arguments are an expression (not a domain expression) */
-export const DOMAIN_EXPRESSION_CONSTRUCTORS = [
-  'Range',
-  'Interval',
-  'Head',
-  'Symbol',
-  'Literal',
+  'Value',
 ];
 
 export const DOMAIN_ALIAS = {
-  // Function: ['Function', ['Some', 'Anything'], 'Anything'],
-  NumericFunction: ['Function', ['Some', 'Number'], 'Number'],
+  // Function: ['Function', ['Sequence', 'Anything'], 'Anything'],
+  NumericFunction: ['Function', ['Sequence', 'Number'], 'Number'],
   RealFunction: [
     'Function',
-    ['Some', 'ExtendedRealNumber'],
+    ['Sequence', 'ExtendedRealNumber'],
     'ExtendedRealNumber',
   ],
   TrigonometricFunction: ['Function', 'Number', 'Number'],
@@ -44,19 +35,19 @@ export const DOMAIN_ALIAS = {
   LogicOperator: [
     'Function',
     'MaybeBoolean',
-    ['Optional', 'MaybeBoolean'],
+    ['Maybe', 'MaybeBoolean'],
     'MaybeBoolean',
   ],
-  Predicate: ['Function', ['Some', 'Anything'], 'MaybeBoolean'],
+  Predicate: ['Function', ['Sequence', 'Anything'], 'MaybeBoolean'],
   RelationalOperator: ['Function', 'Anything', 'Anything', 'MaybeBoolean'],
-  PositiveInteger: ['Range', 1, +Infinity],
-  NonNegativeInteger: ['Range', 0, +Infinity],
-  NegativeInteger: ['Range', -Infinity, -1],
-  NonPositiveInteger: ['Range', -Infinity, 0],
-  PositiveNumber: ['Interval', ['Open', 0], +Infinity],
-  NonNegativeNumber: ['Interval', 0, +Infinity],
-  NegativeNumber: ['Interval', -Infinity, ['Open', 0]],
-  NonPositiveNumber: ['Interval', -Infinity, 0],
+  // PositiveInteger: ['Range', 1, +Infinity],
+  // NonNegativeInteger: ['Range', 0, +Infinity],
+  // NegativeInteger: ['Range', -Infinity, -1],
+  // NonPositiveInteger: ['Range', -Infinity, 0],
+  // PositiveNumber: ['Interval', ['Open', 0], +Infinity],
+  // NonNegativeNumber: ['Interval', 0, +Infinity],
+  // NegativeNumber: ['Interval', -Infinity, ['Open', 0]],
+  // NonPositiveNumber: ['Interval', -Infinity, 0],
 };
 
 // export const NUMERIC_DOMAIN_INFO: { [name: string]: NumericDomainInfo } = {
@@ -172,7 +163,7 @@ const DOMAIN_LITERAL = {
   //
   // Functional Domains
   //
-  Function: 'Value',
+  Function: 'Anything',
   Predicate: 'Function',
   LogicOperator: 'Predicate',
   RelationalOperator: 'Predicate',
@@ -243,15 +234,31 @@ const DOMAIN_LITERAL = {
 
 let gDomainLiterals: { [domain: string]: Set<string> };
 
-export function isDomainLiteral(s: string | null): boolean {
+export function isDomainLiteral(s: string | null): s is DomainLiteral {
   if (!s) return false;
 
   return DOMAIN_LITERAL[s] !== undefined;
 }
 
+export function isSubdomainLiteral(lhs: string, rhs: string): boolean {
+  if (!gDomainLiterals) {
+    gDomainLiterals = {};
+    ancestors('Void');
+  }
+
+  return gDomainLiterals[lhs].has(rhs);
+}
+
 /** Return all the domain literals that are an ancestor of `dom`
  */
 export function ancestors(dom: string): string[] {
+  // Build the domain lattice if necessary, by calculating all the ancestors of
+  // `Void` (the bottom domain)
+  if (!gDomainLiterals) {
+    gDomainLiterals = {};
+    ancestors('Void');
+  }
+
   if (gDomainLiterals[dom]) return Array.from(gDomainLiterals[dom]);
 
   let result: string[] = [];
@@ -268,7 +275,7 @@ export function ancestors(dom: string): string[] {
     if (dom[0] === 'Dictionary') return ancestors('Dictionary');
     if (dom[0] === 'Range') return ancestors('Integer');
     if (dom[0] === 'Interval') return ancestors('RealNumberExtended');
-    if (dom[0] === 'Optional' || dom[0] === 'Some') return ancestors(dom[1]);
+    if (dom[0] === 'Maybe' || dom[0] === 'Sequence') return ancestors(dom[1]);
 
     if (dom[0] === 'Literal') return ['Anything']; // @todo could do better
     if (dom[0] === 'Union') return ['Anything']; // @todo could do better

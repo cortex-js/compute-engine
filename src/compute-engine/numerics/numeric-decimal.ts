@@ -3,7 +3,7 @@ import { IComputeEngine } from '../public';
 
 export function gcd(a: Decimal, b: Decimal): Decimal {
   //@todo: https://github.com/Yaffle/bigint-gcd/blob/main/gcd.js
-  console.assert(a.isInteger() && !b.isInteger());
+  console.assert(a.isInteger() && b.isInteger());
   while (!b.isZero()) [a, b] = [b, a.modulo(b)];
   return a.abs();
 }
@@ -151,9 +151,18 @@ export function gamma(ce: IComputeEngine, z: Decimal): Decimal {
  * for machine numbers,return true.
  */
 export function isInMachineRange(d: Decimal): boolean {
+  // Are there too many significant digits?
+  // Maximum Safe Integer is 9007199254740991
+  // Digits in Decimal are stored by blocks of 7.
+  // Three blocks, with the first block = 90 is close to the maximum
+  if (d.d.length > 3 || (d.d.length === 3 && d.d[0] >= 90)) {
+    return false;
+  }
+
+  // Is the exponent within range?
   // With a binary 64 IEEE 754 number:
   // significant bits: 53 -> 15 digits
-  // exponent bits: 11. emax = 307 (emin = -306)
+  // exponent bits: 11. emax = 307, emin = -306)
   return d.e < 308 && d.e > -306;
 }
 

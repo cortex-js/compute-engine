@@ -1,18 +1,21 @@
 import { LatexDictionary, Serializer } from '../public';
 
 import {
-  LIST,
   op,
   head,
-  tail,
   getSequence,
   dictionary,
-  string,
+  stringValue,
   machineValue,
   symbol,
+  ops,
 } from '../../../math-json/utils';
 import { Expression } from '../../../math-json/math-json-format';
 import { joinLatex } from '../tokenizer';
+
+function parseSingleArg(cmd: string): (parser: any) => Expression {
+  return (parser) => [cmd, parser.matchRequiredLatexArgument() ?? 'Nothing'];
+}
 
 export const DEFINITIONS_OTHERS: LatexDictionary = [
   {
@@ -105,7 +108,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
         }
       }
       const seq = getSequence(sub);
-      if (seq) sub = [LIST, ...seq];
+      if (seq) sub = ['List', ...seq];
 
       if (!sub || !sup) return null;
       let rhs = parser.matchRequiredLatexArgument() ?? 'Nothing';
@@ -121,19 +124,21 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       const vars = op(expr, 2);
       const degree = op(expr, 3);
       if (vars !== null && vars !== 'Nothing') {
-        if (head(vars) === LIST) {
+        if (head(vars) === 'List') {
           result +=
-            '_{' + serializer.serialize(['Sequence', ...tail(vars)]) + '}';
+            '_{' +
+            serializer.serialize(['Sequence', ...(ops(vars) ?? [])]) +
+            '}';
         } else {
           result += '_{' + serializer.serialize(vars) + '}';
         }
       }
-      if (degree !== null && degree !== 'Nothing') {
+
+      if (degree !== null && degree !== 'Nothing')
         result += '^{' + serializer.serialize(degree) + '}';
-      }
-      if (fn !== null && fn !== 'Nothing') {
-        result += serializer.serialize(fn);
-      }
+
+      if (fn !== null && fn !== 'Nothing') result += serializer.serialize(fn);
+
       return result;
     },
     precedence: 740,
@@ -141,79 +146,79 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   {
     name: 'OverBar',
     trigger: ['\\overline'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverBar'),
   },
   {
     name: 'UnderBar',
     trigger: ['\\underline'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('UnderBar'),
   },
   {
     name: 'OverVector',
     trigger: ['\\vec'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverVector'),
   },
   {
     name: 'OverTilde',
     trigger: ['\\tilde'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverTilde'),
   },
   {
     name: 'OverHat',
     trigger: ['\\hat'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverHat'),
   },
   {
     name: 'OverRightArrow',
     trigger: ['\\overrightarrow'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverRightArrow'),
   },
   {
     name: 'OverLeftArrow',
     trigger: ['\\overleftarrow'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverLeftArrow'),
   },
   {
     name: 'OverRightDoubleArrow',
     trigger: ['\\Overrightarrow'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverRightDoubleArrow'),
   },
   {
     name: 'OverLeftHarpoon',
     trigger: ['\\overleftharpoon'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverLeftHarpoon'),
   },
   {
     name: 'OverRightHarpoon',
     trigger: ['\\overrightharpoon'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverRightHarpoon'),
   },
   {
     name: 'OverLeftRightArrow',
     trigger: ['\\overleftrightarrow'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverLeftRightArrow'),
   },
   {
     name: 'OverBrace',
     trigger: ['\\overbrace'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverBrace'),
   },
   {
     name: 'OverLineSegment',
     trigger: ['\\overlinesegment'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverLineSegment'),
   },
   {
     name: 'OverGroup',
     trigger: ['\\overgroup'],
-    requiredLatexArg: 1,
+    parse: parseSingleArg('OverGroup'),
   },
 
   {
     trigger: ['\\displaystyle'],
     parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
+      const arg = parser.matchExpression();
+      if (arg === null) return 'Nothing';
       return [
         'Style',
         ...arg,
@@ -347,13 +352,13 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       const dict = dictionary(op(expr, 2));
       if (dict === null) return result;
 
-      if (string(dict.display) === 'block')
+      if (stringValue(dict.display) === 'block')
         result = joinLatex(['{\\displaystyle', result, '}']);
-      else if (string(dict.display) === 'inline')
+      else if (stringValue(dict.display) === 'inline')
         result = joinLatex(['{\\textstyle', result, '}']);
-      else if (string(dict.display) === 'script')
+      else if (stringValue(dict.display) === 'script')
         result = joinLatex(['{\\scriptstyle', result, '}']);
-      else if (string(dict.display) === 'scriptscript')
+      else if (stringValue(dict.display) === 'scriptscript')
         result = joinLatex(['{\\scriptscriptstyle', result, '}']);
 
       const v = machineValue(dict.size);
@@ -417,7 +422,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     name: 'HorizontalSpacing',
-    serialize: (serializer, expr): string => {
+    serialize: (_serializer, expr): string => {
       const content = op(expr, 1);
       if (symbol(content) === 'Nothing') {
         const v = machineValue(op(expr, 2));
@@ -458,12 +463,10 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   // {
   //     name: '',
   //     trigger: '\\mathring',
-  //     requiredLatexArg: 1,
   // },
   // {
   //     name: '',
   //     trigger: '\\check',
-  //     requiredLatexArg: 1,
   // },
 ];
 

@@ -37,10 +37,9 @@ export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
     return hashCode('Pattern') ^ this._pattern.hash;
   }
 
-  _purge(): undefined {
-    this._pattern._purge();
-    this._canonicalPattern?._purge();
-    return undefined;
+  unbind(): void {
+    this._pattern.unbind();
+    this._canonicalPattern?.unbind();
   }
 
   get json(): Expression {
@@ -51,7 +50,7 @@ export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
     return 'Pattern';
   }
 
-  get valueDomain(): BoxedDomain {
+  get domain(): BoxedDomain {
     return this.engine.domain('Pattern');
   }
   get isCanonical(): boolean {

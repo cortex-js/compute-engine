@@ -6,7 +6,6 @@ import {
   SerializeHandler,
   LatexDictionaryEntry,
   LibraryCategory,
-  Serializer,
   Delimiter,
   PostfixParseHandler,
   MatchfixParseHandler,
@@ -42,11 +41,9 @@ export type CommonEntry = {
 
 export type SymbolEntry = CommonEntry & {
   kind: 'symbol';
-  // The 'precedence' of symbols is used to determine appropriate wrapping
-  precedence: number;
 
-  optionalLatexArg: number;
-  requiredLatexArg: number;
+  // The 'precedence' of symbols is used to determine appropriate wrapping when serializing
+  precedence: number;
 
   parse: SymbolParseHandler;
 };
@@ -83,9 +80,6 @@ export type PostfixEntry = CommonEntry & {
 
 export type EnvironmentEntry = CommonEntry & {
   kind: 'environment';
-
-  optionalLatexArg: number;
-  requiredLatexArg: number;
 
   parse: EnvironmentParseHandler;
 };
@@ -277,7 +271,7 @@ function makeIndexedEntry(
           : tokensToString(result.closeDelimiter);
 
       result.serialize = (serializer, expr) =>
-        joinLatex([openDelim, serializer.serialize(expr), closeDelim]);
+        joinLatex([openDelim, serializer.serialize(op(expr, 1)), closeDelim]);
     }
     if (typeof entry.parse === 'function')
       result.parse = entry.parse as MatchfixParseHandler;
@@ -294,11 +288,12 @@ function makeIndexedEntry(
   //
   if (result.kind === 'environment' && isEnvironmentEntry(entry)) {
     const envName = entry.trigger as string;
-    result.serialize = (serializer: Serializer, expr: Expression): string => {
-      return `\\begin{${envName}${serializer.serialize(
-        op(expr, 1)
-      )}\\end{${envName}`;
-    };
+    result.serialize =
+      entry.serialize ??
+      ((serializer, expr) =>
+        `\\begin{${envName}}${serializer.serialize(
+          op(expr, 1)
+        )}\\end{${envName}}`);
     result.parse = (entry.parse as EnvironmentParseHandler) ?? (() => null);
     return [envName, result as IndexedLatexDictionaryEntry];
   }
@@ -325,8 +320,6 @@ function makeIndexedEntry(
 
   if (result.kind === 'symbol' && isSymbolEntry(entry)) {
     result.precedence = entry.precedence ?? 10000;
-    result.optionalLatexArg = entry.optionalLatexArg ?? 0;
-    result.requiredLatexArg = entry.requiredLatexArg ?? 0;
   }
 
   //
@@ -365,7 +358,11 @@ function makeIndexedEntry(
       console.assert(!entry.parse);
       const name = entry.parse ?? entry.name!;
       result.parse = (_scanner, _terminator, arg) =>
-        [name, op(arg, 1) ?? 'Missing', op(arg, 2) ?? 'Missing'] as Expression;
+        [
+          name,
+          op(arg, 1) ?? ['Error', "'missing'"],
+          op(arg, 2) ?? ['Error', "'missing'"],
+        ] as Expression;
     } else {
       //
       // Default parse function for infix operator
@@ -378,21 +375,19 @@ function makeIndexedEntry(
         if (prec < terminator.minPrec) return null; // @todo should not be needed
 
         // Get the rhs
-        const rhs = scanner.matchExpression({ ...terminator, minPrec: prec });
         // Note: for infix operators, we are lenient and tolerate
         // a missing rhs.
         // This is because it is unlikely to be an ambiguous parse
         // (i.e. `x+`) and more likely to be a syntax error we want to
-        // capture as `['Add', 'x', 'Missing']`.
-        if (typeof head !== 'string') {
-          return [head, lhs, rhs ?? 'Missing'];
-        }
-        return applyAssociativeOperator(
-          head,
-          lhs,
-          rhs ?? 'Missing',
-          associativity
-        );
+        // capture as `['Add', 'x', ['Error', "'missing'"]`.
+        const rhs = scanner.matchExpression({
+          ...terminator,
+          minPrec: prec,
+        }) ?? ['Error', "'missing'"];
+
+        return typeof head === 'string'
+          ? applyAssociativeOperator(head, lhs, rhs, associativity)
+          : [head, lhs, rhs];
       };
     }
   } else {
@@ -566,23 +561,6 @@ function entryIsValid(
           'invalid-dictionary-entry',
           subject,
           'Unexpected "associativity" operator',
-        ],
-      });
-      return false;
-    }
-  }
-
-  if (!isSymbolEntry(entry)) {
-    if (
-      entry['optionalLatexArg'] !== undefined ||
-      entry['requiredLatexArg'] !== undefined
-    ) {
-      onError({
-        severity: 'warning',
-        message: [
-          'invalid-dictionary-entry',
-          subject,
-          'Unexpected "optionalLatexArg" or "requiredLatexArg" for non-symbol',
         ],
       });
       return false;

@@ -1,5 +1,5 @@
 import { Expression } from './math-json-format';
-import { op, machineValue, symbol, tail, head } from './utils';
+import { op, machineValue, symbol, head, ops } from './utils';
 
 function serializeBaseForm(expr: Expression): string | null {
   if (head(expr) !== 'BaseForm') return null;
@@ -62,7 +62,7 @@ function serializeFunction(expr: Expression): string | null {
   // List, Tuple, Pair, KeyValuePair,
   // String, Number,
 
-  const args = tail(expr);
+  const args = ops(expr);
   if (args === null) return null;
   return `${h}(${args.map((x) => serializeExpression(x) ?? '')})`;
   // @todo lambdas

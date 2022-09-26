@@ -1,4 +1,4 @@
-import { head, nops, op, tail } from '../../../math-json/utils';
+import { head, nops, op, ops } from '../../../math-json/utils';
 import { joinLatex } from '../tokenizer';
 import { Expression } from '../../../math-json/math-json-format';
 import { LatexDictionary, Serializer, LatexString } from '../public';
@@ -89,15 +89,12 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       // accept arguments that are `Set`
       const ce = parser.computeEngine!;
 
-      if (!ce || !ce.box(lhs).valueDomain.isCompatible('Set')) return null;
+      if (!ce || !ce.box(lhs).domain.isCompatible('Set')) return null;
 
       const index = parser.index;
       const rhs = parser.matchExpression({ ...until, minPrec: 390 });
       // If the rhs argument is not a set, bail
-      if (
-        rhs === null ||
-        ce.box(lhs).valueDomain.isCompatible('Set') !== true
-      ) {
+      if (rhs === null || ce.box(lhs).domain.isCompatible('Set') !== true) {
         parser.index = index;
         return null;
       }
@@ -347,7 +344,7 @@ function serializeSet(
     //
     return joinLatex([
       '\\left\\lbrace',
-      ...tail(expr).map((x) => serializer.serialize(x) + ' ,'),
+      ...(ops(expr) ?? []).map((x) => serializer.serialize(x) + ' ,'),
       '\\right\\rbrace',
     ]);
   }
@@ -363,11 +360,37 @@ function serializeSet(
   // `Range`
   //
   if (h === 'Range') {
+    return joinLatex([
+      '\\mathopen\\lbrack',
+      serializer.serialize(op(expr, 1)),
+      ', ',
+      serializer.serialize(op(expr, 2)),
+      '\\mathclose\\rbrack',
+    ]);
   }
   //
   // `Range`
   //
   if (h === 'Interval') {
+    let op1 = op(expr, 1);
+    let op2 = op(expr, 2);
+    let openLeft = false;
+    let openRight = false;
+    if (head(op1) === 'Open') {
+      op1 = op(op1, 1);
+      openLeft = true;
+    }
+    if (head(op2) === 'Open') {
+      op2 = op(op2, 1);
+      openRight = true;
+    }
+    return joinLatex([
+      `\\mathopen${openLeft ? '\\rbrack' : '\\lbrack'}`,
+      serializer.serialize(op1),
+      ', ',
+      serializer.serialize(op2),
+      `\\mathclose${openRight ? '\\lbrack' : '\\rbrack'}`,
+    ]);
   }
 
   // -----

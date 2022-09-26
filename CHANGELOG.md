@@ -3,22 +3,40 @@
 ### Breaking Changes
 
 - The `ce.latexOptions.preserveLatex` default value is now `false`
+- The first argument of the `["Error"]` expression (default value) has been
+  dropped. The first argument is now an error code, either as a string or an
+  `["ErrorCode"]` expression.
 
 ### Features
 
-- Implemented new domain computation system
+- Much improved LaTeX parser, in particular when parsing invalid LaTeX. The
+  parser now avoids throwing, but will return a partial expression with
+  `["Error"]` subexpressions indicating where the problems were.
+- Implemented new domain computation system (similar to type systems in
+  programming languages)
 - Added support for multiple signatures per function (ad-hoc polymorphism)
 - Added `FixedPoint`, `Loop`, `Product`, `Sum`, `Break`, `Continue`, `Block`,
   `If`, `Let`, `Set`, `Function`, `Apply`, `Return`
 - Added `Min`, `Max`, `Clamp`
 - Added parsing of log functions, `\lb`, `\ln`, `\ln_{10}`, `\ln_2`, etc...
+- Added
+  `expr.`subexpressions`, `expr.getSubexpressions()`, `expr.errors`, `expr.symbols`, `expr.isValid`.
+- Symbols can now be used to represent functions, i.e. `ce.box('Sin').domain`
+  correctly returns `["Domain", "Function"]`.
+- Correctly handle rational numbers with a numerator or denominator outside the
+  range of a 64-bit float.
+- Instead of a `Missing` symbol an `["Error", "'missing'"]` expression is used.
+- Name binding is now done lazily
+- Correctly handle MathJSON numbers with repeating decimals, e.g. `1.(3)`.
+- Correctly evaluate inverse functions, e.g. `ce.parse('\\sin^{-1}(.5)).N()`
+- Fixed some LaTeX serialization issues
 
 Read more at
 [Core Reference](https://cortexjs.io/compute-engine/reference/core/) and
 [Arithmetic Reference]
 (https://cortexjs.io/compute-engine/reference/arithmetic/)
 
-### Bug Fixed
+### Bugs Fixed
 
 - **#43** If the input of `ce.parse()` is an empty string, return an empty
   string for `expr.latex` or `expr.json.latex`: that is, ensure verbatim LaTeX

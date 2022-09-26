@@ -191,7 +191,7 @@ describe('OPERATOR prefix', () => {
 describe('OPERATOR infix', () => {
   test('- // Invalid negate', () =>
     expect(check('-')).toMatchInlineSnapshot(
-      `'["Subtract", ["Error", "'missing'", ["Latex", "'-'"]], ["Error", "'missing'", ["Latex", "'-'"]]]'`
+      `'["Negate", ["Error", "'missing'", ["Latex", "'-'"]]]'`
     ));
   test('1- // Invalid subtract', () =>
     expect(check('1-')).toMatchInlineSnapshot(
@@ -239,13 +239,15 @@ describe('OPERATOR multiply', () => {
   test('2\\sin(x), function apply', () =>
     expect(check('2\\sin(x)')).toMatchInlineSnapshot(`
       'box      = ["Multiply", 2, ["Sin", "x"]]
-      simplify  = ["Divide", ["Multiply", 2, ["Subtract", ["Exp", ["Multiply", "ImaginaryUnit", "x"]], ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "x"]]]]], ["Complex", 0, 2]]'
+      simplify  = ["Divide", ["Multiply", 2, ["Subtract", ["Exp", ["Multiply", "ImaginaryUnit", "x"]], ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "x"]]]]], ["Complex", 0, 2]]
+      evaluate  = ["Multiply", 2, ["Sin", "x"]]'
     `));
   test('2\\sin(x)\\frac12, function apply', () =>
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
       'box      = ["Multiply", 2, ["Sin", "x"], ["Rational", 1, 2]]
       canonical = ["Sin", "x"]
-      simplify  = ["Divide", ["Subtract", ["Exp", ["Multiply", "ImaginaryUnit", "x"]], ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "x"]]]], ["Complex", 0, 2]]'
+      simplify  = ["Divide", ["Subtract", ["Exp", ["Multiply", "ImaginaryUnit", "x"]], ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "x"]]]], ["Complex", 0, 2]]
+      evaluate  = ["Sin", "x"]'
     `));
   test('3\\pi5', () =>
     expect(check('3\\pi5')).toMatchInlineSnapshot(`

@@ -1,6 +1,6 @@
 /* eslint-disable no-empty */
 /* eslint-disable @typescript-eslint/no-empty-function */
-import { Expression } from '../../math-json/math-json-format';
+
 import {
   ParseLatexOptions,
   LatexToken,
@@ -18,18 +18,24 @@ import {
   PrefixEntry,
   SymbolEntry,
 } from './dictionary/definitions';
-import { WarningSignalHandler } from '../../common/signals';
-import { BoxedExpression, IComputeEngine } from '../public';
+
+import { IComputeEngine } from '../public';
+
+import { Expression } from '../../math-json/math-json-format';
 import {
   applyAssociativeOperator,
   head,
+  isValidSymbolName,
+  machineValue,
+  op,
+  ops,
   symbol,
-  tail,
 } from '../../math-json/utils';
 
 /** These delimiters can be used as 'shorthand' delimiters in
- * `openDelimiter` and `closeDelimiter` for `matchfix` operators */
-const SHORTHAND_DELIMITER = {
+ * `openDelimiter` and `closeDelimiter` for `matchfix` operators.
+ */
+const DELIMITER_SHORTHAND = {
   '(': ['\\lparen', '('],
   ')': ['\\rparen', ')'],
   '[': ['\\lbrack'],
@@ -60,7 +66,10 @@ const MIDDLE_DELIMITER = {
   '|': ['|', '\\|', '\\mid', '\\mvert'],
 };
 
-//Maps an open delimiter prefix to the corresponding close delimiter prefix
+/** Commands that can be used with an open delimiter, and their corresponding
+ * closing commands.
+ */
+
 const OPEN_DELIMITER_PREFIX = {
   '\\left': '\\right',
   '\\bigl': '\\bigr',
@@ -73,6 +82,7 @@ const OPEN_DELIMITER_PREFIX = {
   '\\Bigg': '\\Bigg',
 };
 
+/** Commands that can be used with a middle delimiter */
 const MIDDLE_DELIMITER_PREFIX = [
   '\\middle',
   '\\bigm',
@@ -85,7 +95,10 @@ const MIDDLE_DELIMITER_PREFIX = [
   '\\Bigg',
 ];
 
-const CLOSE_DELIMITERS = {
+/**
+ * Map open delimiters to a matching close delimiter
+ */
+const CLOSE_DELIMITER = {
   '(': ')',
   '[': ']',
   '\\{': '\\}',
@@ -110,7 +123,7 @@ export const DEFAULT_LATEX_NUMBER_OPTIONS: NumberFormattingOptions = {
   positiveInfinity: '\\infty',
   negativeInfinity: '-\\infty',
   notANumber: '\\operatorname{NaN}',
-  decimalMarker: '.',
+  decimalMarker: '.', // Use `{,}` for comma as a decimal marker
   groupSeparator: '\\,', // for thousands, etc...
   exponentProduct: '\\cdot',
   beginExponentMarker: '10^{', // could be 'e'
@@ -129,8 +142,9 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
 
   parseArgumentsOfUnknownLatexCommands: true,
   parseNumbers: true,
-  parseUnknownSymbol: (s: string) => {
-    if (/^[fg]$/.test(s)) return 'function';
+  parseUnknownSymbol: (s: string, parser: Parser) => {
+    if (parser.computeEngine?.lookupFunctionName(s) !== undefined)
+      return 'function';
     if (/^[a-zA-Z]+$/.test(s)) return 'symbol';
     return 'unknown';
   },
@@ -139,39 +153,51 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
 };
 
 export class _Parser implements Parser {
-  readonly onError: WarningSignalHandler;
+  readonly computeEngine: IComputeEngine;
   readonly options: NumberFormattingOptions & ParseLatexOptions;
-  private _decimalMarkerTokens: LatexToken[];
-  readonly engine: IComputeEngine;
-
-  readonly _dictionary: IndexedLatexDictionary;
 
   index = 0;
 
-  // Those two properties are used to detect infinite loops
-  _lastPeek = '';
-  _peekCounter = 0;
+  private readonly _tokens: LatexToken[];
 
-  readonly _tokens: LatexToken[];
+  private _decimalMarkerTokens: LatexToken[];
+  private readonly _dictionary: IndexedLatexDictionary;
+
+  // A parsing boundary is a sequence of tokens that indicate that a
+  // recursive parsing operation should stop.
+  // In a traditional parser, keeping track of parsing boundaries would
+  // not be necessary. However, because we attempt to deliver the best
+  // interpretation of a partial expression, boundaries allow us to fail
+  // parsing more locally.
+  // For example, in `\begin{cases} | \end{cases}`, without boundary
+  // detection, the parsing of `|` would attempt to goble up `\end{cases}`
+  // which would be interpreted as an unexpected command, and the whole `\begin`
+  // would be rejected as an unbalanced environment. With `\end{cases}` as a
+  // boundary, the parsing of the `|` argument stops as soon as it encounters
+  // the `\end{cases}` and can properly report an unexpected toke on the `|`
+  // only while correctly interpreting the `\begin{cases}...\end{cases}`
+  private _boundaries: { index: number; tokens: LatexToken[] }[] = [];
+
+  // Those two properties are used to detect infinite loops while parsing
+  private _lastPeek = '';
+  private _peekCounter = 0;
 
   constructor(
     tokens: LatexToken[],
     options: NumberFormattingOptions & ParseLatexOptions,
     dictionary: IndexedLatexDictionary,
-    computeEngine: IComputeEngine,
-    onError: WarningSignalHandler
+    computeEngine: IComputeEngine
   ) {
+    this._tokens = tokens;
     this.options = {
       ...DEFAULT_LATEX_NUMBER_OPTIONS,
       ...DEFAULT_PARSE_LATEX_OPTIONS,
       ...options,
     };
-    this._decimalMarkerTokens = tokenize(this.options.decimalMarker, []);
-    this.engine = computeEngine;
-    this._tokens = tokens;
-
-    this.onError = onError;
     this._dictionary = dictionary;
+    this.computeEngine = computeEngine;
+
+    this._decimalMarkerTokens = tokenize(this.options.decimalMarker, []);
   }
 
   updateOptions(
@@ -183,19 +209,8 @@ export class _Parser implements Parser {
         if (k === 'decimalMarker' && typeof v === 'string') {
           this._decimalMarkerTokens = tokenize(v, []);
         }
-      }
+      } else throw Error(`Unexpected option "${k}"`);
     }
-  }
-
-  // @todo: deprecate it (use terminator)
-  clone(start: number, end: number): Parser {
-    return new _Parser(
-      this._tokens.slice(start, end),
-      this.options,
-      this._dictionary,
-      this.engine,
-      this.onError
-    );
   }
 
   get atEnd(): boolean {
@@ -203,13 +218,14 @@ export class _Parser implements Parser {
   }
 
   get peek(): LatexToken {
-    if (this._tokens[this.index] === this._lastPeek) this._peekCounter += 1;
+    const peek = this._tokens[this.index];
+    if (peek === this._lastPeek) this._peekCounter += 1;
     else this._peekCounter = 0;
     if (this._peekCounter >= 1024) {
       console.error(
-        `Infinite loop detected while parsing "${this.latex(0)}" at ${
+        `Infinite loop detected while parsing "${this.latex(0)}" at "${
           this._lastPeek
-        } (index ${this.index})`
+        }" (index ${this.index})`
       );
       throw new Error(
         `Infinite loop detected while parsing "${this.latex(0)}" at ${
@@ -217,8 +233,12 @@ export class _Parser implements Parser {
         } (index ${this.index})`
       );
     }
-    this._lastPeek = this._tokens[this.index];
-    return this._tokens[this.index];
+    this._lastPeek = peek;
+    return peek;
+  }
+
+  next(): LatexToken {
+    return this._tokens[this.index++];
   }
 
   /**
@@ -229,15 +249,43 @@ export class _Parser implements Parser {
    * Note: the `minPrec` condition is not checked. It should be checked separately.
    */
   atTerminator(t?: Terminator): boolean {
-    const start = this.index;
+    if (this.atBoundary) return true;
+    if (t?.condition && t.condition(this)) return true;
+    return false;
+  }
+
+  /** True if the current token matches any of the boundaries we are waiting for */
+  get atBoundary(): boolean {
     if (this.atEnd) return true;
-    if (!t) return false;
-    if (t.condition && t.condition(this)) return true;
-    if (t.tokens && t.tokens.length > 0 && this.matchAll(t.tokens)) {
-      this.index = start;
-      return true;
+    const start = this.index;
+    for (const boundary of this._boundaries) {
+      if (this.matchAll(boundary.tokens)) {
+        this.index = start;
+        return true;
+      }
     }
     return false;
+  }
+
+  addBoundary(boundary: LatexToken[]): void {
+    this._boundaries.push({ index: this.index, tokens: boundary });
+  }
+
+  removeBoundary(): void {
+    this._boundaries.pop();
+  }
+
+  matchBoundary(): boolean {
+    const currentBoundary = this._boundaries[this._boundaries.length - 1];
+    const match = currentBoundary && this.matchAll(currentBoundary.tokens);
+    if (match) this._boundaries.pop();
+    return match;
+  }
+
+  boundaryError(msg: string | [string, ...Expression[]]): Expression {
+    const currentBoundary = this._boundaries[this._boundaries.length - 1];
+    this._boundaries.pop();
+    return this.error(msg, currentBoundary.index);
   }
 
   latex(start: number, end?: number): string {
@@ -245,7 +293,7 @@ export class _Parser implements Parser {
   }
 
   latexAhead(n: number): string {
-    return tokensToString(this._tokens.slice(this.index, this.index + n));
+    return this.latex(this.index, this.index + n);
   }
   latexBefore(): string {
     return this.latex(0, this.index);
@@ -255,7 +303,7 @@ export class _Parser implements Parser {
   }
 
   /**
-   * Return at most `lookahead` strings made from the tokens
+   * Return at most `this._dictionary.lookahead` strings made from the tokens
    * ahead.
    *
    * The index in the returned array correspond to the number of tokens.
@@ -270,22 +318,20 @@ export class _Parser implements Parser {
       this._dictionary.lookahead,
       this._tokens.length - this.index
     );
-    const result: string[] = [];
-    while (n > 0) {
-      result[n] = this.latexAhead(n--);
-    }
+    const result = Array<string>(n + 1);
+    while (n > 0) result[n] = this.latexAhead(n--);
+
     return result;
   }
 
   /** Return all the definitions that potentially match the tokens ahead */
   peekDefinitions(kind: 'symbol'): [SymbolEntry, number][] | null;
   peekDefinitions(kind: 'postfix'): [PostfixEntry, number][] | null;
-  peekDefinitions(kind: 'postfix'): [PostfixEntry, number][] | null;
+  peekDefinitions(kind: 'infix'): [InfixEntry, number][] | null;
+  peekDefinitions(kind: 'prefix'): [PrefixEntry, number][] | null;
   peekDefinitions(
     kind: 'operator'
   ): [InfixEntry | PrefixEntry | PostfixEntry, number][] | null;
-  peekDefinitions(kind: 'infix'): [InfixEntry, number][] | null;
-  peekDefinitions(kind: 'prefix'): [PrefixEntry, number][] | null;
   peekDefinitions(
     kind: 'symbol' | 'infix' | 'prefix' | 'postfix' | 'operator'
   ): [IndexedLatexDictionaryEntry, number][] | null {
@@ -310,26 +356,32 @@ export class _Parser implements Parser {
     return result.length === 0 ? null : result;
   }
 
-  next(): LatexToken {
-    return this._tokens[this.index++];
+  skipSpaceTokens(): void {
+    while (this.match('<space>')) {}
   }
 
+  /** While parsing in math mode, skip applicable spaces.
+   * Do not use to skip spaces e.g. while parsing a string. See `skipSpaceTokens()` instead.
+   */
   skipSpace(): boolean {
-    // Check if the have a `{}` token sequence.
+    // Check if there is a `{}` token sequence.
     // Those are used in LaTeX to force an invisible separation between commands
-    if (
-      !this.atEnd &&
-      this.peek === '<{>' &&
-      this._tokens[this.index + 1] === '<}>'
-    ) {
-      this.index += 2;
-      this.skipSpace();
-      return true;
+    // and are considered skipable space.
+    if (!this.atEnd && this.peek === '<{>') {
+      const index = this.index;
+      this.next();
+      while (this.match('<space>')) {}
+      if (this.next() === '<}>') {
+        this.skipSpace();
+        return true;
+      }
+
+      this.index = index;
     }
 
-    let result = false;
-
     if (!this.options.skipSpace) return false;
+
+    let result = false;
     while (this.match('<space>')) result = true;
 
     if (result) this.skipSpace();
@@ -381,7 +433,9 @@ export class _Parser implements Parser {
       }
       return String.fromCodePoint(codepoint);
     } else if (this.match('\\unicode')) {
+      this.skipSpaceTokens();
       if (this.peek === '<{>') {
+        this.next();
         const codepoint = this.matchLatexNumber();
 
         if (
@@ -440,35 +494,25 @@ export class _Parser implements Parser {
   }
 
   matchAny(tokens: LatexToken[]): LatexToken {
-    if (tokens.includes(this._tokens[this.index])) {
+    if (tokens.includes(this._tokens[this.index]))
       return this._tokens[this.index++];
-    }
+
     return '';
   }
 
-  matchWhile(tokens: LatexToken[]): LatexToken[] {
+  matchSequence(tokens: LatexToken[]): LatexToken[] {
     const result: LatexToken[] = [];
-    while (tokens.includes(this._tokens[this.index])) {
+    while (tokens.includes(this._tokens[this.index]))
       result.push(this._tokens[this.index++]);
-    }
+
     return result;
   }
 
-  matchSign(): string {
-    let isNegative = false;
-    let done = false;
-    while (!done) {
-      if (this.skipSpace()) {
-        done = false;
-      } else if (this.matchAny(['-', '\u2212'])) {
-        isNegative = !isNegative;
-        done = false;
-      } else if (this.matchAny(['+', '\ufe62'])) {
-        done = false;
-      } else {
-        done = true;
-      }
-    }
+  matchOptionalSign(): string {
+    let isNegative = !!this.matchAny(['-', '\u2212']);
+    while (this.matchAny(['+', '\ufe62']) || this.skipSpace())
+      if (this.matchAny(['-', '\u2212'])) isNegative = !isNegative;
+
     return isNegative ? '-' : '+';
   }
 
@@ -476,7 +520,7 @@ export class _Parser implements Parser {
     let result = '';
     let done = false;
     while (!done) {
-      result += this.matchWhile([
+      result += this.matchSequence([
         '0',
         '1',
         '2',
@@ -494,11 +538,9 @@ export class _Parser implements Parser {
         this.skipSpace();
         if (this.match(this.options.groupSeparator)) {
           this.skipSpace();
-          if (/[0-9]/.test(this.peek)) {
-            done = false; // There are more digits after a group separator
-          } else {
-            this.index = savedIndex;
-          }
+          // Are there more digits after a group separator
+          if (/[0-9]/.test(this.peek)) done = false;
+          else this.index = savedIndex;
         }
       }
     }
@@ -507,9 +549,9 @@ export class _Parser implements Parser {
 
   matchSignedInteger(): string {
     const start = this.index;
-    const sign = this.matchSign();
+    const sign = this.matchOptionalSign();
     const result = this.matchDecimalDigits();
-    if (result) return (sign === '-' ? '-' : '') + result;
+    if (result) return sign === '-' ? '-' + result : result;
 
     this.index = start;
     return '';
@@ -517,29 +559,25 @@ export class _Parser implements Parser {
 
   matchExponent(): string {
     const start = this.index;
-    let result = '';
 
     if (this.matchAny(['e', 'E'])) {
       const exponent = this.matchSignedInteger();
-      if (exponent) result = 'e' + exponent;
+      if (exponent) return 'e' + exponent;
+      this.index = start;
     }
-    if (result) return result;
 
     if (this.match('\\times')) {
       this.skipSpace();
       if (this.match('1') && this.match('0') && this.match('^')) {
-        if (/[0-9]/.test(this.peek)) {
-          // single digit exponent, i.e. `\times 10^5`
-          return 'e' + this.next();
-        }
+        // Is it a single digit exponent, i.e. `\times 10^5`
+        if (/[0-9]/.test(this.peek)) return 'e' + this.next();
+
         if (this.match('<{>')) {
           // Multi digit exponent,i.e. `\times 10^{10}` or `\times 10^{-5}`
           this.skipSpace();
           const exponent = this.matchSignedInteger();
           this.skipSpace();
-          if (this.match('<}>') && exponent) {
-            return 'e' + exponent;
-          }
+          if (this.match('<}>') && exponent) return 'e' + exponent;
         }
       }
     }
@@ -559,7 +597,7 @@ export class _Parser implements Parser {
     // this is so we can correctly parse `-1^2` as `['Negate', ['Square', 1]]`
     this.match('+');
 
-    // Does the number start with a dot prefix? i.e. `.5`
+    // Does the number start with a decimal marker? i.e. `.5`
     let dotPrefix = false;
 
     if (this.matchAll(this._decimalMarkerTokens)) {
@@ -617,7 +655,7 @@ export class _Parser implements Parser {
     } else if (this.match('"') || this.match('x')) {
       // Double-quote indicates a hex value
       // The 'x' prefix notation for the hexadecimal numbers is a MathJax extension.
-      // For example: 'x3a'
+      // For example: 'x3A'
       radix = 16;
       // Hex digits have to be upper-case
       digits = [
@@ -711,11 +749,9 @@ export class _Parser implements Parser {
    * - 'enclosure' : will look for an argument inside an enclosure (open/close fence)
    * - 'implicit': either an expression inside a pair of `()`, or just a primary
    *  (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
-   * - 'group': the arguments follow until an end of group, `<}>`. This is the
-   * case for example for `\displaystyle`
    */
   matchArguments(
-    kind: undefined | '' | 'enclosure' | 'implicit' | 'group'
+    kind: undefined | '' | 'enclosure' | 'implicit'
   ): Expression[] | null {
     if (!kind) return null;
 
@@ -725,26 +761,22 @@ export class _Parser implements Parser {
 
     if (kind === 'enclosure' && head(group) === 'Delimiter') {
       // We got an enclosure i.e. `f(a, b, c)`
-      return tail(group);
-    }
-
-    if (kind === 'group') {
-      // The argument is everything that follows until an end of group token, `<}>`
-
-      const arg = this.matchExpression({ tokens: ['<}>'] });
-      return arg === null ? [] : [arg];
+      if (op(group, 1) === 'Sequence') return ops(op(group, 1)) ?? [];
+      return [op(group, 1) ?? 'Nothing'];
     }
 
     if (kind === 'implicit') {
       // We are looking for an expression inside an optional pair of `()`
       // (i.e. trig functions, as in `\cos x`.)
-      if (head(group) === 'Delimiter') return tail(group);
-
-      if (group !== null) {
-        // There was a matchfix, the "group" is the argument, i.e.
-        // `\sin [a, b, c]`
-        return [group];
+      if (head(group) === 'Delimiter') {
+        if (op(group, 1) === 'Sequence') return ops(op(group, 1)) ?? [];
+        return [op(group, 1) ?? 'Nothing'];
       }
+
+      // Was there a matchfix? the "group" is the argument, i.e.
+      // `\sin [a, b, c]`
+      if (group !== null) return [group];
+
       // No group, but arguments without parentheses are allowed
       // Read a primary
       const primary = this.matchPrimary();
@@ -760,7 +792,7 @@ export class _Parser implements Parser {
     return null;
   }
 
-  /** If matches the normalized open delimiter, returns the
+  /** If matches the normalized open delimiter, return the
    * expected closing delimiter.
    *
    * For example, if `delimiter` is `(`, it would match `\left\lparen` and
@@ -777,7 +809,7 @@ export class _Parser implements Parser {
     const closePrefix = OPEN_DELIMITER_PREFIX[this.peek];
     if (closePrefix) this.next();
 
-    const alternatives = SHORTHAND_DELIMITER[openDelim] ?? [openDelim];
+    const alternatives = DELIMITER_SHORTHAND[openDelim] ?? [openDelim];
 
     const result = closePrefix ? [closePrefix] : [];
 
@@ -794,10 +826,10 @@ export class _Parser implements Parser {
       return null;
     }
 
-    if (CLOSE_DELIMITERS[openDelim] === closeDelim) {
+    if (CLOSE_DELIMITER[openDelim] === closeDelim) {
       // If this is the standard pair (i.e. '(' and ')')
       // use the matching closing (i.e. '\lparen' -> '\rparen')
-      result.push(CLOSE_DELIMITERS[this.peek]);
+      result.push(CLOSE_DELIMITER[this.peek]);
     } else {
       result.push(closeDelim);
     }
@@ -826,8 +858,8 @@ export class _Parser implements Parser {
   }
 
   /**
-   * An enclosure is an opening matchfix operator, an expression, optionally
-   * followed multiple times by a separator and another expression,
+   * An enclosure is an opening matchfix operator, an optional expression,
+   * optionally followed multiple times by a separator and another expression,
    * and finally a closing matching operator.
    */
   matchEnclosure(): Expression | null {
@@ -854,24 +886,21 @@ export class _Parser implements Parser {
 
         // 1. Match the opening delimiter
         if (!this.matchAll(def.openDelimiter)) continue;
+        this.addBoundary(def.closeDelimiter as string[]);
 
         // 2. Collect the sequence in between the delimiters
-        const body = this.matchExpression({
-          tokens: def.closeDelimiter as string[],
-          minPrec: 0,
-        });
+        const body = this.matchExpression();
+        this.skipSpace();
 
         // 3. Match the closing delimiter
-        this.skipSpace();
-        if (!this.matchAll(def.closeDelimiter)) continue;
-
-        if (typeof def.parse === 'function') {
-          const rhs = def.parse(this, body ?? 'Nothing');
-          if (rhs === null) continue; // This def didn't work. Try another.
-          return rhs;
+        if (!this.matchBoundary()) {
+          this.removeBoundary();
+          continue;
         }
-        console.assert(def.name);
-        return [def.name!, body ?? 'Nothing'];
+
+        const rhs = def.parse(this, body ?? 'Nothing');
+        if (rhs === null) continue; // This def didn't work. Try another.
+        return rhs;
       }
       //
       // We have a 'normalized' delimiter (i.e. '(' will match '(' or
@@ -885,17 +914,35 @@ export class _Parser implements Parser {
       );
       if (closeDelimiter === null) continue;
 
-      // 2. Collect the expression in between the delimiters
-      const body = this.matchExpression({ minPrec: 0, tokens: closeDelimiter });
-      if (body && this.matchAll(closeDelimiter)) {
-        if (typeof def.parse === 'function') {
-          const result = def.parse(this, body ?? 'Nothing');
-          if (result === null) continue; // This def didn't work. Try another.
-          return result;
-        }
-        console.assert(def.name);
-        return [def.name!, body];
+      if (this.matchAll(closeDelimiter)) {
+        const result = def.parse(this, 'Nothing');
+        if (result === null) continue; // This def didn't work. Try another.
+        return result;
       }
+
+      // 2. Collect the expression in between the delimiters
+      this.addBoundary(closeDelimiter);
+      const bodyStart = this.index;
+      let body = this.matchExpression();
+      this.skipSpace();
+      if (!this.matchBoundary()) {
+        // We couldn't parse the body up to the closing delimiter.
+        // This could be a case where the boundary of the enclosure is
+        // ambiguous, i.e. `|(a+|b|+c)|`. Attempt to parse without the boundary
+        this.removeBoundary();
+        this.index = bodyStart;
+        body = this.matchExpression();
+        // If still could not match, try another
+        if (!this.matchAll(closeDelimiter)) {
+          if (!this.atEnd) continue;
+          // If we're at the end, we may need to backtrack and try again
+          // That's the case for `|1+|2|+3|`
+          this.index = bodyStart;
+          return null;
+        }
+      }
+      const result = def.parse(this, body ?? 'Nothing');
+      if (result !== null) return result;
     }
     this.index = start;
     return null;
@@ -913,87 +960,136 @@ export class _Parser implements Parser {
   matchSymbol(): Expression | null {
     const start = this.index;
 
+    //
+    // Is there a custom parser for this symbol?
+    //
     const defs = this.peekDefinitions('symbol');
     if (defs) {
       for (const [def, tokenCount] of defs) {
-        let result: Expression | null = null;
-        // If there is a custom parsing function associated with this
-        // definition, invoke it.
         this.index = start + tokenCount;
         if (typeof def.parse === 'function') {
-          result = def.parse(this);
+          const result = def.parse(this);
           if (result) return result;
-        } else if (def.optionalLatexArg === 0 && def.requiredLatexArg === 0) {
-          return def.name!;
-        } else {
-          const optionalArgs: Expression[] = [];
-          let i = def.optionalLatexArg;
-          while (i !== 0) {
-            const arg = this.matchOptionalLatexArgument();
-            if (arg === null) break;
-            optionalArgs.push(arg);
-            i -= 1;
-          }
-          i = def.requiredLatexArg;
-          const requiredArgs: Expression[] = [];
-          while (i !== 0) {
-            const arg = this.matchRequiredLatexArgument();
-            if (arg === null) break;
-            requiredArgs.push(arg);
-            i -= 1;
-          }
-          if (requiredArgs.length === def.requiredLatexArg) {
-            return [def.name!, ...requiredArgs, ...optionalArgs];
-          }
+        } else return def.name!;
+      }
+    }
 
-          return def.name!;
+    // No custom parser worked. Backtrack.
+    this.index = start;
+
+    let sym: string | null = null;
+
+    if (
+      this.match('\\operatorname') ||
+      this.match('\\mathit') ||
+      this.match('\\mathrm')
+    ) {
+      sym = this.matchStringArgument();
+      if (sym === null) return this.error('expected-string-argument', start);
+      if (!isValidSymbolName(sym))
+        return this.error('invalid-symbol-name', start);
+    }
+
+    //
+    // Is this an unexpected operator?
+    // (this is an error handling code path)
+    //
+    if (!sym) {
+      let opDefs = this.peekDefinitions('operator');
+      if (opDefs) {
+        opDefs = this.peekDefinitions('postfix');
+        if (opDefs) {
+          const [def, n] = opDefs[0] as [PostfixEntry, number];
+          this.index += n;
+          if (typeof def.parse === 'function') {
+            const result = def.parse(this, this.error('missing', start));
+            if (result) return result;
+          }
+          if (def.name) return [def.name, this.error('missing', start)];
+          return this.error('unexpected-operator', start);
+        }
+
+        // Check prefix before infix, to catch `-` as a single missing operand
+        opDefs = this.peekDefinitions('prefix');
+        if (opDefs) {
+          const [def, n] = opDefs[0] as [PrefixEntry, number];
+          this.index += n;
+          if (typeof def.parse === 'function') {
+            const result = def.parse(this, { minPrec: 0 });
+            if (result) return result;
+          }
+          if (def.name)
+            return [
+              def.name,
+              this.matchExpression() ?? this.error('missing', start),
+            ];
+          return this.error('unexpected-operator', start);
+        }
+
+        opDefs = this.peekDefinitions('infix');
+        if (opDefs) {
+          const [def, n] = opDefs[0] as [InfixEntry, number];
+          this.index += n;
+          if (typeof def.parse === 'function') {
+            const result = def.parse(
+              this,
+              { minPrec: 0 },
+              this.error('missing', start)
+            );
+            if (result) return result;
+          }
+          if (def.name)
+            return [
+              def.name,
+              this.error('missing', start),
+              this.matchExpression() ?? this.error('missing', start),
+            ];
+          return this.error('unexpected-operator', start);
         }
       }
     }
 
+    // If we could not capture a symbol yet, simply use the next token.
+    if (!sym) sym = this.next();
+
+    if (sym && isValidSymbolName(sym)) {
+      //
+      // This is a symbol with no custom parsing.
+      //
+
+      // Are we OK with it as either a symbol or  function?
+      const action = this.options.parseUnknownSymbol?.(sym, this);
+
+      if (action === 'symbol') return sym;
+
+      if (action === 'function') {
+        // Is it followed by an argument list inside parentheses?
+        const enclosure = this.matchEnclosure();
+        // If no arguments, return it as a symbol
+        if (enclosure === null) return sym;
+        if (head(enclosure) !== 'Delimiter') return null;
+        if (symbol(op(enclosure, 1)) === 'Nothing') return [sym];
+        const h = head(op(op(enclosure, 1), 1));
+        if (h === 'Sequence') return [sym, ...(ops(op(enclosure, 1)) ?? [])];
+        return [sym, ...(ops(enclosure) ?? [])];
+      }
+    }
+    // Backtrack
     this.index = start;
 
-    let symbol = '';
-
-    if (
-      this.matchAll(['\\operatorname', '<{>']) ||
-      this.matchAll(['\\mathit', '<{>']) ||
-      this.matchAll(['\\mathrm', '<{>'])
-    ) {
-      symbol = this.matchString({ tokens: ['<}>'] });
-      if (!symbol || !this.match('<}>')) this.index = start;
-    }
-
-    if (!symbol) symbol = this.next();
-
-    // This is an unknown symbol.
-    // Can we promote it?
-    const action = this.options.parseUnknownSymbol?.(symbol, this);
-
-    if (action === 'symbol') return symbol;
-
-    if (action === 'function') {
-      // this.onError({ code: 'unknown-function', arg: name });
-      const enclosure = this.matchEnclosure();
-      // If no arguments, return it as a symbol
-      if (enclosure === null) return symbol;
-      if (head(enclosure) !== 'Delimiter') return null;
-      return [symbol, ...tail(enclosure)];
-    }
-
-    this.index = start;
-
-    // Not a symbol (punctuation or fence, maybe?)...
+    // Not a symbol, maybe an unknown LaTeX command?
     return this.matchUnknownLatexCommand();
   }
 
   matchOptionalLatexArgument(): Expression | null {
     const index = this.index;
-    this.skipSpace();
+    this.skipSpaceTokens();
     if (this.match('[')) {
+      this.addBoundary([']']);
       const expr = this.matchExpression();
       this.skipSpace();
-      if (this.match(']')) return expr;
+      if (this.matchBoundary()) return expr;
+      return this.boundaryError('expected-closing-delimiter');
     }
     this.index = index;
     return null;
@@ -1009,13 +1105,13 @@ export class _Parser implements Parser {
    */
   matchRequiredLatexArgument(): Expression | null {
     const start = this.index;
-    this.skipSpace();
+    this.skipSpaceTokens();
     if (this.match('<{>')) {
-      const expr = this.matchExpression({ tokens: ['<}>'] });
+      this.addBoundary(['<}>']);
+      const expr = this.matchExpression();
       this.skipSpace();
-      if (this.match('<}>')) return expr;
-      this.index = start;
-      return null;
+      if (this.matchBoundary()) return expr;
+      return this.boundaryError('expected-closing-delimiter');
     }
 
     // Is it a single digit?
@@ -1028,7 +1124,7 @@ export class _Parser implements Parser {
     if (/^[^\\#]$/.test(this.peek)) return this.next();
 
     // Otherwise, this can only be a symbol.
-    // `frac{1}2+1` is not valid, neither is `\frac\frac123`
+    // `\frac{1}2+1` is not valid, neither is `\frac\frac123`
     const expr = this.matchSymbol();
     if (expr) return expr;
 
@@ -1044,8 +1140,7 @@ export class _Parser implements Parser {
    * - they act mostly like an infix operator, but they are commutative, i.e.
    * `x_a^b` should be parsed identically to `x^b_a`.
    *
-   * - furthermore, in LaTeX, consecutive `^` or `_` are treated as concatenated,
-   * that is `x^a^b` parses the same as `x^{ab}`.
+   * - furthermore, in LaTeX `x^a^b` parses the same as `x^a{}^b`.
    *
    */
   matchSupsub(lhs: Expression | null): Expression | null {
@@ -1061,16 +1156,30 @@ export class _Parser implements Parser {
     //
     const superscripts: Expression[] = [];
     const subscripts: Expression[] = [];
+    let subIndex = index;
     while (this.peek === '_' || this.peek === '^') {
       if (this.match('_')) {
-        let sub = this.matchRequiredLatexArgument();
-        if (!sub && this.match('<{>')) {
-          sub = this.matchString({ tokens: ['<}>'] });
-          if (sub) this.match('<}>');
+        subIndex = this.index;
+        if (this.match('_') || this.match('^'))
+          subscripts.push(this.error('syntax-error', subIndex));
+        else {
+          const sub =
+            this.matchRequiredLatexArgument() ?? this.matchStringArgument();
+          if (!sub) return this.error('missing', index);
+
+          subscripts.push(sub);
         }
-        subscripts.push(sub ?? 'Missing');
-      } else if (this.match('^'))
-        superscripts.push(this.matchRequiredLatexArgument() ?? 'Missing');
+      } else if (this.match('^')) {
+        subIndex = this.index;
+        if (this.match('_') || this.match('^'))
+          superscripts.push(this.error('syntax-error', subIndex));
+        else {
+          const sup = this.matchRequiredLatexArgument();
+          if (!sup) return this.error('missing', index);
+          superscripts.push(sup);
+        }
+      }
+      subIndex = this.index;
       this.skipSpace();
     }
 
@@ -1146,65 +1255,63 @@ export class _Parser implements Parser {
     return null;
   }
 
-  matchString(until: Partial<Terminator>): string {
-    if (!until.minPrec) until = { ...until, minPrec: 0 };
-    console.assert(until.tokens);
+  /** Match a string used as a LaTeX identifier, for example an environment
+   * name.
+   * Not suitable for general purpose text, e.g. argument of a `\text{}
+   * command. See `matchChar()` instead.
+   */
+  matchString(): string {
     let result = '';
-    let done = this.atEnd;
-    while (!done) {
+    while (!this.atBoundary) {
       const token = this.peek;
-      if (token === '<space>') {
+      if (token === '<$>' || token === '<$$>') {
+        return '';
+      } else if (token === '<space>') {
         this.next();
         result += ' ';
       } else if (token[0] === '\\') {
         // TeX will give a 'Missing \endcsname inserted' error
         // if it encounters any command when expecting a string.
         // We're a bit more lax.
-        this.onError([{ severity: 'warning', message: 'unexpected-command' }]);
-        result += this.next();
-      } else if (!/^<(\$|\$\$)>$/.test(token)) {
         result += this.next();
       } else {
-        // It's'<$>' or '<$$>
-        done = true;
+        result += this.next();
       }
-
-      done = done || this.atTerminator(until as Terminator);
     }
     return result;
   }
 
-  matchEnvironmentName(command: '\\begin' | '\\end', envName: string): boolean {
-    if (!this.match(command)) return false;
-
+  /** Match a string as an argument (in a `{}` pair) */
+  matchStringArgument(): string | null {
     const start = this.index;
+    this.skipSpaceTokens();
     if (this.match('<{>')) {
-      const name = this.matchString({ tokens: ['<}>'] });
-      if (this.match('<}>') && name === envName) return true;
+      this.addBoundary(['<}>']);
+      // Don't use this.skipSpace(), as only the space token
+      // should be skipped here, and regardless of the `options.skipSpace` setting
+      while (this.match('<space>')) {}
+      const arg = this.matchString();
+      if (this.matchBoundary()) return arg.trimEnd();
+      this.removeBoundary();
     }
 
     this.index = start;
-    return false;
+    return null;
   }
 
   /**
-   * Match an expression in a tabular format,
-   * where row are separated by `\\` and columns by `&`
+   * Match an expression in a tabular format, where rows are separated by `\\`
+   * and columns by `&`.
    *
-   * Return rows of sparse columns as a list: empty rows are indicated with NOTHING,
-   * and empty cells are also indicated with NOTHING.
+   * Return rows of sparse columns: empty rows are indicated with `Nothing`,
+   * and empty cells are also indicated with `Nothing`.
    */
-  matchTabular(endName: string): null | Expression {
-    const result: null | Expression = ['List'];
+  matchTabular(): null | Expression[][] {
+    const result: Expression[][] = [];
 
-    const until: Terminator = {
-      minPrec: 0,
-      tokens: ['\\end', '<{>', ...endName.split(''), '<}>'],
-    };
-
-    let row: [Expression, ...Expression[]] = ['List'];
+    let row: Expression[] = [];
     let expr: Expression | null = null;
-    while (!this.atTerminator(until)) {
+    while (!this.atBoundary) {
       this.skipSpace();
 
       if (this.match('&')) {
@@ -1220,46 +1327,75 @@ export class _Parser implements Parser {
         this.matchOptionalLatexArgument();
 
         if (expr !== null) row.push(expr);
-        result.push(row as Expression);
-        row = ['List'];
+        result.push(row);
+        row = [];
         expr = null;
       } else {
-        expr = this.matchExpression({
-          ...until,
-          condition: (p) => {
-            const peek = p.peek;
-            return peek === '&' || peek === '\\\\' || peek === '\\cr';
-          },
-        });
+        const cell: Expression[] = [];
+        let peek = this.peek;
+        while (
+          peek !== '&' &&
+          peek !== '\\\\' &&
+          peek !== '\\cr' &&
+          !this.atBoundary
+        ) {
+          expr = this.matchExpression({
+            condition: (p) => {
+              const peek = p.peek;
+              return peek === '&' || peek === '\\\\' || peek === '\\cr';
+            },
+          });
+          if (expr) cell.push(expr);
+          else {
+            cell.push(['Error', ["'unexpected-token'", peek]]);
+            this.next();
+          }
+          this.skipSpace();
+          peek = this.peek;
+        }
+        if (cell.length > 1) expr = ['Sequence', ...cell];
+        else expr = cell[0] ?? 'Nothing';
       }
     }
     // Capture any leftover columns or row
     if (expr !== null) row.push(expr);
-    if (row.length > 1) result.push(row as Expression);
+    if (row.length > 0) result.push(row);
 
     return result;
   }
 
   matchEnvironment(): Expression | null {
+    const index = this.index;
     if (!this.match('\\begin')) return null;
-    const start = this.index;
-    if (this.match('<{>')) {
-      const name = this.matchString({ tokens: ['<}>'] });
-      if (this.match('<}>')) {
-        // @todo:parse optional and required arguments.
+    const name = this.matchStringArgument();
 
-        const def = this._dictionary.environment.get(name);
+    if (name === null) return this.error('expected-environment-name', index);
 
-        // If unknown environment, attempt to parse as tabular
-        const expr = def ? def.parse(this, [], []) : this.matchTabular(name);
+    // @todo:parse optional and required arguments.
 
-        this.skipSpace();
-        this.matchAll(['\\end', '<{>', ...name.split(''), '<}>']);
-        if (expr !== null) return this.decorate(expr, start);
-      }
+    this.addBoundary(['\\end', '<{>', ...name.split(''), '<}>']);
+
+    const def = this._dictionary.environment.get(name);
+    if (!def) {
+      // If unknown environment, attempt to parse as tabular, but discard content
+
+      this.matchTabular();
+      this.skipSpace();
+
+      if (!this.matchBoundary())
+        return this.boundaryError('unbalanced-environment');
+      return this.error(['unknown-environment', { str: name }], index);
     }
 
-    this.index = start;
+    const expr = def.parse(this, [], []);
+
+    this.skipSpace();
+    if (!this.matchBoundary())
+      return this.boundaryError('unbalanced-environment');
+
+    if (expr !== null) return this.decorate(expr, index);
+
+    this.index = index;
     return null;
   }
 
@@ -1286,63 +1422,137 @@ export class _Parser implements Parser {
    */
   applyInvisibleOperator(
     terminator: Terminator,
-    rawLhs: Expression | null
+    lhs: Expression | null
   ): Expression | null {
-    if (rawLhs === null || this.atTerminator(terminator)) return null;
+    if (lhs === null || head(lhs) === 'Error' || this.atTerminator(terminator))
+      return null;
 
     if (this.options.applyInvisibleOperator === null) return null;
 
     //
-    // Capture a right hand side, if there is one
+    // If the right hand side is an operator, no invisible operator to apply
+    //
+    const opDefs = this.peekDefinitions('operator');
+    if (opDefs !== null) return null;
+
+    //
+    // Capture a right hand side expression, if there is one
     //
     const start = this.index;
-    const rawRhs = this.matchExpression({ ...terminator, minPrec: 390 });
-    if (rawRhs === null) {
+    const rhs = this.matchExpression({ ...terminator, minPrec: 390 });
+    if (rhs === null || symbol(rhs) === 'Nothing') {
       this.index = start;
       return null;
     }
 
+    if (head(rhs) === 'Error') {
+      // If we got an error, apply a 'Sequence'
+      return applyAssociativeOperator('Sequence', lhs, rhs);
+    }
+
     //
-    // Invoke custom applyInvisibleOperator handler
+    // Invoke custom `applyInvisibleOperator` handler
     //
     if (typeof this.options.applyInvisibleOperator === 'function')
-      return this.options.applyInvisibleOperator(this, rawLhs, rawRhs);
+      return this.options.applyInvisibleOperator(this, lhs, rhs);
 
-    const rhs = this.engine.box(rawRhs);
+    if (!this.computeEngine) return null;
 
-    // If the `lhs` is a symbol that has a function definition, do a
-    // functional application
-    const symbolName = symbol(rawLhs);
-    if (symbolName && this.engine) {
-      const def = this.engine.getFunctionDefinition(symbolName);
-      if (def) {
-        let ops: BoxedExpression[] = [];
-        if (rhs.head === 'Delimiter') {
-          if (rhs.op1.head === 'Sequence') {
-            ops = [...rhs.op1.ops!];
-          } else ops = [rhs.op1];
-        } else ops = [rhs];
-        return [symbolName, ...ops.map((x) => x.json)];
+    //
+    // Is it a function application?
+    //
+    const lhsSymbol = symbol(lhs);
+    if (lhsSymbol) {
+      const isFunction =
+        this.options.parseUnknownSymbol(lhsSymbol, this) === 'function';
+      if (isFunction) {
+        if (head(rhs) === 'Delimiter') {
+          const op1 = op(rhs, 1);
+          if (head(op1) === 'Sequence') return [lhsSymbol, ...(ops(op1) ?? [])];
+          if (op1 && symbol(op1) !== 'Nothing') return [lhsSymbol, op1];
+          return [lhsSymbol];
+        }
+        return lhsSymbol;
       }
     }
 
-    const lhs = this.engine.box(rawLhs);
-
+    //
+    // Is it an invisible plus?
+    //
     // Integer literal followed by a fraction -> Invisible Add
-    if (lhs.isLiteral && lhs.isInteger && rhs.isLiteral) {
-      const [numer, denom] = rhs.rationalValue;
-      if (numer !== null && denom !== null) return ['Add', rawLhs, rawRhs];
+    // CAUTION: machineValue() only works for numbers in machine range. OK in this case.
+    const lhsNumber = machineValue(lhs);
+    if (lhsNumber !== null && Number.isInteger(lhsNumber)) {
+      const rhsHead = head(rhs);
+      if (rhsHead === 'Divide' || rhsHead === 'Rational') {
+        const [n, d] = [machineValue(op(rhs, 1)), machineValue(op(rhs, 2))];
+        if (
+          n !== null &&
+          d !== null &&
+          n > 0 &&
+          n <= 1000 &&
+          d > 1 &&
+          d <= 1000 &&
+          Number.isInteger(n) &&
+          Number.isInteger(d)
+        )
+          return ['Add', lhs, rhs];
+      }
     }
 
     // If the value of `lhs` is a number and the value of `rhs` is a number
     // (but they may not be literal)
     // -> Apply Invisible Multiply
-    if (
-      (lhs.isMissing || lhs.symbol === 'Nothing' || lhs.isNumber) &&
-      (rhs.isMissing || rhs.symbol === 'Nothing' || rhs.isNumber)
-    ) {
-      return applyAssociativeOperator('Multiply', rawLhs, rawRhs);
+    if (symbol(rhs) === 'Nothing') return lhs;
+    if (head(rhs) === 'Delimiter' && symbol(op(rhs, 1)) === 'Nothing')
+      return ['Multiply', lhs, this.error('expected-expression', start)];
+    if (head(rhs) === 'Delimiter' && head(op(rhs, 1)) === 'Sequence') {
+      return [lhsSymbol ?? lhs, ...(ops(op(rhs, 1)) ?? [])];
     }
+    return applyAssociativeOperator('Multiply', lhs, rhs);
+
+    // ------
+
+    // const rhs = this.engine.box(rawRhs);
+
+    // // If the `lhs` is a symbol that has a function definition, do a
+    // // functional application
+    // const symbolName = symbol(rawLhs);
+    // if (symbolName) {
+    //   const def = this.engine.lookupFunctionName(symbolName);
+    //   if (def) {
+    //     let ops: BoxedExpression[] = [];
+    //     if (rhs.head === 'Delimiter') {
+    //       if (rhs.op1.head === 'Sequence') {
+    //         ops = [...rhs.op1.ops!];
+    //       } else ops = [rhs.op1];
+    //     } else ops = [rhs];
+    //     return [symbolName, ...ops.map((x) => x.json)];
+    //   }
+    // }
+
+    // const rhsName = symbol(rawRhs);
+    // if (rhsName) {
+    //   const def = this.engine.lookupSymbolDefinition(rhsName);
+    // }
+
+    // const lhs = this.engine.box(rawLhs);
+
+    // // Integer literal followed by a fraction -> Invisible Add
+    // if (lhs.isLiteral && lhs.isInteger && rhs.isLiteral) {
+    //   const [numer, denom] = rhs.rationalValue;
+    //   if (numer !== null && denom !== null) return ['Add', rawLhs, rawRhs];
+    // }
+
+    // // If the value of `lhs` is a number and the value of `rhs` is a number
+    // // (but they may not be literal)
+    // // -> Apply Invisible Multiply
+    // if (
+    //   (lhs.isMissing || lhs.symbol === 'Nothing' || lhs.isNumber) &&
+    //   (rhs.isMissing || rhs.symbol === 'Nothing' || rhs.isNumber)
+    // ) {
+    //   return applyAssociativeOperator('Multiply', rawLhs, rawRhs);
+    // }
 
     this.index = start;
     return null;
@@ -1350,70 +1560,47 @@ export class _Parser implements Parser {
 
   matchUnknownLatexCommand(): Expression | null {
     const command = this.peek;
+
+    const index = this.index;
+
     if (!command || command[0] !== '\\') return null;
 
     this.next();
 
-    const tokens: LatexToken[] = [];
+    // Capture potential optional and required arguments
+    // This is a lazy capture, to handle the case `\foo[\blah[12]\blarg]`.
+    // However, a `[` (or `{`) could be e.g. inside a string and this
+    // would fail to parse.
+    // Since we're already in an error situation, though, probably OK.
+    this.skipSpaceTokens();
 
-    if (command === '\\operatorname') {
-      if (this.match('<{>')) {
-        while (!this.atEnd && this.peek !== '<}>') tokens.push(this.next());
-        this.match('<}>');
-      } else {
-        tokens.push(this.next());
-      }
-      if (tokens.length === 0)
-        return [
-          'Error',
-          'Missing',
-          { str: 'syntax-error' },
-          ['LatexForm', { str: command }],
-        ];
-      return [
-        'Error',
-        'Missing',
-        { str: 'unknown-command' },
-        ['LatexForm', { str: `${command}{${tokensToString(tokens)}}` }],
-      ];
+    if (command === '\\end') {
+      const name = this.matchStringArgument();
+      if (name === null) return this.error('expected-environment-name', index);
+
+      return this.error(['unbalanced-environment', { str: name }], index);
     }
 
-    // Capture the optional and required arguments
-
     while (this.match('[')) {
-      tokens.push('[');
-      // This is a lazy capture, to handle the case `\foo[\blah[12]\blarg]`.
-      // However, a `[` could be e.g. inside a string and this would fail to parse
-      // Since we're already in an error situation, though, probably OK.
       let level = 0;
       while (!this.atEnd && level === 0 && this.peek !== ']') {
         if (this.peek === '[') level += 1;
         if (this.peek === ']') level -= 1;
-        tokens.push(this.next());
+        this.next();
       }
-      if (this.match(']')) tokens.push(']');
+      this.match(']');
     }
 
     while (this.match('<{>')) {
-      tokens.push('<{>');
-      // This is a lazy capture, to handle the case `\foo[\blah[12]\blarg]`.
-      // However, a `[` could be e.g. inside a string and this would fail to parse
-      // Since we're already in an error situation, though, probably OK.
       let level = 0;
       while (!this.atEnd && level === 0 && this.peek !== '<}>') {
         if (this.peek === '<{>') level += 1;
         if (this.peek === '<}>') level -= 1;
-        tokens.push(this.next());
+        this.next();
       }
-      if (this.match('<}>')) tokens.push('<}>');
+      this.match('<}>');
     }
-
-    return [
-      'Error',
-      'Missing',
-      { str: 'unknown-command' },
-      ['LatexForm', { str: `${command}${tokensToString(tokens)}` }],
-    ];
+    return this.error(['unexpected-command', { str: command }], index);
   }
 
   /**
@@ -1427,18 +1614,33 @@ export class _Parser implements Parser {
    *
    */
   matchPrimary(): Expression | null {
+    if (this.atBoundary) return null;
+
     let result: Expression | null = null;
     const start = this.index;
 
     //
     // 1. Is it a group? (i.e. `{...}`)
     //
+    // Unabalanced `<}>`? Syntax error
+    if (this.match('<}>'))
+      return this.error('unexpected-closing-delimiter', start);
 
     if (this.match('<{>')) {
-      result = this.matchExpression({ tokens: ['<}>'] });
-      this.match('<}>');
-    } else if (this.match('<}>')) {
-      // That's a syntax error, probably a missing `{`. Ignore it.
+      this.addBoundary(['<}>']);
+      result = this.matchExpression();
+      if (result === null) return this.boundaryError('expected-expression');
+
+      if (!this.matchBoundary()) {
+        return this.decorate(
+          [
+            'Sequence',
+            result,
+            this.boundaryError('expected-closing-delimiter'),
+          ],
+          start
+        );
+      }
     }
 
     //
@@ -1458,7 +1660,7 @@ export class _Parser implements Parser {
 
     //
     // 4. Is it an environment?
-    // `\begin{...}...\end{...}`
+    //    `\begin{...}...\end{...}`
     // (check before other LaTeX commands)
     //
     if (result === null) result = this.matchEnvironment();
@@ -1505,14 +1707,20 @@ export class _Parser implements Parser {
    *  | <prefix-op> <primary>
    *  | <primary> <infix-op> <expression>
    *
-   * Stop when an operator of precedence less than `minPrec` is encountered
+   * Stop when an operator of precedence less than `until.minPrec` is encountered
    */
   matchExpression(until?: Partial<Terminator>): Expression | null {
     const start = this.index;
-    if (!until) until = { minPrec: 0 };
-    if (until.minPrec === undefined) until.minPrec = 0;
 
     this.skipSpace();
+
+    if (this.atBoundary) {
+      this.index = start;
+      return null;
+    }
+
+    if (!until) until = { minPrec: 0 };
+    if (until.minPrec === undefined) until.minPrec = 0;
 
     //
     // 1. Do we have a prefix operator?
@@ -1530,7 +1738,7 @@ export class _Parser implements Parser {
     //
     if (lhs) {
       let done = false;
-      while (!this.atTerminator(until as Terminator) && !done) {
+      while (!done && !this.atTerminator(until as Terminator)) {
         this.skipSpace();
 
         let result = this.matchInfixOperator(lhs, until as Terminator);
@@ -1538,12 +1746,7 @@ export class _Parser implements Parser {
           // We've encountered something else than an infix operator
           // OR an infix operator with a lower priority.
           // Could be "y" after "x": time to apply the invisible operator
-          const opDefs = this.peekDefinitions('operator');
-          if (opDefs === null) {
-            // It's not an operator, so eligible for invisible operator
-            // @todo: do we need to check opDefs?
-            result = this.applyInvisibleOperator(until as Terminator, lhs);
-          }
+          result = this.applyInvisibleOperator(until as Terminator, lhs);
         }
         if (result !== null) {
           lhs = result;
@@ -1575,5 +1778,33 @@ export class _Parser implements Parser {
       expr.latex = latex;
     }
     return expr;
+  }
+
+  error(
+    code: string | [string, ...Expression[]],
+    fromToken: number
+  ): Expression {
+    if (typeof code === 'string')
+      return [
+        'Error',
+        { str: code },
+        [
+          'Latex',
+          {
+            str: this.latex(fromToken, this.index),
+          },
+        ],
+      ];
+
+    return [
+      'Error',
+      ['ErrorCode', { str: code[0] }, ...code.slice(1)],
+      [
+        'Latex',
+        {
+          str: this.latex(fromToken, this.index),
+        },
+      ],
+    ];
   }
 }

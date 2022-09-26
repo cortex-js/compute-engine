@@ -3,15 +3,13 @@ import {
   machineValue,
   PRIME,
   DERIVATIVE,
-  LIST,
   getSequence,
   mapArgs,
   op,
   nops,
   stringValue,
-  tail,
-  symbol,
   head,
+  ops,
 } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer, Terminator } from '../public';
 import { joinLatex } from '../tokenizer';
@@ -41,8 +39,6 @@ function parseSequence(prec: number) {
     console.assert(lhs !== null);
     if (terminator.minPrec >= prec) return null;
 
-    if (lhs === 'Missing') lhs = 'Nothing';
-
     const result: Expression = ['Sequence', lhs];
     let done = false;
     while (!done) {
@@ -50,15 +46,15 @@ function parseSequence(prec: number) {
 
       parser.skipSpace();
       while (parser.match(',')) {
-        result.push('Nothing');
+        result.push('Null');
         parser.skipSpace();
       }
 
       if (parser.atTerminator(terminator)) {
-        result.push('Nothing');
+        result.push('Null');
       } else {
         const rhs = parser.matchExpression({ ...terminator, minPrec: prec });
-        result.push(rhs ?? 'Nothing');
+        result.push(rhs ?? 'Null');
         done = rhs === null;
       }
       if (!done) {
@@ -81,8 +77,6 @@ function parseSequence2(prec: number) {
     console.assert(lhs);
     if (terminator.minPrec >= prec) return null;
 
-    if (lhs === 'Missing') lhs = 'Nothing';
-
     const result: Expression = [
       'Sequence',
       ...(getSequence(lhs) ?? ['Sequence', lhs]),
@@ -91,17 +85,17 @@ function parseSequence2(prec: number) {
     while (true) {
       parser.skipSpace();
       while (parser.match(',')) {
-        result.push('Nothing');
+        result.push('Null');
         parser.skipSpace();
       }
 
       if (parser.atEnd) {
-        result.push('Nothing');
+        result.push('Null');
         break;
       }
       const rhs = parser.matchExpression({ ...terminator, minPrec: prec });
       if (rhs === null) {
-        result.push('Nothing');
+        result.push('Null');
         break;
       }
       result.push(...(getSequence(rhs) ?? ['Sequence', rhs]));
@@ -112,29 +106,10 @@ function parseSequence2(prec: number) {
     return result;
   };
 }
+
 function serializeSequence(sep = '') {
-  return (serializer: Serializer, expr: Expression | null): string => {
-    return tail(expr)
-      .map((x) => serializer.serialize(x))
-      .join(sep);
-  };
-}
-
-export function serializeLatex(
-  serializer: Serializer,
-  expr: Expression | null
-): string {
-  if (expr === null) return '';
-  const h = head(expr);
-  if (h === 'LatexString') return serializeLatexForm(serializer, expr);
-  if (h === 'LatexTokens') return serializeLatexTokens(serializer, expr);
-  const strValue = stringValue(expr);
-  if (strValue !== null) return `\\text{${strValue}}`;
-
-  const numValue = machineValue(expr);
-  if (numValue !== null) return numValue.toString();
-
-  return `\\text{${JSON.stringify(expr)}}`;
+  return (serializer: Serializer, expr: Expression | null): string =>
+    (ops(expr) ?? []).map((x) => serializer.serialize(x)).join(sep);
 }
 
 export const DEFINITIONS_CORE: LatexDictionary = [
@@ -142,11 +117,18 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // Constants
   //
   {
-    name: 'Missing',
     trigger: ['\\placeholder'],
-    requiredLatexArg: 1, // Arg is read, but discarded
-    serialize: (serializer) =>
-      serializer.options.missingSymbol ?? '\\placeholder{}',
+    parse: (parser) => {
+      // Parse, but ignore, the required  LaTeX arg
+      parser.skipSpaceTokens();
+
+      if (parser.match('<{>'))
+        while (!parser.match('<}>') && !parser.atBoundary) parser.next();
+
+      return 'Nothing';
+    },
+    // serialize: (serializer) =>
+    //   serializer.options.missingSymbol ?? '\\placeholder{}',
   },
 
   //
@@ -157,8 +139,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer, expr) => {
       const radix = machineValue(op(expr, 2)) ?? NaN;
       if (isFinite(radix) && radix >= 2 && radix <= 36) {
+        // CAUTION: machineValue() may return a truncated value
+        // if the number is outside of the machine range.
         const num = machineValue(op(expr, 1)) ?? NaN;
-        if (isFinite(num)) {
+        if (isFinite(num) && Number.isInteger(num)) {
           let digits = Number(num).toString(radix);
           let groupLength = 0;
           if (radix === 2) {
@@ -174,9 +158,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
             const oldDigits = digits;
             digits = '';
             for (let i = 0; i < oldDigits.length; i++) {
-              if (i > 0 && i % groupLength === 0) {
-                digits = '\\, ' + digits;
-              }
+              if (i > 0 && i % groupLength === 0) digits = '\\, ' + digits;
+
               digits = oldDigits[oldDigits.length - i - 1] + digits;
             }
           }
@@ -198,22 +181,24 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // @todo: could use `serializer.groupStyle`
       const argCount = nops(expr);
       if (argCount === 0) return '';
+
+      const arg1 = op(expr, 1);
       if (argCount === 1)
-        return `\\left( ${serializer.serialize(op(expr, 1))} \\right)`;
+        return `\\left( ${serializer.serialize(arg1)} \\right)`;
+
       let sep = '';
       let open = '\\left(';
-      let close = '\\left)';
+      let close = '\\right)';
 
-      if (argCount === 2) sep = serializeLatex(serializer, op(expr, 2)) ?? '';
+      if (argCount === 2) sep = stringValue(op(expr, 2)) ?? '';
       else if (argCount === 3) {
-        open = serializeLatex(serializer, op(expr, 2)) ?? '';
-        close = serializeLatex(serializer, op(expr, 3)) ?? '';
+        open = stringValue(op(expr, 2)) ?? '';
+        close = stringValue(op(expr, 3)) ?? '';
       } else {
-        open = serializeLatex(serializer, op(expr, 2)) ?? '';
-        sep = serializeLatex(serializer, op(expr, 3)) ?? '';
-        close = serializeLatex(serializer, op(expr, 4)) ?? '';
+        open = stringValue(op(expr, 2)) ?? '';
+        sep = stringValue(op(expr, 3)) ?? '';
+        close = stringValue(op(expr, 4)) ?? '';
       }
-      const arg1 = op(expr, 1);
       if (sep && head(arg1) === 'Sequence') {
         return `${open} ${serializeSequence(sep)(serializer, arg1)} ${close}`;
       }
@@ -221,19 +206,54 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
+    name: 'Domain',
+    serialize: (serializer, expr) => {
+      if (head(expr) === 'Error') return serializer.serialize(expr);
+      return serializer.serialize(op(expr, 1));
+    },
+  },
+  {
     name: 'Error',
     serialize: (serializer, expr) => {
-      const op1 = op(expr, 1);
-      const value = symbol(op1) === 'Nothing' ? '' : serializer.serialize(op1);
-      if (nops(expr) >= 3) {
-        const arg = op(expr, 3);
-        if (arg && head(arg) === 'LatexForm') {
-          const location = sanitizeLatex(stringValue(op(arg, 1)));
-          if (location)
-            return `${value ?? ''}\\texttt{\\textcolor{red}{${location}}}`;
-        }
+      if (stringValue(op(expr, 1)) === 'missing')
+        return `\\textcolor{red}{${
+          serializer.options.missingSymbol ?? '\\placeholder{}'
+        }}`;
+
+      const where = errorContextAsLatex(serializer, expr);
+
+      const msg = stringValue(op(expr, 1));
+      if (typeof msg === 'string') {
+        return `\\texttt{\\textcolor{red}{${where || '\\blacksquare'}}}`;
       }
-      return value ?? '';
+      return `\\texttt{\\textcolor{red}{${
+        serializer.serialize(op(expr, 1)) || where || '\\blacksquare'
+      }}}`;
+    },
+  },
+  {
+    name: 'ErrorCode',
+    serialize: (serializer, expr) => {
+      const code = stringValue(op(expr, 1));
+
+      if (code === 'missing')
+        return serializer.options.missingSymbol ?? '\\placeholder{}';
+
+      if (
+        code === 'unexpected-command' ||
+        code === 'unexpected-operator' ||
+        code === 'unexpected-token' ||
+        code === 'invalid-symbol-name' ||
+        code === 'unknown-environment' ||
+        code === 'unknown-environment' ||
+        code === 'unexpected-base' ||
+        code === 'mismatched-argument-domain' ||
+        code === 'invalid-domain-expression'
+      ) {
+        return '';
+      }
+
+      return `\\texttt{\\textcolor{red}{\\blacksquare}}`;
     },
   },
   {
@@ -242,25 +262,42 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return `\\texttt{${sanitizeLatex(stringValue(op(expr, 1)))}}`;
     },
   },
-  { name: 'LatexForm', serialize: serializeLatexForm },
+  {
+    name: 'Latex',
+    serialize: (serializer, expr) => {
+      if (expr === null) return '';
+      return joinLatex(
+        mapArgs<string>(expr, (x) => stringValue(x) ?? serializer.serialize(x))
+      );
+    },
+  },
+  {
+    name: 'LatexString',
+    serialize: (serializer, expr) => {
+      if (expr === null) return '';
+      return joinLatex(mapArgs<string>(expr, (x) => serializer.serialize(x)));
+    },
+  },
   { name: 'LatexTokens', serialize: serializeLatexTokens },
 
-  // {
-  //   name: LIST,
-  //   kind: 'matchfix',
-  //   openDelimiter: '[',
-  //   closeDelimiter: ']',
-  //   precedence: 20,
-  //   // parse: (
-  //   //   lhs: Expression,
-  //   //   _scanner: Scanner,
-  //   //   _minPrec: number
-  //   // ): [Expression | null, Expression | null] => {
-  //   //   if (lhs === null) return [null, [LIST]];
-  //   //   if (getFunctionName(lhs) !== SEQUENCE) return [null, [LIST, lhs]];
-  //   //   return [null, [LIST, ...getTail(lhs)]];
-  //   // },
-  // },
+  {
+    name: 'List',
+    kind: 'matchfix',
+    openDelimiter: '[',
+    closeDelimiter: ']',
+    parse: (_parser, lhs) => {
+      if (lhs === null) return ['List'];
+      if (head(lhs) !== 'Sequence') return ['List', lhs];
+      return ['List', ...(ops(lhs) ?? [])];
+    },
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      return joinLatex([
+        '\\lbrack',
+        serializeSequence(', ')(serializer, expr),
+        '\\rbrack',
+      ]);
+    },
+  },
   {
     kind: 'matchfix',
     openDelimiter: '(',
@@ -270,8 +307,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (body === null) return null;
       if (head(body) === 'Sequence') {
         if (nops(body) === 0) return ['Delimiter', 'Nothing'];
-        return ['Delimiter', ...tail(body)];
+        return ['Delimiter', ['Sequence', ...(ops(body) ?? [])]];
       }
+
       return ['Delimiter', body];
     },
   },
@@ -286,7 +324,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // and `1, (2, 3)` -> `["Delimiter",
     // ["Sequence", 1, ["Delimiter", ["Sequence", 2, 3],  "(", ",", ")"]],  ","],
     parse: parseSequence(20),
-    serialize: serializeSequence(),
+    serialize: serializeSequence(', '),
   },
   {
     trigger: [';'],
@@ -299,7 +337,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     trigger: ['\\text'],
     parse: (scanner) => parseTextRun(scanner),
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const args = tail(expr);
+      const args = ops(expr);
       if (args === null || args.length === 0) return '\\text{}';
       return joinLatex([
         '\\text{',
@@ -356,16 +394,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     trigger: ['^', '\\doubleprime'],
     kind: 'postfix',
-    parse: (_parser, lhs) => [PRIME, lhs ?? 'Nothing', 2],
+    parse: (_parser, lhs) => [PRIME, lhs ?? ['Error', "'missing'"], 2],
   },
-  // {
-  //   name: 'InverseFunction',
-  //   trigger: '^{-1}',
-  //   kind: 'postfix',
-  //   serialize: (serializer, expr) => {
-  //     return serializer.serialize(op(expr, 1)) + '^{-1}';
-  //   },
-  // },
+  {
+    name: 'InverseFunction',
+    // trigger: '^{-1}',
+    // kind: 'postfix',
+    serialize: (serializer, expr) =>
+      serializer.serialize(op(expr, 1)) + '^{-1}',
+  },
   {
     name: DERIVATIVE,
     serialize: (serializer: Serializer, expr: Expression): string => {
@@ -384,24 +421,39 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Piecewise',
     trigger: 'cases',
     kind: 'environment',
-    parse: (parser) =>
-      ['Piecewise', parser.matchTabular('cases') ?? 'Nothing'] as Expression,
+    parse: (parser) => {
+      const tabular: Expression[][] | null = parser.matchTabular('cases');
+      if (!tabular) return 'Nothing';
+      return [
+        'Piecewise',
+        [
+          'List',
+          ...tabular.map((x) => [
+            'Tuple',
+            x[1] ?? 'Nothing', // Condition
+            x[0] ?? 'Nothing', // Value
+          ]),
+        ] as Expression,
+      ] as Expression;
+    },
     serialize: (serialize: Serializer, expr: Expression): string => {
-      if (head(op(expr, 1)) !== LIST) return '';
-      const rows = tail(op(expr, 1));
-      let body = ''; // @todo: use joinLatex
+      if (head(op(expr, 1)) !== 'List') return '';
+      const rows = ops(op(expr, 1)) ?? [];
+      const body: string[] = [];
       let rowSep = '';
       for (const row of rows) {
-        body += rowSep;
-        const arg1 = op(row, 1);
-        if (arg1 !== null) {
-          body += serialize.serialize(arg1);
-          const arg2 = op(row, 2);
-          if (arg2 !== null) body += '&' + serialize.serialize(arg2);
+        if (head(row) === 'Tuple' || head(row) === 'Pair') {
+          body.push(rowSep);
+          if (op(row, 2)) {
+            body.push(serialize.serialize(op(row, 2)));
+            const condition = op(row, 1);
+            if (condition !== null)
+              body.push('&', serialize.serialize(condition));
+          }
         }
         rowSep = '\\\\';
       }
-      return '\\begin{cases}' + body + '\\end{cases}';
+      return joinLatex(['\\begin{cases}', ...body, '\\end{cases}']);
     },
   },
 ];
@@ -584,16 +636,6 @@ function serializeLatexTokens(
   );
 }
 
-function serializeLatexForm(
-  serializer: Serializer,
-  expr: Expression | null
-): string {
-  if (expr === null) return '';
-  return joinLatex(
-    mapArgs<string>(expr, (x) => stringValue(x) ?? serializer.serialize(x))
-  );
-}
-
 /**
  * Given a string of presumed (but possibly invalid) LaTeX, return a
  * LaTeX string with all the special characters escaped.
@@ -613,4 +655,19 @@ function sanitizeLatex(s: string | null): string {
         '\\': '\\backslash ',
       }[c] ?? '\\' + c)
   );
+}
+
+function errorContextAsLatex(
+  serializer: Serializer,
+  error: Expression
+): string {
+  const arg = op(error, 2);
+  if (!arg) return '';
+
+  if (head(arg) === 'Latex')
+    return sanitizeLatex(stringValue(op(arg, 1)) ?? '');
+
+  if (head(arg) === 'Hold') return serializer.serialize(op(arg, 1));
+
+  return serializer.serialize(arg);
 }

@@ -9,7 +9,7 @@ import {
 import {
   complexAllowed,
   latexString,
-  useDecimal,
+  preferDecimal,
 } from '../boxed-expression/utils';
 import { Expression } from '../../math-json/math-json-format';
 import { canonicalNegate } from '../symbolic/negate';
@@ -51,34 +51,33 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         constant: true,
         hold: true,
         wikidata: 'Q167',
-        value: (engine) => (useDecimal(engine) ? engine._DECIMAL_PI : Math.PI),
+        value: (engine) =>
+          preferDecimal(engine) ? engine._DECIMAL_PI : Math.PI,
       },
     ],
     functions: [
       // sqrt(x*x + y*y)
       {
         name: 'Hypot',
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number', 'NonNegativeNumber'],
-            evaluate: ['Sqrt', ['Square', '_1'], ['Square', '_2']],
-          },
-        ],
+        signature: {
+          domain: ['Function', 'Number', 'Number', 'NonNegativeNumber'],
+          simplify: (ce, ops) =>
+            ce
+              .box(['Sqrt', ['Add', ['Square', ops[0]], ['Square', ops[1]]]])
+              .simplify(),
+          evaluate: ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
+        },
       },
       {
         name: 'Sin',
         complexity: 5000,
-        signatures: [
-          {
-            domain: [
-              'Function',
-              'Number',
-              ['Interval', ['Literal', -1], ['Literal', 1]],
-            ],
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Sin', ops[0]) ??
-              (complexAllowed(ce)
-                ? ce.box([
+        signature: {
+          domain: ['Function', 'Number', ['Interval', -1, 1]],
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Sin', ops[0]) ??
+            (complexAllowed(ce)
+              ? ce
+                  .box([
                     'Divide',
                     [
                       'Subtract',
@@ -89,36 +88,22 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                       ],
                     ],
                     ['Complex', 0, 2],
-                  ]).canonical
-                : undefined),
-            evaluate: (ce, ops) =>
-              constructibleValues(ce, 'Sin', ops[0]) ??
-              (complexAllowed(ce)
-                ? ce.box([
-                    'Divide',
-                    [
-                      'Subtract',
-                      ['Exp', ['Multiply', 'ImaginaryUnit', ops[0]]],
-                      [
-                        'Exp',
-                        ['Multiply', 'ImaginaryUnit', ['Negate', ops[0]]],
-                      ],
-                    ],
-                    ['Complex', 0, 2],
-                  ]).canonical
-                : undefined),
+                  ])
+                  .simplify()
+              : undefined),
 
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ce.chop(ops[0].decimalValue.sin()));
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.sin());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.sin(ops[0].asFloat));
-              return undefined;
-            },
+          evaluate: (ce, ops) => constructibleValues(ce, 'Sin', ops[0]),
+
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ce.chop(ops[0].decimalValue.sin()));
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.sin());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.sin(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
     ],
   },
@@ -132,88 +117,81 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         name: 'Arctan',
         wikidata: 'Q2257242',
         complexity: 5200,
-        signatures: [
-          {
-            domain: domainNumberToRealNumber('Arctan'),
-            simplify: (ce, ops) => constructibleValues(ce, 'Arctan', ops[0]),
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.atan());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.atan());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.atan(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: domainNumberToRealNumber('Arctan'),
+          simplify: (ce, ops) => constructibleValues(ce, 'Arctan', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.atan());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.atan());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.atan(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Arctan2',
         wikidata: 'Q776598',
         complexity: 5200,
-        signatures: [
-          {
-            domain: ['Function', 'Number', 'Number', 'Number'],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue && ops[1].decimalValue)
-                return ce.number(
-                  Decimal.atan2(ops[0].decimalValue, ops[1].decimalValue)
-                );
-              // atan2 is not defined for complex number
-              if (ops[0].asFloat !== null && ops[1].asFloat !== null)
-                return ce.number(Math.atan2(ops[0].asFloat, ops[1].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', 'Number', 'Number'],
+          N: (ce, ops) => {
+            if (ops[0].decimalValue && ops[1].decimalValue)
+              return ce.number(
+                Decimal.atan2(ops[0].decimalValue, ops[1].decimalValue)
+              );
+            // atan2 is not defined for complex number
+            if (ops[0].asFloat !== null && ops[1].asFloat !== null)
+              return ce.number(Math.atan2(ops[0].asFloat, ops[1].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Cos',
         complexity: 5050,
-        signatures: [
-          {
-            domain: trigFunction('Cos'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Cos', ops[0]) ??
-              ce.box(['Sin', ['Add', ops[0], ['Multiply', 'Half', 'Pi']]])
-                .canonical,
-            evaluate: ['Sin', ['Add', '_1', ['Multiply', 'Half', 'Pi']]],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.cos());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.cos());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.cos(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', ['Interval', -1, 1]],
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Cos', ops[0]) ??
+            ce
+              .box(['Sin', ['Add', ops[0], ['Multiply', 'Half', 'Pi']]])
+              .simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Cos', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.cos());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.cos());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.cos(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
 
       {
         name: 'Tan',
         // Range: 'RealNumber',
         complexity: 5100,
-        signatures: [
-          {
-            domain: trigFunction('Tan'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Tan', ops[0]) ??
-              ce.box(['Divide', ['Sin', ops[0]], ['Cos', ops[0]]]).canonical,
-            evaluate: ['Divide', ['Sin', '_1'], ['Cos', '_1']],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.tan());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.tan());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.tan(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: trigFunction('Tan'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Tan', ops[0]) ??
+            ce.box(['Divide', ['Sin', ops[0]], ['Cos', ops[0]]]).simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Tan', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.tan());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.tan());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.tan(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       /* converts (x, y) -> (radius, angle) */
       // ToPolarCoordinates: {
@@ -231,40 +209,37 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
       {
         name: 'Arcosh',
         complexity: 6200,
-        signatures: [
-          {
-            domain: hyperbolicFunction('Arcosh'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Arcoshh', ops[0]) ??
-              ce.box([
+        signature: {
+          domain: hyperbolicFunction('Arcosh'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Arcoshh', ops[0]) ??
+            ce
+              .box([
                 'Ln',
                 ['Add', ops[0], ['Sqrt', ['Subtract', ['Square', ops[0]], 1]]],
-              ]).canonical,
-            evaluate: [
-              'Ln',
-              ['Add', '_1', ['Sqrt', ['Subtract', ['Square', '_1'], 1]]],
-            ],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.acosh());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.acosh());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.acosh(ops[0].asFloat));
-              return undefined;
-            },
+              ])
+              .simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Arcoshh', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.acosh());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.acosh());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.acosh(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Arcsin',
         complexity: 5500,
-        signatures: [
-          {
-            domain: hyperbolicFunction('Arcsin'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Arcsin', ops[0]) ??
-              ce.box([
+        signature: {
+          domain: hyperbolicFunction('Arcsin'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Arcsin', ops[0]) ??
+            ce
+              .box([
                 'Multiply',
                 2,
                 [
@@ -272,229 +247,195 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                   ops[0],
                   ['Add', 1, ['Sqrt', ['Subtract', 1, ['Square', ops[0]]]]],
                 ],
-              ]).canonical,
-            evaluate: [
-              'Multiply',
-              2,
-              [
-                'Arctan2',
-                '_1',
-                ['Add', 1, ['Sqrt', ['Subtract', 1, ['Square', '_1']]]],
-              ],
-            ],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.asin());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.asin());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.asin(ops[0].asFloat));
-              return undefined;
-            },
+              ])
+              .simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Arcsin', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.asin());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.asin());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.asin(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       //Note: Arsinh, not Arcsinh
       {
         name: 'Arsinh',
         complexity: 6100,
-        signatures: [
-          {
-            domain: hyperbolicFunction('Arsinh'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Arsinh', ops[0]) ??
-              ce.box([
+        signature: {
+          domain: hyperbolicFunction('Arsinh'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Arsinh', ops[0]) ??
+            ce
+              .box([
                 'Ln',
                 ['Add', ops[0], ['Sqrt', ['Add', ['Square', ops[0]], 1]]],
-              ]).canonical,
-            evaluate: [
-              'Ln',
-              ['Add', '_1', ['Sqrt', ['Add', ['Square', '_1'], 1]]],
-            ],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.asinh());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.asinh());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.asinh(ops[0].asFloat));
-              return undefined;
-            },
+              ])
+              .simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Arsinh', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.asinh());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.asinh());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.asinh(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Artanh',
         complexity: 6300,
-        signatures: [
-          {
-            domain: hyperbolicFunction('Artanh'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Artanh', ops[0]) ??
-              ce.box([
+        signature: {
+          domain: hyperbolicFunction('Artanh'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Artanh', ops[0]) ??
+            ce
+              .box([
                 'Multiply',
                 'Half',
                 ['Ln', ['Divide', ['Add', 1, ops[0]], ['Subtract', 1, ops[0]]]],
-              ]).canonical,
-            evaluate: [
-              'Multiply',
-              'Half',
-              ['Ln', ['Divide', ['Add', 1, '_1'], ['Subtract', 1, '_1']]],
-            ],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.atanh());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.atanh());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.atanh(ops[0].asFloat));
-              return undefined;
-            },
+              ])
+              .simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Artanh', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.atanh());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.atanh());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.atanh(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Cosh',
         complexity: 6050,
-        signatures: [
-          {
-            domain: hyperbolicFunction('Cosh'),
-            simplify: (ce, ops) => constructibleValues(ce, 'Cosh', ops[0]),
-            evaluate: [
-              'Multiply',
-              'Half',
-              ['Add', ['Exp', '_1'], ['Exp', ['Negate', '_1']]],
-            ],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.cosh());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.cosh());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.cosh(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: hyperbolicFunction('Cosh'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Cosh', ops[0]) ??
+            ce
+              .box([
+                'Multiply',
+                'Half',
+                ['Add', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
+              ])
+              .simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Cosh', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.cosh());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.cosh());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.cosh(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Cot',
         complexity: 5600,
-        signatures: [
-          {
-            domain: trigFunction('Cot'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Cot', ops[0]) ??
-              ce.box(['Divide', ['Cos', ops[0]], ['Sin', ops[0]]]).canonical,
-            evaluate: ['Divide', ['Cos', '_1'], ['Sin', '_1']],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(
-                  ce._DECIMAL_ONE.div(ops[0].decimalValue.tan())
-                );
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.tan().inverse());
-              if (ops[0].asFloat !== null)
-                return ce.number(1 / Math.tan(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: trigFunction('Cot'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Cot', ops[0]) ??
+            ce.box(['Divide', ['Cos', ops[0]], ['Sin', ops[0]]]).simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Cot', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.tan()));
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.tan().inverse());
+            if (ops[0].asFloat !== null)
+              return ce.number(1 / Math.tan(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Csc',
         description: 'Cosecant',
         complexity: 5600,
-        signatures: [
-          {
-            domain: trigFunction('Csc'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Csc', ops[0]) ??
-              ce.box(['Divide', 1, ['Sin', ops[0]]]).canonical,
-            evaluate: ['Divide', 1, ['Sin', '_1']],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(
-                  ce._DECIMAL_ONE.div(ops[0].decimalValue.sin())
-                );
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.sin().inverse());
-              if (ops[0].asFloat !== null)
-                return ce.number(1 / Math.sin(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: trigFunction('Csc'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Csc', ops[0]) ??
+            ce.box(['Divide', 1, ['Sin', ops[0]]]).simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Csc', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.sin()));
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.sin().inverse());
+            if (ops[0].asFloat !== null)
+              return ce.number(1 / Math.sin(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       /** = sin(z/2)^2 = (1 - cos z) / 2*/
       {
         name: 'Haversine',
         wikidata: 'Q2528380',
-        // Range ['Interval', 0, 1],
-        signatures: [
-          {
-            domain: ['Function', 'ExtendedRealNumber', 'RealNumber'],
-            evaluate: ['Divide', ['Subtract', 1, ['Cos', '_1']], 2],
-          },
-        ],
+        signature: {
+          domain: ['Function', 'ExtendedRealNumber', ['Interval', 0, 1]],
+          evaluate: ['Divide', ['Subtract', 1, ['Cos', '_1']], 2],
+        },
       },
       /** = 2 * Arcsin(Sqrt(z)) */
       {
         name: 'InverseHaversine',
         //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
-        signatures: [
-          {
-            domain: ['Function', 'ExtendedRealNumber', 'RealNumber'],
-            evaluate: ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]],
-          },
-        ],
+        signature: {
+          domain: ['Function', 'ExtendedRealNumber', 'RealNumber'],
+          evaluate: ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]],
+        },
       },
       {
         name: 'Sec',
         description: 'Secant, inverse of cosine',
         complexity: 5500,
-        signatures: [
-          {
-            domain: trigFunction('Sec'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Sec', ops[0]) ??
-              ce.box(['Divide', 1, ['Cos', ops[0]]]).canonical,
-            evaluate: ['Divide', 1, ['Cos', '_1']],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(
-                  ce._DECIMAL_ONE.div(ops[0].decimalValue.cos())
-                );
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.cos().inverse());
-              if (ops[0].asFloat !== null)
-                return ce.number(1 / Math.cos(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: trigFunction('Sec'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Sec', ops[0]) ??
+            ce.box(['Divide', 1, ['Cos', ops[0]]]).simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Sec', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.cos()));
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.cos().inverse());
+            if (ops[0].asFloat !== null)
+              return ce.number(1 / Math.cos(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Sinh',
         // Range: ['Interval', -Infinity, Infinity],
         complexity: 6000,
-        signatures: [
-          {
-            domain: hyperbolicFunction('Sinh'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Sinh', ops[0]) ??
-              ce.box([
+        signature: {
+          domain: hyperbolicFunction('Sinh'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Sinh', ops[0]) ??
+            ce
+              .box([
                 'Multiply',
                 'Half',
                 ['Subtract', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
-              ]).canonical,
-            evaluate: [
-              'Multiply',
-              'Half',
-              ['Subtract', ['Exp', '_1'], ['Exp', ['Negate', '_1']]],
-            ],
-          },
-        ],
+              ])
+              .simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Sinh', ops[0]),
+        },
       },
     ],
   },
@@ -503,74 +444,63 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
       {
         name: 'Csch',
         complexity: 6200,
-        signatures: [
-          {
-            domain: domainNumberToRealNumber('Csch'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Csch', ops[0]) ??
-              ce.box(['Divide', 1, ['Sinh', ops[0]]]).canonical,
-            evaluate: ['Divide', 1, ['Sinh', '_1']],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(
-                  ce._DECIMAL_ONE.div(ops[0].decimalValue.sinh())
-                );
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.sinh().inverse());
-              if (ops[0].asFloat !== null)
-                return ce.number(1 / Math.sinh(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: domainNumberToRealNumber('Csch'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Csch', ops[0]) ??
+            ce.box(['Divide', 1, ['Sinh', ops[0]]]).simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Csch', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.sinh()));
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.sinh().inverse());
+            if (ops[0].asFloat !== null)
+              return ce.number(1 / Math.sinh(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Sech',
-        // Range: ['Interval', -1, 1],
         complexity: 6200,
-        signatures: [
-          {
-            domain: trigFunction('Sech'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Sech', ops[0]) ??
-              ce.box(['Divide', 1, ['Cosh', ops[0]]]).canonical,
-            evaluate: ['Divide', 1, ['Cosh', '_1']],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(
-                  ce._DECIMAL_ONE.div(ops[0].decimalValue.cosh())
-                );
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.cosh().inverse());
-              if (ops[0].asFloat !== null)
-                return ce.number(1 / Math.cosh(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: ['Function', 'Number', ['Interval', -1, 1]],
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Sech', ops[0]) ??
+            ce.box(['Divide', 1, ['Cosh', ops[0]]]).simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Sech', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.cosh()));
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.cosh().inverse());
+            if (ops[0].asFloat !== null)
+              return ce.number(1 / Math.cosh(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       {
         name: 'Tanh',
         // Range: ['Interval', -Infinity, Infinity],
         complexity: 6200,
-        signatures: [
-          {
-            domain: hyperbolicFunction('Tanh'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Tanh', ops[0]) ??
-              ce.box(['Divide', ['Sinh', ops[0]], ['Cosh', ops[0]]]).canonical,
-            evaluate: ['Divide', ['Sinh', '_1'], ['Cosh', '_1']],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.tanh());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.tanh());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.tanh(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: hyperbolicFunction('Tanh'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Tanh', ops[0]) ??
+            ce.box(['Divide', ['Sinh', ops[0]], ['Cosh', ops[0]]]).simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Tanh', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.tanh());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.tanh());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.tanh(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
     ],
   },
@@ -579,25 +509,24 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
       {
         name: 'Arccos',
         complexity: 5550,
-        signatures: [
-          {
-            domain: domainNumberToRealNumber('Arccos'),
-            evaluate: ['Subtract', ['Divide', 'Pi', 2], ['Arcsin', '_1']],
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Arccos', ops[0]) ??
-              ce.box(['Subtract', ['Divide', 'Pi', 2], ['Arcsin', ops[0]]])
-                .canonical,
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(ops[0].decimalValue.acos());
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.acos());
-              if (ops[0].asFloat !== null)
-                return ce.number(Math.acos(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: domainNumberToRealNumber('Arccos'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Arccos', ops[0]) ??
+            ce
+              .box(['Subtract', ['Divide', 'Pi', 2], ['Arcsin', ops[0]]])
+              .simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Arccos', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ops[0].decimalValue.acos());
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.acos());
+            if (ops[0].asFloat !== null)
+              return ce.number(Math.acos(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       // Arccot: {
       //   domain: 'RealNumber',
@@ -628,26 +557,22 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
       {
         name: 'Coth',
         complexity: 6300,
-        signatures: [
-          {
-            domain: hyperbolicFunction('Coth'),
-            simplify: (ce, ops) =>
-              constructibleValues(ce, 'Coth', ops[0]) ??
-              ce.box(['Divide', 1, ['Tanh', ops[0]]]).canonical,
-            evaluate: ['Divide', 1, ['Tanh', '_1']],
-            N: (ce, ops) => {
-              if (ops[0].decimalValue)
-                return ce.number(
-                  ce._DECIMAL_ONE.div(ops[0].decimalValue.tanh())
-                );
-              if (ops[0].complexValue)
-                return ce.number(ops[0].complexValue.tanh().inverse());
-              if (ops[0].asFloat !== null)
-                return ce.number(1 / Math.tanh(ops[0].asFloat));
-              return undefined;
-            },
+        signature: {
+          domain: hyperbolicFunction('Coth'),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Coth', ops[0]) ??
+            ce.box(['Divide', 1, ['Tanh', ops[0]]]).simplify(),
+          evaluate: (ce, ops) => constructibleValues(ce, 'Coth', ops[0]),
+          N: (ce, ops) => {
+            if (ops[0].decimalValue)
+              return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.tanh()));
+            if (ops[0].complexValue)
+              return ce.number(ops[0].complexValue.tanh().inverse());
+            if (ops[0].asFloat !== null)
+              return ce.number(1 / Math.tanh(ops[0].asFloat));
+            return undefined;
           },
-        ],
+        },
       },
       /* converts (radius, angle) -> (x, y) */
       // FromPolarCoordinates: {
@@ -656,13 +581,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
       // },
       {
         name: 'InverseFunction',
-        signatures: [
-          {
-            domain: ['Function', 'Function', 'Function'],
-            simplify: (ce, ops) => processInverseFunction(ce, ops[0]),
-            evaluate: (ce, ops) => processInverseFunction(ce, ops[0]),
-          },
-        ],
+        signature: {
+          domain: ['Function', 'Function', 'Function'],
+          simplify: (ce, ops) => processInverseFunction(ce, ops[0]),
+          evaluate: (ce, ops) => processInverseFunction(ce, ops[0]),
+        },
       },
     ],
   },
@@ -717,8 +640,8 @@ const CONSTRUCTIBLE_VALUES: [
       Cos: '$\\frac {\\sqrt {2+{\\sqrt {2}}}}{2}$',
       Tan: '$\\sqrt{2} - 1$',
       Cot: '$\\sqrt{2} + 1$',
-      Sec: '$\\sqrt{ 4 - 2\\sqrt{2}$',
-      Csc: '$\\sqrt{ 4 + 2\\sqrt{2}$',
+      Sec: '$\\sqrt{ 4 - 2\\sqrt{2}}$',
+      Csc: '$\\sqrt{ 4 + 2\\sqrt{2}}$',
     },
   ],
   [
@@ -867,10 +790,8 @@ const TRIG_IDENTITIES: { [key: string]: [sign: number, head: string][] } = {
 function constructibleValues(
   ce: IComputeEngine,
   head: string,
-  x: BoxedExpression | undefined
+  x: BoxedExpression
 ): undefined | BoxedExpression {
-  if (!x || x.isMissing) return undefined;
-
   const specialValues = ce.cache(
     'constructible-trigonometric-values',
     () => {
@@ -894,14 +815,14 @@ function constructibleValues(
     },
     (cache) => {
       for (const [_k, v] of cache) {
-        for (const v2 of Object.values(v)) (v2 as BoxedExpression)._purge();
+        for (const v2 of Object.values(v)) (v2 as BoxedExpression).unbind();
       }
       return cache;
     }
   );
   x = x.numericValue ?? x;
   if (!x.isLiteral) return undefined;
-  let theta = x.asFloat;
+  let theta = x.asFloat ?? x.decimalValue?.toNumber() ?? null;
   if (theta === null) return undefined;
   theta = theta % (2 * Math.PI);
   // Odd-even identities
@@ -927,7 +848,7 @@ function processInverseFunction(
   ce: IComputeEngine,
   expr: BoxedExpression
 ): BoxedExpression | undefined {
-  const head = expr.op1.head;
+  const head = expr.symbol;
   if (typeof head !== 'string') return expr;
   const newHead = {
     Sin: 'Arcsin',
@@ -952,6 +873,5 @@ function processInverseFunction(
     Arctan: 'Tan',
     Artanh: 'Tanh',
   }[head];
-  if (newHead) return ce._fn(newHead, [expr.op1.op1]);
-  return expr;
+  return newHead ? ce.symbol(newHead) : expr;
 }

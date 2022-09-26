@@ -3,7 +3,7 @@ import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
 import { BoxedExpression, ComputeEngine } from '../src/compute-engine';
 import { parseCortex } from '../src/cortex';
 import { LatexSyntax } from '../src/compute-engine/latex-syntax/latex-syntax';
-import { AnyTxtRecord } from 'dns';
+import { AbstractBoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
 
 let errors: string[] = [];
 
@@ -168,7 +168,8 @@ export function latex(expr: Expression | undefined | null): string {
   } catch (e) {
     errors.push(e.toString());
   }
-  if (errors.length !== 0) return result + '\n' + errors.join('\n');
+  if (result && errors.length !== 0) return result + '\n' + errors.join('\n');
+  if (errors.length !== 0) return errors.join('\n');
   return result;
 }
 
@@ -227,6 +228,7 @@ expect.addSnapshotSerializer({
   test: (_val): boolean => true,
 
   serialize: (val, _config, _indentation, _depth, _refs, _printer): string => {
+    if (val instanceof AbstractBoxedExpression) return val.toJSON();
     return printExpression(val);
   },
 });
@@ -257,7 +259,7 @@ export function strip(expr: Expression): Expression | null {
     return expr;
   }
   if (Array.isArray(expr))
-    return expr.map((x) => strip(x ?? 'Missing') ?? 'Missing') as Expression;
+    return expr.map((x) => strip(x ?? 'Nothing') ?? 'Nothing') as Expression;
 
   if (typeof expr === 'object') {
     if ('num' in expr) {
@@ -268,13 +270,13 @@ export function strip(expr: Expression): Expression | null {
       return expr.sym;
     } else if ('fn' in expr) {
       return expr.fn.map(
-        (x) => strip(x ?? 'Missing') ?? 'Missing'
+        (x) => strip(x ?? 'Nothing') ?? 'Nothing'
       ) as Expression;
     } else if ('dict' in expr) {
       return {
         dict: Object.fromEntries(
           Object.entries(expr.dict).map((keyValue) => {
-            return [keyValue[0], strip(keyValue[1]) ?? 'Missing'];
+            return [keyValue[0], strip(keyValue[1]) ?? 'Nothing'];
           })
         ),
       };

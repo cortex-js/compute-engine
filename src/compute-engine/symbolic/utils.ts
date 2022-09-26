@@ -47,7 +47,7 @@ export function numeratorDenominator(
         const a = arg.op1;
         const b = arg.op2.op1;
         denominator.push(!a || !b ? arg : ['Power', a, b]);
-      } else if (!arg.op1.isMissing) {
+      } else if (arg.op1.symbol === 'Nothing') {
         const exponentVal = arg.op2;
         if (exponentVal.isNegativeOne) {
           denominator.push(arg.op1);
@@ -78,6 +78,9 @@ export function numeratorDenominator(
 export function asCoefficient(
   expr: BoxedExpression
 ): [coef: [numer: number, denom: number], rest: BoxedExpression] {
+  if (!expr.isCanonical) {
+    debugger;
+  }
   console.assert(expr.isCanonical);
 
   const ce = expr.engine;
@@ -195,9 +198,9 @@ export function asCoefficient(
     }
 
     if (expr.machineValue !== null) {
-      if (Number.isInteger(expr.machineValue)) {
+      if (Number.isInteger(expr.machineValue))
         return [[expr.machineValue, 1], ce._ONE];
-      }
+
       if (expr.machineValue < 0)
         return [[-1, 1], ce.number(-expr.machineValue)];
     }
@@ -302,6 +305,8 @@ export function makePositive(
   expr: BoxedExpression
 ): [sign: number, expr: BoxedExpression] {
   if (expr.head === 'Negate') return [-1, expr.op1];
+
+  if (!expr.isLiteral) return [1, expr];
 
   const ce = expr.engine;
 

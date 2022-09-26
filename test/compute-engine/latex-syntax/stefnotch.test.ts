@@ -2,15 +2,11 @@ import { parse } from '../../utils';
 
 describe('STEFNOTCH #9', () => {
   test('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x', () => {
-    expect(parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x'))
-      .toMatchInlineSnapshot(`
-      '[
-        "Error",
-        ["Integral", "Missing", "Nothing", "Nothing"],
-        "'syntax-error'",
-        ["LatexForm", "'{⬚}}^{\\\\placeholder{⬚}}3x'"]
-      ]'
-    `);
+    expect(
+      parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x')
+    ).toMatchInlineSnapshot(
+      `'["Integral", ["Multiply", 3, "x"], "Nothing", "Nothing"]'`
+    );
   });
 });
 
@@ -22,19 +18,33 @@ describe('STEFNOTCH #10', () => {
       )
     ).toMatchInlineSnapshot(`
       '[
-        "Error",
+        "Style",
+        "Power",
         [
-          "Style",
+          "Delimiter",
           [
-            "Error",
-            "Missing",
-            "'unknown-command'",
-            ["LatexForm", "'\\\\left'"]
-          ],
-          ["KeyValuePair", "'display'", "'block'"]
+            [
+              ["InverseFunction", "Sin"],
+              [
+                "Error",
+                ["ErrorCode", "'unexpected-command'", "'\\\\mleft'"],
+                ["Latex", "'\\\\mleft'"]
+              ]
+            ],
+            "x",
+            [
+              "Error",
+              ["ErrorCode", "'unexpected-command'", "'\\\\mright'"],
+              ["Latex", "'\\\\mright'"]
+            ]
+          ]
         ],
-        "'syntax-error'",
-        ["LatexForm", "'(\\\\sin^{-1}\\\\mleft(x\\\\mright)\\\\right)^{\\\\prime}'"]
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\\\prime'"],
+          ["Latex", "'\\\\prime'"]
+        ],
+        ["KeyValuePair", "'display'", "'block'"]
       ]'
     `);
   });
@@ -47,63 +57,68 @@ describe('STEFNOTCH #10', () => {
 
   test('3/ 3\\text{hello}6', () => {
     expect(parse('3\\text{hello}6')).toMatchInlineSnapshot(
-      `'["Error", 3, "'syntax-error'", ["LatexForm", "'\\\\text{hello}6'"]]'`
+      `'["Multiply", 3, "'hello'", 6]'`
     );
   });
 
   test('4/ \\color{red}3', () => {
     expect(parse('\\color{red}3')).toMatchInlineSnapshot(`
       '[
-        "Error",
+        "Sequence",
         [
           "Error",
-          "Missing",
-          "'unknown-command'",
-          ["LatexForm", "'\\\\color{red}'"]
+          ["ErrorCode", "'unexpected-command'", "'\\\\color'"],
+          ["Latex", "'\\\\color{red}'"]
         ],
-        "'syntax-error'",
-        ["LatexForm", "'3'"]
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'3'"],
+          ["Latex", "'3'"]
+        ]
       ]'
     `);
   });
 
   test('5/ \\ln(3)', () => {
-    expect(parse('\\ln(3)')).toMatchInlineSnapshot(`
-      '[
-        "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\ln'"]],
-        "'syntax-error'",
-        ["LatexForm", "'(3)'"]
-      ]'
-    `);
+    expect(parse('\\ln(3)')).toMatchInlineSnapshot(`'["Ln", 3]'`);
   });
 
   test('6/ f:[a,b]\\to R', () => {
-    expect(parse('f:[a,b]\\to R ')).toMatchInlineSnapshot(
-      `'["Error", "f", "'syntax-error'", ["LatexForm", "':[a,b]\\\\to R '"]]'`
-    );
+    expect(parse('f:[a,b]\\to R ')).toMatchInlineSnapshot(`
+      '[
+        "Sequence",
+        "f",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "':'"],
+          ["Latex", "':[a,b]\\\\to R '"]
+        ]
+      ]'
+    `);
   });
 
   test('7/ \\lim_{n\\to\\infin}3', () => {
     expect(parse('\\lim_{n\\to\\infin}3')).toMatchInlineSnapshot(`
       '[
-        "Error",
+        "Multiply",
         [
           "Subscript",
-          ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\lim'"]],
+          [
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\\\lim'"],
+            ["Latex", "'\\\\lim'"]
+          ],
           [
             "To",
             "n",
             [
               "Error",
-              "Missing",
-              "'unknown-command'",
-              ["LatexForm", "'\\\\infin'"]
+              ["ErrorCode", "'unexpected-command'", "'\\\\infin'"],
+              ["Latex", "'\\\\infin'"]
             ]
           ]
         ],
-        "'syntax-error'",
-        ["LatexForm", "'3'"]
+        3
       ]'
     `);
   });
@@ -113,7 +128,7 @@ describe('STEFNOTCH #10', () => {
       .toMatchInlineSnapshot(`
       '[
         "Piecewise",
-        ["List", ["List", 3, ["Less", "x", 5]], ["List", 7, "'else'"]]
+        ["List", ["Pair", ["Less", "x", 5], 3], ["Pair", "'else'", 7]]
       ]'
     `);
   });
@@ -123,15 +138,9 @@ describe('STEFNOTCH #12', () => {
   test('1/ e^{i\\pi\\text{nope!?\\lparen sum}}', () => {
     expect(parse('e^{i\\pi\\text{nope!?\\lparen sum}}')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        [
-          "Multiply",
-          ["Power", "ExponentialE", "Missing"],
-          "ImaginaryUnit",
-          "Pi"
-        ],
-        "'syntax-error'",
-        ["LatexForm", "'\\\\text{nope!?\\\\lparen sum}}'"]
+        "Power",
+        "ExponentialE",
+        ["Multiply", "ImaginaryUnit", "Pi", "'nope!?\\\\lparensum'"]
       ]'
     `);
   });
@@ -143,19 +152,9 @@ describe('STEFNOTCH #13', () => {
       parse('N(\\varepsilon)\\coloneq\\lceil\\frac{4}{\\varepsilon^2}\\rceil')
     ).toMatchInlineSnapshot(`
       '[
-        "Error",
-        [
-          "Assign",
-          ["Multiply", "N", ["Delimiter", "EpsilonSymbol"]],
-          [
-            "Error",
-            "Missing",
-            "'unknown-command'",
-            ["LatexForm", "'\\\\lceil'"]
-          ]
-        ],
-        "'syntax-error'",
-        ["LatexForm", "'\\\\frac{4}{\\\\varepsilon^2}\\\\rceil'"]
+        "Assign",
+        ["Multiply", "N", ["Delimiter", "EpsilonSymbol"]],
+        ["Ceil", ["Divide", 4, ["Power", "EpsilonSymbol", 2]]]
       ]'
     `);
   });
@@ -169,28 +168,50 @@ describe('STEFNOTCH #13', () => {
   test('3/  \\{1,2\\}', () => {
     expect(parse('\\{1,2\\}')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Error", "Missing", "'unknown-command'", ["LatexForm", "'\\\\{'"]],
-        "'syntax-error'",
-        ["LatexForm", "'1,2\\\\}'"]
+        "Sequence",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\\\{'"],
+          ["Latex", "'\\\\{'"]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'1'"],
+          ["Latex", "'1,2\\\\}'"]
+        ]
       ]'
     `);
   });
 
   test('4/ [1,2]', () => {
-    expect(parse('[1,2]')).toMatchInlineSnapshot(
-      `'["Error", "Nothing", "'syntax-error'", ["LatexForm", "'[1,2]'"]]'`
-    );
+    expect(parse('[1,2]')).toMatchInlineSnapshot(`
+      '[
+        "Error",
+        ["ErrorCode", "'unexpected-token'", "'['"],
+        ["Latex", "'[1,2]'"]
+      ]'
+    `);
   });
 
   test('5/ \\frac{2}{\\sqrt{n}}\\Leftrightarrow n>\\frac{5}{n^2}', () => {
     expect(parse('\\frac{2}{\\sqrt{n}}\\Leftrightarrow n>\\frac{5}{n^2}'))
       .toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Divide", 2, ["Sqrt", "n"]],
-        "'syntax-error'",
-        ["LatexForm", "'\\\\Leftrightarrow n>\\\\frac{5}{n^2}'"]
+        "Greater",
+        [
+          "Multiply",
+          [
+            "Sequence",
+            ["Divide", 2, ["Sqrt", "n"]],
+            [
+              "Error",
+              ["ErrorCode", "'unexpected-command'", "'\\\\Leftrightarrow'"],
+              ["Latex", "'\\\\Leftrightarrow'"]
+            ]
+          ],
+          "n"
+        ],
+        ["Divide", 5, ["Power", "n", 2]]
       ]'
     `);
   });
@@ -199,12 +220,28 @@ describe('STEFNOTCH #13', () => {
     expect(parse('|a_n|\\le\\frac{2}{\\sqrt{n}}\\Rightarrow a_n\\to0=0'))
       .toMatchInlineSnapshot(`
       '[
-        "Error",
-        "Nothing",
-        "'syntax-error'",
+        "LessEqual",
+        ["Abs", ["Subscript", "a", "n"]],
         [
-          "LatexForm",
-          "'|a_n|\\\\le\\\\frac{2}{\\\\sqrt{n}}\\\\Rightarrow a_n\\\\to0=0'"
+          "Equal",
+          [
+            "To",
+            [
+              "Multiply",
+              [
+                "Sequence",
+                ["Divide", 2, ["Sqrt", "n"]],
+                [
+                  "Error",
+                  ["ErrorCode", "'unexpected-command'", "'\\\\Rightarrow'"],
+                  ["Latex", "'\\\\Rightarrow'"]
+                ]
+              ],
+              ["Subscript", "a", "n"]
+            ],
+            0
+          ],
+          0
         ]
       ]'
     `);
@@ -213,10 +250,21 @@ describe('STEFNOTCH #13', () => {
   test('7/ 3\\equiv5\\mod7', () => {
     expect(parse('3\\equiv5\\mod7')).toMatchInlineSnapshot(`
       '[
-        "Error",
-        ["Equivalent", 3, 5],
-        "'syntax-error'",
-        ["LatexForm", "'\\\\mod7'"]
+        "Equivalent",
+        3,
+        [
+          "Multiply",
+          [
+            "Sequence",
+            5,
+            [
+              "Error",
+              ["ErrorCode", "'unexpected-command'", "'\\\\mod'"],
+              ["Latex", "'\\\\mod'"]
+            ]
+          ],
+          7
+        ]
       ]'
     `);
   });
@@ -225,27 +273,23 @@ describe('STEFNOTCH #13', () => {
     expect(parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}'))
       .toMatchInlineSnapshot(`
       '[
-        "Error",
+        "Equal",
+        "a",
         [
-          "Equal",
-          "a",
+          "Style",
+          "Multiply",
           [
-            "Style",
+            "Subscript",
             [
-              "Subscript",
-              [
-                "Error",
-                "Missing",
-                "'unknown-command'",
-                ["LatexForm", "'\\\\lim'"]
-              ],
-              ["To", "n", {num: "+Infinity"}]
+              "Error",
+              ["ErrorCode", "'unexpected-command'", "'\\\\lim'"],
+              ["Latex", "'\\\\lim'"]
             ],
-            ["KeyValuePair", "'display'", "'block'"]
-          ]
-        ],
-        "'syntax-error'",
-        ["LatexForm", "'a_n}'"]
+            ["To", "n", {num: "+Infinity"}]
+          ],
+          ["Subscript", "a", "n"],
+          ["KeyValuePair", "'display'", "'block'"]
+        ]
       ]'
     `);
   });
@@ -253,15 +297,17 @@ describe('STEFNOTCH #13', () => {
   test('9/  \\forall x\\in\\C^2:|x|<0', () => {
     expect(parse('\\forall x\\in\\C^2:|x|<0')).toMatchInlineSnapshot(`
       '[
-        "Error",
+        "Sequence",
         [
           "Error",
-          "Missing",
-          "'unknown-command'",
-          ["LatexForm", "'\\\\forall'"]
+          ["ErrorCode", "'unexpected-command'", "'\\\\forall'"],
+          ["Latex", "'\\\\forall'"]
         ],
-        "'syntax-error'",
-        ["LatexForm", "'x\\\\in\\\\C^2:|x|<0'"]
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'x'"],
+          ["Latex", "'x\\\\in\\\\C^2:|x|<0'"]
+        ]
       ]'
     `);
   });
@@ -273,17 +319,19 @@ describe('STEFNOTCH #13', () => {
       )
     ).toMatchInlineSnapshot(`
       '[
-        "Error",
+        "Sequence",
         [
           "Error",
-          "Missing",
-          "'unknown-command'",
-          ["LatexForm", "'\\\\forall'"]
+          ["ErrorCode", "'unexpected-command'", "'\\\\forall'"],
+          ["Latex", "'\\\\forall'"]
         ],
-        "'syntax-error'",
         [
-          "LatexForm",
-          "'n\\\\colon a_n\\\\le c_n\\\\le b_n\\\\implies\\\\lim_{n\\\\to\\\\infin}c_n=a'"
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'n'"],
+          [
+            "Latex",
+            "'n\\\\colon a_n\\\\le c_n\\\\le b_n\\\\implies\\\\lim_{n\\\\to\\\\infin}c_n=a'"
+          ]
         ]
       ]'
     `);

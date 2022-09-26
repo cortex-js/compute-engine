@@ -19,33 +19,48 @@ describe('SEQUENCES AND DELIMITERS', () => {
     );
     // Sequence with empty element
     expect(parse('(a,,b)')).toMatchInlineSnapshot(
-      `'["Delimiter", "a", "Nothing", "b"]'`
+      `'["Delimiter", ["Sequence", "a", "Null", "b"]]'`
     );
   });
   test('Groups', () => {
     expect(parse('(a, b, c)')).toMatchInlineSnapshot(
-      `'["Delimiter", "a", "b", "c"]'`
+      `'["Delimiter", ["Sequence", "a", "b", "c"]]'`
     );
     expect(parse('(a, b; c, d, ;; n ,, m)')).toMatchInlineSnapshot(`
       '[
         "Delimiter",
-        "a",
-        "b",
-        "c",
-        "d",
-        "Nothing",
-        "Nothing",
-        "n",
-        "Nothing",
-        "m"
+        [
+          "Sequence",
+          "a",
+          "b",
+          "c",
+          "d",
+          [
+            "Sequence",
+            "Sequence",
+            ["Error", "'missing'", ["Latex", "';'"]],
+            "Sequence",
+            ["Error", "'missing'", ["Latex", "';'"]],
+            "n",
+            "Null",
+            "m"
+          ]
+        ]
       ]'
     `);
     expect(parse('(a, (b, c))')).toMatchInlineSnapshot(
-      `'["Delimiter", "a", ["Delimiter", "b", "c"]]'`
+      `'["Delimiter", ["Sequence", "a", ["Delimiter", ["Sequence", "b", "c"]]]]'`
     );
-    expect(parse('(a, (b; c))')).toMatchInlineSnapshot(
-      `'["Delimiter", "a", ["Delimiter", "Sequence", "b", "Sequence", "c"]]'`
-    );
+    expect(parse('(a, (b; c))')).toMatchInlineSnapshot(`
+      '[
+        "Delimiter",
+        [
+          "Sequence",
+          "a",
+          ["Delimiter", ["Sequence", "Sequence", "b", "Sequence", "c"]]
+        ]
+      ]'
+    `);
   });
   test('Sequences', () => {
     expect(parse('a, b, c')).toMatchInlineSnapshot(
@@ -53,15 +68,15 @@ describe('SEQUENCES AND DELIMITERS', () => {
     );
     // Sequence with missing element
     expect(parse('a,, c')).toMatchInlineSnapshot(
-      `'["Sequence", "a", "Nothing", "c"]'`
+      `'["Sequence", "a", "Null", "c"]'`
     );
     // Sequence with missing final element
     expect(parse('a,c,')).toMatchInlineSnapshot(
-      `'["Sequence", "a", "c", "Nothing"]'`
+      `'["Sequence", "a", "c", "Null"]'`
     );
     // Sequence with missing initial element
     expect(parse(',c,b')).toMatchInlineSnapshot(
-      `'["Error", "Nothing", "'syntax-error'", ["LatexForm", "',c,b'"]]'`
+      `'["Sequence", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]'`
     );
   });
   test('Subsequences', () => {
@@ -79,8 +94,17 @@ describe('SEQUENCES AND DELIMITERS', () => {
         "h"
       ]'
     `);
-    expect(parse(';;a;')).toMatchInlineSnapshot(
-      `'["Error", "Nothing", "'syntax-error'", ["LatexForm", "';;a;'"]]'`
-    );
+    expect(parse(';;a;')).toMatchInlineSnapshot(`
+      '[
+        "Sequence",
+        "Sequence",
+        ["Error", "'missing'", ["Latex", "';'"]],
+        "Sequence",
+        ["Error", "'missing'", ["Latex", "';'"]],
+        "Sequence",
+        "a",
+        "Null"
+      ]'
+    `);
   });
 });

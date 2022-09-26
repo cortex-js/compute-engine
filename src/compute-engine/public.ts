@@ -168,6 +168,7 @@ export type DomainCompatibility =
 
 /** A domain constructor is the head of a domain expression. */
 export type DomainConstructor =
+  | 'Error'
   | 'Matrix' // <domain-of-elements> <dimension>*
   | 'SquareMatrix' // <domain-of-elements> <dimension>
   | 'Vector' // <domain-of-elements> <length>?
@@ -179,51 +180,73 @@ export type DomainConstructor =
   | 'Interval' // <min-value> <max-value> (inclusive, unless Open domain expression)
   | 'Intersection'
   | 'Union'
-  | 'Optional'
-  | 'Some'
+  | 'Maybe'
+  | 'Sequence'
   | 'Head'
   | 'Symbol'
-  | 'Literal'
+  | 'Value'
   | 'Covariant'
   | 'Contravariant'
+  | 'Bivariant'
   | 'Invariant';
 
 export type DomainLiteral = string;
 
-export type DomainExpression =
+export type DomainExpression<T = SemiBoxedExpression> =
   | DomainLiteral
-  | [
-      Exclude<
-        DomainConstructor,
-        'Literal' | 'Range' | 'Interval' | 'Head' | 'Symbol' | 'Matrix'
-      >,
-      ...DomainExpression[]
-    ]
-  | ['Matrix', DomainExpression, Expression]
-  | ['Range', Expression]
-  | ['Range', Expression, Expression]
-  | ['Range', Expression, Expression, Expression]
-  | ['Interval', Expression, Expression]
-  | ['Interval', ['Open', Expression], Expression]
-  | ['Interval', Expression, ['Open', Expression]]
-  | ['Interval', ['Open', Expression], ['Open', Expression]]
+  | [DomainConstructor, ...(string | T | DomainExpression<T>)[]]
+  | ['Error', T]
+  | ['Error', T, T]
+  | ['Union', ...DomainExpression<T>[]]
+  | ['Intersection', ...DomainExpression<T>[]]
+  | ['Matrix', DomainExpression<T>, T, T]
+  | ['SquareMatrix', DomainExpression<T>, T]
+  | ['Vector', DomainExpression<T>, T]
+  | ['List', DomainExpression<T>]
+  | ['Dictionary', DomainExpression<T>]
+  | ['Tuple', ...DomainExpression<T>[]]
+  | ['Maybe', DomainExpression<T>]
+  | ['Sequence', DomainExpression<T>]
+  | ['Range']
+  | ['Range', T]
+  | ['Range', T, T]
+  | ['Range', T, T, T]
+  | ['Interval', T, T]
+  | ['Interval', ['Open', T], T]
+  | ['Interval', T, ['Open', T]]
+  | ['Interval', ['Open', T], ['Open', T]]
+  | ['Value', T]
   | ['Head', string]
   | ['Symbol', string]
-  | ['Literal', Expression];
+  | ['Covariant', DomainExpression<T>]
+  | ['Contravariant', DomainExpression<T>]
+  | ['Bivariant', DomainExpression<T>]
+  | ['Invariant', DomainExpression<T>]
+  | ['Function', ...DomainExpression<T>[]];
 
 export interface BoxedDomain extends BoxedExpression {
   is(s: BoxedDomain): boolean;
+
+  /** True if a valid domain, and compatible with `dom` */
   isCompatible(
     dom: BoxedDomain | DomainLiteral,
     kind?: DomainCompatibility
   ): boolean;
 
-  get domainLiteral(): string | null;
-  get domainConstructor(): DomainConstructor | null;
-  get domainParams(): BoxedExpression[] | null;
+  get literal(): string | null;
+  get ctor(): DomainConstructor | null;
+  get domainArgs():
+    | (DomainExpression<BoxedExpression> | BoxedExpression | string)[]
+    | null;
+  get domainArg1():
+    | string
+    | BoxedExpression
+    | DomainExpression<BoxedExpression>
+    | null;
+  get codomain(): BoxedDomain | null;
 
   get canonical(): BoxedDomain;
-  get json(): DomainExpression;
+  get json(): Expression;
 
   readonly isNothing: boolean;
   // readonly isBoolean: boolean;
@@ -391,7 +414,7 @@ export interface BoxedExpression {
   /** Only the value of variables can be changed (symbols that are not constants) */
   set value(value: BoxedExpression | number | undefined);
 
-  /** Return an approximation of the value of this expression. Floating-point
+  /** An approximation of the value of this expression. Floating-point
    * operations may be performed.
    *
    * Just like `this.value`, it returns `undefined` for impure expressions.
@@ -410,6 +433,12 @@ export interface BoxedExpression {
    */
   get isPure(): boolean;
 
+  /** True if the expression is a free variable, that is a symbol with no value */
+  get isFree(): boolean;
+
+  /** True if the expression is a constant, that is a symbol with an immutable value */
+  get isConstant(): boolean;
+
   /**
    * If `true`, this expression represents a value that was not calculated
    * or that does not reference another expression.
@@ -425,6 +454,18 @@ export interface BoxedExpression {
    * @internal
    */
   set isCanonical(val: boolean);
+
+  /** All the subexpressions matching the head */
+  getSubexpressions(head: string): BoxedExpression[];
+
+  /** All the subexpressions in this expression, recursively */
+  get subexpressions(): BoxedExpression[];
+
+  /** All the symbols in the expression, recursively */
+  get symbols(): BoxedExpression[];
+
+  /** All the `["Error"]` subexpressions */
+  get errors(): BoxedExpression[];
 
   // ----- FUNCTION
 
@@ -586,7 +627,7 @@ export interface BoxedExpression {
    * performed if they are safe from overflow. This method makes it easy
    * to check for this, whether the value is a Decimal or a number.
    *
-   * By default, "small" is less than 10,000.
+   * By default, "small" is less than 1,000,000.
    *
    * @category Numeric Expression
    *
@@ -636,12 +677,13 @@ export interface BoxedExpression {
    */
   get symbol(): string | null;
 
-  /**  Shortcut for `this.symbol === "Missing"`
+  /**  Return `true` if this expression or any subexpression is an `["Error"]`
+   * expression.
    *
    * @category Symbol Expression
    *
    */
-  get isMissing(): boolean;
+  get isValid(): boolean;
 
   // ----- STRING
 
@@ -908,21 +950,20 @@ export interface BoxedExpression {
    */
   get complexity(): number;
 
-  /** The domain of this expression. */
+  /** The domain of this expression. If a function expression, this the domain
+   * of the value of the function(the codomain of the function), if a symbol
+   * the domain of the value of the symbol.
+   */
   get domain(): BoxedDomain;
 
-  /** Symbols that represent a variable, can have their domain modified */
+  /** Symbols that represent a variable (or a function name), can have their
+   *  domain modified */
   set domain(domain: BoxedDomain | string);
 
-  /** The domain of the value of this expression, using the value of the
-   * expression, definitions associated with this expression and assumptions
-   * if necessary.
-   *
-   * For functions, the `valueDomain` is the codomain of the function.
-   */
-  get valueDomain(): BoxedDomain;
-
-  /** For symbols and functions, a possible definition associated with the expression */
+  /** For symbols and functions, a possible definition associated with the
+   *  expression. `basedDefinition` is the base class of symbol and function
+   *  definition. */
+  get basedDefinition(): BoxedBaseDefinition | undefined;
   get functionDefinition(): BoxedFunctionDefinition | undefined;
   get symbolDefinition(): BoxedSymbolDefinition | undefined;
 
@@ -1053,17 +1094,17 @@ export interface BoxedExpression {
 
   /**
    * Update the definition associated with this expression, taking
-   * into account the current context.
+   * into account the specified scope.
    *
    * @internal
    */
-  _repairDefinition(): void;
+  bind(scope: RuntimeScope | null): void;
 
   /** Purge any cached values.
    *
    * @internal
    */
-  _purge(): undefined;
+  unbind(): void;
 }
 
 /** A semi boxed expression is an MathJSON expression which can include some
@@ -1223,9 +1264,9 @@ export type BaseDefinition = {
    * The name of a symbol or function is an arbitrary string of Unicode
    * characters, however the following conventions are recommended:
    *
-   * - Use only letters, digits and `-`, and the first character should be
-   * a letter: `/^[a-zA-Z][a-zA-Z0-9-]+/`
-   * - Functions and symbols exported from a library should start with an uppercase letter
+   * - Use only letters, digits and `-`: `/[a-zA-Z0-9-]+/`
+   * - The first character should be a letter: `/^[a-zA-Z]/`
+   * - Functions and symbols exported from a library should start with an uppercase letter `/^[A-Z]/`
    *
    */
   name: string;
@@ -1245,7 +1286,7 @@ export type BaseDefinition = {
   wikidata?: string;
 };
 
-export type BoxedBaseDefinition = {
+export interface BoxedBaseDefinition {
   name: string;
   wikidata?: string;
   description?: string | string[];
@@ -1257,8 +1298,11 @@ export type BoxedBaseDefinition = {
    */
   scope: RuntimeScope | undefined;
 
-  _purge(): undefined;
-};
+  /** When the environment changes, for example the numerical precision,
+   * call `reset()` so that any cached values can be recalculated.
+   */
+  reset();
+}
 
 /**
  * A function definition can have some flags to indicate specific
@@ -1365,12 +1409,17 @@ export type FunctionDefinitionFlags = {
  */
 
 export type FunctionSignature = {
-  /** The signature this applies to. A domain compatible with the `Function`
+  /** The domain of this signature, a domain compatible with the `Function`
    * domain) */
   domain?: BoxedDomain | DomainExpression;
 
   /** The minimum and maximum values of the result of the function */
   // range?: [min: number, max: number];
+
+  /** An optional handler to determine the codomain of the function.
+   * If not provided, the codomain of the function is determined from `domain`
+   */
+  codomain?: (ce: IComputeEngine, args: BoxedDomain[]) => BoxedDomain | null;
 
   /**
    * Return the canonical form of the expression with the arguments `args`.
@@ -1515,6 +1564,9 @@ export type FunctionSignature = {
 export type BoxedFunctionSignature = {
   domain: BoxedDomain;
 
+  codomain?:
+    | BoxedDomain
+    | ((ce: IComputeEngine, args: BoxedDomain[]) => BoxedDomain | null);
   canonical?: (ce: IComputeEngine, args: BoxedExpression[]) => BoxedExpression;
   simplify?: (
     ce: IComputeEngine,
@@ -1580,20 +1632,31 @@ export type FunctionDefinition = BaseDefinition &
 
     hold?: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
-    signatures?: FunctionSignature[];
+    /** When `true`, if an argument to a function, the function expression
+     * will be evaluated before the calling function is bound.
+     *
+     * This is uncommon, but is used by the `Symbol` and `Subscript` functions
+     * for example. Their codomain must be determined from the value of
+     * their arguments, not only from the domain of those arguments.
+     *
+     * For example `['Symbol', 'a', 2]`  is equivalent to the symbol `a2`. The
+     * codomain of `['Symbol', 'a', 2]` is the domain of `a2`, but that cannot
+     * be determined until `['Symbol, 'a', 2]` is evaluated.
+     *
+     * **Default**: `false`
+     */
+    dynamic?: boolean;
+
+    signature?: FunctionSignature;
   };
 
 export type BoxedFunctionDefinition = BoxedBaseDefinition &
   FunctionDefinitionFlags & {
     complexity: number;
     hold: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
+    dynamic: boolean;
 
-    // `valueDomain` is the (computed) common ancestor of the return value
-    // of all the signatures
-    valueDomain: BoxedDomain;
-    signatures: BoxedFunctionSignature[];
-
-    getSignature(domains: BoxedDomain[]): BoxedFunctionSignature | null;
+    signature: BoxedFunctionSignature;
   };
 
 /**
@@ -1772,7 +1835,7 @@ export interface IComputeEngine {
   readonly _DECIMAL_NEGATIVE_ONE: Decimal;
 
   /** The current scope */
-  context: RuntimeScope;
+  context: RuntimeScope | null;
 
   /** Absolute time beyond which evaluation should not proceed
    * @internal
@@ -1812,23 +1875,43 @@ export interface IComputeEngine {
    * If a definition existed previously, it is replaced.
    */
   defineSymbol(def: SymbolDefinition): BoxedSymbolDefinition;
-  getSymbolDefinition(
-    name: string,
-    wikidata?: string
-  ): undefined | BoxedSymbolDefinition;
-  /**
-   * Return `undefined` if no definition exist for this `head.
-   */
-  getFunctionDefinition(head: string): undefined | BoxedFunctionDefinition;
 
   /**
-   * Returned a boxed expression from the input.
+   * Associate a new definition to a function in the current context.
+   *
+   * If a definition existed previously, it is replaced.
+   */
+  defineFunction(def: FunctionDefinition): BoxedFunctionDefinition;
+
+  lookupSymbol(
+    name: string,
+    wikidata?: string,
+    scope?: RuntimeScope
+  ): undefined | BoxedSymbolDefinition;
+
+  /** Return `undefined` if no definition exist for this `head` */
+  lookupFunctionName(
+    head: string,
+    scope?: RuntimeScope
+  ): undefined | BoxedFunctionDefinition;
+
+  /** Return a function definition matching a signature */
+  lookupFunctionSignature(
+    head: string,
+    ops: BoxedDomain[],
+    codomain?: BoxedDomain,
+    scope?: RuntimeScope
+  ): undefined | BoxedFunctionDefinition;
+
+  /**
+   * Return a boxed expression from the input.
    *
    * The result may not be canonical.
    */
   box(
     expr: Decimal | Complex | [num: number, denom: number] | SemiBoxedExpression
   ): BoxedExpression;
+
   /** Return a canonical boxed number */
   number(
     value:
@@ -1841,15 +1924,25 @@ export interface IComputeEngine {
   ): BoxedExpression;
   /** Return a canonical boxed symbol */
   symbol(sym: string, metadata?: Metadata): BoxedExpression;
+
   /** Return a canonical boxed string */
   string(s: string, metadata?: Metadata): BoxedExpression;
-  /** Return a canonical boxed domain */
+
+  /** Return a canonical boxed domain.
+   *
+   * If the domain is invalid, may return an `["Error"]` expression
+   *
+   */
   domain(
     domain: SemiBoxedExpression | BoxedDomain | string,
     metadata?: Metadata
   ): BoxedDomain;
 
-  /** Return a canonical expression.
+  /** Return a canonical lambda expression */
+  lambda(expr: SemiBoxedExpression, sig: BoxedDomain): BoxedLambdaExpression;
+
+  /**
+   * Return a canonical expression.
    *
    * Note that the result may not be a function, or may have a different
    * `head` than the one specified.
@@ -1870,8 +1963,8 @@ export interface IComputeEngine {
    * In general, consider using `fn()` or `box()` instead.
    *
    * The result is canonical, but the caller has to ensure that all the
-   * conditions are met (i.e. ops properly normalized and sorted, all
-   * ops canonical, etc..) so that the result is actually canonical.
+   * conditions are met (i.e. `ops` properly normalized and sorted, all
+   * `ops` canonical, etc..) so that the result is actually canonical.
    */
   _fn(
     head: string | BoxedExpression,
@@ -1883,7 +1976,10 @@ export interface IComputeEngine {
    *
    * The result is canonical.
    */
-  error(val: BoxedExpression, message: string, messageArg: SemiBoxedExpression);
+  error(
+    message: string | [string, ...SemiBoxedExpression[]],
+    where?: SemiBoxedExpression
+  ): BoxedExpression;
 
   /** Shortcut for `this.fn("Add"...)`.
    *
@@ -2046,7 +2142,7 @@ export interface IComputeEngine {
   readonly stats: ComputeEngineStats;
 
   /** @internal */
-  purge(): void;
+  reset(): void;
   /** @internal */
   _register(expr: BoxedExpression): void;
   /** @internal */

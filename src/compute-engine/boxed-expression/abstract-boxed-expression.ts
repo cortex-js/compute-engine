@@ -18,7 +18,12 @@ import {
   SemiBoxedExpression,
   SimplifyOptions,
   Substitution,
+  RuntimeScope,
+  DomainCompatibility,
+  DomainLiteral,
+  BoxedBaseDefinition,
 } from '../public';
+import { getSubexpressions, getSymbols } from './utils';
 
 /**
  * AbstractBoxedExpression
@@ -72,6 +77,13 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return this.isSame(this.engine.box(rhs));
   }
 
+  isCompatible(
+    _dom: BoxedDomain | DomainLiteral,
+    _kind?: DomainCompatibility
+  ): boolean {
+    return false;
+  }
+
   has(_v: string | string[]): boolean {
     return false;
   }
@@ -84,11 +96,17 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return '';
   }
 
-  _purge(): undefined {
-    return undefined;
+  get isPure(): boolean {
+    return false;
   }
 
-  get isPure(): boolean {
+  /** For a symbol, true if the symbol is a free variable (no value) */
+  get isFree(): boolean {
+    return false;
+  }
+
+  /** For a symbol, true if the symbol is a constant (unchangeable value) */
+  get isConstant(): boolean {
     return false;
   }
 
@@ -114,6 +132,24 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return 1;
   }
 
+  get symbols(): BoxedExpression[] {
+    return [...getSymbols(this, new Set<string>())].map((x) =>
+      this.engine.symbol(x)
+    );
+  }
+
+  getSubexpressions(head: string): BoxedExpression[] {
+    return getSubexpressions(this, head);
+  }
+
+  get subexpressions(): BoxedExpression[] {
+    return this.getSubexpressions('');
+  }
+
+  get errors(): BoxedExpression[] {
+    return this.getSubexpressions('Error');
+  }
+
   // Only return non-null for functions
   get ops(): null | BoxedExpression[] {
     return null;
@@ -124,13 +160,17 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   }
 
   get op1(): BoxedExpression {
-    return this.engine.symbol('Missing');
+    return this.engine.symbol('Nothing');
   }
   get op2(): BoxedExpression {
-    return this.engine.symbol('Missing');
+    return this.engine.symbol('Nothing');
   }
   get op3(): BoxedExpression {
-    return this.engine.symbol('Missing');
+    return this.engine.symbol('Nothing');
+  }
+
+  get basedDefinition(): BoxedBaseDefinition | undefined {
+    return undefined;
   }
 
   get symbolDefinition(): BoxedSymbolDefinition | undefined {
@@ -141,7 +181,11 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  _repairDefinition(): void {
+  bind(_scope: RuntimeScope | null): void {
+    return;
+  }
+
+  unbind(): void {
     return;
   }
 
@@ -188,8 +232,8 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return null;
   }
 
-  get isMissing(): boolean {
-    return false;
+  get isValid(): boolean {
+    return true;
   }
 
   get value(): BoxedExpression | undefined {
@@ -207,16 +251,11 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return undefined;
   }
   get domain(): BoxedDomain {
-    return this.engine.domain('Nothing');
+    return this.engine.domain('Void') as BoxedDomain;
   }
   set domain(_domain: BoxedDomain) {
     throw new Error(`Can't change the domain of \\(${this.latex}\\)`);
   }
-
-  get valueDomain(): BoxedDomain {
-    return this.domain;
-  }
-
   get string(): string | null {
     return null;
   }

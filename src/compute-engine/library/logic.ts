@@ -30,9 +30,11 @@ export const LOGIC_LIBRARY: SymbolTable = {
       commutative: true,
       idempotent: true,
       complexity: 10000,
-      signatures: [
-        { domain: 'LogicOperator', simplify: processAnd, evaluate: processAnd },
-      ],
+      signature: {
+        domain: 'LogicOperator',
+        simplify: processAnd,
+        evaluate: processAnd,
+      },
     },
     {
       name: 'Or',
@@ -42,9 +44,11 @@ export const LOGIC_LIBRARY: SymbolTable = {
       commutative: true,
       idempotent: true,
       complexity: 10000,
-      signatures: [
-        { domain: 'LogicOperator', simplify: processOr, evaluate: processOr },
-      ],
+      signature: {
+        domain: 'LogicOperator',
+        simplify: processOr,
+        evaluate: processOr,
+      },
     },
     {
       name: 'Not',
@@ -52,95 +56,86 @@ export const LOGIC_LIBRARY: SymbolTable = {
       involution: true,
       complexity: 10100,
       // @todo: this may not be needed, since we also have rules.
-      signatures: [
-        { domain: 'LogicOperator', simplify: processNot, evaluate: processNot },
-      ],
+      signature: {
+        domain: 'LogicOperator',
+        simplify: processNot,
+        evaluate: processNot,
+      },
     },
     {
       name: 'Equivalent',
       wikidata: 'Q220433',
       complexity: 10200,
-      signatures: [
-        {
-          domain: 'LogicOperator',
-          simplify: processEquivalent,
-          evaluate: processEquivalent,
-        },
-      ],
+      signature: {
+        domain: 'LogicOperator',
+        simplify: processEquivalent,
+        evaluate: processEquivalent,
+      },
     },
     {
       name: 'Implies',
       wikidata: 'Q7881229',
       complexity: 10200,
-      signatures: [
-        {
-          domain: 'LogicOperator',
-          simplify: processImplies,
-          evaluate: processImplies,
-        },
-      ],
+      signature: {
+        domain: 'LogicOperator',
+        simplify: processImplies,
+        evaluate: processImplies,
+      },
     },
-    { name: 'Exists', signatures: [{ domain: 'MaybeBoolean' }] },
+    { name: 'Exists', signature: { domain: 'MaybeBoolean' } },
 
     {
       name: 'If',
       hold: 'rest',
-      signatures: [
-        {
-          domain: 'Predicate',
-          simplify: (ce, ops) => {
-            const cond = ops[0];
-            if (cond && cond.symbol === 'True')
-              return ops[1] ? ops[1].simplify() : ce.box('Nothing');
-            return ops[2] ? ops[2].simplify() : ce.box('Nothing');
-          },
-          evaluate: (ce, ops) => {
-            const cond = ops[0];
-            if (cond && cond.symbol === 'True')
-              return ops[1] ? ops[1].evaluate() : ce.box('Nothing');
-            return ops[2] ? ops[2].evaluate() : ce.box('Nothing');
-          },
-          N: (ce, ops) => {
-            const cond = ops[0];
-            if (cond && cond.symbol === 'True')
-              return ops[1] ? ops[1].N() : ce.box('Nothing');
-            return ops[2] ? ops[2].N() : ce.box('Nothing');
-          },
+      signature: {
+        domain: 'Function',
+        codomain: (ce, ops) => ce.domain(['Union', ops[0], ops[1]]),
+        simplify: (ce, ops) => {
+          const cond = ops[0];
+          if (cond && cond.symbol === 'True')
+            return ops[1] ? ops[1].simplify() : ce.box('Nothing');
+          return ops[2] ? ops[2].simplify() : ce.box('Nothing');
         },
-      ],
+        evaluate: (ce, ops) => {
+          const cond = ops[0];
+          if (cond && cond.symbol === 'True')
+            return ops[1] ? ops[1].evaluate() : ce.box('Nothing');
+          return ops[2] ? ops[2].evaluate() : ce.box('Nothing');
+        },
+        N: (ce, ops) => {
+          const cond = ops[0];
+          if (cond && cond.symbol === 'True')
+            return ops[1] ? ops[1].N() : ce.box('Nothing');
+          return ops[2] ? ops[2].N() : ce.box('Nothing');
+        },
+      },
     },
 
     {
       name: 'Loop',
       hold: 'all',
-      signatures: [
-        {
-          domain: 'Function',
-          simplify: (ce, ops) => ops[0]?.simplify() ?? ce.box('Nothing'),
-          evaluate: (ce, ops) => {
-            const body = ops[0] ?? ce.box('Nothing');
-            if (body.symbol === 'Nothing') return body;
-            let result: BoxedExpression;
-            let i = 0;
-            do {
-              result = body.evaluate();
-              i += 1;
-            } while (result.head !== 'Return' && i < ce.iterationLimit);
-            if (result.head === 'Return') return result.op1;
-            return ce.error(
-              result ?? ce.box('Nothing'),
-              'iteration-limit-exceeded',
-              ''
-            );
-          },
-          N: (ce, ops) => {
-            const cond = ops[0];
-            if (cond && cond.symbol === 'True')
-              return ops[1] ? ops[1].N() : ce.box('Nothing');
-            return ops[2] ? ops[2].N() : ce.box('Nothing');
-          },
+      signature: {
+        domain: 'Function',
+        simplify: (ce, ops) => ops[0]?.simplify() ?? ce.box('Nothing'),
+        evaluate: (ce, ops) => {
+          const body = ops[0] ?? ce.box('Nothing');
+          if (body.symbol === 'Nothing') return body;
+          let result: BoxedExpression;
+          let i = 0;
+          do {
+            result = body.evaluate();
+            i += 1;
+          } while (result.head !== 'Return' && i < ce.iterationLimit);
+          if (result.head === 'Return') return result.op1;
+          return ce.error('iteration-limit-exceeded');
         },
-      ],
+        N: (ce, ops) => {
+          const cond = ops[0];
+          if (cond && cond.symbol === 'True')
+            return ops[1] ? ops[1].N() : ce.box('Nothing');
+          return ops[2] ? ops[2].N() : ce.box('Nothing');
+        },
+      },
     },
   ],
 };

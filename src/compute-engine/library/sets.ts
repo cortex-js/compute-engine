@@ -24,78 +24,68 @@ export const SETS_LIBRARY: SymbolTable = {
     {
       name: 'Element',
       complexity: 11200,
-      signatures: [{ domain: 'Predicate' }],
+      signature: { domain: 'Predicate' },
     },
     {
       name: 'NotElement',
       complexity: 11200,
-      signatures: [
-        {
-          domain: 'Predicate',
-          canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
-        },
-      ],
+      signature: {
+        domain: 'Predicate',
+        canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
+      },
     },
     {
       name: 'Subset',
       complexity: 11200,
-      signatures: [{ domain: 'Predicate' }],
+      signature: { domain: 'Predicate' },
     },
     {
       name: 'NotSubset',
       complexity: 11200,
-      signatures: [
-        {
-          domain: 'Predicate',
-          canonical: (ce, args) => ce.fn('Not', [ce.fn('Subset', args)]),
-        },
-      ],
+      signature: {
+        domain: 'Predicate',
+        canonical: (ce, args) => ce.fn('Not', [ce.fn('Subset', args)]),
+      },
     },
     {
       name: 'Superset',
       complexity: 11200,
-      signatures: [{ domain: 'Predicate' }],
+      signature: { domain: 'Predicate' },
     },
     {
       name: 'SupersetEqual',
       complexity: 11200,
-      signatures: [{ domain: 'Predicate' }],
+      signature: { domain: 'Predicate' },
     },
     {
       name: 'NotSuperset',
       complexity: 11200,
-      signatures: [
-        {
-          domain: 'Predicate',
-          canonical: (ce, args) => ce.fn('Not', [ce.fn('Superset', args)]),
-        },
-      ],
+      signature: {
+        domain: 'Predicate',
+        canonical: (ce, args) => ce.fn('Not', [ce.fn('Superset', args)]),
+      },
     },
     {
       name: 'NotSupersetEqual',
       complexity: 11200,
-      signatures: [
-        {
-          domain: 'Predicate',
-          canonical: (ce, args) => ce.fn('Not', [ce.fn('SupersetEqual', args)]),
-        },
-      ],
+      signature: {
+        domain: 'Predicate',
+        canonical: (ce, args) => ce.fn('Not', [ce.fn('SupersetEqual', args)]),
+      },
     },
     {
       name: 'SubsetEqual',
       complexity: 11200,
-      signatures: [{ domain: 'Predicate' }],
+      signature: { domain: 'Predicate' },
       // evaluate: subsetEqual,
     },
     {
       name: 'NotSubsetNotEqual',
       complexity: 11200,
-      signatures: [
-        {
-          domain: 'Predicate',
-          canonical: (ce, args) => ce.fn('Not', [ce.fn('SubsetEqual', args)]),
-        },
-      ],
+      signature: {
+        domain: 'Predicate',
+        canonical: (ce, args) => ce.fn('Not', [ce.fn('SubsetEqual', args)]),
+      },
     },
 
     //
@@ -107,7 +97,7 @@ export const SETS_LIBRARY: SymbolTable = {
       // Aka the product set, the set direct product or cross product
       // Notation: \times
       wikidata: 'Q173740',
-      signatures: [{ domain: ['Function', 'Set', ['Some', 'Set'], 'Set'] }],
+      signature: { domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'] },
       // evaluate: cartesianProduct,
     },
     {
@@ -115,7 +105,7 @@ export const SETS_LIBRARY: SymbolTable = {
       // Return the elements of the first argument that are not in any of
       // the subsequent lists
       wikidata: 'Q242767',
-      signatures: [{ domain: ['Function', 'Set', 'Set'] }],
+      signature: { domain: ['Function', 'Set', 'Set'] },
     },
     {
       name: 'Intersection',
@@ -125,12 +115,10 @@ export const SETS_LIBRARY: SymbolTable = {
       associative: true,
       commutative: true,
       involution: true,
-      signatures: [
-        {
-          domain: ['Function', 'Set', ['Some', 'Set'], 'Set'],
-          evaluate: intersection,
-        },
-      ],
+      signature: {
+        domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'],
+        evaluate: intersection,
+      },
     },
     {
       name: 'Union',
@@ -140,16 +128,14 @@ export const SETS_LIBRARY: SymbolTable = {
       associative: true,
       commutative: true,
       involution: true,
-      signatures: [
-        {
-          domain: ['Function', 'Set', ['Some', 'Set'], 'Set'],
-          evaluate: union,
-        },
-      ],
+      signature: {
+        domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'],
+        evaluate: union,
+      },
     },
     // {
     //   name: 'Set',
-    //   domain: ['Function', ['Some', 'Anything'], 'Set'],
+    //   domain: ['Function', ['Sequence', 'Anything'], 'Set'],
     //   // @todo! set has multiple forms
     //   // Set(Sequence)
     //   // Set(Sequence, Condition)
@@ -158,9 +144,10 @@ export const SETS_LIBRARY: SymbolTable = {
     {
       name: 'SetMinus',
       wikidata: 'Q18192442',
-      signatures: [
-        { domain: ['Function', 'Set', 'Value', 'Set'], evaluate: setMinus },
-      ],
+      signature: {
+        domain: ['Function', 'Set', 'Value', 'Set'],
+        evaluate: setMinus,
+      },
     },
     {
       name: 'SymmetricDifference',
@@ -168,7 +155,7 @@ export const SETS_LIBRARY: SymbolTable = {
       /* = Union(Complement(a, b), Complement(b, a) */
       /* Corresponds to XOR in boolean logic */
       wikidata: 'Q1147242',
-      signatures: [{ domain: ['Function', 'Set', ['Some', 'Set'], 'Set'] }],
+      signature: { domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'] },
     },
   ],
 };

@@ -1,5 +1,5 @@
 export type Attributes = {
-  /** A human readable string to annotate an expression, since JSON does not
+  /** A human readable string to annotate this expression, since JSON does not
    * allow comments in its encoding */
   comment?: string;
 
@@ -7,22 +7,18 @@ export type Attributes = {
    */
   documentation?: string;
 
-  /** A human readable string to indicate a syntax error or
-   * other problem when parsing or evaluating an expression.
-   */
-  error?: string;
-
-  /** A visual representation in LaTeX of the expression.
+  /** A visual representation of this expression as a LaTeX string.
    *
    * This can be useful to preserve non-semantic details, for example
-   * parentheses in an expression or styling attributes
+   * parentheses in an expression or styling attributes.
    */
   latex?: string;
 
   /**
-   * A short string indicating an entry in a wikibase.
+   * A short string referencing an entry in a wikibase.
    *
-   * For example
+   * For example:
+   *
    * `"Q167"` is the [wikidata entry](https://www.wikidata.org/wiki/Q167)
    *  for the `Pi` constant.
    */
@@ -51,19 +47,19 @@ export type Attributes = {
    */
   openmathCd?: string;
 
-  /**  A url to the source of this expression.
+  /**  A URL to the source code from which this expression was generated.
    */
   sourceUrl?: string;
 
-  /** The source from which this expression was generated.
+  /** The source code from which this expression was generated.
    *
-   * It could be a LaTeX expression, or some other source language
+   * It could be a LaTeX expression, or some other source language.
    */
   sourceContent?: string;
 
   /**
    * A character offset in `sourceContent` or `sourceUrl` from which this
-   * expression was generated
+   * expression was generated.
    */
   sourceOffsets?: [start: number, end: number];
 };
@@ -71,19 +67,26 @@ export type Attributes = {
 /**
  * A MathJSON numeric quantity.
  *
- * The string is made of:
+ * The `num` string is made of:
  * - an optional `-` minus sign
  * - a string of decimal digits
- * - an optional fraction part (a `.` decimal point followed by decimal digits)
+ * - an optional fraction part (a `.` decimal marker followed by decimal digits)
+ * - an optional repeating decimal pattern: a string of digits enclosed in
+ *    parentheses
  * - an optional exponent part (a `e` or `E` exponent marker followed by an
- *   optional `-` minus sign, followed by a string of digits).
- * - an optional format suffix:
- *    - `n` to indicate the number is a BigInt
- *    - `d` to indicate the number is an arbitrary precision Decimal number
- *      and may contain more digits or exponents with a greater magnitude than
- *      can be represented with a 64-bit floating point number.
+ *   optional `-` minus sign, followed by a string of digits)
  *
- * For example: `-12.34`, `0.234e-56`, `123454e9999d`.
+ * It can also consist of the value `NaN`, `-Infinity` and `+Infinity` to
+ * represent these respective values.
+ *
+ * A MathJSON number may contain more digits or an exponent with a greater
+ * range than can be represented in an IEEE 64-bit floating-point.
+ *
+ * For example:
+ * - `-12.34`
+ * - `0.234e-56`
+ * - `1.(3)`
+ * - `123456789123456789.123(4567)e999`
  */
 export type MathJsonNumber = {
   num: 'NaN' | '-Infinity' | '+Infinity' | string;

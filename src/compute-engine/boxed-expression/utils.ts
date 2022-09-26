@@ -1,3 +1,6 @@
+import Decimal from 'decimal.js';
+import { Expression } from '../../math-json/math-json-format';
+import { isNumberObject } from '../../math-json/utils';
 import { MACHINE_PRECISION } from '../numerics/numeric';
 import { BoxedExpression, IComputeEngine } from '../public';
 
@@ -21,20 +24,26 @@ export function latexString(s: unknown): string | null {
  * - ['Multiply', 5, 'ImaginaryUnit']
  * - ['Multiply', 'ImaginaryUnit', 5]
  */
-export function getImaginaryCoef(expr: BoxedExpression): number {
+export function getImaginaryCoef(expr: BoxedExpression): number | null {
   if (expr.symbol === 'ImaginaryUnit') return 1;
-  const z = expr.complexValue;
-  if (z && z.re === 0) return z.im;
-  if (expr.head === 'Negate') return -getImaginaryCoef(expr.op1);
+  if (expr.isLiteral) {
+    const z = expr.complexValue;
+    if (z && z.re === 0) return z.im;
+  }
+  if (expr.head === 'Negate') {
+    const v = getImaginaryCoef(expr.op1);
+    if (v === null) return null;
+    return -v;
+  }
 
-  let f = 0;
+  let f: number | null = 0;
 
   if (expr.head === 'Multiply' && expr.nops === 2) {
     let m: BoxedExpression | undefined;
     if (expr.op1.symbol === 'ImaginaryUnit') m = expr.op2;
     else if (expr.op2.symbol === 'ImaginaryUnit') m = expr.op1;
 
-    if (m && m.isLiteral) f = m.asFloat ?? 0;
+    if (m && m.isLiteral) f = m.asFloat;
   }
 
   return f;
@@ -42,7 +51,7 @@ export function getImaginaryCoef(expr: BoxedExpression): number {
 
 /**
  * Return the free symbols in the expression, recursively.
- * A variable, or free symbol,is a symbol that is not bound to a value.
+ * A variable, or free symbol, is a symbol that is not bound to a value.
  */
 export function getVars(expr: BoxedExpression): string[] {
   if (expr.symbol) {
@@ -62,12 +71,48 @@ export function getVars(expr: BoxedExpression): string[] {
   return result;
 }
 
+export function getSymbols(
+  expr: BoxedExpression,
+  set: Set<string>
+): Set<string> {
+  if (expr.symbol) {
+    set.add(expr.symbol);
+    return set;
+  }
+
+  if (!expr.ops && !expr.keys) return set;
+
+  if (expr.ops) for (const op of expr.ops) getSymbols(op, set);
+
+  if (expr.keys)
+    for (const key of expr.keys) getSymbols(expr.getKey(key)!, set);
+
+  return set;
+}
+
+export function getSubexpressions(
+  expr: BoxedExpression,
+  head: string
+): BoxedExpression[] {
+  if (expr.ops) {
+    const result = !head || expr.head === head ? [expr] : [];
+    for (const op of expr.ops) result.push(...getSubexpressions(op, head));
+  } else if (expr.keys) {
+    const result = !head || expr.head === head ? [expr] : [];
+    for (const op of expr.keys)
+      result.push(...getSubexpressions(expr.getKey(op)!, head));
+    return result;
+  }
+  if (!head || expr.head === head) return [expr];
+  return [];
+}
+
 /**
  * For any numeric result, or when boxing numbers,
- * if `ce.useDecimal` is true, create them as Decimal number
- * if `ce.useDecimal` is false, create them as machine number
+ * if `preferDecimal` is true, create them as Decimal number
+ * if `preferDecimal` is false, create them as machine number
  */
-export function useDecimal(ce: IComputeEngine) {
+export function preferDecimal(ce: IComputeEngine) {
   return (
     ce.numericMode === 'decimal' ||
     (ce.numericMode === 'auto' && ce.precision > Math.floor(MACHINE_PRECISION))
@@ -145,4 +190,37 @@ export function isListLike(expr: BoxedExpression): boolean {
 export function getListLike(expr: BoxedExpression): BoxedExpression[] {
   if (expr.head === 'List') return expr.ops!;
   return [];
+}
+
+/**
+ * If `expr` is a number, return it as a Decimal (it might be
+ * in the machine value range or not). Use `isInMachineRange()` to check.
+ *
+ * Use this instead of `machineValue()` when possible, as `machineValue` will truncate decimal numbers to machine numbers
+ */
+export function decimalValue(
+  ce: IComputeEngine,
+  expr: Expression | null | undefined
+): Decimal | null {
+  if (expr === null || expr === undefined) return null;
+  if (typeof expr === 'number') return ce.decimal(expr);
+
+  if (isNumberObject(expr)) {
+    let s = expr.num
+      .toLowerCase()
+      .replace(/[nd]$/g, '')
+      .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+    if (/\([0-9]+\)$/.test(s)) {
+      const [_, body, repeat] = s.match(/(.+)\(([0-9]+)\)$/) ?? [];
+      s = body + repeat.repeat(Math.ceil(ce.precision / repeat.length));
+    }
+
+    if (s === 'nan') return ce.decimal('NaN');
+    if (s === 'infinity' || s === '+infinity') return ce.decimal('+Infinity');
+    if (s === '-infinity') return ce.decimal('-Infinity');
+
+    return ce.decimal(s);
+  }
+
+  return null;
 }

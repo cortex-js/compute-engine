@@ -148,6 +148,7 @@ export function domainToFlags(
   const result: Partial<SymbolFlags> = {};
 
   if (dom.isNumeric) {
+    // @todo: handle `Range`, `Interval`, and other numeric literals
     const domain = dom.symbol;
     result.number = true;
     if (domain === 'Integer') result.integer = true;
@@ -228,13 +229,13 @@ function valueToFlags(value: BoxedExpression): Partial<SymbolFlags> {
 
 export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   private _engine: IComputeEngine;
-  private _value: BoxedExpression | undefined;
+  readonly scope: RuntimeScope | undefined;
+  private _value: BoxedExpression | undefined | null;
   readonly name: string;
   wikidata?: string;
   description?: string | string[];
-  readonly scope: RuntimeScope | undefined;
 
-  private _domain: BoxedDomain | undefined;
+  private _domain: BoxedDomain | undefined | null;
   private _inferedDomain: [BoxedDomain, BoxedDomain] | undefined;
   // readonly unit?: BoxedExpression;
 
@@ -279,18 +280,29 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   self?: unknown; // @todo
 
   constructor(ce: IComputeEngine, def: SymbolDefinition) {
+    if (!ce.context) throw Error('No context available');
     this._engine = ce;
-    this._def = def;
     this.scope = ce.context;
+    this._def = def;
     this.name = def.name;
     this.constant = def.constant ?? false;
     this.hold = def.hold ?? true;
-
-    this._purge();
+    this._value = null;
+    this._domain = null;
   }
 
-  _purge(): undefined {
-    this._value = this._value?._purge();
+  reset() {
+    this._value?.unbind();
+    this.unbind();
+  }
+
+  unbind() {
+    this._value = null;
+    this._domain = null;
+  }
+
+  bind() {
+    this._value = undefined;
     // this._domain = this._domain?._purge();
 
     const def = this._def;
@@ -329,9 +341,9 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
       const value = ce.number(def.value);
       let domain: BoxedDomain;
       const defDomain = def.domain ? ce.domain(def.domain) : undefined;
-      if (defDomain && value.valueDomain!.isCompatible(defDomain))
+      if (defDomain && value.domain!.isCompatible(defDomain))
         domain = defDomain;
-      else domain = value.valueDomain!;
+      else domain = value.domain!;
 
       this._value = value;
       this._domain = domain;
@@ -339,7 +351,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
       this.setProps(domainToFlags(domain));
       this.setProps(result);
 
-      return undefined;
+      return;
     }
 
     //
@@ -347,30 +359,31 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     //
 
     let value: BoxedExpression | undefined;
-    if (isLatexString(def.value)) value = ce.parse(def.value)!;
-    else if (typeof def.value === 'function')
-      value = ce.box(def.value(ce) ?? 'Undefined');
-    else if (def.value) value = ce.box(def.value);
-
-    if (!value && def.hold === false)
-      throw new Error(
-        `Symbol definition "${def.name}": Expected a value "hold=false" `
-      );
+    if (def.hold === false) {
+      value = this.value;
+      if (!value)
+        throw new Error(
+          `Symbol definition "${def.name}": Expected a value "hold=false" `
+        );
+    }
 
     value = value?.canonical;
 
-    // If there is a domain specified in the definition, and it
-    // is compatible with the value, use it.
+    //
+    // If there is a domain specified in the definition, and it is compatible
+    // with the value, use it.
+    //
     // For example, domain = Real, value = 5 (Integer).
+    //
     // Otherwise, adopt the domain of the value, if there is one.
+    //
     // Otherwise, the default domain if there is one.
-    // Otherwise 🤷 'Anything'
+    //
     let domain: BoxedDomain;
     const defDomain = def.domain ? ce.domain(def.domain) : undefined;
-    if (defDomain && (!value || value.valueDomain!.isCompatible(defDomain)))
+    if (defDomain && (!value || value.domain!.isCompatible(defDomain)))
       domain = defDomain;
-    else
-      domain = value?.valueDomain ?? ce.defaultDomain ?? ce.domain('Anything');
+    else domain = value?.domain ?? ce.defaultDomain!;
 
     if (!value) {
       this._value = undefined;
@@ -378,19 +391,27 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
       this.setProps(domainToFlags(domain));
       this.setProps(result);
 
-      return undefined;
+      return;
     }
     this._value = value;
     this._domain = domain;
     this.setProps(valueToFlags(value));
     this.setProps(domainToFlags(domain));
     this.setProps(result);
-
-    return undefined;
   }
 
   get value(): BoxedExpression | undefined {
-    return this._value;
+    if (this._value === null) this.bind();
+    if (this._value === undefined) {
+      if (isLatexString(this._def.value))
+        this._value = this._engine.parse(this._def.value)!;
+      else if (typeof this._def.value === 'function')
+        this._value = this._engine.box(
+          this._def.value(this._engine) ?? 'Undefined'
+        );
+      else if (this._def.value) this._value = this._engine.box(this._def.value);
+    }
+    return this._value ?? undefined;
   }
 
   set value(val: BoxedExpression | number | undefined) {
@@ -404,10 +425,11 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   }
 
   get domain(): BoxedDomain | undefined {
-    return this._domain;
+    if (this._domain === null) this.bind();
+    return this._domain ?? undefined;
   }
 
-  set domain(domain: BoxedDomain | undefined | DomainExpression) {
+  set domain(domain: BoxedDomain | DomainExpression | undefined) {
     if (!domain) {
       this._domain = undefined;
       return;
@@ -417,7 +439,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
 
     // Ensure the domain is compatible with the domain of the value,
     // if there is one
-    const valDomain = this.value?.valueDomain;
+    const valDomain = this.value?.domain;
     if (valDomain && !valDomain.isCompatible(domain)) domain = valDomain;
 
     this._domain = domain;
@@ -466,6 +488,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   //
 
   get number(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._number;
   }
   set number(val: boolean | undefined) {
@@ -473,132 +496,154 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   }
 
   get integer(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._integer;
   }
   set integer(val: boolean | undefined) {
     this.updateFlags({ integer: val });
   }
   get rational(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._rational;
   }
   set rational(val: boolean | undefined) {
     this.updateFlags({ rational: val });
   }
   get algebraic(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._algebraic;
   }
   set algebraic(val: boolean | undefined) {
     this.updateFlags({ algebraic: val });
   }
   get real(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._real;
   }
   set real(val: boolean | undefined) {
     this.updateFlags({ real: val });
   }
   get extendedReal(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._extendedReal;
   }
   set extendedReal(val: boolean | undefined) {
     this.updateFlags({ extendedReal: val });
   }
   get complex(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._complex;
   }
   set complex(val: boolean | undefined) {
     this.updateFlags({ complex: val });
   }
   get extendedComplex(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._extendedComplex;
   }
   set extendedComplex(val: boolean | undefined) {
     this.updateFlags({ extendedComplex: val });
   }
   get imaginary(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._imaginary;
   }
   set imaginary(val: boolean | undefined) {
     this.updateFlags({ imaginary: val });
   }
   get positive(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._positive;
   }
   set positive(val: boolean | undefined) {
     this.updateFlags({ positive: val });
   }
   get nonPositive(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._nonPositive;
   }
   set nonPositive(val: boolean | undefined) {
     this.updateFlags({ nonPositive: val });
   }
   get negative(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._negative;
   }
   set negative(val: boolean | undefined) {
     this.updateFlags({ negative: val });
   }
   get nonNegative(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._nonNegative;
   }
   set nonNegative(val: boolean | undefined) {
     this.updateFlags({ nonNegative: val });
   }
   get zero(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._zero;
   }
   set zero(val: boolean | undefined) {
     this.updateFlags({ zero: val });
   }
   get notZero(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._notZero;
   }
   set notZero(val: boolean | undefined) {
     this.updateFlags({ notZero: val });
   }
   get one(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._one;
   }
   set one(val: boolean | undefined) {
     this.updateFlags({ one: val });
   }
   get negativeOne(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._negativeOne;
   }
   set negativeOne(val: boolean | undefined) {
     this.updateFlags({ negativeOne: val });
   }
   get infinity(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._infinity;
   }
   set infinity(val: boolean | undefined) {
     this.updateFlags({ infinity: val });
   }
   get finite(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._finite;
   }
   set finite(val: boolean | undefined) {
     this.updateFlags({ finite: val });
   }
   get NaN(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._NaN;
   }
   set NaN(val: boolean | undefined) {
     this.updateFlags({ NaN: val });
   }
   get even(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._even;
   }
   set even(val: boolean | undefined) {
     this.updateFlags({ even: val });
   }
   get odd(): boolean | undefined {
+    if (this._value === null) this.bind();
     return this._odd;
   }
   set odd(val: boolean | undefined) {
     this.updateFlags({ odd: val });
   }
   get prime(): boolean | undefined {
+    if (this._value === null) this.bind();
     if (this._prime === undefined && this._value?.isNumber) {
       if (!this._value.isInteger || this._value.isNonPositive) {
         this._prime = false;
@@ -621,6 +666,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     this.updateFlags({ prime: val });
   }
   get composite(): boolean | undefined {
+    if (this._value === null) this.bind();
     if (this._composite === undefined) {
       const isPrime = this.prime;
       if (isPrime === undefined) this._composite = undefined;

@@ -380,12 +380,7 @@ export function parse(s: string): Expression {
     i = skipWhitespace(s, i);
 
     if (i < s.length) {
-      return [
-        'Error',
-        result ?? 'Nothing',
-        { str: 'Unexpected token' },
-        s.substring(i),
-      ];
+      return ['Error', { str: 'unexpected-token' }, s.substring(i)];
     }
 
     return result ?? 'Nothing';

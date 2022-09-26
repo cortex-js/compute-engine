@@ -17,7 +17,6 @@ import {
   LatexString,
   NumberFormattingOptions,
   LibraryCategory,
-  LatexToken,
 } from './public';
 import { Serializer } from './serializer';
 import { Expression } from '../../math-json/math-json-format';
@@ -41,7 +40,7 @@ export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> =
 
     multiply: '\\times',
 
-    missingSymbol: '\\placeholder{}',
+    missingSymbol: '\\blacksquare',
 
     // openGroup: '(',
     // closeGroup: ')',
@@ -135,21 +134,53 @@ export class LatexSyntax {
       tokenize(latex, []),
       this.options,
       this.dictionary,
-      this.computeEngine,
-      this.onError
+      this.computeEngine
     );
 
     let expr = scanner.matchExpression();
 
     if (!scanner.atEnd) {
-      const rest: LatexToken[] = [];
-      while (!scanner.atEnd) rest.push(scanner.next());
-      expr = [
-        'Error',
-        expr ?? 'Nothing',
-        { str: 'syntax-error' },
-        ['LatexForm', { str: tokensToString(rest) }],
-      ];
+      const opDefs = scanner.peekDefinitions('infix');
+      if (opDefs) {
+        const start = scanner.index;
+        const [def, n] = opDefs[0];
+        scanner.index += n;
+        const result = def.parse(
+          scanner,
+          { minPrec: 0 },
+          expr ?? scanner.error('missing', start)
+        );
+        if (result) return result;
+        if (def.name) {
+          return [
+            def.name,
+            expr ?? scanner.error('missing', start),
+            scanner.error('missing', start),
+          ];
+        }
+        scanner.index = start;
+      }
+
+      const rest = scanner.index;
+      const token = scanner.next();
+      while (!scanner.atEnd) scanner.next();
+      // const error: Expression = [
+      //   'Error',
+      //   ['ErrorCode', { str: 'unexpected-token' }, { str: rest[0] }],
+      //   ['Latex', { str: tokensToString(rest) }],
+      // ];
+
+      const error = scanner.error(
+        [
+          token.length > 1 && token.startsWith('\\')
+            ? 'unexpected-command'
+            : 'unexpected-token',
+          { str: tokensToString([token]) },
+        ],
+        rest
+      );
+      if (!expr) expr = error;
+      else expr = ['Sequence', expr, error];
     }
 
     if (!expr) expr = 'Nothing';

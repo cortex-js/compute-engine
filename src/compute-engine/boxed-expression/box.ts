@@ -5,16 +5,17 @@ import {
   SemiBoxedExpression,
   BoxedExpression,
   Metadata,
+  DomainExpression,
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { BoxedDictionary } from './boxed-dictionary';
 import { BoxedFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
-import { _BoxedDomain } from './boxed-domain';
-import { complexAllowed, useDecimal } from './utils';
+import { boxDomain, _BoxedDomain } from './boxed-domain';
+import { complexAllowed, decimalValue, preferDecimal } from './utils';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
-import { machineValue } from '../../math-json/utils';
+import { isInMachineRange } from '../numerics/numeric-decimal';
 
 /**
  * Notes about the boxed form:
@@ -56,19 +57,22 @@ export function box(
   if (Array.isArray(expr)) {
     // If the first element is a number, it's not a function, it's a rational
     // `[number, number]`
-    if (typeof expr[0] !== 'number') {
-      return new BoxedFunction(
-        ce,
-        typeof expr[0] === 'string' ? expr[0] : box(ce, expr[0]),
-        expr.slice(1).map((x) => box(ce, x))
-      );
+    if (typeof expr[0] === 'number') {
+      const [n, d] = expr;
+      if (typeof d === 'number' && Number.isInteger(n) && Number.isInteger(d))
+        return ce.number(expr as [number, number]);
+      // This wasn't a valid rational, turn it into a `Divide`
+      return boxFunction(ce, 'Divide', expr);
     }
 
-    const [n, d] = expr;
-    if (typeof d === 'number' && Number.isInteger(n) && Number.isInteger(d))
-      return ce.number(expr as [number, number]);
-    // This wasn't a valid rational, turn it into a `Divide`
-    return ce.fn('Divide', expr);
+    if (typeof expr[0] === 'string')
+      return boxFunction(ce, expr[0], expr.slice(1));
+
+    return new BoxedFunction(
+      ce,
+      box(ce, expr[0]),
+      expr.slice(1).map((x) => box(ce, x))
+    );
   }
 
   //
@@ -104,7 +108,8 @@ export function box(
     if ('fn' in expr) {
       if (typeof expr.fn[0] === 'string')
         return boxFunction(ce, expr.fn[0], expr.fn.slice(1), metadata);
-      return ce.fn(
+      return new BoxedFunction(
+        ce,
         box(ce, expr.fn[0]),
         expr.fn.slice(1).map((x) => box(ce, x)),
         metadata
@@ -178,7 +183,11 @@ export function boxNumber(
     if (!num.isFinite() && num.isNegative()) return ce._NEGATIVE_INFINITY;
 
     // Use a Decimal if in `decimal` mode, or `auto` with precision > 15
-    return new BoxedNumber(ce, useDecimal(ce) ? num : num.toNumber(), metadata);
+    return new BoxedNumber(
+      ce,
+      preferDecimal(ce) ? num : num.toNumber(),
+      metadata
+    );
   }
 
   if (typeof num === 'object' && 'num' in num) {
@@ -234,7 +243,10 @@ export function boxNumber(
   return null;
 }
 
-function boxHold(ce: IComputeEngine, expr: SemiBoxedExpression) {
+function boxHold(
+  ce: IComputeEngine,
+  expr: SemiBoxedExpression
+): BoxedExpression {
   if (typeof expr === 'object' && expr instanceof AbstractBoxedExpression)
     return expr;
 
@@ -263,25 +275,32 @@ function boxHold(ce: IComputeEngine, expr: SemiBoxedExpression) {
  *
  * The result is *not* a canonical expression.
  *
- * Note that `boxFunction()` should only be called from `ComputeEngine` or
- * `box()`
+ * Note that `boxFunction()` should only be called from `box()`
  */
-export function boxFunction(
+function boxFunction(
   ce: IComputeEngine,
   head: string,
-  ops: Expression[],
+  ops: SemiBoxedExpression[],
   metadata?: Metadata
 ): BoxedExpression {
   //
   // Hold
   //
-  if (head === 'Hold')
-    return new BoxedFunction(
+  if (head === 'Hold') {
+    const result = new BoxedFunction(
       ce,
       'Hold',
-      [boxHold(ce, ops[0] ?? 'Missing')],
+      [boxHold(ce, ops[0] ?? ['Error', "'missing'"])],
       metadata
     );
+    // Hold is always canonical
+    result.isCanonical = true;
+    return result;
+  }
+
+  if (head === 'Domain') {
+    return boxDomain(ce, ops[0] as DomainExpression, metadata);
+  }
 
   //
   // String
@@ -305,10 +324,40 @@ export function boxFunction(
   // Rational (as Divide)
   //
   if ((head === 'Divide' || head === 'Rational') && ops.length === 2) {
-    const n = machineValue(ops[0]);
-    const d = machineValue(ops[1]);
-    if (n !== null && d !== null && Number.isInteger(n) && Number.isInteger(d))
-      return ce.number([n, d]);
+    if (
+      ops[0] instanceof AbstractBoxedExpression &&
+      ops[1] instanceof AbstractBoxedExpression
+    ) {
+      if (
+        ops[0].isLiteral &&
+        ops[1].isLiteral &&
+        ops[0].isInteger &&
+        ops[1].isInteger
+      ) {
+        const [n, d] = [
+          ops[0].machineValue ?? ops[0].asSmallInteger,
+          ops[1].machineValue ?? ops[1].asSmallInteger,
+        ];
+        if (n !== null && d !== null) return ce.number([n, d], metadata);
+        return new BoxedFunction(ce, 'Rational', [ops[0], ops[1]], metadata);
+      }
+    } else {
+      const op1 = ops[0] as Expression;
+      const op2 = ops[1] as Expression;
+      const [n, d] = [decimalValue(ce, op1), decimalValue(ce, op2)];
+      if (n?.isInteger() && d?.isInteger()) {
+        if (isInMachineRange(n) && isInMachineRange(d))
+          return ce.number([n.toNumber(), d.toNumber()], metadata);
+        return new BoxedFunction(
+          ce,
+          'Rational',
+          [ce.box(op1), ce.box(op2)],
+          metadata
+        );
+      }
+    }
+
+    head = 'Divide';
   }
 
   //
@@ -348,18 +397,57 @@ export function boxFunction(
   //
   // Distribute over literals
   //
-  if (head === 'Negate' && ops.length > 0) {
+  if (head === 'Negate' && ops.length === 1) {
     if (typeof ops[0] === 'number') return ce.number(-ops[0], metadata);
+    if (ops[0] instanceof AbstractBoxedExpression && ops[0].machineValue)
+      return ce.number(-ops[0].machineValue, metadata);
   }
-
-  // if (head === 'Add' || head === 'Multiply') {
-  // }
 
   //
   // Tuple
   //
-  if (head === 'Single' || head === 'Pair' || head === 'Triple')
-    return ce.fn('Tuple', ops, metadata);
+  // Note: don't use `ce.tuple` since `boxExpression()` doesn't return a
+  // canonical expression but `ce.tuple` does.
+
+  if (head === 'Single') {
+    if (ops.length < 1) return ce.error('expected-argument', "'Single");
+    if (ops.length > 1) return ce.error('unexpected-argument', "'Single");
+    return new BoxedFunction(ce, 'Tuple', [ce.box(ops[0])], metadata);
+  }
+
+  if (head === 'Pair') {
+    if (ops.length < 2) return ce.error('expected-argument', "'Pair");
+    if (ops.length > 2) return ce.error('unexpected-argument', "'Pair");
+    return new BoxedFunction(
+      ce,
+      'Tuple',
+      [ce.box(ops[0]), ce.box(ops[1])],
+      metadata
+    );
+  }
+
+  // KeyValuePair is not normalized to Tuple
+  if (head === 'KeyValuePair') {
+    if (ops.length < 2) return ce.error('expected-argument', "'KeyValuePair");
+    if (ops.length > 2) return ce.error('unexpected-argument', "'KeyValuePair");
+    return new BoxedFunction(
+      ce,
+      'KeyValuePair',
+      [ce.box(ops[0]), ce.box(ops[1])],
+      metadata
+    );
+  }
+
+  if (head === 'Triple') {
+    if (ops.length < 3) return ce.error('expected-argument', "'Triple");
+    if (ops.length > 3) return ce.error('unexpected-argument', "'Triple");
+    return new BoxedFunction(
+      ce,
+      'Tuple',
+      ops.map((x) => ce.box(x)),
+      metadata
+    );
+  }
 
   //
   // Dictionary
@@ -369,9 +457,13 @@ export function boxFunction(
     for (const op of ops) {
       const arg = ce.box(op);
       const head = arg.head;
-      if (head === 'KeyValuePair' || head === 'Pair' || head === 'Tuple') {
+      if (
+        head === 'KeyValuePair' ||
+        head === 'Pair' ||
+        (head === 'Tuple' && arg.nops === 2)
+      ) {
         const key = arg.op1;
-        if (!key.isMissing) {
+        if (key.isValid && key.symbol !== 'Nothing') {
           const value = arg.op2;
           let k = key.symbol ?? key.string;
           if (!k && key.isLiteral) {

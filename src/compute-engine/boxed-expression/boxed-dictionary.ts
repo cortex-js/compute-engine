@@ -38,8 +38,8 @@ export class BoxedDictionary extends AbstractBoxedExpression {
     ce._register(this);
   }
 
-  _purge(): undefined {
-    for (const [_k, v] of this._value) v._purge();
+  unbind(): undefined {
+    for (const [_k, v] of this._value) v.unbind();
     return undefined;
   }
 

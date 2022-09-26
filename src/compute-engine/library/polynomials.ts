@@ -7,12 +7,10 @@ export const POLYNOMIALS_LIBRARY: SymbolTable[] = [
       {
         name: 'Expand',
         description: 'Expand out products and positive integer powers',
-        signatures: [
-          {
-            evaluate: (ce, ops) =>
-              ops[0] ? expand(ops[0]) : ce.symbol('Nothing'),
-          },
-        ],
+        signature: {
+          domain: ['Function', 'Value', 'Value'],
+          evaluate: (_ce, ops) => expand(ops[0]),
+        },
       },
     ],
   },
