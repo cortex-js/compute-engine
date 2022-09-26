@@ -78,9 +78,6 @@ export function numeratorDenominator(
 export function asCoefficient(
   expr: BoxedExpression
 ): [coef: [numer: number, denom: number], rest: BoxedExpression] {
-  if (!expr.isCanonical) {
-    debugger;
-  }
   console.assert(expr.isCanonical);
 
   const ce = expr.engine;

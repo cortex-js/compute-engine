@@ -1874,16 +1874,8 @@ export interface IComputeEngine {
   ): undefined | BoxedSymbolDefinition;
 
   /** Return `undefined` if no definition exist for this `head` */
-  lookupFunctionName(
+  lookupFunction(
     head: string,
-    scope?: RuntimeScope
-  ): undefined | BoxedFunctionDefinition;
-
-  /** Return a function definition matching a signature */
-  lookupFunctionSignature(
-    head: string,
-    ops: BoxedDomain[],
-    codomain?: BoxedDomain,
     scope?: RuntimeScope
   ): undefined | BoxedFunctionDefinition;
 

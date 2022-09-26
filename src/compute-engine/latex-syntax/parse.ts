@@ -143,7 +143,7 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
   parseArgumentsOfUnknownLatexCommands: true,
   parseNumbers: true,
   parseUnknownSymbol: (s: string, parser: Parser) => {
-    if (parser.computeEngine?.lookupFunctionName(s) !== undefined)
+    if (parser.computeEngine?.lookupFunction(s) !== undefined)
       return 'function';
     if (/^[a-zA-Z]+$/.test(s)) return 'symbol';
     return 'unknown';

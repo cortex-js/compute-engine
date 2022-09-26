@@ -388,7 +388,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
           evaluate: (ce, ops) => {
             const name = ops[0].symbol;
             if (!name) return ce.symbol('Nothing');
-            const result = ce.lookupFunctionName(name);
+            const result = ce.lookupFunction(name);
             if (!result) return ce.symbol('Nothing');
             return ce.fn('List', [result.signature.domain]);
           },

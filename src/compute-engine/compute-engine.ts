@@ -744,7 +744,7 @@ export class ComputeEngine implements IComputeEngine {
    * of the argument or the codomain. However, it is useful during parsing
    * to differentiate between symbols that might represent a function application, e.g. `f` vs `x`.
    */
-  lookupFunctionName(
+  lookupFunction(
     head: string,
     scope?: RuntimeScope
   ): undefined | BoxedFunctionDefinition {
@@ -756,45 +756,6 @@ export class ComputeEngine implements IComputeEngine {
     while (scope) {
       const def = scope.symbolTable?.functions.get(head);
       if (def) return def;
-      scope = scope.parentScope;
-    }
-    return undefined;
-  }
-
-  /**
-   * Return a function definition matching the name and argument domains.
-   */
-  lookupFunctionSignature(
-    head: string,
-    ops: BoxedDomain[],
-    codomain?: BoxedDomain,
-    scope?: RuntimeScope
-  ): BoxedFunctionDefinition | undefined {
-    if (typeof head !== 'string') throw Error('Expected a string');
-
-    // Wildcards never have definitions
-    if (head.startsWith('_') || !this.context) return undefined;
-
-    scope ??= this.context;
-    let def: BoxedFunctionDefinition | undefined = undefined;
-
-    const targetSig = this.domain(['Function', ...ops, codomain ?? 'Anything']);
-
-    while (scope) {
-      def = scope.symbolTable?.functions.get(head);
-      if (def) {
-        const sig = def.signature;
-        console.assert(sig.domain);
-        if (sig.domain.isCompatible(targetSig)) {
-          // Double-check that the codomain, if it is computed, is compatible
-          if (!codomain) return def;
-          const effectiveCodomain =
-            typeof sig.codomain === 'function'
-              ? sig.codomain(this, ops)
-              : sig.codomain;
-          if (effectiveCodomain?.isCompatible(codomain)) return def;
-        }
-      }
       scope = scope.parentScope;
     }
     return undefined;

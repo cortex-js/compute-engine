@@ -234,7 +234,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
 
     if (scope === null) return;
 
-    this._def = ce.lookupFunctionName(this._head, scope);
+    this._def = ce.lookupFunction(this._head, scope);
     if (this._def) {
       // In case the def was found by the wikidata, and the name does not
       // match the one in our dictionary, make sure to update it.

@@ -216,7 +216,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     //
     // 2. Bind to a function definition
     //
-    def = this.engine.lookupFunctionName(this._name, scope);
+    def = this.engine.lookupFunction(this._name, scope);
     if (def) {
       this._def = def;
       return;
