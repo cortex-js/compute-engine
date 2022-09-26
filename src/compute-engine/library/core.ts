@@ -109,17 +109,17 @@ export const CORE_LIBRARY: SymbolTable[] = [
         // Use to represent groups of expressions. Named after https://en.wikipedia.org/wiki/Delimiter
         name: 'Delimiter',
         complexity: 9000,
-        inert: true,
+        hold: 'first',
         signature: {
           domain: [
             'Function',
-            'Value',
+            'Anything',
             ['Maybe', 'String'],
             ['Maybe', 'String'],
-            'Value',
+            'Anything',
           ],
           codomain: (_ce, args) => args[0],
-          canonical: (_ce, args) => args[0],
+          canonical: (_ce, args) => args[0].canonical,
         },
       },
       {
@@ -413,7 +413,6 @@ export const CORE_LIBRARY: SymbolTable[] = [
         description:
           'Construct a new symbol with a name formed by concatenating the arguments',
         threadable: true,
-        dynamic: true,
         signature: {
           domain: ['Function', ['Sequence', 'Anything'], 'Symbol'],
           evaluate: (ce, ops) => {

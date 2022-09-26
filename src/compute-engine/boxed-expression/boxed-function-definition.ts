@@ -58,7 +58,6 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     this.complexity = def.complexity ?? DEFAULT_COMPLEXITY;
 
     this.hold = def.hold ?? 'none';
-    this.dynamic = def.dynamic ?? false;
 
     if (this.inert) {
       if (def.hold)
@@ -66,10 +65,6 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
           `Function Definition "${def.name}": an inert function should not have a hold`
         );
       this.hold = 'rest';
-      if (def.dynamic)
-        throw Error(
-          `Function Definition "${def.name}": an inert function should not be dynamic`
-        );
       if (def.signature) {
         const sig = def.signature;
         // `canonical` and `domain` is OK for an inert function, but none of the others
@@ -112,7 +107,11 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     }
     if (def.signature) {
       const sig = def.signature;
-      const domain = ce.domain(sig.domain ?? 'Function');
+      const domain = sig.domain
+        ? ce.domain(sig.domain)
+        : def.numeric
+        ? ce.domain('NumericFunction')
+        : ce.domain('Function');
       if (!domain.isValid)
         throw Error(
           `Function Definition "${def.name}": invalid domain ${JSON.stringify(
@@ -123,7 +122,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
       const codomain =
         sig.codomain ??
         domain.codomain ??
-        (ce.domain('Anything') as BoxedDomain);
+        (def.numeric ? ce.domain('Number') : ce.domain('Anything'));
       this.signature = {
         domain,
         codomain,
@@ -138,6 +137,11 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
         evalDimension: sig.evalDimension,
         sgn: sig.sgn,
         compile: sig.compile,
+      };
+    } else if (def.numeric) {
+      this.signature = {
+        domain: ce.domain('NumericFunction'),
+        codomain: ce.domain('Number'),
       };
     } else {
       this.signature = {

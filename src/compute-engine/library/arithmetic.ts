@@ -717,10 +717,6 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         // removed during canonicalization.
         hold: 'last',
 
-        // The codomain of the function needs to be determined by considering
-        // the value of its arguments
-        dynamic: true,
-
         signature: {
           domain: ['Function', 'Anything', 'Anything', 'Anything'],
           codomain: (ce, args) => {

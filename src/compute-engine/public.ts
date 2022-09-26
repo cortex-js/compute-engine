@@ -1632,21 +1632,6 @@ export type FunctionDefinition = BaseDefinition &
 
     hold?: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
-    /** When `true`, if an argument to a function, the function expression
-     * will be evaluated before the calling function is bound.
-     *
-     * This is uncommon, but is used by the `Symbol` and `Subscript` functions
-     * for example. Their codomain must be determined from the value of
-     * their arguments, not only from the domain of those arguments.
-     *
-     * For example `['Symbol', 'a', 2]`  is equivalent to the symbol `a2`. The
-     * codomain of `['Symbol', 'a', 2]` is the domain of `a2`, but that cannot
-     * be determined until `['Symbol, 'a', 2]` is evaluated.
-     *
-     * **Default**: `false`
-     */
-    dynamic?: boolean;
-
     signature?: FunctionSignature;
   };
 
@@ -1654,7 +1639,6 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
   FunctionDefinitionFlags & {
     complexity: number;
     hold: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
-    dynamic: boolean;
 
     signature: BoxedFunctionSignature;
   };

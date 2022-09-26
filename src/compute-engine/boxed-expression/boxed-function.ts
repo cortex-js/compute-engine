@@ -182,8 +182,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     if (typeof this._head !== 'string') {
       if (this._head.isValid === false) return false;
     } else {
-      if (this.functionDefinition === undefined) return false;
       if (this._head === 'Error') return false;
+      // Need to check function definition before arguments: binding
+      // as the side effect of normalizing arguments
+      if (this.functionDefinition === undefined) return false;
+      if (!this._ops.every((x) => x.isValid)) return false;
     }
     return this._ops.every((x) => x.isValid);
   }
@@ -217,102 +220,45 @@ export class BoxedFunction extends AbstractBoxedExpression {
     const ce = this.engine;
 
     // Is the head an expression?
+    // For example, `['InverseFunction', 'Sin']`
     if (typeof this._head !== 'string') {
       const head = this._head.evaluate().symbol ?? this._head;
       this._head = head;
       if (typeof this._head !== 'string') {
-        this._ops = filterList(this._ops);
         this._codomain = this._head.domain.codomain ?? ce.domain('Void');
         return;
       }
     }
 
-    if (scope === null || this._scope === null) {
-      this._ops = filterList(this._ops);
-      return;
-    }
+    scope = scope ?? this._scope;
 
-    this._def = ce.lookupFunctionSignature(
-      this._head,
-      this._ops.map((x) => x.domain),
-      ce.domain('Anything'),
-      this._scope!
-    );
+    if (scope === null) return;
+
+    this._def = ce.lookupFunctionName(this._head, scope);
     if (this._def) {
-      // this._ops = holdMap(this._ops, this._def.hold, (x) => x);
-      const opsDomain = this._ops.map((x) => x.domain);
       // In case the def was found by the wikidata, and the name does not
       // match the one in our dictionary, make sure to update it.
       this._head = this._def.name;
 
-      const sig = this._def.signature;
+      // Apply Nothing, Sequence, Symbol
+      this._ops = normalizeList(this._ops, this._def.hold);
+
+      this._ops = validateSignature(ce, this._def, this._ops) ?? this._ops;
+
       // Calculate the effective codomain
+      if (!this._ops.every((x) => x.isValid)) {
+        this._codomain = ce.defaultDomain ?? ce.domain('Void');
+        return;
+      }
+      const sig = this._def.signature;
       if (typeof sig.codomain === 'function') {
         // If the signature was a match, the `sig.domain()` function must succeed
-        this._codomain = sig.codomain(ce, opsDomain)!;
-        console.assert(this._codomain);
-      } else {
-        this._codomain = sig.codomain!;
-      }
-    } else {
-      const def = ce.lookupFunctionName(this._head, this._scope!);
-      if (def) {
-        this._ops = holdMap(this._ops, def.hold, (x) => x);
         const opsDomain = this._ops.map((x) => x.domain);
-        // There's a definition matching the function name
-        // but the argument list is not compatible
-        const expectedArgs = def.signature.domain.domainArgs!.slice(0, -1);
-
-        const newOps: BoxedExpression[] = [];
-
-        const count = Math.max(expectedArgs.length, opsDomain.length);
-
-        for (let i = 0; i <= count - 1; i++) {
-          if (expectedArgs[i] === undefined) {
-            newOps.push(ce.error('unexpected-argument', this.ops[i]));
-          } else {
-            const lhsCtor = Array.isArray(expectedArgs[i])
-              ? expectedArgs[i][0]
-              : null;
-            if (opsDomain[i] === undefined) {
-              if (lhsCtor === 'Maybe') newOps.push(ce.symbol('Nothing'));
-              else newOps.push(ce.error(['missing', expectedArgs[i]]));
-              break;
-            }
-            if (lhsCtor === 'Sequence') {
-              const seq = ce.domain(expectedArgs[i][1]);
-              for (let j = i; j <= opsDomain.length - 1; j++) {
-                if (!opsDomain[j].isCompatible(seq)) {
-                  newOps.push(
-                    ce.error(['mismatched-argument-domain', seq], this.ops[j])
-                  );
-                } else newOps.push(this.ops[j]);
-              }
-              break;
-            }
-            if (!opsDomain[i].isCompatible(ce.domain(expectedArgs[i]))) {
-              newOps.push(
-                ce.error(
-                  ['mismatched-argument-domain', ce.domain(expectedArgs[i])],
-                  this.ops[i]
-                )
-              );
-            } else newOps.push(this.ops[i]);
-          }
-        }
-        this._ops = newOps;
-        // throw Error(
-        //   `Unexpected arguments for "${
-        //     this._head
-        //   }". Was expecting (${expectedArgs
-        //     .map((x) => ce.domain(x).toJSON())
-        //     .join(', ')}) but got (${this._ops.map((x) =>
-        //     x.toJSON()
-        //   )}) : (${opsDomain.map((x) => x.toJSON()).join(', ')}) instead`
-        // );
+        this._codomain = sig.codomain(ce, opsDomain)!;
+      } else {
+        this._codomain = sig.codomain ?? ce.defaultDomain ?? ce.domain('Void');
       }
-      this._codomain = ce.defaultDomain ?? ce.domain('Void');
-    }
+    } else this._codomain = ce.defaultDomain ?? ce.domain('Void');
   }
 
   get domain(): BoxedDomain {
@@ -664,7 +610,6 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   get canonical(): BoxedExpression {
-    this.bind(this._scope);
     if (this.isCanonical || !this.isValid) return this;
 
     // 1/ If no definition (i.e. function `g`...), apply canonical to each op
@@ -678,12 +623,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     // 2/ Get the canonical form of the arguments
     //
-    let tail = this._ops;
-    if (def.associative) tail = flattenOps(this._ops!, def.name) ?? tail;
-    tail = holdMap(tail, def.hold, (arg) => arg.canonical);
-
-    // f(a, f(b, c), d) -> f(a, b, c, d)
-    if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
+    let tail = canonicalHoldMap(def.name, this._ops, def.hold, def.associative);
 
     //
     // 3/ Apply `canonical` handler
@@ -711,12 +651,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   simplify(options?: SimplifyOptions): BoxedExpression {
-    this.bind(this._scope);
-    if (!this.isValid) return this;
-
     //
     // 1/ Use the canonical form
     //
+    if (!this.isValid) return this;
     if (!this.isCanonical) return this.canonical.simplify(options);
 
     //
@@ -724,13 +662,12 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     const def = this.functionDefinition;
     let tail = this._ops!;
-    if (def) {
-      if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
-      tail = holdMap(tail, def.hold, (arg) => arg.simplify(options));
-      if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
-    } else {
-      tail = holdMap(tail, 'none', (arg) => arg.simplify(options));
-    }
+    if (def)
+      tail = holdMap(def.name, tail, def.hold, def.associative, (x) =>
+        x.simplify(options)
+      );
+    else
+      tail = holdMap('', tail, 'none', false, (arg) => arg.simplify(options));
 
     //
     // 3/ If a lambda, apply the arguments, and simplify the result
@@ -797,12 +734,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
-    this.bind(this._scope);
-    if (!this.isValid) return this;
-
     //
     // 1/ Use the canonical form
     //
+    if (!this.isValid) return this;
     if (!this.isCanonical) return this.canonical.evaluate(options);
 
     //
@@ -810,16 +745,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     const def = this.functionDefinition;
     let tail = this._ops!;
-    if (def) {
-      tail = holdMap(
-        def.associative ? flattenOps(tail, def.name) ?? tail : tail,
-        def.hold,
-        (arg) => arg.evaluate(options)
+    if (def)
+      tail = holdMap(def.name, tail, def.hold, def.associative, (x) =>
+        x.evaluate(options)
       );
-      if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
-    } else {
-      tail = holdMap(tail, 'none', (arg) => arg.evaluate(options));
-    }
+    else tail = holdMap('', tail, 'none', false, (x) => x.evaluate(options));
 
     //
     // 3/ Is it a Lambda?
@@ -859,12 +789,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   N(options?: NOptions): BoxedExpression {
-    this.bind(this._scope);
-    if (!this.isValid) return this;
     //
     // 1/ Use canonical form
     //
-
+    if (!this.isValid) return this;
     if (!this.isCanonical) return this.canonical.N(options);
 
     //
@@ -872,16 +800,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     const def = this.functionDefinition;
     let tail = this._ops!;
-    if (def) {
-      tail = holdMap(
-        def.associative ? flattenOps(tail, def.name) ?? tail : tail,
-        def.hold,
-        (arg) => arg.N(options)
+    if (def)
+      tail = holdMap(def.name, tail, def.hold, def.associative, (x) =>
+        x.N(options)
       );
-      if (def.associative) tail = flattenOps(tail, def.name) ?? tail;
-    } else {
-      tail = holdMap(tail, 'none', (arg) => arg.N(options));
-    }
+    else tail = holdMap('', tail, 'none', false, (arg) => arg.N(options));
 
     //
     // 3/ Is it a Lambda?
@@ -973,16 +896,21 @@ function lambda(
  * - 'last': apply `f` to all elements except the last
  * - 'most': apply `f` to the last elements, skip the others
  *
- * Account for `Hold`, `ReleaseHold`, `Sequence` and  `Nothing`.
+ * Account for `Hold`, `ReleaseHold`, `Sequence`, `Symbol` and `Nothing`.
  *
  * If `f` returns `null`, the element is not added to the result
  */
 export function holdMap(
+  head: string,
   xs: BoxedExpression[],
   skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most',
+  associative: boolean,
   f: (x: BoxedExpression) => BoxedExpression | null
 ): BoxedExpression[] {
   if (xs.length === 0) return [];
+
+  // f(a, f(b, c), d) -> f(a, b, c, d)
+  if (associative) xs = flattenOps(xs, head) ?? xs;
 
   const result: BoxedExpression[] = [];
 
@@ -1002,6 +930,9 @@ export function holdMap(
         if (y.head === 'Sequence') {
           if (y.ops)
             result.push(...y.ops.map((x) => f(x)!).filter((x) => x !== null));
+        } else if (y.domain.literal === 'Symbol') {
+          const x = f(y.evaluate());
+          if (x !== null) result.push(x);
         } else {
           const x = f(y);
           if (x !== null) result.push(x);
@@ -1009,6 +940,42 @@ export function holdMap(
       }
     }
   }
+  if (associative) return flattenOps(result, head) ?? result;
+
+  return result;
+}
+
+// Like `HoldMap` but preserves `Hold` and `ReleaseHold`
+export function canonicalHoldMap(
+  head: string,
+  xs: BoxedExpression[],
+  skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most',
+  associative: boolean
+): BoxedExpression[] {
+  if (xs.length === 0) return [];
+
+  // f(a, f(b, c), d) -> f(a, b, c, d)
+  if (associative) xs = flattenOps(xs, head) ?? xs;
+
+  //
+  // Apply the hold as necessary
+  //
+  const result: BoxedExpression[] = [];
+  for (let i = 0; i < xs.length; i++) {
+    const x = xs[i];
+    if (
+      x.head === 'Hold' ||
+      x.head === 'ReleaseHold' ||
+      !applicable(skip, xs.length - 1, i)
+    ) {
+      result.push(x);
+    } else if (x.head === 'Sequence') {
+      if (x.ops) result.push(...x.ops.map((x) => x.canonical));
+    } else if (x.head === 'Symbol' || x.domain.literal === 'Symbol')
+      result.push(x.evaluate());
+    else result.push(x.canonical);
+  }
+  if (associative) return flattenOps(result, head) ?? result;
 
   return result;
 }
@@ -1033,14 +1000,78 @@ function applicable(
   return false;
 }
 
-function filterList(xs: BoxedExpression[]): BoxedExpression[] {
+function normalizeList(
+  xs: BoxedExpression[],
+  skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most'
+): BoxedExpression[] {
   // Remove 'Nothing' from ops and fold 'Sequence'
   const result: BoxedExpression[] = [];
-  for (const x of xs) {
-    if (x.symbol !== 'Nothing') {
-      if (x.head === 'Sequence') result.push(...(x.ops ?? []));
-      else result.push(x);
-    }
+  for (let i = 0; i < xs.length; i++) {
+    if (applicable(skip, xs.length - 1, i)) {
+      const x = xs[i];
+      if (x.symbol !== 'Nothing') {
+        if (x.head === 'Sequence') result.push(...(x.ops ?? []));
+        else if (x.head === 'Symbol') result.push(x.evaluate());
+        else result.push(x);
+      }
+    } else result.push(xs[i]);
   }
   return result;
+}
+
+function validateSignature(
+  ce: IComputeEngine,
+  def: BoxedFunctionDefinition,
+  ops: BoxedExpression[],
+  codomain?: BoxedExpression
+): BoxedExpression[] | null {
+  const opsDomain = ops.map((x) => x.domain);
+
+  const targetSig = ce.domain([
+    'Function',
+    ...opsDomain,
+    codomain ?? 'Anything',
+  ]);
+
+  if (def.signature.domain.isCompatible(targetSig)) return null;
+
+  // The argument list is not compatible
+  const expectedArgs = def.signature.domain.domainArgs!.slice(0, -1);
+
+  const newOps: BoxedExpression[] = [];
+
+  const count = Math.max(expectedArgs.length, opsDomain.length);
+
+  for (let i = 0; i <= count - 1; i++) {
+    if (expectedArgs[i] === undefined) {
+      newOps.push(ce.error('unexpected-argument', ops[i]));
+    } else {
+      const lhsCtor = Array.isArray(expectedArgs[i])
+        ? expectedArgs[i][0]
+        : null;
+      if (opsDomain[i] === undefined) {
+        if (lhsCtor === 'Maybe') newOps.push(ce.symbol('Nothing'));
+        else newOps.push(ce.error(['missing', expectedArgs[i]]));
+        break;
+      }
+      if (lhsCtor === 'Sequence') {
+        const seq = ce.domain(expectedArgs[i][1]);
+        for (let j = i; j <= opsDomain.length - 1; j++) {
+          if (!opsDomain[j].isCompatible(seq)) {
+            newOps.push(ce.error(['mismatched-argument-domain', seq], ops[j]));
+          } else newOps.push(ops[j]);
+        }
+        break;
+      }
+      if (!opsDomain[i].isCompatible(ce.domain(expectedArgs[i]))) {
+        newOps.push(
+          ce.error(
+            ['mismatched-argument-domain', ce.domain(expectedArgs[i])],
+            ops[i]
+          )
+        );
+      } else newOps.push(ops[i]);
+    }
+  }
+  return newOps;
 }

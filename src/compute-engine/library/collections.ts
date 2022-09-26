@@ -1,7 +1,14 @@
 import { SymbolTable } from '../public';
 
 export const COLLECTIONS_LIBRARY: SymbolTable = {
-  functions: [{ name: 'Sequence' }],
+  functions: [
+    {
+      name: 'Sequence',
+      signature: {
+        domain: 'Function',
+      },
+    },
+  ],
 };
 // Keys: { domain: 'Function' },
 // Entries: { domain: 'Function' },
