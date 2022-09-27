@@ -1,5 +1,10 @@
 import { Complex } from 'complex.js';
-import { reducedRational } from '../numerics/numeric';
+
+import {
+  MAX_ITERATION,
+  MAX_SYMBOLIC_TERMS,
+  reducedRational,
+} from '../numerics/numeric';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { complexAllowed, preferDecimal } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
@@ -9,6 +14,7 @@ import {
   isInMachineRange,
   reducedRational as reducedRationalDecimal,
 } from '../numerics/numeric-decimal';
+
 import { square } from './arithmetic-power';
 
 /** The canonical form of `Multiply`:
@@ -279,28 +285,47 @@ function multiply2(
 export function evalMultiplication(
   ce: IComputeEngine,
   expr: BoxedExpression,
-  range: BoxedExpression
-): BoxedExpression {
+  range: BoxedExpression,
+  mode: 'simplify' | 'evaluate' | 'N'
+): BoxedExpression | undefined {
   const index = range.op1.symbol ?? 'i';
   const lower = range.op2.asSmallInteger ?? 1;
-  const upper = range.op3.asSmallInteger ?? 1000000;
+  const upper = range.op3.asSmallInteger ?? MAX_ITERATION;
 
   const fn = expr.head === 'Lambda' ? expr.op1 : expr.subs({ [index]: '_' });
 
-  if (preferDecimal(ce)) {
-    let v = ce.decimal(1);
+  if (
+    (mode === 'evaluate' || mode === 'simplify') &&
+    upper - lower < MAX_SYMBOLIC_TERMS
+  ) {
+    const terms: BoxedExpression[] = [];
+    for (let i = lower; i <= upper; i++) {
+      const n = ce.number(i);
+      terms.push(fn.subs({ _1: n, _: n }));
+    }
+    if (mode === 'simplify') return ce.mul(terms).simplify();
+    return ce.mul(terms).evaluate();
+  }
+
+  if (mode === 'N' && upper - lower < MAX_ITERATION) {
+    if (preferDecimal(ce)) {
+      let v = ce.decimal(1);
+      for (let i = lower; i <= upper; i++) {
+        const n = ce.number(i);
+        const r = fn.subs({ _1: n, _: n }).evaluate();
+        const val = r.decimalValue ?? r.asFloat;
+        if (!val) return undefined;
+        v = v.mul(val);
+      }
+    }
+    let v = 1;
     for (let i = lower; i <= upper; i++) {
       const n = ce.number(i);
       const r = fn.subs({ _1: n, _: n }).evaluate();
-      v = v.mul(r.decimalValue ?? r.asFloat ?? NaN);
+      if (!r.asFloat) return undefined;
+      v *= r.asFloat;
     }
+    return ce.number(v);
   }
-  let v = 1;
-  for (let i = lower; i <= upper; i++) {
-    const n = ce.number(i);
-    const r = fn.subs({ _1: n, _: n }).evaluate();
-    v *= r.asFloat ?? NaN;
-  }
-
-  return ce.number(v);
+  return undefined;
 }

@@ -11,7 +11,11 @@ import {
   isInMachineRange,
   reducedRational as reducedRationalDecimal,
 } from '../numerics/numeric-decimal';
-import { reducedRational } from '../numerics/numeric';
+import {
+  MAX_ITERATION,
+  MAX_SYMBOLIC_TERMS,
+  reducedRational,
+} from '../numerics/numeric';
 import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
 
 /** The canonical form of `Add`:
@@ -246,28 +250,48 @@ export function evalAdd(
 export function evalSummation(
   ce: IComputeEngine,
   expr: BoxedExpression,
-  range: BoxedExpression
-): BoxedExpression {
+  range: BoxedExpression,
+  mode: 'simplify' | 'N' | 'evaluate'
+): BoxedExpression | undefined {
   const index = range.op1.symbol ?? 'i';
   const lower = range.op2.asSmallInteger ?? 1;
-  const upper = range.op3.asSmallInteger ?? 1000000;
+  const upper = range.op3.asSmallInteger ?? MAX_ITERATION;
 
   const fn = expr.head === 'Lambda' ? expr.op1 : expr.subs({ [index]: '_' });
 
-  if (preferDecimal(ce)) {
-    let v = ce.decimal(0);
+  if (
+    (mode === 'evaluate' || mode === 'simplify') &&
+    upper - lower < MAX_SYMBOLIC_TERMS
+  ) {
+    const terms: BoxedExpression[] = [];
+    for (let i = lower; i <= upper; i++) {
+      const n = ce.number(i);
+      terms.push(fn.subs({ _1: n, _: n }));
+    }
+    if (mode === 'simplify') return ce.add(terms).simplify();
+    return ce.add(terms).evaluate();
+  }
+
+  if (mode === 'N' && upper - lower < MAX_ITERATION) {
+    if (preferDecimal(ce)) {
+      let v = ce.decimal(0);
+      for (let i = lower; i <= upper; i++) {
+        const n = ce.number(i);
+        const r = fn.subs({ _1: n, _: n }).evaluate();
+        const val = r.decimalValue ?? r.asFloat;
+        if (!val) return undefined;
+        v = v.add(val);
+      }
+    }
+    let v = 0;
     for (let i = lower; i <= upper; i++) {
       const n = ce.number(i);
       const r = fn.subs({ _1: n, _: n }).evaluate();
-      v = v.add(r.decimalValue ?? r.asFloat ?? NaN);
+      if (!r.asFloat) return undefined;
+      v += r.asFloat;
     }
-  }
-  let v = 0;
-  for (let i = lower; i <= upper; i++) {
-    const n = ce.number(i);
-    const r = fn.subs({ _1: n, _: n }).evaluate();
-    v += r.asFloat ?? NaN;
-  }
 
-  return ce.number(v);
+    return ce.number(v);
+  }
+  return undefined;
 }

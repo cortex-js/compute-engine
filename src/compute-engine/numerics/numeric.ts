@@ -21,6 +21,14 @@ export const NUMERIC_TOLERANCE = Math.pow(10, -10);
 // so that the product of two small integers does not lose precision
 export const SMALL_INTEGER = 1000000;
 
+// When doing a calculation via iteration (e.g. to calculate a sum)
+// do not iterate more than this value
+export const MAX_ITERATION = 1000000;
+
+// When doing a symbolic calculations using multiple terms, do
+// not expand beyon these many terms
+export const MAX_SYMBOLIC_TERMS = 200;
+
 /**
  * Returns the smallest floating-point number greater than x.
  * Denormalized values may not be supported.
