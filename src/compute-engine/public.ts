@@ -1923,7 +1923,8 @@ export interface IComputeEngine {
    * Note that the result may not be a function, or may have a different
    * `head` than the one specified.
    *
-   * For example `ce.fn("Add", [ce.number(2),  ce.number(3)]))` \( \to \) 5
+   * For example:
+   * `ce.fn("Rational", [ce.number(1),  ce.number(2)]))` \( \to \) `ce.number([1,2])`
    *
    */
   fn(

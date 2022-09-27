@@ -352,7 +352,7 @@ describe.skip(`adding second representation for exponentials`, () => {
       )
     ).toBeTruthy());
   test(`not isEquivalent('sin','(x-5*y*I)*(x+5*y*I)')`, () =>
-    expect(isEquivalent('\\sin', 'x-5y\\times{\\imaginaryUnit}')).toBeFalsy());
+    expect(isEquivalent('\\sin', 'x-5y\\times{\\imaginaryI}')).toBeFalsy());
   test(`not isEquivalent('4*y*nthroot(y,((Abs(744487))))', '(3)*(y)*(0.65)')`, () =>
     expect(
       isEquivalent('4y\\sqrt[y]{((|744487|))}', '(3)\\times(y)\\times(0.65)')

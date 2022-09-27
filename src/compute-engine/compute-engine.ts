@@ -1158,10 +1158,7 @@ export class ComputeEngine implements IComputeEngine {
 
     if (!where) return this._fn('Error', [msg]);
 
-    if (where && where[0] === 'Latex')
-      return this._fn('Error', [msg, this.box(where).canonical]);
-
-    return this._fn('Error', [msg, this.box(['Hold', where])]);
+    return this._fn('Error', [msg, this.box(where).canonical]);
   }
 
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {

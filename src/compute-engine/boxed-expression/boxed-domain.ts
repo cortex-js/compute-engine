@@ -1,4 +1,5 @@
 import { Expression } from '../../math-json/math-json-format';
+import { head } from '../../math-json/utils';
 import {
   ancestors,
   DOMAIN_ALIAS,
@@ -59,7 +60,9 @@ export class _BoxedDomain
   }
 
   get json(): Expression {
-    return serialize(this.engine, this._value);
+    const s = serialize(this.engine, this._value);
+    if (head(s) === 'Error') return s;
+    return ['Domain', s];
   }
 
   get literal(): string | null {
@@ -472,10 +475,17 @@ export function isSubdomainOf(
   //
   if (rhsLiteral) {
     const lhsConstructor = lhs[0];
+    if (lhsConstructor === 'Domain') {
+      debugger;
+    }
+
     if (lhsConstructor === 'Function') return rhsLiteral === 'Function';
     if (lhsConstructor === 'Dictionary') return rhsLiteral === 'Dictionary';
     if (lhsConstructor === 'List') return rhsLiteral === 'List';
-    if (lhsConstructor === 'Tuple') return rhsLiteral === 'Tuple';
+    if (lhsConstructor === 'Tuple') {
+      debugger;
+      return rhsLiteral === 'Tuple';
+    }
     if (lhsConstructor === 'Intersection') {
     }
     // @todo handle domain constructors
@@ -621,7 +631,7 @@ function serialize(
   ce: IComputeEngine,
   dom: DomainExpression<BoxedExpression>
 ): Expression {
-  if (typeof dom === 'string') return ['Domain', serializeJsonSymbol(ce, dom)];
+  if (typeof dom === 'string') return serializeJsonSymbol(ce, dom);
 
   if (dom[0] === 'Error') {
     if (dom[2]) return ['Error', dom[1] as Expression, dom[2] as Expression];
@@ -636,7 +646,7 @@ function serialize(
     else
       result.push(serialize(ce, dom[i] as DomainExpression<BoxedExpression>));
   }
-  return ['Domain', result];
+  return result;
 }
 
 function hash(dom: DomainExpression<BoxedExpression>): string {

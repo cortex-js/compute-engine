@@ -134,7 +134,7 @@ describe('Subtract', () => {
     expect(
       ce.box(['Subtract', 2.5, -1.1, 18.4]).evaluate()
     ).toMatchInlineSnapshot(
-      `"["Subtract",2.5,-1.1,["Error","'unexpected-argument'",["Hold",18.4]]]"`
+      `"["Subtract",2.5,-1.1,["Error","'unexpected-argument'",18.4]]"`
     ));
 });
 
@@ -143,13 +143,13 @@ describe('NEGATE', () => {
     expect(ce.box(['Negate', 2.5]).evaluate()).toMatchInlineSnapshot(`"-2.5"`));
   test(`Negate`, () =>
     expect(ce.box(['Negate', 2.5, 1.1]).evaluate()).toMatchInlineSnapshot(
-      `"["Negate",2.5,["Error","'unexpected-argument'",["Hold",1.1]]]"`
+      `"["Negate",2.5,["Error","'unexpected-argument'",1.1]]"`
     )); // @todo
   test(`Negate`, () =>
     expect(
       ce.box(['Negate', 2.5, -1.1, 18.4]).evaluate()
     ).toMatchInlineSnapshot(
-      `"["Negate",2.5,["Error","'unexpected-argument'",["Hold",-1.1]],["Error","'unexpected-argument'",["Hold",18.4]]]"`
+      `"["Negate",2.5,["Error","'unexpected-argument'",-1.1],["Error","'unexpected-argument'",18.4]]"`
     )); // @todo
 });
 
@@ -183,7 +183,7 @@ describe('Divide', () => {
     expect(
       ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate()
     ).toMatchInlineSnapshot(
-      `"["Divide",2.5,-1.1,["Error","'unexpected-argument'",["Hold",18.4]]]"`
+      `"["Divide",2.5,-1.1,["Error","'unexpected-argument'",18.4]]"`
     ));
 });
 
@@ -206,7 +206,7 @@ describe('Power', () => {
     ));
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5, -1.1, 18.4]).evaluate()).toMatchInlineSnapshot(
-      `"["Power",2.5,-1.1,["Error","'unexpected-argument'",["Hold",18.4]]]"`
+      `"["Power",2.5,-1.1,["Error","'unexpected-argument'",18.4]]"`
     ));
 });
 
@@ -221,11 +221,11 @@ describe('Root', () => {
     ));
   test(`INVALID Root`, () =>
     expect(ce.box(['Root', 2.5, 3.1]).evaluate()).toMatchInlineSnapshot(
-      `"["Root",2.5,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","RationalNumber"]],["Hold",3.1]]]"`
+      `"["Root",2.5,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","RationalNumber"]],3.1]]"`
     ));
   test(`INVALID Root`, () =>
     expect(ce.box(['Root', 2.5, -1.1, 18.4]).evaluate()).toMatchInlineSnapshot(
-      `"["Root",2.5,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","RationalNumber"]],["Hold",-1.1]],["Error","'unexpected-argument'",["Hold",18.4]]]"`
+      `"["Root",2.5,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","RationalNumber"]],-1.1],["Error","'unexpected-argument'",18.4]]"`
     ));
 });
 
@@ -236,11 +236,11 @@ describe('Sqrt', () => {
     ));
   test(`INVALID Sqrt`, () =>
     expect(ce.box(['Sqrt', 2.5, 1.1]).evaluate()).toMatchInlineSnapshot(
-      `"["Sqrt",2.5,["Error","'unexpected-argument'",["Hold",1.1]]]"`
+      `"["Sqrt",2.5,["Error","'unexpected-argument'",1.1]]"`
     ));
   test(`INVALID  Sqrt`, () =>
     expect(ce.box(['Sqrt', 2.5, -1.1, 18.4]).evaluate()).toMatchInlineSnapshot(
-      `"["Sqrt",2.5,["Error","'unexpected-argument'",["Hold",-1.1]],["Error","'unexpected-argument'",["Hold",18.4]]]"`
+      `"["Sqrt",2.5,["Error","'unexpected-argument'",-1.1],["Error","'unexpected-argument'",18.4]]"`
     ));
 });
 
@@ -249,13 +249,13 @@ describe('Square', () => {
     expect(ce.box(['Square', 2.5]).evaluate()).toMatchInlineSnapshot(`"6.25"`));
   test(`INVALID Square`, () =>
     expect(ce.box(['Square', 2.5, 1.1]).evaluate()).toMatchInlineSnapshot(
-      `"["Square",2.5,["Error","'unexpected-argument'",["Hold",1.1]]]"`
+      `"["Square",2.5,["Error","'unexpected-argument'",1.1]]"`
     ));
   test(`INVALID Square`, () =>
     expect(
       ce.box(['Square', 2.5, -1.1, 18.4]).evaluate()
     ).toMatchInlineSnapshot(
-      `"["Square",2.5,["Error","'unexpected-argument'",["Hold",-1.1]],["Error","'unexpected-argument'",["Hold",18.4]]]"`
+      `"["Square",2.5,["Error","'unexpected-argument'",-1.1],["Error","'unexpected-argument'",18.4]]"`
     ));
 });
 
@@ -324,7 +324,7 @@ describe('Rational', () => {
     expect(
       ce.box(['Rational', 2.5, -1.1, 18.4]).evaluate()
     ).toMatchInlineSnapshot(
-      `"["Rational",2.5,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain",["Maybe",["Domain","Integer"]]]],["Hold",-1.1]],["Error","'unexpected-argument'",["Hold",18.4]]]"`
+      `"["Rational",2.5,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain",["Maybe","Integer"]]],-1.1],["Error","'unexpected-argument'",18.4]]"`
     ));
   test(`Rational as Divide`, () =>
     expect(ce.box(['Rational', 3.1, 2.8]).N()).toMatchInlineSnapshot(

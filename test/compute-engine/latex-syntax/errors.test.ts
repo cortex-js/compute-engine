@@ -80,13 +80,13 @@ check('Missing argument with \\placeholder parser', () =>
 
 check('Invalid argument in sequence', () =>
   expect(engine.parse('1+(2=2)+3').canonical).toMatchInlineSnapshot(
-    `["Add",1,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],["Hold",["Delimiter",["Equal",2,2]]]],3]`
+    `["Add",1,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],["Equal",2,2]],3]`
   )
 );
 
 check('Invalid argument positional', () =>
   expect(engine.parse('1+\\frac{2}{2=2}+2').canonical).toMatchInlineSnapshot(
-    `["Add",1,["Divide",2,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],["Hold",["Equal",2,2]]]],2]`
+    `["Add",1,["Divide",2,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],["Equal",2,2]]],2]`
   )
 );
 
@@ -235,7 +235,7 @@ check('Invalid double superscript', () =>
 
 check('Double superscript: invalid domain', () =>
   expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(
-    `["Power","x",1,["Error","'unexpected-argument'",["Hold",2]]]`
+    `["Power","x",1,["Error","'unexpected-argument'",2]]`
   )
 );
 
@@ -313,12 +313,12 @@ check('Missing argument', () =>
 
 check('Unexpected argument', () =>
   expect(engine.box(['Sqrt', 12, 29, 74]).canonical).toMatchInlineSnapshot(
-    `["Sqrt",12,["Error","'unexpected-argument'",["Hold",29]],["Error","'unexpected-argument'",["Hold",74]]]`
+    `["Sqrt",12,["Error","'unexpected-argument'",29],["Error","'unexpected-argument'",74]]`
   )
 );
 
 check('Mismatched domain', () =>
   expect(engine.box(['Sqrt', 'True']).canonical).toMatchInlineSnapshot(
-    `["Sqrt",["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],["Hold","True"]]]`
+    `["Sqrt",["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],"True"]]`
   )
 );

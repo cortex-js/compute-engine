@@ -33,6 +33,23 @@ const ce = engine;
 
 ce.assume(['Element', 'f', 'Function']);
 
+const sig1 = ce.domain(['Function', 'PositiveInteger', 'Anything']);
+const sig2 = ce.domain(['Function', 'Number', 'Number']);
+console.log(sig1.isCompatible(sig2));
+
+const sig3 = ce.domain([
+  'Maybe',
+  ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
+]);
+console.log(sig3.toJSON());
+const sig4 = ce.box(['Triple', 'n', 1, 50]).domain;
+console.log(sig4.toJSON());
+console.log(sig4.isCompatible(sig3));
+
+const z = ce.parse('\\sum_{n=1}^5 n^2+1').canonical;
+console.log(z.json);
+console.log(z.evaluate().json);
+
 // When to apply Sequence/Nothing? Need definition to know what to hold...
 console.log(ce.parse('x_{a,b}').toJSON());
 
