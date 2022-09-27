@@ -174,20 +174,19 @@ export function boxNumber(
   }
 
   if (num instanceof Decimal) {
-    if (num.isNaN()) return ce._NAN;
-    if (num.equals(ce._DECIMAL_NEGATIVE_ONE)) return ce._NEGATIVE_ONE;
-    if (num.isZero()) return ce._ZERO;
-    if (num.equals(ce._DECIMAL_ONE)) return ce._ONE;
-    if (num.equals(ce._DECIMAL_TWO)) return ce._TWO;
-    if (!num.isFinite() && num.isPositive()) return ce._POSITIVE_INFINITY;
-    if (!num.isFinite() && num.isNegative()) return ce._NEGATIVE_INFINITY;
+    const n = num.toNumber();
+    if (isNaN(n)) return ce._NAN;
+    if (n === -1) return ce._NEGATIVE_ONE;
+    if (n === 0) return ce._ZERO;
+    if (n === 1) return ce._ONE;
+    if (n === 2) return ce._TWO;
+    if (!Number.isFinite(n)) {
+      if (n < 0) return ce._NEGATIVE_INFINITY;
+      return ce._POSITIVE_INFINITY;
+    }
 
     // Use a Decimal if in `decimal` mode, or `auto` with precision > 15
-    return new BoxedNumber(
-      ce,
-      preferDecimal(ce) ? num : num.toNumber(),
-      metadata
-    );
+    return new BoxedNumber(ce, preferDecimal(ce) ? num : n, metadata);
   }
 
   if (typeof num === 'object' && 'num' in num) {

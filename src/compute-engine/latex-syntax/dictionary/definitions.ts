@@ -93,7 +93,7 @@ export type IndexedLatexDictionaryEntry =
   | EnvironmentEntry;
 
 export type IndexedLatexDictionary = {
-  // Maximum number of tokens ahead of the current one that  need to be
+  // Maximum number of tokens ahead of the current one that need to be
   // considered (longest trigger length)
   lookahead: number;
 

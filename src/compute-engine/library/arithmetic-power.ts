@@ -1,5 +1,6 @@
 import { preferDecimal } from '../boxed-expression/utils';
 import { factorPower } from '../numerics/numeric';
+import { isInMachineRange } from '../numerics/numeric-decimal';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 
 /**
@@ -19,14 +20,17 @@ export function canonicalPower(
     if (exponent.isZero) return ce._ONE;
 
     if (base.isLiteral) {
+      const smallBase = base.machineValue ?? base.asFloat;
       //
       // Special cases
       //
       // Implement same results as sympy.
       // See https://docs.sympy.org/1.6/modules/core.html#pow
       //
-      if (base.isOne) return ce._ONE;
-      if (base.isZero) {
+      // if (base.isOne) return ce._ONE;
+      // if (base.isZero) {
+      if (smallBase === 1) return ce._ONE;
+      if (smallBase === 0) {
         if (exponent.isPositive) return ce._ZERO;
         if (exponent.isNegative) return ce._COMPLEX_INFINITY; //  Unsigned Infinity...
       }
@@ -34,14 +38,26 @@ export function canonicalPower(
       if (exponent.isOne) return base;
 
       if (exponent.isNegativeOne) {
-        if (base.isOne) return ce._ONE;
-        if (base.isNegativeOne) return ce._NEGATIVE_ONE;
+        // if (base.isOne) return ce._ONE;
+        // if (base.isNegativeOne) return ce._NEGATIVE_ONE;
+        if (smallBase === 1) return ce._ONE;
+        if (smallBase === -1) return ce._NEGATIVE_ONE;
         if (base.isInfinity) return ce._ZERO;
         const [n, d] = base.rationalValue;
         if (n !== null && d !== null) return ce.number([d, n], metadata);
         const i = base.asFloat;
         if (i !== null && Number.isInteger(i))
           return ce.number([1, i], metadata);
+        if (base.decimalValue?.isInteger()) {
+          if (isInMachineRange(base.decimalValue))
+            ce.number([1, base.decimalValue.toNumber()], metadata);
+          else ce._fn('Rational', [ce._ONE, base], metadata);
+        } else if (
+          smallBase !== null &&
+          Number.isInteger(smallBase) &&
+          !base.decimalValue
+        )
+          return ce.number([1, smallBase], metadata);
         return ce._fn('Power', [base, ce._NEGATIVE_ONE], metadata);
       }
 

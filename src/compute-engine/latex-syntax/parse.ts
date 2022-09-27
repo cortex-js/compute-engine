@@ -1095,14 +1095,6 @@ export class _Parser implements Parser {
     return null;
   }
 
-  /**
-   * Match a required LaTeX argument:
-   * - either enclosed in `{}`
-   * - or a single token.
-   *
-   * Return null if an argument was not found
-   * Return 'Nothing' if an empty argument `{}` was found
-   */
   matchRequiredLatexArgument(): Expression | null {
     const start = this.index;
     this.skipSpaceTokens();
@@ -1132,17 +1124,6 @@ export class _Parser implements Parser {
     return null;
   }
 
-  /**
-   *  Match a sequence superfix/subfix operator, e.g. `^{*}`
-   *
-   * Superfix and subfix need special handling:
-   *
-   * - they act mostly like an infix operator, but they are commutative, i.e.
-   * `x_a^b` should be parsed identically to `x^b_a`.
-   *
-   * - furthermore, in LaTeX `x^a^b` parses the same as `x^a{}^b`.
-   *
-   */
   matchSupsub(lhs: Expression | null): Expression | null {
     console.assert(lhs !== null); // @todo validate
     if (lhs === null) return null;

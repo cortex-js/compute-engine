@@ -335,6 +335,28 @@ export function applyRecursively(
   return fn(expr);
 }
 
+export function subs(
+  expr: Expression,
+  s: { [symbol: string]: Expression }
+): Expression {
+  const h = head(expr);
+  if (h !== null)
+    return [subs(h, s), ...(ops(expr) ?? []).map((x) => subs(x, s))];
+
+  const dict = dictionary(expr);
+  if (dict !== null) {
+    const keys = Object.keys(dict);
+    const result = {};
+    for (const key of keys) result[key] = subs(dict[key], s);
+    return { dict: result };
+  }
+
+  const sym = symbol(expr);
+  if (sym && s[sym]) return s[sym];
+
+  return expr;
+}
+
 /**
  * Apply a function to the arguments of a function and return an array of T
  */

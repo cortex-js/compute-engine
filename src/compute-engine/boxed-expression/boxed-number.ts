@@ -477,12 +477,13 @@ export class BoxedNumber extends AbstractBoxedExpression {
     // Rationals can never be zero: they get downcast to
     // a machine number during boxing (ctor) if numerator is 0
     if (Array.isArray(this._value)) return false;
-
+    if (this._value === 0) return true;
     return this.engine.chop(this._value) === 0;
   }
 
   get isNotZero(): boolean {
     if (Array.isArray(this._value)) return true;
+    if (this._value === 0) return false;
 
     return this.engine.chop(this._value) !== 0;
   }
@@ -558,6 +559,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (typeof this._value === 'number') return isPrime(this._value);
 
     // @todo: prime for Decimal integers
+    if (this._value instanceof Decimal) return isPrime(this._value.toNumber());
     return undefined;
   }
 
@@ -574,6 +576,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (typeof this._value === 'number') return !isPrime(this._value);
 
     // @todo: prime for Decimal integers
+    if (this._value instanceof Decimal) return !isPrime(this._value.toNumber());
     return undefined;
   }
 

@@ -23,6 +23,8 @@ import {
   op1,
   op2,
   ops,
+  symbol,
+  subs,
 } from '../../../math-json/utils';
 import { Serializer, Parser, LatexDictionary } from '../public';
 import { getFractionStyle, getRootStyle } from '../serializer-style';
@@ -787,6 +789,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     serialize: serializePower,
   },
+  {
+    trigger: '\\prod',
+    precedence: 265,
+    name: 'Product',
+    parse: parseBigOp('Product'),
+    serialize: serializeBigOp('\\prod'),
+  },
+
   // {
   //   trigger: ['*', '*'],
   //   kind: 'infix',
@@ -813,6 +823,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) => serializer.wrapShort(op(expr, 1)) + '^2',
   },
   {
+    trigger: '\\sum',
+    precedence: 265,
+    name: 'Sum',
+    parse: parseBigOp('Sum'),
+    serialize: serializeBigOp('\\sum'),
+  },
+  {
     name: 'Sign',
     // As per ISO 80000-2, "signum" is 'sgn'
     trigger: '\\operatorname{sgn}',
@@ -837,3 +854,95 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
   },
 ];
+
+function parseBigOp(name: string) {
+  return (parser: Parser): Expression | null => {
+    // Look for sub and sup
+    parser.skipSpace();
+
+    let sup: Expression | null = null;
+    let sub: Expression | null = null;
+    while (!(sub && sup) && (parser.peek === '_' || parser.peek === '^')) {
+      if (parser.match('_')) sub = parser.matchRequiredLatexArgument();
+      else if (parser.match('^')) sup = parser.matchRequiredLatexArgument();
+      parser.skipSpace();
+    }
+
+    let index: Expression | null = null;
+    let lower: Expression | null = null;
+    if (head(sub) === 'Equal') {
+      index = op(sub, 1);
+      lower = op(sub, 2);
+    } else {
+      index = sub;
+    }
+
+    const sym = symbol(index);
+    // Note: 265 is the precedence for some relational operators
+    if (sym)
+      parser.computeEngine?.pushScope({
+        symbolTable: { symbols: [{ name: sym, domain: 'Integer' }] },
+      });
+    let fn = parser.matchExpression({ minPrec: 266 });
+    if (fn && sym) fn = ['Lambda', subs(fn, { [sym]: '_' })];
+
+    if (sym) parser.computeEngine?.popScope();
+
+    if (!fn) return [name];
+
+    if (sup) return [name, fn, ['Tuple', index ?? 'Nothing', lower ?? 1, sup]];
+
+    if (lower) return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
+
+    if (index) return [name, fn, ['Tuple', index]];
+
+    return [name, fn];
+  };
+}
+
+function serializeBigOp(command: string) {
+  return (serializer, expr) => {
+    if (!op(expr, 1)) return command;
+
+    const arg = op(expr, 2);
+    const index = op(arg, 1) ?? 'Nothing';
+
+    let fn = op(expr, 1);
+    if (head(fn) === 'Lambda' && op(fn, 1)) {
+      fn = subs(op(fn, 1)!, { _: index, _1: index });
+    }
+
+    if (!arg) return joinLatex([command, serializer.serialize(fn)]);
+    const h = head(arg);
+    if (h !== 'Tuple' && h !== 'Triple' && h !== 'Pair' && h !== 'Single') {
+      return joinLatex([
+        command,
+        '_',
+        serializer.serialize(arg),
+        serializer.serialize(fn),
+      ]);
+    }
+
+    const lower = op(arg, 2);
+
+    let sub: string[] = [];
+    if (symbol(index) !== 'Nothing' && lower) {
+      sub.push('{');
+      sub.push(serializer.serialize(index));
+      sub.push('=');
+      sub.push(serializer.serialize(lower));
+      sub.push('}');
+    } else if (symbol(index) !== 'Nothing') {
+      sub.push(serializer.serialize(index));
+    } else if (lower) {
+      sub.push(serializer.serialize(lower));
+    }
+
+    if (sub.length > 0) sub = ['_{', ...sub, '}'];
+
+    let sup: string[] = [];
+    if (op(arg, 3)) sup = ['^{', serializer.serialize(op(arg, 3)), '}'];
+
+    return joinLatex([command, ...sup, ...sub, serializer.serialize(fn)]);
+  };
+}

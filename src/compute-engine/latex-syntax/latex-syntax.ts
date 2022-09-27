@@ -130,47 +130,47 @@ export class LatexSyntax {
   }
 
   parse(latex: LatexString): Expression {
-    const scanner = new _Parser(
+    const parser = new _Parser(
       tokenize(latex, []),
       this.options,
       this.dictionary,
       this.computeEngine
     );
 
-    let expr = scanner.matchExpression();
+    let expr = parser.matchExpression();
 
-    if (!scanner.atEnd) {
-      const opDefs = scanner.peekDefinitions('infix');
+    if (!parser.atEnd) {
+      const opDefs = parser.peekDefinitions('infix');
       if (opDefs) {
-        const start = scanner.index;
+        const start = parser.index;
         const [def, n] = opDefs[0];
-        scanner.index += n;
+        parser.index += n;
         const result = def.parse(
-          scanner,
+          parser,
           { minPrec: 0 },
-          expr ?? scanner.error('missing', start)
+          expr ?? parser.error('missing', start)
         );
         if (result) return result;
         if (def.name) {
           return [
             def.name,
-            expr ?? scanner.error('missing', start),
-            scanner.error('missing', start),
+            expr ?? parser.error('missing', start),
+            parser.error('missing', start),
           ];
         }
-        scanner.index = start;
+        parser.index = start;
       }
 
-      const rest = scanner.index;
-      const token = scanner.next();
-      while (!scanner.atEnd) scanner.next();
+      const rest = parser.index;
+      const token = parser.next();
+      while (!parser.atEnd) parser.next();
       // const error: Expression = [
       //   'Error',
       //   ['ErrorCode', { str: 'unexpected-token' }, { str: rest[0] }],
       //   ['Latex', { str: tokensToString(rest) }],
       // ];
 
-      const error = scanner.error(
+      const error = parser.error(
         [
           token.length > 1 && token.startsWith('\\')
             ? 'unexpected-command'

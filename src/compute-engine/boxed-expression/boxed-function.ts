@@ -17,6 +17,7 @@ import {
   BoxedDomain,
   BoxedLambdaExpression,
   RuntimeScope,
+  BoxedFunctionSignature,
 } from '../public';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
@@ -243,7 +244,8 @@ export class BoxedFunction extends AbstractBoxedExpression {
       // Apply Nothing, Sequence, Symbol
       this._ops = normalizeList(this._ops, this._def.hold);
 
-      this._ops = validateSignature(ce, this._def, this._ops) ?? this._ops;
+      this._ops =
+        validateSignature(ce, this._def.signature, this._ops) ?? this._ops;
 
       // Calculate the effective codomain
       if (!this._ops.every((x) => x.isValid)) {
@@ -621,7 +623,8 @@ export class BoxedFunction extends AbstractBoxedExpression {
       );
 
     //
-    // 2/ Get the canonical form of the arguments
+    // 2/ Get the canonical form of the arguments, accounting for `Hold`,
+    // `ReleaseHold`, `Sequence` and `Symbol`
     //
     let tail = canonicalHoldMap(def.name, this._ops, def.hold, def.associative);
 
@@ -860,7 +863,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 }
 
-function lambda(
+export function lambda(
   ce: IComputeEngine,
   fn: BoxedLambdaExpression,
   args: BoxedExpression[]
@@ -1019,9 +1022,12 @@ function normalizeList(
   return result;
 }
 
+/** Return null if the `ops` match the sig. Otherwise, return an array
+ * of expressions indicating the mismatched arguments.
+ */
 function validateSignature(
   ce: IComputeEngine,
-  def: BoxedFunctionDefinition,
+  sig: BoxedFunctionSignature,
   ops: BoxedExpression[],
   codomain?: BoxedExpression
 ): BoxedExpression[] | null {
@@ -1033,10 +1039,10 @@ function validateSignature(
     codomain ?? 'Anything',
   ]);
 
-  if (def.signature.domain.isCompatible(targetSig)) return null;
+  if (sig.domain.isCompatible(targetSig)) return null;
 
   // The argument list is not compatible
-  const expectedArgs = def.signature.domain.domainArgs!.slice(0, -1);
+  const expectedArgs = sig.domain.domainArgs!.slice(0, -1);
 
   const newOps: BoxedExpression[] = [];
 
@@ -1063,7 +1069,11 @@ function validateSignature(
         }
         break;
       }
-      if (!opsDomain[i].isCompatible(ce.domain(expectedArgs[i]))) {
+      if (
+        !ops[i].symbol?.startsWith('_') &&
+        !opsDomain[i].isCompatible(ce.domain(expectedArgs[i]))
+      ) {
+        console.log(opsDomain[i].isCompatible(ce.domain(expectedArgs[i])));
         newOps.push(
           ce.error(
             ['mismatched-argument-domain', ce.domain(expectedArgs[i])],
@@ -1074,4 +1084,13 @@ function validateSignature(
     }
   }
   return newOps;
+}
+
+function matchSignature(
+  ce: IComputeEngine,
+  def: BoxedFunctionDefinition,
+  tail: BoxedExpression[],
+  codomain?: BoxedExpression
+): BoxedFunctionSignature | undefined {
+  return def.signature;
 }

@@ -262,6 +262,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return `\\texttt{${sanitizeLatex(stringValue(op(expr, 1)))}}`;
     },
   },
+
   {
     name: 'Latex',
     serialize: (serializer, expr) => {

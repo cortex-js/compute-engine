@@ -758,8 +758,18 @@ export interface Parser {
    *
    * Otherwise, return `null`.
    */
+
   matchOptionalLatexArgument(): Expression | null;
+  /**
+   * Match a required LaTeX argument:
+   * - either enclosed in `{}`
+   * - or a single token.
+   *
+   * Return null if an argument was not found
+   * Return 'Nothing' if an empty argument `{}` was found
+   */
   matchRequiredLatexArgument(): Expression | null;
+
   /**
    * - 'enclosure' : will look for an argument inside an enclosure (an open/close fence)
    * - 'implicit': either an expression inside a pair of `()`, or just a primary
@@ -781,6 +791,17 @@ export interface Parser {
 
   matchMiddleDelimiter(delimiter: '|' | ':' | LatexToken): boolean;
 
+  /**
+   *  Match a sequence superfix/subfix operator, e.g. `^{*}`
+   *
+   * Superfix and subfix need special handling:
+   *
+   * - they act mostly like an infix operator, but they are commutative, i.e.
+   * `x_a^b` should be parsed identically to `x^b_a`.
+   *
+   * - furthermore, in LaTeX `x^a^b` parses the same as `x^a{}^b`.
+   *
+   */
   matchSupsub(lhs: Expression | null): Expression | null;
 
   /**

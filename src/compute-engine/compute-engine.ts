@@ -1170,12 +1170,14 @@ export class ComputeEngine implements IComputeEngine {
     if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
+
   mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
     const result = canonicalMultiply(this, ops);
     if (metadata?.latex !== undefined) result.latex = metadata.latex;
     if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
+
   power(
     base: BoxedExpression,
     exponent: number | [number, number] | BoxedExpression,
@@ -1184,7 +1186,9 @@ export class ComputeEngine implements IComputeEngine {
     console.assert(base.isCanonical); // @debug
     let e: number | null = null;
     if (typeof exponent === 'number') e = exponent;
-    else if (Array.isArray(exponent) && exponent[1] === 1) e = exponent[0];
+    else if (Array.isArray(exponent)) {
+      if (exponent[1] === 1) e = exponent[0];
+    } else e = exponent.machineValue;
     if (e === 1) return base;
     if (e === -1 && base.isLiteral) {
       const [n, d] = base.rationalValue;

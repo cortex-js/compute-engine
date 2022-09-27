@@ -242,3 +242,32 @@ export function evalAdd(
 
   return sum.asExpression();
 }
+
+export function evalSummation(
+  ce: IComputeEngine,
+  expr: BoxedExpression,
+  range: BoxedExpression
+): BoxedExpression {
+  const index = range.op1.symbol ?? 'i';
+  const lower = range.op2.asSmallInteger ?? 1;
+  const upper = range.op3.asSmallInteger ?? 1000000;
+
+  const fn = expr.head === 'Lambda' ? expr.op1 : expr.subs({ [index]: '_' });
+
+  if (preferDecimal(ce)) {
+    let v = ce.decimal(0);
+    for (let i = lower; i <= upper; i++) {
+      const n = ce.number(i);
+      const r = fn.subs({ _1: n, _: n }).evaluate();
+      v = v.add(r.decimalValue ?? r.asFloat ?? NaN);
+    }
+  }
+  let v = 0;
+  for (let i = lower; i <= upper; i++) {
+    const n = ce.number(i);
+    const r = fn.subs({ _1: n, _: n }).evaluate();
+    v += r.asFloat ?? NaN;
+  }
+
+  return ce.number(v);
+}

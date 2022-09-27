@@ -24,6 +24,7 @@ import {
   simplifyAdd,
   evalAdd,
   domainAdd,
+  evalSummation,
 } from './arithmetic-add';
 import {
   canonicalMultiply,
@@ -798,6 +799,29 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
               return ce.number(lhs.asFloat - rhs.asFloat);
             return undefined;
           },
+        },
+      },
+      {
+        name: 'Sum',
+        wikidata: 'Q218005',
+        complexity: 1000,
+        hold: 'first',
+        signature: {
+          domain: [
+            'Function',
+            'Anything',
+            // [
+            //   'Maybe',
+            'Tuple',
+            // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
+            // ],
+            'Number',
+          ],
+          // codomain: (ce, args) => domainAdd(ce, args),
+          // canonical: (ce, args) => canonicalAdd(ce, args),
+          // simplify: (ce, ops) => simplifyAdd(ce, ops),
+          evaluate: (ce, ops) => evalSummation(ce, ops[0], ops[1]),
+          // N: (ce, ops) => evalAdd(ce, ops, 'N'),
         },
       },
     ],

@@ -1,6 +1,7 @@
 import { BoxedExpression, SymbolTable } from '../public';
 import { joinLatex, tokenize } from '../latex-syntax/tokenizer';
 import { fromDigits } from '../numerics/numeric';
+import { lambda } from '../boxed-expression/boxed-function';
 
 //   // := assign 80 // @todo
 
@@ -325,7 +326,11 @@ export const CORE_LIBRARY: SymbolTable[] = [
         name: 'Lambda',
         wikidata: 'Q567612',
         hold: 'all',
-        signature: { domain: 'Function' },
+        signature: {
+          domain: ['Function', 'Anything', 'Function'],
+          evaluate: (ce, ops) =>
+            lambda(ce, ops[0], ops[1].ops ?? []).evaluate(),
+        },
       },
       {
         name: 'Latex',
