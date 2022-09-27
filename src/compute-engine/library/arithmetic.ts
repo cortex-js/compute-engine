@@ -25,12 +25,14 @@ import {
   evalAdd,
   domainAdd,
   evalSummation,
+  canonicalSummation,
 } from './arithmetic-add';
 import {
   canonicalMultiply,
   simplifyMultiply,
   evalMultiply,
   evalMultiplication,
+  canonicalMultiplication,
 } from './arithmetic-multiply';
 import { canonicalDivide, simplifyDivide } from './arithmetic-divide';
 import { canonicalPower, processPower } from './arithmetic-power';
@@ -527,7 +529,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
             'Number',
           ],
           // codomain: (ce, args) => domainAdd(ce, args),
-          // canonical: (ce, args) => canonicalAdd(ce, args),
+          canonical: (ce, ops) => canonicalMultiplication(ce, ops[0], ops[1]),
           simplify: (ce, ops) =>
             evalMultiplication(ce, ops[0], ops[1], 'simplify'),
           evaluate: (ce, ops) =>
@@ -844,6 +846,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
             // ],
             'Number',
           ],
+          canonical: (ce, ops) => canonicalSummation(ce, ops[0], ops[1]),
           simplify: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'simplify'),
           evaluate: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'evaluate'),
           N: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'N'),

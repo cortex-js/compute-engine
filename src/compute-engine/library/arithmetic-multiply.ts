@@ -282,22 +282,66 @@ function multiply2(
   return canonicalNegate(product.asExpression(), metadata);
 }
 
+export function canonicalMultiplication(
+  ce: IComputeEngine,
+  expr: BoxedExpression,
+  range: BoxedExpression | undefined
+) {
+  let index: BoxedExpression | null = null;
+  let lower: BoxedExpression | null = null;
+  let upper: BoxedExpression | null = null;
+  if (
+    range &&
+    range.head !== 'Tuple' &&
+    range.head !== 'Triple' &&
+    range.head !== 'Pair' &&
+    range.head !== 'Single'
+  ) {
+    index = range;
+  } else if (range) {
+    index = range.ops?.[0] ?? null;
+    lower = range.ops?.[1] ?? null;
+    upper = range.ops?.[2] ?? null;
+  }
+
+  let fn: BoxedExpression;
+  if (index !== null && index.symbol)
+    fn = expr.head === 'Lambda' ? expr.op1 : expr.subs({ [index.symbol]: '_' });
+  else fn = expr.head === 'Lambda' ? expr.op1 : expr;
+
+  index ??= ce.symbol('Null');
+
+  if (upper) range = ce.tuple([index, lower ?? ce.symbol('Null'), upper]);
+  else if (lower && upper) range = ce.tuple([index, lower, upper]);
+  else if (lower) range = ce.tuple([index, lower]);
+  else range = index;
+
+  return ce._fn('Product', [ce._fn('Lambda', [fn]), range]);
+}
+
 export function evalMultiplication(
   ce: IComputeEngine,
   expr: BoxedExpression,
   range: BoxedExpression,
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
-  const index = range.op1.symbol ?? 'i';
-  const lower = range.op2.asSmallInteger ?? 1;
-  const upper = range.op3.asSmallInteger ?? MAX_ITERATION;
+  if (expr.head !== 'Lambda') return undefined;
+  const fn = expr.op1 ?? ce.symbol('Nothing');
 
-  const fn = expr.head === 'Lambda' ? expr.op1 : expr.subs({ [index]: '_' });
-
+  let lower = 1;
+  let upper = MAX_ITERATION;
   if (
-    (mode === 'evaluate' || mode === 'simplify') &&
-    upper - lower < MAX_SYMBOLIC_TERMS
+    range.head === 'Tuple' ||
+    range.head === 'Triple' ||
+    range.head === 'Pair' ||
+    range.head === 'Single'
   ) {
+    lower = range.op2.asSmallInteger ?? 1;
+    upper = range.op3.asSmallInteger ?? MAX_ITERATION;
+  }
+  if (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS) return undefined;
+
+  if (mode === 'evaluate' || mode === 'simplify') {
     const terms: BoxedExpression[] = [];
     for (let i = lower; i <= upper; i++) {
       const n = ce.number(i);
@@ -307,25 +351,22 @@ export function evalMultiplication(
     return ce.mul(terms).evaluate();
   }
 
-  if (mode === 'N' && upper - lower < MAX_ITERATION) {
-    if (preferDecimal(ce)) {
-      let v = ce.decimal(1);
-      for (let i = lower; i <= upper; i++) {
-        const n = ce.number(i);
-        const r = fn.subs({ _1: n, _: n }).evaluate();
-        const val = r.decimalValue ?? r.asFloat;
-        if (!val) return undefined;
-        v = v.mul(val);
-      }
-    }
-    let v = 1;
+  if (preferDecimal(ce)) {
+    let v = ce.decimal(1);
     for (let i = lower; i <= upper; i++) {
       const n = ce.number(i);
       const r = fn.subs({ _1: n, _: n }).evaluate();
-      if (!r.asFloat) return undefined;
-      v *= r.asFloat;
+      const val = r.decimalValue ?? r.asFloat;
+      if (!val) return undefined;
+      v = v.mul(val);
     }
-    return ce.number(v);
   }
-  return undefined;
+  let v = 1;
+  for (let i = lower; i <= upper; i++) {
+    const n = ce.number(i);
+    const r = fn.subs({ _1: n, _: n }).evaluate();
+    if (!r.asFloat) return undefined;
+    v *= r.asFloat;
+  }
+  return ce.number(v);
 }
