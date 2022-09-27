@@ -2,11 +2,14 @@ import { parse } from '../../utils';
 
 describe('STEFNOTCH #9', () => {
   test('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x', () => {
-    expect(
-      parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x')
-    ).toMatchInlineSnapshot(
-      `'["Integral", ["Multiply", 3, "x"], "Nothing", "Nothing"]'`
-    );
+    expect(parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x'))
+      .toMatchInlineSnapshot(`
+      '[
+        "Integrate",
+        ["Multiply", 3, "x"],
+        ["Triple", "", "Nothing", "Nothing"]
+      ]'
+    `);
   });
 });
 

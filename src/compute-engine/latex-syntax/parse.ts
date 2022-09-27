@@ -949,6 +949,32 @@ export class _Parser implements Parser {
   }
 
   /**
+   * Match a single variable name. It can be:
+   * - a single letter: `x`, `i`
+   * - a multi-letter variable: `\mathrm{speed}`
+   * - a command: `\alpha`  @todo
+   * - a complex name such as `\alpha_12` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}` (see serializer.ts) @todo:
+   * @todo: matchSymbol should use matchVariable
+   */
+  matchVariable(): string | null {
+    let result: string | null = null;
+    if (
+      this.match('\\operatorname') ||
+      this.match('\\mathit') ||
+      this.match('\\mathrm')
+    ) {
+      result = this.matchStringArgument();
+      if (result === null || !isValidSymbolName(result)) null;
+      return result;
+    }
+
+    result = this.peek;
+    if (/[a-zA-Z]/.test(result)) return this.next();
+
+    return null;
+  }
+
+  /**
    * A symbol can be:
    * - a constant: `\pi`
    * - a single-letter variable: `x`
@@ -967,6 +993,7 @@ export class _Parser implements Parser {
     if (defs) {
       for (const [def, tokenCount] of defs) {
         this.index = start + tokenCount;
+        // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling parseUnknownSymbol() or somethinglike it (parseUnknownSymbol() may aggressively return 'symbol'...))
         if (typeof def.parse === 'function') {
           const result = def.parse(this);
           if (result) return result;
@@ -1107,10 +1134,8 @@ export class _Parser implements Parser {
     }
 
     // Is it a single digit?
-    if (/^[0-9]$/.test(this.peek)) {
-      // ... only match the digit, i.e. `x^23` is `x^{2}3`, not x^{23}
-      return parseInt(this.next());
-    }
+    // Note: `x^23` is `x^{2}3`, not x^{23}
+    if (/^[0-9]$/.test(this.peek)) return parseInt(this.next());
 
     // Is it a single letter (but not a special letter)?
     if (/^[^\\#]$/.test(this.peek)) return this.next();

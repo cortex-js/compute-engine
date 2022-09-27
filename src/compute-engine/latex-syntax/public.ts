@@ -752,6 +752,8 @@ export interface Parser {
     lhs: Expression | null
   ): Expression | null;
 
+  matchVariable(): string | null;
+
   /** If the next tokens correspond to an optional LaTeX argument,
    * enclosed with `[` and `]` return the content of the argument
    * as an expression and advance the index past the closing `]`.

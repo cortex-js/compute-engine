@@ -386,42 +386,45 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     trigger: ['\\!'],
-    parse: () => ['HorizontalSpacing', 'Nothing', -3] as Expression,
+    parse: () => ['HorizontalSpacing', -3] as Expression,
   },
   {
     trigger: ['\\ '],
-    parse: () => ['HorizontalSpacing', 'Nothing', 6] as Expression,
+    parse: () => ['HorizontalSpacing', 6] as Expression,
   },
   {
     trigger: ['\\:'],
-    parse: () => ['HorizontalSpacing', 'Nothing', 4] as Expression,
+    parse: () => ['HorizontalSpacing', 4] as Expression,
   },
   {
     trigger: ['\\enskip'],
-    parse: () => ['HorizontalSpacing', 'Nothing', 9] as Expression,
+    parse: () => ['HorizontalSpacing', 9] as Expression,
   },
   {
     trigger: ['\\quad'],
-    parse: () => ['HorizontalSpacing', 'Nothing', 18] as Expression,
+    parse: () => ['HorizontalSpacing', 18] as Expression,
   },
   {
     trigger: ['\\qquad'],
-    parse: () => ['HorizontalSpacing', 'Nothing', 36] as Expression,
+    parse: () => ['HorizontalSpacing', 36] as Expression,
   },
   {
     trigger: ['\\,'],
-    parse: () => ['HorizontalSpacing', 'Nothing', 3] as Expression,
+    parse: () => ['HorizontalSpacing', 3] as Expression,
   },
   {
     trigger: ['\\;'],
-    parse: () => ['HorizontalSpacing', 'Nothing', 5] as Expression,
+    parse: () => ['HorizontalSpacing', 5] as Expression,
   },
   {
     trigger: ['\\enspace'],
-    parse: () => ['HorizontalSpacing', 'Nothing', 9] as Expression,
+    parse: () => ['HorizontalSpacing', 9] as Expression,
   },
   {
     name: 'HorizontalSpacing',
+    // The `HorizontalSpacing` function has two forms
+    // `["HorizontalSpacing", number]` -> indicate a space of mu units
+    // `["HorizontalSpacing", expr, 'op'|'bin'|rel]` -> indicate a spacing around and expression, i.e. `\mathbin{x}`, etc...
     serialize: (_serializer, expr): string => {
       const content = op(expr, 1);
       if (symbol(content) === 'Nothing') {

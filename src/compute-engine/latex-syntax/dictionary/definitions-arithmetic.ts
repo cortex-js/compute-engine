@@ -890,9 +890,9 @@ function parseBigOp(name: string) {
 
     if (!fn) return [name];
 
-    if (sup) return [name, fn, ['Tuple', index ?? 'Nothing', lower ?? 1, sup]];
+    if (sup) return [name, fn, ['Tuple', index ?? 'Null', lower ?? 1, sup]];
 
-    if (lower) return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
+    if (lower) return [name, fn, ['Tuple', index ?? 'Null', lower]];
 
     if (index) return [name, fn, ['Tuple', index]];
 
@@ -904,21 +904,25 @@ function serializeBigOp(command: string) {
   return (serializer, expr) => {
     if (!op(expr, 1)) return command;
 
-    const arg = op(expr, 2);
-    const index = op(arg, 1) ?? 'Nothing';
+    let arg = op(expr, 2);
+    const h = head(arg);
+    if (h !== 'Tuple' && h !== 'Triple' && h !== 'Pair' && h !== 'Single')
+      arg = null;
+
+    const index = op(arg, 1) ?? 'n';
 
     let fn = op(expr, 1);
-    if (head(fn) === 'Lambda' && op(fn, 1)) {
+    if (head(fn) === 'Lambda' && op(fn, 1))
       fn = subs(op(fn, 1)!, { _: index, _1: index });
-    }
 
-    if (!arg) return joinLatex([command, serializer.serialize(fn)]);
-    const h = head(arg);
-    if (h !== 'Tuple' && h !== 'Triple' && h !== 'Pair' && h !== 'Single') {
+    if (!arg) {
+      if (!op(expr, 2))
+        return joinLatex([command, '_n', serializer.serialize(fn)]);
       return joinLatex([
         command,
-        '_',
-        serializer.serialize(arg),
+        '_{',
+        serializer.serialize(op(expr, 2)),
+        '}',
         serializer.serialize(fn),
       ]);
     }
@@ -926,17 +930,10 @@ function serializeBigOp(command: string) {
     const lower = op(arg, 2);
 
     let sub: string[] = [];
-    if (symbol(index) !== 'Nothing' && lower) {
-      sub.push('{');
-      sub.push(serializer.serialize(index));
-      sub.push('=');
-      sub.push(serializer.serialize(lower));
-      sub.push('}');
-    } else if (symbol(index) !== 'Nothing') {
-      sub.push(serializer.serialize(index));
-    } else if (lower) {
-      sub.push(serializer.serialize(lower));
-    }
+    if (symbol(index) !== 'Null' && lower)
+      sub = [serializer.serialize(index), '=', serializer.serialize(lower)];
+    else if (symbol(index) !== 'Null') sub = [serializer.serialize(index)];
+    else if (lower) sub = [serializer.serialize(lower)];
 
     if (sub.length > 0) sub = ['_{', ...sub, '}'];
 

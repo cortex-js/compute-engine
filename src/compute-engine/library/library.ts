@@ -1,4 +1,5 @@
 import { ARITHMETIC_LIBRARY } from './arithmetic';
+import { CALCULUS_LIBRARY } from './calculus';
 import { COLLECTIONS_LIBRARY } from './collections';
 import { CORE_LIBRARY } from './core';
 import { LOGIC_LIBRARY } from './logic';
@@ -81,7 +82,7 @@ export const LIBRARIES: {
   //   // - simplify
   // ],
   'arithmetic': ARITHMETIC_LIBRARY,
-  'calculus': [],
+  'calculus': CALCULUS_LIBRARY,
   'combinatorics': [], // @todo fibonacci, binomial, etc...
   'control-structures': [],
   //   // D

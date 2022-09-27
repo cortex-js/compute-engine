@@ -143,7 +143,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
         },
       },
       {
-        name: 'Error-code',
+        name: 'ErrorCode',
         complexity: 500,
         inert: true,
         signature: {
@@ -156,6 +156,16 @@ export const CORE_LIBRARY: SymbolTable[] = [
         },
       },
       {
+        name: 'HorizontalSpacing',
+        signature: {
+          domain: 'Function',
+          canonical: (ce, args) => {
+            if (args.length === 2) return args[0].canonical;
+            return ce.symbol('Nothing');
+          },
+        },
+      },
+      {
         name: 'Style',
         complexity: 9000,
         inert: true,
@@ -163,7 +173,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
           domain: [
             'Function',
             'Anything',
-            ['Maybe', ['Head', 'Dictionary']], // @todo
+            ['Maybe', 'Dictionary'], // @todo
             'Anything',
           ],
         },
@@ -328,6 +338,9 @@ export const CORE_LIBRARY: SymbolTable[] = [
         hold: 'all',
         signature: {
           domain: ['Function', 'Anything', 'Function'],
+          canonical: (ce, ops) => {
+            return ce._fn('Lambda', [ops[0].canonical]);
+          },
           evaluate: (ce, ops) =>
             lambda(ce, ops[0], ops[1].ops ?? []).evaluate(),
         },

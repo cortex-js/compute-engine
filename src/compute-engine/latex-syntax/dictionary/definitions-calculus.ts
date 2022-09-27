@@ -1,46 +1,120 @@
 import { Expression } from '../../../math-json/math-json-format';
+import { head, op, subs, symbol } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer } from '../public';
+import { joinLatex } from '../tokenizer';
 
 // See https://de.wikipedia.org/wiki/Formelsatz
 // for a discussion of typographical notation in Germany, Russia and France
 // Also DIN 1304 (symbols in formulas) and DIN 1338 (typesetting of formulas)
 
-function parseIntegral(parser: Parser): Expression | null {
-  // There could be some superscript and subscripts
-  let sup: Expression | null = 'Nothing';
-  let sub: Expression | null = 'Nothing';
-  let done = false;
-  while (!done) {
+// @todo: double integrals
+function parseIntegral(head: string) {
+  return (parser: Parser): Expression | null => {
+    // There could be some superscript and subscripts
     parser.skipSpace();
-    if (parser.match('_')) {
-      sub = parser.matchRequiredLatexArgument();
-    } else if (parser.match('^')) {
-      sup = parser.matchRequiredLatexArgument();
-    } else {
-      done = true;
+
+    let sup: Expression | null = null;
+    let sub: Expression | null = null;
+    while (!(sub && sup) && (parser.peek === '_' || parser.peek === '^')) {
+      if (parser.match('_')) sub = parser.matchRequiredLatexArgument();
+      else if (parser.match('^')) sup = parser.matchRequiredLatexArgument();
+      parser.skipSpace();
     }
-  }
 
-  // @todo: that's not quite right: the integral of the function is denoted
-  // by a `...dx` pattern, e.g. `\int \sin(x)dx`
-  parser.addBoundary(['d']);
-  const fn = parser.matchExpression();
-  if (parser.matchBoundary())
-    return ['Integral', fn ?? '', sup ?? 'Nothing', sub ?? 'Nothing'];
+    // An integral expression is of the form `\int \sin(x)dx`
+    const start = parser.index;
+    parser.addBoundary(['\\mathrm', '<{>', 'd', '<}>']);
 
-  parser.removeBoundary();
-  return ['Integral', fn ?? '', sup ?? 'Nothing', sub ?? 'Nothing'];
+    // Parse an expression (up to a relational operator, or the boundary)
+    let fn = parser.matchExpression({ minPrec: 266 });
+
+    let index: string | null = '';
+    if (parser.matchBoundary()) {
+      parser.skipSpace();
+      index = parser.matchVariable();
+    } else {
+      parser.removeBoundary();
+      // Try again, but looking for a simple "d"
+      parser.index = start;
+      parser.addBoundary(['d']);
+      fn = parser.matchExpression({ minPrec: 266 });
+      if (parser.matchBoundary()) {
+        parser.skipSpace();
+        index = parser.matchVariable();
+      } else parser.removeBoundary();
+    }
+
+    if (fn && index) fn = ['Lambda', subs(fn, { [index]: '_' })];
+
+    if (!fn) return [head];
+
+    if (sup)
+      return [head, fn ?? 'Null', ['Tuple', index ?? 'Null', sub ?? 1, sup]];
+
+    if (sub) return [head, fn ?? 'Null', ['Tuple', index ?? 'Null', sub]];
+
+    if (index) return [head, fn ?? 'Null', ['Tuple', index]];
+
+    if (fn) return [head, fn];
+
+    return [head];
+  };
 }
+function serializeIntegral(command: string) {
+  return (serializer: Serializer, expr: Expression): string => {
+    if (!op(expr, 1)) return command;
 
-function serializeIntegral(_serializer: Serializer, _expr: Expression): string {
-  return '';
+    let arg = op(expr, 2);
+    const h = head(arg);
+    if (h !== 'Tuple' && h !== 'Triple' && h !== 'Pair' && h !== 'Single')
+      arg = null;
+
+    const index = op(arg, 1) ?? 'x';
+
+    let fn = op(expr, 1);
+    if (head(fn) === 'Lambda' && op(fn, 1))
+      fn = subs(op(fn, 1)!, { _: index, _1: index });
+
+    if (!arg) {
+      if (!op(expr, 2)) return joinLatex([command, serializer.serialize(fn)]);
+      return joinLatex([
+        command,
+        '_{',
+        serializer.serialize(op(expr, 2)),
+        '}',
+        serializer.serialize(fn),
+      ]);
+    }
+
+    let sub = [serializer.serialize(op(arg, 2))];
+
+    if (sub.length > 0) sub = ['_{', ...sub, '}'];
+
+    let sup: string[] = [];
+    if (op(arg, 3)) sup = ['^{', serializer.serialize(op(arg, 3)), '}'];
+
+    return joinLatex([
+      command,
+      ...sup,
+      ...sub,
+      serializer.serialize(fn),
+      ...(symbol(index) !== 'Null'
+        ? ['\\,\\mathrm{d}', serializer.serialize(index)]
+        : []),
+    ]);
+  };
 }
-
 export const DEFINITIONS_CALCULUS: LatexDictionary = [
   {
-    name: 'Integral',
+    name: 'Integrate',
     trigger: ['\\int'],
-    parse: parseIntegral,
-    serialize: serializeIntegral,
+    parse: parseIntegral('Integrate'),
+    serialize: serializeIntegral('\\int'),
+  },
+  {
+    name: 'CircularIntegrate',
+    trigger: ['\\oint'],
+    parse: parseIntegral('CircularIntegrate'),
+    serialize: serializeIntegral('\\oint'),
   },
 ];

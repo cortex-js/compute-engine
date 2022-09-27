@@ -4,7 +4,7 @@ describe('STYLE - MATH MODE', () => {
   test('\\textcolor', () => {
     expect(check('x \\textcolor{red}{=} y')).toMatchInlineSnapshot(`
       'box      = ["Multiply", ["Sequence", "x", ["Error", ["ErrorCode", "'unexpected-command'", "'\\textcolor'"], ["Latex", "'\\textcolor{red}{=}'"]]], "y"]
-      canonical = ["Multiply", "x", ["Error", ["ErrorCode", "'unexpected-command'", "'\\textcolor'"], ["Latex", "'\\textcolor{red}{=}'"]], "y"]'
+      canonical = ["Multiply", "x", ["Error", ["ErrorCode", "'unexpected-command'", ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", ["Maybe", ["Sequence", "Anything"]]]], "'\\textcolor'"]], ["Latex", "'\\textcolor{red}{=}'"]], "y"]'
     `);
   });
 });

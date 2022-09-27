@@ -524,7 +524,7 @@ const COMMON_VARIABLE_NAME = [
 // 'not[this]' --> `\mathit{\lbrace this\rbrace}`
 
 /**
- * The `defaultMulticharStyle` indicate which style should be use to
+ * The `defaultMulticharStyle` indicate which style should be used to
  * wrap the symbol if it has more than one character and doesn't have a style
  * specified. This is used to display function names upright, and other
  * (single-char) symbols italic
