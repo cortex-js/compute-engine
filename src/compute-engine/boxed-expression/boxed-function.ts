@@ -616,12 +616,14 @@ export class BoxedFunction extends AbstractBoxedExpression {
 
     // 1/ If no definition (i.e. function `g`...), apply canonical to each op
     const def = this.functionDefinition;
-    if (!def)
-      return this.engine._fn(
-        this._head,
-        this._ops.map((x) => x.canonical)
-      );
-
+    if (!def) {
+      const tail = this._ops.map((x) => x.canonical);
+      if (tail.every((x, i) => this._ops[i] === x)) {
+        this._isCanonical = true;
+        return this;
+      }
+      return this.engine._fn(this._head, tail);
+    }
     //
     // 2/ Get the canonical form of the arguments, accounting for `Hold`,
     // `ReleaseHold`, `Sequence` and `Symbol`
@@ -650,6 +652,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     if (tail.length > 1 && def.commutative === true) tail = tail.sort(order);
 
+    if (tail.every((x, i) => this._ops[i] === x)) {
+      this._isCanonical = true;
+      return this;
+    }
     return this.engine._fn(this._head, tail);
   }
 
