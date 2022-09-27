@@ -74,7 +74,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', ['Interval', -1, 1]],
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Sin', ops[0]) ??
+            constructibleValues(ce, 'Sin', ops[0])?.simplify() ??
             (complexAllowed(ce)
               ? ce
                   .box([
@@ -92,7 +92,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                   .simplify()
               : undefined),
 
-          evaluate: (ce, ops) => constructibleValues(ce, 'Sin', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Sin', ops[0])?.evaluate(),
 
           N: (ce, ops) => {
             if (ops[0].decimalValue)
@@ -119,7 +120,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         complexity: 5200,
         signature: {
           domain: domainNumberToRealNumber('Arctan'),
-          simplify: (ce, ops) => constructibleValues(ce, 'Arctan', ops[0]),
+          simplify: (ce, ops) =>
+            constructibleValues(ce, 'Arctan', ops[0])?.simplify(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.atan());
@@ -155,11 +157,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', ['Interval', -1, 1]],
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Cos', ops[0]) ??
+            constructibleValues(ce, 'Cos', ops[0])?.simplify() ??
             ce
               .box(['Sin', ['Add', ops[0], ['Multiply', 'Half', 'Pi']]])
               .simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Cos', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Cos', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.cos());
@@ -179,9 +182,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: trigFunction('Tan'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Tan', ops[0]) ??
+            constructibleValues(ce, 'Tan', ops[0])?.simplify() ??
             ce.box(['Divide', ['Sin', ops[0]], ['Cos', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Tan', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Tan', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.tan());
@@ -212,14 +216,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: hyperbolicFunction('Arcosh'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arcoshh', ops[0]) ??
+            constructibleValues(ce, 'Arcoshh', ops[0])?.simplify() ??
             ce
               .box([
                 'Ln',
                 ['Add', ops[0], ['Sqrt', ['Subtract', ['Square', ops[0]], 1]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Arcoshh', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Arcoshh', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.acosh());
@@ -237,7 +242,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: hyperbolicFunction('Arcsin'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arcsin', ops[0]) ??
+            constructibleValues(ce, 'Arcsin', ops[0])?.simplify() ??
             ce
               .box([
                 'Multiply',
@@ -249,7 +254,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ],
               ])
               .simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Arcsin', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Arcsin', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.asin());
@@ -268,14 +274,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: hyperbolicFunction('Arsinh'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arsinh', ops[0]) ??
+            constructibleValues(ce, 'Arsinh', ops[0])?.simplify() ??
             ce
               .box([
                 'Ln',
                 ['Add', ops[0], ['Sqrt', ['Add', ['Square', ops[0]], 1]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Arsinh', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Arsinh', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.asinh());
@@ -293,7 +300,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: hyperbolicFunction('Artanh'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Artanh', ops[0]) ??
+            constructibleValues(ce, 'Artanh', ops[0])?.simplify() ??
             ce
               .box([
                 'Multiply',
@@ -301,7 +308,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ['Ln', ['Divide', ['Add', 1, ops[0]], ['Subtract', 1, ops[0]]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Artanh', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Artanh', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.atanh());
@@ -319,7 +327,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: hyperbolicFunction('Cosh'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Cosh', ops[0]) ??
+            constructibleValues(ce, 'Cosh', ops[0])?.simplify() ??
             ce
               .box([
                 'Multiply',
@@ -327,7 +335,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ['Add', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Cosh', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Cosh', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.cosh());
@@ -345,9 +354,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: trigFunction('Cot'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Cot', ops[0]) ??
+            constructibleValues(ce, 'Cot', ops[0])?.simplify() ??
             ce.box(['Divide', ['Cos', ops[0]], ['Sin', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Cot', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Cot', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.tan()));
@@ -366,9 +376,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: trigFunction('Csc'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Csc', ops[0]) ??
+            constructibleValues(ce, 'Csc', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Sin', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Csc', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Csc', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.sin()));
@@ -405,9 +416,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: trigFunction('Sec'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Sec', ops[0]) ??
+            constructibleValues(ce, 'Sec', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Cos', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Sec', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Sec', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.cos()));
@@ -426,7 +438,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: hyperbolicFunction('Sinh'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Sinh', ops[0]) ??
+            constructibleValues(ce, 'Sinh', ops[0])?.simplify() ??
             ce
               .box([
                 'Multiply',
@@ -434,7 +446,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ['Subtract', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Sinh', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Sinh', ops[0])?.evaluate(),
         },
       },
     ],
@@ -447,9 +460,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: domainNumberToRealNumber('Csch'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Csch', ops[0]) ??
+            constructibleValues(ce, 'Csch', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Sinh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Csch', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Csch', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.sinh()));
@@ -467,9 +481,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', ['Interval', -1, 1]],
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Sech', ops[0]) ??
+            constructibleValues(ce, 'Sech', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Cosh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Sech', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Sech', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.cosh()));
@@ -488,9 +503,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: hyperbolicFunction('Tanh'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Tanh', ops[0]) ??
+            constructibleValues(ce, 'Tanh', ops[0])?.simplify() ??
             ce.box(['Divide', ['Sinh', ops[0]], ['Cosh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Tanh', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Tanh', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.tanh());
@@ -512,11 +528,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: domainNumberToRealNumber('Arccos'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arccos', ops[0]) ??
+            constructibleValues(ce, 'Arccos', ops[0])?.simplify() ??
             ce
               .box(['Subtract', ['Divide', 'Pi', 2], ['Arcsin', ops[0]]])
               .simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Arccos', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Arccos', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.acos());
@@ -560,9 +577,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: hyperbolicFunction('Coth'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Coth', ops[0]) ??
+            constructibleValues(ce, 'Coth', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Tanh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => constructibleValues(ce, 'Coth', ops[0]),
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Coth', ops[0])?.evaluate(),
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ce._DECIMAL_ONE.div(ops[0].decimalValue.tanh()));

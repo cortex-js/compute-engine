@@ -190,26 +190,35 @@ export function processPower(
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
   if (mode !== 'simplify' && base.isLiteral && exponent.isLiteral) {
-    if (base.complexValue)
-      return ce.number(
-        base.complexValue.pow(exponent.complexValue ?? exponent.asFloat ?? NaN)
-      );
+    if (mode === 'N' || !base.isInteger) {
+      if (base.complexValue)
+        return ce.number(
+          base.complexValue.pow(
+            exponent.complexValue ?? exponent.asFloat ?? NaN
+          )
+        );
 
-    if (exponent.complexValue && base.asFloat !== null)
-      return ce.number(ce.complex(base.asFloat).pow(exponent.complexValue));
+      if (exponent.complexValue && base.asFloat !== null)
+        return ce.number(ce.complex(base.asFloat).pow(exponent.complexValue));
 
-    if (base.decimalValue) {
-      return ce.number(
-        base.decimalValue.pow(exponent.decimalValue ?? exponent.asFloat!)
-      );
+      if (base.decimalValue) {
+        return ce.number(
+          base.decimalValue.pow(exponent.decimalValue ?? exponent.asFloat!)
+        );
+      }
+
+      if (
+        base.asFloat !== null &&
+        (exponent.decimalValue || preferDecimal(ce))
+      ) {
+        return ce.number(
+          ce
+            .decimal(base.asFloat)
+            .pow(exponent.decimalValue ?? exponent.asFloat!)
+        );
+      }
+      return ce.number(Math.pow(base.asFloat ?? NaN, exponent.asFloat ?? NaN));
     }
-
-    if (base.asFloat !== null && (exponent.decimalValue || preferDecimal(ce))) {
-      return ce.number(
-        ce.decimal(base.asFloat).pow(exponent.decimalValue ?? exponent.asFloat!)
-      );
-    }
-    return ce.number(Math.pow(base.asFloat ?? NaN, exponent.asFloat ?? NaN));
   }
 
   //

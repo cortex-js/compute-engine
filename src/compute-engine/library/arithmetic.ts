@@ -1002,7 +1002,7 @@ function processSqrt(
   if (base.isOne) return ce._ONE;
   if (base.isZero) return ce._ZERO;
 
-  if (mode !== 'simplify') {
+  if (mode === 'N' || (mode === 'evaluate' && !base.isInteger)) {
     if (base.complexValue) return ce.number(base.complexValue.sqrt());
     if (base.isNonNegative) {
       if (base.decimalValue) return ce.number(base.decimalValue.sqrt());
