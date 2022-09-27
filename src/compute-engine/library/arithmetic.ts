@@ -30,6 +30,7 @@ import {
   canonicalMultiply,
   simplifyMultiply,
   evalMultiply,
+  evalMultiplication,
 } from './arithmetic-multiply';
 import { canonicalDivide, simplifyDivide } from './arithmetic-divide';
 import { canonicalPower, processPower } from './arithmetic-power';
@@ -506,6 +507,30 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           // Square root of a prime is irrational (AlgebraicNumber)
           // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
           // evalDomain: (ce, base: BoxedExpression, power: BoxedExpression) ;
+        },
+      },
+
+      {
+        name: 'Product',
+        wikidata: 'Q901718',
+        complexity: 1000,
+        hold: 'first',
+        signature: {
+          domain: [
+            'Function',
+            'Anything',
+            // [
+            //   'Maybe',
+            'Tuple',
+            // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
+            // ],
+            'Number',
+          ],
+          // codomain: (ce, args) => domainAdd(ce, args),
+          // canonical: (ce, args) => canonicalAdd(ce, args),
+          // simplify: (ce, ops) => simplifyAdd(ce, ops),
+          evaluate: (ce, ops) => evalMultiplication(ce, ops[0], ops[1]),
+          // N: (ce, ops) => evalAdd(ce, ops, 'N'),
         },
       },
 
