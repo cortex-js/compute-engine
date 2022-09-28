@@ -31,7 +31,11 @@ import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry';
 import { DEFINITIONS_SETS } from './definitions-sets';
 import { DEFINITIONS_CALCULUS } from './definitions-calculus';
 import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
-import { applyAssociativeOperator, op } from '../../../math-json/utils';
+import {
+  applyAssociativeOperator,
+  missingIfEmpty,
+  op,
+} from '../../../math-json/utils';
 import { ErrorSignal, WarningSignal } from '../../../common/signals';
 
 export type CommonEntry = {
@@ -360,8 +364,8 @@ function makeIndexedEntry(
       result.parse = (_scanner, _terminator, arg) =>
         [
           name,
-          op(arg, 1) ?? ['Error', "'missing'"],
-          op(arg, 2) ?? ['Error', "'missing'"],
+          missingIfEmpty(op(arg, 1)),
+          missingIfEmpty(op(arg, 2)),
         ] as Expression;
     } else {
       //
@@ -380,10 +384,12 @@ function makeIndexedEntry(
         // This is because it is unlikely to be an ambiguous parse
         // (i.e. `x+`) and more likely to be a syntax error we want to
         // capture as `['Add', 'x', ['Error', "'missing'"]`.
-        const rhs = scanner.matchExpression({
-          ...terminator,
-          minPrec: prec,
-        }) ?? ['Error', "'missing'"];
+        const rhs = missingIfEmpty(
+          scanner.matchExpression({
+            ...terminator,
+            minPrec: prec,
+          })
+        );
 
         return typeof head === 'string'
           ? applyAssociativeOperator(head, lhs, rhs, associativity)

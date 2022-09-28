@@ -92,7 +92,7 @@ export function evalMultiply(
   const product = new Product(ce);
 
   for (const arg of ops) {
-    if (arg.symbol === 'Nothing' || arg.isOne) continue;
+    if (arg.isNothing || arg.isOne) continue;
     if (!arg.isLiteral) {
       product.addTerm(arg);
     } else {
@@ -224,8 +224,8 @@ function multiply2(
     }
   }
 
-  if (op1.symbol === 'Nothing') return op2;
-  if (op2.symbol === 'Nothing') return op1;
+  if (op1.isNothing) return op2;
+  if (op2.isNothing) return op1;
   if (op1.isLiteral && op1.isOne) return op2;
   if (op2.isLiteral && op2.isOne) return op1;
   if (op1.isLiteral && op1.isNegativeOne) return canonicalNegate(op2);
@@ -309,9 +309,9 @@ export function canonicalMultiplication(
     fn = expr.head === 'Lambda' ? expr.op1 : expr.subs({ [index.symbol]: '_' });
   else fn = expr.head === 'Lambda' ? expr.op1 : expr;
 
-  index ??= ce.symbol('Null');
+  index ??= ce.symbol('Nothing');
 
-  if (upper) range = ce.tuple([index, lower ?? ce.symbol('Null'), upper]);
+  if (upper) range = ce.tuple([index, lower ?? ce.symbol('Nothing'), upper]);
   else if (lower && upper) range = ce.tuple([index, lower, upper]);
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
@@ -326,7 +326,7 @@ export function evalMultiplication(
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
   if (expr.head !== 'Lambda') return undefined;
-  const fn = expr.op1 ?? ce.symbol('Nothing');
+  const fn = expr.op1;
 
   let lower = 1;
   let upper = MAX_ITERATION;

@@ -10,6 +10,7 @@ import {
   stringValue,
   head,
   ops,
+  missingIfEmpty,
 } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer, Terminator } from '../public';
 import { joinLatex } from '../tokenizer';
@@ -46,15 +47,15 @@ function parseSequence(prec: number) {
 
       parser.skipSpace();
       while (parser.match(',')) {
-        result.push('Null');
+        result.push('Nothing');
         parser.skipSpace();
       }
 
       if (parser.atTerminator(terminator)) {
-        result.push('Null');
+        result.push('Nothing');
       } else {
         const rhs = parser.matchExpression({ ...terminator, minPrec: prec });
-        result.push(rhs ?? 'Null');
+        result.push(rhs ?? 'Nothing');
         done = rhs === null;
       }
       if (!done) {
@@ -85,17 +86,17 @@ function parseSequence2(prec: number) {
     while (true) {
       parser.skipSpace();
       while (parser.match(',')) {
-        result.push('Null');
+        result.push('Nothing');
         parser.skipSpace();
       }
 
       if (parser.atEnd) {
-        result.push('Null');
+        result.push('Nothing');
         break;
       }
       const rhs = parser.matchExpression({ ...terminator, minPrec: prec });
       if (rhs === null) {
-        result.push('Null');
+        result.push('Nothing');
         break;
       }
       result.push(...(getSequence(rhs) ?? ['Sequence', rhs]));
@@ -119,16 +120,17 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     trigger: ['\\placeholder'],
     parse: (parser) => {
-      // Parse, but ignore, the required  LaTeX arg
+      // Parse, but ignore, the optional and required LaTeX args
       parser.skipSpaceTokens();
+      if (parser.match('['))
+        while (!parser.match(']') && !parser.atBoundary) parser.next();
 
+      parser.skipSpaceTokens();
       if (parser.match('<{>'))
         while (!parser.match('<}>') && !parser.atBoundary) parser.next();
 
       return 'Nothing';
     },
-    // serialize: (serializer) =>
-    //   serializer.options.missingSymbol ?? '\\placeholder{}',
   },
 
   //
@@ -247,7 +249,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         code === 'unknown-environment' ||
         code === 'unknown-environment' ||
         code === 'unexpected-base' ||
-        code === 'mismatched-argument-domain' ||
+        code === 'incompatible-domain' ||
         code === 'invalid-domain-expression'
       ) {
         return '';
@@ -307,7 +309,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // @todo: does this really need to be done here? Sequence(Sequence(...))
       if (body === null) return null;
       if (head(body) === 'Sequence') {
-        if (nops(body) === 0) return ['Delimiter', 'Nothing'];
+        if (nops(body) === 0) return ['Delimiter'];
         return ['Delimiter', ['Sequence', ...(ops(body) ?? [])]];
       }
 
@@ -395,7 +397,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     trigger: ['^', '\\doubleprime'],
     kind: 'postfix',
-    parse: (_parser, lhs) => [PRIME, lhs ?? ['Error', "'missing'"], 2],
+    parse: (_parser, lhs) => [PRIME, missingIfEmpty(lhs), 2],
   },
   {
     name: 'InverseFunction',
@@ -424,7 +426,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'environment',
     parse: (parser) => {
       const tabular: Expression[][] | null = parser.matchTabular('cases');
-      if (!tabular) return 'Nothing';
+      if (!tabular) return ['Sequence'];
+      // Note: return `Nothing` for the condition, because it must be present
+      // as the second element of the Tuple. Return an empty sequence for the
+      // value, because it is optional
       return [
         'Piecewise',
         [
@@ -432,7 +437,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           ...tabular.map((x) => [
             'Tuple',
             x[1] ?? 'Nothing', // Condition
-            x[0] ?? 'Nothing', // Value
+            x[0] ?? ['Sequence'], // Value
           ]),
         ] as Expression,
       ] as Expression;
@@ -494,7 +499,7 @@ function parseTextRun(
   parser: Parser,
   style?: { [key: string]: string }
 ): Expression {
-  if (!parser.match('<{>')) return 'Nothing';
+  if (!parser.match('<{>')) return ['Sequence'];
 
   const runs: Expression[] = [];
   let text = '';
@@ -523,7 +528,7 @@ function parseTextRun(
       text += ' ';
     } else if (parser.match('<$>')) {
       const index = parser.index;
-      const expr = parser.matchExpression() ?? 'Nothing';
+      const expr = parser.matchExpression() ?? ['Sequence'];
       parser.skipSpace();
       if (parser.match('<$>')) {
         runs.push(expr);
@@ -533,7 +538,7 @@ function parseTextRun(
       }
     } else if (parser.match('<$$>')) {
       const index = parser.index;
-      const expr = parser.matchExpression() ?? 'Nothing';
+      const expr = parser.matchExpression() ?? ['Sequence'];
       parser.skipSpace();
       if (parser.match('<$$>')) {
         runs.push(expr);

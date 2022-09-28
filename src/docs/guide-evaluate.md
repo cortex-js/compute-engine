@@ -79,7 +79,7 @@ which cannot be evaluate or processed.
 For example, the boxed expression for `ce.box(["Divide", 2, 'True'])` cannot be
 evaluated because a number cannot be divided by a boolean. More accurately,
 evaluating this boxed expression will result in an `["Error"]` expression:
-`["Divide", 2, ["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", "Number"]], "True"]]`.
+`["Divide", 2, ["Error", ["ErrorCode", "'incompatible-domain'", "Number", "Boolean"]], "True"]]`.
 
 **To check if an expression can be evaluated** check that
 `expr.canonical.isValid` is `true`.

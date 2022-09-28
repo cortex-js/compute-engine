@@ -677,7 +677,12 @@ export interface BoxedExpression {
    */
   get symbol(): string | null;
 
-  /**  Return `true` if this expression or any subexpression is an `["Error"]`
+  /**
+   * If this is the `Nothing`, return `true`.
+   */
+  get isNothing(): boolean;
+
+  /** `true` if this expression or any subexpression is an `["Error"]`
    * expression.
    *
    * @category Symbol Expression
@@ -699,7 +704,7 @@ export interface BoxedExpression {
   // --- PREDICATES
   //
 
-  /** True if the value of this expression is a number.
+  /** `true` if the value of this expression is a number.
    *
    * `isExtendedComplex || isNaN` = `isReal || isImaginary || isInfinity || isNaN`
    *
@@ -959,6 +964,17 @@ export interface BoxedExpression {
   /** Symbols that represent a variable (or a function name), can have their
    *  domain modified */
   set domain(domain: BoxedDomain | string);
+
+  /**
+   * The domain of this expression, without accounting for any inferred domain
+   * or `defaultDomain`. If no domain has been explicitly set via assignment
+   * or via an `.assume()` directive, the `expr.explicitDomain` is `null.
+   *
+   * This is useful to determine if the domain of an expression is inferred.
+   *
+   * In most cases you'll want to  use `.domain` instead.
+   */
+  get explicitDomain(): BoxedDomain | null;
 
   /** For symbols and functions, a possible definition associated with the
    *  expression. `basedDefinition` is the base class of symbol and function
@@ -1402,6 +1418,13 @@ export type FunctionDefinitionFlags = {
    * and its value is numeric.
    */
   numeric: boolean;
+
+  /**
+   * When true, evaluating the function create a temporary scope.
+   * This is used for example by the `Lambda` function to keep track of the
+   * inferred domain of its wildcard  `_` arguments
+   */
+  scoped: boolean;
 };
 
 /**

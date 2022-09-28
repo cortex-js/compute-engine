@@ -232,6 +232,10 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return null;
   }
 
+  get isNothing(): boolean {
+    return false;
+  }
+
   get isValid(): boolean {
     return true;
   }
@@ -250,12 +254,18 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   isSubdomainOf(_d: BoxedExpression | string): undefined | boolean {
     return undefined;
   }
+
   get domain(): BoxedDomain {
     return this.engine.domain('Void') as BoxedDomain;
   }
   set domain(_domain: BoxedDomain) {
     throw new Error(`Can't change the domain of \\(${this.latex}\\)`);
   }
+
+  get explicitDomain(): BoxedDomain | null {
+    return this.domain;
+  }
+
   get string(): string | null {
     return null;
   }

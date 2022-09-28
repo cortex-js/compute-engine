@@ -2,14 +2,9 @@ import { parse } from '../../utils';
 
 describe('STEFNOTCH #9', () => {
   test('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x', () => {
-    expect(parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x'))
-      .toMatchInlineSnapshot(`
-      '[
-        "Integrate",
-        ["Multiply", 3, "x"],
-        ["Triple", "", "Nothing", "Nothing"]
-      ]'
-    `);
+    expect(
+      parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x')
+    ).toMatchInlineSnapshot(`'["Integrate", ["Multiply", 3, "x"]]'`);
   });
 });
 
@@ -21,33 +16,9 @@ describe('STEFNOTCH #10', () => {
       )
     ).toMatchInlineSnapshot(`
       '[
-        "Style",
-        "Power",
-        [
-          "Delimiter",
-          [
-            [
-              ["InverseFunction", "Sin"],
-              [
-                "Error",
-                ["ErrorCode", "'unexpected-command'", "'\\\\mleft'"],
-                ["Latex", "'\\\\mleft'"]
-              ]
-            ],
-            "x",
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\\\mright'"],
-              ["Latex", "'\\\\mright'"]
-            ]
-          ]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\\\prime'"],
-          ["Latex", "'\\\\prime'"]
-        ],
-        ["KeyValuePair", "'display'", "'block'"]
+        "Error",
+        ["ErrorCode", "'unexpected-command'", "'\\\\left'"],
+        ["Latex", "'\\\\left(\\\\sin^{-1}\\\\mleft(x\\\\mright)\\\\right)^{\\\\prime}'"]
       ]'
     `);
   });
@@ -276,11 +247,13 @@ describe('STEFNOTCH #13', () => {
     expect(parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}'))
       .toMatchInlineSnapshot(`
       '[
-        "Equal",
-        "a",
+        "Multiply",
         [
-          "Style",
-          "Multiply",
+          "Equal",
+          "a",
+          ["Error", "'expected-expression'", ["Latex", "'\\\\displaystyle'"]]
+        ],
+        [
           [
             "Subscript",
             [
@@ -291,7 +264,7 @@ describe('STEFNOTCH #13', () => {
             ["To", "n", {num: "+Infinity"}]
           ],
           ["Subscript", "a", "n"],
-          ["KeyValuePair", "'display'", "'block'"]
+          ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
         ]
       ]'
     `);

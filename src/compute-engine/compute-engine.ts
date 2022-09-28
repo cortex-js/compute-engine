@@ -1077,7 +1077,7 @@ export class ComputeEngine implements IComputeEngine {
       for (const op of ops) {
         if (op.head === 'Tuple') {
           const key = op.op1;
-          if (key.isValid && key.symbol !== 'Nothing') {
+          if (key.isValid && !key.isNothing) {
             const val = op.op2;
             let k = key.symbol ?? key.string;
             if (!k && key.isLiteral) {

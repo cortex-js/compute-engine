@@ -8,12 +8,12 @@ describe('POWER', () => {
       `'(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}'`
     );
     expect(latex([POWER, null as unknown as Expression])).toMatchInlineSnapshot(
-      `'(\\mathrm{Nothing})^{\\textcolor{red}{\\blacksquare}}'`
+      `'(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}'`
     );
     expect(
       latex([POWER, undefined as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `'(\\mathrm{Nothing})^{\\textcolor{red}{\\blacksquare}}'`
+      `'(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}'`
     );
     expect(latex([POWER, 1])).toMatchInlineSnapshot(
       `'1^{\\textcolor{red}{\\blacksquare}}'`
@@ -130,24 +130,16 @@ describe('SUPSUB', () => {
     );
     expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       '[
-        "Multiply",
         ["Power", "'missing'", ["Latex", "'^'"]],
-        [
-          "Sequence",
-          ["Subscript", "p", "q"],
-          ["Error", "'missing'", ["Latex", "'^n_0'"]]
-        ]
+        ["Subscript", "p", "q"],
+        ["Error", "'missing'", ["Latex", "'^n_0'"]]
       ]'
     `); // @todo: nope...
     expect(parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(`
       '[
-        "Multiply",
         ["Power", "'missing'", ["Latex", "'^'"]],
-        [
-          "Sequence",
-          ["Subscript", 12, 34],
-          ["Error", "'missing'", ["Latex", "'^n_0'"]]
-        ]
+        ["Subscript", 12, 34],
+        ["Error", "'missing'", ["Latex", "'^n_0'"]]
       ]'
     `); // @todo: nope...
   });

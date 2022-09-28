@@ -166,6 +166,7 @@ export class _BoxedDomain
   }
 
   get isNothing(): boolean {
+    // The Nothing domain is the domain of the `Nothing` symbol
     return this._value === 'Nothing';
   }
 

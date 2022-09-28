@@ -24,9 +24,11 @@ import { IComputeEngine } from '../public';
 import { Expression } from '../../math-json/math-json-format';
 import {
   applyAssociativeOperator,
+  getSequence,
   head,
   isValidSymbolName,
   machineValue,
+  nops,
   op,
   ops,
   symbol,
@@ -762,15 +764,15 @@ export class _Parser implements Parser {
     if (kind === 'enclosure' && head(group) === 'Delimiter') {
       // We got an enclosure i.e. `f(a, b, c)`
       if (op(group, 1) === 'Sequence') return ops(op(group, 1)) ?? [];
-      return [op(group, 1) ?? 'Nothing'];
+      return [op(group, 1) ?? ['Sequence']];
     }
 
     if (kind === 'implicit') {
       // We are looking for an expression inside an optional pair of `()`
       // (i.e. trig functions, as in `\cos x`.)
       if (head(group) === 'Delimiter') {
-        if (op(group, 1) === 'Sequence') return ops(op(group, 1)) ?? [];
-        return [op(group, 1) ?? 'Nothing'];
+        if (op(group, 1) === 'Sequence') return getSequence(group) ?? [];
+        return [op(group, 1) ?? ['Sequence']];
       }
 
       // Was there a matchfix? the "group" is the argument, i.e.
@@ -898,7 +900,7 @@ export class _Parser implements Parser {
           continue;
         }
 
-        const rhs = def.parse(this, body ?? 'Nothing');
+        const rhs = def.parse(this, body ?? ['Sequence']);
         if (rhs === null) continue; // This def didn't work. Try another.
         return rhs;
       }
@@ -915,7 +917,7 @@ export class _Parser implements Parser {
       if (closeDelimiter === null) continue;
 
       if (this.matchAll(closeDelimiter)) {
-        const result = def.parse(this, 'Nothing');
+        const result = def.parse(this, ['Sequence']);
         if (result === null) continue; // This def didn't work. Try another.
         return result;
       }
@@ -941,7 +943,7 @@ export class _Parser implements Parser {
           return null;
         }
       }
-      const result = def.parse(this, body ?? 'Nothing');
+      const result = def.parse(this, body ?? ['Sequence']);
       if (result !== null) return result;
     }
     this.index = start;
@@ -1095,9 +1097,10 @@ export class _Parser implements Parser {
         // If no arguments, return it as a symbol
         if (enclosure === null) return sym;
         if (head(enclosure) !== 'Delimiter') return null;
-        if (symbol(op(enclosure, 1)) === 'Nothing') return [sym];
-        const h = head(op(op(enclosure, 1), 1));
-        if (h === 'Sequence') return [sym, ...(ops(op(enclosure, 1)) ?? [])];
+        const enclosure1 = op(enclosure, 1);
+        if (!enclosure1 || symbol(enclosure1) === 'Nothing') return [sym];
+        const h = head(op(enclosure1, 1));
+        if (h === 'Sequence') return [sym, ...(ops(enclosure1) ?? [])];
         return [sym, ...(ops(enclosure) ?? [])];
       }
     }
@@ -1129,7 +1132,7 @@ export class _Parser implements Parser {
       this.addBoundary(['<}>']);
       const expr = this.matchExpression();
       this.skipSpace();
-      if (this.matchBoundary()) return expr;
+      if (this.matchBoundary()) return expr ?? ['Sequence'];
       return this.boundaryError('expected-closing-delimiter');
     }
 
@@ -1446,7 +1449,11 @@ export class _Parser implements Parser {
     //
     const start = this.index;
     const rhs = this.matchExpression({ ...terminator, minPrec: 390 });
-    if (rhs === null || symbol(rhs) === 'Nothing') {
+    if (
+      rhs === null ||
+      symbol(rhs) === 'Nothing' ||
+      (head(rhs) === 'Sequence' && nops(rhs) === 0)
+    ) {
       this.index = start;
       return null;
     }
@@ -1510,10 +1517,11 @@ export class _Parser implements Parser {
     // (but they may not be literal)
     // -> Apply Invisible Multiply
     if (symbol(rhs) === 'Nothing') return lhs;
-    if (head(rhs) === 'Delimiter' && symbol(op(rhs, 1)) === 'Nothing')
-      return ['Multiply', lhs, this.error('expected-expression', start)];
-    if (head(rhs) === 'Delimiter' && head(op(rhs, 1)) === 'Sequence') {
-      return [lhsSymbol ?? lhs, ...(ops(op(rhs, 1)) ?? [])];
+    const seq = getSequence(rhs);
+    if (seq) {
+      if (seq.length === 0)
+        return ['Sequence', lhs, this.error('expected-expression', start)];
+      return [lhsSymbol ?? lhs, ...seq];
     }
     return applyAssociativeOperator('Multiply', lhs, rhs);
 
@@ -1737,7 +1745,12 @@ export class _Parser implements Parser {
     // 2. Do we have a primary?
     // (if we had a prefix, it consumed the primary following it)
     //
-    if (lhs === null) lhs = this.matchPrimary();
+    if (lhs === null) {
+      lhs = this.matchPrimary();
+      // If we got an empty sequence, ignore it.
+      // This is returned by some purely presentational commands, for example `\displaystyle`
+      if (head(lhs) === 'Sequence' && nops(lhs) === 0) lhs = null;
+    }
 
     //
     // 3. Are there some infix operators?

@@ -31,8 +31,34 @@ import {
 
 const ce = engine;
 
+// For the remainder of theses tests, assume that the symbol `f` represent a
+// function
 ce.assume(['Element', 'f', 'Function']);
 
+console.log(ce.box(['Divide', undefined as unknown as any]).latex);
+
+// Should return error about missing argument, not empty sequence
+console.log(ce.parse('\\sqrt{}').toJSON());
+console.log(ce.parse('\\sqrt{}').canonical.toJSON());
+
+//
+// PROBLEMATIC EXPRESSIONS
+//
+
+// Doesn't parse??
+const z4 = ce.parse('\\mathrm{Symbol}(P, i)');
+console.log(z4.json);
+
+// Mismatched argument domain
+const zz = ce.parse('\\sum_{n=1}^5nx').canonical;
+console.log(zz.json);
+
+// Parsed as imaginary unit
+// -> should add pushDictionary() or use the current scope to find a definition for 'i'
+const z3 = ce.parse('\\sum_ii^2').canonical;
+console.log(z3.json);
+
+// Reports false. Should be true.
 const sig1 = ce.domain(['Function', 'PositiveInteger', 'Anything']);
 const sig2 = ce.domain(['Function', 'Number', 'Number']);
 console.log(sig1.isCompatible(sig2));
@@ -173,7 +199,7 @@ describe('SERIALIZING Incomplete expressions', () => {
   test(`['Power', undefined]`, () => {
     expect(
       ce.box(['Power', undefined as unknown as Expression]).toJSON()
-    ).toMatchInlineSnapshot(`'["Power","Nothing"]'`);
+    ).toMatchInlineSnapshot(`'["Power",["Sequence"]]'`);
   });
 });
 

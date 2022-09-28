@@ -47,7 +47,7 @@ export function numeratorDenominator(
         const a = arg.op1;
         const b = arg.op2.op1;
         denominator.push(!a || !b ? arg : ['Power', a, b]);
-      } else if (arg.op1.symbol === 'Nothing') {
+      } else if (arg.op1.isNothing) {
         const exponentVal = arg.op2;
         if (exponentVal.isNegativeOne) {
           denominator.push(arg.op1);

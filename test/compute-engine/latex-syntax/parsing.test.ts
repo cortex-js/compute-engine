@@ -2,7 +2,7 @@ import { parse } from '../../utils';
 
 describe('BASIC PARSING', () => {
   test('', () => {
-    expect(parse('')).toMatchInlineSnapshot(`'"Nothing"'`);
+    expect(parse('')).toMatchInlineSnapshot(`'["Sequence"]'`);
     expect(parse('1')).toMatchInlineSnapshot(`'1'`);
     expect(parse('2{xy}')).toMatchInlineSnapshot(`'["Multiply", 2, "x", "y"]'`);
   });

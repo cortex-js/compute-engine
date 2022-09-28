@@ -1,4 +1,4 @@
-import { LatexDictionary, Serializer } from '../public';
+import { LatexDictionary, Parser, Serializer } from '../public';
 
 import {
   op,
@@ -7,14 +7,18 @@ import {
   dictionary,
   stringValue,
   machineValue,
-  symbol,
   ops,
+  isEmptySequence,
 } from '../../../math-json/utils';
 import { Expression } from '../../../math-json/math-json-format';
 import { joinLatex } from '../tokenizer';
 
 function parseSingleArg(cmd: string): (parser: any) => Expression {
-  return (parser) => [cmd, parser.matchRequiredLatexArgument() ?? 'Nothing'];
+  return (parser) => {
+    const arg = parser.matchRequiredLatexArgument();
+    if (!arg) return [cmd];
+    return [cmd, arg];
+  };
 }
 
 export const DEFINITIONS_OTHERS: LatexDictionary = [
@@ -93,7 +97,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     name: 'PartialDerivative', // PartialDerivative(expr, {lists of vars}, degree)
     trigger: ['\\partial'],
     kind: 'prefix',
-    parse: (parser) => {
+    parse: (parser: Parser) => {
       let done = false;
       let sup: Expression | null = 'Nothing';
       let sub: Expression | null = 'Nothing';
@@ -112,8 +116,8 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
 
       if (!sub || !sup) return null;
       let rhs = parser.matchRequiredLatexArgument() ?? 'Nothing';
-      if (rhs !== 'Nothing') {
-        const arg = parser.matchArguments('enclosure') ?? 'Nothing';
+      if (rhs !== 'Nothing' && !isEmptySequence(rhs)) {
+        const arg = parser.matchArguments('enclosure') ?? ['Nothing'];
         rhs = [rhs, ...arg];
       }
       return ['PartialDerivative', rhs, sub, sup] as Expression;
@@ -216,132 +220,60 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
 
   {
     trigger: ['\\displaystyle'],
-    parse: (parser) => {
-      const arg = parser.matchExpression();
-      if (arg === null) return 'Nothing';
-      return [
-        'Style',
-        ...arg,
-        ['KeyValuePair', "'display'", "'block'"],
-      ] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\textstyle'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return [
-        'Style',
-        ...arg,
-        ['KeyValuePair', "'display'", "'inline'"],
-      ] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\scriptstyle'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return [
-        'Style',
-        ...arg,
-        ['KeyValuePair', "'display'", "'script'"],
-      ] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\scriptscriptstyle'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return [
-        'Style',
-        ...arg,
-        ['KeyValuePair', "'display'", "'scriptscript'"],
-      ] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
 
   {
     trigger: ['\\tiny'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 1]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\scriptsize'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 2]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\footnotesize'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 3]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\small'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 4]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\normalsize'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 5]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\large'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 6]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\Large'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 7]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\LARGE'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 8]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\huge'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 9]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
   {
     trigger: ['\\Huge'],
-    parse: (parser) => {
-      const arg = parser.matchArguments('group');
-      if (arg === null) return null;
-      return ['Style', ...arg, ['KeyValuePair', "'size'", 10]] as Expression;
-    },
+    parse: () => ['Sequence'] as Expression,
   },
 
   {
@@ -425,26 +357,26 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     // The `HorizontalSpacing` function has two forms
     // `["HorizontalSpacing", number]` -> indicate a space of mu units
     // `["HorizontalSpacing", expr, 'op'|'bin'|rel]` -> indicate a spacing around and expression, i.e. `\mathbin{x}`, etc...
-    serialize: (_serializer, expr): string => {
-      const content = op(expr, 1);
-      if (symbol(content) === 'Nothing') {
-        const v = machineValue(op(expr, 2));
-        if (v === null) return '';
-        return (
-          {
-            '-3': '\\!',
-            6: '\\ ',
-            3: '\\,',
-            4: '\\:',
-            5: '\\;',
-            9: '\\enspace',
-            18: '\\quad',
-            36: '\\qquad',
-          }[v] ?? ''
-        );
+    serialize: (serializer, expr): string => {
+      if (op(expr, 2)) {
+        // @todo: handle op(expr,2) == 'op', 'bin', etc...
+        return serializer.serialize(op(expr, 1));
       }
-      // @todo: handle op(expr,2) == 'op', 'bin', etc...
-      return '';
+
+      const v = machineValue(op(expr, 1));
+      if (v === null) return '';
+      return (
+        {
+          '-3': '\\!',
+          6: '\\ ',
+          3: '\\,',
+          4: '\\:',
+          5: '\\;',
+          9: '\\enspace',
+          18: '\\quad',
+          36: '\\qquad',
+        }[v] ?? ''
+      );
     },
   },
   // if (

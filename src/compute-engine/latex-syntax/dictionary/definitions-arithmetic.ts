@@ -2,7 +2,6 @@ import { Expression } from '../../../math-json/math-json-format';
 import {
   machineValue,
   ROOT,
-  SQRT,
   NEGATE,
   SUBTRACT,
   ADD,
@@ -10,7 +9,6 @@ import {
   DIVIDE,
   isNumberObject,
   POWER,
-  LIST,
   COMPLEX_INFINITY,
   PI,
   EXPONENTIAL_E,
@@ -25,6 +23,8 @@ import {
   ops,
   symbol,
   subs,
+  isEmptySequence,
+  missingIfEmpty,
 } from '../../../math-json/utils';
 import { Serializer, Parser, LatexDictionary } from '../public';
 import { getFractionStyle, getRootStyle } from '../serializer-style';
@@ -67,12 +67,13 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
 function parseRoot(parser: Parser): Expression | null {
   const degree = parser.matchOptionalLatexArgument();
   const base = parser.matchRequiredLatexArgument();
-  if (base === null) {
-    if (degree !== null) return [ROOT, ['Error', "'missing'"], degree];
+  if (base === null || isEmptySequence(base)) {
+    if (degree !== null)
+      return ['Root', ['Error', "'missing'"], missingIfEmpty(degree)];
     return ['Sqrt', ['Error', "'missing'"]];
   }
-  if (degree !== null) return [ROOT, base, degree];
-  return [SQRT, base];
+  if (degree !== null) return ['Root', base, degree];
+  return ['Sqrt', base];
 }
 
 function serializeRoot(
@@ -326,8 +327,8 @@ function serializeMultiply(
 }
 
 function parseFraction(parser: Parser): Expression | null {
-  const numer = parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"];
-  const denom = parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"];
+  const numer = missingIfEmpty(parser.matchRequiredLatexArgument());
+  const denom = missingIfEmpty(parser.matchRequiredLatexArgument());
   if (
     head(numer) === 'PartialDerivative' &&
     (head(denom) === 'PartialDerivative' ||
@@ -339,9 +340,7 @@ function parseFraction(parser: Parser): Expression | null {
     const degree = op(numer, 3) ?? null;
     // Expect: getArg(numer, 2) === 'Nothing' -- no args
     let fn = op(numer, 1);
-    if (fn === null) {
-      fn = parser.matchExpression() ?? ['Error', "'missing'"];
-    }
+    if (fn === null) fn = missingIfEmpty(parser.matchExpression());
 
     let vars: Expression[] = [];
     if (head(denom) === 'Multiply') {
@@ -358,13 +357,13 @@ function parseFraction(parser: Parser): Expression | null {
       if (v) vars.push(v);
     }
     if (vars.length > 1) {
-      vars = [LIST, ...vars];
+      vars = ['List', ...vars];
     }
 
     return ['PartialDerivative', fn, ...vars, degree === null ? 1 : degree];
   }
 
-  return [DIVIDE, numer, denom];
+  return ['Divide', numer, denom];
 }
 
 function serializeFraction(
@@ -374,10 +373,9 @@ function serializeFraction(
   // console.assert(getFunctionName(expr) === DIVIDE);
   if (expr === null) return '';
 
-  const numer = op(expr, 1) ?? ['Error', "'missing'"];
-  const denom = op(expr, 2) ?? ['Error', "'missing'"];
+  const numer = missingIfEmpty(op(expr, 1));
+  const denom = missingIfEmpty(op(expr, 2));
 
-  if (nops(expr) === 1) return serializer.serialize(numer);
   const style = getFractionStyle(expr, serializer.level);
   if (style === 'inline-solidus' || style === 'nice-solidus') {
     const numerStr = serializer.wrapShort(numer);
@@ -403,8 +401,8 @@ function serializePower(
   expr: Expression | null
 ): string {
   const name = head(expr);
-  const arg1 = op(expr, 1) ?? ['Error', "'missing'"];
-  const arg2 = op(expr, 2) ?? ['Error', "'missing'"];
+  const arg1 = missingIfEmpty(op(expr, 1));
+  const arg2 = missingIfEmpty(op(expr, 2));
 
   if (name === 'Sqrt') {
     return serializeRoot(
@@ -496,7 +494,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openDelimiter: '|',
     closeDelimiter: '|',
-    parse: (_parser, expr) => (expr === 'Nothing' ? null : ['Abs', expr]),
+    parse: (_parser, expr) => (isEmptySequence(expr) ? null : ['Abs', expr]),
   },
   {
     name: 'Add',
@@ -552,7 +550,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Divide',
-    trigger: ['\\frac'],
+    trigger: '\\frac',
     precedence: 660,
     // For \frac specifically, not for \div, etc..
     // handles Leibnitz notation for partial derivatives
@@ -593,7 +591,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string =>
       joinLatex([
         '\\exponentialE^{',
-        serializer.serialize(op(expr, 1) ?? ['Error', "'missing'"]),
+        serializer.serialize(missingIfEmpty(op(expr, 1))),
         '}',
       ]),
   },
@@ -658,13 +656,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: '\\ln',
     parse: (parser) => {
       let sub: string | null = null;
+      let base: number | null = null;
       if (parser.match('_')) {
-        sub = parser.matchRequiredLatexArgument() ?? '10';
+        sub = parser.matchStringArgument() ?? parser.next();
+        base = Number.parseFloat(sub ?? '10') ?? null;
       }
       const arg = parser.matchArguments('implicit');
       if (arg === null) return null;
-      if (sub === '10') return ['Lg', ...arg] as Expression;
-      if (sub === '2') return ['Lb', ...arg] as Expression;
+      if (base === 10) return ['Lg', ...arg] as Expression;
+      if (base === 2) return ['Lb', ...arg] as Expression;
       if (sub === null) return ['Ln', ...arg] as Expression;
       return ['Log', ...arg, sub] as Expression;
     },
@@ -766,7 +766,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openDelimiter: '||',
     closeDelimiter: '||',
-    parse: (_parser, expr) => ['Norm', expr],
+    parse: (_parser, expr) => (isEmptySequence(expr) ? null : ['Norm', expr]),
   },
   {
     //   /** If the argument is a vector */
@@ -868,6 +868,9 @@ function parseBigOp(name: string) {
       parser.skipSpace();
     }
 
+    if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;
+    if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
+
     let index: Expression | null = null;
     let lower: Expression | null = null;
     if (head(sub) === 'Equal') {
@@ -890,9 +893,9 @@ function parseBigOp(name: string) {
 
     if (!fn) return [name];
 
-    if (sup) return [name, fn, ['Tuple', index ?? 'Null', lower ?? 1, sup]];
+    if (sup) return [name, fn, ['Tuple', index ?? 'Nothing', lower ?? 1, sup]];
 
-    if (lower) return [name, fn, ['Tuple', index ?? 'Null', lower]];
+    if (lower) return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
 
     if (index) return [name, fn, ['Tuple', index]];
 
@@ -930,9 +933,9 @@ function serializeBigOp(command: string) {
     const lower = op(arg, 2);
 
     let sub: string[] = [];
-    if (symbol(index) !== 'Null' && lower)
+    if (symbol(index) !== 'Nothing' && lower)
       sub = [serializer.serialize(index), '=', serializer.serialize(lower)];
-    else if (symbol(index) !== 'Null') sub = [serializer.serialize(index)];
+    else if (symbol(index) !== 'Nothing') sub = [serializer.serialize(index)];
     else if (lower) sub = [serializer.serialize(lower)];
 
     if (sub.length > 0) sub = ['_{', ...sub, '}'];

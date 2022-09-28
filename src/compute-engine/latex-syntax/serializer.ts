@@ -35,7 +35,7 @@ function serializeMatchfix(
   def: MatchfixEntry
 ): string {
   return replaceLatex(def.serialize as string, [
-    serializer.serialize(op(expr, 1) ?? 'Nothing'),
+    serializer.serialize(op(expr, 1) ?? ['Sequence']),
   ]);
 }
 

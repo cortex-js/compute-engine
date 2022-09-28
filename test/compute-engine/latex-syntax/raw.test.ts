@@ -2,7 +2,7 @@ import { rawExpression } from '../../utils';
 
 describe('NO DICTIONARY/NO DEFAULTS', () => {
   test('Parsing', () => {
-    expect(rawExpression('')).toMatchInlineSnapshot(`'"Nothing"'`);
+    expect(rawExpression('')).toMatchInlineSnapshot(`'["Sequence"]'`);
     expect(rawExpression('1+x')).toMatchInlineSnapshot(
       `'["Sequence",1,["Error",["ErrorCode","'unexpected-token'","'+'"],["Latex","'+x'"]]]'`
     );

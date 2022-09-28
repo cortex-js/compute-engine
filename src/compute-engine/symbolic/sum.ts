@@ -43,7 +43,7 @@ export class Sum {
    *  -> [['x', [3, 1]], ['y', [1, 5]]]
    */
   addTerm(term: BoxedExpression, c?: [number, number]) {
-    if (term.symbol === 'Nothing') return;
+    if (term.isNothing) return;
 
     if (c === undefined) c = [1, 1];
 

@@ -19,13 +19,14 @@ describe('SEQUENCES AND DELIMITERS', () => {
     );
     // Sequence with empty element
     expect(parse('(a,,b)')).toMatchInlineSnapshot(
-      `'["Delimiter", ["Sequence", "a", "Null", "b"]]'`
+      `'["Delimiter", ["Sequence", "a", "Nothing", "b"]]'`
     );
   });
   test('Groups', () => {
     expect(parse('(a, b, c)')).toMatchInlineSnapshot(
       `'["Delimiter", ["Sequence", "a", "b", "c"]]'`
     );
+    // @todo
     expect(parse('(a, b; c, d, ;; n ,, m)')).toMatchInlineSnapshot(`
       '[
         "Delimiter",
@@ -42,7 +43,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
             "Sequence",
             ["Error", "'missing'", ["Latex", "';'"]],
             "n",
-            "Null",
+            "Nothing",
             "m"
           ]
         ]
@@ -68,11 +69,11 @@ describe('SEQUENCES AND DELIMITERS', () => {
     );
     // Sequence with missing element
     expect(parse('a,, c')).toMatchInlineSnapshot(
-      `'["Sequence", "a", "Null", "c"]'`
+      `'["Sequence", "a", "Nothing", "c"]'`
     );
     // Sequence with missing final element
     expect(parse('a,c,')).toMatchInlineSnapshot(
-      `'["Sequence", "a", "c", "Null"]'`
+      `'["Sequence", "a", "c", "Nothing"]'`
     );
     // Sequence with missing initial element
     expect(parse(',c,b')).toMatchInlineSnapshot(
@@ -94,6 +95,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
         "h"
       ]'
     `);
+    // @todo
     expect(parse(';;a;')).toMatchInlineSnapshot(`
       '[
         "Sequence",
@@ -103,7 +105,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
         ["Error", "'missing'", ["Latex", "';'"]],
         "Sequence",
         "a",
-        "Null"
+        "Nothing"
       ]'
     `);
   });

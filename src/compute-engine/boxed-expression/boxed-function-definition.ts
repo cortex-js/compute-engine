@@ -22,6 +22,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
   pure: boolean;
   inert: boolean;
   numeric: boolean;
+  scoped: boolean;
 
   complexity: number;
   hold: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
@@ -54,6 +55,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     this.involution = involution;
     this.inert = def.inert ?? false;
     this.numeric = def.numeric ?? false;
+    this.scoped = def.scoped ?? false;
     this.pure = def.pure ?? true;
     this.complexity = def.complexity ?? DEFAULT_COMPLEXITY;
 

@@ -183,7 +183,7 @@ export class LatexSyntax {
       else expr = ['Sequence', expr, error];
     }
 
-    if (!expr) expr = 'Nothing';
+    expr ??= ['Sequence'];
 
     if (this.options.preserveLatex) {
       if (Array.isArray(expr)) expr = { latex, fn: expr };
@@ -192,7 +192,7 @@ export class LatexSyntax {
       else if (typeof expr === 'string') expr = { latex, sym: expr };
       else if (typeof expr === 'object' && expr !== null) expr.latex = latex;
     }
-    return expr ?? 'Nothing';
+    return expr ?? ['Sequence'];
   }
   serialize(expr: Expression): LatexString {
     return this.serializer.serialize(expr);

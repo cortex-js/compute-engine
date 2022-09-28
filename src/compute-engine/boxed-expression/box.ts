@@ -16,6 +16,7 @@ import { boxDomain, _BoxedDomain } from './boxed-domain';
 import { complexAllowed, decimalValue, preferDecimal } from './utils';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
 import { isInMachineRange } from '../numerics/numeric-decimal';
+import { missingIfEmpty } from '../../math-json/utils';
 
 /**
  * Notes about the boxed form:
@@ -47,7 +48,7 @@ export function box(
   ce: IComputeEngine,
   expr: Decimal | Complex | [num: number, denom: number] | SemiBoxedExpression
 ): BoxedExpression {
-  if (expr === null || expr === undefined) return ce.symbol('Nothing');
+  if (expr === null || expr === undefined) return ce._fn('Sequence', []);
 
   if (expr instanceof AbstractBoxedExpression) return expr;
 
@@ -244,10 +245,13 @@ export function boxNumber(
 
 function boxHold(
   ce: IComputeEngine,
-  expr: SemiBoxedExpression
+  expr: SemiBoxedExpression | null
 ): BoxedExpression {
+  if (expr === null) return ce.error('missing');
   if (typeof expr === 'object' && expr instanceof AbstractBoxedExpression)
     return expr;
+
+  expr = missingIfEmpty(expr as Expression);
 
   if (typeof expr === 'string') return box(ce, expr);
 
@@ -289,7 +293,7 @@ function boxFunction(
     const result = new BoxedFunction(
       ce,
       'Hold',
-      [boxHold(ce, ops[0] ?? ['Error', "'missing'"])],
+      [boxHold(ce, ops[0])],
       metadata
     );
     // Hold is always canonical
@@ -462,7 +466,7 @@ function boxFunction(
         (head === 'Tuple' && arg.nops === 2)
       ) {
         const key = arg.op1;
-        if (key.isValid && key.symbol !== 'Nothing') {
+        if (key.isValid && !key.isNothing) {
           const value = arg.op2;
           let k = key.symbol ?? key.string;
           if (!k && key.isLiteral) {

@@ -2,9 +2,7 @@ import { latex, check, engine } from '../../utils';
 
 describe('MATCHFIX', () => {
   test('\\lbrack\\rbrack', () =>
-    expect(check('\\lbrack\\rbrack')).toMatchInlineSnapshot(
-      `'["List", "Nothing"]'`
-    ));
+    expect(check('\\lbrack\\rbrack')).toMatchInlineSnapshot(`'["List"]'`));
 
   test('\\lbrack a\\rbrack', () =>
     expect(check('\\lbrack a\\rbrack')).toMatchInlineSnapshot(
@@ -93,7 +91,7 @@ describe('MATCHFIX abs and norm', () => {
       simplify  = ["Add", 3, ["Abs", "a"]]'
     `));
 
-  test('1+|a|+2', () =>
+  test('|(1+|a|+2)|', () =>
     expect(check('|(1+|a|+2)|')).toMatchInlineSnapshot(`
       'box      = ["Abs", ["Delimiter", ["Add", 1, ["Abs", "a"], 2]]]
       canonical = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
@@ -117,9 +115,9 @@ describe('MATCHFIX abs and norm', () => {
 });
 
 describe('MATCHFIX invalid', () => {
-  test('( // missing closing fence', () => {
-    expect(check('(')).toMatchInlineSnapshot(`'"Nothing"'`);
-  });
+  // @todo
+  test('( // missing closing fence', () =>
+    expect(check('(')).toMatchInlineSnapshot(`'["Sequence"]'`));
   test(') // missing opening fence', () => {
     expect(check(')')).toMatchInlineSnapshot(
       `'["Error", ["ErrorCode", "'unexpected-token'", "')'"], ["Latex", "')'"]]'`

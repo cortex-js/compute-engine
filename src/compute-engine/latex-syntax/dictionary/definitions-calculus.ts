@@ -1,5 +1,11 @@
 import { Expression } from '../../../math-json/math-json-format';
-import { head, op, subs, symbol } from '../../../math-json/utils';
+import {
+  head,
+  isEmptySequence,
+  op,
+  subs,
+  symbol,
+} from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer } from '../public';
 import { joinLatex } from '../tokenizer';
 
@@ -20,6 +26,8 @@ function parseIntegral(head: string) {
       else if (parser.match('^')) sup = parser.matchRequiredLatexArgument();
       parser.skipSpace();
     }
+    if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;
+    if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
 
     // An integral expression is of the form `\int \sin(x)dx`
     const start = parser.index;
@@ -49,11 +57,15 @@ function parseIntegral(head: string) {
     if (!fn) return [head];
 
     if (sup)
-      return [head, fn ?? 'Null', ['Tuple', index ?? 'Null', sub ?? 1, sup]];
+      return [
+        head,
+        fn ?? 'Nothing',
+        ['Tuple', index ?? 'Nothing', sub ?? 1, sup],
+      ];
 
-    if (sub) return [head, fn ?? 'Null', ['Tuple', index ?? 'Null', sub]];
+    if (sub) return [head, fn ?? 'Nothing', ['Tuple', index ?? 'Nothing', sub]];
 
-    if (index) return [head, fn ?? 'Null', ['Tuple', index]];
+    if (index) return [head, fn ?? 'Nothing', ['Tuple', index]];
 
     if (fn) return [head, fn];
 
@@ -98,7 +110,7 @@ function serializeIntegral(command: string) {
       ...sup,
       ...sub,
       serializer.serialize(fn),
-      ...(symbol(index) !== 'Null'
+      ...(symbol(index) !== 'Nothing'
         ? ['\\,\\mathrm{d}', serializer.serialize(index)]
         : []),
     ]);

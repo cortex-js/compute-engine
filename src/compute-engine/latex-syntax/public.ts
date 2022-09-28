@@ -768,7 +768,7 @@ export interface Parser {
    * - or a single token.
    *
    * Return null if an argument was not found
-   * Return 'Nothing' if an empty argument `{}` was found
+   * Return `['Sequence']` if an empty argument `{}` was found
    */
   matchRequiredLatexArgument(): Expression | null;
 

@@ -438,13 +438,26 @@ export function getSequence(expr: Expression | null): Expression[] | null {
   let h = head(expr);
   if (expr === null) return null;
 
-  if (h === 'Delimiter') expr = op(expr, 1) ?? null;
-
-  if (expr === null) return null;
+  if (h === 'Delimiter') {
+    expr = op(expr, 1);
+    if (expr === null) return [];
+  }
 
   h = head(expr);
   if (h === 'Sequence') return ops(expr) ?? [];
   return null;
+}
+
+export function isEmptySequence(expr: Expression | null): boolean {
+  if (expr === null) return false;
+  if (head(expr) !== 'Sequence') return false;
+  if (nops(expr) !== 0) return false;
+  return true;
+}
+
+export function missingIfEmpty(expr: Expression | null): Expression {
+  if (!expr || isEmptySequence(expr)) return ['Error', "'missing'"];
+  return expr;
 }
 
 //  function number(

@@ -237,6 +237,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
 
     this._def = ce.lookupFunction(this._head, scope);
     if (this._def) {
+      if (this._def.scoped) ce.pushScope();
       // In case the def was found by the wikidata, and the name does not
       // match the one in our dictionary, make sure to update it.
       this._head = this._def.name;
@@ -250,6 +251,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
       // Calculate the effective codomain
       if (!this._ops.every((x) => x.isValid)) {
         this._codomain = ce.defaultDomain ?? ce.domain('Void');
+        if (this._def.scoped) ce.popScope();
         return;
       }
       const sig = this._def.signature;
@@ -260,6 +262,8 @@ export class BoxedFunction extends AbstractBoxedExpression {
       } else {
         this._codomain = sig.codomain ?? ce.defaultDomain ?? ce.domain('Void');
       }
+
+      if (this._def.scoped) ce.popScope();
     } else this._codomain = ce.defaultDomain ?? ce.domain('Void');
   }
 
@@ -1018,18 +1022,20 @@ function normalizeList(
   for (let i = 0; i < xs.length; i++) {
     if (applicable(skip, xs.length - 1, i)) {
       const x = xs[i];
-      if (x.symbol !== 'Nothing') {
-        if (x.head === 'Sequence') result.push(...(x.ops ?? []));
-        else if (x.head === 'Symbol') result.push(x.evaluate());
-        else result.push(x);
-      }
+      if (x.head === 'Sequence') result.push(...(x.ops ?? []));
+      else if (x.head === 'Symbol') result.push(x.evaluate());
+      else result.push(x);
     } else result.push(xs[i]);
   }
   return result;
 }
 
-/** Return null if the `ops` match the sig. Otherwise, return an array
+/** Return `null` if the `ops` match the sig. Otherwise, return an array
  * of expressions indicating the mismatched arguments.
+ *
+ * Will modify the `inferredDomain` property of the current scope to reflect
+ * the inferred domain of unknown symbols.
+ *
  */
 function validateSignature(
   ce: IComputeEngine,
@@ -1070,7 +1076,12 @@ function validateSignature(
         const seq = ce.domain(expectedArgs[i][1]);
         for (let j = i; j <= opsDomain.length - 1; j++) {
           if (!opsDomain[j].isCompatible(seq)) {
-            newOps.push(ce.error(['mismatched-argument-domain', seq], ops[j]));
+            newOps.push(
+              ce.error(
+                ['incompatible-domain', seq, ce.domain(opsDomain[j])],
+                ops[j]
+              )
+            );
           } else newOps.push(ops[j]);
         }
         break;
@@ -1082,7 +1093,7 @@ function validateSignature(
         console.log(opsDomain[i].isCompatible(ce.domain(expectedArgs[i])));
         newOps.push(
           ce.error(
-            ['mismatched-argument-domain', ce.domain(expectedArgs[i])],
+            ['incompatible-domain', ce.domain(expectedArgs[i], opsDomain[i])],
             ops[i]
           )
         );

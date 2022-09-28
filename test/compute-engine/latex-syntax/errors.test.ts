@@ -1,10 +1,10 @@
 import { engine } from '../../utils';
 
+engine.assume(['Element', 'f', 'Function']);
+
 function check(s: string, f: jest.ProvidesCallback) {
   describe(s, () => test(s, f));
 }
-
-console.log(engine.box(['Sqrt', 12, 29, 74]).canonical.toJSON());
 
 check('Unknown symbol', () =>
   expect(engine.parse('\\oops')).toMatchInlineSnapshot(
@@ -80,13 +80,13 @@ check('Missing argument with \\placeholder parser', () =>
 
 check('Invalid argument in sequence', () =>
   expect(engine.parse('1+(2=2)+3').canonical).toMatchInlineSnapshot(
-    `["Add",1,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],["Equal",2,2]],3]`
+    `["Add",1,["Error",["ErrorCode","'incompatible-domain'",["Domain","Number"],["Domain","MaybeBoolean"]],["Equal",2,2]],3]`
   )
 );
 
 check('Invalid argument positional', () =>
   expect(engine.parse('1+\\frac{2}{2=2}+2').canonical).toMatchInlineSnapshot(
-    `["Add",1,["Divide",2,["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],["Equal",2,2]]],2]`
+    `["Add",1,["Divide",2,["Error",["ErrorCode","'incompatible-domain'",["Domain","Number"]],["Equal",2,2]]],2]`
   )
 );
 
@@ -156,44 +156,34 @@ check('Command in string', () =>
 // );
 
 check('VALID function application', () =>
-  expect(engine.parse('f\\left(\\right)')).toMatchInlineSnapshot(
-    `["Multiply","f",["Error","'expected-expression'",["Latex","'\\\\left(\\\\right)'"]]]`
-  )
+  expect(engine.parse('f\\left(\\right)')).toMatchInlineSnapshot(`["f"]`)
 );
 
 check('VALID function application', () =>
-  expect(engine.parse('f\\left(2\\right)')).toMatchInlineSnapshot(
-    `["Multiply","f",["Delimiter",2]]`
-  )
+  expect(engine.parse('f\\left(2\\right)')).toMatchInlineSnapshot(`["f",2]`)
 );
 
 check('VALID function application', () =>
-  expect(engine.parse('f()')).toMatchInlineSnapshot(
-    `["Multiply","f",["Error","'expected-expression'",["Latex","'()'"]]]`
-  )
+  expect(engine.parse('f()')).toMatchInlineSnapshot(`["f"]`)
 );
 
 check('VALID function application', () =>
-  expect(engine.parse('f(2)')).toMatchInlineSnapshot(
-    `["Multiply","f",["Delimiter",2]]`
-  )
+  expect(engine.parse('f(2)')).toMatchInlineSnapshot(`["f",2]`)
 );
 
 check('VALID function application', () =>
-  expect(engine.parse('f\\left(2\\right)')).toMatchInlineSnapshot(
-    `["Multiply","f",["Delimiter",2]]`
-  )
+  expect(engine.parse('f\\left(2\\right)')).toMatchInlineSnapshot(`["f",2]`)
 );
 
 check('Invalid empty delimiter expression', () =>
   expect(engine.parse('1()')).toMatchInlineSnapshot(
-    `["Multiply",1,["Error","'expected-expression'",["Latex","'()'"]]]`
+    `["Sequence",1,["Error","'expected-expression'",["Latex","'()'"]]]`
   )
 );
 
 check('Invalid empty delimiter expression', () =>
   expect(engine.parse('1\\left(\\right)')).toMatchInlineSnapshot(
-    `["Multiply",1,["Error","'expected-expression'",["Latex","'\\\\left(\\\\right)'"]]]`
+    `["Sequence",1,["Error","'expected-expression'",["Latex","'\\\\left(\\\\right)'"]]]`
   )
 );
 
@@ -301,7 +291,7 @@ check('VALID empty group', () =>
 
 check('Syntax error', () =>
   expect(engine.parse('x=2{{{')).toMatchInlineSnapshot(
-    `["Equal","x",["Multiply",2,["Sequence",["Sequence",["Error","'expected-expression'",["Latex","''"]],["Error","'expected-closing-delimiter'",["Latex","'{'"]]],["Error","'expected-closing-delimiter'",["Latex","'{{'"]]]]]`
+    `["Equal","x",[2,["Sequence",["Error","'expected-expression'",["Latex","''"]],["Error","'expected-closing-delimiter'",["Latex","'{'"]]],["Error","'expected-closing-delimiter'",["Latex","'{{'"]]]]`
   )
 );
 
@@ -319,6 +309,6 @@ check('Unexpected argument', () =>
 
 check('Mismatched domain', () =>
   expect(engine.box(['Sqrt', 'True']).canonical).toMatchInlineSnapshot(
-    `["Sqrt",["Error",["ErrorCode","'mismatched-argument-domain'",["Domain","Number"]],"True"]]`
+    `["Sqrt",["Error",["ErrorCode","'incompatible-domain'",["Domain","Number"]],"True"]]`
   )
 );

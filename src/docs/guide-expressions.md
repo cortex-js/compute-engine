@@ -224,8 +224,8 @@ expression if there are additional arguments to the error.
 
 For example if the problem is that an argument of a function expression is not
 of the expected domain, an expression such as
-`["Error", ["ErrorCode", "'mismatched-argument-domain'", ["Domain", "Number"]]]`
-could be returned to indicate that a value of domain `"Number"` was expected.
+`["Error", ["ErrorCode", "'incompatible-domain'", "Number", "Anything"]]` could
+be returned to indicate that a value of domain `"Number"` was expected.
 
 The **second argument** of an `["Error"]` expression indicate the context of the
 error. This can be a `["Latex"]` expression when the problem occurred while
@@ -276,7 +276,7 @@ property.
 | `expected-expression`          | an expression was expected inside an enclosure (parentheses)                                                     |
 | `unexpected-command`           | the command is unknown, or not applicable in the current parsing context                                         |
 | `unexpected-token`             | the character does not apply to the current parsing context                                                      |
-| `mismatched-argument-domain`   | the argument provided does not match the expected domain                                                         |
+| `incompatible-domain`          | the argument provided does not match the expected domain                                                         |
 | `unexpected-argument`          | too many arguments provided                                                                                      |
 | `expected-argument`            | not enough arguments provided                                                                                    |
 | `invalid-symbol-name`          | the name of the symbol cannot be used (see [MathJSON Symbols](/math-json/#symbols))                              |
@@ -323,8 +323,8 @@ console.log(ce.parse('1+(2=2)+3').canonical.json);
 // ➔ ["Add",
 //      1,
 //      ["Error",
-//          ["ErrorCode", "'mismatched-argument-domain'", ["Domain", "Number"]],
-//          ["Delimiter",["Equal", 2, 2]]
+//          ["ErrorCode", "'incompatible-domain'", "Number", "Boolean"],
+//          ["Delimiter", ["Equal", 2, 2]]
 //      ],
 //      3
 //    ]

@@ -161,7 +161,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
           domain: 'Function',
           canonical: (ce, args) => {
             if (args.length === 2) return args[0].canonical;
-            return ce.symbol('Nothing');
+            return ce.box(['Sequence']);
           },
         },
       },
@@ -231,12 +231,12 @@ export const CORE_LIBRARY: SymbolTable[] = [
             const op1 = ops[0];
             if (!op1.string)
               return ce.error(
-                ['mismatched-argument-domain', ['Domain', 'String']],
+                ['incompatible-domain', 'String', op1.domain.json],
                 ['Latex', op1.latex]
               );
 
             const op2 = ops[1];
-            if (op2.symbol === 'Nothing')
+            if (op2.isNothing)
               return ce.number(Number.parseInt(op1.string, 10));
             if (op2.machineValue === null) {
               return ce.error(
@@ -301,7 +301,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
             }
 
             const op2 = ops[1];
-            if (op2.symbol === 'Nothing') {
+            if (op2.isNothing) {
               if (op1.machineValue)
                 return ce.string(Math.abs(op1.machineValue).toString());
               if (op1.decimalValue)
@@ -394,7 +394,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'String', 'Anything'],
           evaluate: (ce, ops) => {
-            if (ops.length === 0) return ce.symbol('Nothing');
+            if (ops.length === 0) return ce.box(['Sequence']);
             return ce.parse(ops[0].string ?? '');
           },
         },
@@ -431,6 +431,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
         description:
           'Construct a new symbol with a name formed by concatenating the arguments',
         threadable: true,
+        hold: 'all',
         signature: {
           domain: ['Function', ['Sequence', 'Anything'], 'Symbol'],
           evaluate: (ce, ops) => {

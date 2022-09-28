@@ -115,7 +115,7 @@ export function evalAdd(
   let complexSum = Complex.ZERO;
 
   for (const arg of args) {
-    if (arg.symbol === 'Nothing' || arg.isZero) continue;
+    if (arg.isNothing || arg.isZero) continue;
     if (arg.isLiteral) {
       const [n, d] = arg.rationalValue;
       if (n !== null && d !== null) {
@@ -274,9 +274,9 @@ export function canonicalSummation(
     fn = expr.head === 'Lambda' ? expr.op1 : expr.subs({ [index.symbol]: '_' });
   else fn = expr.head === 'Lambda' ? expr.op1 : expr;
 
-  index ??= ce.symbol('Null');
+  index ??= ce.symbol('Nothing');
 
-  if (upper) range = ce.tuple([index, lower ?? ce.symbol('Null'), upper]);
+  if (upper) range = ce.tuple([index, lower ?? ce.symbol('Nothing'), upper]);
   else if (lower && upper) range = ce.tuple([index, lower, upper]);
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
@@ -291,7 +291,7 @@ export function evalSummation(
   mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
   if (expr.head !== 'Lambda') return undefined;
-  const fn = expr.op1 ?? ce.symbol('Nothing');
+  const fn = expr.op1;
 
   let lower = 1;
   let upper = MAX_ITERATION;

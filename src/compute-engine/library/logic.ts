@@ -119,7 +119,7 @@ export const LOGIC_LIBRARY: SymbolTable = {
         simplify: (ce, ops) => ops[0]?.simplify() ?? ce.box('Nothing'),
         evaluate: (ce, ops) => {
           const body = ops[0] ?? ce.box('Nothing');
-          if (body.symbol === 'Nothing') return body;
+          if (body.isNothing) return body;
           let result: BoxedExpression;
           let i = 0;
           do {

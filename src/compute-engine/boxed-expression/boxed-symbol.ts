@@ -164,6 +164,10 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return this._name;
   }
 
+  get isNothing(): boolean {
+    return this._name === 'Nothing';
+  }
+
   get isLiteral(): boolean {
     return false;
   }
@@ -328,6 +332,11 @@ export class BoxedSymbol extends AbstractBoxedExpression {
         ...domainToFlags(d),
       });
     }
+  }
+
+  get explicitDomain(): BoxedDomain | null {
+    if (this.functionDefinition) return this.engine.domain('Function');
+    return this.symbolDefinition?.domain ?? null;
   }
 
   get json(): Expression {

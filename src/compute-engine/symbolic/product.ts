@@ -57,7 +57,7 @@ export class Product {
   addTerm(term: BoxedExpression) {
     console.assert(term.isCanonical);
 
-    if (term.symbol === 'Nothing') return;
+    if (term.isNothing) return;
     if (term.isLiteral) {
       if (term.isOne) return;
 
