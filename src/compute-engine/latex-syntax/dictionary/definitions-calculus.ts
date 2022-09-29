@@ -3,6 +3,7 @@ import {
   head,
   isEmptySequence,
   op,
+  ops,
   subs,
   symbol,
 } from '../../../math-json/utils';
@@ -30,27 +31,9 @@ function parseIntegral(head: string) {
     if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
 
     // An integral expression is of the form `\int \sin(x)dx`
-    const start = parser.index;
-    parser.addBoundary(['\\mathrm', '<{>', 'd', '<}>']);
 
-    // Parse an expression (up to a relational operator, or the boundary)
-    let fn = parser.matchExpression({ minPrec: 266 });
-
-    let index: string | null = '';
-    if (parser.matchBoundary()) {
-      parser.skipSpace();
-      index = parser.matchVariable();
-    } else {
-      parser.removeBoundary();
-      // Try again, but looking for a simple "d"
-      parser.index = start;
-      parser.addBoundary(['d']);
-      fn = parser.matchExpression({ minPrec: 266 });
-      if (parser.matchBoundary()) {
-        parser.skipSpace();
-        index = parser.matchVariable();
-      } else parser.removeBoundary();
-    }
+    // eslint-disable-next-line prefer-const
+    let [fn, index] = parseIntegralBody(parser);
 
     if (fn && index) fn = ['Lambda', subs(fn, { [index]: '_' })];
 
@@ -72,6 +55,98 @@ function parseIntegral(head: string) {
     return [head];
   };
 }
+
+function parseIntegralBody(
+  parser: Parser
+): [body: Expression, index: string | null] {
+  // Parse an expression (up to a relational operator, or the boundary)
+  const start = parser.index;
+
+  let found = false;
+
+  let fn = parser.matchExpression({
+    minPrec: 266,
+    condition: () => {
+      if (parser.matchAll(['\\mathrm', '<{>', 'd', '<}>'])) found = true;
+      return found;
+    },
+  });
+
+  let index: string | null = '';
+  if (fn && found) {
+    parser.skipSpace();
+    index = parser.matchVariable();
+  } else {
+    // Try again, but looking for a simple "d"
+    parser.index = start;
+    fn = parser.matchExpression({
+      minPrec: 266,
+      condition: () => {
+        if (parser.match('d')) found = true;
+        return found;
+      },
+    });
+    if (fn && found) {
+      parser.skipSpace();
+      index = parser.matchVariable();
+    }
+  }
+
+  if (!found && fn) {
+    // We didn't get a `\mathrm{d}x` or `dx` at the same level as the expression
+    // but perhaps it was in a subexpression, e.g. `\frac{dx}{x}`
+    [fn, index] = parseIntegralBodyExpression(fn);
+  }
+
+  return [fn ?? 'Nothing', index];
+}
+
+function parseIntegralBodyExpression(
+  expr: Expression
+): [body: Expression | null, index: string | null] {
+  const h = head(expr);
+  const op1 = op(expr, 1);
+  if (!op1) return [expr, null];
+  if (h === 'Delimiter') {
+    const [fn2, index2] = parseIntegralBodyExpression(op1);
+    if (index2) {
+      if (!fn2) return [null, index2];
+      return [['Delimiter', fn2, ...ops(expr)!.slice(1)], index2];
+    }
+  } else if (h === 'Add') {
+    const args = ops(expr);
+    if (args && args.length > 0) {
+      const [fn2, index2] = parseIntegralBodyExpression(args[args.length - 1]);
+      if (index2) {
+        if (fn2) return [['Add', ...args.slice(0, -1), fn2], index2];
+        if (args.length > 2) return [['Add', ...args.slice(0, -1)], index2];
+        if (args.length > 2) return [args[0], index2];
+      }
+    }
+  } else if (h === 'Negate') {
+    const [fn2, index2] = parseIntegralBodyExpression(op1);
+    if (!fn2) return [null, index2];
+    if (index2) return [['Negate', fn2], index2];
+  } else if (h === 'Multiply') {
+    const args = ops(expr);
+    if (args && args.length > 0) {
+      if (args[args.length - 2] === 'd') {
+        if (args.length === 2) return [null, symbol(args[1])];
+        if (args.length === 3) return [args[0], symbol(args[2])];
+        return [
+          ['Multiply', ...args.slice(0, -2)],
+          symbol(args[args.length - 1]),
+        ];
+      }
+    }
+  } else if (h === 'Divide') {
+    const [fn2, index2] = parseIntegralBodyExpression(op1);
+    if (index2) return [['Divide', fn2 ?? 1, op(expr, 2)!], index2];
+  }
+
+  return [expr, null];
+}
+
 function serializeIntegral(command: string) {
   return (serializer: Serializer, expr: Expression): string => {
     if (!op(expr, 1)) return command;
