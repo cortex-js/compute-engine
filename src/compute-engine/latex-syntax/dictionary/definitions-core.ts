@@ -499,7 +499,7 @@ function parseTextRun(
   parser: Parser,
   style?: { [key: string]: string }
 ): Expression {
-  if (!parser.match('<{>')) return ['Sequence'];
+  if (!parser.match('<{>')) return "''";
 
   const runs: Expression[] = [];
   let text = '';
@@ -558,7 +558,11 @@ function parseTextRun(
 
   let body: Expression;
   if (runs.length === 1) body = runs[0];
-  else body = ['String', ...runs];
+  else {
+    if (runs.every((x) => stringValue(x) !== null))
+      body = "'" + runs.map((x) => stringValue(x)).join() + "'";
+    else body = ['String', ...runs];
+  }
 
   return style ? ['Style', body, { dict: style }] : body;
 }

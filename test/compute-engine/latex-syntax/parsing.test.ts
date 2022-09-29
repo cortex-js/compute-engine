@@ -13,7 +13,7 @@ describe('ADVANCED PARSING', () => {
   // expected
   test('\\frac{x}{} y', () =>
     expect(parse('\\frac{x}{} \\text{ cm}')).toMatchInlineSnapshot(
-      `'["Multiply", ["Divide", "x", ["Error", "'missing'"]], "' cm'"]'`
+      `'["Sequence", ["Divide", "x", ["Error", "'missing'"]], "' cm'"]'`
     ));
 });
 

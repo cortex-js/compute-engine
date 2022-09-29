@@ -39,12 +39,6 @@ ce.assume(['Element', 'f', 'Function']);
 // PROBLEMATIC EXPRESSIONS
 //
 
-const z6 = ce.parse('^p_q{x+1}^n_0');
-console.log(z6.json);
-
-const z5 = ce.parse('0.(142857)');
-console.log(z5.json);
-
 // Mismatched argument domain
 const zz = ce.parse('\\sum_{n=1}^5nx').canonical;
 console.log(zz.json);

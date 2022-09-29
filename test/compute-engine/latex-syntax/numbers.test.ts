@@ -23,12 +23,8 @@ describe('NUMBERS', () => {
     expect(parse('-+-1')).toMatchInlineSnapshot(`'["Negate", -1]'`);
   });
   test('Parsing numbers with repeating pattern', () => {
-    expect(parse('1.(3)')).toMatchInlineSnapshot(
-      `'["Multiply", 1, ["Delimiter", 3]]'`
-    ); // @todo
-    expect(parse('0.(142857)')).toMatchInlineSnapshot(
-      `'["Multiply", 0, ["Delimiter", 142857]]'`
-    ); // @todo
+    expect(parse('1.(3)')).toMatchInlineSnapshot(`'{num: "1.(3)"}'`);
+    expect(parse('0.(142857)')).toMatchInlineSnapshot(`'{num: "0.(142857)"}'`);
     expect(box({ num: '1.(3)' })).toMatch('{num: "1.(3)"}');
     expect(box({ num: '0.(142857)' })).toMatch('{num: "0.(142857)"}');
   });

@@ -145,7 +145,7 @@ check('Too many infix commands', () =>
 
 check('Command in string', () =>
   expect(engine.parse('1\\text{hello \\alpha}')).toMatchInlineSnapshot(
-    `["Multiply",1,"'hello \\\\alpha'"]`
+    `["Sequence",1,"'hello \\\\alpha'"]`
   )
 );
 

@@ -31,7 +31,7 @@ describe('STEFNOTCH #10', () => {
 
   test('3/ 3\\text{hello}6', () => {
     expect(parse('3\\text{hello}6')).toMatchInlineSnapshot(
-      `'["Multiply", 3, "'hello'", 6]'`
+      `'["Sequence", 3, "'hello'", 6]'`
     );
   });
 
@@ -114,7 +114,7 @@ describe('STEFNOTCH #12', () => {
       '[
         "Power",
         "ExponentialE",
-        ["Multiply", "ImaginaryUnit", "Pi", "'nope!?\\\\lparensum'"]
+        ["Sequence", "ImaginaryUnit", "Pi", "'nope!?\\\\lparensum'"]
       ]'
     `);
   });

@@ -24,6 +24,7 @@ import { IComputeEngine } from '../public';
 import { Expression } from '../../math-json/math-json-format';
 import {
   applyAssociativeOperator,
+  dictionary,
   getSequence,
   head,
   isEmptySequence,
@@ -32,6 +33,7 @@ import {
   nops,
   op,
   ops,
+  stringValue,
   symbol,
 } from '../../math-json/utils';
 
@@ -605,7 +607,9 @@ export class _Parser implements Parser {
 
     if (this.matchAll(this._decimalMarkerTokens)) {
       const i = this.index;
-      if (!this.matchAny(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])) {
+      if (
+        !this.matchAny(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '('])
+      ) {
         // A decimal marker followed by not a digit -> not a number
         this.index = start;
         return '';
@@ -622,10 +626,32 @@ export class _Parser implements Parser {
     }
 
     if (!dotPrefix && this.matchAll(this._decimalMarkerTokens)) {
-      result += '.' + (this.matchDecimalDigits() ?? '0');
+      result += '.';
+      const decimalDigits = this.matchDecimalDigits();
+      if (this.peek === '(') {
+        // Maybe some repeating decimals?
+        const start = this.index;
+        this.match('(');
+        const repeatingDecimals = this.matchDecimalDigits();
+        if (repeatingDecimals && this.match(')'))
+          result += (decimalDigits ?? '') + '(' + repeatingDecimals + ')';
+        else this.index = start;
+      } else result += decimalDigits ?? '0';
+    } else if (dotPrefix) {
+      result = '0.';
+      const decimalDigits = this.matchDecimalDigits();
+      if (this.peek === '(') {
+        // Maybe some repeating decimals?
+        const start = this.index;
+        this.match('(');
+        const repeatingDecimals = this.matchDecimalDigits();
+        if (repeatingDecimals && this.match(')'))
+          result += (decimalDigits ?? '') + '(' + repeatingDecimals + ')';
+        else this.index = start;
+      } else result += decimalDigits ?? '0';
     }
 
-    return (dotPrefix ? '0.' : '') + result + this.matchExponent();
+    return result + this.matchExponent();
   }
 
   /**
@@ -1516,9 +1542,15 @@ export class _Parser implements Parser {
           lhs,
           this.error('expected-expression', start)
         );
-      // return ['Multiply', lhs, this.error('expected-expression', start)];
     }
-    if (head(rhs) === 'Sequence' || head(lhs) === 'Sequence')
+    if (
+      head(rhs) === 'Sequence' ||
+      head(lhs) === 'Sequence' ||
+      stringValue(lhs) !== null ||
+      stringValue(rhs) !== null ||
+      dictionary(lhs) !== null ||
+      dictionary(rhs) !== null
+    )
       return applyAssociativeOperator('Sequence', lhs, rhs);
 
     return applyAssociativeOperator('Multiply', lhs, rhs);

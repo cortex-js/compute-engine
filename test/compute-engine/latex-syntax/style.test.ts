@@ -12,10 +12,9 @@ describe('STYLE - MATH MODE', () => {
 describe('STYLE - TEXT MODE', () => {
   test('\\text', () => {
     // Whitespace should be preserved
-    expect(check('a\\text{ and }b')).toMatchInlineSnapshot(`
-      'box      = ["Multiply", "a", "' and '", "b"]
-      canonical = ["Multiply", "a", ["Error", ["ErrorCode", "'incompatible-domain'", ["Domain", "Number"], ["Domain", "String"]], "' and '"], "b"]'
-    `);
+    expect(check('a\\text{ and }b')).toMatchInlineSnapshot(
+      `'["Sequence", "a", "' and '", "b"]'`
+    );
 
     // Math mode inside text mode
     expect(check('a\\text{ in $x$ }b')).toMatchInlineSnapshot(`
@@ -23,19 +22,19 @@ describe('STYLE - TEXT MODE', () => {
       canonical = ["Multiply", "a", ["Error", ["ErrorCode", "'incompatible-domain'", ["Domain", "Number"], ["Domain", "String"]], "'x' in  ''"], "b"]'
     `);
 
-    expect(check('a\\text{ black \\textcolor{red}{RED} }b'))
-      .toMatchInlineSnapshot(`
-      'box      = ["Multiply", "a", "''red''RED'' black \\textcolor ''", "b"]
-      canonical = ["Multiply", "a", ["Error", ["ErrorCode", "'incompatible-domain'", ["Domain", "Number"], ["Domain", "String"]], "''red''RED'' black \\textcolor ''"], "b"]'
-    `);
+    expect(
+      check('a\\text{ black \\textcolor{red}{RED} }b')
+    ).toMatchInlineSnapshot(
+      `'["Sequence", "a", "'red,RED, black \\textcolor '", "b"]'`
+    );
 
     expect(
       check('a\\text{ black \\color{red}RED\\color{blue}BLUE} b')
-    ).toMatchInlineSnapshot(`'["Multiply", "a", "' black '"]'`);
+    ).toMatchInlineSnapshot(`'["Sequence", "a", "' black '"]'`);
     expect(
       check('a\\text{ black \\textcolor{red}{RED} black} b')
     ).toMatchInlineSnapshot(
-      `'["Sequence", "a", "''red''RED'' black \\textcolor black''", ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]], "b"]'`
+      `'["Sequence", "a", "'red,RED, black \\textcolor black'", "b"]'`
     );
 
     expect(
