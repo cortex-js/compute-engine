@@ -591,6 +591,36 @@ export class _Parser implements Parser {
     return '';
   }
 
+  matchRepeatingDecimal(): string {
+    const start = this.index;
+    let repeatingDecimals = '';
+    if (this.match('(')) {
+      repeatingDecimals = this.matchDecimalDigits();
+      if (repeatingDecimals && this.match(')'))
+        return '(' + repeatingDecimals + ')';
+      return '';
+    }
+
+    this.index = start;
+    if (this.matchAll([`\\left`, '('])) {
+      repeatingDecimals = this.matchDecimalDigits();
+      if (repeatingDecimals && this.matchAll([`\\right`, ')']))
+        return '(' + repeatingDecimals + ')';
+      return '';
+    }
+
+    this.index = start;
+    if (this.matchAll([`\\overline`, '<{>'])) {
+      repeatingDecimals = this.matchDecimalDigits();
+      if (repeatingDecimals && this.match('<}>'))
+        return '(' + repeatingDecimals + ')';
+      return '';
+    }
+
+    this.index = start;
+    return '';
+  }
+
   matchNumber(): string {
     if (!this.options.parseNumbers) return '';
     const start = this.index;
@@ -625,31 +655,10 @@ export class _Parser implements Parser {
       return '';
     }
 
-    if (!dotPrefix && this.matchAll(this._decimalMarkerTokens)) {
-      result += '.';
-      const decimalDigits = this.matchDecimalDigits();
-      if (this.peek === '(') {
-        // Maybe some repeating decimals?
-        const start = this.index;
-        this.match('(');
-        const repeatingDecimals = this.matchDecimalDigits();
-        if (repeatingDecimals && this.match(')'))
-          result += (decimalDigits ?? '') + '(' + repeatingDecimals + ')';
-        else this.index = start;
-      } else result += decimalDigits ?? '0';
-    } else if (dotPrefix) {
-      result = '0.';
-      const decimalDigits = this.matchDecimalDigits();
-      if (this.peek === '(') {
-        // Maybe some repeating decimals?
-        const start = this.index;
-        this.match('(');
-        const repeatingDecimals = this.matchDecimalDigits();
-        if (repeatingDecimals && this.match(')'))
-          result += (decimalDigits ?? '') + '(' + repeatingDecimals + ')';
-        else this.index = start;
-      } else result += decimalDigits ?? '0';
-    }
+    if (!dotPrefix && this.matchAll(this._decimalMarkerTokens))
+      result += '.' + this.matchDecimalDigits() + this.matchRepeatingDecimal();
+    else if (dotPrefix)
+      result = '0.' + this.matchDecimalDigits() + this.matchRepeatingDecimal();
 
     return result + this.matchExponent();
   }
