@@ -27,12 +27,86 @@ describe('NUMBERS', () => {
     expect(parse('0.(142857)')).toMatchInlineSnapshot(`'{num: "0.(142857)"}'`);
     expect(box({ num: '1.(3)' })).toMatch('{num: "1.(3)"}');
     expect(box({ num: '0.(142857)' })).toMatch('{num: "0.(142857)"}');
+    expect(parse('x=.123')).toMatchInlineSnapshot(`'["Equal", "x", 0.123]'`);
+    expect(parse('x=.123(45)')).toMatchInlineSnapshot(
+      `'["Equal", "x", {num: "0.123(45)"}]'`
+    );
+    expect(parse('x=-987.123(45)')).toMatchInlineSnapshot(
+      `'["Equal", "x", {num: "-987.123(45)"}]'`
+    );
   });
+  test('Parsing numbers with truncation  mark', () => {
+    expect(parse('x=.123\\ldots')).toMatchInlineSnapshot(
+      `'["Equal", "x", 0.123]'`
+    );
+    expect(parse('x=.123\\ldots e4')).toMatchInlineSnapshot(
+      `'["Equal", "x", 1230]'`
+    );
+    expect(parse('x=.123\\ldots e4+1')).toMatchInlineSnapshot(
+      `'["Equal", "x", ["Add", 1230, 1]]'`
+    );
+    expect(parse('x=.123\\ldots e-423+1')).toMatchInlineSnapshot(
+      `'["Equal", "x", ["Add", {num: "1.23e-424"}, 1]]'`
+    );
+  });
+
+  test('Parsing numbers with truncation  mark', () => {
+    // Invalid: \ldots after repeating pattern
+    expect(parse('x=.123(45)\\ldots')).toMatchInlineSnapshot(`
+      '[
+        "Equal",
+        "x",
+        [
+          "Sequence",
+          {num: "0.123(45)"},
+          [
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\\\ldots'"],
+            ["Latex", "'\\\\ldots'"]
+          ]
+        ]
+      ]'
+    `);
+  });
+
   test('Parsing numbers including whitespace', () => {
     expect(
       box({ num: '\u00091\u000a2\u000b3\u000c4\u000d5 6\u00a07.2' })
     ).toMatch('1234567.2');
   });
+
+  test('Parsing numbers with grouping', () => {
+    expect(parse('123\\,456')).toMatchInlineSnapshot(`'123456'`);
+    expect(parse('123\\,45\\,67')).toMatchInlineSnapshot(`'1234567'`);
+    expect(parse('123\\,45\\,67.123\\,456\\,78')).toMatchInlineSnapshot(
+      `'{num: "1234567.12345678"}'`
+    );
+  });
+
+  test('INVALID Parsing numbers with grouping', () => {
+    expect(parse('123\\,45\\,67.123\\,456\\,')).toMatchInlineSnapshot(
+      `'["Multiply", 1234567.123456, ["HorizontalSpacing", 3]]'`
+    );
+    expect(parse('123\\,45\\,67.123\\,456\\,e5')).toMatchInlineSnapshot(`
+      '[
+        "Multiply",
+        1234567.123456,
+        ["HorizontalSpacing", 3],
+        "ExponentialE",
+        5
+      ]'
+    `);
+    expect(parse('123\\,45\\,67.123\\,456\\,e12\\,345')).toMatchInlineSnapshot(`
+      '[
+        "Multiply",
+        1234567.123456,
+        ["HorizontalSpacing", 3],
+        "ExponentialE",
+        12345
+      ]'
+    `);
+  });
+
   test('Parsing whitespace with number sign', () => {
     expect(parse('  1')).toMatch('1');
     expect(parse('+ 1')).toMatch('1');

@@ -531,8 +531,8 @@ export type NumberFormattingOptions = {
    *
    * If you change it to another value, be aware that this may lead to
    * unexpected results. For example, if changing it to `,` the expression
-   * `x_{1,2}` will parse as `x` with a subscript of `1.2`, rather than `x`
-   * with two subscripts, `1` and `2`.
+   * `\mathrm{Hypot}(1,2)` will parse as `["Hypot", 1.2]` rather than
+   * `["Hypot", 1, 2]`.
    *
    * **Default**: `"\\,"` (thin space, 3/18mu) (Resolution 7 of the 1948 CGPM)
    */

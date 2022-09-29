@@ -45,7 +45,6 @@ function formatFractionalPart(
             offset.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
             options.beginRepeatingDigits +
             cycle +
-            // cycle.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
             options.endRepeatingDigits
           );
         }

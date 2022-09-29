@@ -165,7 +165,18 @@ export class _Parser implements Parser {
 
   private readonly _tokens: LatexToken[];
 
+  private _positiveInfinityTokens: LatexToken[];
+  private _negativeInfinityTokens: LatexToken[];
+  private _notANumberTokens: LatexToken[];
   private _decimalMarkerTokens: LatexToken[];
+  private _groupSeparatorTokens: LatexToken[];
+  private _exponentProductTokens: LatexToken[];
+  private _beginExponentMarkerTokens: LatexToken[];
+  private _endExponentMarkerTokens: LatexToken[];
+  private _truncationMarkerTokens: LatexToken[];
+  private _beginRepeatingDigitsTokens: LatexToken[];
+  private _endRepeatingDigitsTokens: LatexToken[];
+  private _imaginaryNumberTokens: LatexToken[];
   private readonly _dictionary: IndexedLatexDictionary;
 
   // A parsing boundary is a sequence of tokens that indicate that a
@@ -202,20 +213,64 @@ export class _Parser implements Parser {
     this._dictionary = dictionary;
     this.computeEngine = computeEngine;
 
+    this._positiveInfinityTokens = tokenize(this.options.positiveInfinity, []);
+    this._negativeInfinityTokens = tokenize(this.options.negativeInfinity, []);
+    this._notANumberTokens = tokenize(this.options.notANumber, []);
     this._decimalMarkerTokens = tokenize(this.options.decimalMarker, []);
+    this._groupSeparatorTokens = tokenize(this.options.groupSeparator, []);
+    this._exponentProductTokens = tokenize(this.options.exponentProduct, []);
+    this._beginExponentMarkerTokens = tokenize(
+      this.options.beginExponentMarker,
+      []
+    );
+    this._endExponentMarkerTokens = tokenize(
+      this.options.endExponentMarker,
+      []
+    );
+    this._truncationMarkerTokens = tokenize(this.options.truncationMarker, []);
+    this._beginRepeatingDigitsTokens = tokenize(
+      this.options.beginRepeatingDigits,
+      []
+    );
+    this._endRepeatingDigitsTokens = tokenize(
+      this.options.endRepeatingDigits,
+      []
+    );
+    this._imaginaryNumberTokens = tokenize(this.options.imaginaryNumber, []);
   }
 
   updateOptions(
     opt: Partial<NumberFormattingOptions> & Partial<ParseLatexOptions>
   ) {
-    for (const [k, v] of Object.entries(opt)) {
+    for (const [k, v] of Object.entries(opt))
       if (k in this.options) {
         this.options[k] = v;
-        if (k === 'decimalMarker' && typeof v === 'string') {
-          this._decimalMarkerTokens = tokenize(v, []);
+        if (typeof v === 'string') {
+          if (k === 'positiveInfinity')
+            this._positiveInfinityTokens = tokenize(v, []);
+          if (k === 'negativeInfinity')
+            this._negativeInfinityTokens = tokenize(v, []);
+          if (k === 'notANumber') this._notANumberTokens = tokenize(v, []);
+          if (k === 'decimalMarker')
+            this._decimalMarkerTokens = tokenize(v, []);
+          if (k === 'groupSeparator')
+            this._groupSeparatorTokens = tokenize(v, []);
+          if (k === 'exponentProduct')
+            this._exponentProductTokens = tokenize(v, []);
+          if (k === 'beginExponentMarker')
+            this._beginExponentMarkerTokens = tokenize(v, []);
+          if (k === 'endExponentMarker')
+            this._endExponentMarkerTokens = tokenize(v, []);
+          if (k === 'truncationMarker')
+            this._truncationMarkerTokens = tokenize(v, []);
+          if (k === 'beginRepeatingDigits')
+            this._beginRepeatingDigitsTokens = tokenize(v, []);
+          if (k === 'endRepeatingDigits')
+            this._endRepeatingDigitsTokens = tokenize(v, []);
+          if (k === 'imaginaryNumber')
+            this._imaginaryNumberTokens = tokenize(v, []);
         }
       } else throw Error(`Unexpected option "${k}"`);
-    }
   }
 
   get atEnd(): boolean {
@@ -487,6 +542,7 @@ export class _Parser implements Parser {
 
   matchAll(tokens: LatexToken | LatexToken[]): boolean {
     if (typeof tokens === 'string') tokens = [tokens];
+    if (tokens.length === 0) return false;
 
     let matched = true;
     let i = 0;
@@ -521,7 +577,10 @@ export class _Parser implements Parser {
     return isNegative ? '-' : '+';
   }
 
-  matchDecimalDigits(): string {
+  matchDecimalDigits(options?: { withGrouping?: boolean }): string {
+    options ??= {};
+    options.withGrouping ??= false;
+
     let result = '';
     let done = false;
     while (!done) {
@@ -538,10 +597,10 @@ export class _Parser implements Parser {
         '9',
       ]).join('');
       done = true;
-      if (this.options.groupSeparator) {
+      if (options.withGrouping && this.options.groupSeparator) {
         const savedIndex = this.index;
         this.skipSpace();
-        if (this.match(this.options.groupSeparator)) {
+        if (this.matchAll(this._groupSeparatorTokens)) {
           this.skipSpace();
           // Are there more digits after a group separator
           if (/[0-9]/.test(this.peek)) done = false;
@@ -552,10 +611,14 @@ export class _Parser implements Parser {
     return result;
   }
 
-  matchSignedInteger(): string {
+  matchSignedInteger(options?: { withGrouping?: boolean }): string {
+    options ??= {};
+    options.withGrouping ??= false;
+
     const start = this.index;
+
     const sign = this.matchOptionalSign();
-    const result = this.matchDecimalDigits();
+    const result = this.matchDecimalDigits(options);
     if (result) return sign === '-' ? '-' + result : result;
 
     this.index = start;
@@ -566,24 +629,45 @@ export class _Parser implements Parser {
     const start = this.index;
 
     if (this.matchAny(['e', 'E'])) {
-      const exponent = this.matchSignedInteger();
+      // The exponent does not contain grouping markers. See
+      // https://physics.nist.gov/cuu/Units/checklist.html  #16
+      const exponent = this.matchSignedInteger({ withGrouping: false });
       if (exponent) return 'e' + exponent;
-      this.index = start;
     }
 
+    this.index = start;
     if (this.match('\\times')) {
-      this.skipSpace();
+      this.skipSpaceTokens();
       if (this.match('1') && this.match('0') && this.match('^')) {
         // Is it a single digit exponent, i.e. `\times 10^5`
         if (/[0-9]/.test(this.peek)) return 'e' + this.next();
 
         if (this.match('<{>')) {
           // Multi digit exponent,i.e. `\times 10^{10}` or `\times 10^{-5}`
-          this.skipSpace();
+          this.skipSpaceTokens();
+          // Note: usually don't have group markers, but since we're inside
+          // a `{}` there can't be ambiguity, so we're lenient
           const exponent = this.matchSignedInteger();
-          this.skipSpace();
+          this.skipSpaceTokens();
           if (this.match('<}>') && exponent) return 'e' + exponent;
         }
+      }
+    }
+
+    this.index = start;
+    // `%` is a synonym for `e-2`. See // https://physics.nist.gov/cuu/Units/checklist.html  #10
+    this.skipSpaceTokens();
+    if (this.match('\\%')) return `e-2`;
+
+    this.index = start;
+    if (this.matchAll(this._exponentProductTokens)) {
+      this.skipSpaceTokens();
+      if (this.matchAll(this._beginExponentMarkerTokens)) {
+        this.skipSpaceTokens();
+        const exponent = this.matchSignedInteger();
+        this.skipSpaceTokens();
+        if (this.matchAll(this._endExponentMarkerTokens) && exponent)
+          return 'e' + exponent;
       }
     }
 
@@ -618,10 +702,19 @@ export class _Parser implements Parser {
     }
 
     this.index = start;
+    if (this.matchAll(this._beginRepeatingDigitsTokens)) {
+      repeatingDecimals = this.matchDecimalDigits();
+      if (repeatingDecimals && this.matchAll(this._endRepeatingDigitsTokens))
+        return '(' + repeatingDecimals + ')';
+      return '';
+    }
+
+    this.index = start;
     return '';
   }
 
   matchNumber(): string {
+    // If we don't parse numbers, we'll return them as individual tokens
     if (!this.options.parseNumbers) return '';
     const start = this.index;
 
@@ -632,33 +725,56 @@ export class _Parser implements Parser {
     // this is so we can correctly parse `-1^2` as `['Negate', ['Square', 1]]`
     this.match('+');
 
-    // Does the number start with a decimal marker? i.e. `.5`
+    let result = '';
+
+    // Does the number start with the decimal marker? i.e. `.5`
     let dotPrefix = false;
 
-    if (this.matchAll(this._decimalMarkerTokens)) {
-      const i = this.index;
+    if (this.match('.') || this.matchAll(this._decimalMarkerTokens)) {
+      const peek = this.peek;
+      // Include `(` for repeating decimals
       if (
-        !this.matchAny(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '('])
+        !(
+          peek !== '\\overline' ||
+          peek !== this._beginRepeatingDigitsTokens[0] ||
+          /[0-9]\(/.test(peek)
+        )
       ) {
         // A decimal marker followed by not a digit -> not a number
         this.index = start;
         return '';
       }
-      // Rewind by 1
-      this.index = i;
       dotPrefix = true;
+    } else {
+      result = this.matchDecimalDigits({ withGrouping: true });
+      if (!result) {
+        this.index = start;
+        return '';
+      }
     }
 
-    let result = this.matchDecimalDigits();
-    if (!result) {
-      this.index = start;
-      return '';
+    let hasDecimal = false;
+    if (
+      !dotPrefix &&
+      (this.match('.') || this.matchAll(this._decimalMarkerTokens))
+    ) {
+      result += '.' + this.matchDecimalDigits({ withGrouping: true });
+      hasDecimal = true;
+    } else if (dotPrefix) {
+      result = '0.' + this.matchDecimalDigits({ withGrouping: true });
+      hasDecimal = true;
     }
 
-    if (!dotPrefix && this.matchAll(this._decimalMarkerTokens))
-      result += '.' + this.matchDecimalDigits() + this.matchRepeatingDecimal();
-    else if (dotPrefix)
-      result = '0.' + this.matchDecimalDigits() + this.matchRepeatingDecimal();
+    if (hasDecimal) {
+      const repeat = this.matchRepeatingDecimal();
+      if (repeat) result += repeat;
+      else if (
+        this.match('\\ldots') ||
+        this.matchAll(this._truncationMarkerTokens)
+      ) {
+        // We got a truncation marker, just ignore it.
+      }
+    }
 
     return result + this.matchExponent();
   }
@@ -1678,6 +1794,14 @@ export class _Parser implements Parser {
     //    `f(x)` or `\sin(\pi)
     //    `\frac{1}{2}`
     //
+
+    if (result === null && this.matchAll(this._positiveInfinityTokens))
+      result = { num: '+Infinity' };
+    if (result === null && this.matchAll(this._negativeInfinityTokens))
+      result = { num: '-Infinity' };
+    if (result === null && this.matchAll(this._notANumberTokens))
+      result = { num: 'NaN' };
+
     if (result === null) result = this.matchSymbol();
 
     //
