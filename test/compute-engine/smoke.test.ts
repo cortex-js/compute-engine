@@ -39,16 +39,7 @@ ce.assume(['Element', 'f', 'Function']);
 // PROBLEMATIC EXPRESSIONS
 //
 
-// Mismatched argument domain
-const zz = ce.parse('\\sum_{n=1}^5nx').canonical;
-console.log(zz.json);
-
-// Parsed as imaginary unit
-// -> should add pushDictionary() or use the current scope to find a definition for 'i'
-const z3 = ce.parse('\\sum_ii^2').canonical;
-console.log(z3.json);
-
-// Reports false. Should be true.
+// Report false. Should be true.
 const sig1 = ce.domain(['Function', 'PositiveInteger', 'Anything']);
 const sig2 = ce.domain(['Function', 'Number', 'Number']);
 console.log(sig1.isCompatible(sig2));
@@ -58,22 +49,29 @@ const sig3 = ce.domain([
   ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
 ]);
 console.log(sig3.toJSON());
-const sig4 = ce.box(['Triple', 'n', 1, 50]).domain;
-console.log(sig4.toJSON());
-console.log(sig4.isCompatible(sig3));
-
-const z = ce.parse('\\sum_{n=1}^5 n^2+1').canonical;
-console.log(z.json);
-console.log(z.evaluate().json);
-
-// When to apply Sequence/Nothing? Need definition to know what to hold...
-console.log(ce.parse('x_{a,b}').toJSON());
 
 console.log(
   ce
     .domain(['Function', 'PositiveInteger', 'Anything'])
     .isCompatible(engine.domain(['Function', 'Number', 'Number']))
 );
+
+const sig4 = ce.box(['Triple', 'n', 1, 50]).domain;
+console.log(sig4.toJSON());
+console.log(sig4.isCompatible(sig3));
+
+// Mismatched argument domain
+const zz = ce.parse('\\sum_{n=1}^5nx').canonical;
+console.log(zz.json);
+
+// Parsed as imaginary unit
+// -> should add pushDictionary() or use the current scope to find a definition for 'i'
+const z3 = ce.parse('\\sum_ii^2').canonical;
+console.log(z3.json);
+
+const z = ce.parse('\\sum_{n=1}^5 n^2+1').canonical;
+console.log(z.json);
+console.log(z.evaluate().json);
 
 // Outputs unexpected command, \\left...
 // because there is no matchfix for \\left(\\right.

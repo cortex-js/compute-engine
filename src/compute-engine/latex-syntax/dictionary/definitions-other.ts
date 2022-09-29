@@ -16,7 +16,7 @@ import { joinLatex } from '../tokenizer';
 function parseSingleArg(cmd: string): (parser: any) => Expression {
   return (parser) => {
     const arg = parser.matchRequiredLatexArgument();
-    if (!arg) return [cmd];
+    if (arg === null) return [cmd];
     return [cmd, arg];
   };
 }
@@ -114,7 +114,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       const seq = getSequence(sub);
       if (seq) sub = ['List', ...seq];
 
-      if (!sub || !sup) return null;
+      if (sub === null || sup === null) return null;
       let rhs = parser.matchRequiredLatexArgument() ?? 'Nothing';
       if (rhs !== 'Nothing' && !isEmptySequence(rhs)) {
         const arg = parser.matchArguments('enclosure') ?? ['Nothing'];

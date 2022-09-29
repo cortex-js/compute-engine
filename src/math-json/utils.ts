@@ -457,7 +457,7 @@ export function isEmptySequence(expr: Expression | null): boolean {
 }
 
 export function missingIfEmpty(expr: Expression | null): Expression {
-  if (!expr || isEmptySequence(expr)) return ['Error', "'missing'"];
+  if (expr === null || isEmptySequence(expr)) return ['Error', "'missing'"];
   return expr;
 }
 

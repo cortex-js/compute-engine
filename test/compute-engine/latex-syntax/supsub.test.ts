@@ -1,6 +1,6 @@
 import { POWER } from '../../../src/math-json/utils';
 import { Expression } from '../../../src/math-json/math-json-format';
-import { parse, latex } from '../../utils';
+import { parse, latex, engine } from '../../utils';
 
 describe('POWER', () => {
   test('Power Invalid forms', () => {
@@ -36,6 +36,13 @@ describe('INVERSE FUNCTION', () => {
   });
 });
 
+describe('COMPLEX SYMBOLS', () => {
+  test('x_{\\mathrm{max}}', () =>
+    expect(
+      engine.parse('x_{\\mathrm{max}}').canonical.toJSON()
+    ).toMatchInlineSnapshot(`'"x_max"'`));
+});
+
 describe('SUPSUB', () => {
   test('Superscript', () => {
     expect(parse('2^2')).toMatchInlineSnapshot(`'["Power", 2, 2]'`);
@@ -69,14 +76,12 @@ describe('SUPSUB', () => {
     );
   });
   test('Subscript', () => {
-    expect(parse('x_0')).toMatchInlineSnapshot(
-      `'["Error", "'missing'", ["Latex", "'_0'"]]'`
-    );
+    expect(parse('x_0')).toMatchInlineSnapshot(`'["Subscript", "x", 0]'`);
     expect(parse('x^2_0')).toMatchInlineSnapshot(
-      `'["Error", "'missing'", ["Latex", "'^2_0'"]]'`
+      `'["Power", ["Subscript", "x", 0], 2]'`
     );
     expect(parse('x_0^2')).toMatchInlineSnapshot(
-      `'["Multiply", ["Power", "'missing'", ["Latex", "'_0'"]], 2]'`
+      `'["Power", ["Subscript", "x", 0], 2]'`
     );
     expect(parse('x_{n+1}')).toMatchInlineSnapshot(
       `'["Subscript", "x", ["Add", "n", 1]]'`
@@ -126,22 +131,22 @@ describe('SUPSUB', () => {
       `'["Subscript", ["Delimiter", ["Add", "x", 1]], ["Subtract", "n", 1]]'`
     );
     expect(parse('(x+1)^n_0')).toMatchInlineSnapshot(
-      `'["Error", "'missing'", ["Latex", "'^n_0'"]]'`
+      `'["Power", ["Subscript", ["Delimiter", ["Add", "x", 1]], 0], "n"]'`
     );
     expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       '[
-        "Sequence",
+        "Multiply",
         ["Power", "'missing'", ["Latex", "'^'"]],
         ["Subscript", "p", "q"],
-        ["Error", "'missing'", ["Latex", "'^n_0'"]]
+        ["Power", ["Subscript", ["Add", "x", 1], 0], "n"]
       ]'
     `); // @todo: nope...
     expect(parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(`
       '[
-        "Sequence",
+        "Multiply",
         ["Power", "'missing'", ["Latex", "'^'"]],
         ["Subscript", 12, 34],
-        ["Error", "'missing'", ["Latex", "'^n_0'"]]
+        ["Power", ["Subscript", ["Delimiter", ["Add", "x", 1]], 0], "n"]
       ]'
     `); // @todo: nope...
   });

@@ -1205,7 +1205,7 @@ export class _Parser implements Parser {
         else {
           const sub =
             this.matchRequiredLatexArgument() ?? this.matchStringArgument();
-          if (!sub) return this.error('missing', index);
+          if (sub === null) return this.error('missing', index);
 
           subscripts.push(sub);
         }
@@ -1215,7 +1215,7 @@ export class _Parser implements Parser {
           superscripts.push(this.error('syntax-error', subIndex));
         else {
           const sup = this.matchRequiredLatexArgument();
-          if (!sup) return this.error('missing', index);
+          if (sup === null) return this.error('missing', index);
           superscripts.push(sup);
         }
       }
