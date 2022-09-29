@@ -785,8 +785,8 @@ export class _Parser implements Parser {
 
   /**
    * - 'enclosure' : will look for an argument inside an enclosure (open/close fence)
-   * - 'implicit': either an expression inside a pair of `()`, or just a primary
-   *  (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
+   * - 'implicit': either an expression inside a pair of `()`, or just a product
+   *  (i.e. we interpret `\cos 2x + 1` as `\cos(2x) + 1`)
    */
   matchArguments(
     kind: undefined | '' | 'enclosure' | 'implicit'
@@ -817,7 +817,7 @@ export class _Parser implements Parser {
 
       // No group, but arguments without parentheses are allowed
       // Read a primary
-      const primary = this.matchPrimary();
+      const primary = this.matchExpression({ minPrec: 390 });
       if (primary !== null) return [primary];
       return null;
     }

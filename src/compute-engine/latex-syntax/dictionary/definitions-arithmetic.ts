@@ -529,7 +529,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Complex',
-    precedence: 274, // Same precedence as `Add`: used for correct wrapping
+    precedence: 274, // One less than precedence of `Add`: used for correct wrapping
     serialize: (serializer: Serializer, expr: Expression): string => {
       const re = machineValue(op(expr, 1));
       const im = machineValue(op(expr, 2));
