@@ -173,15 +173,12 @@ describe('STEFNOTCH #13', () => {
       '[
         "Greater",
         [
-          "Multiply",
+          "Sequence",
+          ["Divide", 2, ["Sqrt", "n"]],
           [
-            "Sequence",
-            ["Divide", 2, ["Sqrt", "n"]],
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\\\Leftrightarrow'"],
-              ["Latex", "'\\\\Leftrightarrow'"]
-            ]
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\\\Leftrightarrow'"],
+            ["Latex", "'\\\\Leftrightarrow'"]
           ],
           "n"
         ],
@@ -201,15 +198,12 @@ describe('STEFNOTCH #13', () => {
           [
             "To",
             [
-              "Multiply",
+              "Sequence",
+              ["Divide", 2, ["Sqrt", "n"]],
               [
-                "Sequence",
-                ["Divide", 2, ["Sqrt", "n"]],
-                [
-                  "Error",
-                  ["ErrorCode", "'unexpected-command'", "'\\\\Rightarrow'"],
-                  ["Latex", "'\\\\Rightarrow'"]
-                ]
+                "Error",
+                ["ErrorCode", "'unexpected-command'", "'\\\\Rightarrow'"],
+                ["Latex", "'\\\\Rightarrow'"]
               ],
               ["Subscript", "a", "n"]
             ],
@@ -227,15 +221,12 @@ describe('STEFNOTCH #13', () => {
         "Equivalent",
         3,
         [
-          "Multiply",
+          "Sequence",
+          5,
           [
-            "Sequence",
-            5,
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\\\mod'"],
-              ["Latex", "'\\\\mod'"]
-            ]
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\\\mod'"],
+            ["Latex", "'\\\\mod'"]
           ],
           7
         ]
@@ -247,25 +238,23 @@ describe('STEFNOTCH #13', () => {
     expect(parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}'))
       .toMatchInlineSnapshot(`
       '[
-        "Multiply",
+        "Sequence",
         [
           "Equal",
           "a",
           ["Error", "'expected-expression'", ["Latex", "'\\\\displaystyle'"]]
         ],
         [
+          "Subscript",
           [
-            "Subscript",
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\\\lim'"],
-              ["Latex", "'\\\\lim'"]
-            ],
-            ["To", "n", {num: "+Infinity"}]
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\\\lim'"],
+            ["Latex", "'\\\\lim'"]
           ],
-          ["Subscript", "a", "n"],
-          ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
-        ]
+          ["To", "n", {num: "+Infinity"}]
+        ],
+        ["Subscript", "a", "n"],
+        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
       ]'
     `);
   });

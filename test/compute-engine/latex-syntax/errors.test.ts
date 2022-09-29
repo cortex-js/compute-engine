@@ -213,7 +213,7 @@ check('Invalid delimiter: expected opening', () =>
 
 check('Invalid delimiter', () =>
   expect(engine.parse('1\\left\\alpha2\\right\\alpha')).toMatchInlineSnapshot(
-    `["Multiply",["Sequence",1,["Error",["ErrorCode","'unexpected-command'","'\\\\left'"],["Latex","'\\\\left'"]]],"Alpha",["Sequence",2,["Error",["ErrorCode","'unexpected-command'","'\\\\right'"],["Latex","'\\\\right'"]]],"Alpha"]`
+    `["Sequence",1,["Error",["ErrorCode","'unexpected-command'","'\\\\left'"],["Latex","'\\\\left'"]],"Alpha",2,["Error",["ErrorCode","'unexpected-command'","'\\\\right'"],["Latex","'\\\\right'"]],"Alpha"]`
   )
 );
 
@@ -291,7 +291,7 @@ check('VALID empty group', () =>
 
 check('Syntax error', () =>
   expect(engine.parse('x=2{{{')).toMatchInlineSnapshot(
-    `["Equal","x",[2,["Sequence",["Error","'expected-expression'",["Latex","''"]],["Error","'expected-closing-delimiter'",["Latex","'{'"]]],["Error","'expected-closing-delimiter'",["Latex","'{{'"]]]]`
+    `["Equal","x",["Sequence",2,["Sequence",["Error","'expected-expression'",["Latex","''"]],["Error","'expected-closing-delimiter'",["Latex","'{'"]]],["Error","'expected-closing-delimiter'",["Latex","'{{'"]]]]`
   )
 );
 

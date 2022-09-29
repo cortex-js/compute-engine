@@ -441,6 +441,7 @@ export function getSequence(expr: Expression | null): Expression[] | null {
   if (h === 'Delimiter') {
     expr = op(expr, 1);
     if (expr === null) return [];
+    if (head(expr) !== 'Sequence') return [expr];
   }
 
   h = head(expr);

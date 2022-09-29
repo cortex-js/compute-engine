@@ -3,8 +3,8 @@ import { check } from '../../utils';
 describe('STYLE - MATH MODE', () => {
   test('\\textcolor', () => {
     expect(check('x \\textcolor{red}{=} y')).toMatchInlineSnapshot(`
-      'box      = ["Multiply", ["Sequence", "x", ["Error", ["ErrorCode", "'unexpected-command'", "'\\textcolor'"], ["Latex", "'\\textcolor{red}{=}'"]]], "y"]
-      canonical = ["Multiply", "x", ["Error", ["ErrorCode", "'unexpected-command'", ["Error", ["ErrorCode", "'incompatible-domain'", ["Domain", ["Maybe", ["Sequence", "Anything"]]]], "'\\textcolor'"]], ["Latex", "'\\textcolor{red}{=}'"]], "y"]'
+      'box      = ["Sequence", "x", ["Error", ["ErrorCode", "'unexpected-command'", "'\\textcolor'"], ["Latex", "'\\textcolor{red}{=}'"]], "y"]
+      canonical = ["Sequence", "x", ["Error", ["ErrorCode", "'unexpected-command'", ["Error", ["ErrorCode", "'incompatible-domain'", ["Domain", ["Maybe", ["Sequence", "Anything"]]]], "'\\textcolor'"]], ["Latex", "'\\textcolor{red}{=}'"]], "y"]'
     `);
   });
 });
@@ -30,13 +30,13 @@ describe('STYLE - TEXT MODE', () => {
     `);
 
     expect(
-      check('a\\text{ black \\color{red}RED\\color{blue}BLUE} }b')
+      check('a\\text{ black \\color{red}RED\\color{blue}BLUE} b')
     ).toMatchInlineSnapshot(`'["Multiply", "a", "' black '"]'`);
-    expect(check('a\\text{ black \\textcolor{red}{RED} black} }b'))
-      .toMatchInlineSnapshot(`
-      'box      = ["Multiply", "a", ["Sequence", "''red''RED'' black \\textcolor black''", ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]], "b"]
-      canonical = ["Multiply", "a", ["Error", ["ErrorCode", "'incompatible-domain'", ["Domain", "Number"], ["Domain", "String"]], "''red''RED'' black \\textcolor black''"], ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]], "b"]'
-    `);
+    expect(
+      check('a\\text{ black \\textcolor{red}{RED} black} b')
+    ).toMatchInlineSnapshot(
+      `'["Sequence", "a", "''red''RED'' black \\textcolor black''", ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]], "b"]'`
+    );
 
     expect(
       check(

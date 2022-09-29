@@ -35,19 +35,15 @@ const ce = engine;
 // function
 ce.assume(['Element', 'f', 'Function']);
 
-console.log(ce.box(['Divide', undefined as unknown as any]).latex);
-
-// Should return error about missing argument, not empty sequence
-console.log(ce.parse('\\sqrt{}').toJSON());
-console.log(ce.parse('\\sqrt{}').canonical.toJSON());
-
 //
 // PROBLEMATIC EXPRESSIONS
 //
 
-// Doesn't parse??
-const z4 = ce.parse('\\mathrm{Symbol}(P, i)');
-console.log(z4.json);
+const z6 = ce.parse('^p_q{x+1}^n_0');
+console.log(z6.json);
+
+const z5 = ce.parse('0.(142857)');
+console.log(z5.json);
 
 // Mismatched argument domain
 const zz = ce.parse('\\sum_{n=1}^5nx').canonical;

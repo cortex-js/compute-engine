@@ -130,6 +130,7 @@ describe('SUPSUB', () => {
     );
     expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       '[
+        "Sequence",
         ["Power", "'missing'", ["Latex", "'^'"]],
         ["Subscript", "p", "q"],
         ["Error", "'missing'", ["Latex", "'^n_0'"]]
@@ -137,6 +138,7 @@ describe('SUPSUB', () => {
     `); // @todo: nope...
     expect(parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(`
       '[
+        "Sequence",
         ["Power", "'missing'", ["Latex", "'^'"]],
         ["Subscript", 12, 34],
         ["Error", "'missing'", ["Latex", "'^n_0'"]]

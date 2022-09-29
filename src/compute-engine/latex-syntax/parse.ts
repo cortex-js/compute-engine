@@ -26,6 +26,7 @@ import {
   applyAssociativeOperator,
   getSequence,
   head,
+  isEmptySequence,
   isValidSymbolName,
   machineValue,
   nops,
@@ -1092,16 +1093,11 @@ export class _Parser implements Parser {
       if (action === 'symbol') return sym;
 
       if (action === 'function') {
+        // Function application:
         // Is it followed by an argument list inside parentheses?
         const enclosure = this.matchEnclosure();
-        // If no arguments, return it as a symbol
-        if (enclosure === null) return sym;
-        if (head(enclosure) !== 'Delimiter') return null;
-        const enclosure1 = op(enclosure, 1);
-        if (!enclosure1 || symbol(enclosure1) === 'Nothing') return [sym];
-        const h = head(op(enclosure1, 1));
-        if (h === 'Sequence') return [sym, ...(ops(enclosure1) ?? [])];
-        return [sym, ...(ops(enclosure) ?? [])];
+        const seq = getSequence(enclosure);
+        return seq ? [sym, ...seq] : sym;
       }
     }
     // Backtrack
@@ -1433,27 +1429,27 @@ export class _Parser implements Parser {
     terminator: Terminator,
     lhs: Expression | null
   ): Expression | null {
-    if (lhs === null || head(lhs) === 'Error' || this.atTerminator(terminator))
+    if (
+      lhs === null ||
+      head(lhs) === 'Error' ||
+      symbol(lhs) === 'Nothing' ||
+      isEmptySequence(lhs) ||
+      this.atTerminator(terminator) ||
+      this.options.applyInvisibleOperator === null
+    )
       return null;
-
-    if (this.options.applyInvisibleOperator === null) return null;
 
     //
     // If the right hand side is an operator, no invisible operator to apply
     //
-    const opDefs = this.peekDefinitions('operator');
-    if (opDefs !== null) return null;
+    if (this.peekDefinitions('operator') !== null) return null;
 
     //
     // Capture a right hand side expression, if there is one
     //
     const start = this.index;
     const rhs = this.matchExpression({ ...terminator, minPrec: 390 });
-    if (
-      rhs === null ||
-      symbol(rhs) === 'Nothing' ||
-      (head(rhs) === 'Sequence' && nops(rhs) === 0)
-    ) {
+    if (rhs === null || symbol(rhs) === 'Nothing' || isEmptySequence(rhs)) {
       this.index = start;
       return null;
     }
@@ -1469,8 +1465,6 @@ export class _Parser implements Parser {
     if (typeof this.options.applyInvisibleOperator === 'function')
       return this.options.applyInvisibleOperator(this, lhs, rhs);
 
-    if (!this.computeEngine) return null;
-
     //
     // Is it a function application?
     //
@@ -1479,13 +1473,8 @@ export class _Parser implements Parser {
       const isFunction =
         this.options.parseUnknownSymbol(lhsSymbol, this) === 'function';
       if (isFunction) {
-        if (head(rhs) === 'Delimiter') {
-          const op1 = op(rhs, 1);
-          if (head(op1) === 'Sequence') return [lhsSymbol, ...(ops(op1) ?? [])];
-          if (op1 && symbol(op1) !== 'Nothing') return [lhsSymbol, op1];
-          return [lhsSymbol];
-        }
-        return lhsSymbol;
+        const seq = getSequence(rhs);
+        return seq ? [lhs, ...seq] : lhsSymbol;
       }
     }
 
@@ -1516,60 +1505,23 @@ export class _Parser implements Parser {
     // If the value of `lhs` is a number and the value of `rhs` is a number
     // (but they may not be literal)
     // -> Apply Invisible Multiply
-    if (symbol(rhs) === 'Nothing') return lhs;
-    const seq = getSequence(rhs);
-    if (seq) {
-      if (seq.length === 0)
-        return ['Sequence', lhs, this.error('expected-expression', start)];
-      return [lhsSymbol ?? lhs, ...seq];
+    // if (symbol(rhs) === 'Nothing') return lhs;
+    if (head(rhs) === 'Delimiter') {
+      if (head(op(rhs, 1)) === 'Sequence')
+        return [lhsSymbol ?? lhs, ...(ops(op(rhs, 1)) ?? [])];
+
+      if (!op(rhs, 1) || symbol(op(rhs, 1)) === 'Nothing')
+        return applyAssociativeOperator(
+          'Sequence',
+          lhs,
+          this.error('expected-expression', start)
+        );
+      // return ['Multiply', lhs, this.error('expected-expression', start)];
     }
+    if (head(rhs) === 'Sequence' || head(lhs) === 'Sequence')
+      return applyAssociativeOperator('Sequence', lhs, rhs);
+
     return applyAssociativeOperator('Multiply', lhs, rhs);
-
-    // ------
-
-    // const rhs = this.engine.box(rawRhs);
-
-    // // If the `lhs` is a symbol that has a function definition, do a
-    // // functional application
-    // const symbolName = symbol(rawLhs);
-    // if (symbolName) {
-    //   const def = this.engine.lookupFunctionName(symbolName);
-    //   if (def) {
-    //     let ops: BoxedExpression[] = [];
-    //     if (rhs.head === 'Delimiter') {
-    //       if (rhs.op1.head === 'Sequence') {
-    //         ops = [...rhs.op1.ops!];
-    //       } else ops = [rhs.op1];
-    //     } else ops = [rhs];
-    //     return [symbolName, ...ops.map((x) => x.json)];
-    //   }
-    // }
-
-    // const rhsName = symbol(rawRhs);
-    // if (rhsName) {
-    //   const def = this.engine.lookupSymbolDefinition(rhsName);
-    // }
-
-    // const lhs = this.engine.box(rawLhs);
-
-    // // Integer literal followed by a fraction -> Invisible Add
-    // if (lhs.isLiteral && lhs.isInteger && rhs.isLiteral) {
-    //   const [numer, denom] = rhs.rationalValue;
-    //   if (numer !== null && denom !== null) return ['Add', rawLhs, rawRhs];
-    // }
-
-    // // If the value of `lhs` is a number and the value of `rhs` is a number
-    // // (but they may not be literal)
-    // // -> Apply Invisible Multiply
-    // if (
-    //   (lhs.isMissing || lhs.symbol === 'Nothing' || lhs.isNumber) &&
-    //   (rhs.isMissing || rhs.symbol === 'Nothing' || rhs.isNumber)
-    // ) {
-    //   return applyAssociativeOperator('Multiply', rawLhs, rawRhs);
-    // }
-
-    this.index = start;
-    return null;
   }
 
   matchUnknownLatexCommand(): Expression | null {
