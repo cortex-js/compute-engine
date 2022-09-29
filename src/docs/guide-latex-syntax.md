@@ -12,18 +12,47 @@ The CortexJS Compute Engine manipulates MathJSON expressions. It can also
 convert LaTeX strings to MathJSON expressions (**parsing**) and output MathJSON
 expressions as LaTeX string (**serializing**).{.xl}
 
+**To parse a LaTeX string as MathJSON expression**, call the `ce.parse()` function.
+
+```javascript
+const ce = new ComputeEngine();
+
+console.log(ce.parse('5x + 1').json);
+// ➔  ["Add", ["Multiply", 5, "x"], 1]
+```
+
+
 **To input math using an interactive mathfield**, use [MathLive](/mathlive/).
 
-A MathLive `<mathfield>` element works like a `<textarea>` in HTML, but for
+A MathLive `<math-field>` DOM element works like a `<textarea>` in HTML, but for
 math. It provides its content as a LaTeX string or a MathJSON expression, ready
 to be used with the Compute Engine.
 
 {% readmore "/mathlive/" %} Read more about the MathLive <strong>mathfield
 element</strong> {% endreadmore %}
 
-**To parse a LaTeX string**, call the `ce.parse()` function.
 
-The Compute Engine will apply maximum effort to parse the input string as LaTeX,
+## The Compute Engine Natural Parser
+
+Unlike a programming language, mathematical notation is surprisingly ambiguous 
+and full of idiosyncrasies. Mathematicians frequently invent new notations,
+or have their own preferences to represent even common concepts.
+
+The Compute Engine Natural Parser interprets expressions using the notation 
+you are already familiar with. Write as you would on a blackboard, and 
+get back a semantic representation as an expression ready to be processed.
+
+| LaTeX| MathJSON |
+| :--- | :--- |
+| <big>$$ \sin 3t + \cos 2t $$ </big>`\sin 3t + \cos 2t`  |  `["Add", ["Sin", ["Multiply", 3, "t"]], ["Cos", ["Multiply", 2, "t"]]]` |
+| <big>$$ \int \frac{dx}{x} $$ </big>`\int \frac{dx}{x}`  |  `["Integrate", ["Divide", 1,  "x"], "x"]` |
+| <big>$$ 123.4(567) $$ </big>`123.4(567)`  |  `123.4(567)` |
+| <big>$$ 123.4\overline{567} $$ </big>`123.4\overline{567}` |  `123.4(567)` |
+| <big>$$ \|a+\|b\|+c\| $$ </big>`|a+|b|+c|`  |  `["Abs", ["Add", "a", ["Abs", "b"], "c"]]` |
+| <big>$$ \|\|a\|\|+\|b\| $$ </big>`||a||+|b|`  |  `["Add", ["Norm", "a"], ["Abs", "b"]]` |
+
+
+The Compute Engine Natural Parser will apply maximum effort to parse the input string as LaTeX,
 even if it includes errors. If errors are encountered, the resulting expression
 will have its `expr.isValid` property set to `false`. An `["Error"]` expression
 will be produced where a problem was encountered. To get the list of all the
@@ -33,18 +62,20 @@ errors in an expression, use `expr.errors` which will return an array of
 {% readmore "/compute-engine/guides/expressions/#errors" %} Read more about the
 **errors** that can be returned. {% endreadmore %}
 
+## Serializing to LaTeX
+
 **To serialize an expression to a LaTeX string**, read the `expr.latex`
 property.
 
 ```javascript
 const ce = new ComputeEngine();
 
-console.log(ce.parse('5x + 1').json);
-// ➔  ["Add", ["Multiply", 5, "x"], 1]
-
 console.log(ce.serialize(['Add', ['Power', 'x', 3], 2]));
 // ➔  "x^3 + 2"
 ```
+
+## Customizing Parsing and Serialization
+
 
 **To customize the behavior of `expr.parse()` and `expr.latex`** set the
 `ce.latexOptions` property.
@@ -81,7 +112,7 @@ console.log(ce.parse('\\frac{1}{7}').N().latex);
 // ➔ "0{,}14\\ldots"
 ```
 
-## Customizing the Decimal Marker
+### Customizing the Decimal Marker
 
 The world is
 [about evenly split](https://en.wikipedia.org/wiki/Decimal_separator#/media/File:DecimalSeparator.svg)
@@ -124,10 +155,11 @@ To extend the default dictionary, call `ComputeEngine.getLatexDictionary()`.
 To remove entries from the default dictionary, filter them.
 
 ```javascript
-// Remove the `PlusMinus` entry, and add one for the `\\smoll` command
 const ce = new ComputeEngine({
   latexDictionary: [
-    ...ComputeEngine.getLatexDictionary().filter(x => x.name !== 'PlusMinus),
+    // Remove the `PlusMinus` entry from the default dictionary...
+    ...ComputeEngine.getLatexDictionary().filter(x => x.name !== 'PlusMinus'),
+    // ... and add one for the `\smoll` command
     {
       trigger: ['\\smoll'],
       parse: (parser: Parser): Expression => {
@@ -142,5 +174,5 @@ const ce = new ComputeEngine({
 });
 
 console.log(ce.parse('\\smoll{1}{5}').json);
-// ➔ ["Rational", 1, 5]
+// ➔ ["Divide", 1, 5]
 ```
