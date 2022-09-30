@@ -462,7 +462,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   { name: PI, trigger: ['\\pi'] },
   { trigger: ['π'], parse: 'Pi' },
-  { name: EXPONENTIAL_E, trigger: ['e'], serialize: 'e' },
+  { name: EXPONENTIAL_E, trigger: ['e'], serialize: '\\exponentialE' },
   {
     trigger: ['\\mathrm', '<{>', 'e', '<}>'],
     parse: EXPONENTIAL_E,
@@ -614,26 +614,17 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     closeDelimiter: '\\rfloor',
   },
   {
-    trigger: '\\operatorname{floor}',
+    trigger: 'floor',
+    kind: 'function',
     parse: (parser) => {
       const arg = parser.matchArguments('enclosure');
-      return arg === null ? null : (['Floor', ...arg] as Expression);
+      return arg === null ? 'Floor' : (['Floor', ...arg] as Expression);
     },
   },
   {
     name: 'Gcd',
-    trigger: '\\operatorname{gcd}',
-    parse: (parser) => {
-      const arg = parser.matchArguments('enclosure');
-      return arg === null ? null : (['Gcd', ...arg] as Expression);
-    },
-    serialize: (serializer, expr): string =>
-      joinLatex([
-        '\\operatorname{gcd}',
-        '\\left(',
-        serializer.serialize(expr),
-        '\\right)',
-      ]),
+    trigger: 'gcd',
+    kind: 'function',
   },
   {
     name: 'Half',
@@ -641,15 +632,22 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Lg',
-    trigger: '\\ln_{10}',
+    serialize: (serializer, expr) =>
+      '\\ln_{10}' + serializer.wrapArguments(expr),
   },
   {
     name: 'Lb',
-    parse: '\\lb',
+    trigger: '\\lb',
+    parse: (parser) => {
+      const arg = parser.matchArguments('implicit');
+      if (arg === null) return null;
+      return ['Log', ...arg, 2] as Expression;
+    },
   },
   {
     name: 'Ln',
-    parse: '\\ln',
+    serialize: (serializer, expr): string =>
+      '\\ln' + serializer.wrapArguments(expr),
   },
   {
     name: 'Log',
@@ -659,7 +657,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       let base: number | null = null;
       if (parser.match('_')) {
         sub = parser.matchStringArgument() ?? parser.next();
-        base = Number.parseFloat(sub ?? '10') ?? null;
+        base = Number.parseFloat(sub ?? '10');
       }
       const arg = parser.matchArguments('implicit');
       if (arg === null) return null;
@@ -673,25 +671,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       if (base)
         return joinLatex([
           '\\ln_{',
-          serializer.serialize(base),
+          base.toString(),
           '}',
-          '\\left(',
-          serializer.serialize(op1(expr)),
-          '\\right)',
+          serializer.wrap(op1(expr)),
         ]);
-      return joinLatex([
-        '\\ln_',
-        '\\left(',
-        serializer.serialize(op1(expr)),
-        '\\right)',
-      ]);
+      return '\\ln' + serializer.wrapArguments(expr);
     },
   },
 
   {
     name: 'Lcm',
-    trigger: '\\operatorname{lcm}',
-    // @todo!
+    trigger: 'lcm',
+    kind: 'function',
   },
 
   {
@@ -814,8 +805,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Round',
-    trigger: '\\operatorname{round}',
-    // @todo parse args
+    trigger: 'round',
+    kind: 'function',
   },
   {
     name: 'Square',
@@ -832,8 +823,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Sign',
     // As per ISO 80000-2, "signum" is 'sgn'
-    trigger: '\\operatorname{sgn}',
-    // @todo parse args
+    trigger: 'sgn',
+    kind: 'function',
   },
   {
     name: 'Sqrt',

@@ -1,4 +1,4 @@
-import { Rule, Substitution } from './public';
+import { Rule } from './public';
 
 /**
  * A set of simplification rules.

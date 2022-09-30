@@ -3,6 +3,7 @@ import {
   NumberFormattingOptions,
   LatexString,
   SerializeLatexOptions,
+  FunctionEntry,
 } from './public';
 import {
   IndexedLatexDictionary,
@@ -137,7 +138,10 @@ export class Serializer {
   wrap(expr: Expression | null, prec?: number): string {
     if (expr === null) return '';
     if (prec === undefined) {
-      return '(' + this.serialize(expr) + ')';
+      return this.wrapString(
+        this.serialize(expr),
+        this.options.groupStyle(expr, this.level + 1)
+      );
     }
     if (
       typeof expr === 'number' ||
@@ -148,7 +152,11 @@ export class Serializer {
       return this.serialize(expr);
     }
     const name = head(expr);
-    if (typeof name === 'string' && name !== 'Delimiter') {
+    if (
+      typeof name === 'string' &&
+      name !== 'Delimiter' &&
+      name !== 'Subscript'
+    ) {
       const def = this.dictionary.name.get(name);
       if (
         def &&
@@ -173,7 +181,7 @@ export class Serializer {
     if (expr === null) return '';
     const exprStr = this.serialize(expr);
 
-    if (head(expr) === 'Delimiter') return exprStr;
+    if (head(expr) === 'Delimiter' && nops(expr) === 1) return exprStr;
 
     if (
       typeof expr !== 'number' &&
@@ -192,66 +200,79 @@ export class Serializer {
 
   wrapString(s: string, style: 'paren' | 'leftright' | 'big' | 'none'): string {
     if (style === 'none') return s;
+    if (style === 'leftright') return `\\left(${s}\\right)`;
+    if (style === 'big') return `\\Bigl(${s}\\Bigr)`;
     return '(' + s + ')';
   }
 
-  serializeSymbol(expr: Expression, def?: SymbolEntry): string {
+  wrapArguments(expr: Expression): string {
+    return this.wrapString(
+      (ops(expr) ?? []).map((x) => this.serialize(x)).join(', '),
+      this.options.applyFunctionStyle(expr, this.level)
+    );
+  }
+
+  serializeSymbol(expr: Expression, def?: SymbolEntry | FunctionEntry): string {
     const h = head(expr);
-    if (!h) {
-      console.assert(typeof expr === 'string' || isSymbolObject(expr));
-      // It's a symbol
-      if (typeof def?.serialize === 'string') {
-        return def.serialize;
-      } else if (typeof def?.serialize === 'function') {
-        return def.serialize(this, expr);
-      }
+    if (h) return this.serializeFunction(expr, def);
 
-      return sanitizeName(symbol(expr), 'upright.') ?? '';
-    }
-    //
-    // It's a function
-    //
+    console.assert(typeof expr === 'string' || isSymbolObject(expr));
+    // It's a symbol
+    if (typeof def?.serialize === 'string') return def.serialize;
+    else if (typeof def?.serialize === 'function')
+      return def.serialize(this, expr);
+
+    return sanitizeName(symbol(expr), 'upright.') ?? '';
+  }
+
+  serializeFunction(
+    expr: Expression,
+    def?: FunctionEntry | SymbolEntry
+  ): string {
+    const h = head(expr);
+    if (!h) return this.serializeSymbol(expr, def);
+
     const args = ops(expr) ?? [];
-    if (!def) {
-      // We don't know anything about this function
-      if (typeof h === 'string' && h.length > 0 && h[0] === '\\') {
-        //
-        // 1. Is it an unknown LaTeX command?
-        //
-        // This looks like a LaTeX command. Serialize
-        // the arguments as LaTeX arguments
-        const result: string[] = [h];
-        for (const arg of args) result.push(`{${this.serialize(arg)}}}`);
 
-        return joinLatex(result);
-      }
+    if (def) {
+      //
+      // 1. Is it a known function?
+      //
+      if (typeof def.serialize === 'function') return def.serialize(this, expr);
 
+      return joinLatex([
+        def.serialize ?? (h as string),
+        this.wrapArguments(expr),
+      ]);
+    }
+
+    // We don't know anything about this function
+    if (typeof h === 'string' && h.length > 0 && h[0] === '\\') {
       //
-      // 2. Is it an unknown function call?
+      // 2. Is it an unknown LaTeX command?
       //
-      // It's a function we don't know.
-      // Maybe it came from `promoteUnknownToken`
-      // Serialize the arguments as function arguments
-      if (typeof h === 'string')
-        return `${sanitizeName(h, 'upright.')}(${args
-          .map((x) => this.serialize(x))
-          .join(', ')})`;
-      return `\\operatorname{Apply}(${this.serialize(h)}, ${this.serialize([
-        'List',
-        ...args,
-      ])})`;
+      // This looks like a LaTeX command. Serialize the arguments as LaTeX arguments
+
+      return joinLatex([h, ...args.map((x) => `{${this.serialize(x)}}`)]);
     }
 
     //
-    // 3. Is it a known function?
+    // 2. Is it an unknown function call?
     //
-    if (typeof def.serialize === 'function') return def.serialize(this, expr);
+    // It's a function we don't know.
+    // Maybe it came from `promoteUnknownToken`
+    // Serialize the arguments as function arguments
+    if (typeof h === 'string')
+      return sanitizeName(h, 'upright.') + this.wrapArguments(expr);
 
     const style = this.options.applyFunctionStyle(expr, this.level);
-    if (style === 'none')
-      return joinLatex([def.serialize, ...args.map((x) => this.serialize(x))]);
-
-    return joinLatex([def.serialize, this.serialize(['Delimiter', ...args])]);
+    return (
+      '\\mathrm{Apply}' +
+      this.wrapString(
+        this.serialize(h) + ', ' + this.serialize(['List', ...args]),
+        style
+      )
+    );
   }
 
   serializeDictionary(dict: { [key: string]: Expression }): string {
@@ -287,6 +308,8 @@ export class Serializer {
         if (symbolName !== null) {
           const def = this.dictionary.name.get(symbolName);
           if (def?.kind === 'symbol') return this.serializeSymbol(expr, def);
+          if (def?.kind === 'function')
+            return this.serializeFunction(expr, def);
         }
 
         //
@@ -334,6 +357,8 @@ export class Serializer {
               return serializeOperator(this, expr, def);
 
             if (def.kind === 'symbol') return this.serializeSymbol(expr, def);
+            if (def.kind === 'function')
+              return this.serializeFunction(expr, def);
 
             return '';
           }

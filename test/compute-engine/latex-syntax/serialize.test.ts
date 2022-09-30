@@ -91,7 +91,7 @@ describe('LATEX SERIALIZING', () => {
 
     // Head as expression
     expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
-      `'\\operatorname{Apply}(g(f), \\lbrack x, 1, 0\\rbrack)'`
+      `'\\mathrm{Apply}(g(f), \\lbrack x, 1, 0\\rbrack)'`
     );
   });
 

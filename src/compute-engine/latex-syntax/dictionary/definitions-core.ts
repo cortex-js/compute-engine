@@ -138,6 +138,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   //
   {
     name: 'BaseForm',
+    kind: 'function',
     serialize: (serializer, expr) => {
       const radix = machineValue(op(expr, 2)) ?? NaN;
       if (isFinite(radix) && radix >= 2 && radix <= 36) {

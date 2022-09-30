@@ -333,6 +333,7 @@ function primary(
 ): [index: number, result: Expression | null] {
   // @todo:  atom | attributeref | subscription | slicing | call
 
+  // eslint-disable-next-line prefer-const
   let [i, e] = atom(s, start);
   if (e) return [i, e];
 

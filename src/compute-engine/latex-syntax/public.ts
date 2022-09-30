@@ -101,6 +101,8 @@ export type EnvironmentParseHandler = (
 
 export type SymbolParseHandler = (parser: Parser) => Expression | null;
 
+export type FunctionParseHandler = (parser: Parser) => Expression | null;
+
 export type PostfixParseHandler = (
   parser: Parser,
   lhs: Expression
@@ -124,6 +126,7 @@ export type MatchfixParseHandler = (
 
 export type ParseHandler =
   | SymbolParseHandler
+  | FunctionParseHandler
   | EnvironmentParseHandler
   | PostfixParseHandler
   | PrefixParseHandler
@@ -265,6 +268,12 @@ export type SymbolEntry = BaseEntry & {
   /** Used for appropriate wrapping (i.e. when to surround it with parens) */
   precedence?: number;
 
+  parse: Expression | SymbolParseHandler;
+};
+
+export type FunctionEntry = BaseEntry & {
+  kind: 'function';
+
   /**
    * Indicate if this symbol can be followed by arguments.
    *
@@ -292,7 +301,7 @@ export type SymbolEntry = BaseEntry & {
    */
   // arguments?: 'group' | 'implicit' | '';
 
-  parse: Expression | SymbolParseHandler;
+  parse: Expression | FunctionParseHandler;
 };
 
 /**
@@ -310,6 +319,7 @@ export type LatexDictionaryEntry =
   | PostfixEntry
   | PrefixEntry
   | SymbolEntry
+  | FunctionEntry
   | EnvironmentEntry;
 
 /** @internal */
@@ -317,6 +327,12 @@ export function isSymbolEntry(
   entry: LatexDictionaryEntry
 ): entry is SymbolEntry {
   return !('kind' in entry) || entry.kind === 'symbol';
+}
+/** @internal */
+export function isFunctionEntry(
+  entry: LatexDictionaryEntry
+): entry is FunctionEntry {
+  return !('kind' in entry) || entry.kind === 'function';
 }
 /** @internal */
 export function isMatchfixEntry(
@@ -619,6 +635,11 @@ export interface Serializer {
   serialize: (expr: Expression | null) => string;
 
   wrapString(s: string, style: 'paren' | 'leftright' | 'big' | 'none'): string;
+
+  /** A string with the arguments of expr fenced appropriately and separated by
+   * commas.
+   */
+  wrapArguments(expr: Expression): string;
 
   /** Add a group fence around the expression if it is
    * an operator of precedence less than or equal to `prec`.

@@ -8,6 +8,7 @@ import {
   Delimiter,
   Terminator,
   Parser,
+  FunctionEntry,
 } from './public';
 import { tokenize, tokensToString } from './tokenizer';
 import {
@@ -385,6 +386,7 @@ export class _Parser implements Parser {
   }
 
   /** Return all the definitions that potentially match the tokens ahead */
+  peekDefinitions(kind: 'function'): [FunctionEntry, number][] | null;
   peekDefinitions(kind: 'symbol'): [SymbolEntry, number][] | null;
   peekDefinitions(kind: 'postfix'): [PostfixEntry, number][] | null;
   peekDefinitions(kind: 'infix'): [InfixEntry, number][] | null;
@@ -393,10 +395,26 @@ export class _Parser implements Parser {
     kind: 'operator'
   ): [InfixEntry | PrefixEntry | PostfixEntry, number][] | null;
   peekDefinitions(
-    kind: 'symbol' | 'infix' | 'prefix' | 'postfix' | 'operator'
-  ): [IndexedLatexDictionaryEntry, number][] | null {
+    kind: 'function' | 'symbol' | 'infix' | 'prefix' | 'postfix' | 'operator'
+  ): [FunctionEntry | IndexedLatexDictionaryEntry, number][] | null {
     let defs: (undefined | IndexedLatexDictionaryEntry[])[];
-    if (kind === 'operator') {
+    if (kind === 'function') {
+      const start = this.index;
+      if (
+        this.match('\\operatorname') ||
+        this.match('\\mathrm') ||
+        this.match('\\mathit')
+      ) {
+        const fn = this.matchStringArgument();
+        const n = this.index - start;
+        this.index = start;
+        if (fn !== null && this._dictionary.function.has(fn))
+          return this._dictionary.function.get(fn)!.map((x) => [x, n]);
+
+        return null;
+      }
+      return null;
+    } else if (kind === 'operator') {
       defs = this.lookAhead().map(
         (x, n) =>
           this._dictionary.infix[n]?.get(x) ??
@@ -1140,6 +1158,27 @@ export class _Parser implements Parser {
   matchSymbol(): Expression | null {
     const start = this.index;
 
+    let sym: string | null = null;
+
+    //
+    // Is there a definition for this as a function?
+    // (a string wrapped in `\\mathrm`, etc...) with some optional arguments
+    //
+    const fnDefs = this.peekDefinitions('function');
+    if (fnDefs) {
+      for (const [def, tokenCount] of fnDefs) {
+        this.index = start + tokenCount;
+        if (typeof def.parse === 'function') {
+          const result = def.parse(this);
+          if (result) return result;
+        } else {
+          // Is it followed by an argument list inside parentheses?
+          const seq = getSequence(this.matchEnclosure());
+          return seq ? [def.name!, ...seq] : def.name!;
+        }
+      }
+    }
+
     //
     // Is there a custom parser for this symbol?
     //
@@ -1157,8 +1196,6 @@ export class _Parser implements Parser {
 
     // No custom parser worked. Backtrack.
     this.index = start;
-
-    let sym: string | null = null;
 
     if (
       this.match('\\operatorname') ||

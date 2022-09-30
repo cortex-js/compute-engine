@@ -13,12 +13,14 @@ import {
   PrefixParseHandler,
   EnvironmentParseHandler,
   SymbolParseHandler,
+  FunctionParseHandler,
   isMatchfixEntry,
   isInfixEntry,
   isSymbolEntry,
   isEnvironmentEntry,
   isPostfixEntry,
   isPrefixEntry,
+  isFunctionEntry,
 } from '../public';
 import { joinLatex, tokenize, tokensToString } from '../tokenizer';
 import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
@@ -50,6 +52,12 @@ export type SymbolEntry = CommonEntry & {
   precedence: number;
 
   parse: SymbolParseHandler;
+};
+
+export type FunctionEntry = CommonEntry & {
+  kind: 'function';
+
+  parse: FunctionParseHandler;
 };
 
 export type MatchfixEntry = CommonEntry & {
@@ -89,6 +97,7 @@ export type EnvironmentEntry = CommonEntry & {
 };
 
 export type IndexedLatexDictionaryEntry =
+  | FunctionEntry
   | SymbolEntry
   | MatchfixEntry
   | InfixEntry
@@ -106,6 +115,7 @@ export type IndexedLatexDictionary = {
 
   // Mapping from token triggers of a given length to dictionary entry.
   // Definition can share triggers, so the entry is an array
+  function: Map<string, FunctionEntry[]>;
   symbol: (Map<LatexString, SymbolEntry[]> | null)[];
   prefix: (Map<LatexString, PrefixEntry[]> | null)[];
   infix: (Map<LatexString, InfixEntry[]> | null)[];
@@ -149,6 +159,7 @@ export function indexLatexDictionary(
   const result: IndexedLatexDictionary = {
     lookahead: 1,
     name: new Map(),
+    function: new Map(),
     symbol: [],
     infix: [],
     prefix: [],
@@ -211,7 +222,16 @@ export function indexLatexDictionary(
       const n = triggerLength(trigger);
       result.lookahead = Math.max(result.lookahead, n);
 
-      if (indexedEntry.kind === 'symbol') {
+      if (indexedEntry.kind === 'function') {
+        // If no entries of this kind and length yet, create a map for it
+        if (!result.function.has(triggerString))
+          result.function.set(triggerString, [indexedEntry]);
+        else
+          result.function.set(triggerString, [
+            ...result.function.get(triggerString)!,
+            indexedEntry,
+          ]);
+      } else if (indexedEntry.kind === 'symbol') {
         // If no entries of this kind and length yet, create a map for it
         if (result.symbol[n] === undefined) result.symbol[n] = new Map();
         const list = result.symbol[n]!;
@@ -302,10 +322,6 @@ function makeIndexedEntry(
     return [envName, result as IndexedLatexDictionaryEntry];
   }
 
-  //
-  // 3. Other definitions (not matchfix, not environment)
-  //
-
   // If the trigger is a string, it's a LaTeX string which
   // is a shortcut for an array of LaTeX tokens assigned to `symbol`
   // This is convenient to define common long symbols, such as `\operator{gcd}`...
@@ -314,6 +330,29 @@ function makeIndexedEntry(
       ? tokenize(entry.trigger, [])
       : entry.trigger;
   const triggerString = trigger ? tokensToString(trigger) : '';
+
+  //
+  // 3. Function
+  //
+  if (result.kind === 'function' && isFunctionEntry(entry)) {
+    // Default serializer for functions
+    result.serialize = entry.serialize;
+    if (triggerString && !entry.serialize)
+      result.serialize = (serializer, expr) =>
+        `\\mathrm{${triggerString}}${serializer.wrapArguments(expr)}`;
+
+    result.parse = entry.parse as FunctionParseHandler;
+    if (!result.parse && entry.name)
+      result.parse = ((parser) => {
+        const arg = parser.matchArguments('enclosure');
+        return arg === null ? entry.name : ([entry.name, ...arg] as Expression);
+      }) as FunctionParseHandler;
+    return [triggerString, result as IndexedLatexDictionaryEntry];
+  }
+
+  //
+  // 4. Other definitions (not matchfix, not environment)
+  //
 
   if (typeof entry.trigger === 'string') {
     console.assert(
@@ -650,37 +689,3 @@ export const DEFAULT_LATEX_DICTIONARY: {
   symbols: DEFINITIONS_SYMBOLS,
   trigonometry: DEFINITIONS_TRIGONOMETRY,
 };
-
-// {
-//     const defaultDic = getDefaultLatexDictionary();
-//     let i = 0;
-//     for (const x of Object.keys(FUNCTIONS)) {
-//         if (x.startsWith('\\') && !hasDef(defaultDic, x)) {
-//             i++;
-//             console.log(i + ' No def for function ' + x);
-//         }
-//     }
-//     for (const x of Object.keys(MATH_SYMBOLS)) {
-//         if (x.startsWith('\\') && !hasDef(defaultDic, x)) {
-//             i++;
-//             console.log(i + ' No def for symbol ' + x);
-//         }
-//     }
-// }
-
-// {
-//     const defaultLatexDic = indexLatexDictionary(
-//         getDefaultLatexDictionary('all'),
-//         () => {
-//             return;
-//         }
-//     );
-//     const defaultDic = getDefaultDictionary('all');
-
-//     let i = 0;
-//     Array.from(defaultLatexDic.name.keys()).forEach((x) => {
-//         if (!findInDictionary(defaultDic, x)) {
-//             console.log(Number(i++).toString() + ' No entry for ' + x);
-//         }
-//     });
-// }
