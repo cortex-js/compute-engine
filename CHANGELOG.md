@@ -18,6 +18,7 @@
 - Added `FixedPoint`, `Loop`, `Product`, `Sum`, `Break`, `Continue`, `Block`,
   `If`, `Let`, `Set`, `Function`, `Apply`, `Return`
 - Added `Min`, `Max`, `Clamp`
+- Parsing of `\sum`, `\prod`, `\int`.
 - Added parsing of log functions, `\lb`, `\ln`, `\ln_{10}`, `\ln_2`, etc...
 - Added
   `expr.`subexpressions`, `expr.getSubexpressions()`, `expr.errors`, `expr.symbols`, `expr.isValid`.

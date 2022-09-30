@@ -1110,7 +1110,9 @@ function validateSignature(
         !ops[i].symbol?.startsWith('_') &&
         !opsDomain[i].isCompatible(ce.domain(expectedArgs[i]))
       ) {
-        console.log(opsDomain[i].isCompatible(ce.domain(expectedArgs[i])));
+        // if (!opsDomain[i].isCompatible(ce.domain(expectedArgs[i]))) {
+        //   debugger;
+        // }
         newOps.push(
           ce.error(
             ['incompatible-domain', ce.domain(expectedArgs[i], opsDomain[i])],

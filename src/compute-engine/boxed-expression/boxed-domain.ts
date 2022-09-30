@@ -477,14 +477,14 @@ export function isSubdomainOf(
   if (rhsLiteral) {
     const lhsConstructor = lhs[0];
     if (lhsConstructor === 'Domain') {
-      debugger;
+      // debugger;
     }
 
     if (lhsConstructor === 'Function') return rhsLiteral === 'Function';
     if (lhsConstructor === 'Dictionary') return rhsLiteral === 'Dictionary';
     if (lhsConstructor === 'List') return rhsLiteral === 'List';
     if (lhsConstructor === 'Tuple') {
-      debugger;
+      // debugger;
       return rhsLiteral === 'Tuple';
     }
     if (lhsConstructor === 'Intersection') {
