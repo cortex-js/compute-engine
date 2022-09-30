@@ -13,23 +13,30 @@ describe('INTEGRAL', () => {
 
   test('simple with d', () => {
     expect(json('\\int\\sin x \\mathrm{d} x+1 = 2')).toMatchInlineSnapshot(
-      `['Equal', ['Add', ['Integrate', ['Lambda', ['Sin', '_']], ['Single', 'x']], 1], 2]`
+      `['Equal', ['Add', ['Integrate', ['Lambda', ['Add', ['Sin', '_']]], 'x'], 1], 2]`
     );
   });
   test('simple with mathrm', () => {
     expect(json('\\int\\sin x dx+1 = 2')).toMatchInlineSnapshot(
-      `['Equal', ['Add', ['Integrate', ['Lambda', ['Sin', '_']], ['Single', 'x']], 1], 2]`
+      `['Equal', ['Add', ['Integrate', ['Lambda', ['Add', ['Sin', '_']]], 'x'], 1], 2]`
     );
   });
+
+  test('simple with \\alpha', () => {
+    expect(json('\\int\\alpha d\\alpha+1 = 2')).toMatchInlineSnapshot(
+      `['Equal', ['Add', ['Integrate', ['Lambda', '_'], 'Alpha'], 1], 2]`
+    );
+  });
+
   test('simple with mathrm with spacing', () => {
     expect(json('\\int\\sin x \\, \\mathrm{d}x+1 = 2')).toMatchInlineSnapshot(
-      `['Equal', ['Add', ['Integrate', ['Lambda', ['Multiply', ['Sin', '_'], ['HorizontalSpacing', 3]]], ['Single', 'x']], 1], 2]`
+      `['Equal', ['Add', ['Integrate', ['Lambda', ['Add', ['Sin', ['Multiply', '_', ['HorizontalSpacing', 3]]]]], 'x'], 1], 2]`
     );
   });
 
   test('simple with lower bound', () => {
     expect(json('\\int_0\\sin x \\, \\mathrm{d}x+1 = 2')).toMatchInlineSnapshot(
-      `['Equal', ['Add', ['Integrate', ['Lambda', ['Multiply', ['Sin', '_'], ['HorizontalSpacing', 3]]], ['Single', 'x']], 1], 2]`
+      `['Equal', ['Add', ['Integrate', ['Lambda', ['Add', ['Sin', ['Multiply', '_', ['HorizontalSpacing', 3]]]]], 'x'], 1], 2]`
     );
   });
 
@@ -37,14 +44,14 @@ describe('INTEGRAL', () => {
     expect(
       json('\\int^\\infty\\sin x \\, \\mathrm{d}x+1 = 2')
     ).toMatchInlineSnapshot(
-      `['Equal', ['Add', ['Integrate', ['Lambda', ['Multiply', ['Sin', '_'], ['HorizontalSpacing', 3]]], ['Triple', 'x', 1, {num: '+Infinity'}]], 1], 2]`
+      `['Equal', ['Add', ['Integrate', ['Lambda', ['Add', ['Sin', ['Multiply', '_', ['HorizontalSpacing', 3]]]]], ['Triple', 'x', 'Nothing', {num: '+Infinity'}]], 1], 2]`
     );
   });
   test('simple with lower and upper bound', () => {
     expect(
       json('\\int^\\infty_0\\sin x \\, \\mathrm{d}x+1 = 2')
     ).toMatchInlineSnapshot(
-      `['Equal', ['Add', ['Integrate', ['Lambda', ['Multiply', ['Sin', '_'], ['HorizontalSpacing', 3]]], ['Triple', 'x', 0, {num: '+Infinity'}]], 1], 2]`
+      `['Equal', ['Add', ['Integrate', ['Lambda', ['Add', ['Sin', ['Multiply', '_', ['HorizontalSpacing', 3]]]]], ['Triple', 'x', 0, {num: '+Infinity'}]], 1], 2]`
     );
   });
 
@@ -80,7 +87,7 @@ describe('INTEGRAL', () => {
       `['Equal', ['Integrate', ['Lambda', ['Negate', '_']], ['Triple', 'x', 0, {num: '+Infinity'}]], 2]`
     ));
 
-  test.only('with dx in delimiter', () =>
+  test('with dx in delimiter', () =>
     expect(json('\\int^\\infty_0(3x+x^2dx) = 2')).toMatchInlineSnapshot(
       `['Equal', ['Integrate', ['Lambda', ['Delimiter', ['Add', ['Multiply', 3, '_'], ['Power', '_', 2]]]], ['Triple', 'x', 0, {num: '+Infinity'}]], 2]`
     ));

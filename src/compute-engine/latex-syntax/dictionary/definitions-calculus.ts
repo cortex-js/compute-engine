@@ -15,10 +15,11 @@ import { joinLatex } from '../tokenizer';
 // Also DIN 1304 (symbols in formulas) and DIN 1338 (typesetting of formulas)
 
 // @todo: double integrals
-function parseIntegral(head: string) {
+function parseIntegral(command: string) {
   return (parser: Parser): Expression | null => {
-    // There could be some superscript and subscripts
     parser.skipSpace();
+
+    // Are there some superscript or subscripts?
 
     let sup: Expression | null = null;
     let sub: Expression | null = null;
@@ -30,36 +31,61 @@ function parseIntegral(head: string) {
     if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;
     if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
 
-    // An integral expression is of the form `\int \sin(x)dx`
+    // An integral expression is of the form `\int \sin(x)dx`: `\sin(x)` is
+    // the `fn` and `x` is the index.
 
     // eslint-disable-next-line prefer-const
     let [fn, index] = parseIntegralBody(parser);
 
-    if (fn && index) fn = ['Lambda', subs(fn, { [index]: '_' })];
-
-    if (!fn) return [head];
-
-    if (sup)
-      return [
-        head,
-        fn ?? 'Nothing',
-        ['Tuple', index ?? 'Nothing', sub ?? 1, sup],
-      ];
-
-    if (sub) return [head, fn ?? 'Nothing', ['Tuple', index ?? 'Nothing', sub]];
-
-    if (index) return [head, fn ?? 'Nothing', ['Tuple', index]];
-
-    if (fn) return [head, fn];
-
-    return [head];
+    if (fn && !index && head(fn) === 'Add') {
+      // If the function is an addition, it could appear in any of the terms,
+      // e.g. `\int \sin xdx + 1`
+      const newOp: Expression[] = [];
+      const rest: Expression[] = [];
+      for (const op of ops(fn) ?? []) {
+        if (index) rest.push(op);
+        else {
+          let op2: Expression | null;
+          [op2, index] = parseIntegralBodyExpression(op);
+          newOp.push(op2 ?? op);
+        }
+      }
+      if (index !== null && rest.length > 0) {
+        return [
+          'Add',
+          makeIntegral(command, ['Add', ...newOp], index, sub, sup),
+          ...rest,
+        ];
+      }
+    }
+    return makeIntegral(command, fn, index, sub, sup);
   };
 }
 
+function makeIntegral(
+  command: string,
+  fn: Expression | null,
+  index: string | null,
+  sub: Expression | null,
+  sup: Expression | null
+): Expression {
+  if (fn && index) fn = ['Lambda', subs(fn, { [index]: '_' })];
+
+  if (fn && !sup && !sub && !index) return [command, fn];
+
+  fn ??= 'Nothing';
+
+  if (sup)
+    return [command, fn, ['Tuple', index ?? 'Nothing', sub ?? 'Nothing', sup]];
+  if (sub) return [command, fn, ['Tuple', index ?? 'Nothing', sub]];
+  if (index) return [command, fn, index];
+  return [command];
+}
+
+/**  Parse an expression (up to a relational operator, or the boundary) */
 function parseIntegralBody(
   parser: Parser
-): [body: Expression, index: string | null] {
-  // Parse an expression (up to a relational operator, or the boundary)
+): [body: Expression | null, index: string | null] {
   const start = parser.index;
 
   let found = false;
@@ -72,11 +98,7 @@ function parseIntegralBody(
     },
   });
 
-  let index: string | null = '';
-  if (fn && found) {
-    parser.skipSpace();
-    index = parser.matchVariable();
-  } else {
+  if (!found) {
     // Try again, but looking for a simple "d"
     parser.index = start;
     fn = parser.matchExpression({
@@ -86,19 +108,13 @@ function parseIntegralBody(
         return found;
       },
     });
-    if (fn && found) {
-      parser.skipSpace();
-      index = parser.matchVariable();
-    }
   }
 
-  if (!found && fn) {
-    // We didn't get a `\mathrm{d}x` or `dx` at the same level as the expression
-    // but perhaps it was in a subexpression, e.g. `\frac{dx}{x}`
-    [fn, index] = parseIntegralBodyExpression(fn);
-  }
+  // If we didn't get a `\mathrm{d}x` or `dx` at the same level as the
+  // expression, perhaps it was in a subexpression, e.g. `\frac{dx}{x}`
+  if (fn && !found) return parseIntegralBodyExpression(fn);
 
-  return [fn ?? 'Nothing', index];
+  return [fn, found ? symbol(parser.matchSymbol()) : null];
 }
 
 function parseIntegralBodyExpression(
@@ -107,30 +123,13 @@ function parseIntegralBodyExpression(
   const h = head(expr);
   const op1 = op(expr, 1);
   if (!op1) return [expr, null];
-  if (h === 'Delimiter') {
-    const [fn2, index2] = parseIntegralBodyExpression(op1);
-    if (index2) {
-      if (!fn2) return [null, index2];
-      return [['Delimiter', fn2, ...ops(expr)!.slice(1)], index2];
-    }
-  } else if (h === 'Add') {
+
+  if (h === 'Multiply') {
+    // Handle the case `3xdx` where the `dx` is the last term of a
+    // multiplication (in a subexpression, i.e. `\sin 3xdx`)
     const args = ops(expr);
-    if (args && args.length > 0) {
-      const [fn2, index2] = parseIntegralBodyExpression(args[args.length - 1]);
-      if (index2) {
-        if (fn2) return [['Add', ...args.slice(0, -1), fn2], index2];
-        if (args.length > 2) return [['Add', ...args.slice(0, -1)], index2];
-        if (args.length > 2) return [args[0], index2];
-      }
-    }
-  } else if (h === 'Negate') {
-    const [fn2, index2] = parseIntegralBodyExpression(op1);
-    if (!fn2) return [null, index2];
-    if (index2) return [['Negate', fn2], index2];
-  } else if (h === 'Multiply') {
-    const args = ops(expr);
-    if (args && args.length > 0) {
-      if (args[args.length - 2] === 'd') {
+    if (args && args.length > 1) {
+      if (symbol(args[args.length - 2]) === 'd') {
         if (args.length === 2) return [null, symbol(args[1])];
         if (args.length === 3) return [args[0], symbol(args[2])];
         return [
@@ -139,9 +138,37 @@ function parseIntegralBodyExpression(
         ];
       }
     }
+  } else if (h === 'Delimiter') {
+    const [fn2, index] = parseIntegralBodyExpression(op1);
+    if (index) {
+      if (!fn2) return [null, index];
+      return [['Delimiter', fn2, ...ops(expr)!.slice(1)], index];
+    }
+  } else if (h === 'Add') {
+    const args = ops(expr);
+    if (args && args.length > 0) {
+      const [fn2, index] = parseIntegralBodyExpression(args[args.length - 1]);
+      if (index) {
+        if (fn2) return [['Add', ...args.slice(0, -1), fn2], index];
+        if (args.length > 2) return [['Add', ...args.slice(0, -1)], index];
+        if (args.length > 2) return [args[0], index];
+      }
+    }
+  } else if (h === 'Negate') {
+    const [fn2, index] = parseIntegralBodyExpression(op1);
+    if (index) return [fn2 ? ['Negate', fn2] : null, index];
   } else if (h === 'Divide') {
-    const [fn2, index2] = parseIntegralBodyExpression(op1);
-    if (index2) return [['Divide', fn2 ?? 1, op(expr, 2)!], index2];
+    const [fn2, index] = parseIntegralBodyExpression(op1);
+    if (index) return [['Divide', fn2 ?? 1, op(expr, 2)!], index];
+  } else {
+    // Some other function, e.g. trig function, etc...
+    const args = ops(expr);
+    if (args?.length === 1) {
+      //If it has a single argument, we'll check if it includes an index
+      // e.g. \sin 2xdx
+      const [arg2, index] = parseIntegralBodyExpression(args[0]);
+      if (index) return [[head(expr), arg2] as Expression, index];
+    }
   }
 
   return [expr, null];
@@ -153,27 +180,27 @@ function serializeIntegral(command: string) {
 
     let arg = op(expr, 2);
     const h = head(arg);
-    if (h !== 'Tuple' && h !== 'Triple' && h !== 'Pair' && h !== 'Single')
+    let index: string | null = null;
+    if (h !== 'Tuple' && h !== 'Triple' && h !== 'Pair' && h !== 'Single') {
+      index = symbol(arg);
       arg = null;
-
-    const index = op(arg, 1) ?? 'x';
+    } else index = symbol(op(arg, 1)) ?? 'x';
 
     let fn = op(expr, 1);
     if (head(fn) === 'Lambda' && op(fn, 1))
-      fn = subs(op(fn, 1)!, { _: index, _1: index });
+      fn = subs(op(fn, 1)!, { _: index ?? 'x', _1: index ?? 'x' });
 
     if (!arg) {
-      if (!op(expr, 2)) return joinLatex([command, serializer.serialize(fn)]);
+      if (!index) return joinLatex([command, serializer.serialize(fn)]);
       return joinLatex([
         command,
-        '_{',
-        serializer.serialize(op(expr, 2)),
-        '}',
         serializer.serialize(fn),
+        '\\mathrm{d}',
+        index,
       ]);
     }
 
-    let sub = [serializer.serialize(op(arg, 2))];
+    let sub = arg ? [serializer.serialize(op(arg, 2))] : [];
 
     if (sub.length > 0) sub = ['_{', ...sub, '}'];
 
@@ -185,7 +212,7 @@ function serializeIntegral(command: string) {
       ...sup,
       ...sub,
       serializer.serialize(fn),
-      ...(symbol(index) !== 'Nothing'
+      ...(index && symbol(index) !== 'Nothing'
         ? ['\\,\\mathrm{d}', serializer.serialize(index)]
         : []),
     ]);
@@ -197,6 +224,10 @@ export const DEFINITIONS_CALCULUS: LatexDictionary = [
     trigger: ['\\int'],
     parse: parseIntegral('Integrate'),
     serialize: serializeIntegral('\\int'),
+  },
+  {
+    trigger: ['\\iint'],
+    parse: parseIntegral('Integrate'),
   },
   {
     name: 'CircularIntegrate',

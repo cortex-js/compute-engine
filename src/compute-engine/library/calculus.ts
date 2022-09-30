@@ -15,7 +15,7 @@ export const CALCULUS_LIBRARY: SymbolTable[] = [
             'Anything',
             // [
             //   'Maybe',
-            'Tuple',
+            ['Union', 'Tuple', 'Symbol'],
             // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
             // ],
             'Number',
