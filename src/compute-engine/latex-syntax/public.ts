@@ -773,8 +773,6 @@ export interface Parser {
     lhs: Expression | null
   ): Expression | null;
 
-  matchVariable(): string | null;
-
   /** If the next tokens correspond to an optional LaTeX argument,
    * enclosed with `[` and `]` return the content of the argument
    * as an expression and advance the index past the closing `]`.
@@ -783,6 +781,7 @@ export interface Parser {
    */
 
   matchOptionalLatexArgument(): Expression | null;
+
   /**
    * Match a required LaTeX argument:
    * - either enclosed in `{}`
@@ -847,6 +846,13 @@ export interface Parser {
    * If not a primary, return `null` and do not advance the index.
    */
   matchPrimary(): Expression | null;
+
+  /**
+   * A symbol can be:
+   * - a single-letter variable: `x`
+   * - a single LaTeX command: `\pi`
+   */
+  matchSymbol(): Expression | null;
 
   /**
    * Parse an expression:

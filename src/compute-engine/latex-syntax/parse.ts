@@ -1122,13 +1122,14 @@ export class _Parser implements Parser {
 
   /**
    * Match a single variable name. It can be:
-   * - a single letter: `x`, `i`
-   * - a multi-letter variable: `\mathrm{speed}`
+   * - a symbol
+   * - a simple multi-letter identifier: `\mathrm{speed}`
+   * - a complex multi-letter identifier: `\alpha_12` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
    * - a command: `\alpha`  @todo
    * - a complex name such as `\alpha_12` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}` (see serializer.ts) @todo:
-   * @todo: matchSymbol should use matchVariable
+   * @todo: matchSymbol should use matchIdentifier
    */
-  matchVariable(): string | null {
+  matchIdentifier(): string | null {
     let result: string | null = null;
     if (
       this.match('\\operatorname') ||
@@ -1147,19 +1148,16 @@ export class _Parser implements Parser {
   }
 
   /**
-   * A symbol can be:
-   * - a constant: `\pi`
-   * - a single-letter variable: `x`
-   * - a multi-letter variable: `\mathit{speed}` or `\mathrm{speed}`
+   * A function is a function identifier followed by arguments
    * - a function with explicit arguments `f(x)`
-   * - a function with implicit arguments: `\cos x`
-   * - a command: `\frac{2}{3}`
+   * - a function with explicit arguments `\mathrm{floor}(x)`
+   * - a function name: `\mathrm{floor}`
+   * - a function with implicit arguments: `\cos x` (via a  custom parser)
+   *
    */
-  matchSymbol(): Expression | null {
+
+  matchFunction(): Expression | null {
     const start = this.index;
-
-    let sym: string | null = null;
-
     //
     // Is there a definition for this as a function?
     // (a string wrapped in `\\mathrm`, etc...) with some optional arguments
@@ -1179,6 +1177,58 @@ export class _Parser implements Parser {
       }
     }
 
+    this.index = start;
+
+    //
+    // No known function definition matched
+    // Capture a function name
+    //
+
+    let fn: string | null = null;
+    if (
+      this.match('\\operatorname') ||
+      this.match('\\mathit') ||
+      this.match('\\mathrm')
+    ) {
+      fn = this.matchStringArgument();
+      if (fn === null) return this.error('expected-string-argument', start);
+      if (!isValidSymbolName(fn))
+        return this.error('invalid-symbol-name', start);
+    }
+
+    // If we could not capture a multi-char symbol yet, use the next token
+    if (!fn) {
+      fn = this.next();
+      if (!isValidSymbolName(fn)) fn = null;
+    }
+
+    //
+    // Is it a generic multi-char function identifier?
+    //
+    if (fn) {
+      if (this.options.parseUnknownSymbol?.(fn, this) === 'function') {
+        // Function application:
+        // Is it followed by an argument list inside parentheses?
+        const enclosure = this.matchEnclosure();
+        const seq = getSequence(enclosure);
+        return seq ? [fn, ...seq] : fn;
+      }
+    }
+
+    this.index = start;
+    return null;
+  }
+
+  /**
+   * A symbol can be:
+   * - a single-letter variable: `x`
+   * - a single LaTeX command: `\pi`
+   */
+  matchSymbol(): Expression | null {
+    const start = this.index;
+
+    let sym: string | null = null;
+
     //
     // Is there a custom parser for this symbol?
     //
@@ -1186,7 +1236,7 @@ export class _Parser implements Parser {
     if (defs) {
       for (const [def, tokenCount] of defs) {
         this.index = start + tokenCount;
-        // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling parseUnknownSymbol() or somethinglike it (parseUnknownSymbol() may aggressively return 'symbol'...))
+        // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling parseUnknownSymbol() or somethinglike it (parseUnknownSymbol() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
         if (typeof def.parse === 'function') {
           const result = def.parse(this);
           if (result) return result;
@@ -1208,91 +1258,20 @@ export class _Parser implements Parser {
         return this.error('invalid-symbol-name', start);
     }
 
-    //
-    // Is this an unexpected operator?
-    // (this is an error handling code path)
-    //
-    if (!sym) {
-      let opDefs = this.peekDefinitions('operator');
-      if (opDefs) {
-        opDefs = this.peekDefinitions('postfix');
-        if (opDefs) {
-          const [def, n] = opDefs[0] as [PostfixEntry, number];
-          this.index += n;
-          if (typeof def.parse === 'function') {
-            const result = def.parse(this, this.error('missing', start));
-            if (result) return result;
-          }
-          if (def.name) return [def.name, this.error('missing', start)];
-          return this.error('unexpected-operator', start);
-        }
-
-        // Check prefix before infix, to catch `-` as a single missing operand
-        opDefs = this.peekDefinitions('prefix');
-        if (opDefs) {
-          const [def, n] = opDefs[0] as [PrefixEntry, number];
-          this.index += n;
-          if (typeof def.parse === 'function') {
-            const result = def.parse(this, { minPrec: 0 });
-            if (result) return result;
-          }
-          if (def.name)
-            return [
-              def.name,
-              this.matchExpression() ?? this.error('missing', start),
-            ];
-          return this.error('unexpected-operator', start);
-        }
-
-        opDefs = this.peekDefinitions('infix');
-        if (opDefs) {
-          const [def, n] = opDefs[0] as [InfixEntry, number];
-          this.index += n;
-          if (typeof def.parse === 'function') {
-            const result = def.parse(
-              this,
-              { minPrec: 0 },
-              this.error('missing', start)
-            );
-            if (result) return result;
-          }
-          if (def.name)
-            return [
-              def.name,
-              this.error('missing', start),
-              this.matchExpression() ?? this.error('missing', start),
-            ];
-          return this.error('unexpected-operator', start);
-        }
-      }
-    }
-
     // If we could not capture a symbol yet, simply use the next token.
     if (!sym) sym = this.next();
 
-    if (sym && isValidSymbolName(sym)) {
-      //
-      // This is a symbol with no custom parsing.
-      //
+    // Are we OK with it as a symbol?
+    if (
+      sym &&
+      isValidSymbolName(sym) &&
+      this.options.parseUnknownSymbol?.(sym, this) === 'symbol'
+    )
+      return sym;
 
-      // Are we OK with it as either a symbol or  function?
-      const action = this.options.parseUnknownSymbol?.(sym, this);
-
-      if (action === 'symbol') return sym;
-
-      if (action === 'function') {
-        // Function application:
-        // Is it followed by an argument list inside parentheses?
-        const enclosure = this.matchEnclosure();
-        const seq = getSequence(enclosure);
-        return seq ? [sym, ...seq] : sym;
-      }
-    }
     // Backtrack
     this.index = start;
-
-    // Not a symbol, maybe an unknown LaTeX command?
-    return this.matchUnknownLatexCommand();
+    return null;
   }
 
   matchOptionalLatexArgument(): Expression | null {
@@ -1718,29 +1697,85 @@ export class _Parser implements Parser {
     return applyAssociativeOperator('Multiply', lhs, rhs);
   }
 
-  matchUnknownLatexCommand(): Expression | null {
+  matchUnexpectedLatexCommand(): Expression | null {
+    const start = this.index;
+
+    //
+    // Is this an unexpected operator?
+    // (this is an error handling code path)
+    //
+    let opDefs = this.peekDefinitions('operator');
+    if (opDefs) {
+      opDefs = this.peekDefinitions('postfix');
+      if (opDefs) {
+        const [def, n] = opDefs[0] as [PostfixEntry, number];
+        this.index += n;
+        if (typeof def.parse === 'function') {
+          const result = def.parse(this, this.error('missing', start));
+          if (result) return result;
+        }
+        if (def.name) return [def.name, this.error('missing', start)];
+        return this.error('unexpected-operator', start);
+      }
+
+      // Check prefix before infix, to catch `-` as a single missing operand
+      opDefs = this.peekDefinitions('prefix');
+      if (opDefs) {
+        const [def, n] = opDefs[0] as [PrefixEntry, number];
+        this.index += n;
+        if (typeof def.parse === 'function') {
+          const result = def.parse(this, { minPrec: 0 });
+          if (result) return result;
+        }
+        if (def.name)
+          return [
+            def.name,
+            this.matchExpression() ?? this.error('missing', start),
+          ];
+        return this.error('unexpected-operator', start);
+      }
+
+      opDefs = this.peekDefinitions('infix');
+      if (opDefs) {
+        const [def, n] = opDefs[0] as [InfixEntry, number];
+        this.index += n;
+        if (typeof def.parse === 'function') {
+          const result = def.parse(
+            this,
+            { minPrec: 0 },
+            this.error('missing', start)
+          );
+          if (result) return result;
+        }
+        if (def.name)
+          return [
+            def.name,
+            this.error('missing', start),
+            this.matchExpression() ?? this.error('missing', start),
+          ];
+        return this.error('unexpected-operator', start);
+      }
+    }
+
     const command = this.peek;
-
-    const index = this.index;
-
     if (!command || command[0] !== '\\') return null;
 
     this.next();
 
-    // Capture potential optional and required arguments
-    // This is a lazy capture, to handle the case `\foo[\blah[12]\blarg]`.
-    // However, a `[` (or `{`) could be e.g. inside a string and this
-    // would fail to parse.
-    // Since we're already in an error situation, though, probably OK.
     this.skipSpaceTokens();
 
     if (command === '\\end') {
       const name = this.matchStringArgument();
-      if (name === null) return this.error('expected-environment-name', index);
+      if (name === null) return this.error('expected-environment-name', start);
 
-      return this.error(['unbalanced-environment', { str: name }], index);
+      return this.error(['unbalanced-environment', { str: name }], start);
     }
 
+    // Capture potential optional and required LaTeX arguments
+    // This is a lazy capture, to handle the case `\foo[\blah[12]\blarg]`.
+    // However, a `[` (or `{`) could be e.g. inside a string and this
+    // would fail to parse.
+    // Since we're already in an error situation, though, probably OK.
     while (this.match('[')) {
       let level = 0;
       while (!this.atEnd && level === 0 && this.peek !== ']') {
@@ -1760,7 +1795,8 @@ export class _Parser implements Parser {
       }
       this.match('<}>');
     }
-    return this.error(['unexpected-command', { str: command }], index);
+
+    return this.error(['unexpected-command', { str: command }], start);
   }
 
   /**
@@ -1839,7 +1875,7 @@ export class _Parser implements Parser {
     if (result === null && this.matchAll(this._notANumberTokens))
       result = { num: 'NaN' };
 
-    if (result === null) result = this.matchSymbol();
+    if (result === null) result = this.matchFunction() ?? this.matchSymbol();
 
     //
     // 6. Are there postfix operators ?
@@ -1860,7 +1896,12 @@ export class _Parser implements Parser {
     }
 
     //
-    // 7. Are there superscript or subfix operators?
+    // 7. We've encountered an unexpected LaTeX command
+    //
+    if (result === null) result = this.matchUnexpectedLatexCommand();
+
+    //
+    // 8. Are there superscript or subfix operators?
     //
     if (result !== null) result = this.matchSupsub(result);
 
