@@ -1371,7 +1371,7 @@ export class _Parser implements Parser {
         const arg: Expression = [
           'Subscript',
           result,
-          subscripts.length === 1 ? subscripts[0] : ['Sequence', ...subscripts],
+          subscripts.length === 1 ? subscripts[0] : ['List', ...subscripts],
         ];
         for (const def of defs) {
           if (typeof def.parse === 'function')
@@ -1393,7 +1393,7 @@ export class _Parser implements Parser {
           result!,
           superscripts.length === 1
             ? superscripts[0]
-            : ['Sequence', ...superscripts],
+            : ['List', ...superscripts],
         ];
         for (const def of defs) {
           if (typeof def.parse === 'function')

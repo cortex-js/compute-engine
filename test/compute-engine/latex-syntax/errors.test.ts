@@ -219,13 +219,13 @@ check('Invalid delimiter', () =>
 
 check('Invalid double superscript', () =>
   expect(engine.parse('x^1^2')).toMatchInlineSnapshot(
-    `["Power","x",["Sequence",1,2]]`
+    `["Power","x",["List",1,2]]`
   )
 );
 
 check('Double superscript: invalid domain', () =>
   expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(
-    `["Power","x",1,["Error","'unexpected-argument'",2]]`
+    `["Power","x",["List",1,2]]`
   )
 );
 

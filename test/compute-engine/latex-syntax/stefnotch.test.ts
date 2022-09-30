@@ -135,7 +135,7 @@ describe('STEFNOTCH #13', () => {
 
   test('2/ x_{1,2}=1,2', () => {
     expect(parse('x_{1,2}=1,2')).toMatch(
-      '["Sequence", ["Equal", ["Subscript", "x", ["Sequence", 1, 2]], 1], 2]'
+      '["List", ["Equal", ["Subscript", "x", ["List", 1, 2]], 1], 2]'
     );
   });
 

@@ -40,7 +40,7 @@ function parseSequence(prec: number) {
     console.assert(lhs !== null);
     if (terminator.minPrec >= prec) return null;
 
-    const result: Expression = ['Sequence', lhs];
+    const result: Expression = ['List', lhs];
     let done = false;
     while (!done) {
       done = true;
@@ -80,7 +80,7 @@ function parseSequence2(prec: number) {
 
     const result: Expression = [
       'Sequence',
-      ...(getSequence(lhs) ?? ['Sequence', lhs]),
+      ...(getSequence(lhs) ?? ['List', lhs]),
     ];
 
     while (true) {
@@ -99,7 +99,7 @@ function parseSequence2(prec: number) {
         result.push('Nothing');
         break;
       }
-      result.push(...(getSequence(rhs) ?? ['Sequence', rhs]));
+      result.push(...(getSequence(rhs) ?? ['List', rhs]));
       parser.skipSpace();
       if (!parser.match(',')) break;
     }
@@ -185,27 +185,33 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const argCount = nops(expr);
       if (argCount === 0) return '';
 
+      const style = serializer.options.groupStyle(expr, serializer.level + 1);
+
       const arg1 = op(expr, 1);
+
       if (argCount === 1)
-        return `\\left( ${serializer.serialize(arg1)} \\right)`;
+        return serializer.wrapString(serializer.serialize(arg1), style);
 
       let sep = '';
-      let open = '\\left(';
-      let close = '\\right)';
+      let open = '';
+      let close = '';
 
-      if (argCount === 2) sep = stringValue(op(expr, 2)) ?? '';
-      else if (argCount === 3) {
-        open = stringValue(op(expr, 2)) ?? '';
-        close = stringValue(op(expr, 3)) ?? '';
-      } else {
-        open = stringValue(op(expr, 2)) ?? '';
-        sep = stringValue(op(expr, 3)) ?? '';
-        close = stringValue(op(expr, 4)) ?? '';
+      if (argCount > 1) {
+        const op2 = stringValue(op(expr, 2)) ?? '';
+        open = op2[0] ?? '';
+        close = op2[1] ?? '';
+        sep = op2[2] ?? '';
       }
-      if (sep && head(arg1) === 'Sequence') {
-        return `${open} ${serializeSequence(sep)(serializer, arg1)} ${close}`;
-      }
-      return `${open} ${serializer.serialize(arg1)} ${close}`;
+
+      const body =
+        head(arg1) === 'List'
+          ? serializeSequence(sep)(serializer, arg1)
+          : serializer.serialize(arg1);
+
+      serializer.wrapString(body, style, stringValue(op(expr, 2)) ?? undefined);
+
+      if (!open || !close) return serializer.wrapString(body, style);
+      return `${open} ${body} ${close}`;
     },
   },
   {
@@ -291,7 +297,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     closeDelimiter: ']',
     parse: (_parser, lhs) => {
       if (lhs === null) return ['List'];
-      if (head(lhs) !== 'Sequence') return ['List', lhs];
+      if (head(lhs) !== 'Sequence' && head(lhs) !== 'List')
+        return ['List', lhs];
       return ['List', ...(ops(lhs) ?? [])];
     },
     serialize: (serializer: Serializer, expr: Expression): string => {
@@ -309,9 +316,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: (_parser, body) => {
       // @todo: does this really need to be done here? Sequence(Sequence(...))
       if (body === null) return null;
-      if (head(body) === 'Sequence') {
+      if (head(body) === 'Sequence' || head(body) === 'List') {
         if (nops(body) === 0) return ['Delimiter'];
-        return ['Delimiter', ['Sequence', ...(ops(body) ?? [])]];
+        return ['Delimiter', ['List', ...(ops(body) ?? [])]];
       }
 
       return ['Delimiter', body];

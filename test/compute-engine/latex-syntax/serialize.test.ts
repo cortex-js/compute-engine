@@ -54,10 +54,10 @@ describe('LATEX SERIALIZING', () => {
       `'["Negate", ["Multiply", 1, 2]]'`
     );
     expect(parse('-123,456.789,012')).toMatchInlineSnapshot(
-      `'["Sequence", -123, 456.789, 12]'`
+      `'["List", -123, 456.789, 12]'`
     );
     expect(parse('-1,23456.7890,12')).toMatchInlineSnapshot(
-      `'["Sequence", -1, 23456.789, 12]'`
+      `'["List", -1, 23456.789, 12]'`
     );
   });
   // Leave space between pi and x

@@ -62,7 +62,7 @@ describe('SUPSUB', () => {
     expect(parse('2^{10}')).toMatchInlineSnapshot(`'["Power", 2, 10]'`);
     expect(parse('2^{-2}')).toMatchInlineSnapshot(`'["Power", 2, -2]'`);
     expect(parse('2^3^4')).toMatchInlineSnapshot(
-      `'["Power", 2, ["Sequence", 3, 4]]'`
+      `'["Power", 2, ["List", 3, 4]]'`
     ); // @todo: unclear what the right answer is... (and it's invalid LaTeX)
     expect(parse('2^{3^4}')).toMatchInlineSnapshot(
       `'["Power", 2, ["Power", 3, 4]]'`
@@ -87,7 +87,7 @@ describe('SUPSUB', () => {
       `'["Subscript", "x", ["Add", "n", 1]]'`
     );
     expect(parse('x_n_{+1}')).toMatchInlineSnapshot(
-      `'["Subscript", "x", ["Sequence", "n", 1]]'`
+      `'["Subscript", "x", ["List", "n", 1]]'`
     );
   });
   test('Pre-sup, pre-sub', () => {

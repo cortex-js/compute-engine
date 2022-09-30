@@ -19,91 +19,87 @@ describe('SEQUENCES AND DELIMITERS', () => {
     );
     // Sequence with empty element
     expect(parse('(a,,b)')).toMatchInlineSnapshot(
-      `'["Delimiter", ["Sequence", "a", "Nothing", "b"]]'`
+      `'["Delimiter", ["List", "a", "Nothing", "b"]]'`
     );
   });
   test('Groups', () => {
     expect(parse('(a, b, c)')).toMatchInlineSnapshot(
-      `'["Delimiter", ["Sequence", "a", "b", "c"]]'`
+      `'["Delimiter", ["List", "a", "b", "c"]]'`
     );
     // @todo
     expect(parse('(a, b; c, d, ;; n ,, m)')).toMatchInlineSnapshot(`
       '[
         "Delimiter",
         [
-          "Sequence",
-          "a",
-          "b",
-          "c",
-          "d",
+          "List",
+          "List",
+          ["List", "a", "b"],
+          "List",
           [
-            "Sequence",
-            "Sequence",
-            ["Error", "'missing'", ["Latex", "';'"]],
-            "Sequence",
-            ["Error", "'missing'", ["Latex", "';'"]],
-            "n",
-            "Nothing",
-            "m"
+            "List",
+            "c",
+            "d",
+            [
+              "Sequence",
+              "List",
+              ["Error", "'missing'", ["Latex", "';'"]],
+              "List",
+              ["Error", "'missing'", ["Latex", "';'"]],
+              "List",
+              ["List", "n", "Nothing", "m"]
+            ]
           ]
         ]
       ]'
     `);
     expect(parse('(a, (b, c))')).toMatchInlineSnapshot(
-      `'["Delimiter", ["Sequence", "a", ["Delimiter", ["Sequence", "b", "c"]]]]'`
+      `'["Delimiter", ["List", "a", ["Delimiter", ["List", "b", "c"]]]]'`
     );
     expect(parse('(a, (b; c))')).toMatchInlineSnapshot(`
       '[
         "Delimiter",
-        [
-          "Sequence",
-          "a",
-          ["Delimiter", ["Sequence", "Sequence", "b", "Sequence", "c"]]
-        ]
+        ["List", "a", ["Delimiter", ["List", "List", "b", "List", "c"]]]
       ]'
     `);
   });
   test('Sequences', () => {
-    expect(parse('a, b, c')).toMatchInlineSnapshot(
-      `'["Sequence", "a", "b", "c"]'`
-    );
+    expect(parse('a, b, c')).toMatchInlineSnapshot(`'["List", "a", "b", "c"]'`);
     // Sequence with missing element
     expect(parse('a,, c')).toMatchInlineSnapshot(
-      `'["Sequence", "a", "Nothing", "c"]'`
+      `'["List", "a", "Nothing", "c"]'`
     );
     // Sequence with missing final element
     expect(parse('a,c,')).toMatchInlineSnapshot(
-      `'["Sequence", "a", "c", "Nothing"]'`
+      `'["List", "a", "c", "Nothing"]'`
     );
     // Sequence with missing initial element
     expect(parse(',c,b')).toMatchInlineSnapshot(
-      `'["Sequence", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]'`
+      `'["List", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]'`
     );
   });
   test('Subsequences', () => {
     expect(parse('a,b;c,d,e;f;g,h')).toMatchInlineSnapshot(`
       '[
         "Sequence",
-        "a",
-        "b",
-        "c",
-        "d",
-        "ExponentialE",
-        "Sequence",
+        "List",
+        ["List", "a", "b"],
+        "List",
+        ["List", "c", "d", "ExponentialE"],
+        "List",
         "f",
-        "g",
-        "h"
+        "List",
+        ["List", "g", "h"]
       ]'
     `);
     // @todo
     expect(parse(';;a;')).toMatchInlineSnapshot(`
       '[
         "Sequence",
-        "Sequence",
+        "List",
         ["Error", "'missing'", ["Latex", "';'"]],
-        "Sequence",
+        "List",
         ["Error", "'missing'", ["Latex", "';'"]],
-        "Sequence",
+        "List",
         "a",
         "Nothing"
       ]'

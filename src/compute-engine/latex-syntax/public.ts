@@ -634,7 +634,11 @@ export interface Serializer {
   /** Output a LaTeX string representing the expression */
   serialize: (expr: Expression | null) => string;
 
-  wrapString(s: string, style: 'paren' | 'leftright' | 'big' | 'none'): string;
+  wrapString(
+    s: string,
+    style: 'paren' | 'leftright' | 'big' | 'none',
+    fence?: string
+  ): string;
 
   /** A string with the arguments of expr fenced appropriately and separated by
    * commas.
@@ -787,7 +791,7 @@ export interface Parser {
    * - either enclosed in `{}`
    * - or a single token.
    *
-   * Return null if an argument was not found
+   * Return null if no argument was found
    * Return `['Sequence']` if an empty argument `{}` was found
    */
   matchRequiredLatexArgument(): Expression | null;

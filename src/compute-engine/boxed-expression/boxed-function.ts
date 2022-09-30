@@ -220,6 +220,9 @@ export class BoxedFunction extends AbstractBoxedExpression {
     this._def = undefined;
     const ce = this.engine;
 
+    // Flatten the sequence, canonicalize
+    this._ops = flattenSequence(this._ops.map((x) => x.canonical));
+
     // Is the head an expression?
     // For example, `['InverseFunction', 'Sin']`
     if (typeof this._head !== 'string') {
@@ -242,7 +245,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
       // match the one in our dictionary, make sure to update it.
       this._head = this._def.name;
 
-      // Apply Nothing, Sequence, Symbol
+      // Apply Sequence, Symbol
       this._ops = normalizeList(this._ops, this._def.hold);
 
       this._ops =
@@ -622,7 +625,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     const def = this.functionDefinition;
     if (!def) {
       const tail = this._ops.map((x) => x.canonical);
-      if (tail.every((x, i) => this._ops[i] === x)) {
+      if (
+        tail.length === this._ops.length &&
+        tail.every((x, i) => this._ops[i] === x)
+      ) {
+        // We were already canonical! No need to create a new expression
         this._isCanonical = true;
         return this;
       }
@@ -656,7 +663,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     if (tail.length > 1 && def.commutative === true) tail = tail.sort(order);
 
-    if (tail.every((x, i) => this._ops[i] === x)) {
+    if (
+      tail.length === this._ops.length &&
+      tail.every((x, i) => this._ops[i] === x)
+    ) {
       this._isCanonical = true;
       return this;
     }
@@ -958,6 +968,16 @@ export function holdMap(
   return result;
 }
 
+function flattenSequence(xs: BoxedExpression[]): BoxedExpression[] {
+  const ys: BoxedExpression[] = [];
+  for (const x of xs) {
+    if (x.head === 'Sequence') {
+      if (x.ops) ys.push(...x.ops);
+    } else ys.push(x);
+  }
+  return ys;
+}
+
 // Like `HoldMap` but preserves `Hold` and `ReleaseHold`
 export function canonicalHoldMap(
   head: string,
@@ -1017,7 +1037,7 @@ function normalizeList(
   xs: BoxedExpression[],
   skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most'
 ): BoxedExpression[] {
-  // Remove 'Nothing' from ops and fold 'Sequence'
+  // Fold 'Sequence'
   const result: BoxedExpression[] = [];
   for (let i = 0; i < xs.length; i++) {
     if (applicable(skip, xs.length - 1, i)) {

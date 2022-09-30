@@ -51,37 +51,30 @@ describe('MATCHFIX synonyms', () => {
   //    -> etc...
 
   test('(a, b, c)', () =>
-    expect(check(`(a, b, c)`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      canonical = ["Sequence", "a", "b", "c"]'
-    `));
+    expect(check(`(a, b, c)`)).toMatchInlineSnapshot(
+      `'["Delimiter", ["List", "a", "b", "c"]]'`
+    ));
 
   test('\\left(a, b, c\\right)', () =>
-    expect(check(`\\left(a, b, c\\right)`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      canonical = ["Sequence", "a", "b", "c"]'
-    `));
+    expect(check(`\\left(a, b, c\\right)`)).toMatchInlineSnapshot(
+      `'["Delimiter", ["List", "a", "b", "c"]]'`
+    ));
   test('\\bigl(a, b, c\\bigr)', () =>
-    expect(check(`\\bigl(a, b, c\\bigr)`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      canonical = ["Sequence", "a", "b", "c"]'
-    `));
+    expect(check(`\\bigl(a, b, c\\bigr)`)).toMatchInlineSnapshot(
+      `'["Delimiter", ["List", "a", "b", "c"]]'`
+    ));
   test('\\big(a, b, c\\big)', () =>
-    expect(check(`\\big(a, b, c\\big)`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      canonical = ["Sequence", "a", "b", "c"]'
-    `));
+    expect(check(`\\big(a, b, c\\big)`)).toMatchInlineSnapshot(
+      `'["Delimiter", ["List", "a", "b", "c"]]'`
+    ));
   test('\\lparen a, b, c\\rparen', () =>
-    expect(check(`\\lparen a, b, c\\rparen`)).toMatchInlineSnapshot(`
-      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      canonical = ["Sequence", "a", "b", "c"]'
-    `));
+    expect(check(`\\lparen a, b, c\\rparen`)).toMatchInlineSnapshot(
+      `'["Delimiter", ["List", "a", "b", "c"]]'`
+    ));
   test('\\left\\lparen a, b, c\\right\\rparen', () =>
-    expect(check(`\\left\\lparen a, b, c\\right\\rparen`))
-      .toMatchInlineSnapshot(`
-      'box      = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      canonical = ["Sequence", "a", "b", "c"]'
-    `));
+    expect(
+      check(`\\left\\lparen a, b, c\\right\\rparen`)
+    ).toMatchInlineSnapshot(`'["Delimiter", ["List", "a", "b", "c"]]'`));
 });
 
 describe('MATCHFIX abs and norm', () => {

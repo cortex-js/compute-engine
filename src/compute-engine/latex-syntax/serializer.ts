@@ -198,11 +198,28 @@ export class Serializer {
     return exprStr;
   }
 
-  wrapString(s: string, style: 'paren' | 'leftright' | 'big' | 'none'): string {
+  wrapString(
+    s: string,
+    style: 'paren' | 'leftright' | 'big' | 'none',
+    fence?: string
+  ): string {
     if (style === 'none') return s;
-    if (style === 'leftright') return `\\left(${s}\\right)`;
-    if (style === 'big') return `\\Bigl(${s}\\Bigr)`;
-    return '(' + s + ')';
+    const openFence = fence?.[0] ?? '(';
+    const closeFence = fence?.[1] ?? ')';
+
+    if ((openFence === '.' || closeFence === '.') && style === 'paren')
+      style = 'leftright';
+
+    if (style === 'leftright')
+      return `${openFence === '.' ? '' : `\\left(${openFence}`}${s}${
+        closeFence === '.' ? '' : `\\right(${closeFence}`
+      })`;
+    if (style === 'big')
+      return `${openFence === '.' ? '' : `\\Bigl(${openFence}`}${s}${
+        closeFence === '.' ? '' : `\\Bigr(${closeFence}`
+      })`;
+
+    return openFence + s + closeFence;
   }
 
   wrapArguments(expr: Expression): string {
