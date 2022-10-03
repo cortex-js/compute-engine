@@ -30,13 +30,14 @@ import { getSubexpressions, getSymbols } from './utils';
  */
 
 export abstract class AbstractBoxedExpression implements BoxedExpression {
-  abstract get json(): Expression;
-  abstract get head(): BoxedExpression | string;
+  abstract readonly hash: number;
+  abstract readonly json: Expression;
+  abstract readonly head: BoxedExpression | string;
+  abstract get isCanonical(): boolean;
+  abstract set isCanonical(_val: boolean);
+
   abstract isSame(rhs: BoxedExpression): boolean;
   abstract isEqual(rhs: BoxedExpression): boolean;
-  abstract get isCanonical();
-  abstract set isCanonical(_val: boolean);
-  abstract get hash(): number;
   abstract match(
     rhs: BoxedExpression,
     options?: PatternMatchOption
@@ -49,7 +50,7 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
    */
   protected _latex?: string;
 
-  protected _wikidata?: string;
+  protected _wikidata: string | undefined;
 
   constructor(ce: IComputeEngine, metadata?: Metadata) {
     this.engine = ce;
@@ -57,85 +58,62 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     if (metadata?.wikidata !== undefined) this._wikidata = metadata.wikidata;
   }
 
-  /** Object.toJSON(), called by JSON.Stringify */
-  toJSON(): string {
-    return JSON.stringify(this.json);
+  /** `Object.valueOf()`: return a primitive value for the object
+   *
+   */
+  valueOf(): number | string | boolean {
+    if (this.symbol === 'True') return true;
+    if (this.symbol === 'False') return false;
+    return (
+      this.asFloat ?? this.string ?? this.symbol ?? JSON.stringify(this.json)
+    );
   }
+
   /** Object.toString() */
   toString(): string {
-    return this.latex;
+    return String(this.valueOf());
   }
-  /** Object.valueOf(): return a primitive value for the object */
-  valueOf(): number | string | [number, number] {
-    const [n, d] = this.rationalValue;
-    if (n !== null && d !== null) return [n, d];
-    return this.asFloat ?? this.string ?? this.symbol ?? this.toString();
+
+  [Symbol.toPrimitive](
+    hint: 'number' | 'string' | 'default'
+  ): number | string | null {
+    if (hint === 'string') return this.toString();
+    if (hint === 'number') {
+      const v = this.valueOf();
+      return typeof v === 'number' ? v : null;
+    }
+    return this.toString();
   }
+
+  /** Called by `JSON.stringify()` when serializing to json */
+  toJSON(): Expression {
+    return this.json;
+  }
+
   /** Object.is() */
   is(rhs: any): boolean {
     if (rhs === null || rhs === undefined) return false;
     return this.isSame(this.engine.box(rhs));
   }
 
-  isCompatible(
-    _dom: BoxedDomain | DomainLiteral,
-    _kind?: DomainCompatibility
-  ): boolean {
-    return false;
-  }
-
-  has(_v: string | string[]): boolean {
-    return false;
-  }
-
-  get description(): string[] {
-    return [];
-  }
-
-  get url(): string {
-    return '';
-  }
-
-  get isPure(): boolean {
-    return false;
-  }
-
-  /** For a symbol, true if the symbol is a free variable (no value) */
-  get isFree(): boolean {
-    return false;
-  }
-
-  /** For a symbol, true if the symbol is a constant (unchangeable value) */
-  get isConstant(): boolean {
-    return false;
-  }
-
-  get isLiteral(): boolean {
-    return false;
-  }
-
   get latex(): LatexString {
     return this._latex ?? this.engine.serialize(this);
   }
+
   set latex(val: LatexString) {
     this._latex = val;
   }
 
-  get wikidata(): string {
-    return this._wikidata ?? '';
-  }
-  set wikidata(val: string) {
-    this._wikidata = val;
+  get symbol(): string | null {
+    return null;
   }
 
-  get complexity(): number {
-    return 1;
+  get isNothing(): boolean {
+    return false;
   }
 
-  get symbols(): BoxedExpression[] {
-    return [...getSymbols(this, new Set<string>())].map((x) =>
-      this.engine.symbol(x)
-    );
+  get string(): string | null {
+    return null;
   }
 
   getSubexpressions(head: string): BoxedExpression[] {
@@ -144,6 +122,12 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
 
   get subexpressions(): BoxedExpression[] {
     return this.getSubexpressions('');
+  }
+
+  get symbols(): BoxedExpression[] {
+    return [...getSymbols(this, new Set<string>())].map((x) =>
+      this.engine.symbol(x)
+    );
   }
 
   get errors(): BoxedExpression[] {
@@ -162,11 +146,200 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   get op1(): BoxedExpression {
     return this.engine.symbol('Nothing');
   }
+
   get op2(): BoxedExpression {
     return this.engine.symbol('Nothing');
   }
+
   get op3(): BoxedExpression {
     return this.engine.symbol('Nothing');
+  }
+
+  get isValid(): boolean {
+    return true;
+  }
+
+  get isPure(): boolean {
+    return false;
+  }
+
+  /** For a symbol, true if the symbol is a free variable (no value) */
+  get isFree(): boolean {
+    return false;
+  }
+
+  /** For a symbol, true if the symbol is a constant (unchangeable value) */
+  get isConstant(): boolean {
+    return false;
+  }
+
+  get canonical(): BoxedExpression {
+    return this;
+  }
+
+  apply(
+    _fn: (x: BoxedExpression) => SemiBoxedExpression,
+    _head?: string
+  ): BoxedExpression {
+    return this;
+  }
+
+  subs(_sub: Substitution): BoxedExpression {
+    return this;
+  }
+
+  solve(_vars: Iterable<string>): null | BoxedExpression[] {
+    return null;
+  }
+
+  replace(_rules: BoxedRuleSet): null | BoxedExpression {
+    return null;
+  }
+
+  has(_v: string | string[]): boolean {
+    return false;
+  }
+
+  get isNaN(): boolean | undefined {
+    return undefined;
+  }
+
+  get isZero(): boolean | undefined {
+    return undefined;
+  }
+  get isNotZero(): boolean | undefined {
+    return undefined;
+  }
+
+  get isOne(): boolean | undefined {
+    return undefined;
+  }
+
+  get isNegativeOne(): boolean | undefined {
+    return undefined;
+  }
+
+  get isInfinity(): boolean | undefined {
+    return undefined;
+  }
+
+  // Not +- Infinity, not NaN
+  get isFinite(): boolean | undefined {
+    return undefined;
+  }
+
+  get isEven(): boolean | undefined {
+    return undefined;
+  }
+
+  get isOdd(): boolean | undefined {
+    return undefined;
+  }
+
+  get isPrime(): boolean | undefined {
+    return undefined;
+  }
+
+  get isComposite(): boolean | undefined {
+    return undefined;
+  }
+
+  get machineValue(): number | null {
+    return null;
+  }
+  get rationalValue(): [numer: number, denom: number] | [null, null] {
+    return [null, null];
+  }
+  get decimalValue(): Decimal | null {
+    return null;
+  }
+  get complexValue(): Complex | null {
+    return null;
+  }
+  get asFloat(): number | null {
+    return null;
+  }
+  get asSmallInteger(): number | null {
+    return null;
+  }
+  get asRational(): [number, number] | [null, null] {
+    return [null, null];
+  }
+
+  get sgn(): -1 | 0 | 1 | undefined | null {
+    return null;
+  }
+
+  isLess(_rhs: BoxedExpression): boolean | undefined {
+    return undefined;
+  }
+
+  isLessEqual(_rhs: BoxedExpression): boolean | undefined {
+    return undefined;
+  }
+
+  isGreater(_rhs: BoxedExpression): boolean | undefined {
+    return undefined;
+  }
+
+  isGreaterEqual(_rhs: BoxedExpression): boolean | undefined {
+    return undefined;
+  }
+
+  // x > 0
+  get isPositive(): boolean | undefined {
+    return undefined;
+  }
+
+  // x >= 0
+  get isNonNegative(): boolean | undefined {
+    return undefined;
+  }
+
+  // x < 0
+  get isNegative(): boolean | undefined {
+    return undefined;
+  }
+
+  // x <= 0
+  get isNonPositive(): boolean | undefined {
+    return undefined;
+  }
+
+  //
+  //
+  //
+  //
+  //
+
+  isCompatible(
+    _dom: BoxedDomain | DomainLiteral,
+    _kind?: DomainCompatibility
+  ): boolean {
+    return false;
+  }
+
+  get description(): string[] | undefined {
+    return undefined;
+  }
+
+  get url(): string | undefined {
+    return undefined;
+  }
+
+  get isLiteral(): boolean {
+    return false;
+  }
+
+  get wikidata(): string | undefined {
+    return this._wikidata;
+  }
+  set wikidata(val: string | undefined) {
+    this._wikidata = val;
+  }
+
+  get complexity(): number | undefined {
+    return undefined;
   }
 
   get basedDefinition(): BoxedBaseDefinition | undefined {
@@ -202,46 +375,8 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return false;
   }
 
-  get machineValue(): number | null {
-    return this.numericValue?.machineValue ?? null;
-  }
-  get rationalValue(): [numer: number, denom: number] | [null, null] {
-    return this.numericValue?.rationalValue ?? [null, null];
-  }
-  get decimalValue(): Decimal | null {
-    return this.numericValue?.decimalValue ?? null;
-  }
-  get complexValue(): Complex | null {
-    return this.numericValue?.complexValue ?? null;
-  }
-  get asFloat(): number | null {
-    return this.numericValue?.asFloat ?? null;
-  }
-  get asSmallInteger(): number | null {
-    return this.numericValue?.asSmallInteger ?? null;
-  }
-  get asRational(): [number, number] | [null, null] {
-    return this.numericValue?.asRational ?? [null, null];
-  }
-
-  get sgn(): -1 | 0 | 1 | undefined | null {
-    return this.numericValue?.sgn ?? null;
-  }
-
-  get symbol(): string | null {
-    return null;
-  }
-
-  get isNothing(): boolean {
-    return false;
-  }
-
-  get isValid(): boolean {
-    return true;
-  }
-
   get value(): BoxedExpression | undefined {
-    return this;
+    return undefined;
   }
   set value(_value: BoxedExpression | number | undefined) {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
@@ -262,67 +397,8 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     throw new Error(`Can't change the domain of \\(${this.latex}\\)`);
   }
 
-  get explicitDomain(): BoxedDomain | null {
+  get explicitDomain(): BoxedDomain | undefined {
     return this.domain;
-  }
-
-  get string(): string | null {
-    return null;
-  }
-
-  isLess(_rhs: BoxedExpression): boolean | undefined {
-    return undefined;
-  }
-
-  isLessEqual(_rhs: BoxedExpression): boolean | undefined {
-    return undefined;
-  }
-
-  isGreater(_rhs: BoxedExpression): boolean | undefined {
-    return undefined;
-  }
-
-  isGreaterEqual(_rhs: BoxedExpression): boolean | undefined {
-    return undefined;
-  }
-
-  get isZero(): boolean | undefined {
-    return undefined;
-  }
-  get isNotZero(): boolean | undefined {
-    return undefined;
-  }
-  // x > 0
-  get isPositive(): boolean | undefined {
-    return undefined;
-  }
-
-  // x >= 0
-  get isNonNegative(): boolean | undefined {
-    return undefined;
-  }
-
-  // x < 0
-  get isNegative(): boolean | undefined {
-    return undefined;
-  }
-
-  // x <= 0
-  get isNonPositive(): boolean | undefined {
-    return undefined;
-  }
-
-  get isInfinity(): boolean | undefined {
-    return undefined;
-  }
-
-  get isNaN(): boolean | undefined {
-    return undefined;
-  }
-
-  // Not +- Infinity, not NaN
-  get isFinite(): boolean | undefined {
-    return undefined;
   }
 
   get isNumber(): boolean | undefined {
@@ -361,63 +437,14 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   get isExtendedComplex(): boolean | undefined {
     return undefined;
   }
-
-  get isOne(): boolean | undefined {
-    return undefined;
-  }
-
-  get isNegativeOne(): boolean | undefined {
-    return undefined;
-  }
-
-  get isEven(): boolean | undefined {
-    return undefined;
-  }
-
-  get isOdd(): boolean | undefined {
-    return undefined;
-  }
-
-  get isPrime(): boolean | undefined {
-    return undefined;
-  }
-
-  get isComposite(): boolean | undefined {
-    return undefined;
-  }
-
-  get canonical(): BoxedExpression {
+  simplify(_options?: SimplifyOptions): BoxedExpression {
     return this;
   }
-
-  apply(
-    _fn: (x: BoxedExpression) => SemiBoxedExpression,
-    _head?: string
-  ): BoxedExpression {
-    return this;
-  }
-
   evaluate(options?: EvaluateOptions): BoxedExpression {
     return this.simplify(options);
   }
 
-  simplify(_options?: SimplifyOptions): BoxedExpression {
-    return this;
-  }
-
   N(_options?: NOptions): BoxedExpression {
-    return this;
-  }
-
-  replace(_rules: BoxedRuleSet): null | BoxedExpression {
-    return null;
-  }
-
-  subs(_sub: Substitution): BoxedExpression {
-    return this;
-  }
-
-  solve(_vars: Iterable<string>): null | BoxedExpression[] {
-    return null;
+    return this.evaluate();
   }
 }

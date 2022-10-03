@@ -119,8 +119,8 @@ export function preferDecimal(ce: IComputeEngine) {
   );
 }
 
-/** If result of a numeric evaluation is a complex number,
- * return `NaN` if `ce.useComplex` is false
+/** When result of a numeric evaluation is a complex number,
+ * return `NaN` if not `complexallowed()`
  */
 
 export function complexAllowed(ce: IComputeEngine) {

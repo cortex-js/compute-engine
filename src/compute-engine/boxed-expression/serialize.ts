@@ -381,7 +381,7 @@ export function serializeJsonNumber(
       num =
         value.isInteger() && value.e < value.precision() + 4
           ? value.toFixed(0)
-          : repeatingDecimal(ce, value.toJSON());
+          : repeatingDecimal(ce, value.toString());
     }
 
     if (ce.jsonSerializationOptions.metadata.includes('latex'))

@@ -96,6 +96,9 @@ function exprToStringRecursive(expr, start) {
       '}'
     );
   }
+  if (typeof expr === 'string' && start === 0) return expr;
+  if (typeof expr === 'string') return `"${expr}"`;
+
   return JSON.stringify(expr, null, 2);
 }
 
@@ -120,10 +123,6 @@ export function evaluate(latex: string): string {
   return exprToString(engine.parse(latex)?.evaluate());
 }
 
-export function simplify(latex: string): string {
-  return exprToString(engine.parse(latex)?.simplify());
-}
-
 export function N(latex: string): string {
   return exprToString(engine.parse(latex)?.N());
 }
@@ -131,11 +130,11 @@ export function N(latex: string): string {
 export function check(latex: string): string {
   try {
     const expr = engine.parse(latex);
-    const boxed = serialize(expr.json);
-    const canonical = serialize(expr.canonical.json);
-    const simplify = serialize(expr.simplify().json);
-    const evaluate = serialize(expr.evaluate().json);
-    const numEval = serialize(expr.N().json);
+    const boxed = printExpression(expr.json);
+    const canonical = printExpression(expr.canonical.json);
+    const simplify = printExpression(expr.simplify().json);
+    const evaluate = printExpression(expr.evaluate().json);
+    const numEval = printExpression(expr.N().json);
 
     if (
       boxed === canonical &&
@@ -181,32 +180,11 @@ export function expressionError(latex: string): string | string[] {
 
 export function rawExpression(latex: string): Expression {
   errors = [];
-  return JSON.stringify(engine.box(rawLatex.parse(latex)).json);
+  return JSON.stringify(engine.box(rawLatex.parse(latex)).json, null, 2);
 }
 
 export function printExpression(expr: Expression): string {
-  if (Array.isArray(expr)) {
-    return '[' + expr.map((x) => printExpression(x)).join(', ') + ']';
-  }
-  if (typeof expr === 'string') {
-    return `'${expr}'`;
-  }
-  if (typeof expr === 'undefined') {
-    return 'undefined';
-  }
-  if (expr === null) {
-    return 'null';
-  }
-  if (typeof expr === 'object') {
-    return (
-      '{' +
-      Object.keys(expr)
-        .map((x) => x + ': ' + printExpression(expr[x]))
-        .join(', ') +
-      '}'
-    );
-  }
-  return expr.toString();
+  return exprToStringRecursive(expr, 0);
 }
 
 // beforeEach(() => {
@@ -228,7 +206,8 @@ expect.addSnapshotSerializer({
   test: (_val): boolean => true,
 
   serialize: (val, _config, _indentation, _depth, _refs, _printer): string => {
-    if (val instanceof AbstractBoxedExpression) return val.toJSON();
+    if (val instanceof AbstractBoxedExpression)
+      return printExpression(val.json);
     return printExpression(val);
   },
 });
@@ -407,32 +386,4 @@ export function benchmark(
     );
   }
   return variance;
-}
-
-function recursiveSerialize(x: unknown): string {
-  if (x === null) return 'null';
-  if (
-    typeof x === 'object' &&
-    !Array.isArray(x) &&
-    x.constructor.name !== 'Object'
-  )
-    return `{${x.constructor.name}}`;
-  return serialize(x);
-}
-
-function serialize(x: any): string {
-  if (x === null) return 'null';
-  if (x === undefined) return 'undefined';
-  if (Array.isArray(x)) {
-    return `[${x.map((y) => recursiveSerialize(y)).join(', ')}]`;
-  }
-  if (typeof x === 'object') {
-    return `[${Object.entries(x)
-      .map(([key, value]) => '"' + key + '": ' + recursiveSerialize(value))
-      .join(', ')}]`;
-  }
-  if (typeof x === 'string') {
-    return `"${x}"`;
-  }
-  return x.toString();
 }

@@ -168,12 +168,16 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
     if (a.keysCount !== b.keysCount) return b.keysCount - a.keysCount;
     let bComplexity = 0;
     let aComplexity = 0;
-    for (const key of b.keys) bComplexity += b.getKey(key)!.complexity;
-    for (const key of a.keys) aComplexity += a.getKey(key)!.complexity;
+    for (const key of b.keys)
+      bComplexity += b.getKey(key)!.complexity ?? DEFAULT_COMPLEXITY;
+    for (const key of a.keys)
+      aComplexity += a.getKey(key)!.complexity ?? DEFAULT_COMPLEXITY;
     return aComplexity - bComplexity;
   }
 
-  return a.complexity - b.complexity;
+  return (
+    (a.complexity ?? DEFAULT_COMPLEXITY) - (b.complexity ?? DEFAULT_COMPLEXITY)
+  );
 }
 
 /**

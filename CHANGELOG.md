@@ -1,6 +1,21 @@
-## 0.7.0 
+## [Unreleased]
 
- **Release Date:** 2022-09-30
+### Breaking Changes
+
+- Corrected the implementation of `expr.toJSON()`, `expr.valueOf()` and added
+  the esoteric `[Symbol.toPrimitive]()` method. These are used by JavaScript
+  when interacting with other primitive types. A major change is that
+  `expr.toJSON()` now returns an `Expression` as an object literal, and not a
+  string serialized the `Expression`.
+
+### Bugs Fixed
+
+- Numerical evaluation of expressions containing complex numbers when in
+  `decimal` or `auto` mode produced incorrect results. Example: `e^{i\\pi}`
+
+## 0.7.0
+
+**Release Date:** 2022-09-30
 
 ### Breaking Changes
 

@@ -433,29 +433,25 @@ export const CORE_LIBRARY: SymbolTable[] = [
         threadable: true,
         hold: 'all',
         signature: {
-          domain: ['Function', ['Sequence', 'Anything'], 'Symbol'],
-          evaluate: (ce, ops) => {
+          domain: ['Function', ['Sequence', 'Anything'], 'Anything'],
+          canonical: (ce, ops) => {
             if (ops.length === 0) return ce.symbol('Nothing');
-            const args = ops;
-            const arg = args
-              .map((x) => {
-                const symName = x.symbol;
-                if (symName !== null) return symName;
-
-                const stringValue = arg.string;
-                if (stringValue !== null) return stringValue;
-
-                const numValue = arg.smallIntegerValue;
-                if (numValue !== null) return numValue.toString();
-
-                return '';
-              })
+            const arg = ops
+              .map(
+                (x) =>
+                  x.symbol ??
+                  x.string ??
+                  (x.isLiteral ? x.asSmallInteger?.toString() : null) ??
+                  ''
+              )
               .join('');
 
             if (arg.length > 0) return ce.symbol(arg);
 
             return ce.symbol('Nothing');
           },
+          // Note: a `["Symbol"]` expression is never evaluated, it gets
+          // transformed into something else (a symbol) during canonicalization
         },
       },
       {

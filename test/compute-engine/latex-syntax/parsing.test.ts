@@ -2,9 +2,9 @@ import { parse } from '../../utils';
 
 describe('BASIC PARSING', () => {
   test('', () => {
-    expect(parse('')).toMatchInlineSnapshot(`'["Sequence"]'`);
-    expect(parse('1')).toMatchInlineSnapshot(`'1'`);
-    expect(parse('2{xy}')).toMatchInlineSnapshot(`'["Multiply", 2, "x", "y"]'`);
+    expect(parse('')).toMatchInlineSnapshot(`["Sequence"]`);
+    expect(parse('1')).toMatchInlineSnapshot(`1`);
+    expect(parse('2{xy}')).toMatchInlineSnapshot(`["Multiply", 2, "x", "y"]`);
   });
 });
 
@@ -13,36 +13,36 @@ describe('ADVANCED PARSING', () => {
   // expected
   test('\\frac{x}{} y', () =>
     expect(parse('\\frac{x}{} \\text{ cm}')).toMatchInlineSnapshot(
-      `'["Sequence", ["Divide", "x", ["Error", "'missing'"]], "' cm'"]'`
+      `["Sequence", ["Divide", "x", ["Error", "'missing'"]], "' cm'"]`
     ));
 });
 
 describe('UNKNOWN COMMANDS', () => {
   test('Parse', () => {
     expect(parse('\\foo')).toMatchInlineSnapshot(`
-      '[
+      [
         "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\\\foo'"],
-        ["Latex", "'\\\\foo'"]
-      ]'
+        ["ErrorCode", "'unexpected-command'", "'\\foo'"],
+        ["Latex", "'\\foo'"]
+      ]
     `);
     expect(parse('x=\\foo+1')).toMatchInlineSnapshot(`
-      '[
+      [
         "Equal",
         "x",
         [
           "Add",
           [
             "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\\\foo'"],
-            ["Latex", "'\\\\foo'"]
+            ["ErrorCode", "'unexpected-command'", "'\\foo'"],
+            ["Latex", "'\\foo'"]
           ],
           1
         ]
-      ]'
+      ]
     `);
     expect(parse('x=\\foo   {1}  {x+1}+1')).toMatchInlineSnapshot(`
-      '[
+      [
         "Add",
         [
           "Multiply",
@@ -51,14 +51,14 @@ describe('UNKNOWN COMMANDS', () => {
             "x",
             [
               "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\\\foo'"],
-              ["Latex", "'\\\\foo{1}'"]
+              ["ErrorCode", "'unexpected-command'", "'\\foo'"],
+              ["Latex", "'\\foo{1}'"]
             ]
           ],
           ["Add", "x", 1]
         ],
         1
-      ]'
+      ]
     `);
   });
 });

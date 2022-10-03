@@ -8,7 +8,7 @@ describe('CASES/PIECEWISE', () => {
       1 & n =  1\\\\
       n \\geq 2  & n^2+1 \\end{cases}`)
     ).toMatchInlineSnapshot(`
-      '[
+      [
         "Piecewise",
         [
           "List",
@@ -16,7 +16,7 @@ describe('CASES/PIECEWISE', () => {
           ["Pair", ["Equal", "n", 1], 1],
           ["Pair", ["Add", ["Power", "n", 2], 1], ["GreaterEqual", "n", 2]]
         ]
-      ]'
+      ]
     `);
   });
 });

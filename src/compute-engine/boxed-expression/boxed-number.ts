@@ -134,7 +134,15 @@ export class BoxedNumber extends AbstractBoxedExpression {
     this._isCanonical = val;
   }
 
-  get numericValue(): BoxedExpression | undefined {
+  get complexity(): number {
+    return 1;
+  }
+
+  get value(): BoxedExpression {
+    return this;
+  }
+
+  get numericValue(): BoxedExpression {
     if (!Array.isArray(this._value)) return this;
 
     // Since `numericValue` is equivalent to `.N()`, reduce rationals to floats
@@ -170,7 +178,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
         if (this._value.isPositive()) return Number.POSITIVE_INFINITY;
         return Number.NEGATIVE_INFINITY;
       }
-      if (isInMachineRange(this._value)) return this._value.toNumber();
+      return this._value.toNumber();
     }
 
     if (Array.isArray(this._value)) return this._value[0] / this._value[1];

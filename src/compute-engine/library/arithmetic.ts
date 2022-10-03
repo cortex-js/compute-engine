@@ -279,7 +279,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         complexity: 4000,
 
         signature: {
-          domain: ['Function', 'Number', 'Number', 'Number'],
+          domain: ['Function', 'Number', 'Number'],
           N: (ce, ops) => {
             if (ops[0].decimalValue)
               return ce.number(ops[0].decimalValue.log());
@@ -299,7 +299,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         complexity: 4100,
 
         signature: {
-          domain: ['Function', 'Number', 'Number', 'Number'],
+          domain: ['Function', 'Number', ['Maybe', 'Number'], 'Number'],
           N: (ce, ops) => {
             const exponent = ops[0];
             const base = ops[1] ?? ce.number(10);
@@ -391,7 +391,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
             const rest: BoxedExpression[] = [];
 
             for (const op of ops) {
-              if (!op.isNumber || op.value === undefined) rest.push(op);
+              if (!op.isNumber || op.numericValue === undefined) rest.push(op);
               else if (!result || op.isGreater(result)) result = op;
             }
             if (rest.length > 0)
@@ -422,7 +422,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
             const rest: BoxedExpression[] = [];
 
             for (const op of ops) {
-              if (!op.isNumber || op.value === undefined) rest.push(op);
+              if (!op.isNumber || op.numericValue === undefined) rest.push(op);
               else if (!result || op.isLess(result)) result = op;
             }
             if (rest.length > 0)
@@ -563,10 +563,13 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
               if (n !== null && d !== null) return ce.number([n, d]);
               return undefined;
             }
+
+            //
             // If there is a single argument, i.e. `['Rational', 'Pi']`
             // the function evaluates to a rational expression of the argument
-            const f = ops[0].asFloat ?? ops[0].decimalValue?.toNumber() ?? null;
-            if (f === null) return ops[0];
+            //
+            const f = ops[0].N().asFloat ?? null;
+            if (f === null) return undefined;
 
             const r = rationalize(f);
             if (typeof r === 'number') return ce.number(r);
@@ -782,10 +785,9 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
               }
               // Maybe a compound symbol
               let sub = op2.string ?? op2.symbol;
-              if (!sub) {
-                if (op2.asSmallInteger !== null)
-                  sub = op2.asSmallInteger.toString();
-              }
+              if (!sub && op2.isLiteral && op2.asSmallInteger !== null)
+                sub = op2.asSmallInteger.toString();
+
               if (sub) return ce.symbol(op1.symbol + '_' + sub);
             }
             return ce._fn('Subscript', args);

@@ -13,24 +13,16 @@ sidebar:
 calculate its value or get a numerical approximation of its value**, call the
 `expr.simplify()`, `expr.evaluate()` or `expr.N()` function.
 
-Each identifier (name of symbol or function) is **bound** to a definition within
-a **scope**.
-
-When a Boxed Expression is created with `ce.box()` or `ce.parse()`, its
-identifiers are not bound immediately. The name binding occurs lazily the first
-time it is required. This could be when a function such as `expr.evaluate()` is
-invoked, or when a property such as `expr.domain` is accessed.
-
 ## Scopes
 
 The Compute Engine supports
 [lexical scoping](<https://en.wikipedia.org/wiki/Scope_(computer_science)>).
 
-The **context** of the Compute Engine is a stack of scopes that provide the
-current symbol and function definitions.
+A scope provides definitions of symbols and functions. Scopes are arranged in a
+stack, with the current (top-most) scope available with `ce.context`.
 
-To locate the definition of a symbol or function, the symbol table associated
-with the current (top-most) scope is used first.
+To locate the definition of an identifier, the symbol table associated with the
+current (top-most) scope is used first.
 
 If no matching definition is found, the parent scope is searched, and so on
 until a definition is found.
@@ -59,14 +51,10 @@ associating an identifier (the name of a function or symbol) with a
 definition.**
 
 Name Binding should not be confused with **value binding** with is the process
-of associating a **value** to a symbol.
+of associating a **value** to an identifier.
 
 {% readmore "/compute-engine/guides/symbols/#scopes" %}Read more about
 <strong>symbols</strong> and value binding.{% endreadmore %}
-
-The symbol tables are initially set when an instance of a Compute Engine is
-created. Additional symbol tables can be provided later using the
-`ce.pushScope()` function.
 
 For symbols, the definition records contain information such as the domain of
 the symbol and its value. For functions, the definition record include the
@@ -84,10 +72,24 @@ evaluating this boxed expression will result in an `["Error"]` expression:
 **To check if an expression can be evaluated** check that
 `expr.canonical.isValid` is `true`.
 
+**To get a list of the errors in an expression** use the `expr.errors` property.
+
 {% readmore "/compute-engine/guides/expressions/#errors" %} Read more about the
 <strong>errors</strong> {% endreadmore %}
 
 ## Evaluation Loop
+
+This is an advanced topic. You don't need to know the details of how the
+evaluation loop work, unless you're interested in extending the standard library
+and providing your own function definitions.{notice--info}
+
+Each identifier (name of symbol or function) is **bound** to a definition within
+a **scope**.
+
+When a Boxed Expression is created with `ce.box()` or `ce.parse()`, its
+identifiers are not bound immediately. The name binding occurs lazily the first
+time it is required, for example when a function such as `expr.evaluate()` is
+invoked, or when a property such as `expr.domain` is accessed.
 
 When a function is evaluated, the following steps are followed:
 

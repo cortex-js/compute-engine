@@ -120,7 +120,16 @@ export function evalMultiply(
     }
   }
 
-  if (!complexAllowed(ce) && complexProduct.im !== 0) return ce._NAN;
+  if (complexProduct.im !== 0) {
+    if (!complexAllowed(ce)) return ce._NAN;
+    // We have an imaginary number: fold Decimal into machine numbers
+    machineProduct *= decimalProduct.toNumber();
+    decimalProduct = ce._DECIMAL_ONE;
+    numer *= decimalNumer.toNumber();
+    denom *= decimalDenom.toNumber();
+    decimalNumer = ce._DECIMAL_ONE;
+    decimalDenom = ce._DECIMAL_ONE;
+  }
 
   if (decimalDenom.eq(ce._DECIMAL_ONE) && isInMachineRange(decimalNumer)) {
     numer = denom * decimalNumer.toNumber();
@@ -128,9 +137,10 @@ export function evalMultiply(
   }
 
   if (
-    preferDecimal(ce) ||
-    !decimalProduct.eq(ce._DECIMAL_ONE) ||
-    !(decimalNumer.eq(ce._DECIMAL_ONE) && decimalDenom.eq(ce._DECIMAL_ONE))
+    complexProduct.im === 0 &&
+    (preferDecimal(ce) ||
+      !decimalProduct.eq(ce._DECIMAL_ONE) ||
+      !(decimalNumer.eq(ce._DECIMAL_ONE) && decimalDenom.eq(ce._DECIMAL_ONE)))
   ) {
     // Fold into decimal
     let d = decimalProduct.mul(machineProduct);

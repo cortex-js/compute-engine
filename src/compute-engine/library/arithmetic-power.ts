@@ -191,15 +191,18 @@ export function processPower(
 ): BoxedExpression | undefined {
   if (mode !== 'simplify' && base.isLiteral && exponent.isLiteral) {
     if (mode === 'N' || !base.isInteger) {
-      if (base.complexValue)
+      if (base.complexValue) {
         return ce.number(
           base.complexValue.pow(
             exponent.complexValue ?? exponent.asFloat ?? NaN
           )
         );
-
-      if (exponent.complexValue && base.asFloat !== null)
-        return ce.number(ce.complex(base.asFloat).pow(exponent.complexValue));
+      }
+      if (exponent.complexValue) {
+        const b = base.asFloat ?? base.decimalValue?.toNumber() ?? null;
+        if (b !== null)
+          return ce.number(ce.complex(b).pow(exponent.complexValue));
+      }
 
       if (base.decimalValue) {
         return ce.number(

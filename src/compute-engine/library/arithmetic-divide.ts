@@ -28,7 +28,9 @@ export function canonicalDivide(
     if (op2.isNegativeOne) return canonicalNegate(op1);
 
     const [n, d] = [op1.asSmallInteger, op2.asSmallInteger];
-    if (n !== null && d !== null && d !== 0) return ce.number([n, d]);
+    if (n !== null && d !== null && d !== 0)
+      return ce.number(reducedRational([n, d]));
+
     if (op1.isInteger && op2.isInteger) {
       // eslint-disable-next-line prefer-const
       let [nSign, dn] = makePositive(op1);

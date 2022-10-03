@@ -228,15 +228,19 @@ function valueToFlags(value: BoxedExpression): Partial<SymbolFlags> {
 }
 
 export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
+  readonly name: string;
+
+  private _def: SymbolDefinition;
+  private _value: BoxedExpression | undefined | null;
+  private _domain: BoxedDomain | undefined | null;
+  private _inferedDomain: [BoxedDomain, BoxedDomain] | undefined;
+
   private _engine: IComputeEngine;
   readonly scope: RuntimeScope | undefined;
-  private _value: BoxedExpression | undefined | null;
-  readonly name: string;
+
   wikidata?: string;
   description?: string | string[];
 
-  private _domain: BoxedDomain | undefined | null;
-  private _inferedDomain: [BoxedDomain, BoxedDomain] | undefined;
   // readonly unit?: BoxedExpression;
 
   private _number: boolean | undefined;
@@ -274,8 +278,6 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   readonly constant: boolean;
   readonly hold: boolean;
 
-  private _def: SymbolDefinition;
-
   prototype?: BoxedFunctionDefinition; // @todo for collections and other special data structures
   self?: unknown; // @todo
 
@@ -302,7 +304,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   }
 
   bind() {
-    this._value = undefined;
+    this._value = null;
     // this._domain = this._domain?._purge();
 
     const def = this._def;
@@ -333,12 +335,13 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     }) as BoxedSymbolDefinition;
 
     //
-    // 1/ Is it a number?
+    // 1/ Is it defined as a simple machine number?
     //
     if ('value' in def && typeof def.value === 'number') {
-      // If the dictionary entry is provided as a number, assume it's a
+      // If the definition entry is provided as a number, assume it's a
       // variable, and infer its domain based on its value.
       const value = ce.number(def.value);
+
       let domain: BoxedDomain;
       const defDomain = def.domain ? ce.domain(def.domain) : undefined;
       if (defDomain && value.domain!.isCompatible(defDomain))
@@ -358,14 +361,16 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     // 2/ It's a full definition with no value or a non-numeric value
     //
 
-    let value: BoxedExpression | undefined;
-    if (def.hold === false) {
-      value = this.value;
-      if (!value)
-        throw new Error(
-          `Symbol definition "${def.name}": Expected a value "hold=false" `
-        );
-    }
+    let value: BoxedExpression | undefined = undefined;
+    if (isLatexString(def.value)) value = ce.parse(def.value)!;
+    else if (typeof def.value === 'function')
+      value = ce.box(def.value(ce) ?? 'Undefined');
+    else if (def.value) value = ce.box(def.value);
+
+    if (!value && def.hold === false)
+      throw new Error(
+        `Symbol definition "${def.name}": Expected a value when "hold=false" `
+      );
 
     value = value?.canonical;
 
@@ -385,42 +390,28 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
       domain = defDomain;
     else domain = value?.domain ?? ce.defaultDomain!;
 
-    if (!value) {
-      this._value = undefined;
-      this._domain = domain;
-      this.setProps(domainToFlags(domain));
-      this.setProps(result);
-
-      return;
-    }
     this._value = value;
     this._domain = domain;
-    this.setProps(valueToFlags(value));
+
+    if (value) this.setProps(valueToFlags(value));
     this.setProps(domainToFlags(domain));
     this.setProps(result);
   }
 
   get value(): BoxedExpression | undefined {
     if (this._value === null) this.bind();
-    if (this._value === undefined) {
-      if (isLatexString(this._def.value))
-        this._value = this._engine.parse(this._def.value)!;
-      else if (typeof this._def.value === 'function')
-        this._value = this._engine.box(
-          this._def.value(this._engine) ?? 'Undefined'
-        );
-      else if (this._def.value) this._value = this._engine.box(this._def.value);
-    }
     return this._value ?? undefined;
   }
 
   set value(val: BoxedExpression | number | undefined) {
+    // Need to bind first to check, e.g. `this.constant`
+    if (this._value === null) this.bind();
     if (this.constant)
       throw new Error(
         `The value of the constant "${this.name}" cannot be changed`
       );
     if (typeof val === 'number') val = this._engine.box(val);
-    this._value = val;
+    this._value = val ?? null;
     if (val) this.setProps(valueToFlags(val));
   }
 

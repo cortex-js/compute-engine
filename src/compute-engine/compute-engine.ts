@@ -58,7 +58,10 @@ import { BoxedNumber } from './boxed-expression/boxed-number';
 import { BoxedSymbolDefinitionImpl } from './boxed-expression/boxed-symbol-definition';
 import { canonicalNegate } from './symbolic/negate';
 import { canonicalPower } from './library/arithmetic-power';
-import { BoxedFunction } from './boxed-expression/boxed-function';
+import {
+  BoxedFunction,
+  makeCanonicalFunction,
+} from './boxed-expression/boxed-function';
 import { canonicalMultiply } from './library/arithmetic-multiply';
 import { canonicalAdd } from './library/arithmetic-add';
 import { canonicalDivide } from './library/arithmetic-divide';
@@ -1107,21 +1110,28 @@ export class ComputeEngine implements IComputeEngine {
         metadata
       );
 
-    const result = new BoxedFunction(this, head, ops, metadata);
-    return result.canonical;
+    return makeCanonicalFunction(this, head, ops, { metadata });
   }
-
   /** @internal */
   _fn(
     head: string | BoxedExpression,
     ops: BoxedExpression[],
     metadata?: Metadata
-  ): BoxedFunction {
+  ): BoxedExpression {
     // if (!ops.every((x) => x.isCanonical))    debugger;
+    // return makeCanonicalFunction(this, head, ops, {
+    //   metadata,
+    //   canonical: true,
+    // });
 
-    const result = new BoxedFunction(this, head, ops, metadata);
-    result.isCanonical = true;
-    return result;
+    return new BoxedFunction(this, head, ops, {
+      metadata,
+      canonical: true,
+      def:
+        typeof head === 'string' && this.context
+          ? this.lookupFunction(head, this.context)
+          : undefined,
+    });
   }
 
   error(

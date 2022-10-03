@@ -12,18 +12,18 @@ The CortexJS Compute Engine produces and manipulates
 [symbolic expressions](<https://en.wikipedia.org/wiki/Expression_(mathematics)>)
 such as numbers, constants, variables and functions.{.xl}
 
-Expressions are represented using the [MathJSON format](/math-json/).
+In the CortexJS Compute Engine, expressions are represented using the
+[MathJSON format](/math-json/).
 
-In the CortexJS Compute Engine, MathJSON expressions are wrapped in a JavaScript
-object, a processed called **boxing**, and the resulting expressions are **Boxed
-Expressions**.
+They are wrapped in a JavaScript object, a processe called **boxing**, and the
+resulting expressions are **Boxed Expressions**.
+
+Boxed Expressions improve performance by implementing caching to avoid
+repetitive calculations.
 
 Unlike the plain data types used by JSON, Boxed Expressions allow an IDE, such
 as VSCode Studio, to provide suitable hints in the editor, and to check that the
 correct functions and properties are used, particularly when using TypeScript.
-
-Boxed Expressions also improve performance by implementing caching and avoiding
-repetitive calculations.
 
 ## Boxing
 
@@ -66,7 +66,7 @@ console.log(expr.json);
 ```
 
 **To get a Boxed Expression representing the content of a MathLive mathfield**
-usethe `mf.expression` property:
+use the `mf.expression` property:
 
 ```js
 const mf = document.getElementById('input');
@@ -79,7 +79,7 @@ console.log(expr.evaluate().latex);
 ## Unboxing
 
 **To access the MathJSON expression of a boxed expression**, use the `expr.json`
-property. Use this property to "look inside the box".
+property. Use this property to "unbox" the expression.
 
 ```js
 const expr = ce.box(['Add', 3, 'x']);
@@ -88,16 +88,16 @@ console.log(expr.json);
 ```
 
 **To customize the format of the MathJSON expression** use the
-`ce.jsonSerializationOptions` property )
+`ce.jsonSerializationOptions` property.
 
 Use this option to control which metadata, if any, should be included, whether
 to use shorthand notation, and to exclude some functions. See
 [JsonSerializationOptions](/docs/compute-engine/?q=JsonSerializationOptions) for
-more info about what can be customized.
+more info about the formatting options.
 
 ```ts
-const expr = ce.parse('2 + \\frac{q}{p}');
-console.log(expr.canonical.json);
+const expr = ce.parse('2 + \\frac{q}{p}').canonical;
+console.log(expr.json);
 // ➔ ["Add", 2, ["Divide", "q", "p"]]
 
 ce.jsonSerializationOptions = {
@@ -106,7 +106,7 @@ ce.jsonSerializationOptions = {
   shorthands: [], // Don't use any shorthands
 };
 
-console.log(expr.canonical.json);
+console.log(expr.json);
 // ➔ ["fn": ["Add", ["num": "2"],
 //      ["fn": ["Multiply",
 //        ["sym": "q"],
@@ -117,8 +117,8 @@ console.log(expr.canonical.json);
 
 ## Literal Expressions
 
-A literal expression is one that has a fixed value that was provided directly
-when the expression was defined.
+A literal expression has a fixed value that was provided directly when the
+expression was defined.
 
 Numbers and strings are literals. Symbols and functions are not. They may have a
 value, but their value is calculated indirectly.
@@ -160,7 +160,7 @@ no side effect.
 The \\( \sin() \\) function is pure: it evaluates to the same value when the
 same arguments are applied to it.
 
-On the other hand, the \\( \mathrm{random}() \\) function is not pure: by its
+On the other hand, the \\( \mathrm{Random}() \\) function is not pure: by its
 nature it evaluates to a different value on every evaluation.
 
 Numbers, symbols and strings are pure. A function expression is pure if the
@@ -183,6 +183,21 @@ expression.
 
 {% readmore "/compute-engine/guides/canonical-form/" %} Read more about the
 <strong>Canonical Form</strong> {% endreadmore %}
+
+A non-canonical expression may include errors as a result of parsing from LaTeX,
+if there were syntax errors in the LaTeX input.
+
+The arguments of a function in canonical form are validated to make sure they
+match expectations.
+
+A canonical expression may include additional errors, for example
+`["Divide", 2, 5, 6]` (three arguments instead of two), `["Add", 2, "True"]`
+(mismatched argument domain, expected a number but got a boolean).
+
+**To check if an expression contains errors** use `expr.canonical.isValid`.
+
+This check will include not only possible syntax errors, but also semantic
+errors (incorrect number or domain of arguments, etc...).
 
 </section>
 

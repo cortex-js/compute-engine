@@ -113,7 +113,7 @@ export function box(
         ce,
         box(ce, expr.fn[0]),
         expr.fn.slice(1).map((x) => box(ce, x)),
-        metadata
+        { metadata }
       );
     }
     if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
@@ -151,7 +151,7 @@ export function boxNumber(
   if (Array.isArray(num)) {
     if (num.length !== 2)
       throw new Error('Array argument to boxNumber() should be two integers');
-    const [n, d] = num;
+    let [n, d] = num;
     if (typeof n !== 'number' || typeof d !== 'number')
       throw new Error('Array argument to boxNumber() should be two integers');
     if (!Number.isInteger(n) || !Number.isInteger(d))
@@ -290,12 +290,9 @@ function boxFunction(
   // Hold
   //
   if (head === 'Hold') {
-    const result = new BoxedFunction(
-      ce,
-      'Hold',
-      [boxHold(ce, ops[0])],
-      metadata
-    );
+    const result = new BoxedFunction(ce, 'Hold', [boxHold(ce, ops[0])], {
+      metadata,
+    });
     // Hold is always canonical
     result.isCanonical = true;
     return result;
@@ -342,7 +339,9 @@ function boxFunction(
           ops[1].machineValue ?? ops[1].asSmallInteger,
         ];
         if (n !== null && d !== null) return ce.number([n, d], metadata);
-        return new BoxedFunction(ce, 'Rational', [ops[0], ops[1]], metadata);
+        return new BoxedFunction(ce, 'Rational', [ops[0], ops[1]], {
+          metadata,
+        });
       }
     } else {
       const op1 = ops[0] as Expression;
@@ -351,12 +350,9 @@ function boxFunction(
       if (n?.isInteger() && d?.isInteger()) {
         if (isInMachineRange(n) && isInMachineRange(d))
           return ce.number([n.toNumber(), d.toNumber()], metadata);
-        return new BoxedFunction(
-          ce,
-          'Rational',
-          [ce.box(op1), ce.box(op2)],
-          metadata
-        );
+        return new BoxedFunction(ce, 'Rational', [ce.box(op1), ce.box(op2)], {
+          metadata,
+        });
       }
     }
 
@@ -415,18 +411,15 @@ function boxFunction(
   if (head === 'Single') {
     if (ops.length < 1) return ce.error('expected-argument', "'Single");
     if (ops.length > 1) return ce.error('unexpected-argument', "'Single");
-    return new BoxedFunction(ce, 'Tuple', [ce.box(ops[0])], metadata);
+    return new BoxedFunction(ce, 'Tuple', [ce.box(ops[0])], { metadata });
   }
 
   if (head === 'Pair') {
     if (ops.length < 2) return ce.error('expected-argument', "'Pair");
     if (ops.length > 2) return ce.error('unexpected-argument', "'Pair");
-    return new BoxedFunction(
-      ce,
-      'Tuple',
-      [ce.box(ops[0]), ce.box(ops[1])],
-      metadata
-    );
+    return new BoxedFunction(ce, 'Tuple', [ce.box(ops[0]), ce.box(ops[1])], {
+      metadata,
+    });
   }
 
   // KeyValuePair is not normalized to Tuple
@@ -437,7 +430,7 @@ function boxFunction(
       ce,
       'KeyValuePair',
       [ce.box(ops[0]), ce.box(ops[1])],
-      metadata
+      { metadata }
     );
   }
 
@@ -448,7 +441,7 @@ function boxFunction(
       ce,
       'Tuple',
       ops.map((x) => ce.box(x)),
-      metadata
+      { metadata }
     );
   }
 
@@ -485,7 +478,7 @@ function boxFunction(
     ce,
     head,
     ops.map((x) => box(ce, x)),
-    metadata
+    { metadata }
   );
 }
 

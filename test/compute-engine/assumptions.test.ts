@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
+import '../utils'; // For snapshot serializers
+
 export const ce = new ComputeEngine();
 
 ce.assume('a', 1);
@@ -19,23 +21,23 @@ ce.assume(['Greater', 't', 0]);
 
 describe('TAUTOLOGY a = 1', () => {
   test(`a.value`, () => {
-    expect(ce.box('a').evaluate()).toMatchInlineSnapshot(`""a""`);
+    expect(ce.box('a').evaluate()).toMatchInlineSnapshot(`a`);
   });
   test(`a.domain`, () => {
     expect(ce.box('a').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","ExtendedRealNumber"]"`
+      `["Domain", "ExtendedRealNumber"]`
     );
   });
   test(`a > 0`, () => {
-    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot(`"tautology"`);
+    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot(`tautology`);
   });
   test(`a >= 1`, () => {
     expect(ce.assume(['GreaterEqual', 'a', 1])).toMatchInlineSnapshot(
-      `"not-a-predicate"`
+      `not-a-predicate`
     );
-  }); // @todo: should be valid
+  }); // @fixme: should be valid
   test(`a = 1`, () => {
-    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot(`"ok"`);
+    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot(`ok`);
   });
 });
 
@@ -84,22 +86,22 @@ describe.skip('is() values', () => {
 describe('canonical domains', () => {
   test(`Range domains`, () => {
     expect(ce.box('m').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","Integer"]"`
+      `["Domain", "Integer"]`
     );
     expect(ce.box('n').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","NonNegativeInteger"]"`
-    ); // @todo should  be Integer
+      `["Domain", "NonNegativeInteger"]`
+    ); // @fixme should  be Integer
     expect(ce.box('q').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","NonPositiveInteger"]"`
+      `["Domain", "NonPositiveInteger"]`
     );
   });
 
   test(`Interval domains`, () => {
     expect(ce.box('t').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","ExtendedRealNumber"]"`
-    ); //@todo should be NonNegativeNumber
+      `["Domain", "ExtendedRealNumber"]`
+    ); //@fixme should be NonNegativeNumber
     expect(ce.box('s').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","ExtendedRealNumber"]"`
-    ); // @todo: should be Interval[5, +Infinity]
+      `["Domain", "ExtendedRealNumber"]`
+    ); // @fixme: should be Interval[5, +Infinity]
   });
 });

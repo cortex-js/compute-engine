@@ -348,6 +348,14 @@ export type JsonSerializationOptions = {
  *
  */
 export interface BoxedExpression {
+  //
+  // CANONICAL OR NON-CANONICAL
+  //
+  // The methods/properties below can be used with canonical or non-canonical
+  // expressions. They do not trigger binding (associating the expression
+  // with a definition).
+  //
+  //
   /** The Compute Engine associated with this expression provides
    * a context in which to interpret it, such as definition of symbols
    * and functions.
@@ -356,45 +364,139 @@ export interface BoxedExpression {
 
   /** From `Object.valueOf()`, return a primitive value for the expression.
    *
-   * If the expression is a machine number, or a Decimal that can be
+   * If the expression is a machine number, or a Decimal or rational that can be
    * converted to a machine number, return a `number`.
-   *
-   * If the expression is a rational number, return `[number, number]`.
    *
    * If the expression is a symbol, return the name of the symbol as a `string`.
    *
    * Otherwise return a LaTeX representation of the expression.
    *
-   * @category Object Methods
+   * @category Primitive Methods
    */
-  valueOf(): number | string | [number, number];
+  valueOf(): number | string | boolean;
+
   /** From `Object.toString()`, return a LaTeX representation of the expression.
    *
-   * @category Object Methods
+   * Used when coercing a `BoxedExpression` to a `String`.
+   *
+   * @category Primitive Methods
    */
   toString(): string;
-  /** From `Object.toJSON()`, equivalent to `JSON.stringify(this.json)`
-   *
-   * @category Object Methods
+
+  /** Similar to`expr.valueOf()` but includes a hint.
+   * @category Primitive Methods
    */
-  toJSON(): string;
+  [Symbol.toPrimitive](
+    hint: 'number' | 'string' | 'default'
+  ): number | string | null;
+
+  /** Used by `JSON.stringify()` to serialize this object to JSON.
+   *
+   * Method version of `expr.json`.
+   *
+   * @category Primitive Methods
+   */
+  toJSON(): Expression;
+
+  /** If `true`, this expression is in a canonical form.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  get isCanonical(): boolean;
+
+  /** For internal use only, set when a canonical expression is created.
+   * @internal
+   */
+  set isCanonical(val: boolean);
+
+  /** MathJSON representation of this expression.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  readonly json: Expression;
+
   /** From `Object.is()`. Equivalent to `BoxedExpression.isSame()`
    *
-   * @category Object Methods
+   * @category Primitive Methods
    *
    */
   is(rhs: unknown): boolean;
 
   /** @internal */
-  get hash(): number;
+  readonly hash: number;
 
-  /** An optional short description of the symbol or function head.
+  /** LaTeX representation of this expression.
    *
-   * May include markdown. Each string is a paragraph. */
-  readonly description: string[];
+   * The serialization can be customized with `ComputeEngine.latexOptions`
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  get latex(): LatexString;
 
-  /** An optional URL pointing to more information about the symbol or function head */
-  readonly url: string;
+  /**
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   * @internal
+   */
+  set latex(val: string);
+
+  /** If this expression is a symbol, return the name of the symbol as a string.
+   * Otherwise, return `null`.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+
+  * @category Symbol Expression
+   *
+   */
+  readonly symbol: string | null;
+
+  /**
+   * If this is the `Nothing` symbol, return `true`.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   */
+  readonly isNothing: boolean;
+
+  /** If this expression is a string, return the value of the string.
+   * Otherwise, return `null`.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+
+  * @category String Expression
+   *
+   */
+  readonly string: string | null;
+
+  /** All the subexpressions matching the head
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  getSubexpressions(head: string): BoxedExpression[];
+
+  /** All the subexpressions in this expression, recursively
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  readonly subexpressions: BoxedExpression[];
+
+  /** All the symbols in the expression, recursively
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  readonly symbols: BoxedExpression[];
+
+  /** All the `["Error"]` subexpressions
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  readonly errors: BoxedExpression[];
 
   /** All boxed expressions have a head.
    *
@@ -402,24 +504,89 @@ export interface BoxedExpression {
    *
    * If the head expression can be represented as a string, it is returned
    * as a string.
+   *
+   * **Note** applicable to canonical and non-canonical expressions. The head
+   * of a non-canonical expression may be different than the head of its
+   * canonical counterpart. For example the canonical counterpart of `["Divide", 5, 7]` is `["Rational", 5, 5]`.
    */
-  get head(): BoxedExpression | string;
+  readonly head: BoxedExpression | string;
+
+  /** The list of arguments of the function, its "tail".
+   *
+   * If the expression is not a function, return `null`.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   * @category Function Expression
+   *
+   */
+  readonly ops: null | BoxedExpression[];
+
+  /** If this expression is a function, the number of operands, otherwise 0.
+   *
+   * Note that a function can have 0 operands, so to check if this expression
+   * is a function, check if `this.ops !== null` instead.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   * @category Function Expression
+   *
+   */
+  readonly nops: number;
+
+  /** First operand, i.e.`this.ops[0]`
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   * @category Function Expression
+   *
+   *
+   */
+  readonly op1: BoxedExpression;
+
+  /** Second operand, i.e.`this.ops[1]`
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   * @category Function Expression
+   *
+   *
+   */
+  readonly op2: BoxedExpression;
+
+  /** Third operand, i.e. `this.ops[2]`
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   * @category Function Expression
+   *
+   *
+   */
+  readonly op3: BoxedExpression;
+
+  /** `true` if this expression or any of its subexpressions is an `["Error"]`
+   * expression.
+   *
+   * **Note** applicable to canonical and non-canonical expressions. For
+   * non-canonical expression, this may indicate a syntax error while parsing
+   * LaTeX. For canonical expression, this may indicate argument domain
+   * mismatch, or missing or unexpected arguments.
+   *
+   * @category Symbol Expression
+   *
+   */
+  readonly isValid: boolean;
 
   /**
-   * If `this.isPure` is `true`, this is a synonym for `this.evaluate()`.
-   * Otherwise, it returns `undefined`.
-   */
-  get value(): BoxedExpression | undefined;
-
-  /** Only the value of variables can be changed (symbols that are not constants) */
-  set value(value: BoxedExpression | number | undefined);
-
-  /** An approximation of the value of this expression. Floating-point
-   * operations may be performed.
+   * If `true`, this expression represents a value that was not calculated
+   * and that does not reference another expression.
    *
-   * Just like `this.value`, it returns `undefined` for impure expressions.
+   * This means the expression is either a number, a string or a dictionary.
+   * Functions and symbols are not literals.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
    */
-  get numericValue(): BoxedExpression | undefined;
+  readonly isLiteral: boolean;
 
   /** If true, the value of the expression never changes and evaluating it has
    * no side-effects.
@@ -430,128 +597,207 @@ export interface BoxedExpression {
    * `this.evaluate()` to determine the value of the expression instead.
    *
    * As an example, the `Random` function is not pure.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
    */
-  get isPure(): boolean;
+  readonly isPure: boolean;
 
   /** True if the expression is a free variable, that is a symbol with no value */
-  get isFree(): boolean;
+  readonly isFree: boolean;
 
   /** True if the expression is a constant, that is a symbol with an immutable value */
-  get isConstant(): boolean;
+  readonly isConstant: boolean;
 
   /**
-   * If `true`, this expression represents a value that was not calculated
-   * or that does not reference another expression.
-   * This means the expression is either a number, a string or a dictionary.
-   * Functions and symbols are not literals.
-   */
-  get isLiteral(): boolean;
-
-  /** If `true`, this expression is in a canonical form */
-  get isCanonical(): boolean;
-
-  /** For internal use only, set when a canonical expression is created.
-   * @internal
-   */
-  set isCanonical(val: boolean);
-
-  /** All the subexpressions matching the head */
-  getSubexpressions(head: string): BoxedExpression[];
-
-  /** All the subexpressions in this expression, recursively */
-  get subexpressions(): BoxedExpression[];
-
-  /** All the symbols in the expression, recursively */
-  get symbols(): BoxedExpression[];
-
-  /** All the `["Error"]` subexpressions */
-  get errors(): BoxedExpression[];
-
-  // ----- FUNCTION
-
-  /** `ops` is the list of arguments of the function, its "tail"
+   * Return the canonical form of this expression.
    *
-   * @category Function Expression
+   * If a function, after putting all the arguments in canonical form, find
+   * a corresponding function definition in the current context.
+   *
+   * Apply the function definition flags:
+   * - `associative`: \\( f(a, f(b), c) \longrightarrow f(a, b, c) \\)
+   * - `idempotent`: \\( f(f(a)) \longrightarrow f(a) \\)
+   * - `involution`: \\( f(f(a)) \longrightarrow a \\)
+   * - `commutative`: sort the arguments.
+   *
+   * Additionally, some simplifications involving exact computations on
+   * small integers may be performed.
+   *
+   * For example:
+   * - \\( 2 + x + 1 \longrightarrow x + 3 \\)
+   * - \\( \sqrt{4} \longrightarrow 2 \\)
+   * - \\(\frac{4}{10} \longrightarrow \frac{2}{5} \\).
+   *
+   * However, no calculation is performed involving floating point numbers, so
+   * \\( \sqrt(2) \longrightarrow \sqrt(2) \\).
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   * Expressions that are already canonical return themselves.
    *
    */
-  get ops(): null | BoxedExpression[];
-
-  /** If this expression is a function, the number of operands, otherwise 0.
-   *
-   * Note that a function can have 0 operands, so to check if this expression
-   * is a function, check if `this.ops !== null` instead.
-   *
-   * @category Function Expression
-   *
-   */
-  get nops(): number;
-
-  /** First operand, i.e.`this.ops[0]`
-   *
-   *
-   * @category Function Expression
-   *
-   *
-   */
-  get op1(): BoxedExpression;
-
-  /** Second operand, i.e.`this.ops[0]`
-   *
-   *
-   * @category Function Expression
-   *
-   *
-   */
-  get op2(): BoxedExpression;
-
-  /** Third operand, i.e. `this.ops[2]`
-   *
-   *
-   * @category Function Expression
-   *
-   *
-   */
-  get op3(): BoxedExpression;
-
-  // ----- DICTIONARY
-
-  /** The keys of the dictionary.
-   *
-   * If this expression not a dictionary, return `null`
-   *
-   * @category Dictionary Expression
-   *
-   */
-  get keys(): IterableIterator<string> | null;
+  get canonical(): BoxedExpression;
 
   /**
+   * If this expression is a function, apply the function `fn` to all its operands.
    *
-   * @category Dictionary Expression
-   */
-  get keysCount(): number;
-  /**
-   * If this expression is a dictionary, return the value of the `key` entry.
+   * Replace the head of this expression with `head`, if defined.
    *
-   * @category Dictionary Expression
+   * If this expression is a dictionary, return a new dictionary with the values
+   * modified by `fn`.
    *
-   */
-  getKey(key: string): BoxedExpression | undefined;
-  /**
-   * If this expression is a dictionary, return true if the dictionary has a
-   * `key` entry.
+   * If `head` is provided, return a function expression with the modified
+   * dictionary as operand, otherwise return the  modified dictionary.
    *
-   * @category Dictionary Expression
+   * **Note** applicable to canonical and non-canonical expressions.
    *
-   */
-  hasKey(key: string): boolean;
-
-  // ----- NUMBER/SYMBOL
+   * */
+  apply(
+    fn: (x: BoxedExpression) => SemiBoxedExpression,
+    head?: string
+  ): BoxedExpression;
 
   /**
-   * Return the value of this number or symbol, if stored as a machine number.
+   * Replace all the symbols in the expression as indicated.
    *
-   * Note it is possible for `machineValue` to be `null`, and for `isNotZero` to be true.
-   * For example, when a symbol has been defined with an assumption.
+   * Note the same effect can be achieved with `this.replace()`, but
+   * using `this.subs()` is more efficient, and simpler.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  subs(sub: Substitution): BoxedExpression;
+
+  /**
+   * Transform the expression by applying the rules:
+   * if the `lhs` of a rule matches, it is replaced by its `rhs`.
+   *
+   * If no rules apply, return `null`.
+   *
+   * See also `subs` for a simple substitution.
+   *
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  replace(
+    rules: BoxedRuleSet,
+    options?: ReplaceOptions
+  ): null | BoxedExpression;
+
+  /**
+   * True if the expression includes a symbol `v` or a function head `v`.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   */
+  has(v: string | string[]): boolean;
+
+  /** Structural/symbolic equality (weak equality).
+   *
+   * `ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   * @category Relational Operator
+   */
+  isSame(rhs: BoxedExpression): boolean;
+
+  /** Attempt to match this expression to the `rhs` expression.
+   *
+   * If `rhs` does not match, return `null`.
+   *
+   * Otherwise return an object literal.
+   *
+   * If this expression includes wildcards (symbols with a name that starts
+   * with `_`), the object literal will include a prop for each matching named
+   * wildcard.
+   *
+   * If `rhs` matches this pattern but there are no named wildcards, return
+   * the empty object literal, `{}`.
+   *
+   * **Note** applicable to canonical and non-canonical expressions.
+   *
+   */
+  match(
+    rhs: BoxedExpression,
+    options?: PatternMatchOption
+  ): Substitution | null;
+
+  /**
+   * "Not a Number".
+   *
+   * A value representing undefined result of computations, such as `0/0`,
+   * as per the floating point format standard IEEE-754.
+   *
+   * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
+   * number).
+   *
+   * @category Expression Properties
+   *
+   */
+  readonly isNaN: boolean | undefined;
+
+  /**
+   * The numeric value of this expression is 0.
+   *
+   * @category Expression Properties
+   */
+  readonly isZero: boolean | undefined;
+  /**
+   * The numeric value of this expression is not 0.
+   * @category Expression Properties
+   */
+  readonly isNotZero: boolean | undefined;
+
+  /**
+   * The numeric value of this expression is not 1.
+   * @category Expression Properties
+   */
+  readonly isOne: boolean | undefined;
+
+  /**
+   * The numeric value of this expression is not -1.
+   * @category Expression Properties
+   */
+  readonly isNegativeOne: boolean | undefined;
+
+  /** The numeric value of this expression is ±Infinity or Complex Infinity
+   *
+   * @category Expression Properties
+   */
+  readonly isInfinity: boolean | undefined;
+
+  /** This expression is a number, but not ±Infinity and not `NaN`
+   *
+   * @category Expression Properties
+   */
+  readonly isFinite: boolean | undefined;
+
+  /**
+   * @category Expression Properties
+   */
+  readonly isEven: boolean | undefined;
+
+  /**
+   * @category Expression Properties
+   */
+  readonly isOdd: boolean | undefined;
+
+  /**
+   * @category Expression Properties
+   */
+  readonly isPrime: boolean | undefined;
+
+  /**
+   * @category Expression Properties
+   */
+  readonly isComposite: boolean | undefined;
+
+  /**
+   * Return the value of this expression, if stored as a machine
+   * number.
+   *
+   * Note it is possible for `machineValue` to be `null`, and for `isNotZero`
+   * to be true. For example, when a symbol has been defined with an assumption.
    *
    * If `machineValue` is not `null`, then `decimalValue`, `rationalValue`
    * and `complexValue` are `null.
@@ -559,7 +805,7 @@ export interface BoxedExpression {
    * @category Numeric Expression
    *
    */
-  get machineValue(): number | null;
+  readonly machineValue: number | null;
 
   /** If the value of this expression is a rational number, return it.
    * Otherwise, return `[null, null]`.
@@ -570,7 +816,7 @@ export interface BoxedExpression {
    * @category Numeric Expression
    *
    */
-  get rationalValue(): [numer: number, denom: number] | [null, null];
+  readonly rationalValue: [numer: number, denom: number] | [null, null];
 
   /** If the value of this expression is a `Decimal` number, return it.
    * Otherwise, return `null`.
@@ -583,7 +829,7 @@ export interface BoxedExpression {
    * @category Numeric Expression
    *
    */
-  get decimalValue(): Decimal | null;
+  readonly decimalValue: Decimal | null;
 
   /** If the value of this expression is a `Complex` number, return it.
    * Otherwise, return `null`.
@@ -595,7 +841,7 @@ export interface BoxedExpression {
    *
    *
    */
-  get complexValue(): Complex | null;
+  readonly complexValue: Complex | null;
 
   /** Return an approximation of the numeric value of this expression as
    * a 64-bit floating point number.
@@ -605,10 +851,9 @@ export interface BoxedExpression {
    * If the value is a rational number, return the numerator divided by the
    * denominator.
    *
-   * If the value is a Decimal number that can be represented by a machine
-   * number, return this value. There might be a small loss of precision due
-   * to the limitations of the binary representation of numbers as machine
-   * numbers.
+   * If the value is a Decimal number return an approximation of the decimal
+   * number to a machine number. There might be a loss of precision or a
+   * round to 0 or Infinity, depending on the value.
    *
    * If the value of this expression cannot be represented by a float,
    * return `null`.
@@ -617,11 +862,11 @@ export interface BoxedExpression {
    *
    *
    */
-  get asFloat(): number | null;
+  readonly asFloat: number | null;
 
   /**
-   * If the value of this expression is an integer with a 'small' absolute value,
-   * return this value. Otherwise, return `null`.
+   * If the value of this expression is an integer with a 'small' absolute
+   * value, return this value. Otherwise, return `null`.
    *
    * Some calculations, for example to put in canonical forms, are only
    * performed if they are safe from overflow. This method makes it easy
@@ -632,16 +877,16 @@ export interface BoxedExpression {
    * @category Numeric Expression
    *
    */
-  get asSmallInteger(): number | null;
+  readonly asSmallInteger: number | null;
 
   /**
    * If the value of this an expression is a small integer or a rational,
-   * return this value. Otherwise, return `[null, null`].
+   * return this value. Otherwise, return `[null, null]`.
    *
    * @category Numeric Expression
    *
    */
-  get asRational(): [number, number] | [null, null];
+  readonly asRational: [number, number] | [null, null];
 
   /**
    * Return the following, depending on the value of this expression:
@@ -665,348 +910,192 @@ export interface BoxedExpression {
    * @category Numeric Expression
    *
    */
-  get sgn(): -1 | 0 | 1 | undefined | null;
-
-  // ----- SYMBOL
-
-  /** If this expression is a symbol, return the name of the symbol as a string.
-   * Otherwise, return `null`.
-   *
-   * @category Symbol Expression
-   *
-   */
-  get symbol(): string | null;
-
-  /**
-   * If this is the `Nothing`, return `true`.
-   */
-  get isNothing(): boolean;
-
-  /** `true` if this expression or any subexpression is an `["Error"]`
-   * expression.
-   *
-   * @category Symbol Expression
-   *
-   */
-  get isValid(): boolean;
-
-  // ----- STRING
-
-  /** If this expression is a string, return the value of the string.
-   * Otherwise, return `null`.
-   *
-   * @category String Expression
-   *
-   */
-  get string(): string | null;
-
-  //
-  // --- PREDICATES
-  //
-
-  /** `true` if the value of this expression is a number.
-   *
-   * `isExtendedComplex || isNaN` = `isReal || isImaginary || isInfinity || isNaN`
-   *
-   * Note that in a fateful twist of cosmic irony, `NaN` ("Not a Number")
-   * **is** a number.
-   *
-   * @category Expression Properties
-   */
-  get isNumber(): boolean | undefined;
-
-  /** The value of this expression is an element of the set ℤ: ...,-2, -1, 0, 1, 2...
-   *
-   *
-   * @category Expression Properties
-   *
-   */
-  get isInteger(): boolean | undefined;
-
-  /** The value of this expression is an element of the set ℚ, p/q with p ∈ ℕ, q ∈ ℤ ⃰  q >= 1
-   *
-   * Note that every integer is also a rational.
-   *
-   *
-   * @category Expression Properties
-   *
-   */
-  get isRational(): boolean | undefined;
-
-  /**
-   * The value of this expression is a number that is the root of a non-zero
-   * univariate polynomial with rational coefficients.
-   *
-   * All integers and rational numbers are algebraic.
-   *
-   * Transcendental numbers, such as \\( \pi \\) or \\( e \\) are not algebraic.
-   *
-   *
-   * @category Expression Properties
-   *
-   */
-  get isAlgebraic(): boolean | undefined;
-  /**
-   * The value of this expression is real number: finite and not imaginary.
-   *
-   * `isFinite && !isImaginary`
-   *
-   *
-   * @category Expression Properties
-   */
-  get isReal(): boolean | undefined;
-
-  /** Real or ±Infinity
-   *
-   * `isReal || isInfinity`
-   *
-   *
-   * @category Expression Properties
-   */
-  get isExtendedReal(): boolean | undefined;
-
-  /**
-   * The value of this expression is a number, but not `NaN` or any Infinity
-   *
-   * `isReal || isImaginary`
-   *
-   *
-   * @category Expression Properties
-   *
-   */
-  get isComplex(): boolean | undefined;
-
-  /** `isReal || isImaginary || isInfinity`
-   *
-   *
-   * @category Expression Properties
-   */
-  get isExtendedComplex(): boolean | undefined;
-
-  /** The value of this expression is a number with a imaginary part
-   *
-   *
-   * @category Expression Properties
-   */
-  get isImaginary(): boolean | undefined;
-
-  /**
-   * @category Expression Properties
-   */
-  get isZero(): boolean | undefined;
-  /**
-   * @category Expression Properties
-   */
-  get isNotZero(): boolean | undefined;
-  /**
-   * @category Expression Properties
-   */
-  get isOne(): boolean | undefined;
-  /**
-   * @category Expression Properties
-   */
-  get isNegativeOne(): boolean | undefined;
-
-  /** ±Infinity or Complex Infinity
-   *
-   * @category Expression Properties
-   */
-  get isInfinity(): boolean | undefined;
-  /**
-   * "Not a Number".
-   *
-   * A value representing undefined result of computations, such as `0/0`,
-   * as per the floating point format standard IEEE-754.
-   *
-   * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
-   * number).
-   *
-   * @category Expression Properties
-   *
-   */
-  get isNaN(): boolean | undefined;
-
-  /** This expression is a number, but not ±Infinity and not `NaN`
-   *
-   * @category Expression Properties
-   */
-  get isFinite(): boolean | undefined;
-
-  /**
-   * @category Expression Properties
-   */
-  get isEven(): boolean | undefined;
-  /**
-   * @category Expression Properties
-   */
-  get isOdd(): boolean | undefined;
-  /**
-   * @category Expression Properties
-   */
-  get isPrime(): boolean | undefined;
-  /**
-   * @category Expression Properties
-   */
-  get isComposite(): boolean | undefined;
-
-  /** Structural/symbolic equality (weak equality).
-   *
-   * `ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`
-   *
-   * @category Relational Operator
-   */
-  isSame(rhs: BoxedExpression): boolean;
-
-  /**
-   * True if the expression includes a symbol `v` or a function head `v`.
-   */
-  has(v: string | string[]): boolean;
-
-  /** Attempt to match this expression to the `rhs` expression.
-   *
-   * If `rhs` does not match, return `null`.
-   *
-   * Otherwise return an object literal.
-   *
-   * If this expression includes wildcards (symbols with a name that starts
-   * with `_`), the object literal will include a prop for each matching named
-   * wildcard.
-   *
-   * If `rhs` matches this pattern but there are no named wildcards, return
-   * the empty object literal, `{}`.
-   */
-  match(
-    rhs: BoxedExpression,
-    options?: PatternMatchOption
-  ): Substitution | null;
-
-  /** Mathematical equality (strong equality), that is the value
-   * of this expression and of `rhs` are numerically equal.
-   *
-   * Both expressions are numerically evaluated.
-   *
-   * Numbers whose difference is less than `engine.tolerance` are
-   * considered equal. This tolerance is set when the `engine.precision` is
-   * changed to be such that the last two digits are ignored.
-   *
-   * @category Relational Operator
-   */
-  isEqual(rhs: BoxedExpression): boolean;
+  readonly sgn: -1 | 0 | 1 | undefined | null;
 
   /** If the expressions cannot be compared, return `undefined`
+   *
+   * The numeric value of both expressions are compared.
    *
    * @category Relational Operator
    */
   isLess(rhs: BoxedExpression): boolean | undefined;
+
   /**
+   * The numeric value of both expressions are compared.
    * @category Relational Operator
    */
   isLessEqual(rhs: BoxedExpression): boolean | undefined;
+
   /**
+   * The numeric value of both expressions are compared.
    * @category Relational Operator
    */
   isGreater(rhs: BoxedExpression): boolean | undefined;
+
   /**
+   * The numeric value of both expressions are compared.
    * @category Relational Operator
    */
   isGreaterEqual(rhs: BoxedExpression): boolean | undefined;
 
-  /** The value of this expression is > 0, same as `isGreater(0)`
+  /** The numeric value of this expression is > 0, same as `isGreater(0)`
    *
    * @category Expression Properties
    */
-  get isPositive(): boolean | undefined;
+  readonly isPositive: boolean | undefined;
 
-  /** The value of this expression is >= 0, same as `isGreaterEqual(0)`
+  /** The numeric value of this expression is >= 0, same as `isGreaterEqual(0)`
    *
    * @category Expression Properties
    */
-  get isNonNegative(): boolean | undefined;
+  readonly isNonNegative: boolean | undefined;
 
-  /** The value of this expression is < 0, same as `isLess(0)`
+  /** The numeric value of this expression is < 0, same as `isLess(0)`
    *
    * @category Expression Properties
    */
-  get isNegative(): boolean | undefined;
+  readonly isNegative: boolean | undefined;
 
-  /** The value of this expression is <= 0, same as `isLessEqual(0)`
+  /** The numeric value of this expression is <= 0, same as `isLessEqual(0)`
    *
    * @category Expression Properties
    */
-  get isNonPositive(): boolean | undefined;
+  readonly isNonPositive: boolean | undefined;
+
+  /** The keys of the dictionary.
+   *
+   * If this expression not a dictionary, return `null`
+   *
+   * @category Dictionary Expression
+   *
+   */
+  readonly keys: IterableIterator<string> | null;
+
+  /**
+   *
+   * @category Dictionary Expression
+   */
+  readonly keysCount: number;
+
+  /**
+   * If this expression is a dictionary, return the value of the `key` entry.
+   *
+   * @category Dictionary Expression
+   *
+   */
+  getKey(key: string): BoxedExpression | undefined;
+
+  /**
+   * If this expression is a dictionary, return true if the
+   *  dictionary has a `key` entry.
+   *
+   * @category Dictionary Expression
+   *
+   */
+  hasKey(key: string): boolean;
 
   //
-  // ----- OTHER OPERATIONS
+  // CANONICAL EXPRESSIONS ONLY
+  //
+  // The properties/methods below return only `undefined` for non-canonical
+  // expressions
   //
 
-  /** Wikidata identifier */
-  get wikidata(): string;
-  set wikidata(val: string);
+  /** Wikidata identifier.
+   *
+   * **Note** `undefined` if not a canonical expression.
+   *
+   *
+   */
+  get wikidata(): string | undefined;
+  set wikidata(val: string | undefined);
 
-  /** MathJSON representation of this expression */
-  get json(): Expression;
+  /** An optional short description if the symbol or function head.
+   *
+   * May include markdown. Each string is a paragraph.
+   *
+   * **Note** `undefined` if not a canonical expression.
+   *
+   */
+  readonly description: undefined | string[];
 
-  /** LaTeX representation of this expression */
-  get latex(): LatexString;
-  set latex(val: string);
+  /** An optional URL pointing to more information about the symbol or
+   *  function head
+   *
+   * **Note** `undefined` if not a canonical expression.
+   *
+   */
+  readonly url: string | undefined;
 
   /** Expressions with a higher complexity score are sorted
    * first in commutative functions
+   *
+   * **Note** `undefined` if not a canonical expression.
    */
-  get complexity(): number;
+  readonly complexity: number | undefined;
 
-  /** The domain of this expression. If a function expression, this the domain
-   * of the value of the function(the codomain of the function), if a symbol
-   * the domain of the value of the symbol.
+  /**
+   * For symbols and functions, a possible definition associated with the
+   *  expression. `basedDefinition` is the base class of symbol and function
+   *  definition.
+   *
+   * **Note** `undefined` if not a canonical expression.
+   *
    */
-  get domain(): BoxedDomain;
+  readonly basedDefinition: BoxedBaseDefinition | undefined;
 
-  /** Symbols that represent a variable (or a function name), can have their
-   *  domain modified */
-  set domain(domain: BoxedDomain | string);
+  /**
+   * For functions, a possible definition associated with the expression.
+   *
+   * **Note** `undefined` if not a canonical expression or not a function.
+   *
+   */
+  readonly functionDefinition: BoxedFunctionDefinition | undefined;
+
+  /**
+   * For symbols, a possible definition associated with the expression.
+   *
+   * **Note** `undefined` if not a symbol
+   *
+   */
+  readonly symbolDefinition: BoxedSymbolDefinition | undefined;
 
   /**
    * The domain of this expression, without accounting for any inferred domain
-   * or `defaultDomain`. If no domain has been explicitly set via assignment
-   * or via an `.assume()` directive, the `expr.explicitDomain` is `null.
+   * or `ce.defaultDomain`. If no domain has been explicitly set via assignment
+   * or via an `.assume()` directive, the `expr.explicitDomain` is `undefined`.
    *
    * This is useful to determine if the domain of an expression is inferred.
    *
-   * In most cases you'll want to  use `.domain` instead.
+   * In most cases you'll want to  use `expr.domain` instead.
+   *
+   * **Note** `undefined` if not a canonical expression or not a function.
+   *
    */
-  get explicitDomain(): BoxedDomain | null;
-
-  /** For symbols and functions, a possible definition associated with the
-   *  expression. `basedDefinition` is the base class of symbol and function
-   *  definition. */
-  get basedDefinition(): BoxedBaseDefinition | undefined;
-  get functionDefinition(): BoxedFunctionDefinition | undefined;
-  get symbolDefinition(): BoxedSymbolDefinition | undefined;
+  readonly explicitDomain: BoxedDomain | undefined;
 
   /**
-   * Return the canonical form of this expression.
+   * Update the definition associated with this expression, taking
+   * into account the specified scope.
    *
-   * If a function, consider the function definition flags:
-   * - `associative`: \\( f(a, f(b), c) \longrightarrow f(a, b, c) \\)
-   * - `idempotent`: \\( f(f(a)) \longrightarrow f(a) \\)
-   * - `involution`: \\( f(f(a)) \longrightarrow a \\)
-   * - `commutative`: sort the arguments.
+   * **Note**: applicable only to canonical expressions
    *
-   * Additionally, some simplifications involving exact computations on
-   * small integers may be performed.
-   *
-   * For example:
-   * - \\( 2 + x + 1 \longrightarrow x + 3 \\)
-   * - \\( \sqrt{4} \longrightarrow 2 \\)
-   * - \\(\frac{4}{10} \longrightarrow \frac{2}{5} \\).
-   *
-   * However, no calculation is performed involving floating point numbers, so
-   * \\( \sqrt(2) \longrightarrow \sqrt(2) \\).
-   *
-   * Determining the canonical form does not depend on the values assigned to,
-   * or assumptions about, symbols.
+   * @internal
    */
-  get canonical(): BoxedExpression;
+  bind(scope: RuntimeScope | null): void;
+
+  /**
+   *
+   * @internal
+   */
+  unbind(): void;
+
+  //
+  // AUTO CANONICAL
+  //
+  // The methods below are automatically applied to the canonical version
+  // of the expression
+  //
 
   /**
    * Return a simpler form of this expression.
@@ -1071,56 +1160,154 @@ export interface BoxedExpression {
   solve(vars: Iterable<string>): null | BoxedExpression[];
 
   /**
-   * If this expression is a function, apply the function `fn` to all its operands.
+   * Synonym for `evaluate()`. If the expression is pure, the value may be
+   * cached.
    *
-   * Replace the head of this expression with `head`, if defined.
+   * It returns `undefined` for expressions that are not pure or that may
+   * not be evaluated.
    *
-   * If this expression is a dictionary, return a new dictionary with the values
-   * modified by `fn`.
+   * **Note**: If non-canonical, return the value of its canonical counterpart
+   */
+  get value(): BoxedExpression | undefined;
+
+  /** Only the value of variables can be changed (symbols that are not
+   * constants).
    *
-   * If `head` is provided, return a function
-   * with the modified dictionary as operand, otherwise return the
-   * modified dictionary. */
-  apply(
-    fn: (x: BoxedExpression) => SemiBoxedExpression,
-    head?: string
-  ): BoxedExpression;
+   * **Note**: If non-canonical, does nothing.
+   *
+   */
+  set value(value: BoxedExpression | number | undefined);
+
+  /** An approximation of the value of this expression. Floating-point
+   * operations may be performed.
+   *
+   * Just like `this.value`, it returns `undefined` for expressions that are
+   * not pure.
+   *
+   * **Note**: If non-canonical, return the numeric value of its canonical
+   * counterpart
+   */
+  readonly numericValue: BoxedExpression | undefined;
+
+  /** The domain of the value of this expression.
+   *
+   * If a function expression, the domain  of the value of the function (the codomain of the function).
+   *
+   * If a symbol the domain of the value of the symbol.
+   *
+   * Use `expr.head` to determine if an expression is a symbol or function.
+   *
+   * **Note**: If non-canonical, return the domain of its canonical
+   * counterpart
+   */
+  get domain(): BoxedDomain;
+
+  /** Modify the domain of a symbol that represent a variable
+   * (or a function name).
+   *
+   * **Note**: If non-canonical, does nothing.
+   *
+   */
+  set domain(domain: BoxedDomain | string);
+
+  /** `true` if the value of this expression is a number.
+   *
+   * `isExtendedComplex || isNaN` = `isReal || isImaginary || isInfinity || isNaN`
+   *
+   * Note that in a fateful twist of cosmic irony, `NaN` ("Not a Number")
+   * **is** a number.
+   *
+   * @category Domain Properties
+   */
+  readonly isNumber: boolean | undefined;
+
+  /** The value of this expression is an element of the set ℤ: ...,-2, -1, 0, 1, 2...
+   *
+   *
+   * @category Domain Properties
+   *
+   */
+  readonly isInteger: boolean | undefined;
+
+  /** The value of this expression is an element of the set ℚ, p/q with p ∈ ℕ, q ∈ ℤ ⃰  q >= 1
+   *
+   * Note that every integer is also a rational.
+   *
+   *
+   * @category Domain Properties
+   *
+   */
+  readonly isRational: boolean | undefined;
 
   /**
-   * Transform the expression by according to the rules:
-   * the matching `lhs` of a rule is replaced by its `rhs`.
+   * The value of this expression is a number that is the root of a non-zero
+   * univariate polynomial with rational coefficients.
    *
-   * If no rules apply, return `null`.
+   * All integers and rational numbers are algebraic.
    *
-   * See also `subs` for a simple substitution.
+   * Transcendental numbers, such as \\( \pi \\) or \\( e \\) are not algebraic.
+   *
+   *
+   * @category Domain Properties
+   *
    */
-  replace(
-    rules: BoxedRuleSet,
-    options?: ReplaceOptions
-  ): null | BoxedExpression;
+  readonly isAlgebraic: boolean | undefined;
+  /**
+   * The value of this expression is real number: finite and not imaginary.
+   *
+   * `isFinite && !isImaginary`
+   *
+   *
+   * @category Domain Properties
+   */
+  readonly isReal: boolean | undefined;
+
+  /** Real or ±Infinity
+   *
+   * `isReal || isInfinity`
+   *
+   *
+   * @category Domain Properties
+   */
+  readonly isExtendedReal: boolean | undefined;
 
   /**
-   * Replace all the symbols in the expression as indicated.
+   * The value of this expression is a number, but not `NaN` or any Infinity
    *
-   * Note the same effect can be achieved with `this.replace()`, but
-   * using `this.subs()` is more efficient, and simpler.
+   * `isReal || isImaginary`
+   *
+   *
+   * @category Domain Properties
    *
    */
-  subs(sub: Substitution): BoxedExpression;
+  readonly isComplex: boolean | undefined;
 
-  /**
-   * Update the definition associated with this expression, taking
-   * into account the specified scope.
+  /** `isReal || isImaginary || isInfinity`
    *
-   * @internal
+   *
+   * @category Domain Properties
    */
-  bind(scope: RuntimeScope | null): void;
+  readonly isExtendedComplex: boolean | undefined;
 
-  /** Purge any cached values.
+  /** The value of this expression is a number with a imaginary part
    *
-   * @internal
+   *
+   * @category Domain Properties
    */
-  unbind(): void;
+  readonly isImaginary: boolean | undefined;
+
+  /** Mathematical equality (strong equality), that is the value
+   * of this expression and of `rhs` are numerically equal.
+   *
+   * The numeric value of both expressions are compared.
+   *
+   * Numbers whose difference is less than `engine.tolerance` are
+   * considered equal. This tolerance is set when the `engine.precision` is
+   * changed to be such that the last two digits are ignored.
+   *
+   * @category Relational Operator
+   */
+  isEqual(rhs: BoxedExpression): boolean;
 }
 
 /** A semi boxed expression is an MathJSON expression which can include some
@@ -1715,7 +1902,7 @@ export type SymbolDefinitionFlags = {
   constant: boolean;
 
   /**
-   * If false, the value of the symbol is substituted during canonicalization
+   * If `false`, the value of the symbol is substituted during canonicalization
    * or simplification.
    *
    * If true, the value is only replaced during a `ce.N()` or `ce.evaluate()`.

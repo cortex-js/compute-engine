@@ -632,21 +632,28 @@ function serialize(
   ce: IComputeEngine,
   dom: DomainExpression<BoxedExpression>
 ): Expression {
-  if (typeof dom === 'string') return serializeJsonSymbol(ce, dom);
+  if (dom instanceof AbstractBoxedExpression)
+    return (dom as BoxedExpression).json;
+  if (typeof dom === 'string') return dom;
 
   if (dom[0] === 'Error') {
-    if (dom[2]) return ['Error', dom[1] as Expression, dom[2] as Expression];
-    return ['Error', dom[1] as Expression];
+    if (dom[2])
+      return [
+        'Error',
+        serialize(ce, dom[1] as DomainExpression<BoxedExpression>),
+        serialize(ce, dom[2] as DomainExpression<BoxedExpression>),
+      ];
+    return [
+      'Error',
+      serialize(ce, dom[1] as DomainExpression<BoxedExpression>),
+    ];
   }
 
   const result: Expression = [serializeJsonSymbol(ce, dom[0])];
+  if (dom.length > 1)
+    for (let i = 1; i <= dom.length - 1; i++)
+      serialize(ce, dom[i] as DomainExpression<BoxedExpression>);
 
-  for (let i = 1; i <= dom.length - 1; i++) {
-    if (dom[i] instanceof AbstractBoxedExpression)
-      result.push((dom[i] as BoxedExpression).json);
-    else
-      result.push(serialize(ce, dom[i] as DomainExpression<BoxedExpression>));
-  }
   return result;
 }
 

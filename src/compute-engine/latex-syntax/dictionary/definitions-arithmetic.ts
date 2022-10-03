@@ -57,8 +57,17 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
           numerator.push(arg);
         }
       }
+    } else if (head(arg) === 'Rational' && nops(arg) === 2) {
+      const op1 = op(arg, 1)!;
+      const op2 = op(arg, 2)!;
+      if (machineValue(op1) !== 1) numerator.push(op1);
+      if (machineValue(op2) !== 1) denominator.push(op2);
     } else {
-      numerator.push(arg);
+      const [n, d] = rationalValue(arg);
+      if (n !== null) {
+        if (n !== 1) numerator.push(n);
+        denominator.push(d);
+      } else numerator.push(arg);
     }
   }
   return [numerator, denominator];
@@ -208,13 +217,9 @@ function serializeMultiply(
   const [numer, denom] = numeratorDenominator(expr);
   if (denom.length > 0) {
     if (denom.length === 1 && denom[0] === 1) {
-      if (numer.length === 0) {
-        result = '1';
-      } else if (numer.length === 1) {
-        result = serializer.serialize(numer[0]);
-      } else {
-        result = serializeMultiply(serializer, [MULTIPLY, ...numer]);
-      }
+      if (numer.length === 0) result = '1';
+      else if (numer.length === 1) result = serializer.serialize(numer[0]);
+      else result = serializeMultiply(serializer, [MULTIPLY, ...numer]);
     } else {
       result = serializer.serialize([
         DIVIDE,
@@ -797,7 +802,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Rational',
     precedence: 660,
-    serialize: serializeFraction,
+    serialize: (serializer: Serializer, expr: Expression | null): string => {
+      if (expr && nops(expr) === 1)
+        return '\\mathrm{Rational}' + serializer.wrapArguments(expr);
+      return serializeFraction(serializer, expr);
+    },
   },
   {
     name: ROOT,

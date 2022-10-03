@@ -61,10 +61,16 @@ function cheapest(
 
 export class BoxedFunction extends AbstractBoxedExpression {
   private _scope: RuntimeScope | null;
-  private _head: string | BoxedLambdaExpression;
-  private _ops: BoxedExpression[];
+  private readonly _head: string | BoxedLambdaExpression;
+  private readonly _ops: BoxedExpression[];
+
+  // The canonical representation of this expression
+  private _canonical: BoxedExpression | undefined;
+
+  // Note: only canonical expressions have an associated def
+  // A `null` def indicate it has not been fetched yet, `undefined` indicate
+  // it was not found.
   private _def: BoxedFunctionDefinition | null | undefined;
-  private _isCanonical: boolean;
 
   private _isPure: boolean;
 
@@ -83,26 +89,53 @@ export class BoxedFunction extends AbstractBoxedExpression {
     ce: IComputeEngine,
     head: string | BoxedExpression,
     ops: BoxedExpression[],
-    metadata?: Metadata
+    options?: {
+      metadata?: Metadata;
+      canonical?: boolean;
+      def?: BoxedFunctionDefinition;
+    }
   ) {
-    super(ce, metadata);
+    options ??= {};
+    options.canonical ??= false;
+
+    super(ce, options.metadata);
 
     this._scope = ce.context;
 
-    this._head = typeof head === 'string' ? head : head.symbol ?? head;
-
+    this._head = head;
     this._ops = ops;
 
-    this._def = null; // Mark the def as not cached
-    this._codomain = null;
+    if (options.canonical) this._canonical = this;
 
-    this._isCanonical = false;
+    this._def = options.def ?? null; // Mark the def as not yet cached if none is provided
+    this._codomain = null;
+    if (typeof this._head !== 'string')
+      this._codomain = this._head.domain.codomain;
+    else if (this._def) {
+      const sig = this._def.signature;
+      if (typeof sig.codomain === 'function') {
+        this._codomain =
+          sig.codomain(
+            ce,
+            this._ops.map((x) => x.domain)
+          ) ?? null;
+      } else {
+        this._codomain = sig.codomain ?? null;
+      }
+    }
+    if (!this._codomain) this._codomain = ce.defaultDomain ?? ce.domain('Void');
 
     // Note: _isPure is computed on demand and cached
 
     ce._register(this);
   }
 
+  //
+  // NON-CANONICAL OR CANONICAL OPERATIONS
+  //
+  // Those operations/properties can be applied to a canonical or
+  // non-canonical expression
+  //
   get hash(): number {
     if (this._hash !== undefined) return this._hash;
 
@@ -115,81 +148,49 @@ export class BoxedFunction extends AbstractBoxedExpression {
     return h;
   }
 
-  unbind(): void {
-    if (typeof this._head !== 'string') this._head.unbind();
-    for (const arg of this._ops) arg.unbind();
-    if (this._value) this._value.unbind();
-    if (this._numericValue) this._numericValue.unbind();
+  get isCanonical(): boolean {
+    return this._canonical === this;
   }
 
-  get wikidata(): string {
-    return this._wikidata ?? this.functionDefinition?.wikidata ?? '';
-  }
-
-  get description(): string[] {
-    const def = this.functionDefinition;
-    if (!def) return [];
-    if (!def.description) return [];
-    if (typeof def.description === 'string') return [def.description];
-    return def.description;
-  }
-
-  get url(): string {
-    return this.functionDefinition?.url ?? '';
-  }
-
-  get complexity(): number {
-    return this.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
-  }
-
-  get head(): string | BoxedExpression {
-    return this._head;
-  }
-
-  get value(): BoxedExpression | undefined {
-    if (!this.isPure) return undefined;
-    // Use cached value if the function is pure
-    if (this._value) return this._value;
-    this._value = this.evaluate();
-    return this._value;
-  }
-
-  get numericValue(): BoxedExpression | undefined {
-    if (!this.isPure) return undefined;
-    if (this._numericValue) return this._numericValue;
-    const val = this.N();
-    this._numericValue = val.isLiteral ? val : undefined;
-    return this._numericValue;
-  }
-
-  get isPure(): boolean {
-    if (this._isPure !== undefined) return this._isPure;
-    let result: boolean | undefined = undefined;
-    if (this.functionDefinition?.pure !== undefined)
-      result = this.functionDefinition!.pure;
-    if (result !== false) {
-      // The function might be pure. Let's check that all its arguments are pure.
-      result = this._ops.every((x) => x.isPure);
-    }
-    this._isPure = result;
-    return result;
+  set isCanonical(val: boolean) {
+    this._canonical = val ? this : undefined;
   }
 
   get isLiteral(): boolean {
     return false;
   }
 
-  get isValid(): boolean {
-    if (typeof this._head !== 'string') {
-      if (this._head.isValid === false) return false;
-    } else {
-      if (this._head === 'Error') return false;
-      // Need to check function definition before arguments: binding
-      // as the side effect of normalizing arguments
-      if (this.functionDefinition === undefined) return false;
-      if (!this._ops.every((x) => x.isValid)) return false;
-    }
-    return this._ops.every((x) => x.isValid);
+  get isPure(): boolean {
+    if (!this.isCanonical) return false;
+    if (this._isPure !== undefined) return this._isPure;
+    let result: boolean | undefined = undefined;
+    if (this.functionDefinition?.pure !== undefined)
+      result = this.functionDefinition!.pure;
+    // The function might be pure. Let's check that all its arguments are pure.
+    if (result !== false) result = this._ops.every((x) => x.isPure);
+
+    this._isPure = result;
+    return result;
+  }
+
+  get json(): Expression {
+    // If this expression is canonical, apply some transformations to the
+    // JSON serialization to "reverse" some of the effects of canonicalization.
+    if (this._canonical === this)
+      return serializeJsonCanonicalFunction(
+        this.engine,
+        this._head,
+        this._ops,
+        { latex: this._latex, wikidata: this._wikidata }
+      );
+    return serializeJsonFunction(this.engine, this._head, this._ops, {
+      latex: this._latex,
+      wikidata: this._wikidata,
+    });
+  }
+
+  get head(): string | BoxedExpression {
+    return this._head;
   }
 
   get ops(): BoxedExpression[] {
@@ -210,210 +211,76 @@ export class BoxedFunction extends AbstractBoxedExpression {
     return this._ops[2] ?? this.engine.symbol('Nothing');
   }
 
-  get functionDefinition(): BoxedFunctionDefinition | undefined {
-    if (this._def !== null) return this._def;
-    this.bind(this._scope);
-    return this._def!;
-  }
-
-  bind(scope: RuntimeScope | null): void {
-    this._def = undefined;
-    const ce = this.engine;
-
-    // Flatten the sequence, canonicalize
-    this._ops = flattenSequence(this._ops.map((x) => x.canonical));
-
-    // Is the head an expression?
-    // For example, `['InverseFunction', 'Sin']`
+  get isValid(): boolean {
     if (typeof this._head !== 'string') {
-      const head = this._head.evaluate().symbol ?? this._head;
-      this._head = head;
-      if (typeof this._head !== 'string') {
-        this._codomain = this._head.domain.codomain ?? ce.domain('Void');
-        return;
-      }
+      if (this._head.isValid === false) return false;
+      return this._ops.every((x) => x.isValid);
     }
+    if (this._head === 'Error') return false;
 
-    scope = scope ?? this._scope;
+    // If this expression is not canonical, nothing else to check:
+    // non-canonical expression are never bound
+    if (this._canonical !== this) return true;
 
-    if (scope === null) return;
-
-    this._def = ce.lookupFunction(this._head, scope);
-    if (this._def) {
-      if (this._def.scoped) ce.pushScope();
-      // In case the def was found by the wikidata, and the name does not
-      // match the one in our dictionary, make sure to update it.
-      this._head = this._def.name;
-
-      // Apply Sequence, Symbol
-      this._ops = normalizeList(this._ops, this._def.hold);
-
-      this._ops =
-        validateSignature(ce, this._def.signature, this._ops) ?? this._ops;
-
-      // Calculate the effective codomain
-      if (!this._ops.every((x) => x.isValid)) {
-        this._codomain = ce.defaultDomain ?? ce.domain('Void');
-        if (this._def.scoped) ce.popScope();
-        return;
-      }
-      const sig = this._def.signature;
-      if (typeof sig.codomain === 'function') {
-        // If the signature was a match, the `sig.domain()` function must succeed
-        const opsDomain = this._ops.map((x) => x.domain);
-        this._codomain = sig.codomain(ce, opsDomain)!;
-      } else {
-        this._codomain = sig.codomain ?? ce.defaultDomain ?? ce.domain('Void');
-      }
-
-      if (this._def.scoped) ce.popScope();
-    } else this._codomain = ce.defaultDomain ?? ce.domain('Void');
+    // Need to check function definition before arguments: binding
+    // as the side effect of normalizing arguments
+    if (this.functionDefinition === undefined) return false;
+    if (!this._ops.every((x) => x.isValid)) return false;
+    return true;
   }
 
-  get domain(): BoxedDomain {
-    if (this._codomain === null) this.bind(this._scope);
-    console.assert(this._codomain);
-    return this._codomain!;
-  }
+  get canonical(): BoxedExpression {
+    if (this._canonical) return this._canonical;
 
-  isLess(rhs: BoxedExpression): boolean | undefined {
-    if (rhs.isZero) {
-      const s = this.sgn;
-      if (s === null) return false;
-      if (s !== undefined) return s < 0;
-    }
-    // @todo: use this.functionDefinition.range
-    return undefined;
-  }
-
-  isLessEqual(rhs: BoxedExpression): boolean | undefined {
-    if (rhs.isZero) {
-      const s = this.sgn;
-      if (s === null) return false;
-      if (s !== undefined) return s <= 0;
-    }
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-
-  isGreater(rhs: BoxedExpression): boolean | undefined {
-    if (rhs.isZero) {
-      const s = this.sgn;
-      if (s === null) return false;
-      if (s !== undefined) return s > 0;
-    }
-
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-
-  isGreaterEqual(rhs: BoxedExpression): boolean | undefined {
-    if (rhs.isZero) {
-      const s = this.sgn;
-      if (s === null) return false;
-      if (s !== undefined) return s >= 0;
-    }
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-
-  get isZero(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s === 0;
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-
-  get isNotZero(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s !== 0;
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-
-  get isOne(): boolean | undefined {
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-
-  get isNegativeOne(): boolean | undefined {
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-  // x > 0
-  get isPositive(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s !== 0;
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-  // x <= 0
-  get isNonPositive(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s <= 0;
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-  // x < 0
-  get isNegative(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s < 0;
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-  // x >= 0
-  get isNonNegative(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s >= 0;
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-
-  get isNumber(): boolean | undefined {
-    return this.domain.isCompatible('Number');
-  }
-  get isInteger(): boolean | undefined {
-    return this.domain.isCompatible('Integer');
-  }
-  get isRational(): boolean | undefined {
-    return this.domain.isCompatible('RationalNumber');
-  }
-  get isAlgebraic(): boolean | undefined {
-    return this.domain.isCompatible('AlgebraicNumber');
-  }
-  get isReal(): boolean | undefined {
-    return this.domain.isCompatible('RealNumber');
-  }
-  get isExtendedReal(): boolean | undefined {
-    return this.domain.isCompatible('ExtendedRealNumber');
-  }
-  get isComplex(): boolean | undefined {
-    return this.domain.isCompatible('ComplexNumber');
-  }
-  get isImaginary(): boolean | undefined {
-    return this.domain.isCompatible('ImaginaryNumber');
-  }
-
-  get json(): Expression {
-    // If this expression is canonical, apply some transformations to the
-    // JSON serialization to "reverse" some of the effects of canonicalization.
-    if (this._isCanonical)
-      return serializeJsonCanonicalFunction(
+    if (this.isValid)
+      this._canonical = makeCanonicalFunction(
         this.engine,
         this._head,
-        this._ops,
-        { latex: this._latex, wikidata: this._wikidata }
+        this._ops
       );
-    return serializeJsonFunction(this.engine, this._head, this._ops, {
-      latex: this._latex,
-      wikidata: this._wikidata,
-    });
+    else this._canonical = this;
+
+    return this._canonical;
+  }
+
+  *map<T = BoxedExpression>(
+    fn: (x: BoxedExpression) => T
+  ): IterableIterator<T> {
+    let i = 0;
+    while (i < this._ops.length) yield fn(this._ops[i++]);
+  }
+
+  apply(
+    fn: (x: BoxedExpression) => SemiBoxedExpression,
+    head?: string
+  ): BoxedExpression {
+    const newHead = head ?? this.head;
+    let opsChanged = false;
+    const ops: BoxedExpression[] = [];
+    for (const arg of this._ops) {
+      const newArg = fn(arg);
+      if (arg !== newArg) opsChanged = true;
+      ops.push(this.engine.box(newArg));
+    }
+
+    if (!opsChanged && this.head === newHead) return this;
+
+    return this.engine.fn(newHead, ops);
+  }
+
+  subs(sub: Substitution): BoxedExpression {
+    return makeCanonicalFunction(
+      this.engine,
+      this._head,
+      this._ops.map((x) => x.subs(sub))
+    );
+  }
+
+  replace(
+    rules: BoxedRuleSet,
+    options?: ReplaceOptions
+  ): BoxedExpression | null {
+    return replace(this, rules, options);
   }
 
   has(x: string | string[]): boolean {
@@ -483,10 +350,98 @@ export class BoxedFunction extends AbstractBoxedExpression {
     return result;
   }
 
+  //
+  // CANONICAL OPERATIONS
+  //
+  // These operations apply only to canonical expressions
+  //
+
+  unbind(): void {
+    // Note: a non-canonical expression is never bound
+    this._value = undefined;
+    this._numericValue = undefined;
+    // this._def = null;
+  }
+
+  get wikidata(): string | undefined {
+    // Since the canonical and non-canonical version of the expression
+    // may have different heads, not applicable to non-canonical expressions.
+    if (!this.isCanonical) return undefined;
+    return this._wikidata ?? this.functionDefinition?.wikidata ?? undefined;
+  }
+
+  get description(): string[] | undefined {
+    // Since the canonical and non-canonical version of the expression
+    // may have different heads, not applicable to non-canonical expressions.
+    if (!this.isCanonical) return undefined;
+    const def = this.functionDefinition;
+    if (!def) return [];
+    if (!def.description) return undefined;
+    if (typeof def.description === 'string') return [def.description];
+    return def.description;
+  }
+
+  get url(): string | undefined {
+    // Since the canonical and non-canonical version of the expression
+    // may have different heads, not applicable to non-canonical expressions.
+    if (!this.isCanonical) return '';
+    return this.functionDefinition?.url ?? undefined;
+  }
+
+  get complexity(): number | undefined {
+    // Since the canonical and non-canonical version of the expression
+    // may have different heads, not applicable to non-canonical expressions.
+    if (!this.isCanonical) return undefined;
+    return this.functionDefinition?.complexity ?? DEFAULT_COMPLEXITY;
+  }
+
+  get functionDefinition(): BoxedFunctionDefinition | undefined {
+    if (!this.isCanonical) return undefined;
+    if (this._def !== null) return this._def;
+    return undefined;
+  }
+
+  bind(_scope: RuntimeScope | null): void {
+    debugger;
+  }
+
+  //
+  // AUTO-CANONICAL OPERATIONS
+  //
+  // The operations are automatically done on the canonical form of the
+  // expression
+  //
+
+  get value(): BoxedExpression | undefined {
+    if (!this.isCanonical) return this.canonical.value ?? this.canonical;
+    if (!this.isPure) return undefined;
+    // Use cached value if the function is pure
+    if (this._value) return this._value;
+    this._value = this.evaluate();
+    return this._value;
+  }
+
+  get numericValue(): BoxedExpression | undefined {
+    if (this._numericValue) return this._numericValue;
+    if (!this.isCanonical) return this.canonical.numericValue;
+    if (!this.isPure) this._numericValue = undefined;
+    else {
+      const v = this.N();
+      this._numericValue = v === this ? undefined : v;
+    }
+    return this._numericValue;
+  }
+
+  get domain(): BoxedDomain {
+    if (!this.isCanonical) return this.canonical.domain;
+    console.assert(this._codomain);
+    return this._codomain!;
+  }
+
   /** `isEqual` is mathematical equality */
   isEqual(rhs: BoxedExpression): boolean {
     if (!this.isCanonical) return this.canonical.isEqual(rhs);
-    rhs = rhs.canonical;
+    rhs = rhs.canonical.numericValue ?? rhs.canonical;
     if (rhs.isNumber && this.isNumber) {
       const ce = this.engine;
 
@@ -496,19 +451,161 @@ export class BoxedFunction extends AbstractBoxedExpression {
 
       if (diff.isZero) return true;
 
-      if (diff.asFloat !== null && ce.chop(diff.asFloat) === 0) return true;
+      const v = diff.asFloat;
+      if (v !== null && ce.chop(v) === 0) return true;
 
-      return this.evaluate().isSame(rhs.evaluate());
+      return (this.value ?? this.evaluate()).isSame(rhs);
     }
 
     if (this.domain.isRelationalOperator && rhs.domain.isRelationalOperator) {
-      return this.evaluate().isSame(rhs.evaluate());
+      return this.isSame(rhs);
     }
 
     return this.isSame(rhs);
   }
 
+  isLess(rhs: BoxedExpression): boolean | undefined {
+    if (!this.isCanonical) return this.canonical.isLess(rhs);
+    if (rhs.isZero) {
+      const s = this.sgn;
+      if (s === null) return false;
+      if (s !== undefined) return s < 0;
+    }
+    // @todo: use this.functionDefinition.range
+
+    const ce = this.engine;
+    rhs = rhs.canonical.numericValue ?? rhs.canonical;
+    const diff = ce.add([this, ce.negate(rhs)]).N();
+    const v = diff.asFloat;
+    return v === null ? undefined : v < 0;
+  }
+
+  isLessEqual(rhs: BoxedExpression): boolean | undefined {
+    if (!this.isCanonical) return this.canonical.isLess(rhs);
+    if (rhs.isZero) {
+      const s = this.sgn;
+      if (s === null) return false;
+      if (s !== undefined) return s <= 0;
+    }
+    // @todo: use this.functionDefinition.range
+    const ce = this.engine;
+    rhs = rhs.canonical.numericValue ?? rhs.canonical;
+    const diff = ce.add([this, ce.negate(rhs)]).N();
+    const v = diff.asFloat;
+    return v === null ? undefined : v <= 0 || ce.chop(v) === 0;
+  }
+
+  isGreater(rhs: BoxedExpression): boolean | undefined {
+    if (!this.isCanonical) return this.canonical.isLess(rhs);
+    if (rhs.isZero) {
+      const s = this.sgn;
+      if (s === null) return false;
+      if (s !== undefined) return s > 0;
+    }
+
+    // @todo: use this.functionDefinition.range
+    const ce = this.engine;
+    rhs = rhs.canonical.numericValue ?? rhs.canonical;
+    const diff = ce.add([this, ce.negate(rhs)]).N();
+    const v = diff.asFloat;
+    return v === null ? undefined : v > 0;
+  }
+
+  isGreaterEqual(rhs: BoxedExpression): boolean | undefined {
+    if (!this.isCanonical) return this.canonical.isLess(rhs);
+    if (rhs.isZero) {
+      const s = this.sgn;
+      if (s === null) return false;
+      if (s !== undefined) return s >= 0;
+    }
+    // @todo: use this.functionDefinition.range
+    const ce = this.engine;
+    rhs = rhs.canonical.numericValue ?? rhs.canonical;
+    const diff = ce.add([this, ce.negate(rhs)]).N();
+    const v = diff.asFloat;
+    return v === null ? undefined : v >= 0 || ce.chop(v) === 0;
+  }
+
+  get isZero(): boolean | undefined {
+    const s = this.sgn;
+    if (s === null) return false;
+    if (typeof s === 'number') return s === 0;
+    return undefined;
+    // @todo: use this.functionDefinition.range
+  }
+
+  get isNotZero(): boolean | undefined {
+    const s = this.sgn;
+    if (s === null) return false;
+    if (typeof s === 'number') return s !== 0;
+    return undefined;
+    // @todo: use this.functionDefinition.range
+  }
+
+  get isOne(): boolean | undefined {
+    return this.isEqual(this.engine.number(1));
+  }
+
+  get isNegativeOne(): boolean | undefined {
+    return this.isEqual(this.engine.number(-1));
+  }
+
+  // x > 0
+  get isPositive(): boolean | undefined {
+    const s = this.sgn;
+    if (s === null) return false;
+    if (typeof s === 'number') return s > 0;
+    return undefined;
+  }
+  // x <= 0
+  get isNonPositive(): boolean | undefined {
+    const s = this.sgn;
+    if (s === null) return false;
+    if (typeof s === 'number') return s <= 0;
+    return undefined;
+  }
+  // x < 0
+  get isNegative(): boolean | undefined {
+    const s = this.sgn;
+    if (s === null) return false;
+    if (typeof s === 'number') return s < 0;
+    return undefined;
+  }
+  // x >= 0
+  get isNonNegative(): boolean | undefined {
+    const s = this.sgn;
+    if (s === null) return false;
+    if (typeof s === 'number') return s >= 0;
+    return undefined;
+  }
+
+  get isNumber(): boolean | undefined {
+    return this.domain.isCompatible('Number');
+  }
+  get isInteger(): boolean | undefined {
+    return this.domain.isCompatible('Integer');
+  }
+  get isRational(): boolean | undefined {
+    return this.domain.isCompatible('RationalNumber');
+  }
+  get isAlgebraic(): boolean | undefined {
+    return this.domain.isCompatible('AlgebraicNumber');
+  }
+  get isReal(): boolean | undefined {
+    return this.domain.isCompatible('RealNumber');
+  }
+  get isExtendedReal(): boolean | undefined {
+    return this.domain.isCompatible('ExtendedRealNumber');
+  }
+  get isComplex(): boolean | undefined {
+    return this.domain.isCompatible('ComplexNumber');
+  }
+  get isImaginary(): boolean | undefined {
+    return this.domain.isCompatible('ImaginaryNumber');
+  }
+
   get sgn(): -1 | 0 | 1 | undefined | null {
+    if (!this.isCanonical) return this.canonical.sgn;
     // @todo: if there is a this.functionDefinition.range, use it
     // @todo if inconclusive, and there is a this.def._sgn, call it
 
@@ -582,95 +679,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     }
     // @todo: trig functions, geometric functions
 
-    return null;
-  }
-
-  *map<T = BoxedExpression>(
-    fn: (x: BoxedExpression) => T
-  ): IterableIterator<T> {
-    let i = 0;
-    while (i < this._ops.length) yield fn(this._ops[i++]);
-  }
-
-  get isCanonical(): boolean {
-    return this._isCanonical;
-  }
-
-  set isCanonical(val: boolean) {
-    this._isCanonical = val;
-  }
-
-  apply(
-    fn: (x: BoxedExpression) => SemiBoxedExpression,
-    head?: string
-  ): BoxedExpression {
-    const newHead = head ?? this.head;
-    let opsChanged = false;
-    const ops: BoxedExpression[] = [];
-    for (const arg of this._ops) {
-      const newArg = fn(arg);
-      if (arg !== newArg) opsChanged = true;
-      ops.push(this.engine.box(newArg));
-    }
-
-    if (!opsChanged && this.head === newHead) return this;
-
-    return this.engine.fn(newHead, ops);
-  }
-
-  get canonical(): BoxedExpression {
-    if (this.isCanonical || !this.isValid) return this;
-
-    // 1/ If no definition (i.e. function `g`...), apply canonical to each op
-    const def = this.functionDefinition;
-    if (!def) {
-      const tail = this._ops.map((x) => x.canonical);
-      if (
-        tail.length === this._ops.length &&
-        tail.every((x, i) => this._ops[i] === x)
-      ) {
-        // We were already canonical! No need to create a new expression
-        this._isCanonical = true;
-        return this;
-      }
-      return this.engine._fn(this._head, tail);
-    }
-    //
-    // 2/ Get the canonical form of the arguments, accounting for `Hold`,
-    // `ReleaseHold`, `Sequence` and `Symbol`
-    //
-    let tail = canonicalHoldMap(def.name, this._ops, def.hold, def.associative);
-
-    //
-    // 3/ Apply `canonical` handler
-    //
-
-    const sig = def.signature;
-    if (sig?.canonical) return sig.canonical(this.engine, tail);
-
-    //
-    // 4/ Apply `idempotent` and `involution`
-    //
-    if (tail.length === 1 && tail[0].head === this._head) {
-      // f(f(x)) -> x
-      if (def.involution) return tail[0].op1;
-      // f(f(x)) -> f(x)
-      if (def.idempotent) tail = tail[0].ops!;
-    }
-
-    //
-    // 5/ Sort the arguments
-    //
-    if (tail.length > 1 && def.commutative === true) tail = tail.sort(order);
-
-    if (
-      tail.length === this._ops.length &&
-      tail.every((x, i) => this._ops[i] === x)
-    ) {
-      this._isCanonical = true;
-      return this;
-    }
-    return this.engine._fn(this._head, tail);
+    const v = (this.numericValue ?? this.N()).asSmallInteger;
+    if (v === null) return undefined;
+    if (v === 0) return 0;
+    if (v < 0) return -1;
+    return +1;
   }
 
   simplify(options?: SimplifyOptions): BoxedExpression {
@@ -865,22 +878,91 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // @todo
     return null;
   }
+}
 
-  replace(
-    rules: BoxedRuleSet,
-    options?: ReplaceOptions
-  ): BoxedExpression | null {
-    return replace(this, rules, options);
+export function makeCanonicalFunction(
+  ce: IComputeEngine,
+  head: string | BoxedExpression,
+  ops: BoxedExpression[],
+  options?: {
+    [x: string]: any;
+    metadata?: Metadata;
+  }
+): BoxedExpression {
+  options ??= {};
+  options.canonical = true;
+
+  //
+  // Canonicalize the arguments and flatten any sequence
+  //
+  ops = ops.map((x) => x.canonical);
+  ops = flattenSequence(ops);
+
+  //
+  // Is the head an expression? For example, `['InverseFunction', 'Sin']`
+  //
+  if (typeof head !== 'string') head = head.evaluate().symbol ?? head;
+
+  if (typeof head !== 'string')
+    return new BoxedFunction(ce, head, ops, options);
+
+  if (ce.context === null) return new BoxedFunction(ce, head, ops, options);
+
+  const def = ce.lookupFunction(head, ce.context);
+  if (!def) return new BoxedFunction(ce, head, ops, options);
+
+  // f(a, f(b, c), d) -> f(a, b, c, d)
+  if (def.associative) ops = flattenOps(ops, head) ?? ops;
+
+  // Scoped function automatically create a new scope
+  // @todo: this needs to be done when evaluating, not here...
+  if (def.scoped) ce.pushScope();
+
+  // Apply Sequence, Symbol
+  // this._ops = normalizeList(this._ops, this._def.hold);
+
+  const sig = def.signature;
+
+  ops = validateSignature(ce, sig, ops) ?? ops;
+
+  if (!ops.every((x) => x.isValid)) {
+    if (def.scoped) ce.popScope();
+    return new BoxedFunction(ce, head, ops, { ...options, def });
   }
 
-  subs(sub: Substitution): BoxedExpression {
-    // Call `fn().canonical` (and not `new BoxedFunction()`) so that the
-    // function may be reconstructed as a canonical expression
-    return this.engine.fn(
-      this._head,
-      this._ops.map((x) => x.subs(sub))
-    ).canonical;
+  //
+  // 3/ Apply `canonical` handler
+  //
+
+  if (sig.canonical) {
+    const fn = sig.canonical(ce, ops);
+    if (fn.isValid && !fn.isCanonical) debugger;
+    console.assert(!fn.isValid || fn.isCanonical);
+    return fn;
   }
+
+  //
+  // 4/ No handler, apply idempotent and involution
+  //
+
+  //
+  // 4/ Apply `idempotent` and `involution`
+  //
+  if (ops.length === 1 && ops[0].head === head) {
+    // f(f(x)) -> x
+    if (def.involution) return ops[0].op1;
+
+    // f(f(x)) -> f(x)
+    if (def.idempotent) ops = ops[0].ops!;
+  }
+
+  //
+  // 5/ Sort the arguments
+  //
+  if (ops.length > 1 && def.commutative === true) ops = ops.sort(order);
+
+  if (def.scoped) ce.popScope();
+  return new BoxedFunction(ce, head, ops, { ...options, def });
 }
 
 export function lambda(
@@ -899,9 +981,7 @@ export function lambda(
   subs['_'] = subs['_1'];
 
   // Substitute the arguments in the lambda expression
-  const result = fn.subs(subs);
-  result.bind(ce.context);
-  return result;
+  return fn.subs(subs);
 }
 
 // export function ungroup(expr: BoxedExpression): BoxedExpression {
@@ -950,16 +1030,8 @@ export function holdMap(
       else result.push(xs[i]);
 
       if (y) {
-        if (y.head === 'Sequence') {
-          if (y.ops)
-            result.push(...y.ops.map((x) => f(x)!).filter((x) => x !== null));
-        } else if (y.domain.literal === 'Symbol') {
-          const x = f(y.evaluate());
-          if (x !== null) result.push(x);
-        } else {
-          const x = f(y);
-          if (x !== null) result.push(x);
-        }
+        const x = f(y);
+        if (x !== null) result.push(x);
       }
     }
   }
@@ -979,7 +1051,7 @@ function flattenSequence(xs: BoxedExpression[]): BoxedExpression[] {
 }
 
 // Like `HoldMap` but preserves `Hold` and `ReleaseHold`
-export function canonicalHoldMap(
+function canonicalHoldMap(
   head: string,
   xs: BoxedExpression[],
   skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most',
@@ -1000,12 +1072,8 @@ export function canonicalHoldMap(
       x.head === 'Hold' ||
       x.head === 'ReleaseHold' ||
       !applicable(skip, xs.length - 1, i)
-    ) {
-      result.push(x);
-    } else if (x.head === 'Sequence') {
-      if (x.ops) result.push(...x.ops.map((x) => x.canonical));
-    } else if (x.head === 'Symbol' || x.domain.literal === 'Symbol')
-      result.push(x.evaluate());
+    )
+      result.push(x.canonical);
     else result.push(x.canonical);
   }
   if (associative) return flattenOps(result, head) ?? result;
@@ -1125,6 +1193,7 @@ function validateSignature(
   return newOps;
 }
 
+// @todo: allow selection of one signature amongst multiple
 function matchSignature(
   ce: IComputeEngine,
   def: BoxedFunctionDefinition,

@@ -127,29 +127,28 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   get canonical(): BoxedExpression {
-    if (this.symbolDefinition?.hold === false)
-      return (
-        this.symbolDefinition.value?.value ??
-        this.symbolDefinition.value ??
-        this
-      );
-    return this;
+    if (this.symbolDefinition?.hold === true) return this;
+    return (
+      this.symbolDefinition?.value?.value ??
+      this.symbolDefinition?.value ??
+      this
+    );
   }
 
-  get wikidata(): string {
-    return this._wikidata ?? this.baseDefinition?.wikidata ?? '';
+  get wikidata(): string | undefined {
+    return this._wikidata ?? this.baseDefinition?.wikidata ?? undefined;
   }
 
-  get description(): string[] {
-    if (!this.baseDefinition) return [];
-    if (!this.baseDefinition.description) return [];
+  get description(): string[] | undefined {
+    if (!this.baseDefinition) return undefined;
+    if (!this.baseDefinition.description) return undefined;
     if (typeof this.baseDefinition.description === 'string')
       return [this.baseDefinition.description];
     return this.baseDefinition.description;
   }
 
-  get url(): string {
-    return this.baseDefinition?.url ?? '';
+  get url(): string | undefined {
+    return this.baseDefinition?.url ?? undefined;
   }
 
   get complexity(): number {
@@ -242,8 +241,8 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     }
   }
 
-  get value(): BoxedExpression | undefined {
-    return this.symbolDefinition?.value;
+  get value(): BoxedExpression {
+    return this.symbolDefinition?.value ?? this;
   }
 
   set value(value: BoxedExpression | number | undefined) {
@@ -295,7 +294,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   get numericValue(): BoxedExpression | undefined {
-    return this.symbolDefinition?.value?.numericValue;
+    return this.symbolDefinition?.value?.numericValue ?? undefined;
   }
 
   get domain(): BoxedDomain {
@@ -334,9 +333,9 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     }
   }
 
-  get explicitDomain(): BoxedDomain | null {
+  get explicitDomain(): BoxedDomain | undefined {
     if (this.functionDefinition) return this.engine.domain('Function');
-    return this.symbolDefinition?.domain ?? null;
+    return this.symbolDefinition?.domain ?? undefined;
   }
 
   get json(): Expression {
@@ -349,15 +348,20 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   get sgn(): -1 | 0 | 1 | undefined | null {
     // If available, use the value associated with this symbol.
     // Note that `null` is an acceptable and valid value
-    const s = this.value?.sgn;
-    if (s !== undefined) return s;
+    const v = this.numericValue;
+    if (v && v !== this) {
+      const s = v.sgn;
+      if (s !== undefined) return s;
+    }
 
     // We didn't get a definitive answer from the value
     // of this symbol. Check flags.
-    if (this.symbolDefinition?.zero === true) return 0;
-    if (this.symbolDefinition?.positive === true) return 1;
-    if (this.symbolDefinition?.negative === true) return -1;
-
+    const def = this.symbolDefinition;
+    if (def) {
+      if (def.zero === true) return 0;
+      if (def.positive === true) return 1;
+      if (def.negative === true) return -1;
+    }
     return undefined;
   }
 
@@ -382,14 +386,21 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   isEqual(rhs: BoxedExpression): boolean {
+    if (!this.isCanonical) return this.canonical.isEqual(rhs);
+    rhs = rhs.canonical;
+
+    //  Boxed Identity
     if (this === rhs) return true;
 
     // Idempotency ('x' = 'x')
     if (rhs.symbol !== null) return rhs.symbol === this._name;
 
     // Mathematical/numeric equality
-    const val = this.symbolDefinition?.value;
-    if (val) return val.isEqual(rhs);
+    const lhsVal = this.symbolDefinition?.value?.numericValue;
+    if (lhsVal) {
+      const rhsVal = rhs.numericValue;
+      if (rhsVal) return lhsVal.isEqual(rhsVal);
+    }
 
     if (rhs.isZero) {
       if (this.isZero) return true;
@@ -399,6 +410,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     // @todo could test other contradictory properties: prime vs composite, etc...
 
     // Direct assumptions
+    if (this.engine.ask(['Equal', this, rhs]).length > 0) return true;
     if (this.engine.ask(['NotEqual', this, rhs]).length > 0) return false;
 
     //@todo: could use range

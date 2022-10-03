@@ -1,83 +1,74 @@
 import { ComputeEngine, DomainExpression } from '../../src/compute-engine';
 
+import '../utils'; // For snapshot serializers
+
 export const engine = new ComputeEngine();
 engine.defaultDomain = null;
 
 describe('Domain of function identifiers', () =>
   test('Domain of \\sin', () =>
     expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","Function"]"`
+      `["Domain", "Function"]`
     )));
 
 describe('Domain of function identifiers', () =>
   test('Domain of Sin', () =>
     expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","Function"]"`
+      `["Domain", "Function"]`
     )));
 
 describe('INFERRED DOMAINS', () => {
   test('42', () =>
     expect(engine.box(42).domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","PositiveInteger"]"`
+      `["Domain", "PositiveInteger"]`
     ));
   test('Pi', () =>
     expect(engine.box('Pi').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","TranscendentalNumber"]"`
+      `["Domain", "PositiveNumber"]`
     ));
   test('-3.1415', () =>
     expect(engine.box(-3.1415).domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","NegativeNumber"]"`
+      `["Domain", "NegativeNumber"]`
     ));
 
   test('sym', () =>
     expect(engine.box('sym').domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain","Anything"]"`
+      `["Domain", "Anything"]`
     ));
 
   test('True', () =>
-    expect(engine.box('True').domain.json).toMatchInlineSnapshot(`
-      [
-        "Domain",
-        "Boolean",
-      ]
-    `));
+    expect(engine.box('True').domain.json).toMatchInlineSnapshot(
+      `["Domain", "Boolean"]`
+    ));
   test('["Range", 1, 5]', () =>
-    expect(engine.box(['Range', 1, 5]).domain.json).toMatchInlineSnapshot(`
-      [
-        "Domain",
-        "Void",
-      ]
-    `));
+    expect(engine.box(['Range', 1, 5]).domain.json).toMatchInlineSnapshot(
+      `["Domain", "Void"]`
+    ));
   test('["Range", 1, 5]', () =>
-    expect(engine.box(['Range', 1, 5]).domain.json).toMatchInlineSnapshot(`
-      [
-        "Domain",
-        "Void",
-      ]
-    `));
+    expect(engine.box(['Range', 1, 5]).domain.json).toMatchInlineSnapshot(
+      `["Domain", "Void"]`
+    ));
 
   // The symbol `Sin` references the sine function
   test('Symbol \\sin', () =>
-    expect(() => engine.parse('\\sin').domain.json).toMatchInlineSnapshot(
-      `[Function]`
+    expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
+      `["Domain", "Function"]`
     ));
+
   test('Symbol Sin', () =>
-    expect(() => engine.box('Sin').domain.json).toMatchInlineSnapshot(
-      `[Function]`
+    expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
+      `["Domain", "Function"]`
     ));
 
   test('\\sin(3)', () => {
     expect(engine.box(['Sin', 3]).domain.toJSON()).toMatchInlineSnapshot(
-      `"["Domain",["Interval",-1,1]]"`
+      `["Domain", ["Interval"]]`
     );
   });
   test('Nothing', () => {
-    expect(engine.box('Nothing').domain.json).toMatchInlineSnapshot(`
-      [
-        "Domain",
-        "Nothing",
-      ]
-    `);
+    expect(engine.box('Nothing').domain.json).toMatchInlineSnapshot(
+      `["Domain", "Nothing"]`
+    );
   });
 });
 
@@ -86,22 +77,18 @@ describe('CANONICAL DOMAINS', () => {
     expect(
       engine.box(['Range', -Infinity, Infinity]).toJSON()
     ).toMatchInlineSnapshot(
-      `"["Range",{"num":"-Infinity"},{"num":"+Infinity"}]"`
+      `["Range", {num: "-Infinity"}, {num: "+Infinity"}]`
     ));
   test("['Range', 0, Infinity]", () =>
     expect(engine.box(['Range', 0, Infinity]).toJSON()).toMatchInlineSnapshot(
-      `"["Range",0,{"num":"+Infinity"}]"`
+      `["Range", 0, {num: "+Infinity"}]`
     ));
 
   // Domain of a domain
   test("['Range', -Infinity, Infinity]", () =>
-    expect(engine.box(['Range', -Infinity, Infinity]).domain.json)
-      .toMatchInlineSnapshot(`
-      [
-        "Domain",
-        "Void",
-      ]
-    `));
+    expect(
+      engine.box(['Range', -Infinity, Infinity]).domain.json
+    ).toMatchInlineSnapshot(`["Domain", "Void"]`));
 });
 
 describe('DOMAIN LITERALS', () => {
@@ -200,7 +187,7 @@ describe('NUMERIC', () => {
 describe('INVALID DOMAINS', () => {
   test('NotADomainLiteral', () =>
     expect(engine.domain('NotADomainLiteral').toJSON()).toMatchInlineSnapshot(
-      `"["Error","[\\"ErrorCode\\",\\"'invalid-domain'\\",\\"'\\\\\\"NotADomainLiteral\\\\\\"'\\"]"]"`
+      `["Error", ["ErrorCode", "'invalid-domain'", "'"NotADomainLiteral"'"]]`
     ));
 
   test('NotADomainConstructor', () => {
@@ -211,16 +198,23 @@ describe('INVALID DOMAINS', () => {
           'Integer',
         ] as unknown as DomainExpression)
         .toJSON()
-    ).toMatchInlineSnapshot(
-      `"["Error","[\\"ErrorCode\\",\\"'invalid-domain'\\",\\"'[\\\\\\"NotADomainConstructor\\\\\\",\\\\\\"Integer\\\\\\"]'\\"]"]"`
-    );
+    ).toMatchInlineSnapshot(`
+      [
+        "Error",
+        [
+          "ErrorCode",
+          "'invalid-domain'",
+          "'["NotADomainConstructor","Integer"]'"
+        ]
+      ]
+    `);
   });
 
   test('Missing parameters (Range)', () => {
     expect(
       engine.domain(['Range'] as unknown as DomainExpression).toJSON()
     ).toMatchInlineSnapshot(
-      `"["Error","[\\"ErrorCode\\",\\"'invalid-domain'\\",\\"'[\\\\\\"Range\\\\\\"]'\\"]"]"`
+      `["Error", ["ErrorCode", "'invalid-domain'", "'["Range"]'"]]`
     );
   });
 
@@ -228,7 +222,7 @@ describe('INVALID DOMAINS', () => {
     expect(
       engine.domain(['Maybe'] as unknown as DomainExpression)
     ).toMatchInlineSnapshot(
-      `"["Error","[\\"ErrorCode\\",\\"'invalid-domain'\\",\\"'[\\\\\\"Maybe\\\\\\"]'\\"]"]"`
+      `["Error", ["ErrorCode", "'invalid-domain'", "'["Maybe"]'"]]`
     );
   });
 
