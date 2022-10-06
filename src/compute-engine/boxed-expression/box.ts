@@ -13,9 +13,9 @@ import { BoxedFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
 import { boxDomain, _BoxedDomain } from './boxed-domain';
-import { complexAllowed, decimalValue, preferDecimal } from './utils';
+import { complexAllowed, bignumValue, preferBignum } from './utils';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
-import { isInMachineRange } from '../numerics/numeric-decimal';
+import { isInMachineRange } from '../numerics/numeric-bignum';
 import { missingIfEmpty } from '../../math-json/utils';
 
 /**
@@ -186,8 +186,8 @@ export function boxNumber(
       return ce._POSITIVE_INFINITY;
     }
 
-    // Use a Decimal if in `decimal` mode, or `auto` with precision > 15
-    return new BoxedNumber(ce, preferDecimal(ce) ? num : n, metadata);
+    // Use a Decimal if in `"bignum"` mode, or `"auto"` with precision > 15
+    return new BoxedNumber(ce, preferBignum(ce) ? num : n, metadata);
   }
 
   if (typeof num === 'object' && 'num' in num) {
@@ -346,7 +346,7 @@ function boxFunction(
     } else {
       const op1 = ops[0] as Expression;
       const op2 = ops[1] as Expression;
-      const [n, d] = [decimalValue(ce, op1), decimalValue(ce, op2)];
+      const [n, d] = [bignumValue(ce, op1), bignumValue(ce, op2)];
       if (n?.isInteger() && d?.isInteger()) {
         if (isInMachineRange(n) && isInMachineRange(d))
           return ce.number([n.toNumber(), d.toNumber()], metadata);

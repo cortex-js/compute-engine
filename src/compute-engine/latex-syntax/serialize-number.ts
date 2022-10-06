@@ -117,7 +117,7 @@ export function serializeNumber(
     return serializeAutoNotationNumber(num.toString(), options);
   }
 
-  // If we end with a letter ('n' or 'd' for bigint or decimal)
+  // If we end with a letter ('n' or 'd' for bigint or bignum)
   // remove it (legacy format)
   if (/[0-9][nd]$/.test(num)) num = num.slice(0, -1);
 

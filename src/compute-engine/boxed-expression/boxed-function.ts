@@ -26,7 +26,7 @@ import {
   serializeJsonCanonicalFunction,
   serializeJsonFunction,
 } from './serialize';
-import { complexAllowed, hashCode, preferDecimal } from './utils';
+import { complexAllowed, hashCode, preferBignum } from './utils';
 import { flattenOps } from '../symbolic/flatten';
 
 /**
@@ -868,8 +868,8 @@ export class BoxedFunction extends AbstractBoxedExpression {
       if (!complexAllowed(this.engine) && result.complexValue)
         return this.engine._NAN;
 
-      if (!preferDecimal(this.engine) && result.decimalValue)
-        return this.engine.number(result.decimalValue.toNumber());
+      if (!preferBignum(this.engine) && result.bignumValue)
+        return this.engine.number(result.bignumValue.toNumber());
     }
     return result;
   }

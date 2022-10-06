@@ -4,8 +4,8 @@ import { canonicalNegate } from '../symbolic/negate';
 import { reducedRational } from '../numerics/numeric';
 import {
   isInMachineRange,
-  reducedRational as reducedRationalDecimal,
-} from '../numerics/numeric-decimal';
+  reducedRational as reducedBigRational,
+} from '../numerics/numeric-bignum';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -101,13 +101,13 @@ export function simplifyDivide(
 
     if (op1.isInteger && op2.isInteger) {
       let [dn, dd] = [
-        op1.decimalValue ??
-          (op1.machineValue ? ce.decimal(op1.machineValue) : null),
-        op2.decimalValue ??
-          (op2.machineValue ? ce.decimal(op2.machineValue) : null),
+        op1.bignumValue ??
+          (op1.machineValue ? ce.bignum(op1.machineValue) : null),
+        op2.bignumValue ??
+          (op2.machineValue ? ce.bignum(op2.machineValue) : null),
       ];
       if (dn !== null && dd !== null) {
-        [dn, dd] = reducedRationalDecimal([dn, dd]);
+        [dn, dd] = reducedBigRational([dn, dd]);
         if (dd.eq(1)) return ce.number(dn);
         if (isInMachineRange(dn) && isInMachineRange(dd))
           return ce.number([dn.toNumber(), dd.toNumber()]);

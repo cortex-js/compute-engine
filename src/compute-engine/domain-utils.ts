@@ -1,7 +1,7 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { BoxedExpression } from './public';
-// import { gcd as decimalGcd } from './numerics/numeric-decimal';
+// import { gcd as decimalGcd } from './numerics/numeric-bignum';
 import { reducedRational } from './numerics/numeric';
 
 /** Quickly determine the numeric domain of a number or constant
@@ -33,7 +33,7 @@ export function inferNumericDomain(
   }
 
   //
-  // 2 Is it a decimal?
+  // 2 Is it a bignum?
   //
   if (value instanceof Decimal) {
     if (value.isNaN()) return 'Number';

@@ -3,14 +3,14 @@ import { BoxedExpression, BoxedDomain, IComputeEngine } from '../public';
 import {
   complexAllowed,
   getImaginaryCoef,
-  preferDecimal,
+  preferBignum as preferBignum,
 } from '../boxed-expression/utils';
 import { flattenOps } from '../symbolic/flatten';
 import { Sum } from '../symbolic/sum';
 import {
   isInMachineRange,
-  reducedRational as reducedRationalDecimal,
-} from '../numerics/numeric-decimal';
+  reducedRational as reducedBigRational,
+} from '../numerics/numeric-bignum';
 import {
   MAX_ITERATION,
   MAX_SYMBOLIC_TERMS,
@@ -41,14 +41,14 @@ export function canonicalAdd(
     let re: number | null = 0;
     if (ops[0].isLiteral) {
       re = ops[0].machineValue;
-      if (re === null && ops[0].decimalValue) re = ops[0].asFloat;
+      if (re === null && ops[0].bignumValue) re = ops[0].asFloat;
     }
     if (re !== null && re !== 0) im = getImaginaryCoef(ops[1]);
     else {
       im = getImaginaryCoef(ops[0]);
       if (im !== 0) {
         re = ops[1].machineValue;
-        if (re === null && ops[1].decimalValue) re = ops[1].asFloat;
+        if (re === null && ops[1].bignumValue) re = ops[1].asFloat;
       }
     }
     if (re !== null && im !== null && im !== 0)
@@ -105,13 +105,13 @@ export function evalAdd(
   const sum = new Sum(ce);
 
   //
-  // Accumulate rational, machine, decimal, complex and symbolic terms
+  // Accumulate rational, machine, bignum, complex and symbolic terms
   //
   let [numer, denom] = [0, 1];
-  let [decimalNumer, decimalDenom] = [ce._DECIMAL_ZERO, ce._DECIMAL_ONE];
+  let [bigNumer, bigDenom] = [ce._BIGNUM_ZERO, ce._BIGNUM_ONE];
   let machineSum = 0;
   let machineIntegerSum = 0;
-  let decimalSum = ce._DECIMAL_ZERO;
+  let bigSum = ce._BIGNUM_ZERO;
   let complexSum = Complex.ZERO;
 
   for (const arg of args) {
@@ -120,15 +120,15 @@ export function evalAdd(
       const [n, d] = arg.rationalValue;
       if (n !== null && d !== null) {
         [numer, denom] = reducedRational([numer * d + denom * n, denom * d]);
-      } else if (arg.decimalValue !== null) {
-        if (arg.decimalValue.isInteger())
-          decimalNumer = decimalNumer.add(decimalDenom.mul(arg.decimalValue));
-        else decimalSum = decimalSum.add(arg.decimalValue);
+      } else if (arg.bignumValue !== null) {
+        if (arg.bignumValue.isInteger())
+          bigNumer = bigNumer.add(bigDenom.mul(arg.bignumValue));
+        else bigSum = bigSum.add(arg.bignumValue);
       } else if (arg.machineValue !== null) {
-        if (preferDecimal(ce)) {
+        if (preferBignum(ce)) {
           if (Number.isInteger(arg.machineValue))
-            decimalNumer = decimalNumer.add(decimalDenom.mul(arg.machineValue));
-          else decimalSum = decimalSum.add(arg.machineValue);
+            bigNumer = bigNumer.add(bigDenom.mul(arg.machineValue));
+          else bigSum = bigSum.add(arg.machineValue);
         } else {
           if (Number.isInteger(arg.machineValue))
             machineIntegerSum += arg.machineValue;
@@ -138,14 +138,14 @@ export function evalAdd(
         complexSum = complexSum.add(arg.complexValue);
       } else sum.addTerm(arg);
     } else if (arg.head === 'Rational' && arg.nops === 2) {
-      // If this is a Rational head, it's a rational of Decimal values
+      // If this is a Rational head, it's a rational of bignums
       const [dn, dd] = [
-        arg.op1.decimalValue ?? arg.op1.machineValue,
-        arg.op2.decimalValue ?? arg.op1.machineValue,
+        arg.op1.bignumValue ?? arg.op1.machineValue,
+        arg.op2.bignumValue ?? arg.op1.machineValue,
       ];
       if (dn !== null && dd !== null) {
-        decimalNumer = decimalNumer.mul(dd).add(decimalDenom.mul(dn));
-        decimalDenom = decimalDenom.mul(dd);
+        bigNumer = bigNumer.mul(dd).add(bigDenom.mul(dn));
+        bigDenom = bigDenom.mul(dd);
       } else sum.addTerm(arg);
     } else sum.addTerm(arg);
   }
@@ -154,39 +154,32 @@ export function evalAdd(
   if (!complexAllowed(ce) && complexSum.im !== 0) return ce._NAN;
 
   //
-  // If we prefer to use Decimal, or if we had any decimal term,
-  // do Decimal calculations
+  // If we prefer to use bignum, or if we had any bignum term,
+  // do bignum calculations
   //
-  if (
-    preferDecimal(ce) ||
-    ce.chop(decimalSum) !== 0 ||
-    !decimalNumer.isZero()
-  ) {
-    let d = decimalSum;
+  if (preferBignum(ce) || ce.chop(bigSum) !== 0 || !bigNumer.isZero()) {
+    let d = bigSum;
     if (machineSum !== 0) d = d.add(machineSum);
     if (complexSum.re !== 0) d = d.add(complexSum.re);
 
-    decimalNumer = decimalNumer.add(decimalDenom.mul(machineIntegerSum));
-    decimalNumer = decimalNumer.mul(denom).add(decimalDenom.mul(numer));
-    decimalDenom = decimalDenom.mul(denom);
-    [decimalNumer, decimalDenom] = reducedRationalDecimal([
-      decimalNumer,
-      decimalDenom,
-    ]);
+    bigNumer = bigNumer.add(bigDenom.mul(machineIntegerSum));
+    bigNumer = bigNumer.mul(denom).add(bigDenom.mul(numer));
+    bigDenom = bigDenom.mul(denom);
+    [bigNumer, bigDenom] = reducedBigRational([bigNumer, bigDenom]);
 
     // machineSum = 0;
     // numer = 0;
     // denom = 1;
     // machineIntegerSum = 0;
 
-    if (decimalDenom.eq(1)) d = d.add(decimalNumer);
+    if (bigDenom.eq(1)) d = d.add(bigNumer);
     else {
       // In 'N' mode we should divide the numerator and denominator
-      if (mode === 'N') d = d.add(decimalNumer.div(decimalDenom));
+      if (mode === 'N') d = d.add(bigNumer.div(bigDenom));
       else {
         // In 'eval' mode, preserve a rational
         sum.addTerm(
-          ce.box(['Rational', ce.number(decimalNumer), ce.number(decimalDenom)])
+          ce.box(['Rational', ce.number(bigNumer), ce.number(bigDenom)])
             .canonical
         );
       }
@@ -200,7 +193,7 @@ export function evalAdd(
         if (sum.isEmpty) return c;
         sum.addTerm(c);
       } else {
-        // We have to keep a complex and Decimal term
+        // We have to keep a complex and bignum term
         sum.addTerm(ce.number(ce.complex(0, complexSum.im)));
         sum.addTerm(ce.number(d));
       }
@@ -213,7 +206,7 @@ export function evalAdd(
   //
   // Machine Number calculation
   //
-  // Fold into machine: we don't prefer decimal and we had no Decimal terms
+  // Fold into machine: we don't prefer bignum and we had no bignum terms
 
   if (mode === 'N' || denom === 1) {
     const re = machineSum + machineIntegerSum + complexSum.re + numer / denom;
@@ -316,12 +309,12 @@ export function evalSummation(
     return ce.add(terms).evaluate();
   }
 
-  if (preferDecimal(ce)) {
-    let v = ce.decimal(0);
+  if (preferBignum(ce)) {
+    let v = ce.bignum(0);
     for (let i = lower; i <= upper; i++) {
       const n = ce.number(i);
       const r = fn.subs({ _1: n, _: n }).evaluate();
-      const val = r.decimalValue ?? r.asFloat;
+      const val = r.bignumValue ?? r.asFloat;
       if (!val) return undefined;
       v = v.add(val);
     }

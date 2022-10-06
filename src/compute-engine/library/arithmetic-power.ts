@@ -1,6 +1,6 @@
-import { preferDecimal } from '../boxed-expression/utils';
+import { preferBignum } from '../boxed-expression/utils';
 import { factorPower } from '../numerics/numeric';
-import { isInMachineRange } from '../numerics/numeric-decimal';
+import { isInMachineRange } from '../numerics/numeric-bignum';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 
 /**
@@ -48,14 +48,14 @@ export function canonicalPower(
         const i = base.asFloat;
         if (i !== null && Number.isInteger(i))
           return ce.number([1, i], metadata);
-        if (base.decimalValue?.isInteger()) {
-          if (isInMachineRange(base.decimalValue))
-            ce.number([1, base.decimalValue.toNumber()], metadata);
+        if (base.bignumValue?.isInteger()) {
+          if (isInMachineRange(base.bignumValue))
+            ce.number([1, base.bignumValue.toNumber()], metadata);
           else ce._fn('Rational', [ce._ONE, base], metadata);
         } else if (
           smallBase !== null &&
           Number.isInteger(smallBase) &&
-          !base.decimalValue
+          !base.bignumValue
         )
           return ce.number([1, smallBase], metadata);
         return ce._fn('Power', [base, ce._NEGATIVE_ONE], metadata);
@@ -161,7 +161,7 @@ export function square(
   base: BoxedExpression
 ): BoxedExpression {
   if (base.machineValue) return ce.number(Math.pow(base.machineValue, 2));
-  if (base.decimalValue) return ce.number(base.decimalValue.pow(2));
+  if (base.bignumValue) return ce.number(base.bignumValue.pow(2));
   if (base.complexValue) return ce.number(base.complexValue.pow(2));
   const [n, d] = base.rationalValue;
   if (n !== null && d !== null)
@@ -199,25 +199,20 @@ export function processPower(
         );
       }
       if (exponent.complexValue) {
-        const b = base.asFloat ?? base.decimalValue?.toNumber() ?? null;
+        const b = base.asFloat ?? base.bignumValue?.toNumber() ?? null;
         if (b !== null)
           return ce.number(ce.complex(b).pow(exponent.complexValue));
       }
 
-      if (base.decimalValue) {
+      if (base.bignumValue) {
         return ce.number(
-          base.decimalValue.pow(exponent.decimalValue ?? exponent.asFloat!)
+          base.bignumValue.pow(exponent.bignumValue ?? exponent.asFloat!)
         );
       }
 
-      if (
-        base.asFloat !== null &&
-        (exponent.decimalValue || preferDecimal(ce))
-      ) {
+      if (base.asFloat !== null && (exponent.bignumValue || preferBignum(ce))) {
         return ce.number(
-          ce
-            .decimal(base.asFloat)
-            .pow(exponent.decimalValue ?? exponent.asFloat!)
+          ce.bignum(base.asFloat).pow(exponent.bignumValue ?? exponent.asFloat!)
         );
       }
       return ce.number(Math.pow(base.asFloat ?? NaN, exponent.asFloat ?? NaN));

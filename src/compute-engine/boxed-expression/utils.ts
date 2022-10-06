@@ -108,13 +108,12 @@ export function getSubexpressions(
 }
 
 /**
- * For any numeric result, or when boxing numbers,
- * if `preferDecimal` is true, create them as Decimal number
- * if `preferDecimal` is false, create them as machine number
+ * For any numeric result, if `preferBignum()` is true, calculate using
+ * bignums. If `preferBignum()` is false, calculate using machine numbers
  */
-export function preferDecimal(ce: IComputeEngine) {
+export function preferBignum(ce: IComputeEngine) {
   return (
-    ce.numericMode === 'decimal' ||
+    ce.numericMode === 'bignum' ||
     (ce.numericMode === 'auto' && ce.precision > Math.floor(MACHINE_PRECISION))
   );
 }
@@ -196,14 +195,15 @@ export function getListLike(expr: BoxedExpression): BoxedExpression[] {
  * If `expr` is a number, return it as a Decimal (it might be
  * in the machine value range or not). Use `isInMachineRange()` to check.
  *
- * Use this instead of `machineValue()` when possible, as `machineValue` will truncate decimal numbers to machine numbers
+ * Use this instead of `machineValue()` when possible, as `machineValue` will
+ * truncate bignums to machine numbers
  */
-export function decimalValue(
+export function bignumValue(
   ce: IComputeEngine,
   expr: Expression | null | undefined
 ): Decimal | null {
   if (expr === null || expr === undefined) return null;
-  if (typeof expr === 'number') return ce.decimal(expr);
+  if (typeof expr === 'number') return ce.bignum(expr);
 
   if (isNumberObject(expr)) {
     let s = expr.num
@@ -215,11 +215,11 @@ export function decimalValue(
       s = body + repeat.repeat(Math.ceil(ce.precision / repeat.length));
     }
 
-    if (s === 'nan') return ce.decimal('NaN');
-    if (s === 'infinity' || s === '+infinity') return ce.decimal('+Infinity');
-    if (s === '-infinity') return ce.decimal('-Infinity');
+    if (s === 'nan') return ce.bignum('NaN');
+    if (s === 'infinity' || s === '+infinity') return ce.bignum('+Infinity');
+    if (s === '-infinity') return ce.bignum('-Infinity');
 
-    return ce.decimal(s);
+    return ce.bignum(s);
   }
 
   return null;

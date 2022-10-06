@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/numeric-evaluation/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 ---
 
@@ -42,7 +42,8 @@ console.log(ce.parse('\\sqrt{x} + 7^3').numericValue?.latex);
 ## Numeric Modes
 
 Four numeric modes may be used to perform numeric evaluations with the Compute
-Engine: `machine` `decimal` `complex` and `auto`. The default mode is `auto`.
+Engine: `"machine"` `"bignum"` `"complex"` and `"auto"`. The default mode is
+`"auto"`.
 
 <section id='machine-numeric-mode'>
 
@@ -86,44 +87,42 @@ Arithmetic"</strong> {% endreadmore %}
 
 </section>
 
-<section id='decimal-numeric-mode'>
+<section id='bignum-numeric-mode'>
 
-### Decimal Numeric Mode
+### Bignum Numeric Mode
 
-In the `decimal` numeric mode, numbers are represented in Decimal format, using
-base-10 and a variable amount of memory depending on the number of significant
-digits (**precision**) desired.
+In the `bignum` numeric mode, numbers are represented as a string of base-10
+digits and an exponent.
 
-Numbers in the Decimal format have a minimum value of \\( \pm
-10^{-9000000000000000} \\) and a maximum value of \\( \pm9.99999\ldot\times
-10^{+9000000000000000} \\).
+Bignum numbers have a minimum value of \\( \pm 10^{-9000000000000000} \\) and a
+maximum value of \\( \pm9.99999\ldot\times 10^{+9000000000000000} \\).
 
-**To change the numeric mode to the `decimal` mode**, use
-`engine.numericMode = "decimal"`.
+**To change the numeric mode to the `big` mode**, use
+`engine.numericMode = "bignum"`.
 
 ```ts
-ce.numericMode = 'decimal';
+ce.numericMode = 'bignum';
 console.log(ce.parse('0.1 + 0.2').N().latex);
 // ➔ "0.3"
 ```
 
-When using the `decimal` mode, the precision of computation (number of
+When using the `bignum` mode, the precision of computation (number of
 significant digits used) can be changed. By default, the precision is 100.
 
 Trigonometric operations are accurate for precision up to 1,000.
 
-**To change the precision of calculations in `decimal` mode**, set the
+**To change the precision of calculations in `bignum` mode**, set the
 `engine.precision` property.
 
-The `precision` property affects how the computations are performed. To change
-how numbers are displayed when serialized to LaTeX, use
+The `precision` property affects how the computations are performed, but not how
+they are serialized. To change how numbers are serialized to LaTeX, use
 `engine.latexOptions = { precision: 6 }` to set it to 6 significant digits, for
 example.
 
 The LaTeX precision is adjusted automatically when the `precision` is changed so
 that the display precision is never greater than the computation precision.
 
-When using the `decimal` mode, the return value of `expr.N().json` may be a
+When using the `bignum` mode, the return value of `expr.N().json` may be a
 MathJSON number that looks like this:
 
 ```json
@@ -145,7 +144,7 @@ MathJSON number that looks like this:
 }
 ```
 
-{% readmore "https://mikemcl.github.io/decimal.js/" %} Support for the `decimal`
+{% readmore "https://mikemcl.github.io/decimal.js/" %} Support for the `bignum`
 mode is implemented using the <strong>decimal.js</strong> library.
 {% endreadmore %}
 

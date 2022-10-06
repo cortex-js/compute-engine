@@ -118,19 +118,19 @@ export class ComputeEngine implements IComputeEngine {
   readonly _COMPLEX_INFINITY: BoxedExpression;
 
   /** @internal */
-  _DECIMAL_NAN: Decimal;
+  _BIGNUM_NAN: Decimal;
   /** @internal */
-  _DECIMAL_ZERO: Decimal;
+  _BIGNUM_ZERO: Decimal;
   /** @internal */
-  _DECIMAL_ONE: Decimal;
+  _BIGNUM_ONE: Decimal;
   /** @internal */
-  _DECIMAL_TWO: Decimal;
+  _BIGNUM_TWO: Decimal;
   /** @internal */
-  _DECIMAL_HALF: Decimal;
+  _BIGNUM_HALF: Decimal;
   /** @internal */
-  _DECIMAL_PI: Decimal;
+  _BIGNUM_PI: Decimal;
   /** @internal */
-  _DECIMAL_NEGATIVE_ONE: Decimal;
+  _BIGNUM_NEGATIVE_ONE: Decimal;
 
   /** @internal */
   private _precision: number;
@@ -142,7 +142,7 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   private _tolerance: number;
   /** @internal */
-  private _decimalTolerance: Decimal;
+  private _bignumTolerance: Decimal;
 
   /** @internal */
   private _cache: {
@@ -278,9 +278,10 @@ export class ComputeEngine implements IComputeEngine {
    * be the `'core'` dictionary which include some basic definitions such
    * as domains (`Boolean`, `Number`, etc...) that are used by later dictionaries.
    *
-   * @param options.numericMode The default mode is `auto`. Use `machine` to only
-   * use 64-bit float, use `decimal` to always use arbitrary precision floating
-   * point numbers or `complex` for complex numbers.
+   * @param options.numericMode The default mode is `"auto"`. Use `"machine"`
+   * to perform numeric calculations using 64-bit floats. Use `"bignum"` to
+   * perform calculations using arbitrary precision floating point numbers.
+   * Use `"auto"` or `"complex"` to allow calculations on complex numbers.
    *
    * @param options.numericPrecision Specific how many digits of precision for the
    * numeric calculations. Default is 100.
@@ -322,14 +323,14 @@ export class ComputeEngine implements IComputeEngine {
     // we've built the dictionary
     this._defaultDomain = null;
 
-    // Set the default precision for `decimal` calculations
+    // Set the default precision for `bignum` calculations
     this._numericMode = options?.numericMode ?? 'auto';
     this._precision = Math.max(
       options?.numericPrecision ?? 100,
       Math.floor(MACHINE_PRECISION)
     );
 
-    this._decimal = Decimal.clone({ precision: this._precision });
+    this._bignum = Decimal.clone({ precision: this._precision });
 
     this.tolerance = options?.tolerance ?? NUMERIC_TOLERANCE;
 
@@ -407,16 +408,16 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   reset() {
-    console.assert(this._decimal);
+    console.assert(this._bignum);
 
-    // Recreate the Decimal constants (they depend on the engine's precision)
-    this._DECIMAL_NEGATIVE_ONE = this.decimal(-1);
-    this._DECIMAL_NAN = this.decimal(NaN);
-    this._DECIMAL_ZERO = this.decimal(0);
-    this._DECIMAL_ONE = this.decimal(1);
-    this._DECIMAL_TWO = this.decimal(2);
-    this._DECIMAL_HALF = this._DECIMAL_ONE.div(this._DECIMAL_TWO);
-    this._DECIMAL_PI = this._DECIMAL_NEGATIVE_ONE.acos();
+    // Recreate the bignum constants (they depend on the engine's precision)
+    this._BIGNUM_NEGATIVE_ONE = this.bignum(-1);
+    this._BIGNUM_NAN = this.bignum(NaN);
+    this._BIGNUM_ZERO = this.bignum(0);
+    this._BIGNUM_ONE = this.bignum(1);
+    this._BIGNUM_TWO = this.bignum(2);
+    this._BIGNUM_HALF = this._BIGNUM_ONE.div(this._BIGNUM_TWO);
+    this._BIGNUM_PI = this._BIGNUM_NEGATIVE_ONE.acos();
 
     // Unbind all the known expressions/symbols
     const symbols = this._stats.symbols.values();
@@ -514,7 +515,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal */
-  _decimal: Decimal.Constructor;
+  _bignum: Decimal.Constructor;
 
   /** The precision, or number of significant digits, for numeric calculations
    * such as when calling `ce.N()`.
@@ -547,7 +548,7 @@ export class ComputeEngine implements IComputeEngine {
     }
 
     this._precision = Math.max(p, Math.floor(MACHINE_PRECISION));
-    this._decimal = this._decimal.config({ precision: this._precision });
+    this._bignum = this._bignum.config({ precision: this._precision });
 
     // Reset the caches
     // (the values in the cache depend on the current precision)
@@ -638,12 +639,12 @@ export class ComputeEngine implements IComputeEngine {
     if (typeof val === 'number' && Number.isFinite(val))
       this._tolerance = Math.max(val, 0);
     else this._tolerance = NUMERIC_TOLERANCE;
-    this._decimalTolerance = this.decimal(this._tolerance);
+    this._bignumTolerance = this.bignum(this._tolerance);
   }
 
   /** @internal */
-  decimal(a: Decimal.Value): Decimal {
-    return new this._decimal(a);
+  bignum(a: Decimal.Value): Decimal {
+    return new this._bignum(a);
   }
 
   /** @internal */
@@ -661,7 +662,7 @@ export class ComputeEngine implements IComputeEngine {
   chop(n: number | Decimal | Complex): number | Decimal | Complex {
     if (typeof n === 'number' && Math.abs(n) <= this._tolerance) return 0;
 
-    if (n instanceof Decimal && n.abs().lte(this._decimalTolerance)) return 0;
+    if (n instanceof Decimal && n.abs().lte(this._bignumTolerance)) return 0;
 
     if (
       n instanceof Complex &&
@@ -1041,7 +1042,7 @@ export class ComputeEngine implements IComputeEngine {
     if (head === 'Number') {
       if (ops.length === 1) {
         const x = ops[0];
-        const val = x.decimalValue ?? x.complexValue ?? x.machineValue;
+        const val = x.bignumValue ?? x.complexValue ?? x.machineValue;
         if (val !== null) return this.number(val);
         const [n, d] = x.rationalValue;
         if (n !== null && d !== null) return this.number([n, d]);

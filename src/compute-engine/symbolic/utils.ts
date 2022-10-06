@@ -1,6 +1,6 @@
 import { BoxedExpression, SemiBoxedExpression } from '../public';
 import { factorPower, reducedRational } from '../numerics/numeric';
-import { isInMachineRange } from '../numerics/numeric-decimal';
+import { isInMachineRange } from '../numerics/numeric-bignum';
 
 /**
  * If expression is a product or a division, collect all the terms with a
@@ -187,11 +187,11 @@ export function asCoefficient(
   // Literal
   //
   if (expr.isLiteral) {
-    if (expr.decimalValue) {
-      if (expr.decimalValue.isInteger() && isInMachineRange(expr.decimalValue))
-        return [[expr.decimalValue.toNumber(), 1], ce._ONE];
-      if (expr.decimalValue?.isNegative())
-        return [[-1, 1], ce.number(expr.decimalValue.neg())];
+    if (expr.bignumValue) {
+      if (expr.bignumValue.isInteger() && isInMachineRange(expr.bignumValue))
+        return [[expr.bignumValue.toNumber(), 1], ce._ONE];
+      if (expr.bignumValue?.isNegative())
+        return [[-1, 1], ce.number(expr.bignumValue.neg())];
     }
 
     if (expr.machineValue !== null) {
@@ -310,8 +310,8 @@ export function makePositive(
   if (expr.machineValue !== null && expr.machineValue < 0)
     return [-1, ce.number(-expr.machineValue)];
 
-  if (expr.decimalValue?.isNegative())
-    return [-1, ce.number(expr.decimalValue.neg())];
+  if (expr.bignumValue?.isNegative())
+    return [-1, ce.number(expr.bignumValue.neg())];
 
   if (expr.complexValue !== null) {
     const c = expr.complexValue!;

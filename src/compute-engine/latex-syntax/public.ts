@@ -409,7 +409,7 @@ export type ParseLatexOptions = {
    * When a number is encountered, parse it.
    *
    * Otherwise, return each token making up the number (minus sign, digits,
-   * decimal separator, etc...).
+   * decimal marker, etc...).
    *
    * **Default**: `true`
    */

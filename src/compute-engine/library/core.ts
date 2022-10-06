@@ -291,7 +291,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
           domain: ['Function', 'Integer', ['Maybe', 'Integer'], 'String'],
           evaluate: (ce, ops) => {
             const op1 = ops[0];
-            const val = op1.machineValue ?? op1.decimalValue?.toNumber() ?? NaN;
+            const val = op1.machineValue ?? op1.bignumValue?.toNumber() ?? NaN;
             if (Number.isNaN(val) || !Number.isInteger(val)) {
               ce.signal(
                 ce._fn('IntegerString', ops),
@@ -304,8 +304,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
             if (op2.isNothing) {
               if (op1.machineValue)
                 return ce.string(Math.abs(op1.machineValue).toString());
-              if (op1.decimalValue)
-                return ce.string(op1.decimalValue.abs().toString());
+              if (op1.bignumValue)
+                return ce.string(op1.bignumValue.abs().toString());
               return ce.string(
                 Math.abs(Math.round(op1.asFloat ?? NaN)).toString()
               );

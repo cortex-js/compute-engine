@@ -6,7 +6,13 @@
   the esoteric `[Symbol.toPrimitive]()` method. These are used by JavaScript
   when interacting with other primitive types. A major change is that
   `expr.toJSON()` now returns an `Expression` as an object literal, and not a
-  string serialized the `Expression`.
+  string serialization of the `Expression`.
+
+- Changed from "decimal" to "bignum". "Decimal" is a confusing name, since it is
+  used to represent both integers and floating point numbers. Its key
+  characteristic is that it is an arbitrary precision number, aka "bignum". This
+  affects `ce.numericMode` which now uses `bignum` instead of
+  `decimal', `expr.decimalValue`->`expr.bignumValue`, `decimalValue()`-> `bignumValue()`
 
 ### Bugs Fixed
 
@@ -159,9 +165,8 @@ necessary to invoke `expr.simplify()` in order to get the same results as
 
 ### Rational and Division
 
-In addition to machine floating points, arbitrarily long decimal numbers and
-complex number, the Compute Engine now also recognize and process rational
-numbers.
+In addition to machine floating points, arbitrary precision numbers and complex
+numbers, the Compute Engine now also recognize and process rational numbers.
 
 This is mostly an implementation detail, although you may see
 `["Rational", 3, 4]`, for example, in the value of a `expr.json` property.

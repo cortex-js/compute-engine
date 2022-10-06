@@ -15,9 +15,9 @@ import {
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { inferNumericDomain } from '../domain-utils';
 import { isPrime } from '../numerics/primes';
-import { isInMachineRange } from '../numerics/numeric-decimal';
+import { isInMachineRange } from '../numerics/numeric-bignum';
 import { serializeJsonNumber } from './serialize';
-import { complexAllowed, hashCode, preferDecimal } from './utils';
+import { complexAllowed, hashCode, preferBignum } from './utils';
 
 /**
  * BoxedNumber
@@ -68,17 +68,17 @@ export class BoxedNumber extends AbstractBoxedExpression {
         this._isCanonical = gcd(n, d) === 1;
       }
     } else if (value instanceof Decimal) {
-      // Only use a Decimal if in `decimal` mode or `auto` with precision > 15
-      this._value = preferDecimal(ce) ? value : value.toNumber();
+      // Only use a Decimal if in `"bignum"` mode or `"auto"` with precision > 15
+      this._value = preferBignum(ce) ? value : value.toNumber();
     } else {
       // Note: by the time we reach here, NaN and +/-Infinity have
       // been handled by `boxNumber()`. So the string should be ready
       // to be parsed by `Decimal` or `Number`
       if (typeof value === 'number') {
         this._value = value;
-      } else if (preferDecimal(ce)) {
-        // Use a Decimal if in `decimal` mode or `auto` with precision > 15
-        this._value = ce.decimal(value);
+      } else if (preferBignum(ce)) {
+        // Use a Decimal if in `"bignum"` mode or `"auto"` with precision > 15
+        this._value = ce.bignum(value);
       } else if (typeof value === 'string') {
         this._value = Number.parseFloat(value);
       }
@@ -149,15 +149,15 @@ export class BoxedNumber extends AbstractBoxedExpression {
     const [numer, denom] = this._value;
     const ce = this.engine;
 
-    if (!preferDecimal(ce)) return new BoxedNumber(ce, numer / denom);
-    return new BoxedNumber(ce, ce.decimal(numer).div(denom));
+    if (!preferBignum(ce)) return new BoxedNumber(ce, numer / denom);
+    return new BoxedNumber(ce, ce.bignum(numer).div(denom));
   }
 
   get machineValue(): number | null {
     return typeof this._value === 'number' ? this._value : null;
   }
 
-  get decimalValue(): Decimal | null {
+  get bignumValue(): Decimal | null {
     return this._value instanceof Decimal ? this._value : null;
   }
 
@@ -314,9 +314,8 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
     if (this._value instanceof Decimal)
       return (
-        this.engine.chop(
-          this._value.sub(n.decimalValue ?? n.asFloat ?? NaN)
-        ) === 0
+        this.engine.chop(this._value.sub(n.bignumValue ?? n.asFloat ?? NaN)) ===
+        0
       );
 
     if (this._value instanceof Complex) {
@@ -361,7 +360,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
     if (this._value instanceof Decimal)
       return this._value
-        .sub(rhs.decimalValue ?? rhs.asFloat ?? NaN)
+        .sub(rhs.bignumValue ?? rhs.asFloat ?? NaN)
         .abs()
         .lte(tolerance);
 
@@ -390,7 +389,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (typeof this._value === 'number') {
       const m = rhs.machineValue;
       if (m !== null) return this._value < m;
-      const d = rhs.decimalValue;
+      const d = rhs.bignumValue;
       if (d !== null) return d.greaterThanOrEqualTo(this._value);
       const [numer, denom] = rhs.rationalValue;
       if (numer === null || denom === null) return false;
@@ -400,7 +399,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (this._value instanceof Decimal) {
       const m = rhs.machineValue;
       if (m !== null) return this._value.lt(m);
-      const d = rhs.decimalValue;
+      const d = rhs.bignumValue;
       if (d !== null) return this._value.lt(d);
       const [numer, denom] = rhs.rationalValue;
       if (numer === null || denom === null) return false;
@@ -415,7 +414,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
       const [n2, d2] = rhs.rationalValue;
       if (n2 !== null && d2 !== null) return n1 * d2 < n2 * d1;
 
-      const d = rhs.decimalValue;
+      const d = rhs.bignumValue;
       if (d === null) return false;
       return d.mul(n1).lt(d1);
     }
@@ -500,7 +499,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (typeof this._value === 'number') return this._value === 1;
 
     if (this._value instanceof Decimal)
-      return this._value.equals(this.engine._DECIMAL_ONE);
+      return this._value.equals(this.engine._BIGNUM_ONE);
 
     if (Array.isArray(this._value)) {
       const [numer, denom] = this._value;
@@ -514,7 +513,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (typeof this._value === 'number') return this._value === -1;
 
     if (this._value instanceof Decimal)
-      return this._value.equals(this.engine._DECIMAL_NEGATIVE_ONE);
+      return this._value.equals(this.engine._BIGNUM_NEGATIVE_ONE);
 
     if (Array.isArray(this._value)) {
       const [numer, denom] = this._value;
@@ -720,7 +719,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
       const ce = this.engine;
       const [numer, denom] = this._value;
       // Account for the desired precision/numeric mode
-      if (preferDecimal(ce)) return ce.number(ce.decimal(numer).div(denom));
+      if (preferBignum(ce)) return ce.number(ce.bignum(numer).div(denom));
 
       return ce.number(numer / denom);
     }

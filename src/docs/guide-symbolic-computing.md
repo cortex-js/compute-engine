@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/symbolic-computing/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 head:
   stylesheets:
@@ -17,6 +17,7 @@ head:
     - /assets/js/code-playground.min.js
     - //unpkg.com/@cortex-js/compute-engine?module
 ---
+
 <script>
 moduleMap = {
   "compute-engine": "//unpkg.com/@cortex-js/compute-engine?module",
@@ -27,9 +28,9 @@ moduleMap = {
 The CortexJS Compute Engine essentially performs computation by applying
 rewriting rules to a MathJSON expression.
 
-In this documentation, functions such as `ce.box()` and `ce.parse()` require 
-a `ComputeEngine` instance which is denoted by a `ce.` prefix.<br>Functions 
-that apply to a boxed expression, such as `expr.simplify()` are denoted with a 
+In this documentation, functions such as `ce.box()` and `ce.parse()` require a
+`ComputeEngine` instance which is denoted by a `ce.` prefix.<br>Functions that
+apply to a boxed expression, such as `expr.simplify()` are denoted with a
 `expr.` prefix.{.notice--info}
 
 There are four common transformations that can be applied to an expression:
@@ -45,15 +46,13 @@ There are four common transformations that can be applied to an expression:
 
 </div>
 
-
-
 <div class="">
 
-|                               | `expr.canonical` | `expr.simplify()` | `expr.evaluate()` |  `expr.N()`  |
-| :---------------------------- | :----------: | :------: | :------: | :-: |
-| Exact calculations            | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} |   |
-| Use assumptions on symbols    |              |    {% icon "circle-check" "green-700" %}    |    {% icon "circle-check" "green-700" %}    | {% icon "circle-check" "green-700" %}  |
-| Floating-point approximations |              |          |          | {% icon "circle-check" "green-700" %}  |
+|                               |           `expr.canonical`            |           `expr.simplify()`           |           `expr.evaluate()`           |              `expr.N()`               |
+| :---------------------------- | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: |
+| Exact calculations            | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} |                                       |
+| Use assumptions on symbols    |                                       | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} |
+| Floating-point approximations |                                       |                                       |                                       | {% icon "circle-check" "green-700" %} |
 
 </div>
 
@@ -69,15 +68,14 @@ For example, if `f` is \\( 2 + (\sqrt{x^2 \times 4} + 1) \\) and `x` is 3:
 
 </div>
 
-When `ce.numericFormat` is `"machine"`, `expr.evaluate()` behaves
-as `expr.simplify()`: only calculations on "small integers" are performed.
-What is a small integer, it's an integer less than 10<sup>6</sup>. This is 
-to ensure that the product of two of those integers would not cause any loss
-in precision, since a machine number has about 15 digits of precision.
+When `ce.numericFormat` is `"machine"`, `expr.evaluate()` behaves as
+`expr.simplify()`: only calculations on "small integers" are performed. What is
+a small integer, it's an integer less than 10<sup>6</sup>. This is to ensure
+that the product of two of those integers would not cause any loss in precision,
+since a machine number has about 15 digits of precision.
 
-To ensure that all integer calculations are performed when using `expr.evaluate()`
-make sure that `ce.numericFormat` is `auto` or `decimal`.
-
+To ensure that all integer calculations are performed when using
+`expr.evaluate()` make sure that `ce.numericFormat` is `"auto"` or `"bignum`.
 
 {% readmore "/compute-engine/guides/canonical-form/" %} Read more about the
 <strong>Canonical Form</strong> {% endreadmore %}
@@ -94,13 +92,11 @@ make sure that `ce.numericFormat` is `auto` or `decimal`.
 Other operations can be performed on an expression: comparing it to a pattern,
 replacing part of it, and applying conditional rewrite rules.
 
-
 <code-playground layout="stack" show-line-numbers>
 <div slot="javascript">import { ComputeEngine } from 'compute-engine';
 const ce = new ComputeEngine();
 console.log(ce.parse('3x^2 + 2x^2 + x + 5').simplify().latex);</div>
 </code-playground>
-
 
 ## Comparing Expressions
 
@@ -169,16 +165,13 @@ assumptions may result in a different answer.
 
 </div>
 
-
 ## Replacing a Symbol in an Expresssion
 
 **To replace a symbol in an expression** use the `subs()` function.
 
-The argument of the `subs()` function is an object literal. Each key value
-pairs represent the name of a symbol and the value (as an expression) to be
+The argument of the `subs()` function is an object literal. Each key value pairs
+represent the name of a symbol and the value (as an expression) to be
 substituted with.
-
-
 
 <code-playground layout="stack" show-line-numbers mark-line="7">
 <div slot="javascript">import { ComputeEngine } from 'compute-engine';
@@ -192,9 +185,6 @@ expr = expr.subs({x: ce.box(3)});
 console.log("Substitute x -> 3\t", expr.json);
 console.log("Numerical Evaluation\t", expr.N().latex);</div>
 </code-playground>
-
-
-
 
 ## Other Symbolic Manipulation
 

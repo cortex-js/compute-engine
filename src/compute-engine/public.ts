@@ -46,12 +46,12 @@ export type Metadata = {
  * - `"auto"`: use machine number if precision is 15 or less, allow complex numbers.
  * - `"machine"`: 64-bit float, **IEEE 754-2008**, 64-bit float, 52-bit mantissa,
  *    about 15 digits of precision
- * - `"decimal"`: arbitrary precision floating point numbers, as provided by the
+ * - `"bignum"`: arbitrary precision floating point numbers, as provided by the
  * "decimal.js" library
  * - `"complex"`: complex number represented by two machine numbers, a real and
  * an imaginary part, as provided by the "complex.js" library
  */
-export type NumericMode = 'auto' | 'machine' | 'decimal' | 'complex';
+export type NumericMode = 'auto' | 'machine' | 'bignum' | 'complex';
 
 /** Options for `BoxedExpression.simplify()`
  *
@@ -364,7 +364,7 @@ export interface BoxedExpression {
 
   /** From `Object.valueOf()`, return a primitive value for the expression.
    *
-   * If the expression is a machine number, or a Decimal or rational that can be
+   * If the expression is a machine number, orbignum or rational that can be
    * converted to a machine number, return a `number`.
    *
    * If the expression is a symbol, return the name of the symbol as a `string`.
@@ -799,7 +799,7 @@ export interface BoxedExpression {
    * Note it is possible for `machineValue` to be `null`, and for `isNotZero`
    * to be true. For example, when a symbol has been defined with an assumption.
    *
-   * If `machineValue` is not `null`, then `decimalValue`, `rationalValue`
+   * If `machineValue` is not `null`, then `bignumValue`, `rationalValue`
    * and `complexValue` are `null.
    *
    * @category Numeric Expression
@@ -810,32 +810,32 @@ export interface BoxedExpression {
   /** If the value of this expression is a rational number, return it.
    * Otherwise, return `[null, null]`.
    *
-   * If `rationalValue` is not `[null, null]`, then `machineValue`, `decimalValue`
-   * and `complexValue` are `null.
+   * If `rationalValue` is not `[null, null]`, then `machineValue`,
+   * `bignumValue` and `complexValue` are `null.
    *
    * @category Numeric Expression
    *
    */
   readonly rationalValue: [numer: number, denom: number] | [null, null];
 
-  /** If the value of this expression is a `Decimal` number, return it.
+  /** If the value of this expression is a bignum, return it.
    * Otherwise, return `null`.
    *
-   * A `Decimal` number is an arbitrarily long floating point number.
+   * A bignum is an arbitrary precision floating point number.
    *
-   * If `decimalValue` is not `null`, then `machineValue`
+   * If `bignumValue` is not `null`, then `machineValue`
    * and `complexValue` are `null` and `rationalValue` is `[null, null]`.
    *
    * @category Numeric Expression
    *
    */
-  readonly decimalValue: Decimal | null;
+  readonly bignumValue: Decimal | null;
 
   /** If the value of this expression is a `Complex` number, return it.
    * Otherwise, return `null`.
    *
    * If `complexValue` is not `null`, then `machineValue`, `rationalValue`
-   * and `decimalValue` are `null.
+   * and `bignumValue` are `null.
    *
    * @category Numeric Expression
    *
@@ -851,8 +851,8 @@ export interface BoxedExpression {
    * If the value is a rational number, return the numerator divided by the
    * denominator.
    *
-   * If the value is a Decimal number return an approximation of the decimal
-   * number to a machine number. There might be a loss of precision or a
+   * If the value is a bignum return an approximation of the bignum to a
+   * machine number. There might be a loss of precision or a
    * round to 0 or Infinity, depending on the value.
    *
    * If the value of this expression cannot be represented by a float,
@@ -870,7 +870,7 @@ export interface BoxedExpression {
    *
    * Some calculations, for example to put in canonical forms, are only
    * performed if they are safe from overflow. This method makes it easy
-   * to check for this, whether the value is a Decimal or a number.
+   * to check for this, whether the value is a bignum or a number.
    *
    * By default, "small" is less than 1,000,000.
    *
@@ -1684,8 +1684,8 @@ export type FunctionSignature = {
    * the environment of the `ComputeEngine` instance, do not perform I/O,
    * do not do calculations that depend on random values.
    *
-   * If no simplification can be performed due to the values, domains or assumptions
-   * about its arguments, for example, return `undefined`.
+   * If no simplification can be performed due to the values, domains or
+   * assumptions about its arguments, for example, return `undefined`.
    *
    */
   simplify?: (
@@ -1694,12 +1694,22 @@ export type FunctionSignature = {
   ) => BoxedExpression | undefined;
 
   /**
-   * Evaluate symbolically an expression.
+   * Evaluate symbolically a function expression.
    *
    * The arguments have been symbolically evaluated, except the arguments to
    * which a `hold` apply.
    *
    * It is not necessary to further simplify or evaluate the arguments.
+   *
+   * If performing numerical calculations, keep the calculations "exact":
+   * - do not reduce rational numbers
+   * - do not down convert bignums to machine numbers
+   * - do not add integers and decimal (non-integer) numbers
+   * - do not reduce square roots of rational numbers
+   * - do not reduce constants with a `hold` attribute
+   *
+   * Adding decimal numbers together is acceptable. So is adding integers
+   * and rationals togers.
    *
    * If the expression cannot be evaluated, due to the values, domains, or
    * assumptions about its arguments, for example, return `undefined`.
@@ -1714,7 +1724,7 @@ export type FunctionSignature = {
       ) => BoxedExpression | undefined);
 
   /**
-   * Evaluate numerically an expression.
+   * Evaluate numerically a function expression.
    *
    * The arguments `args` have been simplified and evaluated, numerically
    * if possible, except the arguments to which a `hold` apply.
@@ -1733,19 +1743,22 @@ export type FunctionSignature = {
    * evaluation, but a literal argument is out of range or
    * not of the expected type.
    *
-   * Also return `NaN` if the result of the evaluation would be a complex
-   * number, but complex numbers are not allowed (the `engine.numericMode`
-   * is not `complex` or `auto`).
+   * Note that regardless of the current value of `ce.numericMode`, the
+   * arguments may be boxed numbers representing machine numbers, bignum
+   * numbers, complex numbers, rationals or big rationals.
    *
-   * If the `ce.numericMode` is `auto` or `complex`, you may return
-   * a Complex number as a result. Otherwise, if the result is a complex
-   * value, return `NaN`. If Complex are not allowed, none of the arguments
-   * will be complex literals.
+   * Use the value of `ce.numericMode` to determine how to perform
+   * the numeric evaluation.
    *
-   * If the `ce.numericMode` is `decimal` or `auto` and
-   * `this.engine.precision` is > 15, you may return a Decimal number.
-   * Otherwise, return a `machine` number approximation. If Decimal are
-   * not allowed, none of the arguments will be Decimal literal.
+   * If the numeric mode does not allow complex numbers (the
+   * `engine.numericMode` is not `"complex"` or `"auto"`) and the result of
+   * the evaluation would be a complex number, return `NaN` instead.
+   *
+   * If `ce.numericMode` is `"bignum"` or `"auto"` the evaluation should be done
+   * using bignums.
+   *
+   * Otherwise, `ce.numericMode` is `"machine", the evaluation should be
+   * performed using machine numbers.
    *
    * You may perform any necessary computations, including approximate
    * calculations on floating point numbers.
@@ -1764,7 +1777,7 @@ export type FunctionSignature = {
     args: BoxedExpression[]
   ) => BoxedExpression;
 
-  /** Return the sign of the function given a list of arguments. */
+  /** Return the sign of the function expression. */
   sgn?: (ce: IComputeEngine, args: BoxedExpression[]) => -1 | 0 | 1 | undefined;
 
   /** Return a compiled (optimized) expression. */
@@ -2014,19 +2027,19 @@ export interface IComputeEngine {
   readonly _COMPLEX_INFINITY: BoxedExpression;
 
   /** @internal */
-  readonly _DECIMAL_NAN: Decimal;
+  readonly _BIGNUM_NAN: Decimal;
   /** @internal */
-  readonly _DECIMAL_ZERO: Decimal;
+  readonly _BIGNUM_ZERO: Decimal;
   /** @internal */
-  readonly _DECIMAL_ONE: Decimal;
+  readonly _BIGNUM_ONE: Decimal;
   /** @internal */
-  readonly _DECIMAL_TWO: Decimal;
+  readonly _BIGNUM_TWO: Decimal;
   /** @internal */
-  readonly _DECIMAL_HALF: Decimal;
+  readonly _BIGNUM_HALF: Decimal;
   /** @internal */
-  readonly _DECIMAL_PI: Decimal;
+  readonly _BIGNUM_PI: Decimal;
   /** @internal */
-  readonly _DECIMAL_NEGATIVE_ONE: Decimal;
+  readonly _BIGNUM_NEGATIVE_ONE: Decimal;
 
   /** The current scope */
   context: RuntimeScope | null;
@@ -2054,7 +2067,7 @@ export interface IComputeEngine {
   chop(n: number | Decimal | Complex): number | Decimal | Complex;
 
   /** @internal */
-  decimal: (a: Decimal.Value) => Decimal;
+  bignum: (a: Decimal.Value) => Decimal;
   /** @internal */
   complex: (a: number | Complex, b?: number) => Complex;
 

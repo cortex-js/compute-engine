@@ -4,10 +4,10 @@ import {
   lngamma as lngammaComplex,
 } from '../numerics/numeric-complex';
 import {
-  factorial as factorialDecimal,
-  gamma as gammaDecimal,
-  lngamma as lngammaDecimal,
-} from '../numerics/numeric-decimal';
+  factorial as bigFactorial,
+  gamma as bigGamma,
+  lngamma as bigLngamma,
+} from '../numerics/numeric-bignum';
 import {
   factorial,
   factorPower,
@@ -17,7 +17,7 @@ import {
   rationalize,
 } from '../numerics/numeric';
 import { BoxedExpression, SymbolTable, IComputeEngine } from '../public';
-import { complexAllowed, preferDecimal } from '../boxed-expression/utils';
+import { complexAllowed, preferBignum } from '../boxed-expression/utils';
 import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
   canonicalAdd,
@@ -113,7 +113,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           domain: ['Function', 'Number', 'Integer'],
           evaluate: (ce, ops) => {
             const op1 = ops[0];
-            if (op1.decimalValue) return ce.number(op1.decimalValue.ceil());
+            if (op1.bignumValue) return ce.number(op1.bignumValue.ceil());
             if (op1.complexValue) return ce.number(op1.complexValue.ceil(0));
             if (op1.asFloat !== null) return ce.number(Math.ceil(op1.asFloat));
 
@@ -133,7 +133,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           domain: ['Function', 'Number', 'Number'],
           evaluate: (ce, ops) => {
             const op1 = ops[0];
-            if (op1.decimalValue) return ce.number(ce.chop(op1.decimalValue));
+            if (op1.bignumValue) return ce.number(ce.chop(op1.bignumValue));
             if (op1.complexValue) return ce.number(ce.chop(op1.complexValue));
             if (op1.asFloat !== null) return ce.number(ce.chop(op1.asFloat));
 
@@ -201,8 +201,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           evaluate: (ce, ops) => {
             const n = ops[0].asSmallInteger;
             if (n !== null && n >= 0) {
-              if (!preferDecimal(ce)) return ce.number(factorial(n));
-              return ce.number(factorialDecimal(ce, ce.decimal(n)));
+              if (!preferBignum(ce)) return ce.number(factorial(n));
+              return ce.number(bigFactorial(ce, ce.bignum(n)));
             }
             if (ops[0].complexValue)
               return ce.number(gammaComplex(ops[0].complexValue.add(1)));
@@ -222,8 +222,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'ExtendedRealNumber', 'ExtendedRealNumber'],
           evaluate: (ce, ops) => {
-            if (ops[0].decimalValue)
-              return ce.number(ops[0].decimalValue.floor());
+            if (ops[0].bignumValue)
+              return ce.number(ops[0].bignumValue.floor());
             if (ops[0].complexValue)
               return ce.number(ops[0].complexValue.floor(0));
             if (ops[0].asFloat !== null)
@@ -241,8 +241,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', 'Number', 'Number'],
           N: (ce, ops) => {
-            if (ops[0].decimalValue)
-              return ce.number(gammaDecimal(ce, ops[0].decimalValue));
+            if (ops[0].bignumValue)
+              return ce.number(bigGamma(ce, ops[0].bignumValue));
             // @todo: should gammaComplex() be always called if complexAllowed()?
             if (ops[0].complexValue)
               return ce.number(gammaComplex(ops[0].complexValue));
@@ -260,8 +260,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', 'Number', 'Number'],
           N: (ce, ops) => {
-            if (ops[0].decimalValue)
-              return ce.number(lngammaDecimal(ce, ops[0].decimalValue));
+            if (ops[0].bignumValue)
+              return ce.number(bigLngamma(ce, ops[0].bignumValue));
             // @todo: should lngammaComplex() be always called if complexAllowed()?
             if (ops[0].complexValue)
               return ce.number(lngammaComplex(ops[0].complexValue));
@@ -281,8 +281,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', 'Number'],
           N: (ce, ops) => {
-            if (ops[0].decimalValue)
-              return ce.number(ops[0].decimalValue.log());
+            if (ops[0].bignumValue) return ce.number(ops[0].bignumValue.log());
             if (ops[0].complexValue)
               return ce.number(ops[0].complexValue.log());
             if (ops[0].asFloat !== null)
@@ -303,11 +302,10 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           N: (ce, ops) => {
             const exponent = ops[0];
             const base = ops[1] ?? ce.number(10);
-            if (exponent.decimalValue) {
-              const decimalBase =
-                base.decimalValue?.log() ??
-                ce.decimal(base.asFloat ?? NaN).log();
-              return ce.number(exponent.decimalValue.log().div(decimalBase));
+            if (exponent.bignumValue) {
+              const bigBase =
+                base.bignumValue?.log() ?? ce.bignum(base.asFloat ?? NaN).log();
+              return ce.number(exponent.bignumValue.log().div(bigBase));
             }
             if (exponent.complexValue) {
               const complexBase =
@@ -336,10 +334,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           domain: ['Function', 'Number', 'Number'],
           N: (ce, ops) => {
             const exponent = ops[0];
-            if (exponent.decimalValue)
-              return ce.number(
-                exponent.decimalValue.log().div(ce._DECIMAL_TWO)
-              );
+            if (exponent.bignumValue)
+              return ce.number(exponent.bignumValue.log().div(ce._BIGNUM_TWO));
             if (exponent.complexValue)
               return ce.number(exponent.complexValue.log().div(ce.complex(2)));
 
@@ -360,8 +356,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           domain: ['Function', 'Number', 'Number'],
           N: (ce, ops) => {
             const exponent = ops[0];
-            if (exponent.decimalValue)
-              return ce.number(exponent.decimalValue.log().div(ce.decimal(10)));
+            if (exponent.bignumValue)
+              return ce.number(exponent.bignumValue.log().div(ce.bignum(10)));
             if (exponent.complexValue)
               return ce.number(exponent.complexValue.log().div(ce.complex(10)));
 
@@ -580,10 +576,10 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
               const [n, d] = [ops[0].machineValue, ops[1].machineValue];
               if (n !== null && d !== null) return ce.number(n / d);
               const [dn, dd] = [
-                ops[0].decimalValue ??
-                  (ops[0].asFloat ? ce.decimal(ops[0].asFloat) : null),
-                ops[1].decimalValue ??
-                  (ops[1].asFloat ? ce.decimal(ops[1].asFloat) : null),
+                ops[0].bignumValue ??
+                  (ops[0].asFloat ? ce.bignum(ops[0].asFloat) : null),
+                ops[1].bignumValue ??
+                  (ops[1].asFloat ? ce.bignum(ops[1].asFloat) : null),
               ];
               if (dn !== null && dd !== null) return ce.number(dn.div(dd));
             }
@@ -613,9 +609,9 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
             );
             const base = ops[0];
             const root = ops[1];
-            if (base.decimalValue)
+            if (base.bignumValue)
               return ce.number(
-                base.decimalValue.pow(ce._DECIMAL_ONE.div(root.asFloat ?? NaN))
+                base.bignumValue.pow(ce._BIGNUM_ONE.div(root.asFloat ?? NaN))
               );
             if (base.complexValue) {
               const complexRoot = root.complexValue
@@ -637,8 +633,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', 'Number'],
           evaluate: (ce, ops) => {
-            if (ops[0].decimalValue)
-              return ce.number(ops[0].decimalValue.round());
+            if (ops[0].bignumValue)
+              return ce.number(ops[0].bignumValue.round());
             if (ops[0].complexValue)
               return ce.number(ops[0].complexValue.round(0));
             if (ops[0].asFloat !== null)
@@ -716,8 +712,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
             ce._fn('Power', [args[0], ce._TWO]),
           evaluate: (ce, ops) => {
             console.error('unexpected evaluate: should be decanonicalized');
-            if (ops[0].decimalValue)
-              return ce.number(ops[0].decimalValue.mul(ops[0].decimalValue));
+            if (ops[0].bignumValue)
+              return ce.number(ops[0].bignumValue.mul(ops[0].bignumValue));
             if (ops[0].complexValue)
               return ce.number(ops[0].complexValue.mul(ops[0].complexValue));
             if (ops[0].asFloat !== null)
@@ -819,11 +815,11 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
                   .sub(rhs.complexValue ?? rhs.asFloat)
               );
             }
-            if (lhs.decimalValue || rhs.decimalValue) {
+            if (lhs.bignumValue || rhs.bignumValue) {
               return ce.number(
                 ce
-                  .decimal(lhs.decimalValue ?? lhs.asFloat ?? NaN)
-                  .sub(rhs.decimalValue ?? rhs.asFloat ?? NaN)
+                  .bignum(lhs.bignumValue ?? lhs.asFloat ?? NaN)
+                  .sub(rhs.bignumValue ?? rhs.asFloat ?? NaN)
               );
             }
             if (lhs.asFloat !== null && rhs.asFloat !== null)
@@ -902,7 +898,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         hold: true,
         real: true,
         value: (engine) =>
-          preferDecimal(engine) ? engine._DECIMAL_ONE.exp() : Math.exp(1),
+          preferBignum(engine) ? engine._BIGNUM_ONE.exp() : Math.exp(1),
       },
       {
         name: 'GoldenRatio',
@@ -988,7 +984,7 @@ function processAbs(
 ): BoxedExpression | undefined {
   if (mode !== 'simplify' || op1.isLiteral) {
     if (op1.machineValue !== null) return ce.number(Math.abs(op1.machineValue));
-    if (op1.decimalValue) return ce.number(op1.decimalValue.abs());
+    if (op1.bignumValue) return ce.number(op1.bignumValue.abs());
     if (op1.complexValue) return ce.number(op1.complexValue.abs());
     const [n, d] = op1.rationalValue;
     if (n === null || d === null) return undefined;
@@ -1010,7 +1006,7 @@ function processSqrt(
   if (mode === 'N' || (mode === 'evaluate' && !base.isInteger)) {
     if (base.complexValue) return ce.number(base.complexValue.sqrt());
     if (base.isNonNegative) {
-      if (base.decimalValue) return ce.number(base.decimalValue.sqrt());
+      if (base.bignumValue) return ce.number(base.bignumValue.sqrt());
       if (base.asFloat !== null) return ce.number(Math.sqrt(base.asFloat));
     } else if (complexAllowed(ce)) {
       // Need to potentially do a complex operation

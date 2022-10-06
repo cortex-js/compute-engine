@@ -250,7 +250,7 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   get rationalValue(): [numer: number, denom: number] | [null, null] {
     return [null, null];
   }
-  get decimalValue(): Decimal | null {
+  get bignumValue(): Decimal | null {
     return null;
   }
   get complexValue(): Complex | null {

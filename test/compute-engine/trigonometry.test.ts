@@ -40,7 +40,7 @@ describe('TRIGONOMETRY constructible values', () => {
         ];
 
         const f1 = engine.box([h, arg]).N();
-        let f = f1.asFloat ?? f1.decimalValue!.toNumber();
+        let f = f1.asFloat ?? f1.bignumValue!.toNumber();
 
         if (Math.abs(f) > 1000000) f = +Infinity;
         if (Math.abs(v) > 1000000) v = +Infinity;

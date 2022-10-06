@@ -80,9 +80,9 @@ describe('NUMERIC MODE machine', () => {
   test('', () => expect(N('e^{i\\pi}')).toMatchInlineSnapshot(`{num: "NaN"}`));
 });
 
-describe('NUMERIC MODE decimal 150', () => {
+describe('NUMERIC MODE bignum 150', () => {
   beforeEach(() => {
-    engine.numericMode = 'decimal';
+    engine.numericMode = 'bignum';
     engine.precision = 150;
   });
 
@@ -107,9 +107,9 @@ describe('NUMERIC MODE decimal 150', () => {
 //
 // Minimum  precision is 15 digits
 //
-describe('NUMERIC MODE decimal 7', () => {
+describe('NUMERIC MODE bignum 7', () => {
   beforeEach(() => {
-    engine.numericMode = 'decimal';
+    engine.numericMode = 'bignum';
     engine.precision = 7;
   });
 

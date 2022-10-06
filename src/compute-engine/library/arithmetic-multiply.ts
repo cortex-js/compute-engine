@@ -6,14 +6,14 @@ import {
   reducedRational,
 } from '../numerics/numeric';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
-import { complexAllowed, preferDecimal } from '../boxed-expression/utils';
+import { complexAllowed, preferBignum } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
 import { flattenOps } from '../symbolic/flatten';
 import {
   isInMachineRange,
-  reducedRational as reducedRationalDecimal,
-} from '../numerics/numeric-decimal';
+  reducedRational as reducedBigRational,
+} from '../numerics/numeric-bignum';
 
 import { square } from './arithmetic-power';
 
@@ -83,11 +83,11 @@ export function evalMultiply(
   // Second pass
   //
 
-  // Accumulate rational, machine, decimal, complex and symbolic products
+  // Accumulate rational, machine, bignum, complex and symbolic products
   let [numer, denom] = [1, 1];
-  let [decimalNumer, decimalDenom] = [ce._DECIMAL_ONE, ce._DECIMAL_ONE];
+  let [bigNumer, bigDenom] = [ce._BIGNUM_ONE, ce._BIGNUM_ONE];
   let machineProduct = 1;
-  let decimalProduct = ce._DECIMAL_ONE;
+  let bigProduct = ce._BIGNUM_ONE;
   let complexProduct = Complex.ONE;
   const product = new Product(ce);
 
@@ -98,21 +98,21 @@ export function evalMultiply(
     } else {
       const [n, d] = arg.rationalValue;
       if (n !== null && d !== null) {
-        if (preferDecimal(ce)) {
-          [decimalNumer, decimalDenom] = reducedRationalDecimal([
-            decimalNumer.mul(n),
-            decimalDenom.mul(d),
+        if (preferBignum(ce)) {
+          [bigNumer, bigDenom] = reducedBigRational([
+            bigNumer.mul(n),
+            bigDenom.mul(d),
           ]);
         } else [numer, denom] = reducedRational([numer * n, denom * d]);
-      } else if (arg.decimalValue !== null) {
-        if (arg.decimalValue.isInteger())
-          decimalNumer = decimalNumer.mul(arg.decimalValue);
-        else decimalProduct = decimalProduct.mul(arg.decimalValue);
+      } else if (arg.bignumValue !== null) {
+        if (arg.bignumValue.isInteger())
+          bigNumer = bigNumer.mul(arg.bignumValue);
+        else bigProduct = bigProduct.mul(arg.bignumValue);
       } else if (arg.machineValue !== null) {
-        if (preferDecimal(ce)) {
+        if (preferBignum(ce)) {
           if (Number.isInteger(arg.machineValue))
-            decimalNumer = decimalNumer.mul(arg.machineValue);
-          else decimalProduct = decimalProduct.mul(arg.machineValue);
+            bigNumer = bigNumer.mul(arg.machineValue);
+          else bigProduct = bigProduct.mul(arg.machineValue);
         } else machineProduct *= arg.machineValue;
       } else if (arg.complexValue !== null) {
         complexProduct = complexProduct.mul(arg.complexValue);
@@ -122,47 +122,47 @@ export function evalMultiply(
 
   if (complexProduct.im !== 0) {
     if (!complexAllowed(ce)) return ce._NAN;
-    // We have an imaginary number: fold Decimal into machine numbers
-    machineProduct *= decimalProduct.toNumber();
-    decimalProduct = ce._DECIMAL_ONE;
-    numer *= decimalNumer.toNumber();
-    denom *= decimalDenom.toNumber();
-    decimalNumer = ce._DECIMAL_ONE;
-    decimalDenom = ce._DECIMAL_ONE;
+    // We have an imaginary number: fold bignum into machine numbers
+    machineProduct *= bigProduct.toNumber();
+    bigProduct = ce._BIGNUM_ONE;
+    numer *= bigNumer.toNumber();
+    denom *= bigDenom.toNumber();
+    bigNumer = ce._BIGNUM_ONE;
+    bigDenom = ce._BIGNUM_ONE;
   }
 
-  if (decimalDenom.eq(ce._DECIMAL_ONE) && isInMachineRange(decimalNumer)) {
-    numer = denom * decimalNumer.toNumber();
-    decimalNumer = ce._DECIMAL_ONE;
+  if (bigDenom.eq(ce._BIGNUM_ONE) && isInMachineRange(bigNumer)) {
+    numer = denom * bigNumer.toNumber();
+    bigNumer = ce._BIGNUM_ONE;
   }
 
   if (
     complexProduct.im === 0 &&
-    (preferDecimal(ce) ||
-      !decimalProduct.eq(ce._DECIMAL_ONE) ||
-      !(decimalNumer.eq(ce._DECIMAL_ONE) && decimalDenom.eq(ce._DECIMAL_ONE)))
+    (preferBignum(ce) ||
+      !bigProduct.eq(ce._BIGNUM_ONE) ||
+      !(bigNumer.eq(ce._BIGNUM_ONE) && bigDenom.eq(ce._BIGNUM_ONE)))
   ) {
-    // Fold into decimal
-    let d = decimalProduct.mul(machineProduct);
+    // Fold into bignum
+    let d = bigProduct.mul(machineProduct);
     if (mode === 'N') {
       d = d.mul(numer).div(denom);
-      d = d.mul(decimalNumer).div(decimalDenom);
+      d = d.mul(bigNumer).div(bigDenom);
     } else {
       if (denom === 1) {
-        if (decimalDenom.eq(1)) {
-          d = d.mul(decimalNumer).mul(numer);
+        if (bigDenom.eq(1)) {
+          d = d.mul(bigNumer).mul(numer);
         } else
           product.addTerm(
             ce.box([
               'Rational',
-              ce.number(decimalNumer.mul(numer)),
-              ce.number(decimalDenom),
+              ce.number(bigNumer.mul(numer)),
+              ce.number(bigDenom),
             ])
           );
       } else {
         product.addTerm(ce.number([numer, denom]));
         product.addTerm(
-          ce.box(['Rational', ce.number(decimalNumer), ce.number(decimalDenom)])
+          ce.box(['Rational', ce.number(bigNumer), ce.number(bigDenom)])
             .canonical
         );
       }
@@ -187,7 +187,7 @@ export function evalMultiply(
       product.addTerm(ce.number(d));
     }
   } else {
-    // Fold into complex (there is no decimal component)
+    // Fold into complex (there is no bignum component)
     let a = machineProduct;
     if (mode === 'N') {
       a = (a * numer) / denom;
@@ -227,8 +227,8 @@ function multiply2(
 
   if (op1.isLiteral && op2.isLiteral) {
     if (op1.isInteger && op2.isInteger) {
-      if (op1.decimalValue && op2.decimalValue)
-        return ce.number(op1.decimalValue.mul(op2.decimalValue));
+      if (op1.bignumValue && op2.bignumValue)
+        return ce.number(op1.bignumValue.mul(op2.bignumValue));
       if (op1.machineValue && op2.machineValue)
         return ce.number(op1.machineValue * op2.machineValue);
     }
@@ -361,12 +361,12 @@ export function evalMultiplication(
     return ce.mul(terms).evaluate();
   }
 
-  if (preferDecimal(ce)) {
-    let v = ce.decimal(1);
+  if (preferBignum(ce)) {
+    let v = ce.bignum(1);
     for (let i = lower; i <= upper; i++) {
       const n = ce.number(i);
       const r = fn.subs({ _1: n, _: n }).evaluate();
-      const val = r.decimalValue ?? r.asFloat;
+      const val = r.bignumValue ?? r.asFloat;
       if (!val) return undefined;
       v = v.mul(val);
     }

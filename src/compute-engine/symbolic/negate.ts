@@ -14,7 +14,7 @@ function negateLiteral(
 
   let n: number | Decimal | Complex | [number, number] | undefined;
   if (expr.machineValue !== null) n = -expr.machineValue;
-  if (expr.decimalValue) n = expr.decimalValue.neg();
+  if (expr.bignumValue) n = expr.bignumValue.neg();
   if (expr.complexValue) n = expr.complexValue.neg();
   const [numer, denom] = expr.rationalValue;
   if (numer !== null && denom !== null) n = [-numer, denom];

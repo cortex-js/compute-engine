@@ -27,15 +27,15 @@ export function reducedRational([a, b]: [Decimal, Decimal]): [
 }
 
 export function factorial(ce: IComputeEngine, n: Decimal): Decimal {
-  if (!n.isInteger() || n.isNegative()) return ce._DECIMAL_NAN;
+  if (!n.isInteger() || n.isNegative()) return ce._BIGNUM_NAN;
   if (n.lessThan(10))
-    return ce.decimal(
+    return ce.bignum(
       [1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800][n.toNumber()]
     );
 
   if (n.gt(Number.MAX_SAFE_INTEGER)) {
-    let val = ce._DECIMAL_ONE;
-    let i = ce._DECIMAL_TWO;
+    let val = ce._BIGNUM_ONE;
+    let i = ce._BIGNUM_TWO;
     while (i.lessThan(n)) {
       val = val.mul(i);
       i = i.add(1);
@@ -63,7 +63,7 @@ const gammaG = 7;
 
 // Spouge approximation (suitable for large arguments)
 export function lngamma(ce: IComputeEngine, z: Decimal): Decimal {
-  if (z.isNegative()) return ce._DECIMAL_NAN;
+  if (z.isNegative()) return ce._BIGNUM_NAN;
 
   const GAMMA_P_LN = ce.cache<Decimal[]>('gamma-p-ln', () => {
     return [
@@ -82,7 +82,7 @@ export function lngamma(ce: IComputeEngine, z: Decimal): Decimal {
       '0.84418223983852743293e-4',
       '-0.2619083840158140867e-4',
       '0.36899182659531622704e-5',
-    ].map((x) => ce.decimal(x));
+    ].map((x) => ce.bignum(x));
   });
 
   let x = GAMMA_P_LN[0];
@@ -90,28 +90,28 @@ export function lngamma(ce: IComputeEngine, z: Decimal): Decimal {
     x = x.add(GAMMA_P_LN[i].div(z.add(i)));
   }
 
-  const GAMMA_G_LN = ce.cache('gamma-g-ln', () => ce.decimal(607).div(128));
+  const GAMMA_G_LN = ce.cache('gamma-g-ln', () => ce.bignum(607).div(128));
 
-  const t = z.add(GAMMA_G_LN).add(ce._DECIMAL_HALF);
-  return ce._DECIMAL_NEGATIVE_ONE
+  const t = z.add(GAMMA_G_LN).add(ce._BIGNUM_HALF);
+  return ce._BIGNUM_NEGATIVE_ONE
     .acos()
-    .mul(ce._DECIMAL_TWO)
+    .mul(ce._BIGNUM_TWO)
     .log()
-    .mul(ce._DECIMAL_HALF)
+    .mul(ce._BIGNUM_HALF)
     .add(
-      t.log().mul(z.add(ce._DECIMAL_HALF)).minus(t).add(x.log()).minus(z.log())
+      t.log().mul(z.add(ce._BIGNUM_HALF)).minus(t).add(x.log()).minus(z.log())
     );
 }
 
 // From https://github.com/substack/gamma.js/blob/master/index.js
 export function gamma(ce: IComputeEngine, z: Decimal): Decimal {
-  if (z.lessThan(ce._DECIMAL_HALF)) {
-    const pi = ce._DECIMAL_NEGATIVE_ONE.acos();
+  if (z.lessThan(ce._BIGNUM_HALF)) {
+    const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
     return pi.div(
       pi
         .mul(z)
         .sin()
-        .mul(gamma(ce, ce._DECIMAL_ONE.sub(z)))
+        .mul(gamma(ce, ce._BIGNUM_ONE.sub(z)))
     );
   }
 
@@ -132,22 +132,22 @@ export function gamma(ce: IComputeEngine, z: Decimal): Decimal {
       '-0.13857109526572011689554707',
       '9.984369578019570859563e-6',
       '1.50563273514931155834e-7',
-    ].map(ce.decimal);
+    ].map(ce.bignum);
   });
 
   let x = LANCZOS_7_C[0];
   for (let i = 1; i < gammaG + 2; i++) x = x.add(LANCZOS_7_C[i].div(z.add(i)));
 
-  const t = z.add(gammaG).add(ce._DECIMAL_HALF);
-  return ce._DECIMAL_NEGATIVE_ONE
+  const t = z.add(gammaG).add(ce._BIGNUM_HALF);
+  return ce._BIGNUM_NEGATIVE_ONE
     .acos()
-    .times(ce._DECIMAL_TWO)
+    .times(ce._BIGNUM_TWO)
     .sqrt()
-    .mul(x.mul(t.neg().exp()).mul(t.pow(z.add(ce._DECIMAL_HALF))));
+    .mul(x.mul(t.neg().exp()).mul(t.pow(z.add(ce._BIGNUM_HALF))));
 }
 
 /**
- * If the exponent of the decimal number is in the range of the exponents
+ * If the exponent of the bignum is in the range of the exponents
  * for machine numbers,return true.
  */
 export function isInMachineRange(d: Decimal): boolean {

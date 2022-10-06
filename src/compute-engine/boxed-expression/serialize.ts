@@ -4,7 +4,7 @@ import Decimal from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
-import { isInMachineRange } from '../numerics/numeric-decimal';
+import { isInMachineRange } from '../numerics/numeric-bignum';
 
 import { Product } from '../symbolic/product';
 
@@ -157,8 +157,8 @@ export function serializeJsonFunction(
   if (head === 'Negate' && args[0]?.isLiteral && args.length === 1) {
     if (args[0].machineValue !== null)
       return serializeJsonNumber(ce, -args[0].machineValue);
-    if (args[0].decimalValue !== null)
-      return serializeJsonNumber(ce, args[0].decimalValue.neg());
+    if (args[0].bignumValue !== null)
+      return serializeJsonNumber(ce, args[0].bignumValue.neg());
     if (args[0].complexValue !== null)
       return serializeJsonNumber(ce, args[0].complexValue.neg());
     const [n, d] = args[0].rationalValue;
