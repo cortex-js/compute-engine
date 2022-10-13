@@ -220,7 +220,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         complexity: 1250,
 
         signature: {
-          domain: ['Function', 'ExtendedRealNumber', 'ExtendedRealNumber'],
+          // domain: ['Function', 'ExtendedRealNumber', 'ExtendedRealNumber'],
+          domain: ['Function', 'Number', 'Number'],
           evaluate: (ce, ops) => {
             if (ops[0].bignumValue)
               return ce.number(ops[0].bignumValue.floor());
