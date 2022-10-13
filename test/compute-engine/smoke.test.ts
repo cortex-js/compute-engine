@@ -36,15 +36,37 @@ ce.assume(['Element', 'f', 'Function']);
 // PROBLEMATIC EXPRESSIONS
 //
 
+// Serialization issue (the 1/2 rational should get distributed to numerator/denominator)
+console.log(ce.parse('\\frac{1}{2\\sqrt{3}}').canonical.latex);
+
+// Needs a \times between 2 and 3
+console.log(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').json);
+
 console.log(engine.box('Sin').domain.json);
 
+// `HorizontalScaling` should be interpreted as a function, not a symbol.
+// auto-add all the entries from libraries to the dictionary? Alternatively
+// check in default `parseUnknownSymbol` (and rename to
+// `parseUnknownIdentifier`): check Domain is 'Function'. (See \\operatorname, parse.ts:983)
+// Also maybe unknown identifier in front of Delimiter -> function, .e.g
+// `p(n) =  2n`. Can always disambiguate with a \cdot, e.g. `p\cdot(n)`
+console.log(ce.parse('\\mathrm{HorizontalScaling}\\left(3\\right)+1').json);
+
+// simplify() should decompose the square roots of rational
 let z7 = ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}');
 console.log(z7.toJSON());
 z7 = z7.canonical;
 console.log(z7.toJSON());
+z7 = z7.simplify();
+console.log(z7.json);
+// Expect: `['Sqrt',  5]`
+console.log(ce.parse('\\sqrt{15}').simplify().latex);
+// Expect_. `\sqrt15` (don't keep decomposed root expanded)
 
-console.log(ce.parse('\\sqrt{15}').simplify().toJSON());
-console.log(z7.simplify().toJSON());
+// `evaluate()` should preserve square root of rationals
+// (explain in doc for `evaluate()`)
+console.log(ce.parse('\\sqrt{15}\\sqrt{3}').evaluate().latex);
+// Expect: `\sqrt{5}`
 
 // Drops the "x"
 // (also, should evaluate InverseFunction )
@@ -72,14 +94,21 @@ console.log(sig4.toJSON());
 console.log(sig4.isCompatible(sig3));
 
 // Mismatched argument domain
+//
 const zz = ce.parse('\\sum_{n=1}^5nx').canonical;
 console.log(zz.json);
 
 // Parsed as imaginary unit
-// -> should add pushDictionary() or use the current scope to find a definition for 'i'
+// -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and
+// `exponentialE`. Instead have `hold` constants in the dictionary for `i` and
+// `e`. In canonicalize, replace i and e according to definition in current
+// scope. Also, push new scope for `scoped` def in canonical. Save that scope and reactivate it in evaluate, simplify, and N(), and in the canonical def of
+// `Sum` push `i` to the scope. In evaluate and N(), set the value of `i` for
+//  each loop iteration (don't substitute)
 const z3 = ce.parse('\\sum_ii^2').canonical;
 console.log(z3.json);
 
+// Confusion with domain
 const z = ce.parse('\\sum_{n=1}^5 n^2+1').canonical;
 console.log(z.json);
 console.log(z.evaluate().json);
@@ -87,10 +116,11 @@ console.log(z.evaluate().json);
 // Outputs unexpected command, \\left...
 // because there is no matchfix for \\left(\\right.
 console.log(ce.parse('\\sin\\left(x\\right.').toJSON());
+// Another example: should probably downconvert the \left( to a (
+// and ignore the \right.
+console.log(ce.parse('\\frac{\\left(w\\right.-x)\\times10^6}{v}').json);
 
-// Better if error out with unary minus (prefix priority over infix)
-// console.log(ce.parse('-').toJSON());
-
+// Check error
 console.log(ce.parse('(').toJSON());
 
 // Gives unexpected-token. Should be expected closing boundary?
@@ -99,20 +129,149 @@ console.log(ce.parse('(3+x').toJSON());
 // Give unexpected token. SHould be unexpected closing boundary?
 console.log(ce.parse(')').toJSON());
 
-// ; is parsed as Sequence Sequence?
+// ; is parsed as List List?
 console.log(ce.parse('(a, b; c, d, ;; n ,, m)').toJSON());
 
-// Subscript parsing: not parsing single token (i.e. x_{0} works)
-console.log(ce.parse('x_{0}').toJSON());
-console.log(ce.parse('x_0').toJSON());
-
-// The invalid `$` is not handled very well. Should return an error 'unexpected-mode-shift'
-// const w = ce.parse('\\mathrm{$invalid}').json;
-// console.log(w);
+// The invalid `$` is not detected. Should return an error 'unexpected-mode-shift', or invalid identifier
+const w = ce.parse('\\mathrm{$invalid}').json;
+console.log(w);
 
 // Should interpret function application `(x)`
 console.log(ce.parse('f_{n - 1}(x)').toJSON());
 console.log(ce.parse('x \\times f_{n - 1}(x) + f_{n - 2}(x)').toJSON());
+
+// Incorrect parsing, doesn't  recognize the dx
+console.log(ce.parse('\\int x\\sin xdx+1').json);
+
+// If a symbol surrounded by two numeric literals
+// (Range if integers and symbol is an integer, Interval otherwise)
+console.log(ce.parse('5\\le b\\le 7}').canonical.json);
+// -> ["Range", 5, 7]
+console.log(ce.parse('5\\le b\\lt 7}').canonical.json);
+// -> ["Range", 5, 6]
+
+// Inequality with more than 2 terms (hold all)
+console.log(ce.parse('a\\lt b\\le c}').canonical.json);
+// -> ["Inequality", a, "LessThan", b, "Less", c]
+
+// Several problems:
+// - \mathbb{R} is not recognized
+// - \in has higher precedence than =
+// - ['Equal'] with more than two arguments fails
+console.log(
+  ce.parse(
+    '{\\sqrt{\\sum_{n=1}^\\infty {\\frac{10}{n^4}}}} = {\\int_0^\\infty \\frac{2xdx}{e^x-1}} = \\frac{\\pi^2}{3} \\in {\\mathbb R}'
+  ).canonical.json
+);
+
+// Parses, but doesn't canonicalize
+//  p(n)=(\sum_{v_{1}=2}^{\operatorname{floor}\left(1.5*n*\ln(n)\right)}(\operatorname{floor}(\frac{1}{0^{n-(\sum_{v_{2}=2}^{v_{1}}((\prod_{v_{3}=2}^{\operatorname{floor}(\sqrt{v_{2}})}(1-0^{\operatorname{abs}(\operatorname{floor}(\frac{v_{2}}{v_{3}})-\frac{v_{2}}{v_{3}})}))))}+1})))+2
+// https://github.com/uellenberg/Logimat/tree/master/examples/nth-prime
+
+console.log(
+  ce.parse(
+    'p(n)=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
+  )
+);
+
+// Add Kronecker's Delta
+console.log(ce.parse('\\delta_{n, m}').json);
+// -> ["KroneckerDelta", n, m]
+console.log(ce.box(['KroneckerDelta', 5, ['Add', 4, 1], 5]).evaluate().json);
+// -> 1, when all ops are equal
+console.log(ce.box(['KroneckerDelta', 5, ['Add', 4, 1], 6]).evaluate().json);
+// -> 0 when any ops is different
+
+// Add Iverson Brackets/Indicator Function (0 when boolean expression is false,
+// 1 otherwise)
+// Also, prioritize evaluation of `Boole` terms in `Multiply` (if 0, can exit
+// early)
+console.log(ce.box(['Boole', ['Equal', 3, 5]]).evaluate().json);
+// -> 0
+console.log(ce.box(['Boole', ['Equal', 3, ['Add', 1, 2]]]).evaluate().json);
+// -> 1
+
+// Parse Delimiter with square brackets and a single boolean expression as
+// an argument as an Iverson Bracket.
+console.log(ce.parse('\\left[a=b\\right]').canonical.json);
+// Also \llbracket (U+27E6)...\rrbracket (U+27E7)
+console.log(ce.parse('\\llbracket[a=b\\rrbracket]').canonical.json);
+// -> ['Boole', ['Equal', a, b]]
+//  For Tuple with a single boolean, use Tuple (or Single)
+console.log(ce.parse('\\mathrm{Single}(a, b)').json);
+console.log(ce.parse('\\mathrm{Tuple}(a, b)').json);
+
+// Simplify to Iverson Bracket (or maybe canonicalize)
+console.log(ce.parse('0^{|a-b|}').canonical.json);
+// -> ["Boole", ["Equal", a, b]]
+
+// Simplify (canonicalize) sign function
+console.log(ce.parse('\\frac{2}{0^x+1}-1'));
+
+// Simplify to LessThan, etc...
+console.log(ce.parse('0^{|\\frac{2}{0^x+1}|}').canonical.json);
+// -> ["Boole", ["LessThan", x, 0]]
+
+console.log(ce.parse('0^{|\\frac{2}{0^{4-x}+1}|}').canonical.json);
+// -> ["Boole", ["GreaterThan", x, 4]]
+
+console.log(ce.parse('0^{|\\frac{2}{0^{x-4}+1}|}').canonical.json);
+// -> ["Boole", ["LessThan", x, 4]]
+
+console.log(ce.parse('\\mathbb{1}_{\\N}\\left(x\\right)').canonical.json);
+// -> ["Boole", ["Element", x, ["Domain", "NonNegativeInteger"]]
+
+// Iverson Bracket/Boole simplification/equivalent rules (not sure if worth
+// transforming from one to the other)
+// [¬P]=1−[P]
+// [P∧Q]=[P][Q]
+// [P∨Q]=[P]+[Q]−[P][Q]
+//[P⊕Q]=([P]−[Q])
+// [P→Q]=1−[P]+[P][Q]
+// [P≡Q]=1−([P]−[Q])
+
+// Knuth's interval notation:
+console.log(ce.parse('(a..b)').canonical.json);
+// -> ["Range", a, b]
+
+// Knuth's coprime notation
+console.log(ce.parse('m\\bot n').canonical.json);
+// -> ["Equal", ["Gcd", m, n], 1]
+// -> ["Coprime", m, n]
+
+// Euler's Phi function (number of integers that are coprime)
+console.log(
+  ce.parse('\\phi(n)=\\sum_{i=1}^n\\left\\lbrack i\\bot n\\right\\rbrack ').json
+);
+
+// Additional \sum syntax
+console.log(ce.parse('\\sum_{1 \\le i \\le 10} i^2').json);
+//-> ["Sum", ["Square", "i"], ["i", 1, 10]]
+
+console.log(ce.parse('\\sum_{i \\in S} i^2').json);
+
+console.log(ce.parse('\\sum_{i,j} j+i^2').json);
+// -> ["Sum", ..., ["i"], ["j"]]
+
+console.log(
+  ce.parse('\\sum_{\\stackrel{{\\scriptstyle 1\\le k\\le n}}{(k,n)=1}}\\!\\!k')
+    .json
+);
+
+// Simplify summations:  see https://en.wikipedia.org/wiki/Summation General Identities
+
+// Congruence (mod) notation (a-b is divisible by n, )
+console.log(ce.parse('a\\equiv b(\\mod n)').canonical.json);
+// -> ["Equal", ["Mod", a, n], ["Mod", b, n]]
+console.log(ce.parse('a\\equiv_{n} b').canonical.json);
+// -> ["Equal", ["Mod", a, n], ["Mod", b, n]]
+// See https://reference.wolfram.com/language/ref/Mod.html
+// a \equiv b (mod 0) => a = b
+
+// Function application (when, e.g. f is a  lambda)
+console.log(ce.parse('f|_{3}').canonical.json);
+// Application to a range (return a list)
+console.log(ce.parse('f|_{3..5}').canonical.json);
 
 //
 // BOXING
@@ -162,6 +321,15 @@ describe('PARSING numbers', () => {
   test(`5+3+2`, () => {
     expect(parseToJson('5+3+2')).toMatchObject(['Add', 5, 3, 2]);
   });
+
+  // From https://github.com/uellenberg/Logimat/tree/master/examples/nth-prime
+
+  test('nth prime', () =>
+    expect(
+      parse(
+        'p(n)=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
+      )
+    ).toMatchInlineSnapshot());
 });
 
 describe('PARSING symbols', () => {
