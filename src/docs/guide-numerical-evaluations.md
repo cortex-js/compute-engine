@@ -62,6 +62,9 @@ involving the specified number types:
    of precision, a rounding towards 0 if underflow occurs, or a rounding 
    towards \\( \\pm\\infty \\) if overflow occurs.
 
+
+<div class="symbols-table first-column-header">
+
 |                | `auto`   |  `machine` | `bignum` | `complex` |
 | :---           | --- | --- | --- | --- |
 | `number`      | upgraded to `bignum` | {% icon "circle-check" "green-700" %} | upgraded to `bignum` | {% icon "circle-check" "green-700" %}|
@@ -69,6 +72,8 @@ involving the specified number types:
 | `bignum`       | {% icon "circle-check" "green-700" %} | downgraded to `number` | {% icon "circle-check" "green-700" %} | downgraded to `number` | 
 | `rational`     | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | upgraded to `big rational` | {% icon "circle-check" "green-700" %} |
 | `big rational` | {% icon "circle-check" "green-700" %} | downgraded to `rational` | {% icon "circle-check" "green-700" %} | downgraded to `rational` |
+
+</div>
 
 ### Machine Numeric Mode
 

@@ -168,7 +168,7 @@ A domain constructor is a function expression with one of the identifiers below.
 When a domain expression is boxed, it is automatically put in canonical form.
 
 
-<div class=symbols-table>
+<div class="symbols-table first-column-header">
 
 | Domain Constructor | Description                                                                                                                                                                                                                                                                                                                                    |
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

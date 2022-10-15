@@ -129,7 +129,7 @@ value, but their value is calculated indirectly.
 
 ## Canonical Expressions
 
-The canonical form of an expression is a "standard" way of writing an
+The canonical form of an expression is a conventional way of writing an
 expression.
 
 **To check if an expression is already in canonical form**, use
@@ -141,20 +141,20 @@ expression.
 {% readmore "/compute-engine/guides/canonical-form/" %} Read more about the
 <strong>Canonical Form</strong> {% endreadmore %}
 
-
-By default, `ce.box()` and `ce.parse()` produce a [canonical expression](#canonical-expressions).
+By default, `ce.box()` and `ce.parse()` produce a canonical expression.
 
 **To get a "raw" (non-canonical) expression instead**, use `ce.box(expr, {canonical: false})`
 or `ce.parse(latex, {canonical: false})`.
 
 ```js
-ce.parse("\\frac{3}{-5}")
-// ➔ ["Rational", -3, 5]
+const expr = "\\frac{3}{-5}";
 
-ce.parse("\\frac{3}{-5}", {canonical: false})
-// ➔ ["Divide", 3, -5]
+ce.parse(expr);
+// canonical form ➔ ["Rational", -3, 5]
+
+ce.parse(expr, {canonical: false})
+// non-canonical form ➔ ["Divide", 3, -5]
 ```
-
 
 A non-canonical expression may include errors as a result of parsing from LaTeX,
 if the LaTeX input contained LaTeX syntax errors.
@@ -162,13 +162,14 @@ if the LaTeX input contained LaTeX syntax errors.
 The arguments of a function in canonical form are validated to make sure they
 match expectations.
 
-A canonical expression may include additional errors, for example
-`["Divide", 2, 5, 6]` (three arguments instead of two), `["Add", 2, "True"]`
-(mismatched argument domain, expected a number but got a boolean).
+A canonical expression may include additional errors compared to a non-canonical
+expression, for example `["Divide", 2, 5, 6]` (three arguments instead of two),
+`["Add", 2, "True"]` (mismatched argument domain, expected a number but got a 
+boolean).
 
 **To check if an expression contains errors** use `expr.isValid`.
 
-When doing this check on a canonical expression it take into consideration not 
+When doing this check on a canonical expression it takes into consideration not 
 only possible syntax errors, but also semantic errors (incorrect number or 
 domain of arguments, etc...).
 
@@ -225,15 +226,15 @@ function itself is pure, and all its arguments are pure as well.
 To identify if an expression is a number, symbol, function, string or
 dictionary, use the following boolean expressions:
 
-<div class=symbols-table>
+<div class="symbols-table first-column-header">
 
 | Kind       | Boolean Expression                                     |
 | :--------- | :----------------------------------------------------- |
-| Number     | `expr.isLiteral && expr.isNumber`                      |
-| Symbol     | `expr.symbol !== null` <br> `expr.head === 'Symbol'`   |
-| Function   | `expr.tail !== null`                                   |
-| String     | `expr.string !== null` <br> `expr.head === 'String'`   |
-| Dictionary | `expr.keys !== null` <br> `expr.head === 'Dictionary'` |
+| **Number**     | `expr.isLiteral && expr.isNumber`                      |
+| **Symbol**     | `expr.symbol !== null` <br> `expr.head === 'Symbol'`   |
+| **Function**   | `expr.tail !== null`                                   |
+| **String**     | `expr.string !== null` <br> `expr.head === 'String'`   |
+| **Dictionary** | `expr.keys !== null` <br> `expr.head === 'Dictionary'` |
 
 </div>
 
@@ -301,7 +302,7 @@ request the canonical version of the expression.
 **To get the list of all the `["Error"]` subexpression** use the `expr.errors`
 property.
 
-<div class=symbols-table>
+<div class="symbols-table first-column-header">
 
 | Error Code                     | Meaning                                                                                                          |
 | :----------------------------- | :--------------------------------------------------------------------------------------------------------------- |

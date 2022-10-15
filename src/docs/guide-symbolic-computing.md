@@ -47,7 +47,7 @@ There are three common transformations that can be applied to an expression:
 
 </div>
 
-<div class="">
+<div class="first-column-header">
 
 |                               |              `expr.simplify()`           |           `expr.evaluate()`           |              `expr.N()`               |
 | :---------------------------- | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: |
@@ -59,7 +59,7 @@ There are three common transformations that can be applied to an expression:
 
 For example, if `f` is \\( 2 + (\sqrt{x^2 \times 4} + 1) \\) and `x` is \\( \pi \\):
 
-<div class=symbols-table>
+<div class="symbols-table first-column-header">
 
 |                |                             |                                                              |
 | :------------- | :-------------------------- | :----------------------------------------------------------- |
