@@ -5,13 +5,13 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'universal'
+preamble:
+  '<h1>Evaluation</h1><p class="xl">To apply a sequence of definitions to an 
+  expression in order to simplify it, calculate its value or get a numerical 
+  approximation of its value, call the <kbd>expr.simplify()</kbd>, 
+  <kbd>expr.evaluate()</kbd> or <kbd>expr.N()</kbd> function.</p>'
 ---
 
-# Evaluation of Expressions
-
-**To apply a sequence of definitions to an expression in order to simplify it,
-calculate its value or get a numerical approximation of its value**, call the
-`expr.simplify()`, `expr.evaluate()` or `expr.N()` function.
 
 ## Scopes
 
@@ -32,8 +32,8 @@ until a definition is found.
 ```ts
 ce.pushScope({
   symbolTable: {
-    symbols: [{ name: 'd', value: 500 }],
-  },
+    symbols: [{ name: 'd', value: 500 }]
+  }
 });
 ```
 
@@ -51,26 +51,18 @@ associating an identifier (the name of a function or symbol) with a
 definition.**
 
 Name Binding should not be confused with **value binding** with is the process
-of associating a **value** to an identifier.
+of associating a **value** to a symbol.
 
 {% readmore "/compute-engine/guides/symbols/#scopes" %}Read more about
-<strong>symbols</strong> and value binding.{% endreadmore %}
+<strong>identifiers</strong> and value binding.{% endreadmore %}
 
 For symbols, the definition records contain information such as the domain of
 the symbol and its value. For functions, the definition record include the
 signature of the function (the domain of the argument it expects), and how to
 simplify or evaluate function expressions that have this function as their head.
 
-Because name binding is done lazily, it is possible to have a boxed expression
-which cannot be evaluate or processed.
-
-For example, the boxed expression for `ce.box(["Divide", 2, 'True'])` cannot be
-evaluated because a number cannot be divided by a boolean. More accurately,
-evaluating this boxed expression will result in an `["Error"]` expression:
-`["Divide", 2, ["Error", ["ErrorCode", "'incompatible-domain'", "Number", "Boolean"]], "True"]]`.
-
-**To check if an expression can be evaluated** check that
-`expr.canonical.isValid` is `true`.
+Name binding is done during canonicalization. If name binding failed, the `isValid`
+property of the expession is `false`.
 
 **To get a list of the errors in an expression** use the `expr.errors` property.
 
@@ -80,22 +72,19 @@ evaluating this boxed expression will result in an `["Error"]` expression:
 ## Evaluation Loop
 
 This is an advanced topic. You don't need to know the details of how the
-evaluation loop work, unless you're interested in extending the standard library
+evaluation loop works, unless you're interested in extending the standard library
 and providing your own function definitions.{notice--info}
 
 Each identifier (name of symbol or function) is **bound** to a definition within
-a **scope**.
-
-When a Boxed Expression is created with `ce.box()` or `ce.parse()`, its
-identifiers are not bound immediately. The name binding occurs lazily the first
-time it is required, for example when a function such as `expr.evaluate()` is
-invoked, or when a property such as `expr.domain` is accessed.
+a **scope** during canonicalization. This usually happens when calling `ce.box()`
+or `ce.parse()`, but could also happen during `expr.evaluate()` if `expr` was
+not canonical.
 
 When a function is evaluated, the following steps are followed:
 
-1. If the expression is not canonical, put it in canonical form
+1. If the expression is not canonical, it is put in canonical form
 
-2. Evaluate each argument of the function, left to right.
+2. Each argument of the function are evaluated, left to right.
 
    1. An argument can be **held**, in which case it is not evaluated. Held
       arguments can be useful when you need to pass a symbolic expression to a
@@ -109,10 +98,9 @@ When a function is evaluated, the following steps are followed:
       being evaluated. Conversely, the `ReleaseHold` function will force an
       evaluation.
 
-   2. If an argument is the `Nothing` symbol, remove it
-
-   3. If an argument is a `["Sequence"]` expression, treat each argument of the
-      sequence expression as if it was an argument of the function
+   2. If an argument is a `["Sequence"]` expression, treat each argument of the
+      sequence expression as if it was an argument of the function. If the 
+      sequence is empty, ignore the argument.
 
 3. If the function is associative, flatten its arguments as necessary. \\[
    f(f(a, b), c) \to f(a, b, c) \\]

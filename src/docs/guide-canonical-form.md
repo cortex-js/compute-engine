@@ -39,8 +39,19 @@ The canonical form of an expression is always the same when used with a given
 Compute Engine instance. However, do not rely on the canonical form as future
 versions of the Compute Engine could provide a different result.
 
-The `ce.box()` and `ce.parse()` function return a non-canonical expression. This
-may be desirable for example to compare a "raw" user input.
+The `ce.box()` and `ce.parse()` function return a canonical expression by 
+default. If instead you want a non-canonical version, set the `canonical` option
+to `false`. The non-canonical version will be closer to the literal LaTeX 
+input from a user for example, which may be desirable to compare a "raw" user 
+input with an expected answer.
+
+```js
+ce.parse("\\frac{3}{-5}")
+// ➔ ["Rational", -3, 5]
+
+ce.parse("\\frac{3}{-5}", {canonical: false})
+// ➔ ["Divide", 3, -5]
+```
 
 The output of `expr.simplify()`, `expr.evaluate()` and `expr.N()` are canonical
 expressions.

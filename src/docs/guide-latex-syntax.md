@@ -5,14 +5,21 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'universal'
+preamble:
+  '<h1>Parsing and Serializing LaTeX</h1><p class="xl">The CortexJS Compute Engine 
+  manipulates MathJSON expressions. It can also convert LaTeX strings to 
+  MathJSON expressions (<b>parsing</b>) and output MathJSON expressions as 
+  LaTeX string (<b>serializing</b>)</p>'
 toc: true
 ---
 
-The CortexJS Compute Engine manipulates MathJSON expressions. It can also
-convert LaTeX strings to MathJSON expressions (**parsing**) and output MathJSON
-expressions as LaTeX string (**serializing**).{.xl}
+In this documentation, functions such as `ce.box()` and `ce.parse()` require a
+`ComputeEngine` instance which is denoted by a `ce.` prefix.<br>Functions that
+apply to a boxed expression, such as `expr.simplify()` are denoted with a
+`expr.` prefix.{.notice--info}
 
-**To parse a LaTeX string as MathJSON expression**, call the `ce.parse()` function.
+
+**To parse a LaTeX string as a MathJSON expression**, call the `ce.parse()` function.
 
 ```javascript
 const ce = new ComputeEngine();
@@ -21,6 +28,19 @@ console.log(ce.parse('5x + 1').json);
 // ➔  ["Add", ["Multiply", 5, "x"], 1]
 ```
 
+By default, `ce.parse()` return a [canonical expression](/compute-engine/guides/canonical-form/).
+To get a non-canonical expression instead, use the `{canonical: false}` option:
+The non-canonical form is closer to the literal LaTeX input.
+
+```js
+ce.parse("\\frac{7}{-4}")
+// ➔  ["Rational", -7, 4]
+
+ce.parse("\\frac{7}{-4}", {canonical:false})
+// ➔  ["Divide", 7, -4]
+```
+
+<hr>
 
 **To input math using an interactive mathfield**, use [MathLive](/mathlive/).
 
@@ -77,7 +97,7 @@ console.log(ce.serialize(['Add', ['Power', 'x', 3], 2]));
 ## Customizing Parsing and Serialization
 
 
-**To customize the behavior of `expr.parse()` and `expr.latex`** set the
+**To customize the behavior of `ce.parse()` and `expr.latex`** set the
 `ce.latexOptions` property.
 
 Example of customization:
@@ -85,7 +105,7 @@ Example of customization:
 - whether to use an invisible multiply operator between expressions
 - whether the input LaTeX should be preserved as metadata in the output
   expression
-- how to handle encountering unknown symbols while parsing
+- how to handle encountering unknown identifiers while parsing
 - whether to use a dot or a comma as a decimal marker
 - how to display imaginary numbers and infinity
 - whether to format numbers using engineering or scientific format
@@ -129,11 +149,11 @@ ce.latexOptions.decimalMarker = '{,}';
 Note that in LaTeX, in order to get the correct spacing around the comma, it
 must be surrounded by curly brackets.
 
-## Custom LaTeX Dictionary
+## Customizing the LaTeX Dictionary
 
 The <a href ="/math-json/">MathJSON format</a> is independent of any source or
 target language (LaTeX, MathASCII, etc...) or of any specific interpretation of
-the symbols used in a MathJSON expression (`"Pi"`, `"Sin"`, etc...).
+the identifiers used in a MathJSON expression (`"Pi"`, `"Sin"`, etc...).
 
 A **LaTeX dictionary** defines how a MathJSON expression can be expressed as a
 LaTeX string (**serialization**) or constructed from a LaTeX string

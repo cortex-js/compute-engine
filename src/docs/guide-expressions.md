@@ -15,7 +15,7 @@ such as numbers, constants, variables and functions.{.xl}
 In the CortexJS Compute Engine, expressions are represented using the
 [MathJSON format](/math-json/).
 
-They are wrapped in a JavaScript object, a processe called **boxing**, and the
+They are wrapped in a JavaScript object, a process called **boxing**, and the
 resulting expressions are **Boxed Expressions**.
 
 Boxed Expressions improve performance by implementing caching to avoid
@@ -30,8 +30,7 @@ correct functions and properties are used, particularly when using TypeScript.
 **To create a Boxed Expression from a MathJSON expression**, use the `ce.box()`
 function.
 
-The result is an instance of a subclass of `BoxedExpression`, such as
-`BoxedNumber` `BoxedFunction` etc...
+The result is an instance of a `BoxedExpression`.
 
 ```js
 let expr = ce.box(1.729e3);
@@ -75,6 +74,7 @@ const expr = mf.expression;
 console.log(expr.evaluate().latex);
 // ➔ 2
 ```
+
 
 ## Unboxing
 
@@ -125,13 +125,63 @@ value, but their value is calculated indirectly.
 
 **To check if an expression is a literal**, use `expr.isLiteral`.
 
-## Immutability
+<section id='canonical'>
 
-**Boxed expressions are immutable**. Once a Boxed Expression has been created it
-will always represent the same mathematical object.
+## Canonical Expressions
+
+The canonical form of an expression is a "standard" way of writing an
+expression.
+
+**To check if an expression is already in canonical form**, use
+`expr.isCanonical`.
+
+**To obtain the canonical representation of an expression**, use
+`expr.canonical`.
+
+{% readmore "/compute-engine/guides/canonical-form/" %} Read more about the
+<strong>Canonical Form</strong> {% endreadmore %}
+
+
+By default, `ce.box()` and `ce.parse()` produce a [canonical expression](#canonical-expressions).
+
+**To get a "raw" (non-canonical) expression instead**, use `ce.box(expr, {canonical: false})`
+or `ce.parse(latex, {canonical: false})`.
+
+```js
+ce.parse("\\frac{3}{-5}")
+// ➔ ["Rational", -3, 5]
+
+ce.parse("\\frac{3}{-5}", {canonical: false})
+// ➔ ["Divide", 3, -5]
+```
+
+
+A non-canonical expression may include errors as a result of parsing from LaTeX,
+if the LaTeX input contained LaTeX syntax errors.
+
+The arguments of a function in canonical form are validated to make sure they
+match expectations.
+
+A canonical expression may include additional errors, for example
+`["Divide", 2, 5, 6]` (three arguments instead of two), `["Add", 2, "True"]`
+(mismatched argument domain, expected a number but got a boolean).
+
+**To check if an expression contains errors** use `expr.isValid`.
+
+When doing this check on a canonical expression it take into consideration not 
+only possible syntax errors, but also semantic errors (incorrect number or 
+domain of arguments, etc...).
+
+</section>
+
+
+## Mutability
+
+Unless otherwise specified, expressions are immutable.
 
 The functions that manipulate Boxed Expressions, such as `expr.simplify()`,
-return a new Boxed Expression, without modifying `expr`.
+`expr.evaluate()`, `expr.N()` return a new Boxed Expression, without modifying 
+`expr`.
 
 However, the properties of the expression may change, since some of them may
 depend on contextual information which can change over time.
@@ -168,38 +218,7 @@ function itself is pure, and all its arguments are pure as well.
 
 **To check if an expression is pure**, use `expr.isPure`.
 
-<section id='canonical'>
 
-## Canonical Expressions
-
-The canonical form of an expression is a "standard" way of writing an
-expression.
-
-**To check if an expression is already in canonical form**, use
-`expr.isCanonical`.
-
-**To obtain the canonical representation of an expression**, use
-`expr.canonical`.
-
-{% readmore "/compute-engine/guides/canonical-form/" %} Read more about the
-<strong>Canonical Form</strong> {% endreadmore %}
-
-A non-canonical expression may include errors as a result of parsing from LaTeX,
-if there were syntax errors in the LaTeX input.
-
-The arguments of a function in canonical form are validated to make sure they
-match expectations.
-
-A canonical expression may include additional errors, for example
-`["Divide", 2, 5, 6]` (three arguments instead of two), `["Add", 2, "True"]`
-(mismatched argument domain, expected a number but got a boolean).
-
-**To check if an expression contains errors** use `expr.canonical.isValid`.
-
-This check will include not only possible syntax errors, but also semantic
-errors (incorrect number or domain of arguments, etc...).
-
-</section>
 
 ## Checking the Kind of Expression
 

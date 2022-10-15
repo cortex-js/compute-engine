@@ -5,10 +5,11 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'universal'
+preamble:
+  '<h1>Domains</h1><p class="xl">The <b>domain</b> of an expression is the set 
+  of the possible values of that expression.</p>'
 toc: true
 ---
-
-A **domain** is the set of the possible values of an expression.{.xl}
 
 A domain is represented by a **domain expression**. For example:
 
@@ -16,16 +17,20 @@ A domain is represented by a **domain expression**. For example:
 - `"Boolean"`
 - `["Range", -1, +1]`.
 
-A domain expression is either a **domain literal** represented by a symbol such
-as `"Integer"` and `"Boolean"` or a **constructed domain** represented by a
-function. Of course, it wouldn't make sense for it to be any function, so the
-head of that function is among a limited set of **domain constructor**. This
-effectively defines a specialized language to represent domains. In some cases
-the same function name can be used in a domain expression and a value
-expression, but they will be interpreted differently. For example, the
-expression `["List", 5, 7, 11]` is a value representing a list of three
-integers. On the other hand, the domain expression `["List", "Integer"]`
-represent the domain of all the lists that have integers as their element.
+A domain expression is either a **domain literal** represented by an identifier
+such as `"Integer"` and `"Boolean"` or a **constructed domain** represented by 
+a function expression. 
+
+Of course, it wouldn't make sense for it to be any function, so the
+name of that function must be among a limited set of **domain constructor**. 
+
+This effectively defines a specialized language to represent domains. In some 
+cases the same function name can be used in a domain expression and a value
+expression, but they will be interpreted differently. 
+
+For example, the expression `["List", 5, 7, 11]` is a value representing a list 
+of three integers. On the other hand, the domain expression `["List", "Integer"]`
+represents the domain of all the lists that have integers as their element.
 
 Domains are similar to _types_ in programming languages. Amongst other things,
 they are used to select the correct function definition.
@@ -149,7 +154,7 @@ ce.domain('Number').isCompatible('RealNumber', 'contravariant');
 
 ## Constructing New Domains
 
-A domain constructor is a function with one of the heads below.
+A domain constructor is a function expression with one of the identifiers below.
 
 **To define a new domain** use a domain constructor.
 

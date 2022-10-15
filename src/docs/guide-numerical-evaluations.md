@@ -6,15 +6,16 @@ date: Last Modified
 sidebar:
   - nav: 'universal'
 toc: true
+preamble:
+  '<h1>Numerical Evaluation</h1><p class="xl">To obtain a numeric approximation of the value of an expression, call the <kbd>expr.N()</kbd> function.</p>'
 ---
 
-**To obtain a numeric approximation of the value of an expression**, call the
-`expr.N()` function.
+
 
 If `expr.N()` cannot provide a numeric evaluation, a symbolic representation of
 the partially evaluated expression is returned.
 
-```ts
+```js
 console.log(ce.parse('3 + 5 + x').N().latex);
 // ➔ "8 + x"
 ```
@@ -22,7 +23,7 @@ console.log(ce.parse('3 + 5 + x').N().latex);
 If the expression is [pure](/compute-engine/guides/expressions#pure/), the value
 of the expression can be obtained with `expr.numericValue`.
 
-```ts
+```js
 console.log(ce.parse('\\sqrt{5} + 7^3').N().latex);
 // ➔ "345.2360679774998"
 
@@ -45,7 +46,29 @@ Four numeric modes may be used to perform numeric evaluations with the Compute
 Engine: `"machine"` `"bignum"` `"complex"` and `"auto"`. The default mode is
 `"auto"`.
 
-<section id='machine-numeric-mode'>
+Numbers are represented internally in one of the following format:
+- `number`: a 64-bit float
+- `complex`: a pair of 64-bit float for the real and imaginary part
+- `bignum`: an arbitrary precision floating point number
+- `rational`: a pair of 64-bit float for the numerator and denominator
+- `big rational`: a pair of arbitrary precision floating point numbers for the 
+   numerator and denominator
+
+Depending on the current numeric mode, this is what happens to calculations
+involving the specified number types:
+- {% icon "circle-check" "green-700" %} indicate that no transformation is done
+- `upgraded` indicate that a transformation is done without loss of precision
+- `downgraded` indicate that a transformation is done with may result in a loss
+   of precision, a rounding towards 0 if underflow occurs, or a rounding 
+   towards \\( \\pm\\infty \\) if overflow occurs.
+
+|                | `auto`   |  `machine` | `bignum` | `complex` |
+| :---           | --- | --- | --- | --- |
+| `number`      | upgraded to `bignum` | {% icon "circle-check" "green-700" %} | upgraded to `bignum` | {% icon "circle-check" "green-700" %}|
+| `complex`      | {% icon "circle-check" "green-700" %}  | `NaN`     | `NaN` | {% icon "circle-check" "green-700" %} |
+| `bignum`       | {% icon "circle-check" "green-700" %} | downgraded to `number` | {% icon "circle-check" "green-700" %} | downgraded to `number` | 
+| `rational`     | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | upgraded to `big rational` | {% icon "circle-check" "green-700" %} |
+| `big rational` | {% icon "circle-check" "green-700" %} | downgraded to `rational` | {% icon "circle-check" "green-700" %} | downgraded to `rational` |
 
 ### Machine Numeric Mode
 
@@ -85,19 +108,16 @@ errors when manipulating them.
 Read <strong>"What Every Computer Scientist Should Know About Floating-Point
 Arithmetic"</strong> {% endreadmore %}
 
-</section>
-
-<section id='bignum-numeric-mode'>
 
 ### Bignum Numeric Mode
 
 In the `bignum` numeric mode, numbers are represented as a string of base-10
 digits and an exponent.
 
-Bignum numbers have a minimum value of \\( \pm 10^{-9000000000000000} \\) and a
-maximum value of \\( \pm9.99999\ldot\times 10^{+9000000000000000} \\).
+Bignum numbers have a minimum value of \\( \\pm 10^{-9\\,000\\,000\\,000\\,000\\,000} \\) and a
+maximum value of \\( \\pm9.99999\\ldots \\times  10^{+9\\,000\\,000\\,000\\,000\\,000} \\).
 
-**To change the numeric mode to the `big` mode**, use
+**To change the numeric mode to the `bignum` mode**, use
 `engine.numericMode = "bignum"`.
 
 ```ts
@@ -148,10 +168,6 @@ MathJSON number that looks like this:
 mode is implemented using the <strong>decimal.js</strong> library.
 {% endreadmore %}
 
-</section>
-
-<section id='complex-numeric-mode'>
-
 ### Complex Numeric Mode
 
 The `complex` numeric mode can represent complex numbers as a pair of real and
@@ -172,19 +188,14 @@ Changing the numeric mode to `complex` automatically sets the precision to 15.
 `complex` mode is implemented using the <strong>Complex.js</strong> library.
 {% endreadmore %}
 
-</section>
-
-<section id='auto-numeric-mode'>
 
 ### `Auto` Numeric Mode
 
-When using the `auto` numeric mode, calculations are performed using machine
-numbers if the precision is 15 or less. If the precision is more than 15,
-Decimal numbers are used.
+When using the `auto` numeric mode, calculations are performed using bignum 
+numbers.
 
-Computations with a result in the Complex domain will return a Complex number.
+Computations which result in a complex number will return a complex number.
 
-</section>
 
 ## Simplifying Before Evaluating
 

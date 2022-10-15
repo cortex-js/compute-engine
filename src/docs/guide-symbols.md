@@ -7,9 +7,9 @@ sidebar:
   - nav: 'universal'
 toc: true
 preamble:
-  '<h1>Symbols</h1><p class="xl">A <b>symbol</b> is a named mathematical object. It belongs to a
-  domain and it may hold a value. A symbol without a value represents a
-  mathematical unknown in an expression.</p>'
+  '<h1>Symbols</h1><p class="xl">A <b>symbol</b> is an identifier representing
+  a named mathematical object. It belongs to a domain and it may hold a value. 
+  A symbol without a value represents a mathematical unknown in an expression.</p>'
 head:
   modules:
     - /assets/js/code-playground.min.js
