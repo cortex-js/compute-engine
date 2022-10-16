@@ -18,15 +18,13 @@ value other than themselves.
 | Symbol      | Description                                                                                                                                                                            |
 | :---------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `All`       | {% tags "inert" "float-right" %} All the possible values apply                                                                                                                                                          |
-| `Missing`   | {% tags "inert" "float-right" %}A **required** expression is not present                                                                                                                                               |
 | `None`      | {% tags "inert" "float-right" %}None of the possible values apply                                                                                                                                                      |
-| `Nothing`   | {% tags "inert" "float-right" %}An **optional** expression is not present                                                                                                                                              |
+| `Nothing`   | {% tags "inert" "float-right" %}An **optional** expression is not present. Used in sparse list to indicate  skipped elements.                                                                                                                                              |
 | `Undefined` | {% tags "inert" "float-right" %}The result is not defined. For example, the domain of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` (Not a Number) and for booleans, `Maybe` |
 
 
 | MathJSON                     | LaTeX                                |
 | :-------------------------- | :------------------------------ |
-| `["Divide", 2, "Missing"]`  | \\[\frac{2}{\unicode{"2B1A}}\\] |
 | `["List", 2, "Nothing", 3]` | \\[\lbrack 2, ,3 \rbrack\\]     |
 
 </section>
@@ -34,44 +32,87 @@ value other than themselves.
 
 
 
-<section id='variables'>
 
-## Variables
+## Assignment, Declaration and Assumptions
 
 {% defs "Function" "Operation" %} 
+
+{% def "Assume" %}
+<code>["Assume", _symbol_, _value_]</code><br>
+
+
+<code>["Assume", _symbol_, _domain_]</code><br>
+
+
+<code>["Assume", _predicate_]</code>
+
+The predicate is an expression that evaluates to `True` or `False. The symbols
+or functions in the predicate expression may be free (i.e. not have a definition).
+
+The predicate can take the form of an equality, an inequality or a membership 
+expression:
+- `["Assume", ["Equal", "x", 3]]`
+- `["Assume", ["Greater", "x", 0]]`
+- `["Assume", ["Element", "x", "Integer"]]`
+
+{% enddef %} 
+
 
 {% def "Let" %}
 <code>["Let", _symbol_, _value_]</code><br>
 <code>["Let", _symbol_, _value_, _domain_]</code>
 
 Define a new symbol in the current scope, and set its value and domain.
-If `domain` is not provided, the domain is inferred based on the value.
+If _<kbd>domain</kbd>_ is not provided, the domain is inferred based on the value.
 
-If the symbol already had a definition in the current scope, replace it.
+If the symbol already has a definition in the current scope, evaluate to 
+an error, otherwise evaluate to _<kbd>value</kbd>_. To change the value of 
+an existing symbol, use a `["Set"]` expression.
+
+<code>["Let", _function-expression_, _value_]</code>
+
+Define a new function in the current scope. The name of the function and its
+arguments are provided by the function expression. The value is an expression
+using the arguments from _<kbd>function-expression</kbd>_.
+
+```
+// Define f(x) := x + 1
+["Let", ["f", "x"], ["Add", "x", 1]]
+```
+
+The arguments of the function expression should be either
+- symbols
+- pairs of symbol and domain.
+
+```
+// Define f(n) := 2n, where n is an integer
+["Let", ["f", ["Tuple", "n", "Integer]], ["Multiply", "n", 2]]
+```
+
+
+
 
 {% enddef %} 
 
-{% def "Value" %}
-<code>["Value", _symbol_]</code>
-
-Evaluate to the value of `_symbol_`.
 
 
-<code>["Value", _symbol_, _value_]</code>
+{% def "Set" %}
 
-Set the value of `_symbol_` to `_value_`.
+<code>["Set", _symbol_, _value_]</code>
 
-If `_symbol_` does not exist in the current context, consider parent scopes until
-a definition for the symbol is found.
+Set the value of _<kbd>symbol</kbd>_ to _<kbd>value</kbd>_.
 
-If no definition for the symbol is found add one in the current scope.
+If _<kbd>symbol</kbd>_ does not exist in the current context, consider parent 
+scopes until a definition for the symbol is found.
+
+If there is no definition for the symbol, evaluate to an error, otherwise 
+evaluate to _<kbd>value</kbd>_.  To define a new symbol, use a `["Let"]`
+expression.
 
 {% enddef %} 
+
 
 {% enddefs %}
-
-</section>
-
 
 
 

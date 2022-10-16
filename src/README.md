@@ -341,10 +341,100 @@ A MathJSON **symbol** is either:
 - an object literal with a `"sym"` key
 - a JSON string
 
-**Symbols** are identifiers that represent the name of variables, wildcards,
-constants and functions.
+**Symbols** are identifiers that represent the name of variables,
+constants and wildcards.
 
-Symbols are strings of valid Unicode characters, including Greek, Cyrillic,
+
+## Functions
+
+A MathJSON function expression is either:
+
+- an object literal with a `"fn"` key.
+- a JSON array
+
+Function expressions in the context of MathJSON can be used to represent 
+mathematical functions but are more generally used to represent 
+the application of a function to some arguments. 
+
+The function expression `["Add", 2, 3]` applies the function 
+named `Add` to the arguments `2` and `3`.
+
+The function `"f"` can be used as a symbol, or in a function expression:
+`["f", "x"]`.
+
+### Functions as Object Literal
+
+The default representation of **function** expressions is an object literal with
+a `"fn"` key. The value of the key is an array representing the function head
+and its arguments.
+
+```js
+{
+  "fn": [Expression, ...Expression[]]
+}
+```
+
+
+### Functions as JSON Arrays
+
+If a **function** has no extra metadata it can be represented as a JSON array.
+
+For example these two expressions are equivalent:
+
+```json
+{ "fn": ["Cos", ["Add", "x", 1]] }
+
+["Cos", ["Add", "x", 1]]
+```
+
+An array representing a function must have at least one element, the head of the
+function. Therefore `[]` is not a valid expression.{.notice--info}
+
+### Function Head
+
+The **head** of the function expression is the first element in the array. Its
+presence is required. It indicates the **name of the function** or "what" the
+function is about.
+
+The head is usually an identifier, but it can be another expression.
+
+- If the head is an identifier, it should follow the conventions for function names 
+(see below).
+
+  ```json
+  // Apply the function "Sin" to the argument "x"
+  ["Sin", "x"]
+  // Apply "Cos" to a function expression
+  ["Cos", ["Divide", "Pi", 2]]
+  ```
+
+- If the head is an expression, it may include the wildcard `_` or `_1` to represent
+  the first argument, `_2` to represent the second argument, etc... The wildcard
+  `__` represents the sequence of all the arguments.
+
+  ```json
+  [["Multiply", "_", "_"], 4]
+  ```
+
+Following the head are zero or more **arguments**, which are expressions as
+well. The arguments, or **operands**, form the **tail** of the function.
+
+**CAUTION** the arguments of a function are expressions. To represent an
+argument which is a list, use a `["List"]` expression, do not use an array.
+{.notice--warning}
+
+The expression corresponding to \\(\sin^{-1}(x)\\) is:
+
+```json
+[["InverseFunction", "Sin"], "x"]
+```
+
+The head of this expression is `["InverseFunction", "Sin"]` and the argument is
+`"x"`.
+
+## Identifiers
+
+Identifiers are strings of valid Unicode characters, including Greek, Cyrillic,
 Hebrew, Arabic, ideographic and CJK symbols, mathematical symbols and emojis,
 except:
 
@@ -360,7 +450,7 @@ except:
 
 </div>
 
-In addition, the first character of a symbol must not be:
+In addition, the first character of an identifier must not be:
 
 <div class=symbols-table>
 
@@ -387,13 +477,13 @@ In addition, the first character of a symbol must not be:
 
 </div>
 
-Before they are used, symbols are normalized to the
+Before they are used, identifiers are normalized to the
 [Unicode Normalization Form C (NFC)](https://unicode.org/reports/tr15/). They
 must be stored internally and compared using the NFC.
 
 JSON escape sequences are applied before Unicode normalization.
 
-These four strings represent the same symbol:
+These four strings represent the same identifier:
 
 - `"Å"`
 - `"A\u030a"` `A‌` + **COMBINING RING ABOVE**
@@ -506,81 +596,6 @@ these conventions.
 
 </div>
 
-## Functions
-
-A MathJSON function is either:
-
-- an object literal with a `"fn"` key.
-- a JSON array
-
-### Functions as Object Literal
-
-The default representation of **function** expressions is an object literal with
-a `"fn"` key. The value of the key is an array representing the function head
-and its arguments.
-
-```js
-{
-  "fn": [Expression, ...Expression[]]
-}
-```
-
-### Functions as JSON Arrays
-
-If a **function** has no extra metadata it can be represented as a JSON array.
-
-For example these two expressions are equivalent:
-
-```json
-{ "fn": ["Cos", ["Add", "x", 1]] }
-
-["Cos", ["Add", "x", 1]]
-```
-
-An array representing a function must have at least one element, the head of the
-function. Therefore `[]` is not a valid expression.{.notice--info}
-
-### Function Head
-
-The **head** of the function expression is the first element in the array. Its
-presence is required. It indicates the **name of the function** or "what" the
-function is about.
-
-The head is usually a string, but it can be another expression.
-
-- If it is a string, it should follow the conventions for function names.
-
-  ```json
-  // Apply the function "Sin" to the argument "x"
-  ["Sin", "x"]
-  // Apply "Cos" to a function expression
-  ["Cos", ["Divide", "Pi", 2]]
-  ```
-
-- If it is an expression, it may include the wildcard `_` or `_1` to represent
-  the first argument, `_2` to represent the second argument, etc... The wildcard
-  `__` represents the sequence of all the arguments.
-
-  ```json
-  [["Multiply", "_", "_"], 4]
-  ```
-
-Following the head are zero or more **arguments**, which are expressions as
-well. The arguments, or **operands**, form the **tail** of the function.
-
-**CAUTION** the arguments of a function are expressions. To represent an
-argument which is a list, use a `["List"]` expression, do not use an array.
-{.notice--warning}
-
-The expression corresponding to \\(\sin^{-1}(x)\\) is:
-
-```json
-[["InverseFunction", "Sin"], "x"]
-```
-
-The head of this expression is `["InverseFunction", "Sin"]` and the argument is
-`"x"`.
-
 ## Dictionary
 
 A **dictionary** is a collection of key-value pairs. In some progamming
@@ -652,3 +667,42 @@ The following metadata keys are recommended:
   "wikidata": "Q168",
 }
 ```
+
+
+## Standard Library
+
+This document defines the structure of MathJSON expression. The Standard 
+Library defines a recommended **vocabulary** to use in MathJSON expressions.
+
+Before considering inventing your own vocabulary, check if the standard 
+library already provides relevant definitions.
+
+The Standard Library includes definitions for:
+
+<div class=symbols-table>
+
+| Dictionary | Symbols/Functions |
+|:---|:---|
+| [Arithmetic](/compute-engine/reference/arithmetic/) | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`...|
+| [Calculus](/compute-engine/reference/calculus/) | `Derive` `Integrate`...|
+| [Collections](/compute-engine/reference/collections/)| `Sequence` `List` `Dictionary` `Set`... |
+| [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` `Sum`  ... |
+| [Core](/compute-engine/reference/core/) | `Let`, `Set`, `InverseFunction` `LatexTokens`... |
+| [Domains](/compute-engine/reference/domains/) | `Anything` `Nothing` `Number` `Integer` ... |
+| [Functions](/compute-engine/reference/functions/) | `Function` `Apply` `Return`  ... |
+| [Logic](/compute-engine/reference/logic/) |`And` `Or` `Not` `True` `False` `Maybe` ...|
+| [Sets](/compute-engine/reference/sets/) | `Union` `Intersection` `EmptySet` ...|
+| [Special Functions](/compute-engine/reference/special-functions/) | `Erf` `Gamma` `Factorial`...|
+| [Styling](/compute-engine/reference/styling/) | `Delimiter` `Style`...|
+| [Trigonometry](/compute-engine/reference/trigonometry/)  | `Pi` `Cos` `Sin` `Tan`...| 
+
+</div>
+
+If you need to define a new function, avoid using a name already defined
+in the Standard Library.
+
+{% readmore "/compute-engine/guides/standard-library/" %} Read more about the
+<strong>MathJSON Standard Library</strong>.{% endreadmore %}
+
+
+

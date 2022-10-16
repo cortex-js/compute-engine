@@ -69,7 +69,7 @@ organized by topic as follow:
 | [Calculus](/compute-engine/reference/calculus/) | `Derive` `Integrate`...|
 | [Collections](/compute-engine/reference/collections/)| `Sequence` `List` `Dictionary` `Set`... |
 | [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` `Sum`  ... |
-| [Core](/compute-engine/reference/core/) | `InverseFunction` `LatexTokens`... |
+| [Core](/compute-engine/reference/core/) | `Let`, `Set`, `InverseFunction` `LatexTokens`... |
 | [Domains](/compute-engine/reference/domains/) | `Anything` `Nothing` `Number` `Integer` ... |
 | [Functions](/compute-engine/reference/functions/) | `Function` `Apply` `Return`  ... |
 | [Logic](/compute-engine/reference/logic/) |`And` `Or` `Not` `True` `False` `Maybe` ...|
