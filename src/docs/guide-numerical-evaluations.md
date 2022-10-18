@@ -1,5 +1,5 @@
 ---
-title: Numerical Evaluation
+title: Numeric Evaluation
 permalink: /compute-engine/guides/numeric-evaluation/
 layout: single
 date: Last Modified
@@ -7,13 +7,22 @@ sidebar:
   - nav: 'universal'
 toc: true
 preamble:
-  '<h1>Numerical Evaluation</h1><p class="xl">To obtain a numeric approximation of the value of an expression, call the <kbd>expr.N()</kbd> function.</p>'
+  '<h1>Numeric Evaluation</h1><p class="xl">To obtain an exact numeric evaluation of an expression use <kbd>expr.evaluate()</kbd>. To obtain a
+  numeric approximation use <kbd>expr.N()</kbd>.</p>'
 ---
 
+An evaluation with `expr.evaluate()` preserves **exact** numbers. Exact 
+numbers are:
+- constants such as `ExponentialE` and `Pi`
+- integers and rationals
+- square roots of integers and rationals
 
+If one of the arguments is not an exact value the expression is evaluated
+as a numeric approximation.
 
-If `expr.N()` cannot provide a numeric evaluation, a symbolic representation of
-the partially evaluated expression is returned.
+To provide a numeric approximation, use `expr.N()`. If `expr.N()` cannot 
+provide a numeric evaluation, a symbolic representation of the partially
+evaluated expression is returned.
 
 ```js
 console.log(ce.parse('3 + 5 + x').N().latex);

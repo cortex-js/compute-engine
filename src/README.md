@@ -207,8 +207,8 @@ A MathJSON expression is a combination of **numbers**, **symbols**, **strings**,
 ```
 
 **Numbers**, **symbols**, **strings** and **functions** can be expressed either
-as an object literal with a `"num"` `"str"` `"sym"` or `"fn"` key, respectively,
-or as a shorthand notation using a JSON number, string or array.
+as object literals with a `"num"` `"str"` `"sym"` or `"fn"` key, respectively,
+or using a shorthand notation as a a JSON number, string or array.
 
 **Dictionaries** do not have a shorthand notation and are always expressed as an
 object literal with a `"dict"` key.
@@ -564,15 +564,15 @@ in patterns.
 ### Rendering Conventions
 
 The following recommendations may be followed by clients displaying MathJSON
-symbols. They do not affect computation or manipulation of expressions following
+identifiers. They do not affect computation or manipulation of expressions following
 these conventions.
 
-- Multi-letter variables, that is symbols with more than one character, may be
+- Multi-letter variables, that is identifiers with more than one character, may be
   rendered in LaTeX with a `\mathit{}` or `\mathrm{}` command.
-- Symbol names containing a `_` may be split in a suffix (part before the `_`)
+- Identifiers containing a `_` may be split in a suffix (part before the `_`)
   and a prefix (part after the `_`) and the prefix may be displayed as a
-  subscript of the suffix. A symbol fragment is either the entire symbol, or a
-  suffix or a prefix of a symbol.
+  subscript of the suffix. An identifier fragment is either the entire 
+  identifier, or a suffix or a prefix of an identifier.
 - The following common names, when they appear as a fragment, may be replaced
   with a corresponding LaTeX command: `alpha`, `beta`, `gamma`, `Gamma`,
   `delta`, `Delta`, `epsilon`, `zeta`, `eta`, `theta`, `Theta`, `iota`, `kappa`,
@@ -580,12 +580,12 @@ these conventions.
   `Sigma`, `tau`, `upsilon`, `phi`, `Phi`, `varphi`, `chi`, `psi`, `Psi`,
   `omega`, `Omega`, `aleph`, `ast`, `blacksquare`, `bot`, `bullet`, `circ`,
   `diamond`, `times`, `top`, `square`, `star`.
-- Symbol fragments ending in digits may be displayed with a corresponding
+- Identifier fragments ending in digits may be displayed with a corresponding
   subscript
 
 <div class=symbols-table>
 
-| Symbol    | LaTeX                  |                                 |
+| Identifier    | LaTeX                  |                                 |
 | :-------- | :--------------------- | ------------------------------- |
 | `time`    | `\mathit{time}`        | \\( \mathit{time} \\)           |
 | `alpha`   | `\alpha`               | \\( \alpha \\)                  |
@@ -642,7 +642,7 @@ The following metadata keys are recommended:
 
 | Key             | Note                                                                                                                                                                         |
 | :-------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wikidata`      | A short string indicating an entry in a wikibase.<br>This information can be used to disambiguate the meaning of a symbol                                                    |
+| `wikidata`      | A short string indicating an entry in a wikibase.<br>This information can be used to disambiguate the meaning of an identifier                                                    |
 | `comment`       | A human readable plain string to annotate an expression, since JSON does not allow comments in its encoding                                                                  |
 | `documentation` | A Markdown-encoded string providing documentation about this expression.                                                                                                     |
 | `latex`         | A visual representation in LaTeX of the expression. <br> This can be useful to preserve non-semantic details, for example parentheses in an expression or styling attributes |
