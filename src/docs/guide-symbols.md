@@ -35,7 +35,7 @@ symbol has a domain of `ce.defaultDomain` and no value.
 const n = ce.box('n');
 n.domain = 'Integer';
 n.value = 5;
-console.log("n:", n.domain.json, "=", n.value);</div></code-playground>
+console.log("n:", n.domain.json, "=", n.value.json);</div></code-playground>
 
 Symbols are defined within a **scope**.
 
