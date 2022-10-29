@@ -137,10 +137,9 @@ check('Invalid argument in sequence', () =>
         [
           "ErrorCode",
           "'incompatible-domain'",
-          ["Domain", "Number"],
+          "Number",
           ["Domain", "MaybeBoolean"]
-        ],
-        ["Equal", 2, 2]
+        ]
       ],
       3
     ]
@@ -157,8 +156,12 @@ check('Invalid argument positional', () =>
         2,
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", ["Domain", "Number"]],
-          ["Equal", 2, 2]
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Number",
+            ["Domain", "MaybeBoolean"]
+          ]
         ]
       ],
       2
@@ -239,10 +242,10 @@ check('VALID infix command', () =>
   expect(engine.parse('1\\over 2')).toMatchInlineSnapshot(`["Rational", 1, 2]`)
 );
 
-// @todo
+// @fixme
 check('Too many infix commands', () =>
   expect(engine.parse('1\\over 2 \\over 3')).toMatchInlineSnapshot(
-    `["Divide", 1, ["Rational", 2, 3]]`
+    `["Rational", 3, 2]`
   )
 );
 
@@ -340,14 +343,11 @@ check('Invalid delimiter: expected opening', () =>
   expect(engine.parse('1\\right)')).toMatchInlineSnapshot(`
     [
       "Sequence",
+      1,
       [
-        "Sequence",
-        1,
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\right'"],
-          ["Latex", "'\\right'"]
-        ]
+        "Error",
+        ["ErrorCode", "'unexpected-command'", "'\\right'"],
+        ["Latex", "'\\right'"]
       ],
       [
         "Error",
@@ -497,11 +497,11 @@ check('VALID comment', () =>
 );
 
 check('VALID empty group', () =>
-  expect(engine.parse('x={}2')).toMatchInlineSnapshot(`["Equal", "x", 2]`)
+  expect(engine.parse('x={}2')).toMatchInlineSnapshot(`["Equal", 2, "x"]`)
 );
 
 check('VALID empty group', () =>
-  expect(engine.parse('x={  }2')).toMatchInlineSnapshot(`["Equal", "x", 2]`)
+  expect(engine.parse('x={  }2')).toMatchInlineSnapshot(`["Equal", 2, "x"]`)
 );
 
 check('Syntax error', () =>
@@ -509,35 +509,35 @@ check('Syntax error', () =>
     [
       "Equal",
       "x",
-      [
-        "Sequence",
-        2,
-        [
-          "Sequence",
-          ["Error", "'expected-expression'", ["Latex", "''"]],
-          ["Error", "'expected-closing-delimiter'", ["Latex", "'{'"]]
-        ],
-        ["Error", "'expected-closing-delimiter'", ["Latex", "'{{'"]]
-      ]
+      2,
+      ["Error", "'expected-expression'", ["Latex", "''"]],
+      ["Error", "'expected-closing-delimiter'", ["Latex", "'{'"]],
+      ["Error", "'expected-closing-delimiter'", ["Latex", "'{{'"]]
     ]
   `)
 );
 
 check('Missing argument', () =>
-  expect(engine.box(['Sqrt']).canonical).toMatchInlineSnapshot(
-    `["Sqrt", ["Error", ["ErrorCode", "'missing'", "Number"]]]`
-  )
+  expect(engine.box(['Sqrt']).canonical).toMatchInlineSnapshot(`
+    [
+      "Sqrt",
+      [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-domain'",
+          "Number",
+          ["Domain", "Anything"]
+        ]
+      ]
+    ]
+  `)
 );
 
 check('Unexpected argument', () =>
-  expect(engine.box(['Sqrt', 12, 29, 74]).canonical).toMatchInlineSnapshot(`
-    [
-      "Sqrt",
-      12,
-      ["Error", "'unexpected-argument'", 29],
-      ["Error", "'unexpected-argument'", 74]
-    ]
-  `)
+  expect(engine.box(['Sqrt', 12, 29, 74]).canonical).toMatchInlineSnapshot(
+    `["Sqrt", 12, 29, ["Error", "'unexpected-argument'", 74]]`
+  )
 );
 
 check('Mismatched domain', () =>
@@ -546,8 +546,12 @@ check('Mismatched domain', () =>
       "Sqrt",
       [
         "Error",
-        ["ErrorCode", "'incompatible-domain'", ["Domain", "Number"]],
-        "True"
+        [
+          "ErrorCode",
+          "'incompatible-domain'",
+          "Number",
+          ["Domain", "Boolean"]
+        ]
       ]
     ]
   `)

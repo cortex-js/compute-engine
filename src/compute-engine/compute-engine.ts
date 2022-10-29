@@ -42,8 +42,9 @@ import {
   DomainExpression,
   BoxedLambdaExpression,
   FunctionDefinition,
+  Rational,
 } from './public';
-import { box, boxNumber } from './boxed-expression/box';
+import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
   setCurrentContextSymbolTable,
   getStandardLibrary,
@@ -60,13 +61,12 @@ import { canonicalNegate } from './symbolic/negate';
 import { canonicalPower } from './library/arithmetic-power';
 import {
   BoxedFunction,
-  makeCanonicalFunction,
+  flattenSequence,
 } from './boxed-expression/boxed-function';
 import { canonicalMultiply } from './library/arithmetic-multiply';
 import { canonicalAdd } from './library/arithmetic-add';
 import { canonicalDivide } from './library/arithmetic-divide';
 import { BoxedSymbol } from './boxed-expression/boxed-symbol';
-import { BoxedDictionary } from './boxed-expression/boxed-dictionary';
 import {
   boxDomain,
   isDomain,
@@ -75,6 +75,11 @@ import {
 import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expression';
 import { isValidSymbolName } from '../math-json/utils';
 import { makeFunctionDefinition } from './boxed-expression/boxed-function-definition';
+import {
+  isBigRational,
+  isMachineRational,
+  isRational,
+} from './numerics/rationals';
 
 /**
  *
@@ -100,8 +105,6 @@ export class ComputeEngine implements IComputeEngine {
   readonly _ZERO: BoxedExpression;
   /** @internal */
   readonly _ONE: BoxedExpression;
-  /** @internal */
-  readonly _TWO: BoxedExpression;
   /** @internal */
   readonly _HALF: BoxedExpression;
   /** @internal */
@@ -185,8 +188,10 @@ export class ComputeEngine implements IComputeEngine {
   };
   /** @internal */
   private _commonNumbers: { [num: number]: null | BoxedExpression } = {
-    0: null,
-    1: null,
+    '-5': null,
+    '-4': null,
+    '-3': null,
+    '-2': null,
     2: null,
     3: null,
     4: null,
@@ -196,6 +201,9 @@ export class ComputeEngine implements IComputeEngine {
     8: null,
     9: null,
     10: null,
+    11: null,
+    12: null,
+    36: null,
   };
   /** @internal */
   private _commonDomains: { [dom: string]: null | BoxedDomain } = {
@@ -310,7 +318,8 @@ export class ComputeEngine implements IComputeEngine {
       exclude: [],
       shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
       metadata: [],
-      repeatingDecimal: true,
+      precision: 'max',
+      repeatingDecimals: true,
     };
 
     this._stats = {
@@ -336,7 +345,6 @@ export class ComputeEngine implements IComputeEngine {
 
     this._ZERO = new BoxedNumber(this, 0);
     this._ONE = new BoxedNumber(this, 1);
-    this._TWO = new BoxedNumber(this, 2);
     this._HALF = new BoxedNumber(this, [1, 2]);
     this._NEGATIVE_ONE = new BoxedNumber(this, -1);
     this._I = new BoxedNumber(this, Complex.I);
@@ -440,7 +448,7 @@ export class ComputeEngine implements IComputeEngine {
         for (const [_k, v] of scope.symbolTable.symbols) v.reset();
 
       // @todo purge assumptions
-      scope = scope.parentScope;
+      scope = scope.parentScope ?? null;
     }
 
     // Purge any caches
@@ -584,7 +592,7 @@ export class ComputeEngine implements IComputeEngine {
     let scope = this.context;
     while (scope) {
       if (scope.timeLimit !== undefined) return scope.timeLimit;
-      scope = scope.parentScope;
+      scope = scope.parentScope ?? null;
     }
     return 2.0; // 2s
   }
@@ -593,7 +601,7 @@ export class ComputeEngine implements IComputeEngine {
     let scope = this.context;
     while (scope) {
       if (scope.iterationLimit !== undefined) return scope.iterationLimit;
-      scope = scope.parentScope;
+      scope = scope.parentScope ?? null;
     }
     return 1024;
   }
@@ -602,7 +610,7 @@ export class ComputeEngine implements IComputeEngine {
     let scope = this.context;
     while (scope) {
       if (scope.recursionLimit !== undefined) return scope.recursionLimit;
-      scope = scope.parentScope;
+      scope = scope.parentScope ?? null;
     }
     return 1024;
   }
@@ -749,10 +757,11 @@ export class ComputeEngine implements IComputeEngine {
    * to differentiate between symbols that might represent a function application, e.g. `f` vs `x`.
    */
   lookupFunction(
-    head: string,
-    scope?: RuntimeScope
+    head: string | BoxedExpression,
+    scope?: RuntimeScope | null
   ): undefined | BoxedFunctionDefinition {
-    if (typeof head !== 'string') throw Error('Expected a string');
+    if (typeof head !== 'string') return undefined;
+
     // Wildcards never have definitions
     if (head.startsWith('_') || !this.context) return undefined;
 
@@ -897,7 +906,42 @@ export class ComputeEngine implements IComputeEngine {
       }
     }
 
-    this.context = parentScope;
+    this.context = parentScope ?? null;
+
+    if (this.context === null) debugger;
+  }
+
+  set(identifiers: { [identifier: string]: SemiBoxedExpression }): void {
+    for (const k of Object.keys(identifiers)) {
+      if (k !== 'Nothing') {
+        const def = this.lookupSymbol(k);
+        const val = this.box(identifiers[k]);
+        if (def) {
+          if (def.domain && !val.domain.isCompatible(def.domain))
+            throw Error(
+              `Expected value with domain ${def.domain.toString()} for "${k}"`
+            );
+          def.value = val;
+        } else {
+          if (val.domain.isNumeric)
+            this.defineSymbol({ name: k, value: val, domain: 'Number' });
+          else this.defineSymbol({ name: k, value: val });
+        }
+      }
+    }
+  }
+
+  let(identifiers: {
+    [identifier: string]: SymbolDefinition | FunctionDefinition;
+  }): void {
+    for (const k of Object.keys(identifiers)) {
+      if (k !== 'Nothing') {
+        const def = identifiers[k];
+        if ('value' in def || ('domain' in def && def.domain !== 'Function'))
+          this.defineSymbol({ ...def, name: k } as SymbolDefinition);
+        else this.defineFunction({ ...def, name: k } as FunctionDefinition);
+      }
+    }
   }
 
   get assumptions(): ExpressionMapInterface<boolean> {
@@ -997,9 +1041,14 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   box(
-    expr: Decimal | Complex | [num: number, denom: number] | SemiBoxedExpression
+    expr:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression,
+    options?: { canonical?: boolean }
   ): BoxedExpression {
-    return box(this, expr);
+    return box(this, expr, options);
   }
 
   fn(
@@ -1007,112 +1056,9 @@ export class ComputeEngine implements IComputeEngine {
     ops: BoxedExpression[],
     metadata?: Metadata
   ): BoxedExpression {
-    // Don't attempt to canonicalize the ops if a `Hold` expression
-    if (head === 'Hold') return this._fn('Hold', ops, metadata);
-
-    ops = ops.map((x) => x.canonical);
-
-    if (head === 'String')
-      return this.string(
-        ops.map((x) => x.string ?? x.latex).join(''),
-        metadata
-      );
-
-    if (head === 'Symbol')
-      return this.symbol(
-        ops.map((x) => x.string ?? x.latex).join(''),
-        metadata
-      );
-
-    if ((head === 'Divide' || head === 'Rational') && ops.length === 2) {
-      const [n, d] = [
-        ops[0].machineValue ?? ops[0].asSmallInteger,
-        ops[1].machineValue ?? ops[1].asSmallInteger,
-      ];
-      if (
-        n !== null &&
-        d !== null &&
-        Number.isInteger(n) &&
-        Number.isInteger(d)
-      ) {
-        return this.number([n, d]);
-      }
-    }
-
-    if (head === 'Number') {
-      if (ops.length === 1) {
-        const x = ops[0];
-        const val = x.bignumValue ?? x.complexValue ?? x.machineValue;
-        if (val !== null) return this.number(val);
-        const [n, d] = x.rationalValue;
-        if (n !== null && d !== null) return this.number([n, d]);
-      }
-      return this._NAN;
-    }
-
-    if (head === 'Complex') {
-      if (ops.length === 1) {
-        // If single argument, assume it's imaginary
-        const val = ops[0].asFloat;
-        if (val !== null) return this.number(this.complex(0, val));
-        return this.mul([ops[0], this._I]);
-      } else if (ops.length === 2) {
-        const re = ops[0].asFloat;
-        const im = ops[1].asFloat;
-        if (re !== null && im !== null) this.number(this.complex(re, im));
-        if (im === 0) return ops[0];
-        return this.add([ops[0], this.mul([ops[1], this._I])], metadata);
-      }
-    }
-
-    if (head === 'Negate' && ops.length === 1)
-      return canonicalNegate(ops[0] ?? this.error('missing'), metadata);
-
-    if (
-      head === 'Single' ||
-      head === 'Pair' ||
-      head === 'Triple' ||
-      head === 'KeyValuePair'
-    )
-      return this.tuple(ops, metadata);
-
-    if (head === 'Dictionary') {
-      const dict = {};
-      for (const op of ops) {
-        if (op.head === 'Tuple') {
-          const key = op.op1;
-          if (key.isValid && !key.isNothing) {
-            const val = op.op2;
-            let k = key.symbol ?? key.string;
-            if (!k && key.isLiteral) {
-              const n = key.machineValue ?? key.asSmallInteger;
-              if (n && Number.isFinite(n) && Number.isInteger(n))
-                k = n.toString();
-            }
-            if (k) dict[k] === val;
-          }
-        }
-      }
-      return new BoxedDictionary(this, dict, metadata);
-    }
-
-    if (head === 'Add') return this.add(ops, metadata);
-    if (head === 'Multiply') return this.mul(ops, metadata);
-    if (head === 'Divide')
-      return this.divide(
-        ops[0] ?? this.error('missing'),
-        ops[1] ?? this.error('missing'),
-        metadata
-      );
-    if (head === 'Power')
-      return this.power(
-        ops[0] ?? this.error('missing'),
-        ops[1] ?? this.error('missing'),
-        metadata
-      );
-
-    return makeCanonicalFunction(this, head, ops, { metadata });
+    return boxFunction(this, head, ops, { metadata, canonical: true });
   }
+
   /** @internal */
   _fn(
     head: string | BoxedExpression,
@@ -1128,10 +1074,7 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedFunction(this, head, ops, {
       metadata,
       canonical: true,
-      def:
-        typeof head === 'string' && this.context
-          ? this.lookupFunction(head, this.context)
-          : undefined,
+      def: this.lookupFunction(head, this.context),
     });
   }
 
@@ -1162,54 +1105,108 @@ export class ComputeEngine implements IComputeEngine {
     const msg =
       typeof message === 'string'
         ? this.string(message)
-        : this._fn('ErrorCode', [
-            this.string(message[0]),
-            ...message.slice(1).map((x) => this.box(x).canonical),
-          ]);
+        : new BoxedFunction(
+            this,
+            'ErrorCode',
+            [
+              this.string(message[0]),
+              ...message.slice(1).map((x) => this.box(x, { canonical: false })),
+            ],
+            { canonical: false }
+          );
 
-    if (!where) return this._fn('Error', [msg]);
+    if (!where)
+      return new BoxedFunction(this, 'Error', [msg], { canonical: false });
 
-    return this._fn('Error', [msg, this.box(where).canonical]);
+    return new BoxedFunction(
+      this,
+      'Error',
+      [msg, this.box(where, { canonical: false })],
+      { canonical: false }
+    );
   }
 
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
+    // Short path. Note that are arguments are **not** validated.
+    ops = flattenSequence(ops);
+
     const result = canonicalAdd(this, ops);
     if (metadata?.latex !== undefined) result.latex = metadata.latex;
     if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
 
+  negate(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
+    // Short path. Note that are arguments are **not** validated.
+    return canonicalNegate(expr, metadata);
+  }
+
   mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
+    // Short path. Note that are arguments are **not** validated.
+    ops = flattenSequence(ops);
+
     const result = canonicalMultiply(this, ops);
     if (metadata?.latex !== undefined) result.latex = metadata.latex;
     if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
 
-  power(
-    base: BoxedExpression,
-    exponent: number | [number, number] | BoxedExpression,
+  divide(
+    num: BoxedExpression,
+    denom: BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression {
-    console.assert(base.isCanonical); // @debug
+    // Short path. Note that are arguments are **not** validated.
+
+    const result = canonicalDivide(this, num, denom);
+    if (metadata?.latex !== undefined) result.latex = metadata.latex;
+    if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
+    return result;
+  }
+
+  sqrt(base: BoxedExpression, metadata?: Metadata) {
+    return this.power(base, [1, 2], metadata);
+  }
+
+  power(
+    base: BoxedExpression,
+    exponent: number | Rational | BoxedExpression,
+    metadata?: Metadata
+  ): BoxedExpression {
+    // Short path. Note that are arguments are **not** validated.
     let e: number | null = null;
-    if (typeof exponent === 'number') e = exponent;
-    else if (Array.isArray(exponent)) {
-      if (exponent[1] === 1) e = exponent[0];
-    } else e = exponent.machineValue;
-    if (e === 1) return base;
-    if (e === -1 && base.isLiteral) {
-      const [n, d] = base.rationalValue;
-      if (n !== null && d !== null) return this.number([d, n]);
-      const i = base.asSmallInteger;
-      if (i !== null) return this.number([1, i]);
+
+    if (exponent instanceof AbstractBoxedExpression) {
+      const num = exponent.numericValue;
+      if (num !== null) {
+        if (typeof num === 'number') exponent = num;
+        if (isRational(num)) exponent = num;
+      }
     }
 
-    if (typeof exponent === 'number' || Array.isArray(exponent))
-      exponent = this.number(exponent);
-    else {
-      console.assert(exponent.isCanonical); // @debug
+    if (typeof exponent === 'number') e = exponent;
+    else if (isRational(exponent)) {
+      if (isMachineRational(exponent) && exponent[1] === 1) e = exponent[0];
+      if (isBigRational(exponent) && exponent[1].equals(1))
+        e = exponent[0].toNumber();
     }
+
+    // x^1
+    if (e === 1) return base;
+
+    // x^(-1)
+    const r = base.numericValue;
+    if (e === -1 && r !== null) {
+      if (typeof r === 'number' && Number.isInteger(r))
+        return this.number([1, r]);
+      if (r instanceof Decimal && r.isInteger())
+        return this.number([base.engine._BIGNUM_ONE, r]);
+      if (isRational(r))
+        return this.number(isBigRational(r) ? [r[1], r[0]] : [r[1], r[0]]);
+    }
+
+    if (typeof exponent === 'number' || isRational(exponent))
+      exponent = this.number(exponent);
 
     return (
       canonicalPower(this, base, exponent, metadata) ??
@@ -1218,8 +1215,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   inverse(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
-    console.assert(expr.isCanonical); // @debug
-
+    // Short path. Note that are arguments are **not** validated.
     let e = this._NEGATIVE_ONE;
 
     if (expr.head === 'Power') {
@@ -1238,33 +1234,34 @@ export class ComputeEngine implements IComputeEngine {
       this._fn('Power', [expr, e], metadata)
     );
   }
-  negate(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
-    return canonicalNegate(expr, metadata);
-  }
-  divide(
-    num: BoxedExpression,
-    denom: BoxedExpression,
-    metadata?: Metadata
-  ): BoxedExpression {
-    const result = canonicalDivide(this, num, denom);
-    if (metadata?.latex !== undefined) result.latex = metadata.latex;
-    if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
-    return result;
-  }
+
   pair(
     first: BoxedExpression,
     second: BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression {
-    // @todo: fast path
-    return this._fn('Tuple', [first.canonical, second.canonical], metadata);
+    // Short path
+    return new BoxedFunction(
+      this,
+      'Tuple',
+      [first.canonical, second.canonical],
+      {
+        metadata,
+        canonical: true,
+      }
+    );
   }
+
   tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression {
-    // @todo: fast path
-    return this._fn(
+    // Short path
+    return new BoxedFunction(
+      this,
       'Tuple',
       elements.map((x) => x.canonical),
-      metadata
+      {
+        metadata,
+        canonical: true,
+      }
     );
   }
 
@@ -1272,7 +1269,13 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedString(this, s, metadata);
   }
 
-  symbol(name: string, metadata?: Metadata): BoxedExpression {
+  symbol(
+    name: string,
+    options?: { metadata?: Metadata; canonical?: boolean }
+  ): BoxedExpression {
+    options ??= {};
+    if (!('canonical' in options)) options.canonical = true;
+
     // Symbol names should use the Unicode NFC canonical form
     name = name.normalize();
 
@@ -1289,33 +1292,33 @@ export class ComputeEngine implements IComputeEngine {
     if (!isValidSymbolName(name)) {
       return this.error(
         ['invalid-symbol-name', { str: name }],
-        ['Latex', { str: metadata?.latex ?? '' }]
+        ['Latex', { str: options?.metadata?.latex ?? '' }]
       );
     }
 
     // If there is some LaTeX metadata provided, we can't use the
     // `_commonSymbols` cache, as their LaTeX metadata may not match.
-    if (metadata?.latex !== undefined)
-      return new BoxedSymbol(this, name, metadata);
+    if (options?.metadata?.latex !== undefined && !options.canonical)
+      return new BoxedSymbol(this, name, options);
 
     let result = this._commonSymbols[name];
     if (result) {
       // Only use the cache if there is no metadata or it matches
       if (
-        !metadata?.wikidata ||
+        !options?.metadata?.wikidata ||
         !result.wikidata ||
-        result.wikidata === metadata.wikidata
+        result.wikidata === options.metadata.wikidata
       )
         return result;
-      return new BoxedSymbol(this, name, metadata);
+      return new BoxedSymbol(this, name, options);
     }
     if (result === null) {
       // If `null`, the symbol is in `_commonSymbols`, but not yet cached
-      result = new BoxedSymbol(this, name);
+      result = new BoxedSymbol(this, name, { canonical: true });
       this._commonSymbols[name] = result;
       return result;
     }
-    return new BoxedSymbol(this, name, metadata);
+    return new BoxedSymbol(this, name, options);
   }
 
   domain(
@@ -1350,24 +1353,40 @@ export class ComputeEngine implements IComputeEngine {
     return result;
   }
 
-  number(
-    value:
-      | number
-      | MathJsonNumber
-      | Decimal
-      | Complex
-      | [num: number, denom: number],
-    metadata?: Metadata
-  ): BoxedExpression {
-    if (Array.isArray(value) && value[1] === 1) value = value[0];
-    if (typeof value === 'number') {
-      if (value === -1) return this._NEGATIVE_ONE;
-      if (this._commonNumbers[value] === null)
-        this._commonNumbers[value] = boxNumber(this, value) ?? null;
+  /*
+   * This function tries to avoid creating a boxed number if `num` corresponds
+   * to a common value for which we have a shared instance (-1, 0, NaN, etc...)
+   */
 
-      if (this._commonNumbers[value]) return this._commonNumbers[value]!;
+  number(
+    value: number | MathJsonNumber | Decimal | Complex | Rational,
+    options?: { canonical?: boolean; metadata?: Metadata }
+  ): BoxedExpression {
+    options ??= {};
+    if (!('canonical' in options)) options.canonical = true;
+
+    //
+    // Is this number eligible to be a cached number expression?
+    //
+    if (options.metadata === undefined && typeof value === 'number') {
+      const n = value;
+      if (n === 1) return this._ONE;
+      if (n === 0) return this._ZERO;
+      if (n === -1) return this._NEGATIVE_ONE;
+
+      if (isNaN(n)) return this._NAN;
+
+      if (!Number.isFinite(n))
+        return n < 0 ? this._NEGATIVE_INFINITY : this._POSITIVE_INFINITY;
+
+      if (Number.isInteger(n) && this._commonNumbers[n] === null) {
+        this._commonNumbers[n] = boxNumber(this, value);
+        if (this._commonNumbers[n] === null) return this._NAN;
+        return this._commonNumbers[n]!;
+      }
     }
-    return boxNumber(this, value, metadata) ?? this._NAN;
+
+    return boxNumber(this, value, options) ?? this._NAN;
   }
 
   rules(rules: Rule[]): BoxedRuleSet {
@@ -1378,12 +1397,24 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedPattern(this, expr);
   }
 
-  parse(latex: LatexString | string): BoxedExpression;
-  parse(s: null): null;
-  parse(latex: LatexString | string | null): null | BoxedExpression;
-  parse(latex: LatexString | null | string): BoxedExpression | null {
+  parse(
+    latex: LatexString | string,
+    options?: { canonical?: boolean }
+  ): BoxedExpression;
+  parse(s: null, options?: { canonical?: boolean }): null;
+  parse(
+    latex: LatexString | string | null,
+    options?: { canonical?: boolean }
+  ): null | BoxedExpression;
+  parse(
+    latex: LatexString | null | string,
+    options?: { canonical?: boolean }
+  ): BoxedExpression | null {
     if (typeof latex !== 'string') return null;
-    return this.box(this.latexSyntax.parse(latexString(latex) ?? latex));
+    return this.box(
+      this.latexSyntax.parse(latexString(latex) ?? latex),
+      options
+    );
   }
 
   serialize(x: Expression | BoxedExpression): string {

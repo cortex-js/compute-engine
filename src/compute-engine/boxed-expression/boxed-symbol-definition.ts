@@ -1,3 +1,4 @@
+import { asFloat } from '../numerics/numeric';
 import { isPrime } from '../numerics/primes';
 import {
   BoxedExpression,
@@ -117,7 +118,7 @@ function normalizeFlags(flags: Partial<SymbolFlags>): SymbolFlags {
   if (result.integer) result.rational = true;
   if (result.rational) result.algebraic = true;
   if (result.algebraic) result.real = true;
-  if (result.extendedReal) result.real = true;
+  if (result.real) result.extendedReal = true;
   if (result.real) result.complex = true;
   if (result.imaginary) result.complex = true;
   if (result.extendedComplex) result.complex = true;
@@ -149,7 +150,7 @@ export function domainToFlags(
 
   if (dom.isNumeric) {
     // @todo: handle `Range`, `Interval`, and other numeric literals
-    const domain = dom.symbol;
+    const domain = dom.literal;
     result.number = true;
     if (domain === 'Integer') result.integer = true;
     if (domain === 'RationalNumber') result.rational = true;
@@ -163,6 +164,44 @@ export function domainToFlags(
     if (domain === 'ImaginaryNumber') result.imaginary = true;
     if (domain === 'ExtendedComplexNumber') result.extendedComplex = true;
     if (domain === 'ComplexNumber') result.complex = true;
+
+    if (domain === 'PositiveNumber') {
+      result.notZero = true;
+      result.real = true;
+      result.positive = true;
+    }
+    if (domain === 'NegativeNumber') {
+      result.notZero = true;
+      result.real = true;
+      result.negative = true;
+    }
+    if (domain === 'NonNegativeNumber') {
+      result.real = true;
+      result.positive = true;
+    }
+    if (domain === 'NonPositiveNumber') {
+      result.real = true;
+      result.negative = true;
+    }
+
+    if (domain === 'PositiveInteger') {
+      result.notZero = true;
+      result.integer = true;
+      result.positive = true;
+    }
+    if (domain === 'NegativeNumber') {
+      result.notZero = true;
+      result.integer = true;
+      result.negative = true;
+    }
+    if (domain === 'NonNegativeNumber') {
+      result.integer = true;
+      result.positive = true;
+    }
+    if (domain === 'NonPositiveNumber') {
+      result.integer = true;
+      result.negative = true;
+    }
   } else {
     result.number = false;
     result.integer = false;
@@ -288,7 +327,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     this._def = def;
     this.name = def.name;
     this.constant = def.constant ?? false;
-    this.hold = def.hold ?? true;
+    this.hold = def.hold ?? false;
     this._value = null;
     this._domain = null;
   }
@@ -640,7 +679,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
         this._prime = false;
         this._composite = false;
       } else {
-        const n = this._value.asFloat;
+        const n = asFloat(this._value);
         if (n !== null) {
           this._prime = isPrime(n);
           this._composite = !this._prime;

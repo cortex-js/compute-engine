@@ -17,7 +17,7 @@ export const RELOP_LIBRARY: SymbolTable = {
       commutative: true,
       complexity: 11000,
       signature: {
-        domain: ['Function', ['Sequence', 'Anything'], 'Boolean'],
+        domain: 'RelationalOperator',
         evaluate: (ce, ops) => {
           if (ops.length < 2) return ce.symbol('True');
           let lhs: BoxedExpression | undefined = undefined;
@@ -57,7 +57,7 @@ export const RELOP_LIBRARY: SymbolTable = {
       name: 'Less',
       complexity: 11000,
       signature: {
-        domain: ['Function', ['Sequence', 'Anything'], 'Boolean'],
+        domain: 'RelationalOperator',
         evaluate: (ce, ops) => {
           if (ops.length < 2) return ce.symbol('True');
           let lhs: BoxedExpression | undefined = undefined;

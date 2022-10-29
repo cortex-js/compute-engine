@@ -15,12 +15,228 @@ describe('Nth PRIME NUMBER', () =>
       check(
         'p(n)=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
       )
-    ).toMatchInlineSnapshot();
+    ).toMatchInlineSnapshot(`
+      latex     = [
+        "Equal",
+        ["Multiply", "p", ["Delimiter", "n"]],
+        [
+          "Add",
+          [
+            "Delimiter",
+            [
+              "Sum",
+              [
+                "Delimiter",
+                [
+                  "Floor",
+                  [
+                    "Divide",
+                    1,
+                    [
+                      "Add",
+                      [
+                        "Power",
+                        0,
+                        [
+                          "Subtract",
+                          "n",
+                          [
+                            "Delimiter",
+                            [
+                              "Sum",
+                              [
+                                "Delimiter",
+                                [
+                                  "Delimiter",
+                                  [
+                                    "Product",
+                                    [
+                                      "Delimiter",
+                                      [
+                                        "Subtract",
+                                        1,
+                                        [
+                                          "Power",
+                                          0,
+                                          [
+                                            "Multiply",
+                                            "abs",
+                                            [
+                                              "Delimiter",
+                                              [
+                                                "Subtract",
+                                                [
+                                                  "Floor",
+                                                  [
+                                                    "Divide",
+                                                    ["Subscript", "v", 2],
+                                                    ["Subscript", "v", 3]
+                                                  ]
+                                                ],
+                                                [
+                                                  "Divide",
+                                                  ["Subscript", "v", 2],
+                                                  ["Subscript", "v", 3]
+                                                ]
+                                              ]
+                                            ]
+                                          ]
+                                        ]
+                                      ]
+                                    ],
+                                    [
+                                      "Triple",
+                                      ["Hold", ["Subscript", "v", "3"]],
+                                      2,
+                                      [
+                                        "Floor",
+                                        ["Sqrt", ["Subscript", "v", 2]]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ],
+                              [
+                                "Triple",
+                                ["Hold", ["Subscript", "v", "2"]],
+                                2,
+                                ["Subscript", "v", 1]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ],
+                      1
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "Triple",
+                ["Hold", ["Subscript", "v", "1"]],
+                2,
+                ["Floor", ["Multiply", ["Multiply", 1.5, "n"], ["Ln", "n"]]]
+              ]
+            ]
+          ],
+          2
+        ]
+      ]
+      [
+        "Equal",
+        ["Multiply", "n", "p"],
+        [
+          "Add",
+          [
+            "Sum",
+            [
+              "Floor",
+              [
+                "Divide",
+                1,
+                [
+                  "Add",
+                  [
+                    "Power",
+                    0,
+                    [
+                      "Subtract",
+                      "n",
+                      [
+                        "Sum",
+                        [
+                          "Product",
+                          [
+                            "Delimiter",
+                            [
+                              "Subtract",
+                              1,
+                              [
+                                "Power",
+                                0,
+                                [
+                                  "Multiply",
+                                  "abs",
+                                  [
+                                    "Delimiter",
+                                    [
+                                      "Subtract",
+                                      [
+                                        "Floor",
+                                        [
+                                          "Divide",
+                                          ["Subscript", "v", 2],
+                                          ["Subscript", "v", 3]
+                                        ]
+                                      ],
+                                      [
+                                        "Divide",
+                                        ["Subscript", "v", 2],
+                                        ["Subscript", "v", 3]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "Triple",
+                            ["Hold", ["Subscript", "v", "3"]],
+                            2,
+                            [
+                              "Floor",
+                              [
+                                "Sqrt",
+                                [
+                                  "Error",
+                                  [
+                                    "ErrorCode",
+                                    "'incompatible-domain'",
+                                    "Number",
+                                    ["Domain", "Anything"]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ],
+                        ["Triple", ["Hold", "v_2"], 2, "v_1"]
+                      ]
+                    ]
+                  ],
+                  1
+                ]
+              ]
+            ],
+            [
+              "Triple",
+              ["Hold", "v_1"],
+              2,
+              ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
+            ]
+          ],
+          2
+        ]
+      ]
+    `);
   }));
 
 // A meaningless, but amusing, coincidence
 describe('⌈e⌉ = ⌊π⌋', () =>
-  test('', () => expect(check('⌈e⌉ = ⌊π⌋')).toMatchInlineSnapshot()));
+  test('', () =>
+    expect(check('⌈e⌉ = ⌊π⌋')).toMatchInlineSnapshot(`
+      latex     = [
+        "Error",
+        ["ErrorCode", "'unexpected-token'", "'⌈'"],
+        ["Latex", "'⌈e⌉ = ⌊π⌋'"]
+      ]
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-token'", "'⌈'"],
+        ["Latex", "'⌈e⌉ = ⌊π⌋'"]
+      ]
+    `)));
 
 //  Ramanujan factorial approximation
 // https://www.johndcook.com/blog/2012/09/25/ramanujans-factorial-approximation/
@@ -30,7 +246,72 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       check(
         '\\sqrt{\\pi}\\left(\\frac{n}{e}\\right)^n\\sqrt[6]{8n^3+4n^2+n+\\frac{1}{30}}'
       )
-    ).toMatchInlineSnapshot()));
+    ).toMatchInlineSnapshot(`
+      latex     = [
+        "Multiply",
+        ["Sqrt", "Pi"],
+        ["Power", ["Delimiter", ["Divide", "n", "ExponentialE"]], "n"],
+        [
+          "Root",
+          [
+            "Add",
+            ["Multiply", 8, ["Power", "n", 3]],
+            ["Multiply", 4, ["Power", "n", 2]],
+            "n",
+            ["Rational", 1, 30]
+          ],
+          6
+        ]
+      ]
+      box       = [
+        "Multiply",
+        ["Power", ["Divide", "n", "ExponentialE"], "n"],
+        [
+          "Root",
+          [
+            "Add",
+            ["Rational", 1, 30],
+            ["Multiply", 8, ["Power", "n", 3]],
+            ["Multiply", 4, ["Square", "n"]],
+            "n"
+          ],
+          6
+        ],
+        ["Sqrt", "Pi"]
+      ]
+      N-auto    = [
+        "Multiply",
+        1.7724538509055159,
+        ["Power", ["Multiply", 0.36787944117144233, "n"], "n"],
+        [
+          "Power",
+          [
+            "Add",
+            0.03333333333333333,
+            ["Multiply", 8, ["Power", "n", 3]],
+            ["Multiply", 4, ["Square", "n"]],
+            "n"
+          ],
+          0.16666666666666666
+        ]
+      ]
+      N-bignum  = [
+        "Multiply",
+        1.7724538509055159,
+        ["Power", ["Multiply", 0.36787944117144233, "n"], "n"],
+        [
+          "Power",
+          [
+            "Add",
+            {num: "0.0(3)"},
+            ["Multiply", 8, ["Power", "n", 3]],
+            ["Multiply", 4, ["Square", "n"]],
+            "n"
+          ],
+          {num: "0.1(6)"}
+        ]
+      ]
+    `)));
 
 /*
 

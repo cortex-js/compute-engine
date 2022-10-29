@@ -1,3 +1,6 @@
+import Complex from 'complex.js';
+import { asFloat } from './numerics/numeric';
+import { isMachineRational, isRational } from './numerics/rationals';
 import { BoxedExpression } from './public';
 
 /**
@@ -57,17 +60,23 @@ export function costFunction(expr: BoxedExpression): number {
   //
   if (expr.isLiteral) {
     if (expr.isZero) return 1;
-    if (expr.isInteger && expr.asFloat !== null)
-      return numericCostFunction(expr.asFloat);
+    if (expr.isInteger && asFloat(expr) !== null)
+      return numericCostFunction(asFloat(expr)!);
 
-    const [n, d] = expr.rationalValue;
-    if (n !== null && d !== null)
-      return numericCostFunction(n) + numericCostFunction(d) + 1;
-
-    if (expr.complexValue) {
-      const z = expr.complexValue;
-      return numericCostFunction(z.re) + numericCostFunction(z.im) + 1;
+    const num = expr.numericValue;
+    if (isRational(num)) {
+      if (isMachineRational(num))
+        return numericCostFunction(num[0]) + numericCostFunction(num[1]) + 1;
+      else
+        return (
+          numericCostFunction(num[0].toNumber()) +
+          numericCostFunction(num[1].toNumber()) +
+          1
+        );
     }
+
+    if (num instanceof Complex)
+      return numericCostFunction(num.re) + numericCostFunction(num.im) + 1;
 
     if (expr.isNumber) return 2;
   }

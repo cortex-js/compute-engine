@@ -1,5 +1,6 @@
 import { Decimal } from 'decimal.js';
 import { IComputeEngine } from '../public';
+import { primeFactors as machinePrimeFactors } from './numeric';
 
 export function gcd(a: Decimal, b: Decimal): Decimal {
   //@todo: https://github.com/Yaffle/bigint-gcd/blob/main/gcd.js
@@ -12,18 +13,87 @@ export function lcm(a: Decimal, b: Decimal): Decimal {
   return a.mul(b).div(gcd(a, b));
 }
 
-//  Return the "reduced form" of the rational, that is a rational
-// such that gcd(numer, denom) = 1 and denom > 0
-export function reducedRational([a, b]: [Decimal, Decimal]): [
-  Decimal,
-  Decimal
-] {
-  if (a.equals(1) || b.equals(1)) return [a, b];
-  if (b.lessThan(0)) [a, b] = [a.neg(), b.neg()];
-  const g = gcd(a, b);
-  //  If the gcd is 0, return the rational unchanged
-  if (g.lessThanOrEqualTo(1)) return [a, b];
-  return [a.div(g), b.div(g)];
+// Difference between primes from 7 to 31
+const PRIME_WHEEL_INC = [4, 2, 4, 2, 4, 6, 2, 6];
+
+export function primeFactors(
+  ce: IComputeEngine,
+  n: Decimal
+): Map<Decimal, number> {
+  if (n.lt(Number.MAX_SAFE_INTEGER)) {
+    const factors = machinePrimeFactors(n.toNumber());
+    const result = new Map<Decimal, number>();
+    for (const f of Object.keys(factors)) result.set(ce.bignum(f), factors[f]);
+    return result;
+  }
+
+  //https:rosettacode.org/wiki/Prime_decomposition#JavaScript
+
+  const result = new Map<string, number>();
+  // Wheel factorization
+  // @todo: see https://github.com/Fairglow/prime-factor/blob/main/src/lib.rs
+  // @todo: rewrite using Bignum
+  let count = 0;
+  while (n.mod(2).isZero()) {
+    count += 1;
+    n = n.div(2);
+  }
+  if (count > 0) result.set('2', count);
+  count = 0;
+  while (n.mod(3).isZero()) {
+    count += 1;
+    n = n.div(3);
+  }
+  if (count > 0) result.set('3', count);
+  while (n.mod(5).isZero()) {
+    count += 1;
+    n = n.div(5);
+  }
+  if (count > 0) result.set('5', count);
+
+  let k = ce.bignum(7);
+  let kIndex = k.toString();
+  let i = 0;
+  while (k.mul(k).lt(n)) {
+    if (n.mod(k).isZero()) {
+      result.set(kIndex, (result.get(kIndex) ?? 0) + 1);
+      n = n.div(k);
+    } else {
+      k = k.add(PRIME_WHEEL_INC[i]);
+      kIndex = k.toString();
+      i = i < 7 ? i + 1 : 0;
+    }
+  }
+
+  if (!n.eq(1)) result.set(n.toString(), 1);
+
+  const r = new Map<Decimal, number>();
+  for (const [k, v] of result) r.set(ce.bignum(k), v);
+  return r;
+}
+
+/** Return `[factor, root]` such that
+ * pow(n, 1/exponent) = factor * pow(root, 1/exponent)
+ *
+ * factorPower(75, 2) -> [5, 3] = 5^2 * 3
+ *
+ */
+export function factorPower(
+  ce: IComputeEngine,
+  n: Decimal,
+  exponent: number
+): [factor: Decimal, root: Decimal] {
+  // @todo: handle negative n
+  console.assert(n.isInteger() && n.isPositive());
+  const factors = primeFactors(ce, n);
+  let f = ce.bignum(1);
+  let r = ce.bignum(1);
+  for (const [k, v] of factors) {
+    const v2 = ce.bignum(v);
+    f = f.mul(k.pow(v2.div(exponent).floor()));
+    r = r.mul(k.pow(v2.mod(exponent)));
+  }
+  return [f, r];
 }
 
 export function factorial(ce: IComputeEngine, n: Decimal): Decimal {
@@ -151,13 +221,15 @@ export function gamma(ce: IComputeEngine, z: Decimal): Decimal {
  * for machine numbers,return true.
  */
 export function isInMachineRange(d: Decimal): boolean {
+  if (!d.isFinite()) return true; // Infinity and NaN are in machine range
+
   // Are there too many significant digits?
   // Maximum Safe Integer is 9007199254740991
   // Digits in Decimal are stored by blocks of 7.
   // Three blocks, with the first block = 90 is close to the maximum
-  if (d.d.length > 3 || (d.d.length === 3 && d.d[0] >= 90)) {
-    return false;
-  }
+  if (d.d.length > 3 || (d.d.length === 3 && d.d[0] >= 90)) return false;
+
+  console.assert(d.precision() <= 16);
 
   // Is the exponent within range?
   // With a binary 64 IEEE 754 number:

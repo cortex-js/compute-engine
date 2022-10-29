@@ -125,9 +125,12 @@ export function serializeNumber(
   num = num.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
 
   // Do we have repeating digits?
-  if (/\([0-9]+\)$/.test(num)) {
-    const [_, body, repeat] = num.match(/(.+)\(([0-9]+)\)$/) ?? [];
-    num = body + repeat.repeat(Math.ceil(options.precision / repeat.length));
+  if (/\([0-9]+\)/.test(num)) {
+    const [_, body, repeat, trail] = num.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
+    num =
+      body +
+      repeat.repeat(Math.ceil(options.precision / repeat.length)) +
+      trail;
   }
 
   let sign = '';

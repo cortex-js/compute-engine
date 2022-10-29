@@ -1,3 +1,4 @@
+import { asFloat } from '../../src/compute-engine/numerics/numeric';
 import { engine } from '../utils';
 
 describe('TRIGONOMETRY constructible values', () => {
@@ -40,7 +41,7 @@ describe('TRIGONOMETRY constructible values', () => {
         ];
 
         const f1 = engine.box([h, arg]).N();
-        let f = f1.asFloat ?? f1.bignumValue!.toNumber();
+        let f = asFloat(f1) ?? NaN;
 
         if (Math.abs(f) > 1000000) f = +Infinity;
         if (Math.abs(v) > 1000000) v = +Infinity;

@@ -1,3 +1,5 @@
+import Decimal from 'decimal.js';
+import { asSmallInteger } from '../numerics/numeric';
 import { BoxedExpression, SemiBoxedExpression } from '../public';
 
 /**
@@ -119,8 +121,12 @@ function getDegree(expr: BoxedExpression | undefined): number {
   if (expr.ops) {
     const head = expr.head;
     if (head === 'Power') {
-      const exponent = expr.op2;
-      return exponent.isInteger ? exponent.machineValue! : 0;
+      const exponent = expr.op2.numericValue;
+      if (typeof exponent === 'number')
+        return Number.isInteger(exponent) ? exponent : 0;
+      if (exponent instanceof Decimal)
+        return exponent.isInteger() ? exponent.toNumber() : 0;
+      return 0;
     }
     if (head === 'Multiply') {
       return [...expr.ops].reduce((acc, x) => acc + getDegree(x), 0);
@@ -141,7 +147,7 @@ function getDegree(expr: BoxedExpression | undefined): number {
  */
 export function totalDegree(expr: BoxedExpression): number {
   if (expr.head === 'Power' && expr.op2.isLiteral) {
-    const deg = expr.op2.asSmallInteger;
+    const deg = asSmallInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
     return 1;
   }
@@ -167,7 +173,7 @@ export function totalDegree(expr: BoxedExpression): number {
  */
 export function maxDegree(expr: BoxedExpression): number {
   if (expr.head === 'Power' && expr.op2.isLiteral) {
-    const deg = expr.op2.asSmallInteger;
+    const deg = asSmallInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
     return 1;
   }

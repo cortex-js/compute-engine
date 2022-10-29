@@ -1,7 +1,8 @@
 import { BoxedExpression, SymbolTable } from '../public';
 import { joinLatex, tokenize } from '../latex-syntax/tokenizer';
-import { fromDigits } from '../numerics/numeric';
-import { lambda } from '../boxed-expression/boxed-function';
+import { asFloat, asSmallInteger, fromDigits } from '../numerics/numeric';
+
+import Decimal from 'decimal.js';
 
 //   // := assign 80 // @todo
 
@@ -156,6 +157,15 @@ export const CORE_LIBRARY: SymbolTable[] = [
         },
       },
       {
+        name: 'Hold',
+        hold: 'all',
+        signature: {
+          domain: 'Function',
+          codomain: (_ce, args) => args[0].domain,
+          canonical: (ce, args) => ce._fn('Hold', args),
+        },
+      },
+      {
         name: 'HorizontalSpacing',
         signature: {
           domain: 'Function',
@@ -238,14 +248,14 @@ export const CORE_LIBRARY: SymbolTable[] = [
             const op2 = ops[1];
             if (op2.isNothing)
               return ce.number(Number.parseInt(op1.string, 10));
-            if (op2.machineValue === null) {
+            if (op2.numericValue === null) {
               return ce.error(
                 ['unexpected-base', op2.latex],
                 ['Latex', op2.latex]
               );
             }
-            const base = op2.machineValue;
-            if (base < 2 || base > 36)
+            const base = asFloat(op2)!;
+            if (!Number.isInteger(base) || base < 2 || base > 36)
               return ce.error(['unexpected-base', base], ['Latex', op2.latex]);
 
             const [value, rest] = fromDigits(op1.string, base);
@@ -291,7 +301,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
           domain: ['Function', 'Integer', ['Maybe', 'Integer'], 'String'],
           evaluate: (ce, ops) => {
             const op1 = ops[0];
-            const val = op1.machineValue ?? op1.bignumValue?.toNumber() ?? NaN;
+            const val = asFloat(op1) ?? NaN;
             if (Number.isNaN(val) || !Number.isInteger(val)) {
               ce.signal(
                 ce._fn('IntegerString', ops),
@@ -302,23 +312,24 @@ export const CORE_LIBRARY: SymbolTable[] = [
 
             const op2 = ops[1];
             if (op2.isNothing) {
-              if (op1.machineValue)
-                return ce.string(Math.abs(op1.machineValue).toString());
-              if (op1.bignumValue)
-                return ce.string(op1.bignumValue.abs().toString());
+              const op1Num = op1.numericValue;
+              if (typeof op1Num === 'number')
+                return ce.string(Math.abs(op1Num).toString());
+              if (op1Num instanceof Decimal)
+                return ce.string(op1Num.abs().toString());
               return ce.string(
-                Math.abs(Math.round(op1.asFloat ?? NaN)).toString()
+                Math.abs(Math.round(asFloat(op1) ?? NaN)).toString()
               );
             }
 
-            if (op2.asSmallInteger === null) {
+            if (asSmallInteger(op2) === null) {
               ce.signal(
                 ce._fn('IntegerString', ops),
                 `Expected \`base\` as an integer between 2 and 36. Got \\(${op2.latex}$\\)`
               );
               return undefined;
             }
-            const base = op2.asSmallInteger;
+            const base = asSmallInteger(op2)!;
             if (base < 2 || base > 36) {
               ce.signal(
                 ce._fn('IntegerString', ops),
@@ -338,11 +349,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
         hold: 'all',
         signature: {
           domain: ['Function', 'Anything', 'Function'],
-          canonical: (ce, ops) => {
-            return ce._fn('Lambda', [ops[0].canonical]);
-          },
-          evaluate: (ce, ops) =>
-            lambda(ce, ops[0], ops[1].ops ?? []).evaluate(),
+          codomain: (_ce, ops) => ops[0].codomain,
+          canonical: (ce, ops) => ce._fn('Lambda', ops),
         },
       },
       {
@@ -426,6 +434,75 @@ export const CORE_LIBRARY: SymbolTable[] = [
         },
       },
       {
+        /**
+         * The `Subscript` function can take several forms:
+         *
+         * If `op1` is a string, the string is interpreted as a number in
+         * base `op2` (2 to 36).
+         *
+         * If `op1` is an indexable collection, `x`:
+         * - `x_*` -> `At(x, *)`
+         *
+         * Otherwise:
+         * - `x_0` -> Symbol "x_0"
+         * - `x_n` -> Symbol "x_n"
+         * - `x_{\text{max}}` -> Symbol `x_max`
+         * - `x_{(n+1)}` -> `At(x, n+1)`
+         * - `x_{n+1}` ->  `Subscript(x, n+1)`
+         */
+        name: 'Subscript',
+
+        // The last (subscript) argument can include a delimiter that
+        // needs to be interpreted. Without the hold, it would get
+        // removed during canonicalization.
+        hold: 'last',
+
+        signature: {
+          domain: ['Function', 'Anything', 'Anything', 'Anything'],
+          codomain: (ce, args) => {
+            if (args[0].isFunction) return args[0];
+            return args[0];
+          },
+          canonical: (ce, args) => {
+            const op1 = args[0];
+            const op2 = args[1];
+            // Is it a string in a base form:
+            // `"deadbeef"_{16}` `"0101010"_2?
+            if (op1.string) {
+              if (op2.isLiteral && asSmallInteger(op2) !== null) {
+                const base = asSmallInteger(op2)!;
+                if (base > 1 && base <= 36) {
+                  const [value, rest] = fromDigits(op1.string, base);
+                  if (rest) {
+                    return ce.error(
+                      ['unexpected-digit', rest[0]],
+                      ['Latex', ce.string(op1.string)]
+                    );
+                  }
+                  return ce.number(value);
+                }
+              }
+            }
+            // Is it a compound symbol `x_\mathrm{max}`, `\mu_0`
+            // or an indexable collection?
+            if (op1.symbol) {
+              // Indexable collection?
+              if (op1.symbolDefinition?.at) {
+                return ce._fn('At', [op1, op2]);
+              }
+              // Maybe a compound symbol
+              let sub = op2.string ?? op2.symbol;
+              if (!sub && op2.isLiteral && asSmallInteger(op2) !== null)
+                sub = asSmallInteger(op2)!.toString();
+
+              if (sub)
+                return ce.symbol(op1.symbol + '_' + sub, { canonical: false });
+            }
+            return ce._fn('Subscript', args);
+          },
+        },
+      },
+      {
         name: 'Symbol',
         complexity: 500,
         description:
@@ -441,7 +518,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
                 (x) =>
                   x.symbol ??
                   x.string ??
-                  (x.isLiteral ? x.asSmallInteger?.toString() : null) ??
+                  (x.isLiteral ? asSmallInteger(x)?.toString() : null) ??
                   ''
               )
               .join('');
@@ -491,7 +568,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
             }
 
             // Evaluate multiple times
-            let n = Math.max(3, Math.round(ops[1].asSmallInteger ?? 3));
+            let n = Math.max(3, Math.round(asSmallInteger(ops[1]) ?? 3));
 
             let timings: number[] = [];
             let result: BoxedExpression;

@@ -3,7 +3,8 @@ import { check } from '../../utils';
 describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
   test(`\\cos x + 1`, () =>
     expect(check('\\cos x + 1')).toMatchInlineSnapshot(`
-      box      = ["Add", ["Cos", "x"], 1]
+      latex     = ["Add", ["Cos", "x"], 1]
+      box       = ["Add", 1, ["Cos", "x"]]
       simplify  = [
         "Add",
         1,
@@ -35,7 +36,8 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
     `));
   test(`\\cos x - \\sin x`, () =>
     expect(check('\\cos x - \\sin x')).toMatchInlineSnapshot(`
-      box      = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
+      latex     = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
+      box       = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
       simplify  = [
         "Subtract",
         [
@@ -72,10 +74,12 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
         ]
       ]
       evaluate  = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
+      N-auto    = ["Add", 0, ["Negate", ["Sin", "x"]], ["Cos", "x"]]
     `));
   test(`\\cos \\frac{x}{2}^2`, () =>
     expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
-      box      = ["Cos", ["Power", ["Divide", "x", 2], 2]]
+      latex     = ["Cos", ["Power", ["Divide", "x", 2], 2]]
+      box       = ["Cos", ["Multiply", ["Square", ["Rational", 1, 2]], ["Square", "x"]]]
       canonical = ["Cos", ["Multiply", ["Rational", 1, 4], ["Square", "x"]]]
       simplify  = [
         "Divide",
@@ -109,38 +113,38 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
         ["Complex", 0, 2]
       ]
       evaluate  = ["Cos", ["Multiply", ["Rational", 1, 4], ["Square", "x"]]]
-      N         = ["Cos", ["Multiply", 0.25, ["Square", "x"]]]
+      N-auto    = ["Cos", ["Multiply", 0.25, ["Square", "x"]]]
     `));
 });
 
 describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   test(`\\sin^{-1}'(x)`, () =>
     expect(check("\\sin^{-1}'(x)")).toMatchInlineSnapshot(`
-      box      = [["Derivative", 1, ["InverseFunction", "Sin"]], "x"]
-      simplify  = ["Derivative", 1, ["InverseFunction", "Sin"]]
+      latex     = [["Derivative", 1, ["InverseFunction", "Sin"]], "x"]
+      [["Derivative", 1, ["InverseFunction", "Sin"]], "x"]
     `));
   test(`\\sin^{-1}''(x)`, () =>
     expect(check("\\sin^{-1}''(x)")).toMatchInlineSnapshot(`
-      box      = [["Derivative", 2, ["InverseFunction", "Sin"]], "x"]
-      simplify  = ["Derivative", 2, ["InverseFunction", "Sin"]]
+      latex     = [["Derivative", 2, ["InverseFunction", "Sin"]], "x"]
+      [["Derivative", 2, ["InverseFunction", "Sin"]], "x"]
     `));
   test(`\\cos^{-1\\doubleprime}(x)`, () =>
     expect(check('\\cos^{-1\\doubleprime}(x)')).toMatchInlineSnapshot(`
-      box      = [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
-      simplify  = ["Derivative", 2, ["InverseFunction", "Cos"]]
+      latex     = [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
+      [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
     `));
   test(`\\cos^{-1}\\doubleprime(x)`, () =>
     expect(check('\\cos^{-1}\\doubleprime(x)')).toMatchInlineSnapshot(`
-      box      = [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
-      simplify  = ["Derivative", 2, ["InverseFunction", "Cos"]]
+      latex     = [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
+      [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
     `));
 });
 
 describe('TRIGONOMETRIC FUNCTIONS', () => {
   test(`\\cos(k\\pi)`, () =>
     expect(check('\\cos(k\\pi)')).toMatchInlineSnapshot(`
-      box      = ["Cos", ["Multiply", "k", "Pi"]]
-      canonical = ["Cos", ["Multiply", "Pi", "k"]]
+      latex     = ["Cos", ["Multiply", "k", "Pi"]]
+      box       = ["Cos", ["Multiply", "Pi", "k"]]
       simplify  = [
         "Divide",
         [
@@ -173,7 +177,8 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
         ["Complex", 0, 2]
       ]
       evaluate  = ["Cos", ["Multiply", "Pi", "k"]]
-      N         = [
+      N-auto    = ["Cos", ["Multiply", 3.141592653589793, "k"]]
+      N-bignum  = [
         "Cos",
         [
           "Multiply",
@@ -186,11 +191,9 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
     `));
   test(`\\cos(\\frac{\\pi}{5})`, () =>
     expect(check('\\cos(\\frac{\\pi}{5})')).toMatchInlineSnapshot(`
-      box      = ["Cos", ["Divide", "Pi", 5]]
-      canonical = ["Cos", ["Multiply", ["Rational", 1, 5], "Pi"]]
+      latex     = ["Cos", ["Divide", "Pi", 5]]
+      box       = ["Cos", ["Multiply", ["Rational", 1, 5], "Pi"]]
       simplify  = ["Multiply", ["Rational", 1, 4], ["Add", 1, ["Sqrt", 5]]]
-      N         = {
-        num: "0.8090169943749474241022934171828190588601545899028814310677243113526302314094512248536036020946955687"
-      }
+      N-auto    = 0.8090169943749475
     `));
 });

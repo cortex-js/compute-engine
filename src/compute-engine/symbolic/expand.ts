@@ -1,3 +1,4 @@
+import { asSmallInteger } from '../numerics/numeric';
 import { BoxedExpression } from '../public';
 import { canonicalNegate } from './negate';
 
@@ -65,7 +66,7 @@ export function expand(expr: BoxedExpression): BoxedExpression {
     }
 
     if (op1head === 'Negate') {
-      const n = expr.op2.asSmallInteger;
+      const n = asSmallInteger(expr.op2);
       if (n !== null && n > 0) {
         if (n % 2 === 0) return expr.engine.power(expr.op1.op1, expr.op2);
         return expr.engine.negate(expr.engine.power(expr.op1.op1, expr.op2));
@@ -73,7 +74,7 @@ export function expand(expr: BoxedExpression): BoxedExpression {
     }
 
     if (op1head === 'Add') {
-      const n = expr.op2.asSmallInteger;
+      const n = asSmallInteger(expr.op2);
       if (n !== null) {
         if (n > 0) return expandN(expr.op1, n).simplify();
         return expr.engine.inverse(expandN(expr.op1, -n).simplify());

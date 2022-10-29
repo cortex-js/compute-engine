@@ -30,7 +30,7 @@ export class BoxedWildcard extends BoxedSymbol {
 
   constructor(ce: IComputeEngine, name: string, metadata?: Metadata) {
     const segments = name.split(':');
-    super(ce, segments[0], metadata);
+    super(ce, segments[0], { metadata, canonical: false });
     if (name.startsWith('___')) {
       this._repeatMin = 0;
       this._repeatMax = +Infinity;

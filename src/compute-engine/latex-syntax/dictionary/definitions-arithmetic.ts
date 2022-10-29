@@ -63,10 +63,10 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
       if (machineValue(op1) !== 1) numerator.push(op1);
       if (machineValue(op2) !== 1) denominator.push(op2);
     } else {
-      const [n, d] = rationalValue(arg);
-      if (n !== null) {
-        if (n !== 1) numerator.push(n);
-        denominator.push(d);
+      const r = rationalValue(arg);
+      if (r !== null) {
+        if (r[0] !== 1) numerator.push(r[0]);
+        denominator.push(r[1]);
       } else numerator.push(arg);
     }
   }
@@ -147,24 +147,25 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
         // denominator and numerator in the machine range.
         // Since we are only considering small fractions with a
         // numerator and denominator of less than 100, that's OK.
-        const [numer, denom] = rationalValue(arg);
-        if (
-          numer !== null &&
-          denom !== null &&
-          isFinite(numer) &&
-          isFinite(denom) &&
-          denom > 1 &&
-          denom <= 100 &&
-          numer > 0 &&
-          numer <= 100
-        ) {
-          // Don't include the '+' sign, it's a rational, use 'invisible plus'
-          result = joinLatex([
-            result,
-            serializer.options.invisiblePlus,
-            serializer.serialize(arg),
-          ]);
-          done = true;
+        const r = rationalValue(arg);
+        if (r) {
+          const [numer, denom] = r;
+          if (
+            isFinite(numer) &&
+            isFinite(denom) &&
+            denom > 1 &&
+            denom <= 100 &&
+            numer > 0 &&
+            numer <= 100
+          ) {
+            // Don't include the '+' sign, it's a rational, use 'invisible plus'
+            result = joinLatex([
+              result,
+              serializer.options.invisiblePlus,
+              serializer.serialize(arg),
+            ]);
+            done = true;
+          }
         }
       }
       if (!done) {
@@ -266,16 +267,19 @@ function serializeMultiply(
     if (head(arg) === 'Power') {
       // It's a power with a fractional exponent,
       // it's a nth-root
-      const [n, d] = rationalValue(op(arg, 2));
-      if (n === 1 && d !== null) {
-        result += serializeRoot(
-          serializer,
-          getRootStyle(arg, serializer.level),
-          op(arg, 1),
-          d
-        );
-        prevWasNumber = false;
-        continue;
+      const r = rationalValue(op(arg, 2));
+      if (r) {
+        const [n, d] = r;
+        if (n === 1 && d !== null) {
+          result += serializeRoot(
+            serializer,
+            getRootStyle(arg, serializer.level),
+            op(arg, 1),
+            d
+          );
+          prevWasNumber = false;
+          continue;
+        }
       }
     }
 
@@ -881,23 +885,32 @@ function parseBigOp(name: string) {
     }
 
     const sym = symbol(index);
-    // Note: 265 is the precedence for some relational operators
+    // Create a temporary scope to make sure the index symbol is
+    // not mis-interpreted. Classic example: if the index is `i`, the
+    // letter `i` should not be interpreted as a ImaginaryUnit
     if (sym)
       parser.computeEngine?.pushScope({
         symbolTable: { symbols: [{ name: sym, domain: 'Integer' }] },
       });
-    let fn = parser.matchExpression({ minPrec: 266 });
-    if (fn && sym) fn = ['Lambda', subs(fn, { [sym]: '_' })];
+
+    // Note: 265 is the precedence for some relational operators
+    const fn = parser.matchExpression({ minPrec: 266 });
 
     if (sym) parser.computeEngine?.popScope();
 
     if (!fn) return [name];
 
-    if (sup) return [name, fn, ['Tuple', index ?? 'Nothing', lower ?? 1, sup]];
+    if (sup)
+      return [
+        name,
+        fn,
+        ['Tuple', index ? ['Hold', index] : 'Nothing', lower ?? 1, sup],
+      ];
 
-    if (lower) return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
+    if (lower)
+      return [name, fn, ['Tuple', index ? ['Hold', index] : 'Nothing', lower]];
 
-    if (index) return [name, fn, ['Tuple', index]];
+    if (index) return [name, fn, ['Tuple', ['Hold', index]]];
 
     return [name, fn];
   };
@@ -912,11 +925,10 @@ function serializeBigOp(command: string) {
     if (h !== 'Tuple' && h !== 'Triple' && h !== 'Pair' && h !== 'Single')
       arg = null;
 
-    const index = op(arg, 1) ?? 'n';
+    let index = op(arg, 1);
+    if (index && head(index) === 'Hold') index = op(index, 1);
 
-    let fn = op(expr, 1);
-    if (head(fn) === 'Lambda' && op(fn, 1))
-      fn = subs(op(fn, 1)!, { _: index, _1: index });
+    const fn = op(expr, 1);
 
     if (!arg) {
       if (!op(expr, 2))
@@ -933,9 +945,10 @@ function serializeBigOp(command: string) {
     const lower = op(arg, 2);
 
     let sub: string[] = [];
-    if (symbol(index) !== 'Nothing' && lower)
+    if (index && symbol(index) !== 'Nothing' && lower)
       sub = [serializer.serialize(index), '=', serializer.serialize(lower)];
-    else if (symbol(index) !== 'Nothing') sub = [serializer.serialize(index)];
+    else if (index && symbol(index) !== 'Nothing')
+      sub = [serializer.serialize(index)];
     else if (lower) sub = [serializer.serialize(lower)];
 
     if (sub.length > 0) sub = ['_{', ...sub, '}'];

@@ -28,12 +28,16 @@ export class BoxedDictionary extends AbstractBoxedExpression {
   constructor(
     ce: IComputeEngine,
     dict: { [key: string]: SemiBoxedExpression },
-    metadata?: Metadata
+    options?: { canonical?: boolean; metadata?: Metadata }
   ) {
-    super(ce, metadata);
-    this._isCanonical = false; // @todo: if all the values are canonical, it's canonical
+    options ??= {};
+
+    super(ce, options.metadata);
+
+    const canonical = options.canonical ?? true;
+
     for (const key of Object.keys(dict))
-      this._value.set(key, ce.box(dict[key]));
+      this._value.set(key, ce.box(dict[key], { canonical }));
 
     ce._register(this);
   }

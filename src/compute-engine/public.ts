@@ -31,6 +31,8 @@ import type {
 
 export * from './latex-syntax/public';
 
+export type Rational = [number, number] | [Decimal, Decimal];
+
 /**
  * Metadata that can be associated with a `BoxedExpression`
  */
@@ -43,8 +45,8 @@ export type Metadata = {
 /**
  * The numeric evaluation mode:
  *
- * - `"auto"`: use machine number if precision is 15 or less, allow complex numbers.
- * - `"machine"`: 64-bit float, **IEEE 754-2008**, 64-bit float, 52-bit mantissa,
+ * - `"auto"`: use bignum or complex numbers.
+ * - `"machine"`: **IEEE 754-2008**, 64-bit float: 52-bit mantissa,
  *    about 15 digits of precision
  * - `"bignum"`: arbitrary precision floating point numbers, as provided by the
  * "decimal.js" library
@@ -53,9 +55,7 @@ export type Metadata = {
  */
 export type NumericMode = 'auto' | 'machine' | 'bignum' | 'complex';
 
-/** Options for `BoxedExpression.simplify()`
- *
- */
+/** Options for `BoxedExpression.simplify()` */
 export type SimplifyOptions = EvaluateOptions & {
   recursive?: boolean;
   rules?: BoxedRuleSet;
@@ -330,7 +330,15 @@ export type JsonSerializationOptions = {
    *
    * **Default**: `true`
    */
-  repeatingDecimal: boolean;
+  repeatingDecimals: boolean;
+
+  /** Number literals are serialized with this precision.
+   * If `"auto"`, the same precision as the compute engine calculations is used
+   * If `"max"`, all available digits are serialized
+   *
+   * **Default**: `"auto"`
+   */
+  precision: 'auto' | 'max' | number;
 };
 
 /**
@@ -416,6 +424,12 @@ export interface BoxedExpression {
    *
    */
   readonly json: Expression;
+
+  /**
+   * The scope in which this expression has been defined.
+   * Is null when the expression is not canonical.
+   */
+  readonly scope: RuntimeScope | null;
 
   /** From `Object.is()`. Equivalent to `BoxedExpression.isSame()`
    *
@@ -588,6 +602,17 @@ export interface BoxedExpression {
    */
   readonly isLiteral: boolean;
 
+  /**
+   * An exact value is not further transformed when evaluated. To get an
+   * approximate evaluation of an exact value, use `.N()`.
+   *
+   * Non-exact values includes:
+   * - numbers with a fractional part
+   * - complex numbers with a real or imaginary fractional part
+   *
+   */
+  readonly isExact: boolean;
+
   /** If true, the value of the expression never changes and evaluating it has
    * no side-effects.
    * If false, the value of the expression may change, if the
@@ -611,28 +636,18 @@ export interface BoxedExpression {
   /**
    * Return the canonical form of this expression.
    *
-   * If a function, after putting all the arguments in canonical form, find
-   * a corresponding function definition in the current context.
+   * If this is a function expressin, a definition is associated with the
+   * canonical expression.
    *
-   * Apply the function definition flags:
+   * When determining the canonical form the following function definition
+   * flags are applied:
    * - `associative`: \\( f(a, f(b), c) \longrightarrow f(a, b, c) \\)
    * - `idempotent`: \\( f(f(a)) \longrightarrow f(a) \\)
    * - `involution`: \\( f(f(a)) \longrightarrow a \\)
    * - `commutative`: sort the arguments.
    *
-   * Additionally, some simplifications involving exact computations on
-   * small integers may be performed.
-   *
-   * For example:
-   * - \\( 2 + x + 1 \longrightarrow x + 3 \\)
-   * - \\( \sqrt{4} \longrightarrow 2 \\)
-   * - \\(\frac{4}{10} \longrightarrow \frac{2}{5} \\).
-   *
-   * However, no calculation is performed involving floating point numbers, so
-   * \\( \sqrt(2) \longrightarrow \sqrt(2) \\).
-   *
-   * **Note** applicable to canonical and non-canonical expressions.
-   * Expressions that are already canonical return themselves.
+   * If his expression is already canonical, the value of canonical is
+   * `this`.
    *
    */
   get canonical(): BoxedExpression;
@@ -793,100 +808,15 @@ export interface BoxedExpression {
   readonly isComposite: boolean | undefined;
 
   /**
-   * Return the value of this expression, if stored as a machine
-   * number.
+   * Return the value of this expression, if a number literal.
    *
-   * Note it is possible for `machineValue` to be `null`, and for `isNotZero`
+   * Note it is possible for `numericValue` to be `null`, and for `isNotZero`
    * to be true. For example, when a symbol has been defined with an assumption.
    *
-   * If `machineValue` is not `null`, then `bignumValue`, `rationalValue`
-   * and `complexValue` are `null.
-   *
    * @category Numeric Expression
    *
    */
-  readonly machineValue: number | null;
-
-  /** If the value of this expression is a rational number, return it.
-   * Otherwise, return `[null, null]`.
-   *
-   * If `rationalValue` is not `[null, null]`, then `machineValue`,
-   * `bignumValue` and `complexValue` are `null.
-   *
-   * @category Numeric Expression
-   *
-   */
-  readonly rationalValue: [numer: number, denom: number] | [null, null];
-
-  /** If the value of this expression is a bignum, return it.
-   * Otherwise, return `null`.
-   *
-   * A bignum is an arbitrary precision floating point number.
-   *
-   * If `bignumValue` is not `null`, then `machineValue`
-   * and `complexValue` are `null` and `rationalValue` is `[null, null]`.
-   *
-   * @category Numeric Expression
-   *
-   */
-  readonly bignumValue: Decimal | null;
-
-  /** If the value of this expression is a `Complex` number, return it.
-   * Otherwise, return `null`.
-   *
-   * If `complexValue` is not `null`, then `machineValue`, `rationalValue`
-   * and `bignumValue` are `null.
-   *
-   * @category Numeric Expression
-   *
-   *
-   */
-  readonly complexValue: Complex | null;
-
-  /** Return an approximation of the numeric value of this expression as
-   * a 64-bit floating point number.
-   *
-   * If the value is a machine number, return it exactly.
-   *
-   * If the value is a rational number, return the numerator divided by the
-   * denominator.
-   *
-   * If the value is a bignum return an approximation of the bignum to a
-   * machine number. There might be a loss of precision or a
-   * round to 0 or Infinity, depending on the value.
-   *
-   * If the value of this expression cannot be represented by a float,
-   * return `null`.
-   *
-   * @category Numeric Expression
-   *
-   *
-   */
-  readonly asFloat: number | null;
-
-  /**
-   * If the value of this expression is an integer with a 'small' absolute
-   * value, return this value. Otherwise, return `null`.
-   *
-   * Some calculations, for example to put in canonical forms, are only
-   * performed if they are safe from overflow. This method makes it easy
-   * to check for this, whether the value is a bignum or a number.
-   *
-   * By default, "small" is less than 1,000,000.
-   *
-   * @category Numeric Expression
-   *
-   */
-  readonly asSmallInteger: number | null;
-
-  /**
-   * If the value of this an expression is a small integer or a rational,
-   * return this value. Otherwise, return `[null, null]`.
-   *
-   * @category Numeric Expression
-   *
-   */
-  readonly asRational: [number, number] | [null, null];
+  readonly numericValue: number | Decimal | Complex | Rational | null;
 
   /**
    * Return the following, depending on the value of this expression:
@@ -1098,19 +1028,21 @@ export interface BoxedExpression {
   //
 
   /**
-   * Return a simpler form of this expression.
+   * Return a simpler form of the canonical form of this expression.
    *
-   * The expression is first converted to canonical form. Then a series of
-   * rewriting rules are applied repeatedly, until no rules apply.
+   * A series of rewriting rules are applied repeatedly, until no more rules
+   * apply.
    *
-   * If a custom `simplify` handler is associated with this function definition,
-   * it is invoked.
+   * If a custom `simplify` handler is associated with this function
+   * definition, it is invoked.
    *
    * The values assigned to symbols and the assumptions about symbols may be
    * used, for example `arg.isInteger` or `arg.isPositive`.
    *
-   * No calculations involving floating point numbers are performed but exact
-   * calculations may be performed, for example
+   * No calculations involving decimal numbers (numbers that are not
+   * integers) are performed but exact calculations may be performed,
+   * for example:
+   *
    * \\( \sin(\frac{\pi}{4}) \longrightarrow \frac{\sqrt{2}}{2} \\).
    *
    * The result is in canonical form.
@@ -1119,34 +1051,38 @@ export interface BoxedExpression {
   simplify(options?: SimplifyOptions): BoxedExpression;
 
   /**
-   * Return the value of this expression.
-   *
-   * The expression is first converted to canonical form.
+   * Return the value of the canonical form of this expression.
    *
    * A pure expression always return the same value and has no side effects.
-   * If `this.isPure` is `true`, `this.value` and `this.evaluate()` are synonyms.
-   * For an impure expression, `this.value` is undefined.
+   * If `expr.isPure` is `true`, `expr.value` and `expr.evaluate()` are
+   * synonyms.
+   *
+   * For an impure expression, `expr.value` is undefined.
    *
    * Evaluating an impure expression may have some side effects, for
-   * example modifying the `ComputeEngine` environment, such as its set of assumptions.
+   * example modifying the `ComputeEngine` environment, such as its set of
+   * assumptions.
    *
-   * Only exact calculations are performed, no floating point calculations.
-   * To perform approximate floating point calculations, use `this.N()` instead.
+   * Only exact calculations are performed, no approximate calculations on
+   * decimal numbers (non-integer numbers). Constants, rational numbers and
+   * square root of rational numbers are preserved.
    *
-   * The result of `this.evaluate()` may be the same as `this.simplify()`.
+   * To perform approximate calculations, use `expr.N()` instead.
+   *
+   * The result of `expr.evaluate()` may be the same as `expr.simplify()`.
    *
    * The result is in canonical form.
    *
    */
   evaluate(options?: EvaluateOptions): BoxedExpression;
 
-  /** Return a numeric approximation of this expression.
+  /** Return a numeric approximation of the canonical form of this expression.
    *
-   * The expression is first converted to canonical form.
+   * Any necessary calculations, including on decimal numbers (non-integers),
+   * are performed.
    *
-   * Any necessary calculations, including on floating point numbers,
-   * are performed. The calculations are performed according
-   * to the `numericMode` and `precision` properties of the `ComputeEngine`.
+   * The calculations are performed according to the `numericMode` and
+   * `precision` properties of the `ComputeEngine`.
    *
    * To only perform exact calculations, use `this.evaluate()` instead.
    *
@@ -1178,17 +1114,6 @@ export interface BoxedExpression {
    */
   set value(value: BoxedExpression | number | undefined);
 
-  /** An approximation of the value of this expression. Floating-point
-   * operations may be performed.
-   *
-   * Just like `this.value`, it returns `undefined` for expressions that are
-   * not pure.
-   *
-   * **Note**: If non-canonical, return the numeric value of its canonical
-   * counterpart
-   */
-  readonly numericValue: BoxedExpression | undefined;
-
   /** The domain of the value of this expression.
    *
    * If a function expression, the domain  of the value of the function (the codomain of the function).
@@ -1208,7 +1133,7 @@ export interface BoxedExpression {
    * **Note**: If non-canonical, does nothing.
    *
    */
-  set domain(domain: BoxedDomain | string);
+  set domain(domain: BoxedExpression | DomainExpression | BoxedDomain);
 
   /** `true` if the value of this expression is a number.
    *
@@ -1441,7 +1366,7 @@ export type Scope = {
 };
 
 export type RuntimeScope = Scope & {
-  parentScope: RuntimeScope;
+  parentScope?: RuntimeScope;
 
   symbolTable?: RuntimeSymbolTable;
 
@@ -1605,13 +1530,6 @@ export type FunctionDefinitionFlags = {
    * and its value is numeric.
    */
   numeric: boolean;
-
-  /**
-   * When true, evaluating the function create a temporary scope.
-   * This is used for example by the `Lambda` function to keep track of the
-   * inferred domain of its wildcard  `_` arguments
-   */
-  scoped: boolean;
 };
 
 /**
@@ -1635,7 +1553,6 @@ export type FunctionSignature = {
    * Return the canonical form of the expression with the arguments `args`.
    *
    * All the arguments that are not subject to a hold are in canonical form.
-   * Any `Nothing` argument has been removed.
    *
    * If the function is associative, idempotent or an involution,
    * it should handle its arguments accordingly. Notably, if it
@@ -1644,17 +1561,14 @@ export type FunctionSignature = {
    * The handler can make transformations based on the value of the arguments
    * that are literal and either rational numbers (i.e.
    * `arg.isLiteral && arg.isRational`) or integers (i.e.
-   * `isLiteral && arg.isInteger`).
-   *
-   * The handler should not consider the value of the arguments
-   * that are symbols or functions.
-   *
-   * The handler should not consider any assumptions about any of the
-   * arguments that are symbols or functions i.e. `arg.isZero`,
-   * `arg.isInteger`, etc...
+   * `arg.isLiteral && arg.isInteger`).
    *
    * The handler should not make transformations based on the value of
-   * floating point numbers.
+   * decimal numbers (non-integers).
+   *
+   * The handler should not consider the value or any assumptions about any
+   * of the arguments that are symbols or functions i.e. `arg.isZero`,
+   * `arg.isInteger`, etc...
    *
    * The result of the handler should be a canonical expression.
    *
@@ -1666,19 +1580,16 @@ export type FunctionSignature = {
    *
    * The arguments are in canonical form and have been simplified.
    *
-   * The handler can use the values assigned to symbols and the assumptions about
-   * symbols, for example with `arg.machineValue`, `arg.isInteger` or
+   * The handler can use the values assigned to symbols and the assumptions
+   * about symbols, for example with `arg.numericValue`, `arg.isInteger` or
    * `arg.isPositive`.
    *
    * Even though a symbol may not have a value, there may be some information
    * about it reflected for example in `this.isZero` or `this.isPrime`.
    *
    * The handler should not perform approximate numeric calculations, such
-   * as calculations involving floating point numbers. Making exact
-   * calculations on integers or rationals is OK. It is recommended, but not
-   * required, that the calculations be limited to `this.smallIntegerValue`
-   * (i.e. numeric representations of the expression as an integer of small
-   * magnitude).
+   * as calculations involving decimal numbers (non-integers). Making exact
+   * calculations on integers or rationals is OK.
    *
    * This handler should not have any side-effects: do not modify
    * the environment of the `ComputeEngine` instance, do not perform I/O,
@@ -1701,20 +1612,20 @@ export type FunctionSignature = {
    *
    * It is not necessary to further simplify or evaluate the arguments.
    *
-   * If performing numerical calculations, keep the calculations "exact":
-   * - do not reduce rational numbers
+   * If performing numerical calculations, if all the arguments are exact,
+   * return an exact expression. If any of the arguments is not exact, that is
+   * if it is a literal decimal (non-integer) number, return an approximation.
+   * In this case, the value may be the same as `expr.N()`.
+   *
+   * When doing an exact calculation:
+   * - do not reduce rational numbers to decimal (floating point approximation)
    * - do not down convert bignums to machine numbers
-   * - do not add integers and decimal (non-integer) numbers
    * - do not reduce square roots of rational numbers
    * - do not reduce constants with a `hold` attribute
    *
-   * Adding decimal numbers together is acceptable. So is adding integers
-   * and rationals togers.
-   *
    * If the expression cannot be evaluated, due to the values, domains, or
-   * assumptions about its arguments, for example, return `undefined`.
-   *
-   *
+   * assumptions about its arguments, for example, return `undefined` or
+   * an `["Error"]` expression.
    */
   evaluate?:
     | LambdaExpression
@@ -2010,8 +1921,6 @@ export interface IComputeEngine {
   /** @internal */
   readonly _ONE: BoxedExpression;
   /** @internal */
-  readonly _TWO: BoxedExpression;
-  /** @internal */
   readonly _HALF: BoxedExpression;
   /** @internal */
   readonly _NEGATIVE_ONE: BoxedExpression;
@@ -2098,31 +2007,39 @@ export interface IComputeEngine {
 
   /** Return `undefined` if no definition exist for this `head` */
   lookupFunction(
-    head: string,
-    scope?: RuntimeScope
+    head: string | BoxedExpression,
+    scope?: RuntimeScope | null
   ): undefined | BoxedFunctionDefinition;
 
   /**
    * Return a boxed expression from the input.
-   *
-   * The result may not be canonical.
    */
   box(
-    expr: Decimal | Complex | [num: number, denom: number] | SemiBoxedExpression
+    expr:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression,
+    options?: { canonical?: boolean }
   ): BoxedExpression;
 
-  /** Return a canonical boxed number */
+  /** Return a boxed number */
   number(
     value:
       | number
       | MathJsonNumber
       | Decimal
       | Complex
-      | [num: number, denom: number],
-    metadata?: Metadata
+      | [num: number, denom: number]
+      | [num: Decimal, denom: Decimal],
+    options?: { metadata?: Metadata; canonical?: boolean }
   ): BoxedExpression;
+
   /** Return a canonical boxed symbol */
-  symbol(sym: string, metadata?: Metadata): BoxedExpression;
+  symbol(
+    sym: string,
+    options?: { metadata?: Metadata; canonical?: boolean }
+  ): BoxedExpression;
 
   /** Return a canonical boxed string */
   string(s: string, metadata?: Metadata): BoxedExpression;
@@ -2160,7 +2077,7 @@ export interface IComputeEngine {
    * This is a primitive to create a boxed function. It doesn't perform
    * any checks or normalization on its arguments.
    *
-   * In general, consider using `fn()` or `box()` instead.
+   * In general, consider using `ce.fn()` or `ce.box()` instead.
    *
    * The result is canonical, but the caller has to ensure that all the
    * conditions are met (i.e. `ops` properly normalized and sorted, all
@@ -2197,9 +2114,12 @@ export interface IComputeEngine {
    */
   power(
     base: BoxedExpression,
-    exponent: number | [number, number] | BoxedExpression,
+    exponent: number | Rational | BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression;
+
+  sqrt(base: BoxedExpression, metadata?: Metadata);
+
   /** Shortcut for `this.fn("Divide", [1, expr])`
    *
    * The result is canonical.
@@ -2277,6 +2197,21 @@ export interface IComputeEngine {
   get jsonSerializationOptions(): JsonSerializationOptions;
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>);
 
+  pushScope(options?: {
+    symbolTable?: Readonly<SymbolTable> | Readonly<SymbolTable>[];
+    assumptions?: (LatexString | Expression | BoxedExpression)[];
+    scope?: Partial<Scope>;
+  }): void;
+  popScope(): void;
+
+  /** Assign a value to an identifier in the current scope */
+  set(identifiers: { [identifier: string]: SemiBoxedExpression }): void;
+
+  /** Declare identifiers (specify their domain without necessarily assigning them a value in the current scope*/
+  let(identifiers: {
+    [identifier: string]: SymbolDefinition | FunctionDefinition;
+  }): void;
+
   /**
    * Add an assumption.
    *
@@ -2308,13 +2243,6 @@ export interface IComputeEngine {
   get assumptions(): ExpressionMapInterface<boolean>;
 
   ask(pattern: LatexString | SemiBoxedExpression): Substitution[];
-
-  pushScope(options?: {
-    symbolTable?: Readonly<SymbolTable> | Readonly<SymbolTable>[];
-    assumptions?: (LatexString | Expression | BoxedExpression)[];
-    scope?: Partial<Scope>;
-  }): void;
-  popScope(): void;
 
   /**
    * When `condition` is false, signal.

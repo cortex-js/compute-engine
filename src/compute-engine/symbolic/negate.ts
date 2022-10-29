@@ -1,5 +1,6 @@
 import { Complex } from 'complex.js';
 import Decimal from 'decimal.js';
+import { neg } from '../numerics/rationals';
 
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { flattenOps } from './flatten';
@@ -10,18 +11,15 @@ function negateLiteral(
 ): BoxedExpression | null {
   // Applying negation is safe (doesn't introduce numeric errors)
   // even on floating point numbers
-  if (!expr.isLiteral) return null;
+  let n = expr.numericValue;
+  if (n === null) return null;
 
-  let n: number | Decimal | Complex | [number, number] | undefined;
-  if (expr.machineValue !== null) n = -expr.machineValue;
-  if (expr.bignumValue) n = expr.bignumValue.neg();
-  if (expr.complexValue) n = expr.complexValue.neg();
-  const [numer, denom] = expr.rationalValue;
-  if (numer !== null && denom !== null) n = [-numer, denom];
+  if (typeof n === 'number') n = -n;
+  if (n instanceof Decimal) n = n.neg();
+  if (n instanceof Complex) n = n.neg();
+  if (Array.isArray(n)) n = neg(n);
 
-  if (n !== undefined) return expr.engine.number(n, metadata);
-
-  return null;
+  return expr.engine.number(n, { metadata });
 }
 
 /**

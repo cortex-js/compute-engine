@@ -105,13 +105,13 @@ describe('basic', () => {
       `["Equal", "x", ["Error", "'missing'"]]`
     );
     expect(parse('2 \\times 2 = ')).toMatchInlineSnapshot(
-      `["Equal", ["Multiply", 2, 2], ["Error", "'missing'"]]`
+      `["Equal", 4, ["Error", "'missing'"]]`
     );
     expect(parse('x+1=')).toMatchInlineSnapshot(
-      `["Equal", ["Add", "x", 1], ["Error", "'missing'"]]`
+      `["Equal", ["Add", 1, "x"], ["Error", "'missing'"]]`
     );
     expect(parse('2+1\\le')).toMatchInlineSnapshot(
-      `["LessEqual", ["Add", 2, 1], ["Error", "'missing'"]]`
+      `["LessEqual", ["Add", 1, 2], ["Error", "'missing'"]]`
     );
   });
 });

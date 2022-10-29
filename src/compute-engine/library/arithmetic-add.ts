@@ -1,22 +1,24 @@
-import { Complex } from 'complex.js';
-import { BoxedExpression, BoxedDomain, IComputeEngine } from '../public';
 import {
-  complexAllowed,
+  BoxedExpression,
+  BoxedDomain,
+  IComputeEngine,
+  Rational,
+} from '../public';
+import {
   getImaginaryCoef,
-  preferBignum as preferBignum,
+  bignumPreferred as bignumPreferred,
 } from '../boxed-expression/utils';
 import { flattenOps } from '../symbolic/flatten';
 import { Sum } from '../symbolic/sum';
 import {
-  isInMachineRange,
-  reducedRational as reducedBigRational,
-} from '../numerics/numeric-bignum';
-import {
+  asFloat,
+  asSmallInteger,
   MAX_ITERATION,
   MAX_SYMBOLIC_TERMS,
-  reducedRational,
 } from '../numerics/numeric';
+import { add, isMachineRational } from '../numerics/rationals';
 import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
+import { sortAdd } from '../boxed-expression/order';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -39,22 +41,17 @@ export function canonicalAdd(
     //
     let im: number | null = 0;
     let re: number | null = 0;
-    if (ops[0].isLiteral) {
-      re = ops[0].machineValue;
-      if (re === null && ops[0].bignumValue) re = ops[0].asFloat;
-    }
+    if (ops[0].numericValue !== null) re = asFloat(ops[0]);
     if (re !== null && re !== 0) im = getImaginaryCoef(ops[1]);
     else {
       im = getImaginaryCoef(ops[0]);
-      if (im !== 0) {
-        re = ops[1].machineValue;
-        if (re === null && ops[1].bignumValue) re = ops[1].asFloat;
-      }
+      if (im !== 0 && ops[1].numericValue !== null) re = asFloat(ops[1]);
     }
     if (re !== null && im !== null && im !== 0)
       return ce.number(ce.complex(re, im));
   }
 
+  if (ops.length > 1) ops = sortAdd(ce, ops);
   return ce._fn('Add', ops);
 }
 
@@ -84,160 +81,28 @@ export function simplifyAdd(
     if (!arg.isZero) sum.addTerm(arg);
   }
 
-  return sum.asExpression();
+  return sum.asExpression('expression');
 }
 
 export function evalAdd(
   ce: IComputeEngine,
-  args: BoxedExpression[],
-  mode: 'N' | 'eval' = 'eval'
+  ops: BoxedExpression[],
+  mode: 'N' | 'evaluate' = 'evaluate'
 ): BoxedExpression {
   //
   // First pass: looking for early exits
   //
-  for (const arg of args) {
+  for (const arg of ops) {
     if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
     if (arg.isNaN || arg.symbol === 'Undefined') return ce._NAN;
+    if (!arg.isExact) mode = 'N';
   }
 
-  console.assert(flattenOps(args, 'Add') === null);
+  console.assert(flattenOps(ops, 'Add') === null);
 
-  const sum = new Sum(ce);
+  if (mode === 'N') ops = ops.map((x) => x.N());
 
-  //
-  // Accumulate rational, machine, bignum, complex and symbolic terms
-  //
-  let [numer, denom] = [0, 1];
-  let [bigNumer, bigDenom] = [ce._BIGNUM_ZERO, ce._BIGNUM_ONE];
-  let machineSum = 0;
-  let machineIntegerSum = 0;
-  let bigSum = ce._BIGNUM_ZERO;
-  let complexSum = Complex.ZERO;
-
-  for (const arg of args) {
-    if (arg.isNothing || arg.isZero) continue;
-    if (arg.isLiteral) {
-      const [n, d] = arg.rationalValue;
-      if (n !== null && d !== null) {
-        [numer, denom] = reducedRational([numer * d + denom * n, denom * d]);
-      } else if (arg.bignumValue !== null) {
-        if (arg.bignumValue.isInteger())
-          bigNumer = bigNumer.add(bigDenom.mul(arg.bignumValue));
-        else bigSum = bigSum.add(arg.bignumValue);
-      } else if (arg.machineValue !== null) {
-        if (preferBignum(ce)) {
-          if (Number.isInteger(arg.machineValue))
-            bigNumer = bigNumer.add(bigDenom.mul(arg.machineValue));
-          else bigSum = bigSum.add(arg.machineValue);
-        } else {
-          if (Number.isInteger(arg.machineValue))
-            machineIntegerSum += arg.machineValue;
-          else machineSum += arg.machineValue;
-        }
-      } else if (arg.complexValue !== null) {
-        complexSum = complexSum.add(arg.complexValue);
-      } else sum.addTerm(arg);
-    } else if (arg.head === 'Rational' && arg.nops === 2) {
-      // If this is a Rational head, it's a rational of bignums
-      const [dn, dd] = [
-        arg.op1.bignumValue ?? arg.op1.machineValue,
-        arg.op2.bignumValue ?? arg.op1.machineValue,
-      ];
-      if (dn !== null && dd !== null) {
-        bigNumer = bigNumer.mul(dd).add(bigDenom.mul(dn));
-        bigDenom = bigDenom.mul(dd);
-      } else sum.addTerm(arg);
-    } else sum.addTerm(arg);
-  }
-
-  // If we have an imaginary term, but complex are not allowed, return NaN
-  if (!complexAllowed(ce) && complexSum.im !== 0) return ce._NAN;
-
-  //
-  // If we prefer to use bignum, or if we had any bignum term,
-  // do bignum calculations
-  //
-  if (preferBignum(ce) || ce.chop(bigSum) !== 0 || !bigNumer.isZero()) {
-    let d = bigSum;
-    if (machineSum !== 0) d = d.add(machineSum);
-    if (complexSum.re !== 0) d = d.add(complexSum.re);
-
-    bigNumer = bigNumer.add(bigDenom.mul(machineIntegerSum));
-    bigNumer = bigNumer.mul(denom).add(bigDenom.mul(numer));
-    bigDenom = bigDenom.mul(denom);
-    [bigNumer, bigDenom] = reducedBigRational([bigNumer, bigDenom]);
-
-    // machineSum = 0;
-    // numer = 0;
-    // denom = 1;
-    // machineIntegerSum = 0;
-
-    if (bigDenom.eq(1)) d = d.add(bigNumer);
-    else {
-      // In 'N' mode we should divide the numerator and denominator
-      if (mode === 'N') d = d.add(bigNumer.div(bigDenom));
-      else {
-        // In 'eval' mode, preserve a rational
-        sum.addTerm(
-          ce.box(['Rational', ce.number(bigNumer), ce.number(bigDenom)])
-            .canonical
-        );
-      }
-    }
-
-    // Fold in any remaining imaginary part
-    if (complexSum.im !== 0) {
-      if (isInMachineRange(d)) {
-        // We can fold into a Complex Number
-        const c = ce.number(ce.complex(d.toNumber(), complexSum.im));
-        if (sum.isEmpty) return c;
-        sum.addTerm(c);
-      } else {
-        // We have to keep a complex and bignum term
-        sum.addTerm(ce.number(ce.complex(0, complexSum.im)));
-        sum.addTerm(ce.number(d));
-      }
-    } else if (sum.isEmpty) return ce.number(d);
-    else sum.addTerm(ce.number(d));
-
-    return sum.asExpression();
-  }
-
-  //
-  // Machine Number calculation
-  //
-  // Fold into machine: we don't prefer bignum and we had no bignum terms
-
-  if (mode === 'N' || denom === 1) {
-    const re = machineSum + machineIntegerSum + complexSum.re + numer / denom;
-    const c = ce.number(
-      complexSum.im === 0 ? re : ce.complex(re, complexSum.im)
-    );
-    if (sum.isEmpty) return c;
-    sum.addTerm(c);
-  } else {
-    if (numer !== 0) {
-      if (denom === 1) {
-        machineSum += machineIntegerSum + numer;
-      } else {
-        [numer, denom] = reducedRational([
-          numer + denom * machineIntegerSum,
-          denom,
-        ]);
-        sum.addTerm(ce.number([numer, denom]));
-      }
-    } else {
-      machineSum += machineIntegerSum;
-    }
-    const re = machineSum + complexSum.re;
-    const c = ce.number(
-      complexSum.im === 0 ? re : ce.complex(re, complexSum.im)
-    );
-    if (sum.isEmpty) return c;
-    sum.addTerm(c);
-  }
-
-  return sum.asExpression();
+  return new Sum(ce, ops).asExpression(mode === 'N' ? 'numeric' : 'expression');
 }
 
 export function canonicalSummation(
@@ -262,19 +127,24 @@ export function canonicalSummation(
     upper = range.ops?.[2] ?? null;
   }
 
-  let fn: BoxedExpression;
-  if (index !== null && index.symbol)
-    fn = expr.head === 'Lambda' ? expr.op1 : expr.subs({ [index.symbol]: '_' });
-  else fn = expr.head === 'Lambda' ? expr.op1 : expr;
-
+  if (index && index.head === 'Hold') index = index.op1.canonical;
   index ??= ce.symbol('Nothing');
 
+  if (index.symbol)
+    ce.pushScope({
+      symbolTable: { symbols: [{ name: index.symbol, domain: 'Integer' }] },
+    });
+  const fn = expr.canonical;
+  if (index.symbol) {
+    ce.popScope();
+    index = ce.box(['Hold', index]);
+  }
   if (upper) range = ce.tuple([index, lower ?? ce.symbol('Nothing'), upper]);
   else if (lower && upper) range = ce.tuple([index, lower, upper]);
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
 
-  return ce._fn('Sum', [ce._fn('Lambda', [fn]), range]);
+  return ce._fn('Sum', [fn, range]);
 }
 
 export function evalSummation(
@@ -283,49 +153,76 @@ export function evalSummation(
   range: BoxedExpression,
   mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
-  if (expr.head !== 'Lambda') return undefined;
-  const fn = expr.op1;
+  const fn = expr;
 
   let lower = 1;
   let upper = MAX_ITERATION;
+  let index = 'Nothing';
   if (
     range.head === 'Tuple' ||
     range.head === 'Triple' ||
     range.head === 'Pair' ||
     range.head === 'Single'
   ) {
-    lower = range.op2.asSmallInteger ?? 1;
-    upper = range.op3.asSmallInteger ?? MAX_ITERATION;
+    index =
+      (range.op1.head === 'Hold' ? range.op1.op1.symbol : range.op1.symbol) ??
+      'Nothing';
+    lower = asSmallInteger(range.op2) ?? 1;
+    upper = asSmallInteger(range.op3) ?? MAX_ITERATION;
   }
   if (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS) return undefined;
 
-  if (mode === 'evaluate' || mode === 'simplify') {
+  const savedContext = ce.context;
+  ce.context = fn.scope ?? ce.context;
+
+  if (mode === 'simplify') {
     const terms: BoxedExpression[] = [];
-    for (let i = lower; i <= upper; i++) {
-      const n = ce.number(i);
-      terms.push(fn.subs({ _1: n, _: n }));
-    }
-    if (mode === 'simplify') return ce.add(terms).simplify();
+    if (!fn.scope)
+      for (let i = lower; i <= upper; i++) terms.push(fn.simplify());
+    else
+      for (let i = lower; i <= upper; i++) {
+        ce.set({ [index]: i });
+        terms.push(fn.simplify());
+      }
+    ce.context = savedContext;
+    return ce.add(terms).simplify();
+  }
+
+  if (mode === 'evaluate') {
+    const terms: BoxedExpression[] = [];
+    if (!fn.scope)
+      for (let i = lower; i <= upper; i++) terms.push(fn.evaluate());
+    else
+      for (let i = lower; i <= upper; i++) {
+        ce.set({ [index]: i });
+        terms.push(fn.evaluate());
+      }
+    ce.context = savedContext;
     return ce.add(terms).evaluate();
   }
 
-  if (preferBignum(ce)) {
-    let v = ce.bignum(0);
-    for (let i = lower; i <= upper; i++) {
-      const n = ce.number(i);
-      const r = fn.subs({ _1: n, _: n }).evaluate();
-      const val = r.bignumValue ?? r.asFloat;
-      if (!val) return undefined;
-      v = v.add(val);
-    }
-  }
-  let v = 0;
-  for (let i = lower; i <= upper; i++) {
-    const n = ce.number(i);
-    const r = fn.subs({ _1: n, _: n }).evaluate();
-    if (!r.asFloat) return undefined;
-    v += r.asFloat;
-  }
+  let sum: Rational = bignumPreferred(ce)
+    ? [ce._BIGNUM_ZERO, ce._BIGNUM_ONE]
+    : [0, 1];
 
-  return ce.number(v);
+  if (!fn.scope)
+    for (let i = lower; i <= upper; i++) {
+      const term = fn.N();
+      if (!term.isLiteral) return undefined;
+      sum = add(sum, term);
+    }
+  else
+    for (let i = lower; i <= upper; i++) {
+      ce.set({ [index]: i });
+      const term = fn.N();
+      if (!term.isLiteral) {
+        ce.context = savedContext;
+        return undefined;
+      }
+      sum = add(sum, term);
+    }
+  ce.context = savedContext;
+
+  if (isMachineRational(sum)) return ce.number(sum[0] / sum[1]);
+  return ce.number(sum[0].div(sum[1]));
 }

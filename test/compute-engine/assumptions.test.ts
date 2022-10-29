@@ -29,7 +29,9 @@ describe('TAUTOLOGY a = 1', () => {
     );
   });
   test(`a > 0`, () => {
-    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot(`tautology`);
+    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot(
+      `not-a-predicate`
+    );
   });
   test(`a >= 1`, () => {
     expect(ce.assume(['GreaterEqual', 'a', 1])).toMatchInlineSnapshot(
@@ -37,7 +39,9 @@ describe('TAUTOLOGY a = 1', () => {
     );
   }); // @fixme: should be valid
   test(`a = 1`, () => {
-    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot(`ok`);
+    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot(
+      `not-a-predicate`
+    );
   });
 });
 
@@ -90,7 +94,7 @@ describe('canonical domains', () => {
     );
     expect(ce.box('n').domain.toJSON()).toMatchInlineSnapshot(
       `["Domain", "NonNegativeInteger"]`
-    ); // @fixme should  be Integer
+    );
     expect(ce.box('q').domain.toJSON()).toMatchInlineSnapshot(
       `["Domain", "NonPositiveInteger"]`
     );

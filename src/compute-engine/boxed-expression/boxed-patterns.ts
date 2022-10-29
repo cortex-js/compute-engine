@@ -310,6 +310,9 @@ function match(
 ): BoxedSubstitution | null {
   console.assert(!hasWildcards(subject));
   console.assert(hasWildcards(pattern));
+
+  if (!hasWildcards(pattern)) debugger;
+
   const substitution = matchOnce(
     subject,
     pattern,

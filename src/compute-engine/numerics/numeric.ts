@@ -1,3 +1,7 @@
+import Complex from 'complex.js';
+import Decimal from 'decimal.js';
+import { BoxedExpression } from '../public';
+
 export const MACHINE_PRECISION_BITS = 53;
 export const MACHINE_PRECISION = Math.log10(
   Math.pow(2, MACHINE_PRECISION_BITS)
@@ -139,47 +143,48 @@ export const SMALL_PRIMES = new Set<number>([
 export const LARGEST_SMALL_PRIME = 7919;
 
 export function primeFactors(n: number): { [factor: number]: number } {
+  console.assert(Number.isInteger(n) && n >= 0 && n < Number.MAX_SAFE_INTEGER);
+  if (!Number.isInteger(n) || n < 0 || n >= Number.MAX_SAFE_INTEGER) debugger;
   //https:rosettacode.org/wiki/Prime_decomposition#JavaScript
   if (n <= 3) return { [n]: 1 };
   const result = {};
-  let done = false;
   // Wheel factorization
+  let count = 0;
+  while (n % 2 === 0) {
+    count += 1;
+    n /= 2;
+  }
+  if (count > 0) result[2] = count;
+  count = 0;
+  while (n % 3 === 0) {
+    count += 1;
+    n /= 3;
+  }
+  if (count > 0) result[3] = count;
+  // @todo: could add more special cases: 5, 7, 11, 13
+  let done = false;
   while (!done) {
-    if (n % 2 === 0) {
-      if (result[2]) result[2] += 1;
-      else result[2] = 1;
-      n /= 2;
-      continue;
-    }
-    if (n % 3 === 0) {
-      if (result[3]) result[3] += 1;
-      else result[3] = 1;
-      n /= 3;
-      continue;
-    }
-    // @todo: could add more special cases: 5, 7, 11, 13
     if (n === 1) return result;
     const sr = Math.sqrt(n);
     done = true;
     for (let i = 6; i <= sr + 6; i += 6) {
       if (n % (i - 1) === 0) {
         // is n divisible by i-1?
-        if (result[i - 1]) result[i - 1] += 1;
-        else result[i - 1] = 1;
+        result[i - 1] = (result[i - 1] ?? 0) + 1;
         n /= i - 1;
         done = false;
         break;
       }
       if (n % (i + 1) === 0) {
         // is n divisible by i+1?
-        if (result[i + 1]) result[i + 1] += 1;
-        else result[i + 1] = 1;
+        result[i + 1] = (result[i + 1] ?? 0) + 1;
         n /= i + 1;
         done = false;
         break;
       }
     }
   }
+  console.assert(result[n] === undefined);
   result[n] = 1;
   return result;
 }
@@ -198,11 +203,12 @@ export function factorPower(
 ): [factor: number, root: number] {
   // @todo: handle negative n
   console.assert(Number.isInteger(n) && n > 0);
+  if (!Number.isInteger(n) || n <= 0) debugger;
   const factors = primeFactors(n);
   let f = 1;
   let r = 1;
   for (const k of Object.keys(factors)) {
-    const v = parseFloat(k);
+    const v = parseInt(k);
     f = f * Math.pow(v, Math.floor(factors[k] / exponent));
     r = r * Math.pow(v, factors[k] % exponent);
   }
@@ -242,33 +248,8 @@ var gcd = function (a, b) {
 };
 */
 
-export function rationalGcd(
-  [a, b]: [number, number],
-  [c, d]: [number, number]
-): [number, number] {
-  return [gcd(a * d, b * c), b * d];
-}
-
 export function lcm(a: number, b: number): number {
   return (a * b) / gcd(a, b);
-}
-
-export function rationalLcm(
-  [a, b]: [number, number],
-  [c, d]: [number, number]
-): [number, number] {
-  return [lcm(a, c), gcd(b, d)];
-}
-
-//  Return the "reduced form" of the rational, that is a rational
-// such that gcd(numer, denom) = 1 and denom > 0
-export function reducedRational([a, b]: [number, number]): [number, number] {
-  if (a === 1 || b === 1) return [a, b];
-  if (b < 0) [a, b] = [-a, -b];
-  const g = gcd(a, b);
-  //  If the gcd is 0, return the rational unchanged
-  if (g <= 1) return [a, b];
-  return [a / g, b / g];
 }
 
 export function factorial(n: number): number {
@@ -395,40 +376,99 @@ export function fromDigits(
   return [value, ''];
 }
 
-/** Return a rational approximation of x */
-export function rationalize(x: number): [n: number, d: number] | number {
-  if (!Number.isFinite(x)) return x;
+export function asFloat(expr: BoxedExpression): number | null {
+  const num = expr.numericValue;
+  if (num === null) return null;
 
-  const fractional = x % 1;
+  if (typeof num === 'number') return num;
 
-  if (fractional === 0) return x;
+  if (num instanceof Decimal) return num.toNumber();
 
-  // const real = x - fractional;
-  // const exponent = String(fractional).length - 2; // Number of fractional digits
-  // const denominator = Math.pow(10, exponent);
-  // const mantissa = fractional * denominator;
-  // const numerator = real * denominator + mantissa;
-  // const g = gcd(numerator, denominator);
-  // return [numerator / g, denominator / g];
-
-  const eps = 1.0e-15;
-
-  let a = Math.floor(x);
-  let h1 = 1;
-  let k1 = 0;
-  let h = a;
-  let k = 1;
-
-  while (x - a > eps * k * k) {
-    x = 1 / (x - a);
-    a = Math.floor(x);
-    const h2 = h1;
-    h1 = h;
-    const k2 = k1;
-    k1 = k;
-    h = h2 + a * h1;
-    k = k2 + a * k1;
+  if (Array.isArray(num)) {
+    const [n, d] = num;
+    if (typeof n === 'number' && typeof d === 'number') return n / d;
+    return (n as Decimal).div(d).toNumber();
   }
 
-  return [h, k];
+  console.assert(!(num instanceof Complex) || num.im !== 0);
+
+  return null;
+}
+
+export function asBignum(expr: BoxedExpression): Decimal | null {
+  const num = expr.numericValue;
+  if (num === null) return null;
+
+  if (num instanceof Decimal) return num;
+
+  if (typeof num === 'number') return expr.engine.bignum(num);
+
+  if (Array.isArray(num)) {
+    const [n, d] = num;
+    if (typeof n === 'number' && typeof d === 'number')
+      return expr.engine.bignum(n / d);
+    return (n as Decimal).div(d);
+  }
+
+  console.assert(!(num instanceof Complex) || num.im !== 0);
+
+  return null;
+}
+
+export function asSmallInteger(expr: BoxedExpression): number | null {
+  const num = expr.numericValue;
+  if (num === null) return null;
+
+  if (typeof num === 'number') {
+    if (Number.isInteger(num) && num >= -SMALL_INTEGER && num <= SMALL_INTEGER)
+      return num;
+    return null;
+  }
+
+  if (num instanceof Decimal) {
+    if (num.isInteger()) {
+      const n = num.toNumber();
+      if (n >= -SMALL_INTEGER && n <= SMALL_INTEGER) return n;
+    }
+    return null;
+  }
+
+  // If we're canonical, a rational is never a small integer
+  if (expr.isCanonical) return null;
+
+  // We're not canonical, a rational could be a small integer, i.e. 4/2
+  const r = num;
+  if (Array.isArray(r)) {
+    const [n, d] = r;
+    let v: number;
+    if (typeof n === 'number' && typeof d === 'number') v = n / d;
+    else v = (n as Decimal).div(d).toNumber();
+
+    if (Number.isInteger(v) && v >= -SMALL_INTEGER && v <= SMALL_INTEGER)
+      return v;
+    return null;
+  }
+
+  return null;
+}
+
+export function chop(n: number, tolerance: number): number;
+export function chop(n: Decimal, tolerance: number): 0 | Decimal;
+export function chop(n: Complex, tolerance: number): 0 | Complex;
+export function chop(
+  n: number | Decimal | Complex,
+  tolerance: number
+): 0 | number | Decimal | Complex {
+  if (typeof n === 'number' && Math.abs(n) <= tolerance) return 0;
+
+  if (n instanceof Decimal && n.abs().lte(tolerance)) return 0;
+
+  if (
+    n instanceof Complex &&
+    Math.abs(n.re) <= tolerance &&
+    Math.abs(n.im) <= tolerance
+  )
+    return 0;
+
+  return n;
 }

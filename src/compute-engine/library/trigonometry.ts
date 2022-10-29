@@ -9,10 +9,12 @@ import {
 import {
   complexAllowed,
   latexString,
-  preferBignum,
+  bignumPreferred,
 } from '../boxed-expression/utils';
 import { Expression } from '../../math-json/math-json-format';
 import { canonicalNegate } from '../symbolic/negate';
+import { applyN, apply2N } from '../symbolic/utils';
+import { asFloat } from '../numerics/numeric';
 
 //
 //Note: Names of trigonometric functions follow ISO 80000 Section 13
@@ -51,7 +53,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         constant: true,
         hold: true,
         wikidata: 'Q167',
-        value: (engine) => (preferBignum(engine) ? engine._BIGNUM_PI : Math.PI),
+        value: (engine) =>
+          bignumPreferred(engine) ? engine._BIGNUM_PI : Math.PI,
       },
     ],
     functions: [
@@ -92,17 +95,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
               : undefined),
 
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Sin', ops[0])?.evaluate(),
+            constructibleValues(ce, 'Sin', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Sin', ops) : undefined),
 
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ce.chop(ops[0].bignumValue.sin()));
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.sin());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.sin(ops[0].asFloat));
-            return undefined;
-          },
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.sin,
+              (x) => x.sin(),
+              (x) => x.sin()
+            ),
         },
       },
     ],
@@ -121,14 +123,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           domain: domainNumberToRealNumber('Arctan'),
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Arctan', ops[0])?.simplify(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue) return ce.number(ops[0].bignumValue.atan());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.atan());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.atan(ops[0].asFloat));
-            return undefined;
-          },
+          evaluate: (ce, ops) =>
+            constructibleValues(ce, 'Arctan', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Arctan', ops) : undefined),
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.atan,
+              (x) => x.atan(),
+              (x) => x.atan()
+            ),
         },
       },
       {
@@ -137,16 +141,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         complexity: 5200,
         signature: {
           domain: ['Function', 'Number', 'Number', 'Number'],
-          N: (ce, ops) => {
-            if (ops[0].bignumValue && ops[1].bignumValue)
-              return ce.number(
-                Decimal.atan2(ops[0].bignumValue, ops[1].bignumValue)
-              );
-            // atan2 is not defined for complex number
-            if (ops[0].asFloat !== null && ops[1].asFloat !== null)
-              return ce.number(Math.atan2(ops[0].asFloat, ops[1].asFloat));
-            return undefined;
-          },
+          N: (ce, ops) =>
+            apply2N(ops[0], ops[1], Math.atan2, (a, b) => Decimal.atan2(a, b)),
         },
       },
       {
@@ -160,15 +156,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
               .box(['Sin', ['Add', ops[0], ['Multiply', 'Half', 'Pi']]])
               .simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Cos', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue) return ce.number(ops[0].bignumValue.cos());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.cos());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.cos(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Cos', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Cos', ops) : undefined),
+
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.cos,
+              (x) => x.cos(),
+              (x) => x.cos()
+            ),
         },
       },
 
@@ -182,15 +179,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             constructibleValues(ce, 'Tan', ops[0])?.simplify() ??
             ce.box(['Divide', ['Sin', ops[0]], ['Cos', ops[0]]]).simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Tan', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue) return ce.number(ops[0].bignumValue.tan());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.tan());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.tan(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Tan', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Tan', ops) : undefined),
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.tan,
+              (x) => x.tan(),
+              (x) => x.tan()
+            ),
         },
       },
       /* converts (x, y) -> (radius, angle) */
@@ -212,7 +209,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         signature: {
           domain: hyperbolicFunction('Arcosh'),
           simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arcoshh', ops[0])?.simplify() ??
+            constructibleValues(ce, 'Arcosh', ops[0])?.simplify() ??
             ce
               .box([
                 'Ln',
@@ -220,16 +217,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
               ])
               .simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Arcoshh', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ops[0].bignumValue.acosh());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.acosh());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.acosh(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Arcosh', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Arcosh', ops) : undefined),
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.acosh,
+              (x) => x.acosh(),
+              (x) => x.acosh()
+            ),
         },
       },
       {
@@ -251,15 +247,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
               ])
               .simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Arcsin', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue) return ce.number(ops[0].bignumValue.asin());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.asin());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.asin(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Arcsin', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Arcsin', ops) : undefined),
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.asin,
+              (x) => x.asin(),
+              (x) => x.asin()
+            ),
         },
       },
       //Note: Arsinh, not Arcsinh
@@ -277,16 +273,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
               ])
               .simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Arsinh', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ops[0].bignumValue.asinh());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.asinh());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.asinh(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Arsinh', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Arsinh', ops) : undefined),
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.asinh,
+              (x) => x.asinh(),
+              (x) => x.asinh()
+            ),
         },
       },
       {
@@ -304,16 +299,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
               ])
               .simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Artanh', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ops[0].bignumValue.atanh());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.atanh());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.atanh(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Artanh', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Artanh', ops) : undefined),
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.atanh,
+              (x) => x.atanh(),
+              (x) => x.atanh()
+            ),
         },
       },
       {
@@ -331,15 +325,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
               ])
               .simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Cosh', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue) return ce.number(ops[0].bignumValue.cosh());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.cosh());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.cosh(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Cosh', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Cosh', ops) : undefined),
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.cosh,
+              (x) => x.cosh(),
+              (x) => x.cosh()
+            ),
         },
       },
       {
@@ -351,16 +345,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             constructibleValues(ce, 'Cot', ops[0])?.simplify() ??
             ce.box(['Divide', ['Cos', ops[0]], ['Sin', ops[0]]]).simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Cot', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ce._BIGNUM_ONE.div(ops[0].bignumValue.tan()));
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.tan().inverse());
-            if (ops[0].asFloat !== null)
-              return ce.number(1 / Math.tan(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Cot', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Cot', ops) : undefined),
+          N: (ce, ops) =>
+            applyN(
+              ops[0],
+              (x) => 1 / Math.tan(x),
+              (x) => ce._BIGNUM_ONE.div(x.tan()),
+              (x) => x.tan().inverse()
+            ),
         },
       },
       {
@@ -373,16 +366,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             constructibleValues(ce, 'Csc', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Sin', ops[0]]]).simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Csc', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ce._BIGNUM_ONE.div(ops[0].bignumValue.sin()));
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.sin().inverse());
-            if (ops[0].asFloat !== null)
-              return ce.number(1 / Math.sin(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Csc', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Csc', ops) : undefined),
+          N: (ce, ops) =>
+            applyN(
+              ops[0],
+              (x) => 1 / Math.sin(x),
+              (x) => ce._BIGNUM_ONE.div(x.sin()),
+              (x) => x.sin().inverse()
+            ),
         },
       },
       /** = sin(z/2)^2 = (1 - cos z) / 2*/
@@ -413,16 +405,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             constructibleValues(ce, 'Sec', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Cos', ops[0]]]).simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Sec', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ce._BIGNUM_ONE.div(ops[0].bignumValue.cos()));
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.cos().inverse());
-            if (ops[0].asFloat !== null)
-              return ce.number(1 / Math.cos(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Sec', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Sec', ops) : undefined),
+          N: (ce, ops) =>
+            applyN(
+              ops[0],
+              (x) => 1 / Math.cos(x),
+              (x) => ce._BIGNUM_ONE.div(x.cos()),
+              (x) => x.cos().inverse()
+            ),
         },
       },
       {
@@ -441,7 +432,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
               ])
               .simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Sinh', ops[0])?.evaluate(),
+            constructibleValues(ce, 'Sinh', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Sinh', ops) : undefined),
         },
       },
     ],
@@ -457,16 +449,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             constructibleValues(ce, 'Csch', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Sinh', ops[0]]]).simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Csch', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ce._BIGNUM_ONE.div(ops[0].bignumValue.sinh()));
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.sinh().inverse());
-            if (ops[0].asFloat !== null)
-              return ce.number(1 / Math.sinh(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Csch', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Csch', ops) : undefined),
+          N: (ce, ops) =>
+            applyN(
+              ops[0],
+              (x) => 1 / Math.sinh(x),
+              (x) => ce._BIGNUM_ONE.div(x.sinh()),
+              (x) => x.sinh().inverse()
+            ),
         },
       },
       {
@@ -478,16 +469,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             constructibleValues(ce, 'Sech', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Cosh', ops[0]]]).simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Sech', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ce._BIGNUM_ONE.div(ops[0].bignumValue.cosh()));
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.cosh().inverse());
-            if (ops[0].asFloat !== null)
-              return ce.number(1 / Math.cosh(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Sech', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Sech', ops) : undefined),
+          N: (ce, ops) =>
+            applyN(
+              ops[0],
+              (x) => 1 / Math.cosh(x),
+              (x) => ce._BIGNUM_ONE.div(x.cosh()),
+              (x) => x.cosh().inverse()
+            ),
         },
       },
       {
@@ -500,15 +490,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             constructibleValues(ce, 'Tanh', ops[0])?.simplify() ??
             ce.box(['Divide', ['Sinh', ops[0]], ['Cosh', ops[0]]]).simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Tanh', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue) return ce.number(ops[0].bignumValue.tanh());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.tanh());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.tanh(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Tanh', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Tanh', ops) : undefined),
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.tanh,
+              (x) => x.tanh(),
+              (x) => x.tanh()
+            ),
         },
       },
     ],
@@ -526,15 +516,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
               .box(['Subtract', ['Divide', 'Pi', 2], ['Arcsin', ops[0]]])
               .simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Arccos', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue) return ce.number(ops[0].bignumValue.acos());
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.acos());
-            if (ops[0].asFloat !== null)
-              return ce.number(Math.acos(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Arccos', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Arccos', ops) : undefined),
+          N: (_ce, ops) =>
+            applyN(
+              ops[0],
+              Math.acos,
+              (x) => x.acos(),
+              (x) => x.acos()
+            ),
         },
       },
       // Arccot: {
@@ -572,16 +562,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             constructibleValues(ce, 'Coth', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Tanh', ops[0]]]).simplify(),
           evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Coth', ops[0])?.evaluate(),
-          N: (ce, ops) => {
-            if (ops[0].bignumValue)
-              return ce.number(ce._BIGNUM_ONE.div(ops[0].bignumValue.tanh()));
-            if (ops[0].complexValue)
-              return ce.number(ops[0].complexValue.tanh().inverse());
-            if (ops[0].asFloat !== null)
-              return ce.number(1 / Math.tanh(ops[0].asFloat));
-            return undefined;
-          },
+            constructibleValues(ce, 'Coth', ops[0])?.evaluate() ??
+            (ops[0].isExact ? ce.fn('Coth', ops) : undefined),
+          N: (ce, ops) =>
+            applyN(
+              ops[0],
+              (x) => 1 / Math.tanh(x),
+              (x) => ce._BIGNUM_ONE.div(x.tanh()),
+              (x) => x.tanh().inverse()
+            ),
         },
       },
       /* converts (radius, angle) -> (x, y) */
@@ -812,12 +801,9 @@ function constructibleValues(
 
       for (const [val, results] of CONSTRUCTIBLE_VALUES) {
         const boxedResults = {};
-        for (const head of Object.keys(results)) {
-          // console.log(`Caching  ${head}(${val}) = ${results[head]}`);
-          boxedResults[head] = (
-            ce.parse(latexString(results[head])) ?? ce.box(results[head])
-          ).canonical;
-        }
+        for (const head of Object.keys(results))
+          boxedResults[head] =
+            ce.parse(latexString(results[head])) ?? ce.box(results[head]);
 
         values.push([val, boxedResults]);
       }
@@ -830,9 +816,9 @@ function constructibleValues(
       return cache;
     }
   );
-  x = x.numericValue ?? x;
+  x = x.N();
   if (!x.isLiteral) return undefined;
-  let theta = x.asFloat ?? x.bignumValue?.toNumber() ?? null;
+  let theta = asFloat(x) ?? null;
   if (theta === null) return undefined;
   theta = theta % (2 * Math.PI);
   // Odd-even identities
@@ -883,5 +869,5 @@ function processInverseFunction(
     Arctan: 'Tan',
     Artanh: 'Tanh',
   }[head];
-  return newHead ? ce.symbol(newHead) : expr;
+  return newHead ? ce.symbol(newHead, { canonical: true }) : expr;
 }

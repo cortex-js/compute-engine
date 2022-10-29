@@ -7,38 +7,46 @@ function json(latex: string): Expression {
 
 describe('BASE FORM', () => {
   test('binary', () => {
-    expect(json('\\text{00111}_{2}')).toMatchInlineSnapshot(
-      `["Subscript", "'00111'", 2]`
-    );
-    expect(json('\\text{00111}_2')).toMatchInlineSnapshot(
-      `["Subscript", "'00111'", 2]`
-    );
-    expect(json('\\text{00\\;111}_2')).toMatchInlineSnapshot(
-      `["Subscript", "'00\\;111'", 2]`
-    );
-    expect(json('(\\text{00\\;111})_2')).toMatchInlineSnapshot(
-      `["Subscript", ["Delimiter", "'00\\;111'"], 2]`
-    );
+    expect(json('\\text{00111}_{2}')).toMatchInlineSnapshot(`7`);
+    expect(json('\\text{00111}_2')).toMatchInlineSnapshot(`7`);
+    expect(json('\\text{00\\;111}_2')).toMatchInlineSnapshot(`
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-digit'", "\\"],
+        ["Latex", "'00\\;111'"]
+      ]
+    `);
+    expect(json('(\\text{00\\;111})_2')).toMatchInlineSnapshot(`
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-digit'", "\\"],
+        ["Latex", "'00\\;111'"]
+      ]
+    `);
   });
   test('decimal', () => {
-    expect(json('\\text{123}_{10}')).toMatchInlineSnapshot(
-      `["Subscript", "'123'", 10]`
-    );
-    expect(json('\\text{12c3}_{10}')).toMatchInlineSnapshot(
-      `["Subscript", "'12c3'", 10]`
-    );
+    expect(json('\\text{123}_{10}')).toMatchInlineSnapshot(`123`);
+    expect(json('\\text{12c3}_{10}')).toMatchInlineSnapshot(`
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-digit'", "c"],
+        ["Latex", "'12c3'"]
+      ]
+    `);
   });
   test('hexadecimal', () => {
-    expect(json('\\text{a1b23}_{16}')).toMatchInlineSnapshot(
-      `["Subscript", "'a1b23'", 16]`
-    );
-    expect(json('\\text{1x2gc3}_{16}')).toMatchInlineSnapshot(
-      `["Subscript", "'1x2gc3'", 16]`
-    );
+    expect(json('\\text{a1b23}_{16}')).toMatchInlineSnapshot(`662307`);
+    expect(json('\\text{1x2gc3}_{16}')).toMatchInlineSnapshot(`
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-digit'", "x"],
+        ["Latex", "'1x2gc3'"]
+      ]
+    `);
   });
   test('base 36', () => {
     expect(json('\\text{a1xy9zb23}_{36}')).toMatchInlineSnapshot(
-      `["Subscript", "'a1xy9zb23'", 36]`
+      `28363369669563`
     );
   });
   test('base 37', () => {

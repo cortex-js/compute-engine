@@ -221,9 +221,9 @@ export function machineValue(
       .toLowerCase()
       .replace(/[nd]$/g, '')
       .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
-    if (/\([0-9]+\)$/.test(s)) {
-      const [_, body, repeat] = s.match(/(.+)\(([0-9]+)\)$/) ?? [];
-      s = body + repeat.repeat(Math.ceil(16 / repeat.length));
+    if (/\([0-9]+\)/.test(s)) {
+      const [_, body, repeat, trail] = s.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
+      s = body + repeat.repeat(Math.ceil(16 / repeat.length)) + (trail ?? '');
     }
     if (s === 'nan') return NaN;
     if (s === '+infinity') return Infinity;
@@ -244,7 +244,7 @@ export function machineValue(
 
 /**
  * Return a rational (numer over denom) representation of the expression,
- * if possible, `[null, null]` otherwise.
+ * if possible, `null` otherwise.
  *
  * The expression can be:
  * - Some symbols: "Infinity", "Half"...
@@ -256,8 +256,8 @@ export function machineValue(
  */
 export function rationalValue(
   expr: Expression | undefined | null
-): [number, number] | [null, null] {
-  if (expr === undefined || expr === null) return [null, null];
+): [number, number] | null {
+  if (expr === undefined || expr === null) return null;
   const s = symbol(expr);
   // if (symbol === 'ThreeQuarter') return [3, 4];
   // if (symbol === 'TwoThird') return [2, 3];
@@ -265,19 +265,17 @@ export function rationalValue(
   // if (symbol === 'Third') return [1, 3];
   // if (symbol === 'Quarter') return [1, 4];
 
-  if (isAtomic(expr)) return [null, null];
+  if (isAtomic(expr)) return null;
 
   const h = head(expr);
-  if (!h) return [null, null];
+  if (!h) return null;
 
   let numer: number | null = null;
   let denom: number | null = null;
 
   if (h === 'Negate') {
-    [numer, denom] = rationalValue(op(expr, 1));
-    if (numer !== null && denom !== null) {
-      return [-numer, denom];
-    }
+    const r = rationalValue(op(expr, 1));
+    if (r) return [-r[0], r[1]];
   }
 
   if (h === 'Rational') {
@@ -309,12 +307,12 @@ export function rationalValue(
     denom = machineValue(op(op(expr, 2), 1));
   }
 
-  if (numer === null || denom === null) return [null, null];
+  if (numer === null || denom === null) return null;
 
   if (Number.isInteger(numer) && Number.isInteger(denom)) {
     return [numer, denom];
   }
-  return [null, null];
+  return null;
 }
 
 export function applyRecursively(

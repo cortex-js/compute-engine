@@ -24,7 +24,12 @@ export const SETS_LIBRARY: SymbolTable = {
     {
       name: 'Element',
       complexity: 11200,
-      signature: { domain: 'Predicate' },
+      signature: {
+        domain: 'Predicate',
+        canonical: (ce, args) => {
+          return ce._fn('Element', [args[0], ce.domain(args[1])]);
+        },
+      },
     },
     {
       name: 'NotElement',

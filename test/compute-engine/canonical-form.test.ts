@@ -2,28 +2,32 @@ import { check } from '../utils';
 
 describe('CANONICAL FORMS', () => {
   test('-0', () => {
-    expect(check('-0')).toMatchInlineSnapshot(`0`);
+    expect(check('-0')).toMatchInlineSnapshot(`
+      latex     = 0
+      0
+    `);
   });
 
   // Addition/substraction of 0 gets simplified in canonical  form
   test('a-0', () => {
     expect(check('a-0')).toMatchInlineSnapshot(`
-      box      = ["Subtract", "a", 0]
-      canonical = a
+      latex     = ["Subtract", "a", 0]
+      a
     `);
   });
 
   test('0-a', () => {
     expect(check('0-a')).toMatchInlineSnapshot(`
-      box      = ["Subtract", 0, "a"]
-      canonical = ["Negate", "a"]
+      latex     = ["Subtract", 0, "a"]
+      ["Negate", "a"]
     `);
   });
 
   // Small integers are *not* coalesced in canonical form
   test('7 + 2 + 5"', () => {
     expect(check('7 + 2 + 5')).toMatchInlineSnapshot(`
-      box      = ["Add", 7, 2, 5]
+      latex     = ["Add", 7, 2, 5]
+      box       = ["Add", 2, 5, 7]
       simplify  = 14
     `);
   });
@@ -33,40 +37,43 @@ describe('CANONICAL FORMS', () => {
   // have to be done in the right order to get the correct result
   test('2^3x"', () => {
     expect(check('2^3x')).toMatchInlineSnapshot(`
-      box      = ["Multiply", ["Power", 2, 3], "x"]
-      canonical = ["Multiply", 8, "x"]
+      latex     = ["Multiply", ["Power", 2, 3], "x"]
+      ["Multiply", 8, "x"]
     `);
   });
 
   // Negative sign on denom, numer or both
   test('\\frac{-x}{-n}"', () => {
     expect(check('\\frac{-x}{-n}')).toMatchInlineSnapshot(`
-      box      = ["Divide", ["Negate", "x"], ["Negate", "n"]]
-      canonical = ["Divide", "x", "n"]
+      latex     = ["Divide", ["Negate", "x"], ["Negate", "n"]]
+      ["Divide", "x", "n"]
     `);
   });
 
   test('\\frac{x}{-n}"', () => {
     expect(check('\\frac{x}{-n}')).toMatchInlineSnapshot(`
-      box      = ["Divide", "x", ["Negate", "n"]]
-      canonical = ["Negate", ["Divide", "x", "n"]]
+      latex     = ["Divide", "x", ["Negate", "n"]]
+      box       = ["Negate", ["Divide", "x", "n"]]
+      N-auto    = ["Divide", ["Multiply", -1, "x"], "n"]
     `);
   });
 
   test('\\frac{-x}{n}"', () => {
     expect(check('\\frac{-x}{n}')).toMatchInlineSnapshot(`
-      box      = ["Divide", ["Negate", "x"], "n"]
-      canonical = ["Negate", ["Divide", "x", "n"]]
+      latex     = ["Divide", ["Negate", "x"], "n"]
+      box       = ["Negate", ["Divide", "x", "n"]]
+      N-auto    = ["Divide", ["Multiply", -1, "x"], "n"]
     `);
   });
 
   test('\\frac{-101}{10^{\\frac{2}{3}}}"', () => {
     expect(check('\\frac{-101}{10^{\\frac{2}{3}}}')).toMatchInlineSnapshot(`
-      box      = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
-      canonical = ["Negate", ["Divide", 101, ["Power", 10, ["Rational", 2, 3]]]]
+      latex     = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
+      box       = ["Negate", ["Divide", 101, ["Power", 10, ["Rational", 2, 3]]]]
       simplify  = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
-      N         = {
-        num: "-21.75979036932202558976886502184544000211938391614029668314127861409875217714824208187295918578675709"
+      evaluate  = -21.759790369322026
+      eval-big  = {
+        num: "-21.75979036932202893002012709359876117621895735367189457070420771014661458084450950459811744216443957"
       }
     `);
   });
@@ -75,7 +82,7 @@ describe('CANONICAL FORMS', () => {
   test('(1+(2+(3+4)))(((5+6)+7)((8+(9+10)))(11+(12+13)+14))"', () => {
     expect(check('(1+(2+(3+4)))(((5+6)+7)((8+(9+10)))(11+(12+13)+14))'))
       .toMatchInlineSnapshot(`
-      box      = [
+      latex     = [
         "Multiply",
         [
           "Delimiter",
@@ -94,7 +101,7 @@ describe('CANONICAL FORMS', () => {
           ]
         ]
       ]
-      canonical = [
+      box       = [
         "Multiply",
         ["Add", 5, 6, 7],
         ["Add", 8, 9, 10],
@@ -109,37 +116,39 @@ describe('CANONICAL FORMS', () => {
   // (multiplication by 0 does not always = 0)
   test('2x\\frac{0}{5}"', () => {
     expect(check('2x\\frac{0}{5}')).toMatchInlineSnapshot(`
-      box      = ["Multiply", 2, "x", 0]
-      canonical = 0
+      latex     = ["Multiply", 2, "x", ["Rational", 0, 5]]
+      0
     `);
   });
 
   // Negative exponents become fractions
   test('2xy^{-n}"', () => {
-    expect(check('2xy^{-n}')).toMatchInlineSnapshot(
-      `["Multiply", 2, "x", ["Power", "y", ["Negate", "n"]]]`
-    );
+    expect(check('2xy^{-n}')).toMatchInlineSnapshot(`
+      latex     = ["Multiply", 2, "x", ["Power", "y", ["Negate", "n"]]]
+      ["Multiply", 2, "x", ["Power", "y", ["Negate", "n"]]]
+    `);
   });
 
   test('2\\times0\\times5\\times4"', () => {
     expect(check('2\\times0\\times5\\times4')).toMatchInlineSnapshot(`
-      box      = ["Multiply", 2, 0, 5, 4]
-      canonical = 0
+      latex     = ["Multiply", 2, 0, 5, 4]
+      0
     `);
   });
 
   test('2\\times(5-5)\\times5\\times4"', () => {
     expect(check('2\\times(5-5)\\times5\\times4')).toMatchInlineSnapshot(`
-      box      = ["Multiply", 2, ["Delimiter", ["Subtract", 5, 5]], 5, 4]
-      canonical = ["Multiply", 40, ["Subtract", 5, 5]]
+      latex     = ["Multiply", 2, ["Delimiter", ["Subtract", 5, 5]], 5, 4]
+      box       = ["Multiply", 40, ["Subtract", 5, 5]]
+      canonical = ["Subtract", 200, 200]
       simplify  = 0
     `);
   });
 
   test('2\\frac{x}{a}\\frac{y}{b}"', () => {
     expect(check('2\\frac{x}{a}\\frac{y}{b}')).toMatchInlineSnapshot(`
-      box      = ["Multiply", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
-      canonical = ["Divide", ["Multiply", 2, "x", "y"], ["Multiply", "a", "b"]]
+      latex     = ["Multiply", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
+      ["Divide", ["Multiply", 2, "x", "y"], ["Multiply", "a", "b"]]
     `);
   });
 });
@@ -153,8 +162,8 @@ describe('COMMUTATIVE ORDER', () => {
   // (numbers before symbols)
   test(`Canonical form yx5z`, () => {
     expect(check('yx5z')).toMatchInlineSnapshot(`
-      box      = ["Multiply", "y", "x", 5, "z"]
-      canonical = ["Multiply", 5, "x", "y", "z"]
+      latex     = ["Multiply", "y", "x", 5, "z"]
+      ["Multiply", 5, "x", "y", "z"]
     `);
   });
 
@@ -163,7 +172,7 @@ describe('COMMUTATIVE ORDER', () => {
   // then free variables (lex),
   test(`Canonical form '-2x5z\\sqrt{y}\\frac{3}{4}3\\pi y'`, () => {
     expect(check('-2x5z\\sqrt{y}\\frac{3}{4}3\\pi y')).toMatchInlineSnapshot(`
-      box      = [
+      latex     = [
         "Negate",
         [
           "Multiply",
@@ -178,41 +187,29 @@ describe('COMMUTATIVE ORDER', () => {
           "y"
         ]
       ]
-      canonical = [
+      box       = [
         "Negate",
-        [
-          "Multiply",
-          ["Rational", 45, 2],
-          "Pi",
-          "x",
-          "z",
-          ["Power", "y", ["Rational", 3, 2]]
-        ]
+        ["Multiply", ["Rational", 45, 2], "Pi", "x", "y", "z", ["Sqrt", "y"]]
       ]
-      simplify  = [
-        "Multiply",
-        ["Rational", -45, 2],
-        "Pi",
-        "x",
-        "z",
-        ["Power", "y", ["Rational", 3, 2]]
-      ]
-      N         = [
+      simplify  = ["Multiply", ["Rational", -45, 2], "Pi", "x", "y", "z", ["Sqrt", "y"]]
+      N-auto    = ["Multiply", -1, 70.68583470577035, "x", "y", "z", ["Sqrt", "y"]]
+      N-bignum  = [
         "Multiply",
         -1,
         {
           num: "70.68583470577034786540947612378881489443631148593988097193625332692586914143970246913078357019763403"
         },
         "x",
+        "y",
         "z",
-        ["Power", "y", 1.5]
+        ["Sqrt", "y"]
       ]
     `);
   }); // @fixme: the -1 should be applied to the Decimal
 
   test(`Canonical form '(b^3c^2d)(x^7y)(a^5f)(b^2x^5b3)'`, () => {
     expect(check('(b^3c^2d)(x^7y)(a^5f)(b^2x^5b3)')).toMatchInlineSnapshot(`
-      box      = [
+      latex     = [
         "Multiply",
         [
           "Delimiter",
@@ -225,16 +222,19 @@ describe('COMMUTATIVE ORDER', () => {
           ["Multiply", ["Power", "b", 2], ["Power", "x", 5], "b", 3]
         ]
       ]
-      canonical = [
+      [
         "Multiply",
         3,
+        "b",
         "d",
         "f",
         "y",
+        ["Square", "b"],
         ["Square", "c"],
+        ["Power", "b", 3],
         ["Power", "a", 5],
-        ["Power", "b", 6],
-        ["Power", "x", 12]
+        ["Power", "x", 5],
+        ["Power", "x", 7]
       ]
     `);
   });
@@ -249,7 +249,8 @@ describe('POLYNOMIAL ORDER', () => {
   // addition is deglex ordered, numbers after symbols
   test(`Canonical form c+7+a+5+b`, () => {
     expect(check('c+7+a+5+b')).toMatchInlineSnapshot(`
-      box      = ["Add", "c", 7, "a", 5, "b"]
+      latex     = ["Add", "c", 7, "a", 5, "b"]
+      box       = ["Add", 5, 7, "a", "b", "c"]
       simplify  = ["Add", 12, "a", "b", "c"]
     `);
   });
@@ -260,13 +261,21 @@ describe('POLYNOMIAL ORDER', () => {
   // 6 -> degree 0
   test(`Canonical form 6+5c+2b+3+7a'`, () => {
     expect(check('6+5c+2b+3+7a')).toMatchInlineSnapshot(`
-      box      = [
+      latex     = [
         "Add",
         6,
         ["Multiply", 5, "c"],
         ["Multiply", 2, "b"],
         3,
         ["Multiply", 7, "a"]
+      ]
+      box       = [
+        "Add",
+        3,
+        6,
+        ["Multiply", 7, "a"],
+        ["Multiply", 2, "b"],
+        ["Multiply", 5, "c"]
       ]
       simplify  = [
         "Add",
@@ -281,13 +290,20 @@ describe('POLYNOMIAL ORDER', () => {
   // Arguments sorted by value
   test(`Canonical form 5a+3a+7a`, () => {
     expect(check('5a+3a+7a')).toMatchInlineSnapshot(`
-      box      = [
+      latex     = [
+        "Add",
+        ["Multiply", 5, "a"],
+        ["Multiply", 3, "a"],
+        ["Multiply", 7, "a"]
+      ]
+      box       = [
         "Add",
         ["Multiply", 5, "a"],
         ["Multiply", 3, "a"],
         ["Multiply", 7, "a"]
       ]
       simplify  = ["Multiply", 15, "a"]
+      N-auto    = ["Add", 0, ["Multiply", 15, "a"]]
     `);
   });
 
@@ -296,43 +312,37 @@ describe('POLYNOMIAL ORDER', () => {
   // If degree is the same, longest factor
   test(`Canonical form x^{3}2\\pi+3x^{3}4\\pi+x^3`, () => {
     expect(check('x^{3}2\\pi+3x^{3}4\\pi+x^3')).toMatchInlineSnapshot(`
-      box      = [
+      latex     = [
         "Add",
         ["Multiply", ["Power", "x", 3], 2, "Pi"],
         ["Multiply", 3, ["Power", "x", 3], 4, "Pi"],
         ["Power", "x", 3]
       ]
-      canonical = [
+      box       = [
         "Add",
         ["Multiply", 2, "Pi", ["Power", "x", 3]],
         ["Multiply", 12, "Pi", ["Power", "x", 3]],
         ["Power", "x", 3]
       ]
       simplify  = ["Add", ["Multiply", 14, "Pi", ["Power", "x", 3]], ["Power", "x", 3]]
-      N         = [
+      N-auto    = ["Add", 0, ["Multiply", 44.982297150257104, ["Power", "x", 3]]]
+      N-bignum  = [
         "Add",
+        0,
         [
           "Multiply",
           {
-            num: "6.283185307179586476925286766559005768394338798750211641949889184615632812572417997256069650684234136"
+            num: "44.98229715025710533847700736591304037876037159125148149364922429230942968800692598079248755478963896"
           },
           ["Power", "x", 3]
-        ],
-        [
-          "Multiply",
-          {
-            num: "37.69911184307751886155172059935403461036603279250126985169933510769379687543450798353641790410540482"
-          },
-          ["Power", "x", 3]
-        ],
-        ["Power", "x", 3]
+        ]
       ]
     `);
   });
 
   test(`Canonical form 'x^2y^3+x^3y^2+xy^4+x^4y+x^2y^2'`, () => {
     expect(check('x^2y^3+x^3y^2+xy^4+x^4y+x^2y^2')).toMatchInlineSnapshot(`
-      box      = [
+      latex     = [
         "Add",
         ["Multiply", ["Power", "x", 2], ["Power", "y", 3]],
         ["Multiply", ["Power", "x", 3], ["Power", "y", 2]],
@@ -340,15 +350,7 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", ["Power", "x", 4], "y"],
         ["Multiply", ["Power", "x", 2], ["Power", "y", 2]]
       ]
-      canonical = [
-        "Add",
-        ["Multiply", ["Square", "x"], ["Power", "y", 3]],
-        ["Multiply", ["Square", "y"], ["Power", "x", 3]],
-        ["Multiply", "x", ["Power", "y", 4]],
-        ["Multiply", "y", ["Power", "x", 4]],
-        ["Multiply", ["Square", "x"], ["Square", "y"]]
-      ]
-      simplify  = [
+      box       = [
         "Add",
         ["Multiply", ["Square", "x"], ["Power", "y", 3]],
         ["Multiply", ["Square", "x"], ["Square", "y"]],
@@ -356,13 +358,22 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", ["Square", "y"], ["Power", "x", 3]],
         ["Multiply", "y", ["Power", "x", 4]]
       ]
+      N-auto    = [
+        "Add",
+        0,
+        ["Multiply", 1, ["Square", "x"], ["Power", "y", 3]],
+        ["Multiply", 1, ["Square", "x"], ["Square", "y"]],
+        ["Multiply", 1, "x", ["Power", "y", 4]],
+        ["Multiply", 1, ["Square", "y"], ["Power", "x", 3]],
+        ["Multiply", 1, "y", ["Power", "x", 4]]
+      ]
     `);
   });
 
   test(`Canonical form '(b^3b^2)+(a^3a^2)+(b^6)+(a^5b)+(a^5)'`, () => {
     expect(check('(b^3b^2)+(a^3a^2)+(b^6)+(a^5b)+(a^5)'))
       .toMatchInlineSnapshot(`
-      box      = [
+      latex     = [
         "Add",
         ["Delimiter", ["Multiply", ["Power", "b", 3], ["Power", "b", 2]]],
         ["Delimiter", ["Multiply", ["Power", "a", 3], ["Power", "a", 2]]],
@@ -370,40 +381,43 @@ describe('POLYNOMIAL ORDER', () => {
         ["Delimiter", ["Multiply", ["Power", "a", 5], "b"]],
         ["Delimiter", ["Power", "a", 5]]
       ]
-      canonical = [
+      box       = [
         "Add",
-        ["Power", "b", 5],
         ["Power", "a", 5],
+        ["Multiply", ["Square", "a"], ["Power", "a", 3]],
         ["Power", "b", 6],
         ["Multiply", "b", ["Power", "a", 5]],
-        ["Power", "a", 5]
+        ["Multiply", ["Square", "b"], ["Power", "b", 3]]
       ]
-      simplify  = [
+      N-auto    = [
         "Add",
-        ["Multiply", 2, ["Power", "a", 5]],
+        0,
+        ["Power", "a", 5],
+        ["Multiply", 1, ["Square", "a"], ["Power", "a", 3]],
         ["Power", "b", 6],
-        ["Power", "b", 5],
-        ["Multiply", "b", ["Power", "a", 5]]
+        ["Multiply", 1, "b", ["Power", "a", 5]],
+        ["Multiply", 1, ["Square", "b"], ["Power", "b", 3]]
       ]
     `);
   });
 
   test(`Canonical form '5c^2a^4+2b^8+7b^3a'`, () => {
     expect(check('5c^2a^4+2b^8+7b^3a')).toMatchInlineSnapshot(`
-      box      = [
+      latex     = [
         "Add",
         ["Multiply", 5, ["Power", "c", 2], ["Power", "a", 4]],
         ["Multiply", 2, ["Power", "b", 8]],
         ["Multiply", 7, ["Power", "b", 3], "a"]
       ]
-      canonical = [
+      box       = [
         "Add",
-        ["Multiply", 5, ["Square", "c"], ["Power", "a", 4]],
+        ["Multiply", 7, "a", ["Power", "b", 3]],
         ["Multiply", 2, ["Power", "b", 8]],
-        ["Multiply", 7, "a", ["Power", "b", 3]]
+        ["Multiply", 5, ["Square", "c"], ["Power", "a", 4]]
       ]
-      simplify  = [
+      N-auto    = [
         "Add",
+        0,
         ["Multiply", 7, "a", ["Power", "b", 3]],
         ["Multiply", 2, ["Power", "b", 8]],
         ["Multiply", 5, ["Square", "c"], ["Power", "a", 4]]

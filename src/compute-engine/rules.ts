@@ -28,7 +28,8 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
     // Any unbound variables in the `lhs` is used as a wildcard
     let lhs = ce.pattern(rawLhs);
     const wildcards = {};
-    for (const v of getVars(lhs)) wildcards[v] = ce.symbol('_' + v);
+    for (const v of getVars(lhs))
+      wildcards[v] = ce.symbol('_' + v, { canonical: false });
     lhs = lhs.subs(wildcards);
 
     // Normalize the condition to a function

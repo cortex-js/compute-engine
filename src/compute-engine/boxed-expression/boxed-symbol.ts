@@ -16,6 +16,7 @@ import {
   RuntimeScope,
   BoxedFunctionDefinition,
   BoxedBaseDefinition,
+  DomainExpression,
 } from '../public';
 import { replace } from '../rules';
 import { domainToFlags } from './boxed-symbol-definition';
@@ -73,10 +74,12 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     | null
     | undefined;
 
-  constructor(ce: IComputeEngine, name: string, metadata?: Metadata) {
-    super(ce, metadata);
-
-    this._scope = ce.context;
+  constructor(
+    ce: IComputeEngine,
+    name: string,
+    options?: { metadata?: Metadata; canonical?: boolean }
+  ) {
+    super(ce, options?.metadata);
 
     // MathJSON symbols are always stored in Unicode NFC canonical order.
     // See https://unicode.org/reports/tr15/
@@ -84,6 +87,9 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     this._name = name;
 
     console.assert(isValidSymbolName(this._name));
+
+    this._scope =
+      !name.startsWith('_') && options?.canonical ? ce.context : null;
 
     this._def = null; // Mark the def as not cached
 
@@ -95,9 +101,9 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return this._hash;
   }
 
-  unbind(): undefined {
-    // this._def = null;
-    return this._def?.reset();
+  unbind() {
+    this._def?.reset();
+    this._def = null;
   }
 
   get isPure(): boolean {
@@ -107,6 +113,17 @@ export class BoxedSymbol extends AbstractBoxedExpression {
       this.functionDefinition?.pure ??
       false
     );
+  }
+
+  get json(): Expression {
+    return serializeJsonSymbol(this.engine, this._name, {
+      latex: this._latex,
+      wikidata: this._wikidata,
+    });
+  }
+
+  get scope(): RuntimeScope | null {
+    return this._scope;
   }
 
   /** A free variable either has no definition, or it has a definition, but no value */
@@ -119,20 +136,18 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   get isCanonical(): boolean {
-    if (this.symbolDefinition?.hold === false) return false;
-    return true;
+    return this._scope !== null;
   }
-  set isCanonical(_va: boolean) {
-    return;
+  set isCanonical(val: boolean) {
+    this._scope = val ? this.engine.context : null;
+    this._def = null;
   }
 
   get canonical(): BoxedExpression {
-    if (this.symbolDefinition?.hold === true) return this;
-    return (
-      this.symbolDefinition?.value?.value ??
-      this.symbolDefinition?.value ??
-      this
-    );
+    // If a scope has been provided, this symbol is canonical
+    if (this._scope) return this;
+    // Return a new canonical symbol, scoped in the current context
+    return this.engine.box(this._name);
   }
 
   get wikidata(): string | undefined {
@@ -241,8 +256,8 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     }
   }
 
-  get value(): BoxedExpression {
-    return this.symbolDefinition?.value ?? this;
+  get value(): BoxedExpression | undefined {
+    return this.symbolDefinition?.value;
   }
 
   set value(value: BoxedExpression | number | undefined) {
@@ -293,20 +308,18 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     }
   }
 
-  get numericValue(): BoxedExpression | undefined {
-    return this.symbolDefinition?.value?.numericValue ?? undefined;
-  }
-
   get domain(): BoxedDomain {
     if (this.functionDefinition) return this.engine.domain('Function');
     return this.symbolDefinition?.domain ?? this.engine.domain('Anything');
   }
 
-  set domain(d: BoxedDomain) {
+  set domain(inDomain: BoxedExpression | DomainExpression | BoxedDomain) {
     if (this._name[0] === '_')
       throw new Error(
         `The domain of the wildcard "${this._name}" cannot be changed`
       );
+
+    const d = this.engine.domain(inDomain);
 
     if (d.isCompatible('Function')) {
       this.engine.forget(this._name);
@@ -338,17 +351,10 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return this.symbolDefinition?.domain ?? undefined;
   }
 
-  get json(): Expression {
-    return serializeJsonSymbol(this.engine, this._name, {
-      latex: this._latex,
-      wikidata: this._wikidata,
-    });
-  }
-
   get sgn(): -1 | 0 | 1 | undefined | null {
     // If available, use the value associated with this symbol.
     // Note that `null` is an acceptable and valid value
-    const v = this.numericValue;
+    const v = this.N();
     if (v && v !== this) {
       const s = v.sgn;
       if (s !== undefined) return s;
@@ -396,11 +402,8 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     if (rhs.symbol !== null) return rhs.symbol === this._name;
 
     // Mathematical/numeric equality
-    const lhsVal = this.symbolDefinition?.value?.numericValue;
-    if (lhsVal) {
-      const rhsVal = rhs.numericValue;
-      if (rhsVal) return lhsVal.isEqual(rhsVal);
-    }
+    const lhsVal = this.symbolDefinition?.value?.N();
+    if (lhsVal) return lhsVal.isEqual(rhs.N());
 
     if (rhs.isZero) {
       if (this.isZero) return true;
@@ -577,18 +580,20 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return expr;
   }
 
-  evaluate(options?: EvaluateOptions): BoxedExpression {
+  evaluate(_options?: EvaluateOptions): BoxedExpression {
     const def = this.symbolDefinition;
-    if (!def) return this;
-    if (def.hold === true) return this;
-    return def.value?.evaluate(options) ?? this;
+    if (!def || def.hold || !def.value) return this;
+
+    return def.value.evaluate();
   }
 
   N(options?: NOptions): BoxedExpression {
     // If we're doing a numeric evaluation, the `hold` does not apply,
     // so call the evaluate handler directly (if the `N` handler doesn't work)
     const value = this.symbolDefinition?.value;
-    return value?.N(options) ?? value?.evaluate(options) ?? value ?? this;
+    if (!value) return this;
+
+    return value.N(options);
   }
 
   replace(
@@ -599,7 +604,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   subs(sub: Substitution): BoxedExpression {
-    if (!sub[this._name]) return this;
+    if (sub[this._name] === undefined) return this;
     return this.engine.box(sub[this._name]);
   }
 }

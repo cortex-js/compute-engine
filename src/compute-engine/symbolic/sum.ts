@@ -1,38 +1,79 @@
-import { BoxedExpression, IComputeEngine } from '../public';
+import { BoxedExpression, IComputeEngine, Rational } from '../public';
+
 import { sortAdd } from '../boxed-expression/order';
-import { asCoefficient } from './utils';
+import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
+
 import { flattenOps } from './flatten';
-import { SMALL_INTEGER } from '../numerics/numeric';
+import {
+  add,
+  asCoefficient,
+  asRational,
+  isMachineRational,
+  isRationalNegativeOne,
+  isRationalOne,
+  isRationalZero,
+  machineDenominator,
+  machineNumerator,
+  mul,
+  neg,
+} from '../numerics/rationals';
+import Complex from 'complex.js';
+import Decimal from 'decimal.js';
 
 export class Sum {
   private engine: IComputeEngine;
 
-  // Factor out "small" rationals (numer and denom < SMALL_INTEGER).
-  private _literal: [number, number] = [0, 1];
-  private _imaginary = 0;
+  // Factor out exact literals (if canonical)
+  private _rational: Rational;
+  private _imaginary = 0; // integers only
+  private _number: number;
+  private _bignum: Decimal;
 
   private _posInfinityCount = 0;
   private _negInfinityCount = 0;
 
-  private _terms: { coef: [number, number]; term: BoxedExpression }[] = [];
+  private _terms: { coef: Rational; term: BoxedExpression }[] = [];
 
-  constructor(engine: IComputeEngine, terms?: BoxedExpression[]) {
-    this.engine = engine;
+  // If `false`, the running sums are not calculated
+  private _isCanonical = true;
 
-    if (terms) for (const arg of terms) this.addTerm(arg);
+  constructor(
+    ce: IComputeEngine,
+    xs?: BoxedExpression[],
+    options?: { canonical?: boolean }
+  ) {
+    options ??= {};
+    if (!('canonical' in options)) options.canonical = true;
+    this._isCanonical = options.canonical!;
+    this.engine = ce;
+
+    this._rational = bignumPreferred(ce)
+      ? [ce._BIGNUM_ZERO, ce._BIGNUM_ONE]
+      : [0, 1];
+
+    this._bignum = ce._BIGNUM_ZERO;
+    this._number = 0;
+
+    if (xs) for (const x of xs) this.addTerm(x);
   }
 
   get isEmpty(): boolean {
+    if (!this._isCanonical) return this._terms.length === 0;
+
     return (
       this._terms.length === 0 &&
-      this._literal[0] === 0 &&
+      isRationalZero(this._rational) &&
       this._imaginary === 0 &&
+      this._number === 0 &&
+      this._bignum.isZero() &&
       this._negInfinityCount === 0 &&
       this._posInfinityCount === 0
     );
   }
+
   /**
-   * Add a new term to the sum.
+   * Add a term to the sum.
+   *
    * A term is a rational coefficient and an expression.
    * Optionally, the term is multiplied by the constant `c` before being added.
    *
@@ -42,49 +83,75 @@ export class Sum {
    * E.g. "2x + x + 1/5 y"
    *  -> [['x', [3, 1]], ['y', [1, 5]]]
    */
-  addTerm(term: BoxedExpression, c?: [number, number]) {
-    if (term.isNothing) return;
+  addTerm(term: BoxedExpression, c?: Rational) {
+    if (this._isCanonical) {
+      if (term.isNothing) return;
 
-    if (c === undefined) c = [1, 1];
-
-    if (term.isLiteral) {
-      if (term.isInfinity) {
-        if (term.isPositive) this._posInfinityCount += 1;
-        else this._negInfinityCount += 1;
-        return;
-      }
-
-      const [numer, denom] = term.asRational;
-      if (numer !== null && denom !== null) {
-        this._literal = [
-          c[0] * (this._literal[0] * denom + numer * this._literal[1]),
-          c[1] * denom * this._literal[1],
-        ];
-        return;
-      }
-
-      if (term.complexValue) {
-        let re = term.complexValue.re;
-        let im = term.complexValue.im;
-        if (Number.isInteger(re) && Math.abs(re) <= SMALL_INTEGER) {
-          this._literal[0] += (this._literal[1] * re * c[0]) / c[1];
-          re = 0;
+      if (term.isLiteral) {
+        if (term.isInfinity) {
+          if (term.isPositive) this._posInfinityCount += 1;
+          else this._negInfinityCount += 1;
+          return;
         }
-        if (Number.isInteger(im) && Math.abs(im) <= SMALL_INTEGER) {
-          this._imaginary += (im * c[0]) / c[1];
-          im = 0;
+
+        const r = asRational(term);
+        if (r) {
+          this._rational = add(this._rational, c === undefined ? r : mul(r, c));
+          return;
         }
-        if (re === 0 && im === 0) return;
-        term = this.engine.number(this.engine.complex(re, im)).canonical;
+
+        const num = term.numericValue;
+
+        if (num !== null && typeof num === 'number') {
+          console.assert(!Number.isInteger(num));
+          if (bignumPreferred(this.engine))
+            this._bignum = this._bignum.add(num);
+          else this._number += num;
+          return;
+        }
+
+        if (num !== null && num instanceof Decimal) {
+          console.assert(!num.isInteger());
+          this._bignum = this._bignum.add(num);
+          return;
+        }
+
+        if (num !== null && num instanceof Complex) {
+          let re = num.re;
+          let im = num.im;
+          if (Number.isInteger(re)) {
+            this._rational = add(this._rational, mul([re, 1], c ?? [1, 1]));
+            re = 0;
+          } else {
+            if (bignumPreferred(this.engine))
+              this._bignum = this._bignum.add(re);
+            else this._number += re;
+            re = 0;
+          }
+          if (Number.isInteger(im)) {
+            if (c === undefined) this._imaginary += im;
+            else if (isMachineRational(c))
+              this._imaginary += (im * c[0]) / c[1];
+            else this._imaginary += c[0].mul(im).div(c[1]).toNumber();
+            im = 0;
+          }
+          if (re === 0 && im === 0) return;
+          term = this.engine.number(this.engine.complex(re, im));
+        }
       }
     }
 
-    let coef: [number, number];
+    let coef: Rational;
     [coef, term] = asCoefficient(term);
 
-    if (coef[0] === 0) return;
+    if (isRationalZero(coef)) return;
 
-    coef = [coef[0] * c[0], coef[1] * c[1]];
+    if (c !== undefined) coef = mul(coef, c);
+
+    if (term.head === 'Negate') {
+      this.addTerm(term.op1, neg(coef));
+      return;
+    }
 
     if (term.head === 'Add') {
       for (const x of term.ops!) this.addTerm(x, coef);
@@ -103,9 +170,7 @@ export class Sum {
             h === this._terms[i].term.hash &&
             term.isSame(this._terms[i].term)
           ) {
-            const [a, b] = this._terms[i].coef;
-            const [c, d] = coef;
-            this._terms[i].coef = [a * d + b * c, b * d];
+            this._terms[i].coef = add(this._terms[i].coef, coef);
             hasTerm = true;
             break;
           }
@@ -116,9 +181,7 @@ export class Sum {
             !this._terms[i].term.isLiteral &&
             term.isSame(this._terms[i].term)
           ) {
-            const [a, b] = this._terms[i].coef;
-            const [c, d] = coef;
-            this._terms[i].coef = [a * d + b * c, b * d];
+            this._terms[i].coef = add(this._terms[i].coef, coef);
             hasTerm = true;
             break;
           }
@@ -129,7 +192,7 @@ export class Sum {
     if (!hasTerm) this._terms.push({ term, coef });
   }
 
-  terms(): BoxedExpression[] {
+  terms(mode: 'expression' | 'numeric'): BoxedExpression[] {
     const ce = this.engine;
 
     if (this._posInfinityCount > 0 && this._negInfinityCount > 0)
@@ -137,46 +200,60 @@ export class Sum {
     if (this._posInfinityCount > 0) return [ce._POSITIVE_INFINITY];
     if (this._negInfinityCount > 0) return [ce._NEGATIVE_INFINITY];
 
-    if (this._terms.length === 0) {
-      if (this._literal[0] === 0 && this._imaginary === 0) return [];
-      if (this._imaginary === 0) return [ce.number(this._literal).canonical];
-
-      // if (!complexAllowed(ce)) return [ce.NAN];
-
-      if (this._literal[0] === 0)
-        return [ce.number(ce.complex(0, this._imaginary)).canonical];
-
-      return [
-        ce.number(this._literal).canonical,
-        ce.number(ce.complex(0, this._imaginary)).canonical,
-      ];
-    }
+    if (this._imaginary !== 0 && !complexAllowed(ce)) return [ce._NAN];
 
     const xs: BoxedExpression[] = [];
-    for (const {
-      coef: [n, d],
-      term,
-    } of this._terms) {
-      if (n !== 0) {
-        if (n === d) xs.push(term);
-        else if (n === -d) xs.push(ce.negate(term));
-        else if (d === 1) xs.push(ce.mul([ce.number(n).canonical, term]));
-        else if (n === 1) xs.push(ce.divide(term, ce.number(d).canonical));
-        else if (n !== 0) xs.push(ce.mul([ce.number([n, d]).canonical, term]));
+    for (const { coef, term } of this._terms) {
+      if (!isRationalZero(coef)) {
+        if (isRationalOne(coef)) xs.push(term);
+        else if (isRationalNegativeOne(coef)) xs.push(ce.negate(term));
+        else if (machineDenominator(coef) === 1)
+          xs.push(ce.mul([ce.number(coef[0]), term]));
+        else if (machineNumerator(coef) === 1)
+          xs.push(ce.divide(term, ce.number(coef[1])));
+        else xs.push(ce.mul([ce.number(coef), term]));
       }
     }
 
-    if (this._literal[0] !== 0) xs.push(ce.number(this._literal).canonical);
-    if (this._imaginary !== 0)
-      xs.push(ce.number(ce.complex(0, this._imaginary)).canonical);
+    if (mode === 'numeric') {
+      if (bignumPreferred(this.engine)) {
+        let sum = this._bignum.add(this._number);
+        if (!isRationalZero(this._rational))
+          sum = sum.add(ce.bignum(this._rational[0]).div(this._rational[1]));
 
+        if (this._imaginary !== 0)
+          xs.push(ce.number(ce.complex(sum.toNumber(), this._imaginary)));
+        else xs.push(ce.number(sum));
+      } else {
+        let sum = this._bignum.toNumber() + this._number;
+        if (!isRationalZero(this._rational))
+          sum +=
+            machineNumerator(this._rational) /
+            machineDenominator(this._rational);
+
+        if (this._imaginary !== 0)
+          xs.push(ce.number(ce.complex(sum, this._imaginary)));
+        else xs.push(ce.number(sum));
+      }
+    } else {
+      if (!isRationalZero(this._rational)) xs.push(ce.number(this._rational));
+      if (this._imaginary !== 0)
+        xs.push(ce.number(ce.complex(0, this._imaginary)));
+      if (bignumPreferred(this.engine)) {
+        if (!this._bignum.isZero() || this._number !== 0)
+          xs.push(ce.number(this._bignum.add(this._number)));
+      } else {
+        if (!this._bignum.isZero()) xs.push(ce.number(this._bignum));
+        if (this._number !== 0) xs.push(ce.number(this._number));
+      }
+    }
     return flattenOps(xs, 'Add') ?? xs;
   }
 
-  asExpression(): BoxedExpression {
+  asExpression(mode: 'expression' | 'numeric'): BoxedExpression {
     const ce = this.engine;
 
-    const xs = this.terms();
+    const xs = this.terms(mode);
     if (xs.length === 0) return ce._ZERO;
     if (xs.length === 1) return xs[0];
 

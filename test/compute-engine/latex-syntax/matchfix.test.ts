@@ -2,25 +2,36 @@ import { latex, check, engine } from '../../utils';
 
 describe('MATCHFIX', () => {
   test('\\lbrack\\rbrack', () =>
-    expect(check('\\lbrack\\rbrack')).toMatchInlineSnapshot(`["List"]`));
+    expect(check('\\lbrack\\rbrack')).toMatchInlineSnapshot(`
+      latex     = ["List"]
+      ["List"]
+    `));
 
   test('\\lbrack a\\rbrack', () =>
-    expect(check('\\lbrack a\\rbrack')).toMatchInlineSnapshot(`["List", "a"]`));
+    expect(check('\\lbrack a\\rbrack')).toMatchInlineSnapshot(`
+      latex     = ["List", "a"]
+      ["List", "a"]
+    `));
 
   test('\\lbrack a, b\\rbrack', () =>
-    expect(check('\\lbrack a, b\\rbrack')).toMatchInlineSnapshot(
-      `["List", "a", "b"]`
-    ));
+    expect(check('\\lbrack a, b\\rbrack')).toMatchInlineSnapshot(`
+      latex     = ["List", "a", "b"]
+      ["List", "a", "b"]
+    `));
 
   test('\\lbrack a, \\lbrack b, c\\rbrack\\rbrack', () =>
-    expect(
-      check('\\lbrack a, \\lbrack b, c\\rbrack\\rbrack')
-    ).toMatchInlineSnapshot(`["List", "a", ["List", "b", "c"]]`));
+    expect(check('\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'))
+      .toMatchInlineSnapshot(`
+      latex     = ["List", "a", ["List", "b", "c"]]
+      ["List", "a", ["List", "b", "c"]]
+    `));
 
   test('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack', () =>
-    expect(
-      check('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack')
-    ).toMatchInlineSnapshot(`["Sin", ["List", "a", ["List", "b", "c"]]]`));
+    expect(check('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'))
+      .toMatchInlineSnapshot(`
+      latex     = ["Sin", ["List", "a", ["List", "b", "c"]]]
+      ["Sin", ["List", "a", ["List", "b", "c"]]]
+    `));
 });
 
 describe('MATCHFIX serialize', () => {
@@ -49,70 +60,85 @@ describe('MATCHFIX synonyms', () => {
   //    -> etc...
 
   test('(a, b, c)', () =>
-    expect(check(`(a, b, c)`)).toMatchInlineSnapshot(
-      `["Delimiter", ["List", "a", "b", "c"]]`
-    ));
+    expect(check(`(a, b, c)`)).toMatchInlineSnapshot(`
+      latex     = ["Delimiter", ["List", "a", "b", "c"]]
+      ["List", "a", "b", "c"]
+    `));
 
   test('\\left(a, b, c\\right)', () =>
-    expect(check(`\\left(a, b, c\\right)`)).toMatchInlineSnapshot(
-      `["Delimiter", ["List", "a", "b", "c"]]`
-    ));
+    expect(check(`\\left(a, b, c\\right)`)).toMatchInlineSnapshot(`
+      latex     = ["Delimiter", ["List", "a", "b", "c"]]
+      ["List", "a", "b", "c"]
+    `));
   test('\\bigl(a, b, c\\bigr)', () =>
-    expect(check(`\\bigl(a, b, c\\bigr)`)).toMatchInlineSnapshot(
-      `["Delimiter", ["List", "a", "b", "c"]]`
-    ));
+    expect(check(`\\bigl(a, b, c\\bigr)`)).toMatchInlineSnapshot(`
+      latex     = ["Delimiter", ["List", "a", "b", "c"]]
+      ["List", "a", "b", "c"]
+    `));
   test('\\big(a, b, c\\big)', () =>
-    expect(check(`\\big(a, b, c\\big)`)).toMatchInlineSnapshot(
-      `["Delimiter", ["List", "a", "b", "c"]]`
-    ));
+    expect(check(`\\big(a, b, c\\big)`)).toMatchInlineSnapshot(`
+      latex     = ["Delimiter", ["List", "a", "b", "c"]]
+      ["List", "a", "b", "c"]
+    `));
   test('\\lparen a, b, c\\rparen', () =>
-    expect(check(`\\lparen a, b, c\\rparen`)).toMatchInlineSnapshot(
-      `["Delimiter", ["List", "a", "b", "c"]]`
-    ));
+    expect(check(`\\lparen a, b, c\\rparen`)).toMatchInlineSnapshot(`
+      latex     = ["Delimiter", ["List", "a", "b", "c"]]
+      ["List", "a", "b", "c"]
+    `));
   test('\\left\\lparen a, b, c\\right\\rparen', () =>
-    expect(
-      check(`\\left\\lparen a, b, c\\right\\rparen`)
-    ).toMatchInlineSnapshot(`["Delimiter", ["List", "a", "b", "c"]]`));
+    expect(check(`\\left\\lparen a, b, c\\right\\rparen`))
+      .toMatchInlineSnapshot(`
+      latex     = ["Delimiter", ["List", "a", "b", "c"]]
+      ["List", "a", "b", "c"]
+    `));
 });
 
 describe('MATCHFIX abs and norm', () => {
   test('1+|a|+2', () =>
     expect(check('1+|a|+2')).toMatchInlineSnapshot(`
-      box      = ["Add", 1, ["Abs", "a"], 2]
+      latex     = ["Add", 1, ["Abs", "a"], 2]
+      box       = ["Add", 1, 2, ["Abs", "a"]]
       simplify  = ["Add", 3, ["Abs", "a"]]
     `));
 
   test('|(1+|a|+2)|', () =>
     expect(check('|(1+|a|+2)|')).toMatchInlineSnapshot(`
-      box      = ["Abs", ["Delimiter", ["Add", 1, ["Abs", "a"], 2]]]
-      canonical = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
+      latex     = ["Abs", ["Delimiter", ["Add", 1, ["Abs", "a"], 2]]]
+      box       = ["Abs", ["Add", 1, 2, ["Abs", "a"]]]
       simplify  = ["Add", 3, ["Abs", "a"]]
-      evaluate  = ["Abs", ["Add", 3, ["Abs", "a"]]]
     `));
 
   test('|1+|a|+2|', () =>
     expect(check('|1+|a|+2|')).toMatchInlineSnapshot(`
-      box      = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
+      latex     = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
+      box       = ["Abs", ["Add", 1, 2, ["Abs", "a"]]]
       simplify  = ["Add", 3, ["Abs", "a"]]
-      evaluate  = ["Abs", ["Add", 3, ["Abs", "a"]]]
     `));
 
   test('||a||', () =>
-    expect(check('||a||')).toMatchInlineSnapshot(`["Norm", "a"]`));
+    expect(check('||a||')).toMatchInlineSnapshot(`
+      latex     = ["Norm", "a"]
+      ["Norm", "a"]
+    `));
   test('||a||+|b|', () =>
-    expect(check('||a||+|b|')).toMatchInlineSnapshot(
-      `["Add", ["Norm", "a"], ["Abs", "b"]]`
-    ));
+    expect(check('||a||+|b|')).toMatchInlineSnapshot(`
+      latex     = ["Add", ["Norm", "a"], ["Abs", "b"]]
+      ["Add", ["Norm", "a"], ["Abs", "b"]]
+    `));
 });
 
 describe('MATCHFIX invalid', () => {
-  // @todo
+  // @fixme
   test('( // missing closing fence', () =>
-    expect(check('(')).toMatchInlineSnapshot(`["Sequence"]`));
+    expect(check('(')).toMatchInlineSnapshot(`
+      latex     = ["Sequence"]
+      ["Sequence"]
+    `));
   test(') // missing opening fence', () => {
-    expect(check(')')).toMatchInlineSnapshot(
-      `["Error", ["ErrorCode", "'unexpected-token'", "')'"], ["Latex", "')'"]]`
-    );
+    expect(check(')')).toMatchInlineSnapshot(`
+      latex     = ["Error", ["ErrorCode", "'unexpected-token'", "')'"], ["Latex", "')'"]]
+      ["Error", ["ErrorCode", "'unexpected-token'", "')'"], ["Latex", "')'"]]
+    `);
   });
 
   test('-( // missing closing fence', () => {

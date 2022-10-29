@@ -1,6 +1,10 @@
 import type { Expression } from '../src/math-json/math-json-format';
 import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
-import { BoxedExpression, ComputeEngine } from '../src/compute-engine';
+import {
+  BoxedExpression,
+  ComputeEngine,
+  SemiBoxedExpression,
+} from '../src/compute-engine';
 import { parseCortex } from '../src/cortex';
 import { LatexSyntax } from '../src/compute-engine/latex-syntax/latex-syntax';
 import { AbstractBoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
@@ -8,6 +12,8 @@ import { AbstractBoxedExpression } from '../src/compute-engine/boxed-expression/
 let errors: string[] = [];
 
 export const engine = new ComputeEngine();
+engine.precision = 100; // Some arithmetic test cases assume a precision of at least 100
+// engine.jsonSerializationOptions.precision = 32;
 
 // const defaultLatex = new LatexSyntax({
 //   onError: (warnings) => {
@@ -27,11 +33,11 @@ export function boxToJson(expr: Expression): Expression {
 }
 
 export function parseToJson(latex: string): Expression {
-  return engine.parse(latex).json;
+  return engine.parse(latex, { canonical: false }).json;
 }
 
 export function canonicalToJson(latex: string): Expression {
-  return engine.parse(latex).canonical.json;
+  return engine.parse(latex).json;
 }
 
 export function evaluateToJson(latex: string): Expression {
@@ -127,33 +133,85 @@ export function N(latex: string): string {
   return exprToString(engine.parse(latex)?.N());
 }
 
-export function check(latex: string): string {
+export function checkJson(inExpr: SemiBoxedExpression): string {
   try {
-    const expr = engine.parse(latex);
-    const boxed = printExpression(expr.json);
-    const canonical = printExpression(expr.canonical.json);
+    const boxed = printExpression(
+      engine.box(inExpr, { canonical: false }).json
+    );
+
+    const expr = engine.box(inExpr);
+    const canonical = printExpression(expr.json);
     const simplify = printExpression(expr.simplify().json);
+
+    engine.numericMode = 'auto';
     const evaluate = printExpression(expr.evaluate().json);
-    const numEval = printExpression(expr.N().json);
+    const numEvalAuto = printExpression(expr.N().json);
+    engine.numericMode = 'machine';
+    const evalMachine = printExpression(expr.evaluate().json);
+    const numEvalMachine = printExpression(expr.N().json);
+    engine.numericMode = 'bignum';
+    const evalBignum = printExpression(expr.evaluate().json);
+    const numEvalBignum = printExpression(expr.N().json);
+    engine.numericMode = 'complex';
+    const evalComplex = printExpression(expr.evaluate().json);
+    const numEvalComplex = printExpression(expr.N().json);
+    engine.numericMode = 'auto';
 
     if (
       boxed === canonical &&
       boxed === simplify &&
       boxed === evaluate &&
-      boxed === numEval
+      evalMachine === evaluate &&
+      evalBignum === evaluate &&
+      evalComplex === evaluate &&
+      boxed === numEvalAuto &&
+      boxed === numEvalMachine &&
+      boxed === numEvalBignum &&
+      boxed === numEvalComplex
     ) {
       return boxed;
     }
 
-    const result = ['box      = ' + boxed];
+    const result = ['box       = ' + boxed];
+
     if (canonical !== boxed) result.push('canonical = ' + canonical);
     if (simplify !== canonical) result.push('simplify  = ' + simplify);
-    if (evaluate !== simplify) result.push('evaluate  = ' + evaluate);
-    if (numEval !== evaluate) result.push('N         = ' + numEval);
+    if (
+      evaluate !== simplify ||
+      evalMachine !== evaluate ||
+      evalBignum !== evaluate ||
+      evalComplex !== evaluate
+    )
+      result.push('evaluate  = ' + evaluate);
+
+    if (evalMachine !== evaluate) result.push('eval-mach = ' + evalMachine);
+    if (evalBignum !== evaluate) result.push('eval-big  = ' + evalBignum);
+    if (evalComplex !== evaluate) result.push('eval-cplx = ' + evalComplex);
+
+    if (
+      numEvalAuto !== evaluate ||
+      numEvalMachine !== numEvalAuto ||
+      numEvalBignum !== numEvalAuto ||
+      numEvalComplex !== numEvalAuto
+    )
+      result.push('N-auto    = ' + numEvalAuto);
+    if (numEvalMachine !== numEvalAuto)
+      result.push('N-machine = ' + numEvalMachine);
+    if (numEvalBignum !== numEvalAuto)
+      result.push('N-bignum  = ' + numEvalBignum);
+    if (numEvalComplex !== numEvalAuto)
+      result.push('N-complex = ' + numEvalComplex);
+
     return result.join('\n');
   } catch (e) {
     return e.toString();
   }
+}
+
+export function check(latex: string): string {
+  const boxed = printExpression(engine.parse(latex, { canonical: false }).json);
+
+  return 'latex     = ' + boxed + '\n' + checkJson(engine.parse(latex).json);
 }
 
 export function latex(expr: Expression | undefined | null): string {

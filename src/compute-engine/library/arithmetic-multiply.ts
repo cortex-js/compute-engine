@@ -1,31 +1,33 @@
-import { Complex } from 'complex.js';
-
 import {
+  asSmallInteger,
   MAX_ITERATION,
   MAX_SYMBOLIC_TERMS,
-  reducedRational,
 } from '../numerics/numeric';
-import { BoxedExpression, IComputeEngine, Metadata } from '../public';
-import { complexAllowed, preferBignum } from '../boxed-expression/utils';
+import { BoxedExpression, IComputeEngine, Metadata, Rational } from '../public';
+import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
 import { flattenOps } from '../symbolic/flatten';
-import {
-  isInMachineRange,
-  reducedRational as reducedBigRational,
-} from '../numerics/numeric-bignum';
 
 import { square } from './arithmetic-power';
+import {
+  asRational,
+  isMachineRational,
+  isRationalOne,
+  isRationalZero,
+  mul,
+  neg,
+} from '../numerics/rationals';
+import { apply2N } from '../symbolic/utils';
 
 /** The canonical form of `Multiply`:
  * - remove `1`
- * - combine literal small integers and rationals
+ * - combine literal integers and rationals
  * - any arg is literal 0 -> return 0
- * - simplify signs
  * - combine terms with same base
  *    `a a^3` -> `a^4`
  * - simplify the signs:
- *    - i.e. `-2 \times -3` -> `2 \times 3`
+ *    - i.e. `-y \times -x` -> `x \times y`
  *    - `2 \times -x` -> `-2 \times x`
  *
  * The ops must be canonical, the result is canonical.
@@ -35,30 +37,29 @@ export function canonicalMultiply(
   ops: BoxedExpression[]
 ): BoxedExpression {
   console.assert(ops.every((x) => x.isCanonical));
-  //
+
   // Apply associativity
-  //
   ops = flattenOps(ops, 'Multiply') ?? ops;
 
   if (ops.length === 0) return ce.number(1);
   if (ops.length === 1) return ops[0];
   if (ops.length === 2) return multiply2(ops[0], ops[1]);
 
-  return new Product(ce, ops).asExpression();
+  return simplifyMultiply(ce, ops);
+
+  // return new Product(ce, ops).asExpression();
 }
 
 export function simplifyMultiply(
   ce: IComputeEngine,
   ops: BoxedExpression[]
-): BoxedExpression | undefined {
-  console.assert(ops.length > 1, 'simplifyMultiply(): no arguments');
-
+): BoxedExpression {
   console.assert(flattenOps(ops, 'Multiply') === null);
 
   const product = new Product(ce);
-  for (const arg of ops) {
-    if (arg.isNaN || arg.symbol === 'Undefined') return ce._NAN;
-    product.addTerm(arg);
+  for (const op of ops) {
+    if (op.isNaN || op.symbol === 'Undefined') return ce._NAN;
+    product.addTerm(op);
   }
 
   return product.asExpression();
@@ -74,136 +75,19 @@ export function evalMultiply(
   //
   // First pass: looking for early exits
   //
-  for (const op of ops)
+  for (const op of ops) {
     if (op.isNaN || op.symbol === 'Undefined') return ce._NAN;
-
+    if (!op.isExact) mode = 'N';
+  }
   console.assert(flattenOps(ops, 'Multiply') === null);
+
+  if (mode === 'N') ops = ops.map((x) => x.N());
 
   //
   // Second pass
   //
 
-  // Accumulate rational, machine, bignum, complex and symbolic products
-  let [numer, denom] = [1, 1];
-  let [bigNumer, bigDenom] = [ce._BIGNUM_ONE, ce._BIGNUM_ONE];
-  let machineProduct = 1;
-  let bigProduct = ce._BIGNUM_ONE;
-  let complexProduct = Complex.ONE;
-  const product = new Product(ce);
-
-  for (const arg of ops) {
-    if (arg.isNothing || arg.isOne) continue;
-    if (!arg.isLiteral) {
-      product.addTerm(arg);
-    } else {
-      const [n, d] = arg.rationalValue;
-      if (n !== null && d !== null) {
-        if (preferBignum(ce)) {
-          [bigNumer, bigDenom] = reducedBigRational([
-            bigNumer.mul(n),
-            bigDenom.mul(d),
-          ]);
-        } else [numer, denom] = reducedRational([numer * n, denom * d]);
-      } else if (arg.bignumValue !== null) {
-        if (arg.bignumValue.isInteger())
-          bigNumer = bigNumer.mul(arg.bignumValue);
-        else bigProduct = bigProduct.mul(arg.bignumValue);
-      } else if (arg.machineValue !== null) {
-        if (preferBignum(ce)) {
-          if (Number.isInteger(arg.machineValue))
-            bigNumer = bigNumer.mul(arg.machineValue);
-          else bigProduct = bigProduct.mul(arg.machineValue);
-        } else machineProduct *= arg.machineValue;
-      } else if (arg.complexValue !== null) {
-        complexProduct = complexProduct.mul(arg.complexValue);
-      } else product.addTerm(arg);
-    }
-  }
-
-  if (complexProduct.im !== 0) {
-    if (!complexAllowed(ce)) return ce._NAN;
-    // We have an imaginary number: fold bignum into machine numbers
-    machineProduct *= bigProduct.toNumber();
-    bigProduct = ce._BIGNUM_ONE;
-    numer *= bigNumer.toNumber();
-    denom *= bigDenom.toNumber();
-    bigNumer = ce._BIGNUM_ONE;
-    bigDenom = ce._BIGNUM_ONE;
-  }
-
-  if (bigDenom.eq(ce._BIGNUM_ONE) && isInMachineRange(bigNumer)) {
-    numer = denom * bigNumer.toNumber();
-    bigNumer = ce._BIGNUM_ONE;
-  }
-
-  if (
-    complexProduct.im === 0 &&
-    (preferBignum(ce) ||
-      !bigProduct.eq(ce._BIGNUM_ONE) ||
-      !(bigNumer.eq(ce._BIGNUM_ONE) && bigDenom.eq(ce._BIGNUM_ONE)))
-  ) {
-    // Fold into bignum
-    let d = bigProduct.mul(machineProduct);
-    if (mode === 'N') {
-      d = d.mul(numer).div(denom);
-      d = d.mul(bigNumer).div(bigDenom);
-    } else {
-      if (denom === 1) {
-        if (bigDenom.eq(1)) {
-          d = d.mul(bigNumer).mul(numer);
-        } else
-          product.addTerm(
-            ce.box([
-              'Rational',
-              ce.number(bigNumer.mul(numer)),
-              ce.number(bigDenom),
-            ])
-          );
-      } else {
-        product.addTerm(ce.number([numer, denom]));
-        product.addTerm(
-          ce.box(['Rational', ce.number(bigNumer), ce.number(bigDenom)])
-            .canonical
-        );
-      }
-    }
-
-    if (complexProduct.re !== 1 || complexProduct.im !== 0) {
-      // We potentially have a complex result;
-      if (isInMachineRange(d)) {
-        const z = ce.number(ce.complex(complexProduct.mul(d.toNumber())));
-        if (product.isEmpty) return z;
-        product.addTerm(z);
-      } else {
-        if (product.isEmpty)
-          return ce._fn('Multiply', [ce.number(complexProduct), ce.number(d)]);
-
-        product.addTerm(ce.number(complexProduct));
-        product.addTerm(ce.number(d));
-      }
-    } else {
-      // No complex component
-      if (product.isEmpty) return ce.number(d);
-      product.addTerm(ce.number(d));
-    }
-  } else {
-    // Fold into complex (there is no bignum component)
-    let a = machineProduct;
-    if (mode === 'N') {
-      a = (a * numer) / denom;
-    } else {
-      product.addTerm(ce.number([numer, denom]));
-    }
-    let c: BoxedExpression;
-    if (complexProduct.re !== 1 || complexProduct.im !== 0)
-      c = ce.number(complexProduct.mul(a));
-    else c = ce.number(a);
-
-    if (product.isEmpty) return c;
-    product.addTerm(c);
-  }
-
-  return product.asExpression();
+  return new Product(ce, ops).asExpression(mode);
 }
 
 /**
@@ -225,13 +109,15 @@ function multiply2(
 
   const ce = op1.engine;
 
-  if (op1.isLiteral && op2.isLiteral) {
-    if (op1.isInteger && op2.isInteger) {
-      if (op1.bignumValue && op2.bignumValue)
-        return ce.number(op1.bignumValue.mul(op2.bignumValue));
-      if (op1.machineValue && op2.machineValue)
-        return ce.number(op1.machineValue * op2.machineValue);
-    }
+  if (op1.isLiteral && op2.isLiteral && op1.isInteger && op2.isInteger) {
+    return (
+      apply2N(
+        op1,
+        op2,
+        (a, b) => a * b,
+        (a, b) => a.mul(b)
+      ) ?? ce._NAN
+    );
   }
 
   if (op1.isNothing) return op2;
@@ -244,7 +130,7 @@ function multiply2(
   let sign = 1;
   let c = op1;
   let t = op2;
-  if (!c.isLiteral || c.asRational === null) {
+  if (!c.isLiteral) {
     t = op2;
     c = op1;
   }
@@ -256,10 +142,10 @@ function multiply2(
   }
 
   if (c.isLiteral) {
-    const [n, d] = c.asRational;
-    if (n !== null && d !== null) {
-      if (n === d) return t;
-      if (n === 0) return ce._ZERO;
+    const r = asRational(c);
+    if (r) {
+      if (isRationalOne(r)) return t;
+      if (isRationalZero(r)) return ce._ZERO;
       if (t.head === 'Add') {
         if (sign < 0) c = canonicalNegate(c);
         return ce.add(
@@ -269,12 +155,11 @@ function multiply2(
       }
 
       if (t.isLiteral) {
-        const [numer, denom] = t.asRational;
-        if (numer !== null && denom !== null)
-          return ce.number(
-            reducedRational([sign * n * numer, denom * d]),
-            metadata
-          );
+        const tr = asRational(t);
+        if (tr) {
+          const p = mul(r, tr);
+          return ce.number(sign < 0 ? neg(p) : p, { metadata });
+        }
       }
       if (sign < 0)
         return ce._fn('Multiply', [canonicalNegate(c), t], metadata);
@@ -346,8 +231,8 @@ export function evalMultiplication(
     range.head === 'Pair' ||
     range.head === 'Single'
   ) {
-    lower = range.op2.asSmallInteger ?? 1;
-    upper = range.op3.asSmallInteger ?? MAX_ITERATION;
+    lower = asSmallInteger(range.op2) ?? 1;
+    upper = asSmallInteger(range.op3) ?? MAX_ITERATION;
   }
   if (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS) return undefined;
 
@@ -357,26 +242,22 @@ export function evalMultiplication(
       const n = ce.number(i);
       terms.push(fn.subs({ _1: n, _: n }));
     }
-    if (mode === 'simplify') return ce.mul(terms).simplify();
-    return ce.mul(terms).evaluate();
+    const product = ce.mul(terms);
+    return mode === 'simplify' ? product.simplify() : product.evaluate();
   }
 
-  if (preferBignum(ce)) {
-    let v = ce.bignum(1);
-    for (let i = lower; i <= upper; i++) {
-      const n = ce.number(i);
-      const r = fn.subs({ _1: n, _: n }).evaluate();
-      const val = r.bignumValue ?? r.asFloat;
-      if (!val) return undefined;
-      v = v.mul(val);
-    }
-  }
-  let v = 1;
+  let product: Rational = bignumPreferred(ce)
+    ? [ce._BIGNUM_ONE, ce._BIGNUM_ONE]
+    : [1, 1];
+
   for (let i = lower; i <= upper; i++) {
     const n = ce.number(i);
-    const r = fn.subs({ _1: n, _: n }).evaluate();
-    if (!r.asFloat) return undefined;
-    v *= r.asFloat;
+    const r = fn.subs({ _1: n, _: n });
+    const term = r.N();
+    if (!term.isLiteral) return undefined;
+    product = mul(product, term);
   }
-  return ce.number(v);
+
+  if (isMachineRational(product)) return ce.number(product[0] / product[1]);
+  return ce.number(product[0].div(product[1]));
 }

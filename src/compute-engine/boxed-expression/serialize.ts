@@ -3,10 +3,18 @@ import Decimal from 'decimal.js';
 
 import { Expression } from '../../math-json/math-json-format';
 
-import { BoxedExpression, IComputeEngine, Metadata } from '../public';
+import { BoxedExpression, IComputeEngine, Metadata, Rational } from '../public';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 
 import { Product } from '../symbolic/product';
+import {
+  isBigRational,
+  isMachineRational,
+  isRational,
+  machineDenominator,
+  machineNumerator,
+} from '../numerics/rationals';
+import { asSmallInteger } from '../numerics/numeric';
 
 /**
  * The canonical version of `serializeJsonFunction()` applies
@@ -24,7 +32,7 @@ export function serializeJsonCanonicalFunction(
 
   if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
     if (args[0].isLiteral) {
-      const t0 = args[0].asSmallInteger;
+      const t0 = asSmallInteger(args[0]);
       if (t0 !== null && t0 < 0)
         return serializeJsonFunction(
           ce,
@@ -61,67 +69,77 @@ export function serializeJsonCanonicalFunction(
   ) {
     // Display a product with negative exponents as a division if
     // there are terms with a negative degree
-    const result = new Product(ce, args).asRationalExpression();
+    const result = new Product(ce, args, {
+      canonical: false,
+    }).asRationalExpression();
     if (result.head === 'Divide')
       return serializeJsonFunction(ce, result.head, result.ops!, metadata);
   }
 
   if (head === 'Power') {
-    if (!exclusions.includes('Exp')) {
-      if (args[0]?.symbol === 'ExponentialE')
-        return serializeJsonFunction(ce, 'Exp', [args[1]], metadata);
-    }
+    if (!exclusions.includes('Exp') && args[0]?.symbol === 'ExponentialE')
+      return serializeJsonFunction(ce, 'Exp', [args[1]], metadata);
 
     if (args[1]?.isLiteral) {
-      const exp = args[1].asSmallInteger;
-      if (!exclusions.includes('Square') && exp === 2)
+      const exp = asSmallInteger(args[1]);
+      if (exp === 2 && !exclusions.includes('Square'))
         return serializeJsonFunction(ce, 'Square', [args[0]], metadata);
 
-      if (!ce.jsonSerializationOptions.exclude.includes('Divide')) {
-        if (exp === -1)
-          return serializeJsonFunction(
-            ce,
-            'Divide',
-            [ce._ONE, args[0]],
-            metadata
-          );
+      if (
+        exp !== null &&
+        exp < 0 &&
+        !ce.jsonSerializationOptions.exclude.includes('Divide')
+      ) {
+        return serializeJsonFunction(
+          ce,
+          'Divide',
+          [ce._ONE, exp === -1 ? args[0] : ce.power(args[0], -exp)],
+          metadata
+        );
+      }
 
-        if (exp !== null && exp < 0) {
-          return serializeJsonFunction(
-            ce,
-            'Divide',
-            [ce._ONE, ce.power(args[0], -exp)],
-            metadata
-          );
+      const r = args[1].numericValue;
+
+      if (!exclusions.includes('Sqrt') && r === 0.5)
+        return serializeJsonFunction(ce, 'Sqrt', [args[0]], metadata);
+      if (!exclusions.includes('Sqrt') && r === -0.5)
+        return serializeJsonFunction(
+          ce,
+          'Divide',
+          [ce._ONE, ce._fn('Sqrt', [args[0]])],
+          metadata
+        );
+
+      if (isRational(r)) {
+        const n = machineNumerator(r);
+        const d = machineDenominator(r);
+        if (n === 1) {
+          if (!exclusions.includes('Sqrt') && d === 2)
+            return serializeJsonFunction(ce, 'Sqrt', [args[0]], metadata);
+          if (!exclusions.includes('Root'))
+            return serializeJsonFunction(
+              ce,
+              'Root',
+              [args[0], ce.number(r[1])],
+              metadata
+            );
         }
-      }
-      const [n, d] = args[1].rationalValue;
-      if (n === 1) {
-        if (!exclusions.includes('Sqrt') && d === 2)
-          return serializeJsonFunction(ce, 'Sqrt', [args[0]], metadata);
-        if (!exclusions.includes('Root'))
-          return serializeJsonFunction(
-            ce,
-            'Root',
-            [args[0], ce.number(d!)],
-            metadata
-          );
-      }
-      if (n === -1) {
-        if (!exclusions.includes('Sqrt') && d === 2)
-          return serializeJsonFunction(
-            ce,
-            'Divide',
-            [ce._ONE, ce._fn('Sqrt', [args[0]])],
-            metadata
-          );
-        if (!exclusions.includes('Root'))
-          return serializeJsonFunction(
-            ce,
-            'Divide',
-            [ce._ONE, ce._fn('Root', [args[0], ce.number(d!)])],
-            metadata
-          );
+        if (n === -1) {
+          if (!exclusions.includes('Sqrt') && d === 2)
+            return serializeJsonFunction(
+              ce,
+              'Divide',
+              [ce._ONE, ce._fn('Sqrt', [args[0]])],
+              metadata
+            );
+          if (!exclusions.includes('Root'))
+            return serializeJsonFunction(
+              ce,
+              'Divide',
+              [ce._ONE, ce._fn('Root', [args[0], ce.number(r[1])])],
+              metadata
+            );
+        }
       }
     }
   }
@@ -142,10 +160,8 @@ export function serializeJsonFunction(
   if (
     (head === 'Rational' || head === 'Divide') &&
     args.length === 2 &&
-    args[0].isLiteral &&
-    args[1].isLiteral &&
-    args[0].asSmallInteger === 1 &&
-    args[1].asSmallInteger === 2 &&
+    asSmallInteger(args[0]) === 1 &&
+    asSmallInteger(args[1]) === 2 &&
     !exclusions.includes('Half')
   ) {
     return serializeJsonSymbol(ce, 'Half', {
@@ -154,17 +170,18 @@ export function serializeJsonFunction(
     });
   }
 
-  if (head === 'Negate' && args[0]?.isLiteral && args.length === 1) {
-    if (args[0].machineValue !== null)
-      return serializeJsonNumber(ce, -args[0].machineValue);
-    if (args[0].bignumValue !== null)
-      return serializeJsonNumber(ce, args[0].bignumValue.neg());
-    if (args[0].complexValue !== null)
-      return serializeJsonNumber(ce, args[0].complexValue.neg());
-    const [n, d] = args[0].rationalValue;
-    if (n !== null && d !== null) return serializeJsonNumber(ce, [-n, d]);
+  if (args.length === 1) {
+    const num0 = args[0].numericValue;
+    if (head === 'Negate' && num0 !== null) {
+      if (typeof num0 === 'number') return serializeJsonNumber(ce, -num0);
+      if (num0 instanceof Decimal) return serializeJsonNumber(ce, num0.neg());
+      if (num0 instanceof Complex) return serializeJsonNumber(ce, num0.neg());
+      if (isMachineRational(num0))
+        return serializeJsonNumber(ce, [-num0[0], num0[1]]);
+      if (isBigRational(num0))
+        serializeJsonNumber(ce, [num0[0].neg(), num0[1]]);
+    }
   }
-
   if (typeof head === 'string' && exclusions.includes(head)) {
     if (head === 'Rational' && args.length === 2)
       return serializeJsonFunction(ce, 'Divide', args, metadata);
@@ -186,7 +203,7 @@ export function serializeJsonFunction(
       );
 
     if (head === 'Root' && args.length === 2 && args[1].isLiteral) {
-      const n = args[1].asSmallInteger;
+      const n = asSmallInteger(args[1]);
       if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]]);
 
       if (n !== null) {
@@ -208,7 +225,12 @@ export function serializeJsonFunction(
     }
 
     if (head === 'Square' && args.length === 1)
-      return serializeJsonFunction(ce, 'Power', [args[0], ce._TWO], metadata);
+      return serializeJsonFunction(
+        ce,
+        'Power',
+        [args[0], ce.number(2)],
+        metadata
+      );
 
     if (head === 'Exp' && args.length === 1)
       return serializeJsonFunction(
@@ -233,7 +255,7 @@ export function serializeJsonFunction(
 
   if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
     if (args[1].isLiteral) {
-      const t1 = args[1].asSmallInteger;
+      const t1 = asSmallInteger(args[1]);
       if (t1 !== null && t1 < 0)
         return serializeJsonFunction(
           ce,
@@ -344,7 +366,7 @@ export function serializeJsonSymbol(
 
 export function serializeJsonNumber(
   ce: IComputeEngine,
-  value: number | Decimal | Complex | [number, number],
+  value: number | Decimal | Complex | Rational,
   metadata?: Metadata
 ): Expression {
   metadata = { ...metadata };
@@ -354,34 +376,42 @@ export function serializeJsonNumber(
 
   const shorthandAllowed =
     metadata.latex === undefined &&
+    metadata.wikidata === undefined &&
     !ce.jsonSerializationOptions.metadata.includes('latex') &&
     ce.jsonSerializationOptions.shorthands.includes('number');
 
   //
-  // Decimal
+  // Bignum
   //
   let num = '';
   if (value instanceof Decimal) {
     if (value.isNaN()) num = 'NaN';
-    else if (!value.isFinite()) {
-      if (value.isPositive()) num = '+Infinity';
-      else num = '-Infinity';
-    }
-
-    // Use the number shorthand if:
-    // - it is allowed
-    // - there is no metadata to include
-    // - the number can be represented as a machine number
-    if (!num) {
-      if (shorthandAllowed && isInMachineRange(value) && value.precision() < 15)
-        return value.toNumber();
+    else if (!value.isFinite())
+      num = value.isPositive() ? '+Infinity' : '-Infinity';
+    else {
+      // Use the number shorthand if the number can be represented as a machine number
+      if (shorthandAllowed && isInMachineRange(value)) return value.toNumber();
 
       // Use the scientific notation only if the resulting integer is not
       // too big...
-      num =
-        value.isInteger() && value.e < value.precision() + 4
-          ? value.toFixed(0)
-          : repeatingDecimal(ce, value.toString());
+      if (value.isInteger() && value.e < value.precision() + 4)
+        num = value.toFixed(0);
+      else {
+        const precision = ce.jsonSerializationOptions.precision;
+        const s =
+          precision === 'max'
+            ? value.toString()
+            : value.toPrecision(
+                precision === 'auto' ? ce.precision : precision
+              );
+
+        num = repeatingDecimals(ce, s);
+
+        if (shorthandAllowed) {
+          const val = value.toNumber();
+          if (val.toString() === num) return val;
+        }
+      }
     }
 
     if (ce.jsonSerializationOptions.metadata.includes('latex'))
@@ -424,11 +454,10 @@ export function serializeJsonNumber(
   //
   if (Array.isArray(value)) {
     if (
-      metadata.latex === undefined &&
-      metadata.wikidata === undefined &&
-      !ce.jsonSerializationOptions.metadata.includes('latex') &&
+      shorthandAllowed &&
       ce.jsonSerializationOptions.shorthands.includes('function') &&
-      ce.jsonSerializationOptions.shorthands.includes('number')
+      typeof value[0] === 'number' &&
+      typeof value[1] === 'number'
     ) {
       //  Shorthand allowed, and no metadata to include
       return ['Rational', value[0], value[1]];
@@ -444,12 +473,10 @@ export function serializeJsonNumber(
   // Machine number
   //
   if (Number.isNaN(value)) num = 'NaN';
-  if (!Number.isFinite(value) && value > 0) num = '+Infinity';
-  if (!Number.isFinite(value) && value < 0) num = '-Infinity';
-
-  if (!num) {
+  else if (!Number.isFinite(value)) num = value > 0 ? '+Infinity' : '-Infinity';
+  else {
     if (shorthandAllowed) return value;
-    num = repeatingDecimal(ce, value.toString());
+    num = repeatingDecimals(ce, value.toString());
   }
   if (ce.jsonSerializationOptions.metadata.includes('latex'))
     metadata.latex = metadata.latex ?? ce.serialize({ num });
@@ -465,8 +492,8 @@ function _escapeJsonString(s: string | undefined): string | undefined {
   return s;
 }
 
-function repeatingDecimal(ce: IComputeEngine, s: string): string {
-  if (!ce.jsonSerializationOptions.repeatingDecimal) return s;
+function repeatingDecimals(ce: IComputeEngine, s: string): string {
+  if (!ce.jsonSerializationOptions.repeatingDecimals) return s;
 
   // eslint-disable-next-line prefer-const
   let [_, wholepart, fractionalPart, exponent] =

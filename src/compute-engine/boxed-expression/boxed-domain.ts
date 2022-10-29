@@ -6,6 +6,7 @@ import {
   DOMAIN_CONSTRUCTORS,
   isDomainLiteral,
 } from '../library/domains';
+import { asSmallInteger } from '../numerics/numeric';
 import {
   BoxedDomain,
   BoxedExpression,
@@ -277,16 +278,16 @@ function makeCanonical(
   //
   if (ctor === 'Range') {
     if (dom.length === 1) return 'Integer';
-    let first: BoxedExpression = ce._ONE;
-    let last: BoxedExpression = ce._POSITIVE_INFINITY;
+    let first: string | SemiBoxedExpression | DomainExpression = 1;
+    let last: string | SemiBoxedExpression | DomainExpression = +Infinity;
     if (dom.length === 2) {
-      last = ce.box(dom[1]).evaluate();
+      last = dom[1];
     } else if (dom.length === 3) {
-      first = ce.box(dom[1]).evaluate();
-      last = ce.box(dom[2]).evaluate();
+      first = dom[1];
+      last = dom[2];
     }
-    const firstNum = asRangeBound(first);
-    const lastNum = asRangeBound(last);
+    const firstNum = asRangeBound(ce, first);
+    const lastNum = asRangeBound(ce, last);
     if (firstNum === null || lastNum === null)
       throw Error(`Invalid range [${firstNum}, ${lastNum}] `);
     if (lastNum < firstNum) [first, last] = [last, first];
@@ -405,12 +406,18 @@ function makeCanonical(
   throw Error('Unexpected domain constructor ' + ctor);
 }
 
-function asRangeBound(expr: BoxedExpression): number | null {
-  return expr.isInfinity
-    ? expr.isPositive
+function asRangeBound(
+  ce: IComputeEngine,
+  expr: string | SemiBoxedExpression | DomainExpression
+): number | null {
+  if (typeof expr === 'number') return expr;
+
+  const x = ce.box(expr).evaluate();
+  return x.isInfinity
+    ? x.isPositive
       ? +Infinity
       : -Infinity
-    : expr.asSmallInteger;
+    : asSmallInteger(x);
 }
 
 // function asIntervalBound(ce: IComputeEngine, expr: Expression): number | null {
@@ -428,8 +435,8 @@ function maybeOpen(
 ): [open: boolean, value: number | null] {
   // @todo: Multiple Open
   if (Array.isArray(expr) && expr[0] === 'Open')
-    return [true, asRangeBound(ce.box(expr[1]).evaluate())];
-  return [false, asRangeBound(ce.box(expr).evaluate())];
+    return [true, asRangeBound(ce, expr[1])];
+  return [false, asRangeBound(ce, expr)];
 }
 
 /** Validate that `expr` is a Domain */
@@ -574,6 +581,10 @@ export function isSubdomainOf(
 
   if (rhsConstructor === 'Maybe') {
     if (lhsLiteral === 'Nothing') return true;
+    return isSubdomainOf(lhs, rhs[1]! as DomainExpression<BoxedExpression>);
+  }
+
+  if (rhsConstructor === 'Sequence') {
     return isSubdomainOf(lhs, rhs[1]! as DomainExpression<BoxedExpression>);
   }
 

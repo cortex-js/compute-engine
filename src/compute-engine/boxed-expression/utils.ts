@@ -1,7 +1,8 @@
+import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 import { isNumberObject } from '../../math-json/utils';
-import { MACHINE_PRECISION } from '../numerics/numeric';
+import { asFloat, MACHINE_PRECISION } from '../numerics/numeric';
 import { BoxedExpression, IComputeEngine } from '../public';
 
 export function isLatexString(s: unknown): s is string {
@@ -26,27 +27,22 @@ export function latexString(s: unknown): string | null {
  */
 export function getImaginaryCoef(expr: BoxedExpression): number | null {
   if (expr.symbol === 'ImaginaryUnit') return 1;
-  if (expr.isLiteral) {
-    const z = expr.complexValue;
-    if (z && z.re === 0) return z.im;
-  }
+
+  const z = expr.numericValue;
+  if (z !== null && z instanceof Complex && z.re === 0) return z.im;
+
   if (expr.head === 'Negate') {
     const v = getImaginaryCoef(expr.op1);
     if (v === null) return null;
     return -v;
   }
 
-  let f: number | null = 0;
-
   if (expr.head === 'Multiply' && expr.nops === 2) {
-    let m: BoxedExpression | undefined;
-    if (expr.op1.symbol === 'ImaginaryUnit') m = expr.op2;
-    else if (expr.op2.symbol === 'ImaginaryUnit') m = expr.op1;
-
-    if (m && m.isLiteral) f = m.asFloat;
+    if (expr.op1.symbol === 'ImaginaryUnit') return asFloat(expr.op2);
+    if (expr.op2.symbol === 'ImaginaryUnit') return asFloat(expr.op1);
   }
 
-  return f;
+  return 0;
 }
 
 /**
@@ -108,10 +104,10 @@ export function getSubexpressions(
 }
 
 /**
- * For any numeric result, if `preferBignum()` is true, calculate using
- * bignums. If `preferBignum()` is false, calculate using machine numbers
+ * For any numeric result, if `bignumPreferred()` is true, calculate using
+ * bignums. If `bignumPreferred()` is false, calculate using machine numbers
  */
-export function preferBignum(ce: IComputeEngine) {
+export function bignumPreferred(ce: IComputeEngine) {
   return (
     ce.numericMode === 'bignum' ||
     (ce.numericMode === 'auto' && ce.precision > Math.floor(MACHINE_PRECISION))
@@ -210,9 +206,12 @@ export function bignumValue(
       .toLowerCase()
       .replace(/[nd]$/g, '')
       .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
-    if (/\([0-9]+\)$/.test(s)) {
-      const [_, body, repeat] = s.match(/(.+)\(([0-9]+)\)$/) ?? [];
-      s = body + repeat.repeat(Math.ceil(ce.precision / repeat.length));
+    if (/\([0-9]+\)/.test(s)) {
+      const [_, body, repeat, trail] = s.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
+      s =
+        body +
+        repeat.repeat(Math.ceil(ce.precision / repeat.length)) +
+        (trail ?? '');
     }
 
     if (s === 'nan') return ce.bignum('NaN');

@@ -1,7 +1,6 @@
 import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 import { Expression } from '../../math-json/math-json-format';
-import { gcd, reducedRational, SMALL_INTEGER } from '../numerics/numeric';
 import {
   BoxedExpression,
   BoxedDomain,
@@ -9,90 +8,93 @@ import {
   Metadata,
   NOptions,
   PatternMatchOption,
+  Rational,
   SimplifyOptions,
   Substitution,
 } from '../public';
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { inferNumericDomain } from '../domain-utils';
-import { isPrime } from '../numerics/primes';
 import { isInMachineRange } from '../numerics/numeric-bignum';
+import { isPrime } from '../numerics/primes';
+import {
+  isRational,
+  isRationalNegativeOne,
+  isRationalOne,
+  reducedRational,
+  signDiff,
+} from '../numerics/rationals';
+
+import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonNumber } from './serialize';
-import { complexAllowed, hashCode, preferBignum } from './utils';
+import { hashCode, bignumPreferred } from './utils';
 
 /**
  * BoxedNumber
  */
 
 export class BoxedNumber extends AbstractBoxedExpression {
-  protected readonly _value:
-    | number
-    | Decimal
-    | Complex
-    | [numer: number, denom: number];
+  protected readonly _value: number | Decimal | Complex | Rational;
   private _domain: BoxedDomain | undefined;
-  private _head: string;
   private _hash: number | undefined;
+
   protected _isCanonical = true;
 
   /**
    * By the time the constructor is called, the `value` should have been
-   * screened for cases where it's a well-known value (0, NaN, +Infinity, etc...)
-   * or non-normal (complex number with im = 0, rational with denom = 1, etc...)
-   * This is done in `ce.boxNumber()`. In general, use `ce.boxNumber()` rather
-   * than calling the constructor directly.
+   * screened for cases where it's a well-known value (0, NaN, +Infinity,
+   * etc...) or non-normal (complex number with im = 0, rational with
+   * denom = 1, etc...).
+   *
+   * This is done in `ce.number()`. In general, use `ce.number()` rather
+   * than calling this constructor directly.
+   *
+   * We may store as a machine number if a Decimal is passed that is in machine
+   * range
    */
   constructor(
     ce: IComputeEngine,
-    value: string | number | Decimal | Complex | [numer: number, denom: number],
-    metadata?: Metadata
+    value: number | Decimal | Complex | Rational,
+    options?: { metadata?: Metadata; canonical?: boolean }
   ) {
-    super(ce, metadata);
+    options ??= {};
+    super(ce, options.metadata);
 
-    if (value instanceof Complex) {
-      if (Number.isNaN(value.re) || Number.isNaN(value.im))
-        this._value = Number.NaN;
-      else if (ce.chop(value.im) === 0) this._value = value.re;
-      else {
-        this._value = complexAllowed(ce) ? value : NaN;
-      }
-    } else if (Array.isArray(value)) {
-      let [n, d] = value;
-      console.assert(Number.isInteger(n) && Number.isInteger(d));
-      if (d < 0) [n, d] = [-n, -d];
-      if (d === 1) this._value = n;
-      else if (n === 0) {
-        if (d === 0) this._value = NaN;
-        else this._value = n; // Could be +0 or -0
+    if (isRational(value)) {
+      if (!('canonical' in options)) options.canonical = true;
+      //
+      // This is a rational (or big rational)
+      //
+      const [n, d] = value;
+      console.assert(
+        typeof n !== 'number' ||
+          (Number.isInteger(n) && Number.isInteger(d) && d !== n && d !== 1)
+      );
+      console.assert(
+        !(n instanceof Decimal && d instanceof Decimal) ||
+          (n.isInteger() && d.isInteger() && !d.eq(n) && !d.eq(1))
+      );
+
+      if (options.canonical) {
+        this._value = canonicalNumber(ce, value);
+        this._isCanonical = true;
       } else {
-        this._value = [n, d];
-        this._isCanonical = gcd(n, d) === 1;
-      }
-    } else if (value instanceof Decimal) {
-      // Only use a Decimal if in `"bignum"` mode or `"auto"` with precision > 15
-      this._value = preferBignum(ce) ? value : value.toNumber();
-    } else {
-      // Note: by the time we reach here, NaN and +/-Infinity have
-      // been handled by `boxNumber()`. So the string should be ready
-      // to be parsed by `Decimal` or `Number`
-      if (typeof value === 'number') {
         this._value = value;
-      } else if (preferBignum(ce)) {
-        // Use a Decimal if in `"bignum"` mode or `"auto"` with precision > 15
-        this._value = ce.bignum(value);
-      } else if (typeof value === 'string') {
-        this._value = Number.parseFloat(value);
+        // Note: it *could* be already canonical, but we don't
+        // bother checking as it could be expensive and might
+        // not be worthwhile
+        this._isCanonical = false;
       }
+    } else {
+      console.assert(
+        !(value instanceof Complex) ||
+          (!Number.isNaN(value.re) &&
+            !Number.isNaN(value.im) &&
+            ce.chop(value.im) !== 0)
+      );
+      // Any non-rational is already in canonical form
+      // but we downconvert decimal to number when possible
+      this._value = canonicalNumber(ce, value);
+      this._isCanonical = true;
     }
-
-    if (typeof this._value === 'number') {
-      if (Number.isInteger(this._value)) this._head = 'Integer';
-      else this._head = 'Number'; // Could be Infinity, or NaN, so `Number` is more accurate than `RealNumber`
-    } else if (this._value instanceof Complex) this._head = 'ComplexNumber';
-    else if (Array.isArray(this._value)) this._head = 'RationalNumber';
-    else if (this._value instanceof Decimal) {
-      if (this._value.isInteger()) this._head = 'Integer';
-      else this._head = 'RealNumber';
-    } else this._head = 'Number';
 
     ce._register(this);
   }
@@ -116,7 +118,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get head(): string {
-    return this._head;
+    return 'Number';
   }
 
   get isPure(): boolean {
@@ -125,6 +127,16 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   get isLiteral(): boolean {
     return true;
+  }
+
+  get isExact(): boolean {
+    if (typeof this._value === 'number') return Number.isInteger(this._value);
+    if (this._value instanceof Decimal) return this._value.isInteger();
+    if (this._value instanceof Complex)
+      return (
+        Number.isInteger(this._value.re) && Number.isInteger(this._value.im)
+      );
+    return isRational(this._value);
   }
 
   get isCanonical(): boolean {
@@ -142,95 +154,8 @@ export class BoxedNumber extends AbstractBoxedExpression {
     return this;
   }
 
-  get numericValue(): BoxedExpression {
-    if (!Array.isArray(this._value)) return this;
-
-    // Since `numericValue` is equivalent to `.N()`, reduce rationals to floats
-    const [numer, denom] = this._value;
-    const ce = this.engine;
-
-    if (!preferBignum(ce)) return new BoxedNumber(ce, numer / denom);
-    return new BoxedNumber(ce, ce.bignum(numer).div(denom));
-  }
-
-  get machineValue(): number | null {
-    return typeof this._value === 'number' ? this._value : null;
-  }
-
-  get bignumValue(): Decimal | null {
-    return this._value instanceof Decimal ? this._value : null;
-  }
-
-  get complexValue(): Complex | null {
-    return this._value instanceof Complex ? this._value : null;
-  }
-
-  get rationalValue(): [numer: number, denom: number] | [null, null] {
-    return Array.isArray(this._value) ? this._value : [null, null];
-  }
-
-  get asFloat(): number | null {
-    if (typeof this._value === 'number') return this._value;
-
-    if (this._value instanceof Decimal) {
-      if (this._value.isNaN()) return NaN;
-      if (!this._value.isFinite()) {
-        if (this._value.isPositive()) return Number.POSITIVE_INFINITY;
-        return Number.NEGATIVE_INFINITY;
-      }
-      return this._value.toNumber();
-    }
-
-    if (Array.isArray(this._value)) return this._value[0] / this._value[1];
-
-    console.assert(!(this._value instanceof Complex) || this._value.im !== 0);
-
-    return null;
-  }
-
-  get asSmallInteger(): number | null {
-    if (typeof this._value === 'number') {
-      if (
-        Number.isInteger(this._value) &&
-        this._value >= -SMALL_INTEGER &&
-        this._value <= SMALL_INTEGER
-      )
-        return this._value;
-      return null;
-    }
-    if (this._value instanceof Decimal) {
-      if (
-        this._value.isInteger() &&
-        this._value.gte(-SMALL_INTEGER) &&
-        this._value.lte(SMALL_INTEGER)
-      )
-        return this._value.toNumber();
-      return null;
-    }
-    if (Array.isArray(this._value)) {
-      const v = this._value[0] / this._value[1];
-      if (Number.isInteger(v) && v >= -SMALL_INTEGER && v <= SMALL_INTEGER)
-        return v;
-      return null;
-    }
-    if (this.engine.chop(this._value.im) === 0) {
-      if (
-        Number.isInteger(this._value.re) &&
-        this._value.re >= -SMALL_INTEGER &&
-        this._value.re <= SMALL_INTEGER
-      )
-        return this._value.re;
-      return null;
-    }
-    return null;
-  }
-
-  get asRational(): [number, number] | [null, null] {
-    const [n, d] = this.rationalValue;
-    if (n !== null && d !== null) return [n, d];
-    const i = this.asSmallInteger;
-    if (i !== null) return [i, 1];
-    return [null, null];
+  get numericValue(): number | Decimal | Complex | Rational | null {
+    return this._value;
   }
 
   get domain(): BoxedDomain {
@@ -302,37 +227,9 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   isEqual(rhs: BoxedExpression): boolean {
     if (this === rhs) return true;
-    const n = rhs.numericValue;
-    if (n === undefined) return false;
+    const n = rhs.N();
     if (!(n instanceof BoxedNumber)) return false;
-
-    if (Array.isArray(this._value)) {
-      const v = n.asFloat;
-      if (v === null) return false;
-      return this.engine.chop(this._value[0] / this._value[1] - v) === 0;
-    }
-
-    if (this._value instanceof Decimal)
-      return (
-        this.engine.chop(this._value.sub(n.bignumValue ?? n.asFloat ?? NaN)) ===
-        0
-      );
-
-    if (this._value instanceof Complex) {
-      if (n instanceof Complex)
-        return (
-          this.engine.chop(n.re - this._value.re) === 0 &&
-          this.engine.chop(n.im - this._value.im) === 0
-        );
-      if (this._value.im !== 0) return false;
-    }
-
-    const lhsV = this.asFloat;
-    const rhsV = n.asFloat;
-    if (lhsV !== null && rhsV !== null)
-      return this.engine.chop(rhsV - lhsV) === 0;
-
-    return false;
+    return signDiff(this.N(), n) === 0;
   }
 
   match(
@@ -345,111 +242,31 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   /** Compare this with another BoxedNumber.
-   * `rhs` must be a BoxedNumber. Use `isEqualWithTolerance(rhs.numericValue)`
+   * `rhs` must be a BoxedNumber. Use `isEqualWithTolerance(rhs.N())`
    * if necessary.
    */
   isEqualWithTolerance(rhs: BoxedExpression, tolerance: number): boolean {
-    if (this === rhs) return true;
-    if (!(rhs instanceof BoxedNumber)) return false;
-
-    if (Array.isArray(this._value)) {
-      const v = rhs.asFloat;
-      if (v === null) return false;
-      return Math.abs(this._value[0] / this._value[1] - v) <= tolerance;
-    }
-
-    if (this._value instanceof Decimal)
-      return this._value
-        .sub(rhs.bignumValue ?? rhs.asFloat ?? NaN)
-        .abs()
-        .lte(tolerance);
-
-    if (this._value instanceof Complex) {
-      if (rhs._value instanceof Complex)
-        return (
-          Math.abs(rhs._value.re - this._value.re) <= tolerance &&
-          Math.abs(rhs._value.im - this._value.im) <= tolerance
-        );
-      if (this._value.im !== 0) return false;
-    }
-
-    const lhsV = this.asFloat;
-    const rhsV = rhs.asFloat;
-    if (lhsV !== null && rhsV !== null)
-      return Math.abs(rhsV - lhsV) <= tolerance;
-
-    return false;
+    return rhs instanceof BoxedNumber && signDiff(this, rhs, tolerance) === 0;
   }
 
   isLess(rhs: BoxedExpression): boolean | undefined {
-    rhs = rhs.N();
-    // Imaginary numbers are not ordered.
-    if (this.isImaginary || rhs.isImaginary) return undefined;
-
-    if (typeof this._value === 'number') {
-      const m = rhs.machineValue;
-      if (m !== null) return this._value < m;
-      const d = rhs.bignumValue;
-      if (d !== null) return d.greaterThanOrEqualTo(this._value);
-      const [numer, denom] = rhs.rationalValue;
-      if (numer === null || denom === null) return false;
-      return this._value * denom < numer;
-    }
-
-    if (this._value instanceof Decimal) {
-      const m = rhs.machineValue;
-      if (m !== null) return this._value.lt(m);
-      const d = rhs.bignumValue;
-      if (d !== null) return this._value.lt(d);
-      const [numer, denom] = rhs.rationalValue;
-      if (numer === null || denom === null) return false;
-      return this._value.mul(denom).lt(numer);
-    }
-
-    if (Array.isArray(this._value)) {
-      const [n1, d1] = this._value;
-
-      if (typeof rhs === 'number') return n1 < rhs * d1;
-
-      const [n2, d2] = rhs.rationalValue;
-      if (n2 !== null && d2 !== null) return n1 * d2 < n2 * d1;
-
-      const d = rhs.bignumValue;
-      if (d === null) return false;
-      return d.mul(n1).lt(d1);
-    }
-
-    // @todo compare with real part of complex number
-    if (this._value instanceof Complex) {
-    }
-
-    return undefined;
+    const s = signDiff(this, rhs);
+    if (s === undefined) return undefined;
+    return s < 0;
   }
 
   isLessEqual(rhs: BoxedExpression): boolean | undefined {
-    rhs = rhs.N();
-    // @todo: could be expanded for improved performance
-    const less = this.isLess(rhs);
-    if (less === undefined) return undefined;
-    const equal = this.isEqual(rhs);
-    if (equal === undefined) return undefined;
-    return less || equal;
+    const s = signDiff(this, rhs);
+    if (s === undefined) return undefined;
+    return s <= 0;
   }
 
   isGreater(rhs: BoxedExpression): boolean | undefined {
-    const less = this.isLess(rhs);
-    if (less === undefined) return undefined;
-    return !less;
+    return rhs.isLessEqual(this);
   }
 
   isGreaterEqual(rhs: BoxedExpression): boolean | undefined {
-    rhs = rhs.N();
-    // @todo: could be expanded for improved performance
-    const less = this.isLess(rhs);
-    if (less === undefined) return undefined;
-    const equal = this.isEqual(rhs);
-    if (equal === undefined) return undefined;
-    return !less || equal;
+    return rhs.isLess(this);
   }
 
   /** x > 0, same as `isGreater(0)` */
@@ -481,17 +298,16 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get isZero(): boolean {
+    if (this._value === 0) return true;
     // Rationals can never be zero: they get downcast to
     // a machine number during boxing (ctor) if numerator is 0
     if (Array.isArray(this._value)) return false;
-    if (this._value === 0) return true;
     return this.engine.chop(this._value) === 0;
   }
 
   get isNotZero(): boolean {
-    if (Array.isArray(this._value)) return true;
     if (this._value === 0) return false;
-
+    if (Array.isArray(this._value)) return true;
     return this.engine.chop(this._value) !== 0;
   }
 
@@ -501,10 +317,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (this._value instanceof Decimal)
       return this._value.equals(this.engine._BIGNUM_ONE);
 
-    if (Array.isArray(this._value)) {
-      const [numer, denom] = this._value;
-      return denom !== 0 && numer === denom;
-    }
+    if (Array.isArray(this._value)) return isRationalOne(this._value);
 
     return this._value.equals(1);
   }
@@ -515,10 +328,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (this._value instanceof Decimal)
       return this._value.equals(this.engine._BIGNUM_NEGATIVE_ONE);
 
-    if (Array.isArray(this._value)) {
-      const [numer, denom] = this._value;
-      return numer < 0 && denom !== 0 && -numer === denom;
-    }
+    if (Array.isArray(this._value)) return isRationalNegativeOne(this._value);
 
     return this._value.equals(-1);
   }
@@ -670,7 +480,10 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get isImaginary(): boolean | undefined {
-    if (this._value instanceof Complex) return this._value.im !== 0;
+    if (this._value instanceof Complex) {
+      console.assert(this._value.im !== 0);
+      return true;
+    }
 
     return false;
   }
@@ -682,31 +495,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
   get canonical(): BoxedExpression {
     if (this._isCanonical) return this;
 
-    // Rational canonical form
-    if (Array.isArray(this._value)) {
-      // Note already in normal form (denom > 0) due to boxing
-      const [numer, denom] = reducedRational(this._value);
-
-      if (Number.isNaN(numer) || Number.isNaN(denom)) return this.engine._NAN;
-      if (denom === 1) return this.engine.number(numer);
-      if (denom === 0) {
-        if (numer === 0 || !Number.isFinite(numer)) return this.engine._NAN;
-        if (numer < 0) return this.engine._NEGATIVE_INFINITY;
-        return this.engine._POSITIVE_INFINITY;
-      }
-      if (numer === 0) return this.engine._ZERO;
-
-      return this.engine.number([numer, denom]);
-    }
-
-    // Nothing to do for Complex canonical form,
-    // the boxing already account for complex with null imaginary part.
-
-    // Nothing to do for Decimal canonical form.
-    // We don't want to convert down to machine number, but instead we
-    // want to propagate Decimal values to preserve precision.
-
-    return this;
+    return this.engine.number(canonicalNumber(this.engine, this._value));
   }
 
   simplify(_options?: SimplifyOptions): BoxedExpression {
@@ -714,16 +503,73 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   N(_options?: NOptions): BoxedExpression {
-    // If a rational, evaluate
-    if (Array.isArray(this._value)) {
-      const ce = this.engine;
-      const [numer, denom] = this._value;
-      // Account for the desired precision/numeric mode
-      if (preferBignum(ce)) return ce.number(ce.bignum(numer).div(denom));
+    if (!Array.isArray(this._value)) return this;
 
+    // If a rational, evaluate as an approximation
+    const ce = this.engine;
+    const [numer, denom] = this._value;
+    if (
+      typeof numer === 'number' &&
+      typeof denom === 'number' &&
+      !bignumPreferred(ce)
+    )
       return ce.number(numer / denom);
-    }
 
-    return this;
+    return ce.number(ce.bignum(numer).div(denom));
   }
+}
+
+function canonicalNumber(
+  ce: IComputeEngine,
+  value: number | Decimal | Complex | Rational
+): number | Decimal | Complex | Rational {
+  // We choose to store bignums as machine numbers when possible
+  // This doesn't affect evaluation later. It may require
+  // the number to be upconverted later, but is a memory saving now. Not 100% clear what is the best strategy from a performance point of view.
+  if (value instanceof Decimal && isInMachineRange(value))
+    return value.toNumber();
+  if (!isRational(value)) return value;
+
+  let [n, d] = value;
+
+  if (n instanceof Decimal && d instanceof Decimal) {
+    if (isInMachineRange(n) && isInMachineRange(d))
+      [n, d] = [n.toNumber(), d.toNumber()];
+    else {
+      if (n.isNaN() || d.isNaN()) return NaN;
+
+      [n, d] = reducedRational([n, d]);
+
+      if (d.isNegative()) [n, d] = [n.neg(), d.neg()];
+
+      if (d.eq(ce._BIGNUM_ONE)) return n;
+
+      if (d.isZero()) {
+        if (n.isZero() || !n.isFinite()) return NaN;
+        if (n.isNegative()) return -Infinity;
+        return +Infinity;
+      }
+
+      return [n, d];
+    }
+  }
+
+  if (Number.isNaN(n) || Number.isNaN(d)) return NaN;
+
+  [n, d] = reducedRational([n as number, d as number]);
+
+  if (d < 0) [n, d] = [-n, -d];
+
+  if (d === 1) return n;
+
+  if (d === 0) {
+    if (n === 0 || !Number.isFinite(n)) return NaN;
+    if (n < 0) return -Infinity;
+    return +Infinity;
+  }
+
+  // Could be +0 or -0
+  if (n === 0) return n;
+
+  return [n, d];
 }

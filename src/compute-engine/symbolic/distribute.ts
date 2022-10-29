@@ -74,5 +74,5 @@ export function distribute(
   return expr.engine.box([
     g,
     expr.ops!.reduce((acc, v) => distribute2(acc, v, g, f), expr.engine._ONE),
-  ]).canonical;
+  ]);
 }

@@ -112,7 +112,7 @@ function findUnivariateRoots(
     }
   );
   const result: BoxedExpression[] = [];
-  const unknown = { x: ce.symbol(x) };
+  const unknown = { x: ce.symbol(x, { canonical: false }) };
   for (const [lhs, rhss, cond] of rules) {
     // Replace the `x` in `lhs` with the actual symbol we're looking for
     // and attempt to match

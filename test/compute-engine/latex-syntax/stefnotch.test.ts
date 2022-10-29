@@ -2,9 +2,14 @@ import { parse } from '../../utils';
 
 describe('STEFNOTCH #9', () => {
   test('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x', () => {
-    expect(
-      parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x')
-    ).toMatchInlineSnapshot(`["Integrate", ["Multiply", 3, "x"]]`);
+    expect(parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x'))
+      .toMatchInlineSnapshot(`
+      [
+        "Integrate",
+        ["Multiply", 3, "x"],
+        ["Error", ["ErrorCode", "'missing'", ["Union", "Tuple", "Symbol"]]]
+      ]
+    `);
   });
 });
 
@@ -114,7 +119,15 @@ describe('STEFNOTCH #12', () => {
       [
         "Power",
         "ExponentialE",
-        ["Sequence", "ImaginaryUnit", "Pi", "'nope!?\\lparensum'"]
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Number",
+            ["Domain", "Anything"]
+          ]
+        ]
       ]
     `);
   });
@@ -127,8 +140,8 @@ describe('STEFNOTCH #13', () => {
     ).toMatchInlineSnapshot(`
       [
         "Assign",
-        ["Multiply", "N", ["Delimiter", "EpsilonSymbol"]],
-        ["Ceil", ["Divide", 4, ["Power", "EpsilonSymbol", 2]]]
+        ["Multiply", "EpsilonSymbol", "N"],
+        ["Ceil", ["Divide", 4, ["Square", "EpsilonSymbol"]]]
       ]
     `);
   });
@@ -172,17 +185,14 @@ describe('STEFNOTCH #13', () => {
       .toMatchInlineSnapshot(`
       [
         "Greater",
+        ["Divide", 2, ["Sqrt", "n"]],
         [
-          "Sequence",
-          ["Divide", 2, ["Sqrt", "n"]],
-          [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\Leftrightarrow'"],
-            ["Latex", "'\\Leftrightarrow'"]
-          ],
-          "n"
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\Leftrightarrow'"],
+          ["Latex", "'\\Leftrightarrow'"]
         ],
-        ["Divide", 5, ["Power", "n", 2]]
+        "n",
+        ["Divide", 5, ["Square", "n"]]
       ]
     `);
   });
@@ -192,21 +202,30 @@ describe('STEFNOTCH #13', () => {
       .toMatchInlineSnapshot(`
       [
         "LessEqual",
-        ["Abs", ["Subscript", "a", "n"]],
+        [
+          "Abs",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Domain", "Number"],
+              ["Domain", "Anything"]
+            ],
+            "a_n"
+          ]
+        ],
         [
           "Equal",
           [
             "To",
+            ["Divide", 2, ["Sqrt", "n"]],
             [
-              "Sequence",
-              ["Divide", 2, ["Sqrt", "n"]],
-              [
-                "Error",
-                ["ErrorCode", "'unexpected-command'", "'\\Rightarrow'"],
-                ["Latex", "'\\Rightarrow'"]
-              ],
-              ["Subscript", "a", "n"]
+              "Error",
+              ["ErrorCode", "'unexpected-command'", "'\\Rightarrow'"],
+              ["Latex", "'\\Rightarrow'"]
             ],
+            "a_n",
             0
           ],
           0
@@ -220,16 +239,13 @@ describe('STEFNOTCH #13', () => {
       [
         "Equivalent",
         3,
+        5,
         [
-          "Sequence",
-          5,
-          [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\mod'"],
-            ["Latex", "'\\mod'"]
-          ],
-          7
-        ]
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\mod'"],
+          ["Latex", "'\\mod'"]
+        ],
+        7
       ]
     `);
   });
@@ -253,7 +269,7 @@ describe('STEFNOTCH #13', () => {
           ],
           ["To", "n", {num: "+Infinity"}]
         ],
-        ["Subscript", "a", "n"],
+        "a_n",
         ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
       ]
     `);

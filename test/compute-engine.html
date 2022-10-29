@@ -443,16 +443,16 @@
       document.querySelectorAll('input[name=numeric-format]').forEach((x) => {
         x.addEventListener('click', (evt) => {
           if (evt.target.id === 'numeric-format-auto') {
-            ce.numericFormat = 'auto';
+            ce.numericMode = 'auto';
             ce.precision = 200;
           } else if (evt.target.id === 'numeric-format-machine') {
-            ce.numericFormat = 'machine';
+            ce.numericMode = 'machine';
             ce.precision = 15;
           } else if (evt.target.id === 'numeric-format-decimal') {
-            ce.numericFormat = 'decimal';
+            ce.numericMode = 'bignum';
             ce.precision = 200;
           } else if (evt.target.id === 'numeric-format-complex') {
-            ce.numericFormat = 'complex';
+            ce.numericMode = 'complex';
             ce.precision = 15;
           }
           // defaultLatex.options.precision = ce.precision;
@@ -526,7 +526,7 @@
         updateExpr(null, 'expand');
 
         try {
-          updateExpr(expr, 'json-form');
+          updateExpr(ce.parse(latex, { canonical: false }), 'json-form');
         } catch (e) {
           console.error(
             'format(%c ' + latex + "%c, ['json']) " + e.toString(),

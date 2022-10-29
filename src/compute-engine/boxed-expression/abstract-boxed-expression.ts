@@ -1,5 +1,5 @@
 import type { Decimal } from 'decimal.js';
-import type { Complex } from 'complex.js';
+import { Complex } from 'complex.js';
 
 import { Expression } from '../../math-json/math-json-format';
 
@@ -22,8 +22,11 @@ import {
   DomainCompatibility,
   DomainLiteral,
   BoxedBaseDefinition,
+  Rational,
 } from '../public';
 import { getSubexpressions, getSymbols } from './utils';
+import { isBigRational, isMachineRational } from '../numerics/rationals';
+import { asFloat } from '../numerics/numeric';
 
 /**
  * AbstractBoxedExpression
@@ -65,13 +68,28 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     if (this.symbol === 'True') return true;
     if (this.symbol === 'False') return false;
     return (
-      this.asFloat ?? this.string ?? this.symbol ?? JSON.stringify(this.json)
+      asFloat(this) ?? this.string ?? this.symbol ?? JSON.stringify(this.json)
     );
   }
 
   /** Object.toString() */
   toString(): string {
-    return String(this.valueOf());
+    if (this.symbol) return this.symbol;
+    if (this.string) return this.string;
+    const num = this.numericValue;
+    if (num !== null) {
+      if (typeof num === 'number') return num.toString();
+      if (isMachineRational(num))
+        return `${num[0].toString()}/${num[1].toString()}`;
+      if (isBigRational(num))
+        return `${num[0].toString()}/${num[1].toString()}`;
+      if (num instanceof Complex) {
+        if (num.re === 0) return num.im.toString() + 'i';
+        return `${num.re.toString()}+${num.im.toString()}i`;
+      }
+    }
+
+    return JSON.stringify(this.json);
   }
 
   [Symbol.toPrimitive](
@@ -88,6 +106,10 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   /** Called by `JSON.stringify()` when serializing to json */
   toJSON(): Expression {
     return this.json;
+  }
+
+  get scope(): RuntimeScope | null {
+    return null;
   }
 
   /** Object.is() */
@@ -161,6 +183,10 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
 
   get isPure(): boolean {
     return false;
+  }
+
+  get isExact(): boolean {
+    return true;
   }
 
   /** For a symbol, true if the symbol is a free variable (no value) */
@@ -244,26 +270,8 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get machineValue(): number | null {
+  get numericValue(): number | Decimal | Complex | Rational | null {
     return null;
-  }
-  get rationalValue(): [numer: number, denom: number] | [null, null] {
-    return [null, null];
-  }
-  get bignumValue(): Decimal | null {
-    return null;
-  }
-  get complexValue(): Complex | null {
-    return null;
-  }
-  get asFloat(): number | null {
-    return null;
-  }
-  get asSmallInteger(): number | null {
-    return null;
-  }
-  get asRational(): [number, number] | [null, null] {
-    return [null, null];
   }
 
   get sgn(): -1 | 0 | 1 | undefined | null {
@@ -380,10 +388,6 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   }
   set value(_value: BoxedExpression | number | undefined) {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
-  }
-
-  get numericValue(): BoxedExpression | undefined {
-    return undefined;
   }
 
   isSubdomainOf(_d: BoxedExpression | string): undefined | boolean {

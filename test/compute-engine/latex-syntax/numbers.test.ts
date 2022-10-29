@@ -20,33 +20,33 @@ describe('NUMBERS', () => {
     expect(parse('++1')).toMatchInlineSnapshot(`["PreIncrement", 1]`);
     expect(parse('-1')).toMatchInlineSnapshot(`-1`);
     expect(parse('--1')).toMatchInlineSnapshot(`["PreDecrement", 1]`);
-    expect(parse('-+-1')).toMatchInlineSnapshot(`["Negate", -1]`);
+    expect(parse('-+-1')).toMatchInlineSnapshot(`1`);
   });
   test('Parsing numbers with repeating pattern', () => {
     expect(parse('1.(3)')).toMatchInlineSnapshot(`{num: "1.(3)"}`);
     expect(parse('0.(142857)')).toMatchInlineSnapshot(`{num: "0.(142857)"}`);
     expect(box({ num: '1.(3)' })).toMatch('{num: "1.(3)"}');
     expect(box({ num: '0.(142857)' })).toMatch('{num: "0.(142857)"}');
-    expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", "x", 0.123]`);
+    expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", 0.123, "x"]`);
     expect(parse('x=.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "x", {num: "0.123(45)"}]`
+      `["Equal", {num: "0.123(45)"}, "x"]`
     );
     expect(parse('x=-987.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "x", {num: "-987.123(45)"}]`
+      `["Equal", {num: "-987.123(45)"}, "x"]`
     );
   });
   test('Parsing numbers with truncation  mark', () => {
     expect(parse('x=.123\\ldots')).toMatchInlineSnapshot(
-      `["Equal", "x", 0.123]`
+      `["Equal", 0.123, "x"]`
     );
     expect(parse('x=.123\\ldots e4')).toMatchInlineSnapshot(
-      `["Equal", "x", 1230]`
+      `["Equal", 1230, "x"]`
     );
     expect(parse('x=.123\\ldots e4+1')).toMatchInlineSnapshot(
-      `["Equal", "x", ["Add", 1230, 1]]`
+      `["Equal", "x", ["Add", 1, 1230]]`
     );
     expect(parse('x=.123\\ldots e-423+1')).toMatchInlineSnapshot(
-      `["Equal", "x", ["Add", {num: "1.23e-424"}, 1]]`
+      `["Equal", 1, "x"]`
     );
   });
 
@@ -56,14 +56,11 @@ describe('NUMBERS', () => {
       [
         "Equal",
         "x",
+        {num: "0.123(45)"},
         [
-          "Sequence",
-          {num: "0.123(45)"},
-          [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\ldots'"],
-            ["Latex", "'\\ldots'"]
-          ]
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\ldots'"],
+          ["Latex", "'\\ldots'"]
         ]
       ]
     `);
@@ -79,19 +76,39 @@ describe('NUMBERS', () => {
     expect(parse('123\\,456')).toMatchInlineSnapshot(`123456`);
     expect(parse('123\\,45\\,67')).toMatchInlineSnapshot(`1234567`);
     expect(parse('123\\,45\\,67.123\\,456\\,78')).toMatchInlineSnapshot(
-      `{num: "1234567.12345678"}`
+      `1234567.12345678`
     );
   });
 
   test('INVALID Parsing numbers with grouping', () => {
-    expect(parse('123\\,45\\,67.123\\,456\\,')).toMatchInlineSnapshot(
-      `["Multiply", 1234567.123456, ["HorizontalSpacing", 3]]`
-    );
+    expect(parse('123\\,45\\,67.123\\,456\\,')).toMatchInlineSnapshot(`
+      [
+        "Multiply",
+        1234567.123456,
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Number",
+            ["Domain", "Anything"]
+          ]
+        ]
+      ]
+    `);
     expect(parse('123\\,45\\,67.123\\,456\\,e5')).toMatchInlineSnapshot(`
       [
         "Multiply",
         1234567.123456,
-        ["HorizontalSpacing", 3],
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Number",
+            ["Domain", "Anything"]
+          ]
+        ],
         "ExponentialE",
         5
       ]
@@ -100,7 +117,15 @@ describe('NUMBERS', () => {
       [
         "Multiply",
         1234567.123456,
-        ["HorizontalSpacing", 3],
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Number",
+            ["Domain", "Anything"]
+          ]
+        ],
         "ExponentialE",
         12345
       ]
@@ -154,7 +179,7 @@ describe('NUMBERS', () => {
       `["Add", 2, {num: "+Infinity"}]`
     );
     expect(parse('\\infty-\\infty')).toMatchInlineSnapshot(
-      `["Subtract", {num: "+Infinity"}, {num: "+Infinity"}]`
+      `["Add", {num: "-Infinity"}, {num: "+Infinity"}]`
     );
     // Should not be interpreted as infinity
     expect(parse('\\frac{0}{0}')).toMatchInlineSnapshot(`{num: "NaN"}`);

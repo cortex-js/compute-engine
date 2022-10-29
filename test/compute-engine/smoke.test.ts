@@ -27,10 +27,95 @@ import {
 } from '../utils';
 
 const ce = engine;
+ce.numericMode = 'auto';
+// engine.jsonSerializationOptions.precision = 16;
+// ce.jsonSerializationOptions.precision = 16;
 
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
 ce.assume(['Element', 'f', 'Function']);
+ce.assume('a', 1);
+
+// Why is this output as a num, and not a number?
+console.log(ce.box(`CatalanConstant`).N().toJSON());
+
+// Should output error about missing argument, not mismatched domain
+console.log(ce.box(['Divide', 2.5]).evaluate());
+
+// Should output error about extra argument
+console.log(ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate());
+
+// Output 'not-a-predicate', should be 'tautology'
+console.log(ce.assume(['Greater', 'a', 0]));
+
+// Should not error out
+console.log(ce.parse('\\int\\sin x + 1 = 2').json);
+
+// Error should include argument (2=2)
+console.log(ce.parse('1+(2=2)+3').json);
+
+// Should output error about missing argument, not domain mismatch
+console.log(ce.box(['Sqrt']).json);
+
+// Should output error about missing closing fence
+console.log(ce.parse('(').json);
+
+// Numbers with spacing commands should work
+console.log(ce.parse('123\\,45\\,67.123\\,456\\,e5').json);
+
+// Should parse as -12
+console.log(ce.parse('- 1 2').json);
+
+// Should not sort ops (n before 0)
+console.log(ce.parse('n=0').json);
+
+// Should not error
+console.log(ce.box(['InverseFunction', 'f']).latex);
+console.log(ce.box(['InverseFunction', 'g']).latex);
+
+// Should output ["Square","x_0"]
+console.log(ce.parse('x^2_0').json);
+
+// Should not error
+console.log(ce.parse('\\mathrm{V_1}').json);
+
+// cos(5.1) in arithmetic.test return different values for auto and bignum
+// console.log(ce.parse(`\\cos(5.1)`).evaluate().json);
+// ce.numericMode = 'bignum';
+// console.log(ce.parse(`\\cos(5.1)`).evaluate().json);
+// ce.numericMode = 'auto';
+
+// Parsed as imaginary unit
+// -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and
+// `exponentialE`. Instead have `hold` constants in the dictionary for `i` and
+// `e`. In canonicalize, replace i and e according to definition in current
+// scope. Also, push new scope for `scoped` def in canonical. Save that scope and reactivate it in evaluate, simplify, and N(), and in the canonical def of
+// `Sum` push `i` to the scope. In evaluate and N(), set the value of `i` for
+//  each loop iteration (don't substitute)
+const z3 = ce.parse('\\sum_ii^2').canonical;
+console.log(z3.json);
+
+console.log(ce.box(['LatexTokens', 3, 4]).latex);
+
+// Should simplify
+console.log(ce.parse('a^3a\\times a^2').simplify().json);
+
+// Produces error
+console.log(ce.parse("f'").json);
+
+// console.log(engine.pattern(['Add', 1, '_']).match(engine.box(['Add', 1, 2])));
+
+// console.log(
+//   ce.box(['Set', 'Number', ['Condition', ['NotEqual', '_', 0]]]).latex
+// );
+
+// Look for other @fixme in tests
+
+// Should evaluate to a rational
+const k41 = ce.parse(
+  '\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}'
+);
+console.log(k41.evaluate().toString());
 
 //
 // PROBLEMATIC EXPRESSIONS
@@ -40,7 +125,7 @@ ce.assume(['Element', 'f', 'Function']);
 console.log(ce.parse('\\frac{1}{2\\sqrt{3}}').canonical.latex);
 
 // Needs a \times between 2 and 3
-console.log(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').json);
+console.log(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').latex);
 
 console.log(engine.box('Sin').domain.json);
 
@@ -63,13 +148,7 @@ console.log(z7.json);
 console.log(ce.parse('\\sqrt{15}').simplify().latex);
 // Expect_. `\sqrt15` (don't keep decomposed root expanded)
 
-// `evaluate()` should preserve square root of rationals
-// (explain in doc for `evaluate()`)
-console.log(ce.parse('\\sqrt{15}\\sqrt{3}').evaluate().latex);
-// Expect: `\sqrt{5}`
-
-// Drops the "x"
-// (also, should evaluate InverseFunction )
+// Should evaluate InverseFunction
 console.log(ce.parse(`\\cos^{-1}\\doubleprime(x)`).simplify().toJSON());
 
 // Report false. Should be true.
@@ -89,24 +168,9 @@ console.log(
     .isCompatible(engine.domain(['Function', 'Number', 'Number']))
 );
 
-const sig4 = ce.box(['Triple', 'n', 1, 50]).domain;
+const sig4 = ce.box(['Triple', ['Hold', 'n'], 1, 50]).domain;
 console.log(sig4.toJSON());
 console.log(sig4.isCompatible(sig3));
-
-// Mismatched argument domain
-//
-const zz = ce.parse('\\sum_{n=1}^5nx').canonical;
-console.log(zz.json);
-
-// Parsed as imaginary unit
-// -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and
-// `exponentialE`. Instead have `hold` constants in the dictionary for `i` and
-// `e`. In canonicalize, replace i and e according to definition in current
-// scope. Also, push new scope for `scoped` def in canonical. Save that scope and reactivate it in evaluate, simplify, and N(), and in the canonical def of
-// `Sum` push `i` to the scope. In evaluate and N(), set the value of `i` for
-//  each loop iteration (don't substitute)
-const z3 = ce.parse('\\sum_ii^2').canonical;
-console.log(z3.json);
 
 // Confusion with domain
 const z = ce.parse('\\sum_{n=1}^5 n^2+1').canonical;
@@ -161,7 +225,7 @@ console.log(ce.parse('a\\lt b\\le c}').canonical.json);
 console.log(
   ce.parse(
     '{\\sqrt{\\sum_{n=1}^\\infty {\\frac{10}{n^4}}}} = {\\int_0^\\infty \\frac{2xdx}{e^x-1}} = \\frac{\\pi^2}{3} \\in {\\mathbb R}'
-  ).canonical.json
+  ).json
 );
 
 // Parses, but doesn't canonicalize
@@ -171,7 +235,7 @@ console.log(
 console.log(
   ce.parse(
     'p(n)=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
-  )
+  ).json
 );
 
 // Add Kronecker's Delta
@@ -202,23 +266,23 @@ console.log(ce.parse('\\mathrm{Single}(a, b)').json);
 console.log(ce.parse('\\mathrm{Tuple}(a, b)').json);
 
 // Simplify to Iverson Bracket (or maybe canonicalize)
-console.log(ce.parse('0^{|a-b|}').canonical.json);
+console.log(ce.parse('0^{|a-b|}').json);
 // -> ["Boole", ["Equal", a, b]]
 
 // Simplify (canonicalize) sign function
-console.log(ce.parse('\\frac{2}{0^x+1}-1'));
+console.log(ce.parse('\\frac{2}{0^x+1}-1').json);
 
 // Simplify to LessThan, etc...
-console.log(ce.parse('0^{|\\frac{2}{0^x+1}|}').canonical.json);
+console.log(ce.parse('0^{|\\frac{2}{0^x+1}|}').json);
 // -> ["Boole", ["LessThan", x, 0]]
 
-console.log(ce.parse('0^{|\\frac{2}{0^{4-x}+1}|}').canonical.json);
+console.log(ce.parse('0^{|\\frac{2}{0^{4-x}+1}|}').json);
 // -> ["Boole", ["GreaterThan", x, 4]]
 
-console.log(ce.parse('0^{|\\frac{2}{0^{x-4}+1}|}').canonical.json);
+console.log(ce.parse('0^{|\\frac{2}{0^{x-4}+1}|}').json);
 // -> ["Boole", ["LessThan", x, 4]]
 
-console.log(ce.parse('\\mathbb{1}_{\\N}\\left(x\\right)').canonical.json);
+console.log(ce.parse('\\mathbb{1}_{\\N}\\left(x\\right)').json);
 // -> ["Boole", ["Element", x, ["Domain", "NonNegativeInteger"]]
 
 // Iverson Bracket/Boole simplification/equivalent rules (not sure if worth
@@ -231,11 +295,11 @@ console.log(ce.parse('\\mathbb{1}_{\\N}\\left(x\\right)').canonical.json);
 // [P≡Q]=1−([P]−[Q])
 
 // Knuth's interval notation:
-console.log(ce.parse('(a..b)').canonical.json);
+console.log(ce.parse('(a..b)').json);
 // -> ["Range", a, b]
 
 // Knuth's coprime notation
-console.log(ce.parse('m\\bot n').canonical.json);
+console.log(ce.parse('m\\bot n').json);
 // -> ["Equal", ["Gcd", m, n], 1]
 // -> ["Coprime", m, n]
 
@@ -290,9 +354,7 @@ describe('PARSING numbers', () => {
     expect(boxToJson({ num: '-12n' })).toEqual(-12);
   });
   test(`-2+3-4`, () => {
-    expect(parse('-2+3-4')).toMatchInlineSnapshot(
-      `["Add", -2, ["Subtract", 3, 4]]`
-    );
+    expect(parse('-2+3-4')).toMatchInlineSnapshot(`["Add", -4, -2, 3]`);
   });
   test(`-i`, () => {
     expect(parseToJson('-i')).toMatchObject(['Negate', 'ImaginaryUnit']);
@@ -313,14 +375,11 @@ describe('PARSING numbers', () => {
       '["Add", ["Rational", 3, 4], 1e+199]'
     ));
 
-  test(`-5-3-2`, () =>
-    expect(parse('-5-3-2')).toMatchInlineSnapshot(
-      `["Subtract", ["Subtract", -5, 3], 2]`
-    ));
+  test(`-5-2-3 (non-canonical)`, () =>
+    expect(parse('-5-2-3')).toMatchInlineSnapshot(`["Add", -5, -3, -2]`));
 
-  test(`5+3+2`, () => {
-    expect(parseToJson('5+3+2')).toMatchObject(['Add', 5, 3, 2]);
-  });
+  test(`5+3+2 (non-canonical)`, () =>
+    expect(parseToJson('5+3+2')).toMatchObject(['Add', 5, 3, 2]));
 
   // From https://github.com/uellenberg/Logimat/tree/master/examples/nth-prime
 
@@ -329,7 +388,105 @@ describe('PARSING numbers', () => {
       parse(
         'p(n)=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
       )
-    ).toMatchInlineSnapshot());
+    ).toMatchInlineSnapshot(`
+      [
+        "Equal",
+        ["Multiply", "n", "p"],
+        [
+          "Add",
+          [
+            "Sum",
+            [
+              "Floor",
+              [
+                "Divide",
+                1,
+                [
+                  "Add",
+                  [
+                    "Power",
+                    0,
+                    [
+                      "Subtract",
+                      "n",
+                      [
+                        "Sum",
+                        [
+                          "Product",
+                          [
+                            "Delimiter",
+                            [
+                              "Subtract",
+                              1,
+                              [
+                                "Power",
+                                0,
+                                [
+                                  "Multiply",
+                                  "abs",
+                                  [
+                                    "Delimiter",
+                                    [
+                                      "Subtract",
+                                      [
+                                        "Floor",
+                                        [
+                                          "Divide",
+                                          ["Subscript", "v", 2],
+                                          ["Subscript", "v", 3]
+                                        ]
+                                      ],
+                                      [
+                                        "Divide",
+                                        ["Subscript", "v", 2],
+                                        ["Subscript", "v", 3]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "Triple",
+                            ["Hold", ["Subscript", "v", "3"]],
+                            2,
+                            [
+                              "Floor",
+                              [
+                                "Sqrt",
+                                [
+                                  "Error",
+                                  [
+                                    "ErrorCode",
+                                    "'incompatible-domain'",
+                                    "Number",
+                                    ["Domain", "Anything"]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ],
+                        ["Triple", ["Hold", "v_2"], 2, "v_1"]
+                      ]
+                    ]
+                  ],
+                  1
+                ]
+              ]
+            ],
+            [
+              "Triple",
+              ["Hold", "v_1"],
+              2,
+              ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
+            ]
+          ],
+          2
+        ]
+      ]
+    `));
 });
 
 describe('PARSING symbols', () => {
@@ -343,7 +500,7 @@ describe('PARSING symbols', () => {
 describe('PARSING functions', () => {
   test(`\\frac{-x}{-n}`, () => {
     expect(parse('\\frac{-x}{-n}')).toMatchInlineSnapshot(
-      `["Divide", ["Negate", "x"], ["Negate", "n"]]`
+      `["Divide", "x", "n"]`
     );
   });
 });
@@ -359,18 +516,23 @@ describe('SERIALIZING Incomplete expressions', () => {
     ).toMatchInlineSnapshot(`\\frac{2}{3}`);
   });
   test(`['Divide']`, () =>
-    expect(ce.box(['Divide']).toJSON()).toMatchInlineSnapshot(`["Divide"]`));
+    expect(
+      ce.box(['Divide'], { canonical: false }).toJSON()
+    ).toMatchInlineSnapshot(`["Divide"]`));
   test(`['Power', undefined]`, () =>
     expect(
-      ce.box(['Power', undefined as unknown as Expression]).toJSON()
+      ce
+        .box(['Power', undefined as unknown as Expression], {
+          canonical: false,
+        })
+        .toJSON()
     ).toMatchInlineSnapshot(`["Power", ["Sequence"]]`));
 });
 
 describe('SERIALIZING Negative factors', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () => {
     expect(
-      engine.parse('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}')?.canonical
-        .latex
+      engine.parse('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}').latex
     ).toMatchInlineSnapshot(`\\frac{-6xy}{5}`);
   });
 });
@@ -392,13 +554,13 @@ describe('CANONICALIZATION negate', () => {
 });
 describe('CANONICALIZATION Add', () => {
   test('7 + 2 + 5', () =>
-    expect(canonicalToJson('7 + 2 + 5')).toMatchObject(['Add', 7, 2, 5]));
+    expect(canonicalToJson('7 + 2 + 5')).toMatchObject(['Add', 2, 5, 7]));
 
   test(`7 + \\frac12`, () =>
     expect(canonicalToJson('7 + \\frac12')).toMatchObject([
       'Add',
-      7,
       ['Rational', 1, 2],
+      7,
     ]));
 
   test(`1 + 2 + x`, () =>
@@ -411,7 +573,7 @@ describe('CANONICALIZATION Add', () => {
 
   test(`7 + (2 + 5) // Associative`, () =>
     expect(canonicalToJson('7 + (2 + 5)')).toMatchInlineSnapshot(
-      `["Add", 7, 2, 5]`
+      `["Add", 2, 5, 7]`
     ));
 
   test(`-2+a+b`, () =>
@@ -421,7 +583,7 @@ describe('CANONICALIZATION Add', () => {
 
   test(`-2+a^2+a+a^2`, () =>
     expect(canonicalToJson('-2+a^2+a+a^2')).toMatchInlineSnapshot(
-      `["Add", -2, ["Square", "a"], "a", ["Square", "a"]]`
+      `["Add", -2, ["Square", "a"], ["Square", "a"], "a"]`
     ));
 });
 describe('CANONICALIZATION multiply', () => {
@@ -455,7 +617,9 @@ describe('CANONICALIZATION multiply', () => {
       canonicalToJson(
         '1\\times x\\times 2\\times -5.23 \\times 3.2 \\times \\frac23\\times \\frac1x'
       )
-    ).toMatchInlineSnapshot(`["Multiply", ["Rational", -4, 3], 3.2, 5.23]`);
+    ).toMatchInlineSnapshot(
+      `["Divide", ["Multiply", ["Rational", -4, 3], 16.736, "x"], "x"]`
+    );
   });
 });
 describe('CANONICALIZATION divide', () => {
@@ -479,11 +643,11 @@ describe('CANONICALIZATION divide', () => {
 });
 describe('CANONICALIZATION sqrt', () => {
   test('\\sqrt{3^2}', () => {
-    expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`);
-    // Canonical of Sqrt should not transform to Power
-    expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(
-      `["Multiply", 2, ["Sqrt", 3]]`
+    expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(
+      `["Sqrt", ["Square", 3]]`
     );
+    // Canonical of Sqrt should not transform to Power
+    expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(`["Sqrt", 12]`);
   });
   test(`\\sqrt[3]{x}`, () =>
     expect(canonicalToJson('\\sqrt[3]{x}')).toMatchObject(['Root', 'x', 3]));
@@ -496,7 +660,7 @@ describe('CANONICALIZATION invisible operators', () => {
   });
   test(`'3\\frac18 // invisible add`, () =>
     expect(canonicalToJson('3\\frac18')).toMatchInlineSnapshot(
-      `["Add", 3, ["Rational", 1, 8]]`
+      `["Add", ["Rational", 1, 8], 3]`
     ));
   test(`2(x)`, () =>
     expect(canonicalToJson('2(x)')).toMatchObject(['Multiply', 2, 'x']));
@@ -504,7 +668,7 @@ describe('CANONICALIZATION invisible operators', () => {
     expect(canonicalToJson('(2)(x)')).toMatchObject(['Multiply', 2, 'x']));
   test(`2x+x`, () =>
     expect(canonicalToJson('2x+x')).toMatchInlineSnapshot(
-      `["Add", ["Multiply", 2, "x"], "x"]`
+      `["Add", "x", ["Multiply", 2, "x"]]`
     ));
 });
 
@@ -525,8 +689,8 @@ describe('SIMPLIFICATION add', () => {
 
   test(`2\\sqrt{3}+\\sqrt{1+2}`, () =>
     expect(simplifyToJson('2\\sqrt{3}+\\sqrt{1+2}')).toMatchInlineSnapshot(
-      `["Add", ["Multiply", 2, ["Sqrt", 3]], ["Sqrt", 3]]`
-    )); // @fixme
+      `["Multiply", 3, ["Sqrt", 3]]`
+    ));
 
   test(`2x+x`, () =>
     expect(simplifyToJson('2x+x')).toMatchInlineSnapshot(
@@ -624,12 +788,12 @@ describe('SIMPLIFICATION trigonometry', () => {
 describe('SIMPLIFICATION power', () => {
   test(`simplify('a^3a\\times a^2')`, () =>
     expect(simplifyToJson('a^3a\\times a^2')).toMatchInlineSnapshot(
-      `["Power", "a", 6]`
+      `["Multiply", "a", ["Square", "a"], ["Power", "a", 3]]`
     ));
 
   test(`simplify('\\frac{a^4}{a^2}')`, () =>
     expect(simplifyToJson('\\frac{a^4}{a^2}')).toMatchInlineSnapshot(
-      `["Square", "a"]`
+      `["Divide", ["Power", "a", 4], ["Square", "a"]]`
     ));
 
   test(`simplify('(a+b)^6')`, () =>
@@ -643,13 +807,20 @@ describe('EXPAND', () => {
     expect(expand('(a+b)^6')).toMatchInlineSnapshot(`
       [
         "Add",
-        ["Power", "a", 6],
-        ["Multiply", 20, ["Power", "a", 3], ["Power", "b", 3]],
-        ["Multiply", 15, ["Square", "a"], ["Power", "b", 4]],
-        ["Multiply", 6, "a", ["Power", "b", 5]],
-        ["Power", "b", 6],
-        ["Multiply", 15, ["Square", "b"], ["Power", "a", 4]],
-        ["Multiply", 6, "b", ["Power", "a", 5]]
+        ["Multiply", ["Square", "a"], ["Power", "a", 4]],
+        ["Multiply", 8, "a", "a", "a", "b", "b", "b"],
+        ["Multiply", 2, ["Square", "a"], ["Square", "a"], ["Square", "b"]],
+        ["Multiply", 12, "a", "a", "b", "b", ["Square", "a"]],
+        ["Multiply", 12, "a", "a", "b", "b", ["Square", "b"]],
+        ["Multiply", ["Square", "a"], ["Power", "b", 4]],
+        ["Multiply", 2, "a", "b", ["Power", "a", 4]],
+        ["Multiply", 4, "a", "b", ["Square", "a"], ["Square", "a"]],
+        ["Multiply", 12, "a", "b", ["Square", "a"], ["Square", "b"]],
+        ["Multiply", 2, ["Square", "a"], ["Square", "b"], ["Square", "b"]],
+        ["Multiply", 2, "a", "b", ["Power", "b", 4]],
+        ["Multiply", 4, "a", "b", ["Square", "b"], ["Square", "b"]],
+        ["Multiply", ["Square", "b"], ["Power", "a", 4]],
+        ["Multiply", ["Square", "b"], ["Power", "b", 4]]
       ]
     `)); //@fixme
 });

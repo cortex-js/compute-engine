@@ -1,6 +1,60 @@
-## 0.8.0 
+## [Unreleased]
 
- **Release Date:** 2022-10-02
+### Breaking Changes
+
+- The head of a number expression is always `Number`. Use `expr.domain` to be
+  get more specific info about what kind of number this is.
+- By default, `ce.box()` and `ce.parse()` return a canonical expression. A flag
+  can be used if a non-canonical expression is desired.
+- The API surface of `BoxedExpression` has been reduced. The properties
+  `machineValue`, `bignumValue`, `asFloat`, `asSmallInteger`, `asRational`
+  etc... have been replaced with a single `numericValue` property.
+
+### Improvements
+
+- Better simplification for square root expressions:
+  - `\sqrt{25x^2}` -> `5x`
+- Preserve exact calculations involving rationals or square root of rationals.
+  - `\sqrt{\frac{49}{25}}` -> `\frac{7}{5}`
+- Added `ce.let()` and `ce.set()` to declare and assign values to identifiers.
+- Addition and multiplication provide more consistent results for `evaluate()`
+  and `N()`. Evaluate returns an exact result when possible.
+
+  - EXACT
+    - 2 + 5 -> 7
+    - 2 + 5/7 -> 19/7
+    - 2 + √2 -> 2 + √2
+    - 2 + √(5/7) -> 2 + √(5/7)
+    - 5/7 + 9/11 -> 118/77
+    - 5/7 + √2 -> 5/7 + √2
+    - 10/14 + √(18/9) -> 5/7 + √2
+    - √2 + √5 -> √2 + √5
+    - √2 + √2 -> 2√2
+    - sin(2) -> sin(2)
+    - sin(π/3) -> √3/2
+  - APPROXIMATE
+    - 2 + 2.1 -> 4.1
+    - 2 + √2.1 -> 3.44914
+    - 5/7 + √2.1 -> 2.16342
+    - sin(2) + √2.1 -> 2.35844
+
+- More consistent behavior of the `auto` numeric mode: calculations are done
+  with `bignum` and `complex` in most cases.
+- `JsonSerializationOptions` has a new option to specify the numeric precision
+  in the MathJSON serialization.
+- `\sum` is now correctly parsed and evaluated. This includes creating a local
+  scope with the index and expression value of the sum.
+
+### Bugs Fixed
+
+- Parsing a number with repeating decimals and an exponent would drop the
+  exponent.
+- Correct calculation of complex square roots
+  - `\sqrt{-49}` -> `7i`
+
+## 0.8.0
+
+**Release Date:** 2022-10-02
 
 ### Breaking Changes
 
