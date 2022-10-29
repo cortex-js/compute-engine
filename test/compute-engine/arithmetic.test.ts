@@ -717,21 +717,9 @@ describe('MULTIPLY', () => {
 
 describe('Divide', () => {
   test(`INVALID  Divide`, () =>
-    expect(ce.box(['Divide', 2.5]).evaluate()).toMatchInlineSnapshot(`
-      [
-        "Divide",
-        2.5,
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "Anything"]
-          ]
-        ]
-      ]
-    `));
+    expect(ce.box(['Divide', 2.5]).evaluate()).toMatchInlineSnapshot(
+      `["Divide", 2.5, ["Error", "'missing'"]]`
+    ));
   test(`Divide`, () =>
     expect(ce.box(['Divide', 6, 3]).evaluate()).toMatchInlineSnapshot(`2`));
   test(`Divide`, () =>
@@ -746,21 +734,9 @@ describe('Divide', () => {
 
 describe('Power', () => {
   test(`INVALID Power`, () =>
-    expect(ce.box(['Power', 2.5]).evaluate()).toMatchInlineSnapshot(`
-      [
-        "Power",
-        2.5,
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "Anything"]
-          ]
-        ]
-      ]
-    `));
+    expect(ce.box(['Power', 2.5]).evaluate()).toMatchInlineSnapshot(
+      `["Power", 2.5, ["Error", "'missing'"]]`
+    ));
   test(`Power`, () =>
     expect(ce.box(['Power', 2.5, 1.1]).evaluate()).toMatchInlineSnapshot(
       `2.7398955659630432724`
@@ -816,7 +792,7 @@ describe('Sqrt', () => {
   test(`√0`, () =>
     expect(checkJson(['Sqrt', 0])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 0]
-      simplify  = 0
+      canonical = ["Sqrt", ["Error", "'missing'"]]
     `));
 
   test(`√2.5`, () => {

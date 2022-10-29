@@ -5,24 +5,24 @@ import { parse, latex, engine } from '../../utils';
 describe('POWER', () => {
   test('Power Invalid forms', () => {
     expect(latex([POWER])).toMatchInlineSnapshot(
-      `(\\texttt{\\textcolor{red}{\\blacksquare}})^{\\texttt{\\textcolor{red}{\\blacksquare}}}`
+      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
     );
     expect(latex([POWER, null as unknown as Expression])).toMatchInlineSnapshot(
-      `(\\texttt{\\textcolor{red}{\\blacksquare}})^{\\texttt{\\textcolor{red}{\\blacksquare}}}`
+      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
     );
     expect(
       latex([POWER, undefined as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `(\\texttt{\\textcolor{red}{\\blacksquare}})^{\\texttt{\\textcolor{red}{\\blacksquare}}}`
+      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
     );
     expect(latex([POWER, 1])).toMatchInlineSnapshot(
-      `1^{\\texttt{\\textcolor{red}{\\blacksquare}}}`
+      `1^{\\textcolor{red}{\\blacksquare}}`
     );
     expect(latex([POWER, NaN])).toMatchInlineSnapshot(
-      `\\operatorname{NaN}^{\\texttt{\\textcolor{red}{\\blacksquare}}}`
+      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
     );
     expect(latex([POWER, Infinity])).toMatchInlineSnapshot(
-      `\\infty^{\\texttt{\\textcolor{red}{\\blacksquare}}}`
+      `\\infty^{\\textcolor{red}{\\blacksquare}}`
     );
   });
 });

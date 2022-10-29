@@ -35,14 +35,8 @@ ce.numericMode = 'auto';
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
 
-// Should output error about missing argument, not domain mismatch
-console.log(ce.box(['Sqrt']).json);
-
-// Should output error about missing argument, not mismatched domain
-console.log(ce.box(['Divide', 2.5]).evaluate());
-
 // Should not error
-console.log(ce.box(['Rational', 2.5]).evaluate());
+console.log(ce.box(['Rational', 2.5]).evaluate().json);
 
 // Should output error about extra argument
 console.log(ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate());

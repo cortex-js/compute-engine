@@ -1142,7 +1142,7 @@ function validateNumericArgs(
   } else
     for (let i = 0; i <= Math.max(count - 1, ops.length - 1); i++) {
       if (i > count) xs.push(ce.error('unexpected-argument', ops[i]));
-      else xs.push(ce.box(ops[i]) ?? ce.error('missing'));
+      else xs.push(ops[i] ? ce.box(ops[i]) : ce.error('missing'));
     }
 
   return xs.map((op) =>

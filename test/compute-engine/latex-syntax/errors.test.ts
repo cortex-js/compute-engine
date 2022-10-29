@@ -518,20 +518,9 @@ check('Syntax error', () =>
 );
 
 check('Missing argument', () =>
-  expect(engine.box(['Sqrt']).canonical).toMatchInlineSnapshot(`
-    [
-      "Sqrt",
-      [
-        "Error",
-        [
-          "ErrorCode",
-          "'incompatible-domain'",
-          "Number",
-          ["Domain", "Anything"]
-        ]
-      ]
-    ]
-  `)
+  expect(engine.box(['Sqrt']).canonical).toMatchInlineSnapshot(
+    `["Sqrt", ["Error", "'missing'"]]`
+  )
 );
 
 check('Unexpected argument', () =>
