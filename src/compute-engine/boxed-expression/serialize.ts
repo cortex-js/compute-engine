@@ -498,7 +498,7 @@ function repeatingDecimals(ce: IComputeEngine, s: string): string {
   // eslint-disable-next-line prefer-const
   let [_, wholepart, fractionalPart, exponent] =
     s.match(/^(.*)\.([0-9]+)([e|E][-+]?[0-9]+)?$/) ?? [];
-  if (!fractionalPart) return s;
+  if (!fractionalPart) return s.toLowerCase();
 
   // The last digit may have been rounded off if it exceeds the precision,
   // which could throw off the repeating pattern detection. Ignore it.
@@ -538,5 +538,9 @@ function repeatingDecimals(ce: IComputeEngine, s: string): string {
     }
   }
 
-  return s;
+  while (fractionalPart.endsWith('0'))
+    fractionalPart = fractionalPart.slice(0, -1);
+  if (exponent)
+    return `${wholepart}.${fractionalPart}${exponent.toLowerCase()}`;
+  return `${wholepart}.${fractionalPart}`;
 }
