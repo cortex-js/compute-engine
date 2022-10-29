@@ -8,13 +8,13 @@ import { isInMachineRange } from '../numerics/numeric-bignum';
 
 import { Product } from '../symbolic/product';
 import {
-  isBigRational,
   isMachineRational,
   isRational,
   machineDenominator,
   machineNumerator,
+  neg,
 } from '../numerics/rationals';
-import { asSmallInteger } from '../numerics/numeric';
+import { asFloat, asSmallInteger } from '../numerics/numeric';
 
 /**
  * The canonical version of `serializeJsonFunction()` applies
@@ -61,6 +61,19 @@ export function serializeJsonCanonicalFunction(
       [args[0], ce._fn('Power', [args[1], ce._NEGATIVE_ONE])],
       metadata
     );
+  }
+
+  if (
+    head === 'Multiply' &&
+    !ce.jsonSerializationOptions.exclude.includes('Negate')
+  ) {
+    if (args[0].isLiteral && asFloat(args[0]) === -1)
+      return serializeJsonFunction(
+        ce,
+        'Negate',
+        [ce._fn('Multiply', args.slice(1))],
+        metadata
+      );
   }
 
   if (
@@ -176,10 +189,7 @@ export function serializeJsonFunction(
       if (typeof num0 === 'number') return serializeJsonNumber(ce, -num0);
       if (num0 instanceof Decimal) return serializeJsonNumber(ce, num0.neg());
       if (num0 instanceof Complex) return serializeJsonNumber(ce, num0.neg());
-      if (isMachineRational(num0))
-        return serializeJsonNumber(ce, [-num0[0], num0[1]]);
-      if (isBigRational(num0))
-        serializeJsonNumber(ce, [num0[0].neg(), num0[1]]);
+      if (isRational(num0)) return serializeJsonNumber(ce, neg(num0));
     }
   }
   if (typeof head === 'string' && exclusions.includes(head)) {
@@ -408,6 +418,7 @@ export function serializeJsonNumber(
         num = repeatingDecimals(ce, s);
 
         if (shorthandAllowed) {
+          // Can we shorthand to a JSON number after accounting for serialization precision?
           const val = value.toNumber();
           if (val.toString() === num) return val;
         }
@@ -419,6 +430,8 @@ export function serializeJsonNumber(
 
     return metadata.latex !== undefined
       ? { num, latex: metadata.latex }
+      : shorthandAllowed
+      ? num
       : { num };
   }
 
@@ -452,21 +465,20 @@ export function serializeJsonNumber(
   //
   // Rational
   //
-  if (Array.isArray(value)) {
+  if (isRational(value)) {
+    //  Shorthand allowed, and no metadata to include?
     if (
       shorthandAllowed &&
       ce.jsonSerializationOptions.shorthands.includes('function') &&
-      typeof value[0] === 'number' &&
-      typeof value[1] === 'number'
+      isMachineRational(value)
     ) {
-      //  Shorthand allowed, and no metadata to include
       return ['Rational', value[0], value[1]];
     }
     return serializeJsonFunction(
       ce,
       'Rational',
       [ce.number(value[0]), ce.number(value[1])],
-      metadata
+      { ...metadata }
     );
   }
   //
@@ -538,6 +550,7 @@ function repeatingDecimals(ce: IComputeEngine, s: string): string {
     }
   }
 
+  fractionalPart += lastDigit;
   while (fractionalPart.endsWith('0'))
     fractionalPart = fractionalPart.slice(0, -1);
   if (exponent)

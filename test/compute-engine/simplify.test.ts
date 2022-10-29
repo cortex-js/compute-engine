@@ -36,9 +36,7 @@ describe('SIMPLIFY', () => {
 
 describe('SIMPLIFY', () => {
   test(`simplify(1 + 1e199) (precision loss)`, () =>
-    expect(simplifyToJson('1 + 1e999')).toMatchInlineSnapshot(
-      `{num: "1e+999"}`
-    ));
+    expect(simplifyToJson('1 + 1e999')).toMatchInlineSnapshot(`1e+999`));
 
   test(`1.234 + 5678`, () =>
     expect(simplifyToJson('1.234 + 5678')).toMatchInlineSnapshot(
@@ -57,9 +55,7 @@ describe('SIMPLIFY', () => {
     expect(simplifyToJson('\\frac34 + 1e99')).toMatchInlineSnapshot(`
       [
         "Rational",
-        {
-          num: "4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003"
-        },
+        "4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003",
         4
       ]
     `));

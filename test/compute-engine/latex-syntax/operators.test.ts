@@ -178,14 +178,12 @@ describe('OPERATOR prefix', () => {
   test('-ab // Negate', () =>
     expect(check('-ab')).toMatchInlineSnapshot(`
       latex     = ["Negate", ["Multiply", "a", "b"]]
-      box       = ["Negate", ["Multiply", "a", "b"]]
-      N-auto    = ["Multiply", -1, "a", "b"]
+      ["Negate", ["Multiply", "a", "b"]]
     `));
   test('-(ab) // Negate', () =>
     expect(check('-(ab)')).toMatchInlineSnapshot(`
       latex     = ["Negate", ["Delimiter", ["Multiply", "a", "b"]]]
-      box       = ["Negate", ["Multiply", "a", "b"]]
-      N-auto    = ["Multiply", -1, "a", "b"]
+      ["Negate", ["Multiply", "a", "b"]]
     `));
   test('--x // Predecrement', () =>
     expect(check('--x')).toMatchInlineSnapshot(`
@@ -202,6 +200,8 @@ describe('OPERATOR prefix', () => {
       latex     = ["Negate", "ImaginaryUnit"]
       box       = ["Negate", "ImaginaryUnit"]
       N-auto    = ["Complex", 0, -1]
+      N-big     = {num: "NaN"}
+      N-cplx   = ["Complex", 0, -1]
     `));
   test('-\\infty // Negate', () =>
     expect(check('-\\infty')).toMatchInlineSnapshot(`
@@ -280,7 +280,8 @@ describe('OPERATOR multiply', () => {
     expect(check('2\\pi')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, "Pi"]
       box       = ["Multiply", 2, "Pi"]
-      N-auto    = 6.283185307179586
+      N-auto    = 6.283185307179586476925286766559005768394338798750211641949889184615632812572417997256069650684234136
+      N-mach    = 6.283185307179586
     `));
 
   test('2\\sin(x), function apply', () =>
@@ -321,7 +322,8 @@ describe('OPERATOR multiply', () => {
     expect(check('3\\pi5')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 3, "Pi", 5]
       box       = ["Multiply", 15, "Pi"]
-      N-auto    = 47.12388980384689
+      N-auto    = 47.12388980384689857693965074919254326295754099062658731462416888461724609429313497942052238013175602
+      N-mach    = 47.12388980384689
     `));
 });
 

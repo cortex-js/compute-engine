@@ -17,45 +17,45 @@ describe('NUMERIC MODE', () => {
       simplify  = 0.3
       evaluate  = 0.3
       eval-mach = 0.30000000000000004
-      eval-cplx = 0.30000000000000004
     `));
 
   test(`\\frac{1}{7}`, () =>
     expect(check('\\frac{1}{7}')).toMatchInlineSnapshot(`
       latex     = ["Rational", 1, 7]
       box       = ["Rational", 1, 7]
-      N-auto    = 0.14285714285714285
-      N-bignum  = {num: "0.(142857)"}
+      N-auto    = 0.(142857)
+      N-mach    = 0.14285714285714285
     `));
 
   test(`\\frac{1.5}{7.8}`, () =>
     expect(check('\\frac{1}{7}')).toMatchInlineSnapshot(`
       latex     = ["Rational", 1, 7]
       box       = ["Rational", 1, 7]
-      N-auto    = 0.14285714285714285
-      N-bignum  = {num: "0.(142857)"}
+      N-auto    = 0.(142857)
+      N-mach    = 0.14285714285714285
     `));
 
   test(`\\frac{\\pi}{4}`, () =>
     expect(check('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`
       latex     = ["Divide", "Pi", 4]
       box       = ["Multiply", ["Rational", 1, 4], "Pi"]
-      N-auto    = 0.7853981633974483
+      N-auto    = 0.785398163397448309615660845819875721049292349843776455243736148076954101571552249657008706335529267
+      N-mach    = 0.7853981633974483
     `));
 
   test(`\\frac{12345678901234567890}{23456789012345678901}`, () =>
     expect(check('\\frac{1}{7}')).toMatchInlineSnapshot(`
       latex     = ["Rational", 1, 7]
       box       = ["Rational", 1, 7]
-      N-auto    = 0.14285714285714285
-      N-bignum  = {num: "0.(142857)"}
+      N-auto    = 0.(142857)
+      N-mach    = 0.14285714285714285
     `));
 
   test(`12345678901234567890^{23456789012345678901}`, () =>
     expect(check('12345678901234567890^{23456789012345678901}'))
       .toMatchInlineSnapshot(`
-      latex     = ["Power", {num: "12345678901234567890"}, {num: "23456789012345678901"}]
-      box       = ["Power", {num: "12345678901234567890"}, {num: "23456789012345678901"}]
+      latex     = ["Power", "12345678901234567890", "23456789012345678901"]
+      box       = ["Power", "12345678901234567890", "23456789012345678901"]
       evaluate  = {num: "+Infinity"}
     `));
 
@@ -95,7 +95,8 @@ describe('NUMERIC MODE', () => {
         ["Complex", 0, 2]
       ]
       evaluate  = ["Cos", ["Rational", 1, 555555]]
-      N-auto    = 0.99999999999838
+      N-auto    = 0.9999999999983799967599955773952695962267595445677797188360289660653376695437160992108222980221295701
+      N-mach    = 0.99999999999838
     `));
 
   test(`\\cos(3+4i)`, () =>
@@ -137,6 +138,8 @@ describe('NUMERIC MODE', () => {
       ]
       evaluate  = ["Cos", ["Complex", 3, 4]]
       N-auto    = ["Complex", -27.034945603074224, -3.851153334811777]
+      N-big     = {num: "NaN"}
+      N-cplx   = ["Complex", -27.034945603074224, -3.851153334811777]
     `));
 
   test(`\\sqrt{-1}`, () =>
@@ -145,8 +148,9 @@ describe('NUMERIC MODE', () => {
       box       = ["Sqrt", -1]
       simplify  = ["Complex", 0, 1]
       evaluate  = ["Complex", 0, 1]
-      eval-mach = {num: "NaN"}
       eval-big  = {num: "NaN"}
+      eval-mach = {num: "NaN"}
+      eval-cplx = ["Complex", 0, 1]
     `));
 
   test('e^{i\\pi}', () =>
@@ -154,6 +158,8 @@ describe('NUMERIC MODE', () => {
       latex     = ["Power", "ExponentialE", ["Multiply", "ImaginaryUnit", "Pi"]]
       box       = ["Exp", ["Multiply", "ImaginaryUnit", "Pi"]]
       N-auto    = -1
+      N-big     = {num: "NaN"}
+      N-cplx   = -1
     `));
 });
 

@@ -29,33 +29,32 @@ import {
 const ce = engine;
 ce.numericMode = 'auto';
 // engine.jsonSerializationOptions.precision = 16;
-// ce.jsonSerializationOptions.precision = 16;
 
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
 ce.assume(['Element', 'f', 'Function']);
-ce.assume('a', 1);
+ce.assume('one', 1);
 
-// Why is this output as a num, and not a number?
-console.log(ce.box(`CatalanConstant`).N().toJSON());
+// Should output error about missing argument, not domain mismatch
+console.log(ce.box(['Sqrt']).json);
 
 // Should output error about missing argument, not mismatched domain
 console.log(ce.box(['Divide', 2.5]).evaluate());
 
+// Should not error
+console.log(ce.box(['Rational', 2.5]).evaluate());
+
 // Should output error about extra argument
 console.log(ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate());
-
-// Output 'not-a-predicate', should be 'tautology'
-console.log(ce.assume(['Greater', 'a', 0]));
-
-// Should not error out
-console.log(ce.parse('\\int\\sin x + 1 = 2').json);
 
 // Error should include argument (2=2)
 console.log(ce.parse('1+(2=2)+3').json);
 
-// Should output error about missing argument, not domain mismatch
-console.log(ce.box(['Sqrt']).json);
+// Output 'not-a-predicate', should be 'tautology'
+console.log(ce.assume(['Greater', 'one', 0]));
+
+// Should not error out
+console.log(ce.parse('\\int\\sin x + 1 = 2').json);
 
 // Should output error about missing closing fence
 console.log(ce.parse('(').json);
@@ -72,6 +71,9 @@ console.log(ce.parse('n=0').json);
 // Should not error
 console.log(ce.box(['InverseFunction', 'f']).latex);
 console.log(ce.box(['InverseFunction', 'g']).latex);
+
+// Should evaluate InverseFunction
+console.log(ce.parse(`\\cos^{-1}\\doubleprime(x)`).simplify().toJSON());
 
 // Should output ["Square","x_0"]
 console.log(ce.parse('x^2_0').json);
@@ -127,8 +129,6 @@ console.log(ce.parse('\\frac{1}{2\\sqrt{3}}').canonical.latex);
 // Needs a \times between 2 and 3
 console.log(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').latex);
 
-console.log(engine.box('Sin').domain.json);
-
 // `HorizontalScaling` should be interpreted as a function, not a symbol.
 // auto-add all the entries from libraries to the dictionary? Alternatively
 // check in default `parseUnknownSymbol` (and rename to
@@ -147,9 +147,6 @@ console.log(z7.json);
 // Expect: `['Sqrt',  5]`
 console.log(ce.parse('\\sqrt{15}').simplify().latex);
 // Expect_. `\sqrt15` (don't keep decomposed root expanded)
-
-// Should evaluate InverseFunction
-console.log(ce.parse(`\\cos^{-1}\\doubleprime(x)`).simplify().toJSON());
 
 // Report false. Should be true.
 const sig1 = ce.domain(['Function', 'PositiveInteger', 'Anything']);
@@ -449,7 +446,7 @@ describe('PARSING numbers', () => {
                           ],
                           [
                             "Triple",
-                            ["Hold", ["Subscript", "v", "3"]],
+                            ["Hold", ["Subscript", "v", 3]],
                             2,
                             [
                               "Floor",

@@ -135,6 +135,10 @@ export function N(latex: string): string {
 
 export function checkJson(inExpr: SemiBoxedExpression): string {
   try {
+    const precision = engine.precision;
+    const displayPrecision = engine.jsonSerializationOptions.precision;
+    engine.numericMode = 'auto';
+
     const boxed = printExpression(
       engine.box(inExpr, { canonical: false }).json
     );
@@ -143,19 +147,28 @@ export function checkJson(inExpr: SemiBoxedExpression): string {
     const canonical = printExpression(expr.json);
     const simplify = printExpression(expr.simplify().json);
 
-    engine.numericMode = 'auto';
     const evaluate = printExpression(expr.evaluate().json);
     const numEvalAuto = printExpression(expr.N().json);
-    engine.numericMode = 'machine';
-    const evalMachine = printExpression(expr.evaluate().json);
-    const numEvalMachine = printExpression(expr.N().json);
     engine.numericMode = 'bignum';
-    const evalBignum = printExpression(expr.evaluate().json);
-    const numEvalBignum = printExpression(expr.N().json);
+
+    engine.precision = precision;
+    engine.jsonSerializationOptions.precision = displayPrecision;
+    const evalBignum = printExpression(engine.box(inExpr).evaluate().json);
+    const numEvalBignum = printExpression(engine.box(inExpr).N().json);
+
+    engine.numericMode = 'machine';
+    engine.jsonSerializationOptions.precision = displayPrecision;
+    const evalMachine = printExpression(engine.box(inExpr).evaluate().json);
+    const numEvalMachine = printExpression(engine.box(inExpr).N().json);
+
     engine.numericMode = 'complex';
-    const evalComplex = printExpression(expr.evaluate().json);
-    const numEvalComplex = printExpression(expr.N().json);
+    engine.jsonSerializationOptions.precision = displayPrecision;
+    const evalComplex = printExpression(engine.box(inExpr).evaluate().json);
+    const numEvalComplex = printExpression(engine.box(inExpr).N().json);
+
     engine.numericMode = 'auto';
+    engine.precision = precision;
+    engine.jsonSerializationOptions.precision = displayPrecision;
 
     if (
       boxed === canonical &&
@@ -183,24 +196,19 @@ export function checkJson(inExpr: SemiBoxedExpression): string {
       evalComplex !== evaluate
     )
       result.push('evaluate  = ' + evaluate);
+    if (numEvalAuto !== evaluate) result.push('N-auto    = ' + numEvalAuto);
+
+    if (evalBignum !== evaluate) result.push('eval-big  = ' + evalBignum);
+    if (numEvalBignum !== numEvalAuto && numEvalBignum !== evalBignum)
+      result.push('N-big     = ' + numEvalBignum);
 
     if (evalMachine !== evaluate) result.push('eval-mach = ' + evalMachine);
-    if (evalBignum !== evaluate) result.push('eval-big  = ' + evalBignum);
-    if (evalComplex !== evaluate) result.push('eval-cplx = ' + evalComplex);
+    if (numEvalMachine !== numEvalBignum && numEvalMachine !== evalMachine)
+      result.push('N-mach    = ' + numEvalMachine);
 
-    if (
-      numEvalAuto !== evaluate ||
-      numEvalMachine !== numEvalAuto ||
-      numEvalBignum !== numEvalAuto ||
-      numEvalComplex !== numEvalAuto
-    )
-      result.push('N-auto    = ' + numEvalAuto);
-    if (numEvalMachine !== numEvalAuto)
-      result.push('N-machine = ' + numEvalMachine);
-    if (numEvalBignum !== numEvalAuto)
-      result.push('N-bignum  = ' + numEvalBignum);
-    if (numEvalComplex !== numEvalAuto)
-      result.push('N-complex = ' + numEvalComplex);
+    if (evalComplex !== evalMachine) result.push('eval-cplx = ' + evalComplex);
+    if (numEvalComplex !== numEvalMachine && numEvalComplex !== evalComplex)
+      result.push('N-cplx   = ' + numEvalComplex);
 
     return result.join('\n');
   } catch (e) {

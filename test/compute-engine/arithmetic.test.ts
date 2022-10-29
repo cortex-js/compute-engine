@@ -1,33 +1,42 @@
 import { check, checkJson, engine } from '../utils';
 
-engine.jsonSerializationOptions.precision = 16;
+engine.jsonSerializationOptions.precision = 20;
 const ce = engine;
 
 describe('CONSTANTS', () => {
   test(`ExponentialE`, () =>
-    expect(ce.box(`ExponentialE`).N()).toMatchInlineSnapshot(
-      `2.718281828459045`
-    ));
+    expect(checkJson(`ExponentialE`)).toMatchInlineSnapshot(`
+      box       = ExponentialE
+      N-auto    = 2.7182818284590452354
+      N-mach    = 2.718281828459045
+    `));
   test(`ImaginaryUnit`, () =>
-    expect(ce.box(`ImaginaryUnit`).N()).toMatchInlineSnapshot(
-      `["Complex", 0, 1]`
-    ));
+    expect(checkJson(`ImaginaryUnit`)).toMatchInlineSnapshot(`
+      box       = ImaginaryUnit
+      N-auto    = ["Complex", 0, 1]
+    `));
   test(`MachineEpsilon`, () =>
-    expect(ce.box(`MachineEpsilon`).N()).toMatchInlineSnapshot(
-      `2.220446049250313e-16`
-    ));
+    expect(checkJson(`MachineEpsilon`)).toMatchInlineSnapshot(`
+      box       = MachineEpsilon
+      simplify  = 2.220446049250313e-16
+    `));
   test(`CatalanConstant`, () =>
-    expect(ce.box(`CatalanConstant`).N()).toMatchInlineSnapshot(
-      `{num: "0.9159655941772190"}`
-    ));
+    expect(checkJson(`CatalanConstant`)).toMatchInlineSnapshot(`
+      box       = CatalanConstant
+      simplify  = 0.91596559417721901505
+    `));
   test(`GoldenRatio`, () =>
-    expect(ce.box(`GoldenRatio`).N()).toMatchInlineSnapshot(
-      `1.618033988749895`
-    ));
+    expect(checkJson(`GoldenRatio`)).toMatchInlineSnapshot(`
+      box       = GoldenRatio
+      simplify  = ["Multiply", ["Rational", 1, 2], ["Add", 1, ["Sqrt", 5]]]
+      N-auto    = 1.6180339887498948482
+      N-mach    = 1.618033988749895
+    `));
   test(`EulerGamma`, () =>
-    expect(ce.box(`EulerGamma`).N()).toMatchInlineSnapshot(
-      `0.5772156649015329`
-    ));
+    expect(checkJson(`EulerGamma`)).toMatchInlineSnapshot(`
+      box       = EulerGamma
+      simplify  = 0.57721566490153286061
+    `));
 });
 
 describe('RELATIONAL OPERATOR', () => {
@@ -99,19 +108,22 @@ describe('EXACT EVALUATION', () => {
     expect(check('\\sqrt{5}')).toMatchInlineSnapshot(`
       latex     = ["Sqrt", 5]
       box       = ["Sqrt", 5]
-      N-auto    = {num: "2.236067977499790"}
+      N-auto    = 2.2360679774997896964
+      N-mach    = 2.23606797749979
     `));
   test(`Sqrt: Exact rational`, () =>
     expect(check('\\sqrt{\\frac{5}{7}}')).toMatchInlineSnapshot(`
       latex     = ["Sqrt", ["Rational", 5, 7]]
       box       = ["Sqrt", ["Rational", 5, 7]]
-      N-auto    = 0.8451542547285166
+      N-auto    = 0.84515425472851657751
+      N-mach    = 0.8451542547285166
     `));
   test(`Sqrt: Inexact Fractional part`, () =>
     expect(check('\\sqrt{5.1}')).toMatchInlineSnapshot(`
       latex     = ["Sqrt", 5.1]
       box       = ["Sqrt", 5.1]
-      evaluate  = 2.258317958127243
+      evaluate  = 2.258317958127242985
+      eval-mach = 2.258317958127243
     `));
 
   test(`Cos: Exact integer`, () =>
@@ -142,7 +154,8 @@ describe('EXACT EVALUATION', () => {
         ["Complex", 0, 2]
       ]
       evaluate  = ["Cos", 5]
-      N-auto    = 0.28366218546322625
+      N-auto    = 0.28366218546322626447
+      N-mach    = 0.28366218546322625
     `));
 
   test(`Cos: Exact rational`, () =>
@@ -181,7 +194,8 @@ describe('EXACT EVALUATION', () => {
         ["Complex", 0, 2]
       ]
       evaluate  = ["Cos", ["Rational", 5, 7]]
-      N-auto    = 0.7555613467006966
+      N-auto    = 0.75556134670069659847
+      N-mach    = 0.7555613467006966
     `));
   test(`Cos: Inexact Fractional part`, () =>
     expect(check('\\cos(5.1)')).toMatchInlineSnapshot(`
@@ -210,8 +224,8 @@ describe('EXACT EVALUATION', () => {
         ],
         ["Complex", 0, 2]
       ]
-      evaluate  = 0.37797774271298024
-      eval-big  = {num: "0.3779777427129806"}
+      evaluate  = 0.37797774271298056332
+      eval-mach = 0.37797774271298024
     `));
   test(`Cos: Pi (simplify constructible value)`, () =>
     expect(check('\\cos{\\pi}')).toMatchInlineSnapshot(`
@@ -226,14 +240,16 @@ describe('EXACT EVALUATION', () => {
       latex     = ["Add", 6, ["Rational", 10, 14], ["Sqrt", ["Rational", 18, 9]]]
       box       = ["Add", ["Rational", 5, 7], 6, ["Sqrt", 2]]
       simplify  = ["Add", ["Rational", 47, 7], ["Sqrt", 2]]
-      N-auto    = 8.12849927665881
+      N-auto    = 8.1284992766588093345
+      N-mach    = 8.12849927665881
     `));
 
   test(`Add: All exact`, () =>
     expect(check('6+\\sqrt{2}+\\sqrt{5}')).toMatchInlineSnapshot(`
       latex     = ["Add", 6, ["Sqrt", 2], ["Sqrt", 5]]
       box       = ["Add", 6, ["Sqrt", 2], ["Sqrt", 5]]
-      N-auto    = 9.650281539872886
+      N-auto    = 9.6502815398728847452
+      N-mach    = 9.650281539872886
     `));
 
   test(`Add: All exact`, () =>
@@ -258,7 +274,8 @@ describe('EXACT EVALUATION', () => {
         "Pi"
       ]
       simplify  = ["Add", ["Rational", 535, 63], ["Sqrt", 2], "Pi"]
-      N-auto    = 13.04786970802638
+      N-auto    = 13.047869708026380351
+      N-mach    = 13.04786970802638
     `));
   test(`Add: one inexact`, () =>
     expect(check('1.1+2+5+\\frac{5}{7}+\\frac{7}{9}+\\sqrt{2}+\\pi'))
@@ -284,7 +301,8 @@ describe('EXACT EVALUATION', () => {
         "Pi"
       ]
       simplify  = ["Add", 1.1, ["Rational", 535, 63], ["Sqrt", 2], "Pi"]
-      evaluate  = 14.14786970802638
+      evaluate  = 14.147869708026380351
+      eval-mach = 14.14786970802638
     `));
 });
 
@@ -299,7 +317,7 @@ describe('ADD', () => {
     expect(ce.box(['Add', 2.5, -1.1]).evaluate()).toMatchInlineSnapshot(`1.4`));
   test(`Add ['Add', 2.5, -1.1, 18.4]`, () =>
     expect(ce.box(['Add', 2.5, -1.1, 18.4]).evaluate()).toMatchInlineSnapshot(
-      `19.799999999999997`
+      `19.8`
     ));
 
   test(`Add \\frac{2}{-3222233}+\\frac{1}{3}`, () =>
@@ -307,7 +325,8 @@ describe('ADD', () => {
       latex     = ["Add", ["Divide", 2, -3222233], ["Rational", 1, 3]]
       box       = ["Add", ["Rational", -2, 3222233], ["Rational", 1, 3]]
       simplify  = ["Rational", 3222227, 9666699]
-      N-auto    = 0.33333271264575426
+      N-auto    = 0.33333271264575425386
+      N-mach    = 0.33333271264575426
     `));
 
   test(`Add `, () =>
@@ -343,7 +362,8 @@ describe('ADD', () => {
         "Pi"
       ]
       simplify  = ["Add", 3.2, ["Rational", 692, 77], ["Multiply", 2, ["Sqrt", 5]], "Pi"]
-      evaluate  = 19.80074159560236
+      evaluate  = 19.800741595602359644
+      eval-mach = 19.80074159560236
     `));
 
   // Expected result: 12144966884186830401015120518973257/150534112785803114146067001510798 = 80.6792
@@ -356,21 +376,28 @@ describe('ADD', () => {
       latex     = [
         "Add",
         ["Rational", 2, 3],
-        ["Rational", {num: "12345678912345678"}, {num: "987654321987654321"}],
-        ["Rational", {num: "987654321987654321"}, {num: "12345678912345678"}]
+        ["Rational", "12345678912345678", "987654321987654321"],
+        ["Rational", "987654321987654321", "12345678912345678"]
       ]
       box       = [
         "Add",
-        ["Rational", 1371742101371742, {num: "109739369109739369"}],
+        ["Divide", 1371742101371742, "109739369109739369"],
         ["Rational", 2, 3],
-        ["Rational", {num: "109739369109739369"}, 1371742101371742]
+        ["Divide", "109739369109739369", 1371742101371742]
+      ]
+      canonical = [
+        "Add",
+        ["Rational", 1371742101371742, "109739369109739369"],
+        ["Rational", 2, 3],
+        ["Rational", "109739369109739369", 1371742101371742]
       ]
       simplify  = [
         "Rational",
-        {num: "12144966884186830401015120518973257"},
-        {num: "150534112785803114146067001510798"}
+        "12144966884186830401015120518973257",
+        "150534112785803114146067001510798"
       ]
-      N-auto    = 80.67916739555278
+      N-auto    = 80.679167395552772882
+      N-mach    = 80.67916739555278
     `));
 });
 describe('Subtract', () => {
@@ -412,12 +439,12 @@ describe('NEGATE', () => {
   test(`-1234567890987654321`, () =>
     expect(
       checkJson(['Negate', { num: '1234567890987654321' }])
-    ).toMatchInlineSnapshot(`{num: "-1234567890987654321"}`));
+    ).toMatchInlineSnapshot(`-1234567890987654321`));
 
   test(`-1234567890987654321.123456789`, () =>
     expect(
       checkJson(['Negate', '1234567890987654321.123456789'])
-    ).toMatchInlineSnapshot(`["Negate", "1234567890987654321.123456789"]`));
+    ).toMatchInlineSnapshot(`-1234567890987654321.1`));
 
   test(`-(1+i)`, () =>
     expect(checkJson(['Negate', ['Complex', 1, 1]])).toMatchInlineSnapshot(
@@ -445,25 +472,20 @@ describe('NEGATE', () => {
 
   test(`-(2/3)`, () =>
     expect(checkJson(['Negate', ['Rational', 2, 3]])).toMatchInlineSnapshot(`
-      box       = ["Negate", ["Rational", 2, 3]]
-      canonical = ["Rational", -2, 3]
-      N-auto    = -0.6666666666666666
-      N-bignum  = {num: "-0.6666666666666667"}
+      box       = ["Rational", -2, 3]
+      N-auto    = -0.(6)
+      N-mach    = -0.6666666666666666
     `));
   test(`-(-2/3)`, () =>
     expect(checkJson(['Negate', ['Rational', -2, 3]])).toMatchInlineSnapshot(`
-      box       = ["Negate", ["Rational", -2, 3]]
-      canonical = ["Rational", 2, 3]
-      N-auto    = 0.6666666666666666
-      N-bignum  = {num: "0.6666666666666667"}
+      box       = ["Rational", 2, 3]
+      N-auto    = 0.(6)
+      N-mach    = 0.6666666666666666
     `));
   test(`-(1234567890987654321/3)`, () =>
     expect(
       checkJson(['Negate', ['Rational', { num: '1234567890987654321' }, 3]])
-    ).toMatchInlineSnapshot(`
-      box       = ["Negate", ["Rational", {num: "1234567890987654321"}, 3]]
-      canonical = {num: "-411522630329218107"}
-    `));
+    ).toMatchInlineSnapshot(`-411522630329218107`));
 });
 
 describe('INVALID NEGATE', () => {
@@ -543,22 +565,25 @@ describe('MULTIPLY', () => {
   test(`2x1234567890987654321`, () =>
     expect(checkJson(['Multiply', 2, { num: '1234567890987654321' }]))
       .toMatchInlineSnapshot(`
-      box       = ["Multiply", 2, {num: "1234567890987654321"}]
-      canonical = {num: "2469135781975308642"}
+      box       = ["Multiply", 2, "1234567890987654321"]
+      canonical = 2469135781975308642
     `));
 
   test(`2x-1234567890987654321.123456789`, () =>
-    expect(
-      checkJson(['Multiply', 2, '1234567890987654321.123456789'])
-    ).toMatchInlineSnapshot(
-      `["Multiply", 2, "1234567890987654321.123456789"]`
-    ));
+    expect(checkJson(['Multiply', 2, '1234567890987654321.123456789']))
+      .toMatchInlineSnapshot(`
+      box       = ["Multiply", 2, "1234567890987654321.1"]
+      evaluate  = 2469135781975308642.2
+      eval-mach = 2469135781975309000
+    `));
 
   test(`2x(1+i)`, () =>
     expect(checkJson(['Multiply', 2, ['Complex', 1, 1]]))
       .toMatchInlineSnapshot(`
       box       = ["Multiply", 2, ["Complex", 1, 1]]
       N-auto    = ["Complex", 2, 2]
+      N-big     = {num: "NaN"}
+      N-cplx   = ["Complex", 2, 2]
     `)); // @fixme should be NaN for mach, big
 
   test(`2x(1.1+1.1i)`, () =>
@@ -566,8 +591,9 @@ describe('MULTIPLY', () => {
       .toMatchInlineSnapshot(`
       box       = ["Multiply", 2, ["Complex", 1.1, 1.1]]
       evaluate  = ["Complex", 2.2, 2.2]
-      eval-mach = {num: "NaN"}
       eval-big  = {num: "NaN"}
+      eval-mach = {num: "NaN"}
+      eval-cplx = ["Complex", 2.2, 2.2]
     `));
 
   test(`2x(1.1i)`, () =>
@@ -575,8 +601,9 @@ describe('MULTIPLY', () => {
       .toMatchInlineSnapshot(`
       box       = ["Multiply", 2, ["Complex", 0, 1.1]]
       evaluate  = ["Complex", 0, 2.2]
-      eval-mach = {num: "NaN"}
       eval-big  = {num: "NaN"}
+      eval-mach = {num: "NaN"}
+      eval-cplx = ["Complex", 0, 2.2]
     `));
 
   test(`2x(1.1+i)`, () =>
@@ -584,16 +611,18 @@ describe('MULTIPLY', () => {
       .toMatchInlineSnapshot(`
       box       = ["Multiply", 2, ["Complex", 1.1, 1]]
       evaluate  = ["Complex", 2.2, 2]
-      eval-mach = {num: "NaN"}
       eval-big  = {num: "NaN"}
+      eval-mach = {num: "NaN"}
+      eval-cplx = ["Complex", 2.2, 2]
     `));
   test(`2x(1+1.1i)`, () =>
     expect(checkJson(['Multiply', 2, ['Complex', 1, 1.1]]))
       .toMatchInlineSnapshot(`
       box       = ["Multiply", 2, ["Complex", 1, 1.1]]
       evaluate  = ["Complex", 2, 2.2]
-      eval-mach = {num: "NaN"}
       eval-big  = {num: "NaN"}
+      eval-mach = {num: "NaN"}
+      eval-cplx = ["Complex", 2, 2.2]
     `));
 
   test(`2x(2/3)`, () =>
@@ -601,16 +630,16 @@ describe('MULTIPLY', () => {
       .toMatchInlineSnapshot(`
       box       = ["Multiply", 2, ["Rational", 2, 3]]
       canonical = ["Rational", 4, 3]
-      N-auto    = 1.3333333333333333
-      N-bignum  = {num: "1.333333333333333"}
+      N-auto    = 1.(3)
+      N-mach    = 1.3333333333333333
     `));
   test(`2x(-2/3)`, () =>
     expect(checkJson(['Multiply', 2, ['Rational', -2, 3]]))
       .toMatchInlineSnapshot(`
       box       = ["Multiply", 2, ["Rational", -2, 3]]
       canonical = ["Rational", -4, 3]
-      N-auto    = -1.3333333333333333
-      N-bignum  = {num: "-1.333333333333333"}
+      N-auto    = -1.(3)
+      N-mach    = -1.3333333333333333
     `));
   test(`2x(1234567890987654321/3)`, () =>
     expect(
@@ -620,8 +649,8 @@ describe('MULTIPLY', () => {
         ['Rational', { num: '1234567890987654321' }, 3],
       ])
     ).toMatchInlineSnapshot(`
-      box       = ["Multiply", 2, ["Rational", {num: "1234567890987654321"}, 3]]
-      canonical = {num: "823045260658436214"}
+      box       = ["Multiply", 2, ["Rational", "1234567890987654321", 3]]
+      canonical = 823045260658436214
     `));
 
   test(`Multiply`, () =>
@@ -632,17 +661,17 @@ describe('MULTIPLY', () => {
   test(`Multiply`, () =>
     expect(checkJson(['Multiply', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
       box       = ["Multiply", 2.5, -1.1, 18.4]
-      canonical = ["Multiply", -1, 50.599999999999994]
-      evaluate  = -50.599999999999994
-      eval-big  = {num: "-50.59999999999999"}
+      canonical = ["Negate", ["Multiply", 50.6]]
+      evaluate  = -50.6
+      eval-mach = -50.599999999999994
     `));
 
   test(`Multiply: All exact`, () =>
     expect(check('2\\frac{5}{7}\\times\\frac{7}{9}')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, ["Rational", 5, 7], ["Rational", 7, 9]]
       box       = ["Rational", 10, 9]
-      N-auto    = 1.1111111111111112
-      N-bignum  = {num: "1.111111111111111"}
+      N-auto    = 1.(1)
+      N-mach    = 1.1111111111111112
     `));
 
   test(`Multiply: All exact`, () =>
@@ -661,7 +690,8 @@ describe('MULTIPLY', () => {
         "Pi"
       ]
       box       = ["Multiply", ["Rational", 50, 9], "Pi", ["Sqrt", 2]]
-      N-auto    = 24.6826829897687
+      N-auto    = 24.682682989768701372
+      N-mach    = 24.6826829897687
     `));
   test(`Multiply: One inexact`, () =>
     expect(
@@ -680,8 +710,8 @@ describe('MULTIPLY', () => {
         "Pi"
       ]
       box       = ["Multiply", 1.1, ["Rational", 50, 9], "Pi", ["Sqrt", 2]]
-      evaluate  = 27.150951288745578
-      eval-big  = 27.15095128874557
+      evaluate  = 27.15095128874557151
+      eval-mach = 27.150951288745578
     `)); // @fixme eval-big should be same or bettern than evaluate
 });
 
@@ -706,12 +736,12 @@ describe('Divide', () => {
     expect(ce.box(['Divide', 6, 3]).evaluate()).toMatchInlineSnapshot(`2`));
   test(`Divide`, () =>
     expect(ce.box(['Divide', 2.5, 1.1]).evaluate()).toMatchInlineSnapshot(
-      `2.2727272727272725`
+      `2.(27)`
     ));
   test(`INVALID Divide`, () =>
     expect(
       ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate()
-    ).toMatchInlineSnapshot(`-2.2727272727272725`));
+    ).toMatchInlineSnapshot(`-2.(27)`));
 });
 
 describe('Power', () => {
@@ -733,7 +763,7 @@ describe('Power', () => {
     `));
   test(`Power`, () =>
     expect(ce.box(['Power', 2.5, 1.1]).evaluate()).toMatchInlineSnapshot(
-      `2.7398955659630433`
+      `2.7398955659630432724`
     ));
   test(`Power`, () =>
     expect(ce.box(['Power', 2.5, -3]).evaluate()).toMatchInlineSnapshot(
@@ -741,34 +771,34 @@ describe('Power', () => {
     ));
   test(`Power`, () =>
     expect(ce.box(['Power', 2.5, -3.2]).evaluate()).toMatchInlineSnapshot(
-      `0.05328340527371987`
+      `0.053283405273719880987`
     ));
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5, -1.1, 18.4]).evaluate()).toMatchInlineSnapshot(
-      `0.3649774146221923`
+      `0.36497741462219234487`
     ));
 });
 
 describe('Root', () => {
   test(`Root 2.5`, () =>
     expect(ce.box(['Root', 2.5, 3]).evaluate()).toMatchInlineSnapshot(
-      `1.3572088082974534`
+      `1.3572088082974532443`
     ));
 
   test(`Root 5/7`, () =>
     expect(
       ce.box(['Root', ['Rational', 5, 7], 3]).evaluate()
-    ).toMatchInlineSnapshot(`0.8939035350965676`));
+    ).toMatchInlineSnapshot(`0.89390353509656766727`));
 
   test(`Root 1234567890987654321`, () =>
     expect(
       ce.box(['Root', { num: '1234567890987654321' }, 3]).evaluate()
-    ).toMatchInlineSnapshot(`["Root", {num: "1234567890987654321"}, 3]`));
+    ).toMatchInlineSnapshot(`["Root", "1234567890987654321", 3]`));
 
   test(`Root 1234567890987654321.123456789`, () =>
     expect(
       ce.box(['Root', { num: '1234567890987654321.123456789' }, 3]).evaluate()
-    ).toMatchInlineSnapshot(`{num: "1072765.979927157"}`));
+    ).toMatchInlineSnapshot(`1072765.9799271567916`));
 });
 
 describe('INVALID ROOT', () => {
@@ -789,47 +819,54 @@ describe('Sqrt', () => {
       simplify  = 0
     `));
 
-  test(`√2.5`, () =>
+  test(`√2.5`, () => {
     expect(checkJson(['Sqrt', 2.5])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 2.5]
-      evaluate  = 1.5811388300841898
-      eval-big  = {num: "1.581138830084190"}
-    `));
+      evaluate  = 1.581138830084189666
+      eval-mach = 1.5811388300841898
+    `);
+  });
 
   test(`√(175)`, () =>
     expect(checkJson(['Sqrt', 175])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 175]
       simplify  = ["Multiply", 5, ["Sqrt", 7]]
-      N-auto    = 13.228756555322953
+      N-auto    = 13.228756555322952953
+      N-mach    = 13.228756555322953
     `));
 
   test(`√(12345670000000000000000000)`, () =>
     expect(checkJson(['Sqrt', { num: '12345670000000000000000000' }]))
       .toMatchInlineSnapshot(`
       box       = ["Sqrt", 1.234567e+25]
-      evaluate  = 3513640562152.0254
-      eval-big  = ["Multiply", 1000000000, ["Sqrt", 12345670]]
+      simplify  = ["Multiply", 1000000000, ["Sqrt", 12345670]]
+      evaluate  = ["Multiply", 1000000000, ["Sqrt", 12345670]]
+      N-auto    = 3513640562152.025248
+      eval-mach = 3513640562152.0254
     `));
 
   test(`√(5/7)`, () =>
     expect(checkJson(['Sqrt', ['Rational', 5, 7]])).toMatchInlineSnapshot(`
       box       = ["Sqrt", ["Rational", 5, 7]]
-      N-auto    = 0.8451542547285166
+      N-auto    = 0.84515425472851657751
+      N-mach    = 0.8451542547285166
     `));
 
   test(`√12345678901234567890`, () =>
     expect(checkJson(['Sqrt', { num: '12345678901234567890' }]))
       .toMatchInlineSnapshot(`
-      box       = ["Sqrt", {num: "12345678901234567890"}]
-      simplify  = ["Multiply", 15, ["Sqrt", {num: "1371742100137174210"}]]
-      N-auto    = 3513641828.820144
+      box       = ["Sqrt", "12345678901234567890"]
+      simplify  = ["Multiply", 15, ["Sqrt", "1371742100137174210"]]
+      N-auto    = 3513641828.8201442531
+      N-mach    = 3513641828.820144
     `));
 
   test(`√123456789.01234567890`, () =>
     expect(checkJson(['Sqrt', { num: '123456789.01234567890' }]))
       .toMatchInlineSnapshot(`
-      box       = ["Sqrt", {num: "123456789.0123457"}]
-      evaluate  = 11111.11106111111
+      box       = ["Sqrt", "123456789.0123456789"]
+      evaluate  = 11111.111061111110994
+      N-mach    = 11111.11106111111
     `));
 
   test(`√(1000000/49)`, () =>
@@ -837,14 +874,16 @@ describe('Sqrt', () => {
       .toMatchInlineSnapshot(`
       box       = ["Sqrt", ["Rational", 1000000, 49]]
       simplify  = ["Rational", 1000, 7]
-      N-auto    = 142.85714285714286
+      N-auto    = 142.85714285714285714
+      N-mach    = 142.85714285714286
     `));
 
   test(`√(1000001/7)`, () =>
     expect(checkJson(['Sqrt', ['Rational', 1000001, 7]]))
       .toMatchInlineSnapshot(`
       box       = ["Sqrt", ["Rational", 1000001, 7]]
-      N-auto    = 377.9646619914165
+      N-auto    = 377.96466199141648629
+      N-mach    = 377.9646619914165
     `));
 
   test(`√(12345678901234567890/23456789012345678901)`, () =>
@@ -858,22 +897,17 @@ describe('Sqrt', () => {
         ],
       ])
     ).toMatchInlineSnapshot(`
-      box       = [
-        "Sqrt",
-        [
-          "Rational",
-          {num: "12345678901234567890"},
-          {num: "23456789012345678901"}
-        ]
-      ]
+      box       = ["Sqrt", ["Rational", "12345678901234567890", "23456789012345678901"]]
       canonical = ["Sqrt", ["Rational", 137174210, 260630989]]
-      N-auto    = 0.7254762640277013
+      N-auto    = 0.7254762640277013131
+      N-mach    = 0.7254762640277013
     `));
 
   test(`√(3+4i)`, () =>
     expect(checkJson(['Sqrt', ['Complex', 3, 4]])).toMatchInlineSnapshot(`
       box       = ["Sqrt", ["Complex", 3, 4]]
       evaluate  = ["Complex", 2, 1]
+      N-big     = {num: "NaN"}
     `));
 
   test(`√(4x)`, () =>
@@ -900,8 +934,8 @@ describe('Sqrt', () => {
     expect(checkJson(['Sqrt', 2.5, 1.1])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 2.5, 1.1]
       canonical = ["Sqrt", 2.5]
-      evaluate  = 1.5811388300841898
-      eval-big  = {num: "1.581138830084190"}
+      evaluate  = 1.581138830084189666
+      eval-mach = 1.5811388300841898
     `));
   test(`INVALID  Sqrt`, () =>
     expect(checkJson(['Sqrt', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
@@ -1010,13 +1044,9 @@ describe('Rational', () => {
         { num: '23456789012345678901' },
       ])
     ).toMatchInlineSnapshot(`
-      box       = [
-        "Rational",
-        {num: "12345678901234567890"},
-        {num: "23456789012345678901"}
-      ]
+      box       = ["Rational", "12345678901234567890", "23456789012345678901"]
       canonical = ["Rational", 137174210, 260630989]
-      N-auto    = {num: "0.5263158096675910"}
+      N-auto    = 0.52631580966759098627
     `));
 
   test(`INVALID Rational`, () =>
@@ -1027,8 +1057,8 @@ describe('Rational', () => {
   test(`Rational as Divide`, () =>
     expect(checkJson(['Rational', 3.1, 2.8])).toMatchInlineSnapshot(`
       box       = ["Divide", 3.1, 2.8]
-      evaluate  = 1.1071428571428572
-      eval-big  = {num: "1.107142857142857"}
+      evaluate  = 1.1071428571428571429
+      eval-mach = 1.1071428571428572
     `));
   test(`Rational approximation`, () =>
     expect(checkJson(['Rational', 2.5])).toMatchInlineSnapshot(`
@@ -1047,6 +1077,7 @@ describe('Rational', () => {
     expect(checkJson(['Rational', 'Pi'])).toMatchInlineSnapshot(`
       box       = ["Rational", "Pi"]
       evaluate  = ["Rational", 80143857, 25510582]
-      N-auto    = 3.141592653589793
+      N-auto    = 3.1415926535897932385
+      N-mach    = 3.141592653589793
     `));
 });

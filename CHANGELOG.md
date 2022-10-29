@@ -42,6 +42,16 @@
   with `bignum` and `complex` in most cases.
 - `JsonSerializationOptions` has a new option to specify the numeric precision
   in the MathJSON serialization.
+- Shorthand numbers can now be strings if they do not fit in a float-64:
+
+```json
+// Before
+["Rational", { "num": "1234567890123456789"}, { "num": "2345678901234567889"}]
+
+// Now
+["Rational", "1234567890123456789", "2345678901234567889"]
+```
+
 - `\sum` is now correctly parsed and evaluated. This includes creating a local
   scope with the index and expression value of the sum.
 
@@ -51,6 +61,11 @@
   exponent.
 - Correct calculation of complex square roots
   - `\sqrt{-49}` -> `7i`
+- Calculations were not always performed as bignum in `"auto"` numeric mode if
+  the precision was less than 15. Now, if the numeric mode is `"auto"`,
+  calculations are done as bignum or complex numbers.
+- If an identifier contained multiple strings of digits, it would not be
+  rendered to LaTeX correctly, e.g. `V20_20`.
 
 ## 0.8.0
 

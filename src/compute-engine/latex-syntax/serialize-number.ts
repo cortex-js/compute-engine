@@ -94,13 +94,11 @@ export function serializeNumber(
 ): string {
   if (expr === null) return '';
   let num: string | number;
-  if (typeof expr === 'number') {
+  if (typeof expr === 'number' || typeof expr === 'string') {
     num = expr;
   } else if (typeof expr === 'object' && 'num' in expr) {
     num = expr.num;
-  } else {
-    return '';
-  }
+  } else return '';
 
   if (num === Infinity || num === 'Infinity' || num === '+Infinity') {
     return options.positiveInfinity;

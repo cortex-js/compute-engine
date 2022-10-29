@@ -640,7 +640,7 @@ function sanitizeNameFragment(s: string): string {
   }
 
   // Ends with a numeric suffix?
-  const m = s.match(/([^0-9]+?)([0-9]+)$/);
+  const m = s.match(/(.*?)(-?[0-9]+)$/);
   if (m) {
     if (m[1].length === 0) return s;
     return `${sanitizeNameFragment(m[1])}_{${m[2]}}`;

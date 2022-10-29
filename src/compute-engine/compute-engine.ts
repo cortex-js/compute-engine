@@ -525,22 +525,27 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _bignum: Decimal.Constructor;
 
-  /** The precision, or number of significant digits, for numeric calculations
-   * such as when calling `ce.N()`.
+  /** The precision, or number of significant digits, of numeric
+   * calculations when the numeric mode is `"auto"` or `"bignum"`.
    *
-   * To  make calculations using more digits, at the cost of expended memory
+   * To make calculations using more digits, at the cost of expanded memory
    * usage and slower computations, set the `precision` higher.
+   *
+   * If the numeric mode is not `"auto"` or `"bignum"`, it is set to `"auto"`.
    *
    * Trigonometric operations are accurate for precision up to 1,000.
    *
    */
   get precision(): number {
+    if (this._numericMode === 'machine' || this._numericMode === 'complex')
+      return Math.floor(MACHINE_PRECISION);
     return this._precision;
   }
 
   set precision(p: number | 'machine') {
     if (p === 'machine') p = Math.floor(MACHINE_PRECISION);
     const currentPrecision = this._precision;
+
     if (p === currentPrecision) return;
 
     if (typeof p !== 'number' || p <= 0)
@@ -548,14 +553,23 @@ export class ComputeEngine implements IComputeEngine {
 
     // Set the display precision as requested.
     // It may be less than the effective precision, which is never less than 15
-    if (this._latexSyntax) {
-      this.latexSyntax.updateOptions({
-        precision: p,
-        avoidExponentsInRange: [-6, p],
-      });
-    }
+    this._latexSyntax?.updateOptions({
+      precision: p,
+      avoidExponentsInRange: [-6, p],
+    });
 
     this._precision = Math.max(p, Math.floor(MACHINE_PRECISION));
+
+    if (this.jsonSerializationOptions.precision > this._precision)
+      this.jsonSerializationOptions.precision = this._precision;
+
+    if (
+      this._numericMode !== 'auto' &&
+      this._numericMode !== 'bignum' &&
+      this._precision > Math.floor(MACHINE_PRECISION)
+    )
+      this._numericMode = 'auto';
+
     this._bignum = this._bignum.config({ precision: this._precision });
 
     // Reset the caches
@@ -582,6 +596,9 @@ export class ComputeEngine implements IComputeEngine {
       this.latexSyntax.options.precision > this._precision
     )
       this.latexSyntax.updateOptions({ precision: this._precision });
+
+    if (this.jsonSerializationOptions.precision > this._precision)
+      this.jsonSerializationOptions.precision = this._precision;
 
     // Reset the caches: the values in the cache depend on the numeric mode)
     this.reset();
@@ -1359,7 +1376,7 @@ export class ComputeEngine implements IComputeEngine {
    */
 
   number(
-    value: number | MathJsonNumber | Decimal | Complex | Rational,
+    value: number | string | MathJsonNumber | Decimal | Complex | Rational,
     options?: { canonical?: boolean; metadata?: Metadata }
   ): BoxedExpression {
     options ??= {};
@@ -1418,9 +1435,14 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   serialize(x: Expression | BoxedExpression): string {
-    if (typeof x === 'object' && 'json' in x)
-      return this.latexSyntax.serialize(x.json);
-
+    if (typeof x === 'object' && 'json' in x) {
+      const ce = 'engine' in x ? x.engine : this;
+      const savedPrecision = ce.jsonSerializationOptions.precision;
+      this.jsonSerializationOptions.precision = 'max';
+      const json = x.json;
+      ce.jsonSerializationOptions.precision = savedPrecision;
+      return this.latexSyntax.serialize(json);
+    }
     return this.latexSyntax.serialize(x as Expression);
   }
 

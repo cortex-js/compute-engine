@@ -53,16 +53,14 @@ describe('CANONICAL FORMS', () => {
   test('\\frac{x}{-n}"', () => {
     expect(check('\\frac{x}{-n}')).toMatchInlineSnapshot(`
       latex     = ["Divide", "x", ["Negate", "n"]]
-      box       = ["Negate", ["Divide", "x", "n"]]
-      N-auto    = ["Divide", ["Multiply", -1, "x"], "n"]
+      ["Negate", ["Divide", "x", "n"]]
     `);
   });
 
   test('\\frac{-x}{n}"', () => {
     expect(check('\\frac{-x}{n}')).toMatchInlineSnapshot(`
       latex     = ["Divide", ["Negate", "x"], "n"]
-      box       = ["Negate", ["Divide", "x", "n"]]
-      N-auto    = ["Divide", ["Multiply", -1, "x"], "n"]
+      ["Negate", ["Divide", "x", "n"]]
     `);
   });
 
@@ -71,10 +69,9 @@ describe('CANONICAL FORMS', () => {
       latex     = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
       box       = ["Negate", ["Divide", 101, ["Power", 10, ["Rational", 2, 3]]]]
       simplify  = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
-      evaluate  = -21.759790369322026
-      eval-big  = {
-        num: "-21.75979036932202893002012709359876117621895735367189457070420771014661458084450950459811744216443957"
-      }
+      evaluate  = -21.75979036932202893002012709359876117621895735367189457070420771014661458084450950459811744216443957
+      N-auto    = -21.75979036932202558976886502184544000211938391614029668314127861409875217714824208187295918578675709
+      eval-mach = -21.759790369322026
     `);
   });
 
@@ -192,17 +189,20 @@ describe('COMMUTATIVE ORDER', () => {
         ["Multiply", ["Rational", 45, 2], "Pi", "x", "y", "z", ["Sqrt", "y"]]
       ]
       simplify  = ["Multiply", ["Rational", -45, 2], "Pi", "x", "y", "z", ["Sqrt", "y"]]
-      N-auto    = ["Multiply", -1, 70.68583470577035, "x", "y", "z", ["Sqrt", "y"]]
-      N-bignum  = [
-        "Multiply",
-        -1,
-        {
-          num: "70.68583470577034786540947612378881489443631148593988097193625332692586914143970246913078357019763403"
-        },
-        "x",
-        "y",
-        "z",
-        ["Sqrt", "y"]
+      N-auto    = [
+        "Negate",
+        [
+          "Multiply",
+          "70.68583470577034786540947612378881489443631148593988097193625332692586914143970246913078357019763403",
+          "x",
+          "y",
+          "z",
+          ["Sqrt", "y"]
+        ]
+      ]
+      N-mach    = [
+        "Negate",
+        ["Multiply", 70.68583470577035, "x", "y", "z", ["Sqrt", "y"]]
       ]
     `);
   }); // @fixme: the -1 should be applied to the Decimal
@@ -325,18 +325,16 @@ describe('POLYNOMIAL ORDER', () => {
         ["Power", "x", 3]
       ]
       simplify  = ["Add", ["Multiply", 14, "Pi", ["Power", "x", 3]], ["Power", "x", 3]]
-      N-auto    = ["Add", 0, ["Multiply", 44.982297150257104, ["Power", "x", 3]]]
-      N-bignum  = [
+      N-auto    = [
         "Add",
         0,
         [
           "Multiply",
-          {
-            num: "44.98229715025710533847700736591304037876037159125148149364922429230942968800692598079248755478963896"
-          },
+          "44.98229715025710533847700736591304037876037159125148149364922429230942968800692598079248755478963896",
           ["Power", "x", 3]
         ]
       ]
+      N-mach    = ["Add", 0, ["Multiply", 44.982297150257104, ["Power", "x", 3]]]
     `);
   });
 

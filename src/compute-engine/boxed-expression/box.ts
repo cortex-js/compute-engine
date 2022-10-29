@@ -16,7 +16,12 @@ import { bignumValue } from './utils';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
 import { missingIfEmpty } from '../../math-json/utils';
 import { asBignum, asFloat, asSmallInteger } from '../numerics/numeric';
-import { isRational, neg } from '../numerics/rationals';
+import {
+  isBigRational,
+  isMachineRational,
+  isRational,
+  neg,
+} from '../numerics/rationals';
 
 /**
  * **Theory of Operations**
@@ -73,7 +78,7 @@ import { isRational, neg } from '../numerics/rationals';
  */
 export function boxNumber(
   ce: IComputeEngine,
-  num: MathJsonNumber | number | Complex | Decimal | Rational,
+  num: MathJsonNumber | number | string | Complex | Decimal | Rational,
   options?: { metadata?: Metadata; canonical?: boolean }
 ): BoxedExpression | null {
   //
@@ -91,13 +96,15 @@ export function boxNumber(
   if (isRational(num)) {
     if (num.length !== 2)
       throw new Error(
-        'Array argument to boxNumber() should be two integers or two bignums'
+        'Array argument to `boxNumber()` should be two integers or two bignums'
       );
     const [n, d] = num;
     if (n instanceof Decimal && d instanceof Decimal) {
       // We have a big rational
       if (!n.isInteger() || !d.isInteger())
-        throw new Error('Array argument to boxNumber() should be two integers');
+        throw new Error(
+          'Array argument to `boxNumber()` should be two integers'
+        );
       if (n.eq(d)) return d.isZero() ? ce._NAN : ce._ONE;
       if (d.eq(1)) return ce.number(n, options);
       if (d.eq(-1)) return ce.number(n.negated(), options);
@@ -107,11 +114,11 @@ export function boxNumber(
 
     if (typeof n !== 'number' || typeof d !== 'number')
       throw new Error(
-        'Array argument to boxNumber() should be two integers or two bignums'
+        'Array argument to `boxNumber()` should be two integers or two bignums'
       );
 
     if (!Number.isInteger(n) || !Number.isInteger(d))
-      throw new Error('Array argument to boxNumber() should be two integers');
+      throw new Error('Array argument to `boxNumber()` should be two integers');
     if (d === n) return d === 0 ? ce._NAN : ce._ONE;
     if (d === 1) return ce.number(n, options);
     if (d === -1) return ce.number(-n, options);
@@ -133,15 +140,20 @@ export function boxNumber(
   //
   // Do we have a string of digits?
   //
-  if (typeof num === 'object' && 'num' in num) {
+  let strNum = '';
+  if (typeof num === 'string') strNum = num;
+  else if (typeof num === 'object' && 'num' in num) {
     // Technically, num.num as a number is not valid MathJSON: it should be a
     // string, but we'll allow it.
     if (typeof num.num === 'number') return ce.number(num.num, options);
 
     if (typeof num.num !== 'string')
       throw new Error('MathJSON `num` property should be a string of digits');
+    strNum = num.num;
+  }
 
-    let strNum = num.num.toLowerCase();
+  if (strNum) {
+    strNum = strNum.toLowerCase();
 
     // Remove trailing "n" or "d" letter (from legacy version of MathJSON spec)
     if (/[0-9][nd]$/.test(strNum)) strNum = strNum.slice(0, -1);
@@ -149,6 +161,15 @@ export function boxNumber(
     // Remove any whitespace:
     // Tab, New Line, Vertical Tab, Form Feed, Carriage Return, Space, Non-Breaking Space
     strNum = strNum.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+
+    // Special case some common values to share boxed instances
+    if (strNum === 'nan') return ce._NAN;
+    if (strNum === 'infinity' || strNum === '+infinity')
+      return ce._POSITIVE_INFINITY;
+    if (strNum === '-infinity') return ce._NEGATIVE_INFINITY;
+    if (strNum === '0') return ce._ZERO;
+    if (strNum === '1') return ce._ONE;
+    if (strNum === '-1') return ce._NEGATIVE_ONE;
 
     // Do we have repeating digits?
     if (/\([0-9]+\)/.test(strNum)) {
@@ -161,18 +182,8 @@ export function boxNumber(
         (trail ?? '');
     }
 
-    // Special case some common values to share boxed instances
-    if (strNum === 'nan') return ce._NAN;
-    if (strNum === 'infinity' || strNum === '+infinity')
-      return ce._POSITIVE_INFINITY;
-    if (strNum === '-infinity') return ce._NEGATIVE_INFINITY;
-    if (strNum === '0') return ce._ZERO;
-    if (strNum === '1') return ce._ONE;
-    if (strNum === '-1') return ce._NEGATIVE_ONE;
-
     return boxNumber(ce, ce.bignum(strNum), options);
   }
-
   return null;
 }
 
@@ -299,14 +310,12 @@ export function boxFunction(
     const op1 = ops[0];
     if (typeof op1 === 'number') return ce.number(-op1, options);
     if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
-    if (op1 instanceof AbstractBoxedExpression) {
-      const num = op1.numericValue;
-      if (num !== null) {
-        if (typeof num === 'number') return ce.number(-num, options);
-        if (num instanceof Decimal) return ce.number(num.neg(), options);
-        if (num instanceof Complex) return ce.number(num.neg());
-        if (isRational(num)) return ce.number(neg(num));
-      }
+    const num = ce.box(op1).numericValue;
+    if (num !== null) {
+      if (typeof num === 'number') return ce.number(-num, options);
+      if (num instanceof Decimal) return ce.number(num.neg(), options);
+      if (num instanceof Complex) return ce.number(num.neg());
+      if (isRational(num)) return ce.number(neg(num));
     }
   }
 
@@ -382,13 +391,7 @@ export function boxFunction(
 
 export function box(
   ce: IComputeEngine,
-  expr:
-    | null
-    | undefined
-    | Decimal
-    | Complex
-    | [num: number, denom: number]
-    | SemiBoxedExpression,
+  expr: null | undefined | Decimal | Complex | Rational | SemiBoxedExpression,
   options?: { canonical?: boolean }
 ): BoxedExpression {
   if (expr === null || expr === undefined) return ce._fn('Sequence', []);
@@ -405,10 +408,14 @@ export function box(
   if (Array.isArray(expr)) {
     // If the first element is a number, it's not a function, it's a rational
     // `[number, number]`
-    if (typeof expr[0] === 'number' || expr[0] instanceof Decimal) {
-      const [n, d] = expr;
-      if (typeof d === 'number' && Number.isInteger(n) && Number.isInteger(d))
-        return ce.number(expr as [number, number]);
+    if (isMachineRational(expr)) {
+      if (Number.isInteger(expr[0]) && Number.isInteger(expr[1]))
+        return ce.number(expr);
+      // This wasn't a valid rational, turn it into a `Divide`
+      return boxFunction(ce, 'Divide', expr, options);
+    }
+    if (isBigRational(expr)) {
+      if (expr[0].isInteger() && expr[1].isInteger()) return ce.number(expr);
       // This wasn't a valid rational, turn it into a `Divide`
       return boxFunction(ce, 'Divide', expr, options);
     }
@@ -416,6 +423,7 @@ export function box(
     if (typeof expr[0] === 'string')
       return boxFunction(ce, expr[0], expr.slice(1), options);
 
+    // It's a function with a head expression
     return new BoxedFunction(
       ce,
       box(ce, expr[0], options),
@@ -434,12 +442,14 @@ export function box(
     return ce.number(expr);
 
   //
-  // Box a string or a Symbol
+  // Box a String, a Symbol or a number as a string shorthand
   //
   if (typeof expr === 'string') {
     // It's a `String` if it bracketed with apostrophes (single quotes)
     if (expr.startsWith("'") && expr.endsWith("'"))
       return new BoxedString(ce, expr.slice(1, -1));
+
+    if (/^[+-]?[0-9]/.test(expr)) return ce.number(expr);
 
     return ce.symbol(expr, options);
   }

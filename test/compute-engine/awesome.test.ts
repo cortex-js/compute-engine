@@ -86,7 +86,7 @@ describe('Nth PRIME NUMBER', () =>
                                     ],
                                     [
                                       "Triple",
-                                      ["Hold", ["Subscript", "v", "3"]],
+                                      ["Hold", ["Subscript", "v", 3]],
                                       2,
                                       [
                                         "Floor",
@@ -98,7 +98,7 @@ describe('Nth PRIME NUMBER', () =>
                               ],
                               [
                                 "Triple",
-                                ["Hold", ["Subscript", "v", "2"]],
+                                ["Hold", ["Subscript", "v", 2]],
                                 2,
                                 ["Subscript", "v", 1]
                               ]
@@ -113,7 +113,7 @@ describe('Nth PRIME NUMBER', () =>
               ],
               [
                 "Triple",
-                ["Hold", ["Subscript", "v", "1"]],
+                ["Hold", ["Subscript", "v", 1]],
                 2,
                 ["Floor", ["Multiply", ["Multiply", 1.5, "n"], ["Ln", "n"]]]
               ]
@@ -182,7 +182,7 @@ describe('Nth PRIME NUMBER', () =>
                           ],
                           [
                             "Triple",
-                            ["Hold", ["Subscript", "v", "3"]],
+                            ["Hold", ["Subscript", "v", 3]],
                             2,
                             [
                               "Floor",
@@ -281,6 +281,30 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       ]
       N-auto    = [
         "Multiply",
+        "1.772453850905516027298167483341145182797549456122387128213807789852911284591032181374950656738544665",
+        [
+          "Power",
+          [
+            "Multiply",
+            "0.3678794411714423215955237701614608674458111310317678345078368016974614957448998033571472743459196438",
+            "n"
+          ],
+          "n"
+        ],
+        [
+          "Power",
+          [
+            "Add",
+            "0.0(3)",
+            ["Multiply", 8, ["Power", "n", 3]],
+            ["Multiply", 4, ["Square", "n"]],
+            "n"
+          ],
+          "0.1(6)"
+        ]
+      ]
+      N-mach    = [
+        "Multiply",
         1.7724538509055159,
         ["Power", ["Multiply", 0.36787944117144233, "n"], "n"],
         [
@@ -293,22 +317,6 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
             "n"
           ],
           0.16666666666666666
-        ]
-      ]
-      N-bignum  = [
-        "Multiply",
-        1.7724538509055159,
-        ["Power", ["Multiply", 0.36787944117144233, "n"], "n"],
-        [
-          "Power",
-          [
-            "Add",
-            {num: "0.0(3)"},
-            ["Multiply", 8, ["Power", "n", 3]],
-            ["Multiply", 4, ["Square", "n"]],
-            "n"
-          ],
-          {num: "0.1(6)"}
         ]
       ]
     `)));

@@ -108,10 +108,7 @@ export function getSubexpressions(
  * bignums. If `bignumPreferred()` is false, calculate using machine numbers
  */
 export function bignumPreferred(ce: IComputeEngine) {
-  return (
-    ce.numericMode === 'bignum' ||
-    (ce.numericMode === 'auto' && ce.precision > Math.floor(MACHINE_PRECISION))
-  );
+  return ce.numericMode === 'bignum' || ce.numericMode === 'auto';
 }
 
 /** When result of a numeric evaluation is a complex number,

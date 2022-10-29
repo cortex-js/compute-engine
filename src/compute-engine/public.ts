@@ -44,14 +44,17 @@ export type Metadata = {
 
 /**
  * The numeric evaluation mode:
- *
- * - `"auto"`: use bignum or complex numbers.
- * - `"machine"`: **IEEE 754-2008**, 64-bit float: 52-bit mantissa,
- *    about 15 digits of precision
- * - `"bignum"`: arbitrary precision floating point numbers, as provided by the
- * "decimal.js" library
- * - `"complex"`: complex number represented by two machine numbers, a real and
- * an imaginary part, as provided by the "complex.js" library
+ * 
+<div class=symbols-table>
+
+| Mode | |
+| :--- | :----- |
+| `"auto"`| Use bignum or complex numbers. |
+| `"machine"` |  **IEEE 754-2008**, 64-bit floating point numbers: 52-bit mantissa, about 15 digits of precision |
+| `"bignum"` | Arbitrary precision floating point numbers, as provided by the "decimal.js" library | 
+| `"complex"` | Complex number represented by two machine numbers, a real and an imaginary part, as provided by the "complex.js" library |
+
+</div>
  */
 export type NumericMode = 'auto' | 'machine' | 'bignum' | 'complex';
 
@@ -2027,6 +2030,7 @@ export interface IComputeEngine {
   number(
     value:
       | number
+      | string
       | MathJsonNumber
       | Decimal
       | Complex
