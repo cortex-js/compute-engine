@@ -427,7 +427,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get isFinite(): boolean {
-    return !this.isInfinity && !isNaN;
+    return !this.isInfinity && !this.isNaN;
   }
 
   get isNumber(): true {
@@ -460,9 +460,9 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   get isReal(): boolean {
     if (!this.isFinite) return false;
-    if (this._value instanceof Complex) {
+    if (this._value instanceof Complex)
       return this.engine.chop(this._value.im) === 0;
-    }
+
     return true;
   }
 

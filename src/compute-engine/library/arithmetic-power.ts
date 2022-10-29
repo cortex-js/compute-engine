@@ -144,14 +144,14 @@ export function canonicalPower(
     if (a !== null) {
       const b = asSmallInteger(base.op2);
       if (b !== null) {
-        return ce._fn('Power', [base.op1, ce.number(a * b)]);
+        return ce.power(base.op1, ce.number(a * b));
       }
     }
     if (base.op1.isNonNegative) {
       const ar = asRational(exponent);
       if (ar) {
         const br = asRational(base.op2);
-        if (br) return ce._fn('Power', [base.op1, ce.number(mul(ar, br))]);
+        if (br) return ce.power(base.op1, ce.number(mul(ar, br)));
       }
     }
   }
@@ -160,11 +160,7 @@ export function canonicalPower(
   // (abc)^n -> a^n b^n c^n
   if (base.head === 'Multiply') {
     const e = asSmallInteger(exponent);
-    if (e !== null)
-      return ce._fn(
-        'Multiply',
-        base.ops!.map((x) => ce.power(x, exponent))
-      );
+    if (e !== null) return ce.mul(base.ops!.map((x) => ce.power(x, exponent)));
   }
 
   return null;
@@ -182,20 +178,16 @@ export function square(
     return ce.number([num[1] * num[1], num[0] * num[0]]);
   if (isBigRational(num)) return ce.number([num[1].pow(2), num[0].pow(2)]);
 
-  if (base.head === 'Multiply') {
-    return ce._fn(
-      'Multiply',
-      base.ops!.map((x) => square(ce, x))
-    );
-  }
+  if (base.head === 'Multiply')
+    return ce.mul(base.ops!.map((x) => square(ce, x)));
 
   if (base.head === 'Power') {
     const exp = asSmallInteger(base.op2);
-    if (exp !== null) return ce._fn('Power', [base.op1, ce.number(exp * 2)]);
-    return ce._fn('Power', [base.op1, ce.mul([ce.number(2), base.op2])]);
+    if (exp !== null) return ce.power(base.op1, ce.number(exp * 2));
+    return ce.power(base.op1, ce.mul([ce.number(2), base.op2]));
   }
 
-  return ce._fn('Power', [base, ce.number(2)]);
+  return ce.power(base, ce.number(2));
 }
 
 export function processPower(

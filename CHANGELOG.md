@@ -66,6 +66,7 @@
   calculations are done as bignum or complex numbers.
 - If an identifier contained multiple strings of digits, it would not be
   rendered to LaTeX correctly, e.g. `V20_20`.
+- Correctly return `isReal` for real numbers
 
 ## 0.8.0
 

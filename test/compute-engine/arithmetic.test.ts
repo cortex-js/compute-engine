@@ -895,7 +895,7 @@ describe('Sqrt', () => {
   test(`√(3^2)`, () =>
     expect(checkJson(['Sqrt', ['Square', 3]])).toMatchInlineSnapshot(`
       box       = ["Sqrt", ["Square", 3]]
-      simplify  = 3
+      canonical = 3
     `));
 
   test(`√(5x(3+2))`, () =>
@@ -1039,15 +1039,8 @@ describe('Rational', () => {
   test(`Rational approximation`, () =>
     expect(checkJson(['Rational', 2.5])).toMatchInlineSnapshot(`
       box       = ["Rational", 2.5]
-      canonical = [
-        "Error",
-        [
-          "ErrorCode",
-          "'incompatible-domain'",
-          "RealNumber",
-          ["Domain", "PositiveNumber"]
-        ]
-      ]
+      evaluate  = ["Rational", 5, 2]
+      N-auto    = 2.5
     `));
   test(`Rational approximation`, () =>
     expect(checkJson(['Rational', 'Pi'])).toMatchInlineSnapshot(`

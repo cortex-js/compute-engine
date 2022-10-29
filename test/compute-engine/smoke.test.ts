@@ -35,9 +35,6 @@ ce.numericMode = 'auto';
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
 
-// Should not error
-console.log(ce.box(['Rational', 2.5]).evaluate().json);
-
 // Should output error about extra argument
 console.log(ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate());
 
@@ -634,9 +631,7 @@ describe('CANONICALIZATION divide', () => {
 });
 describe('CANONICALIZATION sqrt', () => {
   test('\\sqrt{3^2}', () => {
-    expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(
-      `["Sqrt", ["Square", 3]]`
-    );
+    expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`);
     // Canonical of Sqrt should not transform to Power
     expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(`["Sqrt", 12]`);
   });
