@@ -491,14 +491,18 @@ describe('NEGATE', () => {
 describe('INVALID NEGATE', () => {
   test(`INVALID Negate`, () =>
     expect(ce.box(['Negate', 2.5, 1.1]).evaluate()).toMatchInlineSnapshot(
-      `-2.5`
+      `["Negate", 2.5, ["Error", "'unexpected-argument'", 1.1]]`
     ));
   test(`INVALID Negate`, () =>
-    expect(
-      ce.box(['Negate', 2.5, -1.1, 18.4]).evaluate()
-    ).toMatchInlineSnapshot(
-      `["Negate", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`
-    ));
+    expect(ce.box(['Negate', 2.5, -1.1, 18.4]).evaluate())
+      .toMatchInlineSnapshot(`
+      [
+        "Negate",
+        2.5,
+        ["Error", "'unexpected-argument'", -1.1],
+        ["Error", "'unexpected-argument'", 18.4]
+      ]
+    `));
 });
 
 describe('MULTIPLY', () => {
@@ -729,7 +733,9 @@ describe('Divide', () => {
   test(`INVALID Divide`, () =>
     expect(
       ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate()
-    ).toMatchInlineSnapshot(`-2.(27)`));
+    ).toMatchInlineSnapshot(
+      `["Divide", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`
+    ));
 });
 
 describe('Power', () => {
@@ -751,7 +757,7 @@ describe('Power', () => {
     ));
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5, -1.1, 18.4]).evaluate()).toMatchInlineSnapshot(
-      `0.36497741462219234487`
+      `["Power", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`
     ));
 });
 
@@ -909,14 +915,17 @@ describe('Sqrt', () => {
   test(`INVALID Sqrt`, () =>
     expect(checkJson(['Sqrt', 2.5, 1.1])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 2.5, 1.1]
-      canonical = ["Sqrt", 2.5]
-      evaluate  = 1.581138830084189666
-      eval-mach = 1.5811388300841898
+      canonical = ["Sqrt", 2.5, ["Error", "'unexpected-argument'", 1.1]]
     `));
   test(`INVALID  Sqrt`, () =>
     expect(checkJson(['Sqrt', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 2.5, -1.1, 18.4]
-      canonical = ["Sqrt", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]
+      canonical = [
+        "Sqrt",
+        2.5,
+        ["Error", "'unexpected-argument'", -1.1],
+        ["Error", "'unexpected-argument'", 18.4]
+      ]
     `));
 });
 
@@ -929,13 +938,17 @@ describe('Square', () => {
   test(`INVALID Square`, () =>
     expect(checkJson(['Square', 2.5, 1.1])).toMatchInlineSnapshot(`
       box       = ["Square", 2.5, 1.1]
-      canonical = ["Square", 2.5]
-      evaluate  = 6.25
+      canonical = ["Square", 2.5, ["Error", "'unexpected-argument'", 1.1]]
     `));
   test(`INVALID Square`, () =>
     expect(checkJson(['Square', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
       box       = ["Square", 2.5, -1.1, 18.4]
-      canonical = ["Square", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]
+      canonical = [
+        "Square",
+        2.5,
+        ["Error", "'unexpected-argument'", -1.1],
+        ["Error", "'unexpected-argument'", 18.4]
+      ]
     `));
 });
 

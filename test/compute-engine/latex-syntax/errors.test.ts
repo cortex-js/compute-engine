@@ -524,9 +524,14 @@ check('Missing argument', () =>
 );
 
 check('Unexpected argument', () =>
-  expect(engine.box(['Sqrt', 12, 29, 74]).canonical).toMatchInlineSnapshot(
-    `["Sqrt", 12, 29, ["Error", "'unexpected-argument'", 74]]`
-  )
+  expect(engine.box(['Sqrt', 12, 29, 74]).canonical).toMatchInlineSnapshot(`
+    [
+      "Sqrt",
+      12,
+      ["Error", "'unexpected-argument'", 29],
+      ["Error", "'unexpected-argument'", 74]
+    ]
+  `)
 );
 
 check('Mismatched domain', () =>
