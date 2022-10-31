@@ -16,6 +16,39 @@ import {
 } from '../numerics/rationals';
 import { asFloat, asSmallInteger } from '../numerics/numeric';
 
+function subtract(
+  ce: IComputeEngine,
+  a: BoxedExpression,
+  b: BoxedExpression,
+  metadata?: Metadata
+): Expression | null {
+  if (a.isLiteral) {
+    if (isRational(a.numericValue)) {
+      if (machineNumerator(a.numericValue) < 0) {
+        return serializeJsonFunction(
+          ce,
+          'Subtract',
+          [b, ce.number(neg(a.numericValue))],
+          metadata
+        );
+      }
+      return null;
+    }
+    const t0 = asSmallInteger(a);
+    if (t0 !== null && t0 < 0)
+      return serializeJsonFunction(
+        ce,
+        'Subtract',
+        [b, ce.number(-t0)],
+        metadata
+      );
+  }
+  if (a.head === 'Negate')
+    return serializeJsonFunction(ce, 'Subtract', [b, a.op1], metadata);
+
+  return null;
+}
+
 /**
  * The canonical version of `serializeJsonFunction()` applies
  * additional transformations to "reverse" some of the effects
@@ -31,30 +64,13 @@ export function serializeJsonCanonicalFunction(
   const exclusions = ce.jsonSerializationOptions.exclude;
 
   if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
-    if (args[0].isLiteral) {
-      const t0 = asSmallInteger(args[0]);
-      if (t0 !== null && t0 < 0)
-        return serializeJsonFunction(
-          ce,
-          'Subtract',
-          [args[1], ce.number(-t0)],
-          metadata
-        );
-    }
-    if (args[0].head === 'Negate') {
-      return serializeJsonFunction(
-        ce,
-        'Subtract',
-        [args[1], args[0].op1],
-        metadata
-      );
-    }
+    const sub =
+      subtract(ce, args[0], args[1], metadata) ??
+      subtract(ce, args[1], args[0], metadata);
+    if (sub) return sub;
   }
 
-  if (
-    head === 'Divide' &&
-    ce.jsonSerializationOptions.exclude.includes('Divide')
-  ) {
+  if (head === 'Divide' && args.length === 2 && exclusions.includes('Divide')) {
     return serializeJsonFunction(
       ce,
       'Multiply',
@@ -63,11 +79,8 @@ export function serializeJsonCanonicalFunction(
     );
   }
 
-  if (
-    head === 'Multiply' &&
-    !ce.jsonSerializationOptions.exclude.includes('Negate')
-  ) {
-    if (args[0].isLiteral && asFloat(args[0]) === -1)
+  if (head === 'Multiply' && !exclusions.includes('Negate')) {
+    if (args[0]?.isLiteral && asFloat(args[0]) === -1)
       return serializeJsonFunction(
         ce,
         'Negate',
@@ -76,10 +89,7 @@ export function serializeJsonCanonicalFunction(
       );
   }
 
-  if (
-    head === 'Multiply' &&
-    !ce.jsonSerializationOptions.exclude.includes('Divide')
-  ) {
+  if (head === 'Multiply' && !exclusions.includes('Divide')) {
     // Display a product with negative exponents as a division if
     // there are terms with a negative degree
     const result = new Product(ce, args, {
@@ -98,11 +108,7 @@ export function serializeJsonCanonicalFunction(
       if (exp === 2 && !exclusions.includes('Square'))
         return serializeJsonFunction(ce, 'Square', [args[0]], metadata);
 
-      if (
-        exp !== null &&
-        exp < 0 &&
-        !ce.jsonSerializationOptions.exclude.includes('Divide')
-      ) {
+      if (exp !== null && exp < 0 && !exclusions.includes('Divide')) {
         return serializeJsonFunction(
           ce,
           'Divide',
