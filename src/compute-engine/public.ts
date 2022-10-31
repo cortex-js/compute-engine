@@ -2198,7 +2198,7 @@ export interface IComputeEngine {
   );
 
   /** {@inheritDoc  JsonSerializationOptions} */
-  get jsonSerializationOptions(): JsonSerializationOptions;
+  get jsonSerializationOptions(): Readonly<JsonSerializationOptions>;
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>);
 
   pushScope(options?: {

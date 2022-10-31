@@ -85,9 +85,9 @@ describe('NUMERIC MODE', () => {
               "Multiply",
               "ImaginaryUnit",
               [
-                "Add",
-                ["Rational", -1, 555555],
-                ["Multiply", ["Rational", -1, 2], "Pi"]
+                "Subtract",
+                ["Multiply", ["Rational", -1, 2], "Pi"],
+                ["Rational", 1, 555555]
               ]
             ]
           ]

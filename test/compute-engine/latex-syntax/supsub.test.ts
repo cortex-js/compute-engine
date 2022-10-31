@@ -32,9 +32,7 @@ describe('INVERSE FUNCTION', () => {
     expect(latex(['InverseFunction', 'Sin'])).toMatchInlineSnapshot(
       `\\sin^{-1}`
     );
-    expect(latex(['InverseFunction', 'f'])).toMatchInlineSnapshot(
-      `\\texttt{\\textcolor{red}{f}}^{-1}`
-    );
+    expect(latex(['InverseFunction', 'f'])).toMatchInlineSnapshot(`f^{-1}`);
   });
 });
 
@@ -85,7 +83,8 @@ describe('SUPSUB', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "Anything"]
-          ]
+          ],
+          "x_0"
         ],
         2
       ]
@@ -100,7 +99,8 @@ describe('SUPSUB', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "Anything"]
-          ]
+          ],
+          "x_0"
         ],
         2
       ]
@@ -123,7 +123,8 @@ describe('SUPSUB', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "String"]
-          ]
+          ],
+          ["Subscript", "'missing'", ["Latex", "'_'"]]
         ],
         ["Power", "p", "q"],
         "x"
@@ -139,7 +140,8 @@ describe('SUPSUB', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "String"]
-          ]
+          ],
+          ["Subscript", "'missing'", ["Latex", "'_'"]]
         ],
         ["Power", "p", "q"],
         [
@@ -151,7 +153,8 @@ describe('SUPSUB', () => {
               "'incompatible-domain'",
               "Number",
               ["Domain", "Anything"]
-            ]
+            ],
+            "x_r"
           ],
           "s"
         ]
@@ -167,7 +170,8 @@ describe('SUPSUB', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "String"]
-          ]
+          ],
+          ["Subscript", "'missing'", ["Latex", "'_'"]]
         ],
         ["Power", ["Add", 1, "p"], ["Add", 1, "q"]],
         ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", 1, "s"]]
@@ -203,7 +207,8 @@ describe('SUPSUB', () => {
               "'incompatible-domain'",
               "Number",
               ["Domain", "String"]
-            ]
+            ],
+            "'missing'"
           ],
           [
             "Error",
@@ -212,7 +217,8 @@ describe('SUPSUB', () => {
               "'incompatible-domain'",
               "Number",
               ["Domain", "String"]
-            ]
+            ],
+            ["Latex", "'^'"]
           ]
         ],
         [
@@ -222,7 +228,8 @@ describe('SUPSUB', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "Anything"]
-          ]
+          ],
+          "p_q"
         ],
         ["Power", ["Subscript", ["Add", 1, "x"], 0], "n"]
       ]
@@ -239,7 +246,8 @@ describe('SUPSUB', () => {
               "'incompatible-domain'",
               "Number",
               ["Domain", "String"]
-            ]
+            ],
+            "'missing'"
           ],
           [
             "Error",
@@ -248,7 +256,8 @@ describe('SUPSUB', () => {
               "'incompatible-domain'",
               "Number",
               ["Domain", "String"]
-            ]
+            ],
+            ["Latex", "'^'"]
           ]
         ],
         ["Subscript", 12, 34],
@@ -364,7 +373,16 @@ describe('PRIME', () => {
     expect(parse('f^{\\prime}')).toMatchInlineSnapshot(`
       [
         "Power",
-        "f",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Number",
+            ["Domain", "Function"]
+          ],
+          "f"
+        ],
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\prime'"],
@@ -377,7 +395,16 @@ describe('PRIME', () => {
         "Sequence",
         [
           "Power",
-          "f",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              "Number",
+              ["Domain", "Function"]
+            ],
+            "f"
+          ],
           ["Error", "'expected-closing-delimiter'", ["Latex", "'\\prime'"]]
         ],
         [
@@ -393,7 +420,16 @@ describe('PRIME', () => {
         "Sequence",
         [
           "Power",
-          "f",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              "Number",
+              ["Domain", "Function"]
+            ],
+            "f"
+          ],
           ["Error", "'expected-closing-delimiter'", ["Latex", "'\\prime'"]]
         ],
         [
@@ -412,7 +448,16 @@ describe('PRIME', () => {
     expect(parse('f^{\\doubleprime}')).toMatchInlineSnapshot(`
       [
         "Power",
-        "f",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Number",
+            ["Domain", "Function"]
+          ],
+          "f"
+        ],
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\doubleprime'"],

@@ -126,27 +126,24 @@ export const CORE_LIBRARY: SymbolTable[] = [
       },
       {
         /**
-         * - The first argument is an expression that indicates a partial
-         * success, or a suitable substitution. If no substitution is possible,
-         * the `Nothing` symbol is used. `NaN`, `0` and `1` are other popular
-         * choices.
-         * - The second argument indicates the reason for the error. It is
-         * an expression that evaluates to a string
-         * - The third argument, if present, indicates the context/location
+         * - The first argument is either a string or an `["ErrorCode"]`
+         * expression indicating the nature of the error.
+         * - The second argument, if present, indicates the context/location
          * of the error. If the error occur while parsing a LaTeX string,
          * for example, the argument will be a `Latex` expression.
          */
         name: 'Error',
         complexity: 500,
-        inert: true,
         signature: {
           domain: ['Function', 'Anything', ['Maybe', 'Anything'], 'Void'],
+          // To make a canonical expression, don't canonicalize the args
+          canonical: (ce, args) => ce._fn('Error', args),
         },
       },
       {
         name: 'ErrorCode',
         complexity: 500,
-        inert: true,
+        hold: 'all',
         signature: {
           domain: [
             'Function',
@@ -154,6 +151,18 @@ export const CORE_LIBRARY: SymbolTable[] = [
             ['Maybe', ['Sequence', 'Anything']],
             'Anything',
           ],
+          canonical: (ce, args) => {
+            if (args[0].head === 'ErrorCode') {
+              const code = args[0].op1.string;
+              if (code === 'incompatible-domain') {
+                return ce._fn('ErrorCode', [
+                  ce.domain(args[0]),
+                  ce.domain(args[1]),
+                ]);
+              }
+            }
+            return ce._fn('ErrorCode', args);
+          },
         },
       },
       {
@@ -161,7 +170,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
         hold: 'all',
         signature: {
           domain: 'Function',
-          codomain: (_ce, args) => args[0].domain,
+          codomain: (_ce, args) => args[0],
+          // To make a canonical expression, don't canonicalize the args
           canonical: (ce, args) => ce._fn('Hold', args),
         },
       },
@@ -171,6 +181,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
           domain: 'Function',
           canonical: (ce, args) => {
             if (args.length === 2) return args[0].canonical;
+            // Returning an empty `["Sequence"]` will make the expression be ignored
             return ce.box(['Sequence']);
           },
         },
@@ -242,26 +253,23 @@ export const CORE_LIBRARY: SymbolTable[] = [
             if (!op1.string)
               return ce.error(
                 ['incompatible-domain', 'String', op1.domain.json],
-                ['Latex', op1.latex]
+                op1
               );
 
             const op2 = ops[1];
             if (op2.isNothing)
               return ce.number(Number.parseInt(op1.string, 10));
             if (op2.numericValue === null) {
-              return ce.error(
-                ['unexpected-base', op2.latex],
-                ['Latex', op2.latex]
-              );
+              return ce.error(['unexpected-base', op2.latex], op2);
             }
             const base = asFloat(op2)!;
             if (!Number.isInteger(base) || base < 2 || base > 36)
-              return ce.error(['unexpected-base', base], ['Latex', op2.latex]);
+              return ce.error(['unexpected-base', base], op2);
 
             const [value, rest] = fromDigits(op1.string, base);
 
             if (rest)
-              return ce.error(['unexpected-digit', rest[0]], ['Latex', rest]);
+              return ce.error(['unexpected-digit', rest[0]], { str: rest });
 
             return ce.number(value);
           },
@@ -349,7 +357,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
         hold: 'all',
         signature: {
           domain: ['Function', 'Anything', 'Function'],
-          codomain: (_ce, ops) => ops[0].codomain,
+          codomain: (_ce, ops) => ops[0],
           canonical: (ce, ops) => ce._fn('Lambda', ops),
         },
       },
@@ -378,7 +386,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
             if (ops.length === 0) return ce._fn('List', []);
             let latex = '';
             if (ops[0].head === 'Latex') latex = ops[0].op1.string ?? '';
-            else if (ops[0].head === 'LatexString') latex = ops[0].op1.latex;
+            else if (ops[0].head === 'LatexString')
+              latex = joinLatex(ops[0].ops!.map((op) => op.latex));
             else latex = ops[0].latex;
             return ce._fn(
               'List',
@@ -487,9 +496,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
             // or an indexable collection?
             if (op1.symbol) {
               // Indexable collection?
-              if (op1.symbolDefinition?.at) {
-                return ce._fn('At', [op1, op2]);
-              }
+              if (op1.symbolDefinition?.at) return ce._fn('At', [op1, op2]);
+
               // Maybe a compound symbol
               let sub = op2.string ?? op2.symbol;
               if (!sub && op2.isLiteral && asSmallInteger(op2) !== null)

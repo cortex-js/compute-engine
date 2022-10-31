@@ -484,11 +484,11 @@ describe('OPERATOR serialize, invalid', () => {
   test(`['Subtract', null] // Invalid form`, () =>
     expect(
       latex(['Subtract', null as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\texttt{\\textcolor{red}{\\blacksquare}}`));
+    ).toMatchInlineSnapshot(`\\textcolor{red}{\\blacksquare}`));
   test(`['Subtract', undefined] // Invalid form`, () =>
     expect(
       latex(['Subtract', undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\texttt{\\textcolor{red}{\\blacksquare}}`));
+    ).toMatchInlineSnapshot(`\\textcolor{red}{\\blacksquare}`));
   test(`['Subtract', 1] // Invalid form`, () =>
     expect(latex(['Subtract', 1])).toMatchInlineSnapshot(`-1`));
   test(`['Subtract', 1, 2, 3] // Invalid form`, () =>
@@ -497,11 +497,15 @@ describe('OPERATOR serialize, invalid', () => {
   test(`['Multiply', null] // Invalid form`, () =>
     expect(
       latex(['Multiply', null as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\texttt{\\textcolor{red}{\\blacksquare}}`));
+    ).toMatchInlineSnapshot(
+      `\\textcolor{red}{\\blacksquare\\in \\mathbf{\\mathrm{Anything}}\\notin \\mathrm{Number}}`
+    ));
   test(`['Multiply', undefined] // Invalid form`, () =>
     expect(
       latex(['Multiply', undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\texttt{\\textcolor{red}{\\blacksquare}}`));
+    ).toMatchInlineSnapshot(
+      `\\textcolor{red}{\\blacksquare\\in \\mathbf{\\mathrm{Anything}}\\notin \\mathrm{Number}}`
+    ));
   test(`['Multiply', 1] // Invalid form`, () =>
     expect(latex(['Multiply', 1])).toMatchInlineSnapshot(`1`));
   test(`['Multiply', 'NaN'] // Invalid form`, () =>

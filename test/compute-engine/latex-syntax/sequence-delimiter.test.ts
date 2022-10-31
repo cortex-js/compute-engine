@@ -44,20 +44,15 @@ describe('SEQUENCES AND DELIMITERS', () => {
         "Delimiter",
         [
           "List",
-          "List",
           ["List", "a", "b"],
-          "List",
           [
             "List",
             "c",
             "d",
             [
               "Sequence",
-              "List",
               ["Error", "'missing'", ["Latex", "';'"]],
-              "List",
-              ["Error", "'missing'", ["Latex", "';'"]],
-              "List",
+              "Nothing",
               ["List", "n", "Nothing", "m"]
             ]
           ]
@@ -67,20 +62,15 @@ describe('SEQUENCES AND DELIMITERS', () => {
         "Delimiter",
         [
           "List",
-          "List",
           ["List", "a", "b"],
-          "List",
           [
             "List",
             "c",
             "d",
             [
               "Sequence",
-              "List",
               ["Error", "'missing'", ["Latex", "';'"]],
-              "List",
-              ["Error", "'missing'", ["Latex", "';'"]],
-              "List",
+              "Nothing",
               ["List", "n", "Nothing", "m"]
             ]
           ]
@@ -92,56 +82,45 @@ describe('SEQUENCES AND DELIMITERS', () => {
       ["List", "a", ["List", "b", "c"]]
     `);
     expect(check('(a, (b; c))')).toMatchInlineSnapshot(`
-      latex     = [
-        "Delimiter",
-        ["List", "a", ["Delimiter", ["List", "List", "b", "List", "c"]]]
-      ]
-      ["List", "a", ["List", "List", "b", "List", "c"]]
+      latex     = ["Delimiter", ["List", "a", ["Delimiter", ["List", "b", "c"]]]]
+      ["List", "a", ["List", "b", "c"]]
     `);
   });
   test('Sequences', () => {
     expect(check('a, b, c')).toMatchInlineSnapshot(`
-      latex     = ["List", "a", "b", "c"]
-      ["List", "a", "b", "c"]
+      latex     = ["Sequence", "a", "b", "c"]
+      ["Sequence", "a", "b", "c"]
     `);
     // Sequence with missing element
     expect(check('a,, c')).toMatchInlineSnapshot(`
-      latex     = ["List", "a", "Nothing", "c"]
-      ["List", "a", "Nothing", "c"]
+      latex     = ["Sequence", "a", "Nothing", "c"]
+      ["Sequence", "a", "Nothing", "c"]
     `);
     // Sequence with missing final element
     expect(check('a,c,')).toMatchInlineSnapshot(`
-      latex     = ["List", "a", "c", "Nothing"]
-      ["List", "a", "c", "Nothing"]
+      latex     = ["Sequence", "a", "c", "Nothing"]
+      ["Sequence", "a", "c", "Nothing"]
     `);
     // Sequence with missing initial element
     expect(check(',c,b')).toMatchInlineSnapshot(`
-      latex     = ["List", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]
-      ["List", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]
-    `);
+      latex     = ["Sequence", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]
+      ["Sequence", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]
+    `); // @fixme: initial element should not be an error
   });
   test('Subsequences', () => {
     expect(check('a,b;c,d,e;f;g,h')).toMatchInlineSnapshot(`
       latex     = [
         "Sequence",
-        "List",
         ["List", "a", "b"],
-        "List",
         ["List", "c", "d", "ExponentialE"],
-        "List",
         "f",
-        "List",
         ["List", "g", "h"]
       ]
       [
         "Sequence",
-        "List",
         ["List", "a", "b"],
-        "List",
         ["List", "c", "d", "ExponentialE"],
-        "List",
         "f",
-        "List",
         ["List", "g", "h"]
       ]
     `);
@@ -149,21 +128,15 @@ describe('SEQUENCES AND DELIMITERS', () => {
     expect(check(';;a;')).toMatchInlineSnapshot(`
       latex     = [
         "Sequence",
-        "List",
         ["Error", "'missing'", ["Latex", "';'"]],
-        "List",
-        ["Error", "'missing'", ["Latex", "';'"]],
-        "List",
+        "Nothing",
         "a",
         "Nothing"
       ]
       [
         "Sequence",
-        "List",
         ["Error", "'missing'", ["Latex", "';'"]],
-        "List",
-        ["Error", "'missing'", ["Latex", "';'"]],
-        "List",
+        "Nothing",
         "a",
         "Nothing"
       ]

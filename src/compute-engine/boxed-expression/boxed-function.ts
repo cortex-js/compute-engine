@@ -1130,6 +1130,15 @@ function validateSignature(
   return newOps;
 }
 
+/**
+ * Validation of arguments is normally done by checking the signature of the
+ * function vs the arguments of the expression. However, we have a fastpath
+ * for some common operations (add, multiply, power, neg, etc...) that bypasses
+ * the regular checks. This is its replacements. Since all those fastpath
+ * functions are numeric (i.e. have numeric arguments and return a numeric
+ * value), we do a simple numeric check of all arguments, and verify we have
+ * the number of expected arguments.
+ */
 function validateNumericArgs(
   ce: IComputeEngine,
   ops: SemiBoxedExpression[],
@@ -1148,7 +1157,7 @@ function validateNumericArgs(
   return xs.map((op) =>
     !op.isValid || op.isNumber
       ? op
-      : ce.error(['incompatible-domain', 'Number', op.domain])
+      : ce.error(['incompatible-domain', 'Number', op.domain], op)
   );
 }
 

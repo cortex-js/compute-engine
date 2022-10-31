@@ -165,6 +165,15 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   private _jsonSerializationOptions: JsonSerializationOptions;
 
+  /**
+   * During certain operations  (serializing to LaTeX, constructing error
+   * messages) we need to use a "raw" JSON serialization without any customization. Setting the `_useRawJsonSerializationOptions` will bypass
+   * the `_jsonSerializationOptions` and use `_rawJsonSerializationOptions`
+   * instead
+   * @internal */
+  private _useRawJsonSerializationOptions: boolean;
+  private _rawJsonSerializationOptions: JsonSerializationOptions;
+
   /** The domain of unknown symbols. If `null` unknown symbols do not have a
    * definition automatically associated with them.
    *
@@ -315,6 +324,15 @@ export class ComputeEngine implements IComputeEngine {
     this._latexDictionary = options?.latexDictionary;
 
     this._jsonSerializationOptions = {
+      exclude: [],
+      shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
+      metadata: [],
+      precision: 'max',
+      repeatingDecimals: true,
+    };
+
+    this._useRawJsonSerializationOptions = false;
+    this._rawJsonSerializationOptions = {
       exclude: [],
       shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
       metadata: [],
@@ -561,7 +579,7 @@ export class ComputeEngine implements IComputeEngine {
     this._precision = Math.max(p, Math.floor(MACHINE_PRECISION));
 
     if (this.jsonSerializationOptions.precision > this._precision)
-      this.jsonSerializationOptions.precision = this._precision;
+      this.jsonSerializationOptions = { precision: this._precision };
 
     if (
       this._numericMode !== 'auto' &&
@@ -598,7 +616,7 @@ export class ComputeEngine implements IComputeEngine {
       this.latexSyntax.updateOptions({ precision: this._precision });
 
     if (this.jsonSerializationOptions.precision > this._precision)
-      this.jsonSerializationOptions.precision = this._precision;
+      this.jsonSerializationOptions = { precision: this._precision };
 
     // Reset the caches: the values in the cache depend on the numeric mode)
     this.reset();
@@ -1107,7 +1125,9 @@ export class ComputeEngine implements IComputeEngine {
     message: string | [string, ...SemiBoxedExpression[]],
     where?: SemiBoxedExpression
   ): BoxedExpression {
-    if (where && Array.isArray(where) && where[0] === 'Latex') {
+    if (where instanceof AbstractBoxedExpression) {
+      where = this.rawJson(where);
+    } else if (where && Array.isArray(where) && where[0] === 'Latex') {
       if (where[1] === undefined || !where[1]) where = '';
       if (typeof where[1] === 'object' && 'str' in where[1] && !where[1].str)
         where = '';
@@ -1122,15 +1142,10 @@ export class ComputeEngine implements IComputeEngine {
     const msg =
       typeof message === 'string'
         ? this.string(message)
-        : new BoxedFunction(
-            this,
-            'ErrorCode',
-            [
-              this.string(message[0]),
-              ...message.slice(1).map((x) => this.box(x, { canonical: false })),
-            ],
-            { canonical: false }
-          );
+        : new BoxedFunction(this, 'ErrorCode', [
+            this.string(message[0]),
+            ...message.slice(1).map((x) => this.box(x, { canonical: false })),
+          ]);
 
     if (!where)
       return new BoxedFunction(this, 'Error', [msg], { canonical: false });
@@ -1307,10 +1322,13 @@ export class ComputeEngine implements IComputeEngine {
     if (name === 'Half') return this._HALF;
 
     if (!isValidSymbolName(name)) {
-      return this.error(
-        ['invalid-symbol-name', { str: name }],
-        ['Latex', { str: options?.metadata?.latex ?? '' }]
-      );
+      const where = options?.metadata?.latex;
+      const nameStr = `'${name}'`;
+      if (where)
+        return this.error(
+          ['invalid-symbol-name', nameStr],
+          where ? ['Latex', `'${where}'`] : nameStr
+        );
     }
 
     // If there is some LaTeX metadata provided, we can't use the
@@ -1437,11 +1455,9 @@ export class ComputeEngine implements IComputeEngine {
   serialize(x: Expression | BoxedExpression): string {
     if (typeof x === 'object' && 'json' in x) {
       const ce = 'engine' in x ? x.engine : this;
-      const savedPrecision = ce.jsonSerializationOptions.precision;
-      this.jsonSerializationOptions.precision = 'max';
-      const json = x.json;
-      ce.jsonSerializationOptions.precision = savedPrecision;
-      return this.latexSyntax.serialize(json);
+      return this.latexSyntax.serialize(
+        this.rawJson(ce.box(x, { canonical: false }))
+      );
     }
     return this.latexSyntax.serialize(x as Expression);
   }
@@ -1473,7 +1489,9 @@ export class ComputeEngine implements IComputeEngine {
     this.latexSyntax.updateOptions(opts);
   }
 
-  get jsonSerializationOptions(): JsonSerializationOptions {
+  get jsonSerializationOptions(): Readonly<JsonSerializationOptions> {
+    if (this._useRawJsonSerializationOptions)
+      return this._rawJsonSerializationOptions;
     return this._jsonSerializationOptions;
   }
 
@@ -1501,6 +1519,20 @@ export class ComputeEngine implements IComputeEngine {
         this._jsonSerializationOptions.metadata = ['latex', 'wikidata'];
       } else this._jsonSerializationOptions.metadata = [...val.metadata];
     }
+    if (typeof val.precision === 'number' && val.precision > 0) {
+      this._jsonSerializationOptions.precision = val.precision;
+    }
+    if (typeof val.repeatingDecimals === 'boolean') {
+      this._jsonSerializationOptions.repeatingDecimals = val.repeatingDecimals;
+    }
+  }
+
+  rawJson(expr: BoxedExpression): Expression {
+    const save = this._useRawJsonSerializationOptions;
+    this._useRawJsonSerializationOptions = true;
+    const result = expr.json;
+    this._useRawJsonSerializationOptions = save;
+    return result;
   }
 
   /**

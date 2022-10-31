@@ -92,7 +92,8 @@ describe('NUMBERS', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "Anything"]
-          ]
+          ],
+          ["Sequence"]
         ]
       ]
     `);
@@ -107,7 +108,8 @@ describe('NUMBERS', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "Anything"]
-          ]
+          ],
+          ["Sequence"]
         ],
         "ExponentialE",
         5
@@ -124,7 +126,8 @@ describe('NUMBERS', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "Anything"]
-          ]
+          ],
+          ["Sequence"]
         ],
         "ExponentialE",
         12345

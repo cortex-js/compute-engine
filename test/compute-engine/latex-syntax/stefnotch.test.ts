@@ -126,7 +126,8 @@ describe('STEFNOTCH #12', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "Anything"]
-          ]
+          ],
+          ["Sequence", "ImaginaryUnit", "Pi", "'nope!?\\lparensum'"]
         ]
       ]
     `);

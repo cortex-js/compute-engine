@@ -139,7 +139,8 @@ check('Invalid argument in sequence', () =>
           "'incompatible-domain'",
           "Number",
           ["Domain", "MaybeBoolean"]
-        ]
+        ],
+        ["Equal", 2, 2]
       ],
       3
     ]
@@ -161,7 +162,8 @@ check('Invalid argument positional', () =>
             "'incompatible-domain'",
             "Number",
             ["Domain", "MaybeBoolean"]
-          ]
+          ],
+          ["Equal", 2, 2]
         ]
       ],
       2
@@ -309,7 +311,7 @@ check('Invalid delimiter: expected closing', () =>
       ]
     ]
   `)
-);
+); // @fixme : should be expected-delimiter
 
 check('Invalid delimiter: expected closing', () =>
   expect(engine.parse('1(')).toMatchInlineSnapshot(`
@@ -323,7 +325,7 @@ check('Invalid delimiter: expected closing', () =>
       ]
     ]
   `)
-);
+); // @fixme : should be expected-delimiter
 
 check('Invalid delimiter: expected opening', () =>
   expect(engine.parse('1)')).toMatchInlineSnapshot(`
@@ -337,7 +339,7 @@ check('Invalid delimiter: expected opening', () =>
       ]
     ]
   `)
-);
+); // @fixme : should be mismatched-delimiter
 
 check('Invalid delimiter: expected opening', () =>
   expect(engine.parse('1\\right)')).toMatchInlineSnapshot(`
@@ -356,7 +358,7 @@ check('Invalid delimiter: expected opening', () =>
       ]
     ]
   `)
-);
+); // @fixme : should be mismatched-delimiter
 
 check('Invalid delimiter', () =>
   expect(engine.parse('1\\left\\alpha2\\right\\alpha')).toMatchInlineSnapshot(`
@@ -545,7 +547,8 @@ check('Mismatched domain', () =>
           "'incompatible-domain'",
           "Number",
           ["Domain", "Boolean"]
-        ]
+        ],
+        "True"
       ]
     ]
   `)

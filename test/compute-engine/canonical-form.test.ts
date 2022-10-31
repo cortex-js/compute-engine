@@ -222,19 +222,45 @@ describe('COMMUTATIVE ORDER', () => {
           ["Multiply", ["Power", "b", 2], ["Power", "x", 5], "b", 3]
         ]
       ]
-      [
+      box       = [
         "Multiply",
-        3,
-        "b",
-        "d",
-        "f",
-        "y",
-        ["Square", "b"],
-        ["Square", "c"],
-        ["Power", "b", 3],
-        ["Power", "a", 5],
-        ["Power", "x", 5],
-        ["Power", "x", 7]
+        ["Multiply", "d", ["Square", "c"], ["Power", "b", 3]],
+        ["Multiply", "y", ["Power", "x", 7]],
+        [
+          "Multiply",
+          ["Power", "a", 5],
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              "Number",
+              ["Domain", "Function"]
+            ],
+            "f"
+          ]
+        ],
+        ["Multiply", 3, "b", ["Square", "b"], ["Power", "x", 5]]
+      ]
+      canonical = [
+        "Multiply",
+        ["Multiply", "d", ["Square", "c"], ["Power", "b", 3]],
+        ["Multiply", "y", ["Power", "x", 7]],
+        [
+          "Multiply",
+          ["Power", "a", 5],
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              "Number",
+              ["Error", "'unexpected-argument'", ["Domain", "Function"]]
+            ],
+            "f"
+          ]
+        ],
+        ["Multiply", 3, "b", ["Square", "b"], ["Power", "x", 5]]
       ]
     `);
   });

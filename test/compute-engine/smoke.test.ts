@@ -35,8 +35,15 @@ ce.numericMode = 'auto';
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
 
-// Should output error about extra argument
-console.log(ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate().json);
+// ["Sequence"] not removed from argument list
+console.log(ce.parse('3\\,2.34').latex);
+
+console.log(ce.parse('3+\\mathrm{True}').latex);
+
+console.log(ce.box(['Add', 'True', 5]).latex);
+
+console.log(ce.box(['Rational', ['Complex', 0, 1]]).latex);
+console.log(ce.parse('\\mathrm{Rational}(i)').latex);
 
 // Error should include argument (2=2)
 console.log(ce.parse('1+(2=2)+3').json);
@@ -356,7 +363,7 @@ describe('PARSING numbers', () => {
     expect(parse('1 + 1e199')).toMatch('["Add", 1, 1e+199]'));
 
   test(`421.35e+1000`, () =>
-    expect(parse('421.35e+1000')).toMatch('{num: "4.2135e+1002"}'));
+    expect(parse('421.35e+1000')).toMatch('4.2135e+1002'));
 
   test(`\\frac34 + 1e199`, () =>
     expect(parse('\\frac34 + 1e199')).toMatch(
@@ -450,7 +457,8 @@ describe('PARSING numbers', () => {
                                     "'incompatible-domain'",
                                     "Number",
                                     ["Domain", "Anything"]
-                                  ]
+                                  ],
+                                  "v_2"
                                 ]
                               ]
                             ]
@@ -847,9 +855,9 @@ describe('SYMBOLIC EVALUATION Other functions', () => {
   test('-(-x)', () => expect(NToJson('-(-x)')).toMatch('x'));
 
   test('50!', () =>
-    expect(evaluateToJson('50!')).toMatchObject({
-      num: '3.0414093201713378043612608166064768844377641568960512e+64',
-    }));
+    expect(evaluateToJson('50!')).toMatch(
+      '3.0414093201713378043612608166064768844377641568960512e+64'
+    ));
 
   test(`eval('8844418+\\frac{85}{7}')`, () =>
     expect(evaluateToJson('8844418+\\frac{85}{7}')).toMatchObject([
@@ -865,50 +873,46 @@ describe('SYMBOLIC EVALUATION Other functions', () => {
 
 describe('NUMERIC EVALUATION arithmetic', () => {
   test(`N('88444111111113418+8')`, () => {
-    expect(NToJson('88444111111113418+8')).toMatchObject({
-      num: '88444111111113426',
-    });
+    expect(NToJson('88444111111113418+8')).toMatch('88444111111113426');
   });
 
   test(`N('1 + \\frac{1}{3}')`, () => {
-    expect(NToJson('1 + \\frac{1}{3}')).toMatchObject({ num: '1.(3)' });
+    expect(NToJson('1 + \\frac{1}{3}')).toMatch('1.(3)');
   });
 
   test(`N('8844418+\\frac{85}{7}')`, () =>
-    expect(NToJson('8844418+\\frac{85}{7}')).toMatchObject({
-      num: '8844430.(142857)',
-    }));
+    expect(NToJson('8844418+\\frac{85}{7}')).toMatch('8844430.(142857)'));
 
   test(`N('\\frac34 + 1e30')`, () =>
-    expect(NToJson('\\frac34 + 1e30')).toMatchObject({
-      num: '1.00000000000000000000000000000075e+30',
-    }));
+    expect(NToJson('\\frac34 + 1e30')).toMatch(
+      '1.00000000000000000000000000000075e+30'
+    ));
 
   test(`N('\\frac34 + 1e99') // Precision is at 100 digits, so loss of 3/4 is expected`, () =>
     expect(NToJson('\\frac34 + 1e199')).toEqual(1e199));
 
   test(`NToJson('12345678^3 + \\frac{1}{3}')`, () =>
-    expect(NToJson('12345678^3 + \\frac{1}{3}')).toMatchObject({
-      num: '1.881675960266558605752(3)e+21',
-    }));
+    expect(NToJson('12345678^3 + \\frac{1}{3}')).toMatch(
+      '1.881675960266558605752(3)e+21'
+    ));
 
   test(`NToJson('50!')`, () =>
-    expect(NToJson('50!')).toMatchObject({
-      num: '3.0414093201713378043612608166064768844377641568960512e+64',
-    }));
+    expect(NToJson('50!')).toMatch(
+      '3.0414093201713378043612608166064768844377641568960512e+64'
+    ));
 
   test(`Wester-3`, () =>
     expect(
       NToJson(
         '\\frac12+\\frac13+\\frac14+\\frac15+\\frac16+\\frac17+\\frac18+\\frac19+\\frac{1}{10}'
       )
-    ).toMatchObject({ num: '1.928(968253)' }));
+    ).toMatch('1.928(968253)'));
 });
 
 describe('NUMERIC EVALUATION trigonometry', () => {
   test(`N('\\sin\\pi')`, () => expect(NToJson('\\sin\\pi')).toEqual(0));
   test(`N('\\cos\\frac{\\pi}{7}')`, () =>
-    expect(NToJson('\\cos\\frac{\\pi}{7}')).toMatchObject({
-      num: '0.9009688679024191262361023195074450511659191621318571500535624231994324204279399655013614547185124153',
-    }));
+    expect(NToJson('\\cos\\frac{\\pi}{7}')).toMatch(
+      '0.9009688679024191262361023195074450511659191621318571500535624231994324204279399655013614547185124153'
+    ));
 });

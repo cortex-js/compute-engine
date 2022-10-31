@@ -3,7 +3,6 @@ import {
   machineValue,
   PRIME,
   DERIVATIVE,
-  getSequence,
   mapArgs,
   op,
   nops,
@@ -31,81 +30,41 @@ import { joinLatex } from '../tokenizer';
 /**
  * Parse a sequence of expressions separated with ','
  */
-function parseSequence(prec: number) {
-  return (
-    parser: Parser,
-    terminator: Terminator,
-    lhs: Expression
-  ): Expression | null => {
-    console.assert(lhs !== null);
-    if (terminator.minPrec >= prec) return null;
+function parseSequence(
+  parser: Parser,
+  terminator: Terminator,
+  lhs: Expression,
+  prec: number,
+  sep: string
+) {
+  console.assert(lhs !== null);
+  if (terminator.minPrec >= prec) return null;
 
-    const result: Expression = ['List', lhs];
-    let done = false;
-    while (!done) {
-      done = true;
+  const result: Expression[] = [lhs];
+  let done = false;
+  while (!done) {
+    done = true;
 
+    parser.skipSpace();
+    while (parser.match(sep)) {
+      result.push('Nothing');
       parser.skipSpace();
-      while (parser.match(',')) {
-        result.push('Nothing');
-        parser.skipSpace();
-      }
-
-      if (parser.atTerminator(terminator)) {
-        result.push('Nothing');
-      } else {
-        const rhs = parser.matchExpression({ ...terminator, minPrec: prec });
-        result.push(rhs ?? 'Nothing');
-        done = rhs === null;
-      }
-      if (!done) {
-        parser.skipSpace();
-        done = !parser.match(',');
-      }
     }
 
-    return result;
-  };
-}
-
-/* Parse a sequence of sequences separated with ';' */
-function parseSequence2(prec: number) {
-  return (
-    parser: Parser,
-    terminator: Terminator,
-    lhs: Expression
-  ): Expression | null => {
-    console.assert(lhs);
-    if (terminator.minPrec >= prec) return null;
-
-    const result: Expression = [
-      'Sequence',
-      ...(getSequence(lhs) ?? ['List', lhs]),
-    ];
-
-    while (true) {
-      parser.skipSpace();
-      while (parser.match(',')) {
-        result.push('Nothing');
-        parser.skipSpace();
-      }
-
-      if (parser.atEnd) {
-        result.push('Nothing');
-        break;
-      }
+    if (parser.atTerminator(terminator)) {
+      result.push('Nothing');
+    } else {
       const rhs = parser.matchExpression({ ...terminator, minPrec: prec });
-      if (rhs === null) {
-        result.push('Nothing');
-        break;
-      }
-      result.push(...(getSequence(rhs) ?? ['List', rhs]));
-      parser.skipSpace();
-      if (!parser.match(',')) break;
+      result.push(rhs ?? 'Nothing');
+      done = rhs === null;
     }
+    if (!done) {
+      parser.skipSpace();
+      done = !parser.match(sep);
+    }
+  }
 
-    return result;
-  };
+  return result;
 }
 
 function serializeSequence(sep = '') {
@@ -218,7 +177,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Domain',
     serialize: (serializer, expr) => {
       if (head(expr) === 'Error') return serializer.serialize(expr);
-      return serializer.serialize(op(expr, 1));
+      return `\\mathbf{${serializer.serialize(op(expr, 1))}}`;
     },
   },
   {
@@ -229,15 +188,21 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           serializer.options.missingSymbol ?? '\\placeholder{}'
         }}`;
 
-      const where = errorContextAsLatex(serializer, expr);
+      const where = errorContextAsLatex(serializer, expr) || '\\blacksquare';
 
-      const msg = stringValue(op(expr, 1));
-      if (typeof msg === 'string') {
-        return `\\texttt{\\textcolor{red}{${where || '\\blacksquare'}}}`;
+      const op1 = op(expr, 1);
+      const code =
+        head(op1) === 'ErrorCode' ? stringValue(op(op1, 1)) : stringValue(op1);
+
+      if (code === 'incompatible-domain') {
+        return `\\textcolor{red}{${where}\\in ${serializer.serialize(
+          op(op1, 3)
+        )}\\notin ${serializer.serialize(op(op1, 2))}}`;
       }
-      return `\\texttt{\\textcolor{red}{${
-        serializer.serialize(op(expr, 1)) || where || '\\blacksquare'
-      }}}`;
+
+      if (typeof code === 'string') return `\\textcolor{red}{${where}}`;
+
+      return `\\textcolor{red}{${where}}`;
     },
   },
   {
@@ -253,7 +218,6 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         code === 'unexpected-operator' ||
         code === 'unexpected-token' ||
         code === 'invalid-symbol-name' ||
-        code === 'unknown-environment' ||
         code === 'unknown-environment' ||
         code === 'unexpected-base' ||
         code === 'incompatible-domain' ||
@@ -325,23 +289,38 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
-    name: 'Sequence',
     trigger: [','],
     kind: 'infix',
     precedence: 20,
     // Unlike the matchfix version of List,
     // when the comma operator is used, the lhs and rhs are flattened,
-    // i.e. `1,2,3` -> `["Delimiter", ["Sequence", 1, 2, 3],  ","]`,
+    // i.e. `1,2,3` -> `["Delimiter", ["List", 1, 2, 3],  ","]`,
     // and `1, (2, 3)` -> `["Delimiter",
-    // ["Sequence", 1, ["Delimiter", ["Sequence", 2, 3],  "(", ",", ")"]],  ","],
-    parse: parseSequence(20),
-    serialize: serializeSequence(', '),
+    // ["Sequence", 1, ["Delimiter", ["List", 2, 3],  "(", ",", ")"]],  ","],
+    parse: (parser: Parser, terminator: Terminator, lhs: Expression) => {
+      const seq = parseSequence(parser, terminator, lhs, 20, ',');
+      if (seq === null) return null;
+      return ['Sequence', ...seq];
+    },
+  },
+  {
+    name: 'Sequence',
+    serialize: serializeSequence(''),
   },
   {
     trigger: [';'],
     kind: 'infix',
     precedence: 19,
-    parse: parseSequence2(19),
+    parse: (parser: Parser, terminator: Terminator, lhs: Expression) => {
+      const seq = parseSequence(parser, terminator, lhs, 19, ';');
+      if (seq === null) return null;
+      return [
+        'Sequence',
+        ...seq.map((x) =>
+          head(x) === 'Sequence' ? ['List', ...(ops(x) ?? [])] : x
+        ),
+      ] as Expression;
+    },
   },
   {
     name: 'String',
@@ -683,7 +662,7 @@ function errorContextAsLatex(
   if (!arg) return '';
 
   if (head(arg) === 'Latex')
-    return sanitizeLatex(stringValue(op(arg, 1)) ?? '');
+    return `\\texttt{${sanitizeLatex(stringValue(op(arg, 1)) ?? '')}}`;
 
   if (head(arg) === 'Hold') return serializer.serialize(op(arg, 1));
 

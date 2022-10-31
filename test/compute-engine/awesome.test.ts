@@ -195,7 +195,8 @@ describe('Nth PRIME NUMBER', () =>
                                     "'incompatible-domain'",
                                     "Number",
                                     ["Domain", "Anything"]
-                                  ]
+                                  ],
+                                  "v_2"
                                 ]
                               ]
                             ]

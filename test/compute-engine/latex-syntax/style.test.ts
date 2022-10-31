@@ -48,7 +48,8 @@ describe('STYLE - TEXT MODE', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "String"]
-          ]
+          ],
+          "'x' in  ''"
         ],
         "b"
       ]
@@ -62,7 +63,8 @@ describe('STYLE - TEXT MODE', () => {
             "'incompatible-domain'",
             "Number",
             ["Error", "'unexpected-argument'", ["Domain", "String"]]
-          ]
+          ],
+          "'x' in  ''"
         ],
         "b"
       ]

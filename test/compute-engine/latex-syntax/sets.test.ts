@@ -20,7 +20,7 @@ describe('SERIALIZING SETS', () => {
         ['Condition', ['NotEqual', 'x', 0]],
       ])
     ).toMatchInlineSnapshot(
-      `\\mathrm{Set}(x\\in\\mathrm{Number}, \\mathrm{Condition}(0\\ne x))`
+      `\\mathrm{Set}(x\\in\\mathbf{\\mathrm{Number}}, \\mathrm{Condition}(0\\ne x))`
     );
   });
 
@@ -43,36 +43,36 @@ describe('SERIALIZING SETS', () => {
 
   test('Union, Intersection, etc...', () => {
     expect(latex(['Union', 'Integer', 'RealNumber'])).toMatchInlineSnapshot(
-      `\\texttt{\\textcolor{red}{\\Z}}\\cup\\texttt{\\textcolor{red}{\\R}}`
+      `\\textcolor{red}{\\Z\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\cup\\textcolor{red}{\\R\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
     );
     expect(
       latex(['Intersection', 'Integer', 'RealNumber'])
     ).toMatchInlineSnapshot(
-      `\\texttt{\\textcolor{red}{\\Z}}\\cap\\texttt{\\textcolor{red}{\\R}}`
+      `\\textcolor{red}{\\Z\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\cap\\textcolor{red}{\\R\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
     );
     expect(latex(['Complement', 'ComplexNumber'])).toMatchInlineSnapshot(
-      `\\texttt{\\textcolor{red}{\\C}}`
+      `\\textcolor{red}{\\C\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
     );
     expect(latex(['CartesianProduct'])).toMatchInlineSnapshot(
-      `\\texttt{\\textcolor{red}{\\blacksquare}}`
+      `\\textcolor{red}{\\blacksquare}`
     );
     expect(latex(['CartesianProduct', 'Integer'])).toMatchInlineSnapshot(
-      `\\texttt{\\textcolor{red}{\\Z}}\\times\\texttt{\\textcolor{red}{\\blacksquare}}`
+      `\\textcolor{red}{\\Z\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\textcolor{red}{\\blacksquare}`
     );
     expect(
       latex(['CartesianProduct', 'Integer', 'Integer'])
     ).toMatchInlineSnapshot(
-      `\\texttt{\\textcolor{red}{\\Z}}\\times\\texttt{\\textcolor{red}{\\Z}}`
+      `\\textcolor{red}{\\Z\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\textcolor{red}{\\Z\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
     );
     expect(
       latex(['CartesianProduct', 'Integer', 'RationalNumber'])
     ).toMatchInlineSnapshot(
-      `\\texttt{\\textcolor{red}{\\Z}}\\times\\texttt{\\textcolor{red}{\\Q}}`
+      `\\textcolor{red}{\\Z\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\textcolor{red}{\\Q\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
     );
     expect(
       latex(['CartesianProduct', 'Integer', 'Integer', 'Integer'])
     ).toMatchInlineSnapshot(
-      `\\texttt{\\textcolor{red}{\\Z}}\\times\\texttt{\\textcolor{red}{\\Z}}\\times\\texttt{\\textcolor{red}{\\Z}}`
+      `\\textcolor{red}{\\Z\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\textcolor{red}{\\Z\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\textcolor{red}{\\Z\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
     );
     expect(latex(['CartesianPower', 'Integer', 3])).toMatchInlineSnapshot(
       `\\mathrm{CartesianPower}(\\Z, 3)`

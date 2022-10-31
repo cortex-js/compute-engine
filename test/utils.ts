@@ -15,6 +15,8 @@ export const engine = new ComputeEngine();
 engine.precision = 100; // Some arithmetic test cases assume a precision of at least 100
 // engine.jsonSerializationOptions.precision = 32;
 
+engine.assume(['Element', 'f', 'Function']);
+
 // const defaultLatex = new LatexSyntax({
 //   onError: (warnings) => {
 //     for (const warning of warnings) errors.push(warning.message.toString());
@@ -152,23 +154,23 @@ export function checkJson(inExpr: SemiBoxedExpression): string {
     engine.numericMode = 'bignum';
 
     engine.precision = precision;
-    engine.jsonSerializationOptions.precision = displayPrecision;
+    engine.jsonSerializationOptions = { precision: displayPrecision };
     const evalBignum = printExpression(engine.box(inExpr).evaluate().json);
     const numEvalBignum = printExpression(engine.box(inExpr).N().json);
 
     engine.numericMode = 'machine';
-    engine.jsonSerializationOptions.precision = displayPrecision;
+    engine.jsonSerializationOptions = { precision: displayPrecision };
     const evalMachine = printExpression(engine.box(inExpr).evaluate().json);
     const numEvalMachine = printExpression(engine.box(inExpr).N().json);
 
     engine.numericMode = 'complex';
-    engine.jsonSerializationOptions.precision = displayPrecision;
+    engine.jsonSerializationOptions = { precision: displayPrecision };
     const evalComplex = printExpression(engine.box(inExpr).evaluate().json);
     const numEvalComplex = printExpression(engine.box(inExpr).N().json);
 
     engine.numericMode = 'auto';
     engine.precision = precision;
-    engine.jsonSerializationOptions.precision = displayPrecision;
+    engine.jsonSerializationOptions = { precision: displayPrecision };
 
     if (
       boxed === canonical &&
