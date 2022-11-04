@@ -160,7 +160,11 @@ export function canonicalPower(
   // (abc)^n -> a^n b^n c^n
   if (base.head === 'Multiply') {
     const e = asSmallInteger(exponent);
-    if (e !== null) return ce.mul(base.ops!.map((x) => ce.power(x, exponent)));
+    if (e !== null)
+      return ce._fn(
+        'Multiply',
+        base.ops!.map((x) => ce.power(x, exponent))
+      ); // Don't call ce.mul() to avoid infinite loops
   }
 
   return null;
@@ -179,7 +183,10 @@ export function square(
   if (isBigRational(num)) return ce.number([num[1].pow(2), num[0].pow(2)]);
 
   if (base.head === 'Multiply')
-    return ce.mul(base.ops!.map((x) => square(ce, x)));
+    return ce._fn(
+      'Multiply',
+      base.ops!.map((x) => square(ce, x))
+    ); // Don't call ce.mul() to avoid infinite loops
 
   if (base.head === 'Power') {
     const exp = asSmallInteger(base.op2);
@@ -188,6 +195,55 @@ export function square(
   }
 
   return ce.power(base, ce.number(2));
+}
+
+function numEvalPower(
+  ce: IComputeEngine,
+  base: BoxedExpression,
+  exponent: BoxedExpression
+): BoxedExpression | undefined {
+  if (base.numericValue instanceof Complex) {
+    if (exponent.numericValue instanceof Complex)
+      return ce.number(base.numericValue.pow(exponent.numericValue));
+    return ce.number(base.numericValue.pow(asFloat(exponent) ?? NaN));
+  }
+
+  if (exponent.numericValue instanceof Complex) {
+    const b = asFloat(base) ?? null;
+    if (b !== null) return ce.number(ce.complex(b).pow(exponent.numericValue));
+  }
+
+  if (
+    bignumPreferred(ce) ||
+    base.numericValue instanceof Decimal ||
+    exponent.numericValue instanceof Decimal
+  ) {
+    const bigBase = asBignum(base);
+    const bigExp = asBignum(exponent);
+    if (!bigBase || !bigExp) return ce._NAN;
+
+    if (bigExp.isNeg()) {
+      const br = bigBase.pow(bigExp.neg());
+      if (br.isInteger()) return ce.number([ce._BIGNUM_ONE, br]);
+      return ce.number(bigBase.pow(bigExp));
+    }
+
+    const exp = rootExp(exponent);
+    if (exp !== null && exp % 2 === 0) {
+      return ce.number(ce.complex(0, bigBase.abs().pow(bigExp).toNumber()));
+    } else if (exp !== null) {
+      return ce.number(bigBase.abs().pow(bigExp).neg());
+    }
+    return ce.number(bigBase.abs().pow(bigExp));
+  }
+
+  const ef = asFloat(exponent) ?? NaN;
+  const bf = asFloat(base) ?? NaN;
+  if (ef < 0) {
+    const rf = Math.pow(bf, -ef);
+    if (Number.isInteger(rf)) return ce.number([1, rf]);
+  }
+  return ce.number(Math.pow(bf, ef));
 }
 
 export function processPower(
@@ -243,86 +299,84 @@ export function processPower(
   }
 
   //
-  // Handle some specific cases: square root and cube root, where
-  // we factor out the common factors
+  // If square root or cube root, attempt to factor out the perfect
+  // factors: sqrt(75) -> 5^2 * 3
   //
-  if (base.isLiteral && base.isInteger) {
+  if (mode !== 'N' && base.isLiteral && base.isInteger) {
+    const smallExpr = asSmallInteger(exponent);
+    if (smallExpr) return numEvalPower(ce, base, exponent);
+
     const r = asRational(exponent);
     if (r) {
       const [n, d] = [machineNumerator(r), machineDenominator(r)];
       if ((n === 1 || n === -1) && (d === 2 || d === 3)) {
         if (bignumPreferred(ce) || base.numericValue instanceof Decimal) {
           const bigBase = asBignum(base)!;
-          const [factor, root] = bigFactorPower(ce, bigBase, d);
+          if (d % 2 === 0 && bigBase.isNeg() && !complexAllowed(ce))
+            return ce._NAN;
 
-          if (root.eq(1) && factor.eq(1)) return ce._ONE;
-          if (factor.eq(1)) return undefined;
-          if (root.eq(1))
-            return ce.number(n >= 0 ? factor : [ce.bignum(1), factor]);
+          const sign = bigBase.isNegative()
+            ? d % 2 === 0
+              ? ce._I
+              : ce._NEGATIVE_ONE
+            : ce._ONE;
 
-          return ce.mul([
-            ce.number(factor),
-            ce.power(ce.number(root), exponent),
-          ]);
-        }
-        //  @todo: handle rationalValue
-        // @todo:handle base.machineValue < 0
-        if (typeof base.numericValue === 'number') {
-          const [factor, root] = factorPower(base.numericValue, d);
+          const [factor, root] = bigFactorPower(ce, bigBase.abs(), d);
 
-          if (root === 1 && factor === 1) return ce._ONE;
-          if (factor === 1) return undefined;
-          if (root === 1) return ce.number(n >= 0 ? factor : [1, factor]);
+          if (root.eq(1) && factor.eq(1)) return sign;
 
-          return ce.mul([
-            ce.number(factor),
-            ce.power(ce.number(root), exponent),
-          ]);
+          // If factor === 1, nothing special to do, fall through
+          if (!factor.eq(1)) {
+            if (root.eq(1))
+              return ce.mul([
+                sign,
+                ce.number(n >= 0 ? factor : [ce.bignum(1), factor]),
+              ]);
+
+            return ce.mul([
+              sign,
+              ce.number(factor),
+              ce.power(ce.number(root), exponent),
+            ]);
+          }
+        } else if (typeof base.numericValue === 'number') {
+          if (d % 2 === 0 && base.numericValue < 0 && !complexAllowed(ce))
+            return ce._NAN;
+
+          const [factor, root] = factorPower(Math.abs(base.numericValue), d);
+
+          const sign =
+            base.numericValue < 0
+              ? d % 2 === 0
+                ? ce._I
+                : ce._NEGATIVE_ONE
+              : ce._ONE;
+
+          if (root === 1 && factor === 1) return sign;
+          if (factor !== 1) {
+            if (root === 1)
+              return ce.mul([sign, ce.number(n >= 0 ? factor : [1, factor])]);
+
+            return ce.mul([
+              sign,
+              ce.number(factor),
+              ce.power(ce.number(root), exponent),
+            ]);
+          }
+        } else {
+          //  @todo: handlebase  rationalValue
         }
       }
+      if (base.isNegative) {
+        if (!complexAllowed) return ce._NAN;
+        return ce.mul([ce._I, ce.fn('Sqrt', [ce.negate(base)])]);
+      }
+      return undefined;
     }
   }
 
-  if (mode !== 'simplify' && base.isLiteral && exponent.isLiteral) {
-    if (base.numericValue instanceof Complex) {
-      if (exponent.numericValue instanceof Complex)
-        return ce.number(base.numericValue.pow(exponent.numericValue));
-      return ce.number(base.numericValue.pow(asFloat(exponent) ?? NaN));
-    }
-
-    if (exponent.numericValue instanceof Complex) {
-      const b = asFloat(base) ?? null;
-      if (b !== null)
-        return ce.number(ce.complex(b).pow(exponent.numericValue));
-    }
-
-    if (
-      bignumPreferred(ce) ||
-      base.numericValue instanceof Decimal ||
-      exponent.numericValue instanceof Decimal
-    ) {
-      const bigBase = asBignum(base);
-      const bigExp = asBignum(exponent);
-      if (!bigBase || !bigExp) return ce._NAN;
-
-      if (bigExp.isNeg()) {
-        const br = bigBase.pow(bigExp.neg());
-        if (br.isInteger()) return ce.number([ce._BIGNUM_ONE, br]);
-        return ce.number(bigBase.pow(bigExp));
-      }
-
-      return ce.number(bigBase.pow(bigExp));
-    }
-
-    const ef = asFloat(exponent) ?? NaN;
-    if (ef < 0) {
-      const bf = asFloat(base) ?? NaN;
-      const rf = Math.pow(bf, -ef);
-      if (Number.isInteger(rf)) return ce.number([1, rf]);
-      return ce.number(Math.pow(bf, ef));
-    }
-    return ce.number(Math.pow(asFloat(base) ?? NaN, ef));
-  }
+  if (mode !== 'simplify' && base.isLiteral && exponent.isLiteral)
+    return numEvalPower(ce, base, exponent);
 
   return undefined;
 }
@@ -335,6 +389,7 @@ export function processSqrt(
   if (base.isOne) return ce._ONE;
   if (base.isZero) return ce._ZERO;
   if (base.isNegativeOne) return complexAllowed(ce) ? ce._I : ce._NAN;
+  if (base.isNegative && !complexAllowed(ce)) return ce._NAN;
 
   const r = asRational(base);
 
@@ -348,8 +403,6 @@ export function processSqrt(
 
   const n = asSmallInteger(base);
   if (n !== null) {
-    if (n < 0 && !complexAllowed(ce)) return ce._NAN;
-
     const [factor, root] = factorPower(Math.abs(n), 2);
     if (n < 0) {
       if (root === 1) ce.mul([ce.number(ce.complex(0, factor))]);
@@ -372,13 +425,11 @@ export function processSqrt(
         const [nFactor, nRoot] = factorPower(Math.abs(n), 2);
         const [dFactor, dRoot] = factorPower(d, 2);
         if (n < 0)
-          return !complexAllowed(ce)
-            ? ce._NAN
-            : ce.mul([
-                ce.number([nFactor, dFactor]),
-                ce.sqrt(ce.number([nRoot, dRoot])),
-                ce._I,
-              ]);
+          return ce.mul([
+            ce.number([nFactor, dFactor]),
+            ce.sqrt(ce.number([nRoot, dRoot])),
+            ce._I,
+          ]);
 
         return ce.mul([
           ce.number([nFactor, dFactor]),
@@ -392,13 +443,11 @@ export function processSqrt(
       const [dFactor, dRoot] = bigFactorPower(ce, ce.bignum(r[1]), 2);
 
       if (n.isNeg())
-        return !complexAllowed(ce)
-          ? ce._NAN
-          : ce.mul([
-              ce.number([nFactor, dFactor]),
-              ce.sqrt(ce.number([nRoot, dRoot])),
-              ce._I,
-            ]);
+        return ce.mul([
+          ce.number([nFactor, dFactor]),
+          ce.sqrt(ce.number([nRoot, dRoot])),
+          ce._I,
+        ]);
 
       return ce.mul([
         ce.number([nFactor, dFactor]),
@@ -408,4 +457,14 @@ export function processSqrt(
   }
 
   return undefined;
+}
+
+function rootExp(exponent: BoxedExpression): number | null {
+  if (!isRational(exponent.numericValue)) return null;
+  const [n, d] = [
+    machineNumerator(exponent.numericValue),
+    machineDenominator(exponent.numericValue),
+  ];
+  if (n !== 1 && n !== -1) return null;
+  return n * d;
 }

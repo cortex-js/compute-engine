@@ -207,8 +207,8 @@ describe('COMMUTATIVE ORDER', () => {
     `);
   }); // @fixme: the -1 should be applied to the Decimal
 
-  test(`Canonical form '(b^3c^2d)(x^7y)(a^5f)(b^2x^5b3)'`, () => {
-    expect(check('(b^3c^2d)(x^7y)(a^5f)(b^2x^5b3)')).toMatchInlineSnapshot(`
+  test(`Canonical form '(b^3c^2d)(x^7y)(a^5g)(b^2x^5b3)'`, () => {
+    expect(check('(b^3c^2d)(x^7y)(a^5g)(b^2x^5b3)')).toMatchInlineSnapshot(`
       latex     = [
         "Multiply",
         [
@@ -216,55 +216,29 @@ describe('COMMUTATIVE ORDER', () => {
           ["Multiply", ["Power", "b", 3], ["Power", "c", 2], "d"]
         ],
         ["Delimiter", ["Multiply", ["Power", "x", 7], "y"]],
-        ["Delimiter", ["Multiply", ["Power", "a", 5], "f"]],
+        ["Delimiter", ["Multiply", ["Power", "a", 5], "g"]],
         [
           "Delimiter",
           ["Multiply", ["Power", "b", 2], ["Power", "x", 5], "b", 3]
         ]
       ]
-      box       = [
+      [
         "Multiply",
-        ["Multiply", "d", ["Square", "c"], ["Power", "b", 3]],
-        ["Multiply", "y", ["Power", "x", 7]],
-        [
-          "Multiply",
-          ["Power", "a", 5],
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              "Number",
-              ["Domain", "Function"]
-            ],
-            "f"
-          ]
-        ],
-        ["Multiply", 3, "b", ["Square", "b"], ["Power", "x", 5]]
-      ]
-      canonical = [
-        "Multiply",
-        ["Multiply", "d", ["Square", "c"], ["Power", "b", 3]],
-        ["Multiply", "y", ["Power", "x", 7]],
-        [
-          "Multiply",
-          ["Power", "a", 5],
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              "Number",
-              ["Error", "'unexpected-argument'", ["Domain", "Function"]]
-            ],
-            "f"
-          ]
-        ],
-        ["Multiply", 3, "b", ["Square", "b"], ["Power", "x", 5]]
+        3,
+        "b",
+        "d",
+        "g",
+        "y",
+        ["Square", "b"],
+        ["Square", "c"],
+        ["Power", "b", 3],
+        ["Power", "a", 5],
+        ["Power", "x", 5],
+        ["Power", "x", 7]
       ]
     `);
   });
-});
+}); // @fixme x^5 and x^7 should be combined
 
 //
 // POLYNOMIAL ORDER

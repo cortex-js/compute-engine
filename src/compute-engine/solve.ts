@@ -1,26 +1,8 @@
-import {
-  BoxedExpression,
-  BoxedSubstitution,
-  IComputeEngine,
-  LatexString,
-  Pattern,
-  SemiBoxedExpression,
-} from './public';
-import { isLatexString } from './boxed-expression/utils';
+import { BoxedExpression, Rule, SemiBoxedExpression } from './public';
+import { boxRules, matchRules } from './rules';
+import { expand } from './symbolic/expand';
 
 // https://en.wikipedia.org/wiki/Equation_solving
-
-export type Solution = [
-  lhs: LatexString | Pattern,
-  solutions: (LatexString | Pattern)[],
-  condition?: (ce: IComputeEngine, vars: BoxedSubstitution) => boolean
-];
-
-export type BoxedSolution = [
-  lhs: Pattern,
-  solutions: Pattern[],
-  condition?: (ce: IComputeEngine, vars: BoxedSubstitution) => boolean
-];
 
 //
 // UNIVARIATE_ROOTS is a collection of rules that find the roots for
@@ -41,56 +23,98 @@ export type BoxedSolution = [
 // Set of rules to find the root(s) for `x`
 // Note: this is not a RuleSet because for each matching pattern, there
 // may be more than one solution/root
-export const UNIVARIATE_ROOTS: Solution[] = [
-  ['$x + a$', ['$-a$']],
-  ['$-x + a$', ['$a$']],
-
-  ['$\\frac{x}{a} - 1$', ['$a$']],
-  ['$1 - \\frac{x}{a}$', ['$a$']],
-  ['$\\frac{-x}{a} - 1$', ['$-a$']],
-
-  ['$ax + b$', ['$\\frac{-b}{a}$']],
-  ['$ax$', ['$0$']],
+export const UNIVARIATE_ROOTS: Rule[] = [
+  // ax = 0
+  [['Multiply', '_x', '_a'], ['0']],
+  // x + a = 0
+  [
+    ['Add', '_a', '_x'],
+    ['Negate', '_a'],
+  ],
+  [
+    ['Add', '_x', '_a'],
+    ['Negate', '_a'],
+  ],
+  // ax + b = 0
+  [
+    ['Add', ['Multiply', '_x', '_a'], '_b'],
+    ['Divide', ['Negate', '_b'], '_a'],
+  ],
 
   // Quadratic formula (real)
-  // @todo: add rule for when b or c is 0
+  // ax^2 + bx + c = 0
   [
-    '$ax^2 + bx + c$',
     [
-      '$\\frac{{ - b + \\sqrt{b^2 - 4ac} }}{{2a}}$',
-      '$\\frac{{ - b - \\sqrt{b^2 - 4ac} }}{{2a}}$',
+      'Add',
+      ['Multiply', ['Power', '_x', 2], '_a'],
+      ['Multiply', '_x', '_b'],
+      '_c',
     ],
-    (_ce, vars): boolean => vars.x.isReal === true,
+    [
+      'Divide',
+      [
+        'Add',
+        ['Negate', '_b'],
+        ['Sqrt', ['Subtract', ['Square', '_b'], ['Multiply', 4, '_a', '_c']]],
+      ],
+      ['Multiply', 2, '_a'],
+    ],
+    // (_ce, vars): boolean => vars.x.isReal === true,
+  ],
+
+  [
+    [
+      'Add',
+      ['Multiply', ['Power', '_x', 2], '_a'],
+      ['Multiply', '_x', '_b'],
+      '_c',
+    ],
+    [
+      'Divide',
+      [
+        'Subtract',
+        ['Negate', '_b'],
+        ['Sqrt', ['Subtract', ['Square', '_b'], ['Multiply', 4, '_a', '_c']]],
+      ],
+      ['Multiply', 2, '_a'],
+    ],
+    // (_ce, vars): boolean => vars.x.isReal === true,
+  ],
+
+  // ax^2 + bx = 0
+  [
+    ['Add', ['Multiply', ['Power', '_x', 2], '_a'], ['Multiply', '_x', '_b']],
+    0,
+    // (_ce, vars): boolean => vars.x.isReal === true,
+  ],
+  [
+    ['Add', ['Multiply', ['Power', '_x', 2], '_a'], ['Multiply', '_x', '_b']],
+    ['Divide', ['Negate', '_b'], '_a'],
+    // (_ce, vars): boolean => vars.x.isReal === true,
+  ],
+
+  // ax^2 + b = 0
+  [
+    ['Add', ['Multiply', ['Power', '_x', 2], '_a'], '_b'],
+    ['Sqrt', ['Divide', ['Negate', '_b'], '_a']],
+    // (_ce, vars): boolean => vars.x.isReal === true,
+  ],
+  [
+    ['Add', ['Multiply', ['Power', '_x', 2], '_a'], '_b'],
+    ['Negate', ['Sqrt', ['Divide', ['Negate', '_b'], '_a']]],
+    // (_ce, vars): boolean => vars.x.isReal === true,
   ],
 
   // Quadratic formula (complex)
-  [
-    '$ax^2 + bx + c$',
-    [
-      '$-\\frac{b}{2a} - \\imaginaryI \\frac{\\sqrt{4ac - b^2}}{2a}$',
-      '$-\\frac{b}{2a} + \\imaginaryI \\frac{\\sqrt{4ac - b^2}}{2a}$',
-    ],
-    (_ce, vars): boolean => vars.x.isImaginary === true,
-  ],
+  // [
+  //   '$ax^2 + bx + c$',
+  //   [
+  //     '$-\\frac{b}{2a} - \\imaginaryI \\frac{\\sqrt{4ac - b^2}}{2a}$',
+  //     '$-\\frac{b}{2a} + \\imaginaryI \\frac{\\sqrt{4ac - b^2}}{2a}$',
+  //   ],
+  //   (_ce, vars): boolean => vars.x.isImaginary === true,
+  // ],
 ];
-
-/**
- * Compile a set of rules for solving equations
- */
-export function boxSolutions(
-  ce: IComputeEngine,
-  rs: Iterable<Solution>
-): BoxedSolution[] {
-  const result: BoxedSolution[] = [];
-  for (const [lhs, rhss, cond] of rs)
-    result.push([
-      ce.pattern(lhs),
-      rhss.map((x) => ce.pattern(isLatexString(x) ? ce.parse(x)! : x)),
-      cond,
-    ]);
-
-  return result;
-}
 
 /**
  * Expression is a function of a single variable (`x`)
@@ -98,42 +122,26 @@ export function boxSolutions(
  * Return the roots of that variable
  *
  */
-function findUnivariateRoots(
+export function findUnivariateRoots(
   expr: BoxedExpression,
   x: string
 ): BoxedExpression[] {
   const ce = expr.engine;
   const rules = ce.cache(
     'univariate-roots-rules',
-    () => boxSolutions(ce, UNIVARIATE_ROOTS),
+    () => boxRules(ce, UNIVARIATE_ROOTS),
     (rules) => {
       for (const r of rules) r.unbind();
       return rules;
     }
   );
-  const result: BoxedExpression[] = [];
-  const unknown = { x: ce.symbol(x, { canonical: false }) };
-  for (const [lhs, rhss, cond] of rules) {
-    // Replace the `x` in `lhs` with the actual symbol we're looking for
-    // and attempt to match
-    const sub = lhs.subs(unknown)?.match(expr);
-    if (sub && (!cond || cond(ce, sub))) {
-      for (const rhs of rhss) {
-        let found = false;
-        // Check that the solution is not a duplicate
-        const sol = rhs.subs(sub).simplify();
-        for (const x of result) {
-          if (sol.isSame(x)) {
-            found = true;
-            break;
-          }
-        }
-        // New, unique, solution, add it
-        if (!found) result.push(sol);
-      }
-    }
-  }
-  return result;
+  const result = matchRules(
+    expand(expr).subs({ [x]: '_x' }, { canonical: false }),
+    rules,
+    { _x: ce.symbol('_x') }
+  );
+  // return result;
+  return result.map((x) => x.canonical.evaluate());
 }
 
 /** Expr is an equation with a head of

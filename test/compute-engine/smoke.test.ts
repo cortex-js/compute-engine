@@ -35,18 +35,14 @@ ce.numericMode = 'auto';
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
 
-// ["Sequence"] not removed from argument list
-console.log(ce.parse('3\\,2.34').latex);
+///
 
-console.log(ce.parse('3+\\mathrm{True}').latex);
+ce.assume(['Equal', 'a', 1]);
+console.log(ce.box('a').evaluate().json);
+console.log(ce.box(['Equal', 'a', 1]).evaluate().json);
 
-console.log(ce.box(['Add', 'True', 5]).latex);
-
-console.log(ce.box(['Rational', ['Complex', 0, 1]]).latex);
-console.log(ce.parse('\\mathrm{Rational}(i)').latex);
-
-// Error should include argument (2=2)
-console.log(ce.parse('1+(2=2)+3').json);
+// Should not include `0` in sum
+console.log(ce.parse('3x^2-15x').N());
 
 // Output 'not-a-predicate', should be 'tautology'
 console.log(ce.assume(['Greater', 'one', 0]));

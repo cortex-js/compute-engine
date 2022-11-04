@@ -7,6 +7,7 @@ import {
   asCoefficient,
   asRational,
   isBigRational,
+  isMachineRational,
   isRational,
   isRationalOne,
   machineDenominator,
@@ -102,10 +103,8 @@ export class Product {
   addTerm(term: BoxedExpression) {
     console.assert(term.isCanonical);
 
-    // If we're calculation a canonical  product, fold exact literals into
-    // running terms
     if (this._isCanonical) {
-      if (term.isNothing || term.isOne) return;
+      if (term.isNothing) return;
 
       if (term.head === 'Sqrt') {
         const r = asRational(term.op1);
@@ -115,6 +114,8 @@ export class Product {
         }
       }
 
+      // If we're calculation a canonical  product, fold exact literals into
+      // running terms
       if (term.isLiteral) {
         if (term.isOne) return;
 
@@ -478,9 +479,9 @@ export class Product {
 // - positive fractional exponents
 // - negative integer exponents
 // - negative fractional exponents
-function degreeKey(exponent: [number, number]): number {
-  const [n, d] = exponent;
-  if (n === d) return 0;
+function degreeKey(exponent: Rational): number {
+  if (isRationalOne(exponent)) return 0;
+  const [n, d] = [machineNumerator(exponent), machineDenominator(exponent)];
   if (n > 0 && Number.isInteger(n / d)) return 1;
   if (n > 0) return 2;
   if (Number.isInteger(n / d)) return 3;
@@ -489,18 +490,39 @@ function degreeKey(exponent: [number, number]): number {
 
 function degreeOrder(
   a: {
-    exponent: [exponentNumer: number, exponentDenom: number];
+    exponent: Rational;
     terms: BoxedExpression[];
   },
   b: {
-    exponent: [exponentNumer: number, exponentDenom: number];
+    exponent: Rational;
     terms: BoxedExpression[];
   }
 ): number {
   const keyA = degreeKey(a.exponent);
   const keyB = degreeKey(b.exponent);
   if (keyA !== keyB) return keyA - keyB;
-  return a.exponent[0] / a.exponent[1] - b.exponent[0] / b.exponent[1];
+  if (isBigRational(a.exponent) && isBigRational(b.exponent)) {
+    return a.exponent[0]
+      .div(a.exponent[1])
+      .sub(b.exponent[0].div(b.exponent[1]))
+      .toNumber();
+  }
+  if (isBigRational(a.exponent) && isMachineRational(b.exponent)) {
+    return a.exponent[0]
+      .div(a.exponent[1])
+      .sub(b.exponent[0] / b.exponent[1])
+      .toNumber();
+  }
+  if (isMachineRational(a.exponent) && isBigRational(b.exponent)) {
+    return b.exponent[0]
+      .div(b.exponent[1])
+      .add(-a.exponent[0] / a.exponent[1])
+      .toNumber();
+  }
+  return (
+    (a.exponent[0] as number) / (a.exponent[1] as number) -
+    (b.exponent[0] as number) / (b.exponent[1] as number)
+  );
 }
 
 function termsAsExpressions(
@@ -511,7 +533,7 @@ function termsAsExpressions(
   const result = terms.map((x) => {
     const t = flattenOps(x.terms, 'Multiply') ?? x.terms;
     const base = t.length <= 1 ? t[0] : ce._fn('Multiply', t.sort(order));
-    if (x.exponent[0] === x.exponent[1]) return base;
+    if (isRationalOne(x.exponent)) return base;
     return ce.power(base, x.exponent);
   });
   return flattenOps(result, 'Multiply') ?? result;

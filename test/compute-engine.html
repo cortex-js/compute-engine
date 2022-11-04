@@ -320,6 +320,13 @@
         </div>
       </div>
 
+      <div class="output-section" id="solve">
+        <h2><code>solve</code></h2>
+        <div class="row">
+          <div class="latex"></div>
+        </div>
+      </div>
+
       <div class="output-section" id="canonical-form">
         <h2><code>expr.canonical</code></h2>
         <div class="row">
@@ -516,13 +523,13 @@
         }
 
         updateLatex(null, 'symbols');
+        updateLatex(null, 'solve');
         updateExpr(null, 'json-form');
         updateExpr(null, 'canonical-form');
         updateExpr(null, 'domain');
         updateExpr(null, 'simplify');
         updateExpr(null, 'evaluate-numerically');
         updateExpr(null, 'evaluate');
-        updateExpr(null, 'solve');
         updateExpr(null, 'expand');
 
         try {
@@ -540,6 +547,22 @@
             expr.symbols.map((x) => x.latex).join('\\,,\\:'),
             'symbols'
           );
+        } catch (e) {
+          console.error(
+            'format(%c ' + latex + "%c, ['json']) " + e.toString(),
+            'color: red;  background: hsla(0, 60%, 90%)',
+            'background: transparent'
+          );
+        }
+
+        try {
+          const freeVars = expr.symbols.filter((x) => !x.isConstant);
+          if (freeVars.length === 1) {
+            const sols = expr.solve(freeVars[0].symbol);
+            if (sols && sols.length > 0) {
+              updateLatex(sols.map((x) => x.latex).join('\\,,\\:'), 'solve');
+            }
+          }
         } catch (e) {
           console.error(
             'format(%c ' + latex + "%c, ['json']) " + e.toString(),
@@ -602,15 +625,6 @@
           } catch (e) {
             console.error(
               'evaluate(%c ' + latex + '%c) ' + e.toString(),
-              'color: red;  background: hsla(0, 60%, 90%)',
-              'background: transparent'
-            );
-          }
-          try {
-            updateExpr(canonicalExpr.solve(['x']), 'solve');
-          } catch (e) {
-            console.error(
-              'solve(%c ' + latex + '%c, ["x"]) ' + e.toString(),
               'color: red;  background: hsla(0, 60%, 90%)',
               'background: transparent'
             );
@@ -701,7 +715,6 @@
         'simplify',
         'evaluate-numerically',
         'evaluate',
-        'solve',
         'expand',
       ].forEach((id) => {
         const el = document.getElementById(id);

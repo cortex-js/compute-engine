@@ -520,25 +520,22 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           canonical: (ce, args) => {
             if (args.length === 1) {
               if (!args[0].isReal)
-                return ce.error([
-                  'incompatible-domain',
-                  'RealNumber',
-                  args[0].domain,
-                ]);
+                return ce.error(
+                  ['incompatible-domain', 'RealNumber', args[0].domain],
+                  args[0]
+                );
               return ce._fn('Rational', args);
             }
             if (!args[0].isInteger)
-              return ce.error([
-                'incompatible-domain',
-                'Integer',
-                args[0].domain,
-              ]);
+              return ce.error(
+                ['incompatible-domain', 'Integer', args[0].domain],
+                args[0]
+              );
             if (!args[1].isInteger)
-              return ce.error([
-                'incompatible-domain',
-                'Integer',
-                args[1].domain,
-              ]);
+              return ce.error(
+                ['incompatible-domain', 'Integer', args[1].domain],
+                args[1]
+              );
 
             return canonicalDivide(ce, args[0], args[1]);
           },
@@ -583,11 +580,10 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           domain: ['Function', 'Number', 'Number', 'Number'],
           canonical: (ce, args) => {
             if (!args[1].isRational)
-              return ce.error([
-                'incompatible-domain',
-                'RationalNumber',
-                args[1].domain,
-              ]);
+              return ce.error(
+                ['incompatible-domain', 'RationalNumber', args[1].domain],
+                args[1]
+              );
             const exp = ce.inverse(args[1]);
             return (
               canonicalPower(ce, args[0], exp) ??

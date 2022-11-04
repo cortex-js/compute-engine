@@ -1,15 +1,30 @@
 {
   "editor.formatOnSave": true,
   "cSpell.words": [
+    "BIGNUM",
+    "bignums",
     "bivariant",
     "canonicalization",
     "canonicalize",
+    "coef",
+    "infty",
+    "Iverson",
+    "lanczos",
+    "lbrack",
     "lngamma",
     "macsyma",
+    "mathbb",
     "Mathematica",
+    "mathrm",
+    "multiplicativity",
     "nops",
+    "pmatrix",
     "quantile",
-    "relop"
+    "rbrack",
+    "reboxing",
+    "relop",
+    "sympy",
+    "upconverted"
   ],
   "editor.defaultFormatter": "esbenp.prettier-vscode"
 }

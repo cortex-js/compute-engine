@@ -11,12 +11,13 @@ import {
   SimplifyOptions,
   Substitution,
   Metadata,
-  PatternMatchOption,
+  PatternMatchOptions,
   BoxedDomain,
   RuntimeScope,
   BoxedFunctionDefinition,
   BoxedBaseDefinition,
   DomainExpression,
+  BoxedSubstitution,
 } from '../public';
 import { replace } from '../rules';
 import { domainToFlags } from './boxed-symbol-definition';
@@ -87,6 +88,10 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     this._name = name;
 
     console.assert(isValidSymbolName(this._name));
+    if (!isValidSymbolName(this._name)) {
+      console.error(this._name);
+      debugger;
+    }
 
     this._scope =
       !name.startsWith('_') && options?.canonical ? ce.context : null;
@@ -384,8 +389,8 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
   match(
     rhs: BoxedExpression,
-    _options?: PatternMatchOption
-  ): Substitution | null {
+    _options?: PatternMatchOptions
+  ): BoxedSubstitution | null {
     if (!(rhs instanceof BoxedSymbol)) return null;
     if (this._name === rhs._name) return {};
     return null;
@@ -603,8 +608,10 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return replace(this, rules, options);
   }
 
-  subs(sub: Substitution): BoxedExpression {
-    if (sub[this._name] === undefined) return this;
-    return this.engine.box(sub[this._name]);
+  subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
+    if (sub[this._name] === undefined)
+      return options?.canonical ? this.canonical : this;
+
+    return this.engine.box(sub[this._name], options);
   }
 }

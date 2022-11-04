@@ -31,7 +31,6 @@ import {
   RuntimeScope,
   Scope,
   SemiBoxedExpression,
-  Substitution,
   SymbolDefinition,
   BoxedRuleSet,
   Rule,
@@ -43,6 +42,7 @@ import {
   BoxedLambdaExpression,
   FunctionDefinition,
   Rational,
+  BoxedSubstitution,
 } from './public';
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
@@ -1544,9 +1544,9 @@ export class ComputeEngine implements IComputeEngine {
    *  //  -> [{'val': 0}]
    * ```
    */
-  ask(pattern: LatexString | SemiBoxedExpression): Substitution[] {
+  ask(pattern: LatexString | SemiBoxedExpression): BoxedSubstitution[] {
     const pat = this.pattern(pattern);
-    const result: Substitution[] = [];
+    const result: BoxedSubstitution[] = [];
     for (const [assumption, val] of this.assumptions) {
       const m = pat.match(assumption, {
         numericTolerance: this._tolerance,

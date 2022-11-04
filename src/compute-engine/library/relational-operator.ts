@@ -21,11 +21,11 @@ export const RELOP_LIBRARY: SymbolTable = {
         evaluate: (ce, ops) => {
           if (ops.length < 2) return ce.symbol('True');
           let lhs: BoxedExpression | undefined = undefined;
-          for (const arg of ops!) {
+          for (const arg of ops) {
             if (!lhs) lhs = arg;
             else {
               const test = lhs.isEqual(arg);
-              if (test === false) return ce.symbol('False');
+              if (test !== true) return ce.symbol('False');
             }
           }
           return ce.symbol('True');

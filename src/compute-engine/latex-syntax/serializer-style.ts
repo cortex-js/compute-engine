@@ -18,8 +18,7 @@ export function getRootStyle(
   _expr: Expression | null,
   level: number
 ): 'radical' | 'quotient' | 'solidus' {
-  if (level > 2) return 'solidus';
-  return 'radical';
+  return level > 2 ? 'solidus' : 'radical';
 }
 
 export function getFractionStyle(

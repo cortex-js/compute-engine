@@ -14,7 +14,7 @@ import {
   LatexString,
   Metadata,
   NOptions,
-  PatternMatchOption,
+  PatternMatchOptions,
   SemiBoxedExpression,
   SimplifyOptions,
   Substitution,
@@ -23,6 +23,7 @@ import {
   DomainLiteral,
   BoxedBaseDefinition,
   Rational,
+  BoxedSubstitution,
 } from '../public';
 import { getSubexpressions, getSymbols } from './utils';
 import { isBigRational, isMachineRational } from '../numerics/rationals';
@@ -43,8 +44,8 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   abstract isEqual(rhs: BoxedExpression): boolean;
   abstract match(
     rhs: BoxedExpression,
-    options?: PatternMatchOption
-  ): Substitution | null;
+    options?: PatternMatchOptions
+  ): BoxedSubstitution | null;
 
   readonly engine: IComputeEngine;
 
@@ -210,7 +211,8 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return this;
   }
 
-  subs(_sub: Substitution): BoxedExpression {
+  subs(_sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
+    if (options?.canonical) return this.canonical;
     return this;
   }
 

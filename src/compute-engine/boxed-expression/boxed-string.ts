@@ -5,8 +5,8 @@ import {
   BoxedDomain,
   IComputeEngine,
   Metadata,
-  PatternMatchOption,
-  Substitution,
+  PatternMatchOptions,
+  BoxedSubstitution,
 } from '../public';
 import { serializeJsonString } from './serialize';
 import { hashCode } from './utils';
@@ -63,8 +63,8 @@ export class BoxedString extends AbstractBoxedExpression {
   }
   match(
     rhs: BoxedExpression,
-    _options?: PatternMatchOption
-  ): Substitution | null {
+    _options?: PatternMatchOptions
+  ): BoxedSubstitution | null {
     if (!(rhs instanceof BoxedString)) return null;
     if (this._string === rhs._string) return {};
     return null;

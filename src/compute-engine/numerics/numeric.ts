@@ -30,7 +30,7 @@ export const SMALL_INTEGER = 1000000;
 export const MAX_ITERATION = 1000000;
 
 // When doing a symbolic calculations using multiple terms, do
-// not expand beyon these many terms
+// not expand beyond these many terms
 export const MAX_SYMBOLIC_TERMS = 200;
 
 /**
@@ -143,7 +143,10 @@ export const SMALL_PRIMES = new Set<number>([
 export const LARGEST_SMALL_PRIME = 7919;
 
 export function primeFactors(n: number): { [factor: number]: number } {
-  console.assert(Number.isInteger(n) && n >= 0 && n < Number.MAX_SAFE_INTEGER);
+  console.assert(
+    Number.isInteger(n) && n >= 0 && n < Number.MAX_SAFE_INTEGER,
+    n
+  );
   if (!Number.isInteger(n) || n < 0 || n >= Number.MAX_SAFE_INTEGER) debugger;
   //https:rosettacode.org/wiki/Prime_decomposition#JavaScript
   if (n <= 3) return { [n]: 1 };

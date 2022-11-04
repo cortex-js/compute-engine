@@ -1,6 +1,6 @@
 import { check, checkJson, engine } from '../utils';
 
-engine.jsonSerializationOptions.precision = 20;
+engine.jsonSerializationOptions = { precision: 20 };
 const ce = engine;
 
 describe('CONSTANTS', () => {
@@ -184,9 +184,9 @@ describe('EXACT EVALUATION', () => {
               "Multiply",
               "ImaginaryUnit",
               [
-                "Add",
-                ["Rational", -5, 7],
-                ["Multiply", ["Rational", -1, 2], "Pi"]
+                "Subtract",
+                ["Multiply", ["Rational", -1, 2], "Pi"],
+                ["Rational", 5, 7]
               ]
             ]
           ]
@@ -323,7 +323,7 @@ describe('ADD', () => {
   test(`Add \\frac{2}{-3222233}+\\frac{1}{3}`, () =>
     expect(check('\\frac{2}{-3222233}+\\frac{1}{3}')).toMatchInlineSnapshot(`
       latex     = ["Add", ["Divide", 2, -3222233], ["Rational", 1, 3]]
-      box       = ["Add", ["Rational", -2, 3222233], ["Rational", 1, 3]]
+      box       = ["Subtract", ["Rational", 1, 3], ["Rational", 2, 3222233]]
       simplify  = ["Rational", 3222227, 9666699]
       N-auto    = 0.33333271264575425386
       N-mach    = 0.33333271264575426

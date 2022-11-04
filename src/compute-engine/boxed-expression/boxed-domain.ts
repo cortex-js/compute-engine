@@ -10,15 +10,15 @@ import { asSmallInteger } from '../numerics/numeric';
 import {
   BoxedDomain,
   BoxedExpression,
+  BoxedSubstitution,
   DomainCompatibility,
   DomainConstructor,
   DomainExpression,
   DomainLiteral,
   IComputeEngine,
   Metadata,
-  PatternMatchOption,
+  PatternMatchOptions,
   SemiBoxedExpression,
-  Substitution,
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonSymbol } from './serialize';
@@ -101,7 +101,7 @@ export class _BoxedDomain
 
   get codomain(): BoxedDomain | null {
     if (typeof this._value === 'string') return null;
-    //  The codomain is the last argumentof the `['Function']` expression
+    //  The codomain is the last argument of the `['Function']` expression
     return this.engine.domain(this._value[this._value.length - 1]);
   }
 
@@ -151,8 +151,8 @@ export class _BoxedDomain
 
   match(
     rhs: BoxedExpression,
-    _options?: PatternMatchOption
-  ): Substitution | null {
+    _options?: PatternMatchOptions
+  ): BoxedSubstitution | null {
     if (!(rhs instanceof _BoxedDomain)) return null;
     if (this.isSame(rhs)) return {};
     return null;

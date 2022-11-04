@@ -252,7 +252,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
             const op1 = ops[0];
             if (!op1.string)
               return ce.error(
-                ['incompatible-domain', 'String', op1.domain.json],
+                ['incompatible-domain', 'String', op1.domain],
                 op1
               );
 

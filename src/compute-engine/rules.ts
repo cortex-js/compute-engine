@@ -7,7 +7,25 @@ import {
   ReplaceOptions,
   BoxedSubstitution,
 } from './public';
-import { getVars, isLatexString, latexString } from './boxed-expression/utils';
+import { latexString } from './boxed-expression/utils';
+
+/**
+ * Go through all the rules in the rule set, and for all the rules that match
+ * return the rhs of the rule applied to `expr`.
+ * @param rules
+ */
+export function matchRules(
+  expr: BoxedExpression,
+  rules: BoxedRuleSet,
+  sub: BoxedSubstitution
+): BoxedExpression[] {
+  const result: BoxedExpression[] = [];
+  for (const rule of rules) {
+    const r = applyRule(rule, expr, sub);
+    if (r !== null) result.push(r);
+  }
+  return result;
+}
 
 // @future Generator functions
 // export function fixPoint(rule: Rule);
@@ -25,29 +43,22 @@ import { getVars, isLatexString, latexString } from './boxed-expression/utils';
 export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
   const result = new Set<BoxedRule>();
   for (const [rawLhs, rawRhs, options] of rs) {
-    // Any unbound variables in the `lhs` is used as a wildcard
-    let lhs = ce.pattern(rawLhs);
-    const wildcards = {};
-    for (const v of getVars(lhs))
-      wildcards[v] = ce.symbol('_' + v, { canonical: false });
-    lhs = lhs.subs(wildcards);
-
     // Normalize the condition to a function
     let cond: undefined | ((x: BoxedSubstitution) => boolean);
     const latex = latexString(options?.condition);
     if (latex) {
       // Substitute any unbound vars in the condition to a wildcard
-      const condPattern = ce.parse(latex)!.subs(wildcards);
+      const condPattern = ce.pattern(latex);
       cond = (x: BoxedSubstitution): boolean =>
         condPattern.subs(x).value?.symbol === 'True';
     } else cond = options?.condition as (x: BoxedSubstitution) => boolean;
 
-    const rhs = isLatexString(rawRhs) ? ce.parse(rawRhs) : ce.box(rawRhs);
-    if (!rhs) {
-      console.error('Invalid rhs');
-      continue;
-    }
-    result.add([lhs, rhs.subs(wildcards), options?.priority ?? 0, cond]);
+    result.add([
+      ce.pattern(rawLhs),
+      ce.pattern(rawRhs),
+      options?.priority ?? 0,
+      cond,
+    ]);
   }
   return result;
 }
@@ -55,9 +66,10 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
 function applyRule(
   [lhs, rhs, _priority, condition]: BoxedRule,
   expr: BoxedExpression,
+  substitution: BoxedSubstitution,
   options?: ReplaceOptions
 ): BoxedExpression | null {
-  const sub = lhs.match(expr, options);
+  const sub = lhs.match(expr, { substitution, ...options });
   // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return null;
 
@@ -67,7 +79,7 @@ function applyRule(
   // @debug
   // console.log('Applying rule ', lhs.latex, '->', rhs.latex);
 
-  return rhs.subs(sub);
+  return rhs.subs(sub, { canonical: true });
 }
 
 /**
@@ -90,7 +102,7 @@ export function replace(
     while (!done && iterationCount < iterationLimit) {
       done = true;
       for (const rule of ruleSet) {
-        const result = applyRule(rule, expr, options);
+        const result = applyRule(rule, expr, {}, options);
         if (result !== null && result !== expr) {
           // If once flag is set, bail on first matching rule
           if (once) return result;
@@ -165,7 +177,7 @@ export function replace(
 // }
 
 export function getWildcardName(s: string): string {
-  const m = s.match(/^__?_?([a-zA-Z0-9]+)/);
+  const m = s.match(/^(__?_?[a-zA-Z0-9]+)/);
   if (m === null) return '';
   return m[1];
 }

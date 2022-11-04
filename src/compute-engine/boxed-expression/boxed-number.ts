@@ -7,10 +7,10 @@ import {
   IComputeEngine,
   Metadata,
   NOptions,
-  PatternMatchOption,
+  PatternMatchOptions,
   Rational,
   SimplifyOptions,
-  Substitution,
+  BoxedSubstitution,
 } from '../public';
 import { inferNumericDomain } from '../domain-utils';
 import { isInMachineRange } from '../numerics/numeric-bignum';
@@ -234,8 +234,8 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   match(
     rhs: BoxedExpression,
-    options?: PatternMatchOption
-  ): Substitution | null {
+    options?: PatternMatchOptions
+  ): BoxedSubstitution | null {
     if (this.isEqualWithTolerance(rhs, options?.numericTolerance ?? 0))
       return {};
     return null;

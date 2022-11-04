@@ -375,7 +375,7 @@ export interface BoxedExpression {
 
   /** From `Object.valueOf()`, return a primitive value for the expression.
    *
-   * If the expression is a machine number, orbignum or rational that can be
+   * If the expression is a machine number, or bignum or rational that can be
    * converted to a machine number, return a `number`.
    *
    * If the expression is a symbol, return the name of the symbol as a `string`.
@@ -683,7 +683,7 @@ export interface BoxedExpression {
    * **Note** applicable to canonical and non-canonical expressions.
    *
    */
-  subs(sub: Substitution): BoxedExpression;
+  subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression;
 
   /**
    * Transform the expression by applying the rules:
@@ -737,8 +737,8 @@ export interface BoxedExpression {
    */
   match(
     rhs: BoxedExpression,
-    options?: PatternMatchOption
-  ): Substitution | null;
+    options?: PatternMatchOptions
+  ): BoxedSubstitution | null;
 
   /**
    * "Not a Number".
@@ -1245,45 +1245,53 @@ export interface BoxedExpression {
  * of an existing `BoxedExpression` while avoiding unboxing and reboxing.
  */
 export type SemiBoxedExpression =
-  | BoxedExpression
   | number
+  | string
   | Decimal
   | Complex
   | MathJsonNumber
   | MathJsonString
   | MathJsonSymbol
-  | string
   | MathJsonFunction
   | MathJsonDictionary
-  | SemiBoxedExpression[];
+  | SemiBoxedExpression[]
+  | BoxedExpression;
 
 export type LambdaExpression = SemiBoxedExpression;
 export type BoxedLambdaExpression = BoxedExpression;
 
-export type PatternMatchOption = {
+export type PatternMatchOptions = {
+  substitution?: BoxedSubstitution;
   recursive?: boolean;
   numericTolerance?: number;
   exact?: boolean;
 };
 
 export interface Pattern extends BoxedExpression {
+  /** If `expr` matches the pattern, return `true`, otherwise `false` */
+  test(expr: BoxedExpression, options?: PatternMatchOptions): boolean;
+
+  /** Return the number of exprs that matched the pattern */
+  count(
+    exprs: Iterable<BoxedExpression>,
+    options?: PatternMatchOptions
+  ): number;
+
   /**
    * If `expr` does not match the pattern, return `null`.
    *
    * Otherwise, return a substitution describing the values that the named
-   * wildcard in the pattern should be changed to in order for the pattern to be
-   * equal to the expression. If there are no named wildcards and the expression
-   * matches the pattern, and empty object literal `{}` is returned.
+   * wildcards in the pattern should be changed to in order for the pattern
+   * to be equal to the expression. If there are no named wildcards and
+   * the expression matches the pattern, an empty object literal `{}` is
+   * returned.
    */
-  match(
-    expr: BoxedExpression,
-    options?: PatternMatchOption
-  ): BoxedSubstitution | null;
-  /** If `expr` matches the pattern, return `true`, otherwise `false` */
-  test(expr: BoxedExpression, options?: PatternMatchOption): boolean;
-  /** Return the number of exprs that matched the pattern */
-  count(exprs: Iterable<BoxedExpression>, options?: PatternMatchOption): number;
-  subs(sub: Substitution): Pattern;
+  // match(
+  //   expr: BoxedExpression,
+  //   options?: PatternMatchOptions
+  // ): BoxedSubstitution | null;
+
+  // subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression;
 }
 
 export interface ExpressionMapInterface<U> {
@@ -2169,9 +2177,15 @@ export interface IComputeEngine {
    * The result may not be canonical.
    *
    */
-  parse(s: LatexString | string): BoxedExpression;
-  parse(s: null): null;
-  parse(s: LatexString | string | null): null | BoxedExpression;
+  parse(
+    s: LatexString | string,
+    options?: { canonical?: boolean }
+  ): BoxedExpression;
+  parse(s: null, options?: { canonical?: boolean }): null;
+  parse(
+    s: LatexString | string | null,
+    options?: { canonical?: boolean }
+  ): null | BoxedExpression;
 
   /** Serialize a `BoxedExpression` or a `MathJSON` expression to
    * a LaTeX string
@@ -2246,7 +2260,7 @@ export interface IComputeEngine {
 
   get assumptions(): ExpressionMapInterface<boolean>;
 
-  ask(pattern: LatexString | SemiBoxedExpression): Substitution[];
+  ask(pattern: LatexString | SemiBoxedExpression): BoxedSubstitution[];
 
   /**
    * When `condition` is false, signal.

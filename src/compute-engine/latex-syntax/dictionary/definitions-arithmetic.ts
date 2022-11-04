@@ -416,7 +416,7 @@ function serializePower(
   if (name === 'Sqrt') {
     return serializeRoot(
       serializer,
-      getRootStyle(expr, serializer.level),
+      getRootStyle(expr, serializer.level - 1),
       arg1,
       2
     );
@@ -424,7 +424,7 @@ function serializePower(
   if (name === 'Root')
     return serializeRoot(
       serializer,
-      getRootStyle(expr, serializer.level),
+      getRootStyle(expr, serializer.level - 1),
       arg1,
       arg2
     );

@@ -13,11 +13,12 @@ import {
   Substitution,
   ReplaceOptions,
   Metadata,
-  PatternMatchOption,
+  PatternMatchOptions,
   BoxedDomain,
   BoxedLambdaExpression,
   RuntimeScope,
   BoxedFunctionSignature,
+  BoxedSubstitution,
 } from '../public';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
@@ -32,6 +33,7 @@ import { asFloat } from '../numerics/numeric';
 import { signDiff } from '../numerics/rationals';
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
+import { findUnivariateRoots } from '../solve';
 
 /**
  * Considering an old (existing) expression and a new (simplified) one,
@@ -278,12 +280,15 @@ export class BoxedFunction extends AbstractBoxedExpression {
     return this.engine.fn(newHead, ops);
   }
 
-  subs(sub: Substitution): BoxedExpression {
-    return makeCanonicalFunction(
-      this.engine,
-      this._head,
-      this._ops.map((x) => x.subs(sub))
-    );
+  subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
+    const ops = this._ops.map((x) => x.subs(sub, options));
+
+    if (options?.canonical)
+      return makeCanonicalFunction(this.engine, this._head, ops);
+
+    return new BoxedFunction(this.engine, this._head, ops, {
+      canonical: false,
+    });
   }
 
   replace(
@@ -330,11 +335,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
 
   match(
     rhs: BoxedExpression,
-    options?: PatternMatchOption
-  ): Substitution | null {
+    options?: PatternMatchOptions
+  ): BoxedSubstitution | null {
     if (!(rhs instanceof BoxedFunction)) return null;
 
-    let result: Substitution = {};
+    let result: BoxedSubstitution = {};
 
     // Head must match
     if (typeof this.head === 'string') {
@@ -472,11 +477,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   get isOne(): boolean | undefined {
-    return this.isEqual(this.engine.number(1));
+    return this.isEqual(this.engine._ONE);
   }
 
   get isNegativeOne(): boolean | undefined {
-    return this.isEqual(this.engine.number(-1));
+    return this.isEqual(this.engine._NEGATIVE_ONE);
   }
 
   // x > 0
@@ -756,11 +761,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
       return lambda(this.engine, sig.evaluate, tail).evaluate(options);
 
     // 5.3/ A regular function handler
-    return (
-      sig.evaluate(this.engine, tail) ??
-      sig.N?.(this.engine, tail) ??
-      this.engine.fn(this._head, tail)
-    );
+    return sig.evaluate(this.engine, tail) ?? this.engine.fn(this._head, tail);
   }
 
   N(options?: NOptions): BoxedExpression {
@@ -817,9 +818,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
     return result;
   }
 
-  solve(_vars: Iterable<string>): null | BoxedExpression[] {
-    // @todo
-    return null;
+  solve(vars: string[]): null | BoxedExpression[] {
+    if (vars.length !== 1) return null;
+    const roots = findUnivariateRoots(this.simplify(), vars[0]);
+    return roots;
   }
 }
 
@@ -967,7 +969,7 @@ export function lambda(
 ): BoxedExpression {
   // 'fn' is a lambda expression.
 
-  const subs: Substitution = {
+  const subs: BoxedSubstitution = {
     '__': fn.engine.tuple(args),
     '_#': fn.engine.number(args.length),
   };

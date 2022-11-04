@@ -29,18 +29,42 @@ describe('TAUTOLOGY a = 1', () => {
     );
   });
   test(`a > 0`, () => {
-    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot(
-      `not-a-predicate`
+    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot(`ok`);
+    expect(ce.box(['Greater', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
+      `["Less", 0, "a"]`
+    );
+    expect(ce.box(['Less', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
+      `["Less", "a", 0]`
+    );
+    expect(ce.box(['Equal', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
+      `False`
+    );
+    expect(ce.box(['Greater', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
+      `["Less", 0, "a"]`
+    );
+    expect(ce.box(['Greater', 'a', -10]).evaluate().json).toMatchInlineSnapshot(
+      `["Less", -10, "a"]`
     );
   });
   test(`a >= 1`, () => {
-    expect(ce.assume(['GreaterEqual', 'a', 1])).toMatchInlineSnapshot(
-      `not-a-predicate`
+    expect(ce.assume(['GreaterEqual', 'a', 1])).toMatchInlineSnapshot(`ok`);
+    expect(ce.box(['Greater', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
+      `["Less", 0, "a"]`
     );
-  }); // @fixme: should be valid
+    expect(ce.box(['Less', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
+      `["Less", "a", 0]`
+    );
+    expect(ce.box(['Equal', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
+      `False`
+    );
+  });
   test(`a = 1`, () => {
-    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot(
-      `not-a-predicate`
+    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot(`ok`);
+    expect(ce.box(['Equal', 'a', 1]).evaluate().json).toMatchInlineSnapshot(
+      `False`
+    );
+    expect(ce.box(['Equal', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
+      `False`
     );
   });
 });

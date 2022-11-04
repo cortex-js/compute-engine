@@ -14,6 +14,9 @@
 
 - Better simplification for square root expressions:
   - `\sqrt{25x^2}` -> `5x`
+- `expr.solve()` returns result for polynomials of order up to 2.
+- The `pattern.match()` function now work correctly for commutative functions,
+  i.e. `ce.pattern(['Add', '_a', 'x']).match(ce.parse('x+y')) -> {"_a": "y"}`
 - Preserve exact calculations involving rationals or square root of rationals.
   - `\sqrt{\frac{49}{25}}` -> `\frac{7}{5}`
 - Added `ce.let()` and `ce.set()` to declare and assign values to identifiers.

@@ -10,8 +10,9 @@ import {
   ReplaceOptions,
   Substitution,
   Metadata,
-  PatternMatchOption,
+  PatternMatchOptions,
   BoxedDomain,
+  BoxedSubstitution,
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonFunction } from './serialize';
@@ -137,8 +138,8 @@ export class BoxedDictionary extends AbstractBoxedExpression {
 
   match(
     rhs: BoxedExpression,
-    _options?: PatternMatchOption
-  ): Substitution | null {
+    _options?: PatternMatchOptions
+  ): BoxedSubstitution | null {
     if (!(rhs instanceof BoxedDictionary)) return null;
 
     if (this._value.size !== rhs._value.size) return null;
@@ -226,10 +227,11 @@ export class BoxedDictionary extends AbstractBoxedExpression {
     return changeCount === 0 ? null : new BoxedDictionary(this.engine, result);
   }
 
-  subs(sub: Substitution): BoxedExpression {
+  subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
     const result = {};
-    for (const key of this.keys) result[key] = this.getKey(key)!.subs(sub);
+    for (const key of this.keys)
+      result[key] = this.getKey(key)!.subs(sub, options);
 
-    return new BoxedDictionary(this.engine, result);
+    return new BoxedDictionary(this.engine, result, options);
   }
 }

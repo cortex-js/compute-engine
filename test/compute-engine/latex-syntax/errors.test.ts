@@ -267,6 +267,16 @@ check('VALID function application', () =>
   expect(engine.parse('f\\left(\\right)')).toMatchInlineSnapshot(`["f"]`)
 );
 
+check('INVALID function application', () =>
+  expect(engine.parse('g\\left(\\right)')).toMatchInlineSnapshot(`
+    [
+      "Sequence",
+      "g",
+      ["Error", "'expected-expression'", ["Latex", "'\\left(\\right)'"]]
+    ]
+  `)
+);
+
 check('VALID function application', () =>
   expect(engine.parse('f\\left(2\\right)')).toMatchInlineSnapshot(`["f", 2]`)
 );

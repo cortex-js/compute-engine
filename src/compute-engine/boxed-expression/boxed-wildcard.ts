@@ -6,9 +6,9 @@ import {
   NOptions,
   SimplifyOptions,
   Metadata,
-  Substitution,
-  PatternMatchOption,
+  PatternMatchOptions,
   BoxedDomain,
+  BoxedSubstitution,
 } from '../public';
 import { serializeJsonSymbol } from './serialize';
 import { BoxedSymbol } from './boxed-symbol';
@@ -115,9 +115,9 @@ export class BoxedWildcard extends BoxedSymbol {
   }
 
   match(
-    rhs: BoxedExpression,
-    options?: PatternMatchOption
-  ): Substitution | null {
+    _rhs: BoxedExpression,
+    _options?: PatternMatchOptions
+  ): BoxedSubstitution | null {
     return null; // @todo
   }
 
