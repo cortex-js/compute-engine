@@ -17,7 +17,6 @@ export type {
 } from './math-json/math-json-format';
 
 export {
-  isAtomic,
   isSymbolObject,
   isStringObject,
   isFunctionObject,
@@ -31,7 +30,6 @@ export {
   op,
   nops,
   dictionary as getDictionary,
-  asValidJSONNumber,
 } from './math-json/utils';
 
 export type {

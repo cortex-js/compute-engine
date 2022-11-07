@@ -57,11 +57,6 @@ export type ErrorSignal = Signal & {
   severity: 'error';
 };
 
-export declare class CortexError extends Error {
-  constructor(errorSignal: Signal);
-  toString(): string;
-}
-
 export type WarningSignal = Signal & {
   severity: 'warning';
 };

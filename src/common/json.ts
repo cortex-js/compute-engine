@@ -46,8 +46,7 @@ export function escapeJsonString(s: string): string {
   if (!/[\u0000-\u001f\"\/\\]/.test(s)) return s;
 
   let result = '';
-  for (const c of s)
-    result = result + (JSON_ESCAPE_CHARS[c.codePointAt(0)!] ?? c);
+  for (const c of s) result += JSON_ESCAPE_CHARS[c.codePointAt(0)!] ?? c;
   return result;
 }
 
