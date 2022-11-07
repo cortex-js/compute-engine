@@ -310,7 +310,7 @@ export function boxFunction(
     const op1 = ops[0];
     if (typeof op1 === 'number') return ce.number(-op1, options);
     if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
-    const num = ce.box(op1).numericValue;
+    const num = ce.box(op1, options).numericValue;
     if (num !== null) {
       if (typeof num === 'number') return ce.number(-num, options);
       if (num instanceof Decimal) return ce.number(num.neg(), options);
