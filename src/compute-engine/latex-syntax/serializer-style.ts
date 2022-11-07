@@ -1,4 +1,5 @@
 import { Expression } from '../../math-json/math-json-format';
+import { countLeaves, head, op1, op2 } from '../../math-json/utils';
 
 export function getApplyFunctionStyle(
   _expr: Expression,
@@ -22,10 +23,16 @@ export function getRootStyle(
 }
 
 export function getFractionStyle(
-  _expr: Expression,
+  expr: Expression,
   level: number
 ): 'quotient' | 'inline-solidus' | 'nice-solidus' | 'reciprocal' | 'factor' {
   if (level > 3) return 'inline-solidus';
+
+  if (head(expr) === 'Divide') {
+    const [n, d] = [countLeaves(op1(expr)), countLeaves(op2(expr))];
+    if (d <= 2 && n > 3) return 'factor';
+    if (n <= 2 && d > 3) return 'reciprocal';
+  }
   return 'quotient';
 }
 
