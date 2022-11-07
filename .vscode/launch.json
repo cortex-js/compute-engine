@@ -7,15 +7,16 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Jest All",
+      "name": "Jest Smoke",
       "program": "${workspaceFolder}/node_modules/.bin/jest",
-      "args": ["--runInBand", "--config", "./config/jest.config.js"],
+      "args": [
+        "smoke.test",
+        "--no-cache",
+        "--config",
+        "./config/jest.config.js"
+      ],
       "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",
-      "disableOptimisticBPs": true,
-      "windows": {
-        "program": "${workspaceFolder}/node_modules/jest/bin/jest"
-      }
+      "internalConsoleOptions": "neverOpen"
     },
     {
       "type": "node",
@@ -29,12 +30,7 @@
         "./config/jest.config.js"
       ],
       "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",
-      "sourcemaps": "inline",
-      "disableOptimisticBPs": true,
-      "windows": {
-        "program": "${workspaceFolder}/node_modules/jest/bin/jest"
-      }
+      "internalConsoleOptions": "neverOpen"
     },
     {
       "type": "node",
@@ -49,12 +45,16 @@
         "./config/jest.config.js"
       ],
       "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",
-      "sourcemaps": "inline",
-      "disableOptimisticBPs": true,
-      "windows": {
-        "program": "${workspaceFolder}/node_modules/jest/bin/jest"
-      }
+      "internalConsoleOptions": "neverOpen"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Jest All",
+      "program": "${workspaceFolder}/node_modules/.bin/jest",
+      "args": ["--runInBand", "--config", "./config/jest.config.js"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
     }
   ]
 }
