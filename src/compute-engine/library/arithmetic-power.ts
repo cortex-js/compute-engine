@@ -202,6 +202,12 @@ function numEvalPower(
   base: BoxedExpression,
   exponent: BoxedExpression
 ): BoxedExpression | undefined {
+  if (base.numericValue === null || exponent.numericValue === null)
+    return undefined;
+
+  //
+  // Complex base or exponent
+  //
   if (base.numericValue instanceof Complex) {
     if (exponent.numericValue instanceof Complex)
       return ce.number(base.numericValue.pow(exponent.numericValue));
@@ -211,8 +217,13 @@ function numEvalPower(
   if (exponent.numericValue instanceof Complex) {
     const b = asFloat(base) ?? null;
     if (b !== null) return ce.number(ce.complex(b).pow(exponent.numericValue));
+    return undefined;
   }
 
+  //
+  // Bignum
+  //
+  const invExp = rootExp(exponent);
   if (
     bignumPreferred(ce) ||
     base.numericValue instanceof Decimal ||
@@ -220,30 +231,44 @@ function numEvalPower(
   ) {
     const bigBase = asBignum(base);
     const bigExp = asBignum(exponent);
-    if (!bigBase || !bigExp) return ce._NAN;
-
-    if (bigExp.isNeg()) {
-      const br = bigBase.pow(bigExp.neg());
-      if (br.isInteger()) return ce.number([ce._BIGNUM_ONE, br]);
-      return ce.number(bigBase.pow(bigExp));
+    if (!bigBase || !bigExp) return undefined;
+    if (invExp === 2) {
+      if (bigBase.isNeg())
+        return complexAllowed(ce)
+          ? ce.mul([ce._I, ce.number(bigBase.neg().sqrt())])
+          : ce._NAN;
+      return ce.number(bigBase.sqrt());
     }
-
-    const exp = rootExp(exponent);
-    if (exp !== null && exp % 2 === 0) {
-      return ce.number(ce.complex(0, bigBase.abs().pow(bigExp).toNumber()));
-    } else if (exp !== null) {
-      return ce.number(bigBase.abs().pow(bigExp).neg());
+    if (!bigExp.isInteger() && bigBase.isNeg()) {
+      // Complex, if allowed
+      if (!complexAllowed(ce)) return ce._NAN;
+      const zBase = ce.complex(bigBase.toNumber());
+      const zExp = ce.complex(bigExp.toNumber());
+      return ce.number(zBase.pow(zExp));
     }
-    return ce.number(bigBase.abs().pow(bigExp));
+    return ce.number(bigBase.pow(bigExp));
   }
 
-  const ef = asFloat(exponent) ?? NaN;
-  const bf = asFloat(base) ?? NaN;
-  if (ef < 0) {
-    const rf = Math.pow(bf, -ef);
-    if (Number.isInteger(rf)) return ce.number([1, rf]);
+  //
+  // Machine
+  //
+  const floatExp = asFloat(exponent) ?? NaN;
+  const floatBase = asFloat(base) ?? NaN;
+  if (invExp === 2) {
+    if (floatBase < 0) {
+      return complexAllowed(ce)
+        ? ce.mul([ce._I, ce.number(Math.sqrt(-floatBase))])
+        : ce._NAN;
+    }
+    return ce.number(Math.sqrt(floatBase));
   }
-  return ce.number(Math.pow(bf, ef));
+  if (!Number.isInteger(floatExp) && floatBase < 0) {
+    if (!complexAllowed(ce)) return ce._NAN;
+    const zBase = ce.complex(floatBase);
+    const zExp = ce.complex(floatExp);
+    return ce.number(zBase.pow(zExp));
+  }
+  return ce.number(Math.pow(floatBase, floatExp));
 }
 
 export function processPower(
@@ -460,6 +485,17 @@ export function processSqrt(
 }
 
 function rootExp(exponent: BoxedExpression): number | null {
+  if (typeof exponent.numericValue === 'number') {
+    const inv = 1 / exponent.numericValue;
+    if (Number.isInteger(inv)) return inv;
+    return null;
+  }
+  if (exponent.numericValue instanceof Decimal) {
+    const inv = exponent.engine._BIGNUM_ONE.div(exponent.numericValue);
+    if (inv.isInt()) return inv.toNumber();
+    return null;
+  }
+
   if (!isRational(exponent.numericValue)) return null;
   const [n, d] = [
     machineNumerator(exponent.numericValue),
