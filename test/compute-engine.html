@@ -321,7 +321,7 @@
       </div>
 
       <div class="output-section" id="solve">
-        <h2><code>solve</code></h2>
+        <h2><code class="label">solve</code></h2>
         <div class="row">
           <div class="latex"></div>
         </div>
@@ -380,17 +380,6 @@
           </button>
         </div>
         <div class="output mathjson"></div>
-      </div>
-
-      <div class="output-section" id="solve">
-        <div class="row">
-          <code class="label">solve(f, ["x"]))&nbsp;=&nbsp;</code>
-          <math-field class="latex" read-only></math-field>
-          <button class="toggle">
-            <svg><use xlink:href="#info-circle" /></svg>
-          </button>
-        </div>
-        <div class="output mathjson toggle-field"></div>
       </div>
 
       <div class="output-section" id="evaluate-numerically">
@@ -486,8 +475,94 @@
           if (/^[a-zA-Z][a-zA-Z0-9]*'?(_[a-zA-Z0-9]+'?)?$/.test(s)) {
             const m = s.match(/^([a-zA-Z]+)([0-9]+)$/);
             if (m) {
-              if (['alpha', 'beta', 'gamma'].includes(m[1]))
+              if (
+                [
+                  'alpha',
+                  'beta',
+                  'gamma',
+                  'delta',
+                  'epsilon',
+                  'varepsilon',
+                  'zeta',
+                  'eta',
+                  'theta',
+                  'vartheta',
+                  'iota',
+                  'kappa',
+                  'varkappa',
+                  'lambda',
+                  'mu',
+                  'nu',
+                  'xi',
+                  'pi',
+                  'varpi',
+                  'rho',
+                  'varrho',
+                  'sigma',
+                  'varsigma',
+                  'tau',
+                  'phi',
+                  'varphi',
+                  'upsilon',
+                  'chi',
+                  'psi',
+                  'omega',
+                  'Gamma',
+                  'Delta',
+                  'Theta',
+                  'Lambda',
+                  'Xi',
+                  'Pi',
+                  'Sigma',
+                  'Upsilon',
+                  'Phi',
+                  'Psi',
+                  'Omega',
+                  'digamma',
+                  'omicron',
+                ].includes(m[1])
+              )
                 return `\\${m[1]}_{${m[2]}}`;
+              if (
+                [
+                  'cos',
+                  'sin',
+                  'tan',
+                  'arcsin',
+                  'arccos',
+                  'arctan',
+                  'arctg',
+                  'arcctg',
+                  'arcsec',
+                  'arccsc',
+                  'arsinh',
+                  'arcosh',
+                  'artanh',
+                  'arcsech',
+                  'arccsch',
+                  'arg',
+                  'ch',
+                  'cosec',
+                  'cosh',
+                  'cot',
+                  'cotg',
+                  'coth',
+                  'csc',
+                  'ctg',
+                  'cth',
+                  'log',
+                  'ln',
+                  'lg',
+                  'lb',
+                  'sec',
+                  'sinh',
+                  'sh',
+                  'tanh',
+                  'tg',
+                  'th',
+                ].includes(m[1])
+              )
+                return `\\${m[1]} ${m[2]}`;
               return `\\mathrm{${m[1]}}_{${m[2]}}`;
             }
             return '\\mathrm{' + s + '}';
@@ -544,7 +619,7 @@
 
         try {
           updateLatex(
-            expr.symbols.map((x) => x.latex).join('\\,,\\:'),
+            expr.symbols.map((x) => x.latex).join(',,\\:'),
             'symbols'
           );
         } catch (e) {
@@ -560,7 +635,7 @@
           if (freeVars.length === 1) {
             const sols = expr.solve(freeVars[0].symbol);
             if (sols && sols.length > 0) {
-              updateLatex(sols.map((x) => x.latex).join('\\,,\\:'), 'solve');
+              updateLatex(sols.map((x) => x.latex).join(',,\\:'), 'solve');
             }
           }
         } catch (e) {
