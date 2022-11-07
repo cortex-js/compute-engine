@@ -8,6 +8,7 @@ import {
   asRational,
   isBigRational,
   isMachineRational,
+  isNeg,
   isRational,
   isRationalOne,
   machineDenominator,
@@ -40,8 +41,9 @@ export class Product {
   engine: IComputeEngine;
 
   // Running products (if canonical)
+  private _sign: number;
   private _rational: Rational;
-  private _squareRootRational: Rational;
+  // private _squareRootRational: Rational;
   private _complex: Complex;
   private _bignum: Decimal;
   private _number: number;
@@ -68,10 +70,11 @@ export class Product {
     this._isCanonical = options.canonical!;
 
     this.engine = ce;
+    this._sign = 1;
     this._rational = bignumPreferred(ce)
       ? [ce._BIGNUM_ONE, ce._BIGNUM_ONE]
       : [1, 1];
-    this._squareRootRational = this._rational;
+    // this._squareRootRational = this._rational;
     this._complex = Complex.ONE;
     this._bignum = ce._BIGNUM_ONE;
     this._number = 1;
@@ -85,8 +88,9 @@ export class Product {
       this._terms.length === 0 &&
       this._hasInfinity === false &&
       this._hasZero === false &&
+      this._sign === 1 &&
       isRationalOne(this._rational) &&
-      isRationalOne(this._squareRootRational) &&
+      // isRationalOne(this._squareRootRational) &&
       this._complex.re === 1 &&
       this._complex.im === 0 &&
       this._bignum.eq(this.engine._BIGNUM_ONE) &&
@@ -106,13 +110,13 @@ export class Product {
     if (this._isCanonical) {
       if (term.isNothing) return;
 
-      if (term.head === 'Sqrt') {
-        const r = asRational(term.op1);
-        if (r) {
-          this._squareRootRational = mul(this._squareRootRational, r);
-          return;
-        }
-      }
+      // if (term.head === 'Sqrt') {
+      //   const r = asRational(term.op1);
+      //   if (r) {
+      //     this._squareRootRational = mul(this._squareRootRational, r);
+      //     return;
+      //   }
+      // }
 
       // If we're calculation a canonical  product, fold exact literals into
       // running terms
@@ -125,42 +129,41 @@ export class Product {
         }
 
         if (term.isNegativeOne) {
-          this._rational = neg(this._rational);
+          this._sign *= -1;
           return;
         }
 
         if (term.isInfinity) {
           this._hasInfinity = true;
+          if (term.isNegative) this._sign *= -1;
           return;
         }
 
-        const num = term.numericValue;
+        let num = term.numericValue;
         if (typeof num === 'number') {
+          if (num < 0) this._sign *= -1;
+          num = Math.abs(num);
           if (Number.isInteger(num))
             this._rational = mul(this._rational, [num, 1]);
-          else if (bignumPreferred(this.engine)) {
-            this._bignum = this._bignum.mul(Math.abs(num));
-            if (num < 0) this._rational = neg(this._rational);
-          } else {
-            this._number *= Math.abs(num);
-            if (num < 0) this._rational = neg(this._rational);
-          }
+          else if (bignumPreferred(this.engine))
+            this._bignum = this._bignum.mul(num);
+          else this._number *= num;
           return;
         }
 
         if (num instanceof Decimal) {
+          if (num.isNegative()) {
+            this._sign *= -1;
+            num = num.neg();
+          }
           if (num.isInteger())
             this._rational = mul(this._rational, [
               num,
               this.engine._BIGNUM_ONE,
             ]);
-          else if (bignumPreferred(this.engine)) {
-            this._bignum = this._bignum.mul(num.abs());
-            if (num.isNegative()) this._rational = neg(this._rational);
-          } else {
-            this._number *= Math.abs(num.toNumber());
-            if (num.isNegative()) this._rational = neg(this._rational);
-          }
+          else if (bignumPreferred(this.engine))
+            this._bignum = this._bignum.mul(num);
+          else this._number *= num.toNumber();
           return;
         }
         if (num instanceof Complex) {
@@ -169,6 +172,10 @@ export class Product {
         }
         if (isRational(num)) {
           this._rational = mul(this._rational, num);
+          if (isNeg(this._rational)) {
+            this._sign *= -1;
+            this._rational = neg(this._rational);
+          }
           return;
         }
       }
@@ -176,11 +183,17 @@ export class Product {
 
     let rest = term;
     if (this._isCanonical) {
+      // If possible, factor out a rational coefficient
       let coef: Rational;
       [coef, rest] = asCoefficient(term);
       this._rational = mul(this._rational, coef);
+      if (isNeg(this._rational)) {
+        this._sign *= -1;
+        this._rational = neg(this._rational);
+      }
     }
 
+    // Note: rest should be positive, so no need to handle the -1 case
     if (rest.isLiteral && rest.isOne) return;
 
     // If this is a power expression, extract the exponent
@@ -211,14 +224,11 @@ export class Product {
 
   unitTerms(
     mode: 'rational' | 'expression' | 'numeric'
-  ): { exponent: Rational; terms: BoxedExpression[] }[] {
-    const xs: { exponent: Rational; terms: BoxedExpression[] }[] = [];
-
+  ): { exponent: Rational; terms: BoxedExpression[] }[] | null {
     const ce = this.engine;
 
     if (mode === 'numeric') {
-      if (!complexAllowed(ce) && this._complex.im !== 0)
-        return [{ exponent: [1, 1], terms: [ce._NAN] }];
+      if (!complexAllowed(ce) && this._complex.im !== 0) return null;
 
       // Collapse all numeric literals
       if (bignumPreferred(ce)) {
@@ -229,29 +239,32 @@ export class Product {
           else b = ce.bignum(this._rational[0]).div(this._rational[1]);
         }
 
-        if (!isRationalOne(this._squareRootRational)) {
-          if (isBigRational(this._squareRootRational))
-            b = b.mul(
-              this._squareRootRational[0]
-                .div(this._squareRootRational[1])
-                .sqrt()
-            );
-          else
-            b = b.mul(
-              ce
-                .bignum(this._squareRootRational[0])
-                .div(this._squareRootRational[1])
-                .sqrt()
-            );
-        }
+        // if (!isRationalOne(this._squareRootRational)) {
+        //   if (isBigRational(this._squareRootRational))
+        //     b = b.mul(
+        //       this._squareRootRational[0]
+        //         .div(this._squareRootRational[1])
+        //         .sqrt()
+        //     );
+        //   else
+        //     b = b.mul(
+        //       ce
+        //         .bignum(this._squareRootRational[0])
+        //         .div(this._squareRootRational[1])
+        //         .sqrt()
+        //     );
+        // }
 
-        b = b.mul(this._bignum).mul(this._number);
+        b = b.mul(this._bignum).mul(this._sign * this._number);
 
-        if (this._complex.im === 0) b = b.mul(this._complex.re);
-        else {
+        if (this._complex.im !== 0) {
           const z = this._complex.mul(b.toNumber());
+          if (z.equals(1)) return [];
           return [{ exponent: [1, 1], terms: [ce.number(z)] }];
         }
+
+        b = b.mul(this._complex.re);
+        if (b.equals(1)) return [];
         return [{ exponent: [1, 1], terms: [ce.number(b)] }];
       } else {
         // Machine preferred
@@ -262,26 +275,28 @@ export class Product {
           else n = this._rational[0] / this._rational[1];
         }
 
-        if (!isRationalOne(this._squareRootRational)) {
-          if (isBigRational(this._squareRootRational))
-            n *= Math.sqrt(
-              this._squareRootRational[0].toNumber() /
-                this._squareRootRational[1].toNumber()
-            );
-          else
-            n *= Math.sqrt(
-              this._squareRootRational[0] / this._squareRootRational[1]
-            );
-        }
+        // if (!isRationalOne(this._squareRootRational)) {
+        //   if (isBigRational(this._squareRootRational))
+        //     n *= Math.sqrt(
+        //       this._squareRootRational[0].toNumber() /
+        //         this._squareRootRational[1].toNumber()
+        //     );
+        //   else
+        //     n *= Math.sqrt(
+        //       this._squareRootRational[0] / this._squareRootRational[1]
+        //     );
+        // }
 
-        n *= this._number * this._bignum.toNumber();
+        n *= this._sign * this._number * this._bignum.toNumber();
 
-        if (this._complex.im === 0) n *= this._complex.re;
-        else {
+        if (this._complex.im !== 0) {
           const z = this._complex.mul(n);
+          if (z.equals(1)) return [];
           return [{ exponent: [1, 1], terms: [ce.number(z)] }];
         }
 
+        n *= this._complex.re;
+        if (n === 1) return [];
         return [{ exponent: [1, 1], terms: [ce.number(n)] }];
       }
     }
@@ -289,39 +304,12 @@ export class Product {
     //
     // Terms of degree 1 (exponent = [1,1])
     //
+    const xs: { exponent: Rational; terms: BoxedExpression[] }[] = [];
     const unitTerms: BoxedExpression[] = [];
     if (this._hasInfinity) unitTerms.push(ce._POSITIVE_INFINITY);
 
     this._rational = reducedRational(this._rational);
-    this._squareRootRational = reducedRational(this._squareRootRational);
-
-    if (!isRationalOne(this._rational)) {
-      if (mode === 'rational') {
-        if (machineNumerator(this._rational) !== 1)
-          unitTerms.push(ce.number(this._rational[0]));
-        if (machineDenominator(this._rational) !== 1)
-          xs.push({
-            exponent: [-1, 1],
-            terms: [ce.number(this._rational[1])],
-          });
-      } else {
-        unitTerms.push(ce.number(this._rational));
-      }
-    }
-
-    if (!isRationalOne(this._squareRootRational)) {
-      if (mode === 'rational') {
-        if (machineNumerator(this._squareRootRational) !== 1)
-          unitTerms.push(ce.sqrt(ce.number(this._squareRootRational[0])));
-        if (machineDenominator(this._squareRootRational) !== 1)
-          xs.push({
-            exponent: [-1, 1],
-            terms: [ce.sqrt(ce.number(this._squareRootRational[1]))],
-          });
-      } else {
-        unitTerms.push(ce.sqrt(ce.number(this._squareRootRational)));
-      }
-    }
+    // this._squareRootRational = reducedRational(this._squareRootRational);
 
     // Complex
     if (this._complex.re !== 1 || this._complex.im !== 0) {
@@ -332,10 +320,42 @@ export class Product {
       }
     }
 
+    let n = this._sign * this._number;
+    let b = this._bignum;
+
+    if (!isRationalOne(this._rational)) {
+      if (mode === 'rational') {
+        if (machineNumerator(this._rational) !== 1) {
+          if (isBigRational(this._rational)) b = b.mul(this._rational[0]);
+          else n *= this._rational[0];
+        }
+        if (machineDenominator(this._rational) !== 1)
+          xs.push({
+            exponent: [-1, 1],
+            terms: [ce.number(this._rational[1])],
+          });
+      } else {
+        unitTerms.push(ce.number(this._rational));
+      }
+    }
+
+    // if (!isRationalOne(this._squareRootRational)) {
+    //   if (mode === 'rational') {
+    //     if (machineNumerator(this._squareRootRational) !== 1)
+    //       unitTerms.push(ce.sqrt(ce.number(this._squareRootRational[0])));
+    //     if (machineDenominator(this._squareRootRational) !== 1)
+    //       xs.push({
+    //         exponent: [-1, 1],
+    //         terms: [ce.sqrt(ce.number(this._squareRootRational[1]))],
+    //       });
+    //   } else {
+    //     unitTerms.push(ce.sqrt(ce.number(this._squareRootRational)));
+    //   }
+    // }
+
     // Literal
-    if (!this._bignum.equals(ce._BIGNUM_ONE))
-      unitTerms.push(ce.number(this._bignum.mul(this._number)));
-    else if (this._number !== 1) unitTerms.push(ce.number(this._number));
+    if (!b.equals(ce._BIGNUM_ONE)) unitTerms.push(ce.number(b.mul(n)));
+    else if (n !== 1) unitTerms.push(ce.number(n));
 
     if (unitTerms.length > 0) xs.push({ exponent: [1, 1], terms: unitTerms });
 
@@ -351,26 +371,26 @@ export class Product {
    * If `mode` is `numeric`, the literals are combined into one expression
    *
    */
-  groupedByDegrees(options?: {
-    mode?: 'rational' | 'expression' | 'numeric';
-  }): {
-    exponent: Rational;
-    terms: BoxedExpression[];
-  }[] {
+  groupedByDegrees(options?: { mode?: 'rational' | 'expression' | 'numeric' }):
+    | {
+        exponent: Rational;
+        terms: BoxedExpression[];
+      }[]
+    | null {
     options ??= {};
     if (!('mode' in options)) options.mode = 'expression';
 
     const ce = this.engine;
 
     if (options.mode === 'numeric') {
-      if (this._complex.im !== 0 && !complexAllowed(ce))
-        return [{ exponent: [1, 1], terms: [ce._NAN] }];
+      if (this._complex.im !== 0 && !complexAllowed(ce)) return null;
 
       if (this._hasInfinity)
         return [{ exponent: [1, 1], terms: [ce._POSITIVE_INFINITY] }];
     }
 
     const xs = this.unitTerms(options.mode ?? 'expression');
+    if (xs === null) return null;
 
     //
     // Other terms
@@ -393,10 +413,6 @@ export class Product {
     return xs;
   }
 
-  // terms(): BoxedExpression[] {
-  //   return termsAsExpressions(this.engine, this.groupedByDegrees());
-  // }
-
   asExpression(mode: 'N' | 'evaluate' = 'evaluate'): BoxedExpression {
     const ce = this.engine;
 
@@ -410,12 +426,14 @@ export class Product {
 
     if (this._hasZero) return ce._ZERO;
 
-    let terms = termsAsExpressions(
-      ce,
-      this.groupedByDegrees({ mode: mode === 'N' ? 'numeric' : 'expression' })
-    );
+    const groupedTerms = this.groupedByDegrees({
+      mode: mode === 'N' ? 'numeric' : 'expression',
+    });
+    if (groupedTerms === null) return ce._NAN;
 
+    let terms = termsAsExpressions(ce, groupedTerms);
     terms = flattenOps(terms, 'Multiply') ?? terms;
+
     if (terms.length === 0) return ce._ONE;
     if (terms.length === 1) return terms[0];
     return this.engine._fn('Multiply', terms);
@@ -424,6 +442,7 @@ export class Product {
   /** The product, expressed as a numerator and denominator */
   asNumeratorDenominator(): [BoxedExpression, BoxedExpression] {
     const xs = this.groupedByDegrees({ mode: 'rational' });
+    if (xs === null) return [this.engine._NAN, this.engine._NAN];
     const xsNumerator: {
       exponent: Rational;
       terms: BoxedExpression[];
@@ -467,8 +486,10 @@ export class Product {
 
   asRationalExpression(): BoxedExpression {
     const [numerator, denominator] = this.asNumeratorDenominator();
-    if (denominator.isOne) return numerator;
-    if (denominator.isNegativeOne) return this.engine.negate(numerator);
+    if (denominator.isLiteral) {
+      if (denominator.isOne) return numerator;
+      if (denominator.isNegativeOne) return this.engine.negate(numerator);
+    }
     return this.engine._fn('Divide', [numerator, denominator]);
   }
 }

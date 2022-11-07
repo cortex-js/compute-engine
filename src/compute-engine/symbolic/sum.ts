@@ -223,7 +223,7 @@ export class Sum {
 
         if (this._imaginary !== 0)
           xs.push(ce.number(ce.complex(sum.toNumber(), this._imaginary)));
-        else xs.push(ce.number(sum));
+        else if (ce.chop(sum) !== 0) xs.push(ce.number(sum));
       } else {
         let sum = this._bignum.toNumber() + this._number;
         if (!isRationalZero(this._rational))
@@ -233,18 +233,20 @@ export class Sum {
 
         if (this._imaginary !== 0)
           xs.push(ce.number(ce.complex(sum, this._imaginary)));
-        else xs.push(ce.number(sum));
+        else if (ce.chop(sum) !== 0) xs.push(ce.number(sum));
       }
     } else {
       if (!isRationalZero(this._rational)) xs.push(ce.number(this._rational));
-      if (this._imaginary !== 0)
+      if (this._imaginary !== 0) {
+        if (!complexAllowed(ce)) return [ce._NAN];
         xs.push(ce.number(ce.complex(0, this._imaginary)));
+      }
       if (bignumPreferred(this.engine)) {
-        if (!this._bignum.isZero() || this._number !== 0)
-          xs.push(ce.number(this._bignum.add(this._number)));
+        const sum = this._bignum.add(this._number);
+        if (ce.chop(sum) !== 0) xs.push(ce.number(sum));
       } else {
-        if (!this._bignum.isZero()) xs.push(ce.number(this._bignum));
-        if (this._number !== 0) xs.push(ce.number(this._number));
+        if (ce.chop(this._bignum) !== 0) xs.push(ce.number(this._bignum));
+        if (ce.chop(this._number) !== 0) xs.push(ce.number(this._number));
       }
     }
     return flattenOps(xs, 'Add') ?? xs;
