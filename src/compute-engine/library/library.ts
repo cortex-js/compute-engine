@@ -19,7 +19,7 @@ import {
 } from '../public';
 import { BoxedSymbolDefinitionImpl } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
-import { isValidSymbolName } from '../../math-json/utils';
+import { isValidIdentifier } from '../../math-json/utils';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'
@@ -160,7 +160,7 @@ function validateDefinitionName(def: BaseDefinition): string {
     throw new Error('Missing name for definition' + JSON.stringify(def)); // @todo cause
 
   const name = def.name.normalize();
-  if (!isValidSymbolName(name)) throw Error(`Invalid definition name ${name}`); // @todo cause
+  if (!isValidIdentifier(name)) throw Error(`Invalid definition name ${name}`); // @todo cause
 
   return name;
 }

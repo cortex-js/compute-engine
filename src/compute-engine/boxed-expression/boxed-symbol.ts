@@ -22,7 +22,7 @@ import {
 import { replace } from '../rules';
 import { domainToFlags } from './boxed-symbol-definition';
 import { serializeJsonSymbol } from './serialize';
-import { isValidSymbolName } from '../../math-json/utils';
+import { isValidIdentifier } from '../../math-json/utils';
 import { hashCode } from './utils';
 
 function isSymbolDefinition(
@@ -87,11 +87,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     console.assert(name === name.normalize());
     this._name = name;
 
-    console.assert(isValidSymbolName(this._name));
-    if (!isValidSymbolName(this._name)) {
-      console.error(this._name);
-      debugger;
-    }
+    console.assert(isValidIdentifier(this._name));
 
     this._scope =
       !name.startsWith('_') && options?.canonical ? ce.context : null;

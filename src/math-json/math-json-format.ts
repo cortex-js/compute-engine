@@ -119,11 +119,11 @@ export type Expression =
   // Shortcut for MathJsonNumber without metadata and in the JavaScript
   // 64-bit float range.
   | number
+  // Shortcut for a MathJsonSymbol with no metadata, a string, or a number
+  | string
   | MathJsonNumber
   | MathJsonString
   | MathJsonSymbol
-  // Shortcut for a MathJsonSymbol with no metadata. Or a string.
-  | string
   | MathJsonFunction
   | MathJsonDictionary
   | [Expression, ...Expression[]];

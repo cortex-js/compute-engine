@@ -147,7 +147,6 @@ export function primeFactors(n: number): { [factor: number]: number } {
     Number.isInteger(n) && n >= 0 && n < Number.MAX_SAFE_INTEGER,
     n
   );
-  if (!Number.isInteger(n) || n < 0 || n >= Number.MAX_SAFE_INTEGER) debugger;
   //https:rosettacode.org/wiki/Prime_decomposition#JavaScript
   if (n <= 3) return { [n]: 1 };
   const result = {};
@@ -205,8 +204,7 @@ export function factorPower(
   exponent: number
 ): [factor: number, root: number] {
   // @todo: handle negative n
-  console.assert(Number.isInteger(n) && n > 0);
-  if (!Number.isInteger(n) || n <= 0) debugger;
+  console.assert(Number.isInteger(n) && n > 0 && n < Number.MAX_SAFE_INTEGER);
   const factors = primeFactors(n);
   let f = 1;
   let r = 1;

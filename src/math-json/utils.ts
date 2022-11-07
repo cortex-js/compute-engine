@@ -6,32 +6,6 @@ import {
   MathJsonSymbol,
 } from './math-json-format';
 
-/**
- * These constants are the 'primitive' functions and constants that are used
- * for some basic manipulations such as parsing, and transforming to canonical
- * form.
- *
- */
-export const IDENTITY = 'Identity';
-export const LIST = 'List';
-
-export const ADD = 'Add';
-export const DERIVATIVE = 'Derivative';
-export const DIVIDE = 'Divide';
-export const EXP = 'Exp';
-export const MULTIPLY = 'Multiply';
-export const NEGATE = 'Negate';
-export const POWER = 'Power';
-export const PRIME = 'Prime';
-export const ROOT = 'Root';
-export const SQRT = 'Sqrt';
-export const SUBTRACT = 'Subtract';
-
-export const COMPLEX_INFINITY = 'ComplexInfinity';
-export const PI = 'Pi';
-export const EXPONENTIAL_E = 'ExponentialE';
-export const IMAGINARY_UNIT = 'ImaginaryUnit';
-
 export function isNumberObject(
   expr: Expression | null
 ): expr is MathJsonNumber {
@@ -60,24 +34,12 @@ export function isDictionaryObject(expr: Expression): expr is MathJsonNumber {
   return expr !== null && typeof expr === 'object' && 'dict' in expr;
 }
 
-/**
- * True if the expression is a number, a symbol or a string
- * (i.e. not a function and not a dictionary)
- */
-export function isAtomic(expr: Expression | null): boolean {
-  return (
-    expr === null ||
-    (!Array.isArray(expr) &&
-      (typeof expr !== 'object' || !('fn' in expr || 'dic' in expr)))
-  );
-}
-
-export function isValidSymbolName(s: string): boolean {
-  // A symbol name must not contain any of these characters
+export function isValidIdentifier(s: string): boolean {
+  // An identifier must not contain any of these characters
   if (/[\u0000-\u0020\u0022\u0060\ufffe\uffff]/.test(s)) return false;
 
   // A symbol name must not start with one these characters
-  return !/^[\u0021\u0022\u0024-\u0029\u002e\u003a\u003f\u0040\u005b\u005d\u005e\u007b\u007d\u007e]/.test(
+  return !/^[\u0021\u0022\u0024-\u0029\u002e\u003a\u003f\u0040\u005b\u005d\u005e\u007b\u007d\u007e\+\-[0-9]]/.test(
     s
   );
 }
@@ -99,7 +61,7 @@ export function stringValue(
 }
 
 /**
- * The head of a function can be a string or an expression.
+ * The head of a function can be an identifier or an expression.
  *
  * Return `null` if the expression is not a function.
  *
@@ -109,7 +71,13 @@ export function stringValue(
  */
 export function head(expr: Expression | null | undefined): Expression | null {
   if (expr === null || expr === undefined) return null;
-  if (Array.isArray(expr)) return expr[0];
+  if (Array.isArray(expr)) {
+    console.assert(
+      expr.length > 0 &&
+        (typeof expr[0] !== 'string' || isValidIdentifier(expr[0]))
+    );
+    return expr[0];
+  }
   if (isFunctionObject(expr)) return expr.fn[0];
   return null;
 }
@@ -118,19 +86,6 @@ export function head(expr: Expression | null | undefined): Expression | null {
 export function headName(expr: Expression | null): string {
   const h = head(expr);
   return typeof h === 'string' ? h : '';
-}
-
-export function op(
-  expr: Expression | null | undefined,
-  n: number
-): Expression | null {
-  if (expr === null || expr === undefined) return null;
-
-  if (Array.isArray(expr)) return expr[n] ?? null;
-
-  if (isFunctionObject(expr)) return expr.fn[n] ?? null;
-
-  return null;
 }
 
 /**
@@ -143,6 +98,20 @@ export function ops(expr: Expression | null | undefined): Expression[] | null {
   if (Array.isArray(expr)) return expr.slice(1);
 
   if (isFunctionObject(expr)) return expr.fn.slice(1);
+
+  return null;
+}
+
+/** Return the nth argument of a function expression */
+export function op(
+  expr: Expression | null | undefined,
+  n: number
+): Expression | null {
+  if (expr === null || expr === undefined) return null;
+
+  if (Array.isArray(expr)) return expr[n] ?? null;
+
+  if (isFunctionObject(expr)) return expr.fn[n] ?? null;
 
   return null;
 }
@@ -164,11 +133,17 @@ export function nops(expr: Expression | null | undefined): number {
 
 export function symbol(expr: Expression | null | undefined): string | null {
   if (expr === null || expr === undefined) return null;
+
+  if (typeof expr === 'string') {
+    // Is it a number?
+    if (/^[+\-\.0-9]/.test(expr)) return null;
+    // Is it a string literal?
+    if (expr.length >= 2 && expr[0] === "'" && expr[expr.length - 1] === "'")
+      return null;
+  }
+
   const s = isSymbolObject(expr) ? expr.sym : expr;
   if (typeof s !== 'string') return null;
-
-  // Is it a string literal?
-  if (s.length >= 2 && s[0] === "'" && s[s.length - 1] === "'") return null;
 
   return s;
 }
@@ -178,9 +153,9 @@ function keyValuePair(
 ): null | [key: string, value: Expression] {
   const h = head(expr);
   if (h === 'KeyValuePair' || h === 'Tuple' || h === 'Pair') {
-    const key = stringValue(op(expr, 1));
+    const key = stringValue(op1(expr));
     if (!key) return null;
-    return [key, op(expr, 2) ?? 'Nothing'];
+    return [key, op2(expr) ?? 'Nothing'];
   }
 
   return null;
@@ -209,6 +184,25 @@ export function dictionary(
   return null;
 }
 
+function machineValueOfString(s: string): number | null {
+  s = s
+    .toLowerCase()
+    .replace(/[nd]$/g, '')
+    .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+  if (s === 'nan') return NaN;
+  if (s === '+infinity') return Infinity;
+  if (s === '-infinity') return -Infinity;
+  // Are there some repeating decimals?
+  if (/\([0-9]+\)/.test(s)) {
+    const [_, body, repeat, trail] = s.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
+    s = body + repeat.repeat(Math.ceil(16 / repeat.length)) + (trail ?? '');
+  }
+  // CAUTION: By using parseFloat, numbers with a precision greater than
+  // machine range will be truncated. Numbers with an exponent outside of the
+  // machine range will be returned as `Infinity` or `-Infinity`
+  return parseFloat(s);
+}
+
 // CAUTION: `machineValue()` will return a truncated value if the number has
 // a precision outside of the machine range.
 export function machineValue(
@@ -216,28 +210,8 @@ export function machineValue(
 ): number | null {
   if (expr === null || expr === undefined) return null;
   if (typeof expr === 'number') return expr;
-  if (isNumberObject(expr)) {
-    let s = expr.num
-      .toLowerCase()
-      .replace(/[nd]$/g, '')
-      .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
-    if (/\([0-9]+\)/.test(s)) {
-      const [_, body, repeat, trail] = s.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
-      s = body + repeat.repeat(Math.ceil(16 / repeat.length)) + (trail ?? '');
-    }
-    if (s === 'nan') return NaN;
-    if (s === '+infinity') return Infinity;
-    if (s === '-infinity') return -Infinity;
-    // CAUTION: By using parseFloat, numbers with a precision greater than
-    // machine range will be truncated. Numbers with an exponent outside of the
-    // machine range will be returned as `Infinity` or `-Infinity`
-    return parseFloat(s);
-  }
-
-  const sym = symbol(expr);
-  if (sym === 'NaN') return NaN;
-  if (sym === '+Infinity') return Infinity;
-  if (sym === '-Infinity') return -Infinity;
+  if (isNumberObject(expr)) return machineValueOfString(expr.num);
+  if (typeof expr === 'string') return machineValueOfString(expr);
 
   return null;
 }
@@ -258,14 +232,7 @@ export function rationalValue(
   expr: Expression | undefined | null
 ): [number, number] | null {
   if (expr === undefined || expr === null) return null;
-  const s = symbol(expr);
-  // if (symbol === 'ThreeQuarter') return [3, 4];
-  // if (symbol === 'TwoThird') return [2, 3];
-  if (s === 'Half') return [1, 2];
-  // if (symbol === 'Third') return [1, 3];
-  // if (symbol === 'Quarter') return [1, 4];
-
-  if (isAtomic(expr)) return null;
+  if (symbol(expr) === 'Half') return [1, 2];
 
   const h = head(expr);
   if (!h) return null;
@@ -274,44 +241,39 @@ export function rationalValue(
   let denom: number | null = null;
 
   if (h === 'Negate') {
-    const r = rationalValue(op(expr, 1));
+    const r = rationalValue(op1(expr));
     if (r) return [-r[0], r[1]];
   }
 
-  if (h === 'Rational') {
-    return [machineValue(op(expr, 1)) ?? NaN, machineValue(op(expr, 2)) ?? NaN];
+  if (h === 'Rational' || h === 'Divide') {
+    numer = machineValue(op1(expr)) ?? NaN;
+    denom = machineValue(op2(expr)) ?? NaN;
   }
 
   if (h === 'Power') {
-    const exponent = machineValue(op(expr, 2));
+    const exponent = machineValue(op2(expr));
     if (exponent === 1) {
-      numer = machineValue(op(expr, 1));
+      numer = machineValue(op1(expr));
       denom = 1;
     } else if (exponent === -1) {
       numer = 1;
-      denom = machineValue(op(expr, 1));
+      denom = machineValue(op1(expr));
     }
-  }
-
-  if (h === 'Divide') {
-    numer = machineValue(op(expr, 1));
-    denom = machineValue(op(expr, 2));
   }
 
   if (
     h === 'Multiply' &&
-    head(op(expr, 2)) === POWER &&
-    machineValue(op(op(expr, 2), 2)) === -1
+    head(op2(expr)) === 'Power' &&
+    machineValue(op2(op2(expr))) === -1
   ) {
-    numer = machineValue(op(expr, 1));
-    denom = machineValue(op(op(expr, 2), 1));
+    numer = machineValue(op1(expr));
+    denom = machineValue(op1(op2(expr)));
   }
 
   if (numer === null || denom === null) return null;
 
-  if (Number.isInteger(numer) && Number.isInteger(denom)) {
-    return [numer, denom];
-  }
+  if (Number.isInteger(numer) && Number.isInteger(denom)) return [numer, denom];
+
   return null;
 }
 
@@ -371,29 +333,6 @@ export function mapArgs<T>(expr: Expression, fn: (x: Expression) => T): T[] {
   }
 
   return result;
-}
-
-/**
- * Return num as a number if it's a valid JSON number (that is
- * a valid JavaScript number but not NaN or +/-Infinity) or
- * as a string otherwise
- */
-
-export function asValidJSONNumber(num: string): string | number {
-  if (typeof num === 'string') {
-    const val = Number(num);
-    if (num[0] === '+') num = num.slice(1);
-    if (val.toString() === num) {
-      // If the number roundtrips, it can be represented by a
-      // JavaScript number
-      // However, NaN and Infinity cannot be represented by JSON
-      if (isNaN(val) || !isFinite(val)) {
-        return val.toString();
-      }
-      return val;
-    }
-  }
-  return num;
 }
 
 /**
@@ -459,40 +398,33 @@ export function missingIfEmpty(expr: Expression | null): Expression {
   return expr;
 }
 
-//  function number(
-//   expr: Expression | null | undefined
-// ): number | string | null {
-//   if (expr === null || expr === undefined) return null;
-//   if (typeof expr === 'number') return expr;
-//   if (isNumberObject(expr)) return expr.num;
-//   return null;
-// }
+function countFunctionLeaves(xs: Expression[]): number {
+  if (xs[0] === 'Square') {
+    // Square is synonym with Power(..., 2)
+    return countFunctionLeaves(xs.slice(1)) + 2;
+  }
+  return xs.reduce<number>((acc, x) => acc + countLeaves(x), 0);
+}
 
-// export function isEqual(lhs: Expression, rhs: Expression): boolean {
-//   const symbLhs = symbol(lhs);
-//   if (symbLhs) return symbLhs === symbol(rhs);
+/** The number of leaves (atomic expressions) in the expression */
+export function countLeaves(expr: Expression | null): number {
+  if (expr === null) return 0;
+  if (typeof expr === 'number' || typeof expr === 'string') return 1;
+  if (isNumberObject(expr) || isSymbolObject(expr) || isStringObject(expr))
+    return 1;
 
-//   const strLhs = string(lhs);
-//   if (strLhs) return strLhs === string(rhs);
+  if (Array.isArray(expr)) return countFunctionLeaves(expr);
+  if ('fn' in expr) return countFunctionLeaves(expr.fn);
 
-//   if (Array.isArray(lhs) || isFunctionObject(lhs)) {
-//     if (!(Array.isArray(rhs) || isFunctionObject(rhs))) return false;
-//     if (nops(lhs) !== nops(rhs)) return false;
-//     if (!isEqual(head(lhs)!, head(rhs)!)) return false;
-//     const lhsTail = tail(lhs);
-//     const rhsTail = tail(rhs);
-//     for (let i = 0; i <= nops(lhs); i += 1)
-//       if (!isEqual(lhsTail[i], rhsTail[i])) return false;
-//     return true;
-//   }
+  const dict = dictionary(expr);
+  if (dict) {
+    const keys = Object.keys(dict);
+    return (
+      1 +
+      keys.length +
+      keys.reduce<number>((acc, x) => acc + countLeaves(dict[x]), 0)
+    );
+  }
 
-//   if (typeof lhs === 'number' || isNumberObject(lhs)) {
-//     if (!(typeof rhs === 'number' || isNumberObject(rhs))) return false;
-//     const mLhs = number(lhs);
-//     const mRhs = number(rhs);
-//     if (mLhs !== null) return mLhs === mRhs;
-//     return false;
-//   }
-
-//   return false;
-// }
+  return 0;
+}
