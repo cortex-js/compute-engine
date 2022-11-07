@@ -299,16 +299,24 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   get isZero(): boolean {
     if (this._value === 0) return true;
+
+    if (this._value instanceof Decimal) return this._value.isZero();
+
+    if (this._value instanceof Complex) return this._value.isZero();
+
     // Rationals can never be zero: they get downcast to
     // a machine number during boxing (ctor) if numerator is 0
-    if (Array.isArray(this._value)) return false;
-    return this.engine.chop(this._value) === 0;
+    return false;
   }
 
   get isNotZero(): boolean {
-    if (this._value === 0) return false;
-    if (Array.isArray(this._value)) return true;
-    return this.engine.chop(this._value) !== 0;
+    if (typeof this._value === 'number' && this._value !== 0) return true;
+
+    if (this._value instanceof Decimal) return !this._value.isZero();
+
+    if (this._value instanceof Complex) return !this._value.isZero();
+
+    return true;
   }
 
   get isOne(): boolean {
@@ -317,9 +325,10 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (this._value instanceof Decimal)
       return this._value.equals(this.engine._BIGNUM_ONE);
 
-    if (Array.isArray(this._value)) return isRationalOne(this._value);
+    if (this._value instanceof Complex)
+      return this._value.im === 0 && this._value.re === 1;
 
-    return this._value.equals(1);
+    return isRationalOne(this._value);
   }
 
   get isNegativeOne(): boolean {
@@ -436,7 +445,9 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   get isInteger(): boolean {
     if (typeof this._value === 'number') return Number.isInteger(this._value);
+
     if (this._value instanceof Decimal) return this._value.isInteger();
+
     // Note that some non-reduced rational numbers, such as `4/2`
     // are not considered integers.
     return false;
