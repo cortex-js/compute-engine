@@ -18,6 +18,7 @@ import {
 import { hashCode, isLatexString } from './utils';
 import { serializeJsonFunction } from './serialize';
 import { BoxedNumber } from './boxed-number';
+import { permutations } from '../../common/utils';
 
 export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
   _pattern: BoxedExpression;
@@ -293,7 +294,7 @@ function matchCommutativeArguments(
   substitution: BoxedSubstitution,
   options: { numericTolerance: number }
 ): BoxedSubstitution | null {
-  const patterns = permutations(pattern.ops!);
+  const patterns = permutations<BoxedExpression>(pattern.ops!);
   for (const pat of patterns) {
     const result = matchPermutation(
       expr.engine,
@@ -388,18 +389,7 @@ function match(
     substitution?: BoxedSubstitution;
   }
 ): BoxedSubstitution | null {
-  // console.assert(!hasWildcards(subject));
-  // if (hasWildcards(subject)) {
-  //   console.log(subject.toString());
-  //   debugger;
-  // }
-
   console.assert(hasWildcards(pattern));
-
-  if (!hasWildcards(pattern)) {
-    console.log(pattern.toString());
-    debugger;
-  }
 
   const substitution = matchOnce(subject, pattern, options.substitution ?? {}, {
     numericTolerance: options?.numericTolerance ?? NUMERIC_TOLERANCE,
@@ -431,24 +421,4 @@ function boxedSubstitution(
   return Object.fromEntries(
     Object.entries(sub).map(([k, v]) => [k, ce.box(v)])
   );
-}
-
-function permutations(xs: BoxedExpression[]): BoxedExpression[][] {
-  const result: BoxedExpression[][] = [];
-
-  const permute = (arr, m = []) => {
-    if (arr.length === 0) {
-      result.push(m);
-    } else {
-      for (let i = 0; i < arr.length; i++) {
-        const curr = arr.slice();
-        const next = curr.splice(i, 1);
-        permute(curr.slice(), m.concat(next));
-      }
-    }
-  };
-
-  permute(xs);
-
-  return result;
 }
