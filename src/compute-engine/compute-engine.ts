@@ -73,7 +73,7 @@ import {
   _BoxedDomain,
 } from './boxed-expression/boxed-domain';
 import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expression';
-import { isValidSymbolName } from '../math-json/utils';
+import { isValidIdentifier } from '../math-json/utils';
 import { makeFunctionDefinition } from './boxed-expression/boxed-function-definition';
 import {
   isBigRational,
@@ -943,7 +943,7 @@ export class ComputeEngine implements IComputeEngine {
 
     this.context = parentScope ?? null;
 
-    if (this.context === null) debugger;
+    console.assert(this.context !== null);
   }
 
   set(identifiers: { [identifier: string]: SemiBoxedExpression }): void {
@@ -1100,12 +1100,6 @@ export class ComputeEngine implements IComputeEngine {
     ops: BoxedExpression[],
     metadata?: Metadata
   ): BoxedExpression {
-    // if (!ops.every((x) => x.isCanonical))    debugger;
-    // return makeCanonicalFunction(this, head, ops, {
-    //   metadata,
-    //   canonical: true,
-    // });
-
     return new BoxedFunction(this, head, ops, {
       metadata,
       canonical: true,
@@ -1321,7 +1315,7 @@ export class ComputeEngine implements IComputeEngine {
     // `Half` is a synonym for the rational 1/2
     if (name === 'Half') return this._HALF;
 
-    if (!isValidSymbolName(name)) {
+    if (!isValidIdentifier(name)) {
       const where = options?.metadata?.latex;
       const nameStr = `'${name}'`;
       if (where)
@@ -1383,7 +1377,7 @@ export class ComputeEngine implements IComputeEngine {
     console.assert(sig.domainArgs);
     const context = this.context;
     this.context = null;
-    const result = this.box(expr);
+    const result = this.box(expr, { canonical: false });
     this.context = context;
     return result;
   }

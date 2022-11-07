@@ -483,15 +483,10 @@ export function isSubdomainOf(
   //
   if (rhsLiteral) {
     const lhsConstructor = lhs[0];
-    if (lhsConstructor === 'Domain') {
-      // debugger;
-    }
-
     if (lhsConstructor === 'Function') return rhsLiteral === 'Function';
     if (lhsConstructor === 'Dictionary') return rhsLiteral === 'Dictionary';
     if (lhsConstructor === 'List') return rhsLiteral === 'List';
     if (lhsConstructor === 'Tuple') {
-      // debugger;
       return rhsLiteral === 'Tuple';
     }
     if (lhsConstructor === 'Intersection') {
@@ -532,6 +527,8 @@ export function isSubdomainOf(
 
     // Check that the arguments and return values are compatible
     // Parameters should be contravariant, return values should be covariant
+
+    if (lhs.length === 1 && rhs.length === 1) return true;
 
     const lhsReturnDomain = lhs[
       lhs.length - 1

@@ -15,7 +15,6 @@ import './boxed-expression/utils';
 import './rules';
 import './simplify-rules';
 import './solve';
-import './utils';
 
 export * from './assume';
 export * from './boxed-expression/expression-map';
@@ -35,4 +34,3 @@ export * from './domain-utils';
 export * from './rules';
 export * from './simplify-rules';
 export * from './solve';
-export * from './utils';
