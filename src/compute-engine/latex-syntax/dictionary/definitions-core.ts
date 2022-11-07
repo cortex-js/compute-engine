@@ -1,8 +1,6 @@
 import { Expression } from '../../../math-json/math-json-format';
 import {
   machineValue,
-  PRIME,
-  DERIVATIVE,
   mapArgs,
   op,
   nops,
@@ -377,14 +375,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: (_parser, lhs) => ['Superdagger', lhs],
   },
   {
-    name: PRIME,
+    name: 'Prime',
     trigger: ['^', '\\prime'],
     kind: 'postfix',
   },
   {
     trigger: ['^', '\\doubleprime'],
     kind: 'postfix',
-    parse: (_parser, lhs) => [PRIME, missingIfEmpty(lhs), 2],
+    parse: (_parser, lhs) => ['Prime', missingIfEmpty(lhs), 2],
   },
   {
     name: 'InverseFunction',
@@ -394,7 +392,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       serializer.serialize(op(expr, 1)) + '^{-1}',
   },
   {
-    name: DERIVATIVE,
+    name: 'Derivative',
     serialize: (serializer: Serializer, expr: Expression): string => {
       const degree = machineValue(op(expr, 1)) ?? NaN;
       if (!isFinite(degree)) return '';

@@ -1,21 +1,5 @@
 import type { Expression } from '../../math-json/math-json-format';
 import {
-  NumberFormattingOptions,
-  LatexString,
-  SerializeLatexOptions,
-  FunctionEntry,
-} from './public';
-import {
-  IndexedLatexDictionary,
-  InfixEntry,
-  MatchfixEntry,
-  PostfixEntry,
-  PrefixEntry,
-  SymbolEntry,
-} from './dictionary/definitions';
-import { joinLatex } from './tokenizer';
-import { serializeNumber } from './serialize-number';
-import {
   op,
   nops,
   dictionary,
@@ -28,17 +12,36 @@ import {
   isSymbolObject,
   ops,
 } from '../../math-json/utils';
+
 import { WarningSignalHandler } from '../../common/signals';
 
-function serializeMatchfix(
-  serializer: Serializer,
-  expr: Expression,
-  def: MatchfixEntry
-): string {
-  return replaceLatex(def.serialize as string, [
-    serializer.serialize(op(expr, 1) ?? ['Sequence']),
-  ]);
-}
+import {
+  NumberFormattingOptions,
+  LatexString,
+  SerializeLatexOptions,
+  FunctionEntry,
+} from './public';
+
+import {
+  IndexedLatexDictionary,
+  InfixEntry,
+  PostfixEntry,
+  PrefixEntry,
+  SymbolEntry,
+} from './dictionary/definitions';
+
+import { joinLatex } from './tokenizer';
+import { serializeNumber } from './serialize-number';
+
+// function serializeMatchfix(
+//   serializer: Serializer,
+//   expr: Expression,
+//   def: MatchfixEntry
+// ): string {
+//   return replaceLatex(def.serialize as string, [
+//     serializer.serialize(op(expr, 1) ?? ['Sequence']),
+//   ]);
+// }
 
 function serializeOperator(
   serializer: Serializer,

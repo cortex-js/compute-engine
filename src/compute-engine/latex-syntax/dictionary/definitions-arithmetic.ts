@@ -1,18 +1,7 @@
 import { Expression } from '../../../math-json/math-json-format';
 import {
   machineValue,
-  ROOT,
-  NEGATE,
-  SUBTRACT,
-  ADD,
-  MULTIPLY,
-  DIVIDE,
   isNumberObject,
-  POWER,
-  COMPLEX_INFINITY,
-  PI,
-  EXPONENTIAL_E,
-  IMAGINARY_UNIT,
   applyAssociativeOperator,
   rationalValue,
   op,
@@ -22,7 +11,6 @@ import {
   op2,
   ops,
   symbol,
-  subs,
   isEmptySequence,
   missingIfEmpty,
 } from '../../../math-json/utils';
@@ -46,13 +34,13 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
       const op2 = op(arg, 2);
       if (head(op2) === 'Negate') {
         const b = op(op2, 1);
-        if (op1 && b) denominator.push([POWER, op1, b]);
+        if (op1 && b) denominator.push(['Power', op1, b]);
       } else {
         const exponentVal = machineValue(op2) ?? NaN;
         if (exponentVal === -1) {
           if (op1) denominator.push(op1);
         } else if (exponentVal < 0) {
-          if (op1) denominator.push([POWER, op1, -exponentVal]);
+          if (op1) denominator.push(['Power', op1, -exponentVal]);
         } else {
           numerator.push(arg);
         }
@@ -127,9 +115,9 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   const name = head(expr);
   let result = '';
   let arg = op(expr, 1);
-  if (name === NEGATE) {
+  if (name === 'Negate') {
     result = '-' + serializer.wrap(arg, 276);
-  } else if (name === ADD) {
+  } else if (name === 'Add') {
     let val = machineValue(arg) ?? NaN;
     let argWasInteger =
       !Number.isNaN(val) && Number.isInteger(val) && Math.abs(val) <= 1000;
@@ -182,7 +170,7 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
       }
       argWasInteger = argIsInteger;
     }
-  } else if (name === SUBTRACT) {
+  } else if (name === 'Subtract') {
     result = serializer.wrap(arg, 275);
     const arg2 = op(expr, 2);
     if (arg2 !== null) {
@@ -220,12 +208,12 @@ function serializeMultiply(
     if (denom.length === 1 && denom[0] === 1) {
       if (numer.length === 0) result = '1';
       else if (numer.length === 1) result = serializer.serialize(numer[0]);
-      else result = serializeMultiply(serializer, [MULTIPLY, ...numer]);
+      else result = serializeMultiply(serializer, ['Multiply', ...numer]);
     } else {
       result = serializer.serialize([
-        DIVIDE,
-        numer.length === 1 ? numer[0] : [MULTIPLY, ...numer],
-        denom.length === 1 ? denom[0] : [MULTIPLY, ...denom],
+        'Divide',
+        numer.length === 1 ? numer[0] : ['Multiply', ...numer],
+        denom.length === 1 ? denom[0] : ['Multiply', ...denom],
       ]);
     }
   }
@@ -244,7 +232,7 @@ function serializeMultiply(
     if (arg === null) continue;
     let term: string;
     //
-    // 1. Should the terms be separated by an explicit MULTIPLY?
+    // 1. Should the terms be separated by an explicit 'Multiply'?
     //
     if (typeof arg === 'number' || isNumberObject(arg)) {
       term = serializer.serialize(arg);
@@ -379,7 +367,7 @@ function serializeFraction(
   serializer: Serializer,
   expr: Expression | null
 ): string {
-  // console.assert(getFunctionName(expr) === DIVIDE);
+  // console.assert(getFunctionName(expr) === 'Divide');
   if (expr === null) return '';
 
   const numer = missingIfEmpty(op(expr, 1));
@@ -393,8 +381,10 @@ function serializeFraction(
     if (style === 'inline-solidus') return `${numerStr}\\/${denomStr}`;
     return `^{${numerStr}}\\!\\!/\\!_{${denomStr}}`;
   } else if (style === 'reciprocal') {
+    if (machineValue(numer) === 1) return serializer.wrap(denom) + '^{-1}';
     return serializer.wrap(numer) + serializer.wrap(denom) + '^{-1}';
   } else if (style === 'factor') {
+    if (machineValue(denom) === 1) return serializer.wrap(numer);
     return (
       '\\frac{1}{' + serializer.serialize(denom) + '}' + serializer.wrap(numer)
     );
@@ -431,16 +421,16 @@ function serializePower(
 
   const val2 = machineValue(arg2) ?? 1;
   if (val2 === -1) {
-    return serializer.serialize([DIVIDE, '1', arg1]);
+    return serializer.serialize(['Divide', '1', arg1]);
   } else if (val2 < 0) {
-    return serializer.serialize([DIVIDE, '1', [POWER, arg1, -val2]]);
+    return serializer.serialize(['Divide', '1', ['Power', arg1, -val2]]);
   } else if (head(arg2) === 'Divide' || head(arg2) === 'Rational') {
     if (machineValue(op(arg2, 1)) === 1) {
       // It's x^{1/n} -> it's a root
       const style = getRootStyle(expr, serializer.level);
       return serializeRoot(serializer, style, arg1, op(arg2, 2));
     }
-  } else if (head(arg2) === POWER) {
+  } else if (head(arg2) === 'Power') {
     if (machineValue(op(arg2, 2)) === -1) {
       // It's x^{n^-1} -> it's a root
       const style = getRootStyle(expr, serializer.level);
@@ -461,36 +451,36 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: { num: '+Infinity' },
   },
   {
-    name: COMPLEX_INFINITY,
+    name: 'ComplexInfinity',
     trigger: ['\\tilde', '\\infty'],
     serialize: '\\tilde\\infty',
   },
   {
     trigger: ['\\tilde', '<{>', '\\infty', '<}>'],
-    parse: COMPLEX_INFINITY,
+    parse: 'ComplexInfinity',
   },
-  { name: PI, trigger: ['\\pi'] },
+  { name: 'Pi', trigger: ['\\pi'] },
   { trigger: ['π'], parse: 'Pi' },
-  { name: EXPONENTIAL_E, trigger: ['e'], serialize: '\\exponentialE' },
+  { name: 'ExponentialE', trigger: ['e'], serialize: '\\exponentialE' },
   {
     trigger: ['\\mathrm', '<{>', 'e', '<}>'],
-    parse: EXPONENTIAL_E,
+    parse: 'ExponentialE',
   },
   {
     trigger: ['\\exponentialE'],
-    parse: EXPONENTIAL_E,
+    parse: 'ExponentialE',
   },
   {
-    name: IMAGINARY_UNIT,
+    name: 'ImaginaryUnit',
     trigger: ['\\imaginaryI'],
   },
   {
     trigger: ['i'],
-    parse: IMAGINARY_UNIT,
+    parse: 'ImaginaryUnit',
   },
   {
     trigger: ['\\mathrm', '<{>', 'i', '<}>'],
-    parse: IMAGINARY_UNIT,
+    parse: 'ImaginaryUnit',
   },
 
   // Operations
@@ -784,7 +774,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: 270,
   },
   {
-    name: POWER,
+    name: 'Power',
     trigger: ['^'],
     kind: 'infix',
     serialize: serializePower,
@@ -813,7 +803,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
   },
   {
-    name: ROOT,
+    name: 'Root',
     serialize: serializePower,
   },
   {

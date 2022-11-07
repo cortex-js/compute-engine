@@ -29,7 +29,7 @@ import {
   getSequence,
   head,
   isEmptySequence,
-  isValidSymbolName,
+  isValidIdentifier,
   machineValue,
   nops,
   op,
@@ -1137,7 +1137,7 @@ export class _Parser implements Parser {
       this.match('\\mathrm')
     ) {
       result = this.matchStringArgument();
-      if (result === null || !isValidSymbolName(result)) null;
+      if (result === null || !isValidIdentifier(result)) null;
       return result;
     }
 
@@ -1192,14 +1192,14 @@ export class _Parser implements Parser {
     ) {
       fn = this.matchStringArgument();
       if (fn === null) return this.error('expected-string-argument', start);
-      if (!isValidSymbolName(fn))
+      if (!isValidIdentifier(fn))
         return this.error('invalid-symbol-name', start);
     }
 
     // If we could not capture a multi-char symbol yet, use the next token
     if (!fn) {
       fn = this.next();
-      if (!isValidSymbolName(fn)) fn = null;
+      if (!isValidIdentifier(fn)) fn = null;
     }
 
     //
@@ -1254,7 +1254,7 @@ export class _Parser implements Parser {
     ) {
       sym = this.matchStringArgument();
       if (sym === null) return this.error('expected-string-argument', start);
-      if (!isValidSymbolName(sym))
+      if (!isValidIdentifier(sym))
         return this.error('invalid-symbol-name', start);
     }
 
@@ -1264,7 +1264,7 @@ export class _Parser implements Parser {
     // Are we OK with it as a symbol?
     if (
       sym &&
-      isValidSymbolName(sym) &&
+      isValidIdentifier(sym) &&
       this.options.parseUnknownSymbol?.(sym, this) === 'symbol'
     )
       return sym;
