@@ -31,10 +31,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ['Add', '_a', '_x'],
     ['Negate', '_a'],
   ],
-  [
-    ['Add', '_x', '_a'],
-    ['Negate', '_a'],
-  ],
+  [['Add', ['Negate', '_x'], '_a'], '_a'],
   // ax + b = 0
   [
     ['Add', ['Multiply', '_x', '_a'], '_b'],
@@ -127,13 +124,8 @@ export function findUnivariateRoots(
   x: string
 ): BoxedExpression[] {
   const ce = expr.engine;
-  const rules = ce.cache(
-    'univariate-roots-rules',
-    () => boxRules(ce, UNIVARIATE_ROOTS),
-    (rules) => {
-      for (const r of rules) r.unbind();
-      return rules;
-    }
+  const rules = ce.cache('univariate-roots-rules', () =>
+    boxRules(ce, UNIVARIATE_ROOTS)
   );
   const result = matchRules(
     expand(expr).subs({ [x]: '_x' }, { canonical: false }),
