@@ -78,6 +78,9 @@ const MAX_LINE_LENGTH = 72;
 
 function exprToStringRecursive(expr, start) {
   const indent = ' '.repeat(start);
+
+  if (start > 50) return indent + '...';
+
   if (Array.isArray(expr)) {
     const elements = expr.map((x) => exprToStringRecursive(x, start + 2));
     const result = `[${elements.join(', ')}]`;
@@ -87,9 +90,15 @@ function exprToStringRecursive(expr, start) {
   if (expr === null) return 'null';
   if (typeof expr === 'object') {
     const elements = {};
-    Object.keys(expr).forEach(
-      (x) => (elements[x] = exprToStringRecursive(expr[x], start + 2))
-    );
+
+    for (const key of Object.keys(expr)) {
+      if (expr[key] instanceof AbstractBoxedExpression)
+        elements[key] = exprToStringRecursive(expr[key].json, start + 2);
+      else if (typeof expr[key] === 'object' && 'json' in expr[key])
+        elements[key] = exprToStringRecursive(expr[key].json, start + 2);
+      else elements[key] = exprToStringRecursive(expr[key], start + 2);
+    }
+
     const result = `{${Object.keys(expr)
       .map((key) => `${key}: ${elements[key]}`)
       .join('; ')}}`;
