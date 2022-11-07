@@ -187,22 +187,15 @@ describe('COMMUTATIVE ORDER', () => {
         "Negate",
         ["Multiply", ["Rational", 45, 2], "Pi", "x", "y", "z", ["Sqrt", "y"]]
       ]
-      simplify  = ["Multiply", ["Rational", -45, 2], "Pi", "x", "y", "z", ["Sqrt", "y"]]
       N-auto    = [
-        "Negate",
-        [
-          "Multiply",
-          "70.68583470577034786540947612378881489443631148593988097193625332692586914143970246913078357019763403",
-          "x",
-          "y",
-          "z",
-          ["Sqrt", "y"]
-        ]
+        "Multiply",
+        "-70.68583470577034786540947612378881489443631148593988097193625332692586914143970246913078357019763403",
+        "x",
+        "y",
+        "z",
+        ["Sqrt", "y"]
       ]
-      N-mach    = [
-        "Negate",
-        ["Multiply", 70.68583470577035, "x", "y", "z", ["Sqrt", "y"]]
-      ]
+      N-mach    = ["Multiply", -70.68583470577035, "x", "y", "z", ["Sqrt", "y"]]
     `);
   }); // @fixme: the -1 should be applied to the Decimal
 
@@ -342,21 +335,13 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", ["Power", "x", 4], "y"],
         ["Multiply", ["Power", "x", 2], ["Power", "y", 2]]
       ]
-      box       = [
+      [
         "Add",
         ["Multiply", ["Square", "x"], ["Power", "y", 3]],
         ["Multiply", ["Square", "x"], ["Square", "y"]],
         ["Multiply", "x", ["Power", "y", 4]],
         ["Multiply", ["Square", "y"], ["Power", "x", 3]],
         ["Multiply", "y", ["Power", "x", 4]]
-      ]
-      N-auto    = [
-        "Add",
-        ["Multiply", 1, ["Square", "x"], ["Power", "y", 3]],
-        ["Multiply", 1, ["Square", "x"], ["Square", "y"]],
-        ["Multiply", 1, "x", ["Power", "y", 4]],
-        ["Multiply", 1, ["Square", "y"], ["Power", "x", 3]],
-        ["Multiply", 1, "y", ["Power", "x", 4]]
       ]
     `);
   });
@@ -372,21 +357,13 @@ describe('POLYNOMIAL ORDER', () => {
         ["Delimiter", ["Multiply", ["Power", "a", 5], "b"]],
         ["Delimiter", ["Power", "a", 5]]
       ]
-      box       = [
+      [
         "Add",
         ["Power", "a", 5],
         ["Multiply", ["Square", "a"], ["Power", "a", 3]],
         ["Power", "b", 6],
         ["Multiply", "b", ["Power", "a", 5]],
         ["Multiply", ["Square", "b"], ["Power", "b", 3]]
-      ]
-      N-auto    = [
-        "Add",
-        ["Power", "a", 5],
-        ["Multiply", 1, ["Square", "a"], ["Power", "a", 3]],
-        ["Power", "b", 6],
-        ["Multiply", 1, "b", ["Power", "a", 5]],
-        ["Multiply", 1, ["Square", "b"], ["Power", "b", 3]]
       ]
     `);
   });

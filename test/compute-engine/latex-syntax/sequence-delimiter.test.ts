@@ -4,28 +4,23 @@ describe('SEQUENCES AND DELIMITERS', () => {
   test('Valid groups', () => {
     expect(check('(a+b)')).toMatchInlineSnapshot(`
       latex     = ["Delimiter", ["Add", "a", "b"]]
-      box       = ["Add", "a", "b"]
-      N-auto    = ["Add", 0, "a", "b"]
+      ["Add", "a", "b"]
     `);
     expect(check('-(a+b)')).toMatchInlineSnapshot(`
       latex     = ["Negate", ["Delimiter", ["Add", "a", "b"]]]
-      box       = ["Subtract", ["Negate", "b"], "a"]
-      N-auto    = ["Add", 0, ["Negate", "a"], ["Negate", "b"]]
+      ["Subtract", ["Negate", "b"], "a"]
     `);
     expect(check('(a+(c+d))')).toMatchInlineSnapshot(`
       latex     = ["Delimiter", ["Add", "a", ["Delimiter", ["Add", "c", "d"]]]]
-      box       = ["Add", "a", "c", "d"]
-      N-auto    = ["Add", 0, "a", "c", "d"]
+      ["Add", "a", "c", "d"]
     `);
     expect(check('(a\\times(c\\times d))')).toMatchInlineSnapshot(`
       latex     = ["Delimiter", ["Multiply", "a", ["Delimiter", ["Multiply", "c", "d"]]]]
-      box       = ["Multiply", "a", "c", "d"]
-      N-auto    = ["Multiply", 1, "a", "c", "d"]
+      ["Multiply", "a", "c", "d"]
     `);
     expect(check('(a\\times(c+d))')).toMatchInlineSnapshot(`
       latex     = ["Delimiter", ["Multiply", "a", ["Delimiter", ["Add", "c", "d"]]]]
-      box       = ["Multiply", "a", ["Add", "c", "d"]]
-      N-auto    = ["Multiply", 1, "a", ["Add", 0, "c", "d"]]
+      ["Multiply", "a", ["Add", "c", "d"]]
     `);
     // Sequence with empty element
     expect(check('(a,,b)')).toMatchInlineSnapshot(`

@@ -27,7 +27,7 @@ import {
 } from '../utils';
 
 const ce = engine;
-ce.numericMode = 'auto';
+// ce.numericMode = 'machine';
 // engine.jsonSerializationOptions.precision = 16;
 
 // For the remainder of theses tests, assume that the symbol `f` represent a
@@ -37,14 +37,8 @@ ce.assume('one', 1);
 
 ///
 
-ce.assume(['Equal', 'a', 1]);
-console.log(ce.box('a').evaluate().json);
-console.log(ce.box(['Equal', 'a', 1]).evaluate().json);
-
-// Should not include `0` in sum
-console.log(ce.parse('3x^2-15x').N());
-
-// Output 'not-a-predicate', should be 'tautology'
+// Output 'ok', should be 'tautology'
+console.log(ce.box(['Greater', 'one', 0]).evaluate().toString());
 console.log(ce.assume(['Greater', 'one', 0]));
 
 // Should not error out
@@ -66,6 +60,9 @@ console.log(ce.parse('n=0').json);
 console.log(ce.box(['InverseFunction', 'f']).latex);
 console.log(ce.box(['InverseFunction', 'g']).latex);
 
+// Produces error
+console.log(ce.parse("f'").json);
+
 // Should evaluate InverseFunction
 console.log(ce.parse(`\\cos^{-1}\\doubleprime(x)`).simplify().toJSON());
 
@@ -74,12 +71,6 @@ console.log(ce.parse('x^2_0').json);
 
 // Should not error
 console.log(ce.parse('\\mathrm{V_1}').json);
-
-// cos(5.1) in arithmetic.test return different values for auto and bignum
-// console.log(ce.parse(`\\cos(5.1)`).evaluate().json);
-// ce.numericMode = 'bignum';
-// console.log(ce.parse(`\\cos(5.1)`).evaluate().json);
-// ce.numericMode = 'auto';
 
 // Parsed as imaginary unit
 // -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and
@@ -95,9 +86,6 @@ console.log(ce.box(['LatexTokens', 3, 4]).latex);
 
 // Should simplify
 console.log(ce.parse('a^3a\\times a^2').simplify().json);
-
-// Produces error
-console.log(ce.parse("f'").json);
 
 // console.log(engine.pattern(['Add', 1, '_']).match(engine.box(['Add', 1, 2])));
 
@@ -525,7 +513,7 @@ describe('SERIALIZING Negative factors', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () => {
     expect(
       engine.parse('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}').latex
-    ).toMatchInlineSnapshot(`\\frac{-6xy}{5}`);
+    ).toMatchInlineSnapshot(`-\\frac{1}{5}(6xy)`);
   });
 });
 
@@ -602,7 +590,9 @@ describe('CANONICALIZATION multiply', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () =>
     expect(
       canonicalToJson('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}')
-    ).toMatchInlineSnapshot(`["Multiply", ["Rational", -6, 5], "x", "y"]`));
+    ).toMatchInlineSnapshot(
+      `["Negate", ["Multiply", ["Rational", 6, 5], "x", "y"]]`
+    ));
 
   test(`'1\\times x\\times 2\\times -5.23 \\times 3.2 \\times \\frac23\\times \\frac1x  // Commutative order'`, () => {
     expect(
@@ -610,7 +600,7 @@ describe('CANONICALIZATION multiply', () => {
         '1\\times x\\times 2\\times -5.23 \\times 3.2 \\times \\frac23\\times \\frac1x'
       )
     ).toMatchInlineSnapshot(
-      `["Divide", ["Multiply", ["Rational", -4, 3], 16.736, "x"], "x"]`
+      `["Divide", ["Multiply", -16.736, ["Rational", 4, 3], "x"], "x"]`
     );
   });
 });

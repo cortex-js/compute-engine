@@ -521,7 +521,7 @@ describe('MULTIPLY', () => {
   test(`5x(-2.1)`, () =>
     expect(checkJson(['Multiply', 5, -2.1])).toMatchInlineSnapshot(`
       box       = ["Multiply", 5, -2.1]
-      simplify  = ["Multiply", -5, 2.1]
+      simplify  = ["Multiply", -2.1, 5]
       evaluate  = -10.5
     `));
 
@@ -546,7 +546,7 @@ describe('MULTIPLY', () => {
     expect(checkJson(['Multiply', 'x', -2, 3.1, '+Infinity']))
       .toMatchInlineSnapshot(`
       box       = ["Multiply", "x", -2, 3.1, {num: "+Infinity"}]
-      canonical = ["Multiply", -2, 3.1, {num: "+Infinity"}, "x"]
+      canonical = ["Multiply", -3.1, 2, {num: "+Infinity"}, "x"]
       evaluate  = {num: "+Infinity"}
     `));
 
@@ -554,7 +554,7 @@ describe('MULTIPLY', () => {
     expect(checkJson(['Multiply', 'x', -2, 3.1, '-Infinity']))
       .toMatchInlineSnapshot(`
       box       = ["Multiply", "x", -2, 3.1, {num: "-Infinity"}]
-      canonical = ["Multiply", -2, 3.1, {num: "+Infinity"}, "x"]
+      canonical = ["Multiply", 2, 3.1, {num: "+Infinity"}, "x"]
       evaluate  = {num: "+Infinity"}
     `));
 
@@ -562,7 +562,7 @@ describe('MULTIPLY', () => {
     expect(checkJson(['Multiply', 'x', -2, 3.1, '-Infinity', '+Infinity']))
       .toMatchInlineSnapshot(`
       box       = ["Multiply", "x", -2, 3.1, {num: "-Infinity"}, {num: "+Infinity"}]
-      canonical = ["Multiply", -2, 3.1, {num: "+Infinity"}, "x"]
+      canonical = ["Multiply", 2, 3.1, {num: "+Infinity"}, "x"]
       evaluate  = {num: "+Infinity"}
     `));
 
@@ -665,7 +665,7 @@ describe('MULTIPLY', () => {
   test(`Multiply`, () =>
     expect(checkJson(['Multiply', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
       box       = ["Multiply", 2.5, -1.1, 18.4]
-      canonical = ["Negate", ["Multiply", 50.6]]
+      canonical = -50.6
       evaluate  = -50.6
       eval-mach = -50.599999999999994
     `));
@@ -824,7 +824,8 @@ describe('Sqrt', () => {
       simplify  = ["Multiply", 1000000000, ["Sqrt", 12345670]]
       evaluate  = ["Multiply", 1000000000, ["Sqrt", 12345670]]
       N-auto    = 3513640562152.025248
-      eval-mach = 3513640562152.0254
+      eval-mach = ["Sqrt", 1.234567e+25]
+      N-mach    = 3513640562152.0254
     `));
 
   test(`√(5/7)`, () =>

@@ -137,8 +137,7 @@ describe('OPERATOR invisible', () => {
         ["Delimiter", ["Multiply", "a", "b", "c"]],
         ["Delimiter", ["Multiply", "x", "y", "z"]]
       ]
-      box       = ["Multiply", "a", "b", "c", "x", "y", "z"]
-      N-auto    = ["Multiply", 1, "a", "b", "c", "x", "y", "z"]
+      ["Multiply", "a", "b", "c", "x", "y", "z"]
     `));
   test('2\\frac{1}{4} // Invisible PLUS operator', () =>
     expect(check('2\\frac{1}{4}')).toMatchInlineSnapshot(`
@@ -268,7 +267,9 @@ describe('OPERATOR multiply', () => {
   test('2\\times-x', () =>
     expect(check('2\\times-x')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, ["Negate", "x"]]
-      ["Multiply", -2, "x"]
+      box       = ["Multiply", -2, "x"]
+      simplify  = ["Negate", ["Multiply", 2, "x"]]
+      N-auto    = ["Multiply", -2, "x"]
     `));
   test('2(x+1)', () =>
     expect(check('2(x+1)')).toMatchInlineSnapshot(`
