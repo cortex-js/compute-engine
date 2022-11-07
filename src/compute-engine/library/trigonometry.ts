@@ -94,17 +94,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                   .simplify()
               : undefined),
 
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Sin', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Sin', ops) : undefined),
-
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.sin,
-              (x) => x.sin(),
-              (x) => x.sin()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sin', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Sin', ops[0]),
         },
       },
     ],
@@ -123,16 +114,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           domain: domainNumberToRealNumber('Arctan'),
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Arctan', ops[0])?.simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Arctan', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Arctan', ops) : undefined),
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.atan,
-              (x) => x.atan(),
-              (x) => x.atan()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arctan', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arctan', ops[0]),
         },
       },
       {
@@ -141,7 +124,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         complexity: 5200,
         signature: {
           domain: ['Function', 'Number', 'Number', 'Number'],
-          N: (ce, ops) =>
+          N: (_ce, ops) =>
             apply2N(ops[0], ops[1], Math.atan2, (a, b) => Decimal.atan2(a, b)),
         },
       },
@@ -155,17 +138,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             ce
               .box(['Sin', ['Add', ops[0], ['Multiply', 'Half', 'Pi']]])
               .simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Cos', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Cos', ops) : undefined),
-
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.cos,
-              (x) => x.cos(),
-              (x) => x.cos()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Cos', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Cos', ops[0]),
         },
       },
 
@@ -178,16 +152,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Tan', ops[0])?.simplify() ??
             ce.box(['Divide', ['Sin', ops[0]], ['Cos', ops[0]]]).simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Tan', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Tan', ops) : undefined),
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.tan,
-              (x) => x.tan(),
-              (x) => x.tan()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Tan', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Tan', ops[0]),
         },
       },
       /* converts (x, y) -> (radius, angle) */
@@ -216,16 +182,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ['Add', ops[0], ['Sqrt', ['Subtract', ['Square', ops[0]], 1]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Arcosh', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Arcosh', ops) : undefined),
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.acosh,
-              (x) => x.acosh(),
-              (x) => x.acosh()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcosh', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arcosh', ops[0]),
         },
       },
       {
@@ -246,16 +204,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ],
               ])
               .simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Arcsin', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Arcsin', ops) : undefined),
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.asin,
-              (x) => x.asin(),
-              (x) => x.asin()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsin', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arcsin', ops[0]),
         },
       },
       //Note: Arsinh, not Arcsinh
@@ -272,16 +222,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ['Add', ops[0], ['Sqrt', ['Add', ['Square', ops[0]], 1]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Arsinh', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Arsinh', ops) : undefined),
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.asinh,
-              (x) => x.asinh(),
-              (x) => x.asinh()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arsinh', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arsinh', ops[0]),
         },
       },
       {
@@ -298,16 +240,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ['Ln', ['Divide', ['Add', 1, ops[0]], ['Subtract', 1, ops[0]]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Artanh', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Artanh', ops) : undefined),
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.atanh,
-              (x) => x.atanh(),
-              (x) => x.atanh()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Artanh', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Artanh', ops[0]),
         },
       },
       {
@@ -324,16 +258,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ['Add', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Cosh', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Cosh', ops) : undefined),
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.cosh,
-              (x) => x.cosh(),
-              (x) => x.cosh()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Cosh', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Cosh', ops[0]),
         },
       },
       {
@@ -344,16 +270,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Cot', ops[0])?.simplify() ??
             ce.box(['Divide', ['Cos', ops[0]], ['Sin', ops[0]]]).simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Cot', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Cot', ops) : undefined),
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => 1 / Math.tan(x),
-              (x) => ce._BIGNUM_ONE.div(x.tan()),
-              (x) => x.tan().inverse()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Cot', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Cot', ops[0]),
         },
       },
       {
@@ -365,16 +283,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Csc', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Sin', ops[0]]]).simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Csc', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Csc', ops) : undefined),
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => 1 / Math.sin(x),
-              (x) => ce._BIGNUM_ONE.div(x.sin()),
-              (x) => x.sin().inverse()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Csc', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Csc', ops[0]),
         },
       },
       /** = sin(z/2)^2 = (1 - cos z) / 2*/
@@ -404,16 +314,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Sec', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Cos', ops[0]]]).simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Sec', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Sec', ops) : undefined),
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => 1 / Math.cos(x),
-              (x) => ce._BIGNUM_ONE.div(x.cos()),
-              (x) => x.cos().inverse()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sec', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Sec', ops[0]),
         },
       },
       {
@@ -431,9 +333,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
                 ['Subtract', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
               ])
               .simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Sinh', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Sinh', ops) : undefined),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sinh', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Sinh', ops[0]),
         },
       },
     ],
@@ -448,16 +349,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Csch', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Sinh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Csch', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Csch', ops) : undefined),
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => 1 / Math.sinh(x),
-              (x) => ce._BIGNUM_ONE.div(x.sinh()),
-              (x) => x.sinh().inverse()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Csch', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Csch', ops[0]),
         },
       },
       {
@@ -468,16 +361,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Sech', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Cosh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Sech', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Sech', ops) : undefined),
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => 1 / Math.cosh(x),
-              (x) => ce._BIGNUM_ONE.div(x.cosh()),
-              (x) => x.cosh().inverse()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sech', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Sech', ops[0]),
         },
       },
       {
@@ -489,16 +374,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Tanh', ops[0])?.simplify() ??
             ce.box(['Divide', ['Sinh', ops[0]], ['Cosh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Tanh', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Tanh', ops) : undefined),
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.tanh,
-              (x) => x.tanh(),
-              (x) => x.tanh()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Tanh', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Tanh', ops[0]),
         },
       },
     ],
@@ -515,16 +392,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             ce
               .box(['Subtract', ['Divide', 'Pi', 2], ['Arcsin', ops[0]]])
               .simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Arccos', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Arccos', ops) : undefined),
-          N: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.acos,
-              (x) => x.acos(),
-              (x) => x.acos()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccos', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arccos', ops[0]),
         },
       },
       // Arccot: {
@@ -561,16 +430,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           simplify: (ce, ops) =>
             constructibleValues(ce, 'Coth', ops[0])?.simplify() ??
             ce.box(['Divide', 1, ['Tanh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) =>
-            constructibleValues(ce, 'Coth', ops[0])?.evaluate() ??
-            (ops[0].isExact ? ce.fn('Coth', ops) : undefined),
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => 1 / Math.tanh(x),
-              (x) => ce._BIGNUM_ONE.div(x.tanh()),
-              (x) => x.tanh().inverse()
-            ),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Coth', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Coth', ops[0]),
         },
       },
       /* converts (radius, angle) -> (x, y) */
@@ -858,7 +719,7 @@ function processInverseFunction(
     Sech: 'Arcsech',
     Csch: 'Arcsch',
     Arcosh: 'Cosh',
-    Arcos: 'Cos',
+    Arccos: 'Cos',
     Arccsc: 'Csc',
     Arcsch: 'Csch',
     // '??': 'Cot',
@@ -870,4 +731,146 @@ function processInverseFunction(
     Artanh: 'Tanh',
   }[head];
   return newHead ? ce.symbol(newHead, { canonical: true }) : expr;
+}
+
+function evalTrig(
+  ce: IComputeEngine,
+  mode: 'N' | 'evaluate',
+  head: string,
+  op: BoxedExpression
+): BoxedExpression | undefined {
+  if (mode === 'evaluate') {
+    const result = constructibleValues(ce, head, op)?.evaluate();
+    if (result) return result;
+    if (op.isExact) return undefined;
+  }
+  switch (head) {
+    case 'Arccos':
+      return applyN(
+        op,
+        Math.acos,
+        (x) => x.acos(),
+        (x) => x.acos()
+      );
+    case 'Arcosh':
+      return applyN(
+        op,
+        Math.acosh,
+        (x) => x.acosh(),
+        (x) => x.acosh()
+      );
+    case 'Arcsin':
+      return applyN(
+        op,
+        Math.asin,
+        (x) => x.asin(),
+        (x) => x.asin()
+      );
+    case 'Arsinh':
+      return applyN(
+        op,
+        Math.asinh,
+        (x) => x.asinh(),
+        (x) => x.asinh()
+      );
+    case 'Arctan':
+      return applyN(
+        op,
+        Math.atan,
+        (x) => x.atan(),
+        (x) => x.atan()
+      );
+    case 'Artanh':
+      return applyN(
+        op,
+        Math.atanh,
+        (x) => x.atanh(),
+        (x) => x.atanh()
+      );
+    case 'Cos':
+      return applyN(
+        op,
+        Math.cos,
+        (x) => x.cos(),
+        (x) => x.cos()
+      );
+    case 'Cosh':
+      return applyN(
+        op,
+        Math.cosh,
+        (x) => x.cosh(),
+        (x) => x.cosh()
+      );
+    case 'Cot':
+      return applyN(
+        op,
+        (x) => 1 / Math.tan(x),
+        (x) => ce._BIGNUM_ONE.div(x.tan()),
+        (x) => x.tan().inverse()
+      );
+    case 'Coth':
+      return applyN(
+        op,
+        (x) => 1 / Math.tanh(x),
+        (x) => ce._BIGNUM_ONE.div(x.tanh()),
+        (x) => x.tanh().inverse()
+      );
+    case 'Csc':
+      return applyN(
+        op,
+        (x) => 1 / Math.sin(x),
+        (x) => ce._BIGNUM_ONE.div(x.sin()),
+        (x) => x.sin().inverse()
+      );
+    case 'Csch':
+      return applyN(
+        op,
+        (x) => 1 / Math.sinh(x),
+        (x) => ce._BIGNUM_ONE.div(x.sinh()),
+        (x) => x.sinh().inverse()
+      );
+    case 'Sec':
+      return applyN(
+        op,
+        (x) => 1 / Math.cos(x),
+        (x) => ce._BIGNUM_ONE.div(x.cos()),
+        (x) => x.cos().inverse()
+      );
+    case 'Sech':
+      return applyN(
+        op,
+        (x) => 1 / Math.cosh(x),
+        (x) => ce._BIGNUM_ONE.div(x.cosh()),
+        (x) => x.cosh().inverse()
+      );
+    case 'Sin':
+      return applyN(
+        op,
+        Math.sin,
+        (x) => x.sin(),
+        (x) => x.sin()
+      );
+    case 'Sinh':
+      return applyN(
+        op,
+        Math.sinh,
+        (x) => x.sinh(),
+        (x) => x.sinh()
+      );
+    case 'Tan':
+      return applyN(
+        op,
+        Math.tan,
+        (x) => x.tan(),
+        (x) => x.tan()
+      );
+    case 'Tanh':
+      return applyN(
+        op,
+        Math.tanh,
+        (x) => x.tanh(),
+        (x) => x.tanh()
+      );
+  }
+  return undefined;
 }
