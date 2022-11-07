@@ -253,8 +253,7 @@ describe('OPERATOR infix', () => {
   test('a-b+c+d // Add', () =>
     expect(check('a-b+c+d')).toMatchInlineSnapshot(`
       latex     = ["Add", ["Subtract", "a", "b"], "c", "d"]
-      box       = ["Add", "a", ["Negate", "b"], "c", "d"]
-      N-auto    = ["Add", 0, "a", ["Negate", "b"], "c", "d"]
+      ["Add", "a", ["Negate", "b"], "c", "d"]
     `));
 
   test('-2+3x-4', () =>
@@ -466,12 +465,12 @@ describe('OPERATOR serialize, valid', () => {
   test(`['Multiply', ['Divide', 2, 'x'], ['Divide', 'x', 3]]`, () =>
     expect(
       latex(['Multiply', ['Divide', 2, 'x'], ['Divide', 'x', 3]])
-    ).toMatchInlineSnapshot(`\\frac{\\frac{2x}{3}}{x}`));
+    ).toMatchInlineSnapshot(`\\frac{1}{x}(\\frac{2x}{3})`));
 
   test(`['Multiply', ['Divide', 2, 'x'], ['Power', 'x', -2]]`, () =>
     expect(
       latex(['Multiply', ['Divide', 2, 'x'], ['Power', 'x', -2]])
-    ).toMatchInlineSnapshot(`\\frac{2}{xx^2}`));
+    ).toMatchInlineSnapshot(`(2)(xx^2)^{-1}`));
 
   test(`['Divide', 2, 3]`, () =>
     expect(latex(['Divide', 2, 3])).toMatchInlineSnapshot(`\\frac{2}{3}`));

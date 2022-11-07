@@ -1,12 +1,3 @@
-import {
-  MULTIPLY,
-  PI,
-  ADD,
-  SUBTRACT,
-  NEGATE,
-  POWER,
-  DIVIDE,
-} from '../../../src/math-json/utils';
 import { box, latex, parse } from '../../utils';
 
 describe('LATEX SERIALIZING', () => {
@@ -58,7 +49,7 @@ describe('LATEX SERIALIZING', () => {
   });
   // Leave space between pi and x
   test('Spacing', () => {
-    expect(latex([MULTIPLY, PI, 'x'])).toMatchInlineSnapshot(`\\pi x`);
+    expect(latex(['Multiply', 'Pi', 'x'])).toMatchInlineSnapshot(`\\pi x`);
   });
 
   test('Symbols', () => {
@@ -88,30 +79,32 @@ describe('LATEX SERIALIZING', () => {
   });
 
   test('Basic operations', () => {
-    expect(latex([ADD, 'a', 'b'])).toMatchInlineSnapshot(`a+b`);
+    expect(latex(['Add', 'a', 'b'])).toMatchInlineSnapshot(`a+b`);
     // Invisible operator
-    expect(latex([MULTIPLY, 'a', 'b'])).toMatchInlineSnapshot(`ab`);
+    expect(latex(['Multiply', 'a', 'b'])).toMatchInlineSnapshot(`ab`);
     expect(
-      latex([MULTIPLY, [ADD, 'x', 1], [SUBTRACT, 'x', 1]])
+      latex(['Multiply', ['Add', 'x', 1], ['Subtract', 'x', 1]])
     ).toMatchInlineSnapshot(`(1+x)(x-1)`);
     expect(
-      latex([ADD, [MULTIPLY, 'x', -1], [MULTIPLY, 'x', 2]])
+      latex(['Add', ['Multiply', 'x', -1], ['Multiply', 'x', 2]])
     ).toMatchInlineSnapshot(`2x-x`);
-    expect(latex([SUBTRACT, [NEGATE, 'x'], -1])).toMatchInlineSnapshot(`1-x`);
+    expect(latex(['Subtract', ['Negate', 'x'], -1])).toMatchInlineSnapshot(
+      `1-x`
+    );
   });
   test('Power', () => {
-    expect(latex([POWER, 'x', -2])).toMatchInlineSnapshot(`\\frac{1}{x^2}`);
-    expect(latex([POWER, 'x', [DIVIDE, 1, 2]])).toMatchInlineSnapshot(
+    expect(latex(['Power', 'x', -2])).toMatchInlineSnapshot(`\\frac{1}{x^2}`);
+    expect(latex(['Power', 'x', ['Divide', 1, 2]])).toMatchInlineSnapshot(
       `\\sqrt{x}`
     );
-    expect(latex([POWER, [ADD, 'x', 1], [DIVIDE, 1, 2]])).toMatchInlineSnapshot(
-      `\\sqrt{1+x}`
-    );
     expect(
-      latex([POWER, [MULTIPLY, 2, 'x'], [DIVIDE, 1, 2]])
+      latex(['Power', ['Add', 'x', 1], ['Divide', 1, 2]])
+    ).toMatchInlineSnapshot(`\\sqrt{1+x}`);
+    expect(
+      latex(['Power', ['Multiply', 2, 'x'], ['Divide', 1, 2]])
     ).toMatchInlineSnapshot(`\\sqrt{2x}`);
     expect(
-      latex([POWER, [MULTIPLY, 2, 'x'], [SUBTRACT, 1, 'n']])
+      latex(['Power', ['Multiply', 2, 'x'], ['Subtract', 1, 'n']])
     ).toMatchInlineSnapshot(`(2x)^{1-n}`);
   });
   test('Missing', () => {

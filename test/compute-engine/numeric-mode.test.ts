@@ -56,7 +56,7 @@ describe('NUMERIC MODE', () => {
       .toMatchInlineSnapshot(`
       latex     = ["Power", "12345678901234567890", "23456789012345678901"]
       box       = ["Power", "12345678901234567890", "23456789012345678901"]
-      evaluate  = {num: "+Infinity"}
+      N-auto    = {num: "+Infinity"}
     `));
 
   test(`\\cos(555555^{-1})`, () =>

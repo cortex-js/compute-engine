@@ -1,27 +1,28 @@
-import { POWER } from '../../../src/math-json/utils';
 import { Expression } from '../../../src/math-json/math-json-format';
 import { parse, latex, engine } from '../../utils';
 
 describe('POWER', () => {
   test('Power Invalid forms', () => {
-    expect(latex([POWER])).toMatchInlineSnapshot(
-      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
-    );
-    expect(latex([POWER, null as unknown as Expression])).toMatchInlineSnapshot(
+    expect(latex(['Power'])).toMatchInlineSnapshot(
       `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
     );
     expect(
-      latex([POWER, undefined as unknown as Expression])
+      latex(['Power', null as unknown as Expression])
     ).toMatchInlineSnapshot(
       `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
     );
-    expect(latex([POWER, 1])).toMatchInlineSnapshot(
-      `1^{\\textcolor{red}{\\blacksquare}}`
-    );
-    expect(latex([POWER, NaN])).toMatchInlineSnapshot(
+    expect(
+      latex(['Power', undefined as unknown as Expression])
+    ).toMatchInlineSnapshot(
       `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
     );
-    expect(latex([POWER, Infinity])).toMatchInlineSnapshot(
+    expect(latex(['Power', 1])).toMatchInlineSnapshot(
+      `1^{\\textcolor{red}{\\blacksquare}}`
+    );
+    expect(latex(['Power', NaN])).toMatchInlineSnapshot(
+      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
+    );
+    expect(latex(['Power', Infinity])).toMatchInlineSnapshot(
       `\\infty^{\\textcolor{red}{\\blacksquare}}`
     );
   });

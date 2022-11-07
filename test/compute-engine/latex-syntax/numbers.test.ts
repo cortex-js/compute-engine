@@ -25,14 +25,14 @@ describe('NUMBERS', () => {
   test('Parsing numbers with repeating pattern', () => {
     expect(parse('1.(3)')).toMatchInlineSnapshot(`1.(3)`);
     expect(parse('0.(142857)')).toMatchInlineSnapshot(`0.(142857)`);
-    expect(box({ num: '1.(3)' })).toMatch('{num: "1.(3)"}');
-    expect(box({ num: '0.(142857)' })).toMatch('{num: "0.(142857)"}');
+    expect(box({ num: '1.(3)' })).toMatch('1.(3)');
+    expect(box({ num: '0.(142857)' })).toMatch('0.(142857)');
     expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", 0.123, "x"]`);
     expect(parse('x=.123(45)')).toMatchInlineSnapshot(
-      `["Equal", {num: "0.123(45)"}, "x"]`
+      `["Equal", "0.123(45)", "x"]`
     );
     expect(parse('x=-987.123(45)')).toMatchInlineSnapshot(
-      `["Equal", {num: "-987.123(45)"}, "x"]`
+      `["Equal", "-987.123(45)", "x"]`
     );
   });
   test('Parsing numbers with truncation  mark', () => {
@@ -46,7 +46,7 @@ describe('NUMBERS', () => {
       `["Equal", "x", ["Add", 1, 1230]]`
     );
     expect(parse('x=.123\\ldots e-423+1')).toMatchInlineSnapshot(
-      `["Equal", 1, "x"]`
+      `["Equal", "x", ["Add", "1.23e-424", 1]]`
     );
   });
 
@@ -151,29 +151,27 @@ describe('NUMBERS', () => {
 
   test('Non-machine number', () => {
     // Exponent larger than 10^308 (Number.MAX_VALUE = 1.7976931348623157e+308)
-    expect(parse('421.35e+1000')).toMatch('{num: "4.2135e+1002"}');
+    expect(parse('421.35e+1000')).toMatch('4.2135e+1002');
     // Exponent smaller than 10^-323 (Number.MIN_VALUE = 5e-324)
-    expect(parse('421.35e-323')).toMatch('{num: "4.2135e-321"}');
+    expect(parse('421.35e-323')).toMatch('4.2135e-321');
 
     //  More than 15 digits
     expect(parse('9007199234534554740991')).toMatchInlineSnapshot(
-      `{num: "9007199234534554740991"}`
+      `9007199234534554740991`
     );
 
     expect(parse('900719923453434553453454740992')).toMatch(
-      '{num: "900719923453434553453454740992"}'
+      '900719923453434553453454740992'
     );
     expect(
       parse(
         '900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789'
       )
-    ).toMatchInlineSnapshot(`
-      {
-        num: "900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789"
-      }
-    `);
+    ).toMatchInlineSnapshot(
+      `900719923453434553982347938645934876598347659823479234879234867923487692348792348692348769234876923487692348769234876923487634876234876234987692348762348769234876348576453454740992123456789`
+    );
     expect(parse('31324234.23423143\\times10^{5000}')).toMatchInlineSnapshot(
-      `{num: "3.132423423423143e+5007"}`
+      `3.132423423423143e+5007`
     );
   });
   test('Non-finite numbers', () => {

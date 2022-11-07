@@ -7,11 +7,11 @@ describe('SERIALIZING SETS', () => {
       `\\mathrm{Set}(2, 5, 7)`
     );
     // With lambda-condition
-    expect(
-      latex(['Set', 'Number', ['Condition', ['NotEqual', '_', 0]]])
-    ).toMatchInlineSnapshot(
-      `\\mathrm{Set}(\\mathrm{Number}, \\mathrm{Condition}(0\\ne\\text{\\_}))`
-    );
+    // expect(
+    //   latex(['Set', 'Number', ['Condition', ['NotEqual', '_', 0]]])
+    // ).toMatchInlineSnapshot(
+    //   `\\mathrm{Set}(\\mathrm{Number}, \\mathrm{Condition}(0\\ne\\text{\\_}))`
+    // );
     // With predicate and named arguments
     expect(
       latex([

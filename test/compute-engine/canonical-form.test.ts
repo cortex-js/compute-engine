@@ -69,9 +69,8 @@ describe('CANONICAL FORMS', () => {
       latex     = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
       box       = ["Negate", ["Divide", 101, ["Power", 10, ["Rational", 2, 3]]]]
       simplify  = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
-      evaluate  = -21.75979036932202893002012709359876117621895735367189457070420771014661458084450950459811744216443957
       N-auto    = -21.75979036932202558976886502184544000211938391614029668314127861409875217714824208187295918578675709
-      eval-mach = -21.759790369322026
+      N-mach    = -21.759790369322026
     `);
   });
 
@@ -303,7 +302,6 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", 7, "a"]
       ]
       simplify  = ["Multiply", 15, "a"]
-      N-auto    = ["Add", 0, ["Multiply", 15, "a"]]
     `);
   });
 
@@ -326,15 +324,11 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       simplify  = ["Add", ["Multiply", 14, "Pi", ["Power", "x", 3]], ["Power", "x", 3]]
       N-auto    = [
-        "Add",
-        0,
-        [
-          "Multiply",
-          "44.98229715025710533847700736591304037876037159125148149364922429230942968800692598079248755478963896",
-          ["Power", "x", 3]
-        ]
+        "Multiply",
+        "44.98229715025710533847700736591304037876037159125148149364922429230942968800692598079248755478963896",
+        ["Power", "x", 3]
       ]
-      N-mach    = ["Add", 0, ["Multiply", 44.982297150257104, ["Power", "x", 3]]]
+      N-mach    = ["Multiply", 44.982297150257104, ["Power", "x", 3]]
     `);
   });
 
@@ -358,7 +352,6 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       N-auto    = [
         "Add",
-        0,
         ["Multiply", 1, ["Square", "x"], ["Power", "y", 3]],
         ["Multiply", 1, ["Square", "x"], ["Square", "y"]],
         ["Multiply", 1, "x", ["Power", "y", 4]],
@@ -389,7 +382,6 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       N-auto    = [
         "Add",
-        0,
         ["Power", "a", 5],
         ["Multiply", 1, ["Square", "a"], ["Power", "a", 3]],
         ["Power", "b", 6],
@@ -407,15 +399,8 @@ describe('POLYNOMIAL ORDER', () => {
         ["Multiply", 2, ["Power", "b", 8]],
         ["Multiply", 7, ["Power", "b", 3], "a"]
       ]
-      box       = [
+      [
         "Add",
-        ["Multiply", 7, "a", ["Power", "b", 3]],
-        ["Multiply", 2, ["Power", "b", 8]],
-        ["Multiply", 5, ["Square", "c"], ["Power", "a", 4]]
-      ]
-      N-auto    = [
-        "Add",
-        0,
         ["Multiply", 7, "a", ["Power", "b", 3]],
         ["Multiply", 2, ["Power", "b", 8]],
         ["Multiply", 5, ["Square", "c"], ["Power", "a", 4]]

@@ -74,7 +74,6 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
         ]
       ]
       evaluate  = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
-      N-auto    = ["Add", 0, ["Negate", ["Sin", "x"]], ["Cos", "x"]]
     `));
   test(`\\cos \\frac{x}{2}^2`, () =>
     expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`

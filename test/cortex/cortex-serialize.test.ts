@@ -1,12 +1,3 @@
-import {
-  ADD,
-  DIVIDE,
-  MULTIPLY,
-  NEGATE,
-  PI,
-  POWER,
-  SUBTRACT,
-} from '../../src/math-json/utils';
 import { serializeCortex } from '../../src/cortex/serialize-cortex';
 
 describe('CORTEX SERIALIZING', () => {
@@ -66,13 +57,13 @@ describe('CORTEX SERIALIZING COMMENTS', () => {
   test('Comment', () => {
     expect(
       serializeCortex({
-        fn: [MULTIPLY, PI, 'x'],
+        fn: ['Multiply', 'Pi', 'x'],
         comment: 'This is a single line-comment',
       })
     ).toMatchInlineSnapshot(`"/* This is a single line-comment */Pi * x"`);
     expect(
       serializeCortex({
-        fn: [MULTIPLY, PI, 'x'],
+        fn: ['Multiply', 'Pi', 'x'],
         comment: 'This is a multi-line-comment\nThis is the second line.',
       })
     ).toMatchInlineSnapshot(`
@@ -90,7 +81,7 @@ describe('CORTEX SERIALIZING COMMENTS', () => {
 
 describe('CORTEX SERIALIZING SPACES', () => {
   test('Spacing', () => {
-    expect(serializeCortex([MULTIPLY, PI, 'x'])).toMatchInlineSnapshot(
+    expect(serializeCortex(['Multiply', 'Pi', 'x'])).toMatchInlineSnapshot(
       `"Pi * x"`
     );
   });
@@ -305,19 +296,19 @@ describe('CORTEX SERIALIZING COLLECTIONS', () => {
 });
 describe('CORTEX SERIALIZING OPERATORS', () => {
   test('Operators', () => {
-    expect(serializeCortex([ADD, 'a', 'b'])).toMatchInlineSnapshot(`"a + b"`);
+    expect(serializeCortex(['Add', 'a', 'b'])).toMatchInlineSnapshot(`"a + b"`);
     // Invisible operator
-    expect(serializeCortex([MULTIPLY, 'a', 'b'])).toMatchInlineSnapshot(
+    expect(serializeCortex(['Multiply', 'a', 'b'])).toMatchInlineSnapshot(
       `"a * b"`
     );
     expect(
-      serializeCortex([MULTIPLY, [ADD, 'x', 1], [SUBTRACT, 'x', 1]])
+      serializeCortex(['Multiply', ['Add', 'x', 1], ['Subtract', 'x', 1]])
     ).toMatchInlineSnapshot(`"(x + 1) * (x - 1)"`);
     expect(
-      serializeCortex([ADD, [MULTIPLY, 'x', -1], [MULTIPLY, 'x', 2]])
+      serializeCortex(['Add', ['Multiply', 'x', -1], ['Multiply', 'x', 2]])
     ).toMatchInlineSnapshot(`"x * -1 + x * 2"`);
     expect(
-      serializeCortex([SUBTRACT, [NEGATE, 'x'], -1])
+      serializeCortex(['Subtract', ['Negate', 'x'], -1])
     ).toMatchInlineSnapshot(`"-x - -1"`);
     expect(
       serializeCortex(['Add', ['Multiply', 'x', 'y'], ['Multiply', 'a', 'b']])
@@ -388,21 +379,23 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
   });
 
   test('Power', () => {
-    expect(serializeCortex([POWER, 'x', -2])).toMatchInlineSnapshot(`"x ^ -2"`);
-    expect(serializeCortex([POWER, 'x', [DIVIDE, 1, 2]])).toMatchInlineSnapshot(
-      `"x ^ (1 / 2)"`
+    expect(serializeCortex(['Power', 'x', -2])).toMatchInlineSnapshot(
+      `"x ^ -2"`
     );
     expect(
-      serializeCortex([POWER, ['Negate', 2], ['Negate', 3]])
+      serializeCortex(['Power', 'x', ['Divide', 1, 2]])
+    ).toMatchInlineSnapshot(`"x ^ (1 / 2)"`);
+    expect(
+      serializeCortex(['Power', ['Negate', 2], ['Negate', 3]])
     ).toMatchInlineSnapshot(`"(-2) ^ (-3)"`);
     expect(
-      serializeCortex([POWER, [ADD, 'x', 1], [DIVIDE, 1, 2]])
+      serializeCortex(['Power', ['Add', 'x', 1], ['Divide', 1, 2]])
     ).toMatchInlineSnapshot(`"(x + 1) ^ (1 / 2)"`);
     expect(
-      serializeCortex([POWER, [MULTIPLY, 2, 'x'], [DIVIDE, 1, 2]])
+      serializeCortex(['Power', ['Multiply', 2, 'x'], ['Divide', 1, 2]])
     ).toMatchInlineSnapshot(`"(2 * x) ^ (1 / 2)"`);
     expect(
-      serializeCortex([POWER, [MULTIPLY, 2, 'x'], [SUBTRACT, 1, 'n']])
+      serializeCortex(['Power', ['Multiply', 2, 'x'], ['Subtract', 1, 'n']])
     ).toMatchInlineSnapshot(`"(2 * x) ^ (1 - n)"`);
   });
 });
