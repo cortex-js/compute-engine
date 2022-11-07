@@ -73,10 +73,10 @@ constants{% endreadmore %}
 | :----------- | :---------------------- | :------------------------------------------------------------------------------------------------------------------------- |
 | `Exp`        | \\(\exponentialE^{x}\\) | [Exponential function](https://www.wikidata.org/wiki/Q168698) {% tags "numeric" "float-right"%}                            |
 | `Ln`        | \\(\ln(x)\\)            | [Logarithm function](https://www.wikidata.org/wiki/Q11197), the inverse of `Exp` {% tags "numeric" "float-right"%}         |
-| `Log`        | \\(\ln(x)\\)            | `["Log", _v_, _b_]` logarithm of base _b_, default 10 {% tags "numeric" "float-right"%}         |
-| `Lb`       | \\(\ln_2(x)\\)          | [Binary logarithm function](https://www.wikidata.org/wiki/Q581168), the base-2 logarithm {% tags "numeric" "float-right"%} |
-| `Lg`      | \\(\ln\_{10}(x)\\)      | [Common logarithm](Q966582), the base-10 logarithm {% tags "numeric" "float-right"%}                                       |
-| `LogOnePlus` |                         | {% tags "numeric" "float-right"%}                                                                                          |
+| `Log`        | \\(\log_b(x)\\)            | `["Log", _v_, _b_]` logarithm of base _b_, default 10 {% tags "numeric" "float-right"%}         |
+| `Lb`       | \\(\log_2(x)\\)          | [Binary logarithm function](https://www.wikidata.org/wiki/Q581168), the base-2 logarithm {% tags "numeric" "float-right"%} |
+| `Lg`      | \\(\log\_{10}(x)\\)      | [Common logarithm](Q966582), the base-10 logarithm {% tags "numeric" "float-right"%}                                       |
+| `LogOnePlus` | \\(\ln(x+1)\\)   | {% tags "numeric" "float-right"%}                                                                                          |
 
 </div>
 
