@@ -1091,19 +1091,44 @@ function validateSignature(
   const count = Math.max(expectedArgs.length, opsDomain.length);
 
   for (let i = 0; i <= count - 1; i++) {
-    if (expectedArgs[i] === undefined) {
+    const expectedArg = expectedArgs[i];
+    if (expectedArg === undefined) {
       newOps.push(ce.error('unexpected-argument', ops[i]));
     } else {
-      const lhsCtor = Array.isArray(expectedArgs[i])
-        ? expectedArgs[i][0]
-        : null;
+      const lhsCtor = Array.isArray(expectedArg) ? expectedArg[0] : null;
       if (opsDomain[i] === undefined) {
-        if (lhsCtor === 'Maybe') newOps.push(ce.symbol('Nothing'));
-        else newOps.push(ce.error(['missing', expectedArgs[i]]));
+        if (lhsCtor === 'Union') {
+          let found = false;
+          for (let j = 1; j <= (expectedArg as any[]).length - 1; j++) {
+            if (expectedArg[j] === 'Nothing') {
+              newOps.push(ce.symbol('Nothing'));
+              found = true;
+              break;
+            }
+          }
+          if (!found) newOps.push(ce.error(['missing', expectedArg]));
+        } else if (lhsCtor === 'Maybe') newOps.push(ce.symbol('Nothing'));
+        else newOps.push(ce.error(['missing', expectedArg]));
         break;
       }
+      if (lhsCtor === 'Union') {
+        let found = false;
+        for (let j = 1; j <= (expectedArg as any[]).length - 1; j++) {
+          if (!opsDomain[i].isCompatible(expectedArg[j])) {
+            newOps.push(
+              ce.error(
+                ['incompatible-domain', expectedArg, opsDomain[i]],
+                ops[i]
+              )
+            );
+            found = true;
+            break;
+          }
+          if (!found) newOps.push(ops[i]);
+        }
+      }
       if (lhsCtor === 'Sequence') {
-        const seq = ce.domain(expectedArgs[i][1]);
+        const seq = ce.domain(expectedArg[1]);
         for (let j = i; j <= opsDomain.length - 1; j++) {
           if (!opsDomain[j].isCompatible(seq)) {
             newOps.push(
@@ -1115,14 +1140,11 @@ function validateSignature(
       }
       if (
         !ops[i].symbol?.startsWith('_') &&
-        !opsDomain[i].isCompatible(ce.domain(expectedArgs[i]))
+        !opsDomain[i].isCompatible(ce.domain(expectedArg))
       ) {
-        // if (!opsDomain[i].isCompatible(ce.domain(expectedArgs[i]))) {
-        //   debugger;
-        // }
         newOps.push(
           ce.error(
-            ['incompatible-domain', ce.domain(expectedArgs[i]), opsDomain[i]],
+            ['incompatible-domain', ce.domain(expectedArg), opsDomain[i]],
             ops[i]
           )
         );
