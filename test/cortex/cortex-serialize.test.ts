@@ -166,12 +166,9 @@ describe('CORTEX SERIALIZING SYMBOLS', () => {
   test('Verbatim symbols', () => {
     // Reserved word
     expect(serializeCortex('new')).toMatch('`new`');
-    // Start with a digit
-    expect(serializeCortex('12x')).toMatch('`12x`');
     // Contain a syntax character
     expect(serializeCortex('x+y')).toMatch('`x+y`');
     // Start with a Syntax character
-    expect(serializeCortex('+x')).toMatch('`+x`');
     expect(serializeCortex('\\sin')).toMatch('`\\\\sin`');
     expect(serializeCortex('~f')).toMatch('`~f`');
     expect(serializeCortex('`')).toMatch('```');
@@ -195,6 +192,10 @@ describe('CORTEX SERIALIZING SYMBOLS', () => {
     expect(serializeCortex('[a')).toMatchInlineSnapshot(`"\`[a\`"`);
     // First char is a right square bracket
     expect(serializeCortex(']a')).toMatchInlineSnapshot(`"\`]a\`"`);
+    // Start with a digit
+    expect(serializeCortex('12x')).toMatch('12');
+    // Start with a `+`
+    expect(serializeCortex('+x')).toMatch('');
   });
 });
 
