@@ -4,7 +4,9 @@ describe('ROOT FUNCTION', () => {
   test('Valid forms', () => {
     expect(parse('\\sqrt{x}')).toMatch('["Sqrt", "x"]');
     expect(parse('\\sqrt[3]{x}')).toMatch('["Root", "x", 3]');
-    expect(parse('\\sqrt[n]{x}')).toMatch('["Root", "x", "n"]');
+    expect(parse('\\sqrt[n]{x}')).toMatchInlineSnapshot(
+      `["Power", "x", ["Divide", 1, "n"]]`
+    );
     expect(parse('\\frac{1}{\\sqrt[3]{x}}')).toMatch(
       '["Divide", 1, ["Root", "x", 3]]'
     );

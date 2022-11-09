@@ -13,11 +13,8 @@ export const CALCULUS_LIBRARY: SymbolTable[] = [
           domain: [
             'Function',
             'Anything',
-            // [
-            //   'Maybe',
-            ['Union', 'Tuple', 'Symbol'],
+            ['Union', 'Nothing', 'Tuple', 'Symbol'],
             // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
-            // ],
             'Number',
           ],
         },

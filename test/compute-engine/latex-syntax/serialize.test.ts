@@ -1,4 +1,6 @@
-import { box, latex, parse } from '../../utils';
+import { engine, box, latex, parse } from '../../utils';
+
+const ce = engine;
 
 describe('LATEX SERIALIZING', () => {
   test('Numbers', () => {
@@ -28,7 +30,7 @@ describe('LATEX SERIALIZING', () => {
     expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(`\\operatorname{NaN}`);
     expect(latex({ num: 'Infinity' })).toMatchInlineSnapshot(`\\infty`);
 
-    // Repeating patern
+    // Repeating pattern
     expect(
       latex({ num: '3.123456785678567856785678567856785678' })
     ).toMatchInlineSnapshot(`3.123\\,4\\overline{5678}`);
@@ -115,14 +117,88 @@ describe('LATEX SERIALIZING', () => {
 });
 
 describe('LATEX', () => {
-  test('LaTeX Valid forms', () => {
-    expect(latex(['LatexTokens', 3, 4])).toMatch(`34`); // @fixme should be `34`
-    expect(latex(['LatexTokens', 'x', 3])).toMatch(`x3`); // @fixme should be `x3`
-    expect(latex(['LatexTokens', "'\\frac'", "'<{>'", 42.12, "'<}>'"])).toMatch(
-      `\\frac{42.12}`
-    ); // @fixme
-    expect(latex(['LatexTokens', ['Divide', 'Pi', 2]])).toMatchInlineSnapshot(
-      `\\frac{\\pi}{2}`
+  test('Valid JoinLatexTokens', () => {
+    expect(
+      ce.box(['JoinLatexTokens', 3, 4]).evaluate().json
+    ).toMatchInlineSnapshot(`["Latex", "'34'"]`);
+    expect(
+      ce.box(['JoinLatexTokens', 'x', 3]).evaluate().json
+    ).toMatchInlineSnapshot(`["Latex", "'x3'"]`);
+    expect(
+      ce
+        .box(['JoinLatexTokens', "'\\frac'", "'<{>'", 42.12, "'<}>'"])
+        .evaluate().json
+    ).toMatchInlineSnapshot(`["Latex", "'\\frac{42.12}'"]`);
+    expect(
+      ce.box(['JoinLatexTokens', ['Divide', 'Pi', 2]]).evaluate().json
+    ).toMatchInlineSnapshot(`["Latex", "'\\frac{\\pi}{2}'"]`);
+  });
+
+  test('Valid Latex', () => {
+    expect(ce.box(['Latex']).evaluate().json).toMatchInlineSnapshot(`''`);
+    expect(
+      ce.box(['Latex', "'\\sqrt{x}'"]).evaluate().json
+    ).toMatchInlineSnapshot(`'\\sqrt{x}'`);
+  });
+
+  test('INVALID Latex', () => {
+    expect(ce.box(['Latex', 22]).evaluate().json).toMatchInlineSnapshot(`'22'`);
+    expect(
+      ce.box(['Latex', "'\\sqrt{x}'", "'+1'"]).evaluate().json
+    ).toMatchInlineSnapshot(`'\\sqrt{x}+1'`);
+  });
+
+  test('Valid SplitAsLatexTokens', () => {
+    expect(
+      ce.box(['SplitAsLatexTokens']).evaluate().json
+    ).toMatchInlineSnapshot(`["List"]`);
+
+    expect(
+      ce
+        .box(['SplitAsLatexTokens', ['Latex', "'\\frac{2}{\\cos x}'"]])
+        .evaluate().json
+    ).toMatchInlineSnapshot(`
+      [
+        "List",
+        "'\\frac'",
+        "'<{>'",
+        "'2'",
+        "'<}>'",
+        "'<{>'",
+        "'\\cos'",
+        "'x'",
+        "'<}>'"
+      ]
+    `);
+
+    expect(
+      ce.box(['SplitAsLatexTokens', ['Add', 2, 'Pi']]).evaluate().json
+    ).toMatchInlineSnapshot(`["List", "'2'", "'+'", "'\\pi'"]`);
+  });
+
+  test('Valid ParseLatex', () => {
+    expect(ce.box(['ParseLatex']).evaluate().json).toMatchInlineSnapshot(
+      `["Sequence"]`
     );
+    expect(
+      ce.box(['ParseLatex', "'\\frac{2}{\\cos x}'"]).evaluate().json
+    ).toMatchInlineSnapshot(`["Divide", 2, ["Cos", "x"]]`);
+
+    expect(ce.box(['ParseLatex', ['Add', 2, 'Pi']]).evaluate().json)
+      .toMatchInlineSnapshot(`
+      [
+        "ParseLatex",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "String",
+            ["Domain", "RealNumber"]
+          ],
+          ["Add", 2, "Pi"]
+        ]
+      ]
+    `);
   });
 });

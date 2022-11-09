@@ -4,7 +4,7 @@ import '../utils'; // For snapshot serializers
 
 export const ce = new ComputeEngine();
 
-ce.assume('a', 1);
+ce.assume('one', 1);
 ce.assume('i', 'Integer');
 ce.assume(['Greater', 'x', 4]);
 ce.assume(['Element', 'm', ['Range', -Infinity, Infinity]]);
@@ -19,88 +19,68 @@ ce.assume(['Greater', 't', 0]);
 
 // console.log([...ce.context!.dictionary!.symbols.keys()]);
 
-describe('TAUTOLOGY a = 1', () => {
-  test(`a.value`, () => {
-    expect(ce.box('a').evaluate()).toMatchInlineSnapshot(`a`);
+describe('TAUTOLOGY one = 1', () => {
+  test(`one.value`, () => {
+    expect(ce.box('one').evaluate().json).toEqual(1);
   });
-  test(`a.domain`, () => {
-    expect(ce.box('a').domain.toJSON()).toMatchInlineSnapshot(
+  test(`one.domain`, () => {
+    expect(ce.box('one').domain.toJSON()).toEqual(
       `["Domain", "ExtendedRealNumber"]`
     );
   });
-  test(`a > 0`, () => {
-    expect(ce.assume(['Greater', 'a', 0])).toMatchInlineSnapshot(`ok`);
-    expect(ce.box(['Greater', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
-      `["Less", 0, "a"]`
-    );
-    expect(ce.box(['Less', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
-      `["Less", "a", 0]`
-    );
-    expect(ce.box(['Equal', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
-      `False`
-    );
-    expect(ce.box(['Greater', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
-      `["Less", 0, "a"]`
-    );
-    expect(ce.box(['Greater', 'a', -10]).evaluate().json).toMatchInlineSnapshot(
-      `["Less", -10, "a"]`
-    );
+  test(`'one' compared to 0`, () => {
+    expect(ce.assume(['Greater', 'one', 0])).toMatchInlineSnapshot(`ok`);
+    expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
+    expect(ce.box(['Less', 'one', 0]).evaluate().json).toEqual('False');
+    expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('False');
+    expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('False');
+    expect(ce.box(['Greater', 'one', -10]).evaluate().json).toEqual('True');
   });
   test(`a >= 1`, () => {
-    expect(ce.assume(['GreaterEqual', 'a', 1])).toMatchInlineSnapshot(`ok`);
-    expect(ce.box(['Greater', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
-      `["Less", 0, "a"]`
-    );
-    expect(ce.box(['Less', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
-      `["Less", "a", 0]`
-    );
-    expect(ce.box(['Equal', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
-      `False`
-    );
+    expect(ce.assume(['GreaterEqual', 'one', 1])).toMatchInlineSnapshot(`ok`);
+    expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
+    expect(ce.box(['Less', 'one', 0]).evaluate().json).toEqual('False');
+    expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('True');
   });
   test(`a = 1`, () => {
-    expect(ce.assume(['Equal', 'a', 1])).toMatchInlineSnapshot(`ok`);
-    expect(ce.box(['Equal', 'a', 1]).evaluate().json).toMatchInlineSnapshot(
-      `False`
-    );
-    expect(ce.box(['Equal', 'a', 0]).evaluate().json).toMatchInlineSnapshot(
-      `False`
-    );
+    expect(ce.assume(['Equal', 'one', 1])).toEqual(`tautology`);
+    expect(ce.box(['Equal', 'one', 1]).evaluate().json).toEqual('True');
+    expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('False');
   });
 });
 
-describe.skip('CONTRADICTIONS', () => {
+describe('CONTRADICTIONS', () => {
   test(`a < 0`, () => {
-    expect(ce.assume(['LessThan', 'a', 0])).toMatchInlineSnapshot();
+    expect(ce.assume(['Less', 'one', 0])).toEqual(`contradiction`);
   });
 });
 
 describe.skip('is() values', () => {
   test(`> 0`, () => {
     // expect(ce.is(['Greater', 'x', 0])).toBeFalsy();
-    // expect(ce.is(['Greater', 'a', 0])).toBeTruthy();
+    // expect(ce.is(['Greater', 'one', 0])).toBeTruthy();
   });
 
   test(`= 0`, () => {
     // expect(ce.is(['Equal', 'x', 0])).toBeFalsy();
-    // expect(ce.is(['Equal', 'a', 0])).toBeFalsy();
+    // expect(ce.is(['Equal', 'one', 0])).toBeFalsy();
   });
 
   test(`= 1`, () => {
     // expect(ce.is(['Equal', 'x', 1])).toBeFalsy();
-    // expect(ce.is(['Equal', 'a', 1])).toBeTruthy();
+    // expect(ce.is(['Equal', 'one', 1])).toBeTruthy();
     // expect(ce.is(['Equal', 'o', 1])).toBeTruthy();
   });
 
   test(`!= 1`, () => {
     // expect(ce.is(['NotEqual', 'x', 1])).toBeTruthy();
-    // expect(ce.is(['NotEqual', 'a', 1])).toBeFalsy();
+    // expect(ce.is(['NotEqual', 'one', 1])).toBeFalsy();
     // expect(ce.is(['NotEqual', 'o', 1])).toBeFalsy();
   });
 
   test(`< 0`, () => {
     // expect(ce.is(['Less', 'x', 0])).toBeFalsy();
-    // expect(ce.is(['Less', 'a', 0])).toBeFalsy();
+    // expect(ce.is(['Less', 'one', 0])).toBeFalsy();
   });
 });
 

@@ -2,14 +2,9 @@ import { parse } from '../../utils';
 
 describe('STEFNOTCH #9', () => {
   test('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x', () => {
-    expect(parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x'))
-      .toMatchInlineSnapshot(`
-      [
-        "Integrate",
-        ["Multiply", 3, "x"],
-        ["Error", ["ErrorCode", "'missing'", ["Union", "Tuple", "Symbol"]]]
-      ]
-    `);
+    expect(
+      parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x')
+    ).toMatchInlineSnapshot(`["Integrate", ["Multiply", 3, "x"]]`);
   });
 });
 
@@ -210,7 +205,7 @@ describe('STEFNOTCH #13', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              ["Domain", "Number"],
+              "Number",
               ["Domain", "Anything"]
             ],
             "a_n"

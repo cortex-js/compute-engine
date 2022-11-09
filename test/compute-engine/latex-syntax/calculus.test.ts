@@ -6,17 +6,9 @@ function json(latex: string): Expression {
 }
 describe('INTEGRAL', () => {
   test('simple with no index', () => {
-    expect(json('\\int\\sin x + 1 = 2')).toMatchInlineSnapshot(`
-      [
-        "Equal",
-        [
-          "Integrate",
-          ["Add", 1, ["Sin", "x"]],
-          ["Error", ["ErrorCode", "'missing'", ["Union", "Tuple", "Symbol"]]]
-        ],
-        2
-      ]
-    `);
+    expect(json('\\int\\sin x + 1 = 2')).toMatchInlineSnapshot(
+      `["Equal", 2, ["Integrate", ["Add", 1, ["Sin", "x"]]]]`
+    );
   });
 
   test('simple with d', () => {
@@ -33,7 +25,7 @@ describe('INTEGRAL', () => {
               [
                 "ErrorCode",
                 "'incompatible-domain'",
-                ["Domain", ["Union"]],
+                ["Union", "Nothing", "Tuple", "Symbol"],
                 ["Domain", "ExtendedRealNumber"]
               ],
               "x"
@@ -44,7 +36,7 @@ describe('INTEGRAL', () => {
         2
       ]
     `);
-  });
+  }); // @fixme
   test('simple with mathrm', () => {
     expect(json('\\int\\sin x dx+1 = 2')).toMatchInlineSnapshot(`
       [
@@ -59,7 +51,7 @@ describe('INTEGRAL', () => {
               [
                 "ErrorCode",
                 "'incompatible-domain'",
-                ["Domain", ["Union"]],
+                ["Union", "Nothing", "Tuple", "Symbol"],
                 ["Domain", "ExtendedRealNumber"]
               ],
               "x"
@@ -70,7 +62,7 @@ describe('INTEGRAL', () => {
         2
       ]
     `);
-  });
+  }); // @fixme
 
   test('simple with \\alpha', () => {
     expect(json('\\int\\alpha d\\alpha+1 = 2')).toMatchInlineSnapshot(`
@@ -86,7 +78,7 @@ describe('INTEGRAL', () => {
               [
                 "ErrorCode",
                 "'incompatible-domain'",
-                ["Domain", ["Union"]],
+                ["Union", "Nothing", "Tuple", "Symbol"],
                 ["Domain", "ExtendedRealNumber"]
               ],
               "Alpha"
@@ -97,7 +89,7 @@ describe('INTEGRAL', () => {
         2
       ]
     `);
-  });
+  }); // @fixme
 
   test('simple with mathrm with spacing', () => {
     expect(json('\\int\\sin x \\, \\mathrm{d}x+1 = 2')).toMatchInlineSnapshot(`
@@ -116,7 +108,7 @@ describe('INTEGRAL', () => {
               [
                 "ErrorCode",
                 "'incompatible-domain'",
-                ["Domain", ["Union"]],
+                ["Union", "Nothing", "Tuple", "Symbol"],
                 ["Domain", "ExtendedRealNumber"]
               ],
               "x"
@@ -127,7 +119,7 @@ describe('INTEGRAL', () => {
         2
       ]
     `);
-  });
+  }); // @fixme
 
   test('simple with lower bound', () => {
     expect(json('\\int_0\\sin x \\, \\mathrm{d}x+1 = 2'))
@@ -147,7 +139,7 @@ describe('INTEGRAL', () => {
               [
                 "ErrorCode",
                 "'incompatible-domain'",
-                ["Domain", ["Union"]],
+                ["Union", "Nothing", "Tuple", "Symbol"],
                 ["Domain", "ExtendedRealNumber"]
               ],
               "x"
@@ -180,7 +172,7 @@ describe('INTEGRAL', () => {
         ]
       ]
     `);
-  });
+  }); // @fixme
   test('simple with lower and upper bound', () => {
     expect(json('\\int^\\infty_0\\sin x \\, \\mathrm{d}x+1 = 2'))
       .toMatchInlineSnapshot(`

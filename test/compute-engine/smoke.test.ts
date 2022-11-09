@@ -41,9 +41,6 @@ ce.assume('one', 1);
 console.log(ce.box(['Greater', 'one', 0]).evaluate().toString());
 console.log(ce.assume(['Greater', 'one', 0]));
 
-// Should not error out
-console.log(ce.parse('\\int\\sin x + 1 = 2').json);
-
 // Should output error about missing closing fence
 console.log(ce.parse('(').json);
 
@@ -81,8 +78,6 @@ console.log(ce.parse('\\mathrm{V_1}').json);
 //  each loop iteration (don't substitute)
 const z3 = ce.parse('\\sum_ii^2').canonical;
 console.log(z3.json);
-
-console.log(ce.box(['LatexTokens', 3, 4]).latex);
 
 // Should simplify
 console.log(ce.parse('a^3a\\times a^2').simplify().json);
@@ -150,11 +145,6 @@ console.log(
 const sig4 = ce.box(['Triple', ['Hold', 'n'], 1, 50]).domain;
 console.log(sig4.toJSON());
 console.log(sig4.isCompatible(sig3));
-
-// Confusion with domain
-const z = ce.parse('\\sum_{n=1}^5 n^2+1').canonical;
-console.log(z.json);
-console.log(z.evaluate().json);
 
 // Outputs unexpected command, \\left...
 // because there is no matchfix for \\left(\\right.

@@ -565,9 +565,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
           evaluate: (ce, ops) => {
             return ce.box([
               'Latex',
-              ce.string(
-                tokensToString(ops.map((x) => x.string ?? x.toString()))
-              ),
+              ce.string(tokensToString(ops.map((x) => x.string ?? x.latex))),
             ]);
           },
         },

@@ -23,7 +23,9 @@
     "rbrack",
     "reboxing",
     "relop",
+    "significand",
     "sympy",
+    "syms",
     "upconverted"
   ],
   "editor.defaultFormatter": "esbenp.prettier-vscode"

@@ -38,7 +38,7 @@ describe('STYLE - TEXT MODE', () => {
     // Math mode inside text mode
     expect(check('a\\text{ in $x$ }b')).toMatchInlineSnapshot(`
       latex     = ["Multiply", "a", "'x' in  ''", "b"]
-      box       = [
+      [
         "Multiply",
         "a",
         [
@@ -48,21 +48,6 @@ describe('STYLE - TEXT MODE', () => {
             "'incompatible-domain'",
             "Number",
             ["Domain", "String"]
-          ],
-          "'x' in  ''"
-        ],
-        "b"
-      ]
-      canonical = [
-        "Multiply",
-        "a",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Error", "'unexpected-argument'", ["Domain", "String"]]
           ],
           "'x' in  ''"
         ],

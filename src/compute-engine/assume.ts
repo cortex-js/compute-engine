@@ -31,9 +31,9 @@ function normalPredicate(
   const p = ce.add([prop.op1, ce.negate(prop.op2)]).simplify();
   const syms = p.symbols.filter((x) => !x.isConstant);
   if (syms.length !== 1) return ['', p, rel];
-
-  const sols = findUnivariateRoots(p, syms[0].symbol!);
-  if (sols.length === 1) return [syms[0].symbol!, sols[0], rel];
+  const sym = syms[0].symbol!;
+  const sols = findUnivariateRoots(p, sym);
+  if (sols.length === 1) return [sym, sols[0], rel];
 
   return ['', p, rel];
 }
@@ -60,6 +60,10 @@ function normalPredicate(
 
 export function assume(proposition: BoxedExpression): AssumeResult {
   const ce = proposition.engine;
+
+  const v = proposition.evaluate();
+  if (v.symbol === 'True') return 'tautology';
+  if (v.symbol === 'False') return 'contradiction';
 
   const p = normalPredicate(proposition);
   if (p === null) return 'not-a-predicate';
