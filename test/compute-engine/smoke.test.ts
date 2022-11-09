@@ -37,6 +37,28 @@ ce.assume('one', 1);
 
 ///
 
+// Incorrect parsing, doesn't  recognize the dx
+console.log(ce.parse('\\int x\\sin xdx+1').json);
+
+console.log(
+  ce
+    .parse(
+      '0.032\\times\\frac{(V-V_b)\\times N\\times\\frac{mathrm{V_so}}{V_a}}{V_N}'
+    )
+    .subs({ V_b: 5 })
+    .toString()
+);
+
+const sig3 = ce.domain([
+  'Maybe',
+  ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
+]);
+console.log(sig3.toJSON());
+
+const sig4 = ce.box(['Triple', ['Hold', 'n'], 1, 50]).domain;
+console.log(sig4.toJSON());
+console.log(sig4.isCompatible(sig3));
+
 // Output 'ok', should be 'tautology'
 console.log(ce.box(['Greater', 'one', 0]).evaluate().toString());
 console.log(ce.assume(['Greater', 'one', 0]));
@@ -65,9 +87,6 @@ console.log(ce.parse(`\\cos^{-1}\\doubleprime(x)`).simplify().toJSON());
 
 // Should output ["Square","x_0"]
 console.log(ce.parse('x^2_0').json);
-
-// Should not error
-console.log(ce.parse('\\mathrm{V_1}').json);
 
 // Parsed as imaginary unit
 // -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and
@@ -130,22 +149,6 @@ const sig1 = ce.domain(['Function', 'PositiveInteger', 'Anything']);
 const sig2 = ce.domain(['Function', 'Number', 'Number']);
 console.log(sig1.isCompatible(sig2));
 
-const sig3 = ce.domain([
-  'Maybe',
-  ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
-]);
-console.log(sig3.toJSON());
-
-console.log(
-  ce
-    .domain(['Function', 'PositiveInteger', 'Anything'])
-    .isCompatible(engine.domain(['Function', 'Number', 'Number']))
-);
-
-const sig4 = ce.box(['Triple', ['Hold', 'n'], 1, 50]).domain;
-console.log(sig4.toJSON());
-console.log(sig4.isCompatible(sig3));
-
 // Outputs unexpected command, \\left...
 // because there is no matchfix for \\left(\\right.
 console.log(ce.parse('\\sin\\left(x\\right.').toJSON());
@@ -172,9 +175,6 @@ console.log(w);
 // Should interpret function application `(x)`
 console.log(ce.parse('f_{n - 1}(x)').toJSON());
 console.log(ce.parse('x \\times f_{n - 1}(x) + f_{n - 2}(x)').toJSON());
-
-// Incorrect parsing, doesn't  recognize the dx
-console.log(ce.parse('\\int x\\sin xdx+1').json);
 
 // If a symbol surrounded by two numeric literals
 // (Range if integers and symbol is an integer, Interval otherwise)

@@ -62,6 +62,7 @@
 
 ### Bugs Fixed
 
+- Correctly parse multi-char symbols with underscore, i.e. `\mathrm{V_a}`
 - Parsing a number with repeating decimals and an exponent would drop the
   exponent.
 - Correct calculation of complex square roots

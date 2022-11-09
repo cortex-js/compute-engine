@@ -151,8 +151,7 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
   parseUnknownSymbol: (s: string, parser: Parser) => {
     if (parser.computeEngine?.lookupFunction(s) !== undefined)
       return 'function';
-    if (/^[a-zA-Z]+$/.test(s)) return 'symbol';
-    return 'unknown';
+    return 'symbol';
   },
 
   preserveLatex: false,
@@ -1129,15 +1128,23 @@ export class _Parser implements Parser {
    * - a complex name such as `\alpha_12` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}` (see serializer.ts) @todo:
    * @todo: matchSymbol should use matchIdentifier
    */
-  matchIdentifier(): string | null {
+  matchIdentifier(): string | Expression | null {
     let result: string | null = null;
     if (
       this.match('\\operatorname') ||
       this.match('\\mathit') ||
       this.match('\\mathrm')
     ) {
-      result = this.matchStringArgument();
-      if (result === null || !isValidIdentifier(result)) null;
+      const start = this.index;
+      const id = this.matchRequiredLatexArgument();
+      if (!id) return this.error('invalid-symbol-name', start);
+
+      const expr = this.computeEngine.box(id);
+      // Look at the latex to handle cases like `\mathrm{V_{m(ABC)}}`
+      result = expr.symbol ?? expr.string ?? expr.latex;
+
+      if (result === null || !isValidIdentifier(result))
+        return this.error('invalid-symbol-name', start);
       return result;
     }
 
@@ -1227,8 +1234,6 @@ export class _Parser implements Parser {
   matchSymbol(): Expression | null {
     const start = this.index;
 
-    let sym: string | null = null;
-
     //
     // Is there a custom parser for this symbol?
     //
@@ -1247,27 +1252,20 @@ export class _Parser implements Parser {
     // No custom parser worked. Backtrack.
     this.index = start;
 
-    if (
-      this.match('\\operatorname') ||
-      this.match('\\mathit') ||
-      this.match('\\mathrm')
-    ) {
-      sym = this.matchStringArgument();
-      if (sym === null) return this.error('expected-string-argument', start);
-      if (!isValidIdentifier(sym))
-        return this.error('invalid-symbol-name', start);
+    const id = this.matchIdentifier();
+
+    // No match. Backtrack and exit.
+    if (id === null) {
+      this.index = start;
+      return null;
     }
 
-    // If we could not capture a symbol yet, simply use the next token.
-    if (!sym) sym = this.next();
+    // Was there an error? Return it.
+    if (typeof id !== 'string') return id;
 
     // Are we OK with it as a symbol?
-    if (
-      sym &&
-      isValidIdentifier(sym) &&
-      this.options.parseUnknownSymbol?.(sym, this) === 'symbol'
-    )
-      return sym;
+    if (id && this.options.parseUnknownSymbol?.(id, this) === 'symbol')
+      return id;
 
     // Backtrack
     this.index = start;
