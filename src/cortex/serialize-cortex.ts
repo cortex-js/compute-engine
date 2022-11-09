@@ -96,15 +96,18 @@ export function serializeCortex(
 
     if (!body) {
       const symName = symbol(expr);
-      if (symName !== null) {
-        body = fmt.text(escapeSymbol(symName));
-      }
+      if (symName !== null) body = fmt.text(escapeSymbol(symName));
     }
-    if (!body) {
-      if (typeof expr === 'number' || isNumberObject(expr)) {
-        body = fmt.text(serializeNumber(expr, NUMBER_FORMATTING_OPTIONS));
-      }
+    if (
+      !body &&
+      (typeof expr === 'number' ||
+        typeof expr === 'string' ||
+        isNumberObject(expr))
+    ) {
+      const num = serializeNumber(expr, NUMBER_FORMATTING_OPTIONS);
+      if (num) body = fmt.text(num);
     }
+
     if (!body) {
       const dict = dictionary(expr);
       if (dict !== null) {
@@ -434,7 +437,7 @@ function escapeSymbol(s: string): string {
   // Shortcut common case: all alphanumeric symbol => nothing to escape
   if (/^[a-zA-Z][a-zA-Z\d_]*$/.test(s)) return s;
 
-  // If starts with a digit: need verbatim
+  // If starts with a digit: needs verbatim
   const code = s.codePointAt(0)!;
   if (DIGITS.has(code)) return `\`${escapeString(s)}\``;
 
@@ -447,6 +450,5 @@ function escapeSymbol(s: string): string {
     i += 1;
   }
 
-  if (!needVerbatim) return s;
-  return `\`${escapeString(s)}\``;
+  return needVerbatim ? `\`${escapeString(s)}\`` : s;
 }

@@ -19,6 +19,7 @@ import {
   RuntimeScope,
   BoxedFunctionSignature,
   BoxedSubstitution,
+  DomainExpression,
 } from '../public';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
@@ -283,7 +284,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
   subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
     const ops = this._ops.map((x) => x.subs(sub, options));
 
-    if (options?.canonical)
+    if (options?.canonical && ops.every((x) => x.isValid))
       return makeCanonicalFunction(this.engine, this._head, ops);
 
     return new BoxedFunction(this.engine, this._head, ops, {
@@ -933,7 +934,7 @@ export function makeCanonicalFunction(
   xs = validateSignature(ce, sig, xs) ?? xs;
 
   if (!xs.every((x) => x.isValid))
-    return new BoxedFunction(ce, head, xs, { metadata });
+    return new BoxedFunction(ce, head, xs, { metadata, canonical: false });
 
   //
   // 3/ Apply `canonical` handler
@@ -1083,75 +1084,128 @@ function validateSignature(
 
   if (sig.domain.isCompatible(targetSig)) return null;
 
-  // The argument list is not compatible
   const expectedArgs = sig.domain.domainArgs!.slice(0, -1);
-
-  const newOps: BoxedExpression[] = [];
-
   const count = Math.max(expectedArgs.length, opsDomain.length);
+  let newOps: BoxedExpression[] = [];
+  let rest: BoxedExpression[] = [...ops];
+  for (let i = 0; i <= count - 1; i++)
+    [newOps, rest] = validateArgument(
+      ce,
+      expectedArgs[i] as DomainExpression<BoxedExpression>,
+      newOps,
+      rest
+    );
 
-  for (let i = 0; i <= count - 1; i++) {
-    const expectedArg = expectedArgs[i];
-    if (expectedArg === undefined) {
-      newOps.push(ce.error('unexpected-argument', ops[i]));
-    } else {
-      const lhsCtor = Array.isArray(expectedArg) ? expectedArg[0] : null;
-      if (opsDomain[i] === undefined) {
-        if (lhsCtor === 'Union') {
-          let found = false;
-          for (let j = 1; j <= (expectedArg as any[]).length - 1; j++) {
-            if (expectedArg[j] === 'Nothing') {
-              newOps.push(ce.symbol('Nothing'));
-              found = true;
-              break;
-            }
-          }
-          if (!found) newOps.push(ce.error(['missing', expectedArg]));
-        } else if (lhsCtor === 'Maybe') newOps.push(ce.symbol('Nothing'));
-        else newOps.push(ce.error(['missing', expectedArg]));
-        break;
-      }
-      if (lhsCtor === 'Union') {
-        let found = false;
-        for (let j = 1; j <= (expectedArg as any[]).length - 1; j++) {
-          if (!opsDomain[i].isCompatible(expectedArg[j])) {
-            newOps.push(
-              ce.error(
-                ['incompatible-domain', expectedArg, opsDomain[i]],
-                ops[i]
-              )
-            );
-            found = true;
-            break;
-          }
-          if (!found) newOps.push(ops[i]);
-        }
-      }
-      if (lhsCtor === 'Sequence') {
-        const seq = ce.domain(expectedArg[1]);
-        for (let j = i; j <= opsDomain.length - 1; j++) {
-          if (!opsDomain[j].isCompatible(seq)) {
-            newOps.push(
-              ce.error(['incompatible-domain', seq, opsDomain[j]], ops[j])
-            );
-          } else newOps.push(ops[j]);
-        }
-        break;
-      }
-      if (
-        !ops[i].symbol?.startsWith('_') &&
-        !opsDomain[i].isCompatible(ce.domain(expectedArg))
-      ) {
-        newOps.push(
-          ce.error(
-            ['incompatible-domain', ce.domain(expectedArg), opsDomain[i]],
-            ops[i]
-          )
-        );
-      } else newOps.push(ops[i]);
-    }
-  }
+  // Remove any 'Nothing' at the end
+  while (newOps.length > 0 && newOps[newOps.length - 1].symbol === 'Nothing')
+    newOps.pop();
   return newOps;
+}
+
+function validateArgument(
+  ce: IComputeEngine,
+  expect: DomainExpression<BoxedExpression> | undefined,
+  matched: BoxedExpression[],
+  ops: BoxedExpression[]
+): [match: BoxedExpression[], rest: BoxedExpression[]] {
+  let next = ops.shift();
+
+  if (expect === undefined)
+    return [[...matched, ce.error('unexpected-argument', next)], ops];
+
+  if (!Array.isArray(expect)) {
+    if (!next) return [[...matched, ce.error(['missing', expect])], ops];
+
+    if (!next.domain.isCompatible(ce.domain(expect))) {
+      return [
+        [
+          ...matched,
+          ce.error(['incompatible-domain', expect, next.domain], next),
+        ],
+        ops,
+      ];
+    }
+
+    return [[...matched, next], ops];
+  }
+
+  const ctor = expect[0];
+
+  if (next === undefined) {
+    //
+    // An expected argument is missing. Is that OK?
+    //
+    let valid = false;
+    if (ctor === 'Union') {
+      //  If an `Union`, was `Nothing` an option?
+      for (let k = 1; k <= expect.length - 1; k++) {
+        if (expect[k] === 'Nothing') {
+          valid = true;
+          break;
+        }
+      }
+    } else if (ctor === 'Maybe') valid = true;
+    if (valid) return [[...matched, ce.symbol('Nothing')], ops];
+    return [[...matched, ce.error(['missing', expect])], ops];
+  }
+
+  if (ctor === 'Union') {
+    //
+    // We expect one of several domains. Check if at least one matches
+    //
+    let found = false;
+    for (let k = 1; k <= expect.length - 1; k++) {
+      if (next.domain.isCompatible(ce.domain(expect[k]))) {
+        found = true;
+        break;
+      }
+    }
+    if (found) return [[...matched, next], ops];
+    return [
+      [
+        ...matched,
+        ce.error(['incompatible-domain', expect, next.domain], next),
+      ],
+      ops,
+    ];
+  }
+
+  if (ctor === 'Sequence') {
+    const seq = ce.domain(expect[1]);
+    if (!next || !next.domain.isCompatible(seq)) {
+      return [
+        [...matched, ce.error(['incompatible-domain', seq, next.domain], next)],
+        ops,
+      ];
+    }
+    let done = false;
+    const result = [...matched, next];
+    while (!done) {
+      next = ops.shift();
+      if (!next) done = false;
+      else if (!next.domain.isCompatible(seq)) {
+        ops.unshift(next);
+        done = false;
+      } else result.push(next);
+    }
+
+    return [result, ops];
+  }
+
+  if (ctor === 'Maybe') {
+    if (next === undefined || next.symbol === 'Nothing')
+      return [[...matched, ce.symbol('Nothing')], ops];
+    return validateArgument(
+      ce,
+      expect[1] as DomainExpression<BoxedExpression>,
+      matched,
+      [next, ...ops]
+    );
+  }
+
+  console.error('Unhandled ctor', ctor);
+
+  return [[...matched, next], ops];
 }
 
 /**

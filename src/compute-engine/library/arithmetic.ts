@@ -579,11 +579,6 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', 'Number', 'Number'],
           canonical: (ce, args) => {
-            if (!args[1].isRational)
-              return ce.error(
-                ['incompatible-domain', 'RationalNumber', args[1].domain],
-                args[1]
-              );
             const exp = ce.inverse(args[1]);
             return (
               canonicalPower(ce, args[0], exp) ??

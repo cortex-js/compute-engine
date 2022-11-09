@@ -83,8 +83,10 @@ export function canonicalDivide(
 
   // Divide: transform into multiply/power
   d = ce.inverse(d);
-  if (n.isOne) return d;
-  if (n.isNegativeOne) return canonicalNegate(d);
+  if (n.isLiteral) {
+    if (n.isOne) return d;
+    if (n.isNegativeOne) return canonicalNegate(d);
+  }
   if (nSign * dSign > 0) return ce.mul([n, d]);
   return canonicalNegate(ce.mul([n, d]));
 }

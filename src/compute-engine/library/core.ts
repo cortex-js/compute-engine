@@ -1,5 +1,5 @@
 import { BoxedExpression, SymbolTable } from '../public';
-import { joinLatex, tokenize } from '../latex-syntax/tokenizer';
+import { joinLatex, tokenize, tokensToString } from '../latex-syntax/tokenizer';
 import { asFloat, asSmallInteger, fromDigits } from '../numerics/numeric';
 
 import Decimal from 'decimal.js';
@@ -235,47 +235,6 @@ export const CORE_LIBRARY: SymbolTable[] = [
         },
       },
       {
-        name: 'FromDigits',
-        description: `\`FromDigits(s, base=10)\` \
-      return an integer representation of the string \`s\` in base \`base\`.`,
-        // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
-        // @todo could accept "roman"... as base
-        // @todo could accept optional third parameter as the (padded) length of the output
-        signature: {
-          domain: [
-            'Function',
-            'String',
-            ['Maybe', ['Range', 1, 36]],
-            'Integer',
-          ],
-          evaluate: (ce, ops) => {
-            const op1 = ops[0];
-            if (!op1.string)
-              return ce.error(
-                ['incompatible-domain', 'String', op1.domain],
-                op1
-              );
-
-            const op2 = ops[1];
-            if (op2.isNothing)
-              return ce.number(Number.parseInt(op1.string, 10));
-            if (op2.numericValue === null) {
-              return ce.error(['unexpected-base', op2.latex], op2);
-            }
-            const base = asFloat(op2)!;
-            if (!Number.isInteger(base) || base < 2 || base > 36)
-              return ce.error(['unexpected-base', base], op2);
-
-            const [value, rest] = fromDigits(op1.string, base);
-
-            if (rest)
-              return ce.error(['unexpected-digit', rest[0]], { str: rest });
-
-            return ce.number(value);
-          },
-        },
-      },
-      {
         name: 'Head',
         signature: {
           domain: 'Function',
@@ -299,59 +258,6 @@ export const CORE_LIBRARY: SymbolTable[] = [
       },
 
       {
-        name: 'IntegerString',
-        description: `\`IntegerString(n, base=10)\` \
-      return a string representation of the integer \`n\` in base \`base\`.`,
-        // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
-        // @todo could accept "roman"... as base
-        // @todo could accept optional third parameter as the (padded) length of the output
-        signature: {
-          domain: ['Function', 'Integer', ['Maybe', 'Integer'], 'String'],
-          evaluate: (ce, ops) => {
-            const op1 = ops[0];
-            const val = asFloat(op1) ?? NaN;
-            if (Number.isNaN(val) || !Number.isInteger(val)) {
-              ce.signal(
-                ce._fn('IntegerString', ops),
-                `Expected first argument as an integer. Got \\(${op1.latex}$\\)`
-              );
-              return undefined;
-            }
-
-            const op2 = ops[1];
-            if (op2.isNothing) {
-              const op1Num = op1.numericValue;
-              if (typeof op1Num === 'number')
-                return ce.string(Math.abs(op1Num).toString());
-              if (op1Num instanceof Decimal)
-                return ce.string(op1Num.abs().toString());
-              return ce.string(
-                Math.abs(Math.round(asFloat(op1) ?? NaN)).toString()
-              );
-            }
-
-            if (asSmallInteger(op2) === null) {
-              ce.signal(
-                ce._fn('IntegerString', ops),
-                `Expected \`base\` as an integer between 2 and 36. Got \\(${op2.latex}$\\)`
-              );
-              return undefined;
-            }
-            const base = asSmallInteger(op2)!;
-            if (base < 2 || base > 36) {
-              ce.signal(
-                ce._fn('IntegerString', ops),
-                `Expected \`base\` as an integer between 2 and 36. Got ${base}`
-              );
-              return undefined;
-            }
-
-            return ce.string(Math.abs(val).toString(base));
-          },
-        },
-      },
-
-      {
         name: 'Lambda',
         wikidata: 'Q567612',
         hold: 'all',
@@ -361,61 +267,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
           canonical: (ce, ops) => ce._fn('Lambda', ops),
         },
       },
-      {
-        name: 'Latex',
-        inert: true,
-        signature: {
-          domain: ['Function', 'String', 'String'],
-        },
-      },
-      {
-        name: 'LatexString',
-        hold: 'all',
-        signature: {
-          domain: ['Function', ['Sequence', 'Anything'], 'String'],
-          evaluate: (ce, ops) =>
-            ce.string(joinLatex(ops.map((x) => ce.serialize(x)))),
-        },
-      },
-      {
-        name: 'LatexTokens',
-        hold: 'all',
-        signature: {
-          domain: ['Function', 'Anything', ['List', 'String']],
-          evaluate: (ce, ops) => {
-            if (ops.length === 0) return ce._fn('List', []);
-            let latex = '';
-            if (ops[0].head === 'Latex') latex = ops[0].op1.string ?? '';
-            else if (ops[0].head === 'LatexString')
-              latex = joinLatex(ops[0].ops!.map((op) => op.latex));
-            else latex = ops[0].latex;
-            return ce._fn(
-              'List',
-              tokenize(latex, []).map((x) => ce.string(x))
-            );
-          },
-        },
-      },
-      {
-        name: 'JoinLatexTokens',
-        signature: {
-          domain: ['Function', ['Sequence', 'String'], 'String'],
-          evaluate: (ce, ops) => {
-            if (ops.length === 0) return ce.string('');
-            return ce.string(joinLatex(ops.map((x) => x.string ?? '')));
-          },
-        },
-      },
-      {
-        name: 'FromLatex',
-        signature: {
-          domain: ['Function', 'String', 'Anything'],
-          evaluate: (ce, ops) => {
-            if (ops.length === 0) return ce.box(['Sequence']);
-            return ce.parse(ops[0].string ?? '');
-          },
-        },
-      },
+
       {
         name: 'Signatures',
         signature: {
@@ -426,19 +278,6 @@ export const CORE_LIBRARY: SymbolTable[] = [
             const result = ce.lookupFunction(name);
             if (!result) return ce.symbol('Nothing');
             return ce.fn('List', [result.signature.domain]);
-          },
-        },
-      },
-      {
-        name: 'String',
-        threadable: true,
-        signature: {
-          domain: ['Function', ['Maybe', 'Anything'], 'String'],
-          evaluate: (ce, ops) => {
-            if (ops.length === 0) return ce.string('');
-            return ce.string(
-              ops.map((x) => x.string ?? `\\(${x.latex}$\\)`).join('')
-            );
           },
         },
       },
@@ -598,6 +437,197 @@ export const CORE_LIBRARY: SymbolTable[] = [
         },
       },
       // {name: 'Pattern',},
+    ],
+  },
+
+  //
+  // String-related
+  //
+  {
+    functions: [
+      {
+        name: 'FromDigits',
+        description: `\`FromDigits(s, base=10)\` \
+      return an integer representation of the string \`s\` in base \`base\`.`,
+        // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
+        // @todo could accept "roman"... as base
+        // @todo could accept optional third parameter as the (padded) length of the output
+        signature: {
+          domain: [
+            'Function',
+            'String',
+            ['Maybe', ['Range', 1, 36]],
+            'Integer',
+          ],
+          evaluate: (ce, ops) => {
+            const op1 = ops[0];
+            if (!op1.string)
+              return ce.error(
+                ['incompatible-domain', 'String', op1.domain],
+                op1
+              );
+
+            const op2 = ops[1];
+            if (op2.isNothing)
+              return ce.number(Number.parseInt(op1.string, 10));
+            if (op2.numericValue === null) {
+              return ce.error(['unexpected-base', op2.latex], op2);
+            }
+            const base = asFloat(op2)!;
+            if (!Number.isInteger(base) || base < 2 || base > 36)
+              return ce.error(['unexpected-base', base], op2);
+
+            const [value, rest] = fromDigits(op1.string, base);
+
+            if (rest)
+              return ce.error(['unexpected-digit', rest[0]], { str: rest });
+
+            return ce.number(value);
+          },
+        },
+      },
+      {
+        name: 'IntegerString',
+        description: `\`IntegerString(n, base=10)\` \
+      return a string representation of the integer \`n\` in base \`base\`.`,
+        // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
+        // @todo could accept "roman"... as base
+        // @todo could accept optional third parameter as the (padded) length of the output
+        signature: {
+          domain: ['Function', 'Integer', ['Maybe', 'Integer'], 'String'],
+          evaluate: (ce, ops) => {
+            const op1 = ops[0];
+            const val = asFloat(op1) ?? NaN;
+            if (Number.isNaN(val) || !Number.isInteger(val)) {
+              ce.signal(
+                ce._fn('IntegerString', ops),
+                `Expected first argument as an integer. Got \\(${op1.latex}$\\)`
+              );
+              return undefined;
+            }
+
+            const op2 = ops[1];
+            if (op2.isNothing) {
+              const op1Num = op1.numericValue;
+              if (typeof op1Num === 'number')
+                return ce.string(Math.abs(op1Num).toString());
+              if (op1Num instanceof Decimal)
+                return ce.string(op1Num.abs().toString());
+              return ce.string(
+                Math.abs(Math.round(asFloat(op1) ?? NaN)).toString()
+              );
+            }
+
+            if (asSmallInteger(op2) === null) {
+              ce.signal(
+                ce._fn('IntegerString', ops),
+                `Expected \`base\` as an integer between 2 and 36. Got \\(${op2.latex}$\\)`
+              );
+              return undefined;
+            }
+            const base = asSmallInteger(op2)!;
+            if (base < 2 || base > 36) {
+              ce.signal(
+                ce._fn('IntegerString', ops),
+                `Expected \`base\` as an integer between 2 and 36. Got ${base}`
+              );
+              return undefined;
+            }
+
+            return ce.string(Math.abs(val).toString(base));
+          },
+        },
+      },
+      {
+        name: 'String',
+        threadable: true,
+        signature: {
+          domain: ['Function', ['Maybe', 'Anything'], 'String'],
+          evaluate: (ce, ops) => {
+            if (ops.length === 0) return ce.string('');
+            return ce.string(ops.map((x) => x.string ?? x.toString()).join(''));
+          },
+        },
+      },
+    ],
+  },
+
+  //
+  // LaTeX-related
+  //
+  {
+    functions: [
+      // Join or more LatexTokens into a LaTeX string
+      {
+        name: 'JoinLatexTokens',
+        signature: {
+          domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'String'],
+          evaluate: (ce, ops) => {
+            return ce.box([
+              'Latex',
+              ce.string(
+                tokensToString(ops.map((x) => x.string ?? x.toString()))
+              ),
+            ]);
+          },
+        },
+      },
+      // Value preserving type conversion/tag indicating the string
+      // is a LaTeX string
+      {
+        name: 'Latex',
+        signature: {
+          domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'String'],
+          evaluate: (ce, ops) => {
+            if (ops.length === 0) return ce.string('');
+            return ce.string(
+              joinLatex(ops.map((x) => x.string ?? x.toString()))
+            );
+          },
+        },
+      },
+      // Serialize one or more expressions to LaTeX
+      {
+        name: 'SerializeLatex',
+        hold: 'all',
+        signature: {
+          domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'String'],
+          evaluate: (ce, ops) =>
+            ce.box(['Latex', ce.string(joinLatex(ops.map((x) => x.latex)))]),
+        },
+      },
+      {
+        name: 'SplitAsLatexTokens',
+        description: 'Split a LaTeX string into a list of LaTeX tokens',
+        hold: 'all',
+        signature: {
+          domain: ['Function', ['Maybe', 'Anything'], ['List', 'String']],
+          evaluate: (ce, ops) => {
+            if (ops.length === 0) return ce._fn('List', []);
+            let latex = '';
+            if (ops[0].head === 'Latex') latex = ops[0].op1.string ?? '';
+            else if (ops[0].head === 'LatexString')
+              latex = joinLatex(ops[0].ops!.map((op) => op.latex));
+            else latex = ops[0].latex;
+            return ce._fn(
+              'List',
+              tokenize(latex, []).map((x) => ce.string(x))
+            );
+          },
+        },
+      },
+      {
+        name: 'ParseLatex',
+        description:
+          'Parse a LaTeX string and evaluate to a corresponding expression',
+        signature: {
+          domain: ['Function', ['Maybe', 'String'], 'Anything'],
+          evaluate: (ce, ops) => {
+            if (ops.length === 0 || !ops[0].string) return ce.box(['Sequence']);
+            return ce.parse(ops[0].string) ?? ce.box(['Sequence']);
+          },
+        },
+      },
     ],
   },
 ];

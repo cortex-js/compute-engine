@@ -392,10 +392,6 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 
-  isSubdomainOf(_d: BoxedExpression | string): undefined | boolean {
-    return undefined;
-  }
-
   get domain(): BoxedDomain {
     return this.engine.domain('Void') as BoxedDomain;
   }

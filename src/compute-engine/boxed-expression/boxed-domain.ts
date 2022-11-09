@@ -133,20 +133,20 @@ export class _BoxedDomain
     if (rhsCtor) {
       const rhsParam = rhs[1] as DomainExpression<BoxedExpression>;
       if (rhsCtor === 'Invariant')
-        return !isSubdomainOf(rhsParam, lhs) && !isSubdomainOf(lhs, rhsParam);
-      if (rhsCtor === 'Covariant') return isSubdomainOf(lhs, rhsParam);
-      if (rhsCtor === 'Contravariant') return isSubdomainOf(rhsParam, lhs);
+        return !isSubdomainOf1(rhsParam, lhs) && !isSubdomainOf1(lhs, rhsParam);
+      if (rhsCtor === 'Covariant') return isSubdomainOf1(lhs, rhsParam);
+      if (rhsCtor === 'Contravariant') return isSubdomainOf1(rhsParam, lhs);
       if (rhsCtor === 'Bivariant')
-        return isSubdomainOf(lhs, rhsParam) && isSubdomainOf(rhsParam, lhs);
+        return isSubdomainOf1(lhs, rhsParam) && isSubdomainOf1(rhsParam, lhs);
     }
 
-    if (compatibility === 'covariant') return isSubdomainOf(lhs, rhs);
-    if (compatibility === 'contravariant') return isSubdomainOf(rhs, lhs);
+    if (compatibility === 'covariant') return isSubdomainOf1(lhs, rhs);
+    if (compatibility === 'contravariant') return isSubdomainOf1(rhs, lhs);
     if (compatibility === 'bivariant')
-      return isSubdomainOf(rhs, lhs) && isSubdomainOf(lhs, rhs);
+      return isSubdomainOf1(rhs, lhs) && isSubdomainOf1(lhs, rhs);
 
     // Invariant
-    return !isSubdomainOf(rhs, lhs) && !isSubdomainOf(lhs, rhs);
+    return !isSubdomainOf1(rhs, lhs) && !isSubdomainOf1(lhs, rhs);
   }
 
   match(
@@ -460,35 +460,46 @@ export function isDomain(
   return false;
 }
 
-// Return `true` if `lhs` is a sub domain of, or equal to, `rhs`
-// `lhs` is the "template" that `rhs` is checked against
-export function isSubdomainOf(
+function isSubdomainOf1(
   lhs: DomainExpression<BoxedExpression>,
   rhs: DomainExpression<BoxedExpression>
 ): boolean {
+  const [result, rest] = isSubdomainOf([lhs], rhs);
+  if (result && rest.length === 0) return true;
+  return false;
+}
+
+// Return `true` if `lhs` is a sub domain of, or equal to, `rhs`
+// `lhs` is the "template" that `rhs` is checked against
+function isSubdomainOf(
+  xlhs: DomainExpression<BoxedExpression>[],
+  rhs: DomainExpression<BoxedExpression>
+): [boolean, DomainExpression<BoxedExpression>[]] {
+  let lhs = xlhs.shift() as DomainExpression<BoxedExpression>;
   const rhsLiteral = typeof rhs === 'string' ? rhs : null;
-  if (rhsLiteral === 'Anything') return true;
+  if (rhsLiteral === 'Anything') return [true, xlhs];
   const lhsLiteral = typeof lhs === 'string' ? lhs : null;
 
   //
   // 1/ Compare two domain literals
   //
   if (lhsLiteral && rhsLiteral) {
-    if (lhsLiteral === rhsLiteral) return true;
-    return includesDomain(ancestors(lhsLiteral), rhsLiteral);
+    if (lhsLiteral === rhsLiteral) return [true, xlhs];
+    return [includesDomain(ancestors(lhsLiteral), rhsLiteral), xlhs];
   }
 
   //
   // 2/ Is the lhs domain constructor a subdomain of the rhs domain literal?
   //
   if (rhsLiteral) {
+    if (!lhs) debugger;
     const lhsConstructor = lhs[0];
-    if (lhsConstructor === 'Function') return rhsLiteral === 'Function';
-    if (lhsConstructor === 'Dictionary') return rhsLiteral === 'Dictionary';
-    if (lhsConstructor === 'List') return rhsLiteral === 'List';
-    if (lhsConstructor === 'Tuple') {
-      return rhsLiteral === 'Tuple';
-    }
+    if (lhsConstructor === 'Function') return [rhsLiteral === 'Function', xlhs];
+    if (lhsConstructor === 'Dictionary')
+      return [rhsLiteral === 'Dictionary', xlhs];
+    if (lhsConstructor === 'List') return [rhsLiteral === 'List', xlhs];
+    if (lhsConstructor === 'Tuple') return [rhsLiteral === 'Tuple', xlhs];
+
     if (lhsConstructor === 'Intersection') {
     }
     // @todo handle domain constructors
@@ -500,14 +511,15 @@ export function isSubdomainOf(
     // 'Sequence',
 
     if (lhsConstructor === 'Interval')
-      return isSubdomainOf('ExtendedRealNumber', rhsLiteral);
+      return [isSubdomainOf1('ExtendedRealNumber', rhsLiteral), xlhs];
 
-    if (lhsConstructor === 'Range') return isSubdomainOf('Integer', rhsLiteral);
+    if (lhsConstructor === 'Range')
+      return [isSubdomainOf1('Integer', rhsLiteral), xlhs];
 
     // 'Head',
     // 'Symbol',
     // 'Value',
-    return true;
+    return [true, xlhs];
   }
 
   //
@@ -517,46 +529,46 @@ export function isSubdomainOf(
 
   if (rhsConstructor === 'Function') {
     // See https://www.stephanboyer.com/post/132/what-are-covariance-and-contravariance
-    if (lhsLiteral === 'Function') return true;
-    if (lhsLiteral) return false;
+    if (lhsLiteral === 'Function') return [true, xlhs];
+    if (lhsLiteral) return [false, xlhs];
 
     // Only a `Function` ctor can be a subdomain of a `Function`
-    if (lhs[0] !== 'Function') return false;
+    if (lhs[0] !== 'Function') return [false, xlhs];
 
     // Both constructors are 'Function':
 
-    // Check that the arguments and return values are compatible
-    // Parameters should be contravariant, return values should be covariant
+    if (lhs.length === 1 && rhs.length === 1) return [true, xlhs];
 
-    if (lhs.length === 1 && rhs.length === 1) return true;
+    // Check that the values are compatible (covariant)
+    if (
+      !isSubdomainOf1(
+        lhs[lhs.length - 1] as DomainExpression<BoxedExpression>,
+        rhs[rhs.length - 1] as DomainExpression<BoxedExpression>
+      )
+    )
+      return [false, xlhs];
 
-    const lhsReturnDomain = lhs[
-      lhs.length - 1
-    ] as DomainExpression<BoxedExpression>;
-    const rhsReturnDomain = rhs[
-      rhs.length - 1
-    ] as DomainExpression<BoxedExpression>;
-    if (!isSubdomainOf(lhsReturnDomain, rhsReturnDomain)) return false;
-
+    // Check that parameters are contravariant
     const lhsParams = lhs.slice(1, -1) as DomainExpression<BoxedExpression>[];
-    const rhsParams = rhs.slice(1, -1) as DomainExpression<BoxedExpression>[];
+    let rhsParams = rhs.slice(1, -1) as DomainExpression<BoxedExpression>[];
+    // let j = 0;
     for (let i = 0; i <= lhsParams.length - 1; i++) {
       // `rhs` is not expected to include a `Sequence`, `Contravariant`, etc... ctor, but `lhs` might
-      const lhsCtor = Array.isArray(lhsParams[i]) ? lhsParams[i][0] : null;
-      if (rhsParams[i] === undefined) {
-        if (lhsCtor !== 'Maybe') return false;
-        return true;
+      if (rhsParams.length === 0) {
+        // We have run out of rhs parameters
+        const lhsCtor = Array.isArray(lhsParams[i]) ? lhsParams[i][0] : null;
+        if (lhsCtor !== 'Maybe') return [false, xlhs];
+        // Any remaining lhs parameters should be optional
+        return [true, xlhs];
+      } else {
+        let match = false;
+        [match, rhsParams] = isSubdomainOf(rhsParams, lhsParams[i]);
+        if (!match) return [false, xlhs];
       }
-      if (lhsCtor === 'Sequence') {
-        const seq = lhsParams[i][1] as DomainExpression<BoxedExpression>;
-        for (let j = i; j < rhsParams.length - 1; j++)
-          if (!isSubdomainOf(rhsParams[j], seq)) return false;
-        return true;
-      }
-      if (!isSubdomainOf(rhsParams[i], lhsParams[i])) return false;
     }
-    if (rhsParams.length > lhsParams.length) return false;
-    return true;
+
+    // There should be no `rhs` parameters left to check
+    return [rhsParams.length === 0, xlhs];
   }
 
   // @todo handle domain constructors
@@ -565,24 +577,46 @@ export function isSubdomainOf(
   // 'Tuple',
 
   if (rhsConstructor === 'Intersection') {
-    return (rhs as DomainExpression<BoxedExpression>[])
-      .slice(1, -1)
-      .every((x: DomainExpression<BoxedExpression>) => isSubdomainOf(lhs, x));
+    return [
+      (rhs as DomainExpression<BoxedExpression>[])
+        .slice(1, -1)
+        .every((x: DomainExpression<BoxedExpression>) =>
+          isSubdomainOf1(lhs, x)
+        ),
+      xlhs,
+    ];
   }
 
   if (rhsConstructor === 'Union') {
-    return (rhs as DomainExpression<BoxedExpression>[])
-      .slice(1, -1)
-      .some((x: DomainExpression<BoxedExpression>) => isSubdomainOf(lhs, x));
+    return [
+      (rhs as DomainExpression<BoxedExpression>[])
+        .slice(1, -1)
+        .some((x: DomainExpression<BoxedExpression>) => isSubdomainOf1(lhs, x)),
+      xlhs,
+    ];
   }
 
   if (rhsConstructor === 'Maybe') {
-    if (lhsLiteral === 'Nothing') return true;
-    return isSubdomainOf(lhs, rhs[1]! as DomainExpression<BoxedExpression>);
+    if (lhsLiteral === 'Nothing') return [true, xlhs];
+    return isSubdomainOf(
+      [lhs, ...xlhs],
+      rhs[1]! as DomainExpression<BoxedExpression>
+    );
   }
 
   if (rhsConstructor === 'Sequence') {
-    return isSubdomainOf(lhs, rhs[1]! as DomainExpression<BoxedExpression>);
+    const seq = rhs[1] as DomainExpression<BoxedExpression>;
+
+    if (!isSubdomainOf1(lhs, seq)) return [false, xlhs];
+    lhs = xlhs.shift() as DomainExpression<BoxedExpression>;
+
+    // Skip over all other parameters of domain `seq`
+    let match = true;
+    while (xlhs.length > 0 && match) {
+      [match, xlhs] = isSubdomainOf(xlhs, seq);
+      lhs = xlhs.shift() as DomainExpression<BoxedExpression>;
+    }
+    return [true, xlhs];
   }
 
   // 'Interval',
@@ -595,7 +629,7 @@ export function isSubdomainOf(
   // 'Symbol',
   // 'Value',
 
-  return false;
+  return [false, xlhs];
 }
 
 /** Return the ancestor domain that is shared by both `a` and `b` */

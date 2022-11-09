@@ -100,27 +100,27 @@ export function serializeNumber(
     num = expr.num;
   } else return '';
 
-  if (num === Infinity || num === 'Infinity' || num === '+Infinity') {
-    return options.positiveInfinity;
-  } else if (num === -Infinity || num === '-Infinity') {
-    return options.negativeInfinity;
-  } else if (num === 'NaN' || (typeof num === 'number' && Number.isNaN(num))) {
-    return options.notANumber;
-  }
-
   if (typeof num === 'number') {
+    if (num === Infinity) return options.positiveInfinity;
+    else if (num === -Infinity) return options.negativeInfinity;
+    else if (Number.isNaN(num)) return options.notANumber;
+
     if (options.notation === 'engineering')
       return serializeEngineeringNotationNumber(num, options);
 
     return serializeAutoNotationNumber(num.toString(), options);
   }
 
-  // If we end with a letter ('n' or 'd' for bigint or bignum)
-  // remove it (legacy format)
-  if (/[0-9][nd]$/.test(num)) num = num.slice(0, -1);
+  num = num.toLowerCase().replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
 
-  // Remove any whitespace
-  num = num.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+  if (num === 'infinity' || num === '+infinity')
+    return options.positiveInfinity;
+  else if (num === '-infinity') return options.negativeInfinity;
+  else if (num === 'nan') return options.notANumber;
+
+  if (!/^[-+\.]?[0-9]/.test(num)) return '';
+
+  num = num.replace(/[nd]$/, '');
 
   // Do we have repeating digits?
   if (/\([0-9]+\)/.test(num)) {

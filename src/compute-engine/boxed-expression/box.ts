@@ -239,6 +239,14 @@ export function boxFunction(
     });
   }
 
+  if (head === 'Error' || head === 'ErrorCode') {
+    return ce._fn(
+      head,
+      ops.map((x) => ce.box(x, { canonical: false })),
+      options.metadata
+    );
+  }
+
   if (head === 'Domain') return ce.domain(ops[0], options.metadata);
   if (head === 'Number' && ops.length === 1) return box(ce, ops[0], options);
   if (head === 'String') {

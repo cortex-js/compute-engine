@@ -41,6 +41,11 @@ export function machineDenominator(x: Rational): number {
   return typeof x[1] === 'number' ? x[1] : x[1].toNumber();
 }
 
+export function isNeg(lhs: Rational): boolean {
+  if (isMachineRational(lhs)) return lhs[0] < 0;
+  return lhs[0].isNeg();
+}
+
 export function neg(lhs: [number, number]): [number, number];
 export function neg(lhs: [Decimal, Decimal]): [Decimal, Decimal];
 export function neg(lhs: Rational): Rational;
