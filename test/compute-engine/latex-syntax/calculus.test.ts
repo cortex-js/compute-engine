@@ -7,7 +7,7 @@ function json(latex: string): Expression {
 describe('INTEGRAL', () => {
   test('simple with no index', () => {
     expect(json('\\int\\sin x + 1 = 2')).toMatchInlineSnapshot(
-      `["Equal", 2, ["Integrate", ["Add", 1, ["Sin", "x"]]]]`
+      `["Equal", 2, ["Integrate", ["Add", ["Sin", "x"], 1]]]`
     );
   });
 
@@ -15,25 +15,12 @@ describe('INTEGRAL', () => {
     expect(json('\\int\\sin x \\mathrm{d} x+1 = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
+        2,
         [
           "Add",
-          [
-            "Integrate",
-            ["Lambda", ["Add", ["Sin", "_"]]],
-            [
-              "Error",
-              [
-                "ErrorCode",
-                "'incompatible-domain'",
-                ["Union", "Nothing", "Tuple", "Symbol"],
-                ["Domain", "ExtendedRealNumber"]
-              ],
-              "x"
-            ]
-          ],
-          1
-        ],
-        2
+          1,
+          ["Integrate", ["Lambda", ["Add", ["Sin", "_"]]], ["Hold", "x"]]
+        ]
       ]
     `);
   }); // @fixme
@@ -41,25 +28,12 @@ describe('INTEGRAL', () => {
     expect(json('\\int\\sin x dx+1 = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
+        2,
         [
           "Add",
-          [
-            "Integrate",
-            ["Lambda", ["Add", ["Sin", "_"]]],
-            [
-              "Error",
-              [
-                "ErrorCode",
-                "'incompatible-domain'",
-                ["Union", "Nothing", "Tuple", "Symbol"],
-                ["Domain", "ExtendedRealNumber"]
-              ],
-              "x"
-            ]
-          ],
-          1
-        ],
-        2
+          1,
+          ["Integrate", ["Lambda", ["Add", ["Sin", "_"]]], ["Hold", "x"]]
+        ]
       ]
     `);
   }); // @fixme
@@ -68,25 +42,8 @@ describe('INTEGRAL', () => {
     expect(json('\\int\\alpha d\\alpha+1 = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        [
-          "Add",
-          [
-            "Integrate",
-            ["Lambda", "_"],
-            [
-              "Error",
-              [
-                "ErrorCode",
-                "'incompatible-domain'",
-                ["Union", "Nothing", "Tuple", "Symbol"],
-                ["Domain", "ExtendedRealNumber"]
-              ],
-              "Alpha"
-            ]
-          ],
-          1
-        ],
-        2
+        2,
+        ["Add", 1, ["Integrate", ["Lambda", "_"], ["Hold", "Alpha"]]]
       ]
     `);
   }); // @fixme
@@ -95,28 +52,19 @@ describe('INTEGRAL', () => {
     expect(json('\\int\\sin x \\, \\mathrm{d}x+1 = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
+        2,
         [
           "Add",
+          1,
           [
             "Integrate",
             [
               "Lambda",
               ["Add", ["Sin", ["Multiply", "_", ["HorizontalSpacing", 3]]]]
             ],
-            [
-              "Error",
-              [
-                "ErrorCode",
-                "'incompatible-domain'",
-                ["Union", "Nothing", "Tuple", "Symbol"],
-                ["Domain", "ExtendedRealNumber"]
-              ],
-              "x"
-            ]
-          ],
-          1
-        ],
-        2
+            ["Hold", "x"]
+          ]
+        ]
       ]
     `);
   }); // @fixme
@@ -126,6 +74,28 @@ describe('INTEGRAL', () => {
       .toMatchInlineSnapshot(`
       [
         "Equal",
+        2,
+        [
+          "Add",
+          1,
+          [
+            "Integrate",
+            [
+              "Lambda",
+              ["Add", ["Sin", ["Multiply", "_", ["HorizontalSpacing", 3]]]]
+            ],
+            ["Hold", "x"]
+          ]
+        ]
+      ]
+    `);
+  });
+
+  test('simple with upper bound', () => {
+    expect(json('\\int^\\infty\\sin x \\, \\mathrm{d}x+1 = 2'))
+      .toMatchInlineSnapshot(`
+      [
+        "Equal",
         [
           "Add",
           [
@@ -140,9 +110,39 @@ describe('INTEGRAL', () => {
                 "ErrorCode",
                 "'incompatible-domain'",
                 ["Union", "Nothing", "Tuple", "Symbol"],
-                ["Domain", "ExtendedRealNumber"]
+                ["Domain", "Anything"]
               ],
-              "x"
+              ["Triple", ["Hold", "x"], "Nothing", {num: "+Infinity"}]
+            ]
+          ],
+          1
+        ],
+        2
+      ]
+    `);
+  }); // @fixme
+  test('simple with lower and upper bound', () => {
+    expect(json('\\int^\\infty_0\\sin x \\, \\mathrm{d}x+1 = 2'))
+      .toMatchInlineSnapshot(`
+      [
+        "Equal",
+        [
+          "Add",
+          [
+            "Integrate",
+            [
+              "Lambda",
+              ["Add", ["Sin", ["Multiply", "_", ["HorizontalSpacing", 3]]]]
+            ],
+            [
+              "Error",
+              [
+                "ErrorCode",
+                "'incompatible-domain'",
+                ["Union", "Nothing", "Tuple", "Symbol"],
+                ["Domain", "Anything"]
+              ],
+              ["Triple", ["Hold", "x"], 0, {num: "+Infinity"}]
             ]
           ],
           1
@@ -152,59 +152,25 @@ describe('INTEGRAL', () => {
     `);
   });
 
-  test('simple with upper bound', () => {
-    expect(json('\\int^\\infty\\sin x \\, \\mathrm{d}x+1 = 2'))
-      .toMatchInlineSnapshot(`
-      [
-        "Equal",
-        2,
-        [
-          "Add",
-          1,
-          [
-            "Integrate",
-            [
-              "Lambda",
-              ["Add", ["Sin", ["Multiply", "_", ["HorizontalSpacing", 3]]]]
-            ],
-            ["Triple", "x", "Nothing", {num: "+Infinity"}]
-          ]
-        ]
-      ]
-    `);
-  }); // @fixme
-  test('simple with lower and upper bound', () => {
-    expect(json('\\int^\\infty_0\\sin x \\, \\mathrm{d}x+1 = 2'))
-      .toMatchInlineSnapshot(`
-      [
-        "Equal",
-        2,
-        [
-          "Add",
-          1,
-          [
-            "Integrate",
-            [
-              "Lambda",
-              ["Add", ["Sin", ["Multiply", "_", ["HorizontalSpacing", 3]]]]
-            ],
-            ["Triple", "x", 0, {num: "+Infinity"}]
-          ]
-        ]
-      ]
-    `);
-  });
-
   test('simple with lower and upper bound and no index', () =>
     expect(json('\\int^\\infty_0\\sin x +1 = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
-          ["Add", 1, ["Sin", "x"]],
-          ["Triple", "Nothing", 0, {num: "+Infinity"}]
-        ]
+          ["Add", ["Sin", "x"], 1],
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Union", "Nothing", "Tuple", "Symbol"],
+              ["Domain", "Anything"]
+            ],
+            ["Triple", "Nothing", 0, {num: "+Infinity"}]
+          ]
+        ],
+        2
       ]
     `));
 
@@ -212,12 +178,21 @@ describe('INTEGRAL', () => {
     expect(json('\\int^\\infty_0\\frac{3xdx}{5} = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Lambda", ["Divide", ["Multiply", 3, "_"], 5]],
-          ["Triple", "x", 0, {num: "+Infinity"}]
-        ]
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Union", "Nothing", "Tuple", "Symbol"],
+              ["Domain", "Anything"]
+            ],
+            ["Triple", ["Hold", "x"], 0, {num: "+Infinity"}]
+          ]
+        ],
+        2
       ]
     `));
 
@@ -226,12 +201,21 @@ describe('INTEGRAL', () => {
       .toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Lambda", ["Divide", ["Multiply", 3, "_"], 5]],
-          ["Triple", "x", 0, {num: "+Infinity"}]
-        ]
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Union", "Nothing", "Tuple", "Symbol"],
+              ["Domain", "Anything"]
+            ],
+            ["Triple", ["Hold", "x"], 0, {num: "+Infinity"}]
+          ]
+        ],
+        2
       ]
     `));
 
@@ -239,16 +223,21 @@ describe('INTEGRAL', () => {
     expect(json('\\int^\\infty_0\\frac{3x}{5dx} = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
+          ["Divide", ["Multiply", 3, "x"], ["Multiply", 5, "d", "x"]],
           [
-            "Divide",
-            ["Multiply", ["Rational", 3, 5], "x"],
-            ["Multiply", "d", "x"]
-          ],
-          ["Triple", "Nothing", 0, {num: "+Infinity"}]
-        ]
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Union", "Nothing", "Tuple", "Symbol"],
+              ["Domain", "Anything"]
+            ],
+            ["Triple", "Nothing", 0, {num: "+Infinity"}]
+          ]
+        ],
+        2
       ]
     `));
 
@@ -256,12 +245,21 @@ describe('INTEGRAL', () => {
     expect(json('\\int^\\infty_03x+kxdx = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Lambda", ["Add", ["Multiply", 3, "_"], ["Multiply", "k", "_"]]],
-          ["Triple", "x", 0, {num: "+Infinity"}]
-        ]
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Union", "Nothing", "Tuple", "Symbol"],
+              ["Domain", "Anything"]
+            ],
+            ["Triple", ["Hold", "x"], 0, {num: "+Infinity"}]
+          ]
+        ],
+        2
       ]
     `));
 
@@ -269,12 +267,21 @@ describe('INTEGRAL', () => {
     expect(json('\\int^\\infty_0-xdx = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Lambda", ["Negate", "_"]],
-          ["Triple", "x", 0, {num: "+Infinity"}]
-        ]
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Union", "Nothing", "Tuple", "Symbol"],
+              ["Domain", "Anything"]
+            ],
+            ["Triple", ["Hold", "x"], 0, {num: "+Infinity"}]
+          ]
+        ],
+        2
       ]
     `));
 
@@ -282,15 +289,24 @@ describe('INTEGRAL', () => {
     expect(json('\\int^\\infty_0(3x+x^2dx) = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           [
             "Lambda",
             ["Delimiter", ["Add", ["Multiply", 3, "_"], ["Power", "_", 2]]]
           ],
-          ["Triple", "x", 0, {num: "+Infinity"}]
-        ]
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Union", "Nothing", "Tuple", "Symbol"],
+              ["Domain", "Anything"]
+            ],
+            ["Triple", ["Hold", "x"], 0, {num: "+Infinity"}]
+          ]
+        ],
+        2
       ]
     `));
 
@@ -298,15 +314,24 @@ describe('INTEGRAL', () => {
     expect(json('\\int^\\infty_0(3x+x^2)dx = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           [
             "Lambda",
             ["Delimiter", ["Add", ["Multiply", 3, "_"], ["Power", "_", 2]]]
           ],
-          ["Triple", "x", 0, {num: "+Infinity"}]
-        ]
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Union", "Nothing", "Tuple", "Symbol"],
+              ["Domain", "Anything"]
+            ],
+            ["Triple", ["Hold", "x"], 0, {num: "+Infinity"}]
+          ]
+        ],
+        2
       ]
     `));
 
@@ -314,12 +339,21 @@ describe('INTEGRAL', () => {
     expect(json('\\int^\\infty_0\\sin x dx = 2')).toMatchInlineSnapshot(`
       [
         "Equal",
-        2,
         [
           "Integrate",
           ["Lambda", ["Sin", "_"]],
-          ["Triple", "x", 0, {num: "+Infinity"}]
-        ]
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "'incompatible-domain'",
+              ["Union", "Nothing", "Tuple", "Symbol"],
+              ["Domain", "Anything"]
+            ],
+            ["Triple", ["Hold", "x"], 0, {num: "+Infinity"}]
+          ]
+        ],
+        2
       ]
     `));
 });

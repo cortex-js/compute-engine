@@ -198,19 +198,7 @@ describe('STEFNOTCH #13', () => {
       .toMatchInlineSnapshot(`
       [
         "LessEqual",
-        [
-          "Abs",
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              "Number",
-              ["Domain", "Anything"]
-            ],
-            "a_n"
-          ]
-        ],
+        ["Abs", "a_n"],
         [
           "Equal",
           [

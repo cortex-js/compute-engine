@@ -128,11 +128,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
       else if (this._def) {
         const sig = this._def.signature;
         if (typeof sig.codomain === 'function') {
-          this._codomain =
-            sig.codomain(
-              ce,
-              this._ops.map((x) => x.domain)
-            ) ?? null;
+          this._codomain = sig.codomain(ce, this._ops) ?? null;
         } else {
           this._codomain = sig.codomain ?? null;
         }
@@ -281,10 +277,13 @@ export class BoxedFunction extends AbstractBoxedExpression {
     return this.engine.fn(newHead, ops);
   }
 
-  subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
+  subs(sub: Substitution, options?: { canonical?: boolean }): BoxedExpression {
+    options ??= {};
+    if (!('canonical' in options)) options.canonical = true;
+
     const ops = this._ops.map((x) => x.subs(sub, options));
 
-    if (options?.canonical && ops.every((x) => x.isValid))
+    if (options.canonical && ops.every((x) => x.isValid))
       return makeCanonicalFunction(this.engine, this._head, ops);
 
     return new BoxedFunction(this.engine, this._head, ops, {
@@ -920,7 +919,7 @@ export function makeCanonicalFunction(
 
   //
   // Flatten any sequence
-  // f(a, f(b, c), d) -> f(a, b, c, d)
+  // f(a, Sequence(b, c), d) -> f(a, b, c, d)
   //
   xs = flattenSequence(xs);
   if (def.associative) xs = flattenOps(xs, head) ?? xs;
@@ -1063,9 +1062,6 @@ function applicable(
 
 /** Return `null` if the `ops` match the sig. Otherwise, return an array
  * of expressions indicating the mismatched arguments.
- *
- * Will modify the `inferredDomain` property of the current scope to reflect
- * the inferred domain of unknown symbols.
  *
  */
 function validateSignature(

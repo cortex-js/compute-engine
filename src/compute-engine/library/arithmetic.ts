@@ -103,7 +103,11 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         complexity: 1300,
         signature: {
           domain: 'NumericFunction',
-          codomain: (ce, args) => domainAdd(ce, args),
+          codomain: (ce, args) =>
+            domainAdd(
+              ce,
+              args.map((x) => x.domain)
+            ),
           canonical: (ce, args) => canonicalAdd(ce, args),
           simplify: (ce, ops) => simplifyAdd(ce, ops),
           evaluate: (ce, ops) => evalAdd(ce, ops),
@@ -432,7 +436,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', 'Number'],
           codomain: (ce, args) => {
-            if (!args[0].literal) return args[0];
+            const arg = args[0].domain;
+            if (!arg.literal) return arg;
             const negDomain = {
               PositiveNumber: 'NegativeNumber',
               NonNegativeNumber: 'NonPositiveNumber',
@@ -442,9 +447,9 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
               NonNegativeInteger: 'NonPositiveInteger',
               NonPositiveInteger: 'NonNegativeInteger',
               NegativeInteger: 'PositiveInteger',
-            }[args[0].literal];
+            }[arg.literal];
             if (negDomain) return ce.domain(negDomain);
-            return args[0];
+            return arg;
           },
           canonical: (_ce, args) => canonicalNegate(args[0]),
           simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),

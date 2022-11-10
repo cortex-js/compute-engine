@@ -759,7 +759,8 @@ export class ComputeEngine implements IComputeEngine {
     if (typeof symbol !== 'string') throw Error('Expected a string');
 
     // Wildcards never have definitions
-    if (symbol.startsWith('_') || !this.context) return undefined;
+    if (symbol.length === 0 || symbol.startsWith('_') || !this.context)
+      return undefined;
 
     let def: undefined | BoxedSymbolDefinition = undefined;
 
@@ -815,6 +816,8 @@ export class ComputeEngine implements IComputeEngine {
   defineSymbol(def: SymbolDefinition): BoxedSymbolDefinition {
     if (!this.context)
       throw Error('Symbol cannot be defined: no scope available');
+    if (def.name.length === 0 || !isValidIdentifier(def.name))
+      throw Error('Invalid identifier ' + def.name);
     const boxedDef = new BoxedSymbolDefinitionImpl(this, def);
     if (!this.context.symbolTable) {
       this.context.symbolTable = {
@@ -836,6 +839,8 @@ export class ComputeEngine implements IComputeEngine {
   defineFunction(def: FunctionDefinition): BoxedFunctionDefinition {
     if (!this.context)
       throw Error('Function cannot be defined: no scope available');
+    if (def.name.length === 0 || !isValidIdentifier(def.name))
+      throw Error('Invalid identifier ' + def.name);
 
     const boxedDef = makeFunctionDefinition(this, def);
 

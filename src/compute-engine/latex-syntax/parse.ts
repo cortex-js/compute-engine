@@ -151,7 +151,8 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
   parseUnknownSymbol: (s: string, parser: Parser) => {
     if (parser.computeEngine?.lookupFunction(s) !== undefined)
       return 'function';
-    return 'symbol';
+    if (/^[a-zA-Z]/.test(s)) return 'symbol';
+    return 'unknown';
   },
 
   preserveLatex: false,
@@ -378,6 +379,7 @@ export class _Parser implements Parser {
       this._dictionary.lookahead,
       this._tokens.length - this.index
     );
+    if (n < 0) return [];
     const result = Array<string>(n + 1);
     while (n > 0) result[n] = this.latexAhead(n--);
 
@@ -1108,7 +1110,7 @@ export class _Parser implements Parser {
           if (!this.atEnd) continue;
           // If we're at the end, we may need to backtrack and try again
           // That's the case for `|1+|2|+3|`
-          this.index = bodyStart;
+          this.index = start;
           return null;
         }
       }
@@ -1120,36 +1122,28 @@ export class _Parser implements Parser {
   }
 
   /**
-   * Match a single variable name. It can be:
+   * Match an identifier. It can be:
    * - a symbol
    * - a simple multi-letter identifier: `\mathrm{speed}`
-   * - a complex multi-letter identifier: `\alpha_12` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
+   * - a complex multi-letter identifier: `\mathrm{\alpha_{12}}` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
    * - a command: `\alpha`  @todo
-   * - a complex name such as `\alpha_12` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}` (see serializer.ts) @todo:
-   * @todo: matchSymbol should use matchIdentifier
    */
   matchIdentifier(): string | Expression | null {
-    let result: string | null = null;
     if (
       this.match('\\operatorname') ||
       this.match('\\mathit') ||
       this.match('\\mathrm')
     ) {
       const start = this.index;
-      const id = this.matchRequiredLatexArgument();
-      if (!id) return this.error('invalid-symbol-name', start);
+      const id = this.matchStringArgument();
+      if (id === null) return this.error('expected-string-argument', start);
 
-      const expr = this.computeEngine.box(id);
-      // Look at the latex to handle cases like `\mathrm{V_{m(ABC)}}`
-      result = expr.symbol ?? expr.string ?? expr.latex;
-
-      if (result === null || !isValidIdentifier(result))
+      if (id === null || !isValidIdentifier(id))
         return this.error('invalid-symbol-name', start);
-      return result;
+      return id;
     }
 
-    result = this.peek;
-    if (/[a-zA-Z]/.test(result)) return this.next();
+    if (/[a-zA-Z]/.test(this.peek)) return this.next();
 
     return null;
   }
@@ -1191,35 +1185,21 @@ export class _Parser implements Parser {
     // Capture a function name
     //
 
-    let fn: string | null = null;
-    if (
-      this.match('\\operatorname') ||
-      this.match('\\mathit') ||
-      this.match('\\mathrm')
-    ) {
-      fn = this.matchStringArgument();
-      if (fn === null) return this.error('expected-string-argument', start);
-      if (!isValidIdentifier(fn))
-        return this.error('invalid-symbol-name', start);
+    const fn = this.matchIdentifier();
+    if (fn === null) {
+      this.index = start;
+      return null;
     }
-
-    // If we could not capture a multi-char symbol yet, use the next token
-    if (!fn) {
-      fn = this.next();
-      if (!isValidIdentifier(fn)) fn = null;
-    }
+    if (typeof fn !== 'string') return fn;
 
     //
     // Is it a generic multi-char function identifier?
     //
-    if (fn) {
-      if (this.options.parseUnknownSymbol?.(fn, this) === 'function') {
-        // Function application:
-        // Is it followed by an argument list inside parentheses?
-        const enclosure = this.matchEnclosure();
-        const seq = getSequence(enclosure);
-        return seq ? [fn, ...seq] : fn;
-      }
+    if (this.options.parseUnknownSymbol?.(fn, this) === 'function') {
+      // Function application:
+      // Is it followed by an argument list inside parentheses?
+      const seq = getSequence(this.matchEnclosure());
+      return seq ? [fn, ...seq] : fn;
     }
 
     this.index = start;

@@ -27,14 +27,8 @@ describe('SYMBOLS', () => {
     expect(parse('V_{10}')).toMatchInlineSnapshot(`V_10`);
     expect(parse('V_{\\alpha}')).toMatchInlineSnapshot(`V_Alpha`);
     expect(parse('V_{\\mathrm{max}}')).toMatchInlineSnapshot(`V_max`);
-    expect(parse('\\mathrm{V_1}')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\mathrm'"],
-        ["Latex", "'\\mathrm{V_1}'"]
-      ]
-    `);
-  }); // @fixme
+    expect(parse('\\mathrm{V_1}')).toMatchInlineSnapshot(`V_1`);
+  });
 
   test('Symbol expressions', () => {
     expect(parse('2x')).toMatch('["Multiply", 2, "x"]');

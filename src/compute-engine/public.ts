@@ -683,7 +683,7 @@ export interface BoxedExpression {
    * **Note** applicable to canonical and non-canonical expressions.
    *
    */
-  subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression;
+  subs(sub: Substitution, options?: { canonical?: boolean }): BoxedExpression;
 
   /**
    * Transform the expression by applying the rules:
@@ -1711,7 +1711,7 @@ export type BoxedFunctionSignature = {
 
   codomain?:
     | BoxedDomain
-    | ((ce: IComputeEngine, args: BoxedDomain[]) => BoxedDomain | null);
+    | ((ce: IComputeEngine, args: BoxedExpression[]) => BoxedDomain | null);
   canonical?: (ce: IComputeEngine, args: BoxedExpression[]) => BoxedExpression;
   simplify?: (
     ce: IComputeEngine,

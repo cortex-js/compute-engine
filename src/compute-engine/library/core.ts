@@ -29,7 +29,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
             'Anything',
             ['Tuple', 'String', 'Anything'],
           ],
-          codomain: (ce, args) => ce.domain(['Tuple', 'String', args[1]]),
+          codomain: (ce, args) =>
+            ce.domain(['Tuple', 'String', args[1].domain]),
           canonical: (ce, args) => ce.tuple(args),
         },
       },
@@ -39,7 +40,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
         complexity: 8200,
         signature: {
           domain: ['Function', 'Anything', ['Tuple', 'Anything']],
-          codomain: (ce, args) => ce.domain(['Tuple', args[0]]),
+          codomain: (ce, args) => ce.domain(['Tuple', args[0].domain]),
           canonical: (ce, args) => ce.tuple(args),
         },
       },
@@ -55,7 +56,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
             ['Tuple', 'Anything', 'Anything'],
           ],
 
-          codomain: (ce, args) => ce.domain(['Tuple', args[0], args[1]]),
+          codomain: (ce, args) =>
+            ce.domain(['Tuple', args[0].domain, args[1].domain]),
           canonical: (ce, args) => ce.tuple(args),
         },
       },
@@ -73,7 +75,12 @@ export const CORE_LIBRARY: SymbolTable[] = [
           ],
 
           codomain: (ce, args) =>
-            ce.domain(['Tuple', args[0], args[1], args[2]]),
+            ce.domain([
+              'Tuple',
+              args[0].domain,
+              args[1].domain,
+              args[2].domain,
+            ]),
           canonical: (ce, args) => ce.tuple(args),
         },
       },
@@ -87,7 +94,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
             ['Sequence', 'Anything'],
             ['Tuple', ['Sequence', 'Anything']],
           ],
-          codomain: (ce, args) => ce.domain(['Tuple', ...args]),
+          codomain: (ce, args) =>
+            ce.domain(['Tuple', ...args.map((x) => x.domain)]),
         },
       },
     ],
@@ -104,7 +112,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
         inert: true,
         signature: {
           domain: ['Function', 'Value', ['Maybe', 'Integer'], 'Value'],
-          codomain: (_ce, args) => args[0],
+          codomain: (_ce, args) => args[0].domain,
         },
       },
       {
@@ -120,7 +128,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
             ['Maybe', 'String'],
             'Anything',
           ],
-          codomain: (_ce, args) => args[0],
+          codomain: (_ce, args) => args[0].domain,
           canonical: (_ce, args) => args[0].canonical,
         },
       },
@@ -170,7 +178,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
         hold: 'all',
         signature: {
           domain: 'Function',
-          codomain: (_ce, args) => args[0],
+          codomain: (ce, args) =>
+            args[0].symbol ? ce.domain('Symbol') : ce.domain('Anything'),
           // To make a canonical expression, don't canonicalize the args
           canonical: (ce, args) => ce._fn('Hold', args),
         },
@@ -230,7 +239,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
         hold: 'all',
         signature: {
           domain: ['Function', 'Anything', 'Anything'],
-          codomain: (_ce, args) => args[0],
+          codomain: (_ce, args) => args[0].domain,
           evaluate: (_ce, ops) => ops[0].evaluate(),
         },
       },
@@ -263,7 +272,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
         hold: 'all',
         signature: {
           domain: ['Function', 'Anything', 'Function'],
-          codomain: (_ce, ops) => ops[0],
+          codomain: (_ce, ops) => ops[0].domain,
           canonical: (ce, ops) => ce._fn('Lambda', ops),
         },
       },
@@ -307,9 +316,9 @@ export const CORE_LIBRARY: SymbolTable[] = [
 
         signature: {
           domain: ['Function', 'Anything', 'Anything', 'Anything'],
-          codomain: (ce, args) => {
-            if (args[0].isFunction) return args[0];
-            return args[0];
+          codomain: (_ce, args) => {
+            if (args[0].isFunction) return args[0].domain;
+            return args[0].domain;
           },
           canonical: (ce, args) => {
             const op1 = args[0];
@@ -342,8 +351,10 @@ export const CORE_LIBRARY: SymbolTable[] = [
               if (!sub && op2.isLiteral && asSmallInteger(op2) !== null)
                 sub = asSmallInteger(op2)!.toString();
 
-              if (sub)
-                return ce.symbol(op1.symbol + '_' + sub, { canonical: false });
+              if (sub) return ce.symbol(op1.symbol + '_' + sub);
+            }
+            if (op2.head === 'Sequence') {
+              debugger;
             }
             return ce._fn('Subscript', args);
           },

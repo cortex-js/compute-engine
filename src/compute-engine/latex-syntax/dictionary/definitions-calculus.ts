@@ -37,7 +37,7 @@ function parseIntegral(command: string) {
     // eslint-disable-next-line prefer-const
     let [fn, index] = parseIntegralBody(parser);
 
-    if (fn && !index && head(fn) === 'Add') {
+    if (fn && !index && (head(fn) === 'Add' || head(fn) === 'Subtract')) {
       // If the function is an addition, it could appear in any of the terms,
       // e.g. `\int \sin xdx + 1`
       const newOp: Expression[] = [];
@@ -75,10 +75,18 @@ function makeIntegral(
 
   fn ??= 'Nothing';
 
+  const heldIndex: Expression | null = index
+    ? (['Hold', index] as Expression)
+    : null;
+
   if (sup)
-    return [command, fn, ['Tuple', index ?? 'Nothing', sub ?? 'Nothing', sup]];
-  if (sub) return [command, fn, ['Tuple', index ?? 'Nothing', sub]];
-  if (index) return [command, fn, index];
+    return [
+      command,
+      fn,
+      ['Tuple', heldIndex ?? 'Nothing', sub ?? 'Nothing', sup],
+    ];
+  if (sub) return [command, fn, ['Tuple', heldIndex ?? 'Nothing', sub]];
+  if (heldIndex) return [command, fn, heldIndex];
   return [command];
 }
 
@@ -137,6 +145,8 @@ function parseIntegralBodyExpression(
           symbol(args[args.length - 1]),
         ];
       }
+      const [fn2, index] = parseIntegralBodyExpression(args[args.length - 1]);
+      if (fn2) return [['Multiply', ...args.slice(0, -1), fn2], index];
     }
   } else if (h === 'Delimiter') {
     const [fn2, index] = parseIntegralBodyExpression(op1);

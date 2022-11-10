@@ -29,7 +29,9 @@ describe('TAUTOLOGY one = 1', () => {
     );
   });
   test(`'one' compared to 0`, () => {
-    expect(ce.assume(['Greater', 'one', 0])).toMatchInlineSnapshot(`ok`);
+    expect(ce.assume(['Greater', 'one', 0])).toMatchInlineSnapshot(
+      `internal-error`
+    );
     expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
     expect(ce.box(['Less', 'one', 0]).evaluate().json).toEqual('False');
     expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('False');

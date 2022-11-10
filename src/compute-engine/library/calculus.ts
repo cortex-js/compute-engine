@@ -9,6 +9,7 @@ export const CALCULUS_LIBRARY: SymbolTable[] = [
       {
         name: 'Integrate',
         wikidata: 'Q80091',
+        hold: 'all',
         signature: {
           domain: [
             'Function',
@@ -17,6 +18,7 @@ export const CALCULUS_LIBRARY: SymbolTable[] = [
             // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
             'Number',
           ],
+          canonical: (ce, ops) => ce._fn('Integrate', ops),
         },
       },
     ],

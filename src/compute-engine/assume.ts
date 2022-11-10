@@ -98,8 +98,9 @@ export function assume(proposition: BoxedExpression): AssumeResult {
   }
 
   if (rel === '<') {
-    if (!def)
+    if (sym && !def)
       def = ce.defineSymbol({ name: sym, domain: ce.domain('RealNumber') });
+    if (!def) return 'internal-error';
     if (def.value) {
       if (def.value.isLess(val)) return 'tautology';
       return 'contradiction';

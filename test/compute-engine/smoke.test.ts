@@ -37,17 +37,8 @@ ce.assume('one', 1);
 
 ///
 
-// Incorrect parsing, doesn't  recognize the dx
-console.log(ce.parse('\\int x\\sin xdx+1').json);
-
-console.log(
-  ce
-    .parse(
-      '0.032\\times\\frac{(V-V_b)\\times N\\times\\frac{mathrm{V_so}}{V_a}}{V_N}'
-    )
-    .subs({ V_b: 5 })
-    .toString()
-);
+const n1 = ce.parse('x_{1,2}');
+console.log(n1.toString());
 
 const sig3 = ce.domain([
   'Maybe',
@@ -360,9 +351,9 @@ describe('PARSING numbers', () => {
     ).toMatchInlineSnapshot(`
       [
         "Equal",
-        ["Multiply", "n", "p"],
         [
           "Add",
+          2,
           [
             "Sum",
             [
@@ -372,6 +363,7 @@ describe('PARSING numbers', () => {
                 1,
                 [
                   "Add",
+                  1,
                   [
                     "Power",
                     0,
@@ -383,32 +375,35 @@ describe('PARSING numbers', () => {
                         [
                           "Product",
                           [
-                            "Delimiter",
+                            "Lambda",
                             [
-                              "Subtract",
-                              1,
+                              "Delimiter",
                               [
-                                "Power",
-                                0,
+                                "Subtract",
+                                1,
                                 [
-                                  "Multiply",
-                                  "abs",
+                                  "Power",
+                                  0,
                                   [
-                                    "Delimiter",
+                                    "Multiply",
+                                    "abs",
                                     [
-                                      "Subtract",
+                                      "Delimiter",
                                       [
-                                        "Floor",
+                                        "Subtract",
+                                        [
+                                          "Floor",
+                                          [
+                                            "Divide",
+                                            ["Subscript", "v", 2],
+                                            ["Subscript", "v", 3]
+                                          ]
+                                        ],
                                         [
                                           "Divide",
                                           ["Subscript", "v", 2],
                                           ["Subscript", "v", 3]
                                         ]
-                                      ],
-                                      [
-                                        "Divide",
-                                        ["Subscript", "v", 2],
-                                        ["Subscript", "v", 3]
                                       ]
                                     ]
                                   ]
@@ -420,29 +415,13 @@ describe('PARSING numbers', () => {
                             "Triple",
                             ["Hold", ["Subscript", "v", 3]],
                             2,
-                            [
-                              "Floor",
-                              [
-                                "Sqrt",
-                                [
-                                  "Error",
-                                  [
-                                    "ErrorCode",
-                                    "'incompatible-domain'",
-                                    "Number",
-                                    ["Domain", "Anything"]
-                                  ],
-                                  "v_2"
-                                ]
-                              ]
-                            ]
+                            ["Floor", ["Sqrt", "v_2"]]
                           ]
                         ],
                         ["Triple", ["Hold", "v_2"], 2, "v_1"]
                       ]
                     ]
-                  ],
-                  1
+                  ]
                 ]
               ]
             ],
@@ -452,9 +431,9 @@ describe('PARSING numbers', () => {
               2,
               ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
             ]
-          ],
-          2
-        ]
+          ]
+        ],
+        ["Multiply", "n", "p"]
       ]
     `));
 });

@@ -317,7 +317,12 @@ check('Invalid delimiter: expected closing', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\left'"],
-        ["Latex", "'\\left('"]
+        ["Latex", "'\\left'"]
+      ],
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-token'", "'('"],
+        ["Latex", "'('"]
       ]
     ]
   `)

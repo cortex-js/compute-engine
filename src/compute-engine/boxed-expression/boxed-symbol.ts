@@ -311,7 +311,11 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
   get domain(): BoxedDomain {
     if (this.functionDefinition) return this.engine.domain('Function');
-    return this.symbolDefinition?.domain ?? this.engine.domain('Anything');
+    return (
+      this.symbolDefinition?.domain ??
+      this.engine.defaultDomain ??
+      this.engine.domain('Anything')
+    );
   }
 
   set domain(inDomain: BoxedExpression | DomainExpression | BoxedDomain) {

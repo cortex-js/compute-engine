@@ -131,8 +131,8 @@ describe('MATCHFIX invalid', () => {
   // @fixme
   test('( // missing closing fence', () =>
     expect(check('(')).toMatchInlineSnapshot(`
-      latex     = ["Sequence"]
-      ["Sequence"]
+      latex     = ["Error", ["ErrorCode", "'unexpected-token'", "'('"], ["Latex", "'('"]]
+      ["Error", ["ErrorCode", "'unexpected-token'", "'('"], ["Latex", "'('"]]
     `));
   test(') // missing opening fence', () => {
     expect(check(')')).toMatchInlineSnapshot(`
@@ -142,17 +142,25 @@ describe('MATCHFIX invalid', () => {
   });
 
   test('-( // missing closing fence', () => {
-    expect(engine.parse('-(').json).toMatchInlineSnapshot(
-      `["Negate", ["Error", "'missing'", ["Latex", "'-('"]]]`
-    );
+    expect(engine.parse('-(').json).toMatchInlineSnapshot(`
+      [
+        "Sequence",
+        ["Negate", ["Error", "'missing'", ["Latex", "'-'"]]],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'('"],
+          ["Latex", "'('"]
+        ]
+      ]
+    `);
   });
 
   test('(3+x // missing closing fence', () => {
     expect(engine.parse('(3+x').json).toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "'unexpected-token'", "'3'"],
-        ["Latex", "'3+x'"]
+        ["ErrorCode", "'unexpected-token'", "'('"],
+        ["Latex", "'(3+x'"]
       ]
     `);
   });

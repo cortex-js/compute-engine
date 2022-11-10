@@ -74,38 +74,8 @@ describe('SUPSUB', () => {
   });
   test('Subscript', () => {
     expect(parse('x_0')).toMatchInlineSnapshot(`x_0`);
-    expect(parse('x^2_0')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "Anything"]
-          ],
-          "x_0"
-        ],
-        2
-      ]
-    `);
-    expect(parse('x_0^2')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "Anything"]
-          ],
-          "x_0"
-        ],
-        2
-      ]
-    `);
+    expect(parse('x^2_0')).toMatchInlineSnapshot(`["Square", "x_0"]`);
+    expect(parse('x_0^2')).toMatchInlineSnapshot(`["Square", "x_0"]`);
     expect(parse('x_{n+1}')).toMatchInlineSnapshot(
       `["Subscript", "x", ["Add", "n", 1]]`
     );
@@ -145,20 +115,7 @@ describe('SUPSUB', () => {
           ["Subscript", "'missing'", ["Latex", "'_'"]]
         ],
         ["Power", "p", "q"],
-        [
-          "Power",
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              "Number",
-              ["Domain", "Anything"]
-            ],
-            "x_r"
-          ],
-          "s"
-        ]
+        ["Power", "x_r", "s"]
       ]
     `); // @fixme: nope...
     expect(parse('_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
@@ -222,16 +179,7 @@ describe('SUPSUB', () => {
             ["Latex", "'^'"]
           ]
         ],
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "Anything"]
-          ],
-          "p_q"
-        ],
+        "p_q",
         ["Power", ["Subscript", ["Add", 1, "x"], 0], "n"]
       ]
     `); // @fixme: nope...

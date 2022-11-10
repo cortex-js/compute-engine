@@ -62,7 +62,9 @@
 
 ### Bugs Fixed
 
-- Correctly parse multi-char symbols with underscore, i.e. `\mathrm{V_a}`
+- **#57** Substituting `0` (i.e. with `expr.subs({})`) did not work.
+- **#60** Correctly parse multi-char symbols with underscore, i.e.
+  `\mathrm{V_a}`
 - Parsing a number with repeating decimals and an exponent would drop the
   exponent.
 - Correct calculation of complex square roots

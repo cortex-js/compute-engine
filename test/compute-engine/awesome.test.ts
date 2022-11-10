@@ -122,11 +122,11 @@ describe('Nth PRIME NUMBER', () =>
           2
         ]
       ]
-      [
+      box       = [
         "Equal",
-        ["Multiply", "n", "p"],
         [
           "Add",
+          2,
           [
             "Sum",
             [
@@ -136,6 +136,7 @@ describe('Nth PRIME NUMBER', () =>
                 1,
                 [
                   "Add",
+                  1,
                   [
                     "Power",
                     0,
@@ -147,32 +148,35 @@ describe('Nth PRIME NUMBER', () =>
                         [
                           "Product",
                           [
-                            "Delimiter",
+                            "Lambda",
                             [
-                              "Subtract",
-                              1,
+                              "Delimiter",
                               [
-                                "Power",
-                                0,
+                                "Subtract",
+                                1,
                                 [
-                                  "Multiply",
-                                  "abs",
+                                  "Power",
+                                  0,
                                   [
-                                    "Delimiter",
+                                    "Multiply",
+                                    "abs",
                                     [
-                                      "Subtract",
+                                      "Delimiter",
                                       [
-                                        "Floor",
+                                        "Subtract",
+                                        [
+                                          "Floor",
+                                          [
+                                            "Divide",
+                                            ["Subscript", "v", 2],
+                                            ["Subscript", "v", 3]
+                                          ]
+                                        ],
                                         [
                                           "Divide",
                                           ["Subscript", "v", 2],
                                           ["Subscript", "v", 3]
                                         ]
-                                      ],
-                                      [
-                                        "Divide",
-                                        ["Subscript", "v", 2],
-                                        ["Subscript", "v", 3]
                                       ]
                                     ]
                                   ]
@@ -184,29 +188,13 @@ describe('Nth PRIME NUMBER', () =>
                             "Triple",
                             ["Hold", ["Subscript", "v", 3]],
                             2,
-                            [
-                              "Floor",
-                              [
-                                "Sqrt",
-                                [
-                                  "Error",
-                                  [
-                                    "ErrorCode",
-                                    "'incompatible-domain'",
-                                    "Number",
-                                    ["Domain", "Anything"]
-                                  ],
-                                  "v_2"
-                                ]
-                              ]
-                            ]
+                            ["Floor", ["Sqrt", "v_2"]]
                           ]
                         ],
                         ["Triple", ["Hold", "v_2"], 2, "v_1"]
                       ]
                     ]
-                  ],
-                  1
+                  ]
                 ]
               ]
             ],
@@ -216,10 +204,11 @@ describe('Nth PRIME NUMBER', () =>
               2,
               ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
             ]
-          ],
-          2
-        ]
+          ]
+        ],
+        ["Multiply", "n", "p"]
       ]
+      evaluate  = False
     `);
   }));
 
