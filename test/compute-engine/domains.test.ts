@@ -62,7 +62,7 @@ describe('INFERRED DOMAINS', () => {
 
   test('\\sin(3)', () => {
     expect(engine.box(['Sin', 3]).domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["Interval"]]`
+      `["Domain", ["Interval", -1, 1]]`
     );
   });
   test('Nothing', () => {

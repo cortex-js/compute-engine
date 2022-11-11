@@ -118,57 +118,60 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   if (name === 'Negate') {
     result = '-' + serializer.wrap(arg, 276);
   } else if (name === 'Add') {
+    if (nops(expr) === 2) {
+      let op1;
+      let op2;
+      if (machineValue(op(expr, 1)) && rationalValue(op(expr, 2))) {
+        op1 = op(expr, 1)!;
+        op2 = op(expr, 2)!;
+      } else if (machineValue(op(expr, 2)) && rationalValue(op(expr, 1))) {
+        op1 = op(expr, 2)!;
+        op2 = op(expr, 1)!;
+      }
+      if (op1 && op2) {
+        const lhs = machineValue(op1) ?? NaN;
+        const rhs = rationalValue(op2) ?? [NaN, NaN];
+
+        if (
+          isFinite(lhs) &&
+          Number.isInteger(lhs) &&
+          lhs >= 0 &&
+          lhs <= 1000 &&
+          isFinite(rhs[0]) &&
+          isFinite(rhs[1]) &&
+          rhs[0] > 0 &&
+          rhs[0] <= 100 &&
+          rhs[1] <= 100
+        ) {
+          // Don't include the '+' sign, it's a rational, use 'invisible plus'
+          result = joinLatex([
+            serializer.serialize(op1),
+            serializer.options.invisiblePlus,
+            serializer.serialize(op2),
+          ]);
+
+          serializer.level += 1;
+          return result;
+        }
+      }
+    }
+
     let val = machineValue(arg) ?? NaN;
-    let argWasInteger =
-      !Number.isNaN(val) && Number.isInteger(val) && Math.abs(val) <= 1000;
     result = serializer.serialize(arg);
     const last = nops(expr) + 1;
     for (let i = 2; i < last; i++) {
       arg = op(expr, i);
       val = machineValue(arg) ?? NaN;
-      const argIsInteger =
-        !Number.isNaN(val) && Number.isInteger(val) && Math.abs(val) <= 1000;
-      let done = false;
-      if (arg !== null && argWasInteger) {
-        // Check if we can convert to an invisible plus, e.g. "1\frac{1}{2}"
-        // CAUTION: rationalValue() only parses rationals with a
-        // denominator and numerator in the machine range.
-        // Since we are only considering small fractions with a
-        // numerator and denominator of less than 100, that's OK.
-        const r = rationalValue(arg);
-        if (r) {
-          const [numer, denom] = r;
-          if (
-            isFinite(numer) &&
-            isFinite(denom) &&
-            denom > 1 &&
-            denom <= 100 &&
-            numer > 0 &&
-            numer <= 100
-          ) {
-            // Don't include the '+' sign, it's a rational, use 'invisible plus'
-            result = joinLatex([
-              result,
-              serializer.options.invisiblePlus,
-              serializer.serialize(arg),
-            ]);
-            done = true;
-          }
-        }
+      if (val < 0) {
+        // Don't include the minus sign, it will be serialized for the arg
+        result += serializer.serialize(arg);
+      } else if (head(arg) === 'Negate') {
+        result += serializer.wrap(arg, 275);
+      } else {
+        const term = serializer.wrap(arg, 275);
+        if (term[0] === '-' || term[0] === '+') result += term;
+        else result += '+' + term;
       }
-      if (!done) {
-        if (val < 0) {
-          // Don't include the minus sign, it will be serialized for the arg
-          result += serializer.serialize(arg);
-        } else if (head(arg) === 'Negate') {
-          result += serializer.wrap(arg, 275);
-        } else {
-          const term = serializer.wrap(arg, 275);
-          if (term[0] === '-' || term[0] === '+') result += term;
-          else result = result + '+' + term;
-        }
-      }
-      argWasInteger = argIsInteger;
     }
   } else if (name === 'Subtract') {
     result = serializer.wrap(arg, 275);
