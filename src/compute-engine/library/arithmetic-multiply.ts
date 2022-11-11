@@ -7,7 +7,7 @@ import { BoxedExpression, IComputeEngine, Metadata, Rational } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
-import { flattenOps } from '../symbolic/flatten';
+import { flattenOps, flattenSequence } from '../symbolic/flatten';
 
 import { square } from './arithmetic-power';
 import {
@@ -19,6 +19,7 @@ import {
   neg,
 } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
+import { validateArgument } from '../boxed-expression/validate';
 
 /** The canonical form of `Multiply`:
  * - remove `1`
@@ -39,7 +40,11 @@ export function canonicalMultiply(
   console.assert(ops.every((x) => x.isCanonical));
 
   // Apply associativity
-  ops = flattenOps(ops, 'Multiply') ?? ops;
+  ops =
+    flattenOps(
+      flattenSequence(ops).map((x) => x.canonical),
+      'Multiply'
+    ) ?? ops;
 
   if (ops.length === 0) return ce.number(1);
   if (ops.length === 1) return ops[0];
@@ -177,11 +182,14 @@ function multiply2(
   return canonicalNegate(product.asExpression(), metadata);
 }
 
+// Canonical form of `["Product"]` (`\prod`) expressions.
 export function canonicalMultiplication(
   ce: IComputeEngine,
-  expr: BoxedExpression,
+  body: BoxedExpression | undefined,
   range: BoxedExpression | undefined
 ) {
+  body ??= ce.error(['missing', 'Function']); // @todo not exactly a function, more like a 'NumericExpression'
+
   let index: BoxedExpression | null = null;
   let lower: BoxedExpression | null = null;
   let upper: BoxedExpression | null = null;
@@ -194,24 +202,33 @@ export function canonicalMultiplication(
   ) {
     index = range;
   } else if (range) {
+    // Don't canonicalize the index. Canonicalization as the
+    // side effect of declaring the symbol, here we're using
+    // it to do a local declaration
     index = range.ops?.[0] ?? null;
-    lower = range.ops?.[1] ?? null;
-    upper = range.ops?.[2] ?? null;
+    lower = range.ops?.[1]?.canonical ?? null;
+    upper = range.ops?.[2]?.canonical ?? null;
   }
 
-  let fn: BoxedExpression;
-  if (index !== null && index.symbol)
-    fn = expr.head === 'Lambda' ? expr.op1 : expr.subs({ [index.symbol]: '_' });
-  else fn = expr.head === 'Lambda' ? expr.op1 : expr;
-
+  // The index, if present, should be a symbol
+  if (index && index.head === 'Hold') index = index.op1;
+  if (index && index.head === 'ReleaseHold') index = index.op1.evaluate();
   index ??= ce.symbol('Nothing');
+  if (!index.symbol)
+    index = ce.error(['incompatible-domain', 'Symbol', index.domain]);
+  else index = ce.hold(index);
 
-  if (upper) range = ce.tuple([index, lower ?? ce.symbol('Nothing'), upper]);
-  else if (lower && upper) range = ce.tuple([index, lower, upper]);
+  // The range bounds, if present, should be Real numbers
+  if (lower) lower = validateArgument(ce, lower, 'ExtendedRealNumber');
+  if (upper) lower = validateArgument(ce, upper, 'ExtendedRealNumber');
+
+  if (lower && upper) range = ce.tuple([index, lower, upper]);
+  else if (upper)
+    range = ce.tuple([index, lower ?? ce._NEGATIVE_INFINITY, upper]);
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
 
-  return ce._fn('Product', [ce._fn('Lambda', [fn]), range]);
+  return ce._fn('Product', [body, range]);
 }
 
 export function evalMultiplication(

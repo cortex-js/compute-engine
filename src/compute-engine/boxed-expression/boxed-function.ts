@@ -1,3 +1,6 @@
+import Complex from 'complex.js';
+import Decimal from 'decimal.js';
+
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 
 import { Expression } from '../../math-json/math-json-format';
@@ -17,10 +20,11 @@ import {
   BoxedDomain,
   BoxedLambdaExpression,
   RuntimeScope,
-  BoxedFunctionSignature,
   BoxedSubstitution,
-  DomainExpression,
 } from '../public';
+import { findUnivariateRoots } from '../solve';
+import { asFloat } from '../numerics/numeric';
+import { signDiff } from '../numerics/rationals';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
 import { DEFAULT_COMPLEXITY, order } from './order';
@@ -29,12 +33,8 @@ import {
   serializeJsonFunction,
 } from './serialize';
 import { complexAllowed, hashCode, bignumPreferred } from './utils';
-import { flattenOps } from '../symbolic/flatten';
-import { asFloat } from '../numerics/numeric';
-import { signDiff } from '../numerics/rationals';
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
-import { findUnivariateRoots } from '../solve';
+import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { validateNumericArgs, validateSignature } from './validate';
 
 /**
  * Considering an old (existing) expression and a new (simplified) one,
@@ -917,6 +917,21 @@ export function makeCanonicalFunction(
     }
   }
 
+  const sig = def.signature;
+
+  //
+  // 3/ Apply `canonical` handler
+  //
+  // If present, the canonical handler is responsible for validating
+  // arguments, sorting them, applying involution and idempotent to
+  // the expression.
+  //
+  if (sig.canonical) {
+    const result = sig.canonical(ce, xs);
+    if (result) return result;
+    return new BoxedFunction(ce, head, xs, { metadata, canonical: false });
+  }
+
   //
   // Flatten any sequence
   // f(a, Sequence(b, c), d) -> f(a, b, c, d)
@@ -928,20 +943,10 @@ export function makeCanonicalFunction(
   if (!xs.every((x) => x.isValid))
     return new BoxedFunction(ce, head, xs, { metadata, canonical: false });
 
-  const sig = def.signature;
-
-  xs = validateSignature(ce, sig, xs) ?? xs;
+  xs = validateSignature(sig.domain, xs) ?? xs;
 
   if (!xs.every((x) => x.isValid))
     return new BoxedFunction(ce, head, xs, { metadata, canonical: false });
-
-  //
-  // 3/ Apply `canonical` handler
-  // If present, the canonical handler is responsible for sorting arguments,
-  // applying involution and idempotent to expression.
-  //
-
-  if (sig.canonical) return sig.canonical(ce, xs);
 
   //
   // 4/ Apply `idempotent` and `involution`
@@ -959,7 +964,7 @@ export function makeCanonicalFunction(
   //
   if (xs.length > 1 && def.commutative === true) xs = xs.sort(order);
 
-  return new BoxedFunction(ce, head, xs, { metadata, canonical: true, def });
+  return new BoxedFunction(ce, head, xs, { metadata, def, canonical: true });
 }
 
 export function lambda(
@@ -1030,16 +1035,6 @@ export function holdMap(
   return result;
 }
 
-export function flattenSequence(xs: BoxedExpression[]): BoxedExpression[] {
-  const ys: BoxedExpression[] = [];
-  for (const x of xs) {
-    if (x.head === 'Sequence') {
-      if (x.ops) ys.push(...x.ops);
-    } else ys.push(x);
-  }
-  return ys;
-}
-
 function applicable(
   skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most',
   count: number,
@@ -1060,187 +1055,12 @@ function applicable(
   return false;
 }
 
-/** Return `null` if the `ops` match the sig. Otherwise, return an array
- * of expressions indicating the mismatched arguments.
- *
- */
-function validateSignature(
-  ce: IComputeEngine,
-  sig: BoxedFunctionSignature,
-  ops: BoxedExpression[],
-  codomain?: BoxedExpression
-): BoxedExpression[] | null {
-  const opsDomain = ops.map((x) => x.domain);
-
-  const targetSig = ce.domain([
-    'Function',
-    ...opsDomain,
-    codomain ?? 'Anything',
-  ]);
-
-  if (sig.domain.isCompatible(targetSig)) return null;
-
-  const expectedArgs = sig.domain.domainArgs!.slice(0, -1);
-  const count = Math.max(expectedArgs.length, opsDomain.length);
-  let newOps: BoxedExpression[] = [];
-  let rest: BoxedExpression[] = [...ops];
-  for (let i = 0; i <= count - 1; i++)
-    [newOps, rest] = validateArgument(
-      ce,
-      expectedArgs[i] as DomainExpression<BoxedExpression>,
-      newOps,
-      rest
-    );
-
-  // Remove any 'Nothing' at the end
-  while (newOps.length > 0 && newOps[newOps.length - 1].symbol === 'Nothing')
-    newOps.pop();
-  return newOps;
-}
-
-function validateArgument(
-  ce: IComputeEngine,
-  expect: DomainExpression<BoxedExpression> | undefined,
-  matched: BoxedExpression[],
-  ops: BoxedExpression[]
-): [match: BoxedExpression[], rest: BoxedExpression[]] {
-  let next = ops.shift();
-
-  if (expect === undefined)
-    return [[...matched, ce.error('unexpected-argument', next)], ops];
-
-  if (!Array.isArray(expect)) {
-    if (!next) return [[...matched, ce.error(['missing', expect])], ops];
-
-    if (!next.domain.isCompatible(ce.domain(expect))) {
-      return [
-        [
-          ...matched,
-          ce.error(['incompatible-domain', expect, next.domain], next),
-        ],
-        ops,
-      ];
-    }
-
-    return [[...matched, next], ops];
-  }
-
-  const ctor = expect[0];
-
-  if (next === undefined) {
-    //
-    // An expected argument is missing. Is that OK?
-    //
-    let valid = false;
-    if (ctor === 'Union') {
-      //  If an `Union`, was `Nothing` an option?
-      for (let k = 1; k <= expect.length - 1; k++) {
-        if (expect[k] === 'Nothing') {
-          valid = true;
-          break;
-        }
-      }
-    } else if (ctor === 'Maybe') valid = true;
-    if (valid) return [[...matched, ce.symbol('Nothing')], ops];
-    return [[...matched, ce.error(['missing', expect])], ops];
-  }
-
-  if (ctor === 'Union') {
-    //
-    // We expect one of several domains. Check if at least one matches
-    //
-    let found = false;
-    for (let k = 1; k <= expect.length - 1; k++) {
-      if (next.domain.isCompatible(ce.domain(expect[k]))) {
-        found = true;
-        break;
-      }
-    }
-    if (found) return [[...matched, next], ops];
-    return [
-      [
-        ...matched,
-        ce.error(['incompatible-domain', expect, next.domain], next),
-      ],
-      ops,
-    ];
-  }
-
-  if (ctor === 'Sequence') {
-    const seq = ce.domain(expect[1]);
-    if (!next || !next.domain.isCompatible(seq)) {
-      return [
-        [...matched, ce.error(['incompatible-domain', seq, next.domain], next)],
-        ops,
-      ];
-    }
-    let done = false;
-    const result = [...matched, next];
-    while (!done) {
-      next = ops.shift();
-      if (!next) done = false;
-      else if (!next.domain.isCompatible(seq)) {
-        ops.unshift(next);
-        done = false;
-      } else result.push(next);
-    }
-
-    return [result, ops];
-  }
-
-  if (ctor === 'Maybe') {
-    if (next === undefined || next.symbol === 'Nothing')
-      return [[...matched, ce.symbol('Nothing')], ops];
-    return validateArgument(
-      ce,
-      expect[1] as DomainExpression<BoxedExpression>,
-      matched,
-      [next, ...ops]
-    );
-  }
-
-  console.error('Unhandled ctor', ctor);
-
-  return [[...matched, next], ops];
-}
-
-/**
- * Validation of arguments is normally done by checking the signature of the
- * function vs the arguments of the expression. However, we have a fastpath
- * for some common operations (add, multiply, power, neg, etc...) that bypasses
- * the regular checks. This is its replacements. Since all those fastpath
- * functions are numeric (i.e. have numeric arguments and return a numeric
- * value), we do a simple numeric check of all arguments, and verify we have
- * the number of expected arguments.
- */
-function validateNumericArgs(
-  ce: IComputeEngine,
-  ops: SemiBoxedExpression[],
-  count?: number
-): BoxedExpression[] {
-  let xs: BoxedExpression[] = [];
-
-  if (count === undefined) {
-    xs = ops.map((x) => ce.box(x));
-  } else
-    for (let i = 0; i <= Math.max(count - 1, ops.length - 1); i++) {
-      if (i > count - 1) xs.push(ce.error('unexpected-argument', ops[i]));
-      else xs.push(ops[i] ? ce.box(ops[i]) : ce.error('missing'));
-    }
-
-  return xs.map((op) =>
-    !op.isValid || op.isNumber
-      ? op
-      : ce.error(['incompatible-domain', 'Number', op.domain], op)
-  );
-}
-
 // @todo: allow selection of one signature amongst multiple
-function matchSignature(
-  ce: IComputeEngine,
-  def: BoxedFunctionDefinition,
-  tail: BoxedExpression[],
-  codomain?: BoxedExpression
-): BoxedFunctionSignature | undefined {
-  return def.signature;
-}
+// function matchSignature(
+//   ce: IComputeEngine,
+//   def: BoxedFunctionDefinition,
+//   tail: BoxedExpression[],
+//   codomain?: BoxedExpression
+// ): BoxedFunctionSignature | undefined {
+//   return def.signature;
+// }

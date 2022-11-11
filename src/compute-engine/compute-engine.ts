@@ -57,12 +57,8 @@ import { boxRules } from './rules';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber } from './boxed-expression/boxed-number';
 import { BoxedSymbolDefinitionImpl } from './boxed-expression/boxed-symbol-definition';
-import { canonicalNegate } from './symbolic/negate';
 import { canonicalPower } from './library/arithmetic-power';
-import {
-  BoxedFunction,
-  flattenSequence,
-} from './boxed-expression/boxed-function';
+import { BoxedFunction } from './boxed-expression/boxed-function';
 import { canonicalMultiply } from './library/arithmetic-multiply';
 import { canonicalAdd } from './library/arithmetic-add';
 import { canonicalDivide } from './library/arithmetic-divide';
@@ -80,6 +76,8 @@ import {
   isMachineRational,
   isRational,
 } from './numerics/rationals';
+import { canonicalNegate } from './symbolic/negate';
+import { flattenSequence } from './symbolic/flatten';
 
 /**
  *
@@ -1157,6 +1155,10 @@ export class ComputeEngine implements IComputeEngine {
     );
   }
 
+  hold(expr: SemiBoxedExpression): BoxedExpression {
+    return this._fn('Hold', [this.box(expr, { canonical: false })]);
+  }
+
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
     ops = flattenSequence(ops);
@@ -1579,7 +1581,9 @@ export class ComputeEngine implements IComputeEngine {
   ): AssumeResult {
     try {
       const latex = latexString(arg1);
-      const predicate = latex ? this.parse(latex) : this.box(arg1);
+      const predicate = latex
+        ? this.parse(latex, { canonical: false })
+        : this.box(arg1, { canonical: false });
 
       if (!arg2) return assume(predicate);
 

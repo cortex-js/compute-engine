@@ -32,3 +32,13 @@ export function flattenOps(
 
   return result;
 }
+
+export function flattenSequence(xs: BoxedExpression[]): BoxedExpression[] {
+  const ys: BoxedExpression[] = [];
+  for (const x of xs) {
+    if (x.head === 'Sequence') {
+      if (x.ops) ys.push(...x.ops);
+    } else ys.push(x);
+  }
+  return ys;
+}

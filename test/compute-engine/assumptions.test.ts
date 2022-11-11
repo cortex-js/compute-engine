@@ -5,7 +5,6 @@ import '../utils'; // For snapshot serializers
 export const ce = new ComputeEngine();
 
 ce.assume('one', 1);
-ce.assume('i', 'Integer');
 ce.assume(['Greater', 'x', 4]);
 ce.assume(['Element', 'm', ['Range', -Infinity, Infinity]]);
 ce.assume(['Element', 'n', ['Range', 0, Infinity]]);
@@ -24,25 +23,26 @@ describe('TAUTOLOGY one = 1', () => {
     expect(ce.box('one').evaluate().json).toEqual(1);
   });
   test(`one.domain`, () => {
-    expect(ce.box('one').domain.toJSON()).toEqual(
-      `["Domain", "ExtendedRealNumber"]`
+    expect(ce.box('one').domain.toJSON()).toMatchInlineSnapshot(
+      `["Domain", "PositiveInteger"]`
     );
   });
   test(`'one' compared to 0`, () => {
-    expect(ce.assume(['Greater', 'one', 0])).toMatchInlineSnapshot(
-      `internal-error`
+    expect(ce.assume(['Greater', 'one', 0])).toMatchInlineSnapshot(`tautology`);
+    expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
+    expect(ce.box(['Less', 'one', 0]).evaluate().json).toEqual('False');
+    expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('False');
+    expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
+    expect(ce.box(['Greater', 'one', -10]).evaluate().json).toEqual('True');
+  });
+  test(`a >= 1`, () => {
+    expect(ce.assume(['GreaterEqual', 'one', 1])).toMatchInlineSnapshot(
+      `tautology`
     );
     expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
     expect(ce.box(['Less', 'one', 0]).evaluate().json).toEqual('False');
     expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('False');
-    expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('False');
-    expect(ce.box(['Greater', 'one', -10]).evaluate().json).toEqual('True');
-  });
-  test(`a >= 1`, () => {
-    expect(ce.assume(['GreaterEqual', 'one', 1])).toMatchInlineSnapshot(`ok`);
-    expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
-    expect(ce.box(['Less', 'one', 0]).evaluate().json).toEqual('False');
-    expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('True');
+    expect(ce.box(['Equal', 'one', 1]).evaluate().json).toEqual('True');
   });
   test(`a = 1`, () => {
     expect(ce.assume(['Equal', 'one', 1])).toEqual(`tautology`);
@@ -108,7 +108,7 @@ describe('canonical domains', () => {
 
   test(`Interval domains`, () => {
     expect(ce.box('t').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "ExtendedRealNumber"]`
+      `["Domain", "PositiveNumber"]`
     ); //@fixme should be NonNegativeNumber
     expect(ce.box('s').domain.toJSON()).toMatchInlineSnapshot(
       `["Domain", "ExtendedRealNumber"]`

@@ -1,4 +1,5 @@
 import { BoxedExpression, SymbolTable } from '../public';
+import { flattenOps, flattenSequence } from '../symbolic/flatten';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔
@@ -18,6 +19,14 @@ export const RELOP_LIBRARY: SymbolTable = {
       complexity: 11000,
       signature: {
         domain: 'RelationalOperator',
+        canonical: (ce, ops) => {
+          ops =
+            flattenOps(
+              flattenSequence(ops).map((x) => x.canonical),
+              'Equal'
+            ) ?? ops;
+          return ce._fn('Equal', ops);
+        },
         evaluate: (ce, ops) => {
           if (ops.length < 2) return ce.symbol('True');
           let lhs: BoxedExpression | undefined = undefined;
@@ -58,6 +67,14 @@ export const RELOP_LIBRARY: SymbolTable = {
       complexity: 11000,
       signature: {
         domain: 'RelationalOperator',
+        canonical: (ce, ops) => {
+          ops =
+            flattenOps(
+              flattenSequence(ops).map((x) => x.canonical),
+              'Less'
+            ) ?? ops;
+          return ce._fn('Less', ops);
+        },
         evaluate: (ce, ops) => {
           if (ops.length < 2) return ce.symbol('True');
           let lhs: BoxedExpression | undefined = undefined;

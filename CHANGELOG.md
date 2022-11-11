@@ -12,6 +12,8 @@
 
 ### Improvements
 
+- `ce.assume()` handle more expressions and can be used to define new symbols by
+  domain or value.
 - Better simplification for square root expressions:
   - `\sqrt{25x^2}` -> `5x`
 - Improved evaluation of `["Power"]` expressions, including for negative

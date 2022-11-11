@@ -114,7 +114,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 ];
 
 /**
- * Expression is a function of a single variable (`x`)
+ * Expression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
  *
@@ -124,6 +124,12 @@ export function findUnivariateRoots(
   x: string
 ): BoxedExpression[] {
   const ce = expr.engine;
+
+  if (expr.head === 'Equal') {
+    expr = ce
+      .add([expr.op1.canonical, ce.negate(expr.op2.canonical)])
+      .simplify();
+  }
   const rules = ce.cache('univariate-roots-rules', () =>
     boxRules(ce, UNIVARIATE_ROOTS)
   );

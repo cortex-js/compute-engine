@@ -27,20 +27,20 @@ describe('NUMBERS', () => {
     expect(parse('0.(142857)')).toMatchInlineSnapshot(`0.(142857)`);
     expect(box({ num: '1.(3)' })).toMatch('1.(3)');
     expect(box({ num: '0.(142857)' })).toMatch('0.(142857)');
-    expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", 0.123, "x"]`);
+    expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", "x", 0.123]`);
     expect(parse('x=.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "0.123(45)", "x"]`
+      `["Equal", "x", "0.123(45)"]`
     );
     expect(parse('x=-987.123(45)')).toMatchInlineSnapshot(
-      `["Equal", "-987.123(45)", "x"]`
+      `["Equal", "x", "-987.123(45)"]`
     );
   });
   test('Parsing numbers with truncation  mark', () => {
     expect(parse('x=.123\\ldots')).toMatchInlineSnapshot(
-      `["Equal", 0.123, "x"]`
+      `["Equal", "x", 0.123]`
     );
     expect(parse('x=.123\\ldots e4')).toMatchInlineSnapshot(
-      `["Equal", 1230, "x"]`
+      `["Equal", "x", 1230]`
     );
     expect(parse('x=.123\\ldots e4+1')).toMatchInlineSnapshot(
       `["Equal", "x", ["Add", 1, 1230]]`
@@ -56,11 +56,14 @@ describe('NUMBERS', () => {
       [
         "Equal",
         "x",
-        "0.123(45)",
         [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\ldots'"],
-          ["Latex", "'\\ldots'"]
+          "Sequence",
+          "0.123(45)",
+          [
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\ldots'"],
+            ["Latex", "'\\ldots'"]
+          ]
         ]
       ]
     `);

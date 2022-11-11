@@ -2,7 +2,7 @@ import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 import { isNumberObject } from '../../math-json/utils';
-import { asFloat, MACHINE_PRECISION } from '../numerics/numeric';
+import { asFloat } from '../numerics/numeric';
 import { BoxedExpression, IComputeEngine } from '../public';
 
 export function isLatexString(s: unknown): s is string {

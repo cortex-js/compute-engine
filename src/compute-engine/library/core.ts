@@ -3,6 +3,10 @@ import { joinLatex, tokenize, tokensToString } from '../latex-syntax/tokenizer';
 import { asFloat, asSmallInteger, fromDigits } from '../numerics/numeric';
 
 import Decimal from 'decimal.js';
+import {
+  validateArgument,
+  validateArgumentCount,
+} from '../boxed-expression/validate';
 
 //   // := assign 80 // @todo
 
@@ -19,6 +23,13 @@ export const CORE_LIBRARY: SymbolTable[] = [
   {
     functions: [
       {
+        name: 'List',
+        complexity: 8200,
+        signature: {
+          domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'Anything'],
+        },
+      },
+      {
         name: 'KeyValuePair',
         description: 'A key/value pair',
         complexity: 8200,
@@ -31,7 +42,11 @@ export const CORE_LIBRARY: SymbolTable[] = [
           ],
           codomain: (ce, args) =>
             ce.domain(['Tuple', 'String', args[1].domain]),
-          canonical: (ce, args) => ce.tuple(args),
+          canonical: (ce, args) => {
+            const key = validateArgument(ce, args[0]?.canonical, 'String');
+            const value = validateArgument(ce, args[1]?.canonical, 'Value');
+            return ce.tuple([key, value]);
+          },
         },
       },
       {
@@ -41,7 +56,14 @@ export const CORE_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Anything', ['Tuple', 'Anything']],
           codomain: (ce, args) => ce.domain(['Tuple', args[0].domain]),
-          canonical: (ce, args) => ce.tuple(args),
+          canonical: (ce, ops) =>
+            ce.tuple(
+              validateArgumentCount(
+                ce,
+                ops.map((x) => x.canonical),
+                1
+              )
+            ),
         },
       },
       {
@@ -58,7 +80,14 @@ export const CORE_LIBRARY: SymbolTable[] = [
 
           codomain: (ce, args) =>
             ce.domain(['Tuple', args[0].domain, args[1].domain]),
-          canonical: (ce, args) => ce.tuple(args),
+          canonical: (ce, ops) =>
+            ce.tuple(
+              validateArgumentCount(
+                ce,
+                ops.map((x) => x.canonical),
+                2
+              )
+            ),
         },
       },
       {
@@ -81,7 +110,14 @@ export const CORE_LIBRARY: SymbolTable[] = [
               args[1].domain,
               args[2].domain,
             ]),
-          canonical: (ce, args) => ce.tuple(args),
+          canonical: (ce, ops) =>
+            ce.tuple(
+              validateArgumentCount(
+                ce,
+                ops.map((x) => x.canonical),
+                3
+              )
+            ),
         },
       },
       {
@@ -94,6 +130,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
             ['Sequence', 'Anything'],
             ['Tuple', ['Sequence', 'Anything']],
           ],
+          canonical: (ce, ops) => ce.tuple(ops.map((x) => x.canonical)),
           codomain: (ce, args) =>
             ce.domain(['Tuple', ...args.map((x) => x.domain)]),
         },
@@ -129,7 +166,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
             'Anything',
           ],
           codomain: (_ce, args) => args[0].domain,
-          canonical: (_ce, args) => args[0].canonical,
+          canonical: (_ce, args) => args[0]?.canonical ?? ['Sequence'],
         },
       },
       {
@@ -155,19 +192,18 @@ export const CORE_LIBRARY: SymbolTable[] = [
         signature: {
           domain: [
             'Function',
-            'Anything',
+            'String',
             ['Maybe', ['Sequence', 'Anything']],
             'Anything',
           ],
           canonical: (ce, args) => {
-            if (args[0].head === 'ErrorCode') {
-              const code = args[0].op1.string;
-              if (code === 'incompatible-domain') {
-                return ce._fn('ErrorCode', [
-                  ce.domain(args[0]),
-                  ce.domain(args[1]),
-                ]);
-              }
+            const code = validateArgument(ce, args[0], 'String').string;
+            if (code === 'incompatible-domain') {
+              return ce._fn('ErrorCode', [
+                ce.string(code),
+                ce.domain(args[1] ?? 'Anything'),
+                ce.domain(args[2] ?? 'Anything'),
+              ]);
             }
             return ce._fn('ErrorCode', args);
           },
@@ -181,7 +217,10 @@ export const CORE_LIBRARY: SymbolTable[] = [
           codomain: (ce, args) =>
             args[0].symbol ? ce.domain('Symbol') : ce.domain('Anything'),
           // To make a canonical expression, don't canonicalize the args
-          canonical: (ce, args) => ce._fn('Hold', args),
+          canonical: (ce, args) =>
+            args.length !== 1
+              ? ce._fn('Hold', validateArgumentCount(ce, args, 1))
+              : ce._fn('Hold', [validateArgument(ce, args[0], 'Anything')]),
         },
       },
       {
@@ -231,7 +270,14 @@ export const CORE_LIBRARY: SymbolTable[] = [
         name: 'Domain',
         signature: {
           domain: ['Function', 'Anything', 'Domain'],
-          canonical: (ce, args) => ce.domain(args[0]),
+          canonical: (ce, ops) =>
+            ce.domain(
+              validateArgumentCount(
+                ce,
+                ops.map((x) => x.canonical),
+                1
+              )[0]
+            ),
         },
       },
       {
@@ -240,6 +286,15 @@ export const CORE_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Anything', 'Anything'],
           codomain: (_ce, args) => args[0].domain,
+          canonical: (ce, ops) =>
+            ce._fn(
+              'Evaluate',
+              validateArgumentCount(
+                ce,
+                ops.map((x) => x.canonical),
+                1
+              )
+            ),
           evaluate: (_ce, ops) => ops[0].evaluate(),
         },
       },
@@ -249,8 +304,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
           domain: 'Function',
           evaluate: (ce, ops) => {
             const op1 = ops[0];
-            if (typeof op1.head === 'string') return ce.symbol(op1.head);
-            return op1.head;
+            if (typeof op1?.head === 'string') return ce.symbol(op1.head);
+            return op1?.head ?? 'Nothing';
           },
         },
       },
@@ -273,7 +328,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Anything', 'Function'],
           codomain: (_ce, ops) => ops[0].domain,
-          canonical: (ce, ops) => ce._fn('Lambda', ops),
+          canonical: (ce, ops) =>
+            ce._fn('Lambda', validateArgumentCount(ce, ops, 1)),
         },
       },
 
@@ -281,6 +337,17 @@ export const CORE_LIBRARY: SymbolTable[] = [
         name: 'Signatures',
         signature: {
           domain: ['Function', 'Symbol', ['Maybe', ['List', 'Domain']]],
+          canonical: (ce, ops) => {
+            ops = validateArgumentCount(ce, ops, 1);
+            if (!ops[0].symbol)
+              return ce._fn('Signatures', [
+                ce.error(
+                  ['incompatible-domain', 'Symbol', ops[0].domain],
+                  ops[0]
+                ),
+              ]);
+            return ce._fn('Signatures', ops);
+          },
           evaluate: (ce, ops) => {
             const name = ops[0].symbol;
             if (!name) return ce.symbol('Nothing');
@@ -344,7 +411,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
             // or an indexable collection?
             if (op1.symbol) {
               // Indexable collection?
-              if (op1.symbolDefinition?.at) return ce._fn('At', [op1, op2]);
+              if (op1.symbolDefinition?.at)
+                return ce._fn('At', [op1, op2.canonical]);
 
               // Maybe a compound symbol
               let sub = op2.string ?? op2.symbol;
@@ -353,9 +421,9 @@ export const CORE_LIBRARY: SymbolTable[] = [
 
               if (sub) return ce.symbol(op1.symbol + '_' + sub);
             }
-            if (op2.head === 'Sequence') {
-              debugger;
-            }
+            if (op2.head === 'Sequence')
+              ce._fn('Subscript', [op1, ce._fn('List', op2.ops!)]);
+
             return ce._fn('Subscript', args);
           },
         },
@@ -390,18 +458,11 @@ export const CORE_LIBRARY: SymbolTable[] = [
         },
       },
       {
-        name: 'SymbolName',
-        signature: {
-          domain: ['Function', 'Anything', ['Maybe', 'String']],
-          evaluate: (ce, ops) =>
-            ops[0].symbol ? ce.string(ops[0].symbol) : ce.symbol('Nothing'),
-        },
-      },
-      {
         name: 'Tail',
         signature: {
           domain: ['Function', 'Value', ['List', 'Value']],
-          evaluate: (ce, ops) => ce._fn('List', ops[0].ops ?? []),
+          evaluate: (ce, ops) =>
+            ops[0] ? ce._fn('List', ops[0].ops ?? []) : ce._fn('List', []),
         },
       },
       {

@@ -42,6 +42,12 @@ import { canonicalPower, processPower, processSqrt } from './arithmetic-power';
 import { applyN, apply2N } from '../symbolic/utils';
 import Decimal from 'decimal.js';
 import Complex from 'complex.js';
+import {
+  validateArgument,
+  validateArgumentCount,
+  validateSignature,
+} from '../boxed-expression/validate';
+import { flattenSequence } from '../symbolic/flatten';
 
 // @todo Future additions to the dictionary
 // Re: real part
@@ -108,7 +114,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
               ce,
               args.map((x) => x.domain)
             ),
-          canonical: (ce, args) => canonicalAdd(ce, args),
+          canonical: (ce, args) => canonicalAdd(ce, args), // never called: shortpath
           simplify: (ce, ops) => simplifyAdd(ce, ops),
           evaluate: (ce, ops) => evalAdd(ce, ops),
           N: (ce, ops) => evalAdd(ce, ops, 'N'),
@@ -180,7 +186,11 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
 
         signature: {
           domain: ['Function', 'Number', 'Number'],
-          canonical: (ce, args) => ce.power(ce.symbol('ExponentialE'), args[0]),
+          canonical: (ce, args) =>
+            ce.power(
+              ce.symbol('ExponentialE'),
+              validateArgument(ce, args[0], 'Number')
+            ),
         },
       },
 
@@ -473,11 +483,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         complexity: 3500,
         signature: {
           domain: ['Function', 'Number', 'Number', 'Number'],
-          canonical: (ce, args) => {
-            return (
-              canonicalPower(ce, args[0], args[1]) ?? ce._fn('Power', args)
-            );
-          },
+          canonical: (ce, args) =>
+            canonicalPower(ce, args[0], args[1]) ?? ce._fn('Power', args),
           simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
           evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
           N: (ce, ops) => processPower(ce, ops[0], ops[1], 'N'),
@@ -523,24 +530,24 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', ['Maybe', 'Number'], 'RationalNumber'],
           canonical: (ce, args) => {
-            if (args.length === 1) {
-              if (!args[0].isReal)
-                return ce.error(
-                  ['incompatible-domain', 'RealNumber', args[0].domain],
-                  args[0]
-                );
+            args = flattenSequence(args);
+
+            if (args.length === 0)
+              return ce._fn('Rational', [ce.error(['missing', 'Number'])]);
+
+            if (args.length === 1)
+              return ce._fn('Rational', [
+                validateArgument(ce, args[0].canonical, 'ExtendedRealNumber'),
+              ]);
+
+            args =
+              validateSignature(
+                ce.domain(['Function', 'Integer', 'Integer', 'RationalNumber']),
+                args
+              ) ?? args;
+
+            if (args.length !== 2 || !args[0].isValid || !args[1].isValid)
               return ce._fn('Rational', args);
-            }
-            if (!args[0].isInteger)
-              return ce.error(
-                ['incompatible-domain', 'Integer', args[0].domain],
-                args[0]
-              );
-            if (!args[1].isInteger)
-              return ce.error(
-                ['incompatible-domain', 'Integer', args[1].domain],
-                args[1]
-              );
 
             return canonicalDivide(ce, args[0], args[1]);
           },
@@ -584,10 +591,21 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         signature: {
           domain: ['Function', 'Number', 'Number', 'Number'],
           canonical: (ce, args) => {
-            const exp = ce.inverse(args[1]);
+            args = flattenSequence(args);
+
+            if (args.length > 2)
+              return ce._fn('Root', validateArgumentCount(ce, args, 2));
+
+            const [base, exp] = [
+              validateArgument(ce, args[0]?.canonical, 'Number'),
+              validateArgument(ce, args[1]?.canonical, 'Number'),
+            ];
+            if (!exp.isValid || !base.isValid)
+              return ce._fn('Root', [base, exp]);
+
             return (
-              canonicalPower(ce, args[0], exp) ??
-              ce._fn('Power', [args[0], exp])
+              canonicalPower(ce, base, ce.inverse(exp)) ??
+              ce._fn('Power', [base, ce.inverse(exp)])
             );
           },
         },
@@ -688,7 +706,10 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           canonical: (ce, args) => {
             // Not necessarily legal, but probably what was intended:
             // ['Subtract', 'x'] -> ['Negate', 'x']
+            args = flattenSequence(args.map((x) => x.canonical));
             if (args.length === 1) return canonicalNegate(args[0]);
+            args = validateArgumentCount(ce, args, 2);
+            if (args.length !== 2) return ce._fn('Subtract', args);
             return canonicalAdd(ce, [args[0], canonicalNegate(args[1])]);
           },
         },

@@ -9,6 +9,7 @@ import {
   isRationalZero,
   mul,
 } from '../numerics/rationals';
+import { validateArgument } from '../boxed-expression/validate';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -24,6 +25,11 @@ export function canonicalDivide(
   op1: BoxedExpression,
   op2: BoxedExpression
 ): BoxedExpression {
+  op1 = validateArgument(ce, op1, 'Number');
+  op2 = validateArgument(ce, op2, 'Number');
+
+  if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
+
   if (op1.isLiteral && op2.isLiteral) {
     if (op2.isOne) return op1;
     if (op2.isNegativeOne) return canonicalNegate(op1);

@@ -8,7 +8,7 @@ import {
   getImaginaryCoef,
   bignumPreferred as bignumPreferred,
 } from '../boxed-expression/utils';
-import { flattenOps } from '../symbolic/flatten';
+import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { Sum } from '../symbolic/sum';
 import {
   asFloat,
@@ -28,17 +28,20 @@ export function canonicalAdd(
   ce: IComputeEngine,
   ops: BoxedExpression[]
 ): BoxedExpression {
+  if (!ops.every((x) => x.isCanonical)) debugger;
   console.assert(ops.every((x) => x.isCanonical));
-  ops = flattenOps(ops, 'Add') ?? ops;
 
+  ops = flattenOps(flattenSequence(ops.map((x) => x.canonical)), 'Add') ?? ops;
+
+  // Remove literal 0
   ops = ops.filter((x) => !(x.isLiteral && x.isZero));
 
   if (ops.length === 0) return ce.number(0);
   if (ops.length === 1) return ops[0];
+  //
+  // Is this a  complex number, i.e. `a + ib` or `ai + b`?
+  //
   if (ops.length === 2) {
-    //
-    // Is this a  complex number, i.e. `a + ib` or `ai + b`?
-    //
     let im: number | null = 0;
     let re: number | null = 0;
     if (ops[0].numericValue !== null) re = asFloat(ops[0]);
@@ -51,7 +54,9 @@ export function canonicalAdd(
       return ce.number(ce.complex(re, im));
   }
 
+  // Commutative, sort
   if (ops.length > 1) ops = sortAdd(ce, ops);
+
   return ce._fn('Add', ops);
 }
 
@@ -107,9 +112,11 @@ export function evalAdd(
 
 export function canonicalSummation(
   ce: IComputeEngine,
-  expr: BoxedExpression,
+  body: BoxedExpression,
   range: BoxedExpression | undefined
 ) {
+  body ??= ce.error(['missing', 'Function']); // @todo not exactly a function, more like a 'NumericExpression'
+
   let index: BoxedExpression | null = null;
   let lower: BoxedExpression | null = null;
   let upper: BoxedExpression | null = null;
@@ -123,24 +130,30 @@ export function canonicalSummation(
     index = range;
   } else if (range) {
     index = range.ops?.[0] ?? null;
-    lower = range.ops?.[1] ?? null;
-    upper = range.ops?.[2] ?? null;
+    lower = range.ops?.[1]?.canonical ?? null;
+    upper = range.ops?.[2]?.canonical ?? null;
   }
 
-  if (index && index.head === 'Hold') index = index.op1.canonical;
+  if (index?.head === 'Hold') index = index.op1;
+  if (index?.head === 'ReleaseHold') index = index.op1?.evaluate();
   index ??= ce.symbol('Nothing');
+
+  if (!index.symbol)
+    index = ce.error(['incompatible-domain', 'Symbol', index.domain]);
 
   if (index.symbol)
     ce.pushScope({
       symbolTable: { symbols: [{ name: index.symbol, domain: 'Integer' }] },
     });
-  const fn = expr.canonical;
+  const fn = body.canonical;
   if (index.symbol) {
     ce.popScope();
-    index = ce.box(['Hold', index]);
+    index = index = ce.hold(index);
   }
-  if (upper) range = ce.tuple([index, lower ?? ce.symbol('Nothing'), upper]);
-  else if (lower && upper) range = ce.tuple([index, lower, upper]);
+
+  if (lower && upper) range = ce.tuple([index, lower, upper]);
+  else if (upper)
+    range = ce.tuple([index, lower ?? ce._NEGATIVE_INFINITY, upper]);
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
 

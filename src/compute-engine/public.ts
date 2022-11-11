@@ -1563,28 +1563,41 @@ export type FunctionSignature = {
   /**
    * Return the canonical form of the expression with the arguments `args`.
    *
-   * All the arguments that are not subject to a hold are in canonical form.
+   * The arguments (`args`) may not be in canonical form. If necessary, they
+   * can be put in canonical form.
+   *
+   * This handler should validate the domain and number of the arguments.
+   * If a required argument is missing, it should be indicated with a
+   * `["Error", "'missing"]` expression. If more arguments than expected
+   * are present, this should be indicated with a `unexpected-argument` error.
+   * If the domain of an argument is not compatible, it should be indicated with
+   * a `incompatible-domain` error.
+   *
+   * `["Sequence"]` expressions are not folded and need to be handled
+   *  explicitly.
    *
    * If the function is associative, idempotent or an involution,
-   * it should handle its arguments accordingly. Notably, if it
-   * is commutative, the arguments should be sorted in canonical order.
+   * this handler should account for it. Notably, if it is commutative, the
+   * arguments should be sorted in canonical order.
    *
    * The handler can make transformations based on the value of the arguments
-   * that are literal and either rational numbers (i.e.
-   * `arg.isLiteral && arg.isRational`) or integers (i.e.
-   * `arg.isLiteral && arg.isInteger`).
-   *
-   * The handler should not make transformations based on the value of
-   * decimal numbers (non-integers).
+   * that are exact (i.e. `arg.isExact`).
    *
    * The handler should not consider the value or any assumptions about any
-   * of the arguments that are symbols or functions i.e. `arg.isZero`,
-   * `arg.isInteger`, etc...
+   * of the arguments that are symbols or functions (i.e. `arg.isZero`,
+   * `arg.isInteger`, etc...) since those may change over time.
    *
    * The result of the handler should be a canonical expression.
    *
+   * If the arguments do not match, they should be replaced with an appropriate
+   * `["Error"]` expression. If the expression cannot be put in canonical form,
+   * the handler should return `null`.
+   *
    */
-  canonical?: (ce: IComputeEngine, args: BoxedExpression[]) => BoxedExpression;
+  canonical?: (
+    ce: IComputeEngine,
+    args: BoxedExpression[]
+  ) => BoxedExpression | null;
 
   /**
    * Rewrite an expression into a simpler form.
@@ -1712,7 +1725,10 @@ export type BoxedFunctionSignature = {
   codomain?:
     | BoxedDomain
     | ((ce: IComputeEngine, args: BoxedExpression[]) => BoxedDomain | null);
-  canonical?: (ce: IComputeEngine, args: BoxedExpression[]) => BoxedExpression;
+  canonical?: (
+    ce: IComputeEngine,
+    args: BoxedExpression[]
+  ) => BoxedExpression | null;
   simplify?: (
     ce: IComputeEngine,
     args: BoxedExpression[]
@@ -2109,6 +2125,11 @@ export interface IComputeEngine {
     message: string | [string, ...SemiBoxedExpression[]],
     where?: SemiBoxedExpression
   ): BoxedExpression;
+
+  /**
+   * Add a`["Hold"]` wrapper to `expr.
+   */
+  hold(expr: SemiBoxedExpression): BoxedExpression;
 
   /** Shortcut for `this.fn("Add"...)`.
    *

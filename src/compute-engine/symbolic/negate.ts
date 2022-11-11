@@ -1,5 +1,6 @@
 import { Complex } from 'complex.js';
 import Decimal from 'decimal.js';
+import { validateArgument } from '../boxed-expression/validate';
 import { neg } from '../numerics/rationals';
 
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
@@ -36,7 +37,10 @@ export function canonicalNegate(
   metadata?: Metadata
 ): BoxedExpression {
   // Negate(Negate(x)) -> x
-  if (expr.head === 'Negate') return expr.op1;
+  if (expr.head === 'Negate')
+    return validateArgument(expr.engine, expr.op1?.canonical, 'Number');
+
+  expr = validateArgument(expr.engine, expr.canonical, 'Number');
   if (expr.isLiteral) return negateLiteral(expr, metadata)!;
 
   // Distribute over addition

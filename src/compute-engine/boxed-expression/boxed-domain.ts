@@ -447,6 +447,8 @@ export function isDomain(
 
   if (typeof expr === 'string') return isDomainLiteral(expr);
 
+  if (expr instanceof AbstractBoxedExpression) expr = expr.json;
+
   if (Array.isArray(expr)) {
     if (expr.length <= 1) return false;
     // Could be a domain expression

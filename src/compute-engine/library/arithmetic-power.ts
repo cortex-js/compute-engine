@@ -1,6 +1,7 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
+import { validateArgument } from '../boxed-expression/validate';
 import {
   asBignum,
   asFloat,
@@ -30,10 +31,13 @@ import { applyN } from '../symbolic/utils';
  */
 export function canonicalPower(
   ce: IComputeEngine,
-  base: BoxedExpression,
-  exponent: BoxedExpression,
+  base: BoxedExpression | undefined,
+  exponent: BoxedExpression | undefined,
   metadata?: Metadata
 ): BoxedExpression | null {
+  base = validateArgument(ce, base?.canonical, 'Number');
+  exponent = validateArgument(ce, exponent?.canonical, 'Number');
+
   if (exponent.symbol === 'ComplexInfinity') return ce._NAN;
 
   if (exponent.isLiteral) {
@@ -163,7 +167,7 @@ export function canonicalPower(
     if (e !== null)
       return ce._fn(
         'Multiply',
-        base.ops!.map((x) => ce.power(x, exponent))
+        base.ops!.map((x) => ce.power(x, exponent!))
       ); // Don't call ce.mul() to avoid infinite loops
   }
 

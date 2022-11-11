@@ -389,8 +389,6 @@ function match(
     substitution?: BoxedSubstitution;
   }
 ): BoxedSubstitution | null {
-  console.assert(hasWildcards(pattern));
-
   const substitution = matchOnce(subject, pattern, options.substitution ?? {}, {
     numericTolerance: options?.numericTolerance ?? NUMERIC_TOLERANCE,
   });
@@ -404,21 +402,21 @@ function match(
   return null;
 }
 
-function boxedSubstitution(ce: IComputeEngine, sub: null): null;
-function boxedSubstitution(
-  ce: IComputeEngine,
-  sub: Substitution
-): BoxedSubstitution;
-function boxedSubstitution(
-  ce: IComputeEngine,
-  sub: Substitution | null
-): BoxedSubstitution | null;
-function boxedSubstitution(
-  ce: IComputeEngine,
-  sub: Substitution | null
-): BoxedSubstitution | null {
-  if (sub === null) return null;
-  return Object.fromEntries(
-    Object.entries(sub).map(([k, v]) => [k, ce.box(v)])
-  );
-}
+// function boxedSubstitution(ce: IComputeEngine, sub: null): null;
+// function boxedSubstitution(
+//   ce: IComputeEngine,
+//   sub: Substitution
+// ): BoxedSubstitution;
+// function boxedSubstitution(
+//   ce: IComputeEngine,
+//   sub: Substitution | null
+// ): BoxedSubstitution | null;
+// function boxedSubstitution(
+//   ce: IComputeEngine,
+//   sub: Substitution | null
+// ): BoxedSubstitution | null {
+//   if (sub === null) return null;
+//   return Object.fromEntries(
+//     Object.entries(sub).map(([k, v]) => [k, ce.box(v)])
+//   );
+// }
