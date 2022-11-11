@@ -30,7 +30,19 @@ describe('MATCHFIX', () => {
     expect(check('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'))
       .toMatchInlineSnapshot(`
       latex     = ["Sin", ["List", "a", ["List", "b", "c"]]]
-      ["Sin", ["List", "a", ["List", "b", "c"]]]
+      [
+        "Sin",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Number",
+            ["Domain", "List"]
+          ],
+          ["List", "a", ["List", "b", "c"]]
+        ]
+      ]
     `));
 });
 

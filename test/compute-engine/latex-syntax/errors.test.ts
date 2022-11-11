@@ -398,15 +398,41 @@ check('Invalid delimiter', () =>
 );
 
 check('Invalid double superscript', () =>
-  expect(engine.parse('x^1^2')).toMatchInlineSnapshot(
-    `["Power", "x", ["List", 1, 2]]`
-  )
+  expect(engine.parse('x^1^2')).toMatchInlineSnapshot(`
+    [
+      "Power",
+      "x",
+      [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-domain'",
+          "Number",
+          ["Domain", "List"]
+        ],
+        ["List", 1, 2]
+      ]
+    ]
+  `)
 );
 
 check('Double superscript: invalid domain', () =>
-  expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(
-    `["Power", "x", ["List", 1, 2]]`
-  )
+  expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(`
+    [
+      "Power",
+      "x",
+      [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-domain'",
+          "Number",
+          ["Domain", "List"]
+        ],
+        ["List", 1, 2]
+      ]
+    ]
+  `)
 );
 
 // check('Invalid double subscript', () =>
@@ -514,11 +540,11 @@ check('VALID comment', () =>
 );
 
 check('VALID empty group', () =>
-  expect(engine.parse('x={}2')).toMatchInlineSnapshot(`["Equal", 2, "x"]`)
+  expect(engine.parse('x={}2')).toMatchInlineSnapshot(`["Equal", "x", 2]`)
 );
 
 check('VALID empty group', () =>
-  expect(engine.parse('x={  }2')).toMatchInlineSnapshot(`["Equal", 2, "x"]`)
+  expect(engine.parse('x={  }2')).toMatchInlineSnapshot(`["Equal", "x", 2]`)
 );
 
 check('Syntax error', () =>
@@ -526,17 +552,20 @@ check('Syntax error', () =>
     [
       "Equal",
       "x",
-      2,
-      ["Error", "'expected-expression'", ["Latex", "''"]],
-      ["Error", "'expected-closing-delimiter'", ["Latex", "'{'"]],
-      ["Error", "'expected-closing-delimiter'", ["Latex", "'{{'"]]
+      [
+        "Sequence",
+        2,
+        ["Error", "'expected-expression'", ["Latex", "''"]],
+        ["Error", "'expected-closing-delimiter'", ["Latex", "'{'"]],
+        ["Error", "'expected-closing-delimiter'", ["Latex", "'{{'"]]
+      ]
     ]
   `)
 );
 
 check('Missing argument', () =>
   expect(engine.box(['Sqrt']).canonical).toMatchInlineSnapshot(
-    `["Sqrt", ["Error", "'missing'"]]`
+    `["Sqrt", ["Error", ["ErrorCode", "'missing'", "Number"]]]`
   )
 );
 

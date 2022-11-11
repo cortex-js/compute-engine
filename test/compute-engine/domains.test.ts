@@ -182,6 +182,21 @@ describe('NUMERIC', () => {
       engine.domain('Integer').isCompatible(engine.domain(['Range', 1, 5]))
     ).toBeFalsy();
   });
+
+  test('["Range", 2, 3] <: ["Range", 1, 5]', () => {
+    expect(
+      engine
+        .domain(['Range', 2, 3])
+        .isCompatible(engine.domain(['Range', 1, 5]))
+    ).toBeTruthy();
+  });
+  test('["Range", 2, 6] <: ["Range", 1, 5]', () => {
+    expect(
+      engine
+        .domain(['Range', 2, 6])
+        .isCompatible(engine.domain(['Range', 1, 5]))
+    ).toBeFalsy();
+  });
 });
 
 describe('INVALID DOMAINS', () => {

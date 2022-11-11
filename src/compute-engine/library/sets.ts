@@ -36,6 +36,8 @@ export const SETS_LIBRARY: SymbolTable = {
             flattenSequence(args).map((x) => x.canonical),
             2
           );
+          if (args.length === 2 && isDomain(args[1]))
+            return ce._fn('Element', [args[0], ce.domain(args[1])]);
           return ce._fn('Element', args);
         },
         evaluate: (ce, args) => evaluateElement(ce, args),

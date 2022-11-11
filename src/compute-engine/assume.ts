@@ -1,6 +1,5 @@
 import { AssumeResult, BoxedExpression, IComputeEngine } from './public';
 
-import { isDomain } from './boxed-expression/boxed-domain';
 import { findUnivariateRoots } from './solve';
 
 /**

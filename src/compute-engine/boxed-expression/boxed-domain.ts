@@ -6,7 +6,7 @@ import {
   DOMAIN_CONSTRUCTORS,
   isDomainLiteral,
 } from '../library/domains';
-import { asSmallInteger } from '../numerics/numeric';
+import { asFloat, asSmallInteger } from '../numerics/numeric';
 import {
   BoxedDomain,
   BoxedExpression,
@@ -242,6 +242,8 @@ export function boxDomain(
   metadata?: Metadata
 ): BoxedDomain {
   if (dom instanceof _BoxedDomain) return dom;
+  if (dom instanceof AbstractBoxedExpression)
+    dom = dom.json as DomainExpression;
 
   if (typeof dom === 'string') {
     const expr = DOMAIN_ALIAS[dom];
@@ -272,6 +274,8 @@ function makeCanonical(
   if (dom instanceof _BoxedDomain) return dom._value;
 
   const ctor = dom[0];
+
+  if (!ctor) debugger;
 
   //
   // Range
@@ -445,16 +449,29 @@ export function isDomain(
 ): expr is BoxedDomain | DomainExpression {
   if (expr instanceof _BoxedDomain) return true;
 
-  if (typeof expr === 'string') return isDomainLiteral(expr);
-
   if (expr instanceof AbstractBoxedExpression) expr = expr.json;
+
+  if (typeof expr === 'string') return isDomainLiteral(expr);
 
   if (Array.isArray(expr)) {
     if (expr.length <= 1) return false;
     // Could be a domain expression
-    const fn = expr[0];
-    if (typeof fn !== 'string' || !DOMAIN_CONSTRUCTORS.includes(fn))
+    const ctor = expr[0];
+    if (typeof ctor !== 'string' || !DOMAIN_CONSTRUCTORS.includes(ctor))
       return false;
+
+    if (ctor === 'List')
+      return expr.length === 2 && isDomain(expr[1] as DomainExpression);
+
+    if (
+      ctor === 'Tuple' ||
+      ctor === 'Function' ||
+      ctor === 'Maybe' ||
+      ctor === 'Sequence' ||
+      ctor === 'Intersection' ||
+      ctor === 'Union'
+    )
+      return expr.slice(1, -1).every((x) => isDomain(x as DomainExpression));
 
     return expr.every((x) => x !== null);
   }
@@ -623,12 +640,6 @@ function isSubdomainOf(
     return [true, xlhs];
   }
 
-  // 'Interval',
-  // 'Range',
-  if (rhsConstructor === 'Range') {
-    // @todo
-  }
-
   if (rhsConstructor === 'Tuple') {
     if (!Array.isArray(lhs) || lhs[0] !== 'Tuple') return [false, xlhs];
     if (lhs.length > rhs.length) return [false, xlhs];
@@ -648,6 +659,42 @@ function isSubdomainOf(
   // 'Head',
   // 'Symbol',
   // 'Value',
+
+  if (rhsConstructor === 'Range') {
+    if (!Array.isArray(lhs) || lhs[0] !== 'Range') return [false, xlhs];
+    const lhsMin = asFloat(lhs[1] as BoxedExpression);
+    const lhsMax = asFloat(lhs[2] as BoxedExpression);
+    const rhsMin = asFloat(rhs[1] as BoxedExpression);
+    const rhsMax = asFloat(rhs[2] as BoxedExpression);
+
+    return [
+      lhsMin !== null &&
+        lhsMax !== null &&
+        rhsMin !== null &&
+        rhsMax !== null &&
+        lhsMin >= rhsMin &&
+        lhsMax <= rhsMax,
+      xlhs,
+    ];
+  }
+
+  if (rhsConstructor === 'Interval') {
+    if (!Array.isArray(lhs) || lhs[0] !== 'Interval') return [false, xlhs];
+    const lhsMin = asFloat(lhs[1] as BoxedExpression);
+    const lhsMax = asFloat(lhs[2] as BoxedExpression);
+    const rhsMin = asFloat(rhs[1] as BoxedExpression);
+    const rhsMax = asFloat(rhs[2] as BoxedExpression);
+
+    return [
+      lhsMin !== null &&
+        lhsMax !== null &&
+        rhsMin !== null &&
+        rhsMax !== null &&
+        lhsMin >= rhsMin &&
+        lhsMax <= rhsMax,
+      xlhs,
+    ];
+  }
 
   console.error('Unexpected domain constructor ' + rhsConstructor);
 

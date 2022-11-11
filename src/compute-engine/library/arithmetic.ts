@@ -710,6 +710,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
             if (args.length === 1) return canonicalNegate(args[0]);
             args = validateArgumentCount(ce, args, 2);
             if (args.length !== 2) return ce._fn('Subtract', args);
+            if (!args.every((x) => x.isValid)) return ce._fn('Subtract', args);
             return canonicalAdd(ce, [args[0], canonicalNegate(args[1])]);
           },
         },

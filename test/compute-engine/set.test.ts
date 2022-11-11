@@ -4,13 +4,13 @@ describe('ELEMENT', () => {
   test(`literal`, () => {
     expect(
       ce.box(['Element', 2, 'Integer']).evaluate().json
-    ).toMatchInlineSnapshot(`["Element", 2, "Integer"]`);
+    ).toMatchInlineSnapshot(`True`);
     expect(
       ce.box(['Element', 2, 'Number']).evaluate().json
-    ).toMatchInlineSnapshot(`["Element", 2, "Number"]`);
+    ).toMatchInlineSnapshot(`True`);
     expect(
       ce.box(['Element', 2, 'Boolean']).evaluate().json
-    ).toMatchInlineSnapshot(`["Element", 2, "Boolean"]`);
+    ).toMatchInlineSnapshot(`False`);
   });
 
   test(`strings`, () => {

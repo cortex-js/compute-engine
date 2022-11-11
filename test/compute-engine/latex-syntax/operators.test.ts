@@ -485,13 +485,13 @@ describe('OPERATOR serialize, invalid', () => {
     expect(
       latex(['Subtract', null as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `-\\textcolor{red}{\\blacksquare}+\\textcolor{red}{\\blacksquare}`
+      `\\textcolor{red}{\\blacksquare}-\\textcolor{red}{\\blacksquare}`
     ));
   test(`['Subtract', undefined] // Invalid form`, () =>
     expect(
       latex(['Subtract', undefined as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `-\\textcolor{red}{\\blacksquare}+\\textcolor{red}{\\blacksquare}`
+      `\\textcolor{red}{\\blacksquare}-\\textcolor{red}{\\blacksquare}`
     ));
   test(`['Subtract', 1] // Invalid form`, () =>
     expect(latex(['Subtract', 1])).toMatchInlineSnapshot(`-1`));

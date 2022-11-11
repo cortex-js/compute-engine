@@ -26,7 +26,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
         name: 'List',
         complexity: 8200,
         signature: {
-          domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'Anything'],
+          domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'List'],
         },
       },
       {
