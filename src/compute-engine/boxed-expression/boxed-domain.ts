@@ -132,10 +132,10 @@ export class _BoxedDomain
     const rhsCtor = Array.isArray(rhs) ? rhs[0] : null;
     if (rhsCtor) {
       const rhsParam = rhs[1] as DomainExpression<BoxedExpression>;
-      if (rhsCtor === 'Invariant')
-        return !isSubdomainOf1(rhsParam, lhs) && !isSubdomainOf1(lhs, rhsParam);
       if (rhsCtor === 'Covariant') return isSubdomainOf1(lhs, rhsParam);
       if (rhsCtor === 'Contravariant') return isSubdomainOf1(rhsParam, lhs);
+      if (rhsCtor === 'Invariant')
+        return !isSubdomainOf1(rhsParam, lhs) && !isSubdomainOf1(lhs, rhsParam);
       if (rhsCtor === 'Bivariant')
         return isSubdomainOf1(lhs, rhsParam) && isSubdomainOf1(rhsParam, lhs);
     }
@@ -478,8 +478,10 @@ function isSubdomainOf(
   rhs: DomainExpression<BoxedExpression>
 ): [boolean, DomainExpression<BoxedExpression>[]] {
   let lhs = xlhs.shift() as DomainExpression<BoxedExpression>;
+
   const rhsLiteral = typeof rhs === 'string' ? rhs : null;
   if (rhsLiteral === 'Anything') return [true, xlhs];
+
   const lhsLiteral = typeof lhs === 'string' ? lhs : null;
 
   //
@@ -601,7 +603,7 @@ function isSubdomainOf(
   if (rhsConstructor === 'Maybe') {
     if (lhsLiteral === 'Nothing') return [true, xlhs];
     return isSubdomainOf(
-      [lhs, ...xlhs],
+      [lhs, ...xlhs] as DomainExpression<BoxedExpression>[],
       rhs[1]! as DomainExpression<BoxedExpression>
     );
   }
@@ -627,9 +629,27 @@ function isSubdomainOf(
     // @todo
   }
 
+  if (rhsConstructor === 'Tuple') {
+    if (!Array.isArray(lhs) || lhs[0] !== 'Tuple') return [false, xlhs];
+    if (lhs.length > rhs.length) return [false, xlhs];
+    for (let i = 1; i <= rhs.length - 1; i++) {
+      if (
+        !lhs[i] ||
+        !isSubdomainOf1(
+          lhs[i] as DomainExpression<BoxedExpression>,
+          rhs[i] as DomainExpression<BoxedExpression>
+        )
+      )
+        return [false, xlhs];
+    }
+    return [true, xlhs];
+  }
+
   // 'Head',
   // 'Symbol',
   // 'Value',
+
+  console.error('Unexpected domain constructor ' + rhsConstructor);
 
   return [false, xlhs];
 }
@@ -676,8 +696,7 @@ function serialize(
   ce: IComputeEngine,
   dom: DomainExpression<BoxedExpression>
 ): Expression {
-  if (dom instanceof AbstractBoxedExpression)
-    return (dom as BoxedExpression).json;
+  if (dom instanceof AbstractBoxedExpression) return dom.json;
   if (typeof dom === 'string') return dom;
 
   if (dom[0] === 'Error') {
@@ -696,7 +715,7 @@ function serialize(
   const result: Expression = [serializeJsonSymbol(ce, dom[0])];
   if (dom.length > 1)
     for (let i = 1; i <= dom.length - 1; i++)
-      serialize(ce, dom[i] as DomainExpression<BoxedExpression>);
+      result.push(serialize(ce, dom[i] as DomainExpression<BoxedExpression>));
 
   return result;
 }
