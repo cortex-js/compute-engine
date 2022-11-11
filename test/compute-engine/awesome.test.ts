@@ -124,9 +124,9 @@ describe('Nth PRIME NUMBER', () =>
       ]
       box       = [
         "Equal",
+        ["Multiply", "n", "p"],
         [
           "Add",
-          2,
           [
             "Sum",
             [
@@ -136,7 +136,6 @@ describe('Nth PRIME NUMBER', () =>
                 1,
                 [
                   "Add",
-                  1,
                   [
                     "Power",
                     0,
@@ -148,35 +147,32 @@ describe('Nth PRIME NUMBER', () =>
                         [
                           "Product",
                           [
-                            "Lambda",
+                            "Delimiter",
                             [
-                              "Delimiter",
+                              "Subtract",
+                              1,
                               [
-                                "Subtract",
-                                1,
+                                "Power",
+                                0,
                                 [
-                                  "Power",
-                                  0,
+                                  "Multiply",
+                                  "abs",
                                   [
-                                    "Multiply",
-                                    "abs",
+                                    "Delimiter",
                                     [
-                                      "Delimiter",
+                                      "Subtract",
                                       [
-                                        "Subtract",
-                                        [
-                                          "Floor",
-                                          [
-                                            "Divide",
-                                            ["Subscript", "v", 2],
-                                            ["Subscript", "v", 3]
-                                          ]
-                                        ],
+                                        "Floor",
                                         [
                                           "Divide",
                                           ["Subscript", "v", 2],
                                           ["Subscript", "v", 3]
                                         ]
+                                      ],
+                                      [
+                                        "Divide",
+                                        ["Subscript", "v", 2],
+                                        ["Subscript", "v", 3]
                                       ]
                                     ]
                                   ]
@@ -186,29 +182,170 @@ describe('Nth PRIME NUMBER', () =>
                           ],
                           [
                             "Triple",
-                            ["Hold", ["Subscript", "v", 3]],
-                            2,
+                            [
+                              "Error",
+                              [
+                                "ErrorCode",
+                                "'incompatible-domain'",
+                                "Symbol",
+                                ["Domain", "Anything"]
+                              ]
+                            ],
+                            ["Floor", ["Sqrt", "v_2"]],
                             ["Floor", ["Sqrt", "v_2"]]
                           ]
                         ],
-                        ["Triple", ["Hold", "v_2"], 2, "v_1"]
+                        [
+                          "Triple",
+                          [
+                            "Error",
+                            [
+                              "ErrorCode",
+                              "'incompatible-domain'",
+                              "Symbol",
+                              ["Domain", "Anything"]
+                            ]
+                          ],
+                          2,
+                          "v_1"
+                        ]
                       ]
                     ]
-                  ]
+                  ],
+                  1
                 ]
               ]
             ],
             [
               "Triple",
-              ["Hold", "v_1"],
+              [
+                "Error",
+                [
+                  "ErrorCode",
+                  "'incompatible-domain'",
+                  "Symbol",
+                  ["Domain", "Anything"]
+                ]
+              ],
               2,
               ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
             ]
-          ]
-        ],
-        ["Multiply", "n", "p"]
+          ],
+          2
+        ]
       ]
-      evaluate  = False
+      canonical = [
+        "Equal",
+        ["Multiply", "n", "p"],
+        [
+          "Add",
+          [
+            "Sum",
+            [
+              "Floor",
+              [
+                "Divide",
+                1,
+                [
+                  "Add",
+                  [
+                    "Power",
+                    0,
+                    [
+                      "Subtract",
+                      "n",
+                      [
+                        "Sum",
+                        [
+                          "Product",
+                          [
+                            "Delimiter",
+                            [
+                              "Subtract",
+                              1,
+                              [
+                                "Power",
+                                0,
+                                [
+                                  "Multiply",
+                                  "abs",
+                                  [
+                                    "Delimiter",
+                                    [
+                                      "Subtract",
+                                      [
+                                        "Floor",
+                                        [
+                                          "Divide",
+                                          ["Subscript", "v", 2],
+                                          ["Subscript", "v", 3]
+                                        ]
+                                      ],
+                                      [
+                                        "Divide",
+                                        ["Subscript", "v", 2],
+                                        ["Subscript", "v", 3]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "Triple",
+                            [
+                              "Error",
+                              [
+                                "ErrorCode",
+                                "'incompatible-domain'",
+                                "Symbol",
+                                ["Domain", "Anything"]
+                              ]
+                            ],
+                            ["Floor", ["Sqrt", "v_2"]],
+                            ["Floor", ["Sqrt", "v_2"]]
+                          ]
+                        ],
+                        [
+                          "Triple",
+                          [
+                            "Error",
+                            [
+                              "ErrorCode",
+                              "'incompatible-domain'",
+                              "Symbol",
+                              ["Domain", "Anything"]
+                            ]
+                          ],
+                          2,
+                          "v_1"
+                        ]
+                      ]
+                    ]
+                  ],
+                  1
+                ]
+              ]
+            ],
+            [
+              "Triple",
+              [
+                "Error",
+                [
+                  "ErrorCode",
+                  "'incompatible-domain'",
+                  "Symbol",
+                  ["Domain", "Void"]
+                ]
+              ],
+              2,
+              ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
+            ]
+          ],
+          2
+        ]
+      ]
     `);
   }));
 

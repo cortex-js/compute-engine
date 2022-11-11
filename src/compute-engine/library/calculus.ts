@@ -52,10 +52,10 @@ export const CALCULUS_LIBRARY: SymbolTable[] = [
 
             // The range bounds, if present, should be numbers
             if (lower) lower = validateArgument(ce, lower, 'Number');
-            if (upper) lower = validateArgument(ce, upper, 'Number');
+            if (upper) upper = validateArgument(ce, upper, 'Number');
             if (lower && upper) range = ce.tuple([index, lower, upper]);
             else if (upper)
-              range = ce.tuple([index, lower ?? ce._NEGATIVE_INFINITY, upper]);
+              range = ce.tuple([index, ce._NEGATIVE_INFINITY, upper]);
             else if (lower) range = ce.tuple([index, lower]);
             else range = index;
 

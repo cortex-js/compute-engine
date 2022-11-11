@@ -20,7 +20,7 @@ describe('POWER', () => {
       `1^{\\textcolor{red}{\\blacksquare}}`
     );
     expect(latex(['Power', NaN])).toMatchInlineSnapshot(
-      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
+      `\\operatorname{NaN}^{\\textcolor{red}{\\blacksquare}}`
     );
     expect(latex(['Power', Infinity])).toMatchInlineSnapshot(
       `\\infty^{\\textcolor{red}{\\blacksquare}}`
@@ -60,9 +60,22 @@ describe('SUPSUB', () => {
     expect(parse('2^{-2}')).toMatchInlineSnapshot(
       `["Divide", 1, ["Square", 2]]`
     );
-    expect(parse('2^3^4')).toMatchInlineSnapshot(
-      `["Power", 2, ["List", 3, 4]]`
-    ); // @todo: unclear what the right answer is... (and it's invalid LaTeX)
+    expect(parse('2^3^4')).toMatchInlineSnapshot(`
+      [
+        "Power",
+        2,
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Number",
+            ["Domain", "List"]
+          ],
+          ["List", 3, 4]
+        ]
+      ]
+    `); // @todo: unclear what the right answer is... (and it's invalid LaTeX)
     expect(parse('2^{3^4}')).toMatchInlineSnapshot(
       `["Power", 2, ["Power", 3, 4]]`
     );

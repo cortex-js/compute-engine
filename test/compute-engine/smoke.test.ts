@@ -40,20 +40,6 @@ ce.assume('one', 1);
 const n1 = ce.parse('x_{1,2}');
 console.log(n1.toString());
 
-const sig3 = ce.domain([
-  'Maybe',
-  ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
-]);
-console.log(sig3.toJSON());
-
-const sig4 = ce.box(['Triple', ['Hold', 'n'], 1, 50]).domain;
-console.log(sig4.toJSON());
-console.log(sig4.isCompatible(sig3));
-
-// Output 'ok', should be 'tautology'
-console.log(ce.box(['Greater', 'one', 0]).evaluate().toString());
-console.log(ce.assume(['Greater', 'one', 0]));
-
 // Should output error about missing closing fence
 console.log(ce.parse('(').json);
 
@@ -62,9 +48,6 @@ console.log(ce.parse('123\\,45\\,67.123\\,456\\,e5').json);
 
 // Should parse as -12
 console.log(ce.parse('- 1 2').json);
-
-// Should not sort ops (n before 0)
-console.log(ce.parse('n=0').json);
 
 // Should not error
 console.log(ce.box(['InverseFunction', 'f']).latex);
@@ -75,9 +58,6 @@ console.log(ce.parse("f'").json);
 
 // Should evaluate InverseFunction
 console.log(ce.parse(`\\cos^{-1}\\doubleprime(x)`).simplify().toJSON());
-
-// Should output ["Square","x_0"]
-console.log(ce.parse('x^2_0').json);
 
 // Parsed as imaginary unit
 // -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and
@@ -351,9 +331,9 @@ describe('PARSING numbers', () => {
     ).toMatchInlineSnapshot(`
       [
         "Equal",
+        ["Multiply", "n", "p"],
         [
           "Add",
-          2,
           [
             "Sum",
             [
@@ -363,7 +343,6 @@ describe('PARSING numbers', () => {
                 1,
                 [
                   "Add",
-                  1,
                   [
                     "Power",
                     0,
@@ -375,35 +354,32 @@ describe('PARSING numbers', () => {
                         [
                           "Product",
                           [
-                            "Lambda",
+                            "Delimiter",
                             [
-                              "Delimiter",
+                              "Subtract",
+                              1,
                               [
-                                "Subtract",
-                                1,
+                                "Power",
+                                0,
                                 [
-                                  "Power",
-                                  0,
+                                  "Multiply",
+                                  "abs",
                                   [
-                                    "Multiply",
-                                    "abs",
+                                    "Delimiter",
                                     [
-                                      "Delimiter",
+                                      "Subtract",
                                       [
-                                        "Subtract",
-                                        [
-                                          "Floor",
-                                          [
-                                            "Divide",
-                                            ["Subscript", "v", 2],
-                                            ["Subscript", "v", 3]
-                                          ]
-                                        ],
+                                        "Floor",
                                         [
                                           "Divide",
                                           ["Subscript", "v", 2],
                                           ["Subscript", "v", 3]
                                         ]
+                                      ],
+                                      [
+                                        "Divide",
+                                        ["Subscript", "v", 2],
+                                        ["Subscript", "v", 3]
                                       ]
                                     ]
                                   ]
@@ -413,27 +389,57 @@ describe('PARSING numbers', () => {
                           ],
                           [
                             "Triple",
-                            ["Hold", ["Subscript", "v", 3]],
-                            2,
+                            [
+                              "Error",
+                              [
+                                "ErrorCode",
+                                "'incompatible-domain'",
+                                "Symbol",
+                                ["Domain", "Anything"]
+                              ]
+                            ],
+                            ["Floor", ["Sqrt", "v_2"]],
                             ["Floor", ["Sqrt", "v_2"]]
                           ]
                         ],
-                        ["Triple", ["Hold", "v_2"], 2, "v_1"]
+                        [
+                          "Triple",
+                          [
+                            "Error",
+                            [
+                              "ErrorCode",
+                              "'incompatible-domain'",
+                              "Symbol",
+                              ["Domain", "Anything"]
+                            ]
+                          ],
+                          2,
+                          "v_1"
+                        ]
                       ]
                     ]
-                  ]
+                  ],
+                  1
                 ]
               ]
             ],
             [
               "Triple",
-              ["Hold", "v_1"],
+              [
+                "Error",
+                [
+                  "ErrorCode",
+                  "'incompatible-domain'",
+                  "Symbol",
+                  ["Domain", "Anything"]
+                ]
+              ],
               2,
               ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
             ]
-          ]
-        ],
-        ["Multiply", "n", "p"]
+          ],
+          2
+        ]
       ]
     `));
 });

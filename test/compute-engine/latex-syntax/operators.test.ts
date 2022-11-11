@@ -501,15 +501,11 @@ describe('OPERATOR serialize, invalid', () => {
   test(`['Multiply', null] // Invalid form`, () =>
     expect(
       latex(['Multiply', null as unknown as Expression])
-    ).toMatchInlineSnapshot(
-      `\\textcolor{red}{\\blacksquare\\in \\mathbf{\\mathrm{Anything}}\\notin \\mathrm{Number}}`
-    ));
+    ).toMatchInlineSnapshot(`1`));
   test(`['Multiply', undefined] // Invalid form`, () =>
     expect(
       latex(['Multiply', undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(
-      `\\textcolor{red}{\\blacksquare\\in \\mathbf{\\mathrm{Anything}}\\notin \\mathrm{Number}}`
-    ));
+    ).toMatchInlineSnapshot(`1`));
   test(`['Multiply', 1] // Invalid form`, () =>
     expect(latex(['Multiply', 1])).toMatchInlineSnapshot(`1`));
   test(`['Multiply', 'NaN'] // Invalid form`, () =>
@@ -536,7 +532,7 @@ describe('OPERATOR serialize, invalid', () => {
     expect(
       latex(['Divide', null as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `\\frac{\\textcolor{red}{\\blacksquare\\in \\mathbf{\\mathrm{Anything}}\\notin \\mathrm{Number}}}{\\textcolor{red}{\\blacksquare}}`
+      `\\frac{1}{\\textcolor{red}{\\blacksquare}}(\\textcolor{red}{\\blacksquare})`
     ));
 
   test(`['Divide, undefined'] // Invalid form`, () =>

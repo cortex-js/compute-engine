@@ -84,58 +84,15 @@ describe('NUMBERS', () => {
   });
 
   test('INVALID Parsing numbers with grouping', () => {
-    expect(parse('123\\,45\\,67.123\\,456\\,')).toMatchInlineSnapshot(`
-      [
-        "Multiply",
-        1234567.123456,
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "Anything"]
-          ],
-          ["Sequence"]
-        ]
-      ]
-    `);
-    expect(parse('123\\,45\\,67.123\\,456\\,e5')).toMatchInlineSnapshot(`
-      [
-        "Multiply",
-        1234567.123456,
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "Anything"]
-          ],
-          ["Sequence"]
-        ],
-        "ExponentialE",
-        5
-      ]
-    `);
-    expect(parse('123\\,45\\,67.123\\,456\\,e12\\,345')).toMatchInlineSnapshot(`
-      [
-        "Multiply",
-        1234567.123456,
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "Anything"]
-          ],
-          ["Sequence"]
-        ],
-        "ExponentialE",
-        12345
-      ]
-    `);
+    expect(parse('123\\,45\\,67.123\\,456\\,')).toMatchInlineSnapshot(
+      `1234567.123456`
+    );
+    expect(parse('123\\,45\\,67.123\\,456\\,e5')).toMatchInlineSnapshot(
+      `["Multiply", 5, 1234567.123456, "ExponentialE"]`
+    );
+    expect(parse('123\\,45\\,67.123\\,456\\,e12\\,345')).toMatchInlineSnapshot(
+      `["Multiply", 12345, 1234567.123456, "ExponentialE"]`
+    );
   });
 
   test('Parsing whitespace with number sign', () => {

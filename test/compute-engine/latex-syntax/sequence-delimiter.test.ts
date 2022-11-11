@@ -53,22 +53,31 @@ describe('SEQUENCES AND DELIMITERS', () => {
           ]
         ]
       ]
-      [
-        "Delimiter",
+      box       = [
+        "List",
+        ["List", "a", "b"],
         [
           "List",
-          ["List", "a", "b"],
+          "c",
+          "d",
           [
-            "List",
-            "c",
-            "d",
-            [
-              "Sequence",
-              ["Error", "'missing'", ["Latex", "';'"]],
-              "Nothing",
-              ["List", "n", "Nothing", "m"]
-            ]
+            "Sequence",
+            ["Error", "'missing'", ["Latex", "';'"]],
+            "Nothing",
+            ["List", "n", "Nothing", "m"]
           ]
+        ]
+      ]
+      canonical = [
+        "List",
+        ["List", "a", "b"],
+        [
+          "List",
+          "c",
+          "d",
+          ["Error", "'missing'", ["Latex", "';'"]],
+          "Nothing",
+          ["List", "n", "Nothing", "m"]
         ]
       ]
     `);
@@ -111,10 +120,29 @@ describe('SEQUENCES AND DELIMITERS', () => {
         "f",
         ["List", "g", "h"]
       ]
-      [
+      box       = [
         "Sequence",
         ["List", "a", "b"],
         ["List", "c", "d", "ExponentialE"],
+        "f",
+        ["List", "g", "h"]
+      ]
+      N-auto    = [
+        "Sequence",
+        ["List", "a", "b"],
+        [
+          "List",
+          "c",
+          "d",
+          "2.718281828459045235360287471352662497757247093699959574966967627724076630353547594571382178525166427"
+        ],
+        "f",
+        ["List", "g", "h"]
+      ]
+      N-mach    = [
+        "Sequence",
+        ["List", "a", "b"],
+        ["List", "c", "d", 2.718281828459045],
         "f",
         ["List", "g", "h"]
       ]

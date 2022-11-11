@@ -7,6 +7,7 @@ import {
   subs,
   symbol,
 } from '../../../math-json/utils';
+import { flattenSequence } from '../../symbolic/flatten';
 import { LatexDictionary, Parser, Serializer } from '../public';
 import { joinLatex } from '../tokenizer';
 
@@ -23,7 +24,10 @@ function parseIntegral(command: string) {
 
     let sup: Expression | null = null;
     let sub: Expression | null = null;
-    while (!(sub && sup) && (parser.peek === '_' || parser.peek === '^')) {
+    while (
+      !(sub !== null && sup !== null) &&
+      (parser.peek === '_' || parser.peek === '^')
+    ) {
       if (parser.match('_')) sub = parser.matchRequiredLatexArgument();
       else if (parser.match('^')) sup = parser.matchRequiredLatexArgument();
       parser.skipSpace();
@@ -53,41 +57,51 @@ function parseIntegral(command: string) {
       if (index !== null && rest.length > 0) {
         return [
           'Add',
-          makeIntegral(command, ['Add', ...newOp], index, sub, sup),
+          makeIntegral(parser, command, ['Add', ...newOp], index, sub, sup),
           ...rest,
         ];
       }
     }
-    return makeIntegral(command, fn, index, sub, sup);
+    return makeIntegral(parser, command, fn, index, sub, sup);
   };
 }
 
 function makeIntegral(
+  parser: Parser,
   command: string,
   fn: Expression | null,
   index: string | null,
   sub: Expression | null,
   sup: Expression | null
 ): Expression {
-  if (fn && index) fn = ['Lambda', subs(fn, { [index]: '_' })];
-
-  if (fn && !sup && !sub && !index) return [command, fn];
+  if (fn && sup === null && sub === null && !index) return [command, fn];
 
   fn ??= 'Nothing';
+  if (parser.computeEngine) {
+    const ce = parser.computeEngine;
+    if (index)
+      ce.pushScope({
+        symbolTable: {
+          symbols: [{ name: index, domain: 'ExtendedRealNumber' }],
+        },
+      });
 
-  const heldIndex: Expression | null = index
-    ? (['Hold', index] as Expression)
-    : null;
+    fn = ce.box(fn).json;
 
-  if (sup)
+    if (index) ce.popScope();
+  }
+  const heldIndex = index ? (['Hold', index] as Expression) : null;
+
+  if (sup !== null)
     return [
       command,
       fn,
       ['Tuple', heldIndex ?? 'Nothing', sub ?? 'Nothing', sup],
     ];
-  if (sub) return [command, fn, ['Tuple', heldIndex ?? 'Nothing', sub]];
+  if (sub !== null)
+    return [command, fn, ['Tuple', heldIndex ?? 'Nothing', sub]];
   if (heldIndex) return [command, fn, heldIndex];
-  return [command];
+  return [command, fn];
 }
 
 /**  Parse an expression (up to a relational operator, or the boundary) */

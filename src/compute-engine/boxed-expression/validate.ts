@@ -5,6 +5,7 @@ import {
   DomainExpression,
   BoxedDomain,
 } from '../public';
+import { flattenSequence } from '../symbolic/flatten';
 
 export function validateArgumentCount(
   ce: IComputeEngine,
@@ -54,7 +55,7 @@ export function validateNumericArgs(
         );
     }
 
-  return xs.map((op) =>
+  return flattenSequence(xs).map((op) =>
     !op.isValid || op.isNumber
       ? op
       : ce.error(['incompatible-domain', 'Number', op.domain], op)

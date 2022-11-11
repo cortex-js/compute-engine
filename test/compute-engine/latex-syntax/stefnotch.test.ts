@@ -4,7 +4,7 @@ describe('STEFNOTCH #9', () => {
   test('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x', () => {
     expect(
       parse('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x')
-    ).toMatchInlineSnapshot(`["Integrate", ["Multiply", 3, "x"]]`);
+    ).toMatchInlineSnapshot(`["Integrate", ["Multiply", 3, "x"], "Nothing"]`);
   });
 });
 
@@ -114,15 +114,17 @@ describe('STEFNOTCH #12', () => {
       [
         "Power",
         "ExponentialE",
+        "ImaginaryUnit",
+        "Pi",
         [
           "Error",
           [
             "ErrorCode",
             "'incompatible-domain'",
             "Number",
-            ["Domain", "Anything"]
+            ["Domain", "String"]
           ],
-          ["Sequence", "ImaginaryUnit", "Pi", "'nope!?\\lparensum'"]
+          "'nope!?\\lparensum'"
         ]
       ]
     `);
@@ -143,10 +145,10 @@ describe('STEFNOTCH #13', () => {
   });
 
   test('2/ x_{1,2}=1,2', () => {
-    expect(parse('x_{1,2}=1,2')).toMatch(
-      '["List", ["Equal", ["Subscript", "x", ["List", 1, 2]], 1], 2]'
+    expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(
+      `["Sequence", ["Equal", ["Subscript", "x", ["Sequence", 1, 2]], 1], 2]`
     );
-  });
+  }); // @fixme unclear what the right answer is
 
   test('3/  \\{1,2\\}', () => {
     expect(parse('\\{1,2\\}')).toMatchInlineSnapshot(`
@@ -180,15 +182,18 @@ describe('STEFNOTCH #13', () => {
     expect(parse('\\frac{2}{\\sqrt{n}}\\Leftrightarrow n>\\frac{5}{n^2}'))
       .toMatchInlineSnapshot(`
       [
-        "Greater",
-        ["Divide", 2, ["Sqrt", "n"]],
+        "Less",
+        ["Divide", 5, ["Square", "n"]],
         [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\Leftrightarrow'"],
-          ["Latex", "'\\Leftrightarrow'"]
-        ],
-        "n",
-        ["Divide", 5, ["Square", "n"]]
+          "Sequence",
+          ["Divide", 2, ["Sqrt", "n"]],
+          [
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\Leftrightarrow'"],
+            ["Latex", "'\\Leftrightarrow'"]
+          ],
+          "n"
+        ]
       ]
     `);
   });

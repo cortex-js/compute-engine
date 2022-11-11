@@ -455,11 +455,8 @@ check('Unexpected closing delimiter', () =>
   expect(engine.parse('\\frac{1}{2}}+1')).toMatchInlineSnapshot(`
     [
       "Add",
-      [
-        "Sequence",
-        ["Rational", 1, 2],
-        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
-      ],
+      ["Rational", 1, 2],
+      ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]],
       1
     ]
   `)
