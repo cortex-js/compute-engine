@@ -722,7 +722,7 @@ describe('MULTIPLY', () => {
 describe('Divide', () => {
   test(`INVALID  Divide`, () =>
     expect(ce.box(['Divide', 2.5]).evaluate()).toMatchInlineSnapshot(
-      `["Divide", 2.5, ["Error", "'missing'"]]`
+      `["Divide", 2.5, ["Error", ["ErrorCode", "'missing'", "Number"]]]`
     ));
   test(`Divide`, () =>
     expect(ce.box(['Divide', 6, 3]).evaluate()).toMatchInlineSnapshot(`2`));
@@ -741,7 +741,7 @@ describe('Divide', () => {
 describe('Power', () => {
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5]).evaluate()).toMatchInlineSnapshot(
-      `["Power", 2.5, ["Error", "'missing'"]]`
+      `["Power", 2.5, ["Error", ["ErrorCode", "'missing'", "Number"]]]`
     ));
   test(`Power`, () =>
     expect(ce.box(['Power', 2.5, 1.1]).evaluate()).toMatchInlineSnapshot(
@@ -798,7 +798,7 @@ describe('Sqrt', () => {
   test(`√0`, () =>
     expect(checkJson(['Sqrt', 0])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 0]
-      canonical = ["Sqrt", ["Error", "'missing'"]]
+      simplify  = 0
     `));
 
   test(`√2.5`, () => {
@@ -1039,11 +1039,39 @@ describe('Rational', () => {
       N-auto    = 0.52631580966759098627
     `));
 
-  test(`INVALID Rational`, () =>
+  test(`INVALID Rational`, () => {
     expect(checkJson(['Rational', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
       box       = ["Rational", 2.5, -1.1, 18.4]
-      canonical = ["Rational", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]
-    `));
+      canonical = [
+        "Rational",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Integer",
+            ["Domain", "PositiveNumber"]
+          ],
+          2.5
+        ],
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Integer",
+            ["Domain", "NegativeNumber"]
+          ],
+          -1.1
+        ],
+        ["Error", "'unexpected-argument'", 18.4]
+      ]
+    `);
+    expect(checkJson(['Rational', 2, 3, 5])).toMatchInlineSnapshot(`
+      box       = ["Rational", 2, 3, 5]
+      canonical = ["Rational", 2, 3, ["Error", "'unexpected-argument'", 5]]
+    `);
+  });
   test(`Rational as Divide`, () =>
     expect(checkJson(['Rational', 3.1, 2.8])).toMatchInlineSnapshot(`
       box       = ["Divide", 3.1, 2.8]

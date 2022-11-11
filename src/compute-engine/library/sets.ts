@@ -1,7 +1,10 @@
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
+import { isDomain } from '../boxed-expression/boxed-domain';
+import { validateArgumentCount } from '../boxed-expression/validate';
 import { BoxedExpression, SymbolTable, IComputeEngine } from '../public';
+import { flattenSequence } from '../symbolic/flatten';
 
 export const SETS_LIBRARY: SymbolTable = {
   symbols: [
@@ -24,16 +27,24 @@ export const SETS_LIBRARY: SymbolTable = {
     {
       name: 'Element',
       complexity: 11200,
+      hold: 'all',
       signature: {
         domain: 'Predicate',
         canonical: (ce, args) => {
-          return ce._fn('Element', [args[0], ce.domain(args[1])]);
+          args = validateArgumentCount(
+            ce,
+            flattenSequence(args).map((x) => x.canonical),
+            2
+          );
+          return ce._fn('Element', args);
         },
+        evaluate: (ce, args) => evaluateElement(ce, args),
       },
     },
     {
       name: 'NotElement',
       complexity: 11200,
+      hold: 'all',
       signature: {
         domain: 'Predicate',
         canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
@@ -197,4 +208,56 @@ function cartesianProduct(
   _ops: BoxedExpression[]
 ): BoxedExpression {
   return ce.symbol('EmptySet');
+}
+
+function evaluateElement(
+  ce: IComputeEngine,
+  ops: BoxedExpression[]
+): BoxedExpression {
+  console.assert(ops.length === 2);
+  const [lhs, rhs] = ops;
+  if (rhs.string) {
+    if (lhs.string && rhs.string.includes(lhs.string)) return ce.symbol('True');
+    return ce.symbol('False');
+  }
+
+  // Is the key `lhs` in the dictionary `rhs`?
+  if (rhs.keys) {
+    if (lhs.string)
+      for (const key of rhs.keys)
+        if (key === lhs.string) return ce.symbol('True');
+    return ce.symbol('False');
+  }
+
+  // Is the element `lhs` or the sublist `lhs` inside `rhs`?
+  if (rhs.head === 'List') {
+    if (lhs.head === 'List') {
+      let found = false;
+      for (let i = 0; i < 1 + (rhs.nops - lhs.nops); ++i) {
+        found = true;
+        for (let j = 0; j < lhs.nops; ++j) {
+          if (!rhs.ops![i + j].isEqual(lhs.ops![j])) {
+            found = false;
+            break;
+          }
+        }
+        if (found) return ce.symbol('True');
+      }
+
+      return ce.symbol('False');
+    }
+    // Is the `lhs` element inside the list?
+    const val = lhs.head === 'Hold' ? lhs.op1 : lhs;
+    for (const elem of rhs.ops!)
+      if (val.isEqual(elem)) return ce.symbol('True');
+
+    return ce.symbol('False');
+  }
+
+  if (isDomain(rhs)) {
+    if (lhs.domain.isCompatible(ce.domain(rhs))) return ce.symbol('True');
+    return ce.symbol('False');
+  }
+
+  return ce._fn('Element', [lhs, rhs]);
 }
