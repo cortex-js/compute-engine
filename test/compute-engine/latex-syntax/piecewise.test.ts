@@ -1,21 +1,21 @@
 import { parse } from '../../utils';
 
-describe('CASES/PIECEWISE', () => {
+describe('WHICH', () => {
   test('Valid forms', () => {
     expect(
       parse(`\\begin{cases}
       0 & n =  0\\\\
       1 & n =  1\\\\
-      n \\geq 2  & n^2+1 \\end{cases}`)
+      n^2+1 & n \\geq 2   \\end{cases}`)
     ).toMatchInlineSnapshot(`
       [
-        "Piecewise",
-        [
-          "List",
-          ["Pair", ["Equal", "n", 0], 0],
-          ["Pair", ["Equal", "n", 1], 1],
-          ["Pair", ["Add", 1, ["Square", "n"]], ["LessEqual", 2, "n"]]
-        ]
+        "Which",
+        ["Equal", "n", 0],
+        0,
+        ["Equal", "n", 1],
+        1,
+        ["GreaterEqual", "n", 2],
+        ["Add", ["Power", "n", 2], 1]
       ]
     `);
   });

@@ -1,4 +1,10 @@
-import { BoxedExpression, SymbolTable, IComputeEngine } from '../public';
+import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
+import {
+  BoxedExpression,
+  SymbolTable,
+  IComputeEngine,
+  BoxedDomain,
+} from '../public';
 
 export const LOGIC_LIBRARY: SymbolTable = {
   symbols: [
@@ -137,6 +143,16 @@ export const LOGIC_LIBRARY: SymbolTable = {
         },
       },
     },
+    {
+      name: 'Which',
+      hold: 'all',
+      signature: {
+        domain: 'Function',
+        codomain: (ce, ops) => domainWhich(ce, ops),
+        evaluate: (ce, ops) => whichEvaluate(ce, ops, 'evaluate'),
+        N: (ce, ops) => whichEvaluate(ce, ops, 'N'),
+      },
+    },
   ],
 };
 
@@ -254,4 +270,30 @@ function processImplies(
   if (lhs === 'True' && rhs === 'False') return ce.symbol('False');
   if (lhs === 'Maybe' || rhs === 'Maybe') return ce.symbol('Maybe');
   return undefined;
+}
+
+function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
+  let dom: BoxedDomain | null = null;
+  for (let i = 1; i <= args.length - 1; i += 2) {
+    if (!dom) dom = args[i].domain;
+    else dom = sharedAncestorDomain(dom, args[i].domain);
+  }
+  return dom ?? ce.domain('Nothing');
+}
+
+function whichEvaluate(
+  ce: IComputeEngine,
+  args: BoxedExpression[],
+  mode: 'N' | 'evaluate'
+): BoxedExpression {
+  let i = 0;
+  while (i < args.length - 1) {
+    if (args[i].evaluate().symbol === 'True') {
+      if (!args[i + 1]) return ce.symbol('Undefined');
+      return mode === 'N' ? args[i + 1].N() : args[i + 1].evaluate();
+    }
+    i += 2;
+  }
+
+  return ce.symbol('Undefined');
 }

@@ -8,6 +8,7 @@ import {
   head,
   ops,
   missingIfEmpty,
+  stripText,
 } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer, Terminator } from '../public';
 import { joinLatex } from '../tokenizer';
@@ -406,26 +407,28 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
-    name: 'Piecewise',
+    name: 'Which',
     trigger: 'cases',
     kind: 'environment',
     parse: (parser) => {
       const tabular: Expression[][] | null = parser.matchTabular('cases');
-      if (!tabular) return ['Sequence'];
-      // Note: return `Nothing` for the condition, because it must be present
+      if (!tabular) return ['Which'];
+      // Note: return `True` for the condition, because it must be present
       // as the second element of the Tuple. Return an empty sequence for the
       // value, because it is optional
-      return [
-        'Piecewise',
-        [
-          'List',
-          ...tabular.map((x) => [
-            'Tuple',
-            x[1] ?? 'Nothing', // Condition
-            x[0] ?? ['Sequence'], // Value
-          ]),
-        ] as Expression,
-      ] as Expression;
+      const result: Expression = ['Which'];
+      for (const row of tabular) {
+        if (row.length === 1) {
+          result.push('True');
+          result.push(row[0]);
+        } else if (row.length === 2) {
+          const s = stringValue(row[1]);
+          // If a string, probably 'else' or 'otherwise'
+          result.push(s ? 'True' : stripText(row[1]) ?? 'True');
+          result.push(row[0]);
+        }
+      }
+      return result;
     },
     serialize: (serialize: Serializer, expr: Expression): string => {
       if (head(op(expr, 1)) !== 'List') return '';

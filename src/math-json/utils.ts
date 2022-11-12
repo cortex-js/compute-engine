@@ -60,6 +60,22 @@ export function stringValue(
   return expr.substring(1, expr.length - 1);
 }
 
+export function stripText(
+  expr: Expression | null | undefined
+): Expression | null {
+  if (expr === null || expr === undefined || stringValue(expr) !== null)
+    return null;
+
+  const h = head(expr);
+  if (h !== null) {
+    return [
+      h,
+      ...(ops(expr) ?? []).map((x) => stripText(x)!).filter((x) => x !== null),
+    ];
+  }
+  return expr;
+}
+
 /**
  * The head of a function can be an identifier or an expression.
  *
@@ -277,19 +293,19 @@ export function rationalValue(
   return null;
 }
 
-export function applyRecursively(
-  expr: Expression,
-  fn: (x: Expression) => Expression
+export function applyRecursively<T extends Expression = Expression>(
+  expr: T,
+  fn: (x: T) => T
 ): Expression {
   const h = head(expr);
   if (h !== null) {
-    return [fn(h), ...(ops(expr) ?? []).map(fn)];
+    return [fn(h as T), ...(ops(expr) ?? []).map(fn)];
   }
   const dict = dictionary(expr);
   if (dict !== null) {
     const keys = Object.keys(dict);
     const result = {};
-    for (const key of keys) result[key] = fn(dict[key]);
+    for (const key of keys) result[key] = fn(dict[key] as T);
     return { dict: result };
   }
   return fn(expr);
