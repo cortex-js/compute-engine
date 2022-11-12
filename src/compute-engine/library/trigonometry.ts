@@ -208,7 +208,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           N: (ce, ops) => evalTrig(ce, 'N', 'Arcsin', ops[0]),
         },
       },
-      //Note: Arsinh, not Arcsinh
+      //Note: Arsinh, not ArCsinh
       {
         name: 'Arsinh',
         complexity: 6100,
@@ -396,31 +396,64 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
           N: (ce, ops) => evalTrig(ce, 'N', 'Arccos', ops[0]),
         },
       },
-      // Arccot: {
-      //   domain: 'RealNumber',
-      //   numeric: true,
-      // },
-      // Note Arcoth, not Arccoth
-      // Arcoth: {
-      //   domain: 'RealNumber',
-      //   numeric: true,
-      // },
-      // Arcsec: {
-      //   domain: 'RealNumber',
-      //   numeric: true,
-      // },
-      // Arsech: {
-      //   domain: 'RealNumber',
-      //   numeric: true,
-      // },
-      // Arccsc: {
-      //   domain: 'RealNumber',
-      //   numeric: true,
-      // },
-      // Arcsch: {
-      //   domain: 'RealNumber',
-      //   numeric: true,
-      // },
+      {
+        name: 'Arccot',
+        numeric: true,
+        signature: {
+          domain: domainNumberToRealNumber('Arccot'),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccot', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arccot', ops[0]),
+        },
+      },
+
+      {
+        name: 'Arcoth',
+        numeric: true,
+        signature: {
+          domain: domainNumberToRealNumber('Arcoth'),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcoth', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arcoth', ops[0]),
+        },
+      },
+
+      {
+        name: 'Arcsch',
+        numeric: true,
+        signature: {
+          domain: domainNumberToRealNumber('Arcsch'),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsch', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arcsch', ops[0]),
+        },
+      },
+
+      {
+        name: 'Arcsec',
+        numeric: true,
+        signature: {
+          domain: domainNumberToRealNumber('Arcsec'),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsec', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arcsec', ops[0]),
+        },
+      },
+
+      {
+        name: 'Arsech',
+        numeric: true,
+        signature: {
+          domain: domainNumberToRealNumber('Arsech'),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arsech', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arsech', ops[0]),
+        },
+      },
+      {
+        name: 'Arccsc',
+        numeric: true,
+        signature: {
+          domain: domainNumberToRealNumber('Arccsc'),
+          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccsc', ops[0]),
+          N: (ce, ops) => evalTrig(ce, 'N', 'Arccsc', ops[0]),
+        },
+      },
 
       {
         name: 'Coth',
@@ -752,12 +785,57 @@ function evalTrig(
         (x) => x.acos(),
         (x) => x.acos()
       );
+    case 'Arccot':
+      return applyN(
+        op,
+        (x) => Math.atan2(1, x),
+        (x) => Decimal.atan2(ce._BIGNUM_ONE, x),
+        (x) => x.inverse().atan()
+      );
+    case 'Arccsc':
+      return applyN(
+        op,
+        (x) => Math.asin(1 / x),
+        (x) => ce._BIGNUM_ONE.div(x).asin(),
+        (x) => x.inverse().asin()
+      );
     case 'Arcosh':
       return applyN(
         op,
         Math.acosh,
         (x) => x.acosh(),
         (x) => x.acosh()
+      );
+    case 'Arcoth':
+      // ln[(1 + x) /(x − 1)] /2
+      return applyN(
+        op,
+        (x) => x,
+        (x) => x.acosh(),
+        (x) => x.acosh()
+      );
+
+    case 'Arcsch':
+      // ln[1/x + √(1/x2 + 1)],
+      return applyN(
+        op,
+        (x) => Math.log(1 / x + Math.sqrt(1 / (x * x) + 1)),
+        (x) =>
+          ce._BIGNUM_ONE
+            .div(x.mul(x))
+            .add(ce._BIGNUM_ONE)
+            .sqrt()
+            .add(ce._BIGNUM_ONE.div(x))
+            .log(),
+        (x) => x.mul(x).inverse().add(1).sqrt().add(x.inverse()).log()
+      );
+
+    case 'Arcsec':
+      return applyN(
+        op,
+        (x) => Math.acos(1 / x),
+        (x) => ce._BIGNUM_ONE.div(x).acos(),
+        (x) => x.inverse().acos()
       );
     case 'Arcsin':
       return applyN(
@@ -766,6 +844,15 @@ function evalTrig(
         (x) => x.asin(),
         (x) => x.asin()
       );
+
+    case 'Arsech':
+      return applyN(
+        op,
+        (x) => Math.log((1 + Math.sqrt(1 - x * x)) / x),
+        (x) => ce._BIGNUM_ONE.sub(x.mul(x).add(ce._BIGNUM_ONE).div(x)).log(),
+        (x) => ce.complex(1).sub(x.mul(x)).add(1).div(x).log()
+      );
+
     case 'Arsinh':
       return applyN(
         op,

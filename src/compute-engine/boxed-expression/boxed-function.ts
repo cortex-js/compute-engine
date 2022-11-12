@@ -227,18 +227,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   get isValid(): boolean {
-    if (typeof this._head !== 'string') {
-      if (this._head.isValid === false) return false;
-      return this._ops.every((x) => x.isValid);
-    }
     if (this._head === 'Error') return false;
 
-    // If this expression is not canonical, just check the arguments
-    if (this._canonical !== this) return this._ops.every((x) => x.isValid);
+    if (typeof this._head !== 'string' && !this._head.isValid) return false;
 
-    // Need to check function definition before arguments: binding
-    // as the side effect of normalizing arguments
-    if (this.functionDefinition === undefined) return false;
     return this._ops.every((x) => x.isValid);
   }
 

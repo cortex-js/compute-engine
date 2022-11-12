@@ -37,6 +37,34 @@ ce.assume('one', 1);
 
 ///
 
+const sr1710 = ce.parse('\\cos\\left(x\\right)-\\sec^{-1}\\left(x\\right)', {
+  canonical: false,
+});
+// const sr1710 = ce.parse('-\\sec^{-1}\\left(x\\right)');
+console.log(sr1710.isValid);
+console.log(sr1710.errors.map((x) => x.toString()).join(', '));
+
+// Unhelpful message
+console.log(ce.parse('\\sqrt[x](y)').toString());
+
+// Does not parse as symbol
+console.log(ce.parse('\\gamma').toString());
+
+const expr = ce.parse('4x(3x+2)-5(5x-4)').json;
+console.log(ce.box(['Expand', expr]).evaluate().latex);
+
+// Not valid, doesn't render
+const q1 = ce.parse('\\cos\\left(x\\right)-\\sec^{-1}\\left(x\\right)');
+console.log(q1.isValid);
+console.log(q1.errors);
+console.log(q1.toString());
+
+// const expr = ce.parse('x^2').json;
+
+// console.log(
+//   ce.box(['Integrate', expr, ['Element', 'x', ['Interval', 0, 1]]]).latex
+// );
+
 const n1 = ce.parse('x_{1,2}');
 console.log(n1.toString());
 
@@ -116,7 +144,7 @@ console.log(ce.parse('\\sqrt{15}').simplify().latex);
 // Expect_. `\sqrt15` (don't keep decomposed root expanded)
 
 // Report false. Should be true.
-const sig1 = ce.domain(['Function', 'PositiveInteger', 'Anything']);
+const sig1 = ce.domain(['Function', 'PositiveInteger', 'Number']);
 const sig2 = ce.domain(['Function', 'Number', 'Number']);
 console.log(sig1.isCompatible(sig2));
 
@@ -362,25 +390,21 @@ describe('PARSING numbers', () => {
                                 "Power",
                                 0,
                                 [
-                                  "Multiply",
-                                  "abs",
+                                  "Abs",
                                   [
-                                    "Delimiter",
+                                    "Subtract",
                                     [
-                                      "Subtract",
-                                      [
-                                        "Floor",
-                                        [
-                                          "Divide",
-                                          ["Subscript", "v", 2],
-                                          ["Subscript", "v", 3]
-                                        ]
-                                      ],
+                                      "Floor",
                                       [
                                         "Divide",
                                         ["Subscript", "v", 2],
                                         ["Subscript", "v", 3]
                                       ]
+                                    ],
+                                    [
+                                      "Divide",
+                                      ["Subscript", "v", 2],
+                                      ["Subscript", "v", 3]
                                     ]
                                   ]
                                 ]

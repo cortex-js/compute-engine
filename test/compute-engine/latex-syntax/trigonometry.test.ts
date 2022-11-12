@@ -120,22 +120,26 @@ describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   test(`\\sin^{-1}'(x)`, () =>
     expect(check("\\sin^{-1}'(x)")).toMatchInlineSnapshot(`
       latex     = [["Derivative", 1, ["InverseFunction", "Sin"]], "x"]
-      [["Derivative", 1, ["InverseFunction", "Sin"]], "x"]
+      box       = [["Derivative", 1, ["InverseFunction", "Sin"]], "x"]
+      simplify  = ["Derivative", 1, "Arcsin"]
     `));
   test(`\\sin^{-1}''(x)`, () =>
     expect(check("\\sin^{-1}''(x)")).toMatchInlineSnapshot(`
       latex     = [["Derivative", 2, ["InverseFunction", "Sin"]], "x"]
-      [["Derivative", 2, ["InverseFunction", "Sin"]], "x"]
+      box       = [["Derivative", 2, ["InverseFunction", "Sin"]], "x"]
+      simplify  = ["Derivative", 2, "Arcsin"]
     `));
   test(`\\cos^{-1\\doubleprime}(x)`, () =>
     expect(check('\\cos^{-1\\doubleprime}(x)')).toMatchInlineSnapshot(`
       latex     = [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
-      [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
+      box       = [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
+      simplify  = ["Derivative", 2, "Arccos"]
     `));
   test(`\\cos^{-1}\\doubleprime(x)`, () =>
     expect(check('\\cos^{-1}\\doubleprime(x)')).toMatchInlineSnapshot(`
       latex     = [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
-      [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
+      box       = [["Derivative", 2, ["InverseFunction", "Cos"]], "x"]
+      simplify  = ["Derivative", 2, "Arccos"]
     `));
 });
 

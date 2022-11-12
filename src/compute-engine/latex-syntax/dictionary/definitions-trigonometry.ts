@@ -133,7 +133,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arcsec',
-    trigger: ['\\arcsec'],
+    trigger: 'arcsec',
 
     parse: parseTrig('Arcsec'),
   },

@@ -59,25 +59,21 @@ describe('Nth PRIME NUMBER', () =>
                                           "Power",
                                           0,
                                           [
-                                            "Multiply",
-                                            "abs",
+                                            "Abs",
                                             [
-                                              "Delimiter",
+                                              "Subtract",
                                               [
-                                                "Subtract",
-                                                [
-                                                  "Floor",
-                                                  [
-                                                    "Divide",
-                                                    ["Subscript", "v", 2],
-                                                    ["Subscript", "v", 3]
-                                                  ]
-                                                ],
+                                                "Floor",
                                                 [
                                                   "Divide",
                                                   ["Subscript", "v", 2],
                                                   ["Subscript", "v", 3]
                                                 ]
+                                              ],
+                                              [
+                                                "Divide",
+                                                ["Subscript", "v", 2],
+                                                ["Subscript", "v", 3]
                                               ]
                                             ]
                                           ]
@@ -155,25 +151,21 @@ describe('Nth PRIME NUMBER', () =>
                                 "Power",
                                 0,
                                 [
-                                  "Multiply",
-                                  "abs",
+                                  "Abs",
                                   [
-                                    "Delimiter",
+                                    "Subtract",
                                     [
-                                      "Subtract",
-                                      [
-                                        "Floor",
-                                        [
-                                          "Divide",
-                                          ["Subscript", "v", 2],
-                                          ["Subscript", "v", 3]
-                                        ]
-                                      ],
+                                      "Floor",
                                       [
                                         "Divide",
                                         ["Subscript", "v", 2],
                                         ["Subscript", "v", 3]
                                       ]
+                                    ],
+                                    [
+                                      "Divide",
+                                      ["Subscript", "v", 2],
+                                      ["Subscript", "v", 3]
                                     ]
                                   ]
                                 ]
@@ -267,25 +259,21 @@ describe('Nth PRIME NUMBER', () =>
                                 "Power",
                                 0,
                                 [
-                                  "Multiply",
-                                  "abs",
+                                  "Abs",
                                   [
-                                    "Delimiter",
+                                    "Subtract",
                                     [
-                                      "Subtract",
-                                      [
-                                        "Floor",
-                                        [
-                                          "Divide",
-                                          ["Subscript", "v", 2],
-                                          ["Subscript", "v", 3]
-                                        ]
-                                      ],
+                                      "Floor",
                                       [
                                         "Divide",
                                         ["Subscript", "v", 2],
                                         ["Subscript", "v", 3]
                                       ]
+                                    ],
+                                    [
+                                      "Divide",
+                                      ["Subscript", "v", 2],
+                                      ["Subscript", "v", 3]
                                     ]
                                   ]
                                 ]
