@@ -90,17 +90,14 @@ export function getSubexpressions(
   expr: BoxedExpression,
   head: string
 ): BoxedExpression[] {
+  const result = !head || expr.head === head ? [expr] : [];
   if (expr.ops) {
-    const result = !head || expr.head === head ? [expr] : [];
     for (const op of expr.ops) result.push(...getSubexpressions(op, head));
   } else if (expr.keys) {
-    const result = !head || expr.head === head ? [expr] : [];
     for (const op of expr.keys)
       result.push(...getSubexpressions(expr.getKey(op)!, head));
-    return result;
   }
-  if (!head || expr.head === head) return [expr];
-  return [];
+  return result;
 }
 
 /**
