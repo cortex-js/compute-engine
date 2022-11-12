@@ -281,7 +281,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (body === null) return null;
       if (head(body) === 'Sequence' || head(body) === 'List') {
         if (nops(body) === 0) return ['Delimiter'];
-        return ['Delimiter', ['List', ...(ops(body) ?? [])]];
+        return ['Delimiter', ['Sequence', ...(ops(body) ?? [])]];
       }
 
       return ['Delimiter', body];

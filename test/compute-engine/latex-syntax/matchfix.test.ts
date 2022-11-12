@@ -73,35 +73,35 @@ describe('MATCHFIX synonyms', () => {
 
   test('(a, b, c)', () =>
     expect(check(`(a, b, c)`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", "b", "c"]]
-      ["List", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      ["Sequence", "a", "b", "c"]
     `));
 
   test('\\left(a, b, c\\right)', () =>
     expect(check(`\\left(a, b, c\\right)`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", "b", "c"]]
-      ["List", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      ["Sequence", "a", "b", "c"]
     `));
   test('\\bigl(a, b, c\\bigr)', () =>
     expect(check(`\\bigl(a, b, c\\bigr)`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", "b", "c"]]
-      ["List", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      ["Sequence", "a", "b", "c"]
     `));
   test('\\big(a, b, c\\big)', () =>
     expect(check(`\\big(a, b, c\\big)`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", "b", "c"]]
-      ["List", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      ["Sequence", "a", "b", "c"]
     `));
   test('\\lparen a, b, c\\rparen', () =>
     expect(check(`\\lparen a, b, c\\rparen`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", "b", "c"]]
-      ["List", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      ["Sequence", "a", "b", "c"]
     `));
   test('\\left\\lparen a, b, c\\right\\rparen', () =>
     expect(check(`\\left\\lparen a, b, c\\right\\rparen`))
       .toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", "b", "c"]]
-      ["List", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      ["Sequence", "a", "b", "c"]
     `));
 });
 

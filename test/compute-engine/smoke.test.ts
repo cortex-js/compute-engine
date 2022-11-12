@@ -37,13 +37,6 @@ ce.assume('one', 1);
 
 ///
 
-const sr1710 = ce.parse('\\cos\\left(x\\right)-\\sec^{-1}\\left(x\\right)', {
-  canonical: false,
-});
-// const sr1710 = ce.parse('-\\sec^{-1}\\left(x\\right)');
-console.log(sr1710.isValid);
-console.log(sr1710.errors.map((x) => x.toString()).join(', '));
-
 // Unhelpful message
 console.log(ce.parse('\\sqrt[x](y)').toString());
 

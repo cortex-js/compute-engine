@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { Expression } from '../../src/math-json/math-json-format';
+import { checkJson } from '../utils';
 
 export const ce = new ComputeEngine();
 
@@ -37,4 +38,20 @@ describe.skip('NUMERIC', () => {
     // Correct answer: 231139177231303975514411787649455628959060199360109972557851519105155176180318215891795874905318274163248033071850
     // expect(ce.evaluate(['Length', ['Partition', 11269]])).toMatchInlineSnapshot();
   });
+});
+
+describe('NUMERIC gamma', () => {
+  test(`gamma(1,2)`, () =>
+    expect(checkJson(['Gamma', 1, 2])).toMatchInlineSnapshot(`
+      box       = ["Gamma", 1, 2]
+      N-auto    = 0.9999999999999999999999999999999091281629753981251626790074685760510910662865722203348077695070143199
+      N-mach    = 0.9999999999999998
+    `));
+
+  test(`gamma(5,0)`, () =>
+    expect(checkJson(['Gamma', 5, 0])).toMatchInlineSnapshot(`
+      box       = ["Gamma", 5, 0]
+      N-auto    = 23.99999999999999999999999999998986904597708917242823805732208966018377622675357765205304540296354587
+      N-mach    = 23.999999999999996
+    `));
 });

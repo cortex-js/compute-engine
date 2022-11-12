@@ -202,7 +202,7 @@ export function gamma(ce: IComputeEngine, z: Decimal): Decimal {
       '-0.13857109526572011689554707',
       '9.984369578019570859563e-6',
       '1.50563273514931155834e-7',
-    ].map(ce.bignum);
+    ].map((x) => ce.bignum(x));
   });
 
   let x = LANCZOS_7_C[0];

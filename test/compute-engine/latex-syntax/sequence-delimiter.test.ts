@@ -24,21 +24,21 @@ describe('SEQUENCES AND DELIMITERS', () => {
     `);
     // Sequence with empty element
     expect(check('(a,,b)')).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", "Nothing", "b"]]
-      ["List", "a", "Nothing", "b"]
+      latex     = ["Delimiter", ["Sequence", "a", "Nothing", "b"]]
+      ["Sequence", "a", "Nothing", "b"]
     `);
   });
   test('Groups', () => {
     expect(check('(a, b, c)')).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", "b", "c"]]
-      ["List", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
+      ["Sequence", "a", "b", "c"]
     `);
     // @fixme
     expect(check('(a, b; c, d, ;; n ,, m)')).toMatchInlineSnapshot(`
       latex     = [
         "Delimiter",
         [
-          "List",
+          "Sequence",
           ["List", "a", "b"],
           [
             "List",
@@ -54,7 +54,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
         ]
       ]
       box       = [
-        "List",
+        "Sequence",
         ["List", "a", "b"],
         [
           "List",
@@ -69,7 +69,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
         ]
       ]
       canonical = [
-        "List",
+        "Sequence",
         ["List", "a", "b"],
         [
           "List",
@@ -82,12 +82,12 @@ describe('SEQUENCES AND DELIMITERS', () => {
       ]
     `);
     expect(check('(a, (b, c))')).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", ["Delimiter", ["List", "b", "c"]]]]
-      ["List", "a", ["List", "b", "c"]]
+      latex     = ["Delimiter", ["Sequence", "a", ["Delimiter", ["Sequence", "b", "c"]]]]
+      ["Sequence", "a", "b", "c"]
     `);
     expect(check('(a, (b; c))')).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["List", "a", ["Delimiter", ["List", "b", "c"]]]]
-      ["List", "a", ["List", "b", "c"]]
+      latex     = ["Delimiter", ["Sequence", "a", ["Delimiter", ["Sequence", "b", "c"]]]]
+      ["Sequence", "a", "b", "c"]
     `);
   });
   test('Sequences', () => {

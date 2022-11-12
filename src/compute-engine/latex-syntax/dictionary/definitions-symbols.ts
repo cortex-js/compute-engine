@@ -4,6 +4,7 @@ const SYMBOLS: [string, string, number][] = [
   // Greek
   ['Alpha', '\\alpha', 0x03b1],
   ['Beta', '\\beta', 0x03b2],
+  ['Gamma', '\\gamma', 0x03b3],
   ['Delta', '\\delta', 0x03b4],
   ['Epsilon', '\\epsilon', 0x03b5],
   ['EpsilonSymbol', '\\varepsilon', 0x03f5], // GREEK LUNATE EPSILON SYMBOL

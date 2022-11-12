@@ -18,6 +18,7 @@
   - `\sqrt{25x^2}` -> `5x`
 - Improved evaluation of `["Power"]` expressions, including for negative
   arguments and non-integer exponents and complex arguments and exponents.
+- Added `Arccot`, `Arcoth`, `Arcsch`, `Arcscc`, `Arsech` and `Arccsc`
 - `expr.solve()` returns result for polynomials of order up to 2.
 - The `pattern.match()` function now work correctly for commutative functions,
   i.e. `ce.pattern(['Add', '_a', 'x']).match(ce.parse('x+y')) -> {"_a": "y"}`
@@ -64,6 +65,8 @@
 
 ### Bugs Fixed
 
+- The `\gamma` command now correctly maps to `["Gamma"]`
+- Fixed numeric evaluation of the `["Gamma"]` function when using bignum
 - **#57** Substituting `0` (i.e. with `expr.subs({})`) did not work.
 - **#60** Correctly parse multi-char symbols with underscore, i.e.
   `\mathrm{V_a}`
