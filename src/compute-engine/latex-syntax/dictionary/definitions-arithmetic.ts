@@ -499,6 +499,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (_parser, expr) => (isEmptySequence(expr) ? null : ['Abs', expr]),
   },
   {
+    trigger: 'abs',
+    kind: 'function',
+    parse: (parser) => {
+      const arg = parser.matchArguments('enclosure');
+      return arg === null ? 'Abs' : (['Abs', ...arg] as Expression);
+    },
+  },
+  {
     name: 'Add',
     trigger: ['+'],
     kind: 'infix',
@@ -528,6 +536,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openDelimiter: '\\lceil',
     closeDelimiter: '\\rceil',
+  },
+  {
+    trigger: 'ceil',
+    kind: 'function',
+    parse: (parser) => {
+      const arg = parser.matchArguments('enclosure');
+      return arg === null ? 'Ceil' : (['Ceil', ...arg] as Expression);
+    },
   },
   {
     name: 'Complex',
