@@ -16,6 +16,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { trigger: '\\mathbb{Z}', parse: 'Integer' },
   { name: 'RationalNumber', trigger: ['\\Q'] },
   { name: 'RealNumber', trigger: ['\\R'] },
+  { trigger: '\\mathbb{R}', parse: 'RealNumber' },
   { name: 'ExtendedRealNumber', trigger: ['\\bar\\R'] },
   { name: 'TranscendentalNumber', trigger: '\\R-\\bar\\Q' },
   { trigger: '\\R\\backslash\\bar\\Q', parse: 'TranscendentalNumber' },
