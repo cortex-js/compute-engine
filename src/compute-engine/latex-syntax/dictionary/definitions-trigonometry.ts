@@ -10,42 +10,49 @@ import { LatexDictionary, Parser } from '../public';
 function parseTrig(op: string) {
   return (parser: Parser): Expression | null => {
     let isInverse = false;
-
     let primeLevel = 0;
+    let sup: Expression | null = null;
 
     parser.skipSpace();
     if (parser.match('^')) {
       parser.skipSpace();
-      // @todo: could also be a regular exponent, i.e. ^2, ^3...
+
+      const start = parser.index;
+
+      // Is this ^{-1}? or some primes?
       if (parser.match('<{>')) {
         parser.skipSpace();
-        // There's a superscript..., parse it.
         if (parser.match('-') && parser.match('1')) {
-          isInverse = true;
+          parser.skipSpace();
+          if (parser.match('<}>')) isInverse = true;
         }
-        do {
-          if (parser.match('\\doubleprime')) {
-            primeLevel += 2;
+        if (!isInverse) {
+          // Is it one or more Prime?
+          let done = false;
+          while (!done) {
+            parser.skipSpace();
+            if (parser.match('\\doubleprime')) primeLevel += 2;
+            else if (parser.match('\\prime')) primeLevel += 1;
+            else if (parser.match("'")) primeLevel += 1;
+            else done = true;
           }
-          if (parser.match('\\prime')) {
-            primeLevel += 1;
+          if (!parser.match('<}>')) primeLevel = 0;
+        }
+        if (primeLevel === 0 && !isInverse) {
+          // We didn't find primes or inverse, this could be a regular exponent
+          parser.index = start;
+          sup = parser.matchRequiredLatexArgument();
+        }
+        if (primeLevel === 0) {
+          // Do we have some primes (not in an exponent)
+          let done = false;
+          while (!done) {
+            parser.skipSpace();
+            if (parser.match('\\doubleprime')) primeLevel += 2;
+            else if (parser.match('\\prime')) primeLevel += 1;
+            else if (parser.match("'")) primeLevel += 1;
+            else done = true;
           }
-          if (parser.match("'")) {
-            primeLevel += 1;
-          }
-        } while (!parser.match('<}>') && !parser.atEnd);
-      }
-      let done = false;
-      while (!done) {
-        parser.skipSpace();
-        if (parser.match('\\doubleprime')) {
-          primeLevel += 2;
-        } else if (parser.match('\\prime')) {
-          primeLevel += 1;
-        } else if (parser.match("'")) {
-          primeLevel += 1;
-        } else {
-          done = true;
         }
       }
     }
@@ -88,17 +95,14 @@ function parseTrig(op: string) {
       op ??
       '';
 
-    if (isInverse) {
-      head = ['InverseFunction', head];
-    }
-    if (primeLevel >= 1) {
-      head = ['Derivative', primeLevel, head];
-    }
+    if (isInverse) head = ['InverseFunction', head];
+
+    if (primeLevel >= 1) head = ['Derivative', primeLevel, head];
 
     const args = parser.matchArguments('implicit');
-    if (args === null) return head;
+    if (args === null) return sup ? [['Power', [head, '_'], sup]] : head;
 
-    return [head, ...args];
+    return sup ? ['Power', [head, ...args], sup] : [head, ...args];
   };
 }
 export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [

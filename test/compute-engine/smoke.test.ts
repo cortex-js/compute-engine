@@ -37,6 +37,8 @@ ce.assume('one', 1);
 
 ///
 
+console.log(ce.parse('\\sin^{\\prime}(2)').toString());
+
 // Unhelpful message
 console.log(ce.parse('\\sqrt[x](y)').toString());
 
