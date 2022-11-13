@@ -119,16 +119,12 @@ describe('INTEGRAL', () => {
         "Equal",
         [
           "Integrate",
-          [
-            "Divide",
-            ["Multiply", ["Rational", 3, 5], "x"],
-            ["Multiply", "d", "x"]
-          ],
+          ["Divide", ["Rational", 3, 5], "d"],
           ["Triple", "Nothing", 0, {num: "+Infinity"}]
         ],
         2
       ]
-    `));
+    `)); // @fixme, should error
 
   test('with dx in addition', () =>
     expect(json('\\int^\\infty_03x+kxdx = 2')).toMatchInlineSnapshot(`

@@ -38,7 +38,7 @@ ce.assume('one', 1);
 ///
 
 // Should simplify
-console.log(ce.parse('a^3a\\times a^2').simplify().json);
+console.log(ce.parse('a^3a\\times a^5').evaluate().json);
 
 // Gets confused with delimiters (mathlive#1703)
 console.log(ce.parse('e^{i\\cdot}'));
@@ -573,9 +573,7 @@ describe('CANONICALIZATION multiply', () => {
       canonicalToJson(
         '1\\times x\\times 2\\times -5.23 \\times 3.2 \\times \\frac23\\times \\frac1x'
       )
-    ).toMatchInlineSnapshot(
-      `["Divide", ["Multiply", -16.736, ["Rational", 4, 3], "x"], "x"]`
-    );
+    ).toMatchInlineSnapshot(`["Multiply", -16.736, ["Rational", 4, 3]]`);
   });
 });
 describe('CANONICALIZATION divide', () => {
@@ -742,12 +740,12 @@ describe('SIMPLIFICATION trigonometry', () => {
 describe('SIMPLIFICATION power', () => {
   test(`simplify('a^3a\\times a^2')`, () =>
     expect(simplifyToJson('a^3a\\times a^2')).toMatchInlineSnapshot(
-      `["Multiply", "a", ["Square", "a"], ["Power", "a", 3]]`
+      `["Power", "a", 6]`
     ));
 
   test(`simplify('\\frac{a^4}{a^2}')`, () =>
     expect(simplifyToJson('\\frac{a^4}{a^2}')).toMatchInlineSnapshot(
-      `["Divide", ["Power", "a", 4], ["Square", "a"]]`
+      `["Square", "a"]`
     ));
 
   test(`simplify('(a+b)^6')`, () =>
@@ -761,20 +759,13 @@ describe('EXPAND', () => {
     expect(expand('(a+b)^6')).toMatchInlineSnapshot(`
       [
         "Add",
-        ["Multiply", ["Square", "a"], ["Power", "a", 4]],
-        ["Multiply", 8, "a", "a", "a", "b", "b", "b"],
-        ["Multiply", 2, ["Square", "a"], ["Square", "a"], ["Square", "b"]],
-        ["Multiply", 12, "a", "a", "b", "b", ["Square", "a"]],
-        ["Multiply", 12, "a", "a", "b", "b", ["Square", "b"]],
-        ["Multiply", ["Square", "a"], ["Power", "b", 4]],
-        ["Multiply", 2, "a", "b", ["Power", "a", 4]],
-        ["Multiply", 4, "a", "b", ["Square", "a"], ["Square", "a"]],
-        ["Multiply", 12, "a", "b", ["Square", "a"], ["Square", "b"]],
-        ["Multiply", 2, ["Square", "a"], ["Square", "b"], ["Square", "b"]],
-        ["Multiply", 2, "a", "b", ["Power", "b", 4]],
-        ["Multiply", 4, "a", "b", ["Square", "b"], ["Square", "b"]],
-        ["Multiply", ["Square", "b"], ["Power", "a", 4]],
-        ["Multiply", ["Square", "b"], ["Power", "b", 4]]
+        ["Power", "a", 6],
+        ["Multiply", 20, ["Power", "a", 3], ["Power", "b", 3]],
+        ["Multiply", 15, ["Square", "a"], ["Power", "b", 4]],
+        ["Multiply", 6, "a", ["Power", "b", 5]],
+        ["Power", "b", 6],
+        ["Multiply", 15, ["Square", "b"], ["Power", "a", 4]],
+        ["Multiply", 6, "b", ["Power", "a", 5]]
       ]
     `)); //@fixme
 });

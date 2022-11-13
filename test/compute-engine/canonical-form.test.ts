@@ -185,19 +185,25 @@ describe('COMMUTATIVE ORDER', () => {
       ]
       box       = [
         "Negate",
-        ["Multiply", ["Rational", 45, 2], "Pi", "x", "y", "z", ["Sqrt", "y"]]
+        [
+          "Multiply",
+          ["Rational", 45, 2],
+          "Pi",
+          "x",
+          "z",
+          ["Power", "y", ["Rational", 3, 2]]
+        ]
       ]
       N-auto    = [
         "Multiply",
         "-70.68583470577034786540947612378881489443631148593988097193625332692586914143970246913078357019763403",
         "x",
-        "y",
         "z",
-        ["Sqrt", "y"]
+        ["Power", "y", 1.5]
       ]
-      N-mach    = ["Multiply", -70.68583470577035, "x", "y", "z", ["Sqrt", "y"]]
+      N-mach    = ["Multiply", -70.68583470577035, "x", "z", ["Power", "y", 1.5]]
     `);
-  }); // @fixme: the -1 should be applied to the Decimal
+  });
 
   test(`Canonical form '(b^3c^2d)(x^7y)(a^5g)(b^2x^5b3)'`, () => {
     expect(check('(b^3c^2d)(x^7y)(a^5g)(b^2x^5b3)')).toMatchInlineSnapshot(`
@@ -217,20 +223,17 @@ describe('COMMUTATIVE ORDER', () => {
       [
         "Multiply",
         3,
-        "b",
         "d",
         "g",
         "y",
-        ["Square", "b"],
         ["Square", "c"],
-        ["Power", "b", 3],
         ["Power", "a", 5],
-        ["Power", "x", 5],
-        ["Power", "x", 7]
+        ["Power", "b", 6],
+        ["Power", "x", 12]
       ]
     `);
   });
-}); // @fixme x^5 and x^7 should be combined
+});
 
 //
 // POLYNOMIAL ORDER
@@ -357,13 +360,20 @@ describe('POLYNOMIAL ORDER', () => {
         ["Delimiter", ["Multiply", ["Power", "a", 5], "b"]],
         ["Delimiter", ["Power", "a", 5]]
       ]
-      [
+      box       = [
         "Add",
         ["Power", "a", 5],
-        ["Multiply", ["Square", "a"], ["Power", "a", 3]],
+        ["Power", "a", 5],
         ["Power", "b", 6],
-        ["Multiply", "b", ["Power", "a", 5]],
-        ["Multiply", ["Square", "b"], ["Power", "b", 3]]
+        ["Power", "b", 5],
+        ["Multiply", "b", ["Power", "a", 5]]
+      ]
+      simplify  = [
+        "Add",
+        ["Multiply", 2, ["Power", "a", 5]],
+        ["Power", "b", 6],
+        ["Power", "b", 5],
+        ["Multiply", "b", ["Power", "a", 5]]
       ]
     `);
   });

@@ -466,12 +466,12 @@ describe('OPERATOR serialize, valid', () => {
   test(`['Multiply', ['Divide', 2, 'x'], ['Divide', 'x', 3]]`, () =>
     expect(
       latex(['Multiply', ['Divide', 2, 'x'], ['Divide', 'x', 3]])
-    ).toMatchInlineSnapshot(`\\frac{1}{x}(\\frac{2x}{3})`));
+    ).toMatchInlineSnapshot(`\\frac{2}{3}`));
 
   test(`['Multiply', ['Divide', 2, 'x'], ['Power', 'x', -2]]`, () =>
     expect(
       latex(['Multiply', ['Divide', 2, 'x'], ['Power', 'x', -2]])
-    ).toMatchInlineSnapshot(`(2)(xx^2)^{-1}`));
+    ).toMatchInlineSnapshot(`\\frac{2}{x^{3}}`));
 
   test(`['Divide', 2, 3]`, () =>
     expect(latex(['Divide', 2, 3])).toMatchInlineSnapshot(`\\frac{2}{3}`));

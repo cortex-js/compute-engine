@@ -207,16 +207,13 @@ export class Product {
       }
     }
 
-    // If the base is non-negative, look for the base, and add the exponent
-    // if already in the list of terms
+    // Look for the base, and add the exponent if already in the list of terms
     let found = false;
-    if (rest.isNonNegative) {
-      for (const x of this._terms) {
-        if (x.term.isSame(rest)) {
-          x.exponent = add(x.exponent, exponent);
-          found = true;
-          break;
-        }
+    for (const x of this._terms) {
+      if (x.term.isSame(rest)) {
+        x.exponent = add(x.exponent, exponent);
+        found = true;
+        break;
       }
     }
     if (!found) this._terms.push({ term: rest, exponent });
