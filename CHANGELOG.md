@@ -65,6 +65,7 @@
 
 ### Bugs Fixed
 
+- The parsing and evaluation of log functions could produce unexpected results
 - The `\gamma` command now correctly maps to `["Gamma"]`
 - Fixed numeric evaluation of the `["Gamma"]` function when using bignum
 - **#57** Substituting `0` (i.e. with `expr.subs({})`) did not work.

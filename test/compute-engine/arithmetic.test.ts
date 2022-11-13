@@ -1092,3 +1092,191 @@ describe('Rational', () => {
       N-mach    = 3.141592653589793
     `));
 });
+
+describe('Ln', () => {
+  expect(checkJson(['Ln', 1.1])).toMatchInlineSnapshot(`
+    box       = ["Ln", 1.1]
+    N-auto    = 0.095310179804324860044
+    N-mach    = 0.09531017980432493
+  `);
+  expect(checkJson(['Ln', 1])).toMatchInlineSnapshot(`
+    box       = ["Ln", 1]
+    N-auto    = 0
+  `);
+  expect(checkJson(['Ln', 0])).toMatchInlineSnapshot(`
+    box       = ["Ln", 0]
+    N-auto    = {num: "-Infinity"}
+  `);
+  expect(checkJson(['Ln', -1])).toMatchInlineSnapshot(`
+    box       = ["Ln", -1]
+    N-auto    = ["Complex", 0, 3.141592653589793]
+    N-big     = {num: "NaN"}
+    N-cplx   = ["Complex", 0, 3.141592653589793]
+  `);
+  expect(checkJson(['Ln', 'Pi'])).toMatchInlineSnapshot(`
+    box       = ["Ln", "Pi"]
+    N-auto    = 1.1447298858494001741
+    N-mach    = 1.1447298858494002
+  `);
+  expect(checkJson(['Ln', ['Complex', 1.1, 1.1]])).toMatchInlineSnapshot(`
+    box       = ["Ln", ["Complex", 1.1, 1.1]]
+    N-auto    = ["Complex", 0.4418837700842976, 0.7853981633974483]
+    N-big     = {num: "NaN"}
+    N-cplx   = ["Complex", 0.4418837700842976, 0.7853981633974483]
+  `);
+});
+
+describe('Lb', () => {
+  expect(checkJson(['Lb', 1.1])).toMatchInlineSnapshot(`
+    box       = ["Lb", 1.1]
+    N-auto    = 0.13750352374993502
+  `);
+  expect(checkJson(['Lb', 1])).toMatchInlineSnapshot(`
+    box       = ["Lb", 1]
+    N-auto    = 0
+  `);
+  expect(checkJson(['Lb', 0])).toMatchInlineSnapshot(`
+    box       = ["Lb", 0]
+    N-auto    = ComplexInfinity
+    N-big     = {num: "NaN"}
+    N-mach    = {num: "-Infinity"}
+  `);
+  expect(checkJson(['Lb', -1])).toMatchInlineSnapshot(`
+    box       = ["Lb", -1]
+    N-auto    = {num: "NaN"}
+    N-cplx   = ["Complex", 0, 4.532360141827194]
+  `);
+  expect(checkJson(['Lb', 'Pi'])).toMatchInlineSnapshot(`
+    box       = ["Lb", "Pi"]
+    N-auto    = 1.651496129472319
+    N-mach    = 1.6514961294723187
+  `);
+  expect(checkJson(['Lb', ['Complex', 1.1, 1.1]])).toMatchInlineSnapshot(`
+    box       = ["Lb", ["Complex", 1.1, 1.1]]
+    N-auto    = ["Complex", 0.637503523749935, 1.1330900354567985]
+    N-big     = {num: "NaN"}
+    N-cplx   = ["Complex", 0.637503523749935, 1.1330900354567985]
+  `);
+});
+
+describe('Lg', () => {
+  expect(checkJson(['Lg', 1.1])).toMatchInlineSnapshot(`
+    box       = ["Lg", 1.1]
+    N-auto    = 0.04139268515822504075
+    N-mach    = 0.04139268515822507
+  `);
+  expect(checkJson(['Lg', 1])).toMatchInlineSnapshot(`
+    box       = ["Lg", 1]
+    N-auto    = 0
+  `);
+  expect(checkJson(['Lg', 0])).toMatchInlineSnapshot(`
+    box       = ["Lg", 0]
+    N-auto    = {num: "-Infinity"}
+  `);
+  expect(checkJson(['Lg', -1])).toMatchInlineSnapshot(`
+    box       = ["Lg", -1]
+    N-auto    = ["Complex", 0, 1.3643763538418412]
+    N-big     = {num: "NaN"}
+    N-cplx   = ["Complex", 0, 1.3643763538418412]
+  `);
+  expect(checkJson(['Lg', 'Pi'])).toMatchInlineSnapshot(`
+    box       = ["Lg", "Pi"]
+    N-auto    = 0.49714987269413385435
+    N-mach    = 0.4971498726941338
+  `);
+  expect(checkJson(['Lg', ['Complex', 1.1, 1.1]])).toMatchInlineSnapshot(`
+    box       = ["Lg", ["Complex", 1.1, 1.1]]
+    N-auto    = ["Complex", 0.19190768299021566, 0.3410940884604603]
+    N-big     = {num: "NaN"}
+    N-cplx   = ["Complex", 0.19190768299021566, 0.3410940884604603]
+  `);
+});
+
+describe('Log(a,b)', () => {
+  expect(checkJson(['Log', 1.1])).toMatchInlineSnapshot(`
+    box       = ["Log", 1.1]
+    N-auto    = 0.04139268515822504075
+    N-mach    = 0.04139268515822507
+  `);
+  expect(checkJson(['Log', 1])).toMatchInlineSnapshot(`
+    box       = ["Log", 1]
+    N-auto    = 0
+  `);
+  expect(checkJson(['Log', 0])).toMatchInlineSnapshot(`
+    box       = ["Log", 0]
+    N-auto    = {num: "-Infinity"}
+  `);
+  expect(checkJson(['Log', -1])).toMatchInlineSnapshot(`
+    box       = ["Log", -1]
+    N-auto    = ["Complex", 0, 1.3643763538418412]
+    N-big     = {num: "NaN"}
+    N-cplx   = ["Complex", 0, 1.3643763538418412]
+  `);
+  expect(checkJson(['Log', 'Pi'])).toMatchInlineSnapshot(`
+    box       = ["Log", "Pi"]
+    N-auto    = 0.49714987269413385435
+    N-mach    = 0.4971498726941338
+  `);
+  expect(checkJson(['Log', ['Complex', 1.1, 1.1]])).toMatchInlineSnapshot(`
+    box       = ["Log", ["Complex", 1.1, 1.1]]
+    N-auto    = ["Complex", 0.19190768299021566, 0.3410940884604603]
+    N-big     = {num: "NaN"}
+    N-cplx   = ["Complex", 0.19190768299021566, 0.3410940884604603]
+  `);
+
+  expect(checkJson(['Log', 1.1, 5])).toMatchInlineSnapshot(`
+    box       = ["Log", 1.1, 5]
+    N-auto    = 0.059219544331585022129
+    N-mach    = 0.05921954433158507
+  `);
+  expect(checkJson(['Log', 1, 5])).toMatchInlineSnapshot(`
+    box       = ["Log", 1, 5]
+    N-auto    = 0
+  `);
+  expect(checkJson(['Log', 0, 5])).toMatchInlineSnapshot(`
+    box       = ["Log", 0, 5]
+    N-auto    = {num: "-Infinity"}
+  `);
+  expect(checkJson(['Log', -1, 5])).toMatchInlineSnapshot(`
+    box       = ["Log", -1, 5]
+    N-auto    = {num: "NaN"}
+  `);
+  expect(checkJson(['Log', 'Pi', 5])).toMatchInlineSnapshot(`
+    box       = ["Log", "Pi", 5]
+    N-auto    = 0.71126066871266895533
+    N-mach    = 0.711260668712669
+  `);
+  expect(checkJson(['Log', ['Complex', 1.1, 1.1], 5])).toMatchInlineSnapshot(`
+    box       = ["Log", ["Complex", 1.1, 1.1], 5]
+    N-auto    = ["Complex", 0.2745578233682816, 0.48799531645779287]
+    N-big     = {num: "NaN"}
+    N-cplx   = ["Complex", 0.2745578233682816, 0.48799531645779287]
+  `);
+});
+
+describe('Log Invalid', () => {
+  expect(checkJson(['Ln'])).toMatchInlineSnapshot(`
+    box       = ["Ln"]
+    canonical = ["Ln", ["Error", ["ErrorCode", "'missing'", "Number"]]]
+  `);
+  expect(checkJson(['Ln', "'string'"])).toMatchInlineSnapshot(`
+    box       = ["Ln", "'string'"]
+    canonical = [
+      "Ln",
+      [
+        "Error",
+        [
+          "ErrorCode",
+          "'incompatible-domain'",
+          "Number",
+          ["Domain", "String"]
+        ],
+        "'string'"
+      ]
+    ]
+  `);
+  expect(checkJson(['Ln', 3, 4])).toMatchInlineSnapshot(`
+    box       = ["Ln", 3, 4]
+    canonical = ["Ln", 3, ["Error", "'unexpected-argument'", 4]]
+  `);
+});

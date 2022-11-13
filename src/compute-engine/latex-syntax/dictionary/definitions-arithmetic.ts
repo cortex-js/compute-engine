@@ -650,50 +650,45 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Lg',
+    trigger: ['\\lg'],
     serialize: (serializer, expr) =>
-      '\\ln_{10}' + serializer.wrapArguments(expr),
+      '\\log_{10}' + serializer.wrapArguments(expr),
+    parse: (parser) => {
+      const arg = parser.matchArguments('implicit');
+      if (arg === null) return ['Lg'] as Expression;
+      return ['Log', ...arg, 10] as Expression;
+    },
   },
   {
     name: 'Lb',
     trigger: '\\lb',
     parse: (parser) => {
       const arg = parser.matchArguments('implicit');
-      if (arg === null) return null;
+      if (arg === null) return ['Log'] as Expression;
       return ['Log', ...arg, 2] as Expression;
     },
   },
   {
     name: 'Ln',
+    trigger: ['\\ln'],
     serialize: (serializer, expr): string =>
       '\\ln' + serializer.wrapArguments(expr),
+    parse: (parser) => parseLog('Ln', parser),
   },
   {
     name: 'Log',
-    trigger: '\\ln',
-    parse: (parser) => {
-      let sub: string | null = null;
-      let base: number | null = null;
-      if (parser.match('_')) {
-        sub = parser.matchStringArgument() ?? parser.next();
-        base = Number.parseFloat(sub ?? '10');
-      }
-      const arg = parser.matchArguments('implicit');
-      if (arg === null) return null;
-      if (base === 10) return ['Lg', ...arg] as Expression;
-      if (base === 2) return ['Lb', ...arg] as Expression;
-      if (sub === null) return ['Ln', ...arg] as Expression;
-      return ['Log', ...arg, sub] as Expression;
-    },
+    trigger: ['\\log'],
+    parse: (parser) => parseLog('Log', parser),
     serialize: (serializer, expr): string => {
       const base = op2(expr);
       if (base)
         return joinLatex([
-          '\\ln_{',
+          '\\log_{',
           base.toString(),
           '}',
           serializer.wrap(op1(expr)),
         ]);
-      return '\\ln' + serializer.wrapArguments(expr);
+      return '\\log' + serializer.wrapArguments(expr);
     },
   },
 
@@ -967,4 +962,19 @@ function serializeBigOp(command: string) {
 
     return joinLatex([command, ...sup, ...sub, serializer.serialize(fn)]);
   };
+}
+
+function parseLog(command: string, parser: Parser): Expression | null {
+  let sub: string | null = null;
+  let base: number | null = null;
+  if (parser.match('_')) {
+    sub = parser.matchStringArgument() ?? parser.next();
+    base = Number.parseFloat(sub ?? '10');
+  }
+  const arg = parser.matchArguments('implicit');
+  if (arg === null) return [command];
+  if (base === 10) return ['Log', arg[0]] as Expression;
+  if (base === 2) return ['Lb', ...arg] as Expression;
+  if (sub === null) return [command, ...arg] as Expression;
+  return ['Log', ...arg, sub] as Expression;
 }

@@ -472,6 +472,7 @@
       const mf = document.getElementById('mf');
       mf.setOptions({
         onInlineShortcut: (_mf, s) => {
+          if (/^(ln|log|lb|lg)/.test(s)) return '\\' + s;
           if (/^[a-zA-Z][a-zA-Z0-9]*'?(_[a-zA-Z0-9]+'?)?$/.test(s)) {
             const m = s.match(/^([a-zA-Z]+)([0-9]+)$/);
             if (m) {
@@ -561,10 +562,15 @@
                   'tg',
                   'th',
                 ].includes(m[1])
-              )
+              ) {
+                console.log('566', s);
                 return `\\${m[1]} ${m[2]}`;
+              }
+              console.log('569', s);
               return `\\mathrm{${m[1]}}_{${m[2]}}`;
             }
+            console.log('572', s);
+            if (s.includes('_')) debugger;
             return '\\mathrm{' + s + '}';
           }
           return '';

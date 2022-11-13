@@ -295,8 +295,8 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           N: (ce, ops) =>
             applyN(
               ops[0],
-              Math.log,
-              (x) => x.log(),
+              (x) => (x >= 0 ? Math.log(x) : ce.complex(x).log()),
+              (x) => (!x.isNeg() ? x.ln() : ce.complex(x.toNumber()).log()),
               (z) => z.log()
             ),
         },
@@ -310,15 +310,46 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
 
         signature: {
           domain: ['Function', 'Number', ['Maybe', 'Number'], 'Number'],
-          N: (_ce, ops) =>
-            apply2N(
+          canonical: (ce, ops) => {
+            ops = flattenSequence(ops);
+            if (ops.length === 1)
+              return ce._fn('Log', [
+                validateArgument(ce, ops[0].canonical, 'Number'),
+              ]);
+            if (ops.length === 2) {
+              const base = validateArgument(ce, ops[1].canonical, 'Number');
+              if (base.numericValue === 10)
+                return ce._fn('Log', [
+                  validateArgument(ce, ops[0].canonical, 'Number'),
+                ]);
+              return ce._fn('Log', [
+                validateArgument(ce, ops[0].canonical, 'Number'),
+                base,
+              ]);
+            }
+            return ce._fn('Log', validateArgumentCount(ce, ops, 2));
+          },
+          N: (ce, ops) => {
+            if (ops[1] === undefined)
+              return applyN(
+                ops[0],
+                (x) =>
+                  x >= 0 ? Math.log10(x) : ce.complex(x).log().div(Math.LN10),
+                (x) =>
+                  !x.isNeg()
+                    ? Decimal.log10(x)
+                    : ce.complex(x.toNumber()).log().div(Math.LN10),
+                (z) => z.log().div(Math.LN10)
+              );
+            return apply2N(
               ops[0],
               ops[1],
               (a, b) => Math.log(a) / Math.log(b),
               (a, b) => a.log(b),
               (a, b) =>
                 a.log().div(typeof b === 'number' ? Math.log(b) : b.log())
-            ),
+            );
+          },
         },
       },
 
@@ -334,9 +365,13 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           N: (ce, ops) =>
             applyN(
               ops[0],
-              Math.log2,
-              (x) => Decimal.log2(x),
-              (z) => z.log().div(Math.log(2))
+              (x) =>
+                x >= 0 ? Math.log2(x) : ce.complex(x).log().div(Math.LN2),
+              (x) =>
+                x.isNeg()
+                  ? Decimal.log10(x)
+                  : ce.complex(x.toNumber()).log().div(Math.LN2),
+              (z) => z.log().div(Math.LN2)
             ),
         },
       },
@@ -352,9 +387,13 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           N: (ce, ops) =>
             applyN(
               ops[0],
-              Math.log10,
-              (x) => Decimal.log10(x),
-              (z) => z.log().div(Math.log(10))
+              (x) =>
+                x >= 0 ? Math.log10(x) : ce.complex(x).log().div(Math.LN10),
+              (x) =>
+                !x.isNeg()
+                  ? Decimal.log10(x)
+                  : ce.complex(x.toNumber()).log().div(Math.LN10),
+              (z) => z.log().div(Math.LN10)
             ),
         },
       },

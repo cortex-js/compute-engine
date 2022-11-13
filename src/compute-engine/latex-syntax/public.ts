@@ -803,6 +803,8 @@ export interface Parser {
    */
   matchArguments(kind: '' | 'implicit' | 'enclosure'): Expression[] | null;
 
+  matchStringArgument(): string | null;
+
   /** If matches the normalized open delimiter, returns the
    * expected closing delimiter.
    *

@@ -942,7 +942,7 @@ export class _Parser implements Parser {
       // We are looking for an expression inside an optional pair of `()`
       // (i.e. trig functions, as in `\cos x`.)
       if (head(group) === 'Delimiter') {
-        if (op(group, 1) === 'Sequence') return getSequence(group) ?? [];
+        if (head(op(group, 1)) === 'Sequence') return getSequence(group) ?? [];
         return [op(group, 1) ?? ['Sequence']];
       }
 
