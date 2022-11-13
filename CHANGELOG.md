@@ -12,6 +12,10 @@
 
 ### Improvements
 
+- `["Expand"]` handles more cases
+- The trig functions can now have a regular exponent, i.e.`\cos^2(x)` in
+  addition to `-1` for inverse, and a combination of `\prime`, `\doubleprime`
+  and `'` for derivatives.
 - `ce.assume()` handle more expressions and can be used to define new symbols by
   domain or value.
 - Better simplification for square root expressions:

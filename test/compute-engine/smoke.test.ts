@@ -37,28 +37,22 @@ ce.assume('one', 1);
 
 ///
 
-console.log(ce.parse('\\sin^{\\prime}(2)').toString());
+// Should simplify
+console.log(ce.parse('a^3a\\times a^2').simplify().json);
+
+// Gets confused with delimiters (mathlive#1703)
+console.log(ce.parse('e^{i\\cdot}'));
+
+// Produces error -- mathlive #1707
+console.log(ce.parse("f'").json);
 
 // Unhelpful message
 console.log(ce.parse('\\sqrt[x](y)').toString());
 
-// Does not parse as symbol
-console.log(ce.parse('\\gamma').toString());
-
-const expr = ce.parse('4x(3x+2)-5(5x-4)').json;
-console.log(ce.box(['Expand', expr]).evaluate().latex);
-
-// Not valid, doesn't render
-const q1 = ce.parse('\\cos\\left(x\\right)-\\sec^{-1}\\left(x\\right)');
-console.log(q1.isValid);
-console.log(q1.errors);
-console.log(q1.toString());
-
-// const expr = ce.parse('x^2').json;
-
-// console.log(
-//   ce.box(['Integrate', expr, ['Element', 'x', ['Interval', 0, 1]]]).latex
-// );
+const expr = ce.parse('x^2').json;
+console.log(
+  ce.box(['Integrate', expr, ['Element', 'x', ['Interval', 0, 1]]]).latex
+);
 
 const n1 = ce.parse('x_{1,2}');
 console.log(n1.toString());
@@ -72,15 +66,10 @@ console.log(ce.parse('123\\,45\\,67.123\\,456\\,e5').json);
 // Should parse as -12
 console.log(ce.parse('- 1 2').json);
 
-// Should not error
-console.log(ce.box(['InverseFunction', 'f']).latex);
-console.log(ce.box(['InverseFunction', 'g']).latex);
-
-// Produces error
-console.log(ce.parse("f'").json);
-
-// Should evaluate InverseFunction
-console.log(ce.parse(`\\cos^{-1}\\doubleprime(x)`).simplify().toJSON());
+// Simplify drops the (x)
+const expr2 = ce.parse(`\\cos^{-1}\\doubleprime(x)`);
+console.log(expr2.toString());
+console.log(expr2.simplify().toJSON());
 
 // Parsed as imaginary unit
 // -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and
@@ -92,9 +81,6 @@ console.log(ce.parse(`\\cos^{-1}\\doubleprime(x)`).simplify().toJSON());
 const z3 = ce.parse('\\sum_ii^2').canonical;
 console.log(z3.json);
 
-// Should simplify
-console.log(ce.parse('a^3a\\times a^2').simplify().json);
-
 // console.log(engine.pattern(['Add', 1, '_']).match(engine.box(['Add', 1, 2])));
 
 // console.log(
@@ -102,12 +88,6 @@ console.log(ce.parse('a^3a\\times a^2').simplify().json);
 // );
 
 // Look for other @fixme in tests
-
-// Should evaluate to a rational
-const k41 = ce.parse(
-  '\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}'
-);
-console.log(k41.evaluate().toString());
 
 //
 // PROBLEMATIC EXPRESSIONS

@@ -20,6 +20,9 @@ export function expand2(
   if (lhs.head === 'Negate') return canonicalNegate(expand2(lhs.op1, rhs));
   if (rhs.head === 'Negate') return canonicalNegate(expand2(lhs, rhs.op1));
 
+  lhs = expand(lhs);
+  rhs = expand(rhs);
+
   if (lhs.head === 'Add') return ce.add(lhs.ops!.map((x) => expand2(x, rhs)));
   if (rhs.head === 'Add') return ce.add(rhs.ops!.map((x) => expand2(lhs, x)));
 
@@ -50,26 +53,38 @@ export function expandN(expr: BoxedExpression, n: number): BoxedExpression {
 
 export function expand(expr: BoxedExpression): BoxedExpression {
   expr = expr.simplify();
+  const ce = expr.engine;
+
+  if (expr.head === 'Add')
+    return ce.add(expr.ops!.map((x) => expand(x))).simplify();
+
+  if (expr.head === 'Negate')
+    return expand2(ce._NEGATIVE_ONE, expr.op1).simplify();
+
+  if (expr.head === 'Subtract')
+    return ce
+      .add([expand(expr.op1), expand2(ce._NEGATIVE_ONE, expr.op1)])
+      .simplify();
+
+  if (expr.head === 'Divide')
+    return ce.divide(expand(expr.op1), expand(expr.op2)).simplify();
 
   if (expr.head === 'Multiply') {
     if (expr.nops === 2) return expand2(expr.op1, expr.op2);
-    return expr.ops!.reduce((acc, v) => expand2(acc, v), expr.engine._ONE);
+    return expr.ops!.reduce((acc, v) => expand2(acc, v), ce._ONE).simplify();
   }
 
   if (expr.head === 'Power') {
     const op1head = expr.op1.head;
 
-    if (op1head === 'Multiply') {
-      return expr.engine.mul(
-        expr.op1.ops!.map((x) => expr.engine.power(x, expr.op2))
-      );
-    }
+    if (op1head === 'Multiply')
+      return ce.mul(expr.op1.ops!.map((x) => ce.power(x, expr.op2))).simplify();
 
     if (op1head === 'Negate') {
       const n = asSmallInteger(expr.op2);
       if (n !== null && n > 0) {
-        if (n % 2 === 0) return expr.engine.power(expr.op1.op1, expr.op2);
-        return expr.engine.negate(expr.engine.power(expr.op1.op1, expr.op2));
+        if (n % 2 === 0) return ce.power(expr.op1.op1, expr.op2).simplify();
+        return ce.negate(ce.power(expr.op1.op1, expr.op2)).simplify();
       }
     }
 
@@ -77,10 +92,10 @@ export function expand(expr: BoxedExpression): BoxedExpression {
       const n = asSmallInteger(expr.op2);
       if (n !== null) {
         if (n > 0) return expandN(expr.op1, n).simplify();
-        return expr.engine.inverse(expandN(expr.op1, -n).simplify());
+        return ce.inverse(expandN(expr.op1, -n)).simplify();
       }
     }
   }
 
-  return expr;
+  return expr.simplify();
 }
