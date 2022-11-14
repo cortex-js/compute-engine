@@ -455,7 +455,47 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   { name: 'CatalanConstant', serialize: 'G' },
   { name: 'GoldenRatio', serialize: '\\varphi' },
   { name: 'EulerGamma', serialize: '\\gamma' },
-  { name: 'Degrees', serialize: '\\frac{\\pi}{180}' },
+  {
+    name: 'Degrees',
+    trigger: ['\\degree'],
+    kind: 'postfix',
+    precedence: 880,
+    parse: (_parser, lhs) => ['Degrees', lhs],
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      return joinLatex([serializer.serialize(op(expr, 1)), '\\degree']);
+    },
+  },
+  {
+    trigger: ['\\deg'],
+    kind: 'postfix',
+    precedence: 880,
+    parse: (_parser, lhs) => ['Degrees', lhs],
+  },
+  {
+    trigger: ['^', '<{>', '\\circ', '<}>'],
+    kind: 'postfix',
+    parse: (_parser, lhs) => ['Degrees', lhs],
+  },
+
+  {
+    trigger: ['^', '\\circ'],
+    kind: 'postfix',
+    parse: (_parser, lhs) => ['Degrees', lhs],
+  },
+  {
+    trigger: ['°'],
+    kind: 'postfix',
+    precedence: 880,
+    parse: (_parser, lhs) => ['Degrees', lhs],
+  },
+
+  {
+    trigger: ['\\ang'],
+    parse: (parser): Expression => {
+      const arg = parser.matchRequiredLatexArgument();
+      return (arg === null ? ['Degrees'] : ['Degrees', arg]) as Expression;
+    },
+  },
   {
     trigger: ['\\infty'],
     parse: { num: '+Infinity' },

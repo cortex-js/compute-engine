@@ -16,7 +16,10 @@ import { canonicalNegate } from '../symbolic/negate';
 import { applyN, apply2N } from '../symbolic/utils';
 import { asFloat } from '../numerics/numeric';
 import { flattenSequence } from '../symbolic/flatten';
-import { validateArgumentCount } from '../boxed-expression/validate';
+import {
+  validateArgument,
+  validateArgumentCount,
+} from '../boxed-expression/validate';
 
 //
 //Note: Names of trigonometric functions follow ISO 80000 Section 13
@@ -41,14 +44,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
     //
     symbols: [
       {
-        name: 'Degrees',
-        /* = Pi / 180 */
-        domain: 'RealNumber',
-        constant: true,
-        value: ['Divide', 'Pi', 180], // 0.017453292519943295769236907,
-      },
-
-      {
         name: 'Pi',
         domain: 'TranscendentalNumber',
         algebraic: false,
@@ -61,6 +56,22 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
     ],
     functions: [
       // sqrt(x*x + y*y)
+      {
+        name: 'Degrees',
+        /* = Pi / 180 */
+        signature: {
+          domain: ['Function', 'Number', 'Number'],
+          canonical: (ce, ops) => {
+            ops = validateArgumentCount(ce, flattenSequence(ops), 1);
+            if (ops.length !== 1) return ce.box(['Degrees', ops]);
+            const arg = validateArgument(ce, ops[0].canonical, 'Number');
+            if (!arg.isValid || !arg.isLiteral) return ce.box(['Degrees', arg]);
+            return ce.mul([arg, ce.box(['Divide', 'Pi', 180])]);
+          },
+          evaluate: (ce, ops) =>
+            ce.mul([ops[0], ce.box(['Divide', 'Pi', 180])]),
+        },
+      },
       {
         name: 'Hypot',
         signature: {
