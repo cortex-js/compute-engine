@@ -120,14 +120,12 @@ describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   test(`\\sin^{-1}'(x)`, () =>
     expect(check("\\sin^{-1}'(x)")).toMatchInlineSnapshot(`
       latex     = [["Derivative", 1, "Arcsin"], "x"]
-      box       = [["Derivative", 1, "Arcsin"], "x"]
-      simplify  = ["Derivative", 1, "Arcsin"]
+      [["Derivative", 1, "Arcsin"], "x"]
     `));
   test(`\\sin^{-1}''(x)`, () =>
     expect(check("\\sin^{-1}''(x)")).toMatchInlineSnapshot(`
       latex     = [["Derivative", 2, "Arcsin"], "x"]
-      box       = [["Derivative", 2, "Arcsin"], "x"]
-      simplify  = ["Derivative", 2, "Arcsin"]
+      [["Derivative", 2, "Arcsin"], "x"]
     `));
   // test(`\\cos^{-1\\doubleprime}(x)`, () =>
   //   expect(check('\\cos^{-1\\doubleprime}(x)')).toMatchInlineSnapshot(`
@@ -138,8 +136,7 @@ describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   test(`\\cos^{-1}\\doubleprime(x)`, () =>
     expect(check('\\cos^{-1}\\doubleprime(x)')).toMatchInlineSnapshot(`
       latex     = [["Derivative", 2, "Arccos"], "x"]
-      box       = [["Derivative", 2, "Arccos"], "x"]
-      simplify  = ["Derivative", 2, "Arccos"]
+      [["Derivative", 2, "Arccos"], "x"]
     `));
 });
 

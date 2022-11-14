@@ -250,24 +250,6 @@ export class BoxedFunction extends AbstractBoxedExpression {
     while (i < this._ops.length) yield fn(this._ops[i++]);
   }
 
-  apply(
-    fn: (x: BoxedExpression) => SemiBoxedExpression,
-    head?: string
-  ): BoxedExpression {
-    const newHead = head ?? this.head;
-    let opsChanged = false;
-    const ops: BoxedExpression[] = [];
-    for (const arg of this._ops) {
-      const newArg = fn(arg);
-      if (arg !== newArg) opsChanged = true;
-      ops.push(this.engine.box(newArg));
-    }
-
-    if (!opsChanged && this.head === newHead) return this;
-
-    return this.engine.fn(newHead, ops);
-  }
-
   subs(sub: Substitution, options?: { canonical?: boolean }): BoxedExpression {
     options ??= {};
     if (!('canonical' in options)) options.canonical = true;
@@ -643,8 +625,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     // 3/ If a function expression, apply the arguments, and simplify the result
     //
-    if (typeof this._head !== 'string')
-      return apply(this._head, tail).simplify(options);
+    if (typeof this._head !== 'string') {
+      const expr = apply(this._head, tail);
+      if (typeof expr.head !== 'string') return expr;
+      return expr.simplify(options);
+    }
 
     //
     // 4/ Apply `simplify` handler
@@ -725,8 +710,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     // 3/ Is it a Lambda?
     //
-    if (typeof this._head !== 'string')
-      return apply(this._head, tail).evaluate(options);
+    if (typeof this._head !== 'string') {
+      const expr = apply(this._head, tail);
+      if (typeof expr.head !== 'string') return expr;
+      return expr.evaluate(options);
+    }
 
     //
     // 4/ No def? Inert? We're done.
@@ -747,9 +735,8 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // 5.1/ No evaluate handler, we're done
     if (!sig || !sig.evaluate) return this.engine.fn(this._head, tail);
 
-    // 5.2/ A lambda-function handler
-    if (typeof sig.evaluate !== 'function')
-      return apply(sig.evaluate, tail).evaluate(options);
+    // 5.2/ A function expression handler
+    if (typeof sig.evaluate !== 'function') return apply(sig.evaluate, tail);
 
     // 5.3/ A regular function handler
     return sig.evaluate(this.engine, tail) ?? this.engine.fn(this._head, tail);
@@ -775,10 +762,13 @@ export class BoxedFunction extends AbstractBoxedExpression {
     );
 
     //
-    // 3/ Is it a Lambda?
+    // 3/ Is it a function expression
     //
-    if (typeof this._head !== 'string')
-      return apply(this._head, tail).N(options);
+    if (typeof this._head !== 'string') {
+      const expr = apply(this._head, tail);
+      if (typeof expr.head !== 'string') return expr;
+      return expr.N(options);
+    }
 
     //
     // 4/ No def? Inert? We're done.
@@ -966,7 +956,8 @@ export function apply(
   fn: BoxedExpression,
   args: BoxedExpression[]
 ): BoxedExpression {
-  if (fn.head !== 'Lambda') return fn.evaluate();
+  if (fn.head !== 'Lambda') return fn.engine._fn(fn.evaluate(), args);
+
   const subs: BoxedSubstitution = {
     '__': fn.engine.tuple(args),
     '_#': fn.engine.number(args.length),
