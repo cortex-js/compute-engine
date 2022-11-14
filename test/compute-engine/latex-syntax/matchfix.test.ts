@@ -157,7 +157,7 @@ describe('MATCHFIX invalid', () => {
     expect(engine.parse('-(').json).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["Negate", ["Error", "'missing'", ["Latex", "'-'"]]],
+        ["Negate", ["Error", "'missing'"]],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'('"],

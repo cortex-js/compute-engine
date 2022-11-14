@@ -234,13 +234,13 @@ describe('OPERATOR prefix', () => {
 describe('OPERATOR infix', () => {
   test('- // Invalid negate', () =>
     expect(check('-')).toMatchInlineSnapshot(`
-      latex     = ["Negate", ["Error", "'missing'", ["Latex", "'-'"]]]
-      ["Negate", ["Error", "'missing'", ["Latex", "'-'"]]]
+      latex     = ["Negate", ["Error", "'missing'"]]
+      ["Negate", ["Error", "'missing'"]]
     `));
   test('1- // Invalid subtract', () =>
     expect(check('1-')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", 1, ["Error", "'missing'", ["Latex", "'-'"]]]
-      ["Subtract", 1, ["Error", "'missing'", ["Latex", "'-'"]]]
+      latex     = ["Subtract", 1, ["Error", "'missing'"]]
+      ["Subtract", 1, ["Error", "'missing'"]]
     `));
 
   test('-1+2+3-4 // Add', () =>

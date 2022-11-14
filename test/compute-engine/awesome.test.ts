@@ -111,7 +111,7 @@ describe('Nth PRIME NUMBER', () =>
                 "Triple",
                 ["Hold", ["Subscript", "v", 1]],
                 2,
-                ["Floor", ["Multiply", ["Multiply", 1.5, "n"], ["Ln", "n"]]]
+                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
               ]
             ]
           ],

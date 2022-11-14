@@ -74,17 +74,9 @@ describe('basic', () => {
     expect(parse('\\times3')).toMatchInlineSnapshot(
       `["Multiply", ["Error", "'missing'", ["Latex", "'\\times'"]], 3]`
     );
-    expect(parse('2*')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        2,
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'*'"],
-          ["Latex", "'*'"]
-        ]
-      ]
-    `);
+    expect(parse('2*')).toMatchInlineSnapshot(
+      `["Multiply", 2, ["Error", "'missing'"]]`
+    );
     expect(parse('\\frac{}{}')).toMatchInlineSnapshot(
       `["Divide", ["Error", "'missing'"], ["Error", "'missing'"]]`
     );

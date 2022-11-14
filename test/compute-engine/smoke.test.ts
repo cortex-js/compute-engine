@@ -40,9 +40,6 @@ ce.assume('one', 1);
 // Numbers with spacing commands should work
 console.log(ce.parse('123\\,45\\,67.123\\,456\\,e5').json);
 
-// Gets confused with delimiters (mathlive#1703)
-console.log(ce.parse('e^{i\\cdot}'));
-
 // Produces error -- mathlive #1707
 console.log(ce.parse("f'").json);
 

@@ -728,7 +728,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator, lhs) => {
       if (391 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 392 });
-      if (rhs === null) return null;
+      if (rhs === null) return ['Multiply', lhs, ['Error', "'missing'"]];
 
       return applyAssociativeOperator('Multiply', lhs, rhs);
     },
@@ -741,7 +741,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator, lhs) => {
       if (391 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 392 });
-      return rhs === null ? null : ['Multiply', lhs, rhs];
+      if (rhs === null) return ['Multiply', lhs, ['Error', "'missing'"]];
+
+      return applyAssociativeOperator('Multiply', lhs, rhs);
     },
   },
   {
@@ -751,7 +753,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator) => {
       if (276 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 400 });
-      return rhs === null ? null : (['Negate', rhs] as Expression);
+      return ['Negate', missingIfEmpty(rhs)] as Expression;
     },
     precedence: 275,
   },
@@ -865,7 +867,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator, lhs) => {
       if (276 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 277 });
-      return rhs === null ? null : (['Subtract', lhs, rhs] as Expression);
+      return ['Subtract', lhs, missingIfEmpty(rhs)] as Expression;
     },
   },
 ];
