@@ -28,19 +28,15 @@ describe('NO DICTIONARY/NO DEFAULTS', () => {
     expect(rawExpression('x^2')).toMatchInlineSnapshot(`"x"`);
     expect(rawExpression('\\frac{1}{x}')).toMatchInlineSnapshot(`
       [
-        "Sequence",
-        "\\\\frac",
+        "Error",
         [
-          "Error",
-          [
-            "ErrorCode",
-            "'unexpected-token'",
-            "'{'"
-          ],
-          [
-            "Latex",
-            "'{1}{x}'"
-          ]
+          "ErrorCode",
+          "'unexpected-command'",
+          "'\\\\frac'"
+        ],
+        [
+          "Latex",
+          "'\\\\frac{1}{x}'"
         ]
       ]
     `);
@@ -48,17 +44,28 @@ describe('NO DICTIONARY/NO DEFAULTS', () => {
       .toMatchInlineSnapshot(`
       [
         "Sequence",
-        "\\\\sqrt",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'unexpected-command'",
+            "'\\\\sqrt'"
+          ],
+          [
+            "Latex",
+            "'\\\\sqrt{(1+x_0)}'"
+          ]
+        ],
         [
           "Error",
           [
             "ErrorCode",
             "'unexpected-token'",
-            "'{'"
+            "'='"
           ],
           [
             "Latex",
-            "'{(1+x_0)}=\\\\frac{\\\\pi^2}{2}'"
+            "'=\\\\frac{\\\\pi^2}{2}'"
           ]
         ]
       ]

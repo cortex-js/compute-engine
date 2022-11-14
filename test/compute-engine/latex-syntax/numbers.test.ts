@@ -83,16 +83,18 @@ describe('NUMBERS', () => {
     );
   });
 
-  test('INVALID Parsing numbers with grouping', () => {
+  test('Parsing numbers with spacing', () => {
     expect(parse('123\\,45\\,67.123\\,456\\,')).toMatchInlineSnapshot(
       `1234567.123456`
     );
     expect(parse('123\\,45\\,67.123\\,456\\,e5')).toMatchInlineSnapshot(
-      `["Multiply", 5, 1234567.123456, "ExponentialE"]`
+      `123456712345.6`
     );
     expect(parse('123\\,45\\,67.123\\,456\\,e12\\,345')).toMatchInlineSnapshot(
-      `["Multiply", 12345, 1234567.123456, "ExponentialE"]`
+      `1.234567123456e+12351`
     );
+
+    expect(parse('-1 2')).toMatchInlineSnapshot(`-12`);
   });
 
   test('Parsing whitespace with number sign', () => {

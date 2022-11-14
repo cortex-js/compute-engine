@@ -17,11 +17,6 @@ engine.precision = 100; // Some arithmetic test cases assume a precision of at l
 
 engine.assume(['Element', 'f', 'Function']);
 
-// const defaultLatex = new LatexSyntax({
-//   onError: (warnings) => {
-//     for (const warning of warnings) errors.push(warning.message.toString());
-//   },
-// });
 const rawLatex = new LatexSyntax({
   computeEngine: engine,
   parseArgumentsOfUnknownLatexCommands: false,
@@ -253,7 +248,11 @@ export function expressionError(latex: string): string | string[] {
 
 export function rawExpression(latex: string): Expression {
   errors = [];
-  return JSON.stringify(engine.box(rawLatex.parse(latex)).json, null, 2);
+  return JSON.stringify(
+    engine.box(rawLatex.parse(latex), { canonical: false }).json,
+    null,
+    2
+  );
 }
 
 export function printExpression(expr: Expression): string {

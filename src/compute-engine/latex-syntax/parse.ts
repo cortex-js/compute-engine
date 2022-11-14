@@ -435,14 +435,21 @@ export class _Parser implements Parser {
     return result.length === 0 ? null : result;
   }
 
+  /** Skip stricly `<space>` tokens.
+   * To also skip `{}` see `skipSpace()`.
+   * To skip visual space (e.g. `\,`) see `skipVisualSpace()`.
+   */
   skipSpaceTokens(): void {
     while (this.match('<space>')) {}
   }
 
-  /** While parsing in math mode, skip applicable spaces.
-   * Do not use to skip spaces e.g. while parsing a string. See `skipSpaceTokens()` instead.
+  /** While parsing in math mode, skip applicable spaces, which includes `{}`.
+   * Do not use to skip spaces while parsing a string. See  `skipSpaceTokens()`
+   * instead.
    */
   skipSpace(): boolean {
+    if (!this.options.skipSpace) return false;
+
     // Check if there is a `{}` token sequence.
     // Those are used in LaTeX to force an invisible separation between commands
     // and are considered skipable space.
@@ -458,14 +465,39 @@ export class _Parser implements Parser {
       this.index = index;
     }
 
-    if (!this.options.skipSpace) return false;
-
     let result = false;
     while (this.match('<space>')) result = true;
 
     if (result) this.skipSpace();
 
     return result;
+  }
+
+  skipVisualSpace(): void {
+    if (!this.options.skipSpace) return;
+
+    this.skipSpace();
+
+    if (
+      [
+        '\\!',
+        '\\,',
+        '\\:',
+        '\\;',
+        '\\enskip',
+        '\\enspace',
+        '\\space',
+        '\\quad',
+        '\\qquad',
+      ].includes(this.peek)
+    ) {
+      this.next();
+      this.skipVisualSpace();
+    }
+
+    // @todo maybe also `\hspace` and `\hspace*` and `\hskip` and `\kern` with a glue param
+
+    this.skipSpace();
   }
 
   matchChar(): string | null {
@@ -600,34 +632,27 @@ export class _Parser implements Parser {
     options ??= {};
     options.withGrouping ??= false;
 
-    let result = '';
+    const result: string[] = [];
     let done = false;
     while (!done) {
-      result += this.matchSequence([
-        '0',
-        '1',
-        '2',
-        '3',
-        '4',
-        '5',
-        '6',
-        '7',
-        '8',
-        '9',
-      ]).join('');
+      while (/^[0-9]$/.test(this.peek)) {
+        result.push(this.next());
+        this.skipVisualSpace();
+      }
+
       done = true;
       if (options.withGrouping && this.options.groupSeparator) {
         const savedIndex = this.index;
-        this.skipSpace();
+        this.skipVisualSpace();
         if (this.matchAll(this._groupSeparatorTokens)) {
-          this.skipSpace();
+          this.skipVisualSpace();
           // Are there more digits after a group separator
-          if (/[0-9]/.test(this.peek)) done = false;
+          if (/^[0-9]$/.test(this.peek)) done = false;
           else this.index = savedIndex;
         }
       }
     }
-    return result;
+    return result.join('');
   }
 
   matchSignedInteger(options?: { withGrouping?: boolean }): string {
@@ -659,7 +684,7 @@ export class _Parser implements Parser {
       this.skipSpaceTokens();
       if (this.match('1') && this.match('0') && this.match('^')) {
         // Is it a single digit exponent, i.e. `\times 10^5`
-        if (/[0-9]/.test(this.peek)) return 'e' + this.next();
+        if (/^[0-9]$/.test(this.peek)) return 'e' + this.next();
 
         if (this.match('<{>')) {
           // Multi digit exponent,i.e. `\times 10^{10}` or `\times 10^{-5}`
@@ -701,6 +726,7 @@ export class _Parser implements Parser {
       repeatingDecimals = this.matchDecimalDigits();
       if (repeatingDecimals && this.match(')'))
         return '(' + repeatingDecimals + ')';
+      this.index = start;
       return '';
     }
 
@@ -709,6 +735,7 @@ export class _Parser implements Parser {
       repeatingDecimals = this.matchDecimalDigits();
       if (repeatingDecimals && this.matchAll([`\\right`, ')']))
         return '(' + repeatingDecimals + ')';
+      this.index = start;
       return '';
     }
 
@@ -717,6 +744,7 @@ export class _Parser implements Parser {
       repeatingDecimals = this.matchDecimalDigits();
       if (repeatingDecimals && this.match('<}>'))
         return '(' + repeatingDecimals + ')';
+      this.index = start;
       return '';
     }
 
@@ -725,6 +753,7 @@ export class _Parser implements Parser {
       repeatingDecimals = this.matchDecimalDigits();
       if (repeatingDecimals && this.matchAll(this._endRepeatingDigitsTokens))
         return '(' + repeatingDecimals + ')';
+      this.index = start;
       return '';
     }
 
@@ -735,9 +764,9 @@ export class _Parser implements Parser {
   matchNumber(): string {
     // If we don't parse numbers, we'll return them as individual tokens
     if (!this.options.parseNumbers) return '';
-    const start = this.index;
 
-    this.skipSpace();
+    const start = this.index;
+    this.skipVisualSpace();
 
     // Skip an optional '+' sign.
     // Important: the `-` sign is not handled as part of a number:
@@ -753,13 +782,11 @@ export class _Parser implements Parser {
       const peek = this.peek;
       // Include `(` for repeating decimals
       if (
-        !(
-          peek !== '\\overline' ||
-          peek !== this._beginRepeatingDigitsTokens[0] ||
-          /[0-9]\(/.test(peek)
-        )
+        peek !== '\\overline' &&
+        peek !== this._beginRepeatingDigitsTokens[0] &&
+        !/[0-9\(]/.test(peek)
       ) {
-        // A decimal marker followed by not a digit -> not a number
+        // A decimal marker followed by not a digit (and not a repeating decimal marker) -> not a number
         this.index = start;
         return '';
       }
@@ -772,17 +799,15 @@ export class _Parser implements Parser {
       }
     }
 
-    let hasDecimal = false;
+    let hasDecimal = true;
     if (
       !dotPrefix &&
       (this.match('.') || this.matchAll(this._decimalMarkerTokens))
-    ) {
+    )
       result += '.' + this.matchDecimalDigits({ withGrouping: true });
-      hasDecimal = true;
-    } else if (dotPrefix) {
+    else if (dotPrefix)
       result = '0.' + this.matchDecimalDigits({ withGrouping: true });
-      hasDecimal = true;
-    }
+    else hasDecimal = false;
 
     if (hasDecimal) {
       const repeat = this.matchRepeatingDecimal();
@@ -795,6 +820,7 @@ export class _Parser implements Parser {
       }
     }
 
+    this.skipVisualSpace();
     return result + this.matchExponent();
   }
 
@@ -1143,7 +1169,7 @@ export class _Parser implements Parser {
       return id;
     }
 
-    if (/[a-zA-Z]/.test(this.peek)) return this.next();
+    if (/^[a-zA-Z]$/.test(this.peek)) return this.next();
 
     return null;
   }

@@ -37,14 +37,18 @@ ce.assume('one', 1);
 
 ///
 
+// Should output error about missing closing fence
+console.log(ce.parse('(').json);
+
 // Numbers with spacing commands should work
 console.log(ce.parse('123\\,45\\,67.123\\,456\\,e5').json);
 
-// Produces error -- mathlive #1707
-console.log(ce.parse("f'").json);
+// Should parse as -12
+console.log(ce.parse('- 1 2').json);
 
-// Should output error about missing closing fence
-console.log(ce.parse('(').json);
+// Produces error -- mathlive #1707
+// also should parse sub, i.e. f_{n-1} -> use sub as first params? (or last, as in log_2(x) -> log(x, 2))
+console.log(ce.parse("f'").json);
 
 const expr = ce.parse('x^2').json;
 console.log(
@@ -53,9 +57,6 @@ console.log(
 
 const n1 = ce.parse('x_{1,2}');
 console.log(n1.toString());
-
-// Should parse as -12
-console.log(ce.parse('- 1 2').json);
 
 // Parsed as imaginary unit
 // -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and

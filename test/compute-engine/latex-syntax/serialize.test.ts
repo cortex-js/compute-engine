@@ -41,7 +41,7 @@ describe('LATEX SERIALIZING', () => {
       `0.123\\,456\\,787\\,236\\,823\\,746\\,238\\,762\\,387\\,6`
     );
 
-    expect(parse('  - 1 2')).toMatchInlineSnapshot(`-2`);
+    expect(parse('  - 1 2')).toMatchInlineSnapshot(`-12`);
     expect(parse('-123,456.789,012')).toMatchInlineSnapshot(
       `["Sequence", -123, 456.789, 12]`
     );

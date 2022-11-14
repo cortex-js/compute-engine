@@ -164,11 +164,6 @@ export class LatexSyntax {
       const rest = parser.index;
       const token = parser.next();
       while (!parser.atEnd) parser.next();
-      // const error: Expression = [
-      //   'Error',
-      //   ['ErrorCode', { str: 'unexpected-token' }, { str: rest[0] }],
-      //   ['Latex', { str: tokensToString(rest) }],
-      // ];
 
       const error = parser.error(
         [
