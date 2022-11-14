@@ -110,17 +110,9 @@ check('Missing argument with \\sqrt custom parser', () =>
 );
 
 check('Paren instead of braces with \\sqrt', () =>
-  expect(engine.parse('\\sqrt[x](y)')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      ["Multiply", "y", ["Power", "(", ["Divide", 1, "x"]]],
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "')'"],
-        ["Latex", "')'"]
-      ]
-    ]
-  `)
+  expect(engine.parse('\\sqrt[x](y)')).toMatchInlineSnapshot(
+    `["Multiply", ["Root", ["Error", "'missing'"], "x"], "y"]`
+  )
 );
 
 check('Missing 1 argument with \\frac custom parser', () =>

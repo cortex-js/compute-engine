@@ -18,6 +18,7 @@
   and `'` for derivatives.
 - `ce.assume()` handle more expressions and can be used to define new symbols by
   domain or value.
+- Better error message when parsing, e.g. `\sqrt(2)` (instead of `\sqrt{2}`)
 - Better simplification for square root expressions:
   - `\sqrt{25x^2}` -> `5x`
 - Improved evaluation of `["Power"]` expressions, including for negative

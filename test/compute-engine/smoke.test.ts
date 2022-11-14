@@ -37,11 +37,6 @@ ce.assume('one', 1);
 
 ///
 
-// Simplify drops the (x)
-const expr2 = ce.parse(`\\cos^{-1}\\doubleprime(x)`);
-console.log(expr2.toString());
-console.log(expr2.simplify().toJSON());
-
 // Numbers with spacing commands should work
 console.log(ce.parse('123\\,45\\,67.123\\,456\\,e5').json);
 
@@ -50,9 +45,6 @@ console.log(ce.parse('e^{i\\cdot}'));
 
 // Produces error -- mathlive #1707
 console.log(ce.parse("f'").json);
-
-// Unhelpful message
-console.log(ce.parse('\\sqrt[x](y)').toString());
 
 // Should output error about missing closing fence
 console.log(ce.parse('(').json);

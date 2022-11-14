@@ -789,12 +789,19 @@ export interface Parser {
   /**
    * Match a required LaTeX argument:
    * - either enclosed in `{}`
-   * - or a single token.
+   * - or a single token (except if token is in `excluding`)
+   *
+   * The `excluding` option is useful to fail early when encountering a likely
+   * syntax error, for example `x^(2)` (instead of `x^{2}`). With `(` in the list
+   * of excluded tokens, the match will fail and the error can be recovered.
+   *
+   * If none is provided, `excluding` is `!"#$%&(),/;:?@[]`|~", `\left` and `\bigl`
+   *
    *
    * Return null if no argument was found
    * Return `['Sequence']` if an empty argument `{}` was found
    */
-  matchRequiredLatexArgument(): Expression | null;
+  matchRequiredLatexArgument(excluding?: string[]): Expression | null;
 
   /**
    * - 'enclosure' : will look for an argument inside an enclosure (an open/close fence)

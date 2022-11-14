@@ -1266,7 +1266,9 @@ export class _Parser implements Parser {
     return null;
   }
 
-  matchRequiredLatexArgument(): Expression | null {
+  matchRequiredLatexArgument(excluding?: string[]): Expression | null {
+    if (!excluding)
+      excluding = [...'!"#$%&(),/;:?@[]`|~'.split(''), '\\left', '\\bigl'];
     const start = this.index;
     this.skipSpaceTokens();
     if (this.match('<{>')) {
@@ -1275,6 +1277,11 @@ export class _Parser implements Parser {
       this.skipSpace();
       if (this.matchBoundary()) return expr ?? ['Sequence'];
       return this.boundaryError('expected-closing-delimiter');
+    }
+
+    if (excluding.includes(this.peek)) {
+      this.index = start;
+      return null;
     }
 
     // Is it a single digit?
