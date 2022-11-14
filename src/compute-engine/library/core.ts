@@ -7,6 +7,7 @@ import {
   validateArgument,
   validateArgumentCount,
 } from '../boxed-expression/validate';
+import { apply } from '../boxed-expression/boxed-function';
 
 //   // := assign 80 // @todo
 
@@ -253,7 +254,13 @@ export const CORE_LIBRARY: SymbolTable[] = [
   },
   {
     functions: [
-      { name: 'Apply', signature: { domain: 'Function' } },
+      {
+        name: 'Apply',
+        signature: {
+          domain: 'Function',
+          evaluate: (ce, ops) => apply(ops[0], ops.slice(1)),
+        },
+      },
       { name: 'About', signature: { domain: 'Function' } },
 
       {
