@@ -403,44 +403,51 @@ function serializePower(
   expr: Expression | null
 ): string {
   const name = head(expr);
-  const arg1 = missingIfEmpty(op(expr, 1));
-  const arg2 = missingIfEmpty(op(expr, 2));
+  const base = missingIfEmpty(op(expr, 1));
 
   if (name === 'Sqrt') {
     return serializeRoot(
       serializer,
       getRootStyle(expr, serializer.level - 1),
-      arg1,
+      base,
       2
     );
   }
+
+  const exp = missingIfEmpty(op(expr, 2));
   if (name === 'Root')
     return serializeRoot(
       serializer,
       getRootStyle(expr, serializer.level - 1),
-      arg1,
-      arg2
+      base,
+      exp
     );
 
-  const val2 = machineValue(arg2) ?? 1;
+  const val2 = machineValue(exp) ?? 1;
   if (val2 === -1) {
-    return serializer.serialize(['Divide', '1', arg1]);
+    return serializer.serialize(['Divide', '1', base]);
   } else if (val2 < 0) {
-    return serializer.serialize(['Divide', '1', ['Power', arg1, -val2]]);
-  } else if (head(arg2) === 'Divide' || head(arg2) === 'Rational') {
-    if (machineValue(op(arg2, 1)) === 1) {
+    return serializer.serialize(['Divide', '1', ['Power', base, -val2]]);
+  } else if (head(exp) === 'Divide' || head(exp) === 'Rational') {
+    if (machineValue(op(exp, 1)) === 1) {
       // It's x^{1/n} -> it's a root
       const style = getRootStyle(expr, serializer.level);
-      return serializeRoot(serializer, style, arg1, op(arg2, 2));
+      return serializeRoot(serializer, style, base, op(exp, 2));
     }
-  } else if (head(arg2) === 'Power') {
-    if (machineValue(op(arg2, 2)) === -1) {
+    if (machineValue(op(exp, 2)) === 2) {
+      // It's x^(n/2) -> it's √x^n
+      return `${serializer.serialize(['Sqrt', base])}^{${serializer.serialize(
+        op(exp, 1)
+      )}}`;
+    }
+  } else if (head(exp) === 'Power') {
+    if (machineValue(op(exp, 2)) === -1) {
       // It's x^{n^-1} -> it's a root
       const style = getRootStyle(expr, serializer.level);
-      return serializeRoot(serializer, style, arg1, op(arg2, 1));
+      return serializeRoot(serializer, style, base, op(exp, 1));
     }
   }
-  return serializer.wrapShort(arg1) + '^{' + serializer.serialize(arg2) + '}';
+  return serializer.wrapShort(base) + '^{' + serializer.serialize(exp) + '}';
 }
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
