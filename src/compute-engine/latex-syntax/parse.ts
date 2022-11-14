@@ -148,7 +148,7 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
 
   parseArgumentsOfUnknownLatexCommands: true,
   parseNumbers: true,
-  parseUnknownSymbol: (s: string, parser: Parser) => {
+  parseUnknownIdentifier: (s: string, parser: Parser) => {
     if (parser.computeEngine?.lookupFunction(s) !== undefined)
       return 'function';
     if (/^[a-zA-Z]/.test(s)) return 'symbol';
@@ -1195,7 +1195,7 @@ export class _Parser implements Parser {
     //
     // Is it a generic multi-char function identifier?
     //
-    if (this.options.parseUnknownSymbol?.(fn, this) === 'function') {
+    if (this.options.parseUnknownIdentifier?.(fn, this) === 'function') {
       // Function application:
       // Is it followed by an argument list inside parentheses?
       const seq = getSequence(this.matchEnclosure());
@@ -1221,7 +1221,7 @@ export class _Parser implements Parser {
     if (defs) {
       for (const [def, tokenCount] of defs) {
         this.index = start + tokenCount;
-        // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling parseUnknownSymbol() or somethinglike it (parseUnknownSymbol() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
+        // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling parseUnknownIdentifier() or somethinglike it (parseUnknownIdentifier() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
         if (typeof def.parse === 'function') {
           const result = def.parse(this);
           if (result) return result;
@@ -1244,7 +1244,7 @@ export class _Parser implements Parser {
     if (typeof id !== 'string') return id;
 
     // Are we OK with it as a symbol?
-    if (id && this.options.parseUnknownSymbol?.(id, this) === 'symbol')
+    if (id && this.options.parseUnknownIdentifier?.(id, this) === 'symbol')
       return id;
 
     // Backtrack
@@ -1623,7 +1623,7 @@ export class _Parser implements Parser {
     const lhsSymbol = symbol(lhs);
     if (lhsSymbol) {
       const isFunction =
-        this.options.parseUnknownSymbol(lhsSymbol, this) === 'function';
+        this.options.parseUnknownIdentifier(lhsSymbol, this) === 'function';
       if (isFunction) {
         const seq = getSequence(rhs);
         return seq ? [lhs, ...seq] : lhsSymbol;

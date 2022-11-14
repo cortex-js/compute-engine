@@ -9,6 +9,7 @@
 - The API surface of `BoxedExpression` has been reduced. The properties
   `machineValue`, `bignumValue`, `asFloat`, `asSmallInteger`, `asRational`
   etc... have been replaced with a single `numericValue` property.
+- `parseUnknownSymbol` is now `parseUnknownIdentifier`
 
 ### Improvements
 

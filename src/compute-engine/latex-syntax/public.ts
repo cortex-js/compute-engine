@@ -431,7 +431,7 @@ export type ParseLatexOptions = {
    *
    * - `error`, an error condition is raised.
    */
-  parseUnknownSymbol: (
+  parseUnknownIdentifier: (
     symbol: string,
     parser: Parser
   ) => 'symbol' | 'function' | 'unknown';

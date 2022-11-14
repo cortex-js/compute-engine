@@ -25,7 +25,7 @@ engine.assume(['Element', 'f', 'Function']);
 const rawLatex = new LatexSyntax({
   computeEngine: engine,
   parseArgumentsOfUnknownLatexCommands: false,
-  parseUnknownSymbol: () => 'symbol',
+  parseUnknownIdentifier: () => 'symbol',
   applyInvisibleOperator: null,
   dictionary: [],
 });
