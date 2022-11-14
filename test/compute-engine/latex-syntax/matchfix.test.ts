@@ -140,16 +140,31 @@ describe('MATCHFIX abs and norm', () => {
 });
 
 describe('MATCHFIX invalid', () => {
-  // @fixme
   test('( // missing closing fence', () =>
     expect(check('(')).toMatchInlineSnapshot(`
-      latex     = ["Error", ["ErrorCode", "'unexpected-token'", "'('"], ["Latex", "'('"]]
-      ["Error", ["ErrorCode", "'unexpected-token'", "'('"], ["Latex", "'('"]]
+      latex     = [
+        "Error",
+        ["ErrorCode", "'expected-close-delimiter'", ")"],
+        ["Latex", "'('"]
+      ]
+      [
+        "Error",
+        ["ErrorCode", "'expected-close-delimiter'", ")"],
+        ["Latex", "'('"]
+      ]
     `));
   test(') // missing opening fence', () => {
     expect(check(')')).toMatchInlineSnapshot(`
-      latex     = ["Error", ["ErrorCode", "'unexpected-token'", "')'"], ["Latex", "')'"]]
-      ["Error", ["ErrorCode", "'unexpected-token'", "')'"], ["Latex", "')'"]]
+      latex     = [
+        "Error",
+        ["ErrorCode", "'expected-open-delimiter'", "("],
+        ["Latex", "')'"]
+      ]
+      [
+        "Error",
+        ["ErrorCode", "'expected-open-delimiter'", "("],
+        ["Latex", "')'"]
+      ]
     `);
   });
 
@@ -160,7 +175,7 @@ describe('MATCHFIX invalid', () => {
         ["Negate", ["Error", "'missing'"]],
         [
           "Error",
-          ["ErrorCode", "'unexpected-token'", "'('"],
+          ["ErrorCode", "'expected-close-delimiter'", ")"],
           ["Latex", "'('"]
         ]
       ]
@@ -171,8 +186,8 @@ describe('MATCHFIX invalid', () => {
     expect(engine.parse('(3+x').json).toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "'unexpected-token'", "'('"],
-        ["Latex", "'(3+x'"]
+        ["ErrorCode", "'expected-close-delimiter'", ")"],
+        ["Latex", "'('"]
       ]
     `);
   });

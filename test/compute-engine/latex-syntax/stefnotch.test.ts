@@ -17,8 +17,8 @@ describe('STEFNOTCH #10', () => {
     ).toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\left'"],
-        ["Latex", "'\\left(\\sin^{-1}\\mleft(x\\mright)\\right)^{\\prime}'"]
+        ["ErrorCode", "'expected-close-delimiter'", "\\right)"],
+        ["Latex", "'\\left('"]
       ]
     `);
   });

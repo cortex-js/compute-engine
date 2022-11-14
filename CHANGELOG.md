@@ -13,6 +13,9 @@
 
 ### Improvements
 
+- More accurate error expressions, for example if there is a missing closing
+  delimiter an `["Error", ["ErrorCode", "'expected-closing-delimiter'", "')'"]]`
+  is produced.
 - `["Expand"]` handles more cases
 - The trig functions can now have a regular exponent, i.e.`\cos^2(x)` in
   addition to `-1` for inverse, and a combination of `\prime`, `\doubleprime`

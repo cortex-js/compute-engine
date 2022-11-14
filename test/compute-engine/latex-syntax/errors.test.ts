@@ -322,17 +322,12 @@ check('Invalid delimiter: expected closing', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\left'"],
-        ["Latex", "'\\left'"]
-      ],
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "'('"],
+        ["ErrorCode", "'expected-close-delimiter'", "\\right)"],
         ["Latex", "'('"]
       ]
     ]
   `)
-); // @fixme : should be expected-delimiter
+);
 
 check('Invalid delimiter: expected closing', () =>
   expect(engine.parse('1(')).toMatchInlineSnapshot(`
@@ -341,12 +336,12 @@ check('Invalid delimiter: expected closing', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'unexpected-token'", "'('"],
+        ["ErrorCode", "'expected-close-delimiter'", ")"],
         ["Latex", "'('"]
       ]
     ]
   `)
-); // @fixme : should be expected-delimiter
+);
 
 check('Invalid delimiter: expected opening', () =>
   expect(engine.parse('1)')).toMatchInlineSnapshot(`
@@ -355,12 +350,12 @@ check('Invalid delimiter: expected opening', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'unexpected-token'", "')'"],
+        ["ErrorCode", "'expected-open-delimiter'", "("],
         ["Latex", "')'"]
       ]
     ]
   `)
-); // @fixme : should be mismatched-delimiter
+);
 
 check('Invalid delimiter: expected opening', () =>
   expect(engine.parse('1\\right)')).toMatchInlineSnapshot(`
@@ -369,17 +364,12 @@ check('Invalid delimiter: expected opening', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\right'"],
-        ["Latex", "'\\right'"]
-      ],
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "')'"],
-        ["Latex", "')'"]
+        ["ErrorCode", "'expected-open-delimiter'", "\\left("],
+        ["Latex", "'\\right)'"]
       ]
     ]
   `)
-); // @fixme : should be mismatched-delimiter
+);
 
 check('Invalid delimiter', () =>
   expect(engine.parse('1\\left\\alpha2\\right\\alpha')).toMatchInlineSnapshot(`
@@ -395,10 +385,9 @@ check('Invalid delimiter', () =>
       2,
       [
         "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\right'"],
-        ["Latex", "'\\right'"]
-      ],
-      "Alpha"
+        ["ErrorCode", "'expected-open-delimiter'", "\\left"],
+        ["Latex", "'\\right\\alpha'"]
+      ]
     ]
   `)
 );

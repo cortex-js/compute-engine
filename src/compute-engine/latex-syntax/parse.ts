@@ -435,7 +435,7 @@ export class _Parser implements Parser {
     return result.length === 0 ? null : result;
   }
 
-  /** Skip stricly `<space>` tokens.
+  /** Skip strictly `<space>` tokens.
    * To also skip `{}` see `skipSpace()`.
    * To skip visual space (e.g. `\,`) see `skipVisualSpace()`.
    */
@@ -1054,6 +1054,68 @@ export class _Parser implements Parser {
       return true;
     }
     return false;
+  }
+
+  /** For error handling, when there is potentially a mismatched delimiter.
+   * Return a LaTeX fragment of the expected closing delimiter
+   */
+  matchEnclosureOpen(): string | null {
+    const defs = this._dictionary.matchfix;
+    if (defs.length === 0) return null;
+
+    const start = this.index;
+    for (const def of defs) {
+      this.index = start;
+      if (Array.isArray(def.openDelimiter)) {
+        if (this.matchAll(def.openDelimiter))
+          return tokensToString(def.closeDelimiter);
+        continue;
+      }
+
+      const closeDelimiter = this.matchOpenDelimiter(
+        def.openDelimiter,
+        def.closeDelimiter as Delimiter
+      );
+      if (closeDelimiter !== null) return tokensToString(closeDelimiter);
+    }
+    this.index = start;
+    return null;
+  }
+
+  matchEnclosureClose(): string | null {
+    const defs = this._dictionary.matchfix;
+    if (defs.length === 0) return null;
+
+    const start = this.index;
+    for (const def of defs) {
+      this.index = start;
+      if (Array.isArray(def.closeDelimiter)) {
+        if (this.matchAll(def.closeDelimiter))
+          return tokensToString(def.openDelimiter);
+        continue;
+      }
+      this.index = start;
+      let peek = this.peek;
+      const prefix = Object.keys(OPEN_DELIMITER_PREFIX).find(
+        (x) => OPEN_DELIMITER_PREFIX[x] === peek
+      );
+      if (prefix) this.next();
+
+      let openDelimiter: string[] = [];
+      peek = this.peek;
+      const matchingDelim = Object.keys(CLOSE_DELIMITER).find(
+        (x) => CLOSE_DELIMITER[x] === peek
+      );
+      if (matchingDelim) openDelimiter = [matchingDelim];
+
+      if (prefix) openDelimiter = [prefix, ...openDelimiter];
+      if (openDelimiter.length > 0) {
+        this.next();
+        return tokensToString(openDelimiter);
+      }
+    }
+    this.index = start;
+    return null;
   }
 
   /**
@@ -1796,6 +1858,19 @@ export class _Parser implements Parser {
       }
       this.match(']');
     }
+
+    const index = this.index;
+    this.index = start;
+    const closeDelimiter = this.matchEnclosureOpen();
+    if (closeDelimiter)
+      return this.error(['expected-close-delimiter', closeDelimiter], index);
+
+    const openDelimiter = this.matchEnclosureClose();
+    if (openDelimiter)
+      return this.error(['expected-open-delimiter', openDelimiter], start);
+
+    // Capture any potential arguments to this unexpected command
+    this.index = index;
 
     while (this.match('<{>')) {
       let level = 0;

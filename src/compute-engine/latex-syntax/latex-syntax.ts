@@ -140,6 +140,7 @@ export class LatexSyntax {
     let expr = parser.matchExpression();
 
     if (!parser.atEnd) {
+      // Somethin went wrong, generate error expressin
       const opDefs = parser.peekDefinitions('infix');
       if (opDefs) {
         const start = parser.index;
@@ -161,10 +162,30 @@ export class LatexSyntax {
         parser.index = start;
       }
 
+      const index = parser.index;
+      const closeDelimiter = parser.matchEnclosureOpen();
+      if (closeDelimiter) {
+        const enclosureError = parser.error(
+          ['expected-close-delimiter', closeDelimiter],
+          index
+        );
+        return expr ? ['Sequence', expr, enclosureError] : enclosureError;
+      }
+
+      const openDelimiter = parser.matchEnclosureClose();
+      if (openDelimiter) {
+        const enclosureError = parser.error(
+          ['expected-open-delimiter', openDelimiter],
+          index
+        );
+        return expr ? ['Sequence', expr, enclosureError] : enclosureError;
+      }
+
       const rest = parser.index;
       const token = parser.next();
       while (!parser.atEnd) parser.next();
 
+      // Something went wrong, generate error expression
       const error = parser.error(
         [
           token.length > 1 && token.startsWith('\\')
@@ -174,8 +195,7 @@ export class LatexSyntax {
         ],
         rest
       );
-      if (!expr) expr = error;
-      else expr = ['Sequence', expr, error];
+      expr = expr ? ['Sequence', expr, error] : error;
     }
 
     expr ??= ['Sequence'];

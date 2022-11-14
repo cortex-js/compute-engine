@@ -96,7 +96,7 @@ describe('PARSING SETS', () => {
         ],
         [
           "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\rbrace'"],
+          ["ErrorCode", "'expected-open-delimiter'", "\\lbrace"],
           ["Latex", "'\\rbrace'"]
         ]
       ]

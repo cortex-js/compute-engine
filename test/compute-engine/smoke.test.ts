@@ -37,15 +37,6 @@ ce.assume('one', 1);
 
 ///
 
-// Should output error about missing closing fence
-console.log(ce.parse('(').json);
-
-// Numbers with spacing commands should work
-console.log(ce.parse('123\\,45\\,67.123\\,456\\,e5').json);
-
-// Should parse as -12
-console.log(ce.parse('- 1 2').json);
-
 // Produces error -- mathlive #1707
 // also should parse sub, i.e. f_{n-1} -> use sub as first params? (or last, as in log_2(x) -> log(x, 2))
 console.log(ce.parse("f'").json);
