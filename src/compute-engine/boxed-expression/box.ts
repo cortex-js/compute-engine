@@ -9,7 +9,7 @@ import {
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { BoxedDictionary } from './boxed-dictionary';
-import { BoxedFunction, makeCanonicalFunction } from './boxed-function';
+import { apply, BoxedFunction, makeCanonicalFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
 import { bignumValue } from './utils';
@@ -432,11 +432,9 @@ export function box(
       return boxFunction(ce, expr[0], expr.slice(1), options);
 
     // It's a function with a head expression
-    return new BoxedFunction(
-      ce,
-      box(ce, expr[0], options),
-      expr.slice(1).map((x) => box(ce, x, options))
-    );
+    const ops = expr.slice(1).map((x) => box(ce, x, options));
+    const head = apply(box(ce, expr[0], options), ops);
+    return new BoxedFunction(ce, head.symbol ?? head, ops);
   }
 
   //

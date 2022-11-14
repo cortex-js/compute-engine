@@ -132,10 +132,6 @@ export function parse(latex: string): string {
   return exprToString(engine.parse(latex));
 }
 
-export function canonical(latex: string): string {
-  return exprToString(engine.parse(latex)?.canonical);
-}
-
 export function evaluate(latex: string): string {
   return exprToString(engine.parse(latex)?.evaluate());
 }

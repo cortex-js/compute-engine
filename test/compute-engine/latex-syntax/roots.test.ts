@@ -1,4 +1,4 @@
-import { canonical, parse } from '../../utils';
+import { parse } from '../../utils';
 
 describe('ROOT FUNCTION', () => {
   test('Valid forms', () => {
@@ -9,9 +9,6 @@ describe('ROOT FUNCTION', () => {
     );
     expect(parse('\\frac{1}{\\sqrt[3]{x}}')).toMatch(
       '["Divide", 1, ["Root", "x", 3]]'
-    );
-    expect(canonical('\\frac{1}{\\sqrt[3]{x}}')).toMatchInlineSnapshot(
-      `["Divide", 1, ["Root", "x", 3]]`
     );
     expect(parse('\\frac{1}{\\sqrt[3]{\\sqrt{x}}}')).toMatch(
       '["Divide", 1, ["Root", ["Sqrt", "x"], 3]]'

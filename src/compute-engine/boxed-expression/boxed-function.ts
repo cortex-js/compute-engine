@@ -18,7 +18,6 @@ import {
   Metadata,
   PatternMatchOptions,
   BoxedDomain,
-  BoxedLambdaExpression,
   RuntimeScope,
   BoxedSubstitution,
 } from '../public';
@@ -68,7 +67,7 @@ function cheapest(
 
 export class BoxedFunction extends AbstractBoxedExpression {
   private _scope: RuntimeScope | null;
-  private readonly _head: string | BoxedLambdaExpression;
+  private readonly _head: string | BoxedExpression;
   private readonly _ops: BoxedExpression[];
 
   // The canonical representation of this expression
@@ -642,10 +641,10 @@ export class BoxedFunction extends AbstractBoxedExpression {
     );
 
     //
-    // 3/ If a lambda, apply the arguments, and simplify the result
+    // 3/ If a function expression, apply the arguments, and simplify the result
     //
     if (typeof this._head !== 'string')
-      return lambda(this.engine, this._head, tail).simplify(options);
+      return apply(this._head, tail).simplify(options);
 
     //
     // 4/ Apply `simplify` handler
@@ -727,7 +726,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // 3/ Is it a Lambda?
     //
     if (typeof this._head !== 'string')
-      return lambda(this.engine, this._head, tail).evaluate(options);
+      return apply(this._head, tail).evaluate(options);
 
     //
     // 4/ No def? Inert? We're done.
@@ -750,7 +749,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
 
     // 5.2/ A lambda-function handler
     if (typeof sig.evaluate !== 'function')
-      return lambda(this.engine, sig.evaluate, tail).evaluate(options);
+      return apply(sig.evaluate, tail).evaluate(options);
 
     // 5.3/ A regular function handler
     return sig.evaluate(this.engine, tail) ?? this.engine.fn(this._head, tail);
@@ -779,7 +778,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // 3/ Is it a Lambda?
     //
     if (typeof this._head !== 'string')
-      return lambda(this.engine, this._head, tail).N(options);
+      return apply(this._head, tail).N(options);
 
     //
     // 4/ No def? Inert? We're done.
@@ -959,13 +958,15 @@ export function makeCanonicalFunction(
   return new BoxedFunction(ce, head, xs, { metadata, def, canonical: true });
 }
 
-export function lambda(
-  ce: IComputeEngine,
-  fn: BoxedLambdaExpression,
+/** Apply arguments to an expression. If the expression is a lambda expression
+ * it's wildcard arguments are substituted before being evaluated. Otherwise
+ * the expression is just evaluated.
+ */
+export function apply(
+  fn: BoxedExpression,
   args: BoxedExpression[]
 ): BoxedExpression {
-  // 'fn' is a lambda expression.
-
+  if (fn.head !== 'Lambda') return fn.evaluate();
   const subs: BoxedSubstitution = {
     '__': fn.engine.tuple(args),
     '_#': fn.engine.number(args.length),
@@ -975,7 +976,13 @@ export function lambda(
   subs['_'] = subs['_1'];
 
   // Substitute the arguments in the lambda expression
-  return fn.subs(subs);
+  const savedContext = this.context;
+  this.context = fn.scope ?? null;
+
+  const result = fn.subs(subs).evaluate();
+
+  this.context = savedContext;
+  return result;
 }
 
 /** Apply the function `f` to elements of `xs`, except to the elements

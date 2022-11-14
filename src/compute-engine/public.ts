@@ -1257,9 +1257,6 @@ export type SemiBoxedExpression =
   | SemiBoxedExpression[]
   | BoxedExpression;
 
-export type LambdaExpression = SemiBoxedExpression;
-export type BoxedLambdaExpression = BoxedExpression;
-
 export type PatternMatchOptions = {
   substitution?: BoxedSubstitution;
   recursive?: boolean;
@@ -1652,7 +1649,7 @@ export type FunctionSignature = {
    * an `["Error"]` expression.
    */
   evaluate?:
-    | LambdaExpression
+    | SemiBoxedExpression
     | ((
         ce: IComputeEngine,
         args: BoxedExpression[]
@@ -1734,7 +1731,7 @@ export type BoxedFunctionSignature = {
     args: BoxedExpression[]
   ) => BoxedExpression | undefined;
   evaluate?:
-    | BoxedLambdaExpression
+    | BoxedExpression
     | ((
         ce: IComputeEngine,
         args: BoxedExpression[]
@@ -2081,9 +2078,6 @@ export interface IComputeEngine {
     domain: SemiBoxedExpression | BoxedDomain | string,
     metadata?: Metadata
   ): BoxedDomain;
-
-  /** Return a canonical lambda expression */
-  lambda(expr: SemiBoxedExpression, sig: BoxedDomain): BoxedLambdaExpression;
 
   /**
    * Return a canonical expression.

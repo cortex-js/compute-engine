@@ -39,7 +39,6 @@ import {
   Metadata,
   BoxedDomain,
   DomainExpression,
-  BoxedLambdaExpression,
   FunctionDefinition,
   Rational,
   BoxedSubstitution,
@@ -1377,16 +1376,6 @@ export class ComputeEngine implements IComputeEngine {
       );
     }
     return boxDomain(this, domain, metadata);
-  }
-
-  lambda(expr: SemiBoxedExpression, sig: BoxedDomain): BoxedLambdaExpression {
-    console.assert(sig.ctor === 'Function');
-    console.assert(sig.domainArgs);
-    const context = this.context;
-    this.context = null;
-    const result = this.box(expr, { canonical: false });
-    this.context = context;
-    return result;
   }
 
   /*

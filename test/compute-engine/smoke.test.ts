@@ -37,8 +37,13 @@ ce.assume('one', 1);
 
 ///
 
-// Should simplify
-console.log(ce.parse('a^3a\\times a^5').evaluate().json);
+// Simplify drops the (x)
+const expr2 = ce.parse(`\\cos^{-1}\\doubleprime(x)`);
+console.log(expr2.toString());
+console.log(expr2.simplify().toJSON());
+
+// Numbers with spacing commands should work
+console.log(ce.parse('123\\,45\\,67.123\\,456\\,e5').json);
 
 // Gets confused with delimiters (mathlive#1703)
 console.log(ce.parse('e^{i\\cdot}'));
@@ -49,6 +54,9 @@ console.log(ce.parse("f'").json);
 // Unhelpful message
 console.log(ce.parse('\\sqrt[x](y)').toString());
 
+// Should output error about missing closing fence
+console.log(ce.parse('(').json);
+
 const expr = ce.parse('x^2').json;
 console.log(
   ce.box(['Integrate', expr, ['Element', 'x', ['Interval', 0, 1]]]).latex
@@ -57,19 +65,8 @@ console.log(
 const n1 = ce.parse('x_{1,2}');
 console.log(n1.toString());
 
-// Should output error about missing closing fence
-console.log(ce.parse('(').json);
-
-// Numbers with spacing commands should work
-console.log(ce.parse('123\\,45\\,67.123\\,456\\,e5').json);
-
 // Should parse as -12
 console.log(ce.parse('- 1 2').json);
-
-// Simplify drops the (x)
-const expr2 = ce.parse(`\\cos^{-1}\\doubleprime(x)`);
-console.log(expr2.toString());
-console.log(expr2.simplify().toJSON());
 
 // Parsed as imaginary unit
 // -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and

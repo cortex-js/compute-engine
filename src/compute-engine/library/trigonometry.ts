@@ -15,6 +15,8 @@ import { Expression } from '../../math-json/math-json-format';
 import { canonicalNegate } from '../symbolic/negate';
 import { applyN, apply2N } from '../symbolic/utils';
 import { asFloat } from '../numerics/numeric';
+import { flattenSequence } from '../symbolic/flatten';
+import { validateArgumentCount } from '../boxed-expression/validate';
 
 //
 //Note: Names of trigonometric functions follow ISO 80000 Section 13
@@ -67,7 +69,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             ce
               .box(['Sqrt', ['Add', ['Square', ops[0]], ['Square', ops[1]]]])
               .simplify(),
-          evaluate: ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
+          evaluate: [
+            'Lambda',
+            ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
+          ],
         },
       },
       {
@@ -293,7 +298,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         wikidata: 'Q2528380',
         signature: {
           domain: ['Function', 'ExtendedRealNumber', ['Interval', 0, 1]],
-          evaluate: ['Divide', ['Subtract', 1, ['Cos', '_1']], 2],
+          evaluate: ['Lambda', ['Divide', ['Subtract', 1, ['Cos', '_1']], 2]],
         },
       },
       /** = 2 * Arcsin(Sqrt(z)) */
@@ -302,7 +307,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
         signature: {
           domain: ['Function', 'ExtendedRealNumber', 'RealNumber'],
-          evaluate: ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]],
+          evaluate: ['Lambda', ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]]],
         },
       },
       {
@@ -476,8 +481,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
         name: 'InverseFunction',
         signature: {
           domain: ['Function', 'Function', 'Function'],
-          simplify: (ce, ops) => processInverseFunction(ce, ops[0]),
-          evaluate: (ce, ops) => processInverseFunction(ce, ops[0]),
+          canonical: (ce, ops) => {
+            ops = validateArgumentCount(ce, flattenSequence(ops), 1).map(
+              (x) => x.canonical
+            );
+            return (
+              processInverseFunction(ce, ops) ?? ce._fn('InverseFunction', ops)
+            );
+          },
+          simplify: (ce, ops) => processInverseFunction(ce, ops),
+          evaluate: (ce, ops) => processInverseFunction(ce, ops),
         },
       },
     ],
@@ -736,10 +749,13 @@ function constructibleValues(
 
 function processInverseFunction(
   ce: IComputeEngine,
-  expr: BoxedExpression
+  xs: BoxedExpression[]
 ): BoxedExpression | undefined {
+  if (xs.length !== 1) return undefined;
+  const expr = xs[0];
   const head = expr.symbol;
-  if (typeof head !== 'string') return expr;
+  if (typeof head !== 'string') return undefined;
+  if (head === 'InverseFunction') return expr.op1;
   const newHead = {
     Sin: 'Arcsin',
     Cos: 'Arccos',
@@ -763,7 +779,7 @@ function processInverseFunction(
     Arctan: 'Tan',
     Artanh: 'Tanh',
   }[head];
-  return newHead ? ce.symbol(newHead, { canonical: true }) : expr;
+  return newHead ? ce.symbol(newHead) : undefined;
 }
 
 function evalTrig(

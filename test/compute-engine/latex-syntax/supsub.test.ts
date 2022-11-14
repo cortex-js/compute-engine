@@ -30,9 +30,7 @@ describe('POWER', () => {
 
 describe('INVERSE FUNCTION', () => {
   test('Valid forms', () => {
-    expect(latex(['InverseFunction', 'Sin'])).toMatchInlineSnapshot(
-      `\\sin^{-1}`
-    );
+    expect(latex(['InverseFunction', 'Sin'])).toMatchInlineSnapshot(`\\arcsin`);
     expect(latex(['InverseFunction', 'f'])).toMatchInlineSnapshot(`f^{-1}`);
   });
 });

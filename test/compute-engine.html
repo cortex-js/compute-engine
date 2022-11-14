@@ -563,13 +563,10 @@
                   'th',
                 ].includes(m[1])
               ) {
-                console.log('566', s);
                 return `\\${m[1]} ${m[2]}`;
               }
-              console.log('569', s);
               return `\\mathrm{${m[1]}}_{${m[2]}}`;
             }
-            console.log('572', s);
             if (s.includes('_')) debugger;
             return '\\mathrm{' + s + '}';
           }

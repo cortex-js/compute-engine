@@ -132,7 +132,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
           ? undefined
           : typeof sig.evaluate === 'function'
           ? sig.evaluate
-          : ce.lambda(sig.evaluate, domain),
+          : ce.box(sig.evaluate, { canonical: false }),
         N: sig.N,
         evalDimension: sig.evalDimension,
         sgn: sig.sgn,
