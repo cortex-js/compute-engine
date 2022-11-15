@@ -191,30 +191,35 @@ A rewrite rule is a triplet of:
 
 - a left-hand-side pattern, `lhs`
 - a right-hand-side pattern, `rhs`
-- an optional `condition`
 
-When a rule is applied to an expression `expr`, if `expr` matches `lhs` and the
-`condition` applies to the resulting substitution, the result of the rule is the
-substitution applied to the `rhs`.
+When a rule is applied to an expression `expr`, if `expr` matches `lhs` the 
+result of the rule is the substitution applied to the `rhs`.
 
 **To apply a set of rules to an expression**, call the `expr.replace()`
 function.
 
 ```ts
-const squareRule = [
-  ['Multiply', '_x', '_x'],
-  ['Square', '_x'],
-];
+const squareRule = ce.rules([
+  [
+    ['Multiply', '_x', '_x'],
+    ['Square', '_x'],
+  ],
+]);
 
-ce.box([squareRule], ['Multiply', 4, 4]).replace();
+ce.box(['Multiply', 4, 4]).replace(squareRule);
 // ➔ ['Square', 4]
 
-const sqrtRule = [
-  ['Sqrt', ['Square', '_x']],
-  '_x',
-  (ce, sub) => ce.isPositive(sub._x),
-];
-ce.box(['Sqrt', ['Square', 17]]).replace([sqrtRule]);
+
+ce
+  .box(['Multiply', 4, 4])
+  .replace(
+    ce.rules([
+      [
+        ['Multiply', '_x', '_x'],
+        ['Square', '_x'],
+      ],
+    ])
+  );
 // ➔ 17
 ```
 
