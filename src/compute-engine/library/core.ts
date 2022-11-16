@@ -167,7 +167,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
             'Anything',
           ],
           codomain: (_ce, args) => args[0].domain,
-          canonical: (_ce, args) => args[0]?.canonical ?? ['Sequence'],
+          canonical: (ce, args) => args[0]?.canonical ?? ce.box(['Sequence']),
         },
       },
       {
@@ -312,7 +312,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
           evaluate: (ce, ops) => {
             const op1 = ops[0];
             if (typeof op1?.head === 'string') return ce.symbol(op1.head);
-            return op1?.head ?? 'Nothing';
+            return op1?.head ?? ce.symbol('Nothing');
           },
         },
       },
