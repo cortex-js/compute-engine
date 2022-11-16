@@ -615,3 +615,14 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return this.engine.box(sub[this._name], options);
   }
 }
+
+export function makeCanonicalSymbol(
+  ce: IComputeEngine,
+  name: string
+): BoxedExpression {
+  const def = ce.lookupSymbol(name, undefined, ce.context!);
+  if (def) {
+    if (def.hold === false && def.value) return ce.box(def.value);
+  }
+  return new BoxedSymbol(ce, name, { canonical: true });
+}

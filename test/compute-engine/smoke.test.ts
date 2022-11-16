@@ -49,16 +49,6 @@ console.log(
   ce.box(['Integrate', expr, ['Element', 'x', ['Interval', 0, 1]]]).latex
 );
 
-// Parsed as imaginary unit
-// -> don't have `i` (and `e`) in the dictionary mapping to `imaginaryUnit` and
-// `exponentialE`. Instead have `hold` constants in the dictionary for `i` and
-// `e`. In canonicalize, replace i and e according to definition in current
-// scope. Also, push new scope for `scoped` def in canonical. Save that scope and reactivate it in evaluate, simplify, and N(), and in the canonical def of
-// `Sum` push `i` to the scope. In evaluate and N(), set the value of `i` for
-//  each loop iteration (don't substitute)
-const z3 = ce.parse('\\sum_ii^2').canonical;
-console.log(z3.json);
-
 // console.log(engine.pattern(['Add', 1, '_']).match(engine.box(['Add', 1, 2])));
 
 // console.log(
@@ -278,7 +268,7 @@ describe('PARSING numbers', () => {
     expect(parse('-2+3-4')).toMatchInlineSnapshot(`["Add", -4, -2, 3]`);
   });
   test(`-i`, () => {
-    expect(parseToJson('-i')).toMatchObject(['Negate', 'ImaginaryUnit']);
+    expect(parse('-i')).toMatchInlineSnapshot(`["Negate", "ImaginaryUnit"]`);
   });
 
   test(`3.424242334e4`, () =>

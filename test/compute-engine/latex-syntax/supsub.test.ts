@@ -4,26 +4,26 @@ import { parse, latex, engine } from '../../utils';
 describe('POWER', () => {
   test('Power Invalid forms', () => {
     expect(latex(['Power'])).toMatchInlineSnapshot(
-      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
+      `(\\error{\\blacksquare})^{\\error{\\blacksquare}}`
     );
     expect(
       latex(['Power', null as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
+      `(\\error{\\blacksquare})^{\\error{\\blacksquare}}`
     );
     expect(
       latex(['Power', undefined as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `(\\textcolor{red}{\\blacksquare})^{\\textcolor{red}{\\blacksquare}}`
+      `(\\error{\\blacksquare})^{\\error{\\blacksquare}}`
     );
     expect(latex(['Power', 1])).toMatchInlineSnapshot(
-      `1^{\\textcolor{red}{\\blacksquare}}`
+      `1^{\\error{\\blacksquare}}`
     );
     expect(latex(['Power', NaN])).toMatchInlineSnapshot(
-      `\\operatorname{NaN}^{\\textcolor{red}{\\blacksquare}}`
+      `\\operatorname{NaN}^{\\error{\\blacksquare}}`
     );
     expect(latex(['Power', Infinity])).toMatchInlineSnapshot(
-      `\\infty^{\\textcolor{red}{\\blacksquare}}`
+      `\\infty^{\\error{\\blacksquare}}`
     );
   });
 });

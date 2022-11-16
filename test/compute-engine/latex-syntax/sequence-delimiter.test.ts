@@ -116,7 +116,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
       latex     = [
         "Sequence",
         ["List", "a", "b"],
-        ["List", "c", "d", "ExponentialE"],
+        ["List", "c", "d", "e"],
         "f",
         ["List", "g", "h"]
       ]

@@ -35,7 +35,7 @@ describe('TAUTOLOGY one = 1', () => {
     expect(ce.box(['Greater', 'one', 0]).evaluate().json).toEqual('True');
     expect(ce.box(['Greater', 'one', -10]).evaluate().json).toEqual('True');
   });
-  test(`a >= 1`, () => {
+  test(`one >= 1`, () => {
     expect(ce.assume(['GreaterEqual', 'one', 1])).toMatchInlineSnapshot(
       `tautology`
     );
@@ -44,7 +44,7 @@ describe('TAUTOLOGY one = 1', () => {
     expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('False');
     expect(ce.box(['Equal', 'one', 1]).evaluate().json).toEqual('True');
   });
-  test(`a = 1`, () => {
+  test(`one = 1`, () => {
     expect(ce.assume(['Equal', 'one', 1])).toEqual(`tautology`);
     expect(ce.box(['Equal', 'one', 1]).evaluate().json).toEqual('True');
     expect(ce.box(['Equal', 'one', 0]).evaluate().json).toEqual('False');

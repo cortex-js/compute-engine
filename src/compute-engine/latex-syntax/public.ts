@@ -561,7 +561,7 @@ export type NumberFormattingOptions = {
   truncationMarker: LatexString;
   beginRepeatingDigits: LatexString;
   endRepeatingDigits: LatexString;
-  imaginaryNumber: LatexString;
+  imaginaryUnit: LatexString;
 
   avoidExponentsInRange: [negativeExponent: number, positiveExponent: number];
 };

@@ -101,7 +101,7 @@ describe('NUMERIC MODE', () => {
 
   test(`\\cos(3+4i)`, () =>
     expect(check('\\cos(3+4i)')).toMatchInlineSnapshot(`
-      latex     = ["Cos", ["Add", 3, ["Multiply", 4, "ImaginaryUnit"]]]
+      latex     = ["Cos", ["Add", 3, ["Multiply", 4, "i"]]]
       box       = ["Cos", ["Complex", 3, 4]]
       simplify  = [
         "Divide",
@@ -155,7 +155,7 @@ describe('NUMERIC MODE', () => {
 
   test('e^{i\\pi}', () =>
     expect(check('e^{i\\pi}')).toMatchInlineSnapshot(`
-      latex     = ["Power", "ExponentialE", ["Multiply", "ImaginaryUnit", "Pi"]]
+      latex     = ["Power", "e", ["Multiply", "i", "Pi"]]
       box       = ["Exp", ["Multiply", "ImaginaryUnit", "Pi"]]
       N-auto    = -1
       N-big     = {num: "NaN"}

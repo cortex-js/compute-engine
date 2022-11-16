@@ -183,7 +183,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Error',
     serialize: (serializer, expr) => {
       if (stringValue(op(expr, 1)) === 'missing')
-        return `\\textcolor{red}{${
+        return `\\error{${
           serializer.options.missingSymbol ?? '\\placeholder{}'
         }}`;
 
@@ -194,14 +194,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         head(op1) === 'ErrorCode' ? stringValue(op(op1, 1)) : stringValue(op1);
 
       if (code === 'incompatible-domain') {
-        return `\\textcolor{red}{${where}\\in ${serializer.serialize(
+        return `\\mathtip{\\error{${where}}{\\in ${serializer.serialize(
           op(op1, 3)
         )}\\notin ${serializer.serialize(op(op1, 2))}}`;
       }
 
-      if (typeof code === 'string') return `\\textcolor{red}{${where}}`;
+      if (typeof code === 'string') return `\\error{${where}}`;
 
-      return `\\textcolor{red}{${where}}`;
+      return `\\error{${where}}`;
     },
   },
   {
@@ -225,7 +225,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         return '';
       }
 
-      return `\\texttt{\\textcolor{red}{\\blacksquare}}`;
+      return `\\texttip{\\error{\\blacksquare}}{\\mathtt{${code}}}`;
     },
   },
   {
@@ -554,64 +554,6 @@ function parseTextRun(
 
   return style ? ['Style', body, { dict: style }] : body;
 }
-
-// parse: (
-//   lhs: Expression,
-//   _scanner: Scanner,
-//   _minPrec: number
-// ): [Expression | null, Expression | null] => {
-//   // //
-//   // // 1. Attempt to scan a base-n number
-//   // // i.e. `(deadbeef)_{16}`
-//   // //
-//   // let done = false;
-//   // let couldBeBaseNumber = true;
-//   // let wrappedInMathTt = false;
-//   // let maxDigit = 0;
-//   // let digits = '';
-//   // while (!done && couldBeBaseNumber) {
-//   //   const token = scanner.next();
-//   //   if (scanner.atEnd || token === ')') {
-//   //     done = true;
-//   //   } else if (token === '\\mathtt') {
-//   //     scanner.match('<{>');
-//   //     wrappedInMathTt = true;
-//   //   } else if (isSpacingToken(token)) {
-//   //     // Skip 'spacing' token
-//   //   } else if (!/^[0-9a-zA-Z]$/.test(token)) {
-//   //     couldBeBaseNumber = false;
-//   //   } else {
-//   //     maxDigit = Math.max(maxDigit, parseInt(token, 36));
-//   //     digits += token;
-//   //   }
-//   //   if (wrappedInMathTt) {
-//   //     scanner.match('<}>');
-//   //   }
-//   // }
-//   // if (couldBeBaseNumber && scanner.match('_')) {
-//   //   const radix =
-//   //     getNumberValue(scanner.matchRequiredLatexArgument()) ?? NaN;
-//   //   if (!isFinite(radix) || radix < 2 || radix > 36 || maxDigit >= radix) {
-//   //     scanner.onError({ code: 'base-out-of-range' });
-//   //     return [lhs, 'Nothing'];
-//   //   }
-//   //   return [lhs, ['BaseForm', parseInt(digits, radix), radix]];
-//   // }
-
-//   // //
-//   // // 2. It wasn't a number in a base. Scan a sequence
-//   // //
-//   // scanner.index = originalIndex;
-
-//   // If it's an empty sequence, i.e. `()`
-//   if (lhs === null) return [null, [PARENTHESES]];
-
-//   // If it's a simple sequence, 'upgrade it' to a `Parentheses`
-//   if (getFunctionName(lhs) === SEQUENCE) {
-//     return [null, [PARENTHESES, ...getTail(lhs)]];
-//   }
-//   return [null, [PARENTHESES, lhs]];
-// },
 
 function serializeLatexTokens(
   serializer: Serializer,

@@ -511,26 +511,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   { name: 'Pi', trigger: ['\\pi'] },
   { trigger: ['π'], parse: 'Pi' },
-  { name: 'ExponentialE', trigger: ['e'], serialize: '\\exponentialE' },
   {
-    trigger: ['\\mathrm', '<{>', 'e', '<}>'],
-    parse: 'ExponentialE',
-  },
-  {
+    name: 'ExponentialE',
     trigger: ['\\exponentialE'],
     parse: 'ExponentialE',
+    serialize: '\\exponentialE',
   },
   {
     name: 'ImaginaryUnit',
     trigger: ['\\imaginaryI'],
-  },
-  {
-    trigger: ['i'],
-    parse: 'ImaginaryUnit',
-  },
-  {
-    trigger: ['\\mathrm', '<{>', 'i', '<}>'],
-    parse: 'ImaginaryUnit',
   },
 
   // Operations

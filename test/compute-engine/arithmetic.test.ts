@@ -18,24 +18,24 @@ describe('CONSTANTS', () => {
   test(`MachineEpsilon`, () =>
     expect(checkJson(`MachineEpsilon`)).toMatchInlineSnapshot(`
       box       = MachineEpsilon
-      simplify  = 2.220446049250313e-16
+      N-auto    = 2.220446049250313e-16
     `));
   test(`CatalanConstant`, () =>
     expect(checkJson(`CatalanConstant`)).toMatchInlineSnapshot(`
       box       = CatalanConstant
-      simplify  = 0.91596559417721901505
+      N-auto    = 0.91596559417721901505
     `));
   test(`GoldenRatio`, () =>
     expect(checkJson(`GoldenRatio`)).toMatchInlineSnapshot(`
       box       = GoldenRatio
-      simplify  = ["Multiply", ["Rational", 1, 2], ["Add", 1, ["Sqrt", 5]]]
+      canonical = ["Multiply", ["Rational", 1, 2], ["Add", 1, ["Sqrt", 5]]]
       N-auto    = 1.6180339887498948482
       N-mach    = 1.618033988749895
     `));
   test(`EulerGamma`, () =>
     expect(checkJson(`EulerGamma`)).toMatchInlineSnapshot(`
       box       = EulerGamma
-      simplify  = 0.57721566490153286061
+      N-auto    = 0.57721566490153286061
     `));
 });
 

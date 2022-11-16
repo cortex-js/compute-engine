@@ -758,7 +758,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         name: 'Sum',
         wikidata: 'Q218005',
         complexity: 1000,
-        hold: 'first',
+        hold: 'all',
         signature: {
           domain: [
             'Function',
@@ -787,6 +787,21 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
     //
     symbols: [
       {
+        name: 'e',
+        domain: 'TranscendentalNumber',
+        constant: true,
+        hold: false,
+        value: 'ExponentialE',
+      },
+      {
+        name: 'i',
+        domain: 'ImaginaryNumber',
+        constant: true,
+        hold: false,
+        imaginary: true,
+        value: 'ImaginaryUnit',
+      },
+      {
         /**
          * The difference between 1 and the next larger floating point number
          *
@@ -796,6 +811,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
          */
         name: 'MachineEpsilon',
         domain: 'RealNumber',
+        hold: true,
         constant: true,
         real: true,
         value: { num: Number.EPSILON.toString() },
@@ -841,6 +857,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         algebraic: undefined, // Not proven irrational or transcendental
         wikidata: 'Q855282',
         constant: true,
+        hold: true,
         value: {
           // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants1.html
           num: `0.91596559417721901505460351493238411077414937428167
@@ -872,6 +889,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         domain: 'RealNumber',
         algebraic: undefined, // Not proven irrational or transcendental
         wikidata: 'Q273023',
+        hold: true,
         constant: true,
         value: {
           num: `0.57721566490153286060651209008240243104215933593992359880576723488486772677766

@@ -39,7 +39,7 @@ export const NUMBER_FORMATTING_OPTIONS: NumberFormattingOptions = {
   beginExponentMarker: 'e',
   endExponentMarker: '',
   notation: 'auto',
-  imaginaryNumber: 'i',
+  imaginaryUnit: 'i',
   truncationMarker: '',
   beginRepeatingDigits: '',
   endRepeatingDigits: '',

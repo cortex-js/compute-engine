@@ -61,7 +61,10 @@ import { BoxedFunction } from './boxed-expression/boxed-function';
 import { canonicalMultiply } from './library/arithmetic-multiply';
 import { canonicalAdd } from './library/arithmetic-add';
 import { canonicalDivide } from './library/arithmetic-divide';
-import { BoxedSymbol } from './boxed-expression/boxed-symbol';
+import {
+  BoxedSymbol,
+  makeCanonicalSymbol,
+} from './boxed-expression/boxed-symbol';
 import {
   boxDomain,
   isDomain,
@@ -188,6 +191,7 @@ export class ComputeEngine implements IComputeEngine {
     Nothing: null,
     None: null,
     Undefined: null,
+    Function: null,
 
     Pi: null,
     ImaginaryUnit: null,
@@ -1345,14 +1349,16 @@ export class ComputeEngine implements IComputeEngine {
         result.wikidata === options.metadata.wikidata
       )
         return result;
+      if (options.canonical) return makeCanonicalSymbol(this, name);
       return new BoxedSymbol(this, name, options);
     }
     if (result === null) {
       // If `null`, the symbol is in `_commonSymbols`, but not yet cached
-      result = new BoxedSymbol(this, name, { canonical: true });
+      result = makeCanonicalSymbol(this, name);
       this._commonSymbols[name] = result;
       return result;
     }
+    if (options.canonical) return makeCanonicalSymbol(this, name);
     return new BoxedSymbol(this, name, options);
   }
 

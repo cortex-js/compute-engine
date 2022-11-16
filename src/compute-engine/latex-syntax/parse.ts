@@ -138,7 +138,7 @@ export const DEFAULT_LATEX_NUMBER_OPTIONS: NumberFormattingOptions = {
   truncationMarker: '\\ldots',
   beginRepeatingDigits: '\\overline{',
   endRepeatingDigits: '}',
-  imaginaryNumber: '\\imaginaryI',
+  imaginaryUnit: '\\imaginaryI',
   avoidExponentsInRange: [-7, 20],
 };
 
@@ -237,7 +237,7 @@ export class _Parser implements Parser {
       this.options.endRepeatingDigits,
       []
     );
-    this._imaginaryNumberTokens = tokenize(this.options.imaginaryNumber, []);
+    this._imaginaryNumberTokens = tokenize(this.options.imaginaryUnit, []);
   }
 
   updateOptions(
@@ -1261,6 +1261,7 @@ export class _Parser implements Parser {
         } else {
           // Is it followed by an argument list inside parentheses?
           const seq = getSequence(this.matchEnclosure());
+          // const seq = this.matchArguments('enclosure');
           return seq ? [def.name!, ...seq] : def.name!;
         }
       }
@@ -1278,6 +1279,7 @@ export class _Parser implements Parser {
       this.index = start;
       return null;
     }
+    // If not a string, this was a malformed name (invalid identifier)
     if (typeof fn !== 'string') return fn;
 
     //
@@ -1287,6 +1289,7 @@ export class _Parser implements Parser {
       // Function application:
       // Is it followed by an argument list inside parentheses?
       const seq = getSequence(this.matchEnclosure());
+      // const seq = this.matchArguments('enclosure');
       return seq ? [fn, ...seq] : fn;
     }
 

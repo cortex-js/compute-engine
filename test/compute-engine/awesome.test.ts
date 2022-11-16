@@ -365,7 +365,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       latex     = [
         "Multiply",
         ["Sqrt", "Pi"],
-        ["Power", ["Delimiter", ["Divide", "n", "ExponentialE"]], "n"],
+        ["Power", ["Delimiter", ["Divide", "n", "e"]], "n"],
         [
           "Root",
           [
