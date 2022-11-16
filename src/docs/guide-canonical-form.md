@@ -28,11 +28,12 @@ functions or flattening associative functions &mdash; we define a **canonical**
 representation.
 
 A canonical representation is somewhat arbitrary, but using it consistently make
-some operations easier, for example, comparing two expressions for equality.
+some operations easier, for example, comparing two expressions for structural 
+equality.
 
 The canonical form used by the Compute Engine follows common (but certainly not
 universal) conventions in writing mathematical expressions, and expresses them
-in a way that optimize their computation. It is not necessarily "the simplest"
+in a way that optimize their computation. It is not always "the simplest"
 way to represent an expression.
 
 The canonical form of an expression is always the same when used with a given
@@ -40,29 +41,55 @@ Compute Engine instance. However, do not rely on the canonical form as future
 versions of the Compute Engine could provide a different result.
 
 The `ce.box()` and `ce.parse()` function return a canonical expression by 
-default. If instead you want a non-canonical version, set the `canonical` option
-to `false`. The non-canonical version will be closer to the literal LaTeX 
+default. 
+
+**To get a non-canonical version of an experssion** set the `canonical` option
+of `ce.parse()` or `ce.box()` to `false`. 
+
+The non-canonical version will be closer to the literal LaTeX 
 input from a user for example, which may be desirable to compare a "raw" user 
 input with an expected answer.
 
 ```js
 ce.parse("\\frac{3}{-5}")
 // ➔ ["Rational", -3, 5]
+// The canonical version moves the sign to the numerator
 
-ce.parse("\\frac{3}{-5}", {canonical: false})
+ce.parse("\\frac{3}{-5}", { canonical: false })
 // ➔ ["Divide", 3, -5]
+// The non-canonical version does not change the arguments, so this is 
+// interpreted as a regular fraction ("Divide"), not a rational.
 ```
+
+You can further customize how an expression is interpreted by using 
+[`ce.jsonSerializationOptions`](/docs/guide-expressions#unboxing).
+
+```js
+ce.parse("\\frac{3}{5}", { canonical: false })
+// ➔ ["Rational", 3, 5]
+// This is a rational without modifying the arguments, so a `["Rational"]` 
+// expression is returned
+
+ce.jsonSerializationOptions = { exclude: ['Rational'] };
+ce.parse('\\frac{3}{5}', { canonical: false });
+// ➔ ["Divide", 3, 5]
+// We've excluded `["Rational"]` expressions, so it is interepreted as a 
+// division instead.
+```
+
 
 The output of `expr.simplify()`, `expr.evaluate()` and `expr.N()` are canonical
 expressions.
 
-**To obtain the canonical representation of an expression**, use the
+**To obtain the canonical representation of an non-canonical expression**, use the
 `expr.canonical` property.
 
 ```js
 console.log(ce.box(['Add', 2, 'x', 3]).canonical);
 // ➔ ["Add", 5, "x"]
 ```
+
+**To check if an expression is canonical** use `expr.isCanonical`.
 
 If the expression is already canonical, `expr.canonical` immediately return
 `expr`.
