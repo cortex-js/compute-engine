@@ -85,8 +85,10 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
       if (isBigRational(num))
         return `${num[0].toString()}/${num[1].toString()}`;
       if (num instanceof Complex) {
-        if (num.re === 0) return num.im.toString() + 'i';
-        return `${num.re.toString()}+${num.im.toString()}i`;
+        const im = num.im === 1 ? '' : num.im === -1 ? '-' : num.im.toString();
+        if (num.re === 0) return im + 'i';
+        if (num.im < 0) return `${num.re.toString()}${im}i`;
+        return `${num.re.toString()}+${im}i`;
       }
     }
 
@@ -96,7 +98,6 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   [Symbol.toPrimitive](
     hint: 'number' | 'string' | 'default'
   ): number | string | null {
-    if (hint === 'string') return this.toString();
     if (hint === 'number') {
       const v = this.valueOf();
       return typeof v === 'number' ? v : null;
@@ -149,7 +150,7 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
 
   get symbols(): BoxedExpression[] {
     return [...getSymbols(this, new Set<string>())].map((x) =>
-      this.engine.symbol(x)
+      this.engine.symbol(x, { canonical: false })
     );
   }
 
