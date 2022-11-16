@@ -932,7 +932,7 @@ export function makeCanonicalFunction(
   //
   // 4/ Apply `idempotent` and `involution`
   //
-  if (ops.length === 1 && xs[0].head === head) {
+  if (xs.length === 1 && xs[0].head === head) {
     // f(f(x)) -> x
     if (def.involution) return xs[0].op1;
 

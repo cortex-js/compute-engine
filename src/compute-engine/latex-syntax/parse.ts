@@ -991,6 +991,16 @@ export class _Parser implements Parser {
     return null;
   }
 
+  /**
+   * A function can be followed by the following suffixes:
+   * - a `\prime`, `\doubleprime`, `'`, `(n)` to indicate a derivative
+   * - a subscript to indicate an argument
+   * - an argument, optionally inside an enclosure
+   */
+  matchFunctionSuffix(): Expression | null {
+    return null;
+  }
+
   /** If matches the normalized open delimiter, return the
    * expected closing delimiter.
    *
@@ -1260,8 +1270,7 @@ export class _Parser implements Parser {
           if (result) return result;
         } else {
           // Is it followed by an argument list inside parentheses?
-          const seq = getSequence(this.matchEnclosure());
-          // const seq = this.matchArguments('enclosure');
+          const seq = this.matchArguments('enclosure');
           return seq ? [def.name!, ...seq] : def.name!;
         }
       }
@@ -1288,8 +1297,7 @@ export class _Parser implements Parser {
     if (this.options.parseUnknownIdentifier?.(fn, this) === 'function') {
       // Function application:
       // Is it followed by an argument list inside parentheses?
-      const seq = getSequence(this.matchEnclosure());
-      // const seq = this.matchArguments('enclosure');
+      const seq = this.matchArguments('enclosure');
       return seq ? [fn, ...seq] : fn;
     }
 

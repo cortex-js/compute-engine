@@ -37,6 +37,8 @@ ce.assume('one', 1);
 
 ///
 
+console.log(ce.parse('f\\left(\\right)').toString());
+
 // Produces error -- mathlive #1707
 // also should parse sub, i.e. f_{n-1} -> use sub as first params? (or last, as in log_2(x) -> log(x, 2))
 console.log(ce.parse("f'").json);
