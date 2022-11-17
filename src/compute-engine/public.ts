@@ -1290,13 +1290,21 @@ export interface ExpressionMapInterface<U> {
 }
 
 /**
- * A symbol table contains definitions for symbols, functions and rules.
+ * An ID table contains definitions for symbols and functions.
+ *
+ * The index of the table is an identifier, the  name of the symbol or
+ * function for this definition
+ *
+ * The name of a symbol or function is an arbitrary string of Unicode
+ * characters, however the following conventions are recommended:
+ *
+ * - Use only letters, digits and `-`: `/[a-zA-Z0-9-]+/`
+ * - The first character should be a letter: `/^[a-zA-Z]/`
+ * - Functions and symbols exported from a library should start with an uppercase letter `/^[A-Z]/`
  *
  */
-export type SymbolTable = {
-  symbols?: SymbolDefinition[];
-  functions?: FunctionDefinition[];
-};
+
+export type IDTable = { [id: string]: SymbolDefinition | FunctionDefinition };
 
 /**
  * The entries of a `RuntimeIdentifierTable` have been validated and
@@ -1363,7 +1371,7 @@ export type Scope = {
 export type RuntimeScope = Scope & {
   parentScope?: RuntimeScope;
 
-  identifierTable?: RuntimeIdentifierTable;
+  idTable?: RuntimeIdentifierTable;
 
   assumptions: undefined | ExpressionMapInterface<boolean>;
 
@@ -1382,18 +1390,6 @@ export type RuntimeScope = Scope & {
 };
 
 export type BaseDefinition = {
-  /** The name of the symbol or function for this definition
-   *
-   * The name of a symbol or function is an arbitrary string of Unicode
-   * characters, however the following conventions are recommended:
-   *
-   * - Use only letters, digits and `-`: `/[a-zA-Z0-9-]+/`
-   * - The first character should be a letter: `/^[a-zA-Z]/`
-   * - Functions and symbols exported from a library should start with an uppercase letter `/^[A-Z]/`
-   *
-   */
-  name: string;
-
   /** A short (about 1 line) description. May contain Markdown. */
   description?: string | string[];
 
@@ -2013,14 +2009,17 @@ export interface IComputeEngine {
    *
    * If a definition existed previously, it is replaced.
    */
-  defineSymbol(def: SymbolDefinition): BoxedSymbolDefinition;
+  defineSymbol(name: string, def: SymbolDefinition): BoxedSymbolDefinition;
 
   /**
    * Associate a new definition to a function in the current context.
    *
    * If a definition existed previously, it is replaced.
    */
-  defineFunction(def: FunctionDefinition): BoxedFunctionDefinition;
+  defineFunction(
+    name: string,
+    def: FunctionDefinition
+  ): BoxedFunctionDefinition;
 
   lookupSymbol(
     name: string,
@@ -2229,11 +2228,10 @@ export interface IComputeEngine {
   get jsonSerializationOptions(): Readonly<JsonSerializationOptions>;
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>);
 
-  pushScope(options?: {
-    symbolTable?: Readonly<SymbolTable> | Readonly<SymbolTable>[];
-    assumptions?: (LatexString | Expression | BoxedExpression)[];
-    scope?: Partial<Scope>;
-  }): void;
+  pushScope(
+    symbolTable?: Readonly<IDTable> | Readonly<IDTable>[],
+    scope?: Partial<Scope>
+  ): void;
   popScope(): void;
 
   /** Assign a value to an identifier in the current scope. Use `null` to reset the identifier to no value */

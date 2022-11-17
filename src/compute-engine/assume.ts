@@ -70,7 +70,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     if (!val.isValid) return 'not-a-predicate';
     const def = ce.lookupSymbol(lhs);
     if (!def) {
-      ce.defineSymbol({ name: lhs, value: val });
+      ce.defineSymbol(lhs, { value: val });
       return 'ok';
     }
     if (def.domain && !val.domain.isCompatible(def.domain))
@@ -102,7 +102,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     const val = sols.length === 1 ? sols[0] : ce.box(['List', ...sols]);
     const def = ce.lookupSymbol(lhs);
     if (!def) {
-      ce.defineSymbol({ name: lhs, value: val });
+      ce.defineSymbol(lhs, { value: val });
       return 'ok';
     }
     if (def.domain && !sols.every((sol) => val.domain.isCompatible(sol.domain)))
@@ -136,29 +136,24 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   if (proposition.op1!.symbol && !hasDef(ce, proposition.op1!.symbol)) {
     if (proposition.op2.evaluate().isZero) {
       if (proposition.head === 'Less') {
-        ce.defineSymbol({
-          name: proposition.op1.symbol,
+        ce.defineSymbol(proposition.op1.symbol, {
           domain: ce.domain('NegativeNumber'),
         });
       } else if (proposition.head === 'LessEqual') {
-        ce.defineSymbol({
-          name: proposition.op1.symbol,
+        ce.defineSymbol(proposition.op1.symbol, {
           domain: ce.domain('NonPositiveNumber'),
         });
       } else if (proposition.head === 'Greater') {
-        ce.defineSymbol({
-          name: proposition.op1.symbol,
+        ce.defineSymbol(proposition.op1.symbol, {
           domain: ce.domain('PositiveNumber'),
         });
       } else if (proposition.head === 'GreaterEqual') {
-        ce.defineSymbol({
-          name: proposition.op1.symbol,
+        ce.defineSymbol(proposition.op1.symbol, {
           domain: ce.domain('NonNegativeNumber'),
         });
       }
     } else {
-      ce.defineSymbol({
-        name: proposition.op1.symbol,
+      ce.defineSymbol(proposition.op1.symbol, {
         domain: ce.domain('ExtendedRealNumber'),
       });
       ce.assumptions.set(proposition, true);
@@ -202,7 +197,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
 
   // Case 3
   if (unvals.length === 1) {
-    ce.defineSymbol({ name: unvals[0], domain: 'ExtendedRealNumber' });
+    ce.defineSymbol(unvals[0], { domain: 'ExtendedRealNumber' });
   }
 
   // Case 3, 4
@@ -232,8 +227,9 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   if (undefs.length === 1) {
     const dom = ce.domain(proposition.op2.evaluate().json);
     if (!dom.isValid) return 'not-a-predicate';
-    if (dom.isCompatible('Function')) ce.defineFunction({ name: undefs[0] });
-    else ce.defineSymbol({ name: undefs[0], domain: dom });
+    if (dom.isCompatible('Function'))
+      ce.defineFunction(undefs[0], { signature: { domain: 'Function' } });
+    else ce.defineSymbol(undefs[0], { domain: dom });
     return 'ok';
   }
 

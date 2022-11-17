@@ -1,18 +1,15 @@
-import { SymbolTable } from '../public';
+import { IDTable } from '../public';
 import { expand } from '../symbolic/expand';
 
-export const POLYNOMIALS_LIBRARY: SymbolTable[] = [
+export const POLYNOMIALS_LIBRARY: IDTable[] = [
   {
-    functions: [
-      {
-        name: 'Expand',
-        description: 'Expand out products and positive integer powers',
-        signature: {
-          domain: ['Function', 'Value', 'Value'],
-          evaluate: (_ce, ops) => expand(ops[0]),
-        },
+    Expand: {
+      description: 'Expand out products and positive integer powers',
+      signature: {
+        domain: ['Function', 'Value', 'Value'],
+        evaluate: (_ce, ops) => expand(ops[0]),
       },
-    ],
+    },
   },
 ];
 

@@ -10,20 +10,15 @@ import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
 import { LibraryCategory } from '../latex-syntax/public';
 
-import {
-  IComputeEngine,
-  SymbolTable,
-  BoxedSymbolDefinition,
-  BoxedFunctionDefinition,
-  BaseDefinition,
-} from '../public';
+import { IComputeEngine, IDTable } from '../public';
 import { BoxedSymbolDefinitionImpl } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
 import { isValidIdentifier } from '../../math-json/utils';
+import { isFunctionDefinition, isSymbolDefinition } from './utils';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'
-): Readonly<SymbolTable>[] {
+): Readonly<IDTable>[] {
   if (categories === 'all') {
     // **Note** the order of the libraries matter:
     // earlier libraries cannot reference definitions in later libraries.
@@ -49,7 +44,7 @@ export function getStandardLibrary(
       'units',
     ]);
   } else if (typeof categories === 'string') categories = [categories];
-  const result: Readonly<SymbolTable>[] = [];
+  const result: Readonly<IDTable>[] = [];
   for (const category of categories) {
     const dict = LIBRARIES[category];
     if (!dict) throw Error(`Unknown library category ${category}`);
@@ -60,9 +55,7 @@ export function getStandardLibrary(
 }
 
 export const LIBRARIES: {
-  [category in LibraryCategory]?:
-    | Readonly<SymbolTable>
-    | Readonly<SymbolTable>[];
+  [category in LibraryCategory]?: Readonly<IDTable> | Readonly<IDTable>[];
 } = {
   'algebra': [],
   // 'algebra': [
@@ -131,17 +124,14 @@ export const LIBRARIES: {
   'relop': RELOP_LIBRARY,
   'polynomials': POLYNOMIALS_LIBRARY,
   'physics': {
-    symbols: [
-      {
-        name: 'Mu-0',
-        description: 'Vaccum permeability',
-        constant: true,
-        wikidata: 'Q1515261',
-        domain: 'RealNumber',
-        value: 1.25663706212e-6,
-        // unit: ['Divide', 'N', ['Square', 'A']],
-      },
-    ],
+    'Mu-0': {
+      description: 'Vaccum permeability',
+      constant: true,
+      wikidata: 'Q1515261',
+      domain: 'RealNumber',
+      value: 1.25663706212e-6,
+      // unit: ['Divide', 'N', ['Square', 'A']],
+    },
   },
   'statistics': [], // @todo statistics: [
   //   // average
@@ -155,11 +145,8 @@ export const LIBRARIES: {
   'units': [],
 };
 
-function validateDefinitionName(def: BaseDefinition): string {
-  if (typeof def !== 'object' || !('name' in def) || !def.name)
-    throw new Error('Missing name for definition' + JSON.stringify(def)); // @todo cause
-
-  const name = def.name.normalize();
+function validateDefinitionName(name: string): string {
+  name = name.normalize();
   if (!isValidIdentifier(name)) throw Error(`Invalid definition name ${name}`); // @todo cause
 
   return name;
@@ -177,23 +164,35 @@ function validateDefinitionName(def: BaseDefinition): string {
  */
 export function setCurrentContextSymbolTable(
   engine: IComputeEngine,
-  table: SymbolTable
+  table: IDTable
 ): void {
   if (!engine.context) throw Error('No context available');
 
   // If this is the first symbol table, setup the context
-  engine.context.identifierTable ??= new Map();
+  engine.context.idTable ??= new Map();
 
-  const idTable = engine.context.identifierTable;
+  const idTable = engine.context.idTable;
 
   //
   // Validate and add the symbols from the symbol table
   //
-  if (table.symbols)
-    for (const entry of table.symbols) {
-      const name = validateDefinitionName(entry);
+  for (let name of Object.keys(table)) {
+    const entry = table[name];
+    name = validateDefinitionName(name);
 
-      const def = new BoxedSymbolDefinitionImpl(engine, entry);
+    if (isFunctionDefinition(entry)) {
+      const def = makeFunctionDefinition(engine, name, entry);
+
+      if (idTable.has(name))
+        throw new Error(
+          `Duplicate function definition ${name}:\n${JSON.stringify(
+            idTable.get(name)!
+          )}\n${JSON.stringify(entry)}`
+        );
+
+      idTable.set(name, def);
+    } else if (isSymbolDefinition(entry)) {
+      const def = new BoxedSymbolDefinitionImpl(engine, name, entry);
 
       if (engine.strict && entry.wikidata) {
         for (const [_, d] of idTable) {
@@ -213,26 +212,8 @@ export function setCurrentContextSymbolTable(
       }
 
       idTable.set(name, def);
+    } else {
+      console.error('Unexpected definition');
     }
-
-  //
-  // Validate and add the functions from the symbol table
-  //
-  if (table.functions)
-    for (const entry of table.functions) {
-      const name = validateDefinitionName(entry);
-
-      const def = makeFunctionDefinition(engine, entry);
-
-      if (idTable.has(name))
-        throw new Error(
-          `Duplicate function definition ${name}:\n${JSON.stringify(
-            idTable.get(name)!
-          )}\n${JSON.stringify(entry)}`
-        );
-
-      idTable.set(name, def);
-    }
-
-  // @todo: take table.rules into consideration
+  }
 }

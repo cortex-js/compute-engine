@@ -19,7 +19,7 @@ import {
   isMachineRational,
   rationalize,
 } from '../numerics/rationals';
-import { BoxedExpression, SymbolTable, IComputeEngine } from '../public';
+import { BoxedExpression, IDTable, IComputeEngine } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
@@ -79,314 +79,244 @@ import { flattenSequence } from '../symbolic/flatten';
 // Binomial
 // Fibonacci
 
-export const ARITHMETIC_LIBRARY: SymbolTable[] = [
+export const ARITHMETIC_LIBRARY: IDTable[] = [
   {
     //
     // Functions
     //
-    functions: [
-      {
-        name: 'Abs',
-        wikidata: 'Q3317982', // magnitude 'Q120812 (for reals)
-        threadable: true,
-        idempotent: true,
-        complexity: 1200,
-        signature: {
-          domain: ['Function', 'Number', 'NonNegativeNumber'],
-          simplify: (ce, ops) => processAbs(ce, ops[0], 'simplify'),
-          evaluate: (ce, ops) => processAbs(ce, ops[0], 'evaluate'),
-          N: (ce, ops) => processAbs(ce, ops[0], 'N'),
+    Abs: {
+      wikidata: 'Q3317982', // magnitude 'Q120812 (for reals)
+      threadable: true,
+      idempotent: true,
+      complexity: 1200,
+      signature: {
+        domain: ['Function', 'Number', 'NonNegativeNumber'],
+        simplify: (ce, ops) => processAbs(ce, ops[0], 'simplify'),
+        evaluate: (ce, ops) => processAbs(ce, ops[0], 'evaluate'),
+        N: (ce, ops) => processAbs(ce, ops[0], 'N'),
+      },
+    },
+
+    Add: {
+      wikidata: 'Q32043',
+      associative: true,
+      commutative: true,
+      threadable: true,
+      idempotent: true,
+      complexity: 1300,
+      hold: 'all',
+      signature: {
+        domain: 'NumericFunction',
+        codomain: (ce, args) =>
+          domainAdd(
+            ce,
+            args.map((x) => x.domain)
+          ),
+        canonical: (ce, args) => canonicalAdd(ce, args), // never called: shortpath
+        simplify: (ce, ops) => simplifyAdd(ce, ops),
+        evaluate: (ce, ops) => evalAdd(ce, ops),
+        N: (ce, ops) => evalAdd(ce, ops, 'N'),
+      },
+    },
+
+    Ceil: {
+      description: 'Rounds a number up to the next largest integer',
+      complexity: 1250,
+      signature: {
+        domain: ['Function', 'Number', 'Integer'],
+        evaluate: (_ce, ops) =>
+          applyN(
+            ops[0],
+            Math.ceil,
+            (x) => x.ceil(),
+            (z) => z.ceil(0)
+          ),
+      },
+    },
+
+    Chop: {
+      associative: true,
+      threadable: true,
+      idempotent: true,
+      complexity: 1200,
+
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        evaluate: (ce, ops) =>
+          applyN(
+            ops[0],
+            (x) => ce.chop(x),
+            (x) => ce.chop(x),
+            (x) => ce.chop(x)
+          ),
+      },
+    },
+
+    Complex: {
+      // This function is converted during boxing, so unlikely to encounter
+      wikidata: 'Q11567',
+      complexity: 500,
+    },
+
+    Divide: {
+      wikidata: 'Q1226939',
+      complexity: 2500,
+      // - if numer product of numbers, or denom product of numbers,
+      // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
+
+      signature: {
+        domain: ['Function', 'Number', 'Number', 'Number'],
+        canonical: (ce, args) => canonicalDivide(ce, args[0], args[1]),
+        simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
+      },
+    },
+
+    Exp: {
+      wikidata: 'Q168698',
+      threadable: true,
+      complexity: 3500,
+      // Exp(x) -> e^x
+
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        canonical: (ce, args) =>
+          ce.power(
+            ce.symbol('ExponentialE'),
+            validateArgument(ce, args[0], 'Number')
+          ),
+      },
+    },
+
+    Erf: {
+      description: 'Complementary Error Function',
+
+      complexity: 7500,
+    },
+
+    Erfc: {
+      description: 'Complementary Error Function',
+
+      complexity: 7500,
+    },
+
+    Factorial: {
+      description: 'The factorial function',
+      wikidata: 'Q120976',
+      complexity: 9000,
+
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        evaluate: (ce, ops) => {
+          const n = asSmallInteger(ops[0]);
+          if (n !== null && n >= 0) {
+            if (!bignumPreferred(ce)) return ce.number(factorial(n));
+            return ce.number(bigFactorial(ce, ce.bignum(n)));
+          }
+          const num = ops[0].numericValue;
+          if (num !== null && num instanceof Complex)
+            return ce.number(gammaComplex(num.add(1)));
+
+          const f = asFloat(ops[0]);
+          if (f !== null) return ce.number(gamma(1 + f));
+
+          return undefined;
         },
       },
+    },
 
-      {
-        name: 'Add',
-        wikidata: 'Q32043',
-        associative: true,
-        commutative: true,
-        threadable: true,
-        idempotent: true,
-        complexity: 1300,
-        hold: 'all',
-        signature: {
-          domain: 'NumericFunction',
-          codomain: (ce, args) =>
-            domainAdd(
-              ce,
-              args.map((x) => x.domain)
-            ),
-          canonical: (ce, args) => canonicalAdd(ce, args), // never called: shortpath
-          simplify: (ce, ops) => simplifyAdd(ce, ops),
-          evaluate: (ce, ops) => evalAdd(ce, ops),
-          N: (ce, ops) => evalAdd(ce, ops, 'N'),
-        },
+    Floor: {
+      wikidata: 'Q56860783',
+      complexity: 1250,
+
+      signature: {
+        domain: ['Function', 'Number', 'ExtendedRealNumber'],
+        evaluate: (ce, ops) =>
+          applyN(
+            ops[0],
+            Math.floor,
+            (x) => x.floor(),
+            (z) => z.floor(0)
+          ),
       },
+    },
 
-      {
-        name: 'Ceil',
-        description: 'Rounds a number up to the next largest integer',
-        complexity: 1250,
-        signature: {
-          domain: ['Function', 'Number', 'Integer'],
-          evaluate: (_ce, ops) =>
-            applyN(
-              ops[0],
-              Math.ceil,
-              (x) => x.ceil(),
-              (z) => z.ceil(0)
-            ),
-        },
+    Gamma: {
+      wikidata: 'Q190573',
+      complexity: 8000,
+
+      signature: {
+        domain: ['Function', 'Number', 'Number', 'Number'],
+        N: (ce, ops) =>
+          applyN(
+            ops[0],
+            (x) => gamma(x),
+            (x) => bigGamma(ce, x),
+            (x) => gammaComplex(x)
+          ),
       },
+    },
 
-      {
-        name: 'Chop',
-        associative: true,
-        threadable: true,
-        idempotent: true,
-        complexity: 1200,
+    LogGamma: {
+      complexity: 8000,
 
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          evaluate: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => ce.chop(x),
-              (x) => ce.chop(x),
-              (x) => ce.chop(x)
-            ),
-        },
+      signature: {
+        domain: ['Function', 'Number', 'Number', 'Number'],
+        N: (ce, ops) =>
+          applyN(
+            ops[0],
+            (x) => lngamma(x),
+            (x) => bigLngamma(ce, x),
+            (x) => lngammaComplex(x)
+          ),
       },
+    },
 
-      {
-        // This function is converted during boxing, so unlikely to encounter
-        name: 'Complex',
-        wikidata: 'Q11567',
-        complexity: 500,
+    Ln: {
+      description: 'Natural Logarithm',
+      wikidata: 'Q204037',
+      complexity: 4000,
+
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        N: (ce, ops) =>
+          applyN(
+            ops[0],
+            (x) => (x >= 0 ? Math.log(x) : ce.complex(x).log()),
+            (x) => (!x.isNeg() ? x.ln() : ce.complex(x.toNumber()).log()),
+            (z) => z.log()
+          ),
       },
+    },
 
-      {
-        name: 'Divide',
-        wikidata: 'Q1226939',
-        complexity: 2500,
-        // - if numer product of numbers, or denom product of numbers,
-        // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
+    Log: {
+      description: 'Log(z, b = 10) = Logarithm of base b',
+      wikidata: 'Q11197',
+      complexity: 4100,
 
-        signature: {
-          domain: ['Function', 'Number', 'Number', 'Number'],
-          canonical: (ce, args) => canonicalDivide(ce, args[0], args[1]),
-          simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
-        },
-      },
-
-      {
-        name: 'Exp',
-        wikidata: 'Q168698',
-        threadable: true,
-        complexity: 3500,
-        // Exp(x) -> e^x
-
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          canonical: (ce, args) =>
-            ce.power(
-              ce.symbol('ExponentialE'),
-              validateArgument(ce, args[0], 'Number')
-            ),
-        },
-      },
-
-      {
-        name: 'Erf',
-        description: 'Complementary Error Function',
-
-        complexity: 7500,
-      },
-
-      {
-        name: 'Erfc',
-        description: 'Complementary Error Function',
-
-        complexity: 7500,
-      },
-
-      {
-        name: 'Factorial',
-        description: 'The factorial function',
-        wikidata: 'Q120976',
-        complexity: 9000,
-
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          evaluate: (ce, ops) => {
-            const n = asSmallInteger(ops[0]);
-            if (n !== null && n >= 0) {
-              if (!bignumPreferred(ce)) return ce.number(factorial(n));
-              return ce.number(bigFactorial(ce, ce.bignum(n)));
-            }
-            const num = ops[0].numericValue;
-            if (num !== null && num instanceof Complex)
-              return ce.number(gammaComplex(num.add(1)));
-
-            const f = asFloat(ops[0]);
-            if (f !== null) return ce.number(gamma(1 + f));
-
-            return undefined;
-          },
-        },
-      },
-
-      {
-        name: 'Floor',
-        wikidata: 'Q56860783',
-        complexity: 1250,
-
-        signature: {
-          domain: ['Function', 'Number', 'ExtendedRealNumber'],
-          evaluate: (ce, ops) =>
-            applyN(
-              ops[0],
-              Math.floor,
-              (x) => x.floor(),
-              (z) => z.floor(0)
-            ),
-        },
-      },
-
-      {
-        name: 'Gamma',
-        wikidata: 'Q190573',
-        complexity: 8000,
-
-        signature: {
-          domain: ['Function', 'Number', 'Number', 'Number'],
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => gamma(x),
-              (x) => bigGamma(ce, x),
-              (x) => gammaComplex(x)
-            ),
-        },
-      },
-
-      {
-        name: 'LogGamma',
-        complexity: 8000,
-
-        signature: {
-          domain: ['Function', 'Number', 'Number', 'Number'],
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => lngamma(x),
-              (x) => bigLngamma(ce, x),
-              (x) => lngammaComplex(x)
-            ),
-        },
-      },
-
-      {
-        name: 'Ln',
-        description: 'Natural Logarithm',
-        wikidata: 'Q204037',
-        complexity: 4000,
-
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) => (x >= 0 ? Math.log(x) : ce.complex(x).log()),
-              (x) => (!x.isNeg() ? x.ln() : ce.complex(x.toNumber()).log()),
-              (z) => z.log()
-            ),
-        },
-      },
-
-      {
-        name: 'Log',
-        description: 'Log(z, b = 10) = Logarithm of base b',
-        wikidata: 'Q11197',
-        complexity: 4100,
-
-        signature: {
-          domain: ['Function', 'Number', ['Maybe', 'Number'], 'Number'],
-          canonical: (ce, ops) => {
-            ops = flattenSequence(ops);
-            if (ops.length === 1)
+      signature: {
+        domain: ['Function', 'Number', ['Maybe', 'Number'], 'Number'],
+        canonical: (ce, ops) => {
+          ops = flattenSequence(ops);
+          if (ops.length === 1)
+            return ce._fn('Log', [
+              validateArgument(ce, ops[0].canonical, 'Number'),
+            ]);
+          if (ops.length === 2) {
+            const base = validateArgument(ce, ops[1].canonical, 'Number');
+            if (base.numericValue === 10)
               return ce._fn('Log', [
                 validateArgument(ce, ops[0].canonical, 'Number'),
               ]);
-            if (ops.length === 2) {
-              const base = validateArgument(ce, ops[1].canonical, 'Number');
-              if (base.numericValue === 10)
-                return ce._fn('Log', [
-                  validateArgument(ce, ops[0].canonical, 'Number'),
-                ]);
-              return ce._fn('Log', [
-                validateArgument(ce, ops[0].canonical, 'Number'),
-                base,
-              ]);
-            }
-            return ce._fn('Log', validateArgumentCount(ce, ops, 2));
-          },
-          N: (ce, ops) => {
-            if (ops[1] === undefined)
-              return applyN(
-                ops[0],
-                (x) =>
-                  x >= 0 ? Math.log10(x) : ce.complex(x).log().div(Math.LN10),
-                (x) =>
-                  !x.isNeg()
-                    ? Decimal.log10(x)
-                    : ce.complex(x.toNumber()).log().div(Math.LN10),
-                (z) => z.log().div(Math.LN10)
-              );
-            return apply2N(
-              ops[0],
-              ops[1],
-              (a, b) => Math.log(a) / Math.log(b),
-              (a, b) => a.log(b),
-              (a, b) =>
-                a.log().div(typeof b === 'number' ? Math.log(b) : b.log())
-            );
-          },
+            return ce._fn('Log', [
+              validateArgument(ce, ops[0].canonical, 'Number'),
+              base,
+            ]);
+          }
+          return ce._fn('Log', validateArgumentCount(ce, ops, 2));
         },
-      },
-
-      {
-        name: 'Lb',
-        description: 'Base-2 Logarithm',
-        wikidata: 'Q581168',
-        complexity: 4100,
-
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-
-          N: (ce, ops) =>
-            applyN(
-              ops[0],
-              (x) =>
-                x >= 0 ? Math.log2(x) : ce.complex(x).log().div(Math.LN2),
-              (x) =>
-                x.isNeg()
-                  ? Decimal.log10(x)
-                  : ce.complex(x.toNumber()).log().div(Math.LN2),
-              (z) => z.log().div(Math.LN2)
-            ),
-        },
-      },
-
-      {
-        name: 'Lg',
-        description: 'Base-10 Logarithm',
-        wikidata: 'Q966582',
-        complexity: 4100,
-
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          N: (ce, ops) =>
-            applyN(
+        N: (ce, ops) => {
+          if (ops[1] === undefined)
+            return applyN(
               ops[0],
               (x) =>
                 x >= 0 ? Math.log10(x) : ce.complex(x).log().div(Math.LN10),
@@ -395,401 +325,430 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
                   ? Decimal.log10(x)
                   : ce.complex(x.toNumber()).log().div(Math.LN10),
               (z) => z.log().div(Math.LN10)
-            ),
-        },
-      },
-
-      {
-        name: 'Max',
-        description: 'Maximum of two or more numbers',
-        complexity: 1200,
-        signature: {
-          domain: ['Function', ['Sequence', 'Number'], 'Number'],
-          simplify: (ce, ops) => {
-            if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-            if (ops.length === 1) return ops[0];
-            return ce.box(['Max', ...ops]);
-          },
-          evaluate: (ce, ops) => {
-            if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-
-            let result: BoxedExpression | undefined = undefined;
-            const rest: BoxedExpression[] = [];
-
-            for (const op of ops) {
-              if (!op.isNumber || op.numericValue === undefined) rest.push(op);
-              else if (!result || op.isGreater(result)) result = op;
-            }
-            if (rest.length > 0)
-              return ce.box(
-                result ? ['Max', result, ...rest] : ['Max', ...rest]
-              );
-            return result ?? ce._NAN;
-          },
-        },
-      },
-
-      {
-        name: 'Min',
-        description: 'Minimum of two or more numbers',
-        complexity: 1200,
-
-        signature: {
-          domain: ['Function', ['Sequence', 'Number'], 'Number'],
-          simplify: (ce, ops) => {
-            if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-            if (ops.length === 1) return ops[0];
-            return ce.box(['Min', ...ops]);
-          },
-          evaluate: (ce, ops) => {
-            if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-
-            let result: BoxedExpression | undefined = undefined;
-            const rest: BoxedExpression[] = [];
-
-            for (const op of ops) {
-              if (!op.isNumber || op.numericValue === undefined) rest.push(op);
-              else if (!result || op.isLess(result)) result = op;
-            }
-            if (rest.length > 0)
-              return ce.box(
-                result ? ['Min', result, ...rest] : ['Min', ...rest]
-              );
-            return result ?? ce._NAN;
-          },
-        },
-      },
-
-      {
-        name: 'Multiply',
-        wikidata: 'Q40276',
-        associative: true,
-        commutative: true,
-        idempotent: true,
-        complexity: 2100,
-        hold: 'all',
-
-        signature: {
-          domain: 'NumericFunction',
-          canonical: (ce, args) => canonicalMultiply(ce, args),
-          simplify: (ce, ops) => simplifyMultiply(ce, ops),
-          evaluate: (ce, ops) => evalMultiply(ce, ops),
-          N: (ce, ops) => evalMultiply(ce, ops, 'N'),
-        },
-      },
-
-      {
-        name: 'Negate',
-        description: 'Additive Inverse',
-        wikidata: 'Q715358',
-        complexity: 2000,
-
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          codomain: (ce, args) => {
-            const arg = args[0].domain;
-            if (!arg.literal) return arg;
-            const negDomain = {
-              PositiveNumber: 'NegativeNumber',
-              NonNegativeNumber: 'NonPositiveNumber',
-              NonPositiveNumber: 'NonNegativeNumber',
-              NegativeNumber: 'PositiveNumber',
-              PositiveInteger: 'NegativeInteger',
-              NonNegativeInteger: 'NonPositiveInteger',
-              NonPositiveInteger: 'NonNegativeInteger',
-              NegativeInteger: 'PositiveInteger',
-            }[arg.literal];
-            if (negDomain) return ce.domain(negDomain);
-            return arg;
-          },
-          canonical: (_ce, args) => canonicalNegate(args[0]),
-          simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
-          evaluate: (ce, ops) => processNegate(ce, ops[0], 'evaluate'),
-          N: (ce, ops) => processNegate(ce, ops[0], 'N'),
-          sgn: (_ce, args): -1 | 0 | 1 | undefined => {
-            const s = args[0].sgn;
-            if (s === undefined || s === null) return undefined;
-            if (s === 0) return 0;
-            if (s > 0) return -1;
-            if (s < 0) return +1;
-            return undefined;
-          },
-        },
-      },
-
-      {
-        name: 'Power',
-        wikidata: 'Q33456',
-        commutative: false,
-        complexity: 3500,
-        signature: {
-          domain: ['Function', 'Number', 'Number', 'Number'],
-          canonical: (ce, args) =>
-            canonicalPower(ce, args[0], args[1]) ?? ce._fn('Power', args),
-          simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
-          evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
-          N: (ce, ops) => {
-            // @fastpath
-            if (
-              ce.numericMode === 'machine' &&
-              typeof ops[0].numericValue === 'number' &&
-              typeof ops[1].numericValue === 'number'
-            )
-              return ce.number(
-                Math.pow(ops[0].numericValue, ops[1].numericValue)
-              );
-            return processPower(ce, ops[0], ops[1], 'N');
-          },
-          // Defined as RealNumber for all power in RealNumber when base > 0;
-          // when x < 0, only defined if n is an integer
-          // if x is a non-zero complex, defined as ComplexNumber
-          // Square root of a prime is irrational (AlgebraicNumber)
-          // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
-          // evalDomain: (ce, base: BoxedExpression, power: BoxedExpression) ;
-        },
-      },
-
-      {
-        name: 'Product',
-        wikidata: 'Q901718',
-        complexity: 1000,
-        hold: 'first',
-        signature: {
-          domain: [
-            'Function',
-            'Anything',
-            // [
-            //   'Maybe',
-            'Tuple',
-            // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
-            // ],
-            'Number',
-          ],
-          // codomain: (ce, args) => domainAdd(ce, args),
-          canonical: (ce, ops) => canonicalMultiplication(ce, ops[0], ops[1]),
-          simplify: (ce, ops) =>
-            evalMultiplication(ce, ops[0], ops[1], 'simplify'),
-          evaluate: (ce, ops) =>
-            evalMultiplication(ce, ops[0], ops[1], 'evaluate'),
-          N: (ce, ops) => evalMultiplication(ce, ops[0], ops[1], 'N'),
-        },
-      },
-
-      {
-        name: 'Rational',
-        complexity: 2400,
-
-        signature: {
-          domain: ['Function', 'Number', ['Maybe', 'Number'], 'RationalNumber'],
-          canonical: (ce, args) => {
-            args = flattenSequence(args);
-
-            if (args.length === 0)
-              return ce._fn('Rational', [ce.error(['missing', 'Number'])]);
-
-            if (args.length === 1)
-              return ce._fn('Rational', [
-                validateArgument(ce, args[0].canonical, 'ExtendedRealNumber'),
-              ]);
-
-            args =
-              validateSignature(
-                ce.domain(['Function', 'Integer', 'Integer', 'RationalNumber']),
-                args
-              ) ?? args;
-
-            if (args.length !== 2 || !args[0].isValid || !args[1].isValid)
-              return ce._fn('Rational', args);
-
-            return canonicalDivide(ce, args[0], args[1]);
-          },
-          simplify: (ce, ops) => {
-            if (ops.length !== 2) return undefined;
-            return simplifyDivide(ce, ops[0], ops[1]);
-          },
-          evaluate: (ce, ops) => {
-            if (ops.length === 2) {
-              const [n, d] = [asSmallInteger(ops[0]), asSmallInteger(ops[1])];
-              if (n !== null && d !== null) return ce.number([n, d]);
-              return undefined;
-            }
-
-            //
-            // If there is a single argument, i.e. `['Rational', 'Pi']`
-            // the function evaluates to a rational expression of the argument
-            //
-            const f = asFloat(ops[0].N());
-            if (f === null) return undefined;
-            return ce.number(rationalize(f));
-          },
-          N: (ce, ops) => {
-            if (ops.length === 1) return ops[0];
-
-            return apply2N(
-              ops[0],
-              ops[1],
-              (a, b) => a / b,
-              (a, b) => a.div(b),
-              (a, b) => a.div(b)
             );
-          },
+          return apply2N(
+            ops[0],
+            ops[1],
+            (a, b) => Math.log(a) / Math.log(b),
+            (a, b) => a.log(b),
+            (a, b) => a.log().div(typeof b === 'number' ? Math.log(b) : b.log())
+          );
         },
       },
+    },
 
-      {
-        name: 'Root',
-        complexity: 3200,
+    Lb: {
+      description: 'Base-2 Logarithm',
+      wikidata: 'Q581168',
+      complexity: 4100,
 
-        signature: {
-          domain: ['Function', 'Number', 'Number', 'Number'],
-          canonical: (ce, args) => {
-            args = flattenSequence(args);
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
 
-            if (args.length > 2)
-              return ce._fn('Root', validateArgumentCount(ce, args, 2));
+        N: (ce, ops) =>
+          applyN(
+            ops[0],
+            (x) => (x >= 0 ? Math.log2(x) : ce.complex(x).log().div(Math.LN2)),
+            (x) =>
+              x.isNeg()
+                ? Decimal.log10(x)
+                : ce.complex(x.toNumber()).log().div(Math.LN2),
+            (z) => z.log().div(Math.LN2)
+          ),
+      },
+    },
 
-            const [base, exp] = [
-              validateArgument(ce, args[0]?.canonical, 'Number'),
-              validateArgument(ce, args[1]?.canonical, 'Number'),
-            ];
-            if (!exp.isValid || !base.isValid)
-              return ce._fn('Root', [base, exp]);
+    Lg: {
+      description: 'Base-10 Logarithm',
+      wikidata: 'Q966582',
+      complexity: 4100,
 
-            return (
-              canonicalPower(ce, base, ce.inverse(exp)) ??
-              ce._fn('Power', [base, ce.inverse(exp)])
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        N: (ce, ops) =>
+          applyN(
+            ops[0],
+            (x) =>
+              x >= 0 ? Math.log10(x) : ce.complex(x).log().div(Math.LN10),
+            (x) =>
+              !x.isNeg()
+                ? Decimal.log10(x)
+                : ce.complex(x.toNumber()).log().div(Math.LN10),
+            (z) => z.log().div(Math.LN10)
+          ),
+      },
+    },
+
+    Max: {
+      description: 'Maximum of two or more numbers',
+      complexity: 1200,
+      signature: {
+        domain: ['Function', ['Sequence', 'Number'], 'Number'],
+        simplify: (ce, ops) => {
+          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+          if (ops.length === 1) return ops[0];
+          return ce.box(['Max', ...ops]);
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+
+          let result: BoxedExpression | undefined = undefined;
+          const rest: BoxedExpression[] = [];
+
+          for (const op of ops) {
+            if (!op.isNumber || op.numericValue === undefined) rest.push(op);
+            else if (!result || op.isGreater(result)) result = op;
+          }
+          if (rest.length > 0)
+            return ce.box(result ? ['Max', result, ...rest] : ['Max', ...rest]);
+          return result ?? ce._NAN;
+        },
+      },
+    },
+
+    Min: {
+      description: 'Minimum of two or more numbers',
+      complexity: 1200,
+
+      signature: {
+        domain: ['Function', ['Sequence', 'Number'], 'Number'],
+        simplify: (ce, ops) => {
+          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+          if (ops.length === 1) return ops[0];
+          return ce.box(['Min', ...ops]);
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+
+          let result: BoxedExpression | undefined = undefined;
+          const rest: BoxedExpression[] = [];
+
+          for (const op of ops) {
+            if (!op.isNumber || op.numericValue === undefined) rest.push(op);
+            else if (!result || op.isLess(result)) result = op;
+          }
+          if (rest.length > 0)
+            return ce.box(result ? ['Min', result, ...rest] : ['Min', ...rest]);
+          return result ?? ce._NAN;
+        },
+      },
+    },
+
+    Multiply: {
+      wikidata: 'Q40276',
+      associative: true,
+      commutative: true,
+      idempotent: true,
+      complexity: 2100,
+      hold: 'all',
+
+      signature: {
+        domain: 'NumericFunction',
+        canonical: (ce, args) => canonicalMultiply(ce, args),
+        simplify: (ce, ops) => simplifyMultiply(ce, ops),
+        evaluate: (ce, ops) => evalMultiply(ce, ops),
+        N: (ce, ops) => evalMultiply(ce, ops, 'N'),
+      },
+    },
+
+    Negate: {
+      description: 'Additive Inverse',
+      wikidata: 'Q715358',
+      complexity: 2000,
+
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        codomain: (ce, args) => {
+          const arg = args[0].domain;
+          if (!arg.literal) return arg;
+          const negDomain = {
+            PositiveNumber: 'NegativeNumber',
+            NonNegativeNumber: 'NonPositiveNumber',
+            NonPositiveNumber: 'NonNegativeNumber',
+            NegativeNumber: 'PositiveNumber',
+            PositiveInteger: 'NegativeInteger',
+            NonNegativeInteger: 'NonPositiveInteger',
+            NonPositiveInteger: 'NonNegativeInteger',
+            NegativeInteger: 'PositiveInteger',
+          }[arg.literal];
+          if (negDomain) return ce.domain(negDomain);
+          return arg;
+        },
+        canonical: (_ce, args) => canonicalNegate(args[0]),
+        simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
+        evaluate: (ce, ops) => processNegate(ce, ops[0], 'evaluate'),
+        N: (ce, ops) => processNegate(ce, ops[0], 'N'),
+        sgn: (_ce, args): -1 | 0 | 1 | undefined => {
+          const s = args[0].sgn;
+          if (s === undefined || s === null) return undefined;
+          if (s === 0) return 0;
+          if (s > 0) return -1;
+          if (s < 0) return +1;
+          return undefined;
+        },
+      },
+    },
+
+    Power: {
+      wikidata: 'Q33456',
+      commutative: false,
+      complexity: 3500,
+      signature: {
+        domain: ['Function', 'Number', 'Number', 'Number'],
+        canonical: (ce, args) =>
+          canonicalPower(ce, args[0], args[1]) ?? ce._fn('Power', args),
+        simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
+        evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
+        N: (ce, ops) => {
+          // @fastpath
+          if (
+            ce.numericMode === 'machine' &&
+            typeof ops[0].numericValue === 'number' &&
+            typeof ops[1].numericValue === 'number'
+          )
+            return ce.number(
+              Math.pow(ops[0].numericValue, ops[1].numericValue)
             );
-          },
+          return processPower(ce, ops[0], ops[1], 'N');
         },
+        // Defined as RealNumber for all power in RealNumber when base > 0;
+        // when x < 0, only defined if n is an integer
+        // if x is a non-zero complex, defined as ComplexNumber
+        // Square root of a prime is irrational (AlgebraicNumber)
+        // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
+        // evalDomain: (ce, base: BoxedExpression, power: BoxedExpression) ;
       },
+    },
 
-      {
-        name: 'Round',
-        complexity: 1250,
+    Product: {
+      wikidata: 'Q901718',
+      complexity: 1000,
+      hold: 'first',
+      signature: {
+        domain: [
+          'Function',
+          'Anything',
+          // [
+          //   'Maybe',
+          'Tuple',
+          // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
+          // ],
+          'Number',
+        ],
+        // codomain: (ce, args) => domainAdd(ce, args),
+        canonical: (ce, ops) => canonicalMultiplication(ce, ops[0], ops[1]),
+        simplify: (ce, ops) =>
+          evalMultiplication(ce, ops[0], ops[1], 'simplify'),
+        evaluate: (ce, ops) =>
+          evalMultiplication(ce, ops[0], ops[1], 'evaluate'),
+        N: (ce, ops) => evalMultiplication(ce, ops[0], ops[1], 'N'),
+      },
+    },
 
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          evaluate: (ce, ops) =>
-            applyN(
-              ops[0],
-              Math.round,
-              (x) => x.round(),
-              (x) => x.round(0)
-            ),
+    Rational: {
+      complexity: 2400,
+
+      signature: {
+        domain: ['Function', 'Number', ['Maybe', 'Number'], 'RationalNumber'],
+        canonical: (ce, args) => {
+          args = flattenSequence(args);
+
+          if (args.length === 0)
+            return ce._fn('Rational', [ce.error(['missing', 'Number'])]);
+
+          if (args.length === 1)
+            return ce._fn('Rational', [
+              validateArgument(ce, args[0].canonical, 'ExtendedRealNumber'),
+            ]);
+
+          args =
+            validateSignature(
+              ce.domain(['Function', 'Integer', 'Integer', 'RationalNumber']),
+              args
+            ) ?? args;
+
+          if (args.length !== 2 || !args[0].isValid || !args[1].isValid)
+            return ce._fn('Rational', args);
+
+          return canonicalDivide(ce, args[0], args[1]);
         },
-      },
-
-      {
-        name: 'Sign',
-        complexity: 1200,
-
-        signature: {
-          domain: ['Function', 'Number', ['Range', -1, 1]],
-          simplify: (ce, ops) => {
-            const s = ops[0].sgn;
-            if (s === 0) return ce._ZERO;
-            if (s === 1) return ce._ONE;
-            if (s === -1) return ce._NEGATIVE_ONE;
+        simplify: (ce, ops) => {
+          if (ops.length !== 2) return undefined;
+          return simplifyDivide(ce, ops[0], ops[1]);
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 2) {
+            const [n, d] = [asSmallInteger(ops[0]), asSmallInteger(ops[1])];
+            if (n !== null && d !== null) return ce.number([n, d]);
             return undefined;
-          },
-          evaluate: (ce, ops) => {
-            const s = ops[0].sgn;
-            if (s === 0) return ce._ZERO;
-            if (s === 1) return ce._ONE;
-            if (s === -1) return ce._NEGATIVE_ONE;
-            return undefined;
-          },
-          N: (ce, ops) => {
-            const s = ops[0].sgn;
-            if (s === 0) return ce._ZERO;
-            if (s === 1) return ce._ONE;
-            if (s === -1) return ce._NEGATIVE_ONE;
-            return undefined;
-          },
+          }
+
+          //
+          // If there is a single argument, i.e. `['Rational', 'Pi']`
+          // the function evaluates to a rational expression of the argument
+          //
+          const f = asFloat(ops[0].N());
+          if (f === null) return undefined;
+          return ce.number(rationalize(f));
+        },
+        N: (ce, ops) => {
+          if (ops.length === 1) return ops[0];
+
+          return apply2N(
+            ops[0],
+            ops[1],
+            (a, b) => a / b,
+            (a, b) => a.div(b),
+            (a, b) => a.div(b)
+          );
         },
       },
+    },
 
-      {
-        name: 'SignGamma',
-        description: 'The sign of the gamma function: -1 or +1',
-        complexity: 7900,
+    Root: {
+      complexity: 3200,
 
-        // @todo
-      },
-      {
-        name: 'Sqrt',
-        description: 'Square Root',
-        wikidata: 'Q134237',
-        complexity: 3000,
+      signature: {
+        domain: ['Function', 'Number', 'Number', 'Number'],
+        canonical: (ce, args) => {
+          args = flattenSequence(args);
 
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          canonical: (ce, args) =>
-            canonicalPower(ce, args[0], ce._HALF) ??
-            ce._fn('Power', [args[0], ce._HALF]),
-          simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
-          evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
-          N: (ce, ops) => processSqrt(ce, ops[0], 'N'),
-          // evalDomain: Square root of a prime is irrational
-          // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
+          if (args.length > 2)
+            return ce._fn('Root', validateArgumentCount(ce, args, 2));
+
+          const [base, exp] = [
+            validateArgument(ce, args[0]?.canonical, 'Number'),
+            validateArgument(ce, args[1]?.canonical, 'Number'),
+          ];
+          if (!exp.isValid || !base.isValid) return ce._fn('Root', [base, exp]);
+
+          return (
+            canonicalPower(ce, base, ce.inverse(exp)) ??
+            ce._fn('Power', [base, ce.inverse(exp)])
+          );
         },
       },
+    },
 
-      {
-        name: 'Square',
-        wikidata: 'Q3075175',
-        complexity: 3100,
+    Round: {
+      complexity: 1250,
 
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          canonical: (ce, args) =>
-            canonicalPower(ce, args[0], ce.number(2)) ??
-            ce._fn('Power', [args[0], ce.number(2)]),
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        evaluate: (ce, ops) =>
+          applyN(
+            ops[0],
+            Math.round,
+            (x) => x.round(),
+            (x) => x.round(0)
+          ),
+      },
+    },
+
+    Sign: {
+      complexity: 1200,
+
+      signature: {
+        domain: ['Function', 'Number', ['Range', -1, 1]],
+        simplify: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === 0) return ce._ZERO;
+          if (s === 1) return ce._ONE;
+          if (s === -1) return ce._NEGATIVE_ONE;
+          return undefined;
+        },
+        evaluate: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === 0) return ce._ZERO;
+          if (s === 1) return ce._ONE;
+          if (s === -1) return ce._NEGATIVE_ONE;
+          return undefined;
+        },
+        N: (ce, ops) => {
+          const s = ops[0].sgn;
+          if (s === 0) return ce._ZERO;
+          if (s === 1) return ce._ONE;
+          if (s === -1) return ce._NEGATIVE_ONE;
+          return undefined;
         },
       },
+    },
 
-      {
-        name: 'Subtract',
-        wikidata: 'Q40754',
-        complexity: 1350,
+    SignGamma: {
+      description: 'The sign of the gamma function: -1 or +1',
+      complexity: 7900,
 
-        signature: {
-          domain: ['Function', 'Number', ['Maybe', 'Number'], 'Number'],
-          canonical: (ce, args) => {
-            // Not necessarily legal, but probably what was intended:
-            // ['Subtract', 'x'] -> ['Negate', 'x']
-            args = flattenSequence(args.map((x) => x.canonical));
-            if (args.length === 1) return canonicalNegate(args[0]);
-            args = validateArgumentCount(ce, args, 2);
-            if (args.length !== 2) return ce._fn('Subtract', args);
-            if (!args.every((x) => x.isValid)) return ce._fn('Subtract', args);
-            return canonicalAdd(ce, [args[0], canonicalNegate(args[1])]);
-          },
+      // @todo
+    },
+    Sqrt: {
+      description: 'Square Root',
+      wikidata: 'Q134237',
+      complexity: 3000,
+
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        canonical: (ce, args) =>
+          canonicalPower(ce, args[0], ce._HALF) ??
+          ce._fn('Power', [args[0], ce._HALF]),
+        simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
+        evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
+        N: (ce, ops) => processSqrt(ce, ops[0], 'N'),
+        // evalDomain: Square root of a prime is irrational
+        // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
+      },
+    },
+
+    Square: {
+      wikidata: 'Q3075175',
+      complexity: 3100,
+
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        canonical: (ce, args) =>
+          canonicalPower(ce, args[0], ce.number(2)) ??
+          ce._fn('Power', [args[0], ce.number(2)]),
+      },
+    },
+
+    Subtract: {
+      wikidata: 'Q40754',
+      complexity: 1350,
+
+      signature: {
+        domain: ['Function', 'Number', ['Maybe', 'Number'], 'Number'],
+        canonical: (ce, args) => {
+          // Not necessarily legal, but probably what was intended:
+          // ['Subtract', 'x'] -> ['Negate', 'x']
+          args = flattenSequence(args.map((x) => x.canonical));
+          if (args.length === 1) return canonicalNegate(args[0]);
+          args = validateArgumentCount(ce, args, 2);
+          if (args.length !== 2) return ce._fn('Subtract', args);
+          if (!args.every((x) => x.isValid)) return ce._fn('Subtract', args);
+          return canonicalAdd(ce, [args[0], canonicalNegate(args[1])]);
         },
       },
-      {
-        name: 'Sum',
-        wikidata: 'Q218005',
-        complexity: 1000,
-        hold: 'all',
-        signature: {
-          domain: [
-            'Function',
-            'Anything',
-            // [
-            //   'Maybe',
-            'Tuple',
-            // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
-            // ],
-            'Number',
-          ],
-          canonical: (ce, ops) => canonicalSummation(ce, ops[0], ops[1]),
-          simplify: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'simplify'),
-          evaluate: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'evaluate'),
-          N: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'N'),
-        },
+    },
+    Sum: {
+      wikidata: 'Q218005',
+      complexity: 1000,
+      hold: 'all',
+      signature: {
+        domain: [
+          'Function',
+          'Anything',
+          // [
+          //   'Maybe',
+          'Tuple',
+          // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
+          // ],
+          'Number',
+        ],
+        canonical: (ce, ops) => canonicalSummation(ce, ops[0], ops[1]),
+        simplify: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'simplify'),
+        evaluate: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'evaluate'),
+        N: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'N'),
       },
-    ],
+    },
   },
   {
     //
@@ -798,82 +757,73 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
     // some of the values (CatalanConstant) reference some function names (Add...)
     // that are defined above. This avoid circular references.
     //
-    symbols: [
-      {
-        name: 'e',
-        domain: 'TranscendentalNumber',
-        constant: true,
-        hold: false,
-        value: 'ExponentialE',
-      },
-      {
-        name: 'i',
-        domain: 'ImaginaryNumber',
-        constant: true,
-        hold: false,
-        imaginary: true,
-        value: 'ImaginaryUnit',
-      },
-      {
-        /**
-         * The difference between 1 and the next larger floating point number
-         *
-         *    2^{−52}
-         *
-         * See https://en.wikipedia.org/wiki/Machine_epsilon
-         */
-        name: 'MachineEpsilon',
-        domain: 'RealNumber',
-        hold: true,
-        constant: true,
-        real: true,
-        value: { num: Number.EPSILON.toString() },
-      },
-      {
-        name: 'Half',
-        constant: true,
-        hold: false,
-        value: ['Rational', 1, 2],
-      },
-      {
-        name: 'ImaginaryUnit',
-        domain: 'ImaginaryNumber',
-        constant: true,
-        hold: true,
-        wikidata: 'Q193796',
-        imaginary: true,
-        value: ['Complex', 0, 1],
-      },
-      {
-        name: 'ExponentialE',
-        domain: 'TranscendentalNumber',
-        algebraic: false,
-        wikidata: 'Q82435',
-        constant: true,
-        hold: true,
-        real: true,
-        value: (engine) =>
-          bignumPreferred(engine) ? engine._BIGNUM_ONE.exp() : Math.exp(1),
-      },
-      {
-        name: 'GoldenRatio',
-        domain: 'AlgebraicNumber',
-        wikidata: 'Q41690',
-        constant: true,
-        algebraic: true,
-        hold: false,
-        value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
-      },
-      {
-        name: 'CatalanConstant',
-        domain: 'RealNumber',
-        algebraic: undefined, // Not proven irrational or transcendental
-        wikidata: 'Q855282',
-        constant: true,
-        hold: true,
-        value: {
-          // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants1.html
-          num: `0.91596559417721901505460351493238411077414937428167
+    e: {
+      domain: 'TranscendentalNumber',
+      constant: true,
+      hold: false,
+      value: 'ExponentialE',
+    },
+    i: {
+      domain: 'ImaginaryNumber',
+      constant: true,
+      hold: false,
+      imaginary: true,
+      value: 'ImaginaryUnit',
+    },
+    MachineEpsilon: {
+      /**
+       * The difference between 1 and the next larger floating point number
+       *
+       *    2^{−52}
+       *
+       * See https://en.wikipedia.org/wiki/Machine_epsilon
+       */
+      domain: 'RealNumber',
+      hold: true,
+      constant: true,
+      real: true,
+      value: { num: Number.EPSILON.toString() },
+    },
+    Half: {
+      constant: true,
+      hold: false,
+      value: ['Rational', 1, 2],
+    },
+    ImaginaryUnit: {
+      domain: 'ImaginaryNumber',
+      constant: true,
+      hold: true,
+      wikidata: 'Q193796',
+      imaginary: true,
+      value: ['Complex', 0, 1],
+    },
+    ExponentialE: {
+      domain: 'TranscendentalNumber',
+      algebraic: false,
+      wikidata: 'Q82435',
+      constant: true,
+      hold: true,
+      real: true,
+      value: (engine) =>
+        bignumPreferred(engine) ? engine._BIGNUM_ONE.exp() : Math.exp(1),
+    },
+    GoldenRatio: {
+      domain: 'AlgebraicNumber',
+      wikidata: 'Q41690',
+      constant: true,
+      algebraic: true,
+      hold: false,
+      value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
+    },
+    CatalanConstant: {
+      domain: 'RealNumber',
+      algebraic: undefined, // Not proven irrational or transcendental
+      wikidata: 'Q855282',
+      constant: true,
+      hold: true,
+      value: {
+        // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants1.html
+        num: `0.91596559417721901505460351493238411077414937428167
                   21342664981196217630197762547694793565129261151062
                   48574422619196199579035898803325859059431594737481
                   15840699533202877331946051903872747816408786590902
@@ -894,18 +844,17 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
                   36440323547845358519277777872709060830319943013323
                   16712476158709792455479119092126201854803963934243
                   `,
-        },
       },
-      {
-        // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants2.html
-        name: 'EulerGamma',
-        domain: 'RealNumber',
-        algebraic: undefined, // Not proven irrational or transcendental
-        wikidata: 'Q273023',
-        hold: true,
-        constant: true,
-        value: {
-          num: `0.57721566490153286060651209008240243104215933593992359880576723488486772677766
+    },
+    EulerGamma: {
+      // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants2.html
+      domain: 'RealNumber',
+      algebraic: undefined, // Not proven irrational or transcendental
+      wikidata: 'Q273023',
+      hold: true,
+      constant: true,
+      value: {
+        num: `0.57721566490153286060651209008240243104215933593992359880576723488486772677766
           467093694706329174674951463144724980708248096050401448654283622417399764492353
           625350033374293733773767394279259525824709491600873520394816567085323315177661
           152862119950150798479374508570574002992135478614669402960432542151905877553526
@@ -916,21 +865,16 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
           014093498712282479497471956469763185066761290638110518241974448678363808617494
           551698927923018773910729457815543160050021828440960537724342032854783670151773
           943987003023703395183286900015581939880427074115422278197165230110735658339673`,
-        },
       },
-    ],
+    },
   },
   {
-    functions: [
-      {
-        name: 'PreIncrement',
-        signature: { domain: ['Function', 'Number', 'Number'] },
-      },
-      {
-        name: 'PreDecrement',
-        signature: { domain: ['Function', 'Number', 'Number'] },
-      },
-    ],
+    PreIncrement: {
+      signature: { domain: ['Function', 'Number', 'Number'] },
+    },
+    PreDecrement: {
+      signature: { domain: ['Function', 'Number', 'Number'] },
+    },
   },
 ];
 

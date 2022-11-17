@@ -1,4 +1,4 @@
-import { BoxedExpression, SymbolTable } from '../public';
+import { BoxedExpression, IDTable } from '../public';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 
 //   // eq, lt, leq, gt, geq, neq, approx
@@ -11,287 +11,259 @@ import { flattenOps, flattenSequence } from '../symbolic/flatten';
 //   // greater-than: Q47035128  243
 //   // less-than: Q52834024 245
 
-export const RELOP_LIBRARY: SymbolTable = {
-  functions: [
-    {
-      name: 'Equal',
-      commutative: true,
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, ops) => {
-          ops =
-            flattenOps(
-              flattenSequence(ops).map((x) => x.canonical),
-              'Equal'
-            ) ?? ops;
-          return ce._fn('Equal', ops);
-        },
-        evaluate: (ce, ops) => {
-          if (ops.length < 2) return ce.symbol('True');
-          let lhs: BoxedExpression | undefined = undefined;
-          for (const arg of ops) {
-            if (!lhs) lhs = arg;
-            else {
-              const test = lhs.isEqual(arg);
-              if (test !== true) return ce.symbol('False');
-            }
+export const RELOP_LIBRARY: IDTable = {
+  Equal: {
+    commutative: true,
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, ops) => {
+        ops =
+          flattenOps(
+            flattenSequence(ops).map((x) => x.canonical),
+            'Equal'
+          ) ?? ops;
+        return ce._fn('Equal', ops);
+      },
+      evaluate: (ce, ops) => {
+        if (ops.length < 2) return ce.symbol('True');
+        let lhs: BoxedExpression | undefined = undefined;
+        for (const arg of ops) {
+          if (!lhs) lhs = arg;
+          else {
+            const test = lhs.isEqual(arg);
+            if (test !== true) return ce.symbol('False');
           }
-          return ce.symbol('True');
-        },
+        }
+        return ce.symbol('True');
       },
     },
-    {
-      name: 'NotEqual',
-      wikidata: 'Q28113351',
-      commutative: true,
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        evaluate: (ce, ops) => {
-          if (ops.length < 2) return ce.symbol('False');
-          let lhs: BoxedExpression | undefined = undefined;
-          for (const arg of ops!) {
-            if (!lhs) lhs = arg;
-            else {
-              const test = lhs.isEqual(arg);
-              if (test === true) return ce.symbol('False');
-            }
+  },
+  NotEqual: {
+    wikidata: 'Q28113351',
+    commutative: true,
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      evaluate: (ce, ops) => {
+        if (ops.length < 2) return ce.symbol('False');
+        let lhs: BoxedExpression | undefined = undefined;
+        for (const arg of ops!) {
+          if (!lhs) lhs = arg;
+          else {
+            const test = lhs.isEqual(arg);
+            if (test === true) return ce.symbol('False');
           }
-          return ce.symbol('True');
-        },
+        }
+        return ce.symbol('True');
       },
     },
-    {
-      name: 'Less',
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, ops) => {
-          ops =
-            flattenOps(
-              flattenSequence(ops).map((x) => x.canonical),
-              'Less'
-            ) ?? ops;
-          return ce._fn('Less', ops);
-        },
-        evaluate: (ce, ops) => {
-          if (ops.length < 2) return ce.symbol('True');
-          let lhs: BoxedExpression | undefined = undefined;
-          for (const arg of ops!) {
-            if (!arg.isNumber) return undefined;
-            if (!lhs) lhs = arg;
-            else {
-              const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
-              if (test === null || test === undefined) return undefined;
-              if (test <= 0) return ce.symbol('False');
-              lhs = arg;
-            }
+  },
+  Less: {
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, ops) => {
+        ops =
+          flattenOps(
+            flattenSequence(ops).map((x) => x.canonical),
+            'Less'
+          ) ?? ops;
+        return ce._fn('Less', ops);
+      },
+      evaluate: (ce, ops) => {
+        if (ops.length < 2) return ce.symbol('True');
+        let lhs: BoxedExpression | undefined = undefined;
+        for (const arg of ops!) {
+          if (!arg.isNumber) return undefined;
+          if (!lhs) lhs = arg;
+          else {
+            const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
+            if (test === null || test === undefined) return undefined;
+            if (test <= 0) return ce.symbol('False');
+            lhs = arg;
           }
-          return ce.symbol('True');
-        },
+        }
+        return ce.symbol('True');
       },
     },
-    {
-      name: 'NotLess',
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Not', [ce._fn('Less', args)]),
-      },
+  },
+  NotLess: {
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('Less', args)]),
     },
-    {
-      name: 'Greater',
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Less', args.reverse()),
+  },
+  Greater: {
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Less', args.reverse()),
 
-        evaluate: (ce, ops) => {
-          if (ops.length < 2) return ce.symbol('True');
-          let lhs: BoxedExpression | undefined = undefined;
-          for (const arg of ops!) {
-            if (!arg.isNumber) return undefined;
-            if (!lhs) lhs = arg;
-            else {
-              const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
-              if (test === null || test === undefined) return undefined;
-              if (test >= 0) return ce.symbol('False');
-              lhs = arg;
-            }
+      evaluate: (ce, ops) => {
+        if (ops.length < 2) return ce.symbol('True');
+        let lhs: BoxedExpression | undefined = undefined;
+        for (const arg of ops!) {
+          if (!arg.isNumber) return undefined;
+          if (!lhs) lhs = arg;
+          else {
+            const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
+            if (test === null || test === undefined) return undefined;
+            if (test >= 0) return ce.symbol('False');
+            lhs = arg;
           }
-          return ce.symbol('True');
-        },
+        }
+        return ce.symbol('True');
       },
     },
-    {
-      name: 'NotGreater',
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Not', [ce._fn('Greater', args)]),
-      },
+  },
+  NotGreater: {
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('Greater', args)]),
     },
-    {
-      name: 'LessEqual',
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        evaluate: (ce, ops) => {
-          if (ops.length < 2) return ce.symbol('True');
-          let lhs: BoxedExpression | undefined = undefined;
-          for (const arg of ops!) {
-            if (!arg.isNumber) return undefined;
-            if (!lhs) lhs = arg;
-            else {
-              const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
-              if (test === null || test === undefined) return undefined;
-              if (test < 0) return ce.symbol('False');
-              lhs = arg;
-            }
+  },
+  LessEqual: {
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      evaluate: (ce, ops) => {
+        if (ops.length < 2) return ce.symbol('True');
+        let lhs: BoxedExpression | undefined = undefined;
+        for (const arg of ops!) {
+          if (!arg.isNumber) return undefined;
+          if (!lhs) lhs = arg;
+          else {
+            const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
+            if (test === null || test === undefined) return undefined;
+            if (test < 0) return ce.symbol('False');
+            lhs = arg;
           }
-          return ce.symbol('True');
-        },
+        }
+        return ce.symbol('True');
       },
     },
-    {
-      name: 'NotLessNotEqual',
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Not', [ce._fn('LessEqual', args)]),
-      },
+  },
+  NotLessNotEqual: {
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('LessEqual', args)]),
     },
-    {
-      name: 'GreaterEqual',
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('LessEqual', args.reverse()),
-        evaluate: (ce, ops) => {
-          if (ops.length < 2) return ce.symbol('True');
-          let lhs: BoxedExpression | undefined = undefined;
-          for (const arg of ops!) {
-            if (!arg.isNumber) return undefined;
-            if (!lhs) lhs = arg;
-            else {
-              const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
-              if (test === null || test === undefined) return undefined;
-              if (test > 0) return ce.symbol('False');
-              lhs = arg;
-            }
+  },
+  GreaterEqual: {
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('LessEqual', args.reverse()),
+      evaluate: (ce, ops) => {
+        if (ops.length < 2) return ce.symbol('True');
+        let lhs: BoxedExpression | undefined = undefined;
+        for (const arg of ops!) {
+          if (!arg.isNumber) return undefined;
+          if (!lhs) lhs = arg;
+          else {
+            const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
+            if (test === null || test === undefined) return undefined;
+            if (test > 0) return ce.symbol('False');
+            lhs = arg;
           }
-          return ce.symbol('True');
-        },
+        }
+        return ce.symbol('True');
       },
     },
-    {
-      name: 'NotGreaterNotEqual',
-      complexity: 11000,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Not', [ce._fn('GreaterEqual', args)]),
-      },
+  },
+  NotGreaterNotEqual: {
+    complexity: 11000,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('GreaterEqual', args)]),
     },
-    {
-      name: 'TildeFullEqual',
-      description: 'Indicate isomorphism, congruence and homotopic equivalence',
-      signature: { domain: 'RelationalOperator' },
-      // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  TildeFullEqual: {
+    description: 'Indicate isomorphism, congruence and homotopic equivalence',
+    signature: { domain: 'RelationalOperator' },
+    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  NotTildeFullEqual: {
+    complexity: 11100,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('TildeFullEqual', args)]),
     },
-    {
-      name: 'NotTildeFullEqual',
-      complexity: 11100,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) =>
-          ce._fn('Not', [ce._fn('TildeFullEqual', args)]),
-      },
+  },
+  TildeEqual: {
+    description: 'Approximately or asymptotically equal',
+    complexity: 11000,
+    signature: { domain: 'RelationalOperator' },
+    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  NotTildeEqual: {
+    complexity: 11100,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('TildeEqual', args)]),
     },
-    {
-      name: 'TildeEqual',
-      description: 'Approximately or asymptotically equal',
-      complexity: 11000,
-      signature: { domain: 'RelationalOperator' },
-      // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  Approx: {
+    complexity: 11100,
+    signature: { domain: 'RelationalOperator' },
+    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  NotApprox: {
+    complexity: 11100,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('Approx', args)]),
     },
-    {
-      name: 'NotTildeEqual',
-      complexity: 11100,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Not', [ce._fn('TildeEqual', args)]),
-      },
+  },
+  ApproxEqual: {
+    complexity: 11100,
+    signature: { domain: 'RelationalOperator' },
+    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  NotApproxEqual: {
+    complexity: 11100,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('ApproxEqual', args)]),
     },
-    {
-      name: 'Approx',
-      complexity: 11100,
-      signature: { domain: 'RelationalOperator' },
-      // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  ApproxNotEqual: {
+    complexity: 11100,
+    signature: { domain: 'RelationalOperator' },
+    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  NotApproxNotEqual: {
+    complexity: 11100,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('ApproxNotEqual', args)]),
     },
-    {
-      name: 'NotApprox',
-      complexity: 11100,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Not', [ce._fn('Approx', args)]),
-      },
+  },
+  Precedes: {
+    complexity: 11100,
+    signature: { domain: 'RelationalOperator' },
+    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  NotPrecedes: {
+    complexity: 11100,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('Precedes', args)]),
     },
-    {
-      name: 'ApproxEqual',
-      complexity: 11100,
-      signature: { domain: 'RelationalOperator' },
-      // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  Succeeds: {
+    signature: { domain: 'RelationalOperator' },
+    // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
+  },
+  NotSucceeds: {
+    complexity: 11100,
+    signature: {
+      domain: 'RelationalOperator',
+      canonical: (ce, args) => ce._fn('Not', [ce._fn('Succeeds', args)]),
     },
-    {
-      name: 'NotApproxEqual',
-      complexity: 11100,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Not', [ce._fn('ApproxEqual', args)]),
-      },
-    },
-    {
-      name: 'ApproxNotEqual',
-      complexity: 11100,
-      signature: { domain: 'RelationalOperator' },
-      // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
-    },
-    {
-      name: 'NotApproxNotEqual',
-      complexity: 11100,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) =>
-          ce._fn('Not', [ce._fn('ApproxNotEqual', args)]),
-      },
-    },
-    {
-      name: 'Precedes',
-      complexity: 11100,
-      signature: { domain: 'RelationalOperator' },
-      // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
-    },
-    {
-      name: 'NotPrecedes',
-      complexity: 11100,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Not', [ce._fn('Precedes', args)]),
-      },
-    },
-    {
-      name: 'Succeeds',
-      signature: { domain: 'RelationalOperator' },
-      // @todo evaluate: (ce, ...args: BoxedExpression[]) => SemiBoxedExpression {}
-    },
-    {
-      name: 'NotSucceeds',
-      complexity: 11100,
-      signature: {
-        domain: 'RelationalOperator',
-        canonical: (ce, args) => ce._fn('Not', [ce._fn('Succeeds', args)]),
-      },
-    },
-  ],
+  },
 };

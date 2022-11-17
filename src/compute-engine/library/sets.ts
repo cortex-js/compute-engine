@@ -3,179 +3,158 @@
 
 import { isDomain } from '../boxed-expression/boxed-domain';
 import { validateArgumentCount } from '../boxed-expression/validate';
-import { BoxedExpression, SymbolTable, IComputeEngine } from '../public';
+import { BoxedExpression, IDTable, IComputeEngine } from '../public';
 import { flattenSequence } from '../symbolic/flatten';
 
-export const SETS_LIBRARY: SymbolTable = {
-  symbols: [
-    //
-    // Constants
-    //
-    {
-      name: 'EmptySet',
-      domain: 'Set',
-      constant: true,
-      wikidata: 'Q226183',
-      // contains: () => false, // @todo not quite true...
-      // includes: () => true, // The empty set is a subset of every set
-    },
-  ],
-  functions: [
-    //
-    // Predicates
-    //
-    {
-      name: 'Element',
-      complexity: 11200,
-      hold: 'all',
-      signature: {
-        domain: 'Predicate',
-        canonical: (ce, args) => {
-          args = validateArgumentCount(
-            ce,
-            flattenSequence(args).map((x) => x.canonical),
-            2
-          );
-          if (args.length === 2 && isDomain(args[1]))
-            return ce._fn('Element', [args[0], ce.domain(args[1])]);
-          return ce._fn('Element', args);
-        },
-        evaluate: (ce, args) => evaluateElement(ce, args),
+export const SETS_LIBRARY: IDTable = {
+  //
+  // Constants
+  //
+  EmptySet: {
+    domain: 'Set',
+    constant: true,
+    wikidata: 'Q226183',
+    // contains: () => false, // @todo not quite true...
+    // includes: () => true, // The empty set is a subset of every set
+  },
+  //
+  // Predicates
+  //
+  Element: {
+    complexity: 11200,
+    hold: 'all',
+    signature: {
+      domain: 'Predicate',
+      canonical: (ce, args) => {
+        args = validateArgumentCount(
+          ce,
+          flattenSequence(args).map((x) => x.canonical),
+          2
+        );
+        if (args.length === 2 && isDomain(args[1]))
+          return ce._fn('Element', [args[0], ce.domain(args[1])]);
+        return ce._fn('Element', args);
       },
+      evaluate: (ce, args) => evaluateElement(ce, args),
     },
-    {
-      name: 'NotElement',
-      complexity: 11200,
-      hold: 'all',
-      signature: {
-        domain: 'Predicate',
-        canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
-      },
+  },
+  NotElement: {
+    complexity: 11200,
+    hold: 'all',
+    signature: {
+      domain: 'Predicate',
+      canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
     },
-    {
-      name: 'Subset',
-      complexity: 11200,
-      signature: { domain: 'Predicate' },
+  },
+  Subset: {
+    complexity: 11200,
+    signature: { domain: 'Predicate' },
+  },
+  NotSubset: {
+    complexity: 11200,
+    signature: {
+      domain: 'Predicate',
+      canonical: (ce, args) => ce.fn('Not', [ce.fn('Subset', args)]),
     },
-    {
-      name: 'NotSubset',
-      complexity: 11200,
-      signature: {
-        domain: 'Predicate',
-        canonical: (ce, args) => ce.fn('Not', [ce.fn('Subset', args)]),
-      },
+  },
+  Superset: {
+    complexity: 11200,
+    signature: { domain: 'Predicate' },
+  },
+  SupersetEqual: {
+    complexity: 11200,
+    signature: { domain: 'Predicate' },
+  },
+  NotSuperset: {
+    complexity: 11200,
+    signature: {
+      domain: 'Predicate',
+      canonical: (ce, args) => ce.fn('Not', [ce.fn('Superset', args)]),
     },
-    {
-      name: 'Superset',
-      complexity: 11200,
-      signature: { domain: 'Predicate' },
+  },
+  NotSupersetEqual: {
+    complexity: 11200,
+    signature: {
+      domain: 'Predicate',
+      canonical: (ce, args) => ce.fn('Not', [ce.fn('SupersetEqual', args)]),
     },
-    {
-      name: 'SupersetEqual',
-      complexity: 11200,
-      signature: { domain: 'Predicate' },
+  },
+  SubsetEqual: {
+    complexity: 11200,
+    signature: { domain: 'Predicate' },
+    // evaluate: subsetEqual,
+  },
+  NotSubsetNotEqual: {
+    complexity: 11200,
+    signature: {
+      domain: 'Predicate',
+      canonical: (ce, args) => ce.fn('Not', [ce.fn('SubsetEqual', args)]),
     },
-    {
-      name: 'NotSuperset',
-      complexity: 11200,
-      signature: {
-        domain: 'Predicate',
-        canonical: (ce, args) => ce.fn('Not', [ce.fn('Superset', args)]),
-      },
-    },
-    {
-      name: 'NotSupersetEqual',
-      complexity: 11200,
-      signature: {
-        domain: 'Predicate',
-        canonical: (ce, args) => ce.fn('Not', [ce.fn('SupersetEqual', args)]),
-      },
-    },
-    {
-      name: 'SubsetEqual',
-      complexity: 11200,
-      signature: { domain: 'Predicate' },
-      // evaluate: subsetEqual,
-    },
-    {
-      name: 'NotSubsetNotEqual',
-      complexity: 11200,
-      signature: {
-        domain: 'Predicate',
-        canonical: (ce, args) => ce.fn('Not', [ce.fn('SubsetEqual', args)]),
-      },
-    },
+  },
 
-    //
-    // Functions
-    //
+  //
+  // Functions
+  //
 
-    {
-      name: 'CartesianProduct',
-      // Aka the product set, the set direct product or cross product
-      // Notation: \times
-      wikidata: 'Q173740',
-      signature: { domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'] },
-      // evaluate: cartesianProduct,
+  CartesianProduct: {
+    // Aka the product set, the set direct product or cross product
+    // Notation: \times
+    wikidata: 'Q173740',
+    signature: { domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'] },
+    // evaluate: cartesianProduct,
+  },
+  Complement: {
+    // Return the elements of the first argument that are not in any of
+    // the subsequent lists
+    wikidata: 'Q242767',
+    signature: { domain: ['Function', 'Set', 'Set'] },
+  },
+  Intersection: {
+    // notation: \cap
+    wikidata: 'Q185837',
+    threadable: true,
+    associative: true,
+    commutative: true,
+    involution: true,
+    signature: {
+      domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'],
+      evaluate: intersection,
     },
-    {
-      name: 'Complement',
-      // Return the elements of the first argument that are not in any of
-      // the subsequent lists
-      wikidata: 'Q242767',
-      signature: { domain: ['Function', 'Set', 'Set'] },
+  },
+  Union: {
+    // Works on set, but can also work on lists
+    wikidata: 'Q185359',
+    threadable: true,
+    associative: true,
+    commutative: true,
+    involution: true,
+    signature: {
+      domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'],
+      evaluate: union,
     },
-    {
-      name: 'Intersection',
-      // notation: \cap
-      wikidata: 'Q185837',
-      threadable: true,
-      associative: true,
-      commutative: true,
-      involution: true,
-      signature: {
-        domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'],
-        evaluate: intersection,
-      },
+  },
+  // {
+  //   name: 'Set',
+  //   domain: ['Function', ['Sequence', 'Anything'], 'Set'],
+  //   // @todo! set has multiple forms
+  //   // Set(Sequence)
+  //   // Set(Sequence, Condition)
+  //   // Set(Set, Condition)
+  // }, // disjoint union Q842620 ⊔
+  SetMinus: {
+    wikidata: 'Q18192442',
+    signature: {
+      domain: ['Function', 'Set', 'Value', 'Set'],
+      evaluate: setMinus,
     },
-    {
-      name: 'Union',
-      // Works on set, but can also work on lists
-      wikidata: 'Q185359',
-      threadable: true,
-      associative: true,
-      commutative: true,
-      involution: true,
-      signature: {
-        domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'],
-        evaluate: union,
-      },
-    },
-    // {
-    //   name: 'Set',
-    //   domain: ['Function', ['Sequence', 'Anything'], 'Set'],
-    //   // @todo! set has multiple forms
-    //   // Set(Sequence)
-    //   // Set(Sequence, Condition)
-    //   // Set(Set, Condition)
-    // }, // disjoint union Q842620 ⊔
-    {
-      name: 'SetMinus',
-      wikidata: 'Q18192442',
-      signature: {
-        domain: ['Function', 'Set', 'Value', 'Set'],
-        evaluate: setMinus,
-      },
-    },
-    {
-      name: 'SymmetricDifference',
-      // symmetric difference = disjunctive union  (circled minus)
-      /* = Union(Complement(a, b), Complement(b, a) */
-      /* Corresponds to XOR in boolean logic */
-      wikidata: 'Q1147242',
-      signature: { domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'] },
-    },
-  ],
+  },
+  SymmetricDifference: {
+    // symmetric difference = disjunctive union  (circled minus)
+    /* = Union(Complement(a, b), Complement(b, a) */
+    /* Corresponds to XOR in boolean logic */
+    wikidata: 'Q1147242',
+    signature: { domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'] },
+  },
 };
 
 function subset(ce: IComputeEngine, _ops: BoxedExpression[]): BoxedExpression {

@@ -79,12 +79,7 @@ function makeIntegral(
   fn ??= 'Nothing';
   if (parser.computeEngine) {
     const ce = parser.computeEngine;
-    if (index)
-      ce.pushScope({
-        symbolTable: {
-          symbols: [{ name: index, domain: 'ExtendedRealNumber' }],
-        },
-      });
+    if (index) ce.pushScope({ [index]: { domain: 'ExtendedRealNumber' } });
 
     fn = ce.box(fn).json;
 

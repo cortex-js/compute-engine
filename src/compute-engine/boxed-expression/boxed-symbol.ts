@@ -240,8 +240,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
     if (this.engine.defaultDomain !== null) {
       // No definition, create one if a default domain is specified
-      this._def = this.engine.defineSymbol({
-        name: this._name,
+      this._def = this.engine.defineSymbol(this._name, {
         wikidata: this._wikidata,
         domain: this.engine.defaultDomain,
         ...domainToFlags(this.engine.defaultDomain),
@@ -281,8 +280,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     //
     if (v?.domain.isCompatible('Function')) {
       // New function definitions always completely replace an existing one
-      this._def = this.engine.defineFunction({
-        name: this._name,
+      this._def = this.engine.defineFunction(this._name, {
         signature: {
           domain: v.domain,
           evaluate: v, // Evaluate as a lambda
@@ -296,8 +294,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
       // Create a new symbol definition
       let dom = v?.domain;
       if (dom?.isNumeric) dom = this.engine.domain('Number');
-      this._def = this.engine.defineSymbol({
-        name: this._name,
+      this._def = this.engine.defineSymbol(this._name, {
         value: v,
         domain: dom ?? undefined,
       });
@@ -323,8 +320,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
     if (d.isCompatible('Function')) {
       this.engine.forget(this._name);
-      this._def = this.engine.defineFunction({
-        name: this._name,
+      this._def = this.engine.defineFunction(this._name, {
         signature: { domain: d },
       });
     }
@@ -338,8 +334,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     } else {
       // Symbol was not bound to a definition, bind it in the current scope
       this.engine.forget(this._name);
-      this._def = this.engine.defineSymbol({
-        name: this._name,
+      this._def = this.engine.defineSymbol(this._name, {
         domain: d,
         ...domainToFlags(d),
       });

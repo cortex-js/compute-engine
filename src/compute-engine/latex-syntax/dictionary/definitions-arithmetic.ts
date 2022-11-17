@@ -930,10 +930,7 @@ function parseBigOp(name: string) {
     // Create a temporary scope to make sure the index symbol is
     // not mis-interpreted. Classic example: if the index is `i`, the
     // letter `i` should not be interpreted as a ImaginaryUnit
-    if (sym)
-      parser.computeEngine?.pushScope({
-        symbolTable: { symbols: [{ name: sym, domain: 'Integer' }] },
-      });
+    if (sym) parser.computeEngine?.pushScope({ [sym]: { domain: 'Integer' } });
 
     // Note: 265 is the precedence for some relational operators
     const fn = parser.matchExpression({ minPrec: 266 });

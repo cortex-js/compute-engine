@@ -1,14 +1,11 @@
-import { SymbolTable } from '../public';
+import { IDTable } from '../public';
 
-export const COLLECTIONS_LIBRARY: SymbolTable = {
-  functions: [
-    {
-      name: 'Sequence',
-      signature: {
-        domain: 'Function',
-      },
+export const COLLECTIONS_LIBRARY: IDTable = {
+  Sequence: {
+    signature: {
+      domain: 'Function',
     },
-  ],
+  },
 };
 // Keys: { domain: 'Function' },
 // Entries: { domain: 'Function' },

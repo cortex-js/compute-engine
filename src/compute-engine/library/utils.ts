@@ -1,13 +1,36 @@
-import { BoxedFunctionDefinition, BoxedSymbolDefinition } from '../public';
+import {
+  BoxedFunctionDefinition,
+  BoxedSymbolDefinition,
+  FunctionDefinition,
+  SymbolDefinition,
+} from '../public';
 
 export function isSymbolDefinition(
-  def: BoxedSymbolDefinition | BoxedFunctionDefinition | undefined | null
+  def:
+    | BoxedSymbolDefinition
+    | BoxedFunctionDefinition
+    | SymbolDefinition
+    | FunctionDefinition
+    | undefined
+    | null
 ): def is BoxedSymbolDefinition {
-  return !!def && typeof def === 'object' && 'constant' in def;
+  return (
+    !!def &&
+    typeof def === 'object' &&
+    ('domain' in def || 'value' in def || 'constant' in def)
+  );
 }
 
 export function isFunctionDefinition(
-  def: BoxedSymbolDefinition | BoxedFunctionDefinition | undefined | null
+  def:
+    | BoxedSymbolDefinition
+    | BoxedFunctionDefinition
+    | SymbolDefinition
+    | FunctionDefinition
+    | undefined
+    | null
 ): def is BoxedFunctionDefinition {
-  return !!def && 'numeric' in def;
+  return (
+    !!def && ('complexity' in def || 'numeric' in def || 'signature' in def)
+  );
 }

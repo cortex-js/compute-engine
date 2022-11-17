@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import {
   BoxedExpression,
-  SymbolTable,
+  IDTable,
   DomainExpression,
   IComputeEngine,
   LatexString,
@@ -37,475 +37,430 @@ const hyperbolicFunction = (_head: string): DomainExpression => {
   return ['Function', 'Number', 'Number'];
 };
 
-export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
+export const TRIGONOMETRY_LIBRARY: IDTable[] = [
   {
     //
     // Constants
     //
-    symbols: [
-      {
-        name: 'Pi',
-        domain: 'TranscendentalNumber',
-        algebraic: false,
-        constant: true,
-        hold: true,
-        wikidata: 'Q167',
-        value: (engine) =>
-          bignumPreferred(engine) ? engine._BIGNUM_PI : Math.PI,
-      },
-    ],
-    functions: [
-      // sqrt(x*x + y*y)
-      {
-        name: 'Degrees',
-        /* = Pi / 180 */
-        signature: {
-          domain: ['Function', 'Number', 'Number'],
-          canonical: (ce, ops) => {
-            ops = validateArgumentCount(ce, flattenSequence(ops), 1);
-            if (ops.length !== 1) return ce.box(['Degrees', ops]);
-            const arg = validateArgument(ce, ops[0].canonical, 'Number');
-            if (arg.numericValue === null || !arg.isValid)
-              return ce.box(['Degrees', arg]);
-            return ce.mul([arg, ce.box(['Divide', 'Pi', 180])]);
-          },
-          evaluate: (ce, ops) =>
-            ce.mul([ops[0], ce.box(['Divide', 'Pi', 180])]),
+    Pi: {
+      domain: 'TranscendentalNumber',
+      algebraic: false,
+      constant: true,
+      hold: true,
+      wikidata: 'Q167',
+      value: (engine) =>
+        bignumPreferred(engine) ? engine._BIGNUM_PI : Math.PI,
+    },
+  },
+  {
+    // sqrt(x*x + y*y)
+    Degrees: {
+      /* = Pi / 180 */
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        canonical: (ce, ops) => {
+          ops = validateArgumentCount(ce, flattenSequence(ops), 1);
+          if (ops.length !== 1) return ce.box(['Degrees', ops]);
+          const arg = validateArgument(ce, ops[0].canonical, 'Number');
+          if (arg.numericValue === null || !arg.isValid)
+            return ce.box(['Degrees', arg]);
+          return ce.mul([arg, ce.box(['Divide', 'Pi', 180])]);
         },
+        evaluate: (ce, ops) => ce.mul([ops[0], ce.box(['Divide', 'Pi', 180])]),
       },
-      {
-        name: 'Hypot',
-        signature: {
-          domain: ['Function', 'Number', 'Number', 'NonNegativeNumber'],
-          simplify: (ce, ops) =>
-            ce
-              .box(['Sqrt', ['Add', ['Square', ops[0]], ['Square', ops[1]]]])
-              .simplify(),
-          evaluate: [
-            'Lambda',
-            ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
-          ],
-        },
+    },
+    Hypot: {
+      signature: {
+        domain: ['Function', 'Number', 'Number', 'NonNegativeNumber'],
+        simplify: (ce, ops) =>
+          ce
+            .box(['Sqrt', ['Add', ['Square', ops[0]], ['Square', ops[1]]]])
+            .simplify(),
+        evaluate: [
+          'Lambda',
+          ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
+        ],
       },
-      {
-        name: 'Sin',
-        complexity: 5000,
-        signature: {
-          domain: ['Function', 'Number', ['Interval', -1, 1]],
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Sin', ops[0])?.simplify() ??
-            (complexAllowed(ce)
-              ? ce
-                  .box([
-                    'Divide',
-                    [
-                      'Subtract',
-                      ['Exp', ['Multiply', 'ImaginaryUnit', ops[0]]],
-                      [
-                        'Exp',
-                        ['Multiply', 'ImaginaryUnit', ['Negate', ops[0]]],
-                      ],
-                    ],
-                    ['Complex', 0, 2],
-                  ])
-                  .simplify()
-              : undefined),
+    },
+    Sin: {
+      complexity: 5000,
+      signature: {
+        domain: ['Function', 'Number', ['Interval', -1, 1]],
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Sin', ops[0])?.simplify() ??
+          (complexAllowed(ce)
+            ? ce
+                .box([
+                  'Divide',
+                  [
+                    'Subtract',
+                    ['Exp', ['Multiply', 'ImaginaryUnit', ops[0]]],
+                    ['Exp', ['Multiply', 'ImaginaryUnit', ['Negate', ops[0]]]],
+                  ],
+                  ['Complex', 0, 2],
+                ])
+                .simplify()
+            : undefined),
 
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sin', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Sin', ops[0]),
-        },
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sin', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Sin', ops[0]),
       },
-    ],
+    },
   },
   {
     //
     // Basic trigonometric function
     // (may be used in the definition of other functions below)
     //
-    functions: [
-      {
-        name: 'Arctan',
-        wikidata: 'Q2257242',
-        complexity: 5200,
-        signature: {
-          domain: domainNumberToRealNumber('Arctan'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arctan', ops[0])?.simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arctan', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arctan', ops[0]),
-        },
+    Arctan: {
+      wikidata: 'Q2257242',
+      complexity: 5200,
+      signature: {
+        domain: domainNumberToRealNumber('Arctan'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Arctan', ops[0])?.simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arctan', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arctan', ops[0]),
       },
-      {
-        name: 'Arctan2',
-        wikidata: 'Q776598',
-        complexity: 5200,
-        signature: {
-          domain: ['Function', 'Number', 'Number', 'Number'],
-          N: (_ce, ops) =>
-            apply2N(ops[0], ops[1], Math.atan2, (a, b) => Decimal.atan2(a, b)),
-        },
+    },
+    Arctan2: {
+      wikidata: 'Q776598',
+      complexity: 5200,
+      signature: {
+        domain: ['Function', 'Number', 'Number', 'Number'],
+        N: (_ce, ops) =>
+          apply2N(ops[0], ops[1], Math.atan2, (a, b) => Decimal.atan2(a, b)),
       },
-      {
-        name: 'Cos',
-        complexity: 5050,
-        signature: {
-          domain: ['Function', 'Number', ['Interval', -1, 1]],
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Cos', ops[0])?.simplify() ??
-            ce
-              .box(['Sin', ['Add', ops[0], ['Multiply', 'Half', 'Pi']]])
-              .simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Cos', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Cos', ops[0]),
-        },
+    },
+    Cos: {
+      complexity: 5050,
+      signature: {
+        domain: ['Function', 'Number', ['Interval', -1, 1]],
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Cos', ops[0])?.simplify() ??
+          ce
+            .box(['Sin', ['Add', ops[0], ['Multiply', 'Half', 'Pi']]])
+            .simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Cos', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Cos', ops[0]),
       },
+    },
 
-      {
-        name: 'Tan',
-        // Range: 'RealNumber',
-        complexity: 5100,
-        signature: {
-          domain: trigFunction('Tan'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Tan', ops[0])?.simplify() ??
-            ce.box(['Divide', ['Sin', ops[0]], ['Cos', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Tan', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Tan', ops[0]),
-        },
+    Tan: {
+      // Range: 'RealNumber',
+      complexity: 5100,
+      signature: {
+        domain: trigFunction('Tan'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Tan', ops[0])?.simplify() ??
+          ce.box(['Divide', ['Sin', ops[0]], ['Cos', ops[0]]]).simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Tan', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Tan', ops[0]),
       },
-      /* converts (x, y) -> (radius, angle) */
-      // ToPolarCoordinates: {
-      //   domain: 'Function',
-      //   outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
-      // }
-    ],
+    },
+    /* converts (x, y) -> (radius, angle) */
+    // ToPolarCoordinates: {
+    //   domain: 'Function',
+    //   outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
+    // }
   },
   //
   // Functions defined using arithmetic functions or basic
   // trigonometric functions above
   //
   {
-    functions: [
-      {
-        name: 'Arcosh',
-        complexity: 6200,
-        signature: {
-          domain: hyperbolicFunction('Arcosh'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arcosh', ops[0])?.simplify() ??
-            ce
-              .box([
-                'Ln',
-                ['Add', ops[0], ['Sqrt', ['Subtract', ['Square', ops[0]], 1]]],
-              ])
-              .simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcosh', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arcosh', ops[0]),
-        },
+    Arcosh: {
+      complexity: 6200,
+      signature: {
+        domain: hyperbolicFunction('Arcosh'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Arcosh', ops[0])?.simplify() ??
+          ce
+            .box([
+              'Ln',
+              ['Add', ops[0], ['Sqrt', ['Subtract', ['Square', ops[0]], 1]]],
+            ])
+            .simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcosh', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arcosh', ops[0]),
       },
-      {
-        name: 'Arcsin',
-        complexity: 5500,
-        signature: {
-          domain: hyperbolicFunction('Arcsin'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arcsin', ops[0])?.simplify() ??
-            ce
-              .box([
-                'Multiply',
-                2,
-                [
-                  'Arctan2',
-                  ops[0],
-                  ['Add', 1, ['Sqrt', ['Subtract', 1, ['Square', ops[0]]]]],
-                ],
-              ])
-              .simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsin', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arcsin', ops[0]),
-        },
+    },
+    Arcsin: {
+      complexity: 5500,
+      signature: {
+        domain: hyperbolicFunction('Arcsin'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Arcsin', ops[0])?.simplify() ??
+          ce
+            .box([
+              'Multiply',
+              2,
+              [
+                'Arctan2',
+                ops[0],
+                ['Add', 1, ['Sqrt', ['Subtract', 1, ['Square', ops[0]]]]],
+              ],
+            ])
+            .simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsin', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arcsin', ops[0]),
       },
-      //Note: Arsinh, not ArCsinh
-      {
-        name: 'Arsinh',
-        complexity: 6100,
-        signature: {
-          domain: hyperbolicFunction('Arsinh'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arsinh', ops[0])?.simplify() ??
-            ce
-              .box([
-                'Ln',
-                ['Add', ops[0], ['Sqrt', ['Add', ['Square', ops[0]], 1]]],
-              ])
-              .simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arsinh', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arsinh', ops[0]),
-        },
+    },
+    //Note: Arsinh, not ArCsinh
+    Arsinh: {
+      complexity: 6100,
+      signature: {
+        domain: hyperbolicFunction('Arsinh'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Arsinh', ops[0])?.simplify() ??
+          ce
+            .box([
+              'Ln',
+              ['Add', ops[0], ['Sqrt', ['Add', ['Square', ops[0]], 1]]],
+            ])
+            .simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arsinh', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arsinh', ops[0]),
       },
-      {
-        name: 'Artanh',
-        complexity: 6300,
-        signature: {
-          domain: hyperbolicFunction('Artanh'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Artanh', ops[0])?.simplify() ??
-            ce
-              .box([
-                'Multiply',
-                'Half',
-                ['Ln', ['Divide', ['Add', 1, ops[0]], ['Subtract', 1, ops[0]]]],
-              ])
-              .simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Artanh', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Artanh', ops[0]),
-        },
+    },
+    Artanh: {
+      complexity: 6300,
+      signature: {
+        domain: hyperbolicFunction('Artanh'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Artanh', ops[0])?.simplify() ??
+          ce
+            .box([
+              'Multiply',
+              'Half',
+              ['Ln', ['Divide', ['Add', 1, ops[0]], ['Subtract', 1, ops[0]]]],
+            ])
+            .simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Artanh', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Artanh', ops[0]),
       },
-      {
-        name: 'Cosh',
-        complexity: 6050,
-        signature: {
-          domain: hyperbolicFunction('Cosh'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Cosh', ops[0])?.simplify() ??
-            ce
-              .box([
-                'Multiply',
-                'Half',
-                ['Add', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
-              ])
-              .simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Cosh', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Cosh', ops[0]),
-        },
+    },
+    Cosh: {
+      complexity: 6050,
+      signature: {
+        domain: hyperbolicFunction('Cosh'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Cosh', ops[0])?.simplify() ??
+          ce
+            .box([
+              'Multiply',
+              'Half',
+              ['Add', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
+            ])
+            .simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Cosh', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Cosh', ops[0]),
       },
-      {
-        name: 'Cot',
-        complexity: 5600,
-        signature: {
-          domain: trigFunction('Cot'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Cot', ops[0])?.simplify() ??
-            ce.box(['Divide', ['Cos', ops[0]], ['Sin', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Cot', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Cot', ops[0]),
-        },
+    },
+    Cot: {
+      complexity: 5600,
+      signature: {
+        domain: trigFunction('Cot'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Cot', ops[0])?.simplify() ??
+          ce.box(['Divide', ['Cos', ops[0]], ['Sin', ops[0]]]).simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Cot', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Cot', ops[0]),
       },
-      {
-        name: 'Csc',
-        description: 'Cosecant',
-        complexity: 5600,
-        signature: {
-          domain: trigFunction('Csc'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Csc', ops[0])?.simplify() ??
-            ce.box(['Divide', 1, ['Sin', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Csc', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Csc', ops[0]),
-        },
+    },
+    Csc: {
+      description: 'Cosecant',
+      complexity: 5600,
+      signature: {
+        domain: trigFunction('Csc'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Csc', ops[0])?.simplify() ??
+          ce.box(['Divide', 1, ['Sin', ops[0]]]).simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Csc', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Csc', ops[0]),
       },
-      /** = sin(z/2)^2 = (1 - cos z) / 2*/
-      {
-        name: 'Haversine',
-        wikidata: 'Q2528380',
-        signature: {
-          domain: ['Function', 'ExtendedRealNumber', ['Interval', 0, 1]],
-          evaluate: ['Lambda', ['Divide', ['Subtract', 1, ['Cos', '_1']], 2]],
-        },
+    },
+    /** = sin(z/2)^2 = (1 - cos z) / 2*/
+    Haversine: {
+      wikidata: 'Q2528380',
+      signature: {
+        domain: ['Function', 'ExtendedRealNumber', ['Interval', 0, 1]],
+        evaluate: ['Lambda', ['Divide', ['Subtract', 1, ['Cos', '_1']], 2]],
       },
-      /** = 2 * Arcsin(Sqrt(z)) */
-      {
-        name: 'InverseHaversine',
-        //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
-        signature: {
-          domain: ['Function', 'ExtendedRealNumber', 'RealNumber'],
-          evaluate: ['Lambda', ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]]],
-        },
+    },
+    /** = 2 * Arcsin(Sqrt(z)) */
+    InverseHaversine: {
+      //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
+      signature: {
+        domain: ['Function', 'ExtendedRealNumber', 'RealNumber'],
+        evaluate: ['Lambda', ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]]],
       },
-      {
-        name: 'Sec',
-        description: 'Secant, inverse of cosine',
-        complexity: 5500,
-        signature: {
-          domain: trigFunction('Sec'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Sec', ops[0])?.simplify() ??
-            ce.box(['Divide', 1, ['Cos', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sec', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Sec', ops[0]),
-        },
+    },
+    Sec: {
+      description: 'Secant, inverse of cosine',
+      complexity: 5500,
+      signature: {
+        domain: trigFunction('Sec'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Sec', ops[0])?.simplify() ??
+          ce.box(['Divide', 1, ['Cos', ops[0]]]).simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sec', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Sec', ops[0]),
       },
-      {
-        name: 'Sinh',
-        // Range: ['Interval', -Infinity, Infinity],
-        complexity: 6000,
-        signature: {
-          domain: hyperbolicFunction('Sinh'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Sinh', ops[0])?.simplify() ??
-            ce
-              .box([
-                'Multiply',
-                'Half',
-                ['Subtract', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
-              ])
-              .simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sinh', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Sinh', ops[0]),
-        },
+    },
+    Sinh: {
+      // Range: ['Interval', -Infinity, Infinity],
+      complexity: 6000,
+      signature: {
+        domain: hyperbolicFunction('Sinh'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Sinh', ops[0])?.simplify() ??
+          ce
+            .box([
+              'Multiply',
+              'Half',
+              ['Subtract', ['Exp', ops[0]], ['Exp', ['Negate', ops[0]]]],
+            ])
+            .simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sinh', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Sinh', ops[0]),
       },
-    ],
+    },
   },
   {
-    functions: [
-      {
-        name: 'Csch',
-        complexity: 6200,
-        signature: {
-          domain: domainNumberToRealNumber('Csch'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Csch', ops[0])?.simplify() ??
-            ce.box(['Divide', 1, ['Sinh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Csch', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Csch', ops[0]),
-        },
+    Csch: {
+      complexity: 6200,
+      signature: {
+        domain: domainNumberToRealNumber('Csch'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Csch', ops[0])?.simplify() ??
+          ce.box(['Divide', 1, ['Sinh', ops[0]]]).simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Csch', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Csch', ops[0]),
       },
-      {
-        name: 'Sech',
-        complexity: 6200,
-        signature: {
-          domain: ['Function', 'Number', ['Interval', -1, 1]],
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Sech', ops[0])?.simplify() ??
-            ce.box(['Divide', 1, ['Cosh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sech', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Sech', ops[0]),
-        },
+    },
+    Sech: {
+      complexity: 6200,
+      signature: {
+        domain: ['Function', 'Number', ['Interval', -1, 1]],
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Sech', ops[0])?.simplify() ??
+          ce.box(['Divide', 1, ['Cosh', ops[0]]]).simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Sech', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Sech', ops[0]),
       },
-      {
-        name: 'Tanh',
-        // Range: ['Interval', -Infinity, Infinity],
-        complexity: 6200,
-        signature: {
-          domain: hyperbolicFunction('Tanh'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Tanh', ops[0])?.simplify() ??
-            ce.box(['Divide', ['Sinh', ops[0]], ['Cosh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Tanh', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Tanh', ops[0]),
-        },
+    },
+    Tanh: {
+      // Range: ['Interval', -Infinity, Infinity],
+      complexity: 6200,
+      signature: {
+        domain: hyperbolicFunction('Tanh'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Tanh', ops[0])?.simplify() ??
+          ce.box(['Divide', ['Sinh', ops[0]], ['Cosh', ops[0]]]).simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Tanh', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Tanh', ops[0]),
       },
-    ],
+    },
   },
   {
-    functions: [
-      {
-        name: 'Arccos',
-        complexity: 5550,
-        signature: {
-          domain: domainNumberToRealNumber('Arccos'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Arccos', ops[0])?.simplify() ??
-            ce
-              .box(['Subtract', ['Divide', 'Pi', 2], ['Arcsin', ops[0]]])
-              .simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccos', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arccos', ops[0]),
-        },
+    Arccos: {
+      complexity: 5550,
+      signature: {
+        domain: domainNumberToRealNumber('Arccos'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Arccos', ops[0])?.simplify() ??
+          ce
+            .box(['Subtract', ['Divide', 'Pi', 2], ['Arcsin', ops[0]]])
+            .simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccos', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arccos', ops[0]),
       },
-      {
-        name: 'Arccot',
-        numeric: true,
-        signature: {
-          domain: domainNumberToRealNumber('Arccot'),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccot', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arccot', ops[0]),
-        },
+    },
+    Arccot: {
+      numeric: true,
+      signature: {
+        domain: domainNumberToRealNumber('Arccot'),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccot', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arccot', ops[0]),
       },
+    },
 
-      {
-        name: 'Arcoth',
-        numeric: true,
-        signature: {
-          domain: domainNumberToRealNumber('Arcoth'),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcoth', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arcoth', ops[0]),
-        },
+    Arcoth: {
+      numeric: true,
+      signature: {
+        domain: domainNumberToRealNumber('Arcoth'),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcoth', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arcoth', ops[0]),
       },
+    },
 
-      {
-        name: 'Arcsch',
-        numeric: true,
-        signature: {
-          domain: domainNumberToRealNumber('Arcsch'),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsch', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arcsch', ops[0]),
-        },
+    Arcsch: {
+      numeric: true,
+      signature: {
+        domain: domainNumberToRealNumber('Arcsch'),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsch', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arcsch', ops[0]),
       },
+    },
 
-      {
-        name: 'Arcsec',
-        numeric: true,
-        signature: {
-          domain: domainNumberToRealNumber('Arcsec'),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsec', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arcsec', ops[0]),
-        },
+    Arcsec: {
+      numeric: true,
+      signature: {
+        domain: domainNumberToRealNumber('Arcsec'),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsec', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arcsec', ops[0]),
       },
+    },
 
-      {
-        name: 'Arsech',
-        numeric: true,
-        signature: {
-          domain: domainNumberToRealNumber('Arsech'),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arsech', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arsech', ops[0]),
-        },
+    Arsech: {
+      numeric: true,
+      signature: {
+        domain: domainNumberToRealNumber('Arsech'),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arsech', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arsech', ops[0]),
       },
-      {
-        name: 'Arccsc',
-        numeric: true,
-        signature: {
-          domain: domainNumberToRealNumber('Arccsc'),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccsc', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Arccsc', ops[0]),
-        },
+    },
+    Arccsc: {
+      numeric: true,
+      signature: {
+        domain: domainNumberToRealNumber('Arccsc'),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccsc', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Arccsc', ops[0]),
       },
+    },
 
-      {
-        name: 'Coth',
-        complexity: 6300,
-        signature: {
-          domain: hyperbolicFunction('Coth'),
-          simplify: (ce, ops) =>
-            constructibleValues(ce, 'Coth', ops[0])?.simplify() ??
-            ce.box(['Divide', 1, ['Tanh', ops[0]]]).simplify(),
-          evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Coth', ops[0]),
-          N: (ce, ops) => evalTrig(ce, 'N', 'Coth', ops[0]),
-        },
+    Coth: {
+      complexity: 6300,
+      signature: {
+        domain: hyperbolicFunction('Coth'),
+        simplify: (ce, ops) =>
+          constructibleValues(ce, 'Coth', ops[0])?.simplify() ??
+          ce.box(['Divide', 1, ['Tanh', ops[0]]]).simplify(),
+        evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Coth', ops[0]),
+        N: (ce, ops) => evalTrig(ce, 'N', 'Coth', ops[0]),
       },
-      /* converts (radius, angle) -> (x, y) */
-      // FromPolarCoordinates: {
-      //   domain: 'Function',
-      //   outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
-      // },
-      {
-        name: 'InverseFunction',
-        signature: {
-          domain: ['Function', 'Function', 'Function'],
-          canonical: (ce, ops) => {
-            ops = validateArgumentCount(ce, flattenSequence(ops), 1).map(
-              (x) => x.canonical
-            );
-            return (
-              processInverseFunction(ce, ops) ?? ce._fn('InverseFunction', ops)
-            );
-          },
-          simplify: (ce, ops) => processInverseFunction(ce, ops),
-          evaluate: (ce, ops) => processInverseFunction(ce, ops),
+    },
+    /* converts (radius, angle) -> (x, y) */
+    // FromPolarCoordinates: {
+    //   domain: 'Function',
+    //   outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
+    // },
+    InverseFunction: {
+      signature: {
+        domain: ['Function', 'Function', 'Function'],
+        canonical: (ce, ops) => {
+          ops = validateArgumentCount(ce, flattenSequence(ops), 1).map(
+            (x) => x.canonical
+          );
+          return (
+            processInverseFunction(ce, ops) ?? ce._fn('InverseFunction', ops)
+          );
         },
+        simplify: (ce, ops) => processInverseFunction(ce, ops),
+        evaluate: (ce, ops) => processInverseFunction(ce, ops),
       },
-    ],
+    },
   },
 ];
 

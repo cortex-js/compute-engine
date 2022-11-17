@@ -316,12 +316,12 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   prototype?: BoxedFunctionDefinition; // @todo for collections and other special data structures
   self?: unknown; // @todo
 
-  constructor(ce: IComputeEngine, def: SymbolDefinition) {
+  constructor(ce: IComputeEngine, name: string, def: SymbolDefinition) {
     if (!ce.context) throw Error('No context available');
     this._engine = ce;
     this.scope = ce.context;
     this._def = def;
-    this.name = def.name;
+    this.name = name;
     this.constant = def.constant ?? false;
     this.hold = def.hold ?? false;
     this._value = null;
@@ -404,7 +404,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
 
     if (!value && def.hold === false)
       throw new Error(
-        `Symbol definition "${def.name}": Expected a value when "hold=false" `
+        `Symbol definition "${this.name}": Expected a value when "hold=false" `
       );
 
     value = value?.canonical;

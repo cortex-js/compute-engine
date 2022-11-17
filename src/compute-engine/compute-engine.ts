@@ -24,7 +24,7 @@ import {
   BoxedFunctionDefinition,
   BoxedSymbolDefinition,
   IComputeEngine,
-  SymbolTable,
+  IDTable,
   ExpressionMapInterface,
   NumericMode as NumericMode,
   Pattern,
@@ -274,25 +274,27 @@ export class ComputeEngine implements IComputeEngine {
   deadline?: number;
 
   /**
-   * Return symbol tables suitable for the specified categories, or `"all"`
+   * Return identifier tables suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
    *
-   * A symbol table defines how the symbols and function names in a MathJSON
-   * expression should be interpreted, i.e. how to evaluate and manipulate them.
+   * An identifier table defines how the symbols and function names in a
+   * MathJSON expression should be interpreted, i.e. how to evaluate and
+   * manipulate them.
    *
    */
-  static getSymbolTables(
+  static getStandardLibrary(
     categories: LibraryCategory[] | LibraryCategory | 'all' = 'all'
-  ): Readonly<SymbolTable>[] {
+  ): Readonly<IDTable>[] {
     return getStandardLibrary(categories);
   }
 
   /**
    * Construct a new `ComputeEngine` instance.
    *
-   * Dictionaries define functions and symbols (in `options.dictionaries`) and
-   * the LaTeX syntax (in `options.latexDictionaries`). If no dictionaries
-   * are provided, the default ones are used.
+   * Identifier tables define functions and symbols (in `options.ids`).
+   * If no table is provided the standard library is used (`ComputeEngine.getStandardLibrary()`)
+   *
+   * The LaTeX syntax dictionary is defined in `options.latexDictionary`.
    *
    * The order of the dictionaries matter: the definitions from the later ones
    * override the definitions from earlier ones. The first dictionary should
@@ -314,12 +316,11 @@ export class ComputeEngine implements IComputeEngine {
    * be a variable in this domain. **Default** `ExtendedRealNumber`
    */
   constructor(options?: {
-    symbolTables?: Readonly<SymbolTable>[];
-    latexDictionary?: readonly LatexDictionaryEntry[];
     numericMode?: NumericMode;
     numericPrecision?: number;
+    ids?: Readonly<IDTable>[];
+    latexDictionary?: readonly LatexDictionaryEntry[];
     tolerance?: number;
-    assumptions?: (LatexString | Expression)[];
     defaultDomain?: string;
   }) {
     if (options !== undefined && typeof options !== 'object')
@@ -383,32 +384,29 @@ export class ComputeEngine implements IComputeEngine {
     //
     // The first, topmost, scope contains additional info
     //
-    const tables = options?.symbolTables ?? ComputeEngine.getSymbolTables();
-    this.pushScope({
-      symbolTable: tables,
-      scope: {
-        warn: (sigs: WarningSignal[]): void => {
-          for (const sig of sigs) {
-            if (typeof sig.message === 'string') {
-              console.warn(sig.message);
-            } else {
-              console.warn(...sig.message);
-            }
+    this.context = {
+      assumptions: new ExpressionMap(),
+      warn: (sigs: WarningSignal[]): void => {
+        for (const sig of sigs) {
+          if (typeof sig.message === 'string') {
+            console.warn(sig.message);
+          } else {
+            console.warn(...sig.message);
           }
-        },
-        timeLimit: 2.0, // execution time limit: 2.0 seconds
-        memoryLimit: 1.0, // memory limit: 1.0 megabyte
-        recursionLimit: 1024,
-        // iterationLimit:    no iteration limit
+        }
       },
-    });
+      timeLimit: 2.0, // execution time limit: 2.0 seconds
+      memoryLimit: 1.0, // memory limit: 1.0 megabyte
+      recursionLimit: 1024,
+      // iterationLimit:    no iteration limit
+    } as RuntimeScope;
+
+    const tables = options?.ids ?? ComputeEngine.getStandardLibrary();
+    for (const table of tables) setCurrentContextSymbolTable(this, table);
 
     // Push a fresh scope to protect global definitions:
     // this will be the "user" scope
-    if (options?.assumptions === null)
-      // If `assumptions` is set to null: no assumptions
-      this.pushScope();
-    else this.pushScope({ assumptions: options?.assumptions });
+    this.pushScope();
 
     // Patch-up any missing definitions (domains that were
     // 'forward-declared')
@@ -466,8 +464,7 @@ export class ComputeEngine implements IComputeEngine {
     // Reset all the definitions
     let scope = this.context;
     while (scope) {
-      if (scope.identifierTable)
-        for (const [_k, v] of scope.identifierTable) v.reset();
+      if (scope.idTable) for (const [_k, v] of scope.idTable) v.reset();
 
       // @todo purge assumptions
       scope = scope.parentScope ?? null;
@@ -764,7 +761,7 @@ export class ComputeEngine implements IComputeEngine {
     if (!this.strict) {
       scope ??= this.context ?? undefined;
       while (scope) {
-        const def = scope.identifierTable?.get(symbol);
+        const def = scope.idTable?.get(symbol);
         if (isSymbolDefinition(def)) return def;
         scope = scope.parentScope;
       }
@@ -781,8 +778,8 @@ export class ComputeEngine implements IComputeEngine {
     if (wikidata) {
       scope = rootScope;
       while (scope) {
-        if (scope.identifierTable)
-          for (const [_, d] of scope.identifierTable) {
+        if (scope.idTable)
+          for (const [_, d] of scope.idTable) {
             if (isSymbolDefinition(d) && d.wikidata === wikidata) return d;
           }
         scope = scope.parentScope;
@@ -791,7 +788,7 @@ export class ComputeEngine implements IComputeEngine {
     // Match by name
     scope = rootScope;
     while (scope) {
-      const def = scope.identifierTable?.get(symbol);
+      const def = scope.idTable?.get(symbol);
       if (isSymbolDefinition(def)) return def;
       scope = scope.parentScope;
     }
@@ -817,7 +814,7 @@ export class ComputeEngine implements IComputeEngine {
 
     scope ??= this.context;
     while (scope) {
-      const def = scope.identifierTable?.get(head);
+      const def = scope.idTable?.get(head);
       if (isFunctionDefinition(def)) return def;
       scope = scope.parentScope;
     }
@@ -827,32 +824,34 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * Add (or replace) a definition for a symbol in the current scope.
    */
-  defineSymbol(def: SymbolDefinition): BoxedSymbolDefinition {
+  defineSymbol(name: string, def: SymbolDefinition): BoxedSymbolDefinition {
     if (!this.context)
       throw Error('Symbol cannot be defined: no scope available');
-    if (def.name.length === 0 || !isValidIdentifier(def.name))
-      throw Error('Invalid identifier ' + def.name);
+    if (name.length === 0 || !isValidIdentifier(name))
+      throw Error('Invalid identifier ' + name);
 
-    if (!this.context.identifierTable) this.context.identifierTable = new Map();
+    if (!this.context.idTable) this.context.idTable = new Map();
 
-    const boxedDef = new BoxedSymbolDefinitionImpl(this, def);
-    if (boxedDef.name)
-      this.context.identifierTable.set(boxedDef.name, boxedDef);
+    const boxedDef = new BoxedSymbolDefinitionImpl(this, name, def);
+    if (boxedDef.name) this.context.idTable.set(boxedDef.name, boxedDef);
 
     return boxedDef;
   }
 
-  defineFunction(def: FunctionDefinition): BoxedFunctionDefinition {
+  defineFunction(
+    name: string,
+    def: FunctionDefinition
+  ): BoxedFunctionDefinition {
     if (!this.context)
       throw Error('Function cannot be defined: no scope available');
-    if (def.name.length === 0 || !isValidIdentifier(def.name))
-      throw Error('Invalid identifier ' + def.name);
+    if (name.length === 0 || !isValidIdentifier(name))
+      throw Error('Invalid identifier ' + name);
 
-    if (!this.context.identifierTable) this.context.identifierTable = new Map();
+    if (!this.context.idTable) this.context.idTable = new Map();
 
-    const boxedDef = makeFunctionDefinition(this, def);
+    const boxedDef = makeFunctionDefinition(this, name, def);
 
-    if (boxedDef.name) this.context.identifierTable.set(def.name, boxedDef);
+    if (boxedDef.name) this.context.idTable.set(name, boxedDef);
 
     return boxedDef;
   }
@@ -865,16 +864,13 @@ export class ComputeEngine implements IComputeEngine {
    * etc... for this scope
    *
    */
-  pushScope(options?: {
-    symbolTable?: Readonly<SymbolTable> | Readonly<SymbolTable>[];
-    assumptions?: (LatexString | Expression)[];
-    scope?: Partial<Scope>;
-  }): void {
-    if (options !== undefined && typeof options !== 'object')
-      throw Error('Expected an object literal');
+  pushScope(
+    ids?: Readonly<IDTable> | Readonly<IDTable>[],
+    scope?: Partial<Scope>
+  ): void {
     if (this.context === null) throw Error('No parent scope available');
     this.context = {
-      ...options?.scope,
+      ...(scope ?? {}),
       parentScope: this.context,
       // We always copy the current assumptions in the new scope.
       // This make is much easier to deal with 'inherited' assumptions
@@ -882,27 +878,16 @@ export class ComputeEngine implements IComputeEngine {
       // into parent contexts. In other words, calling `ce.forget()` will
       // forget everything **in the current scope**. When exiting the scope,
       // the previous assumptions are restored.
-      assumptions: this.context
-        ? new ExpressionMap(this.context.assumptions)
-        : new ExpressionMap(),
+      assumptions: new ExpressionMap(this.context.assumptions),
     };
 
     // `setCurrentContextDictionary` will associate the definitions in the
     // dictionary with the current scope, so we need to set the scope first
     // above(`this.context =...`);
-    if (options?.symbolTable) {
-      if (Array.isArray(options.symbolTable))
-        for (const dict of options.symbolTable)
-          setCurrentContextSymbolTable(this, dict);
-      else setCurrentContextSymbolTable(this, options.symbolTable);
-    }
-    // Add any user-specified assumptions
-    // (those assumptions may use the definitions from the dictionary,
-    // so set those up *after* setting up the dictionary)
-    if (options?.assumptions !== undefined) {
-      for (const assumption of options.assumptions) {
-        this.assume(this.parse(latexString(assumption)) ?? assumption);
-      }
+    if (ids) {
+      if (Array.isArray(ids))
+        for (const table of ids) setCurrentContextSymbolTable(this, table);
+      else setCurrentContextSymbolTable(this, ids);
     }
   }
 
@@ -955,8 +940,8 @@ export class ComputeEngine implements IComputeEngine {
           else if (idk !== undefined && idk !== null) {
             const val = this.box(idk);
             if (val.domain.isNumeric)
-              this.defineSymbol({ name: k, value: val, domain: 'Number' });
-            else this.defineSymbol({ name: k, value: val });
+              this.defineSymbol(k, { value: val, domain: 'Number' });
+            else this.defineSymbol(k, { value: val });
           }
         }
       }
@@ -979,8 +964,8 @@ export class ComputeEngine implements IComputeEngine {
             def.value = val;
           } else {
             if (val.domain.isNumeric)
-              this.defineSymbol({ name: k, value: val, domain: 'Number' });
-            else this.defineSymbol({ name: k, value: val });
+              this.defineSymbol(k, { value: val, domain: 'Number' });
+            else this.defineSymbol(k, { value: val });
           }
         }
       }
@@ -994,8 +979,8 @@ export class ComputeEngine implements IComputeEngine {
       if (k !== 'Nothing') {
         const def = identifiers[k];
         if ('value' in def || ('domain' in def && def.domain !== 'Function'))
-          this.defineSymbol({ ...def, name: k } as SymbolDefinition);
-        else this.defineFunction({ ...def, name: k } as FunctionDefinition);
+          this.defineSymbol(k, def);
+        else this.defineFunction(k, def as FunctionDefinition);
       }
     }
   }
@@ -1619,8 +1604,8 @@ export class ComputeEngine implements IComputeEngine {
     //
 
     if (symbol === undefined) {
-      if (this.context.identifierTable)
-        for (const k of this.context.identifierTable.keys()) this.forget(k);
+      if (this.context.idTable)
+        for (const k of this.context.idTable.keys()) this.forget(k);
 
       this.assumptions.clear();
       return;
@@ -1633,8 +1618,8 @@ export class ComputeEngine implements IComputeEngine {
 
     if (typeof symbol === 'string') {
       // Remove symbol definition in the current scope (if any)
-      if (this.context.identifierTable) {
-        const def = this.context.identifierTable.get(symbol);
+      if (this.context.idTable) {
+        const def = this.context.idTable.get(symbol);
         if (isSymbolDefinition(def)) {
           def.value = undefined;
           def.domain = undefined;

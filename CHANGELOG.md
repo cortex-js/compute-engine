@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The signature of `ce.defineSymbol()`, `ce.defineFunction()` and
+  `ce.pushScope()` have changed
+
 ## 0.10.0
 
 **Release Date:** 2022-11-17

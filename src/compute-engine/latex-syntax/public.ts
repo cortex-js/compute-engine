@@ -44,6 +44,7 @@ export type LibraryCategory =
   | 'control-structures'
   | 'combinatorics'
   | 'core'
+  | 'data-structures'
   | 'dimensions'
   | 'domains'
   | 'linear-algebra'

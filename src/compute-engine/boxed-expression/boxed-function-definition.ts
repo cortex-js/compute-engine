@@ -29,7 +29,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
 
   signature: BoxedFunctionSignature;
 
-  constructor(ce: IComputeEngine, def: FunctionDefinition) {
+  constructor(ce: IComputeEngine, name: string, def: FunctionDefinition) {
     if (!ce.context) throw Error('No context available');
 
     this.engine = ce;
@@ -40,10 +40,10 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
 
     if (idempotent && involution)
       throw new Error(
-        `Function Definition "${def.name}": the 'idempotent' and 'involution' flags are mutually exclusive`
+        `Function Definition "${name}": the 'idempotent' and 'involution' flags are mutually exclusive`
       );
 
-    this.name = def.name;
+    this.name = name;
     this.description = def.description;
     this.wikidata = def.wikidata;
 
@@ -62,7 +62,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     if (this.inert) {
       if (def.hold)
         throw Error(
-          `Function Definition "${def.name}": an inert function should not have a hold`
+          `Function Definition "${name}": an inert function should not have a hold`
         );
       this.hold = 'rest';
       if (def.signature) {
@@ -77,32 +77,32 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
           'compile' in sig
         )
           throw Error(
-            `Function Definition "${def.name}": an inert function should only have 'canonical' or 'codomain' handlers`
+            `Function Definition "${name}": an inert function should only have 'canonical' or 'codomain' handlers`
           );
       }
       if (this.threadable)
         throw Error(
-          `Function Definition "${def.name}": an inert function should not be threadable`
+          `Function Definition "${name}": an inert function should not be threadable`
         );
       if (this.associative)
         throw Error(
-          `Function Definition "${def.name}": an inert function should not be associative`
+          `Function Definition "${name}": an inert function should not be associative`
         );
       if (this.commutative)
         throw Error(
-          `Function Definition "${def.name}": an inert function should not be commutative`
+          `Function Definition "${name}": an inert function should not be commutative`
         );
       if (this.idempotent)
         throw Error(
-          `Function Definition "${def.name}": an inert function should not be idempotent`
+          `Function Definition "${name}": an inert function should not be idempotent`
         );
       if (this.involution)
         throw Error(
-          `Function Definition "${def.name}": an inert function should not be involution`
+          `Function Definition "${name}": an inert function should not be involution`
         );
       if (!this.pure)
         throw Error(
-          `Function Definition "${def.name}": an inert function should be pure`
+          `Function Definition "${name}": an inert function should be pure`
         );
     }
     if (def.signature) {
@@ -114,7 +114,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
         : ce.domain('Function');
       if (!domain.isValid)
         throw Error(
-          `Function Definition "${def.name}": invalid domain ${JSON.stringify(
+          `Function Definition "${name}": invalid domain ${JSON.stringify(
             sig.domain
           )}`
         );
@@ -157,7 +157,8 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
 
 export function makeFunctionDefinition(
   engine: IComputeEngine,
+  name: string,
   def: FunctionDefinition
 ): BoxedFunctionDefinition {
-  return new BoxedFunctionDefinitionImpl(engine, def);
+  return new BoxedFunctionDefinitionImpl(engine, name, def);
 }
