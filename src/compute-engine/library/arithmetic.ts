@@ -107,6 +107,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         threadable: true,
         idempotent: true,
         complexity: 1300,
+        hold: 'all',
         signature: {
           domain: 'NumericFunction',
           codomain: (ce, args) =>
@@ -466,6 +467,7 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
         commutative: true,
         idempotent: true,
         complexity: 2100,
+        hold: 'all',
 
         signature: {
           domain: 'NumericFunction',

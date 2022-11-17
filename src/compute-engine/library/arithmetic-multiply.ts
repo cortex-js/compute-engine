@@ -50,9 +50,12 @@ export function canonicalMultiply(
   if (ops.length === 1) return ops[0];
   if (ops.length === 2) return multiply2(ops[0], ops[1]);
 
-  return simplifyMultiply(ce, ops);
-
-  // return new Product(ce, ops).asExpression();
+  const product = new Product(ce);
+  for (const op of ops) {
+    if (op.isNaN || op.symbol === 'Undefined') return ce._NAN;
+    product.addTerm(op);
+  }
+  return product.asExpression();
 }
 
 export function simplifyMultiply(
@@ -60,9 +63,9 @@ export function simplifyMultiply(
   ops: BoxedExpression[]
 ): BoxedExpression {
   console.assert(flattenOps(ops, 'Multiply') === null);
-
   const product = new Product(ce);
-  for (const op of ops) {
+  for (let op of ops) {
+    op = op.simplify();
     if (op.isNaN || op.symbol === 'Undefined') return ce._NAN;
     product.addTerm(op);
   }
@@ -93,7 +96,6 @@ export function evalMultiply(
     ops = ops.map((x) => x.N());
     const result = fastEvalMultiply(ops);
     if (result !== null) return ce.number(result);
-    return new Product(ce, ops).asExpression('N');
   }
 
   //
@@ -106,6 +108,7 @@ export function evalMultiply(
   console.assert(flattenOps(ops, 'Multiply') === null);
 
   if (mode === 'N') ops = ops.map((x) => x.N());
+  else ops = ops.map((x) => x.evaluate());
 
   //
   // Second pass
@@ -147,7 +150,13 @@ function multiply2(
       ) ?? ce._NAN
     );
   }
-
+  if (
+    op1.isNaN ||
+    op2.isNaN ||
+    op1.symbol === 'Undefined' ||
+    op2.symbol === 'Undefined'
+  )
+    return ce._NAN;
   if (op1.isNothing) return op2;
   if (op2.isNothing) return op1;
   if (op1.numericValue !== null) {

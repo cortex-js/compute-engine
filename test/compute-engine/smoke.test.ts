@@ -14,6 +14,7 @@
  * - numerical evaluation
  */
 
+import { ComputeEngine } from '../../src/compute-engine';
 import { Expression } from '../../src/math-json/math-json-format';
 import {
   boxToJson,
@@ -36,67 +37,65 @@ const ce = engine;
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
 
-///
+function slowEval() {
+  ///
+  const ce = new ComputeEngine();
 
-// ce.numericMode = 'machine';
-// const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
-// const vars = { a: 2, b: 3, c: 4 };
-// const expr1 = expr.N();
+  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
+  const vars = { a: 2, b: 3, c: 4 };
 
-// const graph = this.board.create(
-//   'functiongraph',
-//   [
+  // Factor out substitution of constants
 
-// // run hundred times each render
-// const eval1 = (x: number): number =>
-//   expr1.subs(vars).subs({ x: x }).N().numericValue! as number;
+  ce.numericMode = 'machine';
+  ce.strict = false;
 
-// let startTime = performance.now();
-// let y = 0;
-// for (let x = 0; x <= Math.PI; x += 0.01) y += eval1(x);
+  let y = 0;
+  const startTime = performance.now();
+  for (let x = 0; x <= Math.PI; x += 0.01) {
+    y += expr.subs(vars).subs({ x: x }).N().numericValue! as number;
+  }
 
-// console.log(`Eval1: y = ${y} in ${performance.now() - startTime} milliseconds`);
+  console.log(
+    `Slow eval: y = ${y} in ${performance.now() - startTime} milliseconds`
+  );
+}
 
-// // Factor out substitution of constants
-// const expr2 = expr.subs(vars);
-// const eval2 = (x: number): number =>
-//   expr2.subs({ x: x }).N().numericValue! as number;
+function fastEval() {
+  ///
+  const ce = new ComputeEngine();
 
-// startTime = performance.now();
-// y = 0;
-// for (let x = 0; x <= Math.PI; x += 0.01) y += eval2(x);
+  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
+  const vars = { a: 2, b: 3, c: 4 };
 
-// console.log(`Eval2: y = ${y} in ${performance.now() - startTime} milliseconds`);
+  // Factor out substitution of constants
+  const expr3 = expr.subs(vars).N();
 
-// // Use a scope
-// // Factor out substitution of constants
-// const expr3 = expr.subs(vars);
+  ce.numericMode = 'machine';
+  ce.strict = false;
 
-// ce.strict = false;
+  let y = 0;
+  const startTime = performance.now();
+  for (let x = 0; x <= Math.PI; x += 0.01) {
+    ce.set({ x: x });
+    y += expr3.N().numericValue! as number;
+  }
 
-// ce.set({ x: 0 });
-// // Should return a symbol, not 0
-// const v = ce.symbol('x');
-
-// console.log(v.numericValue, v.isZero, v.isPrime, v.N().numericValue);
-// ce.set({ x: 5 });
-// console.log(v.numericValue, v.isZero, v.isPrime, v.N().numericValue);
-
-// y = 0;
-
-// startTime = performance.now();
-// for (let x = 0; x <= Math.PI; x += 0.01) {
-//   // Avoid setting props, flags
-//   // Q: when are props/flags used? If the symbol does not have a value?
-//   ce.set({ x: x });
-//   y += expr3.N().numericValue! as number;
-// }
-
-// console.log(`Eval3: y = ${y} in ${performance.now() - startTime} milliseconds`);
-
-// debugger;
-
+  console.log(
+    `Fast eval: y = ${y} in ${performance.now() - startTime} milliseconds`
+  );
+}
 // ---
+
+// slowEval();
+// fastEval();
+
+console.log(
+  ce.parse('(1+(2+(3+4)))(((5+6)+7)((8+(9+10)))(11+(12+13)+14))').toJSON()
+);
+
+ce.set({ vv: 0 });
+// Should return a symbol, not 0
+const v = ce.symbol('vv');
 
 console.log(ce.parse('f\\left(\\right)').toString());
 

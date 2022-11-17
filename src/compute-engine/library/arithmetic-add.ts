@@ -44,7 +44,7 @@ export function canonicalAdd(
   if (ops.length === 2) {
     let im: number | null = 0;
     let re: number | null = 0;
-    if (ops[0].numericValue !== null) re = asFloat(ops[0]);
+    re = asFloat(ops[0]);
     if (re !== null && re !== 0) im = getImaginaryCoef(ops[1]);
     else {
       im = getImaginaryCoef(ops[0]);
@@ -80,7 +80,8 @@ export function simplifyAdd(
   console.assert(args.length > 1, `simplifyAdd: not enough args`);
 
   const sum = new Sum(ce);
-  for (const arg of args) {
+  for (let arg of args) {
+    arg = arg.simplify();
     if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
     if (arg.isNaN || arg.symbol === 'Undefined') return ce._NAN;
     if (!arg.isZero) sum.addTerm(arg);
@@ -123,6 +124,7 @@ export function evalAdd(
   console.assert(flattenOps(ops, 'Add') === null);
 
   if (mode === 'N') ops = ops.map((x) => x.N());
+  else ops = ops.map((x) => x.evaluate());
   return new Sum(ce, ops).asExpression(mode === 'N' ? 'numeric' : 'expression');
 }
 

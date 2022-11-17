@@ -1195,7 +1195,7 @@ export class ComputeEngine implements IComputeEngine {
 
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-    ops = flattenSequence(ops);
+    // ops = flattenSequence(ops);
 
     const result = canonicalAdd(this, ops);
     if (metadata?.latex !== undefined) result.latex = metadata.latex;
