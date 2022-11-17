@@ -1,6 +1,25 @@
-## 0.9.0 
+## [Unreleased]
 
- **Release Date:** 2022-11-15
+### Breaking Changes
+
+- `expr.isLiteral` has been removed. Use `expr.numericValue !== null` and
+  `expr.string !== null` instead.
+
+### Bug Fixes
+
+- Calling `ce.forget()` would not affect expressions that previously referenced
+  the symbol.
+
+### Improvements
+
+- More accurate calculations of some trig functions when using bignums.
+- Improved performance when changing a value with `ce.set()`. Up to 10x faster
+  when evaluating a simple polynomial in a loop.
+- `ce.strict` can be set to `false` to bypass some domain and validity checks.
+
+## 0.9.0
+
+**Release Date:** 2022-11-15
 
 ### Breaking Changes
 
