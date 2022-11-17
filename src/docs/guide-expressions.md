@@ -115,16 +115,6 @@ console.log(expr.json);
 //    ]]
 ```
 
-## Literal Expressions
-
-A literal expression has a fixed value that was provided directly when the
-expression was defined.
-
-Numbers and strings are literals. Symbols and functions are not. They may have a
-value, but their value is calculated indirectly.
-
-**To check if an expression is a literal**, use `expr.isLiteral`.
-
 <section id='canonical'>
 
 ## Canonical Expressions
@@ -230,17 +220,13 @@ dictionary, use the following boolean expressions:
 
 | Kind       | Boolean Expression                                     |
 | :--------- | :----------------------------------------------------- |
-| **Number**     | `expr.isLiteral && expr.isNumber`                      |
+| **Number**     | `expr.numericValue !== null`                      |
 | **Symbol**     | `expr.symbol !== null` <br> `expr.head === 'Symbol'`   |
-| **Function**   | `expr.tail !== null`                                   |
+| **Function**   | `expr.ops !== null`                                   |
 | **String**     | `expr.string !== null` <br> `expr.head === 'String'`   |
 | **Dictionary** | `expr.keys !== null` <br> `expr.head === 'Dictionary'` |
 
 </div>
-
-Note that symbols or functions can return `true` for `isNumber`, if their value
-is a number. Use `isLiteral` to distinguish literal numbers from other
-expressions that may have a numeric value.
 
 A symbol may have a value if it represents a bound variable, but it may also
 have no value if it represents a free variable.
