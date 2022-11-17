@@ -118,8 +118,8 @@ export function apply(
   bigFn?: (x: Decimal) => Decimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
 ): number | Decimal | Complex {
-  console.assert(expr.isLiteral);
   const n = expr.numericValue!;
+  console.assert(n !== null);
 
   if (typeof n === 'number') {
     if (bignumPreferred(expr.engine) && bigFn)
@@ -155,7 +155,7 @@ export function applyN(
   bigFn?: (x: Decimal) => Decimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
 ): BoxedExpression | undefined {
-  if (!expr.isLiteral) return undefined;
+  if (expr.numericValue === null) return undefined;
   return expr.engine.number(apply(expr, fn, bigFn, complexFn));
 }
 
@@ -166,7 +166,7 @@ export function apply2(
   bigFn?: (x1: Decimal, x2: Decimal) => Decimal | Complex | Rational | number,
   complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
 ): number | Decimal | Complex | Rational {
-  console.assert(expr1.isLiteral && expr2.isLiteral);
+  console.assert(expr1.numericValue !== null && expr2.numericValue !== null);
 
   const ce = expr1.engine;
 
@@ -210,6 +210,7 @@ export function apply2N(
   bigFn?: (x1: Decimal, x2: Decimal) => Decimal | Complex | number | Rational,
   complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
 ): BoxedExpression | undefined {
-  if (!expr1.isLiteral || !expr2.isLiteral) return undefined;
+  if (expr1.numericValue === null || expr2.numericValue === null)
+    return undefined;
   return expr1.engine.number(apply2(expr1, expr2, fn, bigFn, complexFn));
 }

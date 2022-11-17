@@ -275,7 +275,8 @@ describe('EXACT EVALUATION', () => {
       ]
       simplify  = ["Add", ["Rational", 535, 63], ["Sqrt", 2], "Pi"]
       N-auto    = 13.047869708026380351
-      N-mach    = 13.04786970802638
+      N-mach    = 13.047869708026381
+      N-cplx   = 13.04786970802638
     `));
   test(`Add: one inexact`, () =>
     expect(check('1.1+2+5+\\frac{5}{7}+\\frac{7}{9}+\\sqrt{2}+\\pi'))
@@ -355,10 +356,10 @@ describe('ADD', () => {
         1.5,
         1.7,
         2,
+        2,
         4,
         ["Sqrt", 5],
         ["Sqrt", 5],
-        ["Sqrt", 4],
         "Pi"
       ]
       simplify  = ["Add", 3.2, ["Rational", 692, 77], ["Multiply", 2, ["Sqrt", 5]], "Pi"]
@@ -521,7 +522,7 @@ describe('MULTIPLY', () => {
   test(`5x(-2.1)`, () =>
     expect(checkJson(['Multiply', 5, -2.1])).toMatchInlineSnapshot(`
       box       = ["Multiply", 5, -2.1]
-      simplify  = ["Multiply", -2.1, 5]
+      canonical = ["Multiply", -5, 2.1]
       evaluate  = -10.5
     `));
 
@@ -546,7 +547,7 @@ describe('MULTIPLY', () => {
     expect(checkJson(['Multiply', 'x', -2, 3.1, '+Infinity']))
       .toMatchInlineSnapshot(`
       box       = ["Multiply", "x", -2, 3.1, {num: "+Infinity"}]
-      canonical = ["Multiply", -3.1, 2, {num: "+Infinity"}, "x"]
+      canonical = ["Multiply", -2, 3.1, {num: "+Infinity"}, "x"]
       evaluate  = {num: "+Infinity"}
     `));
 
@@ -798,7 +799,7 @@ describe('Sqrt', () => {
   test(`√0`, () =>
     expect(checkJson(['Sqrt', 0])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 0]
-      simplify  = 0
+      canonical = 0
     `));
 
   test(`√2.5`, () => {
@@ -812,7 +813,7 @@ describe('Sqrt', () => {
   test(`√(175)`, () =>
     expect(checkJson(['Sqrt', 175])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 175]
-      simplify  = ["Multiply", 5, ["Sqrt", 7]]
+      canonical = ["Multiply", 5, ["Sqrt", 7]]
       N-auto    = 13.228756555322952953
       N-mach    = 13.228756555322953
     `));
@@ -909,7 +910,7 @@ describe('Sqrt', () => {
     expect(checkJson(['Sqrt', ['Multiply', 5, ['Add', 3, 2]]]))
       .toMatchInlineSnapshot(`
       box       = ["Sqrt", ["Multiply", 5, ["Add", 3, 2]]]
-      canonical = ["Sqrt", ["Add", 10, 15]]
+      canonical = ["Sqrt", ["Multiply", 5, ["Add", 2, 3]]]
       simplify  = 5
     `));
 

@@ -36,7 +36,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
   private _domain: BoxedDomain | undefined;
   private _hash: number | undefined;
 
-  protected _isCanonical = true;
+  protected _isCanonical: boolean;
 
   /**
    * By the time the constructor is called, the `value` should have been
@@ -55,11 +55,13 @@ export class BoxedNumber extends AbstractBoxedExpression {
     value: number | Decimal | Complex | Rational,
     options?: { metadata?: Metadata; canonical?: boolean }
   ) {
-    options ??= {};
-    super(ce, options.metadata);
-
+    super(ce, options?.metadata);
+    if (typeof value === 'number') {
+      this._value = value;
+      this._isCanonical = true;
+      return;
+    }
     if (isRational(value)) {
-      if (!('canonical' in options)) options.canonical = true;
       //
       // This is a rational (or big rational)
       //
@@ -73,7 +75,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
           (n.isInteger() && d.isInteger() && !d.eq(n) && !d.eq(1))
       );
 
-      if (options.canonical) {
+      if (options?.canonical ?? true) {
         this._value = canonicalNumber(ce, value);
         this._isCanonical = true;
       } else {
@@ -122,10 +124,6 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get isPure(): boolean {
-    return true;
-  }
-
-  get isLiteral(): boolean {
     return true;
   }
 

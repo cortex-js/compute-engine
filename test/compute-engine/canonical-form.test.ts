@@ -136,7 +136,6 @@ describe('CANONICAL FORMS', () => {
     expect(check('2\\times(5-5)\\times5\\times4')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, ["Delimiter", ["Subtract", 5, 5]], 5, 4]
       box       = ["Multiply", 40, ["Subtract", 5, 5]]
-      canonical = ["Subtract", 200, 200]
       simplify  = 0
     `);
   });
@@ -193,6 +192,14 @@ describe('COMMUTATIVE ORDER', () => {
           "z",
           ["Power", "y", ["Rational", 3, 2]]
         ]
+      ]
+      simplify  = [
+        "Multiply",
+        ["Rational", -45, 2],
+        "Pi",
+        "x",
+        "z",
+        ["Power", "y", ["Rational", 3, 2]]
       ]
       N-auto    = [
         "Multiply",

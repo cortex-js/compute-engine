@@ -58,12 +58,11 @@ export function costFunction(expr: BoxedExpression): number {
   //
   // 2/ Literal Numeric Values
   //
-  if (expr.isLiteral) {
+  const num = expr.numericValue;
+  if (num !== null) {
     if (expr.isZero) return 1;
-    if (expr.isInteger && asFloat(expr) !== null)
-      return numericCostFunction(asFloat(expr)!);
+    if (expr.isInteger) return numericCostFunction(asFloat(expr)!);
 
-    const num = expr.numericValue;
     if (isRational(num)) {
       if (isMachineRational(num))
         return numericCostFunction(num[0]) + numericCostFunction(num[1]) + 1;

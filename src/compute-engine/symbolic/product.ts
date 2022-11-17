@@ -120,7 +120,7 @@ export class Product {
 
       // If we're calculation a canonical  product, fold exact literals into
       // running terms
-      if (term.isLiteral) {
+      if (term.numericValue !== null) {
         if (term.isOne) return;
 
         if (term.isZero) {
@@ -141,8 +141,10 @@ export class Product {
 
         let num = term.numericValue;
         if (typeof num === 'number') {
-          if (num < 0) this._sign *= -1;
-          num = Math.abs(num);
+          if (num < 0) {
+            this._sign *= -1;
+            num = -num;
+          }
           if (Number.isInteger(num))
             this._rational = mul(this._rational, [num, 1]);
           else if (bignumPreferred(this.engine))
@@ -194,11 +196,11 @@ export class Product {
     }
 
     // Note: rest should be positive, so no need to handle the -1 case
-    if (rest.isLiteral && rest.isOne) return;
+    if (rest.numericValue !== null && rest.isOne) return;
 
     // If this is a power expression, extract the exponent
     let exponent: Rational = [1, 1];
-    if (rest.head === 'Power' && rest.op2.isLiteral) {
+    if (rest.head === 'Power') {
       // Term is `Power(op1, op2)`
       const r = asRational(rest.op2);
       if (r) {
@@ -263,39 +265,38 @@ export class Product {
         b = b.mul(this._complex.re);
         if (b.equals(1)) return [];
         return [{ exponent: [1, 1], terms: [ce.number(b)] }];
-      } else {
-        // Machine preferred
-        let n = 1;
-        if (!isRationalOne(this._rational)) {
-          if (isBigRational(this._rational))
-            n = this._rational[0].toNumber() / this._rational[1].toNumber();
-          else n = this._rational[0] / this._rational[1];
-        }
-
-        // if (!isRationalOne(this._squareRootRational)) {
-        //   if (isBigRational(this._squareRootRational))
-        //     n *= Math.sqrt(
-        //       this._squareRootRational[0].toNumber() /
-        //         this._squareRootRational[1].toNumber()
-        //     );
-        //   else
-        //     n *= Math.sqrt(
-        //       this._squareRootRational[0] / this._squareRootRational[1]
-        //     );
-        // }
-
-        n *= this._sign * this._number * this._bignum.toNumber();
-
-        if (this._complex.im !== 0) {
-          const z = this._complex.mul(n);
-          if (z.equals(1)) return [];
-          return [{ exponent: [1, 1], terms: [ce.number(z)] }];
-        }
-
-        n *= this._complex.re;
-        if (n === 1) return [];
-        return [{ exponent: [1, 1], terms: [ce.number(n)] }];
       }
+      // Machine preferred
+      let n = 1;
+      if (!isRationalOne(this._rational)) {
+        if (isBigRational(this._rational))
+          n = this._rational[0].toNumber() / this._rational[1].toNumber();
+        else n = this._rational[0] / this._rational[1];
+      }
+
+      // if (!isRationalOne(this._squareRootRational)) {
+      //   if (isBigRational(this._squareRootRational))
+      //     n *= Math.sqrt(
+      //       this._squareRootRational[0].toNumber() /
+      //         this._squareRootRational[1].toNumber()
+      //     );
+      //   else
+      //     n *= Math.sqrt(
+      //       this._squareRootRational[0] / this._squareRootRational[1]
+      //     );
+      // }
+
+      n *= this._sign * this._number * this._bignum.toNumber();
+
+      if (this._complex.im !== 0) {
+        const z = this._complex.mul(n);
+        if (z.equals(1)) return [];
+        return [{ exponent: [1, 1], terms: [ce.number(z)] }];
+      }
+
+      n *= this._complex.re;
+      if (n === 1) return [];
+      return [{ exponent: [1, 1], terms: [ce.number(n)] }];
     }
 
     //
@@ -332,7 +333,10 @@ export class Product {
             terms: [ce.number(this._rational[1])],
           });
       } else {
-        unitTerms.push(ce.number(this._rational));
+        if (n === -1) {
+          unitTerms.push(ce.number(neg(this._rational)));
+          n = 1;
+        } else unitTerms.push(ce.number(this._rational));
       }
     }
 
@@ -483,7 +487,7 @@ export class Product {
 
   asRationalExpression(): BoxedExpression {
     const [numerator, denominator] = this.asNumeratorDenominator();
-    if (denominator.isLiteral) {
+    if (denominator.numericValue !== null) {
       if (denominator.isOne) return numerator;
       if (denominator.isNegativeOne) return this.engine.negate(numerator);
     }

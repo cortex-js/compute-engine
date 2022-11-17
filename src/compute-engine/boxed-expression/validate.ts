@@ -40,6 +40,8 @@ export function validateNumericArgs(
   ops: SemiBoxedExpression[],
   count?: number
 ): BoxedExpression[] {
+  // @fastpath
+  if (!ce.strict) return ops.map((x) => ce.box(x));
   let xs: BoxedExpression[] = [];
 
   if (count === undefined) {
@@ -72,6 +74,10 @@ export function validateSignature(
   codomain?: BoxedExpression
 ): BoxedExpression[] | null {
   const ce = sig.engine;
+
+  // @fastpath
+  if (!ce.strict) return ops;
+
   const opsDomain = ops.map((x) => x.domain);
 
   const targetSig = ce.domain([

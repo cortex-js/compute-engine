@@ -22,7 +22,7 @@ function subtract(
   b: BoxedExpression,
   metadata?: Metadata
 ): Expression | null {
-  if (a.isLiteral) {
+  if (a.numericValue !== null) {
     if (isRational(a.numericValue)) {
       if (machineNumerator(a.numericValue) < 0) {
         return serializeJsonFunction(
@@ -80,7 +80,7 @@ export function serializeJsonCanonicalFunction(
   }
 
   if (head === 'Multiply' && !exclusions.includes('Negate')) {
-    if (args[0]?.isLiteral && asFloat(args[0]) === -1)
+    if (asFloat(args[0]) === -1)
       return serializeJsonFunction(
         ce,
         'Negate',
@@ -103,7 +103,7 @@ export function serializeJsonCanonicalFunction(
     if (!exclusions.includes('Exp') && args[0]?.symbol === 'ExponentialE')
       return serializeJsonFunction(ce, 'Exp', [args[1]], metadata);
 
-    if (args[1]?.isLiteral) {
+    if (args[1]?.numericValue !== null) {
       const exp = asSmallInteger(args[1]);
       if (exp === 2 && !exclusions.includes('Square'))
         return serializeJsonFunction(ce, 'Square', [args[0]], metadata);
@@ -218,7 +218,7 @@ export function serializeJsonFunction(
         metadata
       );
 
-    if (head === 'Root' && args.length === 2 && args[1].isLiteral) {
+    if (head === 'Root' && args.length === 2 && args[1].numericValue !== null) {
       const n = asSmallInteger(args[1]);
       if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]]);
 
@@ -270,7 +270,7 @@ export function serializeJsonFunction(
   }
 
   if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
-    if (args[1].isLiteral) {
+    if (args[1].numericValue !== null) {
       const t1 = asSmallInteger(args[1]);
       if (t1 !== null && t1 < 0)
         return serializeJsonFunction(

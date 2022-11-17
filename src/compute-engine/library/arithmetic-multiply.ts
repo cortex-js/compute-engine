@@ -70,12 +70,31 @@ export function simplifyMultiply(
   return product.asExpression();
 }
 
+function fastEvalMultiply(ops: BoxedExpression[]): number | null {
+  let prod = 1;
+  for (const op of ops) {
+    if (typeof op.numericValue !== 'number') return null;
+    prod *= op.numericValue;
+  }
+  return prod;
+}
+
 export function evalMultiply(
   ce: IComputeEngine,
   ops: BoxedExpression[],
   mode: 'N' | 'evaluate' = 'evaluate'
 ): BoxedExpression | undefined {
   console.assert(ops.length > 1, 'evalMultiply(): no arguments');
+
+  //
+  // @fastpath
+  //
+  if (mode === 'N' && ce.numericMode === 'machine') {
+    ops = ops.map((x) => x.N());
+    const result = fastEvalMultiply(ops);
+    if (result !== null) return ce.number(result);
+    return new Product(ce, ops).asExpression('N');
+  }
 
   //
   // First pass: looking for early exits
@@ -111,10 +130,14 @@ function multiply2(
 ): BoxedExpression {
   console.assert(op1.isCanonical);
   console.assert(op2.isCanonical);
-
   const ce = op1.engine;
 
-  if (op1.isLiteral && op2.isLiteral && op1.isInteger && op2.isInteger) {
+  if (
+    op1.numericValue !== null &&
+    op2.numericValue !== null &&
+    op1.isInteger &&
+    op2.isInteger
+  ) {
     return (
       apply2N(
         op1,
@@ -127,18 +150,16 @@ function multiply2(
 
   if (op1.isNothing) return op2;
   if (op2.isNothing) return op1;
-  if (op1.isLiteral && op1.isOne) return op2;
-  if (op2.isLiteral && op2.isOne) return op1;
-  if (op1.isLiteral && op1.isNegativeOne) return canonicalNegate(op2);
-  if (op2.isLiteral && op2.isNegativeOne) return canonicalNegate(op1);
-
-  let sign = 1;
-  let c = op1;
-  let t = op2;
-  if (!c.isLiteral) {
-    t = op2;
-    c = op1;
+  if (op1.numericValue !== null) {
+    if (op1.isOne) return op2;
+    if (op1.isNegativeOne) return canonicalNegate(op2);
   }
+  if (op2.numericValue !== null) {
+    if (op2.isOne) return op1;
+    if (op2.isNegativeOne) return canonicalNegate(op1);
+  }
+  let sign = 1;
+  let [t, c] = op1.numericValue !== null ? [op1, op2] : [op2, op1];
 
   console.assert(t.head !== 'Subtract');
   if (t.head === 'Negate') {
@@ -146,7 +167,7 @@ function multiply2(
     sign = -sign;
   }
 
-  if (c.isLiteral) {
+  if (c.numericValue !== null) {
     const r = asRational(c);
     if (r) {
       if (isRationalOne(r)) return t;
@@ -159,12 +180,10 @@ function multiply2(
         );
       }
 
-      if (t.isLiteral) {
-        const tr = asRational(t);
-        if (tr) {
-          const p = mul(r, tr);
-          return ce.number(sign < 0 ? neg(p) : p, { metadata });
-        }
+      const tr = asRational(t);
+      if (tr) {
+        const p = mul(r, tr);
+        return ce.number(sign < 0 ? neg(p) : p, { metadata });
       }
       if (sign < 0)
         return ce._fn('Multiply', [canonicalNegate(c), t], metadata);
@@ -271,7 +290,7 @@ export function evalMultiplication(
     const n = ce.number(i);
     const r = fn.subs({ _1: n, _: n });
     const term = r.N();
-    if (!term.isLiteral) return undefined;
+    if (term.numericValue === null) return undefined;
     product = mul(product, term);
   }
 

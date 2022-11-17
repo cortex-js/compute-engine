@@ -34,7 +34,7 @@ export function canonicalAdd(
   ops = flattenOps(flattenSequence(ops.map((x) => x.canonical)), 'Add') ?? ops;
 
   // Remove literal 0
-  ops = ops.filter((x) => !(x.isLiteral && x.isZero));
+  ops = ops.filter((x) => x.numericValue === null || !x.isZero);
 
   if (ops.length === 0) return ce.number(0);
   if (ops.length === 1) return ops[0];
@@ -89,11 +89,28 @@ export function simplifyAdd(
   return sum.asExpression('expression');
 }
 
+function evalAddNum(ops: BoxedExpression[]): number | null {
+  let sum = 0;
+  for (const op of ops) {
+    const v = op.numericValue;
+    if (typeof v === 'number') sum += v;
+    else return null;
+  }
+  return sum;
+}
+
 export function evalAdd(
   ce: IComputeEngine,
   ops: BoxedExpression[],
   mode: 'N' | 'evaluate' = 'evaluate'
 ): BoxedExpression {
+  // @fastpath
+  if (mode === 'N' && ce.numericMode === 'machine') {
+    ops = ops.map((x) => x.N());
+    const sum = evalAddNum(ops);
+    if (sum !== null) return ce.number(sum);
+  }
+
   //
   // First pass: looking for early exits
   //
@@ -106,7 +123,6 @@ export function evalAdd(
   console.assert(flattenOps(ops, 'Add') === null);
 
   if (mode === 'N') ops = ops.map((x) => x.N());
-
   return new Sum(ce, ops).asExpression(mode === 'N' ? 'numeric' : 'expression');
 }
 
@@ -221,14 +237,14 @@ export function evalSummation(
   if (!fn.scope)
     for (let i = lower; i <= upper; i++) {
       const term = fn.N();
-      if (!term.isLiteral) return undefined;
+      if (term.numericValue === null) return undefined;
       sum = add(sum, term);
     }
   else
     for (let i = lower; i <= upper; i++) {
       ce.set({ [index]: i });
       const term = fn.N();
-      if (!term.isLiteral) {
+      if (term.numericValue === null) {
         ce.context = savedContext;
         return undefined;
       }

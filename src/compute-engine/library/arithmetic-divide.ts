@@ -30,7 +30,7 @@ export function canonicalDivide(
 
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
-  if (op1.isLiteral && op2.isLiteral) {
+  if (op1.numericValue !== null && op2.numericValue !== null) {
     if (op2.isOne) return op1;
     if (op2.isNegativeOne) return canonicalNegate(op1);
     if (op1.isOne) return ce.inverse(op2);
@@ -50,25 +50,25 @@ export function canonicalDivide(
       ce.mul([op1.op2, op2.op1])
     );
   }
-  if (op1.isLiteral) {
-    const r = op1.numericValue;
-    if (isMachineRational(r)) {
-      const [a, b] = r;
+  const num1 = op1.numericValue;
+  if (num1 !== null) {
+    if (isMachineRational(num1)) {
+      const [a, b] = num1;
       return canonicalDivide(ce, ce.mul([ce.number(a), op2]), ce.number(b));
     }
-    if (isBigRational(r)) {
-      const [a, b] = r;
+    if (isBigRational(num1)) {
+      const [a, b] = num1;
       return canonicalDivide(ce, ce.mul([ce.number(a), op2]), ce.number(b));
     }
   }
-  if (op2.isLiteral) {
-    const r = op2.numericValue;
-    if (isMachineRational(r)) {
-      const [a, b] = r;
+  const num2 = op2.numericValue;
+  if (num2 !== null) {
+    if (isMachineRational(num2)) {
+      const [a, b] = num2;
       return canonicalDivide(ce, ce.mul([op1, ce.number(b)]), ce.number(a));
     }
-    if (isBigRational(r)) {
-      const [a, b] = r;
+    if (isBigRational(num2)) {
+      const [a, b] = num2;
       return canonicalDivide(ce, ce.mul([op1, ce.number(b)]), ce.number(a));
     }
   }
@@ -85,11 +85,12 @@ export function canonicalDivide(
   n = n.canonical;
   d = d.canonical;
 
-  if (d.isLiteral && d.isOne) return nSign * dSign < 0 ? canonicalNegate(n) : n;
+  if (d.numericValue !== null && d.isOne)
+    return nSign * dSign < 0 ? canonicalNegate(n) : n;
 
   // Divide: transform into multiply/power
   d = ce.inverse(d);
-  if (n.isLiteral) {
+  if (n.numericValue !== null) {
     if (n.isOne) return d;
     if (n.isNegativeOne) return canonicalNegate(d);
   }
@@ -106,7 +107,7 @@ export function simplifyDivide(
   op1: BoxedExpression,
   op2: BoxedExpression
 ): BoxedExpression | undefined {
-  if (op1.isLiteral && op2.isLiteral) {
+  if (op1.numericValue !== null && op2.numericValue !== null) {
     const r1 = asRational(op1);
     const r2 = asRational(op2);
     if (r1 && r2 && !isRationalZero(r2)) return ce.number(mul(r1, inverse(r2)));

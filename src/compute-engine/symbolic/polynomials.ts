@@ -146,7 +146,7 @@ function getDegree(expr: BoxedExpression | undefined): number {
  * `3√2x^5y^3` -> 8 (5 + 3)
  */
 export function totalDegree(expr: BoxedExpression): number {
-  if (expr.head === 'Power' && expr.op2.isLiteral) {
+  if (expr.head === 'Power' && expr.op2.numericValue !== null) {
     const deg = asSmallInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
     return 1;
@@ -172,7 +172,7 @@ export function totalDegree(expr: BoxedExpression): number {
  *
  */
 export function maxDegree(expr: BoxedExpression): number {
-  if (expr.head === 'Power' && expr.op2.isLiteral) {
+  if (expr.head === 'Power' && expr.op2.numericValue !== null) {
     const deg = asSmallInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
     return 1;

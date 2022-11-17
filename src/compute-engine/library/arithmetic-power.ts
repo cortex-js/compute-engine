@@ -40,11 +40,11 @@ export function canonicalPower(
 
   if (exponent.symbol === 'ComplexInfinity') return ce._NAN;
 
-  if (exponent.isLiteral) {
+  if (exponent.numericValue !== null) {
     if (exponent.isZero) return ce._ONE;
 
-    if (base.isLiteral) {
-      const smallBase = asFloat(base);
+    if (base.numericValue !== null) {
+      const numBase = asFloat(base);
 
       //
       // Special cases
@@ -53,9 +53,9 @@ export function canonicalPower(
       // See https://docs.sympy.org/1.6/modules/core.html#pow
       //
       // if (base.isOne) return ce._ONE;
-      if (smallBase === 1) return ce._ONE;
+      if (numBase === 1) return ce._ONE;
       // if (base.isZero) {
-      if (smallBase === 0) {
+      if (numBase === 0) {
         if (exponent.isPositive) return ce._ZERO;
         if (exponent.isNegative) return ce._COMPLEX_INFINITY; //  Unsigned Infinity...
       }
@@ -67,18 +67,16 @@ export function canonicalPower(
 
         // if (base.isOne) return ce._ONE;
         // if (base.isNegativeOne) return ce._NEGATIVE_ONE;
-        if (smallBase === 1) return ce._ONE;
-        if (smallBase === -1) return ce._NEGATIVE_ONE;
+        if (numBase === 1) return ce._ONE;
+        if (numBase === -1) return ce._NEGATIVE_ONE;
         if (base.isInfinity) return ce._ZERO;
 
         const r = base.numericValue;
-        if (r !== null) {
-          if (typeof r === 'number' && Number.isInteger(r))
-            return ce.number([1, r], { metadata });
-          if (r instanceof Decimal && r.isInteger())
-            return ce.number([ce._BIGNUM_ONE, r], { metadata });
-          if (isRational(r)) return ce.number(inverse(r), { metadata });
-        }
+        if (typeof r === 'number' && Number.isInteger(r))
+          return ce.number([1, r], { metadata });
+        if (r instanceof Decimal && r.isInteger())
+          return ce.number([ce._BIGNUM_ONE, r], { metadata });
+        if (isRational(r)) return ce.number(inverse(r), { metadata });
         return ce._fn('Power', [base, ce._NEGATIVE_ONE], metadata);
       }
 
@@ -281,6 +279,15 @@ export function processPower(
   exponent: BoxedExpression,
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
+  // @fastpath
+  if (
+    mode === 'N' &&
+    ce.numericMode === 'machine' &&
+    typeof base.numericValue === 'number' &&
+    typeof exponent.numericValue === 'number'
+  )
+    return ce.number(Math.pow(base.numericValue, exponent.numericValue));
+
   if (base.head === 'Multiply') {
     let c: Rational = bignumPreferred(ce)
       ? [ce._BIGNUM_ONE, ce._BIGNUM_ONE]
@@ -331,7 +338,7 @@ export function processPower(
   // If square root or cube root, attempt to factor out the perfect
   // factors: sqrt(75) -> 5^2 * 3
   //
-  if (mode !== 'N' && base.isLiteral && base.isInteger) {
+  if (mode !== 'N' && base.numericValue !== null && base.isInteger) {
     const smallExpr = asSmallInteger(exponent);
     if (smallExpr) return numEvalPower(ce, base, exponent);
 
@@ -369,7 +376,8 @@ export function processPower(
             ]);
           }
         } else if (typeof base.numericValue === 'number') {
-          if (d % 2 === 0 && base.numericValue < 0 && !complexAllowed(ce))
+          // Square root of a negative number, and no complex allowed
+          if (base.numericValue < 0 && d % 2 === 0 && !complexAllowed(ce))
             return ce._NAN;
 
           const [factor, root] = factorPower(Math.abs(base.numericValue), d);
@@ -404,7 +412,11 @@ export function processPower(
     }
   }
 
-  if (mode !== 'simplify' && base.isLiteral && exponent.isLiteral)
+  if (
+    mode !== 'simplify' &&
+    base.numericValue !== null &&
+    exponent.numericValue !== null
+  )
     return numEvalPower(ce, base, exponent);
 
   return undefined;

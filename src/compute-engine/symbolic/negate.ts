@@ -16,9 +16,9 @@ function negateLiteral(
   if (n === null) return null;
 
   if (typeof n === 'number') n = -n;
-  if (n instanceof Decimal) n = n.neg();
-  if (n instanceof Complex) n = n.neg();
-  if (Array.isArray(n)) n = neg(n);
+  else if (n instanceof Decimal) n = n.neg();
+  else if (n instanceof Complex) n = n.neg();
+  else if (Array.isArray(n)) n = neg(n);
 
   return expr.engine.number(n, { metadata });
 }
@@ -41,7 +41,7 @@ export function canonicalNegate(
     return validateArgument(expr.engine, expr.op1?.canonical, 'Number');
 
   expr = validateArgument(expr.engine, expr.canonical, 'Number');
-  if (expr.isLiteral) return negateLiteral(expr, metadata)!;
+  if (expr.numericValue !== null) return negateLiteral(expr, metadata)!;
 
   // Distribute over addition
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
@@ -69,8 +69,8 @@ export function canonicalNegate(
  * `canonical` chain.
  */
 function distributeNegate(expr: BoxedExpression): BoxedExpression {
+  if (expr.numericValue !== null) return negateLiteral(expr)!;
   if (expr.head === 'Negate') return expr.op1;
-  if (expr.isLiteral) return negateLiteral(expr)!;
 
   const ce = expr.engine;
 
@@ -119,7 +119,7 @@ function negateProduct(
   // else If there is a literal integer, negate it
   result = [];
   for (const arg of args) {
-    if (done || !arg.isLiteral || !arg.isInteger) result.push(arg);
+    if (done || arg.numericValue === null || !arg.isInteger) result.push(arg);
     else {
       done = true;
       result.push(distributeNegate(arg));
@@ -131,7 +131,7 @@ function negateProduct(
   // else If there is a literal number, negate it
   result = [];
   for (const arg of args) {
-    if (done || !arg.isLiteral || !arg.isNumber) result.push(arg);
+    if (done || arg.numericValue === null || !arg.isNumber) result.push(arg);
     else {
       done = true;
       result.push(distributeNegate(arg));

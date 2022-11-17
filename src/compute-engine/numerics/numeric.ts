@@ -203,6 +203,7 @@ export function factorPower(
   n: number,
   exponent: number
 ): [factor: number, root: number] {
+  if (n >= Number.MAX_SAFE_INTEGER) return [1, n];
   // @todo: handle negative n
   console.assert(Number.isInteger(n) && n > 0 && n < Number.MAX_SAFE_INTEGER);
   const factors = primeFactors(n);

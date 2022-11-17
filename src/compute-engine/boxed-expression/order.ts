@@ -80,9 +80,9 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   //  1/ Literal numeric values
   //
   const af = asFloat(a);
-  if (a.isLiteral && af !== null) {
+  if (af !== null) {
     const bf = asFloat(b);
-    if (b.isLiteral && bf !== null) return af - bf;
+    if (bf !== null) return af - bf;
 
     return -1;
   }
@@ -90,8 +90,8 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   //
   // 2/ Complex numbers
   //
-  if (a.isLiteral && a.numericValue instanceof Complex) {
-    if (b.isLiteral && b.numericValue instanceof Complex) {
+  if (a.numericValue instanceof Complex) {
+    if (b.numericValue instanceof Complex) {
       if (a.numericValue.re === b.numericValue.re) {
         if (Math.abs(a.numericValue.im) === Math.abs(b.numericValue.im)) {
           return a.numericValue.im - b.numericValue.im;
@@ -100,7 +100,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
       }
       return a.numericValue.re - b.numericValue.re;
     }
-    if (b.isLiteral && b.isNumber) return +1;
+    if (b.numericValue !== null) return +1;
     return -1;
   }
 
@@ -112,7 +112,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
       if (a.symbol === b.symbol) return 0;
       return a.symbol > b.symbol ? 1 : -1;
     }
-    if (b.isLiteral && b.isNumber) return +1;
+    if (b.numericValue !== null) return +1;
     return -1;
   }
 
@@ -144,7 +144,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
       }
       return aComplexity - bComplexity;
     }
-    if ((b.isLiteral && b.isNumber) || b.symbol) return +1;
+    if (b.numericValue !== null || b.symbol) return +1;
     return -1;
   }
 

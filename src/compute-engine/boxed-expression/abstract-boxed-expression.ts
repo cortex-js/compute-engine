@@ -338,10 +338,6 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get isLiteral(): boolean {
-    return false;
-  }
-
   get wikidata(): string | undefined {
     return this._wikidata;
   }

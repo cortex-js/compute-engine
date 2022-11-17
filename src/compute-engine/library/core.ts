@@ -400,8 +400,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
             // Is it a string in a base form:
             // `"deadbeef"_{16}` `"0101010"_2?
             if (op1.string) {
-              if (op2.isLiteral && asSmallInteger(op2) !== null) {
-                const base = asSmallInteger(op2)!;
+              const base = asSmallInteger(op2);
+              if (base !== null) {
                 if (base > 1 && base <= 36) {
                   const [value, rest] = fromDigits(op1.string, base);
                   if (rest) {
@@ -422,9 +422,8 @@ export const CORE_LIBRARY: SymbolTable[] = [
                 return ce._fn('At', [op1, op2.canonical]);
 
               // Maybe a compound symbol
-              let sub = op2.string ?? op2.symbol;
-              if (!sub && op2.isLiteral && asSmallInteger(op2) !== null)
-                sub = asSmallInteger(op2)!.toString();
+              const sub =
+                op2.string ?? op2.symbol ?? asSmallInteger(op2)?.toString();
 
               if (sub) return ce.symbol(op1.symbol + '_' + sub);
             }
@@ -449,10 +448,7 @@ export const CORE_LIBRARY: SymbolTable[] = [
             const arg = ops
               .map(
                 (x) =>
-                  x.symbol ??
-                  x.string ??
-                  (x.isLiteral ? asSmallInteger(x)?.toString() : null) ??
-                  ''
+                  x.symbol ?? x.string ?? asSmallInteger(x)?.toString() ?? ''
               )
               .join('');
 

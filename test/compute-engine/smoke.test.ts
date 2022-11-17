@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-globals */
 /**
  * This file contains a series of lightweight tests. More exhaustive tests
  * are included in the `./test/compute-engine` and
@@ -37,6 +38,66 @@ ce.assume('one', 1);
 
 ///
 
+// ce.numericMode = 'machine';
+// const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
+// const vars = { a: 2, b: 3, c: 4 };
+// const expr1 = expr.N();
+
+// const graph = this.board.create(
+//   'functiongraph',
+//   [
+
+// // run hundred times each render
+// const eval1 = (x: number): number =>
+//   expr1.subs(vars).subs({ x: x }).N().numericValue! as number;
+
+// let startTime = performance.now();
+// let y = 0;
+// for (let x = 0; x <= Math.PI; x += 0.01) y += eval1(x);
+
+// console.log(`Eval1: y = ${y} in ${performance.now() - startTime} milliseconds`);
+
+// // Factor out substitution of constants
+// const expr2 = expr.subs(vars);
+// const eval2 = (x: number): number =>
+//   expr2.subs({ x: x }).N().numericValue! as number;
+
+// startTime = performance.now();
+// y = 0;
+// for (let x = 0; x <= Math.PI; x += 0.01) y += eval2(x);
+
+// console.log(`Eval2: y = ${y} in ${performance.now() - startTime} milliseconds`);
+
+// // Use a scope
+// // Factor out substitution of constants
+// const expr3 = expr.subs(vars);
+
+// ce.strict = false;
+
+// ce.set({ x: 0 });
+// // Should return a symbol, not 0
+// const v = ce.symbol('x');
+
+// console.log(v.numericValue, v.isZero, v.isPrime, v.N().numericValue);
+// ce.set({ x: 5 });
+// console.log(v.numericValue, v.isZero, v.isPrime, v.N().numericValue);
+
+// y = 0;
+
+// startTime = performance.now();
+// for (let x = 0; x <= Math.PI; x += 0.01) {
+//   // Avoid setting props, flags
+//   // Q: when are props/flags used? If the symbol does not have a value?
+//   ce.set({ x: x });
+//   y += expr3.N().numericValue! as number;
+// }
+
+// console.log(`Eval3: y = ${y} in ${performance.now() - startTime} milliseconds`);
+
+// debugger;
+
+// ---
+
 console.log(ce.parse('f\\left(\\right)').toString());
 
 // Produces error -- mathlive #1707
@@ -46,9 +107,9 @@ console.log(ce.parse("f'").json);
 const n1 = ce.parse('x_{1,2}');
 console.log(n1.toString());
 
-const expr = ce.parse('x^2').json;
+const expr200 = ce.parse('x^2').json;
 console.log(
-  ce.box(['Integrate', expr, ['Element', 'x', ['Interval', 0, 1]]]).latex
+  ce.box(['Integrate', expr200, ['Element', 'x', ['Interval', 0, 1]]]).latex
 );
 
 // console.log(engine.pattern(['Add', 1, '_']).match(engine.box(['Add', 1, 2])));
@@ -457,7 +518,7 @@ describe('SERIALIZING Negative factors', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () => {
     expect(
       engine.parse('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}').latex
-    ).toMatchInlineSnapshot(`-\\frac{1}{5}(6xy)`);
+    ).toMatchInlineSnapshot(`\\frac{1}{5}(-6xy)`);
   });
 });
 
@@ -534,16 +595,14 @@ describe('CANONICALIZATION multiply', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () =>
     expect(
       canonicalToJson('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}')
-    ).toMatchInlineSnapshot(
-      `["Negate", ["Multiply", ["Rational", 6, 5], "x", "y"]]`
-    ));
+    ).toMatchInlineSnapshot(`["Multiply", ["Rational", -6, 5], "x", "y"]`));
 
   test(`'1\\times x\\times 2\\times -5.23 \\times 3.2 \\times \\frac23\\times \\frac1x  // Commutative order'`, () => {
     expect(
       canonicalToJson(
         '1\\times x\\times 2\\times -5.23 \\times 3.2 \\times \\frac23\\times \\frac1x'
       )
-    ).toMatchInlineSnapshot(`["Multiply", -16.736, ["Rational", 4, 3]]`);
+    ).toMatchInlineSnapshot(`["Multiply", ["Rational", -4, 3], 16.736]`);
   });
 });
 describe('CANONICALIZATION divide', () => {
@@ -569,7 +628,9 @@ describe('CANONICALIZATION sqrt', () => {
   test('\\sqrt{3^2}', () => {
     expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`);
     // Canonical of Sqrt should not transform to Power
-    expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(`["Sqrt", 12]`);
+    expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(
+      `["Multiply", 2, ["Sqrt", 3]]`
+    );
   });
   test(`\\sqrt[3]{x}`, () =>
     expect(canonicalToJson('\\sqrt[3]{x}')).toMatchObject(['Root', 'x', 3]));

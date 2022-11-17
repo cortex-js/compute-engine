@@ -183,10 +183,6 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return this._name === 'Nothing';
   }
 
-  get isLiteral(): boolean {
-    return false;
-  }
-
   //  A base definition is the base class of both symbol and function definition
   get baseDefinition(): BoxedBaseDefinition | undefined {
     if (this._def === null) this.bind(this._scope);
@@ -622,7 +618,7 @@ export function makeCanonicalSymbol(
 ): BoxedExpression {
   const def = ce.lookupSymbol(name, undefined, ce.context!);
   if (def) {
-    if (def.hold === false && def.value) return ce.box(def.value);
+    if (def.hold === false && def.value) return def.value;
   }
   return new BoxedSymbol(ce, name, { canonical: true });
 }

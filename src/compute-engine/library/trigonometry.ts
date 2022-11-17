@@ -65,7 +65,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolTable[] = [
             ops = validateArgumentCount(ce, flattenSequence(ops), 1);
             if (ops.length !== 1) return ce.box(['Degrees', ops]);
             const arg = validateArgument(ce, ops[0].canonical, 'Number');
-            if (!arg.isValid || !arg.isLiteral) return ce.box(['Degrees', arg]);
+            if (arg.numericValue === null || !arg.isValid)
+              return ce.box(['Degrees', arg]);
             return ce.mul([arg, ce.box(['Divide', 'Pi', 180])]);
           },
           evaluate: (ce, ops) =>
@@ -735,7 +736,7 @@ function constructibleValues(
     }
   );
   x = x.N();
-  if (!x.isLiteral) return undefined;
+  if (x.numericValue === null) return undefined;
   let theta = asFloat(x) ?? null;
   if (theta === null) return undefined;
   theta = theta % (2 * Math.PI);

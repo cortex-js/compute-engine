@@ -344,7 +344,7 @@ export function boxFunction(
         if (key.isValid && !key.isNothing) {
           const value = arg.op2;
           let k = key.symbol ?? key.string;
-          if (!k && key.isLiteral) {
+          if (!k && (key.numericValue !== null || key.string)) {
             const n =
               typeof key.numericValue === 'number'
                 ? key.numericValue

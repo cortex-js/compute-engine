@@ -37,9 +37,6 @@ export class BoxedString extends AbstractBoxedExpression {
   get isPure(): boolean {
     return true;
   }
-  get isLiteral(): boolean {
-    return true;
-  }
   get isCanonical(): boolean {
     return true;
   }

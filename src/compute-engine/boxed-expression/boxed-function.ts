@@ -23,7 +23,7 @@ import {
 } from '../public';
 import { findUnivariateRoots } from '../solve';
 import { asFloat } from '../numerics/numeric';
-import { signDiff } from '../numerics/rationals';
+import { isRational, signDiff } from '../numerics/rationals';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
 import { DEFAULT_COMPLEXITY, order } from './order';
@@ -164,10 +164,6 @@ export class BoxedFunction extends AbstractBoxedExpression {
 
   set isCanonical(val: boolean) {
     this._canonical = val ? this : undefined;
-  }
-
-  get isLiteral(): boolean {
-    return false;
   }
 
   get isPure(): boolean {
@@ -746,9 +742,9 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     // 1/ Use canonical form
     //
-    if (!this.isValid) return this;
-    if (!this.isCanonical) return this.canonical.N(options);
     if (this._numericValue) return this._numericValue;
+    if (this.engine.strict && !this.isValid) return this;
+    if (!this.isCanonical) return this.canonical.N(options);
 
     //
     // 2/ Evaluate the applicable operands
@@ -838,7 +834,7 @@ function makeNumericFunction(
   if (head === 'Square') return ce.power(ops[0], ce.number(2), metadata);
   if (head === 'Sqrt') {
     const op = ops[0].canonical;
-    if (op.isLiteral && op.isRational)
+    if (isRational(op.numericValue))
       return new BoxedFunction(ce, 'Sqrt', [op], { metadata, canonical: true });
 
     return ce.power(op, ce.number([1, 2]), metadata);

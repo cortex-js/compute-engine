@@ -88,7 +88,8 @@ export function asMachineRational(r: Rational): [number, number] {
  */
 export function add(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
   console.assert(
-    Array.isArray(rhs) || (rhs.isLiteral && !(rhs instanceof Complex))
+    Array.isArray(rhs) ||
+      (rhs.numericValue !== null && !(rhs instanceof Complex))
   );
 
   if (Array.isArray(rhs)) {
@@ -132,7 +133,8 @@ export function add(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
 
 export function mul(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
   console.assert(
-    Array.isArray(rhs) || (rhs.isLiteral && !(rhs instanceof Complex))
+    Array.isArray(rhs) ||
+      (rhs.numericValue !== null && !(rhs instanceof Complex))
   );
 
   if (Array.isArray(rhs)) {
@@ -324,7 +326,7 @@ export function asCoefficient(
   //
   if (expr.head === 'Power') {
     // We can only extract a coef if the exponent is a literal
-    if (!expr.op2.isLiteral) return [[1, 1], expr];
+    if (expr.op2.numericValue === null) return [[1, 1], expr];
 
     // eslint-disable-next-line prefer-const
     let [coef, base] = asCoefficient(expr.op1);
@@ -409,7 +411,11 @@ export function signDiff(
 
   const lhsN = lhs.N();
   const rhsN = rhs.N();
-  if (!lhsN.isLiteral || !rhsN.isLiteral) {
+
+  const lhsNum = lhsN.numericValue;
+  const rhsNum = rhsN.numericValue;
+
+  if (lhsNum === null || rhsNum === null) {
     // Couldn't calculate a numeric value, use the `sgn`
     const lhsS = lhs.sgn;
     const rhsS = rhs.sgn;
@@ -421,9 +427,6 @@ export function signDiff(
   }
 
   tolerance ??= lhs.engine.tolerance;
-
-  const lhsNum = lhsN.numericValue;
-  const rhsNum = rhsN.numericValue;
 
   if (lhsNum instanceof Complex && rhsNum instanceof Complex)
     return chop(lhsNum.re - rhsNum.re, tolerance) === 0 &&

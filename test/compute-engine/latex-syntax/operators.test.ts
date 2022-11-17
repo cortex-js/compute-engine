@@ -267,14 +267,12 @@ describe('OPERATOR multiply', () => {
   test('2\\times-x', () =>
     expect(check('2\\times-x')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, ["Negate", "x"]]
-      box       = ["Multiply", -2, "x"]
-      simplify  = ["Negate", ["Multiply", 2, "x"]]
-      N-auto    = ["Multiply", -2, "x"]
+      ["Multiply", -2, "x"]
     `));
   test('2(x+1)', () =>
     expect(check('2(x+1)')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, ["Delimiter", ["Add", "x", 1]]]
-      ["Add", 2, ["Multiply", 2, "x"]]
+      ["Multiply", 2, ["Add", 1, "x"]]
     `));
   test('2\\pi', () =>
     expect(check('2\\pi')).toMatchInlineSnapshot(`

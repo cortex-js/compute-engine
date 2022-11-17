@@ -595,17 +595,6 @@ export interface BoxedExpression {
   readonly isValid: boolean;
 
   /**
-   * If `true`, this expression represents a value that was not calculated
-   * and that does not reference another expression.
-   *
-   * This means the expression is either a number, a string or a dictionary.
-   * Functions and symbols are not literals.
-   *
-   * **Note** applicable to canonical and non-canonical expressions.
-   */
-  readonly isLiteral: boolean;
-
-  /**
    * An exact value is not further transformed when evaluated. To get an
    * approximate evaluation of an exact value, use `.N()`.
    *
@@ -1910,7 +1899,7 @@ export interface BoxedSymbolDefinition
     Partial<SymbolFlags>,
     SymbolDefinitionFlags {
   get value(): BoxedExpression | undefined;
-  set value(val: BoxedExpression | undefined);
+  set value(val: SemiBoxedExpression | number | undefined);
 
   domain: BoxedDomain | undefined;
 
@@ -2008,6 +1997,15 @@ export interface IComputeEngine {
   get precision(): number;
 
   costFunction: (expr: BoxedExpression) => number;
+
+  /** In strict mode (the default) the Compute Engine performs
+   * validation of domains and signature and may report errors.
+   *
+   * When strict mode is off, results may be incorrect or generate JavaScript
+   * errors if the input is not valid.
+   *
+   */
+  strict: boolean;
 
   /**
    * Associate a new definition to a symbol in the current context.

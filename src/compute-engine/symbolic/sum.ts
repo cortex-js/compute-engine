@@ -87,7 +87,7 @@ export class Sum {
     if (this._isCanonical) {
       if (term.isNothing) return;
 
-      if (term.isLiteral) {
+      if (term.numericValue !== null) {
         if (term.isInfinity) {
           if (term.isPositive) this._posInfinityCount += 1;
           else this._negInfinityCount += 1;
@@ -159,14 +159,14 @@ export class Sum {
     }
 
     let hasTerm = false;
-    if (!term.isLiteral) {
+    if (term.numericValue === null) {
       // There's an overhead to calculate the hash.
       // For best results, only use the hash if there are many terms
       if (this._terms.length > 500) {
         const h = term.hash;
         for (let i = 0; i < this._terms.length; i++) {
           if (
-            !this._terms[i].term.isLiteral &&
+            this._terms[i].term.numericValue === null &&
             h === this._terms[i].term.hash &&
             term.isSame(this._terms[i].term)
           ) {
@@ -178,7 +178,7 @@ export class Sum {
       } else {
         for (let i = 0; i < this._terms.length; i++) {
           if (
-            !this._terms[i].term.isLiteral &&
+            this._terms[i].term.numericValue === null &&
             term.isSame(this._terms[i].term)
           ) {
             this._terms[i].coef = add(this._terms[i].coef, coef);

@@ -265,6 +265,8 @@ export class ComputeEngine implements IComputeEngine {
    */
   context: RuntimeScope | null;
 
+  strict: boolean;
+
   /** Absolute time beyond which evaluation should not proceed.
    * @internal
    */
@@ -321,6 +323,8 @@ export class ComputeEngine implements IComputeEngine {
   }) {
     if (options !== undefined && typeof options !== 'object')
       throw Error('Unexpected argument');
+
+    this.strict = true;
 
     this._latexDictionary = options?.latexDictionary;
 
@@ -757,6 +761,16 @@ export class ComputeEngine implements IComputeEngine {
     wikidata?: string,
     scope?: RuntimeScope
   ): undefined | BoxedSymbolDefinition {
+    // @fastpath
+    if (!this.strict) {
+      scope ??= this.context ?? undefined;
+      let def: undefined | BoxedSymbolDefinition = undefined;
+      while (scope && !def) {
+        def = scope.symbolTable?.symbols.get(symbol);
+        scope = scope.parentScope;
+      }
+      return def;
+    }
     if (typeof symbol !== 'string') throw Error('Expected a string');
 
     // Wildcards never have definitions
@@ -953,6 +967,23 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   set(identifiers: { [identifier: string]: SemiBoxedExpression }): void {
+    // @fastpath
+    if (!this.strict) {
+      for (const k of Object.keys(identifiers)) {
+        if (k !== 'Nothing') {
+          const def = this.lookupSymbol(k);
+          if (def) def.value = identifiers[k];
+          else {
+            const val = this.box(identifiers[k]);
+            if (val.domain.isNumeric)
+              this.defineSymbol({ name: k, value: val, domain: 'Number' });
+            else this.defineSymbol({ name: k, value: val });
+          }
+        }
+      }
+      return;
+    }
+
     for (const k of Object.keys(identifiers)) {
       if (k !== 'Nothing') {
         const def = this.lookupSymbol(k);
@@ -1325,7 +1356,7 @@ export class ComputeEngine implements IComputeEngine {
     // `Half` is a synonym for the rational 1/2
     if (name === 'Half') return this._HALF;
 
-    if (!isValidIdentifier(name)) {
+    if (this.strict && !isValidIdentifier(name)) {
       const where = options?.metadata?.latex;
       const nameStr = `'${name}'`;
       if (where)

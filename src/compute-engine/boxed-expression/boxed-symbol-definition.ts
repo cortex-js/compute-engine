@@ -260,9 +260,6 @@ function valueToFlags(value: BoxedExpression): Partial<SymbolFlags> {
 
     even: value.isEven,
     odd: value.isOdd,
-
-    prime: value.isPrime,
-    composite: value.isComposite,
   }) as Partial<SymbolFlags>;
 }
 
@@ -272,7 +269,6 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
   private _def: SymbolDefinition;
   private _value: BoxedExpression | undefined | null;
   private _domain: BoxedDomain | undefined | null;
-  private _inferedDomain: [BoxedDomain, BoxedDomain] | undefined;
 
   private _engine: IComputeEngine;
   readonly scope: RuntimeScope | undefined;
@@ -442,16 +438,46 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     return this._value ?? undefined;
   }
 
-  set value(val: BoxedExpression | number | undefined) {
+  set value(val: SemiBoxedExpression | number | undefined) {
     // Need to bind first to check, e.g. `this.constant`
     if (this._value === null) this.bind();
     if (this.constant)
       throw new Error(
         `The value of the constant "${this.name}" cannot be changed`
       );
-    if (typeof val === 'number') val = this._engine.box(val);
-    this._value = val ?? null;
-    if (val) this.setProps(valueToFlags(val));
+    if (typeof val === 'number') {
+      val = this._engine.number(val);
+      this._value = val;
+      // this.setProps(valueToFlags(val));
+      this._number = undefined;
+      this._integer = undefined;
+      this._rational = undefined;
+      this._algebraic = undefined;
+      this._real = undefined;
+      this._extendedReal = undefined;
+      this._complex = undefined;
+      this._extendedComplex = undefined;
+      this._imaginary = undefined;
+      this._positive = undefined;
+      this._nonPositive = undefined;
+      this._negative = undefined;
+      this._nonNegative = undefined;
+      this._zero = undefined;
+      this._notZero = undefined;
+      this._one = undefined;
+      this._negativeOne = undefined;
+      this._infinity = undefined;
+      this._finite = undefined;
+      this._NaN = undefined;
+      this._even = undefined;
+      this._odd = undefined;
+      this._prime = undefined;
+      this._composite = undefined;
+    } else if (val) {
+      val = this._engine.box(val);
+      this._value = val;
+      if (val) this.setProps(valueToFlags(val));
+    } else this._value = null;
   }
 
   get domain(): BoxedDomain | undefined {
