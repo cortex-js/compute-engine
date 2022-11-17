@@ -93,8 +93,6 @@ export class BoxedSymbol extends AbstractBoxedExpression {
       !name.startsWith('_') && options?.canonical ? ce.context : null;
 
     this._def = null; // Mark the def as not cached
-
-    ce._register(this);
   }
 
   get hash(): number {
@@ -200,8 +198,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   bind(scope: RuntimeScope | null): void {
-    // Symbols that start with `_` are wildcards and never have a definition
-    if (this._name[0] === '_' || scope === null) {
+    if (scope === null) {
       this._def = undefined;
       return;
     }
@@ -297,10 +294,12 @@ export class BoxedSymbol extends AbstractBoxedExpression {
       this._def.value = v;
     } else {
       // Create a new symbol definition
+      let dom = v?.domain;
+      if (dom?.isNumeric) dom = this.engine.domain('Number');
       this._def = this.engine.defineSymbol({
         name: this._name,
         value: v,
-        domain: this.engine.defaultDomain ?? this.engine.domain('Anything'),
+        domain: dom ?? undefined,
       });
     }
   }
@@ -355,7 +354,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   get sgn(): -1 | 0 | 1 | undefined | null {
     // If available, use the value associated with this symbol.
     // Note that `null` is an acceptable and valid value
-    const v = this.N();
+    const v = this.value;
     if (v && v !== this) {
       const s = v.sgn;
       if (s !== undefined) return s;
@@ -368,7 +367,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
       if (def.zero === true) return 0;
       if (def.positive === true) return 1;
       if (def.negative === true) return -1;
-    }
+    } else return null;
     return undefined;
   }
 
@@ -426,6 +425,10 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     // Idempotency
     if (rhs.symbol !== null && rhs.symbol === this._name) return false;
 
+    // Mathematical/numeric equality
+    const lhsVal = this.symbolDefinition?.value?.N();
+    if (lhsVal) return lhsVal.isLess(rhs.N());
+
     if (rhs.isZero) {
       const s = this.sgn;
       if (s === null) return false;
@@ -442,6 +445,10 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     // Idempotency
     if (rhs.symbol !== null && rhs.symbol === this._name) return true;
 
+    // Mathematical/numeric equality
+    const lhsVal = this.symbolDefinition?.value?.N();
+    if (lhsVal) return lhsVal.isLessEqual(rhs.N());
+
     if (rhs.isZero) {
       const s = this.sgn;
       if (s === null) return false;
@@ -455,6 +462,10 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   isGreater(rhs: BoxedExpression): boolean | undefined {
     // Idempotency
     if (rhs.symbol !== null && rhs.symbol === this._name) return false;
+
+    // Mathematical/numeric equality
+    const lhsVal = this.symbolDefinition?.value?.N();
+    if (lhsVal) return lhsVal.isGreater(rhs.N());
 
     if (rhs.isZero) {
       const s = this.sgn;
@@ -472,6 +483,10 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     // Idempotency
     if (rhs.symbol !== null && rhs.symbol === this._name) return true;
 
+    // Mathematical/numeric equality
+    const lhsVal = this.symbolDefinition?.value?.N();
+    if (lhsVal) return lhsVal.isGreaterEqual(rhs.N());
+
     if (rhs.isZero) {
       const s = this.sgn;
       if (s === null) return false;
@@ -487,15 +502,11 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   get isZero(): boolean | undefined {
-    return this.symbolDefinition?.zero ?? this.symbolDefinition?.value?.isZero;
+    return this.symbolDefinition?.zero;
   }
 
   get isNotZero(): boolean | undefined {
-    const result = this.symbolDefinition?.notZero;
-    if (typeof result === 'boolean') return result;
-    const s = this.sgn;
-    if (typeof s === 'number') return s !== 0;
-    return undefined;
+    return this.symbolDefinition?.notZero;
   }
 
   get isOne(): boolean | undefined {
@@ -571,10 +582,10 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     // however if a custom set of rules is provided, apply them
     const expr = options?.rules ? this.replace(options.rules) ?? this : this;
 
-    // If allowed (`hold` attribute in the symbol definition is false), replace
+    // If allowed (`hold` attribute in the symbol definition is false and `constant` is true), replace
     // this symbol with its value/definition. In some cases this may allow for
     // some additional simplifications (e.g. `GoldenRatio`).
-    if (expr.symbolDefinition?.hold === false) {
+    if (expr.symbolDefinition?.constant && !expr.symbolDefinition.hold) {
       const val = expr.value;
       if (val) return val.simplify(options);
     }
@@ -583,7 +594,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
   evaluate(_options?: EvaluateOptions): BoxedExpression {
     const def = this.symbolDefinition;
-    if (!def || def.hold || !def.value) return this;
+    if (!def || (def.constant && def.hold) || !def.value) return this;
 
     return def.value.evaluate();
   }
@@ -591,10 +602,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   N(options?: NOptions): BoxedExpression {
     // If we're doing a numeric evaluation, the `hold` does not apply,
     // so call the evaluate handler directly (if the `N` handler doesn't work)
-    const value = this.symbolDefinition?.value;
-    if (!value) return this;
-
-    return value.N(options);
+    return this.symbolDefinition?.value?.N(options) ?? this;
   }
 
   replace(
@@ -617,8 +625,6 @@ export function makeCanonicalSymbol(
   name: string
 ): BoxedExpression {
   const def = ce.lookupSymbol(name, undefined, ce.context!);
-  if (def) {
-    if (def.hold === false && def.value) return def.value;
-  }
+  if (def && def.constant && !def.hold && def.value) return def.value;
   return new BoxedSymbol(ce, name, { canonical: true });
 }

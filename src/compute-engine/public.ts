@@ -1296,7 +1296,6 @@ export interface ExpressionMapInterface<U> {
 export type SymbolTable = {
   symbols?: SymbolDefinition[];
   functions?: FunctionDefinition[];
-  simplifyRules?: BoxedRuleSet;
 };
 
 /**
@@ -1304,13 +1303,12 @@ export type SymbolTable = {
  * optimized for faster evaluation.
  *
  * When a new scope is created with `pushScope()` or when creating a new
- * engine instance, new instances of `RuntimeDictionary` are created as needed.
+ * engine instance, new instances of `RuntimeSymbolTable` are created
+ * as needed.
  */
 export type RuntimeSymbolTable = {
   symbols: Map<string, BoxedSymbolDefinition>;
-  symbolWikidata: Map<string, BoxedSymbolDefinition>;
   functions: Map<string, BoxedFunctionDefinition>;
-  functionWikidata: Map<string, BoxedFunctionDefinition>;
 };
 
 /**
@@ -1567,7 +1565,10 @@ export type FunctionSignature = {
    * arguments should be sorted in canonical order.
    *
    * The handler can make transformations based on the value of the arguments
-   * that are exact (i.e. `arg.isExact`).
+   * that are exact and literal
+   * (i.e. `arg.numericValue !== null && arg.isExact`).
+   *
+   * Values of symbols should not be substituted.
    *
    * The handler should not consider the value or any assumptions about any
    * of the arguments that are symbols or functions (i.e. `arg.isZero`,

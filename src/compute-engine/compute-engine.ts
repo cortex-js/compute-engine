@@ -773,23 +773,28 @@ export class ComputeEngine implements IComputeEngine {
     }
     if (typeof symbol !== 'string') throw Error('Expected a string');
 
-    // Wildcards never have definitions
-    if (symbol.length === 0 || symbol.startsWith('_') || !this.context)
-      return undefined;
+    if (symbol.length === 0 || !this.context) return undefined;
 
     let def: undefined | BoxedSymbolDefinition = undefined;
+    const rootScope = scope ?? this.context;
 
     // Try to find a match by wikidata
-    scope ??= this.context;
-    if (wikidata)
+    if (wikidata) {
+      scope = rootScope;
       while (scope && !def) {
-        def = scope.symbolTable?.symbolWikidata.get(wikidata);
+        if (scope.symbolTable?.symbols)
+          for (const [_, d] of scope.symbolTable.symbols) {
+            if (d.wikidata === wikidata) {
+              def = d;
+              break;
+            }
+          }
         scope = scope.parentScope;
       }
-
+    }
     // Match by name
-    if (symbol.length > 0) {
-      scope = this.context;
+    if (!def) {
+      scope = rootScope;
       while (scope && !def) {
         def = scope.symbolTable?.symbols.get(symbol);
         scope = scope.parentScope;
@@ -838,15 +843,11 @@ export class ComputeEngine implements IComputeEngine {
       this.context.symbolTable = {
         symbols: new Map<string, BoxedSymbolDefinition>(),
         functions: new Map<string, BoxedFunctionDefinition>(),
-        symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
-        functionWikidata: new Map<string, BoxedFunctionDefinition>(),
       };
     }
 
     if (boxedDef.name)
       this.context.symbolTable.symbols.set(boxedDef.name, boxedDef);
-    if (boxedDef.wikidata)
-      this.context.symbolTable.symbolWikidata.set(boxedDef.wikidata, boxedDef);
 
     return boxedDef;
   }
@@ -863,18 +864,11 @@ export class ComputeEngine implements IComputeEngine {
       this.context.symbolTable = {
         symbols: new Map<string, BoxedSymbolDefinition>(),
         functions: new Map<string, BoxedFunctionDefinition>(),
-        symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
-        functionWikidata: new Map<string, BoxedFunctionDefinition>(),
       };
     }
 
     if (boxedDef.name)
       this.context.symbolTable.functions.set(def.name, boxedDef);
-    if (boxedDef.wikidata)
-      this.context.symbolTable.functionWikidata.set(
-        boxedDef.wikidata,
-        boxedDef
-      );
 
     return boxedDef;
   }
@@ -1668,9 +1662,6 @@ export class ComputeEngine implements IComputeEngine {
         if (fdef) {
           // @todo...
         }
-
-        this.context.symbolTable.symbolWikidata.delete(symbol);
-        this.context.symbolTable.functionWikidata.delete(symbol);
       }
       // Remove any assumptions that make a reference to this symbol
       // (note that when a scope is created, any assumptions from the

@@ -7,7 +7,8 @@ describe('SETTING/FORGETTING', () => {
   test(`Forget with forget()`, () => {
     ce.set({ x1: 42 });
     // This probe the value of the symbol
-    expect(ce.box(`x1`).json).toMatchInlineSnapshot(`42`); // @fix me should 'x1'
+    expect(ce.box(`x1`).json).toMatchInlineSnapshot(`x1`);
+    expect(ce.symbol(`x1`).json).toMatchInlineSnapshot(`x1`);
     expect(ce.box(`x1`).evaluate().json).toMatchInlineSnapshot(`42`);
     // This probe the value of the symbol in an expression
     expect(ce.box(['Add', 'x1', 1]).evaluate().json).toMatchInlineSnapshot(
@@ -15,18 +16,17 @@ describe('SETTING/FORGETTING', () => {
     );
 
     const expr = ce.box(['Add', 'x1', -1]);
-    expect(expr.json).toMatchInlineSnapshot(`["Subtract", 42, 1]`); // @fix me, should have `x1`
+    expect(expr.json).toMatchInlineSnapshot(`["Subtract", "x1", 1]`);
     expect(expr.evaluate().json).toMatchInlineSnapshot(`41`);
 
     ce.forget('x1');
 
     // Expression should be symbolic 'x1'
+    expect(expr.json).toMatchInlineSnapshot(`["Subtract", "x1", 1]`);
     expect(expr.evaluate().json).toMatchInlineSnapshot(`41`); // @fixme
 
-    expect(ce.box(`x1`).domain).toMatchInlineSnapshot(
-      `["Domain", "PositiveInteger"]`
-    ); // @fixme, should be Number
-    expect(ce.box(`x1`).json).toMatchInlineSnapshot(`42`); // @fixme should be 'x1'
+    expect(ce.box(`x1`).domain).toMatchInlineSnapshot(`["Domain", "Number"]`); // @fixme, should be Number
+    expect(ce.box(`x1`).json).toMatchInlineSnapshot(`x1`); // @fixme should be 'x1'
     expect(ce.box(`x1`).evaluate().json).toMatchInlineSnapshot(`42`); // @fixme should be 'x1'
     expect(ce.box(['Add', 'x1', 5]).evaluate().json).toMatchInlineSnapshot(
       `47`
@@ -37,7 +37,7 @@ describe('SETTING/FORGETTING', () => {
   test(`Forget with set`, () => {
     ce.set({ x2: 42 });
 
-    expect(ce.box(`x2`).json).toMatchInlineSnapshot(`42`);
+    expect(ce.box(`x2`).json).toMatchInlineSnapshot(`x2`);
     expect(ce.box(`x2`).evaluate().json).toMatchInlineSnapshot(`42`);
 
     expect(ce.box(['Add', 'x2', 1]).evaluate().json).toMatchInlineSnapshot(
@@ -52,10 +52,8 @@ describe('SETTING/FORGETTING', () => {
     // Expression should be symbolic 'y1'
     expect(expr.evaluate().json).toMatchInlineSnapshot(`41`);
 
-    expect(ce.box(`x2`).domain).toMatchInlineSnapshot(
-      `["Domain", "PositiveInteger"]`
-    );
-    expect(ce.box(`x2`).json).toMatchInlineSnapshot(`42`);
+    expect(ce.box(`x2`).domain).toMatchInlineSnapshot(`["Domain", "Number"]`);
+    expect(ce.box(`x2`).json).toMatchInlineSnapshot(`x2`);
     expect(ce.box(`x2`).evaluate().json).toMatchInlineSnapshot(`42`);
     expect(ce.box(['Add', 'x2', 5]).evaluate().json).toMatchInlineSnapshot(
       `47`
@@ -71,7 +69,7 @@ describe('SETTING/FORGETTING', () => {
     expect(x3.isOdd).toMatchInlineSnapshot(`true`);
 
     ce.set({ x3: 1024 });
-    expect(x3.isOdd).toMatchInlineSnapshot(`true`);
+    expect(x3.isOdd).toMatchInlineSnapshot(`false`);
   });
 
   test(`Properties with assume`, () => {

@@ -185,8 +185,6 @@ export function setCurrentContextSymbolTable(
   engine.context.symbolTable ??= {
     symbols: new Map<string, BoxedSymbolDefinition>(),
     functions: new Map<string, BoxedFunctionDefinition>(),
-    symbolWikidata: new Map<string, BoxedSymbolDefinition>(),
-    functionWikidata: new Map<string, BoxedFunctionDefinition>(),
   };
 
   const symbolTable = engine.context.symbolTable;
@@ -200,19 +198,18 @@ export function setCurrentContextSymbolTable(
 
       const def = new BoxedSymbolDefinitionImpl(engine, entry);
 
-      if (entry.wikidata) {
-        if (symbolTable.symbolWikidata.has(entry.wikidata))
-          throw new Error(
-            `Duplicate symbol with wikidata ${entry.wikidata}, ${name} and ${
-              symbolTable.symbolWikidata.get(entry.wikidata)!.name
-            }`
-          );
-        symbolTable.symbolWikidata.set(entry.wikidata, def);
+      if (engine.strict && entry.wikidata) {
+        for (const [_, d] of symbolTable.symbols) {
+          if (d.wikidata === entry.wikidata)
+            throw new Error(
+              `Duplicate entry with wikidata "${entry.wikidata}": "${name}" and "${d.name}"`
+            );
+        }
       }
 
       if (symbolTable.symbols.has(name)) {
         throw new Error(
-          `Duplicate symbol definition ${name}:\n${JSON.stringify(
+          `Duplicate symbol definition "${name}":\n${JSON.stringify(
             symbolTable.symbols.get(name)!
           )}\n${JSON.stringify(entry)}`
         );
@@ -229,16 +226,6 @@ export function setCurrentContextSymbolTable(
       const name = validateDefinitionName(entry);
 
       const def = makeFunctionDefinition(engine, entry);
-
-      if (entry.wikidata) {
-        if (symbolTable.functionWikidata.has(entry.wikidata))
-          throw new Error(
-            `Duplicate function with wikidata ${entry.wikidata}, ${name} and ${
-              symbolTable.functionWikidata.get(entry.wikidata)!.name
-            }`
-          );
-        symbolTable.functionWikidata.set(entry.wikidata, def);
-      }
 
       if (symbolTable.functions.has(name))
         throw new Error(
