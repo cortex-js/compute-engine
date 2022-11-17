@@ -446,8 +446,11 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
         `The value of the constant "${this.name}" cannot be changed`
       );
     if (typeof val === 'number') {
-      val = this._engine.number(val);
-      this._value = val;
+      if (typeof this._value?.numericValue === 'number') {
+        this._value['_value'] = val;
+      } else {
+        this._value = this._engine.number(val);
+      }
       // this.setProps(valueToFlags(val));
       this._number = undefined;
       this._integer = undefined;

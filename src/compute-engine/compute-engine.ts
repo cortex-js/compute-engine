@@ -966,15 +966,16 @@ export class ComputeEngine implements IComputeEngine {
     console.assert(this.context !== null);
   }
 
-  set(identifiers: { [identifier: string]: SemiBoxedExpression }): void {
+  set(identifiers: { [identifier: string]: SemiBoxedExpression | null }): void {
     // @fastpath
     if (!this.strict) {
       for (const k of Object.keys(identifiers)) {
         if (k !== 'Nothing') {
           const def = this.lookupSymbol(k);
-          if (def) def.value = identifiers[k];
-          else {
-            const val = this.box(identifiers[k]);
+          const idk = identifiers[k];
+          if (def) def.value = idk ?? undefined;
+          else if (idk !== undefined && idk !== null) {
+            const val = this.box(idk);
             if (val.domain.isNumeric)
               this.defineSymbol({ name: k, value: val, domain: 'Number' });
             else this.defineSymbol({ name: k, value: val });
@@ -987,17 +988,22 @@ export class ComputeEngine implements IComputeEngine {
     for (const k of Object.keys(identifiers)) {
       if (k !== 'Nothing') {
         const def = this.lookupSymbol(k);
-        const val = this.box(identifiers[k]);
-        if (def) {
-          if (def.domain && !val.domain.isCompatible(def.domain))
-            throw Error(
-              `Expected value with domain ${def.domain.toString()} for "${k}"`
-            );
-          def.value = val;
+        const idk = identifiers[k];
+        if (idk === undefined || idk === null) {
+          if (def) def.value = undefined;
         } else {
-          if (val.domain.isNumeric)
-            this.defineSymbol({ name: k, value: val, domain: 'Number' });
-          else this.defineSymbol({ name: k, value: val });
+          const val = this.box(idk);
+          if (def) {
+            if (def.domain && !val.domain.isCompatible(def.domain))
+              throw Error(
+                `Expected value with domain ${def.domain.toString()} for "${k}"`
+              );
+            def.value = val;
+          } else {
+            if (val.domain.isNumeric)
+              this.defineSymbol({ name: k, value: val, domain: 'Number' });
+            else this.defineSymbol({ name: k, value: val });
+          }
         }
       }
     }
@@ -1436,16 +1442,16 @@ export class ComputeEngine implements IComputeEngine {
       if (n === 0) return this._ZERO;
       if (n === -1) return this._NEGATIVE_ONE;
 
-      if (isNaN(n)) return this._NAN;
+      if (Number.isInteger(n) && this._commonNumbers[n] !== undefined) {
+        if (this._commonNumbers[n] === null)
+          this._commonNumbers[n] = boxNumber(this, value) ?? this._NAN;
+        return this._commonNumbers[n]!;
+      }
+
+      if (Number.isNaN(n)) return this._NAN;
 
       if (!Number.isFinite(n))
         return n < 0 ? this._NEGATIVE_INFINITY : this._POSITIVE_INFINITY;
-
-      if (Number.isInteger(n) && this._commonNumbers[n] === null) {
-        this._commonNumbers[n] = boxNumber(this, value);
-        if (this._commonNumbers[n] === null) return this._NAN;
-        return this._commonNumbers[n]!;
-      }
     }
 
     return boxNumber(this, value, options) ?? this._NAN;
@@ -1626,8 +1632,21 @@ export class ComputeEngine implements IComputeEngine {
   forget(symbol: undefined | string | string[]): void {
     if (!this.context) throw Error('No scope available');
 
+    //
+    // Theory of Operations
+    //
+    // When forgeting we need to preserve existing definitions for symbols,
+    // as some expressions may be pointing to them. Instead, we
+    // reset the value/domain of those definitions.
+    //
+
     if (symbol === undefined) {
-      this.context.symbolTable = undefined;
+      if (this.context.symbolTable?.symbols)
+        for (const k of this.context.symbolTable.symbols.keys()) this.forget(k);
+      if (this.context.symbolTable?.functions)
+        for (const k of this.context.symbolTable.functions.keys())
+          this.forget(k);
+
       this.assumptions.clear();
       return;
     }
@@ -1640,13 +1659,21 @@ export class ComputeEngine implements IComputeEngine {
     if (typeof symbol === 'string') {
       // Remove symbol definition in the current scope (if any)
       if (this.context.symbolTable) {
-        this.context.symbolTable.symbols.delete(symbol);
+        const sdef = this.context.symbolTable.symbols.get(symbol);
+        if (sdef) {
+          sdef.value = undefined;
+          sdef.domain = undefined;
+        }
+        const fdef = this.context.symbolTable.functions.get(symbol);
+        if (fdef) {
+          // @todo...
+        }
+
         this.context.symbolTable.symbolWikidata.delete(symbol);
-        this.context.symbolTable.functions.delete(symbol);
         this.context.symbolTable.functionWikidata.delete(symbol);
       }
       // Remove any assumptions that make a reference to this symbol
-      // (note that when a scope if created, any assumptions from the
+      // (note that when a scope is created, any assumptions from the
       // parent scope are copied over, so this effectively removes any
       // reference to this symbol, even if there are assumptions about
       // it in a parent scope. However, when the current scope exits,

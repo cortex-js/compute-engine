@@ -29,13 +29,15 @@ import {
 } from '../utils';
 
 const ce = engine;
-// ce.numericMode = 'machine';
+// ce.numericMode = 'bignum';
 // engine.jsonSerializationOptions.precision = 16;
 
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
+
+console.log(ce.parse('\\sin(30\\deg)').evaluate().toJSON());
 
 function slowEval() {
   ///
@@ -85,13 +87,10 @@ function fastEval() {
   );
 }
 // ---
+persist();
 
-// slowEval();
-// fastEval();
-
-console.log(
-  ce.parse('(1+(2+(3+4)))(((5+6)+7)((8+(9+10)))(11+(12+13)+14))').toJSON()
-);
+slowEval();
+fastEval();
 
 ce.set({ vv: 0 });
 // Should return a symbol, not 0

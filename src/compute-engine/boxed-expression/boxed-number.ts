@@ -97,8 +97,6 @@ export class BoxedNumber extends AbstractBoxedExpression {
       this._value = canonicalNumber(ce, value);
       this._isCanonical = true;
     }
-
-    ce._register(this);
   }
 
   get hash(): number {

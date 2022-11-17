@@ -279,15 +279,6 @@ export function processPower(
   exponent: BoxedExpression,
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
-  // @fastpath
-  if (
-    mode === 'N' &&
-    ce.numericMode === 'machine' &&
-    typeof base.numericValue === 'number' &&
-    typeof exponent.numericValue === 'number'
-  )
-    return ce.number(Math.pow(base.numericValue, exponent.numericValue));
-
   if (base.head === 'Multiply') {
     let c: Rational = bignumPreferred(ce)
       ? [ce._BIGNUM_ONE, ce._BIGNUM_ONE]

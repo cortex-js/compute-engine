@@ -167,8 +167,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   get isPure(): boolean {
-    if (!this.isCanonical) return false;
     if (this._isPure !== undefined) return this._isPure;
+    if (!this.isCanonical) {
+      this._isPure = false;
+      return false;
+    }
     let result: boolean | undefined = undefined;
     if (this.functionDefinition?.pure !== undefined)
       result = this.functionDefinition!.pure;
@@ -390,8 +393,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   get value(): BoxedExpression | undefined {
-    if (!this.isCanonical) return undefined;
-    if (!this.isPure) return undefined;
+    if (!this.isCanonical || !this.isPure) return undefined;
     // Use cached value if the function is pure
     if (!this._value) this._value = this.evaluate();
     return this._value;

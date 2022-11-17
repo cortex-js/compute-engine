@@ -528,7 +528,18 @@ export const ARITHMETIC_LIBRARY: SymbolTable[] = [
             canonicalPower(ce, args[0], args[1]) ?? ce._fn('Power', args),
           simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
           evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
-          N: (ce, ops) => processPower(ce, ops[0], ops[1], 'N'),
+          N: (ce, ops) => {
+            // @fastpath
+            if (
+              ce.numericMode === 'machine' &&
+              typeof ops[0].numericValue === 'number' &&
+              typeof ops[1].numericValue === 'number'
+            )
+              return ce.number(
+                Math.pow(ops[0].numericValue, ops[1].numericValue)
+              );
+            return processPower(ce, ops[0], ops[1], 'N');
+          },
           // Defined as RealNumber for all power in RealNumber when base > 0;
           // when x < 0, only defined if n is an integer
           // if x is a non-zero complex, defined as ComplexNumber

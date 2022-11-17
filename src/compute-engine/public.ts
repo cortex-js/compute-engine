@@ -2235,8 +2235,8 @@ export interface IComputeEngine {
   }): void;
   popScope(): void;
 
-  /** Assign a value to an identifier in the current scope */
-  set(identifiers: { [identifier: string]: SemiBoxedExpression }): void;
+  /** Assign a value to an identifier in the current scope. Use `null` to reset the identifier to no value */
+  set(identifiers: { [identifier: string]: SemiBoxedExpression | null }): void;
 
   /** Declare identifiers (specify their domain without necessarily assigning them a value in the current scope*/
   let(identifiers: {
