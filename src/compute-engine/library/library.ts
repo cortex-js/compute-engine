@@ -182,12 +182,9 @@ export function setCurrentContextSymbolTable(
   if (!engine.context) throw Error('No context available');
 
   // If this is the first symbol table, setup the context
-  engine.context.symbolTable ??= {
-    symbols: new Map<string, BoxedSymbolDefinition>(),
-    functions: new Map<string, BoxedFunctionDefinition>(),
-  };
+  engine.context.identifierTable ??= new Map();
 
-  const symbolTable = engine.context.symbolTable;
+  const idTable = engine.context.identifierTable;
 
   //
   // Validate and add the symbols from the symbol table
@@ -199,7 +196,7 @@ export function setCurrentContextSymbolTable(
       const def = new BoxedSymbolDefinitionImpl(engine, entry);
 
       if (engine.strict && entry.wikidata) {
-        for (const [_, d] of symbolTable.symbols) {
+        for (const [_, d] of idTable) {
           if (d.wikidata === entry.wikidata)
             throw new Error(
               `Duplicate entry with wikidata "${entry.wikidata}": "${name}" and "${d.name}"`
@@ -207,15 +204,15 @@ export function setCurrentContextSymbolTable(
         }
       }
 
-      if (symbolTable.symbols.has(name)) {
+      if (idTable.has(name)) {
         throw new Error(
           `Duplicate symbol definition "${name}":\n${JSON.stringify(
-            symbolTable.symbols.get(name)!
+            idTable.get(name)!
           )}\n${JSON.stringify(entry)}`
         );
       }
 
-      symbolTable.symbols.set(name, def);
+      idTable.set(name, def);
     }
 
   //
@@ -227,14 +224,14 @@ export function setCurrentContextSymbolTable(
 
       const def = makeFunctionDefinition(engine, entry);
 
-      if (symbolTable.functions.has(name))
+      if (idTable.has(name))
         throw new Error(
           `Duplicate function definition ${name}:\n${JSON.stringify(
-            symbolTable.symbols.get(name)!
+            idTable.get(name)!
           )}\n${JSON.stringify(entry)}`
         );
 
-      symbolTable.functions.set(name, def);
+      idTable.set(name, def);
     }
 
   // @todo: take table.rules into consideration

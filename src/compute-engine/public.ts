@@ -1299,17 +1299,17 @@ export type SymbolTable = {
 };
 
 /**
- * The entries of a `RuntimeSymbolTable` have been validated and
+ * The entries of a `RuntimeIdentifierTable` have been validated and
  * optimized for faster evaluation.
  *
  * When a new scope is created with `pushScope()` or when creating a new
- * engine instance, new instances of `RuntimeSymbolTable` are created
+ * engine instance, new instances of `RuntimeIdentifierTable` are created
  * as needed.
  */
-export type RuntimeSymbolTable = {
-  symbols: Map<string, BoxedSymbolDefinition>;
-  functions: Map<string, BoxedFunctionDefinition>;
-};
+export type RuntimeIdentifierTable = Map<
+  string,
+  BoxedSymbolDefinition | BoxedFunctionDefinition
+>;
 
 /**
  * A scope is a set of names in a dictionary that are bound (defined) in
@@ -1363,7 +1363,7 @@ export type Scope = {
 export type RuntimeScope = Scope & {
   parentScope?: RuntimeScope;
 
-  symbolTable?: RuntimeSymbolTable;
+  identifierTable?: RuntimeIdentifierTable;
 
   assumptions: undefined | ExpressionMapInterface<boolean>;
 

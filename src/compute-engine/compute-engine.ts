@@ -80,6 +80,7 @@ import {
 } from './numerics/rationals';
 import { canonicalNegate } from './symbolic/negate';
 import { flattenSequence } from './symbolic/flatten';
+import { isFunctionDefinition, isSymbolDefinition } from './library/utils';
 
 /**
  *
@@ -465,10 +466,8 @@ export class ComputeEngine implements IComputeEngine {
     // Reset all the definitions
     let scope = this.context;
     while (scope) {
-      if (scope.symbolTable?.functions)
-        for (const [_k, v] of scope.symbolTable.functions) v.reset();
-      if (scope.symbolTable?.symbols)
-        for (const [_k, v] of scope.symbolTable.symbols) v.reset();
+      if (scope.identifierTable)
+        for (const [_k, v] of scope.identifierTable) v.reset();
 
       // @todo purge assumptions
       scope = scope.parentScope ?? null;
@@ -764,43 +763,39 @@ export class ComputeEngine implements IComputeEngine {
     // @fastpath
     if (!this.strict) {
       scope ??= this.context ?? undefined;
-      let def: undefined | BoxedSymbolDefinition = undefined;
-      while (scope && !def) {
-        def = scope.symbolTable?.symbols.get(symbol);
+      while (scope) {
+        const def = scope.identifierTable?.get(symbol);
+        if (isSymbolDefinition(def)) return def;
         scope = scope.parentScope;
       }
-      return def;
+      return undefined;
     }
+
     if (typeof symbol !== 'string') throw Error('Expected a string');
 
     if (symbol.length === 0 || !this.context) return undefined;
 
-    let def: undefined | BoxedSymbolDefinition = undefined;
     const rootScope = scope ?? this.context;
 
     // Try to find a match by wikidata
     if (wikidata) {
       scope = rootScope;
-      while (scope && !def) {
-        if (scope.symbolTable?.symbols)
-          for (const [_, d] of scope.symbolTable.symbols) {
-            if (d.wikidata === wikidata) {
-              def = d;
-              break;
-            }
+      while (scope) {
+        if (scope.identifierTable)
+          for (const [_, d] of scope.identifierTable) {
+            if (isSymbolDefinition(d) && d.wikidata === wikidata) return d;
           }
         scope = scope.parentScope;
       }
     }
     // Match by name
-    if (!def) {
-      scope = rootScope;
-      while (scope && !def) {
-        def = scope.symbolTable?.symbols.get(symbol);
-        scope = scope.parentScope;
-      }
+    scope = rootScope;
+    while (scope) {
+      const def = scope.identifierTable?.get(symbol);
+      if (isSymbolDefinition(def)) return def;
+      scope = scope.parentScope;
     }
-    return def;
+    return undefined;
   }
 
   /**
@@ -818,13 +813,12 @@ export class ComputeEngine implements IComputeEngine {
   ): undefined | BoxedFunctionDefinition {
     if (typeof head !== 'string') return undefined;
 
-    // Wildcards never have definitions
-    if (head.startsWith('_') || !this.context) return undefined;
+    if (!this.context) return undefined;
 
     scope ??= this.context;
     while (scope) {
-      const def = scope.symbolTable?.functions.get(head);
-      if (def) return def;
+      const def = scope.identifierTable?.get(head);
+      if (isFunctionDefinition(def)) return def;
       scope = scope.parentScope;
     }
     return undefined;
@@ -838,16 +832,12 @@ export class ComputeEngine implements IComputeEngine {
       throw Error('Symbol cannot be defined: no scope available');
     if (def.name.length === 0 || !isValidIdentifier(def.name))
       throw Error('Invalid identifier ' + def.name);
-    const boxedDef = new BoxedSymbolDefinitionImpl(this, def);
-    if (!this.context.symbolTable) {
-      this.context.symbolTable = {
-        symbols: new Map<string, BoxedSymbolDefinition>(),
-        functions: new Map<string, BoxedFunctionDefinition>(),
-      };
-    }
 
+    if (!this.context.identifierTable) this.context.identifierTable = new Map();
+
+    const boxedDef = new BoxedSymbolDefinitionImpl(this, def);
     if (boxedDef.name)
-      this.context.symbolTable.symbols.set(boxedDef.name, boxedDef);
+      this.context.identifierTable.set(boxedDef.name, boxedDef);
 
     return boxedDef;
   }
@@ -858,17 +848,11 @@ export class ComputeEngine implements IComputeEngine {
     if (def.name.length === 0 || !isValidIdentifier(def.name))
       throw Error('Invalid identifier ' + def.name);
 
+    if (!this.context.identifierTable) this.context.identifierTable = new Map();
+
     const boxedDef = makeFunctionDefinition(this, def);
 
-    if (!this.context.symbolTable) {
-      this.context.symbolTable = {
-        symbols: new Map<string, BoxedSymbolDefinition>(),
-        functions: new Map<string, BoxedFunctionDefinition>(),
-      };
-    }
-
-    if (boxedDef.name)
-      this.context.symbolTable.functions.set(def.name, boxedDef);
+    if (boxedDef.name) this.context.identifierTable.set(def.name, boxedDef);
 
     return boxedDef;
   }
@@ -1635,11 +1619,8 @@ export class ComputeEngine implements IComputeEngine {
     //
 
     if (symbol === undefined) {
-      if (this.context.symbolTable?.symbols)
-        for (const k of this.context.symbolTable.symbols.keys()) this.forget(k);
-      if (this.context.symbolTable?.functions)
-        for (const k of this.context.symbolTable.functions.keys())
-          this.forget(k);
+      if (this.context.identifierTable)
+        for (const k of this.context.identifierTable.keys()) this.forget(k);
 
       this.assumptions.clear();
       return;
@@ -1652,16 +1633,12 @@ export class ComputeEngine implements IComputeEngine {
 
     if (typeof symbol === 'string') {
       // Remove symbol definition in the current scope (if any)
-      if (this.context.symbolTable) {
-        const sdef = this.context.symbolTable.symbols.get(symbol);
-        if (sdef) {
-          sdef.value = undefined;
-          sdef.domain = undefined;
-        }
-        const fdef = this.context.symbolTable.functions.get(symbol);
-        if (fdef) {
-          // @todo...
-        }
+      if (this.context.identifierTable) {
+        const def = this.context.identifierTable.get(symbol);
+        if (isSymbolDefinition(def)) {
+          def.value = undefined;
+          def.domain = undefined;
+        } // @todo: if a function....
       }
       // Remove any assumptions that make a reference to this symbol
       // (note that when a scope is created, any assumptions from the
