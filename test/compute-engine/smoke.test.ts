@@ -37,8 +37,6 @@ const ce = engine;
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
 
-console.log(ce.parse('\\sin(30\\deg)').evaluate().toJSON());
-
 function slowEval() {
   ///
   const ce = new ComputeEngine();
@@ -87,7 +85,6 @@ function fastEval() {
   );
 }
 // ---
-persist();
 
 slowEval();
 fastEval();

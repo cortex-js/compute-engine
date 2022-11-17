@@ -906,7 +906,11 @@ function evalTrig(
       return applyN(
         op,
         Math.cos,
-        (x) => x.cos(),
+        (x) =>
+          x
+            .toSignificantDigits(ce.precision + 4)
+            .cos()
+            .toSignificantDigits(ce.precision),
         (x) => x.cos()
       );
     case 'Cosh':
@@ -962,7 +966,11 @@ function evalTrig(
       return applyN(
         op,
         Math.sin,
-        (x) => x.sin(),
+        (x) =>
+          x
+            .toSignificantDigits(ce.precision + 4)
+            .sin()
+            .toSignificantDigits(ce.precision),
         (x) => x.sin()
       );
     case 'Sinh':
@@ -976,7 +984,11 @@ function evalTrig(
       return applyN(
         op,
         Math.tan,
-        (x) => x.tan(),
+        (x) =>
+          x
+            .toSignificantDigits(ce.precision + 4)
+            .tan()
+            .toSignificantDigits(ce.precision),
         (x) => x.tan()
       );
     case 'Tanh':

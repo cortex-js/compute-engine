@@ -427,7 +427,7 @@
       </div>
     </main>
 
-    <script defer type="module">
+    <!-- <script defer type="module">
       import { ComputeEngine } from '../dist/compute-engine.esm.js';
       const ce2 = new ComputeEngine({ numericMode: 'machine' });
       let expr = ce2.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
@@ -446,140 +446,455 @@
       console.log(
         `Eval3: y = ${y} in ${performance.now() - startTime} milliseconds`
       );
-    </script>
+    </script> -->
 
-    <xscript defer type="module">
-      import { convertLatexToMarkup } from
-      'https://unpkg.com/mathlive/dist/mathlive.min.mjs'; import { ComputeEngine
-      } from '../dist/compute-engine.esm.js'; const MAX_LINE_LENGTH = 64; // //
-      Numeric format segmented control //
+    <script defer type="module">
+      import { convertLatexToMarkup } from 'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
+      import { ComputeEngine } from '../dist/compute-engine.esm.js';
+
+      const MAX_LINE_LENGTH = 64;
+
+      //
+      // Numeric format segmented control
+      //
       document.querySelectorAll('input[name=numeric-format]').forEach((x) => {
-      x.addEventListener('click', (evt) => { if (evt.target.id ===
-      'numeric-format-auto') { ce.numericMode = 'auto'; ce.precision = 200; }
-      else if (evt.target.id === 'numeric-format-machine') { ce.numericMode =
-      'machine'; ce.precision = 15; } else if (evt.target.id ===
-      'numeric-format-decimal') { ce.numericMode = 'bignum'; ce.precision = 200;
-      } else if (evt.target.id === 'numeric-format-complex') { ce.numericMode =
-      'complex'; ce.precision = 15; } // defaultLatex.options.precision =
-      ce.precision; updateContent(mf); }); }); let errors = []; const ce = new
-      ComputeEngine(); // ce.defaultDomain = null; ce.pushScope({ dictionary: {
-      symbols: [{ name: 'd', value: 500 }], }, }); updateAssumptions(); const mf
-      = document.getElementById('mf'); mf.setOptions({ onInlineShortcut: (_mf,
-      s) => { if (/^(ln|log|lb|lg)/.test(s)) return '\\' + s; if
-      (/^[a-zA-Z][a-zA-Z0-9]*'?(_[a-zA-Z0-9]+'?)?$/.test(s)) { const m =
-      s.match(/^([a-zA-Z]+)([0-9]+)$/); if (m) { if ( [ 'alpha', 'beta',
-      'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta', 'theta',
-      'vartheta', 'iota', 'kappa', 'varkappa', 'lambda', 'mu', 'nu', 'xi', 'pi',
-      'varpi', 'rho', 'varrho', 'sigma', 'varsigma', 'tau', 'phi', 'varphi',
-      'upsilon', 'chi', 'psi', 'omega', 'Gamma', 'Delta', 'Theta', 'Lambda',
-      'Xi', 'Pi', 'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega', 'digamma',
-      'omicron', ].includes(m[1]) ) return `\\${m[1]}_{${m[2]}}`; if ( [ 'cos',
-      'sin', 'tan', 'arcsin', 'arccos', 'arctan', 'arctg', 'arcctg', 'arcsec',
-      'arccsc', 'arsinh', 'arcosh', 'artanh', 'arcsech', 'arccsch', 'arg', 'ch',
-      'cosec', 'cosh', 'cot', 'cotg', 'coth', 'csc', 'ctg', 'cth', 'log', 'ln',
-      'lg', 'lb', 'sec', 'sinh', 'sh', 'tanh', 'tg', 'th', ].includes(m[1]) ) {
-      return `\\${m[1]} ${m[2]}`; } return `\\mathrm{${m[1]}}_{${m[2]}}`; } if
-      (s.includes('_')) debugger; return '\\mathrm{' + s + '}'; } return ''; },
-      }); mf.addEventListener('input', (ev) => updateContent(mf));
-      updateContent(mf); function updateContent(mf) { const latex =
-      mf.getValue('latex-expanded'); let expr; try { const latexEl =
-      document.getElementById('latex'); if (latexEl) latexEl.innerHTML =
-      escapeHtml(latex); if (document.getElementById('asciimath')) {
-      document.getElementById('asciimath').innerHTML = escapeHtml(
-      mf.getValue('ascii-math') ); } errors = []; expr = ce.parse(latex); }
-      catch (e) { console.error( 'parse(%c ' + latex + '%c) ' + e.toString(),
-      'color: red; background: hsla(0, 60%, 90%)', 'background: transparent' );
-      } updateLatex(null, 'symbols'); updateLatex(null, 'solve');
-      updateExpr(null, 'json-form'); updateExpr(null, 'canonical-form');
-      updateExpr(null, 'domain'); updateExpr(null, 'simplify'); updateExpr(null,
-      'evaluate-numerically'); updateExpr(null, 'evaluate'); updateExpr(null,
-      'expand'); try { updateExpr(ce.parse(latex, { canonical: false }),
-      'json-form'); } catch (e) { console.error( 'format(%c ' + latex + "%c,
-      ['json']) " + e.toString(), 'color: red; background: hsla(0, 60%, 90%)',
-      'background: transparent' ); } try { updateLatex( expr.symbols.map((x) =>
-      x.latex).join(',,\\:'), 'symbols' ); } catch (e) { console.error(
-      'format(%c ' + latex + "%c, ['json']) " + e.toString(), 'color: red;
-      background: hsla(0, 60%, 90%)', 'background: transparent' ); } try { const
-      freeVars = expr.symbols.filter((x) => !x.isConstant); if (freeVars.length
-      === 1) { const sols = expr.solve(freeVars[0].symbol); if (sols &&
-      sols.length > 0) { updateLatex(sols.map((x) => x.latex).join(',,\\:'),
-      'solve'); } } } catch (e) { console.error( 'format(%c ' + latex + "%c,
-      ['json']) " + e.toString(), 'color: red; background: hsla(0, 60%, 90%)',
-      'background: transparent' ); } try { const canonicalExpr = expr.canonical;
-      try { updateExpr(canonicalExpr, 'canonical-form'); } catch (e) {
-      console.error( 'canonical(%c ' + latex + '%c) ' + e.toString(), 'color:
-      red; background: hsla(0, 60%, 90%)', 'background: transparent' ); } // try
-      { // updateExpr(rawLatex.parse(latex)); // } catch (e) { //
-      console.error("rawLatex.parse(%c " + latex + '%c) ' + // e.toString(),
-      'color: red; background: hsla(0, 60%, 90%)', 'background: transparent');
-      // } try { updateExpr(canonicalExpr.domain, 'domain'); } catch (e) {
-      console.error( 'domain(%c ' + latex + '%c) ' + e.toString(), 'color: red;
-      background: hsla(0, 60%, 90%)', 'background: transparent' ); } try {
-      updateExpr(canonicalExpr.simplify(), 'simplify'); } catch (e) {
-      console.error( 'simplify(%c ' + latex + '%c) ' + e.toString(), 'color:
-      red; background: hsla(0, 60%, 90%)', 'background: transparent' ); } try {
-      updateExpr(canonicalExpr.N(), 'evaluate-numerically'); } catch (e) {
-      console.error( 'N(%c ' + latex + '%c) ' + e.toString(), 'color: red;
-      background: hsla(0, 60%, 90%)', 'background: transparent' ); } try {
-      updateExpr(canonicalExpr.evaluate(), 'evaluate'); } catch (e) {
-      console.error( 'evaluate(%c ' + latex + '%c) ' + e.toString(), 'color:
-      red; background: hsla(0, 60%, 90%)', 'background: transparent' ); } try {
-      const e = ce.box(['Expand', canonicalExpr]); updateExpr(e.evaluate(),
-      'expand'); } catch (e) { console.error( 'expand(%c ' + latex + '%c, ["x"])
-      ' + e.toString(), 'color: red; background: hsla(0, 60%, 90%)',
-      'background: transparent' ); } } catch (e) {} } function
-      updateLatex(latex, id) { const el = document.getElementById(id); if (!el)
-      return; if (!latex) { el.classList.remove('is-visible'); return; }
-      el.classList.add('is-visible'); el.querySelector('.latex').innerHTML =
-      convertLatexToMarkup(latex); } function updateExpr(expr, id) { const el =
-      document.getElementById(id); if (!el) return; if (expr === null)
-      el.classList.remove('is-visible'); else el.classList.add('is-visible');
-      const mathJsonEl = el.querySelector('.mathjson'); if (mathJsonEl) {
-      mathJsonEl.innerHTML = exprToString(expr) + '<br />
-      <div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">
-        ' + errors.join('<br />') + '
-      </div>
-      '; } const latexEl = el.querySelector('.latex'); if (latexEl && expr) {
-      latexEl.innerHTML = convertLatexToMarkup(expr.latex); } else
-      latexEl.innerHTML = ''; errors = []; } function escapeHtml(string) {
-      return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) { return (
-      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-      '/': '&#x2F;', '`': '&#x60;', '=': '&#x3D;', '\u200b': '&amp;#zws;', }[s]
-      || s ); }); } function toggleVisibility(el) { if (el) { if
-      (el.classList.contains('is-visible')) { el.classList.remove('is-visible');
-      } else { el.classList.add('is-visible'); } } } [ 'json-form',
-      'canonical-form', 'domain', 'simplify', 'evaluate-numerically',
-      'evaluate', 'expand', ].forEach((id) => { const el =
-      document.getElementById(id); if (el) { const toggle =
-      el.querySelector('.toggle'); toggle.addEventListener('click', () => {
-      toggle.classList.toggle('is-on');
-      toggleVisibility(el.querySelector('.mathjson')); }); } }); function
-      exprToStringRecursive(expr, start) { let indent = ' '.repeat(start); if
-      (Array.isArray(expr)) { const elements = expr.map((x) =>
-      exprToStringRecursive(x, start + 2)); let result = `[${elements.join(',
-      ')}]`; if (start + result.length < MAX_LINE_LENGTH) return result; return
-      `[\n${indent} ${elements.join(`, `)}\n${indent}]`; } if (expr === null)
-      return 'null'; if (typeof expr === 'object') { const elements = {};
-      Object.keys(expr).forEach( (x) => (elements[x] =
-      exprToStringRecursive(expr[x], start + 2)) ); let result =
-      `\n${indent}{${Object.keys(expr) .map((key) => { return `${key}:
-      ${elements[key]}`; }) .join('; ')}}`; if (start + result.length <
-      MAX_LINE_LENGTH) return result; return ( `\n${indent}{\n` +
-      Object.keys(expr) .map((key) => { return `${indent} ${key}:
-      ${elements[key]}`; }) .join(`;\n${indent}`) + '\n' + indent + '}' ); }
-      return JSON.stringify(expr, null, 2); } function exprToString(expr) { if
-      (!expr) return ''; return escapeHtml(exprToStringRecursive(expr.json, 0));
-      } function updateAssumptions() { ce.assume('n', 'Integer');
-      ce.assume('six', 6); // ce.assume('y', 5); // ce.assume(['Greater', 'x',
-      4]); // ce.assume(['Equal', 'a', 1]); const content = [...ce.assumptions]
-      .map(([assumption, val]) => { return (
-      convertLatexToMarkup(assumption.latex) + '<span
-        >' + (val ? '' : ' is false') + '</span
-      >' ); }) .join(', '); if (content) {
-      document.getElementById('assumptions').innerHTML = content; document
-      .getElementById('assumptions-section') .classList.add('visible'); } else
-      document .getElementById('assumptions-section')
-      .classList.remove('visible'); }
-    </xscript>
+        x.addEventListener('click', (evt) => {
+          if (evt.target.id === 'numeric-format-auto') {
+            ce.numericMode = 'auto';
+            ce.precision = 200;
+          } else if (evt.target.id === 'numeric-format-machine') {
+            ce.numericMode = 'machine';
+            ce.precision = 15;
+          } else if (evt.target.id === 'numeric-format-decimal') {
+            ce.numericMode = 'bignum';
+            ce.precision = 200;
+          } else if (evt.target.id === 'numeric-format-complex') {
+            ce.numericMode = 'complex';
+            ce.precision = 15;
+          }
+          // defaultLatex.options.precision = ce.precision;
+          updateContent(mf);
+        });
+      });
+
+      let errors = [];
+
+      const ce = new ComputeEngine();
+      // ce.defaultDomain = null;
+
+      ce.pushScope({
+        dictionary: {
+          symbols: [{ name: 'd', value: 500 }],
+        },
+      });
+
+      updateAssumptions();
+
+      const mf = document.getElementById('mf');
+      mf.setOptions({
+        onInlineShortcut: (_mf, s) => {
+          if (/^(ln|log|lb|lg)/.test(s)) return '\\' + s;
+          if (/^[a-zA-Z][a-zA-Z0-9]*'?(_[a-zA-Z0-9]+'?)?$/.test(s)) {
+            const m = s.match(/^([a-zA-Z]+)([0-9]+)$/);
+            if (m) {
+              if (
+                [
+                  'alpha',
+                  'beta',
+                  'gamma',
+                  'delta',
+                  'epsilon',
+                  'varepsilon',
+                  'zeta',
+                  'eta',
+                  'theta',
+                  'vartheta',
+                  'iota',
+                  'kappa',
+                  'varkappa',
+                  'lambda',
+                  'mu',
+                  'nu',
+                  'xi',
+                  'pi',
+                  'varpi',
+                  'rho',
+                  'varrho',
+                  'sigma',
+                  'varsigma',
+                  'tau',
+                  'phi',
+                  'varphi',
+                  'upsilon',
+                  'chi',
+                  'psi',
+                  'omega',
+                  'Gamma',
+                  'Delta',
+                  'Theta',
+                  'Lambda',
+                  'Xi',
+                  'Pi',
+                  'Sigma',
+                  'Upsilon',
+                  'Phi',
+                  'Psi',
+                  'Omega',
+                  'digamma',
+                  'omicron',
+                ].includes(m[1])
+              )
+                return `\\${m[1]}_{${m[2]}}`;
+              if (
+                [
+                  'cos',
+                  'sin',
+                  'tan',
+                  'arcsin',
+                  'arccos',
+                  'arctan',
+                  'arctg',
+                  'arcctg',
+                  'arcsec',
+                  'arccsc',
+                  'arsinh',
+                  'arcosh',
+                  'artanh',
+                  'arcsech',
+                  'arccsch',
+                  'arg',
+                  'ch',
+                  'cosec',
+                  'cosh',
+                  'cot',
+                  'cotg',
+                  'coth',
+                  'csc',
+                  'ctg',
+                  'cth',
+                  'log',
+                  'ln',
+                  'lg',
+                  'lb',
+                  'sec',
+                  'sinh',
+                  'sh',
+                  'tanh',
+                  'tg',
+                  'th',
+                ].includes(m[1])
+              ) {
+                return `\\${m[1]} ${m[2]}`;
+              }
+              return `\\mathrm{${m[1]}}_{${m[2]}}`;
+            }
+            if (s.includes('_')) debugger;
+            return '\\mathrm{' + s + '}';
+          }
+          return '';
+        },
+      });
+      mf.addEventListener('input', (ev) => updateContent(mf));
+      updateContent(mf);
+
+      function updateContent(mf) {
+        const latex = mf.getValue('latex-expanded');
+        let expr;
+        try {
+          const latexEl = document.getElementById('latex');
+          if (latexEl) latexEl.innerHTML = escapeHtml(latex);
+
+          if (document.getElementById('asciimath')) {
+            document.getElementById('asciimath').innerHTML = escapeHtml(
+              mf.getValue('ascii-math')
+            );
+          }
+
+          errors = [];
+
+          expr = ce.parse(latex);
+        } catch (e) {
+          console.error(
+            'parse(%c ' + latex + '%c) ' + e.toString(),
+            'color: red;  background: hsla(0, 60%, 90%)',
+            'background: transparent'
+          );
+        }
+
+        updateLatex(null, 'symbols');
+        updateLatex(null, 'solve');
+        updateExpr(null, 'json-form');
+        updateExpr(null, 'canonical-form');
+        updateExpr(null, 'domain');
+        updateExpr(null, 'simplify');
+        updateExpr(null, 'evaluate-numerically');
+        updateExpr(null, 'evaluate');
+        updateExpr(null, 'expand');
+
+        try {
+          updateExpr(ce.parse(latex, { canonical: false }), 'json-form');
+        } catch (e) {
+          console.error(
+            'format(%c ' + latex + "%c, ['json']) " + e.toString(),
+            'color: red;  background: hsla(0, 60%, 90%)',
+            'background: transparent'
+          );
+        }
+
+        try {
+          updateLatex(
+            expr.symbols.map((x) => x.latex).join(',,\\:'),
+            'symbols'
+          );
+        } catch (e) {
+          console.error(
+            'format(%c ' + latex + "%c, ['json']) " + e.toString(),
+            'color: red;  background: hsla(0, 60%, 90%)',
+            'background: transparent'
+          );
+        }
+
+        try {
+          const freeVars = expr.symbols.filter((x) => !x.isConstant);
+          if (freeVars.length === 1) {
+            const sols = expr.solve(freeVars[0].symbol);
+            if (sols && sols.length > 0) {
+              updateLatex(sols.map((x) => x.latex).join(',,\\:'), 'solve');
+            }
+          }
+        } catch (e) {
+          console.error(
+            'format(%c ' + latex + "%c, ['json']) " + e.toString(),
+            'color: red;  background: hsla(0, 60%, 90%)',
+            'background: transparent'
+          );
+        }
+
+        try {
+          const canonicalExpr = expr.canonical;
+          try {
+            updateExpr(canonicalExpr, 'canonical-form');
+          } catch (e) {
+            console.error(
+              'canonical(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
+
+          // try {
+          //   updateExpr(rawLatex.parse(latex));
+          //   } catch (e) {
+          //   console.error("rawLatex.parse(%c " + latex + '%c) ' +
+          //     e.toString(), 'color: red;  background: hsla(0, 60%, 90%)', 'background: transparent');
+          // }
+
+          try {
+            updateExpr(canonicalExpr.domain, 'domain');
+          } catch (e) {
+            console.error(
+              'domain(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
+
+          try {
+            updateExpr(canonicalExpr.simplify(), 'simplify');
+          } catch (e) {
+            console.error(
+              'simplify(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
+
+          try {
+            updateExpr(canonicalExpr.N(), 'evaluate-numerically');
+          } catch (e) {
+            console.error(
+              'N(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
+
+          try {
+            updateExpr(canonicalExpr.evaluate(), 'evaluate');
+          } catch (e) {
+            console.error(
+              'evaluate(%c ' + latex + '%c) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
+
+          try {
+            const e = ce.box(['Expand', canonicalExpr]);
+            updateExpr(e.evaluate(), 'expand');
+          } catch (e) {
+            console.error(
+              'expand(%c ' + latex + '%c, ["x"]) ' + e.toString(),
+              'color: red;  background: hsla(0, 60%, 90%)',
+              'background: transparent'
+            );
+          }
+        } catch (e) {}
+      }
+
+      function updateLatex(latex, id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+
+        if (!latex) {
+          el.classList.remove('is-visible');
+          return;
+        }
+
+        el.classList.add('is-visible');
+
+        el.querySelector('.latex').innerHTML = convertLatexToMarkup(latex);
+      }
+
+      function updateExpr(expr, id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+
+        if (expr === null) el.classList.remove('is-visible');
+        else el.classList.add('is-visible');
+
+        const mathJsonEl = el.querySelector('.mathjson');
+        if (mathJsonEl) {
+          mathJsonEl.innerHTML =
+            exprToString(expr) +
+            '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
+            errors.join('<br>') +
+            '</div>';
+        }
+        const latexEl = el.querySelector('.latex');
+        if (latexEl && expr) {
+          latexEl.innerHTML = convertLatexToMarkup(expr.latex);
+        } else latexEl.innerHTML = '';
+
+        errors = [];
+      }
+
+      function escapeHtml(string) {
+        return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {
+          return (
+            {
+              '&': '&amp;',
+              '<': '&lt;',
+              '>': '&gt;',
+              '"': '&quot;',
+              "'": '&#39;',
+              '/': '&#x2F;',
+              '`': '&#x60;',
+              '=': '&#x3D;',
+              '\u200b': '&amp;#zws;',
+            }[s] || s
+          );
+        });
+      }
+
+      function toggleVisibility(el) {
+        if (el) {
+          if (el.classList.contains('is-visible')) {
+            el.classList.remove('is-visible');
+          } else {
+            el.classList.add('is-visible');
+          }
+        }
+      }
+
+      [
+        'json-form',
+        'canonical-form',
+        'domain',
+        'simplify',
+        'evaluate-numerically',
+        'evaluate',
+        'expand',
+      ].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+          const toggle = el.querySelector('.toggle');
+          toggle.addEventListener('click', () => {
+            toggle.classList.toggle('is-on');
+            toggleVisibility(el.querySelector('.mathjson'));
+          });
+        }
+      });
+
+      function exprToStringRecursive(expr, start) {
+        let indent = ' '.repeat(start);
+        if (Array.isArray(expr)) {
+          const elements = expr.map((x) => exprToStringRecursive(x, start + 2));
+          let result = `[${elements.join(', ')}]`;
+          if (start + result.length < MAX_LINE_LENGTH) return result;
+          return `[\n${indent}  ${elements.join(`,  `)}\n${indent}]`;
+        }
+        if (expr === null) return 'null';
+        if (typeof expr === 'object') {
+          const elements = {};
+          Object.keys(expr).forEach(
+            (x) => (elements[x] = exprToStringRecursive(expr[x], start + 2))
+          );
+          let result = `\n${indent}{${Object.keys(expr)
+            .map((key) => {
+              return `${key}: ${elements[key]}`;
+            })
+            .join('; ')}}`;
+          if (start + result.length < MAX_LINE_LENGTH) return result;
+          return (
+            `\n${indent}{\n` +
+            Object.keys(expr)
+              .map((key) => {
+                return `${indent}  ${key}: ${elements[key]}`;
+              })
+              .join(`;\n${indent}`) +
+            '\n' +
+            indent +
+            '}'
+          );
+        }
+        return JSON.stringify(expr, null, 2);
+      }
+
+      function exprToString(expr) {
+        if (!expr) return '';
+        return escapeHtml(exprToStringRecursive(expr.json, 0));
+      }
+
+      function updateAssumptions() {
+        ce.assume('n', 'Integer');
+        ce.assume('six', 6);
+        // ce.assume('y', 5);
+
+        // ce.assume(['Greater', 'x', 4]);
+        // ce.assume(['Equal', 'a', 1]);
+
+        const content = [...ce.assumptions]
+          .map(([assumption, val]) => {
+            return (
+              convertLatexToMarkup(assumption.latex) +
+              '<span>' +
+              (val ? '' : ' is false') +
+              '</span>'
+            );
+          })
+          .join(', ');
+
+        if (content) {
+          document.getElementById('assumptions').innerHTML = content;
+          document
+            .getElementById('assumptions-section')
+            .classList.add('visible');
+        } else
+          document
+            .getElementById('assumptions-section')
+            .classList.remove('visible');
+      }
+    </script>
   </body>
 </html>

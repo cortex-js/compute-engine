@@ -167,9 +167,13 @@ describe('NUMERIC MODE', () => {
 // Minimum  precision is 15 digits
 //
 describe('NUMERIC MODE bignum 7', () => {
-  beforeEach(() => {
+  beforeAll(() => {
     engine.numericMode = 'bignum';
     engine.precision = 7;
+  });
+  afterAll(() => {
+    engine.numericMode = 'auto';
+    engine.precision = 100;
   });
 
   test(`0.1 + 0.2`, () => expect(N('0.1 + 0.2')).toMatchInlineSnapshot(`0.3`));
