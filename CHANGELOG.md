@@ -1,4 +1,6 @@
-## [Unreleased]
+## 0.11.0 
+
+ **Release Date:** 2022-11-18
 
 ### Breaking Changes
 
