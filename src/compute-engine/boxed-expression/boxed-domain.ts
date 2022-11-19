@@ -506,7 +506,7 @@ function isSubdomainOf(
   //
   if (lhsLiteral && rhsLiteral) {
     if (lhsLiteral === rhsLiteral) return [true, xlhs];
-    return [includesDomain(ancestors(lhsLiteral), rhsLiteral), xlhs];
+    return [ancestors(lhsLiteral).includes(rhsLiteral), xlhs];
   }
 
   //
@@ -711,7 +711,7 @@ export function sharedAncestorDomain(
   const aAncestors = [aLiteral, ...ancestors(aLiteral)];
   const bAncestors = [bLiteral, ...ancestors(bLiteral)];
 
-  while (!includesDomain(bAncestors, aAncestors[0])) aAncestors.shift();
+  while (!bAncestors.includes(aAncestors[0])) aAncestors.shift();
 
   return a.engine.domain(aAncestors[0]);
 }
@@ -732,11 +732,6 @@ function domainLiteralAncestor(dom: BoxedDomain): string {
   if (result === 'Intersection') return 'Anything'; // @todo could be more narrow
 
   return result;
-}
-
-function includesDomain(xs: string[], y: string): boolean {
-  for (const x of xs) if (x === y) return true;
-  return false;
 }
 
 function serialize(
