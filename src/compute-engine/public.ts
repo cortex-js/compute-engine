@@ -1827,23 +1827,41 @@ export type SymbolFlags = {
   composite: boolean | undefined;
 };
 
-export type SymbolDefinitionFlags = {
+export type SymbolAttributes = {
   /**
-   * If true the value of the symbol is constant.
+   * If `true` the value of the symbol is constant. The value or domain of
+   * symbols with this attribute set to `true` cannot be changed.
    *
-   * If false, the symbol is a variable.
+   * If `false`, the symbol is a variable.
+   *
+   * **Default**: `false`
    */
   constant: boolean;
 
   /**
-   * If `false`, the value of the symbol is substituted during canonicalization
-   * or simplification.
-   *
-   * If true, the value is only replaced during a `ce.N()` or `ce.evaluate()`.
-   *
-   * **Default:** `true`
-   */
-  hold: boolean;
+   * If the symbol has a value, it is held as indicated in the table below.
+   * A green checkmark indicate that the symbol is substituted.
+
+<div class=symbols-table>
+
+| Operation | `"never"` | `"simplify"` | `"evaluate"` | `"N"` |
+| :--- | :----- |
+| `canonical()`|  {% icon "circle-check" "green-700" %} | | | |
+| `simplify()` |   {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | | |
+| `evaluate()` |   {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | |
+| `"N()"` |  {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %}  |  {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %}  |
+
+</div>
+
+  * Some examples:
+  * - `i` has `holdUntil: 'never'`
+  * - `GoldenRatio` has `holdUntil: 'simplify'` (symbolic constant)
+  * - `x` has `holdUntil: 'evaluate'` (variables)
+  * - `Pi` has `holdUntil: 'N'` (special numeric constant)
+  * 
+  * **Default:** `simplify`
+  */
+  holdUntil: 'never' | 'simplify' | 'evaluate' | 'N';
 };
 
 /**
@@ -1851,8 +1869,9 @@ export type SymbolDefinitionFlags = {
  * (e.g. ∀ x ∈ ℝ), a value (x = 5) or both (π: value = 3.14... domain = TranscendentalNumber)
  */
 export type SymbolDefinition = BaseDefinition &
-  Partial<SymbolFlags> &
-  Partial<SymbolDefinitionFlags> & {
+  Partial<SymbolAttributes> & {
+    domain?: string | BoxedDomain;
+
     /** `value` can be a function since for some constants, such as
      * `Pi`, the actual value depends on the `precision` setting of the
      * `ComputeEngine` */
@@ -1861,7 +1880,7 @@ export type SymbolDefinition = BaseDefinition &
       | SemiBoxedExpression
       | ((ce: IComputeEngine) => SemiBoxedExpression | null);
 
-    domain?: string | BoxedDomain;
+    flags?: Partial<SymbolFlags>;
 
     /**
      * If this symbol is an indexable collection, return the
@@ -1893,8 +1912,8 @@ export type SymbolDefinition = BaseDefinition &
 
 export interface BoxedSymbolDefinition
   extends BoxedBaseDefinition,
-    Partial<SymbolFlags>,
-    SymbolDefinitionFlags {
+    SymbolAttributes,
+    Partial<SymbolFlags> {
   get value(): BoxedExpression | undefined;
   set value(val: SemiBoxedExpression | number | undefined);
 

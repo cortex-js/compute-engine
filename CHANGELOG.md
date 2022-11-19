@@ -5,6 +5,21 @@
 - The signature of `ce.defineSymbol()`, `ce.defineFunction()` and
   `ce.pushScope()` have changed
 
+### Improvements
+
+- When a constant should be held or substituted with its value can now be more
+  precisely controlled. The `hold` symbol attribute is now `holdUntil` and can
+  specify at which stage the substitution should take place.
+
+### Bug Fixes
+
+- Some constants would return a value as bignum or complex even when the
+  `numericMode` did not allow it.
+- Changing the value or domain of a symbol is now correctly taken into account.
+  Changes can be made with `ce.assume()`, `ce.set()` or `expr.value`.
+- When a symbol does not have a value associated with it, assumptions about it
+  (e.g. "x > 0") are now correctly tracked and reflected.
+
 ## 0.10.0
 
 **Release Date:** 2022-11-17

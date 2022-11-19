@@ -213,7 +213,11 @@ export function setCurrentContextSymbolTable(
 
       idTable.set(name, def);
     } else {
-      console.error('Unexpected definition');
+      const def = new BoxedSymbolDefinitionImpl(engine, name, {
+        value: engine.box(entry as any),
+      });
+      console.assert(def);
+      idTable.set(name, def);
     }
   }
 }

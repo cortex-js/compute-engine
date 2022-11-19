@@ -760,14 +760,14 @@ export const ARITHMETIC_LIBRARY: IDTable[] = [
     e: {
       domain: 'TranscendentalNumber',
       constant: true,
-      hold: false,
+      holdUntil: 'never',
       value: 'ExponentialE',
     },
     i: {
       domain: 'ImaginaryNumber',
       constant: true,
-      hold: false,
-      imaginary: true,
+      holdUntil: 'never',
+      flags: { imaginary: true },
       value: 'ImaginaryUnit',
     },
     MachineEpsilon: {
@@ -779,31 +779,31 @@ export const ARITHMETIC_LIBRARY: IDTable[] = [
        * See https://en.wikipedia.org/wiki/Machine_epsilon
        */
       domain: 'RealNumber',
-      hold: true,
+      holdUntil: 'N',
       constant: true,
-      real: true,
+      flags: { real: true },
       value: { num: Number.EPSILON.toString() },
     },
     Half: {
       constant: true,
-      hold: false,
+      holdUntil: 'never',
       value: ['Rational', 1, 2],
     },
     ImaginaryUnit: {
       domain: 'ImaginaryNumber',
       constant: true,
-      hold: true,
+      holdUntil: 'evaluate', // @todo maybe?
       wikidata: 'Q193796',
-      imaginary: true,
+      flags: { imaginary: true },
       value: ['Complex', 0, 1],
     },
     ExponentialE: {
       domain: 'TranscendentalNumber',
-      algebraic: false,
+      flags: { algebraic: false, real: true },
       wikidata: 'Q82435',
       constant: true,
-      hold: true,
-      real: true,
+      holdUntil: 'N',
+
       value: (engine) =>
         bignumPreferred(engine) ? engine._BIGNUM_ONE.exp() : Math.exp(1),
     },
@@ -811,16 +811,17 @@ export const ARITHMETIC_LIBRARY: IDTable[] = [
       domain: 'AlgebraicNumber',
       wikidata: 'Q41690',
       constant: true,
-      algebraic: true,
-      hold: false,
+      flags: { algebraic: true },
+      holdUntil: 'simplify',
       value: ['Divide', ['Add', 1, ['Sqrt', 5]], 2],
     },
     CatalanConstant: {
       domain: 'RealNumber',
-      algebraic: undefined, // Not proven irrational or transcendental
+      flags: { algebraic: undefined }, // Not proven irrational or transcendental
+
       wikidata: 'Q855282',
       constant: true,
-      hold: true,
+      holdUntil: 'N',
       value: {
         // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants1.html
         num: `0.91596559417721901505460351493238411077414937428167
@@ -849,9 +850,9 @@ export const ARITHMETIC_LIBRARY: IDTable[] = [
     EulerGamma: {
       // From http://www.fullbooks.com/Miscellaneous-Mathematical-Constants2.html
       domain: 'RealNumber',
-      algebraic: undefined, // Not proven irrational or transcendental
+      flags: { algebraic: undefined }, // Not proven irrational or transcendental
       wikidata: 'Q273023',
-      hold: true,
+      holdUntil: 'N',
       constant: true,
       value: {
         num: `0.57721566490153286060651209008240243104215933593992359880576723488486772677766

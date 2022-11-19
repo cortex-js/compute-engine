@@ -305,7 +305,7 @@
       <div class="output-section" id="json-form">
         <h2><code>expr.json</code></h2>
         <div class="row">
-          <div class="latex"></div>
+          <math-field read-only class="latex"></math-field>
           <button class="toggle">
             <svg><use xlink:href="#info-circle" /></svg>
           </button>
@@ -316,21 +316,21 @@
       <div class="output-section" id="symbols">
         <h2><code>expr.symbols</code></h2>
         <div class="row">
-          <div class="latex"></div>
+          <math-field read-only class="latex"></math-field>
         </div>
       </div>
 
       <div class="output-section" id="solve">
         <h2><code class="label">solve</code></h2>
         <div class="row">
-          <div class="latex"></div>
+          <math-field read-only class="latex"></math-field>
         </div>
       </div>
 
       <div class="output-section" id="canonical-form">
         <h2><code>expr.canonical</code></h2>
         <div class="row">
-          <div class="latex"></div>
+          <math-field read-only class="latex"></math-field>
           <button class="toggle">
             <svg><use xlink:href="#info-circle" /></svg>
           </button>
@@ -341,7 +341,7 @@
       <div class="output-section" id="domain">
         <h2><code>expr.domain</code></h2>
         <div class="row">
-          <div class="latex"></div>
+          <math-field read-only class="latex"></math-field>
           <button class="toggle">
             <svg><use xlink:href="#info-circle" /></svg>
           </button>
@@ -352,7 +352,7 @@
       <div class="output-section" id="simplify">
         <h2><code>expr.simplify()</code></h2>
         <div class="row">
-          <div class="latex"></div>
+          <math-field read-only class="latex"></math-field>
           <button class="toggle">
             <svg><use xlink:href="#info-circle" /></svg>
           </button>
@@ -363,7 +363,7 @@
       <div class="output-section" id="evaluate">
         <h2><code>expr.evaluate()</code></h2>
         <div class="row">
-          <div class="latex"></div>
+          <math-field read-only class="latex"></math-field>
           <button class="toggle">
             <svg><use xlink:href="#info-circle" /></svg>
           </button>
@@ -374,7 +374,7 @@
       <div class="output-section" id="expand">
         <h2><code>Expand()</code></h2>
         <div class="row">
-          <div class="latex"></div>
+          <math-field read-only class="latex"></math-field>
           <button class="toggle">
             <svg><use xlink:href="#info-circle" /></svg>
           </button>
@@ -418,7 +418,7 @@
           </div>
         </div>
         <div class="row">
-          <div class="latex"></div>
+          <math-field read-only class="latex"></math-field>
           <button class="toggle">
             <svg><use xlink:href="#info-circle" /></svg>
           </button>
@@ -482,11 +482,7 @@
       const ce = new ComputeEngine();
       // ce.defaultDomain = null;
 
-      ce.pushScope({
-        dictionary: {
-          symbols: [{ name: 'd', value: 500 }],
-        },
-      });
+      ce.pushScope({ hundred: 100 });
 
       updateAssumptions();
 
@@ -753,7 +749,7 @@
 
         el.classList.add('is-visible');
 
-        el.querySelector('.latex').innerHTML = convertLatexToMarkup(latex);
+        el.querySelector('.latex').value = latex;
       }
 
       function updateExpr(expr, id) {
@@ -773,8 +769,8 @@
         }
         const latexEl = el.querySelector('.latex');
         if (latexEl && expr) {
-          latexEl.innerHTML = convertLatexToMarkup(expr.latex);
-        } else latexEl.innerHTML = '';
+          latexEl.value = expr.latex;
+        }
 
         errors = [];
       }

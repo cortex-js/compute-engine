@@ -20,7 +20,6 @@ import {
   BoxedSubstitution,
 } from '../public';
 import { replace } from '../rules';
-import { domainToFlags } from './boxed-symbol-definition';
 import { serializeJsonSymbol } from './serialize';
 import { isValidIdentifier } from '../../math-json/utils';
 import { hashCode } from './utils';
@@ -78,7 +77,11 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   constructor(
     ce: IComputeEngine,
     name: string,
-    options?: { metadata?: Metadata; canonical?: boolean }
+    options?: {
+      metadata?: Metadata;
+      canonical?: boolean;
+      def?: BoxedSymbolDefinition | BoxedFunctionDefinition;
+    }
   ) {
     super(ce, options?.metadata);
 
@@ -89,10 +92,9 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
     console.assert(isValidIdentifier(this._name));
 
-    this._scope =
-      !name.startsWith('_') && options?.canonical ? ce.context : null;
+    this._scope = options?.canonical ? ce.context : null;
 
-    this._def = null; // Mark the def as not cached
+    this._def = options?.def ?? null; // Mark the def as not cached if not provided
   }
 
   get hash(): number {
@@ -243,7 +245,6 @@ export class BoxedSymbol extends AbstractBoxedExpression {
       this._def = this.engine.defineSymbol(this._name, {
         wikidata: this._wikidata,
         domain: this.engine.defaultDomain,
-        ...domainToFlags(this.engine.defaultDomain),
       });
       this._name = this._def.name;
     }
@@ -306,7 +307,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     return (
       this.symbolDefinition?.domain ??
       this.engine.defaultDomain ??
-      this.engine.domain('Anything')
+      this.engine.domain('Value')
     );
   }
 
@@ -334,10 +335,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     } else {
       // Symbol was not bound to a definition, bind it in the current scope
       this.engine.forget(this._name);
-      this._def = this.engine.defineSymbol(this._name, {
-        domain: d,
-        ...domainToFlags(d),
-      });
+      this._def = this.engine.defineSymbol(this._name, { domain: d });
     }
   }
 
@@ -573,30 +571,28 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   }
 
   simplify(options?: SimplifyOptions): BoxedExpression {
+    // If allowed replace this symbol with its value/definition.
+    // In some cases this may allow for some additional simplifications (e.g. `GoldenRatio`).
+    const def = this.symbolDefinition;
+    if (
+      (def?.holdUntil === 'never' || def?.holdUntil === 'simplify') &&
+      def.value
+    )
+      return def.value.simplify(options);
+
     // By default, there is no simplification of symbols,
     // however if a custom set of rules is provided, apply them
-    const expr = options?.rules ? this.replace(options.rules) ?? this : this;
-
-    // If allowed (`hold` attribute in the symbol definition is false and `constant` is true), replace
-    // this symbol with its value/definition. In some cases this may allow for
-    // some additional simplifications (e.g. `GoldenRatio`).
-    if (expr.symbolDefinition?.constant && !expr.symbolDefinition.hold) {
-      const val = expr.value;
-      if (val) return val.simplify(options);
-    }
-    return expr;
+    return options?.rules ? this.replace(options.rules) ?? this : this;
   }
 
-  evaluate(_options?: EvaluateOptions): BoxedExpression {
+  evaluate(options?: EvaluateOptions): BoxedExpression {
     const def = this.symbolDefinition;
-    if (!def || (def.constant && def.hold) || !def.value) return this;
-
-    return def.value.evaluate();
+    if (def?.holdUntil !== 'N') return def?.value?.evaluate(options) ?? this;
+    return this;
   }
 
   N(options?: NOptions): BoxedExpression {
-    // If we're doing a numeric evaluation, the `hold` does not apply,
-    // so call the evaluate handler directly (if the `N` handler doesn't work)
+    // If we're doing a numeric evaluation, the `hold` does not apply
     return this.symbolDefinition?.value?.N(options) ?? this;
   }
 
@@ -620,6 +616,6 @@ export function makeCanonicalSymbol(
   name: string
 ): BoxedExpression {
   const def = ce.lookupSymbol(name, undefined, ce.context!);
-  if (def && def.constant && !def.hold && def.value) return def.value;
-  return new BoxedSymbol(ce, name, { canonical: true });
+  if (def?.holdUntil === 'never' && def.value) return def.value;
+  return new BoxedSymbol(ce, name, { canonical: true, def });
 }

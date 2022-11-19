@@ -158,7 +158,12 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
 export function makeFunctionDefinition(
   engine: IComputeEngine,
   name: string,
-  def: FunctionDefinition
+  def: FunctionDefinition | BoxedFunctionDefinition
 ): BoxedFunctionDefinition {
-  return new BoxedFunctionDefinitionImpl(engine, name, def);
+  if (def instanceof BoxedFunctionDefinitionImpl) return def;
+  return new BoxedFunctionDefinitionImpl(
+    engine,
+    name,
+    def as FunctionDefinition
+  );
 }

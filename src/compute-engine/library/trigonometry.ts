@@ -44,9 +44,9 @@ export const TRIGONOMETRY_LIBRARY: IDTable[] = [
     //
     Pi: {
       domain: 'TranscendentalNumber',
-      algebraic: false,
+      flags: { algebraic: false },
       constant: true,
-      hold: true,
+      holdUntil: 'N',
       wikidata: 'Q167',
       value: (engine) =>
         bignumPreferred(engine) ? engine._BIGNUM_PI : Math.PI,

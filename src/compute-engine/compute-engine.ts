@@ -241,13 +241,9 @@ export class ComputeEngine implements IComputeEngine {
     NumericFunction: null, // (Number^n) -> Number
     RealFunction: null, // (ExtendedRealNumber^n) -> ExtendRealNumber
     TrigonometricFunction: null, // (ComplexNumber) -> ComplexNumber
-    HyperbolicFunction: null,
     LogicOperator: null, // (Boolean, Boolean) -> Boolean
     Predicate: null, // (Anything^n) -> MaybeBoolean
     RelationalOperator: null, // (Anything, Anything) -> MaybeBoolean
-    Expression: null, // () -> Anything
-    BooleanExpression: null, // () -> MaybeBoolean
-    NumericExpression: null, // () -> Number
   };
 
   /** @internal */
@@ -404,19 +400,21 @@ export class ComputeEngine implements IComputeEngine {
     const tables = options?.ids ?? ComputeEngine.getStandardLibrary();
     for (const table of tables) setCurrentContextSymbolTable(this, table);
 
-    // Push a fresh scope to protect global definitions:
-    // this will be the "user" scope
-    this.pushScope();
-
     // Patch-up any missing definitions (domains that were
     // 'forward-declared')
-    for (const d of Object.keys(this._commonDomains))
+    for (const d of Object.keys(this._commonDomains)) {
       if (this._commonDomains[d] && !this._commonDomains[d]!.symbolDefinition)
         this._commonDomains[d]!.bind(this.context);
+      else this._commonDomains[d] = boxDomain(this, d);
+    }
 
-    for (const d of Object.keys(this._commonSymbols))
-      if (this._commonSymbols[d] && !this._commonSymbols[d]!.symbolDefinition)
-        this._commonSymbols[d]!.bind(this.context);
+    // Populate the table of common symbols (they should be in the global context)
+    for (const sym of Object.keys(this._commonSymbols)) {
+      this._commonSymbols[sym] = new BoxedSymbol(this, sym, {
+        canonical: true,
+      });
+      this._commonSymbols[sym]!.bind(this.context);
+    }
 
     // Once a scope is set and the default dictionaries)
     // we can reference symbols for the domain names and other constants
@@ -428,6 +426,10 @@ export class ComputeEngine implements IComputeEngine {
         this._defaultDomain = this.domain('ExtendedRealNumber') as BoxedDomain;
     } else
       this._defaultDomain = this.domain('ExtendedRealNumber') as BoxedDomain;
+
+    // Push a fresh scope to protect global definitions:
+    // this will be the "user" scope
+    this.pushScope();
   }
 
   /** After the configuration of the engine has changed, clear the caches
@@ -1340,7 +1342,7 @@ export class ComputeEngine implements IComputeEngine {
     if (options?.metadata?.latex !== undefined && !options.canonical)
       return new BoxedSymbol(this, name, options);
 
-    let result = this._commonSymbols[name];
+    const result = this._commonSymbols[name];
     if (result) {
       // Only use the cache if there is no metadata or it matches
       if (
@@ -1351,12 +1353,6 @@ export class ComputeEngine implements IComputeEngine {
         return result;
       if (options.canonical) return makeCanonicalSymbol(this, name);
       return new BoxedSymbol(this, name, options);
-    }
-    if (result === null) {
-      // If `null`, the symbol is in `_commonSymbols`, but not yet cached
-      result = makeCanonicalSymbol(this, name);
-      this._commonSymbols[name] = result;
-      return result;
     }
     if (options.canonical) return makeCanonicalSymbol(this, name);
     return new BoxedSymbol(this, name, options);
@@ -1370,8 +1366,6 @@ export class ComputeEngine implements IComputeEngine {
     if (domain instanceof AbstractBoxedExpression && domain.symbol)
       domain = domain.symbol;
     if (typeof domain === 'string') {
-      if (this._commonDomains[domain] === null)
-        this._commonDomains[domain] = boxDomain(this, domain, metadata);
       if (this._commonDomains[domain]) return this._commonDomains[domain]!;
     }
 
@@ -1622,7 +1616,9 @@ export class ComputeEngine implements IComputeEngine {
         const def = this.context.idTable.get(symbol);
         if (isSymbolDefinition(def)) {
           def.value = undefined;
-          def.domain = undefined;
+          if (def.domain?.isNumeric) {
+            def.domain = this.defaultDomain ?? this.domain('Number');
+          } else def.domain = undefined;
         } // @todo: if a function....
       }
       // Remove any assumptions that make a reference to this symbol
