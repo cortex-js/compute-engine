@@ -11,43 +11,97 @@ preamble:
   numeric approximation use <kbd>expr.N()</kbd>.</p>'
 ---
 
-An evaluation with `expr.evaluate()` preserves **exact** numbers. Exact 
-numbers are:
-- constants such as `ExponentialE` and `Pi`
+An evaluation with `expr.evaluate()` preserves **exact values**. Exact 
+values are:
 - integers and rationals
 - square roots of integers and rationals
+- constants such as `ExponentialE` and `Pi`
 
 If one of the arguments is not an exact value the expression is evaluated
 as a numeric approximation.
 
-To provide a numeric approximation, use `expr.N()`. If `expr.N()` cannot 
+**To obtain a numeric approximation, use `expr.N()`**. If `expr.N()` cannot 
 provide a numeric evaluation, a symbolic representation of the partially
 evaluated expression is returned.
 
-```js
-console.log(ce.parse('3 + 5 + x').N().latex);
-// ➔ "8 + x"
-```
+The value of `N()` is a boxed expression. The `numericValue` property is
+either a machine number, a `Decimal` object or a `Complex` object, 
+depending on the `numericMode` of the compute engine, or `null` if the 
+result is not a number.
 
-If the expression is [pure](/compute-engine/guides/expressions#pure/), the value
-of the expression can be obtained with `expr.numericValue`.
+**To access a JavaScript machine number approximation of the result** use 
+`valueOf()`. If `numericValue` is a machine number or a `Decimal` object, 
+`valueOf()` will return a machine number approximation. Otherwise it returns
+a string serialization of the MathJSON representation of the expression.
 
 ```js
+console.log(ce.parse('\\sqrt{5} + 7^3').N().valueOf());
+// ➔ 345.2360679774998
+
+console.log(ce.parse('\\sqrt{5} + 7^3').N().numericValue);
+// ➔ [Decimal]
+
+console.log(ce.parse('\\sqrt{5} + 7^3').N().numericValue.toNumber());
+// ➔ 345.2360679774998
+
 console.log(ce.parse('\\sqrt{5} + 7^3').N().latex);
-// ➔ "345.2360679774998"
+// ➔ "345.236\,067\,977\,499\,8,"
 
-console.log(ce.parse('\\sqrt{5} + 7^3').numericValue?.latex);
-// ➔ "345.2360679774998"
+console.log(ce.parse('\\sqrt{x} + 7^3').N().valueOf());
+// ➔ "["Add",343,["Sqrt","x"]]"
 
-console.log(ce.parse('\\sqrt{x} + 7^3').N().latex);
-// ➔ "\sqrt{x} + 343"
-
-console.log(ce.parse('\\sqrt{x} + 7^3').numericValue?.latex);
-// ➔ undefined
 ```
 
 {% readmore "/compute-engine/guides/symbolic-computing/" %} Read more about
 <strong>Symbolic Computing</strong> {% endreadmore %}
+
+## Repeated Evaluation
+
+**To repeatedly evaluate an expression** use `ce.set()` to change the value 
+of variables. `ce.set()` changes the value associated with one or more 
+variables in the current scope.
+
+
+```js
+const expr = ce.parse("3x^2+4x+c");
+
+for (const x = 0; x < 1; x += 0.01) {
+  ce.set({x : x});
+  console.log(`f(${x}) = ${expr.N().valueOf()}`);
+}
+```
+
+
+You can also use `expr.subs()`, but this will create a brand new expression 
+on each iteration, and will be much slower.
+
+```js
+const expr = ce.parse("3x^2+4x+c");
+
+for (const x = 0; x < 1; x += 0.01) {
+  console.log(`f(${x}) = ${expr.subs({x: x}).N().valueOf()}`);
+}
+```
+
+**To reset a variable to be unbound to a value** use `ce.set()`
+
+```js
+ce.set({x: null});
+
+console.log(expr.N().latex);
+// ➔ "3x^2+4x+c"
+```
+
+You can change the value of a variable by setting its `value` property:
+
+```ts
+
+ce.symbol('x').value = 5;
+
+ce.symbol('x').value = undefined;
+
+```
+
 
 ## Numeric Modes
 
@@ -208,7 +262,8 @@ Changing the numeric mode to `complex` automatically sets the precision to 15.
 When using the `auto` numeric mode, calculations are performed using bignum 
 numbers.
 
-Computations which result in a complex number will return a complex number.
+Computations which result in a complex number will return a complex number as
+a `Complex` object.
 
 
 ## Simplifying Before Evaluating
@@ -219,7 +274,7 @@ evaluated.**
 Because of the limitations of machine numbers, this may produce surprising
 results.
 
-For example:
+For example, when `numericMode = "machine"`:
 
 ```js
 const x = ce.parse('0.1 + 0.2').N();
