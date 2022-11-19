@@ -194,7 +194,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         head(op1) === 'ErrorCode' ? stringValue(op(op1, 1)) : stringValue(op1);
 
       if (code === 'incompatible-domain') {
-        return `\\mathtip{\\error{${where}}{\\in ${serializer.serialize(
+        return `\\mathtip{\\error{${where}}}{\\in ${serializer.serialize(
           op(op1, 3)
         )}\\notin ${serializer.serialize(op(op1, 2))}}`;
       }
