@@ -13,7 +13,10 @@ describe('CONSTANTS', () => {
   test(`ImaginaryUnit`, () =>
     expect(checkJson(`ImaginaryUnit`)).toMatchInlineSnapshot(`
       box       = ImaginaryUnit
-      N-auto    = ["Complex", 0, 1]
+      evaluate  = ["Complex", 0, 1]
+      eval-big  = {num: "NaN"}
+      eval-mach = {num: "NaN"}
+      eval-cplx = ["Complex", 0, 1]
     `));
   test(`MachineEpsilon`, () =>
     expect(checkJson(`MachineEpsilon`)).toMatchInlineSnapshot(`
@@ -24,11 +27,12 @@ describe('CONSTANTS', () => {
     expect(checkJson(`CatalanConstant`)).toMatchInlineSnapshot(`
       box       = CatalanConstant
       N-auto    = 0.91596559417721901505
+      N-mach    = 0.915965594177219
     `));
   test(`GoldenRatio`, () =>
     expect(checkJson(`GoldenRatio`)).toMatchInlineSnapshot(`
       box       = GoldenRatio
-      canonical = ["Multiply", ["Rational", 1, 2], ["Add", 1, ["Sqrt", 5]]]
+      simplify  = ["Multiply", ["Rational", 1, 2], ["Add", 1, ["Sqrt", 5]]]
       N-auto    = 1.6180339887498948482
       N-mach    = 1.618033988749895
     `));
@@ -36,6 +40,7 @@ describe('CONSTANTS', () => {
     expect(checkJson(`EulerGamma`)).toMatchInlineSnapshot(`
       box       = EulerGamma
       N-auto    = 0.57721566490153286061
+      N-mach    = 0.5772156649015329
     `));
 });
 

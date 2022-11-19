@@ -198,9 +198,10 @@ describe('OPERATOR prefix', () => {
     expect(check('-i')).toMatchInlineSnapshot(`
       latex     = ["Negate", "i"]
       box       = ["Negate", "ImaginaryUnit"]
-      N-auto    = ["Complex", 0, -1]
-      N-big     = {num: "NaN"}
-      N-cplx   = ["Complex", 0, -1]
+      evaluate  = ["Complex", 0, -1]
+      eval-big  = {num: "NaN"}
+      eval-mach = {num: "NaN"}
+      eval-cplx = ["Complex", 0, -1]
     `));
   test('-\\infty // Negate', () =>
     expect(check('-\\infty')).toMatchInlineSnapshot(`
@@ -222,7 +223,10 @@ describe('OPERATOR prefix', () => {
     expect(check('+i')).toMatchInlineSnapshot(`
       latex     = i
       box       = ImaginaryUnit
-      N-auto    = ["Complex", 0, 1]
+      evaluate  = ["Complex", 0, 1]
+      eval-big  = {num: "NaN"}
+      eval-mach = {num: "NaN"}
+      eval-cplx = ["Complex", 0, 1]
     `));
   test('+\\infty // Infix plus', () =>
     expect(check('+\\infty')).toMatchInlineSnapshot(`

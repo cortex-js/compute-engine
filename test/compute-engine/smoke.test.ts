@@ -29,7 +29,6 @@ import {
 } from '../utils';
 
 const ce = engine;
-// ce.numericMode = 'bignum';
 // engine.jsonSerializationOptions.precision = 16;
 
 // For the remainder of theses tests, assume that the symbol `f` represent a
@@ -71,7 +70,7 @@ function fastEval() {
   const expr3 = expr.subs(vars).N();
 
   ce.numericMode = 'machine';
-  ce.strict = true;
+  ce.strict = false;
 
   let y = 0;
   const startTime = performance.now();
@@ -86,12 +85,8 @@ function fastEval() {
 }
 // ---
 
-slowEval();
-fastEval();
-
-ce.set({ vv: 0 });
-// Should return a symbol, not 0
-const v = ce.symbol('vv');
+// slowEval();
+// fastEval();
 
 console.log(ce.parse('f\\left(\\right)').toString());
 

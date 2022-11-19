@@ -33,7 +33,7 @@ describe('INFERRED DOMAINS', () => {
 
   test('sym', () =>
     expect(engine.box('sym').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Anything"]`
+      `["Domain", "Value"]`
     ));
 
   test('True', () =>
@@ -67,7 +67,7 @@ describe('INFERRED DOMAINS', () => {
   });
   test('Nothing', () => {
     expect(engine.box('Nothing').domain.json).toMatchInlineSnapshot(
-      `["Domain", "Domain"]`
+      `["Domain", "Nothing"]`
     );
   });
 });
