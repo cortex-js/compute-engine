@@ -197,7 +197,8 @@ export function evalSummation(
     lower = asSmallInteger(range.op2) ?? 1;
     upper = asSmallInteger(range.op3) ?? MAX_ITERATION;
   }
-  if (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS) return undefined;
+  if (mode !== 'N' && (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS))
+    return undefined;
 
   const savedContext = ce.context;
   ce.context = fn.scope ?? ce.context;
