@@ -3,10 +3,10 @@
 
 import { isDomain } from '../boxed-expression/boxed-domain';
 import { validateArgumentCount } from '../boxed-expression/validate';
-import { BoxedExpression, IDTable, IComputeEngine } from '../public';
+import { BoxedExpression, IdTable, IComputeEngine } from '../public';
 import { flattenSequence } from '../symbolic/flatten';
 
-export const SETS_LIBRARY: IDTable = {
+export const SETS_LIBRARY: IdTable = {
   //
   // Constants
   //

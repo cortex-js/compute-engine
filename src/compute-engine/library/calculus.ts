@@ -1,7 +1,7 @@
 import { validateArgument } from '../boxed-expression/validate';
-import { BoxedExpression, IDTable } from '../public';
+import { BoxedExpression, IdTable } from '../public';
 
-export const CALCULUS_LIBRARY: IDTable[] = [
+export const CALCULUS_LIBRARY: IdTable[] = [
   {
     //
     // Functions

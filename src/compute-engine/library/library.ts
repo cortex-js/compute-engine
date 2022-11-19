@@ -10,7 +10,7 @@ import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
 import { LibraryCategory } from '../latex-syntax/public';
 
-import { IComputeEngine, IDTable } from '../public';
+import { IComputeEngine, IdTable } from '../public';
 import { BoxedSymbolDefinitionImpl } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
 import { isValidIdentifier } from '../../math-json/utils';
@@ -18,7 +18,7 @@ import { isFunctionDefinition, isSymbolDefinition } from './utils';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'
-): Readonly<IDTable>[] {
+): Readonly<IdTable>[] {
   if (categories === 'all') {
     // **Note** the order of the libraries matter:
     // earlier libraries cannot reference definitions in later libraries.
@@ -44,7 +44,7 @@ export function getStandardLibrary(
       'units',
     ]);
   } else if (typeof categories === 'string') categories = [categories];
-  const result: Readonly<IDTable>[] = [];
+  const result: Readonly<IdTable>[] = [];
   for (const category of categories) {
     const dict = LIBRARIES[category];
     if (!dict) throw Error(`Unknown library category ${category}`);
@@ -55,7 +55,7 @@ export function getStandardLibrary(
 }
 
 export const LIBRARIES: {
-  [category in LibraryCategory]?: Readonly<IDTable> | Readonly<IDTable>[];
+  [category in LibraryCategory]?: Readonly<IdTable> | Readonly<IdTable>[];
 } = {
   'algebra': [],
   // 'algebra': [
@@ -164,7 +164,7 @@ function validateDefinitionName(name: string): string {
  */
 export function setCurrentContextSymbolTable(
   engine: IComputeEngine,
-  table: IDTable
+  table: IdTable
 ): void {
   if (!engine.context) throw Error('No context available');
 

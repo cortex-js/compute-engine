@@ -1,4 +1,4 @@
-import { BoxedExpression, IDTable } from '../public';
+import { BoxedExpression, IdTable } from '../public';
 import { joinLatex, tokenize, tokensToString } from '../latex-syntax/tokenizer';
 import { asFloat, asSmallInteger, fromDigits } from '../numerics/numeric';
 
@@ -11,7 +11,7 @@ import { apply } from '../boxed-expression/boxed-function';
 
 //   // := assign 80 // @todo
 
-export const CORE_LIBRARY: IDTable[] = [
+export const CORE_LIBRARY: IdTable[] = [
   {
     Nothing: { domain: 'Nothing' },
   },
@@ -521,11 +521,10 @@ export const CORE_LIBRARY: IDTable[] = [
           const op1 = ops[0];
           const val = asFloat(op1) ?? NaN;
           if (Number.isNaN(val) || !Number.isInteger(val)) {
-            ce.signal(
-              ce._fn('IntegerString', ops),
-              `Expected first argument as an integer. Got \\(${op1.latex}$\\)`
+            return ce.error(
+              ['incompatible-domain', 'Integer', op1.domain],
+              op1
             );
-            return undefined;
           }
 
           const op2 = ops[1];
@@ -541,20 +540,14 @@ export const CORE_LIBRARY: IDTable[] = [
           }
 
           if (asSmallInteger(op2) === null) {
-            ce.signal(
-              ce._fn('IntegerString', ops),
-              `Expected \`base\` as an integer between 2 and 36. Got \\(${op2.latex}$\\)`
+            return ce.error(
+              ['incompatible-domain', 'Integer', op2.domain],
+              op2
             );
-            return undefined;
           }
           const base = asSmallInteger(op2)!;
-          if (base < 2 || base > 36) {
-            ce.signal(
-              ce._fn('IntegerString', ops),
-              `Expected \`base\` as an integer between 2 and 36. Got ${base}`
-            );
-            return undefined;
-          }
+          if (base < 2 || base > 36)
+            return ce.error(['out-of-range', 2, 36, base], op2);
 
           return ce.string(Math.abs(val).toString(base));
         },

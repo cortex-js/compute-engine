@@ -19,7 +19,7 @@ import {
   isMachineRational,
   rationalize,
 } from '../numerics/rationals';
-import { BoxedExpression, IDTable, IComputeEngine } from '../public';
+import { BoxedExpression, IdTable, IComputeEngine } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
@@ -79,7 +79,7 @@ import { flattenSequence } from '../symbolic/flatten';
 // Binomial
 // Fibonacci
 
-export const ARITHMETIC_LIBRARY: IDTable[] = [
+export const ARITHMETIC_LIBRARY: IdTable[] = [
   {
     //
     // Functions

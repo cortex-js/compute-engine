@@ -1,6 +1,6 @@
-import { IDTable } from '../public';
+import { IdTable } from '../public';
 
-export const COLLECTIONS_LIBRARY: IDTable = {
+export const COLLECTIONS_LIBRARY: IdTable = {
   Sequence: {
     signature: {
       domain: 'Function',

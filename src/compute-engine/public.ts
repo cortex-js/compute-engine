@@ -11,11 +11,6 @@
 import type { Decimal } from 'decimal.js';
 import type { Complex } from 'complex.js';
 import type {
-  SignalMessage,
-  WarningSignal,
-  WarningSignalHandler,
-} from '../common/signals';
-import type {
   Expression,
   MathJsonDictionary,
   MathJsonFunction,
@@ -112,13 +107,11 @@ export type ReplaceOptions = {
  * A substitution can also be considered a more constrained version of a
  * rule whose `lhs` is always a symbol.
  */
-export type Substitution = {
-  [symbol: string]: SemiBoxedExpression;
+export type Substitution<T = SemiBoxedExpression> = {
+  [symbol: string]: T;
 };
 
-export type BoxedSubstitution = {
-  [symbol: string]: BoxedExpression;
-};
+export type BoxedSubstitution = Substitution<BoxedExpression>;
 
 /** A LaTeX string starts and end with `$`, for example
  * `"$\frac{\pi}{2}$"`.
@@ -1304,7 +1297,7 @@ export interface ExpressionMapInterface<U> {
  *
  */
 
-export type IDTable = { [id: string]: SymbolDefinition | FunctionDefinition };
+export type IdTable = { [id: string]: SymbolDefinition | FunctionDefinition };
 
 /**
  * The entries of a `RuntimeIdentifierTable` have been validated and
@@ -1335,37 +1328,33 @@ export type RuntimeIdentifierTable = Map<
  *
  */
 export type Scope = {
-  /** This handler is invoked when exiting this scope if there are any
-   * warnings pending. */
-  warn?: WarningSignalHandler;
-
   /** Signal `timeout` when the execution time for this scope is exceeded.
    * Time in seconds, default 2s.
    *
    * @experimental
    */
-  timeLimit?: number;
+  timeLimit: number;
 
   /** Signal `out-of-memory` when the memory usage for this scope is exceeded.
    * Memory in Megabytes, default: 1Mb.
    *
    * @experimental
    */
-  memoryLimit?: number;
+  memoryLimit: number;
 
   /** Signal `recursion-depth-exceeded` when the recursion depth for this
    * scope is exceeded.
    *
    * @experimental
    */
-  recursionLimit?: number;
+  recursionLimit: number;
 
   /** Signal `iteration-limit-exceeded` when the iteration limit for this
    * scope is exceeded. Default: no limits.
    *
    * @experimental
    */
-  iterationLimit?: number;
+  iterationLimit: number;
 };
 
 export type RuntimeScope = Scope & {
@@ -1384,9 +1373,6 @@ export type RuntimeScope = Scope & {
 
   /** Free memory should not go below this level for execution to proceed */
   lowWaterMark?: number;
-
-  /** Set when one or more warnings have been signaled in this scope */
-  warnings?: WarningSignal[];
 };
 
 export type BaseDefinition = {
@@ -2248,18 +2234,16 @@ export interface IComputeEngine {
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>);
 
   pushScope(
-    symbolTable?: Readonly<IDTable> | Readonly<IDTable>[],
+    identifiers?: Readonly<IdTable> | Readonly<IdTable>[],
     scope?: Partial<Scope>
   ): void;
   popScope(): void;
 
   /** Assign a value to an identifier in the current scope. Use `null` to reset the identifier to no value */
-  set(identifiers: { [identifier: string]: SemiBoxedExpression | null }): void;
+  set(identifiers: Substitution<SemiBoxedExpression | null | undefined>): void;
 
-  /** Declare identifiers (specify their domain without necessarily assigning them a value in the current scope*/
-  let(identifiers: {
-    [identifier: string]: SymbolDefinition | FunctionDefinition;
-  }): void;
+  /** Declare identifiers (specify their domain without necessarily assigning them a value in the current scope) */
+  let(identifiers: IdTable): void;
 
   /**
    * Add an assumption.
@@ -2293,21 +2277,6 @@ export interface IComputeEngine {
 
   ask(pattern: LatexString | SemiBoxedExpression): BoxedSubstitution[];
 
-  /**
-   * When `condition` is false, signal.
-   *
-   * - `condition` - If `true`, do nothing. If `false`, signal.
-   *
-   * @experimental
-   */
-  assert(
-    condition: boolean,
-    expr: BoxedExpression,
-    msg: string,
-    code?: SignalMessage
-  );
-  signal(expr: BoxedExpression, msg: string, code?: SignalMessage): void;
-  signal(sig: WarningSignal): void;
   /** @internal */
   shouldContinueExecution(): boolean;
   /** @internal */

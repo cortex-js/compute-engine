@@ -1,12 +1,12 @@
 import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
 import {
   BoxedExpression,
-  IDTable,
+  IdTable,
   IComputeEngine,
   BoxedDomain,
 } from '../public';
 
-export const LOGIC_LIBRARY: IDTable = {
+export const LOGIC_LIBRARY: IdTable = {
   True: { wikidata: 'Q16751793', domain: 'Boolean', constant: true },
   False: {
     wikidata: 'Q5432619',

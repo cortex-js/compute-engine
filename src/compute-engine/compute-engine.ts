@@ -2,7 +2,6 @@ import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
 
 import { Expression, MathJsonNumber } from '../math-json/math-json-format';
-import { SignalMessage, WarningSignal } from '../common/signals';
 
 import { LatexSyntax } from './latex-syntax/latex-syntax';
 import type {
@@ -24,7 +23,7 @@ import {
   BoxedFunctionDefinition,
   BoxedSymbolDefinition,
   IComputeEngine,
-  IDTable,
+  IdTable,
   ExpressionMapInterface,
   NumericMode,
   Pattern,
@@ -42,6 +41,7 @@ import {
   FunctionDefinition,
   Rational,
   BoxedSubstitution,
+  Substitution,
 } from './public';
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
@@ -280,7 +280,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   static getStandardLibrary(
     categories: LibraryCategory[] | LibraryCategory | 'all' = 'all'
-  ): Readonly<IDTable>[] {
+  ): Readonly<IdTable>[] {
     return getStandardLibrary(categories);
   }
 
@@ -314,7 +314,7 @@ export class ComputeEngine implements IComputeEngine {
   constructor(options?: {
     numericMode?: NumericMode;
     numericPrecision?: number;
-    ids?: Readonly<IDTable>[];
+    ids?: Readonly<IdTable>[];
     latexDictionary?: readonly LatexDictionaryEntry[];
     tolerance?: number;
     defaultDomain?: string;
@@ -382,19 +382,10 @@ export class ComputeEngine implements IComputeEngine {
     //
     this.context = {
       assumptions: new ExpressionMap(),
-      warn: (sigs: WarningSignal[]): void => {
-        for (const sig of sigs) {
-          if (typeof sig.message === 'string') {
-            console.warn(sig.message);
-          } else {
-            console.warn(...sig.message);
-          }
-        }
-      },
       timeLimit: 2.0, // execution time limit: 2.0 seconds
       memoryLimit: 1.0, // memory limit: 1.0 megabyte
       recursionLimit: 1024,
-      // iterationLimit:    no iteration limit
+      iterationLimit: Number.POSITIVE_INFINITY,
     } as RuntimeScope;
 
     const tables = options?.ids ?? ComputeEngine.getStandardLibrary();
@@ -867,11 +858,12 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
   pushScope(
-    ids?: Readonly<IDTable> | Readonly<IDTable>[],
+    ids?: Readonly<IdTable> | Readonly<IdTable>[],
     scope?: Partial<Scope>
   ): void {
     if (this.context === null) throw Error('No parent scope available');
     this.context = {
+      ...this.context,
       ...(scope ?? {}),
       parentScope: this.context,
       // We always copy the current assumptions in the new scope.
@@ -900,38 +892,12 @@ export class ComputeEngine implements IComputeEngine {
 
     const parentScope = this.context?.parentScope;
 
-    // If there are some warnings, handle them
-    if (this.context.warnings) {
-      const warnings = [...this.context.warnings];
-      this.context.warnings = [];
-      if (this.context.warn) {
-        this.context.warn(warnings);
-      }
-    }
-
-    // If there are some unhandled warnings, or warnings signaled during the
-    // warning handler, propagate them.
-    if (
-      parentScope &&
-      this.context.warnings &&
-      this.context.warnings.length > 0
-    ) {
-      if (!parentScope.warnings) {
-        parentScope.warnings = [...this.context.warnings];
-      } else {
-        parentScope.warnings = [
-          ...parentScope.warnings,
-          ...this.context.warnings,
-        ];
-      }
-    }
-
     this.context = parentScope ?? null;
 
     console.assert(this.context !== null);
   }
 
-  set(identifiers: { [identifier: string]: SemiBoxedExpression | null }): void {
+  set(identifiers: Substitution<SemiBoxedExpression | null | undefined>): void {
     // @fastpath
     if (!this.strict) {
       for (const k of Object.keys(identifiers)) {
@@ -940,6 +906,7 @@ export class ComputeEngine implements IComputeEngine {
           const idk = identifiers[k];
           if (def) def.value = idk ?? undefined;
           else if (idk !== undefined && idk !== null) {
+            // Unknown identifier, define a new one
             const val = this.box(idk);
             if (val.domain.isNumeric)
               this.defineSymbol(k, { value: val, domain: 'Number' });
@@ -974,15 +941,14 @@ export class ComputeEngine implements IComputeEngine {
     }
   }
 
-  let(identifiers: {
-    [identifier: string]: SymbolDefinition | FunctionDefinition;
-  }): void {
+  let(identifiers: IdTable): void {
     for (const k of Object.keys(identifiers)) {
       if (k !== 'Nothing') {
         const def = identifiers[k];
-        if ('value' in def || ('domain' in def && def.domain !== 'Function'))
-          this.defineSymbol(k, def);
-        else this.defineFunction(k, def as FunctionDefinition);
+        if (isSymbolDefinition(def)) this.defineSymbol(k, def);
+        else if (isFunctionDefinition(def))
+          this.defineFunction(k, def as FunctionDefinition);
+        else this.set({ [k]: identifiers[k] as SemiBoxedExpression });
       }
     }
   }
@@ -1020,53 +986,14 @@ export class ComputeEngine implements IComputeEngine {
     }
   }
 
-  assert(
-    condition: boolean,
-    expr: BoxedExpression,
-    msg: string,
-    code?: SignalMessage
-  ) {
-    if (!condition) this.signal(expr, msg, code);
-  }
-
-  /**
-   * Call this function if an unexpected condition occurs during execution of a
-   * function in the engine.
-   *
-   * An `ErrorSignal` is a problem that cannot be recovered from.
-   *
-   * A `WarningSignal` indicates a minor problem that does not prevent the
-   * execution to continue.
-   *
-   */
-  signal(expr: BoxedExpression, msg: string, code?: SignalMessage): void;
-  signal(sig: WarningSignal): void;
-  signal(
-    arg1: WarningSignal | BoxedExpression,
-    msg?: string,
-    code?: SignalMessage
-  ): void {
-    let subject = '';
-    let message = '';
-    // @todo: store the warnings
-    if (typeof arg1 === 'object' && 'message' in arg1) {
-      code = arg1.message;
-    } else {
-      subject = arg1.latex;
-      message = msg ?? '';
-    }
-    const codeString =
-      code === undefined
-        ? ''
-        : typeof code === 'string'
-        ? `[${code}]`
-        : Array.isArray(code)
-        ? '[' + code.map((x) => x.toString()).join(', ') + ']'
-        : '';
-    console.error(`${subject}: ${message ?? ''} ${codeString}`);
-
-    return;
-  }
+  // assert(
+  //   condition: boolean,
+  //   expr: BoxedExpression,
+  //   msg: string,
+  //   code?: SignalMessage
+  // ) {
+  //   if (!condition) this.signal(expr, msg, code);
+  // }
 
   /** @internal */
   cache<T>(cacheName: string, build: () => T, purge: (T) => T | undefined): T {
