@@ -26,7 +26,7 @@ import {
   IComputeEngine,
   IDTable,
   ExpressionMapInterface,
-  NumericMode as NumericMode,
+  NumericMode,
   Pattern,
   RuntimeScope,
   Scope,
@@ -1561,12 +1561,12 @@ export class ComputeEngine implements IComputeEngine {
 
   assume(
     symbol: LatexString | SemiBoxedExpression,
-    domainValue: BoxedDomain  | Expression | BoxedExpression
+    domainValue: BoxedDomain | Expression | BoxedExpression
   ): AssumeResult;
   assume(predicate: LatexString | SemiBoxedExpression): AssumeResult;
   assume(
     arg1: LatexString | SemiBoxedExpression,
-    arg2?: BoxedDomain  | Expression | BoxedExpression
+    arg2?: BoxedDomain | Expression | BoxedExpression
   ): AssumeResult {
     try {
       const latex = latexString(arg1);
