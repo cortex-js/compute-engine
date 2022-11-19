@@ -28,7 +28,6 @@ export function canonicalAdd(
   ce: IComputeEngine,
   ops: BoxedExpression[]
 ): BoxedExpression {
-  if (!ops.every((x) => x.isCanonical)) debugger;
   console.assert(ops.every((x) => x.isCanonical));
 
   ops = flattenOps(flattenSequence(ops.map((x) => x.canonical)), 'Add') ?? ops;
