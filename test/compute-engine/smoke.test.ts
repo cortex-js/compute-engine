@@ -71,7 +71,7 @@ function fastEval() {
   const expr3 = expr.subs(vars).N();
 
   ce.numericMode = 'machine';
-  ce.strict = false;
+  ce.strict = true;
 
   let y = 0;
   const startTime = performance.now();

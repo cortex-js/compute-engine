@@ -6,12 +6,11 @@ date: Last Modified
 sidebar:
   - nav: 'universal'
 preamble:
-  '<h1>Evaluation</h1><p class="xl">To apply a sequence of definitions to an 
-  expression in order to simplify it, calculate its value or get a numerical 
-  approximation of its value, call the <kbd>expr.simplify()</kbd>, 
+  '<h1>Evaluation</h1><p class="xl">To apply a sequence of definitions to an
+  expression in order to simplify it, calculate its value or get a numerical
+  approximation of its value, call the <kbd>expr.simplify()</kbd>,
   <kbd>expr.evaluate()</kbd> or <kbd>expr.N()</kbd> function.</p>'
 ---
-
 
 ## Scopes
 
@@ -30,11 +29,7 @@ until a definition is found.
 **To add a new scope to the context** use `ce.pushScope()`.
 
 ```ts
-ce.pushScope({
-  symbolTable: {
-    symbols: [{ name: 'd', value: 500 }]
-  }
-});
+ce.pushScope({ x: 500 });
 ```
 
 The `symbolTable` property of a scope contains definitions for symbols and
@@ -61,8 +56,8 @@ the symbol and its value. For functions, the definition record include the
 signature of the function (the domain of the argument it expects), and how to
 simplify or evaluate function expressions that have this function as their head.
 
-Name binding is done during canonicalization. If name binding failed, the `isValid`
-property of the expession is `false`.
+Name binding is done during canonicalization. If name binding failed, the
+`isValid` property of the expession is `false`.
 
 **To get a list of the errors in an expression** use the `expr.errors` property.
 
@@ -72,13 +67,13 @@ property of the expession is `false`.
 ## Evaluation Loop
 
 This is an advanced topic. You don't need to know the details of how the
-evaluation loop works, unless you're interested in extending the standard library
-and providing your own function definitions.{notice--info}
+evaluation loop works, unless you're interested in extending the standard
+library and providing your own function definitions.{notice--info}
 
 Each identifier (name of symbol or function) is **bound** to a definition within
-a **scope** during canonicalization. This usually happens when calling `ce.box()`
-or `ce.parse()`, but could also happen during `expr.evaluate()` if `expr` was
-not canonical.
+a **scope** during canonicalization. This usually happens when calling
+`ce.box()` or `ce.parse()`, but could also happen during `expr.evaluate()` if
+`expr` was not canonical.
 
 When a function is evaluated, the following steps are followed:
 
@@ -99,7 +94,7 @@ When a function is evaluated, the following steps are followed:
       evaluation.
 
    2. If an argument is a `["Sequence"]` expression, treat each argument of the
-      sequence expression as if it was an argument of the function. If the 
+      sequence expression as if it was an argument of the function. If the
       sequence is empty, ignore the argument.
 
 3. If the function is associative, flatten its arguments as necessary. \\[

@@ -24,7 +24,7 @@ describe('INFERRED DOMAINS', () => {
     ));
   test('Pi', () =>
     expect(engine.box('Pi').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "PositiveNumber"]`
+      `["Domain", "TranscendentalNumber"]`
     ));
   test('-3.1415', () =>
     expect(engine.box(-3.1415).domain.toJSON()).toMatchInlineSnapshot(
@@ -67,7 +67,7 @@ describe('INFERRED DOMAINS', () => {
   });
   test('Nothing', () => {
     expect(engine.box('Nothing').domain.json).toMatchInlineSnapshot(
-      `["Domain", "Nothing"]`
+      `["Domain", "Domain"]`
     );
   });
 });
