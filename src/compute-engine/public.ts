@@ -1846,10 +1846,10 @@ export type SymbolAttributes = {
 
 | Operation | `"never"` | `"simplify"` | `"evaluate"` | `"N"` |
 | :--- | :----- |
-| `canonical()`|  {% icon "circle-check" "green-700" %} | | | |
-| `simplify()` |   {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | | |
-| `evaluate()` |   {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | |
-| `"N()"` |  {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %}  |  {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %}  |
+| `canonical()`|  (X) | | | |
+| `simplify()` |   (X) | (X) | | |
+| `evaluate()` |   (X) | (X) | (X) | |
+| `"N()"` |  (X) | (X)  |  (X) | (X)  |
 
 </div>
 

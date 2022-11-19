@@ -1561,12 +1561,12 @@ export class ComputeEngine implements IComputeEngine {
 
   assume(
     symbol: LatexString | SemiBoxedExpression,
-    domainValue: BoxedDomain | DomainExpression | Expression | BoxedExpression
+    domainValue: BoxedDomain  | Expression | BoxedExpression
   ): AssumeResult;
   assume(predicate: LatexString | SemiBoxedExpression): AssumeResult;
   assume(
     arg1: LatexString | SemiBoxedExpression,
-    arg2?: BoxedDomain | DomainExpression | Expression | BoxedExpression
+    arg2?: BoxedDomain  | Expression | BoxedExpression
   ): AssumeResult {
     try {
       const latex = latexString(arg1);
