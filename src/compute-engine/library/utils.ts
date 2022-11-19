@@ -31,6 +31,8 @@ export function isFunctionDefinition(
     | null
 ): def is BoxedFunctionDefinition {
   return (
-    !!def && ('complexity' in def || 'numeric' in def || 'signature' in def)
+    !!def &&
+    typeof def === 'object' &&
+    ('complexity' in def || 'numeric' in def || 'signature' in def)
   );
 }
