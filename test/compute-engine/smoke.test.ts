@@ -88,6 +88,12 @@ function fastEval() {
 // slowEval();
 // fastEval();
 
+const t1 = ce.parse('\\cos(5\\pi+k)');
+// Canonical should simplify argument to -π/+π range
+console.log(t1.toString());
+
+console.log(t1.simplify().toString());
+
 console.log(ce.parse('f\\left(\\right)').toString());
 
 // Produces error -- mathlive #1707

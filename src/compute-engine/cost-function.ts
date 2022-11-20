@@ -41,7 +41,7 @@ import { BoxedExpression } from './public';
  */
 
 function numericCostFunction(n: number): number {
-  if (Number.isInteger(n)) {
+  if (Number.isInteger(n) && n !== 0) {
     return Math.floor(Math.log2(Math.abs(n)) / Math.log2(10)) + (n > 0 ? 1 : 2);
   }
 

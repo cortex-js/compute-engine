@@ -38,7 +38,7 @@ import { validateNumericArgs, validateSignature } from './validate';
 /**
  * Considering an old (existing) expression and a new (simplified) one,
  * return the cheapest of the two, with a bias towards the new (which can
- * actually be a bit mor expensive than the old one, and still be picked).
+ * actually be a bit more expensive than the old one, and still be picked).
  */
 function cheapest(
   oldExpr: BoxedExpression,
@@ -52,12 +52,6 @@ function cheapest(
   if (ce.costFunction(boxedNewExpr) <= 1.7 * ce.costFunction(oldExpr)) {
     return boxedNewExpr;
   }
-  console.log(
-    'Cheapest: Rejected ',
-    boxedNewExpr.toString(),
-    'in favor of ',
-    oldExpr.toString()
-  ); // @debug
   return oldExpr;
 }
 
@@ -615,6 +609,8 @@ export class BoxedFunction extends AbstractBoxedExpression {
 
     //
     // 2/ Simplify the applicable operands
+    // @todo not clear if this is always the best strategy. Might be better to
+    // defer to the handler.
     //
     const def = this.functionDefinition;
     const tail = holdMap(
@@ -647,6 +643,9 @@ export class BoxedFunction extends AbstractBoxedExpression {
     }
 
     if (!expr) expr = this.engine.fn(this._head, tail);
+    else expr = cheapest(expr, this.engine.fn(this._head, tail));
+
+    expr = cheapest(this, expr);
 
     //
     // 5/ Apply rules, until no rules can be applied
@@ -688,7 +687,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // }
     // @debug-end
 
-    return expr;
+    return cheapest(this, expr);
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
