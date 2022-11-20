@@ -198,18 +198,13 @@ export function setCurrentContextSymbolTable(
         for (const [_, d] of idTable) {
           if (d.wikidata === entry.wikidata)
             throw new Error(
-              `Duplicate entry with wikidata "${entry.wikidata}": "${name}" and "${d.name}"`
+              `Duplicate entries with wikidata "${entry.wikidata}": "${name}" and "${d.name}"`
             );
         }
       }
 
-      if (idTable.has(name)) {
-        throw new Error(
-          `Duplicate symbol definition "${name}":\n${JSON.stringify(
-            idTable.get(name)!
-          )}\n${JSON.stringify(entry)}`
-        );
-      }
+      if (idTable.has(name))
+        throw new Error(`Duplicate symbol definition "${name}"`);
 
       idTable.set(name, def);
     } else {

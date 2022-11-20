@@ -607,7 +607,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // 1/ Use the canonical form
     //
     if (!this.isValid) return this;
-    if (!this.isCanonical) return this.canonical.simplify(options);
+    if (!this.isCanonical) {
+      const canonical = this.canonical;
+      if (!this.isCanonical || !this.isValid) return this;
+      return canonical.simplify(options);
+    }
 
     //
     // 2/ Simplify the applicable operands
@@ -692,7 +696,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     // 1/ Use the canonical form
     //
     if (!this.isValid) return this;
-    if (!this.isCanonical) return this.canonical.evaluate(options);
+    if (!this.isCanonical) {
+      const canonical = this.canonical;
+      if (!this.isCanonical || !this.isValid) return this;
+      return canonical.evaluate(options);
+    }
 
     //
     // 2/ Evaluate the applicable operands
@@ -746,7 +754,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     if (this._numericValue) return this._numericValue;
     if (this.engine.strict && !this.isValid) return this;
-    if (!this.isCanonical) return this.canonical.N(options);
+    if (!this.isCanonical) {
+      const canonical = this.canonical;
+      if (!this.isCanonical || !this.isValid) return this;
+      return canonical.N(options);
+    }
 
     //
     // 2/ Evaluate the applicable operands
@@ -906,8 +918,12 @@ export function makeCanonicalFunction(
   // the expression.
   //
   if (sig.canonical) {
-    const result = sig.canonical(ce, xs);
-    if (result) return result;
+    try {
+      const result = sig.canonical(ce, xs);
+      if (result) return result;
+    } catch (e) {
+      console.error(e);
+    }
     return new BoxedFunction(ce, head, xs, { metadata, canonical: false });
   }
 

@@ -237,7 +237,7 @@ function numEvalPower(
     if (invExp === 2) {
       if (bigBase.isNeg())
         return complexAllowed(ce)
-          ? ce.mul([ce._I, ce.number(bigBase.neg().sqrt())])
+          ? ce.number(ce.complex(0, bigBase.neg().sqrt().toNumber()))
           : ce._NAN;
       return ce.number(bigBase.sqrt());
     }

@@ -863,7 +863,10 @@ export class ComputeEngine implements IComputeEngine {
   ): void {
     if (this.context === null) throw Error('No parent scope available');
     this.context = {
-      ...this.context,
+      timeLimit: this.context.timeLimit,
+      memoryLimit: this.context.memoryLimit,
+      recursionLimit: this.context.recursionLimit,
+      iterationLimit: this.context.iterationLimit,
       ...(scope ?? {}),
       parentScope: this.context,
       // We always copy the current assumptions in the new scope.
