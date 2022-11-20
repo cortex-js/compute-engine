@@ -38,26 +38,26 @@ export function assume(proposition: BoxedExpression): AssumeResult {
 function assumeEquality(proposition: BoxedExpression): AssumeResult {
   console.assert(proposition.head === 'Equal');
   // Four cases:
-  // 1/ proposition contains no free variable without value
+  // 1/ proposition contains no free variables
   //    e.g. `2 + 1 = 3`, `\pi + 1 = \pi`
   //    => evaluate and return
-  // 2/ lhs is a single free variable with no value and `rhs` does not
-  //     contain `lhs`
+  // 2/ lhs is a single free variable and `rhs` does not contain `lhs`
   //    e.g. `x = 2`, `x = 2\pi`
   //    => if `lhs` has a definition, set its value to `rhs`, otherwise
   //          define a new symbol with a value of `rhs`
-  // 3/ proposition contains a single free variable without value
+  // 3/ proposition contains a single free variable
   //    => solve for the free variable, create new def or set value of the
   //      free variable with the root(s) as value
-  // 4/ proposition contains multiple free variables with no value
+  // 4/ proposition contains multiple free variables
   //    => add (lhs - rhs = 0) to assumptions DB
 
   // Case 1
-  const unvals = unvaluedIdentifiers(proposition);
-  if (unvals.length === 0) {
+  const freeVars = proposition.freeVars;
+  if (freeVars.length === 0) {
     const val = proposition.evaluate();
     if (val.symbol === 'True') return 'tautology';
     if (val.symbol === 'False') return 'contradiction';
+    console.log(proposition.canonical.evaluate());
     return 'not-a-predicate';
   }
 
@@ -65,7 +65,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
 
   // Case 2
   const lhs = proposition.op1.symbol;
-  if (lhs && !hasValue(ce, lhs!) && !proposition.op2.has(lhs)) {
+  if (lhs && !hasValue(ce, lhs) && !proposition.op2.has(lhs)) {
     const val = proposition.op2.evaluate();
     if (!val.isValid) return 'not-a-predicate';
     const def = ce.lookupSymbol(lhs);
@@ -80,8 +80,8 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
   }
 
   // Case 3
-  if (unvals.length === 1) {
-    const lhs = unvals[0];
+  if (freeVars.length === 1) {
+    const lhs = freeVars[0];
     const sols = findUnivariateRoots(proposition, lhs);
     if (sols.length === 0) {
       ce.assumptions.set(
@@ -117,17 +117,16 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
 
 function assumeInequality(proposition: BoxedExpression): AssumeResult {
   //
-  // 1/ lhs is a single free var with no def
-  //    e.g. x < 0
+  // 1/ lhs is a single **undefined** free var e.g. "x < 0"
   //    => define a new var, if the domain can be inferred set it, otherwise
   // RealNumber and add to assumptions (e.g. x < 5)
-  // 2/ (lhs - rhs) is an expression with no free var with no value
-  //  e.g. \pi < 5
+  // 2/ (lhs - rhs) is an expression with no free vars
+  //  e.g. "\pi < 5"
   //  => evaluate
-  // 3/ (lhs - rhs) is an expression with a single free var with no value
-  //    e.g. x + 1 < \pi
+  // 3/ (lhs - rhs) is an expression with a single **undefined** free var
+  //    e.g. "x + 1 < \pi"
   //    => add def as RealNumber, add to assumptions
-  // 4/ (lhs - rhs) is an expression with multiple free vars with no value
+  // 4/ (lhs - rhs) is an expression with multiple free vars
   //    e.g. x + y < 0
   //    => add to assumptions
 
@@ -160,6 +159,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
     }
     return 'ok';
   }
+  // @todo: handle if proposition.op1 *has* a def (and no value)
 
   // Normalize to Less, LessEqual
   let op = '';
@@ -184,20 +184,20 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   }
   if (!op) return 'internal-error';
   const p = ce.add([lhs!.canonical, ce.negate(rhs!.canonical)]).simplify();
-  const unvals = unvaluedIdentifiers(p);
 
   // Case 2
   const result = ce.box([op === '<' ? 'Less' : 'LessEqual', p, 0]).evaluate();
 
-  if (unvals.length === 0) {
-    if (result.symbol === 'True') return 'tautology';
-    if (result.symbol === 'False') return 'contradiction';
-    return 'not-a-predicate';
-  }
+  if (result.symbol === 'True') return 'tautology';
+  if (result.symbol === 'False') return 'contradiction';
+
+  const freeVars = result.freeVars;
+  if (freeVars.length === 0) return 'not-a-predicate';
 
   // Case 3
-  if (unvals.length === 1) {
-    ce.defineSymbol(unvals[0], { domain: 'ExtendedRealNumber' });
+  if (freeVars.length === 1) {
+    if (!ce.lookupSymbol(freeVars[0]))
+      ce.defineSymbol(freeVars[0], { domain: 'ExtendedRealNumber' });
   }
 
   // Case 3, 4
@@ -271,19 +271,7 @@ function hasDef(ce: IComputeEngine, s: string): boolean {
 }
 
 function undefinedIdentifiers(expr: BoxedExpression): string[] {
-  const syms = expr.symbols;
-  if (syms.length === 0) return [];
-  return syms
-    .filter((x) => !hasDef(expr.engine, x.symbol!))
-    .map((x) => x.symbol!);
-}
-
-function unvaluedIdentifiers(expr: BoxedExpression): string[] {
-  const syms = expr.symbols;
-  if (syms.length === 0) return [];
-  return syms
-    .filter((x) => !hasValue(expr.engine, x.symbol!))
-    .map((x) => x.symbol!);
+  return expr.symbols.filter((x) => !hasDef(expr.engine, x));
 }
 
 function hasValue(ce: IComputeEngine, s: string): boolean {
@@ -296,18 +284,3 @@ function isInequality(expr: BoxedExpression): boolean {
   if (typeof h !== 'string') return false;
   return ['Less', 'Greater', 'LessEqual', 'GreaterEqual'].includes(h);
 }
-
-// export function getAssumptionsAbout(
-//   ce: ComputeEngineInterface,
-//   symbol: string
-// ): BoxedExpression[] {
-//   const result: BoxedExpression[] = [];
-//   for (const [assumption, val] of ce.assumptions) {
-//     const vars = getVars(assumption);
-//     if (vars.includes(symbol)) {
-//       result.push(val ? assumption : ce.boxFunction('Not', [assumption]));
-//     }
-//   }
-
-//   return [];
-// }

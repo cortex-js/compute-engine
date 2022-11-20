@@ -58,10 +58,10 @@ describe('CONTRADICTIONS', () => {
 });
 
 describe.skip('is() values', () => {
-  test(`> 0`, () => {
-    // expect(ce.is(['Greater', 'x', 0])).toBeFalsy();
-    // expect(ce.is(['Greater', 'one', 0])).toBeTruthy();
-  });
+  // test(`> 0`, () => {
+  //   expect(ce.box(['Greater', 'x', 0]).evaluate().symbol!).toBe('False');
+  //   expect(ce.box(['Greater', 'one', 0]).evaluate().symbol!).toBe('True');
+  // });
 
   test(`= 0`, () => {
     // expect(ce.is(['Equal', 'x', 0])).toBeFalsy();

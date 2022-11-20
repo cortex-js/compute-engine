@@ -51,7 +51,7 @@ import {
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 import { ExpressionMap } from './boxed-expression/expression-map';
 import { BoxedPattern } from './boxed-expression/boxed-patterns';
-import { getVars, latexString } from './boxed-expression/utils';
+import { latexString } from './boxed-expression/utils';
 import { boxRules } from './rules';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber } from './boxed-expression/boxed-number';
@@ -1558,8 +1558,8 @@ export class ComputeEngine implements IComputeEngine {
       // it in a parent scope. However, when the current scope exits,
       // any previous assumptions about the symbol will be restored).
       for (const [assumption, _val] of this.assumptions) {
-        const vars = getVars(assumption);
-        if (vars.includes(symbol)) this.assumptions.delete(assumption);
+        if (assumption.symbols.includes(symbol))
+          this.assumptions.delete(assumption);
       }
     }
   }

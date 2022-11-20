@@ -129,11 +129,21 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
   /** A free variable either has no definition, or it has a definition, but no value */
   get isFree(): boolean {
-    return !this.symbolDefinition?.value;
+    // Don't use `.symbolDefinition` as this has a side effect of creating
+    // a def, which is not desirable whn we're just doing a test.
+    const def =
+      this._def ?? this.engine.lookupSymbol(this._name, this._wikidata);
+
+    return !isSymbolDefinition(def) || def.value === undefined;
   }
 
   get isConstant(): boolean {
-    return this.symbolDefinition?.constant ?? false;
+    // Don't use `.symbolDefinition` as this has a side effect of creating
+    // a def, which is not desirable whn we're just doing a test.
+    const def =
+      this._def ?? this.engine.lookupSymbol(this._name, this._wikidata);
+
+    return !isSymbolDefinition(def) || def.constant;
   }
 
   get isCanonical(): boolean {

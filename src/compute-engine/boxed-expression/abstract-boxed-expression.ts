@@ -25,7 +25,7 @@ import {
   Rational,
   BoxedSubstitution,
 } from '../public';
-import { getSubexpressions, getSymbols } from './utils';
+import { getFreeVars, getSubexpressions, getSymbols } from './utils';
 import { isBigRational, isMachineRational } from '../numerics/rationals';
 import { asFloat } from '../numerics/numeric';
 
@@ -148,10 +148,16 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return this.getSubexpressions('');
   }
 
-  get symbols(): BoxedExpression[] {
-    return [...getSymbols(this, new Set<string>())].map((x) =>
-      this.engine.symbol(x, { canonical: false })
-    );
+  get symbols(): string[] {
+    const set = new Set<string>();
+    getSymbols(this, set);
+    return Array.from(set);
+  }
+
+  get freeVars(): string[] {
+    const set = new Set<string>();
+    getFreeVars(this, set);
+    return Array.from(set);
   }
 
   get errors(): BoxedExpression[] {

@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The `expr.symbols` property return an array of `string`. Previously it
+  returned an array of `BoxedExpression`.
+
+### Improvements
+
+- `expr.freeVars` provides the free variables in an expression.
+
 ### Bug Fixes
 
 - When `ce.numericMode === "auto"`, square roots of negative numbers would

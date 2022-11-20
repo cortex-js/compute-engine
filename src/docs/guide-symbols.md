@@ -51,22 +51,21 @@ This is in opposition to **free variables** which are symbols that have no
 value, and **constants** which are symbols that have a value that cannot be
 altered.
 
+**To get a list of all the symbols in an expression** use `expr.symbols`.
+
 The property `expr.isFree` is `true` if a symbol is a free variable.
 
 Assigning a value to a free variable makes it a bound variable.
 
-**To get a list of all the symbols in an expression** use `expr.symbols`.
-
 **To get a list of all the free variables in an expression** use
-`expr.symbols.filter(x => x.isFree)`.
+`expr.freeVars`.
 
 The property `expr.isConstant` is `true` if a symbol is a constant.
 
-The value of constants is determined at the time of name binding. The value of
-some symbols — `Pi`, for example — may be determined based on settings of the
-compute engine, for example the value of the `precision` property. So the same
-symbol could have different values depending on when the binding
-occurs.{.notice-warning}
+The value of constants may depend on settings of the compute engine. For
+example, the value of `Pi` is determined based on the value of the `precision`
+property. The values of constants in scope when the `precision` setting is
+changed will be updated. {.notice-warning}
 
 The property `expr.symbolDefinition` is not `undefined` if a symbol has a
 definition (name binding).

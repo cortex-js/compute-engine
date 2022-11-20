@@ -609,7 +609,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     if (!this.isValid) return this;
     if (!this.isCanonical) {
       const canonical = this.canonical;
-      if (!this.isCanonical || !this.isValid) return this;
+      if (!canonical.isCanonical || !canonical.isValid) return this;
       return canonical.simplify(options);
     }
 
@@ -698,7 +698,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     if (!this.isValid) return this;
     if (!this.isCanonical) {
       const canonical = this.canonical;
-      if (!this.isCanonical || !this.isValid) return this;
+      if (!canonical.isCanonical || !canonical.isValid) return this;
       return canonical.evaluate(options);
     }
 
@@ -756,7 +756,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     if (this.engine.strict && !this.isValid) return this;
     if (!this.isCanonical) {
       const canonical = this.canonical;
-      if (!this.isCanonical || !this.isValid) return this;
+      if (!canonical.isCanonical || !canonical.isValid) return this;
       return canonical.N(options);
     }
 

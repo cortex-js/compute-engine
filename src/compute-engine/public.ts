@@ -499,7 +499,13 @@ export interface BoxedExpression {
    * **Note** applicable to canonical and non-canonical expressions.
    *
    */
-  readonly symbols: BoxedExpression[];
+  readonly symbols: string[];
+
+  /**
+   * All the free variables in the expression, recursively,
+   * that is all the symbols with no value
+   */
+  readonly freeVars: string[];
 
   /** All the `["Error"]` subexpressions
    *
