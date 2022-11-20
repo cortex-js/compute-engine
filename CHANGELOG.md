@@ -1,6 +1,13 @@
-## 0.11.0 
+## [Unreleased]
 
- **Release Date:** 2022-11-18
+### Bug Fixes
+
+- When `ce.numericMode === "auto"`, square roots of negative numbers would
+  return an expression instead of a complex number.
+
+## 0.11.0
+
+**Release Date:** 2022-11-18
 
 ### Breaking Changes
 
