@@ -74,8 +74,8 @@ describe('NUMERIC MODE', () => {
               "ImaginaryUnit",
               [
                 "Add",
-                ["Rational", 1, 555555],
-                ["Multiply", ["Rational", 1, 2], "Pi"]
+                ["Multiply", ["Rational", 1, 2], "Pi"],
+                ["Rational", 1, 555555]
               ]
             ]
           ],
@@ -114,9 +114,9 @@ describe('NUMERIC MODE', () => {
               "ImaginaryUnit",
               [
                 "Add",
+                ["Multiply", ["Rational", 1, 2], "Pi"],
                 3,
-                ["Complex", 0, 4],
-                ["Multiply", ["Rational", 1, 2], "Pi"]
+                ["Complex", 0, 4]
               ]
             ]
           ],
@@ -127,9 +127,9 @@ describe('NUMERIC MODE', () => {
               "ImaginaryUnit",
               [
                 "Add",
+                ["Multiply", ["Rational", -1, 2], "Pi"],
                 -3,
-                ["Complex", 0, -4],
-                ["Multiply", ["Rational", -1, 2], "Pi"]
+                ["Complex", 0, -4]
               ]
             ]
           ]

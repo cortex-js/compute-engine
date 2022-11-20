@@ -29,7 +29,7 @@ describe('SETTING/FORGETTING', () => {
     expect(ce.box(`x1`).json).toMatch('x1');
     expect(ce.box(`x1`).evaluate().json).toMatch('x1');
     expect(ce.box(['Add', 'x1', 5]).evaluate().json).toMatchInlineSnapshot(
-      `["Add", 5, "x1"]`
+      `["Add", "x1", 5]`
     );
     expect(expr.evaluate().json).toMatchObject(['Subtract', 'x1', 1]);
   });
@@ -55,8 +55,8 @@ describe('SETTING/FORGETTING', () => {
     expect(ce.box(`x2`).evaluate().json).toMatch('x2');
     expect(ce.box(['Add', 'x2', 5]).evaluate().json).toMatchObject([
       'Add',
-      5,
       'x2',
+      5,
     ]);
   });
 });

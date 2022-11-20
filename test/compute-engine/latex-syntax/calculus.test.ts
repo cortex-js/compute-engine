@@ -13,30 +13,30 @@ describe('INTEGRAL', () => {
 
   test('simple with d', () => {
     expect(json('\\int\\sin x \\mathrm{d} x+1 = 2')).toMatchInlineSnapshot(
-      `["Equal", ["Add", 1, ["Integrate", ["Sin", "x"], "x"]], 2]`
+      `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
     );
   });
   test('simple with mathrm', () => {
     expect(json('\\int\\sin x dx+1 = 2')).toMatchInlineSnapshot(
-      `["Equal", ["Add", 1, ["Integrate", ["Sin", "x"], "x"]], 2]`
+      `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
     );
   });
 
   test('simple with \\alpha', () => {
     expect(json('\\int\\alpha d\\alpha+1 = 2')).toMatchInlineSnapshot(
-      `["Equal", ["Add", 1, ["Integrate", "Alpha", "Alpha"]], 2]`
+      `["Equal", ["Add", ["Integrate", "Alpha", "Alpha"], 1], 2]`
     );
   });
 
   test('simple with mathrm with spacing', () => {
     expect(json('\\int\\sin x \\, \\mathrm{d}x+1 = 2')).toMatchInlineSnapshot(
-      `["Equal", ["Add", 1, ["Integrate", ["Sin", "x"], "x"]], 2]`
+      `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
     );
   });
 
   test('simple with lower bound', () => {
     expect(json('\\int_0\\sin x \\, \\mathrm{d}x+1 = 2')).toMatchInlineSnapshot(
-      `["Equal", ["Add", 1, ["Integrate", ["Sin", "x"], ["Pair", "x", 0]]], 2]`
+      `["Equal", ["Add", ["Integrate", ["Sin", "x"], ["Pair", "x", 0]], 1], 2]`
     );
   });
 
@@ -47,12 +47,12 @@ describe('INTEGRAL', () => {
         "Equal",
         [
           "Add",
-          1,
           [
             "Integrate",
             ["Sin", "x"],
             ["Triple", "x", "Nothing", {num: "+Infinity"}]
-          ]
+          ],
+          1
         ],
         2
       ]
@@ -65,8 +65,8 @@ describe('INTEGRAL', () => {
         "Equal",
         [
           "Add",
-          1,
-          ["Integrate", ["Sin", "x"], ["Triple", "x", 0, {num: "+Infinity"}]]
+          ["Integrate", ["Sin", "x"], ["Triple", "x", 0, {num: "+Infinity"}]],
+          1
         ],
         2
       ]
@@ -79,7 +79,7 @@ describe('INTEGRAL', () => {
         "Equal",
         [
           "Integrate",
-          ["Add", 1, ["Sin", "x"]],
+          ["Add", ["Sin", "x"], 1],
           ["Triple", "Nothing", 0, {num: "+Infinity"}]
         ],
         2

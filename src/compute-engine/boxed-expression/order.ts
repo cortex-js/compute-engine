@@ -22,6 +22,9 @@ export function sortAdd(
   return ops.sort((a, b) => {
     const aLex = lex(a);
     const bLex = lex(b);
+    if (!aLex && !bLex) return order(a, b);
+    if (!aLex) return +1;
+    if (!bLex) return -1;
     if (aLex < bLex) return -1;
     if (aLex > bLex) return +1;
     const aTotalDeg = totalDegree(a);
@@ -100,6 +103,18 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
       return a.numericValue.re - b.numericValue.re;
     }
     if (b.numericValue !== null) return +1;
+    return -1;
+  }
+
+  if (a.numericValue) {
+    if (b.numericValue) {
+      return +1;
+    }
+    return -1;
+  }
+
+  if (a.head === 'Sqrt' && a.op1.numericValue) {
+    if (b.head === 'Sqrt' && b.op1.numericValue) return order(a.op1, b.op1);
     return -1;
   }
 

@@ -129,7 +129,7 @@ check('Missing all arguments with \\frac custom parser', () =>
 
 check('Missing argument with \\placeholder parser', () =>
   expect(engine.parse('1+\\placeholder')).toMatchInlineSnapshot(
-    `["Add", 1, "Nothing"]`
+    `["Add", "Nothing", 1]`
   )
 );
 

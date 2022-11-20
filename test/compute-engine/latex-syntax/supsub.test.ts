@@ -80,7 +80,7 @@ describe('SUPSUB', () => {
     expect(parse('12^34.5')).toMatchInlineSnapshot(`["Multiply", 4.5, 1728]`);
     expect(parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
     expect(parse('x^{x+1}')).toMatchInlineSnapshot(
-      `["Power", "x", ["Add", 1, "x"]]`
+      `["Power", "x", ["Add", "x", 1]]`
     );
   });
   test('Subscript', () => {
@@ -142,27 +142,27 @@ describe('SUPSUB', () => {
           ],
           ["Subscript", "'missing'", ["Latex", "'_'"]]
         ],
-        ["Power", ["Add", 1, "p"], ["Add", 1, "q"]],
-        ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", 1, "s"]]
+        ["Power", ["Add", "p", 1], ["Add", "q", 1]],
+        ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", "s", 1]]
       ]
     `); // @fixme: nope...
     expect(parse('x{}_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
         "Multiply",
-        ["Power", ["Subscript", "x", ["Add", "p", 1]], ["Add", 1, "q"]],
-        ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", 1, "s"]]
+        ["Power", ["Subscript", "x", ["Add", "p", 1]], ["Add", "q", 1]],
+        ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", "s", 1]]
       ]
     `); // @fixme: nope...
   });
   test('Sup/Sub groups', () => {
     expect(parse('(x+1)^{n-1}')).toMatchInlineSnapshot(
-      `["Power", ["Add", 1, "x"], ["Subtract", "n", 1]]`
+      `["Power", ["Add", "x", 1], ["Subtract", "n", 1]]`
     );
     expect(parse('(x+1)_{n-1}')).toMatchInlineSnapshot(
-      `["Subscript", ["Add", 1, "x"], ["Subtract", "n", 1]]`
+      `["Subscript", ["Add", "x", 1], ["Subtract", "n", 1]]`
     );
     expect(parse('(x+1)^n_0')).toMatchInlineSnapshot(
-      `["Power", ["Subscript", ["Add", 1, "x"], 0], "n"]`
+      `["Power", ["Subscript", ["Add", "x", 1], 0], "n"]`
     );
     expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       [
@@ -191,7 +191,7 @@ describe('SUPSUB', () => {
           ]
         ],
         "p_q",
-        ["Power", ["Subscript", ["Add", 1, "x"], 0], "n"]
+        ["Power", ["Subscript", ["Add", "x", 1], 0], "n"]
       ]
     `); // @fixme: nope...
     expect(parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(`
@@ -221,7 +221,7 @@ describe('SUPSUB', () => {
           ]
         ],
         ["Subscript", 12, 34],
-        ["Power", ["Subscript", ["Add", 1, "x"], 0], "n"]
+        ["Power", ["Subscript", ["Add", "x", 1], 0], "n"]
       ]
     `); // @fixme: nope...
   });

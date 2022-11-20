@@ -167,7 +167,7 @@ describe('OPERATOR prefix', () => {
   test('-x-1 // Negate', () =>
     expect(check('-x-1')).toMatchInlineSnapshot(`
       latex     = ["Subtract", ["Negate", "x"], 1]
-      ["Subtract", ["Negate", "x"], 1]
+      ["Subtract", -1, "x"]
     `));
   test('-x+1 // Negate', () =>
     expect(check('-x+1')).toMatchInlineSnapshot(`
@@ -262,7 +262,7 @@ describe('OPERATOR infix', () => {
   test('-2+3x-4', () =>
     expect(check('-2+3x-4')).toMatchInlineSnapshot(`
       latex     = ["Add", -2, ["Subtract", ["Multiply", 3, "x"], 4]]
-      box       = ["Add", -4, -2, ["Multiply", 3, "x"]]
+      box       = ["Add", ["Multiply", 3, "x"], -4, -2]
       simplify  = ["Subtract", ["Multiply", 3, "x"], 6]
     `));
 });
@@ -276,7 +276,7 @@ describe('OPERATOR multiply', () => {
   test('2(x+1)', () =>
     expect(check('2(x+1)')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, ["Delimiter", ["Add", "x", 1]]]
-      ["Multiply", 2, ["Add", 1, "x"]]
+      ["Multiply", 2, ["Add", "x", 1]]
     `));
   test('2\\pi', () =>
     expect(check('2\\pi')).toMatchInlineSnapshot(`
@@ -411,7 +411,7 @@ describe('OPERATOR precedence', () => {
   test('2\\times3^{n+1}+4 // Precedence', () =>
     expect(check('2\\times3^{n+1}+4')).toMatchInlineSnapshot(`
       latex     = ["Add", ["Multiply", 2, ["Power", 3, ["Add", "n", 1]]], 4]
-      ["Add", 4, ["Multiply", 2, ["Power", 3, ["Add", 1, "n"]]]]
+      ["Add", ["Multiply", 2, ["Power", 3, ["Add", "n", 1]]], 4]
     `));
 });
 
@@ -419,7 +419,7 @@ describe('OPERATOR postfix', () => {
   test('2+n! // Precedence', () =>
     expect(check('2+n!')).toMatchInlineSnapshot(`
       latex     = ["Add", 2, ["Factorial", "n"]]
-      ["Add", 2, ["Factorial", "n"]]
+      ["Add", ["Factorial", "n"], 2]
     `));
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`

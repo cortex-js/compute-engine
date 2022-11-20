@@ -45,7 +45,7 @@ describe('EXPAND POWER', () => {
 describe('EXPAND PRODUCT', () => {
   test(`Product`, () =>
     expect(checkExpand(`4x(x+2)`)).toMatchInlineSnapshot(`
-      box       = ["Expand", ["Multiply", 4, "x", ["Add", 2, "x"]]]
+      box       = ["Expand", ["Multiply", 4, "x", ["Add", "x", 2]]]
       evaluate  = ["Add", ["Multiply", 4, ["Square", "x"]], ["Multiply", 8, "x"]]
     `));
   test(`Product`, () =>
@@ -54,7 +54,7 @@ describe('EXPAND PRODUCT', () => {
         "Expand",
         [
           "Subtract",
-          ["Multiply", 4, "x", ["Add", 2, ["Multiply", 3, "x"]]],
+          ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]],
           ["Multiply", 5, ["Subtract", ["Multiply", 5, "x"], 4]]
         ]
       ]
@@ -62,11 +62,11 @@ describe('EXPAND PRODUCT', () => {
         "Expand",
         [
           "Add",
-          20,
           ["Multiply", -25, "x"],
-          ["Multiply", 4, "x", ["Add", 2, ["Multiply", 3, "x"]]]
+          ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]],
+          20
         ]
       ]
-      evaluate  = ["Add", 20, ["Multiply", 12, ["Square", "x"]], ["Multiply", -17, "x"]]
+      evaluate  = ["Add", ["Multiply", 12, ["Square", "x"]], ["Multiply", -17, "x"], 20]
     `));
 });

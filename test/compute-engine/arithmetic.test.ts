@@ -144,7 +144,7 @@ describe('EXACT EVALUATION', () => {
             [
               "Multiply",
               "ImaginaryUnit",
-              ["Add", 5, ["Multiply", ["Rational", 1, 2], "Pi"]]
+              ["Add", ["Multiply", ["Rational", 1, 2], "Pi"], 5]
             ]
           ],
           [
@@ -178,8 +178,8 @@ describe('EXACT EVALUATION', () => {
               "ImaginaryUnit",
               [
                 "Add",
-                ["Rational", 5, 7],
-                ["Multiply", ["Rational", 1, 2], "Pi"]
+                ["Multiply", ["Rational", 1, 2], "Pi"],
+                ["Rational", 5, 7]
               ]
             ]
           ],
@@ -215,7 +215,7 @@ describe('EXACT EVALUATION', () => {
             [
               "Multiply",
               "ImaginaryUnit",
-              ["Add", 5.1, ["Multiply", ["Rational", 1, 2], "Pi"]]
+              ["Add", ["Multiply", ["Rational", 1, 2], "Pi"], 5.1]
             ]
           ],
           [
@@ -223,7 +223,7 @@ describe('EXACT EVALUATION', () => {
             [
               "Multiply",
               "ImaginaryUnit",
-              ["Add", -5.1, ["Multiply", ["Rational", -1, 2], "Pi"]]
+              ["Add", ["Multiply", ["Rational", -1, 2], "Pi"], -5.1]
             ]
           ]
         ],
@@ -271,14 +271,14 @@ describe('EXACT EVALUATION', () => {
       ]
       box       = [
         "Add",
+        "Pi",
         ["Rational", 5, 7],
         ["Rational", 7, 9],
         2,
         5,
-        ["Sqrt", 2],
-        "Pi"
+        ["Sqrt", 2]
       ]
-      simplify  = ["Add", ["Rational", 535, 63], ["Sqrt", 2], "Pi"]
+      simplify  = ["Add", "Pi", ["Rational", 535, 63], ["Sqrt", 2]]
       N-auto    = 13.047869708026380351
       N-mach    = 13.047869708026381
       N-cplx   = 13.04786970802638
@@ -298,15 +298,15 @@ describe('EXACT EVALUATION', () => {
       ]
       box       = [
         "Add",
+        "Pi",
         ["Rational", 5, 7],
         ["Rational", 7, 9],
         1.1,
         2,
         5,
-        ["Sqrt", 2],
-        "Pi"
+        ["Sqrt", 2]
       ]
-      simplify  = ["Add", 1.1, ["Rational", 535, 63], ["Sqrt", 2], "Pi"]
+      simplify  = ["Add", "Pi", 1.1, ["Rational", 535, 63], ["Sqrt", 2]]
       evaluate  = 14.147869708026380351
       eval-mach = 14.14786970802638
     `));
@@ -356,6 +356,7 @@ describe('ADD', () => {
       ]
       box       = [
         "Add",
+        "Pi",
         ["Rational", 3, 11],
         ["Rational", 5, 7],
         1.5,
@@ -364,10 +365,9 @@ describe('ADD', () => {
         2,
         4,
         ["Sqrt", 5],
-        ["Sqrt", 5],
-        "Pi"
+        ["Sqrt", 5]
       ]
-      simplify  = ["Add", 3.2, ["Rational", 692, 77], ["Multiply", 2, ["Sqrt", 5]], "Pi"]
+      simplify  = ["Add", "Pi", 3.2, ["Rational", 692, 77], ["Multiply", 2, ["Sqrt", 5]]]
       evaluate  = 19.800741595602359644
       eval-mach = 19.80074159560236
     `));

@@ -100,7 +100,7 @@ describe('basic', () => {
       `["Equal", 4, ["Error", "'missing'"]]`
     );
     expect(parse('x+1=')).toMatchInlineSnapshot(
-      `["Equal", ["Add", 1, "x"], ["Error", "'missing'"]]`
+      `["Equal", ["Add", "x", 1], ["Error", "'missing'"]]`
     );
     expect(parse('2+1\\le')).toMatchInlineSnapshot(
       `["LessEqual", ["Add", 1, 2], ["Error", "'missing'"]]`

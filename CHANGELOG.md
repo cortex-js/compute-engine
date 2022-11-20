@@ -13,6 +13,8 @@
 
 - When `ce.numericMode === "auto"`, square roots of negative numbers would
   return an expression instead of a complex number.
+- The canonical order of polynomials now orders non-lexicographic terms of
+  degree 1 last.
 
 ## 0.11.0
 

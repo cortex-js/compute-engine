@@ -4,10 +4,9 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
   test(`\\cos x + 1`, () =>
     expect(check('\\cos x + 1')).toMatchInlineSnapshot(`
       latex     = ["Add", ["Cos", "x"], 1]
-      box       = ["Add", 1, ["Cos", "x"]]
+      box       = ["Add", ["Cos", "x"], 1]
       simplify  = [
         "Add",
-        1,
         [
           "Divide",
           [
@@ -30,9 +29,10 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
             ]
           ],
           ["Complex", 0, 2]
-        ]
+        ],
+        1
       ]
-      evaluate  = ["Add", 1, ["Cos", "x"]]
+      evaluate  = ["Add", ["Cos", "x"], 1]
     `));
   test(`\\cos x - \\sin x`, () =>
     expect(check('\\cos x - \\sin x')).toMatchInlineSnapshot(`

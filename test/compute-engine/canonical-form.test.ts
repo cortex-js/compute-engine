@@ -252,8 +252,8 @@ describe('POLYNOMIAL ORDER', () => {
   test(`Canonical form c+7+a+5+b`, () => {
     expect(check('c+7+a+5+b')).toMatchInlineSnapshot(`
       latex     = ["Add", "c", 7, "a", 5, "b"]
-      box       = ["Add", 5, 7, "a", "b", "c"]
-      simplify  = ["Add", 12, "a", "b", "c"]
+      box       = ["Add", "a", "b", "c", 5, 7]
+      simplify  = ["Add", "a", "b", "c", 12]
     `);
   });
 
@@ -273,18 +273,18 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       box       = [
         "Add",
-        3,
-        6,
         ["Multiply", 7, "a"],
         ["Multiply", 2, "b"],
-        ["Multiply", 5, "c"]
+        ["Multiply", 5, "c"],
+        3,
+        6
       ]
       simplify  = [
         "Add",
-        9,
         ["Multiply", 7, "a"],
         ["Multiply", 2, "b"],
-        ["Multiply", 5, "c"]
+        ["Multiply", 5, "c"],
+        9
       ]
     `);
   });

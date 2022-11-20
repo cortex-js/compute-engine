@@ -60,7 +60,7 @@ describe('UNKNOWN COMMANDS', () => {
               ["Latex", "'\\foo{1}'"]
             ]
           ],
-          ["Add", 1, "x"]
+          ["Add", "x", 1]
         ],
         1
       ]

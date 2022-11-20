@@ -86,7 +86,7 @@ describe('LATEX SERIALIZING', () => {
     expect(latex(['Multiply', 'a', 'b'])).toMatchInlineSnapshot(`ab`);
     expect(
       latex(['Multiply', ['Add', 'x', 1], ['Subtract', 'x', 1]])
-    ).toMatchInlineSnapshot(`(1+x)(x-1)`);
+    ).toMatchInlineSnapshot(`(x+1)(x-1)`);
     expect(
       latex(['Add', ['Multiply', 'x', -1], ['Multiply', 'x', 2]])
     ).toMatchInlineSnapshot(`2x-x`);
@@ -101,7 +101,7 @@ describe('LATEX SERIALIZING', () => {
     );
     expect(
       latex(['Power', ['Add', 'x', 1], ['Divide', 1, 2]])
-    ).toMatchInlineSnapshot(`\\sqrt{1+x}`);
+    ).toMatchInlineSnapshot(`\\sqrt{x+1}`);
     expect(
       latex(['Power', ['Multiply', 2, 'x'], ['Divide', 1, 2]])
     ).toMatchInlineSnapshot(`\\sqrt{2x}`);
@@ -196,7 +196,7 @@ describe('LATEX', () => {
             "String",
             ["Domain", "RealNumber"]
           ],
-          ["Add", 2, "Pi"]
+          ["Add", "Pi", 2]
         ]
       ]
     `);
