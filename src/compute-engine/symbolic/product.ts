@@ -432,8 +432,7 @@ export class Product {
     });
     if (groupedTerms === null) return ce._NAN;
 
-    let terms = termsAsExpressions(ce, groupedTerms);
-    terms = flattenOps(terms, 'Multiply') ?? terms;
+    const terms = termsAsExpressions(ce, groupedTerms);
 
     if (terms.length === 0) return ce._ONE;
     if (terms.length === 1) return terms[0];
@@ -467,16 +466,13 @@ export class Product {
 
     const ce = this.engine;
 
-    let numeratorTerms = termsAsExpressions(ce, xsNumerator);
-    numeratorTerms = flattenOps(numeratorTerms, 'Multiply') ?? numeratorTerms;
+    const numeratorTerms = termsAsExpressions(ce, xsNumerator);
     let numerator = ce._ONE;
     if (numeratorTerms.length === 1) numerator = numeratorTerms[0];
     else if (numeratorTerms.length > 0)
       numerator = ce._fn('Multiply', numeratorTerms);
 
-    let denominatorTerms = termsAsExpressions(ce, xsDenominator);
-    denominatorTerms =
-      flattenOps(denominatorTerms, 'Multiply') ?? denominatorTerms;
+    const denominatorTerms = termsAsExpressions(ce, xsDenominator);
     let denominator = ce._ONE;
     if (denominatorTerms.length === 1) denominator = denominatorTerms[0];
     else if (denominatorTerms.length > 0)
@@ -551,8 +547,7 @@ function termsAsExpressions(
   ce: IComputeEngine,
   terms: { exponent: Rational; terms: BoxedExpression[] }[]
 ): BoxedExpression[] {
-  terms = terms.sort(degreeOrder);
-  const result = terms.map((x) => {
+  const result = terms.sort(degreeOrder).map((x) => {
     const t = flattenOps(x.terms, 'Multiply') ?? x.terms;
     const base = t.length <= 1 ? t[0] : ce._fn('Multiply', t.sort(order));
     if (isRationalOne(x.exponent)) return base;
