@@ -63,38 +63,6 @@ describe('NUMERIC MODE', () => {
     expect(check('\\cos(555555^{-1})')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Power", 555555, -1]]
       box       = ["Cos", ["Rational", 1, 555555]]
-      simplify  = [
-        "Divide",
-        [
-          "Subtract",
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Add",
-                ["Multiply", ["Rational", 1, 2], "Pi"],
-                ["Rational", 1, 555555]
-              ]
-            ]
-          ],
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Subtract",
-                ["Multiply", ["Rational", -1, 2], "Pi"],
-                ["Rational", 1, 555555]
-              ]
-            ]
-          ]
-        ],
-        ["Complex", 0, 2]
-      ]
-      evaluate  = ["Cos", ["Rational", 1, 555555]]
       N-auto    = 0.9999999999983799967599955773952695962267595445677797188360289660653376695437160992108222980221295701
       N-mach    = 0.99999999999838
     `));
@@ -103,40 +71,6 @@ describe('NUMERIC MODE', () => {
     expect(check('\\cos(3+4i)')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Add", 3, ["Multiply", 4, "i"]]]
       box       = ["Cos", ["Complex", 3, 4]]
-      simplify  = [
-        "Divide",
-        [
-          "Subtract",
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Add",
-                ["Multiply", ["Rational", 1, 2], "Pi"],
-                3,
-                ["Complex", 0, 4]
-              ]
-            ]
-          ],
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Add",
-                ["Multiply", ["Rational", -1, 2], "Pi"],
-                -3,
-                ["Complex", 0, -4]
-              ]
-            ]
-          ]
-        ],
-        ["Complex", 0, 2]
-      ]
-      evaluate  = ["Cos", ["Complex", 3, 4]]
       N-auto    = ["Complex", -27.034945603074224, -3.851153334811777]
       N-big     = {num: "NaN"}
       N-cplx   = ["Complex", -27.034945603074224, -3.851153334811777]

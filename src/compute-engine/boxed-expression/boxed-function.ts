@@ -49,9 +49,17 @@ function cheapest(
 
   const ce = oldExpr.engine;
   const boxedNewExpr = ce.box(newExpr);
+
   if (ce.costFunction(boxedNewExpr) <= 1.7 * ce.costFunction(oldExpr)) {
+    // console.log(
+    //   'Picked new' + boxedNewExpr.toString() + ' over ' + oldExpr.toString()
+    // );
     return boxedNewExpr;
   }
+
+  // console.log(
+  //   'Picked old ' + oldExpr.toString() + ' over ' + newExpr.toString()
+  // );
   return oldExpr;
 }
 
@@ -643,7 +651,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     }
 
     if (!expr) expr = this.engine.fn(this._head, tail);
-    else expr = cheapest(expr, this.engine.fn(this._head, tail));
+    else expr = cheapest(this.engine.fn(this._head, tail), expr);
 
     expr = cheapest(this, expr);
 

@@ -135,30 +135,6 @@ describe('EXACT EVALUATION', () => {
     expect(check('\\cos{5}')).toMatchInlineSnapshot(`
       latex     = ["Cos", 5]
       box       = ["Cos", 5]
-      simplify  = [
-        "Divide",
-        [
-          "Subtract",
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              ["Add", ["Multiply", ["Rational", 1, 2], "Pi"], 5]
-            ]
-          ],
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              ["Subtract", ["Multiply", ["Rational", -1, 2], "Pi"], 5]
-            ]
-          ]
-        ],
-        ["Complex", 0, 2]
-      ]
-      evaluate  = ["Cos", 5]
       N-auto    = 0.28366218546322626447
       N-mach    = 0.28366218546322625
     `));
@@ -167,38 +143,6 @@ describe('EXACT EVALUATION', () => {
     expect(check('\\cos{\\frac{5}{7}}')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Rational", 5, 7]]
       box       = ["Cos", ["Rational", 5, 7]]
-      simplify  = [
-        "Divide",
-        [
-          "Subtract",
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Add",
-                ["Multiply", ["Rational", 1, 2], "Pi"],
-                ["Rational", 5, 7]
-              ]
-            ]
-          ],
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Subtract",
-                ["Multiply", ["Rational", -1, 2], "Pi"],
-                ["Rational", 5, 7]
-              ]
-            ]
-          ]
-        ],
-        ["Complex", 0, 2]
-      ]
-      evaluate  = ["Cos", ["Rational", 5, 7]]
       N-auto    = 0.75556134670069659847
       N-mach    = 0.7555613467006966
     `));
@@ -206,29 +150,6 @@ describe('EXACT EVALUATION', () => {
     expect(check('\\cos(5.1)')).toMatchInlineSnapshot(`
       latex     = ["Cos", 5.1]
       box       = ["Cos", 5.1]
-      simplify  = [
-        "Divide",
-        [
-          "Subtract",
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              ["Add", ["Multiply", ["Rational", 1, 2], "Pi"], 5.1]
-            ]
-          ],
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              ["Add", ["Multiply", ["Rational", -1, 2], "Pi"], -5.1]
-            ]
-          ]
-        ],
-        ["Complex", 0, 2]
-      ]
       evaluate  = 0.37797774271298056332
       eval-mach = 0.37797774271298024
     `));

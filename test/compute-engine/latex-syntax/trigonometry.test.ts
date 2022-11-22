@@ -4,76 +4,12 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
   test(`\\cos x + 1`, () =>
     expect(check('\\cos x + 1')).toMatchInlineSnapshot(`
       latex     = ["Add", ["Cos", "x"], 1]
-      box       = ["Add", ["Cos", "x"], 1]
-      simplify  = [
-        "Add",
-        [
-          "Divide",
-          [
-            "Subtract",
-            [
-              "Exp",
-              [
-                "Multiply",
-                "ImaginaryUnit",
-                ["Add", ["Multiply", ["Rational", 1, 2], "Pi"], "x"]
-              ]
-            ],
-            [
-              "Exp",
-              [
-                "Multiply",
-                "ImaginaryUnit",
-                ["Subtract", ["Multiply", ["Rational", -1, 2], "Pi"], "x"]
-              ]
-            ]
-          ],
-          ["Complex", 0, 2]
-        ],
-        1
-      ]
-      evaluate  = ["Add", ["Cos", "x"], 1]
+      ["Add", ["Cos", "x"], 1]
     `));
   test(`\\cos x - \\sin x`, () =>
     expect(check('\\cos x - \\sin x')).toMatchInlineSnapshot(`
       latex     = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
-      box       = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
-      simplify  = [
-        "Subtract",
-        [
-          "Divide",
-          [
-            "Subtract",
-            [
-              "Exp",
-              [
-                "Multiply",
-                "ImaginaryUnit",
-                ["Add", ["Multiply", ["Rational", 1, 2], "Pi"], "x"]
-              ]
-            ],
-            [
-              "Exp",
-              [
-                "Multiply",
-                "ImaginaryUnit",
-                ["Subtract", ["Multiply", ["Rational", -1, 2], "Pi"], "x"]
-              ]
-            ]
-          ],
-          ["Complex", 0, 2]
-        ],
-        [
-          "Divide",
-          [
-            "Subtract",
-            ["Exp", ["Multiply", "ImaginaryUnit", "x"]],
-            ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "x"]]]
-          ],
-          ["Complex", 0, 2]
-        ]
-      ]
-      evaluate  = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
+      ["Subtract", ["Cos", "x"], ["Sin", "x"]]
     `));
   test(`\\cos \\frac{x}{2}^2`, () =>
     expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
@@ -81,35 +17,12 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
       box       = ["Cos", ["Multiply", ["Square", ["Rational", 1, 2]], ["Square", "x"]]]
       canonical = ["Cos", ["Multiply", ["Rational", 1, 4], ["Square", "x"]]]
       simplify  = [
-        "Divide",
+        "Sin",
         [
-          "Subtract",
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Add",
-                ["Multiply", ["Rational", 1, 2], "Pi"],
-                ["Multiply", ["Rational", 1, 4], ["Square", "x"]]
-              ]
-            ]
-          ],
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Add",
-                ["Multiply", ["Rational", -1, 2], "Pi"],
-                ["Multiply", ["Rational", -1, 4], ["Square", "x"]]
-              ]
-            ]
-          ]
-        ],
-        ["Complex", 0, 2]
+          "Add",
+          ["Multiply", ["Rational", 1, 2], "Pi"],
+          ["Multiply", ["Rational", 1, 4], ["Square", "x"]]
+        ]
       ]
       evaluate  = ["Cos", ["Multiply", ["Rational", 1, 4], ["Square", "x"]]]
       N-auto    = ["Cos", ["Multiply", 0.25, ["Square", "x"]]]
@@ -145,38 +58,6 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
     expect(check('\\cos(k\\pi)')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Multiply", "k", "Pi"]]
       box       = ["Cos", ["Multiply", "Pi", "k"]]
-      simplify  = [
-        "Divide",
-        [
-          "Subtract",
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Add",
-                ["Multiply", ["Rational", 1, 2], "Pi"],
-                ["Multiply", "Pi", "k"]
-              ]
-            ]
-          ],
-          [
-            "Exp",
-            [
-              "Multiply",
-              "ImaginaryUnit",
-              [
-                "Subtract",
-                ["Multiply", ["Rational", -1, 2], "Pi"],
-                ["Multiply", "Pi", "k"]
-              ]
-            ]
-          ]
-        ],
-        ["Complex", 0, 2]
-      ]
-      evaluate  = ["Cos", ["Multiply", "Pi", "k"]]
       N-auto    = [
         "Cos",
         [

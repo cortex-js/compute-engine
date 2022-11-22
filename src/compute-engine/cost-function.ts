@@ -81,9 +81,18 @@ export function costFunction(expr: BoxedExpression): number {
   }
 
   const head = expr.head;
+  let headCost = 2;
+  if (typeof head === 'string') {
+    if (['Add', 'Divide'].includes(head)) headCost = 3;
+    else if (['Subtract', 'Negate'].includes(head)) headCost = 4;
+    else if (['Square', 'Sqrt', 'Multiply', 'Root'].includes(head))
+      headCost = 5;
+    else if (['Power'].includes(head)) headCost = 6;
+    else if (['Ln', 'Exp', 'Log'].includes(head)) headCost = 7;
+    else headCost = 8;
+  } else headCost = costFunction(head);
   return (
-    (typeof head === 'string' ? 1 : costFunction(head)) +
-    (expr.ops?.reduce((acc, x) => acc + costFunction(x), 0) ?? 0)
+    headCost + (expr.ops?.reduce((acc, x) => acc + costFunction(x), 0) ?? 0)
   );
 }
 

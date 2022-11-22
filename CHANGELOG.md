@@ -13,8 +13,10 @@
 
 - When `ce.numericMode === "auto"`, square roots of negative numbers would
   return an expression instead of a complex number.
+- The trig functions no longer "simplify" to the less simple exponential
+  formulas.
 - The canonical order of polynomials now orders non-lexicographic terms of
-  degree 1 last.
+  degree 1 last, i.e. "ax^2+ bx+ c" instead of "x + ax^2 + bx".
 
 ## 0.11.0
 

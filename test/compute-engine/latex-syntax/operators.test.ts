@@ -289,36 +289,12 @@ describe('OPERATOR multiply', () => {
   test('2\\sin(x), function apply', () =>
     expect(check('2\\sin(x)')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, ["Sin", "x"]]
-      box       = ["Multiply", 2, ["Sin", "x"]]
-      simplify  = [
-        "Divide",
-        [
-          "Multiply",
-          2,
-          [
-            "Subtract",
-            ["Exp", ["Multiply", "ImaginaryUnit", "x"]],
-            ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "x"]]]
-          ]
-        ],
-        ["Complex", 0, 2]
-      ]
-      evaluate  = ["Multiply", 2, ["Sin", "x"]]
+      ["Multiply", 2, ["Sin", "x"]]
     `));
   test('2\\sin(x)\\frac12, function apply', () =>
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, ["Sin", "x"], ["Rational", 1, 2]]
-      box       = ["Sin", "x"]
-      simplify  = [
-        "Divide",
-        [
-          "Subtract",
-          ["Exp", ["Multiply", "ImaginaryUnit", "x"]],
-          ["Exp", ["Negate", ["Multiply", "ImaginaryUnit", "x"]]]
-        ],
-        ["Complex", 0, 2]
-      ]
-      evaluate  = ["Sin", "x"]
+      ["Sin", "x"]
     `));
   test('3\\pi5', () =>
     expect(check('3\\pi5')).toMatchInlineSnapshot(`
