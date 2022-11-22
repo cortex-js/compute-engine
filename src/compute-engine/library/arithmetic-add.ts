@@ -8,7 +8,7 @@ import {
   getImaginaryCoef,
   bignumPreferred as bignumPreferred,
 } from '../boxed-expression/utils';
-import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { canonical, flattenOps, flattenSequence } from '../symbolic/flatten';
 import { Sum } from '../symbolic/sum';
 import {
   asFloat,
@@ -30,7 +30,7 @@ export function canonicalAdd(
 ): BoxedExpression {
   console.assert(ops.every((x) => x.isCanonical));
 
-  ops = flattenOps(flattenSequence(ops.map((x) => x.canonical)), 'Add') ?? ops;
+  ops = flattenOps(canonical(flattenSequence(ops)), 'Add');
 
   // Remove literal 0
   ops = ops.filter((x) => x.numericValue === null || !x.isZero);
@@ -119,8 +119,6 @@ export function evalAdd(
     if (arg.isNaN || arg.symbol === 'Undefined') return ce._NAN;
     if (!arg.isExact) mode = 'N';
   }
-
-  console.assert(flattenOps(ops, 'Add') === null);
 
   if (mode === 'N') ops = ops.map((x) => x.N());
   else ops = ops.map((x) => x.evaluate());

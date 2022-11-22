@@ -4,26 +4,26 @@ import { parse, latex, engine } from '../../utils';
 describe('POWER', () => {
   test('Power Invalid forms', () => {
     expect(latex(['Power'])).toMatchInlineSnapshot(
-      `(\\error{\\blacksquare})^{\\error{\\blacksquare}}`
+      `(\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}})^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
     );
     expect(
       latex(['Power', null as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `(\\error{\\blacksquare})^{\\error{\\blacksquare}}`
+      `(\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}})^{\\error{\\blacksquare}}`
     );
     expect(
       latex(['Power', undefined as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `(\\error{\\blacksquare})^{\\error{\\blacksquare}}`
+      `(\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}})^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
     );
     expect(latex(['Power', 1])).toMatchInlineSnapshot(
-      `1^{\\error{\\blacksquare}}`
+      `1^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
     );
     expect(latex(['Power', NaN])).toMatchInlineSnapshot(
-      `\\operatorname{NaN}^{\\error{\\blacksquare}}`
+      `\\operatorname{NaN}^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
     );
     expect(latex(['Power', Infinity])).toMatchInlineSnapshot(
-      `\\infty^{\\error{\\blacksquare}}`
+      `\\infty^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
     );
   });
 });

@@ -2,8 +2,8 @@ import {
   IComputeEngine,
   SemiBoxedExpression,
   BoxedExpression,
-  DomainExpression,
   BoxedDomain,
+  DomainLiteral,
 } from '../public';
 import { flattenSequence } from '../symbolic/flatten';
 
@@ -104,7 +104,7 @@ export function validateSignature(
   for (let i = 0; i <= count - 1; i++)
     [newOps, rest] = validateNextArgument(
       ce,
-      expectedArgs[i] as DomainExpression<BoxedExpression>,
+      expectedArgs[i] as BoxedDomain | DomainLiteral,
       newOps,
       rest
     );
@@ -118,18 +118,18 @@ export function validateSignature(
 export function validateArgument(
   ce: IComputeEngine,
   arg: BoxedExpression | undefined,
-  expect: DomainExpression<BoxedExpression> | undefined
+  expect: BoxedDomain | DomainLiteral | undefined
 ): BoxedExpression {
   if (expect === undefined) return ce.error('unexpected-argument', arg);
   if (arg === undefined) return ce.error(['missing', expect]);
   if (!arg.isValid) return arg;
-  if (arg?.domain.isCompatible(ce.domain(expect))) return arg;
+  if (arg?.domain.isCompatible(expect)) return arg;
   return ce.error(['incompatible-domain', expect, arg.domain], arg);
 }
 
 function validateNextArgument(
   ce: IComputeEngine,
-  expect: DomainExpression<BoxedExpression> | undefined,
+  expect: BoxedDomain | DomainLiteral | undefined,
   matched: BoxedExpression[],
   ops: BoxedExpression[]
 ): [match: BoxedExpression[], rest: BoxedExpression[]] {
@@ -141,7 +141,7 @@ function validateNextArgument(
   if (!Array.isArray(expect)) {
     if (!next) return [[...matched, ce.error(['missing', expect])], ops];
 
-    if (!next.domain.isCompatible(ce.domain(expect))) {
+    if (!next.domain.isCompatible(expect)) {
       return [
         [
           ...matched,
@@ -180,7 +180,7 @@ function validateNextArgument(
     //
     let found = false;
     for (let k = 1; k <= expect.length - 1; k++) {
-      if (next.domain.isCompatible(ce.domain(expect[k]))) {
+      if (next.domain.isCompatible(expect[k])) {
         found = true;
         break;
       }
@@ -196,7 +196,7 @@ function validateNextArgument(
   }
 
   if (ctor === 'Sequence') {
-    const seq = ce.domain(expect[1]);
+    const seq = expect[1];
     if (!next || !next.domain.isCompatible(seq)) {
       return [
         [...matched, ce.error(['incompatible-domain', seq, next.domain], next)],
@@ -220,15 +220,33 @@ function validateNextArgument(
   if (ctor === 'Maybe') {
     if (next === undefined || next.symbol === 'Nothing')
       return [[...matched, ce.symbol('Nothing')], ops];
-    return validateNextArgument(
-      ce,
-      expect[1] as DomainExpression<BoxedExpression>,
-      matched,
-      [next, ...ops]
-    );
+    return validateNextArgument(ce, expect[1], matched, [next, ...ops]);
   }
 
   console.error('Unhandled ctor', ctor);
 
   return [[...matched, next], ops];
+}
+
+export function validateArguments(
+  ce: IComputeEngine,
+  args: BoxedExpression[],
+  doms: (BoxedDomain | DomainLiteral)[]
+): BoxedExpression[] {
+  // Do a quick check for the common case where everything is as expected.
+  // Avoid allocating arrays and objects
+  if (
+    args.length === expect.length &&
+    args.every((x, i) => x.domain.isCompatible(doms[i]))
+  )
+    return args;
+
+  const xs: BoxedExpression[] = [];
+  for (let i = 0; i <= expect.length - 1; i++)
+    xs.push(validateArgument(ce, args[i], expect[i]));
+
+  for (let i = expect.length; i <= args.length; i++)
+    xs.push(ce.error('unexpected-argument', args[i]));
+
+  return xs;
 }

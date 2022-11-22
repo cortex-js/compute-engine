@@ -34,7 +34,7 @@ export function canonicalPower(
   base: BoxedExpression | undefined,
   exponent: BoxedExpression | undefined,
   metadata?: Metadata
-): BoxedExpression | null {
+): BoxedExpression {
   base = validateArgument(ce, base?.canonical, 'Number');
   exponent = validateArgument(ce, exponent?.canonical, 'Number');
 
@@ -169,7 +169,7 @@ export function canonicalPower(
       ); // Don't call ce.mul() to avoid infinite loops
   }
 
-  return null;
+  return ce._fn('Power', [base, exponent], metadata);
 }
 
 export function square(

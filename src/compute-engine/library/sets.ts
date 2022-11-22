@@ -4,7 +4,7 @@
 import { isDomain } from '../boxed-expression/boxed-domain';
 import { validateArgumentCount } from '../boxed-expression/validate';
 import { BoxedExpression, IdTable, IComputeEngine } from '../public';
-import { flattenSequence } from '../symbolic/flatten';
+import { canonical, flattenSequence } from '../symbolic/flatten';
 
 export const SETS_LIBRARY: IdTable = {
   //
@@ -26,11 +26,7 @@ export const SETS_LIBRARY: IdTable = {
     signature: {
       domain: 'Predicate',
       canonical: (ce, args) => {
-        args = validateArgumentCount(
-          ce,
-          flattenSequence(args).map((x) => x.canonical),
-          2
-        );
+        args = validateArgumentCount(ce, canonical(flattenSequence(args)), 2);
         if (args.length === 2 && isDomain(args[1]))
           return ce._fn('Element', [args[0], ce.domain(args[1])]);
         return ce._fn('Element', args);

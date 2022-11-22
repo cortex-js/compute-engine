@@ -939,7 +939,7 @@ export function makeCanonicalFunction(
   // f(a, Sequence(b, c), d) -> f(a, b, c, d)
   //
   xs = flattenSequence(xs);
-  if (def.associative) xs = flattenOps(xs, head) ?? xs;
+  if (def.associative) xs = flattenOps(xs, head);
 
   // If some of the arguments are not valid, can't make a canonical expression
   if (!xs.every((x) => x.isValid))
@@ -1019,7 +1019,7 @@ export function holdMap(
   if (xs.length === 0) return [];
 
   // f(a, f(b, c), d) -> f(a, b, c, d)
-  if (associativeHead) xs = flattenOps(xs, associativeHead) ?? xs;
+  xs = flattenOps(xs, associativeHead);
 
   const result: BoxedExpression[] = [];
 
@@ -1041,9 +1041,7 @@ export function holdMap(
       }
     }
   }
-  if (associativeHead) return flattenOps(result, associativeHead) ?? result;
-
-  return result;
+  return flattenOps(result, associativeHead);
 }
 
 function applicable(

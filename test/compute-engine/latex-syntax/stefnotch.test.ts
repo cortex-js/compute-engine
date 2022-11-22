@@ -204,13 +204,16 @@ describe('STEFNOTCH #13', () => {
           "Equal",
           [
             "To",
-            ["Divide", 2, ["Sqrt", "n"]],
             [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\Rightarrow'"],
-              ["Latex", "'\\Rightarrow'"]
+              "Sequence",
+              ["Divide", 2, ["Sqrt", "n"]],
+              [
+                "Error",
+                ["ErrorCode", "'unexpected-command'", "'\\Rightarrow'"],
+                ["Latex", "'\\Rightarrow'"]
+              ],
+              "a_n"
             ],
-            "a_n",
             0
           ],
           0
@@ -224,13 +227,16 @@ describe('STEFNOTCH #13', () => {
       [
         "Equivalent",
         3,
-        5,
         [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\mod'"],
-          ["Latex", "'\\mod'"]
-        ],
-        7
+          "Sequence",
+          5,
+          [
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\mod'"],
+            ["Latex", "'\\mod'"]
+          ],
+          7
+        ]
       ]
     `);
   });

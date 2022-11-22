@@ -43,36 +43,36 @@ describe('SERIALIZING SETS', () => {
 
   test('Union, Intersection, etc...', () => {
     expect(latex(['Union', 'Integer', 'RealNumber'])).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\cup\\mathtip{\\error{\\R}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
+      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\cup\\mathtip{\\error{\\R}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}`
     );
     expect(
       latex(['Intersection', 'Integer', 'RealNumber'])
     ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\cap\\mathtip{\\error{\\R}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
+      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\cap\\mathtip{\\error{\\R}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}`
     );
     expect(latex(['Complement', 'ComplexNumber'])).toMatchInlineSnapshot(
       `\\mathtip{\\error{\\C}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}`
     );
     expect(latex(['CartesianProduct'])).toMatchInlineSnapshot(
-      `\\error{\\blacksquare}\\times\\error{\\blacksquare}`
+      `\\mathtip{\\error{\\blacksquare}}{\\mathrm{Set}\\text{ missing}}\\times\\mathtip{\\error{\\blacksquare}}{\\mathrm{Set}\\text{ missing}}`
     );
     expect(latex(['CartesianProduct', 'Integer'])).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\times\\error{\\blacksquare}`
+      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\times\\mathtip{\\error{\\blacksquare}}{\\mathrm{Set}\\text{ missing}}`
     );
     expect(
       latex(['CartesianProduct', 'Integer', 'Integer'])
     ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
+      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}`
     );
     expect(
       latex(['CartesianProduct', 'Integer', 'RationalNumber'])
     ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\times\\mathtip{\\error{\\Q}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
+      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\times\\mathtip{\\error{\\Q}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}`
     );
     expect(
       latex(['CartesianProduct', 'Integer', 'Integer', 'Integer'])
     ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\error{\\Z}`
+      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathrm{Set}}\\times\\error{\\Z}`
     );
     expect(latex(['CartesianPower', 'Integer', 3])).toMatchInlineSnapshot(
       `\\mathrm{CartesianPower}(\\Z, 3)`
@@ -200,7 +200,7 @@ describe('PARSING SETS', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Set"],
+            "Set",
             ["Domain", "ExtendedRealNumber"]
           ],
           "RealNumber"
@@ -225,7 +225,7 @@ describe('PARSING SETS', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Set"],
+            "Set",
             ["Domain", "ExtendedRealNumber"]
           ],
           "RealNumber"

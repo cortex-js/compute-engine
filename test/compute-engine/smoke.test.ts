@@ -545,7 +545,7 @@ describe('CANONICALIZATION Add', () => {
     ]));
 
   test(`1 + 2 + x`, () =>
-    expect(canonicalToJson('1 + 2 + x')).toMatchObject(['Add', 1, 2, 'x']));
+    expect(canonicalToJson('1 + 2 + x')).toMatchObject(['Add', 'x', 1, 2]));
 
   test(`1 + \\infty`, () =>
     expect(canonicalToJson('1 + \\infty')).toMatchInlineSnapshot(
@@ -559,12 +559,12 @@ describe('CANONICALIZATION Add', () => {
 
   test(`-2+a+b`, () =>
     expect(canonicalToJson('-2+a+b')).toMatchInlineSnapshot(
-      `["Add", -2, "a", "b"]`
+      `["Add", "a", "b", -2]`
     ));
 
   test(`-2+a^2+a+a^2`, () =>
     expect(canonicalToJson('-2+a^2+a+a^2')).toMatchInlineSnapshot(
-      `["Add", -2, ["Square", "a"], ["Square", "a"], "a"]`
+      `["Add", ["Square", "a"], ["Square", "a"], "a", -2]`
     ));
 });
 describe('CANONICALIZATION multiply', () => {
@@ -749,7 +749,7 @@ describe('SIMPLIFICATION negate', () => {
 
   test(`simplify('-(x+1)')`, () =>
     expect(simplifyToJson('-(x+1)')).toMatchInlineSnapshot(
-      `["Subtract", ["Negate", "x"], 1]`
+      `["Subtract", -1, "x"]`
     ));
 });
 
@@ -809,7 +809,7 @@ describe('SIMPLIFICATION multiply', () => {
     expect(
       simplifyToJson('-\\frac{-x+2\\times x}{-2\\times x + 1}')
     ).toMatchInlineSnapshot(
-      `["Negate", ["Divide", "x", ["Add", 1, ["Multiply", -2, "x"]]]]`
+      `["Negate", ["Divide", "x", ["Add", ["Multiply", -2, "x"], 1]]]`
     );
   });
 });

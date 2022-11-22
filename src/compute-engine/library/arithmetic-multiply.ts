@@ -7,7 +7,7 @@ import { BoxedExpression, IComputeEngine, Metadata, Rational } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
-import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { canonical, flattenOps, flattenSequence } from '../symbolic/flatten';
 
 import { square } from './arithmetic-power';
 import {
@@ -40,11 +40,7 @@ export function canonicalMultiply(
   console.assert(ops.every((x) => x.isCanonical));
 
   // Apply associativity
-  ops =
-    flattenOps(
-      flattenSequence(ops).map((x) => x.canonical),
-      'Multiply'
-    ) ?? ops;
+  ops = flattenOps(canonical(flattenSequence(ops)), 'Multiply');
 
   if (ops.length === 0) return ce.number(1);
   if (ops.length === 1) return ops[0];
@@ -62,7 +58,7 @@ export function simplifyMultiply(
   ce: IComputeEngine,
   ops: BoxedExpression[]
 ): BoxedExpression {
-  console.assert(flattenOps(ops, 'Multiply') === null);
+  console.assert(ops.every((x) => x.head !== 'Multiply'));
   const product = new Product(ce);
   for (let op of ops) {
     op = op.simplify();
@@ -105,7 +101,7 @@ export function evalMultiply(
     if (op.isNaN || op.symbol === 'Undefined') return ce._NAN;
     if (!op.isExact) mode = 'N';
   }
-  console.assert(flattenOps(ops, 'Multiply') === null);
+  console.assert(ops.every((x) => x.head !== 'Multiply'));
 
   if (mode === 'N') ops = ops.map((x) => x.N());
   else ops = ops.map((x) => x.evaluate());

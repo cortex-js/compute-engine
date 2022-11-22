@@ -79,7 +79,7 @@ import {
   isRational,
 } from './numerics/rationals';
 import { canonicalNegate } from './symbolic/negate';
-import { flattenSequence } from './symbolic/flatten';
+import { canonical, flattenSequence } from './symbolic/flatten';
 import { isFunctionDefinition, isSymbolDefinition } from './library/utils';
 
 /**
@@ -1142,6 +1142,8 @@ export class ComputeEngine implements IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
+    // @todo: not true, they are currectly validated in canonicalPower()
+    // @todo should all this logic be in canonicalPower()?
     let e: number | null = null;
 
     if (exponent instanceof AbstractBoxedExpression) {
@@ -1176,10 +1178,7 @@ export class ComputeEngine implements IComputeEngine {
     if (typeof exponent === 'number' || isRational(exponent))
       exponent = this.number(exponent);
 
-    return (
-      canonicalPower(this, base, exponent, metadata) ??
-      this._fn('Power', [base, exponent], metadata)
-    );
+    return canonicalPower(this, base, exponent, metadata);
   }
 
   inverse(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
@@ -1197,10 +1196,7 @@ export class ComputeEngine implements IComputeEngine {
 
     // Inverse(expr) -> expr^{-1}
     // Will take care of literals, i.e. Inverse(n/d) -> d/n
-    return (
-      canonicalPower(this, expr, e, metadata) ??
-      this._fn('Power', [expr, e], metadata)
-    );
+    return canonicalPower(this, expr, e, metadata);
   }
 
   pair(
@@ -1222,15 +1218,10 @@ export class ComputeEngine implements IComputeEngine {
 
   tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression {
     // Short path
-    return new BoxedFunction(
-      this,
-      'Tuple',
-      elements.map((x) => x.canonical),
-      {
-        metadata,
-        canonical: true,
-      }
-    );
+    return new BoxedFunction(this, 'Tuple', canonical(elements), {
+      metadata,
+      canonical: true,
+    });
   }
 
   string(s: string, metadata?: Metadata): BoxedExpression {

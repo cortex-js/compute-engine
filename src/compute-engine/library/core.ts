@@ -8,6 +8,7 @@ import {
   validateArgumentCount,
 } from '../boxed-expression/validate';
 import { apply } from '../boxed-expression/boxed-function';
+import { canonical } from '../symbolic/flatten';
 
 //   // := assign 80 // @todo
 
@@ -50,13 +51,7 @@ export const CORE_LIBRARY: IdTable[] = [
         domain: ['Function', 'Anything', ['Tuple', 'Anything']],
         codomain: (ce, args) => ce.domain(['Tuple', args[0].domain]),
         canonical: (ce, ops) =>
-          ce.tuple(
-            validateArgumentCount(
-              ce,
-              ops.map((x) => x.canonical),
-              1
-            )
-          ),
+          ce.tuple(validateArgumentCount(ce, canonical(ops), 1)),
       },
     },
     Pair: {
@@ -73,13 +68,7 @@ export const CORE_LIBRARY: IdTable[] = [
         codomain: (ce, args) =>
           ce.domain(['Tuple', args[0].domain, args[1].domain]),
         canonical: (ce, ops) =>
-          ce.tuple(
-            validateArgumentCount(
-              ce,
-              ops.map((x) => x.canonical),
-              2
-            )
-          ),
+          ce.tuple(validateArgumentCount(ce, canonical(ops), 2)),
       },
     },
     Triple: {
@@ -97,13 +86,7 @@ export const CORE_LIBRARY: IdTable[] = [
         codomain: (ce, args) =>
           ce.domain(['Tuple', args[0].domain, args[1].domain, args[2].domain]),
         canonical: (ce, ops) =>
-          ce.tuple(
-            validateArgumentCount(
-              ce,
-              ops.map((x) => x.canonical),
-              3
-            )
-          ),
+          ce.tuple(validateArgumentCount(ce, canonical(ops), 3)),
       },
     },
     Tuple: {
@@ -115,7 +98,7 @@ export const CORE_LIBRARY: IdTable[] = [
           ['Sequence', 'Anything'],
           ['Tuple', ['Sequence', 'Anything']],
         ],
-        canonical: (ce, ops) => ce.tuple(ops.map((x) => x.canonical)),
+        canonical: (ce, ops) => ce.tuple(canonical(ops)),
         codomain: (ce, args) =>
           ce.domain(['Tuple', ...args.map((x) => x.domain)]),
       },
@@ -248,13 +231,7 @@ export const CORE_LIBRARY: IdTable[] = [
       signature: {
         domain: ['Function', 'Anything', 'Domain'],
         canonical: (ce, ops) =>
-          ce.domain(
-            validateArgumentCount(
-              ce,
-              ops.map((x) => x.canonical),
-              1
-            )[0]
-          ),
+          ce.domain(validateArgumentCount(ce, canonical(ops), 1)[0]),
       },
     },
     Evaluate: {
@@ -263,14 +240,7 @@ export const CORE_LIBRARY: IdTable[] = [
         domain: ['Function', 'Anything', 'Anything'],
         codomain: (_ce, args) => args[0].domain,
         canonical: (ce, ops) =>
-          ce._fn(
-            'Evaluate',
-            validateArgumentCount(
-              ce,
-              ops.map((x) => x.canonical),
-              1
-            )
-          ),
+          ce._fn('Evaluate', validateArgumentCount(ce, canonical(ops), 1)),
         evaluate: (_ce, ops) => ops[0].evaluate(),
       },
     },

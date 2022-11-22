@@ -47,7 +47,7 @@ import {
   validateArgumentCount,
   validateSignature,
 } from '../boxed-expression/validate';
-import { flattenSequence } from '../symbolic/flatten';
+import { canonical, flattenSequence } from '../symbolic/flatten';
 
 // @todo Future additions to the dictionary
 // Re: real part
@@ -495,8 +495,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       complexity: 3500,
       signature: {
         domain: ['Function', 'Number', 'Number', 'Number'],
-        canonical: (ce, args) =>
-          canonicalPower(ce, args[0], args[1]) ?? ce._fn('Power', args),
+        canonical: (ce, args) => canonicalPower(ce, args[0], args[1]),
         simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
         evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
         N: (ce, ops) => {
@@ -622,10 +621,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
           ];
           if (!exp.isValid || !base.isValid) return ce._fn('Root', [base, exp]);
 
-          return (
-            canonicalPower(ce, base, ce.inverse(exp)) ??
-            ce._fn('Power', [base, ce.inverse(exp)])
-          );
+          return canonicalPower(ce, base, ce.inverse(exp));
         },
       },
     },
@@ -687,9 +683,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
 
       signature: {
         domain: ['Function', 'Number', 'Number'],
-        canonical: (ce, args) =>
-          canonicalPower(ce, args[0], ce._HALF) ??
-          ce._fn('Power', [args[0], ce._HALF]),
+        canonical: (ce, args) => canonicalPower(ce, args[0], ce._HALF),
         simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
         N: (ce, ops) => processSqrt(ce, ops[0], 'N'),
@@ -704,9 +698,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
 
       signature: {
         domain: ['Function', 'Number', 'Number'],
-        canonical: (ce, args) =>
-          canonicalPower(ce, args[0], ce.number(2)) ??
-          ce._fn('Power', [args[0], ce.number(2)]),
+        canonical: (ce, args) => canonicalPower(ce, args[0], ce.number(2)),
       },
     },
 
@@ -719,7 +711,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
         canonical: (ce, args) => {
           // Not necessarily legal, but probably what was intended:
           // ['Subtract', 'x'] -> ['Negate', 'x']
-          args = flattenSequence(args.map((x) => x.canonical));
+          args = canonical(flattenSequence(args));
           if (args.length === 1) return canonicalNegate(args[0]);
           args = validateArgumentCount(ce, args, 2);
           if (args.length !== 2) return ce._fn('Subtract', args);

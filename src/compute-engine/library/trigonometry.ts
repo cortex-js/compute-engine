@@ -15,7 +15,7 @@ import { Expression } from '../../math-json/math-json-format';
 import { canonicalNegate } from '../symbolic/negate';
 import { applyN, apply2N } from '../symbolic/utils';
 import { asFloat } from '../numerics/numeric';
-import { flattenSequence } from '../symbolic/flatten';
+import { canonical, flattenSequence } from '../symbolic/flatten';
 import {
   validateArgument,
   validateArgumentCount,
@@ -450,9 +450,7 @@ export const TRIGONOMETRY_LIBRARY: IdTable[] = [
       signature: {
         domain: ['Function', 'Function', 'Function'],
         canonical: (ce, ops) => {
-          ops = validateArgumentCount(ce, flattenSequence(ops), 1).map(
-            (x) => x.canonical
-          );
+          ops = validateArgumentCount(ce, canonical(flattenSequence(ops)), 1);
           return (
             processInverseFunction(ce, ops) ?? ce._fn('InverseFunction', ops)
           );

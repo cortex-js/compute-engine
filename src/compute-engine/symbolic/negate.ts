@@ -47,7 +47,7 @@ export function canonicalNegate(
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
   if (expr.head === 'Add') {
     let ops = expr.ops!.map((x) => canonicalNegate(x));
-    ops = flattenOps(ops, 'Add') ?? ops;
+    ops = flattenOps(ops, 'Add');
     return expr.engine.add(ops, metadata);
   }
 
@@ -78,7 +78,7 @@ function distributeNegate(expr: BoxedExpression): BoxedExpression {
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
   if (expr.head === 'Add') {
     let ops = expr.ops!.map((x) => distributeNegate(x));
-    ops = flattenOps(ops, 'Add') ?? ops;
+    ops = flattenOps(ops, 'Add');
     return ce.add(ops);
   }
 

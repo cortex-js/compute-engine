@@ -249,7 +249,7 @@ export class Sum {
         if (ce.chop(this._number) !== 0) xs.push(ce.number(this._number));
       }
     }
-    return flattenOps(xs, 'Add') ?? xs;
+    return flattenOps(xs, 'Add');
   }
 
   asExpression(mode: 'expression' | 'numeric'): BoxedExpression {

@@ -548,7 +548,7 @@ function termsAsExpressions(
   terms: { exponent: Rational; terms: BoxedExpression[] }[]
 ): BoxedExpression[] {
   const result = terms.sort(degreeOrder).map((x) => {
-    const t = flattenOps(x.terms, 'Multiply') ?? x.terms;
+    const t = flattenOps(x.terms, 'Multiply');
     const base = t.length <= 1 ? t[0] : ce._fn('Multiply', t.sort(order));
     if (isRationalOne(x.exponent)) return base;
     return ce.power(base, x.exponent);

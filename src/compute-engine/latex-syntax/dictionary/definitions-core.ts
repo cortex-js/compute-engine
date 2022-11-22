@@ -199,6 +199,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         )}\\notin ${serializer.serialize(op(op1, 2))}}`;
       }
 
+      if (code === 'missing') {
+        return `\\mathtip{\\error{${where}}}{${serializer.serialize(
+          op(op1, 2)
+        )}\\text{ missing}}`;
+      }
+
       if (typeof code === 'string') return `\\error{${where}}`;
 
       return `\\error{${where}}`;

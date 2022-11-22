@@ -53,7 +53,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
           ]
         ]
       ]
-      box       = [
+      [
         "Sequence",
         ["List", "a", "b"],
         [
@@ -66,18 +66,6 @@ describe('SEQUENCES AND DELIMITERS', () => {
             "Nothing",
             ["List", "n", "Nothing", "m"]
           ]
-        ]
-      ]
-      canonical = [
-        "Sequence",
-        ["List", "a", "b"],
-        [
-          "List",
-          "c",
-          "d",
-          ["Error", "'missing'", ["Latex", "';'"]],
-          "Nothing",
-          ["List", "n", "Nothing", "m"]
         ]
       ]
     `);
