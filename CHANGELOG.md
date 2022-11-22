@@ -17,6 +17,7 @@
   formulas.
 - The canonical order of polynomials now orders non-lexicographic terms of
   degree 1 last, i.e. "ax^2+ bx+ c" instead of "x + ax^2 + bx".
+- Fixed evaluation of inverse functions
 
 ## 0.11.0
 

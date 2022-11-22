@@ -52,3 +52,10 @@ describe('TRIGONOMETRY constructible values', () => {
     }
   }
 });
+
+describe('TRIGONOMETRY other values', () => {
+  test(`arccos`, () =>
+    expect(engine.parse('\\cos^{-1}(0.1)').N()).toMatchInlineSnapshot(
+      `1.470628905633336822885798512187058123529908727457923369096448441117505529492241947660079548311554079`
+    ));
+});
