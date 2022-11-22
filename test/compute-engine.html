@@ -489,9 +489,15 @@
       const mf = document.getElementById('mf');
       mf.setOptions({
         onInlineShortcut: (_mf, s) => {
-          if (/^(ln|log|lb|lg)/.test(s)) return '\\' + s;
-          if (/^[a-zA-Z][a-zA-Z0-9]*'?(_[a-zA-Z0-9]+'?)?$/.test(s)) {
-            const m = s.match(/^([a-zA-Z]+)([0-9]+)$/);
+          const f = s.match(
+            /^(cos|sin|tan|arcsin|arccos|arctan|arctg|arcctg|arcsec|arccsc|arsinh|arcosh|artanh|arcsech|arccsch|arg|ch|cosec|cosh|cot|cotg|coth|csc|ctg|cth|log|ln|lg|lb|sec|sinh|sh|tanh|tg|th)(.*)/
+          );
+
+          if (f && f[1] && !f[2]) return `\\${f[1]} `;
+          if (f && f[1] && f[2]) return `\\${f[1]} ${f[2]}`;
+
+          if (/^[a-zA-Z][a-zA-Z0-9]*'?_([a-zA-Z0-9]+'?)?$/.test(s)) {
+            const m = s.match(/^([a-zA-Z]+)_([a-zA-Z0-9]+'?)$/);
             if (m) {
               if (
                 [
@@ -541,52 +547,15 @@
                 ].includes(m[1])
               )
                 return `\\${m[1]}_{${m[2]}}`;
-              if (
-                [
-                  'cos',
-                  'sin',
-                  'tan',
-                  'arcsin',
-                  'arccos',
-                  'arctan',
-                  'arctg',
-                  'arcctg',
-                  'arcsec',
-                  'arccsc',
-                  'arsinh',
-                  'arcosh',
-                  'artanh',
-                  'arcsech',
-                  'arccsch',
-                  'arg',
-                  'ch',
-                  'cosec',
-                  'cosh',
-                  'cot',
-                  'cotg',
-                  'coth',
-                  'csc',
-                  'ctg',
-                  'cth',
-                  'log',
-                  'ln',
-                  'lg',
-                  'lb',
-                  'sec',
-                  'sinh',
-                  'sh',
-                  'tanh',
-                  'tg',
-                  'th',
-                ].includes(m[1])
-              ) {
-                return `\\${m[1]} ${m[2]}`;
-              }
+
               return `\\mathrm{${m[1]}}_{${m[2]}}`;
             }
-            if (s.includes('_')) debugger;
-            return '\\mathrm{' + s + '}';
+            return `\\mathrm{${s}}`;
           }
+
+          const m2 = s.match(/^([a-zA-Z][a-zA-Z0-9]+)$/);
+          if (m2) return `\\mathrm{${s}}`;
+
           return '';
         },
       });
