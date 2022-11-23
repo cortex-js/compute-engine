@@ -1,5 +1,5 @@
 import { Expression } from '../../../src/math-json/math-json-format';
-import { box, latex, parse } from '../../utils';
+import { box, latex, parse, engine as ce } from '../../utils';
 
 describe('NUMBERS', () => {
   test('Parsing', () => {
@@ -184,5 +184,97 @@ describe('NUMBERS', () => {
     ).toMatchInlineSnapshot(
       `18734619237861928346123987612981923064237689123876492384769123786412837040123612308964123876412307864012346012837491237864192837641923876419238764123987642198764987162398716239871236912347619238764`
     );
+  });
+});
+
+describe('NUMBER SERIALIZATION', () => {
+  test('Auto', () => {
+    ce.latexOptions.notation = 'auto';
+    ce.latexOptions.avoidExponentsInRange = null;
+    ce.latexOptions.exponentProduct = '\\times';
+    expect(ce.parse('0').latex).toMatchInlineSnapshot(`0`);
+    expect(ce.parse('0.00001').latex).toMatchInlineSnapshot(`0.000\\,01`);
+    expect(ce.parse('0.0123').latex).toMatchInlineSnapshot(`0.012\\,3`);
+    expect(ce.parse('0.001').latex).toMatchInlineSnapshot(`0.001`);
+    expect(ce.parse('0.123').latex).toMatchInlineSnapshot(`0.123`);
+    expect(ce.parse('5').latex).toMatchInlineSnapshot(`5`);
+    expect(ce.parse('5.1234').latex).toMatchInlineSnapshot(`5.123\\,4`);
+    expect(ce.parse('42').latex).toMatchInlineSnapshot(`42`);
+    expect(ce.parse('420').latex).toMatchInlineSnapshot(`420`);
+    expect(ce.parse('700').latex).toMatchInlineSnapshot(`700`);
+    expect(ce.parse('1420').latex).toMatchInlineSnapshot(`1\\,420`);
+    expect(ce.parse('1420.567').latex).toMatchInlineSnapshot(`1\\,420.567`);
+    expect(ce.parse('12420').latex).toMatchInlineSnapshot(`12\\,420`);
+    expect(ce.parse('7000').latex).toMatchInlineSnapshot(`7\\,000`);
+    expect(ce.parse('12420\\times10^{7}').latex).toMatchInlineSnapshot(
+      `124\\,200\\,000\\,000`
+    );
+    expect(ce.parse('12420.54\\times10^{7}').latex).toMatchInlineSnapshot(
+      `124\\,205\\,400\\,000`
+    );
+  });
+
+  test('Scientific', () => {
+    ce.latexOptions.notation = 'scientific';
+    ce.latexOptions.avoidExponentsInRange = null;
+    ce.latexOptions.exponentProduct = '\\times';
+    expect(ce.parse('0').latex).toMatchInlineSnapshot(`0`);
+    expect(ce.parse('0.00001').latex).toMatchInlineSnapshot(`10^{-5}`);
+    expect(ce.parse('0.0123').latex).toMatchInlineSnapshot(
+      `1.23\\times10^{-2}`
+    );
+    expect(ce.parse('0.001').latex).toMatchInlineSnapshot(`10^{-3}`);
+    expect(ce.parse('0.123').latex).toMatchInlineSnapshot(`1.23\\times10^{-1}`);
+    expect(ce.parse('5').latex).toMatchInlineSnapshot(`5`);
+    expect(ce.parse('5.1234').latex).toMatchInlineSnapshot(`5.123\\,4`);
+    expect(ce.parse('42').latex).toMatchInlineSnapshot(`4.2\\times10^{1}`);
+    expect(ce.parse('420').latex).toMatchInlineSnapshot(`4.2\\times10^{2}`);
+    expect(ce.parse('700').latex).toMatchInlineSnapshot(`7\\times10^{2}`);
+    expect(ce.parse('1420').latex).toMatchInlineSnapshot(`1.42\\times10^{3}`);
+    expect(ce.parse('1420.567').latex).toMatchInlineSnapshot(
+      `1.420\\,567\\times10^{3}`
+    );
+    expect(ce.parse('12420').latex).toMatchInlineSnapshot(`1.242\\times10^{4}`);
+    expect(ce.parse('7000').latex).toMatchInlineSnapshot(`7\\times10^{3}`);
+    expect(ce.parse('12420\\times10^{7}').latex).toMatchInlineSnapshot(
+      `1.242\\times10^{11}`
+    );
+    expect(ce.parse('12420.54\\times10^{7}').latex).toMatchInlineSnapshot(
+      `1.242\\,054\\times10^{11}`
+    );
+    ce.latexOptions.notation = 'auto';
+  });
+
+  test('Auto', () => {
+    ce.latexOptions.notation = 'engineering';
+    ce.latexOptions.avoidExponentsInRange = null;
+    ce.latexOptions.exponentProduct = '\\times';
+    expect(ce.parse('0').latex).toMatchInlineSnapshot(`0`);
+    expect(ce.parse('0.00001').latex).toMatchInlineSnapshot(
+      `100\\times10^{-3}`
+    );
+    expect(ce.parse('0.0123').latex).toMatchInlineSnapshot(
+      `12.3\\times10^{-3}`
+    );
+    expect(ce.parse('0.001').latex).toMatchInlineSnapshot(`10^{-3}`);
+    expect(ce.parse('0.123').latex).toMatchInlineSnapshot(`123\\times10^{-3}`);
+    expect(ce.parse('5').latex).toMatchInlineSnapshot(`5`);
+    expect(ce.parse('5.1234').latex).toMatchInlineSnapshot(`5.123\\,4`);
+    expect(ce.parse('42').latex).toMatchInlineSnapshot(`42`);
+    expect(ce.parse('420').latex).toMatchInlineSnapshot(`420`);
+    expect(ce.parse('700').latex).toMatchInlineSnapshot(`700`);
+    expect(ce.parse('1420').latex).toMatchInlineSnapshot(`1.42\\times10^{3}`);
+    expect(ce.parse('1420.567').latex).toMatchInlineSnapshot(
+      `1.420\\,567\\times10^{3}`
+    );
+    expect(ce.parse('12420').latex).toMatchInlineSnapshot(`12.42\\times10^{3}`);
+    expect(ce.parse('7000').latex).toMatchInlineSnapshot(`7\\times10^{3}`);
+    expect(ce.parse('12420\\times10^{7}').latex).toMatchInlineSnapshot(
+      `124.2\\times10^{9}`
+    );
+    expect(ce.parse('12420.54\\times10^{7}').latex).toMatchInlineSnapshot(
+      `124.205\\,4\\times10^{9}`
+    );
+    ce.latexOptions.notation = 'auto';
   });
 });

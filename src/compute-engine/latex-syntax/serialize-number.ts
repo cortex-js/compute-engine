@@ -106,7 +106,10 @@ export function serializeNumber(
     else if (Number.isNaN(num)) return options.notANumber;
 
     if (options.notation === 'engineering')
-      return serializeEngineeringNotationNumber(num, options);
+      return serializeScientificNotationNumber(num, options, 3);
+
+    if (options.notation === 'scientific')
+      return serializeScientificNotationNumber(num, options);
 
     return serializeAutoNotationNumber(num.toString(), options);
   }
@@ -202,7 +205,10 @@ export function serializeNumber(
     }
   } else if (num.length > options.precision) {
     const len = num.length;
-    if (len > options.avoidExponentsInRange[1]) {
+    if (
+      !options.avoidExponentsInRange ||
+      len > options.avoidExponentsInRange[1]
+    ) {
       let r = num[0];
       const f = formatFractionalPart(num.substring(1), options);
       if (f) {
@@ -241,38 +247,79 @@ export function serializeNumber(
   return sign + num;
 }
 
-export function serializeEngineeringNotationNumber(
-  value: number,
-  options: NumberFormattingOptions
+/**
+ * Scientific notation has:
+ * - a whole part [1..9]
+ * - an optional fractional part (many digits)
+ * - an optional exponent
+ * @param valString
+ * @param options
+ * @returns
+ */
+function serializeScientificNotationNumber(
+  val: number,
+  options: NumberFormattingOptions,
+  expMultiple = 1
 ): string {
-  if (value === 0) return '0';
+  const valString = Number(val).toExponential();
+  // For '7' returns '7e+0'
+  let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/i);
+  // toExponential() should always return an exponent, so m should never be null
+  console.assert(m);
+  if (!m) return serializeAutoNotationNumber(valString, options);
 
-  // Ensure the exponent is a multiple of 3
-  const y = Math.abs(value);
-  let exponent: number = Math.round(Math.log10(y));
-  exponent = exponent - (exponent % 3);
-  if (
-    y > Math.pow(10, options.avoidExponentsInRange[0]) &&
-    y < Math.pow(10, options.avoidExponentsInRange[1])
-  )
-    exponent = 0;
-  const significand = y / Math.pow(10, exponent);
-  let significandString = '';
-  const m = significand.toString().match(/^(.*)\.(.*)$/);
-  if (m?.[1] && m[2]) {
-    significandString = m[1] + options.decimalMarker + m[2];
+  let exponent = parseInt(m[2]);
+  let mantissa = m[1];
+
+  if (Math.abs(exponent) % expMultiple !== 0) {
+    // Need to adjust the exponent and values, e.g. for engineering notation
+    const adjust =
+      exponent > 0
+        ? exponent % expMultiple
+        : -((expMultiple + exponent) % expMultiple);
+    exponent = exponent >= 0 ? exponent - adjust : exponent + adjust;
+    // Don't use numeric operations, which may introduce artifacting
+    // eslint-disable-next-line prefer-const
+    let [_, whole, fraction] = mantissa.match(/^(.*)\.(.*)$/) ?? [
+      '',
+      mantissa,
+      '',
+    ];
+    mantissa =
+      whole +
+      (fraction + '00000000000000000').slice(0, Math.abs(adjust)) +
+      '.' +
+      fraction.slice(Math.abs(adjust));
   }
+
+  // Is the exponent in a range to be avoided?
+  const avoid = options.avoidExponentsInRange;
+  if (avoid && exponent >= avoid[0] && exponent <= avoid[1])
+    return serializeAutoNotationNumber(val.toString(), options);
+
+  let fractionalPart = '';
+  let wholePart = mantissa;
+  m = wholePart.match(/^(.*)\.(.*)$/);
+  if (m) {
+    wholePart = m[1];
+    fractionalPart = m[2];
+  }
+
+  const expString =
+    exponent !== 0 ? formatExponent(Number(exponent).toString(), options) : '';
+
   if (options.groupSeparator) {
-    significandString = formatFractionalPart(
-      significand.toExponential(),
-      options
+    wholePart = wholePart.replace(
+      /\B(?=(\d{3})+(?!\d))/g,
+      options.groupSeparator
     );
+    fractionalPart = formatFractionalPart(fractionalPart, options);
   }
-  let exponentString = '';
-  if (exponent !== 0) {
-    exponentString = formatExponent(exponent.toString(), options);
-  }
-  return (value < 0 ? '-' : '') + significandString + exponentString;
+  if (fractionalPart) fractionalPart = options.decimalMarker + fractionalPart;
+
+  if (!expString) return wholePart + fractionalPart;
+  if (wholePart === '1' && !fractionalPart) return expString;
+  return wholePart + fractionalPart + options.exponentProduct + expString;
 }
 
 function serializeAutoNotationNumber(

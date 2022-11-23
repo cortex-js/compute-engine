@@ -564,7 +564,10 @@ export type NumberFormattingOptions = {
   endRepeatingDigits: LatexString;
   imaginaryUnit: LatexString;
 
-  avoidExponentsInRange: [negativeExponent: number, positiveExponent: number];
+  avoidExponentsInRange:
+    | undefined
+    | null
+    | [negativeExponent: number, positiveExponent: number];
 };
 
 /**
