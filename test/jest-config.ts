@@ -48,13 +48,17 @@ function formatStackTrace(s: string): string {
     .replace(new RegExp(parentDir, 'g'), '..')
     .replace(new RegExp(curDir, 'g'), '.');
 
-  s = s.replace('Error:\n', '');
   const lines = s.split('\n').map((line) => {
-    line = line.replace('    at ', '  > ');
     if (/\.\.\/node_modules/.test(line)) return '';
     if (/\(node:internal/.test(line)) return '';
-    const [_, prefix, filename, suffix] = line.match(/(.+\()(.+)(\:.+?)/) ?? [];
+
+    line = line.replace('    at ', '  > ');
+
+    const [_, prefix, filename, suffix] =
+      line.match(/(?:(.+)\()(.+)(\:.+?)/) ?? [];
     if (!prefix) return line;
+    if (/Object.<anonymous>/.test(prefix))
+      return GREY + '  > ' + CYAN + filename + GREY + suffix;
     return GREY + prefix + CYAN + filename + GREY + suffix;
   });
   lines[0] = '';
