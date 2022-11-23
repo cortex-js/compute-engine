@@ -64,11 +64,10 @@ describe('CANONICAL FORMS', () => {
     `);
   });
 
-  test('\\frac{-101}{10^{\\frac{2}{3}}}"', () => {
+  test('\\frac{-101}{10^{\\frac{2}{3}}}', () => {
     expect(check('\\frac{-101}{10^{\\frac{2}{3}}}')).toMatchInlineSnapshot(`
       latex     = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
-      box       = ["Negate", ["Divide", 101, ["Power", 10, ["Rational", 2, 3]]]]
-      simplify  = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
+      box       = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
       N-auto    = -21.75979036932202558976886502184544000211938391614029668314127861409875217714824208187295918578675709
       N-mach    = -21.759790369322026
     `);

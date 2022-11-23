@@ -107,16 +107,13 @@ export class Product {
   addTerm(term: BoxedExpression) {
     console.assert(term.isCanonical);
 
+    if (term.head === 'Multiply') {
+      for (const t of term.ops!) this.addTerm(t);
+      return;
+    }
+
     if (this._isCanonical) {
       if (term.isNothing) return;
-
-      // if (term.head === 'Sqrt') {
-      //   const r = asRational(term.op1);
-      //   if (r) {
-      //     this._squareRootRational = mul(this._squareRootRational, r);
-      //     return;
-      //   }
-      // }
 
       // If we're calculation a canonical  product, fold exact literals into
       // running terms
@@ -207,6 +204,10 @@ export class Product {
         exponent = r;
         rest = rest.op1;
       }
+    } else if (rest.head === 'Divide') {
+      this.addTerm(rest.op1);
+      exponent = [-1, 1];
+      rest = rest.op2;
     }
 
     // Look for the base, and add the exponent if already in the list of terms
@@ -238,22 +239,6 @@ export class Product {
           else b = ce.bignum(this._rational[0]).div(this._rational[1]);
         }
 
-        // if (!isRationalOne(this._squareRootRational)) {
-        //   if (isBigRational(this._squareRootRational))
-        //     b = b.mul(
-        //       this._squareRootRational[0]
-        //         .div(this._squareRootRational[1])
-        //         .sqrt()
-        //     );
-        //   else
-        //     b = b.mul(
-        //       ce
-        //         .bignum(this._squareRootRational[0])
-        //         .div(this._squareRootRational[1])
-        //         .sqrt()
-        //     );
-        // }
-
         b = b.mul(this._bignum).mul(this._sign * this._number);
 
         if (this._complex.im !== 0) {
@@ -273,18 +258,6 @@ export class Product {
           n = this._rational[0].toNumber() / this._rational[1].toNumber();
         else n = this._rational[0] / this._rational[1];
       }
-
-      // if (!isRationalOne(this._squareRootRational)) {
-      //   if (isBigRational(this._squareRootRational))
-      //     n *= Math.sqrt(
-      //       this._squareRootRational[0].toNumber() /
-      //         this._squareRootRational[1].toNumber()
-      //     );
-      //   else
-      //     n *= Math.sqrt(
-      //       this._squareRootRational[0] / this._squareRootRational[1]
-      //     );
-      // }
 
       n *= this._sign * this._number * this._bignum.toNumber();
 
@@ -339,20 +312,6 @@ export class Product {
         } else unitTerms.push(ce.number(this._rational));
       }
     }
-
-    // if (!isRationalOne(this._squareRootRational)) {
-    //   if (mode === 'rational') {
-    //     if (machineNumerator(this._squareRootRational) !== 1)
-    //       unitTerms.push(ce.sqrt(ce.number(this._squareRootRational[0])));
-    //     if (machineDenominator(this._squareRootRational) !== 1)
-    //       xs.push({
-    //         exponent: [-1, 1],
-    //         terms: [ce.sqrt(ce.number(this._squareRootRational[1]))],
-    //       });
-    //   } else {
-    //     unitTerms.push(ce.sqrt(ce.number(this._squareRootRational)));
-    //   }
-    // }
 
     // Literal
     if (!b.equals(ce._BIGNUM_ONE)) unitTerms.push(ce.number(b.mul(n)));

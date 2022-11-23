@@ -65,7 +65,7 @@ export function canonicalNegate(
  * If none can be produced (the expression is a symbol for example),
  * return `null`.
  *
- * Call during a `simplify` or `evaluate` chain. Use `caonnicalNegate`  during a
+ * Call during a `simplify` or `evaluate` chain. Use `canonicalNegate`  during a
  * `canonical` chain.
  */
 function distributeNegate(expr: BoxedExpression): BoxedExpression {

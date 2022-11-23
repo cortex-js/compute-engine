@@ -25,8 +25,6 @@ import { applyN } from '../symbolic/utils';
 
 /**
  *
- * Return `null` if there is no canonicalization necessary and the result is
- * simply `ce._fn('Power', [base, exponent])`
  */
 export function canonicalPower(
   ce: IComputeEngine,
@@ -34,10 +32,14 @@ export function canonicalPower(
   exponent: BoxedExpression,
   metadata?: Metadata
 ): BoxedExpression {
-  // base = validateArgument(ce, base?.canonical, 'Number');
-  // exponent = validateArgument(ce, exponent?.canonical, 'Number');
-
   if (exponent.symbol === 'ComplexInfinity') return ce._NAN;
+
+  if (exponent.isOne) return base;
+
+  if (base.head === 'Divide') {
+    if (exponent.isNegativeOne)
+      return ce._fn('Divide', [base.op2, base.op1], metadata);
+  }
 
   if (exponent.numericValue !== null) {
     if (exponent.isZero) return ce._ONE;
@@ -59,8 +61,6 @@ export function canonicalPower(
         if (exponent.isNegative) return ce._COMPLEX_INFINITY; //  Unsigned Infinity...
       }
 
-      if (exponent.isOne) return base;
-
       if (exponent.isNegativeOne) {
         //  x^(-1)
 
@@ -76,7 +76,7 @@ export function canonicalPower(
         if (r instanceof Decimal && r.isInteger())
           return ce.number([ce._BIGNUM_ONE, r], { metadata });
         if (isRational(r)) return ce.number(inverse(r), { metadata });
-        return ce._fn('Power', [base, ce._NEGATIVE_ONE], metadata);
+        return ce._fn('Divide', [ce._ONE, base], metadata);
       }
 
       // x^{0.5}, x^{1/2} -> Square Root

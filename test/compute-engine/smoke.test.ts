@@ -88,16 +88,6 @@ function fastEval() {
 // slowEval();
 // fastEval();
 
-console.log(
-  ce
-    .add([
-      ce.number(2),
-      ce._fn('Sequence', [ce.symbol('a'), ce.symbol('b')]),
-      ce.add([ce.symbol('x'), ce.symbol('y')]),
-    ])
-    .toString()
-);
-
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range
 console.log(t1.toString());
@@ -621,7 +611,7 @@ describe('CANONICALIZATION divide', () => {
   });
   test(`\\frac{-x}{2}`, () => {
     expect(canonicalToJson('\\frac{-x}{2}')).toMatchInlineSnapshot(
-      `["Negate", ["Multiply", ["Rational", 1, 2], "x"]]`
+      `["Multiply", ["Rational", -1, 2], "x"]`
     );
   });
   test(`\\frac{-x}{\\frac{1}{n}}`, () => {

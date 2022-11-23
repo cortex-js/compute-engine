@@ -1142,7 +1142,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   sqrt(base: BoxedExpression, metadata?: Metadata) {
-    return this.pow(base, this._HALF, metadata);
+    return canonicalPower(this, base, this._HALF, metadata);
   }
 
   pow(
@@ -1151,9 +1151,8 @@ export class ComputeEngine implements IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-    // @todo should all this logic be in canonicalPower()?
-    let e: number | null = null;
 
+    // The logic here handles the cases where the exponent is a number or Rational
     if (exponent instanceof AbstractBoxedExpression) {
       const num = exponent.numericValue;
       if (num !== null) {
@@ -1162,10 +1161,13 @@ export class ComputeEngine implements IComputeEngine {
       }
     }
 
+    let e: number | null = null;
+
     if (typeof exponent === 'number') e = exponent;
     else if (isRational(exponent)) {
+      // Is the denominator 1?
       if (isMachineRational(exponent) && exponent[1] === 1) e = exponent[0];
-      if (isBigRational(exponent) && exponent[1].equals(1))
+      else if (isBigRational(exponent) && exponent[1].equals(1))
         e = exponent[0].toNumber();
     }
 
@@ -1177,10 +1179,9 @@ export class ComputeEngine implements IComputeEngine {
     if (e === -1 && r !== null) {
       if (typeof r === 'number' && Number.isInteger(r))
         return this.number([1, r]);
-      if (r instanceof Decimal && r.isInteger())
-        return this.number([base.engine._BIGNUM_ONE, r]);
-      if (isRational(r))
-        return this.number(isBigRational(r) ? [r[1], r[0]] : [r[1], r[0]]);
+      else if (r instanceof Decimal && r.isInteger())
+        return this.number([this._BIGNUM_ONE, r]);
+      else if (isRational(r)) return this.number([r[1], r[0]] as Rational);
     }
 
     if (typeof exponent === 'number' || isRational(exponent))
@@ -1202,9 +1203,12 @@ export class ComputeEngine implements IComputeEngine {
       expr = expr.op1;
     }
 
+    if (expr.head === 'Divide')
+      return this._fn('Divide', [expr[1], expr[0]], metadata);
+
     // Inverse(expr) -> expr^{-1}
     // Will take care of literals, i.e. Inverse(n/d) -> d/n
-    return this.pow(expr, e, metadata);
+    return canonicalPower(this, expr, e, metadata);
   }
 
   pair(
@@ -1213,15 +1217,10 @@ export class ComputeEngine implements IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression {
     // Short path
-    return new BoxedFunction(
-      this,
-      'Tuple',
-      [first.canonical, second.canonical],
-      {
-        metadata,
-        canonical: true,
-      }
-    );
+    return new BoxedFunction(this, 'Tuple', [first, second], {
+      metadata,
+      canonical: true,
+    });
   }
 
   tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression {

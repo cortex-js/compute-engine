@@ -175,6 +175,14 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
           return ce.div(args[0], args[1]);
         },
         simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
+        evaluate: (ce, ops) =>
+          apply2N(
+            ops[0],
+            ops[1],
+            (n, d) => n / d,
+            (n, d) => n.div(d),
+            (n, d) => n.div(d)
+          ),
       },
     },
 

@@ -2,13 +2,16 @@ import { BoxedExpression, IComputeEngine } from '../public';
 import { makePositive } from '../symbolic/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import {
+  asCoefficient,
   asRational,
   inverse,
   isBigRational,
   isMachineRational,
+  isRationalOne,
   isRationalZero,
   mul,
 } from '../numerics/rationals';
+import { Product } from '../symbolic/product';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -25,6 +28,11 @@ export function canonicalDivide(
   op2: BoxedExpression
 ): BoxedExpression {
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
+
+  if (op1.head === 'Negate' && op2.head === 'Negate') {
+    op1 = op1.op1;
+    op2 = op2.op1;
+  }
 
   if (op1.numericValue !== null && op2.numericValue !== null) {
     if (op2.isOne) return op1;
@@ -73,6 +81,11 @@ export function canonicalDivide(
   if (op2.head === 'Divide' || op2.head === 'Rational')
     return canonicalDivide(ce, ce.mul([op1, op2.op2]), op2.op1);
 
+  const [c1, t1] = asCoefficient(op1);
+  const [c2, t2] = asCoefficient(op2);
+  if (!isRationalOne(c1) || !isRationalOne(c2))
+    return ce.mul([ce.number(mul(c1, inverse(c2))), ce.div(t1, t2)]);
+
   // eslint-disable-next-line prefer-const
   let [nSign, n] = makePositive(op1);
   // eslint-disable-next-line prefer-const
@@ -84,14 +97,9 @@ export function canonicalDivide(
   if (d.numericValue !== null && d.isOne)
     return nSign * dSign < 0 ? canonicalNegate(n) : n;
 
-  // Divide: transform into multiply/power
-  d = ce.inv(d);
-  if (n.numericValue !== null) {
-    if (n.isOne) return d;
-    if (n.isNegativeOne) return canonicalNegate(d);
-  }
-  if (nSign * dSign > 0) return ce.mul([n, d]);
-  return canonicalNegate(ce.mul([n, d]));
+  if (nSign * dSign > 0) return ce._fn('Divide', [n, d]);
+  if (n.numericValue) return ce._fn('Divide', [canonicalNegate(n), d]);
+  return canonicalNegate(ce._fn('Divide', [n, d]));
 }
 
 /**
@@ -109,5 +117,10 @@ export function simplifyDivide(
     if (r1 && r2 && !isRationalZero(r2)) return ce.number(mul(r1, inverse(r2)));
   }
 
-  return undefined;
+  const [c1, t1] = asCoefficient(op1);
+  const [c2, t2] = asCoefficient(op2);
+  if (!isRationalOne(c1) || !isRationalOne(c2))
+    return ce.mul([ce.number(mul(c1, inverse(c2))), ce.div(t1, t2)]);
+
+  return new Product(ce, [op1, ce.inv(op2)]).asExpression();
 }
