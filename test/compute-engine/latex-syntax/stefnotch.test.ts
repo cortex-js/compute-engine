@@ -111,17 +111,8 @@ describe('STEFNOTCH #12', () => {
         "Power",
         "ExponentialE",
         "ImaginaryUnit",
-        "Pi",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "String"]
-          ],
-          "'nope!?\\lparensum'"
-        ]
+        ["Error", "'unexpected-argument'", "Pi"],
+        ["Error", "'unexpected-argument'", "'nope!?\\lparensum'"]
       ]
     `);
   });

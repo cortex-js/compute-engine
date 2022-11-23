@@ -26,7 +26,7 @@ export const SETS_LIBRARY: IdTable = {
     signature: {
       domain: 'Predicate',
       canonical: (ce, args) => {
-        args = validateArgumentCount(ce, canonical(flattenSequence(args)), 2);
+        args = validateArgumentCount(ce, flattenSequence(canonical(args)), 2);
         if (args.length === 2 && isDomain(args[1]))
           return ce._fn('Element', [args[0], ce.domain(args[1])]);
         return ce._fn('Element', args);

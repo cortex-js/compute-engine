@@ -79,7 +79,7 @@ import {
   isRational,
 } from './numerics/rationals';
 import { canonicalNegate } from './symbolic/negate';
-import { canonical, flattenSequence } from './symbolic/flatten';
+import { canonical, flattenOps, flattenSequence } from './symbolic/flatten';
 import { isFunctionDefinition, isSymbolDefinition } from './library/utils';
 
 /**
@@ -1024,6 +1024,14 @@ export class ComputeEngine implements IComputeEngine {
     return box(this, expr, options);
   }
 
+  canonical(xs: SemiBoxedExpression[]): BoxedExpression[] {
+    if (!xs.every((x) => x instanceof AbstractBoxedExpression))
+      return xs.map((x) => this.box(x));
+
+    const bxs = xs as BoxedExpression[];
+    return bxs.every((x) => x.isCanonical) ? bxs : bxs.map((x) => x.canonical);
+  }
+
   fn(
     head: string,
     ops: BoxedExpression[],
@@ -1096,30 +1104,31 @@ export class ComputeEngine implements IComputeEngine {
 
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-    // ops = flattenSequence(ops);
 
-    const result = canonicalAdd(this, ops);
+    const result = canonicalAdd(this, flattenOps(flattenSequence(ops), 'Add'));
     if (metadata?.latex !== undefined) result.latex = metadata.latex;
     if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
 
-  negate(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
+  neg(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
     return canonicalNegate(expr, metadata);
   }
 
   mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-    ops = flattenSequence(ops);
 
-    const result = canonicalMultiply(this, ops);
+    const result = canonicalMultiply(
+      this,
+      flattenOps(flattenSequence(ops), ' Multiply')
+    );
     if (metadata?.latex !== undefined) result.latex = metadata.latex;
     if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
 
-  divide(
+  div(
     num: BoxedExpression,
     denom: BoxedExpression,
     metadata?: Metadata
@@ -1133,16 +1142,15 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   sqrt(base: BoxedExpression, metadata?: Metadata) {
-    return this.power(base, [1, 2], metadata);
+    return this.pow(base, this._HALF, metadata);
   }
 
-  power(
+  pow(
     base: BoxedExpression,
     exponent: number | Rational | BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-    // @todo: not true, they are currectly validated in canonicalPower()
     // @todo should all this logic be in canonicalPower()?
     let e: number | null = null;
 
@@ -1181,7 +1189,7 @@ export class ComputeEngine implements IComputeEngine {
     return canonicalPower(this, base, exponent, metadata);
   }
 
-  inverse(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
+  inv(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
     let e = this._NEGATIVE_ONE;
 
@@ -1196,7 +1204,7 @@ export class ComputeEngine implements IComputeEngine {
 
     // Inverse(expr) -> expr^{-1}
     // Will take care of literals, i.e. Inverse(n/d) -> d/n
-    return canonicalPower(this, expr, e, metadata);
+    return this.pow(expr, e, metadata);
   }
 
   pair(

@@ -831,11 +831,14 @@ function makeNumericFunction(
 ): BoxedExpression | null {
   let ops: BoxedExpression[] = [];
   if (head === 'Add' || head === 'Multiply')
-    ops = validateNumericArgs(ce, semiOps);
+    ops = validateNumericArgs(
+      ce,
+      flattenOps(flattenSequence(ce.canonical(semiOps)), head)
+    );
   else if (head === 'Negate' || head === 'Square' || head === 'Sqrt')
-    ops = validateNumericArgs(ce, semiOps, 1);
+    ops = validateNumericArgs(ce, flattenSequence(ce.canonical(semiOps)), 1);
   else if (head === 'Divide' || head === 'Power')
-    ops = validateNumericArgs(ce, semiOps, 2);
+    ops = validateNumericArgs(ce, flattenSequence(ce.canonical(semiOps)), 2);
   else return null;
 
   // If some of the arguments are not valid, make a non-canonical expression
@@ -847,22 +850,21 @@ function makeNumericFunction(
   // (avoid looking up a definition)
   //
   if (head === 'Add') return ce.add(ops, metadata);
-  if (head === 'Negate')
-    return ce.negate(ops[0] ?? ce.error('missing'), metadata);
+  if (head === 'Negate') return ce.neg(ops[0] ?? ce.error('missing'), metadata);
   if (head === 'Multiply') return ce.mul(ops, metadata);
-  if (head === 'Divide') return ce.divide(ops[0], ops[1], metadata);
-  if (head === 'Power') return ce.power(ops[0], ops[1], metadata);
-  if (head === 'Square') return ce.power(ops[0], ce.number(2), metadata);
+  if (head === 'Divide') return ce.div(ops[0], ops[1], metadata);
+  if (head === 'Power') return ce.pow(ops[0], ops[1], metadata);
+  if (head === 'Square') return ce.pow(ops[0], ce.number(2), metadata);
   if (head === 'Sqrt') {
     const op = ops[0].canonical;
     if (isRational(op.numericValue))
       return new BoxedFunction(ce, 'Sqrt', [op], { metadata, canonical: true });
 
-    return ce.power(op, ce.number([1, 2]), metadata);
+    return ce.pow(op, ce._HALF, metadata);
   }
 
-  if (head === 'Pair') return ce.pair(ops[0], ops[1], metadata);
-  if (head === 'Tuple') return ce.tuple(ops, metadata);
+  // if (head === 'Pair') return ce.pair(ops[0], ops[1], metadata);
+  // if (head === 'Tuple') return ce.tuple(ops, metadata);
 
   return null;
 }
@@ -1021,11 +1023,27 @@ export function holdMap(
   // f(a, f(b, c), d) -> f(a, b, c, d)
   xs = flattenOps(xs, associativeHead);
 
-  const result: BoxedExpression[] = [];
-
   //
   // Apply the hold as necessary
   //
+  // @fastpath
+  if (skip === 'none') {
+    const result: BoxedExpression[] = [];
+    for (const x of xs) {
+      const h = x.head;
+      if (h === 'Hold') result.push(x);
+      else {
+        const op = h === 'ReleaseHold' ? x.op1 : x;
+        if (op) {
+          const y = f(op);
+          if (y !== null) result.push(y);
+        }
+      }
+    }
+    return flattenOps(result, associativeHead);
+  }
+
+  const result: BoxedExpression[] = [];
   for (let i = 0; i < xs.length; i++) {
     if (xs[i].head === 'Hold') {
       result.push(xs[i]);

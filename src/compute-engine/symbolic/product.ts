@@ -485,7 +485,7 @@ export class Product {
     const [numerator, denominator] = this.asNumeratorDenominator();
     if (denominator.numericValue !== null) {
       if (denominator.isOne) return numerator;
-      if (denominator.isNegativeOne) return this.engine.negate(numerator);
+      if (denominator.isNegativeOne) return this.engine.neg(numerator);
     }
     return this.engine._fn('Divide', [numerator, denominator]);
   }
@@ -551,7 +551,7 @@ function termsAsExpressions(
     const t = flattenOps(x.terms, 'Multiply');
     const base = t.length <= 1 ? t[0] : ce._fn('Multiply', t.sort(order));
     if (isRationalOne(x.exponent)) return base;
-    return ce.power(base, x.exponent);
+    return ce.pow(base, x.exponent);
   });
   return flattenOps(result, 'Multiply') ?? result;
 }

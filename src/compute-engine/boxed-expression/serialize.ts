@@ -112,7 +112,7 @@ export function serializeJsonCanonicalFunction(
         return serializeJsonFunction(
           ce,
           'Divide',
-          [ce._ONE, exp === -1 ? args[0] : ce.power(args[0], -exp)],
+          [ce._ONE, exp === -1 ? args[0] : ce.pow(args[0], -exp)],
           metadata
         );
       }

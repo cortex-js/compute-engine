@@ -23,7 +23,6 @@ import { BoxedExpression, IdTable, IComputeEngine } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
-  canonicalAdd,
   simplifyAdd,
   evalAdd,
   domainAdd,
@@ -31,21 +30,20 @@ import {
   canonicalSummation,
 } from './arithmetic-add';
 import {
-  canonicalMultiply,
   simplifyMultiply,
   evalMultiply,
   evalMultiplication,
   canonicalMultiplication,
 } from './arithmetic-multiply';
-import { canonicalDivide, simplifyDivide } from './arithmetic-divide';
-import { canonicalPower, processPower, processSqrt } from './arithmetic-power';
+import { simplifyDivide } from './arithmetic-divide';
+import { processPower, processSqrt } from './arithmetic-power';
 import { applyN, apply2N } from '../symbolic/utils';
 import Decimal from 'decimal.js';
 import Complex from 'complex.js';
 import {
   validateArgument,
   validateArgumentCount,
-  validateSignature,
+  validateArguments,
 } from '../boxed-expression/validate';
 import { canonical, flattenSequence } from '../symbolic/flatten';
 
@@ -112,7 +110,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
             ce,
             args.map((x) => x.domain)
           ),
-        canonical: (ce, args) => canonicalAdd(ce, args), // never called: shortpath
+        // canonical: (ce, args) => canonicalAdd(ce, args), // never called: shortpath
         simplify: (ce, ops) => simplifyAdd(ce, ops),
         evaluate: (ce, ops) => evalAdd(ce, ops),
         N: (ce, ops) => evalAdd(ce, ops, 'N'),
@@ -166,7 +164,16 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
 
       signature: {
         domain: ['Function', 'Number', 'Number', 'Number'],
-        canonical: (ce, args) => canonicalDivide(ce, args[0], args[1]),
+        canonical: (ce, args) => {
+          args = validateArguments(ce, canonical(flattenSequence(args)), [
+            'Number',
+            'Number',
+          ]);
+
+          if (args.length !== 2) return ce._fn('Divide', args);
+
+          return ce.div(args[0], args[1]);
+        },
         simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
       },
     },
@@ -179,11 +186,13 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
 
       signature: {
         domain: ['Function', 'Number', 'Number'],
-        canonical: (ce, args) =>
-          ce.power(
-            ce.symbol('ExponentialE'),
-            validateArgument(ce, args[0], 'Number')
-          ),
+        canonical: (ce, args) => {
+          args = validateArguments(ce, canonical(flattenSequence(args)), [
+            'Number',
+          ]);
+          if (args.length !== 1) return ce._fn('Power', args);
+          return ce.pow(ce.symbol('ExponentialE'), args[0]);
+        },
       },
     },
 
@@ -296,21 +305,14 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       signature: {
         domain: ['Function', 'Number', ['Maybe', 'Number'], 'Number'],
         canonical: (ce, ops) => {
-          ops = flattenSequence(ops);
+          ops = canonical(flattenSequence(ops));
           if (ops.length === 1)
-            return ce._fn('Log', [
-              validateArgument(ce, ops[0].canonical, 'Number'),
-            ]);
+            return ce._fn('Log', [validateArgument(ce, ops[0], 'Number')]);
           if (ops.length === 2) {
-            const base = validateArgument(ce, ops[1].canonical, 'Number');
-            if (base.numericValue === 10)
-              return ce._fn('Log', [
-                validateArgument(ce, ops[0].canonical, 'Number'),
-              ]);
-            return ce._fn('Log', [
-              validateArgument(ce, ops[0].canonical, 'Number'),
-              base,
-            ]);
+            const arg = validateArgument(ce, ops[0], 'Number');
+            const base = validateArgument(ce, ops[1], 'Number');
+            if (base.numericValue === 10) return ce._fn('Log', [arg]);
+            return ce._fn('Log', [arg, base]);
           }
           return ce._fn('Log', validateArgumentCount(ce, ops, 2));
         },
@@ -444,7 +446,10 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
 
       signature: {
         domain: 'NumericFunction',
-        canonical: (ce, args) => canonicalMultiply(ce, args),
+        // Never called: fastpath
+        // canonical: (ce, args) => {
+        //   return canonicalMultiply(ce, args);
+        // },
         simplify: (ce, ops) => simplifyMultiply(ce, ops),
         evaluate: (ce, ops) => evalMultiply(ce, ops),
         N: (ce, ops) => evalMultiply(ce, ops, 'N'),
@@ -474,7 +479,14 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
           if (negDomain) return ce.domain(negDomain);
           return arg;
         },
-        canonical: (_ce, args) => canonicalNegate(args[0]),
+        canonical: (ce, args) => {
+          args = validateArguments(ce, canonical(flattenSequence(args)), [
+            'Number',
+          ]);
+          if (args.length !== 1) return ce._fn('Negate', args);
+
+          return canonicalNegate(args[0]);
+        },
         simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processNegate(ce, ops[0], 'evaluate'),
         N: (ce, ops) => processNegate(ce, ops[0], 'N'),
@@ -495,7 +507,15 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       complexity: 3500,
       signature: {
         domain: ['Function', 'Number', 'Number', 'Number'],
-        canonical: (ce, args) => canonicalPower(ce, args[0], args[1]),
+        canonical: (ce, args) => {
+          args = validateArguments(ce, canonical(flattenSequence(args)), [
+            'Number',
+            'Number',
+          ]);
+          if (args.length !== 2) return ce._fn('Power', args);
+
+          return ce.pow(args[0], args[1]);
+        },
         simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
         evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
         N: (ce, ops) => {
@@ -535,6 +555,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
           'Number',
         ],
         // codomain: (ce, args) => domainAdd(ce, args),
+        // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
         canonical: (ce, ops) => canonicalMultiplication(ce, ops[0], ops[1]),
         simplify: (ce, ops) =>
           evalMultiplication(ce, ops[0], ops[1], 'simplify'),
@@ -550,26 +571,21 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       signature: {
         domain: ['Function', 'Number', ['Maybe', 'Number'], 'RationalNumber'],
         canonical: (ce, args) => {
-          args = flattenSequence(args);
+          args = canonical(flattenSequence(args));
 
           if (args.length === 0)
             return ce._fn('Rational', [ce.error(['missing', 'Number'])]);
 
           if (args.length === 1)
             return ce._fn('Rational', [
-              validateArgument(ce, args[0].canonical, 'ExtendedRealNumber'),
+              validateArgument(ce, args[0], 'ExtendedRealNumber'),
             ]);
 
-          args =
-            validateSignature(
-              ce.domain(['Function', 'Integer', 'Integer', 'RationalNumber']),
-              args
-            ) ?? args;
+          args = validateArguments(ce, args, ['Integer', 'Integer']);
 
-          if (args.length !== 2 || !args[0].isValid || !args[1].isValid)
-            return ce._fn('Rational', args);
+          if (args.length !== 2) return ce._fn('Rational', args);
 
-          return canonicalDivide(ce, args[0], args[1]);
+          return ce.div(args[0], args[1]);
         },
         simplify: (ce, ops) => {
           if (ops.length !== 2) return undefined;
@@ -610,18 +626,18 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       signature: {
         domain: ['Function', 'Number', 'Number', 'Number'],
         canonical: (ce, args) => {
-          args = flattenSequence(args);
+          args = canonical(flattenSequence(args));
 
           if (args.length > 2)
             return ce._fn('Root', validateArgumentCount(ce, args, 2));
 
           const [base, exp] = [
-            validateArgument(ce, args[0]?.canonical, 'Number'),
-            validateArgument(ce, args[1]?.canonical, 'Number'),
+            validateArgument(ce, args[0], 'Number'),
+            validateArgument(ce, args[1], 'Number'),
           ];
           if (!exp.isValid || !base.isValid) return ce._fn('Root', [base, exp]);
 
-          return canonicalPower(ce, base, ce.inverse(exp));
+          return ce.pow(base, ce.inv(exp));
         },
       },
     },
@@ -683,7 +699,11 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
 
       signature: {
         domain: ['Function', 'Number', 'Number'],
-        canonical: (ce, args) => canonicalPower(ce, args[0], ce._HALF),
+        canonical: (ce, args) => {
+          args = canonical(flattenSequence(args));
+          if (args.length !== 1) return ce._fn('Sqrt', args);
+          return ce.pow(args[0], ce._HALF);
+        },
         simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
         N: (ce, ops) => processSqrt(ce, ops[0], 'N'),
@@ -698,7 +718,11 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
 
       signature: {
         domain: ['Function', 'Number', 'Number'],
-        canonical: (ce, args) => canonicalPower(ce, args[0], ce.number(2)),
+        canonical: (ce, args) => {
+          args = canonical(flattenSequence(args));
+          if (args.length !== 1) return ce._fn('Square', args);
+          return ce.pow(args[0], ce.number(2));
+        },
       },
     },
 
@@ -716,7 +740,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
           args = validateArgumentCount(ce, args, 2);
           if (args.length !== 2) return ce._fn('Subtract', args);
           if (!args.every((x) => x.isValid)) return ce._fn('Subtract', args);
-          return canonicalAdd(ce, [args[0], canonicalNegate(args[1])]);
+          return ce.add([args[0], canonicalNegate(args[1])]);
         },
       },
     },
@@ -894,6 +918,6 @@ function processAbs(
     }
   }
   if (arg.isNonNegative) return arg;
-  if (arg.isNegative) return ce.negate(arg);
+  if (arg.isNegative) return ce.neg(arg);
   return undefined;
 }

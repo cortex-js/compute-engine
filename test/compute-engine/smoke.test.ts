@@ -88,6 +88,16 @@ function fastEval() {
 // slowEval();
 // fastEval();
 
+console.log(
+  ce
+    .add([
+      ce.number(2),
+      ce._fn('Sequence', [ce.symbol('a'), ce.symbol('b')]),
+      ce.add([ce.symbol('x'), ce.symbol('y')]),
+    ])
+    .toString()
+);
+
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range
 console.log(t1.toString());

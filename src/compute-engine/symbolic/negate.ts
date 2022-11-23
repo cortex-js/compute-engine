@@ -91,7 +91,7 @@ function distributeNegate(expr: BoxedExpression): BoxedExpression {
   // Distribute over division
   // Negate(Divide(a, b)) -> Divide(Negate(a), b)
   if (expr.head === 'Divide')
-    return ce.divide(distributeNegate(expr.op1), expr.op2);
+    return ce.div(distributeNegate(expr.op1), expr.op2);
 
   return ce._fn('Negate', [expr]);
 }

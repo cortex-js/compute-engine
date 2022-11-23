@@ -506,7 +506,7 @@ describe('OPERATOR serialize, invalid', () => {
     expect(
       latex(['Divide', null as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `\\frac{1}{\\error{\\blacksquare}}(\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}})`
+      `\\frac{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
     ));
 
   test(`['Divide, undefined'] // Invalid form`, () =>

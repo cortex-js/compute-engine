@@ -9,7 +9,7 @@ describe('POWER', () => {
     expect(
       latex(['Power', null as unknown as Expression])
     ).toMatchInlineSnapshot(
-      `(\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}})^{\\error{\\blacksquare}}`
+      `(\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}})^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
     );
     expect(
       latex(['Power', undefined as unknown as Expression])

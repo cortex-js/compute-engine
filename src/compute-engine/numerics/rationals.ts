@@ -335,8 +335,8 @@ export function asCoefficient(
     const exponent = expr.op2;
 
     const e = asSmallInteger(exponent);
-    if (e === -1) return [inverse(coef), ce.inverse(base)];
-    if (e !== null) return [pow(coef, e), ce.power(base, exponent)];
+    if (e === -1) return [inverse(coef), ce.inv(base)];
+    if (e !== null) return [pow(coef, e), ce.pow(base, exponent)];
 
     // The exponent might be a rational (square root, cubic root...)
     if (
@@ -352,7 +352,7 @@ export function asCoefficient(
         // en = -1 -> inverse the extracted coef
         return [
           en === 1 ? [nCoef, dCoef] : [dCoef, nCoef],
-          ce.power(ce.mul([ce.number([nRest, dRest]), base]), exponent),
+          ce.pow(ce.mul([ce.number([nRest, dRest]), base]), exponent),
         ];
       }
     }

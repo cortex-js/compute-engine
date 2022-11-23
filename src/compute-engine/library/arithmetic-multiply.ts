@@ -7,7 +7,6 @@ import { BoxedExpression, IComputeEngine, Metadata, Rational } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
-import { canonical, flattenOps, flattenSequence } from '../symbolic/flatten';
 
 import { square } from './arithmetic-power';
 import {
@@ -38,9 +37,6 @@ export function canonicalMultiply(
   ops: BoxedExpression[]
 ): BoxedExpression {
   console.assert(ops.every((x) => x.isCanonical));
-
-  // Apply associativity
-  ops = flattenOps(canonical(flattenSequence(ops)), 'Multiply');
 
   if (ops.length === 0) return ce.number(1);
   if (ops.length === 1) return ops[0];

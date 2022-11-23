@@ -9,7 +9,6 @@ import {
   isRationalZero,
   mul,
 } from '../numerics/rationals';
-import { validateArgument } from '../boxed-expression/validate';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')
@@ -25,16 +24,13 @@ export function canonicalDivide(
   op1: BoxedExpression,
   op2: BoxedExpression
 ): BoxedExpression {
-  op1 = validateArgument(ce, op1, 'Number');
-  op2 = validateArgument(ce, op2, 'Number');
-
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
   if (op1.numericValue !== null && op2.numericValue !== null) {
     if (op2.isOne) return op1;
-    if (op2.isNegativeOne) return canonicalNegate(op1);
-    if (op1.isOne) return ce.inverse(op2);
-    if (op1.isNegativeOne) return canonicalNegate(ce.inverse(op2));
+    if (op2.isNegativeOne) return ce.neg(op1);
+    if (op1.isOne) return ce.inv(op2);
+    if (op1.isNegativeOne) return ce.neg(ce.inv(op2));
     const r1 = asRational(op1);
     const r2 = asRational(op2);
     if (r1 && r2 && !isRationalZero(r2)) return ce.number(mul(r1, inverse(r2)));
@@ -89,7 +85,7 @@ export function canonicalDivide(
     return nSign * dSign < 0 ? canonicalNegate(n) : n;
 
   // Divide: transform into multiply/power
-  d = ce.inverse(d);
+  d = ce.inv(d);
   if (n.numericValue !== null) {
     if (n.isOne) return d;
     if (n.isNegativeOne) return canonicalNegate(d);

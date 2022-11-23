@@ -126,9 +126,7 @@ export function findUnivariateRoots(
   const ce = expr.engine;
 
   if (expr.head === 'Equal') {
-    expr = ce
-      .add([expr.op1.canonical, ce.negate(expr.op2.canonical)])
-      .simplify();
+    expr = ce.add([expr.op1.canonical, ce.neg(expr.op2.canonical)]).simplify();
   }
   const rules = ce.cache('univariate-roots-rules', () =>
     boxRules(ce, UNIVARIATE_ROOTS)

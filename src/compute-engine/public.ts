@@ -2056,6 +2056,8 @@ export interface IComputeEngine {
     options?: { canonical?: boolean }
   ): BoxedExpression;
 
+  canonical(xs: SemiBoxedExpression[]): BoxedExpression[];
+
   /** Return a boxed number */
   number(
     value:
@@ -2148,7 +2150,7 @@ export interface IComputeEngine {
    *
    * The result is canonical.
    */
-  power(
+  pow(
     base: BoxedExpression,
     exponent: number | Rational | BoxedExpression,
     metadata?: Metadata
@@ -2160,17 +2162,17 @@ export interface IComputeEngine {
    *
    * The result is canonical.
    */
-  inverse(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
+  inv(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
   /** Shortcut for `this.fn("Negate", [expr])`
    *
    * The result is canonical.
    */
-  negate(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
+  neg(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
   /** Shortcut for `this.fn("Divide", [num, denom])`
    *
    * The result is canonical.
    */
-  divide(
+  div(
     num: BoxedExpression,
     denom: BoxedExpression,
     metadata?: Metadata

@@ -1,7 +1,6 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
-import { validateArgument } from '../boxed-expression/validate';
 import {
   asBignum,
   asFloat,
@@ -31,12 +30,12 @@ import { applyN } from '../symbolic/utils';
  */
 export function canonicalPower(
   ce: IComputeEngine,
-  base: BoxedExpression | undefined,
-  exponent: BoxedExpression | undefined,
+  base: BoxedExpression,
+  exponent: BoxedExpression,
   metadata?: Metadata
 ): BoxedExpression {
-  base = validateArgument(ce, base?.canonical, 'Number');
-  exponent = validateArgument(ce, exponent?.canonical, 'Number');
+  // base = validateArgument(ce, base?.canonical, 'Number');
+  // exponent = validateArgument(ce, exponent?.canonical, 'Number');
 
   if (exponent.symbol === 'ComplexInfinity') return ce._NAN;
 
@@ -94,7 +93,7 @@ export function canonicalPower(
             if (radicand === 1) return ce.number(e >= 0 ? coef : [1, coef]);
             return ce.mul([
               ce.number(coef),
-              ce.power(ce.number(radicand), ce._HALF),
+              ce.pow(ce.number(radicand), ce._HALF),
             ]);
           }
         }
@@ -146,14 +145,14 @@ export function canonicalPower(
     if (a !== null) {
       const b = asSmallInteger(base.op2);
       if (b !== null) {
-        return ce.power(base.op1, ce.number(a * b));
+        return ce.pow(base.op1, ce.number(a * b));
       }
     }
     if (base.op1.isNonNegative) {
       const ar = asRational(exponent);
       if (ar) {
         const br = asRational(base.op2);
-        if (br) return ce.power(base.op1, ce.number(mul(ar, br)));
+        if (br) return ce.pow(base.op1, ce.number(mul(ar, br)));
       }
     }
   }
@@ -165,7 +164,7 @@ export function canonicalPower(
     if (e !== null)
       return ce._fn(
         'Multiply',
-        base.ops!.map((x) => ce.power(x, exponent!))
+        base.ops!.map((x) => ce.pow(x, exponent!))
       ); // Don't call ce.mul() to avoid infinite loops
   }
 
@@ -192,11 +191,11 @@ export function square(
 
   if (base.head === 'Power') {
     const exp = asSmallInteger(base.op2);
-    if (exp !== null) return ce.power(base.op1, ce.number(exp * 2));
-    return ce.power(base.op1, ce.mul([ce.number(2), base.op2]));
+    if (exp !== null) return ce.pow(base.op1, ce.number(exp * 2));
+    return ce.pow(base.op1, ce.mul([ce.number(2), base.op2]));
   }
 
-  return ce.power(base, ce.number(2));
+  return ce.pow(base, ce.number(2));
 }
 
 function numEvalPower(
@@ -293,7 +292,7 @@ export function processPower(
     if (!isRationalOne(c))
       return ce.mul([
         processSqrt(ce, ce.number(c), mode) ?? ce._ONE,
-        ce.power(
+        ce.pow(
           processPower(ce, ce.mul(xs), exponent, mode) ?? ce.mul(xs),
           exponent
         ),
@@ -311,7 +310,7 @@ export function processPower(
       const e = mul(e1, e2);
       if (isRationalZero(e)) return ce._ONE;
       if (isRationalOne(e)) return base.op1;
-      return ce.power(base.op1, e);
+      return ce.pow(base.op1, e);
     }
     if (mode === 'N') {
       const ef1 = asFloat(base.op2);
@@ -320,7 +319,7 @@ export function processPower(
         const ef = ef1 * ef2;
         if (ef === 0) return ce._ONE;
         if (ef === 1) return base.op1;
-        return ce.power(base.op1, ef);
+        return ce.pow(base.op1, ef);
       }
     }
   }
@@ -363,7 +362,7 @@ export function processPower(
             return ce.mul([
               sign,
               ce.number(factor),
-              ce.power(ce.number(root), exponent),
+              ce.pow(ce.number(root), exponent),
             ]);
           }
         } else if (typeof base.numericValue === 'number') {
@@ -388,7 +387,7 @@ export function processPower(
             return ce.mul([
               sign,
               ce.number(factor),
-              ce.power(ce.number(root), exponent),
+              ce.pow(ce.number(root), exponent),
             ]);
           }
         } else {
@@ -397,7 +396,7 @@ export function processPower(
       }
       if (base.isNegative) {
         if (!complexAllowed) return ce._NAN;
-        return ce.mul([ce._I, ce.fn('Sqrt', [ce.negate(base)])]);
+        return ce.mul([ce._I, ce.fn('Sqrt', [ce.neg(base)])]);
       }
       return undefined;
     }

@@ -17,8 +17,8 @@ import { applyN, apply2N } from '../symbolic/utils';
 import { asFloat } from '../numerics/numeric';
 import { canonical, flattenSequence } from '../symbolic/flatten';
 import {
-  validateArgument,
   validateArgumentCount,
+  validateArguments,
 } from '../boxed-expression/validate';
 
 //
@@ -59,12 +59,14 @@ export const TRIGONOMETRY_LIBRARY: IdTable[] = [
       signature: {
         domain: ['Function', 'Number', 'Number'],
         canonical: (ce, ops) => {
-          ops = validateArgumentCount(ce, flattenSequence(ops), 1);
+          ops = validateArguments(ce, flattenSequence(canonical(ops)), [
+            'Number',
+          ]);
           if (ops.length !== 1) return ce.box(['Degrees', ops]);
-          const arg = validateArgument(ce, ops[0].canonical, 'Number');
+          const arg = ops[0];
           if (arg.numericValue === null || !arg.isValid)
             return ce.box(['Degrees', arg]);
-          return ce.mul([arg, ce.box(['Divide', 'Pi', 180])]);
+          return ce.div(ce.mul([arg, ce.symbol('Pi')]), ce.number(180));
         },
         evaluate: (ce, ops) => ce.mul([ops[0], ce.box(['Divide', 'Pi', 180])]),
       },
@@ -450,7 +452,7 @@ export const TRIGONOMETRY_LIBRARY: IdTable[] = [
       signature: {
         domain: ['Function', 'Function', 'Function'],
         canonical: (ce, ops) => {
-          ops = validateArgumentCount(ce, canonical(flattenSequence(ops)), 1);
+          ops = validateArgumentCount(ce, flattenSequence(canonical(ops)), 1);
           return (
             processInverseFunction(ce, ops) ?? ce._fn('InverseFunction', ops)
           );

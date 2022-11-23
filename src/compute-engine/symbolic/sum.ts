@@ -206,11 +206,11 @@ export class Sum {
     for (const { coef, term } of this._terms) {
       if (!isRationalZero(coef)) {
         if (isRationalOne(coef)) xs.push(term);
-        else if (isRationalNegativeOne(coef)) xs.push(ce.negate(term));
+        else if (isRationalNegativeOne(coef)) xs.push(ce.neg(term));
         else if (machineDenominator(coef) === 1)
           xs.push(ce.mul([ce.number(coef[0]), term]));
         else if (machineNumerator(coef) === 1)
-          xs.push(ce.divide(term, ce.number(coef[1])));
+          xs.push(ce.div(term, ce.number(coef[1])));
         else xs.push(ce.mul([ce.number(coef), term]));
       }
     }

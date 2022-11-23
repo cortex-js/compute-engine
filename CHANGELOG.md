@@ -13,6 +13,8 @@
 
 - When `ce.numericMode === "auto"`, square roots of negative numbers would
   return an expression instead of a complex number.
+- The formatting of LaTeX numbers when using
+  `ce.latexOptions.notation = "engineering"` or `"scientific"` was incorrect.
 - The trig functions no longer "simplify" to the less simple exponential
   formulas.
 - The canonical order of polynomials now orders non-lexicographic terms of

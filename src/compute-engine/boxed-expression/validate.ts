@@ -1,11 +1,9 @@
 import {
   IComputeEngine,
-  SemiBoxedExpression,
   BoxedExpression,
   BoxedDomain,
   DomainLiteral,
 } from '../public';
-import { flattenSequence } from '../symbolic/flatten';
 
 export function validateArgumentCount(
   ce: IComputeEngine,
@@ -37,16 +35,16 @@ export function validateArgumentCount(
  */
 export function validateNumericArgs(
   ce: IComputeEngine,
-  ops: SemiBoxedExpression[],
+  ops: BoxedExpression[],
   count?: number
 ): BoxedExpression[] {
   // @fastpath
-  if (!ce.strict) return ops.map((x) => ce.box(x));
-  let xs: BoxedExpression[] = [];
+  if (!ce.strict) return ops;
 
-  if (count === undefined) {
-    xs = ops.map((x) => ce.box(x));
-  } else
+  let xs: BoxedExpression[];
+  if (count === undefined) xs = ops;
+  else {
+    xs = [];
     for (let i = 0; i <= Math.max(count - 1, ops.length - 1); i++) {
       if (i > count - 1) xs.push(ce.error('unexpected-argument', ops[i]));
       else
@@ -56,8 +54,9 @@ export function validateNumericArgs(
             : ce.error(['missing', 'Number'])
         );
     }
+  }
 
-  return flattenSequence(xs).map((op) =>
+  return xs.map((op) =>
     !op.isValid || op.isNumber
       ? op
       : ce.error(['incompatible-domain', 'Number', op.domain], op)
@@ -118,35 +117,32 @@ export function validateSignature(
 export function validateArgument(
   ce: IComputeEngine,
   arg: BoxedExpression | undefined,
-  expect: BoxedDomain | DomainLiteral | undefined
+  dom: BoxedDomain | DomainLiteral | undefined
 ): BoxedExpression {
-  if (expect === undefined) return ce.error('unexpected-argument', arg);
-  if (arg === undefined) return ce.error(['missing', expect]);
+  if (dom === undefined) return ce.error('unexpected-argument', arg);
+  if (arg === undefined) return ce.error(['missing', dom]);
   if (!arg.isValid) return arg;
-  if (arg?.domain.isCompatible(expect)) return arg;
-  return ce.error(['incompatible-domain', expect, arg.domain], arg);
+  if (arg?.domain.isCompatible(dom)) return arg;
+  return ce.error(['incompatible-domain', dom, arg.domain], arg);
 }
 
 function validateNextArgument(
   ce: IComputeEngine,
-  expect: BoxedDomain | DomainLiteral | undefined,
+  dom: BoxedDomain | DomainLiteral | undefined,
   matched: BoxedExpression[],
   ops: BoxedExpression[]
 ): [match: BoxedExpression[], rest: BoxedExpression[]] {
   let next = ops.shift();
 
-  if (expect === undefined)
+  if (dom === undefined)
     return [[...matched, ce.error('unexpected-argument', next)], ops];
 
-  if (!Array.isArray(expect)) {
-    if (!next) return [[...matched, ce.error(['missing', expect])], ops];
+  if (!Array.isArray(dom)) {
+    if (!next) return [[...matched, ce.error(['missing', dom])], ops];
 
-    if (!next.domain.isCompatible(expect)) {
+    if (!next.domain.isCompatible(dom)) {
       return [
-        [
-          ...matched,
-          ce.error(['incompatible-domain', expect, next.domain], next),
-        ],
+        [...matched, ce.error(['incompatible-domain', dom, next.domain], next)],
         ops,
       ];
     }
@@ -154,7 +150,7 @@ function validateNextArgument(
     return [[...matched, next], ops];
   }
 
-  const ctor = expect[0];
+  const ctor = dom[0];
 
   if (next === undefined) {
     //
@@ -163,15 +159,15 @@ function validateNextArgument(
     let valid = false;
     if (ctor === 'Union') {
       //  If an `Union`, was `Nothing` an option?
-      for (let k = 1; k <= expect.length - 1; k++) {
-        if (expect[k] === 'Nothing') {
+      for (let k = 1; k <= dom.length - 1; k++) {
+        if (dom[k] === 'Nothing') {
           valid = true;
           break;
         }
       }
     } else if (ctor === 'Maybe') valid = true;
     if (valid) return [[...matched, ce.symbol('Nothing')], ops];
-    return [[...matched, ce.error(['missing', expect])], ops];
+    return [[...matched, ce.error(['missing', dom])], ops];
   }
 
   if (ctor === 'Union') {
@@ -179,24 +175,21 @@ function validateNextArgument(
     // We expect one of several domains. Check if at least one matches
     //
     let found = false;
-    for (let k = 1; k <= expect.length - 1; k++) {
-      if (next.domain.isCompatible(expect[k])) {
+    for (let k = 1; k <= dom.length - 1; k++) {
+      if (next.domain.isCompatible(dom[k])) {
         found = true;
         break;
       }
     }
     if (found) return [[...matched, next], ops];
     return [
-      [
-        ...matched,
-        ce.error(['incompatible-domain', expect, next.domain], next),
-      ],
+      [...matched, ce.error(['incompatible-domain', dom, next.domain], next)],
       ops,
     ];
   }
 
   if (ctor === 'Sequence') {
-    const seq = expect[1];
+    const seq = dom[1];
     if (!next || !next.domain.isCompatible(seq)) {
       return [
         [...matched, ce.error(['incompatible-domain', seq, next.domain], next)],
@@ -220,7 +213,7 @@ function validateNextArgument(
   if (ctor === 'Maybe') {
     if (next === undefined || next.symbol === 'Nothing')
       return [[...matched, ce.symbol('Nothing')], ops];
-    return validateNextArgument(ce, expect[1], matched, [next, ...ops]);
+    return validateNextArgument(ce, dom[1], matched, [next, ...ops]);
   }
 
   console.error('Unhandled ctor', ctor);
@@ -236,16 +229,16 @@ export function validateArguments(
   // Do a quick check for the common case where everything is as expected.
   // Avoid allocating arrays and objects
   if (
-    args.length === expect.length &&
+    args.length === doms.length &&
     args.every((x, i) => x.domain.isCompatible(doms[i]))
   )
     return args;
 
   const xs: BoxedExpression[] = [];
-  for (let i = 0; i <= expect.length - 1; i++)
-    xs.push(validateArgument(ce, args[i], expect[i]));
+  for (let i = 0; i <= doms.length - 1; i++)
+    xs.push(validateArgument(ce, args[i], doms[i]));
 
-  for (let i = expect.length; i <= args.length; i++)
+  for (let i = doms.length; i <= args.length - 1; i++)
     xs.push(ce.error('unexpected-argument', args[i]));
 
   return xs;
