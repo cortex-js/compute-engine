@@ -11,6 +11,7 @@ import {
   isNumberObject,
   isSymbolObject,
   ops,
+  isNumberExpression,
 } from '../../math-json/utils';
 
 import { WarningSignalHandler } from '../../common/signals';
@@ -186,11 +187,7 @@ export class Serializer {
 
     if (head(expr) === 'Delimiter' && nops(expr) === 1) return exprStr;
 
-    if (
-      typeof expr !== 'number' &&
-      !isNumberObject(expr) &&
-      !/(^(.|\\[a-zA-Z*]+))$/.test(exprStr)
-    ) {
+    if (!isNumberExpression(expr) && !/(^(.|\\[a-zA-Z*]+))$/.test(exprStr)) {
       // It's a long expression, wrap it
       return this.wrapString(
         exprStr,

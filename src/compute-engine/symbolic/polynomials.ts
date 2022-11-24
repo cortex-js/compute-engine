@@ -192,11 +192,16 @@ export function maxDegree(expr: BoxedExpression): number {
  */
 export function lex(expr: BoxedExpression): string {
   if (expr.symbol) return expr.symbol;
-  if (expr.ops)
-    return expr.ops
-      .map((x) => lex(x))
-      .filter((x) => x.length > 0)
-      .join('"');
-
+  if (expr.ops) {
+    const h = typeof expr.head === 'string' ? expr.head : lex(expr.head);
+    return (
+      h +
+      '"' +
+      expr.ops
+        .map((x) => lex(x))
+        .filter((x) => x.length > 0)
+        .join('"')
+    );
+  }
   return '';
 }

@@ -13,6 +13,7 @@ import {
   symbol,
   isEmptySequence,
   missingIfEmpty,
+  isNumberExpression,
 } from '../../../math-json/utils';
 import { Serializer, Parser, LatexDictionary } from '../public';
 import { getFractionStyle, getRootStyle } from '../serializer-style';
@@ -237,7 +238,7 @@ function serializeMultiply(
     //
     // 1. Should the terms be separated by an explicit 'Multiply'?
     //
-    if (typeof arg === 'number' || isNumberObject(arg)) {
+    if (isNumberExpression(arg)) {
       term = serializer.serialize(arg);
       if (term === '-1' && !result) {
         result = '';

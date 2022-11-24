@@ -76,7 +76,10 @@ export function sortAdd(
  *
  */
 export function order(a: BoxedExpression, b: BoxedExpression): number {
-  console.assert(a.isCanonical && b.isCanonical);
+  // console.assert(a.isCanonical && b.isCanonical);
+
+  if (a === b) return 0;
+  if (a.numericValue !== null && a.numericValue === b.numericValue) return 0;
 
   //
   //  1/ Literal numeric values

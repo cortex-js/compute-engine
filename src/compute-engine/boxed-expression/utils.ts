@@ -1,7 +1,7 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
-import { isNumberObject } from '../../math-json/utils';
+import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 import { asFloat } from '../numerics/numeric';
 import { BoxedExpression, IComputeEngine } from '../public';
 
@@ -194,8 +194,9 @@ export function bignumValue(
   if (expr === null || expr === undefined) return null;
   if (typeof expr === 'number') return ce.bignum(expr);
 
-  if (isNumberObject(expr)) {
-    let s = expr.num
+  if (isNumberExpression(expr)) {
+    const num = isNumberObject(expr) ? expr.num : expr;
+    let s = num
       .toLowerCase()
       .replace(/[nd]$/g, '')
       .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
