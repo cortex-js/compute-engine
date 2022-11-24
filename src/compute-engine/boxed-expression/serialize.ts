@@ -538,20 +538,19 @@ function repeatingDecimals(ce: IComputeEngine, s: string): string {
       const times = Math.floor(
         (fractionalPart.length - prefix.length) / repetend.length
       );
-      if (times > 1) {
-        if ((prefix + repetend.repeat(times + 1)).startsWith(fractionalPart)) {
-          // Found a repeating pattern
+      if (times < 3) break;
+      if ((prefix + repetend.repeat(times + 1)).startsWith(fractionalPart)) {
+        // Found a repeating pattern
 
-          // Aktually...
-          if (repetend === '0') {
-            if (lastDigit === '0')
-              return wholepart + '.' + prefix + (exponent ?? '');
-            return s;
-          }
-          return (
-            wholepart + '.' + prefix + '(' + repetend + ')' + (exponent ?? '')
-          );
+        // Aktually...
+        if (repetend === '0') {
+          if (lastDigit === '0')
+            return wholepart + '.' + prefix + (exponent ?? '');
+          return s;
         }
+        return (
+          wholepart + '.' + prefix + '(' + repetend + ')' + (exponent ?? '')
+        );
       }
     }
   }

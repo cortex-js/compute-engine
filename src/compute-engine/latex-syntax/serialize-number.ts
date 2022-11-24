@@ -33,21 +33,20 @@ function formatFractionalPart(
     for (let j = 0; j < 17; j++) {
       const cycle = m.substring(i, i + j + 1);
       const times = Math.floor((m.length - offset.length) / cycle.length);
-      if (times > 1) {
-        if ((offset + cycle.repeat(times + 1)).startsWith(m)) {
-          // We've found a repeating pattern!
-          if (cycle === '0') {
-            // Psych! That pattern is '0'...
-            return offset.replace(/(\d{3})/g, '$1' + options.groupSeparator);
-          }
-          // There is what looks like a true repeating pattern...
-          return (
-            offset.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
-            options.beginRepeatingDigits +
-            cycle +
-            options.endRepeatingDigits
-          );
+      if (times <= 3) break;
+      if ((offset + cycle.repeat(times + 1)).startsWith(m)) {
+        // We've found a repeating pattern!
+        if (cycle === '0') {
+          // Psych! That pattern is '0'...
+          return offset.replace(/(\d{3})/g, '$1' + options.groupSeparator);
         }
+        // There is what looks like a true repeating pattern...
+        return (
+          offset.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
+          options.beginRepeatingDigits +
+          cycle +
+          options.endRepeatingDigits
+        );
       }
     }
   }

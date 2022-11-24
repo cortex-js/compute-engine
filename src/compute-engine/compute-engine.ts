@@ -341,7 +341,7 @@ export class ComputeEngine implements IComputeEngine {
       shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
       metadata: [],
       precision: 'max',
-      repeatingDecimals: true,
+      repeatingDecimals: false,
     };
 
     this._stats = {
