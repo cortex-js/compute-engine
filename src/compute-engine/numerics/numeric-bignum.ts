@@ -14,14 +14,14 @@ export function lcm(a: Decimal, b: Decimal): Decimal {
 }
 
 // Difference between primes from 7 to 31
-const PRIME_WHEEL_INC = [4, 2, 4, 2, 4, 6, 2, 6];
+const PRIME_WHEEL_INC = [4n, 2n, 4n, 2n, 4n, 6n, 2n, 6n];
 
 export function primeFactors(
   ce: IComputeEngine,
-  n: Decimal
+  d: Decimal
 ): Map<Decimal, number> {
-  if (n.lt(Number.MAX_SAFE_INTEGER)) {
-    const factors = machinePrimeFactors(n.toNumber());
+  if (d.lt(Number.MAX_SAFE_INTEGER)) {
+    const factors = machinePrimeFactors(d.toNumber());
     const result = new Map<Decimal, number>();
     for (const f of Object.keys(factors)) result.set(ce.bignum(f), factors[f]);
     return result;
@@ -29,43 +29,61 @@ export function primeFactors(
 
   //https:rosettacode.org/wiki/Prime_decomposition#JavaScript
 
+  let n = BigInt(d.toFixed());
   const result = new Map<string, number>();
+
   // Wheel factorization
   // @todo: see https://github.com/Fairglow/prime-factor/blob/main/src/lib.rs
-  // @todo: rewrite using Bignum
-  let count = 0;
-  while (n.mod(2).isZero()) {
-    count += 1;
-    n = n.div(2);
-  }
-  if (count > 0) result.set('2', count);
-  count = 0;
-  while (n.mod(3).isZero()) {
-    count += 1;
-    n = n.div(3);
-  }
-  if (count > 0) result.set('3', count);
-  while (n.mod(5).isZero()) {
-    count += 1;
-    n = n.div(5);
-  }
-  if (count > 0) result.set('5', count);
 
-  let k = ce.bignum(7);
-  let kIndex = k.toString();
+  let count2 = 0;
+  let count3 = 0;
+  let count5 = 0;
+
+  let k = 10n;
+  while (n % k === 0n) {
+    count2 += 1;
+    count5 += 1;
+    n = n / k;
+  }
+
+  k = 5n;
+  while (n % k === 0n) {
+    count5 += 1;
+    n = n / k;
+  }
+
+  k = 3n;
+  while (n % k === 0n) {
+    count3 += 1;
+    n = n / k;
+  }
+
+  k = 2n;
+  while (n % k === 0n) {
+    count2 += 1;
+    n = n / k;
+  }
+
+  if (count2 > 0) result.set('2', count2);
+  if (count3 > 0) result.set('2', count3);
+  if (count5 > 0) result.set('5', count5);
+
+  k = 7n;
+  let kIndex = '';
   let i = 0;
-  while (k.mul(k).lt(n)) {
-    if (n.mod(k).isZero()) {
+  while (k * k < n) {
+    if (n % k === 0n) {
+      if (!kIndex) kIndex = k.toString();
       result.set(kIndex, (result.get(kIndex) ?? 0) + 1);
-      n = n.div(k);
+      n = n / k;
     } else {
-      k = k.add(PRIME_WHEEL_INC[i]);
-      kIndex = k.toString();
+      k = k + PRIME_WHEEL_INC[i];
+      kIndex = '';
       i = i < 7 ? i + 1 : 0;
     }
   }
 
-  if (!n.eq(1)) result.set(n.toString(), 1);
+  if (n !== 1n) result.set(n.toString(), (result.get(n.toString()) ?? 0) + 1);
 
   const r = new Map<Decimal, number>();
   for (const [k, v] of result) r.set(ce.bignum(k), v);
