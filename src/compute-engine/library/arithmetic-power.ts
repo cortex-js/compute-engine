@@ -34,16 +34,13 @@ export function canonicalPower(
 ): BoxedExpression {
   if (exponent.symbol === 'ComplexInfinity') return ce._NAN;
 
+  if (exponent.isZero) return ce._ONE;
+
   if (exponent.isOne) return base;
 
-  if (base.head === 'Divide') {
-    if (exponent.isNegativeOne)
-      return ce._fn('Divide', [base.op2, base.op1], metadata);
-  }
+  if (exponent.isNegativeOne) return ce.inv(base);
 
   if (exponent.numericValue !== null) {
-    if (exponent.isZero) return ce._ONE;
-
     if (base.numericValue !== null) {
       const numBase = asFloat(base);
 
@@ -61,23 +58,8 @@ export function canonicalPower(
         if (exponent.isNegative) return ce._COMPLEX_INFINITY; //  Unsigned Infinity...
       }
 
-      if (exponent.isNegativeOne) {
-        //  x^(-1)
-
-        // if (base.isOne) return ce._ONE;
-        // if (base.isNegativeOne) return ce._NEGATIVE_ONE;
-        if (numBase === 1) return ce._ONE;
-        if (numBase === -1) return ce._NEGATIVE_ONE;
-        if (base.isInfinity) return ce._ZERO;
-
-        const r = base.numericValue;
-        if (typeof r === 'number' && Number.isInteger(r))
-          return ce.number([1, r], { metadata });
-        if (r instanceof Decimal && r.isInteger())
-          return ce.number([ce._BIGNUM_ONE, r], { metadata });
-        if (isRational(r)) return ce.number(inverse(r), { metadata });
-        return ce._fn('Divide', [ce._ONE, base], metadata);
-      }
+      //  x^(-1)
+      if (exponent.isNegativeOne) return ce.inv(base);
 
       // x^{0.5}, x^{1/2} -> Square Root
       const e = asFloat(exponent);
@@ -93,9 +75,11 @@ export function canonicalPower(
             if (radicand === 1) return ce.number(e >= 0 ? coef : [1, coef]);
             return ce.mul([
               ce.number(coef),
-              ce.pow(ce.number(radicand), ce._HALF),
+              ce._fn('Sqrt', [ce.number(radicand)]),
             ]);
           }
+          if (e > 0) return ce._fn('Sqrt', [base], metadata);
+          return ce.inv(ce._fn('Sqrt', [base]), metadata);
         }
 
         if (e > 0) return ce._fn('Power', [base, ce._HALF], metadata);
@@ -127,9 +111,15 @@ export function canonicalPower(
       if (r) {
         const e = asSmallInteger(exponent);
         if (e !== null) {
-          if (e === -1) return ce.number(inverse(r));
-          // if (e > 0) return ce.number([Math.pow(n, e), Math.pow(d, e)]);
-          // return ce.number([Math.pow(d, -e), Math.pow(n, -e)]);
+          if (isBigRational(r)) {
+            const [n, d] = r;
+            if (e > 0) return ce.number([n.pow(e), d.pow(e)]);
+            return ce.number([d.pow(-e), n.pow(-e)]);
+          } else {
+            const [n, d] = r;
+            if (e > 0) return ce.number([Math.pow(n, e), Math.pow(d, e)]);
+            return ce.number([Math.pow(d, -e), Math.pow(n, -e)]);
+          }
         }
 
         // @todo: could call factorPower to handle \sqrt and \sqrt[3]

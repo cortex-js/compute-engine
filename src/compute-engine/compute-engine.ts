@@ -74,6 +74,7 @@ import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expre
 import { isValidIdentifier } from '../math-json/utils';
 import { makeFunctionDefinition } from './boxed-expression/boxed-function-definition';
 import {
+  inverse,
   isBigRational,
   isMachineRational,
   isRational,
@@ -1192,6 +1193,30 @@ export class ComputeEngine implements IComputeEngine {
 
   inv(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
+    if (expr.isOne) return this._ONE;
+    if (expr.isNegativeOne) return this._NEGATIVE_ONE;
+    if (expr.isInfinity) return this._ZERO;
+    const n = expr.numericValue;
+    if (n !== null) {
+      if (isRational(n)) return this.number(inverse(n), { metadata });
+      if (typeof n === 'number' && Number.isInteger(n))
+        return this.number([1, n], { metadata });
+
+      if (n instanceof Decimal && n.isInteger())
+        return this.number([this._BIGNUM_ONE, n], { metadata });
+      return this._fn('Divide', [this._ONE, expr], metadata);
+    }
+
+    if (expr.head === 'Sqrt')
+      return this._fn('Sqrt', [this.inv(expr.op1)], metadata);
+
+    if (expr.head === 'Divide')
+      return this._fn('Divide', [expr[1], expr[0]], metadata);
+
+    if (expr.head === 'Rational')
+      return this.number([expr[1], expr[0]], { metadata });
+
+    // Inverse(expr) -> expr^{-1}
     let e = this._NEGATIVE_ONE;
 
     if (expr.head === 'Power') {
@@ -1202,13 +1227,8 @@ export class ComputeEngine implements IComputeEngine {
       e = canonicalNegate(expr.op2);
       expr = expr.op1;
     }
-
-    if (expr.head === 'Divide')
-      return this._fn('Divide', [expr[1], expr[0]], metadata);
-
-    // Inverse(expr) -> expr^{-1}
-    // Will take care of literals, i.e. Inverse(n/d) -> d/n
-    return canonicalPower(this, expr, e, metadata);
+    if (e.isNegativeOne) return this._fn('Divide', [this._ONE, expr], metadata);
+    return this._fn('Power', [expr, e], metadata);
   }
 
   pair(
