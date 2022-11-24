@@ -706,7 +706,7 @@ function constructibleValues(
   [sign, head] = TRIG_IDENTITIES[head]?.[quadrant] ?? [1, head];
   sign = sign * identitySign;
   for (const [[n, d], result] of specialValues) {
-    if (ce.chop(theta - (Math.PI * n) / d) === 0) {
+    if (result[head] && ce.chop(theta - (Math.PI * n) / d) === 0) {
       // Cos and Sec are even functions, the others are odd
       return sign < 0 ? canonicalNegate(result[head]) : result[head];
     }

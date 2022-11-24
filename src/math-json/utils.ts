@@ -6,6 +6,16 @@ import {
   MathJsonSymbol,
 } from './math-json-format';
 
+export function isNumberExpression(
+  expr: Expression | null
+): expr is number | string | MathJsonNumber {
+  if (expr === null) return false;
+  if (typeof expr === 'number') return true;
+  if (isNumberObject(expr)) return true;
+  if (typeof expr === 'string' && /^[+-]?[0-9]/.test(expr)) return true;
+  return false;
+}
+
 export function isNumberObject(
   expr: Expression | null
 ): expr is MathJsonNumber {
@@ -426,7 +436,7 @@ function countFunctionLeaves(xs: Expression[]): number {
 export function countLeaves(expr: Expression | null): number {
   if (expr === null) return 0;
   if (typeof expr === 'number' || typeof expr === 'string') return 1;
-  if (isNumberObject(expr) || isSymbolObject(expr) || isStringObject(expr))
+  if (isNumberExpression(expr) || isSymbolObject(expr) || isStringObject(expr))
     return 1;
 
   if (Array.isArray(expr)) return countFunctionLeaves(expr);
