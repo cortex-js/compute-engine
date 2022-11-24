@@ -9,6 +9,7 @@
 
 - `expr.freeVars` provides the free variables in an expression.
 - Improved performance of prime factorization of big num by x100.
+- Added `["RandomExpression"]`
 
 ### Bug Fixes
 

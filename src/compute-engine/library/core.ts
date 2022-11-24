@@ -9,6 +9,7 @@ import {
 } from '../boxed-expression/validate';
 import { apply } from '../boxed-expression/boxed-function';
 import { canonical } from '../symbolic/flatten';
+import { randomExpression } from './random-expression';
 
 //   // := assign 80 // @todo
 
@@ -599,6 +600,14 @@ export const CORE_LIBRARY: IdTable[] = [
           if (ops.length === 0 || !ops[0].string) return ce.box(['Sequence']);
           return ce.parse(ops[0].string) ?? ce.box(['Sequence']);
         },
+      },
+    },
+  },
+  {
+    RandomExpression: {
+      signature: {
+        domain: 'Function',
+        evaluate: (ce, _ops) => ce.box(randomExpression()),
       },
     },
   },
