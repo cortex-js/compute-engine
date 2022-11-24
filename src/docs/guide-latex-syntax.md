@@ -6,10 +6,10 @@ date: Last Modified
 sidebar:
   - nav: 'universal'
 preamble:
-  '<h1>Parsing and Serializing LaTeX</h1><p class="xl">The CortexJS Compute Engine 
-  manipulates MathJSON expressions. It can also convert LaTeX strings to 
-  MathJSON expressions (<b>parsing</b>) and output MathJSON expressions as 
-  LaTeX string (<b>serializing</b>)</p>'
+  '<h1>Parsing and Serializing LaTeX</h1><p class="xl">The CortexJS Compute
+  Engine manipulates MathJSON expressions. It can also convert LaTeX strings to
+  MathJSON expressions (<b>parsing</b>) and output MathJSON expressions as LaTeX
+  string (<b>serializing</b>)</p>'
 toc: true
 ---
 
@@ -18,8 +18,8 @@ In this documentation, functions such as `ce.box()` and `ce.parse()` require a
 apply to a boxed expression, such as `expr.simplify()` are denoted with a
 `expr.` prefix.{.notice--info}
 
-
-**To parse a LaTeX string as a MathJSON expression**, call the `ce.parse()` function.
+**To parse a LaTeX string as a MathJSON expression**, call the `ce.parse()`
+function.
 
 ```javascript
 const ce = new ComputeEngine();
@@ -28,15 +28,16 @@ console.log(ce.parse('5x + 1').json);
 // ➔  ["Add", ["Multiply", 5, "x"], 1]
 ```
 
-By default, `ce.parse()` return a [canonical expression](/compute-engine/guides/canonical-form/).
-To get a non-canonical expression instead, use the `{canonical: false}` option:
-The non-canonical form is closer to the literal LaTeX input.
+By default, `ce.parse()` return a
+[canonical expression](/compute-engine/guides/canonical-form/). To get a
+non-canonical expression instead, use the `{canonical: false}` option: The
+non-canonical form is closer to the literal LaTeX input.
 
 ```js
-ce.parse("\\frac{7}{-4}")
+ce.parse('\\frac{7}{-4}');
 // ➔  ["Rational", -7, 4]
 
-ce.parse("\\frac{7}{-4}", {canonical:false})
+ce.parse('\\frac{7}{-4}', { canonical: false });
 // ➔  ["Divide", 7, -4]
 ```
 
@@ -51,33 +52,31 @@ to be used with the Compute Engine.
 {% readmore "/mathlive/" %} Read more about the MathLive <strong>mathfield
 element</strong> {% endreadmore %}
 
-
 ## The Compute Engine Natural Parser
 
-Unlike a programming language, mathematical notation is surprisingly ambiguous 
-and full of idiosyncrasies. Mathematicians frequently invent new notations,
-or have their own preferences to represent even common concepts.
+Unlike a programming language, mathematical notation is surprisingly ambiguous
+and full of idiosyncrasies. Mathematicians frequently invent new notations, or
+have their own preferences to represent even common concepts.
 
-The Compute Engine Natural Parser interprets expressions using the notation 
-you are already familiar with. Write as you would on a blackboard, and 
-get back a semantic representation as an expression ready to be processed.
+The Compute Engine Natural Parser interprets expressions using the notation you
+are already familiar with. Write as you would on a blackboard, and get back a
+semantic representation as an expression ready to be processed.
 
-| LaTeX| MathJSON |
-| :--- | :--- |
-| <big>$$ \sin 3t + \cos 2t $$ </big>`\sin 3t + \cos 2t`  |  `["Add", ["Sin", ["Multiply", 3, "t"]], ["Cos", ["Multiply", 2, "t"]]]` |
-| <big>$$ \int \frac{dx}{x} $$ </big>`\int \frac{dx}{x}`  |  `["Integrate", ["Divide", 1,  "x"], "x"]` |
-| <big>$$ 123.4(567) $$ </big>`123.4(567)`  |  `123.4(567)` |
-| <big>$$ 123.4\overline{567} $$ </big>`123.4\overline{567}` |  `123.4(567)` |
-| <big>$$ \|a+\|b\|+c\| $$ </big>`|a+|b|+c|`  |  `["Abs", ["Add", "a", ["Abs", "b"], "c"]]` |
-| <big>$$ \|\|a\|\|+\|b\| $$ </big>`||a||+|b|`  |  `["Add", ["Norm", "a"], ["Abs", "b"]]` |
+| LaTeX                                                      | MathJSON                                                                |
+| :--------------------------------------------------------- | :---------------------------------------------------------------------- | --- | --- | --- | ------------------------------------------ | --- | -------------------------------------- |
+| <big>$$ \sin 3t + \cos 2t $$ </big>`\sin 3t + \cos 2t`     | `["Add", ["Sin", ["Multiply", 3, "t"]], ["Cos", ["Multiply", 2, "t"]]]` |
+| <big>$$ \int \frac{dx}{x} $$ </big>`\int \frac{dx}{x}`     | `["Integrate", ["Divide", 1, "x"], "x"]`                                |
+| <big>$$ 123.4(567) $$ </big>`123.4(567)`                   | `123.4(567)`                                                            |
+| <big>$$ 123.4\overline{567} $$ </big>`123.4\overline{567}` | `123.4(567)`                                                            |
+| <big>$$ \|a+\|b\|+c\| $$ </big>`                           | a+                                                                      | b   | +c  | `   | `["Abs", ["Add", "a", ["Abs", "b"], "c"]]` |
+| <big>$$ \|\|a\|\|+\|b\| $$ </big>`                         |                                                                         | a   |     | +   | b                                          | `   | `["Add", ["Norm", "a"], ["Abs", "b"]]` |
 
-
-The Compute Engine Natural Parser will apply maximum effort to parse the input string as LaTeX,
-even if it includes errors. If errors are encountered, the resulting expression
-will have its `expr.isValid` property set to `false`. An `["Error"]` expression
-will be produced where a problem was encountered. To get the list of all the
-errors in an expression, use `expr.errors` which will return an array of
-`["Error"]` expressions.
+The Compute Engine Natural Parser will apply maximum effort to parse the input
+string as LaTeX, even if it includes errors. If errors are encountered, the
+resulting expression will have its `expr.isValid` property set to `false`. An
+`["Error"]` expression will be produced where a problem was encountered. To get
+the list of all the errors in an expression, use `expr.errors` which will return
+an array of `["Error"]` expressions.
 
 {% readmore "/compute-engine/guides/expressions/#errors" %} Read more about the
 **errors** that can be returned. {% endreadmore %}
@@ -95,7 +94,6 @@ console.log(ce.serialize(['Add', ['Power', 'x', 3], 2]));
 ```
 
 ## Customizing Parsing and Serialization
-
 
 **To customize the behavior of `ce.parse()` and `expr.latex`** set the
 `ce.latexOptions` property.
@@ -149,6 +147,64 @@ ce.latexOptions.decimalMarker = '{,}';
 Note that in LaTeX, in order to get the correct spacing around the comma, it
 must be surrounded by curly brackets.
 
+### Customizing the Number Formatting
+
+There are several options that can be used to customize the formating of numbers
+when using `expr.latex`. Note that the format of numbers in JSON serialization
+is standardized and cannot be customized.
+
+The options are members of `ce.latexOptions`.
+
+- `notation`
+  - `"auto"`: (**default**) the whole part may take any value
+  - `"scientific"`: the whole part is a number between 1 and 9, there is an
+    exponent, unless it is 0.
+  - `"engineering"`: the whole part is a number between 1 and 999, the exponent
+    is a multiple of 3.
+- `avoidExponentsInRange`
+  - if `null`, exponents are always used
+  - otherwise, it is a tuple of two values representing a range of exponents. If
+    the exponent for the number is within this range, a decimal notation is
+    used. Otherwise, the number is displayed with an exponent. The default is
+    `[-6, 20]`
+- `exponentProduct`: a LaTeX string inserted before an exponent, if necessary.
+  Default is `"\cdot"`. Another popular value is `"\times"`.
+- `beginExponentMarker` and `endExponentMarker`: LaTeX strings used as template
+  to format an exponent. Default values are `"10^{"` and `"}"` respectively.
+  Other values could include `"\mathrm{E}{"` and `"}"`.
+- `truncationMarker`: a LaTeX string used to indicate that a number has more
+  precision than what is displayed. Default is `"\ldots"`
+- `beginRepeatingDigits` and `endRepeatingDigits`: LaTeX strings used a template
+  to format repeating digits, as in `1.333333333...`. Default is `"\overline{"`
+  and `"}"`. Other popular values are `"("` and `")"`.
+- `imaginaryUnit`: the LaTeX string used to represent the imaginary unit symbol.
+  Default is `"\imaginaryI"`. Other popular values are `"\mathrm{i}"`.
+- `positiveInfinity` and `negativeInfinity` the LaTeX strings used to represent
+  positive and negative infinity, respectively. Defaults are `"\infty"` and
+  `"-\infty"`.
+- `notANumber`: the LaTeX string to represent the number NaN. Default value is
+  `"\operatorname{NaN}"`.
+- `groupSeparator`: the LaTeX string used to separate group of digits, for
+  example thousands. Default is `"\,"`. To turn off group separators, set to
+  `""`
+
+```ts
+console.log(ce.parse('700').latex);
+// ➔ "700"
+console.log(ce.parse('123456.789').latex);
+// ➔ "123\,456.789"
+
+// Always use the scientific notation
+ce.latexOptions.notation = 'scientific';
+ce.latexOptions.avoidExponentsInRange = null;
+ce.latexOptions.exponentProduct = '\\times';
+
+console.log(ce.parse('700').latex);
+// ➔ "7\times10^{2}"
+console.log(ce.parse('123456.789').latex);
+// ➔ "1.234\,567\,89\times10^{5}"
+```
+
 ## Customizing the LaTeX Dictionary
 
 The <a href ="/math-json/">MathJSON format</a> is independent of any source or
@@ -178,7 +234,7 @@ To remove entries from the default dictionary, filter them.
 const ce = new ComputeEngine({
   latexDictionary: [
     // Remove the `PlusMinus` entry from the default dictionary...
-    ...ComputeEngine.getLatexDictionary().filter(x => x.name !== 'PlusMinus'),
+    ...ComputeEngine.getLatexDictionary().filter((x) => x.name !== 'PlusMinus'),
     // ... and add one for the `\smoll` command
     {
       trigger: ['\\smoll'],
@@ -186,7 +242,7 @@ const ce = new ComputeEngine({
         return [
           'Divide',
           parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"],
-          parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"]
+          parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"],
         ];
       },
     },
