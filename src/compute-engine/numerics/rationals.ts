@@ -2,7 +2,7 @@ import { BoxedExpression, Rational } from '../public';
 
 import Decimal from 'decimal.js';
 import { asSmallInteger, chop, factorPower, gcd } from './numeric';
-import { gcd as bigGcd, isInMachineRange } from './numeric-bignum';
+import { gcd as bigGcd } from './numeric-bignum';
 import Complex from 'complex.js';
 
 export function isRational(x: any | null): x is Rational {
@@ -145,11 +145,13 @@ export function mul(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
 
   const rhsNum = rhs.numericValue;
   if (rhsNum !== null && typeof rhsNum === 'number') {
+    console.assert(Number.isInteger(rhsNum));
     if (isMachineRational(lhs)) return [lhs[0] * rhsNum, lhs[1]];
     return [lhs[0].mul(rhsNum), lhs[1]];
   }
 
   if (rhsNum instanceof Decimal) {
+    console.assert(rhsNum.isInteger());
     if (isMachineRational(lhs))
       return [rhsNum.mul(lhs[0]), rhs.engine.bignum(lhs[1])];
     return [rhsNum.mul(lhs[0]), lhs[1]];
@@ -200,6 +202,7 @@ export function reducedRational(r: Rational): Rational {
   if (isMachineRational(r)) {
     if (r[0] === 1 || r[1] === 1) return r;
     if (r[1] < 0) r = [-r[0], -r[1]];
+    if (!Number.isFinite(r[1])) return [0, 1];
     const g = gcd(r[0], r[1]);
     //  If the gcd is 0, return the rational unchanged
     return g <= 1 ? r : [r[0] / g, r[1] / g];
@@ -207,6 +210,7 @@ export function reducedRational(r: Rational): Rational {
 
   if (r[0].equals(1) || r[1].equals(1)) return r;
   if (r[1].isNegative()) r = [r[0].neg(), r[1].neg()];
+  if (!r[1].isFinite()) return [0, 1];
   const g = bigGcd(r[0], r[1]);
   //  If the gcd is 0, return the rational unchanged
   if (g.lessThanOrEqualTo(1)) return r;
@@ -294,8 +298,14 @@ export function asCoefficient(
     for (const arg of expr.ops!) {
       // Only consider the value of literals
       const n = arg.numericValue;
-      if (n === null || n instanceof Complex) rest.push(arg);
-      else coef = mul(coef, arg);
+      if (
+        n !== null &&
+        ((typeof n === 'number' && Number.isInteger(n)) ||
+          (n instanceof Decimal && n.isInteger()) ||
+          isRational(n))
+      )
+        coef = mul(coef, arg);
+      else rest.push(arg);
     }
 
     coef = reducedRational(coef);
@@ -361,6 +371,13 @@ export function asCoefficient(
   }
 
   //
+  // Add
+  //
+  if (expr.head === 'Add') {
+    // @todo
+  }
+
+  //
   // Negate
   //
   if (expr.head === 'Negate') {
@@ -376,8 +393,7 @@ export function asCoefficient(
   const n = expr.numericValue;
   if (n !== null) {
     if (n instanceof Decimal) {
-      if (n.isInteger() && isInMachineRange(n))
-        return [[n.toNumber(), 1], ce._ONE];
+      if (n.isInteger()) return [[n, ce._BIGNUM_ONE], ce._ONE];
       if (n.isNegative()) return [[-1, 1], ce.number(n.neg())];
     }
 
@@ -386,7 +402,7 @@ export function asCoefficient(
       if (n < 0) return [[-1, 1], ce.number(-n)];
     }
 
-    if (Array.isArray(n)) return [n, ce._ONE];
+    if (isRational(n)) return [n, ce._ONE];
 
     // Make the part positive if the real part is negative
     if (n instanceof Complex && n.re < 0)

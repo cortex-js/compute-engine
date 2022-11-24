@@ -186,8 +186,8 @@ export function primeFactors(n: number): { [factor: number]: number } {
       }
     }
   }
-  console.assert(result[n] === undefined);
-  result[n] = 1;
+  if (result[n] !== undefined) result[n] += 1;
+  else result[n] = 1;
   return result;
 }
 
