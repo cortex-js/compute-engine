@@ -180,6 +180,26 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
+    trigger: ['\\mathtip'],
+    parse: (parser) => {
+      const op1 = parser.matchRequiredLatexArgument();
+      const op2 = parser.matchRequiredLatexArgument();
+      return op1;
+    },
+  },
+  {
+    trigger: ['\\texttip'],
+    parse: (parser) => {
+      const op1 = parser.matchRequiredLatexArgument();
+      const op2 = parser.matchRequiredLatexArgument();
+      return op1;
+    },
+  },
+  {
+    trigger: ['\\error'],
+    parse: (parser) => parser.matchRequiredLatexArgument(),
+  },
+  {
     name: 'Error',
     serialize: (serializer, expr) => {
       if (stringValue(op(expr, 1)) === 'missing')
