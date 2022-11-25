@@ -65,7 +65,7 @@ export function primeFactors(
   }
 
   if (count2 > 0) result.set('2', count2);
-  if (count3 > 0) result.set('2', count3);
+  if (count3 > 0) result.set('3', count3);
   if (count5 > 0) result.set('5', count5);
 
   k = 7n;

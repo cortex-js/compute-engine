@@ -625,7 +625,7 @@ describe('CANONICALIZATION sqrt', () => {
     expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`);
     // Canonical of Sqrt should not transform to Power
     expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(
-      `["Multiply", 2, ["Sqrt", 3]]`
+      `["Multiply", ["Sqrt", 3], 2]`
     );
   });
   test(`\\sqrt[3]{x}`, () =>
@@ -647,7 +647,7 @@ describe('CANONICALIZATION invisible operators', () => {
     expect(canonicalToJson('(2)(x)')).toMatchObject(['Multiply', 2, 'x']));
   test(`2x+x`, () =>
     expect(canonicalToJson('2x+x')).toMatchInlineSnapshot(
-      `["Add", "x", ["Multiply", 2, "x"]]`
+      `["Add", ["Multiply", 2, "x"], "x"]`
     ));
 });
 
@@ -668,7 +668,7 @@ describe('SIMPLIFICATION add', () => {
 
   test(`2\\sqrt{3}+\\sqrt{1+2}`, () =>
     expect(simplifyToJson('2\\sqrt{3}+\\sqrt{1+2}')).toMatchInlineSnapshot(
-      `["Multiply", 3, ["Sqrt", 3]]`
+      `["Multiply", ["Sqrt", 3], 3]`
     ));
 
   test(`2x+x`, () =>
@@ -681,8 +681,8 @@ describe('SIMPLIFICATION divide', () => {
   test(`simplify('\\frac{\\sqrt{5040}}{3}')`, () => {
     expect(simplifyToJson('\\frac{\\sqrt{5040}}{3}')).toMatchObject([
       'Multiply',
-      4,
       ['Sqrt', 35],
+      4,
     ]);
   });
 
@@ -702,9 +702,9 @@ describe('SIMPLIFICATION divide', () => {
 
   test(`simplify('\\frac{\\sqrt{15}}{\\sqrt{3}}')`, () =>
     expect(simplifyToJson('\\frac{\\sqrt{15}}{\\sqrt{3}}')).toMatchObject([
-      'Divide',
+      'Multiply',
+      ['Sqrt', ['Rational', 1, 3]],
       ['Sqrt', 15],
-      ['Sqrt', 3],
     ])); // @fixme
 });
 
@@ -712,8 +712,8 @@ describe('SIMPLIFICATION sqrt', () => {
   test(`\\sqrt{5040}`, () =>
     expect(simplifyToJson('\\sqrt{5040}')).toMatchObject([
       'Multiply',
-      12,
       ['Sqrt', 35],
+      12,
     ]));
 
   test(`simplify('\\sqrt{3^2}')`, () =>
@@ -722,8 +722,8 @@ describe('SIMPLIFICATION sqrt', () => {
   test(`simplify('\\sqrt{12}')`, () =>
     expect(simplifyToJson('\\sqrt{12}')).toMatchObject([
       'Multiply',
-      2,
       ['Sqrt', 3],
+      2,
     ]));
 
   // A math olympiad problem
@@ -737,8 +737,8 @@ describe('SIMPLIFICATION sqrt', () => {
         ["Rational", 1, 15],
         [
           "Subtract",
-          ["Sqrt", ["Add", 4, ["Multiply", 2, ["Sqrt", 3]]]],
-          ["Sqrt", ["Add", 28, ["Multiply", 10, ["Sqrt", 3]]]]
+          ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 2], 4]],
+          ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 10], 28]]
         ]
       ]
     `));
@@ -786,13 +786,13 @@ describe('EXPAND', () => {
     expect(expand('(a+b)^6')).toMatchInlineSnapshot(`
       [
         "Add",
-        ["Power", "a", 6],
         ["Multiply", 20, ["Power", "a", 3], ["Power", "b", 3]],
         ["Multiply", 15, ["Square", "a"], ["Power", "b", 4]],
-        ["Multiply", 6, "a", ["Power", "b", 5]],
-        ["Power", "b", 6],
         ["Multiply", 15, ["Square", "b"], ["Power", "a", 4]],
-        ["Multiply", 6, "b", ["Power", "a", 5]]
+        ["Multiply", 6, "a", ["Power", "b", 5]],
+        ["Multiply", 6, "b", ["Power", "a", 5]],
+        ["Power", "a", 6],
+        ["Power", "b", 6]
       ]
     `)); //@fixme
 });
@@ -821,11 +821,11 @@ describe('SIMPLIFICATION multiply', () => {
 describe('SYMBOLIC EVALUATION trigonometric functions', () => {
   test(`\\sin\\frac\\pi3 // constructible values`, () =>
     expect(evaluateToJson('\\sin\\frac\\pi3')).toMatchInlineSnapshot(
-      `["Multiply", ["Rational", 1, 2], ["Sqrt", 3]]`
+      `["Multiply", ["Sqrt", 3], ["Rational", 1, 2]]`
     ));
   test(`\\sin(\\frac13\\pi) // constructible values`, () =>
     expect(evaluateToJson('\\sin(\\frac13\\pi)')).toMatchInlineSnapshot(
-      `["Multiply", ["Rational", 1, 2], ["Sqrt", 3]]`
+      `["Multiply", ["Sqrt", 3], ["Rational", 1, 2]]`
     ));
 });
 

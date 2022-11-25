@@ -10,7 +10,6 @@ import {
 import { factorPower as bigFactorPower } from '../numerics/numeric-bignum';
 import {
   asRational,
-  inverse,
   isBigRational,
   isMachineRational,
   isRational,
@@ -106,24 +105,6 @@ export function canonicalPower(
 
       if (exponent.isInfinity && (base.isOne || base.isNegativeOne))
         return ce._NAN;
-
-      const r = asRational(base);
-      if (r) {
-        const e = asSmallInteger(exponent);
-        if (e !== null) {
-          if (isBigRational(r)) {
-            const [n, d] = r;
-            if (e > 0) return ce.number([n.pow(e), d.pow(e)]);
-            return ce.number([d.pow(-e), n.pow(-e)]);
-          } else {
-            const [n, d] = r;
-            if (e > 0) return ce.number([Math.pow(n, e), Math.pow(d, e)]);
-            return ce.number([Math.pow(d, -e), Math.pow(n, -e)]);
-          }
-        }
-
-        // @todo: could call factorPower to handle \sqrt and \sqrt[3]
-      }
     }
   }
 

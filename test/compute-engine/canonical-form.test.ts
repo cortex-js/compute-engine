@@ -326,11 +326,25 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       simplify  = ["Add", ["Multiply", 14, "Pi", ["Power", "x", 3]], ["Power", "x", 3]]
       N-auto    = [
-        "Multiply",
-        "44.98229715025710533847700736591304037876037159125148149364922429230942968800692598079248755478963896",
+        "Add",
+        [
+          "Multiply",
+          "6.283185307179586476925286766559005768394338798750211641949889184615632812572417997256069650684234136",
+          ["Power", "x", 3]
+        ],
+        [
+          "Multiply",
+          "37.69911184307751886155172059935403461036603279250126985169933510769379687543450798353641790410540482",
+          ["Power", "x", 3]
+        ],
         ["Power", "x", 3]
       ]
-      N-mach    = ["Multiply", 44.982297150257104, ["Power", "x", 3]]
+      N-mach    = [
+        "Add",
+        ["Multiply", 6.283185307179586, ["Power", "x", 3]],
+        ["Multiply", 37.69911184307752, ["Power", "x", 3]],
+        ["Power", "x", 3]
+      ]
     `);
   });
 
@@ -348,8 +362,8 @@ describe('POLYNOMIAL ORDER', () => {
         "Add",
         ["Multiply", ["Square", "x"], ["Power", "y", 3]],
         ["Multiply", ["Square", "x"], ["Square", "y"]],
-        ["Multiply", "x", ["Power", "y", 4]],
         ["Multiply", ["Square", "y"], ["Power", "x", 3]],
+        ["Multiply", "x", ["Power", "y", 4]],
         ["Multiply", "y", ["Power", "x", 4]]
       ]
     `);
@@ -368,18 +382,18 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       box       = [
         "Add",
+        ["Multiply", "b", ["Power", "a", 5]],
         ["Power", "a", 5],
         ["Power", "a", 5],
         ["Power", "b", 6],
-        ["Power", "b", 5],
-        ["Multiply", "b", ["Power", "a", 5]]
+        ["Power", "b", 5]
       ]
       simplify  = [
         "Add",
         ["Multiply", 2, ["Power", "a", 5]],
+        ["Multiply", "b", ["Power", "a", 5]],
         ["Power", "b", 6],
-        ["Power", "b", 5],
-        ["Multiply", "b", ["Power", "a", 5]]
+        ["Power", "b", 5]
       ]
     `);
   });
@@ -394,9 +408,9 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       [
         "Add",
-        ["Multiply", 7, "a", ["Power", "b", 3]],
         ["Multiply", 2, ["Power", "b", 8]],
-        ["Multiply", 5, ["Square", "c"], ["Power", "a", 4]]
+        ["Multiply", 5, ["Square", "c"], ["Power", "a", 4]],
+        ["Multiply", 7, "a", ["Power", "b", 3]]
       ]
     `);
   });

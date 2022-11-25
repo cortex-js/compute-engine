@@ -72,7 +72,7 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
     expect(check('\\cos(\\frac{\\pi}{5})')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Divide", "Pi", 5]]
       box       = ["Cos", ["Multiply", ["Rational", 1, 5], "Pi"]]
-      simplify  = ["Multiply", ["Rational", 1, 4], ["Add", 1, ["Sqrt", 5]]]
+      simplify  = ["Multiply", ["Rational", 1, 4], ["Add", ["Sqrt", 5], 1]]
       N-auto    = 0.8090169943749474241022934171828190588601545899028814310677243113526302314094512248536036020946955687
       N-mach    = 0.8090169943749475
     `));
@@ -83,7 +83,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
     expect(check('\\cos(30\\deg)')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Degrees", 30]]
       box       = ["Cos", ["Multiply", ["Rational", 1, 6], "Pi"]]
-      simplify  = ["Multiply", ["Rational", 1, 2], ["Sqrt", 3]]
+      simplify  = ["Multiply", ["Sqrt", 3], ["Rational", 1, 2]]
       N-auto    = 0.8660254037844386467637231707529361834714026269051903140279034897259665084544000185405730933786242878
       N-mach    = 0.8660254037844387
     `));
@@ -92,7 +92,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
     expect(check('\\cos(30\\degree)')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Degrees", 30]]
       box       = ["Cos", ["Multiply", ["Rational", 1, 6], "Pi"]]
-      simplify  = ["Multiply", ["Rational", 1, 2], ["Sqrt", 3]]
+      simplify  = ["Multiply", ["Sqrt", 3], ["Rational", 1, 2]]
       N-auto    = 0.8660254037844386467637231707529361834714026269051903140279034897259665084544000185405730933786242878
       N-mach    = 0.8660254037844387
     `));
@@ -101,7 +101,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
     expect(check('\\cos(30^\\circ)')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Degrees", 30]]
       box       = ["Cos", ["Multiply", ["Rational", 1, 6], "Pi"]]
-      simplify  = ["Multiply", ["Rational", 1, 2], ["Sqrt", 3]]
+      simplify  = ["Multiply", ["Sqrt", 3], ["Rational", 1, 2]]
       N-auto    = 0.8660254037844386467637231707529361834714026269051903140279034897259665084544000185405730933786242878
       N-mach    = 0.8660254037844387
     `));
@@ -110,7 +110,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
     expect(check('\\cos(\\ang{30})')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Degrees", 30]]
       box       = ["Cos", ["Multiply", ["Rational", 1, 6], "Pi"]]
-      simplify  = ["Multiply", ["Rational", 1, 2], ["Sqrt", 3]]
+      simplify  = ["Multiply", ["Sqrt", 3], ["Rational", 1, 2]]
       N-auto    = 0.8660254037844386467637231707529361834714026269051903140279034897259665084544000185405730933786242878
       N-mach    = 0.8660254037844387
     `));

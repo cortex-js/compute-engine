@@ -23,7 +23,10 @@ import Decimal from 'decimal.js';
 export class Sum {
   private engine: IComputeEngine;
 
-  // Factor out exact literals (if canonical)
+  // If `false`, the running sums are not calculated
+  private _isCanonical = true;
+
+  // Factor out exact literals (if canonical) in running sums
   private _rational: Rational;
   private _imaginary = 0; // integers only
   private _number: number;
@@ -31,11 +34,11 @@ export class Sum {
 
   private _posInfinityCount = 0;
   private _negInfinityCount = 0;
+  private _naNCount = 0;
 
+  // Each term is factored as the product of a rational and an expression
+  // For now, only rationals are factored, so `1.2x + 2.5x` are not combined.
   private _terms: { coef: Rational; term: BoxedExpression }[] = [];
-
-  // If `false`, the running sums are not calculated
-  private _isCanonical = true;
 
   constructor(
     ce: IComputeEngine,
@@ -67,7 +70,8 @@ export class Sum {
       this._number === 0 &&
       this._bignum.isZero() &&
       this._negInfinityCount === 0 &&
-      this._posInfinityCount === 0
+      this._posInfinityCount === 0 &&
+      this._naNCount === 0
     );
   }
 
@@ -84,9 +88,13 @@ export class Sum {
    *  -> [['x', [3, 1]], ['y', [1, 5]]]
    */
   addTerm(term: BoxedExpression, c?: Rational) {
-    if (this._isCanonical) {
-      if (term.isNothing) return;
+    if (term.isNothing) return;
+    if (term.isNaN || (term.isImaginary && !complexAllowed(this.engine))) {
+      this._naNCount += 1;
+      return;
+    }
 
+    if (this._isCanonical) {
       if (term.numericValue !== null) {
         if (term.isInfinity) {
           if (term.isPositive) this._posInfinityCount += 1;
@@ -195,12 +203,13 @@ export class Sum {
   terms(mode: 'expression' | 'numeric'): BoxedExpression[] {
     const ce = this.engine;
 
+    if (this._naNCount > 0) return [ce._NAN];
+    if (this._imaginary !== 0 && !complexAllowed(ce)) return [ce._NAN];
+
     if (this._posInfinityCount > 0 && this._negInfinityCount > 0)
       return [ce._NAN];
     if (this._posInfinityCount > 0) return [ce._POSITIVE_INFINITY];
     if (this._negInfinityCount > 0) return [ce._NEGATIVE_INFINITY];
-
-    if (this._imaginary !== 0 && !complexAllowed(ce)) return [ce._NAN];
 
     const xs: BoxedExpression[] = [];
     for (const { coef, term } of this._terms) {

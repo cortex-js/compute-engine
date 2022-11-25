@@ -256,7 +256,7 @@ describe('OPERATOR infix', () => {
   test('a-b+c+d // Add', () =>
     expect(check('a-b+c+d')).toMatchInlineSnapshot(`
       latex     = ["Add", ["Subtract", "a", "b"], "c", "d"]
-      ["Add", "a", ["Negate", "b"], "c", "d"]
+      ["Add", ["Negate", "b"], "a", "c", "d"]
     `));
 
   test('-2+3x-4', () =>
@@ -400,7 +400,7 @@ describe('OPERATOR postfix', () => {
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`
       latex     = ["Subtract", -2, ["Factorial", 5]]
-      box       = ["Subtract", ["Negate", ["Factorial", 5]], 2]
+      box       = ["Subtract", -2, ["Factorial", 5]]
       evaluate  = -122
     `));
   test('-5! // Precedence', () =>

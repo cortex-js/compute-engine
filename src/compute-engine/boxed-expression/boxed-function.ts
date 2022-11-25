@@ -1027,6 +1027,7 @@ export function holdMap(
   // Apply the hold as necessary
   //
   // @fastpath
+  if (skip === 'all') return xs;
   if (skip === 'none') {
     const result: BoxedExpression[] = [];
     for (const x of xs) {

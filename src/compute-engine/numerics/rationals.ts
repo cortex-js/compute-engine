@@ -296,7 +296,6 @@ export function asCoefficient(
     const rest: BoxedExpression[] = [];
     let coef: Rational = [1, 1];
     for (const arg of expr.ops!) {
-      // Only consider the value of literals
       const n = arg.numericValue;
       if (
         n !== null &&
@@ -326,9 +325,8 @@ export function asCoefficient(
 
     const coef = reducedRational(mul(coef1, inverse(coef2)));
 
-    if (numer.isOne && denom.isOne) return [coef, ce._ONE];
     if (denom.isOne) return [coef, numer];
-    return [coef, ce.fn('Divide', [numer, denom])];
+    return [coef, ce.div(numer, denom)];
   }
 
   //

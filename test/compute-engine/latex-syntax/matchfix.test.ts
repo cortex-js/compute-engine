@@ -135,7 +135,7 @@ describe('MATCHFIX abs and norm', () => {
   test('||a||+|b|', () =>
     expect(check('||a||+|b|')).toMatchInlineSnapshot(`
       latex     = ["Add", ["Norm", "a"], ["Abs", "b"]]
-      ["Add", ["Norm", "a"], ["Abs", "b"]]
+      ["Add", ["Abs", "b"], ["Norm", "a"]]
     `));
 });
 

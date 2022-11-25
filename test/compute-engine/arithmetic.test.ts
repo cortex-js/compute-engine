@@ -32,7 +32,7 @@ describe('CONSTANTS', () => {
   test(`GoldenRatio`, () =>
     expect(checkJson(`GoldenRatio`)).toMatchInlineSnapshot(`
       box       = GoldenRatio
-      simplify  = ["Multiply", ["Rational", 1, 2], ["Add", 1, ["Sqrt", 5]]]
+      simplify  = ["Multiply", ["Rational", 1, 2], ["Add", ["Sqrt", 5], 1]]
       N-auto    = 1.6180339887498948482
       N-mach    = 1.618033988749895
     `));
@@ -164,8 +164,8 @@ describe('EXACT EVALUATION', () => {
     expect(check('6+\\frac{10}{14}+\\sqrt{\\frac{18}{9}}'))
       .toMatchInlineSnapshot(`
       latex     = ["Add", 6, ["Rational", 10, 14], ["Sqrt", ["Rational", 18, 9]]]
-      box       = ["Add", ["Rational", 5, 7], 6, ["Sqrt", 2]]
-      simplify  = ["Add", ["Rational", 47, 7], ["Sqrt", 2]]
+      box       = ["Add", ["Sqrt", 2], ["Rational", 5, 7], 6]
+      simplify  = ["Add", ["Sqrt", 2], ["Rational", 47, 7]]
       N-auto    = 8.1284992766588093345
       N-mach    = 8.12849927665881
     `));
@@ -173,7 +173,7 @@ describe('EXACT EVALUATION', () => {
   test(`Add: All exact`, () =>
     expect(check('6+\\sqrt{2}+\\sqrt{5}')).toMatchInlineSnapshot(`
       latex     = ["Add", 6, ["Sqrt", 2], ["Sqrt", 5]]
-      box       = ["Add", 6, ["Sqrt", 2], ["Sqrt", 5]]
+      box       = ["Add", ["Sqrt", 2], ["Sqrt", 5], 6]
       N-auto    = 9.6502815398728847452
       N-mach    = 9.650281539872886
     `));
@@ -193,16 +193,15 @@ describe('EXACT EVALUATION', () => {
       box       = [
         "Add",
         "Pi",
+        ["Sqrt", 2],
         ["Rational", 5, 7],
         ["Rational", 7, 9],
         2,
-        5,
-        ["Sqrt", 2]
+        5
       ]
-      simplify  = ["Add", "Pi", ["Rational", 535, 63], ["Sqrt", 2]]
+      simplify  = ["Add", "Pi", ["Sqrt", 2], ["Rational", 535, 63]]
       N-auto    = 13.047869708026380351
-      N-mach    = 13.047869708026381
-      N-cplx   = 13.04786970802638
+      N-mach    = 13.04786970802638
     `));
   test(`Add: one inexact`, () =>
     expect(check('1.1+2+5+\\frac{5}{7}+\\frac{7}{9}+\\sqrt{2}+\\pi'))
@@ -220,14 +219,14 @@ describe('EXACT EVALUATION', () => {
       box       = [
         "Add",
         "Pi",
+        ["Sqrt", 2],
         ["Rational", 5, 7],
         ["Rational", 7, 9],
         1.1,
         2,
-        5,
-        ["Sqrt", 2]
+        5
       ]
-      simplify  = ["Add", "Pi", 1.1, ["Rational", 535, 63], ["Sqrt", 2]]
+      simplify  = ["Add", "Pi", ["Sqrt", 2], 1.1, ["Rational", 535, 63]]
       evaluate  = 14.147869708026380351
       eval-mach = 14.14786970802638
     `));
@@ -278,17 +277,17 @@ describe('ADD', () => {
       box       = [
         "Add",
         "Pi",
+        ["Sqrt", 5],
+        ["Sqrt", 5],
         ["Rational", 3, 11],
         ["Rational", 5, 7],
         1.5,
         1.7,
         2,
         2,
-        4,
-        ["Sqrt", 5],
-        ["Sqrt", 5]
+        4
       ]
-      simplify  = ["Add", "Pi", 3.2, ["Rational", 692, 77], ["Multiply", 2, ["Sqrt", 5]]]
+      simplify  = ["Add", ["Multiply", ["Sqrt", 5], 2], "Pi", 3.2, ["Rational", 692, 77]]
       evaluate  = 19.800741595602359644
       eval-mach = 19.80074159560236
     `));
@@ -307,12 +306,6 @@ describe('ADD', () => {
         ["Rational", "987654321987654321", "12345678912345678"]
       ]
       box       = [
-        "Add",
-        ["Divide", 1371742101371742, "109739369109739369"],
-        ["Rational", 2, 3],
-        ["Divide", "109739369109739369", 1371742101371742]
-      ]
-      canonical = [
         "Add",
         ["Rational", 1371742101371742, "109739369109739369"],
         ["Rational", 2, 3],
@@ -620,7 +613,9 @@ describe('MULTIPLY', () => {
         ["Sqrt", 2],
         "Pi"
       ]
-      box       = ["Multiply", ["Rational", 50, 9], "Pi", ["Sqrt", 2]]
+      box       = ["Multiply", "Pi", ["Sqrt", 2], ["Rational", 50, 9]]
+      canonical = ["Multiply", ["Sqrt", 2], ["Rational", 50, 9], "Pi"]
+      simplify  = ["Multiply", "Pi", ["Sqrt", 2], ["Rational", 50, 9]]
       N-auto    = 24.682682989768701372
       N-mach    = 24.6826829897687
     `));
@@ -640,9 +635,11 @@ describe('MULTIPLY', () => {
         ["Sqrt", 2],
         "Pi"
       ]
-      box       = ["Multiply", 1.1, ["Rational", 50, 9], "Pi", ["Sqrt", 2]]
+      box       = ["Multiply", "Pi", ["Sqrt", 2], 1.1, ["Rational", 50, 9]]
+      canonical = ["Multiply", ["Sqrt", 2], 1.1, ["Rational", 50, 9], "Pi"]
+      simplify  = ["Multiply", "Pi", ["Sqrt", 2], 1.1, ["Rational", 50, 9]]
       evaluate  = 27.15095128874557151
-      eval-mach = 27.150951288745578
+      eval-mach = 27.15095128874557
     `)); // @fixme eval-big should be same or bettern than evaluate
 });
 
@@ -739,7 +736,7 @@ describe('Sqrt', () => {
   test(`√(175)`, () =>
     expect(checkJson(['Sqrt', 175])).toMatchInlineSnapshot(`
       box       = ["Sqrt", 175]
-      canonical = ["Multiply", 5, ["Sqrt", 7]]
+      canonical = ["Multiply", ["Sqrt", 7], 5]
       N-auto    = 13.228756555322952953
       N-mach    = 13.228756555322953
     `));
@@ -762,11 +759,12 @@ describe('Sqrt', () => {
       N-mach    = 0.8451542547285166
     `));
 
+  // √12345678901234567890 = 3 x √1371742100137174210
   test(`√12345678901234567890`, () =>
     expect(checkJson(['Sqrt', { num: '12345678901234567890' }]))
       .toMatchInlineSnapshot(`
       box       = ["Sqrt", "12345678901234567890"]
-      simplify  = ["Multiply", 15, ["Sqrt", "1371742100137174210"]]
+      simplify  = ["Multiply", 3, ["Sqrt", "1371742100137174210"]]
       N-auto    = 3513641828.8201442531
       N-mach    = 3513641828.820144
     `));
