@@ -175,8 +175,57 @@ function serializeScientificNotationNumber(
   expMultiple = 1
 ): string | undefined {
   // For '7' returns '7e+0'
-  let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/i);
-  // toExponential() should always return an exponent, so m should never be null
+  let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/);
+  if (!m) {
+    // Valstring wasn't in exponential form, convert it.
+
+    // Remove the sign
+    let sign = '';
+    if (valString[0] === '-') {
+      sign = '-';
+      valString = valString.substring(1);
+    } else if (valString[0] === '+') {
+      valString = valString.substring(1);
+    }
+
+    if (valString.indexOf('.') < 0) {
+      if (valString.length === 1) {
+        valString = sign + valString + 'e+0';
+      } else {
+        // A long integer, convert to exponential form
+        valString =
+          sign +
+          valString[0] +
+          '.' +
+          valString.slice(1) +
+          'e+' +
+          (valString.length - 1).toString();
+      }
+    } else {
+      // A decimal number, convert to exponential form
+      // eslint-disable-next-line prefer-const
+      let [_, whole, fraction] = valString.match(/^(.*)\.(.*)$/)!;
+      if (!fraction) fraction = '';
+      while (whole.startsWith('0')) whole = whole.substring(1);
+      if (!whole) {
+        // .123 -> 0.123e+0
+        // .0123 -> 0.0123e+0
+        valString = sign + '0.' + fraction + 'e+0';
+      } else {
+        // 1.234  -> 1.234e+0
+        // 12.345 -> 1.2345e+1
+        valString =
+          sign +
+          whole[0] +
+          '.' +
+          whole.slice(1) +
+          fraction +
+          'e+' +
+          (whole.length - 1).toString();
+      }
+    }
+    m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/);
+  }
   console.assert(m);
   if (!m) return serializeAutoNotationNumber(valString, options);
 

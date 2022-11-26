@@ -212,6 +212,11 @@ describe('NUMBER SERIALIZATION', () => {
     expect(ce.parse('12420.54\\times10^{7}').latex).toMatchInlineSnapshot(
       `124\\,205\\,400\\,000`
     );
+
+    // *NOT* a repeating pattern (fewer digits than precision)
+    expect(ce.parse('1.234234234').latex).toMatchInlineSnapshot(
+      `1.234\\,234\\,234`
+    );
   });
 
   test('Scientific', () => {
@@ -242,6 +247,12 @@ describe('NUMBER SERIALIZATION', () => {
     expect(ce.parse('12420.54\\times10^{7}').latex).toMatchInlineSnapshot(
       `1.242\\,054\\times10^{11}`
     );
+
+    // *NOT* a repeating pattern (fewer digits than precision)
+    expect(ce.parse('1.234234234').latex).toMatchInlineSnapshot(
+      `1.234\\,234\\,234`
+    );
+
     ce.latexOptions.notation = 'auto';
   });
 
@@ -275,6 +286,12 @@ describe('NUMBER SERIALIZATION', () => {
     expect(ce.parse('12420.54\\times10^{7}').latex).toMatchInlineSnapshot(
       `124.205\\,4\\times10^{9}`
     );
+
+    // *NOT* a repeating pattern (fewer digits than precision)
+    expect(ce.parse('1.234234234').latex).toMatchInlineSnapshot(
+      `1.234\\,234\\,234`
+    );
+
     ce.latexOptions.notation = 'auto';
   });
 });
