@@ -134,7 +134,15 @@ if (targets.includes('math-json')) {
       buildProgress(),
       resolve({ browser: true }),
       commonjs(),
-      typescript(TYPESCRIPT_OPTIONS),
+      typescript({
+        clean: PRODUCTION,
+        tsconfigOverride: {
+          compilerOptions: {
+            declaration: false,
+          },
+          include: ['src/math-json/*'],
+        },
+      }),
     ],
   });
   if (PRODUCTION) {
@@ -152,7 +160,15 @@ if (targets.includes('math-json')) {
         buildProgress(),
         resolve({ browser: true }),
         commonjs(),
-        typescript(TYPESCRIPT_OPTIONS),
+        typescript({
+          clean: PRODUCTION,
+          tsconfigOverride: {
+            compilerOptions: {
+              declaration: false,
+            },
+            include: ['src/math-json/*'],
+          },
+        }),
         terser({
           ...TERSER_OPTIONS,
           format: { ...TERSER_OPTIONS.format, preamble: preamble('MathJSON') },
@@ -175,7 +191,16 @@ if (targets.includes('math-json')) {
         buildProgress(),
         resolve({ browser: true }),
         commonjs(),
-        typescript(TYPESCRIPT_VINTAGE_OPTIONS),
+        typescript({
+          clean: PRODUCTION,
+          tsconfigOverride: {
+            compilerOptions: {
+              declaration: false,
+              target: 'es2017',
+            },
+            include: ['src/math-json/*'],
+          },
+        }),
         terser({
           ...TERSER_OPTIONS,
           ecma: 2017,
@@ -253,10 +278,10 @@ if (targets.includes('compute-engine')) {
           browser: true,
         }),
         commonjs(),
-        typescript(TYPESCRIPT_VINTAGE_OPTIONS),
+        typescript(TYPESCRIPT_OPTIONS),
         terser({
           ...TERSER_OPTIONS,
-          ecma: 2017,
+          ecma: 2020,
           format: {
             ...TERSER_OPTIONS.format,
             preamble: preamble('CortexJS Compute Engine'),
@@ -328,10 +353,10 @@ if (targets.includes('cortex')) {
         buildProgress(),
         resolve({ browser: true }),
         commonjs(),
-        typescript(TYPESCRIPT_VINTAGE_OPTIONS),
+        typescript(TYPESCRIPT_OPTIONS),
         terser({
           ...TERSER_OPTIONS,
-          ecma: 2017,
+          ecma: 2020,
           format: { ...TERSER_OPTIONS.format, preamble: preamble('Cortex') },
         }),
       ],

@@ -32,15 +32,4 @@ export {
   dictionary as getDictionary,
 } from './math-json/utils';
 
-export type {
-  LatexToken,
-  ParseHandler,
-  SerializeHandler,
-  LatexDictionaryEntry,
-  LatexDictionary,
-  ParseLatexOptions,
-  SerializeLatexOptions,
-  NumberFormattingOptions,
-} from './compute-engine/latex-syntax/public';
-
 export const version = '{{SDK_VERSION}}';
