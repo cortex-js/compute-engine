@@ -14,7 +14,14 @@
  * - numerical evaluation
  */
 
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, Rational } from '../../src/compute-engine';
+import { primeFactors } from '../../src/compute-engine/numerics/numeric';
+import { primeFactors as bigPrimeFactors } from '../../src/compute-engine/numerics/numeric-bigint';
+import {
+  mul,
+  add,
+  reducedRational,
+} from '../../src/compute-engine/numerics/rationals';
 import { Expression } from '../../src/math-json/math-json-format';
 import {
   boxToJson,
@@ -36,91 +43,16 @@ const ce = engine;
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
 
-// const r1 = ce.box(['Divide', ['Add', ['Multiply', -5400, 1.1], 2], 3]);
-
-const r1 = ce.box([
-  'Add',
-  ['Power', 'e', 'a'],
-  'i',
-  [
-    'Subtract',
-    [
-      'Subtract',
-      [
-        'Subtract',
-        ['Multiply', 1.52399025e-9, 4.4424e58, 'i', ['Power', 'x', 5]],
-        ['Arccos', ['Divide', 'Pi', 2]],
-      ],
-      ['Multiply', 180, 0.00012345, 'a', ['Power', 'x', 2]],
-    ],
-    3,
-  ],
-  ['Divide', -3, 5],
-  60,
-  '1.(234567891)e+208',
-  ['Divide', ['Multiply', -25, 0.000012345], 4],
-]);
-
-// const r1 = ce.box(['Add', ['Multiply', -54, 2], ['Multiply', -270, 'x']]);
-
-const r11 = r1.latex;
-const r12 = ce.parse(r11);
-console.log(r1.isSame(r12));
-
-console.log(r1.N());
-console.log(r1.symbols);
-
-function slowEval() {
-  ///
-  const ce = new ComputeEngine();
-
-  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
-  const vars = { a: 2, b: 3, c: 4 };
-
-  // Factor out substitution of constants
-
-  ce.numericMode = 'machine';
-  ce.strict = false;
-
-  let y = 0;
-  const startTime = performance.now();
-  for (let x = 0; x <= Math.PI; x += 0.01) {
-    y += expr.subs(vars).subs({ x: x }).N().numericValue! as number;
-  }
-
-  console.log(
-    `Slow eval: y = ${y} in ${performance.now() - startTime} milliseconds`
-  );
-}
-
-function fastEval() {
-  ///
-  const ce = new ComputeEngine();
-
-  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
-  const vars = { a: 2, b: 3, c: 4 };
-
-  // Factor out substitution of constants
-  const expr3 = expr.subs(vars).N();
-
-  ce.numericMode = 'machine';
-  ce.strict = false;
-
-  let y = 0;
-  const startTime = performance.now();
-  for (let x = 0; x <= Math.PI; x += 0.01) {
-    ce.set({ x: x });
-    y += expr3.N().numericValue! as number;
-  }
-
-  console.log(
-    `Fast eval: y = ${y} in ${performance.now() - startTime} milliseconds`
-  );
-}
-// ---
-
 // slowEval();
 // fastEval();
+// perfTestRationals();
+engine.latexOptions.notation = 'engineering';
+engine.latexOptions.avoidExponentsInRange = null;
+
+const rep1 = ce.parse('3.123123123123');
+const rep2 = ce.box('123456789123456789123.123123123', { canonical: false });
+console.log(rep1.latex);
+console.log(rep2.latex);
 
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range
@@ -928,3 +860,112 @@ describe('NUMERIC EVALUATION trigonometry', () => {
       '0.9009688679024191262361023195074450511659191621318571500535624231994324204279399655013614547185124153'
     ));
 });
+
+function perfTestRationals() {
+  let randos: number[] = [];
+  let bigrandos: bigint[] = [];
+  for (let i = 0; i < 1000; i++) {
+    const n = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+    randos.push(n);
+    bigrandos.push(BigInt(n));
+  }
+
+  let start = globalThis.performance.now();
+
+  for (let i = 0; i < 1000; i++) {
+    primeFactors(randos[i]);
+  }
+
+  let timing = Math.floor((globalThis.performance.now() - start) / 10);
+
+  console.log(timing);
+
+  start = globalThis.performance.now();
+
+  for (let i = 0; i < 1000; i++) {
+    bigPrimeFactors(bigrandos[i]);
+  }
+
+  timing = Math.floor((globalThis.performance.now() - start) / 10);
+  console.log(timing);
+
+  randos = [];
+  bigrandos = [];
+
+  const N = 1000000;
+  for (let i = 0; i < N * 4; i++) {
+    const n = Math.floor(Math.random() * 20000) - 10000;
+    randos.push(n);
+    bigrandos.push(BigInt(n));
+  }
+
+  start = globalThis.performance.now();
+  let r: Rational = [1, 1];
+  for (let i = 0; i < N; i++) {
+    const a: Rational = reducedRational([randos[i], randos[i + 1]]);
+    const b: Rational = reducedRational([randos[i + 2], randos[i + 3]]);
+    r = reducedRational(mul(add(r, a), b));
+  }
+
+  timing = Math.floor((globalThis.performance.now() - start) / 10);
+  console.log(timing);
+
+  start = globalThis.performance.now();
+  let r2: Rational = [1n, 1n];
+  for (let i = 0; i < N; i++) {
+    const a: Rational = reducedRational([bigrandos[i], bigrandos[i + 1]]);
+    const b: Rational = reducedRational([bigrandos[i + 2], bigrandos[i + 3]]);
+    r2 = reducedRational(mul(add(r, a), b));
+  }
+
+  timing = Math.floor((globalThis.performance.now() - start) / 10);
+  console.log(timing);
+}
+function slowEval() {
+  ///
+  const ce = new ComputeEngine();
+
+  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
+  const vars = { a: 2, b: 3, c: 4 };
+
+  // Factor out substitution of constants
+
+  ce.numericMode = 'machine';
+  ce.strict = false;
+
+  let y = 0;
+  const startTime = performance.now();
+  for (let x = 0; x <= Math.PI; x += 0.01) {
+    y += expr.subs(vars).subs({ x: x }).N().numericValue! as number;
+  }
+
+  console.log(
+    `Slow eval: y = ${y} in ${performance.now() - startTime} milliseconds`
+  );
+}
+
+function fastEval() {
+  ///
+  const ce = new ComputeEngine();
+
+  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
+  const vars = { a: 2, b: 3, c: 4 };
+
+  // Factor out substitution of constants
+  const expr3 = expr.subs(vars).N();
+
+  ce.numericMode = 'machine';
+  ce.strict = false;
+
+  let y = 0;
+  const startTime = performance.now();
+  for (let x = 0; x <= Math.PI; x += 0.01) {
+    ce.set({ x: x });
+    y += expr3.N().numericValue! as number;
+  }
+
+  console.log(
+    `Fast eval: y = ${y} in ${performance.now() - startTime} milliseconds`
+  );
+}
+// ---

@@ -6,7 +6,7 @@ import { NumberFormattingOptions } from './public';
 // - 123.456 = significand
 // - 123 = wholePart
 // - 456 = fractionalPart
-// - 79 = exponent
+// - 78 = exponent
 //
 // Avoid using mantissa which has several definitions and is ambiguous.
 
@@ -22,44 +22,43 @@ function formatFractionalPart(
   const originalLength = m.length;
   const originalM = m;
 
-  // The last digit may have been rounded off, if it exceeds the precision,
-  // which could throw off the repeating pattern detection. Ignore it.
-  m = m.slice(0, -1);
-
-  for (let i = 0; i < m.length - 16; i++) {
-    // Offset is the part of the fractional part that is not repeating
-    const offset = m.substring(0, i);
-    // Try to find a repeating pattern of length j
-    for (let j = 0; j < 17; j++) {
-      const cycle = m.substring(i, i + j + 1);
-      const times = Math.floor((m.length - offset.length) / cycle.length);
-      if (times <= 3) break;
-      if ((offset + cycle.repeat(times + 1)).startsWith(m)) {
-        // We've found a repeating pattern!
-        if (cycle === '0') {
-          // Psych! That pattern is '0'...
-          return offset.replace(/(\d{3})/g, '$1' + options.groupSeparator);
+  if (options.beginRepeatingDigits && options.endRepeatingDigits) {
+    // The last digit may have been rounded off, if it exceeds the precision,
+    // which could throw off the repeating pattern detection. Ignore it.
+    m = m.slice(0, -1);
+    for (let i = 0; i < m.length - 16; i++) {
+      // Offset is the part of the fractional part that is not repeating
+      const offset = m.substring(0, i);
+      // Try to find a repeating pattern of length j
+      for (let j = 0; j < 17; j++) {
+        const cycle = m.substring(i, i + j + 1);
+        const times = Math.floor((m.length - offset.length) / cycle.length);
+        if (times <= 3) break;
+        if ((offset + cycle.repeat(times + 1)).startsWith(m)) {
+          // We've found a repeating pattern!
+          if (cycle === '0') {
+            // Psych! That pattern is '0'...
+            return offset.replace(/(\d{3})/g, '$1' + options.groupSeparator);
+          }
+          // There is what looks like a true repeating pattern...
+          return (
+            offset.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
+            options.beginRepeatingDigits +
+            cycle +
+            options.endRepeatingDigits
+          );
         }
-        // There is what looks like a true repeating pattern...
-        return (
-          offset.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
-          options.beginRepeatingDigits +
-          cycle +
-          options.endRepeatingDigits
-        );
       }
     }
   }
-
   // There was no repeating pattern we could find...
 
   // Are we displaying fewer digits than were provided?
   // Display a truncation marker.
   const extraDigits = originalLength > options.precision - 1;
   m = originalM;
-  if (extraDigits) {
-    m = m.substring(0, options.precision - 1);
-  }
+  if (extraDigits) m = m.substring(0, options.precision - 1);
+
   // Insert group separators if necessary
   if (options.groupSeparator) {
     m = m.replace(/(\d{3})/g, '$1' + options.groupSeparator);
@@ -104,13 +103,17 @@ export function serializeNumber(
     else if (num === -Infinity) return options.negativeInfinity;
     else if (Number.isNaN(num)) return options.notANumber;
 
+    let result: string | undefined = undefined;
     if (options.notation === 'engineering')
-      return serializeScientificNotationNumber(num, options, 3);
+      result = serializeScientificNotationNumber(
+        num.toExponential(),
+        options,
+        3
+      );
+    else if (options.notation === 'scientific')
+      result = serializeScientificNotationNumber(num.toExponential(), options);
 
-    if (options.notation === 'scientific')
-      return serializeScientificNotationNumber(num, options);
-
-    return serializeAutoNotationNumber(num.toString(), options);
+    return result ?? serializeAutoNotationNumber(num.toString(), options);
   }
 
   num = num.toLowerCase().replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
@@ -125,6 +128,7 @@ export function serializeNumber(
   num = num.replace(/[nd]$/, '');
 
   // Do we have repeating digits?
+  // If so, "unrepeat" (expand) them
   if (/\([0-9]+\)/.test(num)) {
     const [_, body, repeat, trail] = num.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
     num =
@@ -144,106 +148,16 @@ export function serializeNumber(
   // Remove any leading zeros
   while (num[0] === '0') num = num.substring(1);
 
-  if (num.length === 0) return sign + '0';
-  if (num[0] === '.') num = '0' + num;
+  if (num.length === 0) num = sign + '0';
+  else if (num[0] === '.') num = sign + '0' + num;
 
-  let exponent = '';
-  if (num.indexOf('.') >= 0) {
-    const m = num.match(/(\d*)\.(\d*)([e|E]([-+]?[0-9]*))?/);
-    if (!m) return '';
-    const base = m[1];
-    const fractionalPart = m[2];
-    exponent = m[4] ?? '';
+  let result: string | undefined = undefined;
+  if (options.notation === 'engineering')
+    result = serializeScientificNotationNumber(num, options, 3);
+  else if (options.notation === 'scientific')
+    result = serializeScientificNotationNumber(num, options);
 
-    if (base === '0') {
-      let p = 0; // Index of the first non-zero digit after the decimal
-      while (fractionalPart[p] === '0' && p < fractionalPart.length) p += 1;
-
-      let r = '';
-      if (p <= 4) {
-        r = '0' + options.decimalMarker;
-        r += fractionalPart.substring(0, p);
-        r += formatFractionalPart(num.substring(r.length), options);
-      } else if (p + 1 >= options.precision) {
-        r = '0';
-        sign = '';
-      } else {
-        r = num[p];
-        const f = formatFractionalPart(num.substring(p + 1), options);
-        if (f) {
-          r += options.decimalMarker + f;
-        }
-      }
-      if (r !== '0') {
-        if (
-          num.length - 1 > options.precision &&
-          !(
-            options.endRepeatingDigits && r.endsWith(options.endRepeatingDigits)
-          ) &&
-          options.truncationMarker &&
-          !r.endsWith(options.truncationMarker)
-        ) {
-          r += options.truncationMarker;
-        }
-        if (p > 4) {
-          r +=
-            options.exponentProduct +
-            formatExponent((1 - p).toString(), options);
-        }
-      }
-      num = r;
-    } else {
-      num = base.replace(/\B(?=(\d{3})+(?!\d))/g, options.groupSeparator);
-      const f = formatFractionalPart(fractionalPart, options);
-      if (f) {
-        num += options.decimalMarker + f;
-        // if (num.length - 1 > config.precision && !num.endsWith('}') && !num.endsWith('\\ldots')) {
-        //     num += '\\ldots';
-        // }
-      }
-    }
-  } else if (num.length > options.precision) {
-    const len = num.length;
-    if (
-      !options.avoidExponentsInRange ||
-      len > options.avoidExponentsInRange[1]
-    ) {
-      let r = num[0];
-      const f = formatFractionalPart(num.substring(1), options);
-      if (f) {
-        r += options.decimalMarker + f;
-        if (options.truncationMarker && !r.endsWith(options.truncationMarker)) {
-          if (
-            options.endRepeatingDigits &&
-            !r.endsWith(options.endRepeatingDigits)
-          ) {
-            r += options.truncationMarker;
-          }
-        }
-      }
-      if (r !== '1') {
-        r += options.exponentProduct;
-      } else {
-        r = '';
-      }
-      num = r + formatExponent((len - 1).toString(), options);
-    }
-  } else {
-    const m = num.match(/([0-9]*)\.?([0-9]*)([e|E]([-+]?[0-9]+))?/);
-    if (m) {
-      num = m[1];
-      if (m[2]) num += options.decimalMarker + m[2];
-      exponent = m[4] ?? '';
-    }
-
-    num = num.replace(/\B(?=(\d{3})+(?!\d))/g, options.groupSeparator);
-  }
-  const exponentString = formatExponent(exponent, options);
-
-  if (num === '1' && exponentString) return sign + exponentString;
-
-  if (exponentString) num = num + options.exponentProduct + exponentString;
-  return sign + num;
+  return sign + (result ?? serializeAutoNotationNumber(num, options));
 }
 
 /**
@@ -256,11 +170,10 @@ export function serializeNumber(
  * @returns
  */
 function serializeScientificNotationNumber(
-  val: number,
+  valString: string,
   options: NumberFormattingOptions,
   expMultiple = 1
-): string {
-  const valString = Number(val).toExponential();
+): string | undefined {
   // For '7' returns '7e+0'
   let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/i);
   // toExponential() should always return an exponent, so m should never be null
@@ -293,8 +206,7 @@ function serializeScientificNotationNumber(
 
   // Is the exponent in a range to be avoided?
   const avoid = options.avoidExponentsInRange;
-  if (avoid && exponent >= avoid[0] && exponent <= avoid[1])
-    return serializeAutoNotationNumber(val.toString(), options);
+  if (avoid && exponent >= avoid[0] && exponent <= avoid[1]) return undefined;
 
   let fractionalPart = '';
   let wholePart = mantissa;
@@ -315,6 +227,8 @@ function serializeScientificNotationNumber(
     fractionalPart = formatFractionalPart(fractionalPart, options);
   }
   if (fractionalPart) fractionalPart = options.decimalMarker + fractionalPart;
+
+  // @todo: does not respect the options.precision option
 
   if (!expString) return wholePart + fractionalPart;
   if (wholePart === '1' && !fractionalPart) return expString;

@@ -320,7 +320,6 @@ export function processPower(
             bigBase < 0 ? (d % 2 === 0 ? ce._I : ce._NEGATIVE_ONE) : ce._ONE;
 
           const [factor, root] = bigFactorPower(
-            ce,
             bigBase > 0 ? bigBase : -bigBase,
             d
           );
@@ -443,8 +442,8 @@ export function processSqrt(
     }
     if (isBigRational(r) || bignumPreferred(ce)) {
       const n = bigint(r[0]);
-      const [nFactor, nRoot] = bigFactorPower(ce, n > 0 ? n : -n, 2);
-      const [dFactor, dRoot] = bigFactorPower(ce, bigint(r[1]), 2);
+      const [nFactor, nRoot] = bigFactorPower(n > 0 ? n : -n, 2);
+      const [dFactor, dRoot] = bigFactorPower(bigint(r[1]), 2);
 
       if (n < 0)
         return ce.mul([

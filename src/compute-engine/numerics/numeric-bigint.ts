@@ -30,10 +30,7 @@ export function lcm(a: bigint, b: bigint): bigint {
 // Difference between primes from 7 to 31
 const PRIME_WHEEL_INC = [4n, 2n, 4n, 2n, 4n, 6n, 2n, 6n];
 
-export function primeFactors(
-  ce: IComputeEngine,
-  d: bigint
-): Map<bigint, number> {
+export function primeFactors(d: bigint): Map<bigint, number> {
   if (d < Number.MAX_SAFE_INTEGER) {
     const factors = machinePrimeFactors(Number(d));
     const result = new Map<bigint, number>();
@@ -111,12 +108,11 @@ export function primeFactors(
  *
  */
 export function factorPower(
-  ce: IComputeEngine,
   n: bigint,
   exponent: number
 ): [factor: bigint, root: bigint] {
   // @todo: handle negative n
-  const factors = primeFactors(ce, n);
+  const factors = primeFactors(n);
   let f = 1n;
   let r = 1n;
   const exp = bigint(exponent);

@@ -27,7 +27,7 @@ describe('CORTEX SERIALIZING', () => {
     // Repeating pattern
     expect(
       serializeCortex({ num: '3.123456785678567856785678567856785678' })
-    ).toMatchInlineSnapshot(`"3.123_45678"`);
+    ).toMatchInlineSnapshot(`"3.123_456_785_678_56"`);
 
     expect(
       serializeCortex({ num: '0.1234567872368237462387623876' })
