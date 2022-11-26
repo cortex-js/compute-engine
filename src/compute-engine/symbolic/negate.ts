@@ -56,7 +56,7 @@ export function canonicalNegate(
   // Distribute over division
   // Negate(Divide(a, b)) -> Divide(Negate(a), b)
   if (expr.head === 'Divide')
-    return expr.engine.div(canonicalNegate(expr.op1), expr.op2);
+    return expr.engine._fn('Divide', [canonicalNegate(expr.op1), expr.op2]);
 
   // 'Subtract' is canonicalized into `Add`, so don't have to worry about it
   console.assert(expr.head !== 'Subtract');

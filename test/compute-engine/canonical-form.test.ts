@@ -53,14 +53,14 @@ describe('CANONICAL FORMS', () => {
   test('\\frac{x}{-n}"', () => {
     expect(check('\\frac{x}{-n}')).toMatchInlineSnapshot(`
       latex     = ["Divide", "x", ["Negate", "n"]]
-      ["Negate", ["Divide", "x", "n"]]
+      ["Divide", ["Negate", "x"], "n"]
     `);
   });
 
   test('\\frac{-x}{n}"', () => {
     expect(check('\\frac{-x}{n}')).toMatchInlineSnapshot(`
       latex     = ["Divide", ["Negate", "x"], "n"]
-      ["Negate", ["Divide", "x", "n"]]
+      ["Divide", ["Negate", "x"], "n"]
     `);
   });
 
@@ -182,17 +182,6 @@ describe('COMMUTATIVE ORDER', () => {
         ]
       ]
       box       = [
-        "Negate",
-        [
-          "Multiply",
-          ["Rational", 45, 2],
-          "Pi",
-          "x",
-          "z",
-          ["Power", "y", ["Rational", 3, 2]]
-        ]
-      ]
-      simplify  = [
         "Multiply",
         ["Rational", -45, 2],
         "Pi",

@@ -36,6 +36,40 @@ const ce = engine;
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
 
+// const r1 = ce.box(['Divide', ['Add', ['Multiply', -5400, 1.1], 2], 3]);
+
+const r1 = ce.box([
+  'Add',
+  ['Power', 'e', 'a'],
+  'i',
+  [
+    'Subtract',
+    [
+      'Subtract',
+      [
+        'Subtract',
+        ['Multiply', 1.52399025e-9, 4.4424e58, 'i', ['Power', 'x', 5]],
+        ['Arccos', ['Divide', 'Pi', 2]],
+      ],
+      ['Multiply', 180, 0.00012345, 'a', ['Power', 'x', 2]],
+    ],
+    3,
+  ],
+  ['Divide', -3, 5],
+  60,
+  '1.(234567891)e+208',
+  ['Divide', ['Multiply', -25, 0.000012345], 4],
+]);
+
+// const r1 = ce.box(['Add', ['Multiply', -54, 2], ['Multiply', -270, 'x']]);
+
+const r11 = r1.latex;
+const r12 = ce.parse(r11);
+console.log(r1.isSame(r12));
+
+console.log(r1.N());
+console.log(r1.symbols);
+
 function slowEval() {
   ///
   const ce = new ComputeEngine();
@@ -809,7 +843,7 @@ describe('SIMPLIFICATION multiply', () => {
     expect(
       simplifyToJson('-\\frac{-x+2\\times x}{-2\\times x + 1}')
     ).toMatchInlineSnapshot(
-      `["Negate", ["Divide", "x", ["Add", ["Multiply", -2, "x"], 1]]]`
+      `["Divide", ["Negate", "x"], ["Add", ["Multiply", -2, "x"], 1]]`
     );
   });
 });
