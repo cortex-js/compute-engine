@@ -2,7 +2,7 @@ import { BoxedExpression, Rational } from '../public';
 
 import Decimal from 'decimal.js';
 import { asSmallInteger, chop, factorPower, gcd } from './numeric';
-import { gcd as bigGcd } from './numeric-bignum';
+import { bigint, gcd as bigGcd } from './numeric-bigint';
 import Complex from 'complex.js';
 
 export function isRational(x: any | null): x is Rational {
@@ -13,54 +13,47 @@ export function isMachineRational(x: any | null): x is [number, number] {
   return x !== null && Array.isArray(x) && typeof x[0] === 'number';
 }
 
-export function isBigRational(x: any | null): x is [Decimal, Decimal] {
-  return x !== null && Array.isArray(x) && x[0] instanceof Decimal;
+export function isBigRational(x: any | null): x is [bigint, bigint] {
+  return x !== null && Array.isArray(x) && typeof x[0] === 'bigint';
 }
 
 export function isRationalZero(x: Rational): boolean {
-  if (x[0] === 0) return true;
-  return x[0] instanceof Decimal && x[0].isZero();
+  // Note '==' to convert bigint to number
+  return x[0] == 0;
 }
 
 export function isRationalOne(x: Rational): boolean {
-  if (x[0] === x[1]) return true;
-  if (typeof x[0] === 'number') return false;
-  return x[0].eq(x[1]);
+  return x[0] === x[1];
 }
 
 export function isRationalNegativeOne(x: Rational): boolean {
-  if (typeof x[0] === 'number') return x[0] === -x[1];
-  return x[0].eq((x[1] as Decimal).neg());
+  return x[0] === -x[1];
 }
 
 export function machineNumerator(x: Rational): number {
-  return typeof x[0] === 'number' ? x[0] : x[0].toNumber();
+  return Number(x[0]);
 }
 
 export function machineDenominator(x: Rational): number {
-  return typeof x[1] === 'number' ? x[1] : x[1].toNumber();
+  return Number(x[1]);
 }
 
-export function isNeg(lhs: Rational): boolean {
-  if (isMachineRational(lhs)) return lhs[0] < 0;
-  return lhs[0].isNeg();
+export function isNeg(x: Rational): boolean {
+  return x[0] < 0;
 }
 
-export function neg(lhs: [number, number]): [number, number];
-export function neg(lhs: [Decimal, Decimal]): [Decimal, Decimal];
-export function neg(lhs: Rational): Rational;
-export function neg(lhs: Rational): Rational {
-  if (isMachineRational(lhs)) return [-lhs[0], lhs[1]];
-  return [lhs[0].neg(), lhs[1]];
+export function neg(x: [number, number]): [number, number];
+export function neg(x: [bigint, bigint]): [bigint, bigint];
+export function neg(x: Rational): Rational;
+export function neg(x: Rational): Rational {
+  return [-x[0], x[1]] as Rational;
 }
 
-export function inverse(lhs: [number, number]): [number, number];
-export function inverse(lhs: [Decimal, Decimal]): [Decimal, Decimal];
-export function inverse(lhs: Rational): Rational;
-export function inverse(lhs: Rational): Rational {
-  if (isMachineRational(lhs))
-    return lhs[0] < 0 ? [-lhs[1], -lhs[0]] : [lhs[1], lhs[0]];
-  return lhs[0].isNeg() ? [lhs[1].neg(), lhs[0].neg()] : [lhs[1], lhs[0]];
+export function inverse(x: [number, number]): [number, number];
+export function inverse(x: [bigint, bigint]): [bigint, bigint];
+export function inverse(x: Rational): Rational;
+export function inverse(x: Rational): Rational {
+  return x[0] < 0 ? ([-x[1], -x[0]] as Rational) : ([x[1], x[0]] as Rational);
 }
 
 export function asRational(expr: BoxedExpression): Rational | undefined {
@@ -68,14 +61,12 @@ export function asRational(expr: BoxedExpression): Rational | undefined {
   if (num === null) return undefined;
   if (Array.isArray(num)) return num;
   if (typeof num === 'number' && Number.isInteger(num)) return [num, 1];
-  if (num instanceof Decimal && num.isInteger())
-    return [num, expr.engine._BIGNUM_ONE];
+  if (num instanceof Decimal && num.isInteger()) return [bigint(num), 1n];
   return undefined;
 }
 
-export function asMachineRational(r: Rational): [number, number] {
-  if (isMachineRational(r)) return r;
-  return [r[0].toNumber(), r[1].toNumber()];
+function asMachineRational(r: Rational): [number, number] {
+  return [Number(r[0]), Number(r[1])];
 }
 
 /**
@@ -91,40 +82,35 @@ export function add(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
     Array.isArray(rhs) ||
       (rhs.numericValue !== null && !(rhs instanceof Complex))
   );
-
   if (Array.isArray(rhs)) {
-    if (isBigRational(rhs))
-      return [rhs[1].mul(lhs[0]).add(rhs[0].mul(lhs[1])), rhs[1].mul(lhs[1])];
-    if (isBigRational(lhs))
-      return [lhs[0].mul(rhs[1]).add(lhs[1].mul(rhs[0])), lhs[1].mul(rhs[1])];
+    if (isBigRational(rhs)) {
+      lhs = [bigint(lhs[0]), bigint(lhs[1])];
+      return [rhs[1] * lhs[0] + rhs[0] * lhs[1], rhs[1] * lhs[1]];
+    }
+    if (isBigRational(lhs)) {
+      rhs = [bigint(rhs[0]), bigint(rhs[1])];
+      return [rhs[1] * lhs[0] + rhs[0] * lhs[1], rhs[1] * lhs[1]];
+    }
     return [rhs[1] * lhs[0] + rhs[0] * lhs[1], rhs[1] * lhs[1]];
   }
 
-  const rhsNum = rhs.numericValue;
+  let rhsNum = rhs.numericValue;
+  console.assert(rhs.isInteger);
   if (rhsNum !== null && typeof rhsNum === 'number') {
     if (isMachineRational(lhs)) return [lhs[0] + lhs[1] * rhsNum, lhs[1]];
-    return [lhs[0].add(lhs[1].mul(rhsNum)), lhs[1]];
+    return [lhs[0] + lhs[1] * bigint(rhsNum), lhs[1]];
   }
 
   if (rhsNum instanceof Decimal) {
-    if (isMachineRational(lhs)) {
-      const ce = rhs.engine;
-      return [ce.bignum(rhsNum.mul(lhs[1]).add(lhs[0])), ce.bignum(lhs[1])];
-    }
-    return [lhs[0].add(lhs[1].mul(rhsNum)), lhs[1]];
+    if (isMachineRational(lhs)) lhs = [bigint(lhs[0]), bigint(lhs[1])];
+    return [lhs[0] + lhs[1] * bigint(rhsNum.toString()), lhs[1]];
   }
 
   if (Array.isArray(rhsNum)) {
-    if (isBigRational(rhsNum))
-      return [
-        rhsNum[1].mul(lhs[0]).add(rhsNum[0].mul(lhs[1])),
-        rhsNum[1].mul(lhs[1]),
-      ];
-    if (isBigRational(lhs))
-      return [
-        lhs[0].mul(rhsNum[1]).add(lhs[1].mul(rhsNum[0])),
-        lhs[1].mul(rhsNum[1]),
-      ];
+    if (isMachineRational(rhsNum))
+      rhsNum = [bigint(rhsNum[0]), bigint(rhsNum[1])];
+    if (isMachineRational(lhs)) lhs = [bigint(lhs[0]), bigint(lhs[1])];
+
     return [rhsNum[1] * lhs[0] + rhsNum[0] * lhs[1], rhsNum[1] * lhs[1]];
   }
   debugger;
@@ -138,31 +124,34 @@ export function mul(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
   );
 
   if (Array.isArray(rhs)) {
-    if (isBigRational(lhs)) return [lhs[0].mul(rhs[0]), lhs[1].mul(rhs[1])];
-    if (isBigRational(rhs)) return [rhs[0].mul(lhs[0]), rhs[1].mul(lhs[1])];
-    return [rhs[0] * lhs[0], rhs[1] * lhs[1]];
+    if (isMachineRational(lhs) && isMachineRational(rhs))
+      return [lhs[0] * rhs[0], lhs[1] * rhs[1]];
+    if (isMachineRational(lhs)) lhs = [bigint(lhs[0]), bigint(lhs[1])];
+    if (isMachineRational(rhs)) rhs = [bigint(rhs[0]), bigint(rhs[1])];
+    return [lhs[0] * rhs[0], lhs[1] * rhs[1]];
   }
 
   const rhsNum = rhs.numericValue;
   if (rhsNum !== null && typeof rhsNum === 'number') {
     console.assert(Number.isInteger(rhsNum));
     if (isMachineRational(lhs)) return [lhs[0] * rhsNum, lhs[1]];
-    return [lhs[0].mul(rhsNum), lhs[1]];
+    return [lhs[0] * bigint(rhsNum), lhs[1]];
   }
 
   if (rhsNum instanceof Decimal) {
     console.assert(rhsNum.isInteger());
     if (isMachineRational(lhs))
-      return [rhsNum.mul(lhs[0]), rhs.engine.bignum(lhs[1])];
-    return [rhsNum.mul(lhs[0]), lhs[1]];
+      return [bigint(rhsNum.toString()) * bigint(lhs[0]), bigint(lhs[1])];
+    return [bigint(rhsNum.toString()) * lhs[0], lhs[1]];
   }
 
   if (Array.isArray(rhsNum)) {
     if (isBigRational(rhsNum))
-      return [rhsNum[0].mul(lhs[0]), rhsNum[1].mul(lhs[1])];
+      return [rhsNum[0] * bigint(lhs[0]), rhsNum[1] * bigint(lhs[1])];
     else if (isMachineRational(lhs))
       return [lhs[0] * rhsNum[0], lhs[1] * rhsNum[1]];
-    return [lhs[0].mul(rhsNum[0]), lhs[1].mul(rhsNum[1])];
+
+    return [lhs[0] * bigint(rhsNum[0]), lhs[1] * bigint(rhsNum[1])];
   }
 
   debugger;
@@ -171,19 +160,20 @@ export function mul(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
 
 export function pow(r: Rational, exp: number): Rational {
   console.assert(Number.isInteger(exp));
+  if (exp === 0) return [1, 1];
   if (exp < 0) {
     r = inverse(r);
     exp = -exp;
   }
-  if (exp === 0) return [1, 1];
   if (exp === 1) return r;
 
   if (isMachineRational(r)) return [Math.pow(r[0], exp), Math.pow(r[1], exp)];
-  return [r[0].pow(exp), r[1].pow(exp)];
+  const bigexp = bigint(exp);
+  return [r[0] ** bigexp, r[1] ** bigexp];
 }
 
-// export function rationalGcd(lhs: Rational, rhs: Rational): [number, number] {
-//   return [gcd(a * d, b * c), b * d];
+// export function rationalGcd(lhs: Rational, rhs: Rational): Rational {
+//   return [gcd(lhs[0] * rhs[1], lhs[1] * rhs[0]), lhs[1] * rhs[1]] as Rational;
 // }
 
 // export function rationalLcm(
@@ -196,7 +186,7 @@ export function pow(r: Rational, exp: number): Rational {
 //  Return the "reduced form" of the rational, that is a rational
 // such that gcd(numer, denom) = 1 and denom > 0
 export function reducedRational(r: [number, number]): [number, number];
-export function reducedRational(r: [Decimal, Decimal]): [Decimal, Decimal];
+export function reducedRational(r: [bigint, bigint]): [bigint, bigint];
 export function reducedRational(r: Rational): Rational;
 export function reducedRational(r: Rational): Rational {
   if (isMachineRational(r)) {
@@ -208,13 +198,12 @@ export function reducedRational(r: Rational): Rational {
     return g <= 1 ? r : [r[0] / g, r[1] / g];
   }
 
-  if (r[0].equals(1) || r[1].equals(1)) return r;
-  if (r[1].isNegative()) r = [r[0].neg(), r[1].neg()];
-  if (!r[1].isFinite()) return [0, 1];
+  if (r[0] === 1n || r[1] === 1n) return r;
+  if (r[1] < 0) r = [-r[0], -r[1]];
   const g = bigGcd(r[0], r[1]);
   //  If the gcd is 0, return the rational unchanged
-  if (g.lessThanOrEqualTo(1)) return r;
-  return [r[0].div(g), r[1].div(g)];
+  if (g <= 1) return r;
+  return [r[0] / g, r[1] / g];
 }
 
 /** Return a rational approximation of x */
@@ -391,7 +380,7 @@ export function asCoefficient(
   const n = expr.numericValue;
   if (n !== null) {
     if (n instanceof Decimal) {
-      if (n.isInteger()) return [[n, ce._BIGNUM_ONE], ce._ONE];
+      if (n.isInteger()) return [[bigint(n.toString()), 1n], ce._ONE];
       if (n.isNegative()) return [[-1, 1], ce.number(n.neg())];
     }
 
@@ -430,7 +419,7 @@ export function signDiff(
   const rhsNum = rhsN.numericValue;
 
   if (lhsNum === null || rhsNum === null) {
-    // Couldn't calculate a numeric value, use the `sgn`
+    // Couldn't calculate numeric value, use the `sgn` property
     const lhsS = lhs.sgn;
     const rhsS = rhs.sgn;
     if (typeof lhsS !== 'number' || typeof rhsS !== 'number') return undefined;
@@ -453,14 +442,17 @@ export function signDiff(
   // In general, it is impossible to always prove equality
   // (Richardson's theorem) but this works often...
 
-  const rhsR = asRational(rhsN);
-  if (!rhsR) return undefined;
-  const diff = add(neg(rhsR), lhsN);
-  const delta = isMachineRational(diff)
-    ? chop(diff[0] / diff[1], tolerance)
-    : chop(diff[0].div(diff[1]), tolerance);
+  // At this point, lhsNum and rhsNum are either number or Decimal
+  // (it can't be a rational, because lhs.N() simplifies rationals to number or Decimal)
+  if (isRational(lhsNum) || isRational(rhsNum)) return undefined;
 
-  if (delta === 0) return 0;
-  if (typeof delta === 'number') return delta > 0 ? 1 : -1;
+  if (typeof lhsNum === 'number' && typeof rhsNum === 'number') {
+    if (chop(rhsNum - lhsNum, tolerance) === 0) return 0;
+    return lhsNum < rhsNum ? -1 : 1;
+  }
+  const ce = lhs.engine;
+  const delta = ce.bignum(rhsNum).sub(ce.bignum(lhsNum));
+
+  if (chop(delta, tolerance) === 0) return 0;
   return delta.isPos() ? 1 : -1;
 }

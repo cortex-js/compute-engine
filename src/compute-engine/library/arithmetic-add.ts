@@ -224,9 +224,7 @@ export function evalSummation(
     return ce.add(terms).evaluate();
   }
 
-  let sum: Rational = bignumPreferred(ce)
-    ? [ce._BIGNUM_ZERO, ce._BIGNUM_ONE]
-    : [0, 1];
+  let sum: Rational = bignumPreferred(ce) ? [1n, 1n] : [0, 1];
 
   if (!fn.scope)
     for (let i = lower; i <= upper; i++) {
@@ -247,5 +245,5 @@ export function evalSummation(
   ce.context = savedContext;
 
   if (isMachineRational(sum)) return ce.number(sum[0] / sum[1]);
-  return ce.number(sum[0].div(sum[1]));
+  return ce.number(ce.bignum(sum[0]).div(ce.bignum(sum[1])));
 }

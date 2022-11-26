@@ -12,16 +12,17 @@ import { BoxedDictionary } from './boxed-dictionary';
 import { apply, BoxedFunction, makeCanonicalFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
-import { bignumValue } from './utils';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
 import { missingIfEmpty } from '../../math-json/utils';
-import { asBignum, asFloat, asSmallInteger } from '../numerics/numeric';
+import { asFloat, asSmallInteger } from '../numerics/numeric';
 import {
   isBigRational,
   isMachineRational,
   isRational,
   neg,
 } from '../numerics/rationals';
+import { asBigint, bigintValue } from './utils';
+import { bigint } from '../numerics/numeric-bigint';
 
 /**
  * **Theory of Operations**
@@ -78,7 +79,14 @@ import {
  */
 export function boxNumber(
   ce: IComputeEngine,
-  num: MathJsonNumber | number | string | Complex | Decimal | Rational,
+  num:
+    | MathJsonNumber
+    | number
+    | string
+    | Complex
+    | Decimal
+    | Rational
+    | [Decimal, Decimal],
   options?: { metadata?: Metadata; canonical?: boolean }
 ): BoxedExpression | null {
   //
@@ -93,22 +101,29 @@ export function boxNumber(
   //
   // Do we have a rational or big rational?
   //
+
+  if (
+    Array.isArray(num) &&
+    num.length === 2 &&
+    num[0] instanceof Decimal &&
+    num[1] instanceof Decimal
+  ) {
+    if (!num[0].isInteger() || !num[1].isInteger())
+      throw new Error('Array argument to `boxNumber()` should be two integers');
+    num = [bigint(num[0].toString()), bigint(num[1].toString())];
+  }
+
   if (isRational(num)) {
     if (num.length !== 2)
       throw new Error(
         'Array argument to `boxNumber()` should be two integers or two bignums'
       );
     const [n, d] = num;
-    if (n instanceof Decimal && d instanceof Decimal) {
-      // We have a big rational
-      if (!n.isInteger() || !d.isInteger())
-        throw new Error(
-          'Array argument to `boxNumber()` should be two integers'
-        );
-      if (n.eq(d)) return d.isZero() ? ce._NAN : ce._ONE;
-      if (d.eq(1)) return ce.number(n, options);
-      if (d.eq(-1)) return ce.number(n.negated(), options);
-      if (n.eq(1) && d.eq(2)) return ce._HALF;
+    if (typeof n === 'bigint' && typeof d === 'bigint') {
+      if (n === d) return d === 0n ? ce._NAN : ce._ONE;
+      if (d === 1n) return ce.number(n, options);
+      if (d === -1n) return ce.number(-n, options);
+      if (n === 1n && d === 2n) return ce._HALF;
       return new BoxedNumber(ce, [n, d], options);
     }
 
@@ -269,14 +284,14 @@ export function boxFunction(
       ops[0] instanceof AbstractBoxedExpression &&
       ops[1] instanceof AbstractBoxedExpression
     ) {
-      const [n, d] = [asBignum(ops[0]), asBignum(ops[1])];
-      if (n?.isInteger() && d?.isInteger()) return ce.number([n, d], options);
+      const [n, d] = [asBigint(ops[0]), asBigint(ops[1])];
+      if (n && d) return ce.number([n, d], options);
     } else {
       const [n, d] = [
-        bignumValue(ce, ops[0] as Expression),
-        bignumValue(ce, ops[1] as Expression),
+        bigintValue(ce, ops[0] as Expression),
+        bigintValue(ce, ops[1] as Expression),
       ];
-      if (n?.isInteger() && d?.isInteger()) return ce.number([n, d], options);
+      if (n && d) return ce.number([n, d], options);
     }
 
     head = 'Divide';
@@ -422,11 +437,7 @@ export function box(
       // This wasn't a valid rational, turn it into a `Divide`
       return boxFunction(ce, 'Divide', expr, options);
     }
-    if (isBigRational(expr)) {
-      if (expr[0].isInteger() && expr[1].isInteger()) return ce.number(expr);
-      // This wasn't a valid rational, turn it into a `Divide`
-      return boxFunction(ce, 'Divide', expr, options);
-    }
+    if (isBigRational(expr)) return ce.number(expr);
 
     if (typeof expr[0] === 'string')
       return boxFunction(ce, expr[0], expr.slice(1), options);

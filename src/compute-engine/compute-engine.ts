@@ -82,6 +82,7 @@ import {
 import { canonicalNegate } from './symbolic/negate';
 import { canonical, flattenOps, flattenSequence } from './symbolic/flatten';
 import { isFunctionDefinition, isSymbolDefinition } from './library/utils';
+import { bigint } from './numerics/numeric-bigint';
 
 /**
  *
@@ -681,7 +682,9 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal */
-  bignum(a: Decimal.Value): Decimal {
+  bignum(a: Decimal.Value | bigint): Decimal {
+    if (typeof a === 'bigint') return new this._bignum(a.toString());
+
     return new this._bignum(a);
   }
 
@@ -1168,8 +1171,8 @@ export class ComputeEngine implements IComputeEngine {
     else if (isRational(exponent)) {
       // Is the denominator 1?
       if (isMachineRational(exponent) && exponent[1] === 1) e = exponent[0];
-      else if (isBigRational(exponent) && exponent[1].equals(1))
-        e = exponent[0].toNumber();
+      else if (isBigRational(exponent) && exponent[1] === 1n)
+        e = Number(exponent[0]);
     }
 
     // x^1
@@ -1181,7 +1184,7 @@ export class ComputeEngine implements IComputeEngine {
       if (typeof r === 'number' && Number.isInteger(r))
         return this.number([1, r]);
       else if (r instanceof Decimal && r.isInteger())
-        return this.number([this._BIGNUM_ONE, r]);
+        return this.number([1n, bigint(r)]);
       else if (isRational(r)) return this.number([r[1], r[0]] as Rational);
     }
 
@@ -1203,7 +1206,7 @@ export class ComputeEngine implements IComputeEngine {
         return this.number([1, n], { metadata });
 
       if (n instanceof Decimal && n.isInteger())
-        return this.number([this._BIGNUM_ONE, n], { metadata });
+        return this.number([1n, bigint(n)], { metadata });
       return this._fn('Divide', [this._ONE, expr], metadata);
     }
 
@@ -1332,7 +1335,14 @@ export class ComputeEngine implements IComputeEngine {
    */
 
   number(
-    value: number | string | MathJsonNumber | Decimal | Complex | Rational,
+    value:
+      | number
+      | bigint
+      | string
+      | MathJsonNumber
+      | Decimal
+      | Complex
+      | Rational,
     options?: { canonical?: boolean; metadata?: Metadata }
   ): BoxedExpression {
     options ??= {};
@@ -1341,23 +1351,32 @@ export class ComputeEngine implements IComputeEngine {
     //
     // Is this number eligible to be a cached number expression?
     //
-    if (options.metadata === undefined && typeof value === 'number') {
-      const n = value;
-      if (n === 1) return this._ONE;
-      if (n === 0) return this._ZERO;
-      if (n === -1) return this._NEGATIVE_ONE;
-
-      if (Number.isInteger(n) && this._commonNumbers[n] !== undefined) {
-        if (this._commonNumbers[n] === null)
-          this._commonNumbers[n] = boxNumber(this, value) ?? this._NAN;
-        return this._commonNumbers[n]!;
+    if (options.metadata === undefined) {
+      if (typeof value === 'bigint') {
+        if (value === 1n) return this._ONE;
+        if (value === 0n) return this._ZERO;
+        if (value === -1n) return this._NEGATIVE_ONE;
       }
+      if (typeof value === 'number') {
+        const n = value;
+        if (n === 1) return this._ONE;
+        if (n === 0) return this._ZERO;
+        if (n === -1) return this._NEGATIVE_ONE;
 
-      if (Number.isNaN(n)) return this._NAN;
+        if (Number.isInteger(n) && this._commonNumbers[n] !== undefined) {
+          if (this._commonNumbers[n] === null)
+            this._commonNumbers[n] = boxNumber(this, value) ?? this._NAN;
+          return this._commonNumbers[n]!;
+        }
 
-      if (!Number.isFinite(n))
-        return n < 0 ? this._NEGATIVE_INFINITY : this._POSITIVE_INFINITY;
+        if (Number.isNaN(n)) return this._NAN;
+
+        if (!Number.isFinite(n))
+          return n < 0 ? this._NEGATIVE_INFINITY : this._POSITIVE_INFINITY;
+      }
     }
+
+    if (typeof value === 'bigint') value = this.bignum(value);
 
     return boxNumber(this, value, options) ?? this._NAN;
   }

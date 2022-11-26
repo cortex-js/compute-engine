@@ -1,13 +1,20 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
-import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
+import {
+  complexAllowed,
+  bignumPreferred,
+  asBigint,
+} from '../boxed-expression/utils';
 import {
   asBignum,
   asFloat,
   asSmallInteger,
   factorPower,
 } from '../numerics/numeric';
-import { factorPower as bigFactorPower } from '../numerics/numeric-bignum';
+import {
+  bigint,
+  factorPower as bigFactorPower,
+} from '../numerics/numeric-bigint';
 import {
   asRational,
   isBigRational,
@@ -152,7 +159,7 @@ export function square(
   if (num instanceof Complex) return ce.number(num.pow(2));
   if (isMachineRational(num))
     return ce.number([num[1] * num[1], num[0] * num[0]]);
-  if (isBigRational(num)) return ce.number([num[1].pow(2), num[0].pow(2)]);
+  if (isBigRational(num)) return ce.number([num[1] * num[1], num[0] * num[0]]);
 
   if (base.head === 'Multiply')
     return ce._fn(
@@ -250,9 +257,7 @@ export function processPower(
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
   if (base.head === 'Multiply') {
-    let c: Rational = bignumPreferred(ce)
-      ? [ce._BIGNUM_ONE, ce._BIGNUM_ONE]
-      : [1, 1];
+    let c: Rational = bignumPreferred(ce) ? [1n, 1n] : [1, 1];
     const xs: BoxedExpression[] = [];
     for (const op of base.ops!) {
       const r = asRational(op);
@@ -308,27 +313,24 @@ export function processPower(
       const [n, d] = [machineNumerator(r), machineDenominator(r)];
       if ((n === 1 || n === -1) && (d === 2 || d === 3)) {
         if (bignumPreferred(ce) || base.numericValue instanceof Decimal) {
-          const bigBase = asBignum(base)!;
-          if (d % 2 === 0 && bigBase.isNeg() && !complexAllowed(ce))
-            return ce._NAN;
+          const bigBase = asBigint(base)!;
+          if (d % 2 === 0 && bigBase < 0 && !complexAllowed(ce)) return ce._NAN;
 
-          const sign = bigBase.isNegative()
-            ? d % 2 === 0
-              ? ce._I
-              : ce._NEGATIVE_ONE
-            : ce._ONE;
+          const sign =
+            bigBase < 0 ? (d % 2 === 0 ? ce._I : ce._NEGATIVE_ONE) : ce._ONE;
 
-          const [factor, root] = bigFactorPower(ce, bigBase.abs(), d);
+          const [factor, root] = bigFactorPower(
+            ce,
+            bigBase > 0 ? bigBase : -bigBase,
+            d
+          );
 
-          if (root.eq(1) && factor.eq(1)) return sign;
+          if (root === 1n && factor === 1n) return sign;
 
           // If factor === 1, nothing special to do, fall through
-          if (!factor.eq(1)) {
-            if (root.eq(1))
-              return ce.mul([
-                sign,
-                ce.number(n >= 0 ? factor : [ce.bignum(1), factor]),
-              ]);
+          if (factor !== 1n) {
+            if (root === 1n)
+              return ce.mul([sign, ce.number(n >= 0 ? factor : [1n, factor])]);
 
             return ce.mul([
               sign,
@@ -440,11 +442,11 @@ export function processSqrt(
       }
     }
     if (isBigRational(r) || bignumPreferred(ce)) {
-      const n = ce.bignum(r[0]);
-      const [nFactor, nRoot] = bigFactorPower(ce, n.abs(), 2);
-      const [dFactor, dRoot] = bigFactorPower(ce, ce.bignum(r[1]), 2);
+      const n = bigint(r[0]);
+      const [nFactor, nRoot] = bigFactorPower(ce, n > 0 ? n : -n, 2);
+      const [dFactor, dRoot] = bigFactorPower(ce, bigint(r[1]), 2);
 
-      if (n.isNeg())
+      if (n < 0)
         return ce.mul([
           ce.number([nFactor, dFactor]),
           ce.sqrt(ce.number([nRoot, dRoot])),

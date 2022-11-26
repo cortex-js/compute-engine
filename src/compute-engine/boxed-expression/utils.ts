@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 import { asFloat } from '../numerics/numeric';
+import { bigint } from '../numerics/numeric-bigint';
 import { BoxedExpression, IComputeEngine } from '../public';
 
 export function isLatexString(s: unknown): s is string {
@@ -214,6 +215,50 @@ export function bignumValue(
 
     return ce.bignum(s);
   }
+
+  return null;
+}
+
+export function bigintValue(
+  ce: IComputeEngine,
+  expr: Expression | null | undefined
+): bigint | null {
+  if (expr === null || expr === undefined) return null;
+  if (typeof expr === 'number')
+    return Number.isInteger(expr) ? bigint(expr) : null;
+
+  if (isNumberExpression(expr)) {
+    const num = isNumberObject(expr) ? expr.num.toString() : expr;
+    let s = num
+      .toLowerCase()
+      .replace(/[nd]$/g, '')
+      .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+    if (/\([0-9]+\)/.test(s)) {
+      const [_, body, repeat, trail] = s.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
+      s =
+        body +
+        repeat.repeat(Math.ceil(ce.precision / repeat.length)) +
+        (trail ?? '');
+    }
+
+    if (s === 'nan') return null;
+    if (s === 'infinity' || s === '+infinity') return null;
+    if (s === '-infinity') return null;
+    if (s.includes('.')) return null;
+    return bigint(s);
+  }
+
+  return null;
+}
+
+export function asBigint(expr: BoxedExpression): bigint | null {
+  const num = expr.numericValue;
+
+  if (num === null) return null;
+
+  if (typeof num === 'number' && Number.isInteger(num)) return bigint(num);
+
+  if (num instanceof Decimal && num.isInteger()) return bigint(num);
 
   return null;
 }

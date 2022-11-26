@@ -892,17 +892,17 @@ describe('Max', () => {
   test(`Max`, () =>
     expect(checkJson(['Max', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
       box       = ["Max", 2.5, -1.1, 18.4]
-      evaluate  = 2.5
+      evaluate  = 18.4
     `));
   test(`Max`, () =>
     expect(checkJson(['Max', 2.5, -1.1, 'NaN', 18.4])).toMatchInlineSnapshot(`
       box       = ["Max", 2.5, -1.1, {num: "NaN"}, 18.4]
-      evaluate  = 2.5
+      evaluate  = 18.4
     `));
   test(`Max`, () =>
     expect(checkJson(['Max', 2.5, -1.1, 'foo', 18.4])).toMatchInlineSnapshot(`
       box       = ["Max", 2.5, -1.1, "foo", 18.4]
-      evaluate  = 2.5
+      evaluate  = 18.4
     `));
   test(`Max`, () =>
     expect(checkJson(['Max', 'foo', 'bar'])).toMatchInlineSnapshot(`
@@ -920,22 +920,22 @@ describe('Min', () => {
   test(`Min`, () =>
     expect(checkJson(['Min', 2.5, 1.1])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5, 1.1]
-      evaluate  = 2.5
+      evaluate  = 1.1
     `));
   test(`Min`, () =>
     expect(checkJson(['Min', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5, -1.1, 18.4]
-      evaluate  = 2.5
+      evaluate  = -1.1
     `));
   test(`Min`, () =>
     expect(checkJson(['Min', 2.5, -1.1, 'NaN', 18.4])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5, -1.1, {num: "NaN"}, 18.4]
-      evaluate  = 2.5
+      evaluate  = -1.1
     `));
   test(`Min`, () =>
     expect(checkJson(['Min', 2.5, -1.1, 'foo', 18.4])).toMatchInlineSnapshot(`
       box       = ["Min", 2.5, -1.1, "foo", 18.4]
-      evaluate  = 2.5
+      evaluate  = -1.1
     `));
   test(`Min`, () =>
     expect(checkJson(['Min', 'foo', 'bar'])).toMatchInlineSnapshot(`
@@ -962,6 +962,7 @@ describe('Rational', () => {
       box       = ["Rational", "12345678901234567890", "23456789012345678901"]
       canonical = ["Rational", 137174210, 260630989]
       N-auto    = 0.52631580966759098627
+      N-mach    = 0.526315809667591
     `));
 
   test(`INVALID Rational`, () => {

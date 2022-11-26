@@ -68,8 +68,8 @@ export function costFunction(expr: BoxedExpression): number {
         return numericCostFunction(num[0]) + numericCostFunction(num[1]) + 1;
       else
         return (
-          numericCostFunction(num[0].toNumber()) +
-          numericCostFunction(num[1].toNumber()) +
+          numericCostFunction(Number(num[0])) +
+          numericCostFunction(Number(num[1])) +
           1
         );
     }

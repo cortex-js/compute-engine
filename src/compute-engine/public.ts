@@ -26,7 +26,7 @@ import type {
 
 export * from './latex-syntax/public';
 
-export type Rational = [number, number] | [Decimal, Decimal];
+export type Rational = [number, number] | [bigint, bigint];
 
 /**
  * Metadata that can be associated with a `BoxedExpression`
@@ -1997,7 +1997,7 @@ export interface IComputeEngine {
   chop(n: number | Decimal | Complex): number | Decimal | Complex;
 
   /** @internal */
-  bignum: (a: Decimal.Value) => Decimal;
+  bignum: (a: Decimal.Value | bigint) => Decimal;
   /** @internal */
   complex: (a: number | Complex, b?: number) => Complex;
 
@@ -2062,12 +2062,12 @@ export interface IComputeEngine {
   number(
     value:
       | number
+      | bigint
       | string
       | MathJsonNumber
       | Decimal
       | Complex
-      | [num: number, denom: number]
-      | [num: Decimal, denom: Decimal],
+      | Rational,
     options?: { metadata?: Metadata; canonical?: boolean }
   ): BoxedExpression;
 

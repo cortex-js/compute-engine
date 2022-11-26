@@ -50,9 +50,7 @@ export class Sum {
     this._isCanonical = options.canonical!;
     this.engine = ce;
 
-    this._rational = bignumPreferred(ce)
-      ? [ce._BIGNUM_ZERO, ce._BIGNUM_ONE]
-      : [0, 1];
+    this._rational = bignumPreferred(ce) ? [0n, 1n] : [0, 1];
 
     this._bignum = ce._BIGNUM_ZERO;
     this._number = 0;
@@ -140,7 +138,12 @@ export class Sum {
             if (c === undefined) this._imaginary += im;
             else if (isMachineRational(c))
               this._imaginary += (im * c[0]) / c[1];
-            else this._imaginary += c[0].mul(im).div(c[1]).toNumber();
+            else
+              this._imaginary += this.engine
+                .bignum(c[0])
+                .mul(im)
+                .div(this.engine.bignum(c[1]))
+                .toNumber();
             im = 0;
           }
           if (re === 0 && im === 0) return;
@@ -228,7 +231,9 @@ export class Sum {
       if (bignumPreferred(this.engine)) {
         let sum = this._bignum.add(this._number);
         if (!isRationalZero(this._rational))
-          sum = sum.add(ce.bignum(this._rational[0]).div(this._rational[1]));
+          sum = sum.add(
+            ce.bignum(this._rational[0]).div(ce.bignum(this._rational[1]))
+          );
 
         if (this._imaginary !== 0)
           xs.push(ce.number(ce.complex(sum.toNumber(), this._imaginary)));

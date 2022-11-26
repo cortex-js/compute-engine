@@ -106,8 +106,7 @@ export function makePositive(
     return [-1, ce.number(ce.complex(-n.re, -n.im))];
 
   if (isMachineRational(n) && n[0] < 0) return [-1, ce.number([-n[0], n[1]])];
-  if (isBigRational(n) && n[0].isNegative())
-    return [-1, ce.number([n[0].neg(), n[1]])];
+  if (isBigRational(n) && n[0] < 0) return [-1, ce.number([-n[0], n[1]])];
 
   return [1, expr];
 }
@@ -119,30 +118,28 @@ export function apply(
   complexFn?: (x: Complex) => number | Complex
 ): number | Decimal | Complex {
   const n = expr.numericValue!;
+  const ce = expr.engine;
   console.assert(n !== null);
 
   if (typeof n === 'number') {
-    if (bignumPreferred(expr.engine) && bigFn)
-      return expr.engine.chop(bigFn(expr.engine.bignum(n)));
-    return expr.engine.chop(fn(n));
+    if (bignumPreferred(ce) && bigFn) return ce.chop(bigFn(ce.bignum(n)));
+    return ce.chop(fn(n));
   }
 
-  if (n instanceof Decimal)
-    return expr.engine.chop(bigFn?.(n) ?? fn(n.toNumber()));
+  if (n instanceof Decimal) return ce.chop(bigFn?.(n) ?? fn(n.toNumber()));
 
   if (isMachineRational(n)) {
-    if (!bignumPreferred(expr.engine) || !bigFn)
-      return expr.engine.chop(fn(n[0] / n[1]));
-    return expr.engine.chop(bigFn(expr.engine.bignum(n[0]).div(n[1])));
+    if (!bignumPreferred(ce) || !bigFn) return ce.chop(fn(n[0] / n[1]));
+    return ce.chop(bigFn(ce.bignum(n[0]).div(n[1])));
   }
   if (isBigRational(n)) {
-    if (bigFn) return expr.engine.chop(bigFn(n[0].div(n[1])));
-    return expr.engine.chop(fn(n[0].toNumber() / n[1].toNumber()));
+    if (bigFn) return ce.chop(bigFn(ce.bignum(n[0]).div(ce.bignum(n[1]))));
+    return ce.chop(fn(Number(n[0]) / Number(n[1])));
   }
 
   if (n instanceof Complex) {
-    if (!complexFn || !complexAllowed(expr.engine)) return NaN;
-    return expr.engine.chop(complexFn(n));
+    if (!complexFn || !complexAllowed(ce)) return NaN;
+    return ce.chop(complexFn(n));
   }
 
   debugger;
@@ -181,12 +178,12 @@ export function apply2(
 
   let b1: Decimal | undefined = undefined;
   if (m1 instanceof Decimal) b1 = m1;
-  else if (isBigRational(m1)) b1 = m1[0].div(m1[1]);
+  else if (isBigRational(m1)) b1 = ce.bignum(m1[0]).div(ce.bignum(m1[1]));
   else if (m1 !== null && typeof m1 === 'number') b1 = ce.bignum(m1);
 
   let b2: Decimal | undefined = undefined;
   if (m2 instanceof Decimal) b2 = m2;
-  else if (isBigRational(m2)) b2 = m2[0].div(m2[1]);
+  else if (isBigRational(m2)) b1 = ce.bignum(m2[0]).div(ce.bignum(m2[1]));
   else if (m2 !== null && typeof m2 === 'number') b2 = ce.bignum(m2);
 
   if (b1 && b2) return bigFn?.(b1, b2) ?? fn(b1.toNumber(), b2.toNumber());

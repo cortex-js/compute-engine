@@ -7,7 +7,6 @@ import {
   asCoefficient,
   asRational,
   isBigRational,
-  isMachineRational,
   isNeg,
   isRational,
   isRationalOne,
@@ -20,6 +19,7 @@ import {
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
+import { bigint } from '../numerics/numeric-bigint';
 
 /**
  * Group terms in a product by common term.
@@ -71,9 +71,7 @@ export class Product {
 
     this.engine = ce;
     this._sign = 1;
-    this._rational = bignumPreferred(ce)
-      ? [ce._BIGNUM_ONE, ce._BIGNUM_ONE]
-      : [1, 1];
+    this._rational = bignumPreferred(ce) ? [1n, 1n] : [1, 1];
     // this._squareRootRational = this._rational;
     this._complex = Complex.ONE;
     this._bignum = ce._BIGNUM_ONE;
@@ -156,10 +154,7 @@ export class Product {
             num = num.neg();
           }
           if (num.isInteger())
-            this._rational = mul(this._rational, [
-              num,
-              this.engine._BIGNUM_ONE,
-            ]);
+            this._rational = mul(this._rational, [bigint(num), 1n]);
           else if (bignumPreferred(this.engine))
             this._bignum = this._bignum.mul(num);
           else this._number *= num.toNumber();
@@ -235,7 +230,9 @@ export class Product {
         let b = ce._BIGNUM_ONE;
         if (!isRationalOne(this._rational)) {
           if (isBigRational(this._rational))
-            b = this._rational[0].div(this._rational[1]);
+            b = ce
+              .bignum(this._rational[0].toString())
+              .div(ce.bignum(this._rational[1].toString()));
           else b = ce.bignum(this._rational[0]).div(this._rational[1]);
         }
 
@@ -255,7 +252,7 @@ export class Product {
       let n = 1;
       if (!isRationalOne(this._rational)) {
         if (isBigRational(this._rational))
-          n = this._rational[0].toNumber() / this._rational[1].toNumber();
+          n = Number(this._rational[0]) / Number(this._rational[1]);
         else n = this._rational[0] / this._rational[1];
       }
 
@@ -297,7 +294,8 @@ export class Product {
     if (!isRationalOne(this._rational)) {
       if (mode === 'rational') {
         if (machineNumerator(this._rational) !== 1) {
-          if (isBigRational(this._rational)) b = b.mul(this._rational[0]);
+          if (isBigRational(this._rational))
+            b = b.mul(ce.bignum(this._rational[0]));
           else n *= this._rational[0];
         }
         if (machineDenominator(this._rational) !== 1)
@@ -412,11 +410,7 @@ export class Product {
     }[] = [];
 
     for (const x of xs)
-      if (
-        (typeof x.exponent[0] === 'number' && x.exponent[0] >= 0) ||
-        (typeof x.exponent[0] !== 'number' && x.exponent[0].isPositive())
-      )
-        xsNumerator.push(x);
+      if (x.exponent[0] >= 0) xsNumerator.push(x);
       else
         xsDenominator.push({
           exponent: neg(x.exponent),
@@ -478,28 +472,16 @@ function degreeOrder(
   const keyA = degreeKey(a.exponent);
   const keyB = degreeKey(b.exponent);
   if (keyA !== keyB) return keyA - keyB;
-  if (isBigRational(a.exponent) && isBigRational(b.exponent)) {
-    return a.exponent[0]
-      .div(a.exponent[1])
-      .sub(b.exponent[0].div(b.exponent[1]))
-      .toNumber();
-  }
-  if (isBigRational(a.exponent) && isMachineRational(b.exponent)) {
-    return a.exponent[0]
-      .div(a.exponent[1])
-      .sub(b.exponent[0] / b.exponent[1])
-      .toNumber();
-  }
-  if (isMachineRational(a.exponent) && isBigRational(b.exponent)) {
-    return b.exponent[0]
-      .div(b.exponent[1])
-      .add(-a.exponent[0] / a.exponent[1])
-      .toNumber();
-  }
-  return (
-    (a.exponent[0] as number) / (a.exponent[1] as number) -
-    (b.exponent[0] as number) / (b.exponent[1] as number)
-  );
+
+  const [a_n, a_d] = [
+    machineNumerator(a.exponent),
+    machineDenominator(a.exponent),
+  ];
+  const [b_n, b_d] = [
+    machineNumerator(b.exponent),
+    machineDenominator(b.exponent),
+  ];
+  return a_n / a_d - b_n / b_d;
 }
 
 function termsAsExpressions(

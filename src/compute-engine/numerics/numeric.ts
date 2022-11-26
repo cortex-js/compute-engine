@@ -389,7 +389,7 @@ export function asFloat(expr: BoxedExpression): number | null {
   if (Array.isArray(num)) {
     const [n, d] = num;
     if (typeof n === 'number' && typeof d === 'number') return n / d;
-    return (n as Decimal).div(d).toNumber();
+    return Number(n as bigint) / Number(d as bigint);
   }
 
   console.assert(!(num instanceof Complex) || num.im !== 0);
@@ -409,7 +409,7 @@ export function asBignum(expr: BoxedExpression): Decimal | null {
     const [n, d] = num;
     if (typeof n === 'number' && typeof d === 'number')
       return expr.engine.bignum(n / d);
-    return (n as Decimal).div(d);
+    return expr.engine.bignum(n).div(d.toString());
   }
 
   console.assert(!(num instanceof Complex) || num.im !== 0);
@@ -444,7 +444,7 @@ export function asSmallInteger(expr: BoxedExpression): number | null {
     const [n, d] = r;
     let v: number;
     if (typeof n === 'number' && typeof d === 'number') v = n / d;
-    else v = (n as Decimal).div(d).toNumber();
+    else v = Number(n) / Number(d);
 
     if (Number.isInteger(v) && v >= -SMALL_INTEGER && v <= SMALL_INTEGER)
       return v;

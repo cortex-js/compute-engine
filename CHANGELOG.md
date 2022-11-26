@@ -7,9 +7,13 @@
 
 ### Improvements
 
+- Rewrote the rational computation engine to use JavaScript `bigint` instead of
+  `Decimal` instances. Performance improvements of up to 100x.
 - `expr.freeVars` provides the free variables in an expression.
 - Improved performance of prime factorization of big num by x100.
 - Added `["RandomExpression"]`
+- Improved accuracy of some operations, for example
+  `expr.parse("1e999 + 1").simplify()`
 
 ### Bug Fixes
 
@@ -22,6 +26,8 @@
 - The canonical order of polynomials now orders non-lexicographic terms of
   degree 1 last, i.e. "ax^2+ bx+ c" instead of "x + ax^2 + bx".
 - Fixed evaluation of inverse functions
+- Fixed `expr.isLess`, `expr.isGreater`, `expr.isLessEqual`,
+  `expr.isGreaterEqual` and `["Min"]`, `["Max"]`
 
 ## 0.11.0
 

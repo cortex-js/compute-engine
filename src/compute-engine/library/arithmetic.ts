@@ -921,7 +921,11 @@ function processAbs(
 
       if (isBigRational(num)) {
         const [n, d] = num;
-        return ce.number(mode === 'N' ? n.div(d).abs() : [n.abs(), d]);
+        return ce.number(
+          mode === 'N'
+            ? ce.bignum(n).div(ce.bignum(d)).abs()
+            : [n > 0 ? n : -n, d]
+        );
       }
     }
   }

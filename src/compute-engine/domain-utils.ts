@@ -1,18 +1,14 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
-import { BoxedExpression } from './public';
+import { isRational } from './numerics/rationals';
+import { BoxedExpression, Rational } from './public';
 
 /** Quickly determine the numeric domain of a number or constant
  * For the symbols, this is a hard-coded optimization that doesn't rely on the
  * dictionaries. The regular path is in `internalDomain()`
  */
 export function inferNumericDomain(
-  value:
-    | number
-    | Decimal
-    | Complex
-    | [numer: number, denom: number]
-    | [numer: Decimal, denom: Decimal]
+  value: number | Decimal | Complex | Rational
 ): string {
   //
   // 1. Is it a number?
@@ -68,7 +64,7 @@ export function inferNumericDomain(
   // 4. Is it a rational? (machine or bignum)
   //
 
-  if (Array.isArray(value)) {
+  if (isRational(value)) {
     const [numer, denom] = value;
 
     // The value is a rational number

@@ -1,6 +1,5 @@
 import { Decimal } from 'decimal.js';
 import { IComputeEngine } from '../public';
-import { primeFactors as machinePrimeFactors } from './numeric';
 
 export function gcd(a: Decimal, b: Decimal): Decimal {
   //@todo: https://github.com/Yaffle/bigint-gcd/blob/main/gcd.js
@@ -11,107 +10,6 @@ export function gcd(a: Decimal, b: Decimal): Decimal {
 
 export function lcm(a: Decimal, b: Decimal): Decimal {
   return a.mul(b).div(gcd(a, b));
-}
-
-// Difference between primes from 7 to 31
-const PRIME_WHEEL_INC = [4n, 2n, 4n, 2n, 4n, 6n, 2n, 6n];
-
-export function primeFactors(
-  ce: IComputeEngine,
-  d: Decimal
-): Map<Decimal, number> {
-  if (d.lt(Number.MAX_SAFE_INTEGER)) {
-    const factors = machinePrimeFactors(d.toNumber());
-    const result = new Map<Decimal, number>();
-    for (const f of Object.keys(factors)) result.set(ce.bignum(f), factors[f]);
-    return result;
-  }
-
-  //https:rosettacode.org/wiki/Prime_decomposition#JavaScript
-
-  let n = BigInt(d.toFixed());
-  const result = new Map<string, number>();
-
-  // Wheel factorization
-  // @todo: see https://github.com/Fairglow/prime-factor/blob/main/src/lib.rs
-
-  let count2 = 0;
-  let count3 = 0;
-  let count5 = 0;
-
-  let k = 10n;
-  while (n % k === 0n) {
-    count2 += 1;
-    count5 += 1;
-    n = n / k;
-  }
-
-  k = 5n;
-  while (n % k === 0n) {
-    count5 += 1;
-    n = n / k;
-  }
-
-  k = 3n;
-  while (n % k === 0n) {
-    count3 += 1;
-    n = n / k;
-  }
-
-  k = 2n;
-  while (n % k === 0n) {
-    count2 += 1;
-    n = n / k;
-  }
-
-  if (count2 > 0) result.set('2', count2);
-  if (count3 > 0) result.set('3', count3);
-  if (count5 > 0) result.set('5', count5);
-
-  k = 7n;
-  let kIndex = '';
-  let i = 0;
-  while (k * k < n) {
-    if (n % k === 0n) {
-      if (!kIndex) kIndex = k.toString();
-      result.set(kIndex, (result.get(kIndex) ?? 0) + 1);
-      n = n / k;
-    } else {
-      k = k + PRIME_WHEEL_INC[i];
-      kIndex = '';
-      i = i < 7 ? i + 1 : 0;
-    }
-  }
-
-  if (n !== 1n) result.set(n.toString(), (result.get(n.toString()) ?? 0) + 1);
-
-  const r = new Map<Decimal, number>();
-  for (const [k, v] of result) r.set(ce.bignum(k), v);
-  return r;
-}
-
-/** Return `[factor, root]` such that
- * pow(n, 1/exponent) = factor * pow(root, 1/exponent)
- *
- * factorPower(75, 2) -> [5, 3] = 5^2 * 3
- *
- */
-export function factorPower(
-  ce: IComputeEngine,
-  n: Decimal,
-  exponent: number
-): [factor: Decimal, root: Decimal] {
-  // @todo: handle negative n
-  console.assert(n.isInteger() && n.isPositive());
-  const factors = primeFactors(ce, n);
-  let f = ce.bignum(1);
-  let r = ce.bignum(1);
-  for (const [k, v] of factors) {
-    const v2 = ce.bignum(v);
-    f = f.mul(k.pow(v2.div(exponent).floor()));
-    r = r.mul(k.pow(v2.mod(exponent)));
-  }
-  return [f, r];
 }
 
 export function factorial(ce: IComputeEngine, n: Decimal): Decimal {

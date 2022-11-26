@@ -486,7 +486,9 @@
       updateAssumptions();
 
       const mf = document.getElementById('mf');
-      mf.value = ce.box(['RandomExpression']).evaluate().latex;
+      const randomExpr = ce.box(['RandomExpression']).evaluate();
+      console.log(randomExpr.json);
+      mf.value = randomExpr.latex;
       mf.setOptions({
         onInlineShortcut: (_mf, s) => {
           const f = s.match(

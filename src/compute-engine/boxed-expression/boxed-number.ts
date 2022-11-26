@@ -16,6 +16,7 @@ import { inferNumericDomain } from '../domain-utils';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { isPrime } from '../numerics/primes';
 import {
+  isBigRational,
   isRational,
   isRationalNegativeOne,
   isRationalOne,
@@ -71,8 +72,8 @@ export class BoxedNumber extends AbstractBoxedExpression {
           (Number.isInteger(n) && Number.isInteger(d) && d !== n && d !== 1)
       );
       console.assert(
-        !(n instanceof Decimal && d instanceof Decimal) ||
-          (n.isInteger() && d.isInteger() && !d.eq(n) && !d.eq(1))
+        !(typeof n === 'bigint' && typeof d == 'bigint') ||
+          (d !== n && d !== 1n)
       );
 
       if (options?.canonical ?? true) {
@@ -522,7 +523,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     )
       return ce.number(numer / denom);
 
-    return ce.number(ce.bignum(numer).div(denom));
+    return ce.number(ce.bignum(numer).div(ce.bignum(denom)));
   }
 }
 
@@ -536,34 +537,33 @@ function canonicalNumber(
   if (value instanceof Decimal && isInMachineRange(value))
     return value.toNumber();
   if (!isRational(value)) return value;
+  value = reducedRational(value);
 
-  let [n, d] = value;
-
-  if (n instanceof Decimal && d instanceof Decimal) {
-    if (isInMachineRange(n) && isInMachineRange(d))
-      [n, d] = [n.toNumber(), d.toNumber()];
+  if (isBigRational(value)) {
+    let [n, d] = value;
+    if (
+      n > Number.MIN_SAFE_INTEGER &&
+      n < Number.MAX_SAFE_INTEGER &&
+      d > Number.MIN_SAFE_INTEGER &&
+      d < Number.MAX_SAFE_INTEGER
+    )
+      value = [Number(n), Number(d)];
     else {
-      if (n.isNaN() || d.isNaN()) return NaN;
+      if (d < 0) [n, d] = [-n, -d];
 
-      [n, d] = reducedRational([n, d]);
+      if (d === 1n) return ce.bignum(n);
 
-      if (d.isNegative()) [n, d] = [n.neg(), d.neg()];
-
-      if (d.eq(ce._BIGNUM_ONE)) return n;
-
-      if (d.isZero()) {
-        if (n.isZero() || !n.isFinite()) return NaN;
-        if (n.isNegative()) return -Infinity;
-        return +Infinity;
+      if (d === 0n) {
+        if (n === 0n) return NaN;
+        return n < 0 ? -Infinity : +Infinity;
       }
 
       return [n, d];
     }
   }
 
+  let [n, d] = value as [number, number];
   if (Number.isNaN(n) || Number.isNaN(d)) return NaN;
-
-  [n, d] = reducedRational([n as number, d as number]);
 
   if (d < 0) [n, d] = [-n, -d];
 

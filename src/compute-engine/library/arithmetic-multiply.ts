@@ -283,9 +283,7 @@ export function evalMultiplication(
     return mode === 'simplify' ? product.simplify() : product.evaluate();
   }
 
-  let product: Rational = bignumPreferred(ce)
-    ? [ce._BIGNUM_ONE, ce._BIGNUM_ONE]
-    : [1, 1];
+  let product: Rational = bignumPreferred(ce) ? [1n, 1n] : [1, 1];
 
   for (let i = lower; i <= upper; i++) {
     const n = ce.number(i);
@@ -296,5 +294,5 @@ export function evalMultiplication(
   }
 
   if (isMachineRational(product)) return ce.number(product[0] / product[1]);
-  return ce.number(product[0].div(product[1]));
+  return ce.number(ce.bignum(product[0]).div(ce.bignum(product[1])));
 }

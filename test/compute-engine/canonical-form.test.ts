@@ -111,7 +111,7 @@ describe('CANONICAL FORMS', () => {
   // (multiplication by 0 does not always = 0)
   test('2x\\frac{0}{5}"', () => {
     expect(check('2x\\frac{0}{5}')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", 2, "x", ["Rational", 0, 5]]
+      latex     = ["Multiply", 2, "x", ["Divide", 0, 5]]
       0
     `);
   });
