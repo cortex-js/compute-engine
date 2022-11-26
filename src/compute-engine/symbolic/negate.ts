@@ -25,22 +25,18 @@ function negateLiteral(
 
 /**
  * Distribute `Negate` (multiply by -1) if expr is a number literal, an
- * addition or another `Negate`.
+ * addition or multiplication or another `Negate`.
  *
- * This is appropriate to call during a `canonical` chain.
- *
- * For more thorough distribution (including multiplication), see `distributeNegate`,
- * applicable  during a `simplify` or `evaluate` chain.
+ * It is important to do all these to handle cases like
+ * `-3x` -> ["Negate, ["Multiply", 3, "x"]] -> ["Multiply, -3, x]
  */
 export function canonicalNegate(
   expr: BoxedExpression,
   metadata?: Metadata
 ): BoxedExpression {
   // Negate(Negate(x)) -> x
-  if (expr.head === 'Negate')
-    return validateArgument(expr.engine, expr.op1?.canonical, 'Number');
+  if (expr.head === 'Negate') return expr.op1;
 
-  expr = validateArgument(expr.engine, expr.canonical, 'Number');
   if (expr.numericValue !== null) return negateLiteral(expr, metadata)!;
 
   // Distribute over addition
@@ -51,49 +47,21 @@ export function canonicalNegate(
     return expr.engine.add(ops, metadata);
   }
 
-  // 'Subtract' is canonicalized into `Add`, so don't have to worry about it
-  console.assert(expr.head !== 'Subtract');
-
-  return expr.engine._fn('Negate', [expr], metadata);
-}
-
-/**
- * Return the additive opposite of the expression.
- *
- * Applies to `Add`, `Multiply`, `Negate` and number literals.
- *
- * If none can be produced (the expression is a symbol for example),
- * return `null`.
- *
- * Call during a `simplify` or `evaluate` chain. Use `canonicalNegate`  during a
- * `canonical` chain.
- */
-function distributeNegate(expr: BoxedExpression): BoxedExpression {
-  if (expr.numericValue !== null) return negateLiteral(expr)!;
-  if (expr.head === 'Negate') return expr.op1;
-
-  const ce = expr.engine;
-
-  // Distribute over addition
-  // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
-  if (expr.head === 'Add') {
-    let ops = expr.ops!.map((x) => distributeNegate(x));
-    ops = flattenOps(ops, 'Add');
-    return ce.add(ops);
-  }
-
   // Distribute over multiplication
   // Negate(Multiply(a, b)) -> Multiply(Negate(a), b)
   if (expr.head === 'Multiply') {
-    return negateProduct(ce, expr.ops!);
+    return negateProduct(expr.engine, expr.ops!);
   }
 
   // Distribute over division
   // Negate(Divide(a, b)) -> Divide(Negate(a), b)
   if (expr.head === 'Divide')
-    return ce.div(distributeNegate(expr.op1), expr.op2);
+    return expr.engine.div(canonicalNegate(expr.op1), expr.op2);
 
-  return ce._fn('Negate', [expr]);
+  // 'Subtract' is canonicalized into `Add`, so don't have to worry about it
+  console.assert(expr.head !== 'Subtract');
+
+  return expr.engine._fn('Negate', [expr], metadata);
 }
 
 // Given a list of terms in a product, find the "best" one to negate in
@@ -122,7 +90,7 @@ function negateProduct(
     if (done || arg.numericValue === null || !arg.isInteger) result.push(arg);
     else {
       done = true;
-      result.push(distributeNegate(arg));
+      result.push(canonicalNegate(arg));
     }
   }
 
@@ -134,7 +102,7 @@ function negateProduct(
     if (done || arg.numericValue === null || !arg.isNumber) result.push(arg);
     else {
       done = true;
-      result.push(distributeNegate(arg));
+      result.push(canonicalNegate(arg));
     }
   }
   if (done) return ce.mul(result);
@@ -147,5 +115,5 @@ export function processNegate(
   x: BoxedExpression,
   _mode: 'simplify' | 'evaluate' | 'N' = 'simplify'
 ): BoxedExpression {
-  return distributeNegate(x);
+  return canonicalNegate(x);
 }
