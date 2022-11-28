@@ -73,7 +73,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
       );
       console.assert(
         !(typeof n === 'bigint' && typeof d == 'bigint') ||
-          (d !== n && d !== 1n)
+          (d !== n && d !== BigInt(1))
       );
 
       if (options?.canonical ?? true) {
@@ -551,10 +551,10 @@ function canonicalNumber(
     else {
       if (d < 0) [n, d] = [-n, -d];
 
-      if (d === 1n) return ce.bignum(n);
+      if (d === BigInt(1)) return ce.bignum(n);
 
-      if (d === 0n) {
-        if (n === 0n) return NaN;
+      if (d === BigInt(0)) {
+        if (n === d) return NaN;
         return n < 0 ? -Infinity : +Infinity;
       }
 

@@ -61,7 +61,8 @@ export function asRational(expr: BoxedExpression): Rational | undefined {
   if (num === null) return undefined;
   if (Array.isArray(num)) return num;
   if (typeof num === 'number' && Number.isInteger(num)) return [num, 1];
-  if (num instanceof Decimal && num.isInteger()) return [bigint(num), 1n];
+  if (num instanceof Decimal && num.isInteger())
+    return [bigint(num), BigInt(1)];
   return undefined;
 }
 
@@ -198,7 +199,7 @@ export function reducedRational(r: Rational): Rational {
     return g <= 1 ? r : [r[0] / g, r[1] / g];
   }
 
-  if (r[0] === 1n || r[1] === 1n) return r;
+  if (r[0] === BigInt(1) || r[1] === BigInt(1)) return r;
   if (r[1] < 0) r = [-r[0], -r[1]];
   const g = bigGcd(r[0], r[1]);
   //  If the gcd is 0, return the rational unchanged
@@ -380,7 +381,7 @@ export function asCoefficient(
   const n = expr.numericValue;
   if (n !== null) {
     if (n instanceof Decimal) {
-      if (n.isInteger()) return [[bigint(n.toString()), 1n], ce._ONE];
+      if (n.isInteger()) return [[bigint(n.toString()), BigInt(1)], ce._ONE];
       if (n.isNegative()) return [[-1, 1], ce.number(n.neg())];
     }
 

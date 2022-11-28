@@ -71,7 +71,7 @@ export class Product {
 
     this.engine = ce;
     this._sign = 1;
-    this._rational = bignumPreferred(ce) ? [1n, 1n] : [1, 1];
+    this._rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [1, 1];
     // this._squareRootRational = this._rational;
     this._complex = Complex.ONE;
     this._bignum = ce._BIGNUM_ONE;
@@ -154,7 +154,7 @@ export class Product {
             num = num.neg();
           }
           if (num.isInteger())
-            this._rational = mul(this._rational, [bigint(num), 1n]);
+            this._rational = mul(this._rational, [bigint(num), BigInt(1)]);
           else if (bignumPreferred(this.engine))
             this._bignum = this._bignum.mul(num);
           else this._number *= num.toNumber();

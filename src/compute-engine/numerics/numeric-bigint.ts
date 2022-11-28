@@ -19,8 +19,8 @@ export function bigint(a: Decimal | number | bigint | string): bigint {
 }
 
 export function gcd(a: bigint, b: bigint): bigint {
-  while (b !== 0n) [a, b] = [b, a % b];
-  return a < 0n ? -a : a;
+  while (b !== BigInt(0)) [a, b] = [b, a % b];
+  return a < 0 ? -a : a;
 }
 
 export function lcm(a: bigint, b: bigint): bigint {
@@ -28,7 +28,16 @@ export function lcm(a: bigint, b: bigint): bigint {
 }
 
 // Difference between primes from 7 to 31
-const PRIME_WHEEL_INC = [4n, 2n, 4n, 2n, 4n, 6n, 2n, 6n];
+const PRIME_WHEEL_INC = [
+  BigInt(4),
+  BigInt(2),
+  BigInt(4),
+  BigInt(2),
+  BigInt(4),
+  BigInt(6),
+  BigInt(2),
+  BigInt(6),
+];
 
 export function primeFactors(d: bigint): Map<bigint, number> {
   if (d < Number.MAX_SAFE_INTEGER) {
@@ -50,27 +59,27 @@ export function primeFactors(d: bigint): Map<bigint, number> {
   let count3 = 0;
   let count5 = 0;
 
-  let k = 10n;
-  while (n % k === 0n) {
+  let k = BigInt(10);
+  while (n % k === BigInt(0)) {
     count2 += 1;
     count5 += 1;
     n = n / k;
   }
 
-  k = 5n;
-  while (n % k === 0n) {
+  k = BigInt(5);
+  while (n % k === BigInt(0)) {
     count5 += 1;
     n = n / k;
   }
 
-  k = 3n;
-  while (n % k === 0n) {
+  k = BigInt(3);
+  while (n % k === BigInt(0)) {
     count3 += 1;
     n = n / k;
   }
 
-  k = 2n;
-  while (n % k === 0n) {
+  k = BigInt(2);
+  while (n % k === BigInt(0)) {
     count2 += 1;
     n = n / k;
   }
@@ -79,11 +88,11 @@ export function primeFactors(d: bigint): Map<bigint, number> {
   if (count3 > 0) result.set('3', count3);
   if (count5 > 0) result.set('5', count5);
 
-  k = 7n;
+  k = BigInt(7);
   let kIndex = '';
   let i = 0;
   while (k * k < n) {
-    if (n % k === 0n) {
+    if (n % k === BigInt(0)) {
       if (!kIndex) kIndex = k.toString();
       result.set(kIndex, (result.get(kIndex) ?? 0) + 1);
       n = n / k;
@@ -94,7 +103,8 @@ export function primeFactors(d: bigint): Map<bigint, number> {
     }
   }
 
-  if (n !== 1n) result.set(n.toString(), (result.get(n.toString()) ?? 0) + 1);
+  if (n !== BigInt(1))
+    result.set(n.toString(), (result.get(n.toString()) ?? 0) + 1);
 
   const r = new Map<bigint, number>();
   for (const [k, v] of result) r.set(bigint(k), v);
@@ -113,8 +123,8 @@ export function factorPower(
 ): [factor: bigint, root: bigint] {
   // @todo: handle negative n
   const factors = primeFactors(n);
-  let f = 1n;
-  let r = 1n;
+  let f = BigInt(1);
+  let r = BigInt(1);
   const exp = bigint(exponent);
   for (const [k, v] of factors) {
     const v2 = bigint(v);

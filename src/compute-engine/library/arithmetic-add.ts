@@ -224,7 +224,7 @@ export function evalSummation(
     return ce.add(terms).evaluate();
   }
 
-  let sum: Rational = bignumPreferred(ce) ? [1n, 1n] : [0, 1];
+  let sum: Rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [0, 1];
 
   if (!fn.scope)
     for (let i = lower; i <= upper; i++) {

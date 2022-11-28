@@ -257,7 +257,7 @@ export function processPower(
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
   if (base.head === 'Multiply') {
-    let c: Rational = bignumPreferred(ce) ? [1n, 1n] : [1, 1];
+    let c: Rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [1, 1];
     const xs: BoxedExpression[] = [];
     for (const op of base.ops!) {
       const r = asRational(op);
@@ -324,12 +324,15 @@ export function processPower(
             d
           );
 
-          if (root === 1n && factor === 1n) return sign;
+          if (root === BigInt(1) && factor === BigInt(1)) return sign;
 
           // If factor === 1, nothing special to do, fall through
-          if (factor !== 1n) {
-            if (root === 1n)
-              return ce.mul([sign, ce.number(n >= 0 ? factor : [1n, factor])]);
+          if (factor !== BigInt(1)) {
+            if (root === BigInt(1))
+              return ce.mul([
+                sign,
+                ce.number(n >= 0 ? factor : [BigInt(1), factor]),
+              ]);
 
             return ce.mul([
               sign,

@@ -283,7 +283,7 @@ export function evalMultiplication(
     return mode === 'simplify' ? product.simplify() : product.evaluate();
   }
 
-  let product: Rational = bignumPreferred(ce) ? [1n, 1n] : [1, 1];
+  let product: Rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [1, 1];
 
   for (let i = lower; i <= upper; i++) {
     const n = ce.number(i);

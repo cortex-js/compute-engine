@@ -120,10 +120,10 @@ export function boxNumber(
       );
     const [n, d] = num;
     if (typeof n === 'bigint' && typeof d === 'bigint') {
-      if (n === d) return d === 0n ? ce._NAN : ce._ONE;
-      if (d === 1n) return ce.number(n, options);
-      if (d === -1n) return ce.number(-n, options);
-      if (n === 1n && d === 2n) return ce._HALF;
+      if (n === d) return d === BigInt(0) ? ce._NAN : ce._ONE;
+      if (d === BigInt(1)) return ce.number(n, options);
+      if (d === BigInt(-1)) return ce.number(-n, options);
+      if (n === BigInt(1) && d === BigInt(2)) return ce._HALF;
       return new BoxedNumber(ce, [n, d], options);
     }
 

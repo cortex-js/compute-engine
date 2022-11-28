@@ -50,7 +50,7 @@ export class Sum {
     this._isCanonical = options.canonical!;
     this.engine = ce;
 
-    this._rational = bignumPreferred(ce) ? [0n, 1n] : [0, 1];
+    this._rational = bignumPreferred(ce) ? [BigInt(0), BigInt(1)] : [0, 1];
 
     this._bignum = ce._BIGNUM_ZERO;
     this._number = 0;

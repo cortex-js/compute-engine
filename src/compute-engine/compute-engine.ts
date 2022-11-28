@@ -1171,7 +1171,7 @@ export class ComputeEngine implements IComputeEngine {
     else if (isRational(exponent)) {
       // Is the denominator 1?
       if (isMachineRational(exponent) && exponent[1] === 1) e = exponent[0];
-      else if (isBigRational(exponent) && exponent[1] === 1n)
+      else if (isBigRational(exponent) && exponent[1] === BigInt(1))
         e = Number(exponent[0]);
     }
 
@@ -1184,7 +1184,7 @@ export class ComputeEngine implements IComputeEngine {
       if (typeof r === 'number' && Number.isInteger(r))
         return this.number([1, r]);
       else if (r instanceof Decimal && r.isInteger())
-        return this.number([1n, bigint(r)]);
+        return this.number([BigInt(1), bigint(r)]);
       else if (isRational(r)) return this.number([r[1], r[0]] as Rational);
     }
 
@@ -1206,7 +1206,7 @@ export class ComputeEngine implements IComputeEngine {
         return this.number([1, n], { metadata });
 
       if (n instanceof Decimal && n.isInteger())
-        return this.number([1n, bigint(n)], { metadata });
+        return this.number([BigInt(1), bigint(n)], { metadata });
       return this._fn('Divide', [this._ONE, expr], metadata);
     }
 
@@ -1353,9 +1353,9 @@ export class ComputeEngine implements IComputeEngine {
     //
     if (options.metadata === undefined) {
       if (typeof value === 'bigint') {
-        if (value === 1n) return this._ONE;
-        if (value === 0n) return this._ZERO;
-        if (value === -1n) return this._NEGATIVE_ONE;
+        if (value === BigInt(1)) return this._ONE;
+        if (value === BigInt(0)) return this._ZERO;
+        if (value === BigInt(-1)) return this._NEGATIVE_ONE;
       }
       if (typeof value === 'number') {
         const n = value;
