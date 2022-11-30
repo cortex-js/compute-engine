@@ -65,15 +65,6 @@ export function simplifyMultiply(
   return product.asExpression();
 }
 
-function fastEvalMultiply(ops: BoxedExpression[]): number | null {
-  let prod = 1;
-  for (const op of ops) {
-    if (typeof op.numericValue !== 'number') return null;
-    prod *= op.numericValue;
-  }
-  return prod;
-}
-
 export function evalMultiply(
   ce: IComputeEngine,
   ops: BoxedExpression[],
@@ -84,10 +75,16 @@ export function evalMultiply(
   //
   // @fastpath
   //
-  if (mode === 'N' && ce.numericMode === 'machine') {
+  if (mode === 'N') {
     ops = ops.map((x) => x.N());
-    const result = fastEvalMultiply(ops);
-    if (result !== null) return ce.number(result);
+    if (
+      ce.numericMode === 'machine' &&
+      ops.every((x) => typeof x.numericValue === 'number')
+    ) {
+      let prod = 1;
+      for (const op of ops) prod *= op.numericValue as number;
+      return ce.number(prod);
+    }
   }
 
   //
@@ -192,9 +189,7 @@ function multiply2(
     }
   }
 
-  if (c.hash === t.hash && c.isSame(t)) {
-    return square(ce, c);
-  }
+  if (c.hash === t.hash && c.isSame(t)) return square(ce, c);
 
   const product = new Product(ce, [c, t]);
 
