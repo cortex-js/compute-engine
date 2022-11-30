@@ -1,4 +1,6 @@
-## [Unreleased]
+## 0.12.1 
+
+ **Release Date:** 2022-12-01
 
 Work around unpckg.com issue with libraries using BigInt.
 
