@@ -14,6 +14,6 @@ import { ComputeEngine } from './compute-engine/compute-engine';
 export { ComputeEngine } from './compute-engine/compute-engine';
 
 globalThis[Symbol.for('io.cortexjs.compute-engine')] = {
-  ComputeEngine: ComputeEngine.constructor,
+  ComputeEngine: ComputeEngine.prototype.constructor,
   version: '{{SDK_VERSION}}',
 };
