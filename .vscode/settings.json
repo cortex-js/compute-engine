@@ -1,5 +1,22 @@
 {
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.formatOnSave": true,
+
+  // Make sure ESLint runs on target files.
+  "eslint.validate": ["javascript", "typescript"],
+  // Check JavaScript by default (using the Typescript engine)
+  "js/ts.implicitProjectConfig.checkJs": true,
+
+  // ESM requires extensions on import paths to work,
+  // these options tell VSCode to prefer adding extensions
+  // on auto-import.
+  "typescript.preferences.importModuleSpecifierEnding": "js",
+  "javascript.preferences.importModuleSpecifierEnding": "js",
+
+  // Let VSCode auto-update import paths when you move files around
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "javascript.updateImportsOnFileMove.enabled": "always",
+
   "cSpell.words": [
     "BIGNUM",
     "bignums",
@@ -27,6 +44,5 @@
     "sympy",
     "syms",
     "upconverted"
-  ],
-  "editor.defaultFormatter": "esbenp.prettier-vscode"
+  ]
 }
