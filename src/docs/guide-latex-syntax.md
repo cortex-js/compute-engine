@@ -205,6 +205,105 @@ console.log(ce.parse('123456.789').latex);
 // ➔ "1.234\,567\,89\times10^{5}"
 ```
 
+## Customizing the Serialization Style
+
+Some category of expressions can be serialized in different ways based on
+conventions or personal preference. For example, a group can be indicate by
+simple parentheses, or by a `\left...\right` command. A fraction can be
+indicated by a `\frac{}{}` command or by a `{}{}^{-1}`.
+
+The compute engine includes some built-in defaults, but they can be customized
+as desired. For example to always represent fractions with a `\frac{}{}`
+command:
+
+```ts
+ce.latexSyntax.options.fractionStyle = () => 'quotient';
+```
+
+If using a mathfield, the compute engine associated with the mathfield is
+available as `mf.computeEngine`.{.notice--info}
+
+The style option handler has two arguments:
+
+- the expression fragment being styled
+- the depth/level of the expression in the overall expression
+
+For example, to serialize rational numbers and division deeper than level 2 as
+an inline solidus:
+
+```ts
+ce.latexSyntax.options.fractionStyle = (expr, level) =>
+  head(expr) === 'Rational' || level > 2 ? 'inline-solidus' : 'quotient';
+```
+
+### Function Application
+
+`["Sin", "x"]`
+
+|               |                      |                        |
+| :------------ | :------------------- | :--------------------- |
+| `"paren"`     | `\sin(x)`            | $$\sin(x)$$            |
+| `"leftright"` | `\sin\left(x\right)` | $$\sin\left(x\right)$$ |
+| `"big"`       | `\sin\bigl(x\bigr)`  | $$\sin\bigl(x\bigr)$$  |
+| `"none"`      | `\sin x`             | $$\sin x$$             |
+
+### Group
+
+`["Multiply", "x", ["Add", "a", "b"]]`
+
+|               |                     |                       |
+| :------------ | :------------------ | :-------------------- |
+| `"paren"`     | `x(a+b)`            | $$x(a+b)$$            |
+| `"leftright"` | `x\left(a+b\right)` | $$x\left(a+b\right)$$ |
+| `"big"`       | `x\bigl(a+b\bigr)`  | $$x\bigl(a+b\bigr)$$  |
+| `"none"`      | `x a+b`             | $$ x a+b$$            |
+
+### Root
+
+|              |     |     |
+| :----------- | :-- | :-- |
+| `"radical"`  |     |     |
+| `"quotient"` |     |     |
+| `"solidus"`  |     |     |
+
+### Fraction
+
+|                    |     |     |
+| :----------------- | :-- | :-- |
+| `"quotient"`       |     |     |
+| `"inline-solidus"` |     |     |
+| `"nice-solidus"`   |     |     |
+| `"reciprocal"`     |     |     |
+| `"factor"`         |     |     |
+
+### Logic
+
+`["And", "p", "q"]`
+
+|                    |                    |                      |
+| :----------------- | :----------------- | :------------------- |
+| `"word"`           | `a \text{ and } b` | $$a \text{ and } b$$ |
+| `"boolean"`        |                    |                      |
+| `"uppercase-word"` |                    |                      |
+| `"punctuation"`    |                    |                      |
+
+### Power
+
+|              |     |     |
+| :----------- | :-- | :-- |
+| `"root"`     |     |     |
+| `"solidus"`  |     |     |
+| `"quotient"` |     |     |
+
+### Numeric Sets
+
+|                 |     |     |
+| :-------------- | :-- | :-- |
+| `"compact"`     |     |     |
+| `"regular"`     |     |     |
+| `"interval"`    |     |     |
+| `"set-builder"` |     |     |
+
 ## Customizing the LaTeX Dictionary
 
 The <a href ="/math-json/">MathJSON format</a> is independent of any source or
