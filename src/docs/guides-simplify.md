@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: "universal"
 toc: true
+render_math_in_document: true
 ---
 
 A complicated mathematical expression can often be transformed into a form that

@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: "universal"
 toc: true
+render_math_in_document: true
 ---
 
 A **set** is a collection of distinct elements.{.xl}

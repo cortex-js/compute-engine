@@ -5,6 +5,7 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: 'universal'
+render_math_in_document: true
 preamble:
   '<h1>Parsing and Serializing LaTeX</h1><p class="xl">The CortexJS Compute
   Engine manipulates MathJSON expressions. It can also convert LaTeX strings to

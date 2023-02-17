@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: "universal"
 toc: false
+render_math_in_document: true
 ---
 
 # Styling

@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: "universal"
 toc: true
+render_math_in_document: true
 preamble: '<h1>Control Structures</h1><p class=xl>Control Structures define how a sequence of expressions is evaluated</p>'
 ---
 

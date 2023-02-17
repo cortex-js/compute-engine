@@ -9,6 +9,7 @@ preamble:
   '<h1>Domains</h1><p class="xl">The <b>domain</b> of an expression is the set 
   of the possible values of that expression.</p>'
 toc: true
+render_math_in_document: true
 ---
 
 A domain is represented by a **domain expression**. For example:

@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: 'universal'
 toc: true
+render_math_in_document: true
 ---
 
 Many mathematical objects can be represented by several equivalent expressions.
@@ -15,11 +16,11 @@ object:
 
 <div class="equal-width-columns">
 
-|                  |                            |                            |
+||||
 | :--------------: | :------------------------: | :------------------------: |
-| \\[ 215.3465 \\] | \\[ 2.15346\mathrm{e}2 \\] | \\[ 2.15346 \times 10^2\\] |
-|  \\[ 1 - x \\]   |       \\[-x + 1 \\]        |      \\[ 1 + (-x)\\]       |
-| \\[ -2x^{-1}\\]  |    \\[ -\frac{2}{x} \\]    |    \\[ \frac{-2}{x} \\]    |
+| $$215.3465$$ | $$2.15346\mathrm{e}2$$ | $$2.15346 \times 10^2$$ |
+|  $$1 - x$$   |       $$-x + 1$$        |      $$1 + (-x)$$       |
+| $$-2x^{-1}$$  |    $$-\frac{2}{x}$$    |    $$\frac{-2}{x}$$    |
 
 </div>
 
@@ -108,7 +109,7 @@ form:
   - Rationals are reduced, e.g. \\[(\frac{6}{4} \longrightarrow \frac{3}{2}\\]
   - The denominator of rationals is made positive, e.g. \\[(\frac{5}{-11}
     \longrightarrow \frac{-5}{11}\\]
-  - A rational wiht a denominator of 1 is replaced with a number, e.g.
+  - A rational with a denominator of 1 is replaced with a number, e.g.
     \\[(\frac{19}{1} \longrightarrow 19\\]
   - Square roots of rationals have their perfect squared factored out, e.g.
     \\[(\sqrt{63} \longrightarrow 3\sqrt{7}\\]
@@ -122,23 +123,23 @@ form:
     replaced with a complex number.
 - `Multiply`
   - Arguments are sorted
-  - `x \times x` is replaced with `["Square", x]`
+  - $x \times x$ is replaced with `["Square", x]`
   - The product of two integers literals is evaluated **But not exact literals?
     I.e. rationals or Square Root of fractional?**
     - If any argument is `NaN` or `Undefined` evaluates to `NaN` **Might be too
       aggressive**
 - `Divide`
 - `Power`
-  - \\[x^{\tilde\infty} \longrightarrow \operatorname{NaN}\\]
-  - \\[x^0 \longrightarrow 1\\]
-  - \\[x^1 \longrightarrow x\\]
-  - \\[(\pm 1)^{-1} \longrightarrow -1\\]
-  - \\[(\pm\infty)^{-1} \longrightarrow 0\\]
-  - \\[0^{\infty} \longrightarrow \tilde\infty\\]
-  - \\[(\pm 1)^{\pm \infty} \longrightarrow \operatorname{NaN}\\]
-  - \\[\infty^{\infty} \longrightarrow \infty\\]
-  - \\[\infty^{-\infty} \longrightarrow 0\\]
-  - \\[(-\infty)^{\pm \infty} \longrightarrow \operatorname{NaN}\\]
+  - $x^{\tilde\infty} \longrightarrow \operatorname{NaN}$
+  - $x^0 \longrightarrow 1$
+  - $x^1 \longrightarrow x$
+  - $(\pm 1)^{-1} \longrightarrow -1$
+  - $(\pm\infty)^{-1} \longrightarrow 0$
+  - $0^{\infty} \longrightarrow \tilde\infty$
+  - $(\pm 1)^{\pm \infty} \longrightarrow \operatorname{NaN}$
+  - $\infty^{\infty} \longrightarrow \infty$
+  - $\infty^{-\infty} \longrightarrow 0$
+  - $(-\infty)^{\pm \infty} \longrightarrow \operatorname{NaN}$
 - `Square`
 - `Sqrt`
 - `Root`

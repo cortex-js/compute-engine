@@ -6,6 +6,7 @@ date: Last Modified
 sidebar:
   - nav: 'universal'
 toc: true
+render_math_in_document: true
 preamble:
   '<h1>Numeric Evaluation</h1><p class="xl">To obtain an exact numeric evaluation of an expression use <kbd>expr.evaluate()</kbd>. To obtain a
   numeric approximation use <kbd>expr.N()</kbd>.</p>'
