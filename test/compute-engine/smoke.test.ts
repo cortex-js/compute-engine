@@ -43,8 +43,8 @@ const ce = engine;
 ce.assume(['Element', 'f', 'Function']);
 ce.assume('one', 1);
 
-// slowEval();
-// fastEval();
+slowEval();
+fastEval();
 // perfTestRationals();
 engine.latexOptions.notation = 'engineering';
 engine.latexOptions.avoidExponentsInRange = null;
@@ -921,6 +921,7 @@ function perfTestRationals() {
   timing = Math.floor((globalThis.performance.now() - start) / 10);
   console.log(timing);
 }
+
 function slowEval() {
   ///
   const ce = new ComputeEngine();
@@ -931,12 +932,12 @@ function slowEval() {
   // Factor out substitution of constants
 
   ce.numericMode = 'machine';
-  ce.strict = false;
+  ce.strict = true;
 
   let y = 0;
   const startTime = performance.now();
   for (let x = 0; x <= Math.PI; x += 0.01) {
-    y += expr.subs(vars).subs({ x: x }).N().numericValue! as number;
+    y += Number(expr.subs(vars).subs({ x: x }).N().numericValue!.valueOf());
   }
 
   console.log(
@@ -961,7 +962,7 @@ function fastEval() {
   const startTime = performance.now();
   for (let x = 0; x <= Math.PI; x += 0.01) {
     ce.set({ x: x });
-    y += expr3.N().numericValue! as number;
+    y += Number(expr3.N().numericValue!.valueOf());
   }
 
   console.log(
