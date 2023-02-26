@@ -379,7 +379,10 @@ export interface BoxedExpression {
    */
   valueOf(): number | string | boolean;
 
-  /** From `Object.toString()`, return a LaTeX representation of the expression.
+  /** From `Object.toString()`, return a string representation of the
+   *  expression. This string is suitable to be output to the console
+   * for debugging, for example. To get a LaTeX representation of the
+   * expression, use `expr.latex`.
    *
    * Used when coercing a `BoxedExpression` to a `String`.
    *
