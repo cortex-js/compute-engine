@@ -50,7 +50,7 @@ console.log(evaluate(expr));
 
 - <span style='font-size:1.5em'>🌟</span> Star the GitHub repo (it really helps)
 - <span style='font-size:1.5em'>💬</span> Join our
-  [Gitter community](https://gitter.im/cortex-js/community)
+  [Gitter community](https://cortexjs.io/gitter)
 - <span style='font-size:1.5em'>📨</span> Drop a line to arno@arno.org
 
 ## License
