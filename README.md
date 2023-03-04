@@ -49,8 +49,8 @@ console.log(evaluate(expr));
 ## Support the Project
 
 - <span style='font-size:1.5em'>🌟</span> Star the GitHub repo (it really helps)
-- <span style='font-size:1.5em'>💬</span> Join our
-  [Gitter community](https://cortexjs.io/gitter)
+- <span style='font-size:1.5em'>💬</span> Ask questions and give feedback on our
+  [Gitter Forum](https://cortexjs.io/gitter/)
 - <span style='font-size:1.5em'>📨</span> Drop a line to arno@arno.org
 
 ## License

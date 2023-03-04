@@ -15,6 +15,7 @@ preamble: "<picture class=full-width style='aspect-ratio:1.775;clip-path: inset(
   <img src=/assets/MathJSON@1x.jpg alt='MathJSON'>
 </picture>
 <p class=xl>MathJSON is a lightweight data interchange format for mathematical notation."
+render_math_in_document: true
 ---
 
 <style>
@@ -65,6 +66,7 @@ preamble: "<picture class=full-width style='aspect-ratio:1.775;clip-path: inset(
 
 <script type="module">
     // import 'https://unpkg.com/mathlive?module';
+    import 'https://unpkg.com/@cortex-js/compute-engine@latest/dist/compute-engine.min.esm.js';
     const mf = document.getElementById('mf');
 
     window.customElements.whenDefined("math-field").then(() => {
