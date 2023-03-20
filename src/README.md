@@ -60,7 +60,7 @@ render_math_in_document: true
 
 </div>
 
-<math-field id="mf" class="mathfield" virtual-keyboard-mode="manual">e^{i\pi}+1=0</math-field>
+<math-field id="mf" class="mathfield">e^{i\pi}+1=0</math-field>
 
 <div id="mathfield-json" class="output"></div>
 
