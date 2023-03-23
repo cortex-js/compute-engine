@@ -14,13 +14,15 @@ head:
   modules:
     - /assets/js/code-playground.min.js
     - //unpkg.com/@cortex-js/compute-engine?module
+  moduleMap: |
+    window.moduleMap = {
+    "mathlive": "//unpkg.com/mathlive?module",
+    // "mathlive": "/js/mathlive.mjs",
+    "html-to-image": "///assets/js/html-to-image.js",
+    "compute-engine": "//unpkg.com/@cortex-js/compute-engine?module"
+    };
 ---
-
-<script src="//unpkg.com/@cortex-js/compute-engine"></script>
 <script>
-moduleMap = {
-  "compute-engine": "//unpkg.com/@cortex-js/compute-engine?module",
-};
  const ce = new ComputeEngine.ComputeEngine()
 </script>
 

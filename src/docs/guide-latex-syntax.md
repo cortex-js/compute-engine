@@ -35,10 +35,10 @@ non-canonical expression instead, use the `{canonical: false}` option: The
 non-canonical form is closer to the literal LaTeX input.
 
 ```js
-ce.parse('\\frac{7}{-4}');
+ce.parse('\\frac{7}{-4}').json;
 // ➔  ["Rational", -7, 4]
 
-ce.parse('\\frac{7}{-4}', { canonical: false });
+ce.parse('\\frac{7}{-4}', { canonical: false }).json;
 // ➔  ["Divide", 7, -4]
 ```
 
