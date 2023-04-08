@@ -79,8 +79,8 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
 });
 
 describe('TRIGONOMETRIC DEGREES', () => {
-  test('\\cos(30\\deg)', () =>
-    expect(check('\\cos(30\\deg)')).toMatchInlineSnapshot(`
+  test('\\cos(30\\degree)', () =>
+    expect(check('\\cos(30\\degree)')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Degrees", 30]]
       box       = ["Cos", ["Multiply", ["Rational", 1, 6], "Pi"]]
       simplify  = ["Multiply", ["Sqrt", 3], ["Rational", 1, 2]]

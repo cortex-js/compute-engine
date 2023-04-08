@@ -132,7 +132,7 @@ kbd {
   white-space: pre-wrap;
 }
 
-.mathfield {
+math-field, .mathfield {
   border: 1px solid var(--editable-border);
   padding: 5px;
   margin: 10px 0 10px 0;

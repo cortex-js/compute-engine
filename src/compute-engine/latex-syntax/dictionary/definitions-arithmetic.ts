@@ -467,7 +467,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
   },
   {
-    trigger: ['\\deg'],
+    trigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
     parse: (_parser, lhs) => ['Degrees', lhs],

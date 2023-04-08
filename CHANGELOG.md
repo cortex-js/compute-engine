@@ -99,7 +99,7 @@ Work around unpckg.com issue with libraries using BigInt.
 
 ### Improvements
 
-- Support angles in degrees with `30\deg`, `30\degree`, `30^\circ` and
+- Support angles in degrees with `30\degree`, `30^\circ` and
   `\ang{30}`.
 - More accurate error expressions, for example if there is a missing closing
   delimiter an `["Error", ["ErrorCode", "'expected-closing-delimiter'", "')'"]]`
