@@ -58,6 +58,7 @@ MathJSON function, i.e. the one that we returned from the `parse` handler above.
 ```js
 ce.defineFunction('Smallfrac', {
   signature: {
+    domain: 'NumericFunction',
     evaluate: (ce, args) => ce.box(args[0].N() / args[1].N()),
   },
 });
