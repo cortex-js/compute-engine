@@ -834,9 +834,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     trigger: '\\prod',
-    precedence: 265,
+    precedence: 390,
     name: 'Product',
-    parse: parseBigOp('Product'),
+    parse: parseBigOp('Product', 390),
     serialize: serializeBigOp('\\prod'),
   },
 
@@ -871,9 +871,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     trigger: '\\sum',
-    precedence: 265,
+    precedence: 275,
     name: 'Sum',
-    parse: parseBigOp('Sum'),
+    parse: parseBigOp('Sum', 275),
     serialize: serializeBigOp('\\sum'),
   },
   {
@@ -902,7 +902,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
 ];
 
-function parseBigOp(name: string) {
+function parseBigOp(name: string, prec: number) {
   return (parser: Parser): Expression | null => {
     // Look for sub and sup
     parser.skipSpace();
@@ -933,8 +933,7 @@ function parseBigOp(name: string) {
     // letter `i` should not be interpreted as a ImaginaryUnit
     if (sym) parser.computeEngine?.pushScope({ [sym]: { domain: 'Integer' } });
 
-    // Note: 265 is the precedence for some relational operators
-    const fn = parser.matchExpression({ minPrec: 266 });
+    const fn = parser.matchExpression({ minPrec: prec + 1 });
 
     if (sym) parser.computeEngine?.popScope();
 
