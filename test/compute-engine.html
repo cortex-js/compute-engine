@@ -481,6 +481,11 @@
       // ce.defaultDomain = null;
 
       ce.pushScope({ hundred: 100 });
+      ce.defineFunction('suma', {
+        signature: {
+          evaluate: (ce, args) => ce.box(args[0].N() + args[1].N()),
+        },
+      });
 
       updateAssumptions();
 
