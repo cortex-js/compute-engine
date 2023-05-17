@@ -493,8 +493,7 @@
       const randomExpr = ce.box(['RandomExpression']).evaluate();
       console.log(randomExpr.json);
       mf.value = randomExpr.latex;
-      mf.setOptions({
-        onInlineShortcut: (_mf, s) => {
+      mf.onInlineShortcut = (_mf, s) => {
           const f = s.match(
             /^(cos|sin|tan|arcsin|arccos|arctan|arctg|arcctg|arcsec|arccsc|arsinh|arcosh|artanh|arcsech|arccsch|arg|ch|cosec|cosh|cot|cotg|coth|csc|ctg|cth|log|ln|lg|lb|sec|sinh|sh|tanh|tg|th)(.*)/
           );
@@ -563,8 +562,7 @@
           if (m2) return `\\mathrm{${s}}`;
 
           return '';
-        },
-      });
+        };
       mf.addEventListener('input', (ev) => updateContent(mf));
       updateContent(mf);
 
