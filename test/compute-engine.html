@@ -206,11 +206,7 @@
         <div id="input-label">
           <h2><code>expr =</code></h2>
         </div>
-        <math-field
-          id="mf"
-          class="mathfield"
-          tabindex="0"
-        >
+        <math-field id="mf" class="mathfield" tabindex="0">
           <!-- {\sqrt{\sum_{n=1}^\infty {\frac{10}{n^4}}}} = {\int_0^\infty \frac{2xdx}{e^x-1}} = \frac{\pi^2}{3} \in {\mathbb R} -->
 
           <!-- \int_{10}^{100}\sin x \, d x + \int\sin x \quad \mathrm{d} x +
@@ -480,6 +476,26 @@
       const ce = new ComputeEngine();
       // ce.defaultDomain = null;
 
+      // const dict = ComputeEngine.getLatexDictionary();
+      // const whichDef = dict.filter((x) => x.name === 'Which');
+      // if (whichDef.length === 1) {
+      //   whichDef[0] = {
+      //     ...whichDef[0],
+      //     serialize: (serializer, expr) => {
+      //       return '\\which{' + serializer.serialize(expr[1]) + '}';
+      //     },
+      //   };
+      // }
+
+      // const latexDictionary = [
+      //   // Remove the `Which` entry from the default dictionary...
+      //   ...dict.filter((x) => x.name !== 'Which'),
+      //   // ... and add one the modified Which
+      //   ...whichDef,
+      // ];
+
+      // const ce = new ComputeEngine({ latexDictionary });
+
       ce.pushScope({ hundred: 100 });
       ce.defineFunction('suma', {
         signature: {
@@ -494,75 +510,75 @@
       console.log(randomExpr.json);
       mf.value = randomExpr.latex;
       mf.onInlineShortcut = (_mf, s) => {
-          const f = s.match(
-            /^(cos|sin|tan|arcsin|arccos|arctan|arctg|arcctg|arcsec|arccsc|arsinh|arcosh|artanh|arcsech|arccsch|arg|ch|cosec|cosh|cot|cotg|coth|csc|ctg|cth|log|ln|lg|lb|sec|sinh|sh|tanh|tg|th)(.*)/
-          );
+        const f = s.match(
+          /^(cos|sin|tan|arcsin|arccos|arctan|arctg|arcctg|arcsec|arccsc|arsinh|arcosh|artanh|arcsech|arccsch|arg|ch|cosec|cosh|cot|cotg|coth|csc|ctg|cth|log|ln|lg|lb|sec|sinh|sh|tanh|tg|th)(.*)/
+        );
 
-          if (f && f[1] && !f[2]) return `\\${f[1]} `;
-          if (f && f[1] && f[2]) return `\\${f[1]} ${f[2]}`;
+        if (f && f[1] && !f[2]) return `\\${f[1]} `;
+        if (f && f[1] && f[2]) return `\\${f[1]} ${f[2]}`;
 
-          if (/^[a-zA-Z][a-zA-Z0-9]*'?_([a-zA-Z0-9]+'?)?$/.test(s)) {
-            const m = s.match(/^([a-zA-Z]+)_([a-zA-Z0-9]+'?)$/);
-            if (m) {
-              if (
-                [
-                  'alpha',
-                  'beta',
-                  'gamma',
-                  'delta',
-                  'epsilon',
-                  'varepsilon',
-                  'zeta',
-                  'eta',
-                  'theta',
-                  'vartheta',
-                  'iota',
-                  'kappa',
-                  'varkappa',
-                  'lambda',
-                  'mu',
-                  'nu',
-                  'xi',
-                  'pi',
-                  'varpi',
-                  'rho',
-                  'varrho',
-                  'sigma',
-                  'varsigma',
-                  'tau',
-                  'phi',
-                  'varphi',
-                  'upsilon',
-                  'chi',
-                  'psi',
-                  'omega',
-                  'Gamma',
-                  'Delta',
-                  'Theta',
-                  'Lambda',
-                  'Xi',
-                  'Pi',
-                  'Sigma',
-                  'Upsilon',
-                  'Phi',
-                  'Psi',
-                  'Omega',
-                  'digamma',
-                  'omicron',
-                ].includes(m[1])
-              )
-                return `\\${m[1]}_{${m[2]}}`;
+        if (/^[a-zA-Z][a-zA-Z0-9]*'?_([a-zA-Z0-9]+'?)?$/.test(s)) {
+          const m = s.match(/^([a-zA-Z]+)_([a-zA-Z0-9]+'?)$/);
+          if (m) {
+            if (
+              [
+                'alpha',
+                'beta',
+                'gamma',
+                'delta',
+                'epsilon',
+                'varepsilon',
+                'zeta',
+                'eta',
+                'theta',
+                'vartheta',
+                'iota',
+                'kappa',
+                'varkappa',
+                'lambda',
+                'mu',
+                'nu',
+                'xi',
+                'pi',
+                'varpi',
+                'rho',
+                'varrho',
+                'sigma',
+                'varsigma',
+                'tau',
+                'phi',
+                'varphi',
+                'upsilon',
+                'chi',
+                'psi',
+                'omega',
+                'Gamma',
+                'Delta',
+                'Theta',
+                'Lambda',
+                'Xi',
+                'Pi',
+                'Sigma',
+                'Upsilon',
+                'Phi',
+                'Psi',
+                'Omega',
+                'digamma',
+                'omicron',
+              ].includes(m[1])
+            )
+              return `\\${m[1]}_{${m[2]}}`;
 
-              return `\\mathrm{${m[1]}}_{${m[2]}}`;
-            }
-            return `\\mathrm{${s}}`;
+            return `\\mathrm{${m[1]}}_{${m[2]}}`;
           }
+          return `\\mathrm{${s}}`;
+        }
 
-          const m2 = s.match(/^([a-zA-Z][a-zA-Z0-9]+)$/);
-          if (m2) return `\\mathrm{${s}}`;
+        const m2 = s.match(/^([a-zA-Z][a-zA-Z0-9]+)$/);
+        if (m2) return `\\mathrm{${s}}`;
 
-          return '';
-        };
+        return '';
+      };
       mf.addEventListener('input', (ev) => updateContent(mf));
       updateContent(mf);
 
@@ -626,7 +642,7 @@
         try {
           const freeVars = expr.symbols.filter((x) => !x.isConstant);
           if (freeVars.length === 1) {
-            const sols = expr.solve(freeVars[0].symbol);
+            const sols = expr.solve(freeVars[0]);
             if (sols && sols.length > 0) {
               updateLatex(sols.map((x) => x.latex).join(',,\\:'), 'solve');
             }
