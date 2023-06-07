@@ -715,7 +715,7 @@ export class ComputeEngine implements IComputeEngine {
     return n;
   }
 
-  private get latexSyntax(): LatexSyntax {
+  get latexSyntax(): LatexSyntax {
     if (!this._latexSyntax)
       this._latexSyntax = new LatexSyntax({
         computeEngine: this,

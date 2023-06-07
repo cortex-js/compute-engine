@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Cortex Compute Engine REPL</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="style.css" />
+
+    <style>
+        :root {
+            /* --primary: #0066ce; */
+            --primary-light: #86a8cb;
+            --monospace: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo,
+                Monaco, 'Courier New', monospace;
+            --system: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
+                'Helvetica Neue', sans-serif;
+        }
+
+        code {
+            white-space: pre-wrap;
+        }
+
+        h2 {
+            font-size: 1em;
+            padding: 0;
+            margin: 0;
+            color: #666;
+        }
+
+        h2 code {
+            font-family: var(--monospace);
+            font-size: 1em;
+        }
+
+        .latex {
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid var(--secondary-surface-border);
+            background: var(--secondary-surface);
+            width: 100%;
+            margin-right: 0.5em;
+        }
+
+        /* Wrap mathlive content */
+        .latex .ML__mathlive {
+            display: inline;
+            overflow-wrap: break-word;
+        }
+
+        .latex .ML__mathlive .ML__base {
+            display: inline;
+            white-space: normal;
+        }
+
+        #mf {
+            width: 100%;
+        }
+
+        #input-label {
+            min-width: fit-content;
+            margin-right: 0.5em;
+        }
+
+        #assumptions-section {
+            display: none;
+        }
+
+        #assumptions-section.visible {
+            display: block;
+        }
+
+        #assumptions ul {
+            padding-top: 0.25em;
+            border-left: 1px solid #333;
+            padding-left: 1em;
+            margin-bottom: 3em;
+        }
+
+        #assumptions ul li {
+            list-style: none;
+            margin-bottom: 1em;
+        }
+
+        button.toggle {
+            appearance: none;
+            border: none;
+            background: none;
+            border-radius: 4px;
+            width: 36px;
+            height: 36px;
+            color: #777;
+        }
+
+        button.toggle:hover,
+        button.toggle:active {
+            background: #dadada;
+            color: #000;
+        }
+
+        button.toggle.is-on {
+            color: #fff;
+            background: var(--primary);
+        }
+
+        button.toggle svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .row {
+            margin-top: 0.5em;
+            display: inline-flex;
+            align-items: center;
+            width: 100%;
+        }
+
+        .output-section.is-visible {
+            display: block;
+        }
+
+        .output-section {
+            display: none;
+            margin-bottom: 1em;
+        }
+
+        .output-section.is-visible .mathjson {
+            display: none;
+        }
+
+        .output-section.is-visible .mathjson.is-visible {
+            display: block;
+        }
+
+        .segmented-control {
+            display: flex;
+            width: 100%;
+            margin: 0 auto;
+            font-size: 1rem;
+            font-family: var(--system);
+            font-weight: 600;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #eee;
+            padding: 4px;
+        }
+
+        .segmented-control>input {
+            display: none;
+        }
+
+        .segmented-control>input:checked+label {
+            background: var(--primary);
+            color: #fff;
+            border-radius: 8px;
+        }
+
+        .segmented-control label {
+            flex: 1;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+            user-select: none;
+            border-radius: 8px;
+
+            padding: 8px 0;
+            transition: all 250ms cubic-bezier(0, 0.95, 0.38, 0.98);
+
+            width: calc(100% / var(--segments));
+            margin-left: 2px;
+        }
+
+        .segmented-control label:first {
+            margin-left: 0;
+        }
+
+        .segmented-control label:hover {
+            background: #dadada;
+        }
+    </style>
+    <link rel="stylesheet" href="https://unpkg.com/mathlive/dist/mathlive-static.css" />
+</head>
+
+<body>
+    <svg xmlns="http://www.w3.org/2000/svg" style="display: none">
+        <defs>
+            <symbol id="info-circle" aria-hidden="true" focusable="false" data-prefix="fal" data-icon="info-circle"
+                class="svg-inline--fa fa-info-circle fa-w-16" role="img" xmlns="http://www.w3.org/2000/svg"
+                viewbox="0 0 512 512">
+                <path fill="currentColor"
+                    d="M256 40c118.621 0 216 96.075 216 216 0 119.291-96.61 216-216 216-119.244 0-216-96.562-216-216 0-119.203 96.602-216 216-216m0-32C119.043 8 8 119.083 8 256c0 136.997 111.043 248 248 248s248-111.003 248-248C504 119.083 392.957 8 256 8zm-36 344h12V232h-12c-6.627 0-12-5.373-12-12v-8c0-6.627 5.373-12 12-12h48c6.627 0 12 5.373 12 12v140h12c6.627 0 12 5.373 12 12v8c0 6.627-5.373 12-12 12h-72c-6.627 0-12-5.373-12-12v-8c0-6.627 5.373-12 12-12zm36-240c-17.673 0-32 14.327-32 32s14.327 32 32 32 32-14.327 32-32-14.327-32-32-32z">
+                </path>
+            </symbol>
+        </defs>
+    </svg>
+
+    <header>
+        <h1>Compute Engine REPL</h1>
+    </header>
+    <main>
+        <div class="row">
+            <div id="input-label">
+                <h2><code>expr =</code></h2>
+            </div>
+            <math-field id="mf" class="mathfield" tabindex="0">
+                <!-- {\sqrt{\sum_{n=1}^\infty {\frac{10}{n^4}}}} = {\int_0^\infty \frac{2xdx}{e^x-1}} = \frac{\pi^2}{3} \in {\mathbb R} -->
+
+                <!-- \int_{10}^{100}\sin x \, d x + \int\sin x \quad \mathrm{d} x +
+          \sum_{n=1}^5 n^2+1 -->
+                <!-- 1 + 2  -->
+                <!-- 2+3.001 -->
+                <!-- -1^2 -->
+                <!-- 1^{2^3} -->
+                <!-- 1 + 2 + 3.001 -->
+                <!-- \frac{5+3i}{2} -->
+                <!-- \frac{6}{2}+\frac{3i}{2} -->
+                <!-- \frac{3+2i}{2} -->
+                <!-- 2(-i)+i  -->
+                <!-- \frac{6}{2}+\frac{3\imaginaryI}{2} -->
+
+                <!-- \frac{6 + 3\imaginaryI}{2} -->
+                <!-- 0x^2 + 4x  + 2x + 2(x-1) + b(x - 1) -->
+                <!-- -\frac{50}{70}+\operatorname{GoldenRatio} -->
+                <!-- 3 (2x + 1) + \frac{x}{2} + \frac{3x}{2} + 4\frac{x}{2} -->
+                <!-- \sqrt{1}[3] -->
+                <!-- \sin(x -->
+                <!-- x=\frac{-b\pm\sqrt{b^2-4ac}} {2a} -->
+                <!-- 2^3^4 -->
+                <!-- \sqrt{1}[3] -->
+                <!-- = should produce error or Missing = Missing -->
+                <!-- x=\frac{-b\pm \sqrt{b^2-4ac}}{2a} -->
+                <!-- (b^3c^2d)(x^7y)(a^5f)(b^2x^5b3) -->
+                <!-- {}_3^2 -->
+            </math-field>
+        </div>
+        <!-- 2{xy}     1+|a+|2|+b| -->
+        <!-- ,c,b -->
+        <!-- a,c, -->
+        <!-- a,, c -->
+        <!-- x{}_{p+1}^{q+1}x_{r+1}^{s+1} -->
+        <!-- 12+ should generate ["Add", 12]-->
+        <!-- \lbrack\rbrack -->
+        <!-- \foo  -->
+        <!-- a\le b \overline{z} \overrightarrow{ABC} -->
+        <!-- \partial^2_{x,y} f(x,y) -->
+        <!-- -0+0(\frac{0}{\frac{0}{0}}-0)+x^\pi -->
+        <!-- -0+0(\frac{0}{\frac{0}{0}}-0) -->
+        <!-- x_0 + x_{0} +  x_n + x_{n+1}-->
+        <!-- -2x5z\sqrt{y}\frac{3}{4}3\pi y} -->
+        <!-- \sin^{-1}\prime(x)      \sin^{-1}'(x) -->
+        <!-- "\begin{align*}\dot{x} & =\sigma(y-x) \\ \dot{y} & =\rho x-y-xz \\ \dot{z} & =-\beta z+xy\end{align*}" -->
+        <!-- 2{xy} should create group -->
+
+        <!-- -(x) -->
+        <!-- -5-3-2 -->
+        <!-- -123, +456.789, -->
+        <!-- x_{0} -->
+        <!-- -123, 456.789, -->
+        <!-- |(a+|b|+1)| -->
+        <!-- i, 2i, -i -->
+        <!-- (a,,b) -->
+        <!-- x_5 -->
+        <!-- (\mathtt{dead\;beef})_{16} -->
+        <!-- (x,,2) -->
+        <!-- $$(deadbeef)_{16}$$ -->
+
+        <!-- \huge x \text{y} -->
+        <!-- \scriptscriptstyle x \text{y} -->
+        <!-- \sqrt[\Huge 3]{29} -->
+        <!-- x^{\binom{n}{k}} -->
+        <!-- \binom12 \textstyle \binom34 \scriptstyle \binom56 \displaystyle \binom78 \scriptstyle \binom90 -->
+        <!-- \int^b_a x^2 dx -->
+        <!-- \int^b_a\int^c_d x^2 dx dy -->
+        <!-- \int x^2 + x = 0 -->
+        <!-- \int x^2 + x dx = 0 -->
+        <!-- \int (x^2 + x) dx = 0 -->
+
+        <div class='output-section is-visible'>
+            <div class="row">
+                <div class="output" id="latex"></div>
+            </div>
+        </div>
+
+        <div id="assumptions-section">
+            <h2>Assumptions</h2>
+            <div id="assumptions"></div>
+        </div>
+
+        <div class="output-section" id="json-form">
+            <h2><code>expr.json</code></h2>
+            <div class="row">
+                <math-field read-only class="latex"></math-field>
+                <button class="toggle">
+                    <svg>
+                        <use xlink:href="#info-circle" />
+                    </svg>
+                </button>
+            </div>
+            <div class="output mathjson"></div>
+        </div>
+
+        <div class="output-section" id="canonical-form">
+            <h2><code>expr.canonical</code></h2>
+            <div class="row">
+                <math-field read-only class="latex"></math-field>
+                <button class="toggle">
+                    <svg>
+                        <use xlink:href="#info-circle" />
+                    </svg>
+                </button>
+            </div>
+            <div class="output mathjson"></div>
+        </div>
+
+    </main>
+
+    <script defer type="module">
+        import { convertLatexToMarkup } from 'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
+        import { ComputeEngine } from '../dist/compute-engine.esm.js';
+
+        const MAX_LINE_LENGTH = 64;
+
+        let errors = [];
+
+        const ce = new ComputeEngine();
+        ce.latexOptions = { preserveLatex: true };
+        ce.jsonSerializationOptions = { metadata: ['latex'] };
+
+        const mf = document.getElementById('mf');
+
+        mf.addEventListener('input', (ev) => updateContent(mf));
+        updateContent(mf);
+
+        function updateContent(mf) {
+            const latex = mf.getValue('latex-expanded');
+            let expr;
+            try {
+                const latexEl = document.getElementById('latex');
+                if (latexEl) latexEl.innerHTML = escapeHtml(latex);
+
+                if (document.getElementById('asciimath')) {
+                    document.getElementById('asciimath').innerHTML = escapeHtml(
+                        mf.getValue('ascii-math')
+                    );
+                }
+
+                errors = [];
+
+                // expr = ce.parse(latex);
+
+                const latexSyntax = ce.latexSyntax;
+                const result = latexSyntax.parse(latex);
+                console.log('latexSyntax.parse(latex)', latex, result);
+            } catch (e) {
+                console.error(
+                    'parse(%c ' + latex + '%c) ' + e.toString(),
+                    'color: red;  background: hsla(0, 60%, 90%)',
+                    'background: transparent'
+                );
+            }
+
+            updateExpr(null, 'json-form');
+            updateExpr(null, 'canonical-form');
+
+            try {
+                // const nonCanonical = ce.parse(latex, { canonical: false });
+                // updateExpr(nonCanonical, 'json-form');
+                // console.log('updateContent expr', nonCanonical);
+            } catch (e) {
+                console.error(
+                    'format(%c ' + latex + "%c, ['json']) " + e.toString(),
+                    'color: red;  background: hsla(0, 60%, 90%)',
+                    'background: transparent'
+                );
+            }
+
+            try {
+                const canonicalExpr = expr.canonical;
+                try {
+                    // updateExpr(canonicalExpr, 'canonical-form');
+                } catch (e) {
+                    console.error(
+                        'canonical(%c ' + latex + '%c) ' + e.toString(),
+                        'color: red;  background: hsla(0, 60%, 90%)',
+                        'background: transparent'
+                    );
+                }
+            } catch (e) { }
+        }
+
+        function updateLatex(latex, id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            if (!latex) {
+                el.classList.remove('is-visible');
+                return;
+            }
+
+            el.classList.add('is-visible');
+
+            el.querySelector('.latex').value = latex;
+        }
+
+        function updateExpr(expr, id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            if (expr === null) el.classList.remove('is-visible');
+            else el.classList.add('is-visible');
+
+            const mathJsonEl = el.querySelector('.mathjson');
+            if (mathJsonEl) {
+                mathJsonEl.innerHTML =
+                    exprToString(expr) +
+                    '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
+                    errors.join('<br>') +
+                    '</div>';
+            }
+            const latexEl = el.querySelector('.latex');
+            if (latexEl && expr) {
+                latexEl.value = expr.latex;
+            }
+
+            errors = [];
+        }
+
+        function escapeHtml(string) {
+            return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {
+                return (
+                    {
+                        '&': '&amp;',
+                        '<': '&lt;',
+                        '>': '&gt;',
+                        '"': '&quot;',
+                        "'": '&#39;',
+                        '/': '&#x2F;',
+                        '`': '&#x60;',
+                        '=': '&#x3D;',
+                        '\u200b': '&amp;#zws;',
+                    }[s] || s
+                );
+            });
+        }
+
+        function toggleVisibility(el) {
+            if (el) {
+                if (el.classList.contains('is-visible')) {
+                    el.classList.remove('is-visible');
+                } else {
+                    el.classList.add('is-visible');
+                }
+            }
+        }
+
+        [
+            'json-form',
+            'canonical-form',
+            'domain',
+            'simplify',
+            'evaluate-numerically',
+            'evaluate',
+            'expand',
+        ].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) {
+                const toggle = el.querySelector('.toggle');
+                toggle.addEventListener('click', () => {
+                    toggle.classList.toggle('is-on');
+                    toggleVisibility(el.querySelector('.mathjson'));
+                });
+            }
+        });
+
+        function exprToString(expr) {
+            if (!expr) return '';
+            return escapeHtml(JSON.stringify(expr, null, 2));
+        }
+
+    </script>
+</body>
+
+</html>

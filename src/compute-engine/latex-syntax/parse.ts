@@ -2079,14 +2079,22 @@ export class _Parser implements Parser {
     if (!this.options.preserveLatex) return expr;
 
     const latex = this.latex(start, this.index);
+    // start and this.index are indexes in the tokens array
+    // for sourceOffsets we want indexes in the source latex
+    const latexBeforeLength = this.latex(0, start).length;
+    const sourceOffsets: [number, number] = [
+      latexBeforeLength,
+      latexBeforeLength + latex.length,
+    ];
     if (Array.isArray(expr)) {
-      expr = { latex, fn: expr };
+      expr = { latex, sourceOffsets, fn: expr };
     } else if (typeof expr === 'number') {
-      expr = { latex, num: Number(expr).toString() };
+      expr = { latex, sourceOffsets, num: Number(expr).toString() };
     } else if (typeof expr === 'string') {
-      expr = { latex, sym: expr };
+      expr = { latex, sourceOffsets, sym: expr };
     } else if (typeof expr === 'object' && expr !== null) {
       expr.latex = latex;
+      expr.sourceOffsets = sourceOffsets;
     }
     return expr;
   }

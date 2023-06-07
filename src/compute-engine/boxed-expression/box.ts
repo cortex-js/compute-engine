@@ -484,8 +484,12 @@ export function box(
     if ('dict' in expr)
       return new BoxedDictionary(ce, expr.dict, { canonical: true, metadata });
     if ('fn' in expr) {
-      if (typeof expr.fn[0] === 'string')
-        return boxFunction(ce, expr.fn[0], expr.fn.slice(1), options);
+      if (typeof expr.fn[0] === 'string') {
+        return boxFunction(ce, expr.fn[0], expr.fn.slice(1), {
+          metadata,
+          ...options,
+        });
+      }
       return new BoxedFunction(
         ce,
         box(ce, expr.fn[0], options),
