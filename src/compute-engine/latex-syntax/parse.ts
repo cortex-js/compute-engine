@@ -1399,6 +1399,22 @@ export class _Parser implements Parser {
     return null;
   }
 
+  missingIfEmptyRequiredLatexArgument(): Expression {
+    const expr = this.matchRequiredLatexArgument();
+    if (expr === null) {
+      // No Expression and the parser.index should be at the right spot for it
+      // The latex will be empty in this case
+      return this.missing(this.index);
+    } else if (isEmptySequence(expr)) {
+      // Empty sequence so parser.index will be one more than where the missing
+      // element should be
+      // The latex will be `}` which isn't very useful but we can punt that for now
+      return this.missing(this.index - 1);
+    } else {
+      return expr;
+    }
+  }
+
   matchSupsub(lhs: Expression | null): Expression | null {
     console.assert(lhs !== null); // @todo validate
     if (lhs === null) return null;

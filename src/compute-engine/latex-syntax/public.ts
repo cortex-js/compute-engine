@@ -808,6 +808,11 @@ export interface Parser {
   matchRequiredLatexArgument(excluding?: string[]): Expression | null;
 
   /**
+   * Same as above, but if the argument is not there return a missing element.
+   */
+  missingIfEmptyRequiredLatexArgument(): Expression;
+
+  /**
    * - 'enclosure' : will look for an argument inside an enclosure (an open/close fence)
    * - 'implicit': either an expression inside a pair of `()`, or just a primary
    *    (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)

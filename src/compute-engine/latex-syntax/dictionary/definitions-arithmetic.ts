@@ -328,8 +328,8 @@ function serializeMultiply(
 }
 
 function parseFraction(parser: Parser): Expression | null {
-  const numer = missingIfEmpty(parser.matchRequiredLatexArgument());
-  const denom = missingIfEmpty(parser.matchRequiredLatexArgument());
+  const numer = parser.missingIfEmptyRequiredLatexArgument();
+  const denom = parser.missingIfEmptyRequiredLatexArgument();
   if (
     head(numer) === 'PartialDerivative' &&
     (head(denom) === 'PartialDerivative' ||
