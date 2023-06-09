@@ -336,6 +336,7 @@
 
     function updateContent(mf) {
       const latex = mf.getValue('latex-expanded');
+
       let expr;
 
       const latexEl = document.getElementById('latex');
@@ -346,16 +347,16 @@
           mf.getValue('ascii-math')
         );
       }
-
       errors = [];
 
       // expr = ce.parse(latex);
       const latexSyntax = ce.latexSyntax;
       const result = latexSyntax.parse(latex);
-      console.log('🔨latexSyntax.parse(latex)', latex, result);
+      console.log('🔨updateContent');
+      console.log('\tlatex:', latex);
+      console.log('\tresult:', result);
 
       const missingElements = findMissingElements(result);
-      console.log('missingElements', findMissingElements(result));
       const newLatex = replaceMissingElements(latex, missingElements);
       console.log('newLatex', newLatex);
 
@@ -487,7 +488,8 @@
     }
 
     function isMissingError(mathJSON) {
-      console.log("🔨isMissingError with mathJSON", mathJSON);
+      console.log("🔨isMissingError");
+      console.log('\tmathJSON:', mathJSON);
       if (Array.isArray(mathJSON) &&
         mathJSON.length > 1 &&
         mathJSON[0] === 'Error' &&
@@ -507,7 +509,8 @@
     }
 
     function findMissingElements(mathJSON) {
-      console.log("🔨findMissingElements with mathJSON:", mathJSON);
+      console.log("🔨findMissingElements");
+      console.log('\tmathJSON:', mathJSON);
       if (isMissingError(mathJSON)) {
         return [mathJSON];
       }
@@ -526,6 +529,9 @@
     }
 
     function replaceMissingElements(latex, missingElements) {
+      console.log("🔨replaceMissingElements:");
+      console.log("latex:", latex);
+      console.log("missingElements:", missingElements);
       const missingIndexes = [];
       for (const item of missingElements) {
         if (item?.sourceOffsets?.length == 2 &&
