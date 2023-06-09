@@ -758,7 +758,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator, lhs) => {
       if (391 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 392 });
-      if (rhs === null) return ['Multiply', lhs, ['Error', "'missing'"]];
+      if (rhs === null) {
+        return ['Multiply', lhs, parser.missingIfEmpty(rhs)];
+      }
 
       return applyAssociativeOperator('Multiply', lhs, rhs);
     },
@@ -783,7 +785,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator) => {
       if (276 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 400 });
-      return ['Negate', missingIfEmpty(rhs)] as Expression;
+      return ['Negate', parser.missingIfEmpty(rhs)] as Expression;
     },
     precedence: 275,
   },
@@ -897,7 +899,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator, lhs) => {
       if (276 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 277 });
-      return ['Subtract', lhs, missingIfEmpty(rhs)] as Expression;
+      // Note: if the expression is `1-{}`, rhs will not be an empty group.
+      // It will be null. This is because {} is considered empty space so it
+      // is skipped and then we hit the end of the expression.
+      // Likewise with `\left(1-{}\right)`, rhs will be null, because the `{}`
+      // is skipped, and then the `\right)` matches the boundary set when
+      // the `\left(` was seen.
+      return ['Subtract', lhs, parser.missingIfEmpty(rhs)] as Expression;
     },
   },
 ];

@@ -337,30 +337,28 @@
         function updateContent(mf) {
             const latex = mf.getValue('latex-expanded');
             let expr;
-            try {
-                const latexEl = document.getElementById('latex');
-                if (latexEl) latexEl.innerHTML = escapeHtml(latex);
 
-                if (document.getElementById('asciimath')) {
-                    document.getElementById('asciimath').innerHTML = escapeHtml(
-                        mf.getValue('ascii-math')
-                    );
-                }
+            const latexEl = document.getElementById('latex');
+            if (latexEl) latexEl.innerHTML = escapeHtml(latex);
 
-                errors = [];
-
-                // expr = ce.parse(latex);
-
-                const latexSyntax = ce.latexSyntax;
-                const result = latexSyntax.parse(latex);
-                console.log('latexSyntax.parse(latex)', latex, result);
-            } catch (e) {
-                console.error(
-                    'parse(%c ' + latex + '%c) ' + e.toString(),
-                    'color: red;  background: hsla(0, 60%, 90%)',
-                    'background: transparent'
+            if (document.getElementById('asciimath')) {
+                document.getElementById('asciimath').innerHTML = escapeHtml(
+                    mf.getValue('ascii-math')
                 );
             }
+
+            errors = [];
+
+            // expr = ce.parse(latex);
+
+            const latexSyntax = ce.latexSyntax;
+            const result = latexSyntax.parse(latex);
+            console.log('latexSyntax.parse(latex)', latex, result);
+
+            const missingElements = findMissingElements(result);
+            console.log('missingElements', findMissingElements(result));
+            const newLatex = replaceMissingElements(latex, missingElements);
+            console.log('newLatex', newLatex);
 
             updateExpr(null, 'json-form');
             updateExpr(null, 'canonical-form');
@@ -369,6 +367,9 @@
                 // const nonCanonical = ce.parse(latex, { canonical: false });
                 // updateExpr(nonCanonical, 'json-form');
                 // console.log('updateContent expr', nonCanonical);
+                const placeholderExpr = ce.parse(newLatex, { canonical: false });
+                updateExpr(placeholderExpr, 'json-form');
+                console.log('updateContent expr', placeholderExpr);
             } catch (e) {
                 console.error(
                     'format(%c ' + latex + "%c, ['json']) " + e.toString(),
@@ -480,6 +481,73 @@
             return escapeHtml(JSON.stringify(expr, null, 2));
         }
 
+        function isMissingString(mathJSON) {
+            return mathJSON?.str === 'missing' ||
+                mathJSON === 'missing' ||
+                mathJSON === "'missing'"
+        }
+
+        function isMissingError(mathJSON) {
+            if (Array.isArray(mathJSON) &&
+                mathJSON.length > 1 &&
+                mathJSON[0] === 'Error' &&
+                isMissingString(mathJSON[1])) {
+                return true;
+            }
+
+            if (typeof mathJSON === 'object' &&
+                "fn" in mathJSON &&
+                mathJSON.fn.length === 3 &&
+                mathJSON.fn[0] === 'Error' &&
+                isMissingString(mathJSON.fn[1])) {
+                return true;
+            }
+
+            return false;
+        }
+
+        function findMissingElements(mathJSON) {
+            if (isMissingError(mathJSON)) {
+                return [mathJSON];
+            }
+
+            if (Array.isArray(mathJSON)) {
+                let missingElements = [];
+                for (const item of mathJSON) {
+                    missingElements = [...missingElements, ...findMissingElements(item)];
+                }
+                return missingElements;
+            }
+            if (typeof mathJSON === 'object' && "fn" in mathJSON) {
+                return findMissingElements(mathJSON.fn);
+            }
+            return [];
+        }
+
+        function replaceMissingElements(latex, missingElements) {
+            const missingIndexes = [];
+            for (const item of missingElements) {
+                if (item?.sourceOffsets?.length == 2 &&
+                    item.sourceOffsets[0] === item.sourceOffsets[1]) {
+                    missingIndexes.push(item.sourceOffsets[0]);
+                }
+            }
+
+            // sort the items
+            missingIndexes.sort((a, b) => a - b);
+
+            // string parts
+            const parts = [];
+            let prevIndex = 0;
+            for (const missingIndex of missingIndexes) {
+                parts.push(latex.slice(prevIndex, missingIndex))
+                parts.push('\\error{\\placeholder{}}');
+                prevIndex = missingIndex;
+            }
+            // Add the last part
+            parts.push(latex.slice(prevIndex));
+            return parts.join('');
+        }
     </script>
 </body>
 

@@ -813,6 +813,13 @@ export interface Parser {
   missingIfEmptyRequiredLatexArgument(): Expression;
 
   /**
+   * If the expression is an empty sequence or null, return a missing element.
+   * Unlike missingIfEmpty from math-json/utils, this function will add latex and
+   * sourceOffsets if enabled.
+   */
+  missingIfEmpty(expr: Expression | null): Expression;
+
+  /**
    * - 'enclosure' : will look for an argument inside an enclosure (an open/close fence)
    * - 'implicit': either an expression inside a pair of `()`, or just a primary
    *    (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)

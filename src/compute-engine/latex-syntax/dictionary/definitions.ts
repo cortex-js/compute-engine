@@ -423,7 +423,8 @@ function makeIndexedEntry(
         // This is because it is unlikely to be an ambiguous parse
         // (i.e. `x+`) and more likely to be a syntax error we want to
         // capture as `['Add', 'x', ['Error', "'missing'"]`.
-        const rhs = missingIfEmpty(
+        // TODO: add tests: This line wasn't hit until I did the expression `1\div`
+        const rhs = scanner.missingIfEmpty(
           scanner.matchExpression({
             ...terminator,
             minPrec: prec,
