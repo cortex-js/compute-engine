@@ -44,5 +44,8 @@
     "sympy",
     "syms",
     "upconverted"
-  ]
+  ],
+  "[html]": {
+    "editor.defaultFormatter": "vscode.html-language-features"
+  }
 }
