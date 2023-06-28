@@ -640,7 +640,7 @@
         }
 
         try {
-          const freeVars = expr.symbols.filter((x) => !x.isConstant);
+          const freeVars = expr.freeVars;
           if (freeVars.length === 1) {
             const sols = expr.solve(freeVars[0]);
             if (sols && sols.length > 0) {
