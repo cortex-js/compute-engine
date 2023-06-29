@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <title>Cortex Compute Engine REPL</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="../style.css" />
 
     <style>
       :root {
@@ -444,7 +444,7 @@
 
     <script defer type="module">
       import { convertLatexToMarkup } from 'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
-      import { ComputeEngine } from '../dist/compute-engine.esm.js';
+      import { ComputeEngine } from '../compute-engine.esm.js';
 
       const MAX_LINE_LENGTH = 64;
 
@@ -506,79 +506,85 @@
       updateAssumptions();
 
       const mf = document.getElementById('mf');
-      const randomExpr = ce.box(['RandomExpression']).evaluate();
-      console.log(randomExpr.json);
-      mf.value = randomExpr.latex;
-      mf.onInlineShortcut = (_mf, s) => {
-        const f = s.match(
-          /^(cos|sin|tan|arcsin|arccos|arctan|arctg|arcctg|arcsec|arccsc|arsinh|arcosh|artanh|arcsech|arccsch|arg|ch|cosec|cosh|cot|cotg|coth|csc|ctg|cth|log|ln|lg|lb|sec|sinh|sh|tanh|tg|th)(.*)/
-        );
+      // const randomExpr = ce.box(['RandomExpression']).evaluate();
+      // console.log(randomExpr.json);
+      // mf.value = randomExpr.latex;
 
-        if (f && f[1] && !f[2]) return `\\${f[1]} `;
-        if (f && f[1] && f[2]) return `\\${f[1]} ${f[2]}`;
+      mf.value =
+        '\\mathrm{\\Delta钢筋}=\\mathrm{\\Delta钢铁}+\\mathrm{\\Delta混凝}土';
+      // mf.value = '\\mathrm{\\Delta bc}=\\mathrm{abc}+\\mathrm{def}土';
+      // mf.value = '\\mathrm{\\alpha_{12}}';
 
-        if (/^[a-zA-Z][a-zA-Z0-9]*'?_([a-zA-Z0-9]+'?)?$/.test(s)) {
-          const m = s.match(/^([a-zA-Z]+)_([a-zA-Z0-9]+'?)$/);
-          if (m) {
-            if (
-              [
-                'alpha',
-                'beta',
-                'gamma',
-                'delta',
-                'epsilon',
-                'varepsilon',
-                'zeta',
-                'eta',
-                'theta',
-                'vartheta',
-                'iota',
-                'kappa',
-                'varkappa',
-                'lambda',
-                'mu',
-                'nu',
-                'xi',
-                'pi',
-                'varpi',
-                'rho',
-                'varrho',
-                'sigma',
-                'varsigma',
-                'tau',
-                'phi',
-                'varphi',
-                'upsilon',
-                'chi',
-                'psi',
-                'omega',
-                'Gamma',
-                'Delta',
-                'Theta',
-                'Lambda',
-                'Xi',
-                'Pi',
-                'Sigma',
-                'Upsilon',
-                'Phi',
-                'Psi',
-                'Omega',
-                'digamma',
-                'omicron',
-              ].includes(m[1])
-            )
-              return `\\${m[1]}_{${m[2]}}`;
+      // mf.onInlineShortcut = (_mf, s) => {
+      //   const f = s.match(
+      //     /^(cos|sin|tan|arcsin|arccos|arctan|arctg|arcctg|arcsec|arccsc|arsinh|arcosh|artanh|arcsech|arccsch|arg|ch|cosec|cosh|cot|cotg|coth|csc|ctg|cth|log|ln|lg|lb|sec|sinh|sh|tanh|tg|th)(.*)/
+      //   );
 
-            return `\\mathrm{${m[1]}}_{${m[2]}}`;
-          }
-          return `\\mathrm{${s}}`;
-        }
+      //   if (f && f[1] && !f[2]) return `\\${f[1]} `;
+      //   if (f && f[1] && f[2]) return `\\${f[1]} ${f[2]}`;
 
-        const m2 = s.match(/^([a-zA-Z][a-zA-Z0-9]+)$/);
-        if (m2) return `\\mathrm{${s}}`;
+      //   if (/^[a-zA-Z][a-zA-Z0-9]*'?_([a-zA-Z0-9]+'?)?$/.test(s)) {
+      //     const m = s.match(/^([a-zA-Z]+)_([a-zA-Z0-9]+'?)$/);
+      //     if (m) {
+      //       if (
+      //         [
+      //           'alpha',
+      //           'beta',
+      //           'gamma',
+      //           'delta',
+      //           'epsilon',
+      //           'varepsilon',
+      //           'zeta',
+      //           'eta',
+      //           'theta',
+      //           'vartheta',
+      //           'iota',
+      //           'kappa',
+      //           'varkappa',
+      //           'lambda',
+      //           'mu',
+      //           'nu',
+      //           'xi',
+      //           'pi',
+      //           'varpi',
+      //           'rho',
+      //           'varrho',
+      //           'sigma',
+      //           'varsigma',
+      //           'tau',
+      //           'phi',
+      //           'varphi',
+      //           'upsilon',
+      //           'chi',
+      //           'psi',
+      //           'omega',
+      //           'Gamma',
+      //           'Delta',
+      //           'Theta',
+      //           'Lambda',
+      //           'Xi',
+      //           'Pi',
+      //           'Sigma',
+      //           'Upsilon',
+      //           'Phi',
+      //           'Psi',
+      //           'Omega',
+      //           'digamma',
+      //           'omicron',
+      //         ].includes(m[1])
+      //       )
+      //         return `\\${m[1]}_{${m[2]}}`;
 
-        return '';
-      };
+      //       return `\\mathrm{${m[1]}}_{${m[2]}}`;
+      //     }
+      //     return `\\mathrm{${s}}`;
+      //   }
+
+      //   const m2 = s.match(/^([a-zA-Z][a-zA-Z0-9]+)$/);
+      //   if (m2) return `\\mathrm{${s}}`;
+
+      //   return '';
+      // };
       mf.addEventListener('input', (ev) => updateContent(mf));
       updateContent(mf);
 

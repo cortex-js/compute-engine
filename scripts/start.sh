@@ -52,4 +52,4 @@ rm -rf ./coverage
 mkdir -p dist
 
 # Do dev build and watch
-node ./scripts/start.js
+node ./scripts/start.mjs

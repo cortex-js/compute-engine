@@ -96,8 +96,10 @@ echo -e $BASENAME$DOT$RESET"Making a \033[33m$BUILD\033[0m build"
 # use -experimental-json-modules for now instead of:
 # npx rollup --silent --config config/rollup.config.mjs
 
-node --experimental-json-modules ./node_modules/.bin/rollup --config config/rollup.config.mjs
+# node --experimental-json-modules ./node_modules/.bin/rollup --config config/rollup.config.mjs
 # node rollup --config config/rollup.config.js
+
+node --experimental-json-modules ./scripts/build.mjs
 
 echo -e "$BASENAME$CHECK$DIM \033[33m"$BUILD$DIM" build done$RESET"
 

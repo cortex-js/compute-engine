@@ -574,7 +574,7 @@ export class ComputeEngine implements IComputeEngine {
 
     this._precision = Math.max(p, Math.floor(MACHINE_PRECISION));
 
-    if (this.jsonSerializationOptions.precision > this._precision)
+    if ((this.jsonSerializationOptions.precision as number) > this._precision)
       this.jsonSerializationOptions = { precision: this._precision };
 
     if (
@@ -611,7 +611,7 @@ export class ComputeEngine implements IComputeEngine {
     )
       this.latexSyntax.updateOptions({ precision: this._precision });
 
-    if (this.jsonSerializationOptions.precision > this._precision)
+    if ((this.jsonSerializationOptions.precision as number) > this._precision)
       this.jsonSerializationOptions = { precision: this._precision };
 
     // Reset the caches: the values in the cache depend on the numeric mode)

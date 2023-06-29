@@ -1,7 +1,6 @@
 import { Expression } from '../../../math-json/math-json-format';
 import {
   machineValue,
-  isNumberObject,
   applyAssociativeOperator,
   rationalValue,
   op,

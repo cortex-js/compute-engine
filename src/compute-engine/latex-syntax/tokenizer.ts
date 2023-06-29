@@ -21,6 +21,57 @@ import { splitGraphemes } from '../../common/grapheme-splitter';
 //  See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
 export type Token = string;
 
+// The following strings are LaTeX commands that are automatically
+// converted to identifiers.  This list is taken from GiNaC:
+// https://www.ginac.de/ginac.git/?p=ginac.git;a=blob;f=ginac/symbol.cpp;h=b8068c800fffd0de592dc84e85868cf021c62ef3;hb=refs/heads/master
+export const COMMON_IDENTIFIER_NAME = [
+  'alpha',
+  'beta',
+  'gamma',
+  'Gamma',
+  'delta',
+  'Delta',
+  'epsilon',
+  'zeta',
+  'eta',
+  'theta',
+  'Theta',
+  'iota',
+  'kappa',
+  'lambda',
+  'Lambda',
+  'mu',
+  'nu',
+  'xi',
+  'Xi',
+  'pi',
+  'Pi',
+  'rho',
+  'sigma',
+  'Sigma',
+  'tau',
+  'upsilon',
+  'phi',
+  'Phi',
+  'varphi',
+  'chi',
+  'psi',
+  'Psi',
+  'omega',
+  'Omega',
+  'aleph',
+  'ast',
+  'blacksquare',
+  'bot',
+  'bullet',
+  'circ',
+  'diamond',
+  'times',
+  'top',
+  'square',
+  'star',
+];
+
 /**
  * Given a LaTeX expression represented as a character string,
  * the Lexer class will scan and return Tokens for the lexical

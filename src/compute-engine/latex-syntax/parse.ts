@@ -10,7 +10,7 @@ import {
   Parser,
   FunctionEntry,
 } from './public';
-import { tokenize, tokensToString } from './tokenizer';
+import { COMMON_IDENTIFIER_NAME, tokenize, tokensToString } from './tokenizer';
 import {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
@@ -151,7 +151,7 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
   parseUnknownIdentifier: (s: string, parser: Parser) => {
     if (parser.computeEngine?.lookupFunction(s) !== undefined)
       return 'function';
-    if (/^[a-zA-Z]/.test(s)) return 'symbol';
+    if (/^\p{L}/u.test(s)) return 'symbol';
     return 'unknown';
   },
 
@@ -1227,23 +1227,95 @@ export class _Parser implements Parser {
    * - a command: `\alpha`  @todo
    */
   matchIdentifier(): string | Expression | null {
-    if (
-      this.match('\\operatorname') ||
-      this.match('\\mathit') ||
-      this.match('\\mathrm')
-    ) {
+    //
+    // An identifier wrapped in a command
+    //
+    const modifier =
+      {
+        '\\operatorname': '',
+        '\\mathrm': '',
+        '\\mathit': 'italic.',
+        '\\mathbf': 'bold.',
+        // bold-italic is not supported
+        '\\mathscr': 'script.',
+        '\\mathcal': 'calligraphic.',
+        // bold-script is not supported
+        // bold-calligraphic is not supported
+        '\\mathfrak': 'gothic.',
+        // bold-gothic is not supported
+        // bold-fraktur is not supported
+        '\\mathsf': 'sans-serif.',
+        // italic-sans-serif is not supported
+        '\\mathtt': 'monospace.',
+        '\\mathbb': 'double-struck.',
+      }[this.peek] ?? null;
+
+    if (modifier !== null) {
+      this.next();
+      if (!this.match('<{>')) {
+        this.index -= 1;
+        return null;
+      }
+
       const start = this.index;
-      const id = this.matchStringArgument();
+
+      let id = this.matchIdentifierSegment();
+
       if (id === null) return this.error('expected-string-argument', start);
 
-      if (id === null || !isValidIdentifier(id))
-        return this.error('invalid-symbol-name', start);
-      return id;
+      id = `${modifier}${id}`;
+
+      let done = false;
+      while (!done) {
+        if (this.match('<}>')) {
+          done = true;
+        } else if (this.match('_')) {
+          const sub = this.matchIdentifierSegment();
+          id = `${id}_${sub}`;
+        } else if (this.match('^')) {
+          const sup = this.matchIdentifierSegment();
+          id = `${id}__${sup}`;
+        } else {
+          const sub = this.matchIdentifierSegment();
+          if (sub === null) done = true;
+          else id = `${id}${sub}`;
+        }
+      }
+
+      if (isValidIdentifier(id)) return id;
+      return this.error('invalid-symbol-name', start);
     }
 
-    if (/^[a-zA-Z]$/.test(this.peek)) return this.next();
+    //
+    // Single letter identifier
+    //
+    if (/^\p{L}$/u.test(this.peek)) return this.next();
 
     return null;
+  }
+
+  // A portion of an identifier, e.g. `\alpha \beta` or `speed`
+  // Stops on "_" (subscript), "^" (superscript) or non-letter
+  matchIdentifierSegment(): string | null {
+    let result = '';
+    while (true) {
+      if (
+        this.atEnd ||
+        /\d/.test(this.peek) ||
+        this.peek === '"' ||
+        this.peek === '_' ||
+        this.peek === '^' ||
+        this.peek === '<}>'
+      )
+        return result ? result : null;
+      let id = this.peek;
+      if (id.startsWith('\\')) {
+        id = id.substring(1);
+        if (!COMMON_IDENTIFIER_NAME.includes(id)) return null;
+        this.next();
+        result += id;
+      } else result += this.next();
+    }
   }
 
   /**

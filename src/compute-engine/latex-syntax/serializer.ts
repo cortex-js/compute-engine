@@ -31,7 +31,7 @@ import {
   SymbolEntry,
 } from './dictionary/definitions';
 
-import { joinLatex } from './tokenizer';
+import { COMMON_IDENTIFIER_NAME, joinLatex } from './tokenizer';
 import { serializeNumber } from './serialize-number';
 
 // function serializeMatchfix(
@@ -497,54 +497,6 @@ export function replaceLatex(template: string, replacement: string[]): string {
   return result;
 }
 
-const COMMON_VARIABLE_NAME = [
-  'alpha',
-  'beta',
-  'gamma',
-  'Gamma',
-  'delta',
-  'Delta',
-  'epsilon',
-  'zeta',
-  'eta',
-  'theta',
-  'Theta',
-  'iota',
-  'kappa',
-  'lambda',
-  'Lambda',
-  'mu',
-  'nu',
-  'xi',
-  'Xi',
-  'pi',
-  'Pi',
-  'rho',
-  'sigma',
-  'Sigma',
-  'tau',
-  'upsilon',
-  'phi',
-  'Phi',
-  'varphi',
-  'chi',
-  'psi',
-  'Psi',
-  'omega',
-  'Omega',
-  'aleph',
-  'ast',
-  'blacksquare',
-  'bot',
-  'bullet',
-  'circ',
-  'diamond',
-  'times',
-  'top',
-  'square',
-  'star',
-];
-
 // If the name contains an underscore, e.g.'mu_0', make sure
 // to add braces.
 //
@@ -561,7 +513,8 @@ const COMMON_VARIABLE_NAME = [
 // '_a' --> `\mathrm{\_a}`
 // '___a' --> `\mathrm{\_\_\_a}`
 // 'alpha0' --> `mathit{\alpha_{0}}`
-// 'alpha_beta' --> `mathit{\alpha_{beta}}`
+// 'alpha__beta' --> `mathrm{\alpha^{\beta}}`
+// 'alpha_beta' --> `mathrm{\alpha_{beta}}`
 // 'speed-of-sound' --> `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
 // 'not[this]' --> `\mathit{\lbrace this\rbrace}`
 
@@ -595,6 +548,7 @@ function sanitizeName(
   const SYMBOL_MODIFIER_PATTERN = {
     'upright.': '\\mathrm{_}',
     'italic.': '\\mathit{_}',
+    'bold.': '\\mathbf{_}',
     'bold-italic.': '\\mathbf{\\mathit{_}}',
     'script.': '\\mathscr{_}',
     'calligraphic.': '\\mathcal{_}',
@@ -611,12 +565,14 @@ function sanitizeName(
     'blackboard.': '\\mathbb{_}',
     'double-struck.': '\\mathbb{_}',
   };
-  return (SYMBOL_MODIFIER_PATTERN[modifier] ?? '\\mathit{_}').replace(
+  return (SYMBOL_MODIFIER_PATTERN[modifier] ?? '\\mathrm{_}').replace(
     '_',
     name
   );
 }
 
+// "gothic.R" --> ["gothic.", "R"]
+// "upright.C_{12}" --> ["upright.", "C_{12}"]
 function extractSymbolStyleModifier(
   s: string
 ): [modifier: string, symbol: string] {
@@ -625,6 +581,7 @@ function extractSymbolStyleModifier(
   return ['', s];
 }
 
+// "alpha_12" --> "alpha_{12}"
 function sanitizeNameFragment(s: string): string {
   const index = s.indexOf('_');
   if (index > 0) {
@@ -647,7 +604,7 @@ function sanitizeNameFragment(s: string): string {
   }
 
   // Is it a special name, e.g. "alpha", etc...
-  if (COMMON_VARIABLE_NAME.includes(s)) return '\\' + s;
+  if (COMMON_IDENTIFIER_NAME.includes(s)) return '\\' + s;
 
   // Replace special Latex characters
   s = s.replace(
