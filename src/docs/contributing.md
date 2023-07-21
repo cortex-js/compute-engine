@@ -7,8 +7,7 @@ sidebar:
   - nav: "universal"
 ---
 
-
-This would be _very_ welcome! There are many kinds of contribution that can make a difference. Listing them in roughly order of difficulty:
+# Contributing to the Compute Engine
 
 ## Documentation
 

@@ -14,7 +14,7 @@ preamble: "<picture class=full-width style='aspect-ratio:1.775;clip-path: inset(
   <source srcset=/assets/MathJSON@1x.jpg type=image/jpeg> 
   <img src=/assets/MathJSON@1x.jpg alt='MathJSON'>
 </picture>
-<p class=xl>MathJSON is a lightweight data interchange format for mathematical notation."
+<h2 style='font-size:3rem'>MathJSON: a lightweight data interchange format for mathematical notation.</h2>"
 render_math_in_document: true
 ---
 
@@ -29,6 +29,7 @@ render_math_in_document: true
     padding: 5px;
     margin: 10px 0 10px 0;
     border-radius: 5px;
+    width: 100%;
   }
   .output {
     font-family: var(--monospace-font-family);
