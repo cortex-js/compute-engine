@@ -118,20 +118,20 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   if (name === 'Negate') {
     result = '-' + serializer.wrap(arg, 276);
   } else if (name === 'Add') {
-    if (nops(expr) === 2) {
-      let op1;
-      let op2;
-      if (machineValue(op(expr, 1)) && rationalValue(op(expr, 2))) {
-        op1 = op(expr, 1)!;
-        op2 = op(expr, 2)!;
-      } else if (machineValue(op(expr, 2)) && rationalValue(op(expr, 1))) {
-        op1 = op(expr, 2)!;
-        op2 = op(expr, 1)!;
-      }
-      if (op1 && op2) {
-        const lhs = machineValue(op1) ?? NaN;
-        const rhs = rationalValue(op2) ?? [NaN, NaN];
+    // If it is the sum of an integer and a rational, use a special form
+    // (e.g. 1 + 1/2 -> 1 1/2)
+    if (nops(expr) === 2 && serializer.options.invisiblePlus !== '+') {
+      const op1 = op(expr, 1);
+      const op2 = op(expr, 2);
 
+      let lhs = machineValue(op1);
+      let rhs = rationalValue(op2);
+      if (lhs === null || rhs === null) {
+        lhs = machineValue(op2);
+        rhs = rationalValue(op1);
+      }
+
+      if (lhs !== null && rhs !== null) {
         if (
           isFinite(lhs) &&
           Number.isInteger(lhs) &&
