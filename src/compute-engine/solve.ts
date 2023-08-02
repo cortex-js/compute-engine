@@ -132,7 +132,7 @@ export function findUnivariateRoots(
     boxRules(ce, UNIVARIATE_ROOTS)
   );
   const result = matchRules(
-    expand(expr).subs({ [x]: '_x' }, { canonical: false }),
+    (expand(expr) ?? expr).subs({ [x]: '_x' }, { canonical: false }),
     rules,
     { _x: ce.symbol('_x') }
   );

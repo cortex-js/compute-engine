@@ -163,7 +163,7 @@ describe('NUMBERS', () => {
     expect(parse('3\\times10^n')).toMatchInlineSnapshot(
       `["Multiply", 3, ["Power", 10, "n"]]`
     );
-    expect(parse('\\operatorname{NaN}')).toMatch('{num: "NaN"}');
+    expect(parse('\\mathrm{NaN}')).toMatch('{num: "NaN"}');
   });
   test('Bigints', () => {
     // expect(latex({ num: 12n })).toMatchInlineSnapshot();

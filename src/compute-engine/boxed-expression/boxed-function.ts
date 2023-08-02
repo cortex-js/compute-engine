@@ -34,6 +34,7 @@ import {
 import { complexAllowed, hashCode, bignumPreferred } from './utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { validateNumericArgs, validateSignature } from './validate';
+import { expand } from '../symbolic/expand';
 
 /**
  * Considering an old (existing) expression and a new (simplified) one,
@@ -198,6 +199,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
       latex: this._latex,
       wikidata: this._wikidata,
     });
+  }
+
+  get rawJson(): Expression {
+    const head = typeof this._head === 'string' ? this._head : this._head.json;
+    return [head, ...this.ops.map((x) => x.rawJson)];
   }
 
   get scope(): RuntimeScope | null {
@@ -406,6 +412,11 @@ export class BoxedFunction extends AbstractBoxedExpression {
     const s = signDiff(this, rhs);
     if (s === 0) return true;
     if (s !== undefined) return false;
+
+    // Try to simplify the difference of the expressions
+    const diff = this.engine.box(['Subtract', this, rhs]).simplify();
+    if (diff.isZero) return true;
+
     return this.isSame(rhs);
   }
 
@@ -605,6 +616,8 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   simplify(options?: SimplifyOptions): BoxedExpression {
+    const recursive = options?.recursive ?? true;
+
     //
     // 1/ Use the canonical form
     //
@@ -616,20 +629,35 @@ export class BoxedFunction extends AbstractBoxedExpression {
     }
 
     //
-    // 2/ Simplify the applicable operands
+    // 2/ Apply expand
+    //
+
+    let expr: BoxedExpression | undefined | null;
+    if (recursive) {
+      expr = expand(this);
+      if (expr !== null) {
+        expr = cheapest(this, expr);
+        return expr.simplify({ ...options, recursive: false });
+      }
+    }
+
+    //
+    // 3/ Simplify the applicable operands
     // @todo not clear if this is always the best strategy. Might be better to
     // defer to the handler.
     //
     const def = this.functionDefinition;
-    const tail = holdMap(
-      this._ops,
-      def?.hold ?? 'none',
-      def?.associative ? def.name : '',
-      (x) => x.simplify(options)
-    );
+    const tail = recursive
+      ? holdMap(
+          this._ops,
+          def?.hold ?? 'none',
+          def?.associative ? def.name : '',
+          (x) => x.simplify(options)
+        )
+      : this._ops;
 
     //
-    // 3/ If a function expression, apply the arguments, and simplify the result
+    // 4/ If a function expression, apply the arguments, and simplify the result
     //
     if (typeof this._head !== 'string') {
       const expr = apply(this._head, tail);
@@ -638,9 +666,8 @@ export class BoxedFunction extends AbstractBoxedExpression {
     }
 
     //
-    // 4/ Apply `simplify` handler
+    // 5/ Apply `simplify` handler
     //
-    let expr: BoxedExpression | undefined;
 
     if (def) {
       if (def.inert) expr = tail[0]?.canonical ?? this;
@@ -656,7 +683,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     expr = cheapest(this, expr);
 
     //
-    // 5/ Apply rules, until no rules can be applied
+    // 6/ Apply rules, until no rules can be applied
     //
     const rules =
       options?.rules ??

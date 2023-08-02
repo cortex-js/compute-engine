@@ -12,6 +12,7 @@ import {
   isSymbolObject,
   ops,
   isNumberExpression,
+  ONLY_EMOJIS,
 } from '../../math-json/utils';
 
 import { WarningSignalHandler } from '../../common/signals';
@@ -31,8 +32,54 @@ import {
   SymbolEntry,
 } from './dictionary/definitions';
 
-import { COMMON_IDENTIFIER_NAME, joinLatex } from './tokenizer';
+import { countTokens, joinLatex } from './tokenizer';
 import { serializeNumber } from './serialize-number';
+import { SYMBOLS } from './dictionary/definitions-symbols';
+
+const ACCENT_MODIFIERS = {
+  deg: (s: string) => `${s}\\degree`,
+  prime: (s: string) => `${s}^{\\prime}`,
+  dprime: (s: string) => `${s}^{\\doubleprime}`,
+  ring: (s: string) => `\\mathring{${s}}`,
+  hat: (s: string) => `\\hat{${s}}`,
+  tilde: (s: string) => `\\tilde{${s}}`,
+  vec: (s: string) => `\\vec{${s}}`,
+  bar: (s: string) => `\\overline{${s}}`,
+  underbar: (s: string) => `\\underline{${s}}`,
+  dot: (s: string) => `\\dot{${s}}`,
+  ddot: (s: string) => `\\ddot{${s}}`,
+  tdot: (s: string) => `\\dddot{${s}}`,
+  qdot: (s: string) => `\\ddddot{${s}}`,
+
+  // Supplemental
+  acute: (s: string) => `\\acute{${s}}`,
+  grave: (s: string) => `\\grave{${s}}`,
+  breve: (s: string) => `\\breve{${s}}`,
+  check: (s: string) => `\\check{${s}}`,
+};
+
+const STYLE_MODIFIERS = {
+  upright: (s) => `\\mathrm{${s}}`,
+  italic: (s) => `\\mathit{${s}}`,
+  bold: (s) => `\\mathbf{${s}}`,
+  script: (s) => `\\mathscr{${s}}`,
+  fraktur: (s) => `\\mathfrak{${s}}`, // Note Unicode uses 'fraktur' for 'gothic'
+  doublestruck: (s) => `\\mathbb{${s}}`, // Unicode uses 'double-struck' for 'blackboard'
+
+  // Supplemental
+  blackboard: (s) => `\\mathbb{${s}}`,
+  // boldItalic: (s) => `\\mathbf{\\mathit{${s}}}`,
+  calligraphic: (s) => `\\mathcal{${s}}`,
+  // scriptBold: (s) => `\\mathbf{\\mathscr{${s}}}`,
+  // calligraphicBold: (s) => `\\mathbf{\\mathcal{${s}}}`,
+  gothic: (s) => `\\mathfrak{${s}}`,
+  // gothicBold: (s) => `\\mathbf{\\mathfrak{${s}}}`,
+  // frakturBold: (s) => `\\mathbf{\\mathfrak{${s}}}`,
+  sansSerif: (s) => `\\mathsf{${s}}`,
+  // sansSerifBold: (s) => `\\mathbf{\\mathsf{${s}}}`,
+  // sansSerifItalic: (s) => `\\mathit{\\mathsf{${s}}}`,
+  monospace: (s) => `\\mathtt{${s}}`,
+};
 
 // function serializeMatchfix(
 //   serializer: Serializer,
@@ -239,7 +286,7 @@ export class Serializer {
     else if (typeof def?.serialize === 'function')
       return def.serialize(this, expr);
 
-    return sanitizeName(symbol(expr), 'upright.') ?? '';
+    return serializeIdentifier(symbol(expr)) ?? '';
   }
 
   serializeFunction(
@@ -280,7 +327,7 @@ export class Serializer {
     // Maybe it came from `promoteUnknownToken`
     // Serialize the arguments as function arguments
     if (typeof h === 'string')
-      return sanitizeName(h, 'upright.') + this.wrapArguments(expr);
+      return serializeIdentifier(h, 'upright') + this.wrapArguments(expr);
 
     const style = this.options.applyFunctionStyle(expr, this.level);
     return (
@@ -497,13 +544,191 @@ export function replaceLatex(template: string, replacement: string[]): string {
   return result;
 }
 
+function specialName(s: string): [result: string, rest: string] {
+  // Does the name start with a greek letter or other special symbol?
+  let i = SYMBOLS.findIndex((x) => s.startsWith(x[0]));
+  if (i >= 0) return [SYMBOLS[i][1], s.substring(SYMBOLS[i][0].length)];
+
+  // Does the name start with a digit, spelled out?
+  const DIGITS = {
+    ZERO: '0',
+    ONE: '1',
+    TWO: '2',
+    THREE: '3',
+    FOUR: '4',
+    FIVE: '5',
+    SIX: '6',
+    SEVEN: '7',
+    EIGHT: '8',
+    NINE: '9',
+    TEN: '10',
+  };
+  i = Object.keys(DIGITS).findIndex((x) => s.startsWith(x));
+  if (i >= 0) {
+    const key = Object.keys(DIGITS)[i];
+    return [DIGITS[key], s.substring(key.length)];
+  }
+
+  // Does the name start with a Unicode symbol?
+  const code = s.codePointAt(0);
+  i = SYMBOLS.findIndex((x) => x[2] === code);
+  if (i >= 0) return [SYMBOLS[i][1], s.substring(1)];
+
+  const EXTRA_SYMBOLS = {
+    plus: '+',
+    minus: '-',
+    pm: '\\pm',
+    ast: '\\ast',
+    dag: '\\dag',
+    ddag: '\\ddag',
+    hash: '\\#',
+    bottom: '\\bot',
+    top: '\\top',
+    bullet: '\\bullet',
+    circle: '\\circ',
+    diamond: '\\diamond',
+    times: '\\times',
+    square: '\\square',
+    star: '\\star',
+  };
+  i = Object.keys(EXTRA_SYMBOLS).findIndex((x) => s.startsWith(x));
+  if (i >= 0) {
+    // Access the ith key of the object
+    const key = Object.keys(EXTRA_SYMBOLS)[i];
+    return [EXTRA_SYMBOLS[key], s.substring(key.length)];
+  }
+
+  return ['', s];
+}
+
+// Convert special names in the string until there are no more
+// special names to convert, for example if we run into a '_' or a digit.
+function specialNames(s: string): [result: string, rest: string] {
+  const result: string[] = [];
+  let rest = s;
+
+  while (rest.length > 0 && !rest.startsWith('_')) {
+    const [special, rest2] = specialName(rest);
+    if (special === '') {
+      result.push(rest[0]);
+      rest = rest.substring(1);
+    } else {
+      result.push(special);
+      rest = rest2;
+    }
+  }
+
+  return [joinLatex(result), rest];
+}
+
+function parseModifiers(
+  s: string
+): [body: string, accents: string[], styles: string[], rest: string] {
+  // Get the special names
+  // eslint-disable-next-line prefer-const
+  let [body, rest] = specialNames(s);
+
+  // Check for accent modifiers
+  const accent: string[] = [];
+  while (rest.length > 0) {
+    const m = rest.match(/^_([a-zA-Z]+)(.*)/);
+    if (!m) break;
+    if (!ACCENT_MODIFIERS[m[1]]) break;
+    accent.push(m[1]);
+    rest = m[2];
+  }
+
+  const styles: string[] = [];
+  while (rest.length > 0) {
+    const m = rest.match(/^_([a-zA-Z]+)(.*)/);
+    if (!m) break;
+    if (!STYLE_MODIFIERS[m[1]]) break;
+    styles.push(m[1]);
+    rest = m[2];
+  }
+
+  return [body, accent, styles, rest];
+}
+
+function parseIdentifierBody(
+  s: string,
+  topLevel = true,
+  style: 'operator' | 'italic' | 'upright' | 'auto' | 'none' = 'auto'
+): [result: string, rest: string] {
+  // eslint-disable-next-line prefer-const
+  let [body, accents, styles, rest] = parseModifiers(s);
+
+  // Apply accents
+  for (const accent of accents) {
+    if (ACCENT_MODIFIERS[accent]) body = ACCENT_MODIFIERS[accent](body);
+  }
+
+  // Only the top level can have superscripts and subscripts
+  if (topLevel) {
+    const sups: string[] = [];
+    const subs: string[] = [];
+
+    // Check if we have a string of digits at the end of the body
+    const m = body.match(/^([^\d].*?)(\d+)$/);
+    if (m) {
+      subs.push(m[2]);
+      body = m[1];
+    }
+
+    while (rest.length > 0) {
+      if (rest.startsWith('__')) {
+        const [sup, rest2] = parseIdentifierBody(
+          rest.substring(2),
+          false,
+          'none'
+        );
+        sups.push(sup);
+        rest = rest2;
+      } else if (rest.startsWith('_')) {
+        const [sub, rest2] = parseIdentifierBody(
+          rest.substring(1),
+          false,
+          'none'
+        );
+        subs.push(sub);
+        rest = rest2;
+      } else {
+        break;
+      }
+    }
+
+    // Apply the superscripts and subscripts
+    if (sups.length > 0) body = `${body}^{${sups.join(',')}}`;
+    if (subs.length > 0) body = `${body}_{${subs.join(',')}}`;
+  }
+
+  for (const style of styles) {
+    if (STYLE_MODIFIERS[style]) body = STYLE_MODIFIERS[style](body);
+  }
+
+  if (styles.length === 0 && style !== 'none') {
+    switch (style) {
+      case 'auto':
+        if (countTokens(body) > 1) body = `\\mathrm{${body}}`;
+        break;
+      case 'operator':
+        body = `\\operatorname{${body}}`;
+        break;
+      case 'italic':
+        body = `\\mathit{${body}}`;
+        break;
+      case 'upright':
+        body = `\\mathrm{${body}}`;
+        break;
+    }
+  }
+  return [body, rest];
+}
+
 // If the name contains an underscore, e.g.'mu_0', make sure
 // to add braces.
 //
 // If s has a numeric prefix, put it in subscript.
-//
-// Escape special Latex characters
-// `{`, `}`, `$`, `%`, `[`, `]`, `\`
 //
 // Other special symbols:
 // 'x_012' --> `x_{012}`
@@ -522,104 +747,36 @@ export function replaceLatex(template: string, replacement: string[]): string {
  * The `defaultMulticharStyle` indicate which style should be used to
  * wrap the symbol if it has more than one character and doesn't have a style
  * specified. This is used to display function names upright, and other
- * (single-char) symbols italic
+ * (single-char) symbols italic. If the style is '', the symbols is wrapped
+ * in `\mathrm{...}` if it has more than one character and no other style
+ * is specified.
  */
-function sanitizeName(
+function serializeIdentifier(
   s: string | null,
-  defaultMulticharStyle: 'italic.' | 'upright.' = 'italic.'
+  defaultMulticharStyle:
+    | 'operator'
+    | 'italic'
+    | 'upright'
+    | 'none'
+    | 'auto' = 'auto'
 ): string | null {
   if (s === null) return null;
 
-  // If the name starts with one or more underscore, it's a wildcard symbol
+  // If the identifier contains emojis, skip the wrapping
+  if (ONLY_EMOJIS.test(s)) return s;
+
+  // If the identifier starts with one or more underscore,
+  // it's a wildcard symbol and always wrapped with \mathrm{...}.
   const m = s.match(/^(_+)(.*)/);
   if (m) {
-    return `\\text{${'\\_'.repeat(m[1].length) + sanitizeNameFragment(m[2])}}`;
+    const [body, rest] = parseIdentifierBody(m[2], true, 'none');
+    return `\\mathrm{${'\\_'.repeat(m[1].length) + body + rest}}`;
   }
 
-  let modifier: string;
-  [modifier, s] = extractSymbolStyleModifier(s);
+  const [body, rest] = parseIdentifierBody(s, true, defaultMulticharStyle);
 
-  const name = sanitizeNameFragment(s);
+  // We couldn't parse the identifier, so just wrap it in \mathrm{...}
+  if (rest.length > 0) return `\\mathrm{${s}}`;
 
-  if (name.length === 1 && !modifier) return name;
-
-  if (!modifier) modifier = defaultMulticharStyle;
-
-  const SYMBOL_MODIFIER_PATTERN = {
-    'upright.': '\\mathrm{_}',
-    'italic.': '\\mathit{_}',
-    'bold.': '\\mathbf{_}',
-    'bold-italic.': '\\mathbf{\\mathit{_}}',
-    'script.': '\\mathscr{_}',
-    'calligraphic.': '\\mathcal{_}',
-    'bold-script.': '\\mathbf{\\mathscr{_}}',
-    'bold-calligraphic.': '\\mathbf{\\mathcal{_}}',
-    'fraktur.': '\\mathfrak{_}',
-    'gothic.': '\\mathfrak{_}',
-    'bold-gothic.': '\\mathbf{\\mathfrak{_}}',
-    'bold-fraktur.': '\\mathbf{\\mathfrak{_}}',
-    'sans-serif.': '\\mathsf{_}',
-    'bold-sans-serif.': '\\mathbf{\\mathsf{_}}',
-    'italic-sans-serif.': '\\mathit{\\mathsf{_}}',
-    'monospace.': '\\mathtt{_}',
-    'blackboard.': '\\mathbb{_}',
-    'double-struck.': '\\mathbb{_}',
-  };
-  return (SYMBOL_MODIFIER_PATTERN[modifier] ?? '\\mathrm{_}').replace(
-    '_',
-    name
-  );
-}
-
-// "gothic.R" --> ["gothic.", "R"]
-// "upright.C_{12}" --> ["upright.", "C_{12}"]
-function extractSymbolStyleModifier(
-  s: string
-): [modifier: string, symbol: string] {
-  const m = s.match(/^([a-zA-Z-]+\.)(.*)/);
-  if (m) return [m[1], m[2]];
-  return ['', s];
-}
-
-// "alpha_12" --> "alpha_{12}"
-function sanitizeNameFragment(s: string): string {
-  const index = s.indexOf('_');
-  if (index > 0) {
-    const prefix = s.substring(0, index);
-    const suffix = s.substring(index + 1);
-    if (!suffix) return `${sanitizeName(prefix)}\\_`;
-    if (suffix.startsWith('"') && suffix.endsWith('"')) {
-      return `${sanitizeNameFragment(prefix)}_\\mathrm{${sanitizeNameFragment(
-        suffix.substring(1, -1)
-      )}}`;
-    }
-    return `${sanitizeNameFragment(prefix)}_{${sanitizeNameFragment(suffix)}}`;
-  }
-
-  // Ends with a numeric suffix?
-  const m = s.match(/(.*?)(-?[0-9]+)$/);
-  if (m) {
-    if (m[1].length === 0) return s;
-    return `${sanitizeNameFragment(m[1])}_{${m[2]}}`;
-  }
-
-  // Is it a special name, e.g. "alpha", etc...
-  if (COMMON_IDENTIFIER_NAME.includes(s)) return '\\' + s;
-
-  // Replace special Latex characters
-  s = s.replace(
-    /[{}\[\]\\:\-\$%]/g,
-    (c) =>
-      ({
-        '{': '\\lbrace ',
-        '}': '\\rbrace ',
-        '[': '\\lbrack ',
-        ']': '\\rbrack ',
-        ':': '\\colon ',
-        '\\': '\\backslash ',
-        '-': '\\unicode{"2013}',
-      }[c] ?? '\\' + c)
-  );
-
-  return s;
+  return body;
 }

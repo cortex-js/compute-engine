@@ -203,6 +203,13 @@ export class Sum {
     if (!hasTerm) this._terms.push({ term, coef });
   }
 
+  // For debugging
+  toString(): string {
+    const xs = this.terms('expression');
+    if (xs.length === 0) return '0';
+    return xs.map((x) => x.toString()).join('\\n');
+  }
+
   terms(mode: 'expression' | 'numeric'): BoxedExpression[] {
     const ce = this.engine;
 

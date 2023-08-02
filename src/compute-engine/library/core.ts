@@ -341,7 +341,7 @@ export const CORE_LIBRARY: IdTable[] = [
                 const [value, rest] = fromDigits(op1.string, base);
                 if (rest) {
                   return ce.error(
-                    ['unexpected-digit', rest[0]],
+                    ['unexpected-digit', { str: rest[0] }],
                     ['Latex', ce.string(op1.string)]
                   );
                 }
@@ -474,7 +474,9 @@ export const CORE_LIBRARY: IdTable[] = [
           const [value, rest] = fromDigits(op1.string, base);
 
           if (rest)
-            return ce.error(['unexpected-digit', rest[0]], { str: rest });
+            return ce.error(['unexpected-digit', { str: rest[0] }], {
+              str: rest,
+            });
 
           return ce.number(value);
         },

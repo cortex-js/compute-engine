@@ -205,11 +205,11 @@ describe('CORTEX SERIALIZING FUNCTIONS', () => {
     expect(serializeCortex(['f', 'x', 1, 0])).toMatchInlineSnapshot(
       `"f(x, 1, 0)"`
     );
-    expect(serializeCortex(['\\foo', 'x', 1, 0])).toMatchInlineSnapshot(
-      `"\`\\\\foo\`(x, 1, 0)"`
+    expect(serializeCortex(['foo', 'x', 1, 0])).toMatchInlineSnapshot(
+      `"foo(x, 1, 0)"`
     );
-    expect(serializeCortex(['\\frac', 'n', 4])).toMatchInlineSnapshot(
-      `"\`\\\\frac\`(n, 4)"`
+    expect(serializeCortex(['Divide', 'n', 4])).toMatchInlineSnapshot(
+      `"n / 4"`
     );
 
     // Head as expression

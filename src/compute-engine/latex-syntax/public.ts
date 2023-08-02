@@ -371,7 +371,8 @@ export type ParseLatexOptions = {
    * This function is invoked when a number is followed by a symbol,
    * an open delimiter or a function.
    *
-   * If this function is set to `null`, the lhs and rhs are joined as a `Sequence`.
+   * If this function is set to `null`, the lhs and rhs are joined as a
+   * `Sequence`.
    *
    * If this function is set to `undefined` it behaves in the following way:
    * - a number followed by a numeric expression is considered as separated
@@ -389,7 +390,7 @@ export type ParseLatexOptions = {
     | ((parser: Parser, lhs: Expression, rhs: Expression) => Expression | null);
 
   /**
-   * If true, ignore space characters.
+   * If true, ignore space characters in math mode.
    *
    * **Default**: `true`
    *
@@ -417,23 +418,25 @@ export type ParseLatexOptions = {
   parseNumbers: boolean;
 
   /**
-   * This handler is invoked when the parser encounter a set of tokens
-   * at a position that could be a symbol or function.
+   * This handler is invoked when the parser encounters an identifier
+   * that does not have a corresponding entry in the dictionary.
    *
-   * The `symbol` argument is one or more tokens.
+   * The `identifier` argument is a valid identifier
+   * (see https://cortexjs.io/math-json/#identifiers for the definition of a
+   * valid identifier).
    *
    * The handler can return:
    *
-   * - `symbol` to indicate the string represent a constant or variable.
+   * - `"symbol"`: the identifier is a constant or variable name.
    *
-   * - `function` to indicate the string is a function name. If an apply
-   * function operator (typically, parentheses) follow, parse them as arguments
-   * to the function.
+   * - `"function"`: the identifier is a function name. If an apply
+   * function operator (typically, parentheses) follow, they will be parsed
+   * as arguments to the function.
    *
-   * - `error`, an error condition is raised.
+   * - `"unknown"`: the identifier is not recognized.
    */
   parseUnknownIdentifier: (
-    symbol: string,
+    identifier: string,
     parser: Parser
   ) => 'symbol' | 'function' | 'unknown';
 
@@ -889,6 +892,10 @@ export interface Parser {
    * `until` is `{ minPrec:0 }` by default.
    */
   matchExpression(until?: Partial<Terminator>): Expression | null;
+
+  // Return a string representation of the expression
+  // between `start` and `end` (default: the whole expression)
+  latex(start: number, end?: number): string;
 
   /** Return an error expression with the specified code and arguments */
   error(

@@ -17,7 +17,7 @@ describe('STEFNOTCH #10', () => {
     ).toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", "\\right)"],
+        ["ErrorCode", "'expected-close-delimiter'", "'\\right)'"],
         ["Latex", "'\\left('"]
       ]
     `);
@@ -125,8 +125,8 @@ describe('STEFNOTCH #13', () => {
     ).toMatchInlineSnapshot(`
       [
         "Assign",
-        ["Multiply", "EpsilonSymbol", "N"],
-        ["Ceil", ["Divide", 4, ["Square", "EpsilonSymbol"]]]
+        ["Multiply", "N", "epsilonSymbol"],
+        ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]]
       ]
     `);
   });
@@ -268,8 +268,8 @@ describe('STEFNOTCH #13', () => {
         ],
         [
           "Error",
-          ["ErrorCode", "'unexpected-token'", "'x'"],
-          ["Latex", "'x\\in\\C^2:|x|<0'"]
+          ["ErrorCode", "'unexpected-identifier'", "x"],
+          ["Latex", "'x'"]
         ]
       ]
     `);
@@ -290,11 +290,8 @@ describe('STEFNOTCH #13', () => {
         ],
         [
           "Error",
-          ["ErrorCode", "'unexpected-token'", "'n'"],
-          [
-            "Latex",
-            "'n\\colon a_n\\le c_n\\le b_n\\implies\\lim_{n\\to\\infin}c_n=a'"
-          ]
+          ["ErrorCode", "'unexpected-identifier'", "n"],
+          ["Latex", "'n'"]
         ]
       ]
     `);

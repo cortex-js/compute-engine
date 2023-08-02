@@ -39,8 +39,9 @@ function identifier(
   s: string,
   i: number
 ): [i: number, result: Expression | null] {
-  // @todo
-  return [i, null];
+  const m = s.slice(i).match(/^[\p{XIDS}_][\p{XIDC}]*/u);
+  if (m === null) return [i, null];
+  return [i + m[0].length, symbol(m[0])];
 }
 
 function exponent(s: string, i: number): [i: number, result: string | null] {

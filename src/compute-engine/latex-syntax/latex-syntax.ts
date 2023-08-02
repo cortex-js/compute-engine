@@ -140,7 +140,7 @@ export class LatexSyntax {
     let expr = parser.matchExpression();
 
     if (!parser.atEnd) {
-      // Somethin went wrong, generate error expressin
+      // Something went wrong, generate error expressin
       const opDefs = parser.peekDefinitions('infix');
       if (opDefs) {
         const start = parser.index;
@@ -163,10 +163,17 @@ export class LatexSyntax {
       }
 
       const index = parser.index;
+
+      const id = parser.matchIdentifier();
+      if (id) {
+        const idError = parser.error(['unexpected-identifier', id], index);
+        return expr ? ['Sequence', expr, idError] : idError;
+      }
+
       const closeDelimiter = parser.matchEnclosureOpen();
       if (closeDelimiter) {
         const enclosureError = parser.error(
-          ['expected-close-delimiter', closeDelimiter],
+          ['expected-close-delimiter', { str: closeDelimiter }],
           index
         );
         return expr ? ['Sequence', expr, enclosureError] : enclosureError;
@@ -175,7 +182,7 @@ export class LatexSyntax {
       const openDelimiter = parser.matchEnclosureClose();
       if (openDelimiter) {
         const enclosureError = parser.error(
-          ['expected-open-delimiter', openDelimiter],
+          ['expected-open-delimiter', { str: openDelimiter }],
           index
         );
         return expr ? ['Sequence', expr, enclosureError] : enclosureError;
@@ -185,7 +192,14 @@ export class LatexSyntax {
       const token = parser.next();
       while (!parser.atEnd) parser.next();
 
+      //
       // Something went wrong, generate error expression
+      //
+
+      // If we have no token, the parser went past the end of the string
+      // something went very wrong (likely a bug in a custom parser function)
+      if (!token) return parser.error('syntax-error', rest);
+
       const error = parser.error(
         [
           token.length > 1 && token.startsWith('\\')

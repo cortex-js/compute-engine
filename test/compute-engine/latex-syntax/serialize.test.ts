@@ -27,7 +27,7 @@ describe('LATEX SERIALIZING', () => {
     );
     expect(latex({ num: '+Infinity' })).toMatchInlineSnapshot(`\\infty`);
     expect(latex({ num: '-Infinity' })).toMatchInlineSnapshot(`-\\infty`);
-    expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(`\\operatorname{NaN}`);
+    expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(`\\mathrm{NaN}`);
     expect(latex({ num: 'Infinity' })).toMatchInlineSnapshot(`\\infty`);
 
     // Repeating pattern
@@ -62,9 +62,13 @@ describe('LATEX SERIALIZING', () => {
   });
 
   test('Functions', () => {
-    expect(latex(['f', 'x', 1, 0])).toMatchInlineSnapshot(`f(x, 1, 0)`);
-    expect(latex(['\\foo', 'x', 1, 0])).toMatchInlineSnapshot(`\\foo{x}{1}{0}`);
-    expect(latex(['\\frac', 'n', 4])).toMatchInlineSnapshot(`\\frac{n}{4}`);
+    expect(latex(['f', 'x', 1, 0])).toMatchInlineSnapshot(
+      `\\mathrm{f}(x, 1, 0)`
+    );
+    expect(latex(['foo', 'x', 1, 0])).toMatchInlineSnapshot(
+      `\\mathrm{foo}(x, 1, 0)`
+    );
+    expect(latex(['Divide', 'n', 4])).toMatchInlineSnapshot(`\\frac{n}{4}`);
 
     expect(parse('\\foo[0]{1}{2}')).toMatchInlineSnapshot(`
       [
@@ -76,7 +80,7 @@ describe('LATEX SERIALIZING', () => {
 
     // Head as expression
     expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
-      `\\mathrm{Apply}(g(f), \\lbrack x, 1, 0\\rbrack)`
+      `\\mathrm{Apply}(\\mathrm{g}(f), \\lbrack x, 1, 0\\rbrack)`
     );
   });
 
@@ -192,8 +196,8 @@ describe('LATEX', () => {
           "Error",
           [
             "ErrorCode",
-            "'incompatible-domain'",
-            "String",
+            "''incompatible-domain''",
+            ["Domain", "String"],
             ["Domain", "RealNumber"]
           ],
           ["Add", "Pi", 2]

@@ -21,60 +21,9 @@ import { splitGraphemes } from '../../common/grapheme-splitter';
 //  See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
 export type Token = string;
 
-// The following strings are LaTeX commands that are automatically
-// converted to identifiers.  This list is taken from GiNaC:
-// https://www.ginac.de/ginac.git/?p=ginac.git;a=blob;f=ginac/symbol.cpp;h=b8068c800fffd0de592dc84e85868cf021c62ef3;hb=refs/heads/master
-export const COMMON_IDENTIFIER_NAME = [
-  'alpha',
-  'beta',
-  'gamma',
-  'Gamma',
-  'delta',
-  'Delta',
-  'epsilon',
-  'zeta',
-  'eta',
-  'theta',
-  'Theta',
-  'iota',
-  'kappa',
-  'lambda',
-  'Lambda',
-  'mu',
-  'nu',
-  'xi',
-  'Xi',
-  'pi',
-  'Pi',
-  'rho',
-  'sigma',
-  'Sigma',
-  'tau',
-  'upsilon',
-  'phi',
-  'Phi',
-  'varphi',
-  'chi',
-  'psi',
-  'Psi',
-  'omega',
-  'Omega',
-  'aleph',
-  'ast',
-  'blacksquare',
-  'bot',
-  'bullet',
-  'circ',
-  'diamond',
-  'times',
-  'top',
-  'square',
-  'star',
-];
-
 /**
  * Given a LaTeX expression represented as a character string,
- * the Lexer class will scan and return Tokens for the lexical
+ * the Tokenizer class will scan and return Tokens for the lexical
  * units in the string.
  *
  * @param s A string of LaTeX
@@ -86,6 +35,11 @@ class Tokenizer {
   obeyspaces = false;
 
   constructor(s: string) {
+    // Bidi markers are ignored. Remove them.
+    // This is because the math layout algorithm will override the
+    // directionality of the math expression.
+    s = s.replace(/[\u200E\u200F\u2066-\u2069\u202A-\u202E]/g, '');
+
     this.s = splitGraphemes(s);
     this.pos = 0;
   }
@@ -238,104 +192,105 @@ class Tokenizer {
 // Some primitive commands need to be handled in the expansion phase
 // (the 'gullet')
 function expand(lex: Tokenizer, args: string[]): Token[] {
-  let result: Token[] = [];
   let token = lex.next();
-  if (token) {
-    if (token === '\\relax') {
-      // Do nothing
-    } else if (token === '\\noexpand') {
-      // Do not expand the next token
-      token = lex.next();
-      if (token) {
-        result.push(token);
-      }
-    } else if (token === '\\obeyspaces') {
-      lex.obeyspaces = true;
-    } else if (token === '\\space' || token === '~') {
-      // The `\space` command is equivalent to a single space
-      // The ~ is an 'active character' (a single character macro)
-      // that maps to <space>
-      result.push('<space>');
-    } else if (token === '\\bgroup') {
-      // Begin group, synonym for opening brace
-      result.push('<{>');
-    } else if (token === '\\egroup') {
-      // End group, synonym for closing brace
-      result.push('<}>');
-    } else if (token === '\\string') {
-      // Turn the next token into a string
-      token = lex.next();
-      if (token) {
-        if (token[0] === '\\') {
-          Array.from(token).forEach((x) =>
-            result.push(x === '\\' ? '\\backslash' : x)
-          );
-        } else if (token === '<{>') {
-          result.push('\\{');
-        } else if (token === '<space>') {
-          result.push('~');
-        } else if (token === '<}>') {
-          result.push('\\}');
-        }
-      }
-    } else if (token === '\\csname') {
-      // Turn the next tokens, until `\endcsname`, into a command
-      while (lex.peek() === '<space>') {
-        lex.next();
-      }
+  if (!token) return [];
 
-      let command = '';
-      let done = false;
-      let tokens: string[] = [];
-      do {
-        if (tokens.length === 0) {
-          // We're out of tokens to look at, get some more
-          if (/^#[0-9?]$/.test(lex.peek())) {
-            // Expand parameters (but not commands)
-            const param = lex.get().slice(1);
-            tokens = tokenize(
-              args?.[param] ?? args?.['?'] ?? '\\placeholder{}',
-              args
-            );
-            token = tokens[0];
-          } else {
-            token = lex.next();
-            tokens = token ? [token] : [];
-          }
-        }
-        done = tokens.length === 0;
-        if (!done && token === '\\endcsname') {
-          done = true;
-          tokens.shift();
-        }
-        if (!done) {
-          done =
-            token === '<$>' ||
-            token === '<$$>' ||
-            token === '<{>' ||
-            token === '<}>' ||
-            (!!token && token.length > 1 && token[0] === '\\');
-        }
-        if (!done) {
-          command += tokens.shift();
-        }
-      } while (!done);
-      if (command) {
-        result.push('\\' + command);
-      }
-      result = result.concat(tokens);
-    } else if (token === '\\endcsname') {
-      // Unexpected \endcsname are ignored
-    } else if (token.length > 1 && token[0] === '#') {
-      // It's a parameter to expand
-      const param = token.slice(1);
-      result = result.concat(
-        tokenize(args?.[param] ?? args?.['?'] ?? '\\placeholder{}', args)
-      );
-    } else {
+  let result: Token[] = [];
+  if (token === '\\relax') {
+    // Do nothing
+  } else if (token === '\\noexpand') {
+    // Do not expand the next token
+    token = lex.next();
+    if (token) {
       result.push(token);
     }
+  } else if (token === '\\obeyspaces') {
+    lex.obeyspaces = true;
+  } else if (token === '\\space' || token === '~') {
+    // The `\space` command is equivalent to a single space
+    // The ~ is an 'active character' (a single character macro)
+    // that maps to <space>
+    result.push('<space>');
+  } else if (token === '\\bgroup') {
+    // Begin group, synonym for opening brace
+    result.push('<{>');
+  } else if (token === '\\egroup') {
+    // End group, synonym for closing brace
+    result.push('<}>');
+  } else if (token === '\\string') {
+    // Turn the next token into a string
+    token = lex.next();
+    if (token) {
+      if (token[0] === '\\') {
+        Array.from(token).forEach((x) =>
+          result.push(x === '\\' ? '\\backslash' : x)
+        );
+      } else if (token === '<{>') {
+        result.push('\\{');
+      } else if (token === '<space>') {
+        result.push('~');
+      } else if (token === '<}>') {
+        result.push('\\}');
+      }
+    }
+  } else if (token === '\\csname') {
+    // Turn the next tokens, until `\endcsname`, into a command
+    while (lex.peek() === '<space>') {
+      lex.next();
+    }
+
+    let command = '';
+    let done = false;
+    let tokens: string[] = [];
+    do {
+      if (tokens.length === 0) {
+        // We're out of tokens to look at, get some more
+        if (/^#[0-9?]$/.test(lex.peek())) {
+          // Expand parameters (but not commands)
+          const param = lex.get().slice(1);
+          tokens = tokenize(
+            args?.[param] ?? args?.['?'] ?? '\\placeholder{}',
+            args
+          );
+          token = tokens[0];
+        } else {
+          token = lex.next();
+          tokens = token ? [token] : [];
+        }
+      }
+      done = tokens.length === 0;
+      if (!done && token === '\\endcsname') {
+        done = true;
+        tokens.shift();
+      }
+      if (!done) {
+        done =
+          token === '<$>' ||
+          token === '<$$>' ||
+          token === '<{>' ||
+          token === '<}>' ||
+          (!!token && token.length > 1 && token[0] === '\\');
+      }
+      if (!done) {
+        command += tokens.shift();
+      }
+    } while (!done);
+    if (command) {
+      result.push('\\' + command);
+    }
+    result = result.concat(tokens);
+  } else if (token === '\\endcsname') {
+    // Unexpected \endcsname are ignored
+  } else if (token.length > 1 && token[0] === '#') {
+    // It's a parameter to expand
+    const param = token.slice(1);
+    result = result.concat(
+      tokenize(args?.[param] ?? args?.['?'] ?? '\\placeholder{}', args)
+    );
+  } else {
+    result.push(token);
   }
+
   return result;
 }
 
@@ -366,6 +321,10 @@ export function tokenize(s: string, args: string[]): Token[] {
   while (!tokenizer.end());
 
   return result;
+}
+
+export function countTokens(s: string): number {
+  return tokenize(s, []).length;
 }
 
 export function joinLatex(segments: Iterable<string>): string {

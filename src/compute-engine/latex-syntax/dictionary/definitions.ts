@@ -681,7 +681,7 @@ export const DEFAULT_LATEX_DICTIONARY: {
   other: DEFINITIONS_OTHERS,
   physics: [
     {
-      name: 'mu-0',
+      name: 'mu0',
       trigger: '\\mu_0',
     },
   ],

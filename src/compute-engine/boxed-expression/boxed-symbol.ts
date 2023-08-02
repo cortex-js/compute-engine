@@ -21,7 +21,7 @@ import {
 } from '../public';
 import { replace } from '../rules';
 import { serializeJsonSymbol } from './serialize';
-import { isValidIdentifier } from '../../math-json/utils';
+import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { hashCode } from './utils';
 
 function isSymbolDefinition(
@@ -87,10 +87,16 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
     // MathJSON symbols are always stored in Unicode NFC canonical order.
     // See https://unicode.org/reports/tr15/
-    console.assert(name === name.normalize());
+    console.assert(
+      name === name.normalize(),
+      `Symbol "${name}" must be in Unicode NFC canonical order`
+    );
     this._name = name;
 
-    console.assert(isValidIdentifier(this._name));
+    console.assert(
+      isValidIdentifier(this._name),
+      `Invalid symbol "${name}": ${validateIdentifier(this._name)}`
+    );
 
     this._scope = options?.canonical ? ce.context : null;
 

@@ -72,7 +72,7 @@ export function domainAdd(
 export function simplifyAdd(
   ce: IComputeEngine,
   args: BoxedExpression[]
-): BoxedExpression | undefined {
+): BoxedExpression {
   console.assert(args.length > 1, `simplifyAdd: not enough args`);
 
   const sum = new Sum(ce);

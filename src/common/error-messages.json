@@ -9,7 +9,7 @@
     "exponent-expected": "An exponent was expected",
     "expression-expected": "An expression was expected",
     "hexadecimal-number-expected": "A hexadecimal number was expected",
-    "invalid-symbol-name": "\"%0\" is not a valid symbol name",
+    "invalid-identifier": "\"%0\" is not a valid identifier",
     "invalid-escape-sequence": "\"%0\" is not a valid escape sequence",
     "invalid-unicode-codepoint-string": "\"%0\" is not a valid Unicode codepoint",
     "invalid-unicode-codepoint-value": "\"%0\" is not a valid Unicode codepoint value",

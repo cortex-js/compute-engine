@@ -452,104 +452,99 @@ The head of this expression is `["InverseFunction", "Sin"]` and its argument is
 
 ## Identifiers
 
-Identifiers are strings of valid Unicode characters, including Greek, Cyrillic,
-Hebrew, Arabic, ideographic and CJK symbols, mathematical symbols and emojis,
-except:
+Identifiers are the names of symbols, variables, constants, wildcards and
+functions.
 
-<div class=symbols-table>
+They are represented as JSON strings.
 
-| Codepoint                | Name                         |                    |
-| :----------------------- | :--------------------------- | :----------------- |
-| **U+0000** to **U+0020** |                              |                    |
-| **U+0022**               | **QUOTATION MARK**           | `"`                |
-| **U+0060**               | **GRAVE ACCENT**<br>backtick | <code>&#96;</code> |
-| **U+FFFE**               | **BYTE ORDER MARK**          |                    |
-| **U+FFFF**               | **INVALID BYTE ORDER MARK**  |                    |
+Before they are used, JSON escape sequences (such as `\u` sequences, `\\`, etc.)
+are decoded.
 
-</div>
-
-In addition, the first character of an identifier must not be:
-
-<div class=symbols-table>
-
-| Codepoint                | Name                      |         |
-| :----------------------- | :------------------------ | :------ |
-| **U+0021**               | **EXCLAMATION MARK**      | `!`     |
-| **U+0022**               | **QUOTATION MARK**        | `"`     |
-| **U+0024**               | **DOLLAR SIGN**           | `$`     |
-| **U+0025**               | **PERCENT**               | `%`     |
-| **U+0026**               | **AMPERSAND**             | `&`     |
-| **U+0027**               | **APOSTROPHE**            | `'`     |
-| **U+0028**               | **LEFT PARENTHESIS**      | `(`     |
-| **U+0029**               | **RIGHT PARENTHESIS**     | `)`     |
-| **U+002B**               | **PLUS SIGN**             | `+`     |
-| **U+002D**               | **HYPHEN MINUS SIGN**     | `-`     |
-| **U+002E**               | **FULL STOP**             | `.`     |
-| **U+0030** to **U+0039** | **DIGIT 0** - **DIGIT 9** | `0`-`9` |
-| **U+003A**               | **COLON**                 | `:`     |
-| **U+003F**               | **QUESTION MARK**         | `?`     |
-| **U+0040**               | **COMMERCIAL AT**         | `@`     |
-| **U+005B**               | **LEFT SQUARE BRACKET**   | `[`     |
-| **U+005D**               | **RIGHT SQUARE BRACKET**  | `]`     |
-| **U+005E**               | **CIRCUMFLEX ACCENT**     | `^`     |
-| **U+007B**               | **LEFT CURLY BRACKET**    | `{`     |
-| **U+007D**               | **RIGHT CURLY BRACKET**   | `}`     |
-| **U+007E**               | **TILDE**                 | `~`     |
-
-</div>
-
-Before they are used, identifiers are normalized to the
+The identifiers are then normalized to the
 [Unicode Normalization Form C (NFC)](https://unicode.org/reports/tr15/). They
-must be stored internally and compared using the NFC.
+are stored internally and compared using the Unicode NFC.
 
-JSON escape sequences are applied before Unicode normalization.
-
-These four strings represent the same identifier:
+These four JSON strings represent the same identifier:
 
 - `"Å"`
-- `"A\u030a"` `A‌` + **COMBINING RING ABOVE**
-- `"\u00c5"` **LATIN CAPITAL LETTER A WITH RING ABOVE** `Å`
-- `"\u0041\u030a"` **LATIN CAPITAL LETTER A** + **COMBINING RING ABOVE** `A‌` +
-  ` ̊`
+- `"A\u030a"` `A‌` **U+0041 LATIN CAPITAL LETTER** + **U+030A COMBINING RING
+  ABOVE**
+- `"\u00c5"` **U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE** `Å`
+- `"\u0041\u030a"` **U+0041 LATIN CAPITAL LETTER A** + **U+030A COMBINING RING
+  ABOVE** `A‌` + ` ̊`
+
+Identifiers conforms to a profile of
+[UAX31-R1-1](https://unicode.org/reports/tr31/) with the following
+modifications:
+
+- The character `_` **U+005F LOW LINE** is added to the `Start` character set
+- The characters should belong to a
+  [recommended script](https://www.unicode.org/reports/tr31/#Table_Recommended_Scripts)
+- An identifier can be a sequence of one or more emojis. Characters that have
+  both the Emoji and XIDC proeprty are only considered emojis when they are
+  preceeded with emoji modifiers. The definition below is based on
+  [Unicode TR51](https://unicode.org/reports/tr51/#EBNF_and_Regex) but modified
+  to exclude invalid identifiers.
+
+Identifiers match one of those regular expressions:
+
+```js
+const VS16 = '\\u{FE0F}'; // Variation Selector-16, forces emoji presentation
+const KEYCAP = '\\u{20E3}'; // Combining Enclosing Keycap
+const ZWJ = '\\u{200D}'; // Zero Width Joiner
+
+const FLAG_SEQUENCE = '\\p{RI}\\p{RI}';
+
+const TAG_MOD = `(?:[\\u{E0020}-\\u{E007E}]+\\u{E007F})`;
+const EMOJI_MOD = `(?:\\p{EMod}|${VS16}${KEYCAP}?|${TAG_MOD})`;
+const EMOJI_NOT_IDENTIFIER = `(?:(?=\\P{XIDC})\\p{Emoji})`;
+const ZWJ_ELEMENT = `(?:${EMOJI_NOT_IDENTIFIER}${EMOJI_MOD}*|\\p{Emoji}${EMOJI_MOD}+|${FLAG_SEQUENCE})`;
+const POSSIBLE_EMOJI = `(?:${ZWJ_ELEMENT})(${ZWJ}${ZWJ_ELEMENT})*`;
+const EMOJI_IDENTIFIER = new RegExp(`^(?:${POSSIBLE_EMOJI})+$`, 'u');
+```
+
+(from [Unicode TR51](https://unicode.org/reports/tr51/#EBNF_and_Regex))
+
+or
+
+```js
+const NON_EMOJI_IDENTIFIER = /^[\p{XIDS}_]\p{XIDC}*$/u;
+```
+
+In summary, when using Latin characters, identifiers can start with a letter or
+an underscore, followed by zero or more letters, digits and underscores.
+
+Carefully consider when to use non-latin characters. Use non-latin characters
+for whole words, for example: `"半径"` (radius), "מְהִירוּת" (speed), "速度"
+(speed) or "वेग" (speed).
+
+Avoid mixing Unicode characters from different scripts in the same identifier.
+
+Do not include bidi markers such as **U+200E** or RTL **U+200F** in identifiers.
+LTR and RTL marks should be added as needed by the client displaying the
+identifier. They should be ignored when parsing identifiers.
+
+Avoid visual ambiguity issues that might arise with some Unicode characters. For
+example:
+
+- prefer using `"gamma"` rather than `"ɣ"` **U+0194 LATIN SMALL LETTER GAMMA**
+  or `"γ"` **U+03B3 GREEK SMALL LETTER GAMMA**
+- prefer using `"Sum"` rather than `"∑"` **U+2211 N-ARY SUMMATION**, which can
+  be visually confused with `"Σ"` **U+03A3 GREEK CAPITAL LETTER SIGMA**.
+
+---
 
 The following naming convention for wildcards, variables, constants and function
 names are recommendations.
-
-### Variables Naming Convention
-
-- Avoid mixing latin characters and non-latin characters.
-
-  For example, use `"半径"`, `"🍕"` or `"🐕🐄"`, but avoid `"🍕slice"`
-
-  Carefully consider when to use non-latin characters.
-
-  For example:
-
-  - prefer using `"gamma"` rather than `"ɣ"` (**LATIN SMALL LETTER GAMMA**) or
-    `"γ"` (**GREEK SMALL LETTER GAMMA**)
-  - prefer using `"Sum"` rather than `"∑"` **U+2211 N-ARY SUMMATION**, which can
-    be visually confused with `"Σ"` **U+03A3 GREEK CAPITAL LETTER SIGMA**.
-
-- If using latin characters, the first character of a variable should be a
-  lowercase or uppercase letter: `a`-`z` or `A`-`Z`
-- Subsequent characters should be a letter, digit (`0`-`9`) or underscore (`_`).
-
-  Using a more limited set of common characters avoids visual ambiguity issues
-  that might otherwise arise with some Unicode symbols.
-
-- If a variable is made of several words, use camelCase, i.e. `"newDeterminant"`
-
-- Prefer clarity over brevity and avoid obscure abbreviations.
-
-  Use `"newDeterminant"` rather than `"newDet"` or `"nDet"`
 
 ### Wildcards Naming Convention
 
 Symbols that begin with `_` **U+005F LOW LINE** (underscore) should be used to
 denote wildcards and other placeholders.
 
-For example, they may denote the positional arguments in a function expression.
-They may also denote placeholders and captured expression in patterns.
+For example, they may be used to denote the positional arguments in a function
+expression. They may also denote placeholders and captured expression in
+patterns.
 
 <div class=symbols-table>
 
@@ -563,56 +558,199 @@ They may also denote placeholders and captured expression in patterns.
 
 </div>
 
+### Variables Naming Convention
+
+- If a variable is made of several words, use camelCase. For example
+  `"newDeterminant"`
+
+- Prefer clarity over brevity and avoid obscure abbreviations.
+
+  Use `"newDeterminant"` rather than `"newDet"` or `"nDet"`
+
 ### Constants Naming Convention
 
-- Avoid mixing latin characters and non-latin characters.
 - If using latin characters, the first character of a constant should be an
   uppercase letter `A`-`Z`
-- Subsequent characters should be a letter, digit `0`-`9` or underscore `_`.
-- If a constant is made up of several words, use camelCase, e.g.
+- If a constant name is made up of several words, use camelCase. For example
   `"SpeedOfLight"`
 
 ### Function Names Naming Convention
 
-- Avoid mixing latin characters and non-latin characters.
-- The names of the function in the standard library start with an uppercase
-  letter `A`-`Z`, for example `"Sin"`, `"Fold"`.
-- Subsequent characters should be a letter, digit `0`-`9` or underscore `_`.
-- If a function name is made up of several words, use camelCase, e.g.
+- The name of the functions in the standard library starts with an uppercase
+  letter `A`-`Z`. For example `"Sin"`, `"Fold"`.
+- The name of your own functions can start with a lowercase or uppercase letter.
+- If a function name is made up of several words, use camelCase. For example
   `"InverseFunction"`
 
-### Rendering Conventions
+### LaTeX Rendering Conventions
 
 The following recommendations may be followed by clients displaying MathJSON
-identifiers. They do not affect computation or manipulation of expressions
+identifiers with LaTeX, or parsing LaTeX to MathJSON identifiers.
+
+These recommendations do not affect computation or manipulation of expressions
 following these conventions.
 
-- Multi-letter variables, that is identifiers with more than one character, may
-  be rendered in LaTeX with a `\mathit{}` or `\mathrm{}` command.
-- Identifiers containing a `_` may be split in a suffix (part before the `_`)
-  and a prefix (part after the `_`) and the prefix may be displayed as a
-  subscript of the suffix. An identifier fragment is either the entire
-  identifier, or a suffix or a prefix of an identifier.
-- The following common names, when they appear as a fragment, may be replaced
-  with a corresponding LaTeX command: `alpha`, `beta`, `gamma`, `Gamma`,
-  `delta`, `Delta`, `epsilon`, `zeta`, `eta`, `theta`, `Theta`, `iota`, `kappa`,
-  `lambda`, `Lambda`, `mu`, `nu`, `xi`, `Xi`, `pi`, `Pi`, `rho`, `sigma`,
-  `Sigma`, `tau`, `upsilon`, `phi`, `Phi`, `varphi`, `chi`, `psi`, `Psi`,
-  `omega`, `Omega`, `aleph`, `ast`, `blacksquare`, `bot`, `bullet`, `circ`,
-  `diamond`, `times`, `top`, `square`, `star`.
-- Identifier fragments ending in digits may be displayed with a corresponding
-  subscript
+- An identifier may be composed of a main body, some modifiers, some style
+  variants, some subscripts and subscripts. For example `"alpha_0__prime"` \\(
+  \alpha_0\prime \\) or `"x_vec"` (\\ \vec{x} \\) or `"Re_fraktur"` \\(
+  \mathfrak{Re} \\).
+- Subscripts are indicated by an underscore `_` and superscripts by a
+  double-underscore `__`. There may be more than one superscript or subscripts,
+  but they get concatenated. For example `"a_b__c_q__p"` -> `a_{b, q}^{c, p}`
+  \\( a\_{b, q}^{c, p} \\).
+- Modifiers after a superscript or subscript apply to the closest preceding
+  superscript or subscript. For example `"a_b_prime"` -> `a_{b^{\prime}}`
+
+Modifiers include:
 
 <div class=symbols-table>
 
-| Identifier | LaTeX                  |                                 |
-| :--------- | :--------------------- | ------------------------------- |
-| `time`     | `\mathit{time}`        | \\( \mathit{time} \\)           |
-| `alpha`    | `\alpha`               | \\( \alpha \\)                  |
-| `alpha0`   | `\alpha_0`             | \\( \alpha_0 \\)                |
-| `m56`      | `m_{56}`               | \\( m\_{56} \\)                 |
-| `m56_max`  | `m_{56_{\mathit{max}}` | \\( m\_{56\_{\mathit{max}}} \\) |
-| `c_max`    | `c_{\mathit{max}}`     | \\( c\_{\mathit{max}} \\)       |
+| Modifier        | LaTeX             |                          |
+| :-------------- | :---------------- | ------------------------ |
+| `_deg`          | `\degree`         | \\( x\degree \\)         |
+| `_prime`        | `{}^\prime`       | \\( x^{\prime} \\)       |
+| `_dprime`       | `{}^\doubleprime` | \\( x^{\doubleprime} \\) |
+| `_ring`         | `\mathring{}`     | \\( \mathring{x} \\)     |
+| `_hat`          | `\hat{}`          | \\( \hat{x} \\)          |
+| `_tilde`        | `\tilde{}`        | \\( \tilde{x} \\)        |
+| `_vec`          | `\vec{}`          | \\( \vec{x} \\)          |
+| `_bar`          | `\overline{}`     | \\( \overline{x} \\)     |
+| `_underbar`     | `\underline{}`    | \\( \underline{x} \\)    |
+| `_dot`          | `\dot{}`          | \\( \dot{x} \\)          |
+| `_ddot`         | `\ddot{}`         | \\( \ddot{x} \\)         |
+| `_tdot`         | `\dddot{}`        | \\( \dddot{x} \\)        |
+| `_qdot`         | `\ddddot{}`       | \\( \dddodt{x} \\)       |
+| `_operator`     | `\operatorname{}` | \\( \operatorname{x} \\) |
+| `_upright`      | `\mathrm{}`       | \\( \mathrm{x} \\)       |
+| `_italic`       | `\mathit{}`       | \\( \mathit{x} \\)       |
+| `_bold`         | `\mathbf{}`       | \\( \mathbf{x} \\)       |
+| `_doublestruck` | `\mathbb{}`       | \\( \mathbb{x} \\)       |
+| `_fraktur`      | `\mathfrak{}`     | \\( \mathfrak{x} \\)     |
+| `_script`       | `\mathsc{}`       | \\( \mathsc{x} \\)       |
+
+</div>
+
+- The following common names, when they appear as the body or in a
+  subscript/superscript of an identifier, may be replaced with a corresponding
+  LaTeX command:
+
+<div class=symbols-table>
+
+| Common Names     | LaTeX         |                     |
+| :--------------- | :------------ | ------------------- |
+| `alpha`          | `\alpha`      | \\( \alpha \\)      |
+| `beta`           | `\beta`       | \\( \beta \\)       |
+| `gamma`          | `\gamma`      | \\( \gamma \\)      |
+| `delta`          | `\delta`      | \\( \delta \\)      |
+| `epsilon`        | `\epsilon`    | \\( \epsilon \\)    |
+| `epsilonSymbol`  | `\varepsilon` | \\( \varepsilon \\) |
+| `zeta`           | `\zeta`       | \\( \zeta \\)       |
+| `eta`            | `\eta`        | \\( \eta \\)        |
+| `theta`          | `\theta`      | \\( \theta \\)      |
+| `thetaSymbol`    | `\vartheta`   | \\( \vartheta \\)   |
+| `iota`           | `\iota`       | \\( \iota \\)       |
+| `kappa`          | `\kappa`      | \\( \kappa \\)      |
+| `kappaSymbol`    | `\varkappa`   | \\( \varkappa \\)   |
+| `mu`             | `\mu`         | \\( \mu \\)         |
+| `nu`             | `\nu`         | \\( \nu \\)         |
+| `xi`             | `\xi`         | \\( \xi \\)         |
+| `omicron`        | `\omicron`    | \\( \omicron \\)    |
+| `piSymbol`       | `\varpi`      | \\( \varpi \\)      |
+| `rho`            | `\rho`        | \\( \rho \\)        |
+| `rhoSymbol`      | `\varrho`     | \\( \varrho \\)     |
+| `sigma`          | `\sigma`      | \\( \sigma \\)      |
+| `finalSigma`     | `\varsigma`   | \\( \varsigma \\)   |
+| `tau`            | `\tau`        | \\( \tau \\)        |
+| `phi`            | `\phi`        | \\( \phi \\)        |
+| `phiLetter`      | `\varphi`     | \\( \varphi \\)     |
+| `upsilon`        | `\upsilon`    | \\( \upsilon \\)    |
+| `chi`            | `\chi`        | \\( \chi \\)        |
+| `psi`            | `\psi`        | \\( \psi \\)        |
+| `omega`          | `\omega`      | \\( \omega \\)      |
+| `Alpha`          | `\Alpha`      | \\( \Alpha \\)      |
+| `Beta`           | `\Beta`       | \\( \Beta \\)       |
+| `Gamma`          | `\Gamma`      | \\( \Gamma \\)      |
+| `Delta`          | `\Delta`      | \\( \Delta \\)      |
+| `Epsilon`        | `\Epsilon`    | \\( \Epsilon \\)    |
+| `Zeta`           | `\Zeta`       | \\( \Zeta \\)       |
+| `Eta`            | `\Eta`        | \\( \Eta \\)        |
+| `Theta`          | `\Theta`      | \\( \Theta \\)      |
+| `Iota`           | `\Iota`       | \\( \Iota \\)       |
+| `Kappa`          | `\Kappa`      | \\( \Kappa \\)      |
+| `Lambda`         | `\Lambda`     | \\( \Lambda \\)     |
+| `Mu`             | `\Mu`         | \\( \Mu \\)         |
+| `Nu`             | `\Nu`         | \\( \Nu \\)         |
+| `Xi`             | `\Xi`         | \\( \Xi \\)         |
+| `Omicron`        | `\Omicron`    | \\( \Omicron \\)    |
+| `Pi`             | `\Pi`         | \\( \Pi \\)         |
+| `Rho`            | `\Rho`        | \\( \Rho \\)        |
+| `Sigma`          | `\Sigma`      | \\( \Sigma \\)      |
+| `Tau`            | `\Tau`        | \\( \Tau \\)        |
+| `Phi`            | `\Phi`        | \\( \Phi \\)        |
+| `Upsilon`        | `\Upsilon`    | \\( \Upsilon \\)    |
+| `Chi`            | `\Chi`        | \\( \Chi \\)        |
+| `Psi`            | `\Psi`        | \\( \Psi \\)        |
+| `Omega`          | `\Omega`      | \\( \Omega \\)      |
+| `digamma`        | `\digamma`    | \\( \digamma \\)    |
+| `aleph`          | `\aleph`      | \\( \aleph \\)      |
+| `lambda`         | `\lambda`     | \\( \lambda \\)     |
+| `bet`            | `\beth`       | \\( \beth \\)       |
+| `gimel`          | `\gimel`      | \\( \gimel \\)      |
+| `dalet`          | `\dalet`      | \\( \dalet \\)      |
+| `ell`            | `\ell`        | \\( \ell \\)        |
+| `turnedCapitalF` | `\Finv`       | \\( \Finv \\)       |
+| `turnedCapitalG` | `\Game`       | \\( \Game \\)       |
+| `weierstrass`    | `\wp`         | \\( \wp \\)         |
+| `eth`            | `\eth`        | \\( \eth \\)        |
+| `invertedOhm`    | `\mho`        | \\( \mho \\)        |
+| `hBar`           | `\hbar`       | \\( \hbar \\)       |
+| `hSlash`         | `\hslash`     | \\( \hslash \\)     |
+| `blacksquare`    | `\hslash`     | \\( \hslash \\)     |
+| `bottom`         | `\bot`        | \\( \bot \\)        |
+| `bullet`         | `\bullet`     | \\( \bullet \\)     |
+| `circle`         | `\circ`       | \\( \circ \\)       |
+| `diamond`        | `\diamond`    | \\( \diamond \\)    |
+| `times`          | `\times`      | \\( \times \\)      |
+| `top`            | `\top`        | \\( \top \\)        |
+| `square`         | `\square`     | \\( \square \\)     |
+| `star`           | `\star`       | \\( \star \\)       |
+
+</div>
+
+- The following names, when used as a subscript or superscript, may be replaced
+  with a corresponding LaTeX command:
+
+<div class=symbols-table>
+
+| Subscript/Supscript | LaTeX                 |                            |
+| :------------------ | :-------------------- | -------------------------- |
+| `plus`              | `{}_{+}` / `{}^{+}`   | \\( x\_{+} x^+\\)          |
+| `minus`             | `{}_{-}` /`{}^{-}`    | \\( x\_{-} x^-\\)          |
+| `pm`                | `{}_\pm` /`{}^\pm`    | \\( x\_{\pm} x^\pm \\)     |
+| `ast`               | `{}_\ast` /`{}^\ast`  | \\( {x}\_\ast x^\ast \\)   |
+| `dag`               | `{}_\dag` /`{}^\dag`  | \\( {x}\_\dag x^\dag \\)   |
+| `ddag`              | `{}_\ddag` `{}^\ddag` | \\( {x}\_\ddag x^\ddag \\) |
+| `hash`              | `{}_\#` `{}^\#`       | \\( {x}\_\# x^\#\\)        |
+
+</div>
+
+- Multi-letter identifiers may be rendered with a `\mathit{}`, `\mathrm{}` or
+  `\operatorname{}` command.
+
+- Identifier fragments ending in digits may be rendered with a corresponding
+  subscript.
+
+<div class=symbols-table>
+
+| Identifier           | LaTeX              |                           |
+| :------------------- | :----------------- | ------------------------- |
+| `time`               | `\mathrm{time}`    | \\( \mathrm{time} \\)     |
+| `speed_italic`       | `\mathit{speed}`   | \\( \mathit{speed} \\)    |
+| `P_blackboard__plus` | `\mathbb{P}^{+}`   | \\( \mathbb{P^+} \\)      |
+| `alpha`              | `\alpha`           | \\( \alpha \\)            |
+| `mu0`                | `\mu_{0}`          | \\( \mu_0 \\)             |
+| `m56`                | `m_{56}`           | \\( m\_{56} \\)           |
+| `c_max`              | `\mathrm{c_{max}}` | \\( \mathrm{c\_{max}} \\) |
 
 </div>
 

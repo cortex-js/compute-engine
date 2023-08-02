@@ -13,7 +13,7 @@ import { LibraryCategory } from '../latex-syntax/public';
 import { IComputeEngine, IdTable } from '../public';
 import { BoxedSymbolDefinitionImpl } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
-import { isValidIdentifier } from '../../math-json/utils';
+import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { isFunctionDefinition, isSymbolDefinition } from './utils';
 
 export function getStandardLibrary(
@@ -124,7 +124,7 @@ export const LIBRARIES: {
   'relop': RELOP_LIBRARY,
   'polynomials': POLYNOMIALS_LIBRARY,
   'physics': {
-    'Mu-0': {
+    Mu0: {
       description: 'Vaccum permeability',
       constant: true,
       wikidata: 'Q1515261',
@@ -147,9 +147,10 @@ export const LIBRARIES: {
 
 function validateDefinitionName(name: string): string {
   name = name.normalize();
-  if (!isValidIdentifier(name)) throw Error(`Invalid definition name ${name}`); // @todo cause
-
-  return name;
+  if (isValidIdentifier(name)) return name;
+  throw new Error(
+    `Invalid definition name "${name}": ${validateIdentifier(name)}`
+  ); // @todo: cause
 }
 
 /**

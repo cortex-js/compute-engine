@@ -1,66 +1,26 @@
 import { parse } from '../../src/math-json/parse-sympy';
 import { serialize } from '../../src/math-json/serialize-sympy';
 
-const k = parse('077e010');
-console.log('Sympy test: ', k);
+// const k = parse('077e010');
+// console.log('Sympy test: ', k);
 
 describe('Sympy parsing identifiers', () => {
   test('abcde_fgh9', () => {
-    expect(parse('abcde_fgh9')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        {
-          "str": "unexpected-token",
-        },
-        "abcde_fgh9",
-      ]
-    `);
+    expect(parse('abcde_fgh9')).toMatchInlineSnapshot(`"abcde_fgh9"`);
   });
   test('_890', () => {
-    expect(parse('_890')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        {
-          "str": "unexpected-token",
-        },
-        "_890",
-      ]
-    `);
+    expect(parse('_890')).toMatchInlineSnapshot(`"_890"`);
   });
   test('a234_890_', () => {
-    expect(parse('a234_890_')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        {
-          "str": "unexpected-token",
-        },
-        "a234_890_",
-      ]
-    `);
+    expect(parse('a234_890_')).toMatchInlineSnapshot(`"a234_890_"`);
   });
   test('a123456', () => {
-    expect(parse('a123456')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        {
-          "str": "unexpected-token",
-        },
-        "a123456",
-      ]
-    `);
+    expect(parse('a123456')).toMatchInlineSnapshot(`"a123456"`);
   });
 });
 describe('Sympy parsing unicode identifiers', () => {
   test('Unicode Identifiers', () => {
-    expect(parse('abcde_fgh9')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        {
-          "str": "unexpected-token",
-        },
-        "abcde_fgh9",
-      ]
-    `);
+    expect(parse('abcde_fgh9')).toMatchInlineSnapshot(`"abcde_fgh9"`);
   });
 });
 describe('Sympy parsing integers', () => {

@@ -110,6 +110,11 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return this.json;
   }
 
+  /** @internal */
+  get rawJson(): Expression {
+    return this.json;
+  }
+
   get scope(): RuntimeScope | null {
     return null;
   }

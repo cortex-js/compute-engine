@@ -75,7 +75,6 @@ console.log(expr.evaluate().latex);
 // ➔ 2
 ```
 
-
 ## Unboxing
 
 **To access the MathJSON expression of a boxed expression**, use the `expr.json`
@@ -133,16 +132,16 @@ expression.
 
 By default, `ce.box()` and `ce.parse()` produce a canonical expression.
 
-**To get a "raw" (non-canonical) expression instead**, use `ce.box(expr, {canonical: false})`
-or `ce.parse(latex, {canonical: false})`.
+**To get a "raw" (non-canonical) expression instead**, use
+`ce.box(expr, {canonical: false})` or `ce.parse(latex, {canonical: false})`.
 
 ```js
-const expr = "\\frac{3}{-5}";
+const expr = '\\frac{3}{-5}';
 
 ce.parse(expr);
 // canonical form ➔ ["Rational", -3, 5]
 
-ce.parse(expr, {canonical: false})
+ce.parse(expr, { canonical: false });
 // non-canonical form ➔ ["Divide", 3, -5]
 ```
 
@@ -154,24 +153,23 @@ match expectations.
 
 A canonical expression may include additional errors compared to a non-canonical
 expression, for example `["Divide", 2, 5, 6]` (three arguments instead of two),
-`["Add", 2, "True"]` (mismatched argument domain, expected a number but got a 
+`["Add", 2, "True"]` (mismatched argument domain, expected a number but got a
 boolean).
 
 **To check if an expression contains errors** use `expr.isValid`.
 
-When doing this check on a canonical expression it takes into consideration not 
-only possible syntax errors, but also semantic errors (incorrect number or 
+When doing this check on a canonical expression it takes into consideration not
+only possible syntax errors, but also semantic errors (incorrect number or
 domain of arguments, etc...).
 
 </section>
-
 
 ## Mutability
 
 Unless otherwise specified, expressions are immutable.
 
 The functions that manipulate Boxed Expressions, such as `expr.simplify()`,
-`expr.evaluate()`, `expr.N()` return a new Boxed Expression, without modifying 
+`expr.evaluate()`, `expr.N()` return a new Boxed Expression, without modifying
 `expr`.
 
 However, the properties of the expression may change, since some of them may
@@ -209,8 +207,6 @@ function itself is pure, and all its arguments are pure as well.
 
 **To check if an expression is pure**, use `expr.isPure`.
 
-
-
 ## Checking the Kind of Expression
 
 To identify if an expression is a number, symbol, function, string or
@@ -218,11 +214,11 @@ dictionary, use the following boolean expressions:
 
 <div class="symbols-table first-column-header">
 
-| Kind       | Boolean Expression                                     |
-| :--------- | :----------------------------------------------------- |
-| **Number**     | `expr.numericValue !== null`                      |
+| Kind           | Boolean Expression                                     |
+| :------------- | :----------------------------------------------------- |
+| **Number**     | `expr.numericValue !== null`                           |
 | **Symbol**     | `expr.symbol !== null` <br> `expr.head === 'Symbol'`   |
-| **Function**   | `expr.ops !== null`                                   |
+| **Function**   | `expr.ops !== null`                                    |
 | **String**     | `expr.string !== null` <br> `expr.head === 'String'`   |
 | **Dictionary** | `expr.keys !== null` <br> `expr.head === 'Dictionary'` |
 
@@ -300,7 +296,7 @@ property.
 | `incompatible-domain`          | the argument provided does not match the expected domain                                                         |
 | `unexpected-argument`          | too many arguments provided                                                                                      |
 | `expected-argument`            | not enough arguments provided                                                                                    |
-| `invalid-symbol-name`          | the name of the symbol cannot be used (see [MathJSON Symbols](/math-json/#symbols))                              |
+| `invalid-identifier`           | the identifier cannot be used (see [MathJSON Symbols](/math-json/#symbols))                                      |
 | `invalid-domain`               | the domain is not a valid domain literal or domain expression                                                    |
 | `expected-closing-delimiter`   | a closing `}` was expected, but is missing                                                                       |
 | `unexpected-closing-delimiter` | a closing `}` was encountered, but not expected                                                                  |

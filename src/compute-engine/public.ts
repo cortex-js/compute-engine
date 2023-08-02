@@ -424,6 +424,10 @@ export interface BoxedExpression {
    */
   readonly json: Expression;
 
+  /** For debugging, the raw MathJSON representation of this expression without decanonicalization.
+   * @internal */
+  readonly rawJson: Expression;
+
   /**
    * The scope in which this expression has been defined.
    * Is null when the expression is not canonical.

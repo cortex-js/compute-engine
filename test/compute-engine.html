@@ -496,12 +496,37 @@
 
       // const ce = new ComputeEngine({ latexDictionary });
 
+      ce.jsonSerializationOptions = {
+        exclude: [],
+        shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
+        metadata: [],
+        precision: 'max',
+        repeatingDecimals: false,
+      };
       ce.pushScope({ hundred: 100 });
       ce.defineFunction('suma', {
         signature: {
           evaluate: (ce, args) => ce.box(args[0].N() + args[1].N()),
         },
       });
+
+      console.log(ce.parse('\\mathrm{abc}'));
+      console.log(ce.parse('e^{i\\pi}'));
+
+      console.log(ce.box('מְהִירוּת‎').toString());
+      console.log(ce.parse('\\mathrm{半径}').toString());
+
+      console.log(ce.parse('\\mathrm{🍕🔪}').toString());
+      console.log(ce.parse('\\vec{x}').toString());
+      console.log(ce.parse('\\mathbb{X}').toString());
+      console.log(ce.parse('\\alpha_0').toString());
+      console.log(ce.parse('👨🏻‍🎤').toString());
+      console.log(ce.parse('\\mathrm{半径}').toString());
+      console.log(ce.parse('半').toString());
+
+      console.log(
+        ce.box(['Add', ['Divide', '1', '6'], '5'], { canonical: false }).latex
+      );
 
       updateAssumptions();
 
@@ -510,8 +535,8 @@
       // console.log(randomExpr.json);
       // mf.value = randomExpr.latex;
 
-      mf.value =
-        '\\mathrm{\\Delta钢筋}=\\mathrm{\\Delta钢铁}+\\mathrm{\\Delta混凝}土';
+      // mf.value = '(a+b+c)^2';
+      mf.value = '\\frac{b+1}{a}-\\frac{b+1}{a}';
       // mf.value = '\\mathrm{\\Delta bc}=\\mathrm{abc}+\\mathrm{def}土';
       // mf.value = '\\mathrm{\\alpha_{12}}';
 
@@ -611,6 +636,9 @@
             'background: transparent'
           );
         }
+
+        console.log(expr.isEqual(ce.parse('\\frac{b+1}{2}')));
+        console.log(expr.isSame(ce.parse('\\frac{b+1}{2}')));
 
         updateLatex(null, 'symbols');
         updateLatex(null, 'solve');

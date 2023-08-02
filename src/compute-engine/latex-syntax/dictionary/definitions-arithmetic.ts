@@ -121,33 +121,34 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
     // If it is the sum of an integer and a rational, use a special form
     // (e.g. 1 + 1/2 -> 1 1/2)
     if (nops(expr) === 2 && serializer.options.invisiblePlus !== '+') {
-      const op1 = op(expr, 1);
-      const op2 = op(expr, 2);
+      const [op1, op2] = [op(expr, 1), op(expr, 2)];
 
-      let lhs = machineValue(op1);
-      let rhs = rationalValue(op2);
-      if (lhs === null || rhs === null) {
-        lhs = machineValue(op2);
-        rhs = rationalValue(op1);
+      let [lhs, rhs] = [op1, op2];
+      let lhsValue = machineValue(lhs);
+      let rhsValue = rationalValue(rhs);
+      if (lhsValue === null || rhsValue === null) {
+        [lhs, rhs] = [op2, op1];
+        lhsValue = machineValue(lhs);
+        rhsValue = rationalValue(rhs);
       }
 
-      if (lhs !== null && rhs !== null) {
+      if (lhsValue !== null && rhsValue !== null) {
         if (
-          isFinite(lhs) &&
-          Number.isInteger(lhs) &&
-          lhs >= 0 &&
-          lhs <= 1000 &&
-          isFinite(rhs[0]) &&
-          isFinite(rhs[1]) &&
-          rhs[0] > 0 &&
-          rhs[0] <= 100 &&
-          rhs[1] <= 100
+          isFinite(lhsValue) &&
+          Number.isInteger(lhsValue) &&
+          lhsValue >= 0 &&
+          lhsValue <= 1000 &&
+          isFinite(rhsValue[0]) &&
+          isFinite(rhsValue[1]) &&
+          rhsValue[0] > 0 &&
+          rhsValue[0] <= 100 &&
+          rhsValue[1] <= 100
         ) {
           // Don't include the '+' sign, it's a rational, use 'invisible plus'
           result = joinLatex([
-            serializer.serialize(op1),
+            serializer.serialize(lhs),
             serializer.options.invisiblePlus,
-            serializer.serialize(op2),
+            serializer.serialize(rhs),
           ]);
 
           serializer.level += 1;

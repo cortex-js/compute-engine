@@ -10,7 +10,7 @@ import {
   Parser,
   FunctionEntry,
 } from './public';
-import { COMMON_IDENTIFIER_NAME, tokenize, tokensToString } from './tokenizer';
+import { tokenize, tokensToString } from './tokenizer';
 import {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
@@ -29,7 +29,6 @@ import {
   getSequence,
   head,
   isEmptySequence,
-  isValidIdentifier,
   machineValue,
   nops,
   op,
@@ -37,6 +36,7 @@ import {
   stringValue,
   symbol,
 } from '../../math-json/utils';
+import { matchIdentifier, matchInvalidIdentifier } from './parse-identifier';
 
 /** These delimiters can be used as 'shorthand' delimiters in
  * `openDelimiter` and `closeDelimiter` for `matchfix` operators.
@@ -128,7 +128,7 @@ export const DEFAULT_LATEX_NUMBER_OPTIONS: NumberFormattingOptions = {
   precision: 6, // with machine numbers, up to 15 assuming 2^53 bits floating points
   positiveInfinity: '\\infty',
   negativeInfinity: '-\\infty',
-  notANumber: '\\operatorname{NaN}',
+  notANumber: '\\mathrm{NaN}',
   decimalMarker: '.', // Use `{,}` for comma as a decimal marker
   groupSeparator: '\\,', // for thousands, etc...
   exponentProduct: '\\cdot',
@@ -148,13 +148,10 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
 
   parseArgumentsOfUnknownLatexCommands: true,
   parseNumbers: true,
-  parseUnknownIdentifier: (s: string, parser: Parser) => {
-    if (parser.computeEngine?.lookupFunction(s) !== undefined)
-      return 'function';
-    if (/^\p{L}/u.test(s)) return 'symbol';
-    return 'unknown';
-  },
-
+  parseUnknownIdentifier: (id, parser) =>
+    parser.computeEngine?.lookupFunction(id) !== undefined
+      ? 'function'
+      : 'symbol',
   preserveLatex: false,
 };
 
@@ -504,6 +501,7 @@ export class _Parser implements Parser {
     const index = this.index;
     let caretCount = 0;
     while (this.match('^')) caretCount += 1;
+    if (caretCount < 2) this.index = index;
     if (caretCount >= 2) {
       let digits = '';
       let n = 0;
@@ -566,8 +564,7 @@ export class _Parser implements Parser {
       }
     }
     this.index = index;
-    const nextToken = this.next();
-    return nextToken;
+    return null;
   }
 
   matchColor(_background = false): string | null {
@@ -1219,111 +1216,16 @@ export class _Parser implements Parser {
     return null;
   }
 
-  /**
-   * Match an identifier. It can be:
-   * - a symbol
-   * - a simple multi-letter identifier: `\mathrm{speed}`
-   * - a complex multi-letter identifier: `\mathrm{\alpha_{12}}` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
-   * - a command: `\alpha`  @todo
-   */
-  matchIdentifier(): string | Expression | null {
-    //
-    // An identifier wrapped in a command
-    //
-    const modifier =
-      {
-        '\\operatorname': '',
-        '\\mathrm': '',
-        '\\mathit': 'italic.',
-        '\\mathbf': 'bold.',
-        // bold-italic is not supported
-        '\\mathscr': 'script.',
-        '\\mathcal': 'calligraphic.',
-        // bold-script is not supported
-        // bold-calligraphic is not supported
-        '\\mathfrak': 'gothic.',
-        // bold-gothic is not supported
-        // bold-fraktur is not supported
-        '\\mathsf': 'sans-serif.',
-        // italic-sans-serif is not supported
-        '\\mathtt': 'monospace.',
-        '\\mathbb': 'double-struck.',
-      }[this.peek] ?? null;
-
-    if (modifier !== null) {
-      this.next();
-      if (!this.match('<{>')) {
-        this.index -= 1;
-        return null;
-      }
-
-      const start = this.index;
-
-      let id = this.matchIdentifierSegment();
-
-      if (id === null) return this.error('expected-string-argument', start);
-
-      id = `${modifier}${id}`;
-
-      let done = false;
-      while (!done) {
-        if (this.match('<}>')) {
-          done = true;
-        } else if (this.match('_')) {
-          const sub = this.matchIdentifierSegment();
-          id = `${id}_${sub}`;
-        } else if (this.match('^')) {
-          const sup = this.matchIdentifierSegment();
-          id = `${id}__${sup}`;
-        } else {
-          const sub = this.matchIdentifierSegment();
-          if (sub === null) done = true;
-          else id = `${id}${sub}`;
-        }
-      }
-
-      if (isValidIdentifier(id)) return id;
-      return this.error('invalid-symbol-name', start);
-    }
-
-    //
-    // Single letter identifier
-    //
-    if (/^\p{L}$/u.test(this.peek)) return this.next();
-
-    return null;
-  }
-
-  // A portion of an identifier, e.g. `\alpha \beta` or `speed`
-  // Stops on "_" (subscript), "^" (superscript) or non-letter
-  matchIdentifierSegment(): string | null {
-    let result = '';
-    while (true) {
-      if (
-        this.atEnd ||
-        /\d/.test(this.peek) ||
-        this.peek === '"' ||
-        this.peek === '_' ||
-        this.peek === '^' ||
-        this.peek === '<}>'
-      )
-        return result ? result : null;
-      let id = this.peek;
-      if (id.startsWith('\\')) {
-        id = id.substring(1);
-        if (!COMMON_IDENTIFIER_NAME.includes(id)) return null;
-        this.next();
-        result += id;
-      } else result += this.next();
-    }
+  matchIdentifier(): string | null {
+    return matchIdentifier(this);
   }
 
   /**
-   * A function is a function identifier followed by arguments
-   * - a function with explicit arguments `f(x)`
-   * - a function with explicit arguments `\mathrm{floor}(x)`
-   * - a function name: `\mathrm{floor}`
-   * - a function with implicit arguments: `\cos x` (via a  custom parser)
+   * A function is an identifier followed by arguments
+   * - a single letter identifier with explicit arguments `f(x)`
+   * - a multiletter identifier with explicit arguments `\mathrm{floor}(x)`
+   * - an identifier: `\mathrm{floor}`
+   * - a command with implicit arguments: `\cos x` (via a  custom parser)
    *
    */
 
@@ -1356,31 +1258,23 @@ export class _Parser implements Parser {
     //
 
     const fn = this.matchIdentifier();
-    if (fn === null) {
-      this.index = start;
-      return null;
-    }
-    // If not a string, this was a malformed name (invalid identifier)
-    if (typeof fn !== 'string') return fn;
+    if (fn === null) return null;
 
     //
     // Is it a generic multi-char function identifier?
     //
-    if (this.options.parseUnknownIdentifier?.(fn, this) === 'function') {
-      // Function application:
-      // Is it followed by an argument list inside parentheses?
-      const seq = this.matchArguments('enclosure');
-      return seq ? [fn, ...seq] : fn;
+    if (this.options.parseUnknownIdentifier?.(fn, this) !== 'function') {
+      this.index = start;
+      return null;
     }
-
-    this.index = start;
-    return null;
+    // Function application:
+    // Is it followed by an argument list inside parentheses?
+    const seq = this.matchArguments('enclosure');
+    return seq ? [fn, ...seq] : fn;
   }
 
   /**
-   * A symbol can be:
-   * - a single-letter variable: `x`
-   * - a single LaTeX command: `\pi`
+   * A symbol is an identifier or a custom definition
    */
   matchSymbol(): Expression | null {
     const start = this.index;
@@ -1401,24 +1295,19 @@ export class _Parser implements Parser {
     }
 
     // No custom parser worked. Backtrack.
+    // (we shouldn't need to backtrack, but this is in case there's a bug
+    // in a custom parser)
     this.index = start;
 
     const id = this.matchIdentifier();
-
-    // No match. Backtrack and exit.
-    if (id === null) {
-      this.index = start;
-      return null;
-    }
-
-    // Was there an error? Return it.
-    if (typeof id !== 'string') return id;
+    if (id === null) return null;
 
     // Are we OK with it as a symbol?
-    if (id && this.options.parseUnknownIdentifier?.(id, this) === 'symbol')
-      return id;
+    // Note: by the time we call parseUnknownIdentifier(),
+    // we know it is a valid identifier
+    if (this.options.parseUnknownIdentifier?.(id, this) === 'symbol') return id;
 
-    // Backtrack
+    // This was an identifier, but not a valid symbol. Backtrack
     this.index = start;
     return null;
   }
@@ -1946,11 +1835,17 @@ export class _Parser implements Parser {
     this.index = start;
     const closeDelimiter = this.matchEnclosureOpen();
     if (closeDelimiter)
-      return this.error(['expected-close-delimiter', closeDelimiter], index);
+      return this.error(
+        ['expected-close-delimiter', { str: closeDelimiter }],
+        index
+      );
 
     const openDelimiter = this.matchEnclosureClose();
     if (openDelimiter)
-      return this.error(['expected-open-delimiter', openDelimiter], start);
+      return this.error(
+        ['expected-open-delimiter', { str: openDelimiter }],
+        start
+      );
 
     // Capture any potential arguments to this unexpected command
     this.index = index;
@@ -2021,14 +1916,14 @@ export class _Parser implements Parser {
     //    (group fence, absolute value, integral, etc...)
     // (check before other LaTeX commands)
     //
-    if (result === null) result = this.matchEnclosure();
+    result ??= this.matchEnclosure();
 
     //
     // 4. Is it an environment?
     //    `\begin{...}...\end{...}`
     // (check before other LaTeX commands)
     //
-    if (result === null) result = this.matchEnvironment();
+    result ??= this.matchEnvironment();
 
     //
     // 5. Is it a symbol, a LaTeX command or a function call?
@@ -2044,7 +1939,14 @@ export class _Parser implements Parser {
     if (result === null && this.matchAll(this._notANumberTokens))
       result = { num: 'NaN' };
 
-    if (result === null) result = this.matchFunction() ?? this.matchSymbol();
+    result ??=
+      this.matchFunction() ??
+      this.matchSymbol() ??
+      matchInvalidIdentifier(this);
+
+    // We're parsing invalid identifier explicitly so we can get a
+    // better error message, otherwise we would end up with "unexpected
+    // token")
 
     //
     // 6. Are there postfix operators ?
@@ -2065,12 +1967,12 @@ export class _Parser implements Parser {
     }
 
     //
-    // 7. We've encountered an unexpected LaTeX command
+    // 8. We've encountered an unexpected LaTeX command
     //
-    if (result === null) result = this.matchUnexpectedLatexCommand();
+    result ??= this.matchUnexpectedLatexCommand();
 
     //
-    // 8. Are there superscript or subfix operators?
+    // 9. Are there superscript or subfix operators?
     //
     if (result !== null) result = this.matchSupsub(result);
 

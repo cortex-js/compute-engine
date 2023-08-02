@@ -71,7 +71,7 @@ import {
   _BoxedDomain,
 } from './boxed-expression/boxed-domain';
 import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expression';
-import { isValidIdentifier } from '../math-json/utils';
+import { isValidIdentifier, validateIdentifier } from '../math-json/utils';
 import { makeFunctionDefinition } from './boxed-expression/boxed-function-definition';
 import {
   inverse,
@@ -824,8 +824,9 @@ export class ComputeEngine implements IComputeEngine {
   defineSymbol(name: string, def: SymbolDefinition): BoxedSymbolDefinition {
     if (!this.context)
       throw Error('Symbol cannot be defined: no scope available');
+
     if (name.length === 0 || !isValidIdentifier(name))
-      throw Error('Invalid identifier ' + name);
+      throw Error(`Invalid identifier "${name}": ${validateIdentifier(name)}}`);
 
     if (!this.context.idTable) this.context.idTable = new Map();
 
@@ -842,7 +843,7 @@ export class ComputeEngine implements IComputeEngine {
     if (!this.context)
       throw Error('Function cannot be defined: no scope available');
     if (name.length === 0 || !isValidIdentifier(name))
-      throw Error('Invalid identifier ' + name);
+      throw Error(`Invalid identifier "${name}": ${validateIdentifier(name)}}`);
 
     if (!this.context.idTable) this.context.idTable = new Map();
 
@@ -1077,27 +1078,42 @@ export class ComputeEngine implements IComputeEngine {
         where = '';
     }
 
-    if (Array.isArray(message) && message[0] === 'invalid-domain') {
-      return boxDomain(this, [
-        'Error',
-        ['ErrorCode', "'invalid-domain'", message[1]],
+    if (Array.isArray(message)) {
+      if (message[0] === 'invalid-domain') {
+        return boxDomain(this, [
+          'Error',
+          ['ErrorCode', "'invalid-domain'", message[1]],
+        ]);
+      }
+    }
+    let msg: BoxedExpression | undefined = undefined;
+    if (Array.isArray(message) && message[0] === 'incompatible-domain') {
+      msg = new BoxedFunction(this, 'ErrorCode', [
+        this.string("'incompatible-domain'"),
+        boxDomain(this, message[1] as DomainExpression),
+        boxDomain(this, message[2] as DomainExpression),
       ]);
     }
-    const msg =
-      typeof message === 'string'
-        ? this.string(message)
-        : new BoxedFunction(this, 'ErrorCode', [
-            this.string(message[0]),
-            ...message.slice(1).map((x) => this.box(x, { canonical: false })),
-          ]);
+
+    if (typeof message === 'string') msg = this.string(message);
+
+    if (!msg && typeof message !== 'string')
+      msg = new BoxedFunction(this, 'ErrorCode', [
+        this.string(message[0]),
+        ...message
+          .slice(1)
+          .map((x) =>
+            typeof x === 'string' ? this.string(x) : this.string(x.toString())
+          ),
+      ]);
 
     if (!where)
-      return new BoxedFunction(this, 'Error', [msg], { canonical: false });
+      return new BoxedFunction(this, 'Error', [msg!], { canonical: false });
 
     return new BoxedFunction(
       this,
       'Error',
-      [msg, this.box(where, { canonical: false })],
+      [msg!, this.box(where, { canonical: false })],
       { canonical: false }
     );
   }
@@ -1265,7 +1281,7 @@ export class ComputeEngine implements IComputeEngine {
     options ??= {};
     if (!('canonical' in options)) options.canonical = true;
 
-    // Symbol names should use the Unicode NFC canonical form
+    // Identifiers such as symbol names should use the Unicode NFC canonical form
     name = name.normalize();
 
     // These three are not symbols (some of them are not even valid symbol
@@ -1281,11 +1297,10 @@ export class ComputeEngine implements IComputeEngine {
     if (this.strict && !isValidIdentifier(name)) {
       const where = options?.metadata?.latex;
       const nameStr = `'${name}'`;
-      if (where)
-        return this.error(
-          ['invalid-symbol-name', nameStr],
-          where ? ['Latex', `'${where}'`] : nameStr
-        );
+      return this.error(
+        ['invalid-identifier', validateIdentifier(name)],
+        where ? ['Latex', `'${where}'`] : nameStr
+      );
     }
 
     // If there is some LaTeX metadata provided, we can't use the
@@ -1403,10 +1418,8 @@ export class ComputeEngine implements IComputeEngine {
     options?: { canonical?: boolean }
   ): BoxedExpression | null {
     if (typeof latex !== 'string') return null;
-    return this.box(
-      this.latexSyntax.parse(latexString(latex) ?? latex),
-      options
-    );
+    const result = this.latexSyntax.parse(latexString(latex) ?? latex);
+    return this.box(result, options);
   }
 
   serialize(x: Expression | BoxedExpression): string {

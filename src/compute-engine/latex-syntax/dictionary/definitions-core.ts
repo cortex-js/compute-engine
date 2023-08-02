@@ -242,7 +242,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         code === 'unexpected-command' ||
         code === 'unexpected-operator' ||
         code === 'unexpected-token' ||
-        code === 'invalid-symbol-name' ||
+        code === 'invalid-identifier' ||
         code === 'unknown-environment' ||
         code === 'unexpected-base' ||
         code === 'incompatible-domain' ||
@@ -560,7 +560,7 @@ function parseTextRun(
         text += '$$';
         parser.index = index;
       }
-    } else text += parser.matchChar() ?? '';
+    } else text += parser.matchChar() ?? parser.next();
   }
 
   // Apply leftovers
