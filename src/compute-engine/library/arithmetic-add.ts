@@ -127,7 +127,7 @@ export function canonicalSummation(
   body: BoxedExpression,
   range: BoxedExpression | undefined
 ) {
-  body ??= ce.error(['missing', 'Function']); // @todo not exactly a function, more like a 'NumericExpression'
+  body ??= ce.error('missing');
 
   let index: BoxedExpression | null = null;
   let lower: BoxedExpression | null = null;
@@ -224,7 +224,7 @@ export function evalSummation(
     return ce.add(terms).evaluate();
   }
 
-  let sum: Rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [0, 1];
+  let sum: Rational = bignumPreferred(ce) ? [BigInt(0), BigInt(1)] : [0, 1];
 
   if (!fn.scope)
     for (let i = lower; i <= upper; i++) {
