@@ -201,50 +201,33 @@ describe('NUMERIC', () => {
 
 describe('INVALID DOMAINS', () => {
   test('NotADomainLiteral', () =>
-    expect(engine.domain('NotADomainLiteral').toJSON()).toMatchInlineSnapshot(
-      `["Error", ["ErrorCode", "'invalid-domain'", "'"NotADomainLiteral"'"]]`
-    ));
+    expect(() => engine.domain('NotADomainLiteral').toJSON()).toThrow());
 
   test('NotADomainConstructor', () => {
-    expect(
+    expect(() =>
       engine
         .domain([
           'NotADomainConstructor',
           'Integer',
         ] as unknown as DomainExpression)
         .toJSON()
-    ).toMatchInlineSnapshot(`
-      [
-        "Error",
-        [
-          "ErrorCode",
-          "'invalid-domain'",
-          "'["NotADomainConstructor","Integer"]'"
-        ]
-      ]
-    `);
+    ).toThrow();
   });
 
   test('Missing parameters (Range)', () => {
     expect(
       engine.domain(['Range'] as unknown as DomainExpression).toJSON()
-    ).toMatchInlineSnapshot(
-      `["Error", ["ErrorCode", "'invalid-domain'", "'["Range"]'"]]`
-    );
+    ).toMatchInlineSnapshot(`["Domain", "Integer"]`);
   });
 
   test('Missing parameters (Maybe)', () => {
-    expect(
+    expect(() =>
       engine.domain(['Maybe'] as unknown as DomainExpression)
-    ).toMatchInlineSnapshot(
-      `["Error", ["ErrorCode", "'invalid-domain'", "'["Maybe"]'"]]`
-    );
+    ).toThrow();
   });
 
   test('NotADomainLiteral in parametric expression', () =>
-    expect(() =>
-      engine.domain(['Function', 'NotADomainLiteral'])
-    ).toThrowError());
+    expect(() => engine.domain(['Function', 'NotADomainLiteral'])).toThrow());
 });
 
 // describe('SYMBOLS, FUNCTION HEADS', () => {});

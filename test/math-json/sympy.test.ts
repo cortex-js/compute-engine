@@ -96,7 +96,9 @@ describe('Sympy parsing Numeric expressions', () => {
         {
           "str": "unexpected-token",
         },
-        "**2 / 3 + 5",
+        {
+          "str": "**2 / 3 + 5",
+        },
       ]
     `);
   });
@@ -108,7 +110,9 @@ describe('Sympy parsing Numeric expressions', () => {
         {
           "str": "unexpected-token",
         },
-        "-2*(-(-x + 1/x)/(x*(x - 1/x)**2) - 1/(x*(x - 1/x))) - 1",
+        {
+          "str": "-2*(-(-x + 1/x)/(x*(x - 1/x)**2) - 1/(x*(x - 1/x))) - 1",
+        },
       ]
     `);
   });

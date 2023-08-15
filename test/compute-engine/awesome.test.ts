@@ -179,7 +179,7 @@ describe('Nth PRIME NUMBER', () =>
                               [
                                 "ErrorCode",
                                 "'incompatible-domain'",
-                                "Symbol",
+                                ["Domain", "Symbol"],
                                 ["Domain", "Anything"]
                               ]
                             ],
@@ -194,7 +194,7 @@ describe('Nth PRIME NUMBER', () =>
                             [
                               "ErrorCode",
                               "'incompatible-domain'",
-                              "Symbol",
+                              ["Domain", "Symbol"],
                               ["Domain", "Anything"]
                             ]
                           ],
@@ -215,7 +215,7 @@ describe('Nth PRIME NUMBER', () =>
                 [
                   "ErrorCode",
                   "'incompatible-domain'",
-                  "Symbol",
+                  ["Domain", "Symbol"],
                   ["Domain", "Anything"]
                 ]
               ],
@@ -287,7 +287,7 @@ describe('Nth PRIME NUMBER', () =>
                               [
                                 "ErrorCode",
                                 "'incompatible-domain'",
-                                "Symbol",
+                                ["Domain", "Symbol"],
                                 ["Domain", "Anything"]
                               ]
                             ],
@@ -302,7 +302,7 @@ describe('Nth PRIME NUMBER', () =>
                             [
                               "ErrorCode",
                               "'incompatible-domain'",
-                              "Symbol",
+                              ["Domain", "Symbol"],
                               ["Domain", "Anything"]
                             ]
                           ],
@@ -323,7 +323,7 @@ describe('Nth PRIME NUMBER', () =>
                 [
                   "ErrorCode",
                   "'incompatible-domain'",
-                  "Symbol",
+                  ["Domain", "Symbol"],
                   ["Domain", "Void"]
                 ]
               ],

@@ -37,7 +37,7 @@ describe('MATCHFIX', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            "Number",
+            ["Domain", "Number"],
             ["Domain", "List"]
           ],
           ["List", "a", ["List", "b", "c"]]
@@ -144,12 +144,12 @@ describe('MATCHFIX invalid', () => {
     expect(check('(')).toMatchInlineSnapshot(`
       latex     = [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", ")"],
+        ["ErrorCode", "'expected-close-delimiter'", "')'"],
         ["Latex", "'('"]
       ]
       [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", ")"],
+        ["ErrorCode", "'expected-close-delimiter'", "')'"],
         ["Latex", "'('"]
       ]
     `));
@@ -157,12 +157,12 @@ describe('MATCHFIX invalid', () => {
     expect(check(')')).toMatchInlineSnapshot(`
       latex     = [
         "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "("],
+        ["ErrorCode", "'expected-open-delimiter'", "'('"],
         ["Latex", "')'"]
       ]
       [
         "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "("],
+        ["ErrorCode", "'expected-open-delimiter'", "'('"],
         ["Latex", "')'"]
       ]
     `);
@@ -175,7 +175,7 @@ describe('MATCHFIX invalid', () => {
         ["Negate", ["Error", "'missing'"]],
         [
           "Error",
-          ["ErrorCode", "'expected-close-delimiter'", ")"],
+          ["ErrorCode", "'expected-close-delimiter'", "')'"],
           ["Latex", "'('"]
         ]
       ]
@@ -186,7 +186,7 @@ describe('MATCHFIX invalid', () => {
     expect(engine.parse('(3+x').json).toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", ")"],
+        ["ErrorCode", "'expected-close-delimiter'", "')'"],
         ["Latex", "'('"]
       ]
     `);
