@@ -63,9 +63,9 @@ export class Product {
   constructor(
     ce: IComputeEngine,
     xs?: BoxedExpression[],
-    options?: { canonical?: boolean }
+    readonly options?: { canonical?: boolean }
   ) {
-    options ??= {};
+    options = options ? { ...options } : {};
     if (!('canonical' in options)) options.canonical = true;
     this._isCanonical = options.canonical!;
 

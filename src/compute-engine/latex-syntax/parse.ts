@@ -14,10 +14,10 @@ import { tokenize, tokensToString } from './tokenizer';
 import {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
-  InfixEntry,
-  PostfixEntry,
-  PrefixEntry,
-  SymbolEntry,
+  IndexedInfixEntry,
+  IndexedPostfixEntry,
+  IndexedPrefixEntry,
+  IndexedIdentifierEntry,
 } from './dictionary/definitions';
 
 import { IComputeEngine } from '../public';
@@ -302,11 +302,10 @@ export class _Parser implements Parser {
   /**
    * Return true if
    * - at end of the token stream
-   * - the upcoming tokens match `t.tokens`
    * - the `t.condition` function returns true
    * Note: the `minPrec` condition is not checked. It should be checked separately.
    */
-  atTerminator(t?: Terminator): boolean {
+  atTerminator(t?: Partial<Terminator>): boolean {
     if (this.atBoundary) return true;
     if (t?.condition && t.condition(this)) return true;
     return false;
@@ -385,15 +384,25 @@ export class _Parser implements Parser {
 
   /** Return all the definitions that potentially match the tokens ahead */
   peekDefinitions(kind: 'function'): [FunctionEntry, number][] | null;
-  peekDefinitions(kind: 'symbol'): [SymbolEntry, number][] | null;
-  peekDefinitions(kind: 'postfix'): [PostfixEntry, number][] | null;
-  peekDefinitions(kind: 'infix'): [InfixEntry, number][] | null;
-  peekDefinitions(kind: 'prefix'): [PrefixEntry, number][] | null;
+  peekDefinitions(
+    kind: 'identifier'
+  ): [IndexedIdentifierEntry, number][] | null;
+  peekDefinitions(kind: 'postfix'): [IndexedPostfixEntry, number][] | null;
+  peekDefinitions(kind: 'infix'): [IndexedInfixEntry, number][] | null;
+  peekDefinitions(kind: 'prefix'): [IndexedPrefixEntry, number][] | null;
   peekDefinitions(
     kind: 'operator'
-  ): [InfixEntry | PrefixEntry | PostfixEntry, number][] | null;
+  ):
+    | [IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry, number][]
+    | null;
   peekDefinitions(
-    kind: 'function' | 'symbol' | 'infix' | 'prefix' | 'postfix' | 'operator'
+    kind:
+      | 'function'
+      | 'identifier'
+      | 'infix'
+      | 'prefix'
+      | 'postfix'
+      | 'operator'
   ): [FunctionEntry | IndexedLatexDictionaryEntry, number][] | null {
     let defs: (undefined | IndexedLatexDictionaryEntry[])[];
     if (kind === 'function') {
@@ -422,6 +431,7 @@ export class _Parser implements Parser {
     } else {
       defs = this.lookAhead().map((x, n) => this._dictionary[kind][n]?.get(x));
     }
+
     const result: [IndexedLatexDictionaryEntry, number][] = [];
     for (let i = defs.length; i > 0; i--) {
       if (defs[i] !== undefined) {
@@ -924,8 +934,8 @@ export class _Parser implements Parser {
   }
 
   matchInfixOperator(lhs: Expression, until?: Terminator): Expression | null {
-    if (!until) until = { minPrec: 0 };
-    if (!until.minPrec) until = { ...until, minPrec: 0 };
+    until ??= { minPrec: 0 };
+    if (until.minPrec === undefined) until = { ...until, minPrec: 0 };
 
     const defs = this.peekDefinitions('infix');
     if (defs === null) return null;
@@ -947,9 +957,11 @@ export class _Parser implements Parser {
    *  (i.e. we interpret `\cos 2x + 1` as `\cos(2x) + 1`)
    */
   matchArguments(
-    kind: undefined | '' | 'enclosure' | 'implicit'
+    kind: undefined | '' | 'enclosure' | 'implicit',
+    until?: Terminator
   ): Expression[] | null {
     if (!kind) return null;
+    if (this.atTerminator(until)) return null;
 
     const savedIndex = this.index;
 
@@ -975,7 +987,7 @@ export class _Parser implements Parser {
 
       // No group, but arguments without parentheses are allowed
       // Read a primary
-      const primary = this.matchExpression({ minPrec: 390 });
+      const primary = this.matchExpression({ ...until, minPrec: 390 });
       if (primary !== null) return [primary];
       return null;
     }
@@ -994,8 +1006,58 @@ export class _Parser implements Parser {
    * - a subscript to indicate an argument
    * - an argument, optionally inside an enclosure
    */
-  matchFunctionSuffix(): Expression | null {
-    return null;
+  matchFunctionSuffix(id: string): Expression {
+    // Is it followed by one or more postfix (e.g. `\prime`)
+    let fn: Expression = id;
+    do {
+      const pf = this.matchPostfix(fn);
+      if (pf === null) break;
+      fn = pf;
+    } while (true);
+
+    // Is it followed by an argument list inside parentheses?
+    const seq = this.matchArguments('enclosure');
+    return seq ? [fn, ...seq] : id;
+  }
+
+  /** A prime suffix is a sequence of `'`, `\prime` or `\doubleprime`
+   * after a function or in a superscript.
+   */
+  matchPrimeSuffix(): number {
+    this.skipSpace();
+    const start = this.index;
+    let count = 0;
+    if (this.match('^')) {
+      if (this.match('<{>')) {
+        if (this.match('(')) {
+          const n = this.matchNumber();
+          if (n && this.match(')')) return parseInt(n);
+          this.index = start;
+          return 0;
+        }
+        do {
+          const c = countPrimeLevel(this);
+          if (c === 0) break;
+          count += c;
+        } while (true);
+        if (count !== 0 && this.match('<}>')) return count;
+        this.index = start;
+        return 0;
+      }
+      count = countPrimeLevel(this);
+      if (count !== 0) return count;
+      this.index = start;
+      return 0;
+    }
+    do {
+      const c = countPrimeLevel(this);
+      if (c === 0) break;
+      count += c;
+    } while (true);
+
+    if (count !== 0) return count;
+    this.index = start;
+    return 0;
   }
 
   /** If matches the normalized open delimiter, return the
@@ -1229,23 +1291,23 @@ export class _Parser implements Parser {
    *
    */
 
-  matchFunction(): Expression | null {
+  matchFunction(until?: Partial<Terminator>): Expression | null {
+    if (this.atTerminator(until)) return null;
+
     const start = this.index;
     //
-    // Is there a definition for this as a function?
-    // (a string wrapped in `\\mathrm`, etc...) with some optional arguments
+    // Is there a definition for this as a function? (a string wrapped in
+    //  `\\mathrm`, etc...)
     //
     const fnDefs = this.peekDefinitions('function');
     if (fnDefs) {
       for (const [def, tokenCount] of fnDefs) {
         this.index = start + tokenCount;
         if (typeof def.parse === 'function') {
-          const result = def.parse(this);
+          const result = def.parse(this, until as Terminator);
           if (result) return result;
         } else {
-          // Is it followed by an argument list inside parentheses?
-          const seq = this.matchArguments('enclosure');
-          return seq ? [def.name!, ...seq] : def.name!;
+          return this.matchFunctionSuffix(def.name!);
         }
       }
     }
@@ -1268,27 +1330,27 @@ export class _Parser implements Parser {
       return null;
     }
     // Function application:
-    // Is it followed by an argument list inside parentheses?
-    const seq = this.matchArguments('enclosure');
-    return seq ? [fn, ...seq] : fn;
+    return this.matchFunctionSuffix(fn);
   }
 
   /**
    * A symbol is an identifier or a custom definition
    */
-  matchSymbol(): Expression | null {
+  matchSymbol(until?: Partial<Terminator>): Expression | null {
+    if (this.atTerminator(until)) return null;
+
     const start = this.index;
 
     //
     // Is there a custom parser for this symbol?
     //
-    const defs = this.peekDefinitions('symbol');
+    const defs = this.peekDefinitions('identifier');
     if (defs) {
       for (const [def, tokenCount] of defs) {
         this.index = start + tokenCount;
         // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling parseUnknownIdentifier() or somethinglike it (parseUnknownIdentifier() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
         if (typeof def.parse === 'function') {
-          const result = def.parse(this);
+          const result = def.parse(this, until as Terminator);
           if (result) return result;
         } else return def.name!;
       }
@@ -1638,7 +1700,7 @@ export class _Parser implements Parser {
    * => lhs is a number, rhs is a number, but not a literal
    */
   applyInvisibleOperator(
-    terminator: Terminator,
+    until: Terminator,
     lhs: Expression | null
   ): Expression | null {
     if (
@@ -1646,7 +1708,7 @@ export class _Parser implements Parser {
       head(lhs) === 'Error' ||
       symbol(lhs) === 'Nothing' ||
       isEmptySequence(lhs) ||
-      this.atTerminator(terminator) ||
+      this.atTerminator(until) ||
       this.options.applyInvisibleOperator === null
     )
       return null;
@@ -1660,7 +1722,7 @@ export class _Parser implements Parser {
     // Capture a right hand side expression, if there is one
     //
     const start = this.index;
-    const rhs = this.matchExpression({ ...terminator, minPrec: 390 });
+    const rhs = this.matchExpression({ ...until, minPrec: 390 });
     if (rhs === null || symbol(rhs) === 'Nothing' || isEmptySequence(rhs)) {
       this.index = start;
       return null;
@@ -1753,7 +1815,7 @@ export class _Parser implements Parser {
     if (opDefs) {
       opDefs = this.peekDefinitions('postfix');
       if (opDefs) {
-        const [def, n] = opDefs[0] as [PostfixEntry, number];
+        const [def, n] = opDefs[0] as [IndexedPostfixEntry, number];
         this.index += n;
         if (typeof def.parse === 'function') {
           const result = def.parse(this, this.error('missing', start));
@@ -1766,7 +1828,7 @@ export class _Parser implements Parser {
       // Check prefix before infix, to catch `-` as a single missing operand
       opDefs = this.peekDefinitions('prefix');
       if (opDefs) {
-        const [def, n] = opDefs[0] as [PrefixEntry, number];
+        const [def, n] = opDefs[0] as [IndexedPrefixEntry, number];
         this.index += n;
         if (typeof def.parse === 'function') {
           const result = def.parse(this, { minPrec: 0 });
@@ -1782,7 +1844,7 @@ export class _Parser implements Parser {
 
       opDefs = this.peekDefinitions('infix');
       if (opDefs) {
-        const [def, n] = opDefs[0] as [InfixEntry, number];
+        const [def, n] = opDefs[0] as [IndexedInfixEntry, number];
         this.index += n;
         if (typeof def.parse === 'function') {
           const result = def.parse(
@@ -1873,8 +1935,10 @@ export class _Parser implements Parser {
    *  <matchfix-op-open> <expression> [<matchfix-op-separator> <expression>] <matchfix-op-close>
    *
    */
-  matchPrimary(): Expression | null {
+  matchPrimary(until?: Partial<Terminator>): Expression | null {
     if (this.atBoundary) return null;
+
+    if (this.atTerminator(until)) return null;
 
     let result: Expression | null = null;
     const start = this.index;
@@ -1887,17 +1951,12 @@ export class _Parser implements Parser {
       return this.error('unexpected-closing-delimiter', start);
 
     if (this.match('<{>')) {
-      this.addBoundary(['<}>']);
-      result = this.matchExpression();
-      if (result === null) return this.boundaryError('expected-expression');
+      result = this.matchExpression({ condition: (p) => p.peek === '<}>' });
+      if (result === null) return this.error('expected-expression', start);
 
-      if (!this.matchBoundary()) {
+      if (!this.match('<}>')) {
         return this.decorate(
-          [
-            'Sequence',
-            result,
-            this.boundaryError('expected-closing-delimiter'),
-          ],
+          ['Sequence', result, this.error('expected-closing-delimiter', start)],
           start
         );
       }
@@ -1940,8 +1999,8 @@ export class _Parser implements Parser {
       result = { num: 'NaN' };
 
     result ??=
-      this.matchFunction() ??
-      this.matchSymbol() ??
+      this.matchFunction(until) ??
+      this.matchSymbol(until) ??
       matchInvalidIdentifier(this);
 
     // We're parsing invalid identifier explicitly so we can get a
@@ -1999,20 +2058,20 @@ export class _Parser implements Parser {
       return null;
     }
 
-    if (!until) until = { minPrec: 0 };
+    until ??= { minPrec: 0 };
     if (until.minPrec === undefined) until.minPrec = 0;
 
     //
     // 1. Do we have a prefix operator?
     //
-    let lhs = this.matchPrefixOperator({ ...until, minPrec: 0 } as Terminator);
+    let lhs = this.matchPrefixOperator({ ...until, minPrec: 0 });
 
     //
     // 2. Do we have a primary?
     // (if we had a prefix, it consumed the primary following it)
     //
     if (lhs === null) {
-      lhs = this.matchPrimary();
+      lhs = this.matchPrimary(until as Terminator);
       // If we got an empty sequence, ignore it.
       // This is returned by some purely presentational commands, for example `\displaystyle`
       if (head(lhs) === 'Sequence' && nops(lhs) === 0) lhs = null;
@@ -2023,7 +2082,7 @@ export class _Parser implements Parser {
     //
     if (lhs) {
       let done = false;
-      while (!done && !this.atTerminator(until as Terminator)) {
+      while (!done && !this.atTerminator(until)) {
         this.skipSpace();
 
         let result = this.matchInfixOperator(lhs, until as Terminator);
@@ -2069,27 +2128,27 @@ export class _Parser implements Parser {
     code: string | [string, ...Expression[]],
     fromToken: number
   ): Expression {
-    if (typeof code === 'string')
-      return [
-        'Error',
-        { str: code },
-        [
-          'Latex',
-          {
-            str: this.latex(fromToken, this.index),
-          },
-        ],
-      ];
+    let msg: Expression;
+    if (typeof code === 'string') {
+      console.assert(!code.startsWith("'"));
+      msg = { str: code };
+    } else {
+      console.assert(!code[0].startsWith("'"));
+      msg = ['ErrorCode', { str: code[0] }, ...code.slice(1)];
+    }
 
-    return [
-      'Error',
-      ['ErrorCode', { str: code[0] }, ...code.slice(1)],
-      [
-        'Latex',
-        {
-          str: this.latex(fromToken, this.index),
-        },
-      ],
+    const latex: Expression = [
+      'Latex',
+      { str: this.latex(fromToken, this.index) },
     ];
+    return ['Error', msg, latex];
   }
+}
+
+function countPrimeLevel(parser: Parser): number {
+  if (parser.match('\\tripleprime')) return 3;
+  if (parser.match('\\doubleprime')) return 2;
+  if (parser.match('\\prime')) return 1;
+  if (parser.match("'")) return 1;
+  return 0;
 }

@@ -450,6 +450,7 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
   simplify(_options?: SimplifyOptions): BoxedExpression {
     return this;
   }
+
   evaluate(options?: EvaluateOptions): BoxedExpression {
     return this.simplify(options);
   }

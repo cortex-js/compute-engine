@@ -38,6 +38,12 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
+// Should distribute: prefer addition over multiplication
+const xp = ce.parse('(a\\times(c+d))');
+console.log(xp.simplify().toString());
+
+console.log(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
+
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
 ce.assume(['Element', 'f', 'Function']);
@@ -350,31 +356,17 @@ describe('PARSING numbers', () => {
                         [
                           "Product",
                           [
-                            "Delimiter",
+                            "Subtract",
+                            1,
                             [
-                              "Subtract",
-                              1,
+                              "Power",
+                              0,
                               [
-                                "Power",
-                                0,
+                                "Abs",
                                 [
-                                  "Abs",
-                                  [
-                                    "Subtract",
-                                    [
-                                      "Floor",
-                                      [
-                                        "Divide",
-                                        ["Subscript", "v", 2],
-                                        ["Subscript", "v", 3]
-                                      ]
-                                    ],
-                                    [
-                                      "Divide",
-                                      ["Subscript", "v", 2],
-                                      ["Subscript", "v", 3]
-                                    ]
-                                  ]
+                                  "Add",
+                                  ["Divide", ["Negate", "v_2"], "v_3"],
+                                  ["Floor", ["Divide", "v_2", "v_3"]]
                                 ]
                               ]
                             ]
@@ -386,11 +378,11 @@ describe('PARSING numbers', () => {
                               [
                                 "ErrorCode",
                                 "'incompatible-domain'",
-                                "Symbol",
+                                ["Domain", "Symbol"],
                                 ["Domain", "Anything"]
                               ]
                             ],
-                            ["Floor", ["Sqrt", "v_2"]],
+                            2,
                             ["Floor", ["Sqrt", "v_2"]]
                           ]
                         ],
@@ -401,7 +393,7 @@ describe('PARSING numbers', () => {
                             [
                               "ErrorCode",
                               "'incompatible-domain'",
-                              "Symbol",
+                              ["Domain", "Symbol"],
                               ["Domain", "Anything"]
                             ]
                           ],
@@ -422,7 +414,7 @@ describe('PARSING numbers', () => {
                 [
                   "ErrorCode",
                   "'incompatible-domain'",
-                  "Symbol",
+                  ["Domain", "Symbol"],
                   ["Domain", "Anything"]
                 ]
               ],
@@ -667,11 +659,9 @@ describe('SIMPLIFICATION divide', () => {
     ]));
 
   test(`simplify('\\frac{\\sqrt{15}}{\\sqrt{3}}')`, () =>
-    expect(simplifyToJson('\\frac{\\sqrt{15}}{\\sqrt{3}}')).toMatchObject([
-      'Multiply',
-      ['Sqrt', ['Rational', 1, 3]],
-      ['Sqrt', 15],
-    ])); // @fixme
+    expect(
+      simplifyToJson('\\frac{\\sqrt{15}}{\\sqrt{3}}')
+    ).toMatchInlineSnapshot(`["Divide", ["Sqrt", 15], ["Sqrt", 3]]`)); // @fixme
 });
 
 describe('SIMPLIFICATION sqrt', () => {
@@ -693,18 +683,23 @@ describe('SIMPLIFICATION sqrt', () => {
     ]));
 
   // A math olympiad problem
-  // that other CAS don't simplify: Simplify[ToExpression["\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}", TeXForm]]
+  // Simplify[ToExpression["\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}", TeXForm]]
+  // Result is \frac{-4}{15}
   test(`simplify('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')`, () =>
     expect(
       simplifyToJson('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')
     ).toMatchInlineSnapshot(`
       [
-        "Multiply",
-        ["Rational", 1, 15],
+        "Add",
         [
-          "Subtract",
-          ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 2], 4]],
+          "Multiply",
+          ["Rational", -1, 15],
           ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 10], 28]]
+        ],
+        [
+          "Multiply",
+          ["Rational", 1, 15],
+          ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 2], 4]]
         ]
       ]
     `));

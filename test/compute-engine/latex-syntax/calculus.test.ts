@@ -24,7 +24,7 @@ describe('INTEGRAL', () => {
 
   test('simple with \\alpha', () => {
     expect(json('\\int\\alpha d\\alpha+1 = 2')).toMatchInlineSnapshot(
-      `["Equal", ["Add", ["Integrate", "Alpha", "Alpha"], 1], 2]`
+      `["Equal", ["Add", ["Integrate", "alpha", "alpha"], 1], 2]`
     );
   });
 

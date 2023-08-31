@@ -83,39 +83,50 @@ export function add(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
     Array.isArray(rhs) ||
       (rhs.numericValue !== null && !(rhs instanceof Complex))
   );
-  if (Array.isArray(rhs)) {
-    if (isBigRational(rhs)) {
-      lhs = [bigint(lhs[0]), bigint(lhs[1])];
-      return [rhs[1] * lhs[0] + rhs[0] * lhs[1], rhs[1] * lhs[1]];
-    }
-    if (isBigRational(lhs)) {
-      rhs = [bigint(rhs[0]), bigint(rhs[1])];
-      return [rhs[1] * lhs[0] + rhs[0] * lhs[1], rhs[1] * lhs[1]];
-    }
-    return [rhs[1] * lhs[0] + rhs[0] * lhs[1], rhs[1] * lhs[1]];
-  }
+  // If the lhs is infinity (or NaN) return as is
+  // (note that bigint cannot be infinite)
+  if (typeof lhs[0] === 'number' && !Number.isFinite(lhs[0])) return lhs;
 
-  let rhsNum = rhs.numericValue;
-  console.assert(rhs.isInteger);
-  if (rhsNum !== null && typeof rhsNum === 'number') {
-    if (isMachineRational(lhs)) return [lhs[0] + lhs[1] * rhsNum, lhs[1]];
-    return [lhs[0] + lhs[1] * bigint(rhsNum), lhs[1]];
+  const rhsNum = Array.isArray(rhs) ? rhs : rhs.numericValue;
+
+  if (rhsNum === null) return lhs;
+
+  if (Array.isArray(rhsNum)) {
+    if (isBigRational(rhsNum)) {
+      lhs = [bigint(lhs[0]), bigint(lhs[1])];
+      return [rhsNum[1] * lhs[0] + rhsNum[0] * lhs[1], rhsNum[1] * lhs[1]];
+    }
+    if (!Number.isFinite(rhsNum[0])) return rhsNum;
+    if (isBigRational(lhs)) {
+      const bigRhs = [bigint(rhsNum[0]), bigint(rhsNum[1])];
+      return [bigRhs[1] * lhs[0] + bigRhs[0] * lhs[1], bigRhs[1] * lhs[1]];
+    }
+    return [rhsNum[1] * lhs[0] + rhsNum[0] * lhs[1], rhsNum[1] * lhs[1]];
   }
 
   if (rhsNum instanceof Decimal) {
+    if (rhsNum.isNaN()) return [Number.NaN, 1];
+    if (!rhsNum.isFinite())
+      return [rhsNum.isNegative() ? -Infinity : Infinity, 1];
+
+    console.assert(rhsNum.isInteger());
+
     if (isMachineRational(lhs)) lhs = [bigint(lhs[0]), bigint(lhs[1])];
+    // Decimal and Rational return a bigRational
     return [lhs[0] + lhs[1] * bigint(rhsNum.toString()), lhs[1]];
   }
 
-  if (Array.isArray(rhsNum)) {
-    if (isMachineRational(rhsNum))
-      rhsNum = [bigint(rhsNum[0]), bigint(rhsNum[1])];
-    if (isMachineRational(lhs)) lhs = [bigint(lhs[0]), bigint(lhs[1])];
+  // Can't add a complex to a rational
+  if (rhsNum instanceof Complex) return [Number.NaN, 1];
 
-    return [rhsNum[1] * lhs[0] + rhsNum[0] * lhs[1], rhsNum[1] * lhs[1]];
-  }
-  debugger;
-  return lhs;
+  console.assert(!Number.isFinite(rhsNum) || Number.isInteger(rhsNum));
+
+  if (!Number.isFinite(rhsNum)) return [rhsNum, 1];
+
+  if (isMachineRational(lhs)) return [lhs[0] + lhs[1] * rhsNum, lhs[1]];
+
+  // By this point, lhs is a bigRational, rhsNum is a number
+  return [lhs[0] + lhs[1] * bigint(rhsNum), lhs[1]];
 }
 
 export function mul(lhs: Rational, rhs: BoxedExpression | Rational): Rational {

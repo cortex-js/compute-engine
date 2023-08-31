@@ -1,23 +1,19 @@
-import {
-  BoxedExpression,
-  BoxedDomain,
-  IComputeEngine,
-  Rational,
-} from '../public';
+import { BoxedExpression, BoxedDomain, IComputeEngine } from '../public';
 import {
   getImaginaryCoef,
   bignumPreferred as bignumPreferred,
 } from '../boxed-expression/utils';
 import { Sum } from '../symbolic/sum';
 import {
+  asBignum,
   asFloat,
   asSmallInteger,
   MAX_ITERATION,
   MAX_SYMBOLIC_TERMS,
 } from '../numerics/numeric';
-import { add, isMachineRational } from '../numerics/rationals';
 import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
+import { validateArgument } from '../boxed-expression/validate';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -160,9 +156,12 @@ export function canonicalSummation(
     index = index = ce.hold(index);
   }
 
+  // The range bounds, if present, should be integers numbers
+  if (lower && lower.isFinite) lower = validateArgument(ce, lower, 'Integer');
+  if (upper && upper.isFinite) upper = validateArgument(ce, upper, 'Integer');
+
   if (lower && upper) range = ce.tuple([index, lower, upper]);
-  else if (upper)
-    range = ce.tuple([index, lower ?? ce._NEGATIVE_INFINITY, upper]);
+  else if (upper) range = ce.tuple([index, ce.number(1), upper]);
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
 
@@ -175,26 +174,13 @@ export function evalSummation(
   range: BoxedExpression,
   mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
-  const fn = expr;
+  const [index, lower, upper, isFinite] = normalizeLimits(range);
 
-  let lower = 1;
-  let upper = MAX_ITERATION;
-  let index = 'Nothing';
-  if (
-    range.head === 'Tuple' ||
-    range.head === 'Triple' ||
-    range.head === 'Pair' ||
-    range.head === 'Single'
-  ) {
-    index =
-      (range.op1.head === 'Hold' ? range.op1.op1.symbol : range.op1.symbol) ??
-      'Nothing';
-    lower = asSmallInteger(range.op2) ?? 1;
-    upper = asSmallInteger(range.op3) ?? MAX_ITERATION;
-  }
+  const fn = expr;
   if (mode !== 'N' && (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS))
     return undefined;
 
+  let result: BoxedExpression | undefined | null = null;
   const savedContext = ce.context;
   ce.context = fn.scope ?? ce.context;
 
@@ -207,8 +193,7 @@ export function evalSummation(
         ce.set({ [index]: i });
         terms.push(fn.simplify());
       }
-    ce.context = savedContext;
-    return ce.add(terms).simplify();
+    result = ce.add(terms).simplify();
   }
 
   if (mode === 'evaluate') {
@@ -220,30 +205,142 @@ export function evalSummation(
         ce.set({ [index]: i });
         terms.push(fn.evaluate());
       }
-    ce.context = savedContext;
-    return ce.add(terms).evaluate();
+    result = ce.add(terms).evaluate();
   }
 
-  let sum: Rational = bignumPreferred(ce) ? [BigInt(0), BigInt(1)] : [0, 1];
+  if (mode === 'N') {
+    if (result === null && !fn.scope) {
+      //
+      // The term is not a function of the index
+      //
 
-  if (!fn.scope)
-    for (let i = lower; i <= upper; i++) {
-      const term = fn.N();
-      if (term.numericValue === null) return undefined;
-      sum = add(sum, term);
-    }
-  else
-    for (let i = lower; i <= upper; i++) {
-      ce.set({ [index]: i });
-      const term = fn.N();
-      if (term.numericValue === null) {
-        ce.context = savedContext;
-        return undefined;
+      const n = fn.N();
+      if (!isFinite) {
+        if (n.isZero) result = ce._ZERO;
+        else if (n.isPositive) result = ce._POSITIVE_INFINITY;
+        else result = ce._NEGATIVE_INFINITY;
       }
-      sum = add(sum, term);
+      if (result === null && fn.isPure)
+        result = ce.mul([ce.number(upper - lower + 1), n]);
+
+      // If the term is not a function of the index, but it is not pure,
+      // fall through to the general case
     }
+
+    //
+    // Finite series. Evaluate each term and add them up
+    //
+    if (result === null && isFinite) {
+      if (bignumPreferred(ce)) {
+        let sum = ce.bignum(0);
+        for (let i = lower; i <= upper; i++) {
+          ce.set({ [index]: i });
+          const term = asBignum(fn.N());
+          if (term === null) {
+            result = undefined;
+            break;
+          }
+          if (!term.isFinite()) {
+            sum = term;
+            break;
+          }
+          sum = sum.add(term);
+        }
+        if (result === null) result = ce.number(sum);
+      } else {
+        // Machine precision
+        const numericMode = ce.numericMode;
+        ce.numericMode = 'machine';
+        let sum = 0;
+        for (let i = lower; i <= upper; i++) {
+          ce.set({ [index]: i });
+          const term = asFloat(fn.N());
+          if (term === null) {
+            result = undefined;
+            break;
+          }
+          if (!Number.isFinite(term)) {
+            sum = term;
+            break;
+          }
+          sum += term;
+        }
+        ce.numericMode = numericMode;
+        if (result === null) result = ce.number(sum);
+      }
+    } else if (result === null) {
+      //
+      // Infinite series.
+      //
+
+      // First, check for divergence
+      ce.set({ [index]: 1000 });
+      const nMax = fn.N();
+      ce.set({ [index]: 999 });
+      const nMaxMinusOne = fn.N();
+
+      const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
+      if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
+        result = ce._POSITIVE_INFINITY;
+      } else {
+        // Potentially converging series.
+        // Evaluate as a machine number (it's an approximation to infinity, so
+        // no point in calculating with high precision), and check for convergence
+        let sum = 0;
+        const numericMode = ce.numericMode;
+        ce.numericMode = 'machine';
+        for (let i = lower; i <= upper; i++) {
+          ce.set({ [index]: i });
+          const term = asFloat(fn.N());
+          if (term === null) {
+            result = undefined;
+            break;
+          }
+          // Converged (or diverged), early exit
+          if (Math.abs(term) < Number.EPSILON || !Number.isFinite(term)) break;
+          sum += term;
+        }
+        ce.numericMode = numericMode;
+        if (result === null) result = ce.number(sum);
+      }
+    }
+  }
   ce.context = savedContext;
 
-  if (isMachineRational(sum)) return ce.number(sum[0] / sum[1]);
-  return ce.number(ce.bignum(sum[0]).div(ce.bignum(sum[1])));
+  return result ?? undefined;
+}
+
+export function normalizeLimits(
+  range: BoxedExpression
+): [string, number, number, boolean] {
+  let lower = 1;
+  let upper = lower + MAX_ITERATION;
+  let index = 'Nothing';
+  let isFinite = true;
+  if (
+    range.head === 'Tuple' ||
+    range.head === 'Triple' ||
+    range.head === 'Pair' ||
+    range.head === 'Single'
+  ) {
+    index =
+      (range.op1.head === 'Hold' ? range.op1.op1.symbol : range.op1.symbol) ??
+      'Nothing';
+    lower = asSmallInteger(range.op2) ?? 1;
+
+    if (!Number.isFinite(lower)) isFinite = false;
+
+    if (range.op3.isNothing || range.op3.isInfinity) {
+      isFinite = false;
+    } else {
+      const u = asSmallInteger(range.op3);
+      if (u === null) isFinite = false;
+      else {
+        upper = u;
+        if (!Number.isFinite(upper)) isFinite = false;
+      }
+    }
+    if (!isFinite && Number.isFinite(lower)) upper = lower + MAX_ITERATION;
+  }
+  return [index, lower, upper, isFinite];
 }

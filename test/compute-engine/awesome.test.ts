@@ -143,31 +143,17 @@ describe('Nth PRIME NUMBER', () =>
                         [
                           "Product",
                           [
-                            "Delimiter",
+                            "Subtract",
+                            1,
                             [
-                              "Subtract",
-                              1,
+                              "Power",
+                              0,
                               [
-                                "Power",
-                                0,
+                                "Abs",
                                 [
-                                  "Abs",
-                                  [
-                                    "Subtract",
-                                    [
-                                      "Floor",
-                                      [
-                                        "Divide",
-                                        ["Subscript", "v", 2],
-                                        ["Subscript", "v", 3]
-                                      ]
-                                    ],
-                                    [
-                                      "Divide",
-                                      ["Subscript", "v", 2],
-                                      ["Subscript", "v", 3]
-                                    ]
-                                  ]
+                                  "Add",
+                                  ["Divide", ["Negate", "v_2"], "v_3"],
+                                  ["Floor", ["Divide", "v_2", "v_3"]]
                                 ]
                               ]
                             ]
@@ -183,7 +169,7 @@ describe('Nth PRIME NUMBER', () =>
                                 ["Domain", "Anything"]
                               ]
                             ],
-                            ["Floor", ["Sqrt", "v_2"]],
+                            2,
                             ["Floor", ["Sqrt", "v_2"]]
                           ]
                         ],
@@ -251,31 +237,17 @@ describe('Nth PRIME NUMBER', () =>
                         [
                           "Product",
                           [
-                            "Delimiter",
+                            "Subtract",
+                            1,
                             [
-                              "Subtract",
-                              1,
+                              "Power",
+                              0,
                               [
-                                "Power",
-                                0,
+                                "Abs",
                                 [
-                                  "Abs",
-                                  [
-                                    "Subtract",
-                                    [
-                                      "Floor",
-                                      [
-                                        "Divide",
-                                        ["Subscript", "v", 2],
-                                        ["Subscript", "v", 3]
-                                      ]
-                                    ],
-                                    [
-                                      "Divide",
-                                      ["Subscript", "v", 2],
-                                      ["Subscript", "v", 3]
-                                    ]
-                                  ]
+                                  "Add",
+                                  ["Divide", ["Negate", "v_2"], "v_3"],
+                                  ["Floor", ["Divide", "v_2", "v_3"]]
                                 ]
                               ]
                             ]
@@ -291,7 +263,7 @@ describe('Nth PRIME NUMBER', () =>
                                 ["Domain", "Anything"]
                               ]
                             ],
-                            ["Floor", ["Sqrt", "v_2"]],
+                            2,
                             ["Floor", ["Sqrt", "v_2"]]
                           ]
                         ],

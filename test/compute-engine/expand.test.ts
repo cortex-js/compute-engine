@@ -31,13 +31,13 @@ describe('EXPAND POWER', () => {
       ]
       evaluate  = [
         "Add",
-        ["Multiply", 64, ["Power", "a", 6]],
-        ["Multiply", 15360, ["Square", "a"], ["Power", "b", 8]],
-        ["Multiply", 10240, ["Power", "a", 3], ["Power", "b", 6]],
-        ["Multiply", 3840, ["Power", "a", 4], ["Power", "b", 4]],
-        ["Multiply", 4096, ["Power", "b", 12]],
+        ["Multiply", ["Power", 4, 6], ["Power", ["Square", "b"], 6]],
+        ["Multiply", ["Power", 2, 6], ["Power", "a", 6]],
+        ["Multiply", 3840, ["Square", ["Square", "b"]], ["Power", "a", 4]],
+        ["Multiply", 10240, ["Power", "a", 3], ["Power", ["Square", "b"], 3]],
+        ["Multiply", 15360, ["Square", "a"], ["Power", ["Square", "b"], 4]],
         ["Multiply", 768, ["Square", "b"], ["Power", "a", 5]],
-        ["Multiply", 12288, "a", ["Power", "b", 10]]
+        ["Multiply", 12288, "a", ["Power", ["Square", "b"], 5]]
       ]
     `));
 });
@@ -62,8 +62,8 @@ describe('EXPAND PRODUCT', () => {
         "Expand",
         [
           "Add",
-          ["Multiply", -25, "x"],
-          ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]],
+          ["Multiply", 12, ["Square", "x"]],
+          ["Multiply", -17, "x"],
           20
         ]
       ]

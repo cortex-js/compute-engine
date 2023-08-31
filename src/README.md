@@ -54,10 +54,10 @@ render_math_in_document: true
 
 <div class=symbols-table>
 
-| Math                      | MathJSON                                                           |
-| :------------------------ | :----------------------------------------------------------------- |
-| \\[\frac{n}{1+n}\\]       | `["Divide", "n", ["Add", 1, "n"]]`{.math-json}                     |
-| \\[\sin^{-1}^\prime(x)\\] | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`{.math-json} |
+| Math                      | MathJSON                                                        |
+| :------------------------ | :-------------------------------------------------------------- |
+| \\[\frac{n}{1+n}\\]       | `["Divide", "n", ["Add", 1, "n"]]`{.math-json}                  |
+| \\[\sin^{-1}^\prime(x)\\] | `[["Derivative", ["InverseFunction", "Sin"]], "x"]`{.math-json} |
 
 </div>
 

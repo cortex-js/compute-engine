@@ -153,10 +153,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     console.assert(this._defValue === undefined);
 
     if (typeof val === 'number') {
-      // @fastpath: avoid creating a boxed number if changing a machine value
-      if (typeof this._value?.numericValue === 'number')
-        this._value['_value'] = val;
-      else this._value = this._engine.number(val);
+      this._value = this._engine.number(val);
     } else if (val) {
       const newVal = this._engine.box(val);
       // If the new value is not compatible with the domain, discard it

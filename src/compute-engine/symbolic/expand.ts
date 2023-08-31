@@ -198,7 +198,10 @@ export function expandDenominator(
  * If the expression is a fraction, expand the numerator.
  * Return null if the expression cannot be expanded.
  */
-export function expand(expr: BoxedExpression): BoxedExpression | null {
+export function expand(
+  expr: BoxedExpression | undefined
+): BoxedExpression | null {
+  if (!expr) return null;
   let result = expandNumerator(expr);
   if (result !== null) return result;
   if (expr.head === 'Multiply') {

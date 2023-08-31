@@ -387,7 +387,7 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathbf{x}')).toMatchInlineSnapshot(`x_bold`);
 
       // Special handling of initial digits
-      expect(parse('\\mathbb{1}')).toEqual(`ONE_doublestruck`);
+      expect(parse('\\mathbb{1}')).toEqual(`one_doublestruck`);
     });
 
     test('Identifiers with multiple modifiers', () => {
@@ -514,7 +514,7 @@ describe('SYMBOLS', () => {
       expect(latex('x_sansSerif_bold')).toEqual(`\\mathbf{\\mathsf{x}}`);
       expect(latex('x_sansSerif_italic')).toEqual(`\\mathit{\\mathsf{x}}`);
       expect(latex('x_monospace')).toEqual(`\\mathtt{x}`);
-      expect(latex('ONE_blackboard')).toEqual(`\\mathbb{1}`);
+      expect(latex('one_blackboard')).toEqual(`\\mathbb{1}`);
     });
 
     test('multiple modifiers', () => {
@@ -557,9 +557,7 @@ describe('SYMBOLS', () => {
 
     test('special names', () => {
       expect(latex('alpha')).toEqual(`\\alpha`);
-      expect(latex('deltagamma')).toMatchInlineSnapshot(
-        `\\mathrm{\\delta\\gamma}`
-      );
+      expect(latex('deltagamma')).toMatchInlineSnapshot(`\\mathrm{deltagamma}`);
       expect(latex('Alpha')).toEqual(`\\Alpha`);
       expect(latex('aleph')).toEqual(`\\aleph`);
       expect(latex('aleph__plus')).toMatchInlineSnapshot(
@@ -571,8 +569,8 @@ describe('SYMBOLS', () => {
         `\\mathrm{\\alpha_{\\gamma,\\delta}}`
       );
       expect(latex('beta_bold')).toEqual(`\\mathbf{\\beta}`);
-      expect(latex('beta_caligraphic')).toMatchInlineSnapshot(
-        `\\mathrm{\\beta_{caligra\\phi c}}`
+      expect(latex('beta_calligraphic')).toMatchInlineSnapshot(
+        `\\mathcal{\\beta}`
       );
       expect(latex('x_plus')).toEqual(`\\mathrm{x_{+}}`);
       expect(latex('R_blackboard__0__plus')).toEqual(`\\mathbb{R^{0,+}}`);

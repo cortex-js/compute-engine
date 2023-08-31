@@ -103,9 +103,19 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     },
   },
   {
-    name: 'Complement',
     trigger: ['^', '\\complement'],
-    kind: 'infix',
+    kind: 'postfix',
+    parse: (_parser, lhs) => {
+      return ['Complement', lhs];
+    },
+
+    // precedence: 240,
+    // @todo: serialize for the multiple argument case
+  },
+  {
+    name: 'Complement',
+    trigger: ['^', '<{>', '\\complement', '<}>'],
+    kind: 'postfix',
     // precedence: 240,
     // @todo: serialize for the multiple argument case
   },

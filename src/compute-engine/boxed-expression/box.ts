@@ -95,7 +95,7 @@ export function boxNumber(
   if (typeof num === 'number' || num instanceof Decimal)
     return new BoxedNumber(ce, num, options);
 
-  options ??= {};
+  options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
 
   //
@@ -284,6 +284,16 @@ export function boxFunction(
       ops[0] instanceof AbstractBoxedExpression &&
       ops[1] instanceof AbstractBoxedExpression
     ) {
+      if (ce.numericMode === 'machine') {
+        const [fn, fd] = [asFloat(ops[0]), asFloat(ops[1])];
+        if (
+          fn !== null &&
+          Number.isInteger(fn) &&
+          fd !== null &&
+          Number.isInteger(fd)
+        )
+          return ce.number([fn, fd], options);
+      }
       const [n, d] = [asBigint(ops[0]), asBigint(ops[1])];
       if (n && d) return ce.number([n, d], options);
     } else {
@@ -419,7 +429,7 @@ export function box(
 ): BoxedExpression {
   if (expr === null || expr === undefined) return ce._fn('Sequence', []);
 
-  options ??= {};
+  options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
 
   if (expr instanceof AbstractBoxedExpression)

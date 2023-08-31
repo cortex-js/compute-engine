@@ -13,6 +13,7 @@ import {
   isEmptySequence,
   missingIfEmpty,
   isNumberExpression,
+  MISSING,
 } from '../../../math-json/utils';
 import { Serializer, Parser, LatexDictionary } from '../public';
 import { getFractionStyle, getRootStyle } from '../serializer-style';
@@ -65,9 +66,8 @@ function parseRoot(parser: Parser): Expression | null {
   const degree = parser.matchOptionalLatexArgument();
   const base = parser.matchRequiredLatexArgument();
   if (base === null || isEmptySequence(base)) {
-    if (degree !== null)
-      return ['Root', ['Error', "'missing'"], missingIfEmpty(degree)];
-    return ['Sqrt', ['Error', "'missing'"]];
+    if (degree !== null) return ['Root', MISSING, missingIfEmpty(degree)];
+    return ['Sqrt', MISSING];
   }
   if (degree !== null) return ['Root', base, degree];
   return ['Sqrt', base];
@@ -758,7 +758,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator, lhs) => {
       if (391 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 392 });
-      if (rhs === null) return ['Multiply', lhs, ['Error', "'missing'"]];
+      if (rhs === null) return ['Multiply', lhs, MISSING];
 
       return applyAssociativeOperator('Multiply', lhs, rhs);
     },
@@ -771,7 +771,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser, terminator, lhs) => {
       if (391 < terminator.minPrec) return null;
       const rhs = parser.matchExpression({ ...terminator, minPrec: 392 });
-      if (rhs === null) return ['Multiply', lhs, ['Error', "'missing'"]];
+      if (rhs === null) return ['Multiply', lhs, MISSING];
 
       return applyAssociativeOperator('Multiply', lhs, rhs);
     },

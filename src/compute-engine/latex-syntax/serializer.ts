@@ -21,15 +21,15 @@ import {
   NumberFormattingOptions,
   LatexString,
   SerializeLatexOptions,
-  FunctionEntry,
 } from './public';
 
 import {
   IndexedLatexDictionary,
-  InfixEntry,
-  PostfixEntry,
-  PrefixEntry,
-  SymbolEntry,
+  IndexedInfixEntry,
+  IndexedPostfixEntry,
+  IndexedPrefixEntry,
+  IndexedIdentifierEntry,
+  IndexedFunctionEntry,
 } from './dictionary/definitions';
 
 import { countTokens, joinLatex } from './tokenizer';
@@ -94,7 +94,7 @@ const STYLE_MODIFIERS = {
 function serializeOperator(
   serializer: Serializer,
   expr: Expression,
-  def: InfixEntry | PrefixEntry | PostfixEntry
+  def: IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry
 ): string {
   let result = '';
   const count = nops(expr);
@@ -211,7 +211,7 @@ export class Serializer {
       const def = this.dictionary.name.get(name);
       if (
         def &&
-        (def.kind === 'symbol' ||
+        (def.kind === 'identifier' ||
           def.kind === 'prefix' ||
           def.kind === 'infix' ||
           def.kind === 'postfix') &&
@@ -225,24 +225,39 @@ export class Serializer {
     return this.serialize(expr);
   }
 
-  /** If this is a "short" expression (atomic), wrap it.
+  /**
+   * If this is a "short" expression, wrap it.
+   * Do not wrap identifiers, positive numbers or functions.
+   *
+   * This is called by the serializer for power and division (i.e. "(a+1)/b")
    *
    */
   wrapShort(expr: Expression | null): string {
     if (expr === null) return '';
     const exprStr = this.serialize(expr);
 
+    if (symbol(expr) !== null) return exprStr;
     if (head(expr) === 'Delimiter' && nops(expr) === 1) return exprStr;
 
-    if (!isNumberExpression(expr) && !/(^(.|\\[a-zA-Z*]+))$/.test(exprStr)) {
-      // It's a long expression, wrap it
-      return this.wrapString(
-        exprStr,
-        this.options.groupStyle(expr, this.level + 1)
-      );
-    }
+    const isNum = isNumberExpression(expr);
+    // It's not a negative number, or a decimal number
+    if (isNum && !/^(-|\.)/.test(exprStr)) return exprStr;
 
-    return exprStr;
+    const h = head(expr);
+    if (
+      h !== 'Add' &&
+      h !== 'Negate' &&
+      h !== 'Subtract' &&
+      h !== 'PlusMinus' &&
+      h !== 'Multiply'
+    )
+      return exprStr;
+
+    // Wrap the expression with delimiters
+    return this.wrapString(
+      exprStr,
+      this.options.groupStyle(expr, this.level + 1)
+    );
   }
 
   wrapString(
@@ -276,7 +291,10 @@ export class Serializer {
     );
   }
 
-  serializeSymbol(expr: Expression, def?: SymbolEntry | FunctionEntry): string {
+  serializeSymbol(
+    expr: Expression,
+    def?: IndexedIdentifierEntry | IndexedFunctionEntry
+  ): string {
     const h = head(expr);
     if (h) return this.serializeFunction(expr, def);
 
@@ -291,7 +309,7 @@ export class Serializer {
 
   serializeFunction(
     expr: Expression,
-    def?: FunctionEntry | SymbolEntry
+    def?: IndexedFunctionEntry | IndexedIdentifierEntry
   ): string {
     const h = head(expr);
     if (!h) return this.serializeSymbol(expr, def);
@@ -371,7 +389,8 @@ export class Serializer {
         const symbolName = symbol(expr);
         if (symbolName !== null) {
           const def = this.dictionary.name.get(symbolName);
-          if (def?.kind === 'symbol') return this.serializeSymbol(expr, def);
+          if (def?.kind === 'identifier')
+            return this.serializeSymbol(expr, def);
           if (def?.kind === 'function')
             return this.serializeFunction(expr, def);
         }
@@ -387,24 +406,8 @@ export class Serializer {
         //
         const fnName = headName(expr);
         if (fnName) {
-          if (fnName[0] === '\\') {
-            // 5.1 An unknown LaTeX command, possibly with arguments.
-            // This can happen if we encountered an unrecognized LaTeX command
-            // during parsing, e.g. "\foo{x + 1}"
-            const args = ops(expr) ?? [];
-            if (args.length === 0) return fnName;
-            return (
-              fnName +
-              '{' +
-              args
-                .map((x) => this.serialize(x))
-                .filter((x) => Boolean(x))
-                .join('}{') +
-              '}'
-            );
-          }
           //
-          // 5.2 A function, operator or matchfix operator
+          // 5.1 A function, operator or matchfix operator
           //
           const def = this.dictionary.name.get(fnName);
           if (def) {
@@ -420,7 +423,8 @@ export class Serializer {
             )
               return serializeOperator(this, expr, def);
 
-            if (def.kind === 'symbol') return this.serializeSymbol(expr, def);
+            if (def.kind === 'identifier')
+              return this.serializeSymbol(expr, def);
             if (def.kind === 'function')
               return this.serializeFunction(expr, def);
 
@@ -429,9 +433,9 @@ export class Serializer {
         }
 
         if (
+          symbolName !== null ||
           Array.isArray(expr) ||
-          isFunctionObject(expr) ||
-          symbol(expr) !== null
+          isFunctionObject(expr)
         ) {
           // It's a function or a symbol, but without definition.
           // It could be a [['derive', "f"], x]
@@ -544,24 +548,30 @@ export function replaceLatex(template: string, replacement: string[]): string {
   return result;
 }
 
+/** If the string is a special name, extract it. A special name is considered
+ * until we run into a '_' or a digit.
+ * So, for example `Number` is not `\Nu mber`, but `Number`.
+ */
 function specialName(s: string): [result: string, rest: string] {
+  const prefix = s.match(/^([^_]+)/)?.[1] ?? '';
   // Does the name start with a greek letter or other special symbol?
-  let i = SYMBOLS.findIndex((x) => s.startsWith(x[0]));
+  let i = SYMBOLS.findIndex((x) => prefix === x[0]);
   if (i >= 0) return [SYMBOLS[i][1], s.substring(SYMBOLS[i][0].length)];
 
   // Does the name start with a digit, spelled out?
+  // i.e. for `\mathbb{1}`.
   const DIGITS = {
-    ZERO: '0',
-    ONE: '1',
-    TWO: '2',
-    THREE: '3',
-    FOUR: '4',
-    FIVE: '5',
-    SIX: '6',
-    SEVEN: '7',
-    EIGHT: '8',
-    NINE: '9',
-    TEN: '10',
+    zero: '0',
+    one: '1',
+    two: '2',
+    three: '3',
+    four: '4',
+    five: '5',
+    six: '6',
+    seven: '7',
+    eight: '8',
+    nine: '9',
+    ten: '10',
   };
   i = Object.keys(DIGITS).findIndex((x) => s.startsWith(x));
   if (i >= 0) {
@@ -591,42 +601,25 @@ function specialName(s: string): [result: string, rest: string] {
     square: '\\square',
     star: '\\star',
   };
-  i = Object.keys(EXTRA_SYMBOLS).findIndex((x) => s.startsWith(x));
+  i = Object.keys(EXTRA_SYMBOLS).findIndex((x) => prefix === x);
   if (i >= 0) {
     // Access the ith key of the object
     const key = Object.keys(EXTRA_SYMBOLS)[i];
     return [EXTRA_SYMBOLS[key], s.substring(key.length)];
   }
 
-  return ['', s];
+  return [prefix, s.substring(prefix.length)];
 }
 
-// Convert special names in the string until there are no more
-// special names to convert, for example if we run into a '_' or a digit.
-function specialNames(s: string): [result: string, rest: string] {
-  const result: string[] = [];
-  let rest = s;
-
-  while (rest.length > 0 && !rest.startsWith('_')) {
-    const [special, rest2] = specialName(rest);
-    if (special === '') {
-      result.push(rest[0]);
-      rest = rest.substring(1);
-    } else {
-      result.push(special);
-      rest = rest2;
-    }
-  }
-
-  return [joinLatex(result), rest];
-}
-
+/** Extract the body of the identifier, and the modifiers
+ * (accents and styles)
+ */
 function parseModifiers(
   s: string
 ): [body: string, accents: string[], styles: string[], rest: string] {
   // Get the special names
   // eslint-disable-next-line prefer-const
-  let [body, rest] = specialNames(s);
+  let [body, rest] = specialName(s);
 
   // Check for accent modifiers
   const accent: string[] = [];

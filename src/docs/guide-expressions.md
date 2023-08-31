@@ -233,20 +233,21 @@ have no value if it represents a free variable.
 
 Sometimes, things go wrong.
 
-When something goes wrong the Compute Engine uses an `["Error"]` expression.
+When something goes wrong the Compute Engine uses an
+`["Error", <cause>, <location>]` expression.
 
-The **first argument** of an `["Error"]` expression provides details about the
-nature of the problem. This can be either a string or an `["ErrorCode"]`
-expression if there are additional arguments to the error.
+The `<cause>` argument provides details about the nature of the problem. This
+can be either a string or an `["ErrorCode"]` expression if there are additional
+arguments to the error.
 
-For example if the problem is that an argument of a function expression is not
-of the expected domain, an expression such as
-`["Error", ["ErrorCode", "'incompatible-domain'", "Number", "Anything"]]` could
-be returned to indicate that a value of domain `"Number"` was expected.
+For example if the problem is that an argument of a function expression is a
+boolean when a number was expected, an expression such as
+`["Error", ["ErrorCode", "'incompatible-domain'", "Number", "Boolean"]]` could
+be returned.
 
-The **second argument** of an `["Error"]` expression indicate the context of the
-error. This can be a `["Latex"]` expression when the problem occurred while
-parsing a LaTeX string, or another expression if the problem was detected later.
+The `<location>` argument indicates the context of the error. This can be a
+`["Latex"]` expression when the problem occurred while parsing a LaTeX string,
+or another expression if the problem was detected later.
 
 ### Parsing Errors
 

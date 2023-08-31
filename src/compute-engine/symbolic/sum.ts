@@ -46,8 +46,8 @@ export class Sum {
     options?: { canonical?: boolean }
   ) {
     options ??= {};
-    if (!('canonical' in options)) options.canonical = true;
-    this._isCanonical = options.canonical!;
+    if (!('canonical' in options)) this._isCanonical = true;
+    else this._isCanonical = options.canonical!;
     this.engine = ce;
 
     this._rational = bignumPreferred(ce) ? [BigInt(0), BigInt(1)] : [0, 1];
@@ -244,7 +244,7 @@ export class Sum {
 
         if (this._imaginary !== 0)
           xs.push(ce.number(ce.complex(sum.toNumber(), this._imaginary)));
-        else if (ce.chop(sum) !== 0) xs.push(ce.number(sum));
+        else if (!sum.isZero()) xs.push(ce.number(sum));
       } else {
         let sum = this._bignum.toNumber() + this._number;
         if (!isRationalZero(this._rational))
@@ -254,7 +254,7 @@ export class Sum {
 
         if (this._imaginary !== 0)
           xs.push(ce.number(ce.complex(sum, this._imaginary)));
-        else if (ce.chop(sum) !== 0) xs.push(ce.number(sum));
+        else if (sum !== 0) xs.push(ce.number(sum));
       }
     } else {
       if (!isRationalZero(this._rational)) xs.push(ce.number(this._rational));
@@ -264,10 +264,10 @@ export class Sum {
       }
       if (bignumPreferred(this.engine)) {
         const sum = this._bignum.add(this._number);
-        if (ce.chop(sum) !== 0) xs.push(ce.number(sum));
+        if (!sum.isZero()) xs.push(ce.number(sum));
       } else {
-        if (ce.chop(this._bignum) !== 0) xs.push(ce.number(this._bignum));
-        if (ce.chop(this._number) !== 0) xs.push(ce.number(this._number));
+        if (!this._bignum.isZero()) xs.push(ce.number(this._bignum));
+        if (this._number !== 0) xs.push(ce.number(this._number));
       }
     }
     return flattenOps(xs, 'Add');

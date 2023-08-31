@@ -6,13 +6,14 @@ import {
   MathJsonSymbol,
 } from './math-json-format';
 
+export const MISSING: Expression = ['Error', "'missing'"];
+
 export function isNumberExpression(
   expr: Expression | null
 ): expr is number | string | MathJsonNumber {
   if (expr === null) return false;
-  if (typeof expr === 'number') return true;
-  if (isNumberObject(expr)) return true;
-  if (typeof expr === 'string' && /^[+-]?[0-9]/.test(expr)) return true;
+  if (typeof expr === 'number' || isNumberObject(expr)) return true;
+  if (typeof expr === 'string' && /^[+-]?[0-9\.]/.test(expr)) return true;
   return false;
 }
 
@@ -224,16 +225,11 @@ export function head(expr: Expression | null | undefined): Expression | null {
   if (expr === null || expr === undefined) return null;
   if (Array.isArray(expr)) {
     if (typeof expr[0] === 'string' && !isValidIdentifier(expr[0])) {
-      // console.log(
-      //   `Invalid identifier "${expr[0]}": ${validateIdentifier(expr[0])}`
-      // );
-      debugger;
+      console.error(
+        `Invalid identifier "${expr[0]}": ${validateIdentifier(expr[0])}`
+      );
+      return null;
     }
-    console.assert(
-      expr.length > 0 &&
-        (typeof expr[0] !== 'string' || isValidIdentifier(expr[0])),
-      `"${expr[0]}": ${validateIdentifier(expr[0])}`
-    );
     return expr[0];
   }
   if (isFunctionObject(expr)) return expr.fn[0];
@@ -552,7 +548,7 @@ export function isEmptySequence(expr: Expression | null): boolean {
 }
 
 export function missingIfEmpty(expr: Expression | null): Expression {
-  if (expr === null || isEmptySequence(expr)) return ['Error', "'missing'"];
+  if (expr === null || isEmptySequence(expr)) return MISSING;
   return expr;
 }
 

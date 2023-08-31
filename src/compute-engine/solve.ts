@@ -131,12 +131,24 @@ export function findUnivariateRoots(
   const rules = ce.cache('univariate-roots-rules', () =>
     boxRules(ce, UNIVARIATE_ROOTS)
   );
-  const result = matchRules(
-    (expand(expr) ?? expr).subs({ [x]: '_x' }, { canonical: false }),
+  let result = matchRules(
+    expr.subs({ [x]: '_x' }, { canonical: false }),
     rules,
     { _x: ce.symbol('_x') }
   );
-  // return result;
+
+  if (result.length === 0) {
+    const expandedExpr = expand(expr.canonical);
+    if (expandedExpr === null) return [];
+    result = matchRules(
+      expandedExpr.subs({ [x]: '_x' }, { canonical: false }),
+      rules,
+      {
+        _x: ce.symbol('_x'),
+      }
+    );
+  }
+
   return result.map((x) => x.canonical.evaluate());
 }
 

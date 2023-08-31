@@ -1,5 +1,4 @@
 import { Expression } from '../../math-json/math-json-format';
-import { head } from '../../math-json/utils';
 import {
   ancestors,
   DOMAIN_ALIAS,
@@ -57,13 +56,11 @@ export class _BoxedDomain
   }
 
   get isValid(): boolean {
-    return this.ctor !== 'Error';
+    return this.ctor !== 'InvalidDomain';
   }
 
   get json(): Expression {
-    const s = serialize(this.engine, this._value);
-    if (head(s) === 'Error') return s;
-    return ['Domain', s];
+    return ['Domain', serialize(this.engine, this._value)];
   }
 
   get literal(): string | null {
@@ -238,9 +235,12 @@ export class _BoxedDomain
 
 export function boxDomain(
   ce: IComputeEngine,
-  dom: BoxedDomain | DomainExpression,
+  dom: BoxedExpression | DomainExpression,
   metadata?: Metadata
 ): BoxedDomain {
+  if (Array.isArray(dom) && (dom[0] as string) === 'Domain')
+    dom = dom[1] as DomainExpression;
+
   if (dom instanceof _BoxedDomain) return dom;
   if (dom instanceof AbstractBoxedExpression)
     dom = dom.json as DomainExpression;
@@ -256,26 +256,38 @@ export function boxDomain(
     throw Error('Expected a valid domain');
 
   const constructor = dom[0];
+
   if (!DOMAIN_CONSTRUCTORS.includes(constructor))
     throw Error('Expected domain constructor, got ' + constructor);
 
   return new _BoxedDomain(ce, dom, metadata);
 }
 
-/** Turn a valid domain expression into a canonical domain expression */
+/** Turn a valid domain expression into a canonical domain expression.
+ * If the domain expression is invalid, throw an error. We throw in this
+ * case because the domain expression is unlikely to be a user input and
+ * handling a bad domain expression would be burdensome.
+ */
 function makeCanonical(
   ce: IComputeEngine,
-  dom: DomainExpression
+  dom: undefined | number | object | DomainExpression
 ): DomainExpression<BoxedExpression> {
+  if (dom === undefined || typeof dom === 'number')
+    throw Error('Expected a domain expression');
+
+  if (dom instanceof _BoxedDomain) return dom._value;
+
   if (typeof dom === 'string') {
     if (!isDomainLiteral(dom)) throw Error('Unknown domain literal');
     return dom;
   }
-  if (dom instanceof _BoxedDomain) return dom._value;
 
+  if (!Array.isArray(dom) && typeof dom === 'object')
+    throw Error('Expected a domain expression');
+
+  if (!dom) debugger;
   const ctor = dom[0];
-
-  if (!ctor) debugger;
+  console.assert(ctor);
 
   //
   // Range
@@ -340,39 +352,27 @@ function makeCanonical(
     // Multiple Invariant, Covariant, Contravariant in argument
     // Normalize attributes: Open, Maybe, Invariant, Sequence, etc...
     // A rest argument (Sequence) must be the last one
-    return [
-      'Function',
-      ...dom.slice(1).map((x) => makeCanonical(ce, x as DomainExpression)),
-    ];
+    return ['Function', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
   }
 
   if (ctor === 'Dictionary') {
-    return ['Dictionary', makeCanonical(ce, dom[1] as DomainExpression)];
+    return ['Dictionary', makeCanonical(ce, dom[1])];
   }
 
   if (ctor === 'List') {
-    return ['List', makeCanonical(ce, dom[1] as DomainExpression)];
+    return ['List', makeCanonical(ce, dom[1])];
   }
 
   if (ctor === 'Tuple') {
-    return [
-      'Tuple',
-      ...dom.slice(1).map((x) => makeCanonical(ce, x as DomainExpression)),
-    ];
+    return ['Tuple', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
   }
 
   if (ctor === 'Union') {
-    return [
-      'Union',
-      ...dom.slice(1).map((x) => makeCanonical(ce, x as DomainExpression)),
-    ];
+    return ['Union', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
   }
 
   if (ctor === 'Intersection') {
-    return [
-      'Intersection',
-      ...dom.slice(1).map((x) => makeCanonical(ce, x as DomainExpression)),
-    ];
+    return ['Intersection', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
   }
 
   if (
@@ -380,15 +380,15 @@ function makeCanonical(
     ctor === 'Contravariant' ||
     ctor === 'Invariant'
   ) {
-    return [ctor, makeCanonical(ce, dom[1] as DomainExpression)];
+    return [ctor, makeCanonical(ce, dom[1])];
   }
 
   if (ctor === 'Maybe') {
-    return ['Maybe', makeCanonical(ce, dom[1] as DomainExpression)];
+    return ['Maybe', makeCanonical(ce, dom[1])];
   }
 
   if (ctor === 'Sequence') {
-    return ['Sequence', makeCanonical(ce, dom[1] as DomainExpression)];
+    return ['Sequence', makeCanonical(ce, dom[1])];
   }
 
   if (ctor === 'Head') {
@@ -403,8 +403,8 @@ function makeCanonical(
     return ['Value', ce.box(dom[1])];
   }
 
-  if (ctor === 'Error') {
-    return ['Error', ...dom.slice(1).map((x) => ce.box(x))];
+  if (ctor === 'InvalidDomain') {
+    return ['InvalidDomain', dom[1] as string];
   }
 
   throw Error('Unexpected domain constructor ' + ctor);
@@ -460,8 +460,9 @@ export function isDomain(
     if (typeof ctor !== 'string' || !DOMAIN_CONSTRUCTORS.includes(ctor))
       return false;
 
-    if (ctor === 'List')
-      return expr.length === 2 && isDomain(expr[1] as DomainExpression);
+    if (ctor === 'InvalidDomain') return false;
+
+    if (ctor === 'List') return expr.length === 2 && isValidDomain(expr[1]);
 
     if (
       ctor === 'Tuple' ||
@@ -471,12 +472,22 @@ export function isDomain(
       ctor === 'Intersection' ||
       ctor === 'Union'
     )
-      return expr.slice(1, -1).every((x) => isDomain(x as DomainExpression));
+      return expr.slice(1, -1).every((x) => isValidDomain(x));
 
     return expr.every((x) => x !== null);
   }
 
   return false;
+}
+
+export function isValidDomain(
+  expr: any
+): expr is BoxedDomain | DomainExpression {
+  if (expr instanceof _BoxedDomain) return expr.isValid;
+
+  if (Array.isArray(expr) && expr[0] === 'InvalidDomain') return false;
+
+  return isDomain(expr);
 }
 
 function isSubdomainOf1(
@@ -741,17 +752,8 @@ function serialize(
   if (dom instanceof AbstractBoxedExpression) return dom.json;
   if (typeof dom === 'string') return dom;
 
-  if (dom[0] === 'Error') {
-    if (dom[2])
-      return [
-        'Error',
-        serialize(ce, dom[1] as DomainExpression<BoxedExpression>),
-        serialize(ce, dom[2] as DomainExpression<BoxedExpression>),
-      ];
-    return [
-      'Error',
-      serialize(ce, dom[1] as DomainExpression<BoxedExpression>),
-    ];
+  if (dom[0] === 'InvalidDomain') {
+    return ['InvalidDomain', serialize(ce, dom[1] as string)];
   }
 
   const result: Expression = [serializeJsonSymbol(ce, dom[0])];

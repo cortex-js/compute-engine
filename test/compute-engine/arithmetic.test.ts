@@ -32,7 +32,12 @@ describe('CONSTANTS', () => {
   test(`GoldenRatio`, () =>
     expect(checkJson(`GoldenRatio`)).toMatchInlineSnapshot(`
       box       = GoldenRatio
-      simplify  = ["Multiply", ["Rational", 1, 2], ["Add", ["Sqrt", 5], 1]]
+      simplify  = [
+        "Add",
+        ["Multiply", ["Sqrt", 5], ["Rational", 1, 2]],
+        ["Rational", 1, 2]
+      ]
+      evaluate  = ["Multiply", ["Rational", 1, 2], ["Add", ["Sqrt", 5], 1]]
       N-auto    = 1.6180339887498948482
       N-mach    = 1.618033988749895
     `));
@@ -615,7 +620,7 @@ describe('MULTIPLY', () => {
       ]
       box       = ["Multiply", "Pi", ["Sqrt", 2], ["Rational", 50, 9]]
       canonical = ["Multiply", ["Sqrt", 2], ["Rational", 50, 9], "Pi"]
-      simplify  = ["Multiply", "Pi", ["Sqrt", 2], ["Rational", 50, 9]]
+      evaluate  = ["Multiply", "Pi", ["Sqrt", 2], ["Rational", 50, 9]]
       N-auto    = 24.682682989768701372
       N-mach    = 24.6826829897687
     `));
@@ -637,7 +642,6 @@ describe('MULTIPLY', () => {
       ]
       box       = ["Multiply", "Pi", ["Sqrt", 2], 1.1, ["Rational", 50, 9]]
       canonical = ["Multiply", ["Sqrt", 2], 1.1, ["Rational", 50, 9], "Pi"]
-      simplify  = ["Multiply", "Pi", ["Sqrt", 2], 1.1, ["Rational", 50, 9]]
       evaluate  = 27.15095128874557151
       eval-mach = 27.15095128874557
     `)); // @fixme eval-big should be same or bettern than evaluate
@@ -646,7 +650,7 @@ describe('MULTIPLY', () => {
 describe('Divide', () => {
   test(`INVALID  Divide`, () =>
     expect(ce.box(['Divide', 2.5]).evaluate()).toMatchInlineSnapshot(
-      `["Divide", 2.5, ["Error", ["ErrorCode", "'missing'", "Number"]]]`
+      `["Divide", 2.5, ["Error", "'missing'"]]`
     ));
   test(`Divide`, () =>
     expect(ce.box(['Divide', 6, 3]).evaluate()).toMatchInlineSnapshot(`2`));
@@ -665,7 +669,7 @@ describe('Divide', () => {
 describe('Power', () => {
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5]).evaluate()).toMatchInlineSnapshot(
-      `["Power", 2.5, ["Error", ["ErrorCode", "'missing'", "Number"]]]`
+      `["Power", 2.5, ["Error", "'missing'"]]`
     ));
   test(`Power`, () =>
     expect(ce.box(['Power', 2.5, 1.1]).evaluate()).toMatchInlineSnapshot(
@@ -710,7 +714,7 @@ describe('Root', () => {
 describe('INVALID ROOT', () => {
   test(`Too few args`, () =>
     expect(ce.box(['Root', 2.5]).evaluate()).toMatchInlineSnapshot(
-      `["Root", 2.5, ["Error", ["ErrorCode", "'missing'", "Number"]]]`
+      `["Root", 2.5, ["Error", "'missing'"]]`
     ));
   test(`Too many args`, () =>
     expect(ce.box(['Root', 2.5, -1.1, 18.4]).evaluate()).toMatchInlineSnapshot(
@@ -975,7 +979,7 @@ describe('Rational', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            "Integer",
+            ["Domain", "Integer"],
             ["Domain", "PositiveNumber"]
           ],
           2.5
@@ -985,7 +989,7 @@ describe('Rational', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            "Integer",
+            ["Domain", "Integer"],
             ["Domain", "NegativeNumber"]
           ],
           -1.1
@@ -1183,7 +1187,7 @@ describe('Log(a,b)', () => {
 describe('Log Invalid', () => {
   expect(checkJson(['Ln'])).toMatchInlineSnapshot(`
     box       = ["Ln"]
-    canonical = ["Ln", ["Error", ["ErrorCode", "'missing'", "Number"]]]
+    canonical = ["Ln", ["Error", "'missing'"]]
   `);
   expect(checkJson(['Ln', "'string'"])).toMatchInlineSnapshot(`
     box       = ["Ln", "'string'"]
@@ -1194,7 +1198,7 @@ describe('Log Invalid', () => {
         [
           "ErrorCode",
           "'incompatible-domain'",
-          "Number",
+          ["Domain", "Number"],
           ["Domain", "String"]
         ],
         "'string'"

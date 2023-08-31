@@ -9,7 +9,7 @@
 | :------------------------- | :------------------------------------------------------------------------ |
 | `\frac{a}{1+x}`            | `["Divide", "a", ["Add", 1, "x"]]`                                        |
 | `e^{\imaginaryI \pi }+1=0` | `["Eq", ["Power", "E", ["Add", ["Multiply", "Pi", "ImaginaryI"], 1]], 0]` |
-| `\sin^{-1}\prime(x)`       | `[["Derivative", 1, ["InverseFunction", "Sin"]], "x"]`                    |
+| `\sin^{-1}\prime(x)`       | `[["Derivative", ["InverseFunction", "Sin"]], "x"]`                       |
 
 This section of the repo contains code to:
 

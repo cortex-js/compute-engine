@@ -8,7 +8,6 @@ import {
   BoxedExpression,
   BoxedFunctionDefinition,
   IComputeEngine,
-  EvaluateOptions,
   NOptions,
   BoxedRuleSet,
   SemiBoxedExpression,
@@ -20,6 +19,7 @@ import {
   BoxedDomain,
   RuntimeScope,
   BoxedSubstitution,
+  EvaluateOptions,
 } from '../public';
 import { findUnivariateRoots } from '../solve';
 import { asFloat } from '../numerics/numeric';
@@ -51,7 +51,7 @@ function cheapest(
   const ce = oldExpr.engine;
   const boxedNewExpr = ce.box(newExpr);
 
-  if (ce.costFunction(boxedNewExpr) <= 1.7 * ce.costFunction(oldExpr)) {
+  if (ce.costFunction(boxedNewExpr) <= 1.2 * ce.costFunction(oldExpr)) {
     // console.log(
     //   'Picked new' + boxedNewExpr.toString() + ' over ' + oldExpr.toString()
     // );
@@ -258,7 +258,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   subs(sub: Substitution, options?: { canonical?: boolean }): BoxedExpression {
-    options ??= {};
+    options = options ? { ...options } : {};
     if (!('canonical' in options)) options.canonical = true;
 
     const ops = this._ops.map((x) => x.subs(sub, options));
@@ -615,9 +615,18 @@ export class BoxedFunction extends AbstractBoxedExpression {
     return this._codomain!;
   }
 
-  simplify(options?: SimplifyOptions): BoxedExpression {
-    const recursive = options?.recursive ?? true;
+  // simplify(options?: SimplifyOptions): BoxedExpression {
+  //   const result = this.simplifyAll(options);
+  //   if (result.length === 1) return result[0];
+  //   const ce = this.engine;
+  //   result.sort((a, b) => {
+  //     if (a === b) return 0;
+  //     return ce.costFunction(a) - ce.costFunction(b);
+  //   });
+  //   return result[0];
+  // }
 
+  simplify(options?: SimplifyOptions): BoxedExpression {
     //
     // 1/ Use the canonical form
     //
@@ -631,13 +640,14 @@ export class BoxedFunction extends AbstractBoxedExpression {
     //
     // 2/ Apply expand
     //
+    const recursive = options?.recursive ?? true;
 
     let expr: BoxedExpression | undefined | null;
     if (recursive) {
       expr = expand(this);
       if (expr !== null) {
-        expr = cheapest(this, expr);
-        return expr.simplify({ ...options, recursive: false });
+        expr = expr.simplify({ ...options, recursive: false });
+        return cheapest(this, expr);
       }
     }
 
@@ -704,7 +714,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     do {
       const newExpr = expr.replace(rules);
       if (newExpr !== null) {
-        expr = cheapest(newExpr, expr);
+        expr = cheapest(expr, newExpr);
         if (expr === newExpr) done = true;
       } else done = true; // no rules applied
 

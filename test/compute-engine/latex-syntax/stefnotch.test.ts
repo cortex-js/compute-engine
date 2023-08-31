@@ -240,7 +240,7 @@ describe('STEFNOTCH #13', () => {
         [
           "Equal",
           "a",
-          ["Error", "'expected-expression'", ["Latex", "'\\displaystyle'"]]
+          ["Error", "'expected-expression'", ["Latex", "'{\\displaystyle'"]]
         ],
         [
           "Subscript",

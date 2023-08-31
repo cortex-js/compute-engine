@@ -152,7 +152,7 @@ export function applyN(
   bigFn?: (x: Decimal) => Decimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
 ): BoxedExpression | undefined {
-  if (expr.numericValue === null) return undefined;
+  if ((expr?.numericValue ?? null) === null) return undefined;
   return expr.engine.number(apply(expr, fn, bigFn, complexFn));
 }
 

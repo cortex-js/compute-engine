@@ -382,7 +382,7 @@ export function parse(s: string): Expression {
     i = skipWhitespace(s, i);
 
     if (i < s.length) {
-      return ['Error', { str: 'unexpected-token' }, s.substring(i)];
+      return ['Error', { str: 'unexpected-token' }, { str: s.substring(i) }];
     }
 
     return result ?? 'Nothing';

@@ -1,5 +1,5 @@
 import { Expression } from '../../../math-json/math-json-format';
-import { LatexDictionary, Parser } from '../public';
+import { LatexDictionary, Parser, Terminator } from '../public';
 
 /**
  * Trigonometric functions have some special conventions that require a
@@ -8,55 +8,7 @@ import { LatexDictionary, Parser } from '../public';
  *
  */
 function parseTrig(op: string) {
-  return (parser: Parser): Expression | null => {
-    let isInverse = false;
-    let primeLevel = 0;
-    let sup: Expression | null = null;
-
-    parser.skipSpace();
-    if (parser.match('^')) {
-      parser.skipSpace();
-
-      const start = parser.index;
-
-      // Is this ^{-1}? or some primes?
-      if (parser.match('<{>')) {
-        parser.skipSpace();
-        if (parser.match('-') && parser.match('1')) {
-          parser.skipSpace();
-          if (parser.match('<}>')) isInverse = true;
-        }
-        if (!isInverse) {
-          // Is it one or more Prime?
-          let done = false;
-          while (!done) {
-            parser.skipSpace();
-            if (parser.match('\\doubleprime')) primeLevel += 2;
-            else if (parser.match('\\prime')) primeLevel += 1;
-            else if (parser.match("'")) primeLevel += 1;
-            else done = true;
-          }
-          if (!parser.match('<}>')) primeLevel = 0;
-        }
-        if (primeLevel === 0 && !isInverse) {
-          // We didn't find primes or inverse, this could be a regular exponent
-          parser.index = start;
-          sup = parser.matchRequiredLatexArgument();
-        }
-        if (primeLevel === 0) {
-          // Do we have some primes (not in an exponent)
-          let done = false;
-          while (!done) {
-            parser.skipSpace();
-            if (parser.match('\\doubleprime')) primeLevel += 2;
-            else if (parser.match('\\prime')) primeLevel += 1;
-            else if (parser.match("'")) primeLevel += 1;
-            else done = true;
-          }
-        }
-      }
-    }
-
+  return (parser: Parser, until?: Terminator): Expression | null => {
     // Note: names as per NIST-DLMF
     let head: Expression =
       {
@@ -95,16 +47,76 @@ function parseTrig(op: string) {
       op ??
       '';
 
+    if (parser.atTerminator(until)) return head;
+    let isInverse = false;
+    let primeLevel = 0;
+    let sup: Expression | null = null;
+
+    parser.skipSpace();
+    const start = parser.index;
+    if (parser.match('^')) {
+      parser.skipSpace();
+
+      const superscriptIndex = parser.index;
+
+      if (parser.matchAll(['<{>', '-', '1', '<}>'])) isInverse = true;
+      else {
+        parser.index = start;
+
+        // Count a prime symbol suffix
+        parser.index = start;
+        primeLevel = parser.matchPrimeSuffix();
+
+        if (primeLevel === 0) {
+          parser.index = superscriptIndex;
+          sup = parser.matchRequiredLatexArgument();
+        }
+      }
+    }
+    // Additional primes, after a superscript
+    primeLevel += parser.matchPrimeSuffix();
+
     if (isInverse) head = ['InverseFunction', head];
 
-    if (primeLevel >= 1) head = ['Derivative', primeLevel, head];
+    if (primeLevel === 1) head = ['Derivative', head];
+    else if (primeLevel > 1) head = ['Derivative', head, primeLevel];
 
-    const args = parser.matchArguments('implicit');
-    if (args === null) return sup ? [['Power', [head, '_'], sup]] : head;
+    const args = parser.matchArguments('implicit', until);
+    if (args === null) return sup ? [['Power', [head], sup]] : head;
 
     return sup ? ['Power', [head, ...args], sup] : [head, ...args];
   };
 }
+
+// function parsePrimeGroup(parser: Parser): number {
+//   const start = parser.index;
+
+//   parser.skipSpace();
+
+//   if (!parser.match('<{>')) return 0;
+
+//   let primeLevel = 0;
+//   do {
+//     parser.skipSpace();
+//     if (parser.match('<}>')) return primeLevel;
+
+//     const n = countPrimeLevel(parser);
+//     if (n === 0) {
+//       parser.index = start;
+//       return 0;
+//     }
+//     primeLevel += n;
+//   } while (true);
+// }
+
+// function countPrimeLevel(parser: Parser): number {
+//   if (parser.match('\\tripleprime')) return 3;
+//   if (parser.match('\\doubleprime')) return 2;
+//   if (parser.match('\\prime')) return 1;
+//   if (parser.match("'")) return 1;
+//   return 0;
+// }
+
 export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   {
     name: 'Arcsin',
@@ -136,6 +148,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Arccot'),
   },
   {
+    kind: 'function',
     name: 'Arcsec',
     trigger: 'arcsec',
 

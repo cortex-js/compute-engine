@@ -47,12 +47,7 @@ export function validateNumericArgs(
     xs = [];
     for (let i = 0; i <= Math.max(count - 1, ops.length - 1); i++) {
       if (i > count - 1) xs.push(ce.error('unexpected-argument', ops[i]));
-      else
-        xs.push(
-          ops[i] !== undefined
-            ? ce.box(ops[i])
-            : ce.error(['missing', 'Number'])
-        );
+      else xs.push(ops[i] !== undefined ? ce.box(ops[i]) : ce.error('missing'));
     }
   }
 
@@ -120,7 +115,7 @@ export function validateArgument(
   dom: BoxedDomain | DomainLiteral | undefined
 ): BoxedExpression {
   if (dom === undefined) return ce.error('unexpected-argument', arg);
-  if (arg === undefined) return ce.error(['missing', dom]);
+  if (arg === undefined) return ce.error('missing');
   if (!arg.isValid) return arg;
   if (arg?.domain.isCompatible(dom)) return arg;
   return ce.error(['incompatible-domain', dom, arg.domain], arg);
@@ -138,7 +133,7 @@ function validateNextArgument(
     return [[...matched, ce.error('unexpected-argument', next)], ops];
 
   if (!Array.isArray(dom)) {
-    if (!next) return [[...matched, ce.error(['missing', dom])], ops];
+    if (!next) return [[...matched, ce.error('missing')], ops];
 
     if (!next.domain.isCompatible(dom)) {
       return [
@@ -167,7 +162,7 @@ function validateNextArgument(
       }
     } else if (ctor === 'Maybe') valid = true;
     if (valid) return [[...matched, ce.symbol('Nothing')], ops];
-    return [[...matched, ce.error(['missing', dom])], ops];
+    return [[...matched, ce.error('missing')], ops];
   }
 
   if (ctor === 'Union') {

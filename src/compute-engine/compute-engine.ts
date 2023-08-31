@@ -67,8 +67,8 @@ import {
 } from './boxed-expression/boxed-symbol';
 import {
   boxDomain,
-  isDomain,
   _BoxedDomain,
+  isDomain,
 } from './boxed-expression/boxed-domain';
 import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expression';
 import { isValidIdentifier, validateIdentifier } from '../math-json/utils';
@@ -1059,10 +1059,6 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   error(
-    message: ['invalid-domain', ...SemiBoxedExpression[]],
-    where?: SemiBoxedExpression
-  ): BoxedDomain;
-  error(
     message: string | [string, ...SemiBoxedExpression[]],
     where?: SemiBoxedExpression
   ): BoxedExpression;
@@ -1078,18 +1074,10 @@ export class ComputeEngine implements IComputeEngine {
         where = '';
     }
 
-    if (Array.isArray(message)) {
-      if (message[0] === 'invalid-domain') {
-        return boxDomain(this, [
-          'Error',
-          ['ErrorCode', "'invalid-domain'", message[1]],
-        ]);
-      }
-    }
     let msg: BoxedExpression | undefined = undefined;
     if (Array.isArray(message) && message[0] === 'incompatible-domain') {
       msg = new BoxedFunction(this, 'ErrorCode', [
-        this.string("'incompatible-domain'"),
+        this.string('incompatible-domain'),
         boxDomain(this, message[1] as DomainExpression),
         boxDomain(this, message[2] as DomainExpression),
       ]);
@@ -1100,11 +1088,12 @@ export class ComputeEngine implements IComputeEngine {
     if (!msg && typeof message !== 'string')
       msg = new BoxedFunction(this, 'ErrorCode', [
         this.string(message[0]),
-        ...message
-          .slice(1)
-          .map((x) =>
-            typeof x === 'string' ? this.string(x) : this.string(x.toString())
-          ),
+        ...message.slice(1).map((x) => {
+          // console.assert(typeof x !== 'string' || isValidIdentifier(x));
+          if (typeof x === 'string') debugger;
+          console.assert(typeof x !== 'string'); // For safety, require wrapped symbols or strings
+          return this.box(x, { canonical: false });
+        }),
       ]);
 
     if (!where)
@@ -1170,7 +1159,7 @@ export class ComputeEngine implements IComputeEngine {
     exponent: number | Rational | BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression {
-    // Short path. Note that are arguments are **not** validated.
+    // Short path. Note that arguments are **not** validated.
 
     // The logic here handles the cases where the exponent is a number or Rational
     if (exponent instanceof AbstractBoxedExpression) {
@@ -1278,7 +1267,7 @@ export class ComputeEngine implements IComputeEngine {
     name: string,
     options?: { metadata?: Metadata; canonical?: boolean }
   ): BoxedExpression {
-    options ??= {};
+    options = options ? { ...options } : {};
     if (!('canonical' in options)) options.canonical = true;
 
     // Identifiers such as symbol names should use the Unicode NFC canonical form
@@ -1298,7 +1287,7 @@ export class ComputeEngine implements IComputeEngine {
       const where = options?.metadata?.latex;
       const nameStr = `'${name}'`;
       return this.error(
-        ['invalid-identifier', validateIdentifier(name)],
+        ['invalid-identifier', { str: validateIdentifier(name) }],
         where ? ['Latex', `'${where}'`] : nameStr
       );
     }
@@ -1331,16 +1320,12 @@ export class ComputeEngine implements IComputeEngine {
     if (domain instanceof _BoxedDomain) return domain;
     if (domain instanceof AbstractBoxedExpression && domain.symbol)
       domain = domain.symbol;
+
     if (typeof domain === 'string') {
-      if (this._commonDomains[domain]) return this._commonDomains[domain]!;
+      const expr = this._commonDomains[domain];
+      if (expr) return expr;
     }
 
-    if (!isDomain(domain)) {
-      return this.error(
-        ['invalid-domain', { str: JSON.stringify(domain) }],
-        ['Latex', { str: metadata?.latex ?? '' }]
-      );
-    }
     return boxDomain(this, domain, metadata);
   }
 
@@ -1360,7 +1345,7 @@ export class ComputeEngine implements IComputeEngine {
       | Rational,
     options?: { canonical?: boolean; metadata?: Metadata }
   ): BoxedExpression {
-    options ??= {};
+    options = options ? { ...options } : {};
     if (!('canonical' in options)) options.canonical = true;
 
     //

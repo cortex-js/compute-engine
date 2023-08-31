@@ -16,15 +16,6 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
       latex     = ["Cos", ["Power", ["Divide", "x", 2], 2]]
       box       = ["Cos", ["Multiply", ["Square", ["Rational", 1, 2]], ["Square", "x"]]]
       canonical = ["Cos", ["Multiply", ["Rational", 1, 4], ["Square", "x"]]]
-      simplify  = [
-        "Sin",
-        [
-          "Add",
-          ["Multiply", ["Rational", 1, 2], "Pi"],
-          ["Multiply", ["Rational", 1, 4], ["Square", "x"]]
-        ]
-      ]
-      evaluate  = ["Cos", ["Multiply", ["Rational", 1, 4], ["Square", "x"]]]
       N-auto    = ["Cos", ["Multiply", 0.25, ["Square", "x"]]]
     `));
 });
@@ -32,13 +23,13 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
 describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   test(`\\sin^{-1}'(x)`, () =>
     expect(check("\\sin^{-1}'(x)")).toMatchInlineSnapshot(`
-      latex     = [["Derivative", 1, "Arcsin"], "x"]
-      [["Derivative", 1, "Arcsin"], "x"]
+      latex     = [["Derivative", "Arcsin"], "x"]
+      [["Derivative", "Arcsin"], "x"]
     `));
   test(`\\sin^{-1}''(x)`, () =>
     expect(check("\\sin^{-1}''(x)")).toMatchInlineSnapshot(`
-      latex     = [["Derivative", 2, "Arcsin"], "x"]
-      [["Derivative", 2, "Arcsin"], "x"]
+      latex     = [["Derivative", "Arcsin", 2], "x"]
+      [["Derivative", "Arcsin", 2], "x"]
     `));
   // test(`\\cos^{-1\\doubleprime}(x)`, () =>
   //   expect(check('\\cos^{-1\\doubleprime}(x)')).toMatchInlineSnapshot(`
@@ -48,8 +39,8 @@ describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   //   `));
   test(`\\cos^{-1}\\doubleprime(x)`, () =>
     expect(check('\\cos^{-1}\\doubleprime(x)')).toMatchInlineSnapshot(`
-      latex     = [["Derivative", 2, "Arccos"], "x"]
-      [["Derivative", 2, "Arccos"], "x"]
+      latex     = [["Derivative", "Arccos", 2], "x"]
+      [["Derivative", "Arccos", 2], "x"]
     `));
 });
 
@@ -72,7 +63,12 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
     expect(check('\\cos(\\frac{\\pi}{5})')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Divide", "Pi", 5]]
       box       = ["Cos", ["Multiply", ["Rational", 1, 5], "Pi"]]
-      simplify  = ["Multiply", ["Rational", 1, 4], ["Add", ["Sqrt", 5], 1]]
+      simplify  = [
+        "Add",
+        ["Multiply", ["Sqrt", 5], ["Rational", 1, 4]],
+        ["Rational", 1, 4]
+      ]
+      evaluate  = ["Multiply", ["Rational", 1, 4], ["Add", ["Sqrt", 5], 1]]
       N-auto    = 0.8090169943749474241022934171828190588601545899028814310677243113526302314094512248536036020946955687
       N-mach    = 0.8090169943749475
     `));

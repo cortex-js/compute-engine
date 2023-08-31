@@ -1,7 +1,7 @@
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
-import { isDomain } from '../boxed-expression/boxed-domain';
+import { isValidDomain } from '../boxed-expression/boxed-domain';
 import { validateArgumentCount } from '../boxed-expression/validate';
 import { BoxedExpression, IdTable, IComputeEngine } from '../public';
 import { canonical, flattenSequence } from '../symbolic/flatten';
@@ -27,7 +27,7 @@ export const SETS_LIBRARY: IdTable = {
       domain: 'Predicate',
       canonical: (ce, args) => {
         args = validateArgumentCount(ce, flattenSequence(canonical(args)), 2);
-        if (args.length === 2 && isDomain(args[1]))
+        if (args.length === 2 && isValidDomain(args[1]))
           return ce._fn('Element', [args[0], ce.domain(args[1])]);
         return ce._fn('Element', args);
       },
@@ -231,7 +231,7 @@ function evaluateElement(
     return ce.symbol('False');
   }
 
-  if (isDomain(rhs)) {
+  if (isValidDomain(rhs)) {
     if (lhs.domain.isCompatible(ce.domain(rhs))) return ce.symbol('True');
     return ce.symbol('False');
   }

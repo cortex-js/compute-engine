@@ -65,7 +65,7 @@ export type LibraryCategory =
  * This indicates a condition under which parsing should stop:
  * - an operator of a precedence higher than specified has been encountered
  * - the last token has been reached
- * - or if a function is provided, the function returns true;
+ * - or if a condition is provided, the condition returns true;
  */
 export type Terminator = {
   minPrec: number;
@@ -100,9 +100,15 @@ export type EnvironmentParseHandler = (
   optArgs: Expression[]
 ) => Expression | null;
 
-export type SymbolParseHandler = (parser: Parser) => Expression | null;
+export type IdentifierParseHandler = (
+  parser: Parser,
+  until?: Terminator
+) => Expression | null;
 
-export type FunctionParseHandler = (parser: Parser) => Expression | null;
+export type FunctionParseHandler = (
+  parser: Parser,
+  until?: Terminator
+) => Expression | null;
 
 export type PostfixParseHandler = (
   parser: Parser,
@@ -126,7 +132,7 @@ export type MatchfixParseHandler = (
 ) => Expression | null;
 
 export type ParseHandler =
-  | SymbolParseHandler
+  | IdentifierParseHandler
   | FunctionParseHandler
   | EnvironmentParseHandler
   | PostfixParseHandler
@@ -164,7 +170,7 @@ export type BaseEntry = {
    * However, an entry with no `name` can be used to define a synonym (for example
    * for the symbol `\varnothing` which is a synonym for `\emptyset`).
    *
-   * If not `parse` handler is provided, only the trigger is used to select this
+   * If no `parse` handler is provided, only the trigger is used to select this
    * entry. Otherwise, if the trigger of the entry matches the current
    * token, the `parse` handler is invoked.
    */
@@ -263,44 +269,30 @@ export type EnvironmentEntry = BaseEntry & {
   parse: EnvironmentParseHandler;
 };
 
-export type SymbolEntry = BaseEntry & {
-  kind: 'symbol';
+export type IdentifierEntry = BaseEntry & {
+  kind: 'identifier';
 
   /** Used for appropriate wrapping (i.e. when to surround it with parens) */
   precedence?: number;
 
-  parse: Expression | SymbolParseHandler;
+  parse: Expression | IdentifierParseHandler;
 };
 
+/**
+ * A function has the following form:
+ * - a prefix such as `\mathrm` or `\operatorname`
+ * - a trigger string, such as `gcd`
+ * - some postfix operators such as `\prime`
+ * - an optional list of arguments in an enclosure (parentheses)
+ *
+ * For more complex situations, for example implicit arguments or
+ * inverse functions postfix (i.e. ^{-1}), use a custom parse handler with a
+ * base entry.
+ */
 export type FunctionEntry = BaseEntry & {
   kind: 'function';
 
-  /**
-   * Indicate if this symbol can be followed by arguments.
-   *
-   * The presence of arguments will indicate that the arguments should be
-   * applied to the symbol. Otherwise, the invisible operator is applied
-   * to the symbol and the arguments.
-   *
-   * If `arguments` is `"group"`:
-   *
-   * "f(x)" -> `["f", "x"]`
-   * "f x" -> `["Multiply", "f", "x"]`
-   *
-   * If `arguments` is `""`:
-   *
-   * "f(x)" -> `["Multiply", "f", "x"]`
-   * "f x" -> `["Multiply", "f", "x"]`
-   *
-   * If `arguments` is `"implicit"` and the symbol is followed either
-   * by a group or by a primary (prefix + symbol + subsupfix + postfix).
-   * Used for trig functions. i.e. `\sin x` vs `\sin(x)`:
-   *
-   * "f(x)" -> `["f", "x"]`
-   * "f x" -> `["f", "x"]`
-   *
-   */
-  // arguments?: 'group' | 'implicit' | '';
+  trigger: string;
 
   parse: Expression | FunctionParseHandler;
 };
@@ -310,7 +302,7 @@ export type FunctionEntry = BaseEntry & {
  */
 export type DefaultEntry = BaseEntry & {
   precedence?: number;
-  parse?: Expression | SymbolParseHandler;
+  parse?: Expression | IdentifierParseHandler;
 };
 
 export type LatexDictionaryEntry =
@@ -319,15 +311,15 @@ export type LatexDictionaryEntry =
   | InfixEntry
   | PostfixEntry
   | PrefixEntry
-  | SymbolEntry
+  | IdentifierEntry
   | FunctionEntry
   | EnvironmentEntry;
 
 /** @internal */
-export function isSymbolEntry(
+export function isIdentifierEntry(
   entry: LatexDictionaryEntry
-): entry is SymbolEntry {
-  return !('kind' in entry) || entry.kind === 'symbol';
+): entry is IdentifierEntry {
+  return !('kind' in entry) || entry.kind === 'identifier';
 }
 /** @internal */
 export function isFunctionEntry(
@@ -655,7 +647,6 @@ export interface Serializer {
   /** Add a group fence around the expression if it is
    * an operator of precedence less than or equal to `prec`.
    */
-
   wrap: (expr: Expression | null, prec?: number) => string;
 
   /** Add a group fence around the expression if it is
@@ -718,7 +709,7 @@ export interface Parser {
   readonly peek: LatexToken;
 
   /** Return true if the terminator condition is met */
-  atTerminator(t: Terminator): boolean;
+  atTerminator(t: Terminator | undefined): boolean;
 
   /** Return an array of string corresponding to tokens ahead.
    * The index is unchanged.
@@ -815,9 +806,19 @@ export interface Parser {
    * - 'implicit': either an expression inside a pair of `()`, or just a primary
    *    (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
    */
-  matchArguments(kind: '' | 'implicit' | 'enclosure'): Expression[] | null;
+  matchArguments(
+    kind: '' | 'implicit' | 'enclosure',
+    until?: Terminator
+  ): Expression[] | null;
 
   matchStringArgument(): string | null;
+
+  /* Parse a series of `\prime` or `'`, or in a suffix */
+  matchPrimeSuffix(): number;
+
+  /** Parse function 'id' followed optionally by some prefix (primes, etc
+   * and an argument list in an enclosure. */
+  matchFunctionSuffix(id: string): Expression;
 
   /** If matches the normalized open delimiter, returns the
    * expected closing delimiter.
@@ -872,7 +873,7 @@ export interface Parser {
    * - a single-letter variable: `x`
    * - a single LaTeX command: `\pi`
    */
-  matchSymbol(): Expression | null;
+  matchSymbol(until?: Terminator): Expression | null;
 
   /**
    * Parse an expression:

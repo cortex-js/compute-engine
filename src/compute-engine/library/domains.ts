@@ -1,7 +1,7 @@
 import { DomainLiteral } from '../public';
 
 export const DOMAIN_CONSTRUCTORS = [
-  'Error',
+  'InvalidDomain',
 
   'Dictionary',
   'Function',

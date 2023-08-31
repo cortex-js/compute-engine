@@ -12,11 +12,11 @@ import {
   InfixParseHandler,
   PrefixParseHandler,
   EnvironmentParseHandler,
-  SymbolParseHandler,
+  IdentifierParseHandler,
   FunctionParseHandler,
   isMatchfixEntry,
   isInfixEntry,
-  isSymbolEntry,
+  isIdentifierEntry,
   isEnvironmentEntry,
   isPostfixEntry,
   isPrefixEntry,
@@ -45,22 +45,31 @@ export type CommonEntry = {
   serialize: SerializeHandler | LatexString;
 };
 
-export type SymbolEntry = CommonEntry & {
-  kind: 'symbol';
+export type IndexedIdentifierEntry = CommonEntry & {
+  kind: 'identifier';
 
-  // The 'precedence' of symbols is used to determine appropriate wrapping when serializing
+  // The 'precedence' of identifiers is used to determine appropriate wrapping when serializing
   precedence: number;
 
-  parse: SymbolParseHandler;
+  parse: IdentifierParseHandler;
 };
 
-export type FunctionEntry = CommonEntry & {
+/**
+ * A function has the following form:
+ * - a prefix such as `\mathrm` or `\operatorname`
+ * - a trigger string, such as `gcd`
+ * - some postfix operators such as `\prime`
+ * - an optional list of arguments in an enclosure (parentheses)
+ *
+ * Functions of this type are indexed in the dictionary by their trigger string.
+ */
+export type IndexedFunctionEntry = CommonEntry & {
   kind: 'function';
 
   parse: FunctionParseHandler;
 };
 
-export type MatchfixEntry = CommonEntry & {
+export type IndexedMatchfixEntry = CommonEntry & {
   kind: 'matchfix';
 
   openDelimiter: Delimiter | LatexToken[];
@@ -69,7 +78,7 @@ export type MatchfixEntry = CommonEntry & {
   parse: MatchfixParseHandler;
 };
 
-export type InfixEntry = CommonEntry & {
+export type IndexedInfixEntry = CommonEntry & {
   kind: 'infix';
   associativity: 'right' | 'left' | 'non' | 'both';
   precedence: number;
@@ -77,13 +86,13 @@ export type InfixEntry = CommonEntry & {
   parse: InfixParseHandler;
 };
 
-export type PrefixEntry = CommonEntry & {
+export type IndexedPrefixEntry = CommonEntry & {
   kind: 'prefix';
   precedence: number;
 
   parse: PrefixParseHandler;
 };
-export type PostfixEntry = CommonEntry & {
+export type IndexedPostfixEntry = CommonEntry & {
   kind: 'postfix';
   precedence: number;
 
@@ -97,12 +106,12 @@ export type EnvironmentEntry = CommonEntry & {
 };
 
 export type IndexedLatexDictionaryEntry =
-  | FunctionEntry
-  | SymbolEntry
-  | MatchfixEntry
-  | InfixEntry
-  | PrefixEntry
-  | PostfixEntry
+  | IndexedFunctionEntry
+  | IndexedIdentifierEntry
+  | IndexedMatchfixEntry
+  | IndexedInfixEntry
+  | IndexedPrefixEntry
+  | IndexedPostfixEntry
   | EnvironmentEntry;
 
 export type IndexedLatexDictionary = {
@@ -115,15 +124,15 @@ export type IndexedLatexDictionary = {
 
   // Mapping from token triggers of a given length to dictionary entry.
   // Definition can share triggers, so the entry is an array
-  function: Map<string, FunctionEntry[]>;
-  symbol: (Map<LatexString, SymbolEntry[]> | null)[];
-  prefix: (Map<LatexString, PrefixEntry[]> | null)[];
-  infix: (Map<LatexString, InfixEntry[]> | null)[];
-  postfix: (Map<LatexString, PostfixEntry[]> | null)[];
+  function: Map<string, IndexedFunctionEntry[]>;
+  identifier: (Map<LatexString, IndexedIdentifierEntry[]> | null)[];
+  prefix: (Map<LatexString, IndexedPrefixEntry[]> | null)[];
+  infix: (Map<LatexString, IndexedInfixEntry[]> | null)[];
+  postfix: (Map<LatexString, IndexedPostfixEntry[]> | null)[];
 
   // Matchfix entries use openDelimiter/closeDelimiter. They do not
   // have a trigger, and the entries are not sorted by trigger length.
-  matchfix: MatchfixEntry[];
+  matchfix: IndexedMatchfixEntry[];
 
   // Environment definition must be unique. They are indexed by the name
   // of the environment.
@@ -160,7 +169,7 @@ export function indexLatexDictionary(
     lookahead: 1,
     name: new Map(),
     function: new Map(),
-    symbol: [],
+    identifier: [],
     infix: [],
     prefix: [],
     postfix: [],
@@ -231,10 +240,11 @@ export function indexLatexDictionary(
             ...result.function.get(triggerString)!,
             indexedEntry,
           ]);
-      } else if (indexedEntry.kind === 'symbol') {
+      } else if (indexedEntry.kind === 'identifier') {
         // If no entries of this kind and length yet, create a map for it
-        if (result.symbol[n] === undefined) result.symbol[n] = new Map();
-        const list = result.symbol[n]!;
+        if (result.identifier[n] === undefined)
+          result.identifier[n] = new Map();
+        const list = result.identifier[n]!;
         if (list.has(triggerString))
           list.get(triggerString)!.push(indexedEntry);
         else list.set(triggerString, [indexedEntry]);
@@ -271,7 +281,7 @@ function makeIndexedEntry(
 
   const result: Partial<IndexedLatexDictionaryEntry> = {
     name: entry.name,
-    kind: 'kind' in entry ? entry.kind : 'symbol',
+    kind: 'kind' in entry ? entry.kind : 'identifier',
   };
 
   //
@@ -361,7 +371,7 @@ function makeIndexedEntry(
     );
   }
 
-  if (result.kind === 'symbol' && isSymbolEntry(entry)) {
+  if (result.kind === 'identifier' && isIdentifierEntry(entry)) {
     result.precedence = entry.precedence ?? 10000;
   }
 
@@ -446,7 +456,7 @@ function makeIndexedEntry(
       // Parse handler as an expression
       //
 
-      console.assert(result.kind === 'symbol');
+      console.assert(result.kind === 'identifier');
       result.parse = () => entry.parse as Expression;
     } else if (entry.parse === undefined && entry.name !== undefined) {
       //
@@ -490,7 +500,7 @@ function makeIndexedEntry(
       result.serialize = triggerString + '#1';
     } else if (result.kind === 'infix') {
       result.serialize = '#1' + triggerString + '#2';
-    } else if (result.kind === 'symbol') {
+    } else if (result.kind === 'identifier') {
       result.serialize = triggerString;
     } else {
       result.serialize = '';

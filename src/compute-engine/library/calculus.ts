@@ -18,7 +18,7 @@ export const CALCULUS_LIBRARY: IdTable[] = [
           'Number',
         ],
         canonical: (ce, ops) => {
-          const body = ops[0] ?? ce.error(['missing', 'Function']); // @todo not exactly a function, more like a 'NumericExpression'
+          const body = ops[0] ?? ce.error('missing');
 
           let range = ops[1];
           let index: BoxedExpression | null = null;
@@ -57,7 +57,7 @@ export const CALCULUS_LIBRARY: IdTable[] = [
           else if (lower) range = ce.tuple([index, lower]);
           else range = index;
 
-          return ce._fn('Integrate', [body, range]);
+          return ce._fn('Integrate', [body.canonical, range]);
         },
       },
     },

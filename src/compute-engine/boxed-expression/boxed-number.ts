@@ -151,7 +151,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
     return this;
   }
 
-  get numericValue(): number | Decimal | Complex | Rational | null {
+  get numericValue(): number | Decimal | Complex | Rational {
     return this._value;
   }
 
@@ -168,15 +168,16 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get sgn(): -1 | 0 | 1 | undefined | null {
-    if (this.isZero) return 0;
-    if (this._value instanceof Complex) return null;
+    if (this._value === 0) return 0;
 
     if (typeof this._value === 'number') {
       if (this._value < 0) return -1;
       if (this._value > 0) return 1;
       return null;
     }
+
     if (this._value instanceof Decimal) {
+      if (this._value.isZero()) return 0;
       if (this._value.isNegative()) return -1;
       if (this._value.isPositive()) return 1;
       return null;
@@ -186,11 +187,15 @@ export class BoxedNumber extends AbstractBoxedExpression {
       // By convention, the denominator is always positive,
       // so the sign is carried by the numerator
       const [numer, denom] = this._value;
+      // Since the ===, < and > operator are defined for both
+      // number and bigint, no need to check the type
       if (numer === 0 && denom !== 0) return 0;
       if (numer < 0) return -1;
       if (numer > 0) return 1;
       return null;
     }
+
+    // if (this._value instanceof Complex) return null;
 
     return null;
   }
@@ -199,10 +204,9 @@ export class BoxedNumber extends AbstractBoxedExpression {
     if (this === rhs) return true;
     if (!(rhs instanceof BoxedNumber)) return false;
 
-    if (Array.isArray(this._value)) {
-      if (!Array.isArray(rhs._value)) return false;
-      const [rhsN, rhsD] = rhs._value;
-      return this._value[0] === rhsN && this._value[1] === rhsD;
+    if (typeof this._value === 'number') {
+      if (typeof rhs._value !== 'number') return false;
+      return this._value === rhs._value;
     }
 
     if (this._value instanceof Decimal) {
@@ -210,23 +214,23 @@ export class BoxedNumber extends AbstractBoxedExpression {
       return this._value.eq(rhs._value);
     }
 
+    if (Array.isArray(this._value)) {
+      if (!Array.isArray(rhs._value)) return false;
+      const [rhsN, rhsD] = rhs._value;
+      return this._value[0] === rhsN && this._value[1] === rhsD;
+    }
+
     if (this._value instanceof Complex) {
       if (!(rhs._value instanceof Complex)) return false;
       return this._value.equals(rhs._value);
     }
 
-    if (typeof this._value === 'number') {
-      if (typeof rhs._value !== 'number') return false;
-      return this._value === rhs._value;
-    }
     return false;
   }
 
   isEqual(rhs: BoxedExpression): boolean {
-    if (this === rhs) return true;
-    const n = rhs.N();
-    if (!(n instanceof BoxedNumber)) return false;
-    return signDiff(this.N(), n) === 0;
+    // For numbers, mathematical equality is the same as structural equality
+    return this.isSame(rhs);
   }
 
   match(
@@ -268,6 +272,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   /** x > 0, same as `isGreater(0)` */
   get isPositive(): boolean | undefined {
+    if (typeof this._value === 'number') return this._value > 0;
     const s = this.sgn;
     if (s === undefined || s === null) return undefined;
     return s > 0;
@@ -275,6 +280,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   /** x >= 0, same as `isGreaterEqual(0)` */
   get isNonNegative(): boolean | undefined {
+    if (typeof this._value === 'number') return this._value >= 0;
     const s = this.sgn;
     if (s === undefined || s === null) return undefined;
     return s >= 0;
@@ -282,6 +288,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   /** x < 0, same as `isLess(0)` */
   get isNegative(): boolean | undefined {
+    if (typeof this._value === 'number') return this._value < 0;
     const s = this.sgn;
     if (s === undefined || s === null) return undefined;
     return s < 0;
@@ -289,6 +296,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
 
   /** x <= 0, same as `isLessEqual(0)` */
   get isNonPositive(): boolean | undefined {
+    if (typeof this._value === 'number') return this._value <= 0;
     const s = this.sgn;
     if (s === undefined || s === null) return undefined;
     return s <= 0;
@@ -307,7 +315,7 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get isNotZero(): boolean {
-    if (typeof this._value === 'number' && this._value !== 0) return true;
+    if (this._value === 0) return false;
 
     if (this._value instanceof Decimal) return !this._value.isZero();
 
@@ -317,7 +325,8 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get isOne(): boolean {
-    if (typeof this._value === 'number') return this._value === 1;
+    if (this._value === 1) return true;
+    if (typeof this._value === 'number') return false;
 
     if (this._value instanceof Decimal)
       return this._value.equals(this.engine._BIGNUM_ONE);
@@ -329,7 +338,8 @@ export class BoxedNumber extends AbstractBoxedExpression {
   }
 
   get isNegativeOne(): boolean {
-    if (typeof this._value === 'number') return this._value === -1;
+    if (this._value === -1) return true;
+    if (typeof this._value === 'number') return false;
 
     if (this._value instanceof Decimal)
       return this._value.equals(this.engine._BIGNUM_NEGATIVE_ONE);
@@ -422,9 +432,9 @@ export class BoxedNumber extends AbstractBoxedExpression {
   get isNaN(): boolean {
     if (typeof this._value === 'number') return Number.isNaN(this._value);
 
-    if (this._value instanceof Decimal) this._value.isNaN();
+    if (this._value instanceof Decimal) return this._value.isNaN();
 
-    if (this._value instanceof Complex) this._value.isNaN();
+    if (this._value instanceof Complex) return this._value.isNaN();
 
     // Note: Rational numbers cannot be NaN, they are
     // converted to a machine NaN during boxing (ctor)

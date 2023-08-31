@@ -33,7 +33,7 @@ import {
   simplifyMultiply,
   evalMultiply,
   evalMultiplication,
-  canonicalMultiplication,
+  canonicalProduct,
 } from './arithmetic-multiply';
 import { simplifyDivide } from './arithmetic-divide';
 import { processPower, processSqrt } from './arithmetic-power';
@@ -597,7 +597,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
         ],
         // codomain: (ce, args) => domainAdd(ce, args),
         // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
-        canonical: (ce, ops) => canonicalMultiplication(ce, ops[0], ops[1]),
+        canonical: (ce, ops) => canonicalProduct(ce, ops[0], ops[1]),
         simplify: (ce, ops) =>
           evalMultiplication(ce, ops[0], ops[1], 'simplify'),
         evaluate: (ce, ops) =>
@@ -615,7 +615,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
           args = canonical(flattenSequence(args));
 
           if (args.length === 0)
-            return ce._fn('Rational', [ce.error(['missing', 'Number'])]);
+            return ce._fn('Rational', [ce.error('missing')]);
 
           if (args.length === 1)
             return ce._fn('Rational', [

@@ -219,11 +219,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         )}\\notin ${serializer.serialize(op(op1, 2))}}`;
       }
 
-      if (code === 'missing') {
-        return `\\mathtip{\\error{${where}}}{${serializer.serialize(
-          op(op1, 2)
-        )}\\text{ missing}}`;
-      }
+      // if (code === 'missing') {
+      //   return `\\mathtip{\\error{${where}}}{${serializer.serialize(
+      //     op(op1, 2)
+      //   )}\\text{ missing}}`;
+      // }
 
       if (typeof code === 'string') return `\\error{${where}}`;
 
@@ -246,7 +246,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         code === 'unknown-environment' ||
         code === 'unexpected-base' ||
         code === 'incompatible-domain' ||
-        code === 'invalid-domain-expression'
+        code === 'invalid-domain'
       ) {
         return '';
       }
@@ -421,14 +421,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'Derivative',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const degree = machineValue(op(expr, 1)) ?? NaN;
-      if (!isFinite(degree)) return '';
-      const base = serializer.serialize(op(expr, 2));
-      if (degree === 1) {
-        return base + '^{\\prime}';
-      } else if (degree === 2) {
-        return base + '^{\\doubleprime}';
-      }
+      const degree = machineValue(op(expr, 2)) ?? 1;
+      const base = serializer.serialize(op(expr, 1));
+      if (degree === 1) return base + '^{\\prime}';
+      else if (degree === 2) return base + '^{\\doubleprime}';
+      else if (degree === 3) return base + '^{\\tripleprime}';
+
       return base + '^{(' + Number(degree).toString() + ')}';
     },
   },

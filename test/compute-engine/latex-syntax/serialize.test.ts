@@ -196,7 +196,7 @@ describe('LATEX', () => {
           "Error",
           [
             "ErrorCode",
-            "''incompatible-domain''",
+            "'incompatible-domain'",
             ["Domain", "String"],
             ["Domain", "RealNumber"]
           ],

@@ -206,7 +206,12 @@
         <div id="input-label">
           <h2><code>expr =</code></h2>
         </div>
+
         <math-field id="mf" class="mathfield" tabindex="0">
+          <!-- Should evaluate to a number -->
+          1.1\times 2\times
+          5\times\frac{5}{7}\times\frac{7}{9}\times\sqrt{2}\times\pi
+
           <!-- {\sqrt{\sum_{n=1}^\infty {\frac{10}{n^4}}}} = {\int_0^\infty \frac{2xdx}{e^x-1}} = \frac{\pi^2}{3} \in {\mathbb R} -->
 
           <!-- \int_{10}^{100}\sin x \, d x + \int\sin x \quad \mathrm{d} x +
@@ -474,6 +479,25 @@
       let errors = [];
 
       const ce = new ComputeEngine();
+      ce.strict = false;
+
+      // console.log(
+      //   ce
+      //     .box(['Add', 1, ['Sqrt', 5]])
+      //     .evaluate()
+      //     .toString()
+      // );
+
+      console.log(
+        ce.serialize(['Multiply', ['Divide', 4, 9], ['Divide', 2, 10]], {
+          canonical: false,
+        })
+      );
+      console.log(
+        ce.serialize(['Add', ['Divide', 1, 6], 5], {
+          canonical: false,
+        })
+      );
       // ce.defaultDomain = null;
 
       // const dict = ComputeEngine.getLatexDictionary();
@@ -510,24 +534,6 @@
         },
       });
 
-      console.log(ce.parse('\\mathrm{abc}'));
-      console.log(ce.parse('e^{i\\pi}'));
-
-      console.log(ce.box('מְהִירוּת‎').toString());
-      console.log(ce.parse('\\mathrm{半径}').toString());
-
-      console.log(ce.parse('\\mathrm{🍕🔪}').toString());
-      console.log(ce.parse('\\vec{x}').toString());
-      console.log(ce.parse('\\mathbb{X}').toString());
-      console.log(ce.parse('\\alpha_0').toString());
-      console.log(ce.parse('👨🏻‍🎤').toString());
-      console.log(ce.parse('\\mathrm{半径}').toString());
-      console.log(ce.parse('半').toString());
-
-      console.log(
-        ce.box(['Add', ['Divide', '1', '6'], '5'], { canonical: false }).latex
-      );
-
       updateAssumptions();
 
       const mf = document.getElementById('mf');
@@ -536,7 +542,7 @@
       // mf.value = randomExpr.latex;
 
       // mf.value = '(a+b+c)^2';
-      mf.value = '\\frac{b+1}{a}-\\frac{b+1}{a}';
+      // mf.value = '\\frac{b+1}{a}-\\frac{b+1}{a}';
       // mf.value = '\\mathrm{\\Delta bc}=\\mathrm{abc}+\\mathrm{def}土';
       // mf.value = '\\mathrm{\\alpha_{12}}';
 
@@ -637,9 +643,6 @@
           );
         }
 
-        console.log(expr.isEqual(ce.parse('\\frac{b+1}{2}')));
-        console.log(expr.isSame(ce.parse('\\frac{b+1}{2}')));
-
         updateLatex(null, 'symbols');
         updateLatex(null, 'solve');
         updateExpr(null, 'json-form');
@@ -662,7 +665,7 @@
 
         try {
           updateLatex(
-            expr.symbols.map((x) => x.latex).join(',,\\:'),
+            expr.symbols.map((x) => ce.box(x).latex).join(',\\:'),
             'symbols'
           );
         } catch (e) {

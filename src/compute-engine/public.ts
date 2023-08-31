@@ -54,7 +54,7 @@ export type Metadata = {
 export type NumericMode = 'auto' | 'machine' | 'bignum' | 'complex';
 
 /** Options for `BoxedExpression.simplify()` */
-export type SimplifyOptions = EvaluateOptions & {
+export type SimplifyOptions = {
   recursive?: boolean;
   rules?: BoxedRuleSet;
 };
@@ -164,7 +164,7 @@ export type DomainCompatibility =
 
 /** A domain constructor is the head of a domain expression. */
 export type DomainConstructor =
-  | 'Error'
+  | 'InvalidDomain'
   | 'Matrix' // <domain-of-elements> <dimension>*
   | 'SquareMatrix' // <domain-of-elements> <dimension>
   | 'Vector' // <domain-of-elements> <length>?
@@ -191,8 +191,7 @@ export type DomainLiteral = string;
 export type DomainExpression<T = SemiBoxedExpression> =
   | DomainLiteral
   | [DomainConstructor, ...(string | T | DomainExpression<T>)[]]
-  | ['Error', T]
-  | ['Error', T, T]
+  | ['InvalidDomain', T]
   | ['Union', ...DomainExpression<T>[]]
   | ['Intersection', ...DomainExpression<T>[]]
   | ['Matrix', DomainExpression<T>, T, T]
@@ -1072,7 +1071,9 @@ export interface BoxedExpression {
    * The result is in canonical form.
    *
    */
-  evaluate(options?: EvaluateOptions): BoxedExpression;
+  evaluate(ids?: {
+    [id: string]: SemiBoxedExpression | null | undefined;
+  }): BoxedExpression;
 
   /** Return a numeric approximation of the canonical form of this expression.
    *
@@ -2255,7 +2256,7 @@ export interface IComputeEngine {
   popScope(): void;
 
   /** Assign a value to an identifier in the current scope. Use `null` to reset the identifier to no value */
-  set(identifiers: Substitution<SemiBoxedExpression | null | undefined>): void;
+  set(ids: { [id: string]: SemiBoxedExpression | null | undefined }): void;
 
   /** Declare identifiers (specify their domain without necessarily assigning them a value in the current scope) */
   let(identifiers: IdTable): void;

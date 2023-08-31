@@ -37,34 +37,43 @@ const IDENTIFIER_MODIFIER = {
   '\\check': '_check',
 };
 
-function matchIdentifierToken(parser: Parser): string | null {
+function matchIdentifierToken(
+  parser: Parser,
+  options: { toplevel: boolean }
+): string | null {
   if (parser.atEnd) return null;
 
   const token = parser.peek;
-  const special = {
-    '+': 'plus',
-    '-': 'minus',
-
+  let special = {
     '\\_': '_',
-    '\\pm': 'pm',
-    '\\ast': 'ast',
-    '\\dag': 'dag',
-    '\\ddag': 'ddag',
     '\\#': 'hash',
-    '\\bot': 'bottom',
-    '\\top': 'top',
-    '\\bullet': 'bullet',
-    '\\cir': 'circle',
-    '\\diamond': 'diamond',
-    '\\times': 'times',
-    '\\square': 'square',
-    '\\star': 'star',
   }[token];
+
+  if (!special && !options.toplevel) {
+    special = {
+      '+': 'plus',
+      '-': 'minus',
+
+      '\\pm': 'pm',
+      '\\ast': 'ast',
+      '\\dag': 'dag',
+      '\\ddag': 'ddag',
+      '\\bot': 'bottom',
+      '\\top': 'top',
+      '\\bullet': 'bullet',
+      '\\cir': 'circle',
+      '\\diamond': 'diamond',
+      '\\times': 'times',
+      '\\square': 'square',
+      '\\star': 'star',
+    }[token];
+  }
 
   if (special) {
     parser.next();
     return special;
   }
+
   const i = SYMBOLS.findIndex((x) => x[1] === token);
   if (i >= 0) {
     parser.next();
@@ -109,7 +118,7 @@ function matchIdentifierBody(parser: Parser): string | null {
     while (!parser.atEnd) {
       const token = parser.peek;
       if (token === '<}>' || token === '_' || token === '^') break;
-      const next = matchIdentifierToken(parser);
+      const next = matchIdentifierToken(parser, { toplevel: false });
       if (next === null) {
         parser.index = start;
         return null;
@@ -178,20 +187,20 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
   parser.next();
   if (parser.match('<{>')) {
     // If the identifier starts with a digit,
-    // convert it to a string, e.g. `\mathbb{1}` -> `ONE_blackboard`
+    // convert it to a string, e.g. `\mathbb{1}` -> `one_blackboard`
     let body = '';
     const digit =
       {
-        0: 'ZERO',
-        1: 'ONE',
-        2: 'TWO',
-        3: 'THREE',
-        4: 'FOUR',
-        5: 'FIVE',
-        6: 'SIX',
-        7: 'SEVEN',
-        8: 'EIGHT',
-        9: 'NINE',
+        0: 'zero',
+        1: 'one',
+        2: 'two',
+        3: 'three',
+        4: 'four',
+        5: 'five',
+        6: 'six',
+        7: 'seven',
+        8: 'eight',
+        9: 'nine',
       }[parser.peek] ?? '';
     if (digit) {
       body = digit;
@@ -273,6 +282,16 @@ export function matchIdentifier(parser: Parser): string | null {
   //
   const start = parser.index;
   let id = matchPrefixedIdentifier(parser);
+
+  //
+  // Is it a sequence of emojis? (they don't need to be wrapped)
+  //
+  if (!id) {
+    id = '';
+    while (!parser.atEnd && ONLY_EMOJIS.test(id + parser.peek))
+      id += parser.next();
+  }
+
   if (id) {
     id = id.normalize();
     if (isValidIdentifier(id)) return id;
@@ -281,18 +300,9 @@ export function matchIdentifier(parser: Parser): string | null {
   }
 
   //
-  // Is it a sequence of emojis? (they don't need to be wrapped)
-  //
-  id = '';
-  while (!parser.atEnd && ONLY_EMOJIS.test(id + parser.peek))
-    id += parser.next();
-
-  if (id) return id.normalize();
-
-  //
   // Is it a single-letter identifier?
   //
-  let next = matchIdentifierToken(parser);
+  let next = matchIdentifierToken(parser, { toplevel: true });
   if (next) {
     next = next.normalize();
     if (isValidIdentifier(next)) return next;

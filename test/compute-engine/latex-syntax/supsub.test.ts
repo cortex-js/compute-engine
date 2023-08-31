@@ -4,26 +4,22 @@ import { parse, latex, engine } from '../../utils';
 describe('POWER', () => {
   test('Power Invalid forms', () => {
     expect(latex(['Power'])).toMatchInlineSnapshot(
-      `(\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}})^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
+      `\\error{\\blacksquare}^{\\error{\\blacksquare}}`
     );
     expect(
       latex(['Power', null as unknown as Expression])
-    ).toMatchInlineSnapshot(
-      `(\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}})^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
-    );
+    ).toMatchInlineSnapshot(`\\error{\\blacksquare}^{\\error{\\blacksquare}}`);
     expect(
       latex(['Power', undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(
-      `(\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}})^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
-    );
+    ).toMatchInlineSnapshot(`\\error{\\blacksquare}^{\\error{\\blacksquare}}`);
     expect(latex(['Power', 1])).toMatchInlineSnapshot(
-      `1^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
+      `1^{\\error{\\blacksquare}}`
     );
     expect(latex(['Power', NaN])).toMatchInlineSnapshot(
-      `\\operatorname{NaN}^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
+      `\\mathrm{NaN}^{\\error{\\blacksquare}}`
     );
     expect(latex(['Power', Infinity])).toMatchInlineSnapshot(
-      `\\infty^{\\mathtip{\\error{\\blacksquare}}{\\mathrm{Number}\\text{ missing}}}`
+      `\\infty^{\\error{\\blacksquare}}`
     );
   });
 });
@@ -67,7 +63,7 @@ describe('SUPSUB', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            "Number",
+            ["Domain", "Number"],
             ["Domain", "List"]
           ],
           ["List", 3, 4]
@@ -95,53 +91,16 @@ describe('SUPSUB', () => {
     );
   });
   test('Pre-sup, pre-sub', () => {
-    expect(parse('_p^qx')).toMatchInlineSnapshot(`
-      [
-        "Multiply",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "String"]
-          ],
-          ["Subscript", "'missing'", ["Latex", "'_'"]]
-        ],
-        ["Power", "p", "q"],
-        "x"
-      ]
-    `); // @fixme: nope...
-    expect(parse('_p^qx_r^s')).toMatchInlineSnapshot(`
-      [
-        "Multiply",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "String"]
-          ],
-          ["Subscript", "'missing'", ["Latex", "'_'"]]
-        ],
-        ["Power", "p", "q"],
-        ["Power", "x_r", "s"]
-      ]
-    `); // @fixme: nope...
+    expect(parse('_p^qx')).toMatchInlineSnapshot(
+      `["Multiply", "_", "x", ["Power", "p", "q"]]`
+    ); // @fixme: nope...
+    expect(parse('_p^qx_r^s')).toMatchInlineSnapshot(
+      `["Multiply", "_", ["Power", "p", "q"], ["Power", "x_r", "s"]]`
+    ); // @fixme: nope...
     expect(parse('_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
         "Multiply",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Number",
-            ["Domain", "String"]
-          ],
-          ["Subscript", "'missing'", ["Latex", "'_'"]]
-        ],
+        "_",
         ["Power", ["Add", "p", 1], ["Add", "q", 1]],
         ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", "s", 1]]
       ]
@@ -174,7 +133,7 @@ describe('SUPSUB', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              "Number",
+              ["Domain", "Number"],
               ["Domain", "String"]
             ],
             "'missing'"
@@ -184,7 +143,7 @@ describe('SUPSUB', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              "Number",
+              ["Domain", "Number"],
               ["Domain", "String"]
             ],
             ["Latex", "'^'"]
@@ -204,7 +163,7 @@ describe('SUPSUB', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              "Number",
+              ["Domain", "Number"],
               ["Domain", "String"]
             ],
             "'missing'"
@@ -214,7 +173,7 @@ describe('SUPSUB', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              "Number",
+              ["Domain", "Number"],
               ["Domain", "String"]
             ],
             ["Latex", "'^'"]
@@ -338,7 +297,7 @@ describe('PRIME', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            "Number",
+            ["Domain", "Number"],
             ["Domain", "Function"]
           ],
           "f"
@@ -360,7 +319,7 @@ describe('PRIME', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              "Number",
+              ["Domain", "Number"],
               ["Domain", "Function"]
             ],
             "f"
@@ -385,7 +344,7 @@ describe('PRIME', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              "Number",
+              ["Domain", "Number"],
               ["Domain", "Function"]
             ],
             "f"
@@ -413,7 +372,7 @@ describe('PRIME', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            "Number",
+            ["Domain", "Number"],
             ["Domain", "Function"]
           ],
           "f"

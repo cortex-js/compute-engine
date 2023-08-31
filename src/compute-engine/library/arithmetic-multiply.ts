@@ -1,17 +1,14 @@
-import {
-  asSmallInteger,
-  MAX_ITERATION,
-  MAX_SYMBOLIC_TERMS,
-} from '../numerics/numeric';
-import { BoxedExpression, IComputeEngine, Metadata, Rational } from '../public';
+import { MAX_SYMBOLIC_TERMS, asBignum, asFloat } from '../numerics/numeric';
+import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
 
 import { square } from './arithmetic-power';
+import { normalizeLimits } from './arithmetic-add';
+
 import {
   asRational,
-  isMachineRational,
   isRationalOne,
   isRationalZero,
   mul,
@@ -78,7 +75,7 @@ export function evalMultiply(
   if (mode === 'N') {
     ops = ops.map((x) => x.N());
     if (
-      ce.numericMode === 'machine' &&
+      (ce.numericMode === 'machine' || ce.numericMode === 'auto') &&
       ops.every((x) => typeof x.numericValue === 'number')
     ) {
       let prod = 1;
@@ -198,12 +195,12 @@ function multiply2(
 }
 
 // Canonical form of `["Product"]` (`\prod`) expressions.
-export function canonicalMultiplication(
+export function canonicalProduct(
   ce: IComputeEngine,
   body: BoxedExpression | undefined,
   range: BoxedExpression | undefined
 ) {
-  body ??= ce.error(['missing', 'Function']); // @todo not exactly a function, more like a 'NumericExpression'
+  body ??= ce.error('missing');
 
   let index: BoxedExpression | null = null;
   let lower: BoxedExpression | null = null;
@@ -217,7 +214,7 @@ export function canonicalMultiplication(
   ) {
     index = range;
   } else if (range) {
-    // Don't canonicalize the index. Canonicalization as the
+    // Don't canonicalize the index. Canonicalization has the
     // side effect of declaring the symbol, here we're using
     // it to do a local declaration
     index = range.ops?.[0] ?? null;
@@ -233,17 +230,16 @@ export function canonicalMultiplication(
     index = ce.error(['incompatible-domain', 'Symbol', index.domain]);
   else index = ce.hold(index);
 
-  // The range bounds, if present, should be Real numbers
-  if (lower) lower = validateArgument(ce, lower, 'ExtendedRealNumber');
-  if (upper) lower = validateArgument(ce, upper, 'ExtendedRealNumber');
+  // The range bounds, if present, should be integers numbers
+  if (lower && lower.isFinite) lower = validateArgument(ce, lower, 'Integer');
+  if (upper && upper.isFinite) upper = validateArgument(ce, upper, 'Integer');
 
   if (lower && upper) range = ce.tuple([index, lower, upper]);
-  else if (upper)
-    range = ce.tuple([index, lower ?? ce._NEGATIVE_INFINITY, upper]);
+  else if (upper) range = ce.tuple([index, ce.number(1), upper]);
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
 
-  return ce._fn('Product', [body, range]);
+  return ce._fn('Product', [body.canonical, range]);
 }
 
 export function evalMultiplication(
@@ -252,42 +248,134 @@ export function evalMultiplication(
   range: BoxedExpression,
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
-  if (expr.head !== 'Lambda') return undefined;
-  const fn = expr.op1;
+  const [index, lower, upper, isFinite] = normalizeLimits(range);
 
-  let lower = 1;
-  let upper = MAX_ITERATION;
-  if (
-    range.head === 'Tuple' ||
-    range.head === 'Triple' ||
-    range.head === 'Pair' ||
-    range.head === 'Single'
-  ) {
-    lower = asSmallInteger(range.op2) ?? 1;
-    upper = asSmallInteger(range.op3) ?? MAX_ITERATION;
-  }
-  if (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS) return undefined;
+  const fn = expr;
+  if (mode !== 'N' && (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS))
+    return undefined;
 
-  if (mode === 'evaluate' || mode === 'simplify') {
+  let result: BoxedExpression | undefined | null = null;
+  const savedContext = ce.context;
+  ce.context = fn.scope ?? ce.context;
+
+  if (mode === 'simplify') {
     const terms: BoxedExpression[] = [];
-    for (let i = lower; i <= upper; i++) {
-      const n = ce.number(i);
-      terms.push(fn.subs({ _1: n, _: n }));
+    if (!fn.scope)
+      for (let i = lower; i <= upper; i++) terms.push(fn.simplify());
+    else
+      for (let i = lower; i <= upper; i++) {
+        ce.set({ [index]: i });
+        terms.push(fn.simplify());
+      }
+    result = ce.mul(terms).simplify();
+  }
+
+  if (mode === 'evaluate') {
+    const terms: BoxedExpression[] = [];
+    if (!fn.scope)
+      for (let i = lower; i <= upper; i++) terms.push(fn.evaluate());
+    else
+      for (let i = lower; i <= upper; i++) {
+        ce.set({ [index]: i });
+        terms.push(fn.evaluate());
+      }
+    result = ce.mul(terms).evaluate();
+  }
+
+  if (mode === 'N') {
+    if (result === null && !fn.scope) {
+      //
+      // The term is not a function of the index
+      //
+
+      const n = fn.N();
+      if (!isFinite) {
+        if (n.isZero) result = ce._ZERO;
+        else if (n.isPositive) result = ce._POSITIVE_INFINITY;
+        else result = ce._NEGATIVE_INFINITY;
+      }
+      if (result === null && fn.isPure)
+        result = ce.pow(n, ce.number(upper - lower + 1));
+
+      // If the term is not a function of the index, but it is not pure,
+      // fall through to the general case
     }
-    const product = ce.mul(terms);
-    return mode === 'simplify' ? product.simplify() : product.evaluate();
+
+    //
+    // Finite series. Evaluate each term and multiply them
+    //
+    if (result === null && isFinite) {
+      if (bignumPreferred(ce)) {
+        let product = ce.bignum(1);
+        for (let i = lower; i <= upper; i++) {
+          ce.set({ [index]: i });
+          const term = asBignum(fn.N());
+          if (term === null || !term.isFinite()) {
+            result = term !== null ? ce.number(term) : undefined;
+            break;
+          }
+          product = product.mul(term);
+        }
+        if (result === null) result = ce.number(product);
+      }
+
+      // Machine precision
+      let product = 1;
+      const numericMode = ce.numericMode;
+      ce.numericMode = 'machine';
+      for (let i = lower; i <= upper; i++) {
+        ce.set({ [index]: i });
+        const term = asFloat(fn.N());
+        if (term === null || !Number.isFinite(term)) {
+          result = term !== null ? ce.number(term) : undefined;
+          break;
+        }
+        product *= term;
+      }
+      ce.numericMode = numericMode;
+
+      if (result === null) result = ce.number(product);
+    }
+
+    if (result === null) {
+      //
+      // Infinite series.
+      //
+
+      // First, check for divergence
+      ce.set({ [index]: 1000 });
+      const nMax = fn.N();
+      ce.set({ [index]: 999 });
+      const nMaxMinusOne = fn.N();
+
+      const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
+      if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
+        result = ce._POSITIVE_INFINITY;
+      } else {
+        // Potentially converging series.
+        // Evaluate as a machine number (it's an approximation to infinity, so
+        // no point in calculating with high precision), and check for convergence
+        let product = 1;
+        const numericMode = ce.numericMode;
+        ce.numericMode = 'machine';
+        for (let i = lower; i <= upper; i++) {
+          ce.set({ [index]: i });
+          const term = asFloat(fn.N());
+          if (term === null) {
+            result = undefined;
+            break;
+          }
+          // Converged (or diverged), early exit
+          if (Math.abs(1 - term) < Number.EPSILON || !Number.isFinite(term))
+            break;
+          product *= term;
+        }
+        if (result === null) result = ce.number(product);
+        ce.numericMode = numericMode;
+      }
+    }
   }
+  ce.context = savedContext;
 
-  let product: Rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [1, 1];
-
-  for (let i = lower; i <= upper; i++) {
-    const n = ce.number(i);
-    const r = fn.subs({ _1: n, _: n });
-    const term = r.N();
-    if (term.numericValue === null) return undefined;
-    product = mul(product, term);
-  }
-
-  if (isMachineRational(product)) return ce.number(product[0] / product[1]);
-  return ce.number(ce.bignum(product[0]).div(ce.bignum(product[1])));
+  return result ?? undefined;
 }

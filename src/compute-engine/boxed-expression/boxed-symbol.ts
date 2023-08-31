@@ -18,6 +18,7 @@ import {
   BoxedBaseDefinition,
   DomainExpression,
   BoxedSubstitution,
+  SemiBoxedExpression,
 } from '../public';
 import { replace } from '../rules';
 import { serializeJsonSymbol } from './serialize';

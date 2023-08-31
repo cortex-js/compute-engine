@@ -143,7 +143,7 @@ check('Invalid argument in sequence', () =>
         [
           "ErrorCode",
           "'incompatible-domain'",
-          "Number",
+          ["Domain", "Number"],
           ["Domain", "MaybeBoolean"]
         ],
         ["Equal", 2, 2]
@@ -166,7 +166,7 @@ check('Invalid argument positional', () =>
           [
             "ErrorCode",
             "'incompatible-domain'",
-            "Number",
+            ["Domain", "Number"],
             ["Domain", "MaybeBoolean"]
           ],
           ["Equal", 2, 2]
@@ -322,7 +322,7 @@ check('Invalid delimiter: expected closing', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", "\\right)"],
+        ["ErrorCode", "'expected-close-delimiter'", "'\\right)'"],
         ["Latex", "'('"]
       ]
     ]
@@ -336,7 +336,7 @@ check('Invalid delimiter: expected closing', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", ")"],
+        ["ErrorCode", "'expected-close-delimiter'", "')'"],
         ["Latex", "'('"]
       ]
     ]
@@ -350,7 +350,7 @@ check('Invalid delimiter: expected opening', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "("],
+        ["ErrorCode", "'expected-open-delimiter'", "'('"],
         ["Latex", "')'"]
       ]
     ]
@@ -364,7 +364,7 @@ check('Invalid delimiter: expected opening', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "\\left("],
+        ["ErrorCode", "'expected-open-delimiter'", "'\\left('"],
         ["Latex", "'\\right)'"]
       ]
     ]
@@ -381,11 +381,11 @@ check('Invalid delimiter', () =>
         ["ErrorCode", "'unexpected-command'", "'\\left'"],
         ["Latex", "'\\left'"]
       ],
-      "Alpha",
+      "alpha",
       2,
       [
         "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "\\left"],
+        ["ErrorCode", "'expected-open-delimiter'", "'\\left'"],
         ["Latex", "'\\right\\alpha'"]
       ]
     ]
@@ -402,7 +402,7 @@ check('Invalid double superscript', () =>
         [
           "ErrorCode",
           "'incompatible-domain'",
-          "Number",
+          ["Domain", "Number"],
           ["Domain", "List"]
         ],
         ["List", 1, 2]
@@ -421,7 +421,7 @@ check('Double superscript: invalid domain', () =>
         [
           "ErrorCode",
           "'incompatible-domain'",
-          "Number",
+          ["Domain", "Number"],
           ["Domain", "List"]
         ],
         ["List", 1, 2]
@@ -503,17 +503,7 @@ check('Syntax error: \\1', () =>
 );
 
 check('Syntax error: ##', () =>
-  expect(engine.parse('x##')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      "x",
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "'#'"],
-        ["Latex", "'##'"]
-      ]
-    ]
-  `)
+  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Multiply", "##", "x"]`)
 );
 
 check('Syntax error: &', () =>
@@ -552,10 +542,10 @@ check('Syntax error', () =>
         2,
         [
           "Sequence",
-          ["Error", "'expected-expression'", ["Latex", "''"]],
-          ["Error", "'expected-closing-delimiter'", ["Latex", "'{'"]]
+          ["Error", "'expected-expression'", ["Latex", "'{'"]],
+          ["Error", "'expected-closing-delimiter'", ["Latex", "'{{'"]]
         ],
-        ["Error", "'expected-closing-delimiter'", ["Latex", "'{{'"]]
+        ["Error", "'expected-closing-delimiter'", ["Latex", "'{{{'"]]
       ]
     ]
   `)
@@ -563,7 +553,7 @@ check('Syntax error', () =>
 
 check('Missing argument', () =>
   expect(engine.box(['Sqrt']).canonical).toMatchInlineSnapshot(
-    `["Sqrt", ["Error", ["ErrorCode", "'missing'", "Number"]]]`
+    `["Sqrt", ["Error", "'missing'"]]`
   )
 );
 
@@ -587,7 +577,7 @@ check('Mismatched domain', () =>
         [
           "ErrorCode",
           "'incompatible-domain'",
-          "Number",
+          ["Domain", "Number"],
           ["Domain", "Boolean"]
         ],
         "True"
