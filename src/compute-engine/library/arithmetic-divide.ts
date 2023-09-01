@@ -44,25 +44,27 @@ export function canonicalDivide(
     if (r1 && r2 && !isRationalZero(r2)) return ce.number(mul(r1, inverse(r2)));
   }
 
-  if (
-    (op1.head === 'Divide' || op1.head === 'Rational') &&
-    (op2.head === 'Divide' || op2.head === 'Rational')
-  ) {
+  if (op1.head === 'Divide' && op2.head === 'Divide') {
     return canonicalDivide(
       ce,
       ce.mul([op1.op1, op2.op2]),
       ce.mul([op1.op2, op2.op1])
     );
   }
+  if (op1.head === 'Divide')
+    return canonicalDivide(ce, ce.mul([op1.op1, op2]), op1.op2);
+  if (op2.head === 'Divide')
+    return canonicalDivide(ce, ce.mul([op1, op2.op2]), op2.op1);
+
   const num1 = op1.numericValue;
   if (num1 !== null) {
     if (isMachineRational(num1)) {
       const [a, b] = num1;
-      return canonicalDivide(ce, ce.mul([ce.number(a), op2]), ce.number(b));
+      return canonicalDivide(ce, ce.number(a), ce.mul([ce.number(b), op2]));
     }
     if (isBigRational(num1)) {
       const [a, b] = num1;
-      return canonicalDivide(ce, ce.mul([ce.number(a), op2]), ce.number(b));
+      return canonicalDivide(ce, ce.number(a), ce.mul([ce.number(b), op2]));
     }
   }
   const num2 = op2.numericValue;
@@ -76,15 +78,20 @@ export function canonicalDivide(
       return canonicalDivide(ce, ce.mul([op1, ce.number(b)]), ce.number(a));
     }
   }
-  if (op1.head === 'Divide' || op1.head === 'Rational')
-    return canonicalDivide(ce, ce.mul([op1.op1, op2]), op1.op2);
-  if (op2.head === 'Divide' || op2.head === 'Rational')
-    return canonicalDivide(ce, ce.mul([op1, op2.op2]), op2.op1);
 
   const [c1, t1] = asCoefficient(op1);
   const [c2, t2] = asCoefficient(op2);
-  if (!isRationalOne(c1) || !isRationalOne(c2))
-    return ce.mul([ce.number(mul(c1, inverse(c2))), ce.div(t1, t2)]);
+  if (!isRationalOne(c1) || !isRationalOne(c2)) {
+    const [cn, cd] = mul(c1, inverse(c2));
+
+    const en = ce.mul([ce.number(cn), t1]);
+    if (en.isZero) return ce._ZERO;
+    const ed = ce.mul([ce.number(cd), t2]);
+    if (ed.isOne) return en;
+    return ce._fn('Divide', [en, ed]);
+  }
+
+  // return ce.mul([ce.number(mul(c1, inverse(c2))), ce.div(t1, t2)]);
 
   // eslint-disable-next-line prefer-const
   let [nSign, n] = makePositive(op1);
@@ -117,10 +124,5 @@ export function simplifyDivide(
     if (r1 && r2 && !isRationalZero(r2)) return ce.number(mul(r1, inverse(r2)));
   }
 
-  const [c1, t1] = asCoefficient(op1);
-  const [c2, t2] = asCoefficient(op2);
-  if (!isRationalOne(c1) || !isRationalOne(c2))
-    return ce.mul([ce.number(mul(c1, inverse(c2))), ce.div(t1, t2)]);
-
-  return new Product(ce, [op1, ce.inv(op2)]).asExpression();
+  return new Product(ce, [op1, ce.inv(op2)]).asRationalExpression();
 }

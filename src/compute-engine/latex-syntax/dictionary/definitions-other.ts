@@ -15,9 +15,8 @@ import { joinLatex } from '../tokenizer';
 
 function parseSingleArg(cmd: string): (parser: any) => Expression {
   return (parser) => {
-    const arg = parser.matchRequiredLatexArgument();
-    if (arg === null) return [cmd];
-    return [cmd, arg];
+    const arg = parser.matchLatexGroup();
+    return arg === null ? [cmd] : [cmd, arg];
   };
 }
 
@@ -104,9 +103,9 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       while (!done) {
         parser.skipSpace();
         if (parser.match('_')) {
-          sub = parser.matchRequiredLatexArgument();
+          sub = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
         } else if (parser.match('^')) {
-          sup = parser.matchRequiredLatexArgument();
+          sup = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
         } else {
           done = true;
         }
@@ -115,7 +114,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       if (seq) sub = ['List', ...seq];
 
       if (sub === null || sup === null) return null;
-      let rhs = parser.matchRequiredLatexArgument() ?? 'Nothing';
+      let rhs = parser.matchLatexGroup() ?? 'Nothing';
       if (rhs !== 'Nothing' && !isEmptySequence(rhs)) {
         const arg = parser.matchArguments('enclosure') ?? ['Nothing'];
         rhs = [rhs, ...arg];

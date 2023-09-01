@@ -775,31 +775,35 @@ export interface Parser {
     lhs: Expression | null
   ): Expression | null;
 
-  /** If the next tokens correspond to an optional LaTeX argument,
-   * enclosed with `[` and `]` return the content of the argument
-   * as an expression and advance the index past the closing `]`.
+  /** Some LaTeX commands (but not all) can accept an argument without braces,
+   *  for example `^` , `\sqrt` or `\frac`.
+   *
+   * The following tokens are excluded from consideration to fail early when
+   * encountering a likely syntax error, for example `x^(2)` (instead of
+   * `x^{2}`). With `(` in the list of excluded tokens, the match will fail
+   * and the error can be recovered.
+   *
+   * The excluded tokens are `!"#$%&(),/;:?@[]`|~", `\left` and `\bigl`
+   */
+
+  matchSingleAtomArgument(): Expression | null;
+
+  /**
+   *
+   * Match a LaTeX expression enclosed in `[]`
    *
    * Otherwise, return `null`.
    */
 
-  matchOptionalLatexArgument(): Expression | null;
+  matchLatexOptionalGroup(): Expression | null;
 
   /**
-   * Match a required LaTeX argument:
-   * - either enclosed in `{}`
-   * - or a single token (except if token is in `excluding`)
-   *
-   * The `excluding` option is useful to fail early when encountering a likely
-   * syntax error, for example `x^(2)` (instead of `x^{2}`). With `(` in the list
-   * of excluded tokens, the match will fail and the error can be recovered.
-   *
-   * If none is provided, `excluding` is `!"#$%&(),/;:?@[]`|~", `\left` and `\bigl`
-   *
+   * Match a LaTeX group enclosed in `{}`
    *
    * Return null if no argument was found
    * Return `['Sequence']` if an empty argument `{}` was found
    */
-  matchRequiredLatexArgument(excluding?: string[]): Expression | null;
+  matchLatexGroup(): Expression | null;
 
   /**
    * - 'enclosure' : will look for an argument inside an enclosure (an open/close fence)

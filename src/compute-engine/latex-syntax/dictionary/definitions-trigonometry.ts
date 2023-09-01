@@ -69,7 +69,7 @@ function parseTrig(op: string) {
 
         if (primeLevel === 0) {
           parser.index = superscriptIndex;
-          sup = parser.matchRequiredLatexArgument();
+          sup = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
         }
       }
     }

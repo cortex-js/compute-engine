@@ -1221,9 +1221,6 @@ export class ComputeEngine implements IComputeEngine {
     if (expr.head === 'Divide')
       return this._fn('Divide', [expr[1], expr[0]], metadata);
 
-    if (expr.head === 'Rational')
-      return this.number([expr[1], expr[0]], { metadata });
-
     // Inverse(expr) -> expr^{-1}
     let e = this._NEGATIVE_ONE;
 
@@ -1273,8 +1270,8 @@ export class ComputeEngine implements IComputeEngine {
     // Identifiers such as symbol names should use the Unicode NFC canonical form
     name = name.normalize();
 
-    // These three are not symbols (some of them are not even valid symbol
-    // names) but they're a common type
+    // These three are not symbols (some of them are not even valid
+    // identifiers) but they're a common type
     if (name === 'NaN') return this._NAN;
     if (name === 'Infinity') return this._POSITIVE_INFINITY;
     if (name === '+Infinity') return this._POSITIVE_INFINITY;

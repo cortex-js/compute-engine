@@ -472,7 +472,7 @@ describe('SERIALIZING Negative factors', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () => {
     expect(
       engine.parse('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}').latex
-    ).toMatchInlineSnapshot(`\\frac{1}{5}(-6xy)`);
+    ).toMatchInlineSnapshot(`\\frac{-6xy}{5}`);
   });
 });
 
@@ -496,11 +496,7 @@ describe('CANONICALIZATION Add', () => {
     expect(canonicalToJson('7 + 2 + 5')).toMatchObject(['Add', 2, 5, 7]));
 
   test(`7 + \\frac12`, () =>
-    expect(canonicalToJson('7 + \\frac12')).toMatchObject([
-      'Add',
-      ['Rational', 1, 2],
-      7,
-    ]));
+    expect(canonicalToJson('7 + \\frac12')).toMatchObject(['Add', 'Half', 7]));
 
   test(`1 + 2 + x`, () =>
     expect(canonicalToJson('1 + 2 + x')).toMatchObject(['Add', 'x', 1, 2]));
@@ -569,7 +565,7 @@ describe('CANONICALIZATION divide', () => {
   });
   test(`\\frac{-x}{2}`, () => {
     expect(canonicalToJson('\\frac{-x}{2}')).toMatchInlineSnapshot(
-      `["Multiply", ["Rational", -1, 2], "x"]`
+      `["Divide", ["Negate", "x"], 2]`
     );
   });
   test(`\\frac{-x}{\\frac{1}{n}}`, () => {
@@ -653,9 +649,9 @@ describe('SIMPLIFICATION divide', () => {
 
   test(`\\frac{5}{\\frac{7}{x}}`, () =>
     expect(simplifyToJson('\\frac{5}{\\frac{7}{x}}')).toMatchObject([
-      'Multiply',
-      ['Rational', 5, 7],
-      'x',
+      'Divide',
+      ['Multiply', 5, 'x'],
+      7,
     ]));
 
   test(`simplify('\\frac{\\sqrt{15}}{\\sqrt{3}}')`, () =>
@@ -691,15 +687,11 @@ describe('SIMPLIFICATION sqrt', () => {
     ).toMatchInlineSnapshot(`
       [
         "Add",
+        ["Divide", ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 2], 4]], 15],
         [
           "Multiply",
           ["Rational", -1, 15],
           ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 10], 28]]
-        ],
-        [
-          "Multiply",
-          ["Rational", 1, 15],
-          ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 2], 4]]
         ]
       ]
     `));
@@ -782,11 +774,11 @@ describe('SIMPLIFICATION multiply', () => {
 describe('SYMBOLIC EVALUATION trigonometric functions', () => {
   test(`\\sin\\frac\\pi3 // constructible values`, () =>
     expect(evaluateToJson('\\sin\\frac\\pi3')).toMatchInlineSnapshot(
-      `["Multiply", ["Sqrt", 3], ["Rational", 1, 2]]`
+      `["Divide", ["Sqrt", 3], 2]`
     ));
   test(`\\sin(\\frac13\\pi) // constructible values`, () =>
     expect(evaluateToJson('\\sin(\\frac13\\pi)')).toMatchInlineSnapshot(
-      `["Multiply", ["Sqrt", 3], ["Rational", 1, 2]]`
+      `["Divide", ["Sqrt", 3], 2]`
     ));
 });
 

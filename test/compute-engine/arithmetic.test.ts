@@ -32,12 +32,8 @@ describe('CONSTANTS', () => {
   test(`GoldenRatio`, () =>
     expect(checkJson(`GoldenRatio`)).toMatchInlineSnapshot(`
       box       = GoldenRatio
-      simplify  = [
-        "Add",
-        ["Multiply", ["Sqrt", 5], ["Rational", 1, 2]],
-        ["Rational", 1, 2]
-      ]
-      evaluate  = ["Multiply", ["Rational", 1, 2], ["Add", ["Sqrt", 5], 1]]
+      simplify  = ["Add", ["Divide", ["Sqrt", 5], 2], "Half"]
+      evaluate  = ["Divide", ["Add", ["Sqrt", 5], 1], 2]
       N-auto    = 1.6180339887498948482
       N-mach    = 1.618033988749895
     `));
@@ -353,11 +349,11 @@ describe('NEGATE', () => {
     expect(checkJson(['Negate', 'NaN'])).toMatchInlineSnapshot(`{num: "NaN"}`));
 
   test(`-(+Infinity)`, () =>
-    expect(checkJson(['Negate', '+Infinity'])).toMatchInlineSnapshot(
+    expect(checkJson(['Negate', { num: '+Infinity' }])).toMatchInlineSnapshot(
       `{num: "-Infinity"}`
     ));
   test(`-(-Infinity)`, () =>
-    expect(checkJson(['Negate', '-Infinity'])).toMatchInlineSnapshot(
+    expect(checkJson(['Negate', { num: '-Infinity' }])).toMatchInlineSnapshot(
       `{num: "+Infinity"}`
     ));
 
@@ -468,7 +464,7 @@ describe('MULTIPLY', () => {
     `));
 
   test(`with +Infinity`, () =>
-    expect(checkJson(['Multiply', 'x', -2, 3.1, '+Infinity']))
+    expect(checkJson(['Multiply', 'x', -2, 3.1, { num: '+Infinity' }]))
       .toMatchInlineSnapshot(`
       box       = ["Multiply", "x", -2, 3.1, {num: "+Infinity"}]
       canonical = ["Multiply", -2, 3.1, {num: "+Infinity"}, "x"]
@@ -476,7 +472,7 @@ describe('MULTIPLY', () => {
     `));
 
   test(`with -Infinity`, () =>
-    expect(checkJson(['Multiply', 'x', -2, 3.1, '-Infinity']))
+    expect(checkJson(['Multiply', 'x', -2, 3.1, { num: '-Infinity' }]))
       .toMatchInlineSnapshot(`
       box       = ["Multiply", "x", -2, 3.1, {num: "-Infinity"}]
       canonical = ["Multiply", 2, 3.1, {num: "+Infinity"}, "x"]
@@ -484,8 +480,16 @@ describe('MULTIPLY', () => {
     `));
 
   test(`with -Infinity and +Infinity`, () =>
-    expect(checkJson(['Multiply', 'x', -2, 3.1, '-Infinity', '+Infinity']))
-      .toMatchInlineSnapshot(`
+    expect(
+      checkJson([
+        'Multiply',
+        'x',
+        -2,
+        3.1,
+        { num: '-Infinity' },
+        { num: '+Infinity' },
+      ])
+    ).toMatchInlineSnapshot(`
       box       = ["Multiply", "x", -2, 3.1, {num: "-Infinity"}, {num: "+Infinity"}]
       canonical = ["Multiply", 2, 3.1, {num: "+Infinity"}, "x"]
       evaluate  = {num: "+Infinity"}

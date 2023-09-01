@@ -237,17 +237,13 @@ check('Supsub syntax error', () =>
 );
 
 check('Supsub syntax error', () =>
-  expect(engine.parse('x_{a')).toMatchInlineSnapshot(`
-    [
-      "Subscript",
-      "x",
-      ["Error", "'expected-closing-delimiter'", ["Latex", "'a'"]]
-    ]
-  `)
+  expect(engine.parse('x_{a')).toMatchInlineSnapshot(
+    `["Subscript", "x", ["Sequence", "a", ["Error", "'syntax-error'"]]]`
+  )
 );
 
 check('VALID infix command', () =>
-  expect(engine.parse('1\\over 2')).toMatchInlineSnapshot(`["Rational", 1, 2]`)
+  expect(engine.parse('1\\over 2')).toMatchInlineSnapshot(`Half`)
 );
 
 // @fixme
@@ -437,13 +433,9 @@ check('Double superscript: invalid domain', () =>
 // );
 
 check('Expected closing delimiter', () =>
-  expect(engine.parse('\\frac{1}{2')).toMatchInlineSnapshot(`
-    [
-      "Divide",
-      1,
-      ["Error", "'expected-closing-delimiter'", ["Latex", "'2'"]]
-    ]
-  `)
+  expect(engine.parse('\\frac{1}{2')).toMatchInlineSnapshot(
+    `["Divide", 1, ["Sequence", 2, ["Error", "'syntax-error'"]]]`
+  )
 );
 
 check('Unexpected closing delimiter', () =>
@@ -452,7 +444,7 @@ check('Unexpected closing delimiter', () =>
       "Add",
       [
         "Sequence",
-        ["Rational", 1, 2],
+        "Half",
         ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
       ],
       1

@@ -63,8 +63,8 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
 }
 
 function parseRoot(parser: Parser): Expression | null {
-  const degree = parser.matchOptionalLatexArgument();
-  const base = parser.matchRequiredLatexArgument();
+  const degree = parser.matchLatexOptionalGroup();
+  const base = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
   if (base === null || isEmptySequence(base)) {
     if (degree !== null) return ['Root', MISSING, missingIfEmpty(degree)];
     return ['Sqrt', MISSING];
@@ -328,8 +328,16 @@ function serializeMultiply(
 }
 
 function parseFraction(parser: Parser): Expression | null {
-  const numer = missingIfEmpty(parser.matchRequiredLatexArgument());
-  const denom = missingIfEmpty(parser.matchRequiredLatexArgument());
+  let numer: Expression | null = parser.matchLatexGroup();
+  let denom: Expression | null = null;
+  if (numer === null) {
+    numer = parser.matchSingleAtomArgument();
+    denom = parser.matchSingleAtomArgument();
+  } else {
+    denom = parser.matchLatexGroup();
+  }
+  numer = missingIfEmpty(numer);
+  denom = missingIfEmpty(denom);
   if (
     head(numer) === 'PartialDerivative' &&
     (head(denom) === 'PartialDerivative' ||
@@ -383,14 +391,18 @@ function serializeFraction(
     const denomStr = serializer.wrapShort(denom);
 
     if (style === 'inline-solidus') return `${numerStr}\\/${denomStr}`;
-    return `^{${numerStr}}\\!\\!/\\!_{${denomStr}}`;
+    return `{}^{${numerStr}}\\!\\!/\\!{}_{${denomStr}}`;
   } else if (style === 'reciprocal') {
     if (machineValue(numer) === 1) return serializer.wrap(denom) + '^{-1}';
     return serializer.wrap(numer) + serializer.wrap(denom) + '^{-1}';
   } else if (style === 'factor') {
     if (machineValue(denom) === 1) return serializer.wrap(numer);
     return (
-      '\\frac{1}{' + serializer.serialize(denom) + '}' + serializer.wrap(numer)
+      '\\frac{1}{' +
+      serializer.serialize(denom) +
+      '}{' +
+      serializer.wrap(numer) +
+      '}'
     );
   }
   // Quotient (default)
@@ -492,8 +504,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
 
   {
     trigger: ['\\ang'],
-    parse: (parser): Expression => {
-      const arg = parser.matchRequiredLatexArgument();
+    parse: (parser: Parser): Expression => {
+      const arg = parser.matchLatexGroup();
       return (arg === null ? ['Degrees'] : ['Degrees', arg]) as Expression;
     },
   },
@@ -553,6 +565,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       if (275 < until.minPrec) return null;
 
       const rhs = parser.matchExpression({ ...until, minPrec: 275 });
+      // If we did not see a valid rhs, it is important to return null
+      // to give a chance to something else to continue the parsing
+      // This is the case for |a+|b||.
       if (rhs === null) return null;
 
       return applyAssociativeOperator('Add', lhs, rhs);
@@ -910,8 +925,10 @@ function parseBigOp(name: string, prec: number) {
     let sup: Expression | null = null;
     let sub: Expression | null = null;
     while (!(sub && sup) && (parser.peek === '_' || parser.peek === '^')) {
-      if (parser.match('_')) sub = parser.matchRequiredLatexArgument();
-      else if (parser.match('^')) sup = parser.matchRequiredLatexArgument();
+      if (parser.match('_'))
+        sub = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
+      else if (parser.match('^'))
+        sup = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
       parser.skipSpace();
     }
 

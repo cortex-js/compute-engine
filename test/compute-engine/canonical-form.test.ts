@@ -69,7 +69,7 @@ describe('CANONICAL FORMS', () => {
       latex     = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
       box       = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
       N-auto    = -21.75979036932202558976886502184544000211938391614029668314127861409875217714824208187295918578675709
-      N-mach    = -21.759790369322026
+      N-mach    = -21.75979036932203
     `);
   });
 
@@ -111,7 +111,7 @@ describe('CANONICAL FORMS', () => {
   // (multiplication by 0 does not always = 0)
   test('2x\\frac{0}{5}"', () => {
     expect(check('2x\\frac{0}{5}')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", 2, "x", ["Divide", 0, 5]]
+      latex     = ["Multiply", 2, "x", 0]
       0
     `);
   });

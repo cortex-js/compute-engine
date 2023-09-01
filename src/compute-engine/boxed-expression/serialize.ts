@@ -80,13 +80,16 @@ export function serializeJsonCanonicalFunction(
   }
 
   if (head === 'Multiply' && !exclusions.includes('Negate')) {
-    if (asFloat(args[0]) === -1)
+    if (asFloat(args[0]) === -1) {
+      if (args.length === 2)
+        return serializeJsonFunction(ce, 'Negate', [args[1]]);
       return serializeJsonFunction(
         ce,
         'Negate',
         [ce._fn('Multiply', args.slice(1))],
         metadata
       );
+    }
   }
 
   if (head === 'Multiply' && !exclusions.includes('Divide')) {
@@ -396,6 +399,8 @@ export function serializeJsonNumber(
     !ce.jsonSerializationOptions.metadata.includes('latex') &&
     ce.jsonSerializationOptions.shorthands.includes('number');
 
+  const exclusions = ce.jsonSerializationOptions.exclude;
+
   //
   // Bignum
   //
@@ -472,17 +477,20 @@ export function serializeJsonNumber(
   // Rational
   //
   if (isRational(value)) {
+    const allowRational = !exclusions.includes('Rational');
     //  Shorthand allowed, and no metadata to include?
     if (
       shorthandAllowed &&
       ce.jsonSerializationOptions.shorthands.includes('function') &&
       isMachineRational(value)
     ) {
-      return ['Rational', value[0], value[1]];
+      if (value[0] === 1 && value[1] === 2 && !exclusions.includes('Half'))
+        return serializeJsonSymbol(ce, 'Half', metadata);
+      return [allowRational ? 'Rational' : 'Divide', value[0], value[1]];
     }
     return serializeJsonFunction(
       ce,
-      'Rational',
+      allowRational ? 'Rational' : 'Divide',
       [ce.number(value[0]), ce.number(value[1])],
       { ...metadata }
     );

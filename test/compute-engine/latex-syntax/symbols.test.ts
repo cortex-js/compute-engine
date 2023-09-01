@@ -186,84 +186,48 @@ describe('SYMBOLS', () => {
 
   describe('BOXING ERRORS', () => {
     test('Math operators are not valid symbols', () => {
-      expect(box('+')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "'invalid-identifier'", "'invalid-first-char'"],
-          "'+'"
-        ]
-      `);
-      expect(box('=')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "'invalid-identifier'", "'invalid-first-char'"],
-          "'='"
-        ]
-      `);
+      expect(box('+')).toMatchInlineSnapshot(
+        `["Error", "'invalid-identifier'", "'+'"]`
+      );
+      expect(box('=')).toMatchInlineSnapshot(
+        `["Error", "'invalid-identifier'", "'='"]`
+      );
     });
 
     test('LaTeX commands are not valid symbols', () => {
-      expect(box('\\alpha')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "'invalid-identifier'", "'invalid-first-char'"],
-          "'\\alpha'"
-        ]
-      `);
+      expect(box('\\alpha')).toMatchInlineSnapshot(
+        `["Error", "'invalid-identifier'", "'\\alpha'"]`
+      );
     });
 
     test('Braile symbols are not valid symbols', () => {
-      expect(box('⠋')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-script'"],
-          "'⠋'"
-        ]
-      `);
+      expect(box('⠋')).toMatchInlineSnapshot(
+        `["Error", "'invalid-identifier'", "'⠋'"]`
+      );
     });
 
     // U+13000, D80C DC00
     test('Egyptians Hieroglyphs are not valid symbols', () => {
-      expect(box('𓀀')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-script'"],
-          "'𓀀'"
-        ]
-      `);
+      expect(box('𓀀')).toMatchInlineSnapshot(
+        `["Error", "'invalid-identifier'", "'𓀀'"]`
+      );
     });
 
     test('Symbols should not include LTR or RTL marks', () => {
-      expect(box('מְהִירוּת‎')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-bidi-marker'"],
-          "'מְהִירוּת‎'"
-        ]
-      `);
-      expect(box('‎מְהִירוּת')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-bidi-marker'"],
-          "'‎מְהִירוּת'"
-        ]
-      `);
+      expect(box('מְהִירוּת‎')).toMatchInlineSnapshot(
+        `["Error", "'invalid-identifier'", "'מְהִירוּת‎'"]`
+      );
+      expect(box('‎מְהִירוּת')).toMatchInlineSnapshot(
+        `["Error", "'invalid-identifier'", "'‎מְהִירוּת'"]`
+      );
     });
     test('Symbols should not mix emojis and non-emojis', () => {
-      expect(box('👨🏻‍🎤DavidBowie')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-mixed-emoji'"],
-          "'👨🏻‍🎤DavidBowie'"
-        ]
-      `);
-      expect(box('DavidBowie👨🏻‍🎤')).toMatchInlineSnapshot(`
-        [
-          "Error",
-          ["ErrorCode", "'invalid-identifier'", "'unexpected-mixed-emoji'"],
-          "'DavidBowie👨🏻‍🎤'"
-        ]
-      `);
+      expect(box('👨🏻‍🎤DavidBowie')).toMatchInlineSnapshot(
+        `["Error", "'invalid-identifier'", "'👨🏻‍🎤DavidBowie'"]`
+      );
+      expect(box('DavidBowie👨🏻‍🎤')).toMatchInlineSnapshot(
+        `["Error", "'invalid-identifier'", "'DavidBowie👨🏻‍🎤'"]`
+      );
     });
   });
 

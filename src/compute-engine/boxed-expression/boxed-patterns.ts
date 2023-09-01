@@ -374,11 +374,6 @@ function matchNonCommutativeArguments(
  *
  * If the pattern is not a match, it returns `null`.
  *
- * This function attempts the match purely structurally, without any
- * knowledge about commutative and associative properties of functions. To
- * account for those properties, use the canonical form of the pattern and
- * the subject.
- *
  */
 function match(
   subject: BoxedExpression,
@@ -392,7 +387,10 @@ function match(
   const substitution = matchOnce(subject, pattern, options.substitution ?? {}, {
     numericTolerance: options?.numericTolerance ?? NUMERIC_TOLERANCE,
   });
-  if (substitution) return substitution;
+  if (substitution) {
+    console.log('match', subject.toString(), pattern.toString(), substitution);
+    return substitution;
+  }
 
   if (!options.recursive) return null;
 

@@ -147,7 +147,7 @@ export function expandMultinomial(
 /** Expand all
  * Recursive expand of all terms in the expression
  */
-export function expandAll(expr: BoxedExpression): BoxedExpression | null {
+function expandAll(expr: BoxedExpression): BoxedExpression | null {
   if (expr.head && expr.ops) {
     const result = expr.engine.fn(
       expr.head,
@@ -163,7 +163,7 @@ export function expandAll(expr: BoxedExpression): BoxedExpression | null {
  * Expand the numerator of a fraction, or a simple product
  */
 
-export function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
+function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
   if (expr.head !== 'Divide') return null;
   const expandedNumerator = expand(expr.op1);
   if (expandedNumerator === null) return null;
@@ -178,9 +178,7 @@ export function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
  * Expand the denominator of a fraction (but not a simple product)
  */
 
-export function expandDenominator(
-  expr: BoxedExpression
-): BoxedExpression | null {
+function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
   if (expr.head !== 'Divide') return null;
   const expandedDenominator = expand(expr.op2);
   if (expandedDenominator === null) return null;

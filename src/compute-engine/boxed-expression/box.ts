@@ -13,7 +13,7 @@ import { apply, BoxedFunction, makeCanonicalFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
-import { missingIfEmpty } from '../../math-json/utils';
+import { isValidIdentifier, missingIfEmpty } from '../../math-json/utils';
 import { asFloat, asSmallInteger } from '../numerics/numeric';
 import {
   isBigRational,
@@ -121,6 +121,7 @@ export function boxNumber(
     const [n, d] = num;
     if (typeof n === 'bigint' && typeof d === 'bigint') {
       if (n === d) return d === BigInt(0) ? ce._NAN : ce._ONE;
+      if (n === BigInt(0)) return ce._ZERO;
       if (d === BigInt(1)) return ce.number(n, options);
       if (d === BigInt(-1)) return ce.number(-n, options);
       if (n === BigInt(1) && d === BigInt(2)) return ce._HALF;
@@ -135,6 +136,7 @@ export function boxNumber(
     if (!Number.isInteger(n) || !Number.isInteger(d))
       throw new Error('Array argument to `boxNumber()` should be two integers');
     if (d === n) return d === 0 ? ce._NAN : ce._ONE;
+    if (n === 0) return ce._ZERO;
     if (d === 1) return ce.number(n, options);
     if (d === -1) return ce.number(-n, options);
     if (n === 1 && d === 2) return ce._HALF;
@@ -295,13 +297,13 @@ export function boxFunction(
           return ce.number([fn, fd], options);
       }
       const [n, d] = [asBigint(ops[0]), asBigint(ops[1])];
-      if (n && d) return ce.number([n, d], options);
+      if (n !== null && d !== null) return ce.number([n, d], options);
     } else {
       const [n, d] = [
         bigintValue(ce, ops[0] as Expression),
         bigintValue(ce, ops[1] as Expression),
       ];
-      if (n && d) return ce.number([n, d], options);
+      if (n !== null && d !== null) return ce.number([n, d], options);
     }
 
     head = 'Divide';
@@ -480,6 +482,8 @@ export function box(
 
     if (/^[+-]?[0-9]/.test(expr)) return ce.number(expr);
 
+    if (!isValidIdentifier(expr))
+      return ce.error('invalid-identifier', { str: expr });
     return ce.symbol(expr, options);
   }
 

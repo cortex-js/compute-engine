@@ -30,8 +30,8 @@ export function getFractionStyle(
 
   if (head(expr) === 'Divide') {
     const [n, d] = [countLeaves(op1(expr)), countLeaves(op2(expr))];
-    if (d <= 2 && n > 3) return 'factor';
-    if (n <= 2 && d > 3) return 'reciprocal';
+    if (d <= 2 && n > 5) return 'factor';
+    if (n <= 2 && d > 5) return 'reciprocal';
   }
   return 'quotient';
 }

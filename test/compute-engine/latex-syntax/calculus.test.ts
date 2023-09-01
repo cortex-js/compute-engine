@@ -92,7 +92,7 @@ describe('INTEGRAL', () => {
         "Equal",
         [
           "Integrate",
-          ["Multiply", ["Rational", 3, 5], "x"],
+          ["Divide", ["Multiply", 3, "x"], 5],
           ["Triple", "x", 0, {num: "+Infinity"}]
         ],
         2
@@ -106,7 +106,7 @@ describe('INTEGRAL', () => {
         "Equal",
         [
           "Integrate",
-          ["Multiply", ["Rational", 3, 5], "x"],
+          ["Divide", ["Multiply", 3, "x"], 5],
           ["Triple", "x", 0, {num: "+Infinity"}]
         ],
         2
@@ -119,11 +119,7 @@ describe('INTEGRAL', () => {
         "Equal",
         [
           "Integrate",
-          [
-            "Divide",
-            ["Multiply", ["Rational", 3, 5], "x"],
-            ["Multiply", "d", "x"]
-          ],
+          ["Divide", ["Multiply", 3, "x"], ["Multiply", 5, "d", "x"]],
           ["Triple", "Nothing", 0, {num: "+Infinity"}]
         ],
         2

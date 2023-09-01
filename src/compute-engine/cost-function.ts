@@ -89,7 +89,33 @@ export function costFunction(expr: BoxedExpression): number {
       headCost = 5;
     else if (['Power'].includes(head)) headCost = 6;
     else if (['Ln', 'Exp', 'Log'].includes(head)) headCost = 7;
-    else headCost = 8;
+    else if (
+      [
+        'Arcsin',
+        'Arccos',
+        'Arctan',
+        'Arcsec',
+        ' Arccsc',
+        'Arsinh',
+        'Arcosh',
+        'Artanh',
+        'Arcsech',
+        'Arcsch',
+        'Cosh',
+        'Cos',
+        'Csc',
+        'Csch',
+        // '??': 'Cot',
+        // '??': 'Coth',
+        'Sec',
+        'Sin',
+        'Sinh',
+        'Tan',
+        'Tanh',
+      ].includes(head)
+    )
+      headCost = 9;
+    else headCost = 10;
   } else headCost = costFunction(head);
   return (
     headCost + (expr.ops?.reduce((acc, x) => acc + costFunction(x), 0) ?? 0)

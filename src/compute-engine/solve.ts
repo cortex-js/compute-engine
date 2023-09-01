@@ -21,11 +21,9 @@ import { expand } from './symbolic/expand';
 // cos x, acos x, n cos x + a
 
 // Set of rules to find the root(s) for `x`
-// Note: this is not a RuleSet because for each matching pattern, there
-// may be more than one solution/root
 export const UNIVARIATE_ROOTS: Rule[] = [
   // ax = 0
-  [['Multiply', '_x', '_a'], ['0']],
+  [['Multiply', '_x', '_a'], 0],
   // x + a = 0
   [
     ['Add', '_a', '_x'],
@@ -123,6 +121,7 @@ export function findUnivariateRoots(
   expr: BoxedExpression,
   x: string
 ): BoxedExpression[] {
+  console.log('findUnivariateRoots', expr.toString(), x);
   const ce = expr.engine;
 
   if (expr.head === 'Equal') {
@@ -163,6 +162,7 @@ export function univariateSolve(
   expr: BoxedExpression,
   x: string
 ): SemiBoxedExpression[] | null {
+  console.log('univariateSolve', expr.toString(), x);
   const ce = expr.engine;
   const name = expr.head;
   if (name === 'And') {

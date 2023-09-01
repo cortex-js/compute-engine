@@ -29,6 +29,7 @@ import {
   getSequence,
   head,
   isEmptySequence,
+  isValidIdentifier,
   machineValue,
   nops,
   op,
@@ -1374,7 +1375,7 @@ export class _Parser implements Parser {
     return null;
   }
 
-  matchOptionalLatexArgument(): Expression | null {
+  matchLatexOptionalGroup(): Expression | null {
     const index = this.index;
     this.skipSpaceTokens();
     if (this.match('[')) {
@@ -1388,9 +1389,29 @@ export class _Parser implements Parser {
     return null;
   }
 
-  matchRequiredLatexArgument(excluding?: string[]): Expression | null {
-    if (!excluding)
-      excluding = [...'!"#$%&(),/;:?@[]`|~'.split(''), '\\left', '\\bigl'];
+  // Some LaTeX commands (but not all) can accept an argument without braces,
+  // for example `^` , `\sqrt` or `\frac`.
+  matchSingleAtomArgument(): Expression | null {
+    const excluding = [...'!"#$%&(),/;:?@[]`|~'.split(''), '\\left', '\\bigl'];
+    if (excluding.includes(this.peek)) return null;
+
+    // Is it a single digit?
+    // Note: `x^23` is `x^{2}3`, not x^{23}
+    if (/^[0-9]$/.test(this.peek)) return parseInt(this.next());
+
+    // Is it a single letter (but not a special letter)?
+    if (/^[^\\#]$/.test(this.peek) && isValidIdentifier(this.peek))
+      return this.next();
+
+    // Otherwise, this can only be a symbol.
+    // `\frac{1}2+1` is not valid, neither is `\frac\frac123`
+    const sym = this.matchSymbol();
+    if (sym) return sym;
+
+    return null;
+  }
+
+  matchLatexGroup(): Expression | null {
     const start = this.index;
     this.skipSpaceTokens();
     if (this.match('<{>')) {
@@ -1398,25 +1419,12 @@ export class _Parser implements Parser {
       const expr = this.matchExpression();
       this.skipSpace();
       if (this.matchBoundary()) return expr ?? ['Sequence'];
-      return this.boundaryError('expected-closing-delimiter');
+      // Try to find a boundary
+      const from = this.index;
+      while (!this.matchBoundary() && !this.atEnd) this.next();
+      const err = this.error('syntax-error', from);
+      return expr ? ['Sequence', expr, err] : err;
     }
-
-    if (excluding.includes(this.peek)) {
-      this.index = start;
-      return null;
-    }
-
-    // Is it a single digit?
-    // Note: `x^23` is `x^{2}3`, not x^{23}
-    if (/^[0-9]$/.test(this.peek)) return parseInt(this.next());
-
-    // Is it a single letter (but not a special letter)?
-    if (/^[^\\#]$/.test(this.peek)) return this.next();
-
-    // Otherwise, this can only be a symbol.
-    // `\frac{1}2+1` is not valid, neither is `\frac\frac123`
-    const expr = this.matchSymbol();
-    if (expr) return expr;
 
     this.index = start;
     return null;
@@ -1443,7 +1451,9 @@ export class _Parser implements Parser {
           subscripts.push(this.error('syntax-error', subIndex));
         else {
           const sub =
-            this.matchRequiredLatexArgument() ?? this.matchStringArgument();
+            this.matchLatexGroup() ??
+            this.matchSingleAtomArgument() ??
+            this.matchStringArgument();
           if (sub === null) return this.error('missing', index);
 
           subscripts.push(sub);
@@ -1453,7 +1463,7 @@ export class _Parser implements Parser {
         if (this.match('_') || this.match('^'))
           superscripts.push(this.error('syntax-error', subIndex));
         else {
-          const sup = this.matchRequiredLatexArgument();
+          const sup = this.matchLatexGroup() ?? this.matchSingleAtomArgument();
           if (sup === null) return this.error('missing', index);
           superscripts.push(sup);
         }
@@ -1603,7 +1613,7 @@ export class _Parser implements Parser {
 
         this.skipSpace();
         // Parse but drop optional argument (used to indicate spacing between lines)
-        this.matchOptionalLatexArgument();
+        this.matchLatexOptionalGroup();
 
         if (expr !== null) row.push(expr);
         result.push(row);
@@ -1728,10 +1738,9 @@ export class _Parser implements Parser {
       return null;
     }
 
-    if (head(rhs) === 'Error') {
-      // If we got an error, apply a 'Sequence'
+    // If we got an error, apply a 'Sequence'
+    if (head(rhs) === 'Error')
       return applyAssociativeOperator('Sequence', lhs, rhs);
-    }
 
     //
     // Invoke custom `applyInvisibleOperator` handler
@@ -2137,11 +2146,8 @@ export class _Parser implements Parser {
       msg = ['ErrorCode', { str: code[0] }, ...code.slice(1)];
     }
 
-    const latex: Expression = [
-      'Latex',
-      { str: this.latex(fromToken, this.index) },
-    ];
-    return ['Error', msg, latex];
+    const latex = this.latex(fromToken, this.index);
+    return latex ? ['Error', msg, ['Latex', { str: latex }]] : ['Error', msg];
   }
 }
 

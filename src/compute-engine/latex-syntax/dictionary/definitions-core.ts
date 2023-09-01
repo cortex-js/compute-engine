@@ -181,23 +181,23 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     trigger: ['\\mathtip'],
-    parse: (parser) => {
-      const op1 = parser.matchRequiredLatexArgument();
-      const op2 = parser.matchRequiredLatexArgument();
+    parse: (parser: Parser) => {
+      const op1 = parser.matchLatexGroup();
+      const op2 = parser.matchLatexGroup();
       return op1;
     },
   },
   {
     trigger: ['\\texttip'],
-    parse: (parser) => {
-      const op1 = parser.matchRequiredLatexArgument();
-      const op2 = parser.matchRequiredLatexArgument();
+    parse: (parser: Parser) => {
+      const op1 = parser.matchLatexGroup();
+      const op2 = parser.matchLatexGroup();
       return op1;
     },
   },
   {
     trigger: ['\\error'],
-    parse: (parser) => parser.matchRequiredLatexArgument(),
+    parse: (parser: Parser) => parser.matchLatexGroup(),
   },
   {
     name: 'Error',

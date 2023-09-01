@@ -30,8 +30,10 @@ function parseIntegral(command: string, n = 1) {
       !(sub !== null && sup !== null) &&
       (parser.peek === '_' || parser.peek === '^')
     ) {
-      if (parser.match('_')) sub = parser.matchRequiredLatexArgument();
-      else if (parser.match('^')) sup = parser.matchRequiredLatexArgument();
+      if (parser.match('_'))
+        sub = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
+      else if (parser.match('^'))
+        sup = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
       parser.skipSpace();
     }
     if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;

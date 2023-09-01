@@ -148,8 +148,8 @@ export function serializeNumber(
   // Remove any leading zeros
   while (num[0] === '0') num = num.substring(1);
 
-  if (num.length === 0) num = sign + '0';
-  else if (num[0] === '.') num = sign + '0' + num;
+  if (num.length === 0) num = '0';
+  else if (num[0] === '.') num = '0' + num;
 
   let result: string | undefined = undefined;
   if (options.notation === 'engineering')

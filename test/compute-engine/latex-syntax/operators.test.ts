@@ -295,7 +295,7 @@ describe('OPERATOR multiply', () => {
     `));
   test('2\\sin(x)\\frac12, function apply', () =>
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", 2, ["Sin", "x"], ["Rational", 1, 2]]
+      latex     = ["Multiply", 2, ["Sin", "x"], "Half"]
       ["Sin", "x"]
     `));
   test('3\\pi5', () =>
@@ -310,8 +310,8 @@ describe('OPERATOR multiply', () => {
 describe('OPERATOR divide', () => {
   test('\\frac12', () =>
     expect(check('\\frac12')).toMatchInlineSnapshot(`
-      latex     = ["Rational", 1, 2]
-      box       = ["Rational", 1, 2]
+      latex     = Half
+      box       = Half
       N-auto    = 0.5
     `));
   test('\\frac31', () =>

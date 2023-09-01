@@ -311,57 +311,50 @@ describe('PRIME', () => {
     `);
     expect(parse('f^{\\prime\\prime}')).toMatchInlineSnapshot(`
       [
-        "Sequence",
-        [
-          "Power",
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              ["Domain", "Number"],
-              ["Domain", "Function"]
-            ],
-            "f"
-          ],
-          ["Error", "'expected-closing-delimiter'", ["Latex", "'\\prime'"]]
-        ],
+        "Power",
         [
           "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Number"],
+            ["Domain", "Function"]
+          ],
+          "f"
         ],
-        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+        [
+          "Sequence",
+          [
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\prime'"],
+            ["Latex", "'\\prime'"]
+          ],
+          ["Error", "'syntax-error'", ["Latex", "'\\prime}'"]]
+        ]
       ]
     `); // @fixme
     expect(parse('f^{\\prime\\prime\\prime}')).toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Power",
         [
-          "Power",
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Number"],
+            ["Domain", "Function"]
+          ],
+          "f"
+        ],
+        [
+          "Sequence",
           [
             "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              ["Domain", "Number"],
-              ["Domain", "Function"]
-            ],
-            "f"
+            ["ErrorCode", "'unexpected-command'", "'\\prime'"],
+            ["Latex", "'\\prime'"]
           ],
-          ["Error", "'expected-closing-delimiter'", ["Latex", "'\\prime'"]]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
-        ],
-        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+          ["Error", "'syntax-error'", ["Latex", "'\\prime\\prime}'"]]
+        ]
       ]
     `); // @fixme
     expect(parse('f^{\\doubleprime}')).toMatchInlineSnapshot(`

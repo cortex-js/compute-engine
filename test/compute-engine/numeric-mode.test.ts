@@ -38,7 +38,7 @@ describe('NUMERIC MODE', () => {
   test(`\\frac{\\pi}{4}`, () =>
     expect(check('\\frac{\\pi}{4}')).toMatchInlineSnapshot(`
       latex     = ["Divide", "Pi", 4]
-      box       = ["Multiply", ["Rational", 1, 4], "Pi"]
+      box       = ["Divide", "Pi", 4]
       N-auto    = 0.785398163397448309615660845819875721049292349843776455243736148076954101571552249657008706335529267
       N-mach    = 0.7853981633974483
     `));
