@@ -533,7 +533,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'function',
     trigger: 'exp',
-    parse: (parser) => ['Exp', ...(parser.matchArguments('enclosure') ?? [])],
+    parse: (parser) =>
+      ['Exp', ...(parser.matchArguments('enclosure') ?? [])] as Expression,
+  },
+  {
+    trigger: '\\exp',
+    parse: (parser: Parser) =>
+      ['Exp', ...(parser.matchArguments('enclosure') ?? [])] as Expression,
   },
   {
     name: 'ImaginaryUnit',
@@ -668,7 +674,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       if (symbol(op1) || machineValue(op1) !== null)
         return joinLatex(['\\exponentialE^{', serializer.serialize(op1)]);
 
-      return joinLatex(['\\mathrm{exp}', serializer.wrap(missingIfEmpty(op1))]);
+      return joinLatex(['\\exp', serializer.wrap(missingIfEmpty(op1))]);
     },
   },
   {
