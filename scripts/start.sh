@@ -52,4 +52,6 @@ rm -rf ./coverage
 mkdir -p dist
 
 # Do dev build and watch
-node ./scripts/start.mjs
+node ./scripts/start.mjs&
+npx tsc --watch --noEmit --preserveWatchOutput
+
