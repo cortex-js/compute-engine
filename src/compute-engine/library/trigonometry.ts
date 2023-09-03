@@ -665,8 +665,9 @@ const TRIG_IDENTITIES: { [key: string]: [sign: number, head: string][] } = {
 function constructibleValues(
   ce: IComputeEngine,
   head: string,
-  x: BoxedExpression
+  x: BoxedExpression | undefined
 ): undefined | BoxedExpression {
+  if (!x) return undefined;
   const specialValues = ce.cache(
     'constructible-trigonometric-values',
     () => {
@@ -755,8 +756,9 @@ function evalTrig(
   ce: IComputeEngine,
   mode: 'N' | 'evaluate',
   head: string,
-  op: BoxedExpression
+  op: BoxedExpression | undefined
 ): BoxedExpression | undefined {
+  if (!op) return undefined;
   if (mode === 'evaluate') {
     const result = constructibleValues(ce, head, op)?.evaluate();
     if (result) return result;
