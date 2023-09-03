@@ -930,6 +930,7 @@ export function makeCanonicalFunction(
         { metadata, canonical: false }
       );
   }
+
   //
   // Didn't match a short path, look for a definition
   //
@@ -954,6 +955,9 @@ export function makeCanonicalFunction(
       else xs.push(y);
     }
   }
+
+  if (!xs.every((x) => x.isValid))
+    return new BoxedFunction(ce, head, xs, { metadata, canonical: false });
 
   const sig = def.signature;
 
@@ -1017,23 +1021,25 @@ export function apply(
   fn: BoxedExpression,
   args: BoxedExpression[]
 ): BoxedExpression {
-  if (fn.head !== 'Lambda') return fn.engine._fn(fn.evaluate(), args);
+  const ce = fn.engine;
+
+  if (fn.head !== 'Lambda') return ce._fn(fn.evaluate(), args);
 
   const subs: BoxedSubstitution = {
-    '__': fn.engine.tuple(args),
-    '_#': fn.engine.number(args.length),
+    '__': ce.tuple(args),
+    '_#': ce.number(args.length),
   };
   let n = 1;
   for (const op of args) subs[`_${n++}`] = op;
   subs['_'] = subs['_1'];
 
   // Substitute the arguments in the lambda expression
-  const savedContext = this.context;
-  this.context = fn.scope ?? null;
+  const savedContext = ce.context;
+  ce.context = fn.scope ?? null;
 
   const result = fn.subs(subs).evaluate();
 
-  this.context = savedContext;
+  ce.context = savedContext;
   return result;
 }
 

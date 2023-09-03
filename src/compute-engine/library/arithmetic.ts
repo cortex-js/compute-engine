@@ -430,7 +430,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;
           if (ops.length === 1) return ops[0];
-          return ce.box(['Max', ...ops]);
+          return ce.fn('Max', ops);
         },
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;
@@ -458,7 +458,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;
           if (ops.length === 1) return ops[0];
-          return ce.box(['Min', ...ops]);
+          return ce.fn('Min', ops);
         },
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;

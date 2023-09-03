@@ -118,7 +118,7 @@ describe('Nth PRIME NUMBER', () =>
           2
         ]
       ]
-      box       = [
+      [
         "Equal",
         ["Multiply", "n", "p"],
         [
@@ -203,100 +203,6 @@ describe('Nth PRIME NUMBER', () =>
                   "'incompatible-domain'",
                   ["Domain", "Symbol"],
                   ["Domain", "Anything"]
-                ]
-              ],
-              2,
-              ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
-            ]
-          ],
-          2
-        ]
-      ]
-      canonical = [
-        "Equal",
-        ["Multiply", "n", "p"],
-        [
-          "Add",
-          [
-            "Sum",
-            [
-              "Floor",
-              [
-                "Divide",
-                1,
-                [
-                  "Add",
-                  [
-                    "Power",
-                    0,
-                    [
-                      "Subtract",
-                      "n",
-                      [
-                        "Sum",
-                        [
-                          "Product",
-                          [
-                            "Subtract",
-                            1,
-                            [
-                              "Power",
-                              0,
-                              [
-                                "Abs",
-                                [
-                                  "Add",
-                                  ["Divide", ["Negate", "v_2"], "v_3"],
-                                  ["Floor", ["Divide", "v_2", "v_3"]]
-                                ]
-                              ]
-                            ]
-                          ],
-                          [
-                            "Triple",
-                            [
-                              "Error",
-                              [
-                                "ErrorCode",
-                                "'incompatible-domain'",
-                                ["Domain", "Symbol"],
-                                ["Domain", "Anything"]
-                              ]
-                            ],
-                            2,
-                            ["Floor", ["Sqrt", "v_2"]]
-                          ]
-                        ],
-                        [
-                          "Triple",
-                          [
-                            "Error",
-                            [
-                              "ErrorCode",
-                              "'incompatible-domain'",
-                              ["Domain", "Symbol"],
-                              ["Domain", "Anything"]
-                            ]
-                          ],
-                          2,
-                          "v_1"
-                        ]
-                      ]
-                    ]
-                  ],
-                  1
-                ]
-              ]
-            ],
-            [
-              "Triple",
-              [
-                "Error",
-                [
-                  "ErrorCode",
-                  "'incompatible-domain'",
-                  ["Domain", "Symbol"],
-                  ["Domain", "Void"]
                 ]
               ],
               2,

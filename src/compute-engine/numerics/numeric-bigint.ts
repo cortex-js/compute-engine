@@ -1,5 +1,4 @@
 import Decimal from 'decimal.js';
-import { IComputeEngine } from '../public';
 import { primeFactors as machinePrimeFactors } from './numeric';
 
 export function bigint(a: Decimal | number | bigint | string): bigint {

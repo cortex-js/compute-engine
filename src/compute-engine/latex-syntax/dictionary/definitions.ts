@@ -194,7 +194,7 @@ export function indexLatexDictionary(
           message: [
             'invalid-dictionary-entry',
             indexedEntry.name,
-            'Duplicate definition',
+            'Duplicate definition. The name must be unique, but a trigger can be used by multiple definitions.',
           ],
         });
       }

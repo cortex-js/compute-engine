@@ -1040,9 +1040,9 @@ export class ComputeEngine implements IComputeEngine {
   fn(
     head: string,
     ops: BoxedExpression[],
-    metadata?: Metadata
+    options?: { canonical: boolean }
   ): BoxedExpression {
-    return boxFunction(this, head, ops, { metadata, canonical: true });
+    return boxFunction(this, head, ops, options ?? { canonical: true });
   }
 
   /** @internal */

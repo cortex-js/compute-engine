@@ -2111,7 +2111,7 @@ export interface IComputeEngine {
   fn(
     head: string | SemiBoxedExpression,
     ops: SemiBoxedExpression[],
-    metadata?: Metadata
+    options?: { canonical: boolean }
   ): BoxedExpression;
 
   /**

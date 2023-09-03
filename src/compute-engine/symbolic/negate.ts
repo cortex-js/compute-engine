@@ -1,6 +1,5 @@
 import { Complex } from 'complex.js';
 import Decimal from 'decimal.js';
-import { validateArgument } from '../boxed-expression/validate';
 import { neg } from '../numerics/rationals';
 
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';

@@ -112,7 +112,8 @@ export type FunctionParseHandler = (
 
 export type PostfixParseHandler = (
   parser: Parser,
-  lhs: Expression
+  lhs: Expression,
+  until?: Terminator
 ) => Expression | null;
 
 export type PrefixParseHandler = (

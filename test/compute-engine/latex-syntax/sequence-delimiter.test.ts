@@ -54,17 +54,20 @@ describe('SEQUENCES AND DELIMITERS', () => {
         ]
       ]
       [
-        "Sequence",
-        ["List", "a", "b"],
+        "Delimiter",
         [
-          "List",
-          "c",
-          "d",
+          "Sequence",
+          ["List", "a", "b"],
           [
-            "Sequence",
-            ["Error", "'missing'", ["Latex", "';'"]],
-            "Nothing",
-            ["List", "n", "Nothing", "m"]
+            "List",
+            "c",
+            "d",
+            [
+              "Sequence",
+              ["Error", "'missing'", ["Latex", "';'"]],
+              "Nothing",
+              ["List", "n", "Nothing", "m"]
+            ]
           ]
         ]
       ]

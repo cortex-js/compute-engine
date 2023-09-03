@@ -62,13 +62,15 @@ export const TRIGONOMETRY_LIBRARY: IdTable[] = [
           ops = validateArguments(ce, flattenSequence(canonical(ops)), [
             'Number',
           ]);
-          if (ops.length !== 1) return ce.box(['Degrees', ops]);
+          if (ops.length !== 1)
+            return ce.fn('Degrees', ops, { canonical: false });
           const arg = ops[0];
           if (arg.numericValue === null || !arg.isValid)
-            return ce.box(['Degrees', arg]);
+            return ce.fn('Degrees', ops, { canonical: false });
           return ce.div(ce.mul([arg, ce.symbol('Pi')]), ce.number(180));
         },
-        evaluate: (ce, ops) => ce.mul([ops[0], ce.box(['Divide', 'Pi', 180])]),
+        evaluate: (ce, ops) =>
+          ce.mul([ops[0], ce.div(ce.symbol('Pi'), ce.number(180))]),
       },
     },
     Hypot: {

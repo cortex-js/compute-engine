@@ -1527,7 +1527,10 @@ export class _Parser implements Parser {
     return result;
   }
 
-  matchPostfix(lhs: Expression | null): Expression | null {
+  matchPostfix(
+    lhs: Expression | null,
+    until?: Partial<Terminator>
+  ): Expression | null {
     console.assert(lhs !== null); // @todo validate
     if (lhs === null) return null;
 
@@ -1537,7 +1540,7 @@ export class _Parser implements Parser {
     const start = this.index;
     for (const [def, n] of defs) {
       this.index = start + n;
-      const result = def.parse(this, lhs);
+      const result = def.parse(this, lhs, until as Terminator);
       if (result !== null) return result;
     }
     this.index = start;
@@ -2024,7 +2027,7 @@ export class _Parser implements Parser {
       let postfix: Expression | null = null;
       let index = this.index;
       do {
-        postfix = this.matchPostfix(result);
+        postfix = this.matchPostfix(result, until as Terminator);
         result = postfix ?? result;
         if (this.index === index && postfix !== null) {
           console.assert(this.index !== index, 'No token consumed');

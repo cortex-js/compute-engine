@@ -106,7 +106,7 @@ export function expandMultinomial(
   const ce = expr.engine;
   if (expr.op1.head === 'Negate') {
     const sign = exp % 2 === 0 ? 1 : -1;
-    const result = expandMultinomial(ce.box(['Power', expr.op1.op1, expr.op2]));
+    const result = expandMultinomial(ce.pow(expr.op1.op1, expr.op2));
     if (result === null) return null;
     if (sign > 0) return result;
     return ce.neg(result);

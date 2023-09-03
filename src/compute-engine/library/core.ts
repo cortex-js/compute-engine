@@ -547,8 +547,7 @@ export const CORE_LIBRARY: IdTable[] = [
       signature: {
         domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'String'],
         evaluate: (ce, ops) => {
-          return ce.box([
-            'Latex',
+          return ce.fn('Latex', [
             ce.string(tokensToString(ops.map((x) => x.string ?? x.latex))),
           ]);
         },
@@ -571,7 +570,7 @@ export const CORE_LIBRARY: IdTable[] = [
       signature: {
         domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'String'],
         evaluate: (ce, ops) =>
-          ce.box(['Latex', ce.string(joinLatex(ops.map((x) => x.latex)))]),
+          ce.fn('Latex', [ce.string(joinLatex(ops.map((x) => x.latex)))]),
       },
     },
     SplitAsLatexTokens: {

@@ -169,8 +169,7 @@ describe('STEFNOTCH #13', () => {
     expect(parse('\\frac{2}{\\sqrt{n}}\\Leftrightarrow n>\\frac{5}{n^2}'))
       .toMatchInlineSnapshot(`
       [
-        "Less",
-        ["Divide", 5, ["Square", "n"]],
+        "Greater",
         [
           "Sequence",
           ["Divide", 2, ["Sqrt", "n"]],
@@ -180,7 +179,8 @@ describe('STEFNOTCH #13', () => {
             ["Latex", "'\\Leftrightarrow'"]
           ],
           "n"
-        ]
+        ],
+        ["Divide", 5, ["Square", "n"]]
       ]
     `);
   });
