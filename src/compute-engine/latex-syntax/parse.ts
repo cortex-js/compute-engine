@@ -956,6 +956,8 @@ export class _Parser implements Parser {
    * - 'enclosure' : will look for an argument inside an enclosure (open/close fence)
    * - 'implicit': either an expression inside a pair of `()`, or just a product
    *  (i.e. we interpret `\cos 2x + 1` as `\cos(2x) + 1`)
+   *
+   * This returns an array of arguments, or null if there is no match.
    */
   matchArguments(
     kind: undefined | '' | 'enclosure' | 'implicit',
@@ -968,19 +970,13 @@ export class _Parser implements Parser {
 
     const group = this.matchEnclosure();
 
-    if (kind === 'enclosure' && head(group) === 'Delimiter') {
-      // We got an enclosure i.e. `f(a, b, c)`
-      if (op(group, 1) === 'Sequence') return ops(op(group, 1)) ?? [];
-      return [op(group, 1) ?? ['Sequence']];
-    }
+    // We're looking for an enclosure i.e. `f(a, b, c)`
+    if (kind === 'enclosure') return getSequence(group) ?? [];
 
+    // We are looking for an expression inside an optional pair of `()`
+    // (i.e. trig functions, as in `\cos x`.)
     if (kind === 'implicit') {
-      // We are looking for an expression inside an optional pair of `()`
-      // (i.e. trig functions, as in `\cos x`.)
-      if (head(group) === 'Delimiter') {
-        if (head(op(group, 1)) === 'Sequence') return getSequence(group) ?? [];
-        return [op(group, 1) ?? ['Sequence']];
-      }
+      if (head(group) === 'Delimiter') return getSequence(group) ?? [];
 
       // Was there a matchfix? the "group" is the argument, i.e.
       // `\sin [a, b, c]`
@@ -989,8 +985,7 @@ export class _Parser implements Parser {
       // No group, but arguments without parentheses are allowed
       // Read a primary
       const primary = this.matchExpression({ ...until, minPrec: 390 });
-      if (primary !== null) return [primary];
-      return null;
+      return primary === null ? null : [primary];
     }
 
     // The element following the function does not match
@@ -1018,7 +1013,7 @@ export class _Parser implements Parser {
 
     // Is it followed by an argument list inside parentheses?
     const seq = this.matchArguments('enclosure');
-    return seq ? [fn, ...seq] : id;
+    return seq ? [fn, ...seq] : fn;
   }
 
   /** A prime suffix is a sequence of `'`, `\prime` or `\doubleprime`

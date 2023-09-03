@@ -1014,7 +1014,7 @@ export function makeCanonicalFunction(
 }
 
 /** Apply arguments to an expression. If the expression is a lambda expression
- * it's wildcard arguments are substituted before being evaluated. Otherwise
+ * its wildcard arguments are substituted before being evaluated. Otherwise
  * the expression is just evaluated.
  */
 export function apply(
@@ -1037,10 +1037,10 @@ export function apply(
   const savedContext = ce.context;
   ce.context = fn.scope ?? null;
 
-  const result = fn.subs(subs).evaluate();
+  const result = fn.subs(subs);
 
   ce.context = savedContext;
-  return result;
+  return result.op1.evaluate();
 }
 
 /** Apply the function `f` to elements of `xs`, except to the elements
