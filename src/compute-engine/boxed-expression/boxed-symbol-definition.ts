@@ -90,7 +90,7 @@ export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
     this._domain = def.domain ? ce.domain(def.domain) : undefined;
 
     this.constant = def.constant ?? false;
-    this.holdUntil = def.holdUntil ?? 'simplify';
+    this.holdUntil = def.holdUntil ?? 'evaluate';
 
     if (this.constant) {
       this._defValue = def.value;

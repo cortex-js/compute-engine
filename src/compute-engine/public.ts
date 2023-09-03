@@ -1859,7 +1859,7 @@ export type SymbolAttributes = {
   * - `x` has `holdUntil: 'evaluate'` (variables)
   * - `Pi` has `holdUntil: 'N'` (special numeric constant)
   * 
-  * **Default:** `simplify`
+  * **Default:** `evaluate`
   */
   holdUntil: 'never' | 'simplify' | 'evaluate' | 'N';
 };

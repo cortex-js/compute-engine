@@ -854,7 +854,6 @@ export class BoxedFunction extends AbstractBoxedExpression {
   }
 
   solve(vars: string[]): null | BoxedExpression[] {
-    console.log('solve this:', this.toString());
     if (vars.length !== 1) return null;
     const roots = findUnivariateRoots(this.simplify(), vars[0]);
     return roots;

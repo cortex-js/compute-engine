@@ -591,10 +591,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     // If allowed replace this symbol with its value/definition.
     // In some cases this may allow for some additional simplifications (e.g. `GoldenRatio`).
     const def = this.symbolDefinition;
-    if (
-      (def?.holdUntil === 'never' || def?.holdUntil === 'simplify') &&
-      def.value
-    )
+    if (def?.holdUntil === 'simplify' && def.value)
       return def.value.simplify(options);
 
     // By default, there is no simplification of symbols,
@@ -604,12 +601,15 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
     const def = this.symbolDefinition;
-    if (def?.holdUntil !== 'N') return def?.value?.evaluate(options) ?? this;
+    if (def && (def.holdUntil === 'simplify' || def.holdUntil === 'evaluate'))
+      return def.value?.evaluate(options) ?? this;
     return this;
   }
 
   N(options?: NOptions): BoxedExpression {
     // If we're doing a numeric evaluation, the `hold` does not apply
+    const def = this.symbolDefinition;
+    if (def && def.holdUntil === 'never') return this;
     return this.symbolDefinition?.value?.N(options) ?? this;
   }
 

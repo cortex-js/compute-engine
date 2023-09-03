@@ -208,7 +208,7 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
-          \frac{a+}{b}
+          \mathrm{Hypot}\left({3},{4}\right)
 
           <!-- 1.1\times 2\times
           5\times\frac{5}{7}\times\frac{7}{9}\times\sqrt{2}\times\pi -->
@@ -482,6 +482,23 @@
       const ce = new ComputeEngine();
       ce.strict = false;
 
+      const f = ce.parse('2 + (\\sqrt{4x^2} + 1)');
+      ce.set({ x: 'Pi' });
+      console.log(f.evaluate().latex);
+      console.log(f.simplify().latex);
+      console.log(f.N().latex);
+
+      // const formula =
+      //   '\\left(\\left(\\frac{125.5}{100}\\right)^{0.25}\\right)-1';
+      // const ce2 = new ComputeEngine({ numericPrecision: 14 });
+      // const parsed = ce2.parse(formula);
+
+      // console.info('Simplified = ' + parsed.simplify().N().numericValue);
+      // console.log(parsed.simplify().json);
+
+      // console.info('Unsimplified = ' + parsed.evaluate().value.numericValue);
+      // console.log(parsed.json);
+
       // console.log(
       //   ce
       //     .box(['Add', 1, ['Sqrt', 5]])
@@ -489,16 +506,6 @@
       //     .toString()
       // );
 
-      console.log(
-        ce.serialize(['Multiply', ['Divide', 4, 9], ['Divide', 2, 10]], {
-          canonical: false,
-        })
-      );
-      console.log(
-        ce.serialize(['Add', ['Divide', 1, 6], 5], {
-          canonical: false,
-        })
-      );
       // ce.defaultDomain = null;
 
       // const dict = ComputeEngine.getLatexDictionary();
