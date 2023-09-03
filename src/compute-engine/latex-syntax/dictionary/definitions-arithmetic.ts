@@ -531,6 +531,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: '\\exponentialE',
   },
   {
+    kind: 'function',
+    trigger: 'exp',
+    parse: (parser) => ['Exp', ...(parser.matchArguments('enclosure') ?? [])],
+  },
+  {
     name: 'ImaginaryUnit',
     trigger: ['\\imaginaryI'],
   },
@@ -658,12 +663,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Exp',
-    serialize: (serializer: Serializer, expr: Expression): string =>
-      joinLatex([
-        '\\exponentialE^{',
-        serializer.serialize(missingIfEmpty(op(expr, 1))),
-        '}',
-      ]),
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const op1 = op(expr, 1);
+      if (symbol(op1) || machineValue(op1) !== null)
+        return joinLatex(['\\exponentialE^{', serializer.serialize(op1)]);
+
+      return joinLatex(['\\mathrm{exp}', serializer.wrap(missingIfEmpty(op1))]);
+    },
   },
   {
     name: 'Factorial',

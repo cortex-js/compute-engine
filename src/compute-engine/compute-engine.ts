@@ -723,7 +723,7 @@ export class ComputeEngine implements IComputeEngine {
         precision: this.precision,
         avoidExponentsInRange: [-6, this.precision],
         onError: (err) => {
-          throw new Error(err[0].message.toString());
+          throw new Error(JSON.stringify(err[0].message));
         },
       });
     return this._latexSyntax;
