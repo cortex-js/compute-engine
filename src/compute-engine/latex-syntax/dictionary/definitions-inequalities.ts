@@ -48,7 +48,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     kind: 'infix',
     associativity: 'right',
     precedence: 241,
-    parse: 'Equal',
+    parse: 'LessEqual',
   },
   {
     trigger: ['\\leqslant'],
