@@ -840,6 +840,28 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     associativity: 'both',
     precedence: 270,
+    serialize: (serializer, expr) => {
+      const op1 = op(expr, 1);
+      if (op1 === null) return '\\pm';
+      if (nops(expr) === 1)
+        return joinLatex(['\\pm', serializer.serialize(op1)]);
+      const op2 = op(expr, 2);
+      return joinLatex([
+        serializer.serialize(op1),
+        '\\pm',
+        serializer.serialize(op2),
+      ]);
+    },
+  },
+  {
+    trigger: ['\\pm'],
+    kind: 'prefix',
+    precedence: 270,
+    parse: (parser, terminator) => {
+      if (270 < terminator.minPrec) return null;
+      const rhs = parser.matchExpression({ ...terminator, minPrec: 400 });
+      return ['PlusMinus', missingIfEmpty(rhs)] as Expression;
+    },
   },
   {
     name: 'Power',
