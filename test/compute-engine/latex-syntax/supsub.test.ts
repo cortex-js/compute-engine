@@ -200,7 +200,7 @@ describe('PRIME', () => {
     expect(parse("f'")).toMatchInlineSnapshot(`
       [
         "Sequence",
-        "f",
+        ["f"],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'''"],
@@ -211,7 +211,7 @@ describe('PRIME', () => {
     expect(parse("f''")).toMatchInlineSnapshot(`
       [
         "Sequence",
-        "f",
+        ["f"],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'''"],
@@ -222,7 +222,7 @@ describe('PRIME', () => {
     expect(parse("f'''")).toMatchInlineSnapshot(`
       [
         "Sequence",
-        "f",
+        ["f"],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'''"],
@@ -233,7 +233,7 @@ describe('PRIME', () => {
     expect(parse('f\\prime')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        "f",
+        ["f"],
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\prime'"],
@@ -244,7 +244,7 @@ describe('PRIME', () => {
     expect(parse('f\\prime\\prime')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        "f",
+        ["f"],
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\prime'"],
@@ -260,7 +260,7 @@ describe('PRIME', () => {
     expect(parse('f\\prime\\prime\\prime')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        "f",
+        ["f"],
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\prime'"],
@@ -281,7 +281,7 @@ describe('PRIME', () => {
     expect(parse('f\\doubleprime')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        "f",
+        ["f"],
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\doubleprime'"],
@@ -298,9 +298,9 @@ describe('PRIME', () => {
             "ErrorCode",
             "'incompatible-domain'",
             ["Domain", "Number"],
-            ["Domain", "Function"]
+            ["Domain", "Anything"]
           ],
-          "f"
+          ["f"]
         ],
         [
           "Error",
@@ -318,9 +318,9 @@ describe('PRIME', () => {
             "ErrorCode",
             "'incompatible-domain'",
             ["Domain", "Number"],
-            ["Domain", "Function"]
+            ["Domain", "Anything"]
           ],
-          "f"
+          ["f"]
         ],
         [
           "Sequence",
@@ -342,9 +342,9 @@ describe('PRIME', () => {
             "ErrorCode",
             "'incompatible-domain'",
             ["Domain", "Number"],
-            ["Domain", "Function"]
+            ["Domain", "Anything"]
           ],
-          "f"
+          ["f"]
         ],
         [
           "Sequence",
@@ -366,9 +366,9 @@ describe('PRIME', () => {
             "ErrorCode",
             "'incompatible-domain'",
             ["Domain", "Number"],
-            ["Domain", "Function"]
+            ["Domain", "Anything"]
           ],
-          "f"
+          ["f"]
         ],
         [
           "Error",

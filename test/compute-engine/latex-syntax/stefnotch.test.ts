@@ -61,7 +61,7 @@ describe('STEFNOTCH #10', () => {
     expect(parse('f:[a,b]\\to R ')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        "f",
+        ["f"],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "':'"],

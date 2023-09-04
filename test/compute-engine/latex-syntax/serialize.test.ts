@@ -62,9 +62,7 @@ describe('LATEX SERIALIZING', () => {
   });
 
   test('Functions', () => {
-    expect(latex(['f', 'x', 1, 0])).toMatchInlineSnapshot(
-      `\\mathrm{f}(x, 1, 0)`
-    );
+    expect(latex(['f', 'x', 1, 0])).toMatchInlineSnapshot(`f(x, 1, 0)`);
     expect(latex(['foo', 'x', 1, 0])).toMatchInlineSnapshot(
       `\\mathrm{foo}(x, 1, 0)`
     );
@@ -80,7 +78,7 @@ describe('LATEX SERIALIZING', () => {
 
     // Head as expression
     expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
-      `\\mathrm{Apply}(\\mathrm{g}(f), \\lbrack x, 1, 0\\rbrack)`
+      `\\mathrm{Apply}(g(f), \\lbrack x, 1, 0\\rbrack)`
     );
   });
 
