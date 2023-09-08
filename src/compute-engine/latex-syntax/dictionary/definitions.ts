@@ -131,8 +131,7 @@ export type IndexedLatexDictionary = {
 
   // Mapping from token triggers of a given length to dictionary entry.
   // Definition can share triggers, so the entry is an array
-  expression: Map<string, IndexedExpressionEntry[]>;
-  function: Map<string, IndexedFunctionEntry[]>;
+  expression: (Map<LatexString, IndexedExpressionEntry[]> | null)[];
   symbol: (Map<LatexString, IndexedSymbolEntry[]> | null)[];
   prefix: (Map<LatexString, IndexedPrefixEntry[]> | null)[];
   infix: (Map<LatexString, IndexedInfixEntry[]> | null)[];
@@ -141,6 +140,10 @@ export type IndexedLatexDictionary = {
   // Matchfix entries use openDelimiter/closeDelimiter. They do not
   // have a trigger, and the entries are not sorted by trigger length.
   matchfix: IndexedMatchfixEntry[];
+
+  // Note: for functions, the "trigger" is the name of the function
+  // as in \mathrm{foo}, the "trigger" is "foo"
+  function: Map<string, IndexedFunctionEntry[]>;
 
   // Environment definition must be unique. They are indexed by the name
   // of the environment.
@@ -275,8 +278,9 @@ function addEntry(
       // If no entries of this kind and length yet, create a map for it
       if (result[kind][n] === undefined) result[kind][n] = new Map();
       const list = result[kind][n]!;
-      if (list.has(triggerString)) list.get(triggerString)!.push(indexedEntry);
-      else list.set(triggerString, [indexedEntry]);
+      if (list.has(triggerString))
+        list.get(triggerString)!.push(indexedEntry as any);
+      else list.set(triggerString, [indexedEntry as any]);
     }
   }
 }
@@ -288,12 +292,12 @@ export function indexLatexDictionary(
   const result: IndexedLatexDictionary = {
     lookahead: 1,
     name: new Map(),
-    expression: new Map(),
-    function: new Map(),
+    expression: [],
     symbol: [],
     infix: [],
     prefix: [],
     postfix: [],
+    function: new Map(),
     environment: new Map(),
     matchfix: [],
   };

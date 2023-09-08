@@ -1,6 +1,15 @@
-## 0.12.6 
+## [Unreleased]
 
- **Release Date:** 2023-09-08
+## Improvements
+
+- Made customization of the LaTeX dictionary simpler. The `ce.latexDictionary`
+  property can be used to access and modify the dictionary. The documentation at
+  https://cortexjs.io/compute-engine/guides/latex-syntax/#customizing-the-latex-dictionary
+  has been updated.
+
+## 0.12.6
+
+**Release Date:** 2023-09-08
 
 ### Breaking Changes
 

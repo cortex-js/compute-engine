@@ -19,6 +19,7 @@ import type {
   MathJsonSymbol,
 } from '../math-json/math-json-format';
 import type {
+  LatexDictionaryEntry,
   NumberFormattingOptions,
   ParseLatexOptions,
   SerializeLatexOptions,
@@ -1945,6 +1946,8 @@ export interface ComputeEngineStats {
 
 /** @internal */
 export interface IComputeEngine {
+  latexDictionary: readonly LatexDictionaryEntry[];
+
   /** @internal */
   readonly _ZERO: BoxedExpression;
   /** @internal */

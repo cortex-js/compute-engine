@@ -208,11 +208,7 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
-          \mathrm{floor}\left(1.5*n*\ln(n)\right)
-          <!-- p(n)=(\sum_{v_{1}=2}^{\operatorname{floor}\left(1.5*n*\ln(n)\right)}(\operatorname{floor}(\frac{1}{0^{n-(\sum_{v_{2}=2}^{v_{1}}((\prod_{v_{3}=2}^{\operatorname{floor}(\sqrt{v_{2}})}(1-0^{\operatorname{abs}(\operatorname{floor}(\frac{v_{2}}{v_{3}})-\frac{v_{2}}{v_{3}})}))))}+1})))+2 -->
-          <!-- \alpha -->
-          <!-- (\frac{\pi}{5}) -->
-          <!-- ((1,2),(3,4)) -->
+          ((1,2),(3,4))
 
           <!-- 1.1\times 2\times
           5\times\frac{5}{7}\times\frac{7}{9}\times\sqrt{2}\times\pi -->
@@ -483,18 +479,20 @@
 
       let errors = [];
 
-      const ce = new ComputeEngine({
-        latexDictionary: [
-          ...ComputeEngine.getLatexDictionary(),
-          {
-            trigger: ['\\funfunction'],
-            parse: (parser) => ['funfunction', ...parser.matchArguments()],
-          },
-        ],
-      });
+      const mf = document.getElementById('mf');
+      const ce = MathfieldElement.computeEngine;
 
-      console.log(ce.parse('\\pi').toString());
-      console.log(ce.parse('\\frac\\pi2').toString());
+      ce.latexDictionary = [
+        ...ce.latexDictionary,
+        {
+          trigger: ['\\funfunction'],
+          parse: (parser) => [
+            'funfunction',
+            parser.parseGroup(),
+            parser.parseGroup(),
+          ],
+        },
+      ];
 
       // ce.strict = false;
 
@@ -586,7 +584,6 @@
 
       updateAssumptions();
 
-      const mf = document.getElementById('mf');
       // const randomExpr = ce.box(['RandomExpression']).evaluate();
       // console.log(randomExpr.json);
       // mf.value = randomExpr.latex;

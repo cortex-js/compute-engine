@@ -68,6 +68,7 @@ export class LatexSyntax {
   readonly computeEngine: IComputeEngine;
 
   private _dictionary: IndexedLatexDictionary;
+  private _dictionaryInput: readonly LatexDictionaryEntry[];
   private _serializer?: Serializer;
 
   constructor(
@@ -96,10 +97,20 @@ export class LatexSyntax {
       ...DEFAULT_SERIALIZE_LATEX_OPTIONS,
       ...opts,
     };
-    this._dictionary = indexLatexDictionary(
-      options.dictionary ?? (LatexSyntax.getDictionary() as LatexDictionary),
-      (sig) => this.onError([sig])
+    this._dictionaryInput =
+      options.dictionary ?? (LatexSyntax.getDictionary() as LatexDictionary);
+    this._dictionary = indexLatexDictionary(this._dictionaryInput, (sig) =>
+      this.onError([sig])
     );
+  }
+
+  get dictionary(): readonly LatexDictionaryEntry[] {
+    return this._dictionaryInput;
+  }
+
+  set dictionary(val: readonly LatexDictionaryEntry[]) {
+    this._dictionaryInput = val;
+    this._dictionary = indexLatexDictionary(val, (sig) => this.onError([sig]));
   }
 
   updateOptions(

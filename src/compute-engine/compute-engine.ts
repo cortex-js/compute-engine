@@ -425,6 +425,14 @@ export class ComputeEngine implements IComputeEngine {
     this.pushScope();
   }
 
+  get latexDictionary(): readonly LatexDictionaryEntry[] {
+    return this.latexSyntax.dictionary;
+  }
+
+  set latexDictionary(dic: readonly LatexDictionaryEntry[]) {
+    this.latexSyntax.dictionary = dic;
+  }
+
   /** After the configuration of the engine has changed, clear the caches
    * so that new values can be recalculated.
    *
