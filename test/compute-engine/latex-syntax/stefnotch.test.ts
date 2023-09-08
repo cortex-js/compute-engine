@@ -16,9 +16,17 @@ describe('STEFNOTCH #10', () => {
       )
     ).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["ErrorCode", "'expected-close-delimiter'", "'\\right)'"],
-        ["Latex", "'\\left('"]
+        "Sequence",
+        [
+          "Error",
+          ["ErrorCode", "'expected-close-delimiter'", "'\\right)'"],
+          ["Latex", "'('"]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\sin'"],
+          ["Latex", "'\\sin^{-1}\\mleft(x\\mright)\\right)^{\\prime}'"]
+        ]
       ]
     `);
   });
@@ -61,7 +69,7 @@ describe('STEFNOTCH #10', () => {
     expect(parse('f:[a,b]\\to R ')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["f"],
+        "f",
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "':'"],
@@ -74,25 +82,9 @@ describe('STEFNOTCH #10', () => {
   test('7/ \\lim_{n\\to\\infin}3', () => {
     expect(parse('\\lim_{n\\to\\infin}3')).toMatchInlineSnapshot(`
       [
-        "Multiply",
-        [
-          "Subscript",
-          [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\lim'"],
-            ["Latex", "'\\lim'"]
-          ],
-          [
-            "To",
-            "n",
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\infin'"],
-              ["Latex", "'\\infin'"]
-            ]
-          ]
-        ],
-        3
+        "Subscript",
+        ["ErrorCode", "'unexpected-command'", "'\\lim'"],
+        ["Latex", "'\\lim'"]
       ]
     `);
   });
@@ -236,23 +228,27 @@ describe('STEFNOTCH #13', () => {
     expect(parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}'))
       .toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Equal",
+        "a",
         [
-          "Equal",
-          "a",
-          ["Error", "'expected-expression'", ["Latex", "'{\\displaystyle'"]]
-        ],
-        [
-          "Subscript",
+          "Sequence",
           [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\lim'"],
-            ["Latex", "'\\lim'"]
+            "Subscript",
+            [
+              "Error",
+              ["ErrorCode", "'unexpected-command'", "'\\lim'"],
+              ["Latex", "'\\lim'"]
+            ],
+            [
+              "Error",
+              "'expected-closing-delimiter'",
+              ["Latex", "'{\\displaystyle\\lim'"]
+            ]
           ],
-          ["To", "n", {num: "+Infinity"}]
-        ],
-        "a_n",
-        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+          ["To", "n", {num: "+Infinity"}],
+          "a_n",
+          ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+        ]
       ]
     `);
   });

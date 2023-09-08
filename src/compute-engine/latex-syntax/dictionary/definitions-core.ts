@@ -53,7 +53,7 @@ function parseSequence(
     if (parser.atTerminator(terminator)) {
       result.push('Nothing');
     } else {
-      const rhs = parser.matchExpression({ ...terminator, minPrec: prec });
+      const rhs = parser.parseExpression({ ...terminator, minPrec: prec });
       result.push(rhs ?? 'Nothing');
       done = rhs === null;
     }
@@ -77,15 +77,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   //
   {
     trigger: ['\\placeholder'],
-    parse: (parser) => {
+    kind: 'symbol',
+    parse: (parser: Parser) => {
       // Parse, but ignore, the optional and required LaTeX args
-      parser.skipSpaceTokens();
+      while (parser.match('<space>')) {}
       if (parser.match('['))
-        while (!parser.match(']') && !parser.atBoundary) parser.next();
+        while (!parser.match(']') && !parser.atBoundary) parser.nextToken();
 
-      parser.skipSpaceTokens();
+      while (parser.match('<space>')) {}
       if (parser.match('<{>'))
-        while (!parser.match('<}>') && !parser.atBoundary) parser.next();
+        while (!parser.match('<}>') && !parser.atBoundary) parser.nextToken();
 
       return 'Nothing';
     },
@@ -96,7 +97,6 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   //
   {
     name: 'BaseForm',
-    kind: 'function',
     serialize: (serializer, expr) => {
       const radix = machineValue(op(expr, 2)) ?? NaN;
       if (isFinite(radix) && radix >= 2 && radix <= 36) {
@@ -139,7 +139,6 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'Delimiter',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      // @todo: could use `serializer.groupStyle`
       const argCount = nops(expr);
       if (argCount === 0) return '';
 
@@ -156,9 +155,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       if (argCount > 1) {
         const op2 = stringValue(op(expr, 2)) ?? '';
-        open = op2[0] ?? '';
-        close = op2[1] ?? '';
-        sep = op2[2] ?? '';
+        open = op2[0] ?? '(';
+        close = op2[1] ?? ')';
+        sep = op2[2] ?? ',';
       }
 
       const body =
@@ -182,22 +181,22 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     trigger: ['\\mathtip'],
     parse: (parser: Parser) => {
-      const op1 = parser.matchLatexGroup();
-      const op2 = parser.matchLatexGroup();
+      const op1 = parser.parseGroup();
+      const op2 = parser.parseGroup();
       return op1;
     },
   },
   {
     trigger: ['\\texttip'],
     parse: (parser: Parser) => {
-      const op1 = parser.matchLatexGroup();
-      const op2 = parser.matchLatexGroup();
+      const op1 = parser.parseGroup();
+      const op2 = parser.parseGroup();
       return op1;
     },
   },
   {
     trigger: ['\\error'],
-    parse: (parser: Parser) => parser.matchLatexGroup(),
+    parse: (parser: Parser) => parser.parseGroup(),
   },
   {
     name: 'Error',
@@ -284,11 +283,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'matchfix',
     openDelimiter: '[',
     closeDelimiter: ']',
-    parse: (_parser, lhs) => {
-      if (lhs === null) return ['List'];
-      if (head(lhs) !== 'Sequence' && head(lhs) !== 'List')
-        return ['List', lhs];
-      return ['List', ...(ops(lhs) ?? [])];
+    parse: (_parser: Parser, body: Expression): Expression => {
+      if (body === null) return ['List'];
+      if (head(body) !== 'Sequence' && head(body) !== 'List')
+        return ['List', body];
+      return ['List', ...(ops(body) ?? [])];
     },
     serialize: (serializer: Serializer, expr: Expression): string => {
       return joinLatex([
@@ -321,8 +320,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // when the comma operator is used, the lhs and rhs are flattened,
     // i.e. `1,2,3` -> `["Delimiter", ["List", 1, 2, 3],  ","]`,
     // and `1, (2, 3)` -> `["Delimiter",
-    // ["Sequence", 1, ["Delimiter", ["List", 2, 3],  "(", ",", ")"]],  ","],
-    parse: (parser: Parser, terminator: Terminator, lhs: Expression) => {
+    // ["Sequence", 1, ["Delimiter", ["List", 2, 3],  "()", ","]]],
+    parse: (
+      parser: Parser,
+      lhs: Expression,
+      terminator: Terminator
+    ): Expression | null => {
       const seq = parseSequence(parser, terminator, lhs, 20, ',');
       if (seq === null) return null;
       return ['Sequence', ...seq];
@@ -336,7 +339,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     trigger: [';'],
     kind: 'infix',
     precedence: 19,
-    parse: (parser: Parser, terminator: Terminator, lhs: Expression) => {
+    parse: (parser: Parser, lhs: Expression, terminator: Terminator) => {
       const seq = parseSequence(parser, terminator, lhs, 19, ';');
       if (seq === null) return null;
       return [
@@ -412,9 +415,23 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: (_parser, lhs) => ['Prime', missingIfEmpty(lhs), 2],
   },
   {
+    trigger: ['^', '\\tripleprime'],
+    kind: 'postfix',
+    parse: (_parser, lhs) => ['Prime', missingIfEmpty(lhs), 3],
+  },
+  {
     name: 'InverseFunction',
-    // trigger: '^{-1}',
-    // kind: 'postfix',
+    trigger: '^{-1}',
+    kind: 'postfix',
+    parse: (parser, lhs) => {
+      // If the lhs is a function, return the inverse function
+      // i.e. f^{-1} -> InverseFunction(f)
+      // Otherwise, if it's a number or a symbol, return the power
+      // i.e. x^{-1} -> Power(x, -1)
+      if (parser.computeEngine?.box(lhs)?.domain.isFunction)
+        return ['InverseFunction', lhs];
+      return null;
+    },
     serialize: (serializer, expr) =>
       serializer.serialize(op(expr, 1)) + '^{-1}',
   },
@@ -424,8 +441,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const degree = machineValue(op(expr, 2)) ?? 1;
       const base = serializer.serialize(op(expr, 1));
       if (degree === 1) return base + '^{\\prime}';
-      else if (degree === 2) return base + '^{\\doubleprime}';
-      else if (degree === 3) return base + '^{\\tripleprime}';
+      if (degree === 2) return base + '^{\\doubleprime}';
+      if (degree === 3) return base + '^{\\tripleprime}';
 
       return base + '^{(' + Number(degree).toString() + ')}';
     },
@@ -434,8 +451,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Which',
     trigger: 'cases',
     kind: 'environment',
-    parse: (parser) => {
-      const tabular: Expression[][] | null = parser.matchTabular('cases');
+    parse: (parser: Parser) => {
+      const tabular: Expression[][] | null = parser.parseTabular();
       if (!tabular) return ['Which'];
       // Note: return `True` for the condition, because it must be present
       // as the second element of the Tuple. Return an empty sequence for the
@@ -523,10 +540,10 @@ function parseTextRun(
     } else if (parser.match('\\textbf') && parser.match('<{>')) {
       runs.push(parseTextRun(parser, { 'font-weight': 'bold' }));
       // @todo! other text styles...
-    } else if (parser.match('\\color') && parser.match('<{>')) {
+    } else if (parser.match('\\color')) {
       // Run-in style
-      const color = parser.matchColor();
-      if (color && parser.match('<}>')) {
+      const color = parser.parseStringGroup();
+      if (color !== null) {
         // Stash the current text/runinstyle
         if (runinStyle !== null && text) {
           runs.push(['Style', text, { dict: runinStyle }]);
@@ -540,7 +557,7 @@ function parseTextRun(
       text += ' ';
     } else if (parser.match('<$>')) {
       const index = parser.index;
-      const expr = parser.matchExpression() ?? ['Sequence'];
+      const expr = parser.parseExpression() ?? ['Sequence'];
       parser.skipSpace();
       if (parser.match('<$>')) {
         runs.push(expr);
@@ -550,7 +567,7 @@ function parseTextRun(
       }
     } else if (parser.match('<$$>')) {
       const index = parser.index;
-      const expr = parser.matchExpression() ?? ['Sequence'];
+      const expr = parser.parseExpression() ?? ['Sequence'];
       parser.skipSpace();
       if (parser.match('<$$>')) {
         runs.push(expr);
@@ -558,7 +575,7 @@ function parseTextRun(
         text += '$$';
         parser.index = index;
       }
-    } else text += parser.matchChar() ?? parser.next();
+    } else text += parser.matchChar() ?? parser.nextToken();
   }
 
   // Apply leftovers

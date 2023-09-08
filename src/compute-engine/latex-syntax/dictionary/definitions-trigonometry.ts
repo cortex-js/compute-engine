@@ -1,5 +1,10 @@
 import { Expression } from '../../../math-json/math-json-format';
-import { LatexDictionary, Parser, Terminator } from '../public';
+import {
+  ExpressionParseHandler,
+  LatexDictionary,
+  Parser,
+  Terminator,
+} from '../public';
 
 /**
  * Trigonometric functions have some special conventions that require a
@@ -7,10 +12,10 @@ import { LatexDictionary, Parser, Terminator } from '../public';
  * that the inversion function should be used, i.e. "\sin^{-1}" for "arcsin".
  *
  */
-function parseTrig(op: string) {
+function parseTrig(op: string): ExpressionParseHandler {
   return (parser: Parser, until?: Terminator): Expression | null => {
     // Note: names as per NIST-DLMF
-    let head: Expression =
+    const head: Expression =
       {
         '\\arcsin': 'Arcsin',
         '\\arccos': 'Arccos',
@@ -48,43 +53,47 @@ function parseTrig(op: string) {
       '';
 
     if (parser.atTerminator(until)) return head;
-    let isInverse = false;
-    let primeLevel = 0;
-    let sup: Expression | null = null;
+    // let isInverse = false;
+    // let primeLevel = 0;
+    // let sup: Expression | null = null;
 
-    parser.skipSpace();
-    const start = parser.index;
-    if (parser.match('^')) {
-      parser.skipSpace();
+    // parser.skipSpace();
+    // const start = parser.index;
+    // if (parser.match('^')) {
+    //   parser.skipSpace();
 
-      const superscriptIndex = parser.index;
+    //   const superscriptIndex = parser.index;
 
-      if (parser.matchAll(['<{>', '-', '1', '<}>'])) isInverse = true;
-      else {
-        parser.index = start;
+    //   if (parser.matchAll(['<{>', '-', '1', '<}>'])) isInverse = true;
+    //   else {
+    //     parser.index = start;
 
-        // Count a prime symbol suffix
-        parser.index = start;
-        primeLevel = parser.matchPrimeSuffix();
+    //     // Count a prime symbol suffix
+    //     parser.index = start;
+    //     primeLevel = parser.matchPrimeSuffix();
 
-        if (primeLevel === 0) {
-          parser.index = superscriptIndex;
-          sup = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
-        }
-      }
-    }
-    // Additional primes, after a superscript
-    primeLevel += parser.matchPrimeSuffix();
+    //     if (primeLevel === 0) {
+    //       parser.index = superscriptIndex;
+    //       sup = parser.parseGroup() ?? parser.parseToken();
+    //     }
+    //   }
+    // }
+    // // Additional primes, after a superscript
+    // primeLevel += parser.matchPrimeSuffix();
 
-    if (isInverse) head = ['InverseFunction', head];
+    // if (isInverse) head = ['InverseFunction', head];
 
-    if (primeLevel === 1) head = ['Derivative', head];
-    else if (primeLevel > 1) head = ['Derivative', head, primeLevel];
+    // if (primeLevel === 1) head = ['Derivative', head];
+    // else if (primeLevel > 1) head = ['Derivative', head, primeLevel];
 
-    const args = parser.matchArguments('implicit', until);
-    if (args === null) return sup ? [['Power', [head], sup]] : head;
+    // If a postfix was applied (inverse, prime...),
+    // let the function parser handle the rest
+    const fn = parser.parsePostfixOperator(head, until);
+    if (fn !== null) return fn;
 
-    return sup ? ['Power', [head, ...args], sup] : [head, ...args];
+    const args = parser.parseArguments('implicit', until);
+
+    return args === null ? head : [head, ...args];
   };
 }
 
@@ -148,7 +157,6 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Arccot'),
   },
   {
-    kind: 'function',
     name: 'Arcsec',
     trigger: 'arcsec',
 

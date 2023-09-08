@@ -84,7 +84,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'right', // Caution: cartesian product is not associative
     precedence: 390, // Same as Multiply?
-    parse: (parser, until, lhs) => {
+    parse: (parser, lhs, until) => {
       if (390 < until.minPrec) return null;
       // Since this is triggered on `\times` we have to be careful we only
       // accept arguments that are `Set`
@@ -93,7 +93,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       if (!ce || !ce.box(lhs).domain.isCompatible('Set')) return null;
 
       const index = parser.index;
-      const rhs = parser.matchExpression({ ...until, minPrec: 390 });
+      const rhs = parser.parseExpression({ ...until, minPrec: 390 });
       // If the rhs argument is not a set, bail
       if (rhs === null || ce.box(lhs).domain.isCompatible('Set') !== true) {
         parser.index = index;
@@ -174,8 +174,8 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'right',
     precedence: 160, // As per MathML, lower precedence
-    parse: (parser, terminator, lhs): Expression | null => {
-      const rhs = parser.matchExpression(terminator);
+    parse: (parser, lhs, terminator): Expression | null => {
+      const rhs = parser.parseExpression(terminator);
       return rhs === null ? null : ['Element', rhs, lhs];
     },
   },

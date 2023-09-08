@@ -200,9 +200,13 @@ check('Invalid prefix operator', () =>
 check('Invalid postfix operator', () =>
   expect(engine.parse('! 3')).toMatchInlineSnapshot(`
     [
-      "Multiply",
+      "Sequence",
       ["Factorial", ["Error", "'missing'", ["Latex", "'!'"]]],
-      3
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-token'", "' '"],
+        ["Latex", "' 3'"]
+      ]
     ]
   `)
 );

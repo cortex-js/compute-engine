@@ -208,7 +208,11 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
-          ((1,2),(3,4))
+          \mathrm{floor}\left(1.5*n*\ln(n)\right)
+          <!-- p(n)=(\sum_{v_{1}=2}^{\operatorname{floor}\left(1.5*n*\ln(n)\right)}(\operatorname{floor}(\frac{1}{0^{n-(\sum_{v_{2}=2}^{v_{1}}((\prod_{v_{3}=2}^{\operatorname{floor}(\sqrt{v_{2}})}(1-0^{\operatorname{abs}(\operatorname{floor}(\frac{v_{2}}{v_{3}})-\frac{v_{2}}{v_{3}})}))))}+1})))+2 -->
+          <!-- \alpha -->
+          <!-- (\frac{\pi}{5}) -->
+          <!-- ((1,2),(3,4)) -->
 
           <!-- 1.1\times 2\times
           5\times\frac{5}{7}\times\frac{7}{9}\times\sqrt{2}\times\pi -->
@@ -479,14 +483,37 @@
 
       let errors = [];
 
-      const ce = new ComputeEngine();
-      ce.strict = false;
+      const ce = new ComputeEngine({
+        latexDictionary: [
+          ...ComputeEngine.getLatexDictionary(),
+          {
+            trigger: ['\\funfunction'],
+            parse: (parser) => ['funfunction', ...parser.matchArguments()],
+          },
+        ],
+      });
 
-      const f = ce.parse('2 + (\\sqrt{4x^2} + 1)');
-      ce.set({ x: 'Pi' });
-      console.log(f.evaluate().latex);
-      console.log(f.simplify().latex);
-      console.log(f.N().latex);
+      console.log(ce.parse('\\pi').toString());
+      console.log(ce.parse('\\frac\\pi2').toString());
+
+      // ce.strict = false;
+
+      // const seq = ce.box(['Sequence', 1, 2, ['Sequence', 8, 9], 4, 5]);
+      // console.log(seq.toString());
+      // console.log(seq.latex);
+      // console.log(seq.evaluate().toString());
+
+      // console.log(ce.parse('(1; 2; 3)', { canonical: false }).toString());
+      // console.log(ce.parse('\\left(1, 2, 3\\right)').toString());
+      // console.log(ce.parse('(1, (2, 3))').toString());
+      // console.log(ce.parse('(1; 2, 3)').toString());
+      // console.log(ce.parse('(1, 2; 3, 4)').toString());
+      // console.log(ce.parse('\\mathrm{Hypot}(3, 4)').toString());
+      // console.log(
+      //   ce.parse('\\mathrm{Hypot}\\left({3}, {4}\\right)').toString()
+      // );
+      // console.log(ce.parse('\\{1, 2; 3, 4\\}').toString());
+      // console.log(ce.parse('\\lbrack1, 2; 3, 4\\rbrack').toString());
 
       // const formula =
       //   '\\left(\\left(\\frac{125.5}{100}\\right)^{0.25}\\right)-1';
@@ -528,17 +555,32 @@
 
       // const ce = new ComputeEngine({ latexDictionary });
 
-      ce.jsonSerializationOptions = {
-        exclude: [],
-        shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
-        metadata: [],
-        precision: 'max',
-        repeatingDecimals: false,
-      };
-      ce.pushScope({ hundred: 100 });
+      // ce.jsonSerializationOptions = {
+      //   exclude: [],
+      //   shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
+      //   metadata: [],
+      //   // precision: 'max',
+      //   repeatingDecimals: false,
+      // };
+      ce.pushScope({
+        hundred: 100,
+        f: {
+          domain: 'Function',
+          signature: {
+            evaluate: (ce, args) => {
+              if (args.length !== 1) return null;
+              const arg1 = args[0];
+              if (typeof arg1.numericValue !== 'number') return null;
+              return ce.box(Math.pow(arg1.numericValue, 2));
+            },
+          },
+        },
+      });
       ce.defineFunction('suma', {
         signature: {
-          evaluate: (ce, args) => ce.box(args[0].N() + args[1].N()),
+          evaluate: (ce, args) => {
+            return ce.box(args[0].N().numericValue + args[1].N().numericValue);
+          },
         },
       });
 

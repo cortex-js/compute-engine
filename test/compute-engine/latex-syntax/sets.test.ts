@@ -1,4 +1,8 @@
-import { box, latex, parse } from '../../utils';
+import { engine, latex, parse } from '../../utils';
+
+console.log(engine.parse('\\N')?.json);
+
+console.log(engine.parse('\\N \\cup \\R')?.json);
 
 describe('SERIALIZING SETS', () => {
   test('Set', () => {
@@ -43,37 +47,29 @@ describe('SERIALIZING SETS', () => {
 
   test('Union, Intersection, etc...', () => {
     expect(latex(['Union', 'Integer', 'RealNumber'])).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\cup\\mathtip{\\error{\\R}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
+      `\\Z\\cup\\R`
     );
     expect(
       latex(['Intersection', 'Integer', 'RealNumber'])
-    ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\cap\\mathtip{\\error{\\R}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
-    );
+    ).toMatchInlineSnapshot(`\\Z\\cap\\R`);
     expect(latex(['Complement', 'ComplexNumber'])).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\C}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}^{\\complement}`
+      `\\C^{\\complement}`
     );
     expect(latex(['CartesianProduct'])).toMatchInlineSnapshot(
       `\\error{\\blacksquare}\\times\\error{\\blacksquare}`
     );
     expect(latex(['CartesianProduct', 'Integer'])).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\error{\\blacksquare}`
+      `\\Z\\times\\error{\\blacksquare}`
     );
     expect(
       latex(['CartesianProduct', 'Integer', 'Integer'])
-    ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
-    );
+    ).toMatchInlineSnapshot(`\\Z\\times\\Z`);
     expect(
       latex(['CartesianProduct', 'Integer', 'RationalNumber'])
-    ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\mathtip{\\error{\\Q}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}`
-    );
+    ).toMatchInlineSnapshot(`\\Z\\times\\Q`);
     expect(
       latex(['CartesianProduct', 'Integer', 'Integer', 'Integer'])
-    ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Set}}}\\times\\error{\\Z}`
-    );
+    ).toMatchInlineSnapshot(`\\Z\\times\\Z\\times\\Z`);
     expect(latex(['CartesianPower', 'Integer', 3])).toMatchInlineSnapshot(
       `\\mathrm{CartesianPower}(\\Z, 3)`
     );
@@ -182,16 +178,28 @@ describe('PARSING SETS', () => {
     `);
   });
   test('Union, Intersection, etc...', () => {
-    expect(parse('\\N \\cup \\R')).toMatchInlineSnapshot(`
+    expect(parse('\\N \\cup \\R')).toMatchInlineSnapshot(
+      `["Union", "NonNegativeInteger", "RealNumber"]`
+    );
+    expect(parse('\\N \\cap \\R')).toMatchInlineSnapshot(
+      `["Intersection", "NonNegativeInteger", "RealNumber"]`
+    );
+    expect(parse('\\N \\setminus \\R')).toMatchInlineSnapshot(
+      `["SetMinus", "NonNegativeInteger", "RealNumber"]`
+    );
+    expect(parse('\\N^\\complement')).toMatchInlineSnapshot(
+      `["Complement", "NonNegativeInteger"]`
+    );
+    expect(parse('\\N \\times \\N')).toMatchInlineSnapshot(`
       [
-        "Union",
+        "Multiply",
         [
           "Error",
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Set"],
-            ["Domain", "ExtendedRealNumber"]
+            ["Domain", "Number"],
+            ["Domain", "Set"]
           ],
           "NonNegativeInteger"
         ],
@@ -200,77 +208,44 @@ describe('PARSING SETS', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Set"],
-            ["Domain", "ExtendedRealNumber"]
+            ["Domain", "Number"],
+            ["Domain", "Set"]
           ],
-          "RealNumber"
+          "NonNegativeInteger"
         ]
       ]
     `);
-    expect(parse('\\N \\cap \\R')).toMatchInlineSnapshot(`
+    expect(parse('\\N^3')).toMatchInlineSnapshot(`
       [
-        "Intersection",
+        "Power",
         [
           "Error",
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Set"],
-            ["Domain", "ExtendedRealNumber"]
+            ["Domain", "Number"],
+            ["Domain", "Set"]
           ],
           "NonNegativeInteger"
         ],
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["Domain", "Set"],
-            ["Domain", "ExtendedRealNumber"]
-          ],
-          "RealNumber"
-        ]
+        3
       ]
     `);
-    expect(parse('\\N \\setminus \\R')).toMatchInlineSnapshot(`
+    expect(parse('\\N^{n}')).toMatchInlineSnapshot(`
       [
-        "SetMinus",
+        "Power",
         [
           "Error",
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Set"],
-            ["Domain", "ExtendedRealNumber"]
+            ["Domain", "Number"],
+            ["Domain", "Set"]
           ],
           "NonNegativeInteger"
         ],
-        "RealNumber"
+        "n"
       ]
     `);
-    expect(parse('\\N^\\complement')).toMatchInlineSnapshot(`
-      [
-        "Complement",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["Domain", "Set"],
-            ["Domain", "ExtendedRealNumber"]
-          ],
-          "NonNegativeInteger"
-        ]
-      ]
-    `);
-    expect(parse('\\N \\times \\N')).toMatchInlineSnapshot(
-      `["Square", "NonNegativeInteger"]`
-    );
-    expect(parse('\\N^3')).toMatchInlineSnapshot(
-      `["Power", "NonNegativeInteger", 3]`
-    );
-    expect(parse('\\N^{n}')).toMatchInlineSnapshot(
-      `["Power", "NonNegativeInteger", "n"]`
-    );
   });
 });

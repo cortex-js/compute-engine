@@ -63,8 +63,22 @@ describe('STYLE - TEXT MODE', () => {
 
     expect(check('a\\text{ black \\color{red}RED\\color{blue}BLUE} b'))
       .toMatchInlineSnapshot(`
-      latex     = ["Sequence", "a", "' black '"]
-      ["Sequence", "a", "' black '"]
+      latex     = ["Multiply", "a", "' black '", "b"]
+      [
+        "Multiply",
+        "a",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Number"],
+            ["Domain", "String"]
+          ],
+          "' black '"
+        ],
+        "b"
+      ]
     `);
     expect(check('a\\text{ black \\textcolor{red}{RED} black} b'))
       .toMatchInlineSnapshot(`
@@ -77,8 +91,8 @@ describe('STYLE - TEXT MODE', () => {
         '\\text{ abc \\color{blue} b \\color{yellow} y {y \\color{green} g} \\textcolor{red}{r} g}'
       )
     ).toMatchInlineSnapshot(`
-      latex     = ' abc '
-      ' abc '
+      latex     = ' abc 'red''r''
+      ' abc 'red''r''
     `);
   });
 });

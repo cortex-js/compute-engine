@@ -1,4 +1,4 @@
-import { DomainLiteral } from '../public';
+import { DomainLiteral, IdTable } from '../public';
 
 export const DOMAIN_CONSTRUCTORS = [
   'InvalidDomain',
@@ -293,4 +293,24 @@ export function ancestors(dom: string): string[] {
 
   gDomainLiterals[dom] = new Set(result);
   return result;
+}
+
+export function domainSetsLibrary(): IdTable {
+  const table: IdTable = {};
+  for (const dom of Object.keys(DOMAIN_LITERAL)) {
+    // @todo: the Domain domain conflicts with the Domain function
+    // Need to be renamed, as in DomainSet or Domains
+    // Same thing with Symbol Nothing and Domain Nothing
+    if (
+      dom !== 'Domain' &&
+      dom !== 'Nothing' &&
+      dom !== 'String' &&
+      dom !== 'Symbol' &&
+      dom !== 'List' &&
+      dom !== 'Tuple' &&
+      dom !== 'Sequence'
+    )
+      table[dom] = { domain: 'Set' };
+  }
+  return table;
 }

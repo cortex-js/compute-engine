@@ -63,8 +63,8 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
 }
 
 function parseRoot(parser: Parser): Expression | null {
-  const degree = parser.matchLatexOptionalGroup();
-  const base = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
+  const degree = parser.parseOptionalGroup();
+  const base = parser.parseGroup() ?? parser.parseToken();
   if (base === null || isEmptySequence(base)) {
     if (degree !== null) return ['Root', MISSING, missingIfEmpty(degree)];
     return ['Sqrt', MISSING];
@@ -328,13 +328,13 @@ function serializeMultiply(
 }
 
 function parseFraction(parser: Parser): Expression | null {
-  let numer: Expression | null = parser.matchLatexGroup();
+  let numer: Expression | null = parser.parseGroup();
   let denom: Expression | null = null;
   if (numer === null) {
-    numer = parser.matchSingleAtomArgument();
-    denom = parser.matchSingleAtomArgument();
+    numer = parser.parseToken();
+    denom = parser.parseToken();
   } else {
-    denom = parser.matchLatexGroup();
+    denom = parser.parseGroup();
   }
   numer = missingIfEmpty(numer);
   denom = missingIfEmpty(denom);
@@ -349,7 +349,7 @@ function parseFraction(parser: Parser): Expression | null {
     const degree = op(numer, 3) ?? null;
     // Expect: getArg(numer, 2) === 'Nothing' -- no args
     let fn = op(numer, 1);
-    if (fn === null) fn = missingIfEmpty(parser.matchExpression());
+    if (fn === null) fn = missingIfEmpty(parser.parseExpression());
 
     let vars: Expression[] = [];
     if (head(denom) === 'Multiply') {
@@ -505,7 +505,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     trigger: ['\\ang'],
     parse: (parser: Parser): Expression => {
-      const arg = parser.matchLatexGroup();
+      const arg = parser.parseGroup();
       return (arg === null ? ['Degrees'] : ['Degrees', arg]) as Expression;
     },
   },
@@ -522,7 +522,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: ['\\tilde', '<{>', '\\infty', '<}>'],
     parse: 'ComplexInfinity',
   },
-  { name: 'Pi', trigger: ['\\pi'] },
+  { name: 'Pi', kind: 'symbol', trigger: ['\\pi'] },
   { trigger: ['π'], parse: 'Pi' },
   {
     name: 'ExponentialE',
@@ -533,13 +533,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'function',
     trigger: 'exp',
-    parse: (parser) =>
-      ['Exp', ...(parser.matchArguments('enclosure') ?? [])] as Expression,
+    parse: 'Exp',
   },
   {
     trigger: '\\exp',
-    parse: (parser: Parser) =>
-      ['Exp', ...(parser.matchArguments('enclosure') ?? [])] as Expression,
+    parse: 'Exp',
   },
   {
     name: 'ImaginaryUnit',
@@ -561,10 +559,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     trigger: 'abs',
     kind: 'function',
-    parse: (parser) => {
-      const arg = parser.matchArguments('enclosure');
-      return arg === null ? 'Abs' : (['Abs', ...arg] as Expression);
-    },
+    parse: 'Abs',
   },
   {
     name: 'Add',
@@ -572,10 +567,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     associativity: 'both',
     precedence: 275,
-    parse: (parser, until, lhs) => {
-      if (275 < until.minPrec) return null;
+    parse: (parser, lhs, until) => {
+      if (until && 275 < until.minPrec) return null;
 
-      const rhs = parser.matchExpression({ ...until, minPrec: 275 });
+      const rhs = parser.parseExpression({ ...until, minPrec: 275 });
       // If we did not see a valid rhs, it is important to return null
       // to give a chance to something else to continue the parsing
       // This is the case for |a+|b||.
@@ -590,8 +585,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: ['+'],
     precedence: 275,
     parse: (parser, until) => {
-      if (275 < until.minPrec) return null;
-      return parser.matchExpression({ ...until, minPrec: 400 });
+      if (until && 275 < until.minPrec) return null;
+      return parser.parseExpression({ ...until, minPrec: 400 });
     },
   },
   {
@@ -601,12 +596,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     closeDelimiter: '\\rceil',
   },
   {
+    kind: 'matchfix',
+    openDelimiter: ['\u2308'],
+    closeDelimiter: ['\u2309'],
+    parse: (_, body) => ['Ceil', body],
+  },
+  {
     trigger: 'ceil',
     kind: 'function',
-    parse: (parser) => {
-      const arg = parser.matchArguments('enclosure');
-      return arg === null ? 'Ceil' : (['Ceil', ...arg] as Expression);
-    },
+    parse: 'Ceil',
   },
   {
     name: 'Complex',
@@ -696,12 +694,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     closeDelimiter: '\\rfloor',
   },
   {
+    kind: 'matchfix',
+    openDelimiter: ['\u230a'],
+    closeDelimiter: ['\u230b'],
+    parse: (_, body) => ['Floor', body],
+  },
+  {
     trigger: 'floor',
     kind: 'function',
-    parse: (parser) => {
-      const arg = parser.matchArguments('enclosure');
-      return arg === null ? 'Floor' : (['Floor', ...arg] as Expression);
-    },
+    parse: 'Floor',
   },
   {
     name: 'Gcd',
@@ -717,18 +718,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: ['\\lg'],
     serialize: (serializer, expr) =>
       '\\log_{10}' + serializer.wrapArguments(expr),
-    parse: (parser) => {
-      const arg = parser.matchArguments('implicit');
-      if (arg === null) return ['Lg'] as Expression;
+    parse: (parser: Parser) => {
+      const arg = parser.parseArguments('implicit');
+      if (arg === null) return 'Lg' as Expression;
       return ['Log', ...arg, 10] as Expression;
     },
   },
   {
     name: 'Lb',
     trigger: '\\lb',
-    parse: (parser) => {
-      const arg = parser.matchArguments('implicit');
-      if (arg === null) return ['Log'] as Expression;
+    parse: (parser: Parser) => {
+      const arg = parser.parseArguments('implicit');
+      if (arg === null) return 'Log' as Expression;
       return ['Log', ...arg, 2] as Expression;
     },
   },
@@ -737,12 +738,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: ['\\ln'],
     serialize: (serializer, expr): string =>
       '\\ln' + serializer.wrapArguments(expr),
-    parse: (parser) => parseLog('Ln', parser),
+    parse: (parser: Parser) => parseLog('Ln', parser),
   },
   {
     name: 'Log',
     trigger: ['\\log'],
-    parse: (parser) => parseLog('Log', parser),
+    parse: (parser: Parser) => parseLog('Log', parser),
     serialize: (serializer, expr): string => {
       const base = op2(expr);
       if (base)
@@ -782,9 +783,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     associativity: 'both',
     precedence: 390,
-    parse: (parser, terminator, lhs) => {
-      if (391 < terminator.minPrec) return null;
-      const rhs = parser.matchExpression({ ...terminator, minPrec: 392 });
+    parse: (parser, lhs, terminator) => {
+      if (terminator && 391 < terminator.minPrec) return null;
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 392 });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
       return applyAssociativeOperator('Multiply', lhs, rhs);
@@ -795,9 +796,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     associativity: 'both',
     precedence: 390,
-    parse: (parser, terminator, lhs) => {
-      if (391 < terminator.minPrec) return null;
-      const rhs = parser.matchExpression({ ...terminator, minPrec: 392 });
+    parse: (parser, lhs, terminator) => {
+      if (terminator && 391 < terminator.minPrec) return null;
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 392 });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
       return applyAssociativeOperator('Multiply', lhs, rhs);
@@ -808,8 +809,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: ['-'],
     kind: 'prefix',
     parse: (parser, terminator) => {
-      if (276 < terminator.minPrec) return null;
-      const rhs = parser.matchExpression({ ...terminator, minPrec: 400 });
+      if (terminator && 276 < terminator.minPrec) return null;
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['Negate', missingIfEmpty(rhs)] as Expression;
     },
     precedence: 275,
@@ -870,8 +871,29 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'prefix',
     precedence: 270,
     parse: (parser, terminator) => {
+      if (terminator && 270 < terminator.minPrec) return null;
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
+      return ['PlusMinus', missingIfEmpty(rhs)] as Expression;
+    },
+  },
+  {
+    trigger: ['\\plusmn'],
+    kind: 'infix',
+    associativity: 'both',
+    precedence: 270,
+    parse: (parser, lhs, terminator) => {
       if (270 < terminator.minPrec) return null;
-      const rhs = parser.matchExpression({ ...terminator, minPrec: 400 });
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
+      return ['PlusMinus', lhs, missingIfEmpty(rhs)] as Expression;
+    },
+  },
+  {
+    trigger: ['\\plusmn'],
+    kind: 'prefix',
+    precedence: 270,
+    parse: (parser, terminator) => {
+      if (terminator && 270 < terminator.minPrec) return null;
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['PlusMinus', missingIfEmpty(rhs)] as Expression;
     },
   },
@@ -943,9 +965,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'infix',
     associativity: 'both',
     precedence: 275,
-    parse: (parser, terminator, lhs) => {
+    parse: (parser, lhs, terminator) => {
       if (276 < terminator.minPrec) return null;
-      const rhs = parser.matchExpression({ ...terminator, minPrec: 277 });
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 277 });
       return ['Subtract', lhs, missingIfEmpty(rhs)] as Expression;
     },
   },
@@ -959,10 +981,9 @@ function parseBigOp(name: string, prec: number) {
     let sup: Expression | null = null;
     let sub: Expression | null = null;
     while (!(sub && sup) && (parser.peek === '_' || parser.peek === '^')) {
-      if (parser.match('_'))
-        sub = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
+      if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
       else if (parser.match('^'))
-        sup = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
+        sup = parser.parseGroup() ?? parser.parseToken();
       parser.skipSpace();
     }
 
@@ -984,7 +1005,7 @@ function parseBigOp(name: string, prec: number) {
     // letter `i` should not be interpreted as a ImaginaryUnit
     if (sym) parser.computeEngine?.pushScope({ [sym]: { domain: 'Integer' } });
 
-    const fn = parser.matchExpression({ minPrec: prec + 1 });
+    const fn = parser.parseExpression({ minPrec: prec + 1 });
 
     if (sym) parser.computeEngine?.popScope();
 
@@ -1054,10 +1075,10 @@ function parseLog(command: string, parser: Parser): Expression | null {
   let sub: string | null = null;
   let base: number | null = null;
   if (parser.match('_')) {
-    sub = parser.matchStringArgument() ?? parser.next();
+    sub = parser.parseStringGroup()?.trim() ?? parser.nextToken();
     base = Number.parseFloat(sub ?? '10');
   }
-  const arg = parser.matchArguments('implicit');
+  const arg = parser.parseArguments('implicit');
   if (arg === null) return [command];
   if (base === 10) return ['Log', arg[0]] as Expression;
   if (base === 2) return ['Lb', ...arg] as Expression;

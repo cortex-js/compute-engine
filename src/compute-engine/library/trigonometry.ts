@@ -511,8 +511,8 @@ const CONSTRUCTIBLE_VALUES: [
   [
     [1, 8],
     {
-      Sin: '$\\frac\\sqrt{2-\\sqrt2}{2}$',
-      Cos: '$\\frac {\\sqrt {2+{\\sqrt {2}}}}{2}$',
+      Sin: '$\\frac{\\sqrt{2-\\sqrt2}}{2}$',
+      Cos: '$\\frac{\\sqrt {2+{\\sqrt {2}}}}{2}$',
       Tan: '$\\sqrt{2} - 1$',
       Cot: '$\\sqrt{2} + 1$',
       Sec: '$\\sqrt{ 4 - 2\\sqrt{2}}$',

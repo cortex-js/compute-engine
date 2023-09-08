@@ -125,7 +125,7 @@ describe('SUPSUB', () => {
     );
     expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       [
-        "Multiply",
+        "Sequence",
         [
           "Power",
           [
@@ -149,13 +149,16 @@ describe('SUPSUB', () => {
             ["Latex", "'^'"]
           ]
         ],
-        "p_q",
-        ["Power", ["Subscript", ["Add", "x", 1], 0], "n"]
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-identifier'", "p"],
+          ["Latex", "'p'"]
+        ]
       ]
     `); // @fixme: nope...
     expect(parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(`
       [
-        "Multiply",
+        "Sequence",
         [
           "Power",
           [
@@ -179,8 +182,11 @@ describe('SUPSUB', () => {
             ["Latex", "'^'"]
           ]
         ],
-        ["Subscript", 12, 34],
-        ["Power", ["Subscript", ["Add", "x", 1], 0], "n"]
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'{'"],
+          ["Latex", "'{12}_{34}(x+1)^n_0'"]
+        ]
       ]
     `); // @fixme: nope...
   });
@@ -200,7 +206,7 @@ describe('PRIME', () => {
     expect(parse("f'")).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["f"],
+        "f",
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'''"],
@@ -211,7 +217,7 @@ describe('PRIME', () => {
     expect(parse("f''")).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["f"],
+        "f",
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'''"],
@@ -222,7 +228,7 @@ describe('PRIME', () => {
     expect(parse("f'''")).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["f"],
+        "f",
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'''"],
@@ -233,7 +239,7 @@ describe('PRIME', () => {
     expect(parse('f\\prime')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["f"],
+        "f",
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\prime'"],
@@ -244,44 +250,29 @@ describe('PRIME', () => {
     expect(parse('f\\prime\\prime')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["f"],
+        "f",
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
+          ["Latex", "'\\prime\\prime'"]
         ]
       ]
     `); // @fixme
     expect(parse('f\\prime\\prime\\prime')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["f"],
+        "f",
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
+          ["Latex", "'\\prime\\prime\\prime'"]
         ]
       ]
     `); // @fixme
     expect(parse('f\\doubleprime')).toMatchInlineSnapshot(`
       [
         "Sequence",
-        ["f"],
+        "f",
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\doubleprime'"],
@@ -289,26 +280,7 @@ describe('PRIME', () => {
         ]
       ]
     `); // @fixme
-    expect(parse('f^{\\prime}')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "Anything"]
-          ],
-          ["f"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
-        ]
-      ]
-    `);
+    expect(parse('f^{\\prime}')).toMatchInlineSnapshot(`["Prime", "f"]`);
     expect(parse('f^{\\prime\\prime}')).toMatchInlineSnapshot(`
       [
         "Power",
@@ -318,9 +290,9 @@ describe('PRIME', () => {
             "ErrorCode",
             "'incompatible-domain'",
             ["Domain", "Number"],
-            ["Domain", "Anything"]
+            ["Domain", "Function"]
           ],
-          ["f"]
+          "f"
         ],
         [
           "Sequence",
@@ -342,9 +314,9 @@ describe('PRIME', () => {
             "ErrorCode",
             "'incompatible-domain'",
             ["Domain", "Number"],
-            ["Domain", "Anything"]
+            ["Domain", "Function"]
           ],
-          ["f"]
+          "f"
         ],
         [
           "Sequence",
@@ -366,9 +338,9 @@ describe('PRIME', () => {
             "ErrorCode",
             "'incompatible-domain'",
             ["Domain", "Number"],
-            ["Domain", "Anything"]
+            ["Domain", "Function"]
           ],
-          ["f"]
+          "f"
         ],
         [
           "Error",

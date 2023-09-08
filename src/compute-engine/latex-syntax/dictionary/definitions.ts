@@ -10,17 +10,16 @@ import {
   PostfixParseHandler,
   MatchfixParseHandler,
   InfixParseHandler,
-  PrefixParseHandler,
   EnvironmentParseHandler,
-  IdentifierParseHandler,
-  FunctionParseHandler,
   isMatchfixEntry,
   isInfixEntry,
-  isIdentifierEntry,
+  isSymbolEntry,
   isEnvironmentEntry,
   isPostfixEntry,
   isPrefixEntry,
   isFunctionEntry,
+  ExpressionParseHandler,
+  isExpressionEntry,
 } from '../public';
 import { joinLatex, tokenize, tokensToString } from '../tokenizer';
 import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
@@ -35,6 +34,7 @@ import { DEFINITIONS_CALCULUS } from './definitions-calculus';
 import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
 import {
   applyAssociativeOperator,
+  head,
   missingIfEmpty,
   op,
 } from '../../../math-json/utils';
@@ -45,13 +45,19 @@ export type CommonEntry = {
   serialize: SerializeHandler | LatexString;
 };
 
-export type IndexedIdentifierEntry = CommonEntry & {
-  kind: 'identifier';
+export type IndexedSymbolEntry = CommonEntry & {
+  kind: 'symbol';
 
-  // The 'precedence' of identifiers is used to determine appropriate wrapping when serializing
+  // The 'precedence' of symbols is used to determine appropriate wrapping when serializing
   precedence: number;
 
-  parse: IdentifierParseHandler;
+  parse: ExpressionParseHandler;
+};
+
+export type IndexedExpressionEntry = CommonEntry & {
+  kind: 'expression';
+
+  parse: ExpressionParseHandler;
 };
 
 /**
@@ -66,7 +72,7 @@ export type IndexedIdentifierEntry = CommonEntry & {
 export type IndexedFunctionEntry = CommonEntry & {
   kind: 'function';
 
-  parse: FunctionParseHandler;
+  parse: ExpressionParseHandler;
 };
 
 export type IndexedMatchfixEntry = CommonEntry & {
@@ -90,7 +96,7 @@ export type IndexedPrefixEntry = CommonEntry & {
   kind: 'prefix';
   precedence: number;
 
-  parse: PrefixParseHandler;
+  parse: ExpressionParseHandler;
 };
 export type IndexedPostfixEntry = CommonEntry & {
   kind: 'postfix';
@@ -106,8 +112,9 @@ export type EnvironmentEntry = CommonEntry & {
 };
 
 export type IndexedLatexDictionaryEntry =
+  | IndexedExpressionEntry
   | IndexedFunctionEntry
-  | IndexedIdentifierEntry
+  | IndexedSymbolEntry
   | IndexedMatchfixEntry
   | IndexedInfixEntry
   | IndexedPrefixEntry
@@ -124,8 +131,9 @@ export type IndexedLatexDictionary = {
 
   // Mapping from token triggers of a given length to dictionary entry.
   // Definition can share triggers, so the entry is an array
+  expression: Map<string, IndexedExpressionEntry[]>;
   function: Map<string, IndexedFunctionEntry[]>;
-  identifier: (Map<LatexString, IndexedIdentifierEntry[]> | null)[];
+  symbol: (Map<LatexString, IndexedSymbolEntry[]> | null)[];
   prefix: (Map<LatexString, IndexedPrefixEntry[]> | null)[];
   infix: (Map<LatexString, IndexedInfixEntry[]> | null)[];
   postfix: (Map<LatexString, IndexedPostfixEntry[]> | null)[];
@@ -161,15 +169,128 @@ function triggerLength(trigger: LatexToken | LatexToken[]): number {
   return 1;
 }
 
+function addEntry(
+  result: IndexedLatexDictionary,
+  entry: LatexDictionaryEntry,
+  onError: (sig: WarningSignal) => void
+) {
+  //
+  // 1. Create a validated indexed entry
+  //
+  const [trigger, indexedEntry] = makeIndexedEntry(entry, onError);
+  if (indexedEntry === null) return;
+
+  const kind = 'kind' in entry ? entry.kind : 'expression';
+
+  //
+  // 1.1 Handle single token synonyms for ^ and _
+  //
+  if (
+    trigger &&
+    trigger.length === 2 &&
+    /[_^]/.test(trigger[0]) &&
+    trigger[1] !== '<{>' &&
+    kind !== 'function' &&
+    entry.name
+  ) {
+    // This is a single token ^ or _ trigger, e.g. '^+' or '_*'
+    // Add a "synonym" entry with brackets, e.g. '^+' -> '^{+}'
+    let parse = entry.parse;
+    if (parse === undefined) {
+      if (kind === 'symbol') parse = entry.name;
+      if (kind === 'postfix' || kind === 'prefix')
+        parse = (_parser, expr) => [entry.name!, expr] as Expression;
+    }
+    addEntry(
+      result,
+      {
+        ...entry,
+        kind,
+        parse: parse as any,
+        name: undefined,
+        trigger: [trigger[0], '<{>', trigger[1], '<}>'],
+      },
+      onError
+    );
+  }
+
+  //
+  // 2. Update the name index
+  //
+  if (indexedEntry.name !== undefined) {
+    if (result.name.has(indexedEntry.name)) {
+      onError({
+        severity: 'warning',
+        message: [
+          'invalid-dictionary-entry',
+          indexedEntry.name,
+          'Duplicate definition. The name must be unique, but a trigger can be used by multiple definitions.',
+        ],
+      });
+    }
+    result.name.set(indexedEntry.name, indexedEntry);
+  }
+
+  if (indexedEntry.kind === 'matchfix') {
+    //
+    // 3.1/ Update the matchfix index
+    result.matchfix.push(indexedEntry);
+    //
+  } else if (indexedEntry.kind === 'environment') {
+    //
+    // 3.2/ Update the environment index
+    //
+    const triggerString = tokensToString(entry.trigger ?? '');
+    if (result.environment.has(triggerString)) {
+      onError({
+        severity: 'warning',
+        message: [
+          'invalid-dictionary-entry',
+          triggerString,
+          'Duplicate environment definition',
+        ],
+      });
+    }
+    result.environment.set(triggerString, indexedEntry);
+  } else if (trigger) {
+    //
+    // 3.3/ Update the other symbol or operator index
+    //
+    console.assert(entry.trigger);
+    const triggerString = tokensToString(entry.trigger ?? '');
+    const n = triggerLength(trigger);
+    result.lookahead = Math.max(result.lookahead, n);
+
+    if (indexedEntry.kind === 'function') {
+      // If no entries of this kind and length yet, create a map for it
+      if (!result.function.has(triggerString))
+        result.function.set(triggerString, [indexedEntry]);
+      else
+        result.function.set(triggerString, [
+          ...result.function.get(triggerString)!,
+          indexedEntry,
+        ]);
+    } else {
+      const kind = indexedEntry.kind;
+      // If no entries of this kind and length yet, create a map for it
+      if (result[kind][n] === undefined) result[kind][n] = new Map();
+      const list = result[kind][n]!;
+      if (list.has(triggerString)) list.get(triggerString)!.push(indexedEntry);
+      else list.set(triggerString, [indexedEntry]);
+    }
+  }
+}
+
 export function indexLatexDictionary(
-  dic: readonly LatexDictionaryEntry[],
+  dic: readonly Partial<LatexDictionaryEntry>[],
   onError: (sig: WarningSignal) => void
 ): IndexedLatexDictionary {
   const result: IndexedLatexDictionary = {
     lookahead: 1,
     name: new Map(),
+    expression: new Map(),
     function: new Map(),
-    identifier: [],
+    symbol: [],
     infix: [],
     prefix: [],
     postfix: [],
@@ -177,98 +298,8 @@ export function indexLatexDictionary(
     matchfix: [],
   };
 
-  for (const entry of dic) {
-    //
-    // 1. Create a validated indexed entry
-    //
-    const [trigger, indexedEntry] = makeIndexedEntry(entry, onError);
-    if (indexedEntry === null) continue;
-
-    //
-    // 2. Update the name index
-    //
-    if (indexedEntry.name !== undefined) {
-      if (result.name.has(indexedEntry.name)) {
-        onError({
-          severity: 'warning',
-          message: [
-            'invalid-dictionary-entry',
-            indexedEntry.name,
-            'Duplicate definition. The name must be unique, but a trigger can be used by multiple definitions.',
-          ],
-        });
-      }
-      result.name.set(indexedEntry.name, indexedEntry);
-    }
-
-    if (indexedEntry.kind === 'matchfix') {
-      //
-      // 3.1/ Update the matchfix index
-      result.matchfix.push(indexedEntry);
-      //
-    } else if (indexedEntry.kind === 'environment') {
-      //
-      // 3.1/ Update the environment index
-      //
-      const triggerString = tokensToString(entry.trigger ?? '');
-      if (result.environment.has(triggerString)) {
-        onError({
-          severity: 'warning',
-          message: [
-            'invalid-dictionary-entry',
-            triggerString,
-            'Duplicate environment definition',
-          ],
-        });
-      }
-      result.environment.set(triggerString, indexedEntry);
-    } else if (trigger) {
-      //
-      // 3.3/ Update the other symbol or operator index
-      //
-      console.assert(entry.trigger);
-      const triggerString = tokensToString(entry.trigger ?? '');
-      const n = triggerLength(trigger);
-      result.lookahead = Math.max(result.lookahead, n);
-
-      if (indexedEntry.kind === 'function') {
-        // If no entries of this kind and length yet, create a map for it
-        if (!result.function.has(triggerString))
-          result.function.set(triggerString, [indexedEntry]);
-        else
-          result.function.set(triggerString, [
-            ...result.function.get(triggerString)!,
-            indexedEntry,
-          ]);
-      } else if (indexedEntry.kind === 'identifier') {
-        // If no entries of this kind and length yet, create a map for it
-        if (result.identifier[n] === undefined)
-          result.identifier[n] = new Map();
-        const list = result.identifier[n]!;
-        if (list.has(triggerString))
-          list.get(triggerString)!.push(indexedEntry);
-        else list.set(triggerString, [indexedEntry]);
-      } else if (indexedEntry.kind === 'prefix') {
-        if (result.prefix[n] === undefined) result.prefix[n] = new Map();
-        const list = result.prefix[n]!;
-        if (list.has(triggerString))
-          list.get(triggerString)!.push(indexedEntry);
-        else list.set(triggerString, [indexedEntry]);
-      } else if (indexedEntry.kind === 'infix') {
-        if (result.infix[n] === undefined) result.infix[n] = new Map();
-        const list = result.infix[n]!;
-        if (list.has(triggerString))
-          list.get(triggerString)!.push(indexedEntry);
-        else list.set(triggerString, [indexedEntry]);
-      } else if (indexedEntry.kind === 'postfix') {
-        if (result.postfix[n] === undefined) result.postfix[n] = new Map();
-        const list = result.postfix[n]!;
-        if (list.has(triggerString))
-          list.get(triggerString)!.push(indexedEntry);
-        else list.set(triggerString, [indexedEntry]);
-      }
-    }
-  }
+  for (const entry of dic)
+    addEntry(result, entry as LatexDictionaryEntry, onError);
 
   return result;
 }
@@ -281,7 +312,7 @@ function makeIndexedEntry(
 
   const result: Partial<IndexedLatexDictionaryEntry> = {
     name: entry.name,
-    kind: 'kind' in entry ? entry.kind : 'identifier',
+    kind: 'kind' in entry ? entry.kind : 'expression',
   };
 
   //
@@ -347,31 +378,66 @@ function makeIndexedEntry(
   if (result.kind === 'function' && isFunctionEntry(entry)) {
     // Default serializer for functions
     result.serialize = entry.serialize;
-    if (triggerString && !entry.serialize)
-      result.serialize = (serializer, expr) =>
-        `\\mathrm{${triggerString}}${serializer.wrapArguments(expr)}`;
-
-    result.parse = entry.parse as FunctionParseHandler;
-    if (!result.parse && entry.name)
-      result.parse = ((parser) => {
-        const arg = parser.matchArguments('enclosure');
-        return arg === null ? entry.name : ([entry.name, ...arg] as Expression);
-      }) as FunctionParseHandler;
+    if (triggerString && !entry.serialize) {
+      if (triggerString.startsWith('\\')) {
+        result.serialize = (serializer, expr) =>
+          `${triggerString}${serializer.wrapArguments(expr)}`;
+      } else
+        result.serialize = (serializer, expr) =>
+          `\\mathrm{${triggerString}}${serializer.wrapArguments(expr)}`;
+    }
+    if (typeof entry.parse === 'function') result.parse = entry.parse;
+    else if (typeof entry.parse === 'string')
+      result.parse = () => entry.parse as string;
+    else if (entry.name) result.parse = () => entry.name!;
     return [triggerString, result as IndexedLatexDictionaryEntry];
   }
 
   //
-  // 4. Other definitions (not matchfix, not environment)
+  // 4. Generic expression
   //
+  if (result.kind === 'expression' && isExpressionEntry(entry)) {
+    //
+    // Default serialize handler
+    //
+    result.serialize = entry.serialize ?? triggerString;
 
-  if (typeof entry.trigger === 'string') {
-    console.assert(
-      entry.parse || trigger!.length > 1,
-      `Trigger shortcut should produce more than one token. Otherwise, not worth using the shortcut. (${triggerString})`
-    );
+    if (typeof result.serialize === 'string') {
+      const serializeExpr = result.serialize;
+      result.serialize = (serializer, expr) => {
+        if (!head(expr)) return serializer.serialize(serializeExpr);
+        return `${serializer.serialize(
+          serializeExpr
+        )}${serializer.wrapArguments(expr)}`;
+      };
+    }
+    //
+    // Default parse handler
+    //
+    {
+      if (typeof entry.parse === 'function') {
+        result.parse = entry.parse as any as ExpressionParseHandler;
+      } else {
+        const parseResult = entry.parse ?? entry.name;
+        result.parse = () => parseResult as Expression;
+      }
+    }
+    return [triggerString, result as IndexedLatexDictionaryEntry];
   }
 
-  if (result.kind === 'identifier' && isIdentifierEntry(entry)) {
+  //
+  // 5. Other definitions (not matchfix, not environment)
+  //
+
+  console.assert(
+    typeof entry.trigger !== 'string' ||
+      entry.parse ||
+      trigger!.length > 1 ||
+      ('kind' in entry && entry.kind === 'function'),
+    `Trigger shortcuts should produce more than one token. Otherwise, not worth using them. (${triggerString})`
+  );
+
+  if (result.kind === 'symbol' && isSymbolEntry(entry)) {
     result.precedence = entry.precedence ?? 10000;
   }
 
@@ -385,9 +451,13 @@ function makeIndexedEntry(
       result.kind === 'postfix') &&
     (isInfixEntry(entry) || isPrefixEntry(entry) || isPostfixEntry(entry))
   ) {
-    if (trigger && (trigger[0] === '^' || trigger[0] === '_'))
+    if (trigger && (trigger[0] === '^' || trigger[0] === '_')) {
       result.precedence = 720;
-    else result.precedence = entry.precedence ?? 10000;
+      console.assert(
+        entry.precedence === undefined,
+        "'precedence' not allowed with ^ and _ triggers"
+      );
+    } else result.precedence = entry.precedence ?? 10000;
   }
 
   if (result.kind === 'infix' && isInfixEntry(entry)) {
@@ -410,7 +480,7 @@ function makeIndexedEntry(
       //
       console.assert(!entry.parse);
       const name = entry.parse ?? entry.name!;
-      result.parse = (_scanner, _terminator, arg) =>
+      result.parse = (_scanner, arg, _terminator) =>
         [
           name,
           missingIfEmpty(op(arg, 1)),
@@ -423,7 +493,7 @@ function makeIndexedEntry(
       const head = entry.parse ?? entry.name!;
       const prec = result.precedence!;
       const associativity = result.associativity;
-      result.parse = (scanner, terminator, lhs) => {
+      result.parse = (scanner, lhs, terminator) => {
         // If the precedence is too high, return
         if (prec < terminator.minPrec) return null; // @todo should not be needed
 
@@ -434,7 +504,7 @@ function makeIndexedEntry(
         // (i.e. `x+`) and more likely to be a syntax error we want to
         // capture as `['Add', 'x', ['Error', "'missing'"]`.
         const rhs = missingIfEmpty(
-          scanner.matchExpression({
+          scanner.parseExpression({
             ...terminator,
             minPrec: prec,
           })
@@ -456,7 +526,7 @@ function makeIndexedEntry(
       // Parse handler as an expression
       //
 
-      console.assert(result.kind === 'identifier');
+      console.assert(result.kind === 'symbol' || result.kind === 'expression');
       result.parse = () => entry.parse as Expression;
     } else if (entry.parse === undefined && entry.name !== undefined) {
       //
@@ -473,9 +543,9 @@ function makeIndexedEntry(
         const head = entry.name;
         result.parse = (parser, terminator) => {
           // If the precedence is too high, return
-          if (prec < terminator.minPrec) return null;
+          if (terminator && prec < terminator.minPrec) return null;
           // Get the rhs
-          const rhs = parser.matchExpression({ ...terminator, minPrec: prec });
+          const rhs = parser.parseExpression({ ...terminator, minPrec: prec });
           return rhs === null ? null : [head, rhs];
         };
       }
@@ -500,7 +570,7 @@ function makeIndexedEntry(
       result.serialize = triggerString + '#1';
     } else if (result.kind === 'infix') {
       result.serialize = '#1' + triggerString + '#2';
-    } else if (result.kind === 'identifier') {
+    } else if (result.kind === 'symbol') {
       result.serialize = triggerString;
     } else {
       result.serialize = '';
@@ -692,6 +762,7 @@ export const DEFAULT_LATEX_DICTIONARY: {
   physics: [
     {
       name: 'mu0',
+      kind: 'symbol',
       trigger: '\\mu_0',
     },
   ],

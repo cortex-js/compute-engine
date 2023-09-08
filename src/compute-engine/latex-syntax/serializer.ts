@@ -28,7 +28,7 @@ import {
   IndexedInfixEntry,
   IndexedPostfixEntry,
   IndexedPrefixEntry,
-  IndexedIdentifierEntry,
+  IndexedSymbolEntry,
   IndexedFunctionEntry,
 } from './dictionary/definitions';
 
@@ -211,7 +211,7 @@ export class Serializer {
       const def = this.dictionary.name.get(name);
       if (
         def &&
-        (def.kind === 'identifier' ||
+        (def.kind === 'symbol' ||
           def.kind === 'prefix' ||
           def.kind === 'infix' ||
           def.kind === 'postfix') &&
@@ -293,8 +293,9 @@ export class Serializer {
 
   serializeSymbol(
     expr: Expression,
-    def?: IndexedIdentifierEntry | IndexedFunctionEntry
+    def?: IndexedSymbolEntry | IndexedFunctionEntry
   ): string {
+    // @todo: probably don't need to check it's a symbol (or shouldn't have to)
     const h = head(expr);
     if (h) return this.serializeFunction(expr, def);
 
@@ -309,7 +310,7 @@ export class Serializer {
 
   serializeFunction(
     expr: Expression,
-    def?: IndexedFunctionEntry | IndexedIdentifierEntry
+    def?: IndexedFunctionEntry | IndexedSymbolEntry
   ): string {
     const h = head(expr);
     if (!h) return this.serializeSymbol(expr, def);
@@ -344,9 +345,12 @@ export class Serializer {
     // It's a function we don't know.
     // Maybe it came from `promoteUnknownToken`
     // Serialize the arguments as function arguments
-    if (typeof h === 'string')
-      return serializeIdentifier(h, 'upright') + this.wrapArguments(expr);
+    if (typeof h === 'string') {
+      if (h.length === 1)
+        return serializeIdentifier(h) + this.wrapArguments(expr);
 
+      return serializeIdentifier(h, 'upright') + this.wrapArguments(expr);
+    }
     const style = this.options.applyFunctionStyle(expr, this.level);
     return (
       '\\mathrm{Apply}' +
@@ -389,10 +393,11 @@ export class Serializer {
         const symbolName = symbol(expr);
         if (symbolName !== null) {
           const def = this.dictionary.name.get(symbolName);
-          if (def?.kind === 'identifier')
-            return this.serializeSymbol(expr, def);
+          if (def?.kind === 'symbol') return this.serializeSymbol(expr, def);
           if (def?.kind === 'function')
             return this.serializeFunction(expr, def);
+          if (typeof def?.serialize === 'function')
+            return def.serialize(this, expr);
         }
 
         //
@@ -423,8 +428,7 @@ export class Serializer {
             )
               return serializeOperator(this, expr, def);
 
-            if (def.kind === 'identifier')
-              return this.serializeSymbol(expr, def);
+            if (def.kind === 'symbol') return this.serializeSymbol(expr, def);
             if (def.kind === 'function')
               return this.serializeFunction(expr, def);
 

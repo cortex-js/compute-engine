@@ -2,7 +2,7 @@ import { LatexDictionary } from '../public';
 
 export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
   {
-    trigger: ['!', '<'],
+    trigger: ['\\not', '<'],
     kind: 'infix',
     associativity: 'right',
     precedence: 246,
@@ -179,7 +179,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
   },
   {
     name: 'NotApprox', // Note: Mathematica TildeTilde
-    trigger: ['\\approx'],
+    trigger: ['\\not', '\\approx'],
     kind: 'infix',
     associativity: 'right',
     precedence: 247,
@@ -193,7 +193,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
   },
   {
     name: 'NotApproxEqual', // Note: Mathematica NotTildeEqual
-    trigger: ['!', '\\approxeq'],
+    trigger: ['\\not', '\\approxeq'],
     kind: 'infix', // Note: no LaTeX symbol for char U+2249
     associativity: 'right',
     precedence: 250,
@@ -276,7 +276,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     precedence: 244,
   },
   {
-    trigger: ['!', '>'],
+    trigger: ['\\not', '>'],
     kind: 'infix',
     associativity: 'right',
     precedence: 244,

@@ -13,9 +13,9 @@ import {
 import { Expression } from '../../../math-json/math-json-format';
 import { joinLatex } from '../tokenizer';
 
-function parseSingleArg(cmd: string): (parser: any) => Expression {
+function parseSingleArg(cmd: string): (parser: Parser) => Expression {
   return (parser) => {
-    const arg = parser.matchLatexGroup();
+    const arg = parser.parseGroup();
     return arg === null ? [cmd] : [cmd, arg];
   };
 }
@@ -67,14 +67,14 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   {
     name: 'Transpose',
     trigger: ['^', 'T'],
-    kind: 'infix',
+    kind: 'postfix',
     // @todo: if lhs is a list/tensor
   },
   {
     // @todo: if lhs is a list/tensor
     name: 'ConjugateTranspose',
     trigger: ['^', 'H'],
-    kind: 'infix',
+    kind: 'postfix',
   },
   {
     name: 'StringJoin', // @todo From Mathematica...?
@@ -103,9 +103,9 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       while (!done) {
         parser.skipSpace();
         if (parser.match('_')) {
-          sub = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
+          sub = parser.parseGroup() ?? parser.parseToken();
         } else if (parser.match('^')) {
-          sup = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
+          sup = parser.parseGroup() ?? parser.parseToken();
         } else {
           done = true;
         }
@@ -114,9 +114,9 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       if (seq) sub = ['List', ...seq];
 
       if (sub === null || sup === null) return null;
-      let rhs = parser.matchLatexGroup() ?? 'Nothing';
+      let rhs = parser.parseGroup() ?? 'Nothing';
       if (rhs !== 'Nothing' && !isEmptySequence(rhs)) {
-        const arg = parser.matchArguments('enclosure') ?? ['Nothing'];
+        const arg = parser.parseArguments() ?? ['Nothing'];
         rhs = [rhs, ...arg];
       }
       return ['PartialDerivative', rhs, sub, sup] as Expression;

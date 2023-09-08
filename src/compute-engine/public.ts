@@ -2004,10 +2004,107 @@ export interface IComputeEngine {
   chop(n: Complex): Complex | 0;
   chop(n: number | Decimal | Complex): number | Decimal | Complex;
 
-  /** @internal */
+  /** Create an arbitrary precision number. 
+   * 
+   * The return value is an object with methods to perform arithmetic
+   * operations:
+   * - `toNumber()`: convert to a JavaScript `number` with potential loss of precision
+   * - `add()`
+   * - `sub()`
+   * - `neg()` (unary minus)
+   * - `mul()`
+   * - `div()`
+   * - `pow()`
+   * - `sqrt()` (square root)
+   * - `cbrt()` (cube root)
+   * - `exp()`  (e^x)
+   * - `log()` 
+   * - `ln()` (natural logarithm)
+   * - `mod()`
+
+   * - `abs()`
+   * - `ceil()`
+   * - `floor()`
+   * - `round()`
+
+   * - `equals()`
+   * - `gt()`
+   * - `gte()`
+   * - `lt()`
+   * - `lte()`
+   * 
+   * - `cos()`
+   * - `sin()`
+   * - `tanh()`
+   * - `acos()`
+   * - `asin()`
+   * - `atan()`
+   * - `cosh()`
+   * - `sinh()`
+   * - `acosh()`
+   * - `asinh()`
+   * - `atanh()`
+   * 
+   * - `isFinite()`
+   * - `isInteger()`
+   * - `isNaN()`
+   * - `isNegative()`
+   * - `isPositive()`
+   * - `isZero()`
+   * - `sign()` (1, 0 or -1)
+   * 
+   */
   bignum: (a: Decimal.Value | bigint) => Decimal;
-  /** @internal */
+
+  /** Create a complex number.
+   * The return value is an object with methods to perform arithmetic
+   * operations:
+   * - `re` (real part, as a JavaScript `number`)
+   * - `im` (imaginary part, as a JavaScript `number`)
+   * - `add()`
+   * - `sub()`
+   * - `neg()` (unary minus)
+   * - `mul()`
+   * - `div()`
+   * - `pow()`
+   * - `sqrt()` (square root)
+   * - `exp()`  (e^x)
+   * - `log()` 
+   * - `ln()` (natural logarithm)
+   * - `mod()`
+
+   * - `abs()`
+   * - `ceil()`
+   * - `floor()`
+   * - `round()`
+
+   * - `arg()` the angle of the complex number
+   * - `inverse()` the inverse of the complex number 1/z
+   * - `conjugate()` the conjugate of the complex number
+
+   * - `equals()`
+   * 
+   * - `cos()`
+   * - `sin()`
+   * - `tanh()`
+   * - `acos()`
+   * - `asin()`
+   * - `atan()`
+   * - `cosh()`
+   * - `sinh()`
+   * - `acosh()`
+   * - `asinh()`
+   * - `atanh()`
+   * 
+   * - `isFinite()`
+   * - `isNaN()`
+   * - `isZero()`
+   * - `sign()` (1, 0 or -1)
+   */
   complex: (a: number | Complex, b?: number) => Complex;
+
+  isBignum(a: unknown): a is Decimal;
+  isComplex(a: unknown): a is Complex;
 
   set precision(p: number | 'machine');
   get precision(): number;

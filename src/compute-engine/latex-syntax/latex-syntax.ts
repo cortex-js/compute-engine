@@ -31,6 +31,7 @@ import {
   getNumericSetStyle,
 } from './serializer-style';
 import { IComputeEngine } from '../public';
+import { matchIdentifier } from './parse-identifier';
 
 export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> =
   {
@@ -66,7 +67,7 @@ export class LatexSyntax {
     SerializeLatexOptions;
   readonly computeEngine: IComputeEngine;
 
-  private dictionary: IndexedLatexDictionary;
+  private _dictionary: IndexedLatexDictionary;
   private _serializer?: Serializer;
 
   constructor(
@@ -95,8 +96,8 @@ export class LatexSyntax {
       ...DEFAULT_SERIALIZE_LATEX_OPTIONS,
       ...opts,
     };
-    this.dictionary = indexLatexDictionary(
-      options.dictionary ?? LatexSyntax.getDictionary(),
+    this._dictionary = indexLatexDictionary(
+      options.dictionary ?? (LatexSyntax.getDictionary() as LatexDictionary),
       (sig) => this.onError([sig])
     );
   }
@@ -126,18 +127,18 @@ export class LatexSyntax {
 
     if (!DEFAULT_LATEX_DICTIONARY[category]) return [];
 
-    return [...DEFAULT_LATEX_DICTIONARY[category]!];
+    return Object.freeze([...DEFAULT_LATEX_DICTIONARY[category]!]);
   }
 
   parse(latex: LatexString): Expression {
     const parser = new _Parser(
       tokenize(latex, []),
       this.options,
-      this.dictionary,
+      this._dictionary,
       this.computeEngine
     );
 
-    let expr = parser.matchExpression();
+    let expr = parser.parseExpression();
 
     if (!parser.atEnd) {
       // Something went wrong, generate error expressin
@@ -148,8 +149,8 @@ export class LatexSyntax {
         parser.index += n;
         const result = def.parse(
           parser,
-          { minPrec: 0 },
-          expr ?? parser.error('missing', start)
+          expr ?? parser.error('missing', start),
+          { minPrec: 0 }
         );
         if (result) return result;
         if (def.name) {
@@ -164,7 +165,7 @@ export class LatexSyntax {
 
       const index = parser.index;
 
-      const id = parser.matchIdentifier();
+      const id = matchIdentifier(parser);
       if (id) {
         const idError = parser.error(['unexpected-identifier', id], index);
         return expr ? ['Sequence', expr, idError] : idError;
@@ -189,8 +190,8 @@ export class LatexSyntax {
       }
 
       const rest = parser.index;
-      const token = parser.next();
-      while (!parser.atEnd) parser.next();
+      const token = parser.nextToken();
+      while (!parser.atEnd) parser.nextToken();
 
       //
       // Something went wrong, generate error expression
@@ -231,7 +232,7 @@ export class LatexSyntax {
     if (this._serializer) return this._serializer;
     this._serializer = new Serializer(
       this.options,
-      this.dictionary,
+      this._dictionary,
       this.onError
     );
     return this._serializer;

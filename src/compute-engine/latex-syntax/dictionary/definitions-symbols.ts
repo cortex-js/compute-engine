@@ -1,4 +1,4 @@
-import { LatexDictionary } from '../public';
+import { LatexDictionary, SymbolEntry } from '../public';
 
 // From mathlab: https://www.mathworks.com/help/symbolic/add-subscripts-superscripts-accents-to-symbolic-variables.html
 // subscript: '_'
@@ -108,15 +108,17 @@ export const SYMBOLS: [string, string, number][] = [
 export const DEFINITIONS_SYMBOLS: LatexDictionary = [
   ...SYMBOLS.map(([symbol, latex, _codepoint]) => {
     return {
+      kind: 'symbol',
       name: symbol,
       trigger: [latex],
       parse: symbol,
-    };
+    } as SymbolEntry;
   }),
   ...SYMBOLS.map(([symbol, _latex, codepoint]) => {
     return {
+      kind: 'symbol',
       trigger: [String.fromCodePoint(codepoint)],
       parse: symbol,
-    };
+    } as SymbolEntry;
   }),
 ];

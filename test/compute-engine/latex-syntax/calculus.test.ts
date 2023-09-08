@@ -4,6 +4,7 @@ import { engine } from '../../utils';
 function json(latex: string): Expression {
   return engine.parse(latex)?.json ?? '';
 }
+
 describe('INTEGRAL', () => {
   test('simple with no index', () => {
     expect(json('\\int\\sin x + 1 = 2')).toMatchInlineSnapshot(

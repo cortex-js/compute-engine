@@ -15,6 +15,7 @@ import { BoxedSymbolDefinitionImpl } from '../boxed-expression/boxed-symbol-defi
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
 import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { isFunctionDefinition, isSymbolDefinition } from './utils';
+import { domainSetsLibrary } from './domains';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'
@@ -91,7 +92,7 @@ export const LIBRARIES: {
   'dimensions': [], // @todo // volume, speed, area
   'domains': [],
   'core': CORE_LIBRARY,
-  'collections': [SETS_LIBRARY, COLLECTIONS_LIBRARY],
+  'collections': [SETS_LIBRARY, COLLECTIONS_LIBRARY, domainSetsLibrary()],
   // 'domains': getDomainsDictionary(),
   'linear-algebra': [], //@todo   // 'linear-algebra': [
   //   // matrix

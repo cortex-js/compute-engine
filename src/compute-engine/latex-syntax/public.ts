@@ -94,13 +94,17 @@ export type Terminator = {
  *
  */
 
-export type EnvironmentParseHandler = (
+export type ExpressionParseHandler = (
   parser: Parser,
-  reqArgs: Expression[],
-  optArgs: Expression[]
+  until?: Terminator
 ) => Expression | null;
 
-export type IdentifierParseHandler = (
+export type PrefixParseHandler = (
+  parser: Parser,
+  until?: Terminator
+) => Expression | null;
+
+export type SymbolParseHandler = (
   parser: Parser,
   until?: Terminator
 ) => Expression | null;
@@ -110,21 +114,22 @@ export type FunctionParseHandler = (
   until?: Terminator
 ) => Expression | null;
 
+export type EnvironmentParseHandler = (
+  parser: Parser,
+  reqArgs: Expression[],
+  optArgs: Expression[]
+) => Expression | null;
+
 export type PostfixParseHandler = (
   parser: Parser,
   lhs: Expression,
   until?: Terminator
 ) => Expression | null;
 
-export type PrefixParseHandler = (
-  parser: Parser,
-  until: Terminator
-) => Expression | null;
-
 export type InfixParseHandler = (
   parser: Parser,
-  until: Terminator,
-  lhs: Expression
+  lhs: Expression,
+  until: Terminator
 ) => Expression | null;
 
 export type MatchfixParseHandler = (
@@ -132,14 +137,14 @@ export type MatchfixParseHandler = (
   body: Expression
 ) => Expression | null;
 
-export type ParseHandler =
-  | IdentifierParseHandler
-  | FunctionParseHandler
-  | EnvironmentParseHandler
-  | PostfixParseHandler
-  | PrefixParseHandler
-  | InfixParseHandler
-  | MatchfixParseHandler;
+// export type ParseHandler =
+//   | PrefixParseHandler
+//   | SymbolParseHandler
+//   | FunctionParseHandler
+//   | EnvironmentParseHandler
+//   | PostfixParseHandler
+//   | InfixParseHandler
+//   | MatchfixParseHandler;
 
 export type LatexArgumentType =
   | '{expression}' /** A required math mode expression */
@@ -191,9 +196,16 @@ export type BaseEntry = {
    * If no `serialize` handler is provided, the `trigger` property is used
    */
   serialize?: LatexString | SerializeHandler;
+
+  parse?: Expression | ExpressionParseHandler;
 };
 
-export type MatchfixEntry = BaseEntry & {
+export type ExpressionEntry = Omit<BaseEntry, 'parse'> & {
+  kind: 'expression'; // Default entry is "expression"
+  parse: Expression | ExpressionParseHandler;
+};
+
+export type MatchfixEntry = Omit<BaseEntry, 'parse'> & {
   kind: 'matchfix';
   /**
    * If `kind` is `'matchfix'`: the `closeDelimiter` and `openDelimiter`
@@ -206,10 +218,10 @@ export type MatchfixEntry = BaseEntry & {
    * The argument of the handler is the body, i.e. the content between
    * the open delimiter and the close delimiter.
    */
-  parse: MatchfixParseHandler;
+  parse?: MatchfixParseHandler;
 };
 
-export type InfixEntry = BaseEntry & {
+export type InfixEntry = Omit<BaseEntry, 'parse'> & {
   /**
    * Infix position, with an operand before and an operand after: `a ⊛ b`.
    *
@@ -231,12 +243,10 @@ export type InfixEntry = BaseEntry & {
 
   precedence?: number; // Priority
 
-  /**
-   */
-  parse: string | InfixParseHandler;
+  parse?: string | InfixParseHandler;
 };
 
-export type PostfixEntry = BaseEntry & {
+export type PostfixEntry = Omit<BaseEntry, 'parse'> & {
   /**
    * Postfix position, with an operand before: `a ⊛`
    *
@@ -246,10 +256,10 @@ export type PostfixEntry = BaseEntry & {
 
   precedence?: number; // Priority
 
-  parse: PostfixParseHandler;
+  parse?: PostfixParseHandler;
 };
 
-export type PrefixEntry = BaseEntry & {
+export type PrefixEntry = Omit<BaseEntry, 'parse'> & {
   /**
    * Prefix position, with an operand after: `⊛ a`
    *
@@ -258,25 +268,25 @@ export type PrefixEntry = BaseEntry & {
   kind: 'prefix';
   precedence: number;
 
-  parse: PrefixParseHandler;
+  parse?: PrefixParseHandler;
 };
 
 /**
  * A LaTeX dictionary entry for an environment, that is a LaTeX
  * construct using `\begin{...}...\end{...}`.
  */
-export type EnvironmentEntry = BaseEntry & {
+export type EnvironmentEntry = Omit<BaseEntry, 'parse'> & {
   kind: 'environment';
   parse: EnvironmentParseHandler;
 };
 
-export type IdentifierEntry = BaseEntry & {
-  kind: 'identifier';
+export type SymbolEntry = Omit<BaseEntry, 'parse'> & {
+  kind: 'symbol';
 
   /** Used for appropriate wrapping (i.e. when to surround it with parens) */
   precedence?: number;
 
-  parse: Expression | IdentifierParseHandler;
+  parse: Expression | SymbolParseHandler;
 };
 
 /**
@@ -290,43 +300,43 @@ export type IdentifierEntry = BaseEntry & {
  * inverse functions postfix (i.e. ^{-1}), use a custom parse handler with a
  * base entry.
  */
-export type FunctionEntry = BaseEntry & {
+export type FunctionEntry = Omit<BaseEntry, 'parse'> & {
   kind: 'function';
 
   trigger: string;
 
-  parse: Expression | FunctionParseHandler;
-};
-
-/**
- * A simple LaTeX dictionary entry, for example for a command like `\pi`.
- */
-export type DefaultEntry = BaseEntry & {
-  precedence?: number;
-  parse?: Expression | IdentifierParseHandler;
+  parse?: Expression | FunctionParseHandler;
 };
 
 export type LatexDictionaryEntry =
-  | DefaultEntry
+  | BaseEntry
+  | ExpressionEntry
   | MatchfixEntry
   | InfixEntry
   | PostfixEntry
   | PrefixEntry
-  | IdentifierEntry
+  | SymbolEntry
   | FunctionEntry
   | EnvironmentEntry;
 
 /** @internal */
-export function isIdentifierEntry(
+export function isExpressionEntry(
   entry: LatexDictionaryEntry
-): entry is IdentifierEntry {
-  return !('kind' in entry) || entry.kind === 'identifier';
+): entry is ExpressionEntry {
+  return !('kind' in entry) || entry.kind === 'expression';
+}
+
+/** @internal */
+export function isSymbolEntry(
+  entry: LatexDictionaryEntry
+): entry is SymbolEntry {
+  return 'kind' in entry && entry.kind === 'symbol';
 }
 /** @internal */
 export function isFunctionEntry(
   entry: LatexDictionaryEntry
 ): entry is FunctionEntry {
-  return !('kind' in entry) || entry.kind === 'function';
+  return 'kind' in entry && entry.kind === 'function';
 }
 /** @internal */
 export function isMatchfixEntry(
@@ -701,38 +711,56 @@ export interface Parser {
   readonly options: Required<ParseLatexOptions>;
   readonly computeEngine?: IComputeEngine;
 
+  /** The index of the current token */
   index: number;
 
-  /** True if the last token has been reached */
+  /** True if the last token has been reached.
+   * Consider also `atTerminator()`.
+   */
   readonly atEnd: boolean;
+
+  /** Return true if the terminator condition is met or if the last token
+   * has been reached.
+   */
+  atTerminator(t: Terminator | undefined): boolean;
 
   /** Return the next token, without advancing the index */
   readonly peek: LatexToken;
 
-  /** Return true if the terminator condition is met */
-  atTerminator(t: Terminator | undefined): boolean;
+  /** Return the next token and advance the index */
+  nextToken(): LatexToken;
 
   /** Return an array of string corresponding to tokens ahead.
    * The index is unchanged.
    */
   lookAhead(): string[];
 
-  /** Return the next token and advance the index */
-  next(): LatexToken;
+  /** Return a string representation of the expression
+   between `start` and `end` (default: the whole expression) */
+  latex(start: number, end?: number): string;
 
-  /** Return a LaTeX string before the index */
-  latexBefore(): string;
-
-  /** Return a LaTeX string after the index */
-  latexAfter(): string;
+  /** Return an error expression with the specified code and arguments */
+  error(
+    code: string | [string, ...Expression[]],
+    fromToken: number
+  ): Expression;
 
   /** If there are any space, advance the index until a non-space is encountered */
   skipSpace(): boolean;
 
-  addBoundary(boundary: LatexToken[]): void;
-  removeBoundary(): void;
-  matchBoundary(): boolean;
-  boundaryError(msg: string | [string, ...Expression[]]): Expression;
+  /** Skip over "visual space" which
+  includes space tokens, empty groups `{}`, and commands such as `\,` and `\!` */
+  skipVisualSpace(): void;
+
+  /** If the next token matches the target advance and return true. Otherwise
+   * return false */
+  match(token: LatexToken): boolean;
+
+  /** Return true if the next tokens match the argument, an array of tokens, or null otherwise */
+  matchAll(tokens: LatexToken[]): boolean;
+
+  /** Return the next token if it matches any of the token in the argument or null otherwise */
+  matchAny(tokens: LatexToken[]): LatexToken;
 
   /** If the next token is a character, return it and advance the index
    * This includes plain characters (e.g. 'a', '+'...), characters
@@ -740,154 +768,115 @@ export interface Parser {
    */
   matchChar(): string | null;
 
-  /** Return a CSS color. Handle the various color formats supported by the
-   * `xcolor` package.
+  /**
+   * Parse an expression in aLaTeX group enclosed in curly brackets `{}`.
+   * These are often used as arguments to LaTeX commands, for example
+   * `\frac{1}{2}`.
+   *
+   * Return `null` if none was found
+   * Return `['Sequence']` if an empty group `{}` was found
    */
-  matchColor(background?: boolean): string | null;
+  parseGroup(): Expression | null;
 
   /**
-   * Return a LaTeX dimension.
+   * Some LaTeX commands (but not all) can accept arguments as single
+   * tokens (i.e. without braces), for example `^2`, `\sqrt3` or `\frac12`
    *
-   */
-  matchLatexDimension(): string | null;
-
-  /** If the next token matches the target advance and return true. Otherwise
-   * return false */
-  match(tokens: LatexToken): boolean;
-  matchAll(tokens: LatexToken | LatexToken[]): boolean;
-  matchAny(tokens: LatexToken[]): LatexToken;
-  matchSequence(tokens: LatexToken[]): LatexToken[];
-
-  /** If the next token matches a `+` or `-` sign, return it and advance the index.
-   * Otherwise return `''` and do not advance */
-  matchOptionalSign(): string;
-
-  matchDecimalDigits(): string;
-  matchSignedInteger(): string;
-  matchExponent(): string;
-  matchNumber(): string;
-
-  /** Parse a tabular environment, until `\end{endName}`
-   */
-  matchTabular(endName: string): null | Expression[][];
-
-  applyInvisibleOperator(
-    terminator: Terminator,
-    lhs: Expression | null
-  ): Expression | null;
-
-  /** Some LaTeX commands (but not all) can accept an argument without braces,
-   *  for example `^` , `\sqrt` or `\frac`.
+   * This argument will usually be a single token, but can be a sequence of
+   * tokens (e.g. `\sqrt\frac12` or `\sqrt\mathrm{speed}`).
    *
-   * The following tokens are excluded from consideration to fail early when
-   * encountering a likely syntax error, for example `x^(2)` (instead of
-   * `x^{2}`). With `(` in the list of excluded tokens, the match will fail
-   * and the error can be recovered.
+   * The following tokens are excluded from consideration in order to fail
+   * early when encountering a likely syntax error, for example `x^(2)`
+   * instead of `x^{2}`. With `(` in the list of excluded tokens, the
+   * match will fail and the error can be recovered.
    *
-   * The excluded tokens are `!"#$%&(),/;:?@[]`|~", `\left` and `\bigl`
+   * The excluded tokens include `!"#$%&(),/;:?@[]`|~", `\left`, `\bigl`, etc...
    */
-
-  matchSingleAtomArgument(): Expression | null;
+  parseToken(): Expression | null;
 
   /**
+   * Parse an expression enclosed in a LaTeX optional group enclosed in square brackets `[]`.
    *
-   * Match a LaTeX expression enclosed in `[]`
-   *
-   * Otherwise, return `null`.
+   * Return `null` if none was found.
    */
-
-  matchLatexOptionalGroup(): Expression | null;
+  parseOptionalGroup(): Expression | null;
 
   /**
-   * Match a LaTeX group enclosed in `{}`
+   * Some LaTeX commands have arguments that are not interpreted as
+   * expressions, but as strings. For example, `\begin{array}{ccc}` (both
+   * `array` and `ccc` are strings), `\color{red}` or `\operatorname{lim sup}`.
    *
-   * Return null if no argument was found
-   * Return `['Sequence']` if an empty argument `{}` was found
+   * If the next token is the start of a group (`{`), return the content
+   * of the group as a string. This may include white space, and it may need
+   * to be trimmed at the start and end of the string.
+   *
+   * LaTeX commands are typically not allowed inside a string group (for example,
+   * `\alpha` would result in an error), but we do not enforce this.
    */
-  matchLatexGroup(): Expression | null;
-
-  /**
-   * - 'enclosure' : will look for an argument inside an enclosure (an open/close fence)
-   * - 'implicit': either an expression inside a pair of `()`, or just a primary
-   *    (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
-   */
-  matchArguments(
-    kind: '' | 'implicit' | 'enclosure',
-    until?: Terminator
-  ): Expression[] | null;
-
-  matchStringArgument(): string | null;
-
-  /* Parse a series of `\prime` or `'`, or in a suffix */
-  matchPrimeSuffix(): number;
-
-  /** Parse function 'id' followed optionally by some prefix (primes, etc
-   * and an argument list in an enclosure. */
-  matchFunctionSuffix(id: string): Expression;
-
-  /** If matches the normalized open delimiter, returns the
-   * expected closing delimiter.
-   *
-   * For example, if `openDelim` is `(`, and `closeDelim` is `)` it would match
-   * `\left\lparen` and return `['\right', '\rparen']`, which can be matched
-   * with `matchAll()`
-   */
-  matchOpenDelimiter(
-    openDelim: Delimiter,
-    closeDelim: Delimiter
-  ): LatexToken[] | null;
-
-  matchMiddleDelimiter(delimiter: '|' | ':' | LatexToken): boolean;
-
-  /**
-   *  Match a sequence superfix/subfix operator, e.g. `^{*}`
-   *
-   * Superfix and subfix need special handling:
-   *
-   * - they act mostly like an infix operator, but they are commutative, i.e.
-   * `x_a^b` should be parsed identically to `x^b_a`.
-   *
-   * - furthermore, in LaTeX `x^a^b` parses the same as `x^a{}^b`.
-   *
-   */
-  matchSupsub(lhs: Expression | null): Expression | null;
-
-  /**
-   *
-   * ```
-   *    <primary> :=
-   *       (<number> | <symbol> | <latex-command> | <function-call> | <matchfix-expr>)
-   *       (<subsup> | <postfix-operator>)*
-   * ```
-   *
-   * ```
-   *    <matchfix-expr> :=
-   *        <matchfix-op-open> <expression> <matchfix-op-close>
-   *```
-   *
-   *```
-   *    <function-call> ::=
-   *      | <function><matchfix-op-group-open><expression>[',' <expression>]<matchfix-op-group-close>
-   *```
-   * If not a primary, return `null` and do not advance the index.
-   */
-  matchPrimary(): Expression | null;
+  parseStringGroup(): string | null;
 
   /**
    * A symbol can be:
-   * - a single-letter variable: `x`
+   * - a single-letter identifier: `x`
    * - a single LaTeX command: `\pi`
+   * - a multi-letter identifier: `\mathrm{speed}`
    */
-  matchSymbol(until?: Terminator): Expression | null;
+  parseSymbol(until?: Partial<Terminator>): Expression | null;
+
+  /**
+   * Parse an expression in a tabular format, where rows are separated by `\\`
+   * and columns by `&`.
+   *
+   * Return rows of sparse columns: empty rows are indicated with `Nothing`,
+   * and empty cells are also indicated with `Nothing`.
+   */
+  parseTabular(): null | Expression[][];
+
+  /**
+   * Parse an argument list, for example: `(12, x+1)` or `\left(x\right)`
+   *
+   * - 'enclosure' : will look for arguments inside an enclosure
+   *    (an open/close fence) (**default**)
+   * - 'implicit': either an expression inside a pair of `()`, or just a primary
+   *    (i.e. we interpret `\cos x + 1` as `\cos(x) + 1`)
+   *
+   * Return an array of expressions, one for each argument, or `null` if no
+   * argument was found.
+   */
+  parseArguments(
+    kind?: 'implicit' | 'enclosure',
+    until?: Terminator
+  ): Expression[] | null;
+
+  /**
+   * Parse a postfix operator, such as `'` or `!`.
+   *
+   * Prefix, infix and matchfix operators are handled by `parseExpression()`
+   *
+   */
+
+  parsePostfixOperator(
+    lhs: Expression | null,
+    until?: Partial<Terminator>
+  ): Expression | null;
 
   /**
    * Parse an expression:
    *
    * ```
    * <expression> ::=
+   *  | <primary> ( <infix-op> <expression> )?
    *  | <prefix-op> <expression>
-   *  | <primary>
-   *  | <primary> <infix-op> <expression>
+   *
+   * <primary> :=
+   *   (<number> | <symbol> | <function-call> | <matchfix-expr>)
+   *   (<subsup> | <postfix-operator>)*
+   *
+   * <matchfix-expr> :=
+   *   <matchfix-op-open> <expression> <matchfix-op-close>
+   *
+   * <function-call> ::=
+   *   | <function><matchfix-op-group-open><expression>[',' <expression>]<matchfix-op-group-close>
    * ```
    *
    * This is the top-level parsing entry point.
@@ -897,15 +886,24 @@ export interface Parser {
    *
    * `until` is `{ minPrec:0 }` by default.
    */
-  matchExpression(until?: Partial<Terminator>): Expression | null;
+  parseExpression(until?: Partial<Terminator>): Expression | null;
 
-  // Return a string representation of the expression
-  // between `start` and `end` (default: the whole expression)
-  latex(start: number, end?: number): string;
-
-  /** Return an error expression with the specified code and arguments */
-  error(
-    code: string | [string, ...Expression[]],
-    fromToken: number
-  ): Expression;
+  /**
+   * Boundaries are used to detect the end of an expression.
+   *
+   * They are used for unusual syntactic constructs, for example
+   * `\int \sin x dx` where the `dx` is not an argument to the `\sin`
+   * function, but a boundary of the integral.
+   *
+   * They are also useful when handling syntax errors and recovery.
+   *
+   * For example, `\begin{bmatrix} 1 & 2 { \end{bmatrix}` has an
+   * extraneous `{`, but the parser will attempt to recover and continue
+   * parsing when it encounters the `\end{bmatrix}` boundary.
+   */
+  addBoundary(boundary: LatexToken[]): void;
+  removeBoundary(): void;
+  get atBoundary(): boolean;
+  matchBoundary(): boolean;
+  boundaryError(msg: string | [string, ...Expression[]]): Expression;
 }

@@ -817,7 +817,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
     e: {
       domain: 'TranscendentalNumber',
       constant: true,
-      holdUntil: 'N',
+      holdUntil: 'never',
       value: 'ExponentialE',
     },
     i: {
@@ -849,7 +849,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
     ImaginaryUnit: {
       domain: 'ImaginaryNumber',
       constant: true,
-      holdUntil: 'never',
+      holdUntil: 'evaluate',
       wikidata: 'Q193796',
       flags: { imaginary: true },
       value: ['Complex', 0, 1],

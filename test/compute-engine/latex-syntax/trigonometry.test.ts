@@ -21,13 +21,45 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
 describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   test(`\\sin^{-1}'(x)`, () =>
     expect(check("\\sin^{-1}'(x)")).toMatchInlineSnapshot(`
-      latex     = [["Derivative", "Arcsin"], "x"]
-      [["Derivative", "Arcsin"], "x"]
+      latex     = [
+        "Sequence",
+        ["InverseFunction", "Sin"],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'''"],
+          ["Latex", "''(x)'"]
+        ]
+      ]
+      [
+        "Sequence",
+        "Arcsin",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'''"],
+          ["Latex", "''(x)'"]
+        ]
+      ]
     `));
   test(`\\sin^{-1}''(x)`, () =>
     expect(check("\\sin^{-1}''(x)")).toMatchInlineSnapshot(`
-      latex     = [["Derivative", "Arcsin", 2], "x"]
-      [["Derivative", "Arcsin", 2], "x"]
+      latex     = [
+        "Sequence",
+        ["InverseFunction", "Sin"],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'''"],
+          ["Latex", "'''(x)'"]
+        ]
+      ]
+      [
+        "Sequence",
+        "Arcsin",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-token'", "'''"],
+          ["Latex", "'''(x)'"]
+        ]
+      ]
     `));
   // test(`\\cos^{-1\\doubleprime}(x)`, () =>
   //   expect(check('\\cos^{-1\\doubleprime}(x)')).toMatchInlineSnapshot(`
@@ -37,8 +69,24 @@ describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   //   `));
   test(`\\cos^{-1}\\doubleprime(x)`, () =>
     expect(check('\\cos^{-1}\\doubleprime(x)')).toMatchInlineSnapshot(`
-      latex     = [["Derivative", "Arccos", 2], "x"]
-      [["Derivative", "Arccos", 2], "x"]
+      latex     = [
+        "Sequence",
+        ["InverseFunction", "Cos"],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\doubleprime'"],
+          ["Latex", "'\\doubleprime(x)'"]
+        ]
+      ]
+      [
+        "Sequence",
+        "Arccos",
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\doubleprime'"],
+          ["Latex", "'\\doubleprime(x)'"]
+        ]
+      ]
     `));
 });
 

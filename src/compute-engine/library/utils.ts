@@ -30,9 +30,12 @@ export function isFunctionDefinition(
     | undefined
     | null
 ): def is BoxedFunctionDefinition {
-  return (
-    !!def &&
-    typeof def === 'object' &&
-    ('complexity' in def || 'numeric' in def || 'signature' in def)
-  );
+  if (def === undefined || def === null) return false;
+  if (typeof def !== 'object') return false;
+  if ('complexity' in def || 'numeric' in def || 'signature' in def)
+    return true;
+  if (!('domain' in def)) return false;
+  if (def.domain === undefined) return false;
+  if (typeof def.domain === 'string') return def.domain === 'Function';
+  return def.domain.isFunction;
 }

@@ -525,10 +525,11 @@ export function applyAssociativeOperator(
   return [op, lhs, rhs];
 }
 
+/** Return the elements of a sequence, or null if the expression is not a sequence. The sequence can be optionally enclosed by a`["Delimiter"]` expression  */
 export function getSequence(expr: Expression | null): Expression[] | null {
-  let h = head(expr);
   if (expr === null) return null;
 
+  let h = head(expr);
   if (h === 'Delimiter') {
     expr = op(expr, 1);
     if (expr === null) return [];
@@ -536,15 +537,13 @@ export function getSequence(expr: Expression | null): Expression[] | null {
   }
 
   h = head(expr);
-  if (h === 'Sequence') return ops(expr) ?? [];
-  return null;
+  if (h !== 'Sequence') return null;
+
+  return ops(expr) ?? [];
 }
 
 export function isEmptySequence(expr: Expression | null): boolean {
-  if (expr === null) return false;
-  if (head(expr) !== 'Sequence') return false;
-  if (nops(expr) !== 0) return false;
-  return true;
+  return expr !== null && head(expr) === 'Sequence' && nops(expr) === 0;
 }
 
 export function missingIfEmpty(expr: Expression | null): Expression {

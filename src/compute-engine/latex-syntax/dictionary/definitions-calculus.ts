@@ -30,10 +30,10 @@ function parseIntegral(command: string, n = 1) {
       !(sub !== null && sup !== null) &&
       (parser.peek === '_' || parser.peek === '^')
     ) {
-      if (parser.match('_'))
-        sub = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
-      else if (parser.match('^'))
-        sup = parser.matchLatexGroup() ?? parser.matchSingleAtomArgument();
+      if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
+      else if (parser.match('^')) {
+        sup = parser.parseGroup() ?? parser.parseToken();
+      }
       parser.skipSpace();
     }
     if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;
@@ -140,7 +140,7 @@ function parseIntegralBody(
 
   let found = false;
 
-  let fn = parser.matchExpression({
+  let fn = parser.parseExpression({
     minPrec: 266,
     condition: () => {
       if (parser.matchAll(['\\mathrm', '<{>', 'd', '<}>'])) found = true;
@@ -151,7 +151,7 @@ function parseIntegralBody(
   if (!found) {
     // Try again, but looking for a simple "d"
     parser.index = start;
-    fn = parser.matchExpression({
+    fn = parser.parseExpression({
       minPrec: 266,
       condition: () => {
         if (parser.match('d')) found = true;
@@ -172,7 +172,7 @@ function parseIndexes(parser: Parser, n = 1): string[] {
   parser.skipSpace();
 
   const result: string[] = [];
-  const index = symbol(parser.matchSymbol());
+  const index = symbol(parser.parseSymbol());
   if (index === null) return [];
   result.push(index);
 
@@ -301,6 +301,7 @@ function serializeIntegral(command: string) {
 }
 export const DEFINITIONS_CALCULUS: LatexDictionary = [
   {
+    kind: 'expression',
     name: 'Integrate',
     trigger: ['\\int'],
 
@@ -308,24 +309,29 @@ export const DEFINITIONS_CALCULUS: LatexDictionary = [
     serialize: serializeIntegral('\\int'),
   },
   {
+    kind: 'expression',
     trigger: ['\\iint'],
     parse: parseIntegral('Integrate', 2),
   },
   {
+    kind: 'expression',
     trigger: ['\\iiint'],
     parse: parseIntegral('Integrate', 3),
   },
   {
+    kind: 'expression',
     name: 'CircularIntegrate',
     trigger: ['\\oint'],
     parse: parseIntegral('CircularIntegrate'),
     serialize: serializeIntegral('\\oint'),
   },
   {
+    kind: 'expression',
     trigger: ['\\oiint'],
     parse: parseIntegral('CircularIntegrate', 2),
   },
   {
+    kind: 'expression',
     trigger: ['\\oiiint'],
     parse: parseIntegral('CircularIntegrate', 3),
   },

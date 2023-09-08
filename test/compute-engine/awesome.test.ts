@@ -219,16 +219,9 @@ describe('Nth PRIME NUMBER', () =>
 describe('⌈e⌉ = ⌊π⌋', () =>
   test('', () =>
     expect(check('⌈e⌉ = ⌊π⌋')).toMatchInlineSnapshot(`
-      latex     = [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "'⌈'"],
-        ["Latex", "'⌈e⌉ = ⌊π⌋'"]
-      ]
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "'⌈'"],
-        ["Latex", "'⌈e⌉ = ⌊π⌋'"]
-      ]
+      latex     = ["Equal", ["Ceil", "e"], ["Floor", "Pi"]]
+      box       = ["Equal", ["Ceil", "ExponentialE"], ["Floor", "Pi"]]
+      evaluate  = True
     `)));
 
 //  Ramanujan factorial approximation

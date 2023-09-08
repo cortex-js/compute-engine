@@ -54,6 +54,7 @@ function matchIdentifierToken(
       '+': 'plus',
       '-': 'minus',
 
+      '\\plusmn': 'pm',
       '\\pm': 'pm',
       '\\ast': 'ast',
       '\\dag': 'dag',
@@ -70,18 +71,18 @@ function matchIdentifierToken(
   }
 
   if (special) {
-    parser.next();
+    parser.nextToken();
     return special;
   }
 
   const i = SYMBOLS.findIndex((x) => x[1] === token);
   if (i >= 0) {
-    parser.next();
+    parser.nextToken();
     return SYMBOLS[i][0];
   }
 
   // Unexpected LaTeX command or \\char or \\unicode?
-  return parser.matchChar() ?? parser.next();
+  return parser.matchChar() ?? parser.nextToken();
 }
 
 // The body of an identifier is a sequence of tokens contained
@@ -97,7 +98,7 @@ function matchIdentifierBody(parser: Parser): string | null {
   const prefix = IDENTIFIER_MODIFIER[parser.peek] ?? null;
 
   if (prefix) {
-    parser.next();
+    parser.nextToken();
     if (!parser.match('<{>')) {
       parser.index = start;
       return null;
@@ -127,7 +128,7 @@ function matchIdentifierBody(parser: Parser): string | null {
     }
     // If we're immediately followed by a sequence of digits, capture them
     // e.g.  \alpha1234
-    while (!parser.atEnd && /\d/.test(parser.peek)) id += parser.next();
+    while (!parser.atEnd && /\d/.test(parser.peek)) id += parser.nextToken();
   }
 
   while (!parser.atEnd) {
@@ -184,7 +185,7 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
 
   if (prefix === null) return null;
 
-  parser.next();
+  parser.nextToken();
   if (parser.match('<{>')) {
     // If the identifier starts with a digit,
     // convert it to a string, e.g. `\mathbb{1}` -> `one_blackboard`
@@ -204,7 +205,7 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
       }[parser.peek] ?? '';
     if (digit) {
       body = digit;
-      parser.next();
+      parser.nextToken();
     }
 
     body += matchIdentifierBody(parser);
@@ -228,7 +229,7 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
 /** For error handling, if we have a identifier prefix, assume
  * the identifier is invalid (it would have been captured by
  * `mathIdentifier()` otherwise) and return an error expression */
-export function matchInvalidIdentifier(parser: Parser): Expression | null {
+export function parseInvalidIdentifier(parser: Parser): Expression | null {
   const start = parser.index;
   const id = matchPrefixedIdentifier(parser);
   if (id === null || isValidIdentifier(id)) {
@@ -275,7 +276,7 @@ export function matchIdentifier(parser: Parser): string | null {
   // Is it a single-letter identifier (shortcut)?
   //
   if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek))
-    return parser.next();
+    return parser.nextToken();
 
   //
   // Is it a multi-letter, prefixed, identifier?
@@ -289,7 +290,7 @@ export function matchIdentifier(parser: Parser): string | null {
   if (!id) {
     id = '';
     while (!parser.atEnd && ONLY_EMOJIS.test(id + parser.peek))
-      id += parser.next();
+      id += parser.nextToken();
   }
 
   if (id) {
