@@ -681,18 +681,6 @@ export class ComputeEngine implements IComputeEngine {
     this._bignumTolerance = this.bignum(this._tolerance);
   }
 
-  /** @internal */
-  bignum(a: Decimal.Value | bigint): Decimal {
-    if (typeof a === 'bigint') return new this._bignum(a.toString());
-
-    return new this._bignum(a);
-  }
-
-  /** @internal */
-  complex(a: number | Complex, b?: number): Complex {
-    return new Complex(a, b);
-  }
-
   /** Replace a number that is close to 0 with the exact integer 0.
    *
    * How close to 0 the number has to be to be considered 0 is determined by {@link tolerance}.
@@ -713,6 +701,24 @@ export class ComputeEngine implements IComputeEngine {
       return 0;
 
     return n;
+  }
+
+  bignum(a: Decimal.Value | bigint): Decimal {
+    if (typeof a === 'bigint') return new this._bignum(a.toString());
+
+    return new this._bignum(a);
+  }
+
+  complex(a: number | Complex, b?: number): Complex {
+    return new Complex(a, b);
+  }
+
+  isBignum(a: unknown): a is Decimal {
+    return a instanceof Decimal;
+  }
+
+  isComplex(a: unknown): a is Complex {
+    return a instanceof Complex;
   }
 
   private get latexSyntax(): LatexSyntax {

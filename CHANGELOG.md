@@ -1,6 +1,28 @@
-## 0.12.1 
+## [Unreleased]
 
- **Release Date:** 2022-12-01
+### Breaking Changes
+
+- New API for the `Parser` class.
+
+### Improvements and Bux Fixes
+
+- The `ComputeEngine` now exports the `bignum()` and `complex()` methods that
+  can be used to create bignum and complex numbers from strings or numbers. The
+  methods `isBigNum()` and `isComplex()` have also been added to check if a
+  value is a bignum (`Decimal`) or complex (`Complex`) number, for example as
+  returned by `expr.numericValue`.
+- **#69** `\leq` was incorrectly parsed as `Equals` instead of `LessEqual`
+- **#94** The `\exp` command was not parsed correctly.
+- Handle `PlusMinus` in infix and prefix position, i.e. `a\pm b` and `\pm a`.
+- Improved parsing, serialization
+- Improved simplification
+- Improved evaluation of `Sum` and `Product`
+- Support complex identifiers (i.e. non-latin scripts, emojis).
+- Fixed serialization of mixed numbers.
+
+## 0.12.1
+
+**Release Date:** 2022-12-01
 
 Work around unpckg.com issue with libraries using BigInt.
 
@@ -99,8 +121,7 @@ Work around unpckg.com issue with libraries using BigInt.
 
 ### Improvements
 
-- Support angles in degrees with `30\degree`, `30^\circ` and
-  `\ang{30}`.
+- Support angles in degrees with `30\degree`, `30^\circ` and `\ang{30}`.
 - More accurate error expressions, for example if there is a missing closing
   delimiter an `["Error", ["ErrorCode", "'expected-closing-delimiter'", "')'"]]`
   is produced.
