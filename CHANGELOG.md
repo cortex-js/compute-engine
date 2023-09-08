@@ -1,6 +1,14 @@
-## 0.12.7 
+## [Unreleased]
 
- **Release Date:** 2023-09-08
+## Bug Fixes
+
+- Fixed parsing and serialization of extended LaTeX synonyms for `e` and `i`.
+- Fixed serialization of `Half`.
+- Fixed serialization of `Which`
+
+## 0.12.7
+
+**Release Date:** 2023-09-08
 
 ## Improvements
 

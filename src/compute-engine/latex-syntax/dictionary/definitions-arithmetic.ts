@@ -531,6 +531,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: '\\exponentialE',
   },
   {
+    trigger: '\\mathrm{e}',
+    parse: 'ExponentialE',
+  },
+  {
     kind: 'function',
     trigger: 'exp',
     parse: 'Exp',
@@ -542,6 +546,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'ImaginaryUnit',
     trigger: ['\\imaginaryI'],
+  },
+  {
+    trigger: '\\mathrm{i}',
+    parse: 'ImaginaryUnit',
   },
 
   // Operations

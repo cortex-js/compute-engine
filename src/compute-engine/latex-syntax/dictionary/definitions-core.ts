@@ -472,23 +472,17 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return result;
     },
     serialize: (serialize: Serializer, expr: Expression): string => {
-      if (head(op(expr, 1)) !== 'List') return '';
-      const rows = ops(op(expr, 1)) ?? [];
-      const body: string[] = [];
-      let rowSep = '';
-      for (const row of rows) {
-        if (head(row) === 'Tuple' || head(row) === 'Pair') {
-          body.push(rowSep);
-          if (op(row, 2)) {
-            body.push(serialize.serialize(op(row, 2)));
-            const condition = op(row, 1);
-            if (condition !== null)
-              body.push('&', serialize.serialize(condition));
-          }
+      const rows: string[] = [];
+      const args = ops(expr);
+      if (args) {
+        for (let i = 0; i <= args.length - 2; i += 2) {
+          const row: string[] = [];
+          row.push(serialize.serialize(args[i + 1]));
+          row.push(serialize.serialize(args[i]));
+          rows.push(row.join('&'));
         }
-        rowSep = '\\\\';
       }
-      return joinLatex(['\\begin{cases}', ...body, '\\end{cases}']);
+      return joinLatex(['\\begin{cases}', rows.join('\\\\'), '\\end{cases}']);
     },
   },
 ];

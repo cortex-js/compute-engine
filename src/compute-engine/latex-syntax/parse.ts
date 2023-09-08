@@ -439,7 +439,7 @@ export class _Parser implements Parser {
     }
 
     const result: [IndexedLatexDictionaryEntry, number][] = [];
-    for (let i = defs.length; i > 0; i--) {
+    for (let i = defs.length - 1; i > 0; i--) {
       if (defs[i] !== undefined) {
         console.assert(Array.isArray(defs[i]));
         for (const def of defs[i]!) result.push([def, i]);

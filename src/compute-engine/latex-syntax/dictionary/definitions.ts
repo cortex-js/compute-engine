@@ -21,7 +21,7 @@ import {
   ExpressionParseHandler,
   isExpressionEntry,
 } from '../public';
-import { joinLatex, tokenize, tokensToString } from '../tokenizer';
+import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
 import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
 import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
 import { DEFINITIONS_CORE } from './definitions-core';
@@ -167,11 +167,6 @@ const DEFAULT_DELIMITER: { [key: string]: LatexString } = {
   '\\rfloor': '\\rfloor',
 };
 
-function triggerLength(trigger: LatexToken | LatexToken[]): number {
-  if (Array.isArray(trigger)) return trigger.length;
-  return 1;
-}
-
 function addEntry(
   result: IndexedLatexDictionary,
   entry: LatexDictionaryEntry,
@@ -243,7 +238,7 @@ function addEntry(
     //
     // 3.2/ Update the environment index
     //
-    const triggerString = tokensToString(entry.trigger ?? '');
+    const triggerString = tokensToString(entry.trigger ?? []);
     if (result.environment.has(triggerString)) {
       onError({
         severity: 'warning',
@@ -260,24 +255,37 @@ function addEntry(
     // 3.3/ Update the other symbol or operator index
     //
     console.assert(entry.trigger);
-    const triggerString = tokensToString(entry.trigger ?? '');
-    const n = triggerLength(trigger);
-    result.lookahead = Math.max(result.lookahead, n);
 
     if (indexedEntry.kind === 'function') {
       // If no entries of this kind and length yet, create a map for it
-      if (!result.function.has(triggerString))
-        result.function.set(triggerString, [indexedEntry]);
+      console.assert(typeof entry.trigger === 'string');
+      const fnName = entry.trigger as string;
+      if (!result.function.has(fnName))
+        result.function.set(fnName, [indexedEntry]);
       else
-        result.function.set(triggerString, [
-          ...result.function.get(triggerString)!,
+        result.function.set(fnName, [
+          ...result.function.get(fnName)!,
           indexedEntry,
         ]);
     } else {
+      let triggerString: string;
+      let tokenCount: number;
+
+      if (typeof entry.trigger === 'string') {
+        triggerString = entry.trigger;
+        tokenCount = countTokens(triggerString);
+      } else {
+        triggerString = tokensToString(entry.trigger ?? []);
+        tokenCount = entry.trigger!.length;
+      }
+
+      result.lookahead = Math.max(result.lookahead, tokenCount);
+
       const kind = indexedEntry.kind;
       // If no entries of this kind and length yet, create a map for it
-      if (result[kind][n] === undefined) result[kind][n] = new Map();
-      const list = result[kind][n]!;
+      if (result[kind][tokenCount] === undefined)
+        result[kind][tokenCount] = new Map();
+      const list = result[kind][tokenCount]!;
       if (list.has(triggerString))
         list.get(triggerString)!.push(indexedEntry as any);
       else list.set(triggerString, [indexedEntry as any]);
@@ -407,12 +415,10 @@ function makeIndexedEntry(
     result.serialize = entry.serialize ?? triggerString;
 
     if (typeof result.serialize === 'string') {
-      const serializeExpr = result.serialize;
+      const serializeStr = result.serialize;
       result.serialize = (serializer, expr) => {
-        if (!head(expr)) return serializer.serialize(serializeExpr);
-        return `${serializer.serialize(
-          serializeExpr
-        )}${serializer.wrapArguments(expr)}`;
+        if (!head(expr)) return serializeStr;
+        return `${serializeStr}${serializer.wrapArguments(expr)}`;
       };
     }
     //
