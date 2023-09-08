@@ -224,6 +224,20 @@ dictionary, use the following boolean expressions:
 
 </div>
 
+The value of `expr.numericValue` may be:
+- `typeof expr.numericValue === 'number'`: the expression is a JavaScript number
+- `ce.isBignum(expr.numericValue)`: the expression is a bignum. Use 
+  `expr.numericValue.toNumber()` to convert it to a JavaScript number.
+- `ce.isComplex(expr.numericValue)`: the expression is a complex number. Use 
+  `expr.numericValue.re` and `expr.numericValue.im` to access the real and 
+  imaginary parts.
+- `Array.isArray(expr.numericValue)`: the expression is a rational as a tuple
+  of two Javascript `number` or two Javascript `bigint`.
+
+**To access a numerical approximation of an expression if available**, use
+`expr.N().valueOf()`. It will return a Javascript number approximation of the
+value.
+
 A symbol may have a value if it represents a bound variable, but it may also
 have no value if it represents a free variable.
 

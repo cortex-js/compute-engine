@@ -30,28 +30,57 @@ either a machine number, a `Decimal` object or a `Complex` object,
 depending on the `numericMode` of the compute engine, or `null` if the 
 result is not a number.
 
+**To check if the `numericValue` is a `Decimal`** use `ce.isBignum(expr.N().numericValue)`.
+
+**To check if the `numericValue` is a `Complex`** use `ce.isComplex(expr.N().numericValue)`.
+
 **To access a JavaScript machine number approximation of the result** use 
-`valueOf()`. If `numericValue` is a machine number or a `Decimal` object, 
-`valueOf()` will return a machine number approximation. Otherwise it returns
-a string serialization of the MathJSON representation of the expression.
+`valueOf()`. If `numericValue` is a machine number, a `Decimal` object, or
+a rational, `valueOf()` will return a machine number approximation. Otherwise 
+it returns a string serialization of the MathJSON representation of the 
+expression.
 
 ```js
-console.log(ce.parse('\\sqrt{5} + 7^3').N().valueOf());
+console.log(ce.parse('11 + \\sqrt{x}').N().valueOf());
+// ➔ "["Add",11,["Sqrt","x"]]"
+// Note: if the result is not a number, valueOf() returns a string
+// representation of the expression
+
+
+const expr = ce.parse('\\sqrt{5} + 7^3').N();
+
+console.log(expr.valueOf());
 // ➔ 345.2360679774998
+// If the result is a number, valueOf() returns a machine number approximation
 
-console.log(ce.parse('\\sqrt{5} + 7^3').N().numericValue);
-// ➔ [Decimal]
-
-console.log(ce.parse('\\sqrt{5} + 7^3').N().numericValue.toNumber());
-// ➔ 345.2360679774998
-
-console.log(ce.parse('\\sqrt{5} + 7^3').N().latex);
+console.log(expr.latex);
 // ➔ "345.236\,067\,977\,499\,8,"
+// Note: the LaTeX representation of the numeric value is rounded to the
+// display precision
 
-console.log(ce.parse('\\sqrt{x} + 7^3').N().valueOf());
-// ➔ "["Add",343,["Sqrt","x"]]"
+console.log(expr.numericValue);
+// ➔ [Decimal]
+// Note: depending on the numeric mode, this may be a machine number, 
+// a Decimal object or a Complex object
+
+if (ce.isBignum(expr.numericValue)) {
+  console.log('The numeric value is a Decimal object', 
+      expr.numericValue.toNumber());
+} else if (ce.isComplex(expr.numericValue)) {
+  console.log('The numeric value is a Complex object', 
+      expr.numericValue.re, 
+      expr.numericValue.im);
+} else if (Array.isArray(expr.numericValue)) {
+  console.log('The numeric value is a rational', 
+      expr.numericValue[0], 
+      expr.numericValue[1]);
+} else {
+  console.log('The numeric value is a machine number', expr.numericValue);
+}
 
 ```
+
+
 
 {% readmore "/compute-engine/guides/symbolic-computing/" %} Read more about
 <strong>Symbolic Computing</strong> {% endreadmore %}
@@ -234,7 +263,7 @@ MathJSON number that looks like this:
 ```
 
 {% readmore "https://mikemcl.github.io/decimal.js/" %} Support for the `bignum`
-mode is implemented using the <strong>decimal.js</strong> library.
+mode is implemented using the <strong>decimal.js</strong> library. This library is built-in with the Compute Engine.
 {% endreadmore %}
 
 ### Complex Numeric Mode
@@ -254,7 +283,7 @@ This is a convenient shorthand for
 Changing the numeric mode to `complex` automatically sets the precision to 15.
 
 {% readmore "https://github.com/infusion/Complex.js" %} Support for the
-`complex` mode is implemented using the <strong>Complex.js</strong> library.
+`complex` mode is implemented using the <strong>Complex.js</strong> library. This library is built-in with the Compute Engine.
 {% endreadmore %}
 
 

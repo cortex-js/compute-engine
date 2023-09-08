@@ -29,7 +29,16 @@ head:
 **To change the value or domain of a symbol**, use the `value` and `domain`
 properties of the symbol.
 
-A symbol does not have be declared before it can be used. A previously unknown
+```js
+const n = ce.box('n');
+n.domain = 'Integer';
+n.value = 5;
+console.log("n:", n.domain.json, "=", n.value.json);
+// ➔ n: Integer = 5
+```
+
+
+A symbol does not have to be declared before it can be used. A previously unknown
 symbol has a domain of `ce.defaultDomain` and no value.
 
 <code-playground layout="stack" show-line-numbers>
@@ -43,6 +52,10 @@ Symbols are defined within a **scope**.
 
 {% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
 <strong>scopes</strong> {% endreadmore %}
+
+{% readmore "/compute-engine/guides/augmenting/" %} Read more about
+<strong>adding definitions</strong> for symbols and functions {% endreadmore %}
+
 
 ## Bound Variables, Free Variables and Constants
 
@@ -97,44 +110,6 @@ console.log('pi = ', smallPi.numericValue, '=', bigPi.numericValue);
 // ➔ pi  = 3.1415 = 3.1415926535
 ```
 
-## Declaring a Symbol
-
-Declaring a symbol is explicitly associating a definition with it. The
-definition includes some information, such as its domain or whether it is
-positive.
-
-If the symbol has not been used before, a new definition record for this symbol
-is created, and the symbol is bound to it.
-
-**To declare a symbol** use `ce.assume()`.
-
-```ts
-// Making an assumption using an expression
-ce.assume(['Element', 'n', 'Integer']);
-
-// As a shortcut, an assumption about a symbol can be made with two arguments
-ce.assume('n', 'Integer');
-
-// Making  an assumption using a LaTeX expression
-ce.assume('$n > 0$');
-
-// Assumption about the value of a symbol
-ce.assume('n', 5);
-
-const symbol = ce.box('n');
-
-console.log(n.isPositive);
-// ➔ true
-
-console.log(n.domain);
-// ➔ Integer
-
-console.log(n).latex;
-// ➔ 5
-```
-
-Note that `ce.assume('n', 5)` is equivalent to
-`ce.box('n').value = 5`.{.--notice-info}
 
 ## Symbol Auto-binding
 
@@ -152,7 +127,7 @@ const symbol = ce.box('m'); // m for mystery
 console.log(symbol.domain.symbol);
 // ➔ "ExtendedRealNumber"
 symbol.value = 5;
-console.log(symbol.numericValue?.json);
+console.log(symbol.numericValue);
 // ➔ 5
 ```
 
@@ -166,12 +141,12 @@ symbol and the symbol will evaluate to an `["Error"]` expression.
 
 The `ce.forget()` function will remove the definition associated with a symbol,
 including its domain and value, and any
-[assumption](/compute-engine/guides/assumptions) about the symbol.
+[assumptions](/compute-engine/guides/assumptions) about the symbol.
 
-To forget about a specific symbol, pass the name of the symbol as an argument to
+**To forget about a specific symbol**, pass the name of the symbol as an argument to
 `ce.forget()`.
 
-To forget about all the symbols in the current scope, use `ce.forget()` without
+**To forget about all the symbols in the current scope**, use `ce.forget()` without
 any arguments.
 
 Note that only symbols in the current scope are forgotten. If a definition for

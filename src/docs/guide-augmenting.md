@@ -1,5 +1,5 @@
 ---
-title: Defining New Symbols
+title: Adding New Definitions
 permalink: /compute-engine/guides/augmenting/
 layout: single
 date: Last Modified
@@ -8,128 +8,103 @@ sidebar:
 toc: true
 ---
 
+
+{% readmore "/compute-engine/guides/latex-syntax/#customizing-the-latex-dictionary" %} In this guide we are discussing how to enhance the MathJSON dictionary used by the Compute Engine. You may also be interested in **augmenting the LaTeX dictionary**, for example if you've defined custom LaTeX macros that you'd like to parse to MathJSON. {% endreadmore %}
+
+## Defining a Symbol
+
+**To define a new symbol** use the `ce.defineSymbol()` method.
+
+```js
+ce.defineSymbol('m', {domain: 'Number', value: 5});
+ce.defineSymbol('n', {domain: 'Integer'});
+ce.defineSymbol('f', {domain: 'Function'});
+ce.defineSymbol('g', {domain: 'Function'});
+```
+
+`defineSymbol()` will add a definition in the current scope. Use `ce.pushScope()` if you want to create a new scope.
+
+{% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
+<strong>scopes</strong> {% endreadmore %}
+
+
+The `domain` property is optional when a value is provided.
+
+See the `SymbolDefinition` type for more details on the properties associated with a symbol.
+
+You can change the value of one or more symbols using `ce.set()`.
+
+```js
+ce.set({m: 10});
+```
+
+If the symbol was not previously defined, a new definition will be created.
+
+You can also change the value of a symbol with
+`ce.box('m').value = 10`.{.--notice-info}
+
+To remove a symbol definition, use `ce.forget()`.
+
+```js
+ce.forget('m');
+console.log(ce.box('m').value); // -> undefined
+
+```
+
+## Defining a Function
+
 Let's say you want to define a new `Smallfrac` function for use with 
 the Compute Engine.
 
-## Parsing
-
-To use this function from a LaTeX string, using `ce.parse()`,
-you must augment the LaTeX dictionary of the Compute Engine with a new 
-dictionary entry. You can do this by providing a custom LaTeX dictionary 
-to the constructor of `ComputeEngine`.
-
-
-```js
-const ce = new ComputeEngine({
-  latexDictionary: [
-    ...ComputeEngine.getLatexDictionary(),
-    {
-      trigger: ['\\smallfrac'],
-      parse: (parser) => {
-        return [
-          'Smallfrac',
-          parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"],
-          parser.matchRequiredLatexArgument() ?? ['Error', "'missing'"],
-        ];
-      },
-    },
-  ],
-});
-```
-
-```js
-console.log(ce.parse('\\smallfrac{1}{2}').json);
-// -> ["Smallfrac", 1, 2]
-```
-
-The `triger` property indicates that when the `\\smallfrac` command
-is encountered, the `parse` handler should be called. 
-
-The `parse` handler constructs a MathJSON expression from the LaTeX string, 
-by reading the two expected arguments using `matchRequiredLatexArgument()`.
-
-
-## Evaluation
-
-The above is sufficient to parse LaTeX, but if you want to evaluate the 
-function, you will also need to define how to do so.
-
-You can define new functions for the Compute Engine to evaluate using
-`ce.defineFunction()`.
-
-Note that the first argument to `defineFunction()`, `Smallfrac`, is the name of the 
-MathJSON function, i.e. the one that we returned from the `parse` handler 
-above. It is not the name of the LaTeX command (`\smallfrac`).
+You can define new functions using `ce.defineFunction()`.
 
 
 ```js
 ce.defineFunction('Smallfrac', {
   signature: {
     domain: 'NumericFunction',
-    evaluate: (ce, args) => ce.box(args[0].N() / args[1].N()),
+    evaluate: (ce, args) => ce.box(ce.div(args[0].evaluate(), args[1].evaluate())),
+    N: (ce, args) => ce.box(args[0].N() / args[1].N()),
   },
 });
 ```
 
+**Note:** The first argument to `defineFunction()`, `Smallfrac`, is the name of the function as a MathJSON identifier. It is not the name of a LaTeX command.{.notice--info}
+
+`defineFunction()` will add a definition in the current scope. Use `ce.pushScope()` if you want to create a new scope.
+
+{% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
+<strong>scopes</strong> {% endreadmore %}
+
+
+The `signature` property defines how the function can be used. It is an object with the following properties (all are optional):
+- `canonical(ce, args)` returns a canonical representation of the function. This is an opportunity to check that the arguments are valid, and to return a canonical representation of the function.
+- `simplify(ce, args)` returns a simplified representation of the function. This is an opportunity to simplify the function, for example if the arguments are known to be numeric and exact.
+- `evaluate(ce, args)` returns a symbolic evaluation of the function. The arguments may be evaluated symbolically.
+- `N(ce, args)` returns a numeric evaluation of the function. 
+
+See `FunctionDefinition` for more details on these properties and others associated with a function definition.
 
 ```js
-console.log(ce.parse('\\smallfrac{1}{2}').N());
+console.log(ce.box(["Smallfra", 1, 2]).N());
 // -> 0.5
 ```
 
-## Using a New Function with a Mathfield
+## Defining Multiple Functions and Symbols
 
-You may also want to use your new function with a mathfield.
-
-First you need to define a LaTeX macro so that the mathfield knows
-how to render this command. Let's define the `\smallfrac` macro.
+You can define multiple functions and symbols at once using `ce.let()`.
 
 ```js
-const mfe = document.querySelector('math-field');
-
-mfe.macros = {
-  ...mfe.macros,
-  smallfrac: {
-    args: 2,
-    def: '{}^{#1}\\!\\!/\\!{}_{#2}'
+ce.let({
+  m: {domain: 'Number', value: 5},
+  f: {domain: 'Function'},
+  g: {domain: 'Function'},
+  Smallfrac: {
+    signature: {
+      domain: 'NumericFunction',
+      evaluate: (ce, args) => ce.box(args[0].N() / args[1].N()),
+    },
   },
-};
+});
 ```
 
-The content of the `def` property is a LaTeX fragment that will
-be used to render the `\\smallfrac` command.
-
-The `#1` token in `def` is a reference to the first argument and `#2` to the 
-second one. 
-
-
-You may also want to define an inline shortcut to make it easier 
-to input the command. 
-
-With the code below, we define a shortcut "smallfrac". 
-
-When typed, the shortcut is replaced with the associated LaTeX. 
-
-The `#@` token represents the argument to the left of the shortcut, and 
-the `#?` token represents a placeholder to be filled by the user.
-
-```js
-mfe.inlineShortcuts = {
-  ...mfe.inlineShortcuts,
-  smallfrac:'\\smallfrac{#@}{#?}'
-};
-```
-
-You can now parse the input from a mathfield using:
-
-```js
-console.log(ce.parse(mfe.value).json)
-```
-
-Alternatively, you can associate the customized compute engine with the 
-mathfields in the document:
-
-```js
-MathfieldElement.computeEngine = ce;
-console.log(mfe.getValue('math-json'))
-```

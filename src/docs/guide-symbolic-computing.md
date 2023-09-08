@@ -28,7 +28,12 @@ head:
     "compute-engine": "//unpkg.com/@cortex-js/compute-engine?module"
     };
 ---
-In this documentation, functions such as `ce.box()` and `ce.parse()` require a
+
+
+**Note:** To use the Compute Engine you must write JavaScript code. This guide 
+assumes you are familiar with JavaScript or TypeScript.{.notice--info}
+
+**Note:** In this guide, functions such as `ce.box()` and `ce.parse()` require a
 `ComputeEngine` instance which is denoted by a `ce.` prefix.<br>Functions that
 apply to a boxed expression, such as `expr.simplify()` are denoted with a
 `expr.` prefix.{.notice--info}
@@ -55,15 +60,24 @@ There are three common transformations that can be applied to an expression:
 
 </div>
 
-For example, if `f` is \\( 2 + (\sqrt{x^2 \times 4} + 1) \\) and `x` is \\( \pi \\):
+For example, if `f` is \\( 2 + (\sqrt{4x^2} + 1) \\) and `x` is \\( \pi \\):
+
+```javascript
+
+const f = ce.parse('2 + (\\sqrt{4x^2} + 1)');
+ce.set({'x': 'Pi'});
+console.log(f.simplify().latex); // 2\sqrt{x}+3
+console.log(f.evaluate().latex); // 2\sqrt{\pi}+3
+console.log(f.N().latex); // 9.283\,185\,307\ldots
+```
 
 <div class="symbols-table first-column-header">
 
 |                |                             |                                                              |
 | :------------- | :-------------------------- | :----------------------------------------------------------- |
-| `f.simplify()` | \\[ 2 + 2x \\]              | Exact calculations of some integer constants, simplification |
-| `f.evaluate()` | \\[ 2 + 2\\pi \\]                   | Evaluation of symbols                                        |
-| `f.N()` | \\[  8.283\,185\,307 \ldots \\]                   | Evaluation of constants                                        |
+| `f.simplify()` | \\[ \sqrt{x}+3 \\]          | Exact calculations of some integer constants, simplification |
+| `f.evaluate()` | \\[ \sqrt{\\pi}+3 \\]       | Evaluation of symbols                                        |
+| `f.N()`        | \\[ 9.283\,185\,307 \ldots \\] | Evaluation of constants                                      |
 
 </div>
 

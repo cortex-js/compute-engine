@@ -182,6 +182,8 @@ A MathJSON expression is a combination of **numbers**, **symbols**, **strings**,
 ```json
 "x"
 "Pi"
+"🍎"
+"半径"
 {"sym": "Pi", "wikidata": "Q167"}
 ```
 
@@ -189,7 +191,7 @@ A MathJSON expression is a combination of **numbers**, **symbols**, **strings**,
 
 ```json
 "'Diameter of a circle'"
-{"str": "Radius"}
+{"str": "Srinivasa Ramanujan"}
 ```
 
 **Function**
@@ -351,7 +353,7 @@ The encoding of the string follows the encoding of the JSON payload: UTF-8,
 UTF-16LE, UTF-16BE, etc...
 
 ```json
-"'Hello world'"
+"'Alan Turing'"
 ```
 
 ## Symbols
@@ -486,7 +488,16 @@ modifications:
   [Unicode TR51](https://unicode.org/reports/tr51/#EBNF_and_Regex) but modified
   to exclude invalid identifiers.
 
-Identifiers match one of those regular expressions:
+Identifiers match either the `NON_EMOJI_IDENTIFIER` or the `EMOJI_IDENTIFIER`
+patterns below:
+
+```js
+const NON_EMOJI_IDENTIFIER = /^[\p{XIDS}_]\p{XIDC}*$/u;
+```
+
+(from [Unicode TR51](https://unicode.org/reports/tr51/#EBNF_and_Regex))
+
+or
 
 ```js
 const VS16 = '\\u{FE0F}'; // Variation Selector-16, forces emoji presentation
@@ -503,24 +514,18 @@ const POSSIBLE_EMOJI = `(?:${ZWJ_ELEMENT})(${ZWJ}${ZWJ_ELEMENT})*`;
 const EMOJI_IDENTIFIER = new RegExp(`^(?:${POSSIBLE_EMOJI})+$`, 'u');
 ```
 
-(from [Unicode TR51](https://unicode.org/reports/tr51/#EBNF_and_Regex))
 
-or
-
-```js
-const NON_EMOJI_IDENTIFIER = /^[\p{XIDS}_]\p{XIDC}*$/u;
-```
 
 In summary, when using Latin characters, identifiers can start with a letter or
 an underscore, followed by zero or more letters, digits and underscores.
 
 Carefully consider when to use non-latin characters. Use non-latin characters
-for whole words, for example: `"半径"` (radius), "מְהִירוּת" (speed), "速度"
-(speed) or "वेग" (speed).
+for whole words, for example: `"半径"` (radius), "מְהִירוּת" (speed), "直徑"
+(diameter) or "सतह" (surface).
 
 Avoid mixing Unicode characters from different scripts in the same identifier.
 
-Do not include bidi markers such as **U+200E** or RTL **U+200F** in identifiers.
+Do not include bidi markers such as LTR **U+200E** or RTL **U+200F** in identifiers.
 LTR and RTL marks should be added as needed by the client displaying the
 identifier. They should be ignored when parsing identifiers.
 
