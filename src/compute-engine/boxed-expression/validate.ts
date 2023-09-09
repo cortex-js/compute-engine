@@ -52,7 +52,7 @@ export function validateNumericArgs(
   }
 
   return xs.map((op) =>
-    !op.isValid || op.isNumber
+    (op && !op.isValid) || op.isNumber
       ? op
       : ce.error(['incompatible-domain', 'Number', op.domain], op)
   );

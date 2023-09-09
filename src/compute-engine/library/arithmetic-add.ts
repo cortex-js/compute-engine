@@ -312,7 +312,7 @@ export function evalSummation(
 
 export function normalizeLimits(
   range: BoxedExpression
-): [string, number, number, boolean] {
+): [index: string, lower: number, upper: number, isFinite: boolean] {
   let lower = 1;
   let upper = lower + MAX_ITERATION;
   let index = 'Nothing';

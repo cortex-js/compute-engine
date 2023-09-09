@@ -60,6 +60,19 @@ export function randomExpression(level?: number): Expression {
   level ??= 1;
   if (level === 1) {
     const h = oneOf([
+      [
+        'Sqrt',
+        [
+          'Multiply',
+          6,
+          [
+            'Sum',
+            ['Divide', 1, ['Power', 'n', 2]],
+            ['Triple', ['Hold', 'n'], 1, { num: '+Infinity' }],
+          ],
+        ],
+      ],
+
       'Add',
       'Add',
       'Add',
@@ -78,11 +91,13 @@ export function randomExpression(level?: number): Expression {
       'Negate',
       'trig',
     ]);
-    return randomExpressionWithHead(h, 1);
+    if (typeof h === 'string') return randomExpressionWithHead(h, 1);
+    return h as Expression;
   }
   if (level === 2) {
-    if (Math.random() > 0.5) return randomExpression(3);
-    if (Math.random() > 0.75) return randomExpression(1);
+    const r = Math.random();
+    if (r > 0.75) return randomExpression(1);
+    if (r > 0.5) return randomExpression(3);
     const h = oneOf([
       'Multiply',
       'Multiply',
@@ -139,7 +154,7 @@ export function randomExpression(level?: number): Expression {
     ['Rational', 15, 12],
 
     'ExponentialE',
-    'ImaginaryUnit',
+    // 'ImaginaryUnit',
     ['Sqrt', 3],
     ['Sqrt', 5],
     ['Sqrt', 15],
@@ -158,8 +173,8 @@ export function randomExpression(level?: number): Expression {
     ['Power', 'x', 4],
     ['Subtract', 'x', 1],
     ['Add', 'x', 1],
-    'a',
-    'b',
+    // 'a',
+    // 'b',
     'Pi',
   ]);
 }

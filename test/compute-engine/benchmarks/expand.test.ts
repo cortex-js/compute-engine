@@ -21,8 +21,8 @@ const e = engine.parse(`(x + y +  z + 1)^{32}`);
 
 // Sympy benchmarks.
 // Source: https://github.com/sympy/sympy/blob/master/sympy/core/benchmarks/bench_expand.py
-describe.skip('SymPy Benchmarks', () => {
-  test(`Expand(3x^2yz^7 + 7xyz^2 + 4x + xy^4)`, () => {
+describe('SymPy Benchmarks', () => {
+  test.skip(`Expand(3x^2yz^7 + 7xyz^2 + 4x + xy^4)`, () => {
     expect(
       benchmark(() => expand(p), {
         mem: 900000,

@@ -717,7 +717,9 @@ export class ComputeEngine implements IComputeEngine {
     return new this._bignum(a);
   }
 
-  complex(a: number | Complex, b?: number): Complex {
+  complex(a: number | Decimal | Complex, b?: number | Decimal): Complex {
+    if (a instanceof Decimal) a = a.toNumber();
+    if (b instanceof Decimal) b = b.toNumber();
     return new Complex(a, b);
   }
 

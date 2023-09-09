@@ -28,6 +28,7 @@ import {
 import { getFreeVars, getSubexpressions, getSymbols } from './utils';
 import { isBigRational, isMachineRational } from '../numerics/rationals';
 import { asFloat } from '../numerics/numeric';
+import { compileToJavascript } from '../compile';
 
 /**
  * AbstractBoxedExpression
@@ -457,5 +458,9 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
 
   N(_options?: NOptions): BoxedExpression {
     return this.evaluate();
+  }
+
+  compile(): ((args: Record<string, number>) => number) | undefined {
+    return compileToJavascript(this);
   }
 }

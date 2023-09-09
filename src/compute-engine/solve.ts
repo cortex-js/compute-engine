@@ -121,7 +121,6 @@ export function findUnivariateRoots(
   expr: BoxedExpression,
   x: string
 ): BoxedExpression[] {
-  console.log('findUnivariateRoots', expr.toString(), x);
   const ce = expr.engine;
 
   if (expr.head === 'Equal') {

@@ -1,10 +1,19 @@
 ## [Unreleased]
 
-## Bug Fixes
+## New Features
+
+- Some expressions can be compiled to Javascript. This is useful to evaluate an
+  expression many times, for example in a loop. The compiled expression is
+  faster to evaluate than the original expression. To get the compiled
+  expression, use `expr.compile()`. Read more at
+  https://cortexjs.io/compute-engine/guides/compiling
+
+## Bug Fixes and Improvements
 
 - Fixed parsing and serialization of extended LaTeX synonyms for `e` and `i`.
 - Fixed serialization of `Half`.
 - Fixed serialization of `Which`
+- Improved serialization of `["Delimiter"]` expressions.
 
 ## 0.12.7
 

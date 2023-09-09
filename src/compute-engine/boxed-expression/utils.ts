@@ -172,12 +172,30 @@ export function getDictionaryLike(expr: BoxedExpression): {
 }
 
 export function isListLike(expr: BoxedExpression): boolean {
-  if (expr.head === 'List') return true;
+  const h = expr.head;
+  if (
+    h === 'List' ||
+    h === 'Sequence' ||
+    h === 'Tuple' ||
+    h === 'Single' ||
+    h === 'Pair' ||
+    h === 'Triple'
+  )
+    return true;
   return false;
 }
 
 export function getListLike(expr: BoxedExpression): BoxedExpression[] {
-  if (expr.head === 'List') return expr.ops!;
+  const h = expr.head;
+  if (
+    h === 'List' ||
+    h === 'Sequence' ||
+    h === 'Tuple' ||
+    h === 'Single' ||
+    h === 'Pair' ||
+    h === 'Triple'
+  )
+    return expr.ops!;
   return [];
 }
 

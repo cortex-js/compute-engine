@@ -438,24 +438,29 @@ export function benchmark(
 
   // Memory is not a reliable measurement because of unpredictable GC
   const variance =
-    1.0 - Math.max(delta.time / expected.time, delta.exprs / expected.exprs);
+    Math.max(delta.time / expected.time, delta.exprs / expected.exprs) - 1;
 
   if (true || Math.abs(variance) > 0.1) {
     console.error(
-      `Variance ${(variance * 100).toFixed(1)}%`,
-      '\n   mem:',
-      `${memToString(delta.mem)} (${memToString(expected.mem)} ${Number(
-        (100 * delta.mem) / expected.mem
-      ).toFixed(2)} %)`,
-      '\n   time:',
+      `\u001b[0mVariance ${(variance * 100).toFixed(1)}% (actual vs expected)`,
+      `\n     mem ${emoji(delta.mem, expected.mem)}` +
+        `${memToString(delta.mem)} (${memToString(expected.mem)} ${Number(
+          (100 * delta.mem) / expected.mem
+        ).toFixed(2)}%)` +
+        `\n    time ${emoji(delta.time, expected.time)}`,
       `${timeToString(delta.time)} (${timeToString(expected.time)} ${Number(
         (100 * delta.time) / expected.time
-      ).toFixed(2)} %)`,
-      '\n   exprs:',
+      ).toFixed(2)}%)` + `\n   exprs ${emoji(delta.exprs, expected.exprs)}`,
       `${delta.exprs} (${expected.exprs} ${Number(
         (100 * delta.exprs) / expected.exprs
-      ).toFixed(2)} %)`
+      ).toFixed(2)}%)`
     );
   }
   return variance;
+}
+
+function emoji(a, b): string {
+  if (a === b) return '✅';
+  if (a < b) return '\u001b[32m\u25BC\u001b[0m'; // green up triangle
+  return '\u001b[31m\u25B2\u001b[0m';
 }

@@ -9,6 +9,7 @@ import {
   ops,
   missingIfEmpty,
   stripText,
+  isListLike,
 } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer, Terminator } from '../public';
 import { joinLatex } from '../tokenizer';
@@ -66,7 +67,7 @@ function parseSequence(
   return result;
 }
 
-function serializeSequence(sep = '') {
+function serializeOps(sep = '') {
   return (serializer: Serializer, expr: Expression | null): string =>
     (ops(expr) ?? []).map((x) => serializer.serialize(x)).join(sep);
 }
@@ -145,30 +146,27 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const style = serializer.options.groupStyle(expr, serializer.level + 1);
 
       const arg1 = op(expr, 1);
-
-      if (argCount === 1)
-        return serializer.wrapString(serializer.serialize(arg1), style);
-
-      let sep = '';
-      let open = '';
-      let close = '';
+      const h1 = head(arg1);
+      const defaultFence =
+        { List: '[],', Sequence: '' }[typeof h1 === 'string' ? h1 : ''] ??
+        '(),';
+      let open = defaultFence[0] ?? '';
+      let close = defaultFence[1] ?? '';
+      let sep = defaultFence[2] ?? '';
 
       if (argCount > 1) {
         const op2 = stringValue(op(expr, 2)) ?? '';
-        open = op2[0] ?? '(';
-        close = op2[1] ?? ')';
-        sep = op2[2] ?? ',';
+        open = op2[0] ?? defaultFence[0];
+        close = op2[1] ?? defaultFence[1];
+        sep = op2[2] ?? defaultFence[2];
       }
 
-      const body =
-        head(arg1) === 'List'
-          ? serializeSequence(sep)(serializer, arg1)
-          : serializer.serialize(arg1);
+      const body = isListLike(arg1)
+        ? serializeOps(sep)(serializer, arg1)
+        : serializer.serialize(arg1);
 
-      serializer.wrapString(body, style, stringValue(op(expr, 2)) ?? undefined);
-
-      if (!open || !close) return serializer.wrapString(body, style);
-      return `${open} ${body} ${close}`;
+      // if (!open || !close) return serializer.wrapString(body, style);
+      return serializer.wrapString(body, style, open + close);
     },
   },
   {
@@ -292,7 +290,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string => {
       return joinLatex([
         '\\lbrack',
-        serializeSequence(', ')(serializer, expr),
+        serializeOps(', ')(serializer, expr),
         '\\rbrack',
       ]);
     },
@@ -333,7 +331,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     name: 'Sequence',
-    serialize: serializeSequence(''),
+    serialize: serializeOps(''),
   },
   {
     trigger: [';'],

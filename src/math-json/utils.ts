@@ -302,6 +302,20 @@ export function symbol(expr: Expression | null | undefined): string | null {
   return s;
 }
 
+export function isListLike(expr: Expression | null): boolean {
+  if (expr === null) return false;
+  const h = head(expr);
+  if (!h || typeof h !== 'string') return false;
+  return /^(List|Sequence|Tuple|Single|Pair|Triple)$/.test(h);
+}
+
+// Matrices are represented as lists of lists
+export function isMatrixLike(expr: Expression | null): boolean {
+  if (!isListLike(expr)) return false;
+  const rows = ops(expr);
+  return rows?.every((x) => isListLike(x)) ?? false;
+}
+
 function keyValuePair(
   expr: Expression | null
 ): null | [key: string, value: Expression] {

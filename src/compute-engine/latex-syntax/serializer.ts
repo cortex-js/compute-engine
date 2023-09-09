@@ -266,19 +266,18 @@ export class Serializer {
     fence?: string
   ): string {
     if (style === 'none') return s;
-    const openFence = fence?.[0] ?? '(';
-    const closeFence = fence?.[1] ?? ')';
+    if (fence === undefined) fence = '()';
+    const openFence = fence?.[0] ?? '.';
+    const closeFence = fence?.[1] ?? '.';
 
     if ((openFence === '.' || closeFence === '.') && style === 'paren')
       style = 'leftright';
 
     if (style === 'leftright')
-      return `${openFence === '.' ? '' : `\\left(${openFence}`}${s}${
-        closeFence === '.' ? '' : `\\right(${closeFence}`
-      })`;
+      return `\\left${openFence}${s}\\right${closeFence}}`;
     if (style === 'big')
-      return `${openFence === '.' ? '' : `\\Bigl(${openFence}`}${s}${
-        closeFence === '.' ? '' : `\\Bigr(${closeFence}`
+      return `${openFence === '.' ? '' : `\\Bigl${openFence}`}${s}${
+        closeFence === '.' ? '' : `\\Bigr${closeFence}`
       })`;
 
     return openFence + s + closeFence;
