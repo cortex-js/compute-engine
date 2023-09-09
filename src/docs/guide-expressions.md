@@ -232,10 +232,10 @@ The value of `expr.numericValue` may be:
   `expr.numericValue.re` and `expr.numericValue.im` to access the real and 
   imaginary parts.
 - `Array.isArray(expr.numericValue)`: the expression is a rational as a tuple
-  of two Javascript `number` or two Javascript `bigint`.
+  of two JavaScript `number` or two JavaScript `bigint`.
 
 **To access a numerical approximation of an expression if available**, use
-`expr.N().valueOf()`. It will return a Javascript number approximation of the
+`expr.N().valueOf()`. It will return a JavaScript number approximation of the
 value.
 
 A symbol may have a value if it represents a bound variable, but it may also

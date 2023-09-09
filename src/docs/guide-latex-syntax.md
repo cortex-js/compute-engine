@@ -338,7 +338,7 @@ of the Compute Engine
 const ce = new ComputeEngine();
 ce.latexDictionary = [
   // Expand the default dictionary...
-  ...ce.latexDictionary(),
+  ...ce.latexDictionary,
   // ...and add the `\smoll` command
   {
     trigger: ['\\smoll'],
@@ -353,11 +353,12 @@ ce.latexDictionary = [
       ];
     },
   },
-],
-;
+];
 
 console.log(ce.parse('\\smoll{1}{5}').json);
-// ➔ ["Divide", 1, 5]
+// The "Divide" get represented a "Rational" by default when 
+// both arguments are integers.
+// ➔ ["Rational", 1, 5]
 ```
 
 If you are using a mathfield, all the mathfields on the page
