@@ -21,14 +21,14 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   },
   {
     kind: 'symbol',
-    trigger: '\\mathss{T}',
+    trigger: '\\mathsf{T}',
     parse: 'True',
   },
 
   {
     name: 'False',
     kind: 'symbol',
-    trigger: '\\bot', // ⊥ U+22A5
+    trigger: ['\\bot'], // ⊥ U+22A5
   },
   {
     kind: 'symbol',
@@ -37,7 +37,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   },
   {
     kind: 'symbol',
-    trigger: '\\mathss{F}',
+    trigger: '\\mathsf{F}',
     parse: 'True',
   },
 
