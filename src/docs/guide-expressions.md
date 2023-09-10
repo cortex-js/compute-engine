@@ -202,8 +202,8 @@ no side effect.
 The \\( \sin() \\) function is pure: it evaluates to the same value when the
 same arguments are applied to it.
 
-On the other hand, the \\( \mathrm{Random}() \\) function is not pure: by its
-nature it evaluates to a different value on every evaluation.
+On the other hand, the \\( \operatorname{Random}() \\) function is not pure: by
+its nature it evaluates to a different value on every evaluation.
 
 Numbers, symbols and strings are pure. A function expression is pure if the
 function itself is pure, and all its arguments are pure as well.
@@ -228,14 +228,15 @@ dictionary, use the following boolean expressions:
 </div>
 
 The value of `expr.numericValue` may be:
+
 - `typeof expr.numericValue === 'number'`: the expression is a JavaScript number
-- `ce.isBignum(expr.numericValue)`: the expression is a bignum. Use 
+- `ce.isBignum(expr.numericValue)`: the expression is a bignum. Use
   `expr.numericValue.toNumber()` to convert it to a JavaScript number.
-- `ce.isComplex(expr.numericValue)`: the expression is a complex number. Use 
-  `expr.numericValue.re` and `expr.numericValue.im` to access the real and 
+- `ce.isComplex(expr.numericValue)`: the expression is a complex number. Use
+  `expr.numericValue.re` and `expr.numericValue.im` to access the real and
   imaginary parts.
-- `Array.isArray(expr.numericValue)`: the expression is a rational as a tuple
-  of two JavaScript `number` or two JavaScript `bigint`.
+- `Array.isArray(expr.numericValue)`: the expression is a rational as a tuple of
+  two JavaScript `number` or two JavaScript `bigint`.
 
 **To access a numerical approximation of an expression if available**, use
 `expr.N().valueOf()`. It will return a JavaScript number approximation of the

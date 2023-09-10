@@ -2,20 +2,32 @@
 
 ## Improvements
 
-- Added more expressions and symbols supported by `expr.compile()`:
+- Added more functions and symbols supported by `expr.compile()`:
+
   - `Factorial` postfix operator `5!`
   - `Gamma` function `\Gamma(2)`
-  - `LogGamma` function `\mathrm{LogGamma}(2)`
-  - `Gcd` function `\mathrm{gcd}(20, 5)`
-  - `Lcm` function `\mathrm{lcm}(20, 5)`
-  - `Chop` function `\mathrm{chop}(0.00000000001)`
+  - `LogGamma` function `\operatorname{LogGamma}(2)`
+  - `Gcd` function `\operatorname{gcd}(20, 5)`
+  - `Lcm` function `\operatorname{lcm}(20, 5)`
+  - `Chop` function `\operatorname{chop}(0.00000000001)`
   - `Half` constant `\frac{1}{2}`
   - 'MachineEpsilon' constant
   - `GoldenRatio` constant
   - `CatalanConstant` constant
   - `EulerGamma` constant `\gamma`
-  - `Max` function `\mathrm{max}(1, 2, 3)`
-  - `Min` function `\mathrm{min}(13, 5, 7)`
+  - `Max` function `\operatorname{max}(1, 2, 3)`
+  - `Min` function `\operatorname{min}(13, 5, 7)`
+  - Some logical operators and constants: `And`, `Or`, `Not`, `True`, `False`
+
+- Add LaTeX syntax for logical operators:
+  - `And`: `\land`, `\operatorname{and}` (infix or function)
+  - `Or`: `\lor`, `\operatorname{or}` (infix or function)
+  - `Not`: `\lnot`, `\operatorname{not}` (prefix or function)
+  - `Xor`: `\veebar`, `\operatorname{xor}` (infix or function)
+  - `Nand`: `\barwedge`, `\operatorname{nand}` (infix or function)
+  - `Nor`: `^^^^22BD`, `\operatorname{nor}` (infix or function)
+  - `Implies`: `\implies`, `\operatorname{implies}` (infix or function)
+  - `Equivalent`: `\iff`, `\operatorname{equivalent}` (infix or function)
 
 ## 0.13.0
 

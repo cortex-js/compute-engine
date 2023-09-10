@@ -61,7 +61,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     name: 'Ring', // Aka 'Composition', i.e. function composition
     trigger: ['\\circ'],
     kind: 'infix',
-    precedence: 265,
+    precedence: 265, // @todo: MathML is 950
     // @todo: check lhs and rhs are functions
   },
   {

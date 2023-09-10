@@ -531,6 +531,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: '\\exponentialE',
   },
   {
+    trigger: '\\operatorname{e}',
+    parse: 'ExponentialE',
+  },
+  {
     trigger: '\\mathrm{e}',
     parse: 'ExponentialE',
   },
@@ -546,6 +550,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'ImaginaryUnit',
     trigger: ['\\imaginaryI'],
+  },
+  {
+    trigger: '\\operatorname{i}',
+    parse: 'ImaginaryUnit',
   },
   {
     trigger: '\\mathrm{i}',
@@ -936,7 +944,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: 660,
     serialize: (serializer: Serializer, expr: Expression | null): string => {
       if (expr && nops(expr) === 1)
-        return '\\mathrm{Rational}' + serializer.wrapArguments(expr);
+        return '\\operatorname{Rational}' + serializer.wrapArguments(expr);
       return serializeFraction(serializer, expr);
     },
   },
@@ -955,7 +963,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) => serializer.wrapShort(op(expr, 1)) + '^2',
   },
   {
-    trigger: '\\sum',
+    trigger: ['\\sum'],
     precedence: 275,
     name: 'Sum',
     parse: parseBigOp('Sum', 275),

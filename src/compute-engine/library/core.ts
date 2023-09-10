@@ -349,7 +349,7 @@ export const CORE_LIBRARY: IdTable[] = [
               }
             }
           }
-          // Is it a compound symbol `x_\mathrm{max}`, `\mu_0`
+          // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
           // or an indexable collection?
           if (op1.symbol) {
             // Indexable collection?

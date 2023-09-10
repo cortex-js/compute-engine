@@ -20,6 +20,7 @@ import {
   isFunctionEntry,
   ExpressionParseHandler,
   isExpressionEntry,
+  Precedence,
 } from '../public';
 import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
 import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
@@ -49,7 +50,7 @@ export type IndexedSymbolEntry = CommonEntry & {
   kind: 'symbol';
 
   // The 'precedence' of symbols is used to determine appropriate wrapping when serializing
-  precedence: number;
+  precedence: Precedence;
 
   parse: ExpressionParseHandler;
 };
@@ -87,20 +88,20 @@ export type IndexedMatchfixEntry = CommonEntry & {
 export type IndexedInfixEntry = CommonEntry & {
   kind: 'infix';
   associativity: 'right' | 'left' | 'non' | 'both';
-  precedence: number;
+  precedence: Precedence;
 
   parse: InfixParseHandler;
 };
 
 export type IndexedPrefixEntry = CommonEntry & {
   kind: 'prefix';
-  precedence: number;
+  precedence: Precedence;
 
   parse: ExpressionParseHandler;
 };
 export type IndexedPostfixEntry = CommonEntry & {
   kind: 'postfix';
-  precedence: number;
+  precedence: Precedence;
 
   parse: PostfixParseHandler;
 };
@@ -142,7 +143,7 @@ export type IndexedLatexDictionary = {
   matchfix: IndexedMatchfixEntry[];
 
   // Note: for functions, the "trigger" is the name of the function
-  // as in \mathrm{foo}, the "trigger" is "foo"
+  // as in \operatorname{foo}, the "trigger" is "foo"
   function: Map<string, IndexedFunctionEntry[]>;
 
   // Environment definition must be unique. They are indexed by the name
@@ -396,7 +397,7 @@ function makeIndexedEntry(
           `${triggerString}${serializer.wrapArguments(expr)}`;
       } else
         result.serialize = (serializer, expr) =>
-          `\\mathrm{${triggerString}}${serializer.wrapArguments(expr)}`;
+          `\\operatorname{${triggerString}}${serializer.wrapArguments(expr)}`;
     }
     if (typeof entry.parse === 'function') result.parse = entry.parse;
     else if (typeof entry.parse === 'string')

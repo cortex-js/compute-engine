@@ -304,14 +304,15 @@ export class ComputeEngine implements IComputeEngine {
    * perform calculations using arbitrary precision floating point numbers.
    * Use `"auto"` or `"complex"` to allow calculations on complex numbers.
    *
-   * @param options.numericPrecision Specific how many digits of precision for the
-   * numeric calculations. Default is 100.
+   * @param options.numericPrecision Specific how many digits of precision
+   * for the numeric calculations. Default is 100.
    *
-   * @param options.tolerance If the absolute value of the difference of two numbers
-   * is less than `tolerance`, they are considered equal. Used by `chop()` as well.
+   * @param options.tolerance If the absolute value of the difference of two
+   * numbers is less than `tolerance`, they are considered equal. Used by
+   * `chop()` as well.
    *
-   * @param options.defaultDomain If an unknown symbol is encountered, assume it should
-   * be a variable in this domain. **Default** `ExtendedRealNumber`
+   * @param options.defaultDomain If an unknown symbol is encountered, assume
+   * this is its domain. **Default** `ExtendedRealNumber`
    */
   constructor(options?: {
     numericMode?: NumericMode;

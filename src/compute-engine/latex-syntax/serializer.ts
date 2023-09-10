@@ -352,7 +352,7 @@ export class Serializer {
     }
     const style = this.options.applyFunctionStyle(expr, this.level);
     return (
-      '\\mathrm{Apply}' +
+      '\\operatorname{Apply}' +
       this.wrapString(
         this.serialize(h) + ', ' + this.serialize(['List', ...args]),
         style
@@ -729,13 +729,13 @@ function parseIdentifierBody(
 // Other special symbols:
 // 'x_012' --> `x_{012}`
 // 'x012' --> `x_{012}`
-// 'x_"max"' --> `x_\mathrm{max}`
-// '_' --> `\mathrm{\_}`
-// '_a' --> `\mathrm{\_a}`
-// '___a' --> `\mathrm{\_\_\_a}`
+// 'x_"max"' --> `x_\operatorname{max}`
+// '_' --> `\operatorname{\_}`
+// '_a' --> `\operatorname{\_a}`
+// '___a' --> `\operatorname{\_\_\_a}`
 // 'alpha0' --> `mathit{\alpha_{0}}`
-// 'alpha__beta' --> `mathrm{\alpha^{\beta}}`
-// 'alpha_beta' --> `mathrm{\alpha_{beta}}`
+// 'alpha__beta' --> `\operatorname{\alpha^{\beta}}`
+// 'alpha_beta' --> `\operatorname{\alpha_{beta}}`
 // 'speed-of-sound' --> `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
 // 'not[this]' --> `\mathit{\lbrace this\rbrace}`
 
@@ -762,17 +762,17 @@ function serializeIdentifier(
   if (ONLY_EMOJIS.test(s)) return s;
 
   // If the identifier starts with one or more underscore,
-  // it's a wildcard symbol and always wrapped with \mathrm{...}.
+  // it's a wildcard symbol and always wrapped with \operatorname{...}.
   const m = s.match(/^(_+)(.*)/);
   if (m) {
     const [body, rest] = parseIdentifierBody(m[2], true, 'none');
-    return `\\mathrm{${'\\_'.repeat(m[1].length) + body + rest}}`;
+    return `\\operatorname{${'\\_'.repeat(m[1].length) + body + rest}}`;
   }
 
   const [body, rest] = parseIdentifierBody(s, true, defaultMulticharStyle);
 
-  // We couldn't parse the identifier, so just wrap it in \mathrm{...}
-  if (rest.length > 0) return `\\mathrm{${s}}`;
+  // We couldn't parse the identifier, so just wrap it in \operatorname{...}
+  if (rest.length > 0) return `\\operatorname{${s}}`;
 
   return body;
 }

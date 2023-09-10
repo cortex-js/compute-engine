@@ -61,6 +61,43 @@ export type LibraryCategory =
   | 'trigonometry'
   | 'units';
 
+/** Theory of operations:
+ *
+ * The precedence of an operator is a number that indicates the order in which
+ * operators are applied. For example, in `1 + 2 * 3`, the `*` operator has
+ * a higher precedence than the `+` operator, so it is applied first.
+ *
+ * The precendence range from 0 to 1000. The higher the number, the higher the
+ * precedence, the more "binding" the operator is.
+ *
+ * Here are some rough ranges for the precedence:
+ *
+ * - 800: prefix and postfix operators,
+ *        e.g. `\lnot`, `!`, `'`, `\degree`, `++`, etc...
+ * - 700: some relational operators: `<`
+ * - 600: some binary operators: `\div`
+ * - 500: not used
+ * - 400: not used
+ * - 300: some logic and arithmetic operators:
+ *        `\land`, `\lor`, `\times`, etc...
+ * - 200: arithmetic operators, inequalities:
+ *        `+`, `-`, `=`, `<`, etc...
+ *   - 260: `=`
+ *   - 245: `\lt`, `\gt`
+ *   - 241: `\leq`
+ * - 100: not used
+ * - 0: `,`, `;`, etc...
+ *
+ *
+ * Note: MathML defines some operator precendence, but it has some
+ * issues and inconsistencies. However, whenever possible we adopted the
+ * MathML precedence. See https://www.w3.org/TR/2009/WD-MathML3-20090924/appendixc.html
+ *
+ * For reference, the JavaScript operator precedence is documented
+ * here: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence
+ */
+export type Precedence = number;
+
 /**
  * This indicates a condition under which parsing should stop:
  * - an operator of a precedence higher than specified has been encountered
@@ -68,7 +105,7 @@ export type LibraryCategory =
  * - or if a condition is provided, the condition returns true;
  */
 export type Terminator = {
-  minPrec: number;
+  minPrec: Precedence;
   condition?: (parser: Parser) => boolean;
 };
 
@@ -240,7 +277,7 @@ export type InfixEntry = Omit<BaseEntry, 'parse'> & {
    */
   associativity?: 'right' | 'left' | 'non' | 'both';
 
-  precedence?: number; // Priority
+  precedence?: Precedence;
 
   parse?: string | InfixParseHandler;
 };
@@ -253,7 +290,7 @@ export type PostfixEntry = Omit<BaseEntry, 'parse'> & {
    */
   kind: 'postfix';
 
-  precedence?: number; // Priority
+  precedence?: Precedence;
 
   parse?: PostfixParseHandler;
 };
@@ -265,7 +302,7 @@ export type PrefixEntry = Omit<BaseEntry, 'parse'> & {
    * Example: `-`, `\not`.
    */
   kind: 'prefix';
-  precedence: number;
+  precedence: Precedence;
 
   parse?: PrefixParseHandler;
 };
@@ -283,7 +320,7 @@ export type SymbolEntry = Omit<BaseEntry, 'parse'> & {
   kind: 'symbol';
 
   /** Used for appropriate wrapping (i.e. when to surround it with parens) */
-  precedence?: number;
+  precedence?: Precedence;
 
   parse: Expression | SymbolParseHandler;
 };
@@ -553,7 +590,7 @@ export type NumberFormattingOptions = {
    *
    * If you change it to another value, be aware that this may lead to
    * unexpected results. For example, if changing it to `,` the expression
-   * `\mathrm{Hypot}(1,2)` will parse as `["Hypot", 1.2]` rather than
+   * `\operatorname{Hypot}(1,2)` will parse as `["Hypot", 1.2]` rather than
    * `["Hypot", 1, 2]`.
    *
    * **Default**: `"\\,"` (thin space, 3/18mu) (Resolution 7 of the 1948 CGPM)
@@ -782,7 +819,7 @@ export interface Parser {
    * tokens (i.e. without braces), for example `^2`, `\sqrt3` or `\frac12`
    *
    * This argument will usually be a single token, but can be a sequence of
-   * tokens (e.g. `\sqrt\frac12` or `\sqrt\mathrm{speed}`).
+   * tokens (e.g. `\sqrt\frac12` or `\sqrt\operatorname{speed}`).
    *
    * The following tokens are excluded from consideration in order to fail
    * early when encountering a likely syntax error, for example `x^(2)`
@@ -818,7 +855,7 @@ export interface Parser {
    * A symbol can be:
    * - a single-letter identifier: `x`
    * - a single LaTeX command: `\pi`
-   * - a multi-letter identifier: `\mathrm{speed}`
+   * - a multi-letter identifier: `\operatorname{speed}`
    */
   parseSymbol(until?: Partial<Terminator>): Expression | null;
 

@@ -129,7 +129,7 @@ export const DEFAULT_LATEX_NUMBER_OPTIONS: NumberFormattingOptions = {
   precision: 6, // with machine numbers, up to 15 assuming 2^53 bits floating points
   positiveInfinity: '\\infty',
   negativeInfinity: '-\\infty',
-  notANumber: '\\mathrm{NaN}',
+  notANumber: '\\operatorname{NaN}',
   decimalMarker: '.', // Use `{,}` for comma as a decimal marker
   groupSeparator: '\\,', // for thousands, etc...
   exponentProduct: '\\cdot',
@@ -631,7 +631,7 @@ export class _Parser implements Parser {
   // Some LaTeX commands (but not all) can accept an argument without braces,
   // for example `^` , `\sqrt` or `\frac`.
   // This argument will usually be a single token, but can be a sequence of
-  // tokens (e.g. `\sqrt\frac12` or `\sqrt\mathrm{speed}`).
+  // tokens (e.g. `\sqrt\frac12` or `\sqrt\operatorname{speed}`).
   parseToken(): Expression | null {
     const excluding = [
       ...'!"#$%&(),/;:?@[]\\`|~'.split(''),

@@ -144,6 +144,8 @@ function parseIntegralBody(
     minPrec: 266,
     condition: () => {
       if (parser.matchAll(['\\mathrm', '<{>', 'd', '<}>'])) found = true;
+      else if (parser.matchAll(['\\operatorname', '<{>', 'd', '<}>']))
+        found = true;
       return found;
     },
   });
@@ -160,7 +162,7 @@ function parseIntegralBody(
     });
   }
 
-  // If we didn't get a `\mathrm{d}x` or `dx` at the same level as the
+  // If we didn't get a `\operatorname{d}x` or `dx` at the same level as the
   // expression, perhaps it was in a subexpression, e.g. `\frac{dx}{x}`
   if (fn && !found) return parseIntegralBodyExpression(fn);
 
@@ -176,7 +178,7 @@ function parseIndexes(parser: Parser, n = 1): string[] {
   if (index === null) return [];
   result.push(index);
 
-  // @todo: parse additional indexes (\mathrm{d}, 'd', etc...)
+  // @todo: parse additional indexes (\operatorname{d}, 'd', etc...)
 
   return result;
 }
@@ -271,7 +273,7 @@ function serializeIntegral(command: string) {
         command,
         '\\!',
         serializer.serialize(fn),
-        '\\,\\mathrm{d}',
+        '\\,\\operatorname{d}',
         serializer.serialize(index),
       ]);
     }
@@ -294,7 +296,7 @@ function serializeIntegral(command: string) {
       '\\!',
       serializer.serialize(fn),
       ...(index && symbol(index) !== 'Nothing'
-        ? ['\\,\\mathrm{d}', serializer.serialize(index)]
+        ? ['\\,\\operatorname{d}', serializer.serialize(index)]
         : []),
     ]);
   };

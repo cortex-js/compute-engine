@@ -8,8 +8,8 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { name: 'AlgebraicNumber', trigger: '\\bar\\Q' },
   { name: 'ComplexNumber', trigger: ['\\C'] },
   { trigger: '\\mathbb{C}', parse: 'ComplexNumber' },
-  { name: 'ImaginaryNumber', trigger: ['\\imaginaryI\\R'] },
-  { name: 'ExtendedComplexNumber', trigger: ['\\bar\\C'] },
+  { name: 'ImaginaryNumber', trigger: ['\\imaginaryI', '\\R'] },
+  { name: 'ExtendedComplexNumber', trigger: ['\\bar', '\\C'] },
   { name: 'EmptySet', trigger: ['\\emptyset'] },
   { trigger: ['\\varnothing'], parse: 'EmptySet' }, // Parsing only
   { name: 'Integer', trigger: ['\\Z'] },
@@ -17,7 +17,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { name: 'RationalNumber', trigger: ['\\Q'] },
   { name: 'RealNumber', trigger: ['\\R'] },
   { trigger: '\\mathbb{R}', parse: 'RealNumber' },
-  { name: 'ExtendedRealNumber', trigger: ['\\bar\\R'] },
+  { name: 'ExtendedRealNumber', trigger: ['\\bar', '\\R'] },
   { name: 'TranscendentalNumber', trigger: '\\R-\\bar\\Q' },
   { trigger: '\\R\\backslash\\bar\\Q', parse: 'TranscendentalNumber' },
 

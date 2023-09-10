@@ -332,20 +332,6 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     precedence: 260,
   },
   {
-    name: 'Equivalent', // MathML: identical to, Mathematica: Congruent
-    trigger: ['\\equiv'],
-    kind: 'infix',
-    associativity: 'right',
-    precedence: 260,
-  },
-  {
-    trigger: ['\\iff'],
-    kind: 'infix',
-    parse: 'Equivalent',
-    associativity: 'right',
-    precedence: 260,
-  },
-  {
     name: 'MuchLess',
     trigger: ['\\ll'],
     kind: 'infix',

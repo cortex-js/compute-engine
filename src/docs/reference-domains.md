@@ -77,7 +77,7 @@ render_math_in_document: true
 | `Quaternion`                  | A \\(2\times2\\) matrix of complex elements. [Quaternions](https://en.wikipedia.org/wiki/Quaternion) are commonly used to represent vectors in 3D space (\\(\mathbb{R}^3\\)) |
 | `SquareMatrix`                | A tensor with the same number of rows and columns                                                                                                                            |
 | `MonomialMatrix`              | A square matrix with exactly one non-zero entry in each row and column                                                                                                       |
-| `OrthogonalMatrix`            | A real square matrix whose transpose is equal to its inverse: \\(Q^{\mathrm{T}}=Q^{-1}\\)                                                                                    |
+| `OrthogonalMatrix`            | A real square matrix whose transpose is equal to its inverse: \\(Q^{\operatorname{T}}=Q^{-1}\\)                                                                              |
 | `PermutationMatrix`           | A square matrix with with exactly one non-zero entry in each row and column                                                                                                  |
 | `DiagonalMatrix`              | A matrix in which the elements outside the main diagonal are zero                                                                                                            |
 | `IdentityMatrix`              | A diagonal matrix whose diagonal elements are 1                                                                                                                              |
