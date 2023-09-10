@@ -154,6 +154,7 @@ export function compile(
       Multiply: ['*', 12],
       Divide: ['/', 13],
       Equal: ['===', 8],
+      NotEqual: ['!==', 8],
       LessEqual: ['<=', 9],
       GreaterEqual: ['>=', 9],
       Less: ['<', 9],

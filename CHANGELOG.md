@@ -17,6 +17,8 @@
   - `EulerGamma` constant `\gamma`
   - `Max` function `\operatorname{max}(1, 2, 3)`
   - `Min` function `\operatorname{min}(13, 5, 7)`
+  - Relational operators: `Less`, `Greater`, `LessEqual`, `GreaterEqual`,
+    'Equal', 'NotEqual'
   - Some logical operators and constants: `And`, `Or`, `Not`, `True`, `False`
 
 - Add LaTeX syntax for logical operators:
