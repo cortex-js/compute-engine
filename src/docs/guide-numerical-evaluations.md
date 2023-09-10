@@ -19,7 +19,7 @@ values are:
 - constants such as `ExponentialE` and `Pi`
 
 If one of the arguments is not an exact value the expression is evaluated
-as a numeric approximation.
+as a **numeric approximation**.
 
 **To obtain a numeric approximation, use `expr.N()`**. If `expr.N()` cannot 
 provide a numeric evaluation, a symbolic representation of the partially
@@ -93,7 +93,7 @@ variables in the current scope.
 
 
 ```js
-const expr = ce.parse("3x^2+4x+c");
+const expr = ce.parse("3x^2+4x+2");
 
 for (const x = 0; x < 1; x += 0.01) {
   ce.set({x : x});
@@ -106,7 +106,7 @@ You can also use `expr.subs()`, but this will create a brand new expression
 on each iteration, and will be much slower.
 
 ```js
-const expr = ce.parse("3x^2+4x+c");
+const expr = ce.parse("3x^2+4x+2");
 
 for (const x = 0; x < 1; x += 0.01) {
   console.log(`f(${x}) = ${expr.subs({x: x}).N().valueOf()}`);
@@ -131,6 +131,32 @@ ce.symbol('x').value = 5;
 ce.symbol('x').value = undefined;
 
 ```
+
+If performance is important, you can compile the expression to a JavaScript 
+function.
+
+## Compiling
+
+**To get a compiled version of an expression** use the `expr.compile()` method:
+
+```js
+const expr = ce.parse("3x^2+4x+2");
+const fn = expr.compile();
+for (const x = 0; x < 1; x += 0.01) 
+  console.log(fn({x}));
+```
+
+The syntax `{x}` is a shortcut for `{"x": x}`, in other words it defines 
+an argument named `"x"` (which is used the expression `expr`) as having 
+the value of the JavaScript variable `x` (which is used in the for loop).{.notice--info}
+
+
+This will usually result in a much faster evaluation than using `expr.N()`
+but this approach has some limitations.
+
+{% readmore "/compute-engine/guides/compiling/" %}
+Read more about **Compiling Expressions to JavaScript**
+{% endreadmore %}
 
 
 ## Numeric Modes
