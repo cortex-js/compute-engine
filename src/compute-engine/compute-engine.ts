@@ -338,6 +338,7 @@ export class ComputeEngine implements IComputeEngine {
     };
 
     this._useRawJsonSerializationOptions = false;
+    // These options are not customizable...
     this._rawJsonSerializationOptions = {
       exclude: [],
       shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
@@ -1459,9 +1460,28 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   get jsonSerializationOptions(): Readonly<JsonSerializationOptions> {
-    if (this._useRawJsonSerializationOptions)
-      return this._rawJsonSerializationOptions;
-    return this._jsonSerializationOptions;
+    if (this._useRawJsonSerializationOptions) {
+      return new Proxy(this._rawJsonSerializationOptions, {
+        get(options, prop) {
+          if (!(prop in options)) return undefined;
+          return options[prop];
+        },
+      });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
+    return new Proxy(this._jsonSerializationOptions, {
+      get(options, prop) {
+        if (!(prop in options)) return undefined;
+        return options[prop];
+      },
+      set(options, prop, value): boolean {
+        if (!(prop in options)) return false;
+        self.jsonSerializationOptions = { [prop]: value };
+        return true;
+      },
+    });
   }
 
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>) {
