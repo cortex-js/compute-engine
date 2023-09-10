@@ -1,3 +1,22 @@
+## [Unreleased]
+
+## Improvements
+
+- Added more expressions and symbols supported by `expr.compile()`:
+  - `Factorial` postfix operator `5!`
+  - `Gamma` function `\Gamma(2)`
+  - `LogGamma` function `\mathrm{LogGamma}(2)`
+  - `Gcd` function `\mathrm{gcd}(20, 5)`
+  - `Lcm` function `\mathrm{lcm}(20, 5)`
+  - `Chop` function `\mathrm{chop}(0.00000000001)`
+  - `Half` constant `\frac{1}{2}`
+  - 'MachineEpsilon' constant
+  - `GoldenRatio` constant
+  - `CatalanConstant` constant
+  - `EulerGamma` constant `\gamma`
+  - `Max` function `\mathrm{max}(1, 2, 3)`
+  - `Min` function `\mathrm{min}(13, 5, 7)`
+
 ## 0.13.0
 
 **Release Date:** 2023-09-09

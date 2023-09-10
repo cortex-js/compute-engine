@@ -35,7 +35,7 @@ describe('COMPLEX SYMBOLS', () => {
   test('x_{\\mathrm{max}}', () =>
     expect(
       engine.parse('x_{\\mathrm{max}}').canonical.toJSON()
-    ).toMatchInlineSnapshot(`x_max`));
+    ).toMatchInlineSnapshot(`x_Max`));
 });
 
 describe('SUPSUB', () => {

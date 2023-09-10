@@ -1,19 +1,54 @@
-import { normalizeLimits } from './library/arithmetic-add';
-import { asFloat } from './numerics/numeric';
+import { normalizeLimits } from './library/utils';
+import {
+  asFloat,
+  chop,
+  factorial,
+  gamma,
+  gcd,
+  lcm,
+  lngamma,
+} from './numerics/numeric';
 import { BoxedExpression } from './public';
+
+export type CompiledType = boolean | number | string | object;
+
+/** This is an extension of the Function class that allows us to pass
+ * a custom scope for "global" functions. */
+export class ComputeEngineFunction extends Function {
+  private sys = {
+    factorial: factorial,
+    gamma: gamma,
+    lngamma: lngamma,
+    gcd: gcd,
+    lcm: lcm,
+    chop: chop,
+  };
+  constructor(body) {
+    super('_SYS', '_', `return ${body}`);
+    return new Proxy(this, {
+      apply: (target, thisArg, argumentsList) =>
+        super.apply(thisArg, [this.sys, ...argumentsList]),
+      get: (target, prop) => {
+        if (prop === 'toString') return () => body;
+        return target[prop];
+      },
+    });
+  }
+}
 
 export function compileToJavascript(
   expr: BoxedExpression
-): ((_: Record<string, number>) => number) | undefined {
+): ((_: Record<string, CompiledType>) => CompiledType) | undefined {
   const js = compile(expr, expr.freeVars);
   try {
-    return new Function('_', `return ${js}`) as () => number;
+    return new ComputeEngineFunction(js) as unknown as () => CompiledType;
   } catch (e) {
     console.error(`${e}\n${expr.latex}\n${js}`);
   }
   return undefined;
 }
 
+// Will throw an exception if the expression cannot be compiled
 export function compile(
   expr: BoxedExpression,
   freeVars: string[] = [],
@@ -38,6 +73,11 @@ export function compile(
       I: 'Math.I',
       NaN: 'Number.NaN',
       ImaginaryUnit: 'NaN',
+      Half: '0.5',
+      MachineEpsilon: 'Number.EPSILON',
+      GoldenRatio: '((1 + Math.sqrt(5)) / 2)',
+      CatalanConstant: '0.91596559417721901',
+      EulerGamma: '0.57721566490153286',
     }[s];
     if (result !== undefined) return result;
     if (freeVars.includes(s)) return `_.${s}`;
@@ -69,30 +109,48 @@ export function compile(
       if (arg === null) return '';
       return `-${compile(arg, freeVars, 3)}`;
     }
-    if (h === 'Error') {
-      return 'NaN';
-    }
+    if (h === 'Error') throw new Error('Error');
     if (h === 'Sum') return compileLoop(expr, '+');
     if (h === 'Product') return compileLoop(expr, '*');
 
     if (h === 'Root') {
       const arg = expr.op1;
-      if (arg === null) return '';
+      if (arg === null) throw new Error('Root: no argument');
       const exp = expr.op2;
       if (exp === null) return `Math.sqrt(${compile(arg, freeVars, 0)})`;
       return `Math.pow(${compile(arg, freeVars)}, 1/${compile(exp, freeVars)}`;
     }
+
     if (h === 'Factorial') {
       const arg = expr.op1;
-      if (arg === null) return '';
-      return `${compile(arg, freeVars, 3)}!`;
+      if (arg === null) throw new Error('Factorial: no argument');
+      return `_SYS.factorial(${compile(arg, freeVars)})`;
     }
+
+    if (h === 'Power') {
+      const arg = expr.op1;
+      if (arg === null) throw new Error('Power: no argument');
+      const exp = asFloat(expr.op2);
+      if (exp === 0.5) return `Math.sqrt(${compile(arg, freeVars)})`;
+      if (exp === 1 / 3) return `Math.cbrt(${compile(arg, freeVars)})`;
+      if (exp === 1) return compile(arg, freeVars);
+      if (exp === -1) return `1 / ${compile(arg, freeVars)}`;
+      if (exp === -0.5) return `1 / Math.sqrt(${compile(arg, freeVars)})`;
+    }
+
+    if (h === 'Square') {
+      const arg = expr.op1;
+      if (arg === null) throw new Error('Square: no argument');
+      return `Math.pow(${compile(arg, freeVars)}, 2)`;
+    }
+
     // Is it an operator?
     const OPS: Record<string, [op: string, prec: number]> = {
       Add: ['+', 1],
       Subtract: ['-', 1],
       Multiply: ['*', 2],
       Divide: ['/', 3],
+      Equal: ['===', 0],
     };
     const op = OPS[h];
 
@@ -104,7 +162,6 @@ export function compile(
       return op[1] < prec ? `(${result.join(op[0])})` : result.join(op[0]);
     }
 
-    // Assume it's a JS function
     const fn =
       {
         Abs: 'Math.abs',
@@ -116,13 +173,18 @@ export function compile(
         Artanh: 'Math.atanh',
         // Math.cbrt
         Ceiling: 'Math.ceil',
+        Chop: '_SYS.chop',
         Cos: 'Math.cos',
         Cosh: 'Math.cosh',
         Exp: 'Math.exp',
         Floor: 'Math.floor',
+        Gamma: '_SYS.gamma',
+        Gcd: '_SYS.gcd',
         // Math.hypot
+        Lcm: '_SYS.lcm',
         Ln: 'Math.log',
         Log: 'Math.log10',
+        LogGamma: '_SYS.lngamma',
         Lb: 'Math.log2',
         Max: 'Math.max',
         Min: 'Math.min',
@@ -157,7 +219,7 @@ export function compile(
         // Erfi: 'Math.erfi',
         // Zeta: 'Math.zeta',
         // PolyGamma: 'Math.polygamma',
-        // HurwitzZeta: 'Math.hurwitzZeta',
+        // HurwitzZeta: 'Math.hurwitzZeta', $$\zeta (s,a)=\sum _{n=0}^{\infty }{\frac {1}{(n+a)^{s}}}$$
         // DirichletEta: 'Math.dirichletEta',
         // Beta: 'Math.beta',
         // Binomial: 'Math.binomial',
@@ -229,7 +291,7 @@ export function compile(
     const args = expr.ops;
     if (args !== null) {
       const result: string[] = [];
-      for (const arg of args) result.push(compile(arg, freeVars, 0));
+      for (const arg of args) result.push(compile(arg, freeVars));
       return `${fn}(${result.join(', ')})`;
     }
   }
@@ -239,17 +301,20 @@ export function compile(
 
 function compileLoop(expr: BoxedExpression, op: '+' | '*'): string {
   const args = expr.ops;
-  if (args === null) return 'NaN';
-  if (!expr.op1 || !expr.op2) return 'NaN';
+  if (args === null) throw new Error('Sum: no arguments');
+  if (!expr.op1 || !expr.op2) throw new Error('Sum: no limits');
+
   const [index, lower, upper, isFinite] = normalizeLimits(expr.op2);
+
+  // @todo: if !isFinite, add tests for convergence to the generated code
 
   const fn = compile(expr.op1, [...expr.op1.freeVars, index], 0);
 
-  return `((_) => {
-    let acc = ${op === '+' ? '0' : '1'};
-    const fn = (_) => ${fn};
-    for (let i = ${lower}; i < ${upper}; i++)
-      acc ${op}= fn({ ..._, ${index}: i });
-    return acc;
-  })()`;
+  return `(() => {
+  let acc = ${op === '+' ? '0' : '1'};
+  const fn = (_) => ${fn};
+  for (let i = ${lower}; i <= ${upper}; i++)
+    acc ${op}= fn({ ..._, ${index}: i });
+  return acc;
+})()`;
 }

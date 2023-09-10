@@ -105,7 +105,7 @@ export type IndexedPostfixEntry = CommonEntry & {
   parse: PostfixParseHandler;
 };
 
-export type EnvironmentEntry = CommonEntry & {
+export type IndexedEnvironmentEntry = CommonEntry & {
   kind: 'environment';
 
   parse: EnvironmentParseHandler;
@@ -119,7 +119,7 @@ export type IndexedLatexDictionaryEntry =
   | IndexedInfixEntry
   | IndexedPrefixEntry
   | IndexedPostfixEntry
-  | EnvironmentEntry;
+  | IndexedEnvironmentEntry;
 
 export type IndexedLatexDictionary = {
   // Maximum number of tokens ahead of the current one that need to be
@@ -147,7 +147,7 @@ export type IndexedLatexDictionary = {
 
   // Environment definition must be unique. They are indexed by the name
   // of the environment.
-  environment: Map<string, EnvironmentEntry>;
+  environment: Map<string, IndexedEnvironmentEntry>;
 };
 
 const DEFAULT_DELIMITER: { [key: string]: LatexString } = {

@@ -614,6 +614,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'function',
     parse: 'Ceil',
   },
+  { name: 'Chop', trigger: 'chop', kind: 'function', parse: 'Chop' },
   {
     name: 'Complex',
     precedence: 274, // One less than precedence of `Add`: used for correct wrapping
@@ -713,6 +714,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'Floor',
   },
   {
+    trigger: ['\\Gamma'],
+    parse: 'Gamma',
+  },
+  {
     name: 'Gcd',
     trigger: 'gcd',
     kind: 'function',
@@ -770,7 +775,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     trigger: 'lcm',
     kind: 'function',
   },
-
+  { name: 'Max', trigger: 'max', kind: 'function' },
+  { name: 'Min', trigger: 'min', kind: 'function' },
   {
     name: 'MinusPlus',
     trigger: ['\\mp'],

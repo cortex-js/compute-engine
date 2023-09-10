@@ -1093,6 +1093,11 @@ export interface BoxedExpression {
    */
   N(options?: NOptions): BoxedExpression;
 
+  compile(
+    to?: 'javascript',
+    options?: { optimize: ('simplify' | 'evaluate')[] }
+  ): ((args: Record<string, any>) => any | undefined) | undefined;
+
   solve(vars: Iterable<string>): null | BoxedExpression[];
 
   /**

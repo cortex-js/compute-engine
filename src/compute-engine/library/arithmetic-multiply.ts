@@ -5,7 +5,6 @@ import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
 
 import { square } from './arithmetic-power';
-import { normalizeLimits } from './arithmetic-add';
 
 import {
   asRational,
@@ -16,6 +15,7 @@ import {
 } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
 import { validateArgument } from '../boxed-expression/validate';
+import { normalizeLimits } from './utils';
 
 /** The canonical form of `Multiply`:
  * - remove `1`

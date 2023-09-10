@@ -460,7 +460,19 @@ export abstract class AbstractBoxedExpression implements BoxedExpression {
     return this.evaluate();
   }
 
-  compile(): ((args: Record<string, number>) => number) | undefined {
-    return compileToJavascript(this);
+  compile(
+    to = 'javascript',
+    options?: { optimize: ('simplify' | 'evaluate')[] }
+  ): ((args: Record<string, any>) => any | undefined) | undefined {
+    if (to !== 'javascript') return undefined;
+    options ??= { optimize: ['simplify', 'evaluate'] };
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    let expr = this as BoxedExpression;
+    if (options.optimize.includes('simplify')) expr = expr.simplify();
+    if (options.optimize.includes('evaluate')) expr = expr.evaluate();
+    try {
+      return compileToJavascript(expr);
+    } catch (e) {}
+    return undefined;
   }
 }

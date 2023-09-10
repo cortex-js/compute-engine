@@ -116,8 +116,7 @@ export type FunctionParseHandler = (
 
 export type EnvironmentParseHandler = (
   parser: Parser,
-  reqArgs: Expression[],
-  optArgs: Expression[]
+  until?: Terminator
 ) => Expression | null;
 
 export type PostfixParseHandler = (

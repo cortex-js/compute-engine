@@ -30,7 +30,6 @@ import {
   getSequence,
   head,
   isEmptySequence,
-  isValidIdentifier,
   machineValue,
   nops,
   op,
@@ -758,15 +757,13 @@ export class _Parser implements Parser {
 
   /** Parse an environment: `\begin{env}...\end{end}`
    */
-  private parseEnvironment(): Expression | null {
+  private parseEnvironment(until?: Partial<Terminator>): Expression | null {
     const index = this.index;
 
     if (!this.match('\\begin')) return null;
 
     const name = this.parseStringGroup()?.trim();
     if (!name) return this.error('expected-environment-name', index);
-
-    // @todo:parse optional and required arguments.
 
     this.addBoundary(['\\end', '<{>', ...name.split(''), '<}>']);
 
@@ -776,14 +773,14 @@ export class _Parser implements Parser {
       // attempt to parse as tabular, but discard content
 
       this.parseTabular();
-      this.skipSpace();
 
+      this.skipSpace();
       if (!this.matchBoundary())
         return this.boundaryError('unbalanced-environment');
       return this.error(['unknown-environment', { str: name }], index);
     }
 
-    const expr = def.parse(this, [], []);
+    const expr = def.parse(this, until as Terminator);
 
     this.skipSpace();
     if (!this.matchBoundary())
@@ -2039,7 +2036,7 @@ export class _Parser implements Parser {
     //    `\begin{...}...\end{...}`
     // (check before other LaTeX commands)
     //
-    result ??= this.parseEnvironment();
+    result ??= this.parseEnvironment(until);
 
     //
     // 5. Is it a symbol, a LaTeX command or a function call?

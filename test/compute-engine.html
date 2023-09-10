@@ -231,7 +231,7 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
-          \sum_{i=0}^{1000} i^2
+          \sqrt{\sqrt5}
           <!-- (1, 2, 3) -->
           <!-- ((1,2),(3,4)) -->
 
@@ -411,11 +411,11 @@
 
       <div class="output-section" id="compile">
         <h2><code>compiled</code></h2>
+        <div class="output" id="compile-output"></div>
         <div class="row">
-          <math-field read-only class="latex"></math-field>
+          <div class="text output" style="width: 100%"></div>
         </div>
         <div class="timing"></div>
-        <div class="output" id="compile-output"></div>
       </div>
 
       <div class="output-section" id="evaluate-numerically">
@@ -598,13 +598,13 @@
 
       // const ce = new ComputeEngine({ latexDictionary });
 
-      // ce.jsonSerializationOptions = {
-      //   exclude: [],
-      //   shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
-      //   metadata: [],
-      //   // precision: 'max',
-      //   repeatingDecimals: false,
-      // };
+      ce.jsonSerializationOptions = {
+        exclude: [],
+        shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
+        metadata: [],
+        // precision: 'max',
+        repeatingDecimals: false,
+      };
       ce.pushScope({
         hundred: 100,
         f: {
@@ -832,7 +832,7 @@
             updateExpr(
               val,
               'evaluate-numerically',
-              `${evalTiming.toFixed(2)}ms`
+              `⏱️ ${evalTiming.toFixed(2)}ms`
             );
           } catch (e) {
             console.error(
@@ -844,17 +844,22 @@
 
           try {
             let start = performance.now();
-            const fn = canonicalExpr.compile();
-            const compileTiming = performance.now() - start;
-            start = performance.now();
-            const val = fn({ x: 1, ImaginaryUnit: NaN });
-            const evalTiming = performance.now() - start;
-            updateLatex(
-              val,
-              'compile',
-              `${compileTiming.toFixed(2)}ms / ${evalTiming.toFixed(6)}ms`
-            );
-            document.getElementById('compile-output').innerHTML = fn.toString();
+            const fn = canonicalExpr.compile('javascript', { optimize: [] });
+            if (fn) {
+              const compileTiming = performance.now() - start;
+              start = performance.now();
+              const val = fn({ x: 1, ImaginaryUnit: NaN });
+              const evalTiming = performance.now() - start;
+              updateLatex(
+                val,
+                'compile',
+                `⏱️\uFE0E ${compileTiming.toFixed(2)}ms / ${evalTiming.toFixed(
+                  6
+                )}ms`
+              );
+              document.getElementById('compile-output').innerHTML =
+                fn.toString();
+            }
           } catch (e) {
             console.error(
               'compile(%c ' + latex + '%c) ' + e.toString(),
@@ -897,7 +902,10 @@
 
         el.classList.add('is-visible');
 
-        el.querySelector('.latex').value = String(latex);
+        let subel = el.querySelector('.latex');
+        if (subel) subel.value = String(latex);
+        subel = el.querySelector('.text');
+        if (subel) subel.innerHTML = String(latex);
 
         if (start && el.querySelector('.timing')) {
           el.querySelector('.timing').innerHTML = start;

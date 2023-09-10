@@ -238,7 +238,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
     },
 
     Erf: {
-      description: 'Complementary Error Function',
+      description: 'Error Function',
 
       complexity: 7500,
     },
@@ -250,7 +250,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
     },
 
     Factorial: {
-      description: 'The factorial function',
+      description: 'Factorial Function',
       wikidata: 'Q120976',
       complexity: 9000,
 
@@ -295,7 +295,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       complexity: 8000,
 
       signature: {
-        domain: ['Function', 'Number', 'Number', 'Number'],
+        domain: ['Function', 'Number', 'Number'],
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -310,7 +310,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       complexity: 8000,
 
       signature: {
-        domain: ['Function', 'Number', 'Number', 'Number'],
+        domain: ['Function', 'Number', 'Number'],
         N: (ce, ops) =>
           applyN(
             ops[0],

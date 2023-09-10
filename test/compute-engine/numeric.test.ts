@@ -41,16 +41,16 @@ describe.skip('NUMERIC', () => {
 });
 
 describe('NUMERIC gamma', () => {
-  test(`gamma(1,2)`, () =>
-    expect(checkJson(['Gamma', 1, 2])).toMatchInlineSnapshot(`
-      box       = ["Gamma", 1, 2]
+  test(`Gamma(1)`, () =>
+    expect(checkJson(['Gamma', 1])).toMatchInlineSnapshot(`
+      box       = ["Gamma", 1]
       N-auto    = 0.9999999999999999999999999999999091281629753981251626790074685760510910662865722203348077695070143199
       N-mach    = 0.9999999999999998
     `));
 
-  test(`gamma(5,0)`, () =>
-    expect(checkJson(['Gamma', 5, 0])).toMatchInlineSnapshot(`
-      box       = ["Gamma", 5, 0]
+  test(`Gamma(5)`, () =>
+    expect(checkJson(['Gamma', 5])).toMatchInlineSnapshot(`
+      box       = ["Gamma", 5]
       N-auto    = 23.99999999999999999999999999998986904597708917242823805732208966018377622675357765205304540296354587
       N-mach    = 23.999999999999996
     `));
