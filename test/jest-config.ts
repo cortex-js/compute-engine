@@ -15,7 +15,7 @@ const YELLOW = '\u001b[33;0m';
 // const GREY_BG = '\u001b[40;1m';
 
 function simpleFormatter(type: LogType, ...message: LogMessage[]): string {
-  const CONSOLE_INDENT = '      ';
+  const CONSOLE_INDENT = ' ';
 
   let s = message.map((x) => x.toString()).join('');
 
@@ -55,9 +55,9 @@ function formatStackTrace(s: string): string {
     line = line.replace('    at ', '  > ');
 
     const [_, prefix, filename, suffix] =
-      line.match(/(?:(.+)\()(.+)(\:.+?)/) ?? [];
+      line.match(/(?:(.+)\()([^:]+)(\:[^)]+)/) ?? [];
     if (!prefix) return line;
-    if (/Object.<anonymous>/.test(prefix))
+    if (/Object.<anonymous>/.test(prefix) || prefix.startsWith('  > console.'))
       return GREY + '  > ' + CYAN + filename + GREY + suffix;
     return GREY + prefix + CYAN + filename + GREY + suffix;
   });
