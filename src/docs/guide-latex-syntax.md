@@ -341,7 +341,7 @@ ce.latexDictionary = [
   ...ce.latexDictionary,
   // ...and add the `\smoll` command
   {
-    trigger: ['\\smoll'],
+    latxTrigger: '\\smoll',
     parse: (parser) => {
       // We're expecting two arguments, so we're calling 
       // `parseGroup()` twice. If `parseGroup()` returns null,
@@ -372,8 +372,13 @@ Each entry in the LaTeX dictionary is an object with the following properties:
 - `kind`: the kind of expression associated with this entry. Valid values are `prefix`,
   `postfix`, `infix`, `expression`, `function`, `symbol`, `environment` and `matchfix`. 
   If not provided, the default is `expression`.
-- `trigger`: a LaTeX command or a sequence of LaTeX tokens that will trigger
-  the entry. For example, `^{+}`.
+- `latexTrigger`: a sequence of LaTeX tokens that will trigger
+  the entry. For example, `^{+}` or `\mathbb{D}`.
+- `identifierTrigger`: a string, usually wrapped in a LaTeX command, that will
+  trigger the entry. For example, if `identifierTrigger` is `floor`, the
+  LaTeX command `\mathrm{floor}` or `\operatorname{floor}` will trigger the entry.
+  Only one of `latexTrigger` or `identifierTrigger` should be provided.
+  If kind is `environment`, only `identifierTrigger` is valid.
 - `parse`: a function that will be invoked when the trigger is encountered in
   the LaTeX input. It will be passed a `parser` object that can be used to
   parse the input. The `parse` function should return a MathJSON expression. 
@@ -395,16 +400,14 @@ handler will be passed a `parser` object that can be used to parse the input.
 The `parse` handler should return a MathJSON expression.
 
 The `function` kind is a special case of `expression` where the expression 
-is a function, possibly using mutly-character identifiers, as in `\mathrm{concat}`.
-The `trigger` property defines the name of the function, not a sequence of tokens.
-The parse handler should return the idenfitier corresponding
-to the function, such as `Concatenate`. As a shortcut, the `parse` handler
-can be provided as an Expression. For example:
+is a function. The parse handler should return the MathJSON idenfitier 
+corresponding to the function, such as `Concatenate`. As a shortcut, the 
+`parse` handler can be provided as an Expression. For example:
 
 ```javascript
 {
   kind: 'function',
-  trigger: 'concat',
+  identifierTrigger: 'concat',
   parse: 'Concatenate'
 }
 ```
@@ -417,7 +420,7 @@ handler should return a MathJSON expression.
 ```javascript
 {
   kind: 'infix',
-  trigger: '\\oplus',
+  latexTrigger: '\\oplus',
   parse: (parser, lhs) => {
     return ['Concatenate', lhs, parser.parseExpression()];
   },
@@ -431,7 +434,7 @@ expression.
 ```javascript
 {
   kind: 'prefix',
-  trigger: '\\neg',
+  latexTrigger: '\\neg',
   parse: (parser, lhs) => {
     return ['Negate', lhs];
   },
@@ -445,14 +448,14 @@ handler should return a MathJSON expression.
 ```javascript
 {
   kind: 'postfix',
-  trigger: '\\!',
+  latexTrigger: '\\!',
   parse: (parser, lhs) => {
     return ['Factorial', lhs];
   },
 }
 ```
 
-The `environment` kind is used for LaTeX environments. The `trigger` property
+The `environment` kind is used for LaTeX environments. The `identifierTrigger` property
 in that case is the name of the environment. The `parse` handler will
 be passed a `parser` object. The `parseTabular()` method can be used to parse 
 the rows and columns of the environment. It returns a two dimensional array 
@@ -461,7 +464,7 @@ of expressions. The `parse` handler should return a MathJSON expression.
 ```javascript
 {
   kind: 'environment',
-  trigger: 'matrix',
+  identifierTrigger: 'matrix',
   parse: (parser) => {
     const content = parser.parseTabular();
     return ['Matrix', ['List', content.map(row => ['List', row.map(cell => cell)])]];
@@ -470,17 +473,16 @@ of expressions. The `parse` handler should return a MathJSON expression.
 ```
 
 The `matchfix` kind is used for LaTeX commands that are used to enclose an
-expression. There is no `trigger` property in this case. Instead the 
-`openDelimiter` and `closeDelimiter` indicate the LaTeX commands that will
-be used to enclose the expression. The `parse` handler will be passed a
+expression. The `openTrigger` and `closeTrigger` indicate the LaTeX commands 
+that enclose the expression. The `parse` handler is passed a
 `parser` object and the "body" (the expression between the open and close
 delimiters). The `parse` handler should return a MathJSON expression.
 
 ```javascript
 {
   kind: 'matchfix',
-  openDelimiter: '\\lvert',
-  closeDelimiter: '\\rvert',
+  openTrigger: '\\lvert',
+  closeTrigger: '\\rvert',
   parse: (parser, body) => {
     return ['Abs', body];
   },
@@ -498,7 +500,7 @@ Note that each LaTeX command is a single token, but that digits and ordinary
 letters are each separate tokens.
 
 The `parse` handler is invoked when the trigger is encountered in the LaTeX
-token strings. The trigger can be one or more tokens.
+token strings.
 
 A common case is to return from the parse handler a MathJSON identifier 
 for a symbol or function.
@@ -508,7 +510,7 @@ MathJSON `Divide` function. You would write:
 
 ```javascript
 {
-  trigger: ['\\div'],
+  latexTrigger: '\\div',
   parse: (parser) => {
     return 'Divide';
   },
@@ -519,7 +521,7 @@ As a shortcut, you can also write:
 
 ```javascript
 {
-  trigger: ['\\div'],
+  latexTrigger: '\\div',
   parse: () => 'Divide'
 }
 ```
@@ -529,14 +531,14 @@ Or even more succintly:
 
 ```javascript
 {
-  trigger: ['\\div'],
+  latexTrigger: '\\div',
   parse: 'Divide'
 }
 ```
 
 The LaTeX `\div(1, 2)` would then produce the MathJSON expression 
 `["Divide", 1, 2]`. Note that the arguments are provided as comma-separated,
-parenthesized expressions.
+parenthesized expressions, not as LaTeX arguments in curly brackets.
 
 
 If you need to parse some more complex LaTeX syntax, you can use the `parser` 
@@ -587,7 +589,7 @@ For example:
   
 ```javascript
 {
-  trigger: ['\\div'],
+  latexTrigger: '\\div',
   parse: (parser) => {
     return ['Divide', parser.parseGroup(), parser.parseGroup()];
   },
@@ -604,7 +606,7 @@ write:
 
 ```javascript
 {
-  trigger: ['\\div'],
+  latexTrigger: '\\div',
   kind: 'infix',
   parse: (parser, lhs) => {
     return ['Divide', lhs, parser.parseExpression()];
@@ -625,7 +627,7 @@ handler with a MathJSON identifier.
 ```javascript
 {
   name: "Concatenate",
-  trigger: ["\\oplus"],
+  latexTrigger: "\\oplus",
   serialize: (serializer, expr) => 
     "\\oplus" + serializer.wrapArguments(expr),
   evaluate: (ce, args) => {
@@ -655,7 +657,9 @@ a default `parse` handler will be used that is equivalent to:
 `parse: name`.
 
 It is possible to have multiple definitions with the same triggers, but the
-`name` property must be unique.
+`name` property must be unique. The record with the `name` property will be
+used to serialize the expression. A `serialize` handler is invalid if the
+`name` property is not provided.
 
 
 

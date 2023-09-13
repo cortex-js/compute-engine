@@ -30,8 +30,7 @@ head:
 ---
 
 
-**Note:** To use the Compute Engine you must write JavaScript code. This guide 
-assumes you are familiar with JavaScript or TypeScript.{.notice--info}
+**Note:** To use the Compute Engine you must write JavaScript or TypeScript code. This guide assumes you are familiar with one of these programming languages.{.notice--info}
 
 **Note:** In this guide, functions such as `ce.box()` and `ce.parse()` require a
 `ComputeEngine` instance which is denoted by a `ce.` prefix.<br>Functions that
@@ -191,8 +190,20 @@ console.log("Numerical Evaluation:", expr.N().latex);</div>
 
 ## Other Symbolic Manipulation
 
-An expression can be created from MathJSON or LaTeX, simplified, or evaluated.
-An expression has many properties, such as `isZero`, `domain` or `symbol`.
+There are a number of operations that can be performed on an expression:
+- creating an expression from a raw MathJSON expression or from a LaTeX string
+- simplifying an expression
+- evaluating an expression
+- applying a substitution to an expression
+- applying conditional rewrite rules to an expression
+- checking if an expression matches a pattern
+- checking if an expression is a number, a symbol, a function, etc...
+- checking if an expression is zero, positive, negative, etc...
+- checking if an expression is an integer, a rational, etc...
+- and more...
+
+We've introduced some of these operations in this guide, but there are many more
+that are available.
 
 {% readmore "/compute-engine/guides/expressions/" %} Read more about
 <strong>Expressions</strong>, their properties and methods {% endreadmore %}

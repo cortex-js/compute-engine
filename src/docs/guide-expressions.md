@@ -12,7 +12,7 @@ The CortexJS Compute Engine produces and manipulates
 [symbolic expressions](<https://en.wikipedia.org/wiki/Expression_(mathematics)>)
 such as numbers, constants, variables and functions.{.xl}
 
-In the CortexJS Compute Engine, expressions are represented using the
+In the CortexJS Compute Engine, expressions are represented internally using the
 [MathJSON format](/math-json/).
 
 They are wrapped in a JavaScript object, a process called **boxing**, and the
@@ -24,6 +24,9 @@ repetitive calculations.
 Unlike the plain data types used by JSON, Boxed Expressions allow an IDE, such
 as VSCode Studio, to provide suitable hints in the editor, and to check that the
 correct functions and properties are used, particularly when using TypeScript.
+
+Boxed Expression can be created from a LaTeX string or from a raw MathJSON
+expression.
 
 ## Boxing
 
