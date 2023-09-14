@@ -7,7 +7,7 @@
   readable LaTeX, but that may not match exactly the MathJSON. For example, by
   default `ce.serialize(["Power", "x", -1])` returns `\frac{1}{x}` while
   ce.serialize(["Power", "x", -1], {canonical: false}) returns`x^{-1}`.
-
+- Improved parsing of delimiters, i.e. `\left(`, `\right]`, etc...
 - Added complex functions `Real`, `Imaginary`, `Arg`, `Conjugate`, `AbsArg`.
 - **#104** Added the `["ComplexRoots", x, n]` function which returns the nthroot
   of `x`.

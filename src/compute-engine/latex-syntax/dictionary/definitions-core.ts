@@ -302,14 +302,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'List',
     kind: 'matchfix',
-    openTrigger: '[',
-    closeTrigger: ']',
-    parse: (_parser: Parser, body: Expression): Expression => {
-      if (body === null || isEmptySequence(body)) return ['List'];
-      if (head(body) !== 'Sequence' && head(body) !== 'List')
-        return ['List', body];
-      return ['List', ...(ops(body) ?? [])];
-    },
+    openTrigger: '\\lbrack',
+    closeTrigger: '\\rbrack',
+    parse: parseList,
     serialize: (serializer: Serializer, expr: Expression): string => {
       return joinLatex([
         '\\lbrack',
@@ -318,21 +313,31 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       ]);
     },
   },
+  // Synonyms for List
+  {
+    kind: 'matchfix',
+    openTrigger: '[',
+    closeTrigger: ']',
+    parse: parseList,
+  },
+  {
+    kind: 'matchfix',
+    openTrigger: '\\[',
+    closeTrigger: '\\]',
+    parse: parseList,
+  },
+  // Synonyms for Delimiter
   {
     kind: 'matchfix',
     openTrigger: '(',
     closeTrigger: ')',
-    parse: (_parser, body) => {
-      // @todo: does this really need to be done here? Sequence(Sequence(...))
-      // Handle `()` used for example with `f()`
-      if (body === null || isEmptySequence(body)) return ['Sequence'];
-      if (head(body) === 'Sequence' || head(body) === 'List') {
-        if (nops(body) === 0) return ['Delimiter'];
-        return ['Delimiter', ['Sequence', ...(ops(body) ?? [])]];
-      }
-
-      return ['Delimiter', body];
-    },
+    parse: parseDelimiter,
+  },
+  {
+    kind: 'matchfix',
+    openTrigger: '\\lparen',
+    closeTrigger: '\\rparen',
+    parse: parseDelimiter,
   },
   {
     latexTrigger: [','],
@@ -760,4 +765,22 @@ function parsePrime(
   // generic "Prime"
   if (order === 1) return ['Prime', missingIfEmpty(lhs)];
   return ['Prime', missingIfEmpty(lhs), order];
+}
+
+function parseDelimiter(parser: Parser, body: Expression): Expression | null {
+  // @todo: does this really need to be done here? Sequence(Sequence(...))
+  // Handle `()` used for example with `f()`
+  if (body === null || isEmptySequence(body)) return ['Sequence'];
+  if (head(body) === 'Sequence' || head(body) === 'List') {
+    if (nops(body) === 0) return ['Delimiter'];
+    return ['Delimiter', ['Sequence', ...(ops(body) ?? [])]];
+  }
+
+  return ['Delimiter', body];
+}
+
+function parseList(_parser: Parser, body: Expression): Expression {
+  if (body === null || isEmptySequence(body)) return ['List'];
+  if (head(body) !== 'Sequence' && head(body) !== 'List') return ['List', body];
+  return ['List', ...(ops(body) ?? [])];
 }

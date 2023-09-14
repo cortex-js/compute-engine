@@ -108,45 +108,9 @@ describe('LISTS', () => {
     `));
   test('Lists can be enclosed in square brackets', () =>
     expect(check('\\[1, 2, 3\\]')).toMatchInlineSnapshot(`
-      box       = [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\['"],
-          ["Latex", "'\\['"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1, 2, 3\\]'"]
-        ]
-      ]
-      canonical = [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\['"],
-          ["Latex", "'\\['"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1, 2, 3\\]'"]
-        ]
-      ]
-      evaluated = [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\['"],
-          ["Latex", "'\\['"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1, 2, 3\\]'"]
-        ]
-      ]
+      box       = ["List", 1, 2, 3]
+      canonical = ["List", 1, 2, 3]
+      evaluated = ["List", 1, 2, 3]
     `));
   test('Lists can be enclosed in parenthesis', () =>
     expect(check('(1, 2, 3)')).toMatchInlineSnapshot(`

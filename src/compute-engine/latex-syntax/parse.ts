@@ -608,6 +608,73 @@ export class _Parser implements Parser {
     return null;
   }
 
+  /** If the next token matches the open delimiter, set a boundary with
+   * the close token and return true.
+   *
+   * Note this method handles generic delimiters, i.e. '(' will math both
+   * '(', '\left(', '\bigl(', etc...
+   *
+   * Note that the definitions for matchfix may need to include synonyms
+   * for example:
+   *
+   * {
+   *    openDelimiter: '(',
+   *    closeDelimiter: ')'
+   * }
+   *
+   * and
+   *
+   * {
+   *   openDelimiter: '\\lparen',
+   *   closeDelimiter: '\\rparen'
+   * }
+   *
+   * For:
+   * - '[': '\\lbrack' and '\\['
+   * - ']': '\\rbrack' and '\\]'
+   * - '{': '\\lbrace' and '\\}'
+   * - '}': '\\rbrace' and '\\}'
+   * - '<': '\\langle'
+   * - '>': '\\rangle'
+   * - '|': '\\vert'
+   * - '||': '\\Vert'
+   * - '|': '\\lvert' and '\\rvert'
+   * - '||': '\\lVert' and '\\rVert'
+   */
+  private matchDelimiter(
+    open: Delimiter | LatexToken[],
+    close: Delimiter | LatexToken[]
+  ): boolean {
+    // A standalone `[` is not a valid delimiter (but `\left[` is OK)
+    if (this.peek === '[') return false;
+
+    if (Array.isArray(open)) {
+      console.assert(Array.isArray(close));
+      if (this.matchAll(open)) {
+        this.addBoundary(close as LatexToken[]);
+        return true;
+      }
+      return false;
+    }
+
+    const start = this.index;
+    const closePrefix = OPEN_DELIMITER_PREFIX[this.peek];
+    if (closePrefix) this.nextToken();
+
+    if (open === '||' && this.matchAll(['|', '|'])) {
+      this.addBoundary(['|', '|']);
+      return true;
+    }
+
+    if (!this.match(open)) {
+      this.index = start;
+      return false;
+    }
+
+    this.addBoundary(closePrefix ? [closePrefix, close] : [close]);
+    return true;
+  }
+
   parseGroup(): Expression | null {
     const start = this.index;
     this.skipSpaceTokens();
@@ -1177,6 +1244,8 @@ export class _Parser implements Parser {
    * return `['\right', '\rparen']`, which can be matched with `matchAll()`
    *
    * If you need to match several tokens, use `matchAll()`
+   *
+   * @internal
    */
   private matchOpenDelimiter(
     openDelim: Delimiter,
@@ -1316,65 +1385,26 @@ export class _Parser implements Parser {
     for (const def of defs) {
       this.index = start;
 
-      // The `openDelimiter` can be either an array of LatexToken
-      // (for cases like `\langle\vert` as a delimiter)
-      // or a Delimiter (limited set of special strings that get interpreted
-      // as synonyms, e.g. '(' = '\lparen' = '\left(' =...)
-      if (Array.isArray(def.openDelimiter)) {
-        //
-        // If we have an array of tokens, match them all
-        //
-
-        // 1. Match the opening delimiter
-        if (!this.matchAll(def.openDelimiter)) continue;
-        this.addBoundary(def.closeDelimiter as string[]);
-
-        // 2. Collect the sequence in between the delimiters
-        const body = this.parseExpression();
-        this.skipSpace();
-
-        // 3. Match the closing delimiter
-        if (!this.matchBoundary()) {
-          this.removeBoundary();
-          continue;
-        }
-
-        const rhs = def.parse(this, body ?? ['Sequence']);
-        if (rhs === null) continue; // This def didn't work. Try another.
-        return rhs;
-      }
-      //
-      // We have a 'normalized' delimiter (i.e. '(' will match '(' or
-      // '\lparen)
-      //
-
       // 1. Match the opening delimiter
-      const closeDelimiter = this.matchOpenDelimiter(
-        def.openDelimiter,
-        def.closeDelimiter as Delimiter
-      );
-      if (closeDelimiter === null) continue;
-
-      if (this.matchAll(closeDelimiter)) {
-        const result = def.parse(this, ['Sequence']);
-        if (result === null) continue; // This def didn't work. Try another.
-        return result;
-      }
+      if (!this.matchDelimiter(def.openDelimiter, def.closeDelimiter)) continue;
 
       // 2. Collect the expression in between the delimiters
-      this.addBoundary(closeDelimiter);
       const bodyStart = this.index;
+      this.skipSpace();
       let body = this.parseExpression();
       this.skipSpace();
       if (!this.matchBoundary()) {
         // We couldn't parse the body up to the closing delimiter.
         // This could be a case where the boundary of the enclosure is
         // ambiguous, i.e. `|(a+|b|+c)|`. Attempt to parse without the boundary
+        const boundary = this._boundaries[this._boundaries.length - 1].tokens;
         this.removeBoundary();
         this.index = bodyStart;
+        this.skipSpace();
         body = this.parseExpression();
+        this.skipSpace();
         // If still could not match, try another
-        if (!this.matchAll(closeDelimiter)) {
+        if (!this.matchAll(boundary)) {
           if (!this.atEnd) continue;
           // If we're at the end, we may need to backtrack and try again
           // That's the case for `|1+|2|+3|`

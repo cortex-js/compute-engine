@@ -420,7 +420,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       description: 'Maximum of two or more numbers',
       complexity: 1200,
       signature: {
-        domain: ['Function', ['Sequence', 'Number'], 'Number'],
+        domain: ['Function', ['Sequence', 'Value'], 'Number'],
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;
           if (ops.length === 1) return ops[0];
@@ -448,7 +448,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       complexity: 1200,
 
       signature: {
-        domain: ['Function', ['Sequence', 'Number'], 'Number'],
+        domain: ['Function', ['Sequence', 'Value'], 'Number'],
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;
           if (ops.length === 1) return ops[0];
