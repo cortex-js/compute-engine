@@ -1,6 +1,7 @@
 import { ARITHMETIC_LIBRARY } from './arithmetic';
 import { CALCULUS_LIBRARY } from './calculus';
 import { COLLECTIONS_LIBRARY } from './collections';
+import { COMPLEX_LIBRARY } from './complex';
 import { CORE_LIBRARY } from './core';
 import { LOGIC_LIBRARY } from './logic';
 import { POLYNOMIALS_LIBRARY } from './polynomials';
@@ -75,7 +76,7 @@ export const LIBRARIES: {
   //   // - factor
   //   // - simplify
   // ],
-  'arithmetic': ARITHMETIC_LIBRARY,
+  'arithmetic': [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY],
   'calculus': CALCULUS_LIBRARY,
   'combinatorics': [], // @todo fibonacci, binomial, etc...
   'control-structures': [],

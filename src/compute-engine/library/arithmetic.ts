@@ -48,12 +48,6 @@ import {
 import { canonical, flattenSequence } from '../symbolic/flatten';
 
 // @todo Future additions to the dictionary
-// Re: real part
-// Im: imaginary part
-// Arg: argument (phase angle in radians)
-// Conjugate: complex conjugate
-// complex-cartesian (constructor)
-// complex-polar
 // LogOnePlus: { domain: 'Number' },
 // mod (modulo). See https://numerics.diploid.ca/floating-point-part-4.html,
 // regarding 'remainder' and 'truncatingRemainder'

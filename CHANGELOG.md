@@ -8,6 +8,10 @@
   default `ce.serialize(["Power", "x", -1])` returns `\frac{1}{x}` while
   ce.serialize(["Power", "x", -1], {canonical: false}) returns`x^{-1}`.
 
+- Added complex functions `Real`, `Imaginary`, `Arg`, `Conjugate`, `AbsArg`.
+- **#104** Added the `["ComplexRoots", x, n]` function which returns the nthroot
+  of `x`.
+
 ## 0.14.0
 
 **Release Date:** 2023-09-13
@@ -19,7 +23,9 @@
   former replaces the `trigger` property. The latter is new. An entry with a
   `triggerIdentifier` of `average` will match `\operatorname{average}`,
   `\mathrm{average}` and other variants.
-- The `ce.latexSerializationOptions` property is read-only.
+- The `ce.latexOptions` and `ce.jsonSerializationOptions` properties are more
+  robust. They can be modified directly or one of their properties can be
+  modified.
 
 ## Improvements
 

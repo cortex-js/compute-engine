@@ -121,6 +121,23 @@ function multiply2(
   console.assert(op2.isCanonical);
   const ce = op1.engine;
 
+  if (op1.symbol === 'ImaginaryUnit') {
+    const f = asFloat(op2);
+    if (f !== null) return ce.number(ce.complex(0, f));
+  }
+  if (op2.symbol === 'ImaginaryUnit') {
+    const f = asFloat(op1);
+    if (f !== null) return ce.number(ce.complex(0, f));
+  }
+  if (op1.numericValue !== null && op2.numericValue !== null) {
+    const f1 = asFloat(op1);
+    const f2 = asFloat(op2);
+    if (f1 !== null && ce.isComplex(op2))
+      return ce.number(ce.complex(f1 * op2.re, f1 * op2.im));
+    if (f2 !== null && ce.isComplex(op1))
+      return ce.number(ce.complex(f2 * op1.re, f2 * op1.im));
+  }
+
   if (
     op1.numericValue !== null &&
     op2.numericValue !== null &&

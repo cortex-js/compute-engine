@@ -1179,6 +1179,16 @@ export class ComputeEngine implements IComputeEngine {
   ): BoxedExpression {
     // Short path. Note that arguments are **not** validated.
 
+    // Handle complex numbers (exp^{ci}}) as a special case
+    if (
+      base.symbol === 'ExponentialE' &&
+      exponent instanceof Complex &&
+      exponent.re === 0
+    ) {
+      const im = exponent.im;
+      return this.number(this.complex(Math.cos(im), Math.sin(im)));
+    }
+
     // The logic here handles the cases where the exponent is a number or Rational
     if (exponent instanceof AbstractBoxedExpression) {
       const num = exponent.numericValue;
