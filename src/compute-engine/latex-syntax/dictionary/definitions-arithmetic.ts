@@ -120,7 +120,11 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   } else if (name === 'Add') {
     // If it is the sum of an integer and a rational, use a special form
     // (e.g. 1 + 1/2 -> 1 1/2)
-    if (nops(expr) === 2 && serializer.options.invisiblePlus !== '+') {
+    if (
+      serializer.canonical &&
+      nops(expr) === 2 &&
+      serializer.options.invisiblePlus !== '+'
+    ) {
       const [op1, op2] = [op(expr, 1), op(expr, 2)];
 
       let [lhs, rhs] = [op1, op2];
@@ -207,20 +211,23 @@ function serializeMultiply(
   // Is it a fraction?
   // (i.e. does it have a denominator, i.e. some factors with a negative power)
   //
-  const [numer, denom] = numeratorDenominator(expr);
-  if (denom.length > 0) {
-    if (denom.length === 1 && denom[0] === 1) {
-      if (numer.length === 0) result = '1';
-      else if (numer.length === 1) result = serializer.serialize(numer[0]);
-      else result = serializeMultiply(serializer, ['Multiply', ...numer]);
-    } else {
-      result = serializer.serialize([
-        'Divide',
-        numer.length === 1 ? numer[0] : ['Multiply', ...numer],
-        denom.length === 1 ? denom[0] : ['Multiply', ...denom],
-      ]);
+  if (serializer.canonical === true) {
+    const [numer, denom] = numeratorDenominator(expr);
+    if (denom.length > 0) {
+      if (denom.length === 1 && denom[0] === 1) {
+        if (numer.length === 0) result = '1';
+        else if (numer.length === 1) result = serializer.serialize(numer[0]);
+        else result = serializeMultiply(serializer, ['Multiply', ...numer]);
+      } else {
+        result = serializer.serialize([
+          'Divide',
+          numer.length === 1 ? numer[0] : ['Multiply', ...numer],
+          denom.length === 1 ? denom[0] : ['Multiply', ...denom],
+        ]);
+      }
     }
   }
+
   if (result) {
     // Restore the level
     serializer.level += 1;
@@ -385,7 +392,9 @@ function serializeFraction(
   const numer = missingIfEmpty(op(expr, 1));
   const denom = missingIfEmpty(op(expr, 2));
 
-  const style = getFractionStyle(expr, serializer.level);
+  const style = serializer.canonical
+    ? getFractionStyle(expr, serializer.level)
+    : 'quotient';
   if (style === 'inline-solidus' || style === 'nice-solidus') {
     const numerStr = serializer.wrapShort(numer);
     const denomStr = serializer.wrapShort(denom);
@@ -436,28 +445,30 @@ function serializePower(
       exp
     );
 
-  const val2 = machineValue(exp) ?? 1;
-  if (val2 === -1) {
-    return serializer.serialize(['Divide', '1', base]);
-  } else if (val2 < 0) {
-    return serializer.serialize(['Divide', '1', ['Power', base, -val2]]);
-  } else if (head(exp) === 'Divide' || head(exp) === 'Rational') {
-    if (machineValue(op(exp, 1)) === 1) {
-      // It's x^{1/n} -> it's a root
-      const style = getRootStyle(expr, serializer.level);
-      return serializeRoot(serializer, style, base, op(exp, 2));
-    }
-    if (machineValue(op(exp, 2)) === 2) {
-      // It's x^(n/2) -> it's √x^n
-      return `${serializer.serialize(['Sqrt', base])}^{${serializer.serialize(
-        op(exp, 1)
-      )}}`;
-    }
-  } else if (head(exp) === 'Power') {
-    if (machineValue(op(exp, 2)) === -1) {
-      // It's x^{n^-1} -> it's a root
-      const style = getRootStyle(expr, serializer.level);
-      return serializeRoot(serializer, style, base, op(exp, 1));
+  if (serializer.canonical) {
+    const val2 = machineValue(exp) ?? 1;
+    if (val2 === -1) {
+      return serializer.serialize(['Divide', '1', base]);
+    } else if (val2 < 0) {
+      return serializer.serialize(['Divide', '1', ['Power', base, -val2]]);
+    } else if (head(exp) === 'Divide' || head(exp) === 'Rational') {
+      if (machineValue(op(exp, 1)) === 1) {
+        // It's x^{1/n} -> it's a root
+        const style = getRootStyle(expr, serializer.level);
+        return serializeRoot(serializer, style, base, op(exp, 2));
+      }
+      if (machineValue(op(exp, 2)) === 2) {
+        // It's x^(n/2) -> it's √x^n
+        return `${serializer.serialize(['Sqrt', base])}^{${serializer.serialize(
+          op(exp, 1)
+        )}}`;
+      }
+    } else if (head(exp) === 'Power') {
+      if (machineValue(op(exp, 2)) === -1) {
+        // It's x^{n^-1} -> it's a root
+        const style = getRootStyle(expr, serializer.level);
+        return serializeRoot(serializer, style, base, op(exp, 1));
+      }
     }
   }
   return serializer.wrapShort(base) + '^{' + serializer.serialize(exp) + '}';

@@ -1422,14 +1422,18 @@ export class ComputeEngine implements IComputeEngine {
     return this.box(result, options);
   }
 
-  serialize(x: Expression | BoxedExpression): string {
+  serialize(
+    x: Expression | BoxedExpression,
+    options?: { canonical?: boolean }
+  ): string {
     if (typeof x === 'object' && 'json' in x) {
       const ce = 'engine' in x ? x.engine : this;
       return this.latexSyntax.serialize(
-        this.rawJson(ce.box(x, { canonical: false }))
+        this.rawJson(ce.box(x, { canonical: false })),
+        options
       );
     }
-    return this.latexSyntax.serialize(x as Expression);
+    return this.latexSyntax.serialize(x as Expression, options);
   }
 
   get latexOptions(): NumberFormattingOptions &

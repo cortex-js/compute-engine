@@ -1,6 +1,16 @@
-## 0.14.0 
+## [Unreleased]
 
- **Release Date:** 2023-09-13
+## Improvements
+
+- The `ce.serialize()` function now takes an optional `canonical` argument. Set
+  it to `false` to prevent some transformations that are done to produce more
+  readable LaTeX, but that may not match exactly the MathJSON. For example, by
+  default `ce.serialize(["Power", "x", -1])` returns `\frac{1}{x}` while
+  ce.serialize(["Power", "x", -1], {canonical: false}) returns`x^{-1}`.
+
+## 0.14.0
+
+**Release Date:** 2023-09-13
 
 ## Breaking Changes
 

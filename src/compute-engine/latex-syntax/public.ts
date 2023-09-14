@@ -693,6 +693,11 @@ export interface Serializer {
    */
   level: number;
 
+  /** If true, apply transformations to the expression so the output
+   * doesn't necesarily match the raw MathJSON, but is more visually pleasing
+   * and easier to read. If false, output the raw MathJSON. */
+  canonical?: boolean;
+
   /** Output a LaTeX string representing the expression */
   serialize: (expr: Expression | null) => string;
 

@@ -1,5 +1,4 @@
 ---
-
 title: Parsing and Serializing LaTeX
 permalink: /compute-engine/guides/latex-syntax/
 layout: single
@@ -20,26 +19,46 @@ In this documentation, functions such as `ce.box()` and `ce.parse()` require a
 apply to a boxed expression, such as `expr.simplify()` are denoted with a
 `expr.` prefix.{.notice--info}
 
-If you are using a mathfield, all the mathfields on the page
-share a Compute Engine instance, which is available as `MathfieldElement.computeEngine`. You can modify the LaTeX dictionary used by the mathfields with `MathfieldElement.computeEngine.latexDictionary`. 
+**To create a new instance of the Compute Engine**, use the
+`new ComputeEngine()` constructor.
 
-Alternatively, you can associate the customized compute engine with the 
-mathfields in the document:
+```javascript
+const ce = new ComputeEngine();
+```
+
+<hr>
+
+**To input math using an interactive mathfield**, use [MathLive](/mathlive/).
+
+A MathLive `<math-field>` DOM element works like a `<textarea>` in HTML, but for
+math. It provides its content as a LaTeX string or a MathJSON expression, ready
+to be used with the Compute Engine.
+
+{% readmore "/mathlive/" %} Read more about the MathLive <strong>mathfield
+element</strong> {% endreadmore %}
+
+All the mathfields on the page share a Compute Engine instance, which is
+available as `MathfieldElement.computeEngine`.
+
+```javascript
+const ce = MathfieldElement.computeEngine;
+```
+
+You can associate a customized compute engine with the mathfields in the
+document:
 
 ```js
+const ce = new ComputeEngine();
 MathfieldElement.computeEngine = ce;
-console.log(mfe.getValue('math-json'))
+console.log(mfe.expression.json);
 ```
-{.notice--info}
 
-
+<hr>
 
 **To parse a LaTeX string as a MathJSON expression**, call the `ce.parse()`
 function.
 
 ```javascript
-const ce = new ComputeEngine();
-
 console.log(ce.parse('5x + 1').json);
 // ➔  ["Add", ["Multiply", 5, "x"], 1]
 ```
@@ -56,17 +75,6 @@ ce.parse('\\frac{7}{-4}').json;
 ce.parse('\\frac{7}{-4}', { canonical: false }).json;
 // ➔  ["Divide", 7, -4]
 ```
-
-<hr>
-
-**To input math using an interactive mathfield**, use [MathLive](/mathlive/).
-
-A MathLive `<math-field>` DOM element works like a `<textarea>` in HTML, but for
-math. It provides its content as a LaTeX string or a MathJSON expression, ready
-to be used with the Compute Engine.
-
-{% readmore "/mathlive/" %} Read more about the MathLive <strong>mathfield
-element</strong> {% endreadmore %}
 
 ## The Compute Engine Natural Parser
 
@@ -103,10 +111,29 @@ an array of `["Error"]` expressions.
 property.
 
 ```javascript
-const ce = new ComputeEngine();
+console.log(ce.box(['Add', ['Power', 'x', 3], 2]).latex);
+// ➔  "x^3 + 2"
+```
 
+Alternatively, you can use the `ce.serialize()` function.
+
+```javascript
 console.log(ce.serialize(['Add', ['Power', 'x', 3], 2]));
 // ➔  "x^3 + 2"
+```
+
+The `ce.serialize()` function takes an optional `canonical` argument. Set it to
+`false` to prevent some transformations that are done by default to produce more
+readable LaTeX, but that may not match exactly the MathJSON.
+
+For example:
+
+```javascript
+console.log(ce.serialize(['Power', 'x', -1]));
+// ➔  "\\frac{1}{x}"
+
+console.log(ce.serialize(['Power', 'x', -1], { canonical: false }));
+// ➔  "x^{-1}"
 ```
 
 ## Customizing Parsing and Serialization
@@ -236,7 +263,6 @@ command:
 ce.latexSyntax.options.fractionStyle = () => 'quotient';
 ```
 
-
 The style option handler has two arguments:
 
 - the expression fragment being styled
@@ -329,7 +355,7 @@ A **LaTeX dictionary** defines how a MathJSON expression can be expressed as a
 LaTeX string (**serialization**) or constructed from a LaTeX string
 (**parsing**).
 
-The Compute Engine includes a default LaTeX dictionary to parse and serialize 
+The Compute Engine includes a default LaTeX dictionary to parse and serialize
 common math expressions.
 
 It includes definitions such as:
@@ -337,12 +363,12 @@ It includes definitions such as:
 - "_The `Power` function is represented as "`x^{n}`"_"
 - "_The `Divide` function is represented as "`\frac{x}{y}`"_".
 
-Note that the dictionary will include LaTeX commands as triggers. LaTeX 
-commands are usually prefixed with a backslash, such as `\frac` or `\pm`.
-It will also reference MathJSON identifiers. MathJSON identifiers are usually
-capitalized, such as `Divide` or `PlusMinus` and are not prefixed with a backslash.
+Note that the dictionary will include LaTeX commands as triggers. LaTeX commands
+are usually prefixed with a backslash, such as `\frac` or `\pm`. It will also
+reference MathJSON identifiers. MathJSON identifiers are usually capitalized,
+such as `Divide` or `PlusMinus` and are not prefixed with a backslash.
 
-The Compute Engine includes a default LaTeX dictionary to parse and serialize 
+The Compute Engine includes a default LaTeX dictionary to parse and serialize
 common math expressions.
 
 **To extend the LaTeX syntax** update the `latexDictionary` property of the
@@ -351,15 +377,15 @@ Compute Engine
 ```javascript
 const ce = new ComputeEngine();
 ce.latexDictionary = [
-  // Incldue all the entries in the default dictionary...
+  // Include all the entries from the default dictionary...
   ...ce.latexDictionary,
-  // ...and add the `\smoll` command
+  // ...and add the `\smoll{}{}` command
   {
-    // We're defining a `\smoll{}{}` command:
-    latxTrigger: '\\smoll',
+    // The parse handler below will be invoked when this LaTeX command is encountered
+    latexTrigger: '\\smoll',
     parse: (parser) => {
       // We're expecting two arguments, so we're calling
-      // `parseGroup()` twice. If `parseGroup()` returns null,
+      // `parseGroup()` twice. If `parseGroup()` returns `null`,
       // we assume that the argument is missing.
       return [
         'Divide',
@@ -371,15 +397,10 @@ ce.latexDictionary = [
 ];
 
 console.log(ce.parse('\\smoll{1}{5}').json);
-// The "Divide" get represented a "Rational" by default when
+// The "Divide" get represented as a "Rational" by default when
 // both arguments are integers.
 // ➔ ["Rational", 1, 5]
 ```
-
-If you are using a mathfield, all the mathfields on the page
-share a Compute Engine instance, which is available as `MathfieldElement.computeEngine`.
-You can modify the LaTeX dictionary used by the mathfields with `MathfieldElement.computeEngine.latexDictionary`.{.notice--info}
-
 
 ### LaTeX Dictionary Entries
 
@@ -684,8 +705,8 @@ property is not provided.
 
 You may also want to use your new function with a mathfield.
 
-First you need to define a LaTeX macro so that the mathfield knows
-how to render this command. Let's define the `\smallfrac` macro.
+First you need to define a LaTeX macro so that the mathfield knows how to render
+this command. Let's define the `\smallfrac` macro.
 
 ```js
 const mfe = document.querySelector('math-field');
@@ -694,51 +715,47 @@ mfe.macros = {
   ...mfe.macros,
   smallfrac: {
     args: 2,
-    def: '{}^{#1}\\!\\!/\\!{}_{#2}'
+    def: '{}^{#1}\\!\\!/\\!{}_{#2}',
   },
 };
 ```
 
-The content of the `def` property is a LaTeX fragment that will
-be used to render the `\\smallfrac` command.
+The content of the `def` property is a LaTeX fragment that will be used to
+render the `\\smallfrac` command.
 
-The `#1` token in `def` is a reference to the first argument and `#2` to the 
-second one. 
+The `#1` token in `def` is a reference to the first argument and `#2` to the
+second one.
 
+You may also want to define an inline shortcut to make it easier to input the
+command.
 
-You may also want to define an inline shortcut to make it easier 
-to input the command. 
+With the code below, we define a shortcut "smallfrac".
 
-With the code below, we define a shortcut "smallfrac". 
+When typed, the shortcut is replaced with the associated LaTeX.
 
-When typed, the shortcut is replaced with the associated LaTeX. 
-
-The `#@` token represents the argument to the left of the shortcut, and 
-the `#?` token represents a placeholder to be filled by the user.
+The `#@` token represents the argument to the left of the shortcut, and the `#?`
+token represents a placeholder to be filled by the user.
 
 ```js
 mfe.inlineShortcuts = {
   ...mfe.inlineShortcuts,
-  smallfrac:'\\smallfrac{#@}{#?}'
+  smallfrac: '\\smallfrac{#@}{#?}',
 };
 ```
 
-
-{% readmore "/mathlive/guides/shortcuts/" %}
-Learn more about  <strong>Key Bindings and Inline Shortcuts</strong>
-{% endreadmore %}
-
+{% readmore "/mathlive/guides/shortcuts/" %} Learn more about <strong>Key
+Bindings and Inline Shortcuts</strong> {% endreadmore %}
 
 You can now parse the input from a mathfield using:
 
 ```js
-console.log(ce.parse(mfe.value).json)
+console.log(ce.parse(mfe.value).json);
 ```
 
-Alternatively, you can associate the customized compute engine with the 
+Alternatively, you can associate the customized compute engine with the
 mathfields in the document:
 
 ```js
 MathfieldElement.computeEngine = ce;
-console.log(mfe.getValue('math-json'))
+console.log(mfe.getValue('math-json'));
 ```

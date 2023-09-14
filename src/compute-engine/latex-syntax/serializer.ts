@@ -73,6 +73,9 @@ export class Serializer {
   options: NumberFormattingOptions & SerializeLatexOptions;
   readonly dictionary: IndexedLatexDictionary;
   level = -1;
+  // If true, serialize using canonical serialization rules (i.e. (a/b)*(c/d) -> (a*c)/(b*d))
+  // If false, avoid any canonicalization (i.e. (a/b)*(c/d) -> (a/b)*(c/d))
+  canonical: undefined | boolean;
   constructor(
     options: NumberFormattingOptions & SerializeLatexOptions,
     dictionary: IndexedLatexDictionary,
@@ -94,6 +97,7 @@ export class Serializer {
     }
     this.onError = onError;
     this.dictionary = dictionary;
+    this.canonical = undefined;
   }
 
   updateOptions(
@@ -281,8 +285,17 @@ export class Serializer {
       .join('\\\\')}\\end{array}\\right\\rbrack`;
   }
 
-  serialize(expr: Expression | null): LatexString {
+  serialize(
+    expr: Expression | null,
+    options?: { canonical?: boolean }
+  ): LatexString {
     if (expr === null || expr === undefined) return '';
+
+    options ??= {};
+    options = { ...options };
+    if (!('canonical' in options)) options.canonical = true;
+    const savedCanonical = this.canonical;
+    if (this.canonical === undefined) this.canonical = options.canonical;
 
     this.level += 1;
     try {
@@ -351,9 +364,12 @@ export class Serializer {
         ]);
       })();
       this.level -= 1;
+      this.canonical = savedCanonical;
       return result ?? '';
     } catch (e) {}
+
     this.level -= 1;
+    this.canonical = savedCanonical;
     return '';
   }
   applyFunctionStyle(

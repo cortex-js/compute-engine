@@ -239,8 +239,8 @@ export class LatexSyntax {
     }
     return expr ?? ['Sequence'];
   }
-  serialize(expr: Expression): LatexString {
-    return this.serializer.serialize(expr);
+  serialize(expr: Expression, options?: { canonical?: boolean }): LatexString {
+    return this.serializer.serialize(expr, options);
   }
 
   get serializer(): Serializer {
