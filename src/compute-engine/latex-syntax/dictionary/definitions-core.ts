@@ -10,6 +10,7 @@ import {
   missingIfEmpty,
   stripText,
   isListLike,
+  isEmptySequence,
 } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer, Terminator } from '../public';
 import { joinLatex } from '../tokenizer';
@@ -32,7 +33,7 @@ import { joinLatex } from '../tokenizer';
  */
 function parseSequence(
   parser: Parser,
-  terminator: Terminator,
+  terminator: Readonly<Terminator>,
   lhs: Expression,
   prec: number,
   sep: string
@@ -77,7 +78,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // Constants
   //
   {
-    trigger: ['\\placeholder'],
+    latexTrigger: ['\\placeholder'],
     kind: 'symbol',
     parse: (parser: Parser) => {
       // Parse, but ignore, the optional and required LaTeX args
@@ -96,6 +97,28 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   //
   // Functions
   //
+  {
+    name: 'Apply',
+    kind: 'function',
+    identifierTrigger: 'apply',
+    serialize: (serializer: Serializer, expr: Expression): string =>
+      serializer.serializeFunction(ops(expr) as Expression),
+  },
+  {
+    latexTrigger: '\\rhd',
+    kind: 'infix',
+    precedence: 20,
+    parse: 'Apply',
+  },
+  {
+    latexTrigger: '\\lhd',
+    kind: 'infix',
+    precedence: 20,
+    parse: (parser: Parser, lhs: Expression) => {
+      const rhs = parser.parseExpression({ minPrec: 20 }) ?? 'Nothing';
+      return ['Apply', rhs, lhs];
+    },
+  },
   {
     name: 'BaseForm',
     serialize: (serializer, expr) => {
@@ -177,7 +200,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
-    trigger: ['\\mathtip'],
+    latexTrigger: ['\\mathtip'],
     parse: (parser: Parser) => {
       const op1 = parser.parseGroup();
       const op2 = parser.parseGroup();
@@ -185,7 +208,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
-    trigger: ['\\texttip'],
+    latexTrigger: ['\\texttip'],
     parse: (parser: Parser) => {
       const op1 = parser.parseGroup();
       const op2 = parser.parseGroup();
@@ -193,8 +216,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
-    trigger: ['\\error'],
-    parse: (parser: Parser) => parser.parseGroup(),
+    latexTrigger: ['\\error'],
+    parse: (parser: Parser) => ['Error', parser.parseGroup()],
   },
   {
     name: 'Error',
@@ -279,10 +302,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'List',
     kind: 'matchfix',
-    openDelimiter: '[',
-    closeDelimiter: ']',
+    openTrigger: '[',
+    closeTrigger: ']',
     parse: (_parser: Parser, body: Expression): Expression => {
-      if (body === null) return ['List'];
+      if (body === null || isEmptySequence(body)) return ['List'];
       if (head(body) !== 'Sequence' && head(body) !== 'List')
         return ['List', body];
       return ['List', ...(ops(body) ?? [])];
@@ -297,11 +320,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     kind: 'matchfix',
-    openDelimiter: '(',
-    closeDelimiter: ')',
+    openTrigger: '(',
+    closeTrigger: ')',
     parse: (_parser, body) => {
       // @todo: does this really need to be done here? Sequence(Sequence(...))
-      if (body === null) return null;
+      // Handle `()` used for example with `f()`
+      if (body === null || isEmptySequence(body)) return ['Sequence'];
       if (head(body) === 'Sequence' || head(body) === 'List') {
         if (nops(body) === 0) return ['Delimiter'];
         return ['Delimiter', ['Sequence', ...(ops(body) ?? [])]];
@@ -311,7 +335,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
-    trigger: [','],
+    latexTrigger: [','],
     kind: 'infix',
     precedence: 20,
     // Unlike the matchfix version of List,
@@ -322,7 +346,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: (
       parser: Parser,
       lhs: Expression,
-      terminator: Terminator
+      terminator: Readonly<Terminator>
     ): Expression | null => {
       const seq = parseSequence(parser, terminator, lhs, 20, ',');
       if (seq === null) return null;
@@ -334,10 +358,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: serializeOps(''),
   },
   {
-    trigger: [';'],
+    latexTrigger: [';'],
     kind: 'infix',
     precedence: 19,
-    parse: (parser: Parser, lhs: Expression, terminator: Terminator) => {
+    parse: (
+      parser: Parser,
+      lhs: Expression,
+      terminator: Readonly<Terminator>
+    ) => {
       const seq = parseSequence(parser, terminator, lhs, 19, ';');
       if (seq === null) return null;
       return [
@@ -350,7 +378,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     name: 'String',
-    trigger: ['\\text'],
+    latexTrigger: ['\\text'],
     parse: (scanner) => parseTextRun(scanner),
     serialize: (serializer: Serializer, expr: Expression): string => {
       const args = ops(expr);
@@ -364,7 +392,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     name: 'Subscript',
-    trigger: ['_'],
+    latexTrigger: ['_'],
     kind: 'infix',
     serialize: (serializer: Serializer, expr: Expression): string => {
       if (nops(expr) === 2) {
@@ -378,57 +406,123 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return '_{' + serializer.serialize(op(expr, 1)) + '}';
     },
   },
-  { name: 'Superplus', trigger: ['^', '+'], kind: 'postfix' },
-  { name: 'Subplus', trigger: ['_', '+'], kind: 'postfix' },
-  { name: 'Superminus', trigger: ['^', '-'], kind: 'postfix' },
-  { name: 'Subminus', trigger: ['_', '-'], kind: 'postfix' },
+  { name: 'Superplus', latexTrigger: ['^', '+'], kind: 'postfix' },
+  { name: 'Subplus', latexTrigger: ['_', '+'], kind: 'postfix' },
+  { name: 'Superminus', latexTrigger: ['^', '-'], kind: 'postfix' },
+  { name: 'Subminus', latexTrigger: ['_', '-'], kind: 'postfix' },
   {
-    trigger: ['^', '*'],
+    latexTrigger: ['^', '*'],
     kind: 'postfix',
     parse: (_parser, lhs) => ['Superstar', lhs],
   },
   // @todo: when lhs is a complex number, 'Conjugate'
   // { name: 'Conjugate', trigger: ['\\star'], kind: 'infix' },
-  { name: 'Superstar', trigger: ['^', '\\star'], kind: 'postfix' },
+  { name: 'Superstar', latexTrigger: ['^', '\\star'], kind: 'postfix' },
   {
-    trigger: ['_', '*'],
+    latexTrigger: ['_', '*'],
     kind: 'postfix',
     parse: (_parser, lhs) => ['Substar', lhs],
   },
-  { name: 'Substar', trigger: ['_', '\\star'], kind: 'postfix' },
-  { name: 'Superdagger', trigger: ['^', '\\dagger'], kind: 'postfix' },
+  { name: 'Substar', latexTrigger: ['_', '\\star'], kind: 'postfix' },
+  { name: 'Superdagger', latexTrigger: ['^', '\\dagger'], kind: 'postfix' },
   {
-    trigger: ['^', '\\dag'],
+    latexTrigger: ['^', '\\dag'],
     kind: 'postfix',
     parse: (_parser, lhs) => ['Superdagger', lhs],
   },
   {
     name: 'Prime',
-    trigger: ['^', '\\prime'],
+    latexTrigger: ['^', '\\prime'],
+    // Note: we don't need a precedence because the trigger is '^'
+    // and '^' (and '_') are treated specially by the parser.
     kind: 'postfix',
+    parse: (parser, lhs) => parsePrime(parser, lhs, 1),
+    serialize: (serializer, expr) => {
+      const n2 = machineValue(op(expr, 2)) ?? 1;
+      const base = serializer.serialize(op(expr, 1));
+      if (n2 === 1) return base + '^\\prime';
+      if (n2 === 2) return base + '^\\doubleprime';
+      if (n2 === 3) return base + '^\\tripleprime';
+      return base + '^{(' + serializer.serialize(op(expr, 2)) + ')}';
+    },
   },
   {
-    trigger: ['^', '\\doubleprime'],
+    latexTrigger: '^{\\prime\\prime}',
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Prime', missingIfEmpty(lhs), 2],
+    parse: (parser, lhs) => parsePrime(parser, lhs, 2),
   },
   {
-    trigger: ['^', '\\tripleprime'],
+    latexTrigger: '^{\\prime\\prime\\prime}',
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Prime', missingIfEmpty(lhs), 3],
+    parse: (parser, lhs) => parsePrime(parser, lhs, 3),
   },
+  {
+    latexTrigger: ['^', '\\doubleprime'],
+    kind: 'postfix',
+    parse: (parser, lhs) => parsePrime(parser, lhs, 2),
+  },
+  {
+    latexTrigger: ['^', '\\tripleprime'],
+    kind: 'postfix',
+    parse: (parser, lhs) => parsePrime(parser, lhs, 3),
+  },
+  {
+    latexTrigger: "'",
+    kind: 'postfix',
+    precedence: 810,
+    parse: (parser, lhs) => parsePrime(parser, lhs, 1),
+  },
+  {
+    latexTrigger: '\\prime',
+    kind: 'postfix',
+    precedence: 810,
+    parse: (parser, lhs) => parsePrime(parser, lhs, 1),
+  },
+  {
+    latexTrigger: '\\doubleprime',
+    kind: 'postfix',
+    precedence: 810,
+    parse: (parser, lhs) => parsePrime(parser, lhs, 2),
+  },
+  {
+    latexTrigger: '\\tripleprime',
+    kind: 'postfix',
+    precedence: 810,
+    parse: (parser, lhs) => parsePrime(parser, lhs, 3),
+  },
+  {
+    latexTrigger: ['^', '<{>', '('],
+    kind: 'postfix',
+    parse: (parser: Parser, lhs) => {
+      if (!parser.computeEngine?.box(lhs)?.domain.isFunction) return null;
+
+      const start = parser.index;
+      parser.addBoundary([')']);
+      const expr = parser.parseExpression();
+      if (!parser.matchBoundary()) {
+        parser.index = start;
+        return null;
+      }
+      if (!parser.match('<}>')) {
+        parser.index = start;
+        return null;
+      }
+      return ['Derivative', lhs, expr];
+    },
+  },
+
   {
     name: 'InverseFunction',
-    trigger: '^{-1}',
+    latexTrigger: '^{-1}',
     kind: 'postfix',
     parse: (parser, lhs) => {
       // If the lhs is a function, return the inverse function
       // i.e. f^{-1} -> InverseFunction(f)
-      // Otherwise, if it's a number or a symbol, return the power
-      // i.e. x^{-1} -> Power(x, -1)
       if (parser.computeEngine?.box(lhs)?.domain.isFunction)
         return ['InverseFunction', lhs];
-      return null;
+      // Otherwise, if it's a number or a symbol, return the power
+      // i.e. x^{-1} -> Power(x, -1)
+      return ['Power', missingIfEmpty(lhs), -1];
     },
     serialize: (serializer, expr) =>
       serializer.serialize(op(expr, 1)) + '^{-1}',
@@ -442,13 +536,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (degree === 2) return base + '^{\\doubleprime}';
       if (degree === 3) return base + '^{\\tripleprime}';
 
-      return base + '^{(' + Number(degree).toString() + ')}';
+      return base + '^{(' + serializer.serialize(op(expr, 2)) + ')}';
     },
   },
   {
-    name: 'Which',
-    trigger: 'cases',
     kind: 'environment',
+    name: 'Which',
+    identifierTrigger: 'cases',
     parse: (parser: Parser) => {
       const tabular: Expression[][] | null = parser.parseTabular();
       if (!tabular) return ['Which'];
@@ -643,4 +737,27 @@ function errorContextAsLatex(
   if (head(arg) === 'Hold') return serializer.serialize(op(arg, 1));
 
   return serializer.serialize(arg);
+}
+
+function parsePrime(
+  parser: Parser,
+  lhs: Expression,
+  order: number
+): Expression | null {
+  // If the lhs is a Prime/Derivative, increase the derivation order
+  const lhsh = head(lhs);
+  if (lhsh === 'Derivative' || lhsh === 'Prime') {
+    const n = machineValue(op(lhs, 2)) ?? 1;
+    return [lhsh, missingIfEmpty(op(lhs, 1)), n + order];
+  }
+  // If the lhs is a function, return the derivative
+  // i.e. f' -> Derivative(f)
+  if (parser.computeEngine?.box(lhs)?.domain.isFunction) {
+    if (order === 1) return ['Derivative', lhs];
+    return ['Derivative', lhs, order];
+  }
+  // Otherwise, if it's a number or a symbol, return a
+  // generic "Prime"
+  if (order === 1) return ['Prime', missingIfEmpty(lhs)];
+  return ['Prime', missingIfEmpty(lhs), order];
 }

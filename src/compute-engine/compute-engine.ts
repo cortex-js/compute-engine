@@ -304,14 +304,15 @@ export class ComputeEngine implements IComputeEngine {
    * perform calculations using arbitrary precision floating point numbers.
    * Use `"auto"` or `"complex"` to allow calculations on complex numbers.
    *
-   * @param options.numericPrecision Specific how many digits of precision for the
-   * numeric calculations. Default is 100.
+   * @param options.numericPrecision Specific how many digits of precision
+   * for the numeric calculations. Default is 100.
    *
-   * @param options.tolerance If the absolute value of the difference of two numbers
-   * is less than `tolerance`, they are considered equal. Used by `chop()` as well.
+   * @param options.tolerance If the absolute value of the difference of two
+   * numbers is less than `tolerance`, they are considered equal. Used by
+   * `chop()` as well.
    *
-   * @param options.defaultDomain If an unknown symbol is encountered, assume it should
-   * be a variable in this domain. **Default** `ExtendedRealNumber`
+   * @param options.defaultDomain If an unknown symbol is encountered, assume
+   * this is its domain. **Default** `ExtendedRealNumber`
    */
   constructor(options?: {
     numericMode?: NumericMode;
@@ -337,6 +338,7 @@ export class ComputeEngine implements IComputeEngine {
     };
 
     this._useRawJsonSerializationOptions = false;
+    // These options are not customizable...
     this._rawJsonSerializationOptions = {
       exclude: [],
       shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
@@ -1458,9 +1460,28 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   get jsonSerializationOptions(): Readonly<JsonSerializationOptions> {
-    if (this._useRawJsonSerializationOptions)
-      return this._rawJsonSerializationOptions;
-    return this._jsonSerializationOptions;
+    if (this._useRawJsonSerializationOptions) {
+      return new Proxy(this._rawJsonSerializationOptions, {
+        get(options, prop) {
+          if (!(prop in options)) return undefined;
+          return options[prop];
+        },
+      });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
+    return new Proxy(this._jsonSerializationOptions, {
+      get(options, prop) {
+        if (!(prop in options)) return undefined;
+        return options[prop];
+      },
+      set(options, prop, value): boolean {
+        if (!(prop in options)) return false;
+        self.jsonSerializationOptions = { [prop]: value };
+        return true;
+      },
+    });
   }
 
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>) {

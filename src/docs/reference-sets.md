@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/sets/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 render_math_in_document: true
 ---
@@ -28,15 +28,15 @@ expression with one of the following head functions.
 
 <div class=symbols-table>
 
-| Function              | Operation                               |                                                                                                                                                                                                         |
-| :-------------------- | :-------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `CartesianProduct`    | \\[ \mathrm{A} \times \mathrm{B} \\]    | A.k.a the product set, the set direct product or cross product. [Q173740](https://www.wikidata.org/wiki/Q173740)                                                                                        |
-| `Complement`          | \\[ \mathrm{A}^\complement \\]          | The set of elements that are not in \\( \mathrm{A} \\). If \\(\mathrm{A}\\) is a numeric domain, the universe is assumed to be the set of all numbers. [Q242767](https://www.wikidata.org/wiki/Q242767) |
-| `Intersection`        | \\[ \mathrm{A} \cap \mathrm{B} \\]      | The set of elements that are in \\(\mathrm{A}\\) and in \\(\mathrm{B}\\) [Q185837](https://www.wikidata.org/wiki/Q185837)                                                                               |
-| `Union`               | \\[ \mathrm{A} \cup \mathrm{B} \\]      | The set of elements that are in \\(\mathrm{A}\\) or in \\(\mathrm{B}\\) [Q173740](https://www.wikidata.org/wiki/Q173740)                                                                                |
-| `Set`                 | \\(\lbrace 1, 2, 3 \rbrace \\)          | Set builder notation                                                                                                                                                                                    |
-| `SetMinus`            | \\[ \mathrm{A} \setminus \mathrm{B} \\] | [Q18192442](https://www.wikidata.org/wiki/Q18192442)                                                                                                                                                    |
-| `SymmetricDifference` | \\[ \mathrm{A} \triangle \mathrm{B} \\] | Disjunctive union = \\( (\mathrm{A} \setminus \mathrm{B}) \cup (\mathrm{B} \setminus \mathrm{A})\\) [Q1147242](https://www.wikidata.org/wiki/Q1147242)                                                  |
+| Function              | Operation                                           |                                                                                                                                                                                                                     |
+| :-------------------- | :-------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CartesianProduct`    | \\[ \operatorname{A} \times \operatorname{B} \\]    | A.k.a the product set, the set direct product or cross product. [Q173740](https://www.wikidata.org/wiki/Q173740)                                                                                                    |
+| `Complement`          | \\[ \operatorname{A}^\complement \\]                | The set of elements that are not in \\( \operatorname{A} \\). If \\(\operatorname{A}\\) is a numeric domain, the universe is assumed to be the set of all numbers. [Q242767](https://www.wikidata.org/wiki/Q242767) |
+| `Intersection`        | \\[ \operatorname{A} \cap \operatorname{B} \\]      | The set of elements that are in \\(\operatorname{A}\\) and in \\(\operatorname{B}\\) [Q185837](https://www.wikidata.org/wiki/Q185837)                                                                               |
+| `Union`               | \\[ \operatorname{A} \cup \operatorname{B} \\]      | The set of elements that are in \\(\operatorname{A}\\) or in \\(\operatorname{B}\\) [Q173740](https://www.wikidata.org/wiki/Q173740)                                                                                |
+| `Set`                 | \\(\lbrace 1, 2, 3 \rbrace \\)                      | Set builder notation                                                                                                                                                                                                |
+| `SetMinus`            | \\[ \operatorname{A} \setminus \operatorname{B} \\] | [Q18192442](https://www.wikidata.org/wiki/Q18192442)                                                                                                                                                                |
+| `SymmetricDifference` | \\[ \operatorname{A} \triangle \operatorname{B} \\] | Disjunctive union = \\( (\operatorname{A} \setminus \operatorname{B}) \cup (\operatorname{B} \setminus \operatorname{A})\\) [Q1147242](https://www.wikidata.org/wiki/Q1147242)                                      |
 
 </div>
 
@@ -44,15 +44,15 @@ expression with one of the following head functions.
 
 <div class=symbols-table>
 
-| Function        |                                                                                                                                       |     |
-| :-------------- | :------------------------------------------------------------------------------------------------------------------------------------ | :-- |
-| `Element`       | \\[ x \in \mathrm{A} \\]                                                                                                              |     |
-| `NotElement`    | \\[ x \not\in \mathrm{A} \\]                                                                                                          |     |
-| `NotSubset`     | \\[ A \nsubset \mathrm{B} \\]                                                                                                         |     |
-| `NotSuperset`   | \\[ A \nsupset \mathrm{B} \\]                                                                                                         |     |
-| `Subset`        | \\[ \mathrm{A} \subset \mathrm{B} \\] <br> \\[ \mathrm{A} \subsetneq \mathrm{B} \\] <br> \\[ \mathrm{A} \varsubsetneqq \mathrm{B} \\] |     |
-| `SubsetEqual`   | \\[ \mathrm{A} \subseteq \mathrm{B} \\]                                                                                               |     |
-| `Superset`      | \\[ \mathrm{A} \supset \mathrm{B} \\]<br> \\[ \mathrm{A} \supsetneq \mathrm{B} \\]<br>\\[ \mathrm{A} \varsupsetneq \mathrm{B} \\]     |     |
-| `SupersetEqual` | \\[ \mathrm{A} \supseteq \mathrm{B} \\]                                                                                               |     |
+| Function        |                                                                                                                                                                           |     |
+| :-------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :-- |
+| `Element`       | \\[ x \in \operatorname{A} \\]                                                                                                                                            |     |
+| `NotElement`    | \\[ x \not\in \operatorname{A} \\]                                                                                                                                        |     |
+| `NotSubset`     | \\[ A \nsubset \operatorname{B} \\]                                                                                                                                       |     |
+| `NotSuperset`   | \\[ A \nsupset \operatorname{B} \\]                                                                                                                                       |     |
+| `Subset`        | \\[ \operatorname{A} \subset \operatorname{B} \\] <br> \\[ \operatorname{A} \subsetneq \operatorname{B} \\] <br> \\[ \operatorname{A} \varsubsetneqq \operatorname{B} \\] |     |
+| `SubsetEqual`   | \\[ \operatorname{A} \subseteq \operatorname{B} \\]                                                                                                                       |     |
+| `Superset`      | \\[ \operatorname{A} \supset \operatorname{B} \\]<br> \\[ \operatorname{A} \supsetneq \operatorname{B} \\]<br>\\[ \operatorname{A} \varsupsetneq \operatorname{B} \\]     |     |
+| `SupersetEqual` | \\[ \operatorname{A} \supseteq \operatorname{B} \\]                                                                                                                       |     |
 
 </div>

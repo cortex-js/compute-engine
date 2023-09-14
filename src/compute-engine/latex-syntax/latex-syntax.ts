@@ -31,7 +31,7 @@ import {
   getNumericSetStyle,
 } from './serializer-style';
 import { IComputeEngine } from '../public';
-import { matchIdentifier } from './parse-identifier';
+import { parseIdentifier } from './parse-identifier';
 
 export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> =
   {
@@ -68,7 +68,7 @@ export class LatexSyntax {
   readonly computeEngine: IComputeEngine;
 
   private _dictionary: IndexedLatexDictionary;
-  private _dictionaryInput: readonly LatexDictionaryEntry[];
+  private _dictionaryInput: readonly object[];
   private _serializer?: Serializer;
 
   constructor(
@@ -105,7 +105,7 @@ export class LatexSyntax {
   }
 
   get dictionary(): readonly LatexDictionaryEntry[] {
-    return this._dictionaryInput;
+    return this._dictionaryInput as LatexDictionaryEntry[];
   }
 
   set dictionary(val: readonly LatexDictionaryEntry[]) {
@@ -152,9 +152,9 @@ export class LatexSyntax {
     let expr = parser.parseExpression();
 
     if (!parser.atEnd) {
-      // Something went wrong, generate error expressin
+      // Something went wrong, generate error expression
       const opDefs = parser.peekDefinitions('infix');
-      if (opDefs) {
+      if (opDefs.length > 0) {
         const start = parser.index;
         const [def, n] = opDefs[0];
         parser.index += n;
@@ -176,22 +176,26 @@ export class LatexSyntax {
 
       const index = parser.index;
 
-      const id = matchIdentifier(parser);
+      const id = parseIdentifier(parser);
       if (id) {
         const idError = parser.error(['unexpected-identifier', id], index);
         return expr ? ['Sequence', expr, idError] : idError;
       }
 
+      let openDelimiter: string | null = parser.peek;
       const closeDelimiter = parser.matchEnclosureOpen();
       if (closeDelimiter) {
+        // Parse and discard the content of the enclosure
+        parser.parseExpression();
+        parser.match(closeDelimiter);
         const enclosureError = parser.error(
-          ['expected-close-delimiter', { str: closeDelimiter }],
+          ['unexpected-open-delimiter', { str: openDelimiter }],
           index
         );
         return expr ? ['Sequence', expr, enclosureError] : enclosureError;
       }
 
-      const openDelimiter = parser.matchEnclosureClose();
+      openDelimiter = parser.matchEnclosureClose();
       if (openDelimiter) {
         const enclosureError = parser.error(
           ['expected-open-delimiter', { str: openDelimiter }],

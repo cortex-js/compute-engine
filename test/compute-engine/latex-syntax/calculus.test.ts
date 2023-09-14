@@ -13,7 +13,9 @@ describe('INTEGRAL', () => {
   });
 
   test('simple with d', () => {
-    expect(json('\\int\\sin x \\mathrm{d} x+1 = 2')).toMatchInlineSnapshot(
+    expect(
+      json('\\int\\sin x \\operatorname{d} x+1 = 2')
+    ).toMatchInlineSnapshot(
       `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
     );
   });
@@ -30,19 +32,23 @@ describe('INTEGRAL', () => {
   });
 
   test('simple with mathrm with spacing', () => {
-    expect(json('\\int\\sin x \\, \\mathrm{d}x+1 = 2')).toMatchInlineSnapshot(
+    expect(
+      json('\\int\\sin x \\, \\operatorname{d}x+1 = 2')
+    ).toMatchInlineSnapshot(
       `["Equal", ["Add", ["Integrate", ["Sin", "x"], "x"], 1], 2]`
     );
   });
 
   test('simple with lower bound', () => {
-    expect(json('\\int_0\\sin x \\, \\mathrm{d}x+1 = 2')).toMatchInlineSnapshot(
+    expect(
+      json('\\int_0\\sin x \\, \\operatorname{d}x+1 = 2')
+    ).toMatchInlineSnapshot(
       `["Equal", ["Add", ["Integrate", ["Sin", "x"], ["Pair", "x", 0]], 1], 2]`
     );
   });
 
   test('simple with upper bound', () => {
-    expect(json('\\int^\\infty\\sin x \\, \\mathrm{d}x+1 = 2'))
+    expect(json('\\int^\\infty\\sin x \\, \\operatorname{d}x+1 = 2'))
       .toMatchInlineSnapshot(`
       [
         "Equal",
@@ -60,7 +66,7 @@ describe('INTEGRAL', () => {
     `);
   });
   test('simple with lower and upper bound', () => {
-    expect(json('\\int^\\infty_0\\sin x \\, \\mathrm{d}x+1 = 2'))
+    expect(json('\\int^\\infty_0\\sin x \\, \\operatorname{d}x+1 = 2'))
       .toMatchInlineSnapshot(`
       [
         "Equal",
@@ -100,8 +106,8 @@ describe('INTEGRAL', () => {
       ]
     `));
 
-  test('with \\mathrm{d}x in frac', () =>
-    expect(json('\\int^\\infty_0\\frac{3x\\mathrm{d}x}{5} = 2'))
+  test('with \\operatorname{d}x in frac', () =>
+    expect(json('\\int^\\infty_0\\frac{3x\\operatorname{d}x}{5} = 2'))
       .toMatchInlineSnapshot(`
       [
         "Equal",

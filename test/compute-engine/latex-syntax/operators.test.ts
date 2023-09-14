@@ -1,8 +1,6 @@
 import { Expression } from '../../../src/math-json/math-json-format';
 import { parse, latex, check } from '../../utils';
 
-// console.log(box(['Subtract']));
-
 describe('OPERATOR oprel', () => {
   test('x=1', () =>
     expect(check('x=1')).toMatchInlineSnapshot(`
@@ -485,7 +483,9 @@ describe('OPERATOR serialize, invalid', () => {
   test(`['Multiply', 1] // Invalid form`, () =>
     expect(latex(['Multiply', 1])).toMatchInlineSnapshot(`1`));
   test(`['Multiply', 'NaN'] // Invalid form`, () =>
-    expect(latex(['Multiply', 'NaN'])).toMatchInlineSnapshot(`\\mathrm{NaN}`));
+    expect(latex(['Multiply', 'NaN'])).toMatchInlineSnapshot(
+      `\\operatorname{NaN}`
+    ));
   test(`['Multiply', 1] // Invalid form`, () =>
     expect(latex(['Multiply', 'Infinity'])).toMatchInlineSnapshot(`\\infty`));
 
@@ -518,6 +518,6 @@ describe('OPERATOR serialize, invalid', () => {
 
   test(`['Divide', NaN] // Invalid form`, () =>
     expect(latex(['Divide', NaN])).toMatchInlineSnapshot(
-      `\\frac{\\mathrm{NaN}}{\\error{\\blacksquare}}`
+      `\\frac{\\operatorname{NaN}}{\\error{\\blacksquare}}`
     ));
 });

@@ -1,21 +1,76 @@
 ## [Unreleased]
 
+## Breaking Changes
+
+- The entries in the LaTeX syntax dictionary can now have LaTeX triggers
+  (`latexTrigger`) or triggers based on identifiers (`identifierTrigger`). The
+  former replaces the `trigger` property. The latter is new. An entry with a
+  `triggerIdentifier` of `average` will match `\operatorname{average}`,
+  `\mathrm{average}` and other variants.
+- The `ce.latexSerializationOptions` property is read-only.
+
 ## Improvements
 
-- Added more expressions and symbols supported by `expr.compile()`:
+- Added more functions and symbols supported by `expr.compile()`:
+
   - `Factorial` postfix operator `5!`
   - `Gamma` function `\Gamma(2)`
-  - `LogGamma` function `\mathrm{LogGamma}(2)`
-  - `Gcd` function `\mathrm{gcd}(20, 5)`
-  - `Lcm` function `\mathrm{lcm}(20, 5)`
-  - `Chop` function `\mathrm{chop}(0.00000000001)`
+  - `LogGamma` function `\operatorname{LogGamma}(2)`
+  - `Gcd` function `\operatorname{gcd}(20, 5)`
+  - `Lcm` function `\operatorname{lcm}(20, 5)`
+  - `Chop` function `\operatorname{chop}(0.00000000001)`
   - `Half` constant `\frac{1}{2}`
   - 'MachineEpsilon' constant
   - `GoldenRatio` constant
   - `CatalanConstant` constant
   - `EulerGamma` constant `\gamma`
-  - `Max` function `\mathrm{max}(1, 2, 3)`
-  - `Min` function `\mathrm{min}(13, 5, 7)`
+  - `Max` function `\operatorname{max}(1, 2, 3)`
+  - `Min` function `\operatorname{min}(13, 5, 7)`
+  - Relational operators: `Less`, `Greater`, `LessEqual`, `GreaterEqual`,
+    'Equal', 'NotEqual'
+  - Some logical operators and constants: `And`, `Or`, `Not`, `True`, `False`
+
+- More complex identifiers syntax are recognized, including `\\mathbin{}`,
+  `\\mathord{}`, etc... `\\operatorname{}` is the recommended syntax, though: it
+  will display the identifier in upright font and with the propert spacing, and
+  is properly enclosing. Some commands, such as `\\mathrm{}` are not properly
+  enclosing: two adjacent `\\mathrm{}` command could be merged into one.
+
+- Environments are now parsed and serialized correctly.
+
+- When parsing LaTeX, function application is properly handled in more cases,
+  including custom functions, e.g. `f(x)`
+- When parsing LaTeX, multiple arguments are properly handled, e.g. `f(x, y)`
+
+- Add LaTeX syntax for logical operators:
+
+  - `And`: `\land`, `\operatorname{and}` (infix or function)
+  - `Or`: `\lor`, `\operatorname{or}` (infix or function)
+  - `Not`: `\lnot`, `\operatorname{not}` (prefix or function)
+  - `Xor`: `\veebar` (infix)
+  - `Nand`: `\barwedge` (infix)
+  - `Nor`: `^^^^22BD` (infix)
+  - `Implies`: `\implies` (infix)
+  - `Equivalent`: `\iff` (infix)
+
+- When a postfix operator is defined in the LaTeX syntax dictionary of the form
+  `^` plus a single token, a definition with braces is added automatically so
+  that both forms will be recognized.
+
+- Extended the LaTeX dictionary with:
+
+  - `floor`
+  - `ceil`
+  - `round`
+  - `sgn`
+  - `exp`
+  - `abs`
+  - `gcd`
+  - `lcm`
+  - `apply`
+
+- Properly handle inverse and derivate notations, e.g. `\sin^{-1}(x)`,
+  `\sin'(x)`, `\cos''(x)`, \cos^{(4)}(x)`or even`\sin^{-1}''(x)`
 
 ## 0.13.0
 

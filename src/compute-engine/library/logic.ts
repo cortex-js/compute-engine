@@ -22,7 +22,7 @@ export const LOGIC_LIBRARY: IdTable = {
   // expressions into CNF (Conjunctive Normal Form)
   // https://en.wikipedia.org/wiki/Conjunctive_normal_form
   // using rules (with a rule set that's kinda the inverse of the
-  // logic rules for simplify
+  // logic rules for simplify)
   And: {
     wikidata: 'Q191081',
     threadable: true,
@@ -97,6 +97,10 @@ export const LOGIC_LIBRARY: IdTable = {
           return ops[1] ? ops[1].evaluate() : ce.box('Nothing');
         return ops[2] ? ops[2].evaluate() : ce.box('Nothing');
       },
+      // @todo: probably don't need a N() handler. Doesn't make a difference
+      // for the evaluation of booleans. Also, don't need to call N() on the
+      // arguments, the caller should have done that. Same for evaluate()
+      // and simplify() above
       N: (ce, ops) => {
         const cond = ops[0];
         if (cond && cond.symbol === 'True')

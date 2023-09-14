@@ -145,21 +145,41 @@ export function compile(
     }
 
     // Is it an operator?
+    // See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence
+    // for operator precedence in JavaScript
     const OPS: Record<string, [op: string, prec: number]> = {
-      Add: ['+', 1],
-      Subtract: ['-', 1],
-      Multiply: ['*', 2],
-      Divide: ['/', 3],
-      Equal: ['===', 0],
+      Add: ['+', 11],
+      Negate: ['-', 14], // Unary operator
+      Subtract: ['-', 11],
+      Multiply: ['*', 12],
+      Divide: ['/', 13],
+      Equal: ['===', 8],
+      NotEqual: ['!==', 8],
+      LessEqual: ['<=', 9],
+      GreaterEqual: ['>=', 9],
+      Less: ['<', 9],
+      Greater: ['>', 9],
+      And: ['&&', 4],
+      Or: ['||', 3],
+      Not: ['!', 14], // Unary operator
+      // Xor: ['^', 6], // That's bitwise XOR, not logical XOR
+      // Possible solution is to use `a ? !b : b` instead of `a ^ b`
     };
     const op = OPS[h];
 
     if (op !== undefined) {
       const args = expr.ops;
       if (args === null) return '';
-      const result: string[] = [];
-      for (const arg of args) result.push(compile(arg, freeVars, op[1]));
-      return op[1] < prec ? `(${result.join(op[0])})` : result.join(op[0]);
+      let resultStr: string;
+      if (args.length === 1) {
+        // Unary operator, assume prefix
+        resultStr = `${op[0]}${compile(args[0], freeVars, op[1])}`;
+      } else {
+        resultStr = args
+          .map((arg) => compile(arg, freeVars, op[1]))
+          .join(` ${op[0]} `);
+      }
+      return op[1] < prec ? `(${resultStr})` : resultStr;
     }
 
     const fn =

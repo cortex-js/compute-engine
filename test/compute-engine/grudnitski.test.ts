@@ -56,19 +56,27 @@ describe.skip(`arithmetic equalities`, () => {
     expect(isEquivalent('1 = 1', '1 = 5 - 4 + 3 - 2 - 1')).toBeFalsy());
 
   test(`not isEquivalent('Eq(1,5-4+3-2-1)','True')`, () =>
-    expect(isEqual('1 = 5 - 4 + 3 - 2 - 1', '\\mathrm{True}')).toBeFalsy());
+    expect(
+      isEqual('1 = 5 - 4 + 3 - 2 - 1', '\\operatorname{True}')
+    ).toBeFalsy());
 
   test(`not isEquivalent('True', 'Eq(1,5-4+3-2-1)')`, () =>
-    expect(isEqual('\\mathrm{True}', '1 = 5 - 4 + 3 - 2 - 1')).toBeFalsy());
+    expect(
+      isEqual('\\operatorname{True}', '1 = 5 - 4 + 3 - 2 - 1')
+    ).toBeFalsy());
 
   test(`isEquivalent('True', 'True')`, () =>
     expect(isEqual('True', 'True')).toBeTruthy());
 
   test(`isEquivalent('False', 'False')`, () =>
-    expect(isEqual('\\mathrm{False}', '\\mathrm{False}')).toBeTruthy());
+    expect(
+      isEqual('\\operatorname{False}', '\\operatorname{False}')
+    ).toBeTruthy());
 
   test(`not isEquivalent('True', 'False')`, () =>
-    expect(isEqual('\\mathrm{True}', '\\mathrm{False}')).toBeFalsy());
+    expect(
+      isEqual('\\operatorname{True}', '\\operatorname{False}')
+    ).toBeFalsy());
 
   test(`not isEquivalent('2','3')`, () =>
     expect(isEquivalent('2', '3')).toBeFalsy());

@@ -129,176 +129,176 @@ function parseTrig(op: string): ExpressionParseHandler {
 export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   {
     name: 'Arcsin',
-    trigger: ['\\arcsin'],
+    latexTrigger: ['\\arcsin'],
 
     parse: parseTrig('Arcsin'),
   },
   {
     name: 'Arccos',
-    trigger: ['\\arccos'],
+    latexTrigger: ['\\arccos'],
 
     parse: parseTrig('Arccos'),
   },
   {
     name: 'Arctan',
-    trigger: ['\\arctan'],
+    latexTrigger: ['\\arctan'],
 
     parse: parseTrig('Arctan'),
   },
   {
-    trigger: ['\\arctg'],
+    latexTrigger: ['\\arctg'],
 
     parse: parseTrig('Arctan'),
   },
   {
     name: 'Arccot',
-    trigger: ['\\arcctg'],
+    latexTrigger: ['\\arcctg'],
 
     parse: parseTrig('Arccot'),
   },
   {
     name: 'Arcsec',
-    trigger: 'arcsec',
+    latexTrigger: 'arcsec',
 
     parse: parseTrig('Arcsec'),
   },
   {
     name: 'Arccsc',
-    trigger: ['\\arccsc'],
+    latexTrigger: ['\\arccsc'],
 
     parse: parseTrig('Arccsc'),
   },
   {
     name: 'Arsinh',
-    trigger: ['\\arsinh'],
+    latexTrigger: ['\\arsinh'],
 
     parse: parseTrig('Arsinh'),
   },
   {
     name: 'Arcosh',
-    trigger: ['\\arcosh'],
+    latexTrigger: ['\\arcosh'],
 
     parse: parseTrig('Arcosh'),
   },
   {
     name: 'Artanh',
-    trigger: ['\\artanh'],
+    latexTrigger: ['\\artanh'],
 
     parse: parseTrig('Artanh'),
   },
   {
     name: 'Arsech',
-    trigger: ['\\arsech'],
+    latexTrigger: ['\\arsech'],
 
     parse: parseTrig('Arsech'),
   },
   {
     name: 'Arcsch',
-    trigger: ['\\arcsch'],
+    latexTrigger: ['\\arcsch'],
 
     parse: parseTrig('Arcsch'),
   },
   {
     // Rusian hyperbolic cosine
-    trigger: ['\\ch'],
+    latexTrigger: ['\\ch'],
 
     parse: parseTrig('Cosh'),
   },
   {
     name: 'Cosec',
-    trigger: ['\\cosec'],
+    latexTrigger: ['\\cosec'],
 
     parse: parseTrig('Cosec'),
   },
   {
     name: 'Cosh',
-    trigger: ['\\cosh'],
+    latexTrigger: ['\\cosh'],
 
     parse: parseTrig('Cosh'),
   },
   {
     name: 'Cot',
-    trigger: ['\\cot'],
+    latexTrigger: ['\\cot'],
 
     parse: parseTrig('Cot'),
   },
   {
-    trigger: ['\\cotg'],
+    latexTrigger: ['\\cotg'],
 
     parse: parseTrig('Cot'),
   },
   {
     name: 'Coth',
-    trigger: ['\\coth'],
+    latexTrigger: ['\\coth'],
 
     parse: parseTrig('Coth'),
   },
   {
     name: 'Csc',
-    trigger: ['\\csc'],
+    latexTrigger: ['\\csc'],
 
     parse: parseTrig('Csc'),
   },
   {
     // Rusian cotangent
-    trigger: ['\\ctg'],
+    latexTrigger: ['\\ctg'],
 
     parse: parseTrig('Cot'),
   },
   {
-    trigger: ['\\cth'],
+    latexTrigger: ['\\cth'],
 
     parse: parseTrig('Cotanh'),
   },
   {
     name: 'Sec',
-    trigger: ['\\sec'],
+    latexTrigger: ['\\sec'],
 
     parse: parseTrig('Sec'),
   },
   {
     name: 'Sinh',
-    trigger: ['\\sinh'],
+    latexTrigger: ['\\sinh'],
 
     parse: parseTrig('Sinh'),
   },
   {
-    trigger: ['\\sh'],
+    latexTrigger: ['\\sh'],
 
     parse: parseTrig('Sinh'),
   },
   {
     name: 'Tan',
-    trigger: ['\\tan'],
+    latexTrigger: ['\\tan'],
 
     parse: parseTrig('Tan'),
   },
   {
-    trigger: ['\\tg'],
+    latexTrigger: ['\\tg'],
 
     parse: parseTrig('Tan'),
   },
   {
     name: 'Tanh',
-    trigger: ['\\tanh'],
+    latexTrigger: ['\\tanh'],
 
     parse: parseTrig('Tanh'),
   },
   {
-    trigger: ['\\th'],
+    latexTrigger: ['\\th'],
 
     parse: parseTrig('Tanh'),
   },
 
   {
     name: 'Cos',
-    trigger: ['\\cos'],
+    latexTrigger: ['\\cos'],
 
     parse: parseTrig('Cos'),
   },
   {
     name: 'Sin',
-    trigger: ['\\sin'],
+    latexTrigger: ['\\sin'],
 
     parse: parseTrig('Sin'),
   },

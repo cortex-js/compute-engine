@@ -14,12 +14,13 @@ import {
   isMatchfixEntry,
   isInfixEntry,
   isSymbolEntry,
-  isEnvironmentEntry,
   isPostfixEntry,
   isPrefixEntry,
-  isFunctionEntry,
   ExpressionParseHandler,
-  isExpressionEntry,
+  Precedence,
+  Parser,
+  isEnvironmentEntry,
+  Terminator,
 } from '../public';
 import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
 import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
@@ -35,30 +36,53 @@ import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
 import {
   applyAssociativeOperator,
   head,
+  isEmptySequence,
+  isValidIdentifier,
   missingIfEmpty,
+  nops,
   op,
+  ops,
 } from '../../../math-json/utils';
 import { ErrorSignal, WarningSignal } from '../../../common/signals';
 
 export type CommonEntry = {
+  /** Note: a name is required if a serialize handler is provided */
   name?: string;
-  serialize: SerializeHandler | LatexString;
+  serialize?: SerializeHandler;
+
+  /** Note: not all kinds have a latexTrigger or identifierTrigger.
+   * For example, matchfix operators use openDelimiter/closeDelimiter
+   */
+  latexTrigger?: LatexString;
+  identifierTrigger?: string;
 };
 
 export type IndexedSymbolEntry = CommonEntry & {
   kind: 'symbol';
 
   // The 'precedence' of symbols is used to determine appropriate wrapping when serializing
-  precedence: number;
+  precedence: Precedence;
 
   parse: ExpressionParseHandler;
 };
+/** @internal */
+export function isIndexedSymbolEntry(
+  entry: IndexedLatexDictionaryEntry
+): entry is IndexedSymbolEntry {
+  return 'kind' in entry && entry.kind === 'symbol';
+}
 
 export type IndexedExpressionEntry = CommonEntry & {
   kind: 'expression';
 
   parse: ExpressionParseHandler;
 };
+/** @internal */
+export function isIndexedExpressionEntry(
+  entry: IndexedLatexDictionaryEntry
+): entry is IndexedExpressionEntry {
+  return 'kind' in entry && entry.kind === 'expression';
+}
 
 /**
  * A function has the following form:
@@ -74,6 +98,12 @@ export type IndexedFunctionEntry = CommonEntry & {
 
   parse: ExpressionParseHandler;
 };
+/** @internal */
+export function isIndexedFunctionEntry(
+  entry: IndexedLatexDictionaryEntry
+): entry is IndexedFunctionEntry {
+  return 'kind' in entry && entry.kind === 'function';
+}
 
 export type IndexedMatchfixEntry = CommonEntry & {
   kind: 'matchfix';
@@ -83,33 +113,66 @@ export type IndexedMatchfixEntry = CommonEntry & {
 
   parse: MatchfixParseHandler;
 };
+/** @internal */
+export function isIndexedMatchfixEntry(
+  entry: IndexedLatexDictionaryEntry
+): entry is IndexedMatchfixEntry {
+  return 'kind' in entry && entry.kind === 'matchfix';
+}
 
 export type IndexedInfixEntry = CommonEntry & {
   kind: 'infix';
   associativity: 'right' | 'left' | 'non' | 'both';
-  precedence: number;
+  precedence: Precedence;
 
   parse: InfixParseHandler;
 };
+/** @internal */
+export function isIndexedInfixdEntry(
+  entry: IndexedLatexDictionaryEntry
+): entry is IndexedInfixEntry {
+  return 'kind' in entry && entry.kind === 'infix';
+}
 
 export type IndexedPrefixEntry = CommonEntry & {
   kind: 'prefix';
-  precedence: number;
+  precedence: Precedence;
 
   parse: ExpressionParseHandler;
 };
+/** @internal */
+export function isIndexedPrefixedEntry(
+  entry: IndexedLatexDictionaryEntry
+): entry is IndexedPostfixEntry {
+  return 'kind' in entry && entry.kind === 'prefix';
+}
+
 export type IndexedPostfixEntry = CommonEntry & {
   kind: 'postfix';
-  precedence: number;
+  precedence: Precedence;
 
   parse: PostfixParseHandler;
 };
+
+/** @internal */
+export function isIndexedPostfixEntry(
+  entry: IndexedLatexDictionaryEntry
+): entry is IndexedPostfixEntry {
+  return 'kind' in entry && entry.kind === 'postfix';
+}
 
 export type IndexedEnvironmentEntry = CommonEntry & {
   kind: 'environment';
 
   parse: EnvironmentParseHandler;
 };
+
+/** @internal */
+export function isIndexedEnvironmentEntry(
+  entry: IndexedLatexDictionaryEntry
+): entry is IndexedEnvironmentEntry {
+  return 'kind' in entry && entry.kind === 'environment';
+}
 
 export type IndexedLatexDictionaryEntry =
   | IndexedExpressionEntry
@@ -122,32 +185,14 @@ export type IndexedLatexDictionaryEntry =
   | IndexedEnvironmentEntry;
 
 export type IndexedLatexDictionary = {
+  // Mapping from  MathJSON identifiers to dictionary entry
+  ids: Map<string, IndexedLatexDictionaryEntry>;
+
   // Maximum number of tokens ahead of the current one that need to be
   // considered (longest trigger length)
   lookahead: number;
 
-  // Mapping from  MathJSON function name to dictionary entry
-  name: Map<string, IndexedLatexDictionaryEntry>;
-
-  // Mapping from token triggers of a given length to dictionary entry.
-  // Definition can share triggers, so the entry is an array
-  expression: (Map<LatexString, IndexedExpressionEntry[]> | null)[];
-  symbol: (Map<LatexString, IndexedSymbolEntry[]> | null)[];
-  prefix: (Map<LatexString, IndexedPrefixEntry[]> | null)[];
-  infix: (Map<LatexString, IndexedInfixEntry[]> | null)[];
-  postfix: (Map<LatexString, IndexedPostfixEntry[]> | null)[];
-
-  // Matchfix entries use openDelimiter/closeDelimiter. They do not
-  // have a trigger, and the entries are not sorted by trigger length.
-  matchfix: IndexedMatchfixEntry[];
-
-  // Note: for functions, the "trigger" is the name of the function
-  // as in \mathrm{foo}, the "trigger" is "foo"
-  function: Map<string, IndexedFunctionEntry[]>;
-
-  // Environment definition must be unique. They are indexed by the name
-  // of the environment.
-  environment: Map<string, IndexedEnvironmentEntry>;
+  defs: IndexedLatexDictionaryEntry[];
 };
 
 const DEFAULT_DELIMITER: { [key: string]: LatexString } = {
@@ -175,121 +220,81 @@ function addEntry(
   //
   // 1. Create a validated indexed entry
   //
-  const [trigger, indexedEntry] = makeIndexedEntry(entry, onError);
+  const indexedEntry = makeIndexedEntry(entry, onError);
   if (indexedEntry === null) return;
 
   const kind = 'kind' in entry ? entry.kind : 'expression';
 
+  const latexTrigger = indexedEntry.latexTrigger;
+  if (typeof latexTrigger === 'string')
+    result.lookahead = Math.max(result.lookahead, countTokens(latexTrigger));
+
   //
   // 1.1 Handle single token synonyms for ^ and _
   //
+  // Turn the latex string into tokens
+  const tokensTrigger = tokenize(latexTrigger ?? '', []);
+  if (latexTrigger?.[1] === '\\prime') debugger;
   if (
-    trigger &&
-    trigger.length === 2 &&
-    /[_^]/.test(trigger[0]) &&
-    trigger[1] !== '<{>' &&
+    tokensTrigger.length === 2 &&
+    /[_^]/.test(tokensTrigger[0]) &&
+    tokensTrigger[1] !== '<{>' &&
     kind !== 'function' &&
-    entry.name
+    kind !== 'environment' &&
+    kind !== 'matchfix'
   ) {
+    //
     // This is a single token ^ or _ trigger, e.g. '^+' or '_*'
     // Add a "synonym" entry with brackets, e.g. '^+' -> '^{+}'
+    //
+
+    // We're going to add an entry without a name (since names must be unique)
+    // so we need to provide a custom parser
     let parse = entry.parse;
-    if (parse === undefined) {
-      if (kind === 'symbol') parse = entry.name;
+    if (!parse && entry.name) {
       if (kind === 'postfix' || kind === 'prefix')
         parse = (_parser, expr) => [entry.name!, expr] as Expression;
+      else parse = entry.name;
     }
+
     addEntry(
       result,
       {
-        ...entry,
+        ...(entry as any),
         kind,
-        parse: parse as any,
         name: undefined,
-        trigger: [trigger[0], '<{>', trigger[1], '<}>'],
+        serialize: undefined,
+        parse,
+        latexTrigger: [tokensTrigger[0], '<{>', tokensTrigger[1], '<}>'],
       },
       onError
     );
   }
 
   //
-  // 2. Update the name index
+  // 2. Add to the list of definitions
   //
+  result.defs.push(indexedEntry);
+
+  //
+  // 3. Update the name index
+  //    This is an index of MathJSON identifiers to dictionary entries
+  //
+  // Note: makeIndexedEntry() already checked that the name is a
+  // valid identifier
   if (indexedEntry.name !== undefined) {
-    if (result.name.has(indexedEntry.name)) {
+    // Names must be unique
+    if (result.ids.has(indexedEntry.name)) {
       onError({
         severity: 'warning',
         message: [
           'invalid-dictionary-entry',
           indexedEntry.name,
-          'Duplicate definition. The name must be unique, but a trigger can be used by multiple definitions.',
+          'Duplicate definition. The name (MathJSON identifier) must be unique, but triggers can be shared by multiple definitions.',
         ],
       });
     }
-    result.name.set(indexedEntry.name, indexedEntry);
-  }
-
-  if (indexedEntry.kind === 'matchfix') {
-    //
-    // 3.1/ Update the matchfix index
-    result.matchfix.push(indexedEntry);
-    //
-  } else if (indexedEntry.kind === 'environment') {
-    //
-    // 3.2/ Update the environment index
-    //
-    const triggerString = tokensToString(entry.trigger ?? []);
-    if (result.environment.has(triggerString)) {
-      onError({
-        severity: 'warning',
-        message: [
-          'invalid-dictionary-entry',
-          triggerString,
-          'Duplicate environment definition',
-        ],
-      });
-    }
-    result.environment.set(triggerString, indexedEntry);
-  } else if (trigger) {
-    //
-    // 3.3/ Update the other symbol or operator index
-    //
-    console.assert(entry.trigger);
-
-    if (indexedEntry.kind === 'function') {
-      // If no entries of this kind and length yet, create a map for it
-      console.assert(typeof entry.trigger === 'string');
-      const fnName = entry.trigger as string;
-      if (!result.function.has(fnName))
-        result.function.set(fnName, [indexedEntry]);
-      else
-        result.function.set(fnName, [
-          ...result.function.get(fnName)!,
-          indexedEntry,
-        ]);
-    } else {
-      let triggerString: string;
-      let tokenCount: number;
-
-      if (typeof entry.trigger === 'string') {
-        triggerString = entry.trigger;
-        tokenCount = countTokens(triggerString);
-      } else {
-        triggerString = tokensToString(entry.trigger ?? []);
-        tokenCount = entry.trigger!.length;
-      }
-
-      result.lookahead = Math.max(result.lookahead, tokenCount);
-
-      const kind = indexedEntry.kind;
-      // If no entries of this kind and length yet, create a map for it
-      if (result[kind][tokenCount] === undefined)
-        result[kind][tokenCount] = new Map();
-      const list = result[kind][tokenCount]!;
-      if (list.has(triggerString))
-        list.get(triggerString)!.push(indexedEntry as any);
-      else list.set(triggerString, [indexedEntry as any]);
-    }
+    result.ids.set(indexedEntry.name, indexedEntry);
   }
 }
 
@@ -299,15 +304,8 @@ export function indexLatexDictionary(
 ): IndexedLatexDictionary {
   const result: IndexedLatexDictionary = {
     lookahead: 1,
-    name: new Map(),
-    expression: [],
-    symbol: [],
-    infix: [],
-    prefix: [],
-    postfix: [],
-    function: new Map(),
-    environment: new Map(),
-    matchfix: [],
+    ids: new Map(),
+    defs: [],
   };
 
   for (const entry of dic)
@@ -316,197 +314,311 @@ export function indexLatexDictionary(
   return result;
 }
 
+/** Normalie a dictionary entry
+ * - Ensure it has a kind property
+ * - Ensure if it has a serialize property, it is a function, and it has a name
+ *   property as a valid identifier
+ */
 function makeIndexedEntry(
   entry: LatexDictionaryEntry,
   onError: (sig: ErrorSignal | WarningSignal) => void
-): [string | LatexToken[] | null, IndexedLatexDictionaryEntry | null] {
-  if (!entryIsValid(entry, onError)) return [null, null];
+): IndexedLatexDictionaryEntry | null {
+  if (!isValidEntry(entry, onError)) return null;
 
   const result: Partial<IndexedLatexDictionaryEntry> = {
-    name: entry.name,
     kind: 'kind' in entry ? entry.kind : 'expression',
   };
 
   //
-  // 1. Handle matchfix definition
+  // Get and normalize the triggers
+  //
+  let tokensTrigger: LatexToken[] | null = null;
+  if ('latexTrigger' in entry) {
+    if (typeof entry.latexTrigger === 'string')
+      tokensTrigger = tokenize(entry.latexTrigger, []);
+    else tokensTrigger = entry.latexTrigger as LatexToken[];
+  }
+  let idTrigger: string | null = null;
+  if ('identifierTrigger' in entry) {
+    idTrigger = entry.identifierTrigger as string;
+  }
+
+  if (tokensTrigger !== null)
+    result.latexTrigger = tokensToString(tokensTrigger);
+  if (idTrigger !== null) result.identifierTrigger = idTrigger;
+
+  //
+  // Make a default serialize handler if none is provided
+  //
+  if (entry.name) {
+    // Note: the validity of the identifier has been checked
+    // in isValidEntry()
+    result.name = entry.name;
+
+    // A serialize function requires a name
+    result.serialize = makeSerializeHandler(entry, tokensTrigger, idTrigger);
+  }
+
+  //
+  // 1. Matchfix definition
   //
   if (result.kind === 'matchfix' && isMatchfixEntry(entry)) {
-    result.openDelimiter = entry.openDelimiter!;
-    result.closeDelimiter = entry.closeDelimiter!;
-
-    // @todo: use groupStyle to decide on \left..\right, etc..
-    if (typeof entry.serialize === 'function')
-      result.serialize = entry.serialize;
-    else {
-      const openDelim =
-        typeof result.openDelimiter === 'string'
-          ? DEFAULT_DELIMITER[result.openDelimiter]
-          : tokensToString(result.openDelimiter);
-      const closeDelim =
-        typeof result.closeDelimiter === 'string'
-          ? DEFAULT_DELIMITER[result.closeDelimiter]
-          : tokensToString(result.closeDelimiter);
-
-      result.serialize = (serializer, expr) =>
-        joinLatex([openDelim, serializer.serialize(op(expr, 1)), closeDelim]);
-    }
-    if (typeof entry.parse === 'function')
-      result.parse = entry.parse as MatchfixParseHandler;
-    else {
-      console.assert(entry.parse || entry.name);
-      const head = entry.parse ?? entry.name;
-      result.parse = (_parser, expr) => [head!, expr];
-    }
-    return [null, result as IndexedLatexDictionaryEntry];
+    result.openDelimiter = entry.openTrigger!;
+    result.closeDelimiter = entry.closeTrigger!;
   }
 
   //
-  // 2. Environment definitions
+  // 2. Symbol definition
   //
-  if (result.kind === 'environment' && isEnvironmentEntry(entry)) {
-    const envName = entry.trigger as string;
-    result.serialize =
-      entry.serialize ??
-      ((serializer, expr) =>
-        `\\begin{${envName}}${serializer.serialize(
-          op(expr, 1)
-        )}\\end{${envName}}`);
-    result.parse = (entry.parse as EnvironmentParseHandler) ?? (() => null);
-    return [envName, result as IndexedLatexDictionaryEntry];
-  }
-
-  // If the trigger is a string, it's a LaTeX string which
-  // is a shortcut for an array of LaTeX tokens assigned to `symbol`
-  // This is convenient to define common long symbols, such as `\operator{gcd}`...
-  const trigger =
-    typeof entry.trigger === 'string'
-      ? tokenize(entry.trigger, [])
-      : entry.trigger;
-  const triggerString = trigger ? tokensToString(trigger) : '';
-
-  //
-  // 3. Function
-  //
-  if (result.kind === 'function' && isFunctionEntry(entry)) {
-    // Default serializer for functions
-    result.serialize = entry.serialize;
-    if (triggerString && !entry.serialize) {
-      if (triggerString.startsWith('\\')) {
-        result.serialize = (serializer, expr) =>
-          `${triggerString}${serializer.wrapArguments(expr)}`;
-      } else
-        result.serialize = (serializer, expr) =>
-          `\\mathrm{${triggerString}}${serializer.wrapArguments(expr)}`;
-    }
-    if (typeof entry.parse === 'function') result.parse = entry.parse;
-    else if (typeof entry.parse === 'string')
-      result.parse = () => entry.parse as string;
-    else if (entry.name) result.parse = () => entry.name!;
-    return [triggerString, result as IndexedLatexDictionaryEntry];
-  }
-
-  //
-  // 4. Generic expression
-  //
-  if (result.kind === 'expression' && isExpressionEntry(entry)) {
-    //
-    // Default serialize handler
-    //
-    result.serialize = entry.serialize ?? triggerString;
-
-    if (typeof result.serialize === 'string') {
-      const serializeStr = result.serialize;
-      result.serialize = (serializer, expr) => {
-        if (!head(expr)) return serializeStr;
-        return `${serializeStr}${serializer.wrapArguments(expr)}`;
-      };
-    }
-    //
-    // Default parse handler
-    //
-    {
-      if (typeof entry.parse === 'function') {
-        result.parse = entry.parse as any as ExpressionParseHandler;
-      } else {
-        const parseResult = entry.parse ?? entry.name;
-        result.parse = () => parseResult as Expression;
-      }
-    }
-    return [triggerString, result as IndexedLatexDictionaryEntry];
-  }
-
-  //
-  // 5. Other definitions (not matchfix, not environment)
-  //
-
-  console.assert(
-    typeof entry.trigger !== 'string' ||
-      entry.parse ||
-      trigger!.length > 1 ||
-      ('kind' in entry && entry.kind === 'function'),
-    `Trigger shortcuts should produce more than one token. Otherwise, not worth using them. (${triggerString})`
-  );
 
   if (result.kind === 'symbol' && isSymbolEntry(entry)) {
     result.precedence = entry.precedence ?? 10000;
   }
 
   //
-  // Special case for ^ and _
+  // 3. Postfix, prefix
   //
 
   if (
-    (result.kind === 'infix' ||
-      result.kind === 'prefix' ||
-      result.kind === 'postfix') &&
-    (isInfixEntry(entry) || isPrefixEntry(entry) || isPostfixEntry(entry))
+    (result.kind === 'prefix' || result.kind === 'postfix') &&
+    (isPrefixEntry(entry) || isPostfixEntry(entry))
   ) {
-    if (trigger && (trigger[0] === '^' || trigger[0] === '_')) {
+    // Special case for ^ and _
+    if (
+      tokensTrigger &&
+      (tokensTrigger[0] === '^' || tokensTrigger[0] === '_')
+    ) {
       result.precedence = 720;
       console.assert(
         entry.precedence === undefined,
-        "'precedence' not allowed with ^ and _ triggers"
+        "'precedence' is fixed and cannot be modified with ^ and _ triggers"
       );
     } else result.precedence = entry.precedence ?? 10000;
   }
 
   if (result.kind === 'infix' && isInfixEntry(entry)) {
     console.assert(
-      !trigger ||
-        (trigger[0] !== '^' && trigger[0] !== '_') ||
+      !tokensTrigger ||
+        (tokensTrigger[0] !== '^' && tokensTrigger[0] !== '_') ||
         !entry.associativity ||
         entry.associativity === 'non'
     );
     result.associativity = entry.associativity ?? 'non';
+    result.precedence = entry.precedence ?? 10000;
+  }
 
-    if (typeof entry.parse === 'function') {
-      //
-      // Use a custom parse handler
-      //
-      result.parse = entry.parse as InfixParseHandler;
-    } else if (trigger && (trigger[0] === '^' || trigger[0] === '_')) {
-      //
-      // No custom parse handler allowed for ^ and _
-      //
-      console.assert(!entry.parse);
-      const name = entry.parse ?? entry.name!;
-      result.parse = (_scanner, arg, _terminator) =>
-        [
-          name,
-          missingIfEmpty(op(arg, 1)),
-          missingIfEmpty(op(arg, 2)),
-        ] as Expression;
-    } else {
-      //
-      // Default parse function for infix operator
-      //
-      const head = entry.parse ?? entry.name!;
-      const prec = result.precedence!;
-      const associativity = result.associativity;
-      result.parse = (scanner, lhs, terminator) => {
+  //
+  // Make a default parser if none was provided, but a trigger was provided
+  //
+  const parse = makeParseHandler(entry, tokensTrigger, idTrigger);
+  if (parse) result.parse = parse as any;
+
+  return result as IndexedLatexDictionaryEntry;
+}
+
+function makeSerializeHandler(
+  entry: LatexDictionaryEntry,
+  latexTrigger: LatexToken[] | null,
+  idTrigger: string | null
+): SerializeHandler | undefined {
+  if (typeof entry.serialize === 'function') return entry.serialize;
+
+  const kind = entry['kind'] ?? 'expression';
+
+  if (kind === 'environment') {
+    // @todo: should do a serializeTabular(). op(expr,1) is likely to be
+    // a matrix (List of List).
+    const envName = entry['identifierTrigger'] ?? entry.name ?? 'unknown';
+    return (serializer, expr) =>
+      joinLatex([
+        `\\begin{${envName}}`,
+        serializer.serialize(op(expr, 1)),
+        `\\end{${envName}}`,
+      ]);
+  }
+
+  if (isMatchfixEntry(entry)) {
+    // @todo: use groupStyle to decide on \left..\right, etc..
+    const openDelim =
+      typeof entry.openTrigger === 'string'
+        ? DEFAULT_DELIMITER[entry.openTrigger]
+        : tokensToString(entry['openDelimiter']);
+    const closeDelim =
+      typeof entry.closeTrigger === 'string'
+        ? DEFAULT_DELIMITER[entry.closeTrigger]
+        : tokensToString(entry['closeDelimiter']);
+
+    return (serializer, expr) =>
+      joinLatex([openDelim, serializer.serialize(op(expr, 1)), closeDelim]);
+  }
+
+  let latex = entry.serialize;
+  if (latex === undefined && latexTrigger) latex = tokensToString(latexTrigger);
+
+  //
+  // We have a LaTeX version of the identifier
+  //
+  if (latex) {
+    if (kind === 'postfix')
+      return (serializer, expr) =>
+        joinLatex([serializer.serialize(op(expr, 1)), latex!]);
+
+    if (kind === 'prefix')
+      return (serializer, expr) =>
+        joinLatex([latex!, serializer.serialize(op(expr, 1))]);
+
+    if (kind === 'infix') {
+      return (serializer, expr) =>
+        joinLatex(
+          (ops(expr) ?? []).flatMap((val, i) =>
+            i < nops(expr) - 1
+              ? [serializer.serialize(val), latex!]
+              : [serializer.serialize(val)]
+          )
+        );
+    }
+
+    // Function, symbol or expression. Depends on the actual shape of the
+    // expression (the "kind" of the definition may not match the "kind"
+    // of the expression). However, by the time this serializer is called,
+    // `expr` is either a symbol or a function expression.
+    return (serializer, expr) =>
+      head(expr) ? joinLatex([latex!, serializer.wrapArguments(expr)]) : latex!;
+  }
+
+  //
+  // We do not have a LaTeX version of the identifier. Use a string identifier
+  //
+  const id = idTrigger ?? entry.name ?? 'unknown';
+  if (kind === 'postfix')
+    return (serializer, expr) =>
+      joinLatex([
+        serializer.serialize(op(expr, 1)),
+        serializer.serializeSymbol(id),
+      ]);
+
+  if (kind === 'prefix')
+    return (serializer, expr) =>
+      joinLatex([
+        serializer.serializeSymbol(id),
+        serializer.serialize(op(expr, 1)),
+      ]);
+
+  if (kind === 'infix')
+    return (serializer, expr) =>
+      joinLatex([
+        serializer.serialize(op(expr, 1)),
+        serializer.serializeSymbol(id),
+        serializer.serialize(op(expr, 2)),
+      ]);
+
+  // Function, symbol or expression. Depends on the actual shape of the
+  // expression (the "kind" of the definition may not match the "kind"
+  // of the expression). However, by the time this serializer is called,
+  // `expr` is either a symbol or a function expression.
+  return (serializer, expr) =>
+    head(expr)
+      ? joinLatex([
+          serializer.serializeSymbol(id),
+          serializer.wrapArguments(expr),
+        ])
+      : serializer.serializeSymbol(id);
+}
+
+function makeParseHandler(
+  entry: LatexDictionaryEntry,
+  latexTrigger: LatexToken[] | null,
+  idTrigger: string | null
+) {
+  // If there is a custom parser function, always use it.
+  if ('parse' in entry && typeof entry.parse === 'function') return entry.parse;
+
+  const kind = 'kind' in entry ? entry.kind : 'expression' ?? 'expression';
+
+  // If there is a parse handler as an Expression , use the
+  // expression, but depending on the kind of the entry
+
+  //
+  // Environment
+  //
+  if (kind === 'environment') {
+    // Assume we'll parse a tabular body
+    const envName = entry.parse ?? idTrigger ?? entry.name;
+    if (envName)
+      return (parser: Parser, _until) => {
+        const array = parser.parseTabular();
+        if (array === null) return null;
+        return [envName, ['List', array.map((row) => ['List', ...row])]];
+      };
+  }
+
+  //
+  // Function
+  //
+  if (kind === 'function') {
+    const fnName = entry.parse ?? idTrigger ?? entry.name;
+    if (fnName)
+      return (parser: Parser, until: Terminator) => {
+        const args = parser.parseArguments('enclosure', until);
+        return args === null ? fnName : [fnName, ...args];
+      };
+  }
+
+  //
+  // Symbol
+  //
+  if (kind === 'symbol') {
+    const symName = entry.parse ?? idTrigger ?? entry.name;
+    if (symName) return (_parser, _terminator) => symName;
+  }
+
+  //
+  // Prefix
+  //
+  if (kind === 'prefix') {
+    const h = entry.parse ?? idTrigger ?? entry.name;
+    if (h) {
+      const prec = entry['precedence'] ?? 10000;
+      return (parser, until) => {
+        const rhs = parser.parseExpression({
+          ...(until ?? []),
+          minPrec: prec,
+        });
+        return rhs === null ? null : [h, rhs];
+      };
+    }
+  }
+
+  //
+  // Postfix
+  //
+  if (kind === 'postfix') {
+    const h = entry.parse ?? entry.name;
+    if (h) return (_parser, lhs) => (lhs === null ? null : [h, lhs]);
+  }
+
+  //
+  // Infix
+  //
+  if (kind === 'infix') {
+    // Special handling for ^ and _
+    //
+    if (/[_^]/.test(latexTrigger?.[0] ?? '')) {
+      const h = entry.name ?? entry.parse;
+      return (_parser, arg) => [
+        h,
+        missingIfEmpty(op(arg, 1)),
+        missingIfEmpty(op(arg, 2)),
+      ];
+    }
+    const h = entry.parse ?? idTrigger ?? entry.name;
+    const prec = entry['precedence'] ?? 10000;
+    const associativity = entry['associativity'] ?? 'non';
+    if (h)
+      return (parser, lhs, until) => {
+        if (lhs === null) return null;
         // If the precedence is too high, return
-        if (prec < terminator.minPrec) return null; // @todo should not be needed
-
+        if (prec < until.minPrec) return null; // @todo should not be needed
         // Get the rhs
         // Note: for infix operators, we are lenient and tolerate
         // a missing rhs.
@@ -514,87 +626,87 @@ function makeIndexedEntry(
         // (i.e. `x+`) and more likely to be a syntax error we want to
         // capture as `['Add', 'x', ['Error', "'missing'"]`.
         const rhs = missingIfEmpty(
-          scanner.parseExpression({
-            ...terminator,
-            minPrec: prec,
-          })
+          parser.parseExpression({ ...until, minPrec: prec })
         );
 
-        return typeof head === 'string'
-          ? applyAssociativeOperator(head, lhs, rhs, associativity)
-          : [head, lhs, rhs];
+        return typeof h === 'string'
+          ? applyAssociativeOperator(h, lhs, rhs, associativity)
+          : [h, lhs, rhs];
       };
-    }
-  } else {
-    if (typeof entry.parse === 'function') {
-      //
-      // Custom parse handler
-      //
-      result.parse = entry.parse;
-    } else if (entry.parse !== undefined) {
-      //
-      // Parse handler as an expression
-      //
-
-      console.assert(result.kind === 'symbol' || result.kind === 'expression');
-      result.parse = () => entry.parse as Expression;
-    } else if (entry.parse === undefined && entry.name !== undefined) {
-      //
-      // Default parse handler
-      //
-
-      // By default, when a LaTeX string triggers, the generated
-      // output is the name of this record, i.e. 'Multiply'
-      if (result.kind === 'postfix') {
-        result.parse = (_parser, lhs) => (lhs ? [entry.name!, lhs] : null);
-      } else if (result.kind === 'prefix') {
-        const prec = result.precedence!;
-        console.assert(entry.name);
-        const head = entry.name;
-        result.parse = (parser, terminator) => {
-          // If the precedence is too high, return
-          if (terminator && prec < terminator.minPrec) return null;
-          // Get the rhs
-          const rhs = parser.parseExpression({ ...terminator, minPrec: prec });
-          return rhs === null ? null : [head, rhs];
-        };
-      }
-    }
   }
 
   //
-  // Serializer
+  // Matchfix
   //
-
-  if (
-    typeof entry.serialize === 'function' ||
-    typeof entry.serialize === 'string'
-  ) {
-    result.serialize = entry.serialize;
-  } else if (trigger) {
-    // By default, when LaTeX is serialized for this record,
-    // it is the same as the trigger
-    if (result.kind === 'postfix') {
-      result.serialize = '#1' + triggerString;
-    } else if (result.kind === 'prefix') {
-      result.serialize = triggerString + '#1';
-    } else if (result.kind === 'infix') {
-      result.serialize = '#1' + triggerString + '#2';
-    } else if (result.kind === 'symbol') {
-      result.serialize = triggerString;
-    } else {
-      result.serialize = '';
-    }
+  if (kind === 'matchfix') {
+    const h = entry.parse ?? entry.name;
+    if (h)
+      return (_parser, body) => {
+        if (body === null || isEmptySequence(body)) return null;
+        return [h, body];
+      };
   }
 
-  return [trigger ?? null, result as IndexedLatexDictionaryEntry];
+  //
+  // Expression
+  //
+  if (kind === 'expression') {
+    // If no parse funtion provided, parse as a symbol
+    const parseResult = entry.parse ?? idTrigger ?? entry.name;
+    if (parseResult) return () => parseResult as Expression;
+  }
+
+  //
+  // Default parse
+  //
+  if ('parse' in entry) {
+    const parseResult = entry.parse;
+    return () => parseResult as Expression;
+  }
+
+  return undefined;
 }
 
-function entryIsValid(
+function isValidEntry(
   entry: LatexDictionaryEntry,
   onError: (sig: ErrorSignal | WarningSignal) => void
 ): boolean {
-  const subject = entry.name ?? entry.trigger ?? entry['openDelimiter'];
+  let subject =
+    entry.name ??
+    entry['latexTrigger'] ??
+    entry['identifierTrigger'] ??
+    entry['openDelimiter'];
+  if (!subject) {
+    try {
+      subject = JSON.stringify(entry);
+    } catch (e) {
+      subject = '???';
+    }
+  }
+  if (Array.isArray(subject)) subject = tokensToString(subject);
+
+  if (
+    'kind' in entry &&
+    ![
+      'expression',
+      'symbol',
+      'function',
+      'infix',
+      'postfix',
+      'prefix',
+      'matchfix',
+      'environment',
+    ].includes(entry.kind)
+  ) {
+    onError({
+      severity: 'warning',
+      message: [
+        'invalid-dictionary-entry',
+        subject,
+        `The 'kind' property must be one of 'expression', 'symbol', 'function', 'infix', 'postfix', 'prefix', 'matchfix', 'environment'`,
+      ],
+    });
+  }
 
   if (entry.serialize !== undefined && !entry.name) {
     onError({
@@ -602,29 +714,72 @@ function entryIsValid(
       message: [
         'invalid-dictionary-entry',
         subject,
-        `Unexpected serialize property without a name property`,
+        `A 'name' property must be provided if a 'serialize' handler is provided`,
       ],
     });
     return false;
   }
 
-  //
-  // Check specific to `matchfix`
-  //
-  if (isMatchfixEntry(entry)) {
-    if (entry.trigger) {
+  // Check that the identifierTrigger is a valid identifier is present
+  if ('identifierTrigger' in entry) {
+    if (
+      typeof entry.identifierTrigger !== 'string' ||
+      !isValidIdentifier(entry.identifierTrigger)
+    ) {
       onError({
         severity: 'warning',
         message: [
           'invalid-dictionary-entry',
           subject,
-          `Unexpected 'trigger' "${entry.trigger}". 'matchfix' operators use a 'openDelimiter' and 'closeDelimiter' instead of a trigger. `,
+          `The 'identifierTrigger' property must be a valid identifier`,
+        ],
+      });
+    }
+  }
+
+  //
+  // Check that the name identifier is valid if present
+  //
+  if ('name' in entry) {
+    if (typeof entry.name !== 'string') {
+      if (entry.name !== undefined)
+        onError({
+          severity: 'warning',
+          message: [
+            'invalid-dictionary-entry',
+            subject,
+            `The 'name' property must be a string`,
+          ],
+        });
+    } else if (!isValidIdentifier(entry.name)) {
+      onError({
+        severity: 'warning',
+        message: [
+          'invalid-dictionary-entry',
+          entry.name,
+          `The 'name' property must be a valid identifier`,
+        ],
+      });
+    }
+  }
+
+  //
+  // Checks specific to `matchfix`
+  //
+  if (isMatchfixEntry(entry)) {
+    if ('latexTrigger' in entry || 'identifierTrigger' in isPrefixEntry) {
+      onError({
+        severity: 'warning',
+        message: [
+          'invalid-dictionary-entry',
+          subject,
+          `'matchfix' operators use a 'openDelimiter' and 'closeDelimiter' instead of a 'latexTrigger' or 'identifierTrigger'. `,
         ],
       });
       return false;
     }
 
-    if (!entry.openDelimiter || !entry.closeDelimiter) {
+    if (!entry.openTrigger || !entry.closeTrigger) {
       onError({
         severity: 'warning',
         message: [
@@ -636,7 +791,7 @@ function entryIsValid(
       return false;
     }
 
-    if (typeof entry.openDelimiter !== typeof entry.closeDelimiter) {
+    if (typeof entry.openTrigger !== typeof entry.closeTrigger) {
       onError({
         severity: 'warning',
         message: [
@@ -650,14 +805,15 @@ function entryIsValid(
   }
 
   //
-  // Check for infix, postfix and prefix
+  // Checks for infix, postfix and prefix
   //
   if (isInfixEntry(entry) || isPostfixEntry(entry) || isPrefixEntry(entry)) {
     if (
-      (Array.isArray(entry.trigger) &&
-        (entry.trigger[0] === '_' || entry.trigger[0] === '^')) ||
-      (typeof entry.trigger === 'string' &&
-        (entry.trigger.startsWith('^') || entry.trigger.startsWith('_')))
+      (Array.isArray(entry.latexTrigger) &&
+        (entry.latexTrigger[0] === '_' || entry.latexTrigger[0] === '^')) ||
+      (typeof entry.latexTrigger === 'string' &&
+        (entry.latexTrigger.startsWith('^') ||
+          entry.latexTrigger.startsWith('_')))
     ) {
       if (
         entry.precedence !== undefined ||
@@ -702,9 +858,9 @@ function entryIsValid(
     }
   }
 
-  if (!isMatchfixEntry(entry)) {
-    if (!entry.trigger && !entry.name) {
-      // A trigger OR a name is required (except for matchfix)
+  if (!isMatchfixEntry(entry) && !isEnvironmentEntry(entry)) {
+    if (!entry.latexTrigger && !entry.identifierTrigger && !entry.name) {
+      // A trigger OR a name is required (except for matchfix and environment)
       // The trigger maps LaTeX -> json
       // The name maps json -> LaTeX
       onError({
@@ -712,7 +868,7 @@ function entryIsValid(
         message: [
           'invalid-dictionary-entry',
           subject,
-          `Expected at least a 'trigger' or a 'name'`,
+          `Expected a 'name', a 'latexTrigger' or a 'identifierTrigger'`,
         ],
       });
       return false;
@@ -773,7 +929,7 @@ export const DEFAULT_LATEX_DICTIONARY: {
     {
       name: 'mu0',
       kind: 'symbol',
-      trigger: '\\mu_0',
+      latexTrigger: '\\mu_0',
     },
   ],
   sets: DEFINITIONS_SETS,

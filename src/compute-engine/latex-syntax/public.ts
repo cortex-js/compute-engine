@@ -61,6 +61,43 @@ export type LibraryCategory =
   | 'trigonometry'
   | 'units';
 
+/** Theory of operations:
+ *
+ * The precedence of an operator is a number that indicates the order in which
+ * operators are applied. For example, in `1 + 2 * 3`, the `*` operator has
+ * a higher precedence than the `+` operator, so it is applied first.
+ *
+ * The precendence range from 0 to 1000. The higher the number, the higher the
+ * precedence, the more "binding" the operator is.
+ *
+ * Here are some rough ranges for the precedence:
+ *
+ * - 800: prefix and postfix operators,
+ *        e.g. `\lnot`, `!`, `'`, `\degree`, `++`, etc...
+ * - 700: some relational operators: `<`
+ * - 600: some binary operators: `\div`
+ * - 500: not used
+ * - 400: not used
+ * - 300: some logic and arithmetic operators:
+ *        `\land`, `\lor`, `\times`, etc...
+ * - 200: arithmetic operators, inequalities:
+ *        `+`, `-`, `=`, `<`, etc...
+ *   - 260: `=`
+ *   - 245: `\lt`, `\gt`
+ *   - 241: `\leq`
+ * - 100: not used
+ * - 0: `,`, `;`, etc...
+ *
+ *
+ * Note: MathML defines some operator precendence, but it has some
+ * issues and inconsistencies. However, whenever possible we adopted the
+ * MathML precedence. See https://www.w3.org/TR/2009/WD-MathML3-20090924/appendixc.html
+ *
+ * For reference, the JavaScript operator precedence is documented
+ * here: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence
+ */
+export type Precedence = number;
+
 /**
  * This indicates a condition under which parsing should stop:
  * - an operator of a precedence higher than specified has been encountered
@@ -68,7 +105,7 @@ export type LibraryCategory =
  * - or if a condition is provided, the condition returns true;
  */
 export type Terminator = {
-  minPrec: number;
+  minPrec: Precedence;
   condition?: (parser: Parser) => boolean;
 };
 
@@ -96,39 +133,39 @@ export type Terminator = {
 
 export type ExpressionParseHandler = (
   parser: Parser,
-  until?: Terminator
+  until?: Readonly<Terminator>
 ) => Expression | null;
 
 export type PrefixParseHandler = (
   parser: Parser,
-  until?: Terminator
+  until?: Readonly<Terminator>
 ) => Expression | null;
 
 export type SymbolParseHandler = (
   parser: Parser,
-  until?: Terminator
+  until?: Readonly<Terminator>
 ) => Expression | null;
 
 export type FunctionParseHandler = (
   parser: Parser,
-  until?: Terminator
+  until?: Readonly<Terminator>
 ) => Expression | null;
 
 export type EnvironmentParseHandler = (
   parser: Parser,
-  until?: Terminator
+  until?: Readonly<Terminator>
 ) => Expression | null;
 
 export type PostfixParseHandler = (
   parser: Parser,
   lhs: Expression,
-  until?: Terminator
+  until?: Readonly<Terminator>
 ) => Expression | null;
 
 export type InfixParseHandler = (
   parser: Parser,
   lhs: Expression,
-  until: Terminator
+  until: Readonly<Terminator>
 ) => Expression | null;
 
 export type MatchfixParseHandler = (
@@ -160,6 +197,26 @@ export type LatexArgumentType =
   | '[color]'; /** An optional color expression, e.g. `red` or `#00ff00` */
 
 /**
+ * The trigger is the set of tokens that will make this record eligible to
+ * parse the stream and generate an expression. If the trigger matches,
+ * the `parse` handler is called, if available.
+ *
+ * The trigger can be specified either as a LaTeX string (`latexTrigger`) or
+ * as an identifier (`identifierTrigger`), which can be wrapped in a LaTeX
+ * command, for example `\operatorname{mod}` or `\mathbin{gcd}`, with `"gcd"`
+ *  being the `identifierTrigger`.
+ *
+ *
+ * `matchfix` operators use `openDelimiter` and `closeDelimiter` instead.
+ *
+ */
+
+export type Trigger = {
+  latexTrigger?: LatexString | LatexToken[];
+  identifierTrigger?: string;
+};
+
+/**
  * Maps a string of LaTeX tokens to a function or symbol and vice-versa.
  *
  */
@@ -180,38 +237,33 @@ export type BaseEntry = {
    * token, the `parse` handler is invoked.
    */
   name?: string;
-  /**
-   * The trigger is the set of tokens that will make this record eligible for
-   * attempting to parse the stream and generate an expression. After the
-   * trigger matches, the `parse` handler is called, if available.
-   *
-   * `matchfix` operators use `openDelimiter` and `closeDelimiter` instead.
-   *
-   */
-  trigger?: LatexString | LatexToken[];
 
   /**
    * Transform an expression into a LaTeX string.
    * If no `serialize` handler is provided, the `trigger` property is used
    */
   serialize?: LatexString | SerializeHandler;
-
-  parse?: Expression | ExpressionParseHandler;
 };
 
-export type ExpressionEntry = Omit<BaseEntry, 'parse'> & {
-  kind: 'expression'; // Default entry is "expression"
-  parse: Expression | ExpressionParseHandler;
-};
+export type DefaultEntry = BaseEntry &
+  Trigger & {
+    parse: Expression | ExpressionParseHandler;
+  };
 
-export type MatchfixEntry = Omit<BaseEntry, 'parse'> & {
+export type ExpressionEntry = BaseEntry &
+  Trigger & {
+    kind: 'expression'; // Default entry is "expression"
+    parse: Expression | ExpressionParseHandler;
+  };
+
+export type MatchfixEntry = BaseEntry & {
   kind: 'matchfix';
   /**
    * If `kind` is `'matchfix'`: the `closeDelimiter` and `openDelimiter`
    * property are required
    */
-  openDelimiter?: Delimiter | LatexToken[];
-  closeDelimiter?: Delimiter | LatexToken[];
+  openTrigger?: Delimiter | LatexToken[];
+  closeTrigger?: Delimiter | LatexToken[];
 
   /** When invoked, the parser is pointing after the close delimiter.
    * The argument of the handler is the body, i.e. the content between
@@ -220,95 +272,96 @@ export type MatchfixEntry = Omit<BaseEntry, 'parse'> & {
   parse?: MatchfixParseHandler;
 };
 
-export type InfixEntry = Omit<BaseEntry, 'parse'> & {
-  /**
-   * Infix position, with an operand before and an operand after: `a ⊛ b`.
-   *
-   * Example: `+`, `\times`.
-   */
-  kind: 'infix';
+export type InfixEntry = BaseEntry &
+  Trigger & {
+    /**
+     * Infix position, with an operand before and an operand after: `a ⊛ b`.
+     *
+     * Example: `+`, `\times`.
+     */
+    kind: 'infix';
 
-  /**
-   * - **`both`**: a + b + c  +(a, b, c)
-   * - **`left`**: a / b / c -> /(/(a, b), c)
-   * - **`right`**: a = b = c -> =(a, =(b, c))
-   * - **`non`**: a < b < c -> syntax error
-   *
-   * - a `both`-associative operator has an unlimited number of arguments
-   * - a `left`, `right` or `non` associative operator has at most two arguments
-   *
-   */
-  associativity?: 'right' | 'left' | 'non' | 'both';
+    /**
+     * - **`both`**: a + b + c  +(a, b, c)
+     * - **`left`**: a / b / c -> /(/(a, b), c)
+     * - **`right`**: a = b = c -> =(a, =(b, c))
+     * - **`non`**: a < b < c -> syntax error
+     *
+     * - a `both`-associative operator has an unlimited number of arguments
+     * - a `left`, `right` or `non` associative operator has at most two arguments
+     *
+     */
+    associativity?: 'right' | 'left' | 'non' | 'both';
 
-  precedence?: number; // Priority
+    precedence?: Precedence;
 
-  parse?: string | InfixParseHandler;
-};
+    parse?: string | InfixParseHandler;
+  };
 
-export type PostfixEntry = Omit<BaseEntry, 'parse'> & {
-  /**
-   * Postfix position, with an operand before: `a ⊛`
-   *
-   * Example: `!`.
-   */
-  kind: 'postfix';
+export type PostfixEntry = BaseEntry &
+  Trigger & {
+    /**
+     * Postfix position, with an operand before: `a ⊛`
+     *
+     * Example: `!`.
+     */
+    kind: 'postfix';
 
-  precedence?: number; // Priority
+    precedence?: Precedence;
 
-  parse?: PostfixParseHandler;
-};
+    parse?: PostfixParseHandler;
+  };
 
-export type PrefixEntry = Omit<BaseEntry, 'parse'> & {
-  /**
-   * Prefix position, with an operand after: `⊛ a`
-   *
-   * Example: `-`, `\not`.
-   */
-  kind: 'prefix';
-  precedence: number;
+export type PrefixEntry = BaseEntry &
+  Trigger & {
+    /**
+     * Prefix position, with an operand after: `⊛ a`
+     *
+     * Example: `-`, `\not`.
+     */
+    kind: 'prefix';
+    precedence: Precedence;
 
-  parse?: PrefixParseHandler;
-};
+    parse?: PrefixParseHandler;
+  };
 
 /**
  * A LaTeX dictionary entry for an environment, that is a LaTeX
  * construct using `\begin{...}...\end{...}`.
  */
-export type EnvironmentEntry = Omit<BaseEntry, 'parse'> & {
+export type EnvironmentEntry = BaseEntry & {
   kind: 'environment';
   parse: EnvironmentParseHandler;
+  identifierTrigger: string;
 };
 
-export type SymbolEntry = Omit<BaseEntry, 'parse'> & {
-  kind: 'symbol';
+export type SymbolEntry = BaseEntry &
+  Trigger & {
+    kind: 'symbol';
 
-  /** Used for appropriate wrapping (i.e. when to surround it with parens) */
-  precedence?: number;
+    /** Used for appropriate wrapping (i.e. when to surround it with parens) */
+    precedence?: Precedence;
 
-  parse: Expression | SymbolParseHandler;
-};
+    parse: Expression | SymbolParseHandler;
+  };
 
 /**
- * A function has the following form:
- * - a prefix such as `\mathrm` or `\operatorname`
- * - a trigger string, such as `gcd`
+ * A function is an identifier followed by:
  * - some postfix operators such as `\prime`
  * - an optional list of arguments in an enclosure (parentheses)
  *
  * For more complex situations, for example implicit arguments or
  * inverse functions postfix (i.e. ^{-1}), use a custom parse handler with a
- * base entry.
+ * entry of kind `expression`.
  */
-export type FunctionEntry = Omit<BaseEntry, 'parse'> & {
-  kind: 'function';
-
-  trigger: string;
-
-  parse?: Expression | FunctionParseHandler;
-};
+export type FunctionEntry = BaseEntry &
+  Trigger & {
+    kind: 'function';
+    parse?: Expression | FunctionParseHandler;
+  };
 
 export type LatexDictionaryEntry =
-  | BaseEntry
+  | DefaultEntry
   | ExpressionEntry
   | MatchfixEntry
   | InfixEntry
@@ -366,7 +419,7 @@ export function isEnvironmentEntry(
   return 'kind' in entry && entry.kind === 'environment';
 }
 
-export type LatexDictionary = LatexDictionaryEntry[];
+export type LatexDictionary = Array<object>;
 
 export type ParseLatexOptions = {
   /**
@@ -553,7 +606,7 @@ export type NumberFormattingOptions = {
    *
    * If you change it to another value, be aware that this may lead to
    * unexpected results. For example, if changing it to `,` the expression
-   * `\mathrm{Hypot}(1,2)` will parse as `["Hypot", 1.2]` rather than
+   * `\operatorname{Hypot}(1,2)` will parse as `["Hypot", 1.2]` rather than
    * `["Hypot", 1, 2]`.
    *
    * **Default**: `"\\,"` (thin space, 3/18mu) (Resolution 7 of the 1948 CGPM)
@@ -699,6 +752,10 @@ export interface Serializer {
     expr: Expression,
     level: number
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
+
+  serializeFunction(expr: Expression): LatexString;
+
+  serializeSymbol(expr: Expression): LatexString;
 }
 
 export type SerializeHandler = (
@@ -728,11 +785,6 @@ export interface Parser {
 
   /** Return the next token and advance the index */
   nextToken(): LatexToken;
-
-  /** Return an array of string corresponding to tokens ahead.
-   * The index is unchanged.
-   */
-  lookAhead(): string[];
 
   /** Return a string representation of the expression
    between `start` and `end` (default: the whole expression) */
@@ -782,7 +834,7 @@ export interface Parser {
    * tokens (i.e. without braces), for example `^2`, `\sqrt3` or `\frac12`
    *
    * This argument will usually be a single token, but can be a sequence of
-   * tokens (e.g. `\sqrt\frac12` or `\sqrt\mathrm{speed}`).
+   * tokens (e.g. `\sqrt\frac12` or `\sqrt\operatorname{speed}`).
    *
    * The following tokens are excluded from consideration in order to fail
    * early when encountering a likely syntax error, for example `x^(2)`
@@ -818,7 +870,7 @@ export interface Parser {
    * A symbol can be:
    * - a single-letter identifier: `x`
    * - a single LaTeX command: `\pi`
-   * - a multi-letter identifier: `\mathrm{speed}`
+   * - a multi-letter identifier: `\operatorname{speed}`
    */
   parseSymbol(until?: Partial<Terminator>): Expression | null;
 

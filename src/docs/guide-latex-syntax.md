@@ -187,14 +187,14 @@ The options are members of `ce.latexOptions`.
   Default is `"\cdot"`. Another popular value is `"\times"`.
 - `beginExponentMarker` and `endExponentMarker`: LaTeX strings used as template
   to format an exponent. Default values are `"10^{"` and `"}"` respectively.
-  Other values could include `"\mathrm{E}{"` and `"}"`.
+  Other values could include `"\operatorname{E}{"` and `"}"`.
 - `truncationMarker`: a LaTeX string used to indicate that a number has more
   precision than what is displayed. Default is `"\ldots"`
 - `beginRepeatingDigits` and `endRepeatingDigits`: LaTeX strings used a template
   to format repeating digits, as in `1.333333333...`. Default is `"\overline{"`
   and `"}"`. Other popular values are `"("` and `")"`.
 - `imaginaryUnit`: the LaTeX string used to represent the imaginary unit symbol.
-  Default is `"\imaginaryI"`. Other popular values are `"\mathrm{i}"`.
+  Default is `"\imaginaryI"`. Other popular values are `"\operatorname{i}"`.
 - `positiveInfinity` and `negativeInfinity` the LaTeX strings used to represent
   positive and negative infinity, respectively. Defaults are `"\infty"` and
   `"-\infty"`.
@@ -321,9 +321,9 @@ ce.latexSyntax.options.fractionStyle = (expr, level) =>
 ## Customizing the LaTeX Dictionary
 
 The <a href ="/math-json/">MathJSON format</a> is independent of any source or
-target language (LaTeX, MathASCII, Python, etc...) or of any specific 
-interpretation of the identifiers used in a MathJSON expression 
-(`"Pi"`, `"Sin"`, etc...).
+target language (LaTeX, MathASCII, Python, etc...) or of any specific
+interpretation of the identifiers used in a MathJSON expression (`"Pi"`,
+`"Sin"`, etc...).
 
 A **LaTeX dictionary** defines how a MathJSON expression can be expressed as a
 LaTeX string (**serialization**) or constructed from a LaTeX string
@@ -337,16 +337,16 @@ It includes definitions such as:
 - "_The `Power` function is represented as "`x^{n}`"_"
 - "_The `Divide` function is represented as "`\frac{x}{y}`"_".
 
-
-Note that the LaTeX dictionary may include LaTeX commands as triggers. LaTeX 
+Note that the dictionary will include LaTeX commands as triggers. LaTeX 
 commands are usually prefixed with a backslash, such as `\frac` or `\pm`.
 It will also reference MathJSON identifiers. MathJSON identifiers are usually
 capitalized, such as `Divide` or `PlusMinus` and are not prefixed with a backslash.
 
-**To extend the LaTeX syntax** update the `latexDictionary` property
-of the Compute Engine
+The Compute Engine includes a default LaTeX dictionary to parse and serialize 
+common math expressions.
 
-
+**To extend the LaTeX syntax** update the `latexDictionary` property of the
+Compute Engine
 
 ```javascript
 const ce = new ComputeEngine();
@@ -358,7 +358,7 @@ ce.latexDictionary = [
     // We're defining a `\smoll{}{}` command:
     latxTrigger: '\\smoll',
     parse: (parser) => {
-      // We're expecting two arguments, so we're calling 
+      // We're expecting two arguments, so we're calling
       // `parseGroup()` twice. If `parseGroup()` returns null,
       // we assume that the argument is missing.
       return [
@@ -371,70 +371,56 @@ ce.latexDictionary = [
 ];
 
 console.log(ce.parse('\\smoll{1}{5}').json);
-// The "Divide" get represented a "Rational" by default when 
+// The "Divide" get represented a "Rational" by default when
 // both arguments are integers.
 // ➔ ["Rational", 1, 5]
 ```
 
-
-### Adding a Constant
-
-### Adding a Function
-
-### Adding a Binary Operator
-
-### Adding a Unary Operator
-
-### Adding a Postfix Operator
-
-### Adding a Prefix Operator
-
-### Adding a Matchfix Operator
-
-### Adding a LaTeX Environment
-
-### Adding a LaTeX Command
-
-
+If you are using a mathfield, all the mathfields on the page
+share a Compute Engine instance, which is available as `MathfieldElement.computeEngine`.
+You can modify the LaTeX dictionary used by the mathfields with `MathfieldElement.computeEngine.latexDictionary`.{.notice--info}
 
 
 ### LaTeX Dictionary Entries
 
 Each entry in the LaTeX dictionary is an object with the following properties:
-- `kind`: the kind of expression associated with this entry. Valid values are `prefix`,
-  `postfix`, `infix`, `expression`, `function`, `symbol`, `environment` and `matchfix`. 
-  If not provided, the default is `expression`.
-- `latexTrigger`: a sequence of LaTeX tokens that will trigger
-  the entry. For example, `^{+}` or `\mathbb{D}`.
-- `identifierTrigger`: a string, usually wrapped in a LaTeX command, that will
-  trigger the entry. For example, if `identifierTrigger` is `floor`, the
-  LaTeX command `\mathrm{floor}` or `\operatorname{floor}` will trigger the entry.
-  Only one of `latexTrigger` or `identifierTrigger` should be provided.
-  If kind is `environment`, only `identifierTrigger` is valid.
-- `parse`: a function that will be invoked when the trigger is encountered in
-  the LaTeX input. It will be passed a `parser` object that can be used to
-  parse the input. The `parse` function should return a MathJSON expression. 
-  See below for more info about parsing.
-- `serialize`: a function that will be invoked when the `expr.latex` property
-  is read. It will be passed a `serializer` object that can be used to
-  serialize the expression. The `serialize` function should return a LaTeX
-  string. See below for more info about serialization.
-- `name`: the name of the MathJSON identifier associated with this entry. 
-  If provided, a default `parse` handler will be used that is equivalent to:
-  `parse: name`. The `name` property must be unique. However, multiple entries
-  can have different triggers that produce the same expression. This is
-  useful for synonyms, such as `\mathrm{floor{` and `\lfloor`...`\rfloor`.
 
-The most general type of entry is one using `expression` as the `kind`, which
-is also the default if no `kind` is provided. In this case, the `parse` handler
+- `kind`: the kind of expression associated with this entry. Valid values are
+  `prefix`, `postfix`, `infix`, `expression`, `function`, `symbol`,
+  `environment` and `matchfix`. If not provided, the default is `expression`.
+- `latexTrigger`: a sequence of LaTeX tokens that will trigger the entry. For
+  example, `^{+}` or `\mathbb{D}`.
+- `identifierTrigger`: a string, usually wrapped in a LaTeX command, that will
+  trigger the entry. For example, if `identifierTrigger` is `floor`, the LaTeX
+  command `\mathrm{floor}` or `\operatorname{floor}` will trigger the entry.
+  Only one of `latexTrigger` or `identifierTrigger` should be provided. If kind
+  is `environment`, only `identifierTrigger` is valid.
+- `parse`: a function that will be invoked when the trigger is encountered in
+  the LaTeX input. It will be passed a `parser` object that can be used to parse
+  the input. The `parse` function should return a MathJSON expression. See below
+  for more info about parsing.
+- `serialize`: a function that will be invoked when the `expr.latex` property is
+  read. It will be passed a `serializer` object that can be used to serialize
+  the expression. The `serialize` function should return a LaTeX string. See
+  below for more info about serialization.
+- `name`: the name of the MathJSON identifier associated with this entry. If
+  provided, a default `parse` handler will be used that is equivalent to:
+  `parse: name`. The `name` property must be unique. However, multiple entries
+  can have different triggers that produce the same expression. This is useful
+  for synonyms, such as `\operatorname{floor{` and `\lfloor`...`\rfloor`.
+
+The most general type of entry is one using `expression` as the `kind`, which is
+also the default if no `kind` is provided. In this case, the `parse` handler
 will be invoked when the trigger is encountered in the LaTeX input. The `parse`
 handler will be passed a `parser` object that can be used to parse the input.
 The `parse` handler should return a MathJSON expression.
 
-The `function` kind is a special case of `expression` where the expression 
-is a function. The parse handler should return the MathJSON idenfitier 
-corresponding to the function, such as `Concatenate`. As a shortcut, the 
-`parse` handler can be provided as an Expression. For example:
+The `function` kind is a special case of `expression` where the expression is a
+function, possibly using mutly-character identifiers, as in
+`\operatorname{concat}`. The `trigger` property defines the name of the
+function, not a sequence of tokens. The parse handler should return the
+idenfitier corresponding to the function, such as `Concatenate`. As a shortcut,
+the `parse` handler can be provided as an Expression. For example:
 
 ```javascript
 {
@@ -444,9 +430,9 @@ corresponding to the function, such as `Concatenate`. As a shortcut, the
 }
 ```
 
-The `infix` kind is used for binary operators. The `parse` handler will be 
-passed a `parser` object and the left-hand side of the operator. The `parser` 
-object can be used to parse the right-hand side of the expression. The `parse` 
+The `infix` kind is used for binary operators. The `parse` handler will be
+passed a `parser` object and the left-hand side of the operator. The `parser`
+object can be used to parse the right-hand side of the expression. The `parse`
 handler should return a MathJSON expression.
 
 ```javascript
@@ -487,11 +473,11 @@ handler should return a MathJSON expression.
 }
 ```
 
-The `environment` kind is used for LaTeX environments. The `identifierTrigger` property
-in that case is the name of the environment. The `parse` handler will
-be passed a `parser` object. The `parseTabular()` method can be used to parse 
-the rows and columns of the environment. It returns a two dimensional array 
-of expressions. The `parse` handler should return a MathJSON expression.
+The `environment` kind is used for LaTeX environments. The `identifierTrigger`
+property in that case is the name of the environment. The `parse` handler will
+be passed a `parser` object. The `parseTabular()` method can be used to parse
+the rows and columns of the environment. It returns a two dimensional array of
+expressions. The `parse` handler should return a MathJSON expression.
 
 ```javascript
 {
@@ -505,10 +491,10 @@ of expressions. The `parse` handler should return a MathJSON expression.
 ```
 
 The `matchfix` kind is used for LaTeX commands that are used to enclose an
-expression. The `openTrigger` and `closeTrigger` indicate the LaTeX commands 
-that enclose the expression. The `parse` handler is passed a
-`parser` object and the "body" (the expression between the open and close
-delimiters). The `parse` handler should return a MathJSON expression.
+expression. The `openTrigger` and `closeTrigger` indicate the LaTeX commands
+that enclose the expression. The `parse` handler is passed a `parser` object and
+the "body" (the expression between the open and close delimiters). The `parse`
+handler should return a MathJSON expression.
 
 ```javascript
 {
@@ -521,21 +507,19 @@ delimiters). The `parse` handler should return a MathJSON expression.
 }
 ```
 
-
-
 ### Parsing
 
-When parsing a LaTeX string, the first step is to tokenize the string 
-according to the LaTeX syntax. For example, the input string `\\frac{ab}{10}`
-will result in the tokens `["\\frac", "{", "a", "b", "}", "{", "1", "0", "}"]`.
-Note that each LaTeX command is a single token, but that digits and ordinary
-letters are each separate tokens.
+When parsing a LaTeX string, the first step is to tokenize the string according
+to the LaTeX syntax. For example, the input string `\\frac{ab}{10}` will result
+in the tokens `["\\frac", "{", "a", "b", "}", "{", "1", "0", "}"]`. Note that
+each LaTeX command is a single token, but that digits and ordinary letters are
+each separate tokens.
 
 The `parse` handler is invoked when the trigger is encountered in the LaTeX
 token strings.
 
-A common case is to return from the parse handler a MathJSON identifier 
-for a symbol or function.
+A common case is to return from the parse handler a MathJSON identifier for a
+symbol or function.
 
 For example, let's say you wanted to map the LaTeX command `\div` to the
 MathJSON `Divide` function. You would write:
@@ -558,7 +542,6 @@ As a shortcut, you can also write:
 }
 ```
 
-
 Or even more succintly:
 
 ```javascript
@@ -568,57 +551,63 @@ Or even more succintly:
 }
 ```
 
-The LaTeX `\div(1, 2)` would then produce the MathJSON expression 
+The LaTeX `\div(1, 2)` would then produce the MathJSON expression
 `["Divide", 1, 2]`. Note that the arguments are provided as comma-separated,
 parenthesized expressions, not as LaTeX arguments in curly brackets.
 
-
-If you need to parse some more complex LaTeX syntax, you can use the `parser` 
-argument of the `parse` handler. The `parser` object has numerous methods to 
+If you need to parse some more complex LaTeX syntax, you can use the `parser`
+argument of the `parse` handler. The `parser` object has numerous methods to
 help you parse the LaTeX string:
 
 - `parser.peek` is the current token.
-- `parser.index` is the index of the current token. If backtracking is 
+- `parser.index` is the index of the current token. If backtracking is
   necessary, it is possible to set the index to a previous value.
 - `parser.nextToken()` returns the next token and advances the index.
-- `parser.skipSpace()` in LaTeX math mode, skip over "space" which
-  includes space tokens, and empty groups `{}`. Whether space tokens
-  are skipped or not depends on the `skipSpace` option.
-- `parser.skipVisualSpace()` skip over "visual space" which
-  includes space tokens, empty groups `{}`, and commands such as `\,` and `\!`.
-- `parser.match(token: LatexToken)` return true if the next token matches the argument, or `null` otherwise.
-- `parser.matchAll(tokens)` return true if the next tokens match the argument, an array of tokens, or `null` otherwise.
-- `parser.matchAny(tokens: LatexToken[])` return the next token if it matches any of the token in the argument or `null` otherwise.
-- `parser.matchChar()` return the next token if it is a plain character (e.g. 'a', '+'...), or the character corresponding to a hex literal (^^ and ^^^^) or the `\char` and `\unicode` commands
-- `parser.parseGroup()` return an expression if the next token is a group begin token `{` followed by a sequence of LaTeX tokens until a group end token `}` is encountered, or `null` otherwise.
-- `parser.parseToken()` return an expression if the next token can be parsed 
-  as a MathJSON expression, or `null` otherwise. This is useful when the 
-  argument of a LaTeX command can be a single token, for example for `\sqrt5`.
-  Some, but not all, LaTeX commands accept a single token as an argument.
-- `parser.parseOptionalGroup()` return an expression if the next token is an 
-  optional group begin token `[` followed by a sequence of LaTeX tokens until 
-  an optional group end token `]` is encountered, or `null` otherwise.
-- `parser.parseExpression()` return an expression if the next tokens can be 
-  parsed as a MathJSON expression, or `null` otherwise. After this call, 
-  there may be some tokens left to parse.
-- `parser.parseArguments()` return an array of expressions if the next tokens 
-  can be parsed as a sequence of MathJSON expressions separated by a comma, 
-  or `null` otherwise.
+- `parser.skipSpace()` in LaTeX math mode, skip over "space" which includes
+  space tokens, and empty groups `{}`. Whether space tokens are skipped or not
+  depends on the `skipSpace` option.
+- `parser.skipVisualSpace()` skip over "visual space" which includes space
+  tokens, empty groups `{}`, and commands such as `\,` and `\!`.
+- `parser.match(token: LatexToken)` return true if the next token matches the
+  argument, or `null` otherwise.
+- `parser.matchAll(tokens)` return true if the next tokens match the argument,
+  an array of tokens, or `null` otherwise.
+- `parser.matchAny(tokens: LatexToken[])` return the next token if it matches
+  any of the token in the argument or `null` otherwise.
+- `parser.matchChar()` return the next token if it is a plain character (e.g.
+  'a', '+'...), or the character corresponding to a hex literal (^^ and ^^^^) or
+  the `\char` and `\unicode` commands
+- `parser.parseGroup()` return an expression if the next token is a group begin
+  token `{` followed by a sequence of LaTeX tokens until a group end token `}`
+  is encountered, or `null` otherwise.
+- `parser.parseToken()` return an expression if the next token can be parsed as
+  a MathJSON expression, or `null` otherwise. This is useful when the argument
+  of a LaTeX command can be a single token, for example for `\sqrt5`. Some, but
+  not all, LaTeX commands accept a single token as an argument.
+- `parser.parseOptionalGroup()` return an expression if the next token is an
+  optional group begin token `[` followed by a sequence of LaTeX tokens until an
+  optional group end token `]` is encountered, or `null` otherwise.
+- `parser.parseExpression()` return an expression if the next tokens can be
+  parsed as a MathJSON expression, or `null` otherwise. After this call, there
+  may be some tokens left to parse.
+- `parser.parseArguments()` return an array of expressions if the next tokens
+  can be parsed as a sequence of MathJSON expressions separated by a comma, or
+  `null` otherwise. This is useful to parse the argument of a function. For
+  example with `f(x, y, z)`, the arguments would be `[x, y, z]`.
 
 If the `parse` handler returns `null`, the parser will continue to look for
 another handler that matches the current token.
 
-Note there is a pattern in the names of the methods of the parser. The `match` prefix
-means that the method will return the next token if it matches the argument, or
-`null` otherwise. These methods are more primitive. The `parse` prefix 
-indicates that the method will return a MathJSON expression or `null`.
+Note there is a pattern in the names of the methods of the parser. The `match`
+prefix means that the method will return the next token if it matches the
+argument, or `null` otherwise. These methods are more primitive. The `parse`
+prefix indicates that the method will return a MathJSON expression or `null`.
 
-
-The most common usage is to call `parser.parseGroup()` to parse a group of tokens
-as an argument to a LaTeX command.
+The most common usage is to call `parser.parseGroup()` to parse a group of
+tokens as an argument to a LaTeX command.
 
 For example:
-  
+
 ```javascript
 {
   latexTrigger: '\\div',
@@ -629,9 +618,8 @@ For example:
 ```
 
 In this case, the LaTeX input `\div{1}{2}` would produce the MathJSON expression
-`["Divide", 1, 2]` (note the use of the curly brackets, rather than the parentheses
-in the LaTeX input).
-
+`["Divide", 1, 2]` (note the use of the curly brackets, rather than the
+parentheses in the LaTeX input).
 
 If we wanted instead to treat the `\div` command as a binary operator, we could
 write:
@@ -649,18 +637,17 @@ write:
 By using the `kind: 'infix'` option, the parser will automatically insert the
 left-hand side of the operator as the first argument to the `parse` handler.
 
-
 ### Serializing
 
-When serializing a MathJSON expression to a LaTeX string, the `serialize` handler
-is invoked. You must specify a `name` property to associate the serialization
-handler with a MathJSON identifier.
+When serializing a MathJSON expression to a LaTeX string, the `serialize`
+handler is invoked. You must specify a `name` property to associate the
+serialization handler with a MathJSON identifier.
 
 ```javascript
 {
   name: "Concatenate",
   latexTrigger: "\\oplus",
-  serialize: (serializer, expr) => 
+  serialize: (serializer, expr) =>
     "\\oplus" + serializer.wrapArguments(expr),
   evaluate: (ce, args) => {
     let result = '';
@@ -670,7 +657,7 @@ handler with a MathJSON identifier.
       if (ce.isBignum(val)) {
         if (!val.isInteger() || val.isNegative()) return null;
         result += val.toString();
-      } else if (typeof val === 'number') { 
+      } else if (typeof val === 'number') {
         if (!Number.isInteger(val) || val < 0) return null;
         result += val.toString();
       }
@@ -684,54 +671,55 @@ In the example above, the LaTeX command `\oplus` is associated with the
 `Concatenate` function. The `serialize` handler will be invoked when the
 `expr.latex` property is read.
 
-Note that we did not provide a `parse` handler: if a `name` property is provided,
-a default `parse` handler will be used that is equivalent to:
+Note that we did not provide a `parse` handler: if a `name` property is
+provided, a default `parse` handler will be used that is equivalent to:
 `parse: name`.
 
 It is possible to have multiple definitions with the same triggers, but the
-`name` property must be unique. The record with the `name` property will be
-used to serialize the expression. A `serialize` handler is invalid if the
-`name` property is not provided.
-
-
+`name` property must be unique. The record with the `name` property will be used
+to serialize the expression. A `serialize` handler is invalid if the `name`
+property is not provided.
 
 ## Using a New Function with a Mathfield
 
 You may also want to use your new function with a mathfield.
 
 First you need to define a LaTeX macro so that the mathfield knows
-how to render this command. Let's define the `\average` macro.
+how to render this command. Let's define the `\smallfrac` macro.
 
 ```js
 const mfe = document.querySelector('math-field');
 
 mfe.macros = {
   ...mfe.macros,
-  average: '\\operatorname{average}'
+  smallfrac: {
+    args: 2,
+    def: '{}^{#1}\\!\\!/\\!{}_{#2}'
+  },
 };
 ```
 
-The name of the macro is the string before the `:` and the content of the
-macro is the string after the `:`.
+The content of the `def` property is a LaTeX fragment that will
+be used to render the `\\smallfrac` command.
 
-This associates the LaTeX command `\average` with the LaTeX fragment
-`\operatorname{average}`. The `\operatorname` command is a LaTeX command
-that renders its argument as a function name, with the correct spacing.
+The `#1` token in `def` is a reference to the first argument and `#2` to the 
+second one. 
 
-{% readmore "/mathlive/guides/macros/" %}
-Learn more about <strong>LaTeX Macros</strong>
-{% endreadmore %}
 
 You may also want to define an inline shortcut to make it easier 
 to input the command. 
 
-With the definition below, typing `average` in a mathfield will be replaced 
-with the LaTeX command `\average`.
+With the code below, we define a shortcut "smallfrac". 
+
+When typed, the shortcut is replaced with the associated LaTeX. 
+
+The `#@` token represents the argument to the left of the shortcut, and 
+the `#?` token represents a placeholder to be filled by the user.
 
 ```js
 mfe.inlineShortcuts = {
   ...mfe.inlineShortcuts,
-  average:'\\average'
+  smallfrac:'\\smallfrac{#@}{#?}'
 };
 ```
 
@@ -745,4 +733,12 @@ You can now parse the input from a mathfield using:
 
 ```js
 console.log(ce.parse(mfe.value).json)
+```
+
+Alternatively, you can associate the customized compute engine with the 
+mathfields in the document:
+
+```js
+MathfieldElement.computeEngine = ce;
+console.log(mfe.getValue('math-json'))
 ```

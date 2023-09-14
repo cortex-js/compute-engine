@@ -231,7 +231,7 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
-          \sqrt{\sqrt5}
+          f^{(4)}
           <!-- (1, 2, 3) -->
           <!-- ((1,2),(3,4)) -->
 
@@ -240,7 +240,7 @@
 
           <!-- {\sqrt{\sum_{n=1}^\infty {\frac{10}{n^4}}}} = {\int_0^\infty \frac{2xdx}{e^x-1}} = \frac{\pi^2}{3} \in {\mathbb R} -->
 
-          <!-- \int_{10}^{100}\sin x \, d x + \int\sin x \quad \mathrm{d} x +
+          <!-- \int_{10}^{100}\sin x \, d x + \int\sin x \quad \operatorname{d} x +
           \sum_{n=1}^5 n^2+1 -->
           <!-- 1 + 2  -->
           <!-- 2+3.001 -->
@@ -491,7 +491,7 @@
 
       const MAX_LINE_LENGTH = 64;
 
-      document.getElementById('random').addEventListener('click', () => {
+      document.getElementById('random').addEventListener('click', (ev) => {
         const mf = document.getElementById('mf');
         const expr = ce.box(['RandomExpression']);
         const evalExpr = expr.evaluate();
@@ -527,10 +527,24 @@
       const mf = document.getElementById('mf');
       const ce = MathfieldElement.computeEngine;
 
+      ce.defineFunction('f', {
+        domain: 'Function',
+        signature: {
+          evaluate: (ce, args) => {
+            if (args.length !== 1) return null;
+            const arg1 = args[0];
+            if (typeof arg1.numericValue !== 'number') return null;
+            return ce.box(Math.pow(arg1.numericValue, 2));
+          },
+        },
+      });
+
+      ce.jsonSerializationOptions.metadata = ['latex'];
+
       ce.latexDictionary = [
         ...ce.latexDictionary,
         {
-          latexTrigger: '\\funfunction',
+          latexTrigger: ['\\funfunction'],
           parse: (parser) => [
             'funfunction',
             parser.parseGroup(),
@@ -551,9 +565,9 @@
       // console.log(ce.parse('(1, (2, 3))').toString());
       // console.log(ce.parse('(1; 2, 3)').toString());
       // console.log(ce.parse('(1, 2; 3, 4)').toString());
-      // console.log(ce.parse('\\mathrm{Hypot}(3, 4)').toString());
+      // console.log(ce.parse('\\operatorname{Hypot}(3, 4)').toString());
       // console.log(
-      //   ce.parse('\\mathrm{Hypot}\\left({3}, {4}\\right)').toString()
+      //   ce.parse('\\operatorname{Hypot}\\left({3}, {4}\\right)').toString()
       // );
       // console.log(ce.parse('\\{1, 2; 3, 4\\}').toString());
       // console.log(ce.parse('\\lbrack1, 2; 3, 4\\rbrack').toString());

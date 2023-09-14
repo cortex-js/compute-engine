@@ -4,46 +4,43 @@ permalink: /compute-engine/reference/calculus/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 render_math_in_document: true
 ---
 
 ### Functions
 
-{% defs "Function" "Operation" %}
-{% def "Integrate" %}
-<code>["Integrate", _expression_]</code>
+{% defs "Function" "Operation" %} {% def "Integrate" %} <code>["Integrate",
+_expression_]</code>
 
 <code>["Integrate", _expression_, _symbol_]</code>
 
-  Indefinite integral
+Indefinite integral
 
-  ```["Integrate", ["Sin", "x"], "x"]```
+`["Integrate", ["Sin", "x"], "x"]`
 
-  $$ \int \sin x \\,\mathrm{d}x $$
+$$ \int \sin x \\,\operatorname{d}x $$
 
-  
-----
+---
 
 <code>["Integrate", _expression_, _predicate_]</code>
 
-  Definite integral.
+Definite integral.
 
-  ```["Integrate", ["Sin", "x"], ["Element", "x", ["Interval", 0, +Infinity]]]```
+`["Integrate", ["Sin", "x"], ["Element", "x", ["Interval", 0, +Infinity]]]`
 
-  $$ \int_0^\infty \sin x \\,\mathrm{d}x $$
+$$ \int_0^\infty \sin x \\,\operatorname{d}x $$
 
-----
+---
 
 <code>["Integrate", _expression_, _predicate1_, _predicate2_...]</code>
 
-  Multiple integral.
+Multiple integral.
 
-  ```["Integrate", ['"Multiply",  "x", ["Sin", "y"]], ["Element", "x", ["Interval", 0, 2]], ["Element", "y", ["Interval", 0, 1]]]```
+`["Integrate", ['"Multiply", "x", ["Sin", "y"]], ["Element", "x", ["Interval", 0, 2]], ["Element", "y", ["Interval", 0, 1]]]`
 
-  $$ \int_0^1 \int_0^2 x\sin y \\,\mathrm{d}x\\,\mathrm{d}y $$
-
+$$ \int_0^1 \int_0^2 x\sin y \\,\operatorname{d}x\\,\operatorname{d}y $$
 
 {% enddef %}
 
@@ -51,14 +48,15 @@ render_math_in_document: true
 
 <code>["D", _f_, _x_]</code>
 
-Evaluate to the partial derivative \\( \frac{\partial f}{\partial x} \\) or \\( f^{\prime}(x) \\)
+Evaluate to the partial derivative \\( \frac{\partial f}{\partial x} \\) or \\(
+f^{\prime}(x) \\)
 
-----
+---
 
 <code>["D", _f_, ["Tuple", _x_, _n_]]</code>
 
-Evaluate to the multiple derivative \\( \frac{\partial^n f}{\partial x^n} \\) (Leibniz notation) or \\( f^{(n)}(x) \\) (Lagrange notation)
-
+Evaluate to the multiple derivative \\( \frac{\partial^n f}{\partial x^n} \\)
+(Leibniz notation) or \\( f^{(n)}(x) \\) (Lagrange notation)
 
 {% enddef %}
 
@@ -66,16 +64,16 @@ Evaluate to the multiple derivative \\( \frac{\partial^n f}{\partial x^n} \\) (L
 
 ### Lagrange Notation
 
-| LaTeX                 | MathJSON           |
-| :-------------------- | :----------------- |
+| LaTeX                 | MathJSON          |
+| :-------------------- | :---------------- |
 | `f'(x)`               | `["D", "f", "x"]` |
-| `f''(x)`              |                    |
-| `f\prime(x)`          |                    |
-| `f\prime\prime(x)`    |                    |
-| `f\doubleprime(x)`    |                    |
-| `f^{\prime}(x)`       |                    |
-| `f^{\prime\prime}(x)` |                    |
-| `f^{\doubleprime}(x)` |                    |
+| `f''(x)`              |                   |
+| `f\prime(x)`          |                   |
+| `f\prime\prime(x)`    |                   |
+| `f\doubleprime(x)`    |                   |
+| `f^{\prime}(x)`       |                   |
+| `f^{\prime\prime}(x)` |                   |
+| `f^{\doubleprime}(x)` |                   |
 
 @todo: `f^{(4)}`
 
@@ -105,7 +103,7 @@ relative to time t
 
 ## Indefinite Integral
 
-`\int f dx` -> ["Integrate", "f", "x"] 
+`\int f dx` -> ["Integrate", "f", "x"]
 
 `\int\int f dxdy` -> ["Integrate", "f", "x", "y"]
 
@@ -115,9 +113,11 @@ Note: `["Integrate", ["Integrate", "f" , "x"], "y"]` is equivalent to
 ## Definite Integral
 
 `\int_{a}^{b} f dx` -> ["Integrate", f, [x, a, b]]
-`\int_{c}^{d} \int_{a}^{b} f dxdy` -> ["Integrate", "f", ["Triple", "x", "a", "b"], ["Triple", "y", "c", "d"]]
+`\int_{c}^{d} \int_{a}^{b} f dxdy` -> ["Integrate", "f", ["Triple", "x", "a",
+"b"], ["Triple", "y", "c", "d"]]
 
-`\int_{a}^{b}\frac{dx}{f}` -> ["Integrate", ["Power", "f", -1], ["Triple", "x", "a", "b"]]
+`\int_{a}^{b}\frac{dx}{f}` -> ["Integrate", ["Power", "f", -1], ["Triple", "x",
+"a", "b"]]
 
 `\int_{a}^{b}dx f` -> ["Integrate", "f", ["Triple", "x", "a", "b"]]
 

@@ -110,14 +110,14 @@ export const DEFINITIONS_SYMBOLS: LatexDictionary = [
     return {
       kind: 'symbol',
       name: symbol,
-      trigger: [latex],
+      latexTrigger: [latex],
       parse: symbol,
     } as SymbolEntry;
   }),
   ...SYMBOLS.map(([symbol, _latex, codepoint]) => {
     return {
       kind: 'symbol',
-      trigger: [String.fromCodePoint(codepoint)],
+      latexTrigger: [String.fromCodePoint(codepoint)],
       parse: symbol,
     } as SymbolEntry;
   }),
