@@ -161,18 +161,18 @@ describe('STEFNOTCH #13', () => {
     expect(parse('\\frac{2}{\\sqrt{n}}\\Leftrightarrow n>\\frac{5}{n^2}'))
       .toMatchInlineSnapshot(`
       [
-        "Greater",
+        "Equivalent",
         [
-          "Sequence",
-          ["Divide", 2, ["Sqrt", "n"]],
+          "Error",
           [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\Leftrightarrow'"],
-            ["Latex", "'\\Leftrightarrow'"]
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "MaybeBoolean"],
+            ["Domain", "Number"]
           ],
-          "n"
+          ["Divide", 2, ["Sqrt", "n"]]
         ],
-        ["Divide", 5, ["Square", "n"]]
+        ["Less", ["Divide", 5, ["Square", "n"]], "n"]
       ]
     `);
   });
@@ -181,26 +181,9 @@ describe('STEFNOTCH #13', () => {
     expect(parse('|a_n|\\le\\frac{2}{\\sqrt{n}}\\Rightarrow a_n\\to0=0'))
       .toMatchInlineSnapshot(`
       [
-        "LessEqual",
-        ["Abs", "a_n"],
-        [
-          "Equal",
-          [
-            "To",
-            [
-              "Sequence",
-              ["Divide", 2, ["Sqrt", "n"]],
-              [
-                "Error",
-                ["ErrorCode", "'unexpected-command'", "'\\Rightarrow'"],
-                ["Latex", "'\\Rightarrow'"]
-              ],
-              "a_n"
-            ],
-            0
-          ],
-          0
-        ]
+        "Implies",
+        ["LessEqual", ["Abs", "a_n"], ["Divide", 2, ["Sqrt", "n"]]],
+        ["Equal", ["To", "a_n", 0], 0]
       ]
     `);
   });

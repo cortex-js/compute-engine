@@ -1,13 +1,11 @@
 import type { Expression } from '../../math-json/math-json-format';
 import {
-  op,
   nops,
   dictionary,
   stringValue,
   head,
   headName,
   symbol,
-  isFunctionObject,
   isNumberObject,
   isSymbolObject,
   ops,
@@ -25,11 +23,7 @@ import {
 
 import {
   IndexedLatexDictionary,
-  IndexedInfixEntry,
-  IndexedPostfixEntry,
-  IndexedPrefixEntry,
-  IndexedSymbolEntry,
-  IndexedFunctionEntry,
+  IndexedLatexDictionaryEntry,
 } from './dictionary/definitions';
 
 import { countTokens, joinLatex } from './tokenizer';
@@ -68,83 +62,11 @@ const STYLE_MODIFIERS = {
 
   // Supplemental
   blackboard: (s) => `\\mathbb{${s}}`,
-  // boldItalic: (s) => `\\mathbf{\\mathit{${s}}}`,
   calligraphic: (s) => `\\mathcal{${s}}`,
-  // scriptBold: (s) => `\\mathbf{\\mathscr{${s}}}`,
-  // calligraphicBold: (s) => `\\mathbf{\\mathcal{${s}}}`,
   gothic: (s) => `\\mathfrak{${s}}`,
-  // gothicBold: (s) => `\\mathbf{\\mathfrak{${s}}}`,
-  // frakturBold: (s) => `\\mathbf{\\mathfrak{${s}}}`,
   sansserif: (s) => `\\mathsf{${s}}`,
-  // sansSerifBold: (s) => `\\mathbf{\\mathsf{${s}}}`,
-  // sansSerifItalic: (s) => `\\mathit{\\mathsf{${s}}}`,
   monospace: (s) => `\\mathtt{${s}}`,
 };
-
-// function serializeMatchfix(
-//   serializer: Serializer,
-//   expr: Expression,
-//   def: MatchfixEntry
-// ): string {
-//   return replaceLatex(def.serialize as string, [
-//     serializer.serialize(op(expr, 1) ?? ['Sequence']),
-//   ]);
-// }
-
-function serializeOperator(
-  serializer: Serializer,
-  expr: Expression,
-  def: IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry
-): string {
-  let result = '';
-  const count = nops(expr);
-  const name = headName(expr);
-  if (def.kind === 'postfix') {
-    if (count !== 1) {
-      serializer.onError([
-        {
-          severity: 'warning',
-          message: [
-            'postfix-operator-requires-one-operand',
-            serializer.serializeSymbol(name),
-          ],
-        },
-      ]);
-    }
-    return replaceLatex(def.serialize as string, [
-      serializer.wrap(op(expr, 1), def.precedence),
-    ]);
-  }
-  if (def.kind === 'prefix') {
-    if (count !== 1) {
-      serializer.onError([
-        {
-          severity: 'warning',
-          message: [
-            'prefix-operator-requires-one-operand',
-            serializer.serializeSymbol(name),
-          ],
-        },
-      ]);
-    }
-    return replaceLatex(def.serialize as string, [
-      serializer.wrap(op(expr, 1), def.precedence! + 1),
-    ]);
-  }
-  if (def.kind === 'infix') {
-    result = serializer.wrap(op(expr, 1), def.precedence);
-    for (let i = 2; i < count + 1; i++) {
-      const arg = op(expr, i);
-      if (arg !== null) {
-        result = replaceLatex(def.serialize as string, [
-          result,
-          serializer.wrap(arg, def.precedence),
-        ]);
-      }
-    }
-  }
-  return result;
-}
 
 export class Serializer {
   readonly onError: WarningSignalHandler;
@@ -208,7 +130,7 @@ export class Serializer {
       name !== 'Delimiter' &&
       name !== 'Subscript'
     ) {
-      const def = this.dictionary.name.get(name);
+      const def = this.dictionary.ids.get(name);
       if (
         def &&
         (def.kind === 'symbol' ||
@@ -237,6 +159,7 @@ export class Serializer {
     const exprStr = this.serialize(expr);
 
     if (symbol(expr) !== null) return exprStr;
+    // If the default Delimiter (i.e. using parens), don't wrap
     if (head(expr) === 'Delimiter' && nops(expr) === 1) return exprStr;
 
     const isNum = isNumberExpression(expr);
@@ -292,72 +215,62 @@ export class Serializer {
 
   serializeSymbol(
     expr: Expression,
-    def?: IndexedSymbolEntry | IndexedFunctionEntry
-  ): string {
-    // @todo: probably don't need to check it's a symbol (or shouldn't have to)
-    const h = head(expr);
-    if (h) return this.serializeFunction(expr, def);
-
+    def?: IndexedLatexDictionaryEntry
+  ): LatexString {
     console.assert(typeof expr === 'string' || isSymbolObject(expr));
-    // It's a symbol
-    if (typeof def?.serialize === 'string') return def.serialize;
-    else if (typeof def?.serialize === 'function')
-      return def.serialize(this, expr);
-
-    return serializeIdentifier(symbol(expr)) ?? '';
+    if (def?.kind === 'function') {
+      // It's a function, but it doesn't have arguments.
+      // For example `"Cos"`.
+      // Print the trigger as an identifier
+      return serializeIdentifier(symbol(expr) ?? '') ?? '';
+    }
+    return (
+      def?.serialize?.(this, expr) ?? serializeIdentifier(symbol(expr)) ?? ''
+    );
   }
 
   serializeFunction(
     expr: Expression,
-    def?: IndexedFunctionEntry | IndexedSymbolEntry
-  ): string {
+    def?: IndexedLatexDictionaryEntry
+  ): LatexString {
+    //
+    // Use serialize handler if available
+    //
+    if (def?.serialize) return def.serialize(this, expr);
+
+    // It's a function without a serializer.
+    // It may have come from `parseUnknownIdentifier()`
+    // Serialize the arguments as function arguments
     const h = head(expr);
-    if (!h) return this.serializeSymbol(expr, def);
+    if (typeof h === 'string')
+      return serializeIdentifier(h, 'auto') + this.wrapArguments(expr);
 
+    //
+    // It's a function with a head expression. Use an `apply()`
+    // See https://en.wikipedia.org/wiki/Apply
+    //
     const args = ops(expr) ?? [];
-
-    if (def) {
-      //
-      // 1. Is it a known function?
-      //
-      if (typeof def.serialize === 'function') return def.serialize(this, expr);
-
+    if (args.length === 1) {
+      // If there's a single argument, we can use the pipeline operator
+      // (i.e. `\rhd` `|>`)
       return joinLatex([
-        def.serialize ?? (h as string),
-        this.wrapArguments(expr),
+        this.serialize(args[0]),
+        '\\rhd',
+        this.wrapString(
+          this.serialize(h),
+          this.options.applyFunctionStyle(expr, this.level)
+        ),
       ]);
     }
 
-    // We don't know anything about this function
-    if (typeof h === 'string' && h.length > 0 && h[0] === '\\') {
-      //
-      // 2. Is it an unknown LaTeX command?
-      //
-      // This looks like a LaTeX command. Serialize the arguments as LaTeX arguments
-
-      return joinLatex([h, ...args.map((x) => `{${this.serialize(x)}}`)]);
-    }
-
-    //
-    // 2. Is it an unknown function call?
-    //
-    // It's a function we don't know.
-    // Maybe it came from `promoteUnknownToken`
-    // Serialize the arguments as function arguments
-    if (typeof h === 'string') {
-      if (h.length === 1)
-        return serializeIdentifier(h) + this.wrapArguments(expr);
-
-      return serializeIdentifier(h, 'upright') + this.wrapArguments(expr);
-    }
     const style = this.options.applyFunctionStyle(expr, this.level);
-    return (
-      '\\operatorname{Apply}' +
+    return joinLatex([
+      '\\operatorname{apply}',
       this.wrapString(
         this.serialize(h) + ', ' + this.serialize(['List', ...args]),
         style
-      )
-    );
+      ),
+    ]);
   }
 
   serializeDictionary(dict: { [key: string]: Expression }): string {
@@ -387,65 +300,39 @@ export class Serializer {
         if (s !== null) return `\\text{${s}}`;
 
         //
-        // 3. Is it a symbol?
-        //
-        const symbolName = symbol(expr);
-        if (symbolName !== null) {
-          const def = this.dictionary.name.get(symbolName);
-          if (def?.kind === 'symbol') return this.serializeSymbol(expr, def);
-          if (def?.kind === 'function')
-            return this.serializeFunction(expr, def);
-          if (typeof def?.serialize === 'function')
-            return def.serialize(this, expr);
-        }
-
-        //
-        // 4. Is it a dictionary?
+        // 3. Is it a dictionary?
         //
         const dict = dictionary(expr);
         if (dict !== null) return this.serializeDictionary(dict);
+
+        //
+        // 4. Is it a symbol?
+        //
+        const symbolName = symbol(expr);
+        if (symbolName !== null) {
+          return this.serializeSymbol(
+            expr,
+            this.dictionary.ids.get(symbolName)
+          );
+        }
 
         //
         // 5. Is it a named function?
         //
         const fnName = headName(expr);
         if (fnName) {
-          //
-          // 5.1 A function, operator or matchfix operator
-          //
-          const def = this.dictionary.name.get(fnName);
-          if (def) {
-            // If there is a custom serializer function, use it.
-            // (note: 'matchfix' entries always have a default serializer)
-            if (typeof def.serialize === 'function')
-              return def.serialize(this, expr);
-
-            if (
-              def.kind === 'infix' ||
-              def.kind === 'postfix' ||
-              def.kind === 'prefix'
-            )
-              return serializeOperator(this, expr, def);
-
-            if (def.kind === 'symbol') return this.serializeSymbol(expr, def);
-            if (def.kind === 'function')
-              return this.serializeFunction(expr, def);
-
-            return '';
-          }
+          return this.serializeFunction(expr, this.dictionary.ids.get(fnName));
         }
 
-        if (
-          symbolName !== null ||
-          Array.isArray(expr) ||
-          isFunctionObject(expr)
-        ) {
-          // It's a function or a symbol, but without definition.
-          // It could be a [['derive', "f"], x]
-          // serializeSymbol() will take care of it.
-          return this.serializeSymbol(expr);
-        }
+        //
+        // 6/ Is it a function with a head expression?
+        //
+        // For example [['derive', "f"], x]
+        if (head(expr) !== null) return this.serializeFunction(expr);
 
+        //
+        // 7. Unknown expression
+        //
         // This doesn't look like a symbol, or a function,
         // or anything we were expecting.
         // This is an invalid expression, for example an
@@ -527,28 +414,6 @@ export function appendLatex(src: string, s: string): string {
   }
   // No space needed
   return src + s;
-}
-
-/**
- * Replace '#1', '#2' in the LaTeX template stings with the corresponding
- * values from `replacement`, in a LaTeX syntax safe manner (i.e. inserting spaces when needed)
- */
-export function replaceLatex(template: string, replacement: string[]): string {
-  console.assert(typeof template === 'string');
-  console.assert(template.length > 0);
-  let result = template;
-  for (let i = 0; i < replacement.length; i++) {
-    let s = replacement[i] ?? '';
-    if (/[a-zA-Z*]/.test(s[0])) {
-      const m = result.match(new RegExp('(.*)#' + Number(i + 1).toString()));
-      if (m && /\\[a-zA-Z*]+/.test(m[1])) {
-        s = ' ' + s;
-      }
-    }
-    result = result.replace('#' + Number(i + 1).toString(), s);
-  }
-
-  return result;
 }
 
 /** If the string is a special name, extract it. A special name is considered
@@ -749,12 +614,7 @@ function parseIdentifierBody(
  */
 function serializeIdentifier(
   s: string | null,
-  defaultMulticharStyle:
-    | 'operator'
-    | 'italic'
-    | 'upright'
-    | 'none'
-    | 'auto' = 'auto'
+  style: 'operator' | 'italic' | 'upright' | 'none' | 'auto' = 'auto'
 ): string | null {
   if (s === null) return null;
 
@@ -769,7 +629,7 @@ function serializeIdentifier(
     return `\\operatorname{${'\\_'.repeat(m[1].length) + body + rest}}`;
   }
 
-  const [body, rest] = parseIdentifierBody(s, true, defaultMulticharStyle);
+  const [body, rest] = parseIdentifierBody(s, true, style);
 
   // We couldn't parse the identifier, so just wrap it in \operatorname{...}
   if (rest.length > 0) return `\\operatorname{${s}}`;

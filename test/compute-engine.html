@@ -231,8 +231,7 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
-          \lnot \operatorname{True} \land \operatorname{False} \lor
-          \operatorname{True} = \operatorname{True}
+          f^{(4)}
           <!-- (1, 2, 3) -->
           <!-- ((1,2),(3,4)) -->
 
@@ -492,7 +491,7 @@
 
       const MAX_LINE_LENGTH = 64;
 
-      document.getElementById('random').addEventListener('click', () => {
+      document.getElementById('random').addEventListener('click', (ev) => {
         const mf = document.getElementById('mf');
         const expr = ce.box(['RandomExpression']);
         const evalExpr = expr.evaluate();
@@ -528,10 +527,24 @@
       const mf = document.getElementById('mf');
       const ce = MathfieldElement.computeEngine;
 
+      ce.defineFunction('f', {
+        domain: 'Function',
+        signature: {
+          evaluate: (ce, args) => {
+            if (args.length !== 1) return null;
+            const arg1 = args[0];
+            if (typeof arg1.numericValue !== 'number') return null;
+            return ce.box(Math.pow(arg1.numericValue, 2));
+          },
+        },
+      });
+
+      ce.jsonSerializationOptions.metadata = ['latex'];
+
       ce.latexDictionary = [
         ...ce.latexDictionary,
         {
-          trigger: ['\\funfunction'],
+          latexTrigger: ['\\funfunction'],
           parse: (parser) => [
             'funfunction',
             parser.parseGroup(),

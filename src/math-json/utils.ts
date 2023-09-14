@@ -371,15 +371,20 @@ function machineValueOfString(s: string): number | null {
   return parseFloat(s);
 }
 
-// CAUTION: `machineValue()` will return a truncated value if the number has
-// a precision outside of the machine range.
+/**
+ *  CAUTION: `machineValue()` will return a truncated value if the number
+ *  has a precision outside of the machine range.
+ */
 export function machineValue(
   expr: Expression | null | undefined
 ): number | null {
   if (expr === null || expr === undefined) return null;
+
   if (typeof expr === 'number') return expr;
-  if (isNumberObject(expr)) return machineValueOfString(expr.num);
   if (typeof expr === 'string') return machineValueOfString(expr);
+
+  // Stricly, expr.num should be a string, but we allow it to be a number
+  if (isNumberObject(expr)) return machineValue(expr.num);
 
   return null;
 }

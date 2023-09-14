@@ -23,69 +23,69 @@ function parseSingleArg(cmd: string): (parser: Parser) => Expression {
 export const DEFINITIONS_OTHERS: LatexDictionary = [
   {
     name: 'Overscript',
-    trigger: ['\\overset'],
+    latexTrigger: ['\\overset'],
     kind: 'infix',
     precedence: 700, // @todo: not in MathML
   },
   {
     name: 'Underscript',
-    trigger: ['\\underset'],
+    latexTrigger: ['\\underset'],
     kind: 'infix',
     precedence: 700, // @todo: not in MathML
   },
   {
     name: 'Increment',
-    trigger: ['+', '+'],
+    latexTrigger: ['+', '+'],
     kind: 'postfix',
     precedence: 880,
   },
   {
     name: 'Decrement',
-    trigger: ['-', '-'],
+    latexTrigger: ['-', '-'],
     kind: 'postfix',
     precedence: 880,
   },
   {
     name: 'PreIncrement',
-    trigger: ['+', '+'],
+    latexTrigger: ['+', '+'],
     kind: 'prefix',
     precedence: 880,
   },
   {
     name: 'PreDecrement',
-    trigger: ['-', '-'],
+    latexTrigger: ['-', '-'],
     kind: 'prefix',
     precedence: 880,
   },
   {
     name: 'Ring', // Aka 'Composition', i.e. function composition
-    trigger: ['\\circ'],
+    latexTrigger: ['\\circ'],
     kind: 'infix',
     precedence: 265, // @todo: MathML is 950
     // @todo: check lhs and rhs are functions
   },
   {
     name: 'Transpose',
-    trigger: ['^', 'T'],
+    latexTrigger: ['^', 'T'],
     kind: 'postfix',
     // @todo: if lhs is a list/tensor
   },
   {
     // @todo: if lhs is a list/tensor
     name: 'ConjugateTranspose',
-    trigger: ['^', 'H'],
+    latexTrigger: ['^', 'H'],
     kind: 'postfix',
   },
   {
     name: 'StringJoin', // @todo From Mathematica...?
-    trigger: ['\\lt', '\\gt'],
+    latexTrigger: ['\\lt', '\\gt'],
     kind: 'infix',
     precedence: 780,
   },
   {
     name: 'Starstar',
 
-    trigger: ['\\star', '\\star'],
+    latexTrigger: ['\\star', '\\star'],
     kind: 'infix',
     precedence: 780,
   },
@@ -94,7 +94,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     // (the Euler notation uses `D_1f(x)` where "1" is for the first variable
     // For the Leibniz notation see 'Divide' that handles `∂f/∂x`
     name: 'PartialDerivative', // PartialDerivative(expr, {lists of vars}, degree)
-    trigger: ['\\partial'],
+    latexTrigger: ['\\partial'],
     kind: 'prefix',
     parse: (parser: Parser) => {
       let done = false;
@@ -116,8 +116,8 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       if (sub === null || sup === null) return null;
       let rhs = parser.parseGroup() ?? 'Nothing';
       if (rhs !== 'Nothing' && !isEmptySequence(rhs)) {
-        const arg = parser.parseArguments() ?? ['Nothing'];
-        rhs = [rhs, ...arg];
+        const args = parser.parseArguments() ?? ['Nothing'];
+        rhs = [rhs, ...args];
       }
       return ['PartialDerivative', rhs, sub, sup] as Expression;
     },
@@ -148,130 +148,130 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     name: 'OverBar',
-    trigger: ['\\overline'],
+    latexTrigger: ['\\overline'],
     parse: parseSingleArg('OverBar'),
   },
   {
     name: 'UnderBar',
-    trigger: ['\\underline'],
+    latexTrigger: ['\\underline'],
     parse: parseSingleArg('UnderBar'),
   },
   {
     name: 'OverVector',
-    trigger: ['\\vec'],
+    latexTrigger: ['\\vec'],
     parse: parseSingleArg('OverVector'),
   },
   {
     name: 'OverTilde',
-    trigger: ['\\tilde'],
+    latexTrigger: ['\\tilde'],
     parse: parseSingleArg('OverTilde'),
   },
   {
     name: 'OverHat',
-    trigger: ['\\hat'],
+    latexTrigger: ['\\hat'],
     parse: parseSingleArg('OverHat'),
   },
   {
     name: 'OverRightArrow',
-    trigger: ['\\overrightarrow'],
+    latexTrigger: ['\\overrightarrow'],
     parse: parseSingleArg('OverRightArrow'),
   },
   {
     name: 'OverLeftArrow',
-    trigger: ['\\overleftarrow'],
+    latexTrigger: ['\\overleftarrow'],
     parse: parseSingleArg('OverLeftArrow'),
   },
   {
     name: 'OverRightDoubleArrow',
-    trigger: ['\\Overrightarrow'],
+    latexTrigger: ['\\Overrightarrow'],
     parse: parseSingleArg('OverRightDoubleArrow'),
   },
   {
     name: 'OverLeftHarpoon',
-    trigger: ['\\overleftharpoon'],
+    latexTrigger: ['\\overleftharpoon'],
     parse: parseSingleArg('OverLeftHarpoon'),
   },
   {
     name: 'OverRightHarpoon',
-    trigger: ['\\overrightharpoon'],
+    latexTrigger: ['\\overrightharpoon'],
     parse: parseSingleArg('OverRightHarpoon'),
   },
   {
     name: 'OverLeftRightArrow',
-    trigger: ['\\overleftrightarrow'],
+    latexTrigger: ['\\overleftrightarrow'],
     parse: parseSingleArg('OverLeftRightArrow'),
   },
   {
     name: 'OverBrace',
-    trigger: ['\\overbrace'],
+    latexTrigger: ['\\overbrace'],
     parse: parseSingleArg('OverBrace'),
   },
   {
     name: 'OverLineSegment',
-    trigger: ['\\overlinesegment'],
+    latexTrigger: ['\\overlinesegment'],
     parse: parseSingleArg('OverLineSegment'),
   },
   {
     name: 'OverGroup',
-    trigger: ['\\overgroup'],
+    latexTrigger: ['\\overgroup'],
     parse: parseSingleArg('OverGroup'),
   },
 
   {
-    trigger: ['\\displaystyle'],
+    latexTrigger: ['\\displaystyle'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\textstyle'],
+    latexTrigger: ['\\textstyle'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\scriptstyle'],
+    latexTrigger: ['\\scriptstyle'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\scriptscriptstyle'],
+    latexTrigger: ['\\scriptscriptstyle'],
     parse: () => ['Sequence'] as Expression,
   },
 
   {
-    trigger: ['\\tiny'],
+    latexTrigger: ['\\tiny'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\scriptsize'],
+    latexTrigger: ['\\scriptsize'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\footnotesize'],
+    latexTrigger: ['\\footnotesize'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\small'],
+    latexTrigger: ['\\small'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\normalsize'],
+    latexTrigger: ['\\normalsize'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\large'],
+    latexTrigger: ['\\large'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\Large'],
+    latexTrigger: ['\\Large'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\LARGE'],
+    latexTrigger: ['\\LARGE'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\huge'],
+    latexTrigger: ['\\huge'],
     parse: () => ['Sequence'] as Expression,
   },
   {
-    trigger: ['\\Huge'],
+    latexTrigger: ['\\Huge'],
     parse: () => ['Sequence'] as Expression,
   },
 
@@ -316,39 +316,39 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     },
   },
   {
-    trigger: ['\\!'],
+    latexTrigger: ['\\!'],
     parse: () => ['HorizontalSpacing', -3] as Expression,
   },
   {
-    trigger: ['\\ '],
+    latexTrigger: ['\\ '],
     parse: () => ['HorizontalSpacing', 6] as Expression,
   },
   {
-    trigger: ['\\:'],
+    latexTrigger: ['\\:'],
     parse: () => ['HorizontalSpacing', 4] as Expression,
   },
   {
-    trigger: ['\\enskip'],
+    latexTrigger: ['\\enskip'],
     parse: () => ['HorizontalSpacing', 9] as Expression,
   },
   {
-    trigger: ['\\quad'],
+    latexTrigger: ['\\quad'],
     parse: () => ['HorizontalSpacing', 18] as Expression,
   },
   {
-    trigger: ['\\qquad'],
+    latexTrigger: ['\\qquad'],
     parse: () => ['HorizontalSpacing', 36] as Expression,
   },
   {
-    trigger: ['\\,'],
+    latexTrigger: ['\\,'],
     parse: () => ['HorizontalSpacing', 3] as Expression,
   },
   {
-    trigger: ['\\;'],
+    latexTrigger: ['\\;'],
     parse: () => ['HorizontalSpacing', 5] as Expression,
   },
   {
-    trigger: ['\\enspace'],
+    latexTrigger: ['\\enspace'],
     parse: () => ['HorizontalSpacing', 9] as Expression,
   },
   {

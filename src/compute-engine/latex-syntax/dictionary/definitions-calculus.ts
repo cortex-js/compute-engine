@@ -305,36 +305,36 @@ export const DEFINITIONS_CALCULUS: LatexDictionary = [
   {
     kind: 'expression',
     name: 'Integrate',
-    trigger: ['\\int'],
+    latexTrigger: ['\\int'],
 
     parse: parseIntegral('Integrate'),
     serialize: serializeIntegral('\\int'),
   },
   {
     kind: 'expression',
-    trigger: ['\\iint'],
+    latexTrigger: ['\\iint'],
     parse: parseIntegral('Integrate', 2),
   },
   {
     kind: 'expression',
-    trigger: ['\\iiint'],
+    latexTrigger: ['\\iiint'],
     parse: parseIntegral('Integrate', 3),
   },
   {
     kind: 'expression',
     name: 'CircularIntegrate',
-    trigger: ['\\oint'],
+    latexTrigger: ['\\oint'],
     parse: parseIntegral('CircularIntegrate'),
     serialize: serializeIntegral('\\oint'),
   },
   {
     kind: 'expression',
-    trigger: ['\\oiint'],
+    latexTrigger: ['\\oiint'],
     parse: parseIntegral('CircularIntegrate', 2),
   },
   {
     kind: 'expression',
-    trigger: ['\\oiiint'],
+    latexTrigger: ['\\oiiint'],
     parse: parseIntegral('CircularIntegrate', 3),
   },
 ];

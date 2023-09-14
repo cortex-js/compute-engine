@@ -240,8 +240,8 @@ describe('SYMBOLS', () => {
     test('multi letter identifier', () => {
       // Multi-letter identifiers are upright by default
       expect(parse('\\mathrm{ab}')).toEqual(`ab`);
+      expect(parse('\\operatorname{ab}')).toEqual(`ab`);
       expect(parse('\\mathit{ab}')).toEqual(`ab_italic`);
-      expect(parse('\\operatorname{ab}')).toEqual(`ab_operator`);
     });
 
     test('multiletter with subscript', () => {
@@ -265,7 +265,9 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathrm{o\\_o}')).toEqual(`o_o`);
     });
     test('extended latin', () => {
-      expect(parse('\\mathrm{caf\\char"00E9}')).toMatchInlineSnapshot(`café`);
+      expect(parse('\\operatorname{caf\\char"00E9}')).toMatchInlineSnapshot(
+        `café`
+      );
     });
     test('emojis', () => {
       // Sequence of emojis do not need to be wrapped...
@@ -273,19 +275,19 @@ describe('SYMBOLS', () => {
         `["Equal", ["Add", "🍔🍟", "🥤"], 3]`
       );
       // ... but optionally they can be.
-      expect(parse('\\mathrm{😎🤏😳🕶🤏}')).toEqual(`😎🤏😳🕶🤏`);
+      expect(parse('\\operatorname{😎🤏😳🕶🤏}')).toEqual(`😎🤏😳🕶🤏`);
       // emoji with ZWJ and skin tone
       // U+1F468 U+1F3FB U+200D U+1F3A4
       expect(parse('👨🏻‍🎤')).toEqual(`👨🏻‍🎤`);
     });
     test('non-latin scripts', () => {
-      expect(parse('\\mathrm{半径}')).toEqual(`半径`);
-      expect(parse('\\mathrm{半径8546}')).toEqual(`半径8546`);
-      expect(parse('\\mathrm{半径circle}')).toEqual(`半径circle`);
-      expect(parse('\\mathrm{לְהַגבִּיל}')).toEqual(`לְהַגבִּיל`);
+      expect(parse('\\operatorname{半径}')).toEqual(`半径`);
+      expect(parse('\\operatorname{半径8546}')).toEqual(`半径8546`);
+      expect(parse('\\operatorname{半径circle}')).toEqual(`半径circle`);
+      expect(parse('\\operatorname{לְהַגבִּיל}')).toEqual(`לְהַגבִּיל`);
       // Bidi markers are OK outside of identifiers (they are ignored, though,
       // since they are not applicable to the math layout algorithm)
-      expect(parse('\\mathrm{לְהַגבִּיל}\u200e')).toEqual(`לְהַגבִּיל`);
+      expect(parse('\\operatorname{לְהַגבִּיל}\u200e')).toEqual(`לְהַגבִּיל`);
     });
   });
   describe('PARSING SYMBOLS WITH MODIFIERS', () => {
@@ -429,10 +431,10 @@ describe('SYMBOLS', () => {
       expect(latex('x_italic')).toEqual(`\\mathit{x}`);
       expect(latex('speed')).toEqual(`\\mathrm{speed}`);
       expect(latex('speed_max')).toEqual(`\\mathrm{speed_{max}}`);
-      expect(latex('_')).toEqual(`\\mathrm{\\_}`);
-      expect(latex('_0')).toEqual(`\\mathrm{\\_0}`);
-      expect(latex('_abc')).toEqual(`\\mathrm{\\_abc}`);
-      expect(latex('o_o')).toEqual(`\\mathrm{o_{o}}`);
+      expect(latex('_')).toEqual(`\\operatorname{\\_}`);
+      expect(latex('_0')).toEqual(`\\operatorname{\\_0}`);
+      expect(latex('_abc')).toEqual(`\\operatorname{\\_abc}`);
+      expect(latex('o_o')).toEqual(`\\mathrm{o_{o}}`); // single char uses mathrm rather than operatorname
       expect(latex('café')).toEqual(`\\mathrm{café}`);
       // Catalan interpunct (·) is valid in an identifier
       expect(latex('col·lecció')).toEqual(`\\mathrm{col·lecció}`);
@@ -474,9 +476,9 @@ describe('SYMBOLS', () => {
       );
       expect(latex('x_gothic_bold')).toEqual(`\\mathbf{\\mathfrak{x}}`);
       expect(latex('x_fraktur_bold')).toEqual(`\\mathbf{\\mathfrak{x}}`);
-      expect(latex('x_sansSerif')).toEqual(`\\mathsf{x}`);
-      expect(latex('x_sansSerif_bold')).toEqual(`\\mathbf{\\mathsf{x}}`);
-      expect(latex('x_sansSerif_italic')).toEqual(`\\mathit{\\mathsf{x}}`);
+      expect(latex('x_sansserif')).toEqual(`\\mathsf{x}`);
+      expect(latex('x_sansserif_bold')).toEqual(`\\mathbf{\\mathsf{x}}`);
+      expect(latex('x_sansserif_italic')).toEqual(`\\mathit{\\mathsf{x}}`);
       expect(latex('x_monospace')).toEqual(`\\mathtt{x}`);
       expect(latex('one_blackboard')).toEqual(`\\mathbb{1}`);
     });

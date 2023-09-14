@@ -16,7 +16,7 @@ describe('POWER', () => {
       `1^{\\error{\\blacksquare}}`
     );
     expect(latex(['Power', NaN])).toMatchInlineSnapshot(
-      `\\mathrm{NaN}^{\\error{\\blacksquare}}`
+      `\\operatorname{NaN}^{\\error{\\blacksquare}}`
     );
     expect(latex(['Power', Infinity])).toMatchInlineSnapshot(
       `\\infty^{\\error{\\blacksquare}}`
@@ -32,10 +32,10 @@ describe('INVERSE FUNCTION', () => {
 });
 
 describe('COMPLEX SYMBOLS', () => {
-  test('x_{\\mathrm{max}}', () =>
+  test('\\mathord{x_{\\mathrm{max}}}', () =>
     expect(
-      engine.parse('x_{\\mathrm{max}}').canonical.toJSON()
-    ).toMatchInlineSnapshot(`x_Max`));
+      engine.parse('\\mathord{x_{\\mathrm{max}}}').canonical.toJSON()
+    ).toMatchInlineSnapshot(`x_max`));
 });
 
 describe('SUPSUB', () => {
@@ -203,151 +203,28 @@ describe('SUPSUB', () => {
 
 describe('PRIME', () => {
   test('Valid forms', () => {
-    expect(parse("f'")).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        "f",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'''"],
-          ["Latex", "'''"]
-        ]
-      ]
-    `); // @fixme
-    expect(parse("f''")).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        "f",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'''"],
-          ["Latex", "''''"]
-        ]
-      ]
-    `); // @fixme
-    expect(parse("f'''")).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        "f",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'''"],
-          ["Latex", "'''''"]
-        ]
-      ]
-    `); // @fixme
-    expect(parse('f\\prime')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        "f",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime'"]
-        ]
-      ]
-    `); // @fixme
-    expect(parse('f\\prime\\prime')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        "f",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime\\prime'"]
-        ]
-      ]
-    `); // @fixme
-    expect(parse('f\\prime\\prime\\prime')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        "f",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-          ["Latex", "'\\prime\\prime\\prime'"]
-        ]
-      ]
-    `); // @fixme
-    expect(parse('f\\doubleprime')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        "f",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\doubleprime'"],
-          ["Latex", "'\\doubleprime'"]
-        ]
-      ]
-    `); // @fixme
-    expect(parse('f^{\\prime}')).toMatchInlineSnapshot(`["Prime", "f"]`);
-    expect(parse('f^{\\prime\\prime}')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "Function"]
-          ],
-          "f"
-        ],
-        [
-          "Sequence",
-          [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-            ["Latex", "'\\prime'"]
-          ],
-          ["Error", "'syntax-error'", ["Latex", "'\\prime}'"]]
-        ]
-      ]
-    `); // @fixme
-    expect(parse('f^{\\prime\\prime\\prime}')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "Function"]
-          ],
-          "f"
-        ],
-        [
-          "Sequence",
-          [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\prime'"],
-            ["Latex", "'\\prime'"]
-          ],
-          ["Error", "'syntax-error'", ["Latex", "'\\prime\\prime}'"]]
-        ]
-      ]
-    `); // @fixme
-    expect(parse('f^{\\doubleprime}')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "Function"]
-          ],
-          "f"
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\doubleprime'"],
-          ["Latex", "'\\doubleprime'"]
-        ]
-      ]
-    `);
+    expect(parse("f'")).toMatchInlineSnapshot(`["Derivative", "f"]`);
+    expect(parse("f''")).toMatchInlineSnapshot(`["Derivative", "f", 2]`);
+    expect(parse("f'''")).toMatchInlineSnapshot(`["Derivative", "f", 3]`);
+    expect(parse('f\\prime')).toMatchInlineSnapshot(`["Derivative", "f"]`);
+    expect(parse('f\\prime\\prime')).toMatchInlineSnapshot(
+      `["Derivative", "f", 2]`
+    ); // @fixme
+    expect(parse('f\\prime\\prime\\prime')).toMatchInlineSnapshot(
+      `["Derivative", "f", 3]`
+    ); // @fixme
+    expect(parse('f\\doubleprime')).toMatchInlineSnapshot(
+      `["Derivative", "f", 2]`
+    ); // @fixme
+    expect(parse('f^{\\prime}')).toMatchInlineSnapshot(`["Derivative", "f"]`);
+    expect(parse('f^{\\prime\\prime}')).toMatchInlineSnapshot(
+      `["Derivative", "f", 2]`
+    );
+    expect(parse('f^{\\prime\\prime\\prime}')).toMatchInlineSnapshot(
+      `["Derivative", "f", 3]`
+    );
+    expect(parse('f^{\\doubleprime}')).toMatchInlineSnapshot(
+      `["Derivative", "f", 2]`
+    );
   });
 });

@@ -214,9 +214,10 @@ export const CORE_LIBRARY: IdTable[] = [
     Apply: {
       signature: {
         domain: 'Function',
-        evaluate: (ce, ops) => apply(ops[0], ops.slice(1)),
+        evaluate: (_ce, ops) => apply(ops[0], ops.slice(1)),
       },
     },
+
     About: { signature: { domain: 'Function' } },
 
     Block: {
@@ -226,6 +227,11 @@ export const CORE_LIBRARY: IdTable[] = [
        * ["Block", ["List", ["Equal", "x", 1]], [...]]
        */
       signature: { domain: 'Function' },
+    },
+    Derivative: {
+      signature: {
+        domain: ['Function', 'Function', ['Maybe', 'Number'], 'Function'],
+      },
     },
     Domain: {
       /** Return the domain of an expression */

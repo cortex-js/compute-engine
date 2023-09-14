@@ -2,6 +2,8 @@ import { engine } from '../../utils';
 
 engine.assume(['Element', 'f', 'Function']);
 
+console.log(engine.parse('g()').json);
+
 function check(s: string, f: jest.ProvidesCallback) {
   describe(s, () => test(s, f));
 }
@@ -278,7 +280,11 @@ check('INVALID function application', () =>
     [
       "Sequence",
       "g",
-      ["Error", "'expected-expression'", ["Latex", "'\\left(\\right)'"]]
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-open-delimiter'", "'\\left'"],
+        ["Latex", "'\\left(\\right)'"]
+      ]
     ]
   `)
 );
@@ -300,9 +306,17 @@ check('VALID function application', () =>
 );
 
 check('Invalid empty delimiter expression', () =>
-  expect(engine.parse('1()')).toMatchInlineSnapshot(
-    `["Sequence", 1, ["Error", "'expected-expression'", ["Latex", "'()'"]]]`
-  )
+  expect(engine.parse('1()')).toMatchInlineSnapshot(`
+    [
+      "Sequence",
+      1,
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
+        ["Latex", "'()'"]
+      ]
+    ]
+  `)
 );
 
 check('Invalid empty delimiter expression', () =>
@@ -310,7 +324,11 @@ check('Invalid empty delimiter expression', () =>
     [
       "Sequence",
       1,
-      ["Error", "'expected-expression'", ["Latex", "'\\left(\\right)'"]]
+      [
+        "Error",
+        ["ErrorCode", "'unexpected-open-delimiter'", "'\\left'"],
+        ["Latex", "'\\left(\\right)'"]
+      ]
     ]
   `)
 );
@@ -336,7 +354,7 @@ check('Invalid delimiter: expected closing', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", "')'"],
+        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
         ["Latex", "'('"]
       ]
     ]

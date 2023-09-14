@@ -5,74 +5,74 @@ import { LatexDictionary, Serializer, LatexString } from '../public';
 
 export const DEFINITIONS_SETS: LatexDictionary = [
   // Constants
-  { name: 'AlgebraicNumber', trigger: '\\bar\\Q' },
-  { name: 'ComplexNumber', trigger: ['\\C'] },
-  { trigger: '\\mathbb{C}', parse: 'ComplexNumber' },
-  { name: 'ImaginaryNumber', trigger: ['\\imaginaryI', '\\R'] },
-  { name: 'ExtendedComplexNumber', trigger: ['\\bar', '\\C'] },
-  { name: 'EmptySet', trigger: ['\\emptyset'] },
-  { trigger: ['\\varnothing'], parse: 'EmptySet' }, // Parsing only
-  { name: 'Integer', trigger: ['\\Z'] },
-  { trigger: '\\mathbb{Z}', parse: 'Integer' },
-  { name: 'RationalNumber', trigger: ['\\Q'] },
-  { name: 'RealNumber', trigger: ['\\R'] },
-  { trigger: '\\mathbb{R}', parse: 'RealNumber' },
-  { name: 'ExtendedRealNumber', trigger: ['\\bar', '\\R'] },
-  { name: 'TranscendentalNumber', trigger: '\\R-\\bar\\Q' },
-  { trigger: '\\R\\backslash\\bar\\Q', parse: 'TranscendentalNumber' },
+  { name: 'AlgebraicNumber', latexTrigger: '\\bar\\Q' },
+  { name: 'ComplexNumber', latexTrigger: ['\\C'] },
+  { latexTrigger: '\\mathbb{C}', parse: 'ComplexNumber' },
+  { name: 'ImaginaryNumber', latexTrigger: ['\\imaginaryI', '\\R'] },
+  { name: 'ExtendedComplexNumber', latexTrigger: ['\\bar', '\\C'] },
+  { name: 'EmptySet', latexTrigger: ['\\emptyset'] },
+  { latexTrigger: ['\\varnothing'], parse: 'EmptySet' }, // Parsing only
+  { name: 'Integer', latexTrigger: ['\\Z'] },
+  { latexTrigger: '\\mathbb{Z}', parse: 'Integer' },
+  { name: 'RationalNumber', latexTrigger: ['\\Q'] },
+  { name: 'RealNumber', latexTrigger: ['\\R'] },
+  { latexTrigger: '\\mathbb{R}', parse: 'RealNumber' },
+  { name: 'ExtendedRealNumber', latexTrigger: ['\\bar', '\\R'] },
+  { name: 'TranscendentalNumber', latexTrigger: '\\R-\\bar\\Q' },
+  { latexTrigger: '\\R\\backslash\\bar\\Q', parse: 'TranscendentalNumber' },
 
   // Real numbers < 0
-  { name: 'NegativeNumber', trigger: '\\R^-' },
-  { trigger: '\\R^{-}', parse: 'NegativeNumber' },
-  { trigger: '\\R_-', parse: 'NegativeNumber' },
-  { trigger: '\\R_{-}', parse: 'NegativeNumber' },
-  { trigger: '\\R^{\\lt}', parse: 'NegativeNumber' },
+  { name: 'NegativeNumber', latexTrigger: '\\R^-' },
+  { latexTrigger: '\\R^{-}', parse: 'NegativeNumber' },
+  { latexTrigger: '\\R_-', parse: 'NegativeNumber' },
+  { latexTrigger: '\\R_{-}', parse: 'NegativeNumber' },
+  { latexTrigger: '\\R^{\\lt}', parse: 'NegativeNumber' },
 
   // Real numbers > 0
-  { name: 'PositiveNumber', trigger: '\\R^+' },
-  { trigger: '\\R^{+}', parse: 'PositiveNumber' },
-  { trigger: '\\R_+', parse: 'PositiveNumber' },
-  { trigger: '\\R_{+}', parse: 'PositiveNumber' },
-  { trigger: '\\R^{\\gt}', parse: 'PositiveNumber' },
+  { name: 'PositiveNumber', latexTrigger: '\\R^+' },
+  { latexTrigger: '\\R^{+}', parse: 'PositiveNumber' },
+  { latexTrigger: '\\R_+', parse: 'PositiveNumber' },
+  { latexTrigger: '\\R_{+}', parse: 'PositiveNumber' },
+  { latexTrigger: '\\R^{\\gt}', parse: 'PositiveNumber' },
 
   // Real numbers <= 0
-  { name: 'NonPositiveNumber', trigger: '\\R^{0-}' },
-  { trigger: '\\R^{-0}', parse: 'NonPositiveNumber' },
-  { trigger: '\\R^{\\leq}', parse: 'NonPositiveNumber' },
+  { name: 'NonPositiveNumber', latexTrigger: '\\R^{0-}' },
+  { latexTrigger: '\\R^{-0}', parse: 'NonPositiveNumber' },
+  { latexTrigger: '\\R^{\\leq}', parse: 'NonPositiveNumber' },
 
   // Integers < 0
-  { name: 'NegativeInteger', trigger: '\\Z^-' },
-  { trigger: '\\Z^-', parse: 'NegativeInteger' },
-  { trigger: '\\Z^{-}', parse: 'NegativeInteger' },
-  { trigger: '\\Z_-', parse: 'NegativeInteger' },
-  { trigger: '\\Z_{-}', parse: 'NegativeInteger' },
-  { trigger: '\\Z^{\\lt}', parse: 'NegativeInteger' },
+  { name: 'NegativeInteger', latexTrigger: '\\Z^-' },
+  { latexTrigger: '\\Z^-', parse: 'NegativeInteger' },
+  { latexTrigger: '\\Z^{-}', parse: 'NegativeInteger' },
+  { latexTrigger: '\\Z_-', parse: 'NegativeInteger' },
+  { latexTrigger: '\\Z_{-}', parse: 'NegativeInteger' },
+  { latexTrigger: '\\Z^{\\lt}', parse: 'NegativeInteger' },
 
   // Integers >  0
-  { name: 'PositiveInteger', trigger: '\\Z^+' },
-  { trigger: '\\Z^{+}', parse: 'PositiveInteger' },
-  { trigger: '\\Z_+', parse: 'PositiveInteger' },
-  { trigger: '\\Z_{+}', parse: 'PositiveInteger' },
-  { trigger: '\\Z^{\\gt}', parse: 'PositiveInteger' },
-  { trigger: '\\Z^{\\gt0}', parse: 'PositiveInteger' },
-  { trigger: '\\N^+', parse: 'PositiveInteger' },
-  { trigger: '\\N^{+}', parse: 'PositiveInteger' },
-  { trigger: '\\N^*', parse: 'PositiveInteger' },
-  { trigger: '\\N^{*}', parse: 'PositiveInteger' },
-  { trigger: '\\N^\\star', parse: 'PositiveInteger' },
-  { trigger: '\\N^{\\star}', parse: 'PositiveInteger' },
-  { trigger: '\\N_1', parse: 'PositiveInteger' },
-  { trigger: '\\N_{1}', parse: 'PositiveInteger' }, // https://mathvault.ca/hub/higher-math/math-symbols/algebra-symbols/
+  { name: 'PositiveInteger', latexTrigger: '\\Z^+' },
+  { latexTrigger: '\\Z^{+}', parse: 'PositiveInteger' },
+  { latexTrigger: '\\Z_+', parse: 'PositiveInteger' },
+  { latexTrigger: '\\Z_{+}', parse: 'PositiveInteger' },
+  { latexTrigger: '\\Z^{\\gt}', parse: 'PositiveInteger' },
+  { latexTrigger: '\\Z^{\\gt0}', parse: 'PositiveInteger' },
+  { latexTrigger: '\\N^+', parse: 'PositiveInteger' },
+  { latexTrigger: '\\N^{+}', parse: 'PositiveInteger' },
+  { latexTrigger: '\\N^*', parse: 'PositiveInteger' },
+  { latexTrigger: '\\N^{*}', parse: 'PositiveInteger' },
+  { latexTrigger: '\\N^\\star', parse: 'PositiveInteger' },
+  { latexTrigger: '\\N^{\\star}', parse: 'PositiveInteger' },
+  { latexTrigger: '\\N_1', parse: 'PositiveInteger' },
+  { latexTrigger: '\\N_{1}', parse: 'PositiveInteger' }, // https://mathvault.ca/hub/higher-math/math-symbols/algebra-symbols/
 
   // Integers >=  0
-  { name: 'NonNegativeInteger', trigger: ['\\N'] },
-  { trigger: '\\Z^{+0}', parse: 'NonNegativeInteger' },
-  { trigger: '\\Z^{\\geq}', parse: 'NonNegativeInteger' },
-  { trigger: '\\Z^{\\geq0}', parse: 'NonNegativeInteger' },
-  { trigger: '\\Z^{0+}', parse: 'NonNegativeInteger' },
-  { trigger: '\\mathbb{N}', parse: 'NonNegativeInteger' },
-  { trigger: '\\N_0', parse: 'NonNegativeInteger' },
-  { trigger: '\\N_{0}', parse: 'NonNegativeInteger' },
+  { name: 'NonNegativeInteger', latexTrigger: ['\\N'] },
+  { latexTrigger: '\\Z^{+0}', parse: 'NonNegativeInteger' },
+  { latexTrigger: '\\Z^{\\geq}', parse: 'NonNegativeInteger' },
+  { latexTrigger: '\\Z^{\\geq0}', parse: 'NonNegativeInteger' },
+  { latexTrigger: '\\Z^{0+}', parse: 'NonNegativeInteger' },
+  { latexTrigger: '\\mathbb{N}', parse: 'NonNegativeInteger' },
+  { latexTrigger: '\\N_0', parse: 'NonNegativeInteger' },
+  { latexTrigger: '\\N_{0}', parse: 'NonNegativeInteger' },
 
   //
   // Set Expressions
@@ -80,7 +80,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   // @todo: could also have a `CartesianPower` function with a number `rhs`
   {
     name: 'CartesianProduct',
-    trigger: ['\\times'],
+    latexTrigger: ['\\times'],
     kind: 'infix',
     associativity: 'right', // Caution: cartesian product is not associative
     precedence: 390, // Same as Multiply?
@@ -103,7 +103,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     },
   },
   {
-    trigger: ['^', '\\complement'],
+    latexTrigger: ['^', '\\complement'],
     kind: 'postfix',
     parse: (_parser, lhs) => {
       return ['Complement', lhs];
@@ -114,14 +114,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   },
   {
     name: 'Complement',
-    trigger: ['^', '<{>', '\\complement', '<}>'],
+    latexTrigger: ['^', '<{>', '\\complement', '<}>'],
     kind: 'postfix',
     // precedence: 240,
     // @todo: serialize for the multiple argument case
   },
   {
     name: 'Intersection',
-    trigger: ['\\cap'],
+    latexTrigger: ['\\cap'],
     kind: 'infix',
     precedence: 350,
   },
@@ -137,7 +137,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   },
   {
     name: 'Union',
-    trigger: ['\\cup'],
+    latexTrigger: ['\\cup'],
     kind: 'infix',
     precedence: 350,
   },
@@ -156,13 +156,13 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   // },
   {
     name: 'SetMinus',
-    trigger: ['\\setminus'],
+    latexTrigger: ['\\setminus'],
     kind: 'infix',
     precedence: 650,
   },
   {
     name: 'SymmetricDifference',
-    trigger: ['\\triangle'], // or \\ominus
+    latexTrigger: ['\\triangle'], // or \\ominus
     kind: 'infix',
     // @todo: parser could check that lhs and rhs are sets
     precedence: 260,
@@ -170,7 +170,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
 
   // Predicates/Relations
   {
-    trigger: ['\\ni'],
+    latexTrigger: ['\\ni'],
     kind: 'infix',
     associativity: 'right',
     precedence: 160, // As per MathML, lower precedence
@@ -181,88 +181,88 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   },
   {
     name: 'Element',
-    trigger: ['\\in'],
+    latexTrigger: ['\\in'],
     kind: 'infix',
     precedence: 240,
   },
   {
     name: 'NotElement',
-    trigger: ['\\notin'],
+    latexTrigger: ['\\notin'],
     kind: 'infix',
     precedence: 240,
   },
   {
     name: 'NotSubset',
-    trigger: ['\\nsubset'],
+    latexTrigger: ['\\nsubset'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'NotSuperset',
-    trigger: ['\\nsupset'],
+    latexTrigger: ['\\nsupset'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'NotSubsetNotEqual',
-    trigger: ['\\nsubseteq'],
+    latexTrigger: ['\\nsubseteq'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'NotSupersetNotEqual',
-    trigger: ['\\nsupseteq'],
+    latexTrigger: ['\\nsupseteq'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
   },
   {
     name: 'SquareSubset', // MathML: square image of
-    trigger: ['\\sqsubset'],
+    latexTrigger: ['\\sqsubset'],
     kind: 'infix',
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'SquareSubsetEqual', // MathML: square image of or equal to
-    trigger: ['\\sqsubseteq'],
+    latexTrigger: ['\\sqsubseteq'],
     kind: 'infix',
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'SquareSuperset', // MathML: square original of
-    trigger: ['\\sqsupset'],
+    latexTrigger: ['\\sqsupset'],
     kind: 'infix',
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'SquareSupersetEqual', // MathML: square original of or equal
-    trigger: ['\\sqsupseteq'],
+    latexTrigger: ['\\sqsupseteq'],
     kind: 'infix',
     associativity: 'right',
     precedence: 265,
   },
   {
     name: 'Subset',
-    trigger: ['\\subset'],
+    latexTrigger: ['\\subset'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
   },
   {
-    trigger: ['\\subsetneq'],
+    latexTrigger: ['\\subsetneq'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
     parse: 'Subset',
   },
   {
-    trigger: ['\\varsubsetneqq'],
+    latexTrigger: ['\\varsubsetneqq'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
@@ -270,26 +270,26 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   },
   {
     name: 'SubsetEqual',
-    trigger: ['\\subseteq'],
+    latexTrigger: ['\\subseteq'],
     kind: 'infix',
     precedence: 240,
   },
   {
     name: 'Superset',
-    trigger: ['\\supset'],
+    latexTrigger: ['\\supset'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
   },
   {
-    trigger: ['\\supsetneq'],
+    latexTrigger: ['\\supsetneq'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
     parse: 'Superset',
   },
   {
-    trigger: ['\\varsupsetneq'],
+    latexTrigger: ['\\varsupsetneq'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,
@@ -297,7 +297,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   },
   {
     name: 'SupersetEqual',
-    trigger: ['\\supseteq'],
+    latexTrigger: ['\\supseteq'],
     kind: 'infix',
     associativity: 'right',
     precedence: 240,

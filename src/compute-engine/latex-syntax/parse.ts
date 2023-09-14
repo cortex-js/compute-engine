@@ -8,7 +8,6 @@ import {
   Delimiter,
   Terminator,
   Parser,
-  FunctionEntry,
 } from './public';
 import { tokenize, tokensToString } from './tokenizer';
 import {
@@ -19,6 +18,9 @@ import {
   IndexedPrefixEntry,
   IndexedSymbolEntry,
   IndexedExpressionEntry,
+  IndexedFunctionEntry,
+  IndexedEnvironmentEntry,
+  IndexedMatchfixEntry,
 } from './dictionary/definitions';
 
 import { IComputeEngine } from '../public';
@@ -37,7 +39,7 @@ import {
   stringValue,
   symbol,
 } from '../../math-json/utils';
-import { matchIdentifier, parseInvalidIdentifier } from './parse-identifier';
+import { parseIdentifier, parseInvalidIdentifier } from './parse-identifier';
 
 /** These delimiters can be used as 'shorthand' delimiters in
  * `openDelimiter` and `closeDelimiter` for `matchfix` operators.
@@ -306,13 +308,14 @@ export class _Parser implements Parser {
    * - the `t.condition` function returns true
    * Note: the `minPrec` condition is not checked. It should be checked separately.
    */
-  atTerminator(t?: Partial<Terminator>): boolean {
-    if (this.atBoundary) return true;
-    if (t?.condition && t.condition(this)) return true;
-    return false;
+  atTerminator(t?: Readonly<Terminator>): boolean {
+    return this.atBoundary || ((t?.condition && t.condition(this)) ?? false);
   }
 
-  /** True if the current token matches any of the boundaries we are waiting for */
+  /**
+   * True if the current token matches any of the boundaries we are
+   * waiting for.
+   */
   get atBoundary(): boolean {
     if (this.atEnd) return true;
     const start = this.index;
@@ -374,32 +377,38 @@ export class _Parser implements Parser {
    * `[empty, '\\sqrt', '\\sqrt{', '\\sqrt{2', '\\sqrt{2}']`
    *
    */
-  lookAhead(): string[] {
+  lookAhead(): [count: number, tokens: string][] {
     let n = Math.min(
       this._dictionary.lookahead,
       this._tokens.length - this.index
     );
-    if (n < 0) return [];
-    const result = Array<string>(n + 1);
-    while (n > 0) result[n] = this.latexAhead(n--);
+    if (n <= 0) return [];
+
+    const result: [number, string][] = [];
+
+    while (n > 0) result.push([n, this.latexAhead(n--)]);
 
     return result;
   }
 
-  /** Return all the definitions that potentially match the tokens ahead */
-  peekDefinitions(
-    kind: 'expression'
-  ): [IndexedExpressionEntry, number][] | null;
-  peekDefinitions(kind: 'function'): [FunctionEntry, number][] | null;
-  peekDefinitions(kind: 'symbol'): [IndexedSymbolEntry, number][] | null;
-  peekDefinitions(kind: 'postfix'): [IndexedPostfixEntry, number][] | null;
-  peekDefinitions(kind: 'infix'): [IndexedInfixEntry, number][] | null;
-  peekDefinitions(kind: 'prefix'): [IndexedPrefixEntry, number][] | null;
+  /** Return all the definitions that match the tokens ahead
+   *
+   * The return value is an array of pairs `[def, n]` where `def` is the
+   * definition that matches the tokens ahead, and `n` is the number of tokens
+   * that matched.
+   *
+   * Note the 'operator' kind matches both infix, prefix and postfix operators.
+   *
+   */
+  peekDefinitions(kind: 'expression'): [IndexedExpressionEntry, number][];
+  peekDefinitions(kind: 'function'): [IndexedFunctionEntry, number][];
+  peekDefinitions(kind: 'symbol'): [IndexedSymbolEntry, number][];
+  peekDefinitions(kind: 'postfix'): [IndexedPostfixEntry, number][];
+  peekDefinitions(kind: 'infix'): [IndexedInfixEntry, number][];
+  peekDefinitions(kind: 'prefix'): [IndexedPrefixEntry, number][];
   peekDefinitions(
     kind: 'operator'
-  ):
-    | [IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry, number][]
-    | null;
+  ): [IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry, number][];
   peekDefinitions(
     kind:
       | 'expression'
@@ -409,42 +418,35 @@ export class _Parser implements Parser {
       | 'prefix'
       | 'postfix'
       | 'operator'
-  ): [FunctionEntry | IndexedLatexDictionaryEntry, number][] | null {
-    let defs: (undefined | IndexedLatexDictionaryEntry[])[];
-    if (kind === 'function') {
-      const start = this.index;
-      if (
-        this.match('\\operatorname') ||
-        this.match('\\mathrm') ||
-        this.match('\\mathit')
-      ) {
-        const fn = this.parseStringGroup()?.trim();
-        const n = this.index - start;
-        this.index = start;
-        if (!fn || !this._dictionary.function.has(fn)) return null;
-
-        return this._dictionary.function.get(fn)!.map((x) => [x, n]);
-      }
-      return null;
-    } else if (kind === 'operator') {
-      defs = this.lookAhead().map(
-        (x, n) =>
-          this._dictionary.infix[n]?.get(x) ??
-          this._dictionary.postfix[n]?.get(x) ??
-          this._dictionary.prefix[n]?.get(x)
-      );
-    } else {
-      defs = this.lookAhead().map((x, n) => this._dictionary[kind][n]?.get(x));
-    }
-
+  ): [IndexedLatexDictionaryEntry, number][] {
     const result: [IndexedLatexDictionaryEntry, number][] = [];
-    for (let i = defs.length - 1; i > 0; i--) {
-      if (defs[i] !== undefined) {
-        console.assert(Array.isArray(defs[i]));
-        for (const def of defs[i]!) result.push([def, i]);
+    const defs = [...this.getDefs(kind)];
+
+    //
+    // Add any "universal" definitions (ones with an empty string for a trigger)
+    //
+
+    for (const def of defs) if (def.latexTrigger === '') result.push([def, 0]);
+
+    //
+    // Filter the definition matching the tokens ahead with a LaTeX trigger
+    //
+    for (const [n, tokens] of this.lookAhead()) {
+      for (const def of defs)
+        if (def.latexTrigger === tokens) result.push([def, n]);
+    }
+
+    //
+    // Filter the definitions that match with a complex LaTeX identifier
+    //
+    for (const def of defs) {
+      if (def.identifierTrigger) {
+        const n = peekComplexId(this, def.identifierTrigger);
+        if (n > 0) result.push([def, n]);
       }
     }
-    return result.length === 0 ? null : result;
+
+    return result;
   }
 
   /** Skip strictly `<space>` tokens.
@@ -570,9 +572,8 @@ export class _Parser implements Parser {
         digits += digit;
         n += 1;
       }
-      if (digits.length === caretCount) {
+      if (digits.length === caretCount)
         return String.fromCodePoint(Number.parseInt(digits, 16));
-      }
     } else if (this.match('\\char')) {
       let codepoint = Math.floor(this.matchLatexNumber() ?? Number.NaN);
       if (
@@ -585,8 +586,7 @@ export class _Parser implements Parser {
       return String.fromCodePoint(codepoint);
     } else if (this.match('\\unicode')) {
       this.skipSpaceTokens();
-      if (this.peek === '<{>') {
-        this.nextToken();
+      if (this.match('<{>')) {
         const codepoint = this.matchLatexNumber();
 
         if (
@@ -600,9 +600,8 @@ export class _Parser implements Parser {
       } else {
         const codepoint = this.matchLatexNumber();
 
-        if (codepoint !== null && codepoint >= 0 && codepoint <= 0x10ffff) {
+        if (codepoint !== null && codepoint >= 0 && codepoint <= 0x10ffff)
           return String.fromCodePoint(codepoint);
-        }
       }
     }
     this.index = index;
@@ -716,6 +715,7 @@ export class _Parser implements Parser {
           !this.atBoundary
         ) {
           expr = this.parseExpression({
+            minPrec: 0,
             condition: (p) => {
               const peek = p.peek;
               return peek === '&' || peek === '\\\\' || peek === '\\cr';
@@ -757,7 +757,7 @@ export class _Parser implements Parser {
 
   /** Parse an environment: `\begin{env}...\end{end}`
    */
-  private parseEnvironment(until?: Partial<Terminator>): Expression | null {
+  private parseEnvironment(until?: Readonly<Terminator>): Expression | null {
     const index = this.index;
 
     if (!this.match('\\begin')) return null;
@@ -767,29 +767,28 @@ export class _Parser implements Parser {
 
     this.addBoundary(['\\end', '<{>', ...name.split(''), '<}>']);
 
-    const def = this._dictionary.environment.get(name);
-    if (!def) {
-      // Unknown environment:
-      // attempt to parse as tabular, but discard content
+    for (const def of this.getDefs('environment') as IndexedEnvironmentEntry[])
+      if (def.identifierTrigger === name) {
+        const expr = def.parse(this, until);
 
-      this.parseTabular();
+        this.skipSpace();
+        if (!this.matchBoundary())
+          return this.boundaryError('unbalanced-environment');
 
-      this.skipSpace();
-      if (!this.matchBoundary())
-        return this.boundaryError('unbalanced-environment');
-      return this.error(['unknown-environment', { str: name }], index);
-    }
+        if (expr !== null) return this.decorate(expr, index);
 
-    const expr = def.parse(this, until as Terminator);
+        this.index = index;
+        return null;
+      }
+
+    // Unknown environment:
+    // attempt to parse as tabular, but discard content
+    this.parseTabular();
 
     this.skipSpace();
     if (!this.matchBoundary())
       return this.boundaryError('unbalanced-environment');
-
-    if (expr !== null) return this.decorate(expr, index);
-
-    this.index = index;
-    return null;
+    return this.error(['unknown-environment', { str: name }], index);
   }
 
   /** If the next token matches a `+` or `-` sign, return it and advance the index.
@@ -1088,14 +1087,12 @@ export class _Parser implements Parser {
     return negative ? -result : result;
   }
 
-  private parsePrefixOperator(until?: Terminator): Expression | null {
+  private parsePrefixOperator(until?: Readonly<Terminator>): Expression | null {
     if (!until) until = { minPrec: 0 };
     if (!until.minPrec) until = { ...until, minPrec: 0 };
 
-    const defs = this.peekDefinitions('prefix');
-    if (defs === null) return null;
     const start = this.index;
-    for (const [def, n] of defs) {
+    for (const [def, n] of this.peekDefinitions('prefix')) {
       this.index = start + n;
       const rhs = def.parse(this, until);
       if (rhs) return rhs;
@@ -1106,15 +1103,14 @@ export class _Parser implements Parser {
 
   private parseInfixOperator(
     lhs: Expression,
-    until?: Terminator
+    until?: Readonly<Terminator>
   ): Expression | null {
     until ??= { minPrec: 0 };
+    console.assert(until.minPrec !== undefined);
     if (until.minPrec === undefined) until = { ...until, minPrec: 0 };
 
-    const defs = this.peekDefinitions('infix');
-    if (defs === null) return null;
     const start = this.index;
-    for (const [def, n] of defs) {
+    for (const [def, n] of this.peekDefinitions('infix')) {
       if (def.precedence >= until.minPrec) {
         this.index = start + n;
         const rhs = def.parse(this, lhs, until);
@@ -1137,7 +1133,7 @@ export class _Parser implements Parser {
    */
   parseArguments(
     kind: 'enclosure' | 'implicit' = 'enclosure',
-    until?: Terminator
+    until?: Readonly<Terminator>
   ): Expression[] | null {
     if (this.atTerminator(until)) return null;
 
@@ -1173,46 +1169,6 @@ export class _Parser implements Parser {
     this.index = savedIndex;
     return null;
   }
-
-  /** A prime suffix is a sequence of `'`, `\prime` or `\doubleprime`
-   * after a function or in a superscript.
-   */
-  // matchPrimeSuffix(): number {
-  //   this.skipSpace();
-  //   const start = this.index;
-  //   let count = 0;
-  //   if (this.match('^')) {
-  //     if (this.match('<{>')) {
-  //       if (this.match('(')) {
-  //         const n = this.parseNumber();
-  //         if (n && this.match(')')) return parseInt(n);
-  //         this.index = start;
-  //         return 0;
-  //       }
-  //       do {
-  //         const c = countPrimeLevel(this);
-  //         if (c === 0) break;
-  //         count += c;
-  //       } while (true);
-  //       if (count !== 0 && this.match('<}>')) return count;
-  //       this.index = start;
-  //       return 0;
-  //     }
-  //     count = countPrimeLevel(this);
-  //     if (count !== 0) return count;
-  //     this.index = start;
-  //     return 0;
-  //   }
-  //   do {
-  //     const c = countPrimeLevel(this);
-  //     if (c === 0) break;
-  //     count += c;
-  //   } while (true);
-
-  //   if (count !== 0) return count;
-  //   this.index = start;
-  //   return 0;
-  // }
 
   /** If matches the normalized open delimiter, return the
    * expected closing delimiter.
@@ -1285,8 +1241,7 @@ export class _Parser implements Parser {
    * @internal
    */
   matchEnclosureOpen(): string | null {
-    const defs = this._dictionary.matchfix;
-    if (defs.length === 0) return null;
+    const defs = this.getDefs('matchfix') as Iterable<IndexedMatchfixEntry>;
 
     const start = this.index;
     for (const def of defs) {
@@ -1311,8 +1266,7 @@ export class _Parser implements Parser {
    * Used for error handling
    * @internal */
   matchEnclosureClose(): string | null {
-    const defs = this._dictionary.matchfix;
-    if (defs.length === 0) return null;
+    const defs = this.getDefs('matchfix') as Iterable<IndexedMatchfixEntry>;
 
     const start = this.index;
     for (const def of defs) {
@@ -1352,9 +1306,7 @@ export class _Parser implements Parser {
    * and finally a closing matching operator.
    */
   private parseEnclosure(): Expression | null {
-    const defs = this._dictionary.matchfix;
-
-    if (defs.length === 0) return null;
+    const defs = this.getDefs('matchfix') as Iterable<IndexedMatchfixEntry>;
 
     const start = this.index;
 
@@ -1445,7 +1397,7 @@ export class _Parser implements Parser {
    */
 
   private parseGenericExpression(
-    until?: Partial<Terminator>
+    until?: Readonly<Terminator>
   ): Expression | null {
     if (this.atTerminator(until)) return null;
 
@@ -1457,7 +1409,7 @@ export class _Parser implements Parser {
       this.index = start + tokenCount;
       if (typeof def.parse === 'function') {
         // Give a custom parser a chance to parse the expression
-        expr = def.parse(this, until as Terminator);
+        expr = def.parse(this, until);
         if (expr !== null) return expr;
       } else {
         return def.name!;
@@ -1473,7 +1425,7 @@ export class _Parser implements Parser {
    * (`\prime`...) and some arguments.
    */
 
-  private parseFunction(until?: Partial<Terminator>): Expression | null {
+  private parseFunction(until?: Readonly<Terminator>): Expression | null {
     if (this.atTerminator(until)) return null;
 
     const start = this.index;
@@ -1482,13 +1434,12 @@ export class _Parser implements Parser {
     //  `\\mathrm`, etc...)
     //
     let fn: Expression | null = null;
-    const fnDefs = this.peekDefinitions('function') ?? [];
-    for (const [def, tokenCount] of fnDefs) {
+    for (const [def, tokenCount] of this.peekDefinitions('function')) {
       // Skip the trigger tokens
       this.index = start + tokenCount;
       if (typeof def.parse === 'function') {
         // Give a custom parser a chance to parse the function
-        fn = def.parse(this, until as Terminator);
+        fn = def.parse(this, until);
         if (fn !== null) break;
       } else {
         fn = def.name!;
@@ -1501,7 +1452,7 @@ export class _Parser implements Parser {
     //
     if (fn === null) {
       this.index = start;
-      fn = matchIdentifier(this);
+      fn = parseIdentifier(this);
       if (!this.isFunctionHead(fn)) {
         this.index = start;
         return null;
@@ -1524,7 +1475,7 @@ export class _Parser implements Parser {
     return seq ? [fn!, ...seq] : fn!;
   }
 
-  parseSymbol(until?: Partial<Terminator>): Expression | null {
+  parseSymbol(until?: Readonly<Terminator>): Expression | null {
     if (this.atTerminator(until)) return null;
 
     const start = this.index;
@@ -1532,16 +1483,13 @@ export class _Parser implements Parser {
     //
     // Is there a custom parser for this symbol?
     //
-    const defs = this.peekDefinitions('symbol');
-    if (defs) {
-      for (const [def, tokenCount] of defs) {
-        this.index = start + tokenCount;
-        // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling parseUnknownIdentifier() or somethinglike it (parseUnknownIdentifier() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
-        if (typeof def.parse === 'function') {
-          const result = def.parse(this, until as Terminator);
-          if (result) return result;
-        } else return def.name!;
-      }
+    for (const [def, tokenCount] of this.peekDefinitions('symbol')) {
+      this.index = start + tokenCount;
+      // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling parseUnknownIdentifier() or somethinglike it (parseUnknownIdentifier() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
+      if (typeof def.parse === 'function') {
+        const result = def.parse(this, until);
+        if (result) return result;
+      } else return def.name!;
     }
 
     // No custom parser worked. Backtrack.
@@ -1549,7 +1497,7 @@ export class _Parser implements Parser {
     // in a custom parser)
     this.index = start;
 
-    const id = matchIdentifier(this);
+    const id = parseIdentifier(this);
     if (id === null) return null;
 
     // Are we OK with it as a symbol?
@@ -1622,7 +1570,9 @@ export class _Parser implements Parser {
     // 2/ Apply subscripts (first)
     //
     if (subscripts.length > 0) {
-      const defs = this._dictionary.infix[1]?.get('_');
+      const defs = [...this.getDefs('infix')].filter(
+        (x) => x.latexTrigger === '_'
+      ) as IndexedInfixEntry[];
       if (defs) {
         const arg: Expression = [
           'Subscript',
@@ -1642,7 +1592,10 @@ export class _Parser implements Parser {
     // 3/ Apply superscripts (second)
     //
     if (superscripts.length > 0) {
-      const defs = this._dictionary.infix[1]?.get('^');
+      const defs = [...this.getDefs('infix')].filter(
+        (x) => x.latexTrigger === '^'
+      ) as IndexedInfixEntry[];
+
       if (defs) {
         const arg: Expression = [
           'Superscript',
@@ -1668,18 +1621,15 @@ export class _Parser implements Parser {
 
   parsePostfixOperator(
     lhs: Expression | null,
-    until?: Partial<Terminator>
+    until?: Readonly<Terminator>
   ): Expression | null {
     console.assert(lhs !== null); // @todo validate
     if (lhs === null) return null;
 
-    const defs = this.peekDefinitions('postfix');
-    if (defs === null) return null;
-
     const start = this.index;
-    for (const [def, n] of defs) {
+    for (const [def, n] of this.peekDefinitions('postfix')) {
       this.index = start + n;
-      const result = def.parse(this, lhs, until as Terminator);
+      const result = def.parse(this, lhs, until);
       if (result !== null) return result;
     }
     this.index = start;
@@ -1744,7 +1694,7 @@ export class _Parser implements Parser {
    * => lhs is a number, rhs is a number, but not a literal
    */
   private applyInvisibleOperator(
-    until: Terminator,
+    until: Readonly<Terminator>,
     lhs: Expression | null
   ): Expression | null {
     if (
@@ -1757,17 +1707,20 @@ export class _Parser implements Parser {
     )
       return null;
 
-    // If we have a function head, parse the arguments
-    if (this.isFunctionHead(lhs)) {
-      const args = this.parseArguments('enclosure', until);
-      if (args === null) return null;
-      return [lhs, ...args];
-    }
-
     //
     // If the right hand side is an operator, no invisible operator to apply
     //
-    if (this.peekDefinitions('operator') !== null) return null;
+    if (this.peekDefinitions('operator').length > 0) return null;
+
+    //
+    // If we have a function head, parse the arguments
+    // (Invisible apply operator)
+    //
+    if (this.isFunctionHead(lhs)) {
+      const args = this.parseArguments('enclosure', { ...until, minPrec: 0 });
+      if (args === null) return null;
+      return [lhs, ...args];
+    }
 
     //
     // Capture a right hand side expression, if there is one
@@ -1863,9 +1816,9 @@ export class _Parser implements Parser {
     // (this is an error handling code path)
     //
     let opDefs = this.peekDefinitions('operator');
-    if (opDefs) {
+    if (opDefs.length > 0) {
       opDefs = this.peekDefinitions('postfix');
-      if (opDefs) {
+      if (opDefs.length > 0) {
         const [def, n] = opDefs[0] as [IndexedPostfixEntry, number];
         this.index += n;
         if (typeof def.parse === 'function') {
@@ -1878,7 +1831,7 @@ export class _Parser implements Parser {
 
       // Check prefix before infix, to catch `-` as a single missing operand
       opDefs = this.peekDefinitions('prefix');
-      if (opDefs) {
+      if (opDefs.length > 0) {
         const [def, n] = opDefs[0] as [IndexedPrefixEntry, number];
         this.index += n;
         if (typeof def.parse === 'function') {
@@ -1888,13 +1841,14 @@ export class _Parser implements Parser {
         if (def.name)
           return [
             def.name,
+            // @todo: pass a precedence?
             this.parseExpression() ?? this.error('missing', start),
           ];
         return this.error('unexpected-operator', start);
       }
 
       opDefs = this.peekDefinitions('infix');
-      if (opDefs) {
+      if (opDefs.length > 0) {
         const [def, n] = opDefs[0] as [IndexedInfixEntry, number];
         this.index += n;
         if (typeof def.parse === 'function') {
@@ -1989,7 +1943,7 @@ export class _Parser implements Parser {
    *  <matchfix-op-close>
    *
    */
-  private parsePrimary(until?: Partial<Terminator>): Expression | null {
+  private parsePrimary(until?: Readonly<Terminator>): Expression | null {
     if (this.atBoundary) return null;
 
     if (this.atTerminator(until)) return null;
@@ -2005,7 +1959,10 @@ export class _Parser implements Parser {
       return this.error('unexpected-closing-delimiter', start);
 
     if (this.match('<{>')) {
-      result = this.parseExpression({ condition: (p) => p.peek === '<}>' });
+      result = this.parseExpression({
+        minPrec: 0,
+        condition: (p) => p.peek === '<}>',
+      });
       if (result === null) return this.error('expected-expression', start);
 
       if (!this.match('<}>')) {
@@ -2073,7 +2030,7 @@ export class _Parser implements Parser {
       let postfix: Expression | null = null;
       let index = this.index;
       do {
-        postfix = this.parsePostfixOperator(result, until as Terminator);
+        postfix = this.parsePostfixOperator(result, until);
         result = postfix ?? result;
         if (this.index === index && postfix !== null) {
           console.assert(this.index !== index, 'No token consumed');
@@ -2084,7 +2041,7 @@ export class _Parser implements Parser {
     }
 
     //
-    // 8. Are there superscript or subfix operators?
+    // 7. Are there superscript or subfix operators?
     //
     if (result !== null) result = this.parseSupsub(result);
 
@@ -2102,7 +2059,7 @@ export class _Parser implements Parser {
    * Stop when an operator of precedence less than `until.minPrec`
    * is encountered
    */
-  parseExpression(until?: Partial<Terminator>): Expression | null {
+  parseExpression(until?: Readonly<Terminator>): Expression | null {
     const start = this.index;
 
     this.skipSpace();
@@ -2113,7 +2070,8 @@ export class _Parser implements Parser {
     }
 
     until ??= { minPrec: 0 };
-    if (until.minPrec === undefined) until.minPrec = 0;
+    console.assert(until.minPrec !== undefined);
+    if (until.minPrec === undefined) until = { ...until, minPrec: 0 };
 
     //
     // 1. Do we have a prefix operator?
@@ -2125,7 +2083,7 @@ export class _Parser implements Parser {
     // (if we had a prefix, it consumed the primary following it)
     //
     if (lhs === null) {
-      lhs = this.parsePrimary(until as Terminator);
+      lhs = this.parsePrimary(until);
       // If we got an empty sequence, ignore it.
       // This is returned by some purely presentational commands, for example `\displaystyle`
       if (head(lhs) === 'Sequence' && nops(lhs) === 0) lhs = null;
@@ -2139,12 +2097,12 @@ export class _Parser implements Parser {
       while (!done && !this.atTerminator(until)) {
         this.skipSpace();
 
-        let result = this.parseInfixOperator(lhs, until as Terminator);
+        let result = this.parseInfixOperator(lhs, until);
         if (result === null) {
           // We've encountered something else than an infix operator
           // OR an infix operator with a lower priority.
           // Could be "y" after "x": time to apply the invisible operator
-          result = this.applyInvisibleOperator(until as Terminator, lhs);
+          result = this.applyInvisibleOperator(until, lhs);
         }
         if (result !== null) {
           lhs = result;
@@ -2222,12 +2180,28 @@ export class _Parser implements Parser {
     // it's a number, a string, a symbol identifier or something else.
     return false;
   }
+
+  /** Return all defs of the specified kind */
+  *getDefs(kind: string): Iterable<IndexedLatexDictionaryEntry> {
+    if (kind === 'operator') {
+      for (const def of this._dictionary.defs)
+        if (/^prefix|infix|postfix/.test(def.kind)) yield def;
+    } else {
+      for (const def of this._dictionary.defs) if (def.kind === kind) yield def;
+    }
+  }
 }
 
-// function countPrimeLevel(parser: Parser): number {
-//   if (parser.match('\\tripleprime')) return 3;
-//   if (parser.match('\\doubleprime')) return 2;
-//   if (parser.match('\\prime')) return 1;
-//   if (parser.match("'")) return 1;
-//   return 0;
-// }
+/** Return the number of tokens matched, 0 if none */
+function peekComplexId(parser: Parser, id: string): number {
+  const start = parser.index;
+
+  const candidate = parseIdentifier(parser)?.trim();
+  if (candidate === null) return 0;
+
+  const result = candidate !== id ? 0 : parser.index - start;
+
+  parser.index = start;
+
+  return result;
+}

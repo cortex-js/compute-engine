@@ -470,7 +470,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   { name: 'EulerGamma', serialize: '\\gamma' },
   {
     name: 'Degrees',
-    trigger: ['\\degree'],
+    latexTrigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
     parse: (_parser, lhs) => ['Degrees', lhs],
@@ -479,84 +479,84 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
   },
   {
-    trigger: ['\\degree'],
+    latexTrigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
     parse: (_parser, lhs) => ['Degrees', lhs],
   },
   {
-    trigger: ['^', '<{>', '\\circ', '<}>'],
+    latexTrigger: ['^', '<{>', '\\circ', '<}>'],
     kind: 'postfix',
     parse: (_parser, lhs) => ['Degrees', lhs],
   },
 
   {
-    trigger: ['^', '\\circ'],
+    latexTrigger: ['^', '\\circ'],
     kind: 'postfix',
     parse: (_parser, lhs) => ['Degrees', lhs],
   },
   {
-    trigger: ['°'],
+    latexTrigger: ['°'],
     kind: 'postfix',
     precedence: 880,
     parse: (_parser, lhs) => ['Degrees', lhs],
   },
 
   {
-    trigger: ['\\ang'],
+    latexTrigger: ['\\ang'],
     parse: (parser: Parser): Expression => {
       const arg = parser.parseGroup();
       return (arg === null ? ['Degrees'] : ['Degrees', arg]) as Expression;
     },
   },
   {
-    trigger: ['\\infty'],
+    latexTrigger: ['\\infty'],
     parse: { num: '+Infinity' },
   },
   {
     name: 'ComplexInfinity',
-    trigger: ['\\tilde', '\\infty'],
+    latexTrigger: ['\\tilde', '\\infty'],
     serialize: '\\tilde\\infty',
   },
   {
-    trigger: ['\\tilde', '<{>', '\\infty', '<}>'],
+    latexTrigger: ['\\tilde', '<{>', '\\infty', '<}>'],
     parse: 'ComplexInfinity',
   },
-  { name: 'Pi', kind: 'symbol', trigger: ['\\pi'] },
-  { trigger: ['π'], parse: 'Pi' },
+  { name: 'Pi', kind: 'symbol', latexTrigger: ['\\pi'] },
+  { latexTrigger: ['π'], parse: 'Pi' },
   {
     name: 'ExponentialE',
-    trigger: ['\\exponentialE'],
+    latexTrigger: ['\\exponentialE'],
     parse: 'ExponentialE',
     serialize: '\\exponentialE',
   },
   {
-    trigger: '\\operatorname{e}',
+    latexTrigger: '\\operatorname{e}',
     parse: 'ExponentialE',
   },
   {
-    trigger: '\\mathrm{e}',
+    latexTrigger: '\\mathrm{e}',
     parse: 'ExponentialE',
   },
   {
     kind: 'function',
-    trigger: 'exp',
+    identifierTrigger: 'exp',
     parse: 'Exp',
   },
   {
-    trigger: '\\exp',
+    latexTrigger: '\\exp',
     parse: 'Exp',
   },
   {
     name: 'ImaginaryUnit',
-    trigger: ['\\imaginaryI'],
+    latexTrigger: ['\\imaginaryI'],
   },
   {
-    trigger: '\\operatorname{i}',
+    latexTrigger: '\\operatorname{i}',
     parse: 'ImaginaryUnit',
   },
   {
-    trigger: '\\mathrm{i}',
+    latexTrigger: '\\mathrm{i}',
     parse: 'ImaginaryUnit',
   },
 
@@ -568,18 +568,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
      * replaced with bars */
     name: 'Abs',
     kind: 'matchfix',
-    openDelimiter: '|',
-    closeDelimiter: '|',
-    parse: (_parser, expr) => (isEmptySequence(expr) ? null : ['Abs', expr]),
+    openTrigger: '|',
+    closeTrigger: '|',
+    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Abs', body]),
   },
   {
-    trigger: 'abs',
+    identifierTrigger: 'abs',
     kind: 'function',
     parse: 'Abs',
   },
   {
     name: 'Add',
-    trigger: ['+'],
+    latexTrigger: ['+'],
     kind: 'infix',
     associativity: 'both',
     precedence: 275,
@@ -598,7 +598,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     kind: 'prefix',
-    trigger: ['+'],
+    latexTrigger: ['+'],
     precedence: 275,
     parse: (parser, until) => {
       if (until && 275 < until.minPrec) return null;
@@ -608,21 +608,22 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Ceil',
     kind: 'matchfix',
-    openDelimiter: '\\lceil',
-    closeDelimiter: '\\rceil',
+    openTrigger: '\\lceil',
+    closeTrigger: '\\rceil',
+    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Ceil', body]),
   },
   {
     kind: 'matchfix',
-    openDelimiter: ['\u2308'],
-    closeDelimiter: ['\u2309'],
-    parse: (_, body) => ['Ceil', body],
+    openTrigger: ['\u2308'],
+    closeTrigger: ['\u2309'],
+    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Ceil', body]),
   },
   {
-    trigger: 'ceil',
+    identifierTrigger: 'ceil',
     kind: 'function',
     parse: 'Ceil',
   },
-  { name: 'Chop', trigger: 'chop', kind: 'function', parse: 'Chop' },
+  { name: 'Chop', identifierTrigger: 'chop', kind: 'function', parse: 'Chop' },
   {
     name: 'Complex',
     precedence: 274, // One less than precedence of `Add`: used for correct wrapping
@@ -646,7 +647,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Divide',
-    trigger: '\\frac',
+    latexTrigger: '\\frac',
     precedence: 660,
     // For \frac specifically, not for \div, etc..
     // handles Leibnitz notation for partial derivatives
@@ -655,12 +656,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     kind: 'infix',
-    trigger: '\\over',
+    latexTrigger: '\\over',
     precedence: 660,
     parse: 'Divide',
   },
   {
-    trigger: ['\\/'],
+    latexTrigger: ['\\/'],
     kind: 'infix',
     associativity: 'non',
     precedence: 660, // ??? MathML has 265, but it's wrong.
@@ -669,14 +670,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'Divide',
   },
   {
-    trigger: ['/'],
+    latexTrigger: ['/'],
     kind: 'infix',
     associativity: 'non',
     precedence: 660,
     parse: 'Divide',
   },
   {
-    trigger: ['\\div'],
+    latexTrigger: ['\\div'],
     kind: 'infix',
     associativity: 'non',
     precedence: 660, // ??? according to MathML
@@ -694,40 +695,41 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Factorial',
-    trigger: ['!'],
+    latexTrigger: ['!'],
     kind: 'postfix',
     precedence: 810,
   },
   {
     name: 'Factorial2',
-    trigger: ['!', '!'],
+    latexTrigger: ['!', '!'],
     kind: 'postfix',
     precedence: 810,
   },
   {
     name: 'Floor',
     kind: 'matchfix',
-    openDelimiter: '\\lfloor',
-    closeDelimiter: '\\rfloor',
+    openTrigger: '\\lfloor',
+    closeTrigger: '\\rfloor',
+    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Floor', body]),
   },
   {
     kind: 'matchfix',
-    openDelimiter: ['\u230a'],
-    closeDelimiter: ['\u230b'],
-    parse: (_, body) => ['Floor', body],
+    openTrigger: ['\u230a'],
+    closeTrigger: ['\u230b'],
+    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Floor', body]),
   },
   {
-    trigger: 'floor',
+    identifierTrigger: 'floor',
     kind: 'function',
     parse: 'Floor',
   },
   {
-    trigger: ['\\Gamma'],
+    latexTrigger: ['\\Gamma'],
     parse: 'Gamma',
   },
   {
     name: 'Gcd',
-    trigger: 'gcd',
+    identifierTrigger: 'gcd',
     kind: 'function',
   },
   {
@@ -736,34 +738,34 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Lg',
-    trigger: ['\\lg'],
+    latexTrigger: ['\\lg'],
     serialize: (serializer, expr) =>
       '\\log_{10}' + serializer.wrapArguments(expr),
     parse: (parser: Parser) => {
-      const arg = parser.parseArguments('implicit');
-      if (arg === null) return 'Lg' as Expression;
-      return ['Log', ...arg, 10] as Expression;
+      const args = parser.parseArguments('implicit');
+      if (args === null) return 'Lg' as Expression;
+      return ['Log', ...args, 10] as Expression;
     },
   },
   {
     name: 'Lb',
-    trigger: '\\lb',
+    latexTrigger: '\\lb',
     parse: (parser: Parser) => {
-      const arg = parser.parseArguments('implicit');
-      if (arg === null) return 'Log' as Expression;
-      return ['Log', ...arg, 2] as Expression;
+      const args = parser.parseArguments('implicit');
+      if (args === null) return 'Log' as Expression;
+      return ['Log', ...args, 2] as Expression;
     },
   },
   {
     name: 'Ln',
-    trigger: ['\\ln'],
+    latexTrigger: ['\\ln'],
     serialize: (serializer, expr): string =>
       '\\ln' + serializer.wrapArguments(expr),
     parse: (parser: Parser) => parseLog('Ln', parser),
   },
   {
     name: 'Log',
-    trigger: ['\\log'],
+    latexTrigger: ['\\log'],
     parse: (parser: Parser) => parseLog('Log', parser),
     serialize: (serializer, expr): string => {
       const base = op2(expr);
@@ -780,33 +782,32 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
 
   {
     name: 'Lcm',
-    trigger: 'lcm',
+    identifierTrigger: 'lcm',
     kind: 'function',
   },
-  { name: 'Max', trigger: 'max', kind: 'function' },
-  { name: 'Min', trigger: 'min', kind: 'function' },
+  { name: 'Max', identifierTrigger: 'max', kind: 'function' },
+  { name: 'Min', identifierTrigger: 'min', kind: 'function' },
   {
     name: 'MinusPlus',
-    trigger: ['\\mp'],
+    latexTrigger: ['\\mp'],
     kind: 'infix',
     associativity: 'both',
     precedence: 270,
   },
   {
     name: 'Multiply',
-    trigger: ['\\times'],
+    latexTrigger: ['\\times'],
     kind: 'infix',
     associativity: 'both',
     precedence: 390,
     serialize: serializeMultiply,
   },
   {
-    trigger: ['\\cdot'],
+    latexTrigger: ['\\cdot'],
     kind: 'infix',
     associativity: 'both',
     precedence: 390,
     parse: (parser, lhs, terminator) => {
-      if (terminator && 391 < terminator.minPrec) return null;
       const rhs = parser.parseExpression({ ...terminator, minPrec: 392 });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
@@ -814,12 +815,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
   },
   {
-    trigger: ['*'],
+    latexTrigger: ['*'],
     kind: 'infix',
     associativity: 'both',
     precedence: 390,
     parse: (parser, lhs, terminator) => {
-      if (terminator && 391 < terminator.minPrec) return null;
       const rhs = parser.parseExpression({ ...terminator, minPrec: 392 });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
@@ -828,10 +828,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Negate',
-    trigger: ['-'],
+    latexTrigger: ['-'],
     kind: 'prefix',
     parse: (parser, terminator) => {
-      if (terminator && 276 < terminator.minPrec) return null;
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['Negate', missingIfEmpty(rhs)] as Expression;
     },
@@ -857,8 +856,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     //   /** If the argument is a vector */
     /** @todo: domain check */
     kind: 'matchfix',
-    openDelimiter: '||',
-    closeDelimiter: '||',
+    openTrigger: '||',
+    closeTrigger: '||',
     parse: (_parser, expr) => (isEmptySequence(expr) ? null : ['Norm', expr]),
   },
   {
@@ -866,12 +865,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     /** @todo: domain check */
     name: 'Norm',
     kind: 'matchfix',
-    openDelimiter: ['\\left', '\\Vert'],
-    closeDelimiter: ['\\right', '\\Vert'],
+    openTrigger: ['\\left', '\\Vert'],
+    closeTrigger: ['\\right', '\\Vert'],
+    parse: (_parser, expr) => (isEmptySequence(expr) ? null : ['Norm', expr]),
   },
   {
     name: 'PlusMinus',
-    trigger: ['\\pm'],
+    latexTrigger: ['\\pm'],
     kind: 'infix',
     associativity: 'both',
     precedence: 270,
@@ -889,44 +889,41 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     },
   },
   {
-    trigger: ['\\pm'],
+    latexTrigger: ['\\pm'],
     kind: 'prefix',
     precedence: 270,
     parse: (parser, terminator) => {
-      if (terminator && 270 < terminator.minPrec) return null;
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['PlusMinus', missingIfEmpty(rhs)] as Expression;
     },
   },
   {
-    trigger: ['\\plusmn'],
+    latexTrigger: ['\\plusmn'],
     kind: 'infix',
     associativity: 'both',
     precedence: 270,
     parse: (parser, lhs, terminator) => {
-      if (270 < terminator.minPrec) return null;
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['PlusMinus', lhs, missingIfEmpty(rhs)] as Expression;
     },
   },
   {
-    trigger: ['\\plusmn'],
+    latexTrigger: ['\\plusmn'],
     kind: 'prefix',
     precedence: 270,
     parse: (parser, terminator) => {
-      if (terminator && 270 < terminator.minPrec) return null;
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['PlusMinus', missingIfEmpty(rhs)] as Expression;
     },
   },
   {
     name: 'Power',
-    trigger: ['^'],
+    latexTrigger: ['^'],
     kind: 'infix',
     serialize: serializePower,
   },
   {
-    trigger: '\\prod',
+    latexTrigger: '\\prod',
     precedence: 390,
     name: 'Product',
     parse: parseBigOp('Product', 390),
@@ -954,7 +951,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Round',
-    trigger: 'round',
+    identifierTrigger: 'round',
     kind: 'function',
   },
   {
@@ -963,7 +960,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) => serializer.wrapShort(op(expr, 1)) + '^2',
   },
   {
-    trigger: ['\\sum'],
+    latexTrigger: ['\\sum'],
     precedence: 275,
     name: 'Sum',
     parse: parseBigOp('Sum', 275),
@@ -972,23 +969,22 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Sign',
     // As per ISO 80000-2, "signum" is 'sgn'
-    trigger: 'sgn',
+    identifierTrigger: 'sgn',
     kind: 'function',
   },
   {
     name: 'Sqrt',
-    trigger: ['\\sqrt'],
+    latexTrigger: ['\\sqrt'],
     parse: parseRoot,
     serialize: serializePower,
   },
   {
     name: 'Subtract',
-    trigger: ['-'],
+    latexTrigger: ['-'],
     kind: 'infix',
     associativity: 'both',
     precedence: 275,
     parse: (parser, lhs, terminator) => {
-      if (276 < terminator.minPrec) return null;
       const rhs = parser.parseExpression({ ...terminator, minPrec: 277 });
       return ['Subtract', lhs, missingIfEmpty(rhs)] as Expression;
     },
@@ -1100,10 +1096,10 @@ function parseLog(command: string, parser: Parser): Expression | null {
     sub = parser.parseStringGroup()?.trim() ?? parser.nextToken();
     base = Number.parseFloat(sub ?? '10');
   }
-  const arg = parser.parseArguments('implicit');
-  if (arg === null) return [command];
-  if (base === 10) return ['Log', arg[0]] as Expression;
-  if (base === 2) return ['Lb', ...arg] as Expression;
-  if (sub === null) return [command, ...arg] as Expression;
-  return ['Log', ...arg, sub] as Expression;
+  const args = parser.parseArguments('implicit');
+  if (args === null) return [command];
+  if (base === 10) return ['Log', args[0]] as Expression;
+  if (base === 2) return ['Lb', ...args] as Expression;
+  if (sub === null) return [command, ...args] as Expression;
+  return ['Log', ...args, sub] as Expression;
 }

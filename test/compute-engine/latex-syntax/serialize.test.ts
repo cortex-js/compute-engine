@@ -27,7 +27,7 @@ describe('LATEX SERIALIZING', () => {
     );
     expect(latex({ num: '+Infinity' })).toMatchInlineSnapshot(`\\infty`);
     expect(latex({ num: '-Infinity' })).toMatchInlineSnapshot(`-\\infty`);
-    expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(`\\mathrm{NaN}`);
+    expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(`\\operatorname{NaN}`);
     expect(latex({ num: 'Infinity' })).toMatchInlineSnapshot(`\\infty`);
 
     // Repeating pattern
@@ -78,7 +78,7 @@ describe('LATEX SERIALIZING', () => {
 
     // Head as expression
     expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
-      `\\mathrm{Apply}(g(f), \\lbrack x, 1, 0\\rbrack)`
+      `\\operatorname{apply}(g(f), \\lbrack x, 1, 0\\rbrack)`
     );
   });
 

@@ -7,49 +7,49 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     name: 'True',
     kind: 'symbol',
-    trigger: ['\\top'], // ⊤ U+22A4
+    latexTrigger: ['\\top'], // ⊤ U+22A4
   },
   {
     kind: 'symbol',
-    trigger: '\\mathrm{True}',
+    latexTrigger: '\\mathrm{True}',
     parse: 'True',
   },
   {
     kind: 'symbol',
-    trigger: '\\operator{True}',
+    latexTrigger: '\\operator{True}',
     parse: 'True',
   },
   {
     kind: 'symbol',
-    trigger: '\\mathsf{T}',
+    latexTrigger: '\\mathsf{T}',
     parse: 'True',
   },
 
   {
     name: 'False',
     kind: 'symbol',
-    trigger: ['\\bot'], // ⊥ U+22A5
+    latexTrigger: ['\\bot'], // ⊥ U+22A5
   },
   {
     kind: 'symbol',
-    trigger: '\\operator{False}',
+    latexTrigger: '\\operator{False}',
     parse: 'True',
   },
   {
     kind: 'symbol',
-    trigger: '\\mathsf{F}',
+    latexTrigger: '\\mathsf{F}',
     parse: 'True',
   },
 
   {
     name: 'Maybe',
     kind: 'symbol',
-    trigger: '\\operatorname{Maybe}',
+    latexTrigger: '\\operatorname{Maybe}',
     serialize: '\\operatorname{Maybe}',
   },
   {
     kind: 'symbol',
-    trigger: '\\mathrm{Maybe}',
+    latexTrigger: '\\mathrm{Maybe}',
     parse: 'Maybe',
   },
 
@@ -57,15 +57,15 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     name: 'And',
     kind: 'infix',
-    trigger: ['\\land'],
+    latexTrigger: ['\\land'],
     precedence: 317,
     // serialize: '\\land',
   },
-  { kind: 'infix', trigger: ['\\wedge'], parse: 'And', precedence: 317 },
-  { kind: 'infix', trigger: '\\&', parse: 'And', precedence: 317 },
+  { kind: 'infix', latexTrigger: ['\\wedge'], parse: 'And', precedence: 317 },
+  { kind: 'infix', latexTrigger: '\\&', parse: 'And', precedence: 317 },
   {
     kind: 'infix',
-    trigger: '\\operatorname{and}',
+    latexTrigger: '\\operatorname{and}',
     parse: 'And',
     precedence: 317,
   },
@@ -73,14 +73,14 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     name: 'Or',
     kind: 'infix',
-    trigger: ['\\lor'],
+    latexTrigger: ['\\lor'],
     precedence: 310,
   },
-  { kind: 'infix', trigger: ['\\vee'], parse: 'Or', precedence: 310 },
-  { kind: 'infix', trigger: '\\parallel', parse: 'Or', precedence: 310 },
+  { kind: 'infix', latexTrigger: ['\\vee'], parse: 'Or', precedence: 310 },
+  { kind: 'infix', latexTrigger: '\\parallel', parse: 'Or', precedence: 310 },
   {
     kind: 'infix',
-    trigger: '\\operatorname{or}',
+    latexTrigger: '\\operatorname{or}',
     parse: 'And',
     precedence: 310,
   },
@@ -88,7 +88,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     name: 'Xor',
     kind: 'infix',
-    trigger: ['\\veebar'],
+    latexTrigger: ['\\veebar'],
     precedence: 315,
   },
   // Possible alt: \oplus ⊕ U+2295
@@ -96,38 +96,38 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     name: 'Not',
     kind: 'prefix',
-    trigger: ['\\lnot'],
+    latexTrigger: ['\\lnot'],
     precedence: 880,
   },
 
   {
     name: 'Nand',
     kind: 'infix',
-    trigger: ['\\barwedge'],
+    latexTrigger: ['\\barwedge'],
     precedence: 315,
     // serialize: '\\mid',
   },
   {
     name: 'Nor',
     kind: 'infix',
-    trigger: ['\u22BD'], // bar vee
+    latexTrigger: ['\u22BD'], // bar vee
     precedence: 315,
     // serialize: '\\downarrow',
   },
   // Functions
   {
     kind: 'function',
-    trigger: 'and',
+    identifierTrigger: 'and',
     parse: 'And',
   },
   {
     kind: 'function',
-    trigger: 'or',
+    identifierTrigger: 'or',
     parse: 'Or',
   },
   {
     kind: 'function',
-    trigger: 'not',
+    identifierTrigger: 'not',
     parse: 'Not',
   },
   // Relations
@@ -136,11 +136,11 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'infix',
     precedence: 220,
     associativity: 'right',
-    trigger: ['\\implies'],
+    latexTrigger: ['\\implies'],
     serialize: '\\implies',
   },
   {
-    trigger: ['\\Rightarrow'],
+    latexTrigger: ['\\Rightarrow'],
     kind: 'infix',
     precedence: 220,
     associativity: 'right',
@@ -149,20 +149,20 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
 
   {
     name: 'Equivalent', // MathML: identical to, Mathematica: Congruent
-    trigger: ['\\iff'],
+    latexTrigger: ['\\iff'],
     kind: 'infix',
     associativity: 'right',
     precedence: 219,
   },
   {
-    trigger: ['\\Leftrightarrow'],
+    latexTrigger: ['\\Leftrightarrow'],
     kind: 'infix',
     associativity: 'right',
     precedence: 219,
     parse: 'Equivalent',
   },
   {
-    trigger: ['\\equiv'],
+    latexTrigger: ['\\equiv'],
     kind: 'infix',
     associativity: 'right',
     precedence: 219,
@@ -172,7 +172,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     name: 'Proves',
     kind: 'infix',
-    trigger: ['\\vdash'],
+    latexTrigger: ['\\vdash'],
     precedence: 220,
     associativity: 'right',
     serialize: '\\vdash',
@@ -180,7 +180,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     name: 'Entails',
     kind: 'infix',
-    trigger: ['\\vDash'],
+    latexTrigger: ['\\vDash'],
     precedence: 220,
     associativity: 'right',
     serialize: '\\vDash',
@@ -188,7 +188,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     name: 'Satisfies',
     kind: 'infix',
-    trigger: ['\\models'],
+    latexTrigger: ['\\models'],
     precedence: 220,
     associativity: 'right',
     serialize: '\\models',

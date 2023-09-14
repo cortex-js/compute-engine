@@ -8,7 +8,26 @@ import { SYMBOLS } from './dictionary/definitions-symbols';
 import { Parser } from './public';
 
 const IDENTIFIER_PREFIX = {
-  '\\operatorname': '_operator',
+  // Those are "grouping" prefix that also specify spacing
+  // around the symbol. We ignore the spacing, though.
+  '\\mathord': '',
+  '\\mathop': '',
+  '\\mathbin': '',
+  '\\mathrel': '',
+  '\\mathopen': '',
+  '\\mathclose': '',
+  '\\mathpunct': '',
+  '\\mathinner': '',
+
+  // This is the preferred way to specify an identifier
+  // it defines both spacing and font. By default, identifiers
+  // are wrapper with `\\operatorname{}`.
+  '\\operatorname': '',
+
+  // These styling commands are used to change the font of an identifier
+  // They may be problematic, as adjacent identifiers may be merged
+  // into a single identifier when used in editors, such a MathLive.
+  // For example `\mathrm{speed}\mathrm{sound}` can be confused with `\mathrm{speedsound}`
   '\\mathrm': '_upright',
   '\\mathit': '_italic',
   '\\mathbf': '_bold',
@@ -20,6 +39,7 @@ const IDENTIFIER_PREFIX = {
   '\\mathbb': '_doublestruck',
 };
 
+// These commands can be used inside the body of an identifier.
 const IDENTIFIER_MODIFIER = {
   '\\mathring': '_ring',
   '\\hat': '_hat',
@@ -37,7 +57,7 @@ const IDENTIFIER_MODIFIER = {
   '\\check': '_check',
 };
 
-function matchIdentifierToken(
+function parseIdentifierToken(
   parser: Parser,
   options: { toplevel: boolean }
 ): string | null {
@@ -90,7 +110,7 @@ function matchIdentifierToken(
 // It can include a string of tokens (characters and commands)
 // and a list of modifiers (superscript, subscript, etc.)
 // and can be wrapped in a prefix (e.g. `\mathbb{}`).
-function matchIdentifierBody(parser: Parser): string | null {
+function parseIdentifierBody(parser: Parser): string | null {
   let id = matchPrefixedIdentifier(parser);
 
   const start = parser.index;
@@ -103,7 +123,7 @@ function matchIdentifierBody(parser: Parser): string | null {
       parser.index = start;
       return null;
     }
-    const body = matchIdentifierBody(parser);
+    const body = parseIdentifierBody(parser);
     if (body === null || !parser.match('<}>')) {
       parser.index = start;
       return null;
@@ -119,7 +139,7 @@ function matchIdentifierBody(parser: Parser): string | null {
     while (!parser.atEnd) {
       const token = parser.peek;
       if (token === '<}>' || token === '_' || token === '^') break;
-      const next = matchIdentifierToken(parser, { toplevel: false });
+      const next = parseIdentifierToken(parser, { toplevel: false });
       if (next === null) {
         parser.index = start;
         return null;
@@ -147,7 +167,7 @@ function matchIdentifierBody(parser: Parser): string | null {
   while (!parser.atEnd) {
     if (parser.match('_')) {
       const hasBrace = parser.match('<{>');
-      const sub = matchIdentifierBody(parser);
+      const sub = parseIdentifierBody(parser);
       if ((hasBrace && !parser.match('<}>')) || sub === null) {
         parser.index = start;
         return null;
@@ -155,7 +175,7 @@ function matchIdentifierBody(parser: Parser): string | null {
       subs.push(sub);
     } else if (parser.match('^')) {
       const hasBrace = parser.match('<{>');
-      const sup = matchIdentifierBody(parser);
+      const sup = parseIdentifierBody(parser);
       if ((hasBrace && !parser.match('<}>')) || sup === null) {
         parser.index = start;
         return null;
@@ -171,9 +191,15 @@ function matchIdentifierBody(parser: Parser): string | null {
 }
 
 /**
- * Match an identifier. It can be:
- * - a multi-letter identifier: `\mathrm{speed}`
- * - an identifier with modifiers: `\mathrm{\alpha_{12}}` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
+ * Match a prefix identifier.
+ *
+ * It can be:
+ * - a multi-letter identifier: `\operatorname{speed}`
+ *  (`\operatorname` specified both the spacing around the symbol and the font)
+ * - a multi-prefix identifier: `\mathbin{\mathsf{U}}`
+ *  (`\mathbin` specifies the spacing around the symbol,
+ *  `\mathsf` specifies the font)
+ * - an identifier with modifiers as subscripts/superscript: `\mathrm{\alpha_{12}}` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
  */
 function matchPrefixedIdentifier(parser: Parser): string | null {
   const start = parser.index;
@@ -208,7 +234,7 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
       parser.nextToken();
     }
 
-    body += matchIdentifierBody(parser);
+    body += parseIdentifierBody(parser);
     if (body === null || !parser.match('<}>')) {
       parser.index = start;
       return null;
@@ -264,22 +290,28 @@ export function parseInvalidIdentifier(parser: Parser): Expression | null {
 }
 
 /**
- * Match an identifier. It can be:
+ * Match an identifier.
+ *
+ * It can be:
  * - a sequence of emojis: `👍🏻👍🏻👍🏻`
- * - a single-letter identifier: `a`
+ * - a single-letter: `a`
  * - some LaTeX commands: `\alpha`
- * - a multi-letter identifier with a prefix: `\mathrm{speed}`
- * - an identifier with modifiers: `\mathrm{\alpha_{12}}` or `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
+ * - a multi-letter id with a prefix: `\operatorname{speed}`
+ * - an id with multiple prefixes:
+ *  `\mathbin{\mathsf{T}}`
+ * - an id with modifiers:
+ *    - `\mathrm{\alpha_{12}}` or
+ *    - `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`
  */
-export function matchIdentifier(parser: Parser): string | null {
+export function parseIdentifier(parser: Parser): string | null {
   //
-  // Is it a single-letter identifier (shortcut)?
+  // Shortcut: Is it a single-letter identifier?
   //
   if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek))
     return parser.nextToken();
 
   //
-  // Is it a multi-letter, prefixed, identifier?
+  // Is it a prefixed, identifier?
   //
   const start = parser.index;
   let id = matchPrefixedIdentifier(parser);
@@ -291,22 +323,18 @@ export function matchIdentifier(parser: Parser): string | null {
     id = '';
     while (!parser.atEnd && ONLY_EMOJIS.test(id + parser.peek))
       id += parser.nextToken();
+    if (!id) id = null;
   }
+
+  //
+  // Is it a single-token identifier?
+  // (other than a letter, it could be a command, e.g. \alpha)
+  //
+  id ??= parseIdentifierToken(parser, { toplevel: true });
 
   if (id) {
     id = id.normalize();
     if (isValidIdentifier(id)) return id;
-    parser.index = start;
-    return null;
-  }
-
-  //
-  // Is it a single-letter identifier?
-  //
-  let next = matchIdentifierToken(parser, { toplevel: true });
-  if (next) {
-    next = next.normalize();
-    if (isValidIdentifier(next)) return next;
   }
 
   //

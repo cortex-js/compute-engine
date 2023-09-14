@@ -1,9 +1,5 @@
 import { engine, latex, parse } from '../../utils';
 
-console.log(engine.parse('\\N')?.json);
-
-console.log(engine.parse('\\N \\cup \\R')?.json);
-
 describe('SERIALIZING SETS', () => {
   test('Set', () => {
     expect(latex(['Set'])).toMatchInlineSnapshot(`\\mathrm{Set}()`);

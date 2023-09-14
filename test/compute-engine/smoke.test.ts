@@ -38,8 +38,15 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
+// const s1 = ce.parse('5 \\times 2 + 3 \\times 4');
+// // const s1 = ce.parse('3 \\times 4 + 1');
+// console.log(s1.rawJson);
+// console.log(s1.latex);
+
 // Should distribute: prefer addition over multiplication
-const xp = ce.parse('(a\\times(c+d))');
+const xp = ce.parse('a\\times(c+d)');
+console.info(xp.rawJson);
+console.log(xp.latex);
 console.log(xp.simplify().toString());
 
 console.log(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
@@ -51,6 +58,7 @@ ce.assume('one', 1);
 
 slowEval();
 fastEval();
+turboEval();
 // perfTestRationals();
 engine.latexOptions.notation = 'engineering';
 engine.latexOptions.avoidExponentsInRange = null;
@@ -104,7 +112,9 @@ console.log(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').latex);
 // `parseUnknownIdentifier`): check Domain is 'Function'. (See \\operatorname, parse.ts:983)
 // Also maybe unknown identifier in front of Delimiter -> function, .e.g
 // `p(n) =  2n`. Can always disambiguate with a \cdot, e.g. `p\cdot(n)`
-console.log(ce.parse('\\mathrm{HorizontalScaling}\\left(3\\right)+1').json);
+console.log(
+  ce.parse('\\operatorname{HorizontalScaling}\\left(3\\right)+1').json
+);
 
 // simplify() should decompose the square roots of rational
 let z7 = ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}');
@@ -142,7 +152,7 @@ console.log(ce.parse(')').toJSON());
 console.log(ce.parse('(a, b; c, d, ;; n ,, m)').toJSON());
 
 // The invalid `$` is not detected. Should return an error 'unexpected-mode-shift', or invalid identifier
-const w = ce.parse('\\mathrm{$invalid}').json;
+const w = ce.parse('\\operatorname{$invalid}').json;
 console.log(w);
 
 // Should interpret function application `(x)`
@@ -204,8 +214,8 @@ console.log(ce.parse('\\left[a=b\\right]').canonical.json);
 console.log(ce.parse('\\llbracket[a=b\\rrbracket]').canonical.json);
 // -> ['Boole', ['Equal', a, b]]
 //  For Tuple with a single boolean, use Tuple (or Single)
-console.log(ce.parse('\\mathrm{Single}(a, b)').json);
-console.log(ce.parse('\\mathrm{Tuple}(a, b)').json);
+console.log(ce.parse('\\operatorname{Single}(a, b)').json);
+console.log(ce.parse('\\operatorname{Tuple}(a, b)').json);
 
 // Simplify to Iverson Bracket (or maybe canonicalize)
 console.log(ce.parse('0^{|a-b|}').json);
@@ -927,8 +937,10 @@ function slowEval() {
     y += Number(expr.subs(vars).subs({ x: x }).N().numericValue!.valueOf());
   }
 
-  console.log(
-    `Slow eval: y = ${y} in ${performance.now() - startTime} milliseconds`
+  console.info(
+    `Slow eval:  y = ${y} in ${Number(performance.now() - startTime).toFixed(
+      2
+    )} ms`
   );
 }
 
@@ -952,8 +964,34 @@ function fastEval() {
     y += Number(expr3.N().numericValue!.valueOf());
   }
 
-  console.log(
-    `Fast eval: y = ${y} in ${performance.now() - startTime} milliseconds`
+  console.info(
+    `Fast eval:  y = ${y} in ${Number(performance.now() - startTime).toFixed(
+      2
+    )} ms`
   );
 }
-// ---
+
+function turboEval() {
+  ///
+  const ce = new ComputeEngine();
+
+  const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
+  const vars = { a: 2, b: 3, c: 4 };
+
+  // Factor out substitution of constants
+  const expr3 = expr.subs(vars).N();
+
+  const fn = expr3.compile()!;
+
+  let y = 0;
+  const startTime = performance.now();
+  for (let x = 0; x <= Math.PI; x += 0.01) {
+    y += fn({ x });
+  }
+
+  console.info(
+    `Turbo eval: y = ${y} in ${Number(performance.now() - startTime).toFixed(
+      2
+    )} ms`
+  );
+}

@@ -575,7 +575,8 @@ help you parse the LaTeX string:
   may be some tokens left to parse.
 - `parser.parseArguments()` return an array of expressions if the next tokens
   can be parsed as a sequence of MathJSON expressions separated by a comma, or
-  `null` otherwise.
+  `null` otherwise. This is useful to parse the argument of a function. For
+  example with `f(x, y, z)`, the arguments would be `[x, y, z]`.
 
 If the `parse` handler returns `null`, the parser will continue to look for
 another handler that matches the current token.

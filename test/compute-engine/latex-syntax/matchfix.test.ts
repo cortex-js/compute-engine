@@ -144,12 +144,12 @@ describe('MATCHFIX invalid', () => {
     expect(check('(')).toMatchInlineSnapshot(`
       latex     = [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", "')'"],
+        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
         ["Latex", "'('"]
       ]
       [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", "')'"],
+        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
         ["Latex", "'('"]
       ]
     `));
@@ -175,7 +175,7 @@ describe('MATCHFIX invalid', () => {
         ["Negate", ["Error", "'missing'"]],
         [
           "Error",
-          ["ErrorCode", "'expected-close-delimiter'", "')'"],
+          ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
           ["Latex", "'('"]
         ]
       ]
@@ -186,8 +186,8 @@ describe('MATCHFIX invalid', () => {
     expect(engine.parse('(3+x').json).toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "'expected-close-delimiter'", "')'"],
-        ["Latex", "'('"]
+        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
+        ["Latex", "'(3+x'"]
       ]
     `);
   });
