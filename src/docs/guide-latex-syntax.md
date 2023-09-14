@@ -1,4 +1,5 @@
 ---
+
 title: Parsing and Serializing LaTeX
 permalink: /compute-engine/guides/latex-syntax/
 layout: single
@@ -18,6 +19,20 @@ In this documentation, functions such as `ce.box()` and `ce.parse()` require a
 `ComputeEngine` instance which is denoted by a `ce.` prefix.<br>Functions that
 apply to a boxed expression, such as `expr.simplify()` are denoted with a
 `expr.` prefix.{.notice--info}
+
+If you are using a mathfield, all the mathfields on the page
+share a Compute Engine instance, which is available as `MathfieldElement.computeEngine`. You can modify the LaTeX dictionary used by the mathfields with `MathfieldElement.computeEngine.latexDictionary`. 
+
+Alternatively, you can associate the customized compute engine with the 
+mathfields in the document:
+
+```js
+MathfieldElement.computeEngine = ce;
+console.log(mfe.getValue('math-json'))
+```
+{.notice--info}
+
+
 
 **To parse a LaTeX string as a MathJSON expression**, call the `ce.parse()`
 function.
@@ -206,7 +221,7 @@ console.log(ce.parse('123456.789').latex);
 // ➔ "1.234\,567\,89\times10^{5}"
 ```
 
-## Customizing the Serialization Style
+### Customizing the Serialization Style
 
 Some category of expressions can be serialized in different ways based on
 conventions or personal preference. For example, a group can be indicate by
@@ -221,8 +236,6 @@ command:
 ce.latexSyntax.options.fractionStyle = () => 'quotient';
 ```
 
-If using a mathfield, the compute engine associated with the mathfield is
-available as `mf.computeEngine`.{.notice--info}
 
 The style option handler has two arguments:
 
@@ -237,7 +250,7 @@ ce.latexSyntax.options.fractionStyle = (expr, level) =>
   head(expr) === 'Rational' || level > 2 ? 'inline-solidus' : 'quotient';
 ```
 
-### Function Application
+#### Function Application
 
 `["Sin", "x"]`
 
@@ -248,7 +261,7 @@ ce.latexSyntax.options.fractionStyle = (expr, level) =>
 | `"big"`       | `\sin\bigl(x\bigr)`  | $$\sin\bigl(x\bigr)$$  |
 | `"none"`      | `\sin x`             | $$\sin x$$             |
 
-### Group
+#### Group
 
 `["Multiply", "x", ["Add", "a", "b"]]`
 
@@ -259,7 +272,7 @@ ce.latexSyntax.options.fractionStyle = (expr, level) =>
 | `"big"`       | `x\bigl(a+b\bigr)`  | $$x\bigl(a+b\bigr)$$  |
 | `"none"`      | `x a+b`             | $$ x a+b$$            |
 
-### Root
+#### Root
 
 |              |     |     |
 | :----------- | :-- | :-- |
@@ -267,7 +280,7 @@ ce.latexSyntax.options.fractionStyle = (expr, level) =>
 | `"quotient"` |     |     |
 | `"solidus"`  |     |     |
 
-### Fraction
+#### Fraction
 
 |                    |     |     |
 | :----------------- | :-- | :-- |
@@ -277,7 +290,7 @@ ce.latexSyntax.options.fractionStyle = (expr, level) =>
 | `"reciprocal"`     |     |     |
 | `"factor"`         |     |     |
 
-### Logic
+#### Logic
 
 `["And", "p", "q"]`
 
@@ -288,7 +301,7 @@ ce.latexSyntax.options.fractionStyle = (expr, level) =>
 | `"uppercase-word"` |                    |                      |
 | `"punctuation"`    |                    |                      |
 
-### Power
+#### Power
 
 |              |     |     |
 | :----------- | :-- | :-- |
@@ -296,7 +309,7 @@ ce.latexSyntax.options.fractionStyle = (expr, level) =>
 | `"solidus"`  |     |     |
 | `"quotient"` |     |     |
 
-### Numeric Sets
+#### Numeric Sets
 
 |                 |     |     |
 | :-------------- | :-- | :-- |
@@ -316,18 +329,19 @@ A **LaTeX dictionary** defines how a MathJSON expression can be expressed as a
 LaTeX string (**serialization**) or constructed from a LaTeX string
 (**parsing**).
 
+The Compute Engine includes a default LaTeX dictionary to parse and serialize 
+common math expressions.
+
 It includes definitions such as:
 
 - "_The `Power` function is represented as "`x^{n}`"_"
 - "_The `Divide` function is represented as "`\frac{x}{y}`"_".
 
-Note that the dictionary will include LaTeX commands as triggers. LaTeX 
+
+Note that the LaTeX dictionary may include LaTeX commands as triggers. LaTeX 
 commands are usually prefixed with a backslash, such as `\frac` or `\pm`.
 It will also reference MathJSON identifiers. MathJSON identifiers are usually
 capitalized, such as `Divide` or `PlusMinus` and are not prefixed with a backslash.
-
-The Compute Engine includes a default LaTeX dictionary to parse and serialize 
-common math expressions.
 
 **To extend the LaTeX syntax** update the `latexDictionary` property
 of the Compute Engine
@@ -337,10 +351,11 @@ of the Compute Engine
 ```javascript
 const ce = new ComputeEngine();
 ce.latexDictionary = [
-  // Expand the default dictionary...
+  // Incldue all the entries in the default dictionary...
   ...ce.latexDictionary,
   // ...and add the `\smoll` command
   {
+    // We're defining a `\smoll{}{}` command:
     latxTrigger: '\\smoll',
     parse: (parser) => {
       // We're expecting two arguments, so we're calling 
@@ -361,9 +376,26 @@ console.log(ce.parse('\\smoll{1}{5}').json);
 // ➔ ["Rational", 1, 5]
 ```
 
-If you are using a mathfield, all the mathfields on the page
-share a Compute Engine instance, which is available as `MathfieldElement.computeEngine`.
-You can modify the LaTeX dictionary used by the mathfields with `MathfieldElement.computeEngine.latexDictionary`.{.notice--info}
+
+### Adding a Constant
+
+### Adding a Function
+
+### Adding a Binary Operator
+
+### Adding a Unary Operator
+
+### Adding a Postfix Operator
+
+### Adding a Prefix Operator
+
+### Adding a Matchfix Operator
+
+### Adding a LaTeX Environment
+
+### Adding a LaTeX Command
+
+
 
 
 ### LaTeX Dictionary Entries
@@ -668,54 +700,49 @@ used to serialize the expression. A `serialize` handler is invalid if the
 You may also want to use your new function with a mathfield.
 
 First you need to define a LaTeX macro so that the mathfield knows
-how to render this command. Let's define the `\smallfrac` macro.
+how to render this command. Let's define the `\average` macro.
 
 ```js
 const mfe = document.querySelector('math-field');
 
 mfe.macros = {
   ...mfe.macros,
-  smallfrac: {
-    args: 2,
-    def: '{}^{#1}\\!\\!/\\!{}_{#2}'
-  },
+  average: '\\operatorname{average}'
 };
 ```
 
-The content of the `def` property is a LaTeX fragment that will
-be used to render the `\\smallfrac` command.
+The name of the macro is the string before the `:` and the content of the
+macro is the string after the `:`.
 
-The `#1` token in `def` is a reference to the first argument and `#2` to the 
-second one. 
+This associates the LaTeX command `\average` with the LaTeX fragment
+`\operatorname{average}`. The `\operatorname` command is a LaTeX command
+that renders its argument as a function name, with the correct spacing.
 
+{% readmore "/mathlive/guides/macros/" %}
+Learn more about <strong>LaTeX Macros</strong>
+{% endreadmore %}
 
 You may also want to define an inline shortcut to make it easier 
 to input the command. 
 
-With the code below, we define a shortcut "smallfrac". 
-
-When typed, the shortcut is replaced with the associated LaTeX. 
-
-The `#@` token represents the argument to the left of the shortcut, and 
-the `#?` token represents a placeholder to be filled by the user.
+With the definition below, typing `average` in a mathfield will be replaced 
+with the LaTeX command `\average`.
 
 ```js
 mfe.inlineShortcuts = {
   ...mfe.inlineShortcuts,
-  smallfrac:'\\smallfrac{#@}{#?}'
+  average:'\\average'
 };
 ```
+
+
+{% readmore "/mathlive/guides/shortcuts/" %}
+Learn more about  <strong>Key Bindings and Inline Shortcuts</strong>
+{% endreadmore %}
+
 
 You can now parse the input from a mathfield using:
 
 ```js
 console.log(ce.parse(mfe.value).json)
-```
-
-Alternatively, you can associate the customized compute engine with the 
-mathfields in the document:
-
-```js
-MathfieldElement.computeEngine = ce;
-console.log(mfe.getValue('math-json'))
 ```

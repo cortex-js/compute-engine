@@ -530,7 +530,7 @@
       ce.latexDictionary = [
         ...ce.latexDictionary,
         {
-          trigger: ['\\funfunction'],
+          latexTrigger: '\\funfunction',
           parse: (parser) => [
             'funfunction',
             parser.parseGroup(),
