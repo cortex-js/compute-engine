@@ -39,13 +39,15 @@ value other than themselves.
 {% defs "Function" "Operation" %} 
 
 {% def "Assume" %}
-<code>["Assume", _symbol_, _value_]</code><br>
+
+[&quot;**Assume**&quot;, _symbol_, _value_]{.signature}
 
 
-<code>["Assume", _symbol_, _domain_]</code><br>
+[&quot;**Assume**&quot;, _symbol_, _domain_]{.signature}
 
 
-<code>["Assume", _predicate_]</code>
+[&quot;**Assume**&quot;, _predicate_]{.signature}
+
 
 The predicate is an expression that evaluates to `True` or `False. The symbols
 or functions in the predicate expression may be free (i.e. not have a definition).
@@ -60,8 +62,11 @@ expression:
 
 
 {% def "Let" %}
-<code>["Let", _symbol_, _value_]</code><br>
-<code>["Let", _symbol_, _value_, _domain_]</code>
+
+[&quot;**Let**&quot;, _symbol_, _value_]{.signature}
+
+[&quot;**Let**&quot;, _symbol_, _value_, _domain_]{.signature}
+
 
 Define a new symbol in the current scope, and set its value and domain.
 If _<kbd>domain</kbd>_ is not provided, the domain is inferred based on the value.
@@ -99,7 +104,9 @@ The arguments of the function expression should be either
 
 {% def "Set" %}
 
-<code>["Set", _symbol_, _value_]</code>
+
+[&quot;**Set**&quot;, _symbol_, _value_]{.signature}
+
 
 Set the value of _<kbd>symbol</kbd>_ to _<kbd>value</kbd>_.
 
@@ -123,7 +130,11 @@ expression.
 
 {% defs "Function" "Operation" %} 
 
-{% def "About" %} `["About", _symbol_]`
+
+{% def "About" %}
+
+[&quot;**About**&quot;, _symbol_, _value_]{.signature}
+
 
 Evaluate to a dictionary containing information about a symbol such as its
 domain, its attributes, its value, etc... 
@@ -131,14 +142,17 @@ domain, its attributes, its value, etc...
 {% enddef %} 
 
 {% def "Domain" %}
-<code>["Domain", _expression_]</code>
+
+[&quot;**Domain**&quot;, _expression_]{.signature}
+
 
 Evaluate to the domain of _expression_ 
 
 {% enddef %} 
 
 {% def "Evaluate" %}
-<code>["Evaluate", _expression_]</code>
+
+[&quot;**Evaluate**&quot;, _expression_]{.signature}
 
 Apply a sequence of definitions to an expression in order to reduce, simplify
 and calculate its value. Overrides `Hold` and hold attributes of a function.
@@ -146,9 +160,8 @@ and calculate its value. Overrides `Hold` and hold attributes of a function.
 {% enddef %} 
 
 {% def "Error" %} 
-{% tags "inert" "float-right" %}
-<code>["Error", _expression_, _string_, _rest_]</code>
 
+[&quot;**Error**&quot;, _expression_, _string_, _rest_]{.signature}
 
 Tag an expression that could not be interpreted correctly. It may have a syntax
 error, a reference to an unknown symbol or function or some other problem.
@@ -161,8 +174,10 @@ The third argument, if present, is an expression describing what could not be pa
 {% enddef %} 
 
 
-{% def "Hold" %} <code>["Hold",
-_expression_]</code>{% tags "inert" "float-right" %}
+{% def "Hold" %} 
+
+[&quot;**Hold**&quot;, _expression_]{.signature}
+
 
 Tag an expression that should be kept in an unevaluated form {% enddef %}
 {% def "Html" %} <code>["Html", _expr_]</code>
@@ -178,13 +193,18 @@ Evaluate to its argument {% enddef %} {% def "InverseFunction" %}
 Evaluate to the inverse function of its argument for example `Arcsin` for `Sin`
 {% enddef %} 
 
-{% def "Latex" %} <code>["Latex", _expr_]</code>
+{% def "Latex" %} 
+
+[&quot;**Latex**&quot;, _expression_]{.signature}
+
 
 Evaluate to a `LatexString` which is the expression serialized to LaTeX
 {% enddef %} 
 
 {% def "LatexString" %} 
-{% tags "inert" "float-right" %}<code>["LatexString", _string_]</code>
+
+[&quot;**Latex**&quot;, _string_]{.signature}
+
 
 Tag a string as a LaTeX string 
 
@@ -192,13 +212,17 @@ Tag a string as a LaTeX string
 
 
 {% def "LatexTokens" %}
-<code>["LatexTokens", ..._token_\[\]]</code>
+
+[&quot;**LatexTokens**&quot;, ..._tokens_]{.signature}
+
 
 Evaluate to a `LatexString` made of the concatenation of the token arguments
 {% enddef %} 
 
 
-{% def "Parse" %} <code>["Parse", _expr_]</code>
+{% def "Parse" %} 
+
+[&quot;**Parse**&quot;, _expression_]{.signature}
 
 If _expr_ is a `LatexString` or `LatexTokens`, evaluate to a MathJSON expression
 corresponding to the LaTeX string. 
@@ -206,18 +230,25 @@ corresponding to the LaTeX string.
 
 
 {% def "String" %}
-<code>["String", ..._expr_]</code>{% tags "constructor" "float-right"%}
+
+[&quot;**String**&quot;, _expression_]{.signature}
+
 
 Evaluate to a string made from the concatenation of the arguments converted to
-string 
+strings
 {% enddef %} 
 
 {% def "Symbol" %}
-<code>["Symbol", ..._expr_]</code>{% tags "constructor" "float-right"%}
+
+[&quot;**Symbol**&quot;, _expression_]{.signature}
+
 
 Evaluate to a new symbol made of a concatenation of the arguments.
 
-For example `["Symbol", "x", 2] -> "x2"`
+```mathjson
+["Symbol", "x", 2] 
+// -> "x2"
+```
 
 {% enddef %}
 

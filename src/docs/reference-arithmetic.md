@@ -108,8 +108,10 @@ functions{% endreadmore %}
 
 {% def "BaseForm" %}
 
-<code>["BaseForm", _value:Integer_]</code><br> <code>["BaseForm",
-_value:Integer_, _base_]</code>
+[&quot;**BaseForm**&quot;, _value:integer_]{.signature}
+
+[&quot;**BaseForm**&quot;, _value:integer_, _base_]{.signature}
+
 
 Format an _integer_ in a specific _base_, such as hexadecimal or binary.
 
@@ -134,8 +136,11 @@ String(BaseForm(42, 16))
 
 {% enddef %}
 
-{% def "Clamp" %} <code>["Clamp", _value_]</code><br> <code>["Clamp", _value_,
-_lower_, _upper_]</code>
+{% def "Clamp" %} 
+
+[&quot;**Clamp**&quot;, _value_]{.signature}
+
+[&quot;**Clamp**&quot;, _value_, _lower_, _upper_]{.signature}
 
 - If `_value_` is less than `_lower_`, evaluate to `_lower_`
 - If `_value_` is greater than `_upper_`, evaluate to `_upper_`
@@ -157,8 +162,12 @@ and +1.
 
 {% enddef %}
 
-{% def "Max" %} <code>["Max", _expr1_, ..._expr-n_]</code><br> <code>["Max",
-_list-of-values_]</code>
+{% def "Max" %} 
+
+[&quot;**Max**&quot;, _x1_, _x2_, ...]{.signature}
+
+[&quot;**Max**&quot;, _list_]{.signature}
+
 
 If all the arguments are real numbers, excluding `NaN`, evaluate to the largest
 of the arguments.
@@ -175,8 +184,11 @@ equal to the largest real number.
 
 {% enddef %}
 
-{% def "Min" %} <code>["Min", _expr1_, ..._expr-n_]</code><br> <code>["Min",
-_list-of-values_]</code>
+{% def "Min" %} 
+
+[&quot;**Max**&quot;, _x1_, _x2_, ...]{.signature}
+
+[&quot;**Max**&quot;, _list_]{.signature}
 
 If all the arguments are real numbers, excluding `NaN`, evaluate to the smallest
 of the arguments.
@@ -186,13 +198,15 @@ equal to the smallest real number.
 
 {% enddef %}
 
-{% def "Rational" %} <code>["Rational", _n:Number_]</code><br>
+{% def "Rational" %} 
 
-Evaluate to a rational approximating the value of the `_n_`.
+[&quot;**Rational**&quot;, _n_]{.signature}
+
+Evaluate to a rational approximating the value of the number `_n_`.
 
 <br>
 
-<code>["Rational", _numerator:Integer_, _denominator:Integer_]</code>
+[&quot;**Rational**&quot;, _numerator_, _denominator_]{.signature}
 
 Represent a rational number equal to `_numerator_` over `_denominator_`.
 

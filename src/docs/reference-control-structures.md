@@ -23,8 +23,11 @@ preamble: '<h1>Control Structures</h1><p class=xl>Control Structures define how 
 {% defs "Function" "Operation" %} 
 
 {% def "Block" %}
-<code>["Block", _expr-1_, ..._expr-n_]</code><br>
-<code>["Block", _dictionary_, _expr1_, ..._expr-n_]</code>
+
+[&quot;**Block**&quot;, _expr-1_, ..._expr-n_]{.signature}
+
+[&quot;**Block**&quot;, _dictionary_, _expr1_, ..._expr-n_]{.signature}
+
 
 The evaluation of a `["Block"]` expression follows these steps:
 
@@ -34,7 +37,7 @@ The evaluation of a `["Block"]` expression follows these steps:
     The _dictionary_ argument can be a `["Dictionary"]` expression, a 
 `["KeyValuePair"]` expression, a `["Pair"]` expression or a `["Tuple"]` expression.
 
-3) Evaluate each _expr_ sequentially.
+1) Evaluate each _expr_ sequentially.
 
     If the value of an expression is a `["Return"]` expression, a `["Break"]` 
     expression or a `["Continue"]` expression, no more expressions are 
@@ -52,12 +55,15 @@ The evaluation of a `["Block"]` expression follows these steps:
 
 
 {% def "If" %}
-<code>["If", _condition_, _expr-1_]</code>
+
+[&quot;**If**&quot;, _condition_, _expr-1_]{.signature}
+
 
 - If the value of `_condition_` is the symbol `True`, the value of the `["If"]` 
 expression is `_expr-1_`, otherwise `Nothing`.
 
-<code>["If", _condition_, _expr-1_, _expr-2_]</code>
+[&quot;**If**&quot;, _condition_, _expr-1_, _expr-2_]{.signature}
+
 
 - If the value of `_condition_` is the symbol `True`, the value of the `["If"]` 
 expression is `_expr-1_`, otherwise `_expr-2_`.
@@ -106,8 +112,11 @@ To use a named argument, use a `["Function"]` expression for the `body`.
 {% defs "Function" "Operation" %} 
 
 {% def "FixedPoint" %}
-<code>["FixedPoint", _body_, _initial-value_]</code><br>
-<code>["FixedPoint", _body_, _initial-value_, _max-iterations_]</code>
+
+[&quot;**FixedPoint**&quot;, _body_, _initial-value_]{.signature}
+
+[&quot;**FixedPoint**&quot;, _body_, _initial-value_, _max-iterations_]{.signature}
+
 
 Assumes `_body_` is an expression using an implicit argument `_`.
 
@@ -126,8 +135,11 @@ to skip to the next iteration.
 {% enddef %} 
 
 {% def "Fold" %}
-<code>["Fold", _body_, _iterator_]</code><br>
-<code>["Fold", _body_, _initial-value_, _iterator_]</code>
+
+[&quot;**Fold**&quot;, _body_, _iterator_]{.signature}
+
+[&quot;**Fold**&quot;, _body_, _initial-value_, _iterator_]{.signature}
+
 
 Evaluate to `[_body_, [_body_, _initial-value_, _elem-1_], _elem-2]]...` where
 _elem-1_ and _elem-2_ are the first two elements from the iterator.
@@ -144,8 +156,8 @@ See above for the definition of _iterator_.
 
 
 {% def "Loop" %}
-<code>["Loop", _body_]</code><br>
-<code>["Loop", _body_, _iterator_]</code><br>
+
+[&quot;**Loop**&quot;, _body_]{.signature}
 
 Repeatedly evaluate `_body_` until the last element of the iterator is reached.
 
@@ -165,7 +177,8 @@ a `["Continue"]` expression or a `["Return"]` expression.
 {% enddef %} 
 
 {% def "Product" %}
-<code>["Product", _iterator_]</code>
+
+[&quot;**Product**&quot;, _iterator_]{.signature}
 
 Evaluate to a product of all the elements in `_iterator_`. If all the
 elements are numbers, the result is a number. Otherwise it is a simplified list.
@@ -179,7 +192,7 @@ Equivalent to `["Fold", "Multiply", _iterator_]`.
 // ➔ ["List", 55, "x"]
 ```
 
-<code>["Product", _body_, _iterator_]</code>
+[&quot;**Product**&quot;, _body_, _iterator_]{.signature}
 
 Evaluate `_body_` and make a product of the result.
 
@@ -191,7 +204,8 @@ See above for the definition of _iterator_.
 
 
 {% def "Sum" %}
-<code>["Sum", _iterator_]</code>
+
+[&quot;**Sum**&quot;, _body_]{.signature}
 
 Evaluate to a sum of all the elements in `_iterator_`. If all the
 elements are numbers, the result is a number. Otherwise it is a simplified list.
@@ -206,7 +220,7 @@ Equivalent to `["Fold", "Add", _iterator_]`.
 // ➔ ["List", 16, "x"]
 ```
 
-<code>["Sum", _body_, _iterator_]</code>
+[&quot;**Sum**&quot;, _body_, _iterator_]{.signature}
 
 Evaluate `_body_` and make a sum of the result.
 
@@ -225,8 +239,11 @@ Equivalent to `["Fold", ["Add", _1, [_body_, _2]], _iterator_]`.
 {% defs "Function" "Operation" %} 
 
 {% def "Break" %}
-<code>["Break"]</code><br>
-<code>["Break", _expr_]</code><br>
+
+[&quot;**Break**&quot; ]{.signature}
+
+[&quot;**Break**&quot;, _expr_]{.signature}
+
 
 When in a block, exit the block immediately. The value of the `["Block"]` 
 expression is the `["Break"]` expression.
@@ -238,8 +255,10 @@ When  in a loop exit the loop immediately. The final value of the loop is
 {% enddef %} 
 
 {% def "Continue" %}
-<code>["Continue"]</code><br>
-<code>["Continue", _expr_]</code><br>
+
+[&quot;**Continue**&quot; ]{.signature}
+
+[&quot;**Continue**&quot;, _expr_]{.signature}
 
 When in a loop, skip to the next iteration of the loop. The value of the 
 iteration is `_expr_` or `Nothing` if not provided.

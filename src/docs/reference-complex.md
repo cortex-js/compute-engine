@@ -21,20 +21,22 @@ render_math_in_document: true
 
 ## Functions
 
-{% defs "Function" "Description" %}
+{% defs "Function" %}
 
 {% def "Real" %}
 
-<div class="signature">["<strong>Real</strong>", <i>complex</i>]</div>
+[&quot;**Real**&quot;, _z_]{.signature}
+
+{% latex "\\Re(3+4\\imaginaryI)" %}
 
 Evaluate to the real part of a complex number.
-
-
 {% enddef %}
 
 {% def "Imaginary" %}
 
-<div class="signature">["<strong>Imaginary</strong>", <i>complex</i>]</div>
+[&quot;**Imaginary**&quot;, _z_]{.signature}
+
+{% latex "\\Im(3+4\\imaginaryI)" %}
 
  Evaluate to the imaginary part of a complex number.
 
@@ -43,7 +45,10 @@ Evaluate to the real part of a complex number.
 
 {% def "Conjugate" %}
 
-<div class="signature">["<strong>Conjugate</strong>", <i>complex</i>]</div>
+[&quot;**Conjugate**&quot;, _z_]{.signature}
+
+{% latex "z^\\ast" %}
+
 
 Evaluate to the complex conjugate of a complex number.
 
@@ -52,7 +57,12 @@ Evaluate to the complex conjugate of a complex number.
 
 {% def "Abs" %}
 
-<div class="signature">["<strong>Abs</strong>", <i>complex</i>]</div>
+[&quot;**Abs**&quot;, _z_]{.signature}
+
+{% latex "|z|" %}
+
+{% latex "\\operatorname{abs}(z)" %}
+
 
 Evaluate to the magnitude of a complex number.
 
@@ -63,7 +73,9 @@ The magnitude of a complex number is the distance from the origin to the point r
 
 {% def "Arg" %}
 
-<div class="signature">["<strong>Conjugate</strong>", <i>complex</i>]</div>
+[&quot;**Arg**&quot;, _z_]{.signature}
+
+{% latex "\\arg(z)" %}
 
 Evaluate to the argument of a complex number.
 
@@ -72,7 +84,8 @@ The argument of a complex number is the angle between the positive real axis and
 {% enddef %}
 
 {% def "AbsArg" %}
-<div class="signature">["<strong>AbsArg</strong>", <i>complex</i>]</div>
+
+[&quot;**AbsArg**&quot;, _z_]{.signature}
 
 Evaluate to the a tuple of the magnitude and argument of a complex number.
 
@@ -83,11 +96,14 @@ This corresponds to the polar representation of a complex number.
 
 {% def "ComplexRoots" %}
 
-<div class="signature">["<strong>ComplexRoots</strong>", <i>a=complex</i>, <i>n=integer</i>]</div>
+[&quot;**ComplexRoots**&quot;, _z_, _n_]{.signature}
 
-Evaluate to a list of the n<sup>th</sup> roots of a number.
+{% latex "\\operatorname{ComplexRoot}(1, 3)" %}
 
-The complex roots of a number are the solutions of the equation \\(x^n = a\\).
+
+Evaluate to a list of the n<sup>th</sup> roots of a number _z_.
+
+The complex roots of a number are the solutions of the equation \\(z^n = a\\).
 
 
 ```mathjson

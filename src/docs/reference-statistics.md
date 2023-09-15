@@ -23,7 +23,9 @@ take the following forms:
 
 {% def "Mean" %}
 
-<div class="signature">["<strong>Mean</strong>", <i>list</i>]</div>
+[&quot;**Mean**&quot;, _list_]{.signature}
+
+{% latex "\\operatorname{mean}(\\lbrack3, 5, 7\\rbrack)" %}
 
 Evaluate to the **arithmetic mean** of a list of numbers.
 
@@ -44,7 +46,7 @@ The formula for the mean of a list of numbers is \\( \bar{x} = \frac{1}{n}
 
 {% def "Median" %}
 
-<div class="signature">["<strong>Median</strong>", <i>list</i>]</div>
+[&quot;**Median**&quot;, <i>list</i>]{.signature}
 
 Evaluate to the **median** of a list of numbers.
 
@@ -63,7 +65,7 @@ the average of the two middle elements.
 
 {% def "Mode" %}
 
-<div class="signature">["<strong>Mode</strong>", <i>list</i>]</div>
+[&quot;**Mode**&quot;, <i>list</i>]{.signature}
 
 Evaluate to the **mode** of a list of numbers.
 
@@ -77,7 +79,9 @@ list is called **multimodal**.
 
 {% def "Variance" %}
 
-<div class="signature">["<strong>Variance</strong>", <i>list</i>]</div>
+
+[&quot;**Variance**&quot;, <i>list</i>]{.signature}
+
 
 Evaluate to the **variance** of a list of numbers.
 
@@ -96,7 +100,8 @@ where \\(\mu\\) is the mean of the list.
 
 {% def "StandardDeviation" %}
 
-<div class="signature">["<strong>StandardDeviation</strong>", <i>list</i>]</div>
+[&quot;**StandardDeviation**&quot;, <i>list</i>]{.signature}
+
 
 Evaluate to the **standard deviation** of a list of numbers.
 
@@ -115,7 +120,8 @@ where \\(\mu\\) is the mean of the list.
 
 {% def "Skewness" %}
 
-<div class="signature">["<strong>Skewness</strong>", <i>list</i>]</div>
+[&quot;**Skewness**&quot;, <i>list</i>]{.signature}
+
 
 Evaluate to the **skewness** of a list of numbers.
 
@@ -152,7 +158,8 @@ deviation of the list.
 
 {% def "Quantile" %}
 
-<div class="signature">["<strong>Quantile</strong>", <i>list</i>, <i>q:number</i>]</div>
+[&quot;**Quantile**&quot;, _list_, _q:number_]{.signature}
+
 
 
 Evaluate to the **quantile** of a list of numbers.
@@ -178,7 +185,7 @@ groups, each group comprising a quarter of the list.
 
 {% def "InterquartileRange" %}
 
-<div class="signature">["<strong>InterquartileRange</strong>", <i>list</i>]</div>
+[&quot;**InterquartileRange**&quot;, _list_]{.signature}
 
 Evaluate to the **interquartile range** (IRQ) of a list of numbers.
 
@@ -189,7 +196,7 @@ first quartile.
 
 {% def "Sum" %}
 
-<div class="signature">["<strong>Sum</strong>", <i>list</i>]</div>
+[&quot;**Sum**&quot;, _list_]{.signature}
 
 Evaluate to the sum of a list of numbers.
 
@@ -197,7 +204,7 @@ Evaluate to the sum of a list of numbers.
 
 {% def "Product" %}
 
-<div class="signature">["<strong>Product</strong>", <i>list</i>]</div>
+[&quot;**Product**&quot;, _list_]{.signature}
 
 Evaluate to the product of a list of numbers.
 
@@ -205,8 +212,7 @@ Evaluate to the product of a list of numbers.
 
 {% def "Erf" %}
 
-<div class="signature">["<strong>Erf</strong>", <i>z:complex</i>]</div>
-
+[&quot;**Erf**&quot;, _z:complex_]{.signature}
 
 Evaluate to the **error function** of a complex number.
 
@@ -224,7 +230,7 @@ where \\(z\\) is a complex number.
 
 {% def "Erfc" %}
 
-<div class="signature">["<strong>Erfc</strong>", <i>z:complex</i>]</div>
+[&quot;**Erfc**&quot;, _z:complex_]{.signature}
 
 Evaluate to the **complementary error function** of a complex number.
 

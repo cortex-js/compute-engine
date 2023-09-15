@@ -18,14 +18,18 @@ other typographic variations.
 {% defs "Function" "Operation" %} 
 
 {% def "Delimiter" %} 
-{% tags "inert" "float-right" %}<code>["Delimiter", _expr_]</code><br>
-<code>["Delimiter", _expr_, _sep_]</code><br>
-<code>["Delimiter", _expr_, _open_, _close_]</code><br>
-<code>["Delimiter", _expr_, _open_, _sep_, _close_]</code>
 
-May be used to group arithmetic expressions.
+[&quot;**Delimiter**&quot;, _expr_, _delim_]{.signature}
+
+
+Visually group arithmetic expressions.
 
 When serializing to LaTeX, render _expr_ wrapped in a delimiter. 
+
+_delim_ is a string with the following format:
+- `_"open"_` `_"close"_` e.g. `["Delimiter", "x", "'()'"]` renders as \\( (x) \\)
+- `_"open"_` `_"close"_` `_"sep"_` e.g. `["Delimiter", ["List", 1, 2], "'{},'"]` renders as \\\lbrace (1, 2\rbrace \\)
+
 
 If _expr_ is a `["List"]` expression, serialize each element of the list, separated by _sep_.
 
@@ -38,7 +42,9 @@ The `Delimiter` function is **inert** and the value of a `["Delimiter", _expr_]`
 {% enddef %}
 
 {% def "Spacing" %} 
-{% tags "inert" "float-right" %}<code>["Spacing", _width_]</code>
+
+[&quot;**Spacing**&quot;, _width_]{.signature}
+
 
 When serializing to LaTeX,  `_width_` is the dimension of the spacing, in 1/18 em.
 
@@ -49,7 +55,9 @@ The `Spacing` function is **inert** and the value of a `["Spacing", _expr_]` exp
 
 
 {% def "Style" %} 
-{% tags "inert" "float-right" %}<code>["Style", _expr_, _dictionary_]</code><br>
+
+[&quot;**Style**&quot;, _expr_, _dictionary_]{.signature}
+
 
 
 - `_expr_` an expression
