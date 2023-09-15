@@ -1,4 +1,6 @@
-## [Unreleased]
+## 0.15.0 
+
+ **Release Date:** 2023-09-14
 
 ## Improvements
 
