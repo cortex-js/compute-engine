@@ -231,18 +231,6 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       },
     },
 
-    Erf: {
-      description: 'Error Function',
-
-      complexity: 7500,
-    },
-
-    Erfc: {
-      description: 'Complementary Error Function',
-
-      complexity: 7500,
-    },
-
     Factorial: {
       description: 'Factorial Function',
       wikidata: 'Q120976',

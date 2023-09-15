@@ -237,7 +237,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
       },
     },
     Erf: {
-      complexity: 1200,
+      complexity: 7500,
       signature: {
         domain: ['Function', 'Number', 'Number'],
         evaluate: (ce, ops) => {
@@ -248,7 +248,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
       },
     },
     Erfc: {
-      complexity: 1200,
+      complexity: 7500,
       signature: {
         domain: ['Function', 'Number', 'Number'],
         evaluate: (ce, ops) => {
