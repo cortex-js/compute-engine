@@ -420,9 +420,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'postfix',
     parse: (_parser, lhs) => ['Superstar', lhs],
   },
-  // @todo: when lhs is a complex number, 'Conjugate'
-  // { name: 'Conjugate', trigger: ['\\star'], kind: 'infix' },
-  { name: 'Superstar', latexTrigger: ['^', '\\star'], kind: 'postfix' },
+  // { name: 'Superstar', latexTrigger: ['^', '\\star'], kind: 'postfix' },
   {
     latexTrigger: ['_', '*'],
     kind: 'postfix',
@@ -771,7 +769,7 @@ function parseDelimiter(parser: Parser, body: Expression): Expression | null {
   // @todo: does this really need to be done here? Sequence(Sequence(...))
   // Handle `()` used for example with `f()`
   if (body === null || isEmptySequence(body)) return ['Sequence'];
-  if (head(body) === 'Sequence' || head(body) === 'List') {
+  if (head(body) === 'Sequence') {
     if (nops(body) === 0) return ['Delimiter'];
     return ['Delimiter', ['Sequence', ...(ops(body) ?? [])]];
   }

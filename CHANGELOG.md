@@ -8,9 +8,15 @@
   default `ce.serialize(["Power", "x", -1])` returns `\frac{1}{x}` while
   ce.serialize(["Power", "x", -1], {canonical: false}) returns`x^{-1}`.
 - Improved parsing of delimiters, i.e. `\left(`, `\right]`, etc...
-- Added complex functions `Real`, `Imaginary`, `Arg`, `Conjugate`, `AbsArg`.
+- Added complex functions `Real`, `Imaginary`, `Arg`, `Conjugate`, `AbsArg`. See
+  https://cortexjs.io/compute-engine/reference/complex/
+- Added parsing and evaluation of `\Re`, `\Im`, `\arg`, `^\star` (Conjugate).
 - **#104** Added the `["ComplexRoots", x, n]` function which returns the nthroot
   of `x`.
+- Added parsing and evaluation of statistics functions `Mean`, `Median`,
+  `StandardDeviation`, `Variance`, `Skewness`, `Kurtosis`, `Quantile`,
+  `Quartiles`, `InterquartileRange`, `Mode`, `Count`, `Erf`, `Erfc`. See
+  https://cortexjs.io/compute-engine/reference/statistics/
 
 ## 0.14.0
 

@@ -441,7 +441,7 @@ export class _Parser implements Parser {
     //
     for (const def of defs) {
       if (def.identifierTrigger) {
-        const n = peekComplexId(this, def.identifierTrigger);
+        const n = parseComplexId(this, def.identifierTrigger);
         if (n > 0) result.push([def, n]);
       }
     }
@@ -2223,7 +2223,7 @@ export class _Parser implements Parser {
 }
 
 /** Return the number of tokens matched, 0 if none */
-function peekComplexId(parser: Parser, id: string): number {
+function parseComplexId(parser: Parser, id: string): number {
   const start = parser.index;
 
   const candidate = parseIdentifier(parser)?.trim();

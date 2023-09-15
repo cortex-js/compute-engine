@@ -44,6 +44,8 @@ import {
   ops,
 } from '../../../math-json/utils';
 import { ErrorSignal, WarningSignal } from '../../../common/signals';
+import { DEFINITIONS_COMPLEX } from './definitions-complex';
+import { DEFINITIONS_STATISTICS } from './definitions-statistics';
 
 export type CommonEntry = {
   /** Note: a name is required if a serialize handler is provided */
@@ -543,7 +545,7 @@ function makeParseHandler(
   //
   if (kind === 'environment') {
     // Assume we'll parse a tabular body
-    const envName = entry.parse ?? idTrigger ?? entry.name;
+    const envName = entry.parse ?? entry.name ?? idTrigger;
     if (envName)
       return (parser: Parser, _until) => {
         const array = parser.parseTabular();
@@ -556,7 +558,7 @@ function makeParseHandler(
   // Function
   //
   if (kind === 'function') {
-    const fnName = entry.parse ?? idTrigger ?? entry.name;
+    const fnName = entry.parse ?? entry.name ?? idTrigger;
     if (fnName)
       return (parser: Parser, until: Terminator) => {
         const args = parser.parseArguments('enclosure', until);
@@ -568,7 +570,7 @@ function makeParseHandler(
   // Symbol
   //
   if (kind === 'symbol') {
-    const symName = entry.parse ?? idTrigger ?? entry.name;
+    const symName = entry.parse ?? entry.name ?? idTrigger;
     if (symName) return (_parser, _terminator) => symName;
   }
 
@@ -576,7 +578,7 @@ function makeParseHandler(
   // Prefix
   //
   if (kind === 'prefix') {
-    const h = entry.parse ?? idTrigger ?? entry.name;
+    const h = entry.parse ?? entry.name ?? idTrigger;
     if (h) {
       const prec = entry['precedence'] ?? 10000;
       return (parser, until) => {
@@ -611,7 +613,7 @@ function makeParseHandler(
         missingIfEmpty(op(arg, 2)),
       ];
     }
-    const h = entry.parse ?? idTrigger ?? entry.name;
+    const h = entry.parse ?? entry.name ?? idTrigger;
     const prec = entry['precedence'] ?? 10000;
     const associativity = entry['associativity'] ?? 'non';
     if (h)
@@ -652,7 +654,7 @@ function makeParseHandler(
   //
   if (kind === 'expression') {
     // If no parse funtion provided, parse as a symbol
-    const parseResult = entry.parse ?? idTrigger ?? entry.name;
+    const parseResult = entry.parse ?? entry.name ?? idTrigger;
     if (parseResult) return () => parseResult as Expression;
   }
 
@@ -684,6 +686,17 @@ function isValidEntry(
     }
   }
   if (Array.isArray(subject)) subject = tokensToString(subject);
+
+  if ('trigger' in entry) {
+    onError({
+      severity: 'warning',
+      message: [
+        'invalid-dictionary-entry',
+        subject,
+        `The 'trigger' property is deprecated. Use 'latexTrigger' or 'identifierTrigger' instead`,
+      ],
+    });
+  }
 
   if (
     'kind' in entry &&
@@ -921,6 +934,7 @@ export const DEFAULT_LATEX_DICTIONARY: {
   algebra: DEFINITIONS_ALGEBRA,
   arithmetic: DEFINITIONS_ARITHMETIC,
   calculus: DEFINITIONS_CALCULUS,
+  complex: DEFINITIONS_COMPLEX,
   core: DEFINITIONS_CORE,
   logic: DEFINITIONS_LOGIC,
   relop: DEFINITIONS_INEQUALITIES,
@@ -933,6 +947,7 @@ export const DEFAULT_LATEX_DICTIONARY: {
     },
   ],
   sets: DEFINITIONS_SETS,
+  statistics: DEFINITIONS_STATISTICS,
   symbols: DEFINITIONS_SYMBOLS,
   trigonometry: DEFINITIONS_TRIGONOMETRY,
 };

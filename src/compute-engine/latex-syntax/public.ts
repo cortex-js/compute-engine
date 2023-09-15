@@ -43,6 +43,7 @@ export type LibraryCategory =
   | 'collections'
   | 'control-structures'
   | 'combinatorics'
+  | 'complex'
   | 'core'
   | 'data-structures'
   | 'dimensions'

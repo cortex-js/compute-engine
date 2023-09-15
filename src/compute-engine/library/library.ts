@@ -7,6 +7,7 @@ import { LOGIC_LIBRARY } from './logic';
 import { POLYNOMIALS_LIBRARY } from './polynomials';
 import { RELOP_LIBRARY } from './relational-operator';
 import { SETS_LIBRARY } from './sets';
+import { STATISTICS_LIBRARY } from './statistics';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
 import { LibraryCategory } from '../latex-syntax/public';
@@ -135,14 +136,7 @@ export const LIBRARIES: {
       // unit: ['Divide', 'N', ['Square', 'A']],
     },
   },
-  'statistics': [], // @todo statistics: [
-  //   // average
-  //   // mean
-  //   // variance = size(l) * stddev(l)^2 / (size(l) - 1)
-  //   // stddev
-  //   // median
-  //   // quantile
-  // ],
+  'statistics': STATISTICS_LIBRARY,
   'trigonometry': TRIGONOMETRY_LIBRARY,
   'units': [],
 };

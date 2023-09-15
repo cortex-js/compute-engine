@@ -316,6 +316,13 @@ export function isMatrixLike(expr: Expression | null): boolean {
   return rows?.every((x) => isListLike(x)) ?? false;
 }
 
+export function rank(expr: Expression | null): number {
+  if (!isMatrixLike(expr)) return 0;
+  const rows = ops(expr);
+  if (!rows) return 0;
+  return rows.length;
+}
+
 function keyValuePair(
   expr: Expression | null
 ): null | [key: string, value: Expression] {
