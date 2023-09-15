@@ -21,75 +21,74 @@ render_math_in_document: true
 
 ## Functions
 
-{% defs "Function" "Operation" %}
+{% defs "Function" "Description" %}
 
 {% def "Real" %}
 
+<div class="signature">["<strong>Real</strong>", <i>complex</i>]</div>
+
 Evaluate to the real part of a complex number.
 
-```mathjson
-["Real", _complex_]
-```
 
 {% enddef %}
 
-{% def "Imaginary" %} Evaluate to the imaginary part of a complex number.
+{% def "Imaginary" %}
 
-```mathjson
-["Imaginary", _complex_]
-```
+<div class="signature">["<strong>Imaginary</strong>", <i>complex</i>]</div>
+
+ Evaluate to the imaginary part of a complex number.
+
 
 {% enddef %}
 
 {% def "Conjugate" %}
 
+<div class="signature">["<strong>Conjugate</strong>", <i>complex</i>]</div>
+
 Evaluate to the complex conjugate of a complex number.
 
-```mathjson
-["Conjugate", _complex_]
-```
 
 {% enddef %}
 
 {% def "Abs" %}
 
+<div class="signature">["<strong>Abs</strong>", <i>complex</i>]</div>
+
 Evaluate to the magnitude of a complex number.
 
-```mathjson
-["Abs", _complex_]
-```
+The magnitude of a complex number is the distance from the origin to the point representing the complex number in the complex plane.
+
 
 {% enddef %}
 
 {% def "Arg" %}
 
+<div class="signature">["<strong>Conjugate</strong>", <i>complex</i>]</div>
+
 Evaluate to the argument of a complex number.
 
-```mathjson
-["Arg", _complex_]
-```
+The argument of a complex number is the angle between the positive real axis and the line joining the origin to the point representing the complex number in the complex plane.
 
 {% enddef %}
 
 {% def "AbsArg" %}
+<div class="signature">["<strong>AbsArg</strong>", <i>complex</i>]</div>
 
 Evaluate to the a tuple of the magnitude and argument of a complex number.
 
 This corresponds to the polar representation of a complex number.
 
-```mathjson
-["AbsArg", _complex_]
-```
 
 {% enddef %}
 
 {% def "ComplexRoots" %}
 
-Evaluate to a list of the nth roots of a number.
+<div class="signature">["<strong>ComplexRoots</strong>", <i>a=complex</i>, <i>n=integer</i>]</div>
 
-```mathjson
-["ComplexRoots", _number_, _n_]
-```
+Evaluate to a list of the n<sup>th</sup> roots of a number.
+
+The complex roots of a number are the solutions of the equation \\(x^n = a\\).
+
 
 ```mathjson
 // The three complex roots of unity (1)
@@ -99,8 +98,5 @@ Evaluate to a list of the nth roots of a number.
 
 {% enddef %}
 
-{% def "Complex" %}
-
-{% enddef %}
 
 {% enddefs %}

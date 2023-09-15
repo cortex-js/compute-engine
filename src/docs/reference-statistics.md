@@ -9,15 +9,21 @@ toc: true
 render_math_in_document: true
 ---
 
+For the following functions, when the input is a _list_, it can 
+take the following forms:
+- Multiple arguments, e.g. `["Mean", 1, 2, 3]`
+- A list of numbers, e.g. `["Mean", ["List", 1, 2, 3]]`
+- A matrix, e.g. `["Mean", ["List", ["List", 1, 2], ["List", 3, 4]]]`
+- A range, e.g. `["Mean", ["Range", 1, 10]]`
+- A linear space: `["Mean", ["Linspace", 1, 5, 10]]`
+
 ## Functions
 
-{% defs "Function" "Operation" %}
+{% defs "Function" "Description" %}
 
 {% def "Mean" %}
 
-```mathjson
-["Mean", _list_]
-```
+<div class="signature">["<strong>Mean</strong>", <i>list</i>]</div>
 
 Evaluate to the **arithmetic mean** of a list of numbers.
 
@@ -38,9 +44,7 @@ The formula for the mean of a list of numbers is \\( \bar{x} = \frac{1}{n}
 
 {% def "Median" %}
 
-```mathjson
-["Median", _list_]
-```
+<div class="signature">["<strong>Median</strong>", <i>list</i>]</div>
 
 Evaluate to the **median** of a list of numbers.
 
@@ -59,9 +63,7 @@ the average of the two middle elements.
 
 {% def "Mode" %}
 
-```mathjson
-["Mode", _list_]
-```
+<div class="signature">["<strong>Mode</strong>", <i>list</i>]</div>
 
 Evaluate to the **mode** of a list of numbers.
 
@@ -75,9 +77,7 @@ list is called **multimodal**.
 
 {% def "Variance" %}
 
-```mathjson
-["Variance", _list_]
-```
+<div class="signature">["<strong>Variance</strong>", <i>list</i>]</div>
 
 Evaluate to the **variance** of a list of numbers.
 
@@ -96,9 +96,7 @@ where \\(\mu\\) is the mean of the list.
 
 {% def "StandardDeviation" %}
 
-```mathjson
-["StandardDeviation", _list_]
-```
+<div class="signature">["<strong>StandardDeviation</strong>", <i>list</i>]</div>
 
 Evaluate to the **standard deviation** of a list of numbers.
 
@@ -117,9 +115,7 @@ where \\(\mu\\) is the mean of the list.
 
 {% def "Skewness" %}
 
-```mathjson
-["Skewness", _list_]
-```
+<div class="signature">["<strong>Skewness</strong>", <i>list</i>]</div>
 
 Evaluate to the **skewness** of a list of numbers.
 
@@ -137,9 +133,7 @@ deviation of the list.
 
 {% def "Kurtosis" %}
 
-```mathjson
-["Kurtosis", _list_]
-```
+<div class="signature">["<strong>Kurtosis</strong>", <i>list</i>]</div>
 
 Evaluate to the **kurtosis** of a list of numbers.
 
@@ -158,9 +152,8 @@ deviation of the list.
 
 {% def "Quantile" %}
 
-```mathjson
-["Quantile", _list_, _q_]
-```
+<div class="signature">["<strong>Quantile</strong>", <i>list</i>, <i>q:number</i>]</div>
+
 
 Evaluate to the **quantile** of a list of numbers.
 
@@ -174,9 +167,7 @@ So, \\(\operatorname{median} = \operatorname{quantile}(0.5)\\).
 
 {% def "Quartiles" %}
 
-```mathjson
-["Quartiles", _list_]
-```
+<div class="signature">["<strong>Quartiles</strong>", <i>list</i>]</div>
 
 Evaluate to the **quartiles** of a list of numbers.
 
@@ -187,9 +178,7 @@ groups, each group comprising a quarter of the list.
 
 {% def "InterquartileRange" %}
 
-```mathjson
-["InterquartileRange", _list_]
-```
+<div class="signature">["<strong>InterquartileRange</strong>", <i>list</i>]</div>
 
 Evaluate to the **interquartile range** (IRQ) of a list of numbers.
 
@@ -200,9 +189,7 @@ first quartile.
 
 {% def "Sum" %}
 
-```mathjson
-["Sum", _list_]
-```
+<div class="signature">["<strong>Sum</strong>", <i>list</i>]</div>
 
 Evaluate to the sum of a list of numbers.
 
@@ -210,9 +197,7 @@ Evaluate to the sum of a list of numbers.
 
 {% def "Product" %}
 
-```mathjson
-["Product", _list_]
-```
+<div class="signature">["<strong>Product</strong>", <i>list</i>]</div>
 
 Evaluate to the product of a list of numbers.
 
@@ -220,9 +205,8 @@ Evaluate to the product of a list of numbers.
 
 {% def "Erf" %}
 
-```mathjson
-["Erf", _z_]
-```
+<div class="signature">["<strong>Erf</strong>", <i>z:complex</i>]</div>
+
 
 Evaluate to the **error function** of a complex number.
 
@@ -232,7 +216,7 @@ of normally distributed events.
 
 The formula for the error function of a complex number is:
 
-\\\operatornmae{erf} z = [\frac{2}{\sqrt{\pi}} \int_0^z e^{-t^2} dt\\]
+\\[ \operatorname{erf} z = \frac{2}{\sqrt{\pi}} \int_0^z e^{-t^2} dt\\]
 
 where \\(z\\) is a complex number.
 
@@ -240,15 +224,13 @@ where \\(z\\) is a complex number.
 
 {% def "Erfc" %}
 
-```mathjson
-["Erfc", _x_]
-```
+<div class="signature">["<strong>Erfc</strong>", <i>z:complex</i>]</div>
 
 Evaluate to the **complementary error function** of a complex number.
 
 It is defined as:
 
-\\[\operatorname{erfc} z = 1 - \operatorname{erf} z\\]
+\\[ \operatorname{erfc} z = 1 - \operatorname{erf} z \\]
 
 {% enddef %}
 
