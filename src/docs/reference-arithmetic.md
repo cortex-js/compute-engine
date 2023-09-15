@@ -84,6 +84,10 @@ functions{% endreadmore %}
 {% readmore "/compute-engine/reference/complex/" %} See also
 <strong>Complex</strong> for complex functions {% endreadmore %}
 
+{% readmore "/compute-engine/reference/statistics/" %} See also
+<strong>Statistics</strong> for statistics functions and functions on lists
+{% endreadmore %}
+
 ### Rounding
 
 <div class=symbols-table>

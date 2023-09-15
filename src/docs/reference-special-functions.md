@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/special-functions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: false
 render_math_in_document: true
 ---
@@ -23,3 +23,7 @@ render_math_in_document: true
 | `SignGamma` |                             | {% tags "numeric" "float-right"%}                                                                                                                                                                                                         |
 
 </div>
+
+{% readmore "/compute-engine/reference/statistics/" %} See also
+<strong>Statistics</strong> for statistics functions and functions on lists
+{% endreadmore %}
