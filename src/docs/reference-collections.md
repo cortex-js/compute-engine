@@ -9,32 +9,41 @@ toc: true
 render_math_in_document: true
 ---
 
-Collections are used to represent data structures.
+In the Compute Engine, **collections** are used to represent data structures. They group together multiple elements into one unit. Each element in a collection is a **Boxed Expression**.
 
-A frequently used collection is the `List` which is used to represent an ordered
-sequence of elements.
+Collections are **immutable**. They cannot be modified. Operations on collections return new collections.
+
+Collections can be **finite** or **infinite**. Finite collections have a finite number of elements. Infinite collections have an infinite number of elements.
+
+Collections can be **ordered** or **unordered**. Ordered collections are finite and have a well-defined order for their elements. Unordered collections do not have a well-defined order for their elements.
+
+Collections can be **indexable** or **iterable**. Indexable collections can be accessed with a numeric index. Iterable collections can be enumerated one element at a time. Indexable collections are iterable.
+
+
+A frequently used collection is the `List` collection which is used to represent an ordered, indexable, sequence of elements.
+
+{% latex "\\lbrack 42, 3.14, x, y \\rbrack" %}
 
 ```json example
 ["List", 42, 3.14, "x", "y"]
 ```
 
-{% latex "\\lbrack 42, 3.14, x, y \\rbrack" %}
 
 Lists can be used to represent **vectors**.
+
+{% latex "\\lbrack 1, 2, 3 \\rbrack" %}
 
 ```json example
 ["List", 1, 2, 3]
 ```
 
-{% latex "\\lbrack 1, 2, 3 \\rbrack" %}
+A **matrix** is represented using a `List` of `List`s.
 
-A list of lists can be used to represent a **matrix**.
+{% latex "\\lbrack \\lbrack 1, 2, 3 \\rbrack, \\lbrack 4, 5, 6 \\rbrack, \\lbrack 7, 8, 9 \\rbrack \\rbrack" %}
 
 ```json example
 ["List", ["List", 1, 2, 3], ["List", 4, 5, 6], ["List", 7, 8, 9]]
 ```
-
-{% latex "\\lbrack \\lbrack 1, 2, 3 \\rbrack, \\lbrack 4, 5, 6 \\rbrack, \\lbrack 7, 8, 9 \\rbrack \\rbrack" %}
 
 Lists of lists can also be represented using a `;` separator:
 
@@ -78,50 +87,94 @@ collection types.
 
 [&quot;**List**&quot;, _expr-1_, ..._expr-2_]{.signature}
 
-An **ordered** collection of elements.
+A `List` is an **ordered**, **indexable** collection of elements. An element
+in a list may be repeated.
 
-Use to represent a data structure, unlike `Delimiter` which is just a visual
-styling.
+The visual presentation of a `List` expression can be customized using the
+`Delimiter` function.
+
+```js example
+ce.box(["List", 5, 2, 10, 18]).latex
+// -> "\\lbrack 5, 2, 10, 18 \\rbrack"
+
+ce.box(["Delimiter", ["List", 5, 2, 10, 18], "<>;"]).latex
+// -> "\\langle5; 2; 10; 18\\rangle"
+```
+
 
 | MathJSON                        | LaTeX                              |
 | :------------------------------ | :--------------------------------- |
-| `["List", "x", "y", "7", "11"]` | \\( \lbrack x, y, 7, 11\rbrack \\) |
+| `["List", "x", "y", 7, 11]` | \\( \lbrack x, y, 7, 11\rbrack \\) |
 | `["List", "x", "Nothing", "y"]` | \\( \lbrack x,,y\rbrack \\)        |
 
 {% enddef %}
 
 {% def "Range" %}
 
-[&quot;**Range**&quot;, _lower_, _upper_, _step_]{.signature}
+[&quot;**Range**&quot;, _upper_]{.signature}
 
 [&quot;**Range**&quot;, _lower_, _upper_]{.signature}
 
-[&quot;**Range**&quot;, _upper_]{.signature}
+[&quot;**Range**&quot;, _lower_, _upper_, _step_]{.signature}
 
-A sequence of numbers.
+
+A sequence of numbers, starting with `lower`, ending with `upper`, and
+incrementing by `step`.
 
 If the `step` is not specified, it is assumed to be `1`.
 
 If there is a single argument, it is assumed to be the `upper` bound, and the
 `lower` bound is assumed to be `1`.
 
+```json example
+["Range", 3, 9]
+// -> ["List", 3, 4, 5, 6, 7, 8, 9]
+
+["Range", 7]
+// -> ["List", 1, 2, 3, 4, 5, 6, 7]
+
+["Range", 1, 10, 2]
+// -> ["List", 1, 3, 5, 7, 9]
+
+["Range", 10, 1, -1]
+// -> ["List", 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+```
+
+
 {% enddef %}
 
 {% def "Linspace" %}
 
-[&quot;**Linspace**&quot;, _lower_, _upper_, _count_]{.signature}
+[&quot;**Linspace**&quot;, _upper_]{.signature}
 
 [&quot;**Linspace**&quot;, _lower_, _upper_]{.signature}
 
-[&quot;**Linspace**&quot;, _upper_]{.signature}
+[&quot;**Linspace**&quot;, _lower_, _upper_, _count_]{.signature}
 
-A sequence of numbers. Similar to `Range` but the `count` is specified instead
-of the `step`.
+Short for "linearly spaced", from the MATLAB (function of the same name)[https://www.mathworks.com/help/matlab/ref/linspace.html].
+
+A sequence of numbers. Similar to `Range` but the number of elements in 
+the collection is specified with `count`  instead of a `step` value.
 
 If the `count` is not specified, it is assumed to be `50`.
 
 If there is a single argument, it is assumed to be the `upper` bound, and the
 `lower` bound is assumed to be `1`.
+
+```json example
+["Linspace", 3, 9]
+// -> ["List", 3, 3.163265306122449, 3.326530612244898, 3.489795918367347, 3.653061224489796, 3.816326530612245, 3.979591836734694, 4.142857142857143, 4.3061224489795915, 4.469387755102041, 4.63265306122449, 4.795918367346939, 4.959183673469388, 5.122448979591837, 5.285714285714286, 5.448979591836735, 5.612244897959184, 5.775510204081633, 5.938775510204081, 6.1020408163265305, 6.26530612244898, 6.428571428571429, 6.591836734693878, 6.755102040816326, 6.918367346938775, 7.081632653061225, 7.244897959183673, 7.408163265306122, 7.571428571428571, 7.73469387755102, 7.8979591836734695, 8.061224489795919, 8.224489795918368, 8.387755102040817, 8.551020408163266, 8.714285714285714, 8.877551020408163, 9.040816326530612, 9.204081632653061, 9.36734693877551, 9.53061224489796, 9.693877551020408, 9.857142857142858, 10]
+
+["Linspace", 7]
+// -> ["List", 1, 1.1428571428571428, 1.2857142857142858, 1.4285714285714286, 1.5714285714285714, 1.7142857142857142, 1.8571428571428572, 2]
+
+["Linspace", 1, 10, 5]
+// -> ["List", 1, 3.25, 5.5, 7.75, 10]
+
+["Linspace", 10, 1, 10]
+// -> ["List", 10, 9.11111111111111, 8.222222222222221, 7.333333333333333, 6.444444444444445, 5.555555555555555, 4.666666666666666, 3.7777777777777777, 2.888888888888889, 2]
+```
+
 
 {% enddef %}
 
@@ -175,7 +228,8 @@ An **unordered** collection of unique elements.
 The functions in this section create collections with an infinite number of
 elements.
 
-Negative indexes relative to the "last" element are not allowed.
+Negative indexes relative to the "last" element are not allowed when using 
+infinite collections.
 
 The `Length` of infinite collection is `+Infinity`.
 
@@ -185,7 +239,7 @@ The `Length` of infinite collection is `+Infinity`.
 
 [&quot;**Repeat**&quot;, _expr_]{.signature}
 
-A infinite collection of the same element.
+An infinite collection of the same element.
 
 ```json example
 ["Repeat", 0]
@@ -195,8 +249,8 @@ A infinite collection of the same element.
 Use `Take` to get a finite number of elements.
 
 ```json example
-["Take", ["Repeat", 0], 3]
-// -> ["List", 0, 0, 0]
+["Take", ["Repeat", 42], 3]
+// -> ["List", 42, 42, 42]
 ```
 
 {% enddef %}
@@ -209,15 +263,14 @@ A collection that repeats the elements of the input collection. The input
 collection must be finite.
 
 ```json example
-["Cycle", 1, 2, 3]
-
-// -> ["List", 1, 2, 3, 1, 2, 3]
+["Cycle", ["List", 1, 2, 3]]
+// -> ["List", 1, 2, 3, 1, 2, 3, ...]
 ```
 
 Use `Take` to get a finite number of elements.
 
 ```json example
-["Take", ["Cycle", 1, 2, 3], 5]
+["Take", ["Cycle", ["List", 1, 2, 3]], 5]
 // -> ["List", 1, 2, 3, 1, 2]
 ```
 
@@ -229,26 +282,27 @@ Use `Take` to get a finite number of elements.
 
 [&quot;**Iterate**&quot;, _function_, _initial_]{.signature}
 
-An infinite collection of the results of applying the function to the initial
+An infinite collection of the results of applying `function` to the initial
 value.
 
 If the `initial` value is not specified, it is assumed to be `0`
 
 ```json example
-["Iterate", ["Function", ["Tuple", "x", "acc"] ["Multiply", "x", "acc"]], 1]
-
-// -> ["List", 1, 1, 2, 6, 24, 120, ...]
+["Iterate", ["Function", "x", ["Multiply", "x", 2]], 1]
+// -> ["List", 1, 2, 4, 8, 16, ...]
 ```
 
 Use `Take` to get a finite number of elements.
 
 ```json example
-["Take", ["Iterate", ["Plus", "_", 1], 0], 5]
-
-// -> ["List", 0, 1, 2, 3, 4]
+["Take", ["Iterate", ["Plus", "_", 2], 7], 5]
+// -> ["List", 7, 9, 11, 13, 15]
 ```
 
 {% enddef %}
+
+{% enddefs %}
+
 
 ## Iterable Collection Operations
 
@@ -257,6 +311,9 @@ The elements of an **iterable collection** can be enumerated one at a time.
 They may contain an infinite number of elements. The elements are not ordered.
 
 Examples include `Set`.
+
+{% defs %}
+
 
 {% def "Length" %}
 
@@ -267,7 +324,7 @@ Returns the number of elements in the collection.
 If the collection is a matrix (list of lists), `Length` returns the number of
 rows.
 
-```json example example
+```json example
 ["Length", ["List", 5, 2, 10, 18]]
 // -> 4
 
@@ -331,11 +388,10 @@ A scalar has no dimension and `Dimensions` returns an empty tuple.
 
 [&quot;**Rank**&quot;, _collection_]{.signature}
 
-Returns the number of dimensions of the collection, that is the number of axes.
+Returns the number of dimensions of the collection, that is the number of its axes.
 
-A vector or list has rank 1, a matrix has rank 2, a tensor has rank 3, etc.
+A scalar (number) has rank 0, vector or list has rank 1, a matrix has rank 2, a tensor has rank 3, etc.
 
-Scalars (numbers, string, etc.) have rank 0.
 
 ```json example
 ["Rank", 5]
@@ -354,7 +410,9 @@ Scalars (numbers, string, etc.) have rank 0.
 
 [&quot;**Flatten**&quot;, _collection_]{.signature}
 
-Returns a list of the elements of the collection.
+Returns a list of all the elements of the collection, recursively.
+
+Only elements with the same head as the collection are flattened.
 
 ```json example
 ["Flatten", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
@@ -520,6 +578,8 @@ All the collections should have the same head.
 
 {% enddef %}
 
+{% enddefs %}
+
 ## Indexable Collection Operations
 
 An **indexable collection** is a collection where the elements can be accessed
@@ -557,6 +617,8 @@ There can be multiple indexes, up to the rank of the collection.
 ["At", ["List", ["List", 1, 2], ["List", 3, 4]], 2, 1]
 // -> 3
 ```
+
+{% enddef %}
 
 {% def "Take" %}
 
