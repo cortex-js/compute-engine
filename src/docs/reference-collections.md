@@ -232,7 +232,7 @@ negative indexes (or ranges) reverses the order of the elements.
 
 {% def "Drop" %}
 
-[&quot;**Drop**&quot;, _collection_, _index_]{.signature} [&quot;**Drop**&quot;,
+[&quot;**Drop**&quot;, _collection_, _index_]{.signature}
 
 Drop is the opposite of `Take`. It returns a list of the elements that are not
 at the specified indexes.
@@ -255,6 +255,100 @@ It also accepts a list of ranges.
 ["Drop", ["List", 5, 2, 10, 18], ["Tuple", 1, -1, 2]]
 
 // -> ["List", 2, 18]
+```
+
+{% enddef %}
+
+{% def "First" %}
+
+[&quot;**First**&quot;, _collection_]{.signature}
+
+Return the first element of the collection.
+
+It's equivalent to `["Take", _collection_, 1]`.
+
+```json example
+["First", ["List", 5, 2, 10, 18]]
+// -> 5
+
+["First", ["Tuple", "x", "y"]]
+// -> "x"
+
+```
+
+{% enddef %}
+
+{% def "Second" %}
+
+[&quot;**Second**&quot;, _collection_]{.signature}
+
+Return the first element of the collection.
+
+It's equivalent to `["Take", _collection_, 2]`.
+
+```json example
+["Second", ["Tuple", "x", "y"]]
+// -> "y"
+```
+
+{% enddef %}
+
+{% def "Last" %}
+
+[&quot;**Last**&quot;, _collection_]{.signature}
+
+Return the last element of the collection.
+
+It's equivalent to `["Take", _collection_, -1]`.
+
+```json example
+["Last", ["List", 5, 2, 10, 18]]
+// -> 18
+```
+
+{% enddef %}
+
+{% def "Rest" %}
+
+[&quot;**Rest**&quot;, _collection_]{.signature}
+
+Return everything but the first element of the collection.
+
+It's equivalent to `["Drop", _collection_, 1]`.
+
+```json example
+["Rest", ["List", 5, 2, 10, 18]]
+// -> ["List", 2, 10, 18]
+```
+
+{% enddef %}
+
+{% def "Most" %}
+
+[&quot;**Most**&quot;, _collection_]{.signature}
+
+Return everything but the last element of the collection.
+
+It's equivalent to `["Drop", _collection_, -1]`.
+
+```json example
+["Most", ["List", 5, 2, 10, 18]]
+// -> ["List", 5, 2, 10]
+```
+
+{% enddef %}
+
+{% def "Reverse" %}
+
+[&quot;**Reverse**&quot;, _collection_]{.signature}
+
+Return the collection in reverse order.
+
+It's equivalent to `["Take", _collection_, ["Tuple", -1, 1]]`.
+
+```json example
+["Reverse", ["List", 5, 2, 10, 18]]
+// -> ["List", 18, 10, 2, 5]
 ```
 
 {% enddef %}

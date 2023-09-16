@@ -264,6 +264,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     },
   },
 
+  // Note: Take is equivalent to "Extract" or "Part" in Mathematica
+  // @todo: should handle having a ["List"] as an index argument
   Take: {
     complexity: 8200,
     signature: {
@@ -286,6 +288,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     },
   },
 
+  // @todo: should handle having a ["List"] as an index argument
   Drop: {
     complexity: 8200,
     signature: {
@@ -319,27 +322,72 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       },
     },
   },
+
+  First: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (ce, ops) => {
+        const expr = ops[0];
+        const def = ce.lookupFunction(expr.head);
+        if (!def?.at) return ce.symbol('Nothing');
+        return def.at(expr, 1) ?? ce.symbol('Nothing');
+      },
+    },
+  },
+  Second: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (ce, ops) => {
+        const expr = ops[0];
+        const def = ce.lookupFunction(expr.head);
+        if (!def?.at) return ce.symbol('Nothing');
+        return def.at(expr, 2) ?? ce.symbol('Nothing');
+      },
+    },
+  },
+  Last: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (ce, ops) => {
+        const expr = ops[0];
+        const def = ce.lookupFunction(expr.head);
+        if (!def?.at) return ce.symbol('Nothing');
+        return def.at(expr, -1) ?? ce.symbol('Nothing');
+      },
+    },
+  },
+  Rest: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => take(ops[0], [[2, -1, 1]]),
+    },
+  },
+  Most: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => take(ops[0], [[1, -2, 1]]),
+    },
+  },
+
+  Reverse: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => take(ops[0], [[-1, 2, 1]]),
+    },
+  },
 };
 
-// •	First = Take(1)
-// •	Second
-// •	Last = Take(-1)
 // •	Rest (eveything but First)
 // •	Most (everything but Last)
-// •	Take(n) 1...n = Take((1, n))
-// •	Take((from, to, step))
-// •	Take((at))
-// •	Take(seq, seq, seq...)
-// •	Drop(n) Take((n+1...-1))
-// •	Drop(n<0): Take(1...-n)
-// •	Drop((n)) : everything but element at (n)
-// •	Drop((from, to)) : everything but element at from...to
-// •	Drop((from, to, step)) : everything but element at from...to
-// •	Range(n): create list 1...n
-// •	Range(from, to, step)
+
 // •	Length() = Dimensions[0]
 // * Dimensions()
-// •	Reverse()
 // •	Append()
 // •	Prepend()
 // •	Join()
@@ -430,13 +478,15 @@ function rangeArgs(
 
 /**
  * An index range is of the form:
- * - an integer
+ * - an index, as an integer
  * - a tuple of the form [from, to]
- * - a tuple of the form [from, to, step]
+ * - a tuple of the form [from, to, step]. `step` must be a positive number.
+ *   If invalid, or absent, 1 is assumed.
+ * - a ["List"] of indexes
  *
- * `from` and `to` can be negative to indicate position relative to the last element
+ * Negative indexes indicate position relative to the last element: -1 is
+ * the last element, -2 the one before that, etc...
  *
- * `step` must be a positive number. In invalid, or absent, 1 is assumed.
  */
 function indexRangeArg(
   op: BoxedExpression | undefined,
@@ -456,11 +506,7 @@ function indexRangeArg(
 
   // We may have a Tuple...
   const h = op.head;
-  if (
-    !h ||
-    typeof h !== 'string' ||
-    !/^(List|Single|Pair|Triple|Tuple|)$/.test(h)
-  )
+  if (!h || typeof h !== 'string' || !/^(Single|Pair|Triple|Tuple|)$/.test(h))
     return [0, 0, 0];
   let [lower, upper, step] = rangeArgs(op);
 

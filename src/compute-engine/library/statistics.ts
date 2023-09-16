@@ -15,6 +15,9 @@ import { BoxedExpression, IdTable } from '../public';
 
 export const STATISTICS_LIBRARY: IdTable[] = [
   {
+    // https://towardsdatascience.com/on-average-youre-using-the-wrong-average-geometric-harmonic-means-in-data-analysis-2a703e21ea0?gi=d56d047586c6
+    // https://towardsdatascience.com/on-average-youre-using-the-wrong-average-part-ii-b32fcb41527e
+
     Mean: {
       complexity: 1200,
       signature: {

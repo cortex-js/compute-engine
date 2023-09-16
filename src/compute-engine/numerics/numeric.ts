@@ -475,6 +475,9 @@ export function chop(
   return n;
 }
 
+// See https://personal.math.ubc.ca/~cbm/aands/page_299.htm
+// More approximations: https://math.stackexchange.com/questions/321569/approximating-the-error-function-erf-by-analytical-functions
+// NIST: https://dlmf.nist.gov/7.24#i
 export function erf(x: number): number {
   const a1 = 0.254829592;
   const a2 = -0.284496736;
