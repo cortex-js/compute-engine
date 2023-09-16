@@ -27,7 +27,7 @@ The products of all positive integers less than or equal to \\( n\\)
 
 [&quot;**Gamma**&quot;, _z_]{.signature}
 
-{% latex "\Gamma(n) = (n-1)!" %}
+{% latex "\\Gamma(n) = (n-1)!" %}
 
 The [Gamma Function](https://en.wikipedia.org/wiki/Gamma_function) is an
 extension of the factorial function, with its argument shifted by 1, to real and
@@ -50,7 +50,7 @@ complex numbers.
 
 [&quot;**LogGamma**&quot;, _z_]{.signature}
 
-{% latex "\ln(\gamma(z))" %}
+{% latex "\\ln(\\gamma(z))" %}
 
 {% enddef %}
 
@@ -58,7 +58,7 @@ complex numbers.
 
 [&quot;**SignGamma**&quot;, _z_]{.signature}
 
-{% latex "\operatorname{sgn}(\gamma(z))" %}
+{% latex "\\operatorname{sgn}(\\gamma(z))" %}
 
 {% enddef %}
 
