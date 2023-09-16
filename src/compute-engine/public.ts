@@ -1742,10 +1742,78 @@ export type BoxedFunctionSignature = {
 };
 
 /**
+ * The handlers are the primitive operations that can be performed on
+ * collections.
+ *
+ * There are two types of collections:
+ * - finite collections, such as lists, tuples, sets, matrices, etc...
+ *  The `size()` handler of finite collections returns the number of elements
+ * - infinite collections, such as sequences, ranges, etc...
+ *  The `size()` handler of infinite collections returns `Infinity`
+ *  Infinite collections are not indexable, they have no `at()` handler.
+ *
+ */
+export type CollectionHandlers = {
+  /** Return an iterator
+   * - start is optional and is a 1-based index.
+   * - if start is not specified, start from index 1
+   * - count is optional and is the number of elements to return
+   * - if count is not specified or negative, return all the elements from start to the end
+   *
+   * If there is a `keys()` handler, there is no `iterator()` handler.
+   */
+  iterator: (
+    expr: BoxedExpression,
+    start?: number,
+    count?: number
+  ) => Iterator<BoxedExpression>;
+
+  /** Return the element at the specified index.
+   * The first element is `at(1)`, the last element is `at(-1)`.
+   * If the index is <0, return the element at index `size() + index + 1`.
+   * The index can also be a string for example for dictionaries.
+   * If the index is invalid, return `undefined`.
+   */
+  at: (
+    expr: BoxedExpression,
+    index: number | string
+  ) => undefined | BoxedExpression;
+
+  /** Return the number of elements in the collection.
+   * An empty collection has a size of 0.
+   */
+  size: (expr: BoxedExpression) => number;
+
+  /**
+   * If the collection is indexed by strings, return the valid values
+   * for the index.
+   */
+  keys: (expr: BoxedExpression) => undefined | Iterator<string>;
+
+  /**
+   * Return the index of the first element that matches the target expression.
+   * The comparison is done using the `target.isEqual()` method.
+   * If the expression is not found, return `undefined`.
+   * If the expression is found, return the index, 1-based.
+   * If the expression is found multiple times, return the index of the first
+   * match.
+   *
+   * From is the starting index for the search. If negative, start from the end
+   * and search backwards.
+   */
+  indexOf: (
+    expr: BoxedExpression,
+    target: BoxedExpression,
+    from?: number
+  ) => number | string | undefined;
+};
+
+/**
  * Definition record for a function.
  *
  */
 export type FunctionDefinition = BaseDefinition &
+  Partial<CollectionHandlers> &
   Partial<FunctionDefinitionFlags> & {
     /**
      * A number used to order arguments.
@@ -1786,6 +1854,7 @@ export type FunctionDefinition = BaseDefinition &
   };
 
 export type BoxedFunctionDefinition = BoxedBaseDefinition &
+  Partial<CollectionHandlers> &
   FunctionDefinitionFlags & {
     complexity: number;
     hold: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
@@ -1830,7 +1899,7 @@ export type SymbolFlags = {
   odd: boolean | undefined;
 
   prime: boolean | undefined;
-  composite: boolean | undefined;
+  composite: boolean | undefined; // True if not a prime number
 };
 
 export type SymbolAttributes = {
@@ -1878,42 +1947,15 @@ export type SymbolDefinition = BaseDefinition &
   Partial<SymbolAttributes> & {
     domain?: string | BoxedDomain;
 
-    /** `value` can be a function since for some constants, such as
+    /** `value` can be a JS function since for some constants, such as
      * `Pi`, the actual value depends on the `precision` setting of the
-     * `ComputeEngine` */
+     * `ComputeEngine` and possible other environment settings */
     value?:
       | LatexString
       | SemiBoxedExpression
       | ((ce: IComputeEngine) => SemiBoxedExpression | null);
 
     flags?: Partial<SymbolFlags>;
-
-    /**
-     * If this symbol is an indexable collection, return the
-     * element at the provided index.
-     */
-    // @todo at?: (index: string | number) => SemiBoxedExpression;
-
-    /**
-     * If this symbol is a finite collection, return the number
-     * of elements in the collection.
-     */
-    // @todosize?: () => number;
-
-    /**
-     * If this symbol is an iterable collection, return
-     * an iterator.
-     */
-    // @todo iterator?: {
-    //   next: () => null | BoxedExpression;
-    //   hasNext: () => boolean;
-    // };
-    // @todo reverseIterator?: {
-    //   next: () => null | BoxedExpression;
-    //   hasNext: () => boolean;
-    // };
-
-    // unit?: SemiBoxedExpression;
   };
 
 export interface BoxedSymbolDefinition
@@ -1924,10 +1966,6 @@ export interface BoxedSymbolDefinition
   set value(val: SemiBoxedExpression | number | undefined);
 
   domain: BoxedDomain | undefined;
-
-  // @todo unit?: BoxedExpression;
-
-  at?: (index: string | number) => undefined | BoxedExpression;
 }
 
 export type AssumeResult =

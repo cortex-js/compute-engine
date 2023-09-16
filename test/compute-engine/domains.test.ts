@@ -42,11 +42,11 @@ describe('INFERRED DOMAINS', () => {
     ));
   test('["Range", 1, 5]', () =>
     expect(engine.box(['Range', 1, 5]).domain.json).toMatchInlineSnapshot(
-      `["Domain", "Void"]`
+      `["Domain", "Value"]`
     ));
   test('["Range", 1, 5]', () =>
     expect(engine.box(['Range', 1, 5]).domain.json).toMatchInlineSnapshot(
-      `["Domain", "Void"]`
+      `["Domain", "Value"]`
     ));
 
   // The symbol `Sin` references the sine function
@@ -88,7 +88,7 @@ describe('CANONICAL DOMAINS', () => {
   test("['Range', -Infinity, Infinity]", () =>
     expect(
       engine.box(['Range', -Infinity, Infinity]).domain.json
-    ).toMatchInlineSnapshot(`["Domain", "Void"]`));
+    ).toMatchInlineSnapshot(`["Domain", "Value"]`));
 });
 
 describe('DOMAIN LITERALS', () => {

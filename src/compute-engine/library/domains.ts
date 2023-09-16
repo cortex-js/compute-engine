@@ -155,7 +155,7 @@ const DOMAIN_LITERAL = {
   List: 'Collection',
   Dictionary: 'Collection',
   Sequence: 'Collection',
-  Tuple: 'Sequence',
+  Tuple: 'Collection',
   Set: 'Collection',
   InfiniteSet: 'Set',
   FiniteSet: 'Set',

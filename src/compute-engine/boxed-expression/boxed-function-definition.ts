@@ -5,6 +5,7 @@ import {
   RuntimeScope,
   BoxedFunctionSignature,
   BoxedDomain,
+  BoxedExpression,
 } from '../public';
 import { DEFAULT_COMPLEXITY } from './order';
 
@@ -28,6 +29,23 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
   dynamic: boolean;
 
   signature: BoxedFunctionSignature;
+
+  iterator?: (
+    expr: BoxedExpression,
+    start?: number,
+    count?: number
+  ) => Iterator<BoxedExpression>;
+  at?: (
+    expr: BoxedExpression,
+    index: number | string
+  ) => undefined | BoxedExpression;
+  size?: (expr: BoxedExpression) => number;
+  keys?: (expr: BoxedExpression) => undefined | Iterator<string>;
+  indexOf?: (
+    expr: BoxedExpression,
+    target: BoxedExpression,
+    from?: number
+  ) => number | string | undefined;
 
   constructor(ce: IComputeEngine, name: string, def: FunctionDefinition) {
     if (!ce.context) throw Error('No context available');
@@ -58,6 +76,13 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     this.complexity = def.complexity ?? DEFAULT_COMPLEXITY;
 
     this.hold = def.hold ?? 'none';
+
+    // Collection handlers
+    if (def.iterator) this.iterator = def.iterator;
+    if (def.at) this.at = def.at;
+    if (def.size) this.size = def.size;
+    if (def.keys) this.keys = def.keys;
+    if (def.indexOf) this.indexOf = def.indexOf;
 
     if (this.inert) {
       if (def.hold)

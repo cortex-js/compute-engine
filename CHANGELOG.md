@@ -1,6 +1,33 @@
-## 0.15.0 
+## [Unreleased]
 
- **Release Date:** 2023-09-14
+## Improvements
+
+- Added support for **collections** such as lists, tuples, ranges, etc... See
+  https://cortexjs.io/compute-engine/reference/collections/
+
+  Collections can be used to represent various data structures, such as lists,
+  vectors, matrixes and more.
+
+  The can be iterated, sliced, filtered, mapped, etc...
+
+  ```mathjson
+  ["Length", ["List", 19, 23, 5]]
+  // -> 3
+
+  ["IsEmpty", ["Range", 1, 10]]
+  // -> "False"
+
+  ["Take", ["List", 2, 5, 7], 2]
+  // -> ["List", 5]
+
+  ["Drop", ["List", 33, 45, 12, 89, 65], -2, 2]
+  // -> ["List", 33, 12, 65]
+
+  ```
+
+## 0.15.0
+
+**Release Date:** 2023-09-14
 
 ## Improvements
 

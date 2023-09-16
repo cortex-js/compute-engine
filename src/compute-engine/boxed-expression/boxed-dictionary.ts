@@ -89,10 +89,10 @@ export class BoxedDictionary extends AbstractBoxedExpression {
   }
 
   get domain(): BoxedDomain {
-    const result: SemiBoxedExpression[] = ['Dictionary'];
-    for (const [k, v] of this._value) result.push(['Tuple', k, v.domain]);
+    // const result: SemiBoxedExpression[] = ['Dictionary'];
+    // for (const [k, v] of this._value) result.push(['Tuple', k, v.domain]);
 
-    return this.engine.domain(result);
+    return this.engine.domain('Dictionary');
   }
 
   get json(): Expression {

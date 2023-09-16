@@ -278,7 +278,7 @@ function makeCanonical(
   if (dom instanceof _BoxedDomain) return dom._value;
 
   if (typeof dom === 'string') {
-    if (!isDomainLiteral(dom)) throw Error('Unknown domain literal');
+    if (!isDomainLiteral(dom)) throw Error(`Unknown domain literal "${dom}"`);
     return dom;
   }
 

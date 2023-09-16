@@ -17,94 +17,7 @@ export const CORE_LIBRARY: IdTable[] = [
   {
     Nothing: { domain: 'Nothing' },
   },
-  //
-  // Data Structures
-  //
-  {
-    List: {
-      complexity: 8200,
-      signature: {
-        domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'List'],
-      },
-    },
-    KeyValuePair: {
-      description: 'A key/value pair',
-      complexity: 8200,
-      signature: {
-        domain: [
-          'Function',
-          'String',
-          'Anything',
-          ['Tuple', 'String', 'Anything'],
-        ],
-        codomain: (ce, args) => ce.domain(['Tuple', 'String', args[1].domain]),
-        canonical: (ce, args) => {
-          const key = validateArgument(ce, args[0]?.canonical, 'String');
-          const value = validateArgument(ce, args[1]?.canonical, 'Value');
-          return ce.tuple([key, value]);
-        },
-      },
-    },
-    Single: {
-      description: 'A tuple with a single element',
-      complexity: 8200,
-      signature: {
-        domain: ['Function', 'Anything', ['Tuple', 'Anything']],
-        codomain: (ce, args) => ce.domain(['Tuple', args[0].domain]),
-        canonical: (ce, ops) =>
-          ce.tuple(validateArgumentCount(ce, canonical(ops), 1)),
-      },
-    },
-    Pair: {
-      description: 'A tuple of two elements',
-      complexity: 8200,
-      signature: {
-        domain: [
-          'Function',
-          'Anything',
-          'Anything',
-          ['Tuple', 'Anything', 'Anything'],
-        ],
 
-        codomain: (ce, args) =>
-          ce.domain(['Tuple', args[0].domain, args[1].domain]),
-        canonical: (ce, ops) =>
-          ce.tuple(validateArgumentCount(ce, canonical(ops), 2)),
-      },
-    },
-    Triple: {
-      description: 'A tuple of three elements',
-      complexity: 8200,
-      signature: {
-        domain: [
-          'Function',
-          'Anything',
-          'Anything',
-          'Anything',
-          ['Tuple', 'Anything', 'Anything', 'Anything'],
-        ],
-
-        codomain: (ce, args) =>
-          ce.domain(['Tuple', args[0].domain, args[1].domain, args[2].domain]),
-        canonical: (ce, ops) =>
-          ce.tuple(validateArgumentCount(ce, canonical(ops), 3)),
-      },
-    },
-    Tuple: {
-      description: 'A fixed number of heterogeneous elements',
-      complexity: 8200,
-      signature: {
-        domain: [
-          'Function',
-          ['Sequence', 'Anything'],
-          ['Tuple', ['Sequence', 'Anything']],
-        ],
-        canonical: (ce, ops) => ce.tuple(canonical(ops)),
-        codomain: (ce, args) =>
-          ce.domain(['Tuple', ...args.map((x) => x.domain)]),
-      },
-    },
-  },
   //
   // Inert functions
   //
@@ -358,10 +271,12 @@ export const CORE_LIBRARY: IdTable[] = [
           // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
           // or an indexable collection?
           if (op1.symbol) {
-            // Indexable collection?
-            if (op1.symbolDefinition?.at)
-              return ce._fn('At', [op1, op2.canonical]);
-
+            // Is the value of the symbol an indexable collection?
+            const vh = op1.value?.head;
+            if (vh) {
+              const def = ce.lookupFunction(vh);
+              if (def?.at) return ce._fn('At', [op1, op2.canonical]);
+            }
             // Maybe a compound symbol
             const sub =
               op2.string ?? op2.symbol ?? asSmallInteger(op2)?.toString();
