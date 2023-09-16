@@ -50,7 +50,7 @@ If _body_ is a `["Function"]` expression, the named arguments of `["Function"]`
 are replaced by the wildcards.
 
 
-```json
+```json example
 ["Apply", ["Multiply", "\_", "\_"], 3]
 // ➔ 9
 ["Apply", ["Function", "x", ["Multiply", "x", "x"]], 3]

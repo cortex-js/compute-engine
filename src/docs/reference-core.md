@@ -245,7 +245,7 @@ strings
 
 Evaluate to a new symbol made of a concatenation of the arguments.
 
-```mathjson
+```json example
 ["Symbol", "x", 2] 
 // -> "x2"
 ```
@@ -270,7 +270,7 @@ Evaluate to a new symbol made of a concatenation of the arguments.
 - <code>_expr_</code>: a MathJSON expression
 - Returns a LaTeX string representing the expression.
 
-```json
+```json example
 ["Latex", ["Divide", "Pi", 2]]
 // ➔ "'\frac{\pi}{2}'"
 ```
@@ -295,7 +295,7 @@ The arguments <code>_token-n_</code> are interpreted as LaTeX tokens:
 
 </div>
 
-```json
+```json example
 ["LatexTokens", "'\\frac'", "'<{>'", "'pi'", "'<}>'", "'<{>'", 2, "'<}>'"]
 // ➔ "'\frac{\pi}{2}'"
 ```

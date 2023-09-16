@@ -46,7 +46,7 @@ The evaluation of a `["Block"]` expression follows these steps:
     Otherwise, the value of the `["Block"]` expression is the value of the last 
     expression
 
-```json
+```json example
 ["Block", ["Tuple", "c", 5], ["Multiply", "c", 2]]
 // ➔ 10
 ```
@@ -69,7 +69,7 @@ expression is `_expr-1_`, otherwise `Nothing`.
 expression is `_expr-1_`, otherwise `_expr-2_`.
 
 
-```json
+```json example
 ["Value", "n", -10]
 ["If", ["Greater", "n", 0], "n", ["Negate", "n"]]
 // ➔ 10
@@ -102,7 +102,7 @@ element
 
 To use a named argument, use a `["Function"]` expression for the `body`.
 
-```json
+```json example
 ["Loop", ["Print", ["Square", "_"]], ["Range", 5]]
 // ➔ 1 4 9 16 25
 ["Loop", ["Function", "x", ["Print", ["Square", "x"]]], ["Range", 5]]
@@ -144,7 +144,7 @@ to skip to the next iteration.
 Evaluate to `[_body_, [_body_, _initial-value_, _elem-1_], _elem-2]]...` where
 _elem-1_ and _elem-2_ are the first two elements from the iterator.
 
-```json
+```json example
 ["Fold", "Multiply", ["List", 5, 7, 11]]
 // ➔ 385
 ```
@@ -166,7 +166,7 @@ See above for the definition of _iterator_.
 To exit the loop early, _body_ should evaluate to a `["Break"]` expression, 
 a `["Continue"]` expression or a `["Return"]` expression.
 
-```json
+```json example
 ["Loop", ["Print", ["Square", "_"]], ["Range", 5]]
 // ➔ 1 4 9 16 25
 ["Loop", ["Function", "x", ["Print", ["Square", "x"]]], ["Range", 5]]
@@ -185,7 +185,7 @@ elements are numbers, the result is a number. Otherwise it is a simplified list.
 
 Equivalent to `["Fold", "Multiply", _iterator_]`.
 
-```json
+```json example
 ["Product", ["List", 5, 7, 11]]
 // ➔ 385
 ["Product", ["List", 5, "x", 11]]
@@ -213,7 +213,7 @@ elements are numbers, the result is a number. Otherwise it is a simplified list.
 
 Equivalent to `["Fold", "Add", _iterator_]`.
 
-```json
+```json example
 ["Sum", ["List", 5, 7, 11]]
 // ➔ 23
 ["Sum", ["List", 5, "x", 11]]

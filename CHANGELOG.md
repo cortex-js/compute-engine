@@ -10,7 +10,7 @@
 
   The can be iterated, sliced, filtered, mapped, etc...
 
-  ```mathjson
+  ```json example
   ["Length", ["List", 19, 23, 5]]
   // -> 3
 
@@ -329,7 +329,7 @@ Work around unpckg.com issue with libraries using BigInt.
   in the MathJSON serialization.
 - Shorthand numbers can now be strings if they do not fit in a float-64:
 
-```json
+```json example
 // Before
 ["Rational", { "num": "1234567890123456789"}, { "num": "2345678901234567889"}]
 

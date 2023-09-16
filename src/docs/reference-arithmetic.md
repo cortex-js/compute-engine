@@ -122,7 +122,7 @@ The sign of _integer_ is ignored.
 - _value_ should be an integer.
 - _base_ should be an integer from 2 to 36.
 
-```json
+```json example
 ["Latex", ["BaseForm", 42, 16]]
 // ➔ (\text(2a))_{16}
 ```
@@ -149,7 +149,7 @@ String(BaseForm(42, 16))
 If `_lower_` and `_upper_` are not provided, they take the default values of -1
 and +1.
 
-```json
+```json example
 ["Clamp", 0.42]
 // ➔ 5
 ["Clamp", 4.2]
@@ -175,7 +175,7 @@ of the arguments.
 Otherwise, simplify the expression by removing values that are smaller than or
 equal to the largest real number.
 
-```json
+```json example
 ["Max", 5, 2, -1]
 // ➔ 5
 ["Max", 0, 7.1, "NaN", "x", 3]

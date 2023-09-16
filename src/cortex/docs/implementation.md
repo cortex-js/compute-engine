@@ -21,7 +21,7 @@ straightforward:
 Print("x =", x)
 ```
 
-```json
+```json example
 ["Print", "'x ='", "x"]
 ```
 
@@ -32,7 +32,7 @@ Print("x =", x)
 "The solution is \(x)"
 ```
 
-```json
+```json example
 ["String", "'The solution is '", "x"]
 ```
 
@@ -42,7 +42,7 @@ Print("x =", x)
 2x + 1
 ```
 
-```json
+```json example
 ["Add", ["Multiply", 2, "x"], 1]
 ```
 
@@ -56,19 +56,19 @@ tuple = (1.5, 0.5)
 sequence = 2, 5, 7
 ```
 
-```json
+```json example
 ["Equal", "set", ["Set", 2, 5, 7, 11, 13]]
 ```
 
-```json
+```json example
 [("Equal", "list", ["List", 2, 7, 2, 4, 2])]
 ```
 
-```json
+```json example
 [("Equal", "tuple", ["Tuple", 1.5, 0.5])]
 ```
 
-```json
+```json example
 [("Equal", "sequence", ["Sequence", 2, 5, 7])]
 ```
 
@@ -83,7 +83,7 @@ if (x in PrimeNumber) {
 }
 ```
 
-```json
+```json example
 [
   "If",
   ["Element", "x", "PrimeNumber"],

@@ -159,7 +159,7 @@ A domain constructor is a function expression with one of the identifiers below.
 
 **To define a new domain** use a domain constructor.
 
-```json
+```json example
 // Range of non-negative integers
 ["Range", 0, {num: "+Infinity"}]
 

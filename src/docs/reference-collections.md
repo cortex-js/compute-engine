@@ -14,7 +14,7 @@ Collections are used to represent data structures.
 A frequently used collection is the `List` which is used to represent an ordered
 sequence of elements.
 
-```mathjson
+```json example
 ["List", 42, 3.14, "x", "y"]
 ```
 
@@ -22,7 +22,7 @@ sequence of elements.
 
 Lists can be used to represent **vectors**.
 
-```mathjson
+```json example
 ["List", 1, 2, 3]
 ```
 
@@ -30,7 +30,7 @@ Lists can be used to represent **vectors**.
 
 A list of lists can be used to represent a **matrix**.
 
-```mathjson
+```json example
 ["List", ["List", 1, 2, 3], ["List", 4, 5, 6], ["List", 7, 8, 9]]
 ```
 
@@ -47,7 +47,7 @@ And matrixes can be represented using LaTeX environments:
 Another common collection is the `Range` which is used to represent a sequence
 of numbers.
 
-```mathjson
+```json example
 ["Range", 1, 10]
 ```
 
@@ -56,14 +56,14 @@ of numbers.
 Collection operations such as `IsEmpty`, `Take`, `IndexOf` can be applied to any
 collection types.
 
-```mathjson
+```json example
 ["Take", ["List", 2, 5, 7], 2]
 // -> 5
 ```
 
 {% latex "\\lbrack 2, 5, 7 \\rbrack_{2}" %}
 
-```mathjson
+```json example
 ["Take", ["Range", 2, 10], 5]
 // -> 7
 ```
@@ -151,7 +151,7 @@ Returns the number of elements in the collection.
 
 Note this can also be used to get the length of a string.
 
-```mathjson
+```json example example
 ["Length", ["List", 5, 2, 10, 18]]
 // -> 4
 
@@ -167,7 +167,7 @@ Note this can also be used to get the length of a string.
 
 Returns the symbol `True` if the collection is empty.
 
-```mathjson
+```json example
 ["IsEmpty", ["List", 5, 2, 10, 18]]
 // -> False
 
@@ -191,9 +191,10 @@ _collection_, _index1_, _index2_]{.signature}
 
 Returns a list of the elements at the specified indexes.
 
-```mathjson
+```json example
 ["Take", ["List", 5, 2, 10, 18], 2]
 // -> ["List", 10]
+
 ["Take", ["List", 5, 2, 10, 18], -2, 1]
 // -> ["List", 10, 5]
 ```
@@ -208,9 +209,10 @@ Each range is specified as a tuple with the following elements:
 - `end`: the ending index of the range
 - `step`: the step of the range (1 if not omitted)
 
-```mathjson
+```json example
 ["Take", ["List", 5, 2, 10, 18], ["Tuple", 2, 3]]
 // -> ["List", 10, 18]
+
 ["Take", ["List", 5, 2, 10, 18], ["Tuple", 1, -1, 2]]
 // -> ["List", 5, 10]
 ```
@@ -218,7 +220,7 @@ Each range is specified as a tuple with the following elements:
 The elements are returned in the order in which they're specified. Using
 negative indexes (or ranges) reverses the order of the elements.
 
-```mathjson
+```json example
 ["Take", ["List", 5, 2, 10, 18], ["Tuple", -1, 1]]
 // -> ["List", 18, 10, 2, 5]
 
@@ -235,9 +237,10 @@ negative indexes (or ranges) reverses the order of the elements.
 Drop is the opposite of `Take`. It returns a list of the elements that are not
 at the specified indexes.
 
-```mathjson
+```json example
 ["Drop", ["List", 5, 2, 10, 18], 2]
 // -> ["List", 5, 10, 18]
+
 ["Drop", ["List", 5, 2, 10, 18], -2, 1]
 // -> ["List", 2, 18]
 ```
@@ -246,10 +249,11 @@ at the specified indexes.
 
 It also accepts a list of ranges.
 
-```mathjson
+```json example
 ["Drop", ["List", 5, 2, 10, 18], ["Tuple", 2, 3]]
 // -> ["List", 5, 2]
 ["Drop", ["List", 5, 2, 10, 18], ["Tuple", 1, -1, 2]]
+
 // -> ["List", 2, 18]
 ```
 

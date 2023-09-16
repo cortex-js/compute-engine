@@ -106,7 +106,7 @@ Evaluate to a list of the n<sup>th</sup> roots of a number _z_.
 The complex roots of a number are the solutions of the equation \\(z^n = a\\).
 
 
-```mathjson
+```json example
 // The three complex roots of unity (1)
 ["ComplexRoots", 1, 3]
 // ➔ [1, -1/2 + sqrt(3)/2, -1/2 - sqrt(3)/2]

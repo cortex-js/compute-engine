@@ -37,7 +37,7 @@ The formula for the mean of a list of numbers is \\( \bar{x} = \frac{1}{n}
 \sum\_{i=1}^n x_i\\), where \\(n\\) is the number of numbers in the list, and
 \\(x_i\\) is the \\(i\\)-th number in the list.
 
-```mathjson
+```json example
 ["Mean", ["List", 7, 8, 3.1, 12, 77]]
 // 21.02
 ```
@@ -56,7 +56,7 @@ middle value of the list. If the list has an odd number of elements, the median
 is the middle element. If the list has an even number of elements, the median is
 the average of the two middle elements.
 
-```mathjson
+```json example
 ["Median", ["List", 1, 2, 3, 4, 5]]
 // 3
 ```
@@ -139,7 +139,7 @@ deviation of the list.
 
 {% def "Kurtosis" %}
 
-<div class="signature">["<strong>Kurtosis</strong>", <i>list</i>]</div>
+[&quot;**Kurtosis**&quot;, _list_]{.signature}
 
 Evaluate to the **kurtosis** of a list of numbers.
 
@@ -172,9 +172,12 @@ So, \\(\operatorname{median} = \operatorname{quantile}(0.5)\\).
 
 {% enddef %}
 
+
+
 {% def "Quartiles" %}
 
-<div class="signature">["<strong>Quartiles</strong>", <i>list</i>]</div>
+
+[&quot;**Quartiles**&quot;, _list_]{.signature}
 
 Evaluate to the **quartiles** of a list of numbers.
 
@@ -182,6 +185,8 @@ The quartiles are the three points that divide a list of numbers into four equal
 groups, each group comprising a quarter of the list.
 
 {% enddef %}
+
+
 
 {% def "InterquartileRange" %}
 

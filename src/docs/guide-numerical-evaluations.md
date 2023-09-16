@@ -269,7 +269,7 @@ that the display precision is never greater than the computation precision.
 When using the `bignum` mode, the return value of `expr.N().json` may be a
 MathJSON number that looks like this:
 
-```json
+```json example
 {
   "num": "3.141592653589793238462643383279502884197169399375105820974944592307
   8164062862089986280348253421170679821480865132823066470938446095505822317253

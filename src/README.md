@@ -170,7 +170,7 @@ A MathJSON expression is a combination of **numbers**, **symbols**, **strings**,
 
 **Number**
 
-```json
+```json example
 3.14
 314e-2
 {"num": "3.14159265358979323846264338327950288419716939937510"}
@@ -179,7 +179,7 @@ A MathJSON expression is a combination of **numbers**, **symbols**, **strings**,
 
 **Symbol**
 
-```json
+```json example
 "x"
 "Pi"
 "🍎"
@@ -189,21 +189,21 @@ A MathJSON expression is a combination of **numbers**, **symbols**, **strings**,
 
 **String**
 
-```json
+```json example
 "'Diameter of a circle'"
 {"str": "Srinivasa Ramanujan"}
 ```
 
 **Function**
 
-```json
+```json example
 ["Add", 1, "x"]
 {"fn": [{sym: "Add"}, {num: "1"}, {sym: "x"}]}
 ```
 
 **Dictionary**
 
-```json
+```json example
 {
   "dict": {
     "hello": 3,
@@ -258,7 +258,7 @@ the following differences:
   more digits enclosed in parentheses), that pattern should be interpreted as
   repeating digits.
 
-```json
+```json example
 {  "num": "1.(3)" }
 {  "num": "0.(142857)" }
 {  "num": "0.(142857)e7" }
@@ -291,7 +291,7 @@ Specifically:
   64-bit float (**IEEE 754-2008**, 52-bit, about 15 digits of precision).
 - the number is finite: it is not `+Infinity` `-Infinity` or `NaN`.
 
-```json
+```json example
 0
 
 -234.534e-46
@@ -317,7 +317,7 @@ string following the format described above.
 This allows for a shorthand representation of numbers with a higher precision or
 greater range than JSON numbers.
 
-```json
+```json example
 "3.14159265358979323846264338327950288419716"
 "+Infinity"
 ```
@@ -352,7 +352,7 @@ the following characters must be escaped as indicated:
 The encoding of the string follows the encoding of the JSON payload: UTF-8,
 UTF-16LE, UTF-16BE, etc...
 
-```json
+```json example
 "'Alan Turing'"
 ```
 
@@ -401,7 +401,7 @@ If a **function** has no extra metadata it may be represented as a JSON array.
 
 For example these two expressions are equivalent:
 
-```json
+```json example
 { "fn": ["Cos", ["Add", "x", 1]] }
 
 ["Cos", ["Add", "x", 1]]
@@ -421,7 +421,7 @@ The head is usually an identifier, but it may also be another expression.
 - If the head is an identifier, it should follow the conventions for function
   names (see below).
 
-  ```json
+  ```json example
   // Apply the function "Sin" to the argument "x"
   ["Sin", "x"]
   // Apply "Cos" to a function expression
@@ -432,7 +432,7 @@ The head is usually an identifier, but it may also be another expression.
   represent the first argument, `_2` to represent the second argument, etc...
   The wildcard `__` represents the sequence of all the arguments.
 
-  ```json
+  ```json example
   [["Multiply", "_", "_"], 4]
   ```
 
@@ -445,7 +445,7 @@ argument which is a list, use a `["List"]` expression, do not use an array.
 
 The expression corresponding to \\(\sin^{-1}(x)\\) is:
 
-```json
+```json example
 [["InverseFunction", "Sin"], "x"]
 ```
 
@@ -769,7 +769,7 @@ The keys are strings and the values are MathJSON expressions.
 A **dictionary** is represented as an object literal with a `"dict"` key. The
 value of the key is a JSON object literal holding the content of the dictionary.
 
-```json
+```json example
 {
   "dict": {
     "first": 1,
@@ -782,7 +782,7 @@ value of the key is a JSON object literal holding the content of the dictionary.
 An alternate representation of a dictionary is as a `["Dictionary"]` function
 expression, but this is quite a bit more verbose:
 
-```json
+```json example
 [
   "Dictionary",
   ["KeyValuePair", "'first'", 1],
@@ -816,7 +816,7 @@ The following metadata keys are recommended:
 
 </div>
 
-```json
+```json example
 {
   "sym": "Pi",
   "comment": "The ratio of the circumference of a circle to its diameter",
