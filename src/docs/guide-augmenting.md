@@ -55,6 +55,7 @@ After a symbol or function is declared, its domain cannot be changed: other
 expressions may depend on it, and changing its domain would invalidate them.
 
 {% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
+<strong>scopes</strong> {% endreadmore %}
 
 ## Declaring a Symbol
 
