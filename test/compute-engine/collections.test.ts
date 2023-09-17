@@ -6,12 +6,37 @@ function evaluate(expr: Expression): string {
 }
 
 const emptyList: Expression = ['List'];
-const list: Expression = ['List', 1, 2, 3];
+const list: Expression = ['List', 7, 13, 5, 19, 2, 3, 11];
+
+const list1: Expression = ['List', 100, 4, 2, 62, 34, 16, 8];
+const list2: Expression = ['List', 9, 7, 2, 24];
+
+// List with repeated elements
+const list3: Expression = [
+  'List',
+  3,
+  5,
+  7,
+  7,
+  1,
+  3,
+  5,
+  9,
+  7,
+  3,
+  5,
+  7,
+  1,
+  2,
+  5,
+  9,
+];
+
 const matrix: Expression = [
   'List',
-  ['List', 1, 2, 3],
-  ['List', 4, 5, 6],
-  ['List', 7, 8, 9],
+  ['List', 2, 3, 4],
+  ['List', 6, 7, 9],
+  ['List', 11, 12, 13],
 ];
 const range: Expression = ['Range', 2, 19, 2];
 const linspace: Expression = ['Linspace', 2, 100, 89];
@@ -26,7 +51,7 @@ describe('LENGTH', () => {
     expect(evaluate(['Length', emptyList])).toEqual('0'));
 
   test('Length list', () =>
-    expect(evaluate(['Length', list])).toMatchInlineSnapshot(`3`));
+    expect(evaluate(['Length', list])).toMatchInlineSnapshot(`7`));
 
   test('Length matrix', () =>
     expect(evaluate(['Length', matrix])).toMatchInlineSnapshot(`3`));
@@ -54,107 +79,109 @@ describe('LENGTH', () => {
 });
 
 describe('TAKE 1', () => {
-  test('Length empty list', () =>
+  test('empty list', () =>
     expect(evaluate(['Take', emptyList, 1])).toMatchInlineSnapshot(`["List"]`));
 
-  test('Length list', () =>
-    expect(evaluate(['Take', list, 1])).toMatchInlineSnapshot(`["List", 1]`));
+  test('list', () =>
+    expect(evaluate(['Take', list, 1])).toMatchInlineSnapshot(`["List", 7]`));
 
-  test('Length matrix', () =>
+  test('matrix', () =>
     expect(evaluate(['Take', matrix, 1])).toMatchInlineSnapshot(
-      `["List", ["List", 1, 2, 3]]`
+      `["List", ["List", 2, 3, 4]]`
     ));
 
-  test('Length range', () =>
+  test('range', () =>
     expect(evaluate(['Take', range, 1])).toMatchInlineSnapshot(`["List", 2]`));
 
-  test('Length linspace', () =>
+  test('linspace', () =>
     expect(evaluate(['Take', linspace, 1])).toMatchInlineSnapshot(
       `["List", 2]`
     ));
 
-  test('Length string', () =>
+  test('string', () =>
     expect(evaluate(['Take', string, 1])).toMatchInlineSnapshot(`'h'`));
 
-  test('Length expression', () =>
+  test('expression', () =>
     expect(evaluate(['Take', expression, 1])).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length symbol', () =>
+  test('symbol', () =>
     expect(evaluate(['Take', symbol, 1])).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length dict', () =>
+  test('dict', () =>
     expect(evaluate(['Take', dict, 1])).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length tuple', () =>
-    expect(evaluate(['Take', tuple, 1])).toMatchInlineSnapshot(`Nothing`));
+  test('tuple', () =>
+    expect(evaluate(['Take', tuple, 1])).toMatchInlineSnapshot(`["List", 7]`));
 });
 
 describe('TAKE (2,3)', () => {
-  test('Length empty list', () =>
+  test('empty list', () =>
     expect(evaluate(['Take', emptyList, 2, 3])).toMatchInlineSnapshot(
       `["List"]`
     ));
 
-  test('Length list', () =>
+  test('list', () =>
     expect(evaluate(['Take', list, 2, 3])).toMatchInlineSnapshot(
-      `["List", 2, 3]`
+      `["List", 13, 5]`
     ));
 
-  test('Length matrix', () =>
+  test('matrix', () =>
     expect(evaluate(['Take', matrix, 2, 3])).toMatchInlineSnapshot(
-      `["List", ["List", 4, 5, 6], ["List", 7, 8, 9]]`
+      `["List", ["List", 6, 7, 9], ["List", 11, 12, 13]]`
     ));
 
-  test('Length range', () =>
+  test('range', () =>
     expect(evaluate(['Take', range, 2, 3])).toMatchInlineSnapshot(
       `["List", 4, 6]`
     ));
 
-  test('Length linspace', () =>
+  test('linspace', () =>
     expect(evaluate(['Take', linspace, 2, 3])).toMatchInlineSnapshot(
       `["List", 3.101123595505618, 4.202247191011236]`
     ));
 
-  test('Length string', () =>
+  test('string', () =>
     expect(evaluate(['Take', string, 2, 3])).toMatchInlineSnapshot(`'el'`));
 
-  test('Length expression', () =>
+  test('expression', () =>
     expect(evaluate(['Take', expression, 2, 3])).toMatchInlineSnapshot(
       `Nothing`
     ));
 
-  test('Length symbol', () =>
+  test('symbol', () =>
     expect(evaluate(['Take', symbol, 2, 3])).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length dict', () =>
+  test('dict', () =>
     expect(evaluate(['Take', dict, 2, 3])).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length tuple', () =>
-    expect(evaluate(['Take', tuple, 2, 3])).toMatchInlineSnapshot(`Nothing`)); // @fixme
+  test('tuple', () =>
+    expect(evaluate(['Take', tuple, 2, 3])).toMatchInlineSnapshot(
+      `["List", 10, 13]`
+    )); // @fixme
 });
 
 describe('TAKE [-1,1]', () => {
-  test('Length empty list', () =>
+  test('empty list', () =>
     expect(
       evaluate(['Take', emptyList, ['Tuple', -1, 1]])
     ).toMatchInlineSnapshot(`["List"]`));
 
-  test('Length list', () =>
+  test('list', () =>
     expect(evaluate(['Take', list, ['Tuple', -1, 1]])).toMatchInlineSnapshot(
-      `["List", 3, 2, 1]`
+      `["List", 11, 3, 2, 19, 5, 13, 7]`
     ));
 
-  test('Length matrix', () =>
+  test('matrix', () =>
     expect(evaluate(['Take', matrix, ['Tuple', -1, 1]])).toMatchInlineSnapshot(
-      `["List", ["List", 7, 8, 9], ["List", 4, 5, 6], ["List", 1, 2, 3]]`
+      `["List", ["List", 11, 12, 13], ["List", 6, 7, 9], ["List", 2, 3, 4]]`
     ));
 
-  test('Length range', () =>
+  test('range', () =>
     expect(evaluate(['Take', range, ['Tuple', -1, 1]])).toMatchInlineSnapshot(
       `["List", 16, 14, 12, 10, 8, 6, 4, 2]`
     ));
 
-  test('Length linspace', () =>
+  test('linspace', () =>
     expect(evaluate(['Take', linspace, ['Tuple', -1, 1]]))
       .toMatchInlineSnapshot(`
       [
@@ -251,52 +278,52 @@ describe('TAKE [-1,1]', () => {
       ]
     `));
 
-  test('Length string', () =>
+  test('string', () =>
     expect(evaluate(['Take', string, ['Tuple', -1, 1]])).toMatchInlineSnapshot(
       `'dlrow olleh'`
     ));
 
-  test('Length expression', () =>
+  test('expression', () =>
     expect(
       evaluate(['Take', expression, ['Tuple', -1, 1]])
     ).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length symbol', () =>
+  test('symbol', () =>
     expect(evaluate(['Take', symbol, ['Tuple', -1, 1]])).toMatchInlineSnapshot(
       `Nothing`
     ));
 
-  test('Length dict', () =>
+  test('dict', () =>
     expect(evaluate(['Take', dict, ['Tuple', -1, 1]])).toMatchInlineSnapshot(
       `Nothing`
     ));
 
-  test('Length tuple', () =>
+  test('tuple', () =>
     expect(evaluate(['Take', tuple, ['Tuple', -1, 1]])).toMatchInlineSnapshot(
-      `Nothing`
+      `["List", 13, 10, 7]`
     ));
 });
 
 describe('Drop 2', () => {
-  test('Length empty list', () =>
+  test('empty list', () =>
     expect(evaluate(['Drop', emptyList, 2])).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length list', () =>
+  test('list', () =>
     expect(evaluate(['Drop', list, 2])).toMatchInlineSnapshot(
-      `["List", 1, 3]`
+      `["List", 7, 5, 19, 2, 3, 11]`
     ));
 
-  test('Length matrix', () =>
+  test('matrix', () =>
     expect(evaluate(['Drop', matrix, 2])).toMatchInlineSnapshot(
-      `["List", ["List", 1, 2, 3], ["List", 7, 8, 9]]`
+      `["List", ["List", 2, 3, 4], ["List", 11, 12, 13]]`
     ));
 
-  test('Length range', () =>
+  test('range', () =>
     expect(evaluate(['Drop', range, 2])).toMatchInlineSnapshot(
       `["List", 2, 6, 8, 10, 12, 14, 16]`
     ));
 
-  test('Length linspace', () =>
+  test('linspace', () =>
     expect(evaluate(['Drop', linspace, 2])).toMatchInlineSnapshot(`
       [
         "List",
@@ -391,20 +418,276 @@ describe('Drop 2', () => {
       ]
     `));
 
-  test('Length string', () =>
+  test('string', () =>
     expect(evaluate(['Drop', string, 2])).toMatchInlineSnapshot(
       `'hllo world'`
     ));
 
-  test('Length expression', () =>
+  test('expression', () =>
     expect(evaluate(['Drop', expression, 2])).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length symbol', () =>
+  test('symbol', () =>
     expect(evaluate(['Drop', symbol, 2])).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length dict', () =>
+  test('dict', () =>
     expect(evaluate(['Drop', dict, 2])).toMatchInlineSnapshot(`Nothing`));
 
-  test('Length tuple', () =>
-    expect(evaluate(['Take', tuple, 2])).toMatchInlineSnapshot(`Nothing`));
+  test('tuple', () =>
+    expect(evaluate(['Drop', tuple, 2])).toMatchInlineSnapshot(
+      `["List", 7, 13]`
+    ));
 });
+
+describe('INDEXABLE OPERATIONS', () => {
+  test('At', () =>
+    expect(evaluate(['At', list, 1])).toMatchInlineSnapshot(`7`));
+
+  test('At', () =>
+    expect(evaluate(['At', list, -2])).toMatchInlineSnapshot(`Nothing`));
+
+  test('At', () =>
+    expect(evaluate(['At', list, 1, 2])).toMatchInlineSnapshot(`
+      [
+        "At",
+        ["List", 7, 13, 5, 19, 2, 3, 11],
+        1,
+        ["Error", "'unexpected-argument'", 2]
+      ]
+    `));
+
+  test('At', () =>
+    expect(evaluate(['At', matrix, 1, 2])).toMatchInlineSnapshot(`
+      [
+        "At",
+        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
+        1,
+        ["Error", "'unexpected-argument'", 2]
+      ]
+    `));
+
+  test('First', () =>
+    expect(evaluate(['First', list])).toMatchInlineSnapshot(`7`));
+
+  test('Second', () =>
+    expect(evaluate(['Second', list])).toMatchInlineSnapshot(`13`));
+
+  test('Last', () =>
+    expect(evaluate(['Last', list])).toMatchInlineSnapshot(`Nothing`));
+
+  test('Rest', () =>
+    expect(evaluate(['Rest', list])).toMatchInlineSnapshot(`["List"]`));
+
+  test('Most', () =>
+    expect(evaluate(['Most', list])).toMatchInlineSnapshot(`["List"]`));
+
+  test('RotateLeft', () =>
+    expect(evaluate(['RotateLeft', list1, 2])).toMatchInlineSnapshot(`
+      [
+        "RotateLeft",
+        ["List", 100, 4, 2, 62, 34, 16, 8],
+        ["Error", "'unexpected-argument'", 2]
+      ]
+    `));
+
+  test('RotateRight', () =>
+    expect(evaluate(['RotateRight', list1, 2])).toMatchInlineSnapshot(`
+      [
+        "RotateRight",
+        ["List", 100, 4, 2, 62, 34, 16, 8],
+        ["Error", "'unexpected-argument'", 2]
+      ]
+    `));
+
+  test('Sort', () =>
+    expect(evaluate(['Sort', list])).toMatchInlineSnapshot(
+      `["Sort", ["List", 7, 13, 5, 19, 2, 3, 11]]`
+    ));
+
+  test('Sort', () =>
+    expect(evaluate(['Ordering', list])).toMatchInlineSnapshot(
+      `["Ordering", ["List", 7, 13, 5, 19, 2, 3, 11]]`
+    ));
+
+  // test('Shuffle', () =>
+  //   expect(evaluate(['Shuffle', list])).toMatchInlineSnapshot());
+
+  test('Tally', () =>
+    expect(evaluate(['Tally', list3])).toMatchInlineSnapshot(
+      `["Tally", ["List", 3, 5, 7, 7, 1, 3, 5, 9, 7, 3, 5, 7, 1, 2, 5, 9]]`
+    ));
+
+  test('Unique', () =>
+    expect(evaluate(['Unique', list3])).toMatchInlineSnapshot(
+      `["Unique", ["List", 3, 5, 7, 7, 1, 3, 5, 9, 7, 3, 5, 7, 1, 2, 5, 9]]`
+    ));
+});
+
+describe('ITERABLE OPERATIONS', () => {
+  test('Flatten', () =>
+    expect(evaluate(['Flatten', matrix])).toMatchInlineSnapshot(`
+      [
+        "Flatten",
+        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]]
+      ]
+    `));
+
+  test('Reshape 2x2', () =>
+    expect(evaluate(['Flatten', matrix, ['Tuple', 2, 2]]))
+      .toMatchInlineSnapshot(`
+      [
+        "Flatten",
+        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
+        ["Error", "'unexpected-argument'", ["Pair", 2, 2]]
+      ]
+    `));
+
+  test('Reshape 3x3', () =>
+    expect(evaluate(['Flatten', matrix, ['Tuple', 3, 3]]))
+      .toMatchInlineSnapshot(`
+      [
+        "Flatten",
+        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
+        ["Error", "'unexpected-argument'", ["Pair", 3, 3]]
+      ]
+    `));
+
+  test('Reshape 3x2', () =>
+    expect(evaluate(['Flatten', matrix, ['Tuple', 3, 2]]))
+      .toMatchInlineSnapshot(`
+      [
+        "Flatten",
+        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
+        ["Error", "'unexpected-argument'", ["Pair", 3, 2]]
+      ]
+    `));
+
+  test('Reshape 4x4', () =>
+    expect(evaluate(['Flatten', matrix, ['Tuple', 4, 4]]))
+      .toMatchInlineSnapshot(`
+      [
+        "Flatten",
+        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
+        ["Error", "'unexpected-argument'", ["Pair", 4, 4]]
+      ]
+    `));
+
+  test('Reverse', () =>
+    expect(evaluate(['Reverse', list])).toMatchInlineSnapshot(
+      `["List", 7, 13]`
+    ));
+
+  test('Map', () =>
+    expect(evaluate(['Map', ['Function', 'x', ['Plus', 'x', 1]], list]))
+      .toMatchInlineSnapshot(`
+      [
+        "Map",
+        ["Function", "x", ["Plus", "x", 1]],
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Function"],
+            ["Domain", "List"]
+          ],
+          ["List", 7, 13, 5, 19, 2, 3, 11]
+        ]
+      ]
+    `));
+
+  test('Map', () =>
+    expect(evaluate(['Map', ['Plus', '_', 1], list])).toMatchInlineSnapshot(`
+      [
+        "Map",
+        ["Plus", "_", 1],
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Function"],
+            ["Domain", "List"]
+          ],
+          ["List", 7, 13, 5, 19, 2, 3, 11]
+        ]
+      ]
+    `));
+
+  test('Filter', () =>
+    expect(evaluate(['Filter', ['Greater', '_', 10], list]))
+      .toMatchInlineSnapshot(`
+      [
+        "Filter",
+        ["Less", 10, "_"],
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Function"],
+            ["Domain", "List"]
+          ],
+          ["List", 7, 13, 5, 19, 2, 3, 11]
+        ]
+      ]
+    `));
+
+  test('Reduce', () =>
+    expect(evaluate(['Reduce', ['Plus', '_1', '_2'], list]))
+      .toMatchInlineSnapshot(`
+      [
+        "Reduce",
+        ["Plus", "_1", "_2"],
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Function"],
+            ["Domain", "List"]
+          ],
+          ["List", 7, 13, 5, 19, 2, 3, 11]
+        ]
+      ]
+    `));
+
+  test('Reduce', () =>
+    expect(evaluate(['Reduce', 'Plus', list])).toMatchInlineSnapshot(`
+      [
+        "Reduce",
+        "Plus",
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Function"],
+            ["Domain", "List"]
+          ],
+          ["List", 7, 13, 5, 19, 2, 3, 11]
+        ]
+      ]
+    `));
+
+  test('Zip', () =>
+    expect(evaluate(['Zip', list1, list2])).toMatchInlineSnapshot(
+      `["Zip", ["List", 100, 4, 2, 62, 34, 16, 8], ["List", 9, 7, 2, 24]]`
+    ));
+
+  test('Transpose', () =>
+    expect(evaluate(['Transpose', matrix])).toMatchInlineSnapshot(`
+      [
+        "Transpose",
+        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]]
+      ]
+    `));
+
+  test('Join', () =>
+    expect(evaluate(['Join', list1, list2])).toMatchInlineSnapshot(
+      `["Join", ["List", 100, 4, 2, 62, 34, 16, 8], ["List", 9, 7, 2, 24]]`
+    ));
+});
+
+// describe('NON-ITERABLE OPERATIONS', () => {
+
+// })

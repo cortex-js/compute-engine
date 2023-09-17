@@ -9,25 +9,32 @@ toc: true
 render_math_in_document: true
 ---
 
-In the Compute Engine, **collections** are used to represent data structures. They group together multiple elements into one unit. Each element in a collection is a **Boxed Expression**.
+In the Compute Engine, **collections** are used to represent data structures.
+They group together multiple elements into one unit. Each element in a
+collection is a
+[**Boxed Expression**](https://cortexjs.io/compute-engine/guides/expressions/).
 
-Collections are **immutable**. They cannot be modified. Operations on collections return new collections.
+Collections are **immutable**. They cannot be modified. Operations on
+collections return new collections.
 
-Collections can be **finite** or **infinite**. Finite collections have a finite number of elements. Infinite collections have an infinite number of elements.
+Collections can be **finite** or **infinite**. Finite collections have a finite
+number of elements. Infinite collections have an infinite number of elements.
 
-Collections can be **ordered** or **unordered**. Ordered collections are finite and have a well-defined order for their elements. Unordered collections do not have a well-defined order for their elements.
+Collections can be **ordered** or **unordered**. Ordered collections are finite
+and have a well-defined order for their elements. Unordered collections do not
+have a well-defined order for their elements.
 
-Collections can be **indexable** or **iterable**. Indexable collections can be accessed with a numeric index. Iterable collections can be enumerated one element at a time. Indexable collections are iterable.
+Collections can be **indexable** or **iterable**. Indexable collections can be
+accessed with a numeric index. Iterable collections can be enumerated one
+element at a time. Indexable collections are iterable.
 
-
-A frequently used collection is the `List` collection which is used to represent an ordered, indexable, sequence of elements.
+`List` is an example of a of finite, ordered, indexable collection.
 
 {% latex "\\lbrack 42, 3.14, x, y \\rbrack" %}
 
 ```json example
 ["List", 42, 3.14, "x", "y"]
 ```
-
 
 Lists can be used to represent **vectors**.
 
@@ -56,28 +63,28 @@ And matrixes can be represented using LaTeX environments:
 Another common collection is the `Range` which is used to represent a sequence
 of numbers.
 
+{% latex "\\lbrack 1..10 \\rbrack" %}
+
 ```json example
 ["Range", 1, 10]
 ```
 
-{% latex "\\lbrack 1..10 \\rbrack" %}
-
 Collection operations such as `IsEmpty`, `Take`, `IndexOf` can be applied to any
 collection types.
+
+{% latex "\\lbrack 2, 5, 7 \\rbrack_{2}" %}
 
 ```json example
 ["Take", ["List", 2, 5, 7], 2]
 // -> 5
 ```
 
-{% latex "\\lbrack 2, 5, 7 \\rbrack_{2}" %}
+{% latex "(2..10)_5" %}
 
 ```json example
 ["Take", ["Range", 2, 10], 5]
 // -> 7
 ```
-
-{% latex "(2..10)_5" %}
 
 ## Finite Collections
 
@@ -85,26 +92,25 @@ collection types.
 
 {% def "List" %}
 
-[&quot;**List**&quot;, _expr-1_, ..._expr-2_]{.signature}
+[&quot;**List**&quot;, _x-1_, ..._x-2_]{.signature}
 
-A `List` is an **ordered**, **indexable** collection of elements. An element
-in a list may be repeated.
+A `List` is an **ordered**, **indexable** collection of elements. An element in
+a list may be repeated.
 
 The visual presentation of a `List` expression can be customized using the
 `Delimiter` function.
 
 ```js example
-ce.box(["List", 5, 2, 10, 18]).latex
+ce.box(['List', 5, 2, 10, 18]).latex;
 // -> "\\lbrack 5, 2, 10, 18 \\rbrack"
 
-ce.box(["Delimiter", ["List", 5, 2, 10, 18], "<>;"]).latex
+ce.box(['Delimiter', ['List', 5, 2, 10, 18], '<>;']).latex;
 // -> "\\langle5; 2; 10; 18\\rangle"
 ```
 
-
 | MathJSON                        | LaTeX                              |
 | :------------------------------ | :--------------------------------- |
-| `["List", "x", "y", 7, 11]` | \\( \lbrack x, y, 7, 11\rbrack \\) |
+| `["List", "x", "y", 7, 11]`     | \\( \lbrack x, y, 7, 11\rbrack \\) |
 | `["List", "x", "Nothing", "y"]` | \\( \lbrack x,,y\rbrack \\)        |
 
 {% enddef %}
@@ -116,7 +122,6 @@ ce.box(["Delimiter", ["List", 5, 2, 10, 18], "<>;"]).latex
 [&quot;**Range**&quot;, _lower_, _upper_]{.signature}
 
 [&quot;**Range**&quot;, _lower_, _upper_, _step_]{.signature}
-
 
 A sequence of numbers, starting with `lower`, ending with `upper`, and
 incrementing by `step`.
@@ -140,7 +145,6 @@ If there is a single argument, it is assumed to be the `upper` bound, and the
 // -> ["List", 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
 ```
 
-
 {% enddef %}
 
 {% def "Linspace" %}
@@ -151,10 +155,11 @@ If there is a single argument, it is assumed to be the `upper` bound, and the
 
 [&quot;**Linspace**&quot;, _lower_, _upper_, _count_]{.signature}
 
-Short for "linearly spaced", from the MATLAB (function of the same name)[https://www.mathworks.com/help/matlab/ref/linspace.html].
+Short for "linearly spaced", from the (MATLAB function of the same
+name)[https://www.mathworks.com/help/matlab/ref/linspace.html].
 
-A sequence of numbers. Similar to `Range` but the number of elements in 
-the collection is specified with `count`  instead of a `step` value.
+A sequence of numbers. Similar to `Range` but the number of elements in the
+collection is specified with `count` instead of a `step` value.
 
 If the `count` is not specified, it is assumed to be `50`.
 
@@ -175,17 +180,22 @@ If there is a single argument, it is assumed to be the `upper` bound, and the
 // -> ["List", 10, 9.11111111111111, 8.222222222222221, 7.333333333333333, 6.444444444444445, 5.555555555555555, 4.666666666666666, 3.7777777777777777, 2.888888888888889, 2]
 ```
 
-
 {% enddef %}
 
 {%def "Fill" %}
 
+[&quot;**Fill**&quot;, _dimensions_, _value_]{.signature}
+
 [&quot;**Fill**&quot;, _dimensions_, _function_]{.signature}
 
-Create a list of the specified dimensions. The value of the elements is computed
-by applying the function to the index of the element.
+Create a list of the specified dimensions.
 
-If dimension is a number, a list of that length is created.
+If a _value_ is provided, the elements of the list are all set to that value.
+
+If a _function_ is provided, the elements of the list are computed by applying
+the function to the index of the element.
+
+If _dimensions_ is a number, a list of that length is created.
 
 ```json example
 ["Fill", 3, 0]
@@ -203,7 +213,7 @@ If a function is specified, it is applied to the index of the element to compute
 the value of the element.
 
 ```json example
-["Fill", ["Tuple", 2, 3], ["Function", ["Tuple", "i", "j"], ["Plus", "i", "j"]]]
+["Fill", ["Tuple", 2, 3], ["Function", ["Add", "i", "j"], ["Tuple", "i", "j"]]]
 // -> ["List", ["List", 0, 1, 2], ["List", 1, 2, 3]]
 ```
 
@@ -215,9 +225,11 @@ the value of the element.
 
 An **unordered** collection of unique elements.
 
-| MathJSON            | LaTeX                       |
-| :------------------ | :-------------------------- |
-| `["Set", "x", "y"]` | \\( \lbrace x, y\rbrace \\) |
+{% latex "\\lbrace 12, 15, 17 \\rbrace" %}
+
+```json example
+["Set", 12, 15, 17]
+```
 
 {% enddef %}
 
@@ -228,7 +240,7 @@ An **unordered** collection of unique elements.
 The functions in this section create collections with an infinite number of
 elements.
 
-Negative indexes relative to the "last" element are not allowed when using 
+Negative indexes relative to the "last" element are not allowed when using
 infinite collections.
 
 The `Length` of infinite collection is `+Infinity`.
@@ -246,10 +258,13 @@ An infinite collection of the same element.
 // -> ["List", 0, 0, 0, ...]
 ```
 
-Use `Take` to get a finite number of elements.
+Use `Take` or `First` to get a finite number of elements.
 
 ```json example
-["Take", ["Repeat", 42], 3]
+["Take", ["Repeat", 42], ["Range", 3]]
+// -> ["List", 42, 42, 42]
+
+["First", ["Repeat", 42], 3]
 // -> ["List", 42, 42, 42]
 ```
 
@@ -257,21 +272,27 @@ Use `Take` to get a finite number of elements.
 
 {% def "Cycle" %}
 
-[&quot;**Cycle**&quot;, _collection_]{.signature}
+[&quot;**Cycle**&quot;, _seed_]{.signature}
 
-A collection that repeats the elements of the input collection. The input
+A collection that repeats the elements of the _seed_ collection. The input
 collection must be finite.
 
 ```json example
-["Cycle", ["List", 1, 2, 3]]
-// -> ["List", 1, 2, 3, 1, 2, 3, ...]
+["Cycle", ["List", 5, 7, 2]]
+// -> ["List", 5, 7, 2, 5, 7, 2, 5, 7, ...]
+
+["Cycle", ["Range", 3]]
+// -> ["List", 1, 2, 3, 1, 2, 3, 1, 2, ...]
 ```
 
-Use `Take` to get a finite number of elements.
+Use `Take` or `First` to get a finite number of elements.
 
 ```json example
-["Take", ["Cycle", ["List", 1, 2, 3]], 5]
-// -> ["List", 1, 2, 3, 1, 2]
+["Take", ["Cycle", ["List", 5, 7, 2]], ["Range", 5]]
+// -> ["List", 5, 7, 2, 5, 7]
+
+["First", ["Cycle", ["List", 5, 7, 2]], 5]
+// -> ["List", 5, 7, 2, 5, 7]
 ```
 
 {% enddef %}
@@ -288,14 +309,14 @@ value.
 If the `initial` value is not specified, it is assumed to be `0`
 
 ```json example
-["Iterate", ["Function", "x", ["Multiply", "x", 2]], 1]
+["Iterate", ["Function", ["Multiply", "_", 2]], 1]
 // -> ["List", 1, 2, 4, 8, 16, ...]
 ```
 
 Use `Take` to get a finite number of elements.
 
 ```json example
-["Take", ["Iterate", ["Plus", "_", 2], 7], 5]
+["Take", ["Iterate", ["Function", ["Add", "_", 2]], 7], ["Range", 5]]
 // -> ["List", 7, 9, 11, 13, 15]
 ```
 
@@ -303,17 +324,16 @@ Use `Take` to get a finite number of elements.
 
 {% enddefs %}
 
-
 ## Iterable Collection Operations
 
 The elements of an **iterable collection** can be enumerated one at a time.
 
-They may contain an infinite number of elements. The elements are not ordered.
+They may contain an infinite number of elements. The elements may not be
+ordered.
 
-Examples include `Set`.
+Examples include `List`, `Set`.
 
 {% defs %}
-
 
 {% def "Length" %}
 
@@ -321,18 +341,21 @@ Examples include `Set`.
 
 Returns the number of elements in the collection.
 
-If the collection is a matrix (list of lists), `Length` returns the number of
+When the collection is a matrix (list of lists), `Length` returns the number of
 rows.
 
-```json example
+````json example
 ["Length", ["List", 5, 2, 10, 18]]
 // -> 4
 
-`Length` can also be used to get the length of a string.
+When the collection is a string, `Length` returns the number of characters in
+the string.
 
-["Length", "Hello"]
+
+```json example
+["Length", {str: "Hello"}]
 // -> 5
-```
+````
 
 {% enddef %}
 
@@ -344,17 +367,17 @@ Returns the symbol `True` if the collection is empty.
 
 ```json example
 ["IsEmpty", ["List", 5, 2, 10, 18]]
-// -> False
+// -> "False"
 
 ["IsEmpty", ["List"]]
-// -> True
+// -> "True"
 
 ["IsEmpty", "x"]
-// -> True
+// -> "True"
 
 
-["IsEmpty", "Hello"]
-// -> 5
+["IsEmpty", {str: "Hello"]
+// -> "False"
 ```
 
 {% enddef %}
@@ -388,10 +411,11 @@ A scalar has no dimension and `Dimensions` returns an empty tuple.
 
 [&quot;**Rank**&quot;, _collection_]{.signature}
 
-Returns the number of dimensions of the collection, that is the number of its axes.
+Returns the number of dimensions of the collection, that is the number of its
+axes.
 
-A scalar (number) has rank 0, vector or list has rank 1, a matrix has rank 2, a tensor has rank 3, etc.
-
+A scalar (number) has rank 0, a vector or list has rank 1, a matrix has rank 2,
+a tensor has rank 3, etc.
 
 ```json example
 ["Rank", 5]
@@ -414,10 +438,16 @@ Returns a list of all the elements of the collection, recursively.
 
 Only elements with the same head as the collection are flattened.
 
+For a matrix, it returns a list of all the elements in the matrix, in row-major
+order.
+
 ```json example
 ["Flatten", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
 // -> ["List", 5, 2, 10, 18, 1, 2, 3]
 ```
+
+This is similar to the APL `,` Ravel operator or `numpy.ravel`
+[Numpy](https://numpy.org/doc/stable/reference/generated/numpy.ravel.html).
 
 {% enddef %}
 
@@ -427,10 +457,15 @@ Only elements with the same head as the collection are flattened.
 
 Returns a collection with the specified dimensions.
 
+`Reshape` can be used to convert a list into a matrix.
+
 ```json example
 ["Reshape", ["Range", 9], ["Tuple", 3, 3]]
 // -> ["List", ["List", 1, 2, 3], ["List", 4, 5, 6], ["List", 7, 8, 9]]
 ```
+
+This is similar to the APL `⍴` Reshape operator or `numpy.reshape`
+[Numpy](https://numpy.org/doc/stable/reference/generated/numpy.reshape.html).
 
 {% enddef %}
 
@@ -440,31 +475,29 @@ Returns a collection with the specified dimensions.
 
 Return the collection in reverse order.
 
-It's equivalent to `["Take", _collection_, ["Tuple", -1, 1]]`.
-
 ```json example
 ["Reverse", ["List", 5, 2, 10, 18]]
 // -> ["List", 18, 10, 2, 5]
 ```
 
+It's equivalent to `["Take", _collection_, ["Tuple", -1, 1]]`.
+
 {% enddef %}
 
 {% def "Map" %}
 
-[&quot;**Map**&quot;, _function_, _collection_]{.signature}
+[&quot;**Map**&quot;, _collection_, _function_]{.signature}
 
-Returns a collection where the function is applied to each element of the input
+Returns a collection where _function_ is applied to each element of the input
 collection.
 
 ```json example
-["Map", ["Function", "x", ["Plus", "x", 1]], ["List", 5, 2, 10, 18]]
+["Map", ["Function", "x", ["Add", "x", 1]], ["List", 5, 2, 10, 18]]
 // -> ["List", 6, 3, 11, 19]
 ```
 
-Note that functions can be provided as a lambda expression:
-
 ```json example
-["Map", ["Plus", "_", 1], ["List", 5, 2, 10, 18]]
+["Map", ["List", 5, 2, 10, 18], ["Function", ["Add", "_", 1]]]
 // -> ["List", 6, 3, 11, 19]
 ```
 
@@ -472,58 +505,49 @@ Note that functions can be provided as a lambda expression:
 
 {% def "Filter" %}
 
-[&quot;**Filter**&quot;, _function_, _collection_]{.signature}
+[&quot;**Filter**&quot;, _collection_, _function_]{.signature}
 
-Returns a collection where the function is applied to each element of the
-collection. Only the elements for which the function returns `True` are kept.
-
-```json example
-["Filter", ["Function", "x", ["Less", "x", 10]], ["List", 5, 2, 10, 18]]
-// -> ["List", 5, 2]
-```
-
-Note that functions can be provided as a lambda expression:
+Returns a collection where _function_ is applied to each element of the
+collection. Only the elements for which the function returns `"True"` are kept.
 
 ```json example
-["Filter", ["Less", "_", 10], ["List", 5, 2, 10, 18]]
+["Filter", ["List", 5, 2, 10, 18], ["Function", ["Less", "_", 10]]]
 // -> ["List", 5, 2]
 ```
 
 {% enddef %}
 
-{%def "Reduce" %}
+{%def "Fold" %}
 
-[&quot;**Reduce**&quot;, _function_, _collection_]{.signature}
+[&quot;**Fold**&quot;, _collection_, _fn_]{.signature}
 
-[&quot;**Reduce**&quot;, _function_, _collection_, _initial_]{.signature}
+[&quot;**Fold**&quot;, _collection_, _fn_, _initial_]{.signature}
 
-Returns a collection where the function is applied to each element of the
-collection. The function is applied to the first two elements, then to the
-result of the previous application and the next element, etc.
-
-If the `initial` value is not specified, it is assumed to be the first element
+Returns a collection where the reducing function _fn_ is applied to each element
 of the collection.
+
+`Fold` performs a _left fold_ operation: the reducing function is applied to the
+first two elements, then to the result of the previous application and the next
+element, etc...
+
+When an `initial` value is provided, the reducing function is applied to the
+initial value and the first element of the collection, then to the result of the
+previous application and the next element, etc...
 
 ```json example
 [
-  "Reduce",
-  ["Function", ["Tuple", "x", "y"], ["Plus", "x", "y"]],
+  "Fold",
   ["List", 5, 2, 10, 18]
+  ["Function", ["Add", "_1", "_2"]],
 ]
 // -> 35
 ```
 
-Note that functions can be provided as a lambda expression:
+The name of a function can be used as a shortcut for a function that takes two
+arguments.
 
 ```json example
-["Reduce", ["Plus", "_1", "_2"], ["List", 5, 2, 10, 18]]
-// -> 35
-```
-
-Or, if the function takes two arguments, as a function name:
-
-```json example
-["Reduce", "Plus", ["List", 5, 2, 10, 18]]
+["Reduce", ["List", 5, 2, 10, 18], "Add"]
 // -> 35
 ```
 
@@ -550,7 +574,7 @@ The length of the resulting collection is the length of the shortest collection.
 
 [&quot;**Transpose**&quot;, _matrix_]{.signature}
 
-Return the transpose of the matrix.
+Returns the transpose of the matrix.
 
 ```json example
 ["Transpose", ["List", ["List", 1, 2, 3], ["List", 4, 5, 6]]]
@@ -630,8 +654,11 @@ There can be multiple indexes, up to the rank of the collection.
 
 Returns a list of the elements at the specified indexes.
 
-This is a flexible function that can be used to extract a single element, a
+`Take` is a flexible function that can be used to extract a single element, a
 range of elements, or a list of elements.
+
+`Take` always return a list, even if the result is a single element. If no
+elements match, an empty list is returned.
 
 ```json example
 ["Take", ["List", 5, 2, 10, 18], 2]
@@ -639,19 +666,21 @@ range of elements, or a list of elements.
 
 ["Take", ["List", 5, 2, 10, 18], -2, 1]
 // -> ["List", 10, 5]
+
+
+["Take", ["List", 5, 2, 10, 18], 17]
+// -> ["List"]
 ```
 
-When using a range, it is specified as a tuple with the following elements:
-
-- `start`: the starting index of the range
-- `end`: the ending index of the range
-- `step`: the step of the range (1 if not omitted)
+When using a range, it is specified as a [`Range`](/#Range) expression.
 
 ```json example
-["Take", ["List", 5, 2, 10, 18], ["Tuple", 2, 3]]
-// -> ["List", 10, 18]
+// Elements 2 to 3
+["Take", ["List", 5, 2, 10, 18], ["Range", 2, 4]]
+// -> ["List", 2, 10, 18]
 
-["Take", ["List", 5, 2, 10, 18], ["Tuple", 1, -1, 2]]
+// From start to end, every other element
+["Take", ["List", 5, 2, 10, 18], ["Range", 1, -1, 2]]
 // -> ["List", 5, 10]
 ```
 
@@ -659,10 +688,12 @@ The elements are returned in the order in which they're specified. Using
 negative indexes (or ranges) reverses the order of the elements.
 
 ```json example
-["Take", ["List", 5, 2, 10, 18], ["Tuple", -1, 1]]
+// From last to first = reverse
+["Take", ["List", 5, 2, 10, 18], ["Range", -1, 1]]
 // -> ["List", 18, 10, 2, 5]
 
-["Take", "'desserts'", ["Tuple", -1, 1]]
+// From last to first = reverse
+["Take", "'desserts'", ["Range", -1, 1]]
 // -> "'stressed'"
 ```
 
@@ -679,6 +710,8 @@ An index can be repeated to extract the same element multiple times.
 
 [&quot;**Drop**&quot;, _collection_, _index_]{.signature}
 
+[&quot;**Drop**&quot;, _collection_, _index1_, _index2_]{.signature}
+
 [&quot;**Drop**&quot;, _collection_, _range_]{.signature}
 
 Drop is the opposite of `Take`. It returns a list of the elements that are not
@@ -693,10 +726,10 @@ The elements are returned in the same order as they appear in the collection.
 ["Drop", ["List", 5, 2, 10, 18], -2, 1]
 // -> ["List", 2, 18]
 
-["Drop", ["List", 5, 2, 10, 18], ["Tuple", 2, 3]]
+["Drop", ["List", 5, 2, 10, 18], ["Range", 2, 3]]
 // -> ["List", 5, 2]
 
-["Drop", ["List", 5, 2, 10, 18], ["Tuple", 1, -1, 2]]
+["Drop", ["List", 5, 2, 10, 18], ["Range", 1, -1, 2]]
 
 // -> ["List", 2, 18]
 ```
@@ -725,7 +758,17 @@ It's equivalent to `["Take", _collection_, 1]`.
 
 ["First", ["Tuple", "x", "y"]]
 // -> "x"
+```
 
+[&quot;**First**&quot;, _collection_, _n_]{.signature}
+
+Return the first _n_ elements of the collection.
+
+It's equivalent to `["Take", _collection_, ["Tuple", 1, _n_]]`.
+
+```json example
+["First", ["List", 5, 2, 10, 18], 2]
+// -> ["List", 5, 2]
 ```
 
 {% enddef %}
@@ -756,6 +799,15 @@ It's equivalent to `["Take", _collection_, -1]`.
 ```json example
 ["Last", ["List", 5, 2, 10, 18]]
 // -> 18
+```
+
+[&quot;**Last**&quot;, _collection_, _n_]{.signature}
+
+Return the last _n_ elements of the collection.
+
+```json example
+["Last", ["List", 5, 2, 10, 18], 2]
+// -> ["List", 10, 18]
 ```
 
 {% enddef %}

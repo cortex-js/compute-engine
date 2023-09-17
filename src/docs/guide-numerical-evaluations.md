@@ -8,44 +8,46 @@ sidebar:
 toc: true
 render_math_in_document: true
 preamble:
-  '<h1>Numeric Evaluation</h1><p class="xl">To obtain an exact numeric evaluation of an expression use <kbd>expr.evaluate()</kbd>. To obtain a
+  '<h1>Numeric Evaluation</h1><p class="xl">To obtain an exact numeric
+  evaluation of an expression use <kbd>expr.evaluate()</kbd>. To obtain a
   numeric approximation use <kbd>expr.N()</kbd>.</p>'
 ---
 
-An evaluation with `expr.evaluate()` preserves **exact values**. Exact 
-values are:
+An evaluation with `expr.evaluate()` preserves **exact values**.
+
+Exact values are:
+
 - integers and rationals
 - square roots of integers and rationals
 - constants such as `ExponentialE` and `Pi`
 
-If one of the arguments is not an exact value the expression is evaluated
-as a **numeric approximation**.
+If one of the arguments is not an exact value the expression is evaluated as a
+**numeric approximation**.
 
-**To obtain a numeric approximation, use `expr.N()`**. If `expr.N()` cannot 
+**To obtain a numeric approximation, use `expr.N()`**. If `expr.N()` cannot
 provide a numeric evaluation, a symbolic representation of the partially
 evaluated expression is returned.
 
-The value of `N()` is a boxed expression. The `numericValue` property is
-either a machine number, a `Decimal` object or a `Complex` object, 
-depending on the `numericMode` of the compute engine, or `null` if the 
-result is not a number.
+The value of `N()` is a boxed expression. The `numericValue` property is either
+a machine number, a `Decimal` object or a `Complex` object, depending on the
+`numericMode` of the compute engine, or `null` if the result is not a number.
 
-**To check if the `numericValue` is a `Decimal`** use `ce.isBignum(expr.N().numericValue)`.
+**To check if the `numericValue` is a `Decimal`** use
+`ce.isBignum(expr.N().numericValue)`.
 
-**To check if the `numericValue` is a `Complex`** use `ce.isComplex(expr.N().numericValue)`.
+**To check if the `numericValue` is a `Complex`** use
+`ce.isComplex(expr.N().numericValue)`.
 
-**To access a JavaScript machine number approximation of the result** use 
-`valueOf()`. If `numericValue` is a machine number, a `Decimal` object, or
-a rational, `valueOf()` will return a machine number approximation. Otherwise 
-it returns a string serialization of the MathJSON representation of the 
-expression.
+**To access a JavaScript machine number approximation of the result** use
+`valueOf()`. If `numericValue` is a machine number, a `Decimal` object, or a
+rational, `valueOf()` will return a machine number approximation. Otherwise it
+returns a string serialization of the MathJSON representation of the expression.
 
 ```js
 console.log(ce.parse('11 + \\sqrt{x}').N().valueOf());
 // ➔ "["Add",11,["Sqrt","x"]]"
 // Note: if the result is not a number, valueOf() returns a string
 // representation of the expression
-
 
 const expr = ce.parse('\\sqrt{5} + 7^3').N();
 
@@ -60,63 +62,64 @@ console.log(expr.latex);
 
 console.log(expr.numericValue);
 // ➔ [Decimal]
-// Note: depending on the numeric mode, this may be a machine number, 
+// Note: depending on the numeric mode, this may be a machine number,
 // a Decimal object or a Complex object
 
 if (ce.isBignum(expr.numericValue)) {
-  console.log('The numeric value is a Decimal object', 
-      expr.numericValue.toNumber());
+  console.log(
+    'The numeric value is a Decimal object',
+    expr.numericValue.toNumber()
+  );
 } else if (ce.isComplex(expr.numericValue)) {
-  console.log('The numeric value is a Complex object', 
-      expr.numericValue.re, 
-      expr.numericValue.im);
+  console.log(
+    'The numeric value is a Complex object',
+    expr.numericValue.re,
+    expr.numericValue.im
+  );
 } else if (Array.isArray(expr.numericValue)) {
-  console.log('The numeric value is a rational', 
-      expr.numericValue[0], 
-      expr.numericValue[1]);
+  console.log(
+    'The numeric value is a rational',
+    expr.numericValue[0],
+    expr.numericValue[1]
+  );
 } else {
   console.log('The numeric value is a machine number', expr.numericValue);
 }
-
 ```
-
-
 
 {% readmore "/compute-engine/guides/symbolic-computing/" %} Read more about
 <strong>Symbolic Computing</strong> {% endreadmore %}
 
 ## Repeated Evaluation
 
-**To repeatedly evaluate an expression** use `ce.set()` to change the value 
-of variables. `ce.set()` changes the value associated with one or more 
-variables in the current scope.
-
+**To repeatedly evaluate an expression** use `ce.set()` to change the value of
+variables. `ce.set()` changes the value associated with one or more variables in
+the current scope.
 
 ```js
-const expr = ce.parse("3x^2+4x+2");
+const expr = ce.parse('3x^2+4x+2');
 
 for (const x = 0; x < 1; x += 0.01) {
-  ce.set({x : x});
+  ce.set({ x: x });
   console.log(`f(${x}) = ${expr.N().valueOf()}`);
 }
 ```
 
-
-You can also use `expr.subs()`, but this will create a brand new expression 
-on each iteration, and will be much slower.
+You can also use `expr.subs()`, but this will create a brand new expression on
+each iteration, and will be much slower.
 
 ```js
-const expr = ce.parse("3x^2+4x+2");
+const expr = ce.parse('3x^2+4x+2');
 
 for (const x = 0; x < 1; x += 0.01) {
-  console.log(`f(${x}) = ${expr.subs({x: x}).N().valueOf()}`);
+  console.log(`f(${x}) = ${expr.subs({ x: x }).N().valueOf()}`);
 }
 ```
 
 **To reset a variable to be unbound to a value** use `ce.set()`
 
 ```js
-ce.set({x: null});
+ce.set({ x: null });
 
 console.log(expr.N().latex);
 // ➔ "3x^2+4x+c"
@@ -125,14 +128,12 @@ console.log(expr.N().latex);
 You can change the value of a variable by setting its `value` property:
 
 ```ts
-
 ce.symbol('x').value = 5;
 
 ce.symbol('x').value = undefined;
-
 ```
 
-If performance is important, you can compile the expression to a JavaScript 
+If performance is important, you can compile the expression to a JavaScript
 function.
 
 ## Compiling
@@ -140,24 +141,20 @@ function.
 **To get a compiled version of an expression** use the `expr.compile()` method:
 
 ```js
-const expr = ce.parse("3x^2+4x+2");
+const expr = ce.parse('3x^2+4x+2');
 const fn = expr.compile();
-for (const x = 0; x < 1; x += 0.01) 
-  console.log(fn({x}));
+for (const x = 0; x < 1; x += 0.01) console.log(fn({ x }));
 ```
 
-The syntax `{x}` is a shortcut for `{"x": x}`, in other words it defines 
-an argument named `"x"` (which is used the expression `expr`) as having 
-the value of the JavaScript variable `x` (which is used in the for loop).{.notice--info}
+The syntax `{x}` is a shortcut for `{"x": x}`, in other words it defines an
+argument named `"x"` (which is used the expression `expr`) as having the value
+of the JavaScript variable `x` (which is used in the for loop).{.notice--info}
 
+This will usually result in a much faster evaluation than using `expr.N()` but
+this approach has some limitations.
 
-This will usually result in a much faster evaluation than using `expr.N()`
-but this approach has some limitations.
-
-{% readmore "/compute-engine/guides/compiling/" %}
-Read more about **Compiling Expressions to JavaScript**
-{% endreadmore %}
-
+{% readmore "/compute-engine/guides/compiling/" %} Read more about **Compiling
+Expressions to JavaScript** {% endreadmore %}
 
 ## Numeric Modes
 
@@ -166,31 +163,32 @@ Engine: `"machine"` `"bignum"` `"complex"` and `"auto"`. The default mode is
 `"auto"`.
 
 Numbers are represented internally in one of the following format:
+
 - `number`: a 64-bit float
 - `complex`: a pair of 64-bit float for the real and imaginary part
 - `bignum`: an arbitrary precision floating point number
 - `rational`: a pair of 64-bit float for the numerator and denominator
-- `big rational`: a pair of arbitrary precision floating point numbers for the 
-   numerator and denominator
+- `big rational`: a pair of arbitrary precision floating point numbers for the
+  numerator and denominator
 
 Depending on the current numeric mode, this is what happens to calculations
 involving the specified number types:
+
 - {% icon "circle-check" "green-700" %} indicate that no transformation is done
 - `upgraded` indicate that a transformation is done without loss of precision
 - `downgraded` indicate that a transformation is done with may result in a loss
-   of precision, a rounding towards 0 if underflow occurs, or a rounding 
-   towards \\( \\pm\\infty \\) if overflow occurs.
-
+  of precision, a rounding towards 0 if underflow occurs, or a rounding towards
+  \\( \\pm\\infty \\) if overflow occurs.
 
 <div class="symbols-table first-column-header">
 
-|                | `auto`   |  `machine` | `bignum` | `complex` |
-| :---           | --- | --- | --- | --- |
-| `number`      | upgraded to `bignum` | {% icon "circle-check" "green-700" %} | upgraded to `bignum` | {% icon "circle-check" "green-700" %}|
-| `complex`      | {% icon "circle-check" "green-700" %}  | `NaN`     | `NaN` | {% icon "circle-check" "green-700" %} |
-| `bignum`       | {% icon "circle-check" "green-700" %} | downgraded to `number` | {% icon "circle-check" "green-700" %} | downgraded to `number` | 
-| `rational`     | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | upgraded to `big rational` | {% icon "circle-check" "green-700" %} |
-| `big rational` | {% icon "circle-check" "green-700" %} | downgraded to `rational` | {% icon "circle-check" "green-700" %} | downgraded to `rational` |
+|                | `auto`                                | `machine`                             | `bignum`                              | `complex`                             |
+| :------------- | ------------------------------------- | ------------------------------------- | ------------------------------------- | ------------------------------------- |
+| `number`       | upgraded to `bignum`                  | {% icon "circle-check" "green-700" %} | upgraded to `bignum`                  | {% icon "circle-check" "green-700" %} |
+| `complex`      | {% icon "circle-check" "green-700" %} | `NaN`                                 | `NaN`                                 | {% icon "circle-check" "green-700" %} |
+| `bignum`       | {% icon "circle-check" "green-700" %} | downgraded to `number`                | {% icon "circle-check" "green-700" %} | downgraded to `number`                |
+| `rational`     | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | upgraded to `big rational`            | {% icon "circle-check" "green-700" %} |
+| `big rational` | {% icon "circle-check" "green-700" %} | downgraded to `rational`              | {% icon "circle-check" "green-700" %} | downgraded to `rational`              |
 
 </div>
 
@@ -232,14 +230,14 @@ errors when manipulating them.
 Read <strong>"What Every Computer Scientist Should Know About Floating-Point
 Arithmetic"</strong> {% endreadmore %}
 
-
 ### Bignum Numeric Mode
 
 In the `bignum` numeric mode, numbers are represented as a string of base-10
 digits and an exponent.
 
-Bignum numbers have a minimum value of \\( \\pm 10^{-9\\,000\\,000\\,000\\,000\\,000} \\) and a
-maximum value of \\( \\pm9.99999\\ldots \\times  10^{+9\\,000\\,000\\,000\\,000\\,000} \\).
+Bignum numbers have a minimum value of \\( \\pm
+10^{-9\\,000\\,000\\,000\\,000\\,000} \\) and a maximum value of \\(
+\\pm9.99999\\ldots \\times 10^{+9\\,000\\,000\\,000\\,000\\,000} \\).
 
 **To change the numeric mode to the `bignum` mode**, use
 `engine.numericMode = "bignum"`.
@@ -289,8 +287,8 @@ MathJSON number that looks like this:
 ```
 
 {% readmore "https://mikemcl.github.io/decimal.js/" %} Support for the `bignum`
-mode is implemented using the <strong>decimal.js</strong> library. This library is built-in with the Compute Engine.
-{% endreadmore %}
+mode is implemented using the <strong>decimal.js</strong> library. This library
+is built-in with the Compute Engine. {% endreadmore %}
 
 ### Complex Numeric Mode
 
@@ -309,18 +307,19 @@ This is a convenient shorthand for
 Changing the numeric mode to `complex` automatically sets the precision to 15.
 
 {% readmore "https://github.com/infusion/Complex.js" %} Support for the
-`complex` mode is implemented using the <strong>Complex.js</strong> library. This library is built-in with the Compute Engine.
-{% endreadmore %}
-
+`complex` mode is implemented using the <strong>Complex.js</strong> library.
+This library is built-in with the Compute Engine. {% endreadmore %}
 
 ### `Auto` Numeric Mode
 
-When using the `auto` numeric mode, calculations are performed using bignum 
+When using the `auto` numeric mode, calculations are performed using bignum
 numbers.
 
-Computations which result in a complex number will return a complex number as
-a `Complex` object.
+Computations which result in a complex number will return a complex number as a
+`Complex` object.
 
+To check the type of the result, use `ce.isComplex(expr.N().numericValue)` and
+`ce.isBignum(expr.N().numericValue)`.
 
 ## Simplifying Before Evaluating
 
@@ -368,15 +367,19 @@ value is smaller than the tolerance will be considered equal to 0.
 
 ## Numeric Functions
 
-The dictionaries below can provide numeric evaluations for their numeric
-functions:
+The topics below from the
+[Standard Library](/compute-engine/guides/standard-library/) can provide numeric
+evaluations for their numeric functions:
 
 <div class=symbols-table>
 
-|                                                                   |                                                |
-| :---------------------------------------------------------------- | :--------------------------------------------- |
-| [Arithmetic](/compute-engine/reference/arithmetic/)               | `Add` `Multiply` `Sqrt` `Log` `Abs` `Round`... |
-| [Trigonometry](/compute-engine/reference/trigonometry/)           | `Sin` `Cos` `Tan` `Sinh` `Arcsin`...           |
-| [Special Functions](/compute-engine/reference/special-functions/) | `Erf` `Gamma` `Factorial`...                   |
+| Topic                                                             | Symbols/Functions                                                      |
+| :---------------------------------------------------------------- | :--------------------------------------------------------------------- |
+| [Arithmetic](/compute-engine/reference/arithmetic/)               | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`... |
+| [Calculus](/compute-engine/reference/calculus/)                   | `Derive` `Integrate`...                                                |
+| [Complex](/compute-engine/reference/complex/)                     | `Real` `Conjugate`, `ComplexRoots`...                                  |
+| [Special Functions](/compute-engine/reference/special-functions/) | `Gamma` `Factorial`...                                                 |
+| [Statistics](/compute-engine/reference/statistics/)               | `StandardDeviation` `Mean` `Erf`...                                    |
+| [Trigonometry](/compute-engine/reference/trigonometry/)           | `Pi` `Cos` `Sin` `Tan`...                                              |
 
 </div>

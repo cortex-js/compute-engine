@@ -514,8 +514,6 @@ const POSSIBLE_EMOJI = `(?:${ZWJ_ELEMENT})(${ZWJ}${ZWJ_ELEMENT})*`;
 const EMOJI_IDENTIFIER = new RegExp(`^(?:${POSSIBLE_EMOJI})+$`, 'u');
 ```
 
-
-
 In summary, when using Latin characters, identifiers can start with a letter or
 an underscore, followed by zero or more letters, digits and underscores.
 
@@ -525,9 +523,9 @@ for whole words, for example: `"半径"` (radius), "מְהִירוּת" (speed),
 
 Avoid mixing Unicode characters from different scripts in the same identifier.
 
-Do not include bidi markers such as LTR **U+200E** or RTL **U+200F** in identifiers.
-LTR and RTL marks should be added as needed by the client displaying the
-identifier. They should be ignored when parsing identifiers.
+Do not include bidi markers such as LTR **U+200E** or RTL **U+200F** in
+identifiers. LTR and RTL marks should be added as needed by the client
+displaying the identifier. They should be ignored when parsing identifiers.
 
 Avoid visual ambiguity issues that might arise with some Unicode characters. For
 example:
@@ -843,25 +841,31 @@ The Standard Library includes definitions for:
 
 <div class=symbols-table>
 
-| Dictionary                                                          | Symbols/Functions                                                      |
+| Topic                                                               | Symbols/Functions                                                      |
 | :------------------------------------------------------------------ | :--------------------------------------------------------------------- |
 | [Arithmetic](/compute-engine/reference/arithmetic/)                 | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`... |
 | [Calculus](/compute-engine/reference/calculus/)                     | `Derive` `Integrate`...                                                |
-| [Collections](/compute-engine/reference/collections/)               | `Sequence` `List` `Dictionary` `Set`...                                |
+| [Collections](/compute-engine/reference/collections/)               | `List` `Reverse` `Filter`...                                           |
+| [Complex](/compute-engine/reference/complex/)                       | `Real` `Conjugate`, `ComplexRoots`...                                  |
 | [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` `Sum` ...                                          |
 | [Core](/compute-engine/reference/core/)                             | `Let`, `Set`, `InverseFunction` `LatexTokens`...                       |
 | [Domains](/compute-engine/reference/domains/)                       | `Anything` `Nothing` `Number` `Integer` ...                            |
 | [Functions](/compute-engine/reference/functions/)                   | `Function` `Apply` `Return` ...                                        |
 | [Logic](/compute-engine/reference/logic/)                           | `And` `Or` `Not` `True` `False` `Maybe` ...                            |
 | [Sets](/compute-engine/reference/sets/)                             | `Union` `Intersection` `EmptySet` ...                                  |
-| [Special Functions](/compute-engine/reference/special-functions/)   | `Erf` `Gamma` `Factorial`...                                           |
+| [Special Functions](/compute-engine/reference/special-functions/)   | `Gamma` `Factorial`...                                                 |
+| [Statistics](/compute-engine/reference/statistics/)                 | `StandardDeviation` `Mean` `Erf`...                                    |
 | [Styling](/compute-engine/reference/styling/)                       | `Delimiter` `Style`...                                                 |
 | [Trigonometry](/compute-engine/reference/trigonometry/)             | `Pi` `Cos` `Sin` `Tan`...                                              |
 
 </div>
 
-If you need to define a new function, avoid using a name already defined in the
-Standard Library.
+When defining a new function, avoid using a name already defined in the Standard
+Library.
 
 {% readmore "/compute-engine/guides/standard-library/" %} Read more about the
 <strong>MathJSON Standard Library</strong>.{% endreadmore %}
+
+{% readmore %} Read more about
+[Adding New Definitions](/compute-compute-engine/guides/augmenting/).
+{% endreadmore %}
