@@ -9,155 +9,18 @@ toc: true
 render_math_in_document: true
 ---
 
-The standard library of the Compute Engine includes many built-in functions such
-as `["Add"]`, `["Sin"]`, `["Power"]`, etc...
+The Compute Engine Standard Library includes many built-in functions such as
+`Add`, `Sin`, `Power`, etc...
 
-It is also possible to define your own functions.
+The standard library can be extended with your own functions.
 
-## Declaring a Function
-
-Let's say you want to parse the following expression:
-
-```js example
-const expr = ce.parse('f(2)');
-console.log(expr.json);
-// -> ["Multiply", "f", "2"]
-```
-
-🤔 Hmmm... That's probably not what you want. 
-
-
-You probably want to get:
-
-```json example
-["f", 2]
-```
-
-Why is this happening? The Compute Engine doesn't know anything about `f`.
-It just sees an identifier `f` and assume it's a symbol.
-
-You can control how unknown identifiers are handled by setting the
-`ce.latexOptions.parseUnknownIdentifier` property to a function that returns
-`function` if the argument string is a function, `symbol` if it's a symbol or
-`unknown` otherwise. For example, you set it up so that identifiers that start with an upper case letter are always assume to be functions, or any other convention you want. This only affects what happens when parsing LaTeX, though, and has no effect when using MathJSON expressions. {.notice--info}
-
-To tell the Compute Engine that `f` is a function, you need to declare it.
-
-**To declare a function**, use the `ce.let()` function.
-
-```js example
-ce.let("f", { signature: { domain: 'Function' } });
-```
-
-Note that you can use `ce.let()` to declare multiple functions (or symbols) at
-once:
-
-```js example
-ce.let({
-  f: { signature: { domain: 'Function' } },
-  g: { signature: { domain: 'Function' } },
-});
-```
-
-Now, when you parse the expression, you get the expected result:
-
-```js example
-const expr = ce.parse('f(2)');
-console.log(expr.json);
-// -> ["f", 2] 🎉
-```
-
-However, you still can't evaluate the expression, because the Compute Engine
-doesn't know how to evaluate `f` yet, it just knows that `f` is a function.
-
-```js example
-console.log(ce.evaluate(expr).json);
-// -> ["f", 2]
-```
-
-For the Compute Engine to evaluate `f`, you need to define provide a definition
-for `f`.
-
-## Defining a Function
-
-**To define a function**, also use the `ce.let()` function.
-
-```js example
-ce.let("f", {
-  signature: {
-    domain: 'Function',
-    evaluate: (ce, args) => ce.number(args[0].valueOf() * 2)
-  }
-});
-```
-
-This time we've added an `evaluate` handler to the definition of `f`. The
-`evaluate` handler is called when the corresponding function is evaluated. 
-It receives two arguments:
-
-- `ce`: the Compute Engine instance
-- `args`: an array of the arguments that have been applied to the function. Each argument is a `MathJSON` expression. The array may be empty if there are no
-arguments.
-
-Note there are other attributes you can set on a function definition,  See
-`FunctionDefinition` for more details.
-
-If you evaluate the expression now, you get the expected result:
-
-```js example
-console.log(ce.evaluate(expr).json);
-// -> 4
-```
-
-**To change the definition of a function**, use `ce.set()`.
-
-```js example
-ce.set("f", (ce, args) => ce.number(args[0].valueOf() * 5)};
-```
-
-When using `ce.set()`, you can only change the implementation of a function. If
-the identifier `f` was previously declared as a `Number` you cannot change its
-type to a `Function`. {.notice--info}
-
-The `ce.let()` and `ce.set()` functions will call the more primitive
-`ce.defineFunction()` and `ce.defineSymbol()` functions depending on the value
-of their arguments.
-
-You can also evaluate an `["Assign"]` expression to define a function.
-
-```js example
-ce.evaluate(["Assign", "f", ["Function", ["Multiply", "x", 2], "x"]]);
-```
-
-The value of a function can be either a JavaScript function, as in the examples
-above, or a `MathJSON` expression from LaTex:
-
-```js example
-ce.let("f(x)", ce.parse("2x"));
-```
-
-Or directly as a `MathJSON` expression:
-
-```js example
-ce.let("f(x)", ["Multiply", "x", 2]);
-```
-
-This is equivalent to the more verbose:
-
-```js example
-ce.let("f", ["Function", ["Multiply', "x", 2], "x"]);
-```
-
-You can also use anonymous parameters as a shorcut:
-
-```js example
-ce.let("f", ["Multiply", "_", 2]);
-```
+{% readmore "/compute-engine/guides/augmenting/" %}Read more about adding new
+definitions to the Compute Engine.{% endreadmore %}
 
 ## Anonymous Functions and Anonymous Parameters
 
 A function that is not bound to an identifier is called an **anonymous
-function**. 
+function**.
 
 Anonymous functions are frequently used as arguments to other functions.
 
@@ -188,6 +51,10 @@ To apply a function to some arguments, use an `["Apply"]` expression.
 ["Apply", "Power", 2, 3]
 // ➔ 8
 ```
+
+The first argument of `Apply` is a an anonymous function, either as an
+identifier, or as a `["Function"]` expression. The rest of the arguments are the
+arguments of the anonymous function.
 
 ## Operating on Functions
 
@@ -228,16 +95,15 @@ applied to some arguments.
 
 {% enddef %}
 
-
 {% def "Assign" %}
 
 [&quot;**Assign**&quot;, _id_, _fn_]{.signature}
 
 Assign the anonymous function _fn_ to the identifier _id_.
 
-The identifier _id_ should either not have been declared yet, or been 
-declared as a function. If _id_ is already defined as a `Number` for example,
-it is an error to assign a function to it.
+The identifier _id_ should either not have been declared yet, or been declared
+as a function. If _id_ is already defined as a `Number` for example, it is an
+error to assign a function to it.
 
 {% latex "\\operatorname{double} = x \\mapsto 2x" %}
 
@@ -245,9 +111,7 @@ it is an error to assign a function to it.
 ["Assign", "double", ["Function", ["Multiply", "x", 2], "x"]]
 ```
 
-
 {% enddef %}
-
 
 {% def "Apply" %}
 
