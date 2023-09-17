@@ -577,23 +577,8 @@ describe('ITERABLE OPERATIONS', () => {
     ));
 
   test('Map', () =>
-    expect(evaluate(['Map', ['Function', 'x', ['Plus', 'x', 1]], list]))
-      .toMatchInlineSnapshot(`
-      [
-        "Map",
-        ["Function", "x", ["Plus", "x", 1]],
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["Domain", "Function"],
-            ["Domain", "List"]
-          ],
-          ["List", 7, 13, 5, 19, 2, 3, 11]
-        ]
-      ]
-    `));
+    expect(evaluate(['Map', ['Function', ['Plus', 'x', 1], 'x'], list]))
+      .toMatchInlineSnapshot());
 
   test('Map', () =>
     expect(evaluate(['Map', ['Plus', '_', 1], list])).toMatchInlineSnapshot(`

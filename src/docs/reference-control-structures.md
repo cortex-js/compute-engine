@@ -105,7 +105,7 @@ To use a named argument, use a `["Function"]` expression for the `body`.
 ```json example
 ["Loop", ["Print", ["Square", "_"]], ["Range", 5]]
 // ➔ 1 4 9 16 25
-["Loop", ["Function", "x", ["Print", ["Square", "x"]]], ["Range", 5]]
+["Loop", ["Function", ["Print", ["Square", "x"]], "x"], ["Range", 5]]
 // ➔ 1 4 9 16 25
 ```
 
@@ -169,7 +169,7 @@ a `["Continue"]` expression or a `["Return"]` expression.
 ```json example
 ["Loop", ["Print", ["Square", "_"]], ["Range", 5]]
 // ➔ 1 4 9 16 25
-["Loop", ["Function", "x", ["Print", ["Square", "x"]]], ["Range", 5]]
+["Loop", ["Function", ["Print", ["Square", "x"], "x"]], ["Range", 5]]
 // ➔ 1 4 9 16 25
 ```
 

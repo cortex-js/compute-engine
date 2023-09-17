@@ -213,7 +213,7 @@ If a function is specified, it is applied to the index of the element to compute
 the value of the element.
 
 ```json example
-["Fill", ["Tuple", 2, 3], ["Function", ["Add", "i", "j"], ["Tuple", "i", "j"]]]
+["Fill", ["Tuple", 2, 3], ["Function", ["Add", "i", "j"], "i", "j"]]
 // -> ["List", ["List", 0, 1, 2], ["List", 1, 2, 3]]
 ```
 
@@ -492,7 +492,7 @@ Returns a collection where _function_ is applied to each element of the input
 collection.
 
 ```json example
-["Map", ["Function", "x", ["Add", "x", 1]], ["List", 5, 2, 10, 18]]
+["Map", ["Function",["Add", "x", 1], "x"], ["List", 5, 2, 10, 18]]
 // -> ["List", 6, 3, 11, 19]
 ```
 
