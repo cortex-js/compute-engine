@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/domains/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 preamble:
   '<h1>Domains</h1><p class="xl">The <b>domain</b> of an expression is the set 
   of the possible values of that expression.</p>'
@@ -59,17 +59,17 @@ expression.
 ```js
 const ce = new ComputeEngine();
 
-ce.box('Pi').domain;
+ce.box("Pi").domain;
 // ➔ "TranscendentalNumber"
 
-ce.box('Divide').domain;
+ce.box("Divide").domain;
 // ➔ '["Function",  "Number", "Number", "Number]': domain of the function "Divide"
 
-ce.box(['Add', 5, 2]).domain;
+ce.box(["Add", 5, 2]).domain;
 // ➔ "Number": the result of the "Add" function
 // (its codomain) in general is a "Number"
 
-ce.box(['Add', 5, 2]).evaluate().domain;
+ce.box(["Add", 5, 2]).evaluate().domain;
 // ➔ "Integer": once evaluated, the domain of the result may be more specific
 ```
 
@@ -144,10 +144,10 @@ that can be determined:
 By default, `domain.isCompatible()` will check for covariant compatibility.
 
 ```ts
-ce.domain('PositiveNumber').isCompatible('Integer');
+ce.domain("PositiveNumber").isCompatible("Integer");
 // ➔ true
 
-ce.domain('Number').isCompatible('RealNumber', 'contravariant');
+ce.domain("Number").isCompatible("RealNumber", "contravariant");
 // ➔ true
 ```
 

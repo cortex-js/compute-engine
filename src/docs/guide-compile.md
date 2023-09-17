@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/compiling/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 preamble: |

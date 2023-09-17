@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/evaluate/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 render_math_in_document: true
 preamble:
   '<h1>Evaluation</h1><p class="xl">To apply a sequence of definitions to an

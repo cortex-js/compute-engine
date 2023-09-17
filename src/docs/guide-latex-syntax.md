@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/latex-syntax/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 render_math_in_document: true
 preamble:
   '<h1>Parsing and Serializing LaTeX</h1><p class="xl">The CortexJS Compute
@@ -111,14 +111,14 @@ an array of `["Error"]` expressions.
 property.
 
 ```javascript
-console.log(ce.box(['Add', ['Power', 'x', 3], 2]).latex);
+console.log(ce.box(["Add", ["Power", "x", 3], 2]).latex);
 // ➔  "x^3 + 2"
 ```
 
 Alternatively, you can use the `ce.serialize()` function.
 
 ```javascript
-console.log(ce.serialize(['Add', ['Power', 'x', 3], 2]));
+console.log(ce.serialize(["Add", ["Power", "x", 3], 2]));
 // ➔  "x^3 + 2"
 ```
 
@@ -129,10 +129,10 @@ readable LaTeX, but that may not match exactly the MathJSON.
 For example:
 
 ```javascript
-console.log(ce.serialize(['Power', 'x', -1]));
+console.log(ce.serialize(["Power", "x", -1]));
 // ➔  "\\frac{1}{x}"
 
-console.log(ce.serialize(['Power', 'x', -1], { canonical: false }));
+console.log(ce.serialize(["Power", "x", -1], { canonical: false }));
 // ➔  "x^{-1}"
 ```
 
@@ -238,7 +238,7 @@ console.log(ce.parse('123456.789').latex);
 // ➔ "123\,456.789"
 
 // Always use the scientific notation
-ce.latexOptions.notation = 'scientific';
+ce.latexOptions.notation = "scientific";
 ce.latexOptions.avoidExponentsInRange = null;
 ce.latexOptions.exponentProduct = '\\times';
 
@@ -260,7 +260,7 @@ as desired. For example to always represent fractions with a `\frac{}{}`
 command:
 
 ```ts
-ce.latexSyntax.options.fractionStyle = () => 'quotient';
+ce.latexSyntax.options.fractionStyle = () => "quotient";
 ```
 
 The style option handler has two arguments:
@@ -273,7 +273,7 @@ an inline solidus:
 
 ```ts
 ce.latexSyntax.options.fractionStyle = (expr, level) =>
-  head(expr) === 'Rational' || level > 2 ? 'inline-solidus' : 'quotient';
+  head(expr) === "Rational" || level > 2 ? 'inline-solidus' : "quotient";
 ```
 
 #### Function Application
@@ -388,9 +388,9 @@ ce.latexDictionary = [
       // `parseGroup()` twice. If `parseGroup()` returns `null`,
       // we assume that the argument is missing.
       return [
-        'Divide',
-        parser.parseGroup() ?? ['Error', "'missing'"],
-        parser.parseGroup() ?? ['Error', "'missing'"],
+        "Divide",
+        parser.parseGroup() ?? ["Error", ""missing""],
+        parser.parseGroup() ?? ["Error", ""missing""],
       ];
     },
   },
@@ -445,9 +445,9 @@ the `parse` handler can be provided as an Expression. For example:
 
 ```javascript
 {
-  kind: 'function',
-  identifierTrigger: 'concat',
-  parse: 'Concatenate'
+  kind: "function",
+  identifierTrigger: "concat",
+  parse: "Concatenate"
 }
 ```
 
@@ -458,10 +458,10 @@ handler should return a MathJSON expression.
 
 ```javascript
 {
-  kind: 'infix',
+  kind: "infix",
   latexTrigger: '\\oplus',
   parse: (parser, lhs) => {
-    return ['Concatenate', lhs, parser.parseExpression()];
+    return ["Concatenate", lhs, parser.parseExpression()];
   },
 }
 ```
@@ -472,10 +472,10 @@ expression.
 
 ```javascript
 {
-  kind: 'prefix',
+  kind: "prefix",
   latexTrigger: '\\neg',
   parse: (parser, lhs) => {
-    return ['Negate', lhs];
+    return ["Negate", lhs];
   },
 }
 ```
@@ -486,10 +486,10 @@ handler should return a MathJSON expression.
 
 ```javascript
 {
-  kind: 'postfix',
+  kind: "postfix",
   latexTrigger: '\\!',
   parse: (parser, lhs) => {
-    return ['Factorial', lhs];
+    return ["Factorial", lhs];
   },
 }
 ```
@@ -502,11 +502,11 @@ expressions. The `parse` handler should return a MathJSON expression.
 
 ```javascript
 {
-  kind: 'environment',
-  identifierTrigger: 'matrix',
+  kind: "environment",
+  identifierTrigger: "matrix",
   parse: (parser) => {
     const content = parser.parseTabular();
-    return ['Matrix', ['List', content.map(row => ['List', row.map(cell => cell)])]];
+    return ["Matrix", ["List", content.map(row => ["List", row.map(cell => cell)])]];
   },
 }
 ```
@@ -519,11 +519,11 @@ handler should return a MathJSON expression.
 
 ```javascript
 {
-  kind: 'matchfix',
+  kind: "matchfix",
   openTrigger: '\\lvert',
   closeTrigger: '\\rvert',
   parse: (parser, body) => {
-    return ['Abs', body];
+    return ["Abs", body];
   },
 }
 ```
@@ -549,7 +549,7 @@ MathJSON `Divide` function. You would write:
 {
   latexTrigger: '\\div',
   parse: (parser) => {
-    return 'Divide';
+    return "Divide";
   },
 }
 ```
@@ -559,7 +559,7 @@ As a shortcut, you can also write:
 ```javascript
 {
   latexTrigger: '\\div',
-  parse: () => 'Divide'
+  parse: () => "Divide"
 }
 ```
 
@@ -568,7 +568,7 @@ Or even more succintly:
 ```javascript
 {
   latexTrigger: '\\div',
-  parse: 'Divide'
+  parse: "Divide"
 }
 ```
 
@@ -596,7 +596,7 @@ help you parse the LaTeX string:
 - `parser.matchAny(tokens: LatexToken[])` return the next token if it matches
   any of the token in the argument or `null` otherwise.
 - `parser.matchChar()` return the next token if it is a plain character (e.g.
-  'a', '+'...), or the character corresponding to a hex literal (^^ and ^^^^) or
+  "a", '+'...), or the character corresponding to a hex literal (^^ and ^^^^) or
   the `\char` and `\unicode` commands
 - `parser.parseGroup()` return an expression if the next token is a group begin
   token `{` followed by a sequence of LaTeX tokens until a group end token `}`
@@ -633,7 +633,7 @@ For example:
 {
   latexTrigger: '\\div',
   parse: (parser) => {
-    return ['Divide', parser.parseGroup(), parser.parseGroup()];
+    return ["Divide", parser.parseGroup(), parser.parseGroup()];
   },
 }
 ```
@@ -648,14 +648,14 @@ write:
 ```javascript
 {
   latexTrigger: '\\div',
-  kind: 'infix',
+  kind: "infix",
   parse: (parser, lhs) => {
-    return ['Divide', lhs, parser.parseExpression()];
+    return ["Divide", lhs, parser.parseExpression()];
   },
 }
 ```
 
-By using the `kind: 'infix'` option, the parser will automatically insert the
+By using the `kind: "infix"` option, the parser will automatically insert the
 left-hand side of the operator as the first argument to the `parse` handler.
 
 ### Serializing
@@ -678,7 +678,7 @@ serialization handler with a MathJSON identifier.
       if (ce.isBignum(val)) {
         if (!val.isInteger() || val.isNegative()) return null;
         result += val.toString();
-      } else if (typeof val === 'number') {
+      } else if (typeof val === "number") {
         if (!Number.isInteger(val) || val < 0) return null;
         result += val.toString();
       }

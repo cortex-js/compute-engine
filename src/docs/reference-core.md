@@ -9,7 +9,7 @@ toc: true
 render_math_in_document: true
 ---
 
-<section id='constants'>
+<section id="constants">
 
 ## Constants
 
@@ -296,7 +296,7 @@ The arguments <code>_token-n_</code> are interpreted as LaTeX tokens:
 </div>
 
 ```json example
-["LatexTokens", "'\\frac'", "'<{>'", "'pi'", "'<}>'", "'<{>'", 2, "'<}>'"]
+["LatexTokens", "'\\frac'", "'<{>'", ""pi"", "'<}>'", "'<{>'", 2, "'<}>'"]
 // ➔ "'\frac{\pi}{2}'"
 ```
 
@@ -315,7 +315,7 @@ tokens.
 | `["Prime", "f", 2]` | `f^\doubleprime` |
 
 
-<section id='supsub'>
+<section id="supsub">
 
 ## Superscripts and Subscripts
 

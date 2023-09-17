@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/canonical-form/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 ---
@@ -63,7 +63,7 @@ ce.parse('\\frac{3}{5}', { canonical: false });
 // This is a rational without modifying the arguments, so a `["Rational"]`
 // expression is returned
 
-ce.jsonSerializationOptions = { exclude: ['Rational'] };
+ce.jsonSerializationOptions = { exclude: ["Rational"] };
 ce.parse('\\frac{3}{5}', { canonical: false });
 // ➔ ["Divide", 3, 5]
 // We've excluded `["Rational"]` expressions, so it is interepreted as a
@@ -78,7 +78,7 @@ versions of the Compute Engine could provide a different result.
 the `expr.canonical` property.
 
 ```js
-console.log(ce.box(['Add', 2, 'x', 3]).canonical);
+console.log(ce.box(["Add", 2, "x", 3]).canonical);
 // ➔ ["Add", 5, "x"]
 ```
 

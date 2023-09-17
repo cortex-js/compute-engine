@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/augmenting/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 ---
 
@@ -36,16 +36,16 @@ assigned a value.
 To change the value of a symbol, use the `value` property of the symbol.
 
 ```js
-const n = ce.box('n');
+const n = ce.box("n");
 n.value = 5;
 console.log(`${n.latex} = ${n.value.json}`);
 // ➔ n = 5
 ```
 
-Alternatively, you can use `ce.assign()`.
+Alternatively, use `ce.assign()`:
 
 ```js
-ce.assign(n, 5);
+ce.assign("n", 5);
 ```
 
 The declaration of a symbol or function is done within a **scope**. A scope is a
@@ -64,14 +64,14 @@ A symbol is a named value, such as `Pi` or `x`.
 {% readmore "/compute-engine/guides/symbols" %} Learn more about **symbols**.
 {% endreadmore %}
 
-Before it can be used, a symbol must be declared. This is done by adding a
+Before it can be used, a symbol must be **declared**. This is done by adding a
 definition to the MathJSON library.
 
 **To declare a new symbol** use the `ce.declare()` method.
 
 ```js
-ce.declare('m', { domain: 'Number', value: 5 });
-ce.declare('n', { domain: 'Integer' });
+ce.declare("m", { domain: "Number", value: 5 });
+ce.declare("n", { domain: "Integer" });
 ```
 
 `ce.declare()` will add a definition in the current scope. Use `ce.pushScope()`
@@ -88,14 +88,14 @@ with a symbol.
 You can change the value of one or more symbols using `ce.assign()`.
 
 ```js
-ce.assign('m', 10);
+ce.assign("m", 10);
 ```
 
 As a shortcut, if the symbol was not previously defined, a new definition will
 be created. The domain of the symbol will be set to inferred from the value.
 
 You can also change the value of a symbol with
-`ce.box('m').value = 10`.{.--notice-info}
+`ce.box("m").value = 10`.{.--notice-info}
 
 ## Declaring a Function
 
@@ -130,14 +130,14 @@ To tell the Compute Engine that `double` is a function, you need to declare it.
 **To declare a function**, use the `ce.declare()` function.
 
 ```js example
-ce.declare('double', { signature: { domain: 'Function' } });
+ce.declare("double", { signature: { domain: "Function" } });
 ```
 
 The `signature` property defines how the function can be used. It is a
 `FunctionDefinition` object with the following properties (all are optional):
 
 - `domain`: the domain of the function. The `Function` domain represents any
-  function. 'NumericFunction' represents a function whose arguments are number
+  function. "NumericFunction" represents a function whose arguments are number
   and that returns a numeric value. More complex domains can be specified to
   described the domain of the arguments of the function and the domain of its
   return v
@@ -177,9 +177,9 @@ For the Compute Engine to evaluate `double`, you need to define provide a
 definition for it.
 
 ```js example
-ce.declare('double', {
+ce.declare("double", {
   signature: {
-    domain: 'Function',
+    domain: "Function",
     evaluate: (ce, args) => ce.number(args[0].valueOf() * 2),
   },
 });
@@ -223,26 +223,26 @@ ce.assign("g", (ce, args) => ce.number(args[0].valueOf() * 5)};
 You can provide the value of a function as a `MathJSON` expression from LaTeX:
 
 ```js example
-ce.assign('f(x)', ['Multiply', 'x', 5]);
+ce.assign("f(x)", ["Multiply", "x", 5]);
 ```
 
 Note in this case we added `(x)` to the first argument of `ce.assign()` to
 indicate that `f` is a function. This is equivalent to the more verbose:
 
 ```js example
-ce.assign('f', ['Function', ['Multiply', 'x', 5], 'x']);
+ce.assign("f", ["Function", ["Multiply", "x", 5], "x"]);
 ```
 
 You can also use a definition from a LaTeX expression:
 
 ```js example
-ce.assign('f(x)', ce.parse('5x'));
+ce.assign("f(x)", ce.parse("5x"));
 ```
 
 You can also evaluate an `["Assign"]` expression to define a function.
 
 ```js example
-ce.evaluate(['Assign', 'f', ['Function', ['Multiply', 'x', 2], 'x']]);
+ce.evaluate(["Assign", "f", ["Function", ["Multiply", "x", 2], "x"]]);
 ```
 
 ### Summary
@@ -269,12 +269,12 @@ LaTeX command.{.notice--info}
 
 ```js
 ce.declare({
-  m: { domain: 'Number', value: 5 },
-  f: { domain: 'Function' },
-  g: { domain: 'Function' },
+  m: { domain: "Number", value: 5 },
+  f: { domain: "Function" },
+  g: { domain: "Function" },
   Smallfrac: {
     signature: {
-      domain: 'NumericFunction',
+      domain: "NumericFunction",
       evaluate: (ce, args) => ce.box(args[0].valueOf() / args[1].valueOf()),
     },
   },

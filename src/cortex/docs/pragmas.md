@@ -43,7 +43,7 @@ The navigator properties are available when the compilation/parsing is taking
 place in a browser process.
 
 **To access the properties of the `navigator` JavaScript global object**, use
-the `#navigator()` pragma function. It returns 'Nothing' if the property is not
+the `#navigator()` pragma function. It returns "Nothing" if the property is not
 available.
 
 ```cortex

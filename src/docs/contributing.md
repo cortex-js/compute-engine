@@ -4,7 +4,7 @@ permalink: /compute-engine/contributing/
 read_time: false
 layout: single
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 ---
 
 # Contributing to the Compute Engine

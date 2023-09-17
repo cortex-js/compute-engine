@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/calculus/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 ---
@@ -35,12 +35,12 @@ process of differentiation.
 ["Integrate", ["Sin", "x"], "x"]
 ```
 
-Note that the LaTeX expression above include a LaTeX spacing command `\\,` to add a
+Note that the LaTeX expression above include a LaTeX spacing command `\,` to add a
 small space between the function and the differential operator. This is
 optional, but it makes the expression easier to read.{.notice--info}
 
 Note that the `d` indicating the variable of integration is wrapped with 
-a `\\mathrm{}` command so it can be displayed upright. This is 
+a `\mathrm{}` command so it can be displayed upright. This is 
 also optional, but this a recommended typographical convention.{.notice--info}
 
 

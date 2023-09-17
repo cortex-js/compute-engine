@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/symbols/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 preamble:
   '<h1>Symbols</h1><p class="xl">A <b>symbol</b> is an identifier representing a
@@ -30,8 +30,8 @@ head:
 properties of the symbol.
 
 ```js
-const n = ce.box('n');
-n.domain = 'Integer';
+const n = ce.box("n");
+n.domain = "Integer";
 n.value = 5;
 console.log("n:", n.domain.json, "=", n.value.json);
 // ➔ n: Integer = 5
@@ -43,8 +43,8 @@ symbol has a domain of `ce.defaultDomain` and no value.
 
 <code-playground layout="stack" show-line-numbers>
 <div slot="javascript">
-const n = ce.box('n');
-n.domain = 'Integer';
+const n = ce.box("n");
+n.domain = "Integer";
 n.value = 5;
 console.log("n:", n.domain.json, "=", n.value.json);</div></code-playground>
 
@@ -95,12 +95,12 @@ a definition with the name of a symbol).{.notice--info}
 
 ```js
 ce.precision = 4;
-const smallPi = ce.box('Pi'); // π with 4 digits
+const smallPi = ce.box("Pi"); // π with 4 digits
 console.log(smallPi.latex);
 // ➔ 3.1415
 
 ce.precision = 10;
-const bigPi = ce.box('Pi'); // π with 10 digits
+const bigPi = ce.box("Pi"); // π with 10 digits
 console.log(bigPi.latex);
 // ➔ 3.1415926535
 
@@ -123,7 +123,7 @@ By default, `defaultDomain` is `"ExtendedRealNumber"` so any unknown variable is
 automatically assumed to be a real number.
 
 ```js
-const symbol = ce.box('m'); // m for mystery
+const symbol = ce.box("m"); // m for mystery
 console.log(symbol.domain.symbol);
 // ➔ "ExtendedRealNumber"
 symbol.value = 5;

@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/numeric-evaluation/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 preamble:
@@ -128,9 +128,9 @@ console.log(expr.N().latex);
 You can change the value of a variable by setting its `value` property:
 
 ```ts
-ce.symbol('x').value = 5;
+ce.symbol("x").value = 5;
 
-ce.symbol('x').value = undefined;
+ce.symbol("x").value = undefined;
 ```
 
 If performance is important, you can compile the expression to a JavaScript
@@ -217,7 +217,7 @@ by a machine number may return \\( \pm\infty \\).
 results..{notice--warning}
 
 ```ts
-ce.numericMode = 'machine';
+ce.numericMode = "machine";
 console.log(ce.parse('0.1 + 0.2').N().latex);
 // ➔ "0.30000000000000004"
 ```
@@ -243,7 +243,7 @@ Bignum numbers have a minimum value of \\( \\pm
 `engine.numericMode = "bignum"`.
 
 ```ts
-ce.numericMode = 'bignum';
+ce.numericMode = "bignum";
 console.log(ce.parse('0.1 + 0.2').N().latex);
 // ➔ "0.3"
 ```
@@ -333,7 +333,7 @@ For example, when `numericMode = "machine"`:
 
 ```js
 const x = ce.parse('0.1 + 0.2').N();
-console.log(ce.box(['Subtract', x, x]).N());
+console.log(ce.box(["Subtract", x, x]).N());
 // ➔ 2.7755575615628914e-17
 ```
 

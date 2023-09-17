@@ -4,12 +4,12 @@ permalink: /compute-engine/reference/complex/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 ---
 
-<section id='constants'>
+<section id="constants">
 
 ## Constants
 

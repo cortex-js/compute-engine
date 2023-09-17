@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/standard-library/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 ---
 
 # Standard Library

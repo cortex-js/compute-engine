@@ -12,7 +12,7 @@ toc-options: '{"tags":["h2"]}'
 preamble: "<picture class=full-width style='aspect-ratio:1.775;clip-path: inset(0 0 0 0 round 8px 8px 0 0); margin-bottom: 2em'>
   <source srcset=/assets/MathJSON@1x.webp type=image/webp>
   <source srcset=/assets/MathJSON@1x.jpg type=image/jpeg> 
-  <img src=/assets/MathJSON@1x.jpg alt='MathJSON'>
+  <img src=/assets/MathJSON@1x.jpg alt=\"MathJSON\">
 </picture>
 <h2 style='font-size:3rem'>MathJSON: a lightweight data interchange format for mathematical notation.</h2>"
 render_math_in_document: true
@@ -68,11 +68,11 @@ render_math_in_document: true
 <script type="module">
     // import 'https://unpkg.com/mathlive?module';
     import 'https://unpkg.com/@cortex-js/compute-engine@latest/dist/compute-engine.min.esm.js';
-    const mf = document.getElementById('mf');
+    const mf = document.getElementById("mf");
 
     window.customElements.whenDefined("math-field").then(() => {
       document.getElementById('mathfield-json').innerHTML = exprToString(mf.expression.json);
-      mf.addEventListener('input', (ev) => {
+      mf.addEventListener("input", (ev) => {
         document.getElementById('mathfield-json').innerHTML = exprToString(mf.expression.json);
       });
     });
@@ -86,8 +86,8 @@ render_math_in_document: true
         if (start + result.length < MAX_LINE_LENGTH) return result;
         return `[\n${indent}  ${elements.join(`,\n${indent}  `)}\n${indent}]`;
       }
-      if (expr === null) return 'null';
-      if (typeof expr === 'object') {
+      if (expr === null) return "null";
+      if (typeof expr === "object") {
         const elements = {};
         Object.keys(expr).forEach(x => 
            elements[x] = exprToStringRecursive(expr[x], start + 2)
@@ -511,7 +511,7 @@ const EMOJI_MOD = `(?:\\p{EMod}|${VS16}${KEYCAP}?|${TAG_MOD})`;
 const EMOJI_NOT_IDENTIFIER = `(?:(?=\\P{XIDC})\\p{Emoji})`;
 const ZWJ_ELEMENT = `(?:${EMOJI_NOT_IDENTIFIER}${EMOJI_MOD}*|\\p{Emoji}${EMOJI_MOD}+|${FLAG_SEQUENCE})`;
 const POSSIBLE_EMOJI = `(?:${ZWJ_ELEMENT})(${ZWJ}${ZWJ_ELEMENT})*`;
-const EMOJI_IDENTIFIER = new RegExp(`^(?:${POSSIBLE_EMOJI})+$`, 'u');
+const EMOJI_IDENTIFIER = new RegExp(`^(?:${POSSIBLE_EMOJI})+$`, "u");
 ```
 
 In summary, when using Latin characters, identifiers can start with a letter or
@@ -783,9 +783,9 @@ expression, but this is quite a bit more verbose:
 ```json example
 [
   "Dictionary",
-  ["KeyValuePair", "'first'", 1],
-  ["KeyValuePair", "'second'", 2],
-  ["KeyValuePair", "'third'", ["Add", 1, 2]]
+  ["KeyValuePair", ""first"", 1],
+  ["KeyValuePair", ""second"", 2],
+  ["KeyValuePair", ""third"", ["Add", 1, 2]]
 ]
 ```
 

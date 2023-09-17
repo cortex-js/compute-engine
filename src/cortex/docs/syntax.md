@@ -4,7 +4,7 @@ permalink: /cortex/syntax/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 ---
 
 # Cortex Syntax

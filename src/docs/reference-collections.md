@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/collections/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 ---
@@ -101,10 +101,10 @@ The visual presentation of a `List` expression can be customized using the
 `Delimiter` function.
 
 ```js example
-ce.box(['List', 5, 2, 10, 18]).latex;
+ce.box(["List", 5, 2, 10, 18]).latex;
 // -> "\\lbrack 5, 2, 10, 18 \\rbrack"
 
-ce.box(['Delimiter', ['List', 5, 2, 10, 18], '<>;']).latex;
+ce.box(["Delimiter", ["List", 5, 2, 10, 18], '<>;']).latex;
 // -> "\\langle5; 2; 10; 18\\rangle"
 ```
 
@@ -693,8 +693,8 @@ negative indexes (or ranges) reverses the order of the elements.
 // -> ["List", 18, 10, 2, 5]
 
 // From last to first = reverse
-["Take", "'desserts'", ["Range", -1, 1]]
-// -> "'stressed'"
+["Take", ""desserts"", ["Range", -1, 1]]
+// -> ""stressed""
 ```
 
 An index can be repeated to extract the same element multiple times.

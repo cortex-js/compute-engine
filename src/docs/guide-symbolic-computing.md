@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/symbolic-computing/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 preamble:
@@ -64,7 +64,7 @@ For example, if `f` is \\( 2 + (\sqrt{4x^2} + 1) \\) and `x` is \\( \pi \\):
 ```javascript
 
 const f = ce.parse('2 + (\\sqrt{4x^2} + 1)');
-ce.set({'x': 'Pi'});
+ce.set({"x": "Pi"});
 console.log(f.simplify().latex); // 2\sqrt{x}+3
 console.log(f.evaluate().latex); // 2\sqrt{\pi}+3
 console.log(f.N().latex); // 9.283\,185\,307\ldots
@@ -162,8 +162,8 @@ assumptions may result in a different answer.
 | `lhs.isEqual(rhs)`                       | Mathematical equality                  |
 | `lhs.match(rhs) !== null`                | Pattern match                          |
 | `lhs.is(rhs)`                            | Synonym for `isSame()`                 |
-| `ce.box(['Equal', lhs, rhs]).evaluate()` | Synonym for `isEqual()`                |
-| `ce.box(['Same', lhs, rhs]).evaluate()`  | Synonym for `isSame()`                 |
+| `ce.box(["Equal", lhs, rhs]).evaluate()` | Synonym for `isEqual()`                |
+| `ce.box(["Same", lhs, rhs]).evaluate()`  | Synonym for `isSame()`                 |
 
 </div>
 

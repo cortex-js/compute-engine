@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/expressions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 ---
 
@@ -47,7 +47,7 @@ expr = ce.box({ num: '+Infinity' });
 console.log(expr.latex);
 // ➔ +\infty
 
-expr = ce.box(['Add', 3, 'x']);
+expr = ce.box(["Add", 3, "x"]);
 console.log(expr.head);
 // ➔ "Add"
 
@@ -71,7 +71,7 @@ console.log(expr.json);
 use the `mf.expression` property:
 
 ```js
-const mf = document.getElementById('input');
+const mf = document.getElementById("input");
 mf.value = '\\frac{10}{5}';
 const expr = mf.expression;
 console.log(expr.evaluate().latex);
@@ -84,9 +84,9 @@ console.log(expr.evaluate().latex);
 property. Use this property to "unbox" the expression.
 
 ```js
-const expr = ce.box(['Add', 3, 'x']);
+const expr = ce.box(["Add", 3, "x"]);
 console.log(expr.json);
-// ➔ ['Add', 3, 'x']
+// ➔ ["Add", 3, "x"]
 ```
 
 **To customize the format of the MathJSON expression** use the
@@ -103,7 +103,7 @@ console.log(expr.json);
 // ➔ ["Add", 2, ["Divide", "q", "p"]]
 
 ce.jsonSerializationOptions = {
-  exclude: ['Divide'], // Don't use `Divide` functions,
+  exclude: ["Divide"], // Don't use `Divide` functions,
   // use `Multiply`/`Power` instead
   shorthands: [], // Don't use any shorthands
 };
@@ -117,7 +117,7 @@ console.log(expr.json);
 //    ]]
 ```
 
-<section id='canonical'>
+<section id="canonical">
 
 ## Canonical Expressions
 
@@ -183,7 +183,7 @@ a symbol. But if an assumption about the symbol is made later, or a value
 assigned to it, then `expr.isPositive` may take a different value.
 
 ```js
-const expr = ce.box('x');
+const expr = ce.box("x");
 console.log(expr.isPositive);
 // ➔ undefined
 
@@ -220,16 +220,16 @@ dictionary, use the following boolean expressions:
 | Kind           | Boolean Expression                                     |
 | :------------- | :----------------------------------------------------- |
 | **Number**     | `expr.numericValue !== null`                           |
-| **Symbol**     | `expr.symbol !== null` <br> `expr.head === 'Symbol'`   |
+| **Symbol**     | `expr.symbol !== null` <br> `expr.head === "Symbol"`   |
 | **Function**   | `expr.ops !== null`                                    |
-| **String**     | `expr.string !== null` <br> `expr.head === 'String'`   |
-| **Dictionary** | `expr.keys !== null` <br> `expr.head === 'Dictionary'` |
+| **String**     | `expr.string !== null` <br> `expr.head === "String"`   |
+| **Dictionary** | `expr.keys !== null` <br> `expr.head === "Dictionary"` |
 
 </div>
 
 The value of `expr.numericValue` may be:
 
-- `typeof expr.numericValue === 'number'`: the expression is a JavaScript number
+- `typeof expr.numericValue === "number"`: the expression is a JavaScript number
 - `ce.isBignum(expr.numericValue)`: the expression is a bignum. Use
   `expr.numericValue.toNumber()` to convert it to a JavaScript number.
 - `ce.isComplex(expr.numericValue)`: the expression is a complex number. Use
@@ -274,7 +274,7 @@ doctrine. That is, even partially complete expressions are parsed, and as much
 of the input as possible is reflected in the MathJSON result.
 
 If required operands are missing (the denominator of a fraction, for example), a
-`["Error", "'missing'"]` error expression is inserted where the missing operand
+`["Error", ""missing""]` error expression is inserted where the missing operand
 should have been.
 
 Problems that occur while parsing a LaTeX string will usually indicate a LaTeX
@@ -344,13 +344,13 @@ console.log(ce.parse('\\oops{bar}+2').json);
 //    ]
 
 console.log(ce.parse('\\begin{oops}\\end{oops}').json);
-// ➔ ["Error",["ErrorCode","'unknown-environment'","'oops'"],["Latex","'\\\\begin{oops}\\\\end{oops}'"]
+// ➔ ["Error",["ErrorCode","'unknown-environment'",""oops""],["Latex","'\\\\begin{oops}\\\\end{oops}'"]
 
 console.log(ce.parse('1+\\sqrt').json);
-// ➔ ["Add", 1 ,["Sqrt", ["Error", "'missing'"]]]
+// ➔ ["Add", 1 ,["Sqrt", ["Error", ""missing""]]]
 
 console.log(ce.parse('1+\\frac{2}').json);
-// ➔ ["Add", 1, ["Divide", 2, ["Error","'missing'"]]]
+// ➔ ["Add", 1, ["Divide", 2, ["Error",""missing""]]]
 
 console.log(ce.parse('1+(2=2)+2').json);
 // ➔ ["Add", 1, ["Delimiter", ["Equal", 2, 2]]]
