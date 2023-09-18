@@ -841,14 +841,14 @@ The Standard Library includes definitions for:
 
 <div class=symbols-table>
 
-| Topic                                                               | Symbols/Functions                                                      |
+| Topic                                                               |                                                       |
 | :------------------------------------------------------------------ | :--------------------------------------------------------------------- |
 | [Arithmetic](/compute-engine/reference/arithmetic/)                 | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`... |
-| [Calculus](/compute-engine/reference/calculus/)                     | `Derive` `Integrate`...                                                |
+| [Calculus](/compute-engine/reference/calculus/)                     | `Derivative` `Integrate`...                                                |
 | [Collections](/compute-engine/reference/collections/)               | `List` `Reverse` `Filter`...                                           |
 | [Complex](/compute-engine/reference/complex/)                       | `Real` `Conjugate`, `ComplexRoots`...                                  |
-| [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` `Sum` ...                                          |
-| [Core](/compute-engine/reference/core/)                             | `Let`, `Set`, `InverseFunction` `LatexTokens`...                       |
+| [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` ...                                          |
+| [Core](/compute-engine/reference/core/)                             | `Declare`, `Assign`, `Error` `LatexString`...                       |
 | [Domains](/compute-engine/reference/domains/)                       | `Anything` `Nothing` `Number` `Integer` ...                            |
 | [Functions](/compute-engine/reference/functions/)                   | `Function` `Apply` `Return` ...                                        |
 | [Logic](/compute-engine/reference/logic/)                           | `And` `Or` `Not` `True` `False` `Maybe` ...                            |

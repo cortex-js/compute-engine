@@ -47,7 +47,7 @@ Declare a new identifier in the current scope, and set its value and domain.
 If the identifier already has a definition in the current scope, evaluate to an
 error, otherwise evaluate to `value`. 
 
-**To change the value of an existing identifier**, use a `["Set"]` expression.
+**To change the value of an existing identifier**, use an `["Assign"]` expression.
 
 {% readmore "/compute-engine/guides/augmenting/" %}Read more about using
 `ce.declare()` to declare a new symbol or function. {% endreadmore %}
@@ -60,18 +60,18 @@ error, otherwise evaluate to `value`.
 
 Set the value of `identifier` to `value`.
 
-If `identifier` does not exist in the current scope, consider parent
+If `identifier` has not been declared in the current scope, consider parent
 scopes until a definition for the identifier is found.
 
 If a definition is found, change the value of the identifier to `value` 
-if the value is compatible with the domain of the identifier. Once set,
-the domain of the identifier cannot be changed.
+if the value is compatible with the domain of the identifier: once set,
+the domain of an identifier cannot be changed.
 
 If there is no definition for the identifier, add a new definition in the
 current scope, and use the `value` to infer the domain of the identifier.
 
 
-{% readmore "/compute-engine/guides/augmenting/" %}Read more about using `Set`
+{% readmore "/compute-engine/guides/augmenting/" %}Read more about using `Assign`
 to change the value of a symbol or function. {% endreadmore %}
 
 {% enddef %}

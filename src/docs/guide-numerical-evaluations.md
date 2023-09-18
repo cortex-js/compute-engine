@@ -376,7 +376,7 @@ evaluations for their numeric functions:
 | Topic                                                             | Symbols/Functions                                                      |
 | :---------------------------------------------------------------- | :--------------------------------------------------------------------- |
 | [Arithmetic](/compute-engine/reference/arithmetic/)               | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`... |
-| [Calculus](/compute-engine/reference/calculus/)                   | `Derive` `Integrate`...                                                |
+| [Calculus](/compute-engine/reference/calculus/)                   | `Derivative` `Integrate`...                                                |
 | [Complex](/compute-engine/reference/complex/)                     | `Real` `Conjugate`, `ComplexRoots`...                                  |
 | [Special Functions](/compute-engine/reference/special-functions/) | `Gamma` `Factorial`...                                                 |
 | [Statistics](/compute-engine/reference/statistics/)               | `StandardDeviation` `Mean` `Erf`...                                    |
