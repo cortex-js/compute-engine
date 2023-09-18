@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+## Breaking Changes
+
+- The methods `ce.let()` and `ce.set()` have been renamed to `ce.declare()` and
+  `ce.assign()` respectively.
+- The method `ce.assume()` requires a predicate.
+- The signatures of `ce.assume()` and `ce.ask()` have been simplified.
+
+## New Features
+
+- Added the functions `Assume`, `Identity`, `Which`, `FixedPoint`, `Parse`
+
 ## Improvements
 
 - Added support for **collections** such as lists, tuples, ranges, etc... See
@@ -26,8 +37,15 @@
 
   ["First", ["List", 33, 45, 12, 89, 65]]
   // -> 33
-
   ```
+
+- The documentation at https://cortexjs.io/compute-engine/ has been
+  significantly rewritten with help from an AI-powered writing assistant.
+
+## Bug Fixes
+
+- The LaTeX string returned in `["Error"]` expression was incorrectly tagged as
+  `Latex` instead of `LatexString`.
 
 ## 0.15.0
 
