@@ -12,9 +12,19 @@ preamble:
   sequence of expressions is evaluated</p>'
 ---
 
-- A `["Block"]` expression defines a **sequential** control structure
-- An `["If"]` or `["Which"]` expression define a **conditional** control structure.
-- A `["Loop"]` or `["FixedPoint"]` expression define an **iterative** control structure.
+## Overview
+
+The flow of a program is controlled by control structures. Control structures
+are expressions that define how a sequence of expressions is evaluated.
+
+There are three kind of control structures:
+
+- **Sequential**: `Block`, the most common where expressions are evaluated one
+  after the other
+- **Conditional** `If` or `Which`, where expressions are evaluated depending on
+  the value of a condition
+- **Iterative** `Loop` or `FixedPoint`, where expressions are evaluated
+  repeatedly
 
 ## Sequential Control Structure
 
@@ -22,25 +32,23 @@ preamble:
 
 [&quot;**Block**&quot;, _expr-1_, ..._expr-n_]{.signature}
 
+A `["Block"]` expression is a sequence of expressions that are evaluated
+sequentially.
 
-The evaluation of a `["Block"]` expression follows these steps:
+A new scope is created for the `["Block"]` expression. The scope is destroyed
+when the `["Block"]` expression is finished evaluating.
 
-1.  Create a new scope
+The value of the `["Block"]` expression is the value of the last expression
+`expr-n`.
 
-2.  Evaluate each `expr` sequentially.
+If an expression `expr` is a `["Return"]` expression, a `["Break"]` expression
+or a `["Continue"]` expression, no more expressions are evaluated and the value
+of the `["Block"]` is this expression.
 
-    If the value of an expression is a `["Return"]` expression, a `["Break"]`
-    expression or a `["Continue"]` expression, no more expressions are evaluated
-    and the value of the `["Block"]` is this expression.
-
-    Otherwise, the value of the `["Block"]` expression is the value of the last
-    expression
+`["Block"]` expressions can be nested as necessary.
 
 ```json example
-["Block", 
-  ["Assign", "c", 5], 
-  ["Multiply", "c", 2]
-]
+["Block", ["Assign", "c", 5], ["Multiply", "c", 2]]
 // ➔ 10
 ```
 
@@ -50,11 +58,27 @@ The evaluation of a `["Block"]` expression follows these steps:
 
 [&quot;**Return**&quot;, _value_]{.signature}
 
-If evaluated as an argument to a `["Function"]` expression, interupts the 
-evaluation of the function. The value of the `["Function"]` expression is `value`.
+If evaluated as an argument to a `["Function"]` expression, interupts the
+evaluation of the function. The value of the `["Function"]` expression is
+`value`.
 
-The `["Return"]` expression is useful when used with functions that
-have multiple exit points, conditional logic, loops, etc...
+The `["Return"]` expression is useful when used with functions that have
+multiple exit points, conditional logic, loops, etc...
+
+Here's an example of a function that return the sign of a number:
+
+```json example
+[
+  "Function",
+  [
+    "Block",
+    ["If", ["Greater", "x", 0], ["Return", 1]],
+    ["If", ["Less", "x", 0], ["Return", -1]],
+    0
+  ],
+  "x"
+]
+```
 
 {% readmore "/compute-engine/reference/functions/" %}Read more about
 **functions**. {% endreadmore %}
@@ -75,13 +99,13 @@ expression is `expr-1`, otherwise `Nothing`.
 If the value of `condition`is the symbol `True`, the value of the `["If"]`
 expression is `expr-1`, otherwise `expr-2`.
 
+Here's an example of a function that returns the absoluve value of a number:
+
 ```json example
-["Block", 
-  ["Assign", "n", -10]
-  ["If", ["Greater", "n", 0], "n", ["Negate", "n"]]
-]
-// ➔ 10
+["Function", ["If", ["Greater", "n", 0], "n", ["Negate", "n"]], "n"]
 ```
+
+`["If"]` expressions can be nested as necessary.
 
 {% enddef %}
 
@@ -103,22 +127,21 @@ The value of the `["Which"]` expression is the value of the first expression
 // ➔ 10
 ```
 
-
 A `["Which"]` expression is equivalent to the following `["If"]` expression:
 
 ```json example
-["If", ["Equal", condition-1, "True"], expr-1, 
-    ["If", ["Equal", condition-2, "True"], _expr-2, 
-    ... ["If", ["Equal", condition-n, "True"], 
-          expr-n, 
+["If", ["Equal", condition-1, "True"], expr-1,
+    ["If", ["Equal", condition-2, "True"], _expr-2,
+    ... ["If", ["Equal", condition-n, "True"],
+          expr-n,
           "Nothing"
     ]
   ]
 ]
 ```
 
-A `["Which"]` expression is equivalent to a `switch` statement in JavaScript
-or the `Which[]` function in Mathematica.
+A `["Which"]` expression is equivalent to a `switch` statement in JavaScript or
+the `Which[]` function in Mathematica.
 
 {% enddef %}
 
@@ -130,28 +153,25 @@ or the `Which[]` function in Mathematica.
 
 [&quot;**Loop**&quot;, _body_]{.signature}
 
-Repeatedly evaluate `body`until the value of `body`is a `["Break"]`
-expression, a `["Continue"]` expression or a `["Return"]` expression.
+Repeatedly evaluate `body`until the value of `body`is a `["Break"]` expression,
+or a `["Return"]` expression.
 
-- `["Break"]` exits the loop immediately.
-- `["Continue"]` skips to the next iteration of the loop.
+- `["Break"]` exits the loop immediately. The value of the `["Loop"]` expression
+  is the value of the `["Break"]` expression.
 - `["Return"]` exits the loop and returns the value of the `["Return"]`
   expression.
+
+To exit the loop, a `["Break"]` or `["Return"]` expression must be evaluated.
 
 `Loop` with only a _body_ argument is equivalent to a `while(true)` in
 JavaScript or a `While[True, ...]` in Mathematica.
 
 [&quot;**Loop**&quot;, _body_, _collection_]{.signature}
 
-[&quot;**Loop**&quot;, _body_, _collection_, _index_]{.signature}
-
 Iterates over the elements of `collection` and evaluates `body` with an implicit
 argument `_` whose value is the current element. The value of the `["Loop"]`
 expression is the value of the last iteration of the loop, or the value of the
 `["Break"]` expression if the loop was exited with a `["Break"]` expression.
-
-If `index` is provided, the corresponding symbol is assigned the value of the
-current element.
 
 ```json example
 ["Loop", ["Print", ["Square", "_"]], ["Range", 5]]
@@ -174,21 +194,19 @@ _max-iterations_]{.signature}
 
 Assumes `body`is an expression using an implicit argument `_`.
 
-Apply `body`to `initial-value`, then apply `body`to the result until the
-result no longer changes.
+Apply `body`to `initial-value`, then apply `body`to the result until the result
+no longer changes.
 
 To determine if a fixed point has been reached and the loop should terminate,
-the previous and current values are compared with `Same`.
+the previous and current values are compared with `Equal`.
 
-Inside `body`, use `Break` to exit the loop immediately or `Continue`
-to skip to the next iteration.
+Inside `body`, use a `["Break"]` expression to exit the loop immediately or
+`Return` to exit the enclosing `["Function"]` expression.
 
 {% readmore "/compute-engine/reference/collections/#Fold" %}See also the
 **`Fold` function** which operates on a collection {% endreadmore %}
 
 {% enddef %}
-
-
 
 {%readmore "/compute-engine/reference/statistics/" %}Read more about the
 `Product` and `Sum` functions which are specialized version of loops.
@@ -202,8 +220,7 @@ programming constructs that can be used to replace loops. {% endreadmore %}
 
 ## Break and Continue
 
-**To control the flow of a loop expression**, use `Break` and
-`Continue`.
+**To control the flow of a loop expression**, use `Break` and `Continue`.
 
 {% defs "Function" "Description" %}
 
