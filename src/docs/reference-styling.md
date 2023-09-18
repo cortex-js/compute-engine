@@ -37,7 +37,7 @@ If no _sep_ is provided, use a comma `,` as a separator.
 
 If no _open_ and _close_ strings are provided, use parentheses `(` and `)`.
 
-The `Delimiter` function is **inert** and the value of a `["Delimiter", _expr_]` expression is `_expr_`.
+The `Delimiter` function is **inert** and the value of a `["Delimiter", _expr_]` expression is `expr`.
 
 {% enddef %}
 
@@ -46,9 +46,9 @@ The `Delimiter` function is **inert** and the value of a `["Delimiter", _expr_]`
 [&quot;**Spacing**&quot;, _width_]{.signature}
 
 
-When serializing to LaTeX,  `_width_` is the dimension of the spacing, in 1/18 em.
+When serializing to LaTeX,  `width`is the dimension of the spacing, in 1/18 em.
 
-The `Spacing` function is **inert** and the value of a `["Spacing", _expr_]` expression is `_expr_`.
+The `Spacing` function is **inert** and the value of a `["Spacing", _expr_]` expression is `expr`.
 
 {% enddef %}
 
@@ -60,8 +60,8 @@ The `Spacing` function is **inert** and the value of a `["Spacing", _expr_]` exp
 
 
 
-- `_expr_` an expression
-- `_dictionary_` a dictionary with one or more of the following keys:
+- `expr`an expression
+- `dictionary`a dictionary with one or more of the following keys:
   - `_"display"_`:
     - `"inline"` for `\textstyle`
     - `"block"` for `\displaystyle`
@@ -71,7 +71,7 @@ The `Spacing` function is **inert** and the value of a `["Spacing", _expr_]` exp
   - `_"color"_`
 
 
-The `Style` function is **inert** and the value of a `["Style", _expr_]` expression is `_expr_`.
+The `Style` function is **inert** and the value of a `["Style", _expr_]` expression is `expr`.
 
 {% enddef %}
 

@@ -205,7 +205,7 @@ numbers, the result is a number. Otherwise it is a simplified _collection_.
 
 [&quot;**Sum**&quot;, _body_, _bounds_]{.signature}
 
-Return the sum of `_body_` for each value in `_bounds_`.
+Return the sum of `body`for each value in `bounds`.
 
 {% latex "\\sum{i=1}^{n} f(i)" %}
 
@@ -239,7 +239,7 @@ simplified _collection_.
 
 [&quot;**Product**&quot;, _body_, _bounds_]{.signature}
 
-Return the product of `_body_` for each value in `_bounds_`.
+Return the product of `body`for each value in `bounds`.
 
 {% latex "\\prod_{i=1}^{n} f(i)" %}
 

@@ -142,11 +142,11 @@ String(BaseForm(42, 16))
 
 [&quot;**Clamp**&quot;, _value_, _lower_, _upper_]{.signature}
 
-- If `_value_` is less than `_lower_`, evaluate to `_lower_`
-- If `_value_` is greater than `_upper_`, evaluate to `_upper_`
-- Otherwise, evaluate to `_value_`
+- If `value` is less than `lower`, evaluate to `lower`
+- If `value` is greater than `upper`, evaluate to `upper`
+- Otherwise, evaluate to `value`
 
-If `_lower_` and `_upper_` are not provided, they take the default values of -1
+If `lower`and `upper`are not provided, they take the default values of -1
 and +1.
 
 ```json example
@@ -202,13 +202,13 @@ equal to the smallest real number.
 
 [&quot;**Rational**&quot;, _n_]{.signature}
 
-Evaluate to a rational approximating the value of the number `_n_`.
+Evaluate to a rational approximating the value of the number `n`.
 
 <br>
 
 [&quot;**Rational**&quot;, _numerator_, _denominator_]{.signature}
 
-Represent a rational number equal to `_numerator_` over `_denominator_`.
+Represent a rational number equal to `numerator`over `denominator`.
 
 {% enddef %}
 

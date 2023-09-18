@@ -26,7 +26,7 @@ value other than themselves.
 | `Nothing`   | An **optional** expression is not present. Used in sparse list to indicate skipped elements.                                                                                       |
 | `Undefined` | The result is not defined. For example, the domain of an unknown symbol is `Undefined`.<br>Note that for numbers, the equivalent is `NaN` (Not a Number) and for booleans, `Maybe` |
 
-{% latex "\\[\lbrack 2, ,3 \rbrack\\] " %}
+{% latex "\\lbrack 2, ,3 \\rbrack " %}
 
 ```json example
 ["List", 2, "Nothing", 3]
@@ -34,58 +34,20 @@ value other than themselves.
 
 </section>
 
-## Assignment, Declaration and Assumptions
-
-{% def "Assume" %}
-
-[&quot;**Assume**&quot;, _predicate_]{.signature}
-
-The predicate is an expression that evaluates to `True` or `False. The symbols
-or functions in the predicate expression may be free (i.e. not have a
-definition).
-
-The predicate can take the form of an equality, an inequality or a membership
-expression:
-
-- `["Assume", ["Equal", "x", 3]]`
-- `["Assume", ["Greater", "x", 0]]`
-- `["Assume", ["Element", "x", "Integer"]]`
-
-{% enddef %}
+## Declare, Assign and Assume
 
 {% def "Declare" %}
 
-[&quot;**Declare**&quot;, _symbol_, _domain_]{.signature}
+[&quot;**Declare**&quot;, _identifier_, _domain_]{.signature}
 
-[&quot;**Declare**&quot;, _symbol_, _domain_, _value_]{.signature}
+[&quot;**Declare**&quot;, _identifier_, _domain_, _value_]{.signature}
 
-Declare a new symbol in the current scope, and set its value and domain. If
-_<kbd>domain</kbd>_ is not provided, the domain is inferred based on the value.
+Declare a new identifier in the current scope, and set its value and domain.
 
-If the symbol already has a definition in the current scope, evaluate to an
-error, otherwise evaluate to _<kbd>value</kbd>_. To change the value of an
-existing symbol, use a `["Set"]` expression.
+If the identifier already has a definition in the current scope, evaluate to an
+error, otherwise evaluate to `value`. 
 
-<code>["Declare", _function-expression_, _value_]</code>
-
-Define a new function in the current scope. The name of the function and its
-arguments are provided by the function expression. The value is an expression
-using the arguments from _<kbd>function-expression</kbd>_.
-
-```
-// Declare f(x) := x + 1
-["Declare", ["f", "x"], ["Add", "x", 1]]
-```
-
-The arguments of the function expression should be either
-
-- symbols
-- pairs of symbol and domain.
-
-```
-// Declare f(n) := 2n, where n is an integer
-["Declare", ["f", ["Tuple", "n", "Integer]], ["Multiply", "n", 2]]
-```
+**To change the value of an existing identifier**, use a `["Set"]` expression.
 
 {% readmore "/compute-engine/guides/augmenting/" %}Read more about using
 `ce.declare()` to declare a new symbol or function. {% endreadmore %}
@@ -94,32 +56,55 @@ The arguments of the function expression should be either
 
 {% def "Assign" %}
 
-[&quot;**Assign**&quot;, _symbol_, _value_]{.signature}
+[&quot;**Assign**&quot;, _identifier_, _value_]{.signature}
 
-Set the value of _<kbd>symbol</kbd>_ to _<kbd>value</kbd>_.
+Set the value of `identifier` to `value`.
 
-If _<kbd>symbol</kbd>_ does not exist in the current context, consider parent
-scopes until a definition for the symbol is found.
+If `identifier` does not exist in the current scope, consider parent
+scopes until a definition for the identifier is found.
 
-If there is no definition for the symbol, evaluate to an error, otherwise
-evaluate to _<kbd>value</kbd>_. To define a new symbol, use a `["Declare"]`
-expression.
+If a definition is found, change the value of the identifier to `value` 
+if the value is compatible with the domain of the identifier. Once set,
+the domain of the identifier cannot be changed.
+
+If there is no definition for the identifier, add a new definition in the
+current scope, and use the `value` to infer the domain of the identifier.
+
 
 {% readmore "/compute-engine/guides/augmenting/" %}Read more about using `Set`
 to change the value of a symbol or function. {% endreadmore %}
 
 {% enddef %}
 
-<section id='core-functions'>
 
-## Core Functions
+{% def "Assume" %}
+
+[&quot;**Assume**&quot;, _predicate_]{.signature}
+
+The predicate is an expression that evaluates to `True` or `False`. 
+
+The identifiers in the predicate expression may be free, i.e. they may not have 
+have been declared yet. Asserting an assumption does not declare the identifiers
+in the predicate.
+
+The predicate can take the form of:
+
+- an equality: `["Assume", ["Equal", "x", 3]]`
+- an inequality: `["Assume", ["Greater", "x", 0]]`
+- a membership expression: `["Assume", ["Element", "x", "Integer"]]`
+
+{% enddef %}
+
+## Expression Inspection
+
+The following functions can be used to obtain information about an expression.
 
 {% def "About" %}
 
-[&quot;**About**&quot;, _symbol_, _value_]{.signature}
+[&quot;**About**&quot;, _identifier_]{.signature}
 
-Evaluate to a dictionary containing information about a symbol such as its
-domain, its attributes, its value, etc...
+Evaluate to a dictionary expression containing information about an identifier
+such as its domain, its attributes, its value, etc...
 
 {% enddef %}
 
@@ -149,6 +134,13 @@ Evaluate to the head of _expression_
 
 {% enddef %}
 
+
+
+<section id='core-functions'>
+
+## Core Functions
+
+
 {% def "Evaluate" %}
 
 [&quot;**Evaluate**&quot;, _expression_]{.signature}
@@ -160,36 +152,29 @@ and calculate its value. Overrides `Hold` and hold attributes of a function.
 
 {% def "Error" %}
 
-[&quot;**Error**&quot;, _expression_, _string_, _rest_]{.signature}
+[&quot;**Error**&quot;, _error-code_, _context_]{.signature}
 
 Tag an expression that could not be interpreted correctly. It may have a syntax
-error, a reference to an unknown symbol or function or some other problem.
+error, a reference to an unknown identifier or some other problem.
 
-Note that an `Error` expression can be a sub-expression.
+The first argument, `error-code` is either a string, or an `["ErrorCode"]`
+expression.
 
-The second argument is a string indicating the problem.
+The _context_ is an optional expression that provides additional information
+about the error.
 
-The third argument, if present, is an expression describing what could not be
-parsed. {% enddef %}
+
+
+{% enddef %}
 
 {% def "Hold" %}
 
 [&quot;**Hold**&quot;, _expression_]{.signature}
 
-Tag an expression that should be kept in an unevaluated form {% enddef %}
-
-{% def "Html" %}
-
-[&quot;**Html**&quot;, _expression_]{.signature}
-
-Evaluate to a string which is the HTML markup corresponding to the expression.
-If the head of _expr_ is `LatexString`, `Latex` or `LatexTokens`, renders the
-LaTeX to HTML markup {% enddef %} {% def "Identity" %} <code>["Identity",
-_expression_]</code>
-
-Evaluate to its argument
+Tag an expression that should be kept in an unevaluated form 
 
 {% enddef %}
+
 
 {% def "Identity" %}
 
@@ -205,52 +190,21 @@ Evaluate to its argument
 
 Evaluate to the inverse function of its argument for example `Arcsin` for `Sin`
 
-{% latex "\\[\\sin^{-1}(x)\\]" %}
+{% latex "\\sin^{-1}(x)" %}
 
 ```json example
-[["InverseFunction", "Sin"], "x"]\
+[["InverseFunction", "Sin"], "x"]]
 ```
 
 {% enddef %}
 
-{% enddef %}
-
-{% def "Latex" %}
-
-[&quot;**Latex**&quot;, _expression_]{.signature}
-
-Evaluate to a `LatexString` which is the expression serialized to LaTeX
-{% enddef %}
-
-{% def "LatexString" %}
-
-[&quot;**LatexString**&quot;, _string_]{.signature}
-
-Tag a string as a LaTeX string
-
-{% enddef %}
-
-{% def "Parse" %}
-
-[&quot;**Parse**&quot;, _string_]{.signature}
-
-If _expr_ is a `["LatexString"]` expression, evaluate to a MathJSON expression
-corresponding to the LaTeX string.
-
-```json example
-["Parse", ["LatexString", "'\\frac{\\pi}{2}'"]]
-// -> ["Divide", "Pi", 2]
-```
-
-{% enddef %}
 
 {% def "String" %}
 
 [&quot;**String**&quot;, _expression_]{.signature}
 
 Evaluate to a string made from the concatenation of the arguments converted to
-strings {% enddef %}
-
+strings 
 ```json example
 ["String", "x", 2]
 // -> "'x2'"
@@ -280,19 +234,35 @@ use `Declare`.
 
 </section>
 
-## `Parse`, `Latex`, `LatexTokens` and `LatexString`
+## Parsing and Serializing Latex
 
 {% def "Parse" %}
 
-[&quot;**Parse**&quot;, _expression_]{.signature}
+[&quot;**Parse**&quot;, _string_]{.signature}
 
-- `expr`: a MathJSON expression
-- Returns a LaTeX string representing the expression.
+If _expr_ is a `["LatexString"]` expression, evaluate to a MathJSON expression
+corresponding to the LaTeX string.
 
 ```json example
-["Latex", ["Divide", "Pi", 2]]
-// ➔ "'\frac{\pi}{2}'"
+["Parse", ["LatexString", "'\\frac{\\pi}{2}'"]]
+// -> ["Divide", "Pi", 2]
 ```
+
+{% enddef %}
+
+
+{% def "Latex" %}
+
+[&quot;**Latex**&quot;, _expression_]{.signature}
+
+Evaluate to a `LatexString` which is the expression serialized to LaTeX
+{% enddef %}
+
+{% def "LatexString" %}
+
+[&quot;**LatexString**&quot;, _string_]{.signature}
+
+Tag a string as a LaTeX string
 
 {% enddef %}
 
