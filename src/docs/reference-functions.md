@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/functions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 render_math_in_document: true
 ---
@@ -40,6 +40,11 @@ In the example below, both the function and its parameters are anonymous.
 ```json example
 ["Sum", ["Multiply", "_", 2]]
 ```
+
+{% readmore "/compute-engine/reference/control-structures/" %}The examples in
+this section define functions as a simple expression, but functions can include
+more complex control structures, including blocks, loops and conditionals. Learn
+more about **control structures**. {% endreadmore %}
 
 ## Evaluating an Anonymous Function
 
@@ -138,18 +143,6 @@ are replaced by the wildcards.
 ["Apply", ["Function", ["Multiply", "x", "x"], "x"], 3]
 // ➔ 9
 ```
-
-{% enddef %}
-
-{% def "Return" %}
-
-[&quot;**Return**&quot;, _value_]{.signature}
-
-If in a `["Function"]` expression, interupts the evaluation of the function. The
-value of the `["Function"]` expression is _value_
-
-The `["Return"]` expression is useful when used with more complex functions that
-have multiple exit points, conditional logic, loops, etc...
 
 {% enddef %}
 

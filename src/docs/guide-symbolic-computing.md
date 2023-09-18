@@ -29,8 +29,9 @@ head:
     };
 ---
 
-
-**Note:** To use the Compute Engine you must write JavaScript or TypeScript code. This guide assumes you are familiar with one of these programming languages.{.notice--info}
+**Note:** To use the Compute Engine you must write JavaScript or TypeScript
+code. This guide assumes you are familiar with one of these programming
+languages.{.notice--info}
 
 **Note:** In this guide, functions such as `ce.box()` and `ce.parse()` require a
 `ComputeEngine` instance which is denoted by a `ce.` prefix.<br>Functions that
@@ -44,27 +45,26 @@ There are three common transformations that can be applied to an expression:
 | Transformation    |                                                                                                                                                                        |
 | :---------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `expr.simplify()` | Eliminate constants and common sub-expressions. Use available assumptions to determine which rules are applicable. Limit calculations to exact results using integers. |
-| `expr.evaluate()` | Calculate the exact value of an expression. Replace symbols with their value. Perform exact calculations using integers.                                                     |
+| `expr.evaluate()` | Calculate the exact value of an expression. Replace symbols with their value. Perform exact calculations using integers.                                               |
 | `expr.N()`        | Calculate a numeric approximation of an expression using floating point numbers.                                                                                       |
 
 </div>
 
 <div class="first-column-header">
 
-|                               |              `expr.simplify()`           |           `expr.evaluate()`           |              `expr.N()`               |
-| :---------------------------- | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: |
-| Exact calculations           | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} |                                       |
+|                               |           `expr.simplify()`           |           `expr.evaluate()`           |              `expr.N()`               |
+| :---------------------------- | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: |
+| Exact calculations            | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} |                                       |
 | Use assumptions on symbols    | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} |
-| Floating-point approximations |                                        |                                       | {% icon "circle-check" "green-700" %} |
+| Floating-point approximations |                                       |                                       | {% icon "circle-check" "green-700" %} |
 
 </div>
 
 For example, if `f` is \\( 2 + (\sqrt{4x^2} + 1) \\) and `x` is \\( \pi \\):
 
 ```javascript
-
 const f = ce.parse('2 + (\\sqrt{4x^2} + 1)');
-ce.set({"x": "Pi"});
+ce.assign('x', 'Pi');
 console.log(f.simplify().latex); // 2\sqrt{x}+3
 console.log(f.evaluate().latex); // 2\sqrt{\pi}+3
 console.log(f.N().latex); // 9.283\,185\,307\ldots
@@ -72,15 +72,13 @@ console.log(f.N().latex); // 9.283\,185\,307\ldots
 
 <div class="symbols-table first-column-header">
 
-|                |                             |                                                              |
-| :------------- | :-------------------------- | :----------------------------------------------------------- |
-| `f.simplify()` | \\[ \sqrt{x}+3 \\]          | Exact calculations of some integer constants, simplification |
-| `f.evaluate()` | \\[ \sqrt{\\pi}+3 \\]       | Evaluation of symbols                                        |
+|                |                                |                                                              |
+| :------------- | :----------------------------- | :----------------------------------------------------------- |
+| `f.simplify()` | \\[ \sqrt{x}+3 \\]             | Exact calculations of some integer constants, simplification |
+| `f.evaluate()` | \\[ \sqrt{\\pi}+3 \\]          | Evaluation of symbols                                        |
 | `f.N()`        | \\[ 9.283\,185\,307 \ldots \\] | Evaluation of constants                                      |
 
 </div>
-
-
 
 {% readmore "/compute-engine/guides/simplify/" %} Read more about
 <strong>Simplify</strong> {% endreadmore %}
@@ -172,8 +170,8 @@ assumptions may result in a different answer.
 **To replace a symbol in an expression** use the `subs()` function.
 
 The argument of the `subs()` function is an object literal. Each key value pairs
-is an identifier and the value to be substituted with. The value can be 
-either a number or a boxed expression.
+is an identifier and the value to be substituted with. The value can be either a
+number or a boxed expression.
 
 <code-playground layout="stack" show-line-numbers mark-line="7">
 <div slot="javascript">import { ComputeEngine } from 'compute-engine';
@@ -191,6 +189,7 @@ console.log("Numerical Evaluation:", expr.N().latex);</div>
 ## Other Symbolic Manipulation
 
 There are a number of operations that can be performed on an expression:
+
 - creating an expression from a raw MathJSON expression or from a LaTeX string
 - simplifying an expression
 - evaluating an expression

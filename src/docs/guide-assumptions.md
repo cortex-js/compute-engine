@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/assumptions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 ---
 
@@ -23,11 +23,11 @@ simplifications and to optimize computations.
 For example, to indicate \\(\beta \in \R\\):
 
 ```js
-ce.assume(parse('\\beta \\in \\R'));
+ce.assume(ce.parse('\\beta \\in \\R'));
 
 // or:
 
-ce.assume(["Element", "Beta", "RealNumber"]);
+ce.assume(['Element', 'Beta', 'RealNumber']);
 ```
 
 The head of the proposition can be one of the following:
@@ -46,8 +46,8 @@ The head of the proposition can be one of the following:
 If the `assume()` function is invoked with two arguments, it is equivalent to
 `ce.assume(["Element", <arg1>, <arg2>])`.
 
-```js
-ce.assume("x", "RealNumber"); // same as ce.assume(["Element", "x", "RealNumber"])
+```js example
+ce.assume(["Element", "x", "RealNumber"); // same as ce.assume(["Element", "x", "RealNumber"])
 ```
 
 The argument to the `assume()` function is a **proposition**. That proposition
@@ -56,12 +56,14 @@ assumptions knowledge base. Some propositions can be described in several
 different but equivalent ways. You can use whichever form you prefer. Similarly,
 when querying the knowledge base later, you can use any form you'd like.
 
-```js
-ce.assume("x", "PositiveNumber");
+```js example
+ce.assume(['Element', 'x', 'PositiveNumber']);
+
 // Equivalent to...
-ce.assume(["Greater", "x", 0]);
+ce.assume(['Greater', 'x', 0]);
+
 // ... or ...
-ce.assume(["Element", "x", ["Interval", ["Open", 0], "Infinity"]]);
+ce.assume(['Element', 'x', ['Interval', ['Open', 0], 'Infinity']]);
 ```
 
 <section id='multivariate-assumptions'>
@@ -72,7 +74,7 @@ Assumptions are frequently describing the property of a symbol. However, it is
 also possible to describe relationships betwen multiple symbols.
 
 ```js
-ce.assume(parse('xy + 1 = 0'))'
+ce.assume(ce.parse('xy + 1 = 0'))'
 ```
 
 </section>
@@ -114,8 +116,8 @@ when creating a Compute Engine instance:
 ```js
 const ce = new ComputeEngine({
   assumptions: [
-    ["Element", "x", "Integer"],
-    ["Element", "y", "Integer"],
+    ['Element', 'x', 'Integer'],
+    ['Element', 'y', 'Integer'],
   ],
 });
 ```
@@ -136,15 +138,15 @@ const ce = new ComputeEngine({ assumptions: null });
 **To test if a particular assumption is valid**, call the `ce.is()` function.
 
 ```js
-ce.is(["Element", "x", "RealNumber"]);
+ce.is(['Element', 'x', 'RealNumber']);
 ```
 
 As a shorthand, you can pass a symbol as a first argument and a domain as a
 second.
 
 ```js
-ce.is("x", "RealNumber"); // same as ce.is(["Element", "x", 'RealNumber])
-ce.is("x", ["Range", 1, 5]);
+ce.is('x', 'RealNumber'); // same as ce.is(["Element", "x", 'RealNumber])
+ce.is('x', ['Range', 1, 5]);
 ```
 
 The function `ce.is()` return `true` if the assumption is true, `false` if it is
@@ -160,10 +162,10 @@ The argument of `ask()` can be a pattern, and it returns an array of matches as
 
 ```js
 // "x is a positive integer"
-ce.assume("x", "PositiveInteger");
+ce.assume(['Element', 'x', 'PositiveInteger']);
 
 // "What is x greater than?"
-ce.ask(["Greater", "x", '_val']);
+ce.ask(['Greater', 'x', '_val']);
 
 //  -> [{"val": 0}] "It is greater than 0"
 ```
@@ -188,13 +190,13 @@ Each call to `ce.assume()` is additive: the previous assumptions are preserved.
   symbol.
 
 ```js
-ce.assume('\\alpha', "RealNumber");
-ce.is(["Element", '\\alpha', "RealNumber"]);
+ce.assume(['Element', '\\alpha', 'RealNumber']);
+ce.is(['Element', '\\alpha', 'RealNumber']);
 // ➔  true
 
 ce.forget('\\alpha');
 
-ce.is(["Element", '\\alpha', "RealNumber"]);
+ce.is(['Element', '\\alpha', 'RealNumber']);
 // ➔  undefined
 ```
 
@@ -209,18 +211,18 @@ When an assumption is made, it is only valid in the current scope.
 **To temporarily define a series of assumptions**, create a new scope.
 
 ```js
-ce.is(["Element", '\\alpha', "RealNumber"]);
+ce.is(['Element', '\\alpha', 'RealNumber']);
 // ➔ undefined
 
 ce.pushScope();
 
-ce.assume('\\alpha', "RealNumber");
-ce.is(["Element", '\\alpha', "RealNumber"]);
+ce.assume(['Element', '\\alpha', 'RealNumber']);
+ce.is(['Element', '\\alpha', 'RealNumber']);
 // ➔  true
 
 ce.popScope(); // all assumptions made in the current scope are forgotten
 
-ce.is(["Element", '\\alpha', "RealNumber"]);
+ce.is(['Element', '\\alpha', 'RealNumber']);
 // ➔  undefined
 ```
 
@@ -229,17 +231,17 @@ You can also specify a series of assumptions when creating the scope:
 ```js
 ce.pushScope({
   assumptions: [
-    ["Element", '\\alpha', "RealNumber"],
-    ["Element", '\\beta', "RealNumber"],
+    ['Element', '\\alpha', 'RealNumber'],
+    ['Element', '\\beta', 'RealNumber'],
   ],
 });
 
-ce.is(["Element", '\\alpha', "RealNumber"]);
+ce.is(['Element', '\\alpha', 'RealNumber']);
 // ➔  true
 
 ce.popScope();
 
-ce.is(["Element", '\\alpha', "RealNumber"]);
+ce.is(['Element', '\\alpha', 'RealNumber']);
 // ➔  undefined
 ```
 

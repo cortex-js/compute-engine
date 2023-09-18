@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/collections/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 render_math_in_document: true
 ---
@@ -101,10 +101,10 @@ The visual presentation of a `List` expression can be customized using the
 `Delimiter` function.
 
 ```js example
-ce.box(["List", 5, 2, 10, 18]).latex;
+ce.box(['List', 5, 2, 10, 18]).latex;
 // -> "\\lbrack 5, 2, 10, 18 \\rbrack"
 
-ce.box(["Delimiter", ["List", 5, 2, 10, 18], '<>;']).latex;
+ce.box(['Delimiter', ['List', 5, 2, 10, 18], '<>;']).latex;
 // -> "\\langle5; 2; 10; 18\\rangle"
 ```
 
@@ -492,7 +492,7 @@ Returns a collection where _function_ is applied to each element of the input
 collection.
 
 ```json example
-["Map", ["Function",["Add", "x", 1], "x"], ["List", 5, 2, 10, 18]]
+["Map", ["Function", ["Add", "x", 1], "x"], ["List", 5, 2, 10, 18]]
 // -> ["List", 6, 3, 11, 19]
 ```
 
@@ -547,9 +547,13 @@ The name of a function can be used as a shortcut for a function that takes two
 arguments.
 
 ```json example
-["Reduce", ["List", 5, 2, 10, 18], "Add"]
+["Fold", ["List", 5, 2, 10, 18], "Add"]
 // -> 35
 ```
+
+{% readmore "/compute-engine/reference/control-structures/#FixedPoint" %}See
+also the **`FixedPoint` function** which operates without a collection.
+{% endreadmore %}
 
 {% enddef %}
 

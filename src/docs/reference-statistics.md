@@ -4,13 +4,14 @@ permalink: /compute-engine/reference/statistics/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 render_math_in_document: true
 ---
 
-For the following functions, when the input is a _list_, it can 
-take the following forms:
+For the following functions, when the input is a _collection_, it can take the
+following forms:
+
 - Multiple arguments, e.g. `["Mean", 1, 2, 3]`
 - A list of numbers, e.g. `["Mean", ["List", 1, 2, 3]]`
 - A matrix, e.g. `["Mean", ["List", ["List", 1, 2], ["List", 3, 4]]]`
@@ -23,11 +24,11 @@ take the following forms:
 
 {% def "Mean" %}
 
-[&quot;**Mean**&quot;, _list_]{.signature}
+[&quot;**Mean**&quot;, _collection_]{.signature}
 
 {% latex "\\operatorname{mean}(\\lbrack3, 5, 7\\rbrack)" %}
 
-Evaluate to the **arithmetic mean** of a list of numbers.
+Evaluate to the **arithmetic mean** of a collection of numbers.
 
 The arithmetic mean is the average of the list of numbers. The mean is
 calculated by dividing the sum of the numbers by the number of numbers in the
@@ -46,9 +47,9 @@ The formula for the mean of a list of numbers is \\( \bar{x} = \frac{1}{n}
 
 {% def "Median" %}
 
-[&quot;**Median**&quot;, <i>list</i>]{.signature}
+[&quot;**Median**&quot;, _collection_]{.signature}
 
-Evaluate to the **median** of a list of numbers.
+Evaluate to the **median** of a _collection_ of numbers.
 
 The median is the value separating the higher half from the lower half of a data
 sample. For a list of numbers sorted in ascending order, the median is the
@@ -65,9 +66,9 @@ the average of the two middle elements.
 
 {% def "Mode" %}
 
-[&quot;**Mode**&quot;, <i>list</i>]{.signature}
+[&quot;**Mode**&quot;, _collection_]{.signature}
 
-Evaluate to the **mode** of a list of numbers.
+Evaluate to the **mode** of a _collection_ of numbers.
 
 The mode is the value that appears most often in a list of numbers. A list of
 numbers can have more than one mode. If there are two modes, the list is called
@@ -79,11 +80,9 @@ list is called **multimodal**.
 
 {% def "Variance" %}
 
+[&quot;**Variance**&quot;, _collection_]{.signature}
 
-[&quot;**Variance**&quot;, <i>list</i>]{.signature}
-
-
-Evaluate to the **variance** of a list of numbers.
+Evaluate to the **variance** of a _collection_ of numbers.
 
 The variance is a measure of the amount of variation or dispersion of a set of
 values. A low variance indicates that the values tend to be close to the mean of
@@ -100,17 +99,16 @@ where \\(\mu\\) is the mean of the list.
 
 {% def "StandardDeviation" %}
 
-[&quot;**StandardDeviation**&quot;, <i>list</i>]{.signature}
+[&quot;**StandardDeviation**&quot;, _collection_]{.signature}
 
-
-Evaluate to the **standard deviation** of a list of numbers.
+Evaluate to the **standard deviation** of a _collection_ of numbers.
 
 The standard deviation is a measure of the amount of variation or dispersion of
 a set of values. A low standard deviation indicates that the values tend to be
 close to the mean of the set, while a high standard deviation indicates that the
 values are spread out over a wider range.
 
-The formula for the standard deviation of a list of numbers is
+The formula for the standard deviation of a _collection_ of numbers is
 
 \\[\sqrt{\frac{1}{n} \sum_{i=1}^n (x_i - \mu)^2}\\]
 
@@ -120,8 +118,7 @@ where \\(\mu\\) is the mean of the list.
 
 {% def "Skewness" %}
 
-[&quot;**Skewness**&quot;, <i>list</i>]{.signature}
-
+[&quot;**Skewness**&quot;, _collection_]{.signature}
 
 Evaluate to the **skewness** of a list of numbers.
 
@@ -129,25 +126,25 @@ The skewness is a measure of the asymmetry of the distribution of a real-valued
 random variable about its mean. The skewness value can be positive or negative,
 or undefined.
 
-The formula for the skewness of a list of numbers is: \\[\frac{1}{n}
+The formula for the skewness of a _collection_ of numbers is: \\[\frac{1}{n}
 \sum_{i=1}^n \left(\frac{x_i - \mu}{\sigma}\right)^3\\]
 
-where \\(\mu\\) is the mean of the list, and \\(\sigma\\) is the standard
-deviation of the list.
+where \\(\mu\\) is the mean of the _collection_, and \\(\sigma\\) is the
+standard deviation of the _collection_.
 
 {% enddef %}
 
 {% def "Kurtosis" %}
 
-[&quot;**Kurtosis**&quot;, _list_]{.signature}
+[&quot;**Kurtosis**&quot;, _collection_]{.signature}
 
-Evaluate to the **kurtosis** of a list of numbers.
+Evaluate to the **kurtosis** of a _collection_ of numbers.
 
 The kurtosis is a measure of the "tailedness" of the distribution of a
 real-valued random variable. The kurtosis value can be positive or negative, or
 undefined.
 
-The formula for the kurtosis of a list of numbers is
+The formula for the kurtosis of a _collection_ of numbers is
 
 \\[ \frac{1}{n} \sum_{i=1}^n \left(\frac{x_i - \mu}{\sigma}\right)^4\\]
 
@@ -158,41 +155,34 @@ deviation of the list.
 
 {% def "Quantile" %}
 
-[&quot;**Quantile**&quot;, _list_, _q:number_]{.signature}
+[&quot;**Quantile**&quot;, _collection_, _q:number_]{.signature}
 
+Evaluate to the **quantile** of a _collection_ of numbers.
 
-
-Evaluate to the **quantile** of a list of numbers.
-
-The quantile is a value that divides a list of numbers into equal-sized groups.
-The quantile is a generalization of the median, which divides a list of numbers
-into two equal-sized groups.
+The quantile is a value that divides a _collection_ of numbers into equal-sized
+groups. The quantile is a generalization of the median, which divides a
+_collection_ of numbers into two equal-sized groups.
 
 So, \\(\operatorname{median} = \operatorname{quantile}(0.5)\\).
 
 {% enddef %}
 
-
-
 {% def "Quartiles" %}
 
+[&quot;**Quartiles**&quot;, _collection_]{.signature}
 
-[&quot;**Quartiles**&quot;, _list_]{.signature}
+Evaluate to the **quartiles** of a _collection_ of numbers.
 
-Evaluate to the **quartiles** of a list of numbers.
-
-The quartiles are the three points that divide a list of numbers into four equal
-groups, each group comprising a quarter of the list.
+The quartiles are the three points that divide a _collection_ of numbers into
+four equal groups, each group comprising a quarter of the _collection_.
 
 {% enddef %}
 
-
-
 {% def "InterquartileRange" %}
 
-[&quot;**InterquartileRange**&quot;, _list_]{.signature}
+[&quot;**InterquartileRange**&quot;, _collection_]{.signature}
 
-Evaluate to the **interquartile range** (IRQ) of a list of numbers.
+Evaluate to the **interquartile range** (IRQ) of a _collection_ of numbers.
 
 The interquartile range is the difference between the third quartile and the
 first quartile.
@@ -201,17 +191,62 @@ first quartile.
 
 {% def "Sum" %}
 
-[&quot;**Sum**&quot;, _list_]{.signature}
+[&quot;**Sum**&quot;, _collection_]{.signature}
 
-Evaluate to the sum of a list of numbers.
+Evaluate to a sum of all the elements in _collection_. If all the elements are
+numbers, the result is a number. Otherwise it is a simplified _collection_.
+
+{% latex "\\sum x_{i}" %}
+
+```json example
+["Sum", ["List", 5, 7, 11]]
+// ➔ 23
+```
+
+[&quot;**Sum**&quot;, _body_, _bounds_]{.signature}
+
+Return the sum of `_body_` for each value in `_bounds_`.
+
+{% latex "\\sum{i=1}^{n} f(i)" %}
+
+```json example
+["Sum", ["Add", "x", 1], ["Tuple", 1, 10, "x"]]
+// ➔ 65
+```
+
+````
+
 
 {% enddef %}
 
 {% def "Product" %}
 
-[&quot;**Product**&quot;, _list_]{.signature}
+[&quot;**Product**&quot;, _collection_]{.signature}
 
-Evaluate to the product of a list of numbers.
+Evaluate to a product of all the elements in `collection`.
+
+If all the elements are numbers, the result is a number. Otherwise it is a
+simplified _collection_.
+
+{% latex "\\prod x_{i}" %}
+
+```json example
+["Product", ["List", 5, 7, 11]]
+// ➔ 385
+["Product", ["List", 5, "x", 11]]
+// ➔ ["List", 55, "x"]
+````
+
+[&quot;**Product**&quot;, _body_, _bounds_]{.signature}
+
+Return the product of `_body_` for each value in `_bounds_`.
+
+{% latex "\\prod_{i=1}^{n} f(i)" %}
+
+```json example
+["Product", ["Add", "x", 1], ["Tuple", 1, 10, "x"]]
+// ➔ 39916800
+```
 
 {% enddef %}
 
