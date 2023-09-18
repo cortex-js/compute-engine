@@ -66,7 +66,7 @@ describe('INFERRED DOMAINS', () => {
     );
   });
   test('Nothing', () => {
-    expect(engine.box('Nothing').domain.json).toMatchInlineSnapshot(
+    expect(engine.symbol('Nothing').domain.json).toMatchInlineSnapshot(
       `["Domain", "Nothing"]`
     );
   });

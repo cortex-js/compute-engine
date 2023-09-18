@@ -38,7 +38,7 @@ import { bignumPreferred, complexAllowed, isLatexString } from './utils';
  *
  */
 
-export class BoxedSymbolDefinitionImpl implements BoxedSymbolDefinition {
+export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   readonly name: string;
   readonly wikidata?: string;
   readonly description?: string | string[];

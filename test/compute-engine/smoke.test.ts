@@ -54,7 +54,7 @@ console.log(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
 ce.assume(['Element', 'f', 'Function']);
-ce.assume('one', 1);
+ce.assume(['Equal', 'one', 1]);
 
 slowEval();
 fastEval();
@@ -960,7 +960,7 @@ function fastEval() {
   let y = 0;
   const startTime = performance.now();
   for (let x = 0; x <= Math.PI; x += 0.01) {
-    ce.set({ x: x });
+    ce.assign({ x: x });
     y += Number(expr3.N().numericValue!.valueOf());
   }
 

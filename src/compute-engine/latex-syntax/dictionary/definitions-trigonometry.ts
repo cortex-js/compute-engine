@@ -53,41 +53,6 @@ function parseTrig(op: string): ExpressionParseHandler {
       '';
 
     if (parser.atTerminator(until)) return head;
-    // let isInverse = false;
-    // let primeLevel = 0;
-    // let sup: Expression | null = null;
-
-    // parser.skipSpace();
-    // const start = parser.index;
-    // if (parser.match('^')) {
-    //   parser.skipSpace();
-
-    //   const superscriptIndex = parser.index;
-
-    //   if (parser.matchAll(['<{>', '-', '1', '<}>'])) isInverse = true;
-    //   else {
-    //     parser.index = start;
-
-    //     // Count a prime symbol suffix
-    //     parser.index = start;
-    //     primeLevel = parser.matchPrimeSuffix();
-
-    //     if (primeLevel === 0) {
-    //       parser.index = superscriptIndex;
-    //       sup = parser.parseGroup() ?? parser.parseToken();
-    //     }
-    //   }
-    // }
-    // // Additional primes, after a superscript
-    // primeLevel += parser.matchPrimeSuffix();
-
-    // if (isInverse) head = ['InverseFunction', head];
-
-    // if (primeLevel === 1) head = ['Derivative', head];
-    // else if (primeLevel > 1) head = ['Derivative', head, primeLevel];
-
-    // If a postfix was applied (inverse, prime...),
-    // let the function parser handle the rest
     const fn = parser.parsePostfixOperator(head, until);
     if (fn !== null) return fn;
 
@@ -96,35 +61,6 @@ function parseTrig(op: string): ExpressionParseHandler {
     return args === null ? head : [head, ...args];
   };
 }
-
-// function parsePrimeGroup(parser: Parser): number {
-//   const start = parser.index;
-
-//   parser.skipSpace();
-
-//   if (!parser.match('<{>')) return 0;
-
-//   let primeLevel = 0;
-//   do {
-//     parser.skipSpace();
-//     if (parser.match('<}>')) return primeLevel;
-
-//     const n = countPrimeLevel(parser);
-//     if (n === 0) {
-//       parser.index = start;
-//       return 0;
-//     }
-//     primeLevel += n;
-//   } while (true);
-// }
-
-// function countPrimeLevel(parser: Parser): number {
-//   if (parser.match('\\tripleprime')) return 3;
-//   if (parser.match('\\doubleprime')) return 2;
-//   if (parser.match('\\prime')) return 1;
-//   if (parser.match("'")) return 1;
-//   return 0;
-// }
 
 export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   {

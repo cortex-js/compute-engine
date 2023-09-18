@@ -22,7 +22,7 @@ function checkSimplification(): string | undefined {
   const simp = expr.simplify();
 
   for (let i = 0; i <= 100; i++) {
-    engine.set({ x: Math.random() * 2000 - 1000 });
+    engine.assign({ x: Math.random() * 2000 - 1000 });
     if (!expr.evaluate().isEqual(simp.evaluate())) {
       console.log(expr.evaluate().toString());
       console.log(simp.evaluate().toString());

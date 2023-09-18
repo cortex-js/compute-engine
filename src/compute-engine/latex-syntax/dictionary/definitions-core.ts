@@ -203,7 +203,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\mathtip'],
     parse: (parser: Parser) => {
       const op1 = parser.parseGroup();
-      const op2 = parser.parseGroup();
+      parser.parseGroup();
       return op1;
     },
   },
@@ -211,7 +211,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\texttip'],
     parse: (parser: Parser) => {
       const op1 = parser.parseGroup();
-      const op2 = parser.parseGroup();
+      parser.parseGroup();
       return op1;
     },
   },
@@ -493,6 +493,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     precedence: 810,
     parse: (parser, lhs) => parsePrime(parser, lhs, 3),
   },
+
+  // Lagrange Notation for n-th order derivatives,
+  // i.e. f^{(n)} -> Derivative(f, n)
   {
     latexTrigger: ['^', '<{>', '('],
     kind: 'postfix',
@@ -530,8 +533,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer, expr) =>
       serializer.serialize(op(expr, 1)) + '^{-1}',
   },
+  // Lagrange notation
   {
     name: 'Derivative',
+    // @todo: Leibniz notation: {% latex " \\frac{d^n}{dx^n} f(x)" %}
+    // @todo: Euler modified notation: This notation is used by Mathematica. The Euler notation uses `D` instead of
+    // `\partial`: `\partial_{x} f`,  `\partial_{x,y} f`
+    // @todo: Newton notation: `\dot{v}` -> first derivative relative to time t `\ddot{v}` -> second derivative relative to time t
+
     serialize: (serializer: Serializer, expr: Expression): string => {
       const degree = machineValue(op(expr, 2)) ?? 1;
       const base = serializer.serialize(op(expr, 1));
@@ -734,7 +743,7 @@ function errorContextAsLatex(
   const arg = op(error, 2);
   if (!arg) return '';
 
-  if (head(arg) === 'Latex')
+  if (head(arg) === 'LatexString')
     return `\\texttt{${sanitizeLatex(stringValue(op(arg, 1)) ?? '')}}`;
 
   if (head(arg) === 'Hold') return serializer.serialize(op(arg, 1));

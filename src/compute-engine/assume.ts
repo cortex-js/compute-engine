@@ -1,4 +1,9 @@
-import { AssumeResult, BoxedExpression, IComputeEngine } from './public';
+import {
+  AssumeResult,
+  BoxedExpression,
+  DomainExpression,
+  IComputeEngine,
+} from './public';
 
 import { findUnivariateRoots } from './solve';
 
@@ -223,9 +228,8 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   if (undefs.length === 1) {
     const dom = ce.domain(proposition.op2.evaluate().json);
     if (!dom.isValid) return 'not-a-predicate';
-    if (dom.isCompatible('Function'))
-      ce.defineFunction(undefs[0], { signature: { domain: 'Function' } });
-    else ce.defineSymbol(undefs[0], { domain: dom });
+
+    ce.declare(undefs[0], dom.json as DomainExpression);
     return 'ok';
   }
 

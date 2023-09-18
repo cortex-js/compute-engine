@@ -496,3 +496,78 @@ export function erf(x: number): number {
 
   return sign * (1 - y * Math.exp(-x * x));
 }
+
+/**
+ * An 8th-order centered difference approximation can be used to get a highly
+ * accurate approximation of the first derivative of a function.
+ * The formula for the 8th-order centered difference approximation for the
+ * first derivative is given by:
+ *
+ * \[
+ * f'(x) \approx \frac{-f(x-4h) + 9f(x-3h) - 45f(x-2h) + 186f(x-h) - 186f(x+h) + 45f(x+2h) - 9f(x+3h) + f(x+4h)}{60h}
+ * \]
+ *
+ * Note: Mathematica uses an 8th order approximation for the first derivative
+ *
+ * f: the function
+ * x: the point at which to approximate the derivative
+ * h: the step size
+ */
+export function centeredDiff8thOrder(
+  f: (number) => number,
+  x: number,
+  h = 0.0001
+) {
+  return (
+    (-f(x - 4 * h) +
+      9 * f(x - 3 * h) -
+      45 * f(x - 2 * h) +
+      186 * f(x - h) -
+      186 * f(x + h) +
+      45 * f(x + 2 * h) -
+      9 * f(x + 3 * h) +
+      f(x + 4 * h)) /
+    (60 * h)
+  );
+}
+
+/**
+ * Return a numerical approximation of the integral
+ * of the function f from a to b using Monte Carlo integration.
+ */
+export function monteCarloEstimate(
+  f: (x: number) => number,
+  a: number,
+  b: number,
+  n = 10000
+): number {
+  let sum = 0;
+
+  if (a === -Infinity && b === Infinity) {
+    for (let i = 0; i < n; i++) {
+      const u = Math.random();
+      const x = Math.tan(Math.PI * (u - 0.5));
+      const jacobian = Math.PI * (1 + x * x);
+      sum += f(x) / jacobian;
+    }
+  } else if (a === -Infinity) {
+    for (let i = 0; i < n; i++) {
+      const u = Math.random();
+      const x = b - Math.log(1 - u);
+      const jacobian = 1 / (1 - u);
+      sum += f(x) / jacobian;
+    }
+  } else if (b === Infinity) {
+    for (let i = 0; i < n; i++) {
+      const u = Math.random();
+      const x = a + Math.log(u);
+      const jacobian = 1 / u;
+      sum += f(x) / jacobian;
+    }
+  } else {
+    // Proper integral
+    for (let i = 0; i < n; i++) sum += f(a + Math.random() * (b - a));
+  }
+
+  return (sum / n) * (b - a);
+}

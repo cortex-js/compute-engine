@@ -9,7 +9,7 @@ import {
 } from '../public';
 import { AbstractBoxedExpression } from './abstract-boxed-expression';
 import { BoxedDictionary } from './boxed-dictionary';
-import { apply, BoxedFunction, makeCanonicalFunction } from './boxed-function';
+import { BoxedFunction, makeCanonicalFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
@@ -23,6 +23,7 @@ import {
 } from '../numerics/rationals';
 import { asBigint, bigintValue } from './utils';
 import { bigint } from '../numerics/numeric-bigint';
+import { apply } from '../function-utils';
 
 /**
  * **Theory of Operations**

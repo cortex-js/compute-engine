@@ -1,11 +1,13 @@
+import { ComputeEngine } from '../../src/compute-engine/compute-engine';
+
 import { engine } from '../utils';
 
 engine.jsonSerializationOptions = { precision: 20 };
-const ce = engine;
+const ce: ComputeEngine = engine;
 
 describe('SETTING/FORGETTING', () => {
   test(`Forget with forget()`, () => {
-    ce.set({ x1: 42 });
+    ce.assign({ x1: 42 });
     // This probes the value of the symbol
     expect(ce.box(`x1`).json).toMatch('x1');
     expect(ce.symbol(`x1`).json).toMatch('x1');
@@ -35,7 +37,7 @@ describe('SETTING/FORGETTING', () => {
   });
 
   test(`Forget with set`, () => {
-    ce.set({ x2: 42 });
+    ce.assign('x2', 42);
 
     expect(ce.box(`x2`).json).toMatchInlineSnapshot(`x2`);
     expect(ce.box(`x2`).evaluate().json).toEqual(42);
@@ -45,7 +47,7 @@ describe('SETTING/FORGETTING', () => {
     const expr = ce.box(['Add', 'x2', -1]);
     expect(expr.evaluate().json).toEqual(41);
 
-    ce.set({ x2: null });
+    ce.assign('x2', null);
 
     // Expression should be symbolic 'y1'
     expect(expr.evaluate().json).toMatchObject(['Subtract', 'x2', 1]);
@@ -63,12 +65,12 @@ describe('SETTING/FORGETTING', () => {
 
 describe('SETTING/FORGETTING', () => {
   test(`Properties with set`, () => {
-    ce.set({ x3: 2017 });
+    ce.assign({ x3: 2017 });
     const x3 = ce.box(`x3`);
     expect(x3.isPrime).toMatchInlineSnapshot(`true`);
     expect(x3.isOdd).toMatchInlineSnapshot(`true`);
 
-    ce.set({ x3: 1024 });
+    ce.assign({ x3: 1024 });
     expect(x3.isOdd).toMatchInlineSnapshot(`false`);
   });
 
@@ -83,7 +85,7 @@ describe('SETTING/FORGETTING', () => {
       `["Domain", "ExtendedRealNumber"]`
     );
 
-    ce.assume('x4', 17);
+    ce.assume(['Equal', 'x4', 17]);
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`False`);
     expect(x4.isPrime ?? 'undefined').toEqual(true);
     expect(x4.evaluate().numericValue).toEqual(17);
@@ -91,7 +93,7 @@ describe('SETTING/FORGETTING', () => {
       `["Domain", "ExtendedRealNumber"]`
     );
 
-    ce.set({ x4: 2017 });
+    ce.assign({ x4: 2017 });
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`True`);
     expect(x4.isPrime ?? 'undefined').toMatchInlineSnapshot(`true`);
     expect(x4.numericValue).toMatchInlineSnapshot(`null`); // @fixme, should be 2017

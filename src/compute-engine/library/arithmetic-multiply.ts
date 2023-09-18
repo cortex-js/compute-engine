@@ -281,7 +281,7 @@ export function evalMultiplication(
       for (let i = lower; i <= upper; i++) terms.push(fn.simplify());
     else
       for (let i = lower; i <= upper; i++) {
-        ce.set({ [index]: i });
+        ce.assign({ [index]: i });
         terms.push(fn.simplify());
       }
     result = ce.mul(terms).simplify();
@@ -293,7 +293,7 @@ export function evalMultiplication(
       for (let i = lower; i <= upper; i++) terms.push(fn.evaluate());
     else
       for (let i = lower; i <= upper; i++) {
-        ce.set({ [index]: i });
+        ce.assign({ [index]: i });
         terms.push(fn.evaluate());
       }
     result = ce.mul(terms).evaluate();
@@ -325,7 +325,7 @@ export function evalMultiplication(
       if (bignumPreferred(ce)) {
         let product = ce.bignum(1);
         for (let i = lower; i <= upper; i++) {
-          ce.set({ [index]: i });
+          ce.assign({ [index]: i });
           const term = asBignum(fn.N());
           if (term === null || !term.isFinite()) {
             result = term !== null ? ce.number(term) : undefined;
@@ -341,7 +341,7 @@ export function evalMultiplication(
       const numericMode = ce.numericMode;
       ce.numericMode = 'machine';
       for (let i = lower; i <= upper; i++) {
-        ce.set({ [index]: i });
+        ce.assign({ [index]: i });
         const term = asFloat(fn.N());
         if (term === null || !Number.isFinite(term)) {
           result = term !== null ? ce.number(term) : undefined;
@@ -360,9 +360,9 @@ export function evalMultiplication(
       //
 
       // First, check for divergence
-      ce.set({ [index]: 1000 });
+      ce.assign({ [index]: 1000 });
       const nMax = fn.N();
-      ce.set({ [index]: 999 });
+      ce.assign({ [index]: 999 });
       const nMaxMinusOne = fn.N();
 
       const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
@@ -376,7 +376,7 @@ export function evalMultiplication(
         const numericMode = ce.numericMode;
         ce.numericMode = 'machine';
         for (let i = lower; i <= upper; i++) {
-          ce.set({ [index]: i });
+          ce.assign({ [index]: i });
           const term = asFloat(fn.N());
           if (term === null) {
             result = undefined;

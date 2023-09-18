@@ -6,6 +6,9 @@ import { asFloat } from '../numerics/numeric';
 import { BoxedExpression, IdTable, SemiBoxedExpression } from '../public';
 import { canonical } from '../symbolic/flatten';
 
+// From NumPy:
+const DEFAULT_LINSPACE_COUNT = 50;
+
 export const COLLECTIONS_LIBRARY: IdTable = {
   //
   // Data Structures
@@ -126,7 +129,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       ],
     },
     size: (expr) => {
-      const count = asFloat(expr.op3) ?? 50;
+      const count = asFloat(expr.op3) ?? DEFAULT_LINSPACE_COUNT;
       return Math.max(0, Math.floor(count));
     },
     at: (
@@ -136,7 +139,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       if (typeof index !== 'number') return undefined;
       const lower = asFloat(expr.op1);
       const upper = asFloat(expr.op2);
-      const count = asFloat(expr.op3) ?? 50;
+      const count = asFloat(expr.op3) ?? DEFAULT_LINSPACE_COUNT;
       if (lower === undefined || upper === undefined) return undefined;
       if (index < 1 || index > count) return undefined;
       return expr.engine.number(
@@ -150,11 +153,12 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       if (upper === undefined) {
         upper = lower;
         lower = 1;
-        totalCount = 50;
-      } else totalCount = Math.max(0, asFloat(expr.op3) ?? 50);
+        totalCount = DEFAULT_LINSPACE_COUNT;
+      } else
+        totalCount = Math.max(0, asFloat(expr.op3) ?? DEFAULT_LINSPACE_COUNT);
 
       let index = start ?? 1;
-      count = Math.min(count ?? expr.nops!, expr.nops!);
+      count = Math.min(count ?? totalCount, totalCount);
       if (count <= 0) return { next: () => ({ value: undefined, done: true }) };
       return {
         next: () => {
@@ -173,6 +177,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       };
     },
   },
+
   KeyValuePair: {
     description: 'A key/value pair',
     complexity: 8200,
@@ -186,6 +191,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     },
     size: (_expr) => 1,
   },
+
   Single: {
     description: 'A tuple with a single element',
     complexity: 8200,
@@ -195,7 +201,12 @@ export const COLLECTIONS_LIBRARY: IdTable = {
         ce.tuple(validateArgumentCount(ce, canonical(ops), 1)),
     },
     size: (expr) => expr.nops!,
+    at: (expr, index) => {
+      if (typeof index !== 'number' || index !== 1) return undefined;
+      return expr.ops![0];
+    },
   },
+
   Pair: {
     description: 'A tuple of two elements',
     complexity: 8200,
@@ -205,7 +216,10 @@ export const COLLECTIONS_LIBRARY: IdTable = {
         ce.tuple(validateArgumentCount(ce, canonical(ops), 2)),
     },
     size: (expr) => expr.nops!,
+    at: (expr, index) =>
+      typeof index === 'number' ? expr.ops![index - 1] : undefined,
   },
+
   Triple: {
     description: 'A tuple of three elements',
     complexity: 8200,
@@ -215,7 +229,10 @@ export const COLLECTIONS_LIBRARY: IdTable = {
         ce.tuple(validateArgumentCount(ce, canonical(ops), 3)),
     },
     size: (expr) => expr.nops!,
+    at: (expr, index) =>
+      typeof index === 'number' ? expr.ops![index - 1] : undefined,
   },
+
   Tuple: {
     description: 'A fixed number of heterogeneous elements',
     complexity: 8200,
@@ -224,6 +241,19 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       canonical: (ce, ops) => ce.tuple(canonical(ops)),
     },
     size: (expr) => expr.nops!,
+    at: (expr, index) =>
+      typeof index === 'number' ? expr.ops![index - 1] : undefined,
+  },
+
+  String: {
+    threadable: true,
+    signature: {
+      domain: ['Function', ['Maybe', 'Anything'], 'String'],
+      evaluate: (ce, ops) => {
+        if (ops.length === 0) return ce.string('');
+        return ce.string(ops.map((x) => x.string ?? x.toString()).join(''));
+      },
+    },
   },
 
   //
@@ -236,7 +266,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       domain: ['Function', 'Value', 'Number'],
       evaluate: (ce, ops) => {
         // @todo: could have fast path for List.
-        const def = ce.lookupFunction(ops[0].head);
+        const def = ops[0].functionDefinition;
         if (def?.size) return ce.number(def.size(ops[0]));
         const s = ops[0].string;
         if (s !== null) return ce.number(s.length);
@@ -251,7 +281,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       domain: ['Function', 'Value', 'Number'],
       evaluate: (ce, ops) => {
         // @todo: could have fast path for List.
-        const def = ce.lookupFunction(ops[0].head);
+        const def = ops[0].functionDefinition;
         let l: number | undefined = undefined;
         if (def?.size) l = def.size(ops[0]);
         else {
@@ -278,7 +308,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
           return ce.string(takeString(s, indexes));
         }
 
-        const def = ce.lookupFunction(ops[0].head);
+        const def = ops[0].functionDefinition;
         const l = def?.size?.(ops[0]);
         return take(
           ops[0],
@@ -308,7 +338,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
           );
         }
 
-        const def = ce.lookupFunction(ops[0].head);
+        const def = ops[0].functionDefinition;
         const l = def?.size?.(ops[0]);
         if (!l || !def?.at) return ce.symbol('Nothing');
         const xs = indexes(ops.slice(1).map((op) => indexRangeArg(op, l)));
@@ -323,42 +353,62 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     },
   },
 
+  At: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value', 'Value'],
+      evaluate: (ce, ops) => {
+        const expr = ops[0];
+        const def = expr.functionDefinition;
+        if (!def?.at) return undefined;
+        const s = ops[1].string;
+        if (s !== null) return def.at(expr, 1) ?? ce.symbol('Nothing');
+        const i = asFloat(ops[1]);
+        if (i === null || !Number.isInteger(i)) return undefined;
+        return def.at(expr, i) ?? ce.symbol('Nothing');
+      },
+    },
+  },
+
   First: {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
       evaluate: (ce, ops) => {
         const expr = ops[0];
-        const def = ce.lookupFunction(expr.head);
+        const def = expr.functionDefinition;
         if (!def?.at) return ce.symbol('Nothing');
         return def.at(expr, 1) ?? ce.symbol('Nothing');
       },
     },
   },
+
   Second: {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
       evaluate: (ce, ops) => {
         const expr = ops[0];
-        const def = ce.lookupFunction(expr.head);
+        const def = expr.functionDefinition;
         if (!def?.at) return ce.symbol('Nothing');
         return def.at(expr, 2) ?? ce.symbol('Nothing');
       },
     },
   },
+
   Last: {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
       evaluate: (ce, ops) => {
         const expr = ops[0];
-        const def = ce.lookupFunction(expr.head);
+        const def = expr.functionDefinition;
         if (!def?.at) return ce.symbol('Nothing');
         return def.at(expr, -1) ?? ce.symbol('Nothing');
       },
     },
   },
+
   Rest: {
     complexity: 8200,
     signature: {
@@ -366,6 +416,7 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       evaluate: (_ce, ops) => take(ops[0], [[2, -1, 1]]),
     },
   },
+
   Most: {
     complexity: 8200,
     signature: {
@@ -381,90 +432,287 @@ export const COLLECTIONS_LIBRARY: IdTable = {
       evaluate: (_ce, ops) => take(ops[0], [[-1, 2, 1]]),
     },
   },
+
+  // Return the indexes of the elements so they are in sorted order.
+  // Sort is equivalent to `["Take", ["Ordering", expr, f]]`
+  // Equivalent to Grade Up `⍋` and Grade Down `⍒` return the indexes
+  // equivalent to Ordering in Mathematica
+  Ordering: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', ['Maybe', 'Function'], 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  Sort: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', ['Maybe', 'Function'], 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Randomize the order of the elements
+  Shuffle: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Corresponds to monadic Shape `⍴` in APL
+  Dimensions: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'List'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  Rank: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Number'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Corresponds to ArrayReshape in Mathematica
+  // and dyadic Shape `⍴` in APL
+  Reshape: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Corresponds to Ravel `,` in APL
+  // Also Enlist `∊``⍋` in APL
+  Flatten: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // {f(x) for x in xs}
+  // { 2 ⁢ x | x ∈ [ 0 , 10 ] }
+  Map: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Function', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // [x for x in xs if p(x)]
+  // [x | x in xs, p(x)]
+  Filter: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Function', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Equivalent to "foldl" in Haskell
+  // For "foldr", apply Reverse() first
+  Reduce: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Function', ['Maybe', 'Value'], 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  /* Return a tuple of the unique elements, and their respective count
+   * Ex: Tally([a, c, a, d, a, c]) = [[a, c, d], [3, 2, 1]]
+   */
+  Tally: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Tuple'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Return the first element of Tally()
+  // Equivalent to Union in Mathematica
+  Unique: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Tuple'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Similar to Zip, but has a single argument, a matrix
+  // Ex: Transpose([[a, b, c], [1, 2, 3]]) = [[a, 1], [b, 2], [c, 3]]
+  Transpose: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Similar to Transpose, but acts on a sequence of collections
+  // Equivalent to zip in Python
+  // The length of the result is the length of the shortest argument
+  // Ex: Zip([a, b, c], [1, 2]) = [[a, 1], [b, 2]]
+  Zip: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', ['Sequence', 'Value'], 'Value'],
+      evaluate: (_ce, ops) => undefined,
+    },
+  },
+
+  RotateLeft: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  RotateRight: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // If all the arguments have the same head, return a new expression
+  // made of all the arguments, with the head of the first argument
+  // ["Join", ["List", 1, 2, 3], ["List", 4, 5, 6]] -> ["List", 1, 2, 3, 4, 5, 6]
+  Join: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', ['Sequence', 'Value'], 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Iterate(fn, init) -> [fn(1, init), fn(2, fn(1, init)), ...]
+  // Iterate(fn) -> [fn(1), fn(2), ...]
+  // Infinite series. Can use First(Iterate(fn), n) to get a finite series
+  Iterate: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', ['Maybe', 'Value'], 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Repeat(x) -> [x, x, ...]
+  // This is an infinite series. Can use Tak(Repeat(x), n) to get a finite series
+  // x is evaluated once. Although could use Hold()?
+  // So that First(Repeat(Hold(Random(5))), 10) would return 10 random numbers...
+  Repeat: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Cycle(list) -> [list[1], list[2], ...]
+  // -> repeats infinitely
+  Cycle: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
+
+  // Fill(f, [n, m])
+  // Fill a nxm matrix with the result of f(i, j)
+  // Fill( Random(5), [3, 3] )
+  Fill: {
+    complexity: 8200,
+    signature: {
+      domain: ['Function', 'Value', 'Value'],
+      evaluate: (_ce, ops) => {
+        return undefined;
+      },
+    },
+  },
 };
 
-// •	Rest (eveything but First)
-// •	Most (everything but Last)
-
-// •	Length() = Dimensions[0]
-// * Dimensions()
+// • Permutations()
 // •	Append()
 // •	Prepend()
 // •	Join()
-// •	Flatten()
 // •	Partition()
-// * Apply(expr, n) -> if head of expr has a at handler, use it to access an element
-// - Tally(xs, test) -> Return a list of _tuple(element, count)_
-// 	Ex: Tally([a, c, a, d, a, c]) = [(a, 3), (c, 2), (d, 1)]
-// * IndexOf()
-// * Contains() -> True if element is in list, IndexOf() > 0
-// * Shuffle() -> randomized elements in list
-// * Map(xs, f) -> [f(x) for x in xs]
-// * Filter(xs, f) -> [x for x in xs if f(x)]
+// • Apply(expr, n) -> if head of expr has a at handler, use it to access an element
+// • IndexOf()
+// • Contains() -> True if element is in list, IndexOf() > 0
 
-// * Sort()
-
-// Keys: { domain: 'Function' },
-// Entries: { domain: 'Function' },
-// Dictionary: { domain: 'Collection' },
-// Dictionary: {
+// • Keys: { domain: 'Function' },
+// • Entries: { domain: 'Function' },
+// • Dictionary: { domain: 'Collection' },
+// •Dictionary: {
 //   domain: 'Function',
 //   range: 'Dictionary',
 // },
-// List: { domain: 'Collection' },
-// Tuple: { domain: 'Collection' },
-// Sequence: { domain: 'Collection' },
-// ForEach / Apply
-// Map
-// ReduceRight
-// ReduceLeft
-// cons -> cons(first (element), rest (list)) = list
-// append -> append(list, list) -> list
-// reverse
-// rotate
-// in
-// map   ⁡ map(2x, x, list) ( 2 ⁢ x | x ∈ [ 0 , 10 ] )
-// such-that {x ∈ Z | x ≥ 0 ∧ x < 100 ∧ x 2 ∈ Z}
-// select : picks out all elements ei of list for which crit[ei] is True.
-// sort
-// contains / find
+// • cons -> cons(first (element), rest (list)) = list
+// • append -> append(list, list) -> list
+// • in
+// • such-that {x ∈ Z | x ≥ 0 ∧ x < 100 ∧ x 2 ∈ Z}
+// • contains / find
 
-/*
+// Random() -> random number between 0 and 1
+// Random(n) -> random integer between 1 and n
+// Random(n, m) -> random integer between n and m
 
-* Thread(expr) -> ["List", 
-https://reference.wolfram.com/language/ref/Thread.html
+// TakeDiagonal(matrix) -> [matrix[1, 1], matrix[2, 2], ...]
 
-
-[x for x in 1...10 if x % 2 == 0]
-[ _expression_ for _name_ in _iterable_ <if _condition_>? ]
-
-Filter(1...10, (x) -> x % 2 == 0)
-
-Python: my_set = {x for x in range(10) if x % 2 == 0}
-Scala: val mySet = for (x <- 0 until 10 if x % 2 == 0) yield x
-Swift: let mySet = Set(0..<10).filter { $0 % 2 == 0 }
-C#: var mySet = Enumerable.Range(0, 10).Where(x => x % 2 == 0).ToHashSet();
-Java: Set<Integer> mySet = IntStream.range(0, 10).filter(x -> x % 2 == 0).boxed().collect(Collectors.toSet());
-JavaScript: const mySet = new Set([...Array(10).keys()].filter(x => x % 2 === 0));
-Ruby: my_set = (0...9).select(&:even?).to_set
-Rust: let my_set: HashSet<_> = (0..9).filter(|x| x % 2 == 0).collect();
-Go: mySet := make(map[int]struct{})
-for i := 0; i < 10; i++ {
-    if i % 2 == 0 {
-        mySet[i] = struct{}{}
-    }
-}
-Kotlin: val mySet = (0..9).filter { it % 2 == 0 }.toSet()
-PHP: $mySet = array_flip(array_filter(range(0, 9), fn($x) => $x % 2 === 0));
-C++: std::set<int> mySet;
-for (int i = 0; i < 10; ++i) {
-    if (i % 2 == 0) {
-        mySet.insert(i);
-    }
-}
-
-
-*/
+// Diagonal(list) -> [[list[1, 1], 0, 0], [0, list[2, 2], 0], ...]
 
 function rangeArgs(
   expr: BoxedExpression
@@ -527,7 +775,7 @@ function take(
   indexes: [lower: number, upper: number, step: number][]
 ): BoxedExpression {
   const ce = expr.engine;
-  const def = ce.lookupFunction(expr.head);
+  const def = expr.functionDefinition;
   if (!def?.at) return ce.symbol('Nothing');
 
   const list: SemiBoxedExpression = [];

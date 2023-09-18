@@ -13,7 +13,7 @@ import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 import { LibraryCategory } from '../latex-syntax/public';
 
 import { IComputeEngine, IdTable } from '../public';
-import { BoxedSymbolDefinitionImpl } from '../boxed-expression/boxed-symbol-definition';
+import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
 import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { isFunctionDefinition, isSymbolDefinition } from './utils';
@@ -189,7 +189,7 @@ export function setCurrentContextSymbolTable(
 
       idTable.set(name, def);
     } else if (isSymbolDefinition(entry)) {
-      const def = new BoxedSymbolDefinitionImpl(engine, name, entry);
+      const def = new _BoxedSymbolDefinition(engine, name, entry);
 
       if (engine.strict && entry.wikidata) {
         for (const [_, d] of idTable) {
@@ -205,7 +205,7 @@ export function setCurrentContextSymbolTable(
 
       idTable.set(name, def);
     } else {
-      const def = new BoxedSymbolDefinitionImpl(engine, name, {
+      const def = new _BoxedSymbolDefinition(engine, name, {
         value: engine.box(entry as any),
       });
       console.assert(def);

@@ -18,12 +18,12 @@ import {
   BoxedBaseDefinition,
   DomainExpression,
   BoxedSubstitution,
-  SemiBoxedExpression,
 } from '../public';
 import { replace } from '../rules';
 import { serializeJsonSymbol } from './serialize';
 import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { hashCode } from './utils';
+import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 
 function isSymbolDefinition(
   def: BoxedSymbolDefinition | BoxedFunctionDefinition | null | undefined
@@ -141,7 +141,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     const def =
       this._def ?? this.engine.lookupSymbol(this._name, this._wikidata);
 
-    return !isSymbolDefinition(def) || def.value === undefined;
+    return !(def instanceof _BoxedSymbolDefinition) || def.value === undefined;
   }
 
   get isConstant(): boolean {
@@ -150,7 +150,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     const def =
       this._def ?? this.engine.lookupSymbol(this._name, this._wikidata);
 
-    return !isSymbolDefinition(def) || def.constant;
+    return !(def instanceof _BoxedSymbolDefinition) || def.constant;
   }
 
   get isCanonical(): boolean {
@@ -208,7 +208,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
   get symbolDefinition(): BoxedSymbolDefinition | undefined {
     if (this._def === null) this.bind(this._scope);
-    return isSymbolDefinition(this._def) ? this._def : undefined;
+    return this._def instanceof _BoxedSymbolDefinition ? this._def : undefined;
   }
 
   get functionDefinition(): BoxedFunctionDefinition | undefined {
@@ -274,6 +274,8 @@ export class BoxedSymbol extends AbstractBoxedExpression {
   set value(value: BoxedExpression | number | undefined) {
     // Symbols starting with `_` are wildcards and never have an associated
     // value
+    // @todo: this may not entirely be true. This could
+    // be an anonymous parameter, e.g. `x^2 + _`
     if (this._name[0] === '_')
       throw new Error(
         `The value of the wildcard "${this._name}" cannot be changed`
@@ -296,7 +298,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     //
     // Assign the value to the corresponding definition
     //
-    if (v?.domain.isCompatible('Function')) {
+    if (v?.domain.isFunction) {
       // New function definitions always completely replace an existing one
       this._def = this.engine.defineFunction(this._name, {
         signature: {
@@ -304,7 +306,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
           evaluate: v, // Evaluate as a lambda
         },
       });
-    } else if (this._def && isSymbolDefinition(this._def)) {
+    } else if (this._def && this._def instanceof _BoxedSymbolDefinition) {
       // We are already bound to a symbol definition, update it
       // (this may throw if the definition is readonly)
       this._def.value = v;
@@ -336,7 +338,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
     const d = this.engine.domain(inDomain);
 
-    if (d.isCompatible('Function')) {
+    if (d.isFunction) {
       this.engine.forget(this._name);
       this._def = this.engine.defineFunction(this._name, {
         signature: { domain: d },
@@ -346,7 +348,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
     // Since setting the domain can have the side effect of creating a symbol
     // don't use `symbolDefinition` which may also create the symbol entry,
     // but with a defaultDomain
-    else if (isSymbolDefinition(this._def)) {
+    else if (this._def instanceof _BoxedSymbolDefinition) {
       // Setting the domain will also update the flags
       this._def.domain = d;
     } else {

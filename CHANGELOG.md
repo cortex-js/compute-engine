@@ -9,9 +9,14 @@
 
 ## New Features
 
-- Added the functions `Assume`, `Identity`, `Which`, `FixedPoint`, `Parse`
+- Added the functions `Assume`, `Identity`, `Which`, `FixedPoint`, `Parse`,
+  `Block`, `If`, `Loop`, `N`, `Evaluate`, `Simplify`, `Domain` functions, as
+  well as the `Break`, `Continue` and `Return` statements.
 
-## Improvements
+- Added implementation for numeric approximation of derivatives (using an 8-th
+  order centered difference approximation) and integral (using a Monte Carlo
+  method with rebasing for improper integrals) using the `["ND"]` and
+  `["NIntegrate"]` functions.
 
 - Added support for **collections** such as lists, tuples, ranges, etc... See
   https://cortexjs.io/compute-engine/reference/collections/
@@ -19,7 +24,7 @@
   Collections can be used to represent various data structures, such as lists,
   vectors, matrixes and more.
 
-  The can be iterated, sliced, filtered, mapped, etc...
+  They can be iterated, sliced, filtered, mapped, etc...
 
   ```json example
   ["Length", ["List", 19, 23, 5]]
@@ -28,8 +33,11 @@
   ["IsEmpty", ["Range", 1, 10]]
   // -> "False"
 
-  ["Extract", ["List", 2, 5, 7], 2]
-  // -> ["List", 5]
+  ["Take", ["Linspace", 0, 100, 50], 4]
+  // -> ["List", 0, 2, 4, 6]
+
+  ["Map", ["List", 1, 2, 3], ["Function", "x", ["Power", "x", 2]]]
+  // -> ["List", 1, 4, 9]
 
   ["Exclude", ["List", 33, 45, 12, 89, 65], -2, 2]
   // -> ["List", 33, 12, 65]
@@ -38,6 +46,8 @@
   ["First", ["List", 33, 45, 12, 89, 65]]
   // -> 33
   ```
+
+## Improvements
 
 - The documentation at https://cortexjs.io/compute-engine/ has been
   significantly rewritten with help from an AI-powered writing assistant.

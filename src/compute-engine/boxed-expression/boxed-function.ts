@@ -35,6 +35,7 @@ import { complexAllowed, hashCode, bignumPreferred } from './utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { validateNumericArgs, validateSignature } from './validate';
 import { expand } from '../symbolic/expand';
+import { apply } from '../function-utils';
 
 /**
  * Considering an old (existing) expression and a new (simplified) one,
@@ -117,7 +118,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     this._def = options.def ?? null; // Mark the def as not yet cached if none is provided
 
     if (options.canonical) {
-      if (!this._def) this._def = ce.lookupFunction(head, ce.context);
+      this._def ??= ce.lookupFunction(head);
       this._canonical = this;
     }
 
@@ -933,8 +934,8 @@ export function makeCanonicalFunction(
   //
   // Didn't match a short path, look for a definition
   //
-  const def = ce.lookupFunction(head, ce.context);
-  if (typeof head !== 'string' || !def) {
+  const def = ce.lookupFunction(head);
+  if (!def) {
     return new BoxedFunction(
       ce,
       head,
@@ -982,7 +983,7 @@ export function makeCanonicalFunction(
   // f(a, Sequence(b, c), d) -> f(a, b, c, d)
   //
   xs = flattenSequence(xs);
-  if (def.associative) xs = flattenOps(xs, head);
+  if (def.associative) xs = flattenOps(xs, head as string);
 
   // If some of the arguments are not valid, can't make a canonical expression
   if (!xs.every((x) => x.isValid))
@@ -1010,36 +1011,6 @@ export function makeCanonicalFunction(
   if (xs.length > 1 && def.commutative === true) xs = xs.sort(order);
 
   return new BoxedFunction(ce, head, xs, { metadata, def, canonical: true });
-}
-
-/** Apply arguments to an expression. If the expression is a lambda expression
- * its wildcard arguments are substituted before being evaluated. Otherwise
- * the expression is just evaluated.
- */
-export function apply(
-  fn: BoxedExpression,
-  args: BoxedExpression[]
-): BoxedExpression {
-  const ce = fn.engine;
-
-  if (fn.head !== 'Lambda') return ce._fn(fn.evaluate(), args);
-
-  const subs: BoxedSubstitution = {
-    '__': ce.tuple(args),
-    '_#': ce.number(args.length),
-  };
-  let n = 1;
-  for (const op of args) subs[`_${n++}`] = op;
-  subs['_'] = subs['_1'];
-
-  // Substitute the arguments in the lambda expression
-  const savedContext = ce.context;
-  ce.context = fn.scope ?? null;
-
-  const result = fn.subs(subs);
-
-  ce.context = savedContext;
-  return result.op1.evaluate();
 }
 
 /** Apply the function `f` to elements of `xs`, except to the elements

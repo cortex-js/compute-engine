@@ -1,4 +1,9 @@
-import { BoxedExpression, IdTable } from '../public';
+import {
+  BoxedDomain,
+  BoxedExpression,
+  IComputeEngine,
+  IdTable,
+} from '../public';
 import { joinLatex, tokenize, tokensToString } from '../latex-syntax/tokenizer';
 import { asFloat, asSmallInteger, fromDigits } from '../numerics/numeric';
 
@@ -7,9 +12,10 @@ import {
   validateArgument,
   validateArgumentCount,
 } from '../boxed-expression/validate';
-import { apply } from '../boxed-expression/boxed-function';
 import { canonical } from '../symbolic/flatten';
 import { randomExpression } from './random-expression';
+import { apply, iterable } from '../function-utils';
+import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
 
 //   // := assign 80 // @todo
 
@@ -55,6 +61,7 @@ export const CORE_LIBRARY: IdTable[] = [
        * of the error. If the error occur while parsing a LaTeX string,
        * for example, the argument will be a `Latex` expression.
        */
+      hold: 'all',
       complexity: 500,
       signature: {
         domain: ['Function', 'Anything', ['Maybe', 'Anything'], 'Void'],
@@ -131,39 +138,64 @@ export const CORE_LIBRARY: IdTable[] = [
       },
     },
 
+    Assume: {
+      hold: 'all',
+      signature: {
+        domain: ['Function', 'Anything', 'Anything'],
+        evaluate: (ce, ops) => ce.string(ce.assume(ops[0])),
+      },
+    },
+
+    // @todo
     About: { signature: { domain: 'Function' } },
 
     Block: {
-      /** Create a local scope. First argument is a dictionary of local variables.
-       * They are evaluated in the context of the parent scope. The second argument
-       * is an expression to be evaluated in the context of the new scope.
-       * ["Block", ["List", ["Equal", "x", 1]], [...]]
-       */
-      signature: { domain: 'Function' },
+      signature: { domain: 'Function', evaluate: evaluateBlock },
     },
-    Derivative: {
-      signature: {
-        domain: ['Function', 'Function', ['Maybe', 'Number'], 'Function'],
-      },
-    },
+
     Domain: {
       /** Return the domain of an expression */
       signature: {
         domain: ['Function', 'Anything', 'Domain'],
         canonical: (ce, ops) =>
           ce.domain(validateArgumentCount(ce, canonical(ops), 1)[0]),
+        evaluate: (_ce, ops) => ops[0].domain,
       },
     },
+
     Evaluate: {
       hold: 'all',
       signature: {
         domain: ['Function', 'Anything', 'Anything'],
-        codomain: (_ce, args) => args[0].domain,
+        codomain: (_ce, ops) => ops[0].domain,
         canonical: (ce, ops) =>
           ce._fn('Evaluate', validateArgumentCount(ce, canonical(ops), 1)),
         evaluate: (_ce, ops) => ops[0].evaluate(),
       },
     },
+
+    Simplify: {
+      hold: 'all',
+      signature: {
+        domain: ['Function', 'Anything', 'Anything'],
+        codomain: (_ce, ops) => ops[0].domain,
+        canonical: (ce, ops) =>
+          ce._fn('Simplify', validateArgumentCount(ce, canonical(ops), 1)),
+        evaluate: (_ce, ops) => ops[0].simplify(),
+      },
+    },
+
+    N: {
+      hold: 'all',
+      signature: {
+        domain: ['Function', 'Anything', 'Anything'],
+        codomain: (_ce, ops) => ops[0].domain,
+        canonical: (ce, ops) =>
+          ce._fn('N', validateArgumentCount(ce, canonical(ops), 1)),
+        evaluate: (_ce, ops) => ops[0].N(),
+      },
+    },
+
     Head: {
       signature: {
         domain: 'Function',
@@ -174,28 +206,16 @@ export const CORE_LIBRARY: IdTable[] = [
         },
       },
     },
-    Html: {
-      signature: {
-        domain: ['Function', 'Value', 'String'],
-        evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce.string('');
-          // @todo if head(arg[0]) === 'LatexString', call MathLive renderToMarkup()
-          return ce.string('');
-        },
-      },
-    },
 
-    Lambda: {
-      wikidata: 'Q567612',
-      hold: 'all',
+    Identity: {
       signature: {
-        domain: ['Function', 'Anything', 'Function'],
+        domain: ['Function', 'Anything', 'Anything'],
         codomain: (_ce, ops) => ops[0].domain,
-        canonical: (ce, ops) =>
-          ce._fn('Lambda', validateArgumentCount(ce, ops, 1)),
+        evaluate: (_ce, ops) => ops[0],
       },
     },
 
+    // @todo: need review
     Signatures: {
       signature: {
         domain: ['Function', 'Symbol', ['Maybe', ['List', 'Domain']]],
@@ -219,6 +239,7 @@ export const CORE_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Subscript: {
       /**
        * The `Subscript` function can take several forms:
@@ -261,7 +282,7 @@ export const CORE_LIBRARY: IdTable[] = [
                 if (rest) {
                   return ce.error(
                     ['unexpected-digit', { str: rest[0] }],
-                    ['Latex', ce.string(op1.string)]
+                    ['LatexString', ce.string(op1.string)]
                   );
                 }
                 return ce.number(value);
@@ -290,6 +311,7 @@ export const CORE_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Symbol: {
       complexity: 500,
       description:
@@ -314,13 +336,7 @@ export const CORE_LIBRARY: IdTable[] = [
         // transformed into something else (a symbol) during canonicalization
       },
     },
-    Tail: {
-      signature: {
-        domain: ['Function', 'Value', ['List', 'Value']],
-        evaluate: (ce, ops) =>
-          ops[0] ? ce._fn('List', ops[0].ops ?? []) : ce._fn('List', []),
-      },
-    },
+
     Timing: {
       description:
         '`Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation',
@@ -367,6 +383,86 @@ export const CORE_LIBRARY: IdTable[] = [
   },
 
   //
+  // Control Structures
+  //
+  {
+    If: {
+      hold: 'rest', // Evaluate the condition, but no the true/false branches
+      signature: {
+        domain: 'Function',
+        codomain: (ce, ops) => ce.domain(['Union', ops[0], ops[1]]),
+        evaluate: (ce, ops) => {
+          const cond = ops[0];
+          if (cond && cond.symbol === 'True')
+            return ops[1] ? ops[1].evaluate() : ce.symbol('Nothing');
+          return ops[2] ? ops[2].evaluate() : ce.symbol('Nothing');
+        },
+      },
+    },
+
+    Loop: {
+      hold: 'all', // Do not evaluate anything
+      signature: {
+        domain: 'Function',
+        evaluate: (ce, ops) => {
+          const body = ops[0] ?? ce.symbol('Nothing');
+          if (body.isNothing) return body;
+
+          const collection = ops[1];
+
+          if (collection) {
+            //
+            // Iterate over the elements of a collection
+            //
+            const iter = iterable(collection);
+            if (!iter) return ce.symbol('Nothing');
+            let result: BoxedExpression | undefined = undefined;
+            let i = 0;
+            while (true) {
+              const { done, value } = iter.next();
+              if (done) return result ?? ce.symbol('Nothing');
+              result = apply(body, [value]);
+              if (result.head === 'Break') return result.op1;
+              if (result.head === 'Return') return result;
+              if (i++ > ce.iterationLimit)
+                return ce.error('iteration-limit-exceeded');
+            }
+          }
+
+          //
+          // No collection: infinite loop
+          //
+          let i = 0;
+          while (true) {
+            const result = body.evaluate();
+            if (result.head === 'Break') return result.op1;
+            if (result.head === 'Return') return result;
+            if (i++ > ce.iterationLimit)
+              return ce.error('iteration-limit-exceeded');
+          }
+        },
+      },
+    },
+
+    Which: {
+      hold: 'all',
+      signature: {
+        domain: 'Function',
+        codomain: (ce, ops) => domainWhich(ce, ops),
+        evaluate: (ce, ops) => whichEvaluate(ce, ops, 'evaluate'),
+      },
+    },
+
+    FixedPoint: {
+      hold: 'all',
+      signature: {
+        domain: 'Function',
+        // @todo
+      },
+    },
+  },
+
+  //
   // String-related
   //
   {
@@ -403,6 +499,7 @@ export const CORE_LIBRARY: IdTable[] = [
         },
       },
     },
+
     IntegerString: {
       description: `\`IntegerString(n, base=10)\` \
       return a string representation of the integer \`n\` in base \`base\`.`,
@@ -447,84 +544,45 @@ export const CORE_LIBRARY: IdTable[] = [
         },
       },
     },
-    String: {
-      threadable: true,
-      signature: {
-        domain: ['Function', ['Maybe', 'Anything'], 'String'],
-        evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce.string('');
-          return ce.string(ops.map((x) => x.string ?? x.toString()).join(''));
-        },
-      },
-    },
   },
 
   //
   // LaTeX-related
   //
   {
-    // Join or more LatexTokens into a LaTeX string
-    JoinLatexTokens: {
-      signature: {
-        domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'String'],
-        evaluate: (ce, ops) => {
-          return ce.fn('Latex', [
-            ce.string(tokensToString(ops.map((x) => x.string ?? x.latex))),
-          ]);
-        },
-      },
-    },
     // Value preserving type conversion/tag indicating the string
     // is a LaTeX string
+    LatexString: {
+      inert: true,
+      hold: 'all',
+      signature: { domain: ['Function', 'String', 'String'] },
+    },
+
+    // Serialize one or more expressions to LaTeX
     Latex: {
       signature: {
         domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'String'],
-        evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce.string('');
-          return ce.string(joinLatex(ops.map((x) => x.string ?? x.toString())));
-        },
-      },
-    },
-    // Serialize one or more expressions to LaTeX
-    SerializeLatex: {
-      hold: 'all',
-      signature: {
-        domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'String'],
         evaluate: (ce, ops) =>
-          ce.fn('Latex', [ce.string(joinLatex(ops.map((x) => x.latex)))]),
+          ce.fn('LatexString', [ce.string(joinLatex(ops.map((x) => x.latex)))]),
       },
     },
-    SplitAsLatexTokens: {
-      description: 'Split a LaTeX string into a list of LaTeX tokens',
-      hold: 'all',
-      signature: {
-        domain: ['Function', ['Maybe', 'Anything'], ['List', 'String']],
-        evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce._fn('List', []);
-          let latex = '';
-          if (ops[0].head === 'Latex') latex = ops[0].op1.string ?? '';
-          else if (ops[0].head === 'LatexString')
-            latex = joinLatex(ops[0].ops!.map((op) => op.latex));
-          else latex = ops[0].latex;
-          return ce._fn(
-            'List',
-            tokenize(latex, []).map((x) => ce.string(x))
-          );
-        },
-      },
-    },
-    ParseLatex: {
+
+    Parse: {
       description:
         'Parse a LaTeX string and evaluate to a corresponding expression',
       signature: {
-        domain: ['Function', ['Maybe', 'String'], 'Anything'],
+        domain: ['Function', 'Anything', 'Anything'],
         evaluate: (ce, ops) => {
-          if (ops.length === 0 || !ops[0].string) return ce.box(['Sequence']);
-          return ce.parse(ops[0].string) ?? ce.box(['Sequence']);
+          if (ops.length === 0) return ce.box(['Sequence']);
+          const op1 = ops[0];
+          const s =
+            op1.string ?? op1.head === 'LatexString' ? op1.op1.string : '';
+          return ce.parse(s) ?? ce.box(['Sequence']);
         },
       },
     },
   },
+
   {
     RandomExpression: {
       signature: {
@@ -535,51 +593,55 @@ export const CORE_LIBRARY: IdTable[] = [
   },
 ];
 
-// xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
-// https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1
-// length(expr, depth:integer) (for a list, an expression, etc..)
-// shape
-// length
-// depth
-
-/*
- DICTIONARY
- aka Association in Wolfram, Dictionary in Python and Swift, Record in Maple,
- Map Containers in mathlab, Map in JavaScript
- Dictionary("field1", "value1", "field2", "value2"...)
- Need a new atomic 'dict' MathJSON type?
-  {{name: 'dict',"field1": "value1", "field2": "value2"}}
-*/
-
-// LISTS
-// take(n, list) -> n first elements of the list
-// https://www.mathworks.com/help/referencelist.html?type=function&listtype=cat&category=&blocktype=&capability=&s_tid=CRUX_lftnav        // list
-// repeat(x) -> infinite list with "x" as argument
-// cycle(list) -> infinitely repeating list, i.e. cycle({1, 2, 3}) -> {1, 2, 3, 1, 2, 3, 1...}
-// iterate(f, acc) -> {f(acc), f(f(acc)), f(f(f(acc)))...}
-// == NestList ??
-// Append (python) / Push
-// Insert(i, x)
-// Pop(): remove last, Pop(i): remove item at [i]
-
-// Range
-// index
-// Evaluate
-// Bind // replace  ( x-> 1)
-// Domain
-// min, max
-// None -- constant for some options
-// rule ->
-// delayed-rule: :> (value of replacement is recalculated each time)
-// set, set delayed
-// join
-// convert(expr, CONVERT_TO, OPTIONS) -- See Maple
-// convert(expr, options), with options such as 'cos', 'sin, 'trig, 'exp', 'ln', 'latex', 'string', etc...)
-// N
-// set, delayed-set
-// spread -> expand the elements of a list. If inside a list, insert the list into its parent
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
 
-// Symbol(x) -> x as a symbol, e.g. symbol('x' + 'y') -> `xy` (and registers it)
 // Symbols() -> return list of all known symbols
-// variables() -> return list of all free variables
+// FreeVariables(expr) -> return list of all free variables in expr
+
+function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
+  let dom: BoxedDomain | null = null;
+  for (let i = 1; i <= args.length - 1; i += 2) {
+    if (!dom) dom = args[i].domain;
+    else dom = sharedAncestorDomain(dom, args[i].domain);
+  }
+  return dom ?? ce.domain('Nothing');
+}
+
+function whichEvaluate(
+  ce: IComputeEngine,
+  args: BoxedExpression[],
+  mode: 'N' | 'evaluate'
+): BoxedExpression {
+  let i = 0;
+  while (i < args.length - 1) {
+    if (args[i].evaluate().symbol === 'True') {
+      if (!args[i + 1]) return ce.symbol('Undefined');
+      return mode === 'N' ? args[i + 1].N() : args[i + 1].evaluate();
+    }
+    i += 2;
+  }
+
+  return ce.symbol('Undefined');
+}
+
+/** Evaluate a Block expression */
+function evaluateBlock(
+  ce: IComputeEngine,
+  ops: BoxedExpression[]
+): BoxedExpression {
+  // Empty block?
+  if (ops.length === 0) return ce.symbol('Nothing');
+
+  ce.pushScope();
+
+  let result: BoxedExpression | undefined = undefined;
+  for (const op of ops) {
+    result = op.evaluate();
+    const h = result.head;
+    if (h === 'Return' || h === 'Break' || h === 'Continue') break;
+  }
+
+  ce.popScope();
+
+  return result ?? ce.symbol('Nothing');
+}

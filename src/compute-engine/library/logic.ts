@@ -1,10 +1,4 @@
-import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
-import {
-  BoxedExpression,
-  IdTable,
-  IComputeEngine,
-  BoxedDomain,
-} from '../public';
+import { BoxedExpression, IdTable, IComputeEngine } from '../public';
 
 export const LOGIC_LIBRARY: IdTable = {
   True: { wikidata: 'Q16751793', domain: 'Boolean', constant: true },
@@ -79,71 +73,6 @@ export const LOGIC_LIBRARY: IdTable = {
     },
   },
   Exists: { signature: { domain: 'MaybeBoolean' } },
-
-  If: {
-    hold: 'rest',
-    signature: {
-      domain: 'Function',
-      codomain: (ce, ops) => ce.domain(['Union', ops[0], ops[1]]),
-      simplify: (ce, ops) => {
-        const cond = ops[0];
-        if (cond && cond.symbol === 'True')
-          return ops[1] ? ops[1].simplify() : ce.box('Nothing');
-        return ops[2] ? ops[2].simplify() : ce.box('Nothing');
-      },
-      evaluate: (ce, ops) => {
-        const cond = ops[0];
-        if (cond && cond.symbol === 'True')
-          return ops[1] ? ops[1].evaluate() : ce.box('Nothing');
-        return ops[2] ? ops[2].evaluate() : ce.box('Nothing');
-      },
-      // @todo: probably don't need a N() handler. Doesn't make a difference
-      // for the evaluation of booleans. Also, don't need to call N() on the
-      // arguments, the caller should have done that. Same for evaluate()
-      // and simplify() above
-      N: (ce, ops) => {
-        const cond = ops[0];
-        if (cond && cond.symbol === 'True')
-          return ops[1] ? ops[1].N() : ce.box('Nothing');
-        return ops[2] ? ops[2].N() : ce.box('Nothing');
-      },
-    },
-  },
-
-  Loop: {
-    hold: 'all',
-    signature: {
-      domain: 'Function',
-      simplify: (ce, ops) => ops[0]?.simplify() ?? ce.box('Nothing'),
-      evaluate: (ce, ops) => {
-        const body = ops[0] ?? ce.box('Nothing');
-        if (body.isNothing) return body;
-        let result: BoxedExpression;
-        let i = 0;
-        do {
-          result = body.evaluate();
-          i += 1;
-        } while (result.head !== 'Return' && i < ce.iterationLimit);
-        if (result.head === 'Return') return result.op1;
-        return ce.error('iteration-limit-exceeded');
-      },
-      N: (ce, ops) => {
-        const cond = ops[0];
-        if (cond && cond.symbol === 'True')
-          return ops[1] ? ops[1].N() : ce.box('Nothing');
-        return ops[2] ? ops[2].N() : ce.box('Nothing');
-      },
-    },
-  },
-  Which: {
-    hold: 'all',
-    signature: {
-      domain: 'Function',
-      codomain: (ce, ops) => domainWhich(ce, ops),
-      evaluate: (ce, ops) => whichEvaluate(ce, ops, 'evaluate'),
-      N: (ce, ops) => whichEvaluate(ce, ops, 'N'),
-    },
-  },
 };
 
 function processAnd(
@@ -260,30 +189,4 @@ function processImplies(
   if (lhs === 'True' && rhs === 'False') return ce.symbol('False');
   if (lhs === 'Maybe' || rhs === 'Maybe') return ce.symbol('Maybe');
   return undefined;
-}
-
-function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
-  let dom: BoxedDomain | null = null;
-  for (let i = 1; i <= args.length - 1; i += 2) {
-    if (!dom) dom = args[i].domain;
-    else dom = sharedAncestorDomain(dom, args[i].domain);
-  }
-  return dom ?? ce.domain('Nothing');
-}
-
-function whichEvaluate(
-  ce: IComputeEngine,
-  args: BoxedExpression[],
-  mode: 'N' | 'evaluate'
-): BoxedExpression {
-  let i = 0;
-  while (i < args.length - 1) {
-    if (args[i].evaluate().symbol === 'True') {
-      if (!args[i + 1]) return ce.symbol('Undefined');
-      return mode === 'N' ? args[i + 1].N() : args[i + 1].evaluate();
-    }
-    i += 2;
-  }
-
-  return ce.symbol('Undefined');
 }

@@ -231,7 +231,8 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
-          \operatorname{mean}(\left[ 2, 5, 8, 9, 3\right])
+          \operatorname{Hypot}(3, 4)
+          <!-- \operatorname{mean}(\left[ 2, 5, 8, 9, 3\right]) -->
           <!-- (1, 2, 3) -->
           <!-- ((1,2),(3,4)) -->
 
@@ -476,7 +477,7 @@
       ce2.strict = false;
       const startTime = performance.now();
       for (let x = 0; x <= Math.PI; x += 0.000001) {
-        ce2.set({ x: x });
+        ce2.assign({ x: x });
         y += expr.N().numericValue;
       }
 
@@ -538,6 +539,12 @@
           },
         },
       });
+
+      ce.assign('g', ['Function', ['Add', 'x', 1], 'x']);
+      ce.assign('h', ['Add', '_', 5]);
+      ce.assign('p', (ce, arg) => ce.box((args[0]?.valueOf() ?? 0) + 6));
+      ce.assign('q(x)', ce.parse('x^2'));
+      ce.assign('t(x)', ['Add', 'x', 1]);
 
       ce.jsonSerializationOptions.metadata = ['latex'];
 

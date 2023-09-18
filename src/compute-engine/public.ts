@@ -1072,9 +1072,7 @@ export interface BoxedExpression {
    * The result is in canonical form.
    *
    */
-  evaluate(ids?: {
-    [id: string]: SemiBoxedExpression | null | undefined;
-  }): BoxedExpression;
+  evaluate(options?: EvaluateOptions): BoxedExpression;
 
   /** Return a numeric approximation of the canonical form of this expression.
    *
@@ -1766,7 +1764,7 @@ export type CollectionHandlers = {
     expr: BoxedExpression,
     start?: number,
     count?: number
-  ) => Iterator<BoxedExpression>;
+  ) => Iterator<BoxedExpression, undefined>;
 
   /** Return the element at the specified index.
    * The first element is `at(1)`, the last element is `at(-1)`.
@@ -1987,6 +1985,12 @@ export interface ComputeEngineStats {
   highwaterMark: number;
 }
 
+export type SetValue =
+  | SemiBoxedExpression
+  | ((ce, args) => BoxedExpression)
+  | null
+  | undefined;
+
 /** @internal */
 export interface IComputeEngine {
   latexDictionary: readonly LatexDictionaryEntry[];
@@ -2170,6 +2174,11 @@ export interface IComputeEngine {
    * Associate a new definition to a symbol in the current context.
    *
    * If a definition existed previously, it is replaced.
+   *
+   *
+   * For internal use. Use `ce.declare()` instead.
+   *
+   * @internal
    */
   defineSymbol(name: string, def: SymbolDefinition): BoxedSymbolDefinition;
 
@@ -2177,6 +2186,10 @@ export interface IComputeEngine {
    * Associate a new definition to a function in the current context.
    *
    * If a definition existed previously, it is replaced.
+   *
+   * For internal use. Use `ce.declare()` instead.
+   *
+   * @internal
    */
   defineFunction(
     name: string,
@@ -2399,10 +2412,29 @@ export interface IComputeEngine {
   popScope(): void;
 
   /** Assign a value to an identifier in the current scope. Use `null` to reset the identifier to no value */
-  set(ids: { [id: string]: SemiBoxedExpression | null | undefined }): void;
+  assign(ids: { [id: string]: SetValue }): void;
+  assign(id: string, value: SetValue): void;
+  assign(arg1: string | { [id: string]: SetValue }, arg2?: SetValue): void;
 
   /** Declare identifiers (specify their domain without necessarily assigning them a value in the current scope) */
-  let(identifiers: IdTable): void;
+  declare(identifiers: {
+    [id: string]: DomainExpression | SymbolDefinition | FunctionDefinition;
+  }): void;
+  declare(
+    id: string,
+    def: DomainExpression | SymbolDefinition | FunctionDefinition
+  ): void;
+  declare(
+    arg1:
+      | string
+      | {
+          [id: string]:
+            | DomainExpression
+            | SymbolDefinition
+            | FunctionDefinition;
+        },
+    arg2?: DomainExpression | SymbolDefinition | FunctionDefinition
+  ): void;
 
   /**
    * Add an assumption.
@@ -2419,22 +2451,14 @@ export interface IComputeEngine {
    *
    *
    */
-  assume(
-    symbol: LatexString | SemiBoxedExpression,
-    domain: BoxedDomain
-  ): AssumeResult;
-  assume(predicate: LatexString | SemiBoxedExpression): AssumeResult;
-  assume(
-    arg1: LatexString | SemiBoxedExpression,
-    arg2?: BoxedExpression
-  ): AssumeResult;
+  assume(predicate: SemiBoxedExpression): AssumeResult;
 
   /** Remove all assumptions about one or more symbols */
   forget(symbol?: string | string[]): void;
 
   get assumptions(): ExpressionMapInterface<boolean>;
 
-  ask(pattern: LatexString | SemiBoxedExpression): BoxedSubstitution[];
+  ask(pattern: SemiBoxedExpression): BoxedSubstitution[];
 
   /** @internal */
   shouldContinueExecution(): boolean;

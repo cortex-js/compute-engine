@@ -9,7 +9,7 @@ import {
 } from '../public';
 import { DEFAULT_COMPLEXITY } from './order';
 
-class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
+export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   engine: IComputeEngine;
   scope: RuntimeScope;
   name: string;
@@ -34,7 +34,7 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     expr: BoxedExpression,
     start?: number,
     count?: number
-  ) => Iterator<BoxedExpression>;
+  ) => Iterator<BoxedExpression, undefined>;
   at?: (
     expr: BoxedExpression,
     index: number | string
@@ -78,11 +78,54 @@ class BoxedFunctionDefinitionImpl implements BoxedFunctionDefinition {
     this.hold = def.hold ?? 'none';
 
     // Collection handlers
-    if (def.iterator) this.iterator = def.iterator;
     if (def.at) this.at = def.at;
+
+    if (def.iterator) this.iterator = def.iterator;
     if (def.size) this.size = def.size;
+
     if (def.keys) this.keys = def.keys;
     if (def.indexOf) this.indexOf = def.indexOf;
+
+    if (def.at && !def.size) {
+      this.size = (expr: BoxedExpression) => {
+        // Fallback size handler. This is not very efficient, but it works.
+        const at = def.at!;
+        let i = 0;
+        while (at(expr, i) !== undefined) i++;
+        return i;
+      };
+    }
+    if (def.at && !def.iterator) {
+      // Fallback iterator handler.
+      this.iterator = (expr: BoxedExpression, start = 1, count = -1) => {
+        const at = def.at!;
+        let i = start;
+        return {
+          next() {
+            if (count >= 0 && i >= start + count) return { done: true };
+            const result = at(expr, i);
+            if (result === undefined) return { done: true };
+            i++;
+            return { done: false, value: result };
+          },
+        };
+      };
+    }
+
+    if (this.iterator && !def.indexOf) {
+      // Fallback indexOf handler.
+      this.indexOf = (expr: BoxedExpression, target: BoxedExpression) => {
+        let i = 1;
+        const iterator = this.iterator!(expr);
+        let result = iterator.next();
+        while (!result.done) {
+          if (target.isEqual(result.value)) return i;
+          i++;
+          result = iterator.next();
+        }
+        return undefined;
+      };
+    }
 
     if (this.inert) {
       if (def.hold)
@@ -185,10 +228,6 @@ export function makeFunctionDefinition(
   name: string,
   def: FunctionDefinition | BoxedFunctionDefinition
 ): BoxedFunctionDefinition {
-  if (def instanceof BoxedFunctionDefinitionImpl) return def;
-  return new BoxedFunctionDefinitionImpl(
-    engine,
-    name,
-    def as FunctionDefinition
-  );
+  if (def instanceof _BoxedFunctionDefinition) return def;
+  return new _BoxedFunctionDefinition(engine, name, def as FunctionDefinition);
 }

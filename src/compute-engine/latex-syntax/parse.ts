@@ -2186,7 +2186,9 @@ export class _Parser implements Parser {
     }
 
     const latex = this.latex(fromToken, this.index);
-    return latex ? ['Error', msg, ['Latex', { str: latex }]] : ['Error', msg];
+    return latex
+      ? ['Error', msg, ['LatexString', { str: latex }]]
+      : ['Error', msg];
   }
 
   private isFunctionHead(expr: Expression | null): boolean {

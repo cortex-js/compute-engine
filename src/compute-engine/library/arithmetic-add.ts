@@ -185,7 +185,7 @@ export function evalSummation(
       for (let i = lower; i <= upper; i++) terms.push(fn.simplify());
     else
       for (let i = lower; i <= upper; i++) {
-        ce.set({ [index]: i });
+        ce.assign({ [index]: i });
         terms.push(fn.simplify());
       }
     result = ce.add(terms).simplify();
@@ -197,7 +197,7 @@ export function evalSummation(
       for (let i = lower; i <= upper; i++) terms.push(fn.evaluate());
     else
       for (let i = lower; i <= upper; i++) {
-        ce.set({ [index]: i });
+        ce.assign({ [index]: i });
         terms.push(fn.evaluate());
       }
     result = ce.add(terms).evaluate();
@@ -229,7 +229,7 @@ export function evalSummation(
       if (bignumPreferred(ce)) {
         let sum = ce.bignum(0);
         for (let i = lower; i <= upper; i++) {
-          ce.set({ [index]: i });
+          ce.assign({ [index]: i });
           const term = asBignum(fn.N());
           if (term === null) {
             result = undefined;
@@ -248,7 +248,7 @@ export function evalSummation(
         ce.numericMode = 'machine';
         let sum = 0;
         for (let i = lower; i <= upper; i++) {
-          ce.set({ [index]: i });
+          ce.assign({ [index]: i });
           const term = asFloat(fn.N());
           if (term === null) {
             result = undefined;
@@ -269,9 +269,9 @@ export function evalSummation(
       //
 
       // First, check for divergence
-      ce.set({ [index]: 1000 });
+      ce.assign({ [index]: 1000 });
       const nMax = fn.N();
-      ce.set({ [index]: 999 });
+      ce.assign({ [index]: 999 });
       const nMaxMinusOne = fn.N();
 
       const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
@@ -285,7 +285,7 @@ export function evalSummation(
         const numericMode = ce.numericMode;
         ce.numericMode = 'machine';
         for (let i = lower; i <= upper; i++) {
-          ce.set({ [index]: i });
+          ce.assign({ [index]: i });
           const term = asFloat(fn.N());
           if (term === null) {
             result = undefined;
