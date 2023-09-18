@@ -34,7 +34,17 @@ value other than themselves.
 
 </section>
 
-## Declare, Assign and Assume
+## Declaring, Assigning and Assuming
+
+Before an identifier can be used it has to be declared. The `Declare` function
+is used to declare a new identifier in the current scope.
+
+Once an identifier has been declared, its value can be changed using the
+`Assign` function.
+
+The `Assume` function is used to assert a predicate about an expression. It is
+used to provide additional information to the system, for example to indicate
+that a variable is positive, or that a function is continuous.
 
 {% def "Declare" %}
 
@@ -46,6 +56,8 @@ Declare a new identifier in the current scope, and set its value and domain.
 
 If the identifier already has a definition in the current scope, evaluate to an
 error, otherwise evaluate to `value`. 
+
+This is equivalent to `let` in JavaScript or `var` in Python.
 
 **To change the value of an existing identifier**, use an `["Assign"]` expression.
 
@@ -69,6 +81,8 @@ the domain of an identifier cannot be changed.
 
 If there is no definition for the identifier, add a new definition in the
 current scope, and use the `value` to infer the domain of the identifier.
+
+This is equivalent to `=` in may programming languages.
 
 
 {% readmore "/compute-engine/guides/augmenting/" %}Read more about using `Assign`
@@ -95,7 +109,7 @@ The predicate can take the form of:
 
 {% enddef %}
 
-## Expression Inspection
+## Inspecting an Expression 
 
 The following functions can be used to obtain information about an expression.
 
@@ -134,12 +148,7 @@ Evaluate to the head of _expression_
 
 {% enddef %}
 
-
-
-<section id='core-functions'>
-
-## Core Functions
-
+## Transforming an Expression
 
 {% def "Evaluate" %}
 
@@ -149,6 +158,34 @@ Apply a sequence of definitions to an expression in order to reduce, simplify
 and calculate its value. Overrides `Hold` and hold attributes of a function.
 
 {% enddef %}
+
+{% def "Simplify" %}
+
+[&quot;**Simplify**&quot;, _expression_]{.signature}
+
+The `Simplify` function applies a sequence of transformations to an expression
+in order to reduce, simplify and calculate its value. 
+
+{% enddef %}
+
+{%def "N" %}
+
+[&quot;**N**&quot;, _expression_]{.signature}
+
+Evaluate to a numerical approximation of the expression.
+
+```json example
+["N", ["Pi"]]
+// -> 3.141592653589793
+```
+  
+{% enddef %}
+  
+
+
+<section id='core-functions'>
+
+## Core Functions
 
 {% def "Error" %}
 
@@ -163,9 +200,9 @@ expression.
 The _context_ is an optional expression that provides additional information
 about the error.
 
-
-
 {% enddef %}
+
+
 
 {% def "Hold" %}
 
@@ -182,19 +219,26 @@ Tag an expression that should be kept in an unevaluated form
 
 Evaluate to its argument
 
+In the mathematical sense, this is an operator (a function that takes a function
+as an argument and returns a function).
+
 {% enddef %}
 
 {% def "InverseFunction" %}
 
-[&quot;**InverseFunction**&quot;, _expression_]{.signature}
+[&quot;**InverseFunction**&quot;, _symbol_]{.signature}
 
-Evaluate to the inverse function of its argument for example `Arcsin` for `Sin`
+Evaluate to the inverse function of its argument for example `Arcsin` for `Sin`.
 
 {% latex "\\sin^{-1}(x)" %}
 
 ```json example
 [["InverseFunction", "Sin"], "x"]]
 ```
+
+In the mathematical sense, this is an operator (a function that takes a function
+as an argument and returns a function).
+
 
 {% enddef %}
 

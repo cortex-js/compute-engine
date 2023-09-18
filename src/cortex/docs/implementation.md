@@ -57,19 +57,19 @@ sequence = 2, 5, 7
 ```
 
 ```json example
-["Equal", "set", ["Set", 2, 5, 7, 11, 13]]
+["Assign", "set", ["Set", 2, 5, 7, 11, 13]]
 ```
 
 ```json example
-[("Equal", "list", ["List", 2, 7, 2, 4, 2])]
+["Assign", "list", ["List", 2, 7, 2, 4, 2])]
 ```
 
 ```json example
-[("Equal", "tuple", ["Tuple", 1.5, 0.5])]
+["Assign", "tuple", ["Tuple", 1.5, 0.5])]
 ```
 
 ```json example
-[("Equal", "sequence", ["Sequence", 2, 5, 7])]
+["Assign", "sequence", ["Sequence", 2, 5, 7])]
 ```
 
 - Control structures get converted to an appropriate expression:
