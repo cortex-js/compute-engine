@@ -109,7 +109,7 @@ Let's say you want to parse the following expression:
 ```js example
 const expr = ce.parse('\\operatorname{double}(3)');
 console.log(expr.json);
-// -> ["Multiply", "double", "3"]
+// ➔ ["Multiply", "double", "3"]
 ```
 
 🤔 Hmmm... That's probably not what you want.
@@ -159,7 +159,7 @@ Now, when you parse the expression, you get the expected result:
 ```js example
 const expr = ce.parse('\\operatorname{double}(3)');
 console.log(expr.json);
-// -> ["double", 2] 🎉
+// ➔ ["double", 2] 🎉
 ```
 
 ### Defining a Function
@@ -170,7 +170,7 @@ function.
 
 ```js example
 console.log(ce.evaluate(expr).json);
-// -> ["double", 3]
+// ➔ ["double", 3]
 ```
 
 For the Compute Engine to evaluate `double`, you need to define provide a
@@ -198,7 +198,7 @@ If you evaluate the expression now, you get the expected result:
 
 ```js example
 console.log(ce.evaluate(expr).json);
-// -> 6 🎉
+// ➔ 6 🎉
 ```
 
 ### Changing the Definition of a Function

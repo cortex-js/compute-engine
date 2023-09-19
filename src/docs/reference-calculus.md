@@ -120,7 +120,7 @@ The `ND` function returns a numerical approximation of the partial derivative of
 
 ```json example
 ["ND", "Sin", 1]
-// -> 0.5403023058681398
+// ➔ 0.5403023058681398
 ```
 
 **Note:** `["ND", "Sin", 1]` is equivalent to `["N", ["D", "Sin", 1]]`.

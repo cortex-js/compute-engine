@@ -27,13 +27,13 @@ const expr = ce.parse("\\sqrt{6\\sum^{10^6}_{n=1}\\frac{1}{n^2}}");
 
 // Numerical evaluation using the Compute Engine
 console.log(expr.evaluate().latex);
-// -> 3.14159169866146
+// ➔ 3.14159169866146
 // Timing: 1,531ms
 
 // Compilation to a JavaScript function and execution
 const fn = expr.compile();
 console.log(fn());
-// -> 3.1415916986605086
+// ➔ 3.1415916986605086
 // Timing: 6.2ms (247x faster)
 ```
 
@@ -51,7 +51,7 @@ const fn = expr.compile();
 
 ```javascript
 console.log(fn());
-// -> 3.141592653589793
+// ➔ 3.141592653589793
 ```
 
 If the expression cannot be compiled, the `compile()` method will return
@@ -67,7 +67,7 @@ const expr = ce.parse("n^2");
 const fn = expr.compile();
 for (const i = 1; i < 10; i++) 
   console.log(fn({n: i}));
-// -> 1, 4, 9, 16, 25, 36, 49, 64, 81
+// ➔ 1, 4, 9, 16, 25, 36, 49, 64, 81
 ```
 
 **To get a list of the arguments (or _free variables_) of an expression** 
@@ -75,10 +75,10 @@ use the `expr.freeVars` property:
 
 ```javascript
 console.log(ce.parse("n^2").freeVars);
-// -> ["n"]
+// ➔ ["n"]
 
 console.log(ce.parse("a^2+b^3").freeVars);
-// -> ["a", "b"]
+// ➔ ["a", "b"]
 
 ```
 
@@ -100,6 +100,6 @@ const expr = ce.parse("-i\\sqrt{-1}");
 console.log(expr.compile() ?? expr.N().numericValue);
 // Compile cannot handle complex numbers, so it returns `undefined`
 // and we fall back to numerical evaluation with expr.N()
-// -> 1
+// ➔ 1
 ```
 

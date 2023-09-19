@@ -130,7 +130,7 @@ Evaluate to the domain of _expression_
 
 ```json example
 ["Domain", 2.4531]
-// -> "RealNumber"
+// ➔ "RealNumber"
 ```
 
 {% enddef %}
@@ -143,7 +143,7 @@ Evaluate to the head of _expression_
 
 ```json example
 ["Head", ["Add", 2, 3]]
-// -> "Add"
+// ➔ "Add"
 ```
 
 {% enddef %}
@@ -176,7 +176,7 @@ Evaluate to a numerical approximation of the expression.
 
 ```json example
 ["N", ["Pi"]]
-// -> 3.141592653589793
+// ➔ 3.141592653589793
 ```
   
 {% enddef %}
@@ -251,7 +251,7 @@ Evaluate to a string made from the concatenation of the arguments converted to
 strings 
 ```json example
 ["String", "x", 2]
-// -> "'x2'"
+// ➔ "'x2'"
 ```
 
 {% enddef %}
@@ -264,7 +264,7 @@ Evaluate to a new symbol made of a concatenation of the arguments.
 
 ```json example
 ["Symbol", "x", 2]
-// -> "x2"
+// ➔ "x2"
 ```
 
 The symbol is not declared, it remains a free variable. To declare the symbol
@@ -289,7 +289,7 @@ corresponding to the LaTeX string.
 
 ```json example
 ["Parse", ["LatexString", "'\\frac{\\pi}{2}'"]]
-// -> ["Divide", "Pi", 2]
+// ➔ ["Divide", "Pi", 2]
 ```
 
 {% enddef %}
