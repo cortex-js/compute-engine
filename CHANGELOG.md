@@ -13,6 +13,8 @@
   `Block`, `If`, `Loop`, `N`, `Evaluate`, `Simplify`, `Domain` functions, as
   well as the `Break`, `Continue` and `Return` statements.
 
+- Added `ErfInv` (inverse error function)
+
 - Added implementation for numeric approximation of derivatives (using an 8-th
   order centered difference approximation) and integral (using a Monte Carlo
   method with rebasing for improper integrals) using the `["ND"]` and

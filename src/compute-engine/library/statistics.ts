@@ -1,4 +1,4 @@
-import { asFloat, erf } from '../numerics/numeric';
+import { asFloat, erf, erfInv } from '../numerics/numeric';
 import { BoxedExpression, IdTable } from '../public';
 
 //   // mean
@@ -311,6 +311,17 @@ export const STATISTICS_LIBRARY: IdTable[] = [
           const x = asFloat(ops[0]);
           if (x === null) return undefined;
           return ce.number(1 - erf(x));
+        },
+      },
+    },
+    ErfInv: {
+      complexity: 7500,
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        evaluate: (ce, ops) => {
+          const x = asFloat(ops[0]);
+          if (x === null) return undefined;
+          return ce.number(erfInv(x));
         },
       },
     },

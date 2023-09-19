@@ -475,9 +475,19 @@ export function chop(
   return n;
 }
 
-// See https://personal.math.ubc.ca/~cbm/aands/page_299.htm
-// More approximations: https://math.stackexchange.com/questions/321569/approximating-the-error-function-erf-by-analytical-functions
-// NIST: https://dlmf.nist.gov/7.24#i
+/**
+ * An approximation of the gaussian error function, Erf(), using
+ * Abramowitz and Stegun approximation.
+ * 
+ * Thoughts for future improvements:
+ * - https://math.stackexchange.com/questions/321569/approximating-the-error-function-erf-by-analytical-functions
+ * - https://en.wikipedia.org/wiki/Error_function#Approximation_with_elementary_functions
+
+ * 
+ * References:
+ * - NIST: https://dlmf.nist.gov/7.24#i
+ */
+
 export function erf(x: number): number {
   const a1 = 0.254829592;
   const a2 = -0.284496736;
@@ -491,10 +501,51 @@ export function erf(x: number): number {
   x = Math.abs(x);
 
   // Abramowitz and Stegun approximation
+  // https://personal.math.ubc.ca/~cbm/aands/page_299.htm
   const t = 1.0 / (1.0 + p * x);
   const y = ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t;
 
   return sign * (1 - y * Math.exp(-x * x));
+}
+
+/**
+ * Trivial function, used when compiling.
+ */
+export function erfc(x: number): number {
+  return 1 - erf(x);
+}
+
+/**
+ * Inverse Error Function.
+ *
+ */
+export function erfInv(x: number): number {
+  // From https://en.wikipedia.org/wiki/Error_function#Numerical_approximations
+  // {\displaystyle \operatorname {erf} ^{-1}z={\frac {\sqrt {\pi }}{2}}\left(z+{\frac {\pi }{12}}z^{3}+{\frac {7\pi ^{2}}{480}}z^{5}+{\frac {127\pi ^{3}}{40320}}z^{7}+{\frac {4369\pi ^{4}}{5806080}}z^{9}+{\frac {34807\pi ^{5}}{182476800}}z^{11}+\cdots \right).}
+
+  const pi = Math.PI;
+  const pi2 = pi * pi;
+  const pi3 = pi2 * pi;
+  const x2 = x * x;
+  const x3 = x * x2;
+  const x5 = x3 * x2;
+  const x7 = x5 * x2;
+
+  return (
+    (Math.sqrt(pi) / 2) *
+    (x +
+      (pi / 12) * x3 +
+      ((7 * pi2) / 480) * x5 +
+      ((127 * pi3) / 40320) * x7 +
+      ((4369 * pi2 * pi2) / 5806080) * x7 * x2 +
+      ((34807 * pi3 * pi2) / 182476800) * x7 * x2 * x2)
+  );
+
+  // const a = 0.147;
+  // const b = 2 / (Math.PI * a) + Math.log(1 - x ** 2) / 2;
+  // const sqrt1 = Math.sqrt(b ** 2 - Math.log(1 - x ** 2) / a);
+  // const sqrt2 = Math.sqrt(sqrt1 - b);
+  // return sqrt2 * Math.sign(x);
 }
 
 /**
@@ -533,7 +584,21 @@ export function centeredDiff8thOrder(
 
 /**
  * Return a numerical approximation of the integral
- * of the function f from a to b using Monte Carlo integration.
+ * of the function `f` from `a` to `b` using Monte Carlo integration.
+ *
+ * Thoughts for future improvements:
+ * - use a MISER algorithm to improve the accuracy
+ * - use a stratified sampling to improve the accuracy
+ * - use a quasi-Monte Carlo method to improve the accuracy
+ * - use a Markov Chain Monte Carlo method to improve the accuracy
+ * - use a Metropolis-Hastings algorithm to improve the accuracy
+ * - use a Hamiltonian Monte Carlo algorithm to improve the accuracy
+ * - use a Gibbs sampling algorithm to improve the accuracy
+ *
+ *
+ * See:
+ * - https://64.github.io/monte-carlo/
+ *
  */
 export function monteCarloEstimate(
   f: (x: number) => number,
