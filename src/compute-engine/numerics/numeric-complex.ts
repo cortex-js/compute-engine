@@ -7,6 +7,7 @@ export function gamma(c: Complex): Complex {
   return c;
 }
 
-export function lngamma(c: Complex): Complex {
+export function gammaln(c: Complex): Complex {
+  // @todo
   return c;
 }

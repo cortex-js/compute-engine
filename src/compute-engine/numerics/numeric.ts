@@ -261,6 +261,20 @@ export function factorial(n: number): number {
   return val;
 }
 
+export function factorial2(n: number): number {
+  if (!Number.isInteger(n) || n < 0) return NaN;
+  if (n < 0) return NaN;
+  if (n <= 1) return 1;
+
+  let result = n;
+  while (n > 2) {
+    n -= 2;
+    result *= n;
+  }
+
+  return result;
+}
+
 const gammaG = 7;
 const lanczos_7_c = [
   0.99999999999980993, 676.5203681218851, -1259.1392167224028,
@@ -268,34 +282,50 @@ const lanczos_7_c = [
   -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
 ];
 
-const gammaGLn = 607 / 128;
-const gammaPLn = [
-  0.999999999999997, 57.156235665862923, -59.59796035547549, 14.13609797474174,
-  -0.4919138160976202, 0.3399464998481188e-4, 0.4652362892704857e-4,
-  -0.9837447530487956e-4, 0.1580887032249125e-3, -0.21026444172410488e-3,
-  0.2174396181152126e-3, -0.16431810653676389e-3, 0.8441822398385274e-4,
-  -0.261908384015814e-4, 0.3689918265953162e-5,
-];
+// const gammaGLn = 607 / 128;
+// const gammaPLn = [
+//   0.999999999999997, 57.156235665862923, -59.59796035547549, 14.13609797474174,
+//   -0.4919138160976202, 0.3399464998481188e-4, 0.4652362892704857e-4,
+//   -0.9837447530487956e-4, 0.1580887032249125e-3, -0.21026444172410488e-3,
+//   0.2174396181152126e-3, -0.16431810653676389e-3, 0.8441822398385274e-4,
+//   -0.261908384015814e-4, 0.3689918265953162e-5,
+// ];
 
-// Spouge approximation (suitable for large arguments)
-export function lngamma(z: number): number {
+export function gammaln(z: number): number {
+  // From WikiPedia:
+  // \ln \Gamma (z)=z\ln z-z-{\tfrac {1}{2}}\ln z+{\tfrac {1}{2}}\ln 2\pi +{\frac {1}{12z}}-{\frac {1}{360z^{3}}}+{\frac {1}{1260z^{5}}}+o\left({\frac {1}{z^{5}}}\right)
+
   if (z < 0) return NaN;
-  let x = gammaPLn[0];
-  for (let i = gammaPLn.length - 1; i > 0; --i) x += gammaPLn[i] / (z + i);
-  const t = z + gammaGLn + 0.5;
+  const pi = Math.PI;
+  const z3 = z * z * z;
   return (
-    0.5 * Math.log(2 * Math.PI) +
-    (z + 0.5) * Math.log(t) -
-    t +
-    Math.log(x) -
-    Math.log(z)
+    z * Math.log(z) -
+    z -
+    0.5 * Math.log(z) +
+    0.5 * Math.log(2 * pi) +
+    1 / (12 * z) -
+    1 / (360 * z3) +
+    1 / (1260 * z3 * z * z)
   );
+
+  // Spouge approximation (suitable for large arguments)
+  // if (z < 0) return NaN;
+  // let x = gammaPLn[0];
+  // for (let i = gammaPLn.length - 1; i > 0; --i) x += gammaPLn[i] / (z + i);
+  // const t = z + gammaGLn + 0.5;
+  // return (
+  //   0.5 * Math.log(2 * Math.PI) +
+  //   (z + 0.5) * Math.log(t) -
+  //   t +
+  //   Math.log(x) -
+  //   Math.log(z)
+  // );
 }
 
 // From https://github.com/substack/gamma.js/blob/master/index.js
 export function gamma(z: number): number {
   if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
-  if (z > 100) return Math.exp(lngamma(z));
+  if (z > 100) return Math.exp(gammaln(z));
 
   z -= 1;
   let x = lanczos_7_c[0];

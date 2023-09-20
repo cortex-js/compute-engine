@@ -45,10 +45,23 @@ export function factorial(ce: IComputeEngine, n: Decimal): Decimal {
   return val;
 }
 
+export function factorial2(ce: IComputeEngine, n: Decimal): Decimal {
+  if (!n.isInteger() || n.isNegative()) return ce._BIGNUM_NAN;
+  if (n.lessThan(1)) return ce._BIGNUM_ONE;
+
+  let result = n;
+  while (n.greaterThan(2)) {
+    n = n.minus(2);
+    result = result.mul(n);
+  }
+
+  return result;
+}
+
 const gammaG = 7;
 
 // Spouge approximation (suitable for large arguments)
-export function lngamma(ce: IComputeEngine, z: Decimal): Decimal {
+export function gammaln(ce: IComputeEngine, z: Decimal): Decimal {
   if (z.isNegative()) return ce._BIGNUM_NAN;
 
   const GAMMA_P_LN = ce.cache<Decimal[]>('gamma-p-ln', () => {
@@ -101,7 +114,7 @@ export function gamma(ce: IComputeEngine, z: Decimal): Decimal {
     );
   }
 
-  if (z.greaterThan(100)) return lngamma(ce, z).exp();
+  if (z.greaterThan(100)) return gammaln(ce, z).exp();
 
   z = z.sub(1);
 
