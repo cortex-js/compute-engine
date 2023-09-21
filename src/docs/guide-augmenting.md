@@ -8,16 +8,12 @@ sidebar:
 toc: true
 ---
 
-The MathJSON library is a collection of definitions for **symbols** and
-**functions** that are used by the Compute Engine, such as `Pi`, `Add`, `Sin`,
-`Power`, etc...
+The [MathJSON Standard Library](/compute-engine/guides/standard-library/) is 
+a collection of definitions for **symbols** and **functions** such as `Pi`, 
+`Add`, `Sin`, `Power`, `List`, etc...
 
-In this guide we discuss how to augment the MathJSON library with your own
+In this guide we discuss how to augment the MathJSON Standard Library with your own
 definitions.
-
-{% readmore "/compute-engine/guides/standard-library/" %} The **standard library
-reference** describes the content of the Compute Engine standard library.
-{% endreadmore %}
 
 {% readmore "/compute-engine/guides/latex-syntax/#customizing-the-latex-dictionary" %}
 You may also be interested in **augmenting the LaTeX dictionary** which defines
@@ -27,10 +23,66 @@ that you'd like to parse to MathJSON. {% endreadmore %}
 
 ## Introduction
 
-Before it can be used, an identifier must be **declared** as a symbol or a
-function. This is done by adding a definition to the MathJSON library.
+### Declaring an Identifier
 
-Once declared a symbol or function can be used in expressions, and it can be
+Before it can be used, an identifier must be **declared** as a symbol or a
+function.
+
+Declaring it indicates to the Compute Engine the "kind" of object it is (a
+string, a real number, a function...), and allows it to be used in expressions.
+The "kind" of an object is called its **domain**.
+
+{% readmore "/compute-engine/guides/domains" %} Learn more about **domains**.
+{% endreadmore %}
+
+**To declare an identifier** use the `ce.declare()` method:
+
+```js
+ce.declare("m_e", { 
+    domain: "RealNumber",", 
+    constant: true, 
+    value: 9.1e-31 
+});
+```
+
+After an identifier is declared, its domain cannot be changed: other
+expressions may depend on it, and changing its domain would invalidate them.
+
+
+You can also declare an identifier without providing a value:
+
+```js
+ce.declare("f", "Function");
+// (Shortcut for ce.declare("f", { signature: { domain: "Function"} }))
+```
+
+By default, when a new identifier is encountered in an expression, it is
+declared automatically with a domain of `ce.defaultDomain` and no value.
+To prevent this behavior, set `ce.defaultDomain` to `null`. An error
+will be produced instead when an unknown identifier is encountered.
+
+{% readmore "/compute-engine/guides/evaluate/#default-domain" %}
+Read more about the **default domain**. {% endreadmore %}
+
+We will discuss in more details below how to declare and define symbols
+and functions.
+
+### Scope
+
+The declaration of an identifier is done within a **scope**. A scope is a
+hierarchical collection of definitions.
+
+`ce.declare()` will add a definition in the current scope. Use `ce.pushScope()`
+if you want to create a new scope.
+
+
+{% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
+<strong>scopes</strong> {% endreadmore %}
+
+
+### Assigning a Value
+
+Once declared an identifier can be used in expressions, and it can be
 assigned a value.
 
 To change the value of a symbol, use the `value` property of the symbol.
@@ -48,24 +100,13 @@ Alternatively, use `ce.assign()`:
 ce.assign("n", 5);
 ```
 
-The declaration of a symbol or function is done within a **scope**. A scope is a
-collection of definitions.
 
-After a symbol or function is declared, its domain cannot be changed: other
-expressions may depend on it, and changing its domain would invalidate them.
-
-{% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
-<strong>scopes</strong> {% endreadmore %}
-
-## Declaring a Symbol
+## Defining a Symbol
 
 A symbol is a named value, such as `Pi` or `x`.
 
 {% readmore "/compute-engine/guides/symbols" %} Learn more about **symbols**.
 {% endreadmore %}
-
-Before it can be used, a symbol must be **declared**. This is done by adding a
-definition to the MathJSON library.
 
 **To declare a new symbol** use the `ce.declare()` method.
 
@@ -73,12 +114,6 @@ definition to the MathJSON library.
 ce.declare("m", { domain: "Number", value: 5 });
 ce.declare("n", { domain: "Integer" });
 ```
-
-`ce.declare()` will add a definition in the current scope. Use `ce.pushScope()`
-if you want to create a new scope.
-
-{% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
-<strong>scopes</strong> {% endreadmore %}
 
 The `domain` property is optional when a value is provided.
 
@@ -245,7 +280,7 @@ You can also evaluate an `["Assign"]` expression to define a function.
 ce.evaluate(["Assign", "f", ["Function", ["Multiply", "x", 2], "x"]]);
 ```
 
-### Summary
+## Summary
 
 Before a function can be used in an expression, it must be declared. This is
 done by adding a definition to the MathJSON library.

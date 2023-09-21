@@ -107,32 +107,74 @@ There are two useful ways to compare symbolic expressions:
 
 ### Structural Equality: `isSame()`
 
-Structural equality (or syntactic equality) consider the symbolic structure used
-to represent an expression. If a symbol, is it the same symbol, if a function,
-does it have the same head, and are each arguments structurally equal, etc...
+Structural equality (or syntactic equality) considers the **symbolic structure** used
+to represent an expression. 
 
-The `lhs.isSame(rhs)` function return true if `lhs` and `rhs` are structurally
+The symbolic structure of an expression is the tree of symbols and functions
+that make up the expression.
+
+For example, the symbolic structure of \\(2 + 1\\) is a sum of two terms, 
+the first term is the number `2` and the second term is the number `1`.
+
+The symbolic structure of \\(3\\) is a number `3`.
+
+The symbolic structure of \\(2 + 1\\) and \\(3\\) are different, even though
+they represent the same mathematical object.
+
+The `lhs.isSame(rhs)` function returns true if `lhs` and `rhs` are structurally
 exactly identical, that is each sub-expression is recursively identical in `lhs`
 and `rhs`.
 
 - \\(1 + 1 \\) and \\( 2 \\) are not structurally equal, one is a sum of two
   integers, the other is an integer
-- \\(x + 1 \\) and \\( 1 + x \\) are not structurally equal, the order of the
-  arguments is different
 - \\( (x + 1)^2 \\) and \\( x^2 + 2x + 1 \\) are not structural equal, one is a
   power of a sum, the other a sum of terms.
 
-For a less strict version of `isSame()`, you can use the canonical version of
-both expressions, that is `lhs.canonical.isSame(rhs.canonical)`. In this case,
-because the arguments are ordered in a standard way, the canonical form of \\(
-x + 1 \\) and the canonical form of \\(1 + x \\) would be the same. However, \\(
-(x + 1)^2 \\) and \\( x^2 + 2x + 1 \\) would still be considered different.
+
+<code-playground layout="stack" show-line-numbers mark-line="7">
+<div slot="javascript">import { ComputeEngine } from 'compute-engine';
+const ce = new ComputeEngine();
+//
+const a = ce.parse('2 + 1');
+const b = ce.parse('3');
+console.log('isSame?', a.isSame(b));
+</div>
+</code-playground>
+
+
+By default, when parsing or boxing an expression, they are put in canonical
+form. For example, fractions are automatically reduced to their simplest form,
+and arguments are sorted in a standard way.
+
+The expressions \\( \\frac{1}{10} \\) and \\( \\frac{2}{20} \\) are
+structurally equal because they get put into a canonical form when parsed,
+in which the fractions are reduced.
+
+**To compare two expressions without canonicalizing them**, parse or box 
+them with the `canonical` option set to `false`.
+
+<code-playground layout="stack" show-line-numbers mark-line="7">
+<div slot="javascript">import { ComputeEngine } from 'compute-engine';
+const ce = new ComputeEngine();
+//
+const a = ce.parse('\\frac{1}{10}');
+const b = ce.parse('\\frac{2}{20}');
+console.log('Canonical isSame?', a.isSame(b));
+//
+const aPrime = ce.parse('\\frac{1}{10}', {canonical: false});
+const bPrime = ce.parse('\\frac{2}{20}', {canonical: false});
+console.log('Non-canonical isSame?', aPrime.isSame(bPrime));
+</div>
+</code-playground>
+
+
 
 ### Mathematical Equality: `isEqual()`
 
 It turns out that comparing two arbitrary mathematical expressions is a complex
-problem. In fact,
-[Richardson's Theorem](https://en.wikipedia.org/wiki/Richardson%27s_theorem)
+problem. 
+
+In fact, [Richardson's Theorem](https://en.wikipedia.org/wiki/Richardson%27s_theorem)
 proves that it is impossible to determine if two symbolic expressions are
 identical in general.
 
@@ -140,14 +182,28 @@ However, there are many cases where it is possible to make a comparison between
 two expressions to check if they represent the same mathematical object.
 
 The `lhs.isEqual(rhs)` function return true if `lhs` and `rhs` represent the
-same mathematical object. If `lhs` and `rhs` are numeric expressions, they are
-evaluated before being compared. They are considered equal if the absolute value
-of the difference between them is less than `ce.tolerance`.
+same mathematical object. 
+
+If `lhs` and `rhs` are numeric expressions, they are evaluated before being 
+compared. They are considered equal if the absolute value of the difference 
+between them is less than `ce.tolerance`.
 
 Note that unlike `expr.isSame()`, `expr.isEqual()` can return `true`, `false` or
 `undefined`. The latter value indicates that there is not enough information to
 determine if the two expressions are mathematically equal. Adding some
 assumptions may result in a different answer.
+
+<code-playground layout="stack" show-line-numbers mark-line="7">
+<div slot="javascript">import { ComputeEngine } from 'compute-engine';
+const ce = new ComputeEngine();
+//
+const a = ce.parse('1 + 2');
+const b = ce.parse('3');
+console.log('isEqual?', a.isEqual(b));
+</div>
+</code-playground>
+
+
 
 ### Other Comparisons
 

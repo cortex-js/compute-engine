@@ -158,7 +158,7 @@ The Compute Engine includes a standard library of functions and symbols which
 can be extended with custom libraries.
 
 {% readmore "/compute-engine/guides/standard-library/" %} Read more about the
-<strong>Cortex Compute Engine Standard Library</strong> {% endreadmore %}
+<strong>MathJSON Standard Library</strong> {% endreadmore %}
 
 MathJSON is not intended to be suitable as a visual representation of arbitrary
 mathematical notations, and as such is not a replacement for LaTeX or MathML.
@@ -579,7 +579,7 @@ patterns.
 
 ### Function Names Naming Convention
 
-- The name of the functions in the standard library starts with an uppercase
+- The name of the functions in the MathJSON Standard Library starts with an uppercase
   letter `A`-`Z`. For example `"Sin"`, `"Fold"`.
 - The name of your own functions can start with a lowercase or uppercase letter.
 - If a function name is made up of several words, use camelCase. For example
@@ -829,22 +829,22 @@ The following metadata keys are recommended:
 }
 ```
 
-## Standard Library
+## MathJSON Standard Library
 
-This document defines the structure of MathJSON expression. The Standard Library
+This document defines the structure of MathJSON expression. The MathJSON Standard Library
 defines a recommended **vocabulary** to use in MathJSON expressions.
 
-Before considering inventing your own vocabulary, check if the standard library
+Before considering inventing your own vocabulary, check if the MathJSON Standard Library
 already provides relevant definitions.
 
-The Standard Library includes definitions for:
+The MathJSON Standard Library includes definitions for:
 
 <div class=symbols-table>
 
 | Topic                                                               |                                                       |
 | :------------------------------------------------------------------ | :--------------------------------------------------------------------- |
 | [Arithmetic](/compute-engine/reference/arithmetic/)                 | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`... |
-| [Calculus](/compute-engine/reference/calculus/)                     | `Derivative` `Integrate`...                                                |
+| [Calculus](/compute-engine/reference/calculus/)                     | `D` `Derivative` `Integrate`...                                                |
 | [Collections](/compute-engine/reference/collections/)               | `List` `Reverse` `Filter`...                                           |
 | [Complex](/compute-engine/reference/complex/)                       | `Real` `Conjugate`, `ComplexRoots`...                                  |
 | [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` ...                                          |
@@ -866,6 +866,6 @@ Library.
 {% readmore "/compute-engine/guides/standard-library/" %} Read more about the
 <strong>MathJSON Standard Library</strong>.{% endreadmore %}
 
-{% readmore %} Read more about
-[Adding New Definitions](/compute-compute-engine/guides/augmenting/).
+{% readmore "/compute-compute-engine/guides/augmenting/" %} Read more about
+<strong>Adding New Definitions</strong>.
 {% endreadmore %}

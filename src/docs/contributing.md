@@ -56,11 +56,11 @@ There's a decent dictionary already, but it could be extended with either new
 There are still a lot of mathematical expressions that can be expressed in LaTeX
 that cannot be understood by the LaTeX parser, so there's work to be done there.
 
-### Standard Library
+### MathJSON Standard Library
 
 Contributing to the function dictionary. It's in `/src/compute-engine/library/`.
 
-The Standard Library provides the definition of MathJSON functions like `Add` or
+The MathJSON Standard Library provides the definition of MathJSON functions like `Add` or
 `Sum`.
 
 There is much to do here, both in fleshing out what's there and adding new
@@ -78,7 +78,7 @@ utility function in JavaScript taking a MathJSON expression as input and
 returning another MathJSON expression. This can be done without any
 knowledge/understanding of the internals of the Compute Engine, and once you
 have the JS function that does what you want, it's easy to plug in in the
-standard library so that it becomes part of the default engine.
+MathJSON Standard Library so that it becomes part of the default engine.
 
 ```ts
 export function numericAdd2(
@@ -102,6 +102,6 @@ have been filed to see what others have requested, or you can just follow your
 interest.
 
 There's almost no linear-algebra (`Transpose`, `Determinant`, `Rank`...). Also,
-in the source file for the standard library, I have left some comments as to
+in the source file for the MathJSON Standard Library, I have left some comments as to
 what some future functions would be nice to have. That can also be a source of
 inspiration.

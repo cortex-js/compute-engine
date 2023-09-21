@@ -1,5 +1,5 @@
 ---
-title: Standard Library
+title: MathJSON Standard Library
 permalink: /compute-engine/guides/standard-library/
 layout: single
 date: Last Modified
@@ -7,39 +7,24 @@ sidebar:
   - nav: "universal"
 ---
 
-# Standard Library
+# MathJSON Standard Library
 
-The **standard library** defines the **vocabulary** used by a MathJSON
+The **MathJSON standard library** defines the **vocabulary** used by a MathJSON
 expression.
 
 This library defines the meaning of the identifiers used in a MathJSON
 expression. It is independent of the syntax used to parse/serialize from another
 language such as LaTeX.
 
-A library contains definitions for symbols and functions, for example:
-
-For example:
+It includes definitions such as:
 
 - "_`Pi` is a transcendental number whose value is approximately 3.14159265..._"
 - "_The `Add` function is associative, commutative, pure, idempotent and can be
   applied to arbitrary number of Real or Complex numbers_".
 
-## Domains
-
-A domain is similar to a type in a traditional programming language.
-
-The domain of a symbol provides some contextual information about this symbol,
-for example: _"x is a positive integer"_.
-
-The codomain of a function indicates the set of values that a function maps to,
-or the domain of the "result" of the function.
-
-Each entry in the symbol dictionary indicate the domain of the symbol, and for
-functions its codomain (the domain of the result of evaluating the function).
-
 ## Topics
 
-The standard library is organized by topics, each topic is a separate page in
+The **MathJSON Standard Library** is organized by topics, each topic is a separate page in
 the documentation.
 
 <div class=symbols-table>
@@ -47,7 +32,7 @@ the documentation.
 | Topic                                                               |                                                       |
 | :------------------------------------------------------------------ | :--------------------------------------------------------------------- |
 | [Arithmetic](/compute-engine/reference/arithmetic/)                 | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`... |
-| [Calculus](/compute-engine/reference/calculus/)                     | `Derivative` `Integrate`...                                                |
+| [Calculus](/compute-engine/reference/calculus/)                     | `D` `Derivative` `Integrate`...                                                |
 | [Collections](/compute-engine/reference/collections/)               | `List` `Reverse` `Filter`...                                           |
 | [Complex](/compute-engine/reference/complex/)                       | `Real` `Conjugate`, `ComplexRoots`...                                  |
 | [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` ...                                          |
@@ -64,8 +49,34 @@ the documentation.
 </div>
 
 
-## Custom Library
 
-{% readmore %} Read more about
-[Adding New Definitions](/compute-compute-engine/guides/augmenting/).
+
+### Extending the MathJSON Standard Library
+
+The MathJSON Standard Library can be extended by defining new functions:
+
+```js
+// Declare that the identifier "f" is a function, 
+// but without giving it a definition
+ce.declare("f", "Function");
+
+// Define a new function `double` that returns twice its input
+ce.assign("double(x)", ["Multiply", "x", 2]);
+
+// LaTeX can be used for the definition as well...
+ce.assign("half(x)", ce.parse("\\frac{x}{2}"));
+```
+
+
+
+{% readmore "/compute-engine/guides/augmenting/" %}
+Read more about <strong>Augmenting the Standard Library</strong>
+{% endreadmore %}
+
+
+You can also customize the LaTeX syntax, that is how to parse and serialize 
+LaTeX to MathJSON.
+
+{% readmore "/compute-engine/guides/latex-syntax/" %}
+Read more about <strong>Parsing and Serializing LaTeX</strong>
 {% endreadmore %}

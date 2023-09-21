@@ -290,7 +290,7 @@ export class ComputeEngine implements IComputeEngine {
    * Construct a new `ComputeEngine` instance.
    *
    * Identifier tables define functions and symbols (in `options.ids`).
-   * If no table is provided the standard library is used (`ComputeEngine.getStandardLibrary()`)
+   * If no table is provided the MathJSON Standard Library is used (`ComputeEngine.getStandardLibrary()`)
    *
    * The LaTeX syntax dictionary is defined in `options.latexDictionary`.
    *
