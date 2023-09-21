@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/expressions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: true
 ---
 
@@ -43,11 +43,11 @@ console.log(expr.machineNumber);
 console.log(expr.isPositive);
 // ➔ true
 
-expr = ce.box({ num: '+Infinity' });
+expr = ce.box({ num: "+Infinity" });
 console.log(expr.latex);
 // ➔ +\infty
 
-expr = ce.box(["Add", 3, "x"]);
+expr = ce.box(['Add', 3, 'x']);
 console.log(expr.head);
 // ➔ "Add"
 
@@ -59,7 +59,7 @@ console.log(expr.isPositive);
 function.
 
 ```js
-const expr = ce.parse('3 + x + y');
+const expr = ce.parse("3 + x + y");
 console.log(expr.head);
 // ➔ "Add"
 
@@ -71,7 +71,7 @@ console.log(expr.json);
 use the `mf.expression` property:
 
 ```js
-const mf = document.getElementById("input");
+const mf = document.getElementById('input');
 mf.value = '\\frac{10}{5}';
 const expr = mf.expression;
 console.log(expr.evaluate().latex);
@@ -84,7 +84,7 @@ console.log(expr.evaluate().latex);
 property. Use this property to "unbox" the expression.
 
 ```js
-const expr = ce.box(["Add", 3, "x"]);
+const expr = ce.box(['Add', 3, 'x']);
 console.log(expr.json);
 // ➔ ["Add", 3, "x"]
 ```
@@ -103,7 +103,7 @@ console.log(expr.json);
 // ➔ ["Add", 2, ["Divide", "q", "p"]]
 
 ce.jsonSerializationOptions = {
-  exclude: ["Divide"], // Don't use `Divide` functions,
+  exclude: ['Divide'], // Don't use `Divide` functions,
   // use `Multiply`/`Power` instead
   shorthands: [], // Don't use any shorthands
 };
@@ -183,7 +183,7 @@ a symbol. But if an assumption about the symbol is made later, or a value
 assigned to it, then `expr.isPositive` may take a different value.
 
 ```js
-const expr = ce.box("x");
+const expr = ce.box('x');
 console.log(expr.isPositive);
 // ➔ undefined
 
