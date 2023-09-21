@@ -6,6 +6,7 @@
   `ce.assign()` respectively.
 - The method `ce.assume()` requires a predicate.
 - The signatures of `ce.assume()` and `ce.ask()` have been simplified.
+- The signature of `ce.pushScope()` has been simplified.
 
 ## New Features
 

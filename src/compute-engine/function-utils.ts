@@ -1,3 +1,4 @@
+import { inferDomain } from './domain-utils';
 import { BoxedExpression } from './public';
 
 /**
@@ -109,31 +110,32 @@ export function order(
 
 /**
  * Turn a Function or a Lambda expression into a canonical expression
- * with anonymous paramters (`_n` parameters).
+ * with anonymous parameters (`_n` parameters).
  */
 
 function makeLambda(
   expr: BoxedExpression
 ): ((args: BoxedExpression[]) => BoxedExpression) | undefined {
-  const body = normalizeLambda(expr);
+  const [body, paramCount] = normalizeLambda(expr);
   if (!body) return undefined;
 
-  const fv = body.freeVars;
-  if (fv.length === 0) return () => body!.evaluate();
+  if (paramCount === 0) return () => body!.evaluate();
   const ce = expr.engine;
-  if (fv.length === 1)
+  if (paramCount === 1)
     return (args) => {
-      ce.pushScope({ _1: args[0] });
+      ce.pushScope();
+      ce.declare('_1', { value: args[0], domain: inferDomain(args[0]) });
       const result = body!.evaluate();
       ce.popScope();
       return result;
     };
 
   return (args) => {
-    let i = 1;
-    const scope = {};
-    for (const arg of args) scope[`_${i++}`] = arg;
-    ce.pushScope(scope);
+    ce.pushScope();
+    for (let i = 0; i < paramCount; i++) {
+      const value = args[i];
+      ce.declare(`_${i + 1}`, { value, domain: inferDomain(value) });
+    }
     const result = body!.evaluate();
     ce.popScope();
     return result;
@@ -141,28 +143,38 @@ function makeLambda(
 }
 
 /**
- * Given an expression, rewrite it to named parameters
- * with anonymous parameters (`_n` parameters).
+ * Given an expression, rewrite it to anonymous parameters (`_n` parameters).
  * If there is a single free variable, it is replaced by `_1`.
+ *
+ *
+ * - implicit arg (free var): ["Function", "x"] -> ["x", ["x"]]  (body, args)
+ * - explicit arg: ["Function", "x", "x"] -> ["x", ["x"]]  (body, args)
+ * - ["_"] -> ["_1", ["_1"]]  // single implicit arg
+ * - ["_1"] -> ["_1", ["_1"]]  // implicit arg
+ *
  */
-function normalizeLambda(expr: BoxedExpression): BoxedExpression | undefined {
+function normalizeLambda(
+  expr: BoxedExpression
+): [body: BoxedExpression | undefined, paramCount: number] {
   expr = expr.evaluate();
 
   //
-  // Convert N operators: N(D) -> ND, N(Integrate) -> NIntegrate
+  // Convert N operators:
+  //  - N(D) -> ND()
+  //  - N(Integrate) -> NIntegrate()
   //
-  if (expr.head === 'N') {
-    if (expr.op1.head === 'D') expr = expr.engine._fn('ND', expr.op1.ops!);
-    else if (expr.op1.head === 'Integrate')
-      expr = expr.engine._fn('NIntegrate', expr.op1.ops!);
+  if (expr.head === 'N' && typeof expr.op1.head === 'string') {
+    const newHead = { D: 'ND', Integrate: 'NIntegrate' }[expr.op1.head];
+    if (newHead) expr = expr.engine._fn(newHead, expr.op1.ops!);
   }
 
   //
   // Is it a Function expression?
   //
   if (expr.head === 'Function') {
-    // e.g. Function(["+", "x", 1], "x")
+    // e.g. Function(["Add", "x", 1], "x")
     const [body, ...params] = expr.ops!;
+    if (params.length === 0) return body.subs({ _: '_1' });
 
     const subs = {};
     let n = 1;
@@ -172,14 +184,12 @@ function normalizeLambda(expr: BoxedExpression): BoxedExpression | undefined {
   }
 
   //
-  // Not a `["Function"]` expression, maybe a simple expression with a single
-  // free variable, or an expression with anonymous parameters.
+  // Not a `["Function"]` expression, maybe an expression with anonymous parameters.
   //
-  const fv = expr.freeVars;
-  if (fv.length === 1) return expr.op1.subs({ [fv[0]]: '_1' });
 
-  // If we have no free variables, no parameters, this is not a lambda
   // Could be a function name, i.e. "Sin", "Cos", etc...
+  // or an "operator" a function of a function, i.e. ["f", "g"] or
+  // ["InverseFunction", "Sin"]
   return fv.length === 0 ? undefined : expr;
 }
 
@@ -194,7 +204,7 @@ export function makeScopedLambda1(
   if (!body) return undefined;
   const ce = expr.engine;
   return (arg) => {
-    ce.assign({ _1: arg });
+    ce.assign('_1', arg);
     return body!.N().valueOf() as number;
   };
 }
@@ -212,7 +222,7 @@ export function apply(
   const lambda = makeLambda(fn);
   if (lambda) return lambda(args);
 
-  return fn.engine._fn(fn.evaluate(), args).evaluate();
+  return fn.engine._fn(fn, args);
 }
 
 /**

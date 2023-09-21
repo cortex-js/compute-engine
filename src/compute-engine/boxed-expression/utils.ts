@@ -47,27 +47,35 @@ export function getImaginaryCoef(expr: BoxedExpression): number | null {
 }
 
 /**
- * Return the free symbols in the expression, recursively.
- * A variable, or free symbol, is a symbol that is not bound to a value.
+ * Return the free variables in the expression, recursively.
+ *
+ * A free variable, is an identifier (symbol or function) that is not bound
+ * to a value.
+ *
  * Note: do not use `isFree`: it has a side effect of creating a definition
  * if one does not exist, and we want to avoid that. For example, `assume()`
  * relies on `expr.freeVars` *not* creating a definition.
  */
 export function getFreeVars(expr: BoxedExpression, set: Set<string>): void {
+  // @todo: need to check for '["Block"]' which may contain ["Assign"] or ["Declare"] expressions and exclude those
+
   if (expr.symbol) {
     const def = expr.engine.lookupSymbol(expr.symbol);
-    if (def?.value === undefined) set.add(expr.symbol);
+    if (def && def.value !== undefined) return;
+
+    const fnDef = expr.engine.lookupFunction(expr.symbol);
+    if (fnDef && fnDef.signature.evaluate) return;
+
+    set.add(expr.symbol);
     return;
   }
 
-  if (!expr.ops && !expr.keys) return;
+  if (expr.head && typeof expr.head !== 'string') getFreeVars(expr.head, set);
 
   if (expr.ops) for (const op of expr.ops) getFreeVars(op, set);
 
   if (expr.keys)
     for (const key of expr.keys) getFreeVars(expr.getKey(key)!, set);
-
-  return;
 }
 
 export function getSymbols(expr: BoxedExpression, set: Set<string>): void {
@@ -76,14 +84,12 @@ export function getSymbols(expr: BoxedExpression, set: Set<string>): void {
     return;
   }
 
-  if (!expr.ops && !expr.keys) return;
+  if (expr.head && typeof expr.head !== 'string') getSymbols(expr.head, set);
 
   if (expr.ops) for (const op of expr.ops) getSymbols(op, set);
 
   if (expr.keys)
     for (const key of expr.keys) getSymbols(expr.getKey(key)!, set);
-
-  return;
 }
 
 export function getSubexpressions(

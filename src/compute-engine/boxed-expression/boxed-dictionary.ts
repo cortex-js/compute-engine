@@ -14,7 +14,7 @@ import {
   BoxedDomain,
   BoxedSubstitution,
 } from '../public';
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonFunction } from './serialize';
 import { hashCode } from './utils';
 
@@ -22,7 +22,7 @@ import { hashCode } from './utils';
  * BoxedDictionary
  */
 
-export class BoxedDictionary extends AbstractBoxedExpression {
+export class BoxedDictionary extends _BoxedExpression {
   private _value: Map<string, BoxedExpression> = new Map();
   private _isCanonical: boolean;
 

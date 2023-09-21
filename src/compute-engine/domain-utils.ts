@@ -1,7 +1,18 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { isRational } from './numerics/rationals';
-import { BoxedExpression, Rational } from './public';
+import { DomainLiteral, Rational, SemiBoxedExpression } from './public';
+import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
+import {
+  isDictionaryObject,
+  isFunctionObject,
+  isNumberObject,
+  isStringObject,
+  isSymbolObject,
+  machineValue,
+} from '../math-json/utils';
+import { Expression } from '../math-json';
+import { isDomain } from './boxed-expression/boxed-domain';
 
 /** Quickly determine the numeric domain of a number or constant
  * For the symbols, this is a hard-coded optimization that doesn't rely on the
@@ -9,7 +20,7 @@ import { BoxedExpression, Rational } from './public';
  */
 export function inferNumericDomain(
   value: number | Decimal | Complex | Rational
-): string {
+): DomainLiteral {
   //
   // 1. Is it a number?
   //
@@ -78,20 +89,37 @@ export function inferNumericDomain(
   return 'Number';
 }
 
-/**
- * Simple description of a numeric domain as a base domain, a min and
- * max value, possibly open ends, and some excluded values.
- */
-export type NumericDomainInfo = {
-  domain?: string; // Integer, RealNumber, ComplexNumber...
-  // (not one of the 'shortcuts', i.e. PositiveInteger)
-  min?: number; // Min and Max are not defined for ComplexNumbers
-  max?: number;
-  open?: 'left' | 'right' | 'both'; // For RealNumbers
-  /** Values from _excludedValues_ are considered not in this domain */
-  excludedValues?: number[];
-  /** If defined, the values in this domain must follow the relation
-   * _period_ * _n_ + _phase_ when _n_ is in _domain_.
-   */
-  multiple?: [period: number, domain: BoxedExpression, phase: number];
-};
+export function inferDomain(expr: SemiBoxedExpression): DomainLiteral {
+  if (expr instanceof _BoxedExpression)
+    return expr.domain.literal ?? expr.domain.ctor ?? 'Anything';
+
+  if (
+    typeof expr === 'number' ||
+    expr instanceof Decimal ||
+    expr instanceof Complex
+  )
+    return inferNumericDomain(expr);
+
+  if (isStringObject(expr as Expression)) return 'String';
+
+  if (isSymbolObject(expr as Expression) || typeof expr === 'string')
+    return 'Symbol';
+
+  if (isDictionaryObject(expr as Expression)) return 'Dictionary';
+
+  if (isFunctionObject(expr as Expression)) return 'Function';
+
+  if (typeof expr === 'function') return 'Function';
+
+  if (Array.isArray(expr)) return 'Function';
+
+  if (isNumberObject(expr as Expression)) {
+    const value = machineValue(expr as Expression);
+    if (value === null) return 'Number';
+    return inferNumericDomain(value);
+  }
+
+  if (isDomain(expr)) return 'Domain';
+
+  return 'Anything';
+}

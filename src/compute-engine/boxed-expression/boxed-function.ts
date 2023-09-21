@@ -1,7 +1,7 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression';
 
 import { Expression } from '../../math-json/math-json-format';
 import {
@@ -69,7 +69,7 @@ function cheapest(
  * BoxedFunction
  */
 
-export class BoxedFunction extends AbstractBoxedExpression {
+export class BoxedFunction extends _BoxedExpression {
   private _scope: RuntimeScope | null;
   private readonly _head: string | BoxedExpression;
   private readonly _ops: BoxedExpression[];
@@ -759,7 +759,7 @@ export class BoxedFunction extends AbstractBoxedExpression {
     );
 
     //
-    // 3/ Is it a Lambda?
+    // 3/ Is it an anonymous function?
     //
     if (typeof this._head !== 'string') {
       const expr = apply(this._head, tail);
@@ -775,22 +775,13 @@ export class BoxedFunction extends AbstractBoxedExpression {
     if (def.inert) return tail[0] ?? this;
 
     //
-    // 5/ Use the signature associated with his definition
-    //
-    const sig = def.signature;
-
-    //
-    // 6/ Call the `evaluate` handler
+    // 5/ Call the `evaluate` handler
     //
 
-    // 5.1/ No evaluate handler, we're done
-    if (!sig || !sig.evaluate) return this.engine.fn(this._head, tail);
-
-    // 5.2/ A function expression handler
-    if (typeof sig.evaluate !== 'function') return apply(sig.evaluate, tail);
-
-    // 5.3/ A regular function handler
-    return sig.evaluate(this.engine, tail) ?? this.engine.fn(this._head, tail);
+    return (
+      def.signature?.evaluate?.(this.engine, tail) ??
+      this.engine.fn(this._head, tail)
+    );
   }
 
   N(options?: NOptions): BoxedExpression {

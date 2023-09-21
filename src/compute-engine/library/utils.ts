@@ -6,17 +6,15 @@ import {
 } from '../public';
 
 export function isSymbolDefinition(def: any): def is SymbolDefinition {
-  if (def === undefined || def === null) return false;
-  if (typeof def !== 'object') return false;
+  if (def === undefined || def === null || typeof def !== 'object')
+    return false;
   return 'domain' in def || 'value' in def || 'constant' in def;
 }
 
 export function isFunctionDefinition(def: any): def is FunctionDefinition {
-  if (def === undefined || def === null) return false;
-  if (typeof def !== 'object') return false;
-  if ('complexity' in def || 'numeric' in def || 'signature' in def)
-    return true;
-  return false;
+  if (def === undefined || def === null || typeof def !== 'object')
+    return false;
+  return 'signature' in def || 'complexity' in def;
 }
 
 export function normalizeLimits(

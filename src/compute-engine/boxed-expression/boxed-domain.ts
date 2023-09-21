@@ -19,7 +19,7 @@ import {
   PatternMatchOptions,
   SemiBoxedExpression,
 } from '../public';
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonSymbol } from './serialize';
 import { hashCode } from './utils';
 
@@ -29,10 +29,7 @@ import { hashCode } from './utils';
  * If could also be an error, in which case, `isValid` is `false`.
  *
  */
-export class _BoxedDomain
-  extends AbstractBoxedExpression
-  implements BoxedDomain
-{
+export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   /** The value of a boxed domain is either a string if a domain literal, or a
    * domain constructor function.
    * Since the domains are alway canonicalized when boxed, their value can
@@ -242,8 +239,7 @@ export function boxDomain(
     dom = dom[1] as DomainExpression;
 
   if (dom instanceof _BoxedDomain) return dom;
-  if (dom instanceof AbstractBoxedExpression)
-    dom = dom.json as DomainExpression;
+  if (dom instanceof _BoxedExpression) dom = dom.json as DomainExpression;
 
   if (typeof dom === 'string') {
     const expr = DOMAIN_ALIAS[dom];
@@ -449,7 +445,7 @@ export function isDomain(
 ): expr is BoxedDomain | DomainExpression {
   if (expr instanceof _BoxedDomain) return true;
 
-  if (expr instanceof AbstractBoxedExpression) expr = expr.json;
+  if (expr instanceof _BoxedExpression) expr = expr.json;
 
   if (typeof expr === 'string') return isDomainLiteral(expr);
 
@@ -749,7 +745,7 @@ function serialize(
   ce: IComputeEngine,
   dom: DomainExpression<BoxedExpression>
 ): Expression {
-  if (dom instanceof AbstractBoxedExpression) return dom.json;
+  if (dom instanceof _BoxedExpression) return dom.json;
   if (typeof dom === 'string') return dom;
 
   if (dom[0] === 'InvalidDomain') {
@@ -790,8 +786,8 @@ function isEqual(lhs: DomainExpression<BoxedExpression>, rhs: any): boolean {
 
   if (rhs.length !== lhs.length) return false;
   for (let i = 1; i <= lhs.length - 1; i++) {
-    if (lhs[i] instanceof AbstractBoxedExpression) {
-      if (!(rhs[i] instanceof AbstractBoxedExpression)) return false;
+    if (lhs[i] instanceof _BoxedExpression) {
+      if (!(rhs[i] instanceof _BoxedExpression)) return false;
       if (!rhs[i].isEqual(rhs[i])) return false;
     } else if (typeof lhs[i] === 'string') {
       if (typeof rhs[i] !== 'string') return false;

@@ -1,25 +1,32 @@
 import {
   gamma as gammaComplex,
-  lngamma as lngammaComplex,
+  gammaln as lngammaComplex,
 } from '../numerics/numeric-complex';
 import {
   factorial as bigFactorial,
+  factorial2 as bigFactorial2,
   gamma as bigGamma,
-  lngamma as bigLngamma,
+  gammaln as bigLngamma,
 } from '../numerics/numeric-bignum';
 import {
   asFloat,
   asSmallInteger,
   factorial,
+  factorial2,
+  fromDigits,
   gamma,
-  lngamma,
+  gammaln,
 } from '../numerics/numeric';
 import {
   isBigRational,
   isMachineRational,
   rationalize,
 } from '../numerics/rationals';
-import { BoxedExpression, IdTable, IComputeEngine } from '../public';
+import {
+  BoxedExpression,
+  IdentifierDefinitions,
+  IComputeEngine,
+} from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
@@ -47,19 +54,46 @@ import {
 } from '../boxed-expression/validate';
 import { canonical, flattenSequence } from '../symbolic/flatten';
 
+// When considering processing an arithmetic expression, the following
+// are the core functions that should be considered:
+export type CanonicalArithmeticFunctions =
+  | 'Add'
+  | 'Negate' // Distributed over mul/div/add
+  | 'Multiply'
+  | 'Divide'
+  | 'Power'
+  | 'Ln';
+
+// Non-canonical functions: the following functions get transformed during
+// canonicalization, and can be ignored as they will not occur in a canonical
+// expression:
+//
+// - Complex -> Complex number
+// - Exp -> Power(E, _)
+// - Root -> Power(_1, 1/_2)
+// - Sqrt -> Power(_, 1/2)
+// - Square -> Power(_, 2)
+// - Subtract -> Add(_1, Negate(_2))
+// - Rational -> Rational number
+
 // @todo Future additions to the dictionary
+
+// See Scala/Breeze "universal functions": https://github.com/scalanlp/breeze/wiki/Universal-Functions
+
 // LogOnePlus: { domain: 'Number' },
 // mod (modulo). See https://numerics.diploid.ca/floating-point-part-4.html,
 // regarding 'remainder' and 'truncatingRemainder'
 // Lcm
 // Gcd
-// Sum
-// Product
-// Numerator
-// Denominator
-// Rationalize: convert an approximate number to a nearby rational
 // Mod: modulo
 // Boole
+// Zeta function
+// Numerator(fraction)
+// Denominator(fraction)
+// Random() -> random number between 0 and 1
+// Random(n) -> random integer between 1 and n
+// Random(n, m) -> random integer between n and m
+// Hash
 
 // # Prime Numbers:
 // Prime: gives the nth prime number
@@ -73,7 +107,7 @@ import { canonical, flattenSequence } from '../symbolic/flatten';
 
 /*
 
-## Note on Precedence
+## THEORY OF OPERATIONS OF PRECEDENCE
 
 PEMDAS is a lie. But the ambiguity is essentially around the ÷ (or solidus /)
 sign and implicit multiplication.
@@ -104,7 +138,7 @@ References:
 - AIP style guide:  http://web.mit.edu/me-ugoffice/communication/aip_style_4thed.pdf p23 (page 26 of the pdf)
 */
 
-export const ARITHMETIC_LIBRARY: IdTable[] = [
+export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
   {
     //
     // Functions
@@ -177,11 +211,11 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       },
     },
 
-    Complex: {
-      // This function is converted during boxing, so unlikely to encounter
-      wikidata: 'Q11567',
-      complexity: 500,
-    },
+    // Complex: {
+    //   // This function is converted during boxing, so unlikely to encounter
+    //   wikidata: 'Q11567',
+    //   complexity: 500,
+    // },
 
     Divide: {
       wikidata: 'Q1226939',
@@ -256,6 +290,25 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       },
     },
 
+    Factorial2: {
+      description: 'Double Factorial Function',
+      complexity: 9000,
+
+      signature: {
+        domain: ['Function', 'Number', 'Number'],
+        evaluate: (ce, ops) => {
+          // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
+
+          const n = asSmallInteger(ops[0]);
+          if (n === null) return undefined;
+          if (bignumPreferred(ce))
+            return ce.number(bigFactorial2(ce, ce.bignum(n)));
+
+          return ce.number(factorial2(n));
+        },
+      },
+    },
+
     Floor: {
       wikidata: 'Q56860783',
       complexity: 1250,
@@ -288,7 +341,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       },
     },
 
-    LogGamma: {
+    GammaLn: {
       complexity: 8000,
 
       signature: {
@@ -296,7 +349,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
         N: (ce, ops) =>
           applyN(
             ops[0],
-            (x) => lngamma(x),
+            (x) => gammaln(x),
             (x) => bigLngamma(ce, x),
             (x) => lngammaComplex(x)
           ),
@@ -507,32 +560,6 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       },
     },
 
-    Product: {
-      wikidata: 'Q901718',
-      complexity: 1000,
-      hold: 'first',
-      signature: {
-        domain: [
-          'Function',
-          'Anything',
-          // [
-          //   'Maybe',
-          'Tuple',
-          // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
-          // ],
-          'Number',
-        ],
-        // codomain: (ce, args) => domainAdd(ce, args),
-        // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
-        canonical: (ce, ops) => canonicalProduct(ce, ops[0], ops[1]),
-        simplify: (ce, ops) =>
-          evalMultiplication(ce, ops[0], ops[1], 'simplify'),
-        evaluate: (ce, ops) =>
-          evalMultiplication(ce, ops[0], ops[1], 'evaluate'),
-        N: (ce, ops) => evalMultiplication(ce, ops[0], ops[1], 'N'),
-      },
-    },
-
     Rational: {
       complexity: 2400,
 
@@ -654,12 +681,34 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       },
     },
 
-    SignGamma: {
-      description: 'The sign of the gamma function: -1 or +1',
-      complexity: 7900,
+    // {% def "GammaSgn" %}
 
-      // @todo
-    },
+    // [&quot;**GammaSgn**&quot;, _z_]{.signature}
+
+    // {% latex "\\operatorname{sgn}(\\gamma(z))" %}
+
+    // The gamma function can be computed as \\( \operatorname{sgn}\Gamma(x) \cdot
+    // \expoentialE^{\operatorname{LogGamma}(x)} \\)
+    // `["Multiply", ["GammaSgn", "x"], ["Exp", ["LogGamma", "x"]]]`.
+
+    // This function is called `gammasgn` in SciPy.
+
+    // **Reference**
+
+    // - NIST: https://dlmf.nist.gov/5.2#E1
+
+    // {% enddef %}
+    //     GammaSgn: {
+    //   description: 'The sign of the gamma function: -1 or +1',
+    //   complexity: 7900,
+    //   signature: {
+    //     domain: ['Function', 'Number', ['Range', -1, 1]],
+    //     evaluate: (ce, ops) => {
+    //     },
+    //   },
+    //   // @todo
+    // },
+
     Sqrt: {
       description: 'Square Root',
       wikidata: 'Q134237',
@@ -712,27 +761,6 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
         },
       },
     },
-    Sum: {
-      wikidata: 'Q218005',
-      complexity: 1000,
-      hold: 'all',
-      signature: {
-        domain: [
-          'Function',
-          'Anything',
-          // [
-          //   'Maybe',
-          'Tuple',
-          // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
-          // ],
-          'Number',
-        ],
-        canonical: (ce, ops) => canonicalSummation(ce, ops[0], ops[1]),
-        simplify: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'simplify'),
-        evaluate: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'evaluate'),
-        N: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'N'),
-      },
-    },
   },
   {
     //
@@ -769,6 +797,7 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
       value: { num: Number.EPSILON.toString() },
     },
     Half: {
+      domain: 'RationalNumber',
       constant: true,
       holdUntil: 'evaluate',
       value: ['Rational', 1, 2],
@@ -859,6 +888,207 @@ export const ARITHMETIC_LIBRARY: IdTable[] = [
     },
     PreDecrement: {
       signature: { domain: ['Function', 'Number', 'Number'] },
+    },
+  },
+
+  //
+  // Arithmetic on collections: Min, Max, Sum, Product
+  //
+  {
+    Max: {
+      description: 'Maximum of two or more numbers',
+      complexity: 1200,
+      signature: {
+        domain: ['Function', ['Sequence', 'Value'], 'Number'],
+        simplify: (ce, ops) => {
+          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+          if (ops.length === 1) return ops[0];
+          return ce.fn('Max', ops);
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+
+          let result: BoxedExpression | undefined = undefined;
+          const rest: BoxedExpression[] = [];
+
+          for (const op of ops) {
+            if (!op.isNumber || op.numericValue === undefined) rest.push(op);
+            else if (!result || op.isGreater(result)) result = op;
+          }
+          if (rest.length > 0)
+            return ce.box(result ? ['Max', result, ...rest] : ['Max', ...rest]);
+          return result ?? ce._NAN;
+        },
+      },
+    },
+
+    Min: {
+      description: 'Minimum of two or more numbers',
+      complexity: 1200,
+
+      signature: {
+        domain: ['Function', ['Sequence', 'Value'], 'Number'],
+        simplify: (ce, ops) => {
+          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+          if (ops.length === 1) return ops[0];
+          return ce.fn('Min', ops);
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+
+          let result: BoxedExpression | undefined = undefined;
+          const rest: BoxedExpression[] = [];
+
+          for (const op of ops) {
+            if (!op.isNumber || op.numericValue === undefined) rest.push(op);
+            else if (!result || op.isLess(result)) result = op;
+          }
+          if (rest.length > 0)
+            return ce.box(result ? ['Min', result, ...rest] : ['Min', ...rest]);
+          return result ?? ce._NAN;
+        },
+      },
+    },
+
+    Product: {
+      wikidata: 'Q901718',
+      complexity: 1000,
+      hold: 'first',
+      signature: {
+        domain: [
+          'Function',
+          'Anything',
+          // [
+          //   'Maybe',
+          'Tuple',
+          // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
+          // ],
+          'Number',
+        ],
+        // codomain: (ce, args) => domainAdd(ce, args),
+        // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
+        canonical: (ce, ops) => canonicalProduct(ce, ops[0], ops[1]),
+        simplify: (ce, ops) =>
+          evalMultiplication(ce, ops[0], ops[1], 'simplify'),
+        evaluate: (ce, ops) =>
+          evalMultiplication(ce, ops[0], ops[1], 'evaluate'),
+        N: (ce, ops) => evalMultiplication(ce, ops[0], ops[1], 'N'),
+      },
+    },
+
+    Sum: {
+      wikidata: 'Q218005',
+      complexity: 1000,
+      hold: 'all',
+      signature: {
+        domain: [
+          'Function',
+          'Anything',
+          // [
+          //   'Maybe',
+          'Tuple',
+          // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
+          // ],
+          'Number',
+        ],
+        canonical: (ce, ops) => canonicalSummation(ce, ops[0], ops[1]),
+        simplify: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'simplify'),
+        evaluate: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'evaluate'),
+        N: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'N'),
+      },
+    },
+  },
+
+  //
+  // Formatting and string processing
+  //
+  {
+    BaseForm: {
+      description: '`BaseForm(expr, base=10)`',
+      complexity: 9000,
+      inert: true,
+      signature: {
+        domain: ['Function', 'Value', ['Maybe', 'Integer'], 'Value'],
+        codomain: (_ce, args) => args[0].domain,
+      },
+    },
+    FromDigits: {
+      description: `\`FromDigits(s, base=10)\` \
+      return an integer representation of the string \`s\` in base \`base\`.`,
+      // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
+      // @todo could accept "roman"... as base
+      // @todo could accept optional third parameter as the (padded) length of the output
+      signature: {
+        domain: ['Function', 'String', ['Maybe', ['Range', 1, 36]], 'Integer'],
+        evaluate: (ce, ops) => {
+          const op1 = ops[0];
+          if (!op1.string)
+            return ce.error(['incompatible-domain', 'String', op1.domain], op1);
+
+          const op2 = ops[1];
+          if (op2.isNothing) return ce.number(Number.parseInt(op1.string, 10));
+          if (op2.numericValue === null) {
+            return ce.error(['unexpected-base', op2.latex], op2);
+          }
+          const base = asFloat(op2)!;
+          if (!Number.isInteger(base) || base < 2 || base > 36)
+            return ce.error(['unexpected-base', base], op2);
+
+          const [value, rest] = fromDigits(op1.string, base);
+
+          if (rest)
+            return ce.error(['unexpected-digit', { str: rest[0] }], {
+              str: rest,
+            });
+
+          return ce.number(value);
+        },
+      },
+    },
+
+    IntegerString: {
+      description: `\`IntegerString(n, base=10)\` \
+      return a string representation of the integer \`n\` in base \`base\`.`,
+      // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
+      // @todo could accept "roman"... as base
+      // @todo could accept optional third parameter as the (padded) length of the output
+      signature: {
+        domain: ['Function', 'Integer', ['Maybe', 'Integer'], 'String'],
+        evaluate: (ce, ops) => {
+          const op1 = ops[0];
+          const val = asFloat(op1) ?? NaN;
+          if (Number.isNaN(val) || !Number.isInteger(val)) {
+            return ce.error(
+              ['incompatible-domain', 'Integer', op1.domain],
+              op1
+            );
+          }
+
+          const op2 = ops[1];
+          if (op2.isNothing) {
+            const op1Num = op1.numericValue;
+            if (typeof op1Num === 'number')
+              return ce.string(Math.abs(op1Num).toString());
+            if (op1Num instanceof Decimal)
+              return ce.string(op1Num.abs().toString());
+            return ce.string(
+              Math.abs(Math.round(asFloat(op1) ?? NaN)).toString()
+            );
+          }
+
+          if (asSmallInteger(op2) === null) {
+            return ce.error(
+              ['incompatible-domain', 'Integer', op2.domain],
+              op2
+            );
+          }
+          const base = asSmallInteger(op2)!;
+          if (base < 2 || base > 36)
+            return ce.error(['out-of-range', 2, 36, base], op2);
+
+          return ce.string(Math.abs(val).toString(base));
+        },
+      },
     },
   },
 ];

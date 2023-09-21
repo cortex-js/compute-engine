@@ -1,4 +1,4 @@
-import { DomainLiteral, IdTable } from '../public';
+import { DomainLiteral, IdentifierDefinitions } from '../public';
 
 export const DOMAIN_CONSTRUCTORS = [
   'InvalidDomain',
@@ -49,6 +49,24 @@ export const DOMAIN_ALIAS = {
   // NegativeNumber: ['Interval', -Infinity, ['Open', 0]],
   // NonPositiveNumber: ['Interval', -Infinity, 0],
 };
+
+/**
+ * Simple description of a numeric domain as a base domain, a min and
+ * max value, possibly open ends, and some excluded values.
+ */
+// export type NumericDomainInfo = {
+//   domain?: string; // Integer, RealNumber, ComplexNumber...
+//   // (not one of the 'shortcuts', i.e. PositiveInteger)
+//   min?: number; // Min and Max are not defined for ComplexNumbers
+//   max?: number;
+//   open?: 'left' | 'right' | 'both'; // For RealNumbers
+//   /** Values from _excludedValues_ are considered not in this domain */
+//   excludedValues?: number[];
+//   /** If defined, the values in this domain must follow the relation
+//    * _period_ * _n_ + _phase_ when _n_ is in _domain_.
+//    */
+//   multiple?: [period: number, domain: BoxedExpression, phase: number];
+// };
 
 // export const NUMERIC_DOMAIN_INFO: { [name: string]: NumericDomainInfo } = {
 //   Number: { domain: 'ExtendedComplexNumber' },
@@ -295,8 +313,8 @@ export function ancestors(dom: string): string[] {
   return result;
 }
 
-export function domainSetsLibrary(): IdTable {
-  const table: IdTable = {};
+export function domainSetsLibrary(): IdentifierDefinitions {
+  const table = {};
   for (const dom of Object.keys(DOMAIN_LITERAL)) {
     // @todo: the Domain domain conflicts with the Domain function
     // Need to be renamed, as in DomainSet or Domains
@@ -312,5 +330,5 @@ export function domainSetsLibrary(): IdTable {
     )
       table[dom] = { domain: 'Set' };
   }
-  return table;
+  return table as IdentifierDefinitions;
 }

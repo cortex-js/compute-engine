@@ -6,7 +6,6 @@ import { Expression, MathJsonNumber } from '../math-json/math-json-format';
 import { LatexSyntax } from './latex-syntax/latex-syntax';
 import type {
   LibraryCategory,
-  LatexDictionary,
   LatexDictionaryEntry,
   LatexString,
   NumberFormattingOptions,
@@ -23,7 +22,7 @@ import {
   BoxedFunctionDefinition,
   BoxedSymbolDefinition,
   IComputeEngine,
-  IdTable,
+  IdentifierDefinitions,
   ExpressionMapInterface,
   NumericMode,
   Pattern,
@@ -45,7 +44,7 @@ import {
 } from './public';
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
-  setCurrentContextSymbolTable,
+  setIdentifierDefinitions,
   getStandardLibrary,
 } from './library/library';
 import { DEFAULT_COST_FUNCTION } from './cost-function';
@@ -65,13 +64,13 @@ import {
   BoxedSymbol,
   makeCanonicalSymbol,
 } from './boxed-expression/boxed-symbol';
+import { boxDomain, _BoxedDomain } from './boxed-expression/boxed-domain';
+import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
 import {
-  boxDomain,
-  _BoxedDomain,
-  isDomain,
-} from './boxed-expression/boxed-domain';
-import { AbstractBoxedExpression } from './boxed-expression/abstract-boxed-expression';
-import { isValidIdentifier, validateIdentifier } from '../math-json/utils';
+  head,
+  isValidIdentifier,
+  validateIdentifier,
+} from '../math-json/utils';
 import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
@@ -86,6 +85,7 @@ import { canonicalNegate } from './symbolic/negate';
 import { canonical, flattenOps, flattenSequence } from './symbolic/flatten';
 import { isFunctionDefinition, isSymbolDefinition } from './library/utils';
 import { bigint } from './numerics/numeric-bigint';
+import { inferDomain } from './domain-utils';
 
 /**
  *
@@ -285,7 +285,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   static getStandardLibrary(
     categories: LibraryCategory[] | LibraryCategory | 'all' = 'all'
-  ): Readonly<IdTable>[] {
+  ): readonly IdentifierDefinitions[] {
     return getStandardLibrary(categories);
   }
 
@@ -320,7 +320,7 @@ export class ComputeEngine implements IComputeEngine {
   constructor(options?: {
     numericMode?: NumericMode;
     numericPrecision?: number;
-    ids?: Readonly<IdTable>[];
+    ids?: readonly IdentifierDefinitions[];
     latexDictionary?: readonly LatexDictionaryEntry[];
     tolerance?: number;
     defaultDomain?: string;
@@ -356,8 +356,8 @@ export class ComputeEngine implements IComputeEngine {
       expressions: new Set<BoxedExpression>(),
     };
 
-    // Prevent creation of definitions for unknown symbols until after
-    // we've built the dictionary
+    // Setting it to null prevents the creation of definitions for
+    // unknown symbols until after we've built the dictionary
     this._defaultDomain = null;
 
     // Set the default precision for `bignum` calculations
@@ -396,7 +396,7 @@ export class ComputeEngine implements IComputeEngine {
     } as RuntimeScope;
 
     const tables = options?.ids ?? ComputeEngine.getStandardLibrary();
-    for (const table of tables) setCurrentContextSymbolTable(this, table);
+    for (const table of tables) setIdentifierDefinitions(this, table);
 
     // Patch-up any missing definitions (domains that were
     // 'forward-declared')
@@ -472,7 +472,7 @@ export class ComputeEngine implements IComputeEngine {
     // Reset all the definitions
     let scope = this.context;
     while (scope) {
-      if (scope.idTable) for (const [_k, v] of scope.idTable) v.reset();
+      if (scope.ids) for (const [_k, v] of scope.ids) v.reset();
 
       // @todo purge assumptions
       scope = scope.parentScope ?? null;
@@ -752,7 +752,7 @@ export class ComputeEngine implements IComputeEngine {
 
   static getLatexDictionary(
     domain: LibraryCategory | 'all' = 'all'
-  ): Readonly<LatexDictionary> {
+  ): readonly Readonly<object>[] {
     return LatexSyntax.getDictionary(domain);
   }
 
@@ -779,7 +779,7 @@ export class ComputeEngine implements IComputeEngine {
     if (!this.strict) {
       scope ??= this.context ?? undefined;
       while (scope) {
-        const def = scope.idTable?.get(symbol);
+        const def = scope.ids?.get(symbol);
         if (def && def instanceof _BoxedSymbolDefinition) return def;
         scope = scope.parentScope;
       }
@@ -796,8 +796,8 @@ export class ComputeEngine implements IComputeEngine {
     if (wikidata) {
       scope = rootScope;
       while (scope) {
-        if (scope.idTable)
-          for (const [_, d] of scope.idTable) {
+        if (scope.ids)
+          for (const [_, d] of scope.ids) {
             if (d instanceof _BoxedSymbolDefinition && d.wikidata === wikidata)
               return d;
           }
@@ -807,7 +807,7 @@ export class ComputeEngine implements IComputeEngine {
     // Match by name
     scope = rootScope;
     while (scope) {
-      const def = scope.idTable?.get(symbol);
+      const def = scope.ids?.get(symbol);
       if (def instanceof _BoxedSymbolDefinition) return def;
       scope = scope.parentScope;
     }
@@ -833,7 +833,7 @@ export class ComputeEngine implements IComputeEngine {
 
     scope ??= this.context;
     while (scope) {
-      const def = scope.idTable?.get(head);
+      const def = scope.ids?.get(head);
       if (def instanceof _BoxedFunctionDefinition) return def;
       scope = scope.parentScope;
     }
@@ -847,13 +847,15 @@ export class ComputeEngine implements IComputeEngine {
     if (!this.context)
       throw Error('Symbol cannot be defined: no scope available');
 
+    if (name === '_1') debugger;
+
     if (name.length === 0 || !isValidIdentifier(name))
       throw Error(`Invalid identifier "${name}": ${validateIdentifier(name)}}`);
 
-    this.context.idTable ??= new Map();
+    this.context.ids ??= new Map();
 
     const boxedDef = new _BoxedSymbolDefinition(this, name, def);
-    if (boxedDef.name) this.context.idTable.set(boxedDef.name, boxedDef);
+    if (boxedDef.name) this.context.ids.set(boxedDef.name, boxedDef);
 
     return boxedDef;
   }
@@ -867,11 +869,11 @@ export class ComputeEngine implements IComputeEngine {
     if (name.length === 0 || !isValidIdentifier(name))
       throw Error(`Invalid identifier "${name}": ${validateIdentifier(name)}}`);
 
-    this.context.idTable ??= new Map();
+    this.context.ids ??= new Map();
 
     const boxedDef = makeFunctionDefinition(this, name, def);
 
-    if (boxedDef.name) this.context.idTable.set(name, boxedDef);
+    if (boxedDef.name) this.context.ids.set(name, boxedDef);
 
     return boxedDef;
   }
@@ -880,16 +882,12 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Create a new scope and add it to the top of the scope stack
    *
-   * The `options.scope` property can be used to specify custom precision,
+   * The `scope` argument can be used to specify custom precision,
    * etc... for this scope
    *
-   * The `ids` can be either a single table, or an array of tables to handle recursive definitions.
    *
    */
-  pushScope(
-    ids?: Readonly<IdTable> | Readonly<IdTable>[],
-    scope?: Partial<Scope>
-  ): void {
+  pushScope(scope?: Partial<Scope>): IComputeEngine {
     if (this.context === null) throw Error('No parent scope available');
     this.context = {
       timeLimit: this.context.timeLimit,
@@ -906,36 +904,32 @@ export class ComputeEngine implements IComputeEngine {
       // the previous assumptions are restored.
       assumptions: new ExpressionMap(this.context.assumptions),
     };
-
-    // `setCurrentContextSymbolTable` will associate the definitions in the
-    // dictionary with the current scope, so we need to set the scope first
-    // above(`this.context =...`);
-    if (ids) {
-      if (Array.isArray(ids))
-        for (const table of ids) setCurrentContextSymbolTable(this, table);
-      else setCurrentContextSymbolTable(this, ids);
-    }
+    return this;
   }
 
   /** Remove the topmost scope from the scope stack.
    */
-  popScope(): void {
+  popScope(): IComputeEngine {
     if (!this.context) throw Error('No scope available');
 
     this.context = this.context.parentScope ?? null;
+
+    return this;
   }
 
   /**
-   * Declare one or more identifiers
+   * Declare one or more identifiers:
    *
+   * associate an identifier with a definition, at minimum a domain, optionally
+   * a value and some other flags.
    */
   declare(
     id: string,
     def: DomainExpression | SymbolDefinition | FunctionDefinition
-  ): void;
+  ): IComputeEngine;
   declare(identifiers: {
     [id: string]: DomainExpression | SymbolDefinition | FunctionDefinition;
-  }): void;
+  }): IComputeEngine;
   declare(
     arg1:
       | string
@@ -946,68 +940,79 @@ export class ComputeEngine implements IComputeEngine {
             | FunctionDefinition;
         },
     arg2?: DomainExpression | SymbolDefinition | FunctionDefinition
-  ): void {
+  ): IComputeEngine {
     //
-    // If we got a dictionary, call `let` for each entry
+    // If we got an object literal, call `declare` for each entry
     //
-    if (arg2 === undefined) {
+    if (typeof arg1 !== 'string' || arg2 === undefined) {
       for (const [id, def] of Object.entries(arg1)) this.declare(id, def);
-      return;
+      return this;
     }
 
     //
-    // Declaring a single symbol
+    // Declare a single symbol
     //
-    const [id, args] = parseFunctionSignature(arg1 as string);
 
-    // The special id `Nothing` can never be redeclared. It
-    // "skip" the declaration of a symbol.
-    if (id === 'Nothing') return;
+    // Function signatures are not valid with `ce.declare`, it must
+    // be a plain identifier.
+    const [id, args] = parseFunctionSignature(arg1);
+    if (args !== undefined) {
+      throw Error(
+        `Unexpected arguments with ${arg1}. Use 'ce.assign()' instead to assign a value, or a use a function definition with 'ce.declare()'.`
+      );
+    }
+
+    // The special id `Nothing` can never be redeclared.
+    // It is also used to indicate that a symbol should be ignored.
+    if (id === 'Nothing') return this;
+
+    // Note: can't redeclare a symbol as other expressions might reference it
+    // now and changing the definition might make them invalid (i.e. not
+    // canonical)
+    if (this.context?.ids?.get(id))
+      throw Error(
+        `Symbol "${id}" has already been declared in the current scope`
+      );
+
+    // Can't "undeclare" (set to undefined/null) a symbol either
     const def = arg2;
-
-    // Note: can't allow redeclaring a symbol, as other expressions
-    // might reference it now and changing the definition might make
-    // them invalid (i.e. not canonical)
-    if (!def) return;
+    if (!def) throw Error(`Expected a definition for ${id}`);
 
     //
-    // Declaring a symbol with a definition
+    // Declaring a symbol or function with a definition
     //
-    if (def instanceof _BoxedSymbolDefinition) {
-      if (args !== undefined) {
-        throw Error(
-          `Unexpected arguments with symbol definition for ${arg1 as string}`
-        );
-      }
+    if (isSymbolDefinition(def)) {
       this.defineSymbol(id, def);
-      return;
+      return this;
     }
 
-    //
-    // Declaring a function with a definition
-    //
     if (isFunctionDefinition(def)) {
-      if (args !== undefined) {
-      }
       this.defineFunction(id, def as FunctionDefinition);
-      return;
+      return this;
     }
 
     //
     // Declaring an identifier with a domain
-    // (or defining an identifier with a value)
+    // `ce.declare("f", ["Function, "Number", "Number"])`
+    // `ce.declare("z", "ComplexNumber")`
+    //
     {
-      const dom = this.domain(def);
+      const dom = this.domain(def as DomainExpression);
       if (dom.isValid) {
         if (dom.isFunction)
           this.defineFunction(id, { signature: { domain: dom } });
-        else this.defineSymbol(id, { domain: dom });
+        else {
+          if (args) throw Error(`Unexpected arguments with domain for "${id}"`);
+          this.defineSymbol(id, { domain: dom });
+        }
       } else {
-        // ce.declare("x", 25);
-        // Not technically allowed (the right argument should be a domain or a definitions), but we'll allow it for now
-        this.assign(id, def as SemiBoxedExpression);
+        throw Error(
+          `Invalid argument for "${id}": use a domain, a FunctionDefinition or a SymbolDefinition`
+        );
       }
     }
+
+    return this;
   }
 
   /**
@@ -1015,84 +1020,120 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Domain of value must be compatible with existing domain.
    *
-   * Create new identifier if it doesn't exist.
+   * Declare identifier if it hasn't been declared yet.
+   *
+   * The identifier can take the form "f(x, y") to create a function
+   * with two parameters, "x" and "y".
    */
-  assign(id: string, value: SetValue): void;
-  assign(ids: { [id: string]: SetValue }): void;
-  assign(arg1: string | { [id: string]: SetValue }, arg2?: SetValue): void {
+  assign(id: string, value: SetValue): IComputeEngine;
+  assign(ids: { [id: string]: SetValue }): IComputeEngine;
+  assign(
+    arg1: string | { [id: string]: SetValue },
+    arg2?: SetValue
+  ): IComputeEngine {
+    if (arg1 === '_1') debugger;
     //
-    // If we got a dictionary, call `set` for each entry
+    // If we got an object literal, call `assign` for each entry
     //
-    if (arg2 === undefined) {
-      for (const [id, def] of Object.entries(arg1)) this.declare(id, def);
-      return;
+    if (typeof arg1 === 'object') {
+      console.assert(arg2 === undefined);
+      for (const [id, def] of Object.entries(arg1)) this.assign(id, def);
+      return this;
     }
 
-    const id = arg1 as string;
-    if (id === 'Nothing') return;
+    const [id, args] = parseFunctionSignature(arg1 as string);
+
+    // Cannot set the value of 'Nothing'
+    if (id === 'Nothing') return this;
+
     const value = arg2 as SetValue;
-    const def = this.lookupSymbol(id);
 
-    // @fastpath
-    if (!this.strict) {
-      const val = value;
-      if (def) {
-        if (typeof val === 'function')
-          throw Error('Cannot set a symbol to a function');
-        def.value = val ?? undefined;
-      } else if (val !== undefined && val !== null) {
-        // Unknown identifier (no def), define a new one
-        if (typeof val === 'function') {
-          // If the value is a JS function, this can only be a function
-          this.defineFunction(id, {
-            signature: { domain: 'Function', evaluate: val },
-          });
-        } else {
-          // Check what kind of value we have
-          const boxedVal = this.box(val).evaluate();
-          if (boxedVal.domain.isNumeric)
-            this.defineSymbol(id, { value: boxedVal, domain: 'Number' });
-          else if (boxedVal.domain.isFunction)
-            this.defineFunction(id, {
-              signature: {
-                domain: 'Function',
-                evaluate: (ce, args) => ce.fn(boxedVal, args).evaluate(),
-              },
-            });
-          else this.defineSymbol(id, { value: boxedVal });
-        }
+    //
+    // 1. The identifier was declared as a symbol in this scope
+    //    or a parent scope
+    //
+    const symDef = this.lookupSymbol(id);
+    if (symDef) {
+      if (symDef.constant)
+        throw Error(`Cannot assign a value to the constant "${id}"`);
+
+      if (args) throw Error(`The symbol "${id}" is not a function`);
+
+      if (value === undefined || value === null) {
+        symDef.value = undefined;
+        return this;
       }
-      return;
+
+      if (typeof value === 'function')
+        throw Error(`Cannot assign a function to symbol "${id}"`);
+
+      symDef.value = this.box(value).evaluate();
+
+      return this;
     }
 
-    const idk = value;
-    if (idk === undefined || idk === null) {
-      if (def) def.value = undefined;
-    } else if (typeof idk === 'function') {
-      this.defineFunction(k, {
-        signature: { domain: 'Function', evaluate: idk },
+    //
+    // 2. The identifier was declared as a function in this scope or
+    //    a parent scope
+    //
+    const fnDef = this.lookupFunction(id);
+    if (fnDef) {
+      if (value === undefined || value === null) {
+        // Reset any handlers, but keep the signature
+        fnDef.signature = { domain: fnDef.signature.domain };
+        return this;
+      }
+
+      // Will replace definition if it already exists
+      if (typeof value === 'function') {
+        this.defineFunction(id, {
+          signature: { domain: 'Function', evaluate: value },
+        });
+        return this;
+      }
+
+      const val = args
+        ? this.box(['Function', value, ...args])
+        : this.box(value).evaluate();
+
+      this.defineFunction(id, {
+        signature: { domain: 'Function', evaluate: val },
       });
-    } else {
-      const val = this.box(idk).evaluate();
-      if (def) {
-        if (def.domain && !val.domain.isCompatible(def.domain))
-          throw Error(
-            `Expected value with domain ${def.domain.toString()} for "${k}"`
-          );
-        def.value = val;
-      } else {
-        if (val.domain.isNumeric)
-          this.defineSymbol(id, { value: val, domain: 'Number' });
-        else if (val.domain.isFunction)
-          this.defineFunction(id, {
-            signature: {
-              domain: 'Function',
-              evaluate: (ce, args) => ce.fn(val, args).evaluate(),
-            },
-          });
-        else this.defineSymbol(id, { value: val });
-      }
+
+      return this;
     }
+
+    //
+    // 3. The identifier has not been declared yet.
+    //    Declare it automatically, depending on the domain of the value
+    //
+
+    if (value === undefined || value === null) {
+      if (args) this.defineFunction(id, { signature: { domain: 'Function' } });
+      else this.defineSymbol(id, { domain: 'Anything' });
+      return this;
+    }
+
+    if (
+      typeof value === 'function' ||
+      args ||
+      (Array.isArray(value) && head(value as Expression) === 'Function') ||
+      (value instanceof _BoxedExpression && value.head === 'Function')
+    ) {
+      this.defineFunction(id, {
+        signature: { domain: 'Function', evaluate: value },
+      });
+      return this;
+    }
+
+    // It's not a function, it's a symbol
+    const dom = this.domain(inferDomain(value));
+    // Promote any numeric domain to 'Number'
+    // If you do a `ce.assign('x', 2')`, `x` will be a `Number` not an `Integer`
+    // which is generally more useful
+    this.defineSymbol(id, { domain: dom.isNumeric ? 'Number' : dom, value });
+
+    return this;
   }
 
   get assumptions(): ExpressionMapInterface<boolean> {
@@ -1164,7 +1205,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   canonical(xs: SemiBoxedExpression[]): BoxedExpression[] {
-    if (!xs.every((x) => x instanceof AbstractBoxedExpression))
+    if (!xs.every((x) => x instanceof _BoxedExpression))
       return xs.map((x) => this.box(x));
 
     const bxs = xs as BoxedExpression[];
@@ -1200,7 +1241,7 @@ export class ComputeEngine implements IComputeEngine {
     message: string | [string, ...SemiBoxedExpression[]],
     where?: SemiBoxedExpression
   ): BoxedExpression {
-    if (where instanceof AbstractBoxedExpression) {
+    if (where instanceof _BoxedExpression) {
       where = this.rawJson(where);
     } else if (where && Array.isArray(where) && where[0] === 'LatexString') {
       if (where[1] === undefined || !where[1]) where = '';
@@ -1306,7 +1347,7 @@ export class ComputeEngine implements IComputeEngine {
     }
 
     // The logic here handles the cases where the exponent is a number or Rational
-    if (exponent instanceof AbstractBoxedExpression) {
+    if (exponent instanceof _BoxedExpression) {
       const num = exponent.numericValue;
       if (num !== null) {
         if (typeof num === 'number') exponent = num;
@@ -1459,7 +1500,7 @@ export class ComputeEngine implements IComputeEngine {
     metadata?: Metadata
   ): BoxedDomain {
     if (domain instanceof _BoxedDomain) return domain;
-    if (domain instanceof AbstractBoxedExpression && domain.symbol)
+    if (domain instanceof _BoxedExpression && domain.symbol)
       domain = domain.symbol;
 
     if (typeof domain === 'string') {
@@ -1474,7 +1515,6 @@ export class ComputeEngine implements IComputeEngine {
    * This function tries to avoid creating a boxed number if `num` corresponds
    * to a common value for which we have a shared instance (-1, 0, NaN, etc...)
    */
-
   number(
     value:
       | number
@@ -1701,7 +1741,7 @@ export class ComputeEngine implements IComputeEngine {
     if (!this.context) throw Error('No scope available');
 
     //
-    // Theory of Operations
+    // ## THEORY OF OPERATIONS
     //
     // When forgeting we need to preserve existing definitions for symbols,
     // as some expressions may be pointing to them. Instead, we
@@ -1709,8 +1749,8 @@ export class ComputeEngine implements IComputeEngine {
     //
 
     if (symbol === undefined) {
-      if (this.context.idTable)
-        for (const k of this.context.idTable.keys()) this.forget(k);
+      if (this.context.ids)
+        for (const k of this.context.ids.keys()) this.forget(k);
 
       this.assumptions.clear();
       return;
@@ -1723,8 +1763,8 @@ export class ComputeEngine implements IComputeEngine {
 
     if (typeof symbol === 'string') {
       // Remove symbol definition in the current scope (if any)
-      if (this.context.idTable) {
-        const def = this.context.idTable.get(symbol);
+      if (this.context.ids) {
+        const def = this.context.ids.get(symbol);
         if (def instanceof _BoxedSymbolDefinition) {
           def.value = undefined;
           if (def.domain?.isNumeric) {
@@ -1746,6 +1786,8 @@ export class ComputeEngine implements IComputeEngine {
   }
 }
 
+/** Give a string like "f(x,y)" return, ["f", ["x", "y"]]
+ */
 function parseFunctionSignature(
   s: string
 ): [id: string, args: string[] | undefined] {

@@ -1,10 +1,10 @@
 import { asFloat } from '../numerics/numeric';
-import { IdTable } from '../public';
+import { IdentifierDefinitions } from '../public';
 
 // complex-cartesian (constructor) = re + i * im
 // complex-polar = abs * exp(i * arg)
 
-export const COMPLEX_LIBRARY: IdTable[] = [
+export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
   {
     Real: {
       threadable: true,

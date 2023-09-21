@@ -3,13 +3,48 @@ import {
   validateArgumentCount,
 } from '../boxed-expression/validate';
 import { asFloat } from '../numerics/numeric';
-import { BoxedExpression, IdTable, SemiBoxedExpression } from '../public';
+import {
+  BoxedExpression,
+  IdentifierDefinitions,
+  SemiBoxedExpression,
+} from '../public';
 import { canonical } from '../symbolic/flatten';
 
 // From NumPy:
 const DEFAULT_LINSPACE_COUNT = 50;
 
-export const COLLECTIONS_LIBRARY: IdTable = {
+// @todo: future thoughts. Consider
+// - operations from the Scala library, which is particularly well designed:
+//    https://superruzafa.github.io/visual-scala-reference//
+// - Scala/Breeze universal functions: https://github.com/scalanlp/breeze/wiki/Universal-Functions
+
+// • Permutations()
+// •	Append()
+// •	Prepend()
+// •	Join()
+// •	Partition()
+// • Apply(expr, n) -> if head of expr has a at handler, use it to access an element
+// • IndexOf()
+// • Contains() -> True if element is in list, IndexOf() > 0
+
+// • Keys: { domain: 'Function' },
+// • Entries: { domain: 'Function' },
+// • Dictionary: { domain: 'Collection' },
+// •Dictionary: {
+//   domain: 'Function',
+//   range: 'Dictionary',
+// },
+// • cons -> cons(first (element), rest (list)) = list
+// • append -> append(list, list) -> list
+// • in
+// • such-that {x ∈ Z | x ≥ 0 ∧ x < 100 ∧ x 2 ∈ Z}
+// • contains / find
+
+// TakeDiagonal(matrix) -> [matrix[1, 1], matrix[2, 2], ...]
+
+// Diagonal(list) -> [[list[1, 1], 0, 0], [0, list[2, 2], 0], ...]
+
+export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   //
   // Data Structures
   //
@@ -441,7 +476,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', ['Maybe', 'Function'], 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -451,7 +487,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', ['Maybe', 'Function'], 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -462,7 +499,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -473,7 +511,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'List'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -483,7 +522,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Number'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -495,7 +535,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -507,7 +548,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -519,7 +561,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Function', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -531,7 +574,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Function', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -543,7 +587,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Function', ['Maybe', 'Value'], 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -556,19 +601,22 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Tuple'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
   },
 
   // Return the first element of Tally()
-  // Equivalent to Union in Mathematica
+  // Equivalent to `Union` in Mathematica, `distinct` in Scala,
+  // Unique or Nub ∪, ↑ in APL
   Unique: {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Tuple'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -580,7 +628,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -594,7 +643,10 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', ['Sequence', 'Value'], 'Value'],
-      evaluate: (_ce, ops) => undefined,
+      evaluate: (_ce, _ops) => {
+        // @todo
+        return undefined;
+      },
     },
   },
 
@@ -602,7 +654,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -612,7 +665,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -625,7 +679,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', ['Sequence', 'Value'], 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -638,7 +693,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', ['Maybe', 'Value'], 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -652,7 +708,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -664,7 +721,8 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
@@ -677,42 +735,13 @@ export const COLLECTIONS_LIBRARY: IdTable = {
     complexity: 8200,
     signature: {
       domain: ['Function', 'Value', 'Value'],
-      evaluate: (_ce, ops) => {
+      evaluate: (_ce, _ops) => {
+        // @todo
         return undefined;
       },
     },
   },
 };
-
-// • Permutations()
-// •	Append()
-// •	Prepend()
-// •	Join()
-// •	Partition()
-// • Apply(expr, n) -> if head of expr has a at handler, use it to access an element
-// • IndexOf()
-// • Contains() -> True if element is in list, IndexOf() > 0
-
-// • Keys: { domain: 'Function' },
-// • Entries: { domain: 'Function' },
-// • Dictionary: { domain: 'Collection' },
-// •Dictionary: {
-//   domain: 'Function',
-//   range: 'Dictionary',
-// },
-// • cons -> cons(first (element), rest (list)) = list
-// • append -> append(list, list) -> list
-// • in
-// • such-that {x ∈ Z | x ≥ 0 ∧ x < 100 ∧ x 2 ∈ Z}
-// • contains / find
-
-// Random() -> random number between 0 and 1
-// Random(n) -> random integer between 1 and n
-// Random(n, m) -> random integer between n and m
-
-// TakeDiagonal(matrix) -> [matrix[1, 1], matrix[2, 2], ...]
-
-// Diagonal(list) -> [[list[1, 1], 0, 0], [0, list[2, 2], 0], ...]
 
 function rangeArgs(
   expr: BoxedExpression

@@ -1,3 +1,4 @@
+import { applicable, apply } from '../function-utils';
 import {
   IComputeEngine,
   FunctionDefinition,
@@ -191,16 +192,19 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         sig.codomain ??
         domain.codomain ??
         (def.numeric ? ce.domain('Number') : ce.domain('Anything'));
+
+      let evaluate: ((ce, args) => BoxedExpression) | undefined = undefined;
+      if (sig.evaluate && typeof sig.evaluate !== 'function') {
+        const fn = applicable(ce.box(sig.evaluate));
+        evaluate = (_ce, ops) => fn(ops);
+      } else evaluate = sig.evaluate as any;
+
       this.signature = {
         domain,
         codomain,
         canonical: sig.canonical,
         simplify: sig.simplify,
-        evaluate: !sig.evaluate
-          ? undefined
-          : typeof sig.evaluate === 'function'
-          ? sig.evaluate
-          : ce.box(sig.evaluate, { canonical: false }),
+        evaluate,
         N: sig.N,
         evalDimension: sig.evalDimension,
         sgn: sig.sgn,

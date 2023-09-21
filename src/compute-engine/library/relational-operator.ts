@@ -1,4 +1,4 @@
-import { BoxedExpression, IdTable } from '../public';
+import { BoxedExpression, IdentifierDefinitions } from '../public';
 import { canonical, flattenOps, flattenSequence } from '../symbolic/flatten';
 
 //   // eq, lt, leq, gt, geq, neq, approx
@@ -11,7 +11,7 @@ import { canonical, flattenOps, flattenSequence } from '../symbolic/flatten';
 //   // greater-than: Q47035128  243
 //   // less-than: Q52834024 245
 
-export const RELOP_LIBRARY: IdTable = {
+export const RELOP_LIBRARY: IdentifierDefinitions = {
   Equal: {
     commutative: true,
     complexity: 11000,

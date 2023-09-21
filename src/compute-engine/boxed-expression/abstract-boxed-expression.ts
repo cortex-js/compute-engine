@@ -31,10 +31,10 @@ import { asFloat } from '../numerics/numeric';
 import { compileToJavascript } from '../compile';
 
 /**
- * AbstractBoxedExpression
+ * _BoxedExpression
  */
 
-export abstract class AbstractBoxedExpression implements BoxedExpression {
+export abstract class _BoxedExpression implements BoxedExpression {
   abstract readonly hash: number;
   abstract readonly json: Expression;
   abstract readonly head: BoxedExpression | string;

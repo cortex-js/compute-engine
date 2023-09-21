@@ -144,7 +144,7 @@ export function canonicalSummation(
   if (!index.symbol)
     index = ce.error(['incompatible-domain', 'Symbol', index.domain]);
 
-  if (index.symbol) ce.pushScope({ [index.symbol]: { domain: 'Integer' } });
+  if (index.symbol) ce.pushScope().declare(index.symbol, { domain: 'Integer' });
   const fn = body.canonical;
   if (index.symbol) {
     ce.popScope();

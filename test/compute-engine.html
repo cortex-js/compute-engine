@@ -528,6 +528,8 @@
       const mf = document.getElementById('mf');
       const ce = MathfieldElement.computeEngine;
 
+      console.log(ce.parse('\\mathrm{Hypot}(3, 4)').evaluate());
+
       ce.defineFunction('f', {
         domain: 'Function',
         signature: {

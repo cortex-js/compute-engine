@@ -1,5 +1,5 @@
 import { Expression } from '../../math-json/math-json-format';
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
   BoxedDomain,
@@ -15,7 +15,7 @@ import { hashCode } from './utils';
  * BoxedString
  */
 
-export class BoxedString extends AbstractBoxedExpression {
+export class BoxedString extends _BoxedExpression {
   private readonly _string: string;
   constructor(ce: IComputeEngine, expr: string, metadata?: Metadata) {
     super(ce, metadata);

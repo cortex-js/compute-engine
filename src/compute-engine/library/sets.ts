@@ -3,10 +3,14 @@
 
 import { isValidDomain } from '../boxed-expression/boxed-domain';
 import { validateArgumentCount } from '../boxed-expression/validate';
-import { BoxedExpression, IdTable, IComputeEngine } from '../public';
+import {
+  BoxedExpression,
+  IdentifierDefinitions,
+  IComputeEngine,
+} from '../public';
 import { canonical, flattenSequence } from '../symbolic/flatten';
 
-export const SETS_LIBRARY: IdTable = {
+export const SETS_LIBRARY: IdentifierDefinitions = {
   //
   // Constants
   //

@@ -1,7 +1,7 @@
 import { Expression } from '../../math-json/math-json-format';
 import { NUMERIC_TOLERANCE } from '../numerics/numeric';
 import { getWildcardName } from '../rules';
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
   BoxedSubstitution,
@@ -20,7 +20,7 @@ import { serializeJsonFunction } from './serialize';
 import { BoxedNumber } from './boxed-number';
 import { permutations } from '../../common/utils';
 
-export class BoxedPattern extends AbstractBoxedExpression implements Pattern {
+export class BoxedPattern extends _BoxedExpression implements Pattern {
   _pattern: BoxedExpression;
 
   constructor(

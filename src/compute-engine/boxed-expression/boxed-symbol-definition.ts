@@ -15,11 +15,11 @@ import {
   SymbolFlags,
   LatexString,
 } from '../public';
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression';
 import { bignumPreferred, complexAllowed, isLatexString } from './utils';
 
 /**
- * THEORY OF OPERATIONS
+ * ## THEORY OF OPERATIONS
  *
  * - The value or domain of a constant cannot be changed.
  * - If set explicitly, the value is the source of truth: it overrides any
@@ -101,8 +101,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
           this._value = ce.parse(def.value) ?? ce.symbol('Undefined');
         else if (typeof def.value === 'function')
           this._value = ce.box(def.value(ce) ?? 'Undefined');
-        else if (def.value instanceof AbstractBoxedExpression)
-          this._value = def.value;
+        else if (def.value instanceof _BoxedExpression) this._value = def.value;
         else this._value = ce.box(def.value);
       } else this._value = undefined;
       if (!this._value && this._domain && !def.flags)

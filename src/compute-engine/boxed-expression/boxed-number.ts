@@ -24,7 +24,7 @@ import {
   signDiff,
 } from '../numerics/rationals';
 
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonNumber } from './serialize';
 import { hashCode, bignumPreferred } from './utils';
 
@@ -32,7 +32,7 @@ import { hashCode, bignumPreferred } from './utils';
  * BoxedNumber
  */
 
-export class BoxedNumber extends AbstractBoxedExpression {
+export class BoxedNumber extends _BoxedExpression {
   protected readonly _value: number | Decimal | Complex | Rational;
   private _domain: BoxedDomain | undefined;
   private _hash: number | undefined;

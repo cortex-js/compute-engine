@@ -1,8 +1,10 @@
 import { ARITHMETIC_LIBRARY } from './arithmetic';
 import { CALCULUS_LIBRARY } from './calculus';
 import { COLLECTIONS_LIBRARY } from './collections';
+import { CONTROL_STRUCTURES_LIBRARY } from './control-structures';
 import { COMPLEX_LIBRARY } from './complex';
 import { CORE_LIBRARY } from './core';
+import { LINEAR_ALGEBRA_LIBRARY } from './linear-algebra';
 import { LOGIC_LIBRARY } from './logic';
 import { POLYNOMIALS_LIBRARY } from './polynomials';
 import { RELOP_LIBRARY } from './relational-operator';
@@ -12,18 +14,19 @@ import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 
 import { LibraryCategory } from '../latex-syntax/public';
 
-import { IComputeEngine, IdTable } from '../public';
+import { IComputeEngine, IdentifierDefinitions } from '../public';
 import { _BoxedSymbolDefinition } from '../boxed-expression/boxed-symbol-definition';
 import { makeFunctionDefinition } from '../boxed-expression/boxed-function-definition';
 import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { isFunctionDefinition, isSymbolDefinition } from './utils';
 import { domainSetsLibrary } from './domains';
+import { inferDomain } from '../domain-utils';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'
-): Readonly<IdTable>[] {
+): readonly IdentifierDefinitions[] {
   if (categories === 'all') {
-    // **Note** the order of the libraries matter:
+    // **Note** the order of the libraries is significant:
     // earlier libraries cannot reference definitions in later libraries.
     return getStandardLibrary([
       'domains',
@@ -32,33 +35,40 @@ export function getStandardLibrary(
       'logic',
       'collections', // Dictionary, List, Sets
       'relop',
+
       'numeric',
       'arithmetic',
+      'trigonometry',
+
       'algebra',
-      'calculus',
+      'calculus', // D, Integerate
+      'polynomials',
+
       'combinatorics',
       'linear-algebra',
-      'other',
-      'physics',
-      'polynomials',
+
       'statistics',
-      'trigonometry',
       'dimensions',
       'units',
+      'physics',
+
+      'other',
     ]);
   } else if (typeof categories === 'string') categories = [categories];
-  const result: Readonly<IdTable>[] = [];
+  const result: IdentifierDefinitions[] = [];
   for (const category of categories) {
     const dict = LIBRARIES[category];
     if (!dict) throw Error(`Unknown library category ${category}`);
     if (Array.isArray(dict)) result.push(...dict);
     else result.push(dict);
   }
-  return result;
+  return Object.freeze(result);
 }
 
 export const LIBRARIES: {
-  [category in LibraryCategory]?: Readonly<IdTable> | Readonly<IdTable>[];
+  [category in LibraryCategory]?:
+    | IdentifierDefinitions
+    | IdentifierDefinitions[];
 } = {
   'algebra': [],
   // 'algebra': [
@@ -79,49 +89,16 @@ export const LIBRARIES: {
   // ],
   'arithmetic': [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY],
   'calculus': CALCULUS_LIBRARY,
+  'collections': [SETS_LIBRARY, COLLECTIONS_LIBRARY, domainSetsLibrary()],
   'combinatorics': [], // @todo fibonacci, binomial, etc...
-  'control-structures': [],
-  //   // D
-  //   // Derivative (mathematica)
-  //   // diff (macsyma)
-  //   // nth-diff
-  //   // int
-  //   // - integrate(expression, symbol)  -- indefinite integral
-  //   // - integrate(expression, range) <range> = {symbol, min, max} -- definite integral
-  //   // - integrate(expression, range1, range2) -- multiple integral
-  //   // def-int
-  // ],
+  'control-structures': CONTROL_STRUCTURES_LIBRARY,
+  'core': CORE_LIBRARY,
   'dimensions': [], // @todo // volume, speed, area
   'domains': [],
-  'core': CORE_LIBRARY,
-  'collections': [SETS_LIBRARY, COLLECTIONS_LIBRARY, domainSetsLibrary()],
   // 'domains': getDomainsDictionary(),
-  'linear-algebra': [], //@todo   // 'linear-algebra': [
-  //   // matrix
-  //   // transpose
-  //   // cross-product
-  //   // outer-product
-  //   // determinant
-  //   // vector
-  //   // matrix
-  //   // rank
-  //   // scalar-matrix
-  //   // constant-matrix
-  //   // identity-matrix
-  // ],
-
+  'linear-algebra': LINEAR_ALGEBRA_LIBRARY,
   'logic': LOGIC_LIBRARY,
   'numeric': [], // @todo   // 'numeric': [
-  //   // Gamma function
-  //   // Zeta function
-  //   // erf function
-  //   // numerator(fraction)
-  //   // denominator(fraction)
-  //   // exactFloatToRational
-  //   // N -> eval as a number
-  //   // random
-  //   // hash
-  // ],
 
   'other': [],
   'relop': RELOP_LIBRARY,
@@ -138,7 +115,7 @@ export const LIBRARIES: {
   },
   'statistics': STATISTICS_LIBRARY,
   'trigonometry': TRIGONOMETRY_LIBRARY,
-  'units': [],
+  'units': [], // @todo see also "dimensions"
 };
 
 function validateDefinitionName(name: string): string {
@@ -159,22 +136,26 @@ function validateDefinitionName(name: string): string {
  * or function name that has not yet been added to the symbol table.
  *
  */
-export function setCurrentContextSymbolTable(
+export function setIdentifierDefinitions(
   engine: IComputeEngine,
-  table: IdTable
+  table: IdentifierDefinitions
 ): void {
   if (!engine.context) throw Error('No context available');
 
   // If this is the first symbol table, setup the context
-  engine.context.idTable ??= new Map();
+  engine.context.ids ??= new Map();
 
-  const idTable = engine.context.idTable;
+  const idTable = engine.context.ids;
+
+  if (!engine.strict) {
+    // @fastpath @todo
+  }
 
   //
   // Validate and add the symbols from the symbol table
   //
-  for (let name of Object.keys(table)) {
-    const entry = table[name];
+  // eslint-disable-next-line prefer-const
+  for (let [name, entry] of Object.entries(table)) {
     name = validateDefinitionName(name);
 
     if (isFunctionDefinition(entry)) {
@@ -207,6 +188,7 @@ export function setCurrentContextSymbolTable(
     } else {
       const def = new _BoxedSymbolDefinition(engine, name, {
         value: engine.box(entry as any),
+        domain: inferDomain(entry),
       });
       console.assert(def);
       idTable.set(name, def);

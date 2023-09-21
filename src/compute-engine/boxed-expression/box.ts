@@ -7,7 +7,7 @@ import {
   Metadata,
   Rational,
 } from '../public';
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedDictionary } from './boxed-dictionary';
 import { BoxedFunction, makeCanonicalFunction } from './boxed-function';
 import { BoxedNumber } from './boxed-number';
@@ -26,7 +26,7 @@ import { bigint } from '../numerics/numeric-bigint';
 import { apply } from '../function-utils';
 
 /**
- * **Theory of Operations**
+ * ## THEORY OF OPERATIONS
  *
  * 1/ Boxing does not depend on the numeric mode. The numeric mode could be
  * changed later, but the previously boxed numbers could not be retroactively
@@ -211,8 +211,7 @@ function boxHold(
   options: { canonical?: boolean }
 ): BoxedExpression {
   if (expr === null) return ce.error('missing');
-  if (typeof expr === 'object' && expr instanceof AbstractBoxedExpression)
-    return expr;
+  if (typeof expr === 'object' && expr instanceof _BoxedExpression) return expr;
 
   expr = missingIfEmpty(expr as Expression);
 
@@ -284,8 +283,8 @@ export function boxFunction(
   //
   if ((head === 'Divide' || head === 'Rational') && ops.length === 2) {
     if (
-      ops[0] instanceof AbstractBoxedExpression &&
-      ops[1] instanceof AbstractBoxedExpression
+      ops[0] instanceof _BoxedExpression &&
+      ops[1] instanceof _BoxedExpression
     ) {
       if (ce.numericMode === 'machine') {
         const [fn, fd] = [asFloat(ops[0]), asFloat(ops[1])];
@@ -435,7 +434,7 @@ export function box(
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
 
-  if (expr instanceof AbstractBoxedExpression)
+  if (expr instanceof _BoxedExpression)
     return options.canonical ? expr.canonical : expr;
 
   //
@@ -518,7 +517,7 @@ export function box(
 
 function asString(expr: SemiBoxedExpression): string | null {
   if (typeof expr === 'string') return expr;
-  if (expr instanceof AbstractBoxedExpression) {
+  if (expr instanceof _BoxedExpression) {
     return expr.string ?? expr.symbol ?? expr.toString();
   }
 

@@ -126,7 +126,7 @@ export class LatexSyntax {
 
   static getDictionary(
     category: LibraryCategory | 'all' = 'all'
-  ): Readonly<LatexDictionary> {
+  ): readonly Readonly<object>[] {
     if (category === 'all') {
       const result: LatexDictionaryEntry[] = [];
       for (const domain of Object.keys(DEFAULT_LATEX_DICTIONARY))

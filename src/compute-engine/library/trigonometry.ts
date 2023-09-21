@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import {
   BoxedExpression,
-  IdTable,
+  IdentifierDefinitions,
   DomainExpression,
   IComputeEngine,
   LatexString,
@@ -37,7 +37,7 @@ const hyperbolicFunction = (_head: string): DomainExpression => {
   return ['Function', 'Number', 'Number'];
 };
 
-export const TRIGONOMETRY_LIBRARY: IdTable[] = [
+export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
   {
     //
     // Constants
@@ -81,7 +81,7 @@ export const TRIGONOMETRY_LIBRARY: IdTable[] = [
             .box(['Sqrt', ['Add', ['Square', ops[0]], ['Square', ops[1]]]])
             .simplify(),
         evaluate: [
-          'Lambda',
+          'Function',
           ['Sqrt', ['Add', ['Square', '_1'], ['Square', '_2']]],
         ],
       },
@@ -289,7 +289,7 @@ export const TRIGONOMETRY_LIBRARY: IdTable[] = [
       wikidata: 'Q2528380',
       signature: {
         domain: ['Function', 'ExtendedRealNumber', ['Interval', 0, 1]],
-        evaluate: ['Lambda', ['Divide', ['Subtract', 1, ['Cos', '_1']], 2]],
+        evaluate: ['Function', ['Divide', ['Subtract', 1, ['Cos', '_1']], 2]],
       },
     },
     /** = 2 * Arcsin(Sqrt(z)) */
@@ -297,7 +297,7 @@ export const TRIGONOMETRY_LIBRARY: IdTable[] = [
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
       signature: {
         domain: ['Function', 'ExtendedRealNumber', 'RealNumber'],
-        evaluate: ['Lambda', ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]]],
+        evaluate: ['Function', ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]]],
       },
     },
     Sec: {

@@ -7,7 +7,7 @@ import {
 } from '../src/compute-engine';
 import { parseCortex } from '../src/cortex';
 import { LatexSyntax } from '../src/compute-engine/latex-syntax/latex-syntax';
-import { AbstractBoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
+import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
 
 let errors: string[] = [];
 
@@ -87,7 +87,7 @@ function exprToStringRecursive(expr, start) {
     const elements = {};
 
     for (const key of Object.keys(expr)) {
-      if (expr[key] instanceof AbstractBoxedExpression)
+      if (expr[key] instanceof _BoxedExpression)
         elements[key] = exprToStringRecursive(expr[key].json, start + 2);
       else if (typeof expr[key] === 'object' && 'json' in expr[key])
         elements[key] = exprToStringRecursive(expr[key].json, start + 2);
@@ -278,8 +278,7 @@ expect.addSnapshotSerializer({
   test: (_val): boolean => true,
 
   serialize: (val, _config, _indentation, _depth, _refs, _printer): string => {
-    if (val instanceof AbstractBoxedExpression)
-      return printExpression(val.json);
+    if (val instanceof _BoxedExpression) return printExpression(val.json);
     return printExpression(val);
   },
 });

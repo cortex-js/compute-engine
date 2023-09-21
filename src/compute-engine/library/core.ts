@@ -1,25 +1,22 @@
-import {
-  BoxedDomain,
-  BoxedExpression,
-  IComputeEngine,
-  IdTable,
-} from '../public';
-import { joinLatex, tokenize, tokensToString } from '../latex-syntax/tokenizer';
-import { asFloat, asSmallInteger, fromDigits } from '../numerics/numeric';
+import { BoxedExpression, IdentifierDefinitions } from '../public';
+import { joinLatex } from '../latex-syntax/tokenizer';
+import { asSmallInteger, fromDigits } from '../numerics/numeric';
 
-import Decimal from 'decimal.js';
 import {
   validateArgument,
   validateArgumentCount,
 } from '../boxed-expression/validate';
 import { canonical } from '../symbolic/flatten';
 import { randomExpression } from './random-expression';
-import { apply, iterable } from '../function-utils';
-import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
+import { apply } from '../function-utils';
 
 //   // := assign 80 // @todo
+// compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
 
-export const CORE_LIBRARY: IdTable[] = [
+// Symbols() -> return list of all known symbols
+// FreeVariables(expr) -> return list of all free variables in expr
+
+export const CORE_LIBRARY: IdentifierDefinitions[] = [
   {
     Nothing: { domain: 'Nothing' },
   },
@@ -28,15 +25,6 @@ export const CORE_LIBRARY: IdTable[] = [
   // Inert functions
   //
   {
-    BaseForm: {
-      description: '`BaseForm(expr, base=10)`',
-      complexity: 9000,
-      inert: true,
-      signature: {
-        domain: ['Function', 'Value', ['Maybe', 'Integer'], 'Value'],
-        codomain: (_ce, args) => args[0].domain,
-      },
-    },
     Delimiter: {
       // Use to represent groups of expressions. Named after https://en.wikipedia.org/wiki/Delimiter
       complexity: 9000,
@@ -148,10 +136,6 @@ export const CORE_LIBRARY: IdTable[] = [
 
     // @todo
     About: { signature: { domain: 'Function' } },
-
-    Block: {
-      signature: { domain: 'Function', evaluate: evaluateBlock },
-    },
 
     Domain: {
       /** Return the domain of an expression */
@@ -383,170 +367,6 @@ export const CORE_LIBRARY: IdTable[] = [
   },
 
   //
-  // Control Structures
-  //
-  {
-    If: {
-      hold: 'rest', // Evaluate the condition, but no the true/false branches
-      signature: {
-        domain: 'Function',
-        codomain: (ce, ops) => ce.domain(['Union', ops[0], ops[1]]),
-        evaluate: (ce, ops) => {
-          const cond = ops[0];
-          if (cond && cond.symbol === 'True')
-            return ops[1] ? ops[1].evaluate() : ce.symbol('Nothing');
-          return ops[2] ? ops[2].evaluate() : ce.symbol('Nothing');
-        },
-      },
-    },
-
-    Loop: {
-      hold: 'all', // Do not evaluate anything
-      signature: {
-        domain: 'Function',
-        evaluate: (ce, ops) => {
-          const body = ops[0] ?? ce.symbol('Nothing');
-          if (body.isNothing) return body;
-
-          const collection = ops[1];
-
-          if (collection) {
-            //
-            // Iterate over the elements of a collection
-            //
-            const iter = iterable(collection);
-            if (!iter) return ce.symbol('Nothing');
-            let result: BoxedExpression | undefined = undefined;
-            let i = 0;
-            while (true) {
-              const { done, value } = iter.next();
-              if (done) return result ?? ce.symbol('Nothing');
-              result = apply(body, [value]);
-              if (result.head === 'Break') return result.op1;
-              if (result.head === 'Return') return result;
-              if (i++ > ce.iterationLimit)
-                return ce.error('iteration-limit-exceeded');
-            }
-          }
-
-          //
-          // No collection: infinite loop
-          //
-          let i = 0;
-          while (true) {
-            const result = body.evaluate();
-            if (result.head === 'Break') return result.op1;
-            if (result.head === 'Return') return result;
-            if (i++ > ce.iterationLimit)
-              return ce.error('iteration-limit-exceeded');
-          }
-        },
-      },
-    },
-
-    Which: {
-      hold: 'all',
-      signature: {
-        domain: 'Function',
-        codomain: (ce, ops) => domainWhich(ce, ops),
-        evaluate: (ce, ops) => whichEvaluate(ce, ops, 'evaluate'),
-      },
-    },
-
-    FixedPoint: {
-      hold: 'all',
-      signature: {
-        domain: 'Function',
-        // @todo
-      },
-    },
-  },
-
-  //
-  // String-related
-  //
-  {
-    FromDigits: {
-      description: `\`FromDigits(s, base=10)\` \
-      return an integer representation of the string \`s\` in base \`base\`.`,
-      // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
-      // @todo could accept "roman"... as base
-      // @todo could accept optional third parameter as the (padded) length of the output
-      signature: {
-        domain: ['Function', 'String', ['Maybe', ['Range', 1, 36]], 'Integer'],
-        evaluate: (ce, ops) => {
-          const op1 = ops[0];
-          if (!op1.string)
-            return ce.error(['incompatible-domain', 'String', op1.domain], op1);
-
-          const op2 = ops[1];
-          if (op2.isNothing) return ce.number(Number.parseInt(op1.string, 10));
-          if (op2.numericValue === null) {
-            return ce.error(['unexpected-base', op2.latex], op2);
-          }
-          const base = asFloat(op2)!;
-          if (!Number.isInteger(base) || base < 2 || base > 36)
-            return ce.error(['unexpected-base', base], op2);
-
-          const [value, rest] = fromDigits(op1.string, base);
-
-          if (rest)
-            return ce.error(['unexpected-digit', { str: rest[0] }], {
-              str: rest,
-            });
-
-          return ce.number(value);
-        },
-      },
-    },
-
-    IntegerString: {
-      description: `\`IntegerString(n, base=10)\` \
-      return a string representation of the integer \`n\` in base \`base\`.`,
-      // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
-      // @todo could accept "roman"... as base
-      // @todo could accept optional third parameter as the (padded) length of the output
-      signature: {
-        domain: ['Function', 'Integer', ['Maybe', 'Integer'], 'String'],
-        evaluate: (ce, ops) => {
-          const op1 = ops[0];
-          const val = asFloat(op1) ?? NaN;
-          if (Number.isNaN(val) || !Number.isInteger(val)) {
-            return ce.error(
-              ['incompatible-domain', 'Integer', op1.domain],
-              op1
-            );
-          }
-
-          const op2 = ops[1];
-          if (op2.isNothing) {
-            const op1Num = op1.numericValue;
-            if (typeof op1Num === 'number')
-              return ce.string(Math.abs(op1Num).toString());
-            if (op1Num instanceof Decimal)
-              return ce.string(op1Num.abs().toString());
-            return ce.string(
-              Math.abs(Math.round(asFloat(op1) ?? NaN)).toString()
-            );
-          }
-
-          if (asSmallInteger(op2) === null) {
-            return ce.error(
-              ['incompatible-domain', 'Integer', op2.domain],
-              op2
-            );
-          }
-          const base = asSmallInteger(op2)!;
-          if (base < 2 || base > 36)
-            return ce.error(['out-of-range', 2, 36, base], op2);
-
-          return ce.string(Math.abs(val).toString(base));
-        },
-      },
-    },
-  },
-
-  //
   // LaTeX-related
   //
   {
@@ -554,7 +374,6 @@ export const CORE_LIBRARY: IdTable[] = [
     // is a LaTeX string
     LatexString: {
       inert: true,
-      hold: 'all',
       signature: { domain: ['Function', 'String', 'String'] },
     },
 
@@ -592,56 +411,3 @@ export const CORE_LIBRARY: IdTable[] = [
     },
   },
 ];
-
-// compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
-
-// Symbols() -> return list of all known symbols
-// FreeVariables(expr) -> return list of all free variables in expr
-
-function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
-  let dom: BoxedDomain | null = null;
-  for (let i = 1; i <= args.length - 1; i += 2) {
-    if (!dom) dom = args[i].domain;
-    else dom = sharedAncestorDomain(dom, args[i].domain);
-  }
-  return dom ?? ce.domain('Nothing');
-}
-
-function whichEvaluate(
-  ce: IComputeEngine,
-  args: BoxedExpression[],
-  mode: 'N' | 'evaluate'
-): BoxedExpression {
-  let i = 0;
-  while (i < args.length - 1) {
-    if (args[i].evaluate().symbol === 'True') {
-      if (!args[i + 1]) return ce.symbol('Undefined');
-      return mode === 'N' ? args[i + 1].N() : args[i + 1].evaluate();
-    }
-    i += 2;
-  }
-
-  return ce.symbol('Undefined');
-}
-
-/** Evaluate a Block expression */
-function evaluateBlock(
-  ce: IComputeEngine,
-  ops: BoxedExpression[]
-): BoxedExpression {
-  // Empty block?
-  if (ops.length === 0) return ce.symbol('Nothing');
-
-  ce.pushScope();
-
-  let result: BoxedExpression | undefined = undefined;
-  for (const op of ops) {
-    result = op.evaluate();
-    const h = result.head;
-    if (h === 'Return' || h === 'Break' || h === 'Continue') break;
-  }
-
-  ce.popScope();
-
-  return result ?? ce.symbol('Nothing');
-}

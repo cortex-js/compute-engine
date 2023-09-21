@@ -1,7 +1,7 @@
-import { IdTable } from '../public';
+import { IdentifierDefinitions } from '../public';
 import { distribute, expand } from '../symbolic/expand';
 
-export const POLYNOMIALS_LIBRARY: IdTable[] = [
+export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
   {
     Expand: {
       description: 'Expand out products and positive integer powers',

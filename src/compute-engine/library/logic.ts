@@ -1,6 +1,10 @@
-import { BoxedExpression, IdTable, IComputeEngine } from '../public';
+import {
+  BoxedExpression,
+  IdentifierDefinitions,
+  IComputeEngine,
+} from '../public';
 
-export const LOGIC_LIBRARY: IdTable = {
+export const LOGIC_LIBRARY: IdentifierDefinitions = {
   True: { wikidata: 'Q16751793', domain: 'Boolean', constant: true },
   False: {
     wikidata: 'Q5432619',

@@ -1,5 +1,5 @@
 import { asFloat, erf, erfInv } from '../numerics/numeric';
-import { BoxedExpression, IdTable } from '../public';
+import { BoxedExpression, IdentifierDefinitions } from '../public';
 
 //   // mean
 //   // median
@@ -11,63 +11,8 @@ import { BoxedExpression, IdTable } from '../public';
 // Geometric mean:
 // Harmonic mean:
 
-export const STATISTICS_LIBRARY: IdTable[] = [
+export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
   {
-    Max: {
-      description: 'Maximum of two or more numbers',
-      complexity: 1200,
-      signature: {
-        domain: ['Function', ['Sequence', 'Value'], 'Number'],
-        simplify: (ce, ops) => {
-          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-          if (ops.length === 1) return ops[0];
-          return ce.fn('Max', ops);
-        },
-        evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-
-          let result: BoxedExpression | undefined = undefined;
-          const rest: BoxedExpression[] = [];
-
-          for (const op of ops) {
-            if (!op.isNumber || op.numericValue === undefined) rest.push(op);
-            else if (!result || op.isGreater(result)) result = op;
-          }
-          if (rest.length > 0)
-            return ce.box(result ? ['Max', result, ...rest] : ['Max', ...rest]);
-          return result ?? ce._NAN;
-        },
-      },
-    },
-
-    Min: {
-      description: 'Minimum of two or more numbers',
-      complexity: 1200,
-
-      signature: {
-        domain: ['Function', ['Sequence', 'Value'], 'Number'],
-        simplify: (ce, ops) => {
-          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-          if (ops.length === 1) return ops[0];
-          return ce.fn('Min', ops);
-        },
-        evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
-
-          let result: BoxedExpression | undefined = undefined;
-          const rest: BoxedExpression[] = [];
-
-          for (const op of ops) {
-            if (!op.isNumber || op.numericValue === undefined) rest.push(op);
-            else if (!result || op.isLess(result)) result = op;
-          }
-          if (rest.length > 0)
-            return ce.box(result ? ['Min', result, ...rest] : ['Min', ...rest]);
-          return result ?? ce._NAN;
-        },
-      },
-    },
-
     // https://towardsdatascience.com/on-average-youre-using-the-wrong-average-geometric-harmonic-means-in-data-analysis-2a703e21ea0?gi=d56d047586c6
     // https://towardsdatascience.com/on-average-youre-using-the-wrong-average-part-ii-b32fcb41527e
 
@@ -89,6 +34,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Median: {
       complexity: 1200,
       signature: {
@@ -110,6 +56,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Variance: {
       complexity: 1200,
       signature: {
@@ -130,6 +77,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     StandardDeviation: {
       complexity: 1200,
       signature: {
@@ -152,6 +100,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Kurtosis: {
       complexity: 1200,
       signature: {
@@ -177,6 +126,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Skewness: {
       complexity: 1200,
       signature: {
@@ -202,6 +152,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Mode: {
       complexity: 1200,
       signature: {
@@ -232,6 +183,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Quartiles: {
       complexity: 1200,
       signature: {
@@ -257,6 +209,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     InterquartileRange: {
       complexity: 1200,
       signature: {
@@ -280,6 +233,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Count: {
       threadable: true,
       complexity: 1200,
@@ -292,6 +246,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Erf: {
       complexity: 7500,
       signature: {
@@ -303,6 +258,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     Erfc: {
       complexity: 7500,
       signature: {
@@ -314,6 +270,7 @@ export const STATISTICS_LIBRARY: IdTable[] = [
         },
       },
     },
+
     ErfInv: {
       complexity: 7500,
       signature: {

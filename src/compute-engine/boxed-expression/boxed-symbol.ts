@@ -1,5 +1,5 @@
 import { Expression } from '../../math-json/math-json-format';
-import { AbstractBoxedExpression } from './abstract-boxed-expression';
+import { _BoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
   BoxedRuleSet,
@@ -24,22 +24,7 @@ import { serializeJsonSymbol } from './serialize';
 import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { hashCode } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
-
-function isSymbolDefinition(
-  def: BoxedSymbolDefinition | BoxedFunctionDefinition | null | undefined
-): def is BoxedSymbolDefinition {
-  if (def === null || def === undefined) return false;
-  if ('constant' in def) return true;
-  return false;
-}
-
-function isFunctionDefinition(
-  def: BoxedSymbolDefinition | BoxedFunctionDefinition | null | undefined
-): def is BoxedFunctionDefinition {
-  if (def === null || def === undefined) return false;
-  if ('signature' in def) return true;
-  return false;
-}
+import { _BoxedFunctionDefinition } from './boxed-function-definition';
 
 /**
  * BoxedSymbol
@@ -54,7 +39,7 @@ function isFunctionDefinition(
  * not a function expression, i.e. `Sin`, not `["Sin", "Pi"]`. This is used
  * for example in `["InverseFunction", "Sin"]`
  */
-export class BoxedSymbol extends AbstractBoxedExpression {
+export class BoxedSymbol extends _BoxedExpression {
   private _scope: RuntimeScope | null;
   protected _name: string;
   private _hash: number | undefined;
@@ -213,9 +198,14 @@ export class BoxedSymbol extends AbstractBoxedExpression {
 
   get functionDefinition(): BoxedFunctionDefinition | undefined {
     if (this._def === null) this.bind(this._scope);
-    return isFunctionDefinition(this._def) ? this._def : undefined;
+    return this._def instanceof _BoxedFunctionDefinition
+      ? this._def
+      : undefined;
   }
 
+  /**
+   * Associate a definition with this symbol, if one is not already available
+   */
   bind(scope: RuntimeScope | null): void {
     if (scope === null) {
       this._def = undefined;
@@ -316,7 +306,7 @@ export class BoxedSymbol extends AbstractBoxedExpression {
       if (dom?.isNumeric) dom = this.engine.domain('Number');
       this._def = this.engine.defineSymbol(this._name, {
         value: v,
-        domain: dom ?? undefined,
+        domain: dom ?? 'Anything',
       });
     }
   }

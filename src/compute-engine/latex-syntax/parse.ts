@@ -419,6 +419,8 @@ export class _Parser implements Parser {
       | 'postfix'
       | 'operator'
   ): [IndexedLatexDictionaryEntry, number][] {
+    if (this.atEnd) return [];
+
     const result: [IndexedLatexDictionaryEntry, number][] = [];
     const defs = [...this.getDefs(kind)];
 
@@ -1552,6 +1554,7 @@ export class _Parser implements Parser {
    *
    */
   private parseSupsub(lhs: Expression): Expression | null {
+    if (this.atEnd) return lhs;
     console.assert(lhs !== null);
 
     const index = this.index;
@@ -1654,7 +1657,7 @@ export class _Parser implements Parser {
     until?: Readonly<Terminator>
   ): Expression | null {
     console.assert(lhs !== null); // @todo validate
-    if (lhs === null) return null;
+    if (lhs === null || this.atEnd) return null;
 
     const start = this.index;
     for (const [def, n] of this.peekDefinitions('postfix')) {

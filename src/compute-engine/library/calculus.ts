@@ -1,9 +1,10 @@
 import { validateArgument } from '../boxed-expression/validate';
 import { makeScopedLambda1 } from '../function-utils';
 import { centeredDiff8thOrder, monteCarloEstimate } from '../numerics/numeric';
-import { BoxedExpression, IdTable } from '../public';
+import { BoxedExpression, IdentifierDefinitions } from '../public';
+import { partialDerivative } from '../symbolic/derivative';
 
-export const CALCULUS_LIBRARY: IdTable[] = [
+export const CALCULUS_LIBRARY: IdentifierDefinitions[] = [
   {
     /* @todo
     ## Definite Integral
@@ -59,17 +60,70 @@ volumes
 
     //
     // Represents the derivative of a function
-    // Used when the derivative is not known
-    // It is an inert function that can be used in other expressions
+    // ["Derivative", "Sin"] -> "Cos"
+    // ["Derivative", ["Sin", "_"]] -> ["Cos", "_"]
     //
     Derivative: {
+      hold: 'all',
       signature: {
         domain: [
           'Function',
-          'Function',
+          'Symbol',
           ['Maybe', 'Number'], // The order of the derivative
           'Function',
         ],
+        canonical: (ce, ops) => {
+          // Is it a function name, i.e. ["Derivative", "Sin"]?
+          if (ops[0].functionDefinition) {
+            return (
+              partialDerivative(ce._fn(ops[0].canonical, [ce.symbol('_')]), '_')
+                ?.canonical ?? ce._fn('Derivative', ops)
+            );
+          }
+          return ce._fn('Derivative', ops);
+        },
+        evaluate: (ce, ops) => {
+          // Is it a function name, i.e. ["Derivative", "Sin"]?
+          if (ops[0].functionDefinition) {
+            return (
+              partialDerivative(ce._fn(ops[0].canonical, [ce.symbol('_')]), '_')
+                ?.canonical ?? undefined
+            );
+          }
+          // It's a function expression, i.e. ["Derivative", ["Sin", "_"]]
+          const f = partialDerivative(ops[0].canonical, '_');
+          if (!f) return undefined;
+          return f.canonical;
+        },
+      },
+    },
+
+    //
+    // **D: Partial derivative**
+    //
+    // ["D", f, "x"] -> If f is an expression of x, derivative of f with respect
+    //                        to x
+    // ["D", f, "x", "x"]
+    // ["D", f, "y", "x"]
+
+    D: {
+      signature: {
+        domain: ['Function', 'Function', ['Sequence', 'Symbol'], 'Function'],
+        evaluate: (ce, ops) => {
+          let f = ops[0];
+          // Iterate aver all variables
+          const vars = ops.slice(1);
+          while (vars.length > 0) {
+            const v = vars.shift();
+            if (!v?.symbol) return undefined;
+            const fPrime = partialDerivative(f, v.symbol);
+            // If we couldn't derivate with respect to this variable, return
+            // a partial derivation
+            if (fPrime === undefined) return ce._fn(f, vars);
+            f = fPrime;
+          }
+          return f;
+        },
       },
     },
 
@@ -84,27 +138,11 @@ volumes
 
           const f = makeScopedLambda1(ops[0]);
           if (!f) return undefined;
-          ce.pushScope();
+          ce.pushScope(); // Need a scope for the anonymous parameters
+          ce.declare('_1', { domain: 'Number' });
           const result = ce.number(centeredDiff8thOrder(f, x, 1e-6));
           ce.popScope();
           return result;
-        },
-      },
-    },
-
-    //
-    // **D: Partial derivative**
-    //
-    // ["D", f, "x"] -> ["Derivative", f] if f is a function of with a single free variable
-    // ["D", f, "x", "x"] -> ["Derivative", f, 2]
-    // ["D", f, "y", "x"] -> cannot be represented with a ["Derivative"] expression
-
-    D: {
-      signature: {
-        domain: ['Function', 'Function', ['Sequence', 'Symbol'], 'Function'],
-        evaluate: (_ce, ops) => {
-          // @todo: symbolic differentiation
-          return undefined;
         },
       },
     },
@@ -180,7 +218,8 @@ volumes
           if (!f) return undefined;
           const [a, b] = ops.slice(1).map((op) => op.valueOf());
           if (typeof a !== 'number' || typeof b !== 'number') return undefined;
-          ce.pushScope();
+          ce.pushScope(); // Need a scope for the anonymous parameters
+          ce.declare('_1', { domain: 'Number' });
           const result = ce.number(monteCarloEstimate(f, a, b));
           ce.popScope();
           return result;

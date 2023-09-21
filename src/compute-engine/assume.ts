@@ -69,13 +69,18 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
   const ce = proposition.engine;
 
   // Case 2
+  // @todo: this is dubious. Should we allow this?
+  // i.e. `ce.assume(ce.parse("x = 3"))`
+  // that's not really an assumption, that's an assignment.
+  // Assumptions are meant to be complementary to declarations, not replacing
+  // them, i.e. `ce.assume(ce.parse("x > 0"))`
   const lhs = proposition.op1.symbol;
   if (lhs && !hasValue(ce, lhs) && !proposition.op2.has(lhs)) {
     const val = proposition.op2.evaluate();
     if (!val.isValid) return 'not-a-predicate';
     const def = ce.lookupSymbol(lhs);
     if (!def) {
-      ce.defineSymbol(lhs, { value: val });
+      ce.defineSymbol(lhs, { value: val, domain: val.domain });
       return 'ok';
     }
     if (def.domain && !val.domain.isCompatible(def.domain))
@@ -103,7 +108,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     const val = sols.length === 1 ? sols[0] : ce.fn('List', sols);
     const def = ce.lookupSymbol(lhs);
     if (!def) {
-      ce.defineSymbol(lhs, { value: val });
+      ce.defineSymbol(lhs, { value: val, domain: val.domain });
       return 'ok';
     }
     if (def.domain && !sols.every((sol) => val.domain.isCompatible(sol.domain)))

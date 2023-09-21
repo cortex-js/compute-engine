@@ -338,7 +338,7 @@ export type JsonSerializationOptions = {
 };
 
 /**
- * **Theory of Operations**
+ * ## THEORY OF OPERATIONS
  *
  * The `BoxedExpression` interface includes most of the member functions
  * applicable to any kind of expression, for example `get symbol()` or
@@ -1301,31 +1301,35 @@ export interface ExpressionMapInterface<U> {
 }
 
 /**
- * An ID table contains definitions for symbols and functions.
+ * A table mapping identifiers to their definition.
  *
- * The index of the table is an identifier, the  name of the symbol or
- * function for this definition
+ * Identifiers should be valid MathJSON identifiers. In addition, the
+ * following rules are recommended:
  *
- * The name of a symbol or function is an arbitrary string of Unicode
- * characters, however the following conventions are recommended:
- *
- * - Use only letters, digits and `-`: `/[a-zA-Z0-9-]+/`
+ * - Use only latin letters, digits and `-`: `/[a-zA-Z0-9-]+/`
  * - The first character should be a letter: `/^[a-zA-Z]/`
  * - Functions and symbols exported from a library should start with an uppercase letter `/^[A-Z]/`
  *
+ * If a semi boxed expression
+ *
  */
 
-export type IdTable = { [id: string]: SymbolDefinition | FunctionDefinition };
+export type IdentifierDefinition =
+  | SymbolDefinition
+  | FunctionDefinition
+  | SemiBoxedExpression;
+
+export type IdentifierDefinitions = Readonly<{
+  [id: string]: IdentifierDefinition;
+}>;
 
 /**
- * The entries of a `RuntimeIdentifierTable` have been validated and
- * optimized for faster evaluation.
+ * The entries have been validated and optimized for faster evaluation.
  *
  * When a new scope is created with `pushScope()` or when creating a new
- * engine instance, new instances of `RuntimeIdentifierTable` are created
- * as needed.
+ * engine instance, new instances of this type are created as needed.
  */
-export type RuntimeIdentifierTable = Map<
+export type RuntimeIdentifierDefinitions = Map<
   string,
   BoxedSymbolDefinition | BoxedFunctionDefinition
 >;
@@ -1347,6 +1351,7 @@ export type RuntimeIdentifierTable = Map<
  */
 export type Scope = {
   /** Signal `timeout` when the execution time for this scope is exceeded.
+   *
    * Time in seconds, default 2s.
    *
    * @experimental
@@ -1354,7 +1359,8 @@ export type Scope = {
   timeLimit: number;
 
   /** Signal `out-of-memory` when the memory usage for this scope is exceeded.
-   * Memory in Megabytes, default: 1Mb.
+   *
+   * Memory is in Megabytes, default: 1Mb.
    *
    * @experimental
    */
@@ -1367,8 +1373,8 @@ export type Scope = {
    */
   recursionLimit: number;
 
-  /** Signal `iteration-limit-exceeded` when the iteration limit for this
-   * scope is exceeded. Default: no limits.
+  /** Signal `iteration-limit-exceeded` when the iteration limit
+   * in a loop is exceeded. Default: no limits.
    *
    * @experimental
    */
@@ -1378,19 +1384,19 @@ export type Scope = {
 export type RuntimeScope = Scope & {
   parentScope?: RuntimeScope;
 
-  idTable?: RuntimeIdentifierTable;
+  ids?: RuntimeIdentifierDefinitions;
 
   assumptions: undefined | ExpressionMapInterface<boolean>;
 
   /** The location of the call site that created this scope */
-  origin?: {
-    name?: string;
-    line?: number;
-    column?: number;
-  };
+  // origin?: {
+  //   name?: string;
+  //   line?: number;
+  //   column?: number;
+  // };
 
   /** Free memory should not go below this level for execution to proceed */
-  lowWaterMark?: number;
+  // lowWaterMark?: number;
 };
 
 export type BaseDefinition = {
@@ -1554,8 +1560,8 @@ export type FunctionSignature = {
    * If a required argument is missing, it should be indicated with a
    * `["Error", "'missing"]` expression. If more arguments than expected
    * are present, this should be indicated with a `unexpected-argument` error.
-   * If the domain of an argument is not compatible, it should be indicated with
-   * a `incompatible-domain` error.
+   * If the domain of an argument is not compatible, it should be indicated
+   * with a `incompatible-domain` error.
    *
    * `["Sequence"]` expressions are not folded and need to be handled
    *  explicitly.
@@ -1568,7 +1574,8 @@ export type FunctionSignature = {
    * that are exact and literal
    * (i.e. `arg.numericValue !== null && arg.isExact`).
    *
-   * Values of symbols should not be substituted.
+   * Values of symbols should not be substituted, unless they have
+   * a `holdUntil` attribute of `"never"`.
    *
    * The handler should not consider the value or any assumptions about any
    * of the arguments that are symbols or functions (i.e. `arg.isZero`,
@@ -1602,6 +1609,9 @@ export type FunctionSignature = {
    * as calculations involving decimal numbers (non-integers). Making exact
    * calculations on integers or rationals is OK.
    *
+   * Do not reduce constants with a `holdUntil` attribute of `"N"`
+   * or `"evaluate"`.
+   *
    * This handler should not have any side-effects: do not modify
    * the environment of the `ComputeEngine` instance, do not perform I/O,
    * do not do calculations that depend on random values.
@@ -1616,10 +1626,10 @@ export type FunctionSignature = {
   ) => BoxedExpression | undefined;
 
   /**
-   * Evaluate symbolically a function expression.
+   * Evaluate a function expression.
    *
-   * The arguments have been symbolically evaluated, except the arguments to
-   * which a `hold` apply.
+   * The arguments have been evaluated, except the arguments to which a
+   * `hold` applied.
    *
    * It is not necessary to further simplify or evaluate the arguments.
    *
@@ -1632,7 +1642,7 @@ export type FunctionSignature = {
    * - do not reduce rational numbers to decimal (floating point approximation)
    * - do not down convert bignums to machine numbers
    * - do not reduce square roots of rational numbers
-   * - do not reduce constants with a `hold` attribute
+   * - do not reduce constants with a `holdUntil` attribute of `"N"`
    *
    * If the expression cannot be evaluated, due to the values, domains, or
    * assumptions about its arguments, for example, return `undefined` or
@@ -1665,19 +1675,19 @@ export type FunctionSignature = {
    * evaluation, but a literal argument is out of range or
    * not of the expected type.
    *
+   * Use the value of `ce.numericMode` to determine how to perform
+   * the numeric evaluation.
+   *
    * Note that regardless of the current value of `ce.numericMode`, the
    * arguments may be boxed numbers representing machine numbers, bignum
    * numbers, complex numbers, rationals or big rationals.
-   *
-   * Use the value of `ce.numericMode` to determine how to perform
-   * the numeric evaluation.
    *
    * If the numeric mode does not allow complex numbers (the
    * `engine.numericMode` is not `"complex"` or `"auto"`) and the result of
    * the evaluation would be a complex number, return `NaN` instead.
    *
-   * If `ce.numericMode` is `"bignum"` or `"auto"` the evaluation should be done
-   * using bignums.
+   * If `ce.numericMode` is `"bignum"` or `"auto"` the evaluation should
+   * be done using bignums.
    *
    * Otherwise, `ce.numericMode` is `"machine", the evaluation should be
    * performed using machine numbers.
@@ -1720,12 +1730,10 @@ export type BoxedFunctionSignature = {
     ce: IComputeEngine,
     args: BoxedExpression[]
   ) => BoxedExpression | undefined;
-  evaluate?:
-    | BoxedExpression
-    | ((
-        ce: IComputeEngine,
-        args: BoxedExpression[]
-      ) => BoxedExpression | undefined);
+  evaluate?: (
+    ce: IComputeEngine,
+    args: BoxedExpression[]
+  ) => BoxedExpression | undefined;
   N?: (
     ce: IComputeEngine,
     args: BoxedExpression[]
@@ -1848,7 +1856,7 @@ export type FunctionDefinition = BaseDefinition &
 
     hold?: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
-    signature?: FunctionSignature;
+    signature: FunctionSignature;
   };
 
 export type BoxedFunctionDefinition = BoxedBaseDefinition &
@@ -1943,7 +1951,7 @@ export type SymbolAttributes = {
  */
 export type SymbolDefinition = BaseDefinition &
   Partial<SymbolAttributes> & {
-    domain?: string | BoxedDomain;
+    domain: string | BoxedDomain;
 
     /** `value` can be a JS function since for some constants, such as
      * `Pi`, the actual value depends on the `precision` setting of the
@@ -1988,7 +1996,6 @@ export interface ComputeEngineStats {
 export type SetValue =
   | SemiBoxedExpression
   | ((ce, args) => BoxedExpression)
-  | null
   | undefined;
 
 /** @internal */
@@ -2405,25 +2412,44 @@ export interface IComputeEngine {
   get jsonSerializationOptions(): Readonly<JsonSerializationOptions>;
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>);
 
-  pushScope(
-    identifiers?: Readonly<IdTable> | Readonly<IdTable>[],
-    scope?: Partial<Scope>
-  ): void;
-  popScope(): void;
+  pushScope(scope?: Partial<Scope>): IComputeEngine;
+  popScope(): IComputeEngine;
 
-  /** Assign a value to an identifier in the current scope. Use `null` to reset the identifier to no value */
-  assign(ids: { [id: string]: SetValue }): void;
-  assign(id: string, value: SetValue): void;
-  assign(arg1: string | { [id: string]: SetValue }, arg2?: SetValue): void;
+  /** Assign a value to an identifier in the current scope.
+   * Use `undefined` to reset the identifier to no value.
+   *
+   * If the id was not previously declared, an automatic declaration
+   * is done, makign some assumptions about the domain of the identifier
+   * based on its value. To more precisely define the domain of the
+   * identifier, use `ce.declare()` instead, which allows you to specify the
+   * domain, value and other attributes of an identifier.
+   */
+  assign(ids: { [id: string]: SetValue }): IComputeEngine;
+  assign(id: string, value: SetValue): IComputeEngine;
+  assign(
+    arg1: string | { [id: string]: SetValue },
+    arg2?: SetValue
+  ): IComputeEngine;
 
-  /** Declare identifiers (specify their domain without necessarily assigning them a value in the current scope) */
+  /**
+   * Declare an identifier: specify their domain, and other attributes,
+   * including optionally a value.
+   *
+   * Once the domain of an identifier has been declared, it cannot be changed.
+   * The domain information is used to calculate the canonical form of
+   * expressions and ensure they are valid. If the domain could be changed
+   * after the fact, previously valid expressions could become invalid.
+   *
+   * Use the `Anyting` domain for a very generic domain.
+   *
+   */
   declare(identifiers: {
     [id: string]: DomainExpression | SymbolDefinition | FunctionDefinition;
-  }): void;
+  }): IComputeEngine;
   declare(
     id: string,
     def: DomainExpression | SymbolDefinition | FunctionDefinition
-  ): void;
+  ): IComputeEngine;
   declare(
     arg1:
       | string
@@ -2434,7 +2460,7 @@ export interface IComputeEngine {
             | FunctionDefinition;
         },
     arg2?: DomainExpression | SymbolDefinition | FunctionDefinition
-  ): void;
+  ): IComputeEngine;
 
   /**
    * Add an assumption.

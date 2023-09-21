@@ -62,7 +62,9 @@ export type LibraryCategory =
   | 'trigonometry'
   | 'units';
 
-/** Theory of operations:
+/**
+ *
+ * ## THEORY OF OPERATIONS
  *
  * The precedence of an operator is a number that indicates the order in which
  * operators are applied. For example, in `1 + 2 * 3`, the `*` operator has

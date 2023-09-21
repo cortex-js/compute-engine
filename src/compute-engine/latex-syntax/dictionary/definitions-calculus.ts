@@ -107,7 +107,7 @@ function makeIntegral(
         idTable[r.index] = { domain: 'ExtendedRealNumber' };
       }
 
-    if (hasIndex) ce.pushScope(idTable);
+    if (hasIndex) ce.pushScope().declare(idTable);
 
     fn = ce.box(fn).json;
 
@@ -170,7 +170,7 @@ function parseIntegralBody(
   return [fn, indexes[0] ?? null];
 }
 
-function parseIndexes(parser: Parser, n = 1): string[] {
+function parseIndexes(parser: Parser, _n = 1): string[] {
   parser.skipSpace();
 
   const result: string[] = [];
