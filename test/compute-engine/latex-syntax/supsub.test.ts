@@ -146,13 +146,13 @@ describe('SUPSUB', () => {
               ["Domain", "Number"],
               ["Domain", "String"]
             ],
-            ["Latex", "'^'"]
+            ["LatexString", "'^'"]
           ]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-identifier'", "p"],
-          ["Latex", "'p'"]
+          ["LatexString", "'p'"]
         ]
       ]
     `); // @fixme: nope...
@@ -179,13 +179,13 @@ describe('SUPSUB', () => {
               ["Domain", "Number"],
               ["Domain", "String"]
             ],
-            ["Latex", "'^'"]
+            ["LatexString", "'^'"]
           ]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'{'"],
-          ["Latex", "'{12}_{34}(x+1)^n_0'"]
+          ["LatexString", "'{12}_{34}(x+1)^n_0'"]
         ]
       ]
     `); // @fixme: nope...

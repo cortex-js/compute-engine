@@ -72,13 +72,13 @@ describe('LATEX SERIALIZING', () => {
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\foo'"],
-        ["Latex", "'\\foo[0]{1}{2}'"]
+        ["LatexString", "'\\foo[0]{1}{2}'"]
       ]
     `);
 
     // Head as expression
     expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
-      `\\operatorname{apply}(g(f), \\lbrack x, 1, 0\\rbrack)`
+      `g(\\operatorname{\\_1})`
     );
   });
 
@@ -120,44 +120,52 @@ describe('LATEX SERIALIZING', () => {
 
 describe('LATEX', () => {
   test('Valid LatexString', () => {
-    expect(ce.box(['LatexString']).evaluate().json).toMatchInlineSnapshot(`''`);
     expect(
       ce.box(['LatexString', "'\\sqrt{x}'"]).evaluate().json
     ).toMatchInlineSnapshot(`'\\sqrt{x}'`);
   });
 
   test('INVALID LatexString', () => {
-    expect(ce.box(['LatexString', 22]).evaluate().json).toMatchInlineSnapshot(
-      `'22'`
+    expect(ce.box(['LatexString']).evaluate().json).toMatchInlineSnapshot(
+      `["LatexString", ["Error", "'missing'"]]`
     );
-    expect(
-      ce.box(['LatexString', "'\\sqrt{x}'", "'+1'"]).evaluate().json
-    ).toMatchInlineSnapshot(`'\\sqrt{x}+1'`);
-  });
-
-  test('Valid ParseLatex', () => {
-    expect(ce.box(['Latex']).evaluate().json).toMatchInlineSnapshot(
-      `["Sequence"]`
-    );
-    expect(
-      ce.box(['Latex', "'\\frac{2}{\\cos x}'"]).evaluate().json
-    ).toMatchInlineSnapshot(`["Divide", 2, ["Cos", "x"]]`);
-
-    expect(ce.box(['Latex', ['Add', 2, 'Pi']]).evaluate().json)
-      .toMatchInlineSnapshot(`
+    expect(ce.box(['LatexString', 22]).evaluate().json).toMatchInlineSnapshot(`
       [
-        "ParseLatex",
+        "LatexString",
         [
           "Error",
           [
             "ErrorCode",
             "'incompatible-domain'",
             ["Domain", "String"],
-            ["Domain", "RealNumber"]
+            ["Domain", "PositiveInteger"]
           ],
-          ["Add", "Pi", 2]
+          22
         ]
       ]
     `);
+    expect(ce.box(['LatexString', "'\\sqrt{x}'", "'+1'"]).evaluate().json)
+      .toMatchInlineSnapshot(`
+      [
+        "LatexString",
+        "'\\sqrt{x}'",
+        ["Error", "'unexpected-argument'", "'+1'"]
+      ]
+    `);
+  });
+
+  test('Valid ParseLatex', () => {
+    expect(ce.box(['Parse']).evaluate().json).toMatchInlineSnapshot(
+      `["Parse", ["Error", "'missing'"]]`
+    );
+    expect(
+      ce.box(['Parse', "'\\frac{2}{\\cos x}'"]).evaluate().json
+    ).toMatchInlineSnapshot(`["Sequence"]`);
+  });
+
+  test('Invalid ParseLatex', () => {
+    expect(
+      ce.box(['Parse', ['Add', 2, 'Pi']]).evaluate().json
+    ).toMatchInlineSnapshot(`["Sequence"]`);
   });
 });

@@ -36,7 +36,7 @@ describe('SETTING/FORGETTING', () => {
     expect(expr.evaluate().json).toMatchObject(['Subtract', 'x1', 1]);
   });
 
-  test(`Forget with set`, () => {
+  test(`Forget with assign`, () => {
     ce.assign('x2', 42);
 
     expect(ce.box(`x2`).json).toMatchInlineSnapshot(`x2`);
@@ -47,7 +47,7 @@ describe('SETTING/FORGETTING', () => {
     const expr = ce.box(['Add', 'x2', -1]);
     expect(expr.evaluate().json).toEqual(41);
 
-    ce.assign('x2', null);
+    ce.assign('x2', undefined);
 
     // Expression should be symbolic 'y1'
     expect(expr.evaluate().json).toMatchObject(['Subtract', 'x2', 1]);
