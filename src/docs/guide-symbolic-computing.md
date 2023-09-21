@@ -150,6 +150,10 @@ The expressions \\( \\frac{1}{10} \\) and \\( \\frac{2}{20} \\) are
 structurally equal because they get put into a canonical form when parsed,
 in which the fractions are reduced.
 
+Similarly, \\( x^2 - 3x + 4 \\) and \\( 4 - 3x + x^2 \\) are structurally equal
+(`isSame` returns true) because the arguments of the sum are sorted in a standard 
+way.
+
 **To compare two expressions without canonicalizing them**, parse or box 
 them with the `canonical` option set to `false`.
 
@@ -187,6 +191,11 @@ same mathematical object.
 If `lhs` and `rhs` are numeric expressions, they are evaluated before being 
 compared. They are considered equal if the absolute value of the difference 
 between them is less than `ce.tolerance`.
+
+The expressions \\( x^2 - 3x + 4 \\) and \\( 4 - 3x + x^2 \\) will be considered
+equal (`isEqual` returns true) because the difference between them is zero, 
+i.e. \\( (x^2 - 3x + 4) - (4 - 3x + x^2) \\) is zero once the expression has 
+been simplified.
 
 Note that unlike `expr.isSame()`, `expr.isEqual()` can return `true`, `false` or
 `undefined`. The latter value indicates that there is not enough information to
