@@ -28,7 +28,7 @@ describe('UNKNOWN COMMANDS', () => {
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\foo'"],
-        ["Latex", "'\\foo'"]
+        ["LatexString", "'\\foo'"]
       ]
     `);
     expect(parse('x=\\foo+1')).toMatchInlineSnapshot(`
@@ -40,7 +40,7 @@ describe('UNKNOWN COMMANDS', () => {
           [
             "Error",
             ["ErrorCode", "'unexpected-command'", "'\\foo'"],
-            ["Latex", "'\\foo'"]
+            ["LatexString", "'\\foo'"]
           ]
         ],
         1
@@ -57,7 +57,7 @@ describe('UNKNOWN COMMANDS', () => {
             [
               "Error",
               ["ErrorCode", "'unexpected-command'", "'\\foo'"],
-              ["Latex", "'\\foo{1}'"]
+              ["LatexString", "'\\foo{1}'"]
             ]
           ],
           ["Add", "x", 1]

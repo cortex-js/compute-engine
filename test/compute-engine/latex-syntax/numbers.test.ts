@@ -62,7 +62,7 @@ describe('NUMBERS', () => {
           [
             "Error",
             ["ErrorCode", "'unexpected-command'", "'\\ldots'"],
-            ["Latex", "'\\ldots'"]
+            ["LatexString", "'\\ldots'"]
           ]
         ]
       ]

@@ -84,12 +84,12 @@ describe('PARSING SETS', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\lbrace'"],
-          ["Latex", "'\\lbrace'"]
+          ["LatexString", "'\\lbrace'"]
         ],
         [
           "Error",
           ["ErrorCode", "'expected-open-delimiter'", "'\\lbrace'"],
-          ["Latex", "'\\rbrace'"]
+          ["LatexString", "'\\rbrace'"]
         ]
       ]
     `);
@@ -101,12 +101,12 @@ describe('PARSING SETS', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["Latex", "'\\{'"]
+          ["LatexString", "'\\{'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1, 2, 3\\}'"]
+          ["LatexString", "'1, 2, 3\\}'"]
         ]
       ]
     `);
@@ -118,12 +118,12 @@ describe('PARSING SETS', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["Latex", "'\\{'"]
+          ["LatexString", "'\\{'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1, 2, 3...\\}'"]
+          ["LatexString", "'1, 2, 3...\\}'"]
         ]
       ]
     `);
@@ -133,12 +133,12 @@ describe('PARSING SETS', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["Latex", "'\\{'"]
+          ["LatexString", "'\\{'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1, 2, 3, ...\\}'"]
+          ["LatexString", "'1, 2, 3, ...\\}'"]
         ]
       ]
     `);
@@ -148,12 +148,12 @@ describe('PARSING SETS', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["Latex", "'\\{'"]
+          ["LatexString", "'\\{'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'.'"],
-          ["Latex", "'...-2, -1, 0, 1, 2, 3...\\}'"]
+          ["LatexString", "'...-2, -1, 0, 1, 2, 3...\\}'"]
         ]
       ]
     `);
@@ -163,12 +163,12 @@ describe('PARSING SETS', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["Latex", "'\\{'"]
+          ["LatexString", "'\\{'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'.'"],
-          ["Latex", "'...-2, -1, 0\\}'"]
+          ["LatexString", "'...-2, -1, 0\\}'"]
         ]
       ]
     `);

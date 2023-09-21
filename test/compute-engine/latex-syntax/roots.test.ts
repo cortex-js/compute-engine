@@ -31,7 +31,7 @@ describe('ROOT FUNCTION (INVALID FORMS)', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'['"],
-          ["Latex", "'[3]'"]
+          ["LatexString", "'[3]'"]
         ]
       ]
     `);

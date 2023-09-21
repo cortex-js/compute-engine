@@ -20,12 +20,12 @@ describe('STEFNOTCH #10', () => {
         [
           "Error",
           ["ErrorCode", "'expected-close-delimiter'", "'\\right)'"],
-          ["Latex", "'('"]
+          ["LatexString", "'('"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\sin'"],
-          ["Latex", "'\\sin^{-1}\\mleft(x\\mright)\\right)^{\\prime}'"]
+          ["LatexString", "'\\sin^{-1}\\mleft(x\\mright)\\right)^{\\prime}'"]
         ]
       ]
     `);
@@ -50,12 +50,12 @@ describe('STEFNOTCH #10', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\color'"],
-          ["Latex", "'\\color{red}'"]
+          ["LatexString", "'\\color{red}'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'3'"],
-          ["Latex", "'3'"]
+          ["LatexString", "'3'"]
         ]
       ]
     `);
@@ -73,7 +73,7 @@ describe('STEFNOTCH #10', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "':'"],
-          ["Latex", "':[a,b]\\to R '"]
+          ["LatexString", "':[a,b]\\to R '"]
         ]
       ]
     `);
@@ -84,7 +84,7 @@ describe('STEFNOTCH #10', () => {
       [
         "Subscript",
         ["ErrorCode", "'unexpected-command'", "'\\lim'"],
-        ["Latex", "'\\lim'"]
+        ["LatexString", "'\\lim'"]
       ]
     `);
   });
@@ -117,7 +117,7 @@ describe('STEFNOTCH #13', () => {
     ).toMatchInlineSnapshot(`
       [
         "Assign",
-        ["Multiply", "N", "epsilonSymbol"],
+        ["N", "epsilonSymbol"],
         ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]]
       ]
     `);
@@ -136,12 +136,12 @@ describe('STEFNOTCH #13', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["Latex", "'\\{'"]
+          ["LatexString", "'\\{'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1,2\\}'"]
+          ["LatexString", "'1,2\\}'"]
         ]
       ]
     `);
@@ -152,7 +152,7 @@ describe('STEFNOTCH #13', () => {
       [
         "Error",
         ["ErrorCode", "'unexpected-token'", "'['"],
-        ["Latex", "'[1,2]'"]
+        ["LatexString", "'[1,2]'"]
       ]
     `);
   });
@@ -199,7 +199,7 @@ describe('STEFNOTCH #13', () => {
           [
             "Error",
             ["ErrorCode", "'unexpected-command'", "'\\mod'"],
-            ["Latex", "'\\mod'"]
+            ["LatexString", "'\\mod'"]
           ],
           7
         ]
@@ -220,17 +220,17 @@ describe('STEFNOTCH #13', () => {
             [
               "Error",
               ["ErrorCode", "'unexpected-command'", "'\\lim'"],
-              ["Latex", "'\\lim'"]
+              ["LatexString", "'\\lim'"]
             ],
             [
               "Error",
               "'expected-closing-delimiter'",
-              ["Latex", "'{\\displaystyle\\lim'"]
+              ["LatexString", "'{\\displaystyle\\lim'"]
             ]
           ],
           ["To", "n", {num: "+Infinity"}],
           "a_n",
-          ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+          ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
         ]
       ]
     `);
@@ -243,12 +243,12 @@ describe('STEFNOTCH #13', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\forall'"],
-          ["Latex", "'\\forall'"]
+          ["LatexString", "'\\forall'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-identifier'", "x"],
-          ["Latex", "'x'"]
+          ["LatexString", "'x'"]
         ]
       ]
     `);
@@ -265,12 +265,12 @@ describe('STEFNOTCH #13', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\forall'"],
-          ["Latex", "'\\forall'"]
+          ["LatexString", "'\\forall'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-identifier'", "n"],
-          ["Latex", "'n'"]
+          ["LatexString", "'n'"]
         ]
       ]
     `);

@@ -13,7 +13,7 @@ check('Unknown symbol', () =>
     [
       "Error",
       ["ErrorCode", "'unexpected-command'", "'\\oops'"],
-      ["Latex", "'\\oops'"]
+      ["LatexString", "'\\oops'"]
     ]
   `)
 );
@@ -26,7 +26,7 @@ check('Unknown symbol in argument list', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\oops'"],
-        ["Latex", "'\\oops'"]
+        ["LatexString", "'\\oops'"]
       ],
       2
     ]
@@ -41,7 +41,7 @@ check('Unknown command with arguments', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\oops'"],
-        ["Latex", "'\\oops{bar}'"]
+        ["LatexString", "'\\oops{bar}'"]
       ],
       2
     ]
@@ -56,7 +56,7 @@ check('Unknown environment', () =>
       [
         "Error",
         ["ErrorCode", "'unknown-environment'", "'oops'"],
-        ["Latex", "'\\begin{oops}\\end{oops}'"]
+        ["LatexString", "'\\begin{oops}\\end{oops}'"]
       ],
       2
     ]
@@ -68,7 +68,11 @@ check('Unbalanced environment by name', () =>
     [
       "Add",
       1,
-      ["Error", "'unbalanced-environment'", ["Latex", "'\\end{oops}+2'"]]
+      [
+        "Error",
+        "'unbalanced-environment'",
+        ["LatexString", "'\\end{oops}+2'"]
+      ]
     ]
   `)
 );
@@ -81,7 +85,7 @@ check('Unbalanced environment, \\end without \\begin', () =>
       [
         "Error",
         ["ErrorCode", "'unbalanced-environment'", "'cases'"],
-        ["Latex", "'\\end{cases}'"]
+        ["LatexString", "'\\end{cases}'"]
       ],
       2
     ]
@@ -90,7 +94,7 @@ check('Unbalanced environment, \\end without \\begin', () =>
 
 check('Unbalanced environment, \\begin without \\end', () =>
   expect(engine.parse('\\begin{cases}1+2')).toMatchInlineSnapshot(
-    `["Error", "'unbalanced-environment'", ["Latex", "'1+2'"]]`
+    `["Error", "'unbalanced-environment'", ["LatexString", "'1+2'"]]`
   )
 );
 
@@ -99,7 +103,7 @@ check('Environment without name', () =>
     [
       "Add",
       1,
-      ["Error", "'expected-environment-name'", ["Latex", "'\\begin'"]],
+      ["Error", "'expected-environment-name'", ["LatexString", "'\\begin'"]],
       2
     ]
   `)
@@ -181,7 +185,7 @@ check('Invalid argument positional', () =>
 
 check('Invalid infix operator', () =>
   expect(engine.parse('\\times 3')).toMatchInlineSnapshot(
-    `["Multiply", ["Error", "'missing'", ["Latex", "'\\times'"]], 3]`
+    `["Multiply", ["Error", "'missing'", ["LatexString", "'\\times'"]], 3]`
   )
 );
 
@@ -193,7 +197,7 @@ check('Invalid prefix operator', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\partial'"],
-        ["Latex", "'\\partial'"]
+        ["LatexString", "'\\partial'"]
       ]
     ]
   `)
@@ -203,11 +207,11 @@ check('Invalid postfix operator', () =>
   expect(engine.parse('! 3')).toMatchInlineSnapshot(`
     [
       "Sequence",
-      ["Factorial", ["Error", "'missing'", ["Latex", "'!'"]]],
+      ["Factorial", ["Error", "'missing'", ["LatexString", "'!'"]]],
       [
         "Error",
         ["ErrorCode", "'unexpected-token'", "' '"],
-        ["Latex", "' 3'"]
+        ["LatexString", "' 3'"]
       ]
     ]
   `)
@@ -217,7 +221,11 @@ check('Supsub syntax error', () =>
   expect(engine.parse('x__+1')).toMatchInlineSnapshot(`
     [
       "Add",
-      ["Subscript", "x", ["Error", "'syntax-error'", ["Latex", "'_'"]]],
+      [
+        "Subscript",
+        "x",
+        ["Error", "'syntax-error'", ["LatexString", "'_'"]]
+      ],
       1
     ]
   `)
@@ -229,7 +237,11 @@ check('Supsub syntax error', () =>
       "Add",
       [
         "Sqrt",
-        ["Subscript", "x", ["Error", "'syntax-error'", ["Latex", "'_'"]]]
+        [
+          "Subscript",
+          "x",
+          ["Error", "'syntax-error'", ["LatexString", "'_'"]]
+        ]
       ],
       1
     ]
@@ -238,7 +250,7 @@ check('Supsub syntax error', () =>
 
 check('Supsub syntax error', () =>
   expect(engine.parse('x_')).toMatchInlineSnapshot(
-    `["Error", "'missing'", ["Latex", "'_'"]]`
+    `["Error", "'missing'", ["LatexString", "'_'"]]`
   )
 );
 
@@ -283,7 +295,7 @@ check('INVALID function application', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-open-delimiter'", "'\\left'"],
-        ["Latex", "'\\left(\\right)'"]
+        ["LatexString", "'\\left(\\right)'"]
       ]
     ]
   `)
@@ -313,7 +325,7 @@ check('Invalid empty delimiter expression', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["Latex", "'()'"]
+        ["LatexString", "'()'"]
       ]
     ]
   `)
@@ -327,7 +339,7 @@ check('Invalid empty delimiter expression', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-open-delimiter'", "'\\left'"],
-        ["Latex", "'\\left(\\right)'"]
+        ["LatexString", "'\\left(\\right)'"]
       ]
     ]
   `)
@@ -341,7 +353,7 @@ check('Invalid delimiter: expected closing', () =>
       [
         "Error",
         ["ErrorCode", "'expected-close-delimiter'", "'\\right)'"],
-        ["Latex", "'('"]
+        ["LatexString", "'('"]
       ]
     ]
   `)
@@ -355,7 +367,7 @@ check('Invalid delimiter: expected closing', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["Latex", "'('"]
+        ["LatexString", "'('"]
       ]
     ]
   `)
@@ -369,7 +381,7 @@ check('Invalid delimiter: expected opening', () =>
       [
         "Error",
         ["ErrorCode", "'expected-open-delimiter'", "'('"],
-        ["Latex", "')'"]
+        ["LatexString", "')'"]
       ]
     ]
   `)
@@ -383,7 +395,7 @@ check('Invalid delimiter: expected opening', () =>
       [
         "Error",
         ["ErrorCode", "'expected-open-delimiter'", "'\\left('"],
-        ["Latex", "'\\right)'"]
+        ["LatexString", "'\\right)'"]
       ]
     ]
   `)
@@ -397,14 +409,14 @@ check('Invalid delimiter', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\left'"],
-        ["Latex", "'\\left'"]
+        ["LatexString", "'\\left'"]
       ],
       "alpha",
       2,
       [
         "Error",
         ["ErrorCode", "'expected-open-delimiter'", "'\\left'"],
-        ["Latex", "'\\right\\alpha'"]
+        ["LatexString", "'\\right\\alpha'"]
       ]
     ]
   `)
@@ -467,7 +479,7 @@ check('Unexpected closing delimiter', () =>
       [
         "Sequence",
         "Half",
-        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+        ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ],
       1
     ]
@@ -482,7 +494,7 @@ check('Syntax error: @', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-token'", "'@'"],
-        ["Latex", "'@2'"]
+        ["LatexString", "'@2'"]
       ]
     ]
   `)
@@ -496,7 +508,7 @@ check('Syntax error: \\', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\'"],
-        ["Latex", "'\\'"]
+        ["LatexString", "'\\'"]
       ]
     ]
   `)
@@ -510,7 +522,7 @@ check('Syntax error: \\1', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\1'"],
-        ["Latex", "'\\1'"]
+        ["LatexString", "'\\1'"]
       ]
     ]
   `)
@@ -528,7 +540,7 @@ check('Syntax error: &', () =>
       [
         "Error",
         ["ErrorCode", "'unexpected-token'", "'&'"],
-        ["Latex", "'&2'"]
+        ["LatexString", "'&2'"]
       ]
     ]
   `)
@@ -556,10 +568,14 @@ check('Syntax error', () =>
         2,
         [
           "Sequence",
-          ["Error", "'expected-expression'", ["Latex", "'{'"]],
-          ["Error", "'expected-closing-delimiter'", ["Latex", "'{{'"]]
+          ["Error", "'expected-expression'", ["LatexString", "'{'"]],
+          [
+            "Error",
+            "'expected-closing-delimiter'",
+            ["LatexString", "'{{'"]
+          ]
         ],
-        ["Error", "'expected-closing-delimiter'", ["Latex", "'{{{'"]]
+        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{{{'"]]
       ]
     ]
   `)

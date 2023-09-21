@@ -322,28 +322,28 @@ describe('SYMBOLS', () => {
         [
           "Error",
           ["ErrorCode", "'invalid-identifier'", "'invalid-first-char'"],
-          ["Latex", "'\\mathrm{=}'"]
+          ["LatexString", "'\\mathrm{=}'"]
         ]
       `);
       expect(parse('\\mathrm{⠋}')).toMatchInlineSnapshot(`
         [
           "Error",
           ["ErrorCode", "'invalid-identifier'", "'unexpected-script'"],
-          ["Latex", "'\\mathrm{⠋}'"]
+          ["LatexString", "'\\mathrm{⠋}'"]
         ]
       `);
       expect(parse('\\mathrm{𓀀}')).toMatchInlineSnapshot(`
         [
           "Error",
           ["ErrorCode", "'invalid-identifier'", "'unexpected-script'"],
-          ["Latex", "'\\mathrm{𓀀}'"]
+          ["LatexString", "'\\mathrm{𓀀}'"]
         ]
       `);
       expect(parse('\\mathrm{👨🏻‍🎤DavidBowie}')).toMatchInlineSnapshot(`
         [
           "Error",
           ["ErrorCode", "'invalid-identifier'", "'unexpected-mixed-emoji'"],
-          ["Latex", "'\\mathrm{👨🏻‍🎤DavDavidBowie}'"]
+          ["LatexString", "'\\mathrm{👨🏻‍🎤DavDavidBowie}'"]
         ]
       `);
     });
@@ -378,7 +378,7 @@ describe('SYMBOLS', () => {
         [
           "Error",
           ["ErrorCode", "'invalid-identifier'", "'invalid-first-char'"],
-          ["Latex", "'\\mathrm{=}'"]
+          ["LatexString", "'\\mathrm{=}'"]
         ]
       `);
     });
@@ -387,7 +387,7 @@ describe('SYMBOLS', () => {
         [
           "Error",
           ["ErrorCode", "'invalid-identifier'", "'unexpected-script'"],
-          ["Latex", "'\\mathrm{\\char"280B}'"]
+          ["LatexString", "'\\mathrm{\\char"280B}'"]
         ]
       `);
     });
@@ -396,7 +396,7 @@ describe('SYMBOLS', () => {
         [
           "Error",
           ["ErrorCode", "'invalid-identifier'", "'unexpected-script'"],
-          ["Latex", "'\\mathrm{\\char"13000}'"]
+          ["LatexString", "'\\mathrm{\\char"13000}'"]
         ]
       `);
     });
@@ -411,14 +411,14 @@ describe('SYMBOLS', () => {
         [
           "Error",
           ["ErrorCode", "'invalid-identifier'", "'unexpected-mixed-emoji'"],
-          ["Latex", "'\\mathrm{👨🏻‍🎤DavDavidBowie}'"]
+          ["LatexString", "'\\mathrm{👨🏻‍🎤DavDavidBowie}'"]
         ]
       `);
       expect(parse('\\mathrm{DavidBowie👨🏻‍🎤}')).toMatchInlineSnapshot(`
         [
           "Error",
           ["ErrorCode", "'invalid-identifier'", "'unexpected-mixed-emoji'"],
-          ["Latex", "'\\mathrm{DavidBowie👨🏻‍🎤}}'"]
+          ["LatexString", "'\\mathrm{DavidBowie👨🏻‍🎤}}'"]
         ]
       `);
     });

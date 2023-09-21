@@ -48,7 +48,7 @@ describe('LIST PARSING', () => {
       [
         "Error",
         ["ErrorCode", "'unknown-environment'", "'pmatrix'"],
-        ["Latex", "'\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}'"]
+        ["LatexString", "'\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}'"]
       ]
     `);
     expect(parse('\\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}'))
@@ -56,7 +56,7 @@ describe('LIST PARSING', () => {
       [
         "Error",
         ["ErrorCode", "'unknown-environment'", "'bmatrix'"],
-        ["Latex", "'\\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}'"]
+        ["LatexString", "'\\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}'"]
       ]
     `);
   });

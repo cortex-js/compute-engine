@@ -145,12 +145,12 @@ describe('MATCHFIX invalid', () => {
       latex     = [
         "Error",
         ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["Latex", "'('"]
+        ["LatexString", "'('"]
       ]
       [
         "Error",
         ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["Latex", "'('"]
+        ["LatexString", "'('"]
       ]
     `));
   test(') // missing opening fence', () => {
@@ -158,12 +158,12 @@ describe('MATCHFIX invalid', () => {
       latex     = [
         "Error",
         ["ErrorCode", "'expected-open-delimiter'", "'('"],
-        ["Latex", "')'"]
+        ["LatexString", "')'"]
       ]
       [
         "Error",
         ["ErrorCode", "'expected-open-delimiter'", "'('"],
-        ["Latex", "')'"]
+        ["LatexString", "')'"]
       ]
     `);
   });
@@ -176,7 +176,7 @@ describe('MATCHFIX invalid', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-          ["Latex", "'('"]
+          ["LatexString", "'('"]
         ]
       ]
     `);
@@ -187,7 +187,7 @@ describe('MATCHFIX invalid', () => {
       [
         "Error",
         ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["Latex", "'(3+x'"]
+        ["LatexString", "'(3+x'"]
       ]
     `);
   });

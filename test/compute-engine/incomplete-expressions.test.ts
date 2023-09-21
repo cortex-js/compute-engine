@@ -19,7 +19,7 @@ describe('basic', () => {
         "Divide",
         [
           "Sequence",
-          ["Error", "'expected-expression'", ["Latex", "'{'"]],
+          ["Error", "'expected-expression'", ["LatexString", "'{'"]],
           ["Error", "'syntax-error'"]
         ],
         ["Error", "'missing'"]
@@ -29,14 +29,14 @@ describe('basic', () => {
       [
         "Sequence",
         ["Divide", ["Error", "'missing'"], ["Error", "'missing'"]],
-        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+        ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ]
     `);
     expect(parse('\\frac{1}}')).toMatchInlineSnapshot(`
       [
         "Sequence",
         ["Divide", 1, ["Error", "'missing'"]],
-        ["Error", "'unexpected-closing-delimiter'", ["Latex", "'}'"]]
+        ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ]
     `);
     expect(parse('\\frac{1}{2')).toMatchInlineSnapshot(
@@ -55,7 +55,7 @@ describe('basic', () => {
 
   test('Semantic Errors', () => {
     expect(parse('1+')).toMatchInlineSnapshot(
-      `["Add", 1, ["Error", "'missing'", ["Latex", "'+'"]]]`
+      `["Add", 1, ["Error", "'missing'", ["LatexString", "'+'"]]]`
     );
     expect(parse('1\\times')).toMatchInlineSnapshot(
       `["Multiply", 1, ["Error", "'missing'"]]`
@@ -63,12 +63,12 @@ describe('basic', () => {
     expect(parse('\\times')).toMatchInlineSnapshot(`
       [
         "Multiply",
-        ["Error", "'missing'", ["Latex", "'\\times'"]],
+        ["Error", "'missing'", ["LatexString", "'\\times'"]],
         ["Error", "'missing'"]
       ]
     `);
     expect(parse('\\times3')).toMatchInlineSnapshot(
-      `["Multiply", ["Error", "'missing'", ["Latex", "'\\times'"]], 3]`
+      `["Multiply", ["Error", "'missing'", ["LatexString", "'\\times'"]], 3]`
     );
     expect(parse('2*')).toMatchInlineSnapshot(
       `["Multiply", 2, ["Error", "'missing'"]]`
@@ -84,7 +84,7 @@ describe('basic', () => {
     );
 
     expect(parse('=x')).toMatchInlineSnapshot(
-      `["Equal", ["Error", "'missing'", ["Latex", "'='"]], "x"]`
+      `["Equal", ["Error", "'missing'", ["LatexString", "'='"]], "x"]`
     );
   });
 

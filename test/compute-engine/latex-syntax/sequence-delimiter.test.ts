@@ -71,12 +71,12 @@ describe('LISTS', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["Latex", "'\\{'"]
+          ["LatexString", "'\\{'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1, 2, 3\\}'"]
+          ["LatexString", "'1, 2, 3\\}'"]
         ]
       ]
       canonical = [
@@ -84,12 +84,12 @@ describe('LISTS', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["Latex", "'\\{'"]
+          ["LatexString", "'\\{'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1, 2, 3\\}'"]
+          ["LatexString", "'1, 2, 3\\}'"]
         ]
       ]
       evaluated = [
@@ -97,12 +97,12 @@ describe('LISTS', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["Latex", "'\\{'"]
+          ["LatexString", "'\\{'"]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["Latex", "'1, 2, 3\\}'"]
+          ["LatexString", "'1, 2, 3\\}'"]
         ]
       ]
     `));
@@ -137,7 +137,7 @@ describe('LISTS', () => {
             [
               "Error",
               ["ErrorCode", "'unexpected-command'", "'\\{'"],
-              ["Latex", "'\\{'"]
+              ["LatexString", "'\\{'"]
             ],
             2
           ],
@@ -148,7 +148,7 @@ describe('LISTS', () => {
             [
               "Error",
               ["ErrorCode", "'expected-open-delimiter'", "'\\{'"],
-              ["Latex", "'\\}'"]
+              ["LatexString", "'\\}'"]
             ]
           ],
           5
@@ -164,7 +164,7 @@ describe('LISTS', () => {
             [
               "Error",
               ["ErrorCode", "'unexpected-command'", "'\\{'"],
-              ["Latex", "'\\{'"]
+              ["LatexString", "'\\{'"]
             ],
             2
           ],
@@ -175,7 +175,7 @@ describe('LISTS', () => {
             [
               "Error",
               ["ErrorCode", "'expected-open-delimiter'", "'\\{'"],
-              ["Latex", "'\\}'"]
+              ["LatexString", "'\\}'"]
             ]
           ],
           5
@@ -191,7 +191,7 @@ describe('LISTS', () => {
             [
               "Error",
               ["ErrorCode", "'unexpected-command'", "'\\{'"],
-              ["Latex", "'\\{'"]
+              ["LatexString", "'\\{'"]
             ],
             2
           ],
@@ -202,7 +202,7 @@ describe('LISTS', () => {
             [
               "Error",
               ["ErrorCode", "'expected-open-delimiter'", "'\\{'"],
-              ["Latex", "'\\}'"]
+              ["LatexString", "'\\}'"]
             ]
           ],
           5
@@ -322,7 +322,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
             "d",
             [
               "Sequence",
-              ["Error", "'missing'", ["Latex", "';'"]],
+              ["Error", "'missing'", ["LatexString", "';'"]],
               "Nothing",
               ["List", "n", "Nothing", "m"]
             ]
@@ -340,7 +340,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
             "d",
             [
               "Sequence",
-              ["Error", "'missing'", ["Latex", "';'"]],
+              ["Error", "'missing'", ["LatexString", "';'"]],
               "Nothing",
               ["List", "n", "Nothing", "m"]
             ]
@@ -358,7 +358,7 @@ describe('SEQUENCES AND DELIMITERS', () => {
             "d",
             [
               "Sequence",
-              ["Error", "'missing'", ["Latex", "';'"]],
+              ["Error", "'missing'", ["LatexString", "';'"]],
               "Nothing",
               ["List", "n", "Nothing", "m"]
             ]
@@ -397,9 +397,9 @@ describe('SEQUENCES AND DELIMITERS', () => {
     `);
     // Sequence with missing initial element
     expect(check(',c,b')).toMatchInlineSnapshot(`
-      box       = ["Sequence", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]
-      canonical = ["Sequence", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]
-      evaluated = ["Sequence", ["Error", "'missing'", ["Latex", "','"]], "c", "b"]
+      box       = ["Sequence", ["Error", "'missing'", ["LatexString", "','"]], "c", "b"]
+      canonical = ["Sequence", ["Error", "'missing'", ["LatexString", "','"]], "c", "b"]
+      evaluated = ["Sequence", ["Error", "'missing'", ["LatexString", "','"]], "c", "b"]
     `); // @fixme: initial element should not be an error
   });
   test('Subsequences', () => {
@@ -430,21 +430,21 @@ describe('SEQUENCES AND DELIMITERS', () => {
     expect(check(';;a;')).toMatchInlineSnapshot(`
       box       = [
         "Sequence",
-        ["Error", "'missing'", ["Latex", "';'"]],
+        ["Error", "'missing'", ["LatexString", "';'"]],
         "Nothing",
         "a",
         "Nothing"
       ]
       canonical = [
         "Sequence",
-        ["Error", "'missing'", ["Latex", "';'"]],
+        ["Error", "'missing'", ["LatexString", "';'"]],
         "Nothing",
         "a",
         "Nothing"
       ]
       evaluated = [
         "Sequence",
-        ["Error", "'missing'", ["Latex", "';'"]],
+        ["Error", "'missing'", ["LatexString", "';'"]],
         "Nothing",
         "a",
         "Nothing"

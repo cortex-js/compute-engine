@@ -13,14 +13,14 @@ describe('BASE FORM', () => {
       [
         "Error",
         ["ErrorCode", "'unexpected-digit'", "'\\'"],
-        ["Latex", "'00\\;111'"]
+        ["LatexString", "'00\\;111'"]
       ]
     `);
     expect(json('(\\text{00\\;111})_2')).toMatchInlineSnapshot(`
       [
         "Error",
         ["ErrorCode", "'unexpected-digit'", "'\\'"],
-        ["Latex", "'00\\;111'"]
+        ["LatexString", "'00\\;111'"]
       ]
     `);
   });
@@ -30,7 +30,7 @@ describe('BASE FORM', () => {
       [
         "Error",
         ["ErrorCode", "'unexpected-digit'", "'c'"],
-        ["Latex", "'12c3'"]
+        ["LatexString", "'12c3'"]
       ]
     `);
   });
@@ -40,7 +40,7 @@ describe('BASE FORM', () => {
       [
         "Error",
         ["ErrorCode", "'unexpected-digit'", "'x'"],
-        ["Latex", "'1x2gc3'"]
+        ["LatexString", "'1x2gc3'"]
       ]
     `);
   });

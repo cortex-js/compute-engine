@@ -19,7 +19,7 @@ describe('NO DICTIONARY/NO DEFAULTS', () => {
             "'+'"
           ],
           [
-            "Latex",
+            "LatexString",
             "'+x'"
           ]
         ]
@@ -35,7 +35,7 @@ describe('NO DICTIONARY/NO DEFAULTS', () => {
           "'\\\\frac'"
         ],
         [
-          "Latex",
+          "LatexString",
           "'\\\\frac{1}{x}'"
         ]
       ]
@@ -52,7 +52,7 @@ describe('NO DICTIONARY/NO DEFAULTS', () => {
             "'\\\\sqrt'"
           ],
           [
-            "Latex",
+            "LatexString",
             "'\\\\sqrt{(1+x_0)}'"
           ]
         ],
@@ -64,7 +64,7 @@ describe('NO DICTIONARY/NO DEFAULTS', () => {
             "'='"
           ],
           [
-            "Latex",
+            "LatexString",
             "'=\\\\frac{\\\\pi^2}{2}'"
           ]
         ]

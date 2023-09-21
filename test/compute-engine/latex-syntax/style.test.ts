@@ -9,7 +9,7 @@ describe('STYLE - MATH MODE', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\textcolor'"],
-          ["Latex", "'\\textcolor{red}{=}'"]
+          ["LatexString", "'\\textcolor{red}{=}'"]
         ],
         "y"
       ]
@@ -19,7 +19,7 @@ describe('STYLE - MATH MODE', () => {
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\textcolor'"],
-          ["Latex", "'\\textcolor{red}{=}'"]
+          ["LatexString", "'\\textcolor{red}{=}'"]
         ],
         "y"
       ]
