@@ -81,7 +81,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     kind: 'infix',
     latexTrigger: '\\operatorname{or}',
-    parse: 'And',
+    parse: 'Or',
     precedence: 310,
   },
 
