@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/evaluate/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 render_math_in_document: true
 preamble:
   '<h1>Evaluation</h1><p class="xl">To apply a sequence of definitions to an
@@ -18,27 +18,28 @@ preamble:
 The Compute Engine supports
 [lexical scoping](<https://en.wikipedia.org/wiki/Scope_(computer_science)>).
 
-A scope provides definitions of symbols and functions. Scopes are arranged in a
-stack, with the current (top-most) scope available with `ce.context`.
+A scope includes a symbol table, which is a collection of definitions for
+symbols and functions.
+
+Scopes are arranged in a stack, with the current (top-most) scope available with
+`ce.context`.
 
 To locate the definition of an identifier, the symbol table associated with the
-current (top-most) scope is used first.
-
-If no matching definition is found, the parent scope is searched, and so on
-until a definition is found.
+current (top-most) scope is searched first. If no matching definition is found,
+the parent scope is searched, and so on until a definition is found.
 
 **To add a new scope to the context** use `ce.pushScope()`.
 
 ```ts
-ce.pushScope({ x: 500 });
+ce.pushScope();
+ce.assign('x', 500); // "x" is defined in the new scope
 ```
 
-The `symbolTable` property of a scope contains definitions for symbols and
-functions.
+**To exit a scope** use `ce.popScope()`.
 
-**To exit a scope** use `ce.popScope()`. This will invalidate any definition
-associated with the scope, and restore the symbol table from previous scopes
-that may have been shadowed by the current scope.
+This will invalidate any definition associated with the scope, and restore the
+symbol table from previous scopes that may have been shadowed by the current
+scope.
 
 ## Binding
 

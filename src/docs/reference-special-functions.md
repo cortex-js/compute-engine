@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/special-functions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: "universal"
+  - nav: 'universal'
 toc: false
 render_math_in_document: true
 ---
@@ -13,13 +13,45 @@ render_math_in_document: true
 
 {% defs "Function" %}
 
-{% def "Real" %}
+{% def "Factorial" %}
 
 [&quot;**Factorial**&quot;, _n_]{.signature}
 
 {% latex "n!" %}
 
-The products of all positive integers less than or equal to \\( n\\)
+```json example
+["Factorial", 5]
+// -> 120
+```
+
+{% enddef %}
+
+{% def "Factorial2" %}
+
+[&quot;**Factorial2**&quot;, _n_]{.signature}
+
+The double factorial of `n`: \\( n!! = n \cdot (n-2) \cdot (n-4) \times
+\cdots\\), that is the product of all the positive integers up to `n` that have
+the same parity (odd or even) as `n`.
+
+{% latex "n!!" %}
+
+```json example
+["Factorial2", 5]
+// -> 15
+```
+
+It can also be written in terms of the \\( \Gamma \\) function:
+
+\\n!! = [ 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi
+n)-1)}\Gamma\left(\frac{n}{2}+1\right) \\]
+
+This is not the same as the factorial of the factorial of `n` (i.e.
+\\((n!)!)\\)).
+
+**Reference**
+
+- WikiPedia: [Double Factorial](https://en.wikipedia.org/wiki/Double_factorial)
 
 {% enddef %}
 
@@ -46,23 +78,18 @@ complex numbers.
 
 {% enddef %}
 
-{% def "LogGamma" %}
+{% def "GammaLn" %}
 
-[&quot;**LogGamma**&quot;, _z_]{.signature}
+[&quot;**GammaLn**&quot;, _z_]{.signature}
 
 {% latex "\\ln(\\gamma(z))" %}
 
-{% enddef %}
-
-{% def "SignGamma" %}
-
-[&quot;**SignGamma**&quot;, _z_]{.signature}
-
-{% latex "\\operatorname{sgn}(\\gamma(z))" %}
+This function is called `gammaln` in MatLab and SciPy and `LogGamma` in
+Mathematica.
 
 {% enddef %}
 
 {% enddefs %}
 
-{% readmore "/compute-engine/reference/statistics/" %} See also
-<strong>Statistics</strong> for Error Function {% endreadmore %}
+{% readmore "/compute-engine/reference/statistics/" %} See also Statistics for
+the <strong>Error Functions</strong> {% endreadmore %}

@@ -206,7 +206,11 @@ ce.is(['Element', '\\alpha', 'RealNumber']);
 
 ## Scoped Assumptions
 
-When an assumption is made, it is only valid in the current scope.
+When an assumption is made, it is applicable to the current scope and all
+subsequent scopes. Scopes "inherit" assumptions from their parent scopes.
+
+When exiting a scope, with `ce.popScope()`, all assumptions made in that scope
+are forgotten.
 
 **To temporarily define a series of assumptions**, create a new scope.
 
@@ -221,25 +225,6 @@ ce.is(['Element', '\\alpha', 'RealNumber']);
 // ➔  true
 
 ce.popScope(); // all assumptions made in the current scope are forgotten
-
-ce.is(['Element', '\\alpha', 'RealNumber']);
-// ➔  undefined
-```
-
-You can also specify a series of assumptions when creating the scope:
-
-```js
-ce.pushScope({
-  assumptions: [
-    ['Element', '\\alpha', 'RealNumber'],
-    ['Element', '\\beta', 'RealNumber'],
-  ],
-});
-
-ce.is(['Element', '\\alpha', 'RealNumber']);
-// ➔  true
-
-ce.popScope();
 
 ce.is(['Element', '\\alpha', 'RealNumber']);
 // ➔  undefined
