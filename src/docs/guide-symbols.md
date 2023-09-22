@@ -48,50 +48,43 @@ n.domain = "Integer";
 n.value = 5;
 console.log("n:", n.domain.json, "=", n.value.json);</div></code-playground>
 
+
+**To get a list of all the symbols in an expression** use `expr.symbols`.
+
+{% readmore "/compute-engine/guides/augmenting/" %} Read more about
+<strong>adding definitions</strong> for symbols and functions {% endreadmore %}
+
+## Scope
+
 Symbols are defined within a **scope**.
 
 {% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
 <strong>scopes</strong> {% endreadmore %}
 
-{% readmore "/compute-engine/guides/augmenting/" %} Read more about
-<strong>adding definitions</strong> for symbols and functions {% endreadmore %}
 
+## Unknowns and Constants
 
-## Bound Variables, Free Variables and Constants
+A symbol that has been declared, but has no values associated with it, is said to
+be an **unknown**.
 
-If the definition of a symbol has a value, the symbol is said to be a **bound
-variable** (value binding).
-
-This is in opposition to **free variables** which are symbols that have no
-value, and **constants** which are symbols that have a value that cannot be
-altered.
-
-**To get a list of all the symbols in an expression** use `expr.symbols`.
-
-The property `expr.isFree` is `true` if a symbol is a free variable.
-
-Assigning a value to a free variable makes it a bound variable.
-
-**To get a list of all the free variables in an expression** use
-`expr.freeVars`.
+A symbol whose value cannot be changed is a **constant**. Constants are
+identified by a special flag in their definition.
 
 The property `expr.isConstant` is `true` if a symbol is a constant.
 
-The value of constants may depend on settings of the compute engine. For
+```js
+console.log(ce.box("x").isConstant);
+// ➔ false
+
+console.log(ce.box("Pi").isConstant);
+// ➔ true
+```
+
+The value of constants may depend on settings of the Compute Engine. For
 example, the value of `Pi` is determined based on the value of the `precision`
 property. The values of constants in scope when the `precision` setting is
 changed will be updated. {.notice-warning}
 
-The property `expr.symbolDefinition` is not `undefined` if a symbol has a
-definition (name binding).
-
-[**Value binding**](https://en.wikipedia.org/wiki/Free_variables_and_bound_variables)
-(associating a value with the definition of a symbol) should not be confused
-with [**name binding**](https://en.wikipedia.org/wiki/Name_binding) (associating
-a definition with the name of a symbol).{.notice--info}
-
-{% readmore "/compute-engine/guides/evaluate/#binding" %} Read more about
-<strong>name binding</strong> {% endreadmore %}
 
 ```js
 ce.precision = 4;
@@ -111,16 +104,17 @@ console.log('pi = ', smallPi.numericValue, '=', bigPi.numericValue);
 ```
 
 
-## Symbol Auto-binding
+## Automatic Declaration of Symbols
 
-If `ce.defaultDomain` is not`null` and no definition exist for the symbol, a new
-one is created automatically.
-
+If `ce.defaultDomain` is not `null`, an unknown symbol is automatically
+declared when it is first used in an expression.
+ 
 The new definition has a domain of `ce.defaultDomain` and no value associated
-with it, so the symbol will be a **free variable**.
+with it, so the symbol will be an **unknwon**.
 
 By default, `defaultDomain` is `"ExtendedRealNumber"` so any unknown variable is
-automatically assumed to be a real number.
+automatically assumed to be a real number. Use `ce.declare()` to explictly
+specify the domain of a symbol.
 
 ```js
 const symbol = ce.box("m"); // m for mystery

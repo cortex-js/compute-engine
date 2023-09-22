@@ -19,11 +19,12 @@ They are wrapped in a JavaScript object, a process called **boxing**, and the
 resulting expressions are **Boxed Expressions**.
 
 Boxed Expressions improve performance by implementing caching to avoid
-repetitive calculations.
+repetitive calculations. They also ensure that expressions are valid and
+in a standard format.
 
 Unlike the plain data types used by JSON, Boxed Expressions allow an IDE, such
-as VSCode Studio, to provide suitable hints in the editor, and to check that the
-correct functions and properties are used, particularly when using TypeScript.
+as VSCode Studio, to provide suitable hints in the editor regarding which
+methods and properties are available for a given expression.
 
 Boxed Expression can be created from a LaTeX string or from a raw MathJSON
 expression.
@@ -55,6 +56,10 @@ console.log(expr.isPositive);
 // undefined
 ```
 
+By default, `ce.box()` returns a canonical expression. See
+[Canonical Expressions](#canonical) for more info.
+
+
 **To create a Boxed Expression from a LaTeX string**, call the `ce.parse()`
 function.
 
@@ -66,6 +71,10 @@ console.log(expr.head);
 console.log(expr.json);
 // ➔ ["Add", 3, "x", "y"]
 ```
+
+By default, `ce.parse()` returns a canonical expression. See
+[Canonical Expressions](#canonical-expressions) for more info.
+
 
 **To get a Boxed Expression representing the content of a MathLive mathfield**
 use the `mf.expression` property:
@@ -80,8 +89,9 @@ console.log(expr.evaluate().latex);
 
 ## Unboxing
 
-**To access the MathJSON expression of a boxed expression**, use the `expr.json`
-property. Use this property to "unbox" the expression.
+**To access the MathJSON expression of a boxed expression as plain JSON**, 
+use the `expr.json` property. This property is an "unboxed" version of the
+expression.
 
 ```js
 const expr = ce.box(['Add', 3, 'x']);
@@ -89,21 +99,24 @@ console.log(expr.json);
 // ➔ ["Add", 3, "x"]
 ```
 
-**To customize the format of the MathJSON expression** use the
-`ce.jsonSerializationOptions` property.
+**To customize the format of the MathJSON expression returned by `expr.json`** 
+use the `ce.jsonSerializationOptions` property.
 
-Use this option to control which metadata, if any, should be included, whether
-to use shorthand notation, and to exclude some functions. See
-[JsonSerializationOptions](/docs/compute-engine/?q=JsonSerializationOptions) for
-more info about the formatting options.
+Use this option to control:
+- which metadata, if any, should be included
+- whether to use shorthand notation
+- to exclude some functions. 
+
+See [JsonSerializationOptions](/docs/compute-engine/?q=JsonSerializationOptions) for
+more info about the formatting options available.
 
 ```ts
-const expr = ce.parse('2 + \\frac{q}{p}').canonical;
+const expr = ce.parse("2 + \\frac{q}{p}");
 console.log(expr.json);
 // ➔ ["Add", 2, ["Divide", "q", "p"]]
 
 ce.jsonSerializationOptions = {
-  exclude: ['Divide'], // Don't use `Divide` functions,
+  exclude: ["Divide"], // Don't use `Divide` functions,
   // use `Multiply`/`Power` instead
   shorthands: [], // Don't use any shorthands
 };
@@ -121,32 +134,53 @@ console.log(expr.json);
 
 ## Canonical Expressions
 
-The canonical form of an expression is a conventional way of writing an
+The **canonical form** of an expression is a conventional way of writing an
 expression.
 
-**To check if an expression is already in canonical form**, use
-`expr.isCanonical`.
+For example, the canonical form of a fraction of two integers is a reduced 
+rational number, written as a tuple of two integers, such that the GCD of
+the numerator and denominator is 1, and the denominator is positive.
 
-**To obtain the canonical representation of an expression**, use
-`expr.canonical`.
+```js
+const expr = ce.parse('\\frac{30}{-50}');
+console.log(expr.json);
+// ➔ ["Rational", -3, 5]
+```
+
+The canonical form of an addition or mulipication will have its arguments
+ordered in a canonical way.
+
+```js
+const expr = ce.parse('2+x+\\pi+\\sqrt2+1');
+console.log(expr.json);
+// ➔ ["Add", "Pi", ["Sqrt", 2], "x", 1, 2]
+```
 
 {% readmore "/compute-engine/guides/canonical-form/" %} Read more about the
 <strong>Canonical Form</strong> {% endreadmore %}
 
+
 By default, `ce.box()` and `ce.parse()` produce a canonical expression.
 
-**To get a "raw" (non-canonical) expression instead**, use
+**To get a non-canonical expression instead**, use
 `ce.box(expr, {canonical: false})` or `ce.parse(latex, {canonical: false})`.
 
 ```js
-const expr = '\\frac{3}{-5}';
+const expr = '\\frac{30}{-50}';
 
 ce.parse(expr);
 // canonical form ➔ ["Rational", -3, 5]
 
 ce.parse(expr, { canonical: false });
-// non-canonical form ➔ ["Divide", 3, -5]
+// non-canonical form ➔ ["Divide", 30, -50]
 ```
+
+
+**To check if an expression is in canonical form**, use `expr.isCanonical`.
+
+**To obtain the canonical representation of an expression**, use
+`expr.canonical`.
+
 
 A non-canonical expression may include errors as a result of parsing from LaTeX,
 if the LaTeX input contained LaTeX syntax errors.
@@ -239,11 +273,8 @@ The value of `expr.numericValue` may be:
   two JavaScript `number` or two JavaScript `bigint`.
 
 **To access a numerical approximation of an expression if available**, use
-`expr.N().valueOf()`. It will return a JavaScript number approximation of the
+`expr.N().valueOf()`. The result is a JavaScript number approximation of the
 value.
-
-A symbol may have a value if it represents a bound variable, but it may also
-have no value if it represents a free variable.
 
 <section id=errors>
 
@@ -251,7 +282,7 @@ have no value if it represents a free variable.
 
 Sometimes, things go wrong.
 
-When something goes wrong the Compute Engine uses an
+When something goes wrong the Compute Engine uses an 
 `["Error", <cause>, <location>]` expression.
 
 The `<cause>` argument provides details about the nature of the problem. This
@@ -382,17 +413,3 @@ console.log(ce.parse('x@2').json);
 ```
 
 </section>
-
-## Return Value Conventions
-
-The Compute Engine API uses the following conventions for the return values of a
-function and the values of an object property:
-
-- **`null`**: this property/function does not apply, and will never apply. You
-  can think of this as an answer of "never". Example: `expr.isPositive` on a
-  Boxed String.
-- **`undefined`**: at the moment, the result is not available, but it may be
-  available later. You can think of this as an answer of "maybe". For example,
-  `expr.sgn` for a symbol with no assigned value and no assumptions.
-- **`this`**: this function was not applicable, or there was nothing to do. For
-  example, invoking `expr.simplify()` on a boxed string.
