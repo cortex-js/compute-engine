@@ -38,6 +38,20 @@ languages.{.notice--info}
 apply to a boxed expression, such as `expr.simplify()` are denoted with a
 `expr.` prefix.{.notice--info}
 
+<script type="module">
+  window.addEventListener("DOMContentLoaded", () => 
+    import("//unpkg.com/@cortex-js/compute-engine?module").then((ComputeEngine) => {
+      globalThis.ce = new ComputeEngine.ComputeEngine();
+      const playgrounds = [...document.querySelectorAll("code-playground")];
+      for (const playground of playgrounds) {
+        playground.autorun = 1000; // delay in ms
+        playground.run();
+      }
+    })
+);
+</script>
+
+
 There are three common transformations that can be applied to an expression:
 
 <div class=symbols-table>
@@ -92,11 +106,13 @@ console.log(f.N().latex); // 9.283\,185\,307\ldots
 Other operations can be performed on an expression: comparing it to a pattern,
 replacing part of it, and applying conditional rewrite rules.
 
-<code-playground layout="stack" show-line-numbers>
-<div slot="javascript">import { ComputeEngine } from 'compute-engine';
-const ce = new ComputeEngine();
-console.log(ce.parse('3x^2 + 2x^2 + x + 5').simplify().latex);</div>
+<code-playground layout="stack" show-line-numbers autorun="never">
+<div slot="javascript">const expr = ce.parse('3x^2 + 2x^2 + x + 5');
+console.log(expr.latex, '=', expr.simplify().latex);</div>
 </code-playground>
+
+
+
 
 ## Comparing Expressions
 
@@ -131,14 +147,11 @@ and `rhs`.
   power of a sum, the other a sum of terms.
 
 
-<code-playground layout="stack" show-line-numbers mark-line="7">
-<div slot="javascript">import { ComputeEngine } from 'compute-engine';
-const ce = new ComputeEngine();
-//
+<code-playground layout="stack" show-line-numbers autorun="never">
+<div slot="javascript">
 const a = ce.parse('2 + 1');
 const b = ce.parse('3');
-console.log('isSame?', a.isSame(b));
-</div>
+console.log('isSame?', a.isSame(b));</div>
 </code-playground>
 
 
@@ -157,18 +170,15 @@ way.
 **To compare two expressions without canonicalizing them**, parse or box 
 them with the `canonical` option set to `false`.
 
-<code-playground layout="stack" show-line-numbers mark-line="7">
-<div slot="javascript">import { ComputeEngine } from 'compute-engine';
-const ce = new ComputeEngine();
-//
+<code-playground layout="stack" show-line-numbers autorun="never" mark-javascript-line="5-6">
+<div slot="javascript">
 const a = ce.parse('\\frac{1}{10}');
 const b = ce.parse('\\frac{2}{20}');
 console.log('Canonical isSame?', a.isSame(b));
 //
 const aPrime = ce.parse('\\frac{1}{10}', {canonical: false});
 const bPrime = ce.parse('\\frac{2}{20}', {canonical: false});
-console.log('Non-canonical isSame?', aPrime.isSame(bPrime));
-</div>
+console.log('Non-canonical isSame?', aPrime.isSame(bPrime));</div>
 </code-playground>
 
 
@@ -202,14 +212,11 @@ Note that unlike `expr.isSame()`, `expr.isEqual()` can return `true`, `false` or
 determine if the two expressions are mathematically equal. Adding some
 assumptions may result in a different answer.
 
-<code-playground layout="stack" show-line-numbers mark-line="7">
-<div slot="javascript">import { ComputeEngine } from 'compute-engine';
-const ce = new ComputeEngine();
-//
+<code-playground layout="stack" show-line-numbers autorun="never">
+<div slot="javascript">
 const a = ce.parse('1 + 2');
 const b = ce.parse('3');
-console.log('isEqual?', a.isEqual(b));
-</div>
+console.log('isEqual?', a.isEqual(b));</div>
 </code-playground>
 
 
@@ -238,10 +245,8 @@ The argument of the `subs()` function is an object literal. Each key value pairs
 is an identifier and the value to be substituted with. The value can be either a
 number or a boxed expression.
 
-<code-playground layout="stack" show-line-numbers mark-line="7">
-<div slot="javascript">import { ComputeEngine } from 'compute-engine';
-const ce = new ComputeEngine();
-//
+<code-playground layout="stack" show-line-numbers autorun="never" mark-javascript-line="4">
+<div slot="javascript">
 let expr = ce.parse('\\sqrt{\\frac{1}{x+1}}');
 console.log(expr.json);
 //

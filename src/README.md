@@ -32,7 +32,7 @@ render_math_in_document: true
     width: 100%;
   }
   .output {
-    font-family: var(--monospace-font-family);
+    font-family: var(--monospace-font-family), 'Berkeley Mono', 'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', monospace;
     color: var(--base-0a); /* #f0c674; */
 
     background: var(--console-background);

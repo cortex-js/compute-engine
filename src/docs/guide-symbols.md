@@ -22,32 +22,31 @@ head:
     "compute-engine": "//unpkg.com/@cortex-js/compute-engine?module"
     };
 ---
-<script>
- const ce = new ComputeEngine.ComputeEngine()
+
+<script type="module">
+  window.addEventListener("DOMContentLoaded", () => 
+    import("//unpkg.com/@cortex-js/compute-engine?module").then((ComputeEngine) => {
+      globalThis.ce = new ComputeEngine.ComputeEngine();
+      const playgrounds = [...document.querySelectorAll("code-playground")];
+      for (const playground of playgrounds) {
+        playground.autorun = 1000; // delay in ms
+        playground.run();
+      }
+    })
+);
 </script>
 
 **To change the value or domain of a symbol**, use the `value` and `domain`
 properties of the symbol.
 
-```js
-const n = ce.box("n");
-n.domain = "Integer";
-n.value = 5;
-console.log("n:", n.domain.json, "=", n.value.json);
-// ➔ n: Integer = 5
-```
+A symbol does not have to be declared before it can be used. A previously
+unknown symbol has a domain of `ce.defaultDomain` and no value.
 
-
-A symbol does not have to be declared before it can be used. A previously unknown
-symbol has a domain of `ce.defaultDomain` and no value.
-
-<code-playground layout="stack" show-line-numbers>
+<code-playground layout="stack" show-line-numbers autorun="never">
 <div slot="javascript">
 const n = ce.box("n");
-n.domain = "Integer";
 n.value = 5;
-console.log("n:", n.domain.json, "=", n.value.json);</div></code-playground>
-
+console.log("n =", n.value.json);</div></code-playground>
 
 **To get a list of all the symbols in an expression** use `expr.symbols`.
 
@@ -61,11 +60,10 @@ Symbols are defined within a **scope**.
 {% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
 <strong>scopes</strong> {% endreadmore %}
 
-
 ## Unknowns and Constants
 
-A symbol that has been declared, but has no values associated with it, is said to
-be an **unknown**.
+A symbol that has been declared, but has no values associated with it, is said
+to be an **unknown**.
 
 A symbol whose value cannot be changed is a **constant**. Constants are
 identified by a special flag in their definition.
@@ -85,7 +83,6 @@ example, the value of `Pi` is determined based on the value of the `precision`
 property. The values of constants in scope when the `precision` setting is
 changed will be updated. {.notice-warning}
 
-
 ```js
 ce.precision = 4;
 const smallPi = ce.box("Pi"); // π with 4 digits
@@ -103,12 +100,11 @@ console.log('pi = ', smallPi.numericValue, '=', bigPi.numericValue);
 // ➔ pi  = 3.1415 = 3.1415926535
 ```
 
-
 ## Automatic Declaration of Symbols
 
-If `ce.defaultDomain` is not `null`, an unknown symbol is automatically
-declared when it is first used in an expression.
- 
+If `ce.defaultDomain` is not `null`, an unknown symbol is automatically declared
+when it is first used in an expression.
+
 The new definition has a domain of `ce.defaultDomain` and no value associated
 with it, so the symbol will be an **unknwon**.
 
@@ -137,11 +133,11 @@ The `ce.forget()` function will remove the definition associated with a symbol,
 including its domain and value, and any
 [assumptions](/compute-engine/guides/assumptions) about the symbol.
 
-**To forget about a specific symbol**, pass the name of the symbol as an argument to
-`ce.forget()`.
+**To forget about a specific symbol**, pass the name of the symbol as an
+argument to `ce.forget()`.
 
-**To forget about all the symbols in the current scope**, use `ce.forget()` without
-any arguments.
+**To forget about all the symbols in the current scope**, use `ce.forget()`
+without any arguments.
 
 Note that only symbols in the current scope are forgotten. If a definition for
 the symbol existed in a previous scope, that definition will now be in
