@@ -62,6 +62,9 @@ volumes
     // Represents the derivative of a function
     // ["Derivative", "Sin"] -> "Cos"
     // ["Derivative", ["Sin", "_"]] -> ["Cos", "_"]
+    // @todo: consider Fractional Calculus, i.e. Louiville-Riemann derivative
+    // https://en.wikipedia.org/wiki/Fractional_calculus
+    // with values of the order that can be either fractional or negative
     //
     Derivative: {
       hold: 'all',
