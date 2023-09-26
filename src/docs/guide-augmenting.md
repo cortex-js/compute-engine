@@ -180,7 +180,7 @@ To tell the Compute Engine that `double` is a function, you need to declare it.
 second argument.
 
 ```js example
-ce.declare("double", { signature: { domain: "Function" } });
+ce.declare("double", { signature: { domain: "Functions" } });
 ```
 
 If the definition (the second argument of `ce.declare()`) includes a 
@@ -189,8 +189,8 @@ If the definition (the second argument of `ce.declare()`) includes a
 The `signature` property defines how the function can be used. It is a
 `FunctionDefinition` object with the following properties (all are optional):
 
-- `domain`: the domain of the function. The `Function` domain represents any
-  function. "NumericFunction" represents a function whose arguments are number
+- `domain`: the domain of the function. The `Functions` domain represents any
+  function. "NumericFunctions" represents a function whose arguments are number
   and that returns a numeric value. More complex domains can be specified to
   described the domain of the arguments of the function and the domain of its
   return v
@@ -232,7 +232,7 @@ definition of `double`:
 ```js example
 ce.declare("double", {
   signature: {
-    domain: "Function",
+    domain: "Functions",
     evaluate: (ce, args) => ce.number(args[0].valueOf() * 2),
   },
 });
@@ -348,11 +348,11 @@ identifiers, not LaTeX commands. For example, if you have a symbol `α`, use
 ```js
 ce.declare({
   m: { domain: "Number", value: 5 },
-  f: { domain: "Function" },
-  g: { domain: "Function" },
+  f: { domain: "Functions" },
+  g: { domain: "Functions" },
   Smallfrac: {
     signature: {
-      domain: "NumericFunction",
+      domain: "NumericFunctions",
       evaluate: (ce, args) => ce.box(args[0].valueOf() / args[1].valueOf()),
     },
   },

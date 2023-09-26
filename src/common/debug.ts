@@ -1,14 +1,6 @@
 import { SignalOrigin } from './signals';
-
+import { BOLD, GREY, GREY_BG, RED, RESET } from './ansi-codes';
 const LINEBREAK = /\r\n|[\n\r\u2028\u2029]/;
-
-const RESET = '\u001b[0m';
-const GREY = '\u001b[30;1m${s}';
-const RED = '\u001b[31;1m';
-// const YELLOW = '\u001b[33m';
-const BOLD = '\u001b[1m';
-
-const GREY_BG = '\u001b[40;1m';
 
 export type Terminal = {
   joinLines(lines: string[]): string;
@@ -18,33 +10,18 @@ export type Terminal = {
 };
 
 export const colorTerminal: Terminal = {
-  joinLines(lines: string[]): string {
-    return lines.join('\n');
-  },
-  grey(s: string): string {
-    return `${GREY}${s}${RESET}`;
-  },
-  red(s: string): string {
-    return `${BOLD}${RED}${s}${RESET}`;
-  },
-  highlightBackground(s: string): string {
-    return `${GREY_BG}${s}${RESET}`;
-  },
+  joinLines: (lines: string[]): string => lines.join('\n'),
+  grey: (s: string): string => `${GREY}${s}${RESET}`,
+  red: (s: string): string => `${BOLD}${RED}${s}${RESET}`,
+  highlightBackground: (s: string): string => `${GREY_BG}${s}${RESET}`,
 };
 
 const htmlTerminal: Terminal = {
-  joinLines(lines: string[]) {
-    return `<div>${lines.join('</div><div>')}</div>`;
-  },
-  grey(s: string): string {
-    return `<span style="opacity:.5">${s}</span>`;
-  },
-  red(s: string): string {
-    return `<span style="color:#F33">${s}</span>`;
-  },
-  highlightBackground(s: string): string {
-    return `<span style="background:rgba(255, 100, 100, .1);display:block;border-radius: 4px">${s}</span>`;
-  },
+  joinLines: (lines: string[]) => `<div>${lines.join('</div><div>')}</div>`,
+  grey: (s: string): string => `<span style="opacity:.5">${s}</span>`,
+  red: (s: string): string => `<span style="color:#F33">${s}</span>`,
+  highlightBackground: (s: string): string =>
+    `<span style="background:rgba(255, 100, 100, .1);display:block;border-radius: 4px">${s}</span>`,
 };
 
 const terminal = htmlTerminal;

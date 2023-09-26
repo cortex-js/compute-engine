@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en-US">
   <head>
     <meta charset="utf-8" />
@@ -10,11 +10,11 @@
       :root {
         /* --primary: #0066ce; */
         --primary-light: #86a8cb;
-        --monospace: 'JetBrains Mono', 'IBM Plex Mono', 'Source Code Pro', Menlo,
-          Monaco, 'Courier New', monospace;
-        --system: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-          'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
-          'Helvetica Neue', sans-serif;
+        --monospace: "JetBrains Mono", "IBM Plex Mono", "Source Code Pro", Menlo,
+          Monaco, "Courier New", monospace;
+        --system: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans",
+          "Helvetica Neue", sans-serif;
       }
       code {
         white-space: pre-wrap;
@@ -487,14 +487,14 @@
     </script> -->
 
     <script defer type="module">
-      import { convertLatexToMarkup } from 'https://unpkg.com/mathlive/dist/mathlive.min.mjs';
-      import { ComputeEngine } from '../compute-engine.esm.js';
+      import { convertLatexToMarkup } from "https://unpkg.com/mathlive/dist/mathlive.min.mjs";
+      import { ComputeEngine } from "../compute-engine.esm.js";
 
       const MAX_LINE_LENGTH = 64;
 
-      document.getElementById('random').addEventListener('click', (ev) => {
-        const mf = document.getElementById('mf');
-        const expr = ce.box(['RandomExpression']);
+      document.getElementById("random").addEventListener("click", (ev) => {
+        const mf = document.getElementById("mf");
+        const expr = ce.box(["RandomExpression"]);
         const evalExpr = expr.evaluate();
         mf.value = evalExpr.latex;
         updateContent(mf);
@@ -503,19 +503,19 @@
       //
       // Numeric format segmented control
       //
-      document.querySelectorAll('input[name=numeric-format]').forEach((x) => {
-        x.addEventListener('click', (evt) => {
-          if (evt.target.id === 'numeric-format-auto') {
-            ce.numericMode = 'auto';
+      document.querySelectorAll("input[name=numeric-format]").forEach((x) => {
+        x.addEventListener("click", (evt) => {
+          if (evt.target.id === "numeric-format-auto") {
+            ce.numericMode = "auto";
             ce.precision = 200;
-          } else if (evt.target.id === 'numeric-format-machine') {
-            ce.numericMode = 'machine';
+          } else if (evt.target.id === "numeric-format-machine") {
+            ce.numericMode = "machine";
             ce.precision = 15;
-          } else if (evt.target.id === 'numeric-format-decimal') {
-            ce.numericMode = 'bignum';
+          } else if (evt.target.id === "numeric-format-decimal") {
+            ce.numericMode = "bignum";
             ce.precision = 200;
-          } else if (evt.target.id === 'numeric-format-complex') {
-            ce.numericMode = 'complex';
+          } else if (evt.target.id === "numeric-format-complex") {
+            ce.numericMode = "complex";
             ce.precision = 15;
           }
           // defaultLatex.options.precision = ce.precision;
@@ -525,37 +525,42 @@
 
       let errors = [];
 
-      const mf = document.getElementById('mf');
+      const mf = document.getElementById("mf");
       const ce = MathfieldElement.computeEngine;
+      ce.strict = true;
+      ce.defaultDomain = null;
 
-      console.log(ce.parse('\\mathrm{Hypot}(3, 4)').evaluate());
-
-      ce.defineFunction('f', {
-        domain: 'Function',
+      ce.defineFunction("f", {
+        domain: "Functions",
         signature: {
           evaluate: (ce, args) => {
             if (args.length !== 1) return null;
             const arg1 = args[0];
-            if (typeof arg1.numericValue !== 'number') return null;
+            if (typeof arg1.numericValue !== "number") return null;
             return ce.box(Math.pow(arg1.numericValue, 2));
           },
         },
       });
 
-      ce.assign('g', ['Function', ['Add', 'x', 1], 'x']);
-      ce.assign('h', ['Add', '_', 5]);
-      ce.assign('p', (ce, arg) => ce.box((args[0]?.valueOf() ?? 0) + 6));
-      ce.assign('q(x)', ce.parse('x^2'));
-      ce.assign('t(x)', ['Add', 'x', 1]);
+      ce.assign("g", ["Function", ["Add", "x", 1], "x"]);
+      ce.assign("h", ["Add", "_", 5]);
+      ce.assign("t(x)", ["Add", "x", 1]);
+      ce.assign("p", (ce, arg) => ce.box((args[0]?.valueOf() ?? 0) + 6));
+      ce.assign("q(x, y)", "$$x^2 + y^2$$");
+      ce.assign("q(x, y)", ce.parse("x^2 + y^2", { canonical: false }));
+      ce.assign("qq", ce.parse("(x, y) \\mapsto x^2 + y^2"));
+      ce.assign("qq2", ce.parse("x, y \\mapsto x^2 + y^2"));
 
-      ce.jsonSerializationOptions.metadata = ['latex'];
+      ce._printScope();
+
+      ce.jsonSerializationOptions.metadata = ["latex"];
 
       ce.latexDictionary = [
         ...ce.latexDictionary,
         {
-          latexTrigger: ['\\funfunction'],
+          latexTrigger: ["\\funfunction"],
           parse: (parser) => [
-            'funfunction',
+            "funfunction",
             parser.parseGroup(),
             parser.parseGroup(),
           ],
@@ -623,7 +628,7 @@
 
       ce.jsonSerializationOptions = {
         exclude: [],
-        shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
+        shorthands: ["function", "symbol", "string", "dictionary", "number"],
         metadata: [],
         // precision: 'max',
         repeatingDecimals: false,
@@ -631,18 +636,18 @@
       ce.pushScope({
         hundred: 100,
         f: {
-          domain: 'Function',
+          domain: "Function",
           signature: {
             evaluate: (ce, args) => {
               if (args.length !== 1) return null;
               const arg1 = args[0];
-              if (typeof arg1.numericValue !== 'number') return null;
+              if (typeof arg1.numericValue !== "number") return null;
               return ce.box(Math.pow(arg1.numericValue, 2));
             },
           },
         },
       });
-      ce.defineFunction('suma', {
+      ce.defineFunction("suma", {
         signature: {
           evaluate: (ce, args) => {
             return ce.box(args[0].N().numericValue + args[1].N().numericValue);
@@ -732,19 +737,19 @@
       //   return '';
       // };
 
-      mf.addEventListener('input', (ev) => updateContent(mf));
+      mf.addEventListener("input", (ev) => updateContent(mf));
       updateContent(mf);
 
       function updateContent(mf) {
-        const latex = mf.getValue('latex-expanded');
+        const latex = mf.getValue("latex-expanded");
         let expr;
         try {
-          const latexEl = document.getElementById('latex');
+          const latexEl = document.getElementById("latex");
           if (latexEl) latexEl.innerHTML = escapeHtml(latex);
 
-          if (document.getElementById('asciimath')) {
-            document.getElementById('asciimath').innerHTML = escapeHtml(
-              mf.getValue('ascii-math')
+          if (document.getElementById("asciimath")) {
+            document.getElementById("asciimath").innerHTML = escapeHtml(
+              mf.getValue("ascii-math")
             );
           }
 
@@ -753,71 +758,71 @@
           expr = ce.parse(latex);
         } catch (e) {
           console.error(
-            'parse(%c ' + latex + '%c) ' + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
+            "parse(%c " + latex + "%c) " + e.toString(),
+            "color: red;  background: hsla(0, 60%, 90%)",
+            "background: transparent"
           );
         }
 
-        updateLatex(null, 'symbols');
-        updateLatex(null, 'solve');
-        updateExpr(null, 'json-form');
-        updateExpr(null, 'canonical-form');
-        updateExpr(null, 'domain');
-        updateExpr(null, 'simplify');
-        updateExpr(null, 'evaluate-numerically');
-        updateExpr(null, 'compile');
-        updateExpr(null, 'evaluate');
-        updateExpr(null, 'expand');
+        updateLatex(null, "symbols");
+        updateLatex(null, "solve");
+        updateExpr(null, "json-form");
+        updateExpr(null, "canonical-form");
+        updateExpr(null, "domain");
+        updateExpr(null, "simplify");
+        updateExpr(null, "evaluate-numerically");
+        updateExpr(null, "compile");
+        updateExpr(null, "evaluate");
+        updateExpr(null, "expand");
 
         try {
-          updateExpr(ce.parse(latex, { canonical: false }), 'json-form');
+          updateExpr(ce.parse(latex, { canonical: false }), "json-form");
         } catch (e) {
           console.error(
-            'format(%c ' + latex + "%c, ['json']) " + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
+            "format(%c " + latex + "%c, ['json']) " + e.toString(),
+            "color: red;  background: hsla(0, 60%, 90%)",
+            "background: transparent"
           );
         }
 
         try {
           updateLatex(
-            expr.symbols.map((x) => ce.box(x).latex).join(',\\:'),
-            'symbols'
+            expr.symbols.map((x) => ce.box(x).latex).join(",\\:"),
+            "symbols"
           );
         } catch (e) {
           console.error(
-            'format(%c ' + latex + "%c, ['json']) " + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
+            "format(%c " + latex + "%c, ['json']) " + e.toString(),
+            "color: red;  background: hsla(0, 60%, 90%)",
+            "background: transparent"
           );
         }
 
         try {
-          const freeVars = expr.freeVars;
-          if (freeVars.length === 1) {
-            const sols = expr.solve(freeVars[0]);
+          const unknowns = expr.unknowns;
+          if (unknowns.length === 1) {
+            const sols = expr.solve(unknowns[0]);
             if (sols && sols.length > 0) {
-              updateLatex(sols.map((x) => x.latex).join(',,\\:'), 'solve');
+              updateLatex(sols.map((x) => x.latex).join(",,\\:"), "solve");
             }
           }
         } catch (e) {
           console.error(
-            'format(%c ' + latex + "%c, ['json']) " + e.toString(),
-            'color: red;  background: hsla(0, 60%, 90%)',
-            'background: transparent'
+            "format(%c " + latex + "%c, ['json']) " + e.toString(),
+            "color: red;  background: hsla(0, 60%, 90%)",
+            "background: transparent"
           );
         }
 
         try {
           const canonicalExpr = expr.canonical;
           try {
-            updateExpr(canonicalExpr, 'canonical-form');
+            updateExpr(canonicalExpr, "canonical-form");
           } catch (e) {
             console.error(
-              'canonical(%c ' + latex + '%c) ' + e.toString(),
-              'color: red;  background: hsla(0, 60%, 90%)',
-              'background: transparent'
+              "canonical(%c " + latex + "%c) " + e.toString(),
+              "color: red;  background: hsla(0, 60%, 90%)",
+              "background: transparent"
             );
           }
 
@@ -829,22 +834,22 @@
           // }
 
           try {
-            updateExpr(canonicalExpr.domain, 'domain');
+            updateExpr(canonicalExpr.domain, "domain");
           } catch (e) {
             console.error(
-              'domain(%c ' + latex + '%c) ' + e.toString(),
-              'color: red;  background: hsla(0, 60%, 90%)',
-              'background: transparent'
+              "domain(%c " + latex + "%c) " + e.toString(),
+              "color: red;  background: hsla(0, 60%, 90%)",
+              "background: transparent"
             );
           }
 
           try {
-            updateExpr(canonicalExpr.simplify(), 'simplify');
+            updateExpr(canonicalExpr.simplify(), "simplify");
           } catch (e) {
             console.error(
-              'simplify(%c ' + latex + '%c) ' + e.toString(),
-              'color: red;  background: hsla(0, 60%, 90%)',
-              'background: transparent'
+              "simplify(%c " + latex + "%c) " + e.toString(),
+              "color: red;  background: hsla(0, 60%, 90%)",
+              "background: transparent"
             );
           }
 
@@ -854,20 +859,20 @@
             const evalTiming = performance.now() - start;
             updateExpr(
               val,
-              'evaluate-numerically',
+              "evaluate-numerically",
               `⏱️ ${evalTiming.toFixed(2)}ms`
             );
           } catch (e) {
             console.error(
-              'N(%c ' + latex + '%c) ' + e.toString(),
-              'color: red;  background: hsla(0, 60%, 90%)',
-              'background: transparent'
+              "N(%c " + latex + "%c) " + e.toString(),
+              "color: red;  background: hsla(0, 60%, 90%)",
+              "background: transparent"
             );
           }
 
           try {
             let start = performance.now();
-            const fn = canonicalExpr.compile('javascript', { optimize: [] });
+            const fn = canonicalExpr.compile("javascript", { optimize: [] });
             if (fn) {
               const compileTiming = performance.now() - start;
               start = performance.now();
@@ -875,40 +880,40 @@
               const evalTiming = performance.now() - start;
               updateLatex(
                 val,
-                'compile',
+                "compile",
                 `⏱️\uFE0E ${compileTiming.toFixed(2)}ms / ${evalTiming.toFixed(
                   6
                 )}ms`
               );
-              document.getElementById('compile-output').innerHTML =
+              document.getElementById("compile-output").innerHTML =
                 fn.toString();
             }
           } catch (e) {
             console.error(
-              'compile(%c ' + latex + '%c) ' + e.toString(),
-              'color: red;  background: hsla(0, 60%, 90%)',
-              'background: transparent'
+              "compile(%c " + latex + "%c) " + e.toString(),
+              "color: red;  background: hsla(0, 60%, 90%)",
+              "background: transparent"
             );
           }
 
           try {
-            updateExpr(canonicalExpr.evaluate(), 'evaluate');
+            updateExpr(canonicalExpr.evaluate(), "evaluate");
           } catch (e) {
             console.error(
-              'evaluate(%c ' + latex + '%c) ' + e.toString(),
-              'color: red;  background: hsla(0, 60%, 90%)',
-              'background: transparent'
+              "evaluate(%c " + latex + "%c) " + e.toString(),
+              "color: red;  background: hsla(0, 60%, 90%)",
+              "background: transparent"
             );
           }
 
           try {
-            const e = ce.box(['Expand', canonicalExpr]);
-            updateExpr(e.evaluate(), 'expand');
+            const e = ce.box(["Expand", canonicalExpr]);
+            updateExpr(e.evaluate(), "expand");
           } catch (e) {
             console.error(
-              'expand(%c ' + latex + '%c, ["x"]) ' + e.toString(),
-              'color: red;  background: hsla(0, 60%, 90%)',
-              'background: transparent'
+              "expand(%c " + latex + '%c, ["x"]) ' + e.toString(),
+              "color: red;  background: hsla(0, 60%, 90%)",
+              "background: transparent"
             );
           }
         } catch (e) {}
@@ -918,20 +923,20 @@
         const el = document.getElementById(id);
         if (!el) return;
 
-        if (typeof latex === 'string' && latex.length === 0) {
-          el.classList.remove('is-visible');
+        if (typeof latex === "string" && latex.length === 0) {
+          el.classList.remove("is-visible");
           return;
         }
 
-        el.classList.add('is-visible');
+        el.classList.add("is-visible");
 
-        let subel = el.querySelector('.latex');
+        let subel = el.querySelector(".latex");
         if (subel) subel.value = String(latex);
-        subel = el.querySelector('.text');
+        subel = el.querySelector(".text");
         if (subel) subel.innerHTML = String(latex);
 
-        if (start && el.querySelector('.timing')) {
-          el.querySelector('.timing').innerHTML = start;
+        if (start && el.querySelector(".timing")) {
+          el.querySelector(".timing").innerHTML = start;
         }
       }
 
@@ -939,24 +944,24 @@
         const el = document.getElementById(id);
         if (!el) return;
 
-        if (expr === null) el.classList.remove('is-visible');
-        else el.classList.add('is-visible');
+        if (expr === null) el.classList.remove("is-visible");
+        else el.classList.add("is-visible");
 
-        const mathJsonEl = el.querySelector('.mathjson');
+        const mathJsonEl = el.querySelector(".mathjson");
         if (mathJsonEl) {
           mathJsonEl.innerHTML =
             exprToString(expr) +
             '<br><div style="font-weight: bold; color: hsl(4deg, 90%, 50%)">' +
-            errors.join('<br>') +
-            '</div>';
+            errors.join("<br>") +
+            "</div>";
         }
-        const latexEl = el.querySelector('.latex');
+        const latexEl = el.querySelector(".latex");
         if (latexEl && expr) {
           latexEl.value = expr.latex;
         }
 
-        if (start && el.querySelector('.timing')) {
-          el.querySelector('.timing').innerHTML = start;
+        if (start && el.querySelector(".timing")) {
+          el.querySelector(".timing").innerHTML = start;
         }
 
         errors = [];
@@ -966,15 +971,15 @@
         return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {
           return (
             {
-              '&': '&amp;',
-              '<': '&lt;',
-              '>': '&gt;',
-              '"': '&quot;',
-              "'": '&#39;',
-              '/': '&#x2F;',
-              '`': '&#x60;',
-              '=': '&#x3D;',
-              '\u200b': '&amp;#zws;',
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+              "/": "&#x2F;",
+              "`": "&#x60;",
+              "=": "&#x3D;",
+              "\u200b": "&amp;#zws;",
             }[s] || s
           );
         });
@@ -982,43 +987,43 @@
 
       function toggleVisibility(el) {
         if (el) {
-          if (el.classList.contains('is-visible')) {
-            el.classList.remove('is-visible');
+          if (el.classList.contains("is-visible")) {
+            el.classList.remove("is-visible");
           } else {
-            el.classList.add('is-visible');
+            el.classList.add("is-visible");
           }
         }
       }
 
       [
-        'json-form',
-        'canonical-form',
-        'domain',
-        'simplify',
-        'evaluate-numerically',
-        'evaluate',
-        'expand',
+        "json-form",
+        "canonical-form",
+        "domain",
+        "simplify",
+        "evaluate-numerically",
+        "evaluate",
+        "expand",
       ].forEach((id) => {
         const el = document.getElementById(id);
         if (el) {
-          const toggle = el.querySelector('.toggle');
-          toggle.addEventListener('click', () => {
-            toggle.classList.toggle('is-on');
-            toggleVisibility(el.querySelector('.mathjson'));
+          const toggle = el.querySelector(".toggle");
+          toggle.addEventListener("click", () => {
+            toggle.classList.toggle("is-on");
+            toggleVisibility(el.querySelector(".mathjson"));
           });
         }
       });
 
       function exprToStringRecursive(expr, start) {
-        let indent = ' '.repeat(start);
+        let indent = " ".repeat(start);
         if (Array.isArray(expr)) {
           const elements = expr.map((x) => exprToStringRecursive(x, start + 2));
-          let result = `[${elements.join(', ')}]`;
+          let result = `[${elements.join(", ")}]`;
           if (start + result.length < MAX_LINE_LENGTH) return result;
           return `[\n${indent}  ${elements.join(`,  `)}\n${indent}]`;
         }
-        if (expr === null) return 'null';
-        if (typeof expr === 'object') {
+        if (expr === null) return "null";
+        if (typeof expr === "object") {
           const elements = {};
           Object.keys(expr).forEach(
             (x) => (elements[x] = exprToStringRecursive(expr[x], start + 2))
@@ -1027,7 +1032,7 @@
             .map((key) => {
               return `${key}: ${elements[key]}`;
             })
-            .join('; ')}}`;
+            .join("; ")}}`;
           if (start + result.length < MAX_LINE_LENGTH) return result;
           return (
             `\n${indent}{\n` +
@@ -1036,22 +1041,22 @@
                 return `${indent}  ${key}: ${elements[key]}`;
               })
               .join(`;\n${indent}`) +
-            '\n' +
+            "\n" +
             indent +
-            '}'
+            "}"
           );
         }
         return JSON.stringify(expr, null, 2);
       }
 
       function exprToString(expr) {
-        if (!expr) return '';
+        if (!expr) return "";
         return escapeHtml(exprToStringRecursive(expr.json, 0));
       }
 
       function updateAssumptions() {
-        ce.assume('n', 'Integer');
-        ce.assume('six', 6);
+        ce.assume("n", "Integer");
+        ce.assume("six", 6);
         // ce.assume('y', 5);
 
         // ce.assume(['Greater', 'x', 4]);
@@ -1061,22 +1066,22 @@
           .map(([assumption, val]) => {
             return (
               convertLatexToMarkup(assumption.latex) +
-              '<span>' +
-              (val ? '' : ' is false') +
-              '</span>'
+              "<span>" +
+              (val ? "" : " is false") +
+              "</span>"
             );
           })
-          .join(', ');
+          .join(", ");
 
         if (content) {
-          document.getElementById('assumptions').innerHTML = content;
+          document.getElementById("assumptions").innerHTML = content;
           document
-            .getElementById('assumptions-section')
-            .classList.add('visible');
+            .getElementById("assumptions-section")
+            .classList.add("visible");
         } else
           document
-            .getElementById('assumptions-section')
-            .classList.remove('visible');
+            .getElementById("assumptions-section")
+            .classList.remove("visible");
       }
     </script>
   </body>

@@ -43,7 +43,12 @@ import { apply } from '../function-utils';
  * which is canonical from the start avoid going through an intermediary step
  * with a non-canonical expression.
  *
- * 3/ When implementing an `evaluate()`:
+ * 3/ When boxing (and canonicalizing), if the function is "scoped", a new
+ *    scope is created before the canonicalization, so that any declaration
+ *    are done within that scope. Example of scoped functions include `Block`
+ *    and `Sum`.
+ *
+ * 4/ When implementing an `evaluate()`:
  * - if `bignumPreferred()` all operations should be done in bignum and complex,
  *    otherwise, they should all be done in machine numbers and complex.
  * - if not `complexAllowed()`, return `NaN` if a complex value is encountered

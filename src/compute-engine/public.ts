@@ -145,14 +145,14 @@ export type Rule = [
   options?: {
     condition?: LatexString | ((wildcards: BoxedSubstitution) => boolean);
     priority?: number;
-  }
+  },
 ];
 
 export type BoxedRule = [
   lhs: Pattern,
   rhs: BoxedExpression,
   priority: number,
-  condition: undefined | ((wildcards: BoxedSubstitution) => boolean)
+  condition: undefined | ((wildcards: BoxedSubstitution) => boolean),
 ];
 
 export type BoxedRuleSet = Set<BoxedRule>;
@@ -169,7 +169,7 @@ export type DomainConstructor =
   | 'Matrix' // <domain-of-elements> <dimension>*
   | 'SquareMatrix' // <domain-of-elements> <dimension>
   | 'Vector' // <domain-of-elements> <length>?
-  | 'Function' // <domain-of-args>* <co-domain>
+  | 'Functions' // <domain-of-args>* <co-domain>
   | 'List' // <domain-of-elements>
   | 'Dictionary'
   | 'Tuple'
@@ -181,7 +181,7 @@ export type DomainConstructor =
   | 'Sequence'
   | 'Head'
   | 'Symbol'
-  | 'Value'
+  | 'Values'
   | 'Covariant'
   | 'Contravariant'
   | 'Bivariant'
@@ -211,14 +211,14 @@ export type DomainExpression<T = SemiBoxedExpression> =
   | ['Interval', ['Open', T], T]
   | ['Interval', T, ['Open', T]]
   | ['Interval', ['Open', T], ['Open', T]]
-  | ['Value', T]
+  | ['Values', T]
   | ['Head', string]
   | ['Symbol', string]
   | ['Covariant', DomainExpression<T>]
   | ['Contravariant', DomainExpression<T>]
   | ['Bivariant', DomainExpression<T>]
   | ['Invariant', DomainExpression<T>]
-  | ['Function', ...DomainExpression<T>[]];
+  | ['Functions', ...DomainExpression<T>[]];
 
 export interface BoxedDomain extends BoxedExpression {
   is(s: BoxedDomain): boolean;
@@ -501,7 +501,9 @@ export interface BoxedExpression {
    */
   readonly subexpressions: BoxedExpression[];
 
-  /** All the symbols in the expression, recursively
+  /**
+   *
+   * All the symbols in the expression, recursively
    *
    * **Note** applicable to canonical and non-canonical expressions.
    *
@@ -509,10 +511,21 @@ export interface BoxedExpression {
   readonly symbols: string[];
 
   /**
-   * All the free variables in the expression, recursively,
-   * that is all the symbols with no value
+   * All the identifiers used in the expression that do not have a value
+   * associated with them, i.e. they are declared but not defined.
    */
-  readonly freeVars: string[];
+  readonly unknowns: string[];
+
+  /**
+   *
+   * All the identifiers (symbols and functions) in the expression that are a
+   * free variable.
+   *
+   * A free variable is an identifier that is used in a function but is not a
+   * local variable or a parameter of that function.
+   *
+   */
+  readonly freeVariables: string[];
 
   /** All the `["Error"]` subexpressions
    *
@@ -624,9 +637,6 @@ export interface BoxedExpression {
    * **Note** applicable to canonical and non-canonical expressions.
    */
   readonly isPure: boolean;
-
-  /** True if the expression is a free variable, that is a symbol with no value */
-  readonly isFree: boolean;
 
   /** True if the expression is a constant, that is a symbol with an immutable value */
   readonly isConstant: boolean;
@@ -932,13 +942,10 @@ export interface BoxedExpression {
   /** Wikidata identifier.
    *
    * **Note** `undefined` if not a canonical expression.
-   *
-   *
    */
-  get wikidata(): string | undefined;
-  set wikidata(val: string | undefined);
+  readonly wikidata: string | undefined;
 
-  /** An optional short description if the symbol or function head.
+  /** An optional short description if a symbol or function expression.
    *
    * May include markdown. Each string is a paragraph.
    *
@@ -948,7 +955,7 @@ export interface BoxedExpression {
   readonly description: undefined | string[];
 
   /** An optional URL pointing to more information about the symbol or
-   *  function head
+   *  function head.
    *
    * **Note** `undefined` if not a canonical expression.
    *
@@ -964,13 +971,13 @@ export interface BoxedExpression {
 
   /**
    * For symbols and functions, a possible definition associated with the
-   *  expression. `basedDefinition` is the base class of symbol and function
+   *  expression. `baseDefinition` is the base class of symbol and function
    *  definition.
    *
    * **Note** `undefined` if not a canonical expression.
    *
    */
-  readonly basedDefinition: BoxedBaseDefinition | undefined;
+  readonly baseDefinition: BoxedBaseDefinition | undefined;
 
   /**
    * For functions, a possible definition associated with the expression.
@@ -1006,11 +1013,15 @@ export interface BoxedExpression {
    * Update the definition associated with this expression, taking
    * into account the specified scope.
    *
+   * If no scope is specified, the scope of when the expression was boxed is used.
+   *
+   * If the scope is `null`, the definition is removed.
+   *
    * **Note**: applicable only to canonical expressions
    *
    * @internal
    */
-  bind(scope: RuntimeScope | null): void;
+  bind(scope?: RuntimeScope | null): void;
 
   /**
    *
@@ -1298,6 +1309,7 @@ export interface ExpressionMapInterface<U> {
   delete(expr: BoxedExpression): void;
   clear(): void;
   [Symbol.iterator](): IterableIterator<[BoxedExpression, U]>;
+  entries(): IterableIterator<[BoxedExpression, U]>;
 }
 
 /**
@@ -1994,6 +2006,7 @@ export interface ComputeEngineStats {
 }
 
 export type SetValue =
+  | LatexString
   | SemiBoxedExpression
   | ((ce, args) => BoxedExpression)
   | undefined;
@@ -2412,8 +2425,15 @@ export interface IComputeEngine {
   get jsonSerializationOptions(): Readonly<JsonSerializationOptions>;
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>);
 
+  /** Create a new scope on top of the scope stack, and set it as current */
   pushScope(scope?: Partial<Scope>): IComputeEngine;
+
+  /** Remove the most recent scope from the scope stack, and set its
+   *  parent scope as current. */
   popScope(): IComputeEngine;
+
+  /** Set the current scope, return the previous scope. */
+  swapScope(scope: RuntimeScope | null): RuntimeScope | null;
 
   /** Assign a value to an identifier in the current scope.
    * Use `undefined` to reset the identifier to no value.

@@ -164,13 +164,6 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     parse: 'Assign',
   },
   {
-    name: 'Assign',
-    latexTrigger: ['\\coloneq'],
-    kind: 'infix',
-    associativity: 'right',
-    precedence: 260,
-  },
-  {
     name: 'Approx', // Note: Mathematica TildeTilde
     latexTrigger: ['\\approx'],
     kind: 'infix',

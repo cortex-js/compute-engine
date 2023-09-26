@@ -7,17 +7,13 @@ export class CortexError {
   }
   toString(): string {
     let result = '';
-    if (this.signal.head) {
-      result += this.signal.head + ': ';
-    }
+    if (this.signal.head) result += this.signal.head + ': ';
 
     if (typeof this.signal.message === 'string') {
       result += this.signal.message;
     } else {
       result += ' ';
-      for (const arg of this.signal.message) {
-        result += arg.toString() + ' ';
-      }
+      for (const arg of this.signal.message) result += arg.toString() + ' ';
     }
 
     return result;

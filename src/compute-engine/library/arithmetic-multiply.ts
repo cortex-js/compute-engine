@@ -217,6 +217,9 @@ export function canonicalProduct(
   body: BoxedExpression | undefined,
   range: BoxedExpression | undefined
 ) {
+  // Product is a scoped function (to declare the index)
+  ce.pushScope();
+
   body ??= ce.error('missing');
 
   let index: BoxedExpression | null = null;
@@ -256,7 +259,9 @@ export function canonicalProduct(
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
 
-  return ce._fn('Product', [body.canonical, range]);
+  const result = ce._fn('Product', [body.canonical, range]);
+  ce.popScope();
+  return result;
 }
 
 export function evalMultiplication(

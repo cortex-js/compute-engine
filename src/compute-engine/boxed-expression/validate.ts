@@ -51,11 +51,14 @@ export function validateNumericArgs(
     }
   }
 
-  return xs.map((op) =>
-    (op && !op.isValid) || op.isNumber
-      ? op
-      : ce.error(['incompatible-domain', 'Number', op.domain], op)
-  );
+  return xs.map((op) => {
+    if (op === undefined) return ce.error('missing');
+    if (!op.isValid) return op;
+    if (op.isNumber) return op;
+    if (op.symbol && !op.symbolDefinition)
+      return ce.error('undeclared-symbol', op);
+    return ce.error(['incompatible-domain', 'Number', op.domain], op);
+  });
 }
 
 /** Return `null` if the `ops` match the sig. Otherwise, return an array
@@ -75,7 +78,7 @@ export function validateSignature(
   const opsDomain = ops.map((x) => x.domain);
 
   const targetSig = ce.domain([
-    'Function',
+    'Functions',
     ...opsDomain,
     codomain ?? 'Anything',
   ]);
@@ -118,6 +121,8 @@ export function validateArgument(
   if (arg === undefined) return ce.error('missing');
   if (!arg.isValid) return arg;
   if (arg?.domain.isCompatible(dom)) return arg;
+  if (arg.symbol && !arg.symbolDefinition)
+    return ce.error('undeclared-symbol', arg);
   return ce.error(['incompatible-domain', dom, arg.domain], arg);
 }
 

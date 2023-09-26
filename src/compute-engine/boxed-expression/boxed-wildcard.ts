@@ -101,9 +101,7 @@ export class BoxedWildcard extends BoxedSymbol {
   }
 
   get json(): Expression {
-    return serializeJsonSymbol(this.engine, this._name, {
-      wikidata: this._wikidata,
-    });
+    return serializeJsonSymbol(this.engine, this._name);
   }
 
   get sgn(): -1 | 0 | 1 | undefined | null {

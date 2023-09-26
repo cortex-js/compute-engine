@@ -43,22 +43,22 @@ export function assume(proposition: BoxedExpression): AssumeResult {
 function assumeEquality(proposition: BoxedExpression): AssumeResult {
   console.assert(proposition.head === 'Equal');
   // Four cases:
-  // 1/ proposition contains no free variables
+  // 1/ proposition contains no unnknows
   //    e.g. `2 + 1 = 3`, `\pi + 1 = \pi`
   //    => evaluate and return
-  // 2/ lhs is a single free variable and `rhs` does not contain `lhs`
+  // 2/ lhs is a single unknown and `rhs` does not contain `lhs`
   //    e.g. `x = 2`, `x = 2\pi`
   //    => if `lhs` has a definition, set its value to `rhs`, otherwise
-  //          define a new symbol with a value of `rhs`
-  // 3/ proposition contains a single free variable
-  //    => solve for the free variable, create new def or set value of the
-  //      free variable with the root(s) as value
-  // 4/ proposition contains multiple free variables
+  //          declare a new symbol with a value of `rhs`
+  // 3/ proposition contains a single unknown
+  //    => solve for the unknown, create new def or set value of the
+  //      unknown with the root(s) as value
+  // 4/ proposition contains multiple unknowns
   //    => add (lhs - rhs = 0) to assumptions DB
 
   // Case 1
-  const freeVars = proposition.freeVars;
-  if (freeVars.length === 0) {
+  const unknowns = proposition.unknowns;
+  if (unknowns.length === 0) {
     const val = proposition.evaluate();
     if (val.symbol === 'True') return 'tautology';
     if (val.symbol === 'False') return 'contradiction';
@@ -90,8 +90,8 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
   }
 
   // Case 3
-  if (freeVars.length === 1) {
-    const lhs = freeVars[0];
+  if (unknowns.length === 1) {
+    const lhs = unknowns[0];
     const sols = findUnivariateRoots(proposition, lhs);
     if (sols.length === 0) {
       ce.assumptions.set(
@@ -197,13 +197,13 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   if (result.symbol === 'True') return 'tautology';
   if (result.symbol === 'False') return 'contradiction';
 
-  const freeVars = result.freeVars;
-  if (freeVars.length === 0) return 'not-a-predicate';
+  const unknowns = result.unknowns;
+  if (unknowns.length === 0) return 'not-a-predicate';
 
   // Case 3
-  if (freeVars.length === 1) {
-    if (!ce.lookupSymbol(freeVars[0]))
-      ce.defineSymbol(freeVars[0], { domain: 'ExtendedRealNumber' });
+  if (unknowns.length === 1) {
+    if (!ce.lookupSymbol(unknowns[0]))
+      ce.defineSymbol(unknowns[0], { domain: 'ExtendedRealNumber' });
   }
 
   // Case 3, 4

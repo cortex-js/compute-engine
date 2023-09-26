@@ -1,6 +1,6 @@
 import { engine } from '../../utils';
 
-engine.assume(['Element', 'f', 'Function']);
+engine.assume(['Element', 'f', 'Functions']);
 
 console.log(engine.parse('g()').json);
 

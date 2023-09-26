@@ -4,12 +4,15 @@ function evaluate(expr) {
   return exprToString(engine.box(expr)?.evaluate());
 }
 
+console.log(evaluate(['Hypot', 3, 4]));
+
 engine.assign('f1', ['Function', ['Add', 'q', 1], 'q']);
 
 console.log(evaluate(['f1', 10]));
 console.log(evaluate(['f1']));
 
-// engine.assign('f2', ['Add', 'q', 1]);
+engine.assign('f2', ['Add', '_', 1]);
+console.log(evaluate(['f2', 10]));
 
 // // Arguments are not checked by the Compute Engine
 // // so we must use caution when accessing them

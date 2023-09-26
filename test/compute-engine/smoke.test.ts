@@ -53,7 +53,7 @@ console.log(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
 
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
-ce.assume(['Element', 'f', 'Function']);
+ce.assume(['Element', 'f', 'Functions']);
 ce.assume(['Equal', 'one', 1]);
 
 slowEval();
@@ -109,7 +109,7 @@ console.log(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').latex);
 // `HorizontalScaling` should be interpreted as a function, not a symbol.
 // auto-add all the entries from libraries to the dictionary? Alternatively
 // check in default `parseUnknownSymbol` (and rename to
-// `parseUnknownIdentifier`): check Domain is 'Function'. (See \\operatorname, parse.ts:983)
+// `parseUnknownIdentifier`): check Domain is 'Functions'. (See \\operatorname, parse.ts:983)
 // Also maybe unknown identifier in front of Delimiter -> function, .e.g
 // `p(n) =  2n`. Can always disambiguate with a \cdot, e.g. `p\cdot(n)`
 console.log(
@@ -128,8 +128,8 @@ console.log(ce.parse('\\sqrt{15}').simplify().latex);
 // Expect_. `\sqrt15` (don't keep decomposed root expanded)
 
 // Report false. Should be true.
-const sig1 = ce.domain(['Function', 'PositiveInteger', 'Number']);
-const sig2 = ce.domain(['Function', 'Number', 'Number']);
+const sig1 = ce.domain(['Functions', 'PositiveInteger', 'Number']);
+const sig2 = ce.domain(['Functions', 'Number', 'Number']);
 console.log(sig1.isCompatible(sig2));
 
 // Outputs unexpected command, \\left...

@@ -118,6 +118,9 @@ export function canonicalSummation(
   body: BoxedExpression,
   range: BoxedExpression | undefined
 ) {
+  // Sum is a scoped function (to declare the index)
+  ce.pushScope();
+
   body ??= ce.error('missing');
 
   let index: BoxedExpression | null = null;
@@ -141,15 +144,10 @@ export function canonicalSummation(
   if (index?.head === 'ReleaseHold') index = index.op1?.evaluate();
   index ??= ce.symbol('Nothing');
 
-  if (!index.symbol)
-    index = ce.error(['incompatible-domain', 'Symbol', index.domain]);
-
-  if (index.symbol) ce.pushScope().declare(index.symbol, { domain: 'Integer' });
-  const fn = body.canonical;
   if (index.symbol) {
-    ce.popScope();
-    index = index = ce.hold(index);
-  }
+    ce.declare(index.symbol, { domain: 'Integer' });
+    index = ce.hold(index);
+  } else index = ce.error(['incompatible-domain', 'Symbol', index.domain]);
 
   // The range bounds, if present, should be integers numbers
   if (lower && lower.isFinite) lower = validateArgument(ce, lower, 'Integer');
@@ -160,7 +158,9 @@ export function canonicalSummation(
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
 
-  return ce._fn('Sum', [fn, range]);
+  const result = ce._fn('Sum', [body.canonical, range]);
+  ce.popScope();
+  return result;
 }
 
 export function evalSummation(

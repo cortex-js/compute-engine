@@ -102,3 +102,30 @@ describe('SETTING/FORGETTING', () => {
     );
   });
 });
+
+// describe('NESTED SCOPES', () => {
+//   let ce;
+//   let outer;
+//   let inner;
+//   beforeAll(() => {
+//     ce = new ComputeEngine();
+//     ce.declare('global1, {domain: "Number", value: 5 }');
+//     ce.pushScope();
+//     outer = ce.context;
+//     ce.declare('local1, {domain: "Number", value: 10 }');
+//     ce.pushScope();
+//     inner = ce.context;
+//     ce.declare('local1, {domain: "Number", value: 20 }');
+//     ce.box('local1').value = 25;
+//     ce.popScope();
+//     ce.popScope();
+//   });
+
+//   test(`Nested scopes`, () => {
+//     expect(ce.box('local1').evaluate().json).toEqual(42);
+//   });
+
+//   /*
+
+// */
+// });

@@ -46,50 +46,107 @@ export function getImaginaryCoef(expr: BoxedExpression): number | null {
   return 0;
 }
 
+export function getSymbols(expr: BoxedExpression, result: Set<string>): void {
+  if (expr.symbol) {
+    result.add(expr.symbol);
+    return;
+  }
+
+  if (expr.head && typeof expr.head !== 'string') getSymbols(expr.head, result);
+
+  if (expr.ops) for (const op of expr.ops) getSymbols(op, result);
+
+  if (expr.keys)
+    for (const key of expr.keys) getSymbols(expr.getKey(key)!, result);
+}
+
 /**
- * Return the free variables in the expression, recursively.
+ * Return the unknowns in the expression, recursively.
  *
- * A free variable, is an identifier (symbol or function) that is not bound
+ * An unknown is an identifier (symbol or function) that is not bound
  * to a value.
  *
- * Note: do not use `isFree`: it has a side effect of creating a definition
- * if one does not exist, and we want to avoid that. For example, `assume()`
- * relies on `expr.freeVars` *not* creating a definition.
  */
-export function getFreeVars(expr: BoxedExpression, set: Set<string>): void {
-  // @todo: need to check for '["Block"]' which may contain ["Assign"] or ["Declare"] expressions and exclude those
+export function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
+  if (expr.symbol) {
+    const def = expr.engine.lookupSymbol(expr.symbol);
+    if (def && def.value !== undefined) return;
+
+    const fnDef = expr.engine.lookupFunction(expr.symbol);
+    if (fnDef && (fnDef.signature.evaluate || fnDef.signature.N)) return;
+
+    result.add(expr.symbol);
+    return;
+  }
+
+  if (expr.head && typeof expr.head !== 'string')
+    getUnknowns(expr.head, result);
+
+  if (expr.ops) for (const op of expr.ops) getUnknowns(op, result);
+
+  if (expr.keys)
+    for (const key of expr.keys) getUnknowns(expr.getKey(key)!, result);
+}
+
+/**
+ * Return the free variables (non local variable) in the expression,
+ * recursively.
+ *
+ * A free variable is an identifier that is not an argument to a function,
+ * or a local variable.
+ *
+ */
+export function getFreeVariables(
+  expr: BoxedExpression,
+  result: Set<string>
+): void {
+  // @todo: need to check for '["Block"]' which may contain ["Declare"] expressions and exclude those
+
+  if (expr.head === 'Block') {
+  }
 
   if (expr.symbol) {
     const def = expr.engine.lookupSymbol(expr.symbol);
     if (def && def.value !== undefined) return;
 
     const fnDef = expr.engine.lookupFunction(expr.symbol);
-    if (fnDef && fnDef.signature.evaluate) return;
+    if (fnDef && (fnDef.signature.evaluate || fnDef.signature.N)) return;
 
-    set.add(expr.symbol);
+    result.add(expr.symbol);
     return;
   }
 
-  if (expr.head && typeof expr.head !== 'string') getFreeVars(expr.head, set);
+  if (expr.head && typeof expr.head !== 'string')
+    getFreeVariables(expr.head, result);
 
-  if (expr.ops) for (const op of expr.ops) getFreeVars(op, set);
+  if (expr.ops) for (const op of expr.ops) getFreeVariables(op, result);
 
   if (expr.keys)
-    for (const key of expr.keys) getFreeVars(expr.getKey(key)!, set);
+    for (const key of expr.keys) getFreeVariables(expr.getKey(key)!, result);
 }
 
-export function getSymbols(expr: BoxedExpression, set: Set<string>): void {
-  if (expr.symbol) {
-    set.add(expr.symbol);
-    return;
-  }
-
-  if (expr.head && typeof expr.head !== 'string') getSymbols(expr.head, set);
-
-  if (expr.ops) for (const op of expr.ops) getSymbols(op, set);
-
-  if (expr.keys)
-    for (const key of expr.keys) getSymbols(expr.getKey(key)!, set);
+/** Return the local variables in the expression.
+ *
+ * A local variable is an identifier that is declared with a `Declare`
+ * expression in a `Block` expression.
+ *
+ * Note that the canonical form of a `Block` expression will hoist all
+ * `Declare` expressions to the top of the block. `Assign` expressions
+ * of undeclared variables will also have a matching `Declare` expressions
+ * hoisted.
+ *
+ */
+export function getLocalVariables(
+  expr: BoxedExpression,
+  result: Set<string>
+): void {
+  const h = expr.head;
+  if (h !== 'Block') return;
+  for (const statement of expr.ops!)
+    if (statement.head === 'Declare') {
+      const id = statement.op1.symbol;
+      if (id) result.add(id);
+    }
 }
 
 export function getSubexpressions(

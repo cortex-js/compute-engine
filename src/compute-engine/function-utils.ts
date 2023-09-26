@@ -1,4 +1,3 @@
-import { inferDomain } from './domain-utils';
 import { BoxedExpression } from './public';
 
 /**
@@ -8,22 +7,19 @@ import { BoxedExpression } from './public';
  * `expr` can be a collection, a function, an expression, a string.
  *
  * - ["Range", 5]
+ * - ["List", 1, 2, 3]
  * - "'hello world'"
  *
  */
 export function iterable(
   expr: BoxedExpression
 ): Iterator<BoxedExpression> | undefined {
-  const h = expr.symbol;
-
   // Is it a function expresson with a definition that includes an iterator?
-  // e.g. iter(["Range", 5])
-  if (h !== null) {
-    const def = expr.engine.lookupFunction(h);
-    // Note that if there is an at() handler, there is always
-    // a default iterator
-    if (def?.iterator) return def.iterator(expr);
-  }
+  // e.g. ["Range", 5]
+  // Note that if there is an at() handler, there is always
+  // at least a default iterator
+  const def = expr.functionDefinition;
+  if (def?.iterator) return def.iterator(expr);
 
   //
   // String iterator
@@ -45,7 +41,7 @@ export function iterable(
 }
 
 /**
- * indexable(expr) return function with one argument.
+ * indexable(expr) return a JS function with one argument.
  *
  * Evaluate expr.
  * If expr is indexable function (def with at handler), return handler.
@@ -65,9 +61,6 @@ export function indexable(
     return (index) => at(expr, index);
   }
 
-  const lambda = makeLambda(expr);
-  if (lambda) return (index) => lambda([expr.engine.number(index)]);
-
   //
   // String at
   //
@@ -80,6 +73,11 @@ export function indexable(
     };
   }
 
+  // Expressions that don't have an at() handler, have the
+  // argument applied to them.
+  const lambda = makeLambda(expr);
+  if (lambda) return (index) => lambda([expr.engine.number(index)]);
+
   return undefined;
 }
 
@@ -89,6 +87,7 @@ export function indexable(
 export function predicate(
   _expr: BoxedExpression
 ): (...args: BoxedExpression[]) => boolean {
+  // @todo
   return () => false;
 }
 
@@ -98,6 +97,7 @@ export function predicate(
 export function order(
   _expr: BoxedExpression
 ): (a: BoxedExpression, b: BoxedExpression) => -1 | 0 | 1 {
+  // @todo
   //
   // Default comparator
   //
@@ -109,55 +109,25 @@ export function order(
 }
 
 /**
- * Turn a Function or a Lambda expression into a canonical expression
- * with anonymous parameters (`_n` parameters).
- */
-
-function makeLambda(
-  expr: BoxedExpression
-): ((args: BoxedExpression[]) => BoxedExpression) | undefined {
-  const [body, paramCount] = normalizeLambda(expr);
-  if (!body) return undefined;
-
-  if (paramCount === 0) return () => body!.evaluate();
-  const ce = expr.engine;
-  if (paramCount === 1)
-    return (args) => {
-      ce.pushScope();
-      ce.declare('_1', { value: args[0], domain: inferDomain(args[0]) });
-      const result = body!.evaluate();
-      ce.popScope();
-      return result;
-    };
-
-  return (args) => {
-    ce.pushScope();
-    for (let i = 0; i < paramCount; i++) {
-      const value = args[i];
-      ce.declare(`_${i + 1}`, { value, domain: inferDomain(value) });
-    }
-    const result = body!.evaluate();
-    ce.popScope();
-    return result;
-  };
-}
-
-/**
- * Given an expression, rewrite it to anonymous parameters (`_n` parameters).
- * If there is a single free variable, it is replaced by `_1`.
+ * Given an expression, rewrite it to a canonical Function form.
  *
  *
- * - implicit arg (free var): ["Function", "x"] -> ["x", ["x"]]  (body, args)
- * - explicit arg: ["Function", "x", "x"] -> ["x", ["x"]]  (body, args)
- * - ["_"] -> ["_1", ["_1"]]  // single implicit arg
- * - ["_1"] -> ["_1", ["_1"]]  // implicit arg
+ * - explicit parameters (no change)
+ *      ["Function", ["Add, "x", 1], "x"]
+ *      -> ["Function", ["Add, "x", 1], "x"]
+ *
+ * - single anonymous parameters:
+ *      ["Add", "_", 1]
+ *      -> ["Function", ["Add", "_", 1], "_"]
+ *
+ * - multiple anonymous parameters:
+ *      ["Add", "_1", "_2"]
+ *      -> ["Function", ["Add", "_1", "_2"], "_1", "_2"]
  *
  */
-function normalizeLambda(
+export function canonicalFunctionExpression(
   expr: BoxedExpression
-): [body: BoxedExpression | undefined, paramCount: number] {
-  expr = expr.evaluate();
-
+): BoxedExpression | undefined {
   //
   // Convert N operators:
   //  - N(D) -> ND()
@@ -171,76 +141,127 @@ function normalizeLambda(
   //
   // Is it a Function expression?
   //
-  if (expr.head === 'Function') {
-    // e.g. Function(["Add", "x", 1], "x")
-    const [body, ...params] = expr.ops!;
-    if (params.length === 0) return body.subs({ _: '_1' });
+  if (expr.head === 'Function') return expr;
 
-    const subs = {};
-    let n = 1;
-    for (const param of params)
-      if (param.symbol) subs[param.symbol] = `_${n++}`;
-    return body.subs(subs);
+  // @todo an expression could include a scoped environment
+  // and we currently don't handle that case.
+  // e.e. ["Function",
+  //        ["Block",
+  //          ["Add", "x", 1],
+  //          ["Block",
+  //            ["Declare", "x", "String"],   // shadow outer x
+  //            ["Add", "x", 2],              // references inner x
+  //          ]
+  //        ]
+  //      x"]
+
+  // We have a "simple" expression, possibly with some
+  // anonymous parameters, e.g. `["Add", "_1", "_2"]`
+
+  const unknowns = expr.unknowns;
+  let count = 0;
+  if (unknowns.includes('_')) count++;
+  for (const unknown of unknowns) {
+    if (unknown.startsWith('_')) {
+      const n = Number(unknown.slice(1));
+      if (n > count) count = n;
+    }
   }
 
-  //
-  // Not a `["Function"]` expression, maybe an expression with anonymous parameters.
-  //
+  const ce = expr.engine;
+  ce.pushScope();
+  const result = ce._fn('Function', [
+    expr,
+    ...Array.from({ length: count }, (_, i) => ce.symbol(`_${i + 1}`)),
+  ]);
+  ce.popScope();
+  return result;
+}
 
-  // Could be a function name, i.e. "Sin", "Cos", etc...
-  // or an "operator" a function of a function, i.e. ["f", "g"] or
-  // ["InverseFunction", "Sin"]
-  return fv.length === 0 ? undefined : expr;
+/**
+ *
+ * Return a JS function that can be called with arguments.
+ *
+ * Input is a Function expression or an expression with anonymous
+ * parameters.
+ */
+
+function makeLambda(
+  expr: BoxedExpression
+): ((params: BoxedExpression[]) => BoxedExpression) | undefined {
+  const ce = expr.engine;
+  //
+  // Is `expr` a function name, e.g. `Sin`
+  //
+  const fnDef = expr.symbol ? ce.lookupFunction(expr.symbol) : undefined;
+  if (fnDef) {
+    const fn = fnDef.signature.N ?? fnDef.signature.evaluate;
+    if (fn) return (params) => fn(ce, params) ?? ce._fn(expr, params);
+    return (params) => ce._fn(expr, params);
+  }
+
+  const fn = canonicalFunctionExpression(expr);
+  if (!fn) return undefined;
+  console.assert(fn.head === 'Function');
+  const body = fn.op1;
+
+  const args = fn.ops!.slice(1).map((x) => x.symbol ?? 'Nothing');
+
+  if (args.length === 0) return () => body.N() ?? body.evaluate();
+
+  const fnScope = body.scope;
+  return (params) => {
+    const context = ce.swapScope(fnScope);
+
+    let i = 0;
+    for (const arg of args) ce.assign(arg, params[i++]);
+
+    const result = body.N() ?? body.evaluate();
+
+    ce.swapScope(context);
+    return result;
+  };
+}
+
+/**
+ * Apply arguments to an expression which is either
+ * - a '["Function"]' expression
+ * - an expression with anonymous parameters, e.g. ["Add", "_", 1]
+ * - the identifier for a function, e.g. "Sin".
+ */
+export function apply(
+  fn: BoxedExpression,
+  args: BoxedExpression[]
+): BoxedExpression {
+  return makeLambda(fn)?.(args) ?? fn.engine._fn(fn, args);
 }
 
 /**
  * Return a lambda function, assuming a scoped environment has been
  * created and there is a single numeric argument
  */
-export function makeScopedLambda1(
+export function makeLambdaN1(
   expr: BoxedExpression
 ): ((arg: number) => number) | undefined {
-  const body = normalizeLambda(expr);
-  if (!body) return undefined;
-  const ce = expr.engine;
-  return (arg) => {
-    ce.assign('_1', arg);
-    return body!.N().valueOf() as number;
-  };
-}
-
-/** Apply arguments to an expression.
- *
- * If the expression includes
- * anonymous parameters `_`, `_1`, etc.. they are substituted before the expression evaluated. Otherwise
- * the expression is just evaluated.
- */
-export function apply(
-  fn: BoxedExpression,
-  args: BoxedExpression[]
-): BoxedExpression {
-  const lambda = makeLambda(fn);
-  if (lambda) return lambda(args);
-
-  return fn.engine._fn(fn, args);
+  const lambda = makeLambda(expr);
+  if (!lambda) return undefined;
+  return (arg) => lambda([expr.engine.number(arg)]).valueOf() as number;
 }
 
 /**
  * Given an expression such as:
- * - ["Function", ["+", 1, "x"], "x"]
+ * - ["Function", ["Add", 1, "x"], "x"]
  * - ["Function", ["Divide", "_", 2]]
  * - ["Multiply, "_", 3]
  * - ["Add, "_1", "_2"]
  * - "Sin"
  *
- * return a function that can be called with arguments.
+ * return a JS function that can be called with arguments.
  */
 export function applicable(
   fn: BoxedExpression
 ): (args: BoxedExpression[]) => BoxedExpression {
-  return (
-    makeLambda(fn) ?? ((args) => fn.engine._fn(fn.evaluate(), args).evaluate())
-  );
+  return makeLambda(fn) ?? ((args) => fn.engine._fn(fn.N(), args).N());
 }
 
 /**
@@ -251,20 +272,7 @@ export function applicable(
  * with an argument.
  *
  */
-export function applicableN(fn: BoxedExpression): (x: number) => number {
-  const ce = fn.engine;
-
-  const lambda = makeLambda(fn);
-  if (lambda) return (x) => lambda([ce.number(x)]).valueOf() as number;
-
-  return (x) =>
-    ce
-      ._fn(fn.evaluate(), [ce.number(x)])
-      .evaluate()
-      .valueOf() as number;
-}
-
-export function scopedApplicableN(fn: BoxedExpression): (x: number) => number {
+export function applicableN1(fn: BoxedExpression): (x: number) => number {
   const ce = fn.engine;
 
   const lambda = makeLambda(fn);
@@ -279,10 +287,6 @@ export function scopedApplicableN(fn: BoxedExpression): (x: number) => number {
 
 // xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
 // https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1
-// length(expr, depth:integer) (for a list, an expression, etc..)
-// shape
-// length
-// depth
 
 /*
  DICTIONARY
@@ -310,5 +314,17 @@ export function scopedApplicableN(fn: BoxedExpression): (x: number) => number {
 // join
 // convert(expr, CONVERT_TO, OPTIONS) -- See Maple
 // convert(expr, options), with options such as 'cos', 'sin, 'trig, 'exp', 'ln', 'latex', 'string', etc...)
-// N
 // spread -> expand the elements of a list. If inside a list, insert the list into its parent
+
+/**
+ * Give a string like "f(x,y)" return, ["f", ["x", "y"]]
+ */
+export function parseFunctionSignature(
+  s: string
+): [id: string, args: string[] | undefined] {
+  const m = s.match(/(.+)\((.*)\)/);
+  if (!m) return [s, undefined];
+  const id = m[1];
+  const args = m[2].split(',').map((x) => x.trim());
+  return [id, args];
+}

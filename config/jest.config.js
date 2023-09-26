@@ -1,4 +1,5 @@
 module.exports = {
+  prettierPath: require.resolve('prettier-2'),
   preset: 'ts-jest',
   testEnvironment: 'node',
   collectCoverageFrom: ['src/**/*.ts', '!<rootDir>/node_modules/'],
@@ -17,7 +18,7 @@ module.exports = {
   setupFilesAfterEnv: ['../test/jest-config.ts'],
   //   reporters: ['jest-silent-reporter'],
   transform: {
-    '^.+\\.js$': [
+    '^.+\\.ts$': [
       'ts-jest',
       {
         useESM: true,

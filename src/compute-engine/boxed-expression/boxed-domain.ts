@@ -95,7 +95,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
 
   get codomain(): BoxedDomain | null {
     if (typeof this._value === 'string') return null;
-    //  The codomain is the last argument of the `['Function']` expression
+    //  The codomain is the last argument of the `['Functions']` expression
     return this.engine.domain(this._value[this._value.length - 1]);
   }
 
@@ -166,19 +166,19 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   }
 
   get isFunction(): boolean {
-    return this.ctor === 'Function' || this._value === 'Function';
+    return this.ctor === 'Functions' || this._value === 'Functions';
   }
 
   // get isPredicate(): boolean {
   //   if (this.domainLiteral === 'Predicate') return true;
-  //   if (this.domainConstructor !== 'Function') return false;
+  //   if (this.domainConstructor !== 'Functions') return false;
   //   const resultDomain = this._value[this._value.length];
   //   if (!(resultDomain instanceof _Domain)) return false;
   //   return resultDomain.isBoolean;
   // }
   // get isNumericFunction(): boolean {
-  //   if (this.domainLiteral === 'NumericFunction') return true;
-  //   if (this.domainConstructor !== 'Function') return false;
+  //   if (this.domainLiteral === 'NumericFunctions') return true;
+  //   if (this.domainConstructor !== 'Functions') return false;
   //   for (const arg of this.domainParams!)
   //     if (!isNumericSubdomain(arg, 'Number')) return false;
 
@@ -190,8 +190,8 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   // }
 
   // get isRealFunction(): boolean {
-  //   if (this.domainLiteral === 'RealFunction') return true;
-  //   if (this.domainConstructor !== 'Function') return false;
+  //   if (this.domainLiteral === 'RealFunctions') return true;
+  //   if (this.domainConstructor !== 'Functions') return false;
   //   for (const arg of this.domainParams!)
   //     if (!isNumericSubdomain(arg, 'ExtendedRealNumber')) return false;
   //   return true;
@@ -217,7 +217,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
 
   get isRelationalOperator(): boolean {
     if (this._value === 'RelationalOperator') return true;
-    if (this.ctor !== 'Function') return false;
+    if (this.ctor !== 'Functions') return false;
     if (this.domainArgs!.length !== 2) return false;
     if (!this.codomain!.isCompatible('MaybeBoolean')) return false;
 
@@ -342,13 +342,13 @@ function makeCanonical(
   //
   // Function
   //
-  if (ctor === 'Function') {
+  if (ctor === 'Functions') {
     // @todo:
     // Multiple `Maybe`, `Sequence` in arguments
     // Multiple Invariant, Covariant, Contravariant in argument
     // Normalize attributes: Open, Maybe, Invariant, Sequence, etc...
     // A rest argument (Sequence) must be the last one
-    return ['Function', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
+    return ['Functions', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
   }
 
   if (ctor === 'Dictionary') {
@@ -395,8 +395,8 @@ function makeCanonical(
     return ['Symbol', dom[1] as string];
   }
 
-  if (ctor === 'Value') {
-    return ['Value', ce.box(dom[1])];
+  if (ctor === 'Values') {
+    return ['Values', ce.box(dom[1])];
   }
 
   if (ctor === 'InvalidDomain') {
@@ -462,7 +462,7 @@ export function isDomain(
 
     if (
       ctor === 'Tuple' ||
-      ctor === 'Function' ||
+      ctor === 'Functions' ||
       ctor === 'Maybe' ||
       ctor === 'Sequence' ||
       ctor === 'Intersection' ||
@@ -522,7 +522,8 @@ function isSubdomainOf(
   if (rhsLiteral) {
     if (!lhs) debugger;
     const lhsConstructor = lhs[0];
-    if (lhsConstructor === 'Function') return [rhsLiteral === 'Function', xlhs];
+    if (lhsConstructor === 'Functions')
+      return [rhsLiteral === 'Functions', xlhs];
     if (lhsConstructor === 'Dictionary')
       return [rhsLiteral === 'Dictionary', xlhs];
     if (lhsConstructor === 'List') return [rhsLiteral === 'List', xlhs];
@@ -546,7 +547,7 @@ function isSubdomainOf(
 
     // 'Head',
     // 'Symbol',
-    // 'Value',
+    // 'Values',
     return [true, xlhs];
   }
 
@@ -555,15 +556,15 @@ function isSubdomainOf(
   //
   const rhsConstructor = rhs[0]!;
 
-  if (rhsConstructor === 'Function') {
+  if (rhsConstructor === 'Functions') {
     // See https://www.stephanboyer.com/post/132/what-are-covariance-and-contravariance
-    if (lhsLiteral === 'Function') return [true, xlhs];
+    if (lhsLiteral === 'Functions') return [true, xlhs];
     if (lhsLiteral) return [false, xlhs];
 
     // Only a `Function` ctor can be a subdomain of a `Function`
-    if (lhs[0] !== 'Function') return [false, xlhs];
+    if (lhs[0] !== 'Functions') return [false, xlhs];
 
-    // Both constructors are 'Function':
+    // Both constructors are 'Functions':
 
     if (lhs.length === 1 && rhs.length === 1) return [true, xlhs];
 
@@ -665,7 +666,7 @@ function isSubdomainOf(
 
   // 'Head',
   // 'Symbol',
-  // 'Value',
+  // 'Values',
 
   if (rhsConstructor === 'Range') {
     if (!Array.isArray(lhs) || lhs[0] !== 'Range') return [false, xlhs];
@@ -733,7 +734,7 @@ function domainLiteralAncestor(dom: BoxedDomain): string {
   if (result === 'Maybe') return 'Anything';
   if (result === 'Interval') return 'RealNumber';
   if (result === 'Range') return 'Integer';
-  if (result === 'Head') return 'Function';
+  if (result === 'Head') return 'Functions';
 
   if (result === 'Union') return 'Anything'; // @todo could be more narrow
   if (result === 'Intersection') return 'Anything'; // @todo could be more narrow

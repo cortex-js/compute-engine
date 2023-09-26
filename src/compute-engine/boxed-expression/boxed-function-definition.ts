@@ -1,4 +1,4 @@
-import { applicable, apply } from '../function-utils';
+import { applicable } from '../function-utils';
 import {
   IComputeEngine,
   FunctionDefinition,
@@ -35,7 +35,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     expr: BoxedExpression,
     start?: number,
     count?: number
-  ) => Iterator<BoxedExpression, undefined>;
+  ) => Iterator<BoxedExpression>;
   at?: (
     expr: BoxedExpression,
     index: number | string
@@ -103,9 +103,10 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         let i = start;
         return {
           next() {
-            if (count >= 0 && i >= start + count) return { done: true };
+            if (count >= 0 && i >= start + count)
+              return { done: true, value: undefined };
             const result = at(expr, i);
-            if (result === undefined) return { done: true };
+            if (result === undefined) return { done: true, value: undefined };
             i++;
             return { done: false, value: result };
           },
@@ -179,8 +180,8 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       const domain = sig.domain
         ? ce.domain(sig.domain)
         : def.numeric
-        ? ce.domain('NumericFunction')
-        : ce.domain('Function');
+        ? ce.domain('NumericFunctions')
+        : ce.domain('Functions');
       if (!domain.isValid)
         throw Error(
           `Function Definition "${name}": invalid domain ${JSON.stringify(
@@ -195,8 +196,12 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
       let evaluate: ((ce, args) => BoxedExpression) | undefined = undefined;
       if (sig.evaluate && typeof sig.evaluate !== 'function') {
-        const fn = applicable(ce.box(sig.evaluate));
-        evaluate = (_ce, ops) => fn(ops);
+        const boxedEvaluate = ce.box(sig.evaluate);
+        if (!boxedEvaluate.isValid)
+          throw Error(`Invalid function ${boxedEvaluate.toString()}`);
+        const fn = applicable(boxedEvaluate);
+        evaluate = (_ce, xs) => fn(xs);
+        evaluate.toString = () => boxedEvaluate.toString(); // For debugging/_printScope()
       } else evaluate = sig.evaluate as any;
 
       this.signature = {
@@ -212,12 +217,12 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       };
     } else if (def.numeric) {
       this.signature = {
-        domain: ce.domain('NumericFunction'),
+        domain: ce.domain('NumericFunctions'),
         codomain: ce.domain('Number'),
       };
     } else {
       this.signature = {
-        domain: ce.domain('Function') as BoxedDomain,
+        domain: ce.domain('Functions') as BoxedDomain,
         codomain: ce.domain('Anything') as BoxedDomain,
       };
     }

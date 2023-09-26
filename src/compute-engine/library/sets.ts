@@ -100,14 +100,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     // Aka the product set, the set direct product or cross product
     // Notation: \times
     wikidata: 'Q173740',
-    signature: { domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'] },
+    signature: { domain: ['Functions', 'Set', ['Sequence', 'Set'], 'Set'] },
     // evaluate: cartesianProduct,
   },
   Complement: {
     // Return the elements of the first argument that are not in any of
     // the subsequent lists
     wikidata: 'Q242767',
-    signature: { domain: ['Function', 'Set', 'Set'] },
+    signature: { domain: ['Functions', 'Set', 'Set'] },
   },
   Intersection: {
     // notation: \cap
@@ -117,7 +117,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'],
+      domain: ['Functions', 'Set', ['Sequence', 'Set'], 'Set'],
       evaluate: intersection,
     },
   },
@@ -129,13 +129,13 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'],
+      domain: ['Functions', 'Set', ['Sequence', 'Set'], 'Set'],
       evaluate: union,
     },
   },
   // {
   //   name: 'Set',
-  //   domain: ['Function', ['Sequence', 'Anything'], 'Set'],
+  //   domain: ['Functions', ['Sequence', 'Anything'], 'Set'],
   //   // @todo! set has multiple forms
   //   // Set(Sequence)
   //   // Set(Sequence, Condition)
@@ -144,7 +144,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   SetMinus: {
     wikidata: 'Q18192442',
     signature: {
-      domain: ['Function', 'Set', 'Value', 'Set'],
+      domain: ['Functions', 'Set', 'Values', 'Set'],
       evaluate: setMinus,
     },
   },
@@ -153,7 +153,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     /* = Union(Complement(a, b), Complement(b, a) */
     /* Corresponds to XOR in boolean logic */
     wikidata: 'Q1147242',
-    signature: { domain: ['Function', 'Set', ['Sequence', 'Set'], 'Set'] },
+    signature: { domain: ['Functions', 'Set', ['Sequence', 'Set'], 'Set'] },
   },
 };
 

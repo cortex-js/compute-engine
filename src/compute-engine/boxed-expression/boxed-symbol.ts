@@ -111,7 +111,7 @@ export class BoxedSymbol extends _BoxedExpression {
   get json(): Expression {
     return serializeJsonSymbol(this.engine, this._name, {
       latex: this._latex,
-      wikidata: this._wikidata,
+      wikidata: this.wikidata,
     });
   }
 
@@ -119,21 +119,11 @@ export class BoxedSymbol extends _BoxedExpression {
     return this._scope;
   }
 
-  /** A free variable either has no definition, or it has a definition, but no value */
-  get isFree(): boolean {
-    // Don't use `.symbolDefinition` as this has a side effect of creating
-    // a def, which is not desirable whn we're just doing a test.
-    const def =
-      this._def ?? this.engine.lookupSymbol(this._name, this._wikidata);
-
-    return !(def instanceof _BoxedSymbolDefinition) || def.value === undefined;
-  }
-
   get isConstant(): boolean {
     // Don't use `.symbolDefinition` as this has a side effect of creating
     // a def, which is not desirable whn we're just doing a test.
     const def =
-      this._def ?? this.engine.lookupSymbol(this._name, this._wikidata);
+      this._def ?? this.engine.lookupSymbol(this._name, this.wikidata);
 
     return !(def instanceof _BoxedSymbolDefinition) || def.constant;
   }
@@ -151,22 +141,6 @@ export class BoxedSymbol extends _BoxedExpression {
     if (this._scope) return this;
     // Return a new canonical symbol, scoped in the current context
     return this.engine.box(this._name);
-  }
-
-  get wikidata(): string | undefined {
-    return this._wikidata ?? this.baseDefinition?.wikidata ?? undefined;
-  }
-
-  get description(): string[] | undefined {
-    if (!this.baseDefinition) return undefined;
-    if (!this.baseDefinition.description) return undefined;
-    if (typeof this.baseDefinition.description === 'string')
-      return [this.baseDefinition.description];
-    return this.baseDefinition.description;
-  }
-
-  get url(): string | undefined {
-    return this.baseDefinition?.url ?? undefined;
   }
 
   get complexity(): number {
@@ -206,11 +180,14 @@ export class BoxedSymbol extends _BoxedExpression {
   /**
    * Associate a definition with this symbol, if one is not already available
    */
-  bind(scope: RuntimeScope | null): void {
+  bind(scope?: RuntimeScope | null): void {
     if (scope === null) {
       this._def = undefined;
       return;
     }
+
+    if (scope === undefined) scope = this._scope;
+    if (!scope) return;
 
     // Look for a definition in the scope when the symbol was boxed
     let def: BoxedSymbolDefinition | BoxedFunctionDefinition | undefined;
@@ -219,10 +196,7 @@ export class BoxedSymbol extends _BoxedExpression {
     // 1. Bind to a symbol definition over a function definition
     // (since symbols can be redefined)
     //
-    def = this.engine.lookupSymbol(this._name, this._wikidata, scope);
-    // Is the wikidata consistent?
-    if (def?.wikidata && this._wikidata && def.wikidata !== this._wikidata)
-      def = undefined;
+    def = this.engine.lookupSymbol(this._name, undefined, scope);
 
     if (def) {
       // In case the symbol was found by its wikidata and the name of the
@@ -250,7 +224,6 @@ export class BoxedSymbol extends _BoxedExpression {
     if (this.engine.defaultDomain !== null) {
       // No definition, create one if a default domain is specified
       this._def = this.engine.defineSymbol(this._name, {
-        wikidata: this._wikidata,
         domain: this.engine.defaultDomain,
       });
       this._name = this._def.name;
@@ -312,11 +285,11 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   get domain(): BoxedDomain {
-    if (this.functionDefinition) return this.engine.domain('Function');
+    if (this.functionDefinition) return this.engine.domain('Functions');
     return (
       this.symbolDefinition?.domain ??
       this.engine.defaultDomain ??
-      this.engine.domain('Value')
+      this.engine.domain('Values')
     );
   }
 
@@ -349,7 +322,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   get explicitDomain(): BoxedDomain | undefined {
-    if (this.functionDefinition) return this.engine.domain('Function');
+    if (this.functionDefinition) return this.engine.domain('Functions');
     return this.symbolDefinition?.domain ?? undefined;
   }
 

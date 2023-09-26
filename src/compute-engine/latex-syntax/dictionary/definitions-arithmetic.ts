@@ -1028,16 +1028,7 @@ function parseBigOp(name: string, prec: number) {
       index = sub;
     }
 
-    const sym = symbol(index);
-    // Create a temporary scope to make sure the index symbol is
-    // not mis-interpreted. Classic example: if the index is `i`, the
-    // letter `i` should not be interpreted as a ImaginaryUnit
-    const ce = parser.computeEngine;
-    if (ce && sym) ce.pushScope().declare(sym, { domain: 'Integer' });
-
     const fn = parser.parseExpression({ minPrec: prec + 1 });
-
-    if (ce && sym) ce.popScope();
 
     if (!fn) return [name];
 

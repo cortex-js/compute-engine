@@ -27,11 +27,11 @@ const DEFAULT_LINSPACE_COUNT = 50;
 // • IndexOf()
 // • Contains() -> True if element is in list, IndexOf() > 0
 
-// • Keys: { domain: 'Function' },
-// • Entries: { domain: 'Function' },
+// • Keys: { domain: 'Functions' },
+// • Entries: { domain: 'Functions' },
 // • Dictionary: { domain: 'Collection' },
 // •Dictionary: {
-//   domain: 'Function',
+//   domain: 'Functions',
 //   range: 'Dictionary',
 // },
 // • cons -> cons(first (element), rest (list)) = list
@@ -50,13 +50,13 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   //
   Sequence: {
     signature: {
-      domain: 'Function',
+      domain: 'Functions',
     },
   },
   List: {
     complexity: 8200,
     signature: {
-      domain: ['Function', ['Maybe', ['Sequence', 'Anything']], 'List'],
+      domain: ['Functions', ['Maybe', ['Sequence', 'Anything']], 'List'],
     },
     size: (expr) => expr.nops!,
     iterator: (expr, start, count) => {
@@ -110,11 +110,11 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: [
-        'Function',
+        'Functions',
         'Number',
         ['Maybe', 'Number'],
         ['Maybe', 'Number'],
-        'Value',
+        'Values',
       ],
     },
     size: (expr) => {
@@ -156,11 +156,11 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: [
-        'Function',
+        'Functions',
         'Number',
         ['Maybe', 'Number'],
         ['Maybe', 'Number'],
-        'Value',
+        'Values',
       ],
     },
     size: (expr) => {
@@ -217,10 +217,10 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A key/value pair',
     complexity: 8200,
     signature: {
-      domain: ['Function', 'String', 'Anything', 'Tuple'],
+      domain: ['Functions', 'String', 'Anything', 'Tuple'],
       canonical: (ce, args) => {
         const key = validateArgument(ce, args[0]?.canonical, 'String');
-        const value = validateArgument(ce, args[1]?.canonical, 'Value');
+        const value = validateArgument(ce, args[1]?.canonical, 'Values');
         return ce.tuple([key, value]);
       },
     },
@@ -231,7 +231,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A tuple with a single element',
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Anything', 'Tuple'],
+      domain: ['Functions', 'Anything', 'Tuple'],
       canonical: (ce, ops) =>
         ce.tuple(validateArgumentCount(ce, canonical(ops), 1)),
     },
@@ -246,7 +246,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A tuple of two elements',
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Anything', 'Anything', 'Tuple'],
+      domain: ['Functions', 'Anything', 'Anything', 'Tuple'],
       canonical: (ce, ops) =>
         ce.tuple(validateArgumentCount(ce, canonical(ops), 2)),
     },
@@ -259,7 +259,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A tuple of three elements',
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Anything', 'Anything', 'Anything', 'Tuple'],
+      domain: ['Functions', 'Anything', 'Anything', 'Anything', 'Tuple'],
       canonical: (ce, ops) =>
         ce.tuple(validateArgumentCount(ce, canonical(ops), 3)),
     },
@@ -272,7 +272,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A fixed number of heterogeneous elements',
     complexity: 8200,
     signature: {
-      domain: ['Function', ['Sequence', 'Anything'], 'Tuple'],
+      domain: ['Functions', ['Sequence', 'Anything'], 'Tuple'],
       canonical: (ce, ops) => ce.tuple(canonical(ops)),
     },
     size: (expr) => expr.nops!,
@@ -283,7 +283,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   String: {
     threadable: true,
     signature: {
-      domain: ['Function', ['Maybe', 'Anything'], 'String'],
+      domain: ['Functions', ['Maybe', 'Anything'], 'String'],
       evaluate: (ce, ops) => {
         if (ops.length === 0) return ce.string('');
         return ce.string(ops.map((x) => x.string ?? x.toString()).join(''));
@@ -298,7 +298,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Length: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Number'],
+      domain: ['Functions', 'Values', 'Number'],
       evaluate: (ce, ops) => {
         // @todo: could have fast path for List.
         const def = ops[0].functionDefinition;
@@ -313,7 +313,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   IsEmpty: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Number'],
+      domain: ['Functions', 'Values', 'Number'],
       evaluate: (ce, ops) => {
         // @todo: could have fast path for List.
         const def = ops[0].functionDefinition;
@@ -334,7 +334,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Take: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', ['Sequence', 'Value'], 'Value'],
+      domain: ['Functions', 'Values', ['Sequence', 'Values'], 'Values'],
       evaluate: (ce, ops) => {
         if (ops.length < 2) return undefined;
         const s = ops[0].string;
@@ -357,7 +357,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Drop: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', ['Sequence', 'Value'], 'Value'],
+      domain: ['Functions', 'Values', ['Sequence', 'Values'], 'Values'],
       evaluate: (ce, ops) => {
         if (ops.length < 2) return undefined;
         const s = ops[0].string;
@@ -391,7 +391,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   At: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values', 'Values'],
       evaluate: (ce, ops) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
@@ -408,7 +408,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   First: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (ce, ops) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
@@ -421,7 +421,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Second: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (ce, ops) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
@@ -434,7 +434,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Last: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (ce, ops) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
@@ -447,7 +447,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Rest: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, ops) => take(ops[0], [[2, -1, 1]]),
     },
   },
@@ -455,7 +455,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Most: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, ops) => take(ops[0], [[1, -2, 1]]),
     },
   },
@@ -463,7 +463,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Reverse: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, ops) => take(ops[0], [[-1, 2, 1]]),
     },
   },
@@ -475,7 +475,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Ordering: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', ['Maybe', 'Function'], 'Value'],
+      domain: ['Functions', 'Values', ['Maybe', 'Functions'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -486,7 +486,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Sort: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', ['Maybe', 'Function'], 'Value'],
+      domain: ['Functions', 'Values', ['Maybe', 'Functions'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -498,7 +498,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Shuffle: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -510,7 +510,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Dimensions: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'List'],
+      domain: ['Functions', 'Values', 'List'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -521,7 +521,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Rank: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Number'],
+      domain: ['Functions', 'Values', 'Number'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -534,7 +534,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Reshape: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -547,7 +547,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Flatten: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -560,7 +560,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Map: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Function', 'Value'],
+      domain: ['Functions', 'Values', 'Functions', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -573,7 +573,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Filter: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Function', 'Value'],
+      domain: ['Functions', 'Values', 'Functions', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -586,7 +586,13 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Reduce: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Function', ['Maybe', 'Value'], 'Value'],
+      domain: [
+        'Functions',
+        'Values',
+        'Functions',
+        ['Maybe', 'Values'],
+        'Values',
+      ],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -600,7 +606,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Tally: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Tuple'],
+      domain: ['Functions', 'Values', 'Tuple'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -614,7 +620,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Unique: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Tuple'],
+      domain: ['Functions', 'Values', 'Tuple'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -627,7 +633,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Transpose: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -642,7 +648,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Zip: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', ['Sequence', 'Value'], 'Value'],
+      domain: ['Functions', 'Values', ['Sequence', 'Values'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -653,7 +659,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   RotateLeft: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -664,7 +670,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   RotateRight: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -678,7 +684,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Join: {
     complexity: 8200,
     signature: {
-      domain: ['Function', ['Sequence', 'Value'], 'Value'],
+      domain: ['Functions', ['Sequence', 'Values'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -692,7 +698,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Iterate: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', ['Maybe', 'Value'], 'Value'],
+      domain: ['Functions', 'Values', ['Maybe', 'Values'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -707,7 +713,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Repeat: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -720,7 +726,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Cycle: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -734,7 +740,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Fill: {
     complexity: 8200,
     signature: {
-      domain: ['Function', 'Value', 'Value'],
+      domain: ['Functions', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;

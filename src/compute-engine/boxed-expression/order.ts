@@ -209,7 +209,7 @@ export function polynomialOrder(expr: BoxedExpression): SemiBoxedExpression {
   // Empirically, the Total Degree Reverse Lexicographic Order (grevlex)
   // is often the fastest to calculate Gröbner basis. We use it as the
   // default ordering for polynomials.
-  return degreeReverseLexicographicOrder(expr, expr.freeVars);
+  return degreeReverseLexicographicOrder(expr, expr.unknowns);
 }
 
 export function lexicographicOrder(
@@ -217,7 +217,7 @@ export function lexicographicOrder(
   vars?: string[]
 ): SemiBoxedExpression {
   // @todo
-  vars = vars ?? expr.freeVars;
+  vars = vars ?? expr.unknowns;
   return expr;
 }
 
@@ -226,7 +226,7 @@ export function degreeLexicographicOrder(
   vars?: string[]
 ): SemiBoxedExpression {
   // @todo
-  vars = vars ?? expr.freeVars;
+  vars = vars ?? expr.unknowns;
   return expr;
 }
 
@@ -235,7 +235,7 @@ export function degreeReverseLexicographicOrder(
   vars?: string[]
 ): SemiBoxedExpression {
   // @todo
-  vars = vars ?? expr.freeVars;
+  vars = vars ?? expr.unknowns;
   return expr;
 }
 
@@ -244,7 +244,7 @@ export function eliminationOrder(
   vars?: string[]
 ): SemiBoxedExpression {
   // @todo
-  vars = vars ?? expr.freeVars;
+  vars = vars ?? expr.unknowns;
   return expr;
 }
 

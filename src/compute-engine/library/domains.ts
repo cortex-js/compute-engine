@@ -4,7 +4,7 @@ export const DOMAIN_CONSTRUCTORS = [
   'InvalidDomain',
 
   'Dictionary',
-  'Function',
+  'Functions',
   'List',
   'Tuple',
 
@@ -19,27 +19,27 @@ export const DOMAIN_CONSTRUCTORS = [
 
   'Head',
   'Symbol',
-  'Value',
+  'Values',
 ];
 
 export const DOMAIN_ALIAS = {
-  // Function: ['Function', ['Sequence', 'Anything'], 'Anything'],
-  NumericFunction: ['Function', ['Sequence', 'Number'], 'Number'],
-  RealFunction: [
-    'Function',
+  // Functions: ['Functions', ['Sequence', 'Anything'], 'Anything'],
+  NumericFunctions: ['Functions', ['Sequence', 'Number'], 'Number'],
+  RealFunctions: [
+    'Functions',
     ['Sequence', 'ExtendedRealNumber'],
     'ExtendedRealNumber',
   ],
-  TrigonometricFunction: ['Function', 'Number', 'Number'],
-  // HyperbolicFunction: ['Function', 'Number', 'Number'],
+  TrigonometricFunctions: ['Functions', 'Number', 'Number'],
+  // HyperbolicFunctions: ['Functions', 'Number', 'Number'],
   LogicOperator: [
-    'Function',
+    'Functions',
     'MaybeBoolean',
     ['Maybe', 'MaybeBoolean'],
     'MaybeBoolean',
   ],
-  Predicate: ['Function', ['Sequence', 'Anything'], 'MaybeBoolean'],
-  RelationalOperator: ['Function', 'Anything', 'Anything', 'MaybeBoolean'],
+  Predicate: ['Functions', ['Sequence', 'Anything'], 'MaybeBoolean'],
+  RelationalOperator: ['Functions', 'Anything', 'Anything', 'MaybeBoolean'],
   // PositiveInteger: ['Range', 1, +Infinity],
   // NonNegativeInteger: ['Range', 0, +Infinity],
   // NegativeInteger: ['Range', -Infinity, -1],
@@ -133,7 +133,7 @@ export const DOMAIN_ALIAS = {
 const DOMAIN_LITERAL = {
   Anything: [],
 
-  Value: 'Anything',
+  Values: 'Anything',
   Domain: 'Anything',
   DomainExpression: 'Domain',
 
@@ -159,17 +159,17 @@ const DOMAIN_LITERAL = {
     'NonPositiveNumber',
     'NonNegativeNumber',
     'Scalar',
-    'TrigonometricFunction',
+    'TrigonometricFunctions',
     'LogicOperator',
     'RelationalOperator',
   ],
 
-  MaybeBoolean: 'Value',
+  MaybeBoolean: 'Values',
   Boolean: 'MaybeBoolean',
   String: 'Boolean',
   Symbol: 'Boolean',
 
-  Collection: 'Value',
+  Collection: 'Values',
   List: 'Collection',
   Dictionary: 'Collection',
   Sequence: 'Collection',
@@ -181,21 +181,21 @@ const DOMAIN_LITERAL = {
   //
   // Functional Domains
   //
-  Function: 'Anything',
-  Predicate: 'Function',
+  Functions: 'Anything',
+  Predicate: 'Functions',
   LogicOperator: 'Predicate',
   RelationalOperator: 'Predicate',
   // https://en.wikipedia.org/wiki/List_of_mathematical_functions
 
-  NumericFunction: 'Function',
-  RealFunction: 'NumericFunction',
-  TrigonometricFunction: 'RealFunction',
+  NumericFunctions: 'Functions',
+  RealFunctions: 'NumericFunctions',
+  TrigonometricFunctions: 'RealFunctions',
 
   //
   // Numeric Domains
   //
   // https://en.wikipedia.org/wiki/Category_of_sets
-  Number: 'Value',
+  Number: 'Values',
   ExtendedComplexNumber: 'Number',
   ComplexNumber: 'ExtendedComplexNumber',
   ImaginaryNumber: 'ComplexNumber',
@@ -223,7 +223,7 @@ const DOMAIN_LITERAL = {
   //
   // Tensorial Domains
   //
-  Tensor: 'Value',
+  Tensor: 'Values',
   Matrix: 'Tensor',
   Scalar: ['Row', 'Column'],
   Row: 'Vector',
@@ -285,8 +285,8 @@ export function ancestors(dom: string): string[] {
     if (!Array.isArray(dom)) throw Error(`Unknown domain literal ${dom}`);
     if (!DOMAIN_CONSTRUCTORS.includes(dom[0]))
       throw Error(`Unknown domain constructor ${dom[0]}`);
-    if (dom[0] === 'Function' || dom[0] === 'Head')
-      return ancestors('Function');
+    if (dom[0] === 'Functions' || dom[0] === 'Head')
+      return ancestors('Functions');
     if (dom[0] === 'Symbol') return ancestors('Symbol');
     if (dom[0] === 'Tuple') return ancestors('Tuple');
     if (dom[0] === 'List') return ancestors('List');

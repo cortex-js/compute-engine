@@ -66,11 +66,7 @@ import {
 } from './boxed-expression/boxed-symbol';
 import { boxDomain, _BoxedDomain } from './boxed-expression/boxed-domain';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
-import {
-  head,
-  isValidIdentifier,
-  validateIdentifier,
-} from '../math-json/utils';
+import { isValidIdentifier, validateIdentifier } from '../math-json/utils';
 import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
@@ -86,6 +82,8 @@ import { canonical, flattenOps, flattenSequence } from './symbolic/flatten';
 import { isFunctionDefinition, isSymbolDefinition } from './library/utils';
 import { bigint } from './numerics/numeric-bigint';
 import { inferDomain } from './domain-utils';
+import { parseFunctionSignature } from './function-utils';
+import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
 
 /**
  *
@@ -197,7 +195,7 @@ export class ComputeEngine implements IComputeEngine {
     Nothing: null,
     None: null,
     Undefined: null,
-    Function: null,
+    // Function: null,
 
     Pi: null,
     ImaginaryUnit: null,
@@ -242,10 +240,10 @@ export class ComputeEngine implements IComputeEngine {
     PositiveInteger: null,
     TranscendentalNumber: null,
     PositiveNumber: null,
-    Function: null, // (Anything^n) -> Anything
-    NumericFunction: null, // (Number^n) -> Number
-    RealFunction: null, // (ExtendedRealNumber^n) -> ExtendRealNumber
-    TrigonometricFunction: null, // (ComplexNumber) -> ComplexNumber
+    Functions: null, // (Anything^n) -> Anything
+    NumericFunctions: null, // (Number^n) -> Number
+    RealFunctions: null, // (ExtendedRealNumber^n) -> ExtendRealNumber
+    TrigonometricFunctions: null, // (ComplexNumber) -> ComplexNumber
     LogicOperator: null, // (Boolean, Boolean) -> Boolean
     Predicate: null, // (Anything^n) -> MaybeBoolean
     RelationalOperator: null, // (Anything, Anything) -> MaybeBoolean
@@ -847,15 +845,17 @@ export class ComputeEngine implements IComputeEngine {
     if (!this.context)
       throw Error('Symbol cannot be defined: no scope available');
 
-    if (name === '_1') debugger;
-
     if (name.length === 0 || !isValidIdentifier(name))
       throw Error(`Invalid identifier "${name}": ${validateIdentifier(name)}}`);
 
-    this.context.ids ??= new Map();
+    return this._defineSymbol(name, def);
+  }
+
+  _defineSymbol(name: string, def: SymbolDefinition): BoxedSymbolDefinition {
+    this.context!.ids ??= new Map();
 
     const boxedDef = new _BoxedSymbolDefinition(this, name, def);
-    if (boxedDef.name) this.context.ids.set(boxedDef.name, boxedDef);
+    if (boxedDef.name) this.context!.ids.set(boxedDef.name, boxedDef);
 
     return boxedDef;
   }
@@ -869,11 +869,18 @@ export class ComputeEngine implements IComputeEngine {
     if (name.length === 0 || !isValidIdentifier(name))
       throw Error(`Invalid identifier "${name}": ${validateIdentifier(name)}}`);
 
-    this.context.ids ??= new Map();
+    return this._defineFunction(name, def);
+  }
+
+  _defineFunction(
+    name: string,
+    def: FunctionDefinition
+  ): BoxedFunctionDefinition {
+    this.context!.ids ??= new Map();
 
     const boxedDef = makeFunctionDefinition(this, name, def);
 
-    if (boxedDef.name) this.context.ids.set(name, boxedDef);
+    if (boxedDef.name) this.context!.ids.set(boxedDef.name, boxedDef);
 
     return boxedDef;
   }
@@ -917,6 +924,67 @@ export class ComputeEngine implements IComputeEngine {
     return this;
   }
 
+  swapScope(scope: RuntimeScope | null): RuntimeScope | null {
+    const oldScope = this.context;
+    this.context = scope;
+    return oldScope;
+  }
+
+  _printScope(scope?: RuntimeScope | null, depth = 0): void {
+    scope ??= this.context;
+    if (!scope) return;
+    const undef = `${YELLOW}[undefined]${RESET}`;
+    console.group(
+      !scope.parentScope
+        ? `root scope - level ${depth}`
+        : depth === 0
+        ? 'current scope - level 0'
+        : `scope - level ${depth}`
+    );
+    if (scope.ids) {
+      let count = 0;
+      for (const [k, v] of scope.ids) {
+        const id = `${CYAN}${k}${RESET}`;
+        try {
+          if (v instanceof _BoxedSymbolDefinition) {
+            const val = v.value?.isValid
+              ? v.value.toString()
+              : v.value
+              ? `${INVERSE_RED}${v.value!.toString()}${RESET}`
+              : undef;
+            console.log(`${id}: ${v.domain?.toString() ?? undef} = ${val}`);
+          } else if (v instanceof _BoxedFunctionDefinition) {
+            if (typeof v.signature.evaluate === 'function')
+              console.log(`${id}(): ${v.signature.evaluate.toString()}`);
+            else if (v.signature.evaluate === undefined)
+              console.log(`${id}(): ${undef}`);
+            else console.log(`${id}(): ${k.toString()}`);
+          }
+          count += 1;
+          if (count === 11) {
+            console.groupCollapsed(`... and ${scope.ids.size - count} more`);
+          }
+        } catch (err) {
+          console.log(`${id}: ${INVERSE_RED}${err.message}${RESET}`);
+        }
+      }
+      if (count > 10) console.groupEnd();
+    }
+    if (scope.assumptions) {
+      const assumptions = [...scope.assumptions.entries()].map(
+        ([k, v]) => `${k}: ${v}`
+      );
+      if (assumptions.length > 0) {
+        console.groupCollapsed(`${assumptions.length} assumptions)`);
+        for (const a of assumptions) console.log(a);
+        console.groupEnd();
+      }
+    }
+    if (scope.parentScope) this._printScope(scope.parentScope, depth + 1);
+
+    console.groupEnd();
+  }
+
   /**
    * Declare one or more identifiers:
    *
@@ -957,6 +1025,8 @@ export class ComputeEngine implements IComputeEngine {
     // be a plain identifier.
     const [id, args] = parseFunctionSignature(arg1);
     if (args !== undefined) {
+      // ce.declare("f(x)", ["Add", "x", 1]) is not valid: the second argument
+      // should be a domain or a definition. Use ce.assign() instead.
       throw Error(
         `Unexpected arguments with ${arg1}. Use 'ce.assign()' instead to assign a value, or a use a function definition with 'ce.declare()'.`
       );
@@ -1031,7 +1101,6 @@ export class ComputeEngine implements IComputeEngine {
     arg1: string | { [id: string]: SetValue },
     arg2?: SetValue
   ): IComputeEngine {
-    if (arg1 === '_1') debugger;
     //
     // If we got an object literal, call `assign` for each entry
     //
@@ -1046,7 +1115,19 @@ export class ComputeEngine implements IComputeEngine {
     // Cannot set the value of 'Nothing'
     if (id === 'Nothing') return this;
 
-    const value = arg2 as SetValue;
+    let value = arg2 as SetValue;
+
+    //
+    // Is the value a LaTeX string (starts/ends with $ or $$)?
+    //
+    if (typeof value === 'string') {
+      const latex = value.trim();
+      if (latex.startsWith('$') && latex.endsWith('$')) {
+        value = this.parse(latex.slice(1, -1), { canonical: false });
+      } else if (latex.startsWith('$$') && latex.endsWith('$$')) {
+        value = this.parse(latex.slice(2, -2), { canonical: false });
+      }
+    }
 
     //
     // 1. The identifier was declared as a symbol in this scope
@@ -1087,7 +1168,7 @@ export class ComputeEngine implements IComputeEngine {
       // Will replace definition if it already exists
       if (typeof value === 'function') {
         this.defineFunction(id, {
-          signature: { domain: 'Function', evaluate: value },
+          signature: { domain: 'Functions', evaluate: value },
         });
         return this;
       }
@@ -1097,7 +1178,7 @@ export class ComputeEngine implements IComputeEngine {
         : this.box(value).evaluate();
 
       this.defineFunction(id, {
-        signature: { domain: 'Function', evaluate: val },
+        signature: { domain: 'Functions', evaluate: val },
       });
 
       return this;
@@ -1109,21 +1190,83 @@ export class ComputeEngine implements IComputeEngine {
     //
 
     if (value === undefined || value === null) {
-      if (args) this.defineFunction(id, { signature: { domain: 'Function' } });
+      if (args) this.defineFunction(id, { signature: { domain: 'Functions' } });
       else this.defineSymbol(id, { domain: 'Anything' });
       return this;
     }
 
-    if (
-      typeof value === 'function' ||
-      args ||
-      (Array.isArray(value) && head(value as Expression) === 'Function') ||
-      (value instanceof _BoxedExpression && value.head === 'Function')
-    ) {
+    //
+    // Is it a JS function?
+    //
+    if (typeof value === 'function') {
       this.defineFunction(id, {
-        signature: { domain: 'Function', evaluate: value },
+        signature: { domain: 'Functions', evaluate: value },
       });
       return this;
+    }
+
+    //
+    // Is it an expression using anonymous parameters or unknowns,
+    // or where there arguments declared?
+    //
+    if (Array.isArray(value) || value instanceof _BoxedExpression || args) {
+      // This is a semi-boxed function expression i.e.
+      // - a function: `["Add", "x", 1]` or `["Add", "_", 1]`
+      // - or a value: ["Add", 1, 2]`
+
+      // Get a non-canonical version: we don't want to have unknowns declared
+      // as a side effect of canonicalization.
+      let expr = this.box(value, { canonical: false });
+
+      if (expr.head === 'Function') {
+        // If no arguments are specified in the signature, add the 'args'
+        expr = this.box([
+          'Function',
+          ...expr.ops!,
+          ...(args ?? []).map((x) => this.symbol(x)),
+        ]);
+        this.defineFunction(id, {
+          signature: { domain: 'Functions', evaluate: expr },
+        });
+        return this;
+      }
+
+      const unknowns = [...expr.unknowns].sort();
+      if (unknowns.length === 0) {
+        // This is a value, not a function: define a symbol
+        const value = expr.evaluate();
+        this.defineSymbol(id, { domain: inferDomain(value), value });
+        return this;
+      }
+
+      // Probably an anonymous function. The unknowns are the parameters.
+
+      // Check if unknowns includes "_" or "_n" where n is a digit
+      if (unknowns.some((x) => x === '_' || x.startsWith('_'))) {
+        // This is a function
+        expr = this.box(['Function', ...expr.ops!]);
+        this.defineFunction(id, {
+          signature: { domain: 'Functions', evaluate: expr },
+        });
+        return this;
+      }
+
+      // We had some unknowns, but they are not anonymous parameters
+      if (args && args.length > 0) {
+        this.pushScope();
+        expr = this.box(['Function', expr, ...args]);
+        this.popScope();
+        this.defineFunction(id, {
+          signature: { domain: 'Functions', evaluate: expr },
+        });
+        return this;
+      }
+
+      // This is a value, not a function: define a symbol
+      // e.g `ce.assign("f", ["Add", "x", 1]))` : no argument declared
+      // use `ce.assign("f(x)", ["Add", "x", 1]))` instead
+      // or `ce.assign("f", ["Function", ["Add", "x", 1], "x"])`
+      value = expr.evaluate();
     }
 
     // It's not a function, it's a symbol
@@ -1133,6 +1276,34 @@ export class ComputeEngine implements IComputeEngine {
     // which is generally more useful
     this.defineSymbol(id, { domain: dom.isNumeric ? 'Number' : dom, value });
 
+    return this;
+  }
+
+  /**
+   * Same as assign(), but for internal use:
+   * - skips validity checks
+   * - does not auto-declare
+   * - if assigning to a function, must pass a JS function
+   *
+   * @internal
+   */
+
+  _assign(id: string, value: SetValue): IComputeEngine {
+    const symDef = this.lookupSymbol(id);
+    if (symDef) {
+      console.assert(typeof value !== 'function');
+      symDef.value = this.box(value as SemiBoxedExpression).evaluate();
+    } else {
+      const fnDef = this.lookupFunction(id);
+      if (fnDef) {
+        console.assert(typeof value == 'function');
+        fnDef.signature = {
+          domain: fnDef.signature.domain,
+          evaluate: value as () => any,
+        };
+      }
+    }
+    console.assert(false, `Cannot assign to undeclared symbol "${id}"`);
     return this;
   }
 
@@ -1229,7 +1400,6 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedFunction(this, head, ops, {
       metadata,
       canonical: true,
-      def: this.lookupFunction(head),
     });
   }
 
@@ -1291,7 +1461,6 @@ export class ComputeEngine implements IComputeEngine {
 
     const result = canonicalAdd(this, flattenOps(flattenSequence(ops), 'Add'));
     if (metadata?.latex !== undefined) result.latex = metadata.latex;
-    if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
 
@@ -1308,7 +1477,6 @@ export class ComputeEngine implements IComputeEngine {
       flattenOps(flattenSequence(ops), ' Multiply')
     );
     if (metadata?.latex !== undefined) result.latex = metadata.latex;
-    if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
 
@@ -1321,7 +1489,6 @@ export class ComputeEngine implements IComputeEngine {
 
     const result = canonicalDivide(this, num, denom);
     if (metadata?.latex !== undefined) result.latex = metadata.latex;
-    if (metadata?.wikidata !== undefined) result.wikidata = metadata.wikidata;
     return result;
   }
 
@@ -1784,16 +1951,4 @@ export class ComputeEngine implements IComputeEngine {
       }
     }
   }
-}
-
-/** Give a string like "f(x,y)" return, ["f", ["x", "y"]]
- */
-function parseFunctionSignature(
-  s: string
-): [id: string, args: string[] | undefined] {
-  const m = s.match(/(.+)\((.*)\)/);
-  if (!m) return [s, undefined];
-  const id = m[1];
-  const args = m[2].split(',').map((x) => x.trim());
-  return [id, args];
 }

@@ -11,6 +11,7 @@ import {
   stripText,
   isListLike,
   isEmptySequence,
+  symbol,
 } from '../../../math-json/utils';
 import { LatexDictionary, Parser, Serializer, Terminator } from '../public';
 import { joinLatex } from '../tokenizer';
@@ -97,6 +98,59 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   //
   // Functions
   //
+
+  // Anonymous function, i.e. `(x) \mapsto x^2`
+  {
+    name: 'Function',
+    latexTrigger: ['\\mapsto'],
+    kind: 'infix',
+    precedence: 270, // MathML rightwards arrow
+    parse: (parser: Parser, lhs: Expression) => {
+      let params: string[] = [];
+      if (head(lhs) === 'Delimiter') lhs = op(lhs, 1) ?? 'Nothing';
+      if (head(lhs) === 'Sequence') {
+        for (const x of ops(lhs) ?? []) {
+          if (symbol(x)) params.push(symbol(x)!);
+          else return null;
+        }
+      } else {
+        if (symbol(lhs)) params = [symbol(lhs)!];
+        else return null;
+      }
+
+      let rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
+      if (head(rhs) === 'Delimiter') rhs = op(rhs, 1) ?? 'Nothing';
+      if (head(rhs) === 'Sequence') rhs = ['Block', ...(ops(rhs) ?? [])];
+
+      return ['Function', rhs, ...params];
+    },
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const args = ops(expr);
+      if (args === null || args.length < 1) return '()\\mapsto()';
+      if (args.length === 1)
+        return joinLatex(['()', '\\mapsto', serializer.serialize(op(expr, 1))]);
+
+      if (args.length === 2) {
+        return joinLatex([
+          serializer.serialize(op(expr, 2)),
+          '\\mapsto',
+          serializer.serialize(op(expr, 1)),
+        ]);
+      }
+
+      return joinLatex([
+        serializer.wrapString(
+          (ops(expr)?.slice(1) ?? [])
+            .map((x) => serializer.serialize(x))
+            .join(', '),
+          'paren'
+        ),
+        '\\mapsto',
+        serializer.serialize(op(expr, 1)),
+      ]);
+    },
+  },
+
   {
     name: 'Apply',
     kind: 'function',
@@ -119,6 +173,41 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return ['Apply', rhs, lhs];
     },
   },
+
+  {
+    name: 'Assign',
+    kind: 'function',
+    latexTrigger: '\\coloneqq',
+    precedence: 260,
+    parse: (parser: Parser, lhs: Expression) => {
+      const rhs = parser.parseExpression({ minPrec: 260 }) ?? 'Nothing';
+      return ['Assign', lhs, rhs];
+    },
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      return joinLatex([
+        serializer.serialize(op(expr, 1)),
+        '\\coloneqq',
+        serializer.serialize(op(expr, 2)),
+      ]);
+    },
+  },
+  {
+    kind: 'function',
+    latexTrigger: ':=', // \coloneqq
+    parse: (parser: Parser, lhs: Expression) => {
+      const rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
+      return ['Assign', lhs, rhs];
+    },
+  },
+  {
+    kind: 'function',
+    latexTrigger: '\\colonequals', // \coloneqq
+    parse: (parser: Parser, lhs: Expression) => {
+      const rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
+      return ['Assign', lhs, rhs];
+    },
+  },
+
   {
     name: 'BaseForm',
     serialize: (serializer, expr) => {
@@ -732,7 +821,7 @@ function sanitizeLatex(s: string | null): string {
         ']': '\\rbrack ',
         ':': '\\colon ',
         '\\': '\\backslash ',
-      }[c] ?? '\\' + c)
+      })[c] ?? '\\' + c
   );
 }
 

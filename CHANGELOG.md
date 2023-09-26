@@ -7,51 +7,80 @@
 - The method `ce.assume()` requires a predicate.
 - The signatures of `ce.assume()` and `ce.ask()` have been simplified.
 - The signature of `ce.pushScope()` has been simplified.
+- The `expr.freeVars` property has been renamed to `expr.unknowns`. It returns
+  the identifiers used in the expression that do not have a value associated
+  with them. The `expr.freeVariables` property now return the identifiers used
+  in the expression that are defined outside of the local scope and are not
+  arguments of the function, if a function.
 
 ## New Features
 
-- Added `Assume`, `Identity`, `Which`, `FixedPoint`, `Parse`, `Block`, `If`,
-  `Loop`, `N`, `Evaluate`, `Simplify`, `Domain`.
+- Added `Assume`, `Identity`, `Which`, `Parse`, `N`, `Evaluate`, `Simplify`,
+  `Domain`.
 
-- Added `Break`, `Continue` and `Return` statements
+- Assignments in LaTeX: `x \\coloneq 42` produce `["Assign", "x", 42]`
 
 - Added `ErfInv` (inverse error function)
 
-- Added 'Factorial2' (double factorial)
+- Added `Factorial2` (double factorial)
 
-- Added implementation for numeric approximation of derivatives (using an 8-th
-  order centered difference approximation) and integrals (using a Monte Carlo
-  method with rebasing for improper integrals) using the `["ND"]` and
-  `["NIntegrate"]` functions.
+## Functions
 
-- Added support for **collections** such as lists, tuples, ranges, etc... See
-  https://cortexjs.io/compute-engine/reference/collections/
+- Functions can now be defined:
+  - using `ce.assign()` or `ce.declare()`
+  - evaluating LaTeX: `(x, y) \\mapsto x^2 + y^2`
+  - evaluating MathJSON:
+    `["Function", ["Add", ["Power", "x", 2], ["Power", "y", 2]]], "x", "y"]`
 
-  Collections can be used to represent various data structures, such as lists,
-  vectors, matrixes and more.
+See http://localhost:8080/compute-engine/guides/augmenting/ and
+https://cortexjs.io/compute-engine/reference/functions/
 
-  They can be iterated, sliced, filtered, mapped, etc...
+## Control Structures
 
-  ```json example
-  ["Length", ["List", 19, 23, 5]]
-  // -> 3
+- Added `FixedPoint`, `Block`, `If`, `Loop`
+- Added `Break`, `Continue` and `Return` statements
 
-  ["IsEmpty", ["Range", 1, 10]]
-  // -> "False"
+See https://cortexjs.io/compute-engine/reference/control-structures/
 
-  ["Take", ["Linspace", 0, 100, 50], 4]
-  // -> ["List", 0, 2, 4, 6]
+### Calculus
 
-  ["Map", ["List", 1, 2, 3], ["Function", "x", ["Power", "x", 2]]]
-  // -> ["List", 1, 4, 9]
+- Added numeric approximation of derivatives, using an 8-th order centered
+  difference approximation, with the `ND` function.
+- Added numeric approximation of integrals, using a Monte Carlo method with
+  rebasing for improper integrals, with the `NIntegrate` function
+- Added symbolic calculation of derivatives with the `D` function.
 
-  ["Exclude", ["List", 33, 45, 12, 89, 65], -2, 2]
-  // -> ["List", 33, 12, 65]
+### Collections
+
+Added support for **collections** such as lists, tuples, ranges, etc...
+
+See https://cortexjs.io/compute-engine/reference/collections/
+
+Collections can be used to represent various data structures, such as lists,
+vectors, matrixes and more.
+
+They can be iterated, sliced, filtered, mapped, etc...
+
+```json example
+["Length", ["List", 19, 23, 5]]
+// -> 3
+
+["IsEmpty", ["Range", 1, 10]]
+// -> "False"
+
+["Take", ["Linspace", 0, 100, 50], 4]
+// -> ["List", 0, 2, 4, 6]
+
+["Map", ["List", 1, 2, 3], ["Function", "x", ["Power", "x", 2]]]
+// -> ["List", 1, 4, 9]
+
+["Exclude", ["List", 33, 45, 12, 89, 65], -2, 2]
+// -> ["List", 33, 12, 65]
 
 
-  ["First", ["List", 33, 45, 12, 89, 65]]
-  // -> 33
-  ```
+["First", ["List", 33, 45, 12, 89, 65]]
+// -> 33
+```
 
 ## Improvements
 
@@ -632,7 +661,7 @@ It is also possible to evaluate a boolean expression with a relational operator,
 such as `Equal`:
 
 ```ts
-console.log(ce.box(['Equal', expr, 2]).evaluate().symbol);
+console.log(ce.box(["Equal", expr, 2]).evaluate().symbol);
 // -> "True"
 
 console.log(expr.isEqual(ce.box(2)));

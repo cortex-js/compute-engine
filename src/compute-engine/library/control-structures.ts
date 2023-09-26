@@ -4,19 +4,23 @@ import {
   IComputeEngine,
   IdentifierDefinitions,
 } from '../public';
-import { applicable, apply, iterable } from '../function-utils';
+import { applicable, iterable } from '../function-utils';
 import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {
     Block: {
-      signature: { domain: 'Function', evaluate: evaluateBlock },
+      signature: {
+        domain: 'Functions',
+        canonical: canonicalBlock,
+        evaluate: evaluateBlock,
+      },
     },
 
     If: {
       hold: 'rest', // Evaluate the condition, but no the true/false branches
       signature: {
-        domain: 'Function',
+        domain: 'Functions',
         codomain: (ce, ops) => ce.domain(['Union', ops[0], ops[1]]),
         evaluate: (ce, ops) => {
           const cond = ops[0];
@@ -30,7 +34,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
     Loop: {
       hold: 'all', // Do not evaluate anything
       signature: {
-        domain: 'Function',
+        domain: 'Functions',
         evaluate: (ce, ops) => {
           const body = ops[0] ?? ce.symbol('Nothing');
           if (body.isNothing) return body;
@@ -75,7 +79,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
     Which: {
       hold: 'all',
       signature: {
-        domain: 'Function',
+        domain: 'Functions',
         codomain: (ce, ops) => domainWhich(ce, ops),
         evaluate: (ce, ops) => whichEvaluate(ce, ops, 'evaluate'),
       },
@@ -84,7 +88,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
     FixedPoint: {
       hold: 'all',
       signature: {
-        domain: 'Function',
+        domain: 'Functions',
         // @todo
       },
     },
@@ -125,8 +129,6 @@ function evaluateBlock(
   // Empty block?
   if (ops.length === 0) return ce.symbol('Nothing');
 
-  ce.pushScope();
-
   let result: BoxedExpression | undefined = undefined;
   for (const op of ops) {
     result = op.evaluate();
@@ -134,7 +136,50 @@ function evaluateBlock(
     if (h === 'Return' || h === 'Break' || h === 'Continue') break;
   }
 
-  ce.popScope();
-
   return result ?? ce.symbol('Nothing');
+}
+
+/**
+ *
+ *  Canonicalize a Block expression
+ *
+ * - Hoist any `Declare` expression to the top of the block
+ * - Add a `Declare` expression for any `Assign` expression
+ * - Error for any `Declare` expression that's an argument to a function
+ *
+ */
+
+function canonicalBlock(
+  ce: IComputeEngine,
+  ops: BoxedExpression[]
+): BoxedExpression | null {
+  // Empty block?
+  if (ops.length === 0) return null;
+
+  const declarations: BoxedExpression[] = [];
+  const body: BoxedExpression[] = [];
+  for (const op of ops) {
+    if (op.head === 'Declare') {
+      declarations.push(op);
+    } else if (op.head === 'Assign') {
+      const id = op.op1.symbol!;
+      const def = ce.lookupSymbol(id) ?? ce.lookupFunction(id);
+      if (!def) {
+        declarations.push(
+          ce._fn('Declare', [op.op1, ce.defaultDomain ?? ce.domain('Anything')])
+        );
+      }
+    } else body.push(invalidateDeclare(op));
+  }
+
+  return ce._fn('Block', [...declarations, ...body]);
+}
+
+function invalidateDeclare(expr: BoxedExpression): BoxedExpression {
+  if (expr.head === 'Declare') expr.engine.error('unexpected-declare');
+
+  if (expr.ops)
+    return expr.engine._fn(expr.head, expr.ops.map(invalidateDeclare));
+
+  return expr;
 }

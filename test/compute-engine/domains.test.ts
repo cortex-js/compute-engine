@@ -124,7 +124,7 @@ describe('DOMAIN LITERALS', () => {
   });
   test('RealNumber <: Value', () => {
     expect(
-      engine.domain('RealNumber').isCompatible(engine.domain('Value'))
+      engine.domain('RealNumber').isCompatible(engine.domain('Values'))
     ).toBeTruthy();
   });
   test('RealNumber <: Domain', () => {
@@ -227,46 +227,46 @@ describe('INVALID DOMAINS', () => {
   });
 
   test('NotADomainLiteral in parametric expression', () =>
-    expect(() => engine.domain(['Function', 'NotADomainLiteral'])).toThrow());
+    expect(() => engine.domain(['Functions', 'NotADomainLiteral'])).toThrow());
 });
 
 // describe('SYMBOLS, FUNCTION HEADS', () => {});
 
 describe.skip('FUNCTION SIGNATURES', () => {
-  test("['Function', 'PositiveInteger', 'Anything'] <: ['Function', 'Number', 'Number']", () => {
+  test("['Functions', 'PositiveInteger', 'Anything'] <: ['Functions', 'Number', 'Number']", () => {
     expect(
       engine
-        .domain(['Function', 'PositiveInteger', 'Anything'])
-        .isCompatible(engine.domain(['Function', 'Number', 'Number']))
+        .domain(['Functions', 'PositiveInteger', 'Anything'])
+        .isCompatible(engine.domain(['Functions', 'Number', 'Number']))
     ).toBeTruthy();
   });
 
-  test("['Function', 'PositiveInteger', 'Anything'] <: ['Function', 'Number', ['Maybe', 'String'],'Number']", () => {
+  test("['Functions', 'PositiveInteger', 'Anything'] <: ['Functions', 'Number', ['Maybe', 'String'],'Number']", () => {
     expect(
       engine
-        .domain(['Function', 'PositiveInteger', 'Anything'])
+        .domain(['Functions', 'PositiveInteger', 'Anything'])
         .isCompatible(
-          engine.domain(['Function', 'Number', ['Maybe', 'String'], 'Number'])
+          engine.domain(['Functions', 'Number', ['Maybe', 'String'], 'Number'])
         )
     ).toBeTruthy();
   });
 
-  test("['Function', 'PositiveInteger',  'String', 'Anything'] <: ['Function', 'Number', ['Maybe', 'String'], 'Number']", () => {
+  test("['Functions', 'PositiveInteger',  'String', 'Anything'] <: ['Functions', 'Number', ['Maybe', 'String'], 'Number']", () => {
     expect(
       engine
-        .domain(['Function', 'PositiveInteger', 'String', 'Anything'])
+        .domain(['Functions', 'PositiveInteger', 'String', 'Anything'])
         .isCompatible(
-          engine.domain(['Function', 'Number', ['Maybe', 'String'], 'Number'])
+          engine.domain(['Functions', 'Number', ['Maybe', 'String'], 'Number'])
         )
     ).toBeTruthy();
   });
 
-  test("['Function', 'PositiveInteger',  'Boolean', 'Anything'] <: ['Function', 'Number', ['Maybe', 'String'], 'Number']", () => {
+  test("['Functions', 'PositiveInteger',  'Boolean', 'Anything'] <: ['Functions', 'Number', ['Maybe', 'String'], 'Number']", () => {
     expect(
       engine
-        .domain(['Function', 'PositiveInteger', 'Boolean', 'Anything'])
+        .domain(['Functions', 'PositiveInteger', 'Boolean', 'Anything'])
         .isCompatible(
-          engine.domain(['Function', 'Number', ['Maybe', 'String'], 'Number'])
+          engine.domain(['Functions', 'Number', ['Maybe', 'String'], 'Number'])
         )
     ).toBeFalsy();
   });

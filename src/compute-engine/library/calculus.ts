@@ -1,5 +1,5 @@
 import { validateArgument } from '../boxed-expression/validate';
-import { makeScopedLambda1 } from '../function-utils';
+import { applicableN1 } from '../function-utils';
 import { centeredDiff8thOrder, monteCarloEstimate } from '../numerics/numeric';
 import { BoxedExpression, IdentifierDefinitions } from '../public';
 import { partialDerivative } from '../symbolic/derivative';
@@ -70,10 +70,10 @@ volumes
       hold: 'all',
       signature: {
         domain: [
-          'Function',
+          'Functions',
           'Symbol',
           ['Maybe', 'Number'], // The order of the derivative
-          'Function',
+          'Functions',
         ],
         canonical: (ce, ops) => {
           // Is it a function name, i.e. ["Derivative", "Sin"]?
@@ -111,7 +111,7 @@ volumes
 
     D: {
       signature: {
-        domain: ['Function', 'Function', ['Sequence', 'Symbol'], 'Function'],
+        domain: ['Functions', 'Functions', ['Sequence', 'Symbol'], 'Functions'],
         evaluate: (ce, ops) => {
           let f = ops[0];
           // Iterate aver all variables
@@ -134,18 +134,13 @@ volumes
     ND: {
       hold: 'first',
       signature: {
-        domain: ['Function', 'Function', 'Number', 'Function'],
+        domain: ['Functions', 'Functions', 'Number', 'Functions'],
         N: (ce, ops) => {
           const x = ops[1]?.valueOf();
           if (typeof x !== 'number') return undefined;
 
-          const f = makeScopedLambda1(ops[0]);
-          if (!f) return undefined;
-          ce.pushScope(); // Need a scope for the anonymous parameters
-          ce.declare('_1', { domain: 'Number' });
-          const result = ce.number(centeredDiff8thOrder(f, x, 1e-6));
-          ce.popScope();
-          return result;
+          const f = applicableN1(ops[0]);
+          return ce.number(centeredDiff8thOrder(f, x, 1e-6));
         },
       },
     },
@@ -155,8 +150,8 @@ volumes
       hold: 'all',
       signature: {
         domain: [
-          'Function',
-          'Function',
+          'Functions',
+          'Functions',
           ['Union', 'Nothing', 'Tuple', 'Symbol'],
           // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
           'Number',
@@ -215,17 +210,12 @@ volumes
     NIntegrate: {
       hold: 'first',
       signature: {
-        domain: ['Function', 'Function', 'Number', 'Number', 'Number'],
+        domain: ['Functions', 'Functions', 'Number', 'Number', 'Number'],
         evaluate: (ce, ops) => {
-          const f = makeScopedLambda1(ops[0]);
-          if (!f) return undefined;
+          const f = applicableN1(ops[0]);
           const [a, b] = ops.slice(1).map((op) => op.valueOf());
           if (typeof a !== 'number' || typeof b !== 'number') return undefined;
-          ce.pushScope(); // Need a scope for the anonymous parameters
-          ce.declare('_1', { domain: 'Number' });
-          const result = ce.number(monteCarloEstimate(f, a, b));
-          ce.popScope();
-          return result;
+          return ce.number(monteCarloEstimate(f, a, b));
         },
       },
     },

@@ -15,7 +15,7 @@ export const engine = new ComputeEngine();
 engine.precision = 100; // Some arithmetic test cases assume a precision of at least 100
 // engine.jsonSerializationOptions.precision = 32;
 
-engine.assume(['Element', 'f', 'Function']);
+engine.assume(['Element', 'f', 'Functions']);
 
 const rawLatex = new LatexSyntax({
   computeEngine: engine,

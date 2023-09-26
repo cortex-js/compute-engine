@@ -107,11 +107,11 @@ export function inferDomain(expr: SemiBoxedExpression): DomainLiteral {
 
   if (isDictionaryObject(expr as Expression)) return 'Dictionary';
 
-  if (isFunctionObject(expr as Expression)) return 'Function';
+  if (isFunctionObject(expr as Expression)) return 'Functions';
 
-  if (typeof expr === 'function') return 'Function';
+  if (typeof expr === 'function') return 'Functions';
 
-  if (Array.isArray(expr)) return 'Function';
+  if (Array.isArray(expr)) return 'Functions';
 
   if (isNumberObject(expr as Expression)) {
     const value = machineValue(expr as Expression);

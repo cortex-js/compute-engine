@@ -25,7 +25,12 @@ import {
   Rational,
   BoxedSubstitution,
 } from '../public';
-import { getFreeVars, getSubexpressions, getSymbols } from './utils';
+import {
+  getUnknowns,
+  getSubexpressions,
+  getSymbols,
+  getFreeVariables,
+} from './utils';
 import { isBigRational, isMachineRational } from '../numerics/rationals';
 import { asFloat } from '../numerics/numeric';
 import { compileToJavascript } from '../compile';
@@ -50,17 +55,14 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   readonly engine: IComputeEngine;
 
-  /** Verbatim LaTeX, obtained from a source, i.e. from parsing, not generated
-   * synthetically
+  /** Verbatim LaTeX, obtained from a source, i.e. from parsing,
+   *  not generated synthetically
    */
   protected _latex?: string;
-
-  protected _wikidata: string | undefined;
 
   constructor(ce: IComputeEngine, metadata?: Metadata) {
     this.engine = ce;
     if (metadata?.latex !== undefined) this._latex = metadata.latex;
-    if (metadata?.wikidata !== undefined) this._wikidata = metadata.wikidata;
   }
 
   /** `Object.valueOf()`: return a primitive value for the object
@@ -160,9 +162,15 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return Array.from(set);
   }
 
-  get freeVars(): string[] {
+  get unknowns(): string[] {
     const set = new Set<string>();
-    getFreeVars(this, set);
+    getUnknowns(this, set);
+    return Array.from(set);
+  }
+
+  get freeVariables(): string[] {
+    const set = new Set<string>();
+    getFreeVariables(this, set);
     return Array.from(set);
   }
 
@@ -201,11 +209,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   get isExact(): boolean {
     return true;
-  }
-
-  /** For a symbol, true if the symbol is a free variable (no value) */
-  get isFree(): boolean {
-    return false;
   }
 
   /** For a symbol, true if the symbol is a constant (unchangeable value) */
@@ -343,25 +346,27 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   get description(): string[] | undefined {
-    return undefined;
+    if (!this.baseDefinition) return undefined;
+    if (!this.baseDefinition.description) return undefined;
+    if (typeof this.baseDefinition.description === 'string')
+      return [this.baseDefinition.description];
+    return this.baseDefinition.description;
   }
 
   get url(): string | undefined {
-    return undefined;
+    return this.baseDefinition?.url ?? undefined;
   }
 
   get wikidata(): string | undefined {
-    return this._wikidata;
+    return this.baseDefinition?.wikidata ?? undefined;
   }
-  set wikidata(val: string | undefined) {
-    this._wikidata = val;
-  }
+  // set wikidata(val: string | undefined) {}
 
   get complexity(): number | undefined {
     return undefined;
   }
 
-  get basedDefinition(): BoxedBaseDefinition | undefined {
+  get baseDefinition(): BoxedBaseDefinition | undefined {
     return undefined;
   }
 

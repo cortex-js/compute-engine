@@ -39,7 +39,7 @@ export class ComputeEngineFunction extends Function {
 export function compileToJavascript(
   expr: BoxedExpression
 ): ((_: Record<string, CompiledType>) => CompiledType) | undefined {
-  const js = compile(expr, expr.freeVars);
+  const js = compile(expr, expr.unknowns);
   try {
     return new ComputeEngineFunction(js) as unknown as () => CompiledType;
   } catch (e) {
@@ -328,7 +328,7 @@ function compileLoop(expr: BoxedExpression, op: '+' | '*'): string {
 
   // @todo: if !isFinite, add tests for convergence to the generated code
 
-  const fn = compile(expr.op1, [...expr.op1.freeVars, index], 0);
+  const fn = compile(expr.op1, [...expr.op1.unknowns, index], 0);
 
   return `(() => {
   let acc = ${op === '+' ? '0' : '1'};

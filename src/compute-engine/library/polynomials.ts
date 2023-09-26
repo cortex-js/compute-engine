@@ -6,14 +6,14 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
     Expand: {
       description: 'Expand out products and positive integer powers',
       signature: {
-        domain: ['Function', 'Value', 'Value'],
+        domain: ['Functions', 'Values', 'Values'],
         evaluate: (_ce, ops) => expand(ops[0]) ?? ops[0],
       },
     },
     Distribute: {
       description: 'Distribute multiplication over addition',
       signature: {
-        domain: ['Function', 'Value', 'Value'],
+        domain: ['Functions', 'Values', 'Values'],
         evaluate: (ce, ops) => {
           const h = ops[0].head;
           if (h === 'Multiply') return distribute(ops[0].ops!) ?? ops[0];
