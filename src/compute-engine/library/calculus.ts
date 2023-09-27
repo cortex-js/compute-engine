@@ -71,8 +71,8 @@ volumes
       signature: {
         domain: [
           'Functions',
-          'Symbol',
-          ['Maybe', 'Number'], // The order of the derivative
+          'Symbols',
+          ['Maybe', 'Numbers'], // The order of the derivative
           'Functions',
         ],
         canonical: (ce, ops) => {
@@ -111,7 +111,12 @@ volumes
 
     D: {
       signature: {
-        domain: ['Functions', 'Functions', ['Sequence', 'Symbol'], 'Functions'],
+        domain: [
+          'Functions',
+          'Functions',
+          ['Sequence', 'Symbols'],
+          'Functions',
+        ],
         evaluate: (ce, ops) => {
           let f = ops[0];
           // Iterate aver all variables
@@ -134,7 +139,7 @@ volumes
     ND: {
       hold: 'first',
       signature: {
-        domain: ['Functions', 'Functions', 'Number', 'Functions'],
+        domain: ['Functions', 'Functions', 'Numbers', 'Functions'],
         N: (ce, ops) => {
           const x = ops[1]?.valueOf();
           if (typeof x !== 'number') return undefined;
@@ -152,9 +157,9 @@ volumes
         domain: [
           'Functions',
           'Functions',
-          ['Union', 'Nothing', 'Tuple', 'Symbol'],
-          // ['Tuple', 'Symbol', ['Maybe', 'Integer'], ['Maybe', 'Integer']],
-          'Number',
+          ['Union', 'Nothing', 'Tuples', 'Symbols'],
+          // ['Tuple', 'Symbols', ['Maybe', 'Integers'], ['Maybe', 'Integers']],
+          'Numbers',
         ],
         canonical: (ce, ops) => {
           const body = ops[0] ?? ce.error('missing');
@@ -185,11 +190,11 @@ volumes
             index = index.op1.evaluate();
           index ??= ce.symbol('Nothing');
           if (!index.symbol)
-            index = ce.error(['incompatible-domain', 'Symbol', index.domain]);
+            index = ce.error(['incompatible-domain', 'Symbols', index.domain]);
 
           // The range bounds, if present, should be numbers
-          if (lower) lower = validateArgument(ce, lower, 'Number');
-          if (upper) upper = validateArgument(ce, upper, 'Number');
+          if (lower) lower = validateArgument(ce, lower, 'Numbers');
+          if (upper) upper = validateArgument(ce, upper, 'Numbers');
           if (lower && upper) range = ce.tuple([index, lower, upper]);
           else if (upper)
             range = ce.tuple([index, ce._NEGATIVE_INFINITY, upper]);
@@ -210,7 +215,7 @@ volumes
     NIntegrate: {
       hold: 'first',
       signature: {
-        domain: ['Functions', 'Functions', 'Number', 'Number', 'Number'],
+        domain: ['Functions', 'Functions', 'Numbers', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
           const f = applicableN1(ops[0]);
           const [a, b] = ops.slice(1).map((op) => op.valueOf());

@@ -15,7 +15,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   // Constants
   //
   EmptySet: {
-    domain: 'Set',
+    domain: 'Sets',
     constant: true,
     wikidata: 'Q226183',
     // contains: () => false, // @todo not quite true...
@@ -28,7 +28,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     complexity: 11200,
     hold: 'all',
     signature: {
-      domain: 'Predicate',
+      domain: 'Predicates',
       canonical: (ce, args) => {
         args = validateArgumentCount(ce, flattenSequence(canonical(args)), 2);
         if (args.length === 2 && isValidDomain(args[1]))
@@ -42,52 +42,52 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     complexity: 11200,
     hold: 'all',
     signature: {
-      domain: 'Predicate',
+      domain: 'Predicates',
       canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
     },
   },
   Subset: {
     complexity: 11200,
-    signature: { domain: 'Predicate' },
+    signature: { domain: 'Predicates' },
   },
   NotSubset: {
     complexity: 11200,
     signature: {
-      domain: 'Predicate',
+      domain: 'Predicates',
       canonical: (ce, args) => ce.fn('Not', [ce.fn('Subset', args)]),
     },
   },
   Superset: {
     complexity: 11200,
-    signature: { domain: 'Predicate' },
+    signature: { domain: 'Predicates' },
   },
   SupersetEqual: {
     complexity: 11200,
-    signature: { domain: 'Predicate' },
+    signature: { domain: 'Predicates' },
   },
   NotSuperset: {
     complexity: 11200,
     signature: {
-      domain: 'Predicate',
+      domain: 'Predicates',
       canonical: (ce, args) => ce.fn('Not', [ce.fn('Superset', args)]),
     },
   },
   NotSupersetEqual: {
     complexity: 11200,
     signature: {
-      domain: 'Predicate',
+      domain: 'Predicates',
       canonical: (ce, args) => ce.fn('Not', [ce.fn('SupersetEqual', args)]),
     },
   },
   SubsetEqual: {
     complexity: 11200,
-    signature: { domain: 'Predicate' },
+    signature: { domain: 'Predicates' },
     // evaluate: subsetEqual,
   },
   NotSubsetNotEqual: {
     complexity: 11200,
     signature: {
-      domain: 'Predicate',
+      domain: 'Predicates',
       canonical: (ce, args) => ce.fn('Not', [ce.fn('SubsetEqual', args)]),
     },
   },
@@ -100,14 +100,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     // Aka the product set, the set direct product or cross product
     // Notation: \times
     wikidata: 'Q173740',
-    signature: { domain: ['Functions', 'Set', ['Sequence', 'Set'], 'Set'] },
+    signature: { domain: ['Functions', 'Sets', ['Sequence', 'Sets'], 'Sets'] },
     // evaluate: cartesianProduct,
   },
   Complement: {
     // Return the elements of the first argument that are not in any of
     // the subsequent lists
     wikidata: 'Q242767',
-    signature: { domain: ['Functions', 'Set', 'Set'] },
+    signature: { domain: ['Functions', 'Sets', 'Sets'] },
   },
   Intersection: {
     // notation: \cap
@@ -117,7 +117,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['Functions', 'Set', ['Sequence', 'Set'], 'Set'],
+      domain: ['Functions', 'Sets', ['Sequence', 'Sets'], 'Sets'],
       evaluate: intersection,
     },
   },
@@ -129,13 +129,13 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['Functions', 'Set', ['Sequence', 'Set'], 'Set'],
+      domain: ['Functions', 'Sets', ['Sequence', 'Sets'], 'Sets'],
       evaluate: union,
     },
   },
   // {
   //   name: 'Set',
-  //   domain: ['Functions', ['Sequence', 'Anything'], 'Set'],
+  //   domain: ['Functions', ['Sequence', 'Anything'], 'Sets'],
   //   // @todo! set has multiple forms
   //   // Set(Sequence)
   //   // Set(Sequence, Condition)
@@ -144,7 +144,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   SetMinus: {
     wikidata: 'Q18192442',
     signature: {
-      domain: ['Functions', 'Set', 'Values', 'Set'],
+      domain: ['Functions', 'Sets', 'Values', 'Sets'],
       evaluate: setMinus,
     },
   },
@@ -153,7 +153,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     /* = Union(Complement(a, b), Complement(b, a) */
     /* Corresponds to XOR in boolean logic */
     wikidata: 'Q1147242',
-    signature: { domain: ['Functions', 'Set', ['Sequence', 'Set'], 'Set'] },
+    signature: { domain: ['Functions', 'Sets', ['Sequence', 'Sets'], 'Sets'] },
   },
 };
 

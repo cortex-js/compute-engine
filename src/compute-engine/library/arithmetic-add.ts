@@ -145,13 +145,13 @@ export function canonicalSummation(
   index ??= ce.symbol('Nothing');
 
   if (index.symbol) {
-    ce.declare(index.symbol, { domain: 'Integer' });
+    ce.declare(index.symbol, { domain: 'Integers' });
     index = ce.hold(index);
-  } else index = ce.error(['incompatible-domain', 'Symbol', index.domain]);
+  } else index = ce.error(['incompatible-domain', 'Symbols', index.domain]);
 
   // The range bounds, if present, should be integers numbers
-  if (lower && lower.isFinite) lower = validateArgument(ce, lower, 'Integer');
-  if (upper && upper.isFinite) upper = validateArgument(ce, upper, 'Integer');
+  if (lower && lower.isFinite) lower = validateArgument(ce, lower, 'Integers');
+  if (upper && upper.isFinite) upper = validateArgument(ce, upper, 'Integers');
 
   if (lower && upper) range = ce.tuple([index, lower, upper]);
   else if (upper) range = ce.tuple([index, ce.number(1), upper]);

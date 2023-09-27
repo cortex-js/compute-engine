@@ -3,13 +3,13 @@ import { engine as ce } from '../utils';
 describe('ELEMENT', () => {
   test(`literal`, () => {
     expect(
-      ce.box(['Element', 2, 'Integer']).evaluate().json
+      ce.box(['Element', 2, 'Integers']).evaluate().json
     ).toMatchInlineSnapshot(`True`);
     expect(
-      ce.box(['Element', 2, 'Number']).evaluate().json
+      ce.box(['Element', 2, 'Numbers']).evaluate().json
     ).toMatchInlineSnapshot(`True`);
     expect(
-      ce.box(['Element', 2, 'Boolean']).evaluate().json
+      ce.box(['Element', 2, 'Booleans']).evaluate().json
     ).toMatchInlineSnapshot(`False`);
   });
 
@@ -59,11 +59,15 @@ describe('ELEMENT', () => {
     expect(ce.box(['Element', 2]).evaluate().json).toMatchInlineSnapshot(
       `["Element", 2, ["Error", "'missing'"]]`
     );
-    expect(
-      ce.box(['Element', 2, 'Integer', 'Number']).evaluate().json
-    ).toMatchInlineSnapshot(
-      `["Element", 2, "Integer", ["Error", "'unexpected-argument'", "Number"]]`
-    );
+    expect(ce.box(['Element', 2, 'Integers', 'Numbers']).evaluate().json)
+      .toMatchInlineSnapshot(`
+      [
+        "Element",
+        2,
+        "Integers",
+        ["Error", "'unexpected-argument'", "Numbers"]
+      ]
+    `);
     expect(ce.box(['Element', 2, 3]).evaluate().json).toMatchInlineSnapshot(
       `["Element", 2, 3]`
     );

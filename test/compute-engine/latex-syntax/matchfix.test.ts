@@ -37,8 +37,8 @@ describe('MATCHFIX', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "List"]
+            ["Domain", "Numbers"],
+            ["Domain", "Lists"]
           ],
           ["List", "a", ["List", "b", "c"]]
         ]

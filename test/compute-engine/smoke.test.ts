@@ -84,9 +84,7 @@ const n1 = ce.parse('x_{1,2}');
 console.log(n1.toString());
 
 const expr200 = ce.parse('x^2').json;
-console.log(
-  ce.box(['Integrate', expr200, ['Element', 'x', ['Interval', 0, 1]]]).latex
-);
+console.log(ce.box(['Integrate', expr200, ['Tuple', 'x', 0, 1]]).latex);
 
 // console.log(engine.pattern(['Add', 1, '_']).match(engine.box(['Add', 1, 2])));
 
@@ -128,8 +126,8 @@ console.log(ce.parse('\\sqrt{15}').simplify().latex);
 // Expect_. `\sqrt15` (don't keep decomposed root expanded)
 
 // Report false. Should be true.
-const sig1 = ce.domain(['Functions', 'PositiveInteger', 'Number']);
-const sig2 = ce.domain(['Functions', 'Number', 'Number']);
+const sig1 = ce.domain(['Functions', 'PositiveIntegers', 'Numbers']);
+const sig2 = ce.domain(['Functions', 'Numbers', 'Numbers']);
 console.log(sig1.isCompatible(sig2));
 
 // Outputs unexpected command, \\left...
@@ -388,8 +386,8 @@ describe('PARSING numbers', () => {
                               [
                                 "ErrorCode",
                                 "'incompatible-domain'",
-                                ["Domain", "Symbol"],
-                                ["Domain", "Anything"]
+                                ["Domain", "Symbols"],
+                                ["Domain", "ExtendedRealNumbers"]
                               ]
                             ],
                             2,
@@ -403,8 +401,8 @@ describe('PARSING numbers', () => {
                             [
                               "ErrorCode",
                               "'incompatible-domain'",
-                              ["Domain", "Symbol"],
-                              ["Domain", "Anything"]
+                              ["Domain", "Symbols"],
+                              ["Domain", "ExtendedRealNumbers"]
                             ]
                           ],
                           2,
@@ -424,8 +422,8 @@ describe('PARSING numbers', () => {
                 [
                   "ErrorCode",
                   "'incompatible-domain'",
-                  ["Domain", "Symbol"],
-                  ["Domain", "Anything"]
+                  ["Domain", "Symbols"],
+                  ["Domain", "ExtendedRealNumbers"]
                 ]
               ],
               2,
@@ -934,7 +932,7 @@ function slowEval() {
   let y = 0;
   const startTime = performance.now();
   for (let x = 0; x <= Math.PI; x += 0.01) {
-    y += Number(expr.subs(vars).subs({ x: x }).N().numericValue!.valueOf());
+    y += Number(expr.subs(vars).subs({ x }).N().numericValue!.valueOf());
   }
 
   console.info(
@@ -960,8 +958,8 @@ function fastEval() {
   let y = 0;
   const startTime = performance.now();
   for (let x = 0; x <= Math.PI; x += 0.01) {
-    ce.assign({ x: x });
-    y += Number(expr3.N().numericValue!.valueOf());
+    ce.assign('x', x);
+    y += Number(expr3.N().valueOf());
   }
 
   console.info(

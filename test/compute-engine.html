@@ -231,7 +231,15 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
-          \operatorname{Hypot}(3, 4)
+          <!-- \operatorname{double}(\operatorname{double}(5)) -->
+          <!-- 5 \rhd \operatorname{double} \rhd \operatorname{inc} -->
+
+          <!-- \operatorname{inc} \lhd \operatorname{double} \lhd 5 -->
+
+          x \rhd g \rhd f
+
+          <!-- 2\rhd \sin \rhd \sin -->
+
           <!-- \operatorname{mean}(\left[ 2, 5, 8, 9, 3\right]) -->
           <!-- (1, 2, 3) -->
           <!-- ((1,2),(3,4)) -->
@@ -550,6 +558,10 @@
       ce.assign("q(x, y)", ce.parse("x^2 + y^2", { canonical: false }));
       ce.assign("qq", ce.parse("(x, y) \\mapsto x^2 + y^2"));
       ce.assign("qq2", ce.parse("x, y \\mapsto x^2 + y^2"));
+
+      ce.assign("double(x)", "$$2x$$");
+      ce.assign("triple(x)", "$$3x$$");
+      ce.assign("inc(x)", "$$x+1$$");
 
       ce._printScope();
 

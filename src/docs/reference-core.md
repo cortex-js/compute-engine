@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/core/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 ---
@@ -55,11 +55,12 @@ that a variable is positive, or that a function is continuous.
 Declare a new identifier in the current scope, and set its value and domain.
 
 If the identifier already has a definition in the current scope, evaluate to an
-error, otherwise evaluate to `value`. 
+error, otherwise evaluate to `value`.
 
 This is equivalent to `let` in JavaScript or `var` in Python.
 
-**To change the value of an existing identifier**, use an `["Assign"]` expression.
+**To change the value of an existing identifier**, use an `["Assign"]`
+expression.
 
 {% readmore "/compute-engine/guides/augmenting/" %}Read more about using
 `ce.declare()` to declare a new symbol or function. {% endreadmore %}
@@ -75,29 +76,27 @@ Set the value of `identifier` to `value`.
 If `identifier` has not been declared in the current scope, consider parent
 scopes until a definition for the identifier is found.
 
-If a definition is found, change the value of the identifier to `value` 
-if the value is compatible with the domain of the identifier: once set,
-the domain of an identifier cannot be changed.
+If a definition is found, change the value of the identifier to `value` if the
+value is compatible with the domain of the identifier: once set, the domain of
+an identifier cannot be changed.
 
 If there is no definition for the identifier, add a new definition in the
 current scope, and use the `value` to infer the domain of the identifier.
 
 This is equivalent to `=` in may programming languages.
 
-
-{% readmore "/compute-engine/guides/augmenting/" %}Read more about using `Assign`
-to change the value of a symbol or function. {% endreadmore %}
+{% readmore "/compute-engine/guides/augmenting/" %}Read more about using
+`Assign` to change the value of a symbol or function. {% endreadmore %}
 
 {% enddef %}
-
 
 {% def "Assume" %}
 
 [&quot;**Assume**&quot;, _predicate_]{.signature}
 
-The predicate is an expression that evaluates to `True` or `False`. 
+The predicate is an expression that evaluates to `True` or `False`.
 
-The identifiers in the predicate expression may be free, i.e. they may not have 
+The identifiers in the predicate expression may be free, i.e. they may not have
 have been declared yet. Asserting an assumption does not declare the identifiers
 in the predicate.
 
@@ -109,7 +108,7 @@ The predicate can take the form of:
 
 {% enddef %}
 
-## Inspecting an Expression 
+## Inspecting an Expression
 
 The following functions can be used to obtain information about an expression.
 
@@ -130,7 +129,8 @@ Evaluate to the domain of _expression_
 
 ```json example
 ["Domain", 2.4531]
-// ➔ "RealNumber"
+
+// ➔ "RealNumbers"
 ```
 
 {% enddef %}
@@ -143,6 +143,7 @@ Evaluate to the head of _expression_
 
 ```json example
 ["Head", ["Add", 2, 3]]
+
 // ➔ "Add"
 ```
 
@@ -164,7 +165,7 @@ and calculate its value. Overrides `Hold` and hold attributes of a function.
 [&quot;**Simplify**&quot;, _expression_]{.signature}
 
 The `Simplify` function applies a sequence of transformations to an expression
-in order to reduce, simplify and calculate its value. 
+in order to reduce, simplify and calculate its value.
 
 {% enddef %}
 
@@ -176,12 +177,11 @@ Evaluate to a numerical approximation of the expression.
 
 ```json example
 ["N", ["Pi"]]
+
 // ➔ 3.141592653589793
 ```
-  
-{% enddef %}
-  
 
+{% enddef %}
 
 <section id='core-functions'>
 
@@ -202,16 +202,13 @@ about the error.
 
 {% enddef %}
 
-
-
 {% def "Hold" %}
 
 [&quot;**Hold**&quot;, _expression_]{.signature}
 
-Tag an expression that should be kept in an unevaluated form 
+Tag an expression that should be kept in an unevaluated form
 
 {% enddef %}
-
 
 {% def "Identity" %}
 
@@ -239,18 +236,18 @@ Evaluate to the inverse function of its argument for example `Arcsin` for `Sin`.
 In the mathematical sense, this is an operator (a function that takes a function
 as an argument and returns a function).
 
-
 {% enddef %}
-
 
 {% def "String" %}
 
 [&quot;**String**&quot;, _expression_]{.signature}
 
 Evaluate to a string made from the concatenation of the arguments converted to
-strings 
+strings
+
 ```json example
 ["String", "x", 2]
+
 // ➔ "'x2'"
 ```
 
@@ -264,6 +261,7 @@ Evaluate to a new symbol made of a concatenation of the arguments.
 
 ```json example
 ["Symbol", "x", 2]
+
 // ➔ "x2"
 ```
 
@@ -289,11 +287,11 @@ corresponding to the LaTeX string.
 
 ```json example
 ["Parse", ["LatexString", "'\\frac{\\pi}{2}'"]]
+
 // ➔ ["Divide", "Pi", 2]
 ```
 
 {% enddef %}
-
 
 {% def "Latex" %}
 

@@ -44,7 +44,7 @@ export class BoxedString extends _BoxedExpression {
     return;
   }
   get domain(): BoxedDomain {
-    return this.engine.domain('String');
+    return this.engine.domain('Strings');
   }
   get complexity(): number {
     return 19;

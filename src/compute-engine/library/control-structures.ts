@@ -53,7 +53,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
             while (true) {
               const { done, value } = iter.next();
               if (done) return result ?? ce.symbol('Nothing');
-              result = fn([value]);
+              result = fn([value]) ?? ce.symbol('Nothing');
               if (result.head === 'Break') return result.op1;
               if (result.head === 'Return') return result;
               if (i++ > ce.iterationLimit)

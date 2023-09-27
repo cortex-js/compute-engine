@@ -188,7 +188,7 @@ export function canonicalFunctionExpression(
 
 function makeLambda(
   expr: BoxedExpression
-): ((params: BoxedExpression[]) => BoxedExpression) | undefined {
+): ((params: BoxedExpression[]) => BoxedExpression | undefined) | undefined {
   const ce = expr.engine;
   //
   // Is `expr` a function name, e.g. `Sin`
@@ -249,7 +249,8 @@ export function makeLambdaN1(
 ): ((arg: number) => number) | undefined {
   const lambda = makeLambda(expr);
   if (!lambda) return undefined;
-  return (arg) => lambda([expr.engine.number(arg)]).valueOf() as number;
+  return (arg) =>
+    (lambda([expr.engine.number(arg)])?.valueOf() as number) ?? NaN;
 }
 
 /**
@@ -264,7 +265,7 @@ export function makeLambdaN1(
  */
 export function applicable(
   fn: BoxedExpression
-): (args: BoxedExpression[]) => BoxedExpression {
+): (args: BoxedExpression[]) => BoxedExpression | undefined {
   return makeLambda(fn) ?? ((args) => fn.engine._fn(fn.N(), args).N());
 }
 
@@ -280,7 +281,8 @@ export function applicableN1(fn: BoxedExpression): (x: number) => number {
   const ce = fn.engine;
 
   const lambda = makeLambda(fn);
-  if (lambda) return (x) => lambda([ce.number(x)]).valueOf() as number;
+  if (lambda)
+    return (x) => (lambda([ce.number(x)])?.valueOf() as number) ?? NaN;
 
   return (x) =>
     ce

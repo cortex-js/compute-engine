@@ -581,14 +581,23 @@ describe('ITERABLE OPERATIONS', () => {
       .toMatchInlineSnapshot(`
       [
         "Map",
-        ["Function", ["Add", "x", 1], "x"],
         [
           "Error",
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Function"],
-            ["Domain", "List"]
+            ["Domain", "Collections"],
+            ["Domain", "Functions"]
+          ],
+          ["Function", ["Add", "x", 1], "x"]
+        ],
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Functions"],
+            ["Domain", "Lists"]
           ],
           ["List", 7, 13, 5, 19, 2, 3, 11]
         ]
@@ -599,14 +608,23 @@ describe('ITERABLE OPERATIONS', () => {
     expect(evaluate(['Map', ['Plus', '_', 1], list])).toMatchInlineSnapshot(`
       [
         "Map",
-        ["Plus", "_", 1],
         [
           "Error",
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Function"],
-            ["Domain", "List"]
+            ["Domain", "Collections"],
+            ["Domain", "ExtendedRealNumbers"]
+          ],
+          ["Plus", "_", 1]
+        ],
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["Domain", "Functions"],
+            ["Domain", "Lists"]
           ],
           ["List", 7, 13, 5, 19, 2, 3, 11]
         ]
@@ -624,8 +642,8 @@ describe('ITERABLE OPERATIONS', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Function"],
-            ["Domain", "List"]
+            ["Domain", "Functions"],
+            ["Domain", "Lists"]
           ],
           ["List", 7, 13, 5, 19, 2, 3, 11]
         ]
@@ -643,8 +661,8 @@ describe('ITERABLE OPERATIONS', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Function"],
-            ["Domain", "List"]
+            ["Domain", "Functions"],
+            ["Domain", "Lists"]
           ],
           ["List", 7, 13, 5, 19, 2, 3, 11]
         ]
@@ -661,8 +679,8 @@ describe('ITERABLE OPERATIONS', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Function"],
-            ["Domain", "List"]
+            ["Domain", "Functions"],
+            ["Domain", "Lists"]
           ],
           ["List", 7, 13, 5, 19, 2, 3, 11]
         ]

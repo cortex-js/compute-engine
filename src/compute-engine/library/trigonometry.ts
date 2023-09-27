@@ -26,15 +26,15 @@ import {
 //
 
 const domainNumberToRealNumber = (_head: string): DomainExpression => {
-  return ['Functions', 'Number', 'ExtendedRealNumber'];
+  return ['Functions', 'Numbers', 'ExtendedRealNumbers'];
 };
 
 const trigFunction = (_head: string): DomainExpression => {
-  return ['Functions', 'Number', 'Number'];
+  return ['Functions', 'Numbers', 'Numbers'];
 };
 
 const hyperbolicFunction = (_head: string): DomainExpression => {
-  return ['Functions', 'Number', 'Number'];
+  return ['Functions', 'Numbers', 'Numbers'];
 };
 
 export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
@@ -43,7 +43,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     // Constants
     //
     Pi: {
-      domain: 'TranscendentalNumber',
+      domain: 'TranscendentalNumbers',
       flags: { algebraic: false },
       constant: true,
       holdUntil: 'N',
@@ -57,10 +57,10 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Degrees: {
       /* = Pi / 180 */
       signature: {
-        domain: ['Functions', 'Number', 'Number'],
+        domain: ['Functions', 'Numbers', 'Numbers'],
         canonical: (ce, ops) => {
           ops = validateArguments(ce, flattenSequence(canonical(ops)), [
-            'Number',
+            'Numbers',
           ]);
           if (ops.length !== 1)
             return ce.fn('Degrees', ops, { canonical: false });
@@ -75,7 +75,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Hypot: {
       signature: {
-        domain: ['Functions', 'Number', 'Number', 'NonNegativeNumber'],
+        domain: ['Functions', 'Numbers', 'Numbers', 'NonNegativeNumbers'],
         simplify: (ce, ops) =>
           ce
             .box(['Sqrt', ['Add', ['Square', ops[0]], ['Square', ops[1]]]])
@@ -89,7 +89,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Sin: {
       complexity: 5000,
       signature: {
-        domain: ['Functions', 'Number', ['Interval', -1, 1]],
+        domain: ['Functions', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Sin', ops[0])?.simplify() ??
           (complexAllowed(ce)
@@ -131,7 +131,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q776598',
       complexity: 5200,
       signature: {
-        domain: ['Functions', 'Number', 'Number', 'Number'],
+        domain: ['Functions', 'Numbers', 'Numbers', 'Numbers'],
         N: (_ce, ops) =>
           apply2N(ops[0], ops[1], Math.atan2, (a, b) => Decimal.atan2(a, b)),
       },
@@ -139,7 +139,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Cos: {
       complexity: 5050,
       signature: {
-        domain: ['Functions', 'Number', ['Interval', -1, 1]],
+        domain: ['Functions', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Cos', ops[0])?.simplify() ??
           ce
@@ -151,7 +151,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
 
     Tan: {
-      // Range: 'RealNumber',
+      // Range: 'RealNumbers',
       complexity: 5100,
       signature: {
         domain: trigFunction('Tan'),
@@ -165,7 +165,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     /* converts (x, y) -> (radius, angle) */
     // ToPolarCoordinates: {
     //   domain: 'Functions',
-    //   outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
+    //   outputDomain: ['TupleOf', 'RealNumbers', 'RealNumbers'],
     // }
   },
   //
@@ -288,16 +288,16 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Haversine: {
       wikidata: 'Q2528380',
       signature: {
-        domain: ['Functions', 'ExtendedRealNumber', ['Interval', 0, 1]],
-        evaluate: ['Function', ['Divide', ['Subtract', 1, ['Cos', '_1']], 2]],
+        domain: ['Functions', 'ExtendedRealNumbers', 'Numbers'],
+        evaluate: ['Divide', ['Subtract', 1, ['Cos', '_1']], 2],
       },
     },
     /** = 2 * Arcsin(Sqrt(z)) */
     InverseHaversine: {
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
       signature: {
-        domain: ['Functions', 'ExtendedRealNumber', 'RealNumber'],
-        evaluate: ['Function', ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]]],
+        domain: ['Functions', 'ExtendedRealNumbers', 'RealNumbers'],
+        evaluate: ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]],
       },
     },
     Sec: {
@@ -346,7 +346,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Sech: {
       complexity: 6200,
       signature: {
-        domain: ['Functions', 'Number', ['Interval', -1, 1]],
+        domain: ['Functions', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Sech', ops[0])?.simplify() ??
           ce.box(['Divide', 1, ['Cosh', ops[0]]]).simplify(),
@@ -448,7 +448,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     /* converts (radius, angle) -> (x, y) */
     // FromPolarCoordinates: {
     //   domain: 'Function',
-    //   outputDomain: ['TupleOf', 'RealNumber', 'RealNumber'],
+    //   outputDomain: ['TupleOf', 'RealNumbers', 'RealNumbers'],
     // },
     InverseFunction: {
       signature: {

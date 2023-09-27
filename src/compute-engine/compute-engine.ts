@@ -223,34 +223,30 @@ export class ComputeEngine implements IComputeEngine {
   private _commonDomains: { [dom: string]: null | BoxedDomain } = {
     Anything: null,
     Nothing: null,
-    Boolean: null,
-    MaybeBoolean: null,
-    String: null,
-    Domain: null,
-    Symbol: null,
-    Integer: null,
-    RationalNumber: null,
-    AlgebraicNumber: null,
-    RealNumber: null,
-    ExtendedRealNumber: null,
-    ImaginaryNumber: null,
-    ComplexNumber: null,
-    ExtendedComplexNumber: null,
-    Number: null,
-    PositiveInteger: null,
-    TranscendentalNumber: null,
-    PositiveNumber: null,
+    Booleans: null,
+    MaybeBooleans: null,
+    Strings: null,
+    Domains: null,
+    Symbols: null,
+    Integers: null,
+    RationalNumbers: null,
+    AlgebraicNumbers: null,
+    RealNumbers: null,
+    ExtendedRealNumbers: null,
+    ImaginaryNumbers: null,
+    ComplexNumbers: null,
+    ExtendedComplexNumbers: null,
+    Numbers: null,
+    PositiveIntegers: null,
+    TranscendentalNumbers: null,
+    PositiveNumbers: null,
     Functions: null, // (Anything^n) -> Anything
-    NumericFunctions: null, // (Number^n) -> Number
-    RealFunctions: null, // (ExtendedRealNumber^n) -> ExtendRealNumber
-    TrigonometricFunctions: null, // (ComplexNumber) -> ComplexNumber
-    LogicOperator: null, // (Boolean, Boolean) -> Boolean
-    Predicate: null, // (Anything^n) -> MaybeBoolean
-    RelationalOperator: null, // (Anything, Anything) -> MaybeBoolean
+    NumericFunctions: null, // (Numbers^n) -> Numbers
+    RealFunctions: null, // (ExtendedRealNumbers^n) -> ExtendRealNumbers
+    LogicOperators: null, // (Booleans, Booleans) -> Boolean
+    Predicates: null, // (Anything^n) -> MaybeBooleans
+    RelationalOperators: null, // (Anything, Anything) -> MaybeBooleans
   };
-
-  /** @internal */
-  private _latexDictionary?: readonly LatexDictionaryEntry[];
 
   /**
    * The current scope.
@@ -298,7 +294,8 @@ export class ComputeEngine implements IComputeEngine {
    * The order of the dictionaries matter: the definitions from the later ones
    * override the definitions from earlier ones. The first dictionary should
    * be the `'core'` dictionary which include some basic definitions such
-   * as domains (`Boolean`, `Number`, etc...) that are used by later dictionaries.
+   * as domains (`Booleans`, `Numbers`, etc...) that are used by later
+   * dictionaries.
    *
    * @param options.numericMode The default mode is `"auto"`. Use `"machine"`
    * to perform numeric calculations using 64-bit floats. Use `"bignum"` to
@@ -313,13 +310,12 @@ export class ComputeEngine implements IComputeEngine {
    * `chop()` as well.
    *
    * @param options.defaultDomain If an unknown symbol is encountered, assume
-   * this is its domain. **Default** `ExtendedRealNumber`
+   * this is its domain. **Default** `ExtendedRealNumbers`
    */
   constructor(options?: {
     numericMode?: NumericMode;
     numericPrecision?: number;
     ids?: readonly IdentifierDefinitions[];
-    latexDictionary?: readonly LatexDictionaryEntry[];
     tolerance?: number;
     defaultDomain?: string;
   }) {
@@ -327,8 +323,6 @@ export class ComputeEngine implements IComputeEngine {
       throw Error('Unexpected argument');
 
     this.strict = true;
-
-    this._latexDictionary = options?.latexDictionary;
 
     this._jsonSerializationOptions = {
       exclude: [],
@@ -404,24 +398,23 @@ export class ComputeEngine implements IComputeEngine {
       else this._commonDomains[d] = boxDomain(this, d);
     }
 
-    // Populate the table of common symbols (they should be in the global context)
+    // Populate the table of common symbols
+    // (they should be in the global context)
     for (const sym of Object.keys(this._commonSymbols)) {
-      this._commonSymbols[sym] = new BoxedSymbol(this, sym, {
-        canonical: true,
-      });
-      this._commonSymbols[sym]!.bind(this.context);
+      const boxedSymbol = new BoxedSymbol(this, sym, { canonical: true });
+      boxedSymbol.bind();
+      this._commonSymbols[sym] = boxedSymbol;
     }
 
-    // Once a scope is set and the default dictionaries)
+    // Once a scope is set and the default dictionaries loaded
     // we can reference symbols for the domain names and other constants
     if (options?.defaultDomain) {
-      const defaultDomain = this.domain(options.defaultDomain);
-      if (defaultDomain.isValid)
-        this._defaultDomain = defaultDomain as BoxedDomain;
-      else
-        this._defaultDomain = this.domain('ExtendedRealNumber') as BoxedDomain;
+      let defaultDomain = this.domain(options.defaultDomain);
+      if (!defaultDomain.isValid)
+        defaultDomain = this.domain('ExtendedRealNumbers');
+      this._defaultDomain = defaultDomain;
     } else
-      this._defaultDomain = this.domain('ExtendedRealNumber') as BoxedDomain;
+      this._defaultDomain = this.domain('ExtendedRealNumbers') as BoxedDomain;
 
     // Push a fresh scope to protect global definitions:
     // this will be the "user" scope
@@ -663,7 +656,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    * If set to `null`, unknown symbols will trigger an error.
    *
-   * **Default:** `"ExtendedRealNumber"`
+   * **Default:** `"ExtendedRealNumbers"`
    */
   get defaultDomain(): BoxedDomain | null {
     return this._defaultDomain;
@@ -735,16 +728,17 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   private get latexSyntax(): LatexSyntax {
-    if (!this._latexSyntax)
+    if (!this._latexSyntax) {
+      const precision = this.precision;
       this._latexSyntax = new LatexSyntax({
         computeEngine: this,
-        dictionary: this._latexDictionary,
-        precision: this.precision,
-        avoidExponentsInRange: [-6, this.precision],
+        precision,
+        avoidExponentsInRange: [-6, precision],
         onError: (err) => {
           throw new Error(JSON.stringify(err[0].message));
         },
       });
+    }
     return this._latexSyntax;
   }
 
@@ -930,9 +924,9 @@ export class ComputeEngine implements IComputeEngine {
     return oldScope;
   }
 
-  _printScope(scope?: RuntimeScope | null, depth = 0): void {
+  _printScope(scope?: RuntimeScope | null, depth = 0): RuntimeScope | null {
     scope ??= this.context;
-    if (!scope) return;
+    if (!scope) return null;
     const undef = `${YELLOW}[undefined]${RESET}`;
     if (depth === 0) {
       console.group('current scope - level 0');
@@ -954,20 +948,20 @@ export class ComputeEngine implements IComputeEngine {
               : v.value
               ? `${INVERSE_RED}${v.value!.toString()}${RESET}`
               : undef;
-            console.log(`${id}: ${v.domain?.toString() ?? undef} = ${val}`);
+            console.info(`${id}: ${v.domain?.toString() ?? undef} = ${val}`);
           } else if (v instanceof _BoxedFunctionDefinition) {
             if (typeof v.signature.evaluate === 'function')
-              console.log(`${id}(): ${v.signature.evaluate.toString()}`);
+              console.info(`${id}(): ${v.signature.evaluate.toString()}`);
             else if (v.signature.evaluate === undefined)
-              console.log(`${id}(): ${undef}`);
-            else console.log(`${id}(): ${k.toString()}`);
+              console.info(`${id}(): ${undef}`);
+            else console.info(`${id}(): ${k.toString()}`);
           }
           count += 1;
           if (count === 11) {
             console.groupCollapsed(`... and ${scope.ids.size - count} more`);
           }
         } catch (err) {
-          console.log(`${id}: ${INVERSE_RED}${err.message}${RESET}`);
+          console.info(`${id}: ${INVERSE_RED}${err.message}${RESET}`);
         }
       }
       if (count > 10) console.groupEnd();
@@ -978,13 +972,15 @@ export class ComputeEngine implements IComputeEngine {
       );
       if (assumptions.length > 0) {
         console.groupCollapsed(`${assumptions.length} assumptions)`);
-        for (const a of assumptions) console.log(a);
+        for (const a of assumptions) console.info(a);
         console.groupEnd();
       }
     }
     if (scope.parentScope) this._printScope(scope.parentScope, depth + 1);
 
     console.groupEnd();
+
+    return this.context;
   }
 
   /**
@@ -1065,8 +1061,8 @@ export class ComputeEngine implements IComputeEngine {
 
     //
     // Declaring an identifier with a domain
-    // `ce.declare("f", ["Function, "Number", "Number"])`
-    // `ce.declare("z", "ComplexNumber")`
+    // `ce.declare("f", ["Functions", "Numbers", "Numbers"])`
+    // `ce.declare("z", "ComplexNumbers")`
     //
     {
       const dom = this.domain(def as DomainExpression);
@@ -1273,10 +1269,10 @@ export class ComputeEngine implements IComputeEngine {
 
     // It's not a function, it's a symbol
     const dom = this.domain(inferDomain(value));
-    // Promote any numeric domain to 'Number'
-    // If you do a `ce.assign('x', 2')`, `x` will be a `Number` not an `Integer`
+    // Promote any numeric domain to 'Numbers'
+    // If you do a `ce.assign('x', 2)`, `x` will be a `Numbers` not an `Integers`
     // which is generally more useful
-    this.defineSymbol(id, { domain: dom.isNumeric ? 'Number' : dom, value });
+    this.defineSymbol(id, { domain: dom.isNumeric ? 'Numbers' : dom, value });
 
     return this;
   }
@@ -1867,7 +1863,7 @@ export class ComputeEngine implements IComputeEngine {
    * Return a list of all the assumptions that match a pattern.
    *
    * ```js
-   *  ce.assume(['Element', 'x', 'PositiveInteger');
+   *  ce.assume(['Element', 'x', 'PositiveIntegers');
    *  ce.ask(['Greater', 'x', '_val'])
    *  //  -> [{'val': 0}]
    * ```
@@ -1937,7 +1933,7 @@ export class ComputeEngine implements IComputeEngine {
         if (def instanceof _BoxedSymbolDefinition) {
           def.value = undefined;
           if (def.domain?.isNumeric) {
-            def.domain = this.defaultDomain ?? this.domain('Number');
+            def.domain = this.defaultDomain ?? this.domain('Numbers');
           } else def.domain = undefined;
         } // @todo: if a function....
       }

@@ -210,7 +210,7 @@ export function checkJson(inExpr: SemiBoxedExpression): string {
 
     if (evalComplex !== evalMachine) result.push('eval-cplx = ' + evalComplex);
     if (numEvalComplex !== numEvalMachine && numEvalComplex !== evalComplex)
-      result.push('N-cplx   = ' + numEvalComplex);
+      result.push('N-cplx    = ' + numEvalComplex);
 
     return result.join('\n');
   } catch (e) {

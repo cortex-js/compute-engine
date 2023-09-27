@@ -47,10 +47,10 @@ export const engine = new ComputeEngine();
 //   'TranscendentalNumber',
 //   'AlgebraicNumber',
 //   'RationalNumber',
-//   'Integer',
+//   'Integers',
 
 //   'Boolean',
-//   'MaybeBoolean',
+//   'MaybeBooleans',
 
 //   ['Range', 2, 5],
 //   ['Range', 0, +Infinity],
@@ -85,12 +85,12 @@ const tests: Expression[] = [
   // ['And'],
   // ['Or',
 
-  ['Element', -1, 'Integer'],
-  ['Element', 0, 'Integer'],
-  ['Element', 5, 'Integer'],
-  ['Element', 0.12, 'Integer'],
-  ['Element', { num: '7d' }, 'Integer'],
-  // ['Element', , 'Integer'],
+  ['Element', -1, 'Integers'],
+  ['Element', 0, 'Integers'],
+  ['Element', 5, 'Integers'],
+  ['Element', 0.12, 'Integers'],
+  ['Element', { num: '7d' }, 'Integers'],
+  // ['Element', , 'Integers'],
 ];
 
 describe.skip('is()', () => {

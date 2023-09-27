@@ -5,15 +5,15 @@ import {
 } from '../public';
 
 export const LOGIC_LIBRARY: IdentifierDefinitions = {
-  True: { wikidata: 'Q16751793', domain: 'Boolean', constant: true },
+  True: { wikidata: 'Q16751793', domain: 'Booleans', constant: true },
   False: {
     wikidata: 'Q5432619',
-    domain: 'Boolean',
+    domain: 'Booleans',
     constant: true,
   },
   Maybe: {
     wikidata: 'Q781546',
-    domain: 'MaybeBoolean',
+    domain: 'MaybeBooleans',
     constant: true,
   },
   // @todo: specify a `canonical` function that converts boolean
@@ -29,7 +29,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     idempotent: true,
     complexity: 10000,
     signature: {
-      domain: 'LogicOperator',
+      domain: 'LogicOperators',
       simplify: processAnd,
       evaluate: processAnd,
     },
@@ -42,7 +42,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     idempotent: true,
     complexity: 10000,
     signature: {
-      domain: 'LogicOperator',
+      domain: 'LogicOperators',
       simplify: processOr,
       evaluate: processOr,
     },
@@ -53,7 +53,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     complexity: 10100,
     // @todo: this may not be needed, since we also have rules.
     signature: {
-      domain: 'LogicOperator',
+      domain: 'LogicOperators',
       simplify: processNot,
       evaluate: processNot,
     },
@@ -62,7 +62,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     wikidata: 'Q220433',
     complexity: 10200,
     signature: {
-      domain: 'LogicOperator',
+      domain: 'LogicOperators',
       simplify: processEquivalent,
       evaluate: processEquivalent,
     },
@@ -71,12 +71,12 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     wikidata: 'Q7881229',
     complexity: 10200,
     signature: {
-      domain: 'LogicOperator',
+      domain: 'LogicOperators',
       simplify: processImplies,
       evaluate: processImplies,
     },
   },
-  Exists: { signature: { domain: 'MaybeBoolean' } },
+  Exists: { signature: { domain: 'MaybeBooleans' } },
 };
 
 function processAnd(

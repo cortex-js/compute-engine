@@ -111,13 +111,18 @@ describe('STEFNOTCH #12', () => {
 });
 
 describe('STEFNOTCH #13', () => {
-  test('1/ N(\\varepsilon)\\coloneq\\lceil\\frac{4}{\\varepsilon^2}\\rceil', () => {
+  test('1/ N(\\varepsilon)\\coloneqq\\lceil\\frac{4}{\\varepsilon^2}\\rceil', () => {
     expect(
-      parse('N(\\varepsilon)\\coloneq\\lceil\\frac{4}{\\varepsilon^2}\\rceil')
+      parse('N(\\varepsilon)\\coloneqq\\lceil\\frac{4}{\\varepsilon^2}\\rceil')
     ).toMatchInlineSnapshot(`
       [
-        "Assign",
+        "Sequence",
         ["N", "epsilonSymbol"],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\coloneq'"],
+          ["LatexString", "'\\coloneq'"]
+        ],
         ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]]
       ]
     `);
@@ -167,8 +172,8 @@ describe('STEFNOTCH #13', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "MaybeBoolean"],
-            ["Domain", "Number"]
+            ["Domain", "MaybeBooleans"],
+            ["Domain", "Numbers"]
           ],
           ["Divide", 2, ["Sqrt", "n"]]
         ],

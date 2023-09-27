@@ -73,7 +73,7 @@ describe('NUMERIC MODE', () => {
       box       = ["Cos", ["Complex", 3, 4]]
       N-auto    = ["Complex", -27.034945603074224, -3.851153334811777]
       N-big     = {num: "NaN"}
-      N-cplx   = ["Complex", -27.034945603074224, -3.851153334811777]
+      N-cplx    = ["Complex", -27.034945603074224, -3.851153334811777]
     `));
 
   test(`\\sqrt{-1}`, () =>
@@ -97,7 +97,7 @@ describe('NUMERIC MODE', () => {
       N-big     = {num: "NaN"}
       eval-mach = ["Exp", {num: "NaN"}]
       eval-cplx = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
-      N-cplx   = -1
+      N-cplx    = -1
     `));
 });
 

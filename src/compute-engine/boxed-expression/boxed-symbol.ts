@@ -25,6 +25,7 @@ import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { hashCode } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
+import { sharedAncestorDomain } from './boxed-domain';
 
 /**
  * BoxedSymbol
@@ -59,6 +60,9 @@ export class BoxedSymbol extends _BoxedExpression {
     | BoxedFunctionDefinition
     | null
     | undefined;
+
+  /* If there is no definition, an inferred domain may be available */
+  private _inferredDomain: BoxedDomain | undefined;
 
   constructor(
     ce: IComputeEngine,
@@ -177,6 +181,15 @@ export class BoxedSymbol extends _BoxedExpression {
       : undefined;
   }
 
+  infer(domain: BoxedDomain): boolean {
+    if (this._def) return false;
+    if (!this._inferredDomain) this._inferredDomain = domain;
+    else
+      this._inferredDomain = sharedAncestorDomain(this._inferredDomain, domain);
+
+    return true;
+  }
+
   /**
    * Associate a definition with this symbol, if one is not already available
    */
@@ -276,7 +289,7 @@ export class BoxedSymbol extends _BoxedExpression {
     } else {
       // Create a new symbol definition
       let dom = v?.domain;
-      if (dom?.isNumeric) dom = this.engine.domain('Number');
+      if (dom?.isNumeric) dom = this.engine.domain('Numbers');
       this._def = this.engine.defineSymbol(this._name, {
         value: v,
         domain: dom ?? 'Anything',
@@ -288,8 +301,8 @@ export class BoxedSymbol extends _BoxedExpression {
     if (this.functionDefinition) return this.engine.domain('Functions');
     return (
       this.symbolDefinition?.domain ??
-      this.engine.defaultDomain ??
-      this.engine.domain('Values')
+      this._inferredDomain ??
+      this.engine.domain('Anything')
     );
   }
 
@@ -319,11 +332,6 @@ export class BoxedSymbol extends _BoxedExpression {
       this.engine.forget(this._name);
       this._def = this.engine.defineSymbol(this._name, { domain: d });
     }
-  }
-
-  get explicitDomain(): BoxedDomain | undefined {
-    if (this.functionDefinition) return this.engine.domain('Functions');
-    return this.symbolDefinition?.domain ?? undefined;
   }
 
   get sgn(): -1 | 0 | 1 | undefined | null {

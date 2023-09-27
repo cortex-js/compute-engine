@@ -5,74 +5,74 @@ import { LatexDictionary, Serializer, LatexString } from '../public';
 
 export const DEFINITIONS_SETS: LatexDictionary = [
   // Constants
-  { name: 'AlgebraicNumber', latexTrigger: '\\bar\\Q' },
-  { name: 'ComplexNumber', latexTrigger: ['\\C'] },
-  { latexTrigger: '\\mathbb{C}', parse: 'ComplexNumber' },
-  { name: 'ImaginaryNumber', latexTrigger: ['\\imaginaryI', '\\R'] },
-  { name: 'ExtendedComplexNumber', latexTrigger: ['\\bar', '\\C'] },
+  { name: 'AlgebraicNumbers', latexTrigger: '\\bar\\Q' },
+  { name: 'ComplexNumbers', latexTrigger: ['\\C'] },
+  { latexTrigger: '\\mathbb{C}', parse: 'ComplexNumbers' },
+  { name: 'ImaginaryNumbers', latexTrigger: ['\\imaginaryI', '\\R'] },
+  { name: 'ExtendedComplexNumbers', latexTrigger: ['\\bar', '\\C'] },
   { name: 'EmptySet', latexTrigger: ['\\emptyset'] },
   { latexTrigger: ['\\varnothing'], parse: 'EmptySet' }, // Parsing only
-  { name: 'Integer', latexTrigger: ['\\Z'] },
-  { latexTrigger: '\\mathbb{Z}', parse: 'Integer' },
-  { name: 'RationalNumber', latexTrigger: ['\\Q'] },
-  { name: 'RealNumber', latexTrigger: ['\\R'] },
-  { latexTrigger: '\\mathbb{R}', parse: 'RealNumber' },
-  { name: 'ExtendedRealNumber', latexTrigger: ['\\bar', '\\R'] },
-  { name: 'TranscendentalNumber', latexTrigger: '\\R-\\bar\\Q' },
-  { latexTrigger: '\\R\\backslash\\bar\\Q', parse: 'TranscendentalNumber' },
+  { name: 'Integers', latexTrigger: ['\\Z'] },
+  { latexTrigger: '\\mathbb{Z}', parse: 'Integers' },
+  { name: 'RationalNumbers', latexTrigger: ['\\Q'] },
+  { name: 'RealNumbers', latexTrigger: ['\\R'] },
+  { latexTrigger: '\\mathbb{R}', parse: 'RealNumbers' },
+  { name: 'ExtendedRealNumbers', latexTrigger: ['\\bar', '\\R'] },
+  { name: 'TranscendentalNumberss', latexTrigger: '\\R-\\bar\\Q' },
+  { latexTrigger: '\\R\\backslash\\bar\\Q', parse: 'TranscendentalNumbers' },
 
   // Real numbers < 0
-  { name: 'NegativeNumber', latexTrigger: '\\R^-' },
-  { latexTrigger: '\\R^{-}', parse: 'NegativeNumber' },
-  { latexTrigger: '\\R_-', parse: 'NegativeNumber' },
-  { latexTrigger: '\\R_{-}', parse: 'NegativeNumber' },
-  { latexTrigger: '\\R^{\\lt}', parse: 'NegativeNumber' },
+  { name: 'NegativeNumbers', latexTrigger: '\\R^-' },
+  { latexTrigger: '\\R^{-}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\R_-', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\R_{-}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\R^{\\lt}', parse: 'NegativeNumbers' },
 
   // Real numbers > 0
-  { name: 'PositiveNumber', latexTrigger: '\\R^+' },
-  { latexTrigger: '\\R^{+}', parse: 'PositiveNumber' },
-  { latexTrigger: '\\R_+', parse: 'PositiveNumber' },
-  { latexTrigger: '\\R_{+}', parse: 'PositiveNumber' },
-  { latexTrigger: '\\R^{\\gt}', parse: 'PositiveNumber' },
+  { name: 'PositiveNumbers', latexTrigger: '\\R^+' },
+  { latexTrigger: '\\R^{+}', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\R_+', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\R_{+}', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\R^{\\gt}', parse: 'PositiveNumbers' },
 
   // Real numbers <= 0
-  { name: 'NonPositiveNumber', latexTrigger: '\\R^{0-}' },
-  { latexTrigger: '\\R^{-0}', parse: 'NonPositiveNumber' },
-  { latexTrigger: '\\R^{\\leq}', parse: 'NonPositiveNumber' },
+  { name: 'NonPositiveNumbers', latexTrigger: '\\R^{0-}' },
+  { latexTrigger: '\\R^{-0}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\R^{\\leq}', parse: 'NonPositiveNumbers' },
 
   // Integers < 0
-  { name: 'NegativeInteger', latexTrigger: '\\Z^-' },
-  { latexTrigger: '\\Z^-', parse: 'NegativeInteger' },
-  { latexTrigger: '\\Z^{-}', parse: 'NegativeInteger' },
-  { latexTrigger: '\\Z_-', parse: 'NegativeInteger' },
-  { latexTrigger: '\\Z_{-}', parse: 'NegativeInteger' },
-  { latexTrigger: '\\Z^{\\lt}', parse: 'NegativeInteger' },
+  { name: 'NegativeIntegers', latexTrigger: '\\Z^-' },
+  { latexTrigger: '\\Z^-', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\Z^{-}', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\Z_-', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\Z_{-}', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\Z^{\\lt}', parse: 'NegativeIntegers' },
 
   // Integers >  0
-  { name: 'PositiveInteger', latexTrigger: '\\Z^+' },
-  { latexTrigger: '\\Z^{+}', parse: 'PositiveInteger' },
-  { latexTrigger: '\\Z_+', parse: 'PositiveInteger' },
-  { latexTrigger: '\\Z_{+}', parse: 'PositiveInteger' },
-  { latexTrigger: '\\Z^{\\gt}', parse: 'PositiveInteger' },
-  { latexTrigger: '\\Z^{\\gt0}', parse: 'PositiveInteger' },
-  { latexTrigger: '\\N^+', parse: 'PositiveInteger' },
-  { latexTrigger: '\\N^{+}', parse: 'PositiveInteger' },
-  { latexTrigger: '\\N^*', parse: 'PositiveInteger' },
-  { latexTrigger: '\\N^{*}', parse: 'PositiveInteger' },
-  { latexTrigger: '\\N^\\star', parse: 'PositiveInteger' },
-  { latexTrigger: '\\N^{\\star}', parse: 'PositiveInteger' },
-  { latexTrigger: '\\N_1', parse: 'PositiveInteger' },
-  { latexTrigger: '\\N_{1}', parse: 'PositiveInteger' }, // https://mathvault.ca/hub/higher-math/math-symbols/algebra-symbols/
+  { name: 'PositiveIntegers', latexTrigger: '\\Z^+' },
+  { latexTrigger: '\\Z^{+}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\Z_+', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\Z_{+}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\Z^{\\gt}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\Z^{\\gt0}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N^+', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N^{+}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N^*', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N^{*}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N^\\star', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N^{\\star}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N_1', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N_{1}', parse: 'PositiveIntegers' }, // https://mathvault.ca/hub/higher-math/math-symbols/algebra-symbols/
 
   // Integers >=  0
-  { name: 'NonNegativeInteger', latexTrigger: ['\\N'] },
-  { latexTrigger: '\\Z^{+0}', parse: 'NonNegativeInteger' },
-  { latexTrigger: '\\Z^{\\geq}', parse: 'NonNegativeInteger' },
-  { latexTrigger: '\\Z^{\\geq0}', parse: 'NonNegativeInteger' },
-  { latexTrigger: '\\Z^{0+}', parse: 'NonNegativeInteger' },
-  { latexTrigger: '\\mathbb{N}', parse: 'NonNegativeInteger' },
-  { latexTrigger: '\\N_0', parse: 'NonNegativeInteger' },
-  { latexTrigger: '\\N_{0}', parse: 'NonNegativeInteger' },
+  { name: 'NonNegativeIntegers', latexTrigger: ['\\N'] },
+  { latexTrigger: '\\Z^{+0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z^{\\geq}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z^{\\geq0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z^{0+}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\mathbb{N}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\N_0', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\N_{0}', parse: 'NonNegativeIntegers' },
 
   //
   // Set Expressions
@@ -90,12 +90,12 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       // accept arguments that are `Set`
       const ce = parser.computeEngine!;
 
-      if (!ce || !ce.box(lhs).domain.isCompatible('Set')) return null;
+      if (!ce || !ce.box(lhs).domain.isCompatible('Sets')) return null;
 
       const index = parser.index;
       const rhs = parser.parseExpression({ ...until, minPrec: 390 });
       // If the rhs argument is not a set, bail
-      if (rhs === null || ce.box(lhs).domain.isCompatible('Set') !== true) {
+      if (rhs === null || ce.box(lhs).domain.isCompatible('Sets') !== true) {
         parser.index = index;
         return null;
       }

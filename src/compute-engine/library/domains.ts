@@ -14,32 +14,27 @@ export const DOMAIN_CONSTRUCTORS = [
   'Maybe',
   'Sequence',
 
-  'Interval',
-  'Range',
-
   'Head',
   'Symbol',
-  'Values',
+  'Value',
 ];
 
 export const DOMAIN_ALIAS = {
   // Functions: ['Functions', ['Sequence', 'Anything'], 'Anything'],
-  NumericFunctions: ['Functions', ['Sequence', 'Number'], 'Number'],
+  NumericFunctions: ['Functions', ['Sequence', 'Numbers'], 'Numbers'],
   RealFunctions: [
     'Functions',
-    ['Sequence', 'ExtendedRealNumber'],
-    'ExtendedRealNumber',
+    ['Sequence', 'ExtendedRealNumbers'],
+    'ExtendedRealNumbers',
   ],
-  TrigonometricFunctions: ['Functions', 'Number', 'Number'],
-  // HyperbolicFunctions: ['Functions', 'Number', 'Number'],
-  LogicOperator: [
+  LogicOperators: [
     'Functions',
-    'MaybeBoolean',
-    ['Maybe', 'MaybeBoolean'],
-    'MaybeBoolean',
+    'MaybeBooleans',
+    ['Maybe', 'MaybeBooleans'],
+    'MaybeBooleans',
   ],
-  Predicate: ['Functions', ['Sequence', 'Anything'], 'MaybeBoolean'],
-  RelationalOperator: ['Functions', 'Anything', 'Anything', 'MaybeBoolean'],
+  Predicates: ['Functions', ['Sequence', 'Anything'], 'MaybeBooleans'],
+  RelationalOperators: ['Functions', 'Anything', 'Anything', 'MaybeBooleans'],
   // PositiveInteger: ['Range', 1, +Infinity],
   // NonNegativeInteger: ['Range', 0, +Infinity],
   // NegativeInteger: ['Range', -Infinity, -1],
@@ -134,101 +129,85 @@ const DOMAIN_LITERAL = {
   Anything: [],
 
   Values: 'Anything',
-  Domain: 'Anything',
-  DomainExpression: 'Domain',
+  Domains: 'Anything',
 
   Void: 'Nothing',
   Nothing: [
-    'DomainExpression',
-    'Boolean',
-    'String',
-    'Symbol',
-    'Tuple',
-    'List',
-    'Dictionary',
-    'InfiniteSet',
-    'FiniteSet',
-    'ImaginaryNumber',
-    'TranscendentalNumber',
-    'PositiveInteger',
-    'NegativeInteger',
-    'NonPositiveInteger',
-    'NonNegativeInteger',
-    'PositiveNumber',
-    'NegativeNumber',
-    'NonPositiveNumber',
-    'NonNegativeNumber',
-    'Scalar',
-    'TrigonometricFunctions',
-    'LogicOperator',
-    'RelationalOperator',
+    'Booleans',
+    'Strings',
+    'Symbols',
+    'Tuples',
+    'Lists',
+    'Dictionaries',
+    'ImaginaryNumbers',
+    'TranscendentalNumbers',
+    'PositiveIntegers',
+    'NegativeIntegers',
+    'NonPositiveIntegers',
+    'NonNegativeIntegers',
+    'PositiveNumbers',
+    'NegativeNumbers',
+    'NonPositiveNumbers',
+    'NonNegativeNumbers',
+    'LogicOperators',
+    'RelationalOperators',
   ],
 
-  MaybeBoolean: 'Values',
-  Boolean: 'MaybeBoolean',
-  String: 'Boolean',
-  Symbol: 'Boolean',
+  MaybeBooleans: 'Values',
+  Booleans: 'MaybeBooleans',
 
-  Collection: 'Values',
-  List: 'Collection',
-  Dictionary: 'Collection',
-  Sequence: 'Collection',
-  Tuple: 'Collection',
-  Set: 'Collection',
-  InfiniteSet: 'Set',
-  FiniteSet: 'Set',
+  Strings: 'Values',
+  Symbols: 'Values',
+
+  Collections: 'Values',
+  Lists: 'Collections',
+  Dictionaries: 'Collections',
+  Sequences: 'Collections',
+  Tuples: 'Collections',
+  Sets: 'Collections',
 
   //
   // Functional Domains
   //
-  Functions: 'Anything',
-  Predicate: 'Functions',
-  LogicOperator: 'Predicate',
-  RelationalOperator: 'Predicate',
   // https://en.wikipedia.org/wiki/List_of_mathematical_functions
+  //
+  Functions: 'Anything',
+  Predicates: 'Functions',
+  LogicOperators: 'Predicates',
+  RelationalOperators: 'Predicates',
 
   NumericFunctions: 'Functions',
   RealFunctions: 'NumericFunctions',
-  TrigonometricFunctions: 'RealFunctions',
 
   //
   // Numeric Domains
   //
   // https://en.wikipedia.org/wiki/Category_of_sets
-  Number: 'Values',
-  ExtendedComplexNumber: 'Number',
-  ComplexNumber: 'ExtendedComplexNumber',
-  ImaginaryNumber: 'ComplexNumber',
-  ExtendedRealNumber: 'ExtendedComplexNumber',
-  RealNumber: ['ComplexNumber', 'ExtendedRealNumber'],
-
-  PositiveNumber: 'NonNegativeNumber',
-  NonNegativeNumber: 'RealNumber',
-  NonPositiveNumber: 'NegativeNumber',
-  NegativeNumber: 'RealNumber',
-
-  TranscendentalNumber: 'RealNumber',
-
-  AlgebraicNumber: 'RealNumber',
-  RationalNumber: 'AlgebraicNumber',
-
-  // NaturalNumber: 'Integer',
-  Integer: 'RationalNumber',
-
-  PositiveInteger: 'NonNegativeInteger',
-  NonNegativeInteger: 'Integer',
-  NonPositiveInteger: 'NegativeInteger',
-  NegativeInteger: 'Integer',
-
   //
-  // Tensorial Domains
-  //
-  Tensor: 'Values',
-  Matrix: 'Tensor',
-  Scalar: ['Row', 'Column'],
-  Row: 'Vector',
-  Column: 'Vector',
-  Vector: 'Matrix',
+  Numbers: 'Values',
+  ExtendedComplexNumbers: 'Numbers',
+  ComplexNumbers: 'ExtendedComplexNumbers',
+  ImaginaryNumbers: 'ComplexNumbers',
+  ExtendedRealNumbers: 'ExtendedComplexNumbers',
+  RealNumbers: ['ComplexNumbers', 'ExtendedRealNumbers'],
+
+  PositiveNumbers: 'NonNegativeNumbers',
+  NonNegativeNumbers: 'RealNumbers',
+  NonPositiveNumbers: 'NegativeNumbers',
+  NegativeNumbers: 'RealNumbers',
+
+  TranscendentalNumbers: 'RealNumbers',
+
+  AlgebraicNumbers: 'RealNumbers',
+  RationalNumbers: 'AlgebraicNumbers',
+
+  // NaturalNumbers: 'Integers',
+  Integers: 'RationalNumbers',
+
+  PositiveIntegers: 'NonNegativeIntegers',
+  NonNegativeIntegers: 'Integers',
+  NonPositiveIntegers: 'NegativeIntegers',
+  NegativeIntegers: 'Integers',
 
   // https://en.wikipedia.org/wiki/List_of_named_matrices
   // ComplexTensor: 'Tensor',
@@ -287,12 +266,10 @@ export function ancestors(dom: string): string[] {
       throw Error(`Unknown domain constructor ${dom[0]}`);
     if (dom[0] === 'Functions' || dom[0] === 'Head')
       return ancestors('Functions');
-    if (dom[0] === 'Symbol') return ancestors('Symbol');
-    if (dom[0] === 'Tuple') return ancestors('Tuple');
-    if (dom[0] === 'List') return ancestors('List');
-    if (dom[0] === 'Dictionary') return ancestors('Dictionary');
-    if (dom[0] === 'Range') return ancestors('Integer');
-    if (dom[0] === 'Interval') return ancestors('RealNumberExtended');
+    if (dom[0] === 'Symbol') return ancestors('Symbols');
+    if (dom[0] === 'Tuple') return ancestors('Tuples');
+    if (dom[0] === 'List') return ancestors('Lists');
+    if (dom[0] === 'Dictionary') return ancestors('Dictionaries');
     if (dom[0] === 'Maybe' || dom[0] === 'Sequence') return ancestors(dom[1]);
 
     if (dom[0] === 'Literal') return ['Anything']; // @todo could do better
@@ -328,7 +305,7 @@ export function domainSetsLibrary(): IdentifierDefinitions {
       dom !== 'Tuple' &&
       dom !== 'Sequence'
     )
-      table[dom] = { domain: 'Set' };
+      table[dom] = { domain: 'Sets' };
   }
   return table as IdentifierDefinitions;
 }

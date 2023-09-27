@@ -77,9 +77,7 @@ describe('LATEX SERIALIZING', () => {
     `);
 
     // Head as expression
-    expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
-      `g(\\operatorname{\\_1})`
-    );
+    expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(`g(f)`);
   });
 
   test('Basic operations', () => {
@@ -137,8 +135,8 @@ describe('LATEX', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "String"],
-            ["Domain", "PositiveInteger"]
+            ["Domain", "Strings"],
+            ["Domain", "PositiveIntegers"]
           ],
           22
         ]

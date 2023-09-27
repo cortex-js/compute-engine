@@ -247,12 +247,12 @@ export function canonicalProduct(
   if (index && index.head === 'ReleaseHold') index = index.op1.evaluate();
   index ??= ce.symbol('Nothing');
   if (!index.symbol)
-    index = ce.error(['incompatible-domain', 'Symbol', index.domain]);
+    index = ce.error(['incompatible-domain', 'Symbols', index.domain]);
   else index = ce.hold(index);
 
   // The range bounds, if present, should be integers numbers
-  if (lower && lower.isFinite) lower = validateArgument(ce, lower, 'Integer');
-  if (upper && upper.isFinite) upper = validateArgument(ce, upper, 'Integer');
+  if (lower && lower.isFinite) lower = validateArgument(ce, lower, 'Integers');
+  if (upper && upper.isFinite) upper = validateArgument(ce, upper, 'Integers');
 
   if (lower && upper) range = ce.tuple([index, lower, upper]);
   else if (upper) range = ce.tuple([index, ce.number(1), upper]);

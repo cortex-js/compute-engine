@@ -378,6 +378,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
+  infer(_domain: BoxedDomain): boolean {
+    return false;
+  }
+
   bind(_scope: RuntimeScope | null): void {
     return;
   }
@@ -411,10 +415,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
   set domain(_domain: BoxedDomain) {
     throw new Error(`Can't change the domain of \\(${this.latex}\\)`);
-  }
-
-  get explicitDomain(): BoxedDomain | undefined {
-    return this.domain;
   }
 
   get isNumber(): boolean | undefined {

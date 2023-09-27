@@ -6,7 +6,7 @@ date: Last Modified
 sidebar:
   - nav: "universal"
 preamble:
-  '<h1>Domains</h1><p class="xl">The <b>domain</b> of an expression is the set 
+  '<h1>Domains</h1><p class="xl">The <b>domain</b> of an expression is the set
   of the possible values of that expression.</p>'
 toc: true
 render_math_in_document: true
@@ -19,22 +19,22 @@ A domain is represented by a **domain expression**. For example:
 - `["Functions", "Integers", "Integers"]`
 
 A domain expression is either a **domain literal** represented by an identifier
-such as `"Integers"` and `"Booleans"` or a **constructed domain** represented by 
-a function expression. 
+such as `"Integers"` and `"Booleans"` or a **constructed domain** represented by
+a function expression.
 
-Of course, it wouldn't make sense for it to be any function, so the
-name of that function must be among a limited set of **domain constructors**. 
+Of course, it wouldn't make sense for it to be any function, so the name of that
+function must be among a limited set of **domain constructors**.
 
-This effectively defines a specialized language to represent domains. In some 
+This effectively defines a specialized language to represent domains. In some
 cases the same function name can be used in a domain expression and a value
-expression, but they will be interpreted differently. 
+expression, but they will be interpreted differently.
 
 Domains are similar to _types_ in programming languages. Amongst other things,
 they are used to select the correct function definition.
 
-For example a function `Add` could have several implementation to operate
-on numbers or on matrixes. The domain of the arguments would be used to select
-the appropriate function definition.
+For example a function `Add` could have several implementation to operate on
+numbers or on matrixes. The domain of the arguments would be used to select the
+appropriate function definition.
 
 Symbolic manipulation algorithms also use domains to decide when certain
 transformations are applicable.
@@ -98,17 +98,17 @@ There are a few other important domains:
   `Nothing` symbol.
 
 The _parent_ of a domain represents a _is-a_/_subset-of_ relationship, for
-example, a `List` _is-a_ `Collection`.
+example, a `List` _is-a_ `Collections`.
 
-![Anything domains](/assets/domains.001.jpeg 'The top-level domains')
+![Anything domains](/assets/domains.001.jpeg "The top-level domains")
 
-![Value domains](/assets/domains.002.jpeg 'The Value sub-domains')
+![Value domains](/assets/domains.002.jpeg "The Value sub-domains")
 
-![Tensor domains](/assets/domains.003.jpeg 'The Tensor sub-domains')
+![Tensor domains](/assets/domains.003.jpeg "The Tensor sub-domains")
 
-![Function domains](/assets/domains.004.jpeg 'The Function sub-domains')
+![Function domains](/assets/domains.004.jpeg "The Function sub-domains")
 
-![Number domains](/assets/domains.005.jpeg 'The Number sub-domains')
+![Number domains](/assets/domains.005.jpeg "The Number sub-domains")
 
 The implementation of the CortexJS domains is based on
 [Weibel, Trudy & Gonnet, Gaston. (1991). An Algebra of Properties.. 352-359. 10.1145/120694.120749. ](https://www.researchgate.net/publication/.221564157_An_Algebra_of_Properties).{.notice--info}
@@ -157,28 +157,28 @@ A domain constructor is a function expression with one of the identifiers below.
 // Functions with a single real number argument and that return an integer
 ["Functions", "RealNumbers", "Integers"]
 ```
-When a domain expression is boxed, it is automatically put in canonical form.
 
+When a domain expression is boxed, it is automatically put in canonical form.
 
 <div class="symbols-table first-column-header">
 
-| Domain Constructor | Description                                                                                                                                                                                                                                                                                                                                    |
-| :----------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Functions`         | `["Functions", ...<arg-domain>, <co-domain>]` <br> For example, `["Functions", "Numbers", "Booleans"]` is the domain of the functions that have a single argument, a number, and return a boolean (has a boolean codomain).<br>By default, compatibility is determined by using covariance for the arguments and contravariance for the co-domain. |
-| `List`             | `["List", <element-domain>]` <br>                                                                                                                                                                                                                                                                                                              |
-| `Tuple`            | `["Tuple", <element-1-domain>]`, `["Tuple", <element-1-domain>] ... <element-n-domain>]`                                                                                                                                                                                                                                                       |
-| `Intersection`     | `["Intersection", <domain-1>, <domain-2>]` <br> All the values that are a member of `<domain-1>` and `<domain-2>`                                                                                                                                                                                                                              |
-| `Union`            | `["Union", <domain-1>, <domain-2>]` <br>All the values that are a member of `<domain-1>` or `<domain-2>`                                                                                                                                                                                                                                       |
-| `Maybe`            | `["Maybe", <domain>]`<br> A value of `<domain>` or `Nothing`                                                                                                                                                                                                                                                                                   |
-| `Sequence`         | `["Sequence", <domain>]` <br>As a function argument one or more values of `<domain>`.                                                                                                                                                                                                                                                          |
-| `Head`             |                                                                                                                                                                                                                                                                                                                                                |
-| `Symbol`           |                                                                                                                                                                                                                                                                                                                                                |
-| `Literal`          | This constructor defines a domain with a single value, the value of its argument. `                                                                                                                                                                                                                                                            |
-| `Covariant`        |                                                                                                                                                                                                                                                                                                                                                |
-| `Contravariant`    |                                                                                                                                                                                                                                                                                                                                                |
-| `Invariant`        | `["Invariant", <domain>]`<br> This constructor indicate that a domain is compatible with this domain only if they are invariants with regard to each other.                                                                                                                                                                                    |
-| `Interval`         | `["Interval", <min>, <max>]` <br> The set of real numbers between `<min>` and `<max>`.<br> Use `["Interval", ["Open", <min>], <max>]` to indicate an open-left interval.                                                                                                                                                                       |
-| `Range`            | `["Range", <min>, <max>]` <br> The set of integers from `<min>` to `<max>` (inclusive).                                                                                                                                                                                                                                                        |
-| `Multiple`         | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integers", 1]`                                                                                                                                       |
+| Domain Constructor | Description                                                                                                                                                                                                                                                                                                                                        |
+| :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Functions`        | `["Functions", ...<arg-domain>, <co-domain>]` <br> For example, `["Functions", "Numbers", "Booleans"]` is the domain of the functions that have a single argument, a number, and return a boolean (has a boolean codomain).<br>By default, compatibility is determined by using covariance for the arguments and contravariance for the co-domain. |
+| `List`             | `["List", <element-domain>]` <br>                                                                                                                                                                                                                                                                                                                  |
+| `Tuple`            | `["Tuple", <element-1-domain>]`, `["Tuple", <element-1-domain>] ... <element-n-domain>]`                                                                                                                                                                                                                                                           |
+| `Intersection`     | `["Intersection", <domain-1>, <domain-2>]` <br> All the values that are a member of `<domain-1>` and `<domain-2>`                                                                                                                                                                                                                                  |
+| `Union`            | `["Union", <domain-1>, <domain-2>]` <br>All the values that are a member of `<domain-1>` or `<domain-2>`                                                                                                                                                                                                                                           |
+| `Maybe`            | `["Maybe", <domain>]`<br> A value of `<domain>` or `Nothing`                                                                                                                                                                                                                                                                                       |
+| `Sequence`         | `["Sequence", <domain>]` <br>As a function argument one or more values of `<domain>`.                                                                                                                                                                                                                                                              |
+| `Head`             |                                                                                                                                                                                                                                                                                                                                                    |
+| `Symbol`           |                                                                                                                                                                                                                                                                                                                                                    |
+| `Literal`          | This constructor defines a domain with a single value, the value of its argument. `                                                                                                                                                                                                                                                                |
+| `Covariant`        |                                                                                                                                                                                                                                                                                                                                                    |
+| `Contravariant`    |                                                                                                                                                                                                                                                                                                                                                    |
+| `Invariant`        | `["Invariant", <domain>]`<br> This constructor indicate that a domain is compatible with this domain only if they are invariants with regard to each other.                                                                                                                                                                                        |
+| `Interval`         | `["Interval", <min>, <max>]` <br> The set of real numbers between `<min>` and `<max>`.<br> Use `["Interval", ["Open", <min>], <max>]` to indicate an open-left interval.                                                                                                                                                                           |
+| `Range`            | `["Range", <min>, <max>]` <br> The set of integers from `<min>` to `<max>` (inclusive).                                                                                                                                                                                                                                                            |
+| `Multiple`         | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integers", 1]`                                                                                                                                          |
 
 </div>

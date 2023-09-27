@@ -96,7 +96,7 @@ console.log(bigPi.latex);
 
 ce.precision = 100; // Future computations will be done with 100 digits
 
-console.log('pi = ', smallPi.numericValue, '=', bigPi.numericValue);
+console.log("pi = ", smallPi.numericValue, "=", bigPi.numericValue);
 // ➔ pi  = 3.1415 = 3.1415926535
 ```
 
@@ -108,14 +108,14 @@ when it is first used in an expression.
 The new definition has a domain of `ce.defaultDomain` and no value associated
 with it, so the symbol will be an **unknwon**.
 
-By default, `defaultDomain` is `"ExtendedRealNumber"` so any unknown variable is
-automatically assumed to be a real number. Use `ce.declare()` to explictly
+By default, `defaultDomain` is `"ExtendedRealNumbers"` so any unknown variable
+is automatically assumed to be a real number. Use `ce.declare()` to explictly
 specify the domain of a symbol.
 
 ```js
 const symbol = ce.box("m"); // m for mystery
 console.log(symbol.domain.symbol);
-// ➔ "ExtendedRealNumber"
+// ➔ "ExtendedRealNumbers"
 symbol.value = 5;
 console.log(symbol.numericValue);
 // ➔ 5

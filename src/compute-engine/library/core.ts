@@ -33,8 +33,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Anything',
-          ['Maybe', 'String'],
-          ['Maybe', 'String'],
+          ['Maybe', 'Strings'],
+          ['Maybe', 'Strings'],
           'Anything',
         ],
         codomain: (_ce, args) => args[0].domain,
@@ -63,12 +63,12 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: [
           'Functions',
-          'String',
+          'Strings',
           ['Maybe', ['Sequence', 'Anything']],
           'Anything',
         ],
         canonical: (ce, args) => {
-          const code = validateArgument(ce, args[0], 'String').string;
+          const code = validateArgument(ce, args[0], 'Strings').string;
           if (code === 'incompatible-domain') {
             return ce._fn('ErrorCode', [
               ce.string(code),
@@ -85,7 +85,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: 'Functions',
         codomain: (ce, args) =>
-          args[0].symbol ? ce.domain('Symbol') : ce.domain('Anything'),
+          args[0].symbol ? ce.domain('Symbols') : ce.domain('Anything'),
         // To make a canonical expression, don't canonicalize the args
         canonical: (ce, args) =>
           args.length !== 1
@@ -110,7 +110,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Anything',
-          ['Maybe', 'Dictionary'], // @todo
+          ['Maybe', 'Dictionaries'], // @todo
           'Anything',
         ],
       },
@@ -140,7 +140,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Domain: {
       /** Return the domain of an expression */
       signature: {
-        domain: ['Functions', 'Anything', 'Domain'],
+        domain: ['Functions', 'Anything', 'Domains'],
         canonical: (ce, ops) =>
           ce.domain(validateArgumentCount(ce, canonical(ops), 1)[0]),
         evaluate: (_ce, ops) => ops[0].domain,
@@ -165,7 +165,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Anything',
-          ['Maybe', ['Sequence', 'Symbol']],
+          ['Maybe', ['Sequence', 'Symbols']],
           'Functions',
         ],
         canonical: (ce, args) => {
@@ -235,13 +235,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     // @todo: need review
     Signatures: {
       signature: {
-        domain: ['Functions', 'Symbol', ['Maybe', ['List', 'Domain']]],
+        domain: ['Functions', 'Symbols', ['Maybe', ['List', 'Domains']]],
         canonical: (ce, ops) => {
           ops = validateArgumentCount(ce, ops, 1);
           if (!ops[0].symbol)
             return ce._fn('Signatures', [
               ce.error(
-                ['incompatible-domain', 'Symbol', ops[0].domain],
+                ['incompatible-domain', 'Symbols', ops[0].domain],
                 ops[0]
               ),
             ]);
@@ -361,8 +361,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Values',
-          ['Maybe', 'Integer'],
-          ['Tuple', 'Values', 'Number'],
+          ['Maybe', 'Integers'],
+          ['Tuple', 'Values', 'Numbers'],
         ],
         evaluate: (ce, ops) => {
           if (ops[1].symbol === 'Nothing') {
@@ -407,13 +407,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     // is a LaTeX string
     LatexString: {
       inert: true,
-      signature: { domain: ['Functions', 'String', 'String'] },
+      signature: { domain: ['Functions', 'Strings', 'Strings'] },
     },
 
     // Serialize one or more expressions to LaTeX
     Latex: {
       signature: {
-        domain: ['Functions', ['Maybe', ['Sequence', 'Anything']], 'String'],
+        domain: ['Functions', ['Maybe', ['Sequence', 'Anything']], 'Strings'],
         evaluate: (ce, ops) =>
           ce.fn('LatexString', [ce.string(joinLatex(ops.map((x) => x.latex)))]),
       },

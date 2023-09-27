@@ -166,22 +166,17 @@ export type DomainCompatibility =
 /** A domain constructor is the head of a domain expression. */
 export type DomainConstructor =
   | 'InvalidDomain'
-  | 'Matrix' // <domain-of-elements> <dimension>*
-  | 'SquareMatrix' // <domain-of-elements> <dimension>
-  | 'Vector' // <domain-of-elements> <length>?
   | 'Functions' // <domain-of-args>* <co-domain>
   | 'List' // <domain-of-elements>
   | 'Dictionary'
   | 'Tuple'
-  | 'Range' // <min-value> <max-value> (inclusive)
-  | 'Interval' // <min-value> <max-value> (inclusive, unless Open domain expression)
   | 'Intersection'
   | 'Union'
   | 'Maybe'
   | 'Sequence'
   | 'Head'
   | 'Symbol'
-  | 'Values'
+  | 'Value'
   | 'Covariant'
   | 'Contravariant'
   | 'Bivariant'
@@ -195,23 +190,12 @@ export type DomainExpression<T = SemiBoxedExpression> =
   | ['InvalidDomain', T]
   | ['Union', ...DomainExpression<T>[]]
   | ['Intersection', ...DomainExpression<T>[]]
-  | ['Matrix', DomainExpression<T>, T, T]
-  | ['SquareMatrix', DomainExpression<T>, T]
-  | ['Vector', DomainExpression<T>, T]
   | ['List', DomainExpression<T>]
   | ['Dictionary', DomainExpression<T>]
   | ['Tuple', ...DomainExpression<T>[]]
   | ['Maybe', DomainExpression<T>]
   | ['Sequence', DomainExpression<T>]
-  | ['Range']
-  | ['Range', T]
-  | ['Range', T, T]
-  | ['Range', T, T, T]
-  | ['Interval', T, T]
-  | ['Interval', ['Open', T], T]
-  | ['Interval', T, ['Open', T]]
-  | ['Interval', ['Open', T], ['Open', T]]
-  | ['Values', T]
+  | ['Value', T]
   | ['Head', string]
   | ['Symbol', string]
   | ['Covariant', DomainExpression<T>]
@@ -996,18 +980,18 @@ export interface BoxedExpression {
   readonly symbolDefinition: BoxedSymbolDefinition | undefined;
 
   /**
-   * The domain of this expression, without accounting for any inferred domain
-   * or `ce.defaultDomain`. If no domain has been explicitly set via assignment
-   * or via an `.assume()` directive, the `expr.explicitDomain` is `undefined`.
    *
-   * This is useful to determine if the domain of an expression is inferred.
+   * Infer the domain of this expression.
    *
-   * In most cases you'll want to  use `expr.domain` instead.
+   * If the domain of this expression is already known, return `false`.
    *
-   * **Note** `undefined` if not a canonical expression or not a function.
+   * If the domain was not set, set it to the inferred domain, return `true`
+   * If the domain was previously inferred, adjust it by widening it,
+   *    return `true
    *
+   * @internal
    */
-  readonly explicitDomain: BoxedDomain | undefined;
+  infer(domain: BoxedDomain): boolean;
 
   /**
    * Update the definition associated with this expression, taking
@@ -1959,7 +1943,7 @@ export type SymbolAttributes = {
 
 /**
  * A bound symbol (i.e. one with an associated definition) has either a domain
- * (e.g. ∀ x ∈ ℝ), a value (x = 5) or both (π: value = 3.14... domain = TranscendentalNumber)
+ * (e.g. ∀ x ∈ ℝ), a value (x = 5) or both (π: value = 3.14... domain = TranscendentalNumbers)
  */
 export type SymbolDefinition = BaseDefinition &
   Partial<SymbolAttributes> & {

@@ -168,7 +168,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
 
   get domain(): BoxedDomain | undefined {
     // The _domain, if present, has priority over the value
-    // So if the domain is more general than the value, say 'Number',
+    // So if the domain is more general than the value, say 'Numbers',
     // that is what will be returned. It is possible to get the
     // expr.value.domain to get the more specific domain if desired.
     return this._domain ?? this._value?.domain ?? undefined;
@@ -464,7 +464,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
         this._defValue = undefined;
         this._value = undefined;
       }
-      this._domain = this._engine.domain('Number');
+      this._domain = this._engine.domain('Numbers');
 
       if (!this._flags) this._flags = normalizeFlags(flags);
       else this._flags = { ...this._flags, ...normalizeFlags(flags) };
@@ -612,53 +612,53 @@ export function domainToFlags(
     // @todo: handle `Range`, `Interval`, and other numeric literals
     const domain = dom.literal;
     result.number = true;
-    if (domain === 'Integer') result.integer = true;
-    if (domain === 'RationalNumber') result.rational = true;
-    if (domain === 'AlgebraicNumber') result.algebraic = true;
-    if (domain === 'TranscendentalNumber') {
+    if (domain === 'Integers') result.integer = true;
+    if (domain === 'RationalNumbers') result.rational = true;
+    if (domain === 'AlgebraicNumbers') result.algebraic = true;
+    if (domain === 'TranscendentalNumbers') {
       result.algebraic = false;
       result.real = true;
     }
-    if (domain === 'ExtendedRealNumber') result.extendedReal = true;
-    if (domain === 'RealNumber') result.real = true;
-    if (domain === 'ImaginaryNumber') result.imaginary = true;
-    if (domain === 'ExtendedComplexNumber') result.extendedComplex = true;
-    if (domain === 'ComplexNumber') result.complex = true;
+    if (domain === 'ExtendedRealNumbers') result.extendedReal = true;
+    if (domain === 'RealNumbers') result.real = true;
+    if (domain === 'ImaginaryNumbers') result.imaginary = true;
+    if (domain === 'ExtendedComplexNumbers') result.extendedComplex = true;
+    if (domain === 'ComplexNumbers') result.complex = true;
 
-    if (domain === 'PositiveNumber') {
+    if (domain === 'PositiveNumbers') {
       result.notZero = true;
       result.real = true;
       result.positive = true;
     }
-    if (domain === 'NegativeNumber') {
+    if (domain === 'NegativeNumbers') {
       result.notZero = true;
       result.real = true;
       result.negative = true;
     }
-    if (domain === 'NonNegativeNumber') {
+    if (domain === 'NonNegativeNumbers') {
       result.real = true;
       result.positive = true;
     }
-    if (domain === 'NonPositiveNumber') {
+    if (domain === 'NonPositiveNumbers') {
       result.real = true;
       result.negative = true;
     }
 
-    if (domain === 'PositiveInteger') {
+    if (domain === 'PositiveIntegers') {
       result.notZero = true;
       result.integer = true;
       result.positive = true;
     }
-    if (domain === 'NegativeNumber') {
+    if (domain === 'NegativeNumbers') {
       result.notZero = true;
       result.integer = true;
       result.negative = true;
     }
-    if (domain === 'NonNegativeNumber') {
+    if (domain === 'NonNegativeNumbers') {
       result.integer = true;
       result.positive = true;
     }
-    if (domain === 'NonPositiveNumber') {
+    if (domain === 'NonPositiveNumbers') {
       result.integer = true;
       result.negative = true;
     }

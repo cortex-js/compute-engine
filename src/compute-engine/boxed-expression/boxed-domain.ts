@@ -157,7 +157,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   }
 
   get domain(): BoxedDomain {
-    return this.engine.domain('Domain');
+    return this.engine.domain('Domains');
   }
 
   get isNothing(): boolean {
@@ -180,25 +180,25 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   //   if (this.domainLiteral === 'NumericFunctions') return true;
   //   if (this.domainConstructor !== 'Functions') return false;
   //   for (const arg of this.domainParams!)
-  //     if (!isNumericSubdomain(arg, 'Number')) return false;
+  //     if (!isNumericSubdomain(arg, 'Numbers')) return false;
 
   //   return true;
   // }
   // get isBoolean(): boolean {
   //   const dom = this.domainLiteral;
-  //   return dom === 'Boolean' || dom === 'MaybeBoolean';
+  //   return dom === 'Booleans' || dom === 'MaybeBooleans';
   // }
 
   // get isRealFunction(): boolean {
   //   if (this.domainLiteral === 'RealFunctions') return true;
   //   if (this.domainConstructor !== 'Functions') return false;
   //   for (const arg of this.domainParams!)
-  //     if (!isNumericSubdomain(arg, 'ExtendedRealNumber')) return false;
+  //     if (!isNumericSubdomain(arg, 'ExtendedRealNumbers')) return false;
   //   return true;
   // }
 
   get isNumeric(): boolean {
-    return this.isCompatible(this.engine.domain('Number'));
+    return this.isCompatible(this.engine.domain('Numbers'));
   }
 
   // get isLogicOperator(): boolean {
@@ -216,10 +216,10 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   // }
 
   get isRelationalOperator(): boolean {
-    if (this._value === 'RelationalOperator') return true;
+    if (this._value === 'RelationalOperators') return true;
     if (this.ctor !== 'Functions') return false;
     if (this.domainArgs!.length !== 2) return false;
-    if (!this.codomain!.isCompatible('MaybeBoolean')) return false;
+    if (!this.codomain!.isCompatible('MaybeBooleans')) return false;
 
     return true;
   }
@@ -286,60 +286,6 @@ function makeCanonical(
   console.assert(ctor);
 
   //
-  // Range
-  //
-  if (ctor === 'Range') {
-    if (dom.length === 1) return 'Integer';
-    let first: string | SemiBoxedExpression | DomainExpression = 1;
-    let last: string | SemiBoxedExpression | DomainExpression = +Infinity;
-    if (dom.length === 2) {
-      last = dom[1];
-    } else if (dom.length === 3) {
-      first = dom[1];
-      last = dom[2];
-    }
-    const firstNum = asRangeBound(ce, first);
-    const lastNum = asRangeBound(ce, last);
-    if (firstNum === null || lastNum === null)
-      throw Error(`Invalid range [${firstNum}, ${lastNum}] `);
-    if (lastNum < firstNum) [first, last] = [last, first];
-    if (firstNum === -Infinity && lastNum === Infinity) return 'Integer';
-
-    if (firstNum === 1 && lastNum === Infinity) return 'PositiveInteger';
-    if (firstNum === 0 && lastNum === Infinity) return 'NonNegativeInteger';
-    if (firstNum === -Infinity && lastNum === -1) return 'NegativeInteger';
-    if (firstNum === -Infinity && lastNum === 0) return 'NonPositiveInteger';
-
-    return ['Range', ce.number(firstNum), ce.number(lastNum)];
-  }
-
-  //
-  // Interval
-  //
-  if (ctor === 'Interval') {
-    if (dom.length !== 3) throw Error('Invalid range ' + dom);
-    let [isLeftOpen, first] = maybeOpen(ce, dom[1]);
-    let [isRightOpen, last] = maybeOpen(ce, dom[2]);
-
-    if (first === null || last === null) throw Error('Invalid range ' + dom);
-    if (last < first) {
-      [first, last] = [last, first];
-      [isLeftOpen, isRightOpen] = [isRightOpen, isLeftOpen];
-    }
-
-    if (first === 0 && last === Infinity)
-      return isLeftOpen ? 'PositiveNumber' : 'NonNegativeNumber';
-    if (first === -Infinity && last === 0)
-      return isRightOpen ? 'NegativeNumber' : 'NonPositiveNumber';
-
-    return [
-      'Interval',
-      isLeftOpen ? ['Open', ce.number(first)] : ce.number(first),
-      isRightOpen ? ['Open', ce.number(last)] : ce.number(last),
-    ] as DomainExpression<BoxedExpression>;
-  }
-
-  //
   // Function
   //
   if (ctor === 'Functions') {
@@ -395,8 +341,8 @@ function makeCanonical(
     return ['Symbol', dom[1] as string];
   }
 
-  if (ctor === 'Values') {
-    return ['Values', ce.box(dom[1])];
+  if (ctor === 'Value') {
+    return ['Value', ce.box(dom[1])];
   }
 
   if (ctor === 'InvalidDomain') {
@@ -539,15 +485,9 @@ function isSubdomainOf(
     // 'Maybe',
     // 'Sequence',
 
-    if (lhsConstructor === 'Interval')
-      return [isSubdomainOf1('ExtendedRealNumber', rhsLiteral), xlhs];
-
-    if (lhsConstructor === 'Range')
-      return [isSubdomainOf1('Integer', rhsLiteral), xlhs];
-
     // 'Head',
     // 'Symbol',
-    // 'Values',
+    // 'Value',
     return [true, xlhs];
   }
 
@@ -668,42 +608,6 @@ function isSubdomainOf(
   // 'Symbol',
   // 'Values',
 
-  if (rhsConstructor === 'Range') {
-    if (!Array.isArray(lhs) || lhs[0] !== 'Range') return [false, xlhs];
-    const lhsMin = asFloat(lhs[1] as BoxedExpression);
-    const lhsMax = asFloat(lhs[2] as BoxedExpression);
-    const rhsMin = asFloat(rhs[1] as BoxedExpression);
-    const rhsMax = asFloat(rhs[2] as BoxedExpression);
-
-    return [
-      lhsMin !== null &&
-        lhsMax !== null &&
-        rhsMin !== null &&
-        rhsMax !== null &&
-        lhsMin >= rhsMin &&
-        lhsMax <= rhsMax,
-      xlhs,
-    ];
-  }
-
-  if (rhsConstructor === 'Interval') {
-    if (!Array.isArray(lhs) || lhs[0] !== 'Interval') return [false, xlhs];
-    const lhsMin = asFloat(lhs[1] as BoxedExpression);
-    const lhsMax = asFloat(lhs[2] as BoxedExpression);
-    const rhsMin = asFloat(rhs[1] as BoxedExpression);
-    const rhsMax = asFloat(rhs[2] as BoxedExpression);
-
-    return [
-      lhsMin !== null &&
-        lhsMax !== null &&
-        rhsMin !== null &&
-        rhsMax !== null &&
-        lhsMin >= rhsMin &&
-        lhsMax <= rhsMax,
-      xlhs,
-    ];
-  }
-
   console.error('Unexpected domain constructor ' + rhsConstructor);
 
   return [false, xlhs];
@@ -732,8 +636,6 @@ function domainLiteralAncestor(dom: BoxedDomain): string {
   result = dom.ctor!;
 
   if (result === 'Maybe') return 'Anything';
-  if (result === 'Interval') return 'RealNumber';
-  if (result === 'Range') return 'Integer';
   if (result === 'Head') return 'Functions';
 
   if (result === 'Union') return 'Anything'; // @todo could be more narrow

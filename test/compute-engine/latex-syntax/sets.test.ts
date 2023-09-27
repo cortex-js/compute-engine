@@ -8,7 +8,7 @@ describe('SERIALIZING SETS', () => {
     );
     // With lambda-condition
     // expect(
-    //   latex(['Set', 'Number', ['Condition', ['NotEqual', '_', 0]]])
+    //   latex(['Set', 'Numbers', ['Condition', ['NotEqual', '_', 0]]])
     // ).toMatchInlineSnapshot(
     //   `\\mathrm{Set}(\\mathrm{Number}, \\mathrm{Condition}(0\\ne\\text{\\_}))`
     // );
@@ -16,11 +16,11 @@ describe('SERIALIZING SETS', () => {
     expect(
       latex([
         'Set',
-        ['Element', 'x', 'Number'],
+        ['Element', 'x', 'Numbers'],
         ['Condition', ['NotEqual', 'x', 0]],
       ])
     ).toMatchInlineSnapshot(
-      `\\mathrm{Set}(x\\in\\mathbf{\\mathrm{Number}}, \\mathrm{Condition}(0\\ne x))`
+      `\\mathrm{Set}(x\\in\\mathbf{\\mathrm{Numbers}}, \\mathrm{Condition}(0\\ne x))`
     );
   });
 
@@ -29,12 +29,12 @@ describe('SERIALIZING SETS', () => {
   // test('Interval', () => {});
 
   test('Multiple', () => {
-    expect(latex(['Multiple', 'Integer'])).toMatchInlineSnapshot(``);
-    expect(latex(['Multiple', 'Integer', 1])).toMatchInlineSnapshot(``);
-    expect(latex(['Multiple', 'Integer', 1, 0])).toMatchInlineSnapshot(``);
-    expect(latex(['Multiple', 'Integer', 2])).toMatchInlineSnapshot(``);
-    expect(latex(['Multiple', 'Integer', 2, 0])).toMatchInlineSnapshot(``);
-    expect(latex(['Multiple', 'Integer', 2, 1])).toMatchInlineSnapshot(``);
+    expect(latex(['Multiple', 'Integers'])).toMatchInlineSnapshot(``);
+    expect(latex(['Multiple', 'Integers', 1])).toMatchInlineSnapshot(``);
+    expect(latex(['Multiple', 'Integers', 1, 0])).toMatchInlineSnapshot(``);
+    expect(latex(['Multiple', 'Integers', 2])).toMatchInlineSnapshot(``);
+    expect(latex(['Multiple', 'Integers', 2, 0])).toMatchInlineSnapshot(``);
+    expect(latex(['Multiple', 'Integers', 2, 1])).toMatchInlineSnapshot(``);
     expect(latex(['Multiple', 'Pi', 2, 3])).toMatchInlineSnapshot(``);
     expect(
       latex(['Multiple', ['Divide', 'Pi', 2], 2, 3])
@@ -42,34 +42,36 @@ describe('SERIALIZING SETS', () => {
   });
 
   test('Union, Intersection, etc...', () => {
-    expect(latex(['Union', 'Integer', 'RealNumber'])).toMatchInlineSnapshot(
+    expect(latex(['Union', 'Integers', 'RealNumbers'])).toMatchInlineSnapshot(
       `\\Z\\cup\\R`
     );
     expect(
-      latex(['Intersection', 'Integer', 'RealNumber'])
+      latex(['Intersection', 'Integers', 'RealNumbers'])
     ).toMatchInlineSnapshot(`\\Z\\cap\\R`);
     expect(latex(['Complement', 'ComplexNumber'])).toMatchInlineSnapshot(
-      `\\C^{\\complement}`
+      `\\mathtip{\\error{\\mathrm{ComplexNumber}}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Sets}}}^{\\complement}`
     );
     expect(latex(['CartesianProduct'])).toMatchInlineSnapshot(
       `\\error{\\blacksquare}\\times\\error{\\blacksquare}`
     );
-    expect(latex(['CartesianProduct', 'Integer'])).toMatchInlineSnapshot(
+    expect(latex(['CartesianProduct', 'Integers'])).toMatchInlineSnapshot(
       `\\Z\\times\\error{\\blacksquare}`
     );
     expect(
-      latex(['CartesianProduct', 'Integer', 'Integer'])
+      latex(['CartesianProduct', 'Integers', 'Integers'])
     ).toMatchInlineSnapshot(`\\Z\\times\\Z`);
     expect(
-      latex(['CartesianProduct', 'Integer', 'RationalNumber'])
-    ).toMatchInlineSnapshot(`\\Z\\times\\Q`);
+      latex(['CartesianProduct', 'Integers', 'RationalNumber'])
+    ).toMatchInlineSnapshot(
+      `\\Z\\times\\mathtip{\\error{\\mathrm{RationalNumber}}}{\\in \\mathbf{\\bar\\R}\\notin \\mathbf{\\mathrm{Sets}}}`
+    );
     expect(
-      latex(['CartesianProduct', 'Integer', 'Integer', 'Integer'])
+      latex(['CartesianProduct', 'Integers', 'Integers', 'Integers'])
     ).toMatchInlineSnapshot(`\\Z\\times\\Z\\times\\Z`);
-    expect(latex(['CartesianPower', 'Integer', 3])).toMatchInlineSnapshot(
+    expect(latex(['CartesianPower', 'Integers', 3])).toMatchInlineSnapshot(
       `\\mathrm{CartesianPower}(\\Z, 3)`
     );
-    expect(latex(['CartesianPower', 'Integer', 'n'])).toMatchInlineSnapshot(
+    expect(latex(['CartesianPower', 'Integers', 'n'])).toMatchInlineSnapshot(
       `\\mathrm{CartesianPower}(\\Z, n)`
     );
   });
@@ -175,16 +177,16 @@ describe('PARSING SETS', () => {
   });
   test('Union, Intersection, etc...', () => {
     expect(parse('\\N \\cup \\R')).toMatchInlineSnapshot(
-      `["Union", "NonNegativeInteger", "RealNumber"]`
+      `["Union", "NonNegativeIntegers", "RealNumbers"]`
     );
     expect(parse('\\N \\cap \\R')).toMatchInlineSnapshot(
-      `["Intersection", "NonNegativeInteger", "RealNumber"]`
+      `["Intersection", "NonNegativeIntegers", "RealNumbers"]`
     );
     expect(parse('\\N \\setminus \\R')).toMatchInlineSnapshot(
-      `["SetMinus", "NonNegativeInteger", "RealNumber"]`
+      `["SetMinus", "NonNegativeIntegers", "RealNumbers"]`
     );
     expect(parse('\\N^\\complement')).toMatchInlineSnapshot(
-      `["Complement", "NonNegativeInteger"]`
+      `["Complement", "NonNegativeIntegers"]`
     );
     expect(parse('\\N \\times \\N')).toMatchInlineSnapshot(`
       [
@@ -194,20 +196,20 @@ describe('PARSING SETS', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "Set"]
+            ["Domain", "Numbers"],
+            ["Domain", "Sets"]
           ],
-          "NonNegativeInteger"
+          "NonNegativeIntegers"
         ],
         [
           "Error",
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "Set"]
+            ["Domain", "Numbers"],
+            ["Domain", "Sets"]
           ],
-          "NonNegativeInteger"
+          "NonNegativeIntegers"
         ]
       ]
     `);
@@ -219,10 +221,10 @@ describe('PARSING SETS', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "Set"]
+            ["Domain", "Numbers"],
+            ["Domain", "Sets"]
           ],
-          "NonNegativeInteger"
+          "NonNegativeIntegers"
         ],
         3
       ]
@@ -235,10 +237,10 @@ describe('PARSING SETS', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "Set"]
+            ["Domain", "Numbers"],
+            ["Domain", "Sets"]
           ],
-          "NonNegativeInteger"
+          "NonNegativeIntegers"
         ],
         "n"
       ]

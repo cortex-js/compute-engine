@@ -104,7 +104,7 @@ function makeIntegral(
     for (const r of ranges)
       if (r.index) {
         hasIndex = true;
-        idTable[r.index] = { domain: 'ExtendedRealNumber' };
+        idTable[r.index] = { domain: 'ExtendedRealNumbers' };
       }
 
     if (hasIndex) ce.pushScope().declare(idTable);

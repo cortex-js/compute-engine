@@ -185,4 +185,4 @@ export function getWildcardName(s: string): string {
 // @todo ['Alternatives', ...]:
 // @todo: ['Condition',...] : Conditional match
 // @todo: ['Repeated',...] : repeating match
-// @todo _x:Head or _x:RealNumber
+// @todo _x:Head or _x:RealNumbers

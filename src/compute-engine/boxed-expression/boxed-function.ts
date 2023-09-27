@@ -439,28 +439,28 @@ export class BoxedFunction extends _BoxedExpression {
       debugger;
       console.log(this.domain);
     }
-    return this.domain.isCompatible('Number');
+    return this.domain.isCompatible('Numbers');
   }
   get isInteger(): boolean | undefined {
-    return this.domain.isCompatible('Integer');
+    return this.domain.isCompatible('Integers');
   }
   get isRational(): boolean | undefined {
-    return this.domain.isCompatible('RationalNumber');
+    return this.domain.isCompatible('RationalNumbers');
   }
   get isAlgebraic(): boolean | undefined {
-    return this.domain.isCompatible('AlgebraicNumber');
+    return this.domain.isCompatible('AlgebraicNumbers');
   }
   get isReal(): boolean | undefined {
-    return this.domain.isCompatible('RealNumber');
+    return this.domain.isCompatible('RealNumbers');
   }
   get isExtendedReal(): boolean | undefined {
-    return this.domain.isCompatible('ExtendedRealNumber');
+    return this.domain.isCompatible('ExtendedRealNumbers');
   }
   get isComplex(): boolean | undefined {
-    return this.domain.isCompatible('ComplexNumber');
+    return this.domain.isCompatible('ComplexNumbers');
   }
   get isImaginary(): boolean | undefined {
-    return this.domain.isCompatible('ImaginaryNumber');
+    return this.domain.isCompatible('ImaginaryNumbers');
   }
 
   get sgn(): -1 | 0 | 1 | undefined | null {

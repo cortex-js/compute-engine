@@ -51,13 +51,15 @@ export function validateNumericArgs(
     }
   }
 
+  for (const op of ops) op.infer(ce.domain('Numbers'));
+
   return xs.map((op) => {
     if (op === undefined) return ce.error('missing');
     if (!op.isValid) return op;
     if (op.isNumber) return op;
     if (op.symbol && !op.symbolDefinition)
       return ce.error('undeclared-symbol', op);
-    return ce.error(['incompatible-domain', 'Number', op.domain], op);
+    return ce.error(['incompatible-domain', 'Numbers', op.domain], op);
   });
 }
 
@@ -74,6 +76,13 @@ export function validateSignature(
 
   // @fastpath
   if (!ce.strict) return ops;
+
+  // Infer that the domain of the arguments match the signature
+  // Useful with parameters of functions, for example, even more so
+  // for anonymous parameters, which are unlikely to have an explicit domain.
+  if (sig.domainArgs)
+    for (let i = 1; i <= sig.domainArgs!.length - 1; i++)
+      ops[i - 1]?.infer(ce.domain(sig.domainArgs![i]));
 
   const opsDomain = ops.map((x) => x.domain);
 

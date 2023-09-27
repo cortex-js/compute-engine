@@ -108,7 +108,7 @@ export const LIBRARIES: {
       description: 'Vaccum permeability',
       constant: true,
       wikidata: 'Q1515261',
-      domain: 'RealNumber',
+      domain: 'RealNumbers',
       value: 1.25663706212e-6,
       // unit: ['Divide', 'N', ['Square', 'A']],
     },

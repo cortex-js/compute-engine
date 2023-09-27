@@ -29,7 +29,7 @@ const DEFAULT_LINSPACE_COUNT = 50;
 
 // • Keys: { domain: 'Functions' },
 // • Entries: { domain: 'Functions' },
-// • Dictionary: { domain: 'Collection' },
+// • Dictionary: { domain: 'Collections' },
 // •Dictionary: {
 //   domain: 'Functions',
 //   range: 'Dictionary',
@@ -56,7 +56,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   List: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', ['Maybe', ['Sequence', 'Anything']], 'List'],
+      domain: ['Functions', ['Maybe', ['Sequence', 'Anything']], 'Lists'],
     },
     size: (expr) => expr.nops!,
     iterator: (expr, start, count) => {
@@ -111,9 +111,9 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     signature: {
       domain: [
         'Functions',
-        'Number',
-        ['Maybe', 'Number'],
-        ['Maybe', 'Number'],
+        'Numbers',
+        ['Maybe', 'Numbers'],
+        ['Maybe', 'Numbers'],
         'Values',
       ],
     },
@@ -157,9 +157,9 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     signature: {
       domain: [
         'Functions',
-        'Number',
-        ['Maybe', 'Number'],
-        ['Maybe', 'Number'],
+        'Numbers',
+        ['Maybe', 'Numbers'],
+        ['Maybe', 'Numbers'],
         'Values',
       ],
     },
@@ -217,9 +217,9 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A key/value pair',
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'String', 'Anything', 'Tuple'],
+      domain: ['Functions', 'Strings', 'Anything', 'Tuples'],
       canonical: (ce, args) => {
-        const key = validateArgument(ce, args[0]?.canonical, 'String');
+        const key = validateArgument(ce, args[0]?.canonical, 'Strings');
         const value = validateArgument(ce, args[1]?.canonical, 'Values');
         return ce.tuple([key, value]);
       },
@@ -231,7 +231,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A tuple with a single element',
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Anything', 'Tuple'],
+      domain: ['Functions', 'Anything', 'Tuples'],
       canonical: (ce, ops) =>
         ce.tuple(validateArgumentCount(ce, canonical(ops), 1)),
     },
@@ -246,7 +246,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A tuple of two elements',
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Anything', 'Anything', 'Tuple'],
+      domain: ['Functions', 'Anything', 'Anything', 'Tuples'],
       canonical: (ce, ops) =>
         ce.tuple(validateArgumentCount(ce, canonical(ops), 2)),
     },
@@ -259,7 +259,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A tuple of three elements',
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Anything', 'Anything', 'Anything', 'Tuple'],
+      domain: ['Functions', 'Anything', 'Anything', 'Anything', 'Tuples'],
       canonical: (ce, ops) =>
         ce.tuple(validateArgumentCount(ce, canonical(ops), 3)),
     },
@@ -272,7 +272,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A fixed number of heterogeneous elements',
     complexity: 8200,
     signature: {
-      domain: ['Functions', ['Sequence', 'Anything'], 'Tuple'],
+      domain: ['Functions', ['Sequence', 'Anything'], 'Tuples'],
       canonical: (ce, ops) => ce.tuple(canonical(ops)),
     },
     size: (expr) => expr.nops!,
@@ -283,7 +283,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   String: {
     threadable: true,
     signature: {
-      domain: ['Functions', ['Maybe', 'Anything'], 'String'],
+      domain: ['Functions', ['Maybe', 'Anything'], 'Strings'],
       evaluate: (ce, ops) => {
         if (ops.length === 0) return ce.string('');
         return ce.string(ops.map((x) => x.string ?? x.toString()).join(''));
@@ -298,7 +298,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Length: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', 'Number'],
+      domain: ['Functions', 'Values', 'Numbers'],
       evaluate: (ce, ops) => {
         // @todo: could have fast path for List.
         const def = ops[0].functionDefinition;
@@ -313,7 +313,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   IsEmpty: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', 'Number'],
+      domain: ['Functions', 'Values', 'Numbers'],
       evaluate: (ce, ops) => {
         // @todo: could have fast path for List.
         const def = ops[0].functionDefinition;
@@ -510,7 +510,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Dimensions: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', 'List'],
+      domain: ['Functions', 'Values', 'Lists'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -521,7 +521,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Rank: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', 'Number'],
+      domain: ['Functions', 'Values', 'Numbers'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -555,12 +555,12 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     },
   },
 
-  // {f(x) for x in xs}
-  // { 2 ⁢ x | x ∈ [ 0 , 10 ] }
+  // { f(x) for x in xs }
+  // { 2x | x ∈ [ 1 , 10 ] }
   Map: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', 'Functions', 'Values'],
+      domain: ['Functions', 'Collections', 'Functions', 'Collections'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -600,13 +600,24 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     },
   },
 
+  Tabulate: {
+    complexity: 8200,
+    signature: {
+      domain: ['Functions', 'Functions', ['Sequence', 'Integers'], 'Values'],
+      evaluate: (_ce, _ops) => {
+        // @todo
+        return undefined;
+      },
+    },
+  },
+
   /* Return a tuple of the unique elements, and their respective count
    * Ex: Tally([a, c, a, d, a, c]) = [[a, c, d], [3, 2, 1]]
    */
   Tally: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', 'Tuple'],
+      domain: ['Functions', 'Values', 'Tuples'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -620,7 +631,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Unique: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', 'Tuple'],
+      domain: ['Functions', 'Values', 'Tuples'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;

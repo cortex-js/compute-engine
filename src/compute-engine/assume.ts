@@ -17,7 +17,7 @@ import { findUnivariateRoots } from './solve';
  *
  * Some assumptions are handled separately, specifically, those that can
  * be represented as a symbol definition (equality to an expression,
- * membership to Integer, RealNumber, etc..., >0, <=0, etc...). The result
+ * membership to Integers, RealNumbers, etc..., >0, <=0, etc...). The result
  * of these are stored directly in the current scope's symbols dictionary
  * (and an entry for the symbol is created if necessary).
  *
@@ -125,13 +125,13 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   //
   // 1/ lhs is a single **undefined** free var e.g. "x < 0"
   //    => define a new var, if the domain can be inferred set it, otherwise
-  // RealNumber and add to assumptions (e.g. x < 5)
+  // RealNumbers and add to assumptions (e.g. x < 5)
   // 2/ (lhs - rhs) is an expression with no free vars
   //  e.g. "\pi < 5"
   //  => evaluate
   // 3/ (lhs - rhs) is an expression with a single **undefined** free var
   //    e.g. "x + 1 < \pi"
-  //    => add def as RealNumber, add to assumptions
+  //    => add def as RealNumbers, add to assumptions
   // 4/ (lhs - rhs) is an expression with multiple free vars
   //    e.g. x + y < 0
   //    => add to assumptions
@@ -142,24 +142,24 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
     if (proposition.op2.evaluate().isZero) {
       if (proposition.head === 'Less') {
         ce.defineSymbol(proposition.op1.symbol, {
-          domain: ce.domain('NegativeNumber'),
+          domain: ce.domain('NegativeNumbers'),
         });
       } else if (proposition.head === 'LessEqual') {
         ce.defineSymbol(proposition.op1.symbol, {
-          domain: ce.domain('NonPositiveNumber'),
+          domain: ce.domain('NonPositiveNumbers'),
         });
       } else if (proposition.head === 'Greater') {
         ce.defineSymbol(proposition.op1.symbol, {
-          domain: ce.domain('PositiveNumber'),
+          domain: ce.domain('PositiveNumbers'),
         });
       } else if (proposition.head === 'GreaterEqual') {
         ce.defineSymbol(proposition.op1.symbol, {
-          domain: ce.domain('NonNegativeNumber'),
+          domain: ce.domain('NonNegativeNumbers'),
         });
       }
     } else {
       ce.defineSymbol(proposition.op1.symbol, {
-        domain: ce.domain('ExtendedRealNumber'),
+        domain: ce.domain('ExtendedRealNumbers'),
       });
       ce.assumptions.set(proposition, true);
     }
@@ -203,7 +203,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   // Case 3
   if (unknowns.length === 1) {
     if (!ce.lookupSymbol(unknowns[0]))
-      ce.defineSymbol(unknowns[0], { domain: 'ExtendedRealNumber' });
+      ce.defineSymbol(unknowns[0], { domain: 'ExtendedRealNumbers' });
   }
 
   // Case 3, 4

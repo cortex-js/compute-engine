@@ -165,8 +165,8 @@ describe('Nth PRIME NUMBER', () =>
                               [
                                 "ErrorCode",
                                 "'incompatible-domain'",
-                                ["Domain", "Symbol"],
-                                ["Domain", "Anything"]
+                                ["Domain", "Symbols"],
+                                ["Domain", "ExtendedRealNumbers"]
                               ]
                             ],
                             2,
@@ -180,8 +180,8 @@ describe('Nth PRIME NUMBER', () =>
                             [
                               "ErrorCode",
                               "'incompatible-domain'",
-                              ["Domain", "Symbol"],
-                              ["Domain", "Anything"]
+                              ["Domain", "Symbols"],
+                              ["Domain", "ExtendedRealNumbers"]
                             ]
                           ],
                           2,
@@ -201,8 +201,8 @@ describe('Nth PRIME NUMBER', () =>
                 [
                   "ErrorCode",
                   "'incompatible-domain'",
-                  ["Domain", "Symbol"],
-                  ["Domain", "Anything"]
+                  ["Domain", "Symbols"],
+                  ["Domain", "ExtendedRealNumbers"]
                 ]
               ],
               2,

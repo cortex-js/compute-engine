@@ -449,11 +449,11 @@ export const FANCY_UNICODE = new Map<number, string>([
 
   [0x2148, 'ImaginaryUnit'], // ⅈ
   [0x2147, 'ExponentialE'], // ⅇ
-  [0x2102, 'ComplexNumber'], // ℂ
-  [0x211d, 'RealNumber'], // ℝ
-  [0x2115, 'NaturalNumber'], // ℕ
-  [0x2124, 'Integer'], // ℤ
-  [0x211a, 'RationalNumber'], // ℚ
+  [0x2102, 'ComplexNumbers'], // ℂ
+  [0x211d, 'RealNumbers'], // ℝ
+  [0x2115, 'NaturalNumbers'], // ℕ
+  [0x2124, 'Integers'], // ℤ
+  [0x211a, 'RationalNumbers'], // ℚ
 
   [0x2190, '<-'],
   [0x2192, '->'], // RIGHTWARDS ARROW

@@ -8,61 +8,53 @@ engine.defaultDomain = null;
 describe('Domain of function identifiers', () =>
   test('Domain of \\sin', () =>
     expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Function"]`
+      `["Domain", "Functions"]`
     )));
 
 describe('Domain of function identifiers', () =>
   test('Domain of Sin', () =>
     expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Function"]`
+      `["Domain", "Functions"]`
     )));
 
 describe('INFERRED DOMAINS', () => {
   test('42', () =>
     expect(engine.box(42).domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "PositiveInteger"]`
+      `["Domain", "PositiveIntegers"]`
     ));
   test('Pi', () =>
     expect(engine.box('Pi').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "TranscendentalNumber"]`
+      `["Domain", "TranscendentalNumbers"]`
     ));
   test('-3.1415', () =>
     expect(engine.box(-3.1415).domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "NegativeNumber"]`
+      `["Domain", "NegativeNumbers"]`
     ));
 
   test('sym', () =>
     expect(engine.box('sym').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Value"]`
+      `["Domain", "Anything"]`
     ));
 
   test('True', () =>
     expect(engine.box('True').domain.json).toMatchInlineSnapshot(
-      `["Domain", "Boolean"]`
-    ));
-  test('["Range", 1, 5]', () =>
-    expect(engine.box(['Range', 1, 5]).domain.json).toMatchInlineSnapshot(
-      `["Domain", "Value"]`
-    ));
-  test('["Range", 1, 5]', () =>
-    expect(engine.box(['Range', 1, 5]).domain.json).toMatchInlineSnapshot(
-      `["Domain", "Value"]`
+      `["Domain", "Booleans"]`
     ));
 
   // The symbol `Sin` references the sine function
   test('Symbol \\sin', () =>
     expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Function"]`
+      `["Domain", "Functions"]`
     ));
 
   test('Symbol Sin', () =>
     expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Function"]`
+      `["Domain", "Functions"]`
     ));
 
   test('\\sin(3)', () => {
     expect(engine.box(['Sin', 3]).domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["Interval", -1, 1]]`
+      `["Domain", "Numbers"]`
     );
   });
   test('Nothing', () => {
@@ -72,64 +64,45 @@ describe('INFERRED DOMAINS', () => {
   });
 });
 
-describe('CANONICAL DOMAINS', () => {
-  test("['Range', -Infinity, Infinity]", () =>
-    expect(
-      engine.box(['Range', -Infinity, Infinity]).toJSON()
-    ).toMatchInlineSnapshot(
-      `["Range", {num: "-Infinity"}, {num: "+Infinity"}]`
-    ));
-  test("['Range', 0, Infinity]", () =>
-    expect(engine.box(['Range', 0, Infinity]).toJSON()).toMatchInlineSnapshot(
-      `["Range", 0, {num: "+Infinity"}]`
-    ));
-
-  // Domain of a domain
-  test("['Range', -Infinity, Infinity]", () =>
-    expect(
-      engine.box(['Range', -Infinity, Infinity]).domain.json
-    ).toMatchInlineSnapshot(`["Domain", "Value"]`));
-});
-
 describe('DOMAIN LITERALS', () => {
   test('Number <: String', () => {
     expect(
-      engine.domain('Number').isCompatible(engine.domain('String'))
+      engine.domain('Numbers').isCompatible(engine.domain('Strings'))
     ).toBeFalsy();
   });
   test('String <: Number', () => {
     expect(
-      engine.domain('String').isCompatible(engine.domain('Number'))
+      engine.domain('Strings').isCompatible(engine.domain('Numbers'))
     ).toBeFalsy();
   });
   test('Void <: Number', () => {
     expect(
-      engine.domain('Void').isCompatible(engine.domain('Number'))
+      engine.domain('Void').isCompatible(engine.domain('Numbers'))
     ).toBeTruthy();
   });
   test('Number <: Void', () => {
     expect(
-      engine.domain('Number').isCompatible(engine.domain('Void'))
+      engine.domain('Numbers').isCompatible(engine.domain('Void'))
     ).toBeFalsy();
   });
   test('Number <: Anything', () => {
     expect(
-      engine.domain('Number').isCompatible(engine.domain('Anything'))
+      engine.domain('Numbers').isCompatible(engine.domain('Anything'))
     ).toBeTruthy();
   });
   test('RealNumber <: Number', () => {
     expect(
-      engine.domain('RealNumber').isCompatible(engine.domain('Number'))
+      engine.domain('RealNumbers').isCompatible(engine.domain('Numbers'))
     ).toBeTruthy();
   });
   test('RealNumber <: Value', () => {
     expect(
-      engine.domain('RealNumber').isCompatible(engine.domain('Values'))
+      engine.domain('RealNumbers').isCompatible(engine.domain('Values'))
     ).toBeTruthy();
   });
   test('RealNumber <: Domain', () => {
     expect(
-      engine.domain('RealNumber').isCompatible(engine.domain('Domain'))
+      engine.domain('RealNumbers').isCompatible(engine.domain('Domains'))
     ).toBeFalsy();
   });
 });
@@ -137,65 +110,41 @@ describe('DOMAIN LITERALS', () => {
 describe('NUMERIC', () => {
   test('Number <: Number', () => {
     expect(
-      engine.domain('Number').isCompatible(engine.domain('Number'))
+      engine.domain('Numbers').isCompatible(engine.domain('Numbers'))
     ).toBeTruthy();
   });
   test('RealNumber <: RealNumber', () => {
     expect(
-      engine.domain('RealNumber').isCompatible(engine.domain('RealNumber'))
+      engine.domain('RealNumbers').isCompatible(engine.domain('RealNumbers'))
     ).toBeTruthy();
   });
   test('PositiveNumber <: Number', () => {
     expect(
-      engine.domain('PositiveNumber').isCompatible(engine.domain('Number'))
+      engine.domain('PositiveNumbers').isCompatible(engine.domain('Numbers'))
     ).toBeTruthy();
   });
   test('NegativeInteger <: Integer', () => {
     expect(
-      engine.domain('NegativeInteger').isCompatible(engine.domain('Integer'))
+      engine.domain('NegativeIntegers').isCompatible(engine.domain('Integers'))
     ).toBeTruthy();
   });
   test('NegativeInteger <: Integer', () => {
     expect(
-      engine.domain('NegativeInteger').isCompatible(engine.domain('Integer'))
+      engine.domain('NegativeIntegers').isCompatible(engine.domain('Integers'))
     ).toBeTruthy();
   });
   test('Integer <: RealNumber', () => {
     expect(
-      engine.domain('Integer').isCompatible(engine.domain('RealNumber'))
+      engine.domain('Integers').isCompatible(engine.domain('RealNumbers'))
     ).toBeTruthy();
   });
   test('RationalNumber <: ExtendedRealNumber', () => {
     expect(
-      engine.domain('RationalNumber').isCompatible('ExtendedRealNumber')
+      engine.domain('RationalNumbers').isCompatible('ExtendedRealNumbers')
     ).toBeTruthy();
   });
   test('RealNumber <: Integer', () => {
-    expect(engine.domain('RealNumber').isCompatible('Integer')).toBeFalsy();
-  });
-
-  test('["Range", 1, 5] <: Integer', () => {
-    expect(engine.domain(['Range', 1, 5]).isCompatible('Integer')).toBeTruthy();
-  });
-  test('Integer <: ["Range", 1, 5]', () => {
-    expect(
-      engine.domain('Integer').isCompatible(engine.domain(['Range', 1, 5]))
-    ).toBeFalsy();
-  });
-
-  test('["Range", 2, 3] <: ["Range", 1, 5]', () => {
-    expect(
-      engine
-        .domain(['Range', 2, 3])
-        .isCompatible(engine.domain(['Range', 1, 5]))
-    ).toBeTruthy();
-  });
-  test('["Range", 2, 6] <: ["Range", 1, 5]', () => {
-    expect(
-      engine
-        .domain(['Range', 2, 6])
-        .isCompatible(engine.domain(['Range', 1, 5]))
-    ).toBeFalsy();
+    expect(engine.domain('RealNumbers').isCompatible('Integers')).toBeFalsy();
   });
 });
 
@@ -208,16 +157,10 @@ describe('INVALID DOMAINS', () => {
       engine
         .domain([
           'NotADomainConstructor',
-          'Integer',
+          'Integers',
         ] as unknown as DomainExpression)
         .toJSON()
     ).toThrow();
-  });
-
-  test('Missing parameters (Range)', () => {
-    expect(
-      engine.domain(['Range'] as unknown as DomainExpression).toJSON()
-    ).toMatchInlineSnapshot(`["Domain", "Integer"]`);
   });
 
   test('Missing parameters (Maybe)', () => {
@@ -233,40 +176,55 @@ describe('INVALID DOMAINS', () => {
 // describe('SYMBOLS, FUNCTION HEADS', () => {});
 
 describe.skip('FUNCTION SIGNATURES', () => {
-  test("['Functions', 'PositiveInteger', 'Anything'] <: ['Functions', 'Number', 'Number']", () => {
+  test("['Functions', 'PositiveIntegers', 'Anything'] <: ['Functions', 'Numbers', 'Numbers']", () => {
     expect(
       engine
-        .domain(['Functions', 'PositiveInteger', 'Anything'])
-        .isCompatible(engine.domain(['Functions', 'Number', 'Number']))
+        .domain(['Functions', 'PositiveIntegers', 'Anything'])
+        .isCompatible(engine.domain(['Functions', 'Numbers', 'Numbers']))
     ).toBeTruthy();
   });
 
-  test("['Functions', 'PositiveInteger', 'Anything'] <: ['Functions', 'Number', ['Maybe', 'String'],'Number']", () => {
+  test("['Functions', 'PositiveIntegers', 'Anything'] <: ['Functions', 'Numbers', ['Maybe', 'Strings'],'Numbers']", () => {
     expect(
       engine
-        .domain(['Functions', 'PositiveInteger', 'Anything'])
+        .domain(['Functions', 'PositiveIntegers', 'Anything'])
         .isCompatible(
-          engine.domain(['Functions', 'Number', ['Maybe', 'String'], 'Number'])
+          engine.domain([
+            'Functions',
+            'Numbers',
+            ['Maybe', 'Strings'],
+            'Numbers',
+          ])
         )
     ).toBeTruthy();
   });
 
-  test("['Functions', 'PositiveInteger',  'String', 'Anything'] <: ['Functions', 'Number', ['Maybe', 'String'], 'Number']", () => {
+  test("['Functions', 'PositiveIntegers',  'Strings', 'Anything'] <: ['Functions', 'Numbers', ['Maybe', 'Strings'], 'Numbers']", () => {
     expect(
       engine
-        .domain(['Functions', 'PositiveInteger', 'String', 'Anything'])
+        .domain(['Functions', 'PositiveIntegers', 'Strings', 'Anything'])
         .isCompatible(
-          engine.domain(['Functions', 'Number', ['Maybe', 'String'], 'Number'])
+          engine.domain([
+            'Functions',
+            'Numbers',
+            ['Maybe', 'Strings'],
+            'Numbers',
+          ])
         )
     ).toBeTruthy();
   });
 
-  test("['Functions', 'PositiveInteger',  'Boolean', 'Anything'] <: ['Functions', 'Number', ['Maybe', 'String'], 'Number']", () => {
+  test("['Functions', 'PositiveIntegers',  'Booleans', 'Anything'] <: ['Functions', 'Numbers', ['Maybe', 'Strings'], 'Numbers']", () => {
     expect(
       engine
-        .domain(['Functions', 'PositiveInteger', 'Boolean', 'Anything'])
+        .domain(['Functions', 'PositiveIntegers', 'Booleans', 'Anything'])
         .isCompatible(
-          engine.domain(['Functions', 'Number', ['Maybe', 'String'], 'Number'])
+          engine.domain([
+            'Functions',
+            'Numbers',
+            ['Maybe', 'Strings'],
+            'Numbers',
+          ])
         )
     ).toBeFalsy();
   });

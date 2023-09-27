@@ -46,8 +46,8 @@ describe('STYLE - TEXT MODE', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "String"]
+            ["Domain", "Numbers"],
+            ["Domain", "Strings"]
           ],
           "'x' in  ''"
         ],
@@ -72,8 +72,8 @@ describe('STYLE - TEXT MODE', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "String"]
+            ["Domain", "Numbers"],
+            ["Domain", "Strings"]
           ],
           "' black '"
         ],

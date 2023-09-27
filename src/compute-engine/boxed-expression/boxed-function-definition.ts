@@ -78,7 +78,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
     this.hold = def.hold ?? 'none';
 
-    // Collection handlers
+    // Collections handlers
     if (def.at) this.at = def.at;
 
     if (def.iterator) this.iterator = def.iterator;
@@ -192,11 +192,12 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       const codomain =
         sig.codomain ??
         domain.codomain ??
-        (def.numeric ? ce.domain('Number') : ce.domain('Anything'));
+        (def.numeric ? ce.domain('Numbers') : ce.domain('Anything'));
 
-      let evaluate: ((ce, args) => BoxedExpression) | undefined = undefined;
+      let evaluate: ((ce, args) => BoxedExpression | undefined) | undefined =
+        undefined;
       if (sig.evaluate && typeof sig.evaluate !== 'function') {
-        const boxedEvaluate = ce.box(sig.evaluate);
+        const boxedEvaluate = ce.box(sig.evaluate, { canonical: false });
         if (!boxedEvaluate.isValid)
           throw Error(`Invalid function ${boxedEvaluate.toString()}`);
         const fn = applicable(boxedEvaluate);
@@ -218,7 +219,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     } else if (def.numeric) {
       this.signature = {
         domain: ce.domain('NumericFunctions'),
-        codomain: ce.domain('Number'),
+        codomain: ce.domain('Numbers'),
       };
     } else {
       this.signature = {

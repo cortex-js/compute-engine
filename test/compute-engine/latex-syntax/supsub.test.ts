@@ -63,8 +63,8 @@ describe('SUPSUB', () => {
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Number"],
-            ["Domain", "List"]
+            ["Domain", "Numbers"],
+            ["Domain", "Lists"]
           ],
           ["List", 3, 4]
         ]
@@ -133,8 +133,8 @@ describe('SUPSUB', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              ["Domain", "Number"],
-              ["Domain", "String"]
+              ["Domain", "Numbers"],
+              ["Domain", "Strings"]
             ],
             "'missing'"
           ],
@@ -143,8 +143,8 @@ describe('SUPSUB', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              ["Domain", "Number"],
-              ["Domain", "String"]
+              ["Domain", "Numbers"],
+              ["Domain", "Strings"]
             ],
             ["LatexString", "'^'"]
           ]
@@ -166,8 +166,8 @@ describe('SUPSUB', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              ["Domain", "Number"],
-              ["Domain", "String"]
+              ["Domain", "Numbers"],
+              ["Domain", "Strings"]
             ],
             "'missing'"
           ],
@@ -176,8 +176,8 @@ describe('SUPSUB', () => {
             [
               "ErrorCode",
               "'incompatible-domain'",
-              ["Domain", "Number"],
-              ["Domain", "String"]
+              ["Domain", "Numbers"],
+              ["Domain", "Strings"]
             ],
             ["LatexString", "'^'"]
           ]

@@ -92,7 +92,7 @@ export class BoxedDictionary extends _BoxedExpression {
     // const result: SemiBoxedExpression[] = ['Dictionary'];
     // for (const [k, v] of this._value) result.push(['Tuple', k, v.domain]);
 
-    return this.engine.domain('Dictionary');
+    return this.engine.domain('Dictionaries');
   }
 
   get json(): Expression {
