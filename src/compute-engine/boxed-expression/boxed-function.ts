@@ -128,7 +128,7 @@ export class BoxedFunction extends _BoxedExpression {
       this._isPure = false;
       return false;
     }
-    let pure = this.functionDefinition!.pure ?? false;
+    let pure = this.functionDefinition?.pure ?? false;
 
     // The function might be pure. Let's check that all its arguments are pure.
     if (pure) pure = this._ops.every((x) => x.isPure);

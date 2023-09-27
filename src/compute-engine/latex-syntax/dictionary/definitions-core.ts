@@ -159,17 +159,17 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       serializer.serializeFunction(ops(expr) as Expression),
   },
   {
-    latexTrigger: '\\rhd',
+    latexTrigger: '\\lhd',
     kind: 'infix',
     precedence: 20,
     parse: 'Apply',
   },
   {
-    latexTrigger: '\\lhd',
+    latexTrigger: '\\rhd',
     kind: 'infix',
     precedence: 20,
     parse: (parser: Parser, lhs: Expression) => {
-      const rhs = parser.parseExpression({ minPrec: 20 }) ?? 'Nothing';
+      const rhs = parser.parseExpression({ minPrec: 21 }) ?? 'Nothing';
       return ['Apply', rhs, lhs];
     },
   },

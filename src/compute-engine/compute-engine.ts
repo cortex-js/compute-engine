@@ -934,13 +934,15 @@ export class ComputeEngine implements IComputeEngine {
     scope ??= this.context;
     if (!scope) return;
     const undef = `${YELLOW}[undefined]${RESET}`;
-    console.group(
-      !scope.parentScope
-        ? `root scope - level ${depth}`
-        : depth === 0
-        ? 'current scope - level 0'
-        : `scope - level ${depth}`
-    );
+    if (depth === 0) {
+      console.group('current scope - level 0');
+    } else {
+      console.groupCollapsed(
+        !scope.parentScope
+          ? `root scope - level ${depth}`
+          : `scope - level ${depth}`
+      );
+    }
     if (scope.ids) {
       let count = 0;
       for (const [k, v] of scope.ids) {

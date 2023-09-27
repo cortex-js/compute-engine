@@ -1100,7 +1100,7 @@ function parseLog(command: string, parser: Parser): Expression | null {
     base = Number.parseFloat(sub ?? '10');
   }
   const args = parser.parseArguments('implicit');
-  if (args === null) return [command];
+  if (args === null) return command;
   if (base === 10) return ['Log', args[0]] as Expression;
   if (base === 2) return ['Lb', ...args] as Expression;
   if (sub === null) return [command, ...args] as Expression;

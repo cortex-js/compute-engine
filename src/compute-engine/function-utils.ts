@@ -203,7 +203,9 @@ function makeLambda(
   const fn = canonicalFunctionExpression(expr);
   if (!fn) return undefined;
   console.assert(fn.head === 'Function');
-  const body = fn.op1;
+  ce.pushScope();
+  const body = fn.op1.canonical;
+  ce.popScope();
 
   const args = fn.ops!.slice(1).map((x) => x.symbol ?? 'Nothing');
 
@@ -219,6 +221,8 @@ function makeLambda(
     const result = body.N() ?? body.evaluate();
 
     ce.swapScope(context);
+
+    if (!result.isValid) return undefined;
     return result;
   };
 }

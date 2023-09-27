@@ -27,10 +27,17 @@
 ## Functions
 
 - Functions can now be defined:
+
   - using `ce.assign()` or `ce.declare()`
   - evaluating LaTeX: `(x, y) \\mapsto x^2 + y^2`
   - evaluating MathJSON:
     `["Function", ["Add", ["Power", "x", 2], ["Power", "y", 2]]], "x", "y"]`
+
+- Function can be applied using `\operatorname{apply}` or the operators `\rhd`
+  and `\lhd`:
+  - `\operatorname{apply}(f, x)`
+  - `f \rhd x`
+  - `x \lhd f`
 
 See http://localhost:8080/compute-engine/guides/augmenting/ and
 https://cortexjs.io/compute-engine/reference/functions/
