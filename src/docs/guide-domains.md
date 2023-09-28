@@ -14,31 +14,27 @@ render_math_in_document: true
 
 A domain is represented by a **domain expression**. For example:
 
-- `"Integer"`
-- `"Boolean"`
-- `["Range", -1, +1]`.
+- `"Integers"`
+- `"Booleans"`
+- `["Functions", "Integers", "Integers"]`
 
 A domain expression is either a **domain literal** represented by an identifier
-such as `"Integer"` and `"Boolean"` or a **constructed domain** represented by 
+such as `"Integers"` and `"Booleans"` or a **constructed domain** represented by 
 a function expression. 
 
 Of course, it wouldn't make sense for it to be any function, so the
-name of that function must be among a limited set of **domain constructor**. 
+name of that function must be among a limited set of **domain constructors**. 
 
 This effectively defines a specialized language to represent domains. In some 
 cases the same function name can be used in a domain expression and a value
 expression, but they will be interpreted differently. 
 
-For example, the expression `["List", 5, 7, 11]` is a value representing a list 
-of three integers. On the other hand, the domain expression `["List", "Integer"]`
-represents the domain of all the lists that have integers as their element.
-
 Domains are similar to _types_ in programming languages. Amongst other things,
 they are used to select the correct function definition.
 
-For example a function `Add` could operate either on numbers or matrixes. The
-domain of the arguments would be used to select the appropriate function
-definition.
+For example a function `Add` could have several implementation to operate
+on numbers or on matrixes. The domain of the arguments would be used to select
+the appropriate function definition.
 
 Symbolic manipulation algorithms also use domains to decide when certain
 transformations are applicable.
@@ -57,20 +53,18 @@ Engine {% endreadmore %}
 expression.
 
 ```js
-const ce = new ComputeEngine();
-
 ce.box("Pi").domain;
-// ➔ "TranscendentalNumber"
+// ➔ "TranscendentalNumbers"
 
 ce.box("Divide").domain;
-// ➔ '["Function",  "Number", "Number", "Number]': domain of the function "Divide"
+// ➔ '["Functions",  "Numbers", "Numbers", "Numbers]': domain of the function "Divide"
 
 ce.box(["Add", 5, 2]).domain;
-// ➔ "Number": the result of the "Add" function
-// (its codomain) in general is a "Number"
+// ➔ "Numbers": the result of the "Add" function
+// (its codomain) belongs to the domain "Numbers"
 
 ce.box(["Add", 5, 2]).evaluate().domain;
-// ➔ "Integer": once evaluated, the domain of the result may be more specific
+// ➔ "Integers": once evaluated, the domain of the result may be more specific
 ```
 
 </section>
@@ -93,8 +87,8 @@ the `Void` domain (the bottom domain).
 
 There are a few other important domains:
 
-- The **`Domain`** domain contains all the domain expressions.
-- The **`Value`** domain contains all the expressions which are not domains,  
+- The **`Domains`** domain contains all the domain expressions.
+- The **`Values`** domain contains all the expressions which are not domains,  
   for example the number `42`, the symbol `alpha`, the expression
   `["Add", "x", 1]`.
 - The **`Nothing`** domain has exactly one value, the symbol `Nothing`. It is
@@ -144,10 +138,10 @@ that can be determined:
 By default, `domain.isCompatible()` will check for covariant compatibility.
 
 ```ts
-ce.domain("PositiveNumber").isCompatible("Integer");
+ce.domain("PositiveNumbers").isCompatible("Integers");
 // ➔ true
 
-ce.domain("Number").isCompatible("RealNumber", "contravariant");
+ce.domain("Numbers").isCompatible("RealNumbers", "contravariant");
 // ➔ true
 ```
 
@@ -160,11 +154,8 @@ A domain constructor is a function expression with one of the identifiers below.
 **To define a new domain** use a domain constructor.
 
 ```json example
-// Range of non-negative integers
-["Range", 0, {num: "+Infinity"}]
-
 // Functions with a single real number argument and that return an integer
-["Function", "RealNumber", "Integer"]
+["Functions", "RealNumbers", "Integers"]
 ```
 When a domain expression is boxed, it is automatically put in canonical form.
 
@@ -173,9 +164,8 @@ When a domain expression is boxed, it is automatically put in canonical form.
 
 | Domain Constructor | Description                                                                                                                                                                                                                                                                                                                                    |
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Function`         | `["Function", ...<arg-domain>, <co-domain>]` <br> For example, `["Function", "Number", "Boolean"]` is the domain of the functions that have a single argument, a number, and return a boolean (has a boolean codomain).<br>By default, compatibility is determined by using covariance for the arguments and contravariance for the co-domain. |
+| `Functions`         | `["Functions", ...<arg-domain>, <co-domain>]` <br> For example, `["Functions", "Numbers", "Booleans"]` is the domain of the functions that have a single argument, a number, and return a boolean (has a boolean codomain).<br>By default, compatibility is determined by using covariance for the arguments and contravariance for the co-domain. |
 | `List`             | `["List", <element-domain>]` <br>                                                                                                                                                                                                                                                                                                              |
-| `Record`           |                                                                                                                                                                                                                                                                                                                                                |
 | `Tuple`            | `["Tuple", <element-1-domain>]`, `["Tuple", <element-1-domain>] ... <element-n-domain>]`                                                                                                                                                                                                                                                       |
 | `Intersection`     | `["Intersection", <domain-1>, <domain-2>]` <br> All the values that are a member of `<domain-1>` and `<domain-2>`                                                                                                                                                                                                                              |
 | `Union`            | `["Union", <domain-1>, <domain-2>]` <br>All the values that are a member of `<domain-1>` or `<domain-2>`                                                                                                                                                                                                                                       |
@@ -189,6 +179,6 @@ When a domain expression is boxed, it is automatically put in canonical form.
 | `Invariant`        | `["Invariant", <domain>]`<br> This constructor indicate that a domain is compatible with this domain only if they are invariants with regard to each other.                                                                                                                                                                                    |
 | `Interval`         | `["Interval", <min>, <max>]` <br> The set of real numbers between `<min>` and `<max>`.<br> Use `["Interval", ["Open", <min>], <max>]` to indicate an open-left interval.                                                                                                                                                                       |
 | `Range`            | `["Range", <min>, <max>]` <br> The set of integers from `<min>` to `<max>` (inclusive).                                                                                                                                                                                                                                                        |
-| `Multiple`         | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integer", 1]`                                                                                                                                       |
+| `Multiple`         | `["Multiple", <factor>, <domain>, <offset>]` <br> The set of numbers that satisfy `<factor> * x + <offset>` with `x` in `domain`. For example, the set of odd numbers is `["Multiple", 2, "Integers", 1]`                                                                                                                                       |
 
 </div>

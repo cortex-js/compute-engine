@@ -5,7 +5,7 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: "universal"
-toc: true
+toc: false
 render_math_in_document: true
 ---
 
@@ -25,7 +25,8 @@ object:
 </div>
 
 The Compute Engine stores expressions internally in a canonical form to simplify
-the implementation of some algorithms.
+comparisons and to make it easier to implement algorithms that work with
+expressions.
 
 The value of `expr.simplify()`, `expr.evaluate()` and `expr.N()` are canonical
 expressions.
@@ -40,33 +41,33 @@ The non-canonical version will be closer to the literal LaTeX input, which may
 be desirable to compare a "raw" user input with an expected answer.
 
 ```js
-ce.parse('\\frac{3}{-5}');
+ce.parse('\\frac{30}{-50}');
 // ➔ ["Rational", -3, 5]
-// The canonical version moves the sign to the numerator
+// The canonical version moves the sign to the numerator and reduces the 
+// numerator and denominator
 
-ce.parse('\\frac{3}{-5}', { canonical: false });
-// ➔ ["Divide", 3, -5]
+ce.parse('\\frac{30}{-50}', { canonical: false });
+// ➔ ["Divide", 30, -50]
 // The non-canonical version does not change the arguments,
 // so this is interpreted as a regular fraction ("Divide"), 
-// not a rational.
+// not as a rational number.
 ```
 
 The value of `expr.json` (the plain JSON representation of an expression) may 
 not be in canonical form: some "sugaring" is applied to the internal 
-representation before being returned, for example
-`["Add", -1, "x"]` may be returned as `["Subtract", "x ", 1]`.
+representation before being returned, for example `["Power", "x", 2]` is
+returned as `["Square", "x"]`.
 
-You can further customize how an expression is serialized to plain JSON by using
+You can customize how an expression is serialized to plain JSON by using
 [`ce.jsonSerializationOptions`](/docs/guide-expressions#unboxing).
 
 ```js
-ce.parse('\\frac{3}{5}', { canonical: false });
+const expr = ce.parse("\\frac{3}{5}");
+console.log(expr.json)
 // ➔ ["Rational", 3, 5]
-// This is a rational without modifying the arguments, 
-// so a `["Rational"]` expression is returned
 
 ce.jsonSerializationOptions = { exclude: ["Rational"] };
-ce.parse('\\frac{3}{5}', { canonical: false });
+console.log(expr.json);
 // ➔ ["Divide", 3, 5]
 // We have excluded `["Rational"]` expressions, so it 
 // is interepreted as a division instead.
@@ -76,10 +77,11 @@ The canonical form of an expression is always the same when used with a given
 Compute Engine instance. However, do not rely on the canonical form as future
 versions of the Compute Engine could provide a different result.
 
-**To obtain the canonical representation of a non-canonical expression**, use
-the `expr.canonical` property.
 
 **To check if an expression is canonical** use `expr.isCanonical`.
+
+**To obtain the canonical representation of a non-canonical expression**, use
+the `expr.canonical` property.
 
 If the expression is already canonical, `expr.canonical` immediately returns
 `expr`.
@@ -88,7 +90,7 @@ If the expression is already canonical, `expr.canonical` immediately returns
 ```js
 const expr = ce.parse("\\frac{10}{30}", { canonical: false });
 console.log(expr.json);
-// ➔ ["Rational", 10, 30]
+// ➔ ["Divide", 10, 30]
 
 console.log(expr.isCanonical);
 // ➔ false
@@ -100,15 +102,15 @@ console.log(expr.canonical);
 
 ## Canonical Form Transformations
 
-The canonical form used by the Compute Engine follows common conventions. It is
-not always "the simplest" way to represent an expression.
+The canonical form used by the Compute Engine follows common conventions. 
+However, it is not always "the simplest" way to represent an expression.
 
-Calculating the canonical form of an expression is applying some rewriting rules
-to an expression to put sums, products, numbers, roots, etc... in canonical
-form. In that sense, it is similar to simplifying an expression with
-`expr.simplify()`, but it is more conservative in the transformations it
-applies, and it will not take into account any assumptions about symbols or
-their value.
+Calculating the canonical form of an expression involves applying some 
+rewriting rules to an expression to put sums, products, numbers, roots, 
+etc... in canonical form. In that sense, it is similar to simplifying an 
+expression with `expr.simplify()`, but it is more conservative in the 
+transformations it applies, and it will not take into account any assumptions 
+about symbols or their value.
 
 Below is a list of some of the transformations applied to obtain the canonical
 form:
@@ -117,48 +119,31 @@ form:
 - Involution: \\( f(f(x)) \to x \\)
 - Associativity: \\( f(a, f(b, c)) \to f(a, b, c) \\)
 - **Literals**
-  - Rationals are reduced, e.g. \\[(\frac{6}{4} \longrightarrow \frac{3}{2}\\]
-  - The denominator of rationals is made positive, e.g. \\[(\frac{5}{-11}
-    \longrightarrow \frac{-5}{11}\\]
+  - Rationals are reduced, e.g. \\( \frac{6}{4} \to \frac{3}{2}\\)
+  - The denominator of rationals is made positive, e.g. \\(\frac{5}{-11}
+    \to \frac{-5}{11}\\)
   - A rational with a denominator of 1 is replaced with a number, e.g.
-    \\[(\frac{19}{1} \longrightarrow 19\\]
-  - Square roots of rationals have their perfect squared factored out, e.g.
-    \\[(\sqrt{63} \longrightarrow 3\sqrt{7}\\]
+    \\(\frac{19}{1} \to 19\\)
   - Complex numbers with no imaginary component are replaced with a real number
-- `Abs`
-  - The absolute value of literals is evaluated
 - `Add`
   - Arguments are sorted
-  - Literal `0` is removed
   - Sum of a literal and the product of a literal with the imaginary unit are
     replaced with a complex number.
-- `Multiply`
-  - Arguments are sorted
-  - $x \times x$ is replaced with `["Square", x]`
-  - The product of two integers literals is evaluated **But not exact literals?
-    I.e. rationals or Square Root of fractional?**
-    - If any argument is `NaN` or `Undefined` evaluates to `NaN` **Might be too
-      aggressive**
-- `Divide`
+- `Multiply`: Arguments are sorted
+- `Negate`: `["Negate", 3]` \\(\to\\) `-3`
 - `Power`
-  - $x^{\tilde\infty} \longrightarrow \operatorname{NaN}$
-  - $x^0 \longrightarrow 1$
-  - $x^1 \longrightarrow x$
-  - $(\pm 1)^{-1} \longrightarrow -1$
-  - $(\pm\infty)^{-1} \longrightarrow 0$
-  - $0^{\infty} \longrightarrow \tilde\infty$
-  - $(\pm 1)^{\pm \infty} \longrightarrow \operatorname{NaN}$
-  - $\infty^{\infty} \longrightarrow \infty$
-  - $\infty^{-\infty} \longrightarrow 0$
-  - $(-\infty)^{\pm \infty} \longrightarrow \operatorname{NaN}$
-- `Square`
-- `Sqrt`
-- `Root`
-- `Subtract`
-- `Negate`
+  - \\(x^{\tilde\infty} \to \operatorname{NaN}\\)
+  - \\(x^0 \to 1\\)
+  - \\(x^1 \to x\\)
+  - \\((\pm 1)^{-1} \to -1\\)
+  - \\((\pm\infty)^{-1} \to 0\\)
+  - \\(0^{\infty} \to \tilde\infty\\)
+  - \\((\pm 1)^{\pm \infty} \to \operatorname{NaN}\\)
+  - \\(\infty^{\infty} \to \infty\\)
+  - \\(\infty^{-\infty} \to 0\\)
+  - \\((-\infty)^{\pm \infty} \to \operatorname{NaN}\\)
+- `Square`: `["Power", "x", 2]` \\(\to\\) `["Square", "x"]`
+- `Sqrt`: `["Sqrt", "x"]` \\(\to\\)`["Power", "x", "Half"]`
+- `Root`:  `["Root", "x", 3]` \\(\to\\) `["Power", "x", ["Rational", 1, 3]]`
+- `Subtract`: `["Subtract", "a", "b"]` \\(\to\\) `["Add", ["Negate", "b"], "a"]`
 
-- For `Multiply`, literal 1 is removed, small integers and small rations are
-  multiplied together.
-- For `Divide`, replaced by `Multiply` / `Power`
-- For `Subtract`, replaced by `Add`
-- For `Sqrt` and `Root`, replaced by `Power`

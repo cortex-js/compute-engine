@@ -105,7 +105,7 @@ The predicate can take the form of:
 
 - an equality: `["Assume", ["Equal", "x", 3]]`
 - an inequality: `["Assume", ["Greater", "x", 0]]`
-- a membership expression: `["Assume", ["Element", "x", "Integer"]]`
+- a membership expression: `["Assume", ["Element", "x", "Integers"]]`
 
 {% enddef %}
 
