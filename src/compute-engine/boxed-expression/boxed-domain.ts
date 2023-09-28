@@ -5,7 +5,6 @@ import {
   DOMAIN_CONSTRUCTORS,
   isDomainLiteral,
 } from '../library/domains';
-import { asFloat, asSmallInteger } from '../numerics/numeric';
 import {
   BoxedDomain,
   BoxedExpression,
@@ -17,7 +16,6 @@ import {
   IComputeEngine,
   Metadata,
   PatternMatchOptions,
-  SemiBoxedExpression,
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonSymbol } from './serialize';
@@ -352,19 +350,19 @@ function makeCanonical(
   throw Error('Unexpected domain constructor ' + ctor);
 }
 
-function asRangeBound(
-  ce: IComputeEngine,
-  expr: string | SemiBoxedExpression | DomainExpression
-): number | null {
-  if (typeof expr === 'number') return expr;
+// function asRangeBound(
+//   ce: IComputeEngine,
+//   expr: string | SemiBoxedExpression | DomainExpression
+// ): number | null {
+//   if (typeof expr === 'number') return expr;
 
-  const x = ce.box(expr).evaluate();
-  return x.isInfinity
-    ? x.isPositive
-      ? +Infinity
-      : -Infinity
-    : asSmallInteger(x);
-}
+//   const x = ce.box(expr).evaluate();
+//   return x.isInfinity
+//     ? x.isPositive
+//       ? +Infinity
+//       : -Infinity
+//     : asSmallInteger(x);
+// }
 
 // function asIntervalBound(ce: IComputeEngine, expr: Expression): number | null {
 //   const val = ce.box(open(expr) ?? expr).evaluate();
@@ -375,15 +373,15 @@ function asRangeBound(
 //   );
 // }
 
-function maybeOpen(
-  ce: IComputeEngine,
-  expr: string | SemiBoxedExpression | DomainExpression
-): [open: boolean, value: number | null] {
-  // @todo: Multiple Open
-  if (Array.isArray(expr) && expr[0] === 'Open')
-    return [true, asRangeBound(ce, expr[1])];
-  return [false, asRangeBound(ce, expr)];
-}
+// function maybeOpen(
+//   ce: IComputeEngine,
+//   expr: string | SemiBoxedExpression | DomainExpression
+// ): [open: boolean, value: number | null] {
+//   // @todo: Multiple Open
+//   if (Array.isArray(expr) && expr[0] === 'Open')
+//     return [true, asRangeBound(ce, expr[1])];
+//   return [false, asRangeBound(ce, expr)];
+// }
 
 /** Validate that `expr` is a Domain */
 export function isDomain(
@@ -614,10 +612,12 @@ function isSubdomainOf(
 }
 
 /** Return the ancestor domain that is shared by both `a` and `b` */
-export function sharedAncestorDomain(
-  a: BoxedDomain,
-  b: BoxedDomain
+export function widen(
+  a: BoxedDomain | undefined | null,
+  b: BoxedDomain | undefined | null
 ): BoxedDomain {
+  if (a === undefined || a === null) return b!;
+  if (b === undefined || b === null) return a;
   const aLiteral = domainLiteralAncestor(a);
   const bLiteral = domainLiteralAncestor(b);
   const aAncestors = [aLiteral, ...ancestors(aLiteral)];
@@ -626,6 +626,37 @@ export function sharedAncestorDomain(
   while (!bAncestors.includes(aAncestors[0])) aAncestors.shift();
 
   return a.engine.domain(aAncestors[0]);
+}
+
+function widestDomain(a: string, b: string): string {
+  const aAncestors = [a, ...ancestors(a)];
+  const bAncestors = [b, ...ancestors(b)];
+
+  while (!bAncestors.includes(aAncestors[0])) aAncestors.shift();
+
+  return aAncestors[0];
+}
+
+function narrowestDomain(a: string, b: string): string {
+  const aAncestors = [a, ...ancestors(a)];
+  const bAncestors = [b, ...ancestors(b)];
+
+  while (!bAncestors.includes(aAncestors[0])) bAncestors.shift();
+
+  return bAncestors[0];
+}
+
+export function narrow(
+  a: BoxedDomain | undefined,
+  b: BoxedDomain | undefined
+): BoxedDomain {
+  if (a === undefined) return b!;
+  if (b === undefined) return a;
+  const aLiteral = domainLiteralAncestor(a);
+  const bLiteral = domainLiteralAncestor(b);
+  if (isSubdomainOf1(aLiteral, bLiteral)) return a;
+  if (isSubdomainOf1(bLiteral, aLiteral)) return b;
+  return a.engine.domain('Void');
 }
 
 // Return the domain literal that is the closest ancestor to `dom`
@@ -638,7 +669,15 @@ function domainLiteralAncestor(dom: BoxedDomain): string {
   if (result === 'Maybe') return 'Anything';
   if (result === 'Head') return 'Functions';
 
-  if (result === 'Union') return 'Anything'; // @todo could be more narrow
+  if (result === 'Union') {
+    // Calculate the widest domain that is a subdomain of all the domains
+    // in the union
+    const args = dom.domainArgs!;
+    result = args[0] as string;
+    for (let i = 1; i <= args.length - 1; i++) {
+      result = widestDomain(result, args[i] as string);
+    }
+  }
   if (result === 'Intersection') return 'Anything'; // @todo could be more narrow
 
   return result;

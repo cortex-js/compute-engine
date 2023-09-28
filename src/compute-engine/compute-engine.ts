@@ -40,7 +40,7 @@ import {
   FunctionDefinition,
   Rational,
   BoxedSubstitution,
-  SetValue,
+  AssignValue,
 } from './public';
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
@@ -81,7 +81,6 @@ import { canonicalNegate } from './symbolic/negate';
 import { canonical, flattenOps, flattenSequence } from './symbolic/flatten';
 import { isFunctionDefinition, isSymbolDefinition } from './library/utils';
 import { bigint } from './numerics/numeric-bigint';
-import { inferDomain } from './domain-utils';
 import { parseFunctionSignature } from './function-utils';
 import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
 
@@ -924,7 +923,12 @@ export class ComputeEngine implements IComputeEngine {
     return oldScope;
   }
 
-  _printScope(scope?: RuntimeScope | null, depth = 0): RuntimeScope | null {
+  _printScope(
+    options?: { details?: boolean },
+    scope?: RuntimeScope | null,
+    depth = 0
+  ): RuntimeScope | null {
+    options ??= { details: false };
     scope ??= this.context;
     if (!scope) return null;
     const undef = `${YELLOW}[undefined]${RESET}`;
@@ -951,20 +955,25 @@ export class ComputeEngine implements IComputeEngine {
             console.info(`${id}: ${v.domain?.toString() ?? undef} = ${val}`);
           } else if (v instanceof _BoxedFunctionDefinition) {
             if (typeof v.signature.evaluate === 'function')
-              console.info(`${id}(): ${v.signature.evaluate.toString()}`);
+              console.info(
+                `${id}(): ${
+                  options.details
+                    ? v.signature.evaluate.toString()
+                    : '[native-code]'
+                }`
+              );
             else if (v.signature.evaluate === undefined)
               console.info(`${id}(): ${undef}`);
-            else console.info(`${id}(): ${k.toString()}`);
+            else console.info(`${id}(): ${v.toString()}`);
           }
-          count += 1;
-          if (count === 11) {
+          if (count === 11)
             console.groupCollapsed(`... and ${scope.ids.size - count} more`);
-          }
+          count += 1;
         } catch (err) {
           console.info(`${id}: ${INVERSE_RED}${err.message}${RESET}`);
         }
       }
-      if (count > 10) console.groupEnd();
+      if (count >= 11) console.groupEnd();
     }
     if (scope.assumptions) {
       const assumptions = [...scope.assumptions.entries()].map(
@@ -976,7 +985,8 @@ export class ComputeEngine implements IComputeEngine {
         console.groupEnd();
       }
     }
-    if (scope.parentScope) this._printScope(scope.parentScope, depth + 1);
+    if (scope.parentScope)
+      this._printScope(options, scope.parentScope, depth + 1);
 
     console.groupEnd();
 
@@ -1034,13 +1044,28 @@ export class ComputeEngine implements IComputeEngine {
     // It is also used to indicate that a symbol should be ignored.
     if (id === 'Nothing') return this;
 
-    // Note: can't redeclare a symbol as other expressions might reference it
-    // now and changing the definition might make them invalid (i.e. not
-    // canonical)
-    if (this.context?.ids?.get(id))
+    if (this.context?.ids?.get(id)) {
+      const def = this.context.ids.get(id);
+      if (def instanceof _BoxedSymbolDefinition && def.inferredDomain) {
+        // The domain of this symbol was inferred: it can be redeclared
+        // with a different domain
+
+        // Don't replace the def, since other expressions may already be
+        // referencing it, but update it.
+        if (isSymbolDefinition(arg2)) def.update(arg2);
+        else {
+          def.domain = this.domain(arg2 as DomainExpression);
+          def.inferredDomain = false;
+        }
+        return this;
+      }
+      // Note: can't redeclare a symbol as other expressions might reference it
+      // now and changing the definition might make them invalid (i.e. not
+      // canonical)
       throw Error(
         `Symbol "${id}" has already been declared in the current scope`
       );
+    }
 
     // Can't "undeclare" (set to undefined/null) a symbol either
     const def = arg2;
@@ -1084,20 +1109,18 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Set: assign a value to one or more identifiers.
+   * Assign a value to one or more identifiers.
    *
    * Domain of value must be compatible with existing domain.
    *
    * Declare identifier if it hasn't been declared yet.
    *
-   * The identifier can take the form "f(x, y") to create a function
-   * with two parameters, "x" and "y".
    */
-  assign(id: string, value: SetValue): IComputeEngine;
-  assign(ids: { [id: string]: SetValue }): IComputeEngine;
+  assign(id: string, value: AssignValue): IComputeEngine;
+  assign(ids: { [id: string]: AssignValue }): IComputeEngine;
   assign(
-    arg1: string | { [id: string]: SetValue },
-    arg2?: SetValue
+    arg1: string | { [id: string]: AssignValue },
+    arg2?: AssignValue
   ): IComputeEngine {
     //
     // If we got an object literal, call `assign` for each entry
@@ -1113,7 +1136,7 @@ export class ComputeEngine implements IComputeEngine {
     // Cannot set the value of 'Nothing'
     if (id === 'Nothing') return this;
 
-    let value = arg2 as SetValue;
+    let value = arg2 as AssignValue;
 
     //
     // Is the value a LaTeX string (starts/ends with $ or $$)?
@@ -1233,7 +1256,7 @@ export class ComputeEngine implements IComputeEngine {
       if (unknowns.length === 0) {
         // This is a value, not a function: define a symbol
         const value = expr.evaluate();
-        this.defineSymbol(id, { domain: inferDomain(value), value });
+        this.defineSymbol(id, { value });
         return this;
       }
 
@@ -1268,11 +1291,7 @@ export class ComputeEngine implements IComputeEngine {
     }
 
     // It's not a function, it's a symbol
-    const dom = this.domain(inferDomain(value));
-    // Promote any numeric domain to 'Numbers'
-    // If you do a `ce.assign('x', 2)`, `x` will be a `Numbers` not an `Integers`
-    // which is generally more useful
-    this.defineSymbol(id, { domain: dom.isNumeric ? 'Numbers' : dom, value });
+    this.defineSymbol(id, { value });
 
     return this;
   }
@@ -1286,7 +1305,7 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
 
-  _assign(id: string, value: SetValue): IComputeEngine {
+  _assign(id: string, value: AssignValue): IComputeEngine {
     const symDef = this.lookupSymbol(id);
     if (symDef) {
       console.assert(typeof value !== 'function');
@@ -1878,19 +1897,6 @@ export class ComputeEngine implements IComputeEngine {
       if (m !== null && val === true) result.push(m);
     }
     return result;
-  }
-
-  // Based on contextual usage, infer domain of a symbol
-  infer(
-    symbol: BoxedExpression | string,
-    _domain: BoxedDomain | DomainExpression
-  ): AssumeResult {
-    if (typeof symbol !== 'string') {
-      if (!symbol.symbol) return 'internal-error';
-      symbol = symbol.symbol;
-    }
-    // @todo
-    return 'ok';
   }
 
   assume(predicate: SemiBoxedExpression): AssumeResult {

@@ -538,6 +538,35 @@
       ce.strict = true;
       ce.defaultDomain = null;
 
+      ce.assign("x", 5);
+      console.log(ce.box("x").domain);
+
+      ce.assign("x", -3.1);
+      console.log(ce.box("x").domain);
+
+      ce.assign("b", false);
+      console.log(ce.box("b").domain);
+
+      ce.assign("s", "'a string'");
+      console.log(ce.box("s").domain);
+
+      console.log(ce._printScope());
+
+      const expr = ce.box(["Negate", 3]);
+      console.log(expr.json);
+      console.log(expr.rawJson);
+      // ➔ ["Rational", 3, 5]
+
+      ce.jsonSerializationOptions = { exclude: ["Rational"] };
+      console.log(expr.json);
+
+      console.info(ce.parse("\\sin^{-1}'(x)", { canonical: false }).toString());
+      console.info(ce.parse("\\sin^{-1}'(x)", { canonical: true }).toString());
+
+      const f1 = ce.box([["g", "f"], "x", 1, 0]);
+      console.info(f1.toString());
+      console.info(f1.latex);
+
       ce.defineFunction("f", {
         domain: "Functions",
         signature: {
@@ -562,8 +591,6 @@
       ce.assign("double(x)", "$$2x$$");
       ce.assign("triple(x)", "$$3x$$");
       ce.assign("inc(x)", "$$x+1$$");
-
-      ce._printScope();
 
       ce.jsonSerializationOptions.metadata = ["latex"];
 

@@ -25,7 +25,7 @@ import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { hashCode } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
-import { sharedAncestorDomain } from './boxed-domain';
+import { widen } from './boxed-domain';
 
 /**
  * BoxedSymbol
@@ -60,9 +60,6 @@ export class BoxedSymbol extends _BoxedExpression {
     | BoxedFunctionDefinition
     | null
     | undefined;
-
-  /* If there is no definition, an inferred domain may be available */
-  private _inferredDomain: BoxedDomain | undefined;
 
   constructor(
     ce: IComputeEngine,
@@ -182,12 +179,27 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   infer(domain: BoxedDomain): boolean {
-    if (this._def) return false;
-    if (!this._inferredDomain) this._inferredDomain = domain;
-    else
-      this._inferredDomain = sharedAncestorDomain(this._inferredDomain, domain);
+    if (!this._def) {
+      // We don't know anything about this symbol yet, create a definition
+      const scope = this.engine.swapScope(this._scope);
+      console.assert(this.engine.lookupSymbol(this._name) === undefined);
+      this._def = this.engine.defineSymbol(this._name, {
+        domain,
+        inferred: true,
+      });
+      this.engine.swapScope(scope);
+      return true;
+    }
 
-    return true;
+    if (
+      this._def instanceof _BoxedSymbolDefinition &&
+      this._def.inferredDomain
+    ) {
+      this._def.domain = widen(this._def.domain, domain);
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -298,12 +310,12 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   get domain(): BoxedDomain {
-    if (this.functionDefinition) return this.engine.domain('Functions');
-    return (
-      this.symbolDefinition?.domain ??
-      this._inferredDomain ??
-      this.engine.domain('Anything')
-    );
+    if (this.functionDefinition)
+      return (
+        this.functionDefinition.signature.domain ??
+        this.engine.domain('Functions')
+      );
+    return this.symbolDefinition?.domain ?? this.engine.domain('Anything');
   }
 
   set domain(inDomain: BoxedExpression | DomainExpression | BoxedDomain) {

@@ -15,6 +15,10 @@
 
 ## New Features
 
+- **Domain Inference** when the domain of a symbol is not set explicitly (for
+  example with `ce.declare()`), the domain is inferred from the value of the
+  symbol or from the context of its usage.
+
 - Added `Assume`, `Identity`, `Which`, `Parse`, `N`, `Evaluate`, `Simplify`,
   `Domain`.
 

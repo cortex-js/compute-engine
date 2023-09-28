@@ -20,7 +20,6 @@ import { makeFunctionDefinition } from '../boxed-expression/boxed-function-defin
 import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { isFunctionDefinition, isSymbolDefinition } from './utils';
 import { domainSetsLibrary } from './domains';
-import { inferDomain } from '../domain-utils';
 
 export function getStandardLibrary(
   categories: LibraryCategory[] | LibraryCategory | 'all'
@@ -188,7 +187,6 @@ export function setIdentifierDefinitions(
     } else {
       const def = new _BoxedSymbolDefinition(engine, name, {
         value: engine.box(entry as any),
-        domain: inferDomain(entry),
       });
       console.assert(def);
       idTable.set(name, def);

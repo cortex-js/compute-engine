@@ -8,13 +8,13 @@ engine.defaultDomain = null;
 describe('Domain of function identifiers', () =>
   test('Domain of \\sin', () =>
     expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Functions"]`
+      `["Domain", ["Functions", "Numbers", "Numbers"]]`
     )));
 
 describe('Domain of function identifiers', () =>
   test('Domain of Sin', () =>
     expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Functions"]`
+      `["Domain", ["Functions", "Numbers", "Numbers"]]`
     )));
 
 describe('INFERRED DOMAINS', () => {
@@ -44,12 +44,12 @@ describe('INFERRED DOMAINS', () => {
   // The symbol `Sin` references the sine function
   test('Symbol \\sin', () =>
     expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Functions"]`
+      `["Domain", ["Functions", "Numbers", "Numbers"]]`
     ));
 
   test('Symbol Sin', () =>
     expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Functions"]`
+      `["Domain", ["Functions", "Numbers", "Numbers"]]`
     ));
 
   test('\\sin(3)', () => {
@@ -61,6 +61,30 @@ describe('INFERRED DOMAINS', () => {
     expect(engine.symbol('Nothing').domain.json).toMatchInlineSnapshot(
       `["Domain", "Nothing"]`
     );
+  });
+
+  test('Symbol domain inference', () => {
+    engine.assign('numSymbol', 42);
+    expect(engine.symbol('numSymbol').domain.json).toMatchInlineSnapshot(
+      `["Domain", "PositiveIntegers"]`
+    );
+    // Widening to reals
+    engine.assign('numSymbol', 456.234);
+    expect(engine.symbol('numSymbol').domain.json).toMatchInlineSnapshot(
+      `["Domain", "RealNumbers"]`
+    );
+
+    // Widening to anything
+    engine.assign('numSymbol', "'hello'");
+    expect(engine.symbol('numSymbol').domain.json).toMatchInlineSnapshot();
+
+    // Booleans
+    engine.assign('booleanSymbol', true);
+    expect(engine.symbol('booleanSymbol').domain.json).toMatchInlineSnapshot();
+
+    // Strings
+    engine.assign('stringSymbol', "'hello'");
+    expect(engine.symbol('stringSymbol').domain.json).toMatchInlineSnapshot();
   });
 });
 

@@ -159,8 +159,7 @@ export function canonicalFunctionExpression(
   // anonymous parameters, e.g. `["Add", "_1", "_2"]`
 
   const unknowns = expr.unknowns;
-  let count = 0;
-  if (unknowns.includes('_')) count++;
+  let count = unknowns.includes('_') ? 1 : 0;
   for (const unknown of unknowns) {
     if (unknown.startsWith('_')) {
       const n = Number(unknown.slice(1));
@@ -207,6 +206,7 @@ function makeLambda(
   const body = fn.op1.canonical;
   ce.popScope();
 
+  // Extract the arguments from the function definition ("x", "y")
   const args = fn.ops!.slice(1).map((x) => x.symbol ?? 'Nothing');
 
   if (args.length === 0) return () => body.N() ?? body.evaluate();
@@ -217,6 +217,7 @@ function makeLambda(
 
     let i = 0;
     for (const arg of args) ce.assign(arg, params[i++]);
+    if (params[0]) ce.assign('_', params[0]);
 
     const result = body.N() ?? body.evaluate();
 

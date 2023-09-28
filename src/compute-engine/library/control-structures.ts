@@ -5,7 +5,7 @@ import {
   IdentifierDefinitions,
 } from '../public';
 import { applicable, iterable } from '../function-utils';
-import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
+import { widen } from '../boxed-expression/boxed-domain';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -99,7 +99,7 @@ function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
   let dom: BoxedDomain | null = null;
   for (let i = 1; i <= args.length - 1; i += 2) {
     if (!dom) dom = args[i].domain;
-    else dom = sharedAncestorDomain(dom, args[i].domain);
+    else dom = widen(dom, args[i].domain);
   }
   return dom ?? ce.domain('Nothing');
 }

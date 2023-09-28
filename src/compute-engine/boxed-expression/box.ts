@@ -261,6 +261,9 @@ export function boxFunction(
     });
   }
 
+  //
+  // Error
+  //
   if (head === 'Error' || head === 'ErrorCode') {
     return ce._fn(
       head,
@@ -269,7 +272,14 @@ export function boxFunction(
     );
   }
 
+  //
+  // Domain
+  //
   if (head === 'Domain') return ce.domain(ops[0], options.metadata);
+
+  //
+  // Number
+  //
   if (head === 'Number' && ops.length === 1) return box(ce, ops[0], options);
   if (head === 'String') {
     if (ops.length === 0) return new BoxedString(ce, '', options.metadata);
@@ -285,8 +295,13 @@ export function boxFunction(
 
   //
   // Rational (as Divide)
+  // (only if canonical)
   //
-  if ((head === 'Divide' || head === 'Rational') && ops.length === 2) {
+  if (
+    options.canonical &&
+    (head === 'Divide' || head === 'Rational') &&
+    ops.length === 2
+  ) {
     if (
       ops[0] instanceof _BoxedExpression &&
       ops[1] instanceof _BoxedExpression
@@ -317,7 +332,7 @@ export function boxFunction(
   //
   // Complex
   //
-  if (head === 'Complex') {
+  if (options.canonical && head === 'Complex') {
     if (ops.length === 1) {
       // If single argument, assume it's imaginary
       // @todo: use machineValue() & symbol() instead of box()
@@ -346,7 +361,7 @@ export function boxFunction(
   //
   // Distribute over literals
   //
-  if (head === 'Negate' && ops.length === 1) {
+  if (options.canonical && head === 'Negate' && ops.length === 1) {
     const op1 = ops[0];
     if (typeof op1 === 'number') return ce.number(-op1, options);
     if (op1 instanceof Decimal) return ce.number(op1.neg(), options);

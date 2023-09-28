@@ -1947,7 +1947,13 @@ export type SymbolAttributes = {
  */
 export type SymbolDefinition = BaseDefinition &
   Partial<SymbolAttributes> & {
-    domain: string | BoxedDomain;
+    domain?: string | BoxedDomain;
+
+    /** If true, the domain is inferred, and could be adjusted later
+     * as more information becomes available or if the symbol is explicitly
+     * declared.
+     */
+    inferred?: boolean;
 
     /** `value` can be a JS function since for some constants, such as
      * `Pi`, the actual value depends on the `precision` setting of the
@@ -1968,6 +1974,10 @@ export interface BoxedSymbolDefinition
   set value(val: SemiBoxedExpression | number | undefined);
 
   domain: BoxedDomain | undefined;
+  // True if the domain has been inferred: while a domain is inferred,
+  // it can be updated as more information becomes available.
+  // A domain that is not inferred, but has been set explicitly, cannot be updated.
+  inferredDomain: boolean;
 }
 
 export type AssumeResult =
@@ -1989,7 +1999,7 @@ export interface ComputeEngineStats {
   highwaterMark: number;
 }
 
-export type SetValue =
+export type AssignValue =
   | LatexString
   | SemiBoxedExpression
   | ((ce, args) => BoxedExpression)
@@ -2422,17 +2432,23 @@ export interface IComputeEngine {
   /** Assign a value to an identifier in the current scope.
    * Use `undefined` to reset the identifier to no value.
    *
+   * The identifier should be a valid MathJSON identifier
+   * not a LaTeX string.
+   *
+   * The identifier can take the form "f(x, y") to create a function
+   * with two parameters, "x" and "y".
+   *
    * If the id was not previously declared, an automatic declaration
-   * is done, makign some assumptions about the domain of the identifier
-   * based on its value. To more precisely define the domain of the
-   * identifier, use `ce.declare()` instead, which allows you to specify the
-   * domain, value and other attributes of an identifier.
+   * is done. The domain of the identifier is inferred from the value.
+   * To more precisely define the domain of the identifier, use `ce.declare()`
+   * instead, which allows you to specify the domain, value and other
+   * attributes of the identifier.
    */
-  assign(ids: { [id: string]: SetValue }): IComputeEngine;
-  assign(id: string, value: SetValue): IComputeEngine;
+  assign(ids: { [id: string]: AssignValue }): IComputeEngine;
+  assign(id: string, value: AssignValue): IComputeEngine;
   assign(
-    arg1: string | { [id: string]: SetValue },
-    arg2?: SetValue
+    arg1: string | { [id: string]: AssignValue },
+    arg2?: AssignValue
   ): IComputeEngine;
 
   /**

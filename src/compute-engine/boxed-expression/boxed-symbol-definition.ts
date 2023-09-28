@@ -17,6 +17,7 @@ import {
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { bignumPreferred, complexAllowed, isLatexString } from './utils';
+import { widen } from './boxed-domain';
 
 /**
  * ## THEORY OF OPERATIONS
@@ -40,9 +41,9 @@ import { bignumPreferred, complexAllowed, isLatexString } from './utils';
 
 export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   readonly name: string;
-  readonly wikidata?: string;
-  readonly description?: string | string[];
-  readonly url?: string;
+  wikidata?: string;
+  description?: string | string[];
+  url?: string;
 
   private _engine: IComputeEngine;
   readonly scope: RuntimeScope | undefined;
@@ -59,15 +60,14 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   private _value: BoxedExpression | undefined | null;
   // If `null`, the domain is the domain of the _value
   private _domain: BoxedDomain | undefined | null;
+  // If true, the _domain is inferred
+  inferredDomain: boolean;
   private _flags: Partial<SymbolFlags> | undefined;
 
-  readonly constant: boolean;
-  readonly holdUntil: 'never' | 'simplify' | 'evaluate' | 'N';
+  constant: boolean;
+  holdUntil: 'never' | 'simplify' | 'evaluate' | 'N';
 
   // readonly unit?: BoxedExpression;
-
-  private _at: (index: string | number) => undefined | SemiBoxedExpression;
-  at?: (index: string | number) => undefined | BoxedExpression;
 
   prototype?: BoxedFunctionDefinition; // @todo for collections and other special data structures
   self?: unknown; // @todo
@@ -88,6 +88,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     this._flags = def.flags ? normalizeFlags(def.flags) : undefined;
 
     this._domain = def.domain ? ce.domain(def.domain) : undefined;
+    this.inferredDomain = def.inferred ?? false;
 
     this.constant = def.constant ?? false;
     this.holdUntil = def.holdUntil ?? 'evaluate';
@@ -107,8 +108,51 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       if (!this._value && this._domain && !def.flags)
         this._flags = domainToFlags(this._domain);
     }
+
+    if (this._value && !this._domain) {
+      this._domain = this._value.domain;
+      this.inferredDomain = true;
+    }
   }
 
+  /** The symbol was previously inferred, but now it has a declaration. Update the def accordingly (we can't replace defs, as other expressions may be referencing them) */
+  update(def: SymbolDefinition): void {
+    if (def.wikidata) this.wikidata = def.wikidata;
+    if (def.description) this.description = def.description;
+    if (def.url) this.url = def.url;
+
+    if (def.flags) this._flags = normalizeFlags(def.flags);
+
+    if (def.domain) {
+      this._domain = this._engine.domain(def.domain);
+      this.inferredDomain = false;
+    }
+
+    if (def.holdUntil) this.holdUntil = def.holdUntil;
+
+    if (def.constant) {
+      this.constant = def.constant;
+      this._defValue = def.value;
+      this._value = null;
+    } else {
+      if (def.value) {
+        if (isLatexString(def.value))
+          this._value =
+            this._engine.parse(def.value) ?? this._engine.symbol('Undefined');
+        else if (typeof def.value === 'function')
+          this._value = this._engine.box(
+            def.value(this._engine) ?? 'Undefined'
+          );
+        else if (def.value instanceof _BoxedExpression) this._value = def.value;
+        else this._value = this._engine.box(def.value);
+      }
+    }
+
+    if (this._value && !this._domain) {
+      this._domain = this._value.domain;
+      this.inferredDomain = true;
+    }
+  }
   reset() {
     // Force the value to be recalculated based on the original definition
     // Useful when the environment (e.g.) precision changes
@@ -156,7 +200,10 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     } else if (val) {
       const newVal = this._engine.box(val);
       // If the new value is not compatible with the domain, discard it
-      if (!this._domain || newVal.domain.isCompatible(this._domain))
+      if (this.inferredDomain) {
+        this._value = newVal;
+        this._domain = widen(this._domain, newVal.domain);
+      } else if (!this._domain || newVal.domain.isCompatible(this._domain))
         this._value = newVal;
       else this._value = undefined;
     } else this._value = undefined;

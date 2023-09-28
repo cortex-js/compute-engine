@@ -90,9 +90,24 @@ export function inferNumericDomain(
 }
 
 export function inferDomain(expr: SemiBoxedExpression): DomainLiteral {
-  if (expr instanceof _BoxedExpression)
-    return expr.domain.literal ?? expr.domain.ctor ?? 'Anything';
-
+  if (expr instanceof _BoxedExpression) {
+    if (expr.domain.literal) return expr.domain.literal;
+    if (expr.domain.ctor) {
+      switch (expr.domain.ctor) {
+        case 'Functions':
+          return 'Functions';
+        case 'List':
+          return 'Lists';
+        case 'Dictionary':
+          return 'Dictionaries';
+        case 'Tuple':
+          return 'Tuples';
+        case 'Sequence':
+          return 'Sequences';
+      }
+    }
+    return 'Anything';
+  }
   if (
     typeof expr === 'number' ||
     expr instanceof Decimal ||

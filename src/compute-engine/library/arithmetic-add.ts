@@ -5,7 +5,7 @@ import {
 } from '../boxed-expression/utils';
 import { Sum } from '../symbolic/sum';
 import { asBignum, asFloat, MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
-import { sharedAncestorDomain } from '../boxed-expression/boxed-domain';
+import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
 import { validateArgument } from '../boxed-expression/validate';
 import { normalizeLimits } from './utils';
@@ -55,7 +55,7 @@ export function domainAdd(
   for (const arg of args) {
     if (!arg.isNumeric) return null;
     if (!dom) dom = arg;
-    else dom = sharedAncestorDomain(dom, arg);
+    else dom = widen(dom, arg);
   }
   return dom;
 }
