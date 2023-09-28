@@ -13,7 +13,8 @@ import { IdentifierDefinitions } from '../public';
 // constant-matrix
 // identity-matrix
 
-// See also:
+// @todo: See also:
 // - https://github.com/scalanlp/breeze/wiki/Linear-Algebra-Cheat-Sheet
-
+// - http://sylvester.jcoglan.com/api/matrix.html#random
+// - https://www.statmethods.net/advstats/matrix.html
 export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [];

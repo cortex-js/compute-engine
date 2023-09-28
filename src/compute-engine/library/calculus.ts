@@ -54,6 +54,11 @@ volumes
 `\iiint`
 */
 
+    // @todo: review the following
+    // - https://index.scala-lang.org/cascala/galileo
+    // - https://symbolics.juliasymbolics.org/stable/
+    // - https://github.com/symengine/SymEngine.jl
+
     //
     // Functions
     //

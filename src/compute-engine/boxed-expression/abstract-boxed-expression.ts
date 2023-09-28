@@ -379,7 +379,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   infer(_domain: BoxedDomain): boolean {
-    return false;
+    return false; // The inference was ignored if false
   }
 
   bind(_scope: RuntimeScope | null): void {

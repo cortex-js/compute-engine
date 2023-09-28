@@ -15,8 +15,12 @@ const DEFAULT_LINSPACE_COUNT = 50;
 
 // @todo: future thoughts. Consider
 // - operations from the Scala library, which is particularly well designed:
-//    https://superruzafa.github.io/visual-scala-reference//
-// - Scala/Breeze universal functions: https://github.com/scalanlp/breeze/wiki/Universal-Functions
+//    - https://scala-lang.org/api/3.3.1/scala/language$.html#
+//    - https://superruzafa.github.io/visual-scala-reference//
+// - Scala/Breeze universal functions:
+//     https://github.com/scalanlp/breeze/wiki/Universal-Functions
+// See also Julia:
+//    - https://docs.julialang.org/en/v1/base/iterators/
 
 // • Permutations()
 // •	Append()

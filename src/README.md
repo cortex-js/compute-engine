@@ -429,8 +429,8 @@ The head is usually an identifier, but it may also be another expression.
   ```
 
 - If the head is an expression, it may include the wildcard `_` or `_1` to
-  represent the first argument, `_2` to represent the second argument, etc...
-  The wildcard `__` represents the sequence of all the arguments.
+  represent the first parameter, `_2` to represent the second parameter, etc...
+  The wildcard `__` represents the sequence of all the parameter.
 
   ```json example
   [["Multiply", "_", "_"], 4]
@@ -500,11 +500,11 @@ const NON_EMOJI_IDENTIFIER = /^[\p{XIDS}_]\p{XIDC}*$/u;
 or
 
 ```js
-const VS16 = '\\u{FE0F}'; // Variation Selector-16, forces emoji presentation
-const KEYCAP = '\\u{20E3}'; // Combining Enclosing Keycap
-const ZWJ = '\\u{200D}'; // Zero Width Joiner
+const VS16 = "\\u{FE0F}"; // Variation Selector-16, forces emoji presentation
+const KEYCAP = "\\u{20E3}"; // Combining Enclosing Keycap
+const ZWJ = "\\u{200D}"; // Zero Width Joiner
 
-const FLAG_SEQUENCE = '\\p{RI}\\p{RI}';
+const FLAG_SEQUENCE = "\\p{RI}\\p{RI}";
 
 const TAG_MOD = `(?:[\\u{E0020}-\\u{E007E}]+\\u{E007F})`;
 const EMOJI_MOD = `(?:\\p{EMod}|${VS16}${KEYCAP}?|${TAG_MOD})`;
@@ -545,7 +545,7 @@ names are recommendations.
 Symbols that begin with `_` **U+005F LOW LINE** (underscore) should be used to
 denote wildcards and other placeholders.
 
-For example, they may be used to denote the positional arguments in a function
+For example, they may be used to denote the positional parameter in a function
 expression. They may also denote placeholders and captured expression in
 patterns.
 
@@ -579,8 +579,8 @@ patterns.
 
 ### Function Names Naming Convention
 
-- The name of the functions in the MathJSON Standard Library starts with an uppercase
-  letter `A`-`Z`. For example `"Sin"`, `"Fold"`.
+- The name of the functions in the MathJSON Standard Library starts with an
+  uppercase letter `A`-`Z`. For example `"Sin"`, `"Fold"`.
 - The name of your own functions can start with a lowercase or uppercase letter.
 - If a function name is made up of several words, use camelCase. For example
   `"InverseFunction"`
@@ -831,24 +831,25 @@ The following metadata keys are recommended:
 
 ## MathJSON Standard Library
 
-This document defines the structure of MathJSON expression. The MathJSON Standard Library
-defines a recommended **vocabulary** to use in MathJSON expressions.
+This document defines the structure of MathJSON expression. The MathJSON
+Standard Library defines a recommended **vocabulary** to use in MathJSON
+expressions.
 
-Before considering inventing your own vocabulary, check if the MathJSON Standard Library
-already provides relevant definitions.
+Before considering inventing your own vocabulary, check if the MathJSON Standard
+Library already provides relevant definitions.
 
 The MathJSON Standard Library includes definitions for:
 
 <div class=symbols-table>
 
-| Topic                                                               |                                                       |
+| Topic                                                               |                                                                        |
 | :------------------------------------------------------------------ | :--------------------------------------------------------------------- |
 | [Arithmetic](/compute-engine/reference/arithmetic/)                 | `Add` `Multiply` `Power` `Exp` `Log` `ExponentialE` `ImaginaryUnit`... |
-| [Calculus](/compute-engine/reference/calculus/)                     | `D` `Derivative` `Integrate`...                                                |
+| [Calculus](/compute-engine/reference/calculus/)                     | `D` `Derivative` `Integrate`...                                        |
 | [Collections](/compute-engine/reference/collections/)               | `List` `Reverse` `Filter`...                                           |
 | [Complex](/compute-engine/reference/complex/)                       | `Real` `Conjugate`, `ComplexRoots`...                                  |
-| [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` ...                                          |
-| [Core](/compute-engine/reference/core/)                             | `Declare`, `Assign`, `Error` `LatexString`...                       |
+| [Control Structures](/compute-engine/reference/control-structures/) | `If` `Block` `Loop` ...                                                |
+| [Core](/compute-engine/reference/core/)                             | `Declare`, `Assign`, `Error` `LatexString`...                          |
 | [Domains](/compute-engine/reference/domains/)                       | `Anything` `Nothing` `Number` `Integer` ...                            |
 | [Functions](/compute-engine/reference/functions/)                   | `Function` `Apply` `Return` ...                                        |
 | [Logic](/compute-engine/reference/logic/)                           | `And` `Or` `Not` `True` `False` `Maybe` ...                            |
@@ -867,5 +868,4 @@ Library.
 <strong>MathJSON Standard Library</strong>.{% endreadmore %}
 
 {% readmore "/compute-compute-engine/guides/augmenting/" %} Read more about
-<strong>Adding New Definitions</strong>.
-{% endreadmore %}
+<strong>Adding New Definitions</strong>. {% endreadmore %}

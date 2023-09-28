@@ -21,6 +21,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   // https://en.wikipedia.org/wiki/Conjunctive_normal_form
   // using rules (with a rule set that's kinda the inverse of the
   // logic rules for simplify)
+  // See also: https://en.wikipedia.org/wiki/Prenex_normal_form
   And: {
     wikidata: 'Q191081',
     threadable: true,
