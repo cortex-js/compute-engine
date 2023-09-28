@@ -4,10 +4,15 @@ import { check } from '../utils';
 // Some real math expressions that are awesome...
 //
 
-// A function that returns the nth prime number.
+// C.P. Willans Formula: A function that returns the nth prime number.
+//
 // Not very efficient, but it works
+//
 //  p(n)=(\sum_{v_{1}=2}^{\operatorname{floor}\left(1.5*n*\ln(n)\right)}(\operatorname{floor}(\frac{1}{0^{n-(\sum_{v_{2}=2}^{v_{1}}((\prod_{v_{3}=2}^{\operatorname{floor}(\sqrt{v_{2}})}(1-0^{\operatorname{abs}(\operatorname{floor}(\frac{v_{2}}{v_{3}})-\frac{v_{2}}{v_{3}})}))))}+1})))+2
 // https://github.com/uellenberg/Logimat/tree/master/examples/nth-prime
+
+// See https://en.wikipedia.org/wiki/Formula_for_primes
+// Explanation at https://www.youtube.com/watch?v=j5s0h42GfvM&t=1s
 
 describe('Nth PRIME NUMBER', () =>
   test('', () => {
