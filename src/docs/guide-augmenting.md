@@ -45,8 +45,8 @@ ce.declare("m_e", {
 });
 ```
 
-After an identifier has been declared, its domain cannot be changed: other expressions
-may depend on it, and changing its domain would invalidate them.
+After an identifier has been declared, its domain cannot be changed: other
+expressions may depend on it, and changing its domain would invalidate them.
 
 You can also declare an identifier without providing a value:
 
@@ -78,7 +78,6 @@ hierarchical collection of definitions.
 {% readmore "/compute-engine/guides/evaluate/#scopes" %}Read more about
 <strong>scopes</strong> {% endreadmore %}
 
-
 ## Defining a Symbol
 
 A symbol is a named value, such as `Pi` or `x`.
@@ -104,8 +103,8 @@ be created. The domain of the symbol will be set to inferred from the value.
 
 ### Assigning a Value
 
-Once declared an identifier can be used in expressions, and it can be
-assigned a value.
+Once declared an identifier can be used in expressions, and it can be assigned a
+value.
 
 To change the value of a symbol, use the `value` property of the symbol.
 
@@ -135,9 +134,8 @@ or parse a LaTeX expression that contains an assignment:
 ce.parse("n := 5").evaluate();
 ```
 
-In LaTeX, assignments are indicated by the `:=` or `\coloneqq` operator (note the two `qq`s). The
-`=` operator is used for equality.
-
+In LaTeX, assignments are indicated by the `:=` or `\coloneqq` operator (note
+the two `qq`s). The `=` operator is used for equality.
 
 You can also change the value of a symbol with
 `ce.box("m").value = 10`.{.--notice-info}
@@ -159,10 +157,10 @@ console.log(expr.json);
 
 🤔 Hmmm... That's probably not what you want.
 
-You probably want to get `["double", 3]` instead. 
+You probably want to get `["double", 3]` instead.
 
-The problem is that the Compute Engine doesn't know what `double` is, so 
-it assumes it's a symbol.
+The problem is that the Compute Engine doesn't know what `double` is, so it
+assumes it's a symbol.
 
 You can control how unknown identifiers are handled by setting the
 `ce.latexOptions.parseUnknownIdentifier` property to a function that returns
@@ -183,8 +181,8 @@ second argument.
 ce.declare("double", { signature: { domain: "Functions" } });
 ```
 
-If the definition (the second argument of `ce.declare()`) includes a 
-`signature` property, a function is being declared. 
+If the definition (the second argument of `ce.declare()`) includes a `signature`
+property, a function is being declared.
 
 The `signature` property defines how the function can be used. It is a
 `FunctionDefinition` object with the following properties (all are optional):
@@ -225,9 +223,9 @@ console.log(ce.evaluate(expr).json);
 // ➔ ["double", 3]
 ```
 
-For the Compute Engine to evaluate `double`, you need to provide a
-definition for it. You can do this by adding a `evaluate` handler to the
-definition of `double`:
+For the Compute Engine to evaluate `double`, you need to provide a definition
+for it. You can do this by adding a `evaluate` handler to the definition of
+`double`:
 
 ```js example
 ce.declare("double", {
@@ -238,7 +236,7 @@ ce.declare("double", {
 });
 ```
 
-The `evaluate` handler is called when the corresponding function is evaluated. 
+The `evaluate` handler is called when the corresponding function is evaluated.
 
 It receives two arguments:
 
@@ -265,16 +263,13 @@ declaration.{.notice--info}
 As a shortcut, if you assign a value to an identifier that was not previously
 declared, a new function definition is created, if the value is a function.
 
-
-Using `ce.assign()` gives you more flexibility than `ce.declare()`:
-the "value" of the function can be a JavaScript function, a MathJSON expression
-or a LaTeX expression.
-
+Using `ce.assign()` gives you more flexibility than `ce.declare()`: the "value"
+of the function can be a JavaScript function, a MathJSON expression or a LaTeX
+expression.
 
 ```js example
 ce.assign("f", (ce, args) => ce.number(args[0].valueOf() * 5)};
 ```
-
 
 The value can also be a MathJSON expression:
 
@@ -295,13 +290,13 @@ The value can be a LaTeX expression:
 ce.assign("f(x)", "$$ 5x $$"));
 ```
 
-You can also use `ce.parse()` but you have to watch out and make sure you
-parse a non-canonical expression, otherwise any unknowns (such as `x`) will be
+You can also use `ce.parse()` but you have to watch out and make sure you parse
+a non-canonical expression, otherwise any unknowns (such as `x`) will be
 automatically declared, instead of being interpreted as an argument to the
 function.
 
 ```js example
-ce.assign("f(x)", ce.parse("5x", {canonical: false}));
+ce.assign("f(x)", ce.parse("5x", { canonical: false }));
 ```
 
 You can also use a more explicit LaTeX syntax:
@@ -311,17 +306,15 @@ ce.assign("f", ce.parse("(x) \\mapsto 5x"));
 ```
 
 The arguments on the left hand side of the `\\mapsto` operator are the arguments
-of the function. The right hand side is the body of the function. The parenthesis
-around the argument is optional if there is only one argument. If there are
-multiple arguments, they must be enclosed in parenthesis and separatated by
-commas. If there are *no* arguments (rare, but possible), the parenthesis are
-still required to indicate the argument list is empty.
+of the function. The right hand side is the body of the function. The
+parenthesis around the argument is optional if there is only one argument. If
+there are multiple arguments, they must be enclosed in parenthesis and
+separatated by commas. If there are _no_ arguments (rare, but possible), the
+parenthesis are still required to indicate the argument list is empty.
 
-When using `\\mapsto` you don't have to worry about the canonical flag, because the
-expression indicates what the arguments are, and so they are not intepreted as 
-unknowns in the body of the function.
-
-
+When using `\\mapsto` you don't have to worry about the canonical flag, because
+the expression indicates what the arguments are, and so they are not intepreted
+as unknowns in the body of the function.
 
 Evaluating an `["Assign"]` expression is equivalent to calling `ce.assign()`:
 
@@ -334,7 +327,6 @@ You can also evaluate a LaTeX assignment expression:
 ```js example
 ce.parse("\\operatorname{double} := x \\mapsto 2x").evaluate();
 ```
-
 
 ## Acting on Multiple Functions and Symbols
 

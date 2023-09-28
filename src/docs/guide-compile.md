@@ -13,14 +13,15 @@ preamble: |
 
 ## Introduction
 
-Some expressions can take a long time to numerically evaluate, for example 
-if they contain a large number of terms or involve a loop \\((\sum\\) or \\(\prod\\)). 
+Some expressions can take a long time to evaluate numerically, for example if
+they contain a large number of terms or involve a loop \\((\sum\\) or
+\\(\prod\\)).
 
-In this case, it is useful to compile the expression into a JavaScript function that
-can be evaluated much faster.
+In this case, it is useful to compile the expression into a JavaScript function
+that can be evaluated much faster.
 
-For example this approximation of \\(\pi\\): \\( \sqrt{6\sum^{10^6}_{n=1}\frac{1}{n^2}} \\)
-
+For example this approximation of \\(\pi\\): \\(
+\sqrt{6\sum^{10^6}\_{n=1}\frac{1}{n^2}} \\)
 
 ```javascript
 const expr = ce.parse("\\sqrt{6\\sum^{10^6}_{n=1}\\frac{1}{n^2}}");
@@ -37,7 +38,6 @@ console.log(fn());
 // Timing: 6.2ms (247x faster)
 ```
 
-
 ## Compiling
 
 **To get a compiled version of an expression** use the `expr.compile()` method:
@@ -47,7 +47,8 @@ const expr = ce.parse("2\\prod_{n=1}^{\\infty} \\frac{4n^2}{4n^2-1}");
 const fn = expr.compile();
 ```
 
-**To evaluate the compiled expression** call the function returned by `expr.compile()`:
+**To evaluate the compiled expression** call the function returned by
+`expr.compile()`:
 
 ```javascript
 console.log(fn());
@@ -65,34 +66,31 @@ containing the value of the arguments:
 ```javascript
 const expr = ce.parse("n^2");
 const fn = expr.compile();
-for (const i = 1; i < 10; i++) 
-  console.log(fn({n: i}));
+for (const i = 1; i < 10; i++) console.log(fn({ n: i }));
 // ➔ 1, 4, 9, 16, 25, 36, 49, 64, 81
 ```
 
-**To get a list of the arguments (or _free variables_) of an expression** 
-use the `expr.freeVars` property:
+**To get a list of the unknows of an expression** use the `expr.unknowns`
+property:
 
 ```javascript
-console.log(ce.parse("n^2").freeVars);
+console.log(ce.parse("n^2").unknowns);
 // ➔ ["n"]
 
-console.log(ce.parse("a^2+b^3").freeVars);
+console.log(ce.parse("a^2+b^3").unknowns);
 // ➔ ["a", "b"]
-
 ```
-
 
 ## Limitations
 
-Complex numbers, arbitrary precision numbers, and symbolic calculations
-are not supported.
+Complex numbers, arbitrary precision numbers, and symbolic calculations are not
+supported.
 
 The calculations are only performed using machine precision numbers.
 
 Some functions are not supported.
 
-If the expression cannot be compiled, the `compile()` method will return 
+If the expression cannot be compiled, the `compile()` method will return
 `undefined`. The expression can be numerically evaluated as a fallback:
 
 ```javascript
@@ -102,4 +100,3 @@ console.log(expr.compile() ?? expr.N().numericValue);
 // and we fall back to numerical evaluation with expr.N()
 // ➔ 1
 ```
-
