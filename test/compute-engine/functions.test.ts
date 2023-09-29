@@ -42,7 +42,7 @@ describe('Anonymous function', () => {
   test('Function', () =>
     expect(evaluate(['f1', 10])).toMatchInlineSnapshot(`11`));
   test('Expression', () =>
-    expect(evaluate(['f2', 10])).toMatchInlineSnapshot(`11`));
+    expect(evaluate(['f2', 10])).toMatchInlineSnapshot(`["f2", 10]`));
   test('JS Function', () =>
     expect(evaluate(['f3', 10])).toMatchInlineSnapshot(`11`));
   test('Declared JS Function', () =>
@@ -53,7 +53,7 @@ describe('Anonymous function with missing param', () => {
   test('Missing Param Function', () =>
     expect(evaluate(['f1'])).toMatchInlineSnapshot(`["Add", "q", 1]`)); // @fixme
   test('Missing Param Expression', () =>
-    expect(evaluate(['f2'])).toMatchInlineSnapshot(`11`)); // @fixme
+    expect(evaluate(['f2'])).toMatchInlineSnapshot(`["f2"]`));
   test('Missing Param JS Function', () =>
     expect(evaluate(['f3'])).toMatchInlineSnapshot(`{num: "NaN"}`)); // NaN is correct
   test('Missing Param Declared JS Function', () =>
@@ -66,7 +66,7 @@ describe('Anonymous function with too many params', () => {
   test('Too many params: Function', () =>
     expect(evaluate(['f1', 10, 20])).toMatchInlineSnapshot(`11`));
   test('Too many params: Expression', () =>
-    expect(evaluate(['f2', 10, 20])).toMatchInlineSnapshot(`11`)); // @fixme
+    expect(evaluate(['f2', 10, 20])).toMatchInlineSnapshot(`["f2", 10, 20]`));
   test('Too many params: JS Function', () =>
     expect(evaluate(['f3', 10, 20])).toMatchInlineSnapshot(`11`));
   test('Too many params: Declared JS Function: arguments are checked by Compute Engine', () =>
@@ -83,7 +83,7 @@ describe('Anonymous function with anonymous parameters', () => {
   test('Anon Param: F7', () =>
     expect(evaluate(['f7', 10])).toMatchInlineSnapshot(`["Add", "_2", 1]`)); // @fixme not clear what the right answer is
   test('Anon Param: F8', () =>
-    expect(evaluate(['f8', 10])).toMatchInlineSnapshot(`11`));
+    expect(evaluate(['f8', 10])).toMatchInlineSnapshot(`["f8", 10]`));
   test('Anon Param: F9', () =>
     expect(evaluate(['f9', 10])).toMatchInlineSnapshot(`11`));
 });

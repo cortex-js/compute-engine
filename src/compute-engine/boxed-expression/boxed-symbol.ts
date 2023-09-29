@@ -131,6 +131,12 @@ export class BoxedSymbol extends _BoxedExpression {
     return !(def instanceof _BoxedSymbolDefinition) || def.constant;
   }
 
+  rebind(): void {
+    this._def = null;
+    this._scope = this.engine.context;
+    this.bind();
+  }
+
   get isCanonical(): boolean {
     return this._scope !== null;
   }

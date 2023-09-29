@@ -122,6 +122,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
+  rebind(): void {
+    return;
+  }
+
   /** Object.is() */
   is(rhs: any): boolean {
     if (rhs === null || rhs === undefined) return false;

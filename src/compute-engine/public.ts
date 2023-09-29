@@ -397,6 +397,12 @@ export interface BoxedExpression {
    */
   set isCanonical(val: boolean);
 
+  /**
+   * Rebind the expression to the current scope.
+   * "Reset" the expression to a non-canonical version.
+   * @internal */
+  rebind(): void;
+
   /** MathJSON representation of this expression.
    *
    * **Note** applicable to canonical and non-canonical expressions.

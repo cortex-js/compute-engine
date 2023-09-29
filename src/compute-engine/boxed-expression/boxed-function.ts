@@ -114,6 +114,18 @@ export class BoxedFunction extends _BoxedExpression {
     return h;
   }
 
+  rebind(): void {
+    if (this._canonical === this) {
+      // rebind any subexpressions
+      for (const op of this._ops) op.rebind();
+      if (typeof this._head !== 'string') this._head.rebind();
+    }
+    this._canonical = undefined;
+    this._def = undefined;
+    this._scope = this.engine.context;
+    this.bind();
+  }
+
   get isCanonical(): boolean {
     return this._canonical === this;
   }

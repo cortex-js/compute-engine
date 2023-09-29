@@ -1,8 +1,15 @@
+## [Unreleased]
+
+### Bugs Fixed
+
+- Invoking a function repeatedly would invoke the function in the original scope
+  rather than using a new scope for each invocation.
+
 ## 0.16.0
 
 **Release Date:** 2023-09-29
 
-## Breaking Changes
+### Breaking Changes
 
 - The methods `ce.let()` and `ce.set()` have been renamed to `ce.declare()` and
   `ce.assign()` respectively.
@@ -15,7 +22,7 @@
   in the expression that are defined outside of the local scope and are not
   arguments of the function, if a function.
 
-## New Features
+### New Features
 
 - **Domain Inference** when the domain of a symbol is not set explicitly (for
   example with `ce.declare()`), the domain is inferred from the value of the
@@ -30,7 +37,7 @@
 
 - Added `Factorial2` (double factorial)
 
-## Functions
+### Functions
 
 - Functions can now be defined:
 
@@ -49,7 +56,7 @@ See
 [Adding New Definitions](https://cortexjs.io/compute-engine/guides/augmenting/)
 and [Functions](https://cortexjs.io/compute-engine/reference/functions/).
 
-## Control Structures
+### Control Structures
 
 - Added `FixedPoint`, `Block`, `If`, `Loop`
 - Added `Break`, `Continue` and `Return` statements
@@ -57,7 +64,7 @@ and [Functions](https://cortexjs.io/compute-engine/reference/functions/).
 See
 [Control Structures](https://cortexjs.io/compute-engine/reference/control-structures/)
 
-### Calculus
+#### Calculus
 
 - Added numeric approximation of derivatives, using an 8-th order centered
   difference approximation, with the `ND` function.
@@ -65,7 +72,7 @@ See
   rebasing for improper integrals, with the `NIntegrate` function
 - Added symbolic calculation of derivatives with the `D` function.
 
-### Collections
+#### Collections
 
 Added support for **collections** such as lists, tuples, ranges, etc...
 
@@ -97,12 +104,12 @@ They can be iterated, sliced, filtered, mapped, etc...
 // -> 33
 ```
 
-## Improvements
+### Improvements
 
 - The documentation at https://cortexjs.io/compute-engine/ has been
   significantly rewritten with help from an AI-powered writing assistant.
 
-## Bug Fixes
+### Bug Fixes
 
 - The LaTeX string returned in `["Error"]` expression was incorrectly tagged as
   `Latex` instead of `LatexString`.
@@ -111,7 +118,7 @@ They can be iterated, sliced, filtered, mapped, etc...
 
 **Release Date:** 2023-09-14
 
-## Improvements
+### Improvements
 
 - The `ce.serialize()` function now takes an optional `canonical` argument. Set
   it to `false` to prevent some transformations that are done to produce more
@@ -133,7 +140,7 @@ They can be iterated, sliced, filtered, mapped, etc...
 
 **Release Date:** 2023-09-13
 
-## Breaking Changes
+### Breaking Changes
 
 - The entries in the LaTeX syntax dictionary can now have LaTeX triggers
   (`latexTrigger`) or triggers based on identifiers (`identifierTrigger`). The
@@ -144,7 +151,7 @@ They can be iterated, sliced, filtered, mapped, etc...
   robust. They can be modified directly or one of their properties can be
   modified.
 
-## Improvements
+### Improvements
 
 - Added more functions and symbols supported by `expr.compile()`:
 
@@ -211,7 +218,7 @@ They can be iterated, sliced, filtered, mapped, etc...
 
 **Release Date:** 2023-09-09
 
-## New Features
+### New Features
 
 - Some expressions can be compiled to Javascript. This is useful to evaluate an
   expression many times, for example in a loop. The compiled expression is
@@ -219,7 +226,7 @@ They can be iterated, sliced, filtered, mapped, etc...
   expression, use `expr.compile()`. Read more at
   https://cortexjs.io/compute-engine/guides/compiling
 
-## Bug Fixes and Improvements
+### Bug Fixes and Improvements
 
 - Fixed parsing and serialization of extended LaTeX synonyms for `e` and `i`.
 - Fixed serialization of `Half`.
@@ -230,7 +237,7 @@ They can be iterated, sliced, filtered, mapped, etc...
 
 **Release Date:** 2023-09-08
 
-## Improvements
+### Improvements
 
 - Made customization of the LaTeX dictionary simpler. The `ce.latexDictionary`
   property can be used to access and modify the dictionary. The documentation at

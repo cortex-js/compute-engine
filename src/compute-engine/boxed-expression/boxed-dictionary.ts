@@ -43,6 +43,10 @@ export class BoxedDictionary extends _BoxedExpression {
     ce._register(this);
   }
 
+  rebind(): void {
+    for (const [_k, v] of this._value) v.rebind();
+  }
+
   unbind(): undefined {
     for (const [_k, v] of this._value) v.unbind();
     return undefined;

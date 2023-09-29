@@ -202,25 +202,39 @@ function makeLambda(
   const fn = canonicalFunctionExpression(expr);
   if (!fn) return undefined;
   console.assert(fn.head === 'Function');
-  ce.pushScope();
-  const body = fn.op1.canonical;
-  ce.popScope();
 
-  // Extract the arguments from the function definition ("x", "y")
+  const body = fn.op1;
+
+  // Extract the parameters from the function signature ("x", "y")
   const args = fn.ops!.slice(1).map((x) => x.symbol ?? 'Nothing');
 
-  if (args.length === 0) return () => body.N() ?? body.evaluate();
-
   const fnScope = body.scope;
+  if (args.length === 0)
+    return () => {
+      const context = ce.swapScope(fnScope);
+      ce.pushScope();
+      const result = body.N() ?? body.evaluate();
+      ce.popScope();
+      ce.swapScope(context);
+      return result;
+    };
+
   return (params) => {
+    // Switch to the lexical scope in which the function was defined
     const context = ce.swapScope(fnScope);
+
+    // Create a new scope for arguments and locals
+    ce.pushScope();
+    // Make sure the function body is evaluated in the context of the
+    // new scope, and doesn't reuse any scope from a previous invocation
+    body.rebind();
 
     let i = 0;
     for (const arg of args) ce.assign(arg, params[i++]);
     if (params[0]) ce.assign('_', params[0]);
 
     const result = body.N() ?? body.evaluate();
-
+    ce.popScope();
     ce.swapScope(context);
 
     if (!result.isValid) return undefined;
