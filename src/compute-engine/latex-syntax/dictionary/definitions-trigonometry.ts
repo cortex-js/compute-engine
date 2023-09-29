@@ -53,10 +53,23 @@ function parseTrig(op: string): ExpressionParseHandler {
       '';
 
     if (parser.atTerminator(until)) return head;
-    const fn = parser.parsePostfixOperator(head, until);
-    if (fn !== null) return fn;
+
+    let fn: Expression | null = head;
+    do {
+      const pf = parser.parsePostfixOperator(fn, until);
+      if (pf === null) break;
+      fn = pf;
+    } while (true);
+
+    let sup: Expression | null = null;
+    if (parser.match('^')) sup = parser.parseGroup() ?? parser.parseToken();
 
     const args = parser.parseArguments('implicit', until);
+
+    if (sup !== null) {
+      if (args === null) return ['Power', head, sup];
+      return ['Power', [head, ...args], sup];
+    }
 
     return args === null ? head : [head, ...args];
   };
