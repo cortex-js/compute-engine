@@ -22,19 +22,29 @@ describe('Postfix operators: prime', () => {
   test('Single prime', () =>
     expect(parse("f'")).toMatchInlineSnapshot(`["Derivative", "f"]`));
   test('Single prime with arg', () =>
-    expect(parse("f'()")).toMatchInlineSnapshot(`0`));
-  test('\\prime', () => expect(parse('f\\prime()')).toMatchInlineSnapshot(`0`));
+    expect(parse("f'()")).toMatchInlineSnapshot(`[["Derivative", "f"]]`));
+  test('\\prime', () =>
+    expect(parse('f\\prime()')).toMatchInlineSnapshot(`[["Derivative", "f"]]`));
   test('^\\prime', () =>
-    expect(parse('f\\prime()')).toMatchInlineSnapshot(`0`));
+    expect(parse('f\\prime()')).toMatchInlineSnapshot(`[["Derivative", "f"]]`));
   test('^\\prime', () =>
-    expect(parse('f^\\prime()')).toMatchInlineSnapshot(`0`));
+    expect(parse('f^\\prime()')).toMatchInlineSnapshot(
+      `[["Derivative", "f"]]`
+    ));
   test('^{\\prime}', () =>
-    expect(parse('f^{\\prime}()')).toMatchInlineSnapshot(`0`));
-  test("f''", () => expect(parse("f''()")).toMatchInlineSnapshot(`0`));
+    expect(parse('f^{\\prime}()')).toMatchInlineSnapshot(
+      `[["Derivative", "f"]]`
+    ));
+  test("f''", () =>
+    expect(parse("f''()")).toMatchInlineSnapshot(`[["Derivative", "f", 2]]`));
   test('f\\doubleprime', () =>
-    expect(parse('f\\doubleprime()')).toMatchInlineSnapshot(`0`));
+    expect(parse('f\\doubleprime()')).toMatchInlineSnapshot(
+      `[["Derivative", "f", 2]]`
+    ));
   test('f^{\\doubleprime}', () =>
-    expect(parse('f^{\\doubleprime}()')).toMatchInlineSnapshot(`0`));
+    expect(parse('f^{\\doubleprime}()')).toMatchInlineSnapshot(
+      `[["Derivative", "f", 2]]`
+    ));
 });
 
 describe('Anonymous functions, no arg', () => {

@@ -21,24 +21,35 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
 describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
   test(`\\sin^{-1}'(x)`, () =>
     expect(check("\\sin^{-1}'(x)")).toMatchInlineSnapshot(`
-      latex     = ["Derivative", ["InverseFunction", "Sin"]]
-      ["Derivative", ["InverseFunction", "Sin"]]
+      latex     = [["Derivative", ["InverseFunction", "Sin"]], "x"]
+      box       = [["Derivative", ["InverseFunction", "Sin"]], "x"]
+      simplify  = ["Derivative", "Arcsin"]
+      evaluate  = ["Derivative", ["InverseFunction", "Sin"]]
+      N-auto    = [["Derivative", ["InverseFunction", "Sin"]], "x"]
     `));
   test(`\\sin^{-1}''(x)`, () =>
     expect(check("\\sin^{-1}''(x)")).toMatchInlineSnapshot(`
-      latex     = ["Derivative", ["InverseFunction", "Sin"], 2]
-      ["Derivative", ["InverseFunction", "Sin"], 2]
+      latex     = [["Derivative", ["InverseFunction", "Sin"], 2], "x"]
+      box       = [["Derivative", ["InverseFunction", "Sin"], 2], "x"]
+      simplify  = ["Derivative", "Arcsin", 2]
+      evaluate  = ["Derivative", ["InverseFunction", "Sin"], 2]
+      N-auto    = [["Derivative", ["InverseFunction", "Sin"], 2], "x"]
     `));
-  // test(`\\cos^{-1\\doubleprime}(x)`, () =>
-  //   expect(check('\\cos^{-1\\doubleprime}(x)')).toMatchInlineSnapshot(`
-  //     latex     = [["Derivative", 2, "Cos"], "x"]
-  //     box       = [["Derivative", 2, "Cos"], "x"]
-  //     simplify  = ["Derivative", 2, "Cos"]
-  //   `));
+  test(`\\cos^{-1\\doubleprime}(x)`, () =>
+    expect(check('\\cos^{-1\\doubleprime}(x)')).toMatchInlineSnapshot(`
+      latex     = [["Derivative", ["InverseFunction", "Cos"], 2], "x"]
+      box       = [["Derivative", ["InverseFunction", "Cos"], 2], "x"]
+      simplify  = ["Derivative", "Arccos", 2]
+      evaluate  = ["Derivative", ["InverseFunction", "Cos"], 2]
+      N-auto    = [["Derivative", ["InverseFunction", "Cos"], 2], "x"]
+    `));
   test(`\\cos^{-1}\\doubleprime(x)`, () =>
     expect(check('\\cos^{-1}\\doubleprime(x)')).toMatchInlineSnapshot(`
-      latex     = ["Derivative", ["InverseFunction", "Cos"], 2]
-      ["Derivative", ["InverseFunction", "Cos"], 2]
+      latex     = [["Derivative", ["InverseFunction", "Cos"], 2], "x"]
+      box       = [["Derivative", ["InverseFunction", "Cos"], 2], "x"]
+      simplify  = ["Derivative", "Arccos", 2]
+      evaluate  = ["Derivative", ["InverseFunction", "Cos"], 2]
+      N-auto    = [["Derivative", ["InverseFunction", "Cos"], 2], "x"]
     `));
 });
 

@@ -21,7 +21,7 @@ describe('NUMERIC MODE', () => {
 
   test(`\\frac{1}{7}`, () =>
     expect(check('\\frac{1}{7}')).toMatchInlineSnapshot(`
-      latex     = ["Rational", 1, 7]
+      latex     = ["Divide", 1, 7]
       box       = ["Rational", 1, 7]
       N-auto    = 0.(142857)
       N-mach    = 0.14285714285714285
@@ -29,7 +29,7 @@ describe('NUMERIC MODE', () => {
 
   test(`\\frac{1.5}{7.8}`, () =>
     expect(check('\\frac{1}{7}')).toMatchInlineSnapshot(`
-      latex     = ["Rational", 1, 7]
+      latex     = ["Divide", 1, 7]
       box       = ["Rational", 1, 7]
       N-auto    = 0.(142857)
       N-mach    = 0.14285714285714285
@@ -45,7 +45,7 @@ describe('NUMERIC MODE', () => {
 
   test(`\\frac{12345678901234567890}{23456789012345678901}`, () =>
     expect(check('\\frac{1}{7}')).toMatchInlineSnapshot(`
-      latex     = ["Rational", 1, 7]
+      latex     = ["Divide", 1, 7]
       box       = ["Rational", 1, 7]
       N-auto    = 0.(142857)
       N-mach    = 0.14285714285714285

@@ -106,39 +106,70 @@ be created. The domain of the symbol will be set to inferred from the value.
 Once declared an identifier can be used in expressions, and it can be assigned a
 value.
 
-To change the value of a symbol, use the `value` property of the symbol.
+**To change the value of a symbol**, use the `value` property of the symbol or
+the `ce.assign()` method.
 
 ```js
 const n = ce.box("n");
 n.value = 5;
 console.log(`${n.latex} = ${n.value.json}`);
 // ➔ n = 5
-```
 
-Alternatively, use `ce.assign()`:
-
-```js
-ce.assign("n", 5);
+ce.assign("n", 18);
+// ➔ n = 18
 ```
 
 You can also evaluate a MathJSON expression that contains an `["Assign"]`
 expression:
 
 ```js
-ce.box(["Assign", "n", 5]).evaluate();
+ce.box(["Assign", "n", 42]).evaluate();
+// ➔ n = 42
 ```
 
 or parse a LaTeX expression that contains an assignment:
 
 ```js
-ce.parse("n := 5").evaluate();
+ce.parse("n := 31").evaluate();
+// ➔ n = 31
 ```
 
 In LaTeX, assignments are indicated by the `:=` or `\coloneqq` operator (note
 the two `qq`s). The `=` operator is used for equality.
 
-You can also change the value of a symbol with
-`ce.box("m").value = 10`.{.--notice-info}
+The right hand side argument of an assignment (with a `ce.assign()`,
+`expr.value` or `["Assign"]` expression) can be one of the following:
+
+- a JavaScript boolean: interpreted as `True` or `False`
+- a JavaScript number
+- a tuple of two numbers, for a rational
+- a `bignum`, for a large number
+- a `complex`, for a complex number
+- a JavaScript string: interpreted as string, unless it starts and ends with a
+  `$` in which case it is interpreted as a LaTeX expression that defines a
+  function.
+- a MathJSON expression, which defines a function
+- a JavaScript function, which also defines a functon
+
+```js example
+ce.assign("b", true);
+ce.assign("n", 5);
+ce.assign("q", [1, 2]);
+ce.assign(
+  "d",
+  ce.bignum("123456789012345678901234567890.123456789012345678901234567890e512")
+);
+ce.assign("z", ce.complex(1, 2));
+ce.assign("s", "Hello");
+
+// Functions
+ce.assign("f", "$$ 2x + 3 $$");
+ce.assign("double", ["Function", ["Multiply", "x", 2], "x"]);
+ce.assign("halve", (ce, args) => ce.number(args[0].valueOf() / 2));
+```
+
+Note that when assigning an expression to a symbol, the expression is not
+evaluated. It is used to define a function
 
 ## Declaring a Function
 
@@ -164,7 +195,7 @@ assumes it's a symbol.
 
 You can control how unknown identifiers are handled by setting the
 `ce.latexOptions.parseUnknownIdentifier` property to a function that returns
-`function` if the argument string is a function, `symbol` if it's a symbol or
+`function` if the parameter string is a function, `symbol` if it's a symbol or
 `unknown` otherwise. For example, you set it up so that identifiers that start
 with an upper case letter are always assume to be functions, or any other
 convention you want. This only affects what happens when parsing LaTeX, though,
@@ -175,22 +206,22 @@ To tell the Compute Engine that `double` is a function, you need to declare it.
 **To declare a function**, use the `ce.declare()` function.
 
 `ce.declare()` can be used to declare symbols or functions depending on its
-second argument.
+second parameter.
 
 ```js example
 ce.declare("double", { signature: { domain: "Functions" } });
 ```
 
-If the definition (the second argument of `ce.declare()`) includes a `signature`
-property, a function is being declared.
+If the definition (the second parameter of `ce.declare()`) includes a
+`signature` property, a function is being declared.
 
 The `signature` property defines how the function can be used. It is a
 `FunctionDefinition` object with the following properties (all are optional):
 
 - `domain`: the domain of the function. The `Functions` domain represents any
-  function. "NumericFunctions" represents a function whose arguments are number
+  function. "NumericFunctions" represents a function whose parameters are number
   and that returns a numeric value. More complex domains can be specified to
-  described the domain of the arguments of the function and the domain of its
+  described the domain of the parameters of the function and the domain of its
   return v
 - `canonical(ce, args)` returns a canonical representation of the function. This
   is an opportunity to check that the arguments are valid, and to return a
@@ -238,7 +269,7 @@ ce.declare("double", {
 
 The `evaluate` handler is called when the corresponding function is evaluated.
 
-It receives two arguments:
+It has two parameters:
 
 - `ce`: the Compute Engine instance
 - `args`: an array of the arguments that have been applied to the function. Each
@@ -277,7 +308,7 @@ The value can also be a MathJSON expression:
 ce.assign("f(x)", ["Multiply", "x", 5]);
 ```
 
-Note in this case we added `(x)` to the first argument of `ce.assign()` to
+Note in this case we added `(x)` to the first parameter of `ce.assign()` to
 indicate that `f` is a function. This is equivalent to the more verbose:
 
 ```js example
@@ -292,7 +323,7 @@ ce.assign("f(x)", "$$ 5x $$"));
 
 You can also use `ce.parse()` but you have to watch out and make sure you parse
 a non-canonical expression, otherwise any unknowns (such as `x`) will be
-automatically declared, instead of being interpreted as an argument to the
+automatically declared, instead of being interpreted as a parameter of the
 function.
 
 ```js example
@@ -305,15 +336,15 @@ You can also use a more explicit LaTeX syntax:
 ce.assign("f", ce.parse("(x) \\mapsto 5x"));
 ```
 
-The arguments on the left hand side of the `\\mapsto` operator are the arguments
-of the function. The right hand side is the body of the function. The
-parenthesis around the argument is optional if there is only one argument. If
-there are multiple arguments, they must be enclosed in parenthesis and
-separatated by commas. If there are _no_ arguments (rare, but possible), the
-parenthesis are still required to indicate the argument list is empty.
+The arguments on the left hand side of the `\\mapsto` operator are the
+parameters of the function. The right hand side is the body of the function. The
+parenthesis around the parameters is optional if there is only one parameter. If
+there are multiple parameters, they must be enclosed in parenthesis and
+separatated by commas. If there are _no_ parameters (rare, but possible), the
+parenthesis are still required to indicate the parameter list is empty.
 
 When using `\\mapsto` you don't have to worry about the canonical flag, because
-the expression indicates what the arguments are, and so they are not intepreted
+the expression indicates what the parameters are, and so they are not intepreted
 as unknowns in the body of the function.
 
 Evaluating an `["Assign"]` expression is equivalent to calling `ce.assign()`:

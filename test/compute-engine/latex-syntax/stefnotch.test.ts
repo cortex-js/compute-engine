@@ -116,14 +116,13 @@ describe('STEFNOTCH #13', () => {
       parse('N(\\varepsilon)\\coloneqq\\lceil\\frac{4}{\\varepsilon^2}\\rceil')
     ).toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Multiply",
         ["N", "epsilonSymbol"],
         [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\coloneq'"],
-          ["LatexString", "'\\coloneq'"]
-        ],
-        ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]]
+          "Assign",
+          "Undefined",
+          ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]]
+        ]
       ]
     `);
   });

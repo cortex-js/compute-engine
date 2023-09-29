@@ -249,7 +249,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
             ["Multiply", 8, ["Power", "n", 3]],
             ["Multiply", 4, ["Power", "n", 2]],
             "n",
-            ["Rational", 1, 30]
+            ["Divide", 1, 30]
           ],
           6
         ]

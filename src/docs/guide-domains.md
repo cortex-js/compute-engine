@@ -57,14 +57,16 @@ ce.box("Pi").domain;
 // ➔ "TranscendentalNumbers"
 
 ce.box("Divide").domain;
-// ➔ '["Functions",  "Numbers", "Numbers", "Numbers]': domain of the function "Divide"
+// ➔ '["Functions",  "Numbers", "Numbers", "Numbers]':
+//   domain of the function "Divide"
 
 ce.box(["Add", 5, 2]).domain;
 // ➔ "Numbers": the result of the "Add" function
-// (its codomain) belongs to the domain "Numbers"
+//   (its codomain) belongs to the domain "Numbers"
 
 ce.box(["Add", 5, 2]).evaluate().domain;
-// ➔ "Integers": once evaluated, the domain of the result may be more specific
+// ➔ "Integers": once evaluated, the domain of
+//   the result may be more specific
 ```
 
 </section>
@@ -128,7 +130,7 @@ that can be determined:
 - **Invariance**: two domains are invariant if they represent exactly the same
   set of values
 - **Covariance**: domain **A** is covariant with domain **B** if all the values
-  in **A** are also in **B**. For example `Integer` is covariant with `Number`
+  in **A** are also in **B**. For example `Integers` is covariant with `Numbers`
 - **Contravariant**: domain **A** is contravariant with domain **B** if all the
   values in **B** are in **A**. For example `Anything` is contravariant with
   every domain.

@@ -123,39 +123,9 @@ describe('SUPSUB', () => {
     expect(parse('(x+1)^n_0')).toMatchInlineSnapshot(
       `["Power", ["Subscript", ["Add", "x", 1], 0], "n"]`
     );
-    expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        [
-          "Power",
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              ["Domain", "Numbers"],
-              ["Domain", "Strings"]
-            ],
-            "'missing'"
-          ],
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              ["Domain", "Numbers"],
-              ["Domain", "Strings"]
-            ],
-            ["LatexString", "'^'"]
-          ]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-identifier'", "p"],
-          ["LatexString", "'p'"]
-        ]
-      ]
-    `); // @fixme: nope...
+    expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(
+      `["Subscript", "'missing'", ["LatexString", "'^p'"]]`
+    ); // @fixme: nope...
     expect(parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(`
       [
         "Sequence",
@@ -179,13 +149,13 @@ describe('SUPSUB', () => {
               ["Domain", "Numbers"],
               ["Domain", "Strings"]
             ],
-            ["LatexString", "'^'"]
+            ["LatexString", "'^{12}_'"]
           ]
         ],
         [
           "Error",
           ["ErrorCode", "'unexpected-token'", "'{'"],
-          ["LatexString", "'{12}_{34}(x+1)^n_0'"]
+          ["LatexString", "'{34}(x+1)^n_0'"]
         ]
       ]
     `); // @fixme: nope...

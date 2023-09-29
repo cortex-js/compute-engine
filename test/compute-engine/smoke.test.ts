@@ -154,8 +154,8 @@ const w = ce.parse('\\operatorname{$invalid}').json;
 console.log(w);
 
 // Should interpret function application `(x)`
-console.log(ce.parse('f_{n - 1}(x)').toJSON());
-console.log(ce.parse('x \\times f_{n - 1}(x) + f_{n - 2}(x)').toJSON());
+// console.log(ce.parse('f_{n - 1}(x)').toJSON());
+// console.log(ce.parse('x \\times f_{n - 1}(x) + f_{n - 2}(x)').toJSON());
 
 // If a symbol surrounded by two numeric literals
 // (Range if integers and symbol is an integer, Interval otherwise)

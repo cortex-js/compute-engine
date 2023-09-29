@@ -77,7 +77,9 @@ describe('LATEX SERIALIZING', () => {
     `);
 
     // Head as expression
-    expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(`g(f)`);
+    expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
+      `\\operatorname{apply}(g(f), \\lbrack x, 1, 0\\rbrack)`
+    );
   });
 
   test('Basic operations', () => {

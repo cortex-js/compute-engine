@@ -74,17 +74,23 @@ describe('INFERRED DOMAINS', () => {
       `["Domain", "RealNumbers"]`
     );
 
-    // Widening to anything
+    // Widening to Values
     engine.assign('numSymbol', "'hello'");
-    expect(engine.symbol('numSymbol').domain.json).toMatchInlineSnapshot();
+    expect(engine.symbol('numSymbol').domain.json).toMatchInlineSnapshot(
+      `["Domain", "Values"]`
+    );
 
     // Booleans
     engine.assign('booleanSymbol', true);
-    expect(engine.symbol('booleanSymbol').domain.json).toMatchInlineSnapshot();
+    expect(engine.symbol('booleanSymbol').domain.json).toMatchInlineSnapshot(
+      `["Domain", "Booleans"]`
+    );
 
     // Strings
     engine.assign('stringSymbol', "'hello'");
-    expect(engine.symbol('stringSymbol').domain.json).toMatchInlineSnapshot();
+    expect(engine.symbol('stringSymbol').domain.json).toMatchInlineSnapshot(
+      `["Domain", "Strings"]`
+    );
   });
 });
 

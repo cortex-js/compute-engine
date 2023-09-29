@@ -139,7 +139,7 @@ describe('OPERATOR invisible', () => {
     `));
   test('2\\frac{1}{4} // Invisible PLUS operator', () =>
     expect(check('2\\frac{1}{4}')).toMatchInlineSnapshot(`
-      latex     = ["Add", 2, ["Rational", 1, 4]]
+      latex     = ["Add", 2, ["Divide", 1, 4]]
       box       = ["Add", ["Rational", 1, 4], 2]
       simplify  = ["Rational", 9, 4]
       N-auto    = 2.25
@@ -314,18 +314,18 @@ describe('OPERATOR divide', () => {
     `));
   test('\\frac31', () =>
     expect(check('\\frac31')).toMatchInlineSnapshot(`
-      latex     = 3
+      latex     = ["Divide", 3, 1]
       3
     `));
   test('\\frac75', () =>
     expect(check('\\frac75')).toMatchInlineSnapshot(`
-      latex     = ["Rational", 7, 5]
+      latex     = ["Divide", 7, 5]
       box       = ["Rational", 7, 5]
       N-auto    = 1.4
     `));
   test('\\frac{10}{5}', () =>
     expect(check('\\frac{10}{5}')).toMatchInlineSnapshot(`
-      latex     = ["Rational", 10, 5]
+      latex     = ["Divide", 10, 5]
       2
     `));
   test('\\frac{18}{-3}', () =>
