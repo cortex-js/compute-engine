@@ -1,6 +1,6 @@
-## 0.16.0 
+## 0.16.0
 
- **Release Date:** 2023-09-29
+**Release Date:** 2023-09-29
 
 ## Breaking Changes
 
@@ -45,15 +45,17 @@
   - `f \rhd x`
   - `x \lhd f`
 
-See http://localhost:8080/compute-engine/guides/augmenting/ and
-https://cortexjs.io/compute-engine/reference/functions/
+See
+[Adding New Definitions](https://cortexjs.io/compute-engine/guides/augmenting/)
+and [Functions](https://cortexjs.io/compute-engine/reference/functions/).
 
 ## Control Structures
 
 - Added `FixedPoint`, `Block`, `If`, `Loop`
 - Added `Break`, `Continue` and `Return` statements
 
-See https://cortexjs.io/compute-engine/reference/control-structures/
+See
+[Control Structures](https://cortexjs.io/compute-engine/reference/control-structures/)
 
 ### Calculus
 
@@ -67,7 +69,7 @@ See https://cortexjs.io/compute-engine/reference/control-structures/
 
 Added support for **collections** such as lists, tuples, ranges, etc...
 
-See https://cortexjs.io/compute-engine/reference/collections/
+See [Collections](https://cortexjs.io/compute-engine/reference/collections/)
 
 Collections can be used to represent various data structures, such as lists,
 vectors, matrixes and more.
