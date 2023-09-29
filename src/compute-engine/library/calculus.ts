@@ -90,16 +90,24 @@ volumes
           }
           return ce._fn('Derivative', ops);
         },
+        simplify: (ce, ops) => {
+          const expr = ops[0].simplify();
+          if (ops[1]) return ce._fn('Derivative', [expr, ops[1]]);
+
+          return ce._fn('Derivative', [expr]);
+        },
         evaluate: (ce, ops) => {
           // Is it a function name, i.e. ["Derivative", "Sin"]?
           if (ops[0].functionDefinition) {
             return (
-              partialDerivative(ce._fn(ops[0].canonical, [ce.symbol('_')]), '_')
-                ?.canonical ?? undefined
+              partialDerivative(
+                ce._fn(ops[0].evaluate(), [ce.symbol('_')]),
+                '_'
+              )?.canonical ?? undefined
             );
           }
           // It's a function expression, i.e. ["Derivative", ["Sin", "_"]]
-          const f = partialDerivative(ops[0].canonical, '_');
+          const f = partialDerivative(ops[0].evaluate(), '_');
           if (!f) return undefined;
           return f.canonical;
         },

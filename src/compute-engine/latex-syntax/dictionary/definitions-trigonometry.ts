@@ -67,11 +67,11 @@ function parseTrig(op: string): ExpressionParseHandler {
     const args = parser.parseArguments('implicit', until);
 
     if (sup !== null) {
-      if (args === null) return ['Power', head, sup];
-      return ['Power', [head, ...args], sup];
+      if (args === null) return ['Power', fn, sup];
+      return ['Power', [fn, ...args], sup];
     }
 
-    return args === null ? head : [head, ...args];
+    return args === null ? fn : [fn, ...args];
   };
 }
 

@@ -712,15 +712,6 @@ export class BoxedFunction extends _BoxedExpression {
     }
 
     //
-    // Swap to the lexical scope (the scope in which the expression was boxed)
-    //
-    // This will allow any asignments (or declaration) to be made in the
-    // lexical scope, not the current scope.
-    //
-
-    const scope = this.engine.swapScope(this._scope);
-
-    //
     // 3/ Evaluate the applicable operands
     //
     const def = this.functionDefinition;
@@ -755,8 +746,6 @@ export class BoxedFunction extends _BoxedExpression {
       def!.signature?.evaluate?.(this.engine, tail) ??
       this.engine.fn(this._head, tail);
 
-    // Restore the scope and exit
-    this.engine.swapScope(scope);
     return result;
   }
 

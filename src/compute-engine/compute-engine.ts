@@ -1138,8 +1138,13 @@ export class ComputeEngine implements IComputeEngine {
 
     let value = arg2 as AssignValue;
 
+    if (typeof value === 'boolean')
+      value = value ? this.symbol('True') : this.symbol('True');
+
     //
     // Is the value a LaTeX string (starts/ends with $ or $$)?
+    // Parse it, as a non-canonical expression.
+    // If we parse it as canonical, any unknowns will be auto-declared.
     //
     if (typeof value === 'string') {
       const latex = value.trim();
@@ -1147,6 +1152,9 @@ export class ComputeEngine implements IComputeEngine {
         value = this.parse(latex.slice(1, -1), { canonical: false });
       } else if (latex.startsWith('$$') && latex.endsWith('$$')) {
         value = this.parse(latex.slice(2, -2), { canonical: false });
+      } else {
+        // Not a LaTeX string? interpret as a plain string (not a symbol)
+        value = this.string(value);
       }
     }
 
@@ -1263,9 +1271,9 @@ export class ComputeEngine implements IComputeEngine {
       // Probably an anonymous function. The unknowns are the parameters.
 
       // Check if unknowns includes "_" or "_n" where n is a digit
-      if (unknowns.some((x) => x === '_' || x.startsWith('_'))) {
+      if (unknowns.some((x) => /\_[\d]+/.test(x))) {
         // This is a function
-        expr = this.box(['Function', ...expr.ops!]);
+        expr = this.box(['Function', expr]);
         this.defineFunction(id, {
           signature: { domain: 'Functions', evaluate: expr },
         });
@@ -1452,7 +1460,6 @@ export class ComputeEngine implements IComputeEngine {
         this.string(message[0]),
         ...message.slice(1).map((x) => {
           // console.assert(typeof x !== 'string' || isValidIdentifier(x));
-          if (typeof x === 'string') debugger;
           console.assert(typeof x !== 'string'); // For safety, require wrapped symbols or strings
           return this.box(x, { canonical: false });
         }),
@@ -1903,7 +1910,7 @@ export class ComputeEngine implements IComputeEngine {
     try {
       return assume(this.box(predicate, { canonical: false }));
     } catch (e) {
-      console.error(e);
+      console.error(e.toString());
       return 'internal-error';
     }
   }
@@ -1916,7 +1923,7 @@ export class ComputeEngine implements IComputeEngine {
     //
     // When forgeting we need to preserve existing definitions for symbols,
     // as some expressions may be pointing to them. Instead, we
-    // reset the value/domain of those definitions.
+    // reset the value of those definitions, but don't change the domain.
     //
 
     if (symbol === undefined) {
@@ -1936,12 +1943,9 @@ export class ComputeEngine implements IComputeEngine {
       // Remove symbol definition in the current scope (if any)
       if (this.context.ids) {
         const def = this.context.ids.get(symbol);
-        if (def instanceof _BoxedSymbolDefinition) {
-          def.value = undefined;
-          if (def.domain?.isNumeric) {
-            def.domain = this.defaultDomain ?? this.domain('Numbers');
-          } else def.domain = undefined;
-        } // @todo: if a function....
+        if (def instanceof _BoxedSymbolDefinition) def.value = undefined;
+        else if (def instanceof _BoxedFunctionDefinition)
+          def.signature = { domain: def.signature.domain };
       }
       // Remove any assumptions that make a reference to this symbol
       // (note that when a scope is created, any assumptions from the

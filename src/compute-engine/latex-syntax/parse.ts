@@ -1495,7 +1495,7 @@ export class _Parser implements Parser {
     // Is it followed by one or more postfix (e.g. `\prime`)
     //
     do {
-      const pf = this.parsePostfixOperator(fn);
+      const pf = this.parsePostfixOperator(fn, until);
       if (pf === null) break;
       fn = pf;
     } while (true);
@@ -1883,6 +1883,12 @@ export class _Parser implements Parser {
       opDefs = this.peekDefinitions('infix');
       if (opDefs.length > 0) {
         const [def, n] = opDefs[0] as [IndexedInfixEntry, number];
+        if (this.peek === '^') {
+          // '^' is a special case, with a custom parser
+          this.index += 1;
+          this.parseGroup();
+          this.error('unexpected-operator', start);
+        }
         this.index += n;
         if (typeof def.parse === 'function') {
           const result = def.parse(this, this.error('missing', start), {

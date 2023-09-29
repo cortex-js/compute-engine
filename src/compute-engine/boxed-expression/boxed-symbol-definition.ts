@@ -76,6 +76,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     if (!ce.context) throw Error('No context available');
 
     this.name = name;
+    // if (this.name === 'x') debugger;
     this.wikidata = def.wikidata;
     this.description = def.description;
     this.url = def.url;
@@ -218,6 +219,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     // So if the domain is more general than the value, say 'Numbers',
     // that is what will be returned. It is possible to get the
     // expr.value.domain to get the more specific domain if desired.
+    console.assert(this._domain);
     return this._domain ?? this._value?.domain ?? undefined;
   }
 
@@ -226,7 +228,14 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       throw new Error(
         `The domain of the constant "${this.name}" cannot be changed`
       );
+
+    if (!this.inferredDomain)
+      throw Error(
+        `The domain of "${this.name}" cannot be changed because it has already been declared`
+      );
+
     if (!domain) {
+      debugger;
       this._defValue = undefined;
       this._value = undefined;
       this._flags = undefined;
@@ -235,22 +244,22 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     }
 
     domain = this._engine.domain(domain);
-    // OK to change the domain if still numeric
-    if (this._domain?.isNumeric) {
-      if (!domain.isNumeric)
-        throw Error("Can't change from a numeric domain to a non-numeric one");
-      this._domain = domain;
-      if (!this._value)
-        this._flags = { ...(this._flags ?? {}), ...domainToFlags(domain) };
-      return;
+
+    // Narrowing is OK
+    if (this._domain && !domain.isCompatible(this._domain)) {
+      throw Error(
+        `The domain of "${this.name}" cannot be widened from "${this._domain.literal}" to "${domain.literal}"`
+      );
     }
 
-    if (this._domain) throw Error("Can't change a non-numeric domain");
+    if (this._value && !domain.isCompatible(this._value.domain))
+      throw Error(
+        `The domain of "${this.name}" cannot be changed to "${domain.literal} because its value has a domain of "${this._value.domain.literal}"`
+      );
 
     this._flags = undefined;
     this._domain = domain;
-    if (!this._value && domain.isNumeric)
-      this._flags = { ...(this._flags ?? {}), ...domainToFlags(domain) };
+    if (!this._value && domain.isNumeric) this._flags = domainToFlags(domain);
   }
 
   //

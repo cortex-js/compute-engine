@@ -253,6 +253,17 @@ export class Serializer {
     // It's a function with a head expression. Use an `apply()`
     // See https://en.wikipedia.org/wiki/Apply
     //
+
+    if (head(h) === 'InverseFunction' || head(h) === 'Derivative') {
+      // For inverse functions and derivatives display as a regular function,
+      // e.g. \sin^{-1} x, f'(x) instead of x \rhd f' and x \rhd \sin^{-1}
+
+      return (
+        this.serializeFunction(h!, this.dictionary.ids.get(head(h) as string)) +
+        this.wrapArguments(expr)
+      );
+    }
+
     const args = ops(expr) ?? [];
     if (args.length === 1) {
       // If there's a single argument, we can use the pipeline operator

@@ -932,6 +932,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['^'],
     kind: 'infix',
     serialize: serializePower,
+    // Parsing is done as a special case in `parseExpression`
   },
   {
     latexTrigger: '\\prod',

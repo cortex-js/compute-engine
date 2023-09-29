@@ -608,16 +608,33 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
   {
     name: 'InverseFunction',
-    latexTrigger: '^{-1}',
+    latexTrigger: '^{-1', // Note: the closing brace is not included
     kind: 'postfix',
     parse: (parser, lhs) => {
       // If the lhs is a function, return the inverse function
       // i.e. f^{-1} -> InverseFunction(f)
-      if (parser.computeEngine?.box(lhs)?.domain.isFunction)
-        return ['InverseFunction', lhs];
-      // Otherwise, if it's a number or a symbol, return the power
-      // i.e. x^{-1} -> Power(x, -1)
-      return ['Power', missingIfEmpty(lhs), -1];
+      if (!parser.computeEngine?.box(lhs)?.domain.isFunction) return null;
+
+      // There may be additional postfixes, i.e. \prime, \doubleprime,
+      // \tripleprime in the superscript. Account for them.
+
+      let primeCount = 0;
+      const start = parser.index;
+      while (!parser.atEnd && !parser.match('<}>')) {
+        if (parser.match("'")) primeCount++;
+        else if (parser.match('\\prime')) primeCount++;
+        else if (parser.match('\\doubleprime')) primeCount += 2;
+        else if (parser.match('\\tripleprime')) primeCount += 3;
+        else {
+          parser.index = start;
+          return null;
+        }
+      }
+      if (primeCount === 1) return ['Derivative', ['InverseFunction', lhs]];
+      if (primeCount > 0)
+        return ['Derivative', ['InverseFunction', lhs], primeCount];
+
+      return ['InverseFunction', lhs];
     },
     serialize: (serializer, expr) =>
       serializer.serialize(op(expr, 1)) + '^{-1}',

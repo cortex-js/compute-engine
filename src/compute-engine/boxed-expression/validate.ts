@@ -81,8 +81,8 @@ export function validateSignature(
   // Useful with parameters of functions, for example, even more so
   // for anonymous parameters, which are unlikely to have an explicit domain.
   if (sig.domainArgs)
-    for (let i = 1; i <= sig.domainArgs!.length - 1; i++)
-      ops[i - 1]?.infer(ce.domain(sig.domainArgs![i]));
+    for (let i = 0; i <= sig.domainArgs!.length - 2; i++)
+      ops[i]?.infer(ce.domain(sig.domainArgs![i]));
 
   const opsDomain = ops.map((x) => x.domain);
 

@@ -478,8 +478,7 @@ export function box(
     // Try to evaluate to something simpler
     const ops = expr.slice(1).map((x) => box(ce, x, options));
     const head = box(ce, expr[0], options);
-    if (head.symbol) return new BoxedFunction(ce, head.symbol, ops);
-    return apply(head, ops);
+    return new BoxedFunction(ce, head, ops);
   }
 
   //

@@ -25,7 +25,9 @@ import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { hashCode } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
-import { widen } from './boxed-domain';
+import { narrow, widen } from './boxed-domain';
+import Complex from 'complex.js';
+import Decimal from 'decimal.js';
 
 /**
  * BoxedSymbol
@@ -178,10 +180,18 @@ export class BoxedSymbol extends _BoxedExpression {
       : undefined;
   }
 
+  /**
+   * Subsequence inferences will narrow the domain of the symbol.
+   * f(:integer), g(:real)
+   * g(x) => x:real
+   * f(x) => x:integer narrowed from integer to real
+   */
   infer(domain: BoxedDomain): boolean {
-    if (!this._def) {
+    const def = this.symbolDefinition;
+    if (!def) {
       // We don't know anything about this symbol yet, create a definition
       const scope = this.engine.swapScope(this._scope);
+      if (this.engine.lookupSymbol(this._name)) debugger;
       console.assert(this.engine.lookupSymbol(this._name) === undefined);
       this._def = this.engine.defineSymbol(this._name, {
         domain,
@@ -191,11 +201,9 @@ export class BoxedSymbol extends _BoxedExpression {
       return true;
     }
 
-    if (
-      this._def instanceof _BoxedSymbolDefinition &&
-      this._def.inferredDomain
-    ) {
-      this._def.domain = widen(this._def.domain, domain);
+    // Narrow the domain, if it was previously inferred
+    if (def.inferredDomain) {
+      def.domain = narrow(def.domain, domain);
       return true;
     }
 
@@ -259,7 +267,17 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.symbolDefinition?.value;
   }
 
-  set value(value: BoxedExpression | number | undefined) {
+  set value(
+    value:
+      | boolean
+      | string
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | BoxedExpression
+      | number
+      | undefined
+  ) {
     // Symbols starting with `_` are wildcards and never have an associated
     // value
     // @todo: this may not entirely be true. This could
@@ -269,17 +287,23 @@ export class BoxedSymbol extends _BoxedExpression {
         `The value of the wildcard "${this._name}" cannot be changed`
       );
 
+    const ce = this.engine;
+
     //
     // Clear assumptions  about this symbol
     //
-    this.engine.forget(this._name);
+    ce.forget(this._name);
 
     //
     // Determine the new value
     //
     let v: BoxedExpression | undefined;
+    if (typeof value === 'boolean')
+      value = value ? ce.symbol('True') : ce.symbol('True');
+    if (typeof value === 'string') value = ce.string(value);
+
     if (value !== undefined) {
-      const boxedValue = this.engine.box(value);
+      const boxedValue = ce.box(value);
       v = boxedValue.value ?? boxedValue.evaluate();
     }
 
@@ -288,7 +312,7 @@ export class BoxedSymbol extends _BoxedExpression {
     //
     if (v?.domain.isFunction) {
       // New function definitions always completely replace an existing one
-      this._def = this.engine.defineFunction(this._name, {
+      this._def = ce.defineFunction(this._name, {
         signature: {
           domain: v.domain,
           evaluate: v, // Evaluate as a lambda
@@ -301,8 +325,8 @@ export class BoxedSymbol extends _BoxedExpression {
     } else {
       // Create a new symbol definition
       let dom = v?.domain;
-      if (dom?.isNumeric) dom = this.engine.domain('Numbers');
-      this._def = this.engine.defineSymbol(this._name, {
+      if (dom?.isNumeric) dom = ce.domain('Numbers');
+      this._def = ce.defineSymbol(this._name, {
         value: v,
         domain: dom ?? 'Anything',
       });
@@ -595,7 +619,7 @@ export class BoxedSymbol extends _BoxedExpression {
     // If we're doing a numeric evaluation, the `hold` does not apply
     const def = this.symbolDefinition;
     if (def && def.holdUntil === 'never') return this;
-    return this.symbolDefinition?.value?.N(options) ?? this;
+    return def?.value?.N(options) ?? this;
   }
 
   replace(

@@ -33,7 +33,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
    * Since the domains are alway canonicalized when boxed, their value can
    * be represented by a simple array, without the need for extra boxing.
    */
-  _value: DomainExpression<BoxedExpression>;
+  _value: DomainLiteral | DomainExpression<BoxedExpression>;
   private _hash: number;
 
   constructor(ce: IComputeEngine, dom: DomainExpression, metadata?: Metadata) {
@@ -77,18 +77,6 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
       | BoxedExpression
       | DomainExpression<BoxedExpression>
     )[];
-  }
-
-  get domainArg1():
-    | string
-    | BoxedExpression
-    | DomainExpression<BoxedExpression>
-    | null {
-    if (typeof this._value === 'string') return null;
-    return this._value[1] as
-      | string
-      | BoxedExpression
-      | DomainExpression<BoxedExpression>;
   }
 
   get codomain(): BoxedDomain | null {
@@ -350,29 +338,6 @@ function makeCanonical(
   throw Error('Unexpected domain constructor ' + ctor);
 }
 
-// function asRangeBound(
-//   ce: IComputeEngine,
-//   expr: string | SemiBoxedExpression | DomainExpression
-// ): number | null {
-//   if (typeof expr === 'number') return expr;
-
-//   const x = ce.box(expr).evaluate();
-//   return x.isInfinity
-//     ? x.isPositive
-//       ? +Infinity
-//       : -Infinity
-//     : asSmallInteger(x);
-// }
-
-// function asIntervalBound(ce: IComputeEngine, expr: Expression): number | null {
-//   const val = ce.box(open(expr) ?? expr).evaluate();
-
-//   return (
-//     val.asSmallInteger ??
-//     (val.isInfinity ? (val.isPositive ? +Infinity : -Infinity) : null)
-//   );
-// }
-
 // function maybeOpen(
 //   ce: IComputeEngine,
 //   expr: string | SemiBoxedExpression | DomainExpression
@@ -499,14 +464,16 @@ function isSubdomainOf(
     if (lhsLiteral === 'Functions') return [true, xlhs];
     if (lhsLiteral) return [false, xlhs];
 
-    // Only a `Function` ctor can be a subdomain of a `Function`
+    // Only a `Functions` ctor can be a subdomain of a `Functions`
     if (lhs[0] !== 'Functions') return [false, xlhs];
 
     // Both constructors are 'Functions':
 
     if (lhs.length === 1 && rhs.length === 1) return [true, xlhs];
 
-    // Check that the values are compatible (covariant)
+    // Check that the result are compatible (**covariant**):
+    // return types may be more speicific than expected (declare return to
+    // be `Numbers`, but return `Integers`)
     if (
       !isSubdomainOf1(
         lhs[lhs.length - 1] as DomainExpression<BoxedExpression>,
@@ -515,7 +482,9 @@ function isSubdomainOf(
     )
       return [false, xlhs];
 
-    // Check that parameters are contravariant
+    // Check that the parameters are compatible (***contravariant**)
+    // input types may be more general than expected (ask for `Numbers`, but
+    // accept `RealNumbers`)
     const lhsParams = lhs.slice(1, -1) as DomainExpression<BoxedExpression>[];
     let rhsParams = rhs.slice(1, -1) as DomainExpression<BoxedExpression>[];
     // let j = 0;

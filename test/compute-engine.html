@@ -231,12 +231,11 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
+          \cos^2(x)
           <!-- \operatorname{double}(\operatorname{double}(5)) -->
           <!-- 5 \rhd \operatorname{double} \rhd \operatorname{inc} -->
 
           <!-- \operatorname{inc} \lhd \operatorname{double} \lhd 5 -->
-
-          x \rhd g \rhd f
 
           <!-- 2\rhd \sin \rhd \sin -->
 
@@ -538,31 +537,6 @@
       ce.strict = true;
       ce.defaultDomain = null;
 
-      ce.assign("x", 5);
-      console.log(ce.box("x").domain);
-
-      ce.assign("x", -3.1);
-      console.log(ce.box("x").domain);
-
-      ce.assign("b", false);
-      console.log(ce.box("b").domain);
-
-      ce.assign("s", "'a string'");
-      console.log(ce.box("s").domain);
-
-      console.log(ce._printScope());
-
-      const expr = ce.box(["Negate", 3]);
-      console.log(expr.json);
-      console.log(expr.rawJson);
-      // ➔ ["Rational", 3, 5]
-
-      ce.jsonSerializationOptions = { exclude: ["Rational"] };
-      console.log(expr.json);
-
-      console.info(ce.parse("\\sin^{-1}'(x)", { canonical: false }).toString());
-      console.info(ce.parse("\\sin^{-1}'(x)", { canonical: true }).toString());
-
       const f1 = ce.box([["g", "f"], "x", 1, 0]);
       console.info(f1.toString());
       console.info(f1.latex);
@@ -579,18 +553,18 @@
         },
       });
 
-      ce.assign("g", ["Function", ["Add", "x", 1], "x"]);
-      ce.assign("h", ["Add", "_", 5]);
-      ce.assign("t(x)", ["Add", "x", 1]);
-      ce.assign("p", (ce, arg) => ce.box((args[0]?.valueOf() ?? 0) + 6));
-      ce.assign("q(x, y)", "$$x^2 + y^2$$");
-      ce.assign("q(x, y)", ce.parse("x^2 + y^2", { canonical: false }));
-      ce.assign("qq", ce.parse("(x, y) \\mapsto x^2 + y^2"));
-      ce.assign("qq2", ce.parse("x, y \\mapsto x^2 + y^2"));
+      // ce.assign("g", ["Function", ["Add", "x", 1], "x"]);
+      // ce.assign("h", ["Add", "_", 5]);
+      // ce.assign("t(x)", ["Add", "x", 1]);
+      // ce.assign("p", (ce, arg) => ce.box((args[0]?.valueOf() ?? 0) + 6));
+      // ce.assign("q(x, y)", "$$x^2 + y^2$$");
+      // ce.assign("q(x, y)", ce.parse("x^2 + y^2", { canonical: false }));
+      // ce.assign("qq", ce.parse("(x, y) \\mapsto x^2 + y^2"));
+      // ce.assign("qq2", ce.parse("x, y \\mapsto x^2 + y^2"));
 
-      ce.assign("double(x)", "$$2x$$");
-      ce.assign("triple(x)", "$$3x$$");
-      ce.assign("inc(x)", "$$x+1$$");
+      // ce.assign("double(x)", "$$2x$$");
+      // ce.assign("triple(x)", "$$3x$$");
+      // ce.assign("inc(x)", "$$x+1$$");
 
       ce.jsonSerializationOptions.metadata = ["latex"];
 

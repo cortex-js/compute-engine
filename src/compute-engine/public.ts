@@ -186,8 +186,7 @@ export type DomainLiteral = string;
 
 export type DomainExpression<T = SemiBoxedExpression> =
   | DomainLiteral
-  | [DomainConstructor, ...(string | T | DomainExpression<T>)[]]
-  | ['InvalidDomain', T]
+  | ['InvalidDomain', string]
   | ['Union', ...DomainExpression<T>[]]
   | ['Intersection', ...DomainExpression<T>[]]
   | ['List', DomainExpression<T>]
@@ -207,7 +206,9 @@ export type DomainExpression<T = SemiBoxedExpression> =
 export interface BoxedDomain extends BoxedExpression {
   is(s: BoxedDomain): boolean;
 
-  /** True if a valid domain, and compatible with `dom` */
+  /** True if a valid domain, and compatible with `dom`
+   * kind is 'covariant' by default, i.e. `this <: dom`
+   */
   isCompatible(
     dom: BoxedDomain | DomainLiteral,
     kind?: DomainCompatibility
@@ -217,11 +218,6 @@ export interface BoxedDomain extends BoxedExpression {
   get ctor(): DomainConstructor | null;
   get domainArgs():
     | (DomainExpression<BoxedExpression> | BoxedExpression | string)[]
-    | null;
-  get domainArg1():
-    | string
-    | BoxedExpression
-    | DomainExpression<BoxedExpression>
     | null;
   get codomain(): BoxedDomain | null;
 
@@ -1104,8 +1100,11 @@ export interface BoxedExpression {
    */
   get value(): BoxedExpression | undefined;
 
-  /** Only the value of variables can be changed (symbols that are not
+  /**
+   * Only the value of variables can be changed (symbols that are not
    * constants).
+   *
+   * Throws a runtime error if a constant.
    *
    * **Note**: If non-canonical, does nothing.
    *
@@ -2000,6 +1999,11 @@ export interface ComputeEngineStats {
 }
 
 export type AssignValue =
+  | boolean
+  | number
+  | string
+  | Decimal
+  | Complex
   | LatexString
   | SemiBoxedExpression
   | ((ce, args) => BoxedExpression)
