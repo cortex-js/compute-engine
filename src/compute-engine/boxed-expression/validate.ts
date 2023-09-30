@@ -87,7 +87,7 @@ export function validateSignature(
   const opsDomain = ops.map((x) => x.domain);
 
   const targetSig = ce.domain([
-    'Functions',
+    'FunctionOf',
     ...opsDomain,
     codomain ?? 'Anything',
   ]);

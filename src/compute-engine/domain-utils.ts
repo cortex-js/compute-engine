@@ -94,13 +94,13 @@ export function inferDomain(expr: SemiBoxedExpression): DomainLiteral {
     if (expr.domain.base) return expr.domain.base;
     if (expr.domain.ctor) {
       switch (expr.domain.ctor) {
-        case 'Functions':
+        case 'FunctionOf':
           return 'Functions';
-        case 'List':
+        case 'ListOf':
           return 'Lists';
-        case 'Dictionary':
+        case 'DictionaryOf':
           return 'Dictionaries';
-        case 'Tuple':
+        case 'TupleOf':
           return 'Tuples';
       }
     }

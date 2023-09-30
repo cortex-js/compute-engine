@@ -21,7 +21,7 @@ engine.assign('f3', (ce, args) => ce.number(args[0]?.valueOf() + 1));
 // With a declared function, the arguments are checked by the Compute Engine
 engine.declare('f4', {
   signature: {
-    domain: ['Functions', 'Numbers', 'Numbers'],
+    domain: ['FunctionOf', 'Numbers', 'Numbers'],
     evaluate: (ce, args) => ce.number((args[0].valueOf() as number) + 1),
   },
 });

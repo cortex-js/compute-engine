@@ -126,8 +126,8 @@ console.log(ce.parse('\\sqrt{15}').simplify().latex);
 // Expect_. `\sqrt15` (don't keep decomposed root expanded)
 
 // Report false. Should be true.
-const sig1 = ce.domain(['Functions', 'PositiveIntegers', 'Numbers']);
-const sig2 = ce.domain(['Functions', 'Numbers', 'Numbers']);
+const sig1 = ce.domain(['FunctionOf', 'PositiveIntegers', 'Numbers']);
+const sig2 = ce.domain(['FunctionOf', 'Numbers', 'Numbers']);
 console.log(sig1.isCompatible(sig2));
 
 // Outputs unexpected command, \\left...

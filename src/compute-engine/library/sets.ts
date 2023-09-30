@@ -100,14 +100,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     // Aka the product set, the set direct product or cross product
     // Notation: \times
     wikidata: 'Q173740',
-    signature: { domain: ['Functions', 'Sets', ['VarArg', 'Sets'], 'Sets'] },
+    signature: { domain: ['FunctionOf', 'Sets', ['VarArg', 'Sets'], 'Sets'] },
     // evaluate: cartesianProduct,
   },
   Complement: {
     // Return the elements of the first argument that are not in any of
     // the subsequent lists
     wikidata: 'Q242767',
-    signature: { domain: ['Functions', 'Sets', 'Sets'] },
+    signature: { domain: ['FunctionOf', 'Sets', 'Sets'] },
   },
   Intersection: {
     // notation: \cap
@@ -117,7 +117,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['Functions', 'Sets', ['VarArg', 'Sets'], 'Sets'],
+      domain: ['FunctionOf', 'Sets', ['VarArg', 'Sets'], 'Sets'],
       evaluate: intersection,
     },
   },
@@ -129,13 +129,13 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['Functions', 'Sets', ['VarArg', 'Sets'], 'Sets'],
+      domain: ['FunctionOf', 'Sets', ['VarArg', 'Sets'], 'Sets'],
       evaluate: union,
     },
   },
   // {
   //   name: 'Set',
-  //   domain: ['Functions', ['VarArg', 'Anything'], 'Sets'],
+  //   domain: ['FunctionOf', ['VarArg', 'Anything'], 'Sets'],
   //   // @todo! set has multiple forms
   //   // Set(Sequence)
   //   // Set(Sequence, Condition)
@@ -144,7 +144,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   SetMinus: {
     wikidata: 'Q18192442',
     signature: {
-      domain: ['Functions', 'Sets', 'Values', 'Sets'],
+      domain: ['FunctionOf', 'Sets', 'Values', 'Sets'],
       evaluate: setMinus,
     },
   },
@@ -153,7 +153,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     /* = Union(Complement(a, b), Complement(b, a) */
     /* Corresponds to XOR in boolean logic */
     wikidata: 'Q1147242',
-    signature: { domain: ['Functions', 'Sets', ['VarArg', 'Sets'], 'Sets'] },
+    signature: { domain: ['FunctionOf', 'Sets', ['VarArg', 'Sets'], 'Sets'] },
   },
 };
 

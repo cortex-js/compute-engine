@@ -88,7 +88,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
 
   get codomain(): BoxedDomain | null {
     if (typeof this._value === 'string') return null;
-    //  The codomain is the last argument of the `['Functions']` expression
+    //  The codomain is the last argument of the `['FunctionOf']` expression
     return this.engine.domain(this._value[this._value.length - 1]);
   }
 
@@ -159,19 +159,19 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   }
 
   get isFunction(): boolean {
-    return this.ctor === 'Functions' || this._value === 'Functions';
+    return this.ctor === 'FunctionOf' || this._value === 'Functions';
   }
 
   // get isPredicate(): boolean {
   //   if (this.domainLiteral === 'Predicate') return true;
-  //   if (this.domainConstructor !== 'Functions') return false;
+  //   if (this.domainConstructor !== 'FunctionOf') return false;
   //   const resultDomain = this._value[this._value.length];
   //   if (!(resultDomain instanceof _Domain)) return false;
   //   return resultDomain.isBoolean;
   // }
   // get isNumericFunction(): boolean {
   //   if (this.domainLiteral === 'NumericFunctions') return true;
-  //   if (this.domainConstructor !== 'Functions') return false;
+  //   if (this.domainConstructor !== 'FunctionOf') return false;
   //   for (const arg of this.domainParams!)
   //     if (!isNumericSubdomain(arg, 'Numbers')) return false;
 
@@ -184,7 +184,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
 
   // get isRealFunction(): boolean {
   //   if (this.domainLiteral === 'RealFunctions') return true;
-  //   if (this.domainConstructor !== 'Functions') return false;
+  //   if (this.domainConstructor !== 'FunctionOf') return false;
   //   for (const arg of this.domainParams!)
   //     if (!isNumericSubdomain(arg, 'ExtendedRealNumbers')) return false;
   //   return true;
@@ -210,7 +210,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
 
   get isRelationalOperator(): boolean {
     if (this._value === 'RelationalOperators') return true;
-    if (this.ctor !== 'Functions') return false;
+    if (this.ctor !== 'FunctionOf') return false;
     if (this.domainArgs!.length !== 2) return false;
     if (!this.codomain!.isCompatible('MaybeBooleans')) return false;
 
@@ -281,25 +281,25 @@ function makeCanonical(
   //
   // Function
   //
-  if (ctor === 'Functions') {
+  if (ctor === 'FunctionOf') {
     // @todo:
     // Multiple `Maybe`, `Sequence` in arguments
     // Multiple Invariant, Covariant, Contravariant in argument
     // Normalize attributes: Open, Maybe, Invariant, Sequence, etc...
     // A rest argument (Sequence) must be the last one
-    return ['Functions', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
+    return ['FunctionOf', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
   }
 
-  if (ctor === 'Dictionary') {
-    return ['Dictionary', makeCanonical(ce, dom[1])];
+  if (ctor === 'DictionaryOf') {
+    return ['DictionaryOf', makeCanonical(ce, dom[1])];
   }
 
-  if (ctor === 'List') {
-    return ['List', makeCanonical(ce, dom[1])];
+  if (ctor === 'ListOf') {
+    return ['ListOf', makeCanonical(ce, dom[1])];
   }
 
-  if (ctor === 'Tuple') {
-    return ['Tuple', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
+  if (ctor === 'TupleOf') {
+    return ['TupleOf', ...dom.slice(1).map((x) => makeCanonical(ce, x))];
   }
 
   if (ctor === 'Union') {
@@ -368,17 +368,17 @@ export function isDomain(
   if (Array.isArray(expr)) {
     if (expr.length <= 1) return false;
     // Could be a domain expression
-    const ctor = expr[0];
+    const ctor = expr[0] as DomainConstructor;
     if (typeof ctor !== 'string' || !DOMAIN_CONSTRUCTORS.includes(ctor))
       return false;
 
     if (ctor === 'InvalidDomain') return false;
 
-    if (ctor === 'List') return expr.length === 2 && isValidDomain(expr[1]);
+    if (ctor === 'ListOf') return expr.length === 2 && isValidDomain(expr[1]);
 
     if (
-      ctor === 'Tuple' ||
-      ctor === 'Functions' ||
+      ctor === 'TupleOf' ||
+      ctor === 'FunctionOf' ||
       ctor === 'OptArg' ||
       ctor === 'VarArg' ||
       ctor === 'Intersection' ||
@@ -437,13 +437,13 @@ function isSubdomainOf(
   //
   if (rhsLiteral) {
     if (!lhs) debugger;
-    const lhsConstructor = lhs[0];
-    if (lhsConstructor === 'Functions')
+    const lhsConstructor = lhs[0] as DomainConstructor;
+    if (lhsConstructor === 'FunctionOf')
       return [rhsLiteral === 'Functions', xlhs];
-    if (lhsConstructor === 'Dictionary')
+    if (lhsConstructor === 'DictionaryOf')
       return [rhsLiteral === 'Dictionary', xlhs];
-    if (lhsConstructor === 'List') return [rhsLiteral === 'List', xlhs];
-    if (lhsConstructor === 'Tuple') return [rhsLiteral === 'Tuple', xlhs];
+    if (lhsConstructor === 'ListOf') return [rhsLiteral === 'List', xlhs];
+    if (lhsConstructor === 'TupleOf') return [rhsLiteral === 'Tuple', xlhs];
 
     if (lhsConstructor === 'Intersection') {
     }
@@ -461,15 +461,15 @@ function isSubdomainOf(
   //
   // 3/ Compare a rhs domain expression with a domain literal or expression
   //
-  const rhsConstructor = rhs[0]!;
+  const rhsConstructor = rhs[0]! as DomainConstructor;
 
-  if (rhsConstructor === 'Functions') {
+  if (rhsConstructor === 'FunctionOf') {
     // See https://www.stephanboyer.com/post/132/what-are-covariance-and-contravariance
     if (lhsLiteral === 'Functions') return [true, xlhs];
     if (lhsLiteral) return [false, xlhs];
 
     // Only a `Functions` ctor can be a subdomain of a `Functions`
-    if (lhs[0] !== 'Functions') return [false, xlhs];
+    if (lhs[0] !== 'FunctionOf') return [false, xlhs];
 
     // Both constructors are 'Functions':
 
@@ -559,8 +559,8 @@ function isSubdomainOf(
     return [true, xlhs];
   }
 
-  if (rhsConstructor === 'Tuple') {
-    if (!Array.isArray(lhs) || lhs[0] !== 'Tuple') return [false, xlhs];
+  if (rhsConstructor === 'TupleOf') {
+    if (!Array.isArray(lhs) || lhs[0] !== 'TupleOf') return [false, xlhs];
     if (lhs.length > rhs.length) return [false, xlhs];
     for (let i = 1; i <= rhs.length - 1; i++) {
       if (
@@ -639,7 +639,7 @@ function domainLiteralAncestor(dom: BoxedDomain): string {
 
   result = dom.ctor!;
 
-  if (result === 'Maybex') return 'Anything';
+  if (result === 'OptArg') return 'Anything';
   if (result === 'Head') return 'Functions';
 
   if (result === 'Union') {

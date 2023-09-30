@@ -3,10 +3,10 @@ import { DomainLiteral, IdentifierDefinitions } from '../public';
 export const DOMAIN_CONSTRUCTORS = [
   'InvalidDomain',
 
-  'Dictionary',
-  'Functions',
-  'List',
-  'Tuple',
+  'DictionaryOf',
+  'FunctionOf',
+  'ListOf',
+  'TupleOf',
 
   'Intersection',
   'Union',
@@ -20,21 +20,21 @@ export const DOMAIN_CONSTRUCTORS = [
 ];
 
 export const DOMAIN_ALIAS = {
-  // Functions: ['Functions', ['VarArg', 'Anything'], 'Anything'],
-  NumericFunctions: ['Functions', ['VarArg', 'Numbers'], 'Numbers'],
+  // Functions: ['FunctionOf', ['VarArg', 'Anything'], 'Anything'],
+  NumericFunctions: ['FunctionOf', ['VarArg', 'Numbers'], 'Numbers'],
   RealFunctions: [
-    'Functions',
+    'FunctionOf',
     ['VarArg', 'ExtendedRealNumbers'],
     'ExtendedRealNumbers',
   ],
   LogicOperators: [
-    'Functions',
+    'FunctionOf',
     'MaybeBooleans',
     ['OptArg', 'MaybeBooleans'],
     'MaybeBooleans',
   ],
-  Predicates: ['Functions', ['VarArg', 'Anything'], 'MaybeBooleans'],
-  RelationalOperators: ['Functions', 'Anything', 'Anything', 'MaybeBooleans'],
+  Predicates: ['FunctionOf', ['VarArg', 'Anything'], 'MaybeBooleans'],
+  RelationalOperators: ['FunctionOf', 'Anything', 'Anything', 'MaybeBooleans'],
   // PositiveInteger: ['Range', 1, +Infinity],
   // NonNegativeInteger: ['Range', 0, +Infinity],
   // NegativeInteger: ['Range', -Infinity, -1],
@@ -264,12 +264,12 @@ export function ancestors(dom: string): string[] {
     if (!Array.isArray(dom)) throw Error(`Unknown domain literal ${dom}`);
     if (!DOMAIN_CONSTRUCTORS.includes(dom[0]))
       throw Error(`Unknown domain constructor ${dom[0]}`);
-    if (dom[0] === 'Functions' || dom[0] === 'Head')
+    if (dom[0] === 'FunctionOf' || dom[0] === 'Head')
       return ancestors('Functions');
     if (dom[0] === 'Symbol') return ancestors('Symbols');
-    if (dom[0] === 'Tuple') return ancestors('Tuples');
-    if (dom[0] === 'List') return ancestors('Lists');
-    if (dom[0] === 'Dictionary') return ancestors('Dictionaries');
+    if (dom[0] === 'TupleOf') return ancestors('Tuples');
+    if (dom[0] === 'ListOf') return ancestors('Lists');
+    if (dom[0] === 'DictionaryOf') return ancestors('Dictionaries');
     if (dom[0] === 'OptArg' || dom[0] === 'VarArg') return ancestors(dom[1]);
 
     if (dom[0] === 'Literal') return ['Anything']; // @todo could do better

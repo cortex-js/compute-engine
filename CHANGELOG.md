@@ -3,8 +3,9 @@
 ### Breaking Changes
 
 - The `Nothing` domain has been renamed to `NothingDomain`
-- The `Maybe` domain constructor has been renamed to `OptArg`
-- The `Sequence` domain constructor has been renamed to `VarArg`
+- The `Functions`, `Maybe`, `Sequence`, `Dictionary`, `List` and `Tuple` domain
+  constructors have been renamed to `FunctionOf`, `OptArg`, `VarArg`,
+  `DictionaryOf`, `ListOf` and `TupleOf`, respectively.
 
 ### Bugs Fixed
 

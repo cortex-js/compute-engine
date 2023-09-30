@@ -10,7 +10,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       complexity: 1200,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
           const op = ops[0].numericValue;
           if (op === null) return undefined;
@@ -23,7 +23,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       complexity: 1200,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
           const op = ops[0].numericValue;
           if (op === null) return undefined;
@@ -36,7 +36,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       complexity: 1200,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
           const op = ops[0].numericValue;
           if (op === null) return undefined;
@@ -52,7 +52,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       complexity: 1200,
       signature: {
-        domain: ['Functions', 'Numbers', 'Tuples'],
+        domain: ['FunctionOf', 'Numbers', 'Tuples'],
         evaluate: (ce, ops) => {
           const op = ops[0].numericValue;
           if (op === null) return undefined;
@@ -72,7 +72,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       complexity: 1200,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
           const op = ops[0].numericValue;
           if (op === null || !ce.isComplex(op)) return undefined;
@@ -85,7 +85,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       complexity: 1200,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers', 'Lists'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers', 'Lists'],
         evaluate: (ce, ops) => {
           const x = asFloat(ops[0]);
           const n = asFloat(ops[1]);

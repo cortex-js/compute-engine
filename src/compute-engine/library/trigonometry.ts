@@ -26,15 +26,15 @@ import {
 //
 
 const domainNumberToRealNumber = (_head: string): DomainExpression => {
-  return ['Functions', 'Numbers', 'ExtendedRealNumbers'];
+  return ['FunctionOf', 'Numbers', 'ExtendedRealNumbers'];
 };
 
 const trigFunction = (_head: string): DomainExpression => {
-  return ['Functions', 'Numbers', 'Numbers'];
+  return ['FunctionOf', 'Numbers', 'Numbers'];
 };
 
 const hyperbolicFunction = (_head: string): DomainExpression => {
-  return ['Functions', 'Numbers', 'Numbers'];
+  return ['FunctionOf', 'Numbers', 'Numbers'];
 };
 
 export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
@@ -57,7 +57,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Degrees: {
       /* = Pi / 180 */
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, ops) => {
           ops = validateArguments(ce, flattenSequence(canonical(ops)), [
             'Numbers',
@@ -75,7 +75,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Hypot: {
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers', 'NonNegativeNumbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers', 'NonNegativeNumbers'],
         simplify: (ce, ops) =>
           ce
             .box(['Sqrt', ['Add', ['Square', ops[0]], ['Square', ops[1]]]])
@@ -89,7 +89,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Sin: {
       complexity: 5000,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Sin', ops[0])?.simplify() ??
           (complexAllowed(ce)
@@ -131,7 +131,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q776598',
       complexity: 5200,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         N: (_ce, ops) =>
           apply2N(ops[0], ops[1], Math.atan2, (a, b) => Decimal.atan2(a, b)),
       },
@@ -139,7 +139,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Cos: {
       complexity: 5050,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Cos', ops[0])?.simplify() ??
           ce
@@ -288,7 +288,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Haversine: {
       wikidata: 'Q2528380',
       signature: {
-        domain: ['Functions', 'ExtendedRealNumbers', 'Numbers'],
+        domain: ['FunctionOf', 'ExtendedRealNumbers', 'Numbers'],
         evaluate: ['Divide', ['Subtract', 1, ['Cos', '_1']], 2],
       },
     },
@@ -296,7 +296,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     InverseHaversine: {
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
       signature: {
-        domain: ['Functions', 'ExtendedRealNumbers', 'RealNumbers'],
+        domain: ['FunctionOf', 'ExtendedRealNumbers', 'RealNumbers'],
         evaluate: ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]],
       },
     },
@@ -346,7 +346,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Sech: {
       complexity: 6200,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>
           constructibleValues(ce, 'Sech', ops[0])?.simplify() ??
           ce.box(['Divide', 1, ['Cosh', ops[0]]]).simplify(),
@@ -452,7 +452,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     // },
     InverseFunction: {
       signature: {
-        domain: ['Functions', 'Functions', 'Functions'],
+        domain: ['FunctionOf', 'Functions', 'Functions'],
         canonical: (ce, ops) => {
           ops = validateArgumentCount(ce, flattenSequence(canonical(ops)), 1);
           return (

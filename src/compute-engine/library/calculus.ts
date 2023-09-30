@@ -75,7 +75,7 @@ volumes
       hold: 'all',
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Symbols',
           ['OptArg', 'Numbers'], // The order of the derivative
           'Functions',
@@ -124,7 +124,7 @@ volumes
 
     D: {
       signature: {
-        domain: ['Functions', 'Functions', ['VarArg', 'Symbols'], 'Functions'],
+        domain: ['FunctionOf', 'Functions', ['VarArg', 'Symbols'], 'Functions'],
         evaluate: (ce, ops) => {
           let f = ops[0];
           // Iterate aver all variables
@@ -147,7 +147,7 @@ volumes
     ND: {
       hold: 'first',
       signature: {
-        domain: ['Functions', 'Functions', 'Numbers', 'Functions'],
+        domain: ['FunctionOf', 'Functions', 'Numbers', 'Functions'],
         N: (ce, ops) => {
           const x = ops[1]?.valueOf();
           if (typeof x !== 'number') return undefined;
@@ -163,7 +163,7 @@ volumes
       hold: 'all',
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Functions',
           ['OptArg', ['Union', 'Tuples', 'Symbols']],
           // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
@@ -223,7 +223,7 @@ volumes
     NIntegrate: {
       hold: 'first',
       signature: {
-        domain: ['Functions', 'Functions', 'Numbers', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Functions', 'Numbers', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
           const f = applicableN1(ops[0]);
           const [a, b] = ops.slice(1).map((op) => op.valueOf());

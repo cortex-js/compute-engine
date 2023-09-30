@@ -166,10 +166,10 @@ export type DomainCompatibility =
 /** A domain constructor is the head of a domain expression. */
 export type DomainConstructor =
   | 'InvalidDomain'
-  | 'Functions' // <domain-of-args>* <co-domain>
-  | 'List' // <domain-of-elements>
-  | 'Dictionary'
-  | 'Tuple'
+  | 'FunctionOf' // <domain-of-args>* <co-domain>
+  | 'ListOf' // <domain-of-elements>
+  | 'DictionaryOf'
+  | 'TupleOf'
   | 'Intersection'
   | 'Union'
   | 'OptArg'
@@ -189,9 +189,9 @@ export type DomainExpression<T = SemiBoxedExpression> =
   | ['InvalidDomain', string]
   | ['Union', ...DomainExpression<T>[]]
   | ['Intersection', ...DomainExpression<T>[]]
-  | ['List', DomainExpression<T>]
-  | ['Dictionary', DomainExpression<T>]
-  | ['Tuple', ...DomainExpression<T>[]]
+  | ['ListOf', DomainExpression<T>]
+  | ['DictionaryOf', DomainExpression<T>]
+  | ['TupleOf', ...DomainExpression<T>[]]
   | ['OptArg', DomainExpression<T>]
   | ['VarArg', DomainExpression<T>]
   | ['Value', T]
@@ -201,7 +201,7 @@ export type DomainExpression<T = SemiBoxedExpression> =
   | ['Contravariant', DomainExpression<T>]
   | ['Bivariant', DomainExpression<T>]
   | ['Invariant', DomainExpression<T>]
-  | ['Functions', ...DomainExpression<T>[]];
+  | ['FunctionOf', ...DomainExpression<T>[]];
 
 export interface BoxedDomain extends BoxedExpression {
   is(s: BoxedDomain): boolean;

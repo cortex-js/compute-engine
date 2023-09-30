@@ -31,7 +31,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'first',
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Anything',
           ['OptArg', 'Strings'],
           ['OptArg', 'Strings'],
@@ -52,7 +52,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       complexity: 500,
       signature: {
-        domain: ['Functions', 'Anything', ['OptArg', 'Anything'], 'Void'],
+        domain: ['FunctionOf', 'Anything', ['OptArg', 'Anything'], 'Void'],
         // To make a canonical expression, don't canonicalize the args
         canonical: (ce, args) => ce._fn('Error', args),
       },
@@ -62,7 +62,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Strings',
           ['OptArg', ['VarArg', 'Anything']],
           'Anything',
@@ -108,7 +108,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       inert: true,
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Anything',
           ['OptArg', 'Dictionaries'], // @todo
           'Anything',
@@ -129,7 +129,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Assume: {
       hold: 'all',
       signature: {
-        domain: ['Functions', 'Anything', 'Anything'],
+        domain: ['FunctionOf', 'Anything', 'Anything'],
         evaluate: (ce, ops) => ce.string(ce.assume(ops[0])),
       },
     },
@@ -140,7 +140,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Domain: {
       /** Return the domain of an expression */
       signature: {
-        domain: ['Functions', 'Anything', 'Domains'],
+        domain: ['FunctionOf', 'Anything', 'Domains'],
         canonical: (ce, ops) =>
           ce.domain(validateArgumentCount(ce, canonical(ops), 1)[0]),
         evaluate: (_ce, ops) => ops[0].domain,
@@ -150,7 +150,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Evaluate: {
       hold: 'all',
       signature: {
-        domain: ['Functions', 'Anything', 'Anything'],
+        domain: ['FunctionOf', 'Anything', 'Anything'],
         codomain: (_ce, ops) => ops[0].domain,
         canonical: (ce, ops) =>
           ce._fn('Evaluate', validateArgumentCount(ce, canonical(ops), 1)),
@@ -163,7 +163,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Anything',
           ['OptArg', ['VarArg', 'Symbols']],
           'Functions',
@@ -194,7 +194,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Simplify: {
       hold: 'all',
       signature: {
-        domain: ['Functions', 'Anything', 'Anything'],
+        domain: ['FunctionOf', 'Anything', 'Anything'],
         codomain: (_ce, ops) => ops[0].domain,
         canonical: (ce, ops) =>
           ce._fn('Simplify', validateArgumentCount(ce, canonical(ops), 1)),
@@ -205,7 +205,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     N: {
       hold: 'all',
       signature: {
-        domain: ['Functions', 'Anything', 'Anything'],
+        domain: ['FunctionOf', 'Anything', 'Anything'],
         codomain: (_ce, ops) => ops[0].domain,
         canonical: (ce, ops) =>
           ce._fn('N', validateArgumentCount(ce, canonical(ops), 1)),
@@ -226,7 +226,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Identity: {
       signature: {
-        domain: ['Functions', 'Anything', 'Anything'],
+        domain: ['FunctionOf', 'Anything', 'Anything'],
         codomain: (_ce, ops) => ops[0].domain,
         evaluate: (_ce, ops) => ops[0],
       },
@@ -235,7 +235,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     // @todo: need review
     Signatures: {
       signature: {
-        domain: ['Functions', 'Symbols', ['OptArg', ['List', 'Domains']]],
+        domain: ['FunctionOf', 'Symbols', ['OptArg', ['ListOf', 'Domains']]],
         canonical: (ce, ops) => {
           ops = validateArgumentCount(ce, ops, 1);
           if (!ops[0].symbol)
@@ -281,7 +281,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'last',
 
       signature: {
-        domain: ['Functions', 'Anything', 'Anything', 'Anything'],
+        domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
         codomain: (_ce, args) => {
           if (args[0].isFunction) return args[0].domain;
           return args[0].domain;
@@ -336,7 +336,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       hold: 'all',
       signature: {
-        domain: ['Functions', ['VarArg', 'Anything'], 'Anything'],
+        domain: ['FunctionOf', ['VarArg', 'Anything'], 'Anything'],
         canonical: (ce, ops) => {
           if (ops.length === 0) return ce.symbol('Nothing');
           const arg = ops
@@ -359,10 +359,10 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         '`Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation',
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Values',
           ['OptArg', 'Integers'],
-          ['Tuple', 'Values', 'Numbers'],
+          ['TupleOf', 'Values', 'Numbers'],
         ],
         evaluate: (ce, ops) => {
           if (ops[1].symbol === 'Nothing') {
@@ -407,13 +407,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     // is a LaTeX string
     LatexString: {
       inert: true,
-      signature: { domain: ['Functions', 'Strings', 'Strings'] },
+      signature: { domain: ['FunctionOf', 'Strings', 'Strings'] },
     },
 
     // Serialize one or more expressions to LaTeX
     Latex: {
       signature: {
-        domain: ['Functions', ['OptArg', ['VarArg', 'Anything']], 'Strings'],
+        domain: ['FunctionOf', ['OptArg', ['VarArg', 'Anything']], 'Strings'],
         evaluate: (ce, ops) =>
           ce.fn('LatexString', [ce.string(joinLatex(ops.map((x) => x.latex)))]),
       },
@@ -423,7 +423,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       description:
         'Parse a LaTeX string and evaluate to a corresponding expression',
       signature: {
-        domain: ['Functions', 'Anything', 'Anything'],
+        domain: ['FunctionOf', 'Anything', 'Anything'],
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.box(['Sequence']);
           const op1 = ops[0];

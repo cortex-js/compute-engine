@@ -149,7 +149,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       idempotent: true,
       complexity: 1200,
       signature: {
-        domain: ['Functions', 'Numbers', 'NonNegativeNumbers'],
+        domain: ['FunctionOf', 'Numbers', 'NonNegativeNumbers'],
         simplify: (ce, ops) => processAbs(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processAbs(ce, ops[0], 'evaluate'),
         N: (ce, ops) => processAbs(ce, ops[0], 'N'),
@@ -182,7 +182,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Rounds a number up to the next largest integer',
       complexity: 1250,
       signature: {
-        domain: ['Functions', 'Numbers', 'Integers'],
+        domain: ['FunctionOf', 'Numbers', 'Integers'],
         evaluate: (_ce, ops) =>
           applyN(
             ops[0],
@@ -200,7 +200,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) =>
           applyN(
             ops[0],
@@ -224,7 +224,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
           args = validateArguments(ce, canonical(flattenSequence(args)), [
             'Numbers',
@@ -254,7 +254,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // Exp(x) -> e^x
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
           args = validateArguments(ce, canonical(flattenSequence(args)), [
             'Numbers',
@@ -271,7 +271,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 9000,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
           const n = asSmallInteger(ops[0]);
           if (n !== null && n >= 0) {
@@ -295,7 +295,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 9000,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
           // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
@@ -314,7 +314,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1250,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'ExtendedRealNumbers'],
+        domain: ['FunctionOf', 'Numbers', 'ExtendedRealNumbers'],
         evaluate: (ce, ops) =>
           applyN(
             ops[0],
@@ -330,7 +330,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 8000,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -345,7 +345,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 8000,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -362,7 +362,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 4000,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -379,7 +379,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 4100,
 
       signature: {
-        domain: ['Functions', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
         canonical: (ce, ops) => {
           ops = canonical(flattenSequence(ops));
           if (ops.length === 1)
@@ -421,7 +421,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 4100,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
 
         N: (ce, ops) =>
           applyN(
@@ -442,7 +442,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 4100,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -483,7 +483,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 2000,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         codomain: (ce, args) => {
           const arg = args[0].domain;
           if (!arg.base) return arg;
@@ -527,7 +527,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       commutative: false,
       complexity: 3500,
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
           args = validateArguments(ce, canonical(flattenSequence(args)), [
             'Numbers',
@@ -565,7 +565,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Numbers',
           ['OptArg', 'Numbers'],
           'RationalNumbers',
@@ -624,7 +624,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 3200,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
           args = canonical(flattenSequence(args));
 
@@ -646,7 +646,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1250,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) =>
           applyN(
             ops[0],
@@ -661,7 +661,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Integers'],
+        domain: ['FunctionOf', 'Numbers', 'Integers'],
         simplify: (ce, ops) => {
           const s = ops[0].sgn;
           if (s === 0) return ce._ZERO;
@@ -707,7 +707,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     //   description: 'The sign of the gamma function: -1 or +1',
     //   complexity: 7900,
     //   signature: {
-    //     domain: ['Functions', 'Numbers', ['Range', -1, 1]],
+    //     domain: ['FunctionOf', 'Numbers', ['Range', -1, 1]],
     //     evaluate: (ce, ops) => {
     //     },
     //   },
@@ -720,7 +720,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 3000,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
           args = canonical(flattenSequence(args));
           if (args.length !== 1) return ce._fn('Sqrt', args);
@@ -739,7 +739,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 3100,
 
       signature: {
-        domain: ['Functions', 'Numbers', 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
           args = canonical(flattenSequence(args));
           if (args.length !== 1) return ce._fn('Square', args);
@@ -753,7 +753,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1350,
 
       signature: {
-        domain: ['Functions', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
+        domain: ['FunctionOf', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
         canonical: (ce, args) => {
           // Not necessarily legal, but probably what was intended:
           // ['Subtract', 'x'] -> ['Negate', 'x']
@@ -889,10 +889,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
   },
   {
     PreIncrement: {
-      signature: { domain: ['Functions', 'Numbers', 'Numbers'] },
+      signature: { domain: ['FunctionOf', 'Numbers', 'Numbers'] },
     },
     PreDecrement: {
-      signature: { domain: ['Functions', 'Numbers', 'Numbers'] },
+      signature: { domain: ['FunctionOf', 'Numbers', 'Numbers'] },
     },
   },
 
@@ -904,7 +904,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Maximum of two or more numbers',
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;
           if (ops.length === 1) return ops[0];
@@ -932,7 +932,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
 
       signature: {
-        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;
           if (ops.length === 1) return ops[0];
@@ -961,7 +961,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       hold: 'first',
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Anything',
           // [
           //   'OptArg',
@@ -987,7 +987,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: [
-          'Functions',
+          'FunctionOf',
           'Anything',
           // [
           //   'OptArg',
@@ -1013,7 +1013,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 9000,
       inert: true,
       signature: {
-        domain: ['Functions', 'Values', ['OptArg', 'Integers'], 'Values'],
+        domain: ['FunctionOf', 'Values', ['OptArg', 'Integers'], 'Values'],
         codomain: (_ce, args) => args[0].domain,
       },
     },
@@ -1024,7 +1024,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
       signature: {
-        domain: ['Functions', 'Strings', ['OptArg', 'Integers'], 'Integers'],
+        domain: ['FunctionOf', 'Strings', ['OptArg', 'Integers'], 'Integers'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
           if (!op1.string)
@@ -1061,7 +1061,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
       signature: {
-        domain: ['Functions', 'Integers', ['OptArg', 'Integers'], 'Strings'],
+        domain: ['FunctionOf', 'Integers', ['OptArg', 'Integers'], 'Strings'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
           const val = asFloat(op1) ?? NaN;

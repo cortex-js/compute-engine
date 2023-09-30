@@ -8,13 +8,13 @@ engine.defaultDomain = null;
 describe('Domain of function identifiers', () =>
   test('Domain of \\sin', () =>
     expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["Functions", "Numbers", "Numbers"]]`
+      `["Domain", ["FunctionOf", "Numbers", "Numbers"]]`
     )));
 
 describe('Domain of function identifiers', () =>
   test('Domain of Sin', () =>
     expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["Functions", "Numbers", "Numbers"]]`
+      `["Domain", ["FunctionOf", "Numbers", "Numbers"]]`
     )));
 
 describe('INFERRED DOMAINS', () => {
@@ -44,12 +44,12 @@ describe('INFERRED DOMAINS', () => {
   // The symbol `Sin` references the sine function
   test('Symbol \\sin', () =>
     expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["Functions", "Numbers", "Numbers"]]`
+      `["Domain", ["FunctionOf", "Numbers", "Numbers"]]`
     ));
 
   test('Symbol Sin', () =>
     expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["Functions", "Numbers", "Numbers"]]`
+      `["Domain", ["FunctionOf", "Numbers", "Numbers"]]`
     ));
 
   test('\\sin(3)', () => {
@@ -193,66 +193,66 @@ describe('INVALID DOMAINS', () => {
     ).toThrow();
   });
 
-  test('Missing parameters (Maybe)', () => {
+  test('Missing parameters (OptArg)', () => {
     expect(() =>
-      engine.domain(['Maybe'] as unknown as DomainExpression)
+      engine.domain(['OptArg'] as unknown as DomainExpression)
     ).toThrow();
   });
 
   test('NotADomainLiteral in parametric expression', () =>
-    expect(() => engine.domain(['Functions', 'NotADomainLiteral'])).toThrow());
+    expect(() => engine.domain(['FunctionOf', 'NotADomainLiteral'])).toThrow());
 });
 
 // describe('SYMBOLS, FUNCTION HEADS', () => {});
 
 describe.skip('FUNCTION SIGNATURES', () => {
-  test("['Functions', 'PositiveIntegers', 'Anything'] <: ['Functions', 'Numbers', 'Numbers']", () => {
+  test("['FunctionOf', 'PositiveIntegers', 'Anything'] <: ['FunctionOf', 'Numbers', 'Numbers']", () => {
     expect(
       engine
-        .domain(['Functions', 'PositiveIntegers', 'Anything'])
-        .isCompatible(engine.domain(['Functions', 'Numbers', 'Numbers']))
+        .domain(['FunctionOf', 'PositiveIntegers', 'Anything'])
+        .isCompatible(engine.domain(['FunctionOf', 'Numbers', 'Numbers']))
     ).toBeTruthy();
   });
 
-  test("['Functions', 'PositiveIntegers', 'Anything'] <: ['Functions', 'Numbers', ['Maybe', 'Strings'],'Numbers']", () => {
+  test("['FunctionOf', 'PositiveIntegers', 'Anything'] <: ['FunctionOf', 'Numbers', ['OptArg', 'Strings'],'Numbers']", () => {
     expect(
       engine
-        .domain(['Functions', 'PositiveIntegers', 'Anything'])
+        .domain(['FunctionOf', 'PositiveIntegers', 'Anything'])
         .isCompatible(
           engine.domain([
-            'Functions',
+            'FunctionOf',
             'Numbers',
-            ['Maybe', 'Strings'],
+            ['OptArg', 'Strings'],
             'Numbers',
           ])
         )
     ).toBeTruthy();
   });
 
-  test("['Functions', 'PositiveIntegers',  'Strings', 'Anything'] <: ['Functions', 'Numbers', ['Maybe', 'Strings'], 'Numbers']", () => {
+  test("['FunctionOf', 'PositiveIntegers',  'Strings', 'Anything'] <: ['FunctionOf', 'Numbers', ['OptArg', 'Strings'], 'Numbers']", () => {
     expect(
       engine
-        .domain(['Functions', 'PositiveIntegers', 'Strings', 'Anything'])
+        .domain(['FunctionOf', 'PositiveIntegers', 'Strings', 'Anything'])
         .isCompatible(
           engine.domain([
-            'Functions',
+            'FunctionOf',
             'Numbers',
-            ['Maybe', 'Strings'],
+            ['OptArg', 'Strings'],
             'Numbers',
           ])
         )
     ).toBeTruthy();
   });
 
-  test("['Functions', 'PositiveIntegers',  'Booleans', 'Anything'] <: ['Functions', 'Numbers', ['Maybe', 'Strings'], 'Numbers']", () => {
+  test("['FunctionOf', 'PositiveIntegers',  'Booleans', 'Anything'] <: ['FunctionOf', 'Numbers', ['OptArg', 'Strings'], 'Numbers']", () => {
     expect(
       engine
-        .domain(['Functions', 'PositiveIntegers', 'Booleans', 'Anything'])
+        .domain(['FunctionOf', 'PositiveIntegers', 'Booleans', 'Anything'])
         .isCompatible(
           engine.domain([
-            'Functions',
+            'FunctionOf',
             'Numbers',
-            ['Maybe', 'Strings'],
+            ['OptArg', 'Strings'],
             'Numbers',
           ])
         )

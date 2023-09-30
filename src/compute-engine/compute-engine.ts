@@ -1054,6 +1054,7 @@ export class ComputeEngine implements IComputeEngine {
         // referencing it, but update it.
         if (isSymbolDefinition(arg2)) def.update(arg2);
         else {
+          // @todo: could check that the new domain is compatible
           def.domain = this.domain(arg2 as DomainExpression);
           def.inferredDomain = false;
         }
