@@ -68,7 +68,7 @@ to be an **unknown**.
 A symbol whose value cannot be changed is a **constant**. Constants are
 identified by a special flag in their definition.
 
-The property `expr.isConstant` is `true` if a symbol is a constant.
+**To check if a symbol is a constant**, use the `expr.isConstant` property.
 
 ```js
 console.log(ce.box("x").isConstant);
@@ -116,6 +116,7 @@ specify the domain of a symbol.
 const symbol = ce.box("m"); // m for mystery
 console.log(symbol.domain.symbol);
 // ➔ "ExtendedRealNumbers"
+
 symbol.value = 5;
 console.log(symbol.numericValue);
 // ➔ 5
@@ -129,9 +130,9 @@ symbol and the symbol will evaluate to an `["Error"]` expression.
 
 **To _reset_ what is known about a symbol** use the `ce.forget()` function.
 
-The `ce.forget()` function will remove the definition associated with a symbol,
-including its domain and value, and any
-[assumptions](/compute-engine/guides/assumptions) about the symbol.
+The `ce.forget()` function will remove any [assumptions](/compute-engine/guides/assumptions)
+associated with a symbol, and remove its value. Howeve, the symbol
+will remained declared, since other expressions may depend on it.
 
 **To forget about a specific symbol**, pass the name of the symbol as an
 argument to `ce.forget()`.
@@ -139,6 +140,6 @@ argument to `ce.forget()`.
 **To forget about all the symbols in the current scope**, use `ce.forget()`
 without any arguments.
 
-Note that only symbols in the current scope are forgotten. If a definition for
-the symbol existed in a previous scope, that definition will now be in
-effect.{.notice--info}
+Note that only symbols in the current scope are forgotten. If assumptions about
+the symbol existed in a previous scope, those assumptions will be in effect
+when returning to the previous scope.{.notice--info}
