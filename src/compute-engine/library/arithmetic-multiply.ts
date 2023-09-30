@@ -277,51 +277,46 @@ export function evalMultiplication(
     return undefined;
 
   let result: BoxedExpression | undefined | null = null;
-  const savedContext = ce.context;
-  ce.context = fn.scope ?? ce.context;
+  const savedContext = ce.swapScope(fn.scope);
+  ce.pushScope();
+  fn.rebind();
 
   if (mode === 'simplify') {
     const terms: BoxedExpression[] = [];
-    if (!fn.scope)
-      for (let i = lower; i <= upper; i++) terms.push(fn.simplify());
-    else
-      for (let i = lower; i <= upper; i++) {
-        ce.assign({ [index]: i });
-        terms.push(fn.simplify());
-      }
+    for (let i = lower; i <= upper; i++) {
+      ce.assign({ [index]: i });
+      terms.push(fn.simplify());
+    }
     result = ce.mul(terms).simplify();
   }
 
   if (mode === 'evaluate') {
     const terms: BoxedExpression[] = [];
-    if (!fn.scope)
-      for (let i = lower; i <= upper; i++) terms.push(fn.evaluate());
-    else
-      for (let i = lower; i <= upper; i++) {
-        ce.assign({ [index]: i });
-        terms.push(fn.evaluate());
-      }
+    for (let i = lower; i <= upper; i++) {
+      ce.assign({ [index]: i });
+      terms.push(fn.evaluate());
+    }
     result = ce.mul(terms).evaluate();
   }
 
   if (mode === 'N') {
-    if (result === null && !fn.scope) {
-      //
-      // The term is not a function of the index
-      //
+    // if (result === null && !fn.scope) {
+    //   //
+    //   // The term is not a function of the index
+    //   //
 
-      const n = fn.N();
-      if (!isFinite) {
-        if (n.isZero) result = ce._ZERO;
-        else if (n.isPositive) result = ce._POSITIVE_INFINITY;
-        else result = ce._NEGATIVE_INFINITY;
-      }
-      if (result === null && fn.isPure)
-        result = ce.pow(n, ce.number(upper - lower + 1));
+    //   const n = fn.N();
+    //   if (!isFinite) {
+    //     if (n.isZero) result = ce._ZERO;
+    //     else if (n.isPositive) result = ce._POSITIVE_INFINITY;
+    //     else result = ce._NEGATIVE_INFINITY;
+    //   }
+    //   if (result === null && fn.isPure)
+    //     result = ce.pow(n, ce.number(upper - lower + 1));
 
-      // If the term is not a function of the index, but it is not pure,
-      // fall through to the general case
-    }
+    //   // If the term is not a function of the index, but it is not pure,
+    //   // fall through to the general case
+    // }
 
     //
     // Finite series. Evaluate each term and multiply them
@@ -397,7 +392,9 @@ export function evalMultiplication(
       }
     }
   }
-  ce.context = savedContext;
+
+  ce.popScope();
+  ce.swapScope(savedContext);
 
   return result ?? undefined;
 }
