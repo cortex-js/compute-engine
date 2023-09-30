@@ -21,7 +21,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
       hold: 'rest', // Evaluate the condition, but no the true/false branches
       signature: {
         domain: 'Functions',
-        codomain: (ce, ops) => ce.domain(['Union', ops[0], ops[1]]),
+        codomain: (_ce, ops) => widen(ops[0], ops[1]),
         evaluate: (ce, ops) => {
           const cond = ops[0];
           if (cond && cond.symbol === 'True')
@@ -101,7 +101,7 @@ function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
     if (!dom) dom = args[i].domain;
     else dom = widen(dom, args[i].domain);
   }
-  return dom ?? ce.domain('Nothing');
+  return dom ?? ce.domain('NothingDomain');
 }
 
 function whichEvaluate(

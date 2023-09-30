@@ -189,12 +189,7 @@ canonical = [
   "Ln",
   [
     "Error",
-    [
-      "ErrorCode",
-      "'incompatible-domain'",
-      ["Domain", "Numbers"],
-      ["Domain", "Strings"]
-    ],
+    ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
     "'string'"
   ]
 ]
@@ -790,8 +785,8 @@ canonical = [
     [
       "ErrorCode",
       "'incompatible-domain'",
-      ["Domain", "Integers"],
-      ["Domain", "PositiveNumbers"]
+      "Integers",
+      "PositiveNumbers"
     ],
     2.5
   ],
@@ -800,8 +795,8 @@ canonical = [
     [
       "ErrorCode",
       "'incompatible-domain'",
-      ["Domain", "Integers"],
-      ["Domain", "NegativeNumbers"]
+      "Integers",
+      "NegativeNumbers"
     ],
     -1.1
   ],

@@ -668,7 +668,7 @@ export class ComputeEngine implements IComputeEngine {
     else {
       const defaultDomain = this.domain(domain);
       if (!defaultDomain.isValid) throw Error(`Invalid domain ${domain}`);
-      this._defaultDomain = defaultDomain as BoxedDomain;
+      this._defaultDomain = defaultDomain;
     }
   }
 
@@ -1691,19 +1691,17 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   domain(
-    domain: BoxedExpression | DomainExpression | BoxedDomain,
+    domain: BoxedDomain | DomainExpression,
     metadata?: Metadata
   ): BoxedDomain {
     if (domain instanceof _BoxedDomain) return domain;
-    if (domain instanceof _BoxedExpression && domain.symbol)
-      domain = domain.symbol as DomainLiteral;
 
     if (typeof domain === 'string') {
       const expr = this._commonDomains[domain];
       if (expr) return expr;
     }
 
-    return boxDomain(this, domain, metadata);
+    return boxDomain(this, domain as DomainExpression, metadata);
   }
 
   /*

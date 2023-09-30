@@ -168,12 +168,7 @@ describe('STEFNOTCH #13', () => {
         "Equivalent",
         [
           "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["Domain", "MaybeBooleans"],
-            ["Domain", "Numbers"]
-          ],
+          ["ErrorCode", "'incompatible-domain'", "MaybeBooleans", "Numbers"],
           ["Divide", 2, ["Sqrt", "n"]]
         ],
         ["Less", ["Divide", 5, ["Square", "n"]], "n"]

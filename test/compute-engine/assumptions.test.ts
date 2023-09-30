@@ -24,7 +24,7 @@ describe('TAUTOLOGY one = 1', () => {
   });
   test(`one.domain`, () => {
     expect(ce.box('one').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "PositiveIntegers"]`
+      `PositiveIntegers`
     );
   });
   test(`'one' compared to 0`, () => {
@@ -96,22 +96,22 @@ describe.skip('is() values', () => {
 describe('canonical domains', () => {
   test(`Range domains`, () => {
     expect(ce.box('m').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "ExtendedRealNumbers"]`
+      `ExtendedRealNumbers`
     );
     expect(ce.box('n').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "ExtendedRealNumbers"]`
+      `ExtendedRealNumbers`
     );
     expect(ce.box('q').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "ExtendedRealNumbers"]`
+      `ExtendedRealNumbers`
     );
   });
 
   test(`Interval domains`, () => {
     expect(ce.box('t').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "PositiveNumbers"]`
+      `PositiveNumbers`
     ); //@fixme should be NonNegativeNumber
     expect(ce.box('s').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "ExtendedRealNumbers"]`
+      `ExtendedRealNumbers`
     ); // @fixme: should be Interval[5, +Infinity]
   });
 });

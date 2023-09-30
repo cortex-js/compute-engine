@@ -51,7 +51,7 @@ export class BoxedPattern extends _BoxedExpression implements Pattern {
   }
 
   get domain(): BoxedDomain {
-    return this.engine.domain('Patterns');
+    return this.engine.domain('Values');
   }
 
   get isCanonical(): boolean {

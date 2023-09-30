@@ -6,6 +6,9 @@
 - The `Functions`, `Maybe`, `Sequence`, `Dictionary`, `List` and `Tuple` domain
   constructors have been renamed to `FunctionOf`, `OptArg`, `VarArg`,
   `DictionaryOf`, `ListOf` and `TupleOf`, respectively.
+- Domains no longer require a `["Domain"]` expression wrapper, so for example
+  `ce.box("Pi").domain` returns `"TranscendentalNumbers"` instead of
+  `["Domain", "TranscendentalNumbers"]`.
 
 ### Bugs Fixed
 

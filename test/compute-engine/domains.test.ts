@@ -8,88 +8,86 @@ engine.defaultDomain = null;
 describe('Domain of function identifiers', () =>
   test('Domain of \\sin', () =>
     expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["FunctionOf", "Numbers", "Numbers"]]`
+      `["FunctionOf", "Numbers", "Numbers"]`
     )));
 
 describe('Domain of function identifiers', () =>
   test('Domain of Sin', () =>
     expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["FunctionOf", "Numbers", "Numbers"]]`
+      `["FunctionOf", "Numbers", "Numbers"]`
     )));
 
 describe('INFERRED DOMAINS', () => {
   test('42', () =>
     expect(engine.box(42).domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "PositiveIntegers"]`
+      `PositiveIntegers`
     ));
   test('Pi', () =>
     expect(engine.box('Pi').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "TranscendentalNumbers"]`
+      `TranscendentalNumbers`
     ));
   test('-3.1415', () =>
     expect(engine.box(-3.1415).domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "NegativeNumbers"]`
+      `NegativeNumbers`
     ));
 
   test('sym', () =>
     expect(engine.box('sym').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Anything"]`
+      `Anything`
     ));
 
   test('True', () =>
-    expect(engine.box('True').domain.json).toMatchInlineSnapshot(
-      `["Domain", "Booleans"]`
-    ));
+    expect(engine.box('True').domain.json).toMatchInlineSnapshot(`Booleans`));
 
   // The symbol `Sin` references the sine function
   test('Symbol \\sin', () =>
     expect(engine.parse('\\sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["FunctionOf", "Numbers", "Numbers"]]`
+      `["FunctionOf", "Numbers", "Numbers"]`
     ));
 
   test('Symbol Sin', () =>
     expect(engine.box('Sin').domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", ["FunctionOf", "Numbers", "Numbers"]]`
+      `["FunctionOf", "Numbers", "Numbers"]`
     ));
 
   test('\\sin(3)', () => {
     expect(engine.box(['Sin', 3]).domain.toJSON()).toMatchInlineSnapshot(
-      `["Domain", "Numbers"]`
+      `Numbers`
     );
   });
   test('Nothing', () => {
     expect(engine.symbol('Nothing').domain.json).toMatchInlineSnapshot(
-      `["Domain", "NothingDomain"]`
+      `NothingDomain`
     );
   });
 
   test('Symbol domain inference', () => {
     engine.assign('numSymbol', 42);
     expect(engine.symbol('numSymbol').domain.json).toMatchInlineSnapshot(
-      `["Domain", "PositiveIntegers"]`
+      `PositiveIntegers`
     );
     // Widening to reals
     engine.assign('numSymbol', 456.234);
     expect(engine.symbol('numSymbol').domain.json).toMatchInlineSnapshot(
-      `["Domain", "RealNumbers"]`
+      `RealNumbers`
     );
 
     // Widening to Values
     engine.assign('numSymbol', "'hello'");
     expect(engine.symbol('numSymbol').domain.json).toMatchInlineSnapshot(
-      `["Domain", "Values"]`
+      `Values`
     );
 
     // Booleans
     engine.assign('booleanSymbol', true);
     expect(engine.symbol('booleanSymbol').domain.json).toMatchInlineSnapshot(
-      `["Domain", "Booleans"]`
+      `Booleans`
     );
 
     // Strings
     engine.assign('stringSymbol', "'hello'");
     expect(engine.symbol('stringSymbol').domain.json).toMatchInlineSnapshot(
-      `["Domain", "Strings"]`
+      `Strings`
     );
   });
 });

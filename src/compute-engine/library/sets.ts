@@ -117,7 +117,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['FunctionOf', 'Sets', ['VarArg', 'Sets'], 'Sets'],
+      domain: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Anything'],
+      canonical: (ce, args) => {
+        if (args.length === 0) return ce.symbol('EmptySet');
+        if (args.length === 1) return args[0];
+        if (args[0].head === 'Domain')
+          return ce.domain(['Intersection', ...args]);
+        return ce._fn('Intersection', args);
+      },
       evaluate: intersection,
     },
   },
@@ -129,7 +136,13 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['FunctionOf', 'Sets', ['VarArg', 'Sets'], 'Sets'],
+      domain: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Anything'],
+      canonical: (ce, args) => {
+        if (args.length === 0) return ce.symbol('EmptySet');
+        if (args.length === 1) return args[0];
+        if (args[0].head === 'Domain') return ce.domain(['Union', ...args]);
+        return ce._fn('Union', args);
+      },
       evaluate: union,
     },
   },

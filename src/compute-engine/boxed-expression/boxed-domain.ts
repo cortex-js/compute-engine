@@ -44,15 +44,15 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   private _hash: number;
 
   constructor(ce: IComputeEngine, dom: DomainExpression, metadata?: Metadata) {
+    console.assert(!(dom instanceof _BoxedDomain));
     super(ce, metadata);
     this._value = makeCanonical(ce, dom);
   }
 
+  /** Boxed domains are always canonical. */
   get isCanonical(): boolean {
     return true;
   }
-
-  /** Boxed domains are always canonical. */
   get canonical(): _BoxedDomain {
     return this;
   }
@@ -62,7 +62,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   }
 
   get json(): Expression {
-    return ['Domain', serialize(this.engine, this._value)];
+    return serialize(this.engine, this._value);
   }
 
   get base(): DomainLiteral | null {
@@ -89,7 +89,9 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   get codomain(): BoxedDomain | null {
     if (typeof this._value === 'string') return null;
     //  The codomain is the last argument of the `['FunctionOf']` expression
-    return this.engine.domain(this._value[this._value.length - 1]);
+    return this.engine.domain(
+      this._value[this._value.length - 1] as DomainExpression
+    );
   }
 
   get hash(): number {
@@ -153,10 +155,10 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
     return this.engine.domain('Domains');
   }
 
-  get isNothing(): boolean {
-    // The domain NothingDomain is the domain of the `Nothing` symbol
-    return this._value === 'NothingDomain';
-  }
+  // get isNothing(): boolean {
+  //   // The domain NothingDomain is the domain of the `Nothing` symbol
+  //   return this._value === 'NothingDomain';
+  // }
 
   get isFunction(): boolean {
     return this.ctor === 'FunctionOf' || this._value === 'Functions';
@@ -225,14 +227,16 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
 
 export function boxDomain(
   ce: IComputeEngine,
-  dom: BoxedExpression | DomainExpression,
+  dom: DomainExpression,
   metadata?: Metadata
 ): BoxedDomain {
+  if (dom instanceof _BoxedDomain) return dom;
+
+  // Wrapped in a `Domain` expression
   if (Array.isArray(dom) && (dom[0] as string) === 'Domain')
     dom = dom[1] as DomainExpression;
 
-  if (dom instanceof _BoxedDomain) return dom;
-  if (dom instanceof _BoxedExpression) dom = dom.json as DomainExpression;
+  // if (dom instanceof _BoxedExpression) dom = dom.json as DomainExpression;
 
   if (typeof dom === 'string') {
     const expr = DOMAIN_ALIAS[dom];
@@ -326,17 +330,17 @@ function makeCanonical(
     return ['VarArg', makeCanonical(ce, dom[1])];
   }
 
-  if (ctor === 'Head') {
-    return ['Head', dom[1] as string];
-  }
+  // if (ctor === 'Head') {
+  //   return ['Head', dom[1] as string];
+  // }
 
-  if (ctor === 'Symbol') {
-    return ['Symbol', dom[1] as string];
-  }
+  // if (ctor === 'Symbol') {
+  //   return ['Symbol', dom[1] as string];
+  // }
 
-  if (ctor === 'Value') {
-    return ['Value', ce.box(dom[1])];
-  }
+  // if (ctor === 'Value') {
+  //   return ['Value', ce.box(dom[1])];
+  // }
 
   if (ctor === 'InvalidDomain') {
     return ['InvalidDomain', dom[1] as string];
@@ -639,7 +643,7 @@ function domainLiteralAncestor(dom: BoxedDomain): DomainLiteral {
   const ctor = dom.ctor!;
 
   if (ctor === 'OptArg') return 'Anything';
-  if (ctor === 'Head') return 'Functions';
+  // if (ctor === 'Head') return 'Functions';
 
   if (ctor === 'Union') {
     // Calculate the widest domain that is a subdomain of all the domains

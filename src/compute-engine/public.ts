@@ -174,9 +174,9 @@ export type DomainConstructor =
   | 'Union'
   | 'OptArg'
   | 'VarArg'
-  | 'Head'
-  | 'Symbol'
-  | 'Value'
+  // | 'Head'
+  // | 'Symbol'
+  // | 'Value'
   | 'Covariant'
   | 'Contravariant'
   | 'Bivariant'
@@ -227,16 +227,16 @@ export type DomainLiteral =
 export type DomainExpression<T = SemiBoxedExpression> =
   | DomainLiteral
   | ['InvalidDomain', string]
-  | ['Union', ...DomainExpression<T>[]]
-  | ['Intersection', ...DomainExpression<T>[]]
+  | ['Union', ...(DomainExpression<T> | BoxedExpression)[]]
+  | ['Intersection', ...(DomainExpression<T> | BoxedExpression)[]]
   | ['ListOf', DomainExpression<T>]
   | ['DictionaryOf', DomainExpression<T>]
   | ['TupleOf', ...DomainExpression<T>[]]
   | ['OptArg', DomainExpression<T>]
   | ['VarArg', DomainExpression<T>]
-  | ['Value', T]
-  | ['Head', string]
-  | ['Symbol', string]
+  // | ['Value', T]
+  // | ['Head', string]
+  // | ['Symbol', string]
   | ['Covariant', DomainExpression<T>]
   | ['Contravariant', DomainExpression<T>]
   | ['Bivariant', DomainExpression<T>]
@@ -264,7 +264,7 @@ export interface BoxedDomain extends BoxedExpression {
   get canonical(): BoxedDomain;
   get json(): Expression;
 
-  readonly isNothing: boolean;
+  // readonly isNothing: boolean;
   // readonly isBoolean: boolean;
   readonly isNumeric: boolean;
   readonly isFunction: boolean;
@@ -1176,7 +1176,7 @@ export interface BoxedExpression {
    * **Note**: If non-canonical, does nothing.
    *
    */
-  set domain(domain: BoxedExpression | DomainExpression | BoxedDomain);
+  set domain(domain: DomainExpression | BoxedDomain);
 
   /** `true` if the value of this expression is a number.
    *
@@ -1992,7 +1992,7 @@ export type SymbolAttributes = {
  */
 export type SymbolDefinition = BaseDefinition &
   Partial<SymbolAttributes> & {
-    domain?: string | BoxedDomain;
+    domain?: DomainLiteral | BoxedDomain;
 
     /** If true, the domain is inferred, and could be adjusted later
      * as more information becomes available or if the symbol is explicitly
@@ -2314,7 +2314,7 @@ export interface IComputeEngine {
    *
    */
   domain(
-    domain: SemiBoxedExpression | BoxedDomain | string,
+    domain: BoxedDomain | DomainExpression,
     metadata?: Metadata
   ): BoxedDomain;
 

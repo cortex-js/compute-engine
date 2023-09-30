@@ -25,9 +25,7 @@ describe('SETTING/FORGETTING', () => {
     expect(expr.json).toMatchObject(['Subtract', 'x1', 1]);
     expect(expr.evaluate().json).toMatchObject(['Subtract', 'x1', 1]);
 
-    expect(ce.box(`x1`).domain).toMatchInlineSnapshot(
-      `["Domain", "PositiveIntegers"]`
-    );
+    expect(ce.box(`x1`).domain).toMatchInlineSnapshot(`PositiveIntegers`);
     expect(ce.box(`x1`).json).toMatch('x1');
     expect(ce.box(`x1`).evaluate().json).toMatch('x1');
     expect(ce.box(['Add', 'x1', 5]).evaluate().json).toMatchInlineSnapshot(
@@ -52,9 +50,7 @@ describe('SETTING/FORGETTING', () => {
     // Expression should be symbolic 'y1'
     expect(expr.evaluate().json).toMatchObject(['Subtract', 'x2', 1]);
 
-    expect(ce.box(`x2`).domain).toMatchInlineSnapshot(
-      `["Domain", "PositiveIntegers"]`
-    );
+    expect(ce.box(`x2`).domain).toMatchInlineSnapshot(`PositiveIntegers`);
     expect(ce.box(`x2`).json).toMatch('x2');
     expect(ce.box(`x2`).evaluate().json).toMatch('x2');
     expect(ce.box(['Add', 'x2', 5]).evaluate().json).toMatchObject([
@@ -83,25 +79,19 @@ describe('SETTING/FORGETTING', () => {
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`["Less", 30, "x4"]`); // @fixme
     expect(x4.isPrime ?? 'undefined').toMatchInlineSnapshot(`undefined`);
     expect(x4.evaluate().numericValue).toMatchInlineSnapshot(`null`);
-    expect(x4.domain.json).toMatchInlineSnapshot(
-      `["Domain", "ExtendedRealNumbers"]`
-    );
+    expect(x4.domain.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
 
     ce.assume(['Equal', 'x4', 17]);
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`False`);
     expect(x4.isPrime ?? 'undefined').toEqual(true);
     expect(x4.evaluate().numericValue).toEqual(17);
-    expect(x4.domain.json).toMatchInlineSnapshot(
-      `["Domain", "ExtendedRealNumbers"]`
-    );
+    expect(x4.domain.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
 
     ce.assign({ x4: 2017 });
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`True`);
     expect(x4.isPrime ?? 'undefined').toMatchInlineSnapshot(`true`);
     expect(x4.numericValue).toMatchInlineSnapshot(`null`); // @fixme, should be 2017
-    expect(x4.domain.json).toMatchInlineSnapshot(
-      `["Domain", "ExtendedRealNumbers"]`
-    );
+    expect(x4.domain.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
   });
 });
 

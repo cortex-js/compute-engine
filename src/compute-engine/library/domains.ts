@@ -14,9 +14,9 @@ export const DOMAIN_CONSTRUCTORS = [
   'OptArg',
   'VarArg',
 
-  'Head',
-  'Symbol',
-  'Value',
+  // 'Head',
+  // 'Symbol',
+  // 'Value',
 ];
 
 export const DOMAIN_ALIAS = {
@@ -265,9 +265,10 @@ export function ancestors(dom: DomainLiteral): DomainLiteral[] {
     if (!Array.isArray(dom)) throw Error(`Unknown domain literal ${dom}`);
     if (!DOMAIN_CONSTRUCTORS.includes(dom[0]))
       throw Error(`Unknown domain constructor ${dom[0]}`);
-    if (dom[0] === 'FunctionOf' || dom[0] === 'Head')
-      return ancestors('Functions');
-    if (dom[0] === 'Symbol') return ancestors('Symbols');
+    if (dom[0] === 'FunctionOf') return ancestors('Functions');
+    // if (dom[0] === 'Head') return ancestors('Functions');
+    // if (dom[0] === 'Symbol') return ancestors('Symbols');
+    // if (dom[0] === 'Value') return ancestors('Values');
     if (dom[0] === 'TupleOf') return ancestors('Tuples');
     if (dom[0] === 'ListOf') return ancestors('Lists');
     if (dom[0] === 'DictionaryOf') return ancestors('Dictionaries');
@@ -294,7 +295,41 @@ export function ancestors(dom: DomainLiteral): DomainLiteral[] {
 export function domainSetsLibrary(): IdentifierDefinitions {
   const table = {};
   for (const dom of Object.keys(DOMAIN_LITERAL))
-    table[dom] = { domain: 'Sets' };
+    table[dom] = { domain: 'Domains', value: ['Domain', dom] };
+
+  table['InvalidDomain'] = {
+    signature: {
+      domain: ['FunctionOf', 'Domains', 'Domains'],
+      canonical: (ce, ops) => ce.domain(['InvalidDomain', ops[0]]),
+    },
+  };
+
+  for (const ctor of ['DictionaryOf', 'FunctionOf', 'ListOf', 'TupleOf']) {
+    table[ctor] = {
+      signature: {
+        domain: ['FunctionOf', ['VarArg', 'Domains'], 'Domains'],
+        canonical: (ce, ops) => ce.domain([ctor, ...ops]),
+      },
+    };
+  }
+
+  for (const ctor of ['OptArg', 'VarArg']) {
+    table[ctor] = {
+      signature: {
+        domain: ['FunctionOf', 'Domains', 'Domains'],
+        canonical: (ce, ops) => ce.domain([ctor, ops[0]]),
+      },
+    };
+  }
+
+  // for (const ctor of ['Head', 'Symbol', 'Value']) {
+  //   table[ctor] = {
+  //     signature: {
+  //       domain: ['FunctionOf', 'Anything', 'Domains'],
+  //       canonical: (ce, ops) => ce.domain([ctor, ops[0]]),
+  //     },
+  //   };
+  // }
 
   return table as IdentifierDefinitions;
 }

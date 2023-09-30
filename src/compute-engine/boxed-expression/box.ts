@@ -6,6 +6,7 @@ import {
   BoxedExpression,
   Metadata,
   Rational,
+  DomainExpression,
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedDictionary } from './boxed-dictionary';
@@ -23,7 +24,7 @@ import {
 } from '../numerics/rationals';
 import { asBigint, bigintValue } from './utils';
 import { bigint } from '../numerics/numeric-bigint';
-import { apply } from '../function-utils';
+import { isDomainLiteral } from '../library/domains';
 
 /**
  * ## THEORY OF OPERATIONS
@@ -275,7 +276,8 @@ export function boxFunction(
   //
   // Domain
   //
-  if (head === 'Domain') return ce.domain(ops[0], options.metadata);
+  if (head === 'Domain')
+    return ce.domain(ops[0] as DomainExpression, options.metadata);
 
   //
   // Number
@@ -500,6 +502,8 @@ export function box(
       return new BoxedString(ce, expr.slice(1, -1));
 
     if (/^[+-]?[0-9]/.test(expr)) return ce.number(expr);
+
+    if (isDomainLiteral(expr)) return ce.domain(expr);
 
     if (!isValidIdentifier(expr))
       return ce.error('invalid-identifier', { str: expr });

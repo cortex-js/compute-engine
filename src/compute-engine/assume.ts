@@ -231,7 +231,7 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   const undefs = undefinedIdentifiers(proposition.op1);
   // Case 1
   if (undefs.length === 1) {
-    const dom = ce.domain(proposition.op2.evaluate().json);
+    const dom = ce.domain(proposition.op2.evaluate().json as DomainExpression);
     if (!dom.isValid) return 'not-a-predicate';
 
     ce.declare(undefs[0], dom.json as DomainExpression);
@@ -240,7 +240,7 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
 
   // Case 2
   if (proposition.op1.symbol && hasDef(ce, proposition.op1.symbol)) {
-    const dom = ce.domain(proposition.op2.evaluate().json);
+    const dom = ce.domain(proposition.op2.evaluate().json as DomainExpression);
     if (!dom.isValid) return 'not-a-predicate';
     const def = ce.lookupSymbol(proposition.op1.symbol);
     if (def) {

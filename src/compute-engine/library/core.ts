@@ -72,8 +72,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (code === 'incompatible-domain') {
             return ce._fn('ErrorCode', [
               ce.string(code),
-              ce.domain(args[1] ?? 'Anything'),
-              ce.domain(args[2] ?? 'Anything'),
+              args[1] ?? 'Anything',
+              args[2] ?? 'Anything',
             ]);
           }
           return ce._fn('ErrorCode', args);
@@ -141,8 +141,6 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       /** Return the domain of an expression */
       signature: {
         domain: ['FunctionOf', 'Anything', 'Domains'],
-        canonical: (ce, ops) =>
-          ce.domain(validateArgumentCount(ce, canonical(ops), 1)[0]),
         evaluate: (_ce, ops) => ops[0].domain,
       },
     },

@@ -3,6 +3,7 @@ import {
   BoxedExpression,
   BoxedDomain,
   DomainLiteral,
+  DomainExpression,
 } from '../public';
 
 export function validateArgumentCount(
@@ -11,7 +12,7 @@ export function validateArgumentCount(
   count: number
 ): BoxedExpression[] {
   if (ops.length === count) return ops;
-  const xs = [...ops.slice(0, count)];
+  const xs: BoxedExpression[] = [...ops.slice(0, count)];
   let i = Math.min(count, ops.length);
   while (i < count) {
     xs.push(ce.error('missing'));
@@ -84,14 +85,14 @@ export function validateSignature(
   // constructors, i.e. VarArg or OptArg and we should not infer those.
   if (sig.domainArgs)
     for (let i = 0; i <= sig.domainArgs!.length - 2; i++)
-      ops[i]?.infer(ce.domain(sig.domainArgs![i]));
+      ops[i]?.infer(ce.domain(sig.domainArgs![i] as DomainExpression));
 
-  const opsDomain = ops.map((x) => x.domain);
+  const opsDomain: BoxedDomain[] = ops.map((x) => x.domain);
 
   const targetSig = ce.domain([
     'FunctionOf',
-    ...opsDomain,
-    codomain ?? 'Anything',
+    ...(opsDomain as any as DomainExpression[]),
+    (codomain as any as DomainExpression) ?? 'Anything',
   ]);
 
   if (sig.isCompatible(targetSig)) return null;

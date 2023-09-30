@@ -25,7 +25,7 @@ import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { hashCode } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
-import { narrow, widen } from './boxed-domain';
+import { narrow } from './boxed-domain';
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 
@@ -348,7 +348,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.symbolDefinition?.domain ?? this.engine.domain('Anything');
   }
 
-  set domain(inDomain: BoxedExpression | DomainExpression | BoxedDomain) {
+  set domain(inDomain: DomainExpression | BoxedDomain) {
     if (this._name[0] === '_')
       throw new Error(
         `The domain of the wildcard "${this._name}" cannot be changed`

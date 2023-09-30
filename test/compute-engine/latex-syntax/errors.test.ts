@@ -144,12 +144,7 @@ check('Invalid argument in sequence', () =>
       1,
       [
         "Error",
-        [
-          "ErrorCode",
-          "'incompatible-domain'",
-          ["Domain", "Numbers"],
-          ["Domain", "MaybeBooleans"]
-        ],
+        ["ErrorCode", "'incompatible-domain'", "Numbers", "MaybeBooleans"],
         ["Equal", 2, 2]
       ],
       3
@@ -170,8 +165,8 @@ check('Invalid argument positional', () =>
           [
             "ErrorCode",
             "'incompatible-domain'",
-            ["Domain", "Numbers"],
-            ["Domain", "MaybeBooleans"]
+            "Numbers",
+            "MaybeBooleans"
           ],
           ["Equal", 2, 2]
         ]
@@ -427,12 +422,7 @@ check('Invalid double superscript', () =>
       "x",
       [
         "Error",
-        [
-          "ErrorCode",
-          "'incompatible-domain'",
-          ["Domain", "Numbers"],
-          ["Domain", "Lists"]
-        ],
+        ["ErrorCode", "'incompatible-domain'", "Numbers", "Lists"],
         ["List", 1, 2]
       ]
     ]
@@ -446,12 +436,7 @@ check('Double superscript: invalid domain', () =>
       "x",
       [
         "Error",
-        [
-          "ErrorCode",
-          "'incompatible-domain'",
-          ["Domain", "Numbers"],
-          ["Domain", "Lists"]
-        ],
+        ["ErrorCode", "'incompatible-domain'", "Numbers", "Lists"],
         ["List", 1, 2]
       ]
     ]
@@ -602,12 +587,7 @@ check('Mismatched domain', () =>
       "Sqrt",
       [
         "Error",
-        [
-          "ErrorCode",
-          "'incompatible-domain'",
-          ["Domain", "Numbers"],
-          ["Domain", "Booleans"]
-        ],
+        ["ErrorCode", "'incompatible-domain'", "Numbers", "Booleans"],
         "True"
       ]
     ]

@@ -60,12 +60,7 @@ describe('SUPSUB', () => {
         2,
         [
           "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["Domain", "Numbers"],
-            ["Domain", "Lists"]
-          ],
+          ["ErrorCode", "'incompatible-domain'", "Numbers", "Lists"],
           ["List", 3, 4]
         ]
       ]
@@ -133,22 +128,12 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              ["Domain", "Numbers"],
-              ["Domain", "Strings"]
-            ],
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
             "'missing'"
           ],
           [
             "Error",
-            [
-              "ErrorCode",
-              "'incompatible-domain'",
-              ["Domain", "Numbers"],
-              ["Domain", "Strings"]
-            ],
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
             ["LatexString", "'^{12}_'"]
           ]
         ],

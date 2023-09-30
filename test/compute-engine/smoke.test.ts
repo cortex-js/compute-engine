@@ -386,8 +386,8 @@ describe('PARSING numbers', () => {
                               [
                                 "ErrorCode",
                                 "'incompatible-domain'",
-                                ["Domain", "Symbols"],
-                                ["Domain", "ExtendedRealNumbers"]
+                                "Symbols",
+                                "ExtendedRealNumbers"
                               ]
                             ],
                             2,
@@ -401,8 +401,8 @@ describe('PARSING numbers', () => {
                             [
                               "ErrorCode",
                               "'incompatible-domain'",
-                              ["Domain", "Symbols"],
-                              ["Domain", "ExtendedRealNumbers"]
+                              "Symbols",
+                              "ExtendedRealNumbers"
                             ]
                           ],
                           2,
@@ -422,8 +422,8 @@ describe('PARSING numbers', () => {
                 [
                   "ErrorCode",
                   "'incompatible-domain'",
-                  ["Domain", "Symbols"],
-                  ["Domain", "ExtendedRealNumbers"]
+                  "Symbols",
+                  "ExtendedRealNumbers"
                 ]
               ],
               2,
