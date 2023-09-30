@@ -2,8 +2,6 @@ import { engine } from '../../utils';
 
 engine.assume(['Element', 'f', 'Functions']);
 
-console.log(engine.parse('g()').json);
-
 function check(s: string, f: jest.ProvidesCallback) {
   describe(s, () => test(s, f));
 }

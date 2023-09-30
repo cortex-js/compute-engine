@@ -22,9 +22,16 @@ import { serializeJsonSymbol } from './serialize';
 import { hashCode } from './utils';
 
 /**
- * A `_BoxedDomain` is a wrapper around a boxed, canonical, domain expression.
+ * A `_BoxedDomain` is a wrapper around a boxed, canonical, domain
+ * expression.
  *
  * If could also be an error, in which case, `isValid` is `false`.
+ *
+ * @todo: architectural improvements:
+ * - when constructing, decomposose function signatures into a list of
+ *  required parameters, a list of optional parameters,
+ *  a vararg parameter, and a return type.
+ *
  *
  */
 export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
@@ -58,7 +65,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
     return ['Domain', serialize(this.engine, this._value)];
   }
 
-  get literal(): string | null {
+  get base(): string | null {
     if (typeof this._value === 'string') return this._value;
     return null;
   }
@@ -311,12 +318,12 @@ function makeCanonical(
     return [ctor, makeCanonical(ce, dom[1])];
   }
 
-  if (ctor === 'Maybe') {
-    return ['Maybe', makeCanonical(ce, dom[1])];
+  if (ctor === 'OptArg') {
+    return ['OptArg', makeCanonical(ce, dom[1])];
   }
 
-  if (ctor === 'Sequence') {
-    return ['Sequence', makeCanonical(ce, dom[1])];
+  if (ctor === 'VarArg') {
+    return ['VarArg', makeCanonical(ce, dom[1])];
   }
 
   if (ctor === 'Head') {
@@ -372,8 +379,8 @@ export function isDomain(
     if (
       ctor === 'Tuple' ||
       ctor === 'Functions' ||
-      ctor === 'Maybe' ||
-      ctor === 'Sequence' ||
+      ctor === 'OptArg' ||
+      ctor === 'VarArg' ||
       ctor === 'Intersection' ||
       ctor === 'Union'
     )
@@ -445,9 +452,6 @@ function isSubdomainOf(
     // 'Intersection',
     // 'Union',
 
-    // 'Maybe',
-    // 'Sequence',
-
     // 'Head',
     // 'Symbol',
     // 'Value',
@@ -493,7 +497,7 @@ function isSubdomainOf(
       if (rhsParams.length === 0) {
         // We have run out of rhs parameters
         const lhsCtor = Array.isArray(lhsParams[i]) ? lhsParams[i][0] : null;
-        if (lhsCtor !== 'Maybe') return [false, xlhs];
+        if (lhsCtor !== 'OptArg') return [false, xlhs];
         // Any remaining lhs parameters should be optional
         return [true, xlhs];
       } else {
@@ -532,7 +536,7 @@ function isSubdomainOf(
     ];
   }
 
-  if (rhsConstructor === 'Maybe') {
+  if (rhsConstructor === 'OptArg') {
     if (lhsLiteral === 'Nothing') return [true, xlhs];
     return isSubdomainOf(
       [lhs, ...xlhs] as DomainExpression<BoxedExpression>[],
@@ -540,7 +544,7 @@ function isSubdomainOf(
     );
   }
 
-  if (rhsConstructor === 'Sequence') {
+  if (rhsConstructor === 'VarArg') {
     const seq = rhs[1] as DomainExpression<BoxedExpression>;
 
     if (!isSubdomainOf1(lhs, seq)) return [false, xlhs];
@@ -630,12 +634,12 @@ export function narrow(
 
 // Return the domain literal that is the closest ancestor to `dom`
 function domainLiteralAncestor(dom: BoxedDomain): string {
-  let result = dom.literal;
+  let result = dom.base;
   if (result) return result;
 
   result = dom.ctor!;
 
-  if (result === 'Maybe') return 'Anything';
+  if (result === 'Maybex') return 'Anything';
   if (result === 'Head') return 'Functions';
 
   if (result === 'Union') {
@@ -646,8 +650,18 @@ function domainLiteralAncestor(dom: BoxedDomain): string {
     for (let i = 1; i <= args.length - 1; i++) {
       result = widestDomain(result, args[i] as string);
     }
+    return result;
   }
-  if (result === 'Intersection') return 'Anything'; // @todo could be more narrow
+  if (result === 'Intersection') {
+    // Calculate the narrowest domain that is a superdomain of all the domains
+    // in the intersection
+    const args = dom.domainArgs!;
+    result = args[0] as string;
+    for (let i = 1; i <= args.length - 1; i++) {
+      result = narrowestDomain(result, args[i] as string);
+    }
+    return result;
+  }
 
   return result;
 }

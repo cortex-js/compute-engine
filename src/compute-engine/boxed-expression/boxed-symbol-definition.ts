@@ -248,13 +248,13 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     // Narrowing is OK
     if (this._domain && !domain.isCompatible(this._domain)) {
       throw Error(
-        `The domain of "${this.name}" cannot be widened from "${this._domain.literal}" to "${domain.literal}"`
+        `The domain of "${this.name}" cannot be widened from "${this._domain.base}" to "${domain.base}"`
       );
     }
 
     if (this._value && !domain.isCompatible(this._value.domain))
       throw Error(
-        `The domain of "${this.name}" cannot be changed to "${domain.literal} because its value has a domain of "${this._value.domain.literal}"`
+        `The domain of "${this.name}" cannot be changed to "${domain.base} because its value has a domain of "${this._value.domain.base}"`
       );
 
     this._flags = undefined;
@@ -666,7 +666,7 @@ export function domainToFlags(
 
   if (dom.isNumeric) {
     // @todo: handle `Range`, `Interval`, and other numeric literals
-    const domain = dom.literal;
+    const domain = dom.base;
     result.number = true;
     if (domain === 'Integers') result.integer = true;
     if (domain === 'RationalNumbers') result.rational = true;

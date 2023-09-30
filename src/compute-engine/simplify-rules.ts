@@ -84,13 +84,13 @@ export const SIMPLIFY_RULES: Rule[] = [];
 //   [['Not', ['Not', '_x']], '_x'], // @todo Since Not is an involution, should not be needed
 //   [['Not', 'True'], 'False'],
 //   [['Not', 'False'], 'True'],
-//   [['Not', 'Maybe'], 'Maybe'],
+//   [['Not', 'OptArg'], 'OptArg'],
 
 //   [['And'], 'True'],
 //   [['And', '__x'], '__x'],
 //   [['And', '__x', 'True'], '_x'],
 //   [['And', '__', 'False'], 'False'],
-//   [['And', '__', 'Maybe'], 'Maybe'],
+//   [['And', '__', 'OptArg'], 'OptArg'],
 //   [['And', '__x', ['Not', '__x']], 'False'],
 //   [['And', ['Not', '__x'], '__x'], 'False'],
 
@@ -99,7 +99,7 @@ export const SIMPLIFY_RULES: Rule[] = [];
 //   [['Or', '__', 'True'], 'True'],
 //   [['Or', '__x', 'False'], '__x'],
 //   [
-//     ['Or', '__x', 'Maybe'],
+//     ['Or', '__x', 'OptArg'],
 //     ['Or', '__x'],
 //   ],
 
@@ -185,7 +185,7 @@ export const SIMPLIFY_RULES: Rule[] = [];
 //   // Implies
 
 //   [['Implies', 'True', 'False'], 'False'],
-//   [['Implies', '_', 'Maybe'], 'True'],
+//   [['Implies', '_', 'OptArg'], 'True'],
 //   [['Implies', '_', 'True'], 'True'],
 //   [['Implies', 'False', '_'], 'True'],
 //   [
@@ -204,13 +204,13 @@ export const SIMPLIFY_RULES: Rule[] = [];
 //   //   if (q = p), T. Otherwise, F
 //   [['Equivalent', 'True', 'True'], 'True'],
 //   [['Equivalent', 'False', 'False'], 'True'],
-//   [['Equivalent', 'Maybe', 'Maybe'], 'True'],
+//   [['Equivalent', 'OptArg', 'OptArg'], 'True'],
 //   [['Equivalent', 'True', 'False'], 'False'],
 //   [['Equivalent', 'False', 'True'], 'False'],
-//   [['Equivalent', 'True', 'Maybe'], 'False'],
-//   [['Equivalent', 'False', 'Maybe'], 'False'],
-//   [['Equivalent', 'Maybe', 'True'], 'False'],
-//   [['Equivalent', 'Maybe', 'False'], 'False'],
+//   [['Equivalent', 'True', 'OptArg'], 'False'],
+//   [['Equivalent', 'False', 'OptArg'], 'False'],
+//   [['Equivalent', 'OptArg', 'True'], 'False'],
+//   [['Equivalent', 'OptArg', 'False'], 'False'],
 // ];
 
 // export function internalSimplify(

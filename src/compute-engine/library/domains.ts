@@ -11,8 +11,8 @@ export const DOMAIN_CONSTRUCTORS = [
   'Intersection',
   'Union',
 
-  'Maybe',
-  'Sequence',
+  'OptArg',
+  'VarArg',
 
   'Head',
   'Symbol',
@@ -20,20 +20,20 @@ export const DOMAIN_CONSTRUCTORS = [
 ];
 
 export const DOMAIN_ALIAS = {
-  // Functions: ['Functions', ['Sequence', 'Anything'], 'Anything'],
-  NumericFunctions: ['Functions', ['Sequence', 'Numbers'], 'Numbers'],
+  // Functions: ['Functions', ['VarArg', 'Anything'], 'Anything'],
+  NumericFunctions: ['Functions', ['VarArg', 'Numbers'], 'Numbers'],
   RealFunctions: [
     'Functions',
-    ['Sequence', 'ExtendedRealNumbers'],
+    ['VarArg', 'ExtendedRealNumbers'],
     'ExtendedRealNumbers',
   ],
   LogicOperators: [
     'Functions',
     'MaybeBooleans',
-    ['Maybe', 'MaybeBooleans'],
+    ['OptArg', 'MaybeBooleans'],
     'MaybeBooleans',
   ],
-  Predicates: ['Functions', ['Sequence', 'Anything'], 'MaybeBooleans'],
+  Predicates: ['Functions', ['VarArg', 'Anything'], 'MaybeBooleans'],
   RelationalOperators: ['Functions', 'Anything', 'Anything', 'MaybeBooleans'],
   // PositiveInteger: ['Range', 1, +Infinity],
   // NonNegativeInteger: ['Range', 0, +Infinity],
@@ -131,8 +131,8 @@ const DOMAIN_LITERAL = {
   Values: 'Anything',
   Domains: 'Anything',
 
-  Void: 'Nothing',
-  Nothing: [
+  Void: 'NothingDomain',
+  NothingDomain: [
     'Booleans',
     'Strings',
     'Symbols',
@@ -270,7 +270,7 @@ export function ancestors(dom: string): string[] {
     if (dom[0] === 'Tuple') return ancestors('Tuples');
     if (dom[0] === 'List') return ancestors('Lists');
     if (dom[0] === 'Dictionary') return ancestors('Dictionaries');
-    if (dom[0] === 'Maybe' || dom[0] === 'Sequence') return ancestors(dom[1]);
+    if (dom[0] === 'OptArg' || dom[0] === 'VarArg') return ancestors(dom[1]);
 
     if (dom[0] === 'Literal') return ['Anything']; // @todo could do better
     if (dom[0] === 'Union') return ['Anything']; // @todo could do better
@@ -292,20 +292,8 @@ export function ancestors(dom: string): string[] {
 
 export function domainSetsLibrary(): IdentifierDefinitions {
   const table = {};
-  for (const dom of Object.keys(DOMAIN_LITERAL)) {
-    // @todo: the Domain domain conflicts with the Domain function
-    // Need to be renamed, as in DomainSet or Domains
-    // Same thing with Symbol Nothing and Domain Nothing
-    if (
-      dom !== 'Domain' &&
-      dom !== 'Nothing' &&
-      dom !== 'String' &&
-      dom !== 'Symbol' &&
-      dom !== 'List' &&
-      dom !== 'Tuple' &&
-      dom !== 'Sequence'
-    )
-      table[dom] = { domain: 'Sets' };
-  }
+  for (const dom of Object.keys(DOMAIN_LITERAL))
+    table[dom] = { domain: 'Sets' };
+
   return table as IdentifierDefinitions;
 }

@@ -60,7 +60,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   List: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', ['Maybe', ['Sequence', 'Anything']], 'Lists'],
+      domain: ['Functions', ['OptArg', ['VarArg', 'Anything']], 'Lists'],
     },
     size: (expr) => expr.nops!,
     iterator: (expr, start, count) => {
@@ -116,8 +116,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       domain: [
         'Functions',
         'Numbers',
-        ['Maybe', 'Numbers'],
-        ['Maybe', 'Numbers'],
+        ['OptArg', 'Numbers'],
+        ['OptArg', 'Numbers'],
         'Values',
       ],
     },
@@ -162,8 +162,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       domain: [
         'Functions',
         'Numbers',
-        ['Maybe', 'Numbers'],
-        ['Maybe', 'Numbers'],
+        ['OptArg', 'Numbers'],
+        ['OptArg', 'Numbers'],
         'Values',
       ],
     },
@@ -276,7 +276,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A fixed number of heterogeneous elements',
     complexity: 8200,
     signature: {
-      domain: ['Functions', ['Sequence', 'Anything'], 'Tuples'],
+      domain: ['Functions', ['VarArg', 'Anything'], 'Tuples'],
       canonical: (ce, ops) => ce.tuple(canonical(ops)),
     },
     size: (expr) => expr.nops!,
@@ -287,7 +287,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   String: {
     threadable: true,
     signature: {
-      domain: ['Functions', ['Maybe', 'Anything'], 'Strings'],
+      domain: ['Functions', ['OptArg', 'Anything'], 'Strings'],
       evaluate: (ce, ops) => {
         if (ops.length === 0) return ce.string('');
         return ce.string(ops.map((x) => x.string ?? x.toString()).join(''));
@@ -338,7 +338,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Take: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', ['Sequence', 'Values'], 'Values'],
+      domain: ['Functions', 'Values', ['VarArg', 'Values'], 'Values'],
       evaluate: (ce, ops) => {
         if (ops.length < 2) return undefined;
         const s = ops[0].string;
@@ -361,7 +361,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Drop: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', ['Sequence', 'Values'], 'Values'],
+      domain: ['Functions', 'Values', ['VarArg', 'Values'], 'Values'],
       evaluate: (ce, ops) => {
         if (ops.length < 2) return undefined;
         const s = ops[0].string;
@@ -479,7 +479,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Ordering: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', ['Maybe', 'Functions'], 'Values'],
+      domain: ['Functions', 'Values', ['OptArg', 'Functions'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -490,7 +490,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Sort: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', ['Maybe', 'Functions'], 'Values'],
+      domain: ['Functions', 'Values', ['OptArg', 'Functions'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -594,7 +594,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         'Functions',
         'Values',
         'Functions',
-        ['Maybe', 'Values'],
+        ['OptArg', 'Values'],
         'Values',
       ],
       evaluate: (_ce, _ops) => {
@@ -607,7 +607,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Tabulate: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Functions', ['Sequence', 'Integers'], 'Values'],
+      domain: ['Functions', 'Functions', ['VarArg', 'Integers'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -663,7 +663,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Zip: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', ['Sequence', 'Values'], 'Values'],
+      domain: ['Functions', 'Values', ['VarArg', 'Values'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -699,7 +699,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Join: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', ['Sequence', 'Values'], 'Values'],
+      domain: ['Functions', ['VarArg', 'Values'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -713,7 +713,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Iterate: {
     complexity: 8200,
     signature: {
-      domain: ['Functions', 'Values', ['Maybe', 'Values'], 'Values'],
+      domain: ['Functions', 'Values', ['OptArg', 'Values'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;

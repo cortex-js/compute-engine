@@ -221,7 +221,7 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   private _commonDomains: { [dom: string]: null | BoxedDomain } = {
     Anything: null,
-    Nothing: null,
+    NothingDomain: null,
     Booleans: null,
     MaybeBooleans: null,
     Strings: null,

@@ -174,7 +174,7 @@ function validateNextArgument(
           break;
         }
       }
-    } else if (ctor === 'Maybe') valid = true;
+    } else if (ctor === 'OptArg') valid = true;
     if (valid) return [[...matched, ce.symbol('Nothing')], ops];
     return [[...matched, ce.error('missing')], ops];
   }
@@ -197,7 +197,7 @@ function validateNextArgument(
     ];
   }
 
-  if (ctor === 'Sequence') {
+  if (ctor === 'VarArg') {
     const seq = dom[1];
     if (!next || !next.domain.isCompatible(seq)) {
       return [
@@ -219,7 +219,7 @@ function validateNextArgument(
     return [result, ops];
   }
 
-  if (ctor === 'Maybe') {
+  if (ctor === 'OptArg') {
     if (next === undefined || next.symbol === 'Nothing')
       return [[...matched, ce.symbol('Nothing')], ops];
     return validateNextArgument(ce, dom[1], matched, [next, ...ops]);

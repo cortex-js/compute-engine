@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The `Nothing` domain has been renamed to `NothingDomain`
+- The `Maybe` domain constructor has been renamed to `OptArg`
+- The `Sequence` domain constructor has been renamed to `VarArg`
+
 ### Bugs Fixed
 
 - Invoking a function repeatedly would invoke the function in the original scope

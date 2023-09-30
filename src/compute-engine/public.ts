@@ -172,8 +172,8 @@ export type DomainConstructor =
   | 'Tuple'
   | 'Intersection'
   | 'Union'
-  | 'Maybe'
-  | 'Sequence'
+  | 'OptArg'
+  | 'VarArg'
   | 'Head'
   | 'Symbol'
   | 'Value'
@@ -192,8 +192,8 @@ export type DomainExpression<T = SemiBoxedExpression> =
   | ['List', DomainExpression<T>]
   | ['Dictionary', DomainExpression<T>]
   | ['Tuple', ...DomainExpression<T>[]]
-  | ['Maybe', DomainExpression<T>]
-  | ['Sequence', DomainExpression<T>]
+  | ['OptArg', DomainExpression<T>]
+  | ['VarArg', DomainExpression<T>]
   | ['Value', T]
   | ['Head', string]
   | ['Symbol', string]
@@ -214,7 +214,7 @@ export interface BoxedDomain extends BoxedExpression {
     kind?: DomainCompatibility
   ): boolean;
 
-  get literal(): string | null;
+  get base(): DomainLiteral | null;
   get ctor(): DomainConstructor | null;
   get domainArgs():
     | (DomainExpression<BoxedExpression> | BoxedExpression | string)[]

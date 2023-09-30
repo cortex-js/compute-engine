@@ -77,7 +77,7 @@ volumes
         domain: [
           'Functions',
           'Symbols',
-          ['Maybe', 'Numbers'], // The order of the derivative
+          ['OptArg', 'Numbers'], // The order of the derivative
           'Functions',
         ],
         canonical: (ce, ops) => {
@@ -124,12 +124,7 @@ volumes
 
     D: {
       signature: {
-        domain: [
-          'Functions',
-          'Functions',
-          ['Sequence', 'Symbols'],
-          'Functions',
-        ],
+        domain: ['Functions', 'Functions', ['VarArg', 'Symbols'], 'Functions'],
         evaluate: (ce, ops) => {
           let f = ops[0];
           // Iterate aver all variables
@@ -170,8 +165,8 @@ volumes
         domain: [
           'Functions',
           'Functions',
-          ['Union', 'Nothing', 'Tuples', 'Symbols'],
-          // ['Tuple', 'Symbols', ['Maybe', 'Integers'], ['Maybe', 'Integers']],
+          ['OptArg', ['Union', 'Tuples', 'Symbols']],
+          // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
           'Numbers',
         ],
         canonical: (ce, ops) => {

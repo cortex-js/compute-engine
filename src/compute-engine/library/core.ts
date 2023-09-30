@@ -18,7 +18,7 @@ import { apply, canonicalFunctionExpression } from '../function-utils';
 
 export const CORE_LIBRARY: IdentifierDefinitions[] = [
   {
-    Nothing: { domain: 'Nothing' },
+    Nothing: { domain: 'NothingDomain' },
   },
 
   //
@@ -33,8 +33,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Anything',
-          ['Maybe', 'Strings'],
-          ['Maybe', 'Strings'],
+          ['OptArg', 'Strings'],
+          ['OptArg', 'Strings'],
           'Anything',
         ],
         codomain: (_ce, args) => args[0].domain,
@@ -52,7 +52,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       complexity: 500,
       signature: {
-        domain: ['Functions', 'Anything', ['Maybe', 'Anything'], 'Void'],
+        domain: ['Functions', 'Anything', ['OptArg', 'Anything'], 'Void'],
         // To make a canonical expression, don't canonicalize the args
         canonical: (ce, args) => ce._fn('Error', args),
       },
@@ -64,7 +64,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Strings',
-          ['Maybe', ['Sequence', 'Anything']],
+          ['OptArg', ['VarArg', 'Anything']],
           'Anything',
         ],
         canonical: (ce, args) => {
@@ -110,7 +110,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Anything',
-          ['Maybe', 'Dictionaries'], // @todo
+          ['OptArg', 'Dictionaries'], // @todo
           'Anything',
         ],
       },
@@ -165,7 +165,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Anything',
-          ['Maybe', ['Sequence', 'Symbols']],
+          ['OptArg', ['VarArg', 'Symbols']],
           'Functions',
         ],
         canonical: (ce, args) => {
@@ -235,7 +235,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     // @todo: need review
     Signatures: {
       signature: {
-        domain: ['Functions', 'Symbols', ['Maybe', ['List', 'Domains']]],
+        domain: ['Functions', 'Symbols', ['OptArg', ['List', 'Domains']]],
         canonical: (ce, ops) => {
           ops = validateArgumentCount(ce, ops, 1);
           if (!ops[0].symbol)
@@ -336,7 +336,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       hold: 'all',
       signature: {
-        domain: ['Functions', ['Sequence', 'Anything'], 'Anything'],
+        domain: ['Functions', ['VarArg', 'Anything'], 'Anything'],
         canonical: (ce, ops) => {
           if (ops.length === 0) return ce.symbol('Nothing');
           const arg = ops
@@ -361,7 +361,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Values',
-          ['Maybe', 'Integers'],
+          ['OptArg', 'Integers'],
           ['Tuple', 'Values', 'Numbers'],
         ],
         evaluate: (ce, ops) => {
@@ -413,7 +413,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     // Serialize one or more expressions to LaTeX
     Latex: {
       signature: {
-        domain: ['Functions', ['Maybe', ['Sequence', 'Anything']], 'Strings'],
+        domain: ['Functions', ['OptArg', ['VarArg', 'Anything']], 'Strings'],
         evaluate: (ce, ops) =>
           ce.fn('LatexString', [ce.string(joinLatex(ops.map((x) => x.latex)))]),
       },

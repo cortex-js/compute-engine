@@ -91,7 +91,7 @@ export function inferNumericDomain(
 
 export function inferDomain(expr: SemiBoxedExpression): DomainLiteral {
   if (expr instanceof _BoxedExpression) {
-    if (expr.domain.literal) return expr.domain.literal;
+    if (expr.domain.base) return expr.domain.base;
     if (expr.domain.ctor) {
       switch (expr.domain.ctor) {
         case 'Functions':
@@ -102,8 +102,6 @@ export function inferDomain(expr: SemiBoxedExpression): DomainLiteral {
           return 'Dictionaries';
         case 'Tuple':
           return 'Tuples';
-        case 'Sequence':
-          return 'Sequences';
       }
     }
     return 'Anything';

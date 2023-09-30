@@ -100,7 +100,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     // Aka the product set, the set direct product or cross product
     // Notation: \times
     wikidata: 'Q173740',
-    signature: { domain: ['Functions', 'Sets', ['Sequence', 'Sets'], 'Sets'] },
+    signature: { domain: ['Functions', 'Sets', ['VarArg', 'Sets'], 'Sets'] },
     // evaluate: cartesianProduct,
   },
   Complement: {
@@ -117,7 +117,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['Functions', 'Sets', ['Sequence', 'Sets'], 'Sets'],
+      domain: ['Functions', 'Sets', ['VarArg', 'Sets'], 'Sets'],
       evaluate: intersection,
     },
   },
@@ -129,13 +129,13 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     commutative: true,
     involution: true,
     signature: {
-      domain: ['Functions', 'Sets', ['Sequence', 'Sets'], 'Sets'],
+      domain: ['Functions', 'Sets', ['VarArg', 'Sets'], 'Sets'],
       evaluate: union,
     },
   },
   // {
   //   name: 'Set',
-  //   domain: ['Functions', ['Sequence', 'Anything'], 'Sets'],
+  //   domain: ['Functions', ['VarArg', 'Anything'], 'Sets'],
   //   // @todo! set has multiple forms
   //   // Set(Sequence)
   //   // Set(Sequence, Condition)
@@ -153,7 +153,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     /* = Union(Complement(a, b), Complement(b, a) */
     /* Corresponds to XOR in boolean logic */
     wikidata: 'Q1147242',
-    signature: { domain: ['Functions', 'Sets', ['Sequence', 'Sets'], 'Sets'] },
+    signature: { domain: ['Functions', 'Sets', ['VarArg', 'Sets'], 'Sets'] },
   },
 };
 

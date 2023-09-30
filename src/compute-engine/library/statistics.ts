@@ -19,7 +19,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     Mean: {
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let count = 0;
@@ -38,7 +38,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     Median: {
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         evaluate: (ce, ops) => {
           const values: number[] = [];
           for (const op of each(ops)) {
@@ -60,7 +60,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     Variance: {
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let sum2 = 0;
@@ -81,7 +81,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     StandardDeviation: {
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let sum2 = 0;
@@ -104,7 +104,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     Kurtosis: {
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let sum2 = 0;
@@ -130,7 +130,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     Skewness: {
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let sum2 = 0;
@@ -156,7 +156,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     Mode: {
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         evaluate: (ce, ops) => {
           const values: number[] = [];
           for (const op of each(ops)) {
@@ -187,7 +187,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     Quartiles: {
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Lists'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Lists'],
         evaluate: (ce, ops) => {
           const values: number[] = [];
           for (const op of each(ops)) {
@@ -213,7 +213,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     InterquartileRange: {
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         evaluate: (ce, ops) => {
           const values: number[] = [];
           for (const op of each(ops)) {
@@ -238,7 +238,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         evaluate: (ce, ops) => {
           let count = 0;
           for (const _op of each(ops)) count++;

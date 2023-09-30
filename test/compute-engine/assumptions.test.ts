@@ -6,12 +6,12 @@ export const ce = new ComputeEngine();
 
 ce.assume(['Equal', 'one', 1]);
 ce.assume(['Greater', 'x', 4]);
-ce.assume(['Element', 'm', ['Range', -Infinity, Infinity]]);
-ce.assume(['Element', 'n', ['Range', 0, Infinity]]);
+// ce.assume(['Element', 'm', ['Range', -Infinity, Infinity]]);
+// ce.assume(['Element', 'n', ['Range', 0, Infinity]]);
 ce.assume(['Equal', 'o', 1]);
 ce.assume(['Equal', 'p', 11]);
-ce.assume(['Element', 'q', ['Range', -Infinity, 0]]);
-ce.assume(['Element', 'r', ['Interval', ['Open', 0], +Infinity]]);
+// ce.assume(['Element', 'q', ['Range', -Infinity, 0]]);
+// ce.assume(['Element', 'r', ['Interval', ['Open', 0], +Infinity]]);
 
 ce.assume(['Greater', 's', 5]);
 ce.assume(['Greater', 't', 0]);

@@ -379,7 +379,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 4100,
 
       signature: {
-        domain: ['Functions', 'Numbers', ['Maybe', 'Numbers'], 'Numbers'],
+        domain: ['Functions', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
         canonical: (ce, ops) => {
           ops = canonical(flattenSequence(ops));
           if (ops.length === 1)
@@ -486,7 +486,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: ['Functions', 'Numbers', 'Numbers'],
         codomain: (ce, args) => {
           const arg = args[0].domain;
-          if (!arg.literal) return arg;
+          if (!arg.base) return arg;
           const negDomain = {
             PositiveNumbers: 'NegativeNumbers',
             NonNegativeNumbers: 'NonPositiveNumbers',
@@ -496,7 +496,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             NonNegativeIntegers: 'NonPositiveIntegers',
             NonPositiveIntegers: 'NonNegativeIntegers',
             NegativeIntegers: 'PositiveIntegers',
-          }[arg.literal];
+          }[arg.base];
           if (negDomain) return ce.domain(negDomain);
           return arg;
         },
@@ -567,7 +567,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'Functions',
           'Numbers',
-          ['Maybe', 'Numbers'],
+          ['OptArg', 'Numbers'],
           'RationalNumbers',
         ],
         canonical: (ce, args) => {
@@ -753,7 +753,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1350,
 
       signature: {
-        domain: ['Functions', 'Numbers', ['Maybe', 'Numbers'], 'Numbers'],
+        domain: ['Functions', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
         canonical: (ce, args) => {
           // Not necessarily legal, but probably what was intended:
           // ['Subtract', 'x'] -> ['Negate', 'x']
@@ -904,7 +904,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Maximum of two or more numbers',
       complexity: 1200,
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;
           if (ops.length === 1) return ops[0];
@@ -932,7 +932,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 1200,
 
       signature: {
-        domain: ['Functions', ['Sequence', 'Values'], 'Numbers'],
+        domain: ['Functions', ['VarArg', 'Values'], 'Numbers'],
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce._NEGATIVE_INFINITY;
           if (ops.length === 1) return ops[0];
@@ -964,9 +964,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           'Functions',
           'Anything',
           // [
-          //   'Maybe',
+          //   'OptArg',
           'Tuples',
-          // ['Tuple', 'Symbols', ['Maybe', 'Integers'], ['Maybe', 'Integers']],
+          // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
           // ],
           'Numbers',
         ],
@@ -990,9 +990,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           'Functions',
           'Anything',
           // [
-          //   'Maybe',
+          //   'OptArg',
           'Tuples',
-          // ['Tuple', 'Symbols', ['Maybe', 'Integers'], ['Maybe', 'Integers']],
+          // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
           // ],
           'Numbers',
         ],
@@ -1013,7 +1013,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 9000,
       inert: true,
       signature: {
-        domain: ['Functions', 'Values', ['Maybe', 'Integers'], 'Values'],
+        domain: ['Functions', 'Values', ['OptArg', 'Integers'], 'Values'],
         codomain: (_ce, args) => args[0].domain,
       },
     },
@@ -1024,7 +1024,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
       signature: {
-        domain: ['Functions', 'Strings', ['Maybe', 'Integers'], 'Integers'],
+        domain: ['Functions', 'Strings', ['OptArg', 'Integers'], 'Integers'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
           if (!op1.string)
@@ -1061,7 +1061,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
       signature: {
-        domain: ['Functions', 'Integers', ['Maybe', 'Integers'], 'Strings'],
+        domain: ['Functions', 'Integers', ['OptArg', 'Integers'], 'Strings'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
           const val = asFloat(op1) ?? NaN;
