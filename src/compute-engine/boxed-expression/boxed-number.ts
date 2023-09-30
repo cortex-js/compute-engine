@@ -156,8 +156,7 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   get domain(): BoxedDomain {
-    if (this._domain === undefined)
-      this._domain = this.engine.domain(inferNumericDomain(this._value));
+    this._domain ??= this.engine.domain(inferNumericDomain(this._value));
     return this._domain;
   }
 

@@ -65,7 +65,7 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
     return ['Domain', serialize(this.engine, this._value)];
   }
 
-  get base(): string | null {
+  get base(): DomainLiteral | null {
     if (typeof this._value === 'string') return this._value;
     return null;
   }
@@ -154,8 +154,8 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   }
 
   get isNothing(): boolean {
-    // The Nothing domain is the domain of the `Nothing` symbol
-    return this._value === 'Nothing';
+    // The domain NothingDomain is the domain of the `Nothing` symbol
+    return this._value === 'NothingDomain';
   }
 
   get isFunction(): boolean {
@@ -441,9 +441,9 @@ function isSubdomainOf(
     if (lhsConstructor === 'FunctionOf')
       return [rhsLiteral === 'Functions', xlhs];
     if (lhsConstructor === 'DictionaryOf')
-      return [rhsLiteral === 'Dictionary', xlhs];
-    if (lhsConstructor === 'ListOf') return [rhsLiteral === 'List', xlhs];
-    if (lhsConstructor === 'TupleOf') return [rhsLiteral === 'Tuple', xlhs];
+      return [rhsLiteral === 'Dictionaries', xlhs];
+    if (lhsConstructor === 'ListOf') return [rhsLiteral === 'Lists', xlhs];
+    if (lhsConstructor === 'TupleOf') return [rhsLiteral === 'Tuples', xlhs];
 
     if (lhsConstructor === 'Intersection') {
     }
@@ -537,7 +537,7 @@ function isSubdomainOf(
   }
 
   if (rhsConstructor === 'OptArg') {
-    if (lhsLiteral === 'Nothing') return [true, xlhs];
+    if (lhsLiteral === 'NothingDomain') return [true, xlhs];
     return isSubdomainOf(
       [lhs, ...xlhs] as DomainExpression<BoxedExpression>[],
       rhs[1]! as DomainExpression<BoxedExpression>
@@ -601,7 +601,7 @@ export function widen(
   return a.engine.domain(aAncestors[0]);
 }
 
-function widestDomain(a: string, b: string): string {
+function widestDomain(a: DomainLiteral, b: DomainLiteral): DomainLiteral {
   const aAncestors = [a, ...ancestors(a)];
   const bAncestors = [b, ...ancestors(b)];
 
@@ -610,7 +610,7 @@ function widestDomain(a: string, b: string): string {
   return aAncestors[0];
 }
 
-function narrowestDomain(a: string, b: string): string {
+function narrowestDomain(a: DomainLiteral, b: DomainLiteral): DomainLiteral {
   const aAncestors = [a, ...ancestors(a)];
   const bAncestors = [b, ...ancestors(b)];
 
@@ -633,37 +633,36 @@ export function narrow(
 }
 
 // Return the domain literal that is the closest ancestor to `dom`
-function domainLiteralAncestor(dom: BoxedDomain): string {
-  let result = dom.base;
-  if (result) return result;
+function domainLiteralAncestor(dom: BoxedDomain): DomainLiteral {
+  if (dom.base) return dom.base;
 
-  result = dom.ctor!;
+  const ctor = dom.ctor!;
 
-  if (result === 'OptArg') return 'Anything';
-  if (result === 'Head') return 'Functions';
+  if (ctor === 'OptArg') return 'Anything';
+  if (ctor === 'Head') return 'Functions';
 
-  if (result === 'Union') {
+  if (ctor === 'Union') {
     // Calculate the widest domain that is a subdomain of all the domains
     // in the union
     const args = dom.domainArgs!;
-    result = args[0] as string;
+    let result = args[0] as DomainLiteral;
     for (let i = 1; i <= args.length - 1; i++) {
-      result = widestDomain(result, args[i] as string);
+      result = widestDomain(result, args[i] as DomainLiteral);
     }
     return result;
   }
-  if (result === 'Intersection') {
+  if (ctor === 'Intersection') {
     // Calculate the narrowest domain that is a superdomain of all the domains
     // in the intersection
     const args = dom.domainArgs!;
-    result = args[0] as string;
+    let result = args[0] as DomainLiteral;
     for (let i = 1; i <= args.length - 1; i++) {
-      result = narrowestDomain(result, args[i] as string);
+      result = narrowestDomain(result, args[i] as DomainLiteral);
     }
     return result;
   }
 
-  return result;
+  return 'Anything';
 }
 
 function serialize(
@@ -674,7 +673,7 @@ function serialize(
   if (typeof dom === 'string') return dom;
 
   if (dom[0] === 'InvalidDomain') {
-    return ['InvalidDomain', serialize(ce, dom[1] as string)];
+    return ['InvalidDomain', serialize(ce, dom[1] as DomainLiteral)];
   }
 
   const result: Expression = [serializeJsonSymbol(ce, dom[0])];

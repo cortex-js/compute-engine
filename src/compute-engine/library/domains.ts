@@ -229,7 +229,7 @@ const DOMAIN_LITERAL = {
   // Quaternion: ['SquareMatrix', 'ComplexTensor'],
 };
 
-let gDomainLiterals: { [domain: string]: Set<string> };
+let gDomainLiterals: Partial<{ [domain in DomainLiteral]: Set<string> }>;
 
 export function isDomainLiteral(s: string | null): s is DomainLiteral {
   if (!s) return false;
@@ -248,7 +248,7 @@ export function isSubdomainLiteral(lhs: string, rhs: string): boolean {
 
 /** Return all the domain literals that are an ancestor of `dom`
  */
-export function ancestors(dom: string): string[] {
+export function ancestors(dom: DomainLiteral): DomainLiteral[] {
   // Build the domain lattice if necessary, by calculating all the ancestors of
   // `Void` (the bottom domain)
   if (!gDomainLiterals) {
@@ -256,9 +256,10 @@ export function ancestors(dom: string): string[] {
     ancestors('Void');
   }
 
-  if (gDomainLiterals[dom]) return Array.from(gDomainLiterals[dom]);
+  if (gDomainLiterals[dom])
+    return Array.from(gDomainLiterals[dom]!) as DomainLiteral[];
 
-  let result: string[] = [];
+  let result: DomainLiteral[] = [];
   if (typeof dom !== 'string' || !DOMAIN_LITERAL[dom]) {
     // Not a domain literal, it should be a constructor
     if (!Array.isArray(dom)) throw Error(`Unknown domain literal ${dom}`);

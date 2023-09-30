@@ -41,6 +41,7 @@ import {
   Rational,
   BoxedSubstitution,
   AssignValue,
+  DomainLiteral,
 } from './public';
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
@@ -219,7 +220,10 @@ export class ComputeEngine implements IComputeEngine {
     36: null,
   };
   /** @internal */
-  private _commonDomains: { [dom: string]: null | BoxedDomain } = {
+
+  private _commonDomains: Partial<{
+    [dom in DomainLiteral]: null | BoxedDomain;
+  }> = {
     Anything: null,
     NothingDomain: null,
     Booleans: null,
@@ -244,7 +248,6 @@ export class ComputeEngine implements IComputeEngine {
     RealFunctions: null, // (ExtendedRealNumbers^n) -> ExtendRealNumbers
     LogicOperators: null, // (Booleans, Booleans) -> Boolean
     Predicates: null, // (Anything^n) -> MaybeBooleans
-    RelationalOperators: null, // (Anything, Anything) -> MaybeBooleans
   };
 
   /**
@@ -316,7 +319,7 @@ export class ComputeEngine implements IComputeEngine {
     numericPrecision?: number;
     ids?: readonly IdentifierDefinitions[];
     tolerance?: number;
-    defaultDomain?: string;
+    defaultDomain?: DomainLiteral;
   }) {
     if (options !== undefined && typeof options !== 'object')
       throw Error('Unexpected argument');
@@ -394,7 +397,7 @@ export class ComputeEngine implements IComputeEngine {
     for (const d of Object.keys(this._commonDomains)) {
       if (this._commonDomains[d] && !this._commonDomains[d]!.symbolDefinition)
         this._commonDomains[d]!.bind(this.context);
-      else this._commonDomains[d] = boxDomain(this, d);
+      else this._commonDomains[d] = boxDomain(this, d as DomainLiteral);
     }
 
     // Populate the table of common symbols
@@ -660,7 +663,7 @@ export class ComputeEngine implements IComputeEngine {
   get defaultDomain(): BoxedDomain | null {
     return this._defaultDomain;
   }
-  set defaultDomain(domain: BoxedDomain | string | null) {
+  set defaultDomain(domain: BoxedDomain | DomainLiteral | null) {
     if (domain === null) this._defaultDomain = null;
     else {
       const defaultDomain = this.domain(domain);
@@ -1693,7 +1696,7 @@ export class ComputeEngine implements IComputeEngine {
   ): BoxedDomain {
     if (domain instanceof _BoxedDomain) return domain;
     if (domain instanceof _BoxedExpression && domain.symbol)
-      domain = domain.symbol;
+      domain = domain.symbol as DomainLiteral;
 
     if (typeof domain === 'string') {
       const expr = this._commonDomains[domain];

@@ -182,7 +182,47 @@ export type DomainConstructor =
   | 'Bivariant'
   | 'Invariant';
 
-export type DomainLiteral = string;
+export type DomainLiteral =
+  | 'Anything'
+  | 'Values'
+  | 'Domains'
+  | 'Void'
+  | 'NothingDomain'
+  | 'Booleans'
+  | 'MaybeBooleans'
+  | 'Strings'
+  | 'Symbols'
+  | 'Collections'
+  | 'Lists'
+  | 'Dictionaries'
+  | 'Sequences'
+  | 'Tuples'
+  | 'Sets'
+  | 'Functions'
+  | 'Predicates'
+  | 'LogicOperators'
+  | 'RelationalOperators'
+  | 'NumericFunctions'
+  | 'RealFunctions'
+  | 'Numbers'
+  | 'ComplexNumbers'
+  | 'ExtendedRealNumbers'
+  | 'ImaginaryNumbers'
+  | 'Integers'
+  | 'Rationals'
+  | 'PositiveNumbers'
+  | 'PositiveIntegers'
+  | 'NegativeNumbers'
+  | 'NegativeIntegers'
+  | 'NonNegativeNumbers'
+  | 'NonNegativeIntegers'
+  | 'NonPositiveNumbers'
+  | 'NonPositiveIntegers'
+  | 'ExtendedComplexNumbers'
+  | 'TranscendentalNumbers'
+  | 'AlgebraicNumbers'
+  | 'RationalNumbers'
+  | 'RealNumbers';
 
 export type DomainExpression<T = SemiBoxedExpression> =
   | DomainLiteral

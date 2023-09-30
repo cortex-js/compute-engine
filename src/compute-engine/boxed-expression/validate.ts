@@ -80,6 +80,8 @@ export function validateSignature(
   // Infer that the domain of the arguments match the signature
   // Useful with parameters of functions, for example, even more so
   // for anonymous parameters, which are unlikely to have an explicit domain.
+  // @todo: that's uh... incorrect. some of the sig.domainArgs[i] might be
+  // constructors, i.e. VarArg or OptArg and we should not infer those.
   if (sig.domainArgs)
     for (let i = 0; i <= sig.domainArgs!.length - 2; i++)
       ops[i]?.infer(ce.domain(sig.domainArgs![i]));

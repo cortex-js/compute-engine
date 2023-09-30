@@ -1,22 +1,10 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { isRational } from './numerics/rationals';
-import { DomainLiteral, Rational, SemiBoxedExpression } from './public';
-import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
-import {
-  isDictionaryObject,
-  isFunctionObject,
-  isNumberObject,
-  isStringObject,
-  isSymbolObject,
-  machineValue,
-} from '../math-json/utils';
-import { Expression } from '../math-json';
-import { isDomain } from './boxed-expression/boxed-domain';
+import { DomainLiteral, Rational } from './public';
 
-/** Quickly determine the numeric domain of a number or constant
- * For the symbols, this is a hard-coded optimization that doesn't rely on the
- * dictionaries. The regular path is in `internalDomain()`
+/**
+ * Determine the numeric domain of a number.
  */
 export function inferNumericDomain(
   value: number | Decimal | Complex | Rational
@@ -87,52 +75,4 @@ export function inferNumericDomain(
   }
 
   return 'Numbers';
-}
-
-export function inferDomain(expr: SemiBoxedExpression): DomainLiteral {
-  if (expr instanceof _BoxedExpression) {
-    if (expr.domain.base) return expr.domain.base;
-    if (expr.domain.ctor) {
-      switch (expr.domain.ctor) {
-        case 'FunctionOf':
-          return 'Functions';
-        case 'ListOf':
-          return 'Lists';
-        case 'DictionaryOf':
-          return 'Dictionaries';
-        case 'TupleOf':
-          return 'Tuples';
-      }
-    }
-    return 'Anything';
-  }
-  if (
-    typeof expr === 'number' ||
-    expr instanceof Decimal ||
-    expr instanceof Complex
-  )
-    return inferNumericDomain(expr);
-
-  if (isStringObject(expr as Expression)) return 'Strings';
-
-  if (isSymbolObject(expr as Expression) || typeof expr === 'string')
-    return 'Symbols';
-
-  if (isDictionaryObject(expr as Expression)) return 'Dictionaries';
-
-  if (isFunctionObject(expr as Expression)) return 'Functions';
-
-  if (typeof expr === 'function') return 'Functions';
-
-  if (Array.isArray(expr)) return 'Functions';
-
-  if (isNumberObject(expr as Expression)) {
-    const value = machineValue(expr as Expression);
-    if (value === null) return 'Numbers';
-    return inferNumericDomain(value);
-  }
-
-  if (isDomain(expr)) return 'Domains';
-
-  return 'Anything';
 }
