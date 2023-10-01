@@ -99,6 +99,34 @@ console.log(expr.canonical);
 // ➔ ["Rational", 1, 3]
 ```
 
+## Canonical Form and Validity
+
+The canonical form of an expression may not be **valid**. A canonical expression
+may include `["Error"]` expressions, for example, indicating missing arguments,
+excess arguments, or arguments of the wrong type.
+
+For example the canonical form of `["Ln"]` is `["Ln", ["Error", "'missing'"]]`
+and it is not a valid expression.
+
+**To check if an expression is valid** use `expr.isValid`.
+
+**To get a list of errors in an expression** use `expr.errors`.
+
+```js
+const expr = ce.parse("Ln");
+console.log(expr.json);
+// ➔ ["Ln", ["Error", "'missing'"]]
+// The canonical form of `Ln` is not valid
+
+console.log(expr.isCanonical);
+// ➔ true
+
+console.log(expr.isValid);
+// ➔ false
+
+console.log(expr.errors);
+// ➔ [["Error", "'missing'"]]
+```
 
 ## Canonical Form Transformations
 

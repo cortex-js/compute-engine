@@ -176,8 +176,6 @@ ce.parse(expr, { canonical: false });
 ```
 
 
-**To check if an expression is in canonical form**, use `expr.isCanonical`.
-
 **To obtain the canonical representation of an expression**, use
 `expr.canonical`.
 
@@ -185,13 +183,14 @@ ce.parse(expr, { canonical: false });
 A non-canonical expression may include errors as a result of parsing from LaTeX,
 if the LaTeX input contained LaTeX syntax errors.
 
-The arguments of a function in canonical form are validated to make sure they
-match expectations.
-
 A canonical expression may include additional errors compared to a non-canonical
 expression, for example `["Divide", 2, 5, 6]` (three arguments instead of two),
 `["Add", 2, "True"]` (mismatched argument domain, expected a number but got a
 boolean).
+
+The canonical form of an expression which is not valid will
+include one or more `["Error"]` expressions indicating the nature of the
+problem.
 
 **To check if an expression contains errors** use `expr.isValid`.
 
