@@ -220,6 +220,19 @@ describe('Nth PRIME NUMBER', () =>
     `);
   }));
 
+// The value of these polynomials for x in 0..n are all prime numbers
+describe('Euler Prime Generating Polynomial', () => {
+  test('x in 0..39', () => check('n^2 + n + 41').toMatchInlineSnapshot());
+  test('x in 0..61', () =>
+    check('8x^2 - 488 x + 7243').toMatchInlineSnapshot());
+  test('x in ', () => check('43 x^2 - 537x + 2971').toMatchInlineSnapshot());
+  test('x in 0..45', () =>
+    check('36 x^2 - 810 x + 2763').toMatchInlineSnapshot());
+  test('x in', () => check('x^2 - 79x + 1601').toMatchInlineSnapshot());
+  test('x in 0..10', () => check('2x^2 + 11').toMatchInlineSnapshot());
+  test('x in 0..10', () => check('x^3 + x^2 + 17').toMatchInlineSnapshot());
+});
+
 // A meaningless, but amusing, coincidence
 describe('⌈e⌉ = ⌊π⌋', () =>
   test('', () =>
