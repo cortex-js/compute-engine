@@ -388,8 +388,8 @@ a dictionary of values.
 ```js
 ce.assign({
   "m": 10,
-  "f(x)": ce.parse("2x^2 + 3x + 5"),
-  "g(t)": ce.parse("t^3 + 4t + 1"),
+  "f(x)": ce.parse("x^2 + x + 41"),
+  "g(t)": ce.parse("t^3 + t^2 + 17"),
 });
 ```
 
