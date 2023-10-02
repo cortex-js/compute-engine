@@ -178,7 +178,7 @@ describe('NUMERIC', () => {
 
 describe('INVALID DOMAINS', () => {
   test('NotADomainLiteral', () =>
-    expect(() => engine.domain('NotADomainLiteral').toJSON()).toThrow());
+    expect(() => engine.domain('NotADomainLiteral' as any).toJSON()).toThrow());
 
   test('NotADomainConstructor', () => {
     expect(() =>
@@ -198,7 +198,9 @@ describe('INVALID DOMAINS', () => {
   });
 
   test('NotADomainLiteral in parametric expression', () =>
-    expect(() => engine.domain(['FunctionOf', 'NotADomainLiteral'])).toThrow());
+    expect(() =>
+      engine.domain(['FunctionOf', 'NotADomainLiteral' as any])
+    ).toThrow());
 });
 
 // describe('SYMBOLS, FUNCTION HEADS', () => {});
