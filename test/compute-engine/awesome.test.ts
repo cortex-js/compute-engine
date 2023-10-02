@@ -222,16 +222,108 @@ describe('Nth PRIME NUMBER', () =>
 
 // The value of these polynomials for x in 0..n are all prime numbers
 describe('Euler Prime Generating Polynomial', () => {
-  test('x in 0..39', () => check('n^2 + n + 41').toMatchInlineSnapshot());
+  test('x in 0..39', () =>
+    expect(check('n^2 + n + 41')).toMatchInlineSnapshot(`
+      latex     = ["Add", ["Power", "n", 2], "n", 41]
+      ["Add", ["Square", "n"], "n", 41]
+    `));
   test('x in 0..61', () =>
-    check('8x^2 - 488 x + 7243').toMatchInlineSnapshot());
-  test('x in ', () => check('43 x^2 - 537x + 2971').toMatchInlineSnapshot());
+    expect(check('8x^2 - 488 x + 7243')).toMatchInlineSnapshot(`
+      latex     = [
+        "Add",
+        [
+          "Subtract",
+          ["Multiply", 8, ["Power", "x", 2]],
+          ["Multiply", 488, "x"]
+        ],
+        7243
+      ]
+      [
+        "Add",
+        ["Multiply", 8, ["Square", "x"]],
+        ["Multiply", -488, "x"],
+        7243
+      ]
+    `));
+  test('x in ', () =>
+    expect(check('43 x^2 - 537x + 2971')).toMatchInlineSnapshot(`
+      latex     = [
+        "Add",
+        [
+          "Subtract",
+          ["Multiply", 43, ["Power", "x", 2]],
+          ["Multiply", 537, "x"]
+        ],
+        2971
+      ]
+      [
+        "Add",
+        ["Multiply", 43, ["Square", "x"]],
+        ["Multiply", -537, "x"],
+        2971
+      ]
+    `));
   test('x in 0..45', () =>
-    check('36 x^2 - 810 x + 2763').toMatchInlineSnapshot());
-  test('x in', () => check('x^2 - 79x + 1601').toMatchInlineSnapshot());
-  test('x in 0..10', () => check('2x^2 + 11').toMatchInlineSnapshot());
-  test('x in 0..10', () => check('x^3 + x^2 + 17').toMatchInlineSnapshot());
+    expect(check('36 x^2 - 810 x + 2763')).toMatchInlineSnapshot(`
+      latex     = [
+        "Add",
+        [
+          "Subtract",
+          ["Multiply", 36, ["Power", "x", 2]],
+          ["Multiply", 810, "x"]
+        ],
+        2763
+      ]
+      [
+        "Add",
+        ["Multiply", 36, ["Square", "x"]],
+        ["Multiply", -810, "x"],
+        2763
+      ]
+    `));
+  test('x in', () =>
+    expect(check('x^2 - 79x + 1601')).toMatchInlineSnapshot(`
+      latex     = ["Add", ["Subtract", ["Power", "x", 2], ["Multiply", 79, "x"]], 1601]
+      ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
+    `));
+  test('x in 0..10', () =>
+    expect(check('2x^2 + 11')).toMatchInlineSnapshot(`
+      latex     = ["Add", ["Multiply", 2, ["Power", "x", 2]], 11]
+      ["Add", ["Multiply", 2, ["Square", "x"]], 11]
+    `));
+  test('x in 0..10', () =>
+    expect(check('x^3 + x^2 + 17')).toMatchInlineSnapshot(`
+      latex     = ["Add", ["Power", "x", 3], ["Power", "x", 2], 17]
+      ["Add", ["Power", "x", 3], ["Square", "x"], 17]
+    `));
 });
+
+describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
+  test('Sequence https://oeis.org/A051254', () =>
+    expect(check('\\lfloor (\\frac{3540326840}{2710032743})^{3^{n}} \\rfloor'))
+      .toMatchInlineSnapshot(`
+      latex     = [
+        "Floor",
+        [
+          "Power",
+          ["Delimiter", ["Divide", 3540326840, 2710032743]],
+          ["Power", 3, "n"]
+        ]
+      ]
+      box       = [
+        "Floor",
+        ["Power", ["Rational", 3540326840, 2710032743], ["Power", 3, "n"]]
+      ]
+      N-auto    = [
+        "Floor",
+        [
+          "Power",
+          "1.306377883863080690460867985165889931094459842841832409550337303802827152778795780033127075763896038",
+          ["Power", 3, "n"]
+        ]
+      ]
+      N-mach    = ["Floor", ["Power", 1.3063778838630806, ["Power", 3, "n"]]]
+    `)));
 
 // A meaningless, but amusing, coincidence
 describe('⌈e⌉ = ⌊π⌋', () =>
