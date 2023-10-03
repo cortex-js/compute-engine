@@ -11,11 +11,11 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     domain: 'Booleans',
     constant: true,
   },
-  Maybe: {
-    wikidata: 'Q781546',
-    domain: 'MaybeBooleans',
-    constant: true,
-  },
+  // Maybe: {
+  //   wikidata: 'Q781546',
+  //   domain: 'MaybeBooleans',
+  //   constant: true,
+  // },
   // @todo: specify a `canonical` function that converts boolean
   // expressions into CNF (Conjunctive Normal Form)
   // https://en.wikipedia.org/wiki/Conjunctive_normal_form
@@ -77,18 +77,18 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
       evaluate: processImplies,
     },
   },
-  Exists: { signature: { domain: 'MaybeBooleans' } },
+  Exists: { signature: { domain: 'Booleans' } },
 };
 
 function processAnd(
   ce: IComputeEngine,
   args: BoxedExpression[]
 ): BoxedExpression | undefined {
-  if (args.length === 0) return ce.symbol('True');
+  if (args.length === 0) return ce.True;
   const ops: BoxedExpression[] = [];
   for (const arg of args) {
     // ['And', ... , 'False', ...] -> 'False'
-    if (arg.symbol === 'False') return ce.symbol('False');
+    if (arg.symbol === 'False') return ce.False;
     if (arg.symbol !== 'True') {
       //Check if arg matches one of the tail elements
       let duplicate = false;
@@ -103,13 +103,13 @@ function processAnd(
         ) {
           // ['And', ['Not', a],... a]
           // Contradition
-          return ce.symbol('False');
+          return ce.False;
         }
       }
       if (!duplicate) ops.push(arg);
     }
   }
-  if (ops.length === 0) return ce.symbol('True');
+  if (ops.length === 0) return ce.True;
   if (ops.length === 1) return ops[0];
   return ce._fn('And', ops);
 }
@@ -118,11 +118,11 @@ function processOr(
   ce: IComputeEngine,
   args: BoxedExpression[]
 ): BoxedExpression | undefined {
-  if (args.length === 0) return ce.symbol('True');
+  if (args.length === 0) return ce.True;
   const ops: BoxedExpression[] = [];
   for (const arg of args) {
     // ['Or', ... , 'True', ...] -> 'True'
-    if (arg.symbol === 'True') return ce.symbol('True');
+    if (arg.symbol === 'True') return ce.True;
     if (arg.symbol !== 'False') {
       //Check if arg matches one of the tail elements
       let duplicate = false;
@@ -137,13 +137,13 @@ function processOr(
         ) {
           // ['Or', ['Not', a],... a]
           // Tautology
-          return ce.symbol('True');
+          return ce.True;
         }
       }
       if (!duplicate) ops.push(arg);
     }
   }
-  if (ops.length === 0) return ce.symbol('True');
+  if (ops.length === 0) return ce.True;
   if (ops.length === 1) return ops[0];
   return ce._fn('Or', ops);
 }
@@ -153,9 +153,8 @@ function processNot(
   args: BoxedExpression[]
 ): BoxedExpression | undefined {
   const op1 = args[0].symbol;
-  if (op1 === 'True') return ce.symbol('False');
-  if (op1 === 'False') return ce.symbol('True');
-  if (op1 === 'Maybe') return ce.symbol('Maybe');
+  if (op1 === 'True') return ce.False;
+  if (op1 === 'False') return ce.True;
   return undefined;
 }
 
@@ -169,13 +168,12 @@ function processEquivalent(
     (lhs === 'True' && rhs === 'True') ||
     (lhs === 'False' && rhs === 'False')
   )
-    return ce.symbol('True');
+    return ce.True;
   if (
     (lhs === 'True' && rhs === 'False') ||
     (lhs === 'False' && rhs === 'True')
   )
-    return ce.symbol('False');
-  if (lhs === 'Maybe' || rhs === 'Maybe') return ce.symbol('Maybe');
+    return ce.False;
   return undefined;
 }
 
@@ -190,8 +188,7 @@ function processImplies(
     (lhs === 'False' && rhs === 'False') ||
     (lhs === 'False' && rhs === 'True')
   )
-    return ce.symbol('True');
-  if (lhs === 'True' && rhs === 'False') return ce.symbol('False');
-  if (lhs === 'Maybe' || rhs === 'Maybe') return ce.symbol('Maybe');
+    return ce.True;
+  if (lhs === 'True' && rhs === 'False') return ce.False;
   return undefined;
 }

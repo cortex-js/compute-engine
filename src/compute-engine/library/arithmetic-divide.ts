@@ -85,7 +85,7 @@ export function canonicalDivide(
     const [cn, cd] = mul(c1, inverse(c2));
 
     const en = ce.mul([ce.number(cn), t1]);
-    if (en.isZero) return ce._ZERO;
+    if (en.isZero) return ce.Zero;
     const ed = ce.mul([ce.number(cd), t2]);
     if (ed.isOne) return en;
     return ce._fn('Divide', [en, ed]);

@@ -192,15 +192,15 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   get op1(): BoxedExpression {
-    return this.engine.symbol('Nothing');
+    return this.engine.Nothing;
   }
 
   get op2(): BoxedExpression {
-    return this.engine.symbol('Nothing');
+    return this.engine.Nothing;
   }
 
   get op3(): BoxedExpression {
-    return this.engine.symbol('Nothing');
+    return this.engine.Nothing;
   }
 
   get isValid(): boolean {
@@ -415,7 +415,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   get domain(): BoxedDomain {
-    return this.engine.domain('Void') as BoxedDomain;
+    return this.engine.Void;
   }
   set domain(_domain: BoxedDomain) {
     throw new Error(`Can't change the domain of \\(${this.latex}\\)`);

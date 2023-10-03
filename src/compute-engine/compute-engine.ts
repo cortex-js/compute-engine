@@ -65,7 +65,7 @@ import {
   BoxedSymbol,
   makeCanonicalSymbol,
 } from './boxed-expression/boxed-symbol';
-import { boxDomain, _BoxedDomain } from './boxed-expression/boxed-domain';
+import { _BoxedDomain } from './boxed-expression/boxed-domain';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
 import { isValidIdentifier, validateIdentifier } from '../math-json/utils';
 import {
@@ -79,11 +79,17 @@ import {
   isRational,
 } from './numerics/rationals';
 import { canonicalNegate } from './symbolic/negate';
-import { canonical, flattenOps, flattenSequence } from './symbolic/flatten';
+import { flattenOps, flattenSequence } from './symbolic/flatten';
 import { isFunctionDefinition, isSymbolDefinition } from './library/utils';
 import { bigint } from './numerics/numeric-bigint';
 import { parseFunctionSignature } from './function-utils';
 import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
+import {
+  DOMAIN_ALIAS,
+  DOMAIN_CONSTRUCTORS,
+  isDomainLiteral,
+} from './library/domains';
+import { canonical } from './boxed-expression/validate';
 
 /**
  *
@@ -105,24 +111,30 @@ import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
  * ```
  */
 export class ComputeEngine implements IComputeEngine {
-  /** @internal */
-  readonly _ZERO: BoxedExpression;
-  /** @internal */
-  readonly _ONE: BoxedExpression;
-  /** @internal */
-  readonly _HALF: BoxedExpression;
-  /** @internal */
-  readonly _NEGATIVE_ONE: BoxedExpression;
-  /** @internal */
-  readonly _I: BoxedExpression;
-  /** @internal */
-  readonly _NAN: BoxedExpression;
-  /** @internal */
-  readonly _POSITIVE_INFINITY: BoxedExpression;
-  /** @internal */
-  readonly _NEGATIVE_INFINITY: BoxedExpression;
-  /** @internal */
-  readonly _COMPLEX_INFINITY: BoxedExpression;
+  // Common domains
+  readonly Anything: BoxedDomain;
+  readonly Void: BoxedDomain;
+  readonly Strings: BoxedDomain;
+  readonly Booleans: BoxedDomain;
+  readonly Numbers: BoxedDomain;
+
+  // Common symbols
+  readonly True: BoxedExpression;
+  readonly False: BoxedExpression;
+  readonly Pi: BoxedExpression;
+  readonly E: BoxedExpression;
+  readonly Nothing: BoxedExpression;
+
+  // Common numbers
+  readonly Zero: BoxedExpression;
+  readonly One: BoxedExpression;
+  readonly Half: BoxedExpression;
+  readonly NegativeOne: BoxedExpression;
+  readonly I: BoxedExpression;
+  readonly NaN: BoxedExpression;
+  readonly PositiveInfinity: BoxedExpression;
+  readonly NegativeInfinity: BoxedExpression;
+  readonly ComplexInfinity: BoxedExpression;
 
   /** @internal */
   _BIGNUM_NAN: Decimal;
@@ -189,7 +201,6 @@ export class ComputeEngine implements IComputeEngine {
   private _commonSymbols: { [symbol: string]: null | BoxedExpression } = {
     True: null,
     False: null,
-    Maybe: null,
 
     All: null,
     Nothing: null,
@@ -199,6 +210,7 @@ export class ComputeEngine implements IComputeEngine {
 
     Pi: null,
     ImaginaryUnit: null,
+    ExponentialE: null,
   };
   /** @internal */
   private _commonNumbers: { [num: number]: null | BoxedExpression } = {
@@ -225,9 +237,9 @@ export class ComputeEngine implements IComputeEngine {
     [dom in DomainLiteral]: null | BoxedDomain;
   }> = {
     Anything: null,
+    Void: null,
     NothingDomain: null,
     Booleans: null,
-    MaybeBooleans: null,
     Strings: null,
     Domains: null,
     Symbols: null,
@@ -247,7 +259,7 @@ export class ComputeEngine implements IComputeEngine {
     NumericFunctions: null, // (Numbers^n) -> Numbers
     RealFunctions: null, // (ExtendedRealNumbers^n) -> ExtendRealNumbers
     LogicOperators: null, // (Booleans, Booleans) -> Boolean
-    Predicates: null, // (Anything^n) -> MaybeBooleans
+    Predicates: null, // (Anything^n) -> Booleans
   };
 
   /**
@@ -365,15 +377,15 @@ export class ComputeEngine implements IComputeEngine {
 
     this.tolerance = options?.tolerance ?? NUMERIC_TOLERANCE;
 
-    this._ZERO = new BoxedNumber(this, 0);
-    this._ONE = new BoxedNumber(this, 1);
-    this._HALF = new BoxedNumber(this, [1, 2]);
-    this._NEGATIVE_ONE = new BoxedNumber(this, -1);
-    this._I = new BoxedNumber(this, Complex.I);
-    this._NAN = new BoxedNumber(this, Number.NaN);
-    this._POSITIVE_INFINITY = new BoxedNumber(this, Number.POSITIVE_INFINITY);
-    this._NEGATIVE_INFINITY = new BoxedNumber(this, Number.NEGATIVE_INFINITY);
-    this._COMPLEX_INFINITY = new BoxedNumber(this, Complex.INFINITY);
+    this.Zero = new BoxedNumber(this, 0);
+    this.One = new BoxedNumber(this, 1);
+    this.Half = new BoxedNumber(this, [1, 2]);
+    this.NegativeOne = new BoxedNumber(this, -1);
+    this.I = new BoxedNumber(this, Complex.I);
+    this.NaN = new BoxedNumber(this, Number.NaN);
+    this.PositiveInfinity = new BoxedNumber(this, Number.POSITIVE_INFINITY);
+    this.NegativeInfinity = new BoxedNumber(this, Number.NEGATIVE_INFINITY);
+    this.ComplexInfinity = new BoxedNumber(this, Complex.INFINITY);
 
     // Reset the caches/create numeric constants
     this.reset();
@@ -397,7 +409,12 @@ export class ComputeEngine implements IComputeEngine {
     for (const d of Object.keys(this._commonDomains)) {
       if (this._commonDomains[d] && !this._commonDomains[d]!.symbolDefinition)
         this._commonDomains[d]!.bind(this.context);
-      else this._commonDomains[d] = boxDomain(this, d as DomainLiteral);
+      else {
+        this._commonDomains[d] = new _BoxedDomain(
+          this,
+          DOMAIN_ALIAS[d] ?? (d as DomainLiteral)
+        );
+      }
     }
 
     // Populate the table of common symbols
@@ -407,6 +424,18 @@ export class ComputeEngine implements IComputeEngine {
       boxedSymbol.bind();
       this._commonSymbols[sym] = boxedSymbol;
     }
+
+    this.Anything = this._commonDomains.Anything!;
+    this.Void = this._commonDomains.Void!;
+    this.Strings = this._commonDomains.Strings!;
+    this.Booleans = this._commonDomains.Booleans!;
+    this.Numbers = this._commonDomains.Numbers!;
+
+    this.True = this._commonSymbols.True!;
+    this.False = this._commonSymbols.False!;
+    this.Pi = this._commonSymbols.Pi!;
+    this.E = this._commonSymbols.ExponentialE!;
+    this.Nothing = this._commonSymbols.Nothing!;
 
     // Once a scope is set and the default dictionaries loaded
     // we can reference symbols for the domain names and other constants
@@ -1142,8 +1171,7 @@ export class ComputeEngine implements IComputeEngine {
 
     let value = arg2 as AssignValue;
 
-    if (typeof value === 'boolean')
-      value = value ? this.symbol('True') : this.symbol('True');
+    if (typeof value === 'boolean') value = value ? this.True : this.False;
 
     //
     // Is the value a LaTeX string (starts/ends with $ or $$)?
@@ -1219,12 +1247,11 @@ export class ComputeEngine implements IComputeEngine {
 
     //
     // 3. The identifier has not been declared yet.
-    //    Declare it automatically, depending on the domain of the value
     //
 
     if (value === undefined || value === null) {
-      if (args) this.defineFunction(id, { signature: { domain: 'Functions' } });
-      else this.defineSymbol(id, { domain: 'Anything' });
+      // If we don't have a value, let type inference or explicit
+      // declaration handle it.
       return this;
     }
 
@@ -1452,8 +1479,8 @@ export class ComputeEngine implements IComputeEngine {
     if (Array.isArray(message) && message[0] === 'incompatible-domain') {
       msg = new BoxedFunction(this, 'ErrorCode', [
         this.string('incompatible-domain'),
-        boxDomain(this, message[1] as DomainExpression),
-        boxDomain(this, message[2] as DomainExpression),
+        this.domain(message[1] as DomainExpression),
+        this.domain(message[2] as DomainExpression),
       ]);
     }
 
@@ -1521,7 +1548,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   sqrt(base: BoxedExpression, metadata?: Metadata) {
-    return canonicalPower(this, base, this._HALF, metadata);
+    return canonicalPower(this, base, this.Half, metadata);
   }
 
   pow(
@@ -1532,13 +1559,14 @@ export class ComputeEngine implements IComputeEngine {
     // Short path. Note that arguments are **not** validated.
 
     // Handle complex numbers (exp^{ci}}) as a special case
-    if (
-      base.symbol === 'ExponentialE' &&
-      exponent instanceof Complex &&
-      exponent.re === 0
-    ) {
+    if (base.symbol === 'ExponentialE' && exponent instanceof Complex) {
       const im = exponent.im;
-      return this.number(this.complex(Math.cos(im), Math.sin(im)));
+      const re = exponent.re;
+      if (re === 0)
+        return this.number(this.complex(Math.cos(im), Math.sin(im)));
+      if (im === 0) return this.number(Math.exp(re));
+      const e = Math.exp(re);
+      return this.number(this.complex(e * Math.cos(im), e * Math.sin(im)));
     }
 
     // The logic here handles the cases where the exponent is a number or Rational
@@ -1581,9 +1609,9 @@ export class ComputeEngine implements IComputeEngine {
 
   inv(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-    if (expr.isOne) return this._ONE;
-    if (expr.isNegativeOne) return this._NEGATIVE_ONE;
-    if (expr.isInfinity) return this._ZERO;
+    if (expr.isOne) return this.One;
+    if (expr.isNegativeOne) return this.NegativeOne;
+    if (expr.isInfinity) return this.Zero;
     const n = expr.numericValue;
     if (n !== null) {
       if (isRational(n)) return this.number(inverse(n), { metadata });
@@ -1592,7 +1620,7 @@ export class ComputeEngine implements IComputeEngine {
 
       if (n instanceof Decimal && n.isInteger())
         return this.number([BigInt(1), bigint(n)], { metadata });
-      return this._fn('Divide', [this._ONE, expr], metadata);
+      return this._fn('Divide', [this.One, expr], metadata);
     }
 
     if (expr.head === 'Sqrt')
@@ -1602,7 +1630,7 @@ export class ComputeEngine implements IComputeEngine {
       return this._fn('Divide', [expr[1], expr[0]], metadata);
 
     // Inverse(expr) -> expr^{-1}
-    let e = this._NEGATIVE_ONE;
+    let e = this.NegativeOne;
 
     if (expr.head === 'Power') {
       // Inverse(x^{-1}) -> x
@@ -1612,7 +1640,7 @@ export class ComputeEngine implements IComputeEngine {
       e = canonicalNegate(expr.op2);
       expr = expr.op1;
     }
-    if (e.isNegativeOne) return this._fn('Divide', [this._ONE, expr], metadata);
+    if (e.isNegativeOne) return this._fn('Divide', [this.One, expr], metadata);
     return this._fn('Power', [expr, e], metadata);
   }
 
@@ -1652,13 +1680,13 @@ export class ComputeEngine implements IComputeEngine {
 
     // These three are not symbols (some of them are not even valid
     // identifiers) but they're a common type
-    if (name === 'NaN') return this._NAN;
-    if (name === 'Infinity') return this._POSITIVE_INFINITY;
-    if (name === '+Infinity') return this._POSITIVE_INFINITY;
-    if (name === '-Infinity') return this._NEGATIVE_INFINITY;
+    if (name === 'NaN') return this.NaN;
+    if (name === 'Infinity') return this.PositiveInfinity;
+    if (name === '+Infinity') return this.PositiveInfinity;
+    if (name === '-Infinity') return this.NegativeInfinity;
 
     // `Half` is a synonym for the rational 1/2
-    if (name === 'Half') return this._HALF;
+    if (name === 'Half') return this.Half;
 
     if (this.strict && !isValidIdentifier(name)) {
       const where = options?.metadata?.latex;
@@ -1701,7 +1729,35 @@ export class ComputeEngine implements IComputeEngine {
       if (expr) return expr;
     }
 
-    return boxDomain(this, domain as DomainExpression, metadata);
+    // @fastpath: skip validity checks when not in stric mode
+    if (!this.strict) {
+      if (typeof domain === 'string') {
+        const expr = DOMAIN_ALIAS[domain];
+        if (expr) return this.domain(expr);
+      }
+      return new _BoxedDomain(this, domain as DomainExpression, metadata);
+    }
+
+    // Wrapped in a `Domain` expression
+    if (Array.isArray(domain) && (domain[0] as string) === 'Domain')
+      domain = domain[1] as DomainExpression;
+
+    if (typeof domain === 'string') {
+      const expr = DOMAIN_ALIAS[domain];
+      if (expr) return this.domain(expr);
+      if (!isDomainLiteral(domain))
+        throw Error('Expected a domain literal, got ' + domain);
+      return new _BoxedDomain(this, domain, metadata);
+    }
+
+    if (!Array.isArray(domain) || domain.length === 0)
+      throw Error('Expected a valid domain');
+
+    const constructor = domain[0];
+
+    if (!DOMAIN_CONSTRUCTORS.includes(constructor))
+      throw Error('Expected a domain constructor, got ' + constructor);
+    return new _BoxedDomain(this, domain, metadata);
   }
 
   /*
@@ -1727,32 +1783,32 @@ export class ComputeEngine implements IComputeEngine {
     //
     if (options.metadata === undefined) {
       if (typeof value === 'bigint') {
-        if (value === BigInt(1)) return this._ONE;
-        if (value === BigInt(0)) return this._ZERO;
-        if (value === BigInt(-1)) return this._NEGATIVE_ONE;
+        if (value === BigInt(1)) return this.One;
+        if (value === BigInt(0)) return this.Zero;
+        if (value === BigInt(-1)) return this.NegativeOne;
       }
       if (typeof value === 'number') {
         const n = value;
-        if (n === 1) return this._ONE;
-        if (n === 0) return this._ZERO;
-        if (n === -1) return this._NEGATIVE_ONE;
+        if (n === 1) return this.One;
+        if (n === 0) return this.Zero;
+        if (n === -1) return this.NegativeOne;
 
         if (Number.isInteger(n) && this._commonNumbers[n] !== undefined) {
           if (this._commonNumbers[n] === null)
-            this._commonNumbers[n] = boxNumber(this, value) ?? this._NAN;
+            this._commonNumbers[n] = boxNumber(this, value) ?? this.NaN;
           return this._commonNumbers[n]!;
         }
 
-        if (Number.isNaN(n)) return this._NAN;
+        if (Number.isNaN(n)) return this.NaN;
 
         if (!Number.isFinite(n))
-          return n < 0 ? this._NEGATIVE_INFINITY : this._POSITIVE_INFINITY;
+          return n < 0 ? this.NegativeInfinity : this.PositiveInfinity;
       }
     }
 
     if (typeof value === 'bigint') value = this.bignum(value);
 
-    return boxNumber(this, value, options) ?? this._NAN;
+    return boxNumber(this, value, options) ?? this.NaN;
   }
 
   rules(rules: Rule[]): BoxedRuleSet {

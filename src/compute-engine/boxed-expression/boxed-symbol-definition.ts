@@ -76,7 +76,6 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     if (!ce.context) throw Error('No context available');
 
     this.name = name;
-    // if (this.name === 'x') debugger;
     this.wikidata = def.wikidata;
     this.description = def.description;
     this.url = def.url;
@@ -181,7 +180,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
         if (!bignumPreferred(ce) && val instanceof Decimal)
           this._value = ce.number(val.toNumber());
         else if (!complexAllowed(ce) && val instanceof Complex)
-          this._value = ce._NAN;
+          this._value = ce.NaN;
       }
     }
     return this._value ?? undefined;
@@ -520,7 +519,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
         this._defValue = undefined;
         this._value = undefined;
       }
-      this._domain = this._engine.domain('Numbers');
+      this._domain = this._engine.Numbers;
 
       if (!this._flags) this._flags = normalizeFlags(flags);
       else this._flags = { ...this._flags, ...normalizeFlags(flags) };

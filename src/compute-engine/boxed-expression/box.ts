@@ -127,11 +127,11 @@ export function boxNumber(
       );
     const [n, d] = num;
     if (typeof n === 'bigint' && typeof d === 'bigint') {
-      if (n === d) return d === BigInt(0) ? ce._NAN : ce._ONE;
-      if (n === BigInt(0)) return ce._ZERO;
+      if (n === d) return d === BigInt(0) ? ce.NaN : ce.One;
+      if (n === BigInt(0)) return ce.Zero;
       if (d === BigInt(1)) return ce.number(n, options);
       if (d === BigInt(-1)) return ce.number(-n, options);
-      if (n === BigInt(1) && d === BigInt(2)) return ce._HALF;
+      if (n === BigInt(1) && d === BigInt(2)) return ce.Half;
       return new BoxedNumber(ce, [n, d], options);
     }
 
@@ -142,11 +142,11 @@ export function boxNumber(
 
     if (!Number.isInteger(n) || !Number.isInteger(d))
       throw new Error('Array argument to `boxNumber()` should be two integers');
-    if (d === n) return d === 0 ? ce._NAN : ce._ONE;
-    if (n === 0) return ce._ZERO;
+    if (d === n) return d === 0 ? ce.NaN : ce.One;
+    if (n === 0) return ce.Zero;
     if (d === 1) return ce.number(n, options);
     if (d === -1) return ce.number(-n, options);
-    if (n === 1 && d === 2) return ce._HALF;
+    if (n === 1 && d === 2) return ce.Half;
     return new BoxedNumber(ce, [n, d], options);
   }
 
@@ -154,9 +154,9 @@ export function boxNumber(
   // Do we have a complex number?
   //
   if (num instanceof Complex) {
-    if (num.isNaN()) return ce._NAN;
-    if (num.isZero()) return ce._ZERO;
-    if (num.isInfinite()) return ce._COMPLEX_INFINITY;
+    if (num.isNaN()) return ce.NaN;
+    if (num.isZero()) return ce.Zero;
+    if (num.isInfinite()) return ce.ComplexInfinity;
     if (ce.chop(num.im) === 0) return ce.number(num.re, options);
     return new BoxedNumber(ce, num, options);
   }
@@ -187,13 +187,13 @@ export function boxNumber(
     strNum = strNum.replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
 
     // Special case some common values to share boxed instances
-    if (strNum === 'nan') return ce._NAN;
+    if (strNum === 'nan') return ce.NaN;
     if (strNum === 'infinity' || strNum === '+infinity')
-      return ce._POSITIVE_INFINITY;
-    if (strNum === '-infinity') return ce._NEGATIVE_INFINITY;
-    if (strNum === '0') return ce._ZERO;
-    if (strNum === '1') return ce._ONE;
-    if (strNum === '-1') return ce._NEGATIVE_ONE;
+      return ce.PositiveInfinity;
+    if (strNum === '-infinity') return ce.NegativeInfinity;
+    if (strNum === '0') return ce.Zero;
+    if (strNum === '1') return ce.One;
+    if (strNum === '-1') return ce.NegativeOne;
 
     // Do we have repeating digits?
     if (/\([0-9]+\)/.test(strNum)) {
@@ -341,7 +341,7 @@ export function boxFunction(
       const op1 = box(ce, ops[0], options);
       const im = asFloat(op1);
       if (im !== null && im !== 0) return ce.number(ce.complex(0, im), options);
-      return ce.mul([op1, ce._I]);
+      return ce.mul([op1, ce.I]);
     }
     if (ops.length === 2) {
       const op1 = box(ce, ops[0], options);
@@ -349,12 +349,12 @@ export function boxFunction(
       const re = asFloat(op1);
       const im = asFloat(op2);
       if (im !== null && re !== null) {
-        if (im === 0 && re === 0) return ce._ZERO;
+        if (im === 0 && re === 0) return ce.Zero;
         if (im !== null && im !== 0)
           return ce.number(ce.complex(re, im), options);
         return op1;
       }
-      return ce.add([op1, ce.mul([op2, ce._I])], options.metadata);
+      return ce.add([op1, ce.mul([op2, ce.I])], options.metadata);
     }
   }
 

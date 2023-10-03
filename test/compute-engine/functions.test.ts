@@ -4,15 +4,9 @@ function evaluate(expr) {
   return exprToString(engine.box(expr)?.evaluate());
 }
 
-console.log(evaluate(['Hypot', 3, 4]));
-
 engine.assign('f1', ['Function', ['Add', 'q', 1], 'q']);
 
-console.log(evaluate(['f1', 10]));
-console.log(evaluate(['f1']));
-
 engine.assign('f2', ['Add', '_', 1]);
-console.log(evaluate(['f2', 10]));
 
 // Arguments are not checked by the Compute Engine
 // so we must use caution when accessing them
@@ -51,7 +45,7 @@ describe('Anonymous function', () => {
 
 describe('Anonymous function with missing param', () => {
   test('Missing Param Function', () =>
-    expect(evaluate(['f1'])).toMatchInlineSnapshot(`["Add", "q", 1]`)); // @fixme
+    expect(evaluate(['f1'])).toMatchInlineSnapshot(`1`));
   test('Missing Param Expression', () =>
     expect(evaluate(['f2'])).toMatchInlineSnapshot(`["f2"]`));
   test('Missing Param JS Function', () =>
@@ -81,7 +75,7 @@ describe('Anonymous function with anonymous parameters', () => {
   test('Anon Param: F6', () =>
     expect(evaluate(['f6', 10])).toMatchInlineSnapshot(`11`));
   test('Anon Param: F7', () =>
-    expect(evaluate(['f7', 10])).toMatchInlineSnapshot(`["Add", "_2", 1]`)); // @fixme not clear what the right answer is
+    expect(evaluate(['f7', 10])).toMatchInlineSnapshot(`1`));
   test('Anon Param: F8', () =>
     expect(evaluate(['f8', 10])).toMatchInlineSnapshot(`["f8", 10]`));
   test('Anon Param: F9', () =>

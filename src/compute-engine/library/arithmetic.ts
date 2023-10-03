@@ -28,7 +28,7 @@ import {
   IComputeEngine,
 } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
-import { canonicalNegate, processNegate } from '../symbolic/negate';
+import { processNegate } from '../symbolic/negate';
 import {
   simplifyAdd,
   evalAdd,
@@ -48,17 +48,19 @@ import { applyN, apply2N } from '../symbolic/utils';
 import Decimal from 'decimal.js';
 import Complex from 'complex.js';
 import {
-  validateArgument,
-  validateArgumentCount,
-  validateArguments,
+  checkArg,
+  checkArgs,
+  checkNumericArgs,
+  canonical,
 } from '../boxed-expression/validate';
-import { canonical, flattenSequence } from '../symbolic/flatten';
+import { flattenSequence } from '../symbolic/flatten';
 
 // When considering processing an arithmetic expression, the following
-// are the core functions that should be considered:
+// are the core canonical arithmetic functions that should be considered:
 export type CanonicalArithmeticFunctions =
   | 'Add'
   | 'Negate' // Distributed over mul/div/add
+  | 'Sqrt' // Square root of rationals are preserved as "exact" values
   | 'Multiply'
   | 'Divide'
   | 'Power'
@@ -66,12 +68,12 @@ export type CanonicalArithmeticFunctions =
 
 // Non-canonical functions: the following functions get transformed during
 // canonicalization, and can be ignored as they will not occur in a canonical
-// expression:
+// expression (they are not canonicalized):
 //
 // - Complex -> Complex number
 // - Exp -> Power(E, _)
 // - Root -> Power(_1, 1/_2)
-// - Sqrt -> Power(_, 1/2)
+// - Sqrt -> Power(_, 1/2) (converted if argument is *not* a rational)
 // - Square -> Power(_, 2)
 // - Subtract -> Add(_1, Negate(_2))
 // - Rational -> Rational number
@@ -226,14 +228,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
-          args = validateArguments(ce, canonical(flattenSequence(args)), [
-            'Numbers',
-            'Numbers',
-          ]);
+          args = checkNumericArgs(ce, args, 2);
 
+          const [numer, denom] = args;
           if (args.length !== 2) return ce._fn('Divide', args);
-
-          return ce.div(args[0], args[1]);
+          return ce.div(numer, denom);
         },
         simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
         evaluate: (ce, ops) =>
@@ -256,11 +255,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
-          args = validateArguments(ce, canonical(flattenSequence(args)), [
-            'Numbers',
-          ]);
-          if (args.length !== 1) return ce._fn('Power', args);
-          return ce.pow(ce.symbol('ExponentialE'), args[0]);
+          args = checkNumericArgs(ce, args, 1);
+          if (args.length !== 1) return ce._fn('Power', [ce.E, ...args]);
+          return ce.pow(ce.E, args[0]);
         },
       },
     },
@@ -381,16 +378,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
         canonical: (ce, ops) => {
-          ops = canonical(flattenSequence(ops));
           if (ops.length === 1)
-            return ce._fn('Log', [validateArgument(ce, ops[0], 'Numbers')]);
-          if (ops.length === 2) {
-            const arg = validateArgument(ce, ops[0], 'Numbers');
-            const base = validateArgument(ce, ops[1], 'Numbers');
-            if (base.numericValue === 10) return ce._fn('Log', [arg]);
-            return ce._fn('Log', [arg, base]);
-          }
-          return ce._fn('Log', validateArgumentCount(ce, ops, 2));
+            return ce._fn('Log', [checkArg(ce, ops[0], 'Numbers')]);
+
+          ops = checkNumericArgs(ce, ops, 2);
+          if (ops.length !== 2) return ce._fn('Log', ops);
+          const [arg, base] = ops;
+          if (base.numericValue === 10) return ce._fn('Log', [arg]);
+          return ce._fn('Log', [arg, base]);
         },
         N: (ce, ops) => {
           if (ops[1] === undefined)
@@ -501,12 +496,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return arg;
         },
         canonical: (ce, args) => {
-          args = validateArguments(ce, canonical(flattenSequence(args)), [
-            'Numbers',
-          ]);
+          args = checkNumericArgs(ce, args);
           if (args.length !== 1) return ce._fn('Negate', args);
 
-          return canonicalNegate(args[0]);
+          return ce.neg(args[0]);
         },
         simplify: (ce, ops) => processNegate(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processNegate(ce, ops[0], 'evaluate'),
@@ -529,10 +522,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
-          args = validateArguments(ce, canonical(flattenSequence(args)), [
-            'Numbers',
-            'Numbers',
-          ]);
+          args = checkNumericArgs(ce, args, 2);
           if (args.length !== 2) return ce._fn('Power', args);
 
           return ce.pow(args[0], args[1]);
@@ -578,12 +568,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
           if (args.length === 1)
             return ce._fn('Rational', [
-              validateArgument(ce, args[0], 'ExtendedRealNumbers'),
+              checkArg(ce, args[0], 'ExtendedRealNumbers'),
             ]);
 
-          args = validateArguments(ce, args, ['Integers', 'Integers']);
+          args = checkArgs(ce, args, ['Integers', 'Integers']);
 
-          if (args.length !== 2) return ce._fn('Rational', args);
+          if (args.length !== 2 || !args[0].isValid || !args[1].isValid)
+            return ce._fn('Rational', args);
 
           return ce.div(args[0], args[1]);
         },
@@ -626,16 +617,11 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
-          args = canonical(flattenSequence(args));
+          args = checkNumericArgs(ce, args, 2);
 
-          if (args.length > 2)
-            return ce._fn('Root', validateArgumentCount(ce, args, 2));
-
-          const [base, exp] = [
-            validateArgument(ce, args[0], 'Numbers'),
-            validateArgument(ce, args[1], 'Numbers'),
-          ];
-          if (!exp.isValid || !base.isValid) return ce._fn('Root', [base, exp]);
+          const [base, exp] = args;
+          if (args.length !== 2 || !base.isValid || !exp.isValid)
+            return ce._fn('Root', args);
 
           return ce.pow(base, ce.inv(exp));
         },
@@ -664,23 +650,23 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Numbers', 'Integers'],
         simplify: (ce, ops) => {
           const s = ops[0].sgn;
-          if (s === 0) return ce._ZERO;
-          if (s === 1) return ce._ONE;
-          if (s === -1) return ce._NEGATIVE_ONE;
+          if (s === 0) return ce.Zero;
+          if (s === 1) return ce.One;
+          if (s === -1) return ce.NegativeOne;
           return undefined;
         },
         evaluate: (ce, ops) => {
           const s = ops[0].sgn;
-          if (s === 0) return ce._ZERO;
-          if (s === 1) return ce._ONE;
-          if (s === -1) return ce._NEGATIVE_ONE;
+          if (s === 0) return ce.Zero;
+          if (s === 1) return ce.One;
+          if (s === -1) return ce.NegativeOne;
           return undefined;
         },
         N: (ce, ops) => {
           const s = ops[0].sgn;
-          if (s === 0) return ce._ZERO;
-          if (s === 1) return ce._ONE;
-          if (s === -1) return ce._NEGATIVE_ONE;
+          if (s === 0) return ce.Zero;
+          if (s === 1) return ce.One;
+          if (s === -1) return ce.NegativeOne;
           return undefined;
         },
       },
@@ -724,7 +710,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           args = canonical(flattenSequence(args));
           if (args.length !== 1) return ce._fn('Sqrt', args);
-          return ce.pow(args[0], ce._HALF);
+          return ce.pow(args[0], ce.Half);
         },
         simplify: (ce, ops) => processSqrt(ce, ops[0], 'simplify'),
         evaluate: (ce, ops) => processSqrt(ce, ops[0], 'evaluate'),
@@ -757,12 +743,16 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           // Not necessarily legal, but probably what was intended:
           // ['Subtract', 'x'] -> ['Negate', 'x']
-          args = canonical(flattenSequence(args));
-          if (args.length === 1) return canonicalNegate(args[0]);
-          args = validateArgumentCount(ce, args, 2);
-          if (args.length !== 2) return ce._fn('Subtract', args);
-          if (!args.every((x) => x.isValid)) return ce._fn('Subtract', args);
-          return ce.add([args[0], canonicalNegate(args[1])]);
+          if (args.length === 1) {
+            const x = checkArg(ce, args[0], 'Numbers');
+            if (x.isValid) return ce.neg(x);
+          }
+
+          args = checkNumericArgs(ce, args, 2);
+          const [a, b] = args;
+          if (args.length !== 2 || !a.isValid || !b.isValid)
+            return ce._fn('Subtract', args);
+          return ce.add([a, ce.neg(b)]);
         },
       },
     },
@@ -906,12 +896,12 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
         simplify: (ce, ops) => {
-          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+          if (ops.length === 0) return ce.NegativeInfinity;
           if (ops.length === 1) return ops[0];
           return ce.fn('Max', ops);
         },
         evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+          if (ops.length === 0) return ce.NegativeInfinity;
 
           let result: BoxedExpression | undefined = undefined;
           const rest: BoxedExpression[] = [];
@@ -922,7 +912,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           }
           if (rest.length > 0)
             return ce.box(result ? ['Max', result, ...rest] : ['Max', ...rest]);
-          return result ?? ce._NAN;
+          return result ?? ce.NaN;
         },
       },
     },
@@ -934,12 +924,12 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
         simplify: (ce, ops) => {
-          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+          if (ops.length === 0) return ce.NegativeInfinity;
           if (ops.length === 1) return ops[0];
           return ce.fn('Min', ops);
         },
         evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce._NEGATIVE_INFINITY;
+          if (ops.length === 0) return ce.NegativeInfinity;
 
           let result: BoxedExpression | undefined = undefined;
           const rest: BoxedExpression[] = [];
@@ -950,7 +940,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           }
           if (rest.length > 0)
             return ce.box(result ? ['Min', result, ...rest] : ['Min', ...rest]);
-          return result ?? ce._NAN;
+          return result ?? ce.NaN;
         },
       },
     },

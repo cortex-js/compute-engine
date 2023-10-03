@@ -2,11 +2,7 @@ import { BoxedExpression, IdentifierDefinitions } from '../public';
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { asSmallInteger, fromDigits } from '../numerics/numeric';
 
-import {
-  validateArgument,
-  validateArgumentCount,
-} from '../boxed-expression/validate';
-import { canonical } from '../symbolic/flatten';
+import { checkArg, checkArity } from '../boxed-expression/validate';
 import { randomExpression } from './random-expression';
 import { apply, canonicalFunctionExpression } from '../function-utils';
 
@@ -33,8 +29,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'FunctionOf',
           'Anything',
-          ['OptArg', 'Strings'],
-          ['OptArg', 'Strings'],
+          ['OptArg', 'Strings', 'Strings'],
           'Anything',
         ],
         codomain: (_ce, args) => args[0].domain,
@@ -61,14 +56,9 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       complexity: 500,
       hold: 'all',
       signature: {
-        domain: [
-          'FunctionOf',
-          'Strings',
-          ['OptArg', ['VarArg', 'Anything']],
-          'Anything',
-        ],
+        domain: ['FunctionOf', 'Strings', ['VarArg', 'Anything'], 'Anything'],
         canonical: (ce, args) => {
-          const code = validateArgument(ce, args[0], 'Strings').string;
+          const code = checkArg(ce, args[0], ce.Strings).string;
           if (code === 'incompatible-domain') {
             return ce._fn('ErrorCode', [
               ce.string(code),
@@ -83,14 +73,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Hold: {
       hold: 'all',
       signature: {
-        domain: 'Functions',
+        domain: ['FunctionOf', 'Anything', 'Anything'],
         codomain: (ce, args) =>
-          args[0].symbol ? ce.domain('Symbols') : ce.domain('Anything'),
-        // To make a canonical expression, don't canonicalize the args
+          args[0].symbol ? ce.domain('Symbols') : ce.Anything,
+        // By definition, for arguments of the canonical expression of
+        // `Hold` are not canonicalized.
         canonical: (ce, args) =>
-          args.length !== 1
-            ? ce._fn('Hold', validateArgumentCount(ce, args, 1))
-            : ce._fn('Hold', [validateArgument(ce, args[0], 'Anything')]),
+          args.length !== 1 ? null : ce._fn('Hold', args),
       },
     },
     HorizontalSpacing: {
@@ -150,8 +139,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
         codomain: (_ce, ops) => ops[0].domain,
-        canonical: (ce, ops) =>
-          ce._fn('Evaluate', validateArgumentCount(ce, canonical(ops), 1)),
+        canonical: (ce, ops) => ce._fn('Evaluate', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].evaluate(),
       },
     },
@@ -160,12 +148,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       complexity: 9876,
       hold: 'all',
       signature: {
-        domain: [
-          'FunctionOf',
-          'Anything',
-          ['OptArg', ['VarArg', 'Symbols']],
-          'Functions',
-        ],
+        domain: ['FunctionOf', 'Anything', ['VarArg', 'Symbols'], 'Functions'],
         canonical: (ce, args) => {
           // When canonicalizing a function expression, we need to
           // create a new scope and declare all the arguments as
@@ -194,8 +177,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
         codomain: (_ce, ops) => ops[0].domain,
-        canonical: (ce, ops) =>
-          ce._fn('Simplify', validateArgumentCount(ce, canonical(ops), 1)),
+        canonical: (ce, ops) => ce._fn('Simplify', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].simplify(),
       },
     },
@@ -205,8 +187,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
         codomain: (_ce, ops) => ops[0].domain,
-        canonical: (ce, ops) =>
-          ce._fn('N', validateArgumentCount(ce, canonical(ops), 1)),
+        canonical: (ce, ops) => ce._fn('N', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].N(),
       },
     },
@@ -217,7 +198,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const op1 = ops[0];
           if (typeof op1?.head === 'string') return ce.symbol(op1.head);
-          return op1?.head ?? ce.symbol('Nothing');
+          return op1?.head ?? ce.Nothing;
         },
       },
     },
@@ -233,9 +214,9 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     // @todo: need review
     Signatures: {
       signature: {
-        domain: ['FunctionOf', 'Symbols', ['OptArg', ['ListOf', 'Domains']]],
+        domain: ['FunctionOf', 'Symbols', ['ListOf', 'Domains']],
         canonical: (ce, ops) => {
-          ops = validateArgumentCount(ce, ops, 1);
+          ops = checkArity(ce, ops, 1);
           if (!ops[0].symbol)
             return ce._fn('Signatures', [
               ce.error(
@@ -247,9 +228,9 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         },
         evaluate: (ce, ops) => {
           const name = ops[0].symbol;
-          if (!name) return ce.symbol('Nothing');
+          if (!name) return ce.Nothing;
           const result = ce.lookupFunction(name);
-          if (!result) return ce.symbol('Nothing');
+          if (!result) return ce.fn('List', []);
           return ce.fn('List', [result.signature.domain]);
         },
       },
@@ -280,8 +261,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
-        codomain: (_ce, args) => {
-          if (args[0].isFunction) return args[0].domain;
+        codomain: (_ce, args: BoxedExpression[]) => {
+          if (args[0].domain.isFunction) return args[0].domain;
           return args[0].domain;
         },
         canonical: (ce, args) => {
@@ -336,7 +317,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Anything'], 'Anything'],
         canonical: (ce, ops) => {
-          if (ops.length === 0) return ce.symbol('Nothing');
+          if (ops.length === 0) return ce.Nothing;
           const arg = ops
             .map(
               (x) => x.symbol ?? x.string ?? asSmallInteger(x)?.toString() ?? ''
@@ -345,7 +326,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           if (arg.length > 0) return ce.symbol(arg);
 
-          return ce.symbol('Nothing');
+          return ce.Nothing;
         },
         // Note: a `["Symbol"]` expression is never evaluated, it gets
         // transformed into something else (a symbol) during canonicalization
@@ -411,7 +392,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     // Serialize one or more expressions to LaTeX
     Latex: {
       signature: {
-        domain: ['FunctionOf', ['OptArg', ['VarArg', 'Anything']], 'Strings'],
+        domain: ['FunctionOf', ['VarArg', 'Anything'], 'Strings'],
         evaluate: (ce, ops) =>
           ce.fn('LatexString', [ce.string(joinLatex(ops.map((x) => x.latex)))]),
       },

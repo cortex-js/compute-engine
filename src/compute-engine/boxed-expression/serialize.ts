@@ -74,7 +74,7 @@ export function serializeJsonCanonicalFunction(
     return serializeJsonFunction(
       ce,
       'Multiply',
-      [args[0], ce._fn('Power', [args[1], ce._NEGATIVE_ONE])],
+      [args[0], ce._fn('Power', [args[1], ce.NegativeOne])],
       metadata
     );
   }
@@ -115,7 +115,7 @@ export function serializeJsonCanonicalFunction(
         return serializeJsonFunction(
           ce,
           'Divide',
-          [ce._ONE, exp === -1 ? args[0] : ce.pow(args[0], -exp)],
+          [ce.One, exp === -1 ? args[0] : ce.pow(args[0], -exp)],
           metadata
         );
       }
@@ -128,7 +128,7 @@ export function serializeJsonCanonicalFunction(
         return serializeJsonFunction(
           ce,
           'Divide',
-          [ce._ONE, ce._fn('Sqrt', [args[0]])],
+          [ce.One, ce._fn('Sqrt', [args[0]])],
           metadata
         );
 
@@ -151,14 +151,14 @@ export function serializeJsonCanonicalFunction(
             return serializeJsonFunction(
               ce,
               'Divide',
-              [ce._ONE, ce._fn('Sqrt', [args[0]])],
+              [ce.One, ce._fn('Sqrt', [args[0]])],
               metadata
             );
           if (!exclusions.includes('Root'))
             return serializeJsonFunction(
               ce,
               'Divide',
-              [ce._ONE, ce._fn('Root', [args[0], ce.number(r[1])])],
+              [ce.One, ce._fn('Root', [args[0], ce.number(r[1])])],
               metadata
             );
         }
@@ -209,7 +209,7 @@ export function serializeJsonFunction(
       return serializeJsonFunction(
         ce,
         'Add',
-        [args[0], ce._fn('Multiply', [args[1], ce.symbol('ImaginaryUnit')])],
+        [args[0], ce._fn('Multiply', [args[1], ce.I])],
         metadata
       );
 
@@ -217,7 +217,7 @@ export function serializeJsonFunction(
       return serializeJsonFunction(
         ce,
         'Power',
-        [args[0], exclusions.includes('Half') ? ce.number([1, 2]) : ce._HALF],
+        [args[0], exclusions.includes('Half') ? ce.number([1, 2]) : ce.Half],
         metadata
       );
 
@@ -230,7 +230,7 @@ export function serializeJsonFunction(
           return serializeJsonFunction(
             ce,
             'Divide',
-            [ce._ONE, ce._fn('Power', [args[0], ce.number([1, -n])])],
+            [ce.One, ce._fn('Power', [args[0], ce.number([1, -n])])],
             metadata
           );
 
@@ -252,12 +252,7 @@ export function serializeJsonFunction(
       );
 
     if (head === 'Exp' && args.length === 1)
-      return serializeJsonFunction(
-        ce,
-        'Power',
-        [ce.symbol('ExponentialE'), args[0]],
-        metadata
-      );
+      return serializeJsonFunction(ce, 'Power', [ce.E, args[0]], metadata);
 
     // Note: even though 'Subtract' is boxed out, we still need to handle it here
     // because the function may be called with a 'Subtract' head.

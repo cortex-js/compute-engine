@@ -157,6 +157,10 @@ export type BoxedRule = [
 
 export type BoxedRuleSet = Set<BoxedRule>;
 
+// Use `contravariant` for the arguments of a function.
+// Use `covariant` for the result of a function.
+// Use `bivariant` to check the domain matches exactly.
+
 export type DomainCompatibility =
   | 'covariant' // A <: B
   | 'contravariant' // A :> B
@@ -165,7 +169,6 @@ export type DomainCompatibility =
 
 /** A domain constructor is the head of a domain expression. */
 export type DomainConstructor =
-  | 'InvalidDomain'
   | 'FunctionOf' // <domain-of-args>* <co-domain>
   | 'ListOf' // <domain-of-elements>
   | 'DictionaryOf'
@@ -189,7 +192,6 @@ export type DomainLiteral =
   | 'Void'
   | 'NothingDomain'
   | 'Booleans'
-  | 'MaybeBooleans'
   | 'Strings'
   | 'Symbols'
   | 'Collections'
@@ -226,13 +228,12 @@ export type DomainLiteral =
 
 export type DomainExpression<T = SemiBoxedExpression> =
   | DomainLiteral
-  | ['InvalidDomain', string]
   | ['Union', ...(DomainExpression<T> | BoxedExpression)[]]
   | ['Intersection', ...(DomainExpression<T> | BoxedExpression)[]]
   | ['ListOf', DomainExpression<T>]
   | ['DictionaryOf', DomainExpression<T>]
   | ['TupleOf', ...DomainExpression<T>[]]
-  | ['OptArg', DomainExpression<T>]
+  | ['OptArg', ...DomainExpression<T>[]]
   | ['VarArg', DomainExpression<T>]
   // | ['Value', T]
   // | ['Head', string]
@@ -244,30 +245,29 @@ export type DomainExpression<T = SemiBoxedExpression> =
   | ['FunctionOf', ...DomainExpression<T>[]];
 
 export interface BoxedDomain extends BoxedExpression {
-  is(s: BoxedDomain): boolean;
+  get canonical(): BoxedDomain;
+  get json(): Expression;
 
   /** True if a valid domain, and compatible with `dom`
-   * kind is 'covariant' by default, i.e. `this <: dom`
+   * `kind` is '"covariant"' by default, i.e. `this <: dom`
    */
   isCompatible(
     dom: BoxedDomain | DomainLiteral,
     kind?: DomainCompatibility
   ): boolean;
 
-  get base(): DomainLiteral | null;
+  get base(): DomainLiteral;
+
   get ctor(): DomainConstructor | null;
-  get domainArgs():
-    | (DomainExpression<BoxedExpression> | BoxedExpression | string)[]
-    | null;
-  get codomain(): BoxedDomain | null;
+  get params(): BoxedDomain[];
+  get optParams(): BoxedDomain[];
+  get restParam(): BoxedDomain | null;
+  get result(): BoxedDomain | null;
 
-  get canonical(): BoxedDomain;
-  get json(): Expression;
-
-  // readonly isNothing: boolean;
-  // readonly isBoolean: boolean;
   readonly isNumeric: boolean;
   readonly isFunction: boolean;
+  // readonly isNothing: boolean;
+  // readonly isBoolean: boolean;
   // readonly isPredicate: boolean;
   /**
    * If true, when all the arguments are numeric, the result of the
@@ -297,7 +297,7 @@ export interface BoxedDomain extends BoxedExpression {
    *
    * **Default:** `false`
    */
-  readonly isRelationalOperator: boolean;
+  // readonly isRelationalOperator: boolean;
 }
 
 /**
@@ -1598,11 +1598,14 @@ export type FunctionSignature = {
    * can be put in canonical form.
    *
    * This handler should validate the domain and number of the arguments.
+   *
    * If a required argument is missing, it should be indicated with a
    * `["Error", "'missing"]` expression. If more arguments than expected
-   * are present, this should be indicated with a `unexpected-argument` error.
+   * are present, this should be indicated with an
+   * ["Error", "'unexpected-argument'"]` error expression
+   *
    * If the domain of an argument is not compatible, it should be indicated
-   * with a `incompatible-domain` error.
+   * with an `incompatible-domain` error.
    *
    * `["Sequence"]` expressions are not folded and need to be handled
    *  explicitly.
@@ -1612,8 +1615,8 @@ export type FunctionSignature = {
    * arguments should be sorted in canonical order.
    *
    * The handler can make transformations based on the value of the arguments
-   * that are exact and literal
-   * (i.e. `arg.numericValue !== null && arg.isExact`).
+   * that are exact and literal (i.e.
+   * `arg.numericValue !== null && arg.isExact`).
    *
    * Values of symbols should not be substituted, unless they have
    * a `holdUntil` attribute of `"never"`.
@@ -2059,24 +2062,29 @@ export type AssignValue =
 export interface IComputeEngine {
   latexDictionary: readonly LatexDictionaryEntry[];
 
-  /** @internal */
-  readonly _ZERO: BoxedExpression;
-  /** @internal */
-  readonly _ONE: BoxedExpression;
-  /** @internal */
-  readonly _HALF: BoxedExpression;
-  /** @internal */
-  readonly _NEGATIVE_ONE: BoxedExpression;
-  /** @internal */
-  readonly _I: BoxedExpression;
-  /** @internal */
-  readonly _NAN: BoxedExpression;
-  /** @internal */
-  readonly _POSITIVE_INFINITY: BoxedExpression;
-  /** @internal */
-  readonly _NEGATIVE_INFINITY: BoxedExpression;
-  /** @internal */
-  readonly _COMPLEX_INFINITY: BoxedExpression;
+  // Common domains
+  readonly Anything: BoxedDomain;
+  readonly Void: BoxedDomain;
+  readonly Strings: BoxedDomain;
+  readonly Booleans: BoxedDomain;
+  readonly Numbers: BoxedDomain;
+
+  // Common symbols
+  readonly True: BoxedExpression;
+  readonly False: BoxedExpression;
+  readonly Pi: BoxedExpression;
+  readonly E: BoxedExpression;
+  readonly Nothing: BoxedExpression;
+
+  readonly Zero: BoxedExpression;
+  readonly One: BoxedExpression;
+  readonly Half: BoxedExpression;
+  readonly NegativeOne: BoxedExpression;
+  readonly I: BoxedExpression;
+  readonly NaN: BoxedExpression;
+  readonly PositiveInfinity: BoxedExpression;
+  readonly NegativeInfinity: BoxedExpression;
+  readonly ComplexInfinity: BoxedExpression;
 
   /** @internal */
   readonly _BIGNUM_NAN: Decimal;

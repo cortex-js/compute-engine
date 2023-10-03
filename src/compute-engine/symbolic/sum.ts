@@ -213,13 +213,13 @@ export class Sum {
   terms(mode: 'expression' | 'numeric'): BoxedExpression[] {
     const ce = this.engine;
 
-    if (this._naNCount > 0) return [ce._NAN];
-    if (this._imaginary !== 0 && !complexAllowed(ce)) return [ce._NAN];
+    if (this._naNCount > 0) return [ce.NaN];
+    if (this._imaginary !== 0 && !complexAllowed(ce)) return [ce.NaN];
 
     if (this._posInfinityCount > 0 && this._negInfinityCount > 0)
-      return [ce._NAN];
-    if (this._posInfinityCount > 0) return [ce._POSITIVE_INFINITY];
-    if (this._negInfinityCount > 0) return [ce._NEGATIVE_INFINITY];
+      return [ce.NaN];
+    if (this._posInfinityCount > 0) return [ce.PositiveInfinity];
+    if (this._negInfinityCount > 0) return [ce.NegativeInfinity];
 
     const xs: BoxedExpression[] = [];
     for (const { coef, term } of this._terms) {
@@ -259,7 +259,7 @@ export class Sum {
     } else {
       if (!isRationalZero(this._rational)) xs.push(ce.number(this._rational));
       if (this._imaginary !== 0) {
-        if (!complexAllowed(ce)) return [ce._NAN];
+        if (!complexAllowed(ce)) return [ce.NaN];
         xs.push(ce.number(ce.complex(0, this._imaginary)));
       }
       if (bignumPreferred(this.engine)) {
@@ -277,7 +277,7 @@ export class Sum {
     const ce = this.engine;
 
     const xs = this.terms(mode);
-    if (xs.length === 0) return ce._ZERO;
+    if (xs.length === 0) return ce.Zero;
     if (xs.length === 1) return xs[0];
 
     return ce._fn('Add', sortAdd(ce, xs));

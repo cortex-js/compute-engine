@@ -197,7 +197,6 @@ export class BoxedSymbol extends _BoxedExpression {
     if (!def) {
       // We don't know anything about this symbol yet, create a definition
       const scope = this.engine.swapScope(this._scope);
-      if (this.engine.lookupSymbol(this._name)) debugger;
       console.assert(this.engine.lookupSymbol(this._name) === undefined);
       this._def = this.engine.defineSymbol(this._name, {
         domain,
@@ -304,8 +303,7 @@ export class BoxedSymbol extends _BoxedExpression {
     // Determine the new value
     //
     let v: BoxedExpression | undefined;
-    if (typeof value === 'boolean')
-      value = value ? ce.symbol('True') : ce.symbol('True');
+    if (typeof value === 'boolean') value = value ? ce.True : ce.False;
     if (typeof value === 'string') value = ce.string(value);
 
     if (value !== undefined) {
@@ -331,7 +329,7 @@ export class BoxedSymbol extends _BoxedExpression {
     } else {
       // Create a new symbol definition
       let dom = v?.domain;
-      if (dom?.isNumeric) dom = ce.domain('Numbers');
+      if (dom?.isNumeric) dom = ce.Numbers;
       this._def = ce.defineSymbol(this._name, {
         value: v,
         domain: dom ?? 'Anything',
@@ -345,7 +343,7 @@ export class BoxedSymbol extends _BoxedExpression {
         this.functionDefinition.signature.domain ??
         this.engine.domain('Functions')
       );
-    return this.symbolDefinition?.domain ?? this.engine.domain('Anything');
+    return this.symbolDefinition?.domain ?? this.engine.Anything;
   }
 
   set domain(inDomain: DomainExpression | BoxedDomain) {

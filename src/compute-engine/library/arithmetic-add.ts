@@ -7,7 +7,7 @@ import { Sum } from '../symbolic/sum';
 import { asBignum, asFloat, MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
-import { validateArgument } from '../boxed-expression/validate';
+import { checkArg } from '../boxed-expression/validate';
 import { normalizeLimits } from './utils';
 
 /** The canonical form of `Add`:
@@ -23,7 +23,7 @@ export function canonicalAdd(
   // Remove literal 0
   ops = ops.filter((x) => x.numericValue === null || !x.isZero);
 
-  if (ops.length === 0) return ce.number(0);
+  if (ops.length === 0) return ce.Zero;
   if (ops.length === 1) return ops[0];
   //
   // Is this a  complex number, i.e. `a + ib` or `ai + b`?
@@ -69,8 +69,8 @@ export function simplifyAdd(
   const sum = new Sum(ce);
   for (let arg of args) {
     arg = arg.simplify();
-    if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
-    if (arg.isNaN || arg.symbol === 'Undefined') return ce._NAN;
+    if (arg.isImaginary && arg.isInfinity) return ce.ComplexInfinity;
+    if (arg.isNaN || arg.symbol === 'Undefined') return ce.NaN;
     if (!arg.isZero) sum.addTerm(arg);
   }
 
@@ -103,8 +103,8 @@ export function evalAdd(
   // First pass: looking for early exits
   //
   for (const arg of ops) {
-    if (arg.isImaginary && arg.isInfinity) return ce.symbol('ComplexInfinity');
-    if (arg.isNaN || arg.symbol === 'Undefined') return ce._NAN;
+    if (arg.isImaginary && arg.isInfinity) return ce.ComplexInfinity;
+    if (arg.isNaN || arg.symbol === 'Undefined') return ce.NaN;
     if (!arg.isExact) mode = 'N';
   }
 
@@ -142,7 +142,7 @@ export function canonicalSummation(
 
   if (index?.head === 'Hold') index = index.op1;
   if (index?.head === 'ReleaseHold') index = index.op1?.evaluate();
-  index ??= ce.symbol('Nothing');
+  index ??= ce.Nothing;
 
   if (index.symbol) {
     ce.declare(index.symbol, { domain: 'Integers' });
@@ -150,11 +150,11 @@ export function canonicalSummation(
   } else index = ce.error(['incompatible-domain', 'Symbols', index.domain]);
 
   // The range bounds, if present, should be integers numbers
-  if (lower && lower.isFinite) lower = validateArgument(ce, lower, 'Integers');
-  if (upper && upper.isFinite) upper = validateArgument(ce, upper, 'Integers');
+  if (lower && lower.isFinite) lower = checkArg(ce, lower, 'Integers');
+  if (upper && upper.isFinite) upper = checkArg(ce, upper, 'Integers');
 
   if (lower && upper) range = ce.tuple([index, lower, upper]);
-  else if (upper) range = ce.tuple([index, ce.number(1), upper]);
+  else if (upper) range = ce.tuple([index, ce.One, upper]);
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
 
@@ -271,7 +271,7 @@ export function evalSummation(
 
       const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
       if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
-        result = ce._POSITIVE_INFINITY;
+        result = ce.PositiveInfinity;
       } else {
         // Potentially converging series.
         // Evaluate as a machine number (it's an approximation to infinity, so

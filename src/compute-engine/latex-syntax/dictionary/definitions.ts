@@ -236,7 +236,6 @@ function addEntry(
   //
   // Turn the latex string into tokens
   const tokensTrigger = tokenize(latexTrigger ?? '', []);
-  if (latexTrigger?.[1] === '\\prime') debugger;
   if (
     tokensTrigger.length === 2 &&
     /[_^]/.test(tokensTrigger[0]) &&

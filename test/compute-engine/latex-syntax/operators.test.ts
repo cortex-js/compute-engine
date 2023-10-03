@@ -462,11 +462,11 @@ describe('OPERATOR serialize, invalid', () => {
   test(`['Subtract', null] // Invalid form`, () =>
     expect(
       latex(['Subtract', null as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\error{\\blacksquare}-\\error{\\blacksquare}`));
+    ).toMatchInlineSnapshot(`-\\mathrm{Nothing}`));
   test(`['Subtract', undefined] // Invalid form`, () =>
     expect(
       latex(['Subtract', undefined as unknown as Expression])
-    ).toMatchInlineSnapshot(`\\error{\\blacksquare}-\\error{\\blacksquare}`));
+    ).toMatchInlineSnapshot(`-\\mathrm{Nothing}`));
   test(`['Subtract', 1] // Invalid form`, () =>
     expect(latex(['Subtract', 1])).toMatchInlineSnapshot(`-1`));
   test(`['Subtract', 1, 2, 3] // Invalid form`, () =>

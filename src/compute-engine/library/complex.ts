@@ -28,7 +28,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
           const op = ops[0].numericValue;
           if (op === null) return undefined;
           if (ce.isComplex(op)) return ce.number(op.im);
-          return ce._ZERO;
+          return ce.Zero;
         },
       },
     },
@@ -43,7 +43,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
           if (ce.isComplex(op)) return ce.number(op.arg());
           const f = asFloat(ops[0]);
           if (f === null) return undefined;
-          if (f >= 0) return ce.number(0);
+          if (f >= 0) return ce.Zero;
           return ce.number(Math.PI);
         },
       },

@@ -25,8 +25,8 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const cond = ops[0];
           if (cond && cond.symbol === 'True')
-            return ops[1] ? ops[1].evaluate() : ce.symbol('Nothing');
-          return ops[2] ? ops[2].evaluate() : ce.symbol('Nothing');
+            return ops[1] ? ops[1].evaluate() : ce.Nothing;
+          return ops[2] ? ops[2].evaluate() : ce.Nothing;
         },
       },
     },
@@ -36,7 +36,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: 'Functions',
         evaluate: (ce, ops) => {
-          const body = ops[0] ?? ce.symbol('Nothing');
+          const body = ops[0] ?? ce.Nothing;
           if (body.isNothing) return body;
 
           const collection = ops[1];
@@ -46,14 +46,14 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
             // Iterate over the elements of a collection
             //
             const iter = iterable(collection);
-            if (!iter) return ce.symbol('Nothing');
+            if (!iter) return ce.Nothing;
             let result: BoxedExpression | undefined = undefined;
             let i = 0;
             const fn = applicable(body);
             while (true) {
               const { done, value } = iter.next();
-              if (done) return result ?? ce.symbol('Nothing');
-              result = fn([value]) ?? ce.symbol('Nothing');
+              if (done) return result ?? ce.Nothing;
+              result = fn([value]) ?? ce.Nothing;
               if (result.head === 'Break') return result.op1;
               if (result.head === 'Return') return result;
               if (i++ > ce.iterationLimit)
@@ -127,7 +127,7 @@ function evaluateBlock(
   ops: BoxedExpression[]
 ): BoxedExpression {
   // Empty block?
-  if (ops.length === 0) return ce.symbol('Nothing');
+  if (ops.length === 0) return ce.Nothing;
 
   let result: BoxedExpression | undefined = undefined;
   for (const op of ops) {
@@ -136,7 +136,7 @@ function evaluateBlock(
     if (h === 'Return' || h === 'Break' || h === 'Continue') break;
   }
 
-  return result ?? ce.symbol('Nothing');
+  return result ?? ce.Nothing;
 }
 
 /**
@@ -166,7 +166,7 @@ function canonicalBlock(
       const def = ce.lookupSymbol(id) ?? ce.lookupFunction(id);
       if (!def) {
         declarations.push(
-          ce._fn('Declare', [op.op1, ce.defaultDomain ?? ce.domain('Anything')])
+          ce._fn('Declare', [op.op1, ce.defaultDomain ?? ce.Anything])
         );
       }
     } else body.push(invalidateDeclare(op));

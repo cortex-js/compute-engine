@@ -15,11 +15,7 @@ import { Expression } from '../../math-json/math-json-format';
 import { canonicalNegate } from '../symbolic/negate';
 import { applyN, apply2N } from '../symbolic/utils';
 import { asFloat } from '../numerics/numeric';
-import { canonical, flattenSequence } from '../symbolic/flatten';
-import {
-  validateArgumentCount,
-  validateArguments,
-} from '../boxed-expression/validate';
+import { checkArity, checkNumericArgs } from '../boxed-expression/validate';
 
 //
 //Note: Names of trigonometric functions follow ISO 80000 Section 13
@@ -59,18 +55,14 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, ops) => {
-          ops = validateArguments(ce, flattenSequence(canonical(ops)), [
-            'Numbers',
-          ]);
-          if (ops.length !== 1)
-            return ce.fn('Degrees', ops, { canonical: false });
+          ops = checkNumericArgs(ce, ops, 1);
+          if (ops.length !== 1) return ce._fn('Degrees', ops);
           const arg = ops[0];
           if (arg.numericValue === null || !arg.isValid)
-            return ce.fn('Degrees', ops, { canonical: false });
-          return ce.div(ce.mul([arg, ce.symbol('Pi')]), ce.number(180));
+            return ce._fn('Degrees', ops);
+          return ce.div(ce.mul([arg, ce.Pi]), ce.number(180));
         },
-        evaluate: (ce, ops) =>
-          ce.mul([ops[0], ce.div(ce.symbol('Pi'), ce.number(180))]),
+        evaluate: (ce, ops) => ce.mul([ops[0], ce.div(ce.Pi, ce.number(180))]),
       },
     },
     Hypot: {
@@ -454,7 +446,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Functions', 'Functions'],
         canonical: (ce, ops) => {
-          ops = validateArgumentCount(ce, flattenSequence(canonical(ops)), 1);
+          ops = checkArity(ce, ops, 1);
           return (
             processInverseFunction(ce, ops) ?? ce._fn('InverseFunction', ops)
           );
@@ -721,7 +713,7 @@ function processInverseFunction(
   ce: IComputeEngine,
   xs: BoxedExpression[]
 ): BoxedExpression | undefined {
-  if (xs.length !== 1) return undefined;
+  if (xs.length !== 1 || !xs[0].isValid) return undefined;
   const expr = xs[0];
   const head = expr.symbol;
   if (typeof head !== 'string') return undefined;

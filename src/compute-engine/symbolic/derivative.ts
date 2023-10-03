@@ -121,9 +121,9 @@ export function partialDerivative(
 ): BoxedExpression | undefined {
   // A few easy ones...
   if (expr.string || expr.keys) return undefined;
-  if (expr.numericValue !== null) return expr.engine._ZERO;
-  if (expr.symbol === v) return expr.engine._ONE;
-  if (expr.symbol) return expr.engine._ZERO;
+  if (expr.numericValue !== null) return expr.engine.Zero;
+  if (expr.symbol === v) return expr.engine.One;
+  if (expr.symbol) return expr.engine.Zero;
 
   if (expr.head && typeof expr.head === 'string') {
     const ce = expr.engine;

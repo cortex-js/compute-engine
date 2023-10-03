@@ -1,14 +1,10 @@
-import {
-  validateArgument,
-  validateArgumentCount,
-} from '../boxed-expression/validate';
+import { checkArity, canonical, checkArgs } from '../boxed-expression/validate';
 import { asFloat } from '../numerics/numeric';
 import {
   BoxedExpression,
   IdentifierDefinitions,
   SemiBoxedExpression,
 } from '../public';
-import { canonical } from '../symbolic/flatten';
 
 // From NumPy:
 const DEFAULT_LINSPACE_COUNT = 50;
@@ -60,7 +56,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   List: {
     complexity: 8200,
     signature: {
-      domain: ['FunctionOf', ['OptArg', ['VarArg', 'Anything']], 'Lists'],
+      domain: ['FunctionOf', ['VarArg', 'Anything'], 'Lists'],
     },
     size: (expr) => expr.nops!,
     iterator: (expr, start, count) => {
@@ -116,8 +112,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       domain: [
         'FunctionOf',
         'Numbers',
-        ['OptArg', 'Numbers'],
-        ['OptArg', 'Numbers'],
+        ['OptArg', 'Numbers', 'Numbers'],
         'Values',
       ],
     },
@@ -162,8 +157,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       domain: [
         'FunctionOf',
         'Numbers',
-        ['OptArg', 'Numbers'],
-        ['OptArg', 'Numbers'],
+        ['OptArg', 'Numbers', 'Numbers'],
         'Values',
       ],
     },
@@ -223,8 +217,9 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     signature: {
       domain: ['FunctionOf', 'Strings', 'Anything', 'Tuples'],
       canonical: (ce, args) => {
-        const key = validateArgument(ce, args[0]?.canonical, 'Strings');
-        const value = validateArgument(ce, args[1]?.canonical, 'Values');
+        const [key, value] = checkArgs(ce, args, [ce.Strings, 'Values']);
+        if (!key.isValid || !value.isValid)
+          return ce._fn('KeyValuePair', [key, value]);
         return ce.tuple([key, value]);
       },
     },
@@ -236,8 +231,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Anything', 'Tuples'],
-      canonical: (ce, ops) =>
-        ce.tuple(validateArgumentCount(ce, canonical(ops), 1)),
+      canonical: (ce, ops) => ce.tuple(checkArity(ce, ops, 1)),
     },
     size: (expr) => expr.nops!,
     at: (expr, index) => {
@@ -251,8 +245,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Anything', 'Anything', 'Tuples'],
-      canonical: (ce, ops) =>
-        ce.tuple(validateArgumentCount(ce, canonical(ops), 2)),
+      canonical: (ce, ops) => ce.tuple(checkArity(ce, ops, 2)),
     },
     size: (expr) => expr.nops!,
     at: (expr, index) =>
@@ -264,8 +257,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Anything', 'Anything', 'Anything', 'Tuples'],
-      canonical: (ce, ops) =>
-        ce.tuple(validateArgumentCount(ce, canonical(ops), 3)),
+      canonical: (ce, ops) => ce.tuple(checkArity(ce, ops, 3)),
     },
     size: (expr) => expr.nops!,
     at: (expr, index) =>
@@ -276,7 +268,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     description: 'A fixed number of heterogeneous elements',
     complexity: 8200,
     signature: {
-      domain: ['FunctionOf', ['VarArg', 'Anything'], 'Tuples'],
+      domain: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Tuples'],
       canonical: (ce, ops) => ce.tuple(canonical(ops)),
     },
     size: (expr) => expr.nops!,
@@ -309,7 +301,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         if (def?.size) return ce.number(def.size(ops[0]));
         const s = ops[0].string;
         if (s !== null) return ce.number(s.length);
-        return ce.number(0);
+        return ce.Zero;
       },
     },
   },
@@ -328,7 +320,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
           if (s !== null) l = s.length;
         }
         if (l === undefined) return undefined;
-        return l === 0 ? ce.symbol('True') : ce.symbol('False');
+        return l === 0 ? ce.True : ce.False;
       },
     },
   },
@@ -379,7 +371,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
 
         const def = ops[0].functionDefinition;
         const l = def?.size?.(ops[0]);
-        if (!l || !def?.at) return ce.symbol('Nothing');
+        if (!l || !def?.at) return ce.Nothing;
         const xs = indexes(ops.slice(1).map((op) => indexRangeArg(op, l)));
         const result: SemiBoxedExpression[] = [];
         for (let i = 1; i <= l; i++)
@@ -401,10 +393,10 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         const def = expr.functionDefinition;
         if (!def?.at) return undefined;
         const s = ops[1].string;
-        if (s !== null) return def.at(expr, 1) ?? ce.symbol('Nothing');
+        if (s !== null) return def.at(expr, 1) ?? ce.Nothing;
         const i = asFloat(ops[1]);
         if (i === null || !Number.isInteger(i)) return undefined;
-        return def.at(expr, i) ?? ce.symbol('Nothing');
+        return def.at(expr, i) ?? ce.Nothing;
       },
     },
   },
@@ -416,8 +408,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       evaluate: (ce, ops) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
-        if (!def?.at) return ce.symbol('Nothing');
-        return def.at(expr, 1) ?? ce.symbol('Nothing');
+        if (!def?.at) return ce.Nothing;
+        return def.at(expr, 1) ?? ce.Nothing;
       },
     },
   },
@@ -429,8 +421,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       evaluate: (ce, ops) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
-        if (!def?.at) return ce.symbol('Nothing');
-        return def.at(expr, 2) ?? ce.symbol('Nothing');
+        if (!def?.at) return ce.Nothing;
+        return def.at(expr, 2) ?? ce.Nothing;
       },
     },
   },
@@ -442,8 +434,8 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
       evaluate: (ce, ops) => {
         const expr = ops[0];
         const def = expr.functionDefinition;
-        if (!def?.at) return ce.symbol('Nothing');
-        return def.at(expr, -1) ?? ce.symbol('Nothing');
+        if (!def?.at) return ce.Nothing;
+        return def.at(expr, -1) ?? ce.Nothing;
       },
     },
   },
@@ -607,7 +599,13 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   Tabulate: {
     complexity: 8200,
     signature: {
-      domain: ['FunctionOf', 'Functions', ['VarArg', 'Integers'], 'Values'],
+      domain: [
+        'FunctionOf',
+        'Functions',
+        'Integers',
+        ['VarArg', 'Integers'],
+        'Values',
+      ],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -674,7 +672,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   RotateLeft: {
     complexity: 8200,
     signature: {
-      domain: ['FunctionOf', 'Values', 'Values'],
+      domain: ['FunctionOf', 'Values', ['OptArg', 'Integers'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -685,7 +683,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   RotateRight: {
     complexity: 8200,
     signature: {
-      domain: ['FunctionOf', 'Values', 'Values'],
+      domain: ['FunctionOf', 'Values', ['OptArg', 'Integers'], 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
@@ -826,7 +824,7 @@ function take(
 ): BoxedExpression {
   const ce = expr.engine;
   const def = expr.functionDefinition;
-  if (!def?.at) return ce.symbol('Nothing');
+  if (!def?.at) return ce.Nothing;
 
   const list: SemiBoxedExpression = [];
 

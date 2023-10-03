@@ -20,21 +20,22 @@ export const DOMAIN_CONSTRUCTORS = [
 ];
 
 export const DOMAIN_ALIAS = {
-  // Functions: ['FunctionOf', ['VarArg', 'Anything'], 'Anything'],
-  NumericFunctions: ['FunctionOf', ['VarArg', 'Numbers'], 'Numbers'],
+  Functions: ['FunctionOf', ['VarArg', 'Anything'], 'Anything'],
+  NumericFunctions: ['FunctionOf', 'Numbers', ['VarArg', 'Numbers'], 'Numbers'],
   RealFunctions: [
     'FunctionOf',
+    'ExtendedRealNumbers',
     ['VarArg', 'ExtendedRealNumbers'],
     'ExtendedRealNumbers',
   ],
   LogicOperators: [
     'FunctionOf',
-    'MaybeBooleans',
-    ['OptArg', 'MaybeBooleans'],
-    'MaybeBooleans',
+    'Booleans',
+    ['OptArg', 'Booleans'],
+    'Booleans',
   ],
-  Predicates: ['FunctionOf', ['VarArg', 'Anything'], 'MaybeBooleans'],
-  RelationalOperators: ['FunctionOf', 'Anything', 'Anything', 'MaybeBooleans'],
+  Predicates: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Booleans'],
+  RelationalOperators: ['FunctionOf', 'Anything', 'Anything', 'Booleans'],
   // PositiveInteger: ['Range', 1, +Infinity],
   // NonNegativeInteger: ['Range', 0, +Infinity],
   // NegativeInteger: ['Range', -Infinity, -1],
@@ -153,8 +154,7 @@ const DOMAIN_LITERAL = {
     'RelationalOperators',
   ],
 
-  MaybeBooleans: 'Values',
-  Booleans: 'MaybeBooleans',
+  Booleans: 'Values',
 
   Strings: 'Values',
   Symbols: 'Values',

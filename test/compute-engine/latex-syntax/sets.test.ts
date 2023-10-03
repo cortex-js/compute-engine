@@ -52,10 +52,10 @@ describe('SERIALIZING SETS', () => {
       `\\mathtip{\\error{\\mathrm{ComplexNumber}}}{\\in \\bar\\R\\notin \\mathrm{Sets}}^{\\complement}`
     );
     expect(latex(['CartesianProduct'])).toMatchInlineSnapshot(
-      `\\error{\\blacksquare}\\times\\error{\\blacksquare}`
+      `\\error{\\blacksquare}`
     );
     expect(latex(['CartesianProduct', 'Integers'])).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\error{\\blacksquare}`
+      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}`
     );
     expect(
       latex(['CartesianProduct', 'Integers', 'Integers'])
@@ -70,7 +70,7 @@ describe('SERIALIZING SETS', () => {
     expect(
       latex(['CartesianProduct', 'Integers', 'Integers', 'Integers'])
     ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\error{\\Z}`
+      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}`
     );
     expect(latex(['CartesianPower', 'Integers', 3])).toMatchInlineSnapshot(
       `\\mathrm{CartesianPower}(\\Z, 3)`

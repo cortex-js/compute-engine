@@ -311,7 +311,7 @@ export function asCoefficient(
     coef = reducedRational(coef);
 
     if (isRationalOne(coef)) return [[1, 1], expr];
-    if (rest.length === 0) return [coef, ce._ONE];
+    if (rest.length === 0) return [coef, ce.One];
     if (rest.length === 1) return [coef, rest[0]];
     return [coef, ce.mul(rest)];
   }
@@ -392,16 +392,16 @@ export function asCoefficient(
   const n = expr.numericValue;
   if (n !== null) {
     if (n instanceof Decimal) {
-      if (n.isInteger()) return [[bigint(n.toString()), BigInt(1)], ce._ONE];
+      if (n.isInteger()) return [[bigint(n.toString()), BigInt(1)], ce.One];
       if (n.isNegative()) return [[-1, 1], ce.number(n.neg())];
     }
 
     if (typeof n === 'number') {
-      if (Number.isInteger(n)) return [[n, 1], ce._ONE];
+      if (Number.isInteger(n)) return [[n, 1], ce.One];
       if (n < 0) return [[-1, 1], ce.number(-n)];
     }
 
-    if (isRational(n)) return [n, ce._ONE];
+    if (isRational(n)) return [n, ce.One];
 
     // Make the part positive if the real part is negative
     if (n instanceof Complex && n.re < 0)

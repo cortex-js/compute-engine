@@ -34,7 +34,7 @@ import {
 } from './serialize';
 import { complexAllowed, hashCode, bignumPreferred } from './utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
-import { validateNumericArgs, validateSignature } from './validate';
+import { checkNumericArgs, adjustArguments } from './validate';
 import { expand } from '../symbolic/expand';
 import { apply } from '../function-utils';
 
@@ -190,13 +190,13 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get op1(): BoxedExpression {
-    return this._ops[0] ?? this.engine.symbol('Nothing');
+    return this._ops[0] ?? this.engine.Nothing;
   }
   get op2(): BoxedExpression {
-    return this._ops[1] ?? this.engine.symbol('Nothing');
+    return this._ops[1] ?? this.engine.Nothing;
   }
   get op3(): BoxedExpression {
-    return this._ops[2] ?? this.engine.symbol('Nothing');
+    return this._ops[2] ?? this.engine.Nothing;
   }
 
   get isValid(): boolean {
@@ -363,7 +363,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (s !== undefined) return false;
 
     // Try to simplify the difference of the expressions
-    const diff = this.engine.box(['Subtract', this, rhs]).simplify();
+    const diff = this.engine.add([this, this.engine.neg(rhs)]).simplify();
     if (diff.isZero) return true;
 
     return this.isSame(rhs);
@@ -410,11 +410,11 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isOne(): boolean | undefined {
-    return this.isEqual(this.engine._ONE);
+    return this.isEqual(this.engine.One);
   }
 
   get isNegativeOne(): boolean | undefined {
-    return this.isEqual(this.engine._NEGATIVE_ONE);
+    return this.isEqual(this.engine.NegativeOne);
   }
 
   // x > 0
@@ -447,10 +447,6 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
-    if (!this.domain) {
-      debugger;
-      console.log(this.domain);
-    }
     return this.domain.isCompatible('Numbers');
   }
   get isInteger(): boolean | undefined {
@@ -566,14 +562,14 @@ export class BoxedFunction extends _BoxedExpression {
 
   get domain(): BoxedDomain {
     if (this._codomain !== undefined) return this._codomain;
-    if (!this.canonical) return this.engine.domain('Anything');
+    if (!this.canonical) return this.engine.Anything;
 
     const ce = this.engine;
 
     let result: BoxedDomain | undefined = undefined;
 
     if (typeof this._head !== 'string') {
-      result = this._head.domain.codomain ?? undefined;
+      result = this._head.domain.result ?? undefined;
     } else if (this._def) {
       const sig = this._def.signature;
       if (typeof sig.codomain === 'function')
@@ -581,12 +577,7 @@ export class BoxedFunction extends _BoxedExpression {
       else result = sig.codomain ?? undefined;
     }
 
-    result ??= ce.defaultDomain ?? ce.domain('Void');
-
-    if (!result) {
-      debugger;
-      console.log(this.domain);
-    }
+    result ??= ce.defaultDomain ?? ce.Void;
 
     this._codomain = result;
     return result;
@@ -818,7 +809,7 @@ export class BoxedFunction extends _BoxedExpression {
     const num = result.numericValue;
     if (num !== null) {
       if (!complexAllowed(this.engine) && num instanceof Complex)
-        result = this.engine._NAN;
+        result = this.engine.NaN;
       else if (!bignumPreferred(this.engine) && num instanceof Decimal)
         result = this.engine.number(num.toNumber());
     }
@@ -843,40 +834,42 @@ function makeNumericFunction(
 ): BoxedExpression | null {
   let ops: BoxedExpression[] = [];
   if (head === 'Add' || head === 'Multiply')
-    ops = validateNumericArgs(
-      ce,
-      flattenOps(flattenSequence(ce.canonical(semiOps)), head)
-    );
-  else if (head === 'Negate' || head === 'Square' || head === 'Sqrt')
-    ops = validateNumericArgs(ce, flattenSequence(ce.canonical(semiOps)), 1);
+    ops = checkNumericArgs(ce, ce.canonical(semiOps), { flatten: head });
+  else if (
+    head === 'Negate' ||
+    head === 'Square' ||
+    head === 'Sqrt' ||
+    head === 'Exp' ||
+    head === 'Ln'
+  )
+    ops = checkNumericArgs(ce, ce.canonical(semiOps), 1);
   else if (head === 'Divide' || head === 'Power')
-    ops = validateNumericArgs(ce, flattenSequence(ce.canonical(semiOps)), 2);
+    ops = checkNumericArgs(ce, ce.canonical(semiOps), 2);
   else return null;
 
-  // If some of the arguments are not valid, make a non-canonical expression
-  if (!ops.every((x) => x.isValid))
-    return new BoxedFunction(ce, head, ops, { metadata, canonical: false });
+  // If some of the arguments are not valid, we're done
+  // (note: the result is canonical, but not valid)
+  if (!ops.every((x) => x.isValid)) return ce._fn(head, ops, metadata);
 
   //
   // Short path for some functions
   // (avoid looking up a definition)
   //
   if (head === 'Add') return ce.add(ops, metadata);
-  if (head === 'Negate') return ce.neg(ops[0] ?? ce.error('missing'), metadata);
+  if (head === 'Negate') return ce.neg(ops[0], metadata);
   if (head === 'Multiply') return ce.mul(ops, metadata);
   if (head === 'Divide') return ce.div(ops[0], ops[1], metadata);
+  if (head === 'Exp') return ce.pow(ce.E, ops[0], metadata);
   if (head === 'Power') return ce.pow(ops[0], ops[1], metadata);
-  if (head === 'Square') return ce.pow(ops[0], ce.number(2), metadata);
+  if (head === 'Square') return ce.pow(ops[0], 2, metadata);
   if (head === 'Sqrt') {
     const op = ops[0].canonical;
-    if (isRational(op.numericValue))
-      return new BoxedFunction(ce, 'Sqrt', [op], { metadata, canonical: true });
+    // We preserve square roots of rationals as "exact" values
+    if (isRational(op.numericValue)) return ce._fn('Sqrt', [op], metadata);
 
-    return ce.pow(op, ce._HALF, metadata);
+    return ce.pow(op, ce.Half, metadata);
   }
-
-  // if (head === 'Pair') return ce.pair(ops[0], ops[1], metadata);
-  // if (head === 'Tuple') return ce.tuple(ops, metadata);
+  if (head === 'Ln') return ce._fn('Ln', ops, metadata);
 
   return null;
 }
@@ -932,9 +925,6 @@ export function makeCanonicalFunction(
     }
   }
 
-  if (!xs.every((x) => x.isValid))
-    return new BoxedFunction(ce, head, xs, { metadata, canonical: false });
-
   const sig = def.signature;
 
   //
@@ -963,17 +953,17 @@ export function makeCanonicalFunction(
   xs = flattenSequence(xs);
   if (def.associative) xs = flattenOps(xs, head as string);
 
-  // If some of the arguments are not valid, can't make a canonical expression
-  if (!xs.every((x) => x.isValid))
-    return new BoxedFunction(ce, head, xs, { metadata, canonical: false });
+  const adjustedArgs = adjustArguments(
+    ce,
+    xs,
+    sig.domain.params,
+    sig.domain.optParams,
+    sig.domain.restParam
+  );
 
-  const invalidArgs = validateSignature(sig.domain, xs);
-
-  if (invalidArgs)
-    return new BoxedFunction(ce, head, invalidArgs, {
-      metadata,
-      canonical: false,
-    });
+  // If we have some adjusted arguments, the arguments did not
+  // match the parameters of the signature. We're done.
+  if (adjustedArgs) return ce._fn(head, adjustedArgs, metadata);
 
   //
   // 4/ Apply `idempotent` and `involution`
@@ -991,7 +981,7 @@ export function makeCanonicalFunction(
   //
   if (xs.length > 1 && def.commutative === true) xs = xs.sort(order);
 
-  return new BoxedFunction(ce, head, xs, { metadata, canonical: true });
+  return ce._fn(head, xs, metadata);
 }
 
 /** Apply the function `f` to elements of `xs`, except to the elements

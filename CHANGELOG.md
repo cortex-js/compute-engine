@@ -9,6 +9,17 @@
 - Domains no longer require a `["Domain"]` expression wrapper, so for example
   `ce.box("Pi").domain` returns `"TranscendentalNumbers"` instead of
   `["Domain", "TranscendentalNumbers"]`.
+- The `VarArg` domain constructor now indicates the presence of 0 or more
+  arguments, instead of 1 or more arguments.
+- The `MaybeBooleans` domain has been dropped. Use
+  `["Union", "Booleans", "NothingDomain"]` instead.
+
+### Improvements
+
+- Some frequently used expressions are now available as predefined constants,
+  for example `ce.Pi`, `ce.True` and `ce.Numbers`.
+- Improved type checking and inference, especially for functions with complex or
+  non-numeric signatures.
 
 ### Bugs Fixed
 

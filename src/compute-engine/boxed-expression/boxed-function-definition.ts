@@ -5,7 +5,6 @@ import {
   BoxedFunctionDefinition,
   RuntimeScope,
   BoxedFunctionSignature,
-  BoxedDomain,
   BoxedExpression,
 } from '../public';
 import { DEFAULT_COMPLEXITY } from './order';
@@ -191,8 +190,8 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
 
       const codomain =
         sig.codomain ??
-        domain.codomain ??
-        (def.numeric ? ce.domain('Numbers') : ce.domain('Anything'));
+        domain.result ??
+        (def.numeric ? ce.Numbers : ce.Anything);
 
       let evaluate: ((ce, args) => BoxedExpression | undefined) | undefined =
         undefined;
@@ -219,12 +218,12 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     } else if (def.numeric) {
       this.signature = {
         domain: ce.domain('NumericFunctions'),
-        codomain: ce.domain('Numbers'),
+        codomain: ce.Numbers,
       };
     } else {
       this.signature = {
-        domain: ce.domain('Functions') as BoxedDomain,
-        codomain: ce.domain('Anything') as BoxedDomain,
+        domain: ce.domain('Functions'),
+        codomain: ce.Anything,
       };
     }
   }

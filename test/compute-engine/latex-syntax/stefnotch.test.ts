@@ -168,7 +168,7 @@ describe('STEFNOTCH #13', () => {
         "Equivalent",
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", "MaybeBooleans", "Numbers"],
+          ["ErrorCode", "'incompatible-domain'", "Booleans", "Numbers"],
           ["Divide", 2, ["Sqrt", "n"]]
         ],
         ["Less", ["Divide", 5, ["Square", "n"]], "n"]
@@ -191,7 +191,16 @@ describe('STEFNOTCH #13', () => {
     expect(parse('3\\equiv5\\mod7')).toMatchInlineSnapshot(`
       [
         "Equivalent",
-        3,
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            "Booleans",
+            "PositiveIntegers"
+          ],
+          3
+        ],
         [
           "Sequence",
           5,

@@ -58,8 +58,3 @@ export function flattenSequence(xs: BoxedExpression[]): BoxedExpression[] {
   }
   return ys;
 }
-
-export function canonical(xs: BoxedExpression[]): BoxedExpression[] {
-  // Avoid memory allocation if possible
-  return xs.every((x) => x.isCanonical) ? xs : xs.map((x) => x.canonical);
-}

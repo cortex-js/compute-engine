@@ -1,4 +1,4 @@
-import { validateArgument } from '../boxed-expression/validate';
+import { checkArg } from '../boxed-expression/validate';
 import { applicableN1 } from '../function-utils';
 import { centeredDiff8thOrder, monteCarloEstimate } from '../numerics/numeric';
 import { BoxedExpression, IdentifierDefinitions } from '../public';
@@ -124,7 +124,13 @@ volumes
 
     D: {
       signature: {
-        domain: ['FunctionOf', 'Functions', ['VarArg', 'Symbols'], 'Functions'],
+        domain: [
+          'FunctionOf',
+          'Functions',
+          'Symbols',
+          ['VarArg', 'Symbols'],
+          'Functions',
+        ],
         evaluate: (ce, ops) => {
           let f = ops[0];
           // Iterate aver all variables
@@ -196,16 +202,15 @@ volumes
           if (index && index.head === 'Hold') index = index.op1;
           if (index && index.head === 'ReleaseHold')
             index = index.op1.evaluate();
-          index ??= ce.symbol('Nothing');
+          index ??= ce.Nothing;
           if (!index.symbol)
             index = ce.error(['incompatible-domain', 'Symbols', index.domain]);
 
           // The range bounds, if present, should be numbers
-          if (lower) lower = validateArgument(ce, lower, 'Numbers');
-          if (upper) upper = validateArgument(ce, upper, 'Numbers');
+          if (lower) lower = checkArg(ce, lower, ce.Numbers);
+          if (upper) upper = checkArg(ce, upper, ce.Numbers);
           if (lower && upper) range = ce.tuple([index, lower, upper]);
-          else if (upper)
-            range = ce.tuple([index, ce._NEGATIVE_INFINITY, upper]);
+          else if (upper) range = ce.tuple([index, ce.NegativeInfinity, upper]);
           else if (lower) range = ce.tuple([index, lower]);
           else range = index;
 

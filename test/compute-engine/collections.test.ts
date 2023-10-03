@@ -481,22 +481,14 @@ describe('INDEXABLE OPERATIONS', () => {
     expect(evaluate(['Most', list])).toMatchInlineSnapshot(`["List"]`));
 
   test('RotateLeft', () =>
-    expect(evaluate(['RotateLeft', list1, 2])).toMatchInlineSnapshot(`
-      [
-        "RotateLeft",
-        ["List", 100, 4, 2, 62, 34, 16, 8],
-        ["Error", "'unexpected-argument'", 2]
-      ]
-    `));
+    expect(evaluate(['RotateLeft', list1, 2])).toMatchInlineSnapshot(
+      `["RotateLeft", ["List", 100, 4, 2, 62, 34, 16, 8], 2]`
+    ));
 
   test('RotateRight', () =>
-    expect(evaluate(['RotateRight', list1, 2])).toMatchInlineSnapshot(`
-      [
-        "RotateRight",
-        ["List", 100, 4, 2, 62, 34, 16, 8],
-        ["Error", "'unexpected-argument'", 2]
-      ]
-    `));
+    expect(evaluate(['RotateRight', list1, 2])).toMatchInlineSnapshot(
+      `["RotateRight", ["List", 100, 4, 2, 62, 34, 16, 8], 2]`
+    ));
 
   test('Sort', () =>
     expect(evaluate(['Sort', list])).toMatchInlineSnapshot(
@@ -577,82 +569,85 @@ describe('ITERABLE OPERATIONS', () => {
     ));
 
   test('Map', () =>
-    expect(evaluate(['Map', ['Function', ['Add', 'x', 1], 'x'], list]))
+    expect(evaluate(['Map', list, ['Function', ['Add', 'x', 1], 'x']]))
       .toMatchInlineSnapshot(`
       [
         "Map",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Collections", "Functions"],
-          ["Function", ["Add", "x", 1], "x"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Functions", "Lists"],
-          ["List", 7, 13, 5, 19, 2, 3, 11]
-        ]
+        ["List", 7, 13, 5, 19, 2, 3, 11],
+        ["Function", ["Add", "x", 1], "x"]
       ]
     `));
 
   test('Map', () =>
-    expect(evaluate(['Map', ['Plus', '_', 1], list])).toMatchInlineSnapshot(`
+    expect(evaluate(['Map', list, ['Plus', '_', 1]])).toMatchInlineSnapshot(`
       [
         "Map",
+        ["List", 7, 13, 5, 19, 2, 3, 11],
         [
           "Error",
           [
             "ErrorCode",
             "'incompatible-domain'",
-            "Collections",
+            ["FunctionOf", ["VarArg", "Anything"], "Anything"],
             "ExtendedRealNumbers"
           ],
           ["Plus", "_", 1]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Functions", "Lists"],
-          ["List", 7, 13, 5, 19, 2, 3, 11]
         ]
       ]
     `));
 
   test('Filter', () =>
-    expect(evaluate(['Filter', ['Greater', '_', 10], list]))
+    expect(evaluate(['Filter', list, ['Greater', '_', 10]]))
       .toMatchInlineSnapshot(`
       [
         "Filter",
-        ["Less", 10, "_"],
+        ["List", 7, 13, 5, 19, 2, 3, 11],
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", "Functions", "Lists"],
-          ["List", 7, 13, 5, 19, 2, 3, 11]
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["FunctionOf", ["VarArg", "Anything"], "Anything"],
+            "Booleans"
+          ],
+          ["Less", 10, "_"]
         ]
       ]
     `));
 
   test('Reduce', () =>
-    expect(evaluate(['Reduce', ['Plus', '_1', '_2'], list]))
+    expect(evaluate(['Reduce', list, ['Plus', '_1', '_2']]))
       .toMatchInlineSnapshot(`
       [
         "Reduce",
-        ["Plus", "_1", "_2"],
+        ["List", 7, 13, 5, 19, 2, 3, 11],
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", "Functions", "Lists"],
-          ["List", 7, 13, 5, 19, 2, 3, 11]
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["FunctionOf", ["VarArg", "Anything"], "Anything"],
+            "ExtendedRealNumbers"
+          ],
+          ["Plus", "_1", "_2"]
         ]
       ]
     `));
 
   test('Reduce', () =>
-    expect(evaluate(['Reduce', 'Plus', list])).toMatchInlineSnapshot(`
+    expect(evaluate(['Reduce', list, 'Plus'])).toMatchInlineSnapshot(`
       [
         "Reduce",
-        "Plus",
+        ["List", 7, 13, 5, 19, 2, 3, 11],
         [
           "Error",
-          ["ErrorCode", "'incompatible-domain'", "Functions", "Lists"],
-          ["List", 7, 13, 5, 19, 2, 3, 11]
+          [
+            "ErrorCode",
+            "'incompatible-domain'",
+            ["FunctionOf", ["VarArg", "Anything"], "Anything"],
+            "ExtendedRealNumbers"
+          ],
+          "Plus"
         ]
       ]
     `));

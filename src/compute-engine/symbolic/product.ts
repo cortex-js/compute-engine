@@ -274,7 +274,7 @@ export class Product {
     //
     const xs: { exponent: Rational; terms: BoxedExpression[] }[] = [];
     const unitTerms: BoxedExpression[] = [];
-    if (this._hasInfinity) unitTerms.push(ce._POSITIVE_INFINITY);
+    if (this._hasInfinity) unitTerms.push(ce.PositiveInfinity);
 
     this._rational = reducedRational(this._rational);
     // this._squareRootRational = reducedRational(this._squareRootRational);
@@ -344,7 +344,7 @@ export class Product {
       if (this._complex.im !== 0 && !complexAllowed(ce)) return null;
 
       if (this._hasInfinity)
-        return [{ exponent: [1, 1], terms: [ce._POSITIVE_INFINITY] }];
+        return [{ exponent: [1, 1], terms: [ce.PositiveInfinity] }];
     }
 
     const xs = this.unitTerms(options.mode ?? 'expression');
@@ -375,23 +375,23 @@ export class Product {
     const ce = this.engine;
 
     if (this._hasInfinity) {
-      if (this._hasZero) return ce._NAN;
+      if (this._hasZero) return ce.NaN;
       if (this._terms.length === 0) {
-        if (machineNumerator(this._rational) > 0) return ce._POSITIVE_INFINITY;
-        return ce._NEGATIVE_INFINITY;
+        if (machineNumerator(this._rational) > 0) return ce.PositiveInfinity;
+        return ce.NegativeInfinity;
       }
     }
 
-    if (this._hasZero) return ce._ZERO;
+    if (this._hasZero) return ce.Zero;
 
     const groupedTerms = this.groupedByDegrees({
       mode: mode === 'N' ? 'numeric' : 'expression',
     });
-    if (groupedTerms === null) return ce._NAN;
+    if (groupedTerms === null) return ce.NaN;
 
     const terms = termsAsExpressions(ce, groupedTerms);
 
-    if (terms.length === 0) return ce._ONE;
+    if (terms.length === 0) return ce.One;
     if (terms.length === 1) return terms[0];
     return this.engine._fn('Multiply', terms);
   }
@@ -399,7 +399,7 @@ export class Product {
   /** The product, expressed as a numerator and denominator */
   asNumeratorDenominator(): [BoxedExpression, BoxedExpression] {
     const xs = this.groupedByDegrees({ mode: 'rational' });
-    if (xs === null) return [this.engine._NAN, this.engine._NAN];
+    if (xs === null) return [this.engine.NaN, this.engine.NaN];
     const xsNumerator: {
       exponent: Rational;
       terms: BoxedExpression[];
@@ -420,13 +420,13 @@ export class Product {
     const ce = this.engine;
 
     const numeratorTerms = termsAsExpressions(ce, xsNumerator);
-    let numerator = ce._ONE;
+    let numerator = ce.One;
     if (numeratorTerms.length === 1) numerator = numeratorTerms[0];
     else if (numeratorTerms.length > 0)
       numerator = ce._fn('Multiply', numeratorTerms);
 
     const denominatorTerms = termsAsExpressions(ce, xsDenominator);
-    let denominator = ce._ONE;
+    let denominator = ce.One;
     if (denominatorTerms.length === 1) denominator = denominatorTerms[0];
     else if (denominatorTerms.length > 0)
       denominator = ce._fn('Multiply', denominatorTerms);

@@ -45,7 +45,7 @@ function serializeNumber(expr: Expression): string | null {
 function serializeSymbol(expr: Expression): string | null {
   const sym = symbol(expr);
   if (sym === null) return null;
-  // @todo some special values: Pi, NaN, Nothing, Missing, True, False, Maybe
+  // @todo some special values: Pi, NaN, Nothing, Missing, True, False
   // ImaginaryUnit, ExponentialE
   return sym;
 }

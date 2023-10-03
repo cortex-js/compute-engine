@@ -41,18 +41,6 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     parse: 'True',
   },
 
-  {
-    name: 'Maybe',
-    kind: 'symbol',
-    latexTrigger: '\\operatorname{Maybe}',
-    serialize: '\\operatorname{Maybe}',
-  },
-  {
-    kind: 'symbol',
-    latexTrigger: '\\mathrm{Maybe}',
-    parse: 'Maybe',
-  },
-
   // Operators
   {
     name: 'And',

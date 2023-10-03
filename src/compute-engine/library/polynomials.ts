@@ -18,7 +18,7 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
           const h = ops[0].head;
           if (h === 'Multiply') return distribute(ops[0].ops!) ?? ops[0];
           if (h === 'Negate')
-            return distribute([ce._NEGATIVE_ONE, ...ops[0].ops!]) ?? ops[0];
+            return distribute([ce.NegativeOne, ...ops[0].ops!]) ?? ops[0];
           if (h === 'Divide' && ops[0].ops![0].head === 'Multiply') {
             const numerator = distribute(ops[0].ops!);
             const denominator = ops[0].ops![1];

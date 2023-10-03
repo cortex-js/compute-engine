@@ -101,7 +101,7 @@ export function expandMultinomial(
   if (expr.head !== 'Power') return null;
   const exp = asSmallInteger(expr.op2);
   if (exp === null || exp < 0) return null;
-  if (exp === 0) return expr.engine._ONE;
+  if (exp === 0) return expr.engine.One;
   if (exp === 1) return expr.op1;
   const ce = expr.engine;
   if (expr.op1.head === 'Negate') {

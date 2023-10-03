@@ -68,7 +68,7 @@ export function indexable(
   if (s !== null) {
     return (index) => {
       const c = s.charAt(index);
-      if (c === undefined) return expr.engine.symbol('Nothing');
+      if (c === undefined) return expr.engine.Nothing;
       return expr.engine.string(c);
     };
   }
@@ -230,8 +230,8 @@ function makeLambda(
     body.rebind();
 
     let i = 0;
-    for (const arg of args) ce.assign(arg, params[i++]);
-    if (params[0]) ce.assign('_', params[0]);
+    for (const arg of args) ce.assign(arg, params[i++] ?? ce.Nothing);
+    if (params[0]) ce.assign('_', params[0] ?? ce.Nothing);
 
     const result = body.N() ?? body.evaluate();
     ce.popScope();

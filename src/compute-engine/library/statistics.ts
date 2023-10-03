@@ -29,7 +29,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             sum += v;
             count++;
           }
-          if (count === 0) return ce._NAN;
+          if (count === 0) return ce.NaN;
           return ce.number(sum / count);
         },
       },
@@ -46,7 +46,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             if (v === null) return undefined;
             values.push(v);
           }
-          if (values.length === 0) return ce._NAN;
+          if (values.length === 0) return ce.NaN;
           values.sort((a, b) => a - b);
           const mid = Math.floor(values.length / 2);
           if (values.length % 2 === 0)
@@ -72,7 +72,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             sum2 += v * v;
             count++;
           }
-          if (count === 0) return ce._NAN;
+          if (count === 0) return ce.NaN;
           return ce.number((sum2 - (sum * sum) / count) / (count - 1));
         },
       },
@@ -93,7 +93,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             sum2 += v * v;
             count++;
           }
-          if (count === 0) return ce._NAN;
+          if (count === 0) return ce.NaN;
           return ce.number(
             Math.sqrt((sum2 - (sum * sum) / count) / (count - 1))
           );
@@ -118,7 +118,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             sum4 += v * v * v * v;
             count++;
           }
-          if (count === 0) return ce._NAN;
+          if (count === 0) return ce.NaN;
           // const m = sum / count;
           const s2 = (sum2 - (sum * sum) / count) / (count - 1);
           const s4 = (sum4 - (sum2 * sum2) / count) / (count - 1);
@@ -144,7 +144,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             sum3 += v * v * v;
             count++;
           }
-          if (count === 0) return ce._NAN;
+          if (count === 0) return ce.NaN;
           // const m = sum / count;
           const s2 = (sum2 - (sum * sum) / count) / (count - 1);
           const s3 = (sum3 - (sum2 * sum) / count) / (count - 1);
@@ -164,7 +164,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             if (v === null) return undefined;
             values.push(v);
           }
-          if (values.length === 0) return ce._NAN;
+          if (values.length === 0) return ce.NaN;
           values.sort((a, b) => a - b);
           const counts: Record<number, number> = {};
           for (const v of values) {
@@ -195,7 +195,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             if (v === null) return undefined;
             values.push(v);
           }
-          if (values.length === 0) return ce._NAN;
+          if (values.length === 0) return ce.NaN;
           values.sort((a, b) => a - b);
           const mid = Math.floor(values.length / 2);
           const lower = values.slice(0, mid);
@@ -221,7 +221,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             if (v === null) return undefined;
             values.push(v);
           }
-          if (values.length === 0) return ce._NAN;
+          if (values.length === 0) return ce.NaN;
           values.sort((a, b) => a - b);
           const mid = Math.floor(values.length / 2);
           const lower = values.slice(0, mid);

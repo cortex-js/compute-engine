@@ -14,7 +14,7 @@ import {
   neg,
 } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
-import { validateArgument } from '../boxed-expression/validate';
+import { checkArg } from '../boxed-expression/validate';
 import { normalizeLimits } from './utils';
 
 /** The canonical form of `Multiply`:
@@ -35,13 +35,13 @@ export function canonicalMultiply(
 ): BoxedExpression {
   console.assert(ops.every((x) => x.isCanonical));
 
-  if (ops.length === 0) return ce.number(1);
+  if (ops.length === 0) return ce.One;
   if (ops.length === 1) return ops[0];
   if (ops.length === 2) return multiply2(ops[0], ops[1]);
 
   const product = new Product(ce);
   for (const op of ops) {
-    if (op.isNaN || op.symbol === 'Undefined') return ce._NAN;
+    if (op.isNaN || op.symbol === 'Undefined') return ce.NaN;
     product.addTerm(op);
   }
   return product.asExpression();
@@ -55,7 +55,7 @@ export function simplifyMultiply(
   const product = new Product(ce);
   for (let op of ops) {
     op = op.simplify();
-    if (op.isNaN || op.symbol === 'Undefined') return ce._NAN;
+    if (op.isNaN || op.symbol === 'Undefined') return ce.NaN;
     product.addTerm(op);
   }
 
@@ -88,7 +88,7 @@ export function evalMultiply(
   // First pass: looking for early exits
   //
   for (const op of ops) {
-    if (op.isNaN || op.symbol === 'Undefined') return ce._NAN;
+    if (op.isNaN || op.symbol === 'Undefined') return ce.NaN;
     if (!op.isExact) mode = 'N';
   }
   console.assert(ops.every((x) => x.head !== 'Multiply'));
@@ -150,7 +150,7 @@ function multiply2(
         op2,
         (a, b) => a * b,
         (a, b) => a.mul(b)
-      ) ?? ce._NAN
+      ) ?? ce.NaN
     );
   }
   if (
@@ -159,7 +159,7 @@ function multiply2(
     op1.symbol === 'Undefined' ||
     op2.symbol === 'Undefined'
   )
-    return ce._NAN;
+    return ce.NaN;
   if (op1.isNothing) return op2;
   if (op2.isNothing) return op1;
   if (op1.numericValue !== null) {
@@ -183,7 +183,7 @@ function multiply2(
     const r = asRational(c);
     if (r) {
       if (isRationalOne(r)) return t;
-      if (isRationalZero(r)) return ce._ZERO;
+      if (isRationalZero(r)) return ce.Zero;
       if (t.head === 'Add') {
         if (sign < 0) c = canonicalNegate(c);
         return ce.add(
@@ -245,17 +245,17 @@ export function canonicalProduct(
   // The index, if present, should be a symbol
   if (index && index.head === 'Hold') index = index.op1;
   if (index && index.head === 'ReleaseHold') index = index.op1.evaluate();
-  index ??= ce.symbol('Nothing');
+  index ??= ce.Nothing;
   if (!index.symbol)
     index = ce.error(['incompatible-domain', 'Symbols', index.domain]);
   else index = ce.hold(index);
 
   // The range bounds, if present, should be integers numbers
-  if (lower && lower.isFinite) lower = validateArgument(ce, lower, 'Integers');
-  if (upper && upper.isFinite) upper = validateArgument(ce, upper, 'Integers');
+  if (lower && lower.isFinite) lower = checkArg(ce, lower, 'Integers');
+  if (upper && upper.isFinite) upper = checkArg(ce, upper, 'Integers');
 
   if (lower && upper) range = ce.tuple([index, lower, upper]);
-  else if (upper) range = ce.tuple([index, ce.number(1), upper]);
+  else if (upper) range = ce.tuple([index, ce.One, upper]);
   else if (lower) range = ce.tuple([index, lower]);
   else range = index;
 
@@ -367,7 +367,7 @@ export function evalMultiplication(
 
       const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
       if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
-        result = ce._POSITIVE_INFINITY;
+        result = ce.PositiveInfinity;
       } else {
         // Potentially converging series.
         // Evaluate as a machine number (it's an approximation to infinity, so
