@@ -54,6 +54,8 @@ export type Metadata = {
  */
 export type NumericMode = 'auto' | 'machine' | 'bignum' | 'complex';
 
+export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
+
 /** Options for `BoxedExpression.simplify()` */
 export type SimplifyOptions = {
   recursive?: boolean;
@@ -436,12 +438,6 @@ export interface BoxedExpression {
    * @internal
    */
   set isCanonical(val: boolean);
-
-  /**
-   * Rebind the expression to the current scope.
-   * "Reset" the expression to a non-canonical version.
-   * @internal */
-  rebind(): void;
 
   /** MathJSON representation of this expression.
    *
@@ -1036,24 +1032,23 @@ export interface BoxedExpression {
   infer(domain: BoxedDomain): boolean;
 
   /**
-   * Update the definition associated with this expression, taking
-   * into account the specified scope.
-   *
-   * If no scope is specified, the scope of when the expression was boxed is used.
-   *
-   * If the scope is `null`, the definition is removed.
-   *
-   * **Note**: applicable only to canonical expressions
+   * Update the definition associated with this expression, using the
+   * current scope (`ce.context`).
    *
    * @internal
    */
-  bind(scope?: RuntimeScope | null): void;
+  bind(): void;
 
   /**
    *
+   * Reset the cached value associated with this expression.
+   *
+   * Use when the environment has changed, for example the numeric mode
+   * or precision, to force the expression to be re-evaluated.
+   *
    * @internal
    */
-  unbind(): void;
+  reset(): void;
 
   //
   // AUTO CANONICAL
@@ -1898,7 +1893,7 @@ export type FunctionDefinition = BaseDefinition &
      * **Default**: `"none"`
      */
 
-    hold?: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
+    hold?: Hold;
 
     signature: FunctionSignature;
   };
@@ -1907,7 +1902,7 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
   Partial<CollectionHandlers> &
   FunctionDefinitionFlags & {
     complexity: number;
-    hold: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
+    hold: Hold;
 
     signature: BoxedFunctionSignature;
   };
@@ -2522,22 +2517,31 @@ export interface IComputeEngine {
    *
    */
   declare(identifiers: {
-    [id: string]: DomainExpression | SymbolDefinition | FunctionDefinition;
+    [id: string]:
+      | BoxedDomain
+      | DomainExpression
+      | SymbolDefinition
+      | FunctionDefinition;
   }): IComputeEngine;
   declare(
     id: string,
-    def: DomainExpression | SymbolDefinition | FunctionDefinition
+    def: BoxedDomain | DomainExpression | SymbolDefinition | FunctionDefinition
   ): IComputeEngine;
   declare(
     arg1:
       | string
       | {
           [id: string]:
+            | BoxedDomain
             | DomainExpression
             | SymbolDefinition
             | FunctionDefinition;
         },
-    arg2?: DomainExpression | SymbolDefinition | FunctionDefinition
+    arg2?:
+      | BoxedDomain
+      | DomainExpression
+      | SymbolDefinition
+      | FunctionDefinition
   ): IComputeEngine;
 
   /**

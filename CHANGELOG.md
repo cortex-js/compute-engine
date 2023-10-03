@@ -14,6 +14,12 @@
 - The `MaybeBooleans` domain has been dropped. Use
   `["Union", "Booleans", "NothingDomain"]` instead.
 
+### New Features
+
+- Symbolic derivatives of expressions can be calculated using the `D` function.
+  For example, `ce.box(["D", ce.parse("x^2 + 3x + 1"), "x").evaluate().latex`
+  returns `"2x + 3"`.
+
 ### Improvements
 
 - Some frequently used expressions are now available as predefined constants,

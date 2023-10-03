@@ -18,7 +18,7 @@ describe('Nth PRIME NUMBER', () =>
   test('', () => {
     expect(
       check(
-        'p(n)=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
+        'p(n)=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{\\mathrm{v_3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{\\mathrm{v_3}})-\\frac{v_{2}}{\\mathrm{v_3}})}))))}+1})))+2'
       )
     ).toMatchInlineSnapshot(`
       latex     = [
@@ -72,13 +72,13 @@ describe('Nth PRIME NUMBER', () =>
                                                 [
                                                   "Divide",
                                                   ["Subscript", "v", 2],
-                                                  ["Subscript", "v", 3]
+                                                  "v_3"
                                                 ]
                                               ],
                                               [
                                                 "Divide",
                                                 ["Subscript", "v", 2],
-                                                ["Subscript", "v", 3]
+                                                "v_3"
                                               ]
                                             ]
                                           ]
@@ -87,7 +87,7 @@ describe('Nth PRIME NUMBER', () =>
                                     ],
                                     [
                                       "Triple",
-                                      ["Hold", ["Subscript", "v", 3]],
+                                      ["Hold", "v_3"],
                                       2,
                                       [
                                         "Floor",
@@ -165,15 +165,7 @@ describe('Nth PRIME NUMBER', () =>
                           ],
                           [
                             "Triple",
-                            [
-                              "Error",
-                              [
-                                "ErrorCode",
-                                "'incompatible-domain'",
-                                "Symbols",
-                                "ExtendedRealNumbers"
-                              ]
-                            ],
+                            ["Hold", "v_3"],
                             2,
                             ["Floor", ["Sqrt", "v_2"]]
                           ]
@@ -186,7 +178,7 @@ describe('Nth PRIME NUMBER', () =>
                               "ErrorCode",
                               "'incompatible-domain'",
                               "Symbols",
-                              "ExtendedRealNumbers"
+                              "Anything"
                             ]
                           ],
                           2,
@@ -203,12 +195,7 @@ describe('Nth PRIME NUMBER', () =>
               "Triple",
               [
                 "Error",
-                [
-                  "ErrorCode",
-                  "'incompatible-domain'",
-                  "Symbols",
-                  "ExtendedRealNumbers"
-                ]
+                ["ErrorCode", "'incompatible-domain'", "Symbols", "Anything"]
               ],
               2,
               ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
@@ -259,15 +246,7 @@ describe('Nth PRIME NUMBER', () =>
                           ],
                           [
                             "Triple",
-                            [
-                              "Error",
-                              [
-                                "ErrorCode",
-                                "'incompatible-domain'",
-                                "Symbols",
-                                "ExtendedRealNumbers"
-                              ]
-                            ],
+                            ["Hold", "v_3"],
                             2,
                             ["Floor", ["Sqrt", "v_2"]]
                           ]
@@ -280,7 +259,7 @@ describe('Nth PRIME NUMBER', () =>
                               "ErrorCode",
                               "'incompatible-domain'",
                               "Symbols",
-                              "ExtendedRealNumbers"
+                              "Anything"
                             ]
                           ],
                           2,

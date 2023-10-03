@@ -44,14 +44,13 @@ import {
 } from './arithmetic-multiply';
 import { simplifyDivide } from './arithmetic-divide';
 import { processPower, processSqrt } from './arithmetic-power';
-import { applyN, apply2N } from '../symbolic/utils';
+import { applyN, apply2N, canonical } from '../symbolic/utils';
 import Decimal from 'decimal.js';
 import Complex from 'complex.js';
 import {
   checkArg,
   checkArgs,
   checkNumericArgs,
-  canonical,
 } from '../boxed-expression/validate';
 import { flattenSequence } from '../symbolic/flatten';
 

@@ -21,6 +21,7 @@ import {
   BoxedSubstitution,
   EvaluateOptions,
   BoxedBaseDefinition,
+  Hold,
 } from '../public';
 import { findUnivariateRoots } from '../solve';
 import { asFloat } from '../numerics/numeric';
@@ -37,6 +38,7 @@ import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { checkNumericArgs, adjustArguments } from './validate';
 import { expand } from '../symbolic/expand';
 import { apply } from '../function-utils';
+import { shouldHold } from '../symbolic/utils';
 
 /**
  * BoxedFunction
@@ -88,10 +90,10 @@ export class BoxedFunction extends _BoxedExpression {
     this._head = head;
     this._ops = ops;
 
-    if (options.canonical) this._canonical = this;
-
-    this._scope = ce.context;
-    this.bind();
+    if (options.canonical) {
+      this._canonical = this;
+      this.bind();
+    }
 
     ce._register(this);
   }
@@ -114,16 +116,27 @@ export class BoxedFunction extends _BoxedExpression {
     return h;
   }
 
-  rebind(): void {
-    if (this._canonical === this) {
-      // rebind any subexpressions
-      for (const op of this._ops) op.rebind();
-      if (typeof this._head !== 'string') this._head.rebind();
-    }
-    this._canonical = undefined;
+  bind(): void {
+    // Unbind
     this._def = undefined;
+
     this._scope = this.engine.context;
-    this.bind();
+
+    const head = this._head;
+    if (typeof head !== 'string') head.bind();
+
+    for (const op of this._ops) op.bind();
+
+    if (typeof head !== 'string') return;
+
+    this._def = this.engine.lookupFunction(head);
+  }
+
+  reset(): void {
+    // Note: a non-canonical expression is never bound
+    this._value = undefined;
+    this._numericValue = undefined;
+    // this._def = null;
   }
 
   get isCanonical(): boolean {
@@ -268,7 +281,11 @@ export class BoxedFunction extends _BoxedExpression {
       if (this.head !== rhs.head) return false;
     } else {
       if (typeof rhs.head === 'string') return false;
-      else if (!rhs.head || !this.head.isSame(rhs.head)) return false;
+      if (
+        !rhs.head ||
+        !this.engine.box(this.head).isSame(this.engine.box(rhs.head))
+      )
+        return false;
     }
 
     // Each argument must match
@@ -331,22 +348,6 @@ export class BoxedFunction extends _BoxedExpression {
 
   get functionDefinition(): BoxedFunctionDefinition | undefined {
     return this._def;
-  }
-
-  bind(_scope?: RuntimeScope | null): void {
-    // Unbind
-    this._def = undefined;
-
-    const head = this._head;
-    if (!head || typeof head !== 'string') return;
-    this._def = this.engine.lookupFunction(head);
-  }
-
-  unbind(): void {
-    // Note: a non-canonical expression is never bound
-    this._value = undefined;
-    this._numericValue = undefined;
-    // this._def = null;
   }
 
   get value(): BoxedExpression | undefined {
@@ -670,8 +671,8 @@ export class BoxedFunction extends _BoxedExpression {
         () => boxRules(this.engine, SIMPLIFY_RULES),
         (rules) => {
           for (const [lhs, rhs, _priority, _condition] of rules) {
-            lhs.unbind();
-            rhs.unbind();
+            lhs.reset();
+            rhs.reset();
           }
           return rules;
         }
@@ -956,6 +957,7 @@ export function makeCanonicalFunction(
   const adjustedArgs = adjustArguments(
     ce,
     xs,
+    def.hold,
     sig.domain.params,
     sig.domain.optParams,
     sig.domain.restParam
@@ -999,7 +1001,7 @@ export function makeCanonicalFunction(
  */
 export function holdMap(
   xs: BoxedExpression[],
-  skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most',
+  skip: Hold,
   associativeHead: string,
   f: (x: BoxedExpression) => BoxedExpression | null
 ): BoxedExpression[] {
@@ -1046,26 +1048,6 @@ export function holdMap(
     }
   }
   return flattenOps(result, associativeHead);
-}
-
-function shouldHold(
-  skip: 'all' | 'none' | 'first' | 'rest' | 'last' | 'most',
-  count: number,
-  index: number
-): boolean {
-  if (skip === 'all') return true;
-
-  if (skip === 'none') return false;
-
-  if (skip === 'first') return index === 0;
-
-  if (skip === 'rest') return index !== 0;
-
-  if (skip === 'last') return index === count;
-
-  if (skip === 'most') return index !== count;
-
-  return true;
 }
 
 // @todo: allow selection of one signature amongst multiple

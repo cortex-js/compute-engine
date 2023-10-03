@@ -6,6 +6,7 @@ import {
   RuntimeScope,
   BoxedFunctionSignature,
   BoxedExpression,
+  Hold,
 } from '../public';
 import { DEFAULT_COMPLEXITY } from './order';
 
@@ -25,7 +26,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
   numeric: boolean;
 
   complexity: number;
-  hold: 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
+  hold: Hold;
   dynamic: boolean;
 
   signature: BoxedFunctionSignature;

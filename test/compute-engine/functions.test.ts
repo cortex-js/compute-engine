@@ -27,10 +27,10 @@ engine.assign('f7', ['Function', ['Add', '_2', 1]]);
 engine.assign('f8', ['Add', '_', 1]);
 engine.assign('f9', ['Add', '_1', 1]);
 
-// console.log(engine.box(['f1']).evaluate().toString());
-console.log(evaluate(['f2', 10]));
-console.log(evaluate(['f2'])); // @fixme value of parameters is remembered
-// console.log(evaluate(['f1']));
+// console.info(engine.box(['f1']).evaluate().toString());
+console.info(evaluate(['f2', 10]));
+console.info(evaluate(['f2'])); // @fixme value of parameters is remembered
+// console.info(evaluate(['f1']));
 
 describe('Anonymous function', () => {
   test('Function', () =>

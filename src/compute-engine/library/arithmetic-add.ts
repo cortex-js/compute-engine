@@ -178,7 +178,7 @@ export function evalSummation(
   let result: BoxedExpression | undefined | null = null;
   const savedContext = ce.swapScope(fn.scope);
   ce.pushScope();
-  fn.rebind();
+  fn.bind();
 
   if (mode === 'simplify') {
     const terms: BoxedExpression[] = [];

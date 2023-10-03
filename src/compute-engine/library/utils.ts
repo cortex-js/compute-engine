@@ -1,21 +1,5 @@
 import { MAX_ITERATION, asSmallInteger } from '../numerics/numeric';
-import {
-  BoxedExpression,
-  FunctionDefinition,
-  SymbolDefinition,
-} from '../public';
-
-export function isSymbolDefinition(def: any): def is SymbolDefinition {
-  if (def === undefined || def === null || typeof def !== 'object')
-    return false;
-  return 'domain' in def || 'value' in def || 'constant' in def;
-}
-
-export function isFunctionDefinition(def: any): def is FunctionDefinition {
-  if (def === undefined || def === null || typeof def !== 'object')
-    return false;
-  return 'signature' in def || 'complexity' in def;
-}
+import { BoxedExpression } from '../public';
 
 export function normalizeLimits(
   range: BoxedExpression

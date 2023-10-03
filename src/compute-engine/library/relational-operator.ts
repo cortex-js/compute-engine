@@ -1,6 +1,6 @@
-import { canonical } from '../boxed-expression/validate';
 import { BoxedExpression, IdentifierDefinitions } from '../public';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { canonical } from '../symbolic/utils';
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔

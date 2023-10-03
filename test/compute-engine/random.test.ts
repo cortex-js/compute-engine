@@ -4,13 +4,13 @@ function checkLatexRoundtrip(): string | undefined {
   engine.forget('x');
   const expr = engine.box(['RandomExpression']).evaluate();
   if (!expr.isValid) {
-    console.log(expr.toString());
+    console.info(expr.toString());
     return expr.toString();
   }
   const expr2 = engine.parse(expr.latex);
   if (!expr2.isSame(expr)) {
     const repeat = expr2.isSame(expr);
-    console.log(expr.toString());
+    console.info(expr.toString());
     return expr.toString();
   }
   return undefined;
@@ -24,8 +24,8 @@ function checkSimplification(): string | undefined {
   for (let i = 0; i <= 100; i++) {
     engine.assign({ x: Math.random() * 2000 - 1000 });
     if (!expr.evaluate().isEqual(simp.evaluate())) {
-      console.log(expr.evaluate().toString());
-      console.log(simp.evaluate().toString());
+      console.info(expr.evaluate().toString());
+      console.info(simp.evaluate().toString());
       return expr.toString();
     }
   }

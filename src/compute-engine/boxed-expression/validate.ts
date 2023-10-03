@@ -3,8 +3,10 @@ import {
   BoxedExpression,
   BoxedDomain,
   DomainLiteral,
+  Hold,
 } from '../public';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { canonical, shouldHold } from '../symbolic/utils';
 
 /**
  * Check that the number of arguments is as expected.
@@ -154,6 +156,7 @@ export function checkArgs(
 export function adjustArguments(
   ce: IComputeEngine,
   ops: BoxedExpression[],
+  hold: Hold,
   params: BoxedDomain[],
   optParams: BoxedDomain[],
   restParam: BoxedDomain | null
@@ -178,6 +181,10 @@ export function adjustArguments(
     if (!op) {
       result.push(ce.error('missing'));
       isValid = false;
+      continue;
+    }
+    if (shouldHold(hold, params.length, i - 1)) {
+      result.push(op);
       continue;
     }
     if (!op.isValid) {
@@ -206,6 +213,10 @@ export function adjustArguments(
       // No more ops, we're done
       break;
     }
+    if (shouldHold(hold, params.length, i)) {
+      result.push(op);
+      continue;
+    }
     if (!op.isValid) {
       result.push(op);
       isValid = false;
@@ -233,6 +244,10 @@ export function adjustArguments(
   if (restParam) {
     for (const op of ops.slice(i)) {
       i += 1;
+      if (shouldHold(hold, params.length, i - 1)) {
+        result.push(op);
+        continue;
+      }
       if (!op.isValid) {
         result.push(op);
         isValid = false;
@@ -267,15 +282,19 @@ export function adjustArguments(
 
   // All arguments are valid, we can infer the domain of the arguments
   i = 0;
-  for (const param of params) ops[i++].infer(param);
-  for (const param of optParams) ops[i++]?.infer(param);
+  for (const param of params) {
+    if (!shouldHold(hold, params.length, i)) ops[i].infer(param);
+    i += 1;
+  }
+  for (const param of optParams) {
+    if (!shouldHold(hold, params.length, i)) ops[i++]?.infer(param);
+    i += 1;
+  }
   if (restParam) {
-    for (const op of ops.slice(i)) op.infer(restParam);
+    for (const op of ops.slice(i)) {
+      if (!shouldHold(hold, params.length, i)) op.infer(restParam);
+      i += 1;
+    }
   }
   return null;
-}
-
-export function canonical(xs: BoxedExpression[]): BoxedExpression[] {
-  // Avoid memory allocation if possible
-  return xs.every((x) => x.isCanonical) ? xs : xs.map((x) => x.canonical);
 }

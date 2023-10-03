@@ -154,6 +154,8 @@ export function validateIdentifier(
 
   if (s === '') return 'empty-string';
 
+  // MathJSON symbols are always stored in Unicode NFC canonical order.
+  // See https://unicode.org/reports/tr15/
   if (s.normalize() !== s) return 'expected-nfc';
 
   // Does the string contain any bidi marker?

@@ -4,7 +4,7 @@ import { box, parse, latex } from '../../utils';
 // for (let i = 0; i < 0x10ffff; i++) {
 //   const s = String.fromCodePoint(i);
 //   if (/\p{Emoji}/u.test(s) && /\p{XIDC}/s.test(s)) {
-//     console.log(s, `U+${i.toString(16).toUpperCase()}`);
+//     console.info(s, `U+${i.toString(16).toUpperCase()}`);
 //   }
 // }
 

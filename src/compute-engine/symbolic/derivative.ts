@@ -1,3 +1,4 @@
+import { apply } from '../function-utils';
 import { BoxedExpression } from '../public';
 
 // See also:
@@ -159,18 +160,12 @@ export function partialDerivative(
     // Power rule
     if (expr.head === 'Power') {
       const [base, exponent] = expr.ops!;
-      const gPrime =
-        partialDerivative(base, v) ??
-        ce._fn('Derivative', [base, ce.symbol(v)]);
-      const hPrime =
-        partialDerivative(exponent, v) ??
-        ce._fn('Derivative', [exponent, ce.symbol(v)]);
+      // Derivative Power Rule
+      // d/dx x^n = n * x^(n-1)
+
       return ce.mul([
-        ce._fn('Power', [base, exponent]),
-        ce.add([
-          ce.mul([gPrime, ce._fn('Ln', [base])]),
-          ce.mul([hPrime, exponent]),
-        ]),
+        exponent,
+        ce.pow(base, ce.add([exponent, ce.NegativeOne])),
       ]);
     }
 
@@ -200,7 +195,9 @@ export function partialDerivative(
     const g = expr.ops![0];
     const gPrime =
       partialDerivative(g, v) ?? ce._fn('Derivative', [g, ce.symbol(v)]);
-    return ce.mul([ce._fn(h, [g]), ce._fn(gPrime, [expr.op1!])]);
+    return ce
+      .mul([apply(ce.box(h), [g]), apply(gPrime, [expr.op1])])
+      .simplify();
   }
 
   return undefined;

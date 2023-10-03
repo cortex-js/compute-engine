@@ -157,13 +157,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     // Force the value to be recalculated based on the original definition
     // Useful when the environment (e.g.) precision changes
     if (this.constant) this._value = null;
-    // this.unbind();
   }
-
-  // unbind() {
-  //   this._value = null;
-  //   this._domain = null;
-  // }
 
   get value(): BoxedExpression | undefined {
     if (this._value === null) {

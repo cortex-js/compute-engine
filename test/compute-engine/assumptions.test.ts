@@ -16,7 +16,7 @@ ce.assume(['Equal', 'p', 11]);
 ce.assume(['Greater', 's', 5]);
 ce.assume(['Greater', 't', 0]);
 
-// console.log([...ce.context!.dictionary!.symbols.keys()]);
+// console.info([...ce.context!.dictionary!.symbols.keys()]);
 
 describe('TAUTOLOGY one = 1', () => {
   test(`one.value`, () => {

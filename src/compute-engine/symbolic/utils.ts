@@ -2,7 +2,7 @@ import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
 import { isMachineRational, isBigRational } from '../numerics/rationals';
-import { BoxedExpression, Rational } from '../public';
+import { BoxedExpression, Hold, Rational } from '../public';
 
 /**
  * Return a rational coef and constant such that `coef * mod + constant = expr`
@@ -210,4 +210,25 @@ export function apply2N(
   if (expr1.numericValue === null || expr2.numericValue === null)
     return undefined;
   return expr1.engine.number(apply2(expr1, expr2, fn, bigFn, complexFn));
+}
+
+export function shouldHold(skip: Hold, count: number, index: number): boolean {
+  if (skip === 'all') return true;
+
+  if (skip === 'none') return false;
+
+  if (skip === 'first') return index === 0;
+
+  if (skip === 'rest') return index !== 0;
+
+  if (skip === 'last') return index === count;
+
+  if (skip === 'most') return index !== count;
+
+  return true;
+}
+
+export function canonical(xs: BoxedExpression[]): BoxedExpression[] {
+  // Avoid memory allocation if possible
+  return xs.every((x) => x.isCanonical) ? xs : xs.map((x) => x.canonical);
 }

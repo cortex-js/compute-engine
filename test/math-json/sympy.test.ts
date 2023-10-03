@@ -2,7 +2,7 @@ import { parse } from '../../src/math-json/parse-sympy';
 import { serialize } from '../../src/math-json/serialize-sympy';
 
 // const k = parse('077e010');
-// console.log('Sympy test: ', k);
+// console.info('Sympy test: ', k);
 
 describe('Sympy parsing identifiers', () => {
   test('abcde_fgh9', () => {

@@ -211,11 +211,11 @@ function makeLambda(
   const fnScope = body.scope;
   if (args.length === 0)
     return () => {
-      const context = ce.swapScope(fnScope);
+      const context = fnScope ? ce.swapScope(fnScope) : null;
       ce.pushScope();
       const result = body.N() ?? body.evaluate();
       ce.popScope();
-      ce.swapScope(context);
+      if (fnScope) ce.swapScope(context);
       return result;
     };
 
@@ -227,7 +227,7 @@ function makeLambda(
     ce.pushScope();
     // Make sure the function body is evaluated in the context of the
     // new scope, and doesn't reuse any scope from a previous invocation
-    body.rebind();
+    body.bind();
 
     let i = 0;
     for (const arg of args) ce.assign(arg, params[i++] ?? ce.Nothing);

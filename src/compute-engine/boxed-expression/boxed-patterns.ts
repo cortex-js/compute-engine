@@ -38,8 +38,8 @@ export class BoxedPattern extends _BoxedExpression implements Pattern {
     return hashCode('Pattern') ^ this._pattern.hash;
   }
 
-  unbind(): void {
-    this._pattern.unbind();
+  reset(): void {
+    this._pattern.reset();
   }
 
   get json(): Expression {
@@ -388,7 +388,7 @@ function match(
     numericTolerance: options?.numericTolerance ?? NUMERIC_TOLERANCE,
   });
   if (substitution) {
-    console.log('match', subject.toString(), pattern.toString(), substitution);
+    // console.info('match', subject.toString(), pattern.toString(), substitution);
     return substitution;
   }
 

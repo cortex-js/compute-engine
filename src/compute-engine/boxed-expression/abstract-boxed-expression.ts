@@ -122,10 +122,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
-  rebind(): void {
-    return;
-  }
-
   /** Object.is() */
   is(rhs: any): boolean {
     if (rhs === null || rhs === undefined) return false;
@@ -386,11 +382,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false; // The inference was ignored if false
   }
 
-  bind(_scope: RuntimeScope | null): void {
+  bind(): void {
     return;
   }
 
-  unbind(): void {
+  reset(): void {
     return;
   }
 

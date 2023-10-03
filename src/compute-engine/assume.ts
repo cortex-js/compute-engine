@@ -228,13 +228,14 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   //    => evaluate and return result (contradiction or tautology)
 
   const ce = proposition.engine;
+  // Note: this is not 'unknowns' because proposition is not canonical (so all symbols are "unknowns")
   const undefs = undefinedIdentifiers(proposition.op1);
   // Case 1
   if (undefs.length === 1) {
     const dom = ce.domain(proposition.op2.evaluate().json as DomainExpression);
     if (!dom.isValid) return 'not-a-predicate';
 
-    ce.declare(undefs[0], dom.json as DomainExpression);
+    ce.declare(undefs[0], dom);
     return 'ok';
   }
 

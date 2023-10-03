@@ -123,13 +123,14 @@ volumes
     // ["D", f, "y", "x"]
 
     D: {
+      hold: 'all',
       signature: {
         domain: [
           'FunctionOf',
-          'Functions',
+          'Anything',
           'Symbols',
           ['VarArg', 'Symbols'],
-          'Functions',
+          'Anything',
         ],
         evaluate: (ce, ops) => {
           let f = ops[0];
@@ -138,7 +139,10 @@ volumes
           while (vars.length > 0) {
             const v = vars.shift();
             if (!v?.symbol) return undefined;
-            const fPrime = partialDerivative(f, v.symbol);
+            ce.pushScope();
+            ce.declare(v.symbol, ce.Numbers);
+            const fPrime = partialDerivative(f.canonical, v.symbol);
+            ce.popScope();
             // If we couldn't derivate with respect to this variable, return
             // a partial derivation
             if (fPrime === undefined) return ce._fn(f, vars);
@@ -153,12 +157,12 @@ volumes
     ND: {
       hold: 'first',
       signature: {
-        domain: ['FunctionOf', 'Functions', 'Numbers', 'Functions'],
+        domain: ['FunctionOf', 'Anything', 'Numbers', 'Functions'],
         N: (ce, ops) => {
           const x = ops[1]?.valueOf();
           if (typeof x !== 'number') return undefined;
 
-          const f = applicableN1(ops[0]);
+          const f = applicableN1(ce.box(ops[0]));
           return ce.number(centeredDiff8thOrder(f, x, 1e-6));
         },
       },

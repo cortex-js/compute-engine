@@ -15,9 +15,9 @@ const e = engine.parse(`(x + y +  z + 1)^{32}`);
 // engine.numericMode = 'machine';
 // engine.precision = 14;
 
-// console.log(expand(e).toJSON());
+// console.info(expand(e).toJSON());
 
-// console.log(expand(engine.parse('(a+b)^{10}')).latex);
+// console.info(expand(engine.parse('(a+b)^{10}')).latex);
 
 // Sympy benchmarks.
 // Source: https://github.com/sympy/sympy/blob/master/sympy/core/benchmarks/bench_expand.py

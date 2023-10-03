@@ -47,6 +47,8 @@ import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
   setIdentifierDefinitions,
   getStandardLibrary,
+  isSymbolDefinition,
+  isFunctionDefinition,
 } from './library/library';
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 import { ExpressionMap } from './boxed-expression/expression-map';
@@ -80,7 +82,6 @@ import {
 } from './numerics/rationals';
 import { canonicalNegate } from './symbolic/negate';
 import { flattenOps, flattenSequence } from './symbolic/flatten';
-import { isFunctionDefinition, isSymbolDefinition } from './library/utils';
 import { bigint } from './numerics/numeric-bigint';
 import { parseFunctionSignature } from './function-utils';
 import { CYAN, INVERSE_RED, RESET, YELLOW } from '../common/ansi-codes';
@@ -89,7 +90,7 @@ import {
   DOMAIN_CONSTRUCTORS,
   isDomainLiteral,
 } from './library/domains';
-import { canonical } from './boxed-expression/validate';
+import { canonical } from './symbolic/utils';
 
 /**
  *
@@ -408,7 +409,7 @@ export class ComputeEngine implements IComputeEngine {
     // 'forward-declared')
     for (const d of Object.keys(this._commonDomains)) {
       if (this._commonDomains[d] && !this._commonDomains[d]!.symbolDefinition)
-        this._commonDomains[d]!.bind(this.context);
+        this._commonDomains[d]!.bind();
       else {
         this._commonDomains[d] = new _BoxedDomain(
           this,
@@ -479,17 +480,17 @@ export class ComputeEngine implements IComputeEngine {
     this._BIGNUM_HALF = this._BIGNUM_ONE.div(this._BIGNUM_TWO);
     this._BIGNUM_PI = this._BIGNUM_NEGATIVE_ONE.acos();
 
-    // Unbind all the known expressions/symbols
+    // Reset all the known expressions/symbols
     const symbols = this._stats.symbols.values();
     const expressions = this._stats.expressions!.values();
     this._stats.symbols = new Set<BoxedExpression>();
     this._stats.expressions = new Set<BoxedExpression>();
-    for (const s of symbols) s.unbind();
-    for (const s of expressions) s.unbind();
+    for (const s of symbols) s.reset();
+    for (const s of expressions) s.reset();
 
-    // Unbind all the common  expressions (probably not necessary)
-    for (const d of Object.values(this._commonDomains)) d?.unbind();
-    for (const d of Object.values(this._commonSymbols)) d?.unbind();
+    // Reset all the common  expressions (probably not necessary)
+    for (const d of Object.values(this._commonDomains)) d?.reset();
+    for (const d of Object.values(this._commonSymbols)) d?.reset();
 
     // Reset all the definitions
     let scope = this.context;
@@ -946,12 +947,15 @@ export class ComputeEngine implements IComputeEngine {
 
     this.context = this.context.parentScope ?? null;
 
+    if (!this.context) debugger;
+
     return this;
   }
 
   swapScope(scope: RuntimeScope | null): RuntimeScope | null {
     const oldScope = this.context;
     this.context = scope;
+    if (!this.context) debugger;
     return oldScope;
   }
 
@@ -1033,21 +1037,30 @@ export class ComputeEngine implements IComputeEngine {
    */
   declare(
     id: string,
-    def: DomainExpression | SymbolDefinition | FunctionDefinition
+    def: BoxedDomain | DomainExpression | SymbolDefinition | FunctionDefinition
   ): IComputeEngine;
   declare(identifiers: {
-    [id: string]: DomainExpression | SymbolDefinition | FunctionDefinition;
+    [id: string]:
+      | BoxedDomain
+      | DomainExpression
+      | SymbolDefinition
+      | FunctionDefinition;
   }): IComputeEngine;
   declare(
     arg1:
       | string
       | {
           [id: string]:
+            | BoxedDomain
             | DomainExpression
             | SymbolDefinition
             | FunctionDefinition;
         },
-    arg2?: DomainExpression | SymbolDefinition | FunctionDefinition
+    arg2?:
+      | BoxedDomain
+      | DomainExpression
+      | SymbolDefinition
+      | FunctionDefinition
   ): IComputeEngine {
     //
     // If we got an object literal, call `declare` for each entry
@@ -1119,11 +1132,12 @@ export class ComputeEngine implements IComputeEngine {
 
     //
     // Declaring an identifier with a domain
-    // `ce.declare("f", ["Functions", "Numbers", "Numbers"])`
+    // `ce.declare("f", ["FunctionOf", "Numbers", "Numbers"])`
     // `ce.declare("z", "ComplexNumbers")`
+    // `ce.declare("n", ce.Integers)`
     //
     {
-      const dom = this.domain(def as DomainExpression);
+      const dom = this.domain(def);
       if (dom.isValid) {
         if (dom.isFunction)
           this.defineFunction(id, { signature: { domain: dom } });

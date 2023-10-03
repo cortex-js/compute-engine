@@ -101,7 +101,7 @@ export class BoxedWildcard extends BoxedSymbol {
   }
 
   get json(): Expression {
-    return serializeJsonSymbol(this.engine, this._name);
+    return serializeJsonSymbol(this.engine, this._id);
   }
 
   get sgn(): -1 | 0 | 1 | undefined | null {
@@ -121,7 +121,7 @@ export class BoxedWildcard extends BoxedSymbol {
 
   isSame(rhs: BoxedExpression): boolean {
     if (!(rhs instanceof BoxedWildcard)) return false;
-    return this._name === rhs._name;
+    return this._id === rhs._id;
   }
 
   isEqual(rhs: BoxedExpression): boolean {
@@ -130,7 +130,7 @@ export class BoxedWildcard extends BoxedSymbol {
 
   isLess(rhs: BoxedExpression): boolean | undefined {
     // Idempotency
-    if (rhs.symbol !== null && rhs.symbol === this._name) return false;
+    if (rhs.symbol !== null && rhs.symbol === this._id) return false;
 
     if (rhs.isZero) {
       const s = this.sgn;
@@ -145,7 +145,7 @@ export class BoxedWildcard extends BoxedSymbol {
 
   isLessEqual(rhs: BoxedExpression): boolean | undefined {
     // Idempotency
-    if (rhs.symbol !== null && rhs.symbol === this._name) return true;
+    if (rhs.symbol !== null && rhs.symbol === this._id) return true;
 
     if (rhs.isZero) {
       const s = this.sgn;
@@ -159,7 +159,7 @@ export class BoxedWildcard extends BoxedSymbol {
 
   isGreater(rhs: BoxedExpression): boolean | undefined {
     // Idempotency
-    if (rhs.symbol !== null && rhs.symbol === this._name) return false;
+    if (rhs.symbol !== null && rhs.symbol === this._id) return false;
 
     if (rhs.isZero) {
       const s = this.sgn;
@@ -175,7 +175,7 @@ export class BoxedWildcard extends BoxedSymbol {
 
   isGreaterEqual(rhs: BoxedExpression): boolean | undefined {
     // Idempotency
-    if (rhs.symbol !== null && rhs.symbol === this._name) return true;
+    if (rhs.symbol !== null && rhs.symbol === this._id) return true;
 
     if (rhs.isZero) {
       const s = this.sgn;

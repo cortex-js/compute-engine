@@ -680,7 +680,7 @@ function constructibleValues(
     },
     (cache) => {
       for (const [_k, v] of cache) {
-        for (const v2 of Object.values(v)) (v2 as BoxedExpression).unbind();
+        for (const v2 of Object.values(v)) (v2 as BoxedExpression).reset();
       }
       return cache;
     }

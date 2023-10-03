@@ -38,18 +38,20 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
+console.info(ce.box(['Triple', 'u', 4, 5]).toString());
+
 // const s1 = ce.parse('5 \\times 2 + 3 \\times 4');
 // // const s1 = ce.parse('3 \\times 4 + 1');
-// console.log(s1.rawJson);
-// console.log(s1.latex);
+// console.info(s1.rawJson);
+// console.info(s1.latex);
 
 // Should distribute: prefer addition over multiplication
 const xp = ce.parse('a\\times(c+d)');
 console.info(xp.rawJson);
-console.log(xp.latex);
-console.log(xp.simplify().toString());
+console.info(xp.latex);
+console.info(xp.simplify().toString());
 
-console.log(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
+console.info(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
 
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
@@ -65,30 +67,30 @@ engine.latexOptions.avoidExponentsInRange = null;
 
 const rep1 = ce.parse('3.123123123123');
 const rep2 = ce.box('123456789123456789123.123123123', { canonical: false });
-console.log(rep1.latex);
-console.log(rep2.latex);
+console.info(rep1.latex);
+console.info(rep2.latex);
 
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range
-console.log(t1.toString());
+console.info(t1.toString());
 
-console.log(t1.simplify().toString());
+console.info(t1.simplify().toString());
 
-console.log(ce.parse('f\\left(\\right)').toString());
+console.info(ce.parse('f\\left(\\right)').toString());
 
 // Produces error -- mathlive #1707
 // also should parse sub, i.e. f_{n-1} -> use sub as first params? (or last, as in log_2(x) -> log(x, 2))
-console.log(ce.parse("f'").json);
+console.info(ce.parse("f'").json);
 
 const n1 = ce.parse('x_{1,2}');
-console.log(n1.toString());
+console.info(n1.toString());
 
 const expr200 = ce.parse('x^2').json;
-console.log(ce.box(['Integrate', expr200, ['Tuple', 'x', 0, 1]]).latex);
+console.info(ce.box(['Integrate', expr200, ['Tuple', 'x', 0, 1]]).latex);
 
-// console.log(engine.pattern(['Add', 1, '_']).match(engine.box(['Add', 1, 2])));
+// console.info(engine.pattern(['Add', 1, '_']).match(engine.box(['Add', 1, 2])));
 
-// console.log(
+// console.info(
 //   ce.box(['Set', 'Number', ['Condition', ['NotEqual', '_', 0]]]).latex
 // );
 
@@ -99,10 +101,10 @@ console.log(ce.box(['Integrate', expr200, ['Tuple', 'x', 0, 1]]).latex);
 //
 
 // Serialization issue (the 1/2 rational should get distributed to numerator/denominator)
-console.log(ce.parse('\\frac{1}{2\\sqrt{3}}').canonical.latex);
+console.info(ce.parse('\\frac{1}{2\\sqrt{3}}').canonical.latex);
 
 // Needs a \times between 2 and 3
-console.log(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').latex);
+console.info(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').latex);
 
 // `HorizontalScaling` should be interpreted as a function, not a symbol.
 // auto-add all the entries from libraries to the dictionary? Alternatively
@@ -110,69 +112,69 @@ console.log(ce.parse('\\sqrt{\\sqrt{\\sqrt{2\\sqrt{3}}}}').latex);
 // `parseUnknownIdentifier`): check Domain is 'Functions'. (See \\operatorname, parse.ts:983)
 // Also maybe unknown identifier in front of Delimiter -> function, .e.g
 // `p(n) =  2n`. Can always disambiguate with a \cdot, e.g. `p\cdot(n)`
-console.log(
+console.info(
   ce.parse('\\operatorname{HorizontalScaling}\\left(3\\right)+1').json
 );
 
 // simplify() should decompose the square roots of rational
 let z7 = ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}');
-console.log(z7.toJSON());
+console.info(z7.toJSON());
 z7 = z7.canonical;
-console.log(z7.toJSON());
+console.info(z7.toJSON());
 z7 = z7.simplify();
-console.log(z7.json);
+console.info(z7.json);
 // Expect: `['Sqrt',  5]`
-console.log(ce.parse('\\sqrt{15}').simplify().latex);
+console.info(ce.parse('\\sqrt{15}').simplify().latex);
 // Expect_. `\sqrt15` (don't keep decomposed root expanded)
 
 // Report false. Should be true.
 const sig1 = ce.domain(['FunctionOf', 'PositiveIntegers', 'Numbers']);
 const sig2 = ce.domain(['FunctionOf', 'Numbers', 'Numbers']);
-console.log(sig1.isCompatible(sig2));
+console.info(sig1.isCompatible(sig2));
 
 // Outputs unexpected command, \\left...
 // because there is no matchfix for \\left(\\right.
-console.log(ce.parse('\\sin\\left(x\\right.').toJSON());
+console.info(ce.parse('\\sin\\left(x\\right.').toJSON());
 // Another example: should probably downconvert the \left( to a (
 // and ignore the \right.
-console.log(ce.parse('\\frac{\\left(w\\right.-x)\\times10^6}{v}').json);
+console.info(ce.parse('\\frac{\\left(w\\right.-x)\\times10^6}{v}').json);
 
 // Check error
-console.log(ce.parse('(').toJSON());
+console.info(ce.parse('(').toJSON());
 
 // Gives unexpected-token. Should be expected closing boundary?
-console.log(ce.parse('(3+x').toJSON());
+console.info(ce.parse('(3+x').toJSON());
 
 // Give unexpected token. SHould be unexpected closing boundary?
-console.log(ce.parse(')').toJSON());
+console.info(ce.parse(')').toJSON());
 
 // ; is parsed as List List?
-console.log(ce.parse('(a, b; c, d, ;; n ,, m)').toJSON());
+console.info(ce.parse('(a, b; c, d, ;; n ,, m)').toJSON());
 
 // The invalid `$` is not detected. Should return an error 'unexpected-mode-shift', or invalid identifier
 const w = ce.parse('\\operatorname{$invalid}').json;
-console.log(w);
+console.info(w);
 
 // Should interpret function application `(x)`
-// console.log(ce.parse('f_{n - 1}(x)').toJSON());
-// console.log(ce.parse('x \\times f_{n - 1}(x) + f_{n - 2}(x)').toJSON());
+// console.info(ce.parse('f_{n - 1}(x)').toJSON());
+// console.info(ce.parse('x \\times f_{n - 1}(x) + f_{n - 2}(x)').toJSON());
 
 // If a symbol surrounded by two numeric literals
 // (Range if integers and symbol is an integer, Interval otherwise)
-console.log(ce.parse('5\\le b\\le 7}').canonical.json);
+console.info(ce.parse('5\\le b\\le 7}').canonical.json);
 // -> ["Range", 5, 7]
-console.log(ce.parse('5\\le b\\lt 7}').canonical.json);
+console.info(ce.parse('5\\le b\\lt 7}').canonical.json);
 // -> ["Range", 5, 6]
 
 // Inequality with more than 2 terms (hold all)
-console.log(ce.parse('a\\lt b\\le c}').canonical.json);
+console.info(ce.parse('a\\lt b\\le c}').canonical.json);
 // -> ["Inequality", a, "LessThan", b, "Less", c]
 
 // Several problems:
 // - \mathbb{R} is not recognized
 // - \in has higher precedence than =
 // - ['Equal'] with more than two arguments fails
-console.log(
+console.info(
   ce.parse(
     '{\\sqrt{\\sum_{n=1}^\\infty {\\frac{10}{n^4}}}} = {\\int_0^\\infty \\frac{2xdx}{e^x-1}} = \\frac{\\pi^2}{3} \\in {\\mathbb R}'
   ).json
@@ -182,57 +184,57 @@ console.log(
 //  p(n)=(\sum_{v_{1}=2}^{\operatorname{floor}\left(1.5*n*\ln(n)\right)}(\operatorname{floor}(\frac{1}{0^{n-(\sum_{v_{2}=2}^{v_{1}}((\prod_{v_{3}=2}^{\operatorname{floor}(\sqrt{v_{2}})}(1-0^{\operatorname{abs}(\operatorname{floor}(\frac{v_{2}}{v_{3}})-\frac{v_{2}}{v_{3}})}))))}+1})))+2
 // https://github.com/uellenberg/Logimat/tree/master/examples/nth-prime
 
-console.log(
+console.info(
   ce.parse(
     'p(n)=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
   ).json
 );
 
 // Add Kronecker's Delta
-console.log(ce.parse('\\delta_{n, m}').json);
+console.info(ce.parse('\\delta_{n, m}').json);
 // -> ["KroneckerDelta", n, m]
-console.log(ce.box(['KroneckerDelta', 5, ['Add', 4, 1], 5]).evaluate().json);
+console.info(ce.box(['KroneckerDelta', 5, ['Add', 4, 1], 5]).evaluate().json);
 // -> 1, when all ops are equal
-console.log(ce.box(['KroneckerDelta', 5, ['Add', 4, 1], 6]).evaluate().json);
+console.info(ce.box(['KroneckerDelta', 5, ['Add', 4, 1], 6]).evaluate().json);
 // -> 0 when any ops is different
 
 // Add Iverson Brackets/Indicator Function (0 when boolean expression is false,
 // 1 otherwise)
 // Also, prioritize evaluation of `Boole` terms in `Multiply` (if 0, can exit
 // early)
-console.log(ce.box(['Boole', ['Equal', 3, 5]]).evaluate().json);
+console.info(ce.box(['Boole', ['Equal', 3, 5]]).evaluate().json);
 // -> 0
-console.log(ce.box(['Boole', ['Equal', 3, ['Add', 1, 2]]]).evaluate().json);
+console.info(ce.box(['Boole', ['Equal', 3, ['Add', 1, 2]]]).evaluate().json);
 // -> 1
 
 // Parse Delimiter with square brackets and a single boolean expression as
 // an argument as an Iverson Bracket.
-console.log(ce.parse('\\left[a=b\\right]').canonical.json);
+console.info(ce.parse('\\left[a=b\\right]').canonical.json);
 // Also \llbracket (U+27E6)...\rrbracket (U+27E7)
-console.log(ce.parse('\\llbracket[a=b\\rrbracket]').canonical.json);
+console.info(ce.parse('\\llbracket[a=b\\rrbracket]').canonical.json);
 // -> ['Boole', ['Equal', a, b]]
 //  For Tuple with a single boolean, use Tuple (or Single)
-console.log(ce.parse('\\operatorname{Single}(a, b)').json);
-console.log(ce.parse('\\operatorname{Tuple}(a, b)').json);
+console.info(ce.parse('\\operatorname{Single}(a, b)').json);
+console.info(ce.parse('\\operatorname{Tuple}(a, b)').json);
 
 // Simplify to Iverson Bracket (or maybe canonicalize)
-console.log(ce.parse('0^{|a-b|}').json);
+console.info(ce.parse('0^{|a-b|}').json);
 // -> ["Boole", ["Equal", a, b]]
 
 // Simplify (canonicalize) sign function
-console.log(ce.parse('\\frac{2}{0^x+1}-1').json);
+console.info(ce.parse('\\frac{2}{0^x+1}-1').json);
 
 // Simplify to LessThan, etc...
-console.log(ce.parse('0^{|\\frac{2}{0^x+1}|}').json);
+console.info(ce.parse('0^{|\\frac{2}{0^x+1}|}').json);
 // -> ["Boole", ["LessThan", x, 0]]
 
-console.log(ce.parse('0^{|\\frac{2}{0^{4-x}+1}|}').json);
+console.info(ce.parse('0^{|\\frac{2}{0^{4-x}+1}|}').json);
 // -> ["Boole", ["GreaterThan", x, 4]]
 
-console.log(ce.parse('0^{|\\frac{2}{0^{x-4}+1}|}').json);
+console.info(ce.parse('0^{|\\frac{2}{0^{x-4}+1}|}').json);
 // -> ["Boole", ["LessThan", x, 4]]
 
-console.log(ce.parse('\\mathbb{1}_{\\N}\\left(x\\right)').json);
+console.info(ce.parse('\\mathbb{1}_{\\N}\\left(x\\right)').json);
 // -> ["Boole", ["Element", x, ["Domain", "NonNegativeInteger"]]
 
 // Iverson Bracket/Boole simplification/equivalent rules (not sure if worth
@@ -245,29 +247,29 @@ console.log(ce.parse('\\mathbb{1}_{\\N}\\left(x\\right)').json);
 // [P≡Q]=1−([P]−[Q])
 
 // Knuth's interval notation:
-console.log(ce.parse('(a..b)').json);
+console.info(ce.parse('(a..b)').json);
 // -> ["Range", a, b]
 
 // Knuth's coprime notation
-console.log(ce.parse('m\\bot n').json);
+console.info(ce.parse('m\\bot n').json);
 // -> ["Equal", ["Gcd", m, n], 1]
 // -> ["Coprime", m, n]
 
 // Euler's Phi function (number of integers that are coprime)
-console.log(
+console.info(
   ce.parse('\\phi(n)=\\sum_{i=1}^n\\left\\lbrack i\\bot n\\right\\rbrack ').json
 );
 
 // Additional \sum syntax
-console.log(ce.parse('\\sum_{1 \\le i \\le 10} i^2').json);
+console.info(ce.parse('\\sum_{1 \\le i \\le 10} i^2').json);
 //-> ["Sum", ["Square", "i"], ["i", 1, 10]]
 
-console.log(ce.parse('\\sum_{i \\in S} i^2').json);
+console.info(ce.parse('\\sum_{i \\in S} i^2').json);
 
-console.log(ce.parse('\\sum_{i,j} j+i^2').json);
+console.info(ce.parse('\\sum_{i,j} j+i^2').json);
 // -> ["Sum", ..., ["i"], ["j"]]
 
-console.log(
+console.info(
   ce.parse('\\sum_{\\stackrel{{\\scriptstyle 1\\le k\\le n}}{(k,n)=1}}\\!\\!k')
     .json
 );
@@ -275,17 +277,17 @@ console.log(
 // Simplify summations:  see https://en.wikipedia.org/wiki/Summation General Identities
 
 // Congruence (mod) notation (a-b is divisible by n, )
-console.log(ce.parse('a\\equiv b(\\mod n)').canonical.json);
+console.info(ce.parse('a\\equiv b(\\mod n)').canonical.json);
 // -> ["Equal", ["Mod", a, n], ["Mod", b, n]]
-console.log(ce.parse('a\\equiv_{n} b').canonical.json);
+console.info(ce.parse('a\\equiv_{n} b').canonical.json);
 // -> ["Equal", ["Mod", a, n], ["Mod", b, n]]
 // See https://reference.wolfram.com/language/ref/Mod.html
 // a \equiv b (mod 0) => a = b
 
 // Function application (when, e.g. f is a  lambda)
-console.log(ce.parse('f|_{3}').canonical.json);
+console.info(ce.parse('f|_{3}').canonical.json);
 // Application to a range (return a list)
-console.log(ce.parse('f|_{3..5}').canonical.json);
+console.info(ce.parse('f|_{3..5}').canonical.json);
 
 //
 // BOXING
@@ -387,7 +389,7 @@ describe('PARSING numbers', () => {
                                 "ErrorCode",
                                 "'incompatible-domain'",
                                 "Symbols",
-                                "ExtendedRealNumbers"
+                                "Anything"
                               ]
                             ],
                             2,
@@ -402,7 +404,7 @@ describe('PARSING numbers', () => {
                               "ErrorCode",
                               "'incompatible-domain'",
                               "Symbols",
-                              "ExtendedRealNumbers"
+                              "Anything"
                             ]
                           ],
                           2,
@@ -419,12 +421,7 @@ describe('PARSING numbers', () => {
               "Triple",
               [
                 "Error",
-                [
-                  "ErrorCode",
-                  "'incompatible-domain'",
-                  "Symbols",
-                  "ExtendedRealNumbers"
-                ]
+                ["ErrorCode", "'incompatible-domain'", "Symbols", "Anything"]
               ],
               2,
               ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
@@ -873,7 +870,7 @@ function perfTestRationals() {
 
   let timing = Math.floor((globalThis.performance.now() - start) / 10);
 
-  console.log(timing);
+  console.info(timing);
 
   start = globalThis.performance.now();
 
@@ -882,7 +879,7 @@ function perfTestRationals() {
   }
 
   timing = Math.floor((globalThis.performance.now() - start) / 10);
-  console.log(timing);
+  console.info(timing);
 
   randos = [];
   bigrandos = [];
@@ -903,7 +900,7 @@ function perfTestRationals() {
   }
 
   timing = Math.floor((globalThis.performance.now() - start) / 10);
-  console.log(timing);
+  console.info(timing);
 
   start = globalThis.performance.now();
   let r2: Rational = [1n, 1n];
@@ -914,7 +911,7 @@ function perfTestRationals() {
   }
 
   timing = Math.floor((globalThis.performance.now() - start) / 10);
-  console.log(timing);
+  console.info(timing);
 }
 
 function slowEval() {

@@ -1,4 +1,5 @@
-import { checkArity, canonical, checkArgs } from '../boxed-expression/validate';
+import { checkArity, checkArgs } from '../boxed-expression/validate';
+import { canonical } from '../symbolic/utils';
 import { asFloat } from '../numerics/numeric';
 import {
   BoxedExpression,
