@@ -43,10 +43,10 @@ A symbol does not have to be declared before it can be used. A previously
 unknown symbol has a domain of `ce.defaultDomain` and no value.
 
 <code-playground layout="stack" show-line-numbers autorun="never">
-<div slot="javascript">
+<pre slot="javascript">
 const n = ce.box("n");
 n.value = 5;
-console.log("n =", n.value.json);</div></code-playground>
+console.log("n =", n.value.json);</pre></code-playground>
 
 **To get a list of all the symbols in an expression** use `expr.symbols`.
 

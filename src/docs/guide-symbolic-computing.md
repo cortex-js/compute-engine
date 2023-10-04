@@ -107,8 +107,8 @@ Other operations can be performed on an expression: comparing it to a pattern,
 replacing part of it, and applying conditional rewrite rules.
 
 <code-playground layout="stack" show-line-numbers autorun="never">
-<div slot="javascript">const expr = ce.parse('3x^2 + 2x^2 + x + 5');
-console.log(expr.latex, '=', expr.simplify().latex);</div>
+<pre slot="javascript">const expr = ce.parse('3x^2 + 2x^2 + x + 5');
+console.log(expr.latex, '=', expr.simplify().latex);</pre>
 </code-playground>
 
 
@@ -148,10 +148,10 @@ and `rhs`.
 
 
 <code-playground layout="stack" show-line-numbers autorun="never">
-<div slot="javascript">
+<pre slot="javascript">
 const a = ce.parse('2 + 1');
 const b = ce.parse('3');
-console.log('isSame?', a.isSame(b));</div>
+console.log('isSame?', a.isSame(b));</pre>
 </code-playground>
 
 
@@ -171,14 +171,14 @@ way.
 them with the `canonical` option set to `false`.
 
 <code-playground layout="stack" show-line-numbers autorun="never" mark-javascript-line="5-6">
-<div slot="javascript">
+<pre slot="javascript">
 const a = ce.parse('\\frac{1}{10}');
 const b = ce.parse('\\frac{2}{20}');
 console.log('Canonical isSame?', a.isSame(b));
 //
 const aPrime = ce.parse('\\frac{1}{10}', {canonical: false});
 const bPrime = ce.parse('\\frac{2}{20}', {canonical: false});
-console.log('Non-canonical isSame?', aPrime.isSame(bPrime));</div>
+console.log('Non-canonical isSame?', aPrime.isSame(bPrime));</pre>
 </code-playground>
 
 
@@ -213,10 +213,10 @@ determine if the two expressions are mathematically equal. Adding some
 assumptions may result in a different answer.
 
 <code-playground layout="stack" show-line-numbers autorun="never">
-<div slot="javascript">
+<pre slot="javascript">
 const a = ce.parse('1 + 2');
 const b = ce.parse('3');
-console.log('isEqual?', a.isEqual(b));</div>
+console.log('isEqual?', a.isEqual(b));</pre>
 </code-playground>
 
 
@@ -246,14 +246,14 @@ is an identifier and the value to be substituted with. The value can be either a
 number or a boxed expression.
 
 <code-playground layout="stack" show-line-numbers autorun="never" mark-javascript-line="4">
-<div slot="javascript">
+<pre slot="javascript">
 let expr = ce.parse('\\sqrt{\\frac{1}{x+1}}');
 console.log(expr.json);
 //
 expr = expr.subs({x: 3});
 //
 console.log("Substitute x -> 3\n", expr.json);
-console.log("Numerical Evaluation:", expr.N().latex);</div>
+console.log("Numerical Evaluation:", expr.N().latex);</pre>
 </code-playground>
 
 ## Other Symbolic Manipulation
