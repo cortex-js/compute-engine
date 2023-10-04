@@ -9,6 +9,8 @@ toc: false
 render_math_in_document: true
 ---
 
+# Canonical Form
+
 Many mathematical objects can be represented by several equivalent expressions.
 
 For example, the expressions in each row below represent the same mathematical
@@ -43,8 +45,8 @@ be desirable to compare a "raw" user input with an expected answer.
 ```js
 ce.parse('\\frac{30}{-50}');
 // ➔ ["Rational", -3, 5]
-// The canonical version moves the sign to the numerator and reduces the 
-// numerator and denominator
+// The canonical version moves the sign to the numerator 
+// and reduces the numerator and denominator
 
 ce.parse('\\frac{30}{-50}', { canonical: false });
 // ➔ ["Divide", 30, -50]
