@@ -39,7 +39,7 @@ The "kind" of an object is called its **domain**.
 
 ```js
 ce.declare("m_e", {
-  domain: "RealNumber",
+  domain: "RealNumbers",
   constant: true,
   value: 9.1e-31,
 });
@@ -370,7 +370,7 @@ identifiers, not LaTeX commands. For example, if you have a symbol `α`, use
 
 ```js
 ce.declare({
-  m: { domain: "Number", value: 5 },
+  m: { domain: "Numbers", value: 5 },
   f: { domain: "Functions" },
   g: { domain: "Functions" },
   Smallfrac: {

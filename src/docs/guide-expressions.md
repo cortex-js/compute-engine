@@ -290,7 +290,7 @@ arguments to the error.
 
 For example if the problem is that an argument of a function expression is a
 boolean when a number was expected, an expression such as
-`["Error", ["ErrorCode", "'incompatible-domain'", "Number", "Boolean"]]` could
+`["Error", ["ErrorCode", "'incompatible-domain'", "Numbers", "Booleans"]]` could
 be returned.
 
 The `<location>` argument indicates the context of the error. This can be a
@@ -389,7 +389,7 @@ console.log(ce.parse('1+(2=2)+3').canonical.json);
 // ➔ ["Add",
 //      1,
 //      ["Error",
-//          ["ErrorCode", "'incompatible-domain'", "Number", "Boolean"],
+//          ["ErrorCode", "'incompatible-domain'", "Numbers", "Booleans"],
 //          ["Delimiter", ["Equal", 2, 2]]
 //      ],
 //      3

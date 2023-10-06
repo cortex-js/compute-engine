@@ -104,13 +104,13 @@ example, a `List` _is-a_ `Collections`.
 
 ![Anything domains](/assets/domains.001.jpeg "The top-level domains")
 
-![Value domains](/assets/domains.002.jpeg "The Value sub-domains")
+![Values domains](/assets/domains.002.jpeg "The Values sub-domains")
 
 ![Tensor domains](/assets/domains.003.jpeg "The Tensor sub-domains")
 
-![Function domains](/assets/domains.004.jpeg "The Function sub-domains")
+![Function domains](/assets/domains.004.jpeg "The Functions sub-domains")
 
-![Number domains](/assets/domains.005.jpeg "The Number sub-domains")
+![Numbers domains](/assets/domains.005.jpeg "The Numbers sub-domains")
 
 The implementation of the CortexJS domains is based on
 [Weibel, Trudy & Gonnet, Gaston. (1991). An Algebra of Properties.. 352-359. 10.1145/120694.120749. ](https://www.researchgate.net/publication/.221564157_An_Algebra_of_Properties).{.notice--info}

@@ -269,7 +269,7 @@ The symbol is not declared, it remains a free variable. To declare the symbol
 use `Declare`.
 
 ```json example
-["Declare", ["Symbol", "x", 2], "RealNumber"]
+["Declare", ["Symbol", "x", 2], "RealNumbers"]
 ```
 
 {% enddef %}
