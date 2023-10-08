@@ -76,5 +76,6 @@
   "dependencies": {
     "complex.js": "^2.1.1",
     "decimal.js": "^10.4.3"
-  }
+  },
+  "type": "module"
 }
