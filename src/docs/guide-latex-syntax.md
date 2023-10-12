@@ -59,7 +59,7 @@ console.log(mfe.expression.json);
 function.
 
 ```javascript
-console.log(ce.parse('5x + 1').json);
+console.log(ce.parse("5x + 1").json);
 // ➔  ["Add", ["Multiply", 5, "x"], 1]
 ```
 
@@ -69,10 +69,10 @@ non-canonical expression instead, use the `{canonical: false}` option: The
 non-canonical form is closer to the literal LaTeX input.
 
 ```js
-ce.parse('\\frac{7}{-4}').json;
+ce.parse("\\frac{7}{-4}").json;
 // ➔  ["Rational", -7, 4]
 
-ce.parse('\\frac{7}{-4}', { canonical: false }).json;
+ce.parse("\\frac{7}{-4}", { canonical: false }).json;
 // ➔  ["Divide", 7, -4]
 ```
 
@@ -166,10 +166,10 @@ Refer to these interfaces for more details.
 const ce = new ComputeEngine();
 ce.latexOptions = {
   precision: 3,
-  decimalMarker: '{,}',
+  decimalMarker: "{,}",
 };
 
-console.log(ce.parse('\\frac{1}{7}').N().latex);
+console.log(ce.parse("\\frac{1}{7}").N().latex);
 // ➔ "0{,}14\\ldots"
 ```
 
@@ -184,7 +184,7 @@ By default, the ComputeEngine is configured to use a dot.
 **To use a comma as a decimal marker**, set the `decimalMarker` option:
 
 ```ts
-ce.latexOptions.decimalMarker = '{,}';
+ce.latexOptions.decimalMarker = "{,}";
 ```
 
 Note that in LaTeX, in order to get the correct spacing around the comma, it
@@ -232,19 +232,19 @@ The options are members of `ce.latexOptions`.
   `""`
 
 ```ts
-console.log(ce.parse('700').latex);
+console.log(ce.parse("700").latex);
 // ➔ "700"
-console.log(ce.parse('123456.789').latex);
+console.log(ce.parse("123456.789").latex);
 // ➔ "123\,456.789"
 
 // Always use the scientific notation
 ce.latexOptions.notation = "scientific";
 ce.latexOptions.avoidExponentsInRange = null;
-ce.latexOptions.exponentProduct = '\\times';
+ce.latexOptions.exponentProduct = "\\times";
 
-console.log(ce.parse('700').latex);
+console.log(ce.parse("700").latex);
 // ➔ "7\times10^{2}"
-console.log(ce.parse('123456.789').latex);
+console.log(ce.parse("123456.789").latex);
 // ➔ "1.234\,567\,89\times10^{5}"
 ```
 
@@ -273,7 +273,7 @@ an inline solidus:
 
 ```ts
 ce.latexSyntax.options.fractionStyle = (expr, level) =>
-  head(expr) === "Rational" || level > 2 ? 'inline-solidus' : "quotient";
+  head(expr) === "Rational" || level > 2 ? "inline-solidus" : "quotient";
 ```
 
 #### Function Application
@@ -409,39 +409,61 @@ Each entry in the LaTeX dictionary is an object with the following properties:
 - `kind`: the kind of expression associated with this entry. Valid values are
   `prefix`, `postfix`, `infix`, `expression`, `function`, `symbol`,
   `environment` and `matchfix`. If not provided, the default is `expression`.
+  The meaning of the values and how to use them is explained below.
 - `latexTrigger`: a sequence of LaTeX tokens that will trigger the entry. For
   example, `^{+}` or `\mathbb{D}`.
 - `identifierTrigger`: a string, usually wrapped in a LaTeX command, that will
   trigger the entry. For example, if `identifierTrigger` is `floor`, the LaTeX
   command `\mathrm{floor}` or `\operatorname{floor}` will trigger the entry.
   Only one of `latexTrigger` or `identifierTrigger` should be provided. If kind
-  is `environment`, only `identifierTrigger` is valid.
-- `parse`: a function that will be invoked when the trigger is encountered in
-  the LaTeX input. It will be passed a `parser` object that can be used to parse
-  the input. The `parse` function should return a MathJSON expression. See below
-  for more info about parsing.
-- `serialize`: a function that will be invoked when the `expr.latex` property is
+  is `environment`, only `identifierTrigger` is valid. If kind is `matchfix`,
+  both `openTrigger` and `closeTrigger` must be provided instead.
+- `parse`: a handler that will be invoked when the trigger is encountered in the
+  LaTeX input. It will be passed a `parser` object that can be used to parse the
+  input. The `parse` handler should return a MathJSON expression. The signature
+  of the `parse` handler will vary depending on the `kind`. See below for more
+  info about parsing.
+- `serialize`: a handler that will be invoked when the `expr.latex` property is
   read. It will be passed a `serializer` object that can be used to serialize
-  the expression. The `serialize` function should return a LaTeX string. See
+  the expression. The `serialize` handler should return a LaTeX string. See
   below for more info about serialization.
 - `name`: the name of the MathJSON identifier associated with this entry. If
   provided, a default `parse` handler will be used that is equivalent to:
   `parse: name`. The `name` property must be unique. However, multiple entries
   can have different triggers that produce the same expression. This is useful
-  for synonyms, such as `\operatorname{floor{` and `\lfloor`...`\rfloor`.
+  for synonyms, such as `\operatorname{floor}` and `\lfloor`...`\rfloor`.
 
-The most general type of entry is one using `expression` as the `kind`, which is
-also the default if no `kind` is provided. In this case, the `parse` handler
-will be invoked when the trigger is encountered in the LaTeX input. The `parse`
-handler will be passed a `parser` object that can be used to parse the input.
-The `parse` handler should return a MathJSON expression.
+### Expressions
+
+The most general type of entry is one of kind `expression`. If no `kind`
+property is provided, the kind is assumed to be `expression`.
+
+For entries of kind `expression` the `parse` handler is invoked when the trigger
+is encountered in the LaTeX input. The `parse` handler is passed a `parser`
+object that can be used to parse the input. The `parse` handler should return a
+MathJSON expression.
+
+The kind `expression` is suitable for a simple symbol, for example a
+mathematical constant. It can also be used for more complex constructs, such as
+to parse a series of tokens representing an integral expression. In this case,
+the `parse` handler would be responsible for parsing the entire expression and
+would use the `parser` object to parse the tokens.
+
+If the tokens are not recognized, the `parse` handler should return `null` and
+the parser will continue to look for another handler that matches the current
+token.
+
+#### Functions
 
 The `function` kind is a special case of `expression` where the expression is a
 function, possibly using mutly-character identifiers, as in
-`\operatorname{concat}`. The `trigger` property defines the name of the
-function, not a sequence of tokens. The parse handler should return the
-idenfitier corresponding to the function, such as `Concatenate`. As a shortcut,
-the `parse` handler can be provided as an Expression. For example:
+`\operatorname{concat}`. Unlike an `expression` entry, after the `parse` handler
+is invoked, the parser will look for a pair of parentheses to parse the
+arguments of the function and apply them to the function.
+
+The parse handler should return the identifier corresponding to the function,
+such as `Concatenate`. As a shortcut, the `parse` handler can be provided as an
+Expression. For example:
 
 ```javascript
 {
@@ -451,15 +473,59 @@ the `parse` handler can be provided as an Expression. For example:
 }
 ```
 
-The `infix` kind is used for binary operators. The `parse` handler will be
-passed a `parser` object and the left-hand side of the operator. The `parser`
-object can be used to parse the right-hand side of the expression. The `parse`
-handler should return a MathJSON expression.
+#### Operators: prefix, infix, postfix
+
+The `prefix`, `infix` and `postfix` kinds are used for operators. The `parse`
+handler will be passed a `parser` object and the left-hand side of the operator.
+
+Entries for `prefix`, `infix` and `postfix` operators must include a
+`precedence` property. The `precedence` property is a number that indicates the
+precedence of the operator. The higher the number, the higher the precedence,
+that is the more "binding" the operator is.
+
+For example, the `precedence` of the `Add` operator is 275
+(`ADDITION_PRECEDENCE`), while the `precedence` of the `Multiply` operator is
+390 (`MULTIPLICATION_PRECEDENCE`).
+
+In `1 + 2 * 3`, the `Multiply` operator has a **higher** precedence than the
+`Add` operator, so it is applied first.
+
+The precedence range is an integer from 0 to 1000.
+
+The larger the number, the higher the precedence, the more "binding" the
+operator is.
+
+Here are some rough ranges for the precedence:
+
+- 800: prefix and postfix operators: `\lnot` etc...
+  - `POSTFIX_PRECEDENCE` = 810: `!`, `'`
+- 700: some arithmetic operators
+  - `EXPONENTIATION_PRECEDENCE` = 700: `^`
+- 600: some binary operators
+  - `DIVISION_PRECEDENCE` = 600: `\div`
+- 300: some logic and arithmetic operators: `\land`, `\lor` etc...
+  - `MULTIPLICATION_PRECEDENCE` = 390: `\times`
+- 200: arithmetic operators, inequalities:
+  - `ADDITION_PRECEDENCE` = 275: `+` `-`
+  - `ARROW_PRECEDENCE` = 270: `\to` `\rightarrow`
+  - `ASSIGNMENT_PRECEDENCE` = 260: `:=`
+  - `COMPARISON_PRECEDENCE` = 245: `\lt` `\gt`
+  - 241: `\leq`
+- 0: `,`, `;`, etc...
+
+The `infix` kind is used for binary operators (operators with a left-hand-side
+and right-hand-side). The `parse` handler will be passed a `parser` object and
+the left-hand side of the operator, for `postfix` and `infix` operators. The
+`parser` object can be used to parse the right-hand side of the expression. The
+`parse` handler should return a MathJSON expression or `null` if the operator is
+not recognized, or the left-hand side or right-hand side of the operator is not
+valid.
 
 ```javascript
 {
   kind: "infix",
   latexTrigger: '\\oplus',
+  precedence: ADDITION_PRECEDENCE,
   parse: (parser, lhs) => {
     return ["Concatenate", lhs, parser.parseExpression()];
   },
@@ -474,6 +540,7 @@ expression.
 {
   kind: "prefix",
   latexTrigger: '\\neg',
+  precedence: ADDITION_PRECEDENCE,
   parse: (parser, lhs) => {
     return ["Negate", lhs];
   },
@@ -494,6 +561,8 @@ handler should return a MathJSON expression.
 }
 ```
 
+#### Environment
+
 The `environment` kind is used for LaTeX environments. The `identifierTrigger`
 property in that case is the name of the environment. The `parse` handler will
 be passed a `parser` object. The `parseTabular()` method can be used to parse
@@ -510,6 +579,8 @@ expressions. The `parse` handler should return a MathJSON expression.
   },
 }
 ```
+
+#### Matchfix
 
 The `matchfix` kind is used for LaTeX commands that are used to enclose an
 expression. The `openTrigger` and `closeTrigger` indicate the LaTeX commands
@@ -709,13 +780,13 @@ First you need to define a LaTeX macro so that the mathfield knows how to render
 this command. Let's define the `\smallfrac` macro.
 
 ```js
-const mfe = document.querySelector('math-field');
+const mfe = document.querySelector("math-field");
 
 mfe.macros = {
   ...mfe.macros,
   smallfrac: {
     args: 2,
-    def: '{}^{#1}\\!\\!/\\!{}_{#2}',
+    def: "{}^{#1}\\!\\!/\\!{}_{#2}",
   },
 };
 ```
@@ -739,7 +810,7 @@ token represents a placeholder to be filled by the user.
 ```js
 mfe.inlineShortcuts = {
   ...mfe.inlineShortcuts,
-  smallfrac: '\\smallfrac{#@}{#?}',
+  smallfrac: "\\smallfrac{#@}{#?}",
 };
 ```
 
@@ -757,5 +828,5 @@ mathfields in the document:
 
 ```js
 MathfieldElement.computeEngine = ce;
-console.log(mfe.getValue('math-json'));
+console.log(mfe.getValue("math-json"));
 ```
