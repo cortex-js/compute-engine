@@ -1,5 +1,48 @@
 import { BoxedExpression } from './public';
 
+import { checkArity } from './boxed-expression/validate';
+
+/***
+ * ## THEORY OF OPERATIONS
+ *
+ * A `["Function"]` expression has its own scope.
+ * This scope includes the parameters and local variables.
+ *
+ * Some expressions with anonymous parameters (e.g. `["Add", "_", 1]`)
+ * are rewritten to a `["Function"]` expression with anonymous parameters
+ * (e.g. `["Function", ["Add", "_", 1], "_"]`).
+ *
+ * The **body** of a `["Function"]` expression may have its own scope
+ * (for example if it's a `["Block"]` expression) or may not have a scope
+ * at all (if it's a number, i.e. `["Function", 1]`). the function body may
+ * be a number, a symbol or (more commonly) an function expression.
+ *
+ *
+ * ### DURING BOXING (in makeLambda())
+ *
+ * During the boxing/canonicalization phase of a function
+ * (`["Function"]` expression or head expression):
+ *
+ * 1/ If not a `["Function"]` expression, the expression is rewritten
+ *    to a `["Function"]` expression with anonymous parameters
+ * 2/ A new scope is created
+ * 3/ The function parameters are declared in the scope
+ * 4/ The function body is boxed in the context of the scope and the scope
+ *    is associated with the function
+ *
+ *
+ * ### DURING EVALUATION (executing the result of makeLambda())
+ *
+ * 1/ The arguments are evaluated in the current scope
+ * 2/ The context is swapped to the function scope
+ * 3/ The values of all the ids in this scope are reset
+ * 4/ The parameters are set to the value of the arguments
+ * 5/ The function body is evaluated in the context of the function scope
+ * 6/ The context is swapped back to the current scope
+ * 7/ The result of the function body is returned
+ *
+ */
+
 /**
  * From an expression, create an iterator that can be used
  * to enumerate values.
@@ -158,8 +201,14 @@ export function canonicalFunctionExpression(
   // We have a "simple" expression, possibly with some
   // anonymous parameters, e.g. `["Add", "_1", "_2"]`
 
-  const unknowns = expr.unknowns;
-  let count = unknowns.includes('_') ? 1 : 0;
+  let unknowns = expr.unknowns;
+
+  if (unknowns.includes('_')) {
+    expr = expr.subs({ _: '_1' });
+    unknowns = expr.unknowns;
+  }
+
+  let count = 0;
   for (const unknown of unknowns) {
     if (unknown.startsWith('_')) {
       const n = Number(unknown.slice(1));
@@ -168,12 +217,10 @@ export function canonicalFunctionExpression(
   }
 
   const ce = expr.engine;
-  ce.pushScope();
   const result = ce._fn('Function', [
     expr,
     ...Array.from({ length: count }, (_, i) => ce.symbol(`_${i + 1}`)),
   ]);
-  ce.popScope();
   return result;
 }
 
@@ -199,42 +246,55 @@ function makeLambda(
     return (params) => ce._fn(expr, params);
   }
 
-  const fn = canonicalFunctionExpression(expr);
-  if (!fn) return undefined;
-  console.assert(fn.head === 'Function');
-
-  const body = fn.op1;
+  const fnExpr = canonicalFunctionExpression(expr);
+  if (!fnExpr) return undefined;
+  console.assert(fnExpr.head === 'Function');
 
   // Extract the parameters from the function signature ("x", "y")
-  const args = fn.ops!.slice(1).map((x) => x.symbol ?? 'Nothing');
+  const params = fnExpr.ops!.slice(1).map((x) => x.symbol ?? 'Nothing');
 
-  const fnScope = body.scope;
-  if (args.length === 0)
+  // Create a scope for the arguments and locals
+  ce.pushScope();
+  // Declare some "placeholders" for the parameters.
+  // This is to avoid having the arguments bound to an id in a parent scope
+  // with coincidentally the same name as the parameter.
+  for (const param of params)
+    ce.declare(param, { inferred: true, domain: undefined });
+  const fn = fnExpr.op1.canonical;
+
+  fn.bind();
+  ce.popScope();
+
+  const fnScope = fn.scope!;
+
+  if (params.length === 0)
     return () => {
-      const context = fnScope ? ce.swapScope(fnScope) : null;
-      ce.pushScope();
-      const result = body.N() ?? body.evaluate();
-      ce.popScope();
-      if (fnScope) ce.swapScope(context);
+      const context = ce.swapScope(fnScope);
+      ce.resetContext();
+      const result = fn.N() ?? fn.evaluate();
+      ce.swapScope(context);
       return result;
     };
 
-  return (params) => {
-    // Switch to the lexical scope in which the function was defined
-    const context = ce.swapScope(fnScope);
+  return (args) => {
+    if (ce.strict) {
+      args = checkArity(ce, args, params.length);
+      if (!args.every((x) => x.isValid)) return undefined;
+    }
 
-    // Create a new scope for arguments and locals
-    ce.pushScope();
-    // Make sure the function body is evaluated in the context of the
-    // new scope, and doesn't reuse any scope from a previous invocation
-    body.bind();
+    // Evaluate the arguments, in the current scope
+    // (we don't want the arguments to be bound to the function scope)
+    args = args.map((x) => x.evaluate());
+
+    // Switch to the function lexical scope
+    // which includes the (inferred) params and locals
+    const context = ce.swapScope(fnScope);
+    ce.resetContext();
 
     let i = 0;
-    for (const arg of args) ce.assign(arg, params[i++] ?? ce.Nothing);
-    if (params[0]) ce.assign('_', params[0] ?? ce.Nothing);
+    for (const param of params) ce.assign(param, args[i++]);
 
-    const result = body.N() ?? body.evaluate();
-    ce.popScope();
+    const result = fn.N() ?? fn.evaluate();
     ce.swapScope(context);
 
     if (!result.isValid) return undefined;

@@ -246,8 +246,7 @@ export function canonicalProduct(
   if (index && index.head === 'Hold') index = index.op1;
   if (index && index.head === 'ReleaseHold') index = index.op1.evaluate();
   index ??= ce.Nothing;
-  if (!index.symbol)
-    index = ce.error(['incompatible-domain', 'Symbols', index.domain]);
+  if (!index.symbol) index = ce.domainError('Symbols', index.domain, index);
   else index = ce.hold(index);
 
   // The range bounds, if present, should be integers numbers
@@ -339,6 +338,7 @@ export function evalMultiplication(
       // Machine precision
       let product = 1;
       const numericMode = ce.numericMode;
+      const precision = ce.precision;
       ce.numericMode = 'machine';
       for (let i = lower; i <= upper; i++) {
         ce.assign({ [index]: i });
@@ -350,6 +350,7 @@ export function evalMultiplication(
         product *= term;
       }
       ce.numericMode = numericMode;
+      ce.precision = precision;
 
       if (result === null) result = ce.number(product);
     }
@@ -374,6 +375,7 @@ export function evalMultiplication(
         // no point in calculating with high precision), and check for convergence
         let product = 1;
         const numericMode = ce.numericMode;
+        const precision = ce.precision;
         ce.numericMode = 'machine';
         for (let i = lower; i <= upper; i++) {
           ce.assign({ [index]: i });
@@ -389,6 +391,7 @@ export function evalMultiplication(
         }
         if (result === null) result = ce.number(product);
         ce.numericMode = numericMode;
+        ce.precision = precision;
       }
     }
   }

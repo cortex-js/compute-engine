@@ -64,6 +64,8 @@ export type Attributes = {
   sourceOffsets?: [start: number, end: number];
 };
 
+export type MathJsonIdentifier = string;
+
 /**
  * A MathJSON numeric quantity.
  *
@@ -93,7 +95,7 @@ export type MathJsonNumber = {
 } & Attributes;
 
 export type MathJsonSymbol = {
-  sym: string;
+  sym: MathJsonIdentifier;
 } & Attributes;
 
 export type MathJsonString = {
@@ -119,7 +121,9 @@ export type Expression =
   // Shortcut for MathJsonNumber without metadata and in the JavaScript
   // 64-bit float range.
   | number
-  // Shortcut for a MathJsonSymbol with no metadata, a string, or a number
+  // Shortcut for a MathJsonSymbol with no metadata
+  | MathJsonIdentifier
+  // Shortcut for a string or a number
   | string
   | MathJsonNumber
   | MathJsonString

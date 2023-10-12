@@ -72,23 +72,27 @@ export type LibraryCategory =
  * For example, in `1 + 2 * 3`, the `*` operator has a **higher** precedence
  * than the `+` operator, so it is applied first.
  *
- * The precendence range from 0 to 1000. The larger the number, the higher the
+ * The precedence range from 0 to 1000. The larger the number, the higher the
  * precedence, the more "binding" the operator is.
  *
  * Here are some rough ranges for the precedence:
  *
- * - 800: prefix and postfix operators,
- *        e.g. `\lnot`, `!`, `'`, `\degree`, `++`, etc...
- * - 700: some relational operators: `<`
- * - 600: some binary operators: `\div`
+ * - 800: prefix and postfix operators: `\lnot` etc...
+ *    - `POSTFIX_PRECEDENCE` = 810: `!`, `'`
+ * - 700: some arithmetic operators
+ *    - `EXPONENTIATION_PRECEDENCE` = 700: `^`
+ * - 600: some binary operators
+ *    - `DIVISION_PRECEDENCE` = 600: `\div`
  * - 500: not used
  * - 400: not used
  * - 300: some logic and arithmetic operators:
  *        `\land`, `\lor`, `\times`, etc...
+ *   - `MULTIPLICATION_PRECEDENCE` = 390: `\times`
  * - 200: arithmetic operators, inequalities:
- *        `+`, `-`, `=`, `<`, etc...
- *   - 260: `=`
- *   - 245: `\lt`, `\gt`
+ *   - `ADDITION_PRECEDENCE` = 275: `+` `-`
+ *   - `ARROW_PRECEDENCE` = 270: `\to` `\rightarrow`
+ *   - `ASSIGNMENT_PRECEDENCE` = 260: `:=`
+ *   - `COMPARISON_PRECEDENCE` = 245: `\lt` `\gt`
  *   - 241: `\leq`
  * - 100: not used
  * - 0: `,`, `;`, etc...
@@ -96,7 +100,7 @@ export type LibraryCategory =
  * Some constants are defined below for common precedence values.
  *
  *
- * Note: MathML defines some operator precendence, but it has some
+ * Note: MathML defines some operator precedence, but it has some
  * issues and inconsistencies. However, whenever possible we adopted the
  * MathML precedence. See https://www.w3.org/TR/2009/WD-MathML3-20090924/appendixc.html
  *
@@ -106,10 +110,10 @@ export type LibraryCategory =
 export type Precedence = number;
 
 // > < >= ≥ <= ≤ == === ≡ != ≠ !== ≢ ∈ ∉ ∋ ∌ ⊆ ⊈ ⊂ ⊄ ⊊ ∝ ∊ ∍ ∥ ∦ ∷ ∺ ∻ ∽ ∾ ≁ ≃ ≂ ≄ ≅ ≆ ≇ ≈ ≉ ≊ ≋ ≌ ≍ ≎ ≐ ≑ ≒ ≓ ≖ ≗ ≘ ≙ ≚ ≛ ≜ ≝ ≞ ≟ ≣ ≦ ≧ ≨ ≩ ≪ ≫ ≬ ≭ ≮ ≯ ≰ ≱ ≲ ≳ ≴ ≵ ≶ ≷ ≸ ≹ ≺ ≻ ≼ ≽ ≾ ≿ ⊀ ⊁ ⊃ ⊅ ⊇ ⊉ ⊋ ⊏ ⊐ ⊑ ⊒ ⊜ ⊩ ⊬ ⊮ ⊰ ⊱ ⊲ ⊳ ⊴ ⊵ ⊶ ⊷ ⋍ ⋐ ⋑ ⋕ ⋖ ⋗ ⋘ ⋙ ⋚ ⋛ ⋜ ⋝ ⋞ ⋟ ⋠ ⋡ ⋢ ⋣ ⋤ ⋥ ⋦ ⋧ ⋨ ⋩ ⋪ ⋫ ⋬ ⋭ ⋲ ⋳ ⋴ ⋵ ⋶ ⋷ ⋸ ⋹ ⋺ ⋻ ⋼ ⋽ ⋾ ⋿ ⟈ ⟉ ⟒ ⦷ ⧀ ⧁ ⧡ ⧣ ⧤ ⧥ ⩦ ⩧ ⩪ ⩫ ⩬ ⩭ ⩮ ⩯ ⩰ ⩱ ⩲ ⩳ ⩵ ⩶ ⩷ ⩸ ⩹ ⩺ ⩻ ⩼ ⩽ ⩾ ⩿ ⪀ ⪁ ⪂ ⪃ ⪄ ⪅ ⪆ ⪇ ⪈ ⪉ ⪊ ⪋ ⪌ ⪍ ⪎ ⪏ ⪐ ⪑ ⪒ ⪓ ⪔ ⪕ ⪖ ⪗ ⪘ ⪙ ⪚ ⪛ ⪜ ⪝ ⪞ ⪟ ⪠ ⪡ ⪢ ⪣ ⪤ ⪥ ⪦ ⪧ ⪨ ⪩ ⪪ ⪫ ⪬ ⪭ ⪮ ⪯ ⪰ ⪱ ⪲ ⪳ ⪴ ⪵ ⪶ ⪷ ⪸ ⪹ ⪺ ⪻ ⪼ ⪽ ⪾ ⪿ ⫀ ⫁ ⫂ ⫃ ⫄ ⫅ ⫆ ⫇ ⫈ ⫉ ⫊ ⫋ ⫌ ⫍ ⫎ ⫏ ⫐ ⫑ ⫒ ⫓ ⫔ ⫕ ⫖ ⫗ ⫘ ⫙ ⫷ ⫸ ⫹ ⫺ ⊢ ⊣ ⟂ ⫪ ⫫ <: >:
-export const COMPARISON_PRECEDENCE = 245;
+export const COMPARISON_PRECEDENCE: Precedence = 245;
 
 // := $= = += -= −= *= /= //= |\\=| ^= ÷= %= <<= >>= >>>= |\|=| &= ⊻= ≔ ⩴ ≕
-export const ASSIGNMENT_PRECEDENCE = 260;
+export const ASSIGNMENT_PRECEDENCE: Precedence = 260;
 
 // Unicode U+2190 to U+2950:
 // ← → ↔ ↚ ↛ ↞ ↠ ↢ ↣ ↦ ↤ ↮ ⇎ ⇍ ⇏ ⇐ ⇒ ⇔ ⇴ ⇶ ⇷ ⇸ ⇹ ⇺ ⇻ ⇼ ⇽ ⇾ ⇿ ⟵ ⟶ ⟷ ⟹ ⟺ ⟻ ⟼ ⟽ ⟾ ⟿ ⤀ ⤁ ⤂ ⤃ ⤄ ⤅ ⤆ ⤇ ⤌ ⤍ ⤎ ⤏ ⤐ ⤑ ⤔ ⤕ ⤖ ⤗ ⤘ ⤝ ⤞ ⤟ ⤠ ⥄ ⥅ ⥆ ⥇ ⥈ ⥊ ⥋ ⥎ ⥐ ⥒ ⥓ ⥖ ⥗ ⥚ ⥛ ⥞ ⥟ ⥢ ⥤ ⥦ ⥧ ⥨ ⥩ ⥪ ⥫ ⥬ ⥭ ⥰
@@ -117,21 +121,21 @@ export const ASSIGNMENT_PRECEDENCE = 260;
 // ⧴ ⬱ ⬰ ⬲ ⬳ ⬴ ⬵ ⬶ ⬷ ⬸ ⬹ ⬺ ⬻ ⬼ ⬽ ⬾ ⬿ ⭀ ⭁ ⭂ ⭃ ⥷ ⭄ ⥺ ⭇ ⭈ ⭉ ⭊ ⭋ ⭌ ￩ ￫ ⇜ ⇝ ↜ ↝ ↩ ↪ ↫ ↬ ↼ ↽ ⇀ ⇁ ⇄ ⇆ ⇇ ⇉ ⇋ ⇌ ⇚ ⇛ ⇠ ⇢ ↷ ↶ ↺ ↻ --> <-- <--> <==>
 //
 // See unicode.ts for equivalent LaTeX commands
-export const ARROW_PRECEDENCE = 270;
+export const ARROW_PRECEDENCE: Precedence = 270;
 
 // + - − ¦ |\|| ⊕ ⊖ ⊞ ⊟ |++| ∪ ∨ ⊔ ± ∓ ∔ ∸ ≏ ⊎ ⊻ ⊽ ⋎ ⋓ ⟇ ⧺ ⧻ ⨈ ⨢ ⨣ ⨤ ⨥ ⨦ ⨧ ⨨ ⨩ ⨪ ⨫ ⨬ ⨭ ⨮ ⨹ ⨺ ⩁ ⩂ ⩅ ⩊ ⩌ ⩏ ⩐ ⩒ ⩔ ⩖ ⩗ ⩛ ⩝ ⩡ ⩢ ⩣)
-export const ADDITION_PRECEDENCE = 275;
+export const ADDITION_PRECEDENCE: Precedence = 275;
 // * / ⌿ ÷ % & · · ⋅ ∘ × |\\| ∩ ∧ ⊗ ⊘ ⊙ ⊚ ⊛ ⊠ ⊡ ⊓ ∗ ∙ ∤ ⅋ ≀ ⊼ ⋄ ⋆ ⋇ ⋉ ⋊ ⋋ ⋌ ⋏ ⋒ ⟑ ⦸ ⦼ ⦾ ⦿ ⧶ ⧷ ⨇ ⨰ ⨱ ⨲ ⨳ ⨴ ⨵ ⨶ ⨷ ⨸ ⨻ ⨼ ⨽ ⩀ ⩃ ⩄ ⩋ ⩍ ⩎ ⩑ ⩓ ⩕ ⩘ ⩚ ⩜ ⩞ ⩟ ⩠ ⫛ ⊍ ▷ ⨝ ⟕ ⟖ ⟗ ⨟
-export const MULTIPLICATION_PRECEDENCE = 390;
+export const MULTIPLICATION_PRECEDENCE: Precedence = 390;
 
 // Rational, Divide
-export const DIVISION_PRECEDENCE = 600;
+export const DIVISION_PRECEDENCE: Precedence = 600;
 
 // Power, Square, Overscript
-export const EXPONENTIATION_PRECEDENCE = 700;
+export const EXPONENTIATION_PRECEDENCE: Precedence = 700;
 
 // Factorial, Prime
-export const POSTFIX_PRECEDENCE = 810;
+export const POSTFIX_PRECEDENCE: Precedence = 810;
 
 /**
  * This indicates a condition under which parsing should stop:
@@ -714,7 +718,6 @@ export declare class LatexSyntax {
 export interface Serializer {
   readonly onError: WarningSignalHandler;
   readonly options: Required<SerializeLatexOptions>;
-  // readonly computeEngine?: ComputeEngine;
 
   /** "depth" of the expression:
    * - 0 for the root

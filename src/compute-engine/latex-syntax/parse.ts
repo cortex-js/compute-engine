@@ -1472,7 +1472,7 @@ export class _Parser implements Parser {
       if (typeof def.parse === 'function') {
         // Give a custom parser a chance to parse the function
         fn = def.parse(this, until);
-        if (fn !== null) break;
+        if (fn !== null) return fn;
       } else {
         fn = def.name!;
         break;
@@ -1500,11 +1500,14 @@ export class _Parser implements Parser {
       fn = pf;
     } while (true);
 
-    // If fn is a function identifier (i.e. not a symbol), it must be followed
+    // If fn is a function identifier (i.e. not a symbol), it may be followed
     // by an argument list
 
-    const seq = this.isFunctionHead(fn) ? this.parseArguments() : null;
-    return seq ? [fn!, ...seq] : fn!;
+    const args = this.parseArguments('enclosure', until);
+
+    if (args === null) return fn;
+
+    return typeof fn === 'string' ? [fn, ...args] : ['Apply', fn!, ...args];
   }
 
   parseSymbol(until?: Readonly<Terminator>): Expression | null {
@@ -2202,21 +2205,17 @@ export class _Parser implements Parser {
 
   private isFunctionHead(expr: Expression | null): boolean {
     if (expr === null) return false;
-    const s = symbol(expr);
 
-    // If it's not a symbol, is it a function expression?
-    // i.e. ["InverseFunction", "f"]
-    if (!s) return this.computeEngine.box(expr).domain.isFunction;
+    const s = symbol(expr);
+    if (!s) return false;
 
     // Is this a known symbol with a definition?
-    if (
-      this.computeEngine &&
-      this.computeEngine.lookupFunction(s) !== undefined
-    )
-      return true;
+    if (this.computeEngine?.lookupFunction(s) !== undefined) return true;
+
     // Is this a valid function identifier?
     if (this.options.parseUnknownIdentifier?.(s, this) === 'function')
       return true;
+
     // This doesn't look like the expression could be the head of a function:
     // it's a number, a string, a symbol identifier or something else.
     return false;

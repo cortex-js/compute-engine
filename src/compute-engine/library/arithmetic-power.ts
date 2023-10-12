@@ -1,5 +1,5 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 import {
   complexAllowed,
   bignumPreferred,
@@ -284,8 +284,6 @@ export function processPower(
     const e2 = asRational(exponent);
     if (e1 && e2) {
       const e = mul(e1, e2);
-      if (isRationalZero(e)) return ce.One;
-      if (isRationalOne(e)) return base.op1;
       return ce.pow(base.op1, e);
     }
     if (mode === 'N') {

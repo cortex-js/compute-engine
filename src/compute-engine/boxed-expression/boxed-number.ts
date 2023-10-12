@@ -1,5 +1,5 @@
-import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 import {
   BoxedExpression,
@@ -11,6 +11,7 @@ import {
   Rational,
   SimplifyOptions,
   BoxedSubstitution,
+  EvaluateOptions,
 } from '../public';
 import { inferNumericDomain } from '../domain-utils';
 import { isInMachineRange } from '../numerics/numeric-bignum';
@@ -343,9 +344,10 @@ export class BoxedNumber extends _BoxedExpression {
     if (this._value instanceof Decimal)
       return this._value.equals(this.engine._BIGNUM_NEGATIVE_ONE);
 
-    if (Array.isArray(this._value)) return isRationalNegativeOne(this._value);
+    if (this._value instanceof Complex)
+      return this._value.im === 0 && this._value.re === -1;
 
-    return this._value.equals(-1);
+    return isRationalNegativeOne(this._value);
   }
 
   get isOdd(): boolean | undefined {
@@ -517,6 +519,11 @@ export class BoxedNumber extends _BoxedExpression {
 
   simplify(_options?: SimplifyOptions): BoxedExpression {
     return this.canonical;
+  }
+
+  evaluate(options?: EvaluateOptions): BoxedExpression {
+    if (options?.numericMode) return this.N(options);
+    return this;
   }
 
   N(_options?: NOptions): BoxedExpression {

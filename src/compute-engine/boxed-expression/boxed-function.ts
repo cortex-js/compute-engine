@@ -1,5 +1,5 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 
@@ -123,13 +123,13 @@ export class BoxedFunction extends _BoxedExpression {
     this._scope = this.engine.context;
 
     const head = this._head;
-    if (typeof head !== 'string') head.bind();
-
-    for (const op of this._ops) op.bind();
-
-    if (typeof head !== 'string') return;
+    if (typeof head !== 'string') {
+      head.bind();
+      return;
+    }
 
     this._def = this.engine.lookupFunction(head);
+    for (const op of this._ops) op.bind();
   }
 
   reset(): void {
@@ -448,28 +448,28 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get isNumber(): boolean | undefined {
-    return this.domain.isCompatible('Numbers');
+    return this.domain?.isCompatible('Numbers');
   }
   get isInteger(): boolean | undefined {
-    return this.domain.isCompatible('Integers');
+    return this.domain?.isCompatible('Integers');
   }
   get isRational(): boolean | undefined {
-    return this.domain.isCompatible('RationalNumbers');
+    return this.domain?.isCompatible('RationalNumbers');
   }
   get isAlgebraic(): boolean | undefined {
-    return this.domain.isCompatible('AlgebraicNumbers');
+    return this.domain?.isCompatible('AlgebraicNumbers');
   }
   get isReal(): boolean | undefined {
-    return this.domain.isCompatible('RealNumbers');
+    return this.domain?.isCompatible('RealNumbers');
   }
   get isExtendedReal(): boolean | undefined {
-    return this.domain.isCompatible('ExtendedRealNumbers');
+    return this.domain?.isCompatible('ExtendedRealNumbers');
   }
   get isComplex(): boolean | undefined {
-    return this.domain.isCompatible('ComplexNumbers');
+    return this.domain?.isCompatible('ComplexNumbers');
   }
   get isImaginary(): boolean | undefined {
-    return this.domain.isCompatible('ImaginaryNumbers');
+    return this.domain?.isCompatible('ImaginaryNumbers');
   }
 
   get sgn(): -1 | 0 | 1 | undefined | null {
@@ -547,11 +547,7 @@ export class BoxedFunction extends _BoxedExpression {
     }
     // @todo: trig functions, geometric functions
 
-    const v = asFloat(this.N());
-    if (v === null) return undefined;
-    if (v === 0) return 0;
-    if (v < 0) return -1;
-    return +1;
+    return undefined;
   }
 
   //
@@ -561,24 +557,24 @@ export class BoxedFunction extends _BoxedExpression {
   // expression
   //
 
-  get domain(): BoxedDomain {
+  get domain(): BoxedDomain | undefined {
     if (this._codomain !== undefined) return this._codomain;
-    if (!this.canonical) return this.engine.Anything;
+    if (!this.canonical) return undefined;
 
     const ce = this.engine;
 
-    let result: BoxedDomain | undefined = undefined;
+    let result: BoxedDomain | undefined | null = undefined;
 
     if (typeof this._head !== 'string') {
-      result = this._head.domain.result ?? undefined;
+      result = this._head.domain?.result;
     } else if (this._def) {
       const sig = this._def.signature;
       if (typeof sig.codomain === 'function')
-        result = sig.codomain(ce, this._ops) ?? undefined;
-      else result = sig.codomain ?? undefined;
+        result = sig.codomain(ce, this._ops);
+      else result = sig.codomain;
     }
 
-    result ??= ce.defaultDomain ?? ce.Void;
+    result ??= undefined;
 
     this._codomain = result;
     return result;
@@ -710,13 +706,15 @@ export class BoxedFunction extends _BoxedExpression {
     //
     if (!this.isValid) return this;
     if (!this.isCanonical) {
+      this.engine.pushScope();
       const canonical = this.canonical;
+      this.engine.popScope();
       if (!canonical.isCanonical || !canonical.isValid) return this;
       return canonical.evaluate(options);
     }
 
     //
-    // 3/ Evaluate the applicable operands
+    // 2/ Evaluate the applicable operands
     //
     const def = this.functionDefinition;
     const tail = holdMap(
@@ -727,97 +725,42 @@ export class BoxedFunction extends _BoxedExpression {
     );
 
     //
-    // 4/ Is it an anonymous function?
+    // 3/ Inert? Just return the first argument.
+    //
+    if (def?.inert) return tail[0] ?? this;
+
+    //
+    // 4/ Is it an applied anonymous function?
+    //    e.g. [["Add", "_", 1], 2]
     //
     let result: BoxedExpression | undefined | null = undefined;
-    if (typeof this._head !== 'string') {
-      const expr = apply(this._head, tail);
-      if (typeof expr.head !== 'string') result = expr;
-      else result = expr.evaluate(options);
-    }
+    if (typeof this._head !== 'string') result = apply(this._head, tail);
 
     //
-    // 5/ No def? Inert? We're done.
+    // 5/ Call the `evaluate` or `N` handler
     //
-    if (!result) {
-      if (!def) result = this.engine.fn(this._head, tail);
-      else if (def.inert) result = tail[0] ?? this;
+    const sig = def?.signature;
+    if (!result && sig) {
+      const numericMode = options?.numericMode ?? false;
+      if (numericMode && sig.N) result = sig.N!(this.engine, tail);
+      if (!result && sig.evaluate) result = sig.evaluate!(this.engine, tail);
     }
-    //
-    // 5/ Call the `evaluate` handler
-    //
-    result ??=
-      def!.signature?.evaluate?.(this.engine, tail) ??
-      this.engine.fn(this._head, tail);
 
-    return result;
+    if (result) {
+      const num = result.numericValue;
+      if (num !== null) {
+        if (!complexAllowed(this.engine) && num instanceof Complex)
+          result = this.engine.NaN;
+        else if (!bignumPreferred(this.engine) && num instanceof Decimal)
+          result = this.engine.number(num.toNumber());
+        if (this.isPure) this._numericValue = result;
+      }
+    }
+    return result ?? this.engine.fn(this._head, tail);
   }
 
   N(options?: NOptions): BoxedExpression {
-    //
-    // 1/ Use canonical form
-    //
-    if (this._numericValue) return this._numericValue;
-    if (this.engine.strict && !this.isValid) return this;
-    if (!this.isCanonical) {
-      const canonical = this.canonical;
-      if (!canonical.isCanonical || !canonical.isValid) return this;
-      return canonical.N(options);
-    }
-
-    const scope = this.engine.swapScope(this._scope);
-
-    //
-    // 2/ Evaluate the applicable operands
-    //
-
-    const def = this.functionDefinition;
-    const tail = holdMap(
-      this._ops,
-      def?.hold ?? 'none',
-      def?.associative ? def.name : '',
-      (x) => x.N(options)
-    );
-
-    let result: BoxedExpression | undefined | null = undefined;
-
-    //
-    // 3/ Is it a function expression
-    //
-    if (typeof this._head !== 'string') {
-      const expr = apply(this._head, tail);
-      if (typeof expr.head !== 'string') result = expr;
-      else result = expr.N(options);
-    }
-
-    //
-    // 4/ No def? Inert? We're done.
-    //
-    if (!def) result = this.engine.fn(this._head, tail);
-    else if (def.inert) result = tail[0] ?? this;
-
-    //
-    // 5/ Call `N` handler or fallback to `evaluate`
-    //
-    const sig = def?.signature;
-
-    result ??=
-      sig?.N?.(this.engine, tail) ??
-      this.engine.fn(this._head, tail).evaluate();
-
-    this.engine.swapScope(scope);
-
-    const num = result.numericValue;
-    if (num !== null) {
-      if (!complexAllowed(this.engine) && num instanceof Complex)
-        result = this.engine.NaN;
-      else if (!bignumPreferred(this.engine) && num instanceof Decimal)
-        result = this.engine.number(num.toNumber());
-    }
-
-    if (this.isPure) this._numericValue = result;
-
-    return result;
+    return this.evaluate({ ...options, numericMode: true });
   }
 
   solve(vars: string[]): null | BoxedExpression[] {
@@ -884,7 +827,13 @@ export function makeCanonicalFunction(
   //
   // Is the head an expression? For example, `['InverseFunction', 'Sin']`
   //
-  if (typeof head !== 'string') head = head.evaluate().symbol ?? head;
+  if (typeof head !== 'string') {
+    // We need a new scope to capture any locals that might get bound
+    // while evaluating the head.
+    ce.pushScope();
+    head = head.evaluate().symbol ?? head;
+    ce.popScope();
+  }
 
   if (typeof head === 'string') {
     const result = makeNumericFunction(ce, head, ops, metadata);

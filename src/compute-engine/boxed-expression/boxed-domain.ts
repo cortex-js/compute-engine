@@ -327,7 +327,6 @@ function isSubdomainOf(
   // 2/ Is the lhs domain constructor a subdomain of the rhs domain literal?
   //
   if (rhsLiteral) {
-    if (!lhs) debugger;
     const lhsConstructor = lhs[0] as DomainConstructor;
     if (lhsConstructor === 'FunctionOf')
       return [rhsLiteral === 'Functions', xlhs];
@@ -479,7 +478,7 @@ function isSubdomainOf(
 export function widen(
   a: BoxedDomain | undefined | null,
   b: BoxedDomain | undefined | null
-): BoxedDomain {
+): BoxedDomain | undefined {
   if (a === undefined || a === null) return b!;
   if (b === undefined || b === null) return a;
   const aAncestors = [a.base, ...ancestors(a.base)];

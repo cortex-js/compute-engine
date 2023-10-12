@@ -1,5 +1,5 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 import { BoxedExpression } from '../public';
 
 export const MACHINE_PRECISION_BITS = 53;

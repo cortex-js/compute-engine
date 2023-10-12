@@ -1,5 +1,5 @@
-import { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 
 import { Expression, MathJsonNumber } from '../math-json/math-json-format';
 
@@ -67,7 +67,7 @@ import {
   BoxedSymbol,
   makeCanonicalSymbol,
 } from './boxed-expression/boxed-symbol';
-import { _BoxedDomain } from './boxed-expression/boxed-domain';
+import { _BoxedDomain, isDomain } from './boxed-expression/boxed-domain';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
 import { isValidIdentifier, validateIdentifier } from '../math-json/utils';
 import {
@@ -79,6 +79,8 @@ import {
   isBigRational,
   isMachineRational,
   isRational,
+  isRationalOne,
+  isRationalZero,
 } from './numerics/rationals';
 import { canonicalNegate } from './symbolic/negate';
 import { flattenOps, flattenSequence } from './symbolic/flatten';
@@ -323,16 +325,12 @@ export class ComputeEngine implements IComputeEngine {
    * @param options.tolerance If the absolute value of the difference of two
    * numbers is less than `tolerance`, they are considered equal. Used by
    * `chop()` as well.
-   *
-   * @param options.defaultDomain If an unknown symbol is encountered, assume
-   * this is its domain. **Default** `ExtendedRealNumbers`
    */
   constructor(options?: {
     numericMode?: NumericMode;
     numericPrecision?: number;
     ids?: readonly IdentifierDefinitions[];
     tolerance?: number;
-    defaultDomain?: DomainLiteral;
   }) {
     if (options !== undefined && typeof options !== 'object')
       throw Error('Unexpected argument');
@@ -382,10 +380,10 @@ export class ComputeEngine implements IComputeEngine {
     this.One = new BoxedNumber(this, 1);
     this.Half = new BoxedNumber(this, [1, 2]);
     this.NegativeOne = new BoxedNumber(this, -1);
-    this.I = new BoxedNumber(this, Complex.I);
     this.NaN = new BoxedNumber(this, Number.NaN);
     this.PositiveInfinity = new BoxedNumber(this, Number.POSITIVE_INFINITY);
     this.NegativeInfinity = new BoxedNumber(this, Number.NEGATIVE_INFINITY);
+    this.I = new BoxedNumber(this, Complex.I);
     this.ComplexInfinity = new BoxedNumber(this, Complex.INFINITY);
 
     // Reset the caches/create numeric constants
@@ -402,8 +400,8 @@ export class ComputeEngine implements IComputeEngine {
       iterationLimit: Number.POSITIVE_INFINITY,
     } as RuntimeScope;
 
-    const tables = options?.ids ?? ComputeEngine.getStandardLibrary();
-    for (const table of tables) setIdentifierDefinitions(this, table);
+    for (const table of ComputeEngine.getStandardLibrary('domains'))
+      setIdentifierDefinitions(this, table);
 
     // Patch-up any missing definitions (domains that were
     // 'forward-declared')
@@ -418,6 +416,15 @@ export class ComputeEngine implements IComputeEngine {
       }
     }
 
+    this.Anything = this._commonDomains.Anything!;
+    this.Void = this._commonDomains.Void!;
+    this.Strings = this._commonDomains.Strings!;
+    this.Booleans = this._commonDomains.Booleans!;
+    this.Numbers = this._commonDomains.Numbers!;
+
+    const tables = options?.ids ?? ComputeEngine.getStandardLibrary();
+    for (const table of tables) setIdentifierDefinitions(this, table);
+
     // Populate the table of common symbols
     // (they should be in the global context)
     for (const sym of Object.keys(this._commonSymbols)) {
@@ -426,27 +433,11 @@ export class ComputeEngine implements IComputeEngine {
       this._commonSymbols[sym] = boxedSymbol;
     }
 
-    this.Anything = this._commonDomains.Anything!;
-    this.Void = this._commonDomains.Void!;
-    this.Strings = this._commonDomains.Strings!;
-    this.Booleans = this._commonDomains.Booleans!;
-    this.Numbers = this._commonDomains.Numbers!;
-
     this.True = this._commonSymbols.True!;
     this.False = this._commonSymbols.False!;
     this.Pi = this._commonSymbols.Pi!;
     this.E = this._commonSymbols.ExponentialE!;
     this.Nothing = this._commonSymbols.Nothing!;
-
-    // Once a scope is set and the default dictionaries loaded
-    // we can reference symbols for the domain names and other constants
-    if (options?.defaultDomain) {
-      let defaultDomain = this.domain(options.defaultDomain);
-      if (!defaultDomain.isValid)
-        defaultDomain = this.domain('ExtendedRealNumbers');
-      this._defaultDomain = defaultDomain;
-    } else
-      this._defaultDomain = this.domain('ExtendedRealNumbers') as BoxedDomain;
 
     // Push a fresh scope to protect global definitions:
     // this will be the "user" scope
@@ -680,26 +671,6 @@ export class ComputeEngine implements IComputeEngine {
       scope = scope.parentScope ?? null;
     }
     return 1024;
-  }
-
-  /**
-   * If an unknown symbol is encountered, assume it should
-   * be a variable in this domain.
-   *
-   * If set to `null`, unknown symbols will trigger an error.
-   *
-   * **Default:** `"ExtendedRealNumbers"`
-   */
-  get defaultDomain(): BoxedDomain | null {
-    return this._defaultDomain;
-  }
-  set defaultDomain(domain: BoxedDomain | DomainLiteral | null) {
-    if (domain === null) this._defaultDomain = null;
-    else {
-      const defaultDomain = this.domain(domain);
-      if (!defaultDomain.isValid) throw Error(`Invalid domain ${domain}`);
-      this._defaultDomain = defaultDomain;
-    }
   }
 
   /**
@@ -947,7 +918,7 @@ export class ComputeEngine implements IComputeEngine {
 
     this.context = this.context.parentScope ?? null;
 
-    if (!this.context) debugger;
+    console.assert(this.context);
 
     return this;
   }
@@ -955,18 +926,32 @@ export class ComputeEngine implements IComputeEngine {
   swapScope(scope: RuntimeScope | null): RuntimeScope | null {
     const oldScope = this.context;
     this.context = scope;
-    if (!this.context) debugger;
+    console.assert(this.context);
     return oldScope;
   }
 
+  resetContext(): void {
+    // Iterate over all the identifiers of the current scope
+    // and reset them
+    if (!this.context) return;
+    for (const [_, def] of this.context.ids ?? []) {
+      if (def instanceof _BoxedSymbolDefinition) {
+        if (!def.constant) def.value = undefined;
+      } else if (def instanceof _BoxedFunctionDefinition) {
+        def.signature = { domain: def.signature.domain };
+      }
+    }
+  }
+
   _printScope(
-    options?: { details?: boolean },
+    options?: { details?: boolean; maxDepth?: number },
     scope?: RuntimeScope | null,
     depth = 0
   ): RuntimeScope | null {
-    options ??= { details: false };
+    options ??= { details: false, maxDepth: 1 };
     scope ??= this.context;
     if (!scope) return null;
+    if (options.maxDepth && depth > options.maxDepth) return null;
     const undef = `${YELLOW}[undefined]${RESET}`;
     if (depth === 0) {
       console.group('current scope - level 0');
@@ -1212,18 +1197,23 @@ export class ComputeEngine implements IComputeEngine {
     if (symDef) {
       if (symDef.constant)
         throw Error(`Cannot assign a value to the constant "${id}"`);
-
       if (args) throw Error(`The symbol "${id}" is not a function`);
+      if (typeof value === 'function')
+        throw Error(`Cannot assign a function to symbol "${id}"`);
 
       if (value === undefined || value === null) {
         symDef.value = undefined;
         return this;
       }
 
-      if (typeof value === 'function')
-        throw Error(`Cannot assign a function to symbol "${id}"`);
+      // Remove the def to avoid circular references.
+      const scope = symDef.scope;
+      scope?.ids?.delete(symDef.name!);
 
-      symDef.value = this.box(value).evaluate();
+      symDef.value = this.box(value);
+
+      // Reinsert the def in the scope
+      scope?.ids?.set(symDef.name!, symDef);
 
       return this;
     }
@@ -1234,27 +1224,33 @@ export class ComputeEngine implements IComputeEngine {
     //
     const fnDef = this.lookupFunction(id);
     if (fnDef) {
-      if (value === undefined || value === null) {
-        // Reset any handlers, but keep the signature
-        fnDef.signature = { domain: fnDef.signature.domain };
-        return this;
-      }
+      // Remove the def to avoid circular references.
+      const scope = fnDef.scope;
+      scope?.ids?.delete(fnDef.name!);
+
+      if (value === undefined || value === null) return this;
 
       // Will replace definition if it already exists
       if (typeof value === 'function') {
+        // Make sure defineFunction acts on the correct scope
+        const previousScope = this.swapScope(scope!);
         this.defineFunction(id, {
           signature: { domain: 'Functions', evaluate: value },
         });
+        this.swapScope(previousScope);
         return this;
       }
 
+      // Box value in the current scope
       const val = args
         ? this.box(['Function', value, ...args])
-        : this.box(value).evaluate();
+        : this.box(value);
 
+      const previousScope = this.swapScope(scope!);
       this.defineFunction(id, {
         signature: { domain: 'Functions', evaluate: val },
       });
+      this.swapScope(previousScope);
 
       return this;
     }
@@ -1266,6 +1262,8 @@ export class ComputeEngine implements IComputeEngine {
     if (value === undefined || value === null) {
       // If we don't have a value, let type inference or explicit
       // declaration handle it.
+      // We still want to reserve a spot for this value, so we declare it.
+      this.declare(id, { inferred: true, domain: this.Anything });
       return this;
     }
 
@@ -1340,7 +1338,9 @@ export class ComputeEngine implements IComputeEngine {
       // e.g `ce.assign("f", ["Add", "x", 1]))` : no argument declared
       // use `ce.assign("f(x)", ["Add", "x", 1]))` instead
       // or `ce.assign("f", ["Function", ["Add", "x", 1], "x"])`
+      this.pushScope();
       value = expr.evaluate();
+      this.popScope();
     }
 
     // It's not a function, it's a symbol
@@ -1363,16 +1363,18 @@ export class ComputeEngine implements IComputeEngine {
     if (symDef) {
       console.assert(typeof value !== 'function');
       symDef.value = this.box(value as SemiBoxedExpression).evaluate();
-    } else {
-      const fnDef = this.lookupFunction(id);
-      if (fnDef) {
-        console.assert(typeof value == 'function');
-        fnDef.signature = {
-          domain: fnDef.signature.domain,
-          evaluate: value as () => any,
-        };
-      }
+      return this;
     }
+    const fnDef = this.lookupFunction(id);
+    if (fnDef) {
+      console.assert(typeof value == 'function');
+      fnDef.signature = {
+        domain: fnDef.signature.domain,
+        evaluate: value as () => any,
+      };
+      return this;
+    }
+
     console.assert(false, `Cannot assign to undeclared symbol "${id}"`);
     return this;
   }
@@ -1490,14 +1492,6 @@ export class ComputeEngine implements IComputeEngine {
     }
 
     let msg: BoxedExpression | undefined = undefined;
-    if (Array.isArray(message) && message[0] === 'incompatible-domain') {
-      msg = new BoxedFunction(this, 'ErrorCode', [
-        this.string('incompatible-domain'),
-        this.domain(message[1] as DomainExpression),
-        this.domain(message[2] as DomainExpression),
-      ]);
-    }
-
     if (typeof message === 'string') msg = this.string(message);
 
     if (!msg && typeof message !== 'string')
@@ -1519,6 +1513,23 @@ export class ComputeEngine implements IComputeEngine {
       [msg!, this.box(where, { canonical: false })],
       { canonical: false }
     );
+  }
+
+  domainError(
+    expectedDomain: BoxedDomain | DomainLiteral,
+    actualDomain: undefined | BoxedDomain,
+    where?: SemiBoxedExpression
+  ): BoxedExpression {
+    const expected = isDomain(expectedDomain)
+      ? this.domain(expectedDomain)
+      : this.symbol(expectedDomain);
+
+    const actual =
+      actualDomain && isDomain(actualDomain)
+        ? this.domain(actualDomain)
+        : this.symbol(actualDomain ?? 'Undefined');
+
+    return this.error(['incompatible-domain', expected, actual], where);
   }
 
   hold(expr: SemiBoxedExpression): BoxedExpression {
@@ -1596,11 +1607,16 @@ export class ComputeEngine implements IComputeEngine {
 
     if (typeof exponent === 'number') e = exponent;
     else if (isRational(exponent)) {
+      if (isRationalZero(exponent)) return this.One;
+      if (isRationalOne(exponent)) return base;
       // Is the denominator 1?
       if (isMachineRational(exponent) && exponent[1] === 1) e = exponent[0];
       else if (isBigRational(exponent) && exponent[1] === BigInt(1))
         e = Number(exponent[0]);
     }
+
+    // x^0
+    if (e === 0) return this.One;
 
     // x^1
     if (e === 1) return base;

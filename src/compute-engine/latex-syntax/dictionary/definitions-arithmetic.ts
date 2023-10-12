@@ -1033,17 +1033,11 @@ function parseBigOp(name: string, prec: number) {
 
     if (!fn) return [name];
 
-    if (sup)
-      return [
-        name,
-        fn,
-        ['Tuple', index ? ['Hold', index] : 'Nothing', lower ?? 1, sup],
-      ];
+    if (sup) return [name, fn, ['Tuple', index ?? 'Nothing', lower ?? 1, sup]];
 
-    if (lower)
-      return [name, fn, ['Tuple', index ? ['Hold', index] : 'Nothing', lower]];
+    if (lower) return [name, fn, ['Tuple', index ?? 'Nothing', lower]];
 
-    if (index) return [name, fn, ['Tuple', ['Hold', index]]];
+    if (index) return [name, fn, ['Tuple', index]];
 
     return [name, fn];
   };

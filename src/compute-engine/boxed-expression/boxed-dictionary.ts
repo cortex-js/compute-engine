@@ -28,7 +28,7 @@ export class BoxedDictionary extends _BoxedExpression {
 
   constructor(
     ce: IComputeEngine,
-    dict: { [key: string]: SemiBoxedExpression },
+    dict: { [key: string]: SemiBoxedExpression } | Map<string, BoxedExpression>,
     options?: { canonical?: boolean; metadata?: Metadata }
   ) {
     options ??= {};
@@ -37,9 +37,13 @@ export class BoxedDictionary extends _BoxedExpression {
 
     const canonical = options.canonical ?? true;
 
-    for (const key of Object.keys(dict))
-      this._value.set(key, ce.box(dict[key], { canonical }));
-
+    if (dict instanceof Map) {
+      for (const [key, value] of dict)
+        this._value.set(key, ce.box(value, { canonical }));
+    } else {
+      for (const key of Object.keys(dict))
+        this._value.set(key, ce.box(dict[key], { canonical }));
+    }
     ce._register(this);
   }
 
@@ -172,19 +176,8 @@ export class BoxedDictionary extends _BoxedExpression {
     return true;
   }
 
-  apply(
-    fn: (x: BoxedExpression) => SemiBoxedExpression,
-    head?: string
-  ): BoxedExpression {
-    const result = {};
-    for (const key of this.keys)
-      result[key] = this.engine.box(fn(this.getKey(key)!));
-    if (head) return this.engine.fn(head, [{ dict: result }]);
-    return new BoxedDictionary(this.engine, result);
-  }
-
-  evaluate(options?: EvaluateOptions): BoxedExpression {
-    return this.apply((x) => x.evaluate(options) ?? x);
+  evaluate(_options?: EvaluateOptions): BoxedExpression {
+    return this;
   }
 
   get isCanonical(): boolean {
@@ -196,23 +189,15 @@ export class BoxedDictionary extends _BoxedExpression {
 
   get canonical(): BoxedExpression {
     if (this.isCanonical) return this;
-    const result = this.apply((x) => x.canonical);
-    result.isCanonical = true;
-    return result;
+    return new BoxedDictionary(this.engine, this._value, { canonical: true });
   }
 
-  simplify(options?: SimplifyOptions): BoxedExpression {
-    if (!(options?.recursive ?? true)) return this;
-
-    // In general, we should simplify the canonical form of this
-    // expression, but for dictionaries, there is no canonical
-    // form, except the canonical form of its elements
-
-    return this.apply((x) => x.simplify(options) ?? x);
+  simplify(_options?: SimplifyOptions): BoxedExpression {
+    return this;
   }
 
-  N(options?: NOptions): BoxedExpression {
-    return this.apply((x) => x.N(options));
+  N(_options?: NOptions): BoxedExpression {
+    return this;
   }
 
   replace(

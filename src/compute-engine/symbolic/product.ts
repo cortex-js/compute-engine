@@ -16,8 +16,8 @@ import {
   neg,
   reducedRational,
 } from '../numerics/rationals';
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
 import { bigint } from '../numerics/numeric-bigint';
 
@@ -491,7 +491,6 @@ function termsAsExpressions(
   const result = terms.sort(degreeOrder).map((x) => {
     const t = flattenOps(x.terms, 'Multiply');
     const base = t.length <= 1 ? t[0] : ce._fn('Multiply', t.sort(order));
-    if (isRationalOne(x.exponent)) return base;
     return ce.pow(base, x.exponent);
   });
   return flattenOps(result, 'Multiply') ?? result;

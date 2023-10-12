@@ -33,7 +33,6 @@ export function getStandardLibrary(
     // **Note** the order of the libraries is significant:
     // earlier libraries cannot reference definitions in later libraries.
     return getStandardLibrary([
-      'domains',
       'core',
       'control-structures', // If, Block, Loop
       'logic',

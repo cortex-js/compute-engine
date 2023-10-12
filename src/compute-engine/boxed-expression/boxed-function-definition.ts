@@ -197,12 +197,12 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       let evaluate: ((ce, args) => BoxedExpression | undefined) | undefined =
         undefined;
       if (sig.evaluate && typeof sig.evaluate !== 'function') {
-        const boxedEvaluate = ce.box(sig.evaluate, { canonical: false });
-        if (!boxedEvaluate.isValid)
-          throw Error(`Invalid function ${boxedEvaluate.toString()}`);
-        const fn = applicable(boxedEvaluate);
+        const boxedFn = ce.box(sig.evaluate, { canonical: false });
+        if (!boxedFn.isValid)
+          throw Error(`Invalid function ${boxedFn.toString()}`);
+        const fn = applicable(boxedFn);
         evaluate = (_ce, xs) => fn(xs);
-        evaluate.toString = () => boxedEvaluate.toString(); // For debugging/_printScope()
+        evaluate.toString = () => boxedFn.toString(); // For debugging/_printScope()
       } else evaluate = sig.evaluate as any;
 
       this.signature = {

@@ -1,11 +1,5 @@
-import { Expression } from '../../../math-json/math-json-format';
 import { symbol } from '../../../math-json/utils';
-import {
-  ExpressionParseHandler,
-  LatexDictionary,
-  Parser,
-  Terminator,
-} from '../public';
+import { LatexDictionary, Parser, Terminator } from '../public';
 
 export const DEFINITIONS_STATISTICS: LatexDictionary = [
   {

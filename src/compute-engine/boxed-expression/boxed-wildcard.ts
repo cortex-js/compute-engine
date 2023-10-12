@@ -96,8 +96,8 @@ export class BoxedWildcard extends BoxedSymbol {
     return 'Wildcard';
   }
 
-  get domain(): BoxedDomain {
-    return this.engine.Anything; // @todo
+  get domain(): BoxedDomain | undefined {
+    return undefined;
   }
 
   get json(): Expression {

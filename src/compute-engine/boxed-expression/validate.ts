@@ -83,17 +83,31 @@ export function checkNumericArgs(
     } else if (op === undefined) {
       isValid = false;
       xs.push(ce.error('missing'));
-    } else if (op.isNumber) {
+    } else if (
+      op.symbol &&
+      !ce.lookupSymbol(op.symbol) &&
+      !ce.lookupFunction(op.symbol)
+    ) {
+      // We have an unknown symbol, we'll infer it's a number later
       xs.push(op);
-    } else if (op.symbol && !op.symbolDefinition) {
-      // We have an unknown symbol, we'll infer it's a number
+    } else if (op.isNumber) {
       xs.push(op);
     } else if (!op.isValid) {
       isValid = false;
       xs.push(op);
+    } else if (!op.domain) {
+      // No domain, set. Keep it that way, infer later
+      xs.push(op);
+    } else if (
+      op.symbolDefinition?.inferredDomain &&
+      op.domain.isCompatible(ce.Numbers, 'contravariant')
+    ) {
+      // There was an inferred domain, and it is contravrariant with Numbers
+      // e.g. "Anything". We'll narrow it down to Number when we infer later.
+      xs.push(op);
     } else {
       isValid = false;
-      xs.push(ce.error(['incompatible-domain', 'Numbers', op.domain], op));
+      xs.push(ce.domainError('Numbers', op.domain, op));
     }
   }
 
@@ -118,8 +132,8 @@ export function checkArg(
   arg = arg.canonical;
   if (arg.head === 'Sequence') arg = arg.op1;
   if (!arg.isValid) return arg;
-  if (arg.domain.isCompatible(dom)) return arg;
-  return ce.error(['incompatible-domain', dom, arg.domain], arg);
+  if (!arg.domain || arg.domain.isCompatible(dom)) return arg;
+  return ce.domainError(dom, arg.domain, arg);
 }
 
 export function checkArgs(
@@ -131,7 +145,7 @@ export function checkArgs(
   // Avoid allocating arrays and objects
   if (
     args.length === doms.length &&
-    args.every((x, i) => x.domain.isCompatible(doms[i]))
+    args.every((x, i) => !x.domain || x.domain.isCompatible(doms[i]))
   )
     return args;
 
@@ -192,14 +206,25 @@ export function adjustArguments(
       isValid = false;
       continue;
     }
-    if (op.symbol && op.baseDefinition === undefined) {
-      // A symbol without a definition is assumed to be valid,
+    if (!op.domain) {
+      // An expression without a domain is assumed to be valid,
       // we'll infer the domain later
       result.push(op);
       continue;
     }
+
+    if (
+      op.symbolDefinition?.inferredDomain &&
+      op.domain.isCompatible(param, 'contravariant')
+    ) {
+      // There was an inferred domain, and it is contravrariant with Numbers
+      // e.g. "Anything". We'll narrow it down to Number when we infer later.
+      result.push(op);
+      continue;
+    }
+
     if (!op.domain.isCompatible(param)) {
-      result.push(ce.error(['incompatible-domain', param, op.domain], op));
+      result.push(ce.domainError(param, op.domain, op));
       isValid = false;
       continue;
     }
@@ -223,15 +248,24 @@ export function adjustArguments(
       i += 1;
       continue;
     }
-    if (op.symbol && op.baseDefinition === undefined) {
-      // A symbol without a definition is assumed to be valid,
+    if (!op.domain) {
+      // An expression without a domain is assumed to be valid,
       // we'll infer the domain later
       result.push(op);
       i += 1;
       continue;
     }
+    if (
+      op.symbolDefinition?.inferredDomain &&
+      op.domain.isCompatible(param, 'contravariant')
+    ) {
+      // There was an inferred domain, and it is contravrariant with Numbers
+      // e.g. "Anything". We'll narrow it down to Number when we infer later.
+      result.push(op);
+      continue;
+    }
     if (!op.domain.isCompatible(param)) {
-      result.push(ce.error(['incompatible-domain', param, op.domain], op));
+      result.push(ce.domainError(param, op.domain, op));
       isValid = false;
       i += 1;
       continue;
@@ -253,16 +287,23 @@ export function adjustArguments(
         isValid = false;
         continue;
       }
-      if (op.symbol && op.baseDefinition === undefined) {
-        // A symbol without a definition is assumed to be valid,
+      if (!op.domain) {
+        // An expression without a domain is assumed to be valid,
         // we'll infer the domain later
         result.push(op);
         continue;
       }
+      if (
+        op.symbolDefinition?.inferredDomain &&
+        op.domain.isCompatible(restParam, 'contravariant')
+      ) {
+        // There was an inferred domain, and it is contravrariant with Numbers
+        // e.g. "Anything". We'll narrow it down to Number when we infer later.
+        result.push(op);
+        continue;
+      }
       if (!op.domain.isCompatible(restParam)) {
-        result.push(
-          ce.error(['incompatible-domain', restParam, op.domain], op)
-        );
+        result.push(ce.domainError(restParam, op.domain, op));
         isValid = false;
         continue;
       }

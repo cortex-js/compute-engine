@@ -1,4 +1,4 @@
-import Complex from 'complex.js';
+import { Complex } from 'complex.js';
 import { asFloat } from '../numerics/numeric';
 import {
   BoxedExpression,

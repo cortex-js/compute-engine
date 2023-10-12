@@ -17,8 +17,8 @@ import {
   mul,
   neg,
 } from '../numerics/rationals';
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 
 export class Sum {
   private engine: IComputeEngine;

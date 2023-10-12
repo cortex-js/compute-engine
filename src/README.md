@@ -54,10 +54,10 @@ render_math_in_document: true
 
 <div class=symbols-table>
 
-| Math                      | MathJSON                                                        |
-| :------------------------ | :-------------------------------------------------------------- |
-| \\[\frac{n}{1+n}\\]       | `["Divide", "n", ["Add", 1, "n"]]`{.math-json}                  |
-| \\[\sin^{-1}^\prime(x)\\] | `[["Derivative", ["InverseFunction", "Sin"]], "x"]`{.math-json} |
+| Math                      | MathJSON                                                                 |
+| :------------------------ | :----------------------------------------------------------------------- |
+| \\[\frac{n}{1+n}\\]       | `["Divide", "n", ["Add", 1, "n"]]`{.math-json}                           |
+| \\[\sin^{-1}^\prime(x)\\] | `["Apply", ["Derivative", ["InverseFunction", "Sin"]], "x"]`{.math-json} |
 
 </div>
 
@@ -416,41 +416,31 @@ The **head** of the function expression is the first element in the array. Its
 presence is required. It indicates the **name of the function** or "what" the
 function is about.
 
-The head is usually an identifier, but it may also be another expression.
+The head is an identifier following the conventions for function names (see
+below).
 
-- If the head is an identifier, it should follow the conventions for function
-  names (see below).
+```json example
+// Apply the function "Sin" to the argument "x"
+["Sin", "x"]
+// Apply "Cos" to a function expression
+["Cos", ["Divide", "Pi", 2]]
+```
 
-  ```json example
-  // Apply the function "Sin" to the argument "x"
-  ["Sin", "x"]
-  // Apply "Cos" to a function expression
-  ["Cos", ["Divide", "Pi", 2]]
-  ```
-
-- If the head is an expression, it may include the wildcard `_` or `_1` to
-  represent the first parameter, `_2` to represent the second parameter, etc...
-  The wildcard `__` represents the sequence of all the parameter.
-
-  ```json example
-  [["Multiply", "_", "_"], 4]
-  ```
-
-Following the head are zero or more **arguments**, which are expressions as
-well. The arguments, or **operands**, form the **tail** of the function.
+Following the head are zero or more **arguments**, which are expressions. The
+arguments, or **operands**, form the **tail** of the function.
 
 **CAUTION** the arguments of a function are expressions. To represent an
-argument which is a list, use a `["List"]` expression, do not use an array.
+argument which is a list, use a `["List"]` expression, do not use an JSON array.
 {.notice--warning}
 
 The expression corresponding to \\(\sin^{-1}(x)\\) is:
 
 ```json example
-[["InverseFunction", "Sin"], "x"]
+["Apply", ["InverseFunction", "Sin"], "x"]
 ```
 
-The head of this expression is `["InverseFunction", "Sin"]` and its argument is
-`"x"`.
+The head of this expression is `"Apply"` and its argument are the expressions
+`["InverseFunction", "Sin"]` and `"x"`.
 
 ## Identifiers
 

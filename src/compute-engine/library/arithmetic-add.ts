@@ -49,13 +49,12 @@ export function canonicalAdd(
 
 export function domainAdd(
   _ce: IComputeEngine,
-  args: BoxedDomain[]
-): BoxedDomain | null {
-  let dom: BoxedDomain | null = null;
+  args: (undefined | BoxedDomain)[]
+): BoxedDomain | null | undefined {
+  let dom: BoxedDomain | null | undefined = null;
   for (const arg of args) {
-    if (!arg.isNumeric) return null;
-    if (!dom) dom = arg;
-    else dom = widen(dom, arg);
+    if (!arg?.isNumeric) return null;
+    dom = widen(dom, arg);
   }
   return dom;
 }
@@ -126,6 +125,7 @@ export function canonicalSummation(
   let index: BoxedExpression | null = null;
   let lower: BoxedExpression | null = null;
   let upper: BoxedExpression | null = null;
+
   if (
     range &&
     range.head !== 'Tuple' &&
@@ -140,14 +140,15 @@ export function canonicalSummation(
     upper = range.ops?.[2]?.canonical ?? null;
   }
 
-  if (index?.head === 'Hold') index = index.op1;
-  if (index?.head === 'ReleaseHold') index = index.op1?.evaluate();
   index ??= ce.Nothing;
+
+  if (index.head === 'Hold') index = index.op1;
 
   if (index.symbol) {
     ce.declare(index.symbol, { domain: 'Integers' });
+    index.bind();
     index = ce.hold(index);
-  } else index = ce.error(['incompatible-domain', 'Symbols', index.domain]);
+  } else index = ce.domainError('Symbols', index.domain, index);
 
   // The range bounds, if present, should be integers numbers
   if (lower && lower.isFinite) lower = checkArg(ce, lower, 'Integers');
@@ -183,7 +184,7 @@ export function evalSummation(
   if (mode === 'simplify') {
     const terms: BoxedExpression[] = [];
     for (let i = lower; i <= upper; i++) {
-      ce.assign({ [index]: i });
+      ce.assign(index, i);
       terms.push(fn.simplify());
     }
     result = ce.add(terms).simplify();
@@ -192,7 +193,7 @@ export function evalSummation(
   if (mode === 'evaluate') {
     const terms: BoxedExpression[] = [];
     for (let i = lower; i <= upper; i++) {
-      ce.assign({ [index]: i });
+      ce.assign(index, i);
       terms.push(fn.evaluate());
     }
     result = ce.add(terms).evaluate();
@@ -224,7 +225,7 @@ export function evalSummation(
       if (bignumPreferred(ce)) {
         let sum = ce.bignum(0);
         for (let i = lower; i <= upper; i++) {
-          ce.assign({ [index]: i });
+          ce.assign(index, i);
           const term = asBignum(fn.N());
           if (term === null) {
             result = undefined;
@@ -240,10 +241,11 @@ export function evalSummation(
       } else {
         // Machine precision
         const numericMode = ce.numericMode;
+        const precision = ce.precision;
         ce.numericMode = 'machine';
         let sum = 0;
         for (let i = lower; i <= upper; i++) {
-          ce.assign({ [index]: i });
+          ce.assign(index, i);
           const term = asFloat(fn.N());
           if (term === null) {
             result = undefined;
@@ -256,6 +258,7 @@ export function evalSummation(
           sum += term;
         }
         ce.numericMode = numericMode;
+        ce.precision = precision;
         if (result === null) result = ce.number(sum);
       }
     } else if (result === null) {
@@ -264,9 +267,9 @@ export function evalSummation(
       //
 
       // First, check for divergence
-      ce.assign({ [index]: 1000 });
+      ce.assign(index, 1000);
       const nMax = fn.N();
-      ce.assign({ [index]: 999 });
+      ce.assign(index, 999);
       const nMaxMinusOne = fn.N();
 
       const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
@@ -278,9 +281,10 @@ export function evalSummation(
         // no point in calculating with high precision), and check for convergence
         let sum = 0;
         const numericMode = ce.numericMode;
+        const precision = ce.precision;
         ce.numericMode = 'machine';
         for (let i = lower; i <= upper; i++) {
-          ce.assign({ [index]: i });
+          ce.assign(index, i);
           const term = asFloat(fn.N());
           if (term === null) {
             result = undefined;
@@ -291,6 +295,7 @@ export function evalSummation(
           sum += term;
         }
         ce.numericMode = numericMode;
+        ce.precision = precision;
         if (result === null) result = ce.number(sum);
       }
     }

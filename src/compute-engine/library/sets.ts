@@ -245,7 +245,7 @@ function evaluateElement(
     return ce.False;
   }
 
-  if (isDomain(rhs)) {
+  if (isDomain(rhs) && lhs.domain) {
     if (lhs.domain.isCompatible(ce.domain(rhs))) return ce.True;
     return ce.False;
   }

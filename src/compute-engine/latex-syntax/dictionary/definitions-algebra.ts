@@ -7,4 +7,10 @@ export const DEFINITIONS_ALGEBRA: LatexDictionary = [
     kind: 'infix',
     precedence: 270, // MathML rightwards arrow
   },
+  {
+    latexTrigger: ['\\rightarrow'],
+    kind: 'infix',
+    precedence: 270, // MathML rightwards arrow
+    parse: 'To',
+  },
 ];

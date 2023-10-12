@@ -28,15 +28,7 @@ function randomExpressionWithHead(head: string, level: number): Expression {
 
 function randomTrig(): Expression {
   return [
-    oneOf([
-      'Cos',
-      'Sin',
-      'Tan',
-      'Sinh',
-      'Arccos',
-      'Arsinh',
-      ['InverseFunction', 'Cos'],
-    ]),
+    oneOf(['Cos', 'Sin', 'Tan', 'Sinh', 'Arccos', 'Arsinh']),
     oneOf([
       'Pi',
       '-1',

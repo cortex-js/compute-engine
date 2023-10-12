@@ -8,8 +8,8 @@
  * @module ComputeEngine
  */
 
-import type { Decimal } from 'decimal.js';
 import type { Complex } from 'complex.js';
+import type { Decimal } from 'decimal.js';
 import type {
   Expression,
   MathJsonDictionary,
@@ -64,10 +64,9 @@ export type SimplifyOptions = {
 
 /** Options for `BoxedExpression.evaluate()`
  *
- * @internal
  */
 export type EvaluateOptions = {
-  //
+  numericMode?: boolean; // Default to false
 };
 
 /** Options for `BoxedExpression.N()`
@@ -179,9 +178,6 @@ export type DomainConstructor =
   | 'Union'
   | 'OptArg'
   | 'VarArg'
-  // | 'Head'
-  // | 'Symbol'
-  // | 'Value'
   | 'Covariant'
   | 'Contravariant'
   | 'Bivariant'
@@ -683,25 +679,6 @@ export interface BoxedExpression {
   get canonical(): BoxedExpression;
 
   /**
-   * If this expression is a function, apply the function `fn` to all its operands.
-   *
-   * Replace the head of this expression with `head`, if defined.
-   *
-   * If this expression is a dictionary, return a new dictionary with the values
-   * modified by `fn`.
-   *
-   * If `head` is provided, return a function expression with the modified
-   * dictionary as operand, otherwise return the  modified dictionary.
-   *
-   * **Note** applicable to canonical and non-canonical expressions.
-   *
-   * */
-  apply(
-    fn: (x: BoxedExpression) => SemiBoxedExpression,
-    head?: string
-  ): BoxedExpression;
-
-  /**
    * Replace all the symbols in the expression as indicated.
    *
    * Note the same effect can be achieved with `this.replace()`, but
@@ -1025,7 +1002,7 @@ export interface BoxedExpression {
    *
    * If the domain was not set, set it to the inferred domain, return `true`
    * If the domain was previously inferred, adjust it by widening it,
-   *    return `true
+   *    return `true`
    *
    * @internal
    */
@@ -1152,26 +1129,29 @@ export interface BoxedExpression {
    */
   set value(value: BoxedExpression | number | undefined);
 
-  /** The domain of the value of this expression.
+  /**
    *
-   * If a function expression, the domain  of the value of the function (the codomain of the function).
+   * The domain of the value of this expression.
+   *
+   * If a function expression, the domain  of the value of the function
+   * (the codomain of the function).
    *
    * If a symbol the domain of the value of the symbol.
    *
-   * Use `expr.head` to determine if an expression is a symbol or function.
+   * Use `expr.head` to determine if an expression is a symbol or function
+   * expression.
    *
-   * **Note**: If non-canonical, return the domain of its canonical
-   * counterpart
+   * **Note**: if non-canonical or not valid, return `undefined`.
+   *
    */
-  get domain(): BoxedDomain;
+  get domain(): BoxedDomain | undefined;
 
-  /** Modify the domain of a symbol that represent a variable
-   * (or a function name).
+  /** Modify the domain of a symbol.
    *
    * **Note**: If non-canonical, does nothing.
    *
    */
-  set domain(domain: DomainExpression | BoxedDomain);
+  set domain(domain: DomainExpression | BoxedDomain | undefined);
 
   /** `true` if the value of this expression is a number.
    *
@@ -1584,7 +1564,10 @@ export type FunctionSignature = {
   /** An optional handler to determine the codomain of the function.
    * If not provided, the codomain of the function is determined from `domain`
    */
-  codomain?: (ce: IComputeEngine, args: BoxedDomain[]) => BoxedDomain | null;
+  codomain?: (
+    ce: IComputeEngine,
+    args: BoxedDomain[]
+  ) => BoxedDomain | null | undefined;
 
   /**
    * Return the canonical form of the expression with the arguments `args`.
@@ -1760,7 +1743,10 @@ export type BoxedFunctionSignature = {
 
   codomain?:
     | BoxedDomain
-    | ((ce: IComputeEngine, args: BoxedExpression[]) => BoxedDomain | null);
+    | ((
+        ce: IComputeEngine,
+        args: BoxedExpression[]
+      ) => BoxedDomain | null | undefined);
   canonical?: (
     ce: IComputeEngine,
     args: BoxedExpression[]
@@ -1916,7 +1902,7 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
  * For example, it might be useful to override `algebraic = false`
  * for a transcendental number.
  */
-export type SymbolFlags = {
+export type NumericFlags = {
   number: boolean | undefined;
   integer: boolean | undefined;
   rational: boolean | undefined;
@@ -2006,13 +1992,13 @@ export type SymbolDefinition = BaseDefinition &
       | SemiBoxedExpression
       | ((ce: IComputeEngine) => SemiBoxedExpression | null);
 
-    flags?: Partial<SymbolFlags>;
+    flags?: Partial<NumericFlags>;
   };
 
 export interface BoxedSymbolDefinition
   extends BoxedBaseDefinition,
     SymbolAttributes,
-    Partial<SymbolFlags> {
+    Partial<NumericFlags> {
   get value(): BoxedExpression | undefined;
   set value(val: SemiBoxedExpression | number | undefined);
 
@@ -2110,7 +2096,6 @@ export interface IComputeEngine {
   readonly iterationLimit: number;
   /** @experimental */
   readonly recursionLimit: number;
-  defaultDomain: null | BoxedDomain;
 
   /** {@inheritDoc  NumericMode} */
   numericMode: NumericMode;
@@ -2362,6 +2347,12 @@ export interface IComputeEngine {
     where?: SemiBoxedExpression
   ): BoxedExpression;
 
+  domainError(
+    expectedDomain: BoxedDomain | DomainLiteral,
+    actualDomain: undefined | BoxedDomain,
+    where?: SemiBoxedExpression
+  ): BoxedExpression;
+
   /**
    * Add a`["Hold"]` wrapper to `expr.
    */
@@ -2372,11 +2363,13 @@ export interface IComputeEngine {
    * The result is canonical.
    */
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression;
+
   /** Shortcut for `this.fn("Multiply"...)`
    *
    * The result is canonical.
    */
   mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression;
+
   /** Shortcut for `this.fn("Power"...)`
    *
    * The result is canonical.
@@ -2387,6 +2380,10 @@ export interface IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression;
 
+  /** Shortcut for `this.fn("Sqrt"...)`
+   *
+   * The result is canonical.
+   */
   sqrt(base: BoxedExpression, metadata?: Metadata);
 
   /** Shortcut for `this.fn("Divide", [1, expr])`
@@ -2394,11 +2391,13 @@ export interface IComputeEngine {
    * The result is canonical.
    */
   inv(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
+
   /** Shortcut for `this.fn("Negate", [expr])`
    *
    * The result is canonical.
    */
   neg(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
+
   /** Shortcut for `this.fn("Divide", [num, denom])`
    *
    * The result is canonical.
@@ -2447,7 +2446,10 @@ export interface IComputeEngine {
   /** Serialize a `BoxedExpression` or a `MathJSON` expression to
    * a LaTeX string
    */
-  serialize(expr: SemiBoxedExpression): LatexString;
+  serialize(
+    expr: SemiBoxedExpression,
+    options?: { canonical?: boolean }
+  ): LatexString;
 
   /**
    * Options to control the serialization of MathJSON expression to LaTeX
@@ -2481,6 +2483,12 @@ export interface IComputeEngine {
 
   /** Set the current scope, return the previous scope. */
   swapScope(scope: RuntimeScope | null): RuntimeScope | null;
+
+  /**
+   * Reset the value of any identifiers that have been assigned a value
+   * in the current scope.
+   * @internal */
+  resetContext(): void;
 
   /** Assign a value to an identifier in the current scope.
    * Use `undefined` to reset the identifier to no value.

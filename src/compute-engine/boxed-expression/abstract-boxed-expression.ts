@@ -1,5 +1,5 @@
-import type { Decimal } from 'decimal.js';
 import { Complex } from 'complex.js';
+import type { Decimal } from 'decimal.js';
 
 import { Expression } from '../../math-json/math-json-format';
 
@@ -15,7 +15,6 @@ import {
   Metadata,
   NOptions,
   PatternMatchOptions,
-  SemiBoxedExpression,
   SimplifyOptions,
   Substitution,
   RuntimeScope,
@@ -220,13 +219,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this;
   }
 
-  apply(
-    _fn: (x: BoxedExpression) => SemiBoxedExpression,
-    _head?: string
-  ): BoxedExpression {
-    return this;
-  }
-
   subs(_sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
     if (options?.canonical) return this.canonical;
     return this;
@@ -410,8 +402,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 
-  get domain(): BoxedDomain {
-    return this.engine.Void;
+  get domain(): BoxedDomain | undefined {
+    return undefined;
   }
   set domain(_domain: BoxedDomain) {
     throw new Error(`Can't change the domain of \\(${this.latex}\\)`);
@@ -453,16 +445,17 @@ export abstract class _BoxedExpression implements BoxedExpression {
   get isExtendedComplex(): boolean | undefined {
     return undefined;
   }
+
   simplify(_options?: SimplifyOptions): BoxedExpression {
     return this;
   }
 
-  evaluate(options?: EvaluateOptions): BoxedExpression {
-    return this.simplify(options);
+  evaluate(_options?: EvaluateOptions): BoxedExpression {
+    return this.simplify();
   }
 
   N(_options?: NOptions): BoxedExpression {
-    return this.evaluate();
+    return this.evaluate({ numericMode: true });
   }
 
   compile(

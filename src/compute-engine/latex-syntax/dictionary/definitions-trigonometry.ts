@@ -66,12 +66,14 @@ function parseTrig(op: string): ExpressionParseHandler {
 
     const args = parser.parseArguments('implicit', until);
 
-    if (sup !== null) {
-      if (args === null) return ['Power', fn, sup];
-      return ['Power', [fn, ...args], sup];
-    }
+    const appliedFn: Expression =
+      args === null
+        ? fn
+        : typeof fn === 'string'
+        ? [fn, ...args]
+        : ['Apply', fn, ...args];
 
-    return args === null ? fn : [fn, ...args];
+    return sup === null ? appliedFn : ['Power', appliedFn, sup];
   };
 }
 

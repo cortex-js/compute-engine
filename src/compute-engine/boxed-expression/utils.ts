@@ -1,5 +1,5 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 import { asFloat } from '../numerics/numeric';

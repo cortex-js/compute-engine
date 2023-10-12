@@ -479,7 +479,10 @@ export function box(
     // It's a function with a head expression
     // Try to evaluate to something simpler
     const ops = expr.slice(1).map((x) => box(ce, x, options));
-    const head = box(ce, expr[0], options);
+    // The head could include some unknowns, i.e. `_` which we do *not*
+    // want to get declated in the current scope, so use canonical: false
+    // to avoid that.
+    const head = box(ce, expr[0], { ...options, canonical: false });
     return new BoxedFunction(ce, head, ops);
   }
 

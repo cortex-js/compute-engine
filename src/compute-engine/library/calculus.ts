@@ -2,7 +2,7 @@ import { checkArg } from '../boxed-expression/validate';
 import { applicableN1 } from '../function-utils';
 import { centeredDiff8thOrder, monteCarloEstimate } from '../numerics/numeric';
 import { BoxedExpression, IdentifierDefinitions } from '../public';
-import { partialDerivative } from '../symbolic/derivative';
+import { differentiate } from '../symbolic/derivative';
 
 export const CALCULUS_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -64,9 +64,27 @@ volumes
     //
 
     //
-    // Represents the derivative of a function
-    // ["Derivative", "Sin"] -> "Cos"
-    // ["Derivative", ["Sin", "_"]] -> ["Cos", "_"]
+    // Represents the functional derivative of a function.
+    //
+    // This can be considered a more primitive form of the Derivative. In
+    // most cases users will use the `D` function instead of this one.
+    //
+    // ["Derivative", "Sin"]
+    //    -> "Cos"
+    //
+    // ["Derivative", ["Function", ["Square", "x"], "x"], 2]
+    //    -> ["Function", ["Multiply", 2, "x"], "x"]
+    //
+    // The "2" indicates the order of the derivative, and that the first
+    // argument of the function is the variable with respect to which the
+    // derivative is taken.
+    //
+    // ["Derivative", ["Function", ["Add", "x", "y"], "x", "y"], 0, 1]
+    //    -> ["Function", "y"], "x", "y"]
+    // The 0 indicate that the first argument of the function (x) is a
+    // constant, while the "1" indicates that the second argument (y) is the
+    // variable with respect to which the derivative is taken.
+    //
     // @todo: consider Fractional Calculus, i.e. Louiville-Riemann derivative
     // https://en.wikipedia.org/wiki/Fractional_calculus
     // with values of the order that can be either fractional or negative
@@ -76,7 +94,7 @@ volumes
       signature: {
         domain: [
           'FunctionOf',
-          'Symbols',
+          'Functions',
           ['OptArg', 'Numbers'], // The order of the derivative
           'Functions',
         ],
@@ -84,7 +102,7 @@ volumes
           // Is it a function name, i.e. ["Derivative", "Sin"]?
           if (ops[0].functionDefinition) {
             return (
-              partialDerivative(ce._fn(ops[0].canonical, [ce.symbol('_')]), '_')
+              differentiate(ce._fn(ops[0].canonical, [ce.symbol('_')]), '_')
                 ?.canonical ?? ce._fn('Derivative', ops)
             );
           }
@@ -98,16 +116,15 @@ volumes
         },
         evaluate: (ce, ops) => {
           // Is it a function name, i.e. ["Derivative", "Sin"]?
-          if (ops[0].functionDefinition) {
+          const op = ops[0].evaluate();
+          if (op.functionDefinition) {
             return (
-              partialDerivative(
-                ce._fn(ops[0].evaluate(), [ce.symbol('_')]),
-                '_'
-              )?.canonical ?? undefined
+              differentiate(ce._fn(op, [ce.symbol('_')]), '_')?.canonical ??
+              undefined
             );
           }
           // It's a function expression, i.e. ["Derivative", ["Sin", "_"]]
-          const f = partialDerivative(ops[0].evaluate(), '_');
+          const f = differentiate(op, '_');
           if (!f) return undefined;
           return f.canonical;
         },
@@ -132,23 +149,46 @@ volumes
           ['VarArg', 'Symbols'],
           'Anything',
         ],
-        evaluate: (ce, ops) => {
+        canonical: (ce, ops) => {
           let f = ops[0];
-          // Iterate aver all variables
-          const vars = ops.slice(1);
-          while (vars.length > 0) {
-            const v = vars.shift();
-            if (!v?.symbol) return undefined;
-            ce.pushScope();
-            ce.declare(v.symbol, ce.Numbers);
-            const fPrime = partialDerivative(f.canonical, v.symbol);
-            ce.popScope();
-            // If we couldn't derivate with respect to this variable, return
-            // a partial derivation
-            if (fPrime === undefined) return ce._fn(f, vars);
-            f = fPrime;
+          if (!f) return null;
+
+          ce.pushScope();
+          const params = ops.slice(1);
+          // const vars: BoxedExpression[] = [];
+          // for (const param of params) {
+          //   let v = param;
+          //   if (v.head === 'ReleaseHold') v = param.op1.evaluate();
+          //   if (!v.symbol) {
+          //     ce.popScope();
+          //     return null;
+          //   }
+          //   ce.declare(v.symbol, ce.Numbers);
+          //   vars.push(ce.box(v.symbol));
+          // }
+          f.bind();
+          f = f.canonical;
+          ce.popScope();
+          return ce._fn('D', [f, ...params]);
+        },
+        evaluate: (ce, ops) => {
+          let f: BoxedExpression | undefined = ops[0].canonical;
+          const context = ce.swapScope(f.scope);
+          f = f.evaluate();
+          const params = ops.slice(1);
+          if (params.length === 0) f = undefined;
+          for (const param of params) {
+            if (!param.symbol) {
+              f = undefined;
+              break;
+            }
+            f = differentiate(f!, param.symbol);
+            if (f === undefined) break;
           }
-          return f;
+          ce.swapScope(context);
+          f = f?.canonical;
+          // Avoid recursive evaluation
+          return f?.head === 'D' ? f : f?.evaluate();
         },
       },
     },
@@ -208,7 +248,7 @@ volumes
             index = index.op1.evaluate();
           index ??= ce.Nothing;
           if (!index.symbol)
-            index = ce.error(['incompatible-domain', 'Symbols', index.domain]);
+            index = ce.domainError('Symbols', index.domain, index);
 
           // The range bounds, if present, should be numbers
           if (lower) lower = checkArg(ce, lower, ce.Numbers);

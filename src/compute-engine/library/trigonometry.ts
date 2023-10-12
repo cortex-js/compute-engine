@@ -62,7 +62,8 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
             return ce._fn('Degrees', ops);
           return ce.div(ce.mul([arg, ce.Pi]), ce.number(180));
         },
-        evaluate: (ce, ops) => ce.mul([ops[0], ce.div(ce.Pi, ce.number(180))]),
+        evaluate: (ce, ops) =>
+          ce.mul([ops[0], ce.div(ce.Pi, ce.number(180))]).evaluate(),
       },
     },
     Hypot: {

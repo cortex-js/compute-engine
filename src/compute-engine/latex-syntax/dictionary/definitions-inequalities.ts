@@ -203,20 +203,20 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['!', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260, // Note different precendence than \\ne per MathML
+    precedence: 260, // Note different precedence than \\ne per MathML
   },
   {
     name: 'GreaterEqual',
     latexTrigger: ['\\ge'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 242, // Note: different precendence than `>=` as per MathML
+    precedence: 242, // Note: different precedence than `>=` as per MathML
   },
   {
     latexTrigger: ['\\geq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 242, // Note: different precendence than `>=` as per MathML
+    precedence: 242, // Note: different precedence than `>=` as per MathML
     parse: 'GreaterEqual',
   },
   {
@@ -230,7 +230,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['\\geqslant'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265, // Note: different precendence than `>=` as per MathML
+    precedence: 265, // Note: different precedence than `>=` as per MathML
     parse: 'GreaterEqual',
   },
   {

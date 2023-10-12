@@ -83,7 +83,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
       ce.defineSymbol(lhs, { value: val, domain: val.domain });
       return 'ok';
     }
-    if (def.domain && !val.domain.isCompatible(def.domain))
+    if (def.domain && !val.domain?.isCompatible(def.domain))
       return 'contradiction';
     def.value = val;
     return 'ok';
@@ -111,7 +111,10 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
       ce.defineSymbol(lhs, { value: val, domain: val.domain });
       return 'ok';
     }
-    if (def.domain && !sols.every((sol) => val.domain.isCompatible(sol.domain)))
+    if (
+      def.domain &&
+      !sols.every((sol) => !sol.domain || val.domain?.isCompatible(sol.domain))
+    )
       return 'contradiction';
     def.value = val;
     return 'ok';

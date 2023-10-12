@@ -1,5 +1,5 @@
 import { Complex } from 'complex.js';
-import Decimal from 'decimal.js';
+import { Decimal } from 'decimal.js';
 import { neg } from '../numerics/rationals';
 
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';

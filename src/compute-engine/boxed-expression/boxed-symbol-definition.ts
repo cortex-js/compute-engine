@@ -1,5 +1,5 @@
-import Complex from 'complex.js';
-import Decimal from 'decimal.js';
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 import { asFloat } from '../numerics/numeric';
 import { isPrime } from '../numerics/primes';
 import {
@@ -12,7 +12,7 @@ import {
   RuntimeScope,
   SemiBoxedExpression,
   SymbolDefinition,
-  SymbolFlags,
+  NumericFlags,
   LatexString,
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
@@ -62,7 +62,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
   private _domain: BoxedDomain | undefined | null;
   // If true, the _domain is inferred
   inferredDomain: boolean;
-  private _flags: Partial<SymbolFlags> | undefined;
+  private _flags: Partial<NumericFlags> | undefined;
 
   constant: boolean;
   holdUntil: 'never' | 'simplify' | 'evaluate' | 'N';
@@ -121,10 +121,15 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     if (def.description) this.description = def.description;
     if (def.url) this.url = def.url;
 
-    if (def.flags) this._flags = normalizeFlags(def.flags);
+    let flags = def?.flags;
+    const domain = def?.domain ? this._engine.domain(def.domain) : undefined;
 
-    if (def.domain) {
-      this._domain = this._engine.domain(def.domain);
+    if (domain) flags = { ...domainToFlags(domain), ...(flags ?? {}) };
+
+    if (flags) this._flags = normalizeFlags(flags);
+
+    if (domain) {
+      this._domain = domain;
       this.inferredDomain = false;
     }
 
@@ -197,23 +202,22 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       if (this.inferredDomain) {
         this._value = newVal;
         this._domain = widen(this._domain, newVal.domain);
-      } else if (!this._domain || newVal.domain.isCompatible(this._domain))
+      } else if (
+        !this._domain ||
+        !newVal.domain ||
+        newVal.domain?.isCompatible(this._domain)
+      )
         this._value = newVal;
       else this._value = undefined;
     } else this._value = undefined;
 
     // If there were any flags, discard them, the value is the source of truth
     if (this._value !== undefined) this._flags = undefined;
-    else this._flags = domainToFlags(this.domain);
+    else this._flags = domainToFlags(this._domain);
   }
 
   get domain(): BoxedDomain | undefined {
-    // The _domain, if present, has priority over the value
-    // So if the domain is more general than the value, say 'Numbers',
-    // that is what will be returned. It is possible to get the
-    // expr.value.domain to get the more specific domain if desired.
-    console.assert(this._domain);
-    return this._domain ?? this._value?.domain ?? undefined;
+    return this._domain ?? undefined;
   }
 
   set domain(domain: BoxedDomain | DomainExpression | undefined) {
@@ -228,7 +232,6 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       );
 
     if (!domain) {
-      debugger;
       this._defValue = undefined;
       this._value = undefined;
       this._flags = undefined;
@@ -245,14 +248,15 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       );
     }
 
-    if (this._value && !domain.isCompatible(this._value.domain))
+    if (this._value?.domain && !this._value.domain.isCompatible(domain))
       throw Error(
-        `The domain of "${this.name}" cannot be changed to "${domain.base} because its value has a domain of "${this._value.domain.base}"`
+        `The domain of "${this.name}" cannot be changed to "${domain.base}" because its value has a domain of "${this._value.domain.base}"`
       );
 
-    this._flags = undefined;
     this._domain = domain;
-    if (!this._value && domain.isNumeric) this._flags = domainToFlags(domain);
+    this._flags = undefined;
+    if (this._value === undefined && domain.isNumeric)
+      this._flags = domainToFlags(domain);
   }
 
   //
@@ -419,7 +423,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
     this.updateFlags({ composite: val });
   }
 
-  updateFlags(flags: Partial<SymbolFlags>): void {
+  updateFlags(flags: Partial<NumericFlags>): void {
     // If this is a constant, can set the flags
     if (this.constant) throw Error('The flags of constant cannot be changed');
     if (this.domain?.isNumeric === false)
@@ -527,7 +531,7 @@ function definedKeys<T>(xs: Record<string, T>): Record<string, T> {
   );
 }
 
-function normalizeFlags(flags: Partial<SymbolFlags>): SymbolFlags {
+function normalizeFlags(flags: Partial<NumericFlags>): NumericFlags {
   const result = { ...flags };
 
   if (flags.zero || flags.one || flags.negativeOne) {
@@ -648,70 +652,16 @@ function normalizeFlags(flags: Partial<SymbolFlags>): SymbolFlags {
 
   if (result.number && result.prime) result.composite = false;
 
-  return result as SymbolFlags;
+  return result as NumericFlags;
 }
 
 export function domainToFlags(
   dom: BoxedDomain | undefined | null
-): Partial<SymbolFlags> {
+): Partial<NumericFlags> {
   if (!dom) return {};
-  const result: Partial<SymbolFlags> = {};
+  const result: Partial<NumericFlags> = {};
 
-  if (dom.isNumeric) {
-    // @todo: handle `Range`, `Interval`, and other numeric literals
-    const domain = dom.base;
-    result.number = true;
-    if (domain === 'Integers') result.integer = true;
-    if (domain === 'RationalNumbers') result.rational = true;
-    if (domain === 'AlgebraicNumbers') result.algebraic = true;
-    if (domain === 'TranscendentalNumbers') {
-      result.algebraic = false;
-      result.real = true;
-    }
-    if (domain === 'ExtendedRealNumbers') result.extendedReal = true;
-    if (domain === 'RealNumbers') result.real = true;
-    if (domain === 'ImaginaryNumbers') result.imaginary = true;
-    if (domain === 'ExtendedComplexNumbers') result.extendedComplex = true;
-    if (domain === 'ComplexNumbers') result.complex = true;
-
-    if (domain === 'PositiveNumbers') {
-      result.notZero = true;
-      result.real = true;
-      result.positive = true;
-    }
-    if (domain === 'NegativeNumbers') {
-      result.notZero = true;
-      result.real = true;
-      result.negative = true;
-    }
-    if (domain === 'NonNegativeNumbers') {
-      result.real = true;
-      result.positive = true;
-    }
-    if (domain === 'NonPositiveNumbers') {
-      result.real = true;
-      result.negative = true;
-    }
-
-    if (domain === 'PositiveIntegers') {
-      result.notZero = true;
-      result.integer = true;
-      result.positive = true;
-    }
-    if (domain === 'NegativeNumbers') {
-      result.notZero = true;
-      result.integer = true;
-      result.negative = true;
-    }
-    if (domain === 'NonNegativeNumbers') {
-      result.integer = true;
-      result.positive = true;
-    }
-    if (domain === 'NonPositiveNumbers') {
-      result.integer = true;
-      result.negative = true;
-    }
-  } else {
+  if (!dom.isNumeric) {
     result.number = false;
     result.integer = false;
     result.rational = false;
@@ -738,6 +688,62 @@ export function domainToFlags(
 
     result.prime = false;
     result.composite = false;
+    return result;
   }
+
+  // @todo: handle `Range`, `Interval`, and other numeric literals
+  const base = dom.base;
+  result.number = true;
+  if (base === 'Integers') result.integer = true;
+  if (base === 'RationalNumbers') result.rational = true;
+  if (base === 'AlgebraicNumbers') result.algebraic = true;
+  if (base === 'TranscendentalNumbers') {
+    result.algebraic = false;
+    result.real = true;
+  }
+  if (base === 'ExtendedRealNumbers') result.extendedReal = true;
+  if (base === 'RealNumbers') result.real = true;
+  if (base === 'ImaginaryNumbers') result.imaginary = true;
+  if (base === 'ExtendedComplexNumbers') result.extendedComplex = true;
+  if (base === 'ComplexNumbers') result.complex = true;
+
+  if (base === 'PositiveNumbers') {
+    result.notZero = true;
+    result.real = true;
+    result.positive = true;
+  }
+  if (base === 'NegativeNumbers') {
+    result.notZero = true;
+    result.real = true;
+    result.negative = true;
+  }
+  if (base === 'NonNegativeNumbers') {
+    result.real = true;
+    result.positive = true;
+  }
+  if (base === 'NonPositiveNumbers') {
+    result.real = true;
+    result.negative = true;
+  }
+
+  if (base === 'PositiveIntegers') {
+    result.notZero = true;
+    result.integer = true;
+    result.positive = true;
+  }
+  if (base === 'NegativeNumbers') {
+    result.notZero = true;
+    result.integer = true;
+    result.negative = true;
+  }
+  if (base === 'NonNegativeNumbers') {
+    result.integer = true;
+    result.positive = true;
+  }
+  if (base === 'NonPositiveNumbers') {
+    result.integer = true;
+    result.negative = true;
+  }
+
   return definedKeys(normalizeFlags(result));
 }

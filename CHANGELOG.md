@@ -13,19 +13,22 @@
   arguments, instead of 1 or more arguments.
 - The `MaybeBooleans` domain has been dropped. Use
   `["Union", "Booleans", "NothingDomain"]` instead.
+- The `ce.defaultDomain` has been dropped. The domain of a symbol is now
+  determined by the context in which it is used, or by the `ce.assume()` method.
+  In some circumstances, the domain of a symbol can be `undefined`.
 
 ### New Features
 
 - Symbolic derivatives of expressions can be calculated using the `D` function.
-  For example, `ce.box(["D", ce.parse("x^2 + 3x + 1"), "x").evaluate().latex`
+  For example, `ce.box(["D", ce.parse("x^2 + 3x + 1"), "x"]).evaluate().latex`
   returns `"2x + 3"`.
 
 ### Improvements
 
 - Some frequently used expressions are now available as predefined constants,
   for example `ce.Pi`, `ce.True` and `ce.Numbers`.
-- Improved type checking and inference, especially for functions with complex or
-  non-numeric signatures.
+- Improved type checking and inference, especially for functions with
+  complicated or non-numeric signatures.
 
 ### Bugs Fixed
 

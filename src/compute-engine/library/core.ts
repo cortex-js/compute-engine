@@ -60,11 +60,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           const code = checkArg(ce, args[0], ce.Strings).string;
           if (code === 'incompatible-domain') {
-            return ce._fn('ErrorCode', [
-              ce.string(code),
-              args[1] ?? 'Anything',
-              args[2] ?? 'Anything',
-            ]);
+            return ce._fn('ErrorCode', [ce.string(code), args[1], args[2]]);
           }
           return ce._fn('ErrorCode', args);
         },
@@ -74,8 +70,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        codomain: (ce, args) =>
-          args[0].symbol ? ce.domain('Symbols') : ce.Anything,
+        codomain: (ce, args) => {
+          const op1 = args[0];
+          if (op1.symbol) return ce.domain('Symbols');
+          if (op1.string) return ce.domain('Strings');
+          if (op1.head === 'Numbers') return ce.domain('Numbers');
+          return undefined;
+        },
         // By definition, for arguments of the canonical expression of
         // `Hold` are not canonicalized.
         canonical: (ce, args) =>
@@ -111,6 +112,10 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Apply: {
       signature: {
         domain: 'Functions',
+        canonical: (ce, args) => {
+          if (args[0].symbol) return ce.box([...args]);
+          return ce._fn('Apply', args);
+        },
         evaluate: (_ce, ops) => apply(ops[0], ops.slice(1)),
       },
     },
@@ -156,12 +161,11 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           if (args.length === 0) return ce.box(['Sequence']);
 
-          ce.pushScope();
-          if (args.length === 1)
-            return canonicalFunctionExpression(args[0]) ?? null;
-          const result = ce._fn('Function', args);
-          ce.popScope();
-          return result;
+          const result =
+            args.length === 1
+              ? canonicalFunctionExpression(args[0])
+              : ce._fn('Function', args);
+          return result ?? null;
         },
         evaluate: (_ce, _args) => {
           // "evaluating" a function expression is not the same
@@ -219,10 +223,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           ops = checkArity(ce, ops, 1);
           if (!ops[0].symbol)
             return ce._fn('Signatures', [
-              ce.error(
-                ['incompatible-domain', 'Symbols', ops[0].domain],
-                ops[0]
-              ),
+              ce.domainError('Symbols', ops[0].domain, ops[0]),
             ]);
           return ce._fn('Signatures', ops);
         },
@@ -261,9 +262,19 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
-        codomain: (_ce, args: BoxedExpression[]) => {
-          if (args[0].domain.isFunction) return args[0].domain;
-          return args[0].domain;
+        codomain: (ce, args: BoxedExpression[]) => {
+          const op1 = args[0];
+          const op2 = args[1];
+          if (op1.string && asSmallInteger(op2) !== null) return 'Integers';
+          if (op1.symbol) {
+            const vh = op1.value?.head;
+            if (vh) {
+              const def = ce.lookupFunction(vh);
+              if (def?.at) return undefined;
+              return 'Symbols';
+            }
+          }
+          return undefined;
         },
         canonical: (ce, args) => {
           const op1 = args[0];
@@ -292,7 +303,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
             const vh = op1.value?.head;
             if (vh) {
               const def = ce.lookupFunction(vh);
-              if (def?.at) return ce._fn('At', [op1, op2.canonical]);
+              if (def?.at) return ce._fn('At', [op1.canonical, op2.canonical]);
             }
             // Maybe a compound symbol
             const sub =

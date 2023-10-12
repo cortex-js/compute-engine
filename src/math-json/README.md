@@ -26,14 +26,15 @@ $ npm install --save @cortex-js/compute-engine
 ```
 
 ```js
-import { parse, serialize } from '@cortex-js/compute-engine';
+import { ComputeEngine } from "@cortex-js/compute-engine";
 
-console.log(parse('\\frac{\\pi}{2}'));
+const ce = new ComputeEngine();
+
+console.log(ce.parse("\\frac{\\pi}{2}"));
 // ➔ ["Divide", "Pi", 2]
 
-console.log(serialize([["InverseFunction", "Sin"], "x"));
+console.log(ce.serialize(["Apply", ["InverseFunction", "Sin"], "x"]));
 // ➔ \sin^{-1}x
-
 ```
 
 # More

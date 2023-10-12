@@ -1,9 +1,9 @@
 import { BoxedExpression, Rational } from '../public';
 
-import Decimal from 'decimal.js';
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 import { asSmallInteger, chop, factorPower, gcd } from './numeric';
 import { bigint, gcd as bigGcd } from './numeric-bigint';
-import Complex from 'complex.js';
 
 export function isRational(x: any | null): x is Rational {
   return x !== null && Array.isArray(x);

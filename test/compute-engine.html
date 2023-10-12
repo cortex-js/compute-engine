@@ -231,7 +231,7 @@
         </div>
 
         <math-field id="mf" class="mathfield" tabindex="0">
-          \operatorname{ND}\left(x \mapsto x, 1.1\right)
+          D(f(x), x)
           <!-- \operatorname{ND}\left(x \mapsto 3x^2 + 5x + 7, 1.1\right) -->
 
           <!-- D\left(\ln x, x\right) -->
@@ -534,7 +534,6 @@
       const mf = document.getElementById("mf");
       const ce = MathfieldElement.computeEngine;
       ce.strict = true;
-      ce.defaultDomain = null;
 
       ce.assign("f(x)", "$$ 3x^2 + 2x + 5$$");
 
@@ -588,8 +587,6 @@
       //     .evaluate()
       //     .toString()
       // );
-
-      // ce.defaultDomain = null;
 
       // const dict = ComputeEngine.getLatexDictionary();
       // const whichDef = dict.filter((x) => x.name === 'Which');

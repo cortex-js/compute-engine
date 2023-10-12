@@ -1,3 +1,5 @@
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
 import {
   gamma as gammaComplex,
   gammaln as lngammaComplex,
@@ -45,8 +47,6 @@ import {
 import { simplifyDivide } from './arithmetic-divide';
 import { processPower, processSqrt } from './arithmetic-power';
 import { applyN, apply2N, canonical } from '../symbolic/utils';
-import Decimal from 'decimal.js';
-import Complex from 'complex.js';
 import {
   checkArg,
   checkArgs,
@@ -462,9 +462,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: 'NumericFunctions',
         // Never called: fastpath
-        // canonical: (ce, args) => {
-        //   return canonicalMultiply(ce, args);
-        // },
+        // canonical: (ce, args) => canonicalMultiply(ce, args)
+        //
         simplify: (ce, ops) => simplifyMultiply(ce, ops),
         evaluate: (ce, ops) => evalMultiply(ce, ops),
         N: (ce, ops) => evalMultiply(ce, ops, 'N'),
@@ -480,7 +479,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         codomain: (ce, args) => {
           const arg = args[0].domain;
-          if (!arg.base) return arg;
+          if (!arg?.base) return arg;
           const negDomain = {
             PositiveNumbers: 'NegativeNumbers',
             NonNegativeNumbers: 'NonPositiveNumbers',
@@ -1016,11 +1015,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Strings', ['OptArg', 'Integers'], 'Integers'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
-          if (!op1.string)
-            return ce.error(
-              ['incompatible-domain', 'Strings', op1.domain],
-              op1
-            );
+          if (!op1.string) return ce.domainError('Strings', op1.domain, op1);
 
           const op2 = ops[1];
           if (op2.isNothing) return ce.number(Number.parseInt(op1.string, 10));
@@ -1054,12 +1049,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const op1 = ops[0];
           const val = asFloat(op1) ?? NaN;
-          if (Number.isNaN(val) || !Number.isInteger(val)) {
-            return ce.error(
-              ['incompatible-domain', 'Integers', op1.domain],
-              op1
-            );
-          }
+          if (Number.isNaN(val) || !Number.isInteger(val))
+            return ce.domainError('Integers', op1.domain, op1);
 
           const op2 = ops[1];
           if (op2.isNothing) {
@@ -1073,12 +1064,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             );
           }
 
-          if (asSmallInteger(op2) === null) {
-            return ce.error(
-              ['incompatible-domain', 'Integers', op2.domain],
-              op2
-            );
-          }
+          if (asSmallInteger(op2) === null)
+            return ce.domainError('Integers', op2.domain, op2);
+
           const base = asSmallInteger(op2)!;
           if (base < 2 || base > 36)
             return ce.error(['out-of-range', 2, 36, base], op2);

@@ -96,11 +96,9 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
 ];
 
 function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
-  let dom: BoxedDomain | null = null;
-  for (let i = 1; i <= args.length - 1; i += 2) {
-    if (!dom) dom = args[i].domain;
-    else dom = widen(dom, args[i].domain);
-  }
+  let dom: BoxedDomain | null | undefined = null;
+  for (let i = 1; i <= args.length - 1; i += 2)
+    dom = widen(dom, args[i].domain);
   return dom ?? ce.domain('NothingDomain');
 }
 
@@ -165,9 +163,7 @@ function canonicalBlock(
       const id = op.op1.symbol!;
       const def = ce.lookupSymbol(id) ?? ce.lookupFunction(id);
       if (!def) {
-        declarations.push(
-          ce._fn('Declare', [op.op1, ce.defaultDomain ?? ce.Anything])
-        );
+        declarations.push(ce._fn('Declare', [op.op1, ce.symbol('Undefined')]));
       }
     } else body.push(invalidateDeclare(op));
   }
