@@ -265,13 +265,14 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         codomain: (ce, args: BoxedExpression[]) => {
           const op1 = args[0];
           const op2 = args[1];
-          if (op1.string && asSmallInteger(op2) !== null) return 'Integers';
+          if (op1.string && asSmallInteger(op2) !== null)
+            return ce.domain('Integers');
           if (op1.symbol) {
             const vh = op1.value?.head;
             if (vh) {
               const def = ce.lookupFunction(vh);
               if (def?.at) return undefined;
-              return 'Symbols';
+              return ce.domain('Symbols');
             }
           }
           return undefined;
