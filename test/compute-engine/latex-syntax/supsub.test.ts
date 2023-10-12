@@ -26,8 +26,12 @@ describe('POWER', () => {
 
 describe('INVERSE FUNCTION', () => {
   test('Valid forms', () => {
-    expect(latex(['InverseFunction', 'Sin'])).toMatchInlineSnapshot(`\\arcsin`);
-    expect(latex(['InverseFunction', 'f'])).toMatchInlineSnapshot(`f^{-1}`);
+    expect(latex(['Apply', ['InverseFunction', 'Sin']])).toMatchInlineSnapshot(
+      `\\arcsin()`
+    );
+    expect(latex(['Apply', ['InverseFunction', 'f']])).toMatchInlineSnapshot(
+      `f^{-1}()`
+    );
   });
 });
 

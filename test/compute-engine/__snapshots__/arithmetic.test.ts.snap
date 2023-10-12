@@ -631,13 +631,10 @@ evaluate  = 18.4
 
 exports[`Max Max 5`] = `
 box       = ["Max", 2.5, -1.1, "foo", 18.4]
-evaluate  = 18.4
+evaluate  = ["Max", 18.4, "foo"]
 `;
 
-exports[`Max Max 6`] = `
-box       = ["Max", "foo", "bar"]
-evaluate  = foo
-`;
+exports[`Max Max 6`] = `["Max", "foo", "bar"]`;
 
 exports[`Min Min 1`] = `
 box       = ["Min", 2.5]
@@ -661,13 +658,10 @@ evaluate  = -1.1
 
 exports[`Min Min 5`] = `
 box       = ["Min", 2.5, -1.1, "foo", 18.4]
-evaluate  = -1.1
+evaluate  = ["Min", -1.1, "foo"]
 `;
 
-exports[`Min Min 6`] = `
-box       = ["Min", "foo", "bar"]
-evaluate  = foo
-`;
+exports[`Min Min 6`] = `["Min", "foo", "bar"]`;
 
 exports[`NEGATE -(+Infinity) 1`] = `{num: "-Infinity"}`;
 
@@ -860,7 +854,9 @@ canonical = ["Sqrt", 2.5, ["Error", "'unexpected-argument'", 1.1]]
 exports[`Sqrt √(3+4i) 1`] = `
 box       = ["Sqrt", ["Complex", 3, 4]]
 evaluate  = ["Complex", 2, 1]
-N-big     = {num: "NaN"}
+eval-big  = {num: "NaN"}
+eval-mach = {num: "NaN"}
+eval-cplx = ["Complex", 2, 1]
 `;
 
 exports[`Sqrt √(3^2) 1`] = `
@@ -935,7 +931,7 @@ eval-mach = 1.5811388300841898
 exports[`Sqrt √123456789.01234567890 1`] = `
 box       = ["Sqrt", "123456789.0123456789"]
 evaluate  = 11111.111061111110994
-N-mach    = 11111.11106111111
+eval-mach = 11111.11106111111
 `;
 
 exports[`Sqrt √12345678901234567890 1`] = `

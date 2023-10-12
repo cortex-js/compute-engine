@@ -49,7 +49,7 @@ describe('SERIALIZING SETS', () => {
       latex(['Intersection', 'Integers', 'RealNumbers'])
     ).toMatchInlineSnapshot(`\\Z\\cap\\R`);
     expect(latex(['Complement', 'ComplexNumber'])).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\mathrm{ComplexNumber}}}{\\in \\bar\\R\\notin \\mathrm{Sets}}^{\\complement}`
+      `\\mathrm{ComplexNumber}^{\\complement}`
     );
     expect(latex(['CartesianProduct'])).toMatchInlineSnapshot(
       `\\error{\\blacksquare}`
@@ -65,7 +65,7 @@ describe('SERIALIZING SETS', () => {
     expect(
       latex(['CartesianProduct', 'Integers', 'RationalNumber'])
     ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\mathtip{\\error{\\mathrm{RationalNumber}}}{\\in \\bar\\R\\notin \\mathrm{Sets}}`
+      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\mathrm{RationalNumber}`
     );
     expect(
       latex(['CartesianProduct', 'Integers', 'Integers', 'Integers'])

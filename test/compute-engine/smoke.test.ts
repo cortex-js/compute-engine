@@ -38,12 +38,11 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-console.info(ce.box(['Triple', 'u', 4, 5]).toString());
-
-// const s1 = ce.parse('5 \\times 2 + 3 \\times 4');
-// // const s1 = ce.parse('3 \\times 4 + 1');
-// console.info(s1.rawJson);
-// console.info(s1.latex);
+console.info(
+  ce.parse(
+    'p(n):=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
+  ).json
+);
 
 // Should distribute: prefer addition over multiplication
 const xp = ce.parse('a\\times(c+d)');
@@ -51,7 +50,7 @@ console.info(xp.rawJson);
 console.info(xp.latex);
 console.info(xp.simplify().toString());
 
-console.info(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
+// console.info(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
 
 // For the remainder of theses tests, assume that the symbol `f` represent a
 // function
@@ -64,11 +63,6 @@ turboEval();
 // perfTestRationals();
 engine.latexOptions.notation = 'engineering';
 engine.latexOptions.avoidExponentsInRange = null;
-
-const rep1 = ce.parse('3.123123123123');
-const rep2 = ce.box('123456789123456789123.123123123', { canonical: false });
-console.info(rep1.latex);
-console.info(rep2.latex);
 
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range
@@ -277,9 +271,9 @@ console.info(
 // Simplify summations:  see https://en.wikipedia.org/wiki/Summation General Identities
 
 // Congruence (mod) notation (a-b is divisible by n, )
-console.info(ce.parse('a\\equiv b(\\mod n)').canonical.json);
+// console.info(ce.parse('a\\equiv b(\\mod n)').canonical.json);
 // -> ["Equal", ["Mod", a, n], ["Mod", b, n]]
-console.info(ce.parse('a\\equiv_{n} b').canonical.json);
+// console.info(ce.parse('a\\equiv_{n} b').canonical.json);
 // -> ["Equal", ["Mod", a, n], ["Mod", b, n]]
 // See https://reference.wolfram.com/language/ref/Mod.html
 // a \equiv b (mod 0) => a = b
@@ -383,15 +377,7 @@ describe('PARSING numbers', () => {
                           ],
                           [
                             "Triple",
-                            [
-                              "Error",
-                              [
-                                "ErrorCode",
-                                "'incompatible-domain'",
-                                "Symbols",
-                                "Anything"
-                              ]
-                            ],
+                            ["Hold", "v_3"],
                             2,
                             ["Floor", ["Sqrt", "v_2"]]
                           ]
@@ -404,8 +390,9 @@ describe('PARSING numbers', () => {
                               "ErrorCode",
                               "'incompatible-domain'",
                               "Symbols",
-                              "Anything"
-                            ]
+                              "Undefined"
+                            ],
+                            ["Subscript", "v", 2]
                           ],
                           2,
                           "v_1"
@@ -421,7 +408,13 @@ describe('PARSING numbers', () => {
               "Triple",
               [
                 "Error",
-                ["ErrorCode", "'incompatible-domain'", "Symbols", "Anything"]
+                [
+                  "ErrorCode",
+                  "'incompatible-domain'",
+                  "Symbols",
+                  "Undefined"
+                ],
+                ["Subscript", "v", 1]
               ],
               2,
               ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
@@ -847,10 +840,12 @@ describe('NUMERIC EVALUATION arithmetic', () => {
 
 describe('NUMERIC EVALUATION trigonometry', () => {
   test(`N('\\sin\\pi')`, () => expect(NToJson('\\sin\\pi')).toEqual(0));
-  test(`N('\\cos\\frac{\\pi}{7}')`, () =>
+
+  test(`N('\\cos\\frac{\\pi}{7}')`, () => {
     expect(NToJson('\\cos\\frac{\\pi}{7}')).toMatch(
       '0.9009688679024191262361023195074450511659191621318571500535624231994324204279399655013614547185124153'
-    ));
+    );
+  });
 });
 
 function perfTestRationals() {

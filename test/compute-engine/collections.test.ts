@@ -579,22 +579,9 @@ describe('ITERABLE OPERATIONS', () => {
     `));
 
   test('Map', () =>
-    expect(evaluate(['Map', list, ['Plus', '_', 1]])).toMatchInlineSnapshot(`
-      [
-        "Map",
-        ["List", 7, 13, 5, 19, 2, 3, 11],
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["FunctionOf", ["VarArg", "Anything"], "Anything"],
-            "ExtendedRealNumbers"
-          ],
-          ["Plus", "_", 1]
-        ]
-      ]
-    `));
+    expect(evaluate(['Map', list, ['Plus', '_', 1]])).toMatchInlineSnapshot(
+      `["Map", ["List", 7, 13, 5, 19, 2, 3, 11], ["Plus", "_", 1]]`
+    ));
 
   test('Filter', () =>
     expect(evaluate(['Filter', list, ['Greater', '_', 10]]))
@@ -616,41 +603,16 @@ describe('ITERABLE OPERATIONS', () => {
     `));
 
   test('Reduce', () =>
-    expect(evaluate(['Reduce', list, ['Plus', '_1', '_2']]))
-      .toMatchInlineSnapshot(`
-      [
-        "Reduce",
-        ["List", 7, 13, 5, 19, 2, 3, 11],
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["FunctionOf", ["VarArg", "Anything"], "Anything"],
-            "ExtendedRealNumbers"
-          ],
-          ["Plus", "_1", "_2"]
-        ]
-      ]
-    `));
+    expect(
+      evaluate(['Reduce', list, ['Plus', '_1', '_2']])
+    ).toMatchInlineSnapshot(
+      `["Reduce", ["List", 7, 13, 5, 19, 2, 3, 11], ["Plus", "_1", "_2"]]`
+    ));
 
   test('Reduce', () =>
-    expect(evaluate(['Reduce', list, 'Plus'])).toMatchInlineSnapshot(`
-      [
-        "Reduce",
-        ["List", 7, 13, 5, 19, 2, 3, 11],
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            ["FunctionOf", ["VarArg", "Anything"], "Anything"],
-            "ExtendedRealNumbers"
-          ],
-          "Plus"
-        ]
-      ]
-    `));
+    expect(evaluate(['Reduce', list, 'Plus'])).toMatchInlineSnapshot(
+      `["Reduce", ["List", 7, 13, 5, 19, 2, 3, 11], "Plus"]`
+    ));
 
   test('Zip', () =>
     expect(evaluate(['Zip', list1, list2])).toMatchInlineSnapshot(
