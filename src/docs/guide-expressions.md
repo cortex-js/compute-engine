@@ -4,7 +4,7 @@ permalink: /compute-engine/guides/expressions/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 ---
 
@@ -19,8 +19,8 @@ They are wrapped in a JavaScript object, a process called **boxing**, and the
 resulting expressions are **Boxed Expressions**.
 
 Boxed Expressions improve performance by implementing caching to avoid
-repetitive calculations. They also ensure that expressions are valid and
-in a standard format.
+repetitive calculations. They also ensure that expressions are valid and in a
+standard format.
 
 Unlike the plain data types used by JSON, Boxed Expressions allow an IDE, such
 as VSCode Studio, to provide suitable hints in the editor regarding which
@@ -48,7 +48,7 @@ expr = ce.box({ num: "+Infinity" });
 console.log(expr.latex);
 // ➔ +\infty
 
-expr = ce.box(['Add', 3, 'x']);
+expr = ce.box(["Add", 3, "x"]);
 console.log(expr.head);
 // ➔ "Add"
 
@@ -58,7 +58,6 @@ console.log(expr.isPositive);
 
 By default, `ce.box()` returns a canonical expression. See
 [Canonical Expressions](#canonical) for more info.
-
 
 **To create a Boxed Expression from a LaTeX string**, call the `ce.parse()`
 function.
@@ -75,13 +74,12 @@ console.log(expr.json);
 By default, `ce.parse()` returns a canonical expression. See
 [Canonical Expressions](#canonical-expressions) for more info.
 
-
 **To get a Boxed Expression representing the content of a MathLive mathfield**
 use the `mf.expression` property:
 
 ```js
-const mf = document.getElementById('input');
-mf.value = '\\frac{10}{5}';
+const mf = document.getElementById("input");
+mf.value = "\\frac{10}{5}";
 const expr = mf.expression;
 console.log(expr.evaluate().latex);
 // ➔ 2
@@ -89,26 +87,27 @@ console.log(expr.evaluate().latex);
 
 ## Unboxing
 
-**To access the MathJSON expression of a boxed expression as plain JSON**, 
-use the `expr.json` property. This property is an "unboxed" version of the
+**To access the MathJSON expression of a boxed expression as plain JSON**, use
+the `expr.json` property. This property is an "unboxed" version of the
 expression.
 
 ```js
-const expr = ce.box(['Add', 3, 'x']);
+const expr = ce.box(["Add", 3, "x"]);
 console.log(expr.json);
 // ➔ ["Add", 3, "x"]
 ```
 
-**To customize the format of the MathJSON expression returned by `expr.json`** 
+**To customize the format of the MathJSON expression returned by `expr.json`**
 use the `ce.jsonSerializationOptions` property.
 
 Use this option to control:
+
 - which metadata, if any, should be included
 - whether to use shorthand notation
-- to exclude some functions. 
+- to exclude some functions.
 
-See [JsonSerializationOptions](/docs/compute-engine/?q=JsonSerializationOptions) for
-more info about the formatting options available.
+See [JsonSerializationOptions](/docs/compute-engine/?q=JsonSerializationOptions)
+for more info about the formatting options available.
 
 ```ts
 const expr = ce.parse("2 + \\frac{q}{p}");
@@ -137,12 +136,12 @@ console.log(expr.json);
 The **canonical form** of an expression is a conventional way of writing an
 expression.
 
-For example, the canonical form of a fraction of two integers is a reduced 
-rational number, written as a tuple of two integers, such that the GCD of
-the numerator and denominator is 1, and the denominator is positive.
+For example, the canonical form of a fraction of two integers is a reduced
+rational number, written as a tuple of two integers, such that the GCD of the
+numerator and denominator is 1, and the denominator is positive.
 
 ```js
-const expr = ce.parse('\\frac{30}{-50}');
+const expr = ce.parse("\\frac{30}{-50}");
 console.log(expr.json);
 // ➔ ["Rational", -3, 5]
 ```
@@ -151,7 +150,7 @@ The canonical form of an addition or mulipication will have its arguments
 ordered in a canonical way.
 
 ```js
-const expr = ce.parse('2+x+\\pi+\\sqrt2+1');
+const expr = ce.parse("2+x+\\pi+\\sqrt2+1");
 console.log(expr.json);
 // ➔ ["Add", "Pi", ["Sqrt", 2], "x", 1, 2]
 ```
@@ -159,14 +158,13 @@ console.log(expr.json);
 {% readmore "/compute-engine/guides/canonical-form/" %} Read more about the
 <strong>Canonical Form</strong> {% endreadmore %}
 
-
 By default, `ce.box()` and `ce.parse()` produce a canonical expression.
 
 **To get a non-canonical expression instead**, use
 `ce.box(expr, {canonical: false})` or `ce.parse(latex, {canonical: false})`.
 
 ```js
-const expr = '\\frac{30}{-50}';
+const expr = "\\frac{30}{-50}";
 
 ce.parse(expr);
 // canonical form ➔ ["Rational", -3, 5]
@@ -175,10 +173,8 @@ ce.parse(expr, { canonical: false });
 // non-canonical form ➔ ["Divide", 30, -50]
 ```
 
-
 **To obtain the canonical representation of an expression**, use
 `expr.canonical`.
-
 
 A non-canonical expression may include errors as a result of parsing from LaTeX,
 if the LaTeX input contained LaTeX syntax errors.
@@ -188,9 +184,8 @@ expression, for example `["Divide", 2, 5, 6]` (three arguments instead of two),
 `["Add", 2, "True"]` (mismatched argument domain, expected a number but got a
 boolean).
 
-The canonical form of an expression which is not valid will
-include one or more `["Error"]` expressions indicating the nature of the
-problem.
+The canonical form of an expression which is not valid will include one or more
+`["Error"]` expressions indicating the nature of the problem.
 
 **To check if an expression contains errors** use `expr.isValid`.
 
@@ -216,11 +211,11 @@ a symbol. But if an assumption about the symbol is made later, or a value
 assigned to it, then `expr.isPositive` may take a different value.
 
 ```js
-const expr = ce.box('x');
+const expr = ce.box("x");
 console.log(expr.isPositive);
 // ➔ undefined
 
-ce.assume('x > 0');
+ce.assume("x > 0");
 console.log(expr.isPositive);
 // ➔ true
 ```
@@ -281,7 +276,7 @@ value.
 
 Sometimes, things go wrong.
 
-When something goes wrong the Compute Engine uses an 
+When something goes wrong the Compute Engine uses an
 `["Error", <cause>, <location>]` expression.
 
 The `<cause>` argument provides details about the nature of the problem. This
@@ -361,10 +356,10 @@ property.
 </div>
 
 ```ts
-console.log(ce.parse('\\oops').json);
+console.log(ce.parse("\\oops").json);
 // ➔ ["Error", ["ErrorCode","'unexpected-command'","'\\oops'"], ["Latex","'\\oops'"]
 
-console.log(ce.parse('\\oops{bar}+2').json);
+console.log(ce.parse("\\oops{bar}+2").json);
 // ➔  ["Add",
 //        ["Error",
 //          ["ErrorCode","'unexpected-command'","'\\oops'"],
@@ -373,19 +368,19 @@ console.log(ce.parse('\\oops{bar}+2').json);
 //        2
 //    ]
 
-console.log(ce.parse('\\begin{oops}\\end{oops}').json);
+console.log(ce.parse("\\begin{oops}\\end{oops}").json);
 // ➔ ["Error",["ErrorCode","'unknown-environment'",""oops""],["Latex","'\\\\begin{oops}\\\\end{oops}'"]
 
-console.log(ce.parse('1+\\sqrt').json);
+console.log(ce.parse("1+\\sqrt").json);
 // ➔ ["Add", 1 ,["Sqrt", ["Error", ""missing""]]]
 
-console.log(ce.parse('1+\\frac{2}').json);
+console.log(ce.parse("1+\\frac{2}").json);
 // ➔ ["Add", 1, ["Divide", 2, ["Error",""missing""]]]
 
-console.log(ce.parse('1+(2=2)+2').json);
+console.log(ce.parse("1+(2=2)+2").json);
 // ➔ ["Add", 1, ["Delimiter", ["Equal", 2, 2]]]
 
-console.log(ce.parse('1+(2=2)+3').canonical.json);
+console.log(ce.parse("1+(2=2)+3").canonical.json);
 // ➔ ["Add",
 //      1,
 //      ["Error",
@@ -395,19 +390,19 @@ console.log(ce.parse('1+(2=2)+3').canonical.json);
 //      3
 //    ]
 
-console.log(ce.parse('\\times 3').json);
+console.log(ce.parse("\\times 3").json);
 // ➔ ["Sequence", ["Error", ["ErrorCode", "'unexpected-operator'", "'\\times'"], ["Latex","'\\times'"]], 3]
 
-console.log(ce.parse('x__+1').json);
+console.log(ce.parse("x__+1").json);
 // ➔ ["Add", ["Subscript", "x", ["Error","'syntax-error'", ["Latex","'_'"]]], 1]
 
-console.log(ce.parse('x_{a').json);
+console.log(ce.parse("x_{a").json);
 // ➔ ["Subscript", "x", ["Error", "'expected-closing-delimiter'", ["Latex","'{a'"]]]
 
-console.log(ce.parse('1()').json);
+console.log(ce.parse("1()").json);
 // ➔ ["Multiply",1,["Error","'expected-expression'",["Latex","'()'"]]]
 
-console.log(ce.parse('x@2').json);
+console.log(ce.parse("x@2").json);
 // ➔ ["Sequence", "x", ["Error", ["ErrorCode", "'unexpected-token'", "'@'"], ["Latex", "'@2'"]]]
 ```
 

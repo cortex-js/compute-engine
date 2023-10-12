@@ -58,9 +58,7 @@ ce.declare("f", { signature: { domain: "Functions" } });
 ```
 
 By default, when a new identifier is encountered in an expression, it is
-declared automatically with a domain of `ce.defaultDomain` and no value. To
-prevent this behavior, set `ce.defaultDomain` to `null`. An error will be
-produced instead when an unknown identifier is encountered.
+declared automatically with no domain and no value.
 
 {% readmore "/compute-engine/guides/evaluate/#default-domain" %} Read more about
 the **default domain**. {% endreadmore %}

@@ -39,8 +39,8 @@ head:
 **To change the value or domain of a symbol**, use the `value` and `domain`
 properties of the symbol.
 
-A symbol does not have to be declared before it can be used. A previously
-unknown symbol has a domain of `ce.defaultDomain` and no value.
+A symbol does not have to be declared before it can be used. The domain of a
+symbol will be inferred based on its usage or its value.
 
 <code-playground layout="stack" show-line-numbers autorun="never">
 <pre slot="javascript">
@@ -102,37 +102,30 @@ console.log("pi = ", smallPi.numericValue, "=", bigPi.numericValue);
 
 ## Automatic Declaration of Symbols
 
-If `ce.defaultDomain` is not `null`, an unknown symbol is automatically declared
-when it is first used in an expression.
+An unknown symbol is automatically declared when it is first used in an
+expression.
 
-The new definition has a domain of `ce.defaultDomain` and no value associated
-with it, so the symbol will be an **unknwon**.
-
-By default, `defaultDomain` is `"ExtendedRealNumbers"` so any unknown variable
-is automatically assumed to be a real number. Use `ce.declare()` to explictly
-specify the domain of a symbol.
+The new definition has a domain of `undefined` and no value associated with it,
+so the symbol will be an **unknwon**.
 
 ```js
 const symbol = ce.box("m"); // m for mystery
-console.log(symbol.domain.symbol);
-// ➔ "ExtendedRealNumbers"
+console.log(symbol.domain);
+// ➔ undefined
 
 symbol.value = 5;
 console.log(symbol.numericValue);
 // ➔ 5
 ```
 
-If `ce.defaultDomain` is `null`, and no definition exist for the symbol, the
-symbol is **unbound** (no name binding). This will limit the usefulness of the
-symbol and the symbol will evaluate to an `["Error"]` expression.
-
 ## Forgetting a Symbol
 
 **To _reset_ what is known about a symbol** use the `ce.forget()` function.
 
-The `ce.forget()` function will remove any [assumptions](/compute-engine/guides/assumptions)
-associated with a symbol, and remove its value. Howeve, the symbol
-will remained declared, since other expressions may depend on it.
+The `ce.forget()` function will remove any
+[assumptions](/compute-engine/guides/assumptions) associated with a symbol, and
+remove its value. Howeve, the symbol will remained declared, since other
+expressions may depend on it.
 
 **To forget about a specific symbol**, pass the name of the symbol as an
 argument to `ce.forget()`.
@@ -141,5 +134,5 @@ argument to `ce.forget()`.
 without any arguments.
 
 Note that only symbols in the current scope are forgotten. If assumptions about
-the symbol existed in a previous scope, those assumptions will be in effect
-when returning to the previous scope.{.notice--info}
+the symbol existed in a previous scope, those assumptions will be in effect when
+returning to the previous scope.{.notice--info}
