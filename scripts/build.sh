@@ -118,7 +118,7 @@ if [ "$BUILD" = "production" ]; then
 
     # Run test suite
     # printf "$BASENAME$DOT Running test suite"
-    # npx jest --config ./config/jest.config.js ./test --silent --reporters jest-silent-reporter
+    # npx jest --config ./config/jest.config.cjs ./test --silent --reporters jest-silent-reporter
     # echo -e "$LINECLEAR$BASENAME$CHECK$DIM Test suite complete$RESET"
 fi
 

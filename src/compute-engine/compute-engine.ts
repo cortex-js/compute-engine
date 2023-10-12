@@ -1524,10 +1524,7 @@ export class ComputeEngine implements IComputeEngine {
       ? this.domain(expectedDomain)
       : this.symbol(expectedDomain);
 
-    const actual =
-      actualDomain && isDomain(actualDomain)
-        ? this.domain(actualDomain)
-        : this.symbol(actualDomain ?? 'Undefined');
+    const actual = actualDomain ? actualDomain : this.symbol('Undefined');
 
     return this.error(['incompatible-domain', expected, actual], where);
   }
