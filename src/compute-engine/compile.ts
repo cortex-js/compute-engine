@@ -8,6 +8,7 @@ import {
   gcd,
   lcm,
   gammaln,
+  limit,
 } from './numerics/numeric';
 import { BoxedExpression } from './public';
 
@@ -65,6 +66,9 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Gcd: '_SYS.gcd',
   // Math.hypot
   Lcm: '_SYS.lcm',
+  Limit: (args, compile) => {
+    return `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`;
+  },
   Ln: 'Math.log',
   Log: 'Math.log10',
   LogGamma: '_SYS.lngamma',
@@ -91,7 +95,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   },
   Random: 'Math.random',
   Round: 'Math.round',
-  Sqaure: (args, compile) => {
+  Square: (args, compile) => {
     const arg = args[0];
     if (arg === null) throw new Error('Square: no argument');
     return `Math.pow(${compile(arg)}, 2)`;
@@ -214,6 +218,7 @@ export class ComputeEngineFunction extends Function {
     gcd: gcd,
     lcm: lcm,
     chop: chop,
+    limit: limit,
   };
   constructor(body) {
     super('_SYS', '_', `return ${body}`);
@@ -308,6 +313,15 @@ function compileExpr(
         .join(` ${op[0]} `);
     }
     return op[1] < prec ? `(${resultStr})` : resultStr;
+  }
+
+  if (h === 'Function') {
+    // Anonymous function
+    const params = args.slice(1).map((x) => x.symbol);
+    return `((${params.join(', ')}) => ${compile(args[0], {
+      ...target,
+      var: (id) => (params.includes(id) ? id : target.var(id)),
+    })})`;
   }
 
   const fn = target.functions?.(h);
