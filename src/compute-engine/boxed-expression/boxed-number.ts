@@ -229,8 +229,12 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   isEqual(rhs: BoxedExpression): boolean {
-    // For numbers, mathematical equality is the same as structural equality
-    return this.isSame(rhs);
+    // Note: this is not the same as `isSame()`: we want 0.09 and [9,100]
+    // to be considered equal.
+    if (this === rhs) return true;
+    if (!(rhs instanceof BoxedNumber)) return false;
+    const s = signDiff(this, rhs);
+    return s === 0;
   }
 
   match(
