@@ -796,8 +796,40 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     identifierTrigger: 'lcm',
     kind: 'function',
   },
-  { name: 'Max', identifierTrigger: 'max', kind: 'function' },
-  { name: 'Min', identifierTrigger: 'min', kind: 'function' },
+  { identifierTrigger: 'max', kind: 'function', parse: 'Max' },
+  { identifierTrigger: 'min', kind: 'function', parse: 'Min' },
+  { name: 'Max', latexTrigger: '\\max', kind: 'function' },
+  { name: 'Min', latexTrigger: '\\min', kind: 'function' },
+  { name: 'Supremum', latexTrigger: '\\sup', kind: 'function' },
+  { name: 'Infimum', latexTrigger: '\\inf', kind: 'function' },
+
+  {
+    name: 'Limit',
+    latexTrigger: '\\lim',
+    kind: 'expression',
+    parse: (parser: Parser) => {
+      if (!parser.match('_')) return undefined;
+      const base = parser.parseGroup();
+      if (head(base) !== 'To') return undefined;
+      const expr = parser.parseArguments('implicit');
+      if (!expr) return undefined;
+      return ['Limit', ['Function', expr[0], op(base, 1)], op(base, 2)];
+    },
+    serialize: (serializer, expr) => {
+      const fn = op(expr, 1);
+      const fnVar = op(fn, 2);
+      const to = op(expr, 2);
+      return joinLatex([
+        '\\lim_{',
+        serializer.serialize(fnVar),
+        '\\to',
+        serializer.serialize(to),
+        '}',
+        serializer.serialize(op(fn, 1)),
+      ]);
+    },
+  },
+
   {
     name: 'MinusPlus',
     latexTrigger: ['\\mp'],

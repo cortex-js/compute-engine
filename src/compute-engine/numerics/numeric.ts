@@ -1,6 +1,7 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { BoxedExpression } from '../public';
+import { extrapolate } from './richardson';
 
 export const MACHINE_PRECISION_BITS = 53;
 export const MACHINE_PRECISION = Math.log10(
@@ -665,4 +666,25 @@ export function monteCarloEstimate(
   }
 
   return (sum / n) * (b - a);
+}
+
+/**
+ *
+ * @param f
+ * @param x
+ * @param dir Direction of approach: > 0 for right, < 0 for left, 0 for both
+ * @returns
+ */
+export function limit(f: (x: number) => number, x: number, dir = 1): number {
+  if (dir === 0) {
+    // Approach from both sides
+    const left = limit(f, x, -1);
+    const right = limit(f, x, 1);
+    if (left === undefined || right === undefined) return NaN;
+    if (Math.abs(left - right) > 1e-5) return NaN;
+    return (left + right) / 2;
+  }
+
+  const [val, err] = extrapolate(f, x, { step: dir > 0 ? 1 : -1 });
+  return val;
 }

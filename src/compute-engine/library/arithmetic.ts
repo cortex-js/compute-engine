@@ -18,6 +18,7 @@ import {
   fromDigits,
   gamma,
   gammaln,
+  limit,
 } from '../numerics/numeric';
 import {
   isBigRational,
@@ -53,6 +54,7 @@ import {
   checkNumericArgs,
 } from '../boxed-expression/validate';
 import { flattenSequence } from '../symbolic/flatten';
+import { applicable } from '../function-utils';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic functions that should be considered:
@@ -898,20 +900,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (ops.length === 1) return ops[0];
           return ce.fn('Max', ops);
         },
-        evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce.NegativeInfinity;
-
-          let result: BoxedExpression | undefined = undefined;
-          const rest: BoxedExpression[] = [];
-
-          for (const op of ops) {
-            if (!op.isNumber || op.numericValue === undefined) rest.push(op);
-            else if (!result || op.isGreater(result)) result = op;
-          }
-          if (rest.length > 0)
-            return ce.box(result ? ['Max', result, ...rest] : ['Max', ...rest]);
-          return result ?? ce.NaN;
-        },
+        evaluate: (ce, ops) => processMinMax(ce, ops, 'Max'),
       },
     },
 
@@ -922,24 +911,41 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
         simplify: (ce, ops) => {
+          if (ops.length === 0) return ce.PositiveInfinity;
+          if (ops.length === 1) return ops[0];
+          return ce.fn('Min', ops);
+        },
+        evaluate: (ce, ops) => processMinMax(ce, ops, 'Min'),
+      },
+    },
+
+    Supremum: {
+      description: 'Like Max, but defined for open sets',
+      complexity: 1200,
+
+      signature: {
+        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        simplify: (ce, ops) => {
           if (ops.length === 0) return ce.NegativeInfinity;
           if (ops.length === 1) return ops[0];
           return ce.fn('Min', ops);
         },
-        evaluate: (ce, ops) => {
-          if (ops.length === 0) return ce.NegativeInfinity;
+        evaluate: (ce, ops) => processMinMax(ce, ops, 'Supremum'),
+      },
+    },
 
-          let result: BoxedExpression | undefined = undefined;
-          const rest: BoxedExpression[] = [];
+    Infimum: {
+      description: 'Like Min, but defined for open sets',
+      complexity: 1200,
 
-          for (const op of ops) {
-            if (!op.isNumber || op.numericValue === undefined) rest.push(op);
-            else if (!result || op.isLess(result)) result = op;
-          }
-          if (rest.length > 0)
-            return ce.box(result ? ['Min', result, ...rest] : ['Min', ...rest]);
-          return result ?? ce.NaN;
+      signature: {
+        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        simplify: (ce, ops) => {
+          if (ops.length === 0) return ce.PositiveInfinity;
+          if (ops.length === 1) return ops[0];
+          return ce.fn('Min', ops);
         },
+        evaluate: (ce, ops) => processMinMax(ce, ops, 'Infimum'),
       },
     },
 
@@ -988,6 +994,68 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'simplify'),
         evaluate: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'evaluate'),
         N: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'N'),
+      },
+    },
+
+    // Limits
+    Limit: {
+      description: 'Limit of a function',
+      complexity: 5000,
+      hold: 'all',
+      signature: {
+        domain: [
+          'FunctionOf',
+          'Anything',
+          'Numbers',
+          ['OptArg', 'Numbers'],
+          'Numbers',
+        ],
+        N: (ce, ops) => {
+          const [f, x, dir] = ops;
+          const target = asFloat(x.N());
+          if (target === null) return undefined;
+          const fn = applicable(f);
+          return ce.number(
+            limit(
+              (x) => {
+                let y = fn([ce.number(x)])?.valueOf();
+                return typeof y === 'number' ? y : Number.NaN;
+              },
+              target,
+              dir ? asFloat(dir) ?? 1 : 1
+            )
+          );
+        },
+      },
+    },
+    NLimit: {
+      description: 'Numerical approximation of the limit of a function',
+      complexity: 5000,
+      hold: 'all',
+      signature: {
+        domain: [
+          'FunctionOf',
+          'Anything',
+          'Numbers',
+          ['OptArg', 'Numbers'],
+          'Numbers',
+        ],
+        evaluate: (ce, ops) => {
+          const [f, x, dir] = ops;
+          const target = asFloat(x.N());
+          if (target === null) return undefined;
+          const fn = applicable(f);
+          return ce.number(
+            limit(
+              (x) => {
+                let y = fn([ce.number(x)])?.valueOf();
+                return typeof y === 'number' ? y : Number.NaN;
+              },
+              target,
+              dir ? asFloat(dir) ?? 1 : 1
+            )
+          );
+        },
       },
     },
   },
@@ -1107,4 +1175,27 @@ function processAbs(
   if (arg.isNonNegative) return arg;
   if (arg.isNegative) return ce.neg(arg);
   return undefined;
+}
+
+function processMinMax(
+  ce: IComputeEngine,
+  ops: BoxedExpression[],
+  mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
+): BoxedExpression {
+  const upper = mode === 'Max' || mode === 'Supremum';
+  if (ops.length === 0)
+    return upper ? ce.NegativeInfinity : ce.PositiveInfinity;
+
+  let result: BoxedExpression | undefined = undefined;
+  const rest: BoxedExpression[] = [];
+
+  for (const op of ops) {
+    if (!op.isNumber || op.numericValue === undefined) rest.push(op);
+    else if (!result) result = op;
+    else if ((upper && op.isGreater(result)) || (!upper && op.isLess(result)))
+      result = op;
+  }
+  if (rest.length > 0)
+    return ce.box(result ? [mode, result, ...rest] : [mode, ...rest]);
+  return result ?? (upper ? ce.NegativeInfinity : ce.PositiveInfinity);
 }

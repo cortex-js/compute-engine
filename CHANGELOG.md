@@ -1,6 +1,29 @@
-## 0.17.0 
+## [Unreleased]
 
- **Release Date:** 2023-10-12
+### New Features
+
+- Expanded LaTeX dictionary with `\max`, `\min`, `\sup`, `\inf` and `\lim`
+  functions
+- Added `Supremum` and `Infimum` functions
+- Added numerical evaluation of limits with `Limit` functions and `NLimit`
+  functions, using a Richardson Extrapolation.
+
+```js
+console.info(ce.parse("\\lim_{x\\to0} \\frac{\\sin x}{x}").N().json);
+// -> 1
+
+console.info(
+  ce.box(["NLimit", ["Divide", ["Sin", "_"], "_"], 0]).evaluate().json
+);
+// -> 1
+
+console.info(ce.parse("\\lim_{x\\to \\infty} \\cos \\frac{1}{x}").N().json);
+// -> 1
+```
+
+## 0.17.0
+
+**Release Date:** 2023-10-12
 
 ### Breaking Changes
 

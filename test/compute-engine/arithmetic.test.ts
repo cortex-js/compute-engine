@@ -507,3 +507,47 @@ describe('Log Invalid', () => {
   expect(checkJson(['Ln', "'string'"])).toMatchSnapshot();
   expect(checkJson(['Ln', 3, 4])).toMatchSnapshot();
 });
+
+describe('Limit', () => {
+  expect(
+    ce
+      .box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+      .evaluate()
+      .valueOf()
+  ).toMatchInlineSnapshot(
+    `["Limit",["Function",["Divide",["Sin","x"],"x"],"x"],0]`
+  );
+
+  expect(
+    ce
+      .box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+      .N()
+      .valueOf()
+  ).toMatchInlineSnapshot(`1`);
+
+  expect(
+    ce
+      .box(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+      .evaluate()
+      .valueOf()
+  ).toMatchInlineSnapshot(`1`);
+
+  expect(
+    ce
+      .box(['NLimit', ['Divide', ['Sin', '_'], '_'], 0])
+      .evaluate()
+      .valueOf()
+  ).toMatchInlineSnapshot(`1`);
+
+  // Should be "1"
+  expect(
+    ce
+      .box([
+        'NLimit',
+        ['Function', ['Cos', ['Divide', 1, 'x']], 'x'],
+        'Infinity',
+      ])
+      .evaluate()
+      .valueOf()
+  ).toMatchInlineSnapshot(`1`);
+});
