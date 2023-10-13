@@ -112,7 +112,6 @@ functions{% endreadmore %}
 
 [&quot;**BaseForm**&quot;, _value:integer_, _base_]{.signature}
 
-
 Format an _integer_ in a specific _base_, such as hexadecimal or binary.
 
 If no _base_ is specified, use base-10.
@@ -124,6 +123,7 @@ The sign of _integer_ is ignored.
 
 ```json example
 ["Latex", ["BaseForm", 42, 16]]
+
 // ➔ (\text(2a))_{16}
 ```
 
@@ -136,7 +136,7 @@ String(BaseForm(42, 16))
 
 {% enddef %}
 
-{% def "Clamp" %} 
+{% def "Clamp" %}
 
 [&quot;**Clamp**&quot;, _value_]{.signature}
 
@@ -146,8 +146,8 @@ String(BaseForm(42, 16))
 - If `value` is greater than `upper`, evaluate to `upper`
 - Otherwise, evaluate to `value`
 
-If `lower`and `upper`are not provided, they take the default values of -1
-and +1.
+If `lower`and `upper`are not provided, they take the default values of -1 and
++1.
 
 ```json example
 ["Clamp", 0.42]
@@ -162,12 +162,47 @@ and +1.
 
 {% enddef %}
 
-{% def "Max" %} 
+{% def "Limit" %}
+
+[&quot;**Limit**&quot;, _fn_, _value_]{.signature}
+
+Evaluate the expression _fn_ as it approaches the value _value_.
+
+```json example
+["Limit", ["Divide", ["Sin", "_"], "_"], 0]
+
+["Limit", ["Function", ["Divide", ["Sin", "x"], "x"], "x"], 0]
+```
+
+This function evaluates to a numerical approximation when using `expr.N()`. To
+get a numerical evaluation with `expr.evaluate()`, use `NLimit`.
+
+{% enddef %}
+
+{% def "NLimit" %}
+
+[&quot;**NLimit**&quot;, _fn_, _value_]{.signature}
+
+Evaluate the expression _fn_ as it approaches the value _value_.
+
+```json example
+["NLimit", ["Divide", ["Sin", "_"], "_"], 0]
+// ➔ 1
+
+["NLimit", ["Function", ["Divide", ["Sin", "x"], "x"], "x"], 0]
+// ➔ 1
+```
+
+The numerical approximation is computed using a Richardson extrapolation
+algorithm.
+
+{% enddef %}
+
+{% def "Max" %}
 
 [&quot;**Max**&quot;, _x1_, _x2_, ...]{.signature}
 
 [&quot;**Max**&quot;, _list_]{.signature}
-
 
 If all the arguments are real numbers, excluding `NaN`, evaluate to the largest
 of the arguments.
@@ -184,7 +219,7 @@ equal to the largest real number.
 
 {% enddef %}
 
-{% def "Min" %} 
+{% def "Min" %}
 
 [&quot;**Max**&quot;, _x1_, _x2_, ...]{.signature}
 
@@ -198,7 +233,7 @@ equal to the smallest real number.
 
 {% enddef %}
 
-{% def "Rational" %} 
+{% def "Rational" %}
 
 [&quot;**Rational**&quot;, _n_]{.signature}
 
