@@ -183,13 +183,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
   {
     name: 'Assign',
-    kind: 'function',
     latexTrigger: '\\coloneqq',
+    kind: 'infix',
+    associativity: 'right',
     precedence: 260,
-    parse: (parser: Parser, lhs: Expression) => {
-      const rhs = parser.parseExpression({ minPrec: 260 }) ?? 'Nothing';
-      return ['Assign', lhs, rhs];
-    },
+    // parse: (parser: Parser, lhs: Expression) => {
+    //   const rhs = parser.parseExpression({ minPrec: 260 }) ?? 'Nothing';
+    //   return ['Assign', lhs, rhs];
+    // },
     serialize: (serializer: Serializer, expr: Expression): string => {
       return joinLatex([
         serializer.serialize(op(expr, 1)),
@@ -199,20 +200,30 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
-    kind: 'function',
-    latexTrigger: ':=', // \coloneqq
-    parse: (parser: Parser, lhs: Expression) => {
-      const rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
-      return ['Assign', lhs, rhs];
-    },
+    latexTrigger: [':', '='],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 260,
+    parse: 'Assign',
   },
+  // {
+  //   kind: 'function',
+  //   latexTrigger: ':=', // \coloneqq
+  //   parse: (parser: Parser, lhs: Expression) => {
+  //     const rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
+  //     return ['Assign', lhs, rhs];
+  //   },
+  // },
   {
-    kind: 'function',
     latexTrigger: '\\colonequals', // \coloneqq
-    parse: (parser: Parser, lhs: Expression) => {
-      const rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
-      return ['Assign', lhs, rhs];
-    },
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 260,
+    parse: 'Assign',
+    // parse: (parser: Parser, lhs: Expression) => {
+    //   const rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
+    //   return ['Assign', lhs, rhs];
+    // },
   },
 
   {

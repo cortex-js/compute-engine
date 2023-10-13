@@ -21,6 +21,25 @@ console.info(ce.parse("\\lim_{x\\to \\infty} \\cos \\frac{1}{x}").N().json);
 // -> 1
 ```
 
+- Added `Assign` and `Declare` functions to assign values to symbols and declare
+  symbols with a domain.
+
+- `Block` evaluations with local variables work now. For example:
+
+```js
+ce.box(["Block", ["Assign", "c", 5], ["Multiply", "c", 2]]).evaluate().json;
+// -> 10
+```
+
+- You can return from the middle of a block with the `Return` statement:
+
+```js
+ce
+  .box(["Block", ["Assign", "c", 5], ["Return", "c"], ["Multiply", "c", 2]])
+  .evaluate().json;
+// -> 5
+```
+
 ## 0.17.0
 
 **Release Date:** 2023-10-12

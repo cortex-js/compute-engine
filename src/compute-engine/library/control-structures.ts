@@ -154,19 +154,16 @@ function canonicalBlock(
   // Empty block?
   if (ops.length === 0) return null;
 
+  ce.pushScope();
+
   const declarations: BoxedExpression[] = [];
   const body: BoxedExpression[] = [];
   for (const op of ops) {
-    if (op.head === 'Declare') {
-      declarations.push(op);
-    } else if (op.head === 'Assign') {
-      const id = op.op1.symbol!;
-      const def = ce.lookupSymbol(id) ?? ce.lookupFunction(id);
-      if (!def) {
-        declarations.push(ce._fn('Declare', [op.op1, ce.symbol('Undefined')]));
-      }
-    } else body.push(invalidateDeclare(op));
+    if (op.head === 'Declare') declarations.push(op);
+    else body.push(invalidateDeclare(op));
   }
+
+  ce.popScope();
 
   return ce._fn('Block', [...declarations, ...body]);
 }

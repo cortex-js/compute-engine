@@ -5,7 +5,7 @@ function parse(expr: string): BoxedExpression {
   return engine.parse(expr)!;
 }
 
-describe('calculus', () => {
+describe('CALCULUS', () => {
   describe('D', () => {
     it('should compute the partial derivative of a polynomial', () => {
       const expr = parse('D(x^3 + 2x - 4, x)');

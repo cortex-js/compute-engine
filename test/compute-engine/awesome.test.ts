@@ -123,181 +123,103 @@ describe('Nth PRIME NUMBER', () =>
           2
         ]
       ]
-      box       = [
+      [
         "Assign",
-        ["Multiply", "n", "p"],
+        ["Multiply", "p", ["Delimiter", "n"]],
         [
           "Add",
           [
-            "Sum",
+            "Delimiter",
             [
-              "Floor",
+              "Sum",
               [
-                "Divide",
-                1,
+                "Delimiter",
                 [
-                  "Add",
+                  "Floor",
                   [
-                    "Power",
-                    0,
+                    "Divide",
+                    1,
                     [
-                      "Subtract",
-                      "n",
+                      "Add",
                       [
-                        "Sum",
+                        "Power",
+                        0,
                         [
-                          "Product",
+                          "Subtract",
+                          "n",
                           [
-                            "Subtract",
-                            1,
+                            "Delimiter",
                             [
-                              "Power",
-                              0,
+                              "Sum",
                               [
-                                "Abs",
+                                "Delimiter",
                                 [
-                                  "Add",
-                                  ["Divide", ["Negate", "v_2"], "v_3"],
-                                  ["Floor", ["Divide", "v_2", "v_3"]]
+                                  "Delimiter",
+                                  [
+                                    "Product",
+                                    [
+                                      "Delimiter",
+                                      [
+                                        "Subtract",
+                                        1,
+                                        [
+                                          "Power",
+                                          0,
+                                          [
+                                            "Abs",
+                                            [
+                                              "Subtract",
+                                              [
+                                                "Floor",
+                                                [
+                                                  "Divide",
+                                                  ["Subscript", "v", 2],
+                                                  ["Subscript", "v", 3]
+                                                ]
+                                              ],
+                                              [
+                                                "Divide",
+                                                ["Subscript", "v", 2],
+                                                ["Subscript", "v", 3]
+                                              ]
+                                            ]
+                                          ]
+                                        ]
+                                      ]
+                                    ],
+                                    [
+                                      "Triple",
+                                      ["Subscript", "v", 3],
+                                      2,
+                                      [
+                                        "Floor",
+                                        ["Sqrt", ["Subscript", "v", 2]]
+                                      ]
+                                    ]
+                                  ]
                                 ]
+                              ],
+                              [
+                                "Triple",
+                                ["Subscript", "v", 2],
+                                2,
+                                ["Subscript", "v", 1]
                               ]
                             ]
-                          ],
-                          [
-                            "Triple",
-                            ["Hold", "v_3"],
-                            2,
-                            ["Floor", ["Sqrt", "v_2"]]
                           ]
-                        ],
-                        [
-                          "Triple",
-                          [
-                            "Error",
-                            [
-                              "ErrorCode",
-                              "'incompatible-domain'",
-                              "Symbols",
-                              "Undefined"
-                            ],
-                            ["Subscript", "v", 2]
-                          ],
-                          2,
-                          "v_1"
                         ]
-                      ]
+                      ],
+                      1
                     ]
-                  ],
-                  1
-                ]
-              ]
-            ],
-            [
-              "Triple",
-              [
-                "Error",
-                [
-                  "ErrorCode",
-                  "'incompatible-domain'",
-                  "Symbols",
-                  "Undefined"
-                ],
-                ["Subscript", "v", 1]
-              ],
-              2,
-              ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
-            ]
-          ],
-          2
-        ]
-      ]
-      canonical = [
-        "Assign",
-        ["Multiply", "n", "p"],
-        [
-          "Add",
-          [
-            "Sum",
-            [
-              "Floor",
-              [
-                "Divide",
-                1,
-                [
-                  "Add",
-                  [
-                    "Power",
-                    0,
-                    [
-                      "Subtract",
-                      "n",
-                      [
-                        "Sum",
-                        [
-                          "Product",
-                          [
-                            "Subtract",
-                            1,
-                            [
-                              "Power",
-                              0,
-                              [
-                                "Abs",
-                                [
-                                  "Add",
-                                  ["Divide", ["Negate", "v_2"], "v_3"],
-                                  ["Floor", ["Divide", "v_2", "v_3"]]
-                                ]
-                              ]
-                            ]
-                          ],
-                          [
-                            "Triple",
-                            ["Hold", "v_3"],
-                            2,
-                            ["Floor", ["Sqrt", "v_2"]]
-                          ]
-                        ],
-                        [
-                          "Triple",
-                          [
-                            "Error",
-                            [
-                              "ErrorCode",
-                              "'incompatible-domain'",
-                              "Symbols",
-                              "Undefined"
-                            ],
-                            ["Subscript", "v", 2]
-                          ],
-                          2,
-                          "v_1"
-                        ]
-                      ]
-                    ]
-                  ],
-                  1
-                ]
-              ]
-            ],
-            [
-              "Triple",
-              [
-                "Error",
-                ["ErrorCode", "'incompatible-domain'", "Symbols", "Void"],
-                [
-                  "Error",
-                  [
-                    "ErrorCode",
-                    "'incompatible-domain'",
-                    "Symbols",
-                    "Undefined"
-                  ],
-                  ["Subscript", "v", 1]
+                  ]
                 ]
               ],
-              2,
-              ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
+              [
+                "Triple",
+                ["Subscript", "v", 1],
+                2,
+                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
+              ]
             ]
           ],
           2

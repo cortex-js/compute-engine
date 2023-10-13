@@ -81,6 +81,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         // `Hold` are not canonicalized.
         canonical: (ce, args) =>
           args.length !== 1 ? null : ce._fn('Hold', args),
+        evaluate: (ce, ops) => ops[0],
       },
     },
     HorizontalSpacing: {
@@ -120,6 +121,29 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       },
     },
 
+    Assign: {
+      hold: 'all',
+      signature: {
+        domain: ['FunctionOf', 'Symbols', 'Anything', 'Anything'],
+        canonical: (ce, args) => {
+          if (args.length !== 2) return null;
+          const op1 = args[0];
+          const op2 = args[1];
+          if (!op1.symbol) return null;
+          if (op2.symbol) return ce._fn('Assign', args);
+          return ce._fn('Assign', [op1, ce._fn('Hold', [op2])]);
+        },
+        evaluate: (ce, ops) => {
+          const op1 = ops[0];
+          const op2 = ops[1];
+          if (!op1.symbol) return ce.Nothing;
+          const val = op2.evaluate();
+          ce.assign(op1.symbol, val);
+          return val;
+        },
+      },
+    },
+
     Assume: {
       hold: 'all',
       signature: {
@@ -130,6 +154,29 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     // @todo
     About: { signature: { domain: 'Functions' } },
+
+    Declare: {
+      hold: 'all',
+      signature: {
+        domain: ['FunctionOf', 'Symbols', 'Anything'],
+        canonical: (ce, args) => {
+          if (args.length !== 2) return null;
+          const op1 = args[0];
+          const op2 = args[1];
+          if (!op1.symbol) return null;
+          if (op2.symbol) return ce._fn('Declare', args);
+          return ce._fn('Declare', [op1, ce._fn('Hold', [op2])]);
+        },
+        evaluate: (ce, ops) => {
+          const op1 = ops[0];
+          const op2 = ops[1];
+          if (!op1.symbol) return ce.Nothing;
+          const val = op2.evaluate();
+          ce.declare(op1.symbol, val);
+          return val;
+        },
+      },
+    },
 
     Domain: {
       /** Return the domain of an expression */

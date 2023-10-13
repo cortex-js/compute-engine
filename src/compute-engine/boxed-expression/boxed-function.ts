@@ -742,8 +742,10 @@ export class BoxedFunction extends _BoxedExpression {
     const sig = def?.signature;
     if (!result && sig) {
       const numericMode = options?.numericMode ?? false;
+      const context = this.engine.swapScope(this.scope);
       if (numericMode && sig.N) result = sig.N!(this.engine, tail);
       if (!result && sig.evaluate) result = sig.evaluate!(this.engine, tail);
+      this.engine.swapScope(context);
     }
 
     if (result) {

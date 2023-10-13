@@ -88,7 +88,7 @@ describe('Expression head', () => {
         ['Function', 'x', 'x'],
         ['Hold', 'x'],
       ])
-    ).toMatchInlineSnapshot(`["Hold", "x"]`));
+    ).toMatchInlineSnapshot(`x`));
 
   // Using a 'Sequence' so that the head can be a "neutral" identity function
   // Note: could add a ["Hold", "x"] if there was a need to prevent evaluation

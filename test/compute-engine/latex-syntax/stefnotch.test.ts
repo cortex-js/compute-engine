@@ -79,14 +79,10 @@ describe('STEFNOTCH #10', () => {
     `);
   });
 
-  test('7/ \\lim_{n\\to\\infin}3', () => {
-    expect(parse('\\lim_{n\\to\\infin}3')).toMatchInlineSnapshot(`
-      [
-        "Subscript",
-        ["ErrorCode", "'unexpected-command'", "'\\lim'"],
-        ["LatexString", "'\\lim'"]
-      ]
-    `);
+  test('7/ \\lim_{n\\to\\infty}3', () => {
+    expect(parse('\\lim_{n\\to\\infty}3')).toMatchInlineSnapshot(
+      `["Limit", ["Function", 3, "n"], {num: "+Infinity"}]`
+    );
   });
 
   test('8/ \\begin{cases} 3 & x < 5 \\\\ 7 & \\text{else} \\end{cases}', () => {
@@ -116,13 +112,9 @@ describe('STEFNOTCH #13', () => {
       parse('N(\\varepsilon)\\coloneqq\\lceil\\frac{4}{\\varepsilon^2}\\rceil')
     ).toMatchInlineSnapshot(`
       [
-        "Multiply",
+        "Assign",
         ["N", "epsilonSymbol"],
-        [
-          "Assign",
-          "Undefined",
-          ["Ceil", ["Divide", 4, ["Square", "epsilonSymbol"]]]
-        ]
+        ["Ceil", ["Divide", 4, ["Power", "epsilonSymbol", 2]]]
       ]
     `);
   });

@@ -157,13 +157,6 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     precedence: 260,
   },
   {
-    latexTrigger: [':', '='],
-    kind: 'infix',
-    associativity: 'right',
-    precedence: 260,
-    parse: 'Assign',
-  },
-  {
     name: 'Approx', // Note: Mathematica TildeTilde
     latexTrigger: ['\\approx'],
     kind: 'infix',
