@@ -24,11 +24,7 @@ describe('COMPILE', () => {
   describe('Blocks', () => {
     it('should compile a simple block', () => {
       const expr = ce.box(['Block', ['Multiply', 10, 2]]);
-      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`
-        (() => {
-        return 10 * 2
-        })()
-      `);
+      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(`10 * 2`);
     });
 
     it('should compile a block with two statements', () => {
@@ -73,6 +69,27 @@ describe('COMPILE', () => {
         return x * 2
         })()
       `);
+    });
+  });
+
+  describe('Conditionals / Ifs', () => {
+    it('should compile an if statement', () => {
+      const expr = ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
+      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(
+        `((0 < _.x) ? (_.x) : (-_.x))`
+      );
+    });
+
+    it('should compile an if statement with blocks', () => {
+      const expr = ce.box([
+        'If',
+        ['Greater', 'x', 0],
+        ['Block', 'x'],
+        ['Block', ['Negate', 'x']],
+      ]);
+      expect(expr.compile()?.toString() ?? '').toMatchInlineSnapshot(
+        `((0 < _.x) ? (_.x) : (-_.x))`
+      );
     });
   });
 });
