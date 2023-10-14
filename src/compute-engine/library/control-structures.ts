@@ -10,6 +10,7 @@ import { widen } from '../boxed-expression/boxed-domain';
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {
     Block: {
+      hold: 'all',
       signature: {
         domain: 'Functions',
         canonical: canonicalBlock,
@@ -131,7 +132,10 @@ function evaluateBlock(
   for (const op of ops) {
     result = op.evaluate();
     const h = result.head;
-    if (h === 'Return' || h === 'Break' || h === 'Continue') break;
+    if (h === 'Return' || h === 'Break' || h === 'Continue') {
+      result = result.op1.evaluate();
+      break;
+    }
   }
 
   return result ?? ce.Nothing;
@@ -163,9 +167,10 @@ function canonicalBlock(
     else body.push(invalidateDeclare(op));
   }
 
-  ce.popScope();
+  const result = ce._fn('Block', [...declarations, ...body]);
 
-  return ce._fn('Block', [...declarations, ...body]);
+  ce.popScope();
+  return result;
 }
 
 function invalidateDeclare(expr: BoxedExpression): BoxedExpression {

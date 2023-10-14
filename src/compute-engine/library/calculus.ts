@@ -168,8 +168,9 @@ volumes
           // }
           f.bind();
           f = f.canonical;
+          const result = ce._fn('D', [f, ...params]);
           ce.popScope();
-          return ce._fn('D', [f, ...params]);
+          return result;
         },
         evaluate: (ce, ops) => {
           let f: BoxedExpression | undefined = ops[0].canonical;
