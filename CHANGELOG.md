@@ -42,6 +42,11 @@ ce
 // -> 5
 ```
 
+### Improvements
+
+- LaTeX parser: empty superscripts are now ignored, e.g. `4^{}` is interpreted
+  as `4`.
+
 ## 0.17.0
 
 **Release Date:** 2023-10-12

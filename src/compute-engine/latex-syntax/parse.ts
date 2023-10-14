@@ -33,6 +33,7 @@ import {
   head,
   isEmptySequence,
   machineValue,
+  missingIfEmpty,
   nops,
   op,
   ops,
@@ -1633,18 +1634,25 @@ export class _Parser implements Parser {
       ) as IndexedInfixEntry[];
 
       if (defs) {
-        const arg: Expression = [
-          'Superscript',
-          result!,
-          superscripts.length === 1
-            ? superscripts[0]
-            : ['List', ...superscripts],
-        ];
-        for (const def of defs) {
-          if (typeof def.parse === 'function')
-            result = def.parse(this, arg, { minPrec: 0 });
-          else result = arg;
-          if (result) break;
+        let nonEmptySuperscripts = superscripts.filter(
+          (x) => head(x) !== 'Sequence'
+        ) as Expression[];
+        if (nonEmptySuperscripts.length !== 0) {
+          const superscriptExpression: Expression =
+            nonEmptySuperscripts.length === 1
+              ? nonEmptySuperscripts[0]
+              : ['List', ...nonEmptySuperscripts];
+          const arg: Expression = [
+            'Superscript',
+            result!,
+            superscriptExpression,
+          ];
+          for (const def of defs) {
+            if (typeof def.parse === 'function')
+              result = def.parse(this, arg, { minPrec: 0 });
+            else result = arg;
+            if (result) break;
+          }
         }
       }
     }
@@ -1889,8 +1897,11 @@ export class _Parser implements Parser {
         if (this.peek === '^') {
           // '^' is a special case, with a custom parser
           this.index += 1;
-          this.parseGroup();
-          this.error('unexpected-operator', start);
+          return [
+            'Superscript',
+            this.error('missing', start),
+            missingIfEmpty(this.parseGroup()),
+          ];
         }
         this.index += n;
         if (typeof def.parse === 'function') {
