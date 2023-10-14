@@ -5,6 +5,7 @@
 - Expanded LaTeX dictionary with `\max`, `\min`, `\sup`, `\inf` and `\lim`
   functions
 - Added `Supremum` and `Infimum` functions
+- Compilation of `Block` expressions, local variables and return statements.
 - Added numerical evaluation of limits with `Limit` functions and `NLimit`
   functions, using a Richardson Extrapolation.
 

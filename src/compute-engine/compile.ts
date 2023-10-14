@@ -14,6 +14,8 @@ import { BoxedExpression } from './public';
 
 export type CompiledType = boolean | number | string | object;
 
+type JSSource = string;
+
 export type CompiledOperators = Record<
   MathJsonIdentifier,
   [op: string, prec: number]
@@ -24,8 +26,8 @@ export type CompiledFunctions = {
     | string
     | ((
         args: BoxedExpression[],
-        compile: (expr: BoxedExpression) => CompiledType
-      ) => CompiledType);
+        compile: (expr: BoxedExpression) => JSSource
+      ) => JSSource);
 };
 
 const NATIVE_JS_OPERATORS: CompiledOperators = {
@@ -66,9 +68,8 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Gcd: '_SYS.gcd',
   // Math.hypot
   Lcm: '_SYS.lcm',
-  Limit: (args, compile) => {
-    return `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`;
-  },
+  Limit: (args, compile) =>
+    `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
   Ln: 'Math.log',
   Log: 'Math.log10',
   LogGamma: '_SYS.lngamma',
@@ -202,10 +203,12 @@ export type CompileTarget = {
   operators?: (op: MathJsonIdentifier) => [op: string, prec: number];
   functions?: (
     id: MathJsonIdentifier
-  ) => string | ((...args: CompiledType[]) => CompiledType);
+  ) => string | ((...args: CompiledType[]) => string);
   var: (id: MathJsonIdentifier) => string | undefined;
   string: (str: string) => string;
   number: (n: number) => string;
+  ws: (s?: string) => string; // White space
+  indent: number;
 };
 
 /** This is an extension of the Function class that allows us to pass
@@ -271,6 +274,8 @@ export function compileToJavascript(
     },
     string: (str) => JSON.stringify(str),
     number: (n) => n.toString(),
+    indent: 0,
+    ws: (s?: string) => s ?? '',
   });
 }
 
@@ -279,7 +284,7 @@ function compileExpr(
   args: BoxedExpression[],
   prec: number,
   target: CompileTarget
-): CompiledType {
+): JSSource {
   // No need to check for 'Rational': this has been handled as a number
 
   if (h === 'Sequence') {
@@ -322,6 +327,33 @@ function compileExpr(
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
     })})`;
+  }
+
+  if (h === 'Declare') return `let ${args[0].symbol}`;
+  if (h === 'Assign') return `${args[0].symbol} = ${compile(args[1], target)}`;
+  if (h === 'Return') return `return ${compile(args[0], target)}`;
+
+  if (h === 'Block') {
+    // Get all the Declare statements
+    const locals: string[] = [];
+    for (const arg of args) {
+      if (arg.head === 'Declare') locals.push(arg.ops![0].symbol!);
+    }
+
+    const result = args.map((arg) =>
+      compile(arg, {
+        ...target,
+        var: (id) => {
+          if (locals.includes(id)) return id;
+          return target.var(id);
+        },
+      })
+    );
+    // Add a return statement to the last expression
+    result[result.length - 1] = `return ${result[result.length - 1]}`;
+    return `(() => {${target.ws('\n')}${result.join(
+      `;${target.ws('\n')}`
+    )}${target.ws('\n')}})()`;
   }
 
   const fn = target.functions?.(h);
