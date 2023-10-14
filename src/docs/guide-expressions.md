@@ -34,7 +34,17 @@ expression.
 **To create a Boxed Expression from a MathJSON expression**, use the `ce.box()`
 function.
 
+The input of `ce.box()` can be:
+- a [MathJSON expression](/math-json/)
+- a `BoxedExpression` (in which case it is returned as-is)
+- a `SemiBoxedExpression`, that is a MathJSON expression with some of its
+  subexpressions already boxed.
+
 The result is an instance of a `BoxedExpression`.
+
+By default, `ce.box()` returns a canonical expression. See
+[Canonical Expressions](#canonical) for more info.
+
 
 ```js
 let expr = ce.box(1.729e3);
@@ -51,13 +61,8 @@ console.log(expr.latex);
 expr = ce.box(["Add", 3, "x"]);
 console.log(expr.head);
 // ➔ "Add"
-
-console.log(expr.isPositive);
-// undefined
 ```
 
-By default, `ce.box()` returns a canonical expression. See
-[Canonical Expressions](#canonical) for more info.
 
 **To create a Boxed Expression from a LaTeX string**, call the `ce.parse()`
 function.

@@ -74,10 +74,10 @@ There are three common transformations that can be applied to an expression:
 
 </div>
 
-For example, if `f` is \\( 2 + (\sqrt{4x^2} + 1) \\) and `x` is \\( \pi \\):
+For example:
 
 ```javascript
-const f = ce.parse('2 + (\\sqrt{4x^2} + 1)');
+const f = ce.parse('2 + (\\sqrt{4x} + 1)');
 ce.assign('x', 'Pi');
 console.log(f.simplify().latex); // 2\sqrt{x}+3
 console.log(f.evaluate().latex); // 2\sqrt{\pi}+3

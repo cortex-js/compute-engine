@@ -151,7 +151,7 @@ If `lower`and `upper`are not provided, they take the default values of -1 and
 
 ```json example
 ["Clamp", 0.42]
-// ➔ 5
+// ➔ 1
 ["Clamp", 4.2]
 // ➔ 1
 ["Clamp", -5, 0, "+Infinity"]
