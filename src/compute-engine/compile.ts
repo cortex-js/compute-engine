@@ -332,12 +332,23 @@ function compileExpr(
   if (h === 'Declare') return `let ${args[0].symbol}`;
   if (h === 'Assign') return `${args[0].symbol} = ${compile(args[1], target)}`;
   if (h === 'Return') return `return ${compile(args[0], target)}`;
+  if (h === 'If') {
+    if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    return `((${compile(args[0], target)}) ? (${compile(
+      args[1],
+      target
+    )}) : (${compile(args[2], target)}))`;
+  }
 
   if (h === 'Block') {
     // Get all the Declare statements
     const locals: string[] = [];
     for (const arg of args) {
       if (arg.head === 'Declare') locals.push(arg.ops![0].symbol!);
+    }
+
+    if (args.length === 1 && locals.length === 0) {
+      return compile(args[0], target);
     }
 
     const result = args.map((arg) =>
@@ -371,7 +382,7 @@ export function compile(
   expr: BoxedExpression,
   target: CompileTarget,
   prec = 0
-): CompiledType {
+): JSSource {
   if (!expr.isValid) throw new Error('Invalid expression');
 
   //
