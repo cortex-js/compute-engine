@@ -38,6 +38,14 @@
   "files": [
     "/dist"
   ],
+  "exports": {
+    ".": {
+        "types": "./dist/types/compute-engine.d.ts",
+        "require": "./dist/compute-engine.min.js",
+        "import": "./dist/compute-engine.min.esm.js",
+        "default": "./dist/compute-engine.min.js"
+    }
+  },
   "main": "./dist/compute-engine.min.js",
   "module": "./dist/compute-engine.min.esm.js",
   "types": "./dist/types/compute-engine.d.ts",
@@ -76,6 +84,5 @@
   "dependencies": {
     "complex.js": "^2.1.1",
     "decimal.js": "^10.4.3"
-  },
-  "type": "module"
+  }
 }
