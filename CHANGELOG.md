@@ -42,6 +42,11 @@ ce
 // -> 5
 ```
 
+- When decimal numbers are parsed they are interpreted as inexact numbers by
+  default, i.e. "1.2" -> `{num: "1.2"}`. To force the number to be interpreted
+  as a rational number, set `ce.latexOptions.parseNumbers = "rational"`. In that
+  case, "1.2" -> `["Rational", 12, 10]`, an exact number.
+
 ### Improvements
 
 - LaTeX parser: empty superscripts are now ignored, e.g. `4^{}` is interpreted

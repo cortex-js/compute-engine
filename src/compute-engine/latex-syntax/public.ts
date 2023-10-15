@@ -502,14 +502,23 @@ export type ParseLatexOptions = {
   parseArgumentsOfUnknownLatexCommands: boolean;
 
   /**
-   * When a number is encountered, parse it.
+   * When parsing a decimal number (e.g. `3.1415`):
    *
-   * Otherwise, return each token making up the number (minus sign, digits,
-   * decimal marker, etc...).
+   * - `"auto"` or `"decimal"`: if a decimal number parse it as an approximate
+   *   decimal number with a whole part and a fractional part
+   * - `"rational"`: if a decimal number, parse it as an exact rational number
+   *   with a numerator  and a denominator. If not a decimal number, parse
+   *   it as a regular number.
+   * - `"never"`: do not parse numbers, instead return each token making up
+   *  the number (minus sign, digits, decimal marker, etc...).
    *
-   * **Default**: `true`
+   * Note: if the number includes repeating digits (e.g. `1.33(333)`),
+   * it will be parsed as a decimal number even if this setting is `"rational"`.
+   *
+   * **Default**: `"auto"`
+   *
    */
-  parseNumbers: boolean;
+  parseNumbers: 'auto' | 'rational' | 'decimal' | 'never';
 
   /**
    * This handler is invoked when the parser encounters an identifier

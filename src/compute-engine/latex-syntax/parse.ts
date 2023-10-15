@@ -151,7 +151,7 @@ export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
   skipSpace: true,
 
   parseArgumentsOfUnknownLatexCommands: true,
-  parseNumbers: true,
+  parseNumbers: 'auto',
   parseUnknownIdentifier: (id, parser) =>
     parser.computeEngine?.lookupFunction(id) !== undefined
       ? 'function'
@@ -919,7 +919,7 @@ export class _Parser implements Parser {
       // The exponent does not contain grouping markers. See
       // https://physics.nist.gov/cuu/Units/checklist.html  #16
       const exponent = this.parseSignedInteger({ withGrouping: false });
-      if (exponent) return 'e' + exponent;
+      if (exponent) return exponent;
     }
 
     this.index = start;
@@ -927,7 +927,7 @@ export class _Parser implements Parser {
       this.skipSpaceTokens();
       if (this.match('1') && this.match('0') && this.match('^')) {
         // Is it a single digit exponent, i.e. `\times 10^5`
-        if (/^[0-9]$/.test(this.peek)) return 'e' + this.nextToken();
+        if (/^[0-9]$/.test(this.peek)) return this.nextToken();
 
         if (this.match('<{>')) {
           // Multi digit exponent,i.e. `\times 10^{10}` or `\times 10^{-5}`
@@ -936,7 +936,7 @@ export class _Parser implements Parser {
           // a `{}` there can't be ambiguity, so we're lenient
           const exponent = this.parseSignedInteger();
           this.skipSpaceTokens();
-          if (this.match('<}>') && exponent) return 'e' + exponent;
+          if (this.match('<}>') && exponent) return exponent;
         }
       }
     }
@@ -944,7 +944,7 @@ export class _Parser implements Parser {
     this.index = start;
     // `%` is a synonym for `e-2`. See // https://physics.nist.gov/cuu/Units/checklist.html  #10
     this.skipSpaceTokens();
-    if (this.match('\\%')) return `e-2`;
+    if (this.match('\\%')) return `-2`;
 
     this.index = start;
     if (this.matchAll(this._exponentProductTokens)) {
@@ -954,7 +954,7 @@ export class _Parser implements Parser {
         const exponent = this.parseSignedInteger();
         this.skipSpaceTokens();
         if (this.matchAll(this._endExponentMarkerTokens) && exponent)
-          return 'e' + exponent;
+          return exponent;
       }
     }
 
@@ -1008,11 +1008,16 @@ export class _Parser implements Parser {
    * Parse a number, with an optional sign, exponent, decimal marker,
    * repeating decimals, etc...
    */
-  private parseNumber(): string | null {
+  private parseNumber(): Expression | null {
     // If we don't parse numbers, we'll return them as individual tokens
-    if (!this.options.parseNumbers) return null;
+    if (
+      (this.options.parseNumbers as any as boolean) === false ||
+      this.options.parseNumbers === 'never'
+    )
+      return null;
 
     const start = this.index;
+
     this.skipVisualSpace();
 
     // Skip an optional '+' sign.
@@ -1020,46 +1025,46 @@ export class _Parser implements Parser {
     // this is so we can correctly parse `-1^2` as `['Negate', ['Square', 1]]`
     this.match('+');
 
-    let result = '';
+    let wholePart = '';
+    let fractionalPart = '';
 
     // Does the number start with the decimal marker? i.e. `.5`
-    let dotPrefix = false;
+    let startsWithDecimalMarker = false;
 
     if (this.match('.') || this.matchAll(this._decimalMarkerTokens)) {
       const peek = this.peek;
-      // Include `(` for repeating decimals
+      // We have a number if followed by a digit, or a `\overline` or a `\ldots`
       if (
-        peek !== '\\overline' &&
-        peek !== this._beginRepeatingDigitsTokens[0] &&
-        !/[0-9\(]/.test(peek)
+        peek === '\\overline' ||
+        peek === this._beginRepeatingDigitsTokens[0] ||
+        /[0-9\(]/.test(peek)
       ) {
-        // A decimal marker followed by not a digit (and not a repeating decimal marker) -> not a number
-        this.index = start;
-        return null;
+        startsWithDecimalMarker = true;
+        wholePart = '0';
       }
-      dotPrefix = true;
-    } else {
-      result = this.parseDecimalDigits({ withGrouping: true });
-      if (!result) {
-        this.index = start;
-        return null;
-      }
+    } else wholePart = this.parseDecimalDigits({ withGrouping: true });
+
+    if (!wholePart) {
+      this.index = start;
+      return null;
     }
 
-    let hasDecimal = true;
+    let hasFractionalPart = true;
     if (
-      !dotPrefix &&
-      (this.match('.') || this.matchAll(this._decimalMarkerTokens))
+      startsWithDecimalMarker ||
+      this.match('.') ||
+      this.matchAll(this._decimalMarkerTokens)
     )
-      result += '.' + this.parseDecimalDigits({ withGrouping: true });
-    else if (dotPrefix)
-      result = '0.' + this.parseDecimalDigits({ withGrouping: true });
-    else hasDecimal = false;
+      fractionalPart = this.parseDecimalDigits({ withGrouping: true });
+    else hasFractionalPart = false;
 
-    if (hasDecimal) {
+    let hasRepeatingPart = false;
+    if (hasFractionalPart) {
       const repeat = this.parseRepeatingDecimal();
-      if (repeat) result += repeat;
-      else if (
+      if (repeat) {
+        fractionalPart += repeat;
+        hasRepeatingPart = true;
+      } else if (
         this.match('\\ldots') ||
         this.matchAll(this._truncationMarkerTokens)
       ) {
@@ -1068,7 +1073,35 @@ export class _Parser implements Parser {
     }
 
     this.skipVisualSpace();
-    return result + this.parseExponent();
+
+    const exponent = this.parseExponent();
+
+    if (!hasRepeatingPart && this.options.parseNumbers === 'rational') {
+      const whole = parseInt(wholePart, 10);
+      const fraction = parseInt(fractionalPart, 10);
+
+      // Determine the number of decimal places in fractional part
+      const n = fractionalPart.length;
+
+      // Calculate numerator and denominator
+      const numerator = whole * Math.pow(10, n) + fraction;
+      const denominator = Math.pow(10, n);
+
+      if (exponent) {
+        return [
+          'Multiply',
+          ['Rational', numerator, denominator],
+          ['Power', 10, exponent],
+        ];
+      }
+      return ['Rational', numerator, denominator];
+    }
+    return {
+      num:
+        wholePart +
+        (hasFractionalPart ? '.' + fractionalPart : '') +
+        (exponent ? 'e' + exponent : ''),
+    };
   }
 
   /**
@@ -2029,10 +2062,7 @@ export class _Parser implements Parser {
     //
     // 2. Is it a number?
     //
-    if (result === null) {
-      const num = this.parseNumber();
-      if (num !== null) result = { num };
-    }
+    result ??= this.parseNumber();
 
     //
     // 3. Is it an enclosure, i.e. a matchfix expression?
