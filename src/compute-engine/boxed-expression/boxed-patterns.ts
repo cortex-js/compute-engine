@@ -397,6 +397,16 @@ function match(
   // Attempt to match recursively on the arguments of a function (or the keys
   // of a dictionary) @todo
 
+  if (subject.ops) {
+    const ops = subject.ops;
+    const result = {};
+    for (let i = 0; i < ops.length; i++) {
+      const sub = match(ops[i], pattern, options);
+      if (sub !== null) return sub;
+    }
+    return result;
+  }
+
   return null;
 }
 

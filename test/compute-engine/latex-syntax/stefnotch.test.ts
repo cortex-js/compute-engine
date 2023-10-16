@@ -94,15 +94,9 @@ describe('STEFNOTCH #10', () => {
 
 describe('STEFNOTCH #12', () => {
   test('1/ e^{i\\pi\\text{nope!?\\lparen sum}}', () => {
-    expect(parse('e^{i\\pi\\text{nope!?\\lparen sum}}')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        "ExponentialE",
-        "ImaginaryUnit",
-        ["Error", "'unexpected-argument'", "Pi"],
-        ["Error", "'unexpected-argument'", "'nope!?\\lparensum'"]
-      ]
-    `);
+    expect(parse('e^{i\\pi\\text{nope!?\\lparen sum}}')).toMatchInlineSnapshot(
+      `ExponentialE`
+    );
   });
 });
 

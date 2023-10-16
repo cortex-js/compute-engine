@@ -1186,6 +1186,13 @@ function processMinMax(
   if (ops.length === 0)
     return upper ? ce.NegativeInfinity : ce.PositiveInfinity;
 
+  // @todo:
+  // Should handle an argument that is:
+  // - a function
+  // - a list / set / sequence / collection
+  // - a matrix (?)
+  // - a Range or Interval
+
   let result: BoxedExpression | undefined = undefined;
   const rest: BoxedExpression[] = [];
 

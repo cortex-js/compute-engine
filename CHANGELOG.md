@@ -33,19 +33,16 @@ ce.box(["Block", ["Assign", "c", 5], ["Multiply", "c", 2]]).evaluate().json;
 // -> 10
 ```
 
-- You can return from the middle of a block with the `Return` statement:
-
-```js
-ce
-  .box(["Block", ["Assign", "c", 5], ["Return", "c"], ["Multiply", "c", 2]])
-  .evaluate().json;
-// -> 5
-```
-
 - When decimal numbers are parsed they are interpreted as inexact numbers by
   default, i.e. "1.2" -> `{num: "1.2"}`. To force the number to be interpreted
   as a rational number, set `ce.latexOptions.parseNumbers = "rational"`. In that
   case, "1.2" -> `["Rational", 12, 10]`, an exact number.
+
+  While regular decimals are considered "inexact" numbers (i.e. they are assumed
+  to be an approximation), rationals are assumed to be exact. In most cases, the
+  safest thing to do is to consider decimal numbers as inexact to avoid
+  introducing errors in calculations. If you know that the decimal numbers you
+  parse are exact, you can use this option to consider them as exact numbers.
 
 ### Improvements
 

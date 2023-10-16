@@ -4,12 +4,12 @@ permalink: /compute-engine/reference/control-structures/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 preamble:
-  '<h1>Control Structures</h1><p class=xl>Control Structures define how a
-  sequence of expressions is evaluated</p>'
+  "<h1>Control Structures</h1><p class=xl>Control Structures define how a
+  sequence of expressions is evaluated</p>"
 ---
 
 ## Overview
@@ -36,52 +36,25 @@ A `["Block"]` expression is a sequence of expressions that are evaluated
 sequentially.
 
 A new scope is created for the `["Block"]` expression. The scope is destroyed
-when the `["Block"]` expression is finished evaluating.
+when the `["Block"]` expression is finished evaluating. This means that
+variables defined in the `["Block"]` expression are not accessible outside of
+the `["Block"]` expression.
 
 The value of the `["Block"]` expression is the value of the last expression
 `expr-n`.
 
-If an expression `expr` is a `["Return"]` expression, a `["Break"]` expression
-or a `["Continue"]` expression, no more expressions are evaluated and the value
-of the `["Block"]` is this expression.
+If one of the expression in the block is a `["Return"]` expression, a
+`["Break"]` expression or a `["Continue"]` expression, no more expressions are
+evaluated and the value of the `["Block"]` is this expression.
 
 `["Block"]` expressions can be nested as necessary.
 
 ```json example
 ["Block", ["Assign", "c", 5], ["Multiply", "c", 2]]
+
+
 // ➔ 10
 ```
-
-{% enddef %}
-
-{% def "Return" %}
-
-[&quot;**Return**&quot;, _value_]{.signature}
-
-If evaluated as an argument to a `["Function"]` expression, interupts the
-evaluation of the function. The value of the `["Function"]` expression is
-`value`.
-
-The `["Return"]` expression is useful when used with functions that have
-multiple exit points, conditional logic, loops, etc...
-
-Here's an example of a function that return the sign of a number:
-
-```json example
-[
-  "Function",
-  [
-    "Block",
-    ["If", ["Greater", "x", 0], ["Return", 1]],
-    ["If", ["Less", "x", 0], ["Return", -1]],
-    0
-  ],
-  "x"
-]
-```
-
-{% readmore "/compute-engine/reference/functions/" %}Read more about
-**functions**. {% endreadmore %}
 
 {% enddef %}
 
@@ -218,23 +191,52 @@ programming constructs that can be used to replace loops. {% endreadmore %}
 
 {% enddefs %}
 
-## Break and Continue
+## Controlling the Flow of Execution
+
+**To exit a function**, use `Return`.
 
 **To control the flow of a loop expression**, use `Break` and `Continue`.
 
 {% defs "Function" "Description" %}
 
+{% def "Return" %}
+
+[&quot;**Return**&quot;, _value_]{.signature}
+
+Interupts the evaluation of a `["Function"]` expression. The value of the
+`["Function"]` expression is `value`.
+
+The `["Return"]` expression is useful when used with functions that have
+multiple exit points, conditional logic, loops, etc...
+
+Here's a contrived example of a function that returns the sign of a number:
+
+```json example
+[
+  "Function",
+  [
+    "Block",
+    ["If", ["Greater", "x", 0], ["Return", 1]],
+    ["If", ["Less", "x", 0], ["Return", -1]],
+    0
+  ],
+  "x"
+]
+```
+
+{% readmore "/compute-engine/reference/functions/" %}Read more about
+**functions**. {% endreadmore %}
+
+{% enddef %}
+
 {% def "Break" %}
 
 [&quot;**Break**&quot; ]{.signature}
 
-[&quot;**Break**&quot;, _expr_]{.signature}
-
-When in a block, exit the block immediately. The value of the `["Block"]`
-expression is the `["Break"]` expression.
+[&quot;**Break**&quot;, _value_]{.signature}
 
 When in a loop exit the loop immediately. The final value of the loop is
-`expr`or `Nothing` if not provided.
+`value`or `Nothing` if not provided.
 
 {% enddef %}
 
@@ -242,13 +244,10 @@ When in a loop exit the loop immediately. The final value of the loop is
 
 [&quot;**Continue**&quot; ]{.signature}
 
-[&quot;**Continue**&quot;, _expr_]{.signature}
+[&quot;**Continue**&quot;, _value_]{.signature}
 
 When in a loop, skip to the next iteration of the loop. The value of the
-iteration is `expr`or `Nothing` if not provided.
-
-When in a block, exit the block immediately, and return the `["Continue"]`
-expression as the value of the block.
+iteration is `value` or `Nothing` if not provided.
 
 {% enddef %}
 

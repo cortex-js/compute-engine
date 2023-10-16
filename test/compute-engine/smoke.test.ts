@@ -38,11 +38,18 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-console.info(
-  ce.parse(
-    'p(n):=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
-  ).json
-);
+// const expr = ce.parse('4x^{}');
+const expr = ce.box([
+  'Add',
+  ['Power', 2, ['Error', "'missing'"]],
+  ['Power', 'x', ['Error', "'missing'"]],
+]);
+console.info(expr.json);
+// expr.replace(ce.rules([['^{}', ['Sequence']]]));
+expr.replace(ce.rules([[['Power', '_1', ['Error', "'missing'"]], '_1']]), {
+  recursive: true,
+});
+console.info(expr.json);
 
 // Should distribute: prefer addition over multiplication
 const xp = ce.parse('a\\times(c+d)');
@@ -924,7 +931,7 @@ function slowEval() {
   let y = 0;
   const startTime = performance.now();
   for (let x = 0; x <= Math.PI; x += 0.01) {
-    y += Number(expr.subs(vars).subs({ x }).N().numericValue!.valueOf());
+    y += Number(expr.subs(vars).subs({ x }).N().numericValue?.valueOf());
   }
 
   console.info(

@@ -122,32 +122,24 @@ describe('SUPSUB', () => {
     expect(parse('(x+1)^n_0')).toMatchInlineSnapshot(
       `["Power", ["Subscript", ["Add", "x", 1], 0], "n"]`
     );
-    expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(
-      `["Subscript", "'missing'", ["LatexString", "'^p'"]]`
-    ); // @fixme: nope...
-    expect(parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(`
+    expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       [
         "Sequence",
         [
-          "Power",
-          [
-            "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
-            "'missing'"
-          ],
-          [
-            "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
-            ["LatexString", "'^{12}_'"]
-          ]
+          "Superscript",
+          ["Error", "'missing'", ["LatexString", "'^'"]],
+          ["Error", "'missing'"]
         ],
         [
           "Error",
-          ["ErrorCode", "'unexpected-token'", "'{'"],
-          ["LatexString", "'{34}(x+1)^n_0'"]
+          ["ErrorCode", "'unexpected-identifier'", "p"],
+          ["LatexString", "'p'"]
         ]
       ]
     `); // @fixme: nope...
+    expect(parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(
+      `["Subscript", ["Error", "'missing'", ["LatexString", "'^'"]], 12]`
+    ); // @fixme: nope...
   });
   test('Accents', () => {
     expect(parse('\\vec{x}')).toMatchInlineSnapshot(`["OverVector", "x"]`);

@@ -128,14 +128,20 @@ function evaluateBlock(
   // Empty block?
   if (ops.length === 0) return ce.Nothing;
 
+  ce.resetContext();
+
   let result: BoxedExpression | undefined = undefined;
   for (const op of ops) {
-    result = op.evaluate();
-    const h = result.head;
-    if (h === 'Return' || h === 'Break' || h === 'Continue') {
-      result = result.op1.evaluate();
+    const h = op.head;
+    if (h === 'Return') {
+      result = op.op1.evaluate();
       break;
     }
+    if (h === 'Break' || h === 'Continue') {
+      result = ce.fn(h, [op.op1.evaluate()]);
+      break;
+    }
+    result = op.evaluate();
   }
 
   return result ?? ce.Nothing;

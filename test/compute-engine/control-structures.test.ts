@@ -1,5 +1,4 @@
-import { engine } from '../utils';
-const ce = engine;
+import { engine as ce } from '../utils';
 describe('CONTROL STRUCTURES', () => {
   describe('Block', () => {
     it('should evaluate a block wiht a single expression', () => {
@@ -28,7 +27,7 @@ describe('CONTROL STRUCTURES', () => {
         ['Add', 2, 2],
       ]);
       const result = expr.evaluate();
-      expect(result.json).toMatchInlineSnapshot(`["Return", 3]`);
+      expect(result.json).toMatchInlineSnapshot(`3`);
     });
   });
 

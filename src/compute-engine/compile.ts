@@ -209,6 +209,12 @@ export type CompileTarget = {
   number: (n: number) => string;
   ws: (s?: string) => string; // White space
   indent: number;
+  // @todo: add context or return compile as an array of statements
+  // and let the caller decide how to wrap it in an IIFE.
+  // The expression being compiled will be used:
+  // - as the value of a variable declaration (LexicalDeclaration)
+  // - as the body of a function (FunctionDeclaration)
+  // context?: 'LexicalDeclaration' | 'ExpressionStatement' | 'ReturnStatement';
 };
 
 /** This is an extension of the Function class that allows us to pass
@@ -331,6 +337,7 @@ function compileExpr(
 
   if (h === 'Declare') return `let ${args[0].symbol}`;
   if (h === 'Assign') return `${args[0].symbol} = ${compile(args[1], target)}`;
+  // @todo: that's incorrect: return should return from the function, not the block
   if (h === 'Return') return `return ${compile(args[0], target)}`;
   if (h === 'If') {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
@@ -347,9 +354,8 @@ function compileExpr(
       if (arg.head === 'Declare') locals.push(arg.ops![0].symbol!);
     }
 
-    if (args.length === 1 && locals.length === 0) {
+    if (args.length === 1 && locals.length === 0)
       return compile(args[0], target);
-    }
 
     const result = args.map((arg) =>
       compile(arg, {
@@ -441,6 +447,8 @@ function compileLoop(
     },
   });
 
+  // @todo: don't always need to wrap in an IIFE
+
   return `(() => {
   let _acc = ${op === '+' ? '0' : '1'};
   let ${index} = ${lower};
@@ -451,4 +459,19 @@ function compileLoop(
   }
   return _acc;
 })()`;
+}
+
+function iife(statements: string[], target: CompileTarget): string {
+  if (statements.length === 0) return '';
+  if (statements.length === 1) return statements[0];
+
+  const last = statements.length - 1;
+  statements[last] = `return ${statements[last]}`;
+
+  return (() => {
+    'foo';
+    return 'bar';
+  })();
+
+  // return `(() => ${statements.join(`;${target.ws('\n')}`)}()`;
 }

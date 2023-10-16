@@ -463,7 +463,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     options?: { optimize: ('simplify' | 'evaluate')[] }
   ): ((args: Record<string, any>) => any | undefined) | undefined {
     if (to !== 'javascript') return undefined;
-    options ??= { optimize: ['simplify', 'evaluate'] };
+    options ??= { optimize: ['simplify'] };
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     let expr = this as BoxedExpression;
     if (options.optimize.includes('simplify')) expr = expr.simplify();
