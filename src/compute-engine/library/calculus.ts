@@ -204,7 +204,7 @@ volumes
           if (typeof x !== 'number') return undefined;
 
           const f = applicableN1(ce.box(ops[0]));
-          return ce.number(centeredDiff8thOrder(f, x, 1e-6));
+          return ce.number(centeredDiff8thOrder(f, x));
         },
       },
     },
@@ -275,10 +275,20 @@ volumes
       signature: {
         domain: ['FunctionOf', 'Functions', 'Numbers', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {
+          // Switch to machine mode
+          const numericMode = ce.numericMode;
+          const precision = ce.precision;
+          ce.numericMode = 'machine';
+
           const f = applicableN1(ops[0]);
           const [a, b] = ops.slice(1).map((op) => op.valueOf());
-          if (typeof a !== 'number' || typeof b !== 'number') return undefined;
-          return ce.number(monteCarloEstimate(f, a, b));
+          let result: BoxedExpression | undefined = undefined;
+          if (typeof a === 'number' && typeof b === 'number')
+            result = ce.number(monteCarloEstimate(f, a, b));
+
+          ce.numericMode = numericMode;
+          ce.precision = precision;
+          return result;
         },
       },
     },

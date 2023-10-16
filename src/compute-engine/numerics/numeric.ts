@@ -586,7 +586,7 @@ export function erfInv(x: number): number {
  * first derivative is given by:
  *
  * \[
- * f'(x) \approx \frac{-f(x-4h) + 9f(x-3h) - 45f(x-2h) + 186f(x-h) - 186f(x+h) + 45f(x+2h) - 9f(x+3h) + f(x+4h)}{60h}
+ * f'(x) \approx \frac{1}{280h} \left[ -f(x-4h) + \frac{4}{3}f(x-3h) - \frac{1}{5}f(x-2h) + \frac{8}{5}f(x-h) - \frac{8}{5}f(x+h) + \frac{1}{5}f(x+2h) - \frac{4}{3}f(x+3h) + f(x+4h) \right]
  * \]
  *
  * Note: Mathematica uses an 8th order approximation for the first derivative
@@ -594,22 +594,24 @@ export function erfInv(x: number): number {
  * f: the function
  * x: the point at which to approximate the derivative
  * h: the step size
+ *
+ * See https://en.wikipedia.org/wiki/Finite_difference_coefficient
  */
 export function centeredDiff8thOrder(
   f: (number) => number,
   x: number,
-  h = 0.0001
+  h = 0.1
 ) {
   return (
-    (-f(x - 4 * h) +
-      9 * f(x - 3 * h) -
-      45 * f(x - 2 * h) +
-      186 * f(x - h) -
-      186 * f(x + h) +
-      45 * f(x + 2 * h) -
-      9 * f(x + 3 * h) +
-      f(x + 4 * h)) /
-    (60 * h)
+    (f(x - 4 * h) / 280 -
+      (4 * f(x - 3 * h)) / 105 +
+      f(x - 2 * h) / 5 -
+      (4 * f(x - h)) / 5 +
+      (4 * f(x + h)) / 5 -
+      f(x + 2 * h) / 5 +
+      (4 * f(x + 3 * h)) / 105 -
+      f(x + 4 * h) / 280) /
+    h
   );
 }
 
@@ -635,7 +637,7 @@ export function monteCarloEstimate(
   f: (x: number) => number,
   a: number,
   b: number,
-  n = 10000
+  n = 100000
 ): number {
   let sum = 0;
 

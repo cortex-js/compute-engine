@@ -72,4 +72,27 @@ describe('CALCULUS', () => {
       expect(result.latex).toMatchInlineSnapshot(`D\\error{\\texttt{e}}`);
     });
   });
+
+  describe('ND', () => {
+    it('should compute the numerical approximation of the derivative of a polynomial', () => {
+      const expr = parse('\\mathrm{ND}(x \\mapsto x^3 + 2x - 4, 2)');
+      const result = expr.N();
+      expect(result.json).toMatchInlineSnapshot(`14.000000000000009`);
+    });
+
+    it('should compute the numerical approximation of the derivative of an expression', () => {
+      const expr = parse('\\mathrm{ND}(x \\mapsto \\cos x + 2x^3 - 4, 2)');
+      const result = expr.N();
+      expect(result.json).toMatchInlineSnapshot(`23.090702573188704`);
+    });
+  });
+
+  describe('NIntegrate', () => {
+    it('should compute the numerical approximation of a trig function', () => {
+      const expr = parse('\\mathrm{NIntegrate}(x \\mapsto \\sin x, 0, 1)');
+      const result = expr.N().valueOf() as number;
+
+      expect(Math.round(result * 100)).toMatchInlineSnapshot(`46`);
+    });
+  });
 });

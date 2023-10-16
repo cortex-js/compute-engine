@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- Parsing of whole numbers while in `rational` mode would return incorrect
+  results.
+- The `ND` function to evaluate derivatives numerically now return correct
+  values.
+
+```js
+ce.parse("\\mathrm{ND}(x \\mapsto 3x^2+5x+7, 2)").N();
+// -> 17.000000000001
+```
+
+### Improvements
+
+- Speed up `NIntegrate` by temporarily switching the numeric mode to `machine`
+  while computing the Monte Carlo approximation.
+
 ## 0.18.0
 
 **Release Date:** 2023-10-16
