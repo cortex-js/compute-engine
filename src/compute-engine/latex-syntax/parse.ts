@@ -1078,6 +1078,12 @@ export class _Parser implements Parser {
 
     if (!hasRepeatingPart && this.options.parseNumbers === 'rational') {
       const whole = parseInt(wholePart, 10);
+
+      if (!fractionalPart) {
+        if (exponent) return ['Multiply', whole, ['Power', 10, exponent]];
+        return whole;
+      }
+
       const fraction = parseInt(fractionalPart, 10);
 
       // Determine the number of decimal places in fractional part
