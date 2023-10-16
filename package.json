@@ -1,5 +1,5 @@
 {
-  "version": "0.17.0",
+  "version": "0.18.0",
   "scripts": {
     "build": "bash ./scripts/build.sh",
     "clean": "bash ./scripts/clean.sh",
@@ -40,10 +40,10 @@
   ],
   "exports": {
     ".": {
-        "types": "./dist/types/compute-engine.d.ts",
-        "require": "./dist/compute-engine.min.js",
-        "import": "./dist/compute-engine.min.esm.js",
-        "default": "./dist/compute-engine.min.js"
+      "types": "./dist/types/compute-engine.d.ts",
+      "require": "./dist/compute-engine.min.js",
+      "import": "./dist/compute-engine.min.esm.js",
+      "default": "./dist/compute-engine.min.js"
     }
   },
   "main": "./dist/compute-engine.min.js",

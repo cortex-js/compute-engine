@@ -1,4 +1,6 @@
-## [Unreleased]
+## 0.18.0 
+
+ **Release Date:** 2023-10-16
 
 ### New Features
 
