@@ -151,6 +151,18 @@ console.log(expr.json);
 // ➔ ["Rational", -3, 5]
 ```
 
+You can check if a non-canonical expression is a reduced (canonical) rational 
+number by checking the GCD of the numerator and denominator:
+
+```json
+const input = ce.parse("\\frac{30}{50}", {canonical: false});
+console.info(ce.box(
+  ["GCD", ["NumeratorDenominator", input]]
+).evaluate().valueOf() === 1);
+// ➔ false
+```
+
+
 The canonical form of an addition or mulipication will have its arguments
 ordered in a canonical way.
 

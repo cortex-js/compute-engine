@@ -239,6 +239,12 @@ equal to the smallest real number.
 
 Evaluate to a rational approximating the value of the number `n`.
 
+```json example
+["Rational", 0.42]
+// ➔ ["Rational", 21, 50]
+```
+
+
 <br>
 
 [&quot;**Rational**&quot;, _numerator_, _denominator_]{.signature}
@@ -246,5 +252,69 @@ Evaluate to a rational approximating the value of the number `n`.
 Represent a rational number equal to `numerator`over `denominator`.
 
 {% enddef %}
+
+
+{% def "Numerator" %}
+
+[&quot;**Numerator**&quot;, _expr_]{.signature}
+
+Return the numerator of `expr`.
+
+Note that `expr` may be a non-canonical form.
+
+
+```json example
+["Numerator", ["Rational", 4, 5]]
+// ➔ 4
+```
+
+{% enddef %}
+
+{% def "Denominator" %}
+
+[&quot;**Denominator**&quot;, _expr_]{.signature}
+
+Return the denominator of `expr`.
+
+Note that `expr` may be a non-canonical form.
+
+
+```json example
+["Denominator", ["Rational", 4, 5]]
+// ➔ 5
+```
+{% enddef %}
+
+
+{% def "NumeratorDenominator" %}
+
+[&quot;**NumeratorDenominator**&quot;, _expr_]{.signature}
+
+Return the numerator and denominator of `expr` as a sequence.
+
+Note that `expr` may be a non-canonical form.
+
+```json example
+["NumeratorDenominator", ["Rational", 4, 5]]
+// ➔ ["Sequence", 4, 5]
+```
+
+The sequence can be used with another function, for example GCD to 
+check if the fraction is in its canonical form:
+
+```json example
+["GCD", ["NumeratorDenominator", ["Rational", 4, 5]]]
+// ➔ 1
+
+["GCD", ["NumeratorDenominator", ["Rational", 8, 10]]]
+// ➔ 2
+```
+
+{% enddef %}
+
+
+
+
+
 
 {% enddefs %}
