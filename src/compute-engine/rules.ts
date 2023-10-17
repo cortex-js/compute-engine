@@ -50,7 +50,7 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
       // Substitute any unbound vars in the condition to a wildcard
       const condPattern = ce.pattern(latex);
       cond = (x: BoxedSubstitution): boolean =>
-        condPattern.subs(x).value?.symbol === 'True';
+        condPattern.subs(x).evaluate()?.symbol === 'True';
     } else cond = options?.condition as (x: BoxedSubstitution) => boolean;
 
     result.add([

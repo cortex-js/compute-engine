@@ -39,21 +39,20 @@ a machine number, a `Decimal` object or a `Complex` object, depending on the
 `ce.isComplex(expr.N().numericValue)`.
 
 **To access a JavaScript machine number approximation of the result** use
-`valueOf()`. If `numericValue` is a machine number, a `Decimal` object, or a
-rational, `valueOf()` will return a machine number approximation. Otherwise it
-returns a string serialization of the MathJSON representation of the expression.
+`expr.value`. If `numericValue` is a machine number, a `Decimal` object, or a
+rational, `expr.value` will return a machine number approximation.
 
 ```js
-console.log(ce.parse('11 + \\sqrt{x}').N().valueOf());
+console.log(ce.parse('11 + \\sqrt{x}').value);
 // ➔ "["Add",11,["Sqrt","x"]]"
-// Note: if the result is not a number, valueOf() returns a string
+// Note: if the result is not a number, value returns a string
 // representation of the expression
 
 const expr = ce.parse('\\sqrt{5} + 7^3').N();
 
-console.log(expr.valueOf());
+console.log(expr.value);
 // ➔ 345.2360679774998
-// If the result is a number, valueOf() returns a machine number approximation
+// If the result is a number, value returns a machine number approximation
 
 console.log(expr.latex);
 // ➔ "345.236\,067\,977\,499\,8,"
@@ -101,7 +100,7 @@ const expr = ce.parse('3x^2+4x+2');
 
 for (const x = 0; x < 1; x += 0.01) {
   ce.assign('x', x);
-  console.log(`f(${x}) = ${expr.N().valueOf()}`);
+  console.log(`f(${x}) = ${expr.value}`);
 }
 ```
 
@@ -112,7 +111,7 @@ each iteration, and will be much slower.
 const expr = ce.parse('3x^2+4x+2');
 
 for (const x = 0; x < 1; x += 0.01) {
-  console.log(`f(${x}) = ${expr.subs({ x: x }).N().valueOf()}`);
+  console.log(`f(${x}) = ${expr.subs({ x: x }).value}`);
 }
 ```
 

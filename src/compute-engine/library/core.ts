@@ -1,11 +1,12 @@
-import { BoxedExpression, IdentifierDefinitions } from '../public';
+import { BoxedDomain, BoxedExpression, IdentifierDefinitions } from '../public';
 import { joinLatex } from '../latex-syntax/tokenizer';
 import { asSmallInteger, fromDigits } from '../numerics/numeric';
 
 import { checkArg, checkArity } from '../boxed-expression/validate';
 import { randomExpression } from './random-expression';
 import { apply, canonicalFunctionExpression } from '../function-utils';
-import { canonical } from '../symbolic/utils.js';
+import { canonical } from '../symbolic/utils';
+import { isDomain } from '../boxed-expression/boxed-domain';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -221,7 +222,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           const op2 = ops[1];
           if (!op1.symbol) return ce.Nothing;
           const val = op2.evaluate();
-          ce.declare(op1.symbol, val);
+          if (!isDomain(val)) return undefined;
+          ce.declare(op1.symbol, val as BoxedDomain);
           return val;
         },
       },
@@ -345,7 +347,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (op1.string && asSmallInteger(op2) !== null)
             return ce.domain('Integers');
           if (op1.symbol) {
-            const vh = op1.value?.head;
+            const vh = op1.evaluate()?.head;
             if (vh) {
               const def = ce.lookupFunction(vh);
               if (def?.at) return undefined;
@@ -378,7 +380,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // or an indexable collection?
           if (op1.symbol) {
             // Is the value of the symbol an indexable collection?
-            const vh = op1.value?.head;
+            const vh = op1.evaluate()?.head;
             if (vh) {
               const def = ce.lookupFunction(vh);
               if (def?.at) return ce._fn('At', [op1.canonical, op2.canonical]);

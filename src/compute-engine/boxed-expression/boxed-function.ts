@@ -350,13 +350,6 @@ export class BoxedFunction extends _BoxedExpression {
     return this._def;
   }
 
-  get value(): BoxedExpression | undefined {
-    if (!this.isCanonical || !this.isPure) return undefined;
-    // Use cached value if the function is pure
-    if (!this._value) this._value = this.evaluate();
-    return this._value;
-  }
-
   /** `isEqual` is mathematical equality */
   isEqual(rhs: BoxedExpression): boolean {
     const s = signDiff(this, rhs);

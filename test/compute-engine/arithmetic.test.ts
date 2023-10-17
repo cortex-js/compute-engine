@@ -422,65 +422,42 @@ describe('Max', () => {
   test(`Max`, () => expect(checkJson(['Max', 'foo', 'bar'])).toMatchSnapshot());
 
   test('Max of a range', () => {
-    expect(
-      ce
-        .box(['Max', ['Range', 1, 10]])
-        .evaluate()
-        .valueOf()
-    ).toMatchInlineSnapshot(`10`);
+    expect(ce.box(['Max', ['Range', 1, 10]]).value).toMatchInlineSnapshot(`10`);
   });
 
   test('Max of a range of reals', () => {
-    expect(
-      ce
-        .box(['Max', ['Range', 1.2, 4.5]])
-        .evaluate()
-        .valueOf()
-    ).toMatchInlineSnapshot(`4.2`);
+    expect(ce.box(['Max', ['Range', 1.2, 4.5]]).value).toMatchInlineSnapshot(
+      `4.2`
+    );
   });
 
   test('Max of a range with custom step', () => {
-    expect(
-      ce
-        .box(['Max', ['Range', 1, 10, 7]])
-        .evaluate()
-        .valueOf()
-    ).toMatchInlineSnapshot(`8`);
+    expect(ce.box(['Max', ['Range', 1, 10, 7]]).value).toMatchInlineSnapshot(
+      `8`
+    );
   });
 
   test('Max of an interval', () => {
-    expect(
-      ce
-        .box(['Max', ['Interval', 1.1, 7.8]])
-        .evaluate()
-        .valueOf()
-    ).toMatchInlineSnapshot(`7.8`);
+    expect(ce.box(['Max', ['Interval', 1.1, 7.8]]).value).toMatchInlineSnapshot(
+      `7.8`
+    );
   });
 
   test('Max of a list', () => {
-    expect(
-      ce
-        .box(['Max', ['List', 4, 1, 56, 18]])
-        .evaluate()
-        .valueOf()
-    ).toMatchInlineSnapshot(`56`);
+    expect(ce.box(['Max', ['List', 4, 1, 56, 18]]).value).toMatchInlineSnapshot(
+      `56`
+    );
   });
 
   test('Max of a set', () => {
-    expect(
-      ce
-        .box(['Max', ['Set', 4, 1, 56, 18]])
-        .evaluate()
-        .valueOf()
-    ).toMatchInlineSnapshot(`["Max",["Set",4,1,56,18]]`);
+    expect(ce.box(['Max', ['Set', 4, 1, 56, 18]]).value).toMatchInlineSnapshot(
+      `["Max",["Set",4,1,56,18]]`
+    );
   });
 
   test('Max of a list with non-comparable', () => {
     expect(
-      ce
-        .box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]])
-        .evaluate()
-        .valueOf()
+      ce.box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]]).value
     ).toMatchInlineSnapshot(`["Max",56,"bar","foo"]`);
   });
 });
@@ -573,45 +550,29 @@ describe('Log Invalid', () => {
 
 describe('Limit', () => {
   expect(
-    ce
-      .box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
-      .evaluate()
-      .valueOf()
-  ).toMatchInlineSnapshot(
-    `["Limit",["Function",["Divide",["Sin","x"],"x"],"x"],0]`
-  );
-
-  expect(
-    ce
-      .box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
-      .N()
-      .valueOf()
+    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).value
   ).toMatchInlineSnapshot(`1`);
 
   expect(
-    ce
-      .box(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
-      .evaluate()
-      .valueOf()
+    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).value
   ).toMatchInlineSnapshot(`1`);
 
   expect(
-    ce
-      .box(['NLimit', ['Divide', ['Sin', '_'], '_'], 0])
-      .evaluate()
-      .valueOf()
+    ce.box(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+      .value
+  ).toMatchInlineSnapshot(`1`);
+
+  expect(
+    ce.box(['NLimit', ['Divide', ['Sin', '_'], '_'], 0]).value
   ).toMatchInlineSnapshot(`1`);
 
   // Should be "1"
   expect(
-    ce
-      .box([
-        'NLimit',
-        ['Function', ['Cos', ['Divide', 1, 'x']], 'x'],
-        'Infinity',
-      ])
-      .evaluate()
-      .valueOf()
+    ce.box([
+      'NLimit',
+      ['Function', ['Cos', ['Divide', 1, 'x']], 'x'],
+      'Infinity',
+    ]).value
   ).toMatchInlineSnapshot(`1`);
 });
 

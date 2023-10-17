@@ -200,7 +200,7 @@ volumes
       signature: {
         domain: ['FunctionOf', 'Anything', 'Numbers', 'Functions'],
         N: (ce, ops) => {
-          const x = ops[1]?.valueOf();
+          const x = ops[1]?.value;
           if (typeof x !== 'number') return undefined;
 
           const f = applicableN1(ce.box(ops[0]));
@@ -281,7 +281,7 @@ volumes
           ce.numericMode = 'machine';
 
           const f = applicableN1(ops[0]);
-          const [a, b] = ops.slice(1).map((op) => op.valueOf());
+          const [a, b] = ops.slice(1).map((op) => op.value);
           let result: BoxedExpression | undefined = undefined;
           if (typeof a === 'number' && typeof b === 'number')
             result = ce.number(monteCarloEstimate(f, a, b));

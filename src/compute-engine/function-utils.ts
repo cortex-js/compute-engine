@@ -275,14 +275,9 @@ export function applicableN1(fn: BoxedExpression): (x: number) => number {
   const ce = fn.engine;
 
   const lambda = makeLambda(fn);
-  if (lambda)
-    return (x) => (lambda([ce.number(x)])?.valueOf() as number) ?? NaN;
+  if (lambda) return (x) => (lambda([ce.number(x)])?.value as number) ?? NaN;
 
-  return (x) =>
-    ce
-      ._fn(fn.evaluate(), [ce.number(x)])
-      .evaluate()
-      .valueOf() as number;
+  return (x) => ce._fn(fn.evaluate(), [ce.number(x)]).value as number;
 }
 
 // xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html

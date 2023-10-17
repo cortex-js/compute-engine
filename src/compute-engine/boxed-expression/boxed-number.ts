@@ -148,10 +148,6 @@ export class BoxedNumber extends _BoxedExpression {
     return 1;
   }
 
-  get value(): BoxedExpression {
-    return this;
-  }
-
   get numericValue(): number | Decimal | Complex | Rational {
     return this._value;
   }

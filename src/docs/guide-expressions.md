@@ -158,7 +158,7 @@ number by checking the GCD of the numerator and denominator:
 const input = ce.parse("\\frac{30}{50}", {canonical: false});
 console.info(ce.box(
   ["GCD", ["NumeratorDenominator", input]]
-).evaluate().valueOf() === 1);
+).evaluate().value === 1);
 // ➔ false
 ```
 
@@ -283,9 +283,9 @@ The value of `expr.numericValue` may be:
 - `Array.isArray(expr.numericValue)`: the expression is a rational as a tuple of
   two JavaScript `number` or two JavaScript `bigint`.
 
-**To access a numerical approximation of an expression if available**, use
-`expr.N().valueOf()`. The result is a JavaScript number approximation of the
-value.
+**To access a the value of an expression as a JavaScript primitive**, use
+`expr.value`. The result is a JavaScript primitive, such as a number, string or
+boolean.
 
 <section id=errors>
 

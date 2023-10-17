@@ -64,12 +64,23 @@ export abstract class _BoxedExpression implements BoxedExpression {
     if (metadata?.latex !== undefined) this._latex = metadata.latex;
   }
 
-  /** `Object.valueOf()`: return a primitive value for the object
+  /**
+   *
+   * `Object.valueOf()`: return a JavaScript primitive value for the expression
    *
    */
-  valueOf(): number | string | boolean {
+  valueOf(): number | any[] | string | boolean {
     if (this.symbol === 'True') return true;
     if (this.symbol === 'False') return false;
+    if (
+      this.head &&
+      typeof this.head === 'string' &&
+      ['List', 'Set', 'Sequence', 'Tuple', 'Pair', 'Single', 'Triple'].includes(
+        this.head
+      )
+    ) {
+      return this.ops?.map((x) => x.valueOf()) as any[];
+    }
     return (
       asFloat(this) ?? this.string ?? this.symbol ?? JSON.stringify(this.json)
     );
@@ -83,14 +94,14 @@ export abstract class _BoxedExpression implements BoxedExpression {
     if (num !== null) {
       if (typeof num === 'number') return num.toString();
       if (isMachineRational(num))
-        return `${num[0].toString()}/${num[1].toString()}`;
+        return `(${num[0].toString()}/${num[1].toString()})`;
       if (isBigRational(num))
-        return `${num[0].toString()}/${num[1].toString()}`;
+        return `(${num[0].toString()}/${num[1].toString()})`;
       if (num instanceof Complex) {
         const im = num.im === 1 ? '' : num.im === -1 ? '-' : num.im.toString();
         if (num.re === 0) return im + 'i';
         if (num.im < 0) return `${num.re.toString()}${im}i`;
-        return `${num.re.toString()}+${im}i`;
+        return `(${num.re.toString()}+${im}i)`;
       }
     }
 
@@ -395,10 +406,13 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  get value(): BoxedExpression | undefined {
-    return undefined;
+  get value(): number | boolean | string | number[] | undefined {
+    return this.N().valueOf();
   }
-  set value(_value: BoxedExpression | number | undefined) {
+
+  set value(
+    _value: BoxedExpression | number | boolean | string | number[] | undefined
+  ) {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 

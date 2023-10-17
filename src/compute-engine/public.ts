@@ -387,15 +387,15 @@ export interface BoxedExpression {
   /** From `Object.valueOf()`, return a primitive value for the expression.
    *
    * If the expression is a machine number, or bignum or rational that can be
-   * converted to a machine number, return a `number`.
+   * converted to a machine number, return a JavaScript `number`.
    *
    * If the expression is a symbol, return the name of the symbol as a `string`.
    *
-   * Otherwise return a LaTeX representation of the expression.
+   * Otherwise return a JavaScript primitive representation of the expression.
    *
    * @category Primitive Methods
    */
-  valueOf(): number | string | boolean;
+  valueOf(): number | any[] | string | boolean;
 
   /** From `Object.toString()`, return a string representation of the
    *  expression. This string is suitable to be output to the console
@@ -1108,15 +1108,12 @@ export interface BoxedExpression {
   solve(vars: Iterable<string>): null | BoxedExpression[];
 
   /**
-   * Synonym for `evaluate()`. If the expression is pure, the value may be
-   * cached.
+   * Return a JavaScript primitive representing the value of this expression.
    *
-   * It returns `undefined` for expressions that are not pure or that may
-   * not be evaluated.
+   * Equivalent to `expr.N().valueOf()`.
    *
-   * **Note**: If non-canonical, return the value of its canonical counterpart
    */
-  get value(): BoxedExpression | undefined;
+  get value(): number | boolean | string | number[] | undefined;
 
   /**
    * Only the value of variables can be changed (symbols that are not
@@ -1127,7 +1124,19 @@ export interface BoxedExpression {
    * **Note**: If non-canonical, does nothing.
    *
    */
-  set value(value: BoxedExpression | number | undefined);
+  set value(
+    value:
+      | boolean
+      | string
+      | Decimal
+      | Complex
+      | { re: number; im: number }
+      | { num: number; denom: number }
+      | number[]
+      | BoxedExpression
+      | number
+      | undefined
+  );
 
   /**
    *

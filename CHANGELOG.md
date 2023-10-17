@@ -17,6 +17,10 @@
 - Added `Head` and `Tail` functions which can be used on non-canonical
   expressions.
 
+- Improved interoperability with JavaScript: `expr.value` will return a
+  JavaScript primitive (`number`, `boolean`, `string`, etc...) when possible.
+  This is a more succinct version of `expr.N().valueOf()`.
+
 ## 0.18.1
 
 **Release Date:** 2023-10-16

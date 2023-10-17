@@ -90,7 +90,7 @@ describe('CALCULUS', () => {
   describe('NIntegrate', () => {
     it('should compute the numerical approximation of a trig function', () => {
       const expr = parse('\\mathrm{NIntegrate}(x \\mapsto \\sin x, 0, 1)');
-      const result = expr.N().valueOf() as number;
+      const result = expr.value as number;
 
       expect(Math.round(result * 100)).toMatchInlineSnapshot(`46`);
     });

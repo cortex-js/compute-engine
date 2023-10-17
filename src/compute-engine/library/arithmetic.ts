@@ -1124,7 +1124,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ce.number(
             limit(
               (x) => {
-                let y = fn([ce.number(x)])?.valueOf();
+                let y = fn([ce.number(x)])?.value;
                 return typeof y === 'number' ? y : Number.NaN;
               },
               target,
@@ -1154,7 +1154,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ce.number(
             limit(
               (x) => {
-                let y = fn([ce.number(x)])?.valueOf();
+                let y = fn([ce.number(x)])?.value;
                 return typeof y === 'number' ? y : Number.NaN;
               },
               target,

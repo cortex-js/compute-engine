@@ -239,9 +239,9 @@ export class BoxedSymbol extends _BoxedExpression {
     return false;
   }
 
-  get value(): BoxedExpression | undefined {
+  get value(): number | boolean | string | number[] | undefined {
     const def = this._def;
-    if (def && def instanceof _BoxedSymbolDefinition) return def.value;
+    if (def && def instanceof _BoxedSymbolDefinition) return def.value?.value;
     return undefined;
   }
 
@@ -251,7 +251,9 @@ export class BoxedSymbol extends _BoxedExpression {
       | string
       | Decimal
       | Complex
-      | [num: number, denom: number]
+      | { re: number; im: number }
+      | { num: number; denom: number }
+      | number[]
       | BoxedExpression
       | number
       | undefined
@@ -269,10 +271,22 @@ export class BoxedSymbol extends _BoxedExpression {
     let v: BoxedExpression | undefined;
     if (typeof value === 'boolean') value = value ? ce.True : ce.False;
     if (typeof value === 'string') value = ce.string(value);
+    if (typeof value === 'object') {
+      if ('re' in value && 'im' in value)
+        value = ce.complex(value.re, value.im);
+      else if ('num' in value && 'denom' in value)
+        value = ce.number([value.num, value.denom]);
+      else if (Array.isArray(value))
+        value = ce._fn(
+          'List',
+          value.map((x) => ce.box(x))
+        );
+      else throw new Error(`Invalid value for symbol ${this._id}: ${value}`);
+    }
 
     if (value !== undefined) {
-      const boxedValue = ce.box(value);
-      v = boxedValue.value ?? boxedValue.evaluate();
+      const boxedValue = ce.box(value as Complex | Decimal | BoxedExpression);
+      v = boxedValue.evaluate();
     }
 
     //
@@ -348,7 +362,10 @@ export class BoxedSymbol extends _BoxedExpression {
   get sgn(): -1 | 0 | 1 | undefined | null {
     // If available, use the value associated with this symbol.
     // Note that `null` is an acceptable and valid value
-    const v = this.value;
+    const def = this._def;
+    if (!def || !(def instanceof _BoxedSymbolDefinition)) return null;
+
+    const v = def.value;
     if (v && v !== this) {
       const s = v.sgn;
       if (s !== undefined) return s;
@@ -356,12 +373,9 @@ export class BoxedSymbol extends _BoxedExpression {
 
     // We didn't get a definitive answer from the value
     // of this symbol. Check flags.
-    const def = this.symbolDefinition;
-    if (def) {
-      if (def.zero === true) return 0;
-      if (def.positive === true) return 1;
-      if (def.negative === true) return -1;
-    } else return null;
+    if (def.zero === true) return 0;
+    if (def.positive === true) return 1;
+    if (def.negative === true) return -1;
     return undefined;
   }
 

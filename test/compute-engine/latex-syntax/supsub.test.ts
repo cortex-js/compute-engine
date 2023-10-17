@@ -101,14 +101,38 @@ describe('SUPSUB', () => {
         "Multiply",
         "_",
         ["Power", ["Add", "p", 1], ["Add", "q", 1]],
-        ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", "s", 1]]
+        [
+          "Power",
+          [
+            "Error",
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Symbols"],
+            ["Subscript", "x", ["Add", "r", 1]]
+          ],
+          ["Add", "s", 1]
+        ]
       ]
     `); // @fixme: nope...
     expect(parse('x{}_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
         "Multiply",
-        ["Power", ["Subscript", "x", ["Add", "p", 1]], ["Add", "q", 1]],
-        ["Power", ["Subscript", "x", ["Add", "r", 1]], ["Add", "s", 1]]
+        [
+          "Power",
+          [
+            "Error",
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Symbols"],
+            ["Subscript", "x", ["Add", "p", 1]]
+          ],
+          ["Add", "q", 1]
+        ],
+        [
+          "Power",
+          [
+            "Error",
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Symbols"],
+            ["Subscript", "x", ["Add", "r", 1]]
+          ],
+          ["Add", "s", 1]
+        ]
       ]
     `); // @fixme: nope...
   });

@@ -958,7 +958,7 @@ function fastEval() {
   const startTime = performance.now();
   for (let x = 0; x <= Math.PI; x += 0.01) {
     ce.assign('x', x);
-    y += Number(expr3.N().valueOf());
+    y += Number(expr3.value);
   }
 
   console.info(

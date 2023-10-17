@@ -163,7 +163,7 @@ ce.assign("s", "Hello");
 // Functions
 ce.assign("f", "$$ 2x + 3 $$");
 ce.assign("double", ["Function", ["Multiply", "x", 2], "x"]);
-ce.assign("halve", (ce, args) => ce.number(args[0].valueOf() / 2));
+ce.assign("halve", (ce, args) => ce.number(args[0].value / 2));
 ```
 
 Note that when assigning an expression to a symbol, the expression is not
@@ -260,7 +260,7 @@ for it. You can do this by adding a `evaluate` handler to the definition of
 ce.declare("double", {
   signature: {
     domain: "Functions",
-    evaluate: (ce, args) => ce.number(args[0].valueOf() * 2),
+    evaluate: (ce, args) => ce.number(args[0].value * 2),
   },
 });
 ```
@@ -297,7 +297,7 @@ of the function can be a JavaScript function, a MathJSON expression or a LaTeX
 expression.
 
 ```js example
-ce.assign("f", (ce, args) => ce.number(args[0].valueOf() * 5)};
+ce.assign("f", (ce, args) => ce.number(args[0].value * 5)};
 ```
 
 The value can also be a MathJSON expression:
@@ -374,7 +374,7 @@ ce.declare({
   Smallfrac: {
     signature: {
       domain: "NumericFunctions",
-      evaluate: (ce, args) => ce.box(args[0].valueOf() / args[1].valueOf()),
+      evaluate: (ce, args) => ce.box(args[0].value / args[1].value),
     },
   },
 });
