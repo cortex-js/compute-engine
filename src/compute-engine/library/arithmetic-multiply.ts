@@ -16,6 +16,7 @@ import {
 import { apply2N } from '../symbolic/utils';
 import { checkArg } from '../boxed-expression/validate';
 import { normalizeLimits } from './utils';
+import { iterable } from '../collection-utils';
 
 /** The canonical form of `Multiply`:
  * - remove `1`
@@ -266,16 +267,54 @@ export function canonicalProduct(
 export function evalMultiplication(
   ce: IComputeEngine,
   expr: BoxedExpression,
-  range: BoxedExpression,
+  range: BoxedExpression | undefined,
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
+  let result: BoxedExpression | undefined | null = null;
+
+  if (!range) {
+    // The body is a collection, e.g. Product({1, 2, 3})
+    const body = expr.evaluate();
+    if (bignumPreferred(ce)) {
+      let product = ce.bignum(1);
+      for (const x of iterable(body)) {
+        const term = asBignum(x);
+        if (term === null) {
+          result = undefined;
+          break;
+        }
+        if (!term.isFinite()) {
+          product = term;
+          break;
+        }
+        product = product.mul(term);
+      }
+      if (result === null) result = ce.number(product);
+    } else {
+      let product = 1;
+      for (const x of iterable(body)) {
+        const term = asFloat(x);
+        if (term === null) {
+          result = undefined;
+          break;
+        }
+        if (term === null || !Number.isFinite(term)) {
+          product = term;
+          break;
+        }
+        product *= term;
+      }
+      if (result === null) result = ce.number(product);
+    }
+    return result ?? undefined;
+  }
+
   const [index, lower, upper, isFinite] = normalizeLimits(range);
 
   const fn = expr;
   if (mode !== 'N' && (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS))
     return undefined;
 
-  let result: BoxedExpression | undefined | null = null;
   const savedContext = ce.swapScope(fn.scope);
   ce.pushScope();
   fn.bind();

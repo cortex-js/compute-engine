@@ -108,9 +108,12 @@ The predicate can take the form of:
 
 {% enddef %}
 
-## Inspecting an Expression
 
-The following functions can be used to obtain information about an expression.
+## Structural Operations
+
+The following functions can be applied to non-canonical expressions.
+The do not depend on the canonical form, but reflect the structure of the
+expression.
 
 {% def "About" %}
 
@@ -120,6 +123,70 @@ Evaluate to a dictionary expression containing information about an identifier
 such as its domain, its attributes, its value, etc...
 
 {% enddef %}
+
+
+{% def "Head" %}
+
+[&quot;**Head**&quot;, _expression_]{.signature}
+
+Evaluate to the head of _expression_
+
+```json example
+["Head", ["Add", 2, 3]]
+
+// ➔ "Add"
+```
+
+{% enddef %}
+
+{% def "Tail" %}
+
+[&quot;**Tail**&quot;, _expression_]{.signature}
+
+Evaluate to a sequence of the arguments of _expression_.
+
+```json example
+["Tail", ["Add", 2, 3]]
+// ➔ ["Sequence", 2, 3]
+```
+
+`Tail` can be used to change the head of an expression, for example:
+
+```json example
+["Multiply", ["Tail", ["Add", 2, 3]]]
+// ➔ ["Multiply", 2, 3]
+```
+
+
+{% enddef %}
+
+
+
+{% def "Hold" %}
+
+[&quot;**Hold**&quot;, _expression_]{.signature}
+
+Tag an expression that should be kept in an unevaluated form
+
+{% enddef %}
+
+{% def "Identity" %}
+
+[&quot;**Identity**&quot;, _expression_]{.signature}
+
+Evaluate to its argument
+
+In the mathematical sense, this is an operator (a function that takes a function
+as an argument and returns a function).
+
+{% enddef %}
+
+
+
+## Inspecting an Expression
+
+The following functions can be used to obtain information about an expression.
+
 
 {% def "Domain" %}
 
@@ -135,19 +202,6 @@ Evaluate to the domain of _expression_
 
 {% enddef %}
 
-{% def "Head" %}
-
-[&quot;**Head**&quot;, _expression_]{.signature}
-
-Evaluate to the head of _expression_
-
-```json example
-["Head", ["Add", 2, 3]]
-
-// ➔ "Add"
-```
-
-{% enddef %}
 
 ## Transforming an Expression
 
@@ -199,25 +253,6 @@ expression.
 
 The _context_ is an optional expression that provides additional information
 about the error.
-
-{% enddef %}
-
-{% def "Hold" %}
-
-[&quot;**Hold**&quot;, _expression_]{.signature}
-
-Tag an expression that should be kept in an unevaluated form
-
-{% enddef %}
-
-{% def "Identity" %}
-
-[&quot;**Identity**&quot;, _expression_]{.signature}
-
-Evaluate to its argument
-
-In the mathematical sense, this is an operator (a function that takes a function
-as an argument and returns a function).
 
 {% enddef %}
 

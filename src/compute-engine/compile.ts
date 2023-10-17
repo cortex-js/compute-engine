@@ -65,9 +65,9 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Exp: 'Math.exp',
   Floor: 'Math.floor',
   Gamma: '_SYS.gamma',
-  Gcd: '_SYS.gcd',
+  GCD: '_SYS.gcd',
   // Math.hypot
-  Lcm: '_SYS.lcm',
+  LCM: '_SYS.lcm',
   Limit: (args, compile) =>
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
   Ln: 'Math.log',

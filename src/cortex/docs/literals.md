@@ -161,7 +161,6 @@ value of the literal.
 +03.14_15_92_65
 ```
 
-
 ## Strings
 
 ### Single Line String
@@ -195,7 +194,7 @@ character:
 
 A multiline string is delimited by `"""` (three quotation marks).
 
-````cortex
+```cortex
 cortex = """
       ,ad8888ba,
     d8"'    `"8b                             ,d
@@ -238,7 +237,7 @@ also omitted.This can come in handy when using a very long string.
 ```cortex
 hello = "Hello \
 World"  // Same as "Hello World"
-````
+```
 
 ```cortex
 hello2 = """
@@ -285,5 +284,3 @@ A string literal which contains no escape sequences is delimited by one or more
 These string as useful for string containing characters such as quotation mark
 or backslash that would otherwise need to be escaped, leading to the
 [Leaning Tootpick Syndrome](https://en.wikipedia.org/wiki/Leaning_toothpick_syndrome).
-
-

@@ -4,8 +4,9 @@ import {
   IComputeEngine,
   IdentifierDefinitions,
 } from '../public';
-import { applicable, iterable } from '../function-utils';
+import { applicable } from '../function-utils';
 import { widen } from '../boxed-expression/boxed-domain';
+import { iterable } from '../collection-utils';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {

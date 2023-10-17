@@ -5,6 +5,7 @@ import { asSmallInteger, fromDigits } from '../numerics/numeric';
 import { checkArg, checkArity } from '../boxed-expression/validate';
 import { randomExpression } from './random-expression';
 import { apply, canonicalFunctionExpression } from '../function-utils';
+import { canonical } from '../symbolic/utils.js';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -110,6 +111,57 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     },
   },
   {
+    // Structural operations that can be applied to non-canonical expressions
+    // @todo
+    About: { signature: { domain: 'Functions' } },
+
+    Head: {
+      hold: 'all',
+      signature: {
+        domain: 'Functions',
+        canonical: (ce, args) => {
+          // **IMPORTANT** Head should work on non-canonical expressions
+          if (args.length !== 1) return null;
+          const op1 = args[0];
+          if (op1.head) return ce.box(op1.head);
+          return ce._fn('Head', canonical(args));
+        },
+        evaluate: (ce, ops) => {
+          const op1 = ops[0];
+          if (typeof op1?.head === 'string') return ce.symbol(op1.head);
+          return op1?.head ?? ce.Nothing;
+        },
+      },
+    },
+
+    Tail: {
+      hold: 'all',
+      signature: {
+        domain: 'Functions',
+        canonical: (ce, args) => {
+          // **IMPORTANT** Tail should work on non-canonical expressions
+          if (args.length !== 1) return null;
+          const op1 = args[0];
+          if (op1.ops) return ce._fn('Sequence', op1.ops);
+          return ce._fn('Tail', canonical(args));
+        },
+        evaluate: (ce, ops) => {
+          const op1 = ops[0];
+          if (op1?.ops) return ce.fn('Sequence', op1.ops);
+          return ce.box(['Sequence']);
+        },
+      },
+    },
+
+    Identity: {
+      signature: {
+        domain: ['FunctionOf', 'Anything', 'Anything'],
+        codomain: (_ce, ops) => ops[0].domain,
+        evaluate: (_ce, ops) => ops[0],
+      },
+    },
+  },
+  {
     Apply: {
       signature: {
         domain: 'Functions',
@@ -151,9 +203,6 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => ce.string(ce.assume(ops[0])),
       },
     },
-
-    // @todo
-    About: { signature: { domain: 'Functions' } },
 
     Declare: {
       hold: 'all',
@@ -240,25 +289,6 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         codomain: (_ce, ops) => ops[0].domain,
         canonical: (ce, ops) => ce._fn('N', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].N(),
-      },
-    },
-
-    Head: {
-      signature: {
-        domain: 'Functions',
-        evaluate: (ce, ops) => {
-          const op1 = ops[0];
-          if (typeof op1?.head === 'string') return ce.symbol(op1.head);
-          return op1?.head ?? ce.Nothing;
-        },
-      },
-    },
-
-    Identity: {
-      signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything'],
-        codomain: (_ce, ops) => ops[0].domain,
-        evaluate: (_ce, ops) => ops[0],
       },
     },
 

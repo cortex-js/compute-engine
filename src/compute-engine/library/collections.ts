@@ -8,7 +8,7 @@ import {
 } from '../public';
 
 // From NumPy:
-const DEFAULT_LINSPACE_COUNT = 50;
+export const DEFAULT_LINSPACE_COUNT = 50;
 
 // @todo: future thoughts. Consider
 // - operations from the Scala library, which is particularly well designed:

@@ -68,7 +68,6 @@ any collection types.
 
 ```json example
 ["Extract", ["List", 2, 5, 7], 2]
-
 // ➔ ["List", 5]
 ```
 
@@ -76,7 +75,6 @@ any collection types.
 
 ```json example
 ["Extract", ["Range", 2, 10], 5]
-
 // ➔ ["List", 7]
 ```
 
@@ -208,7 +206,6 @@ If `dimensions` is a number, a list of that length is created.
 
 ```json example
 ["Fill", 3, 0]
-
 // ➔ ["List", 0, 0, 0]
 ```
 
@@ -216,7 +213,6 @@ If dimension is a tuple, a matrix of the specified dimensions is created.
 
 ```json example
 ["Fill", ["Tuple", 2, 3], 0]
-
 // ➔ ["List", ["List", 0, 0, 0], ["List", 0, 0, 0]]
 ```
 
@@ -225,7 +221,6 @@ compute the value of the element.
 
 ```json example
 ["Fill", ["Tuple", 2, 3], ["Function", ["Add", "i", "j"], "i", "j"]]
-
 // ➔ ["List", ["List", 0, 1, 2], ["List", 1, 2, 3]]
 ```
 
@@ -239,7 +234,6 @@ An infinite collection of the same element.
 
 ```json example
 ["Repeat", 0]
-
 // ➔ ["List", 0, 0, 0, ...]
 ```
 
@@ -247,7 +241,6 @@ Use `Take` to get a finite number of elements.
 
 ```json example
 ["Take", ["Repeat", 42], 3]
-
 // ➔ ["List", 42, 42, 42]
 ```
 
@@ -274,7 +267,6 @@ Use `Take` to get a finite number of elements.
 
 ```json example
 ["Take", ["Cycle", ["List", 5, 7, 2]], 5]
-
 // ➔ ["List", 5, 7, 2, 5, 7]
 ```
 
@@ -294,6 +286,7 @@ If the `initial` value is not specified, it is assumed to be `0`
 ```json example
 ["Iterate", ["Function", ["Multiply", "_", 2]], 1]
 
+
 // ➔ ["List", 1, 2, 4, 8, 16, ...]
 ```
 
@@ -301,7 +294,6 @@ Use `Take` to get a finite number of elements.
 
 ```json example
 ["Take", ["Iterate", ["Function", ["Add", "_", 2]], 7], 5]
-
 // ➔ ["List", 7, 9, 11, 13, 15]
 ```
 
@@ -325,7 +317,6 @@ order.
 
 ```json example
 ["Flatten", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
-
 // ➔ ["List", 5, 2, 10, 18, 1, 2, 3]
 ```
 
@@ -344,7 +335,6 @@ Returns a collection with the specified dimensions.
 
 ```json example
 ["Reshape", ["Range", 9], ["Tuple", 3, 3]]
-
 // ➔ ["List", ["List", 1, 2, 3], ["List", 4, 5, 6], ["List", 7, 8, 9]]
 ```
 
@@ -361,7 +351,6 @@ Return the collection in reverse order.
 
 ```json example
 ["Reverse", ["List", 5, 2, 10, 18]]
-
 // ➔ ["List", 18, 10, 2, 5]
 ```
 
@@ -377,7 +366,6 @@ Returns the transpose of the matrix.
 
 ```json example
 ["Transpose", ["List", ["List", 1, 2, 3], ["List", 4, 5, 6]]]
-
 // ➔ ["List", ["List", 1, 4], ["List", 2, 5], ["List", 3, 6]]
 ```
 
@@ -392,13 +380,10 @@ by the elements of the second collection.
 
 All the collections should have the same head.
 
-````json example
-["Join", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]
-
 ```json example
 ["Join", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]
 // ➔ ["List", 5, 2, 10, 18, 1, 2, 3]
-````
+```
 
 {% enddef %}
 
@@ -459,7 +444,6 @@ An index can be repeated to extract the same element multiple times.
 
 ```json example
 ["Extract", ["List", 5, 2, 10, 18], 3, 3, 1]
-
 // ➔ ["List", 10, 10, 5]
 ```
 
@@ -498,7 +482,6 @@ once.
 
 ```json example
 ["Exclude", ["List", 5, 2, 10, 18], 3, 3, 1]
-
 // ➔ ["List", 2, 18]
 ```
 
@@ -566,7 +549,6 @@ Return the second element of the collection.
 
 ```json example
 ["Second", ["Tuple", "x", "y"]]
-
 // ➔ "y"
 ```
 
@@ -580,7 +562,6 @@ Return the last element of the collection.
 
 ```json example
 ["Last", ["List", 5, 2, 10, 18]]
-
 // ➔ 18
 ```
 
@@ -590,7 +571,6 @@ Return the last _n_ elements of the collection.
 
 ```json example
 ["Last", ["List", 5, 2, 10, 18], 2]
-
 // ➔ ["List", 10, 18]
 ```
 
@@ -606,7 +586,6 @@ It's equivalent to `["Drop", _collection_, 1]`.
 
 ```json example
 ["Rest", ["List", 5, 2, 10, 18]]
-
 // ➔ ["List", 2, 10, 18]
 ```
 
@@ -622,7 +601,6 @@ It's equivalent to `["Drop", _collection_, -1]`.
 
 ```json example
 ["Most", ["List", 5, 2, 10, 18]]
-
 // ➔ ["List", 5, 2, 10]
 ```
 
@@ -638,7 +616,6 @@ Return the collection in sorted order.
 
 ```json example
 ["Sort", ["List", 5, 2, 10, 18]]
-
 // ➔ ["List", 2, 5, 10, 18]
 ```
 
@@ -652,7 +629,6 @@ Return the collection in random order.
 
 ```json example
 ["Shuffle", ["List", 5, 2, 10, 18]]
-
 // ➔ ["List", 10, 18, 5, 5]
 ```
 
@@ -667,7 +643,6 @@ count.
 
 ```json example
 ["RotateLeft", ["List", 5, 2, 10, 18], 2]
-
 // ➔ ["List", 10, 18, 5, 2]
 ```
 
@@ -682,7 +657,6 @@ specified count.
 
 ```json example
 ["RotateRight", ["List", 5, 2, 10, 18], 2]
-
 // ➔ ["List", 10, 18, 5, 2]
 ```
 
@@ -699,7 +673,6 @@ This is equivalent to the first element of the result of `Tally`:
 
 ```json example
 ["Unique", ["List", 5, 2, 10, 18, 5, 2, 5]]
-
 // ➔ ["List", 5, 2, 10, 18]
 ```
 
@@ -764,7 +737,6 @@ arguments.
 
 ```json example
 ["Fold", ["List", 5, 2, 10, 18], "Add"]
-
 // ➔ 35
 ```
 
@@ -783,18 +755,18 @@ Returns the number of elements in the collection.
 When the collection is a matrix (list of lists), `Length` returns the number of
 rows.
 
-````json example
+```json example
 ["Length", ["List", 5, 2, 10, 18]]
 // ➔ 4
+```
 
 When the collection is a string, `Length` returns the number of characters in
 the string.
 
-
 ```json example
-["Length", {str: "Hello"}]
+["Length", { "str": "Hello" }]
 // ➔ 5
-````
+```
 
 {% enddef %}
 
@@ -879,7 +851,6 @@ Return the indexes of the collection in sorted order.
 
 ```json example
 ["Ordering", ["List", 5, 2, 10, 18]]
-
 // ➔ ["List", 2, 1, 3, 4]
 ```
 
@@ -909,7 +880,6 @@ Returns a tuples of two lists:
 
 ```json example
 ["Tally", ["List", 5, 2, 10, 18, 5, 2, 5]]
-
 // ➔ ["Tuple", ["List", 5, 2, 10, 18], ["List", 3, 2, 1, 1]]
 ```
 
@@ -924,13 +894,11 @@ collection.
 
 ```json example
 ["Map", ["Function", ["Add", "x", 1], "x"], ["List", 5, 2, 10, 18]]
-
 // ➔ ["List", 6, 3, 11, 19]
 ```
 
 ```json example
 ["Map", ["List", 5, 2, 10, 18], ["Function", ["Add", "_", 1]]]
-
 // ➔ ["List", 6, 3, 11, 19]
 ```
 
@@ -945,7 +913,6 @@ collection. Only the elements for which the function returns `"True"` are kept.
 
 ```json example
 ["Filter", ["List", 5, 2, 10, 18], ["Function", ["Less", "_", 10]]]
-
 // ➔ ["List", 5, 2]
 ```
 
@@ -963,7 +930,6 @@ The length of the resulting collection is the length of the shortest collection.
 
 ```json example
 ["Zip", ["List", 1, 2, 3], ["List", 4, 5, 6]]
-
 // ➔ ["List", ["Tuple", 1, 4], ["Tuple", 2, 5], ["Tuple", 3, 6]]
 ```
 

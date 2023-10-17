@@ -2,3 +2,4 @@
 /submodules/
 /build/
 /dist/
+**/docs/

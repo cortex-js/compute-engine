@@ -1,5 +1,6 @@
+import { each } from '../collection-utils';
 import { asFloat, erf, erfInv } from '../numerics/numeric';
-import { BoxedExpression, IdentifierDefinitions } from '../public';
+import { IdentifierDefinitions } from '../public';
 
 //   // mean
 //   // median
@@ -284,71 +285,3 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     },
   },
 ];
-
-/**
- * Iterate over all the expressions in an expression tree with
- * the following form:
- * - ops: []
- * - ops: [op, op, op, ...]
- * - ops: [["List", op, op, ...]]
- * - ops: [["List", ["List", op, op...], ["List", op, op...], ...]]
- * - ops: [["Range", upper]]
- * - ops: [["Range", lower, upper]]
- * - ops: [["Range", lower, upper, step]]
- */
-function* each(ops: BoxedExpression[]): Generator<BoxedExpression> {
-  if (ops.length === 0) return;
-
-  const ce = ops[0].engine;
-
-  for (const op of ops) {
-    const h = op.head;
-    if (h === 'Range') {
-      let lower = asFloat(op[1]);
-      if (lower === null) return;
-      let upper = asFloat(op[2]);
-      if (upper === null) {
-        upper = lower;
-        lower = 1;
-      }
-
-      if (lower > upper) {
-        const step = asFloat(op[3] ?? -1) ?? -1;
-        if (step >= 0) return;
-        for (let i = lower; i <= upper; i += step) yield ce.number(i);
-        return;
-      }
-
-      const step = asFloat(op[3] ?? 1) ?? 1;
-      if (step <= 0) return;
-      for (let i = lower; i <= upper; i += step) yield ce.number(i);
-      return;
-    }
-    if (h === 'Linspace') {
-      let start = asFloat(op[1]);
-      if (start === null) return;
-      let stop = asFloat(op[2]);
-      if (stop === null) {
-        stop = start;
-        start = 0;
-      }
-      const num = asFloat(op[3]) ?? 50;
-      if (!Number.isInteger(num)) return;
-      if (num <= 0) return;
-
-      const step = (stop - start) / (num - 1);
-
-      for (let i = start; i <= stop; i += step) yield ce.number(i);
-      return;
-    }
-
-    if (
-      typeof h === 'string' &&
-      /^(List|Sequence|Tuple|Single|Pair|Triple)$/.test(h)
-    ) {
-      yield* each(op.ops!);
-      return;
-    }
-    yield op;
-  }
-}

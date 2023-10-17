@@ -9,6 +9,7 @@ import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
 import { checkArg } from '../boxed-expression/validate';
 import { normalizeLimits } from './utils';
+import { iterable } from '../collection-utils';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -167,16 +168,55 @@ export function canonicalSummation(
 export function evalSummation(
   ce: IComputeEngine,
   expr: BoxedExpression,
-  range: BoxedExpression,
+  range: BoxedExpression | undefined,
   mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
+  let result: BoxedExpression | undefined | null = null;
+
+  if (!range) {
+    // The body is a collection, e.g. Sum({1, 2, 3})
+
+    const body = expr.evaluate();
+    if (bignumPreferred(ce)) {
+      let sum = ce.bignum(0);
+      for (const x of iterable(body)) {
+        const term = asBignum(x);
+        if (term === null) {
+          result = undefined;
+          break;
+        }
+        if (!term.isFinite()) {
+          sum = term;
+          break;
+        }
+        sum = sum.add(term);
+      }
+      if (result === null) result = ce.number(sum);
+    } else {
+      let sum = 0;
+      for (const x of iterable(body)) {
+        const term = asFloat(x);
+        if (term === null) {
+          result = undefined;
+          break;
+        }
+        if (term === null || !Number.isFinite(term)) {
+          sum = term;
+          break;
+        }
+        sum += term;
+      }
+      if (result === null) result = ce.number(sum);
+    }
+    return result ?? undefined;
+  }
+
   const [index, lower, upper, isFinite] = normalizeLimits(range);
 
   const fn = expr;
   if (mode !== 'N' && (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS))
     return undefined;
 
-  let result: BoxedExpression | undefined | null = null;
   const savedContext = ce.swapScope(fn.scope);
   ce.pushScope();
   fn.bind();

@@ -739,9 +739,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'Gamma',
   },
   {
-    name: 'Gcd',
+    name: 'GCD',
     identifierTrigger: 'gcd',
     kind: 'function',
+  },
+  {
+    identifierTrigger: 'GCD',
+    kind: 'function',
+    parse: 'GCD',
   },
   {
     name: 'Half',
@@ -792,9 +797,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
 
   {
-    name: 'Lcm',
+    name: 'LCM',
     identifierTrigger: 'lcm',
     kind: 'function',
+  },
+  {
+    identifierTrigger: 'LCM',
+    kind: 'function',
+    parse: 'LCM',
   },
   { identifierTrigger: 'max', kind: 'function', parse: 'Max' },
   { identifierTrigger: 'min', kind: 'function', parse: 'Min' },

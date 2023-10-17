@@ -1,6 +1,25 @@
-## 0.18.1 
+## [Unreleased]
 
- **Release Date:** 2023-10-16
+### Improvements
+
+- The functions `Sum`, `Product`, `Min`, `Max`, and the statistics functions
+  (`Mean`, `Median`, `Variance`, etc...) now handle arguments that can be
+  collections:
+
+  - `["Range"]`, `["Interval"]`, `["Linspace"]` expressions
+  - `["List"]` or `["Set"]` expressions
+  - `["Tuple"]`, `["Pair"]`, `["Pair"]`, `["Triple"]` expressions
+  - `["Sequence"]` expressions
+
+- Added `GCD` and `LCM` functions
+- Added `Numerator`, `Denominator`, `NumeratorDenominator` functions. These
+  functions can be used on non-canonical expressions.
+- Added `Head` and `Tail` functions which can be used on non-canonical
+  expressions.
+
+## 0.18.1
+
+**Release Date:** 2023-10-16
 
 ### Bug Fixes
 

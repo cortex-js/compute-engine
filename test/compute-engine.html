@@ -536,6 +536,15 @@
       ce.strict = true;
       // ce.latexOptions.parseNumbers = "rational";
 
+      const input = ce.parse("\\frac23", { canonical: false });
+
+      console.info(ce.box(["Head", input]).evaluate().toString());
+      console.info(ce.box(["Tail", input]).evaluate().toString());
+
+      const test = ce.box(["GCD", ["NumeratorDenominator", input]]);
+
+      console.info(test.value.valueOf() === 1);
+
       ce.assign("f(x)", "$$ 3x^2 + 2x + 5$$");
 
       ce.jsonSerializationOptions.metadata = ["latex"];

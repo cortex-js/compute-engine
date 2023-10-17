@@ -4,7 +4,7 @@ permalink: /compute-engine/reference/statistics/
 layout: single
 date: Last Modified
 sidebar:
-  - nav: 'universal'
+  - nav: "universal"
 toc: true
 render_math_in_document: true
 ---
@@ -214,9 +214,6 @@ Return the sum of `body`for each value in `bounds`.
 // ➔ 65
 ```
 
-````
-
-
 {% enddef %}
 
 {% def "Product" %}
@@ -233,9 +230,10 @@ simplified _collection_.
 ```json example
 ["Product", ["List", 5, 7, 11]]
 // ➔ 385
+
 ["Product", ["List", 5, "x", 11]]
 // ➔ ["List", 55, "x"]
-````
+```
 
 [&quot;**Product**&quot;, _body_, _bounds_]{.signature}
 

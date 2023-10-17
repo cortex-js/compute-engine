@@ -9,6 +9,8 @@ import {
   factorial2 as bigFactorial2,
   gamma as bigGamma,
   gammaln as bigLngamma,
+  gcd as bigGcd,
+  lcm as bigLcm,
 } from '../numerics/numeric-bignum';
 import {
   asFloat,
@@ -19,8 +21,12 @@ import {
   gamma,
   gammaln,
   limit,
+  gcd,
+  lcm,
+  asBignum,
 } from '../numerics/numeric';
 import {
+  asRational,
   isBigRational,
   isMachineRational,
   rationalize,
@@ -55,6 +61,7 @@ import {
 } from '../boxed-expression/validate';
 import { flattenSequence } from '../symbolic/flatten';
 import { applicable } from '../function-utils';
+import { each } from '../collection-utils';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic functions that should be considered:
@@ -86,13 +93,9 @@ export type CanonicalArithmeticFunctions =
 // LogOnePlus: { domain: 'Numbers' },
 // mod (modulo). See https://numerics.diploid.ca/floating-point-part-4.html,
 // regarding 'remainder' and 'truncatingRemainder'
-// Lcm
-// Gcd
 // Mod: modulo
 // Boole
 // Zeta function
-// Numerator(fraction)
-// Denominator(fraction)
 // Random() -> random number between 0 and 1
 // Random(n) -> random integer between 1 and n
 // Random(n, m) -> random integer between n and m
@@ -877,12 +880,119 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       },
     },
   },
+
   {
     PreIncrement: {
       signature: { domain: ['FunctionOf', 'Numbers', 'Numbers'] },
     },
     PreDecrement: {
       signature: { domain: ['FunctionOf', 'Numbers', 'Numbers'] },
+    },
+  },
+
+  {
+    GCD: {
+      description: 'Greatest Common Divisor',
+      complexity: 1200,
+      signature: {
+        domain: ['FunctionOf', ['VarArg', 'Anything'], 'Numbers'],
+        evaluate: (ce, ops) => processGcdLcm(ce, ops, 'GCD'),
+      },
+    },
+    LCM: {
+      description: 'Least Common Multiple',
+      complexity: 1200,
+      signature: {
+        domain: ['FunctionOf', ['VarArg', 'Anything'], 'Numbers'],
+        evaluate: (ce, ops) => processGcdLcm(ce, ops, 'LCM'),
+      },
+    },
+
+    Numerator: {
+      description: 'Numerator of an expression',
+      complexity: 1200,
+      hold: 'all',
+      signature: {
+        domain: ['FunctionOf', 'Anything', 'Numbers'],
+        canonical: (ce, ops) => {
+          // **IMPORTANT**: We want Numerator to work on non-canonical
+          // expressions, so that you can determine if a user input is
+          // reductible, for example.
+          if (ops.length === 0) return ce.box(['Sequence']);
+          const op = ops[0];
+          if (op.head === 'Rational' || op.head === 'Divide') return op.op1;
+          const num = asRational(op);
+          if (num !== undefined) return ce.number(num[0]);
+          return ce._fn('Numerator', canonical(ops));
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 0) return ce.box(['Sequence']);
+          const op = ops[0];
+          if (op.head === 'Rational' || op.head === 'Divide') return op.op1;
+          const num = asRational(op);
+          if (num !== undefined) return ce.number(num[0]);
+          return ce._fn('Numerator', canonical(ops));
+        },
+      },
+    },
+    Denominator: {
+      description: 'Denominator of an expression',
+      complexity: 1200,
+      hold: 'all',
+      signature: {
+        domain: ['FunctionOf', 'Anything', 'Numbers'],
+        canonical: (ce, ops) => {
+          // **IMPORTANT**: We want Denominator to work on non-canonical
+          // expressions, so that you can determine if a user input is
+          // reductible, for example.
+          if (ops.length === 0) return ce.box(['Sequence']);
+          const op = ops[0];
+          if (op.head === 'Rational' || op.head === 'Divide') return op.op2;
+          const num = asRational(op);
+          if (num !== undefined) return ce.number(num[1]);
+          return ce._fn('Denominator', canonical(ops));
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 0) return ce.box(['Sequence']);
+          const op = ops[0];
+          if (op.head === 'Rational' || op.head === 'Divide') return op.op2;
+          const num = asRational(op);
+          if (num !== undefined) return ce.number(num[1]);
+          return ce._fn('Denominator', canonical(ops));
+        },
+      },
+    },
+
+    NumeratorDenominator: {
+      description: 'Sequence of Numerator and Denominator of an expression',
+      complexity: 1200,
+      hold: 'all',
+      signature: {
+        domain: ['FunctionOf', 'Anything', 'Anything'],
+        canonical: (ce, ops) => {
+          // **IMPORTANT**: We want NumeratorDenominator to work on non-canonical
+          // expressions, so that you can determine if a user input is
+          // reductible, for example.
+          if (ops.length === 0) return ce.box(['Sequence']);
+          const op = ops[0];
+          if (op.head === 'Rational' || op.head === 'Divide')
+            return ce._fn('Sequence', op.ops!);
+          const num = asRational(op);
+          if (num !== undefined)
+            return ce._fn('Sequence', [ce.number(num[0]), ce.number(num[1])]);
+          return ce._fn('NumeratorDenominator', canonical(ops));
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 0) return ce.box(['Sequence']);
+          const op = ops[0];
+          if (op.head === 'Rational' || op.head === 'Divide')
+            return ce._fn('Sequence', op.ops!);
+          const num = asRational(op);
+          if (num !== undefined)
+            return ce._fn('Sequence', [ce.number(num[0]), ce.number(num[1])]);
+          return ce._fn('NumeratorDenominator', canonical(ops));
+        },
+      },
     },
   },
 
@@ -957,9 +1067,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'FunctionOf',
           'Anything',
-          // [
-          //   'OptArg',
-          'Tuples',
+          ['OptArg', 'Tuples'],
           // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
           // ],
           'Numbers',
@@ -983,9 +1091,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: [
           'FunctionOf',
           'Anything',
-          // [
-          //   'OptArg',
-          'Tuples',
+          ['OptArg', 'Tuples'],
           // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
           // ],
           'Numbers',
@@ -1186,23 +1292,117 @@ function processMinMax(
   if (ops.length === 0)
     return upper ? ce.NegativeInfinity : ce.PositiveInfinity;
 
-  // @todo:
-  // Should handle an argument that is:
-  // - a function
-  // - a list / set / sequence / collection
-  // - a matrix (?)
-  // - a Range or Interval
-
   let result: BoxedExpression | undefined = undefined;
   const rest: BoxedExpression[] = [];
 
-  for (const op of ops) {
+  for (let op of each(ops, ['Range', 'Interval'])) {
+    // An interval is continuous
+    if (op.head === 'Interval') {
+      const b = upper ? op.op2 : op.op1;
+
+      if (!b.isNumber || b.numericValue === undefined) rest.push(op);
+      if (!result) result = b;
+      else {
+        if ((upper && b.isGreater(result)) || (!upper && b.isLess(result)))
+          result = b;
+      }
+      continue;
+    }
+
+    // A range is discrete, the last element may not be included
+    if (op.head === 'Range') {
+      if (op.nops === 1) op = upper ? op.op1 : ce.One;
+      else if (!upper) {
+        op = op.op1;
+      } else {
+        const step = op.nops === 2 ? 1 : asFloat(op.op3);
+        if (step === null || !isFinite(step)) {
+          rest.push(op);
+          continue;
+        }
+        const [a, b] = [asFloat(op.op1), asFloat(op.op2)];
+        if (a === null || b === null) {
+          rest.push(op);
+          continue;
+        }
+        const steps = Math.floor((b - a) / step);
+        op = ce.number(a + step * steps);
+      }
+
+      if (
+        !result ||
+        (upper && op.isGreater(result)) ||
+        (!upper && op.isLess(result))
+      )
+        result = op;
+
+      continue;
+    }
+
+    if (op.head === 'Linspace') {
+      if (op.nops === 1) op = upper ? op.op1 : ce.One;
+      else if (upper) op = op.op2;
+      else op = op.op1;
+
+      if (
+        !result ||
+        (upper && op.isGreater(result)) ||
+        (!upper && op.isLess(result))
+      )
+        result = op;
+      continue;
+    }
+
     if (!op.isNumber || op.numericValue === undefined) rest.push(op);
     else if (!result) result = op;
     else if ((upper && op.isGreater(result)) || (!upper && op.isLess(result)))
       result = op;
   }
+
   if (rest.length > 0)
     return ce.box(result ? [mode, result, ...rest] : [mode, ...rest]);
   return result ?? (upper ? ce.NegativeInfinity : ce.PositiveInfinity);
+}
+
+function processGcdLcm(
+  ce: IComputeEngine,
+  ops: BoxedExpression[],
+  mode: 'LCM' | 'GCD'
+) {
+  const fn = mode === 'LCM' ? lcm : gcd;
+  const bigFn = mode === 'LCM' ? bigLcm : bigGcd;
+
+  let rest: BoxedExpression[] = [];
+  if (bignumPreferred(ce)) {
+    let result: Decimal | null = null;
+    for (const op of ops) {
+      if (result === null) {
+        result = asBignum(op);
+        if (result === null || !result.isInteger()) rest.push(op);
+      } else {
+        const d = asBignum(op);
+        if (d && d.isInteger()) result = bigFn(result, d);
+        else rest.push(op);
+      }
+    }
+
+    if (rest.length === 0) return result === null ? ce.One : ce.number(result);
+    if (result === null) return ce._fn(mode, rest);
+    return ce._fn(mode, [ce.number(result), ...rest]);
+  }
+
+  let result: number | null = null;
+  for (const op of ops) {
+    if (result === null) {
+      result = asFloat(op);
+      if (result === null || !Number.isInteger(result)) rest.push(op);
+    } else {
+      const d = asFloat(op);
+      if (d && Number.isInteger(d)) result = fn(result, d);
+      else rest.push(op);
+    }
+  }
+  if (rest.length === 0) return result === null ? ce.One : ce.number(result);
+  if (result === null) return ce._fn(mode, rest);
+  return ce._fn(mode, [ce.number(result), ...rest]);
 }

@@ -420,6 +420,69 @@ describe('Max', () => {
   test(`Max`, () =>
     expect(checkJson(['Max', 2.5, -1.1, 'foo', 18.4])).toMatchSnapshot());
   test(`Max`, () => expect(checkJson(['Max', 'foo', 'bar'])).toMatchSnapshot());
+
+  test('Max of a range', () => {
+    expect(
+      ce
+        .box(['Max', ['Range', 1, 10]])
+        .evaluate()
+        .valueOf()
+    ).toMatchInlineSnapshot(`10`);
+  });
+
+  test('Max of a range of reals', () => {
+    expect(
+      ce
+        .box(['Max', ['Range', 1.2, 4.5]])
+        .evaluate()
+        .valueOf()
+    ).toMatchInlineSnapshot(`4.2`);
+  });
+
+  test('Max of a range with custom step', () => {
+    expect(
+      ce
+        .box(['Max', ['Range', 1, 10, 7]])
+        .evaluate()
+        .valueOf()
+    ).toMatchInlineSnapshot(`8`);
+  });
+
+  test('Max of an interval', () => {
+    expect(
+      ce
+        .box(['Max', ['Interval', 1.1, 7.8]])
+        .evaluate()
+        .valueOf()
+    ).toMatchInlineSnapshot(`7.8`);
+  });
+
+  test('Max of a list', () => {
+    expect(
+      ce
+        .box(['Max', ['List', 4, 1, 56, 18]])
+        .evaluate()
+        .valueOf()
+    ).toMatchInlineSnapshot(`56`);
+  });
+
+  test('Max of a set', () => {
+    expect(
+      ce
+        .box(['Max', ['Set', 4, 1, 56, 18]])
+        .evaluate()
+        .valueOf()
+    ).toMatchInlineSnapshot(`["Max",["Set",4,1,56,18]]`);
+  });
+
+  test('Max of a list with non-comparable', () => {
+    expect(
+      ce
+        .box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]])
+        .evaluate()
+        .valueOf()
+    ).toMatchInlineSnapshot(`["Max",56,"bar","foo"]`);
+  });
 });
 
 describe('Min', () => {
@@ -550,4 +613,46 @@ describe('Limit', () => {
       .evaluate()
       .valueOf()
   ).toMatchInlineSnapshot(`1`);
+});
+
+describe('GCD/LCM', () => {
+  it('should compute the GCD of two integers', () =>
+    expect(ce.box(['GCD', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
+      `12`
+    ));
+
+  it('should compute the GCD of two integers', () =>
+    expect(ce.box(['GCD', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
+      `5`
+    ));
+
+  it('should compute the LCM of two integers', () =>
+    expect(ce.box(['LCM', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
+      `60`
+    ));
+
+  it('should compute the LCM of two integers', () =>
+    expect(ce.box(['LCM', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
+      `30`
+    ));
+
+  it('should compute the GCD of some integers and other stuff', () =>
+    expect(
+      ce.box(['GCD', 60, 'foo', 12]).evaluate().toString()
+    ).toMatchInlineSnapshot(`["GCD",12,"foo"]`));
+
+  it('should compute the GCD of only stuff', () =>
+    expect(
+      ce.box(['GCD', 'foo', 'bar']).evaluate().toString()
+    ).toMatchInlineSnapshot(`["GCD","foo","bar"]`));
+
+  it('should compute the GCD of a single number', () =>
+    expect(ce.box(['GCD', 42]).evaluate().toString()).toMatchInlineSnapshot(
+      `42`
+    ));
+
+  it('should compute the GCD of some numbers', () =>
+    expect(
+      ce.box(['GCD', 60, 12, 3.1415]).evaluate().toString()
+    ).toMatchInlineSnapshot(`["GCD",12,3.1415]`));
 });
