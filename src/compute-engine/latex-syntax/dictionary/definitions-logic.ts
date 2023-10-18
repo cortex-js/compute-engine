@@ -33,12 +33,12 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     kind: 'symbol',
     latexTrigger: '\\operator{False}',
-    parse: 'True',
+    parse: 'False',
   },
   {
     kind: 'symbol',
     latexTrigger: '\\mathsf{F}',
-    parse: 'True',
+    parse: 'False',
   },
 
   // Operators
