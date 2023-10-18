@@ -272,8 +272,8 @@ where \\(z\\) is a complex number.
 
 Evaluate to the **complementary error function** of a complex number.
 
-It is defined as \\( \operatorname {erf} \left(\operatorname {erf} ^{-1}x\right)
-= x \\).
+It is defined as \\( \operatorname{erfc} z = 1 - \operatorname {erf} z \\).
+
 
 {% enddef %}
 
@@ -281,12 +281,11 @@ It is defined as \\( \operatorname {erf} \left(\operatorname {erf} ^{-1}x\right)
 
 [&quot;**ErfInv**&quot;, _x:real_]{.signature}
 
-Evaluate to the **inverse error function** of a complex number.
+Evaluate to the **inverse error function** of a real number \\( -1 < x < 1 \\)
 
-`x` is a real number between -1 and 1.
+It is defined as \\( \operatorname{erf} \left(\operatorname{erf} ^{-1}x\right)
+= x \\).
 
-It is defined as \\( operatorname {erf} \left(\operatorname {erf}
-^{-1}x\right)=x \\).
 
 {% enddef %}
 
