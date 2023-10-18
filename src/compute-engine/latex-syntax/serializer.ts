@@ -407,7 +407,14 @@ export class Serializer {
   fractionStyle(
     expr: Expression,
     level: number
-  ): 'quotient' | 'inline-solidus' | 'nice-solidus' | 'reciprocal' | 'factor' {
+  ):
+    | 'quotient'
+    | 'block-quotient'
+    | 'inline-quotient'
+    | 'inline-solidus'
+    | 'nice-solidus'
+    | 'reciprocal'
+    | 'factor' {
     return this.options.fractionStyle(expr, level);
   }
 

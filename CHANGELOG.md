@@ -21,6 +21,9 @@
   JavaScript primitive (`number`, `boolean`, `string`, etc...) when possible.
   This is a more succinct version of `expr.N().valueOf()`.
 
+- Added `display-quotient` and `inline-quotient` style for formatting of
+  division expressions in LaTeX.
+
 ## 0.18.1
 
 **Release Date:** 2023-10-16

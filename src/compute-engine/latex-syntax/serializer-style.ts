@@ -25,7 +25,14 @@ export function getRootStyle(
 export function getFractionStyle(
   expr: Expression,
   level: number
-): 'quotient' | 'inline-solidus' | 'nice-solidus' | 'reciprocal' | 'factor' {
+):
+  | 'quotient'
+  | 'block-quotient'
+  | 'inline-quotient'
+  | 'inline-solidus'
+  | 'nice-solidus'
+  | 'reciprocal'
+  | 'factor' {
   if (level > 3) return 'inline-solidus';
 
   if (head(expr) === 'Divide') {
