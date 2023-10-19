@@ -247,12 +247,12 @@ export function compileToTarget(
   target: CompileTarget
 ): ((_: Record<string, CompiledType>) => CompiledType) | undefined {
   const js = compile(expr, target);
-  try {
-    return new ComputeEngineFunction(js) as unknown as () => CompiledType;
-  } catch (e) {
-    console.error(`${e}\n${expr.latex}\n${js}`);
-  }
-  return undefined;
+  // try {
+  return new ComputeEngineFunction(js) as unknown as () => CompiledType;
+  // } catch (e) {
+  //   console.error(`${e}\n${expr.latex}\n${js}`);
+  // }
+  // return undefined;
 }
 
 export function compileToJavascript(
@@ -373,6 +373,10 @@ function compileExpr(
     )}${target.ws('\n')}})()`;
   }
 
+  if (h === 'List') {
+    return `[${args.map((x) => compile(x, target)).join(', ')}]`;
+  }
+
   const fn = target.functions?.(h);
   if (!fn) throw new Error(`Unknown function ${h}`);
   if (typeof fn === 'function')
@@ -431,11 +435,23 @@ function compileLoop(
   target: CompileTarget
 ): string {
   if (args === null) throw new Error('Sum/Product: no arguments');
-  if (!args[0] || !args[1]) throw new Error('Sum/Product: no limits');
+  if (!args[0]) throw new Error('Sum/Product: no body');
+  // if (!args[1]) throw new Error('Sum/Product: no limits');
 
   const [index, lower, upper, isFinite] = normalizeLimits(args[1]);
 
   const op = h === 'Sum' ? '+' : '*';
+
+  if (!index) {
+    // Loop over a collection
+    const col = compile(args[0], target);
+    return `${col}.reduce((acc, x) => acc ${op} x, ${op === '+' ? '0' : '1'})`;
+    //         return `(() => {
+    //   let _acc = ${op === '+' ? '0' : '1'};
+    //   for (const _x of ${col}) _acc ${op}= _x;
+    //   return _acc;
+    // })()`;
+  }
 
   // @todo: if !isFinite, add tests for convergence to the generated code
 
