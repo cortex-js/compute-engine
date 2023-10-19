@@ -2,13 +2,6 @@ import { each } from '../collection-utils';
 import { asFloat, erf, erfInv } from '../numerics/numeric';
 import { IdentifierDefinitions } from '../public';
 
-//   // mean
-//   // median
-//   // variance = size(l) * stddev(l)^2 / (size(l) - 1)
-//   // stddev
-//   // quantile
-// Quartiles
-
 // Geometric mean:
 // Harmonic mean:
 
@@ -19,12 +12,13 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Mean: {
       complexity: 1200,
+      threadable: true,
       signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let count = 0;
-          for (const op of each(ops)) {
+          for (const op of each(ops[0])) {
             const v = asFloat(op);
             if (v === null) return undefined;
             sum += v;
@@ -38,11 +32,12 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Median: {
       complexity: 1200,
+      threadable: true,
       signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
           const values: number[] = [];
-          for (const op of each(ops)) {
+          for (const op of each(ops[0])) {
             const v = asFloat(op);
             if (v === null) return undefined;
             values.push(v);
@@ -60,13 +55,14 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Variance: {
       complexity: 1200,
+      threadable: true,
       signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let sum2 = 0;
           let count = 0;
-          for (const op of each(ops)) {
+          for (const op of each(ops[0])) {
             const v = asFloat(op);
             if (v === null) return undefined;
             sum += v;
@@ -81,13 +77,14 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     StandardDeviation: {
       complexity: 1200,
+      threadable: true,
       signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let sum2 = 0;
           let count = 0;
-          for (const op of each(ops)) {
+          for (const op of each(ops[0])) {
             const v = asFloat(op);
             if (v === null) return undefined;
             sum += v;
@@ -104,14 +101,15 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Kurtosis: {
       complexity: 1200,
+      threadable: true,
       signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let sum2 = 0;
           let sum4 = 0;
           let count = 0;
-          for (const op of each(ops)) {
+          for (const op of each(ops[0])) {
             const v = asFloat(op);
             if (v === null) return undefined;
             sum += v;
@@ -130,14 +128,15 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Skewness: {
       complexity: 1200,
+      threadable: true,
       signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
           let sum = 0;
           let sum2 = 0;
           let sum3 = 0;
           let count = 0;
-          for (const op of each(ops)) {
+          for (const op of each(ops[0])) {
             const v = asFloat(op);
             if (v === null) return undefined;
             sum += v;
@@ -156,11 +155,12 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Mode: {
       complexity: 1200,
+      threadable: true,
       signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
           const values: number[] = [];
-          for (const op of each(ops)) {
+          for (const op of each(ops[0])) {
             const v = asFloat(op);
             if (v === null) return undefined;
             values.push(v);
@@ -187,11 +187,12 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Quartiles: {
       complexity: 1200,
+      threadable: true,
       signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Lists'],
+        domain: ['FunctionOf', 'Collections', 'Lists'],
         evaluate: (ce, ops) => {
           const values: number[] = [];
-          for (const op of each(ops)) {
+          for (const op of each(ops[0])) {
             const v = asFloat(op);
             if (v === null) return undefined;
             values.push(v);
@@ -213,11 +214,12 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     InterquartileRange: {
       complexity: 1200,
+      threadable: true,
       signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
+        domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
           const values: number[] = [];
-          for (const op of each(ops)) {
+          for (const op of each(ops[0])) {
             const v = asFloat(op);
             if (v === null) return undefined;
             values.push(v);
@@ -231,19 +233,6 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
             upper[Math.floor(upper.length / 2)] -
               lower[Math.floor(lower.length / 2)]
           );
-        },
-      },
-    },
-
-    Count: {
-      threadable: true,
-      complexity: 1200,
-      signature: {
-        domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
-        evaluate: (ce, ops) => {
-          let count = 0;
-          for (const _op of each(ops)) count++;
-          return ce.number(count);
         },
       },
     },

@@ -15,8 +15,8 @@ import {
 } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
 import { checkArg } from '../boxed-expression/validate';
-import { normalizeLimits } from './utils';
-import { iterable } from '../collection-utils';
+import { canonicalLimits, normalizeLimits } from './utils';
+import { each } from '../collection-utils';
 
 /** The canonical form of `Multiply`:
  * - remove `1`
@@ -223,43 +223,11 @@ export function canonicalProduct(
 
   body ??= ce.error('missing');
 
-  let index: BoxedExpression | null = null;
-  let lower: BoxedExpression | null = null;
-  let upper: BoxedExpression | null = null;
-  if (
-    range &&
-    range.head !== 'Tuple' &&
-    range.head !== 'Triple' &&
-    range.head !== 'Pair' &&
-    range.head !== 'Single'
-  ) {
-    index = range;
-  } else if (range) {
-    // Don't canonicalize the index. Canonicalization has the
-    // side effect of declaring the symbol, here we're using
-    // it to do a local declaration
-    index = range.ops?.[0] ?? null;
-    lower = range.ops?.[1]?.canonical ?? null;
-    upper = range.ops?.[2]?.canonical ?? null;
-  }
+  const limits = canonicalLimits(range);
+  const result = limits
+    ? ce._fn('Product', [body.canonical, limits])
+    : ce._fn('Product', [body.canonical]);
 
-  // The index, if present, should be a symbol
-  if (index && index.head === 'Hold') index = index.op1;
-  if (index && index.head === 'ReleaseHold') index = index.op1.evaluate();
-  index ??= ce.Nothing;
-  if (!index.symbol) index = ce.domainError('Symbols', index.domain, index);
-  else index = ce.hold(index);
-
-  // The range bounds, if present, should be integers numbers
-  if (lower && lower.isFinite) lower = checkArg(ce, lower, 'Integers');
-  if (upper && upper.isFinite) upper = checkArg(ce, upper, 'Integers');
-
-  if (lower && upper) range = ce.tuple([index, lower, upper]);
-  else if (upper) range = ce.tuple([index, ce.One, upper]);
-  else if (lower) range = ce.tuple([index, lower]);
-  else range = index;
-
-  const result = ce._fn('Product', [body.canonical, range]);
   ce.popScope();
   return result;
 }
@@ -272,12 +240,16 @@ export function evalMultiplication(
 ): BoxedExpression | undefined {
   let result: BoxedExpression | undefined | null = null;
 
+  const body =
+    mode === 'simplify'
+      ? expr.simplify()
+      : expr.evaluate({ numericMode: mode === 'N' });
+
   if (!range) {
     // The body is a collection, e.g. Product({1, 2, 3})
-    const body = expr.evaluate();
     if (bignumPreferred(ce)) {
       let product = ce.bignum(1);
-      for (const x of iterable(body)) {
+      for (const x of each(body)) {
         const term = asBignum(x);
         if (term === null) {
           result = undefined;
@@ -292,7 +264,7 @@ export function evalMultiplication(
       if (result === null) result = ce.number(product);
     } else {
       let product = 1;
-      for (const x of iterable(body)) {
+      for (const x of each(body)) {
         const term = asFloat(x);
         if (term === null) {
           result = undefined;
@@ -310,6 +282,8 @@ export function evalMultiplication(
   }
 
   const [index, lower, upper, isFinite] = normalizeLimits(range);
+
+  if (!index) return undefined;
 
   const fn = expr;
   if (mode !== 'N' && (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS))

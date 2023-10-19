@@ -919,7 +919,6 @@ export class ComputeEngine implements IComputeEngine {
     this.context = this.context.parentScope ?? null;
 
     console.assert(this.context);
-
     return this;
   }
 

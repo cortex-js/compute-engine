@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en-US">
   <head>
     <meta charset="utf-8" />
@@ -42,12 +42,8 @@
         padding-left: 32px;
         resize: vertical;
         margin-bottom: 10px;
-        font-family: var(--monospace-font-family), 'Berkeley Mono', 'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', monospace;
+        font-family: var(--monospace-font-family), monospace;
         outline: none;
-      }
-
-      .output {
-        font-family: var(--monospace-font-family), 'Berkeley Mono', 'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', monospace;
       }
 
       #mathjson,
@@ -108,13 +104,13 @@
         LatexSyntax,
         parseCortex,
         serializeCortex,
-      } from '../dist/cortex.js';
+      } from "../dist/cortex.js";
 
       const engine = new ComputeEngine();
 
-      const input = document.getElementById('input');
-      input.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter' && ev.shiftKey === false) {
+      const input = document.getElementById("input");
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" && ev.shiftKey === false) {
           updateContent();
 
           ev.preventDefault();
@@ -124,29 +120,29 @@
       updateContent();
 
       function warningsToString(warnings) {
-        let errorMsg = '';
+        let errorMsg = "";
         if (warnings && warnings.length > 0) {
           errorMsg += warnings
             .map((warning) => {
               // if (warning.signal.head) {
               //     errorMsg += warning.signal.head + ': ';
               // }
-              let result = '';
+              let result = "";
               if (warning.origin) {
                 result += `(${warning.origin.line}:${warning.origin.column}) `;
               }
               result += `${warning.severity}: ${warning.message}`;
               if (warning.args) {
                 for (const arg of warning.args) {
-                  result += arg.toString() + ' ';
+                  result += arg.toString() + " ";
                 }
               }
               if (warning.origin?.around) {
-                result += warning.origin.around + '<br>';
+                result += warning.origin.around + "<br>";
               }
               return result;
             })
-            .join('<hr>');
+            .join("<hr>");
         }
         return errorMsg;
       }
@@ -155,48 +151,48 @@
         const cortex = input.value;
         try {
           const errors = [];
-          document.getElementById('cortex').classList.remove('visible');
-          document.getElementById('mathjson').classList.remove('visible');
-          document.getElementById('result').classList.remove('visible');
-          document.getElementById('error').classList.remove('visible');
-          let errorMsg = '';
+          document.getElementById("cortex").classList.remove("visible");
+          document.getElementById("mathjson").classList.remove("visible");
+          document.getElementById("result").classList.remove("visible");
+          document.getElementById("error").classList.remove("visible");
+          let errorMsg = "";
           try {
             const [expr, warnings] = parseCortex(cortex);
             errorMsg += warningsToString(warnings ?? []);
             if (expr) {
               setTimeout(() => {
-                document.getElementById('cortex').classList.add('visible');
-                document.getElementById('mathjson').classList.add('visible');
-                document.getElementById('result').classList.add('visible');
+                document.getElementById("cortex").classList.add("visible");
+                document.getElementById("mathjson").classList.add("visible");
+                document.getElementById("result").classList.add("visible");
               }, 125);
-              document.getElementById('mathjson').innerHTML = escapeHtml(
+              document.getElementById("mathjson").innerHTML = escapeHtml(
                 JSON.stringify(expr, null, 2)
               );
 
-              document.getElementById('cortex').innerHTML = escapeHtml(
+              document.getElementById("cortex").innerHTML = escapeHtml(
                 serializeCortex(expr)
               );
-              document.getElementById('result').innerHTML = escapeHtml(
+              document.getElementById("result").innerHTML = escapeHtml(
                 serializeCortex(engine.evaluate(expr))
               );
               errorMsg += warningsToString(engine.warnings);
             }
           } catch (err) {
-            errorMsg += err.toString() + '<br>';
+            errorMsg += err.toString() + "<br>";
           }
           //
           // Update the error message panel
           //
-          const error = document.getElementById('error');
+          const error = document.getElementById("error");
           if (errorMsg) {
-            error.classList.add('visible');
+            error.classList.add("visible");
             error.innerHTML = errorMsg;
           } else {
-            error.classList.remove('visible');
+            error.classList.remove("visible");
           }
         } catch (e) {
-          const error = document.getElementById('error');
-          error.classList.add('visible');
+          const error = document.getElementById("error");
+          error.classList.add("visible");
           error.innerHTML = `${e}`;
         }
       }
@@ -205,15 +201,15 @@
         return String(string).replace(/[&<>"'`=/\u200b]/g, function (s) {
           return (
             {
-              '&': '&amp;',
-              '<': '&lt;',
-              '>': '&gt;',
-              '"': '&quot;',
-              "'": '&#39;',
-              '/': '&#x2F;',
-              '`': '&#x60;',
-              '=': '&#x3D;',
-              '\u200b': '&amp;#zws;',
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+              "/": "&#x2F;",
+              "`": "&#x60;",
+              "=": "&#x3D;",
+              "\u200b": "&amp;#zws;",
             }[s] || s
           );
         });

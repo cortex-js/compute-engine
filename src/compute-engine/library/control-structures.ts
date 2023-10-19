@@ -6,7 +6,7 @@ import {
 } from '../public';
 import { applicable } from '../function-utils';
 import { widen } from '../boxed-expression/boxed-domain';
-import { iterable } from '../collection-utils';
+import { each, isCollection } from '../collection-utils';
 
 export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -43,19 +43,16 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
 
           const collection = ops[1];
 
-          if (collection) {
+          if (collection && isCollection(collection)) {
             //
             // Iterate over the elements of a collection
             //
-            const iter = iterable(collection);
-            if (!iter) return ce.Nothing;
             let result: BoxedExpression | undefined = undefined;
-            let i = 0;
             const fn = applicable(body);
-            while (true) {
-              const { done, value } = iter.next();
-              if (done) return result ?? ce.Nothing;
-              result = fn([value]) ?? ce.Nothing;
+            let i = 0;
+
+            for (const x of each(collection)) {
+              result = fn([x]) ?? ce.Nothing;
               if (result.head === 'Break') return result.op1;
               if (result.head === 'Return') return result;
               if (i++ > ce.iterationLimit)

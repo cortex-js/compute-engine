@@ -119,6 +119,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     },
     size: (expr) => {
       const [lower, upper, step] = rangeArgs(expr);
+      if (!isFinite(lower) || !isFinite(upper)) return Infinity;
       return Math.max(0, Math.floor((upper! - lower!) / step));
     },
     at: (

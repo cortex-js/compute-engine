@@ -482,9 +482,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
     let expr = this as BoxedExpression;
     if (options.optimize.includes('simplify')) expr = expr.simplify();
     if (options.optimize.includes('evaluate')) expr = expr.evaluate();
-    try {
-      return compileToJavascript(expr);
-    } catch (e) {}
-    return undefined;
+    // try {
+    return compileToJavascript(expr);
+    // } catch (e) {}
+    // return undefined;
   }
 }

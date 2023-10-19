@@ -61,7 +61,7 @@ import {
 } from '../boxed-expression/validate';
 import { flattenSequence } from '../symbolic/flatten';
 import { applicable } from '../function-utils';
-import { each } from '../collection-utils';
+import { each, isCollection } from '../collection-utils';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic functions that should be considered:
@@ -1062,7 +1062,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Product: {
       wikidata: 'Q901718',
       complexity: 1000,
-      hold: 'first',
+      hold: 'all',
       signature: {
         domain: [
           'FunctionOf',
@@ -1090,7 +1090,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: [
           'FunctionOf',
-          'Anything',
+          ['Union', 'Collections', 'Functions'],
           ['OptArg', 'Tuples'],
           // ['Tuple', 'Symbols', ['OptArg', 'Integers'], ['OptArg', 'Integers']],
           // ],
@@ -1283,6 +1283,70 @@ function processAbs(
   return undefined;
 }
 
+function processMinMaxItem(
+  item: BoxedExpression,
+  mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
+): [BoxedExpression | undefined, BoxedExpression[]] {
+  const ce = item.engine;
+  const upper = mode === 'Max' || mode === 'Supremum';
+
+  // An interval is continuous
+  if (item.head === 'Interval') {
+    const b = upper ? item.op2 : item.op1;
+
+    if (!b.isNumber || b.numericValue === undefined) return [undefined, [item]];
+    return [b, []];
+  }
+
+  // A range is discrete, the last element may not be included
+  if (item.head === 'Range') {
+    if (item.nops === 1) item = upper ? item.op1 : ce.One;
+    else if (!upper) {
+      item = item.op1;
+    } else {
+      const step = item.nops === 2 ? 1 : asFloat(item.op3);
+      if (step === null || !isFinite(step)) return [undefined, [item]];
+      const [a, b] = [asFloat(item.op1), asFloat(item.op2)];
+      if (a === null || b === null) return [undefined, [item]];
+      const steps = Math.floor((b - a) / step);
+      item = ce.number(a + step * steps);
+    }
+
+    return [item, []];
+  }
+
+  if (item.head === 'Linspace') {
+    if (item.nops === 1) item = upper ? item.op1 : ce.One;
+    else if (upper) item = item.op2;
+    else item = item.op1;
+    return [item, []];
+  }
+
+  if (isCollection(item)) {
+    let result: BoxedExpression | undefined = undefined;
+    const rest: BoxedExpression[] = [];
+    for (const op of each(item)) {
+      const [val, others] = processMinMaxItem(op, mode);
+      if (val) {
+        if (!result) result = val;
+        else {
+          if (
+            (upper && val.isGreater(result)) ||
+            (!upper && val.isLess(result))
+          )
+            result = val;
+        }
+      }
+      rest.push(...others);
+    }
+    return [result, rest];
+  }
+
+  if (!item.isNumber || item.numericValue === undefined)
+    return [undefined, [item]];
+  return [item, []];
+}
+
 function processMinMax(
   ce: IComputeEngine,
   ops: BoxedExpression[],
@@ -1295,68 +1359,16 @@ function processMinMax(
   let result: BoxedExpression | undefined = undefined;
   const rest: BoxedExpression[] = [];
 
-  for (let op of each(ops, ['Range', 'Interval'])) {
-    // An interval is continuous
-    if (op.head === 'Interval') {
-      const b = upper ? op.op2 : op.op1;
-
-      if (!b.isNumber || b.numericValue === undefined) rest.push(op);
-      if (!result) result = b;
+  for (let op of ops) {
+    const [val, others] = processMinMaxItem(op, mode);
+    if (val) {
+      if (!result) result = val;
       else {
-        if ((upper && b.isGreater(result)) || (!upper && b.isLess(result)))
-          result = b;
+        if ((upper && val.isGreater(result)) || (!upper && val.isLess(result)))
+          result = val;
       }
-      continue;
     }
-
-    // A range is discrete, the last element may not be included
-    if (op.head === 'Range') {
-      if (op.nops === 1) op = upper ? op.op1 : ce.One;
-      else if (!upper) {
-        op = op.op1;
-      } else {
-        const step = op.nops === 2 ? 1 : asFloat(op.op3);
-        if (step === null || !isFinite(step)) {
-          rest.push(op);
-          continue;
-        }
-        const [a, b] = [asFloat(op.op1), asFloat(op.op2)];
-        if (a === null || b === null) {
-          rest.push(op);
-          continue;
-        }
-        const steps = Math.floor((b - a) / step);
-        op = ce.number(a + step * steps);
-      }
-
-      if (
-        !result ||
-        (upper && op.isGreater(result)) ||
-        (!upper && op.isLess(result))
-      )
-        result = op;
-
-      continue;
-    }
-
-    if (op.head === 'Linspace') {
-      if (op.nops === 1) op = upper ? op.op1 : ce.One;
-      else if (upper) op = op.op2;
-      else op = op.op1;
-
-      if (
-        !result ||
-        (upper && op.isGreater(result)) ||
-        (!upper && op.isLess(result))
-      )
-        result = op;
-      continue;
-    }
-
-    if (!op.isNumber || op.numericValue === undefined) rest.push(op);
-    else if (!result) result = op;
-    else if ((upper && op.isGreater(result)) || (!upper && op.isLess(result)))
-      result = op;
+    rest.push(...others);
   }
 
   if (rest.length > 0)

@@ -576,6 +576,32 @@ describe('Limit', () => {
   ).toMatchInlineSnapshot(`1`);
 });
 
+describe('SUM', () => {
+  it('should compute the sum of a function over a closed interval', () =>
+    expect(
+      ce
+        .box(['Sum', ['Divide', 1, 'x'], ['Tuple', ['Hold', 'x'], 1, 10]])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`"2.9289682539682539683"`));
+
+  it('should compute the sum of a function over an open interval', () =>
+    expect(
+      ce
+        .box(['Sum', ['Divide', 1, 'x'], 'x'])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`"14.392727722864723632"`));
+
+  it('should compute the sum of a collection', () =>
+    expect(
+      ce
+        .box(['Sum', ['Range', 1, 10]])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`55`));
+});
+
 describe('GCD/LCM', () => {
   it('should compute the GCD of two integers', () =>
     expect(ce.box(['GCD', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(

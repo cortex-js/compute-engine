@@ -5,15 +5,42 @@ function evaluate(s: string): Expression {
   return engine.parse(s).evaluate()?.json ?? 'ERROR';
 }
 
-describe('SUM AND PRODUCT', () => {
+describe('SUM', () => {
   test('k is an Integer (as the index) and used a a Number (in the fraction)', () => {
     expect(evaluate(`\\sum_{k=0}^{10}\\frac{k}{2}`)).toMatchInlineSnapshot(
       `27.5`
     );
   });
+
   test('i is a valid index', () => {
     expect(evaluate(`\\sum_{i=0}^{10}\\frac{i}{2}`)).toMatchInlineSnapshot(
       `27.5`
     );
+  });
+
+  test('sum of a collection', () => {
+    expect(
+      evaluate(`\\sum \\lbrack 1, 2, 3, 4, 5\\rbrack`)
+    ).toMatchInlineSnapshot(`15`);
+  });
+});
+
+describe('PRODUCT', () => {
+  test('k is an Integer (as the index) and used a a Number (in the fraction)', () => {
+    expect(evaluate(`\\prod_{k=1}^{10}\\frac{k}{2}`)).toMatchInlineSnapshot(
+      `3543.75`
+    );
+  });
+
+  test('i is a valid index', () => {
+    expect(evaluate(`\\prod_{i=1}^{10}\\frac{i}{2}`)).toMatchInlineSnapshot(
+      `3543.75`
+    );
+  });
+
+  test('product of a collection', () => {
+    expect(
+      evaluate(`\\prod \\lbrack 1, 2, 3, 4, 5\\rbrack`)
+    ).toMatchInlineSnapshot(`120`);
   });
 });

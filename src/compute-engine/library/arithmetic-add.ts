@@ -7,9 +7,8 @@ import { Sum } from '../symbolic/sum';
 import { asBignum, asFloat, MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
-import { checkArg } from '../boxed-expression/validate';
-import { normalizeLimits } from './utils';
-import { iterable } from '../collection-utils';
+import { canonicalLimits, normalizeLimits } from './utils';
+import { each } from '../collection-utils';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -123,44 +122,11 @@ export function canonicalSummation(
 
   body ??= ce.error('missing');
 
-  let index: BoxedExpression | null = null;
-  let lower: BoxedExpression | null = null;
-  let upper: BoxedExpression | null = null;
+  const limits = canonicalLimits(range);
+  const result = limits
+    ? ce._fn('Sum', [body.canonical, limits])
+    : ce._fn('Sum', [body.canonical]);
 
-  if (
-    range &&
-    range.head !== 'Tuple' &&
-    range.head !== 'Triple' &&
-    range.head !== 'Pair' &&
-    range.head !== 'Single'
-  ) {
-    index = range;
-  } else if (range) {
-    index = range.ops?.[0] ?? null;
-    lower = range.ops?.[1]?.canonical ?? null;
-    upper = range.ops?.[2]?.canonical ?? null;
-  }
-
-  index ??= ce.Nothing;
-
-  if (index.head === 'Hold') index = index.op1;
-
-  if (index.symbol) {
-    ce.declare(index.symbol, { domain: 'Integers' });
-    index.bind();
-    index = ce.hold(index);
-  } else index = ce.domainError('Symbols', index.domain, index);
-
-  // The range bounds, if present, should be integers numbers
-  if (lower && lower.isFinite) lower = checkArg(ce, lower, 'Integers');
-  if (upper && upper.isFinite) upper = checkArg(ce, upper, 'Integers');
-
-  if (lower && upper) range = ce.tuple([index, lower, upper]);
-  else if (upper) range = ce.tuple([index, ce.One, upper]);
-  else if (lower) range = ce.tuple([index, lower]);
-  else range = index;
-
-  const result = ce._fn('Sum', [body.canonical, range]);
   ce.popScope();
   return result;
 }
@@ -175,11 +141,14 @@ export function evalSummation(
 
   if (!range) {
     // The body is a collection, e.g. Sum({1, 2, 3})
+    const body =
+      mode === 'simplify'
+        ? expr.simplify()
+        : expr.evaluate({ numericMode: mode === 'N' });
 
-    const body = expr.evaluate();
     if (bignumPreferred(ce)) {
       let sum = ce.bignum(0);
-      for (const x of iterable(body)) {
+      for (const x of each(body)) {
         const term = asBignum(x);
         if (term === null) {
           result = undefined;
@@ -194,7 +163,7 @@ export function evalSummation(
       if (result === null) result = ce.number(sum);
     } else {
       let sum = 0;
-      for (const x of iterable(body)) {
+      for (const x of each(body)) {
         const term = asFloat(x);
         if (term === null) {
           result = undefined;
@@ -213,8 +182,13 @@ export function evalSummation(
 
   const [index, lower, upper, isFinite] = normalizeLimits(range);
 
+  if (!index) return undefined;
+
   const fn = expr;
-  if (mode !== 'N' && (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS))
+  if (
+    mode == 'simplify' &&
+    (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS)
+  )
     return undefined;
 
   const savedContext = ce.swapScope(fn.scope);

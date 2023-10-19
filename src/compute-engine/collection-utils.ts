@@ -1,130 +1,67 @@
-import { asFloat } from './numerics/numeric';
 import { BoxedExpression } from './public';
 
-/**
- *
- * Iterate over all the expressions in an expression tree.
- *
- * Some expressions are not iterated because they are evaluated
- * to an "elementary" collection, for example "Fill".
- *
- * Some expressions are infinite and not iterable, for example
- * "Repeat", "Cycle", ...
- *
- * @param col
- *
- * @returns
- */
-export function* iterable(
-  col: BoxedExpression,
-  exclude?: string[]
-): Generator<BoxedExpression> {
-  const ce = col.engine;
-  const h = col.head;
+export function isCollection(col: BoxedExpression): boolean {
+  if (col.string !== null) return true;
+  const def = col.functionDefinition;
+  return def?.iterator !== undefined;
+}
 
-  if (typeof h === 'string' && exclude?.includes(h)) {
-    yield col;
-    return;
-  }
+export function isFiniteCollection(col: BoxedExpression): boolean {
+  const l = length(col);
+  if (l === undefined) return false;
+  return Number.isFinite(l);
+}
 
-  const iter = iterator(col);
-  if (iter) {
-    let i = 0;
-    while (true) {
-      const { done, value } = iter.next();
-      if (done) return;
-      if (i++ > ce.iterationLimit) {
-        yield ce.error('iteration-limit-exceeded');
-        return;
-      }
-      yield value;
-    }
-  }
-
-  // if (h === 'Range') {
-  //   let lower = asFloat(col.op1);
-  //   if (lower === null) return;
-  //   let upper = asFloat(col.op2);
-  //   if (upper === null) {
-  //     upper = lower;
-  //     lower = 1;
-  //   }
-
-  //   if (!isFinite(lower) || !isFinite(upper)) return;
-
-  //   if (lower > upper) {
-  //     const step = asFloat(col.op3 ?? -1) ?? -1;
-  //     if (step >= 0) return;
-  //     for (let i = lower; i <= upper; i += step) yield ce.number(i);
-  //     return;
-  //   }
-
-  //   const step = asFloat(col.op3 ?? 1) ?? 1;
-  //   if (step <= 0) return;
-  //   for (let i = lower; i <= upper; i += step) yield ce.number(i);
-  //   return;
-  // }
-
-  // if (h === 'Linspace') {
-  //   let start = asFloat(col.op1);
-  //   if (start === null) return;
-  //   let stop = asFloat(col.op2);
-  //   if (stop === null) {
-  //     stop = start;
-  //     start = 0;
-  //   }
-  //   const num = asFloat(col.op3) ?? 50;
-  //   if (!Number.isInteger(num)) return;
-  //   if (num <= 0) return;
-
-  //   if (!isFinite(stop) || !isFinite(start)) return;
-
-  //   const step = (stop - start) / (num - 1);
-
-  //   for (let i = start; i <= stop; i += step) yield ce.number(i);
-  //   return;
-  // }
-
-  // // Sequence are automatically flattended
-  // if (h === 'Sequence') {
-  //   for (const x of col.ops!) {
-  //     if (x.head === 'Sequence') yield* each(x.ops!);
-  //     else yield x;
-  //   }
-  //   return;
-  // }
-
-  // if (
-  //   typeof h === 'string' &&
-  //   /^(List|Set|Tuple|Single|Pair|Triple)$/.test(h)
-  // ) {
-  //   for (const x of col.ops!) yield x;
-  //   return;
-  // }
-
-  yield col;
+export function isIndexableCollection(col: BoxedExpression): boolean {
+  if (col.string !== null) return true;
+  const def = col.functionDefinition;
+  return def?.at !== undefined;
 }
 
 /**
- * Iterate over all the expressions in an expression tree with
- * the following form:
+ *
+ * Iterate over all the elements of a collection. If not a collection,
+ * return the expression.
+ *
+ * Even infinite collections are iterable. Use `isFiniteCollection()`
+ * to check if the collection is finite.
+ *
+ * The collection can have one of the following forms:
  * - `["Range"]`, `["Interval"]`, `["Linspace"]` expressions
  * - `["List"]` and `["Set"]` expressions
  * - `["Tuple"]`, `["Pair"]`, `["Pair"]`, `["Triple"]` expressions
  * - `["Sequence"]` expressions
+ * ... and more
  *
- * @param exclude a list of expression heads to exclude from the
- *  recursive iteration. They are instead retured as is.
+ * @param col - A potential collection
  *
- *
+ * @returns
  */
-export function* each(
-  ops: BoxedExpression[],
-  exclude?: string[]
-): Generator<BoxedExpression> {
-  if (ops.length === 0) return;
+export function* each(col: BoxedExpression): Generator<BoxedExpression> {
+  const limit = col.engine.iterationLimit;
+  const iter = iterator(col);
+  if (!iter) {
+    yield col;
+    return;
+  }
+  // We've got an iterator, iterate over it
+  let i = 0;
+  while (true) {
+    const { done, value } = iter.next();
+    if (done) return;
+    if (i++ > limit) {
+      yield col.engine.error('iteration-limit-exceeded');
+      return;
+    }
+    yield value;
+  }
+}
 
-  for (const op of ops) for (const val of iterable(op, exclude)) yield val;
+export function length(col: BoxedExpression): number | undefined {
+  if (col.string !== null) return col.string.length;
+
+  const def = col.functionDefinition;
+  return def?.size?.(col);
 }
 
 /**
@@ -136,7 +73,6 @@ export function* each(
  * - ["Range", 5]
  * - ["List", 1, 2, 3]
  * - "'hello world'"
- *
  *
  */
 export function iterator(

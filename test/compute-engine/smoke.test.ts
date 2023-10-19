@@ -39,11 +39,7 @@ const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
 // const expr = ce.parse('4x^{}');
-const expr = ce.box([
-  'Add',
-  ['Power', 2, ['Error', "'missing'"]],
-  ['Power', 'x', ['Error', "'missing'"]],
-]);
+const expr = ce.box(['Sum', ['Divide', 1, 'x'], 'x']).evaluate();
 console.info(expr.json);
 // expr.replace(ce.rules([['^{}', ['Sequence']]]));
 expr.replace(ce.rules([[['Power', '_1', ['Error', "'missing'"]], '_1']]), {
@@ -384,7 +380,16 @@ describe('PARSING numbers', () => {
                           ],
                           [
                             "Triple",
-                            ["Hold", "v_3"],
+                            [
+                              "Error",
+                              [
+                                "ErrorCode",
+                                "'incompatible-domain'",
+                                "Symbols",
+                                "Undefined"
+                              ],
+                              ["Subscript", "v", 3]
+                            ],
                             2,
                             ["Floor", ["Sqrt", "v_2"]]
                           ]
