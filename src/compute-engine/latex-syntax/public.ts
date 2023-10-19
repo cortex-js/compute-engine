@@ -612,7 +612,14 @@ export type SerializeLatexOptions = {
   fractionStyle: (
     expr: Expression,
     level: number
-  ) => 'quotient' | 'inline-solidus' | 'nice-solidus' | 'reciprocal' | 'factor';
+  ) =>
+    | 'quotient'
+    | 'block-quotient'
+    | 'inline-quotient'
+    | 'inline-solidus'
+    | 'nice-solidus'
+    | 'reciprocal'
+    | 'factor';
 
   logicStyle: (
     expr: Expression,
@@ -788,7 +795,14 @@ export interface Serializer {
   fractionStyle: (
     expr: Expression,
     level: number
-  ) => 'quotient' | 'inline-solidus' | 'nice-solidus' | 'reciprocal' | 'factor';
+  ) =>
+    | 'quotient'
+    | 'block-quotient'
+    | 'inline-quotient'
+    | 'inline-solidus'
+    | 'nice-solidus'
+    | 'reciprocal'
+    | 'factor';
 
   logicStyle: (
     expr: Expression,

@@ -414,10 +414,15 @@ function serializeFraction(
       '}'
     );
   }
+
   // Quotient (default)
+  let cmd = '\\frac';
+  if (style === 'block-quotient') cmd = '\\dfrac';
+  else if (style === 'inline-quotient') cmd = '\\tfrac';
+
   const numerLatex = serializer.serialize(numer);
   const denomLatex = serializer.serialize(denom);
-  return `\\frac{${numerLatex}}{${denomLatex}}`;
+  return `${cmd}{${numerLatex}}{${denomLatex}}`;
 }
 
 function serializePower(
@@ -1100,8 +1105,7 @@ function serializeBigOp(command: string) {
     const fn = op(expr, 1);
 
     if (!arg) {
-      if (!op(expr, 2))
-        return joinLatex([command, '_n', serializer.serialize(fn)]);
+      if (!op(expr, 2)) return joinLatex([command, serializer.serialize(fn)]);
       return joinLatex([
         command,
         '_{',
