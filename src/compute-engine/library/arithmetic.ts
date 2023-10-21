@@ -187,6 +187,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Ceil: {
       description: 'Rounds a number up to the next largest integer',
       complexity: 1250,
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Integers'],
         evaluate: (_ce, ops) =>
@@ -226,6 +227,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Divide: {
       wikidata: 'Q1226939',
       complexity: 2500,
+      threadable: true,
       // - if numer product of numbers, or denom product of numbers,
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
 
@@ -269,6 +271,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Factorial: {
       description: 'Factorial Function',
       wikidata: 'Q120976',
+      threadable: true,
       complexity: 9000,
 
       signature: {
@@ -294,6 +297,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Factorial2: {
       description: 'Double Factorial Function',
       complexity: 9000,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -313,6 +317,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Floor: {
       wikidata: 'Q56860783',
       complexity: 1250,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'ExtendedRealNumbers'],
@@ -329,6 +334,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Gamma: {
       wikidata: 'Q190573',
       complexity: 8000,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -344,6 +350,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     GammaLn: {
       complexity: 8000,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -361,6 +368,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Natural Logarithm',
       wikidata: 'Q204037',
       complexity: 4000,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -378,6 +386,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Log(z, b = 10) = Logarithm of base b',
       wikidata: 'Q11197',
       complexity: 4100,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
@@ -418,6 +427,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Base-2 Logarithm',
       wikidata: 'Q581168',
       complexity: 4100,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -439,6 +449,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Base-10 Logarithm',
       wikidata: 'Q966582',
       complexity: 4100,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -463,6 +474,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       idempotent: true,
       complexity: 2100,
       hold: 'all',
+      threadable: true,
 
       signature: {
         domain: 'NumericFunctions',
@@ -479,6 +491,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Additive Inverse',
       wikidata: 'Q715358',
       complexity: 2000,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -521,6 +534,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Power: {
       wikidata: 'Q33456',
       commutative: false,
+      threadable: true,
       complexity: 3500,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
@@ -616,6 +630,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Root: {
       complexity: 3200,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
@@ -633,6 +648,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Round: {
       complexity: 1250,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -648,6 +664,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
     Sign: {
       complexity: 1200,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Integers'],
@@ -707,6 +724,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Square Root',
       wikidata: 'Q134237',
       complexity: 3000,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -726,6 +744,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Square: {
       wikidata: 'Q3075175',
       complexity: 3100,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
@@ -740,6 +759,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Subtract: {
       wikidata: 'Q40754',
       complexity: 1350,
+      threadable: true,
 
       signature: {
         domain: ['FunctionOf', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
@@ -911,6 +931,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Numerator: {
       description: 'Numerator of an expression',
       complexity: 1200,
+      threadable: true,
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Numbers'],
@@ -938,6 +959,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Denominator: {
       description: 'Denominator of an expression',
       complexity: 1200,
+      threadable: true,
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Numbers'],
@@ -966,6 +988,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     NumeratorDenominator: {
       description: 'Sequence of Numerator and Denominator of an expression',
       complexity: 1200,
+      threadable: true,
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
@@ -1124,7 +1147,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ce.number(
             limit(
               (x) => {
-                let y = fn([ce.number(x)])?.value;
+                const y = fn([ce.number(x)])?.value;
                 return typeof y === 'number' ? y : Number.NaN;
               },
               target,
@@ -1154,7 +1177,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ce.number(
             limit(
               (x) => {
-                let y = fn([ce.number(x)])?.value;
+                const y = fn([ce.number(x)])?.value;
                 return typeof y === 'number' ? y : Number.NaN;
               },
               target,
@@ -1359,7 +1382,7 @@ function processMinMax(
   let result: BoxedExpression | undefined = undefined;
   const rest: BoxedExpression[] = [];
 
-  for (let op of ops) {
+  for (const op of ops) {
     const [val, others] = processMinMaxItem(op, mode);
     if (val) {
       if (!result) result = val;
@@ -1384,7 +1407,7 @@ function processGcdLcm(
   const fn = mode === 'LCM' ? lcm : gcd;
   const bigFn = mode === 'LCM' ? bigLcm : bigGcd;
 
-  let rest: BoxedExpression[] = [];
+  const rest: BoxedExpression[] = [];
   if (bignumPreferred(ce)) {
     let result: Decimal | null = null;
     for (const op of ops) {

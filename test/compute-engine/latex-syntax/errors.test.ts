@@ -6,6 +6,27 @@ function check(s: string, f: jest.ProvidesCallback) {
   describe(s, () => test(s, f));
 }
 
+check('Syntax error inside group with invisible operator', () =>
+  expect(engine.parse('{2\\pi)}')).toMatchInlineSnapshot(`
+    [
+      "Sequence",
+      2,
+      "Pi",
+      ["Error", ["ErrorCode", "'unexpected-token'", "')'"]]
+    ]
+  `)
+);
+
+check('Valid empty group', () =>
+  expect(engine.parse('{}')).toMatchInlineSnapshot(`["Sequence"]`)
+);
+
+check('Invalid open delimiter', () =>
+  expect(engine.parse(')+1')).toMatchInlineSnapshot(
+    `["Error", ["ErrorCode", "'unexpected-token'", "')'"]]`
+  )
+);
+
 check('Unknown symbol', () =>
   expect(engine.parse('\\oops')).toMatchInlineSnapshot(`
     [
@@ -25,8 +46,7 @@ check('Unknown symbol in argument list', () =>
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\oops'"],
         ["LatexString", "'\\oops'"]
-      ],
-      2
+      ]
     ]
   `)
 );
@@ -40,8 +60,7 @@ check('Unknown command with arguments', () =>
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\oops'"],
         ["LatexString", "'\\oops{bar}'"]
-      ],
-      2
+      ]
     ]
   `)
 );
@@ -84,8 +103,7 @@ check('Unbalanced environment, \\end without \\begin', () =>
         "Error",
         ["ErrorCode", "'unbalanced-environment'", "'cases'"],
         ["LatexString", "'\\end{cases}'"]
-      ],
-      2
+      ]
     ]
   `)
 );
@@ -178,31 +196,15 @@ check('Invalid infix operator', () =>
 );
 
 check('Invalid prefix operator', () =>
-  expect(engine.parse('2\\partial')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      2,
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\partial'"],
-        ["LatexString", "'\\partial'"]
-      ]
-    ]
-  `)
+  expect(engine.parse('2\\partial')).toMatchInlineSnapshot(
+    `["Sequence", 2, ["PartialDerivative", "Nothing", "Nothing", "Nothing"]]`
+  )
 );
 
 check('Invalid postfix operator', () =>
-  expect(engine.parse('! 3')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      ["Factorial", ["Error", "'missing'", ["LatexString", "'!'"]]],
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "' '"],
-        ["LatexString", "' 3'"]
-      ]
-    ]
-  `)
+  expect(engine.parse('! 3')).toMatchInlineSnapshot(
+    `["Factorial", ["Error", "'missing'", ["LatexString", "'!'"]]]`
+  )
 );
 
 check('Supsub syntax error', () =>
@@ -276,17 +278,9 @@ check('VALID function application', () =>
 );
 
 check('INVALID function application', () =>
-  expect(engine.parse('g\\left(\\right)')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      "g",
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-open-delimiter'", "'\\left'"],
-        ["LatexString", "'\\left(\\right)'"]
-      ]
-    ]
-  `)
+  expect(engine.parse('g\\left(\\right)')).toMatchInlineSnapshot(
+    `["Sequence", "g", ["Error", "'syntax-error'"]]`
+  )
 );
 
 check('VALID function application', () =>
@@ -306,31 +300,15 @@ check('VALID function application', () =>
 );
 
 check('Invalid empty delimiter expression', () =>
-  expect(engine.parse('1()')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      1,
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["LatexString", "'()'"]
-      ]
-    ]
-  `)
+  expect(engine.parse('1()')).toMatchInlineSnapshot(
+    `["Sequence", 1, ["Error", "'syntax-error'"]]`
+  )
 );
 
 check('Invalid empty delimiter expression', () =>
-  expect(engine.parse('1\\left(\\right)')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      1,
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-open-delimiter'", "'\\left'"],
-        ["LatexString", "'\\left(\\right)'"]
-      ]
-    ]
-  `)
+  expect(engine.parse('1\\left(\\right)')).toMatchInlineSnapshot(
+    `["Sequence", 1, ["Error", "'syntax-error'"]]`
+  )
 );
 
 check('Invalid delimiter: expected closing', () =>
@@ -338,41 +316,21 @@ check('Invalid delimiter: expected closing', () =>
     [
       "Sequence",
       1,
-      [
-        "Error",
-        ["ErrorCode", "'expected-close-delimiter'", "'\\right)'"],
-        ["LatexString", "'('"]
-      ]
+      ["Error", "'unexpected-delimiter'", ["LatexString", "'\\left('"]]
     ]
   `)
 );
 
 check('Invalid delimiter: expected closing', () =>
-  expect(engine.parse('1(')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      1,
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["LatexString", "'('"]
-      ]
-    ]
-  `)
+  expect(engine.parse('1(')).toMatchInlineSnapshot(
+    `["Sequence", 1, ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]]`
+  )
 );
 
 check('Invalid delimiter: expected opening', () =>
-  expect(engine.parse('1)')).toMatchInlineSnapshot(`
-    [
-      "Sequence",
-      1,
-      [
-        "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "'('"],
-        ["LatexString", "')'"]
-      ]
-    ]
-  `)
+  expect(engine.parse('1)')).toMatchInlineSnapshot(
+    `["Sequence", 1, ["Error", ["ErrorCode", "'unexpected-token'", "')'"]]]`
+  )
 );
 
 check('Invalid delimiter: expected opening', () =>
@@ -380,11 +338,7 @@ check('Invalid delimiter: expected opening', () =>
     [
       "Sequence",
       1,
-      [
-        "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "'\\left('"],
-        ["LatexString", "'\\right)'"]
-      ]
+      ["Error", "'unexpected-delimiter'", ["LatexString", "'\\right)'"]]
     ]
   `)
 );
@@ -394,48 +348,15 @@ check('Invalid delimiter', () =>
     [
       "Sequence",
       1,
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\left'"],
-        ["LatexString", "'\\left'"]
-      ],
-      "alpha",
-      2,
-      [
-        "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "'\\left'"],
-        ["LatexString", "'\\right\\alpha'"]
-      ]
+      ["Error", "'unexpected-delimiter'", ["LatexString", "'\\left\\alpha'"]]
     ]
   `)
 );
 
-check('Invalid double superscript', () =>
-  expect(engine.parse('x^1^2')).toMatchInlineSnapshot(`
-    [
-      "Power",
-      "x",
-      [
-        "Error",
-        ["ErrorCode", "'incompatible-domain'", "Numbers", "Lists"],
-        ["List", 1, 2]
-      ]
-    ]
-  `)
-);
-
-check('Double superscript: invalid domain', () =>
-  expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(`
-    [
-      "Power",
-      "x",
-      [
-        "Error",
-        ["ErrorCode", "'incompatible-domain'", "Numbers", "Lists"],
-        ["List", 1, 2]
-      ]
-    ]
-  `)
+check('Double superscript: threaded', () =>
+  expect(engine.parse('x^1^2').canonical).toMatchInlineSnapshot(
+    `["Power", "x", ["List", 1, 2]]`
+  )
 );
 
 // check('Invalid double subscript', () =>
@@ -469,11 +390,7 @@ check('Syntax error: @', () =>
     [
       "Sequence",
       "x",
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "'@'"],
-        ["LatexString", "'@2'"]
-      ]
+      ["Error", ["ErrorCode", "'unexpected-token'", "'@'"]]
     ]
   `)
 );
@@ -515,11 +432,7 @@ check('Syntax error: &', () =>
     [
       "Sequence",
       "x",
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "'&'"],
-        ["LatexString", "'&2'"]
-      ]
+      ["Error", ["ErrorCode", "'unexpected-token'", "'&'"]]
     ]
   `)
 );
@@ -546,14 +459,10 @@ check('Syntax error', () =>
         2,
         [
           "Sequence",
-          ["Error", "'expected-expression'", ["LatexString", "'{'"]],
-          [
-            "Error",
-            "'expected-closing-delimiter'",
-            ["LatexString", "'{{'"]
-          ]
+          ["Error", "'syntax-error'"],
+          ["Error", "'syntax-error'"]
         ],
-        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{{{'"]]
+        ["Error", "'syntax-error'"]
       ]
     ]
   `)

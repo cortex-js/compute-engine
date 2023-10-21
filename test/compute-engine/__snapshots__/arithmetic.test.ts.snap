@@ -185,14 +185,7 @@ canonical = ["Ln", ["Error", "'missing'"]]
 
 exports[` 32`] = `
 box       = ["Ln", "'string'"]
-canonical = [
-  "Ln",
-  [
-    "Error",
-    ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
-    "'string'"
-  ]
-]
+evaluate  = ["Sequence"]
 `;
 
 exports[` 33`] = `

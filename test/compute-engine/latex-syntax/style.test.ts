@@ -10,8 +10,7 @@ describe('STYLE - MATH MODE', () => {
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\textcolor'"],
           ["LatexString", "'\\textcolor{red}{=}'"]
-        ],
-        "y"
+        ]
       ]
       [
         "Sequence",
@@ -20,8 +19,7 @@ describe('STYLE - MATH MODE', () => {
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\textcolor'"],
           ["LatexString", "'\\textcolor{red}{=}'"]
-        ],
-        "y"
+        ]
       ]
     `);
   });
@@ -37,17 +35,8 @@ describe('STYLE - TEXT MODE', () => {
 
     // Math mode inside text mode
     expect(check('a\\text{ in $x$ }b')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", "a", "'x' in  ''", "b"]
-      [
-        "Multiply",
-        "a",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
-          "'x' in  ''"
-        ],
-        "b"
-      ]
+      latex     = ["Sequence", "a", "' in $x$ '", "b"]
+      ["Sequence", "a", "' in $x$ '", "b"]
     `);
 
     expect(check('a\\text{ black \\textcolor{red}{RED} }b'))
@@ -59,16 +48,8 @@ describe('STYLE - TEXT MODE', () => {
     expect(check('a\\text{ black \\color{red}RED\\color{blue}BLUE} b'))
       .toMatchInlineSnapshot(`
       latex     = ["Multiply", "a", "' black '", "b"]
-      [
-        "Multiply",
-        "a",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
-          "' black '"
-        ],
-        "b"
-      ]
+      box       = ["Multiply", "a", "b", "' black '"]
+      evaluate  = ["Sequence"]
     `);
     expect(check('a\\text{ black \\textcolor{red}{RED} black} b'))
       .toMatchInlineSnapshot(`

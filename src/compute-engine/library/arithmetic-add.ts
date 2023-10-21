@@ -8,7 +8,7 @@ import { asBignum, asFloat, MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
 import { canonicalLimits, normalizeLimits } from './utils';
-import { each } from '../collection-utils';
+import { each, isIndexableCollection } from '../collection-utils';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -24,7 +24,7 @@ export function canonicalAdd(
   ops = ops.filter((x) => x.numericValue === null || !x.isZero);
 
   if (ops.length === 0) return ce.Zero;
-  if (ops.length === 1) return ops[0];
+  if (ops.length === 1 && !isIndexableCollection(ops[0])) return ops[0];
   //
   // Is this a  complex number, i.e. `a + ib` or `ai + b`?
   //
@@ -63,7 +63,7 @@ export function simplifyAdd(
   ce: IComputeEngine,
   args: BoxedExpression[]
 ): BoxedExpression {
-  console.assert(args.length > 1, `simplifyAdd: not enough args`);
+  // console.assert(args.length > 1, `simplifyAdd: not enough args`);
 
   const sum = new Sum(ce);
   for (let arg of args) {

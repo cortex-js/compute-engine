@@ -38,8 +38,17 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-// const expr = ce.parse('4x^{}');
-const expr = ce.box(['Sum', ['Divide', 1, 'x'], 'x']).evaluate();
+console.info(
+  ce
+    .parse('\\frac{1}{225}{(0.000\\,123\\,45\\sin(0)\\arsinh(5\\pi))} ')
+    .toString()
+);
+
+ce.assign('f(x)', ce.parse('2x'));
+const expr1 = ce.box(['Subtract', 3, ['f', 3]]);
+console.info(expr1.evaluate().toString());
+
+const expr = ce.parse('3\\equiv5\\mod7');
 console.info(expr.json);
 // expr.replace(ce.rules([['^{}', ['Sequence']]]));
 expr.replace(ce.rules([[['Power', '_1', ['Error', "'missing'"]], '_1']]), {

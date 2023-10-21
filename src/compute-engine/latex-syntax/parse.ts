@@ -43,13 +43,13 @@ import {
 import { parseIdentifier, parseInvalidIdentifier } from './parse-identifier';
 
 /** These delimiters can be used as 'shorthand' delimiters in
- * `openDelimiter` and `closeDelimiter` for `matchfix` operators.
+ * `openTrigger` and `closeTrigger` for `matchfix` operators.
  */
-const DELIMITER_SHORTHAND = {
+const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
   '(': ['\\lparen', '('],
   ')': ['\\rparen', ')'],
-  '[': ['\\lbrack'],
-  ']': ['\\rbrack'],
+  '[': ['\\lbrack', '\\[', '['],
+  ']': ['\\rbrack', '\\]', ']'],
   '<': ['<', '\\langle'],
   '>': ['>', '\\rangle'],
   '{': ['\\{', '\\lbrace'],
@@ -111,7 +111,9 @@ const MIDDLE_DELIMITER_PREFIX = [
 const CLOSE_DELIMITER = {
   '(': ')',
   '[': ']',
+  '|': '|',
   '\\{': '\\}',
+  '\\[': '\\]',
   '\\lbrace': '\\rbrace',
   '\\lparen': '\\rparen',
   '\\langle': '\\rangle',
@@ -284,16 +286,11 @@ export class _Parser implements Parser {
     if (peek === this._lastPeek) this._peekCounter += 1;
     else this._peekCounter = 0;
     if (this._peekCounter >= 1024) {
-      console.error(
-        `Infinite loop detected while parsing "${this.latex(0)}" at "${
-          this._lastPeek
-        }" (index ${this.index})`
-      );
-      throw new Error(
-        `Infinite loop detected while parsing "${this.latex(0)}" at ${
-          this._lastPeek
-        } (index ${this.index})`
-      );
+      const msg = `Infinite loop detected while parsing "${this.latex(
+        0
+      )}" at "${this._lastPeek}" (index ${this.index})`;
+      console.error(msg);
+      throw new Error(msg);
     }
     this._lastPeek = peek;
     return peek;
@@ -611,54 +608,37 @@ export class _Parser implements Parser {
     return null;
   }
 
-  /** If the next token matches the open delimiter, set a boundary with
+  /**
+   *
+   * If the next token matches the open delimiter, set a boundary with
    * the close token and return true.
    *
-   * Note this method handles generic delimiters, i.e. '(' will math both
-   * '(', '\left(', '\bigl(', etc...
+   * Note this method handles "shorthand" delimiters, i.e. '(' will match both
+   * `(` and `\lparen`. If a shorthand is used for the open delimiter, the
+   * corresponding shorthand will be used for the close delimiter.
+   * See DELIMITER_SHORTHAND.
    *
-   * Note that the definitions for matchfix may need to include synonyms
-   * for example:
+   * It also handles prefixes like `\left` and `\bigl`.
    *
-   * {
-   *    openDelimiter: '(',
-   *    closeDelimiter: ')'
-   * }
-   *
-   * and
-   *
-   * {
-   *   openDelimiter: '\\lparen',
-   *   closeDelimiter: '\\rparen'
-   * }
-   *
-   * For:
-   * - '[': '\\lbrack' and '\\['
-   * - ']': '\\rbrack' and '\\]'
-   * - '{': '\\lbrace' and '\\}'
-   * - '}': '\\rbrace' and '\\}'
-   * - '<': '\\langle'
-   * - '>': '\\rangle'
-   * - '|': '\\vert'
-   * - '||': '\\Vert'
-   * - '|': '\\lvert' and '\\rvert'
-   * - '||': '\\lVert' and '\\rVert'
    */
   private matchDelimiter(
     open: Delimiter | LatexToken[],
     close: Delimiter | LatexToken[]
   ): boolean {
-    // A standalone `[` is not a valid delimiter (but `\left[` is OK)
+    // A standalone `[` is not a valid delimiter, because it is used
+    // for optional arguments, but `\left[` is OK
     if (this.peek === '[') return false;
 
+    // If the delimiters are token arrays, look specifically for those
     if (Array.isArray(open)) {
+      // If the open trigger is an array, the close trigger must be an array too
       console.assert(Array.isArray(close));
-      if (this.matchAll(open)) {
-        this.addBoundary(close as LatexToken[]);
-        return true;
-      }
-      return false;
+      if (!this.matchAll(open)) return false;
+      this.addBoundary(close as LatexToken[]);
+      return true;
     }
+
+    console.assert(!Array.isArray(close));
 
     const start = this.index;
     const closePrefix = OPEN_DELIMITER_PREFIX[this.peek];
@@ -669,10 +649,17 @@ export class _Parser implements Parser {
       return true;
     }
 
-    if (!this.match(open)) {
+    if (!(DELIMITER_SHORTHAND[open] ?? [open]).includes(this.peek)) {
+      // Not the delimiter we were expecting: backtrack
       this.index = start;
       return false;
     }
+
+    open = this.nextToken() as Delimiter;
+
+    // If we are using a shorthand delimiter, we need to add the
+    // corresponding close delimiter.
+    close = CLOSE_DELIMITER[open] ?? close;
 
     this.addBoundary(closePrefix ? [closePrefix, close] : [close]);
     return true;
@@ -686,7 +673,7 @@ export class _Parser implements Parser {
       const expr = this.parseExpression();
       this.skipSpace();
       if (this.matchBoundary()) return expr ?? ['Sequence'];
-      // Try to find a boundary
+      // Try to find the boundary (or the end)
       const from = this.index;
       while (!this.matchBoundary() && !this.atEnd) this.nextToken();
       const err = this.error('syntax-error', from);
@@ -1346,71 +1333,6 @@ export class _Parser implements Parser {
   //   return false;
   // }
 
-  /** For error handling, when there is potentially a mismatched delimiter.
-   * Return a LaTeX fragment of the expected closing delimiter
-   *
-   * @internal
-   */
-  matchEnclosureOpen(): string | null {
-    const defs = this.getDefs('matchfix') as Iterable<IndexedMatchfixEntry>;
-
-    const start = this.index;
-    for (const def of defs) {
-      this.index = start;
-      if (Array.isArray(def.openDelimiter)) {
-        if (this.matchAll(def.openDelimiter))
-          return tokensToString(def.closeDelimiter);
-        continue;
-      }
-
-      const closeDelimiter = this.matchOpenDelimiter(
-        def.openDelimiter,
-        def.closeDelimiter as Delimiter
-      );
-      if (closeDelimiter !== null) return tokensToString(closeDelimiter);
-    }
-    this.index = start;
-    return null;
-  }
-
-  /**
-   * Used for error handling
-   * @internal */
-  matchEnclosureClose(): string | null {
-    const defs = this.getDefs('matchfix') as Iterable<IndexedMatchfixEntry>;
-
-    const start = this.index;
-    for (const def of defs) {
-      this.index = start;
-      if (Array.isArray(def.closeDelimiter)) {
-        if (this.matchAll(def.closeDelimiter))
-          return tokensToString(def.openDelimiter);
-        continue;
-      }
-      this.index = start;
-      let peek = this.peek;
-      const prefix = Object.keys(OPEN_DELIMITER_PREFIX).find(
-        (x) => OPEN_DELIMITER_PREFIX[x] === peek
-      );
-      if (prefix) this.nextToken();
-
-      let openDelimiter: string[] = [];
-      peek = this.peek;
-      const matchingDelim = Object.keys(CLOSE_DELIMITER).find(
-        (x) => CLOSE_DELIMITER[x] === peek
-      );
-      if (matchingDelim) openDelimiter = [matchingDelim];
-
-      if (prefix) openDelimiter = [prefix, ...openDelimiter];
-      if (openDelimiter.length > 0) {
-        this.nextToken();
-        return tokensToString(openDelimiter);
-      }
-    }
-    this.index = start;
-    return null;
-  }
-
   /**
    * An enclosure is an opening matchfix operator, an optional expression,
    * optionally followed multiple times by a separator and another expression,
@@ -1428,7 +1350,7 @@ export class _Parser implements Parser {
       this.index = start;
 
       // 1. Match the opening delimiter
-      if (!this.matchDelimiter(def.openDelimiter, def.closeDelimiter)) continue;
+      if (!this.matchDelimiter(def.openTrigger, def.closeTrigger)) continue;
 
       // 2. Collect the expression in between the delimiters
       const bodyStart = this.index;
@@ -1673,7 +1595,7 @@ export class _Parser implements Parser {
       ) as IndexedInfixEntry[];
 
       if (defs) {
-        let nonEmptySuperscripts = superscripts.filter(
+        const nonEmptySuperscripts = superscripts.filter(
           (x) => head(x) !== 'Sequence'
         ) as Expression[];
         if (nonEmptySuperscripts.length !== 0) {
@@ -1886,18 +1808,34 @@ export class _Parser implements Parser {
   }
 
   /**
-   * This is an error handling method. We've encountered a LaTeX command
-   * but were not able to match it to any entry in the LaTeX dictionary,
-   * or ran into it in an unexpected context (postfix operator lacking an
-   * argument, for example)
+   * This method can be invoked when we know we're in an error situation.
+   *
+   * In general, if a context does not apply, we return `null` to give
+   * the chance to some other option to be considered. However, in some cases
+   * we know we've exhausted all posibilities, and in this case this method
+   * will return an error expression as informative as possible.
+   *
+   * We've encountered a LaTeX command or symbol but were not able to match it
+   * to any entry in the LaTeX dictionary, or ran into it in an unexpected
+   * context (postfix operator lacking an argument, for example)
    */
-  private parseUnexpectedLatexCommand(): Expression | null {
+  parseSyntaxError(): Expression {
     const start = this.index;
 
     //
     // Is this an unexpected operator?
     // (this is an error handling code path)
     //
+    // '^' is a special infix operator, with a custom parser
+    if (this.peek === '^') {
+      this.index += 1;
+      return [
+        'Superscript',
+        this.error('missing', start),
+        missingIfEmpty(this.parseGroup()),
+      ];
+    }
+
     let opDefs = this.peekDefinitions('operator');
     if (opDefs.length > 0) {
       opDefs = this.peekDefinitions('postfix');
@@ -1933,49 +1871,58 @@ export class _Parser implements Parser {
       opDefs = this.peekDefinitions('infix');
       if (opDefs.length > 0) {
         const [def, n] = opDefs[0] as [IndexedInfixEntry, number];
-        if (this.peek === '^') {
-          // '^' is a special case, with a custom parser
-          this.index += 1;
-          return [
-            'Superscript',
-            this.error('missing', start),
-            missingIfEmpty(this.parseGroup()),
-          ];
-        }
         this.index += n;
-        if (typeof def.parse === 'function') {
-          const result = def.parse(this, this.error('missing', start), {
-            minPrec: 0,
-          });
-          if (result) return result;
-        }
-        if (def.name)
-          return [
-            def.name,
-            this.error('missing', start),
-            this.parseExpression() ?? this.error('missing', start),
-          ];
+        const result = def.parse(this, this.error('missing', start), {
+          minPrec: 0,
+        });
+        if (result) return result;
+        // if (def.name)
+        //   return [
+        //     def.name,
+        //     this.error('missing', start),
+        //     this.error('missing', start),
+        //   ];
         return this.error('unexpected-operator', start);
       }
     }
 
-    const command = this.peek;
-    if (!command || command[0] !== '\\') return null;
+    const index = this.index;
 
-    this.nextToken();
+    let id = parseInvalidIdentifier(this);
+    if (id) return id;
+    id = parseIdentifier(this);
+    if (id) return this.error(['unexpected-identifier', id], index);
+
+    const command = this.peek;
+    if (!command) {
+      return this.error('syntax-error', start);
+    }
+    if (command[0] !== '\\') {
+      return this.error(
+        ['unexpected-token', { str: tokensToString(command) }],
+        start
+      );
+    }
+
+    // If the command is an open or close delimiter prefix, exit
+    if (isDelimiterCommand(this))
+      return this.error('unexpected-delimiter', start);
+
+    const errorToken = this.nextToken();
 
     this.skipSpaceTokens();
 
-    if (command === '\\end') {
+    if (errorToken === '\\end') {
       const name = this.parseStringGroup();
-      if (name === null) return this.error('expected-environment-name', start);
 
-      return this.error(['unbalanced-environment', { str: name }], start);
+      return name === null
+        ? this.error('expected-environment-name', start)
+        : this.error(['unbalanced-environment', { str: name }], start);
     }
 
     // Capture potential optional and required LaTeX arguments
     // This is a lazy capture, to handle the case `\foo[\blah[12]\blarg]`.
-    // However, a `[` (or `{`) could be e.g. inside a string and this
+    // However, a `[` could be e.g. inside a string and this
     // would fail to parse.
     // Since we're already in an error situation, though, probably OK.
     while (this.match('[')) {
@@ -1988,24 +1935,7 @@ export class _Parser implements Parser {
       this.match(']');
     }
 
-    const index = this.index;
-    this.index = start;
-    const closeDelimiter = this.matchEnclosureOpen();
-    if (closeDelimiter)
-      return this.error(
-        ['expected-close-delimiter', { str: closeDelimiter }],
-        index
-      );
-
-    const openDelimiter = this.matchEnclosureClose();
-    if (openDelimiter)
-      return this.error(
-        ['expected-open-delimiter', { str: openDelimiter }],
-        start
-      );
-
     // Capture any potential arguments to this unexpected command
-    this.index = index;
 
     while (this.match('<{>')) {
       let level = 0;
@@ -2017,7 +1947,10 @@ export class _Parser implements Parser {
       this.match('<}>');
     }
 
-    return this.error(['unexpected-command', { str: command }], start);
+    return this.error(
+      ['unexpected-command', { str: tokensToString(errorToken) }],
+      start
+    );
   }
 
   /**
@@ -2050,20 +1983,7 @@ export class _Parser implements Parser {
     if (this.match('<}>'))
       return this.error('unexpected-closing-delimiter', start);
 
-    if (this.match('<{>')) {
-      result = this.parseExpression({
-        minPrec: 0,
-        condition: (p) => p.peek === '<}>',
-      });
-      if (result === null) return this.error('expected-expression', start);
-
-      if (!this.match('<}>')) {
-        return this.decorate(
-          ['Sequence', result, this.error('expected-closing-delimiter', start)],
-          start
-        );
-      }
-    }
+    result ??= this.parseGroup();
 
     //
     // 2. Is it a number?
@@ -2149,10 +2069,12 @@ export class _Parser implements Parser {
    * is encountered
    */
   parseExpression(until?: Readonly<Terminator>): Expression | null {
-    const start = this.index;
-
+    // We want to skip spaces before parsing the expression
+    // That way, an "empty" `{}` expression is still considered
+    // valid.
     this.skipSpace();
 
+    const start = this.index;
     if (this.atBoundary) {
       this.index = start;
       return null;
@@ -2204,9 +2126,12 @@ export class _Parser implements Parser {
     }
 
     //
-    // 4. We've encountered an unexpected LaTeX command
+    // 4. We've encountered an unexpected token
     //
-    lhs ??= this.parseUnexpectedLatexCommand();
+    if (!lhs) {
+      lhs = this.parseSyntaxError();
+      while (!this.atTerminator(until)) this.nextToken();
+    }
 
     return this.decorate(lhs, start);
   }
@@ -2291,4 +2216,26 @@ function parseComplexId(parser: Parser, id: string): number {
   parser.index = start;
 
   return result;
+}
+
+function isDelimiterCommand(parser: Parser): boolean {
+  const command = parser.peek;
+  if (
+    Object.values(CLOSE_DELIMITER).includes(command) ||
+    CLOSE_DELIMITER[command]
+  ) {
+    parser.nextToken();
+    return true;
+  }
+
+  if (
+    OPEN_DELIMITER_PREFIX[command] ||
+    Object.values(OPEN_DELIMITER_PREFIX).includes(command)
+  ) {
+    parser.nextToken();
+    parser.nextToken();
+    return true;
+  }
+
+  return false;
 }

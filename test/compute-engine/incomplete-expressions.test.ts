@@ -19,7 +19,7 @@ describe('basic', () => {
         "Divide",
         [
           "Sequence",
-          ["Error", "'expected-expression'", ["LatexString", "'{'"]],
+          ["Error", "'syntax-error'"],
           ["Error", "'syntax-error'"]
         ],
         ["Error", "'missing'"]
@@ -54,9 +54,13 @@ describe('basic', () => {
   });
 
   test('Semantic Errors', () => {
-    expect(parse('1+')).toMatchInlineSnapshot(
-      `["Add", 1, ["Error", "'missing'", ["LatexString", "'+'"]]]`
-    );
+    expect(parse('1+')).toMatchInlineSnapshot(`
+      [
+        "Sequence",
+        1,
+        ["Error", "'unexpected-operator'", ["LatexString", "'+'"]]
+      ]
+    `);
     expect(parse('1\\times')).toMatchInlineSnapshot(
       `["Multiply", 1, ["Error", "'missing'"]]`
     );

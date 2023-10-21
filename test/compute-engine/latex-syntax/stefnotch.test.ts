@@ -9,26 +9,14 @@ describe('STEFNOTCH #9', () => {
 });
 
 describe('STEFNOTCH #10', () => {
-  test('1/ \\displaystyle \\left(\\sin^{-1}\\mleft(x\\mright)\\right)^{\\prime}', () => {
+  test('1/ \\displaystyle \\left(\\sin^{-1}\\left(x\\right)\\right)^{\\prime}', () => {
     expect(
       parse(
-        '\\displaystyle \\left(\\sin^{-1}\\mleft(x\\mright)\\right)^{\\prime}'
+        '\\displaystyle \\left(\\sin^{-1}\\left(x\\right)\\right)^{\\prime}'
       )
-    ).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'expected-close-delimiter'", "'\\right)'"],
-          ["LatexString", "'('"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\sin'"],
-          ["LatexString", "'\\sin^{-1}\\mleft(x\\mright)\\right)^{\\prime}'"]
-        ]
-      ]
-    `);
+    ).toMatchInlineSnapshot(
+      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\left('"]]`
+    );
   });
 
   test('2/ 1^{\\sin(x)}', () => {
@@ -46,17 +34,9 @@ describe('STEFNOTCH #10', () => {
   test('4/ \\color{red}3', () => {
     expect(parse('\\color{red}3')).toMatchInlineSnapshot(`
       [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\color'"],
-          ["LatexString", "'\\color{red}'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'3'"],
-          ["LatexString", "'3'"]
-        ]
+        "Error",
+        ["ErrorCode", "'unexpected-command'", "'\\color'"],
+        ["LatexString", "'\\color{red}'"]
       ]
     `);
   });
@@ -70,11 +50,7 @@ describe('STEFNOTCH #10', () => {
       [
         "Sequence",
         "f",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "':'"],
-          ["LatexString", "':[a,b]\\to R '"]
-        ]
+        ["Error", ["ErrorCode", "'unexpected-token'", "':'"]]
       ]
     `);
   });
@@ -120,31 +96,13 @@ describe('STEFNOTCH #13', () => {
   }); // @fixme unclear what the right answer is
 
   test('3/  \\{1,2\\}', () => {
-    expect(parse('\\{1,2\\}')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["LatexString", "'\\{'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["LatexString", "'1,2\\}'"]
-        ]
-      ]
-    `);
+    expect(parse('\\{1,2\\}')).toMatchInlineSnapshot(`["Set", 1, 2]`);
   });
 
-  test('4/ [1,2]', () => {
-    expect(parse('[1,2]')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-token'", "'['"],
-        ["LatexString", "'[1,2]'"]
-      ]
-    `);
+  test('4/ \\[1,2\\]', () => {
+    expect(parse('[1,2]')).toMatchInlineSnapshot(
+      `["Error", ["ErrorCode", "'unexpected-token'", "'['"]]`
+    );
   });
 
   test('5/ \\frac{2}{\\sqrt{n}}\\Leftrightarrow n>\\frac{5}{n^2}', () => {
@@ -194,38 +152,28 @@ describe('STEFNOTCH #13', () => {
             "Error",
             ["ErrorCode", "'unexpected-command'", "'\\mod'"],
             ["LatexString", "'\\mod'"]
-          ],
-          7
+          ]
         ]
       ]
     `);
   });
 
-  test('8/ a={displaystyle lim_{n\toinfin}a_n}', () => {
+  test('8/ a={displaystyle lim_{n\\toinfin}a_n}', () => {
     expect(parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}'))
       .toMatchInlineSnapshot(`
       [
-        "Equal",
-        "a",
+        "Sequence",
         [
-          "Sequence",
+          "Equal",
+          "a",
           [
-            "Subscript",
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\lim'"],
-              ["LatexString", "'\\lim'"]
-            ],
-            [
-              "Error",
-              "'expected-closing-delimiter'",
-              ["LatexString", "'{\\displaystyle\\lim'"]
-            ]
-          ],
-          ["To", "n", {num: "+Infinity"}],
-          "a_n",
-          ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
-        ]
+            "Error",
+            ["ErrorCode", "'unexpected-command'", "'\\lim'"],
+            ["LatexString", "'\\lim'"]
+          ]
+        ],
+        "a_n",
+        ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ]
     `);
   });
@@ -233,17 +181,9 @@ describe('STEFNOTCH #13', () => {
   test('9/  \\forall x\\in\\C^2:|x|<0', () => {
     expect(parse('\\forall x\\in\\C^2:|x|<0')).toMatchInlineSnapshot(`
       [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\forall'"],
-          ["LatexString", "'\\forall'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-identifier'", "x"],
-          ["LatexString", "'x'"]
-        ]
+        "Error",
+        ["ErrorCode", "'unexpected-command'", "'\\forall'"],
+        ["LatexString", "'\\forall'"]
       ]
     `);
   });
@@ -255,17 +195,9 @@ describe('STEFNOTCH #13', () => {
       )
     ).toMatchInlineSnapshot(`
       [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\forall'"],
-          ["LatexString", "'\\forall'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-identifier'", "n"],
-          ["LatexString", "'n'"]
-        ]
+        "Error",
+        ["ErrorCode", "'unexpected-command'", "'\\forall'"],
+        ["LatexString", "'\\forall'"]
       ]
     `);
   });

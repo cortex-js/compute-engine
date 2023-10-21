@@ -50,10 +50,11 @@ import { DEFINITIONS_STATISTICS } from './definitions-statistics';
 export type CommonEntry = {
   /** Note: a name is required if a serialize handler is provided */
   name?: string;
+
   serialize?: SerializeHandler;
 
-  /** Note: not all kinds have a latexTrigger or identifierTrigger.
-   * For example, matchfix operators use openDelimiter/closeDelimiter
+  /** Note: not all kinds have a `latexTrigger` or `identifierTrigger`.
+   * For example, matchfix operators use `openTrigger`/`closeTrigger`
    */
   latexTrigger?: LatexString;
   identifierTrigger?: string;
@@ -110,8 +111,8 @@ export function isIndexedFunctionEntry(
 export type IndexedMatchfixEntry = CommonEntry & {
   kind: 'matchfix';
 
-  openDelimiter: Delimiter | LatexToken[];
-  closeDelimiter: Delimiter | LatexToken[];
+  openTrigger: Delimiter | LatexToken[];
+  closeTrigger: Delimiter | LatexToken[];
 
   parse: MatchfixParseHandler;
 };
@@ -197,6 +198,9 @@ export type IndexedLatexDictionary = {
   defs: IndexedLatexDictionaryEntry[];
 };
 
+//
+// This table is used for the default serialzier for matchfix operators
+//
 const DEFAULT_DELIMITER: { [key: string]: LatexString } = {
   '(': '(',
   ')': ')',
@@ -364,8 +368,8 @@ function makeIndexedEntry(
   // 1. Matchfix definition
   //
   if (result.kind === 'matchfix' && isMatchfixEntry(entry)) {
-    result.openDelimiter = entry.openTrigger!;
-    result.closeDelimiter = entry.closeTrigger!;
+    result.openTrigger = entry.openTrigger!;
+    result.closeTrigger = entry.closeTrigger!;
   }
 
   //
@@ -443,11 +447,11 @@ function makeSerializeHandler(
     const openDelim =
       typeof entry.openTrigger === 'string'
         ? DEFAULT_DELIMITER[entry.openTrigger]
-        : tokensToString(entry['openDelimiter']);
+        : tokensToString(entry.openTrigger);
     const closeDelim =
       typeof entry.closeTrigger === 'string'
         ? DEFAULT_DELIMITER[entry.closeTrigger]
-        : tokensToString(entry['closeDelimiter']);
+        : tokensToString(entry.closeTrigger);
 
     return (serializer, expr) =>
       joinLatex([openDelim, serializer.serialize(op(expr, 1)), closeDelim]);
@@ -676,7 +680,7 @@ function isValidEntry(
     entry.name ??
     entry['latexTrigger'] ??
     entry['identifierTrigger'] ??
-    entry['openDelimiter'];
+    entry['openTrigger'];
   if (!subject) {
     try {
       subject = JSON.stringify(entry);
@@ -785,7 +789,7 @@ function isValidEntry(
         message: [
           'invalid-dictionary-entry',
           subject,
-          `'matchfix' operators use a 'openDelimiter' and 'closeDelimiter' instead of a 'latexTrigger' or 'identifierTrigger'. `,
+          `'matchfix' operators use a 'openTrigger' and 'closeTrigger' instead of a 'latexTrigger' or 'identifierTrigger'. `,
         ],
       });
       return false;
@@ -797,7 +801,7 @@ function isValidEntry(
         message: [
           'invalid-dictionary-entry',
           subject,
-          'Expected `openDelimiter` and a `closeDelimiter` for matchfix operator',
+          'Expected `openTrigger` and a `closeTrigger` for matchfix operator',
         ],
       });
       return false;
@@ -809,7 +813,7 @@ function isValidEntry(
         message: [
           'invalid-dictionary-entry',
           subject,
-          'Expected `openDelimiter` and `closeDelimiter` to both be strings or array of LatexToken',
+          'Expected `openTrigger` and `closeTrigger` to both be strings or array of LatexToken',
         ],
       });
       return false;

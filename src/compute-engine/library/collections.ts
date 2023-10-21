@@ -120,7 +120,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     size: (expr) => {
       const [lower, upper, step] = rangeArgs(expr);
       if (!isFinite(lower) || !isFinite(upper)) return Infinity;
-      return Math.max(0, Math.floor((upper! - lower!) / step));
+      return 1 + Math.max(0, Math.floor((upper! - lower!) / step));
     },
     at: (
       expr: BoxedExpression,
@@ -128,7 +128,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     ): undefined | BoxedExpression => {
       if (typeof index !== 'number') return undefined;
       const [lower, upper, step] = rangeArgs(expr);
-      if (index < 1 || index > (upper - lower) / step) return undefined;
+      if (index < 1 || index > 1 + (upper - lower) / step) return undefined;
       return expr.engine.number(lower + step * (index - 1));
     },
     iterator: (expr, start, count) => {

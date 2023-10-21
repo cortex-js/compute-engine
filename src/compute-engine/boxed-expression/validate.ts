@@ -1,3 +1,4 @@
+import { isIndexableCollection } from '../collection-utils';
 import {
   IComputeEngine,
   BoxedExpression,
@@ -51,6 +52,8 @@ export function checkArity(
  * and a numeric result), we do a simple numeric check of all arguments, and
  * verify we have the number of expected arguments.
  *
+ * We also assume that the function is threadable.
+ *
  * Converts the arguments to canonical, and flattens the sequence.
  */
 export function checkNumericArgs(
@@ -66,7 +69,7 @@ export function checkNumericArgs(
 
   // @fastpath
   if (!ce.strict) {
-    for (const x of ops) x.infer(ce.Numbers);
+    for (const x of ops) if (!isIndexableCollection(x)) x.infer(ce.Numbers);
     return ops;
   }
 
@@ -98,6 +101,8 @@ export function checkNumericArgs(
     } else if (!op.domain) {
       // No domain, set. Keep it that way, infer later
       xs.push(op);
+    } else if (isIndexableCollection(op)) {
+      xs.push(op);
     } else if (
       op.symbolDefinition?.inferredDomain &&
       op.domain.isCompatible(ce.Numbers, 'contravariant')
@@ -112,7 +117,8 @@ export function checkNumericArgs(
   }
 
   // Only if all arguments are valid, we infer the domain of the arguments
-  if (isValid) for (const x of xs) x.infer(ce.Numbers);
+  if (isValid)
+    for (const x of xs) if (!isIndexableCollection(x)) x.infer(ce.Numbers);
 
   return xs;
 }

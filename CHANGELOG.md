@@ -11,6 +11,17 @@
   - `["Tuple"]`, `["Pair"]`, `["Pair"]`, `["Triple"]` expressions
   - `["Sequence"]` expressions
 
+- Most mathematical functions are now threadable, that is their arguments can be
+  collections, for example:
+
+```json
+["Sin", ["List", 0, 1, 5]]
+// -> ["List", 0, 0.8414709848078965, -0.9589242746631385]
+
+["Add", ["List", 1, 2], ["List", 3, 4]]
+// -> ["List", 4, 6]
+```
+
 - Added `GCD` and `LCM` functions
 - Added `Numerator`, `Denominator`, `NumeratorDenominator` functions. These
   functions can be used on non-canonical expressions.

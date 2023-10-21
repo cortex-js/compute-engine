@@ -144,3 +144,26 @@ export function iterator(
 
 //   return undefined;
 // }
+
+/**
+ *
+ * @param expr
+ * @param index 1-based index
+ * @returns
+ */
+
+export function at(
+  expr: BoxedExpression,
+  index: number
+): BoxedExpression | undefined {
+  if (expr.functionDefinition?.at)
+    return expr.functionDefinition.at(expr, index);
+
+  const s = expr.string;
+  if (s) {
+    if (index < 1) return expr.engine.string(s.charAt(s.length + index));
+    return expr.engine.string(s.charAt(index - 1));
+  }
+
+  return undefined;
+}

@@ -24,16 +24,8 @@ describe('ROOT FUNCTION (INVALID FORMS)', () => {
     expect(parse('\\sqrt{}')).toMatchInlineSnapshot(
       `["Sqrt", ["Error", "'missing'"]]`
     );
-    expect(parse('\\sqrt{1}[3]')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        1,
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'['"],
-          ["LatexString", "'[3]'"]
-        ]
-      ]
-    `);
+    expect(parse('\\sqrt{1}[3]')).toMatchInlineSnapshot(
+      `["Sequence", 1, ["Error", ["ErrorCode", "'unexpected-token'", "'['"]]]`
+    );
   });
 });

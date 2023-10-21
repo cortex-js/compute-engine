@@ -1,7 +1,7 @@
-import { head, nops, op, ops } from '../../../math-json/utils';
+import { head, isEmptySequence, nops, op, ops } from '../../../math-json/utils';
 import { joinLatex } from '../tokenizer';
 import { Expression } from '../../../math-json/math-json-format';
-import { LatexDictionary, Serializer, LatexString } from '../public';
+import { LatexDictionary, Serializer, LatexString, Parser } from '../public';
 
 export const DEFINITIONS_SETS: LatexDictionary = [
   // Constants
@@ -142,18 +142,25 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     precedence: 350,
   },
   {
-    name: 'Range',
-    // @todo: parse opening '[' or ']' or '('
-    serialize: serializeSet,
+    name: 'Set',
+    kind: 'matchfix',
+    openTrigger: '{',
+    closeTrigger: '}',
+    precedence: 20,
+    // @todo: the set syntax can also include conditions...
+    parse: (_parser: Parser, body: Expression): Expression => {
+      if (body === null || isEmptySequence(body)) return 'EmptySet';
+      if (head(body) !== 'Sequence') return ['Set', body];
+      return ['Set', ...(ops(body) ?? [])];
+    },
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      return joinLatex([
+        '\\lbrace',
+        (ops(expr) ?? []).map((x) => serializer.serialize(x)).join(', '),
+        '\\rbrace',
+      ]);
+    },
   },
-  // {
-  //   name: 'Set',
-  //   kind: 'matchfix',
-  //   openDelimiter: '{',
-  //   closeDelimiter: '}',
-  //   precedence: 20,
-  //   // @todo: the set syntax can also include conditions...
-  // },
   {
     name: 'SetMinus',
     latexTrigger: ['\\setminus'],

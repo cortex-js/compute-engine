@@ -71,6 +71,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Limit: (args, compile) =>
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
   Ln: 'Math.log',
+  List: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
   Log: 'Math.log10',
   LogGamma: '_SYS.lngamma',
   Lb: 'Math.log2',
@@ -86,6 +87,27 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     if (exp === -1) return `1 / (${compile(arg)})`;
     if (exp === -0.5) return `1 / Math.sqrt(${compile(arg)})`;
     return `Math.pow(${compile(arg)}, ${compile(args[1])})`;
+  },
+  Range: (args, compile) => {
+    // args could either be missing, or not a number
+    if (args.length === 0) return '[]';
+    if (args.length === 1)
+      return `Array.from({length: ${compile(args[0])}}, (_, i) => i)`;
+
+    let start = compile(args[0]);
+    let stop = compile(args[1]);
+    const step = args[2] ? compile(args[2]) : '1';
+    if (start === null) throw new Error('Range: no start');
+    if (stop === null) {
+      stop = start;
+      start = '1';
+    }
+    if (step === '0') throw new Error('Range: step cannot be zero');
+    if (parseFloat(step) === 1.0)
+      return `Array.from({length: ${stop} - ${start} + 1
+      }, (_, i) => ${start} + i)`;
+
+    return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_, i) => ${start} + i * ${step})`;
   },
   Root: (args, compile) => {
     const arg = args[0];
@@ -373,10 +395,6 @@ function compileExpr(
     )}${target.ws('\n')}})()`;
   }
 
-  if (h === 'List') {
-    return `[${args.map((x) => compile(x, target)).join(', ')}]`;
-  }
-
   const fn = target.functions?.(h);
   if (!fn) throw new Error(`Unknown function ${h}`);
   if (typeof fn === 'function')
@@ -389,10 +407,11 @@ function compileExpr(
 
 // Will throw an exception if the expression cannot be compiled
 export function compile(
-  expr: BoxedExpression,
+  expr: BoxedExpression | undefined,
   target: CompileTarget,
   prec = 0
 ): JSSource {
+  if (expr === undefined) return '';
   if (!expr.isValid) throw new Error('Invalid expression');
 
   //

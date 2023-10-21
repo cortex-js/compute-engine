@@ -409,7 +409,8 @@ export function fromDigits(
   return [value, ''];
 }
 
-export function asFloat(expr: BoxedExpression): number | null {
+export function asFloat(expr: BoxedExpression | undefined): number | null {
+  if (expr === undefined || expr === null) return null;
   const num = expr.numericValue;
   if (num === null) return null;
 
@@ -428,7 +429,8 @@ export function asFloat(expr: BoxedExpression): number | null {
   return null;
 }
 
-export function asBignum(expr: BoxedExpression): Decimal | null {
+export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
+  if (expr === undefined || expr === null) return null;
   const num = expr.numericValue;
   if (num === null) return null;
 
@@ -448,7 +450,10 @@ export function asBignum(expr: BoxedExpression): Decimal | null {
   return null;
 }
 
-export function asSmallInteger(expr: BoxedExpression): number | null {
+export function asSmallInteger(
+  expr: BoxedExpression | undefined
+): number | null {
+  if (expr === undefined || expr === null) return null;
   const num = expr.numericValue;
   if (num === null) return null;
 

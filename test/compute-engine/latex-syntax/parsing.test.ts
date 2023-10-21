@@ -33,36 +33,24 @@ describe('UNKNOWN COMMANDS', () => {
     `);
     expect(parse('x=\\foo+1')).toMatchInlineSnapshot(`
       [
-        "Add",
+        "Equal",
+        "x",
         [
-          "Equal",
-          "x",
-          [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\foo'"],
-            ["LatexString", "'\\foo'"]
-          ]
-        ],
-        1
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\foo'"],
+          ["LatexString", "'\\foo'"]
+        ]
       ]
     `);
     expect(parse('x=\\foo   {1}  {x+1}+1')).toMatchInlineSnapshot(`
       [
-        "Add",
+        "Equal",
+        "x",
         [
-          "Multiply",
-          [
-            "Equal",
-            "x",
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\foo'"],
-              ["LatexString", "'\\foo{1}'"]
-            ]
-          ],
-          ["Add", "x", 1]
-        ],
-        1
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\foo'"],
+          ["LatexString", "'\\foo{1}'"]
+        ]
       ]
     `);
   });

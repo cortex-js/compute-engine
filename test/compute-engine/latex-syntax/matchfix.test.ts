@@ -42,20 +42,17 @@ describe('MATCHFIX', () => {
 });
 
 describe('MATCHFIX serialize', () => {
-  test('[List]', () =>
-    expect(latex(['List'])).toMatchInlineSnapshot(`\\lbrack\\rbrack`));
+  test('[List]', () => expect(latex(['List'])).toMatchInlineSnapshot(`\\[\\]`));
 
   test('[List, "a"]', () =>
-    expect(latex(['List', 'a'])).toMatchInlineSnapshot(`\\lbrack a\\rbrack`));
+    expect(latex(['List', 'a'])).toMatchInlineSnapshot(`\\[a\\]`));
 
   test(`['List', 'a', 'b']`, () =>
-    expect(latex(['List', 'a', 'b'])).toMatchInlineSnapshot(
-      `\\lbrack a, b\\rbrack`
-    ));
+    expect(latex(['List', 'a', 'b'])).toMatchInlineSnapshot(`\\[a, b\\]`));
 
   test(`['List', 'a', ['List', 'b', 'c']`, () =>
     expect(latex(['List', 'a', ['List', 'b', 'c']])).toMatchInlineSnapshot(
-      `\\lbrack a, \\lbrack b, c\\rbrack\\rbrack`
+      `\\[a, \\[b, c\\]\\]`
     ));
 });
 
@@ -110,16 +107,38 @@ describe('MATCHFIX abs and norm', () => {
 
   test('|(1+|a|+2)|', () =>
     expect(check('|(1+|a|+2)|')).toMatchInlineSnapshot(`
-      latex     = ["Abs", ["Delimiter", ["Add", 1, ["Abs", "a"], 2]]]
-      box       = ["Abs", ["Add", ["Abs", "a"], 1, 2]]
-      simplify  = ["Add", ["Abs", "a"], 3]
+      latex     = [
+        "Multiply",
+        ["Abs", ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]],
+        "a",
+        [
+          "Abs",
+          [
+            "Sequence",
+            2,
+            ["Error", ["ErrorCode", "'unexpected-token'", "')'"]]
+          ]
+        ]
+      ]
+      [
+        "Multiply",
+        ["Abs", ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]],
+        "a",
+        [
+          "Abs",
+          [
+            "Sequence",
+            2,
+            ["Error", ["ErrorCode", "'unexpected-token'", "')'"]]
+          ]
+        ]
+      ]
     `));
 
   test('|1+|a|+2|', () =>
     expect(check('|1+|a|+2|')).toMatchInlineSnapshot(`
-      latex     = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
-      box       = ["Abs", ["Add", ["Abs", "a"], 1, 2]]
-      simplify  = ["Add", ["Abs", "a"], 3]
+      latex     = ["Error", ["ErrorCode", "'unexpected-token'", "'|'"]]
+      ["Error", ["ErrorCode", "'unexpected-token'", "'|'"]]
     `));
 
   test('||a||', () =>
@@ -137,53 +156,25 @@ describe('MATCHFIX abs and norm', () => {
 describe('MATCHFIX invalid', () => {
   test('( // missing closing fence', () =>
     expect(check('(')).toMatchInlineSnapshot(`
-      latex     = [
-        "Error",
-        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["LatexString", "'('"]
-      ]
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["LatexString", "'('"]
-      ]
+      latex     = ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]
+      ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]
     `));
   test(') // missing opening fence', () => {
     expect(check(')')).toMatchInlineSnapshot(`
-      latex     = [
-        "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "'('"],
-        ["LatexString", "')'"]
-      ]
-      [
-        "Error",
-        ["ErrorCode", "'expected-open-delimiter'", "'('"],
-        ["LatexString", "')'"]
-      ]
+      latex     = ["Error", ["ErrorCode", "'unexpected-token'", "')'"]]
+      ["Error", ["ErrorCode", "'unexpected-token'", "')'"]]
     `);
   });
 
   test('-( // missing closing fence', () => {
-    expect(engine.parse('-(').json).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        ["Negate", ["Error", "'missing'"]],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-          ["LatexString", "'('"]
-        ]
-      ]
-    `);
+    expect(engine.parse('-(').json).toMatchInlineSnapshot(
+      `["Negate", ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]]`
+    );
   });
 
   test('(3+x // missing closing fence', () => {
-    expect(engine.parse('(3+x').json).toMatchInlineSnapshot(`
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-open-delimiter'", "'('"],
-        ["LatexString", "'(3+x'"]
-      ]
-    `);
+    expect(engine.parse('(3+x').json).toMatchInlineSnapshot(
+      `["Error", ["ErrorCode", "'unexpected-token'", "'('"]]`
+    );
   });
 });

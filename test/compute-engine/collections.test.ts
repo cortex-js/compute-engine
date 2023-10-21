@@ -57,7 +57,7 @@ describe('LENGTH', () => {
     expect(evaluate(['Length', matrix])).toMatchInlineSnapshot(`3`));
 
   test('Length range', () =>
-    expect(evaluate(['Length', range])).toMatchInlineSnapshot(`8`));
+    expect(evaluate(['Length', range])).toMatchInlineSnapshot(`9`));
 
   test('Length linspace', () =>
     expect(evaluate(['Length', linspace])).toMatchInlineSnapshot(`89`));
@@ -178,7 +178,7 @@ describe('TAKE [-1,1]', () => {
 
   test('range', () =>
     expect(evaluate(['Take', range, ['Tuple', -1, 1]])).toMatchInlineSnapshot(
-      `["List", 16, 14, 12, 10, 8, 6, 4, 2]`
+      `["List", 18, 16, 14, 12, 10, 8, 6, 4, 2]`
     ));
 
   test('linspace', () =>
@@ -320,7 +320,7 @@ describe('Drop 2', () => {
 
   test('range', () =>
     expect(evaluate(['Drop', range, 2])).toMatchInlineSnapshot(
-      `["List", 2, 6, 8, 10, 12, 14, 16]`
+      `["List", 2, 6, 8, 10, 12, 14, 16, 18]`
     ));
 
   test('linspace', () =>

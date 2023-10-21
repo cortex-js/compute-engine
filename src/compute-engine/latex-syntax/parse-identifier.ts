@@ -254,7 +254,7 @@ function matchPrefixedIdentifier(parser: Parser): string | null {
 
 /** For error handling, if we have a identifier prefix, assume
  * the identifier is invalid (it would have been captured by
- * `mathIdentifier()` otherwise) and return an error expression */
+ * `matchIdentifier()` otherwise) and return an error expression */
 export function parseInvalidIdentifier(parser: Parser): Expression | null {
   const start = parser.index;
   const id = matchPrefixedIdentifier(parser);

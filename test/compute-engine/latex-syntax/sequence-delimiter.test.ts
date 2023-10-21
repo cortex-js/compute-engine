@@ -63,48 +63,12 @@ describe('SEQUENCE PARSING', () => {
     `));
 });
 
-describe('LISTS', () => {
-  test('Lists can be enclosed in braces', () =>
+describe('SETS', () => {
+  test('Sets can be enclosed in braces', () =>
     expect(check('\\{1, 2, 3\\}')).toMatchInlineSnapshot(`
-      box       = [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["LatexString", "'\\{'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["LatexString", "'1, 2, 3\\}'"]
-        ]
-      ]
-      canonical = [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["LatexString", "'\\{'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["LatexString", "'1, 2, 3\\}'"]
-        ]
-      ]
-      evaluated = [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["LatexString", "'\\{'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["LatexString", "'1, 2, 3\\}'"]
-        ]
-      ]
+      box       = ["Set", 1, 2, 3]
+      canonical = ["Set", 1, 2, 3]
+      evaluated = ["Set", 1, 2, 3]
     `));
   test('Lists can be enclosed in square brackets', () =>
     expect(check('\\[1, 2, 3\\]')).toMatchInlineSnapshot(`
@@ -126,88 +90,10 @@ describe('LISTS', () => {
     `));
 
   test('Lists can be embedded in other lists', () =>
-    expect(check('(1, \\{2, 3, 4\\}, 5)')).toMatchInlineSnapshot(`
-      box       = [
-        "Delimiter",
-        [
-          "Sequence",
-          [
-            "Sequence",
-            1,
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\{'"],
-              ["LatexString", "'\\{'"]
-            ],
-            2
-          ],
-          3,
-          [
-            "Sequence",
-            4,
-            [
-              "Error",
-              ["ErrorCode", "'expected-open-delimiter'", "'\\{'"],
-              ["LatexString", "'\\}'"]
-            ]
-          ],
-          5
-        ]
-      ]
-      canonical = [
-        "Delimiter",
-        [
-          "Sequence",
-          [
-            "Sequence",
-            1,
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\{'"],
-              ["LatexString", "'\\{'"]
-            ],
-            2
-          ],
-          3,
-          [
-            "Sequence",
-            4,
-            [
-              "Error",
-              ["ErrorCode", "'expected-open-delimiter'", "'\\{'"],
-              ["LatexString", "'\\}'"]
-            ]
-          ],
-          5
-        ]
-      ]
-      evaluated = [
-        "Delimiter",
-        [
-          "Sequence",
-          [
-            "Sequence",
-            1,
-            [
-              "Error",
-              ["ErrorCode", "'unexpected-command'", "'\\{'"],
-              ["LatexString", "'\\{'"]
-            ],
-            2
-          ],
-          3,
-          [
-            "Sequence",
-            4,
-            [
-              "Error",
-              ["ErrorCode", "'expected-open-delimiter'", "'\\{'"],
-              ["LatexString", "'\\}'"]
-            ]
-          ],
-          5
-        ]
-      ]
+    expect(check('(1, \\[2, 3, 4\\], 5)')).toMatchInlineSnapshot(`
+      box       = ["Delimiter", ["Sequence", 1, ["List", 2, 3, 4], 5]]
+      canonical = ["Sequence", 1, ["List", 2, 3, 4], 5]
+      evaluated = ["Sequence", 1, ["List", 2, 3, 4], 5]
     `));
 });
 

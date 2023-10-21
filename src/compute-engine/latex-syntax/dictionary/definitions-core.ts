@@ -414,41 +414,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'List',
     kind: 'matchfix',
-    openTrigger: '\\lbrack',
-    closeTrigger: '\\rbrack',
-    parse: parseList,
-    serialize: (serializer: Serializer, expr: Expression): string => {
-      return joinLatex([
-        '\\lbrack',
-        serializeOps(', ')(serializer, expr),
-        '\\rbrack',
-      ]);
-    },
-  },
-  // Synonyms for List
-  {
-    kind: 'matchfix',
     openTrigger: '[',
     closeTrigger: ']',
     parse: parseList,
+    serialize: (serializer: Serializer, expr: Expression): string =>
+      joinLatex(['\\[', serializeOps(', ')(serializer, expr), '\\]']),
   },
-  {
-    kind: 'matchfix',
-    openTrigger: '\\[',
-    closeTrigger: '\\]',
-    parse: parseList,
-  },
-  // Synonyms for Delimiter
   {
     kind: 'matchfix',
     openTrigger: '(',
     closeTrigger: ')',
-    parse: parseDelimiter,
-  },
-  {
-    kind: 'matchfix',
-    openTrigger: '\\lparen',
-    closeTrigger: '\\rparen',
     parse: parseDelimiter,
   },
   {
@@ -468,6 +443,21 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const seq = parseSequence(parser, terminator, lhs, 20, ',');
       if (seq === null) return null;
       return ['Sequence', ...seq];
+    },
+  },
+  {
+    latexTrigger: ['.', '.'],
+    kind: 'infix',
+    precedence: 10,
+    parse: (
+      parser: Parser,
+      lhs: Expression,
+      terminator: Readonly<Terminator>
+    ): Expression | null => {
+      if (!lhs) return null;
+      const end = parser.parseExpression({ ...terminator, minPrec: 0 });
+      if (!end) return null;
+      return ['Range', lhs, end];
     },
   },
   {
@@ -903,7 +893,7 @@ function parsePrime(
   return ['Prime', missingIfEmpty(lhs), order];
 }
 
-function parseDelimiter(parser: Parser, body: Expression): Expression | null {
+function parseDelimiter(_parser: Parser, body: Expression): Expression | null {
   // @todo: does this really need to be done here? Sequence(Sequence(...))
   // Handle `()` used for example with `f()`
   if (body === null || isEmptySequence(body)) return ['Sequence'];
@@ -917,6 +907,17 @@ function parseDelimiter(parser: Parser, body: Expression): Expression | null {
 
 function parseList(_parser: Parser, body: Expression): Expression {
   if (body === null || isEmptySequence(body)) return ['List'];
+  if (head(body) === 'Range') return body;
   if (head(body) !== 'Sequence' && head(body) !== 'List') return ['List', body];
   return ['List', ...(ops(body) ?? [])];
+}
+
+function parseRange(parser: Parser): Expression | null {
+  const start = parser.parseExpression({ minPrec: 0 });
+  if (!start) return null;
+  if (!parser.match('..')) return null;
+  const end = parser.parseExpression({ minPrec: 0 });
+  if (!end) return null;
+
+  return ['Range', start, end];
 }

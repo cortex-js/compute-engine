@@ -49,7 +49,6 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
   },
   {
-    // sqrt(x*x + y*y)
     Degrees: {
       /* = Pi / 180 */
       signature: {
@@ -66,7 +65,9 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
           ce.mul([ops[0], ce.div(ce.Pi, ce.number(180))]).evaluate(),
       },
     },
+    // Hypot: sqrt(x*x + y*y)
     Hypot: {
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'NonNegativeNumbers'],
         simplify: (ce, ops) =>
@@ -81,6 +82,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Sin: {
       complexity: 5000,
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>

@@ -24,7 +24,6 @@ import {
   Hold,
 } from '../public';
 import { findUnivariateRoots } from '../solve';
-import { asFloat } from '../numerics/numeric';
 import { isRational, signDiff } from '../numerics/rationals';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
@@ -39,6 +38,7 @@ import { checkNumericArgs, adjustArguments } from './validate';
 import { expand } from '../symbolic/expand';
 import { apply } from '../function-utils';
 import { shouldHold } from '../symbolic/utils';
+import { at, isIndexableCollection } from '../collection-utils';
 
 /**
  * BoxedFunction
@@ -68,7 +68,6 @@ export class BoxedFunction extends _BoxedExpression {
 
   // The cached result of applying the tail to the head. If the function is
   // not pure, its value is never cached.
-  private _value: BoxedExpression | undefined;
   private _numericValue: BoxedExpression | undefined;
 
   private _hash: number | undefined;
@@ -134,7 +133,6 @@ export class BoxedFunction extends _BoxedExpression {
 
   reset(): void {
     // Note: a non-canonical expression is never bound
-    this._value = undefined;
     this._numericValue = undefined;
     // this._def = null;
   }
@@ -706,10 +704,39 @@ export class BoxedFunction extends _BoxedExpression {
       return canonical.evaluate(options);
     }
 
-    //
-    // 2/ Evaluate the applicable operands
-    //
     const def = this.functionDefinition;
+
+    //
+    // 2/ Thread if applicable
+    //
+    // If the function is threadable, iterate
+    //
+    if (def?.threadable && this.ops!.some((x) => isIndexableCollection(x))) {
+      // If one of the arguments is an indexable collection, thread the function
+      // Get the length of the longest sequence
+      const length = Math.max(
+        ...this._ops.map((x) => x.functionDefinition?.size?.(x) ?? 0)
+      );
+
+      // Zip
+      const results: BoxedExpression[] = [];
+      for (let i = 0; i <= length - 1; i++) {
+        const args = this._ops.map((x) =>
+          isIndexableCollection(x)
+            ? at(x, (i % length) + 1) ?? this.engine.Nothing
+            : x
+        );
+        results.push(this.engine._fn(this.head, args).evaluate(options));
+      }
+
+      if (results.length === 0) return this.engine.box(['Sequence']);
+      if (results.length === 1) return results[0];
+      return this.engine._fn('List', results);
+    }
+
+    //
+    // 3/ Evaluate the applicable operands
+    //
     const tail = holdMap(
       this._ops,
       def?.hold ?? 'none',
@@ -718,19 +745,19 @@ export class BoxedFunction extends _BoxedExpression {
     );
 
     //
-    // 3/ Inert? Just return the first argument.
+    // 4/ Inert? Just return the first argument.
     //
     if (def?.inert) return tail[0] ?? this;
 
     //
-    // 4/ Is it an applied anonymous function?
+    // 5/ Is it an applied anonymous function?
     //    e.g. [["Add", "_", 1], 2]
     //
     let result: BoxedExpression | undefined | null = undefined;
     if (typeof this._head !== 'string') result = apply(this._head, tail);
 
     //
-    // 5/ Call the `evaluate` or `N` handler
+    // 6/ Call the `evaluate` or `N` handler
     //
     const sig = def?.signature;
     if (!result && sig) {

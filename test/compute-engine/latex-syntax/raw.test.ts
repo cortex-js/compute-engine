@@ -17,10 +17,6 @@ describe('NO DICTIONARY/NO DEFAULTS', () => {
             "ErrorCode",
             "'unexpected-token'",
             "'+'"
-          ],
-          [
-            "LatexString",
-            "'+x'"
           ]
         ]
       ]
@@ -43,30 +39,15 @@ describe('NO DICTIONARY/NO DEFAULTS', () => {
     expect(rawExpression('\\sqrt{(1+x_0)}=\\frac{\\pi^2}{2}'))
       .toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Error",
         [
-          "Error",
-          [
-            "ErrorCode",
-            "'unexpected-command'",
-            "'\\\\sqrt'"
-          ],
-          [
-            "LatexString",
-            "'\\\\sqrt{(1+x_0)}'"
-          ]
+          "ErrorCode",
+          "'unexpected-command'",
+          "'\\\\sqrt'"
         ],
         [
-          "Error",
-          [
-            "ErrorCode",
-            "'unexpected-token'",
-            "'='"
-          ],
-          [
-            "LatexString",
-            "'=\\\\frac{\\\\pi^2}{2}'"
-          ]
+          "LatexString",
+          "'\\\\sqrt{(1+x_0)}'"
         ]
       ]
     `);

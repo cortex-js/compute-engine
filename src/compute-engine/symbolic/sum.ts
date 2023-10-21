@@ -19,6 +19,7 @@ import {
 } from '../numerics/rationals';
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
+import { isIndexableCollection } from '../collection-utils';
 
 export class Sum {
   private engine: IComputeEngine;
@@ -278,7 +279,7 @@ export class Sum {
 
     const xs = this.terms(mode);
     if (xs.length === 0) return ce.Zero;
-    if (xs.length === 1) return xs[0];
+    if (xs.length === 1 && !isIndexableCollection(xs[0])) return xs[0];
 
     return ce._fn('Add', sortAdd(ce, xs));
   }

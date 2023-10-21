@@ -2,9 +2,9 @@ import { latex, parse } from '../../utils';
 
 describe('SERIALIZING SETS', () => {
   test('Set', () => {
-    expect(latex(['Set'])).toMatchInlineSnapshot(`\\mathrm{Set}()`);
+    expect(latex(['Set'])).toMatchInlineSnapshot(`\\lbrace\\rbrace`);
     expect(latex(['Set', 2, 5, 7])).toMatchInlineSnapshot(
-      `\\mathrm{Set}(2, 5, 7)`
+      `\\lbrace2, 5, 7\\rbrace`
     );
     // With lambda-condition
     // expect(
@@ -20,7 +20,7 @@ describe('SERIALIZING SETS', () => {
         ['Condition', ['NotEqual', 'x', 0]],
       ])
     ).toMatchInlineSnapshot(
-      `\\mathrm{Set}(x\\in\\mathrm{Numbers}, \\mathrm{Condition}(0\\ne x))`
+      `\\lbrace x\\in\\mathrm{Numbers}, \\mathrm{Condition}(0\\ne x)\\rbrace`
     );
   });
 
@@ -84,97 +84,45 @@ describe('SERIALIZING SETS', () => {
 describe('PARSING SETS', () => {
   test('Set', () => {
     // Empty set
-    expect(parse('\\lbrace\\rbrace')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\lbrace'"],
-          ["LatexString", "'\\lbrace'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'expected-open-delimiter'", "'\\lbrace'"],
-          ["LatexString", "'\\rbrace'"]
-        ]
-      ]
-    `);
+    expect(parse('\\lbrace\\rbrace')).toMatchInlineSnapshot(`EmptySet`);
 
     // Finite set
-    expect(parse('\\{1, 2, 3\\}')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["LatexString", "'\\{'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["LatexString", "'1, 2, 3\\}'"]
-        ]
-      ]
-    `);
+    expect(parse('\\{1, 2, 3\\}')).toMatchInlineSnapshot(`["Set", 1, 2, 3]`);
 
     // Infinite sets
-    expect(parse('\\{1, 2, 3...\\}')).toMatchInlineSnapshot(`
-      [
-        "Sequence",
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["LatexString", "'\\{'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["LatexString", "'1, 2, 3...\\}'"]
-        ]
-      ]
-    `);
+    expect(parse('\\{1, 2, 3...\\}')).toMatchInlineSnapshot(
+      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\{'"]]`
+    );
     expect(parse('\\{1, 2, 3, ...\\}')).toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Set",
+        1,
+        2,
+        3,
         [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["LatexString", "'\\{'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'1'"],
-          ["LatexString", "'1, 2, 3, ...\\}'"]
+          "Range",
+          ["Error", "'missing'", ["LatexString", "'..'"]],
+          ["Error", ["ErrorCode", "'unexpected-token'", "'.'"]]
         ]
       ]
     `);
     expect(parse('\\{...-2, -1, 0, 1, 2, 3...\\}')).toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Set",
         [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["LatexString", "'\\{'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'.'"],
-          ["LatexString", "'...-2, -1, 0, 1, 2, 3...\\}'"]
+          "Range",
+          ["Error", "'missing'", ["LatexString", "'..'"]],
+          ["Error", ["ErrorCode", "'unexpected-token'", "'.'"]]
         ]
       ]
     `);
     expect(parse('\\{...-2, -1, 0\\}')).toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Set",
         [
-          "Error",
-          ["ErrorCode", "'unexpected-command'", "'\\{'"],
-          ["LatexString", "'\\{'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-token'", "'.'"],
-          ["LatexString", "'...-2, -1, 0\\}'"]
+          "Range",
+          ["Error", "'missing'", ["LatexString", "'..'"]],
+          ["Error", ["ErrorCode", "'unexpected-token'", "'.'"]]
         ]
       ]
     `);

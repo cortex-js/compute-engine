@@ -151,81 +151,11 @@ export class LatexSyntax {
 
     let expr = parser.parseExpression();
 
+    // If we didn't reach the end of the input, there was an error
     if (!parser.atEnd) {
-      // Something went wrong, generate error expression
-      const opDefs = parser.peekDefinitions('infix');
-      if (opDefs.length > 0) {
-        const start = parser.index;
-        const [def, n] = opDefs[0];
-        parser.index += n;
-        const result = def.parse(
-          parser,
-          expr ?? parser.error('missing', start),
-          { minPrec: 0 }
-        );
-        if (result) return result;
-        if (def.name) {
-          return [
-            def.name,
-            expr ?? parser.error('missing', start),
-            parser.error('missing', start),
-          ];
-        }
-        parser.index = start;
-      }
-
-      const index = parser.index;
-
-      const id = parseIdentifier(parser);
-      if (id) {
-        const idError = parser.error(['unexpected-identifier', id], index);
-        return expr ? ['Sequence', expr, idError] : idError;
-      }
-
-      let openDelimiter: string | null = parser.peek;
-      const closeDelimiter = parser.matchEnclosureOpen();
-      if (closeDelimiter) {
-        // Parse and discard the content of the enclosure
-        parser.parseExpression();
-        parser.match(closeDelimiter);
-        const enclosureError = parser.error(
-          ['unexpected-open-delimiter', { str: openDelimiter }],
-          index
-        );
-        return expr ? ['Sequence', expr, enclosureError] : enclosureError;
-      }
-
-      openDelimiter = parser.matchEnclosureClose();
-      if (openDelimiter) {
-        const enclosureError = parser.error(
-          ['expected-open-delimiter', { str: openDelimiter }],
-          index
-        );
-        return expr ? ['Sequence', expr, enclosureError] : enclosureError;
-      }
-
-      const rest = parser.index;
-      const token = parser.nextToken();
-      while (!parser.atEnd) parser.nextToken();
-
-      //
-      // Something went wrong, generate error expression
-      //
-
-      // If we have no token, the parser went past the end of the string
-      // something went very wrong (likely a bug in a custom parser function)
-      if (!token) return parser.error('syntax-error', rest);
-
-      const error = parser.error(
-        [
-          token.length > 1 && token.startsWith('\\')
-            ? 'unexpected-command'
-            : 'unexpected-token',
-          { str: tokensToString([token]) },
-        ],
-        rest
-      );
+      const error = parser.parseSyntaxError();
       expr = expr ? ['Sequence', expr, error] : error;
+      while (!parser.atEnd) parser.nextToken();
     }
 
     expr ??= ['Sequence'];

@@ -58,17 +58,9 @@ describe('SUPSUB', () => {
     expect(parse('2^{-2}')).toMatchInlineSnapshot(
       `["Divide", 1, ["Square", 2]]`
     );
-    expect(parse('2^3^4')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        2,
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Lists"],
-          ["List", 3, 4]
-        ]
-      ]
-    `); // @todo: unclear what the right answer is... (and it's invalid LaTeX)
+    expect(parse('2^3^4')).toMatchInlineSnapshot(
+      `["Power", 2, ["List", 3, 4]]`
+    );
     expect(parse('2^{3^4}')).toMatchInlineSnapshot(
       `["Power", 2, ["Power", 3, 4]]`
     );
@@ -148,21 +140,13 @@ describe('SUPSUB', () => {
     );
     expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       [
-        "Sequence",
-        [
-          "Superscript",
-          ["Error", "'missing'", ["LatexString", "'^'"]],
-          ["Error", "'missing'"]
-        ],
-        [
-          "Error",
-          ["ErrorCode", "'unexpected-identifier'", "p"],
-          ["LatexString", "'p'"]
-        ]
+        "Superscript",
+        ["Error", "'missing'", ["LatexString", "'^'"]],
+        ["Error", "'missing'"]
       ]
     `); // @fixme: nope...
     expect(parse('^{12}_{34}(x+1)^n_0')).toMatchInlineSnapshot(
-      `["Subscript", ["Error", "'missing'", ["LatexString", "'^'"]], 12]`
+      `["Superscript", ["Error", "'missing'", ["LatexString", "'^'"]], 12]`
     ); // @fixme: nope...
   });
   test('Accents', () => {

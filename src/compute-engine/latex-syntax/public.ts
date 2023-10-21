@@ -246,7 +246,7 @@ export type LatexArgumentType =
  *  being the `identifierTrigger`.
  *
  *
- * `matchfix` operators use `openDelimiter` and `closeDelimiter` instead.
+ * `matchfix` operators use `openTrigger` and `closeTrigger` instead.
  *
  */
 
@@ -298,11 +298,11 @@ export type ExpressionEntry = BaseEntry &
 export type MatchfixEntry = BaseEntry & {
   kind: 'matchfix';
   /**
-   * If `kind` is `'matchfix'`: the `closeDelimiter` and `openDelimiter`
-   * property are required
+   * If `kind` is `'matchfix'`: the `openTrigger` and `closeTrigger`
+   * properties are required.
    */
-  openTrigger?: Delimiter | LatexToken[];
-  closeTrigger?: Delimiter | LatexToken[];
+  openTrigger: Delimiter | LatexToken[];
+  closeTrigger: Delimiter | LatexToken[];
 
   /** When invoked, the parser is pointing after the close delimiter.
    * The argument of the handler is the body, i.e. the content between

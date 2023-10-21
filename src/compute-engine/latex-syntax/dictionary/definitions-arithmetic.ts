@@ -630,8 +630,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     kind: 'matchfix',
-    openTrigger: ['\u2308'],
-    closeTrigger: ['\u2309'],
+    openTrigger: ['\u2308'], // ⌈ U+2308 LEFT CEILING
+    closeTrigger: ['\u2309'], // ⌉ U+2309 RIGHT CEILING
     parse: (_parser, body) => (isEmptySequence(body) ? null : ['Ceil', body]),
   },
   {
@@ -730,8 +730,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     kind: 'matchfix',
-    openTrigger: ['\u230a'],
-    closeTrigger: ['\u230b'],
+    openTrigger: ['\u230a'], // ⌊ U+230A LEFT FLOOR
+    closeTrigger: ['\u230b'], // ⌋ U+230B RIGHT FLOOR
     parse: (_parser, body) => (isEmptySequence(body) ? null : ['Floor', body]),
   },
   {
