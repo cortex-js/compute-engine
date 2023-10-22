@@ -16,6 +16,7 @@ import { canonicalNegate } from '../symbolic/negate';
 import { applyN, apply2N } from '../symbolic/utils';
 import { asFloat } from '../numerics/numeric';
 import { checkArity, checkNumericArgs } from '../boxed-expression/validate';
+import { reducedRational } from '../numerics/rationals';
 
 //
 //Note: Names of trigonometric functions follow ISO 80000 Section 13
@@ -59,6 +60,18 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
           const arg = ops[0];
           if (arg.numericValue === null || !arg.isValid)
             return ce._fn('Degrees', ops);
+          let fArg = asFloat(arg);
+          if (fArg !== null) {
+            // Constrain fArg to [0, 360]
+            fArg = fArg % 360;
+            if (fArg < 0) fArg += 360;
+            // Convert fArg to radians
+            const fRadians = reducedRational([fArg, 180]);
+            if (fRadians[0] === 0) return ce.number(0);
+            if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
+            if (fRadians[0] === 1) return ce.div(ce.Pi, ce.number(fRadians[1]));
+            return ce.mul([ce.number(fRadians), ce.Pi]);
+          }
           return ce.div(ce.mul([arg, ce.Pi]), ce.number(180));
         },
         evaluate: (ce, ops) =>
