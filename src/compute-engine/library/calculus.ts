@@ -91,6 +91,7 @@ volumes
     //
     Derivative: {
       hold: 'all',
+      threadable: false,
       signature: {
         domain: [
           'FunctionOf',
@@ -141,6 +142,7 @@ volumes
 
     D: {
       hold: 'all',
+      threadable: false,
       signature: {
         domain: [
           'FunctionOf',
@@ -197,6 +199,7 @@ volumes
     // Evaluate a numerical approximation of a derivative at point x
     ND: {
       hold: 'first',
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Anything', 'Numbers', 'Functions'],
         N: (ce, ops) => {
@@ -212,6 +215,7 @@ volumes
     Integrate: {
       wikidata: 'Q80091',
       hold: 'all',
+      threadable: false,
       signature: {
         domain: [
           'FunctionOf',
@@ -272,6 +276,7 @@ volumes
 
     NIntegrate: {
       hold: 'first',
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Functions', 'Numbers', 'Numbers', 'Numbers'],
         evaluate: (ce, ops) => {

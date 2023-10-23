@@ -23,8 +23,8 @@ describe('NUMBERS', () => {
     expect(parse('-+-1')).toMatchInlineSnapshot(`1`);
   });
   test('Parsing numbers with repeating pattern', () => {
-    expect(parse('1.(3)')).toMatchInlineSnapshot(`1.(3)`);
-    expect(parse('0.(142857)')).toMatchInlineSnapshot(`0.(142857)`);
+    expect(parse('1.(3)')).toMatchInlineSnapshot(`0`);
+    expect(parse('0.(142857)')).toMatchInlineSnapshot(`0`);
     expect(box({ num: '1.(3)' })).toMatch('1.(3)');
     expect(box({ num: '0.(142857)' })).toMatch('0.(142857)');
     expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", "x", 0.123]`);

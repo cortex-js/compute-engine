@@ -13,7 +13,13 @@ import {
   isEmptySequence,
   symbol,
 } from '../../../math-json/utils';
-import { LatexDictionary, Parser, Serializer, Terminator } from '../public';
+import {
+  ADDITION_PRECEDENCE,
+  LatexDictionary,
+  Parser,
+  Serializer,
+  Terminator,
+} from '../public';
 import { joinLatex } from '../tokenizer';
 
 // function isSpacingToken(token: string): boolean {
@@ -417,8 +423,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     openTrigger: '[',
     closeTrigger: ']',
     parse: parseList,
+    // Note: Avoid \\[ ... \\] because it is used for display math
     serialize: (serializer: Serializer, expr: Expression): string =>
-      joinLatex(['\\[', serializeOps(', ')(serializer, expr), '\\]']),
+      joinLatex([
+        '\\bigl\\lbrack',
+        serializeOps(', ')(serializer, expr),
+        '\\bigr\\rbrack',
+      ]),
   },
   {
     kind: 'matchfix',
@@ -446,18 +457,45 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
+    name: 'Range',
     latexTrigger: ['.', '.'],
     kind: 'infix',
     precedence: 10,
-    parse: (
-      parser: Parser,
-      lhs: Expression,
-      terminator: Readonly<Terminator>
-    ): Expression | null => {
-      if (!lhs) return null;
-      const end = parser.parseExpression({ ...terminator, minPrec: 0 });
-      if (!end) return null;
-      return ['Range', lhs, end];
+    parse: parseRange,
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const args = ops(expr);
+      if (args === null) return '';
+      if (args.length === 1) return '1..' + serializer.serialize(op(expr, 1));
+      if (args.length === 2)
+        return (
+          serializer.wrap(op(expr, 1), 10) +
+          '..' +
+          serializer.wrap(op(expr, 2), 10)
+        );
+      if (args.length === 3) {
+        const step = machineValue(op(expr, 3));
+        const start = machineValue(op(expr, 1));
+        if (step !== null && start !== null) {
+          return (
+            serializer.wrap(op(expr, 1), 10) +
+            ',' +
+            serializer.wrap(start + step, 10) +
+            '..' +
+            serializer.wrap(op(expr, 2), 10)
+          );
+        }
+
+        return (
+          serializer.wrap(op(expr, 1), 10) +
+          ',' +
+          (serializer.wrap(op(expr, 3), ADDITION_PRECEDENCE) +
+            '+' +
+            serializer.wrap(op(expr, 3), ADDITION_PRECEDENCE)) +
+          '..' +
+          serializer.wrap(op(expr, 2), 10)
+        );
+      }
+      return '';
     },
   },
   {
@@ -912,12 +950,41 @@ function parseList(_parser: Parser, body: Expression): Expression {
   return ['List', ...(ops(body) ?? [])];
 }
 
-function parseRange(parser: Parser): Expression | null {
-  const start = parser.parseExpression({ minPrec: 0 });
-  if (!start) return null;
-  if (!parser.match('..')) return null;
+function parseRange(parser: Parser, lhs: Expression): Expression | null {
+  const index = parser.index;
+  if (!lhs) return null;
+
+  // Is there a step implied? e.g. "1,3..10"
+  let start: Expression | null = null;
+  let second: Expression | null = null;
+  if (head(lhs) === 'Sequence') {
+    if (nops(lhs) !== 2) return null;
+    start = op(lhs, 1);
+    second = op(lhs, 2);
+    if (second === null) {
+      parser.index = index;
+      return null;
+    }
+  } else start = op(lhs, 1);
+
+  if (start === null) return null;
+
   const end = parser.parseExpression({ minPrec: 0 });
-  if (!end) return null;
+  if (!end) {
+    parser.index = index;
+    return null;
+  }
+
+  // Is there an implied step?
+  if (second) {
+    // If the step is a number, use it
+    const secondValue = machineValue(second);
+    const startValue = machineValue(start);
+    if (secondValue !== null && startValue !== null) {
+      return ['Range', start, end, secondValue - startValue];
+    }
+    return ['Range', start, end, ['Subtract', second, start]];
+  }
 
   return ['Range', start, end];
 }

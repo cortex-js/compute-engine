@@ -2,7 +2,9 @@ import { BoxedExpression } from './public';
 
 export function isCollection(col: BoxedExpression): boolean {
   if (col.string !== null) return true;
-  const def = col.functionDefinition;
+  if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
+  const def =
+    col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
   return def?.iterator !== undefined;
 }
 
@@ -14,14 +16,28 @@ export function isFiniteCollection(col: BoxedExpression): boolean {
 
 export function isIndexableCollection(col: BoxedExpression): boolean {
   if (col.string !== null) return true;
-  const def = col.functionDefinition;
+  if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
+  const def =
+    col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
   return def?.at !== undefined;
+}
+
+export function isFiniteIndexableCollection(col: BoxedExpression): boolean {
+  if (col.string !== null) return true;
+  if ((col.symbolDefinition?.value?.string ?? null) !== null) return true;
+  const def =
+    col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
+  if (!def) return false;
+  return def.at !== undefined && Number.isFinite(def.size?.(col) ?? Infinity);
 }
 
 /**
  *
  * Iterate over all the elements of a collection. If not a collection,
  * return the expression.
+ *
+ * The `col` argument is either a collection literal, or a symbol
+ * whose value is a collection literal.
  *
  * Even infinite collections are iterable. Use `isFiniteCollection()`
  * to check if the collection is finite.
@@ -33,18 +49,22 @@ export function isIndexableCollection(col: BoxedExpression): boolean {
  * - `["Sequence"]` expressions
  * ... and more
  *
+ * In general, `each` is easier to use than `iterator`, but they do the same
+ * thing.
+ *
  * @param col - A potential collection
  *
  * @returns
  */
 export function* each(col: BoxedExpression): Generator<BoxedExpression> {
-  const limit = col.engine.iterationLimit;
   const iter = iterator(col);
   if (!iter) {
     yield col;
     return;
   }
+
   // We've got an iterator, iterate over it
+  const limit = col.engine.iterationLimit;
   let i = 0;
   while (true) {
     const { done, value } = iter.next();
@@ -57,10 +77,19 @@ export function* each(col: BoxedExpression): Generator<BoxedExpression> {
   }
 }
 
+/**
+ *
+ * The `col` argument is either a collection literal, or a symbol
+ * whose value is a collection literal.
+ *
+ * @returns
+ */
 export function length(col: BoxedExpression): number | undefined {
-  if (col.string !== null) return col.string.length;
+  const s = col.string ?? col.symbolDefinition?.value?.string ?? null;
+  if (s !== null) return s.length;
 
-  const def = col.functionDefinition;
+  const def =
+    col.functionDefinition ?? col.symbolDefinition?.value?.functionDefinition;
   return def?.size?.(col);
 }
 
@@ -68,27 +97,31 @@ export function length(col: BoxedExpression): number | undefined {
  * From an expression, create an iterator that can be used
  * to enumerate values.
  *
- * `expr` can be a collection, a function, an expression, a string.
+ * `expr` should be a collection expression, or a string, or a symbol whose
+ * value is a collection expression or a string.
  *
  * - ["Range", 5]
  * - ["List", 1, 2, 3]
  * - "'hello world'"
  *
  */
-export function iterator(
+function iterator(
   expr: BoxedExpression
 ): Iterator<BoxedExpression> | undefined {
   // Is it a function expresson with a definition that includes an iterator?
   // e.g. ["Range", 5]
+  // or a symbol whose value is a function expression with an iterator?
+  const def =
+    expr.functionDefinition ?? expr.symbolDefinition?.value?.functionDefinition;
+
   // Note that if there is an at() handler, there is always
-  // at least a default iterator
-  const def = expr.functionDefinition;
+  // at least a default iterator so we could just check for the at handler
   if (def?.iterator) return def.iterator(expr);
 
   //
   // String iterator
   //
-  const s = expr.string;
+  const s = expr.string ?? expr.symbolDefinition?.value?.string ?? null;
   if (s !== null) {
     if (s.length === 0)
       return { next: () => ({ done: true, value: undefined }) };
@@ -105,47 +138,6 @@ export function iterator(
 }
 
 /**
- * indexable(expr) return a JS function with one argument.
- *
- * Evaluate expr.
- * If expr is indexable function (def with at handler), return handler.
- * Otherwise, call makeLambda, then return function that set scope
- * with one arg, then evaluate result of makeLambda.
- */
-
-// export function indexable(
-//   expr: BoxedExpression
-// ): ((index: number) => BoxedExpression | undefined) | undefined {
-//   expr = expr.evaluate();
-
-//   // If the function expression is indexable (it has an at() handler)
-//   // return the at() handler, bound to this expression.
-//   if (expr.functionDefinition?.at) {
-//     const at = expr.functionDefinition.at;
-//     return (index) => at(expr, index);
-//   }
-
-//   //
-//   // String at
-//   //
-//   const s = expr.string;
-//   if (s !== null) {
-//     return (index) => {
-//       const c = s.charAt(index);
-//       if (c === undefined) return expr.engine.Nothing;
-//       return expr.engine.string(c);
-//     };
-//   }
-
-//   // Expressions that don't have an at() handler, have the
-//   // argument applied to them.
-//   const lambda = makeLambda(expr);
-//   if (lambda) return (index) => lambda([expr.engine.number(index)]);
-
-//   return undefined;
-// }
-
-/**
  *
  * @param expr
  * @param index 1-based index
@@ -156,8 +148,10 @@ export function at(
   expr: BoxedExpression,
   index: number
 ): BoxedExpression | undefined {
-  if (expr.functionDefinition?.at)
-    return expr.functionDefinition.at(expr, index);
+  const def =
+    expr.functionDefinition ?? expr.symbolDefinition?.value?.functionDefinition;
+
+  if (def?.at) return def.at(expr, index);
 
   const s = expr.string;
   if (s) {

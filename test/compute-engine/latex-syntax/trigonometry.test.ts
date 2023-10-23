@@ -79,7 +79,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
   test('\\cos(30\\degree)', () =>
     expect(check('\\cos(30\\degree)')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Degrees", 30]]
-      box       = ["Cos", ["Divide", ["Multiply", 30, "Pi"], 180]]
+      box       = ["Cos", ["Divide", "Pi", 6]]
       simplify  = ["Divide", ["Sqrt", 3], 2]
       N-auto    = 0.8660254037844386467637231707529361834714026269051903140279034897259665084544000185405730933786242878
       N-mach    = 0.8660254037844387
@@ -88,7 +88,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
   test('\\cos(30\\degree)', () =>
     expect(check('\\cos(30\\degree)')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Degrees", 30]]
-      box       = ["Cos", ["Divide", ["Multiply", 30, "Pi"], 180]]
+      box       = ["Cos", ["Divide", "Pi", 6]]
       simplify  = ["Divide", ["Sqrt", 3], 2]
       N-auto    = 0.8660254037844386467637231707529361834714026269051903140279034897259665084544000185405730933786242878
       N-mach    = 0.8660254037844387
@@ -97,7 +97,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
   test('\\cos(30^\\circ)', () =>
     expect(check('\\cos(30^\\circ)')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Degrees", 30]]
-      box       = ["Cos", ["Divide", ["Multiply", 30, "Pi"], 180]]
+      box       = ["Cos", ["Divide", "Pi", 6]]
       simplify  = ["Divide", ["Sqrt", 3], 2]
       N-auto    = 0.8660254037844386467637231707529361834714026269051903140279034897259665084544000185405730933786242878
       N-mach    = 0.8660254037844387
@@ -106,7 +106,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
   test('\\cos(\\ang{30})', () =>
     expect(check('\\cos(\\ang{30})')).toMatchInlineSnapshot(`
       latex     = ["Cos", ["Degrees", 30]]
-      box       = ["Cos", ["Divide", ["Multiply", 30, "Pi"], 180]]
+      box       = ["Cos", ["Divide", "Pi", 6]]
       simplify  = ["Divide", ["Sqrt", 3], 2]
       N-auto    = 0.8660254037844386467637231707529361834714026269051903140279034897259665084544000185405730933786242878
       N-mach    = 0.8660254037844387

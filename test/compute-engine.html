@@ -128,98 +128,97 @@
     </header>
     <main>
       <div class="row">
-        <math-field id="mf" class="mathfield" tabindex="0">
-          \sum \lbrack 1, 2, 3, 4 \rbrack
-          <!-- \operatorname{NIntegrate}\left(x \mapsto \sin x, 0, 1\right) -->
-          <!-- \operatorname{N}\left(\int_0^1 \sin x dx\right) -->
-
-          <!-- D\left(\ln x, x\right) -->
-          <!-- D\left(3x^2+2x+x, x\right) -->
-          <!-- f'(x) -->
-
-          <!-- \operatorname{mean}(\left[ 2, 5, 8, 9, 3\right]) -->
-          <!-- (1, 2, 3) -->
-          <!-- ((1,2),(3,4)) -->
-
-          <!-- 1.1\times 2\times
-          5\times\frac{5}{7}\times\frac{7}{9}\times\sqrt{2}\times\pi -->
-
-          <!-- {\sqrt{\sum_{n=1}^\infty {\frac{10}{n^4}}}} = {\int_0^\infty \frac{2xdx}{e^x-1}} = \frac{\pi^2}{3} \in {\mathbb R} -->
-
-          <!-- \int_{10}^{100}\sin x \, d x + \int\sin x \quad \operatorname{d} x +
-          \sum_{n=1}^5 n^2+1 -->
-          <!-- -1^2 -->
-          <!-- 1^{2^3} -->
-          <!-- 1 + 2 + 3.001 -->
-          <!-- \frac{5+3i}{2} -->
-          <!-- \frac{6}{2}+\frac{3i}{2} -->
-          <!-- \frac{3+2i}{2} -->
-          <!-- 2(-i)+i  -->
-          <!-- \frac{6}{2}+\frac{3\imaginaryI}{2} -->
-
-          <!-- \frac{6 + 3\imaginaryI}{2} -->
-          <!-- 0x^2 + 4x  + 2x + 2(x-1) + b(x - 1) -->
-          <!-- -\frac{50}{70}+\operatorname{GoldenRatio} -->
-          <!-- 3 (2x + 1) + \frac{x}{2} + \frac{3x}{2} + 4\frac{x}{2} -->
-          <!-- \sqrt{1}[3] -->
-          <!-- \sin(x -->
-          <!-- x=\frac{-b\pm\sqrt{b^2-4ac}} {2a} -->
-          <!-- 2^3^4 -->
-          <!-- \sqrt{1}[3] -->
-          <!-- = should produce error or Missing = Missing -->
-          <!-- x=\frac{-b\pm \sqrt{b^2-4ac}}{2a} -->
-          <!-- (b^3c^2d)(x^7y)(a^5f)(b^2x^5b3) -->
-          <!-- {}_3^2 -->
-          <!-- 2{xy}     1+|a+|2|+b| -->
-          <!-- ,c,b -->
-          <!-- a,c, -->
-          <!-- a,, c -->
-          <!-- x{}_{p+1}^{q+1}x_{r+1}^{s+1} -->
-          <!-- 12+ should generate ["Add", 12]-->
-          <!-- \lbrack\rbrack -->
-          <!-- \foo  -->
-          <!-- a\le b \overline{z} \overrightarrow{ABC} -->
-          <!-- \partial^2_{x,y} f(x,y) -->
-          <!-- -0+0(\frac{0}{\frac{0}{0}}-0)+x^\pi -->
-          <!-- -0+0(\frac{0}{\frac{0}{0}}-0) -->
-          <!-- x_0 + x_{0} +  x_n + x_{n+1}-->
-          <!-- -2x5z\sqrt{y}\frac{3}{4}3\pi y} -->
-          <!-- \sin^{-1}\prime(x)      \sin^{-1}'(x) -->
-          <!-- "\begin{align*}\dot{x} & =\sigma(y-x) \\ \dot{y} & =\rho x-y-xz \\ \dot{z} & =-\beta z+xy\end{align*}" -->
-          <!-- 2{xy} should create group -->
-
-          <!-- -(x) -->
-          <!-- -5-3-2 -->
-          <!-- -123, +456.789, -->
-          <!-- x_{0} -->
-          <!-- -123, 456.789, -->
-          <!-- |(a+|b|+1)| -->
-          <!-- i, 2i, -i -->
-          <!-- (a,,b) -->
-          <!-- x_5 -->
-          <!-- (\mathtt{dead\;beef})_{16} -->
-          <!-- (x,,2) -->
-          <!-- $$(deadbeef)_{16}$$ -->
-
-          <!-- \huge x \text{y} -->
-          <!-- \scriptscriptstyle x \text{y} -->
-          <!-- \sqrt[\Huge 3]{29} -->
-          <!-- x^{\binom{n}{k}} -->
-          <!-- \binom12 \textstyle \binom34 \scriptstyle \binom56 \displaystyle \binom78 \scriptstyle \binom90 -->
-          <!-- \int^b_a x^2 dx -->
-          <!-- \int^b_a\int^c_d x^2 dx dy -->
-          <!-- \int x^2 + x = 0 -->
-          <!-- \int x^2 + x dx = 0 -->
-          <!-- \int (x^2 + x) dx = 0 -->
-        </math-field>
+        <math-field id="mf" class="mathfield" tabindex="0"></math-field>
+        <button id="random">🎲</button>
       </div>
-
+      <!-- <textarea id="json-input" class="input">["Add", 0, ["Range", 1, 10]]</textarea> -->
       <textarea id="json-input" class="input">
-        ["Add", 0, ["Range", 1, 10]]</textarea
+      ["Assign", "s", ["List", 2, 3, 5, 7]] ["Add", "s", 5]
+    </textarea
       >
       <div id="json-input-error"></div>
 
-      <button id="random">🎲</button>
+      <!-- \operatorname{NIntegrate}\left(x \mapsto \sin x, 0, 1\right) -->
+      <!-- \operatorname{N}\left(\int_0^1 \sin x dx\right) -->
+
+      <!-- D\left(\ln x, x\right) -->
+      <!-- D\left(3x^2+2x+x, x\right) -->
+      <!-- f'(x) -->
+
+      <!-- \operatorname{mean}(\left[ 2, 5, 8, 9, 3\right]) -->
+      <!-- (1, 2, 3) -->
+      <!-- ((1,2),(3,4)) -->
+
+      <!-- 1.1\times 2\times
+          5\times\frac{5}{7}\times\frac{7}{9}\times\sqrt{2}\times\pi -->
+
+      <!-- {\sqrt{\sum_{n=1}^\infty {\frac{10}{n^4}}}} = {\int_0^\infty \frac{2xdx}{e^x-1}} = \frac{\pi^2}{3} \in {\mathbb R} -->
+
+      <!-- \int_{10}^{100}\sin x \, d x + \int\sin x \quad \operatorname{d} x +
+          \sum_{n=1}^5 n^2+1 -->
+      <!-- -1^2 -->
+      <!-- 1^{2^3} -->
+      <!-- 1 + 2 + 3.001 -->
+      <!-- \frac{5+3i}{2} -->
+      <!-- \frac{6}{2}+\frac{3i}{2} -->
+      <!-- \frac{3+2i}{2} -->
+      <!-- 2(-i)+i  -->
+      <!-- \frac{6}{2}+\frac{3\imaginaryI}{2} -->
+
+      <!-- \frac{6 + 3\imaginaryI}{2} -->
+      <!-- 0x^2 + 4x  + 2x + 2(x-1) + b(x - 1) -->
+      <!-- -\frac{50}{70}+\operatorname{GoldenRatio} -->
+      <!-- 3 (2x + 1) + \frac{x}{2} + \frac{3x}{2} + 4\frac{x}{2} -->
+      <!-- \sqrt{1}[3] -->
+      <!-- \sin(x -->
+      <!-- x=\frac{-b\pm\sqrt{b^2-4ac}} {2a} -->
+      <!-- 2^3^4 -->
+      <!-- \sqrt{1}[3] -->
+      <!-- = should produce error or Missing = Missing -->
+      <!-- x=\frac{-b\pm \sqrt{b^2-4ac}}{2a} -->
+      <!-- (b^3c^2d)(x^7y)(a^5f)(b^2x^5b3) -->
+      <!-- {}_3^2 -->
+      <!-- 2{xy}     1+|a+|2|+b| -->
+      <!-- ,c,b -->
+      <!-- a,c, -->
+      <!-- a,, c -->
+      <!-- x{}_{p+1}^{q+1}x_{r+1}^{s+1} -->
+      <!-- 12+ should generate ["Add", 12]-->
+      <!-- \lbrack\rbrack -->
+      <!-- \foo  -->
+      <!-- a\le b \overline{z} \overrightarrow{ABC} -->
+      <!-- \partial^2_{x,y} f(x,y) -->
+      <!-- -0+0(\frac{0}{\frac{0}{0}}-0)+x^\pi -->
+      <!-- -0+0(\frac{0}{\frac{0}{0}}-0) -->
+      <!-- x_0 + x_{0} +  x_n + x_{n+1}-->
+      <!-- -2x5z\sqrt{y}\frac{3}{4}3\pi y} -->
+      <!-- \sin^{-1}\prime(x)      \sin^{-1}'(x) -->
+      <!-- "\begin{align*}\dot{x} & =\sigma(y-x) \\ \dot{y} & =\rho x-y-xz \\ \dot{z} & =-\beta z+xy\end{align*}" -->
+      <!-- 2{xy} should create group -->
+
+      <!-- -(x) -->
+      <!-- -5-3-2 -->
+      <!-- -123, +456.789, -->
+      <!-- x_{0} -->
+      <!-- -123, 456.789, -->
+      <!-- |(a+|b|+1)| -->
+      <!-- i, 2i, -i -->
+      <!-- (a,,b) -->
+      <!-- x_5 -->
+      <!-- (\mathtt{dead\;beef})_{16} -->
+      <!-- (x,,2) -->
+      <!-- $$(deadbeef)_{16}$$ -->
+
+      <!-- \huge x \text{y} -->
+      <!-- \scriptscriptstyle x \text{y} -->
+      <!-- \sqrt[\Huge 3]{29} -->
+      <!-- x^{\binom{n}{k}} -->
+      <!-- \binom12 \textstyle \binom34 \scriptstyle \binom56 \displaystyle \binom78 \scriptstyle \binom90 -->
+      <!-- \int^b_a x^2 dx -->
+      <!-- \int^b_a\int^c_d x^2 dx dy -->
+      <!-- \int x^2 + x = 0 -->
+      <!-- \int x^2 + x dx = 0 -->
+      <!-- \int (x^2 + x) dx = 0 -->
 
       <div id="assumptions-section">
         <h2>Assumptions</h2>
@@ -388,7 +387,10 @@
             ce.precision = 15;
           }
           // defaultLatex.options.precision = ce.precision;
-          updateContent(document.getElementById("json-input").value);
+          const jsonLines = splitJSON(
+            document.getElementById("json-input").value
+          );
+          updateContent(jsonLines.map((x) => JSON.parse(x)));
         });
       });
 
@@ -398,6 +400,8 @@
       // ce.numericMode = "machine";
       // ce.latexOptions.parseNumbers = "rational";
       // ce.jsonSerializationOptions.metadata = ["latex"];
+
+      console.info(ce.parse("1,4..10").toString());
 
       ce.assign("f(x)", "$$ 3x^2 + 2x + 5$$");
 
@@ -579,14 +583,14 @@
 
         const expr = ce.parse(latex, { canonical: false });
 
-        const jsonLines = document
-          .getElementById("json-input")
-          .value.split("\n")
-          .map((x) => x.trim())
-          .filter((x) => x && !x.startsWith("//"));
+        const jsonLines = splitJSON(
+          document.getElementById("json-input").value
+        );
 
         if (jsonLines === 1) {
-          document.getElementById("json-input").value = expr.json;
+          document.getElementById("json-input").value = JSON.stringify(
+            expr.json
+          );
         } else {
           // Replace last line
           jsonLines[jsonLines.length - 1] = JSON.stringify(expr.json);
@@ -598,22 +602,20 @@
 
       if (!document.getElementById("json-input").value) {
         document.getElementById("json-input").innerHTML = exprToString(
-          ce.parse(mf.value, {
-            canonical: false,
-          })
+          ce.parse(mf.value, { canonical: false })
         );
-      } else if (!mf.value) {
-        const jsonLines = document
-          .getElementById("json-input")
-          .value.split("\n")
-          .map((x) => {
-            x = x.trim();
-            if (!x || x.startsWith("//")) return undefined;
-            return JSON.parse(x);
-          })
-          .filter((x) => x !== undefined);
+      }
+      const jsonLines = splitJSON(
+        document.getElementById("json-input").value
+      ).map((x) => JSON.parse(x));
+
+      for (const line of jsonLines) ce.box(line).evaluate();
+
+      if (!mf.value) {
         try {
-          mf.value = ce.box(jsonLines[jsonLines.length - 1]).latex;
+          mf.value = ce.box(jsonLines[jsonLines.length - 1], {
+            canonical: false,
+          }).latex;
         } catch (e) {
           console.error(e);
         }
@@ -634,14 +636,7 @@
           .classList.remove("is-visible");
         const jsonText = document.querySelector("textarea.input").value;
         try {
-          const json = jsonText
-            .split("\n")
-            .map((x) => {
-              x = x.trim();
-              if (!x || x.startsWith("//")) return undefined;
-              return JSON.parse(x);
-            })
-            .filter((x) => x !== undefined);
+          const json = splitJSON(jsonText).map((x) => JSON.parse(x));
 
           mf.value = ce.box(json[json.length - 1]).latex;
           updateContent(json);
@@ -893,6 +888,31 @@
             el.querySelector(".timing").innerHTML = start;
           }
         }
+      }
+
+      function splitJSON(json) {
+        const result = [];
+        let depth = 0;
+        let statement = "";
+        for (let i = 0; i < json.length; i++) {
+          if (json[i] === "\n" || json[i] === "\t") continue;
+
+          if (json[i] === "/" && json[i + 1] === "/") {
+            while (json[i] !== "\n" && i < json.length) i++;
+          } else if (json[i] === "[" && depth === 0) {
+            result.push(statement);
+            depth += 1;
+            statement = "[";
+          } else if (json[i] === "[") {
+            statement += "[";
+            depth++;
+          } else if (json[i] === "]") {
+            statement += "]";
+            depth--;
+          } else statement += json[i];
+        }
+        result.push(statement);
+        return result.filter((x) => x.trim().length > 0);
       }
 
       function escapeHtml(string) {

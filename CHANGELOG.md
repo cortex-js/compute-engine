@@ -2,6 +2,8 @@
 
 ### Improvements
 
+- Parse ranges, for example `1..5` or `1, 3..10`. Ranges are collections and can
+  be used anywhere collections can be used.
 - The functions `Sum`, `Product`, `Min`, `Max`, and the statistics functions
   (`Mean`, `Median`, `Variance`, etc...) now handle arguments that can be
   collections:
@@ -27,11 +29,10 @@
   functions can be used on non-canonical expressions.
 - Added `Head` and `Tail` functions which can be used on non-canonical
   expressions.
-
+- Improved parsing of `\degree` command
 - Improved interoperability with JavaScript: `expr.value` will return a
   JavaScript primitive (`number`, `boolean`, `string`, etc...) when possible.
   This is a more succinct version of `expr.N().valueOf()`.
-
 - Added `display-quotient` and `inline-quotient` style for formatting of
   division expressions in LaTeX.
 

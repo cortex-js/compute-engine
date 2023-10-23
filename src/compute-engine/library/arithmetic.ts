@@ -914,6 +914,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     GCD: {
       description: 'Greatest Common Divisor',
       complexity: 1200,
+      threadable: false, // The function take a variable number of arguments,
+      // including collections
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Anything'], 'Numbers'],
         evaluate: (ce, ops) => processGcdLcm(ce, ops, 'GCD'),
@@ -922,6 +924,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     LCM: {
       description: 'Least Common Multiple',
       complexity: 1200,
+      threadable: false, // The function take a variable number of arguments,
+      // including collections
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Anything'], 'Numbers'],
         evaluate: (ce, ops) => processGcdLcm(ce, ops, 'LCM'),
@@ -1026,6 +1030,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Max: {
       description: 'Maximum of two or more numbers',
       complexity: 1200,
+      threadable: false, // The function take a variable number of arguments,
+      // including collections
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
         simplify: (ce, ops) => {
@@ -1040,7 +1046,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Min: {
       description: 'Minimum of two or more numbers',
       complexity: 1200,
-
+      threadable: false, // The function take a variable number of arguments,
+      // including collections
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
         simplify: (ce, ops) => {
@@ -1055,6 +1062,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Supremum: {
       description: 'Like Max, but defined for open sets',
       complexity: 1200,
+      threadable: false, // The function take a variable number of arguments,
+      // including collections
 
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
@@ -1070,6 +1079,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
     Infimum: {
       description: 'Like Min, but defined for open sets',
       complexity: 1200,
+      threadable: false, // The function take a variable number of arguments,
+      // including collections
 
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Values'], 'Numbers'],
@@ -1086,6 +1097,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q901718',
       complexity: 1000,
       hold: 'all',
+      threadable: false,
       signature: {
         domain: [
           'FunctionOf',
@@ -1110,6 +1122,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       wikidata: 'Q218005',
       complexity: 1000,
       hold: 'all',
+      threadable: false,
       signature: {
         domain: [
           'FunctionOf',
@@ -1131,6 +1144,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Limit of a function',
       complexity: 5000,
       hold: 'all',
+      threadable: false,
       signature: {
         domain: [
           'FunctionOf',
@@ -1161,6 +1175,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       description: 'Numerical approximation of the limit of a function',
       complexity: 5000,
       hold: 'all',
+      threadable: false,
       signature: {
         domain: [
           'FunctionOf',
@@ -1208,6 +1223,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'Strings', ['OptArg', 'Integers'], 'Integers'],
         evaluate: (ce, ops) => {
@@ -1241,6 +1257,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'Integers', ['OptArg', 'Integers'], 'Strings'],
         evaluate: (ce, ops) => {

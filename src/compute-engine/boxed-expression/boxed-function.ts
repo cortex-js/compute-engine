@@ -38,7 +38,7 @@ import { checkNumericArgs, adjustArguments } from './validate';
 import { expand } from '../symbolic/expand';
 import { apply } from '../function-utils';
 import { shouldHold } from '../symbolic/utils';
-import { at, isIndexableCollection } from '../collection-utils';
+import { at, isFiniteIndexableCollection } from '../collection-utils';
 
 /**
  * BoxedFunction
@@ -711,7 +711,10 @@ export class BoxedFunction extends _BoxedExpression {
     //
     // If the function is threadable, iterate
     //
-    if (def?.threadable && this.ops!.some((x) => isIndexableCollection(x))) {
+    if (
+      def?.threadable &&
+      this.ops!.some((x) => isFiniteIndexableCollection(x))
+    ) {
       // If one of the arguments is an indexable collection, thread the function
       // Get the length of the longest sequence
       const length = Math.max(
@@ -722,7 +725,7 @@ export class BoxedFunction extends _BoxedExpression {
       const results: BoxedExpression[] = [];
       for (let i = 0; i <= length - 1; i++) {
         const args = this._ops.map((x) =>
-          isIndexableCollection(x)
+          isFiniteIndexableCollection(x)
             ? at(x, (i % length) + 1) ?? this.engine.Nothing
             : x
         );
@@ -929,6 +932,7 @@ export function makeCanonicalFunction(
     ce,
     xs,
     def.hold,
+    def.threadable,
     sig.domain.params,
     sig.domain.optParams,
     sig.domain.restParam

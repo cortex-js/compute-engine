@@ -1,4 +1,4 @@
-import { isIndexableCollection } from '../collection-utils';
+import { isFiniteIndexableCollection } from '../collection-utils';
 import {
   IComputeEngine,
   BoxedExpression,
@@ -69,7 +69,8 @@ export function checkNumericArgs(
 
   // @fastpath
   if (!ce.strict) {
-    for (const x of ops) if (!isIndexableCollection(x)) x.infer(ce.Numbers);
+    for (const x of ops)
+      if (!isFiniteIndexableCollection(x)) x.infer(ce.Numbers);
     return ops;
   }
 
@@ -101,7 +102,7 @@ export function checkNumericArgs(
     } else if (!op.domain) {
       // No domain, set. Keep it that way, infer later
       xs.push(op);
-    } else if (isIndexableCollection(op)) {
+    } else if (isFiniteIndexableCollection(op)) {
       xs.push(op);
     } else if (
       op.symbolDefinition?.inferredDomain &&
@@ -118,7 +119,8 @@ export function checkNumericArgs(
 
   // Only if all arguments are valid, we infer the domain of the arguments
   if (isValid)
-    for (const x of xs) if (!isIndexableCollection(x)) x.infer(ce.Numbers);
+    for (const x of xs)
+      if (!isFiniteIndexableCollection(x)) x.infer(ce.Numbers);
 
   return xs;
 }
@@ -177,6 +179,7 @@ export function adjustArguments(
   ce: IComputeEngine,
   ops: BoxedExpression[],
   hold: Hold,
+  threadable: boolean,
   params: BoxedDomain[],
   optParams: BoxedDomain[],
   restParam: BoxedDomain | null
@@ -218,7 +221,10 @@ export function adjustArguments(
       result.push(op);
       continue;
     }
-
+    if (threadable && isFiniteIndexableCollection(op)) {
+      result.push(op);
+      continue;
+    }
     if (
       op.symbolDefinition?.inferredDomain &&
       op.domain.isCompatible(param, 'contravariant')
@@ -261,6 +267,10 @@ export function adjustArguments(
       i += 1;
       continue;
     }
+    if (threadable && isFiniteIndexableCollection(op)) {
+      result.push(op);
+      continue;
+    }
     if (
       op.symbolDefinition?.inferredDomain &&
       op.domain.isCompatible(param, 'contravariant')
@@ -299,6 +309,10 @@ export function adjustArguments(
         result.push(op);
         continue;
       }
+      if (threadable && isFiniteIndexableCollection(op)) {
+        result.push(op);
+        continue;
+      }
       if (
         op.symbolDefinition?.inferredDomain &&
         op.domain.isCompatible(restParam, 'contravariant')
@@ -330,16 +344,21 @@ export function adjustArguments(
   // All arguments are valid, we can infer the domain of the arguments
   i = 0;
   for (const param of params) {
-    if (!shouldHold(hold, params.length, i)) ops[i].infer(param);
+    if (!shouldHold(hold, params.length, i))
+      if (!threadable || !isFiniteIndexableCollection(ops[i]))
+        ops[i].infer(param);
     i += 1;
   }
   for (const param of optParams) {
-    if (!shouldHold(hold, params.length, i)) ops[i++]?.infer(param);
+    if (!threadable || !isFiniteIndexableCollection(ops[i]))
+      ops[i]?.infer(param);
     i += 1;
   }
   if (restParam) {
     for (const op of ops.slice(i)) {
-      if (!shouldHold(hold, params.length, i)) op.infer(restParam);
+      if (!shouldHold(hold, params.length, i))
+        if (!threadable || !isFiniteIndexableCollection(op))
+          op.infer(restParam);
       i += 1;
     }
   }

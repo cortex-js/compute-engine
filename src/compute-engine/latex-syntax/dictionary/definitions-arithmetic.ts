@@ -481,9 +481,9 @@ function serializePower(
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // Constants
-  { name: 'CatalanConstant', serialize: 'G' },
-  { name: 'GoldenRatio', serialize: '\\varphi' },
-  { name: 'EulerGamma', serialize: '\\gamma' },
+  { name: 'CatalanConstant', identifierTrigger: 'G' },
+  { name: 'GoldenRatio', latexTrigger: '\\varphi' },
+  { name: 'EulerGamma', latexTrigger: '\\gamma' },
   {
     name: 'Degrees',
     latexTrigger: ['\\degree'],

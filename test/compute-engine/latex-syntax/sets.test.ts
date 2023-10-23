@@ -101,7 +101,11 @@ describe('PARSING SETS', () => {
         3,
         [
           "Range",
-          ["Error", "'missing'", ["LatexString", "'..'"]],
+          [
+            "Error",
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
+            "'missing'"
+          ],
           ["Error", ["ErrorCode", "'unexpected-token'", "'.'"]]
         ]
       ]
@@ -111,7 +115,11 @@ describe('PARSING SETS', () => {
         "Set",
         [
           "Range",
-          ["Error", "'missing'", ["LatexString", "'..'"]],
+          [
+            "Error",
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
+            "'missing'"
+          ],
           ["Error", ["ErrorCode", "'unexpected-token'", "'.'"]]
         ]
       ]
@@ -121,7 +129,11 @@ describe('PARSING SETS', () => {
         "Set",
         [
           "Range",
-          ["Error", "'missing'", ["LatexString", "'..'"]],
+          [
+            "Error",
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
+            "'missing'"
+          ],
           ["Error", ["ErrorCode", "'unexpected-token'", "'.'"]]
         ]
       ]

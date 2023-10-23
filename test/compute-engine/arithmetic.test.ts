@@ -121,7 +121,8 @@ describe('ADD', () => {
       )
     ).toMatchSnapshot());
 });
-describe('Subtract', () => {
+
+describe('SUBTRACT', () => {
   test(`Subtract`, () =>
     expect(ce.box(['Subtract', 2.5]).evaluate()).toMatchSnapshot());
   test(`Subtract`, () =>
@@ -285,7 +286,7 @@ describe('MULTIPLY', () => {
     ).toMatchSnapshot()); // @fixme eval-big should be same or bettern than evaluate
 });
 
-describe('Divide', () => {
+describe('DIVIDE', () => {
   test(`INVALID  Divide`, () =>
     expect(ce.box(['Divide', 2.5]).evaluate()).toMatchSnapshot());
   test(`Divide`, () =>
@@ -296,7 +297,7 @@ describe('Divide', () => {
     expect(ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 
-describe('Power', () => {
+describe('POWER', () => {
   test(`INVALID Power`, () =>
     expect(ce.box(['Power', 2.5]).evaluate()).toMatchSnapshot());
   test(`Power`, () =>
@@ -309,7 +310,7 @@ describe('Power', () => {
     expect(ce.box(['Power', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 
-describe('Root', () => {
+describe('ROOT', () => {
   test(`Root 2.5`, () =>
     expect(ce.box(['Root', 2.5, 3]).evaluate()).toMatchSnapshot());
 
@@ -336,7 +337,7 @@ describe('INVALID ROOT', () => {
     expect(ce.box(['Root', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 
-describe('Sqrt', () => {
+describe('SQRT', () => {
   test(`√0`, () => expect(checkJson(['Sqrt', 0])).toMatchSnapshot());
 
   test(`√2.5`, () => {
@@ -395,6 +396,10 @@ describe('Sqrt', () => {
     expect(
       checkJson(['Sqrt', ['Multiply', 5, ['Add', 3, 2]]])
     ).toMatchSnapshot());
+
+  test('√ of list', () => {
+    expect(ce.box(['Sqrt', ['List', 4, 1, 56, 18]]).value).toMatchSnapshot();
+  });
 
   test(`INVALID Sqrt`, () =>
     expect(checkJson(['Sqrt', 2.5, 1.1])).toMatchSnapshot());
@@ -474,7 +479,7 @@ describe('Min', () => {
   test(`Min`, () => expect(checkJson(['Min', 'foo', 'bar'])).toMatchSnapshot());
 });
 
-describe('Rational', () => {
+describe('RATIONAL', () => {
   test(`Rational`, () =>
     expect(checkJson(['Rational', 3, 4])).toMatchSnapshot());
 
@@ -499,7 +504,7 @@ describe('Rational', () => {
     expect(checkJson(['Rational', 'Pi'])).toMatchSnapshot());
 });
 
-describe('Ln', () => {
+describe('LN', () => {
   expect(checkJson(['Ln', 1.1])).toMatchSnapshot();
   expect(checkJson(['Ln', 1])).toMatchSnapshot();
   expect(checkJson(['Ln', 0])).toMatchSnapshot();
@@ -508,7 +513,7 @@ describe('Ln', () => {
   expect(checkJson(['Ln', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
 });
 
-describe('Lb', () => {
+describe('LB', () => {
   expect(checkJson(['Lb', 1.1])).toMatchSnapshot();
   expect(checkJson(['Lb', 1])).toMatchSnapshot();
   expect(checkJson(['Lb', 0])).toMatchSnapshot();
@@ -517,7 +522,7 @@ describe('Lb', () => {
   expect(checkJson(['Lb', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
 });
 
-describe('Lg', () => {
+describe('LG', () => {
   expect(checkJson(['Lg', 1.1])).toMatchSnapshot();
   expect(checkJson(['Lg', 1])).toMatchSnapshot();
   expect(checkJson(['Lg', 0])).toMatchSnapshot();
@@ -526,7 +531,7 @@ describe('Lg', () => {
   expect(checkJson(['Lg', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
 });
 
-describe('Log(a,b)', () => {
+describe('LOG(a,b)', () => {
   expect(checkJson(['Log', 1.1])).toMatchSnapshot();
   expect(checkJson(['Log', 1])).toMatchSnapshot();
   expect(checkJson(['Log', 0])).toMatchSnapshot();
@@ -542,13 +547,33 @@ describe('Log(a,b)', () => {
   expect(checkJson(['Log', ['Complex', 1.1, 1.1], 5])).toMatchSnapshot();
 });
 
-describe('Log Invalid', () => {
+describe('INVALID LOG', () => {
   expect(checkJson(['Ln'])).toMatchSnapshot();
   expect(checkJson(['Ln', "'string'"])).toMatchSnapshot();
   expect(checkJson(['Ln', 3, 4])).toMatchSnapshot();
 });
 
-describe('Limit', () => {
+describe('EXP', () => {
+  expect(checkJson(['Exp', 1.1])).toMatchSnapshot();
+  expect(checkJson(['Exp', 1])).toMatchSnapshot();
+  expect(checkJson(['Exp', 0])).toMatchSnapshot();
+  expect(checkJson(['Exp', -1])).toMatchSnapshot();
+  expect(checkJson(['Exp', 'Pi'])).toMatchSnapshot();
+  expect(checkJson(['Exp', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
+  expect(checkJson(['Exp', ['List', 1.1, 2, 4]])).toMatchInlineSnapshot(`
+    box       = ["Exp", ["List", 1.1, 2, 4]]
+    evaluate  = ["List", ["Exp", 1.1], ["Exp", 2], ["Exp", 4]]
+    N-auto    = [
+      "List",
+      "3.0041660239464331121",
+      "7.3890560989306502272",
+      "54.598150033144239078"
+    ]
+    N-mach    = ["List", 3.004166023946433, 7.3890560989306495, 54.59815003314423]
+  `);
+});
+
+describe('LIMIT', () => {
   expect(
     ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).value
   ).toMatchInlineSnapshot(`1`);
@@ -642,4 +667,40 @@ describe('GCD/LCM', () => {
     expect(
       ce.box(['GCD', 60, 12, 3.1415]).evaluate().toString()
     ).toMatchInlineSnapshot(`["GCD",12,3.1415]`));
+
+  it('should compute the GCD of a list', () =>
+    expect(
+      ce
+        .box(['GCD', ['List', 60, 12, 3.1415]])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`["GCD",["List",60,12,3.1415]]`));
+
+  it('should compute the LCM of some integers and other stuff', () =>
+    expect(
+      ce.box(['LCM', 60, 'foo', 12]).evaluate().toString()
+    ).toMatchInlineSnapshot(`["LCM",60,"foo"]`));
+
+  it('should compute the LCM of only stuff', () =>
+    expect(
+      ce.box(['LCM', 'foo', 'bar']).evaluate().toString()
+    ).toMatchInlineSnapshot(`["LCM","foo","bar"]`));
+
+  it('should compute the LCM of a single number', () =>
+    expect(ce.box(['LCM', 42]).evaluate().toString()).toMatchInlineSnapshot(
+      `42`
+    ));
+
+  it('should compute the LCM of some numbers', () =>
+    expect(
+      ce.box(['LCM', 60, 12, 3.1415]).evaluate().toString()
+    ).toMatchInlineSnapshot(`["LCM",60,3.1415]`));
+
+  it('should compute the LCM of a list', () =>
+    expect(
+      ce
+        .box(['LCM', ['List', 60, 12, 3.1415]])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`["LCM",["List",60,12,3.1415]]`));
 });

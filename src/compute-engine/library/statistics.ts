@@ -12,7 +12,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Mean: {
       complexity: 1200,
-      threadable: true,
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
@@ -32,7 +32,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Median: {
       complexity: 1200,
-      threadable: true,
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
@@ -55,7 +55,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Variance: {
       complexity: 1200,
-      threadable: true,
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
@@ -77,7 +77,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     StandardDeviation: {
       complexity: 1200,
-      threadable: true,
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
@@ -101,7 +101,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Kurtosis: {
       complexity: 1200,
-      threadable: true,
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
@@ -128,7 +128,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Skewness: {
       complexity: 1200,
-      threadable: true,
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
@@ -155,7 +155,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Mode: {
       complexity: 1200,
-      threadable: true,
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
@@ -187,7 +187,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     Quartiles: {
       complexity: 1200,
-      threadable: true,
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Lists'],
         evaluate: (ce, ops) => {
@@ -214,7 +214,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
 
     InterquartileRange: {
       complexity: 1200,
-      threadable: true,
+      threadable: false,
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {

@@ -30,29 +30,30 @@ describe('MATCHFIX', () => {
     expect(check('\\sin\\lbrack a, \\lbrack b, c\\rbrack\\rbrack'))
       .toMatchInlineSnapshot(`
       latex     = ["Sin", ["List", "a", ["List", "b", "c"]]]
-      [
-        "Sin",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Lists"],
-          ["List", "a", ["List", "b", "c"]]
-        ]
-      ]
+      box       = ["Sin", ["List", "a", ["List", "b", "c"]]]
+      evaluate  = ["List", ["Sin", "a"], ["List", ["Sin", "b"], ["Sin", "c"]]]
     `));
 });
 
 describe('MATCHFIX serialize', () => {
-  test('[List]', () => expect(latex(['List'])).toMatchInlineSnapshot(`\\[\\]`));
+  test('[List]', () =>
+    expect(latex(['List'])).toMatchInlineSnapshot(
+      `\\bigl\\lbrack\\bigr\\rbrack`
+    ));
 
   test('[List, "a"]', () =>
-    expect(latex(['List', 'a'])).toMatchInlineSnapshot(`\\[a\\]`));
+    expect(latex(['List', 'a'])).toMatchInlineSnapshot(
+      `\\bigl\\lbrack a\\bigr\\rbrack`
+    ));
 
   test(`['List', 'a', 'b']`, () =>
-    expect(latex(['List', 'a', 'b'])).toMatchInlineSnapshot(`\\[a, b\\]`));
+    expect(latex(['List', 'a', 'b'])).toMatchInlineSnapshot(
+      `\\bigl\\lbrack a, b\\bigr\\rbrack`
+    ));
 
   test(`['List', 'a', ['List', 'b', 'c']`, () =>
     expect(latex(['List', 'a', ['List', 'b', 'c']])).toMatchInlineSnapshot(
-      `\\[a, \\[b, c\\]\\]`
+      `\\bigl\\lbrack a, \\bigl\\lbrack b, c\\bigr\\rbrack\\bigr\\rbrack`
     ));
 });
 

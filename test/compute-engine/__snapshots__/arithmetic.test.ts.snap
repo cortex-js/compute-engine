@@ -193,6 +193,44 @@ box       = ["Ln", 3, 4]
 canonical = ["Ln", 3, ["Error", "'unexpected-argument'", 4]]
 `;
 
+exports[` 34`] = `
+box       = ["Exp", 1.1]
+N-auto    = 3.0041660239464331121
+N-mach    = 3.004166023946433
+`;
+
+exports[` 35`] = `
+box       = ["Exp", 1]
+canonical = ExponentialE
+N-auto    = 2.7182818284590452354
+N-mach    = 2.718281828459045
+`;
+
+exports[` 36`] = `
+box       = ["Exp", 0]
+canonical = 1
+`;
+
+exports[` 37`] = `
+box       = ["Exp", -1]
+canonical = ["Divide", 1, "ExponentialE"]
+N-auto    = 0.3678794411714423216
+N-mach    = 0.36787944117144233
+`;
+
+exports[` 38`] = `
+box       = ["Exp", "Pi"]
+N-auto    = 23.140692632779269006
+N-mach    = 23.140692632779263
+`;
+
+exports[` 39`] = `
+box       = ["Exp", ["Complex", 1.1, 1.1]]
+N-auto    = ["Complex", 1.3626780565806003, 2.67733487138756]
+N-big     = {num: "NaN"}
+N-cplx    = ["Complex", 1.3626780565806003, 2.67733487138756]
+`;
+
 exports[`ADD Add  1`] = `
 latex     = [
   "Add",
@@ -302,13 +340,13 @@ box       = MachineEpsilon
 N-auto    = 2.220446049250313e-16
 `;
 
-exports[`Divide Divide 1`] = `2`;
+exports[`DIVIDE Divide 1`] = `2`;
 
-exports[`Divide Divide 2`] = `2.(27)`;
+exports[`DIVIDE Divide 2`] = `2.(27)`;
 
-exports[`Divide INVALID  Divide 1`] = `["Divide", 2.5, ["Error", "'missing'"]]`;
+exports[`DIVIDE INVALID  Divide 1`] = `["Divide", 2.5, ["Error", "'missing'"]]`;
 
-exports[`Divide INVALID Divide 1`] = `["Divide", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`;
+exports[`DIVIDE INVALID Divide 1`] = `["Divide", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`;
 
 exports[`EXACT EVALUATION Add: All exact 1`] = `
 latex     = ["Add", 6, ["Divide", 10, 14], ["Sqrt", ["Divide", 18, 9]]]
@@ -718,15 +756,80 @@ exports[`NEGATE -1234567890987654321.123456789 1`] = `-1234567890987654321.1`;
 
 exports[`NEGATE -NaN 1`] = `{num: "NaN"}`;
 
-exports[`Power INVALID Power 1`] = `["Power", 2.5, ["Error", "'missing'"]]`;
+exports[`POWER INVALID Power 1`] = `["Power", 2.5, ["Error", "'missing'"]]`;
 
-exports[`Power INVALID Power 2`] = `["Power", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`;
+exports[`POWER INVALID Power 2`] = `["Power", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`;
 
-exports[`Power Power 1`] = `2.7398955659630432724`;
+exports[`POWER Power 1`] = `2.7398955659630432724`;
 
-exports[`Power Power 2`] = `0.064`;
+exports[`POWER Power 2`] = `0.064`;
 
-exports[`Power Power 3`] = `0.053283405273719880987`;
+exports[`POWER Power 3`] = `0.053283405273719880987`;
+
+exports[`RATIONAL Bignum rational 1`] = `
+box       = ["Rational", "12345678901234567890", "23456789012345678901"]
+canonical = ["Rational", 137174210, 260630989]
+N-auto    = 0.52631580966759098627
+N-mach    = 0.526315809667591
+`;
+
+exports[`RATIONAL INVALID Rational 1`] = `
+box       = ["Rational", 2.5, -1.1, 18.4]
+canonical = [
+  "Rational",
+  [
+    "Error",
+    [
+      "ErrorCode",
+      "'incompatible-domain'",
+      "Integers",
+      "PositiveNumbers"
+    ],
+    2.5
+  ],
+  [
+    "Error",
+    [
+      "ErrorCode",
+      "'incompatible-domain'",
+      "Integers",
+      "NegativeNumbers"
+    ],
+    -1.1
+  ],
+  ["Error", "'unexpected-argument'", 18.4]
+]
+`;
+
+exports[`RATIONAL INVALID Rational 2`] = `
+box       = ["Rational", 2, 3, 5]
+canonical = ["Rational", 2, 3, ["Error", "'unexpected-argument'", 5]]
+`;
+
+exports[`RATIONAL Rational 1`] = `
+box       = ["Rational", 3, 4]
+N-auto    = 0.75
+`;
+
+exports[`RATIONAL Rational approximation 1`] = `
+box       = ["Rational", 2.5]
+evaluate  = ["Rational", 5, 2]
+N-auto    = 2.5
+`;
+
+exports[`RATIONAL Rational approximation 2`] = `
+box       = ["Rational", "Pi"]
+evaluate  = ["Rational", 80143857, 25510582]
+N-auto    = 3.1415926535897932385
+N-mach    = 3.141592653589793
+`;
+
+exports[`RATIONAL Rational as Divide 1`] = `
+box       = ["Rational", 3.1, 2.8]
+canonical = ["Divide", 3.1, 2.8]
+evaluate  = 1.1071428571428571429
+eval-mach = 1.1071428571428572
+`;
 
 exports[`RELATIONAL OPERATOR Equal 1`] = `True`;
 
@@ -756,80 +859,15 @@ exports[`RELATIONAL OPERATOR NotEqual 1`] = `False`;
 
 exports[`RELATIONAL OPERATOR NotEqual 2`] = `True`;
 
-exports[`Rational Bignum rational 1`] = `
-box       = ["Rational", "12345678901234567890", "23456789012345678901"]
-canonical = ["Rational", 137174210, 260630989]
-N-auto    = 0.52631580966759098627
-N-mach    = 0.526315809667591
-`;
+exports[`ROOT Root 2.5 1`] = `1.3572088082974532443`;
 
-exports[`Rational INVALID Rational 1`] = `
-box       = ["Rational", 2.5, -1.1, 18.4]
-canonical = [
-  "Rational",
-  [
-    "Error",
-    [
-      "ErrorCode",
-      "'incompatible-domain'",
-      "Integers",
-      "PositiveNumbers"
-    ],
-    2.5
-  ],
-  [
-    "Error",
-    [
-      "ErrorCode",
-      "'incompatible-domain'",
-      "Integers",
-      "NegativeNumbers"
-    ],
-    -1.1
-  ],
-  ["Error", "'unexpected-argument'", 18.4]
-]
-`;
+exports[`ROOT Root 5/7 1`] = `0.89390353509656766727`;
 
-exports[`Rational INVALID Rational 2`] = `
-box       = ["Rational", 2, 3, 5]
-canonical = ["Rational", 2, 3, ["Error", "'unexpected-argument'", 5]]
-`;
+exports[`ROOT Root 1234567890987654321 1`] = `["Root", "1234567890987654321", 3]`;
 
-exports[`Rational Rational 1`] = `
-box       = ["Rational", 3, 4]
-N-auto    = 0.75
-`;
+exports[`ROOT Root 1234567890987654321.123456789 1`] = `1072765.9799271567916`;
 
-exports[`Rational Rational approximation 1`] = `
-box       = ["Rational", 2.5]
-evaluate  = ["Rational", 5, 2]
-N-auto    = 2.5
-`;
-
-exports[`Rational Rational approximation 2`] = `
-box       = ["Rational", "Pi"]
-evaluate  = ["Rational", 80143857, 25510582]
-N-auto    = 3.1415926535897932385
-N-mach    = 3.141592653589793
-`;
-
-exports[`Rational Rational as Divide 1`] = `
-box       = ["Rational", 3.1, 2.8]
-canonical = ["Divide", 3.1, 2.8]
-evaluate  = 1.1071428571428571429
-eval-mach = 1.1071428571428572
-`;
-
-exports[`Root Root 2.5 1`] = `1.3572088082974532443`;
-
-exports[`Root Root 5/7 1`] = `0.89390353509656766727`;
-
-exports[`Root Root 1234567890987654321 1`] = `["Root", "1234567890987654321", 3]`;
-
-exports[`Root Root 1234567890987654321.123456789 1`] = `1072765.9799271567916`;
-
-exports[`Sqrt INVALID  Sqrt 1`] = `
+exports[`SQRT INVALID  Sqrt 1`] = `
 box       = ["Sqrt", 2.5, -1.1, 18.4]
 canonical = [
   "Sqrt",
@@ -839,12 +877,14 @@ canonical = [
 ]
 `;
 
-exports[`Sqrt INVALID Sqrt 1`] = `
+exports[`SQRT INVALID Sqrt 1`] = `
 box       = ["Sqrt", 2.5, 1.1]
 canonical = ["Sqrt", 2.5, ["Error", "'unexpected-argument'", 1.1]]
 `;
 
-exports[`Sqrt √(3+4i) 1`] = `
+exports[`SQRT √ of list 1`] = `[2, 1, 7.483314773547883, 4.242640687119285]`;
+
+exports[`SQRT √(3+4i) 1`] = `
 box       = ["Sqrt", ["Complex", 3, 4]]
 evaluate  = ["Complex", 2, 1]
 eval-big  = {num: "NaN"}
@@ -852,56 +892,56 @@ eval-mach = {num: "NaN"}
 eval-cplx = ["Complex", 2, 1]
 `;
 
-exports[`Sqrt √(3^2) 1`] = `
+exports[`SQRT √(3^2) 1`] = `
 box       = ["Sqrt", ["Square", 3]]
 canonical = 3
 `;
 
-exports[`Sqrt √(4x) 1`] = `
+exports[`SQRT √(4x) 1`] = `
 box       = ["Sqrt", ["Multiply", 4, "x"]]
 simplify  = ["Multiply", 2, ["Sqrt", "x"]]
 `;
 
-exports[`Sqrt √(5/7) 1`] = `
+exports[`SQRT √(5/7) 1`] = `
 box       = ["Sqrt", ["Rational", 5, 7]]
 N-auto    = 0.84515425472851657751
 N-mach    = 0.8451542547285166
 `;
 
-exports[`Sqrt √(5x(3+2)) 1`] = `
+exports[`SQRT √(5x(3+2)) 1`] = `
 box       = ["Sqrt", ["Multiply", 5, ["Add", 3, 2]]]
 canonical = ["Sqrt", ["Multiply", 5, ["Add", 2, 3]]]
 simplify  = 5
 `;
 
-exports[`Sqrt √(175) 1`] = `
+exports[`SQRT √(175) 1`] = `
 box       = ["Sqrt", 175]
 canonical = ["Multiply", ["Sqrt", 7], 5]
 N-auto    = 13.228756555322952953
 N-mach    = 13.228756555322953
 `;
 
-exports[`Sqrt √(1000000/49) 1`] = `
+exports[`SQRT √(1000000/49) 1`] = `
 box       = ["Sqrt", ["Rational", 1000000, 49]]
 simplify  = ["Rational", 1000, 7]
 N-auto    = 142.85714285714285714
 N-mach    = 142.85714285714286
 `;
 
-exports[`Sqrt √(1000001/7) 1`] = `
+exports[`SQRT √(1000001/7) 1`] = `
 box       = ["Sqrt", ["Rational", 1000001, 7]]
 N-auto    = 377.96466199141648629
 N-mach    = 377.9646619914165
 `;
 
-exports[`Sqrt √(12345678901234567890/23456789012345678901) 1`] = `
+exports[`SQRT √(12345678901234567890/23456789012345678901) 1`] = `
 box       = ["Sqrt", ["Rational", "12345678901234567890", "23456789012345678901"]]
 canonical = ["Sqrt", ["Rational", 137174210, 260630989]]
 N-auto    = 0.7254762640277013131
 N-mach    = 0.7254762640277013
 `;
 
-exports[`Sqrt √(12345670000000000000000000) 1`] = `
+exports[`SQRT √(12345670000000000000000000) 1`] = `
 box       = ["Sqrt", 1.234567e+25]
 simplify  = ["Multiply", 1000000000, ["Sqrt", 12345670]]
 evaluate  = ["Multiply", 1000000000, ["Sqrt", 12345670]]
@@ -910,29 +950,35 @@ eval-mach = ["Sqrt", 1.234567e+25]
 N-mach    = 3513640562152.0254
 `;
 
-exports[`Sqrt √0 1`] = `
+exports[`SQRT √0 1`] = `
 box       = ["Sqrt", 0]
 canonical = 0
 `;
 
-exports[`Sqrt √2.5 1`] = `
+exports[`SQRT √2.5 1`] = `
 box       = ["Sqrt", 2.5]
 evaluate  = 1.581138830084189666
 eval-mach = 1.5811388300841898
 `;
 
-exports[`Sqrt √123456789.01234567890 1`] = `
+exports[`SQRT √123456789.01234567890 1`] = `
 box       = ["Sqrt", "123456789.0123456789"]
 evaluate  = 11111.111061111110994
 eval-mach = 11111.11106111111
 `;
 
-exports[`Sqrt √12345678901234567890 1`] = `
+exports[`SQRT √12345678901234567890 1`] = `
 box       = ["Sqrt", "12345678901234567890"]
 simplify  = ["Multiply", 3, ["Sqrt", "1371742100137174210"]]
 N-auto    = 3513641828.8201442531
 N-mach    = 3513641828.820144
 `;
+
+exports[`SUBTRACT INVALID Subtract 1`] = `["Subtract", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`;
+
+exports[`SUBTRACT Subtract 1`] = `-2.5`;
+
+exports[`SUBTRACT Subtract 2`] = `1.4`;
 
 exports[`Square INVALID Square 1`] = `
 box       = ["Square", 2.5, 1.1]
@@ -953,9 +999,3 @@ exports[`Square Square 1`] = `
 box       = ["Square", 2.5]
 evaluate  = 6.25
 `;
-
-exports[`Subtract INVALID Subtract 1`] = `["Subtract", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`;
-
-exports[`Subtract Subtract 1`] = `-2.5`;
-
-exports[`Subtract Subtract 2`] = `1.4`;

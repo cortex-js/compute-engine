@@ -1,4 +1,5 @@
 import { MathJsonIdentifier } from '../math-json/math-json-format';
+import { isCollection, isFiniteIndexableCollection } from './collection-utils';
 import { normalizeLimits } from './library/utils';
 import {
   asFloat,
@@ -51,6 +52,14 @@ const NATIVE_JS_OPERATORS: CompiledOperators = {
 
 const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Abs: 'Math.abs',
+  Add: (args, compile) => {
+    if (args.length === 1) return compile(args[0]);
+    // if (args.length > 2) {
+
+    // }
+    // const maxLength = Math.max(...args.map((x) => length(x) ?? 1));
+    return `(${args.map((x) => compile(x)).join(' + ')})`;
+  },
   Arccos: 'Math.acos',
   Arcosh: 'Math.acosh',
   Arsin: 'Math.asin',
@@ -103,10 +112,24 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
       start = '1';
     }
     if (step === '0') throw new Error('Range: step cannot be zero');
-    if (parseFloat(step) === 1.0)
+    if (parseFloat(step) === 1.0) {
+      const fStop = parseFloat(stop);
+      const fStart = parseFloat(start);
+
+      if (fStop !== null && fStart !== null) {
+        if (fStop - fStart < 50) {
+          return `[${Array.from(
+            { length: fStop - fStart + 1 },
+            (_, i) => fStart + i
+          ).join(', ')}]`;
+        }
+        return `Array.from({length: ${fStop - fStart + 1} 
+        }, (_, i) => ${start} + i)`;
+      }
+
       return `Array.from({length: ${stop} - ${start} + 1
       }, (_, i) => ${start} + i)`;
-
+    }
     return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_, i) => ${start} + i * ${step})`;
   },
   Root: (args, compile) => {
@@ -315,6 +338,8 @@ function compileExpr(
 ): JSSource {
   // No need to check for 'Rational': this has been handled as a number
 
+  if (h === 'Error') throw new Error('Error');
+
   if (h === 'Sequence') {
     if (args.length === 0) return '';
     return `(${args.map((arg) => compile(arg, target, prec)).join(', ')})`;
@@ -325,27 +350,34 @@ function compileExpr(
   //   if (arg === null) return '';
   //   return `-${compile(arg, target, 3)}`;
   // }
-  if (h === 'Error') throw new Error('Error');
 
   if (h === 'Sum' || h === 'Product') return compileLoop(h, args, target);
 
+  //
   // Is it an operator?
-  // See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence
-  // for operator precedence in JavaScript
-  const op = target.operators?.(h);
+  //
+  // Check that none of the arguments are collections
+  // If they are, we'll treat it as a function call
+  //
 
-  if (op !== undefined) {
-    if (args === null) return '';
-    let resultStr: string;
-    if (args.length === 1) {
-      // Unary operator, assume prefix
-      resultStr = `${op[0]}${compile(args[0], target, op[1])}`;
-    } else {
-      resultStr = args
-        .map((arg) => compile(arg, target, op[1]))
-        .join(` ${op[0]} `);
+  if (args.every((x) => !isCollection(x))) {
+    // See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence
+    // for operator precedence in JavaScript
+    const op = target.operators?.(h);
+
+    if (op !== undefined) {
+      if (args === null) return '';
+      let resultStr: string;
+      if (args.length === 1) {
+        // Unary operator, assume prefix
+        resultStr = `${op[0]}${compile(args[0], target, op[1])}`;
+      } else {
+        resultStr = args
+          .map((arg) => compile(arg, target, op[1]))
+          .join(` ${op[0]} `);
+      }
+      return op[1] < prec ? `(${resultStr})` : resultStr;
     }
-    return op[1] < prec ? `(${resultStr})` : resultStr;
   }
 
   if (h === 'Function') {
@@ -397,10 +429,26 @@ function compileExpr(
 
   const fn = target.functions?.(h);
   if (!fn) throw new Error(`Unknown function ${h}`);
-  if (typeof fn === 'function')
+  if (typeof fn === 'function') {
+    if (args.length === 1 && isFiniteIndexableCollection(args[0])) {
+      const v = rndVar();
+      return `(${compile(args[0], target)}).map((${v}) => ${fn(
+        args[0].engine.box(v),
+        (expr) => compile(expr, target)
+      )})`;
+    }
     return fn(args, (expr) => compile(expr, target));
+  }
 
   if (args === null) return `${fn}()`;
+
+  if (args.length === 1 && isFiniteIndexableCollection(args[0])) {
+    const v = rndVar();
+    return `(${compile(args[0], target)}).map((${v}) => ${fn}(${compile(
+      args[0].engine.box(v),
+      target
+    )}))`;
+  }
 
   return `${fn}(${args.map((x) => compile(x, target)).join(', ')})`;
 }
@@ -463,8 +511,12 @@ function compileLoop(
 
   if (!index) {
     // Loop over a collection
+    const indexVar = rndVar();
+    const acc = rndVar();
     const col = compile(args[0], target);
-    return `${col}.reduce((acc, x) => acc ${op} x, ${op === '+' ? '0' : '1'})`;
+    return `${col}.reduce((${acc}, ${indexVar}) => ${acc} ${op} ${indexVar}, ${
+      op === '+' ? '0' : '1'
+    })`;
     //         return `(() => {
     //   let _acc = ${op === '+' ? '0' : '1'};
     //   for (const _x of ${col}) _acc ${op}= _x;
@@ -483,16 +535,18 @@ function compileLoop(
   });
 
   // @todo: don't always need to wrap in an IIFE
+  const indexVar = rndVar();
+  const acc = rndVar();
 
   return `(() => {
-  let _acc = ${op === '+' ? '0' : '1'};
+  let ${acc} = ${op === '+' ? '0' : '1'};
   let ${index} = ${lower};
   const _fn = () => ${fn};
-  while (${index} <= ${upper}) {
-    _acc ${op}= _fn();
-    ${index}++;
+  while (${indexVar} <= ${upper}) {
+    ${acc} ${op}= _fn();
+    ${indexVar}++;
   }
-  return _acc;
+  return ${acc};
 })()`;
 }
 
@@ -509,4 +563,10 @@ function iife(statements: string[], target: CompileTarget): string {
   })();
 
   // return `(() => ${statements.join(`;${target.ws('\n')}`)}()`;
+}
+
+function rndVar(): string {
+  // Return a random variable name made up of a single underscore
+  // followed by some digits and letters
+  return `_${Math.random().toString(36).substring(2)}`;
 }

@@ -19,7 +19,9 @@ describe('ADVANCED PARSING', () => {
 
 describe('FUNCTIONS', () => {
   test('Multiple arguments', () =>
-    expect(parse('\\gamma(2, 1)')).toMatchInlineSnapshot(`["gamma", 2, 1]`));
+    expect(parse('\\gamma(2, 1)')).toMatchInlineSnapshot(
+      `["EulerGamma", 2, 1]`
+    ));
 });
 
 describe('UNKNOWN COMMANDS', () => {

@@ -536,11 +536,8 @@ export interface BoxedExpression {
 
   /**
    *
-   * All the identifiers (symbols and functions) in the expression that are a
-   * free variable.
-   *
-   * A free variable is an identifier that is used in a function but is not a
-   * local variable or a parameter of that function.
+   * All the identifiers (symbols and functions) in the expression that are
+   * not a local variable or a parameter of that function.
    *
    */
   readonly freeVariables: string[];

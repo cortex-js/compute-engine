@@ -1036,14 +1036,22 @@ export class _Parser implements Parser {
       return null;
     }
 
+    const fractionalIndex = this.index;
     let hasFractionalPart = true;
     if (
       startsWithDecimalMarker ||
       this.match('.') ||
       this.matchAll(this._decimalMarkerTokens)
-    )
+    ) {
       fractionalPart = this.parseDecimalDigits({ withGrouping: true });
-    else hasFractionalPart = false;
+      if (!fractionalPart) {
+        // There was a '.', but no fractional part
+        // the '.' may be part of something else, i.e. '1..2'
+        // so backtrack
+        this.index = fractionalIndex;
+        return { num: wholePart };
+      }
+    } else hasFractionalPart = false;
 
     let hasRepeatingPart = false;
     if (hasFractionalPart) {

@@ -50,6 +50,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   },
   Not: {
     wikidata: 'Q190558',
+    threadable: true,
     involution: true,
     complexity: 10100,
     // @todo: this may not be needed, since we also have rules.
@@ -61,6 +62,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   },
   Equivalent: {
     wikidata: 'Q220433',
+    threadable: true,
     complexity: 10200,
     signature: {
       domain: 'LogicOperators',
@@ -70,6 +72,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   },
   Implies: {
     wikidata: 'Q7881229',
+    threadable: true,
     complexity: 10200,
     signature: {
       domain: 'LogicOperators',

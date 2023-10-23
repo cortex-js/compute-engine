@@ -66,11 +66,15 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
             fArg = fArg % 360;
             if (fArg < 0) fArg += 360;
             // Convert fArg to radians
-            const fRadians = reducedRational([fArg, 180]);
-            if (fRadians[0] === 0) return ce.number(0);
-            if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
-            if (fRadians[0] === 1) return ce.div(ce.Pi, ce.number(fRadians[1]));
-            return ce.mul([ce.number(fRadians), ce.Pi]);
+            if (Number.isInteger(fArg)) {
+              const fRadians = reducedRational([fArg, 180]);
+              if (fRadians[0] === 0) return ce.number(0);
+              if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
+              if (fRadians[0] === 1)
+                return ce.div(ce.Pi, ce.number(fRadians[1]));
+              return ce.mul([ce.number(fRadians), ce.Pi]);
+            }
+            return ce.mul([ce.div(ce.number(fArg), ce.number(180)), ce.Pi]);
           }
           return ce.div(ce.mul([arg, ce.Pi]), ce.number(180));
         },
@@ -127,6 +131,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Arctan: {
       wikidata: 'Q2257242',
       complexity: 5200,
+      threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arctan'),
         simplify: (ce, ops) =>
@@ -138,6 +143,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Arctan2: {
       wikidata: 'Q776598',
       complexity: 5200,
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
         N: (_ce, ops) =>
@@ -146,6 +152,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Cos: {
       complexity: 5050,
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>
@@ -161,6 +168,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Tan: {
       // Range: 'RealNumbers',
       complexity: 5100,
+      threadable: true,
       signature: {
         domain: trigFunction('Tan'),
         simplify: (ce, ops) =>
@@ -183,6 +191,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
   {
     Arcosh: {
       complexity: 6200,
+      threadable: true,
       signature: {
         domain: hyperbolicFunction('Arcosh'),
         simplify: (ce, ops) =>
@@ -199,6 +208,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Arcsin: {
       complexity: 5500,
+      threadable: true,
       signature: {
         domain: hyperbolicFunction('Arcsin'),
         simplify: (ce, ops) =>
@@ -221,6 +231,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     //Note: Arsinh, not ArCsinh
     Arsinh: {
       complexity: 6100,
+      threadable: true,
       signature: {
         domain: hyperbolicFunction('Arsinh'),
         simplify: (ce, ops) =>
@@ -237,6 +248,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Artanh: {
       complexity: 6300,
+      threadable: true,
       signature: {
         domain: hyperbolicFunction('Artanh'),
         simplify: (ce, ops) =>
@@ -254,6 +266,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Cosh: {
       complexity: 6050,
+      threadable: true,
       signature: {
         domain: hyperbolicFunction('Cosh'),
         simplify: (ce, ops) =>
@@ -271,6 +284,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Cot: {
       complexity: 5600,
+      threadable: true,
       signature: {
         domain: trigFunction('Cot'),
         simplify: (ce, ops) =>
@@ -283,6 +297,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Csc: {
       description: 'Cosecant',
       complexity: 5600,
+      threadable: true,
       signature: {
         domain: trigFunction('Csc'),
         simplify: (ce, ops) =>
@@ -295,6 +310,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     /** = sin(z/2)^2 = (1 - cos z) / 2*/
     Haversine: {
       wikidata: 'Q2528380',
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'ExtendedRealNumbers', 'Numbers'],
         evaluate: ['Divide', ['Subtract', 1, ['Cos', '_1']], 2],
@@ -303,6 +319,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     /** = 2 * Arcsin(Sqrt(z)) */
     InverseHaversine: {
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'ExtendedRealNumbers', 'RealNumbers'],
         evaluate: ['Multiply', 2, ['Arcsin', ['Sqrt', '_1']]],
@@ -311,6 +328,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Sec: {
       description: 'Secant, inverse of cosine',
       complexity: 5500,
+      threadable: true,
       signature: {
         domain: trigFunction('Sec'),
         simplify: (ce, ops) =>
@@ -323,6 +341,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Sinh: {
       // Range: ['Interval', -Infinity, Infinity],
       complexity: 6000,
+      threadable: true,
       signature: {
         domain: hyperbolicFunction('Sinh'),
         simplify: (ce, ops) =>
@@ -342,6 +361,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
   {
     Csch: {
       complexity: 6200,
+      threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Csch'),
         simplify: (ce, ops) =>
@@ -353,6 +373,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Sech: {
       complexity: 6200,
+      threadable: true,
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         simplify: (ce, ops) =>
@@ -365,6 +386,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     Tanh: {
       // Range: ['Interval', -Infinity, Infinity],
       complexity: 6200,
+      threadable: true,
       signature: {
         domain: hyperbolicFunction('Tanh'),
         simplify: (ce, ops) =>
@@ -378,6 +400,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
   {
     Arccos: {
       complexity: 5550,
+      threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arccos'),
         simplify: (ce, ops) =>
@@ -391,6 +414,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Arccot: {
       numeric: true,
+      threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arccot'),
         evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccot', ops[0]),
@@ -400,6 +424,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
 
     Arcoth: {
       numeric: true,
+      threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arcoth'),
         evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcoth', ops[0]),
@@ -409,6 +434,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
 
     Arcsch: {
       numeric: true,
+      threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arcsch'),
         evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsch', ops[0]),
@@ -418,6 +444,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
 
     Arcsec: {
       numeric: true,
+      threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arcsec'),
         evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arcsec', ops[0]),
@@ -427,6 +454,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
 
     Arsech: {
       numeric: true,
+      threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arsech'),
         evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arsech', ops[0]),
@@ -435,6 +463,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
     },
     Arccsc: {
       numeric: true,
+      threadable: true,
       signature: {
         domain: domainNumberToRealNumber('Arccsc'),
         evaluate: (ce, ops) => evalTrig(ce, 'evaluate', 'Arccsc', ops[0]),
@@ -444,6 +473,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
 
     Coth: {
       complexity: 6300,
+      threadable: true,
       signature: {
         domain: hyperbolicFunction('Coth'),
         simplify: (ce, ops) =>
