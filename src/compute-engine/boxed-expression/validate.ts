@@ -182,7 +182,7 @@ export function adjustArguments(
   threadable: boolean,
   params: BoxedDomain[],
   optParams: BoxedDomain[],
-  restParam: BoxedDomain | null
+  restParam: BoxedDomain | undefined
 ): BoxedExpression[] | null {
   // @fastpath
   if (!ce.strict) return null;

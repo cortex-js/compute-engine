@@ -80,7 +80,7 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
       evaluate: processImplies,
     },
   },
-  Exists: { signature: { domain: 'Booleans' } },
+  Exists: { signature: { domain: 'Functions' } },
 };
 
 function processAnd(

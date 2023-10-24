@@ -38,12 +38,6 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-console.info(
-  ce
-    .parse('\\frac{1}{225}{(0.000\\,123\\,45\\sin(0)\\arsinh(5\\pi))} ')
-    .toString()
-);
-
 ce.assign('f(x)', ce.parse('2x'));
 const expr1 = ce.box(['Subtract', 3, ['f', 3]]);
 console.info(expr1.evaluate().toString());

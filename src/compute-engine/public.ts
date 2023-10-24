@@ -226,8 +226,8 @@ export type DomainLiteral =
 
 export type DomainExpression<T = SemiBoxedExpression> =
   | DomainLiteral
-  | ['Union', ...(DomainExpression<T> | BoxedExpression)[]]
-  | ['Intersection', ...(DomainExpression<T> | BoxedExpression)[]]
+  | ['Union', ...DomainExpression<T>[]]
+  | ['Intersection', ...DomainExpression<T>[]]
   | ['ListOf', DomainExpression<T>]
   | ['DictionaryOf', DomainExpression<T>]
   | ['TupleOf', ...DomainExpression<T>[]]
@@ -257,10 +257,7 @@ export interface BoxedDomain extends BoxedExpression {
   get base(): DomainLiteral;
 
   get ctor(): DomainConstructor | null;
-  get params(): BoxedDomain[];
-  get optParams(): BoxedDomain[];
-  get restParam(): BoxedDomain | null;
-  get result(): BoxedDomain | null;
+  get params(): DomainExpression[];
 
   readonly isNumeric: boolean;
   readonly isFunction: boolean;
@@ -1564,16 +1561,15 @@ export type FunctionSignature = {
    * domain) */
   domain?: BoxedDomain | DomainExpression;
 
-  /** The minimum and maximum values of the result of the function */
-  // range?: [min: number, max: number];
-
-  /** An optional handler to determine the codomain of the function.
-   * If not provided, the codomain of the function is determined from `domain`
+  /** The domain of the result of evaluating the function. Either a domain
+   * expression, or a function that returns a domain expression.
    */
-  codomain?: (
-    ce: IComputeEngine,
-    args: BoxedDomain[]
-  ) => BoxedDomain | null | undefined;
+  result?:
+    | BoxedDomain
+    | ((
+        ce: IComputeEngine,
+        args: BoxedDomain[]
+      ) => BoxedDomain | null | undefined);
 
   /**
    * Return the canonical form of the expression with the arguments `args`.
@@ -1745,14 +1741,18 @@ export type FunctionSignature = {
 };
 
 export type BoxedFunctionSignature = {
-  domain: BoxedDomain;
+  inferredSignature: boolean;
 
-  codomain?:
+  params: BoxedDomain[];
+  optParams: BoxedDomain[];
+  restParam?: BoxedDomain;
+  result:
     | BoxedDomain
     | ((
         ce: IComputeEngine,
         args: BoxedExpression[]
       ) => BoxedDomain | null | undefined);
+
   canonical?: (
     ce: IComputeEngine,
     args: BoxedExpression[]

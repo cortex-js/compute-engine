@@ -1,3 +1,4 @@
+import { signatureToDomain } from './domain-utils';
 import {
   AssumeResult,
   BoxedExpression,
@@ -246,6 +247,9 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
   if (proposition.op1.symbol && hasDef(ce, proposition.op1.symbol)) {
     const dom = ce.domain(proposition.op2.evaluate().json as DomainExpression);
     if (!dom.isValid) return 'not-a-predicate';
+
+    ce.declare(proposition.op1.symbol, dom);
+
     const def = ce.lookupSymbol(proposition.op1.symbol);
     if (def) {
       if (def.domain && !dom.isCompatible(def.domain)) return 'contradiction';
@@ -253,13 +257,13 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
       return 'ok';
     }
     const fdef = ce.lookupFunction(proposition.op1.symbol);
-    if (fdef?.signature?.domain) {
-      if (!dom.isCompatible(fdef.signature.domain)) return 'contradiction';
-      if (dom.isCompatible(fdef.signature.domain, 'bivariant'))
-        return 'tautology';
-      return 'not-a-predicate';
+    if (fdef) {
+      if (!dom.isCompatible(signatureToDomain(ce, fdef.signature)))
+        return 'contradiction';
+
+      return 'ok';
     }
-    return 'ok';
+    return 'not-a-predicate';
   }
 
   // Case 3

@@ -23,7 +23,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
       hold: 'rest', // Evaluate the condition, but no the true/false branches
       signature: {
         domain: 'Functions',
-        codomain: (_ce, ops) => widen(ops[0], ops[1]),
+        result: (_ce, ops) => widen(ops[0], ops[1]),
         evaluate: (ce, ops) => {
           const cond = ops[0];
           if (cond && cond.symbol === 'True')
@@ -79,7 +79,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: 'Functions',
-        codomain: (ce, ops) => domainWhich(ce, ops),
+        result: (ce, ops) => domainWhich(ce, ops),
         evaluate: (ce, ops) => whichEvaluate(ce, ops, 'evaluate'),
       },
     },

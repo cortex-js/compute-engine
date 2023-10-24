@@ -1,7 +1,16 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { isRational } from './numerics/rationals';
-import { DomainLiteral, Rational } from './public';
+import {
+  BoxedDomain,
+  BoxedFunctionSignature,
+  DomainExpression,
+  DomainLiteral,
+  IComputeEngine,
+  Rational,
+  SemiBoxedExpression,
+} from './public';
+import { ops, head, nops } from '../math-json/utils';
 
 /**
  * Determine the numeric domain of a number.
@@ -75,4 +84,83 @@ export function inferNumericDomain(
   }
 
   return 'Numbers';
+}
+
+/**
+ * Extract the parts of a function domain.
+ */
+export function functionDomain(
+  dom: BoxedDomain
+): [
+  params: BoxedDomain[],
+  optParams: BoxedDomain[],
+  restParam: BoxedDomain | undefined,
+  result: BoxedDomain,
+] {
+  console.assert(dom.ctor === 'FunctionOf');
+
+  const ce = dom.engine;
+
+  const allParams = dom.params;
+
+  const params: BoxedDomain[] = [];
+  const optParams: BoxedDomain[] = [];
+  let restParam: BoxedDomain | undefined = undefined;
+  const result = ce.domain(allParams[allParams.length - 1]);
+
+  for (const arg of allParams.slice(0, -1)) {
+    if (head(arg) === 'OptArg') {
+      if (optParams.length > 0)
+        throw Error(`Unexpected multiple OptArg in domain ${dom}`);
+      if (restParam)
+        throw Error(`Unexpected OptArg after VarArg in domain ${dom}`);
+      if (nops(arg) === 0)
+        throw Error(`Unexpected empty OptArg in domain ${dom}`);
+      for (const optParam of ops(arg)!) {
+        if (head(optParam) === 'OptArg')
+          throw Error(`Unexpected OptArg of OptArg in domain ${dom}`);
+        if (head(optParam) === 'VarArg')
+          throw Error(
+            `Unexpected superfluous OptArg of VarArg in domain ${dom}`
+          );
+        optParams.push(ce.domain(optParam as DomainExpression));
+      }
+    } else if (head(arg) === 'VarArg') {
+      const params = ops(arg)!;
+      if (params.length !== 1) throw Error(`Invalid VarArg in domain ${dom}`);
+      if (head(params[0]) === 'OptArg')
+        throw Error(`Unexpectedf VarArg of OptArg in domain ${dom}`);
+      if (head(params[0]) === 'VarArg')
+        throw Error(`Unexpected VarArg of VarArg in domain ${dom}`);
+
+      restParam = ce.domain(params[0] as DomainExpression);
+    } else {
+      if (optParams.length > 0)
+        throw Error(
+          `Unexpected required parameter after OptArg in domain ${dom}`
+        );
+      if (restParam)
+        throw Error(
+          `Unexpected required parameter after VarArg in domain ${dom}`
+        );
+      params.push(ce.domain(arg));
+    }
+  }
+
+  return [params, optParams, restParam, result];
+}
+
+export function signatureToDomain(
+  ce: IComputeEngine,
+  sig: BoxedFunctionSignature
+): BoxedDomain {
+  const fnParams: SemiBoxedExpression[] = [...sig.params];
+  if (sig.optParams.length > 0) fnParams.push(['OptArg', ...sig.optParams]);
+  if (sig.restParam) fnParams.push(['VarArg', sig.restParam]);
+
+  if (typeof sig.result === 'function')
+    fnParams.push(sig.result(ce, []) ?? ce.symbol('Undefined'));
+  else fnParams.push(sig.result);
+
+  return ce.domain(['FunctionOf', ...(fnParams as DomainExpression[])]);
 }

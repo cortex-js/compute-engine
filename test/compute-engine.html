@@ -133,7 +133,7 @@
       </div>
       <!-- <textarea id="json-input" class="input">["Add", 0, ["Range", 1, 10]]</textarea> -->
       <textarea id="json-input" class="input">
-      ["Assign", "s", ["List", 2, 3, 5, 7]] ["Add", "s", 5]
+      ["Assign", "f", ["Add", "_", 1]] ["Add", ["f", 2], 5]
     </textarea
       >
       <div id="json-input-error"></div>
@@ -401,9 +401,13 @@
       // ce.latexOptions.parseNumbers = "rational";
       // ce.jsonSerializationOptions.metadata = ["latex"];
 
-      console.info(ce.parse("1,4..10").toString());
-
       ce.assign("f(x)", "$$ 3x^2 + 2x + 5$$");
+      console.info(
+        ce
+          .box(["Add", ["f", 2], 5])
+          .evaluate()
+          .toString()
+      );
 
       // const seq = ce.box(['Sequence', 1, 2, ['Sequence', 8, 9], 4, 5]);
       // console.log(seq.toString());

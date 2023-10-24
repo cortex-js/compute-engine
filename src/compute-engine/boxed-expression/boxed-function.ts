@@ -39,6 +39,7 @@ import { expand } from '../symbolic/expand';
 import { apply } from '../function-utils';
 import { shouldHold } from '../symbolic/utils';
 import { at, isFiniteIndexableCollection } from '../collection-utils';
+import { narrow } from './boxed-domain';
 
 /**
  * BoxedFunction
@@ -64,7 +65,7 @@ export class BoxedFunction extends _BoxedExpression {
   private _isPure: boolean;
 
   // The domain of the value of the function applied to its arguments
-  private _codomain: BoxedDomain | undefined = undefined;
+  private _result: BoxedDomain | undefined = undefined;
 
   // The cached result of applying the tail to the head. If the function is
   // not pure, its value is never cached.
@@ -113,6 +114,17 @@ export class BoxedFunction extends _BoxedExpression {
     else h = (h ^ this._head.hash) | 0;
     this._hash = h;
     return h;
+  }
+
+  infer(domain: BoxedDomain): boolean {
+    const def = this._def;
+    if (!def) return false;
+
+    if (!def.signature.inferredSignature) return false;
+
+    if (typeof def.signature.result !== 'function')
+      def.signature.result = narrow(def.signature.result, domain);
+    return true;
   }
 
   bind(): void {
@@ -541,15 +553,8 @@ export class BoxedFunction extends _BoxedExpression {
     return undefined;
   }
 
-  //
-  // AUTO-CANONICAL OPERATIONS
-  //
-  // The operations are automatically done on the canonical form of the
-  // expression
-  //
-
   get domain(): BoxedDomain | undefined {
-    if (this._codomain !== undefined) return this._codomain;
+    if (this._result !== undefined) return this._result;
     if (!this.canonical) return undefined;
 
     const ce = this.engine;
@@ -557,17 +562,16 @@ export class BoxedFunction extends _BoxedExpression {
     let result: BoxedDomain | undefined | null = undefined;
 
     if (typeof this._head !== 'string') {
-      result = this._head.domain?.result;
+      result = this._head.domain;
     } else if (this._def) {
       const sig = this._def.signature;
-      if (typeof sig.codomain === 'function')
-        result = sig.codomain(ce, this._ops);
-      else result = sig.codomain;
+      if (typeof sig.result === 'function') result = sig.result(ce, this._ops);
+      else result = sig.result;
     }
 
     result ??= undefined;
 
-    this._codomain = result;
+    this._result = result;
     return result;
   }
 
@@ -933,9 +937,9 @@ export function makeCanonicalFunction(
     xs,
     def.hold,
     def.threadable,
-    sig.domain.params,
-    sig.domain.optParams,
-    sig.domain.restParam
+    sig.params,
+    sig.optParams,
+    sig.restParam
   );
 
   // If we have some adjusted arguments, the arguments did not

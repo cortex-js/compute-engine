@@ -34,7 +34,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           ['OptArg', 'Strings', 'Strings'],
           'Anything',
         ],
-        codomain: (_ce, args) => args[0].domain,
+        result: (_ce, args) => args[0].domain,
         canonical: (ce, args) => args[0]?.canonical ?? ce.box(['Sequence']),
       },
     },
@@ -72,7 +72,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        codomain: (ce, args) => {
+        result: (ce, args) => {
           const op1 = args[0];
           if (op1.symbol) return ce.domain('Symbols');
           if (op1.string) return ce.domain('Strings');
@@ -157,7 +157,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Identity: {
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        codomain: (_ce, ops) => ops[0].domain,
+        result: (_ce, ops) => ops[0].domain,
         evaluate: (_ce, ops) => ops[0],
       },
     },
@@ -241,7 +241,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        codomain: (_ce, ops) => ops[0].domain,
+        result: (_ce, ops) => ops[0].domain,
         canonical: (ce, ops) => ce._fn('Evaluate', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].evaluate(),
       },
@@ -278,7 +278,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        codomain: (_ce, ops) => ops[0].domain,
+        result: (_ce, ops) => ops[0].domain,
         canonical: (ce, ops) => ce._fn('Simplify', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].simplify(),
       },
@@ -288,7 +288,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        codomain: (_ce, ops) => ops[0].domain,
+        result: (_ce, ops) => ops[0].domain,
         canonical: (ce, ops) => ce._fn('N', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].N(),
       },
@@ -309,9 +309,18 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const name = ops[0].symbol;
           if (!name) return ce.Nothing;
-          const result = ce.lookupFunction(name);
-          if (!result) return ce.fn('List', []);
-          return ce.fn('List', [result.signature.domain]);
+          const def = ce.lookupFunction(name);
+          if (!def) return ce.fn('List', []);
+          const sig = def.signature;
+          const fnParams: BoxedExpression[] = [...sig.params];
+          if (sig.optParams.length > 0)
+            fnParams.push(ce._fn('OptArg', sig.optParams));
+          if (sig.restParam) fnParams.push(ce._fn('VarArg', [sig.restParam]));
+
+          if (typeof sig.result === 'function')
+            fnParams.push(sig.result(ce, []) ?? ce.symbol('Undefined'));
+          else fnParams.push(sig.result);
+          return ce.fn('List', fnParams);
         },
       },
     },
@@ -341,7 +350,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
-        codomain: (ce, args: BoxedExpression[]) => {
+        result: (ce, args: BoxedExpression[]) => {
           const op1 = args[0];
           const op2 = args[1];
           if (op1.string && asSmallInteger(op2) !== null)

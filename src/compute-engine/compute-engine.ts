@@ -937,7 +937,14 @@ export class ComputeEngine implements IComputeEngine {
       if (def instanceof _BoxedSymbolDefinition) {
         if (!def.constant) def.value = undefined;
       } else if (def instanceof _BoxedFunctionDefinition) {
-        def.signature = { domain: def.signature.domain };
+        const sig = def.signature;
+        def.signature = {
+          ...sig,
+          evaluate: undefined,
+          N: undefined,
+          simplify: undefined,
+          canonical: undefined,
+        };
       }
     }
   }
@@ -1367,8 +1374,12 @@ export class ComputeEngine implements IComputeEngine {
     const fnDef = this.lookupFunction(id);
     if (fnDef) {
       console.assert(typeof value == 'function');
+      const sig = fnDef.signature;
       fnDef.signature = {
-        domain: fnDef.signature.domain,
+        ...sig,
+        N: undefined,
+        simplify: undefined,
+        canonical: undefined,
         evaluate: value as () => any,
       };
       return this;
@@ -2028,8 +2039,16 @@ export class ComputeEngine implements IComputeEngine {
       if (this.context.ids) {
         const def = this.context.ids.get(symbol);
         if (def instanceof _BoxedSymbolDefinition) def.value = undefined;
-        else if (def instanceof _BoxedFunctionDefinition)
-          def.signature = { domain: def.signature.domain };
+        else if (def instanceof _BoxedFunctionDefinition) {
+          const sig = def.signature;
+          def.signature = {
+            ...sig,
+            evaluate: undefined,
+            N: undefined,
+            simplify: undefined,
+            canonical: undefined,
+          };
+        }
       }
       // Remove any assumptions that make a reference to this symbol
       // (note that when a scope is created, any assumptions from the

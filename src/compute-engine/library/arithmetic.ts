@@ -172,7 +172,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: 'NumericFunctions',
-        codomain: (ce, args) =>
+        result: (ce, args) =>
           domainAdd(
             ce,
             args.map((x) => x.domain)
@@ -495,7 +495,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
-        codomain: (ce, args) => {
+        result: (ce, args) => {
           const arg = args[0].domain;
           if (!arg?.base) return arg;
           const negDomain = {
@@ -1214,7 +1214,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       inert: true,
       signature: {
         domain: ['FunctionOf', 'Values', ['OptArg', 'Integers'], 'Values'],
-        codomain: (_ce, args) => args[0].domain,
+        result: (_ce, args) => args[0].domain,
       },
     },
     FromDigits: {

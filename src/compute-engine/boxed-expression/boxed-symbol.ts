@@ -28,7 +28,7 @@ import { hashCode } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { narrow } from './boxed-domain';
-import { isFunctionDefinition, isSymbolDefinition } from '../library/library';
+import { signatureToDomain } from '../domain-utils';
 
 /**
  * BoxedSymbol
@@ -324,10 +324,9 @@ export class BoxedSymbol extends _BoxedExpression {
   get domain(): BoxedDomain | undefined {
     const def = this._def;
     if (def) {
-      if (isFunctionDefinition(def)) {
-        if (!def.signature.domain) return undefined;
-        return this.engine.domain(def.signature.domain);
-      } else if (isSymbolDefinition(def))
+      if (def instanceof _BoxedFunctionDefinition) {
+        return signatureToDomain(this.engine, def.signature);
+      } else if (def instanceof _BoxedSymbolDefinition)
         return (def as BoxedSymbolDefinition).domain ?? undefined;
     }
     return undefined;

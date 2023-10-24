@@ -1,3 +1,4 @@
+import { functionDomain } from '../domain-utils';
 import { applicable } from '../function-utils';
 import {
   IComputeEngine,
@@ -63,6 +64,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       );
 
     this.name = name;
+    if (name === 'Sin') debugger;
     this.description = def.description;
     this.wikidata = def.wikidata;
 
@@ -182,6 +184,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         : def.numeric
         ? ce.domain('NumericFunctions')
         : ce.domain('Functions');
+
       if (!domain.isValid)
         throw Error(
           `Function Definition "${name}": invalid domain ${JSON.stringify(
@@ -189,10 +192,10 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
           )}`
         );
 
+      const [params, optParams, restParam, result] = functionDomain(domain);
+
       const codomain =
-        sig.codomain ??
-        domain.result ??
-        (def.numeric ? ce.Numbers : ce.Anything);
+        sig.result ?? result ?? (def.numeric ? ce.Numbers : ce.Anything);
 
       let evaluate: ((ce, args) => BoxedExpression | undefined) | undefined =
         undefined;
@@ -206,8 +209,11 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       } else evaluate = sig.evaluate as any;
 
       this.signature = {
-        domain,
-        codomain,
+        inferredSignature: false,
+        params,
+        optParams,
+        restParam: restParam ? restParam : undefined,
+        result: codomain,
         canonical: sig.canonical,
         simplify: sig.simplify,
         evaluate,
@@ -218,13 +224,19 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       };
     } else if (def.numeric) {
       this.signature = {
-        domain: ce.domain('NumericFunctions'),
-        codomain: ce.Numbers,
+        inferredSignature: true,
+        params: [],
+        optParams: [],
+        restParam: ce.Numbers,
+        result: ce.Numbers,
       };
     } else {
       this.signature = {
-        domain: ce.domain('Functions'),
-        codomain: ce.Anything,
+        inferredSignature: true,
+        params: [],
+        optParams: [],
+        restParam: ce.Anything,
+        result: ce.Anything,
       };
     }
   }
