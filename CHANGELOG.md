@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- When invoking a declared function in a numeric operation, correctly infer the
+  result type.
+
+```json
+["Assign", "f", ["Add", "_", 1]]
+["Add", ["f", 1], 1]
+// -> 3
+```
+
+Previously a domain error was returned, now `f` is inferred to have a numeric
+return type.
+
 ### New Features
 
 - Implemented `Union` and `Intersection` of collections, for example:
