@@ -3,6 +3,7 @@
 
 import { isDomain } from '../boxed-expression/boxed-domain';
 import { checkArity } from '../boxed-expression/validate';
+import { each, isFiniteIndexableCollection } from '../collection-utils';
 import {
   BoxedExpression,
   IdentifierDefinitions,
@@ -111,17 +112,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   Intersection: {
     // notation: \cap
     wikidata: 'Q185837',
-    threadable: true,
     associative: true,
     commutative: true,
     involution: true,
     signature: {
-      domain: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Anything'],
+      domain: ['FunctionOf', 'Collections', ['VarArg', 'Collections'], 'Sets'],
       canonical: (ce, args) => {
         if (args.length === 0) return ce.symbol('EmptySet');
-        if (args.length === 1) return args[0];
-        if (args[0].head === 'Domain')
-          return ce.domain(['Intersection', ...args]);
+        if (args.length === 1) return ce.symbol('EmptySet');
         return ce._fn('Intersection', args);
       },
       evaluate: intersection,
@@ -130,16 +128,16 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   Union: {
     // Works on set, but can also work on lists
     wikidata: 'Q185359',
-    threadable: true,
     associative: true,
     commutative: true,
     involution: true,
     signature: {
-      domain: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Anything'],
+      domain: ['FunctionOf', 'Collections', ['VarArg', 'Collections'], 'Sets'],
       canonical: (ce, args) => {
         if (args.length === 0) return ce.symbol('EmptySet');
-        if (args.length === 1) return args[0];
-        if (args[0].head === 'Domain') return ce.domain(['Union', ...args]);
+        // Even if there is only one argument, we still need to call Union
+        // to canonicalize the argument, since it may not be a set (it could
+        // be a collection)
         return ce._fn('Union', args);
       },
       evaluate: union,
@@ -170,24 +168,54 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
 };
 
 function subset(ce: IComputeEngine, _ops: BoxedExpression[]): BoxedExpression {
+  // @todo
   return ce.False;
 }
 function subsetEqual(
   ce: IComputeEngine,
   _ops: BoxedExpression[]
 ): BoxedExpression {
+  // @todo
   return ce.False;
 }
 
-function union(ce: IComputeEngine, _ops: BoxedExpression[]): BoxedExpression {
-  return ce.False;
+function union(ce: IComputeEngine, ops: BoxedExpression[]): BoxedExpression {
+  const elements: BoxedExpression[] = [];
+  for (const op of ops) {
+    if (isFiniteIndexableCollection(op)) {
+      for (const elem of each(op)) {
+        if (elements.every((e) => !e.isEqual(elem))) elements.push(elem);
+      }
+    } else {
+      // Not a collection, assume it's a collection made of this single element
+      if (elements.every((elem) => !elem.isEqual(op))) elements.push(op);
+    }
+  }
+
+  if (elements.length === 0) return ce.symbol('EmptySet');
+  return ce._fn('Set', elements);
 }
 
 function intersection(
   ce: IComputeEngine,
-  _ops: BoxedExpression[]
+  ops: BoxedExpression[]
 ): BoxedExpression {
-  return ce.symbol('EmptySet');
+  let elements: BoxedExpression[] = ops[0].ops ?? [];
+
+  // Remove elements that are not in all the other sets
+  for (const op of ops.slice(1)) {
+    if (isFiniteIndexableCollection(op)) {
+      elements = elements.filter((element) =>
+        [...each(op)].some((op) => element.isEqual(op))
+      );
+    } else {
+      // Not a collection, assume it's a collection made of this single element
+      elements = elements.filter((element) => element.isEqual(op));
+    }
+  }
+
+  if (elements.length === 0) return ce.symbol('EmptySet');
+  return ce._fn('Set', elements);
 }
 
 function setMinus(

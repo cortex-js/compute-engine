@@ -1,11 +1,22 @@
 ## [Unreleased]
 
-### Improvements
+### New Features
+
+- Implemented `Union` and `Intersection` of collections, for example:
+
+```json
+["Intersection", ["List", 3, 5, 7], ["List", 2, 5, 9]]
+// -> ["Set", 5]
+
+["Union", ["List", 3, 5, 7], ["List", 2, 5, 9]]
+// -> ["Set", 3, 5, 7, 2, 9]
+```
 
 - Parse ranges, for example `1..5` or `1, 3..10`. Ranges are collections and can
   be used anywhere collections can be used.
+
 - The functions `Sum`, `Product`, `Min`, `Max`, and the statistics functions
-  (`Mean`, `Median`, `Variance`, etc...) now handle arguments that can be
+  (`Mean`, `Median`, `Variance`, etc...) now handle collection arguments:
   collections:
 
   - `["Range"]`, `["Interval"]`, `["Linspace"]` expressions
@@ -25,16 +36,36 @@
 ```
 
 - Added `GCD` and `LCM` functions
+
+```json
+["GCD", 10, 5, 15]
+// -> 5
+
+["LCM", 10, 5, 15]
+// -> 30
+```
+
 - Added `Numerator`, `Denominator`, `NumeratorDenominator` functions. These
   functions can be used on non-canonical expressions.
+
 - Added `Head` and `Tail` functions which can be used on non-canonical
   expressions.
+
+- Added `display-quotient` and `inline-quotient` style for formatting of
+  division expressions in LaTeX.
+
+### Improvements
+
 - Improved parsing of `\degree` command
+
+```json
+ce.parse("30\\degree)
+// -> ["Divide", "Pi", 6]
+```
+
 - Improved interoperability with JavaScript: `expr.value` will return a
   JavaScript primitive (`number`, `boolean`, `string`, etc...) when possible.
   This is a more succinct version of `expr.N().valueOf()`.
-- Added `display-quotient` and `inline-quotient` style for formatting of
-  division expressions in LaTeX.
 
 ## 0.18.1
 
