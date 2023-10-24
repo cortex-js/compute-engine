@@ -64,7 +64,6 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       );
 
     this.name = name;
-    if (name === 'Sin') debugger;
     this.description = def.description;
     this.wikidata = def.wikidata;
 
@@ -209,7 +208,7 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       } else evaluate = sig.evaluate as any;
 
       this.signature = {
-        inferredSignature: false,
+        inferredSignature: !(sig.domain !== undefined || def.numeric === true),
         params,
         optParams,
         restParam: restParam ? restParam : undefined,

@@ -26,6 +26,12 @@ engine.assign('f7', ['Function', ['Add', '_2', 1]]);
 engine.assign('f8', ['Add', '_', 1]);
 engine.assign('f9', ['Add', '_1', 1]);
 
+describe('Infer result domain', () => {
+  // By calling add, the result of `f1` is inferred to be a number
+  test('Add', () =>
+    expect(evaluate(['Add', 1, ['f1', 10]])).toMatchInlineSnapshot(`12`));
+});
+
 describe('Anonymous function', () => {
   test('Function', () =>
     expect(evaluate(['f1', 10])).toMatchInlineSnapshot(`11`));

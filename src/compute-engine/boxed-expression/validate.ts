@@ -1,4 +1,4 @@
-import { isFiniteIndexableCollection } from '../collection-utils';
+import { each, isFiniteIndexableCollection } from '../collection-utils';
 import {
   IComputeEngine,
   BoxedExpression,
@@ -94,7 +94,8 @@ export function checkNumericArgs(
     ) {
       // We have an unknown symbol, we'll infer it's a number later
       xs.push(op);
-    } else if (op.isNumber) {
+    } else if (op.isNumber || op.domain?.isNumber) {
+      // The argument is a number literal or a function whose result is a number
       xs.push(op);
     } else if (!op.isValid) {
       isValid = false;
@@ -103,12 +104,28 @@ export function checkNumericArgs(
       // No domain, set. Keep it that way, infer later
       xs.push(op);
     } else if (isFiniteIndexableCollection(op)) {
-      xs.push(op);
+      // The argument is a list. Check that all elements are numbers
+      // and infer the domain of the elements
+      for (const x of each(op)) {
+        if (!x.isNumber && !x.domain?.isNumber) {
+          isValid = false;
+          break;
+        }
+      }
+      if (!isValid) xs.push(ce.domainError('Numbers', op.domain, op));
+      else xs.push(op);
     } else if (
       op.symbolDefinition?.inferredDomain &&
       op.domain.isCompatible(ce.Numbers, 'contravariant')
     ) {
       // There was an inferred domain, and it is contravrariant with Numbers
+      // e.g. "Anything". We'll narrow it down to Number when we infer later.
+      xs.push(op);
+    } else if (
+      op.functionDefinition?.signature.inferredSignature &&
+      op.domain.isCompatible(ce.Numbers, 'contravariant')
+    ) {
+      // There is an inferred signature, and its result is contravariant with Numbers
       // e.g. "Anything". We'll narrow it down to Number when we infer later.
       xs.push(op);
     } else {
@@ -120,7 +137,9 @@ export function checkNumericArgs(
   // Only if all arguments are valid, we infer the domain of the arguments
   if (isValid)
     for (const x of xs)
-      if (!isFiniteIndexableCollection(x)) x.infer(ce.Numbers);
+      if (isFiniteIndexableCollection(x))
+        for (const y of each(x)) y.infer(ce.Numbers);
+      else x.infer(ce.Numbers);
 
   return xs;
 }
@@ -229,8 +248,14 @@ export function adjustArguments(
       op.symbolDefinition?.inferredDomain &&
       op.domain.isCompatible(param, 'contravariant')
     ) {
-      // There was an inferred domain, and it is contravrariant with Numbers
-      // e.g. "Anything". We'll narrow it down to Number when we infer later.
+      result.push(op);
+      continue;
+    }
+
+    if (
+      op.functionDefinition?.signature.inferredSignature &&
+      op.domain.isCompatible(param, 'contravariant')
+    ) {
       result.push(op);
       continue;
     }

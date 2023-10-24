@@ -48,8 +48,16 @@ describe('STYLE - TEXT MODE', () => {
     expect(check('a\\text{ black \\color{red}RED\\color{blue}BLUE} b'))
       .toMatchInlineSnapshot(`
       latex     = ["Multiply", "a", "' black '", "b"]
-      box       = ["Multiply", "a", "b", "' black '"]
-      evaluate  = ["Sequence"]
+      [
+        "Multiply",
+        "a",
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
+          "' black '"
+        ],
+        "b"
+      ]
     `);
     expect(check('a\\text{ black \\textcolor{red}{RED} black} b'))
       .toMatchInlineSnapshot(`

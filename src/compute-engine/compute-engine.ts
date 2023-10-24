@@ -1241,7 +1241,7 @@ export class ComputeEngine implements IComputeEngine {
         // Make sure defineFunction acts on the correct scope
         const previousScope = this.swapScope(scope!);
         this.defineFunction(id, {
-          signature: { domain: 'Functions', evaluate: value },
+          signature: { evaluate: value },
         });
         this.swapScope(previousScope);
         return this;
@@ -1254,7 +1254,7 @@ export class ComputeEngine implements IComputeEngine {
 
       const previousScope = this.swapScope(scope!);
       this.defineFunction(id, {
-        signature: { domain: 'Functions', evaluate: val },
+        signature: { evaluate: val },
       });
       this.swapScope(previousScope);
 
@@ -1278,7 +1278,7 @@ export class ComputeEngine implements IComputeEngine {
     //
     if (typeof value === 'function') {
       this.defineFunction(id, {
-        signature: { domain: 'Functions', evaluate: value },
+        signature: { evaluate: value },
       });
       return this;
     }
@@ -1304,7 +1304,7 @@ export class ComputeEngine implements IComputeEngine {
           ...(args ?? []).map((x) => this.symbol(x)),
         ]);
         this.defineFunction(id, {
-          signature: { domain: 'Functions', evaluate: expr },
+          signature: { evaluate: expr },
         });
         return this;
       }
@@ -1324,7 +1324,7 @@ export class ComputeEngine implements IComputeEngine {
         // This is a function
         expr = this.box(['Function', expr]);
         this.defineFunction(id, {
-          signature: { domain: 'Functions', evaluate: expr },
+          signature: { evaluate: expr },
         });
         return this;
       }
@@ -1335,7 +1335,7 @@ export class ComputeEngine implements IComputeEngine {
         expr = this.box(['Function', expr, ...args]);
         this.popScope();
         this.defineFunction(id, {
-          signature: { domain: 'Functions', evaluate: expr },
+          signature: { evaluate: expr },
         });
         return this;
       }

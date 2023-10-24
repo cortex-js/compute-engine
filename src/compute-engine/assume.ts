@@ -248,7 +248,8 @@ function assumeElement(proposition: BoxedExpression): AssumeResult {
     const dom = ce.domain(proposition.op2.evaluate().json as DomainExpression);
     if (!dom.isValid) return 'not-a-predicate';
 
-    ce.declare(proposition.op1.symbol, dom);
+    if (!ce.context?.ids?.has(proposition.op1.symbol))
+      ce.declare(proposition.op1.symbol, dom);
 
     const def = ce.lookupSymbol(proposition.op1.symbol);
     if (def) {

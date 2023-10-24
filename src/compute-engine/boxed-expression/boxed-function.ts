@@ -116,6 +116,7 @@ export class BoxedFunction extends _BoxedExpression {
     return h;
   }
 
+  // For function expressions, infer infers the result domain of the function
   infer(domain: BoxedDomain): boolean {
     const def = this._def;
     if (!def) return false;
