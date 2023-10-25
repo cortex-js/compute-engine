@@ -58,18 +58,25 @@ There are three common transformations that can be applied to an expression:
 
 | Transformation    |                                                                                                                                                                        |
 | :---------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `expr.simplify()` | Eliminate constants and common sub-expressions. Use available assumptions to determine which rules are applicable. Limit calculations to exact results using integers. |
-| `expr.evaluate()` | Calculate the exact value of an expression. Replace symbols with their value. Perform exact calculations using integers.                                               |
+| `expr.simplify()` | Eliminate constants and common sub-expressions. Use available assumptions to determine which rules are applicable. Limit calculations to exact results. |
+| `expr.evaluate()` | Calculate the exact value of an expression. Replace symbols with their value.                                               |
 | `expr.N()`        | Calculate a numeric approximation of an expression using floating point numbers.                                                                                       |
 
 </div>
+
+A key difference between `expr.evaluate()` and `expr.N()` is that the former
+will use the exact value of symbols, while the latter will use their numeric
+approximation. An exact value is a rational number, an integer, the square root
+of a rational and some constants such as \\(\pi\\) or \\(e\\). A numeric
+approximation is a floating point number.
+
 
 <div class="first-column-header">
 
 |                               |           `expr.simplify()`           |           `expr.evaluate()`           |              `expr.N()`               |
 | :---------------------------- | :-----------------------------------: | :-----------------------------------: | :-----------------------------------: |
+| Use assumptions on symbols    | {% icon "circle-check" "green-700" %} | | |
 | Exact calculations            | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} |                                       |
-| Use assumptions on symbols    | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} | {% icon "circle-check" "green-700" %} |
 | Floating-point approximations |                                       |                                       | {% icon "circle-check" "green-700" %} |
 
 </div>
@@ -88,9 +95,9 @@ console.log(f.N().latex); // 9.283\,185\,307\ldots
 
 |                |                                |                                                              |
 | :------------- | :----------------------------- | :----------------------------------------------------------- |
-| `f.simplify()` | \\[ \sqrt{x}+3 \\]             | Exact calculations of some integer constants, simplification |
+| `f.simplify()` | \\[ \sqrt{x}+3 \\]             | Exact calculations, simplification |
 | `f.evaluate()` | \\[ \sqrt{\\pi}+3 \\]          | Evaluation of symbols                                        |
-| `f.N()`        | \\[ 9.283\,185\,307 \ldots \\] | Evaluation of constants                                      |
+| `f.N()`        | \\[ 9.283\,185\,307 \ldots \\] | Numerical approximation                                      |
 
 </div>
 
@@ -209,8 +216,7 @@ been simplified.
 
 Note that unlike `expr.isSame()`, `expr.isEqual()` can return `true`, `false` or
 `undefined`. The latter value indicates that there is not enough information to
-determine if the two expressions are mathematically equal. Adding some
-assumptions may result in a different answer.
+determine if the two expressions are mathematically equal.
 
 <code-playground layout="stack" show-line-numbers autorun="never">
 <pre slot="javascript">
@@ -228,6 +234,7 @@ console.log('isEqual?', a.isEqual(b));</pre>
 |                                          |                                        |
 | :--------------------------------------- | :------------------------------------- |
 | `lhs === rhs`                            | If true, same box expression instances |
+| `lhs.value === rhs.value`                | Equivalent to `lhs.N().isEqual(rhs.N())` |
 | `lhs.isSame(rhs)`                        | Structural equality                    |
 | `lhs.isEqual(rhs)`                       | Mathematical equality                  |
 | `lhs.match(rhs) !== null`                | Pattern match                          |

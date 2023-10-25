@@ -26,7 +26,7 @@ return type.
 - Fixed a runtime error when inverting a fraction, i.e. `\frac{3}{4}^{-1}`
 - The tangent of π/2 now correctly returns `ComplexInfinity`.
 - The exact values of some constructible trigonometric operations (e.g.
-  $$\tan 18\degree = \frac{\sqrt{25-10\sqrt5}}{5}$$) returned incorrect results.
+  `\tan 18\degree = \frac{\sqrt{25-10\sqrt5}}{5}`) returned incorrect results.
   The unit test case was incorrect and did not detect the problem. The unit test
   case has been fixed and the returned values are now correct.
 

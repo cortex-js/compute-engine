@@ -8,11 +8,41 @@ sidebar:
 toc: true
 ---
 
-The Cortex Compute Engine has a robust system to specify properties and
-relationships between symbols.
+Assumptions are statements about symbols that are assumed to be true. For
+example, the assumption that \\(x\\) is a positive real number is used to simplify
+\\|x|\\) to \\(x\\).
 
-These assumptions are used to select algorithms, to validate some
-simplifications and to optimize computations.
+When declaring a symbol, it is possible to specify its domain. For example, the
+symbol \\(x\\) can be declared to be a real number:
+
+```js
+ce.declare("x", "RealNumbers");
+```
+
+However, assumptions can be used to describe more complex properties of symbols.
+For example, the assumption that \\(x\\) is positive is used to simplify
+\\(\\sqrt{x^2}\\) to \\(x\\).
+
+```js
+ce.assume(["Greater", "x", 2]);
+```
+
+Assumptions can also describe the relationship between two symbols, for example
+that \\(x\\) is greater than \\(y\\):
+
+```js
+ce.assume(["Greater", "x", "y"]);
+```
+
+This knowledge base is used by the Compute Engine to simplify
+expressions.
+
+{% readmore "/compute-engine/guides/simplify/" %} Read more about
+<strong>Simplifying Expressions</strong> {% endreadmore %}
+
+
+In general, assumptions are not used when evaluating expressions.
+
 
 <section id='defining-new-assumptions'>
 
@@ -28,6 +58,13 @@ ce.assume(ce.parse("\\beta \\in \\R"));
 // or:
 
 ce.assume(["Element", "Beta", "RealNumbers"]);
+```
+
+In this case, this would be equivalent to declaring a domain for the symbol
+\\(\beta\\):
+
+```js
+ce.declare("Beta", "RealNumbers");
 ```
 
 The head of the proposition can be one of the following:
@@ -70,22 +107,12 @@ ce.assume(["Element", "x", ["Interval", ["Open", 0], "Infinity"]]);
 
 ### Multivariate Assumptions
 
-Assumptions are frequently describing the property of a symbol. However, it is
-also possible to describe relationships betwen multiple symbols.
+Assumptions frequently describe the property of a symbol. However, it is
+also possible to describe relationships betwen symbols.
 
 ```js
 ce.assume(ce.parse('xy + 1 = 0'))'
 ```
-
-</section>
-
-<section id='using-assumptions-to-declare-symbols'>
-
-### Using Assumptions to Declare Symbols
-
-Before a symbol can be used in an expression, the symbol must be known by the
-Compute Engine. The definition of a symbol can be used for this purpose, but an
-assumption that defines a domain for the symbol is sufficient.
 
 </section>
 
@@ -129,30 +156,22 @@ const ce = new ComputeEngine({ assumptions: null });
 ```
 
 </section>
-</section>
 
 <section id='testing-assumptions'>
 
-## Testing Assumptions
+## Verifyinf Assumptions
 
-**To test if a particular assumption is valid**, call the `ce.is()` function.
-
-```js
-ce.is(["Element", "x", "RealNumbers"]);
-```
-
-As a shorthand, you can pass a symbol as a first argument and a domain as a
-second.
+**To test if a particular assumption is valid**, call the `ce.verify()` function.
 
 ```js
-ce.is("x", "RealNumbers"); // same as ce.is(["Element", "x", 'RealNumbers])
-ce.is("x", ["Range", 1, 5]);
+ce.verify(["Element", "x", "RealNumbers"]);
 ```
 
-The function `ce.is()` return `true` if the assumption is true, `false` if it is
+
+The function `ce.verify()` return `true` if the assumption is true, `false` if it is
 not, and `undefined` if it cannot be determined.
 
-While `ce.is()` is appropriate to get boolean answers, more complex queries can
+While `ce.verify()` is appropriate to get boolean answers, more complex queries can
 also be made.
 
 **To query the assumptions knowledge base** call the `ce.ask()` function.

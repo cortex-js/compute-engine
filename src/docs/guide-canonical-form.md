@@ -139,8 +139,7 @@ Calculating the canonical form of an expression involves applying some
 rewriting rules to an expression to put sums, products, numbers, roots, 
 etc... in canonical form. In that sense, it is similar to simplifying an 
 expression with `expr.simplify()`, but it is more conservative in the 
-transformations it applies, and it will not take into account any assumptions 
-about symbols or their value.
+transformations it applies.
 
 Below is a list of some of the transformations applied to obtain the canonical
 form:
