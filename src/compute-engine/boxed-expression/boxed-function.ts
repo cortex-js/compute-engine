@@ -366,6 +366,7 @@ export class BoxedFunction extends _BoxedExpression {
 
   /** `isEqual` is mathematical equality */
   isEqual(rhs: BoxedExpression): boolean {
+    if (this === rhs) return true;
     const s = signDiff(this, rhs);
     if (s === 0) return true;
     if (s !== undefined) return false;
@@ -375,83 +376,6 @@ export class BoxedFunction extends _BoxedExpression {
     if (diff.isZero) return true;
 
     return this.isSame(rhs);
-  }
-
-  isLess(rhs: BoxedExpression): boolean | undefined {
-    const s = signDiff(this, rhs);
-    if (s === undefined) return undefined;
-    return s < 0;
-  }
-
-  isLessEqual(rhs: BoxedExpression): boolean | undefined {
-    const s = signDiff(this, rhs);
-    if (s === undefined) return undefined;
-    return s <= 0;
-  }
-
-  isGreater(rhs: BoxedExpression): boolean | undefined {
-    const s = signDiff(this, rhs);
-    if (s === undefined) return undefined;
-    return s > 0;
-  }
-
-  isGreaterEqual(rhs: BoxedExpression): boolean | undefined {
-    const s = signDiff(this, rhs);
-    if (s === undefined) return undefined;
-    return s >= 0;
-  }
-
-  get isZero(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s === 0;
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-
-  get isNotZero(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s !== 0;
-    return undefined;
-    // @todo: use this.functionDefinition.range
-  }
-
-  get isOne(): boolean | undefined {
-    return this.isEqual(this.engine.One);
-  }
-
-  get isNegativeOne(): boolean | undefined {
-    return this.isEqual(this.engine.NegativeOne);
-  }
-
-  // x > 0
-  get isPositive(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s > 0;
-    return undefined;
-  }
-  // x <= 0
-  get isNonPositive(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s <= 0;
-    return undefined;
-  }
-  // x < 0
-  get isNegative(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s < 0;
-    return undefined;
-  }
-  // x >= 0
-  get isNonNegative(): boolean | undefined {
-    const s = this.sgn;
-    if (s === null) return false;
-    if (typeof s === 'number') return s >= 0;
-    return undefined;
   }
 
   get isNumber(): boolean | undefined {
@@ -477,84 +401,6 @@ export class BoxedFunction extends _BoxedExpression {
   }
   get isImaginary(): boolean | undefined {
     return this.domain?.isCompatible('ImaginaryNumbers');
-  }
-
-  get sgn(): -1 | 0 | 1 | undefined | null {
-    if (!this.isCanonical) return undefined;
-    // @todo: if there is a this.functionDefinition.range, use it
-    // @todo if inconclusive, and there is a this.def._sgn, call it
-
-    // @todo: add sgn() function to FunctionDefinition
-    const head = this.head;
-    if (head === 'Negate') {
-      const s = this._ops[0]?.sgn;
-      if (s === undefined) return undefined;
-      if (s === null) return null;
-      return s === 0 ? 0 : s > 0 ? -1 : +1;
-    }
-    if (head === 'Multiply') {
-      const total = this._ops.reduce((acc, x) => acc * (x.sgn ?? NaN), 1);
-      if (isNaN(total)) return null;
-      if (total > 0) return 1;
-      if (total < 0) return -1;
-      return 0;
-    }
-    if (head === 'Add') {
-      let posCount = 0;
-      let negCount = 0;
-      let zeroCount = 0;
-      const count = this._ops.length;
-      for (const op of this._ops) {
-        const s = op.sgn;
-        if (s === null || s === undefined) break;
-        if (s === 0) zeroCount += 1;
-        if (s > 0) posCount += 1;
-        if (s < 0) negCount += 1;
-      }
-      if (zeroCount === count) return 0;
-      if (posCount === count) return 1;
-      if (negCount === count) return -1;
-      return null;
-    }
-    if (head === 'Divide') {
-      const n = this._ops[0]?.sgn;
-      const d = this._ops[1]?.sgn;
-      if (n === null || d === null || n === undefined || d === undefined)
-        return null;
-      if (n === 0) return 0;
-      if ((n > 0 && d > 0) || (n < 0 && d < 0)) return +1;
-      return -1;
-    }
-    if (head === 'Square') {
-      if (this._ops[0]?.isImaginary) return -1;
-      if (this._ops[0]?.isZero) return 0;
-      return +1;
-    }
-    if (head === 'Abs') {
-      if (this._ops[0]?.isZero) return 0;
-      return +1;
-    }
-    if (head === 'Sqrt') {
-      if (this._ops[0]?.isZero) return 0;
-      if (this._ops[0]?.isImaginary) return null;
-      return +1;
-    }
-    // @todo: more functions...
-    if (head === 'Power') {
-    }
-    if (head === 'Root') {
-    }
-    if (head === 'Ln') {
-    }
-    if (head === 'Floor') {
-    }
-    if (head === 'Ceil') {
-    }
-    if (head === 'Round') {
-    }
-    // @todo: trig functions, geometric functions
-
-    return undefined;
   }
 
   get domain(): BoxedDomain | undefined {

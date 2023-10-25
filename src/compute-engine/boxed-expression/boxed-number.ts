@@ -227,10 +227,9 @@ export class BoxedNumber extends _BoxedExpression {
   isEqual(rhs: BoxedExpression): boolean {
     // Note: this is not the same as `isSame()`: we want 0.09 and [9,100]
     // to be considered equal.
-    if (this === rhs) return true;
-    if (!(rhs instanceof BoxedNumber)) return false;
-    const s = signDiff(this, rhs);
-    return s === 0;
+    // We also want a number to be equal to an exact expression, so don't
+    // bail if rhs is not a BoxedNumebr.
+    return this === rhs || signDiff(this, rhs) === 0;
   }
 
   match(

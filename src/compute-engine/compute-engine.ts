@@ -2002,6 +2002,16 @@ export class ComputeEngine implements IComputeEngine {
     return result;
   }
 
+  /**
+   * Answer a query based on the current assumptions.
+   *
+   */
+
+  verify(_query: SemiBoxedExpression): boolean {
+    // @todo
+    return false;
+  }
+
   assume(predicate: SemiBoxedExpression): AssumeResult {
     try {
       return assume(this.box(predicate, { canonical: false }));

@@ -12,8 +12,9 @@ export function isLatexString(s: unknown): s is string {
 }
 
 export function latexString(s: unknown): string | null {
-  if (typeof s === 'string' && s.startsWith('$') && s.endsWith('$'))
-    return s.slice(1, -1);
+  if (typeof s !== 'string') return null;
+  if (s.startsWith('$$') && s.endsWith('$$')) return s.slice(2, -2);
+  if (s.startsWith('$') && s.endsWith('$')) return s.slice(1, -1);
 
   return null;
 }

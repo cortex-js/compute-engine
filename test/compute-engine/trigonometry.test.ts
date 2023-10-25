@@ -19,7 +19,7 @@ describe('TRIGONOMETRY constructible values', () => {
     ]) {
       for (const p of [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]) {
         const theta = (Math.PI * n) / d + (Math.PI / 2) * p;
-        let v =
+        let jsValue =
           h === 'Cos'
             ? Math.cos(theta)
             : h === 'Sin'
@@ -34,20 +34,46 @@ describe('TRIGONOMETRY constructible values', () => {
             ? 1 / Math.tan(theta)
             : NaN;
 
-        const arg = [
-          'Add',
-          ['Multiply', p, 'Half', 'Pi'],
-          ['Multiply', 'Pi', ['Rational', n, d]],
-        ];
+        // const arg = engine
+        //   .box([
+        //     'Add',
+        //     ['Multiply', p, 'Half', 'Pi'],
+        //     ['Multiply', 'Pi', ['Rational', n, d]],
+        //   ])
+        //   .simplify();
+        const arg = engine
+          .box([
+            'Multiply',
+            'Pi',
+            ['Add', ['Rational', p, 2], ['Rational', n, d]],
+          ])
+          .simplify();
 
-        const f1 = engine.box([h, arg]).N();
-        let f = asFloat(f1) ?? NaN;
+        // Use evaluate to get the exact value (using N() directly could bypass
+        // the constructible value logic)
+        const fExact = engine.box([h, arg]).evaluate();
 
-        if (Math.abs(f) > 1000000) f = +Infinity;
-        if (Math.abs(v) > 1000000) v = +Infinity;
+        // Reduce the exact value to a number
+        const fNumeric = fExact.N();
 
-        test(`${h}(${engine.box(arg).simplify().latex})`, () =>
-          expect(f).toBeCloseTo(v, 10));
+        // The numeric and exact values should be the same
+
+        if (!fNumeric.isEqual(fExact)) debugger;
+
+        test(`${h}(${arg.latex}) exact = numeric`, () =>
+          expect(fNumeric.isEqual(fExact)).toBeTruthy());
+
+        if (fNumeric.symbol === 'ComplexInfinity') {
+          test(`${h}(${arg.latex})`, () =>
+            expect(Math.abs(jsValue) > 1e6).toBeTruthy());
+        } else {
+          let f = asFloat(fNumeric) ?? NaN;
+
+          if (Math.abs(f) > 1000000) f = +Infinity;
+          if (Math.abs(jsValue) > 1000000) jsValue = +Infinity;
+          test(`${h}(${arg.latex})`, () =>
+            expect(Math.abs(f - jsValue)).toBeCloseTo(0, 10));
+        }
       }
     }
   }

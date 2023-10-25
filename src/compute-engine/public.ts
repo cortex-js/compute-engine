@@ -2587,7 +2587,11 @@ export interface IComputeEngine {
 
   get assumptions(): ExpressionMapInterface<boolean>;
 
+  /* Return a list of all the assumptions that match a pattern. */
   ask(pattern: SemiBoxedExpression): BoxedSubstitution[];
+
+  /** Using the current assumptions, answer a query. */
+  verify(query: SemiBoxedExpression): boolean;
 
   /** @internal */
   shouldContinueExecution(): boolean;

@@ -509,6 +509,7 @@ const S3: Expression = ['Sqrt', 3];
 const S5: Expression = ['Sqrt', 5];
 const S6: Expression = ['Sqrt', 6];
 // From https://en.wikipedia.org/wiki/Trigonometric_functions
+// and https://en.wikipedia.org/wiki/Exact_trigonometric_values
 const CONSTRUCTIBLE_VALUES: [
   key: [numerator: number, denominator: number],
   values: { [head: string]: Expression | LatexString },
@@ -519,9 +520,9 @@ const CONSTRUCTIBLE_VALUES: [
       Sin: 0,
       Cos: 1,
       Tan: 0,
-      Cot: NaN,
+      Cot: 'ComplexInfinity',
       Sec: 1,
-      Csc: NaN,
+      Csc: 'ComplexInfinity',
     },
   ],
   [
@@ -540,7 +541,7 @@ const CONSTRUCTIBLE_VALUES: [
     {
       Sin: ['Divide', ['Subtract', S5, 1], 4],
       Cos: ['Divide', ['Sqrt', ['Add', 10, ['Multiply', 2, S5]]], 4],
-      Tan: ['Divide', ['Sqrt', ['Subtract', 25, ['Multiply', 10, S5]]], 4],
+      Tan: ['Divide', ['Sqrt', ['Subtract', 25, ['Multiply', 10, S5]]], 5],
       Cot: ['Sqrt', ['Add', 5, ['Multiply', 2, S5]]],
       Sec: ['Divide', ['Sqrt', ['Subtract', 50, ['Multiply', 10, S5]]], 5],
       Csc: ['Add', 1, S5],
@@ -563,8 +564,8 @@ const CONSTRUCTIBLE_VALUES: [
       Sin: '$\\frac{1}{2}$',
       Cos: '$\\frac{\\sqrt{3}}{2}$',
       Tan: '$\\frac{\\sqrt{3}}{3}$',
-      Cot: '$\\frac{2\\sqrt{3}}{3}$',
-      Sec: '$\\sqrt{3}$',
+      Cot: '$\\sqrt{3}$',
+      Sec: '$\\frac{2\\sqrt{3}}{3}$',
       Csc: 2,
     },
   ],
@@ -590,15 +591,16 @@ const CONSTRUCTIBLE_VALUES: [
       Csc: S2,
     },
   ],
+
   [
     [3, 10],
     {
-      Sin: '$\\frac{1+ \\sqrt{5}} {4}$',
-      Cos: '$\\frac{\\sqrt{10- 2\\sqrt{5}}} {4}$',
+      Sin: '$\\frac{1+ \\sqrt5} {4}$',
+      Cos: '$\\frac{\\sqrt{10- 2\\sqrt5}} {4}$',
       Tan: '$\\frac{\\sqrt{25+10\\sqrt5}} {5}$',
       Cot: '$\\sqrt{5-2\\sqrt5}$',
-      Sec: '$$',
-      Csc: '$\\frac{\\sqrt{50+10\\sqrt{5}}} {5}$',
+      Sec: '$\\frac{\\sqrt{50+10\\sqrt5}} {5}$',
+      Csc: '$\\sqrt5-1$',
     },
   ],
   [
@@ -650,15 +652,15 @@ const CONSTRUCTIBLE_VALUES: [
     {
       Sin: 1,
       Cos: 0,
-      Tan: NaN,
+      Tan: 'ComplexInfinity',
       Cot: 0,
-      Sec: NaN,
+      Sec: 'ComplexInfinity',
       Csc: 1,
     },
   ],
 ];
 
-// For each trig function, by quadrant (0-π/2, π/2-π, π-3π/2, 3π/2-2π),
+// For each trig function, by quadrant (0..π/2, π/2..π, π..3π/2, 3π/2..2π),
 // what is the corresponding identity (sign and function)
 // E.g 'Sin[θ+π/2] = Cos[θ]` -> Quadrant 2, Positive sign, Cos
 const TRIG_IDENTITIES: { [key: string]: [sign: number, head: string][] } = {
@@ -706,50 +708,58 @@ function constructibleValues(
   x: BoxedExpression | undefined
 ): undefined | BoxedExpression {
   if (!x) return undefined;
-  const specialValues = ce.cache(
+
+  //
+  // Create the cache of special values
+  //
+  type ConstructibleValues = [
+    [numerator: number, denominator: number],
+    { [head: string]: BoxedExpression },
+  ][];
+  const specialValues = ce.cache<ConstructibleValues>(
     'constructible-trigonometric-values',
     () => {
-      const values: [
-        [numerator: number, denominator: number],
-        { [head: string]: BoxedExpression },
-      ][] = [];
-
-      for (const [val, results] of CONSTRUCTIBLE_VALUES) {
-        const boxedResults = {};
-        for (const head of Object.keys(results))
-          boxedResults[head] =
-            ce.parse(latexString(results[head])) ?? ce.box(results[head]);
-
-        values.push([val, boxedResults]);
-      }
-      return values;
+      return CONSTRUCTIBLE_VALUES.map(([val, results]) => [
+        val,
+        Object.fromEntries(
+          Object.entries(results).map(([head, r]) => [
+            head,
+            ce.parse(latexString(r)) ?? ce.box(r),
+          ])
+        ),
+      ]);
     },
-    (cache) => {
+
+    (cache: ConstructibleValues) => {
       for (const [_k, v] of cache) {
-        for (const v2 of Object.values(v)) (v2 as BoxedExpression).reset();
+        for (const v2 of Object.values(v)) v2.reset();
       }
       return cache;
     }
   );
-  x = x.N();
-  if (x.numericValue === null) return undefined;
-  let theta = asFloat(x) ?? null;
+
+  let theta = asFloat(x.N());
   if (theta === null) return undefined;
-  theta = theta % (2 * Math.PI);
+
   // Odd-even identities
+  // Cos and Sec are even functions, the others are odd
   const identitySign = head !== 'Cos' && head !== 'Sec' ? Math.sign(theta) : +1;
-  theta = Math.abs(theta);
 
-  const quadrant = Math.floor((theta * 2) / Math.PI); // 0-3
-  theta = theta % (Math.PI / 2);
+  theta = Math.abs(theta % (2 * Math.PI));
 
+  const quadrant = Math.floor((theta * 2) / Math.PI); // 0..3
+
+  theta = theta % (Math.PI / 2); // 0..π/2
+
+  // Adjusting for the position in the quadrant
   let sign: number;
   [sign, head] = TRIG_IDENTITIES[head]?.[quadrant] ?? [1, head];
-  sign = sign * identitySign;
-  for (const [[n, d], result] of specialValues) {
-    if (result[head] && ce.chop(theta - (Math.PI * n) / d) === 0) {
-      // Cos and Sec are even functions, the others are odd
-      return sign < 0 ? canonicalNegate(result[head]) : result[head];
+
+  for (const [[n, d], value] of specialValues) {
+    const r = value[head];
+    if (r && ce.chop(theta - (Math.PI * n) / d) === 0) {
+      if (r.symbol === 'ComplexInfinity') return r;
+      return identitySign * sign < 0 ? canonicalNegate(r) : r;
     }
   }
   return undefined;
