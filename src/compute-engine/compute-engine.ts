@@ -1665,7 +1665,7 @@ export class ComputeEngine implements IComputeEngine {
       return this._fn('Sqrt', [this.inv(expr.op1)], metadata);
 
     if (expr.head === 'Divide')
-      return this._fn('Divide', [expr[1], expr[0]], metadata);
+      return this._fn('Divide', [expr.op1, expr.op2], metadata);
 
     // Inverse(expr) -> expr^{-1}
     let e = this.NegativeOne;

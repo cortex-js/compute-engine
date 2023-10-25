@@ -172,7 +172,7 @@ export function serializeJsonCanonicalFunction(
 export function serializeJsonFunction(
   ce: IComputeEngine,
   head: string | BoxedExpression,
-  args: BoxedExpression[],
+  args: (undefined | BoxedExpression)[],
   metadata?: Metadata
 ): Expression {
   // Special case some functions...
@@ -193,7 +193,7 @@ export function serializeJsonFunction(
   }
 
   if (args.length === 1) {
-    const num0 = args[0].numericValue;
+    const num0 = args[0]?.numericValue;
     if (head === 'Negate' && num0 !== null) {
       if (typeof num0 === 'number') return serializeJsonNumber(ce, -num0);
       if (num0 instanceof Decimal) return serializeJsonNumber(ce, num0.neg());
@@ -209,7 +209,10 @@ export function serializeJsonFunction(
       return serializeJsonFunction(
         ce,
         'Add',
-        [args[0], ce._fn('Multiply', [args[1], ce.I])],
+        [
+          args[0],
+          ce._fn('Multiply', [args[1] ?? ce.symbol('Undefined'), ce.I]),
+        ],
         metadata
       );
 
@@ -221,7 +224,11 @@ export function serializeJsonFunction(
         metadata
       );
 
-    if (head === 'Root' && args.length === 2 && args[1].numericValue !== null) {
+    if (
+      head === 'Root' &&
+      args.length === 2 &&
+      args[1]?.numericValue !== null
+    ) {
       const n = asSmallInteger(args[1]);
       if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]]);
 
@@ -230,7 +237,13 @@ export function serializeJsonFunction(
           return serializeJsonFunction(
             ce,
             'Divide',
-            [ce.One, ce._fn('Power', [args[0], ce.number([1, -n])])],
+            [
+              ce.One,
+              ce._fn('Power', [
+                args[0] ?? ce.symbol('Undefined'),
+                ce.number([1, -n]),
+              ]),
+            ],
             metadata
           );
 
@@ -260,7 +273,7 @@ export function serializeJsonFunction(
       return serializeJsonFunction(
         ce,
         'Add',
-        [args[0], ce._fn('Negate', [args[1]])],
+        [args[0], ce._fn('Negate', [args[1] ?? ce.symbol('Undefined')])],
         metadata
       );
     if (head === 'Subtract' && args.length === 1)
@@ -268,7 +281,7 @@ export function serializeJsonFunction(
   }
 
   if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
-    if (args[1].numericValue !== null) {
+    if (args[1]?.numericValue !== null) {
       const t1 = asSmallInteger(args[1]);
       if (t1 !== null && t1 < 0)
         return serializeJsonFunction(
@@ -278,7 +291,7 @@ export function serializeJsonFunction(
           metadata
         );
     }
-    if (args[1].head === 'Negate') {
+    if (args[1]?.head === 'Negate') {
       return serializeJsonFunction(
         ce,
         'Subtract',
@@ -300,7 +313,7 @@ export function serializeJsonFunction(
   const jsonHead =
     typeof head === 'string' ? _escapeJsonString(head) : head.json;
 
-  const fn: Expression = [jsonHead, ...args.map((x) => x.json)];
+  const fn: Expression = [jsonHead, ...args.map((x) => x?.json ?? 'Undefined')];
 
   const md: Metadata = { ...(metadata ?? {}) };
 

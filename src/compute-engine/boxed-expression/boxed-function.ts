@@ -141,7 +141,10 @@ export class BoxedFunction extends _BoxedExpression {
     }
 
     this._def = this.engine.lookupFunction(head);
-    for (const op of this._ops) op.bind();
+    for (const op of this._ops) {
+      if (!op) debugger;
+      op.bind();
+    }
   }
 
   reset(): void {
@@ -228,7 +231,7 @@ export class BoxedFunction extends _BoxedExpression {
 
     if (typeof this._head !== 'string' && !this._head.isValid) return false;
 
-    return this._ops.every((x) => x.isValid);
+    return this._ops.every((x) => x?.isValid);
   }
 
   get canonical(): BoxedExpression {

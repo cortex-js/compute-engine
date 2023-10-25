@@ -21,6 +21,8 @@
 Previously a domain error was returned, now `f` is inferred to have a numeric
 return type.
 
+- Fixed a runtime error when inverting a fraction, i.e. `\frac{3}{4}^{-1}`
+
 ### New Features
 
 - Implemented `Union` and `Intersection` of collections, for example:
