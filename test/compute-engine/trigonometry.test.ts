@@ -58,8 +58,6 @@ describe('TRIGONOMETRY constructible values', () => {
 
         // The numeric and exact values should be the same
 
-        if (!fNumeric.isEqual(fExact)) debugger;
-
         test(`${h}(${arg.latex}) exact = numeric`, () =>
           expect(fNumeric.isEqual(fExact)).toBeTruthy());
 

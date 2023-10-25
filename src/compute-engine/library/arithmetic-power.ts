@@ -21,7 +21,6 @@ import {
   isMachineRational,
   isRational,
   isRationalOne,
-  isRationalZero,
   machineDenominator,
   machineNumerator,
   mul,

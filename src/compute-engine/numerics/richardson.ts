@@ -111,9 +111,9 @@ export function extrapolate(
   }
 
   let h = step;
-  let invcontract = Math.pow(1 / contract, power);
+  const invcontract = Math.pow(1 / contract, power);
   let f0 = f(x0 + h);
-  let neville: number[] = [f0]; // The current diagonal of the Neville tableau
+  const neville: number[] = [f0]; // The current diagonal of the Neville tableau
   let err = Infinity;
   let numeval = 1;
 

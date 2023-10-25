@@ -141,10 +141,7 @@ export class BoxedFunction extends _BoxedExpression {
     }
 
     this._def = this.engine.lookupFunction(head);
-    for (const op of this._ops) {
-      if (!op) debugger;
-      op.bind();
-    }
+    for (const op of this._ops) op.bind();
   }
 
   reset(): void {

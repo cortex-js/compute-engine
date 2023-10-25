@@ -1,4 +1,4 @@
-import { tokenize, tokensToString } from './tokenizer';
+import { tokenize } from './tokenizer';
 import {
   DEFAULT_LATEX_DICTIONARY,
   IndexedLatexDictionary,
@@ -31,7 +31,6 @@ import {
   getNumericSetStyle,
 } from './serializer-style';
 import { IComputeEngine } from '../public';
-import { parseIdentifier } from './parse-identifier';
 
 export const DEFAULT_SERIALIZE_LATEX_OPTIONS: Required<SerializeLatexOptions> =
   {

@@ -14,7 +14,6 @@ import {
   neg,
 } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
-import { checkArg } from '../boxed-expression/validate';
 import { canonicalLimits, normalizeLimits } from './utils';
 import { each } from '../collection-utils';
 

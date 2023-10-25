@@ -71,7 +71,7 @@ export interface Rules {
 
 export type Combinator<T = any> = [
   label: string,
-  parser: (parser: Parser) => Result<T>
+  parser: (parser: Parser) => Result<T>,
 ];
 
 /**
