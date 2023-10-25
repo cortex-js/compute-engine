@@ -38,10 +38,6 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-ce.assign('f(x)', '$$2x$$');
-const expr1 = ce.box(['Subtract', 3, ['f', 3]]);
-console.info(expr1.evaluate().toString());
-
 const expr = ce.parse('3\\equiv5\\mod7');
 console.info(expr.json);
 // expr.replace(ce.rules([['^{}', ['Sequence']]]));

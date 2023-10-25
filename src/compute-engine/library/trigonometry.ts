@@ -797,11 +797,11 @@ function evalTrig(
   op: BoxedExpression | undefined
 ): BoxedExpression | undefined {
   if (!op) return undefined;
-  if (mode === 'evaluate') {
-    const result = constructibleValues(ce, head, op)?.evaluate();
-    if (result) return result;
-    if (op.isExact) return undefined;
-  }
+  const result = constructibleValues(ce, head, op)?.evaluate({
+    numericMode: mode === 'N',
+  });
+  if (result) return result;
+  if (mode === 'evaluate' && op.isExact) return undefined;
   switch (head) {
     case 'Arccos':
       return applyN(
