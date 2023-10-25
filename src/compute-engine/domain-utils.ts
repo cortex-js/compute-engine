@@ -6,6 +6,7 @@ import {
   BoxedFunctionSignature,
   DomainExpression,
   DomainLiteral,
+  FunctionSignature,
   IComputeEngine,
   Rational,
   SemiBoxedExpression,
@@ -148,6 +149,19 @@ export function functionDomain(
   }
 
   return [params, optParams, restParam, result];
+}
+
+export function domainToSignature(
+  dom: BoxedDomain
+): Partial<FunctionSignature> {
+  const [params, optParams, restParam, result] = functionDomain(dom);
+
+  return {
+    params: params.map((x) => x.json as DomainExpression),
+    optParams: optParams.map((x) => x.json as DomainExpression),
+    restParam: restParam?.json as DomainExpression,
+    result: result.json as DomainExpression,
+  } as Partial<FunctionSignature>;
 }
 
 export function signatureToDomain(

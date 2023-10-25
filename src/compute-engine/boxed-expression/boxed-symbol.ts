@@ -28,7 +28,7 @@ import { hashCode } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { narrow } from './boxed-domain';
-import { signatureToDomain } from '../domain-utils';
+import { domainToSignature, signatureToDomain } from '../domain-utils';
 
 /**
  * BoxedSymbol
@@ -297,7 +297,7 @@ export class BoxedSymbol extends _BoxedExpression {
       // New function definitions always completely replace an existing one
       this._def = ce.defineFunction(this._id, {
         signature: {
-          domain: v.domain,
+          ...domainToSignature(v.domain),
           evaluate: v, // Evaluate as a lambda
         },
       });
@@ -346,7 +346,7 @@ export class BoxedSymbol extends _BoxedExpression {
     if (d.isFunction) {
       this.engine.forget(this._id);
       this._def = this.engine.defineFunction(this._id, {
-        signature: { domain: d },
+        signature: domainToSignature(d),
       });
     } else if (this._def instanceof _BoxedSymbolDefinition) {
       // Setting the domain will also update the flags

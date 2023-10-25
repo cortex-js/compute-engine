@@ -1557,15 +1557,22 @@ export type FunctionDefinitionFlags = {
  */
 
 export type FunctionSignature = {
-  /** The domain of this signature, a domain compatible with the `Function`
-   * domain) */
-  domain?: BoxedDomain | DomainExpression;
+  /** The domain of this signature, a domain compatible with the `Functions`
+   * domain).
+   *
+   * @deprecated Use params, optParams, restParam and result instead
+   */
+  domain?: DomainExpression;
 
-  /** The domain of the result of evaluating the function. Either a domain
-   * expression, or a function that returns a domain expression.
+  params?: DomainExpression[];
+  optParams?: DomainExpression[];
+  restParam?: DomainExpression;
+
+  /** The domain of the result of the function. Either a domain
+   * expression, or a function that returns a boxed domain.
    */
   result?:
-    | BoxedDomain
+    | DomainExpression
     | ((
         ce: IComputeEngine,
         args: BoxedDomain[]

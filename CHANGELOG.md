@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The `domain` property of the function definition `signature` is deprecated and
+  replaced with the `params`, `optParams`, `restParam` and `result` properties
+  instead. The `domain` property is still supported for backward compatibility,
+  but will be removed in a future version.
+
 ### Bug Fixes
 
 - When invoking a declared function in a numeric operation, correctly infer the

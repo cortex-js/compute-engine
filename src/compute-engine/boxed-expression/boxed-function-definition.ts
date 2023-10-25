@@ -8,6 +8,7 @@ import {
   BoxedFunctionSignature,
   BoxedExpression,
   Hold,
+  BoxedDomain,
 } from '../public';
 import { DEFAULT_COMPLEXITY } from './order';
 
@@ -178,23 +179,51 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
     }
     if (def.signature) {
       const sig = def.signature;
-      const domain = sig.domain
-        ? ce.domain(sig.domain)
-        : def.numeric
-        ? ce.domain('NumericFunctions')
-        : ce.domain('Functions');
+      let params: BoxedDomain[];
+      let optParams: BoxedDomain[];
+      let restParam: BoxedDomain | undefined;
+      let result:
+        | BoxedDomain
+        | ((
+            ce: IComputeEngine,
+            args: BoxedExpression[]
+          ) => BoxedDomain | null | undefined)
+        | undefined;
 
-      if (!domain.isValid)
-        throw Error(
-          `Function Definition "${name}": invalid domain ${JSON.stringify(
-            sig.domain
-          )}`
+      let inferredSignature = false;
+
+      if (sig.domain) {
+        const domain = ce.domain(sig.domain);
+        if (!domain.isValid)
+          throw Error(
+            `Function Definition "${name}": invalid domain ${JSON.stringify(
+              sig.domain
+            )}`
+          );
+        [params, optParams, restParam, result] = functionDomain(
+          ce.domain(domain)
         );
-
-      const [params, optParams, restParam, result] = functionDomain(domain);
-
-      const codomain =
-        sig.result ?? result ?? (def.numeric ? ce.Numbers : ce.Anything);
+      } else if (sig.params || sig.result) {
+        params = sig.params?.map((x) => ce.domain(x)) ?? [];
+        optParams = sig.optParams?.map((x) => ce.domain(x)) ?? [];
+        restParam = sig.restParam ? ce.domain(sig.restParam) : undefined;
+        if (typeof sig.result === 'function') result = sig.result;
+        else if (sig.result) result = ce.domain(sig.result);
+        else if (def.numeric) result = ce.Numbers;
+        else result = ce.Anything;
+      } else if (def.numeric) {
+        inferredSignature = true;
+        params = [];
+        optParams = [];
+        restParam = ce.Numbers;
+        result = ce.Numbers;
+      } else {
+        inferredSignature = true;
+        params = [];
+        optParams = [];
+        restParam = ce.Anything;
+        result = ce.Anything;
+      }
 
       let evaluate: ((ce, args) => BoxedExpression | undefined) | undefined =
         undefined;
@@ -208,11 +237,11 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
       } else evaluate = sig.evaluate as any;
 
       this.signature = {
-        inferredSignature: !(sig.domain !== undefined || def.numeric === true),
+        inferredSignature,
         params,
         optParams,
         restParam: restParam ? restParam : undefined,
-        result: codomain,
+        result,
         canonical: sig.canonical,
         simplify: sig.simplify,
         evaluate,

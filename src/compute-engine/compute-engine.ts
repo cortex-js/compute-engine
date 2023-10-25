@@ -93,6 +93,7 @@ import {
   isDomainLiteral,
 } from './library/domains';
 import { canonical } from './symbolic/utils';
+import { domainToSignature } from './domain-utils';
 
 /**
  *
@@ -1130,9 +1131,9 @@ export class ComputeEngine implements IComputeEngine {
     {
       const dom = this.domain(def);
       if (dom.isValid) {
-        if (dom.isFunction)
-          this.defineFunction(id, { signature: { domain: dom } });
-        else {
+        if (dom.isFunction) {
+          this.defineFunction(id, { signature: domainToSignature(dom) });
+        } else {
           if (args) throw Error(`Unexpected arguments with domain for "${id}"`);
           this.defineSymbol(id, { domain: dom });
         }
