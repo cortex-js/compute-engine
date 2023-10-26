@@ -973,7 +973,6 @@ function fastEval() {
 }
 
 function turboEval() {
-  ///
   const ce = new ComputeEngine();
 
   const expr = ce.parse('ax^2+bx+c'); // like $$ ax^2+bx+c $$
@@ -982,17 +981,20 @@ function turboEval() {
   // Factor out substitution of constants
   const expr3 = expr.subs(vars).N();
 
-  const fn = expr3.compile()!;
+  try {
+    const fn = expr3.compile()!;
+    let y = 0;
+    const startTime = performance.now();
+    for (let x = 0; x <= Math.PI; x += 0.01) {
+      y += fn({ x });
+    }
 
-  let y = 0;
-  const startTime = performance.now();
-  for (let x = 0; x <= Math.PI; x += 0.01) {
-    y += fn({ x });
+    console.info(
+      `Turbo eval: y = ${y} in ${Number(performance.now() - startTime).toFixed(
+        2
+      )} ms`
+    );
+  } catch (e) {
+    console.error(e);
   }
-
-  console.info(
-    `Turbo eval: y = ${y} in ${Number(performance.now() - startTime).toFixed(
-      2
-    )} ms`
-  );
 }

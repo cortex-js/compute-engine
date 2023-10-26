@@ -1223,23 +1223,27 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
-      threadable: true,
       signature: {
-        domain: ['FunctionOf', 'Strings', ['OptArg', 'Integers'], 'Integers'],
+        domain: ['FunctionOf', 'Strings', ['OptArg', 'Anything'], 'Integers'],
         evaluate: (ce, ops) => {
-          const op1 = ops[0];
-          if (!op1.string) return ce.domainError('Strings', op1.domain, op1);
+          let op1 = ops[0]?.string;
+          if (!op1) return ce.domainError('Strings', ops[0]?.domain, ops[0]);
 
-          const op2 = ops[1];
-          if (op2.isNothing) return ce.number(Number.parseInt(op1.string, 10));
-          if (op2.numericValue === null) {
-            return ce.error(['unexpected-base', op2.latex], op2);
-          }
+          op1 = op1.trim();
+
+          if (op1.startsWith('0x'))
+            return ce.number(parseInt(op1.slice(2), 16));
+
+          if (op1.startsWith('0b')) return ce.number(parseInt(op1.slice(2), 2));
+
+          const op2 = ops[1] ?? ce.Nothing;
+          if (op2.isNothing) return ce.number(Number.parseInt(op1, 10));
+
           const base = asFloat(op2)!;
-          if (!Number.isInteger(base) || base < 2 || base > 36)
+          if (base && (!Number.isInteger(base) || base < 2 || base > 36))
             return ce.error(['unexpected-base', base], op2);
 
-          const [value, rest] = fromDigits(op1.string, base);
+          const [value, rest] = fromDigits(op1, op2.string ?? op2.symbol ?? 10);
 
           if (rest)
             return ce.error(['unexpected-digit', { str: rest[0] }], {
@@ -1266,7 +1270,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (Number.isNaN(val) || !Number.isInteger(val))
             return ce.domainError('Integers', op1.domain, op1);
 
-          const op2 = ops[1];
+          const op2 = ops[1] ?? ce.Nothing;
           if (op2.isNothing) {
             const op1Num = op1.numericValue;
             if (typeof op1Num === 'number')

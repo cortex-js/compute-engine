@@ -1204,25 +1204,28 @@ export class ComputeEngine implements IComputeEngine {
     if (symDef) {
       if (symDef.constant)
         throw Error(`Cannot assign a value to the constant "${id}"`);
-      if (args) throw Error(`The symbol "${id}" is not a function`);
-      if (typeof value === 'function')
-        throw Error(`Cannot assign a function to symbol "${id}"`);
 
-      if (value === undefined || value === null) {
-        symDef.value = undefined;
-        return this;
-      }
+      if (!symDef.inferredDomain && isFunctionValue(value))
+        throw Error(`Cannot assign a function to symbol "${id}"`);
 
       // Remove the def to avoid circular references.
       const scope = symDef.scope;
       scope?.ids?.delete(symDef.name!);
 
-      symDef.value = this.box(value);
+      // Make sure the value is not a function
+      if (!args && !isFunctionValue(value)) {
+        if (value === undefined || value === null) {
+          symDef.value = undefined;
+          return this;
+        }
 
-      // Reinsert the def in the scope
-      scope?.ids?.set(symDef.name!, symDef);
+        symDef.value = this.box(value as BoxedExpression);
 
-      return this;
+        // Reinsert the def in the scope
+        scope?.ids?.set(symDef.name!, symDef);
+
+        return this;
+      }
     }
 
     //
@@ -1241,12 +1244,14 @@ export class ComputeEngine implements IComputeEngine {
       if (typeof value === 'function') {
         // Make sure defineFunction acts on the correct scope
         const previousScope = this.swapScope(scope!);
-        this.defineFunction(id, {
-          signature: { evaluate: value },
-        });
+        this.defineFunction(id, { signature: { evaluate: value } });
         this.swapScope(previousScope);
         return this;
       }
+      // If it's a function value, it should not have args,
+      // since the args are part of the function value
+      if (args && isFunctionValue(value))
+        throw Error(`Unexpected arguments for "${id}"`);
 
       // Box value in the current scope
       const val = args
@@ -1254,9 +1259,7 @@ export class ComputeEngine implements IComputeEngine {
         : this.box(value);
 
       const previousScope = this.swapScope(scope!);
-      this.defineFunction(id, {
-        signature: { evaluate: val },
-      });
+      this.defineFunction(id, { signature: { evaluate: val } });
       this.swapScope(previousScope);
 
       return this;
@@ -1278,9 +1281,18 @@ export class ComputeEngine implements IComputeEngine {
     // Is it a JS function?
     //
     if (typeof value === 'function') {
-      this.defineFunction(id, {
-        signature: { evaluate: value },
-      });
+      this.defineFunction(id, { signature: { evaluate: value } });
+      return this;
+    }
+
+    //
+    // Is it a function expression?
+    //
+    if (
+      value instanceof _BoxedExpression &&
+      value.domain?.base === 'Functions'
+    ) {
+      this.defineFunction(id, { signature: { evaluate: value } });
       return this;
     }
 
@@ -2073,4 +2085,13 @@ export class ComputeEngine implements IComputeEngine {
       }
     }
   }
+}
+
+/** Return true if the value is a function  */
+function isFunctionValue(value: AssignValue): boolean {
+  if (typeof value === 'function') return true;
+  if (value instanceof _BoxedExpression && value.domain?.base === 'Functions')
+    return true;
+
+  return false;
 }

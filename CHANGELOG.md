@@ -1,6 +1,16 @@
-## 0.19.0 
+## [Unreleased]
 
- **Release Date:** 2023-10-25
+### Bug Fixes
+
+- Assigning a function to an indentifier works correctly now, i.e.
+
+```js
+ce.parse("\\operatorname{f} := x \\mapsto 2x").evaluate();
+```
+
+## 0.19.0
+
+**Release Date:** 2023-10-25
 
 ### Breaking Changes
 
