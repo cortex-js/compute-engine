@@ -1,4 +1,6 @@
-## [Unreleased]
+## 0.19.1 
+
+ **Release Date:** 2023-10-26
 
 ### Bug Fixes
 
