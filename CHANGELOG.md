@@ -1,6 +1,12 @@
-## 0.19.1 
+## [Unreleased]
 
- **Release Date:** 2023-10-26
+### Bug Fixes
+
+- **#126** Logic operators only accepted up to two arguments.
+
+## 0.19.1
+
+**Release Date:** 2023-10-26
 
 ### Bug Fixes
 

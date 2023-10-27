@@ -259,11 +259,11 @@ export class ComputeEngine implements IComputeEngine {
     PositiveIntegers: null,
     TranscendentalNumbers: null,
     PositiveNumbers: null,
-    Functions: null, // (Anything^n) -> Anything
-    NumericFunctions: null, // (Numbers^n) -> Numbers
-    RealFunctions: null, // (ExtendedRealNumbers^n) -> ExtendRealNumbers
-    LogicOperators: null, // (Booleans, Booleans) -> Boolean
-    Predicates: null, // (Anything^n) -> Booleans
+    Functions: null, // (Anything*) -> Anything
+    NumericFunctions: null, // (Numbers+) -> Numbers
+    RealFunctions: null, // (ExtendedRealNumbers+) -> ExtendRealNumbers
+    LogicOperators: null, // (Booleans+) -> Boolean
+    Predicates: null, // (Anything+) -> Booleans
   };
 
   /**

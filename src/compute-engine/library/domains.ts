@@ -31,7 +31,7 @@ export const DOMAIN_ALIAS = {
   LogicOperators: [
     'FunctionOf',
     'Booleans',
-    ['OptArg', 'Booleans'],
+    ['VarArg', 'Booleans'],
     'Booleans',
   ],
   Predicates: ['FunctionOf', 'Anything', ['VarArg', 'Anything'], 'Booleans'],
