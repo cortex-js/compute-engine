@@ -147,7 +147,7 @@ export function checkNumericArgs(
 /**
  * Check that an argument is of the expected domain.
  *
- * Converts the arguments to czanonical
+ * Converts the arguments to canonical
  */
 export function checkDomain(
   ce: IComputeEngine,
@@ -161,6 +161,20 @@ export function checkDomain(
   if (!arg.isValid) return arg;
   if (!arg.domain || arg.domain.isCompatible(dom)) return arg;
   return ce.domainError(dom, arg.domain, arg);
+}
+
+/**
+ * Check that the argument is pure.
+ */
+export function checkPure(
+  ce: IComputeEngine,
+  arg: BoxedExpression | BoxedExpression | undefined | null
+): BoxedExpression {
+  if (arg === undefined || arg === null) return ce.error('missing');
+  arg = arg.canonical;
+  if (!arg.isValid) return arg;
+  if (arg.isPure) return arg;
+  return ce.error('expected-pure-expression', arg);
 }
 
 export function checkDomains(

@@ -94,12 +94,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   get isPure(): boolean {
-    const def = this._def ?? this.engine.lookupSymbol(this._id, this.wikidata);
-    if (!def) return false;
-    if (def instanceof _BoxedSymbolDefinition)
-      return (def?.constant && def.value?.isPure) ?? false;
-    if (def instanceof _BoxedFunctionDefinition) return def?.pure ?? false;
-    return false;
+    return true;
   }
 
   get json(): Expression {

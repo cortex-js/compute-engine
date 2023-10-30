@@ -189,7 +189,7 @@ An **unordered** collection of unique elements.
 
 {% enddef %}
 
-{%def "Fill" %}
+{% def "Fill" %}
 
 [&quot;**Fill**&quot;, _dimensions_, _value_]{.signature}
 
@@ -272,7 +272,7 @@ Use `Take` to get a finite number of elements.
 
 {% enddef %}
 
-{%def "Iterate" %}
+{% def "Iterate" %}
 
 [&quot;**Iterate**&quot;, _function_]{.signature}
 
@@ -358,7 +358,7 @@ It's equivalent to `["Extract", _collection_, ["Tuple", -1, 1]]`.
 
 {% enddef %}
 
-{%def "Transpose" %}
+{% def "Transpose" %}
 
 [&quot;**Transpose**&quot;, _matrix_]{.signature}
 
@@ -487,7 +487,7 @@ once.
 
 {% enddef %}
 
-{%def "Take" %}
+{% def "Take" %}
 
 [&quot;**Take**&quot;, _collection_, _n_]{.signature}
 
@@ -505,7 +505,7 @@ If `n` is negative, it returns the last `n` elements.
 
 {% enddef %}
 
-{%def "Drop" %}
+{% def "Drop" %}
 
 [&quot;**Drop**&quot;, _collection_, _n_]{.signature}
 
@@ -706,7 +706,7 @@ There can be multiple indexes, up to the rank of the collection.
 
 {% enddef %}
 
-{%def "Fold" %}
+{% def "Fold" %}
 
 [&quot;**Fold**&quot;, _collection_, _fn_]{.signature}
 
@@ -918,7 +918,7 @@ collection. Only the elements for which the function returns `"True"` are kept.
 
 {% enddef %}
 
-{%def "Zip" %}
+{% def "Zip" %}
 
 [&quot;**Zip**&quot;, _collection-1_, _collection-2_, ...]{.signature}
 

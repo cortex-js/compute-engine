@@ -151,6 +151,8 @@ The identifier _id_ should either not have been declared yet, or been declared
 as a function. If _id_ is already defined in the domain of `Numbers` for example, it is an
 error to assign a function to it.
 
+`Assign` is not a [pure function](/compute-engine/guides/expressions#pure-expressions).
+
 {% latex "\\operatorname{double} \\coloneqq x \\mapsto 2x" %}
 
 ```json example

@@ -62,6 +62,9 @@ This is equivalent to `let` in JavaScript or `var` in Python.
 **To change the value of an existing identifier**, use an `["Assign"]`
 expression.
 
+`Declare` is not a [pure function](/compute-engine/guides/expressions#pure-expressions).
+
+
 {% readmore "/compute-engine/guides/augmenting/" %}Read more about using
 `ce.declare()` to declare a new symbol or function. {% endreadmore %}
 
@@ -85,6 +88,8 @@ current scope, and use the `value` to infer the domain of the identifier.
 
 This is equivalent to `=` in may programming languages.
 
+`Assign` is not a [pure function](/compute-engine/guides/expressions#pure-expressions).
+
 {% readmore "/compute-engine/guides/augmenting/" %}Read more about using
 `Assign` to change the value of a symbol or function. {% endreadmore %}
 
@@ -105,6 +110,9 @@ The predicate can take the form of:
 - an equality: `["Assume", ["Equal", "x", 3]]`
 - an inequality: `["Assume", ["Greater", "x", 0]]`
 - a membership expression: `["Assume", ["Element", "x", "Integers"]]`
+
+`Assign` is not a [pure function](/compute-engine/guides/expressions#pure-expressions).
+
 
 {% enddef %}
 
@@ -223,7 +231,7 @@ in order to reduce, simplify and calculate its value.
 
 {% enddef %}
 
-{%def "N" %}
+{% def "N" %}
 
 [&quot;**N**&quot;, _expression_]{.signature}
 

@@ -341,6 +341,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Assign: {
       hold: 'all',
+      pure: false,
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
         canonical: (ce, args) => {
@@ -363,6 +364,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Assume: {
       hold: 'all',
+      pure: false,
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
         evaluate: (ce, ops) => ce.string(ce.assume(ops[0])),
@@ -371,6 +373,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
     Declare: {
       hold: 'all',
+      pure: false,
       signature: {
         domain: ['FunctionOf', 'Symbols', 'Anything'],
         canonical: (ce, args) => {

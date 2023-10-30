@@ -20,6 +20,7 @@
     "string-literal-closing-delimiter-expected": "A closing delimiter (%0) was expected at the end of the string, on the same line",
     "symbol-expected": "A symbol name was expected",
     "unbalanced-verbatim-symbol": "Could not find closing \"`\" in \"%0\"",
-    "unexpected-symbol": "Unexpected symbol \"%0\""
+    "unexpected-symbol": "Unexpected symbol \"%0\"",
+    "expected-pure-argument": "The argument \"%0\" was expected to be pure"
   }
 }

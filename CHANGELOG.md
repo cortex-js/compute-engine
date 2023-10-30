@@ -17,6 +17,7 @@
 
 ### Bug Fixes
 
+- **#25** Correctly parses chained relational operators, i.e. `a < b <= c`
 - **#126** Logic operators only accepted up to two arguments.
 - **#127** Correctly compile `Log` with bases other than 10.
 - Correctly parse numbers with repeating patterns but no fractional digits, i.e.
