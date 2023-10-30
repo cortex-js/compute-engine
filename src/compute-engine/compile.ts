@@ -368,6 +368,25 @@ function compileExpr(
     // for operator precedence in JavaScript
     const op = target.operators?.(h);
 
+    if (
+      (h === 'NotEqual' ||
+        h === 'Equal' ||
+        h === 'Less' ||
+        h === 'Greater' ||
+        h === 'LessEqual' ||
+        h === 'GreaterEqual') &&
+      args.length > 2 &&
+      op
+    ) {
+      // JavaScript relational operators only take two arguments
+      // We need to chain them
+      const result: string[] = [];
+      for (let i = 0; i < args.length - 1; i++)
+        result.push(compileExpr(h, [args[i], args[i + 1]], op[1], target));
+
+      return `(${result.join(') && (')})`;
+    }
+
     if (op !== undefined) {
       if (args === null) return '';
       let resultStr: string;
