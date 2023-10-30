@@ -114,7 +114,7 @@ See below for additonal relational operators: `Congruent`, etc...
 
 Evaluate to `True` if `a` is congruent to `b` modulo `modulus`.
 
-{% latex " 26 \equiv 11 \pmod{5}" %}
+{% latex " 26 \\equiv 11 \\pmod{5}" %}
 
 
 ```json example
@@ -193,7 +193,7 @@ If `lower`and `upper`are not provided, they take the default values of -1 and
 
 Evaluate the expression _fn_ as it approaches the value _value_.
 
-{% latex " \lim_{x \to 0} \frac{\sin(x)}{x} = 1" %}
+{% latex " \\lim_{x \\to 0} \\frac{\\sin(x)}{x} = 1" %}
 
 
 ```json example
@@ -261,7 +261,7 @@ of the arguments.
 Otherwise, simplify the expression by removing values that are greater than or
 equal to the smallest real number.
 
-{% latex " \min(0, 7.1, 3) = 0" %}
+{% latex " \\min(0, 7.1, 3) = 0" %}
 
 ```json example
 ["Min", 5, 2, -1]
