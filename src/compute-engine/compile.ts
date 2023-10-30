@@ -81,7 +81,10 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
   Ln: 'Math.log',
   List: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
-  Log: 'Math.log10',
+  Log: (args, compile) => {
+    if (args.length === 1) return `Math.log(${compile(args[0])})`;
+    return `(Math.log(${compile(args[0])}) / Math.log(${compile(args[1])}))`;
+  },
   LogGamma: '_SYS.lngamma',
   Lb: 'Math.log2',
   Max: 'Math.max',

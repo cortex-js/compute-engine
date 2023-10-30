@@ -18,6 +18,7 @@
 ### Bug Fixes
 
 - **#126** Logic operators only accepted up to two arguments.
+- **#127** Correctly compile `Log` with bases other than 10.
 - Correctly parse numbers with repeating patterns but no fractional digits, i.e.
   `0.(1234)`
 - Correctly parse `|1+|a|+2|`
