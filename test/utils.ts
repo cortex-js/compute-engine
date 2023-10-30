@@ -21,7 +21,6 @@ const rawLatex = new LatexSyntax({
   computeEngine: engine,
   parseArgumentsOfUnknownLatexCommands: false,
   parseUnknownIdentifier: () => 'symbol',
-  applyInvisibleOperator: null,
   dictionary: [],
 });
 

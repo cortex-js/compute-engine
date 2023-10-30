@@ -15,7 +15,17 @@ import {
   isNumberExpression,
   MISSING,
 } from '../../../math-json/utils';
-import { Serializer, Parser, LatexDictionary } from '../public';
+import {
+  Serializer,
+  Parser,
+  LatexDictionary,
+  MULTIPLICATION_PRECEDENCE,
+  ADDITION_PRECEDENCE,
+  ARROW_PRECEDENCE,
+  DIVISION_PRECEDENCE,
+  POSTFIX_PRECEDENCE,
+  COMPARISON_PRECEDENCE,
+} from '../public';
 import { getFractionStyle, getRootStyle } from '../serializer-style';
 import { joinLatex } from '../tokenizer';
 
@@ -171,18 +181,18 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
         // Don't include the minus sign, it will be serialized for the arg
         result += serializer.serialize(arg);
       } else if (head(arg) === 'Negate') {
-        result += serializer.wrap(arg, 275);
+        result += serializer.wrap(arg, ADDITION_PRECEDENCE);
       } else {
-        const term = serializer.wrap(arg, 275);
+        const term = serializer.wrap(arg, ADDITION_PRECEDENCE);
         if (term[0] === '-' || term[0] === '+') result += term;
         else result += '+' + term;
       }
     }
   } else if (name === 'Subtract') {
-    result = serializer.wrap(arg, 275);
+    result = serializer.wrap(arg, ADDITION_PRECEDENCE);
     const arg2 = op(expr, 2);
     if (arg2 !== null) {
-      const term = serializer.wrap(arg2, 275);
+      const term = serializer.wrap(arg2, ADDITION_PRECEDENCE);
       if (term[0] === '-') result += '+' + term.slice(1);
       else if (term[0] === '+') result += '-' + term.slice(1);
       else result = result + '-' + term;
@@ -298,8 +308,8 @@ function serializeMultiply(
       isNegative = !isNegative;
     }
     // 2.1 Wrap the term if necessary
-    // (if it's an operator of precedence less than 390)
-    term = serializer.wrap(arg, 390);
+    // (if it's an operator of precedence less than MULTIPLICATION_PRECEDENCE)
+    term = serializer.wrap(arg, MULTIPLICATION_PRECEDENCE);
 
     // 2.2. The terms can be separated by an invisible multiply.
     if (!result) {
@@ -598,11 +608,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['+'],
     kind: 'infix',
     associativity: 'both',
-    precedence: 275,
+    precedence: ADDITION_PRECEDENCE,
     parse: (parser, lhs, until) => {
-      if (until && 275 < until.minPrec) return null;
+      if (until && ADDITION_PRECEDENCE < until.minPrec) return null;
 
-      const rhs = parser.parseExpression({ ...until, minPrec: 275 });
+      const rhs = parser.parseExpression({
+        ...until,
+        minPrec: ADDITION_PRECEDENCE,
+      });
       // If we did not see a valid rhs, it is important to return null
       // to give a chance to something else to continue the parsing
       // This is the case for |a+|b||.
@@ -615,9 +628,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'prefix',
     latexTrigger: ['+'],
-    precedence: 275,
+    precedence: ADDITION_PRECEDENCE,
     parse: (parser, until) => {
-      if (until && 275 < until.minPrec) return null;
+      if (until && ADDITION_PRECEDENCE < until.minPrec) return null;
       return parser.parseExpression({ ...until, minPrec: 400 });
     },
   },
@@ -642,7 +655,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   { name: 'Chop', identifierTrigger: 'chop', kind: 'function', parse: 'Chop' },
   {
     name: 'Complex',
-    precedence: 274, // One less than precedence of `Add`: used for correct wrapping
+    precedence: ADDITION_PRECEDENCE - 1, // One less than precedence of `Add`: used for correct wrapping
     serialize: (serializer: Serializer, expr: Expression): string => {
       const re = machineValue(op(expr, 1));
       const im = machineValue(op(expr, 2));
@@ -664,7 +677,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Divide',
     latexTrigger: '\\frac',
-    precedence: 660,
+    precedence: DIVISION_PRECEDENCE,
     // For \frac specifically, not for \div, etc..
     // handles Leibnitz notation for partial derivatives
     parse: parseFraction,
@@ -673,14 +686,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'infix',
     latexTrigger: '\\over',
-    precedence: 660,
+    precedence: DIVISION_PRECEDENCE,
     parse: 'Divide',
   },
   {
     latexTrigger: ['\\/'],
     kind: 'infix',
     associativity: 'non',
-    precedence: 660, // ??? MathML has 265, but it's wrong.
+    precedence: DIVISION_PRECEDENCE, // ??? MathML has 265, but it's wrong.
     // It has to be at least higher than multiply
     // e.g. `1/2+3*x` -> `1/2 + 3*x` , not `1/(2+3*x)`
     parse: 'Divide',
@@ -689,14 +702,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['/'],
     kind: 'infix',
     associativity: 'non',
-    precedence: 660,
+    precedence: DIVISION_PRECEDENCE,
     parse: 'Divide',
   },
   {
     latexTrigger: ['\\div'],
     kind: 'infix',
     associativity: 'non',
-    precedence: 660, // ??? according to MathML
+    precedence: DIVISION_PRECEDENCE, // ??? according to MathML
     parse: 'Divide',
   },
   {
@@ -713,13 +726,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Factorial',
     latexTrigger: ['!'],
     kind: 'postfix',
-    precedence: 810,
+    precedence: POSTFIX_PRECEDENCE,
   },
   {
     name: 'Factorial2',
     latexTrigger: ['!', '!'],
     kind: 'postfix',
-    precedence: 810,
+    precedence: POSTFIX_PRECEDENCE,
   },
   {
     name: 'Floor',
@@ -850,23 +863,26 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\mp'],
     kind: 'infix',
     associativity: 'both',
-    precedence: 270,
+    precedence: ARROW_PRECEDENCE,
   },
   {
     name: 'Multiply',
     latexTrigger: ['\\times'],
     kind: 'infix',
     associativity: 'both',
-    precedence: 390,
+    precedence: MULTIPLICATION_PRECEDENCE,
     serialize: serializeMultiply,
   },
   {
     latexTrigger: ['\\cdot'],
     kind: 'infix',
     associativity: 'both',
-    precedence: 390,
+    precedence: MULTIPLICATION_PRECEDENCE,
     parse: (parser, lhs, terminator) => {
-      const rhs = parser.parseExpression({ ...terminator, minPrec: 392 });
+      const rhs = parser.parseExpression({
+        ...terminator,
+        minPrec: MULTIPLICATION_PRECEDENCE + 2,
+      });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
       return applyAssociativeOperator('Multiply', lhs, rhs);
@@ -876,23 +892,81 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['*'],
     kind: 'infix',
     associativity: 'both',
-    precedence: 390,
+    precedence: MULTIPLICATION_PRECEDENCE,
     parse: (parser, lhs, terminator) => {
-      const rhs = parser.parseExpression({ ...terminator, minPrec: 392 });
+      const rhs = parser.parseExpression({
+        ...terminator,
+        minPrec: MULTIPLICATION_PRECEDENCE + 2,
+      });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
       return applyAssociativeOperator('Multiply', lhs, rhs);
     },
   },
+  // Infix modulo, as in `26 \bmod 5`
+  {
+    name: 'Mod',
+    latexTrigger: '\\bmod',
+    kind: 'infix',
+    precedence: DIVISION_PRECEDENCE,
+    serialize: (serializer, expr) => {
+      if (nops(expr) !== 2) return '';
+      const lhs = serializer.serialize(op(expr, 1));
+      const rhs = serializer.serialize(op(expr, 2));
+      return joinLatex([lhs, '\\bmod', rhs]);
+    },
+  },
+  // Synonym to \\bmod
+  {
+    latexTrigger: '\\mod',
+    kind: 'infix',
+    precedence: DIVISION_PRECEDENCE,
+    parse: 'Mod',
+  },
+  {
+    latexTrigger: '\\pmod',
+    kind: 'prefix',
+    precedence: COMPARISON_PRECEDENCE,
+    parse: (parser) => {
+      const rhs = parser.parseGroup() ?? parser.parseToken();
+      return ['Mod', missingIfEmpty(rhs)];
+    },
+  },
+  {
+    name: 'Congruent',
+    serialize: (serializer, expr) => {
+      const lhs = serializer.serialize(op(expr, 1));
+      const rhs = serializer.serialize(op(expr, 2));
+      if (op(expr, 3) === null) return joinLatex([lhs, '\\equiv', rhs]);
+      const modulus = serializer.serialize(op(expr, 3));
+      return joinLatex([lhs, '\\equiv', rhs, '\\pmod{', modulus, '}']);
+    },
+  },
+
   {
     name: 'Negate',
     latexTrigger: ['-'],
     kind: 'prefix',
+    precedence: ADDITION_PRECEDENCE,
     parse: (parser, terminator) => {
-      const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
+      // Quick check if the next token is a digit, if so, it's a number
+      // not a Negate
+      if (/\d/.test(parser.peek)) return null;
+
+      const index = parser.index;
+
+      // If the next token is a number, it's not a Negate, backtrack
+      if (parser.parseNumber() !== null) {
+        parser.index = index;
+        return null;
+      }
+
+      const rhs = parser.parseExpression({
+        ...terminator,
+        minPrec: ADDITION_PRECEDENCE + 1,
+      });
       return ['Negate', missingIfEmpty(rhs)] as Expression;
     },
-    precedence: 275,
   },
   // {
   //   /** If the argument is a vector */
@@ -932,7 +1006,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\pm'],
     kind: 'infix',
     associativity: 'both',
-    precedence: 270,
+    precedence: ARROW_PRECEDENCE,
     serialize: (serializer, expr) => {
       const op1 = op(expr, 1);
       if (op1 === null) return '\\pm';
@@ -949,7 +1023,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     latexTrigger: ['\\pm'],
     kind: 'prefix',
-    precedence: 270,
+    precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['PlusMinus', missingIfEmpty(rhs)] as Expression;
@@ -959,7 +1033,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\plusmn'],
     kind: 'infix',
     associativity: 'both',
-    precedence: 270,
+    precedence: ARROW_PRECEDENCE,
     parse: (parser, lhs, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['PlusMinus', lhs, missingIfEmpty(rhs)] as Expression;
@@ -968,7 +1042,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     latexTrigger: ['\\plusmn'],
     kind: 'prefix',
-    precedence: 270,
+    precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
       return ['PlusMinus', missingIfEmpty(rhs)] as Expression;
@@ -983,9 +1057,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     latexTrigger: '\\prod',
-    precedence: 390,
+    precedence: MULTIPLICATION_PRECEDENCE,
     name: 'Product',
-    parse: parseBigOp('Product', 390),
+    parse: parseBigOp('Product', MULTIPLICATION_PRECEDENCE),
     serialize: serializeBigOp('\\prod'),
   },
 
@@ -997,7 +1071,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // },
   {
     name: 'Rational',
-    precedence: 660,
+    precedence: DIVISION_PRECEDENCE,
     serialize: (serializer: Serializer, expr: Expression | null): string => {
       if (expr && nops(expr) === 1)
         return '\\operatorname{Rational}' + serializer.wrapArguments(expr);
@@ -1020,9 +1094,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     latexTrigger: ['\\sum'],
-    precedence: 275,
+    precedence: ADDITION_PRECEDENCE,
     name: 'Sum',
-    parse: parseBigOp('Sum', 275),
+    parse: parseBigOp('Sum', ADDITION_PRECEDENCE),
     serialize: serializeBigOp('\\sum'),
   },
   {
@@ -1042,9 +1116,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['-'],
     kind: 'infix',
     associativity: 'both',
-    precedence: 275,
+    precedence: ADDITION_PRECEDENCE,
     parse: (parser, lhs, terminator) => {
-      const rhs = parser.parseExpression({ ...terminator, minPrec: 277 });
+      const rhs = parser.parseExpression({
+        ...terminator,
+        minPrec: ADDITION_PRECEDENCE + 2,
+      });
       return ['Subtract', lhs, missingIfEmpty(rhs)] as Expression;
     },
   },

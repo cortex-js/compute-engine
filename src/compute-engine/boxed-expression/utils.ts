@@ -235,34 +235,6 @@ export function getDictionaryLike(expr: BoxedExpression): {
   return {};
 }
 
-export function isListLike(expr: BoxedExpression): boolean {
-  const h = expr.head;
-  if (
-    h === 'List' ||
-    h === 'Sequence' ||
-    h === 'Tuple' ||
-    h === 'Single' ||
-    h === 'Pair' ||
-    h === 'Triple'
-  )
-    return true;
-  return false;
-}
-
-export function getListLike(expr: BoxedExpression): BoxedExpression[] {
-  const h = expr.head;
-  if (
-    h === 'List' ||
-    h === 'Sequence' ||
-    h === 'Tuple' ||
-    h === 'Single' ||
-    h === 'Pair' ||
-    h === 'Triple'
-  )
-    return expr.ops!;
-  return [];
-}
-
 /**
  * If `expr` is a number, return it as a Decimal (it might be
  * in the machine value range or not). Use `isInMachineRange()` to check.

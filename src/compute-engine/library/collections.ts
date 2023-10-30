@@ -1,8 +1,9 @@
-import { checkArity, checkArgs } from '../boxed-expression/validate';
+import { checkArity, checkDomains } from '../boxed-expression/validate';
 import { canonical } from '../symbolic/utils';
 import { asFloat } from '../numerics/numeric';
 import {
   BoxedExpression,
+  IComputeEngine,
   IdentifierDefinitions,
   SemiBoxedExpression,
 } from '../public';
@@ -49,15 +50,12 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
   //
   // Data Structures
   //
-  Sequence: {
-    signature: {
-      domain: 'Functions',
-    },
-  },
   List: {
     complexity: 8200,
+    hold: 'all',
     signature: {
       domain: ['FunctionOf', ['VarArg', 'Anything'], 'Lists'],
+      canonical: canonicalList,
     },
     size: (expr) => expr.nops!,
     iterator: (expr, start, count) => {
@@ -219,7 +217,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     signature: {
       domain: ['FunctionOf', 'Strings', 'Anything', 'Tuples'],
       canonical: (ce, args) => {
-        const [key, value] = checkArgs(ce, args, [ce.Strings, 'Values']);
+        const [key, value] = checkDomains(ce, args, [ce.Strings, 'Values']);
         if (!key.isValid || !value.isValid)
           return ce._fn('KeyValuePair', [key, value]);
         return ce.tuple([key, value]);
@@ -881,4 +879,19 @@ function indexes(
   }
 
   return result;
+}
+
+function canonicalList(
+  ce: IComputeEngine,
+  ops: BoxedExpression[]
+): BoxedExpression {
+  ops = ops.map((op) => {
+    if (op.head === 'Delimiter') {
+      if (op.op1.head === 'Sequence')
+        return ce._fn('List', canonical(op.op1.ops!));
+      return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
+    }
+    return op.canonical;
+  });
+  return ce._fn('List', ops);
 }

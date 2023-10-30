@@ -23,8 +23,8 @@ describe('NUMBERS', () => {
     expect(parse('-+-1')).toMatchInlineSnapshot(`1`);
   });
   test('Parsing numbers with repeating pattern', () => {
-    expect(parse('1.(3)')).toMatchInlineSnapshot(`0`);
-    expect(parse('0.(142857)')).toMatchInlineSnapshot(`0`);
+    expect(parse('1.(3)')).toMatchInlineSnapshot(`1.(3)`);
+    expect(parse('0.(142857)')).toMatchInlineSnapshot(`0.(142857)`);
     expect(box({ num: '1.(3)' })).toMatch('1.(3)');
     expect(box({ num: '0.(142857)' })).toMatch('0.(142857)');
     expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", "x", 0.123]`);
@@ -54,16 +54,12 @@ describe('NUMBERS', () => {
     // Invalid: \ldots after repeating pattern
     expect(parse('x=.123(45)\\ldots')).toMatchInlineSnapshot(`
       [
-        "Equal",
-        "x",
+        "Sequence",
+        ["Equal", "x", "0.123(45)"],
         [
-          "Sequence",
-          "0.123(45)",
-          [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\ldots'"],
-            ["LatexString", "'\\ldots'"]
-          ]
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\ldots'"],
+          ["LatexString", "'\\ldots'"]
         ]
       ]
     `);

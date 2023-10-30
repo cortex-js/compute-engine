@@ -1,4 +1,4 @@
-import { checkArg } from '../boxed-expression/validate';
+import { checkDomain } from '../boxed-expression/validate';
 import { applicableN1 } from '../function-utils';
 import { centeredDiff8thOrder, monteCarloEstimate } from '../numerics/numeric';
 import { BoxedExpression, IdentifierDefinitions } from '../public';
@@ -225,8 +225,6 @@ volumes
           'Numbers',
         ],
         canonical: (ce, ops) => {
-          const body = ops[0] ?? ce.error('missing');
-
           let range = ops[1];
           let index: BoxedExpression | null = null;
           let lower: BoxedExpression | null = null;
@@ -256,14 +254,19 @@ volumes
             index = ce.domainError('Symbols', index.domain, index);
 
           // The range bounds, if present, should be numbers
-          if (lower) lower = checkArg(ce, lower, ce.Numbers);
-          if (upper) upper = checkArg(ce, upper, ce.Numbers);
+          if (lower) lower = checkDomain(ce, lower, ce.Numbers);
+          if (upper) upper = checkDomain(ce, upper, ce.Numbers);
           if (lower && upper) range = ce.tuple([index, lower, upper]);
           else if (upper) range = ce.tuple([index, ce.NegativeInfinity, upper]);
           else if (lower) range = ce.tuple([index, lower]);
           else range = index;
 
-          return ce._fn('Integrate', [body.canonical, range]);
+          let body = ops[0] ?? ce.error('missing');
+          body = body.canonical;
+          if (body.head === 'Delimiter' && body.op1.head === 'Sequence')
+            body = body.op1.op1;
+
+          return ce._fn('Integrate', [body, range]);
           // evaluate: (ce, ops) => {
           // @todo: implement using Risch Algorithm
           // },

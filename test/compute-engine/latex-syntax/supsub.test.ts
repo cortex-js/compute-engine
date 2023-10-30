@@ -48,7 +48,9 @@ describe('SUPSUB', () => {
     expect(parse('x^t')).toMatchInlineSnapshot(`["Power", "x", "t"]`);
     expect(parse('2^{10}')).toMatchInlineSnapshot(`["Power", 2, 10]`);
     expect(parse('\\pi^2')).toMatchInlineSnapshot(`["Square", "Pi"]`);
-    expect(parse('2^23')).toMatchInlineSnapshot(`12`);
+    expect(parse('2^23')).toMatchInlineSnapshot(
+      `["Multiply", ["Square", 2], 3]`
+    );
     expect(parse('2^\\pi')).toMatchInlineSnapshot(`["Power", 2, "Pi"]`);
     expect(parse('2^\\frac12')).toMatchInlineSnapshot(`["Sqrt", 2]`);
     expect(parse('2^{3^4}')).toMatchInlineSnapshot(
@@ -64,7 +66,9 @@ describe('SUPSUB', () => {
     expect(parse('2^{3^4}')).toMatchInlineSnapshot(
       `["Power", 2, ["Power", 3, 4]]`
     );
-    expect(parse('12^34.5')).toMatchInlineSnapshot(`["Multiply", 4.5, 1728]`);
+    expect(parse('12^34.5')).toMatchInlineSnapshot(
+      `["Multiply", ["Power", 12, 3], 4.5]`
+    );
     expect(parse('x^2')).toMatchInlineSnapshot(`["Square", "x"]`);
     expect(parse('x^{x+1}')).toMatchInlineSnapshot(
       `["Power", "x", ["Add", "x", 1]]`
@@ -83,14 +87,14 @@ describe('SUPSUB', () => {
   });
   test('Pre-sup, pre-sub', () => {
     expect(parse('_p^qx')).toMatchInlineSnapshot(
-      `["Multiply", "_", "x", ["Power", "p", "q"]]`
+      `["Multiply", "_", ["Power", "p", "q"], "x"]`
     ); // @fixme: nope...
     expect(parse('_p^qx_r^s')).toMatchInlineSnapshot(
       `["Multiply", "_", ["Power", "p", "q"], ["Power", "x_r", "s"]]`
     ); // @fixme: nope...
     expect(parse('_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
-        "Multiply",
+        "Triple",
         "_",
         ["Power", ["Add", "p", 1], ["Add", "q", 1]],
         [
@@ -106,7 +110,7 @@ describe('SUPSUB', () => {
     `); // @fixme: nope...
     expect(parse('x{}_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
-        "Multiply",
+        "Pair",
         [
           "Power",
           [
@@ -132,16 +136,20 @@ describe('SUPSUB', () => {
     expect(parse('(x+1)^{n-1}')).toMatchInlineSnapshot(
       `["Power", ["Add", "x", 1], ["Subtract", "n", 1]]`
     );
-    expect(parse('(x+1)_{n-1}')).toMatchInlineSnapshot(
-      `["Subscript", ["Add", "x", 1], ["Subtract", "n", 1]]`
-    );
+    expect(parse('(x+1)_{n-1}')).toMatchInlineSnapshot(`
+      [
+        "Subscript",
+        ["Delimiter", ["Sequence", ["Add", "x", 1]]],
+        ["Subtract", "n", 1]
+      ]
+    `);
     expect(parse('(x+1)^n_0')).toMatchInlineSnapshot(`
       [
         "Power",
         [
           "Error",
           ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
-          ["Subscript", ["Add", "x", 1], 0]
+          ["Subscript", ["Delimiter", ["Sequence", ["Add", "x", 1]]], 0]
         ],
         "n"
       ]
@@ -176,13 +184,13 @@ describe('PRIME', () => {
     expect(parse('f\\prime')).toMatchInlineSnapshot(`["Derivative", "f"]`);
     expect(parse('f\\prime\\prime')).toMatchInlineSnapshot(
       `["Derivative", "f", 2]`
-    ); // @fixme
+    );
     expect(parse('f\\prime\\prime\\prime')).toMatchInlineSnapshot(
       `["Derivative", "f", 3]`
-    ); // @fixme
+    );
     expect(parse('f\\doubleprime')).toMatchInlineSnapshot(
       `["Derivative", "f", 2]`
-    ); // @fixme
+    );
     expect(parse('f^{\\prime}')).toMatchInlineSnapshot(`["Derivative", "f"]`);
     expect(parse('f^{\\prime\\prime}')).toMatchInlineSnapshot(
       `["Derivative", "f", 2]`

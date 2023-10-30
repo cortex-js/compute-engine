@@ -1,4 +1,5 @@
 import { LatexDictionary } from '../public';
+import { head, missingIfEmpty, op } from '../../../math-json/utils';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
 
@@ -154,7 +155,18 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'infix',
     associativity: 'right',
     precedence: 219,
-    parse: 'Equivalent',
+    parse: (parser, lhs, terminator) => {
+      const rhs = parser.parseExpression({ ...terminator, minPrec: 219 });
+
+      const index = parser.index;
+
+      const modulus = parser.parseExpression({ ...terminator, minPrec: 219 });
+      if (modulus && head(modulus) === 'Mod')
+        return ['Congruent', lhs, rhs, missingIfEmpty(op(modulus, 1))];
+
+      parser.index = index;
+      return ['Equivalent', lhs, missingIfEmpty(rhs)];
+    },
   },
 
   {

@@ -1,4 +1,4 @@
-import { checkArg } from '../boxed-expression/validate';
+import { checkDomain } from '../boxed-expression/validate';
 import { MAX_ITERATION, asSmallInteger } from '../numerics/numeric';
 import { BoxedExpression } from '../public';
 
@@ -43,8 +43,8 @@ export function canonicalLimits(
   } else index = ce.domainError('Symbols', index.domain, index);
 
   // The range bounds, if present, should be integers numbers
-  if (lower && lower.isFinite) lower = checkArg(ce, lower, 'Integers');
-  if (upper && upper.isFinite) upper = checkArg(ce, upper, 'Integers');
+  if (lower && lower.isFinite) lower = checkDomain(ce, lower, 'Integers');
+  if (upper && upper.isFinite) upper = checkDomain(ce, upper, 'Integers');
 
   if (lower && upper) return ce.tuple([index, lower, upper]);
   if (upper) return ce.tuple([index, ce.One, upper]);

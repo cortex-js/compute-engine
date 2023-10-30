@@ -248,7 +248,7 @@ describe('SYMBOLS', () => {
       expect(parse('\\mathrm{speed_{max}}')).toMatchInlineSnapshot(`speed_max`);
       // An expression, not an identifier:
       expect(parse('\\mathrm{speed}_{max}')).toMatchInlineSnapshot(
-        `["Subscript", "speed", ["Multiply", "m", "a", "x"]]`
+        `["Subscript", "speed", ["InvisibleOperator", "m", "a", "x"]]`
       );
     });
 

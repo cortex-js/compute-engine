@@ -1,12 +1,19 @@
-import { BoxedDomain, BoxedExpression, IdentifierDefinitions } from '../public';
+import {
+  BoxedDomain,
+  BoxedExpression,
+  IComputeEngine,
+  IdentifierDefinitions,
+} from '../public';
 import { joinLatex } from '../latex-syntax/tokenizer';
-import { asSmallInteger, fromDigits } from '../numerics/numeric';
+import { asFloat, asSmallInteger, fromDigits } from '../numerics/numeric';
 
-import { checkArg, checkArity } from '../boxed-expression/validate';
+import { checkDomain, checkArity } from '../boxed-expression/validate';
 import { randomExpression } from './random-expression';
 import { apply, canonicalFunctionExpression } from '../function-utils';
 import { canonical } from '../symbolic/utils';
 import { isDomain } from '../boxed-expression/boxed-domain';
+import { isIndexableCollection } from '../collection-utils';
+import { flattenOps, flattenSequence } from '../symbolic/flatten';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -23,21 +30,180 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
   // Inert functions
   //
   {
-    Delimiter: {
-      // Use to represent groups of expressions. Named after https://en.wikipedia.org/wiki/Delimiter
+    /**
+     * ## THEORY OF OPERATIONS: SEQUENCES
+     *
+     * There are two similar functions used to represent sequences of
+     * expressions:
+     *
+     * - `InvisibleOperator` represent a sequence of expressions
+     *  that are syntactically juxtaposed without any separator or
+     *  operators combining them. For example, `2x` is represented as
+     *  `["InvisibleOperator", 2, "x"]`. `InvisibleOperator` gets
+     *  transformed into `Multiply` (or some other semantic operation)
+     *  during canonicalization.
+     *
+     * - `Sequence` is used to represent a sequence of expressions
+     *   at a semantic level. It is a collection, but it is handled
+     *   specially when canonicalizing expressions, for example it
+     *   is automatically flattened and hoisted to the top level of the
+     *   argument list.
+     *   For example:
+     *    `["Add", "a", ["Sequence", "b", "c"]]` is canonicalized
+     *      to `["Add", "a", "b", "c"]`.
+     *
+     * The empty `Sequence` expression (i.e. `["Sequence"]`) is ignored
+     * but it can be used to represent an "empty" expression.
+     *
+     * - `Delimiter` is used to represent a group of expressions
+     *   with an open and close delimiter and separator. They capture the
+     *   input syntax, and can get transformed into other expressions
+     *   during boxing and canonicalization.
+     *   The first argument is a function expression, such as `List`
+     *   or `Sequence`. The arguments of that expression are represented
+     *   with a separator between them and delimiters around the whole
+     *   group.
+     *   The second argument specify the separator and delimiters. If not
+     *   specified, the default is the string `"(,)"`
+     *
+     * Examples:
+     * - `f(x)` ->
+     *    `["InvisibleOperator",
+     *        "f",
+     *        ["Delimiter", ["Sequence", "x"], "'(,)'"]
+     *     ]`
+     *
+     * - `1, 2; 3, 4` ->
+     *    `["Delimiter",
+     *      ["Sequence",
+     *        ["Delimiter", ["Sequence", 1, 2], "','"],
+     *        ["Delimiter", ["Sequence", 3, 4], "','"],
+     *      ],
+     *     "';'"
+     *    ]`
+     *
+     * - `2x` -> `["InvisibleOperator", 2, "x"]`
+     *
+     * - `2+` -> `["InvisibleOperator", 2, ["Error", "'unexpected-operator'", "+"]]`
+     *
+     *
+     *
+     *
+     */
+    InvisibleOperator: {
       complexity: 9000,
-      hold: 'first',
+      hold: 'all',
       signature: {
-        domain: [
-          'FunctionOf',
-          'Anything',
-          ['OptArg', 'Strings', 'Strings'],
-          'Anything',
-        ],
-        result: (_ce, args) => args[0].domain,
-        canonical: (ce, args) => args[0]?.canonical ?? ce.box(['Sequence']),
+        restParam: 'Anything',
+        result: (ce, args) => {
+          if (args.length === 0) return ce.domain('NothingDomain');
+          if (args.length === 1) return args[0].domain;
+          return ce.Anything;
+        },
+        canonical: canonicalInvisibleOperator,
       },
     },
+    /** See above for a theory of operations */
+    Sequence: {
+      hold: 'all',
+      signature: {
+        restParam: 'Anything',
+        result: (ce, args) => {
+          if (args.length === 0) return ce.domain('NothingDomain');
+          if (args.length === 1) return args[0].domain;
+          return ce.Anything;
+        },
+        canonical: (ce, args) => {
+          const xs = canonical(flattenSequence(args));
+          if (xs.length === 0) return ce._fn('Sequence', []);
+          if (xs.length === 1) return xs[0];
+          return ce._fn('Sequence', xs);
+        },
+      },
+    },
+    /** See above for a theory of operations */
+    Delimiter: {
+      // Use to represent groups of expressions.
+      // Named after https://en.wikipedia.org/wiki/Delimiter
+      complexity: 9000,
+      hold: 'all',
+      signature: {
+        params: ['Anything'],
+        optParams: ['Strings'],
+        result: (_ce, args) => args[0].domain,
+
+        // During canonicalization, Delimiters get replaced by their first
+        // argument, which is a function expression (e.g. `List` or `Sequence`)
+        canonical: (ce, args) => {
+          if (args.length === 0) return ce._fn('Tuple', []);
+          let body = args[0];
+          console.assert(body.ops !== null);
+
+          // If the body is a sequence, preserve it (don't flatten it)
+          if (body.head === 'Sequence')
+            body = ce._fn('Sequence', ce.canonical(body.ops!));
+
+          args = [body, ...args.slice(1)];
+
+          if (args.length === 1) return ce._fn('Delimiter', args);
+
+          if (args.length > 2)
+            return ce._fn('Delimiter', checkArity(ce, args, 2));
+
+          if ((args[1].string?.length ?? 0) > 3) {
+            return ce._fn('Delimiter', [
+              args[0],
+              ce.error('invalid-delimiter', args[1]),
+            ]);
+          }
+
+          return ce._fn('Delimiter', [
+            args[0],
+            checkDomain(ce, args[1], 'Strings'),
+          ]);
+        },
+        evaluate: (ce, ops) => {
+          if (ops.length === 0) return ce.Nothing;
+
+          const op1 = ops[0];
+
+          if (op1.head === 'Sequence' || op1.head === 'Delimiter')
+            ops = flattenSequence(ops[0].ops!);
+
+          return ce._fn(
+            'Tuple',
+            ops.map((x) => x.evaluate())
+          );
+        },
+        N: (ce, ops) => {
+          if (ops.length === 0) return ce.Nothing;
+
+          const op1 = ops[0];
+
+          if (op1.head === 'Sequence' || op1.head === 'Delimiter')
+            ops = flattenSequence(ops[0].ops!);
+
+          return ce._fn(
+            'Tuple',
+            ops.map((x) => x.N())
+          );
+        },
+      },
+    },
+
+    Matrix: {
+      complexity: 9000,
+      hold: 'all',
+      signature: {
+        params: ['Lists'],
+        optParams: ['Strings', 'Strings'],
+        result: 'Lists',
+        canonical: canonicalMatrix,
+        evaluate: (_ce, ops) => ops[0].evaluate(),
+        N: (_ce, ops) => ops[0].N(),
+      },
+    },
+
     Error: {
       /**
        * - The first argument is either a string or an `["ErrorCode"]`
@@ -60,7 +226,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Strings', ['VarArg', 'Anything'], 'Anything'],
         canonical: (ce, args) => {
-          const code = checkArg(ce, args[0], ce.Strings).string;
+          const code = checkDomain(ce, args[0], ce.Strings).string;
           if (code === 'incompatible-domain') {
             return ce._fn('ErrorCode', [ce.string(code), args[1], args[2]]);
           }
@@ -77,12 +243,11 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (op1.symbol) return ce.domain('Symbols');
           if (op1.string) return ce.domain('Strings');
           if (op1.head === 'Numbers') return ce.domain('Numbers');
-          return undefined;
+          return op1.domain;
         },
         // By definition, for arguments of the canonical expression of
         // `Hold` are not canonicalized.
-        canonical: (ce, args) =>
-          args.length !== 1 ? null : ce._fn('Hold', args),
+        canonical: (ce, args) => (args.length !== 1 ? null : ce.hold(args[0])),
         evaluate: (ce, ops) => ops[0],
       },
     },
@@ -177,14 +342,13 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Assign: {
       hold: 'all',
       signature: {
-        domain: ['FunctionOf', 'Symbols', 'Anything', 'Anything'],
+        domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
         canonical: (ce, args) => {
           if (args.length !== 2) return null;
           const op1 = args[0];
-          const op2 = args[1];
           if (!op1.symbol) return null;
-          if (op2.symbol) return ce._fn('Assign', args);
-          return ce._fn('Assign', [op1, ce._fn('Hold', [op2])]);
+          const op2 = args[1];
+          return ce._fn('Assign', [ce.hold(op1), ce.hold(op2)]);
         },
         evaluate: (ce, ops) => {
           const op1 = ops[0];
@@ -372,17 +536,15 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // `"deadbeef"_{16}` `"0101010"_2?
           if (op1.string) {
             const base = asSmallInteger(op2);
-            if (base !== null) {
-              if (base > 1 && base <= 36) {
-                const [value, rest] = fromDigits(op1.string, base);
-                if (rest) {
-                  return ce.error(
-                    ['unexpected-digit', { str: rest[0] }],
-                    ['LatexString', ce.string(op1.string)]
-                  );
-                }
-                return ce.number(value);
+            if (base !== null && base > 1 && base <= 36) {
+              const [value, rest] = fromDigits(op1.string, base);
+              if (rest) {
+                return ce.error(
+                  ['unexpected-digit', { str: rest[0] }],
+                  ['LatexString', ce.string(op1.string)]
+                );
               }
+              return ce.number(value);
             }
           }
           // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
@@ -523,3 +685,103 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     },
   },
 ];
+
+function canonicalInvisibleOperator(
+  ce: IComputeEngine,
+  ops: BoxedExpression[]
+): BoxedExpression | null {
+  if (ops.length === 0) return null;
+  const lhs = ops[0];
+  if (ops.length === 1) return canonicalInvisibleOperator(ce, [lhs.canonical]);
+
+  if (ops.length === 2) {
+    //
+    // Is it an implicit addition/mixed fraction, e.g. "3 1/4"
+    //
+    const lhsNumber = asFloat(lhs);
+    if (lhsNumber !== null && Number.isInteger(lhsNumber)) {
+      const rhs = ops[1];
+      if (rhs.head === 'Divide' || rhs.head === 'Rational') {
+        const [n, d] = [asFloat(rhs.op1), asFloat(rhs.op2)];
+        if (
+          n !== null &&
+          d !== null &&
+          n > 0 &&
+          n <= 1000 &&
+          d > 1 &&
+          d <= 1000 &&
+          Number.isInteger(n) &&
+          Number.isInteger(d)
+        )
+          return ce.add([lhs.canonical, rhs.canonical]);
+      }
+    }
+
+    //
+    // Is it a function application: symbol with a function
+    // definition followed by delimiter
+    //
+    let rhs = ops[1];
+    if (
+      lhs.symbol &&
+      rhs.head === 'Delimiter' &&
+      !ce.lookupSymbol(lhs.symbol)
+    ) {
+      // Infer the type of the symbol
+      if (!ce.lookupFunction(lhs.symbol)) {
+        ce.declare(lhs.symbol, 'Functions');
+      }
+
+      //
+      // Function call with an empty argument list?
+      //
+      if (rhs.nops === 0) return ce.box([lhs.symbol]);
+
+      // The first argument of the delimiter should be sequence...
+      rhs = rhs.op1!;
+      if (rhs.head === 'Sequence')
+        return ce.box([lhs.symbol, ...ce.canonical(rhs.ops!)]);
+      return ce.box([lhs.symbol, rhs.canonical]);
+    }
+  }
+
+  ops = canonical(flattenSequence(ops));
+
+  //
+  // Is it an invisible multiplication?
+  // (are all argument numeric or indexable collections?)
+  //
+  if (
+    ops.every(
+      (x) =>
+        x.isValid &&
+        (!x.domain ||
+          x.domain.isNumeric ||
+          (isIndexableCollection(x) && !x.string))
+    )
+  )
+    return ce._fn('Multiply', flattenOps(ops, 'Multiply'));
+
+  //
+  // If some of the elements are not numeric (or of unknown domain)
+  // group them as a Tuple
+  //
+  return ce._fn('Tuple', ops);
+}
+
+function canonicalMatrix(
+  ce: IComputeEngine,
+  ops: BoxedExpression[]
+): BoxedExpression | null {
+  if (ops.length === 0) return ce._fn('Matrix', []);
+
+  const body = ops[0].canonical;
+  const delims = ops[1]?.canonical;
+  const columns = ops[2]?.canonical;
+
+  if (ops.length > 3) return ce._fn('Matrix', checkArity(ce, ops, 3));
+
+  if (columns) return ce._fn('Matrix', [body, delims, columns]);
+  if (delims) return ce._fn('Matrix', [body, delims]);
+  return ce._fn('Matrix', [body]);
+}

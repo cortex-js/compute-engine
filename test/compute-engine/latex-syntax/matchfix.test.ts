@@ -66,35 +66,41 @@ describe('MATCHFIX synonyms', () => {
 
   test('(a, b, c)', () =>
     expect(check(`(a, b, c)`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      ["Sequence", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      evaluate  = ["Triple", "a", "b", "c"]
     `));
 
   test('\\left(a, b, c\\right)', () =>
     expect(check(`\\left(a, b, c\\right)`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      ["Sequence", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      evaluate  = ["Triple", "a", "b", "c"]
     `));
   test('\\bigl(a, b, c\\bigr)', () =>
     expect(check(`\\bigl(a, b, c\\bigr)`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      ["Sequence", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      evaluate  = ["Triple", "a", "b", "c"]
     `));
   test('\\big(a, b, c\\big)', () =>
     expect(check(`\\big(a, b, c\\big)`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      ["Sequence", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      evaluate  = ["Triple", "a", "b", "c"]
     `));
   test('\\lparen a, b, c\\rparen', () =>
     expect(check(`\\lparen a, b, c\\rparen`)).toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      ["Sequence", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      evaluate  = ["Triple", "a", "b", "c"]
     `));
   test('\\left\\lparen a, b, c\\right\\rparen', () =>
     expect(check(`\\left\\lparen a, b, c\\right\\rparen`))
       .toMatchInlineSnapshot(`
-      latex     = ["Delimiter", ["Sequence", "a", "b", "c"]]
-      ["Sequence", "a", "b", "c"]
+      latex     = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      box       = ["Delimiter", ["Sequence", "a", "b", "c"], "'(,)'"]
+      evaluate  = ["Triple", "a", "b", "c"]
     `));
 });
 
@@ -108,38 +114,16 @@ describe('MATCHFIX abs and norm', () => {
 
   test('|(1+|a|+2)|', () =>
     expect(check('|(1+|a|+2)|')).toMatchInlineSnapshot(`
-      latex     = [
-        "Multiply",
-        ["Abs", ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]],
-        "a",
-        [
-          "Abs",
-          [
-            "Sequence",
-            2,
-            ["Error", ["ErrorCode", "'unexpected-token'", "')'"]]
-          ]
-        ]
-      ]
-      [
-        "Multiply",
-        ["Abs", ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]],
-        "a",
-        [
-          "Abs",
-          [
-            "Sequence",
-            2,
-            ["Error", ["ErrorCode", "'unexpected-token'", "')'"]]
-          ]
-        ]
-      ]
+      latex     = ["Abs", ["Delimiter", ["Sequence", ["Add", 1, ["Abs", "a"], 2]]]]
+      box       = ["Abs", ["Add", ["Abs", "a"], 1, 2]]
+      simplify  = ["Abs", ["Add", ["Abs", "a"], 3]]
     `));
 
   test('|1+|a|+2|', () =>
     expect(check('|1+|a|+2|')).toMatchInlineSnapshot(`
-      latex     = ["Error", ["ErrorCode", "'unexpected-token'", "'|'"]]
-      ["Error", ["ErrorCode", "'unexpected-token'", "'|'"]]
+      latex     = ["Abs", ["Add", 1, ["Abs", "a"], 2]]
+      box       = ["Abs", ["Add", ["Abs", "a"], 1, 2]]
+      simplify  = ["Abs", ["Add", ["Abs", "a"], 3]]
     `));
 
   test('||a||', () =>
@@ -168,9 +152,13 @@ describe('MATCHFIX invalid', () => {
   });
 
   test('-( // missing closing fence', () => {
-    expect(engine.parse('-(').json).toMatchInlineSnapshot(
-      `["Negate", ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]]`
-    );
+    expect(engine.parse('-(').json).toMatchInlineSnapshot(`
+      [
+        "Sequence",
+        ["Negate", ["Error", "'missing'"]],
+        ["Error", ["ErrorCode", "'unexpected-token'", "'('"]]
+      ]
+    `);
   });
 
   test('(3+x // missing closing fence', () => {

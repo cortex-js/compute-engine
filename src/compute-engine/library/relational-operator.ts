@@ -13,6 +13,33 @@ import { canonical } from '../symbolic/utils';
 //   // less-than: Q52834024 245
 
 export const RELOP_LIBRARY: IdentifierDefinitions = {
+  Congruent: {
+    commutative: false,
+    complexity: 11000,
+    numeric: true,
+    signature: {
+      simplify: (ce, ops) => {
+        if (ops.length < 3) return undefined;
+        return ce
+          ._fn('Equal', [
+            ce.box(['Mod', ops[0], ops[2]]).simplify(),
+            ce.box(['Mod', ops[1], ops[2]]).simplify(),
+          ])
+          .simplify();
+      },
+      evaluate: (ce, ops) => {
+        if (ops.length < 3) return undefined;
+        const [lhs, rhs, modulo] = ops;
+        const nLhs = lhs.value;
+        const nRhs = rhs.value;
+        const nModulo = modulo.value;
+        if (typeof nLhs !== 'number') return undefined;
+        if (typeof nRhs !== 'number') return undefined;
+        if (typeof nModulo !== 'number') return undefined;
+        return nLhs % nModulo === nRhs % nModulo ? ce.True : ce.False;
+      },
+    },
+  },
   Equal: {
     commutative: true,
     complexity: 11000,

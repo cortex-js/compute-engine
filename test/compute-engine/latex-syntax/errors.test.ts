@@ -9,10 +9,13 @@ function check(s: string, f: jest.ProvidesCallback) {
 check('Syntax error inside group with invisible operator', () =>
   expect(engine.parse('{2\\pi)}')).toMatchInlineSnapshot(`
     [
-      "Sequence",
-      2,
-      "Pi",
-      ["Error", ["ErrorCode", "'unexpected-token'", "')'"]]
+      "Pair",
+      ["Multiply", 2, "Pi"],
+      [
+        "Error",
+        "'expected-closing-delimiter'",
+        ["LatexString", "'{2\\pi)}'"]
+      ]
     ]
   `)
 );
@@ -40,13 +43,9 @@ check('Unknown symbol', () =>
 check('Unknown symbol in argument list', () =>
   expect(engine.parse('1+\\oops+2')).toMatchInlineSnapshot(`
     [
-      "Add",
+      "Sequence",
       1,
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\oops'"],
-        ["LatexString", "'\\oops'"]
-      ]
+      ["Error", "'unexpected-operator'", ["LatexString", "'+'"]]
     ]
   `)
 );
@@ -54,13 +53,9 @@ check('Unknown symbol in argument list', () =>
 check('Unknown command with arguments', () =>
   expect(engine.parse('1+\\oops{bar}+2')).toMatchInlineSnapshot(`
     [
-      "Add",
+      "Sequence",
       1,
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\oops'"],
-        ["LatexString", "'\\oops{bar}'"]
-      ]
+      ["Error", "'unexpected-operator'", ["LatexString", "'+'"]]
     ]
   `)
 );
@@ -97,13 +92,9 @@ check('Unbalanced environment by name', () =>
 check('Unbalanced environment, \\end without \\begin', () =>
   expect(engine.parse('1+\\end{cases}+2')).toMatchInlineSnapshot(`
     [
-      "Add",
+      "Sequence",
       1,
-      [
-        "Error",
-        ["ErrorCode", "'unbalanced-environment'", "'cases'"],
-        ["LatexString", "'\\end{cases}'"]
-      ]
+      ["Error", "'unexpected-operator'", ["LatexString", "'+'"]]
     ]
   `)
 );
@@ -133,7 +124,7 @@ check('Missing argument with \\sqrt custom parser', () =>
 
 check('Paren instead of braces with \\sqrt', () =>
   expect(engine.parse('\\sqrt[x](y)')).toMatchInlineSnapshot(
-    `["Multiply", ["Root", ["Error", "'missing'"], "x"], "y"]`
+    `["Pair", ["Root", ["Error", "'missing'"], "x"], "y"]`
   )
 );
 
@@ -245,9 +236,17 @@ check('Supsub syntax error', () =>
 );
 
 check('Supsub syntax error', () =>
-  expect(engine.parse('x_{a')).toMatchInlineSnapshot(
-    `["Subscript", "x", ["Sequence", "a", ["Error", "'syntax-error'"]]]`
-  )
+  expect(engine.parse('x_{a')).toMatchInlineSnapshot(`
+    [
+      "Subscript",
+      "x",
+      [
+        "InvisibleOperator",
+        "a",
+        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{a'"]]
+      ]
+    ]
+  `)
 );
 
 check('VALID infix command', () =>
@@ -263,7 +262,7 @@ check('Too many infix commands', () =>
 
 check('Command in string', () =>
   expect(engine.parse('1\\text{hello \\alpha}')).toMatchInlineSnapshot(
-    `["Sequence", 1, "'hello \\alpha'"]`
+    `["Pair", 1, "'hello \\alpha'"]`
   )
 );
 
@@ -277,10 +276,9 @@ check('VALID function application', () =>
   expect(engine.parse('f\\left(\\right)')).toMatchInlineSnapshot(`["f"]`)
 );
 
-check('INVALID function application', () =>
-  expect(engine.parse('g\\left(\\right)')).toMatchInlineSnapshot(
-    `["Sequence", "g", ["Error", "'syntax-error'"]]`
-  )
+check(
+  'VALID function application of unknown identifier with empty argument list',
+  () => expect(engine.parse('g\\left(\\right)')).toMatchInlineSnapshot(`["g"]`)
 );
 
 check('VALID function application', () =>
@@ -299,17 +297,19 @@ check('VALID function application', () =>
   expect(engine.parse('f\\left(2\\right)')).toMatchInlineSnapshot(`["f", 2]`)
 );
 
-check('Invalid empty delimiter expression', () =>
+// This is valid, because Multiply is threaded, and can accept an empty
+// tupple as an argument.
+check('VALID empty delimiter expression', () =>
   expect(engine.parse('1()')).toMatchInlineSnapshot(
-    `["Sequence", 1, ["Error", "'syntax-error'"]]`
+    `["Multiply", 1, ["Tupple"]]`
   )
 );
 
 check('Invalid empty delimiter expression', () =>
   expect(engine.parse('1\\left(\\right)')).toMatchInlineSnapshot(
-    `["Sequence", 1, ["Error", "'syntax-error'"]]`
+    `["Multiply", 1, ["Tupple"]]`
   )
-);
+); // @fixme
 
 check('Invalid delimiter: expected closing', () =>
   expect(engine.parse('1\\left(')).toMatchInlineSnapshot(`
@@ -366,9 +366,17 @@ check('Double superscript: threaded', () =>
 // );
 
 check('Expected closing delimiter', () =>
-  expect(engine.parse('\\frac{1}{2')).toMatchInlineSnapshot(
-    `["Divide", 1, ["Sequence", 2, ["Error", "'syntax-error'"]]]`
-  )
+  expect(engine.parse('\\frac{1}{2')).toMatchInlineSnapshot(`
+    [
+      "Divide",
+      1,
+      [
+        "Pair",
+        2,
+        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{2'"]]
+      ]
+    ]
+  `)
 );
 
 check('Unexpected closing delimiter', () =>
@@ -376,7 +384,7 @@ check('Unexpected closing delimiter', () =>
     [
       "Add",
       [
-        "Sequence",
+        "Pair",
         "Half",
         ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ],
@@ -424,7 +432,7 @@ check('Syntax error: \\1', () =>
 );
 
 check('Syntax error: ##', () =>
-  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Multiply", "##", "x"]`)
+  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Multiply", "x", "##"]`)
 );
 
 check('Syntax error: &', () =>
@@ -455,14 +463,9 @@ check('Syntax error', () =>
       "Equal",
       "x",
       [
-        "Sequence",
+        "Pair",
         2,
-        [
-          "Sequence",
-          ["Error", "'syntax-error'"],
-          ["Error", "'syntax-error'"]
-        ],
-        ["Error", "'syntax-error'"]
+        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{'"]]
       ]
     ]
   `)

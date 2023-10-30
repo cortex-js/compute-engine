@@ -1,8 +1,46 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Architectural changes**: the invisible operator is used to represent the
+  multiplication of two adjacent symbols, i.e. `2x`. It was previously handled
+  during parsing, but it is now handled during canonicalization. This allows
+  more complex syntactic structures to be handled correctly, for example
+  `f(x) := 2x`: previously, the left-hand-side argument would have been parsed
+  as a function application, while in this case it should be interpreted as a
+  function definition.
+
+  A new `InvisibleOperator` function has been added to support this.
+
+  The `applyInvisibleOperator` parsing option has been removed. To support
+  custom invisible operators, use the `InvisibleOperator` function.
+
 ### Bug Fixes
 
 - **#126** Logic operators only accepted up to two arguments.
+- Correctly parse numbers with repeating patterns but no fractional digits, i.e.
+  `0.(1234)`
+- Correctly parse `|1+|a|+2|`
+
+### New Features and Improvements
+
+- Implement the `Mod` and `Congruent` function.
+- Correctly parse `11 \bmod 5` (`Mod`) and `26\equiv 11 \pmod5` (`Congruent`)
+- Better handle empty argument lists, i.e. `f()`
+- When a function is used before being declared, infer that the symbol is a
+  function, e.g. `f(12)` will infer that `f` is a function (and not a variable
+  `f` multiplied by 12)
+- When a constant is followed by some parentheses, don't assume this is a
+  function application, e.g. `\pi(3+n)` is now parsed as
+  `["Multiply", "Pi", ["Add", 3, "n"]]` instead of `["Pi", ["Add", 3, "n"]]`
+- Improved parsing of nested lists, sequences and sets.
+- Improved error messages when syntax errors are encountered during LaTeX
+  parsing.
+- When parsing with the canonical option set to false, preserve more closely the
+  original LaTeX syntax.
+- When parsing text strings, convert some LaTeX commands to Unicode, including
+  spacing commands. As a result, `ce.parse("\\text{dead\;beef}_{16}")` correctly
+  gets evaluated to 3,735,928,559.
 
 ## 0.19.1
 

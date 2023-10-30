@@ -9,12 +9,13 @@ import {
   ops,
   missingIfEmpty,
   stripText,
-  isListLike,
   isEmptySequence,
   symbol,
 } from '../../../math-json/utils';
 import {
   ADDITION_PRECEDENCE,
+  ARROW_PRECEDENCE,
+  ASSIGNMENT_PRECEDENCE,
   LatexDictionary,
   Parser,
   Serializer,
@@ -36,19 +37,18 @@ import { joinLatex } from '../tokenizer';
 // }
 
 /**
- * Parse a sequence of expressions separated with ','
+ * Parse a sequence of expressions separated with `sep`
  */
 function parseSequence(
   parser: Parser,
   terminator: Readonly<Terminator>,
-  lhs: Expression,
+  lhs: Expression | null,
   prec: number,
   sep: string
-) {
-  console.assert(lhs !== null);
+): Expression[] | null {
   if (terminator.minPrec >= prec) return null;
 
-  const result: Expression[] = [lhs];
+  const result: Expression[] = lhs ? [lhs] : ['Nothing'];
   let done = false;
   while (!done) {
     done = true;
@@ -76,8 +76,36 @@ function parseSequence(
 }
 
 function serializeOps(sep = '') {
-  return (serializer: Serializer, expr: Expression | null): string =>
-    (ops(expr) ?? []).map((x) => serializer.serialize(x)).join(sep);
+  return (serializer: Serializer, expr: Expression | null): string => {
+    if (!expr) return '';
+    const xs = ops(expr) ?? [];
+    if (xs.length === 0) return '';
+    if (xs.length === 1) return serializer.serialize(xs[0]);
+
+    sep =
+      {
+        '&': '\\&',
+        ':': '\\colon',
+        '|': '\\mvert',
+        '-': '-',
+        '\u00b7': '\\cdot', // U+00B7 MIDDLE DOT
+        '\u2012': '-', // U+2012 FIGURE DASH
+        '\u2013': '--', // U+2013 EN DASH
+        '\u2014': '---', // U+2014 EM DASH
+        '\u2015': '-', // U+2015 HORIZONTAL BAR
+        '\u2022': '\\bullet', // U+2022 BULLET
+        '\u2026': '\\ldots',
+      }[sep] ?? sep;
+
+    const ys = xs.reduce((acc, item) => {
+      acc.push(serializer.serialize(item), sep);
+      return acc;
+    }, [] as string[]);
+
+    ys.pop();
+
+    return joinLatex(ys);
+  };
 }
 
 export const DEFINITIONS_CORE: LatexDictionary = [
@@ -110,7 +138,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Function',
     latexTrigger: ['\\mapsto'],
     kind: 'infix',
-    precedence: 270, // MathML rightwards arrow
+    precedence: ARROW_PRECEDENCE, // MathML rightwards arrow
     parse: (parser: Parser, lhs: Expression) => {
       let params: string[] = [];
       if (head(lhs) === 'Delimiter') lhs = op(lhs, 1) ?? 'Nothing';
@@ -124,7 +152,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         else return null;
       }
 
-      let rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
+      let rhs =
+        parser.parseExpression({ minPrec: ARROW_PRECEDENCE }) ?? 'Nothing';
       if (head(rhs) === 'Delimiter') rhs = op(rhs, 1) ?? 'Nothing';
       if (head(rhs) === 'Sequence') rhs = ['Block', ...(ops(rhs) ?? [])];
 
@@ -209,7 +238,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: [':', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: ASSIGNMENT_PRECEDENCE,
     parse: 'Assign',
   },
   // {
@@ -224,7 +253,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: '\\colonequals', // \coloneqq
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: ASSIGNMENT_PRECEDENCE,
     parse: 'Assign',
     // parse: (parser: Parser, lhs: Expression) => {
     //   const rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
@@ -274,35 +303,166 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
+    name: 'Sequence',
+    // Use a space as a separator, otherwise a sequence of numbers
+    // could be interpreted as a single number.
+    serialize: serializeOps(' '),
+  },
+  {
+    name: 'InvisibleOperator',
+    serialize: serializeOps(''),
+  },
+  {
+    // The first argument is a function expression.
+    // The second (optional) argument is a string specifying the
+    // delimiters and separator.
     name: 'Delimiter',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const argCount = nops(expr);
-      if (argCount === 0) return '';
+      const arg1 = op(expr, 1);
 
       const style = serializer.options.groupStyle(expr, serializer.level + 1);
 
-      const arg1 = op(expr, 1);
-      const h1 = head(arg1);
-      const defaultFence =
-        { List: '[],', Sequence: '' }[typeof h1 === 'string' ? h1 : ''] ??
-        '(),';
-      let open = defaultFence[0] ?? '';
-      let close = defaultFence[1] ?? '';
-      let sep = defaultFence[2] ?? '';
+      const h1 = head(arg1)!;
+      let delims =
+        {
+          Set: '{,}',
+          List: '[,]',
+          Tuple: '(,)',
+          Single: '(,)',
+          Pair: '(,)',
+          Triple: '(,)',
+          Sequence: '(,)',
+          String: '""',
+        }[typeof h1 === 'string' ? h1 : ''] ?? '(,)';
 
-      if (argCount > 1) {
-        const op2 = stringValue(op(expr, 2)) ?? '';
-        open = op2[0] ?? defaultFence[0];
-        close = op2[1] ?? defaultFence[1];
-        sep = op2[2] ?? defaultFence[2];
+      // Check if there are custom delimiters specified
+      if (nops(expr) > 1) {
+        const op2 = stringValue(op(expr, 2));
+        if (typeof op2 === 'string' && op2.length <= 3) delims = op2;
       }
 
-      const body = isListLike(arg1)
-        ? serializeOps(sep)(serializer, arg1)
-        : serializer.serialize(arg1);
+      let [open, sep, close] = ['', '', ''];
+      if (delims.length === 3) [open, sep, close] = delims;
+      else if (delims.length === 2) [open, close] = delims;
+      else if (delims.length === 1) sep = delims;
+
+      const body = arg1
+        ? ops(arg1)
+          ? serializeOps(sep)(serializer, arg1)
+          : serializer.serialize(arg1)
+        : '';
 
       // if (!open || !close) return serializer.wrapString(body, style);
       return serializer.wrapString(body, style, open + close);
+    },
+  },
+  // The first argument is the matrix data.
+  // The second, optional, argument are the delimiters.
+  // The third, optional, argument is the column specification.
+  {
+    name: 'Matrix',
+    // https://ctan.math.illinois.edu/macros/latex/required/tools/array.pdf
+    serialize: (serializer: Serializer, expr: Expression): string => {
+      const body = op(expr, 1);
+      const delims = op(expr, 2) ?? '()';
+      let columns = '';
+      if (op(expr, 3) !== null) {
+        const colsSpec = stringValue(op(expr, 3)) ?? '';
+        for (const c of colsSpec) {
+          if (c === '<') columns += 'l';
+          else if (c === '>') columns += 'r';
+          else if (c === '=') columns += 'c';
+          else if (c === '|') columns += '|';
+          else if (c === ':') columns += ':';
+        }
+      }
+
+      let [open, close] = ['', ''];
+      if (typeof delims === 'string' && delims.length === 2)
+        [open, close] = delims;
+
+      const rows: string[] = [];
+      for (const row of ops(body) ?? []) {
+        const cells: string[] = [];
+        for (const cell of ops(row) ?? [])
+          cells.push(serializer.serialize(cell));
+        rows.push(cells.join(' & '));
+      }
+
+      const tabular = rows.join('\\\\\n');
+
+      const optColumns = columns.length > 0 ? `[${columns}]` : '';
+
+      if (open === '(' && close === ')')
+        return joinLatex([
+          '\\begin{pmatrix}',
+          optColumns,
+          tabular,
+          '\\end{pmatrix}',
+        ]);
+
+      if (open === '[' && close === ']')
+        return joinLatex([
+          '\\begin{bmatrix}',
+          optColumns,
+          tabular,
+          '\\end{bmatrix}',
+        ]);
+
+      if (open === '{' && close === '}')
+        return joinLatex([
+          '\\begin{Bmatrix}',
+          optColumns,
+          tabular,
+          '\\end{Bmatrix}',
+        ]);
+
+      if (open === '|' && close === '|')
+        return joinLatex([
+          '\\begin{vmatrix}',
+          optColumns,
+          tabular,
+          '\\end{vmatrix}',
+        ]);
+
+      if (open === '‖' && close === '‖')
+        return joinLatex([
+          '\\begin{Vmatrix}',
+          optColumns,
+          tabular,
+          '\\end{Vmatrix}',
+        ]);
+
+      if (open === '{' && close === '.')
+        return joinLatex([
+          '\\begin{dcases}',
+          optColumns,
+          tabular,
+          '\\end{dcases}',
+        ]);
+
+      if (open === '.' && close === '}')
+        return joinLatex([
+          '\\begin{rcases}',
+          optColumns,
+          tabular,
+          '\\end{rcases}',
+        ]);
+
+      if (columns || open !== '.' || close !== '.') {
+        return joinLatex([
+          '\\left',
+          DELIMITERS_SHORTHAND[open] ?? open,
+          '\\begin{array}',
+          `{${columns}}`,
+          tabular,
+          '\\end{array}',
+          '\\right',
+          DELIMITERS_SHORTHAND[close] ?? close,
+        ]);
+      }
+
+      return joinLatex(['\\begin{matrix}', tabular, '\\end{matrix}']);
     },
   },
   {
@@ -435,7 +595,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '(',
     closeTrigger: ')',
-    parse: parseDelimiter,
+    parse: parseParenDelimiter,
   },
   {
     latexTrigger: [','],
@@ -453,7 +613,19 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     ): Expression | null => {
       const seq = parseSequence(parser, terminator, lhs, 20, ',');
       if (seq === null) return null;
-      return ['Sequence', ...seq];
+      return ['Delimiter', ['Sequence', ...seq], { str: ',' }];
+    },
+  },
+  // Entry to handle the case of a single comma
+  // with a missing lhs.
+  {
+    latexTrigger: [','],
+    kind: 'prefix',
+    precedence: 20,
+    parse: (parser, terminator): Expression | null => {
+      const seq = parseSequence(parser, terminator, null, 20, ',');
+      if (seq === null) return null;
+      return ['Delimiter', ['Sequence', ...seq], { str: ',' }];
     },
   },
   {
@@ -499,10 +671,6 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
   {
-    name: 'Sequence',
-    serialize: serializeOps(''),
-  },
-  {
     latexTrigger: [';'],
     kind: 'infix',
     precedence: 19,
@@ -513,12 +681,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     ) => {
       const seq = parseSequence(parser, terminator, lhs, 19, ';');
       if (seq === null) return null;
-      return [
-        'Sequence',
-        ...seq.map((x) =>
-          head(x) === 'Sequence' ? ['List', ...(ops(x) ?? [])] : x
-        ),
-      ] as Expression;
+
+      return ['Delimiter', ['Sequence', ...seq], "';'"] as Expression;
     },
   },
   {
@@ -830,7 +994,57 @@ function parseTextRun(
         text += '$$';
         parser.index = index;
       }
-    } else text += parser.matchChar() ?? parser.nextToken();
+    } else {
+      const c = parser.matchChar() ?? parser.nextToken();
+      text +=
+        {
+          '\\enskip': '\u2002', //  en space
+          '\\enspace': '\u2002', //  en space
+          '\\quad': '\u2003', //  em space
+          '\\qquad': '\u2003\u2003', //  2 em space
+          '\\space': '\u2003', //  em space
+          '\\ ': '\u2003', //  em space
+          '\\;': '\u2004', //  three per em space
+          '\\,': '\u2009', //  thin space
+          '\\:': '\u205f', //  medium mathematical space
+          '\\!': '', //  negative thin space
+          '\\{': '{',
+          '\\}': '}',
+          '\\$': '$',
+          '\\&': '&',
+          '\\#': '#',
+          '\\%': '%',
+          '\\_': '_',
+          '\\textbackslash': '\\',
+          '\\textasciitilde': '~',
+          '\\textasciicircum': '^',
+          '\\textless': '<',
+          '\\textgreater': '>',
+          '\\textbar': '|',
+          '\\textunderscore': '_',
+          '\\textbraceleft': '{',
+          '\\textbraceright': '}',
+          '\\textasciigrave': '`',
+          '\\textquotesingle': "'",
+          '\\textquotedblleft': '“',
+          '\\textquotedblright': '”',
+          '\\textquotedbl': '"',
+          '\\textquoteleft': '‘',
+          '\\textquoteright': '’',
+          '\\textbullet': '•',
+          '\\textdagger': '†',
+          '\\textdaggerdbl': '‡',
+          '\\textsection': '§',
+          '\\textparagraph': '¶',
+          '\\textperiodcentered': '·',
+          '\\textellipsis': '…',
+          '\\textemdash': '—',
+          '\\textendash': '–',
+          '\\textregistered': '®',
+          '\\texttrademark': '™',
+          '\\textdegree': '°',
+        }[c] ?? c;
+    }
   }
 
   // Apply leftovers
@@ -931,20 +1145,33 @@ function parsePrime(
   return ['Prime', missingIfEmpty(lhs), order];
 }
 
-function parseDelimiter(_parser: Parser, body: Expression): Expression | null {
-  // @todo: does this really need to be done here? Sequence(Sequence(...))
+function parseParenDelimiter(
+  _parser: Parser,
+  body: Expression
+): Expression | null {
   // Handle `()` used for example with `f()`
-  if (body === null || isEmptySequence(body)) return ['Sequence'];
-  if (head(body) === 'Sequence') {
-    if (nops(body) === 0) return ['Delimiter'];
-    return ['Delimiter', ['Sequence', ...(ops(body) ?? [])]];
+  if (body === null || isEmptySequence(body)) return ['Delimiter'];
+
+  if (head(body) === 'Delimiter' && op(body, 2)) {
+    const delims = stringValue(op(body, 2));
+    if (delims?.length === 1) {
+      // We have a Delimiter with a single character separator
+      return ['Delimiter', op(body, 1) ?? ['Sequence'], { str: `(${delims})` }];
+    }
   }
 
-  return ['Delimiter', body];
+  if (head(body) === 'Sequence') {
+    if (nops(body) === 0) return ['Delimiter'];
+    return ['Delimiter', body];
+  }
+
+  return ['Delimiter', ['Sequence', body]];
 }
 
-function parseList(_parser: Parser, body: Expression): Expression {
+function parseList(_parser: Parser, body: Expression | null): Expression {
   if (body === null || isEmptySequence(body)) return ['List'];
+  if (head(body) === 'Delimiter') return parseList(_parser, op(body, 1));
+
   if (head(body) === 'Range') return body;
   if (head(body) !== 'Sequence' && head(body) !== 'List') return ['List', body];
   return ['List', ...(ops(body) ?? [])];
@@ -988,3 +1215,32 @@ function parseRange(parser: Parser, lhs: Expression): Expression | null {
 
   return ['Range', start, end];
 }
+
+export const DELIMITERS_SHORTHAND = {
+  '(': '(',
+  ')': ')',
+  '[': '\\lbrack',
+  '\u27E6': '\\llbrack', // U+27E6 MATHEMATICAL LEFT WHITE SQUARE BRACKET
+  '\u27E7': '\\rrbrack', // U+27E7 MATHEMATICAL RIGHT WHITE SQUARE BRACKET
+  ']': '\\rbrack',
+  '{': '\\lbrace',
+  '}': '\\rbrace',
+  '<': '\\langle',
+  '>': '\\rangle',
+  // '|': '\\vert',
+  '‖': '\\Vert', // U+2016 DOUBLE VERTICAL LINE
+  '\\': '\\backslash',
+  '⌈': '\\lceil', // ⌈ U+2308 LEFT CEILING
+  '⌉': '\\rceil', // U+2309 RIGHT CEILING
+  '⌊': '\\lfloor', // ⌊ U+230A LEFT FLOOR
+  '⌋': '\\rfloor', // ⌋ U+230B RIGHT FLOOR
+  '⌜': '\\ulcorner', // ⌜ U+231C TOP LEFT CORNER
+  '⌝': '\\urcorner', // ⌝ U+231D TOP RIGHT CORNER
+  '⌞': '\\llcorner', // ⌞ U+231E BOTTOM LEFT CORNER
+  '⌟': '\\lrcorner', // ⌟ U+231F BOTTOM RIGHT CORNER
+  '⎰': '\\lmoustache', // U+23B0 UPPER LEFT OR LOWER RIGHT CURLY BRACKET SECTION
+  '⎱': '\\rmoustache', // U+23B1 UPPER RIGHT OR LOWER LEFT CURLY BRACKET SECTION
+  // '⎹': '', // U+23B9 DIVIDES
+  // '⎾': '', // U+23BE RIGHT PARENTHESIS UPPER HOOK
+  // '⎿': '', // U+23BF RIGHT PARENTHESIS LOWER HOOK
+};

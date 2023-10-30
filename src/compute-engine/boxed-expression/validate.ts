@@ -62,7 +62,7 @@ export function checkNumericArgs(
   options?: number | { count?: number; flatten?: boolean | string }
 ): BoxedExpression[] {
   let count = typeof options === 'number' ? options : options?.count;
-  const flatten = typeof options === 'number' ? true : options?.flatten ?? true;
+  const flatten = typeof options === 'number' || (options?.flatten ?? true);
   ops = canonical(ops);
   if (flatten) ops = flattenSequence(ops);
   if (typeof flatten === 'string') flattenOps(ops, flatten);
@@ -147,9 +147,9 @@ export function checkNumericArgs(
 /**
  * Check that an argument is of the expected domain.
  *
- * Converts the arguments to canonical
+ * Converts the arguments to czanonical
  */
-export function checkArg(
+export function checkDomain(
   ce: IComputeEngine,
   arg: BoxedExpression | undefined | null,
   dom: BoxedDomain | DomainLiteral | undefined
@@ -163,7 +163,7 @@ export function checkArg(
   return ce.domainError(dom, arg.domain, arg);
 }
 
-export function checkArgs(
+export function checkDomains(
   ce: IComputeEngine,
   args: BoxedExpression[],
   doms: (BoxedDomain | DomainLiteral)[]
@@ -178,7 +178,7 @@ export function checkArgs(
 
   const xs: BoxedExpression[] = [];
   for (let i = 0; i <= doms.length - 1; i++)
-    xs.push(checkArg(ce, args[i], doms[i]));
+    xs.push(checkDomain(ce, args[i], doms[i]));
 
   for (let i = doms.length; i <= args.length - 1; i++)
     xs.push(ce.error('unexpected-argument', args[i]));

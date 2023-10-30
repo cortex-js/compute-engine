@@ -34,14 +34,16 @@ functions{% endreadmore %}
 
 <div class=symbols-table>
 
-| Function       | Notation         |                                                                                                                     |
-| :------------- | :--------------- | :------------------------------------------------------------------------------------------------------------------ |
-| `Equal`        | \\( x = y \\)    | {% tags "predicate" "float-right" %}<br>Mathematical relationship asserting that two quantities have the same value |
-| `Greater`      | \\( x \gt y \\)  | {% tags "predicate" "float-right" %}                                                                                |
-| `GreaterEqual` | \\( x \geq y \\) | {% tags "predicate" "float-right" %}                                                                                |
-| `Less`         | \\( x \lt y \\)  | {% tags "predicate" "float-right" %}                                                                                |
-| `LessEqual`    | \\( x \leq y \\) | {% tags "predicate" "float-right" %}                                                                                |
-| `NotEqual`     | \\( x \ne y \\)  | {% tags "predicate" "float-right" %}                                                                                |
+| Function       | Notation         |                                                                       |
+| :------------- | :--------------- | :------------------------------------------------------------------------------ |
+| `Equal`        | \\( x = y \\)    | <br>Mathematical relationship asserting that two quantities have the same value |
+| `Greater`      | \\( x \gt y \\)  |                                                                                 |
+| `GreaterEqual` | \\( x \geq y \\) |                                                                                 |
+| `Less`         | \\( x \lt y \\)  |                                                                                 |
+| `LessEqual`    | \\( x \leq y \\) |                                                                                 |
+| `NotEqual`     | \\( x \ne y \\)  |                                                                                 |
+
+See below for additonal relational operators: `Congruent`, etc...
 
 </div>
 
@@ -101,6 +103,29 @@ functions{% endreadmore %}
 | `Round`  |              | {% tags "numeric" "float-right"%}                                                                                 |
 
 </div>
+
+### Other Relational Operators
+
+{% defs "Function" "Operation" %}
+
+{% def "Congruent" %}
+
+[&quot;**Congruent**&quot;, _a_, _b_, _modulus_]{.signature}
+
+Evaluate to `True` if `a` is congruent to `b` modulo `modulus`.
+
+{% latex " 26 \equiv 11 \pmod{5}" %}
+
+
+```json example
+["Congruent", 26, 11, 5]
+// ➔ True
+```
+
+
+{% enddef %}
+
+{% enddefs %}
 
 ### Other Functions
 
@@ -168,6 +193,9 @@ If `lower`and `upper`are not provided, they take the default values of -1 and
 
 Evaluate the expression _fn_ as it approaches the value _value_.
 
+{% latex " \lim_{x \to 0} \frac{\sin(x)}{x} = 1" %}
+
+
 ```json example
 ["Limit", ["Divide", ["Sin", "_"], "_"], 0]
 
@@ -176,6 +204,8 @@ Evaluate the expression _fn_ as it approaches the value _value_.
 
 This function evaluates to a numerical approximation when using `expr.N()`. To
 get a numerical evaluation with `expr.evaluate()`, use `NLimit`.
+
+
 
 {% enddef %}
 
@@ -231,7 +261,47 @@ of the arguments.
 Otherwise, simplify the expression by removing values that are greater than or
 equal to the smallest real number.
 
+{% latex " \min(0, 7.1, 3) = 0" %}
+
+```json example
+["Min", 5, 2, -1]
+// ➔ -1
+["Min", 0, 7.1, "x", 3]
+// ➔ ["Min", 0, "x"]
+```
+
+
 {% enddef %}
+
+{% def "Mod" %}
+
+[&quot;**Mod**&quot;, _a_, _b_]{.signature}
+
+Evaluate to the Euclidian division (modulus) of `a` by `b`.
+
+When `a` and `b` are positive integers, this is equivalent to the `%` operator in
+JavaScript, and returns the remainder of the division of `a` by `b`.
+
+However, when `a` and `b` are not positive integers, the result is different.
+
+The result is always the same sign as `b`, or 0.
+
+```json example
+["Mod", 7, 5]
+// ➔ 2
+
+["Mod", -7, 5]
+// ➔ 3
+
+["Mod", 7, -5]
+// ➔ -3
+
+["Mod", -7, -5]
+// ➔ -2
+```
+
+{% enddef %}
+
 
 {% def "Rational" %}
 

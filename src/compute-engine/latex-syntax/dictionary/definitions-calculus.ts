@@ -2,6 +2,7 @@ import { Expression } from '../../../math-json/math-json-format';
 import {
   head,
   isEmptySequence,
+  nops,
   op,
   ops,
   subs,
@@ -163,7 +164,7 @@ function parseIntegralBody(
   }
 
   // If we didn't get a `\operatorname{d}x` or `dx` at the same level as the
-  // expression, perhaps it was in a subexpression, e.g. `\frac{dx}{x}`
+  // expression, perhaps it was in a subexpression, e.g. `\frac{dx}{x}` or `3xdx`
   if (fn && !found) return parseIntegralBodyExpression(fn);
 
   const indexes = parseIndexes(parser, n);
@@ -190,7 +191,11 @@ function parseIntegralBodyExpression(
   const op1 = op(expr, 1);
   if (!op1) return [expr, null];
 
-  if (h === 'Multiply') {
+  if (h === 'Sequence' && nops(expr) === 1) {
+    return parseIntegralBodyExpression(op1);
+  }
+
+  if (h === 'Multiply' || h === 'InvisibleOperator') {
     // Handle the case `3xdx` where the `dx` is the last term of a
     // multiplication (in a subexpression, i.e. `\sin 3xdx`)
     const args = ops(expr);
@@ -211,7 +216,7 @@ function parseIntegralBodyExpression(
     const [fn2, index] = parseIntegralBodyExpression(op1);
     if (index) {
       if (!fn2) return [null, index];
-      return [['Delimiter', fn2, ...ops(expr)!.slice(1)], index];
+      return [['Delimiter', ['Sequence', fn2], ...ops(expr)!.slice(1)], index];
     }
   } else if (h === 'Add') {
     const args = ops(expr);

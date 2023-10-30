@@ -55,21 +55,33 @@ describe('CALCULUS', () => {
 
   describe('Derivative', () => {
     it('should compute the derivative of a function', () => {
-      const expr = parse('Derivative(Sin)');
+      const expr = engine.box(['Derivative', 'Sin']);
       const result = expr.evaluate();
-      expect(result.latex).toMatchInlineSnapshot(`D\\error{\\texttt{e}}`);
+      expect(result.latex).toMatchInlineSnapshot(`\\sin^{\\prime}`);
     });
 
     it('should compute higher order derivatives', () => {
-      const expr = parse('Derivative(Function(Square(x), x), 2)');
+      const expr = engine.box([
+        'Derivative',
+        ['Function', ['Square', 'x'], 'x'],
+        2,
+      ]);
       const result = expr.evaluate();
-      expect(result.latex).toMatchInlineSnapshot(`D\\error{\\texttt{e}}`);
+      expect(result.latex).toMatchInlineSnapshot(
+        `x\\mapsto x^2^{\\doubleprime}`
+      );
     });
 
     it('should compute the derivative of a function with respect to a specific variable', () => {
-      const expr = parse('Derivative(Function(Add(x, y), x, y), 0, 1)');
+      const expr = engine.box([
+        'Derivative',
+        ['Function', ['Add', 'x', 'u'], 'x', 'y'],
+        0,
+        1,
+      ]);
+
       const result = expr.evaluate();
-      expect(result.latex).toMatchInlineSnapshot(`D\\error{\\texttt{e}}`);
+      expect(result.latex).toMatchInlineSnapshot(`(x, y)\\mapsto x+u^{(0)}`);
     });
   });
 

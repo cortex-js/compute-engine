@@ -713,8 +713,12 @@ export class ComputeEngine implements IComputeEngine {
 
   bignum(a: Decimal.Value | bigint): Decimal {
     if (typeof a === 'bigint') return new this._bignum(a.toString());
-
-    return new this._bignum(a);
+    try {
+      return new this._bignum(a);
+    } catch (e) {
+      console.error(e);
+    }
+    return this._BIGNUM_NAN;
   }
 
   complex(a: number | Decimal | Complex, b?: number | Decimal): Complex {
@@ -1214,12 +1218,8 @@ export class ComputeEngine implements IComputeEngine {
 
       // Make sure the value is not a function
       if (!args && !isFunctionValue(value)) {
-        if (value === undefined || value === null) {
-          symDef.value = undefined;
-          return this;
-        }
-
-        symDef.value = this.box(value as BoxedExpression);
+        if (value === undefined || value === null) symDef.value = undefined;
+        else symDef.value = this.box(value as BoxedExpression);
 
         // Reinsert the def in the scope
         scope?.ids?.set(symDef.name!, symDef);

@@ -9,20 +9,10 @@ describe('BASE FORM', () => {
   test('binary', () => {
     expect(json('\\text{00111}_{2}')).toMatchInlineSnapshot(`7`);
     expect(json('\\text{00111}_2')).toMatchInlineSnapshot(`7`);
-    expect(json('\\text{00\\;111}_2')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-digit'", "'\\'"],
-        ["LatexString", "'00\\;111'"]
-      ]
-    `);
-    expect(json('(\\text{00\\;111})_2')).toMatchInlineSnapshot(`
-      [
-        "Error",
-        ["ErrorCode", "'unexpected-digit'", "'\\'"],
-        ["LatexString", "'00\\;111'"]
-      ]
-    `);
+    expect(json('\\text{00\\;111}_2')).toMatchInlineSnapshot(`7`);
+    expect(json('(\\text{00\\;111})_2')).toMatchInlineSnapshot(
+      `["Subscript", ["Delimiter", ["Sequence", "'00 111'"]], 2]`
+    ); // @fixme
   });
   test('decimal', () => {
     expect(json('\\text{123}_{10}')).toMatchInlineSnapshot(`123`);

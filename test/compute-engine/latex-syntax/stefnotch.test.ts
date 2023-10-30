@@ -27,7 +27,7 @@ describe('STEFNOTCH #10', () => {
 
   test('3/ 3\\text{hello}6', () => {
     expect(parse('3\\text{hello}6')).toMatchInlineSnapshot(
-      `["Sequence", 3, "'hello'", 6]`
+      `["Triple", 3, "'hello'", 6]`
     );
   });
 
@@ -70,9 +70,17 @@ describe('STEFNOTCH #10', () => {
 
 describe('STEFNOTCH #12', () => {
   test('1/ e^{i\\pi\\text{nope!?\\lparen sum}}', () => {
-    expect(parse('e^{i\\pi\\text{nope!?\\lparen sum}}')).toMatchInlineSnapshot(
-      `ExponentialE`
-    );
+    expect(parse('e^{i\\pi\\text{nope!?\\lparen sum}}')).toMatchInlineSnapshot(`
+      [
+        "Power",
+        "ExponentialE",
+        [
+          "Error",
+          ["ErrorCode", "'incompatible-domain'", "Numbers", "Tuples"],
+          ["Triple", "ImaginaryUnit", "Pi", "'nope!?\\lparensum'"]
+        ]
+      ]
+    `);
   });
 });
 
@@ -90,9 +98,21 @@ describe('STEFNOTCH #13', () => {
   });
 
   test('2/ x_{1,2}=1,2', () => {
-    expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(
-      `["Sequence", ["Equal", ["Subscript", "x", ["Sequence", 1, 2]], 1], 2]`
-    );
+    expect(parse('x_{1,2}=1,2')).toMatchInlineSnapshot(`
+      [
+        "Delimiter",
+        [
+          "Sequence",
+          [
+            "Equal",
+            ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], "','"]],
+            1
+          ],
+          2
+        ],
+        "','"
+      ]
+    `);
   }); // @fixme unclear what the right answer is
 
   test('3/  \\{1,2\\}', () => {
@@ -110,11 +130,7 @@ describe('STEFNOTCH #13', () => {
       .toMatchInlineSnapshot(`
       [
         "Equivalent",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Booleans", "Numbers"],
-          ["Divide", 2, ["Sqrt", "n"]]
-        ],
+        ["Divide", 2, ["Sqrt", "n"]],
         ["Less", ["Divide", 5, ["Square", "n"]], "n"]
       ]
     `);
@@ -131,49 +147,29 @@ describe('STEFNOTCH #13', () => {
     `);
   });
 
-  test('7/ 3\\equiv5\\mod7', () => {
-    expect(parse('3\\equiv5\\mod7')).toMatchInlineSnapshot(`
-      [
-        "Equivalent",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Booleans",
-            "PositiveIntegers"
-          ],
-          3
-        ],
-        [
-          "Sequence",
-          5,
-          [
-            "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\mod'"],
-            ["LatexString", "'\\mod'"]
-          ]
-        ]
-      ]
-    `);
+  // Note that the (\\mod) applies to the entire equation, not just the 11
+  test('7/ 26\\equiv11(\\pmod5)', () => {
+    expect(parse('3\\equiv5\\pmod7')).toMatchInlineSnapshot(
+      `["Congruent", 3, 5, 7]`
+    );
   });
 
   test('8/ a={displaystyle lim_{n\\toinfin}a_n}', () => {
     expect(parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}'))
       .toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Equal",
+        "a",
         [
-          "Equal",
-          "a",
+          "Triple",
           [
             "Error",
-            ["ErrorCode", "'unexpected-command'", "'\\lim'"],
-            ["LatexString", "'\\lim'"]
-          ]
-        ],
-        "a_n",
-        ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
+            "'expected-closing-delimiter'",
+            ["LatexString", "'{\\displaystyle\\lim_{n\\to\\infty}'"]
+          ],
+          "a_n",
+          ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
+        ]
       ]
     `);
   });

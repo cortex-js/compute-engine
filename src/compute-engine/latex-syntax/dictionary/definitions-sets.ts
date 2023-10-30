@@ -1,4 +1,11 @@
-import { head, isEmptySequence, nops, op, ops } from '../../../math-json/utils';
+import {
+  head,
+  isEmptySequence,
+  nops,
+  op,
+  ops,
+  stringValue,
+} from '../../../math-json/utils';
 import { joinLatex } from '../tokenizer';
 import { Expression } from '../../../math-json/math-json-format';
 import { LatexDictionary, Serializer, LatexString, Parser } from '../public';
@@ -150,6 +157,9 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     // @todo: the set syntax can also include conditions...
     parse: (_parser: Parser, body: Expression): Expression => {
       if (body === null || isEmptySequence(body)) return 'EmptySet';
+      if (head(body) == 'Delimiter' && stringValue(op(body, 2)) === ',') {
+        body = op(body, 1)!;
+      }
       if (head(body) !== 'Sequence') return ['Set', body];
       return ['Set', ...(ops(body) ?? [])];
     },

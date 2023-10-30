@@ -42,11 +42,11 @@ describe('LATEX SERIALIZING', () => {
     );
 
     expect(parse('  - 1 2')).toMatchInlineSnapshot(`-12`);
-    expect(parse('-123,456.789,012')).toMatchInlineSnapshot(
-      `["Sequence", -123, 456.789, 12]`
+    expect(parse('-123\\,456.789\\,012')).toMatchInlineSnapshot(
+      `-123456.789012`
     );
-    expect(parse('-1,23456.7890,12')).toMatchInlineSnapshot(
-      `["Sequence", -1, 23456.789, 12]`
+    expect(parse('-1\\,23456.7890\\,12')).toMatchInlineSnapshot(
+      `-123456.789012`
     );
   });
   // Leave space between pi and x

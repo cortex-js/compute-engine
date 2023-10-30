@@ -8,6 +8,7 @@ import {
   Delimiter,
   Terminator,
   Parser,
+  MULTIPLICATION_PRECEDENCE,
 } from './public';
 import { tokenize, tokensToString } from './tokenizer';
 import {
@@ -27,17 +28,12 @@ import { IComputeEngine } from '../public';
 
 import { Expression } from '../../math-json/math-json-format';
 import {
-  applyAssociativeOperator,
-  dictionary,
   getSequence,
   head,
-  isEmptySequence,
-  machineValue,
   missingIfEmpty,
   nops,
-  op,
+  op1,
   ops,
-  stringValue,
   symbol,
 } from '../../math-json/utils';
 import { parseIdentifier, parseInvalidIdentifier } from './parse-identifier';
@@ -71,10 +67,10 @@ const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
   '\\rmoustache': ['\\rmoustache'],
 };
 
-const MIDDLE_DELIMITER = {
-  ':': [':', '\\colon'],
-  '|': ['|', '\\|', '\\mid', '\\mvert'],
-};
+// const MIDDLE_DELIMITER = {
+//   ':': [':', '\\colon'],
+//   '|': ['|', '\\|', '\\mid', '\\mvert'],
+// };
 
 /** Commands that can be used with an open delimiter, and their corresponding
  * closing commands.
@@ -93,17 +89,17 @@ const OPEN_DELIMITER_PREFIX = {
 };
 
 /** Commands that can be used with a middle delimiter */
-const MIDDLE_DELIMITER_PREFIX = [
-  '\\middle',
-  '\\bigm',
-  '\\Bigm',
-  '\\biggm',
-  '\\Biggm',
-  '\\big',
-  '\\Big',
-  '\\bigg',
-  '\\Bigg',
-];
+// const MIDDLE_DELIMITER_PREFIX = [
+//   '\\middle',
+//   '\\bigm',
+//   '\\Bigm',
+//   '\\biggm',
+//   '\\Biggm',
+//   '\\big',
+//   '\\Big',
+//   '\\bigg',
+//   '\\Bigg',
+// ];
 
 /**
  * Map open delimiters to a matching close delimiter
@@ -149,7 +145,6 @@ export const DEFAULT_LATEX_NUMBER_OPTIONS: NumberFormattingOptions = {
 };
 
 export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
-  applyInvisibleOperator: 'auto',
   skipSpace: true,
 
   parseArgumentsOfUnknownLatexCommands: true,
@@ -674,10 +669,10 @@ export class _Parser implements Parser {
       this.skipSpace();
       if (this.matchBoundary()) return expr ?? ['Sequence'];
       // Try to find the boundary (or the end)
-      const from = this.index;
       while (!this.matchBoundary() && !this.atEnd) this.nextToken();
-      const err = this.error('syntax-error', from);
-      return expr ? ['Sequence', expr, err] : err;
+      if (head(expr) === 'Error') return expr;
+      const err = this.error('expected-closing-delimiter', start);
+      return expr ? ['InvisibleOperator', expr, err] : err;
     }
 
     this.index = start;
@@ -860,7 +855,7 @@ export class _Parser implements Parser {
 
   private parseDecimalDigits(options?: { withGrouping?: boolean }): string {
     options ??= {};
-    options.withGrouping ??= false;
+    options.withGrouping ??= true;
 
     const result: string[] = [];
     let done = false;
@@ -887,7 +882,7 @@ export class _Parser implements Parser {
 
   private parseSignedInteger(options?: { withGrouping?: boolean }): string {
     options ??= {};
-    options.withGrouping ??= false;
+    options.withGrouping ??= true;
 
     const start = this.index;
 
@@ -938,7 +933,7 @@ export class _Parser implements Parser {
       this.skipSpaceTokens();
       if (this.matchAll(this._beginExponentMarkerTokens)) {
         this.skipSpaceTokens();
-        const exponent = this.parseSignedInteger();
+        const exponent = this.parseSignedInteger({ withGrouping: false });
         this.skipSpaceTokens();
         if (this.matchAll(this._endExponentMarkerTokens) && exponent)
           return exponent;
@@ -1007,10 +1002,13 @@ export class _Parser implements Parser {
 
     this.skipVisualSpace();
 
-    // Skip an optional '+' sign.
-    // Important: the `-` sign is not handled as part of a number:
-    // this is so we can correctly parse `-1^2` as `['Negate', ['Square', 1]]`
-    this.match('+');
+    // Parse a '+' or '-' sign
+    let sign = +1;
+    while (this.peek === '-' || this.peek === '+') {
+      if (this.match('-')) sign *= -1;
+      else this.match('+');
+      this.skipVisualSpace();
+    }
 
     let wholePart = '';
     let fractionalPart = '';
@@ -1029,7 +1027,7 @@ export class _Parser implements Parser {
         startsWithDecimalMarker = true;
         wholePart = '0';
       }
-    } else wholePart = this.parseDecimalDigits({ withGrouping: true });
+    } else wholePart = this.parseDecimalDigits();
 
     if (!wholePart) {
       this.index = start;
@@ -1037,21 +1035,15 @@ export class _Parser implements Parser {
     }
 
     const fractionalIndex = this.index;
-    let hasFractionalPart = true;
+    let hasFractionalPart = false;
     if (
       startsWithDecimalMarker ||
       this.match('.') ||
       this.matchAll(this._decimalMarkerTokens)
     ) {
-      fractionalPart = this.parseDecimalDigits({ withGrouping: true });
-      if (!fractionalPart) {
-        // There was a '.', but no fractional part
-        // the '.' may be part of something else, i.e. '1..2'
-        // so backtrack
-        this.index = fractionalIndex;
-        return { num: wholePart };
-      }
-    } else hasFractionalPart = false;
+      fractionalPart = this.parseDecimalDigits();
+      hasFractionalPart = true;
+    }
 
     let hasRepeatingPart = false;
     if (hasFractionalPart) {
@@ -1067,6 +1059,14 @@ export class _Parser implements Parser {
       }
     }
 
+    if (hasFractionalPart && !fractionalPart) {
+      // There was a '.', but an empty fractional part and no repeating part.
+      // The '.' may be part of something else, i.e. '1..2'
+      // so backtrack
+      this.index = fractionalIndex;
+      return { num: sign < 0 ? '-' + wholePart : wholePart };
+    }
+
     this.skipVisualSpace();
 
     const exponent = this.parseExponent();
@@ -1075,8 +1075,9 @@ export class _Parser implements Parser {
       const whole = parseInt(wholePart, 10);
 
       if (!fractionalPart) {
-        if (exponent) return ['Multiply', whole, ['Power', 10, exponent]];
-        return whole;
+        if (exponent)
+          return ['Multiply', sign * whole, ['Power', 10, exponent]];
+        return sign * whole;
       }
 
       const fraction = parseInt(fractionalPart, 10);
@@ -1091,14 +1092,15 @@ export class _Parser implements Parser {
       if (exponent) {
         return [
           'Multiply',
-          ['Rational', numerator, denominator],
+          ['Rational', sign * numerator, denominator],
           ['Power', 10, exponent],
         ];
       }
-      return ['Rational', numerator, denominator];
+      return ['Rational', sign * numerator, denominator];
     }
     return {
       num:
+        (sign < 0 ? '-' : '') +
         wholePart +
         (hasFractionalPart ? '.' + fractionalPart : '') +
         (exponent ? 'e' + exponent : ''),
@@ -1254,7 +1256,13 @@ export class _Parser implements Parser {
     // We are looking for an expression inside an optional pair of `()`
     // (i.e. trig functions, as in `\cos x`.)
     if (kind === 'implicit') {
-      if (head(group) === 'Delimiter') return getSequence(group) ?? [];
+      if (head(group) === 'Delimiter') {
+        if (head(op1(group)) === 'Sequence') {
+          const seq = op1(op1(group));
+          return seq ? [seq] : [];
+        }
+        return op1(group) ? [op1(group)!] : [];
+      }
 
       // Was there a matchfix? the "group" is the argument, i.e.
       // `\sin [a, b, c]`
@@ -1604,7 +1612,7 @@ export class _Parser implements Parser {
 
       if (defs) {
         const nonEmptySuperscripts = superscripts.filter(
-          (x) => head(x) !== 'Sequence'
+          (x) => !(head(x) === 'Sequence' && nops(x) === 0)
         ) as Expression[];
         if (nonEmptySuperscripts.length !== 0) {
           const superscriptExpression: Expression =
@@ -1683,136 +1691,6 @@ export class _Parser implements Parser {
       }
     }
     return result;
-  }
-
-  /**
-   * Apply an invisible operator between two expressions.
-   *
-   * If the `lhs` is an literal integer and the `rhs` is a literal rational
-   * -> 'invisible plus'
-   *
-   * That is '2 3/4' -> ['Add', 2, ['Rational', 3, 4]]
-   *
-   * If `lhs` is a number and `rhs` is a number but not a literal -> 'invisible multiply'.
-   * - 2x
-   * - 2(x+1)
-   * - x(x+1)
-   * - f(x)g(y)
-   * - 2 sin(x)
-   * - 2 f(x)
-   * - x f(x)
-   * - (x-1)(x+1)
-   * - (x+1)2 -> no
-   * - x2 -> no
-   * => lhs is a number, rhs is a number, but not a literal
-   */
-  private applyInvisibleOperator(
-    until: Readonly<Terminator>,
-    lhs: Expression | null
-  ): Expression | null {
-    if (
-      lhs === null ||
-      this.options.applyInvisibleOperator === null ||
-      head(lhs) === 'Error' ||
-      symbol(lhs) === 'Nothing' ||
-      isEmptySequence(lhs) ||
-      this.atTerminator(until)
-    )
-      return null;
-
-    //
-    // If the right hand side is an operator, no invisible operator to apply
-    //
-    if (this.peekDefinitions('operator').length > 0) return null;
-
-    //
-    // If we have a function head, parse the arguments
-    // (Invisible apply operator)
-    //
-    if (this.isFunctionHead(lhs)) {
-      const args = this.parseArguments('enclosure', { ...until, minPrec: 0 });
-      if (args === null) return null;
-      return [lhs, ...args];
-    }
-
-    //
-    // Capture a right hand side expression, if there is one
-    //
-    const start = this.index;
-    const rhs = this.parseExpression({ ...until, minPrec: 390 });
-    if (rhs === null || symbol(rhs) === 'Nothing' || isEmptySequence(rhs)) {
-      this.index = start;
-      return null;
-    }
-
-    // If we got an error, apply a 'Sequence'
-    if (head(rhs) === 'Error')
-      return applyAssociativeOperator('Sequence', lhs, rhs);
-
-    //
-    // Invoke custom `applyInvisibleOperator` handler
-    //
-    if (typeof this.options.applyInvisibleOperator === 'function')
-      return this.options.applyInvisibleOperator(this, lhs, rhs);
-
-    //
-    // Is it a function application?
-    //
-    if (this.isFunctionHead(lhs)) {
-      const seq = getSequence(rhs);
-      return seq ? [lhs, ...seq] : lhs;
-    }
-
-    //
-    // Is it an invisible plus?
-    //
-    // Integer literal followed by a fraction -> Invisible Add
-    // CAUTION: machineValue() only works for numbers in machine range. OK in this case.
-    const lhsNumber = machineValue(lhs);
-    if (lhsNumber !== null && Number.isInteger(lhsNumber)) {
-      const rhsHead = head(rhs);
-      if (rhsHead === 'Divide' || rhsHead === 'Rational') {
-        const [n, d] = [machineValue(op(rhs, 1)), machineValue(op(rhs, 2))];
-        if (
-          n !== null &&
-          d !== null &&
-          n > 0 &&
-          n <= 1000 &&
-          d > 1 &&
-          d <= 1000 &&
-          Number.isInteger(n) &&
-          Number.isInteger(d)
-        )
-          return ['Add', lhs, rhs];
-      }
-    }
-
-    // If the value of `lhs` is a number and the value of `rhs` is a number
-    // (but they may not be literal)
-    // -> Apply Invisible Multiply
-    // if (symbol(rhs) === 'Nothing') return lhs;
-    if (head(rhs) === 'Delimiter') {
-      if (head(op(rhs, 1)) === 'Sequence')
-        return [lhs, ...(ops(op(rhs, 1)) ?? [])];
-
-      if (!op(rhs, 1) || symbol(op(rhs, 1)) === 'Nothing')
-        return applyAssociativeOperator(
-          'Sequence',
-          lhs,
-          this.error('expected-expression', start)
-        );
-    }
-    if (
-      head(rhs) === 'Sequence' ||
-      head(lhs) === 'Sequence' ||
-      stringValue(lhs) !== null ||
-      stringValue(rhs) !== null ||
-      dictionary(lhs) !== null ||
-      dictionary(rhs) !== null
-    )
-      return applyAssociativeOperator('Sequence', lhs, rhs);
-
-    return applyAssociativeOperator('Multiply', lhs, rhs);
   }
 
   /**
@@ -2104,7 +1982,8 @@ export class _Parser implements Parser {
     if (lhs === null) {
       lhs = this.parsePrimary(until);
       // If we got an empty sequence, ignore it.
-      // This is returned by some purely presentational commands, for example `\displaystyle`
+      // This is returned by some purely presentational commands,
+      // for example `\displaystyle`
       if (head(lhs) === 'Sequence' && nops(lhs) === 0) lhs = null;
     }
 
@@ -2118,10 +1997,23 @@ export class _Parser implements Parser {
 
         let result = this.parseInfixOperator(lhs, until);
         if (result === null) {
-          // We've encountered something else than an infix operator
-          // OR an infix operator with a lower priority.
-          // Could be "y" after "x": time to apply the invisible operator
-          result = this.applyInvisibleOperator(until, lhs);
+          // If any operator, no sequence to apply
+          if (this.peekDefinitions('operator').length === 0) {
+            // No infix operator, join the expressions with a Sequence
+            const rhs = this.parseExpression({
+              ...until,
+              minPrec: MULTIPLICATION_PRECEDENCE,
+            });
+            if (rhs !== null) {
+              if (head(lhs) === 'InvisibleOperator') {
+                if (head(rhs) === 'InvisibleOperator')
+                  result = ['InvisibleOperator', ...ops(lhs)!, ...ops(rhs)!];
+                else result = ['InvisibleOperator', ...ops(lhs)!, rhs];
+              } else if (head(rhs) === 'InvisibleOperator') {
+                result = ['InvisibleOperator', lhs, ...ops(rhs)!];
+              } else result = ['InvisibleOperator', lhs, rhs];
+            }
+          }
         }
         if (result !== null) {
           lhs = result;
@@ -2131,14 +2023,6 @@ export class _Parser implements Parser {
           done = true;
         }
       }
-    }
-
-    //
-    // 4. We've encountered an unexpected token
-    //
-    if (!lhs) {
-      lhs = this.parseSyntaxError();
-      while (!this.atTerminator(until)) this.nextToken();
     }
 
     return this.decorate(lhs, start);

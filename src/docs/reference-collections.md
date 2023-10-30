@@ -97,7 +97,7 @@ The visual presentation of a `List` expression can be customized using the
 ce.box(["List", 5, 2, 10, 18]).latex;
 // ➔ "\\lbrack 5, 2, 10, 18 \\rbrack"
 
-ce.box(["Delimiter", ["List", 5, 2, 10, 18], "<>;"]).latex;
+ce.box(["Delimiter", ["List", 5, 2, 10, 18], "<;>"]).latex;
 // ➔ "\\langle5; 2; 10; 18\\rangle"
 ```
 

@@ -37,8 +37,9 @@ describe('CANONICAL FORMS', () => {
   // have to be done in the right order to get the correct result
   test('2^3x"', () => {
     expect(check('2^3x')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", ["Power", 2, 3], "x"]
-      ["Multiply", 8, "x"]
+      latex     = ["InvisibleOperator", ["Power", 2, 3], "x"]
+      box       = ["Multiply", ["Power", 2, 3], "x"]
+      canonical = ["Multiply", 8, "x"]
     `);
   });
 
@@ -78,25 +79,74 @@ describe('CANONICAL FORMS', () => {
     expect(check('(1+(2+(3+4)))(((5+6)+7)((8+(9+10)))(11+(12+13)+14))'))
       .toMatchInlineSnapshot(`
       latex     = [
-        "Multiply",
+        "InvisibleOperator",
         [
           "Delimiter",
-          ["Add", 1, ["Delimiter", ["Add", 2, ["Delimiter", ["Add", 3, 4]]]]]
+          [
+            "Sequence",
+            [
+              "Add",
+              1,
+              [
+                "Delimiter",
+                [
+                  "Sequence",
+                  ["Add", 2, ["Delimiter", ["Sequence", ["Add", 3, 4]]]]
+                ]
+              ]
+            ]
+          ]
         ],
         [
           "Delimiter",
           [
-            "Multiply",
-            ["Delimiter", ["Add", ["Delimiter", ["Add", 5, 6]], 7]],
+            "Sequence",
             [
-              "Delimiter",
-              ["Delimiter", ["Add", 8, ["Delimiter", ["Add", 9, 10]]]]
-            ],
-            ["Delimiter", ["Add", 11, ["Delimiter", ["Add", 12, 13]], 14]]
+              "InvisibleOperator",
+              [
+                "Delimiter",
+                [
+                  "Sequence",
+                  ["Add", ["Delimiter", ["Sequence", ["Add", 5, 6]]], 7]
+                ]
+              ],
+              [
+                "Delimiter",
+                [
+                  "Sequence",
+                  [
+                    "Delimiter",
+                    [
+                      "Sequence",
+                      ["Add", 8, ["Delimiter", ["Sequence", ["Add", 9, 10]]]]
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "Delimiter",
+                [
+                  "Sequence",
+                  [
+                    "Add",
+                    11,
+                    ["Delimiter", ["Sequence", ["Add", 12, 13]]],
+                    14
+                  ]
+                ]
+              ]
+            ]
           ]
         ]
       ]
       box       = [
+        "Multiply",
+        ["Add", 1, 2, 3, 4],
+        ["Add", 5, 6, 7],
+        ["Add", 8, 9, 10],
+        ["Add", 11, 12, 13, 14]
+      ]
+      canonical = [
         "Multiply",
         ["Add", 5, 6, 7],
         ["Add", 8, 9, 10],
@@ -111,15 +161,16 @@ describe('CANONICAL FORMS', () => {
   // (multiplication by 0 does not always = 0)
   test('2x\\frac{0}{5}"', () => {
     expect(check('2x\\frac{0}{5}')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", 2, "x", ["Divide", 0, 5]]
-      0
+      latex     = ["InvisibleOperator", 2, "x", ["Divide", 0, 5]]
+      box       = ["Multiply", 2, "x", 0]
+      canonical = 0
     `);
   });
 
   // Negative exponents become fractions
   test('2xy^{-n}"', () => {
     expect(check('2xy^{-n}')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", 2, "x", ["Power", "y", ["Negate", "n"]]]
+      latex     = ["InvisibleOperator", 2, "x", ["Power", "y", ["Negate", "n"]]]
       ["Multiply", 2, "x", ["Power", "y", ["Negate", "n"]]]
     `);
   });
@@ -133,7 +184,7 @@ describe('CANONICAL FORMS', () => {
 
   test('2\\times(5-5)\\times5\\times4"', () => {
     expect(check('2\\times(5-5)\\times5\\times4')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", 2, ["Delimiter", ["Subtract", 5, 5]], 5, 4]
+      latex     = ["Multiply", 2, ["Delimiter", ["Sequence", ["Subtract", 5, 5]]], 5, 4]
       box       = ["Multiply", 40, ["Subtract", 5, 5]]
       simplify  = 0
     `);
@@ -141,7 +192,7 @@ describe('CANONICAL FORMS', () => {
 
   test('2\\frac{x}{a}\\frac{y}{b}"', () => {
     expect(check('2\\frac{x}{a}\\frac{y}{b}')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
+      latex     = ["InvisibleOperator", 2, ["Divide", "x", "a"], ["Divide", "y", "b"]]
       ["Divide", ["Multiply", 2, "x", "y"], ["Multiply", "a", "b"]]
     `);
   });
@@ -156,8 +207,9 @@ describe('COMMUTATIVE ORDER', () => {
   // (numbers before symbols)
   test(`Canonical form yx5z`, () => {
     expect(check('yx5z')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", "y", "x", 5, "z"]
-      ["Multiply", 5, "x", "y", "z"]
+      latex     = ["InvisibleOperator", "y", "x", 5, "z"]
+      box       = ["Multiply", "y", "x", 5, "z"]
+      canonical = ["Multiply", 5, "x", "y", "z"]
     `);
   });
 
@@ -167,21 +219,30 @@ describe('COMMUTATIVE ORDER', () => {
   test(`Canonical form '-2x5z\\sqrt{y}\\frac{3}{4}3\\pi y'`, () => {
     expect(check('-2x5z\\sqrt{y}\\frac{3}{4}3\\pi y')).toMatchInlineSnapshot(`
       latex     = [
-        "Negate",
-        [
-          "Multiply",
-          2,
-          "x",
-          5,
-          "z",
-          ["Sqrt", "y"],
-          ["Divide", 3, 4],
-          3,
-          "Pi",
-          "y"
-        ]
+        "InvisibleOperator",
+        -2,
+        "x",
+        5,
+        "z",
+        ["Sqrt", "y"],
+        ["Divide", 3, 4],
+        3,
+        "Pi",
+        "y"
       ]
       box       = [
+        "Multiply",
+        -2,
+        "x",
+        5,
+        "z",
+        ["Sqrt", "y"],
+        ["Rational", 3, 4],
+        3,
+        "Pi",
+        "y"
+      ]
+      canonical = [
         "Multiply",
         ["Rational", -45, 2],
         "Pi",
@@ -203,19 +264,51 @@ describe('COMMUTATIVE ORDER', () => {
   test(`Canonical form '(b^3c^2d)(x^7y)(a^5g)(b^2x^5b3)'`, () => {
     expect(check('(b^3c^2d)(x^7y)(a^5g)(b^2x^5b3)')).toMatchInlineSnapshot(`
       latex     = [
-        "Multiply",
+        "InvisibleOperator",
         [
           "Delimiter",
-          ["Multiply", ["Power", "b", 3], ["Power", "c", 2], "d"]
+          [
+            "Sequence",
+            ["InvisibleOperator", ["Power", "b", 3], ["Power", "c", 2], "d"]
+          ]
         ],
-        ["Delimiter", ["Multiply", ["Power", "x", 7], "y"]],
-        ["Delimiter", ["Multiply", ["Power", "a", 5], "g"]],
         [
           "Delimiter",
-          ["Multiply", ["Power", "b", 2], ["Power", "x", 5], "b", 3]
+          ["Sequence", ["InvisibleOperator", ["Power", "x", 7], "y"]]
+        ],
+        [
+          "Delimiter",
+          ["Sequence", ["InvisibleOperator", ["Power", "a", 5], "g"]]
+        ],
+        [
+          "Delimiter",
+          [
+            "Sequence",
+            [
+              "InvisibleOperator",
+              ["Power", "b", 2],
+              ["Power", "x", 5],
+              "b",
+              3
+            ]
+          ]
         ]
       ]
-      [
+      box       = [
+        "Multiply",
+        ["Power", "b", 3],
+        ["Square", "c"],
+        "d",
+        ["Power", "x", 7],
+        "y",
+        ["Power", "a", 5],
+        "g",
+        ["Square", "b"],
+        ["Power", "x", 5],
+        "b",
+        3
+      ]
+      canonical = [
         "Multiply",
         3,
         "d",
@@ -254,10 +347,10 @@ describe('POLYNOMIAL ORDER', () => {
       latex     = [
         "Add",
         6,
-        ["Multiply", 5, "c"],
-        ["Multiply", 2, "b"],
+        ["InvisibleOperator", 5, "c"],
+        ["InvisibleOperator", 2, "b"],
         3,
-        ["Multiply", 7, "a"]
+        ["InvisibleOperator", 7, "a"]
       ]
       box       = [
         "Add",
@@ -282,9 +375,9 @@ describe('POLYNOMIAL ORDER', () => {
     expect(check('5a+3a+7a')).toMatchInlineSnapshot(`
       latex     = [
         "Add",
-        ["Multiply", 5, "a"],
-        ["Multiply", 3, "a"],
-        ["Multiply", 7, "a"]
+        ["InvisibleOperator", 5, "a"],
+        ["InvisibleOperator", 3, "a"],
+        ["InvisibleOperator", 7, "a"]
       ]
       box       = [
         "Add",
@@ -303,11 +396,17 @@ describe('POLYNOMIAL ORDER', () => {
     expect(check('x^{3}2\\pi+3x^{3}4\\pi+x^3')).toMatchInlineSnapshot(`
       latex     = [
         "Add",
+        ["InvisibleOperator", ["Power", "x", 3], 2, "Pi"],
+        ["InvisibleOperator", 3, ["Power", "x", 3], 4, "Pi"],
+        ["Power", "x", 3]
+      ]
+      box       = [
+        "Add",
         ["Multiply", ["Power", "x", 3], 2, "Pi"],
         ["Multiply", 3, ["Power", "x", 3], 4, "Pi"],
         ["Power", "x", 3]
       ]
-      box       = [
+      canonical = [
         "Add",
         ["Multiply", 2, "Pi", ["Power", "x", 3]],
         ["Multiply", 12, "Pi", ["Power", "x", 3]],
@@ -341,13 +440,21 @@ describe('POLYNOMIAL ORDER', () => {
     expect(check('x^2y^3+x^3y^2+xy^4+x^4y+x^2y^2')).toMatchInlineSnapshot(`
       latex     = [
         "Add",
-        ["Multiply", ["Power", "x", 2], ["Power", "y", 3]],
-        ["Multiply", ["Power", "x", 3], ["Power", "y", 2]],
-        ["Multiply", "x", ["Power", "y", 4]],
-        ["Multiply", ["Power", "x", 4], "y"],
-        ["Multiply", ["Power", "x", 2], ["Power", "y", 2]]
+        ["InvisibleOperator", ["Power", "x", 2], ["Power", "y", 3]],
+        ["InvisibleOperator", ["Power", "x", 3], ["Power", "y", 2]],
+        ["InvisibleOperator", "x", ["Power", "y", 4]],
+        ["InvisibleOperator", ["Power", "x", 4], "y"],
+        ["InvisibleOperator", ["Power", "x", 2], ["Power", "y", 2]]
       ]
-      [
+      box       = [
+        "Add",
+        ["Multiply", ["Square", "x"], ["Power", "y", 3]],
+        ["Multiply", ["Power", "x", 3], ["Square", "y"]],
+        ["Multiply", ["Square", "x"], ["Square", "y"]],
+        ["Multiply", ["Power", "x", 4], "y"],
+        ["Multiply", "x", ["Power", "y", 4]]
+      ]
+      canonical = [
         "Add",
         ["Multiply", ["Square", "x"], ["Power", "y", 3]],
         ["Multiply", ["Square", "x"], ["Square", "y"]],
@@ -363,13 +470,36 @@ describe('POLYNOMIAL ORDER', () => {
       .toMatchInlineSnapshot(`
       latex     = [
         "Add",
-        ["Delimiter", ["Multiply", ["Power", "b", 3], ["Power", "b", 2]]],
-        ["Delimiter", ["Multiply", ["Power", "a", 3], ["Power", "a", 2]]],
-        ["Delimiter", ["Power", "b", 6]],
-        ["Delimiter", ["Multiply", ["Power", "a", 5], "b"]],
-        ["Delimiter", ["Power", "a", 5]]
+        [
+          "Delimiter",
+          [
+            "Sequence",
+            ["InvisibleOperator", ["Power", "b", 3], ["Power", "b", 2]]
+          ]
+        ],
+        [
+          "Delimiter",
+          [
+            "Sequence",
+            ["InvisibleOperator", ["Power", "a", 3], ["Power", "a", 2]]
+          ]
+        ],
+        ["Delimiter", ["Sequence", ["Power", "b", 6]]],
+        [
+          "Delimiter",
+          ["Sequence", ["InvisibleOperator", ["Power", "a", 5], "b"]]
+        ],
+        ["Delimiter", ["Sequence", ["Power", "a", 5]]]
       ]
       box       = [
+        "Add",
+        ["Multiply", ["Power", "a", 3], ["Square", "a"]],
+        ["Multiply", ["Power", "a", 5], "b"],
+        ["Multiply", ["Power", "b", 3], ["Square", "b"]],
+        ["Power", "a", 5],
+        ["Power", "b", 6]
+      ]
+      canonical = [
         "Add",
         ["Multiply", "b", ["Power", "a", 5]],
         ["Power", "a", 5],
@@ -391,11 +521,17 @@ describe('POLYNOMIAL ORDER', () => {
     expect(check('5c^2a^4+2b^8+7b^3a')).toMatchInlineSnapshot(`
       latex     = [
         "Add",
-        ["Multiply", 5, ["Power", "c", 2], ["Power", "a", 4]],
-        ["Multiply", 2, ["Power", "b", 8]],
-        ["Multiply", 7, ["Power", "b", 3], "a"]
+        ["InvisibleOperator", 5, ["Power", "c", 2], ["Power", "a", 4]],
+        ["InvisibleOperator", 2, ["Power", "b", 8]],
+        ["InvisibleOperator", 7, ["Power", "b", 3], "a"]
       ]
-      [
+      box       = [
+        "Add",
+        ["Multiply", 2, ["Power", "b", 8]],
+        ["Multiply", 7, ["Power", "b", 3], "a"],
+        ["Multiply", 5, ["Square", "c"], ["Power", "a", 4]]
+      ]
+      canonical = [
         "Add",
         ["Multiply", 2, ["Power", "b", 8]],
         ["Multiply", 5, ["Square", "c"], ["Power", "a", 4]],

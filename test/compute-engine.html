@@ -128,14 +128,13 @@
     </header>
     <main>
       <div class="row">
-        <math-field id="mf" class="mathfield" tabindex="0"></math-field>
+        <math-field id="mf" class="mathfield" tabindex="0"
+          >-18 \bmod 5</math-field
+        >
         <button id="random">🎲</button>
       </div>
       <!-- <textarea id="json-input" class="input">["Add", 0, ["Range", 1, 10]]</textarea> -->
-      <textarea id="json-input" class="input">
-      ["Assign", "f", ["Add", "_", 1]] ["Add", ["f", 2], 5]
-    </textarea
-      >
+      <textarea id="json-input" class="input"> </textarea>
       <div id="json-input-error"></div>
 
       <!-- \operatorname{NIntegrate}\left(x \mapsto \sin x, 0, 1\right) -->
@@ -590,7 +589,7 @@
           document.getElementById("json-input").value
         );
 
-        if (jsonLines === 1) {
+        if (jsonLines <= 1) {
           document.getElementById("json-input").value = JSON.stringify(
             expr.json
           );
@@ -624,7 +623,8 @@
         }
       }
 
-      onTextareaChange();
+      if (mf.value) onMathfieldChange();
+      else onTextareaChange();
 
       //
       // When the user edits the text area...

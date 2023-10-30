@@ -2,24 +2,7 @@ import { BoxedExpression } from '../public';
 
 /**
  * Flatten the arguments.
- * If `expr` was canonical, the result it canonical.
  */
-export function flatten(expr: BoxedExpression, head: string): BoxedExpression {
-  if (!expr.ops || expr.head !== head) return expr;
-  if (expr.ops.every((x) => !x.ops || x.head !== head)) return expr;
-
-  const tail: BoxedExpression[] = [];
-  for (const arg of expr.ops) {
-    if (!arg.ops || arg.head !== head) tail.push(arg);
-    else {
-      // ["f", a, ["f", b, c]] -> ["f", a, b, c]
-      // or ["f", ["f", a]] -> ["f", a]
-      tail.push(...flattenOps(arg.ops, head));
-    }
-  }
-
-  return expr.engine.fn(head, tail);
-}
 
 export function flattenOps(
   ops: BoxedExpression[],
@@ -47,12 +30,19 @@ export function flattenOps(
 }
 
 export function flattenSequence(xs: BoxedExpression[]): BoxedExpression[] {
-  // Bypass memory allocation for the common case where there are no sequences
-  if (xs.every((x) => x.head !== 'Sequence')) return xs;
+  // Bypass memory allocation for the common case where there are no sequences or delimiters
+  if (xs.every((x) => x.head !== 'Sequence' && x.head !== 'Delimiter'))
+    return xs;
 
   const ys: BoxedExpression[] = [];
   for (const x of xs) {
-    if (x.isValid && x.head === 'Sequence') {
+    if (!x.isValid) ys.push(x);
+    else if (x.head === 'Delimiter') {
+      const seq = x.op1.ops ?? [];
+      // If this is an empty delimiter, i.e. `()`, preserve it as a tuple, don't flatten it.
+      if (seq.length === 0) ys.push(x.engine.box(['Tupple']));
+      else ys.push(...flattenSequence(seq));
+    } else if (x.head === 'Sequence') {
       if (x.ops) ys.push(...x.ops);
     } else ys.push(x);
   }

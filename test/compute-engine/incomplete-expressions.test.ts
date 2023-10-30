@@ -11,37 +11,45 @@ describe('basic', () => {
     expect(parse('\\frac')).toMatchInlineSnapshot(
       `["Divide", ["Error", "'missing'"], ["Error", "'missing'"]]`
     );
-    expect(parse('\\frac{')).toMatchInlineSnapshot(
-      `["Divide", ["Error", "'syntax-error'"], ["Error", "'missing'"]]`
-    );
+    expect(parse('\\frac{')).toMatchInlineSnapshot(`
+      [
+        "Divide",
+        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{'"]],
+        ["Error", "'missing'"]
+      ]
+    `);
     expect(parse('\\frac{{')).toMatchInlineSnapshot(`
       [
         "Divide",
-        [
-          "Sequence",
-          ["Error", "'syntax-error'"],
-          ["Error", "'syntax-error'"]
-        ],
+        ["Error", "'expected-closing-delimiter'", ["LatexString", "'{'"]],
         ["Error", "'missing'"]
       ]
     `);
     expect(parse('\\frac{}}')).toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Pair",
         ["Divide", ["Error", "'missing'"], ["Error", "'missing'"]],
         ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ]
     `);
     expect(parse('\\frac{1}}')).toMatchInlineSnapshot(`
       [
-        "Sequence",
+        "Pair",
         ["Divide", 1, ["Error", "'missing'"]],
         ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ]
     `);
-    expect(parse('\\frac{1}{2')).toMatchInlineSnapshot(
-      `["Divide", 1, ["Sequence", 2, ["Error", "'syntax-error'"]]]`
-    );
+    expect(parse('\\frac{1}{2')).toMatchInlineSnapshot(`
+      [
+        "Divide",
+        1,
+        [
+          "Pair",
+          2,
+          ["Error", "'expected-closing-delimiter'", ["LatexString", "'{2'"]]
+        ]
+      ]
+    `);
     expect(parse('\\sqrt{}')).toMatchInlineSnapshot(
       `["Sqrt", ["Error", "'missing'"]]`
     );

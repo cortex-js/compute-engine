@@ -29,6 +29,7 @@ import {
 import { countTokens, joinLatex } from './tokenizer';
 import { serializeNumber } from './serialize-number';
 import { SYMBOLS } from './dictionary/definitions-symbols';
+import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core';
 
 const ACCENT_MODIFIERS = {
   deg: (s: string) => `${s}\\degree`,
@@ -194,14 +195,26 @@ export class Serializer {
   ): string {
     if (style === 'none') return s;
     if (fence === undefined) fence = '()';
-    const openFence = fence?.[0] ?? '.';
-    const closeFence = fence?.[1] ?? '.';
+    let openFence = fence?.[0] ?? '.';
+    let closeFence = fence?.[1] ?? '.';
 
     if ((openFence === '.' || closeFence === '.') && style === 'paren')
       style = 'leftright';
 
+    // Map Unicode characters to LaTeX commands
+    if (openFence === '"') openFence = '``';
+    else if (openFence === '|') openFence = '\\lvert';
+    else openFence = DELIMITERS_SHORTHAND[openFence] ?? openFence;
+
+    if (closeFence === '"') closeFence = "''";
+    else if (closeFence === '|') closeFence = '\\rvert';
+    else closeFence = DELIMITERS_SHORTHAND[closeFence] ?? closeFence;
+
+    if (openFence === '.' && closeFence === '.') return s;
+
     if (style === 'leftright')
       return `\\left${openFence}${s}\\right${closeFence}}`;
+
     if (style === 'big')
       return `${openFence === '.' ? '' : `\\Bigl${openFence}`}${s}${
         closeFence === '.' ? '' : `\\Bigr${closeFence}`

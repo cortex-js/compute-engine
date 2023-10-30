@@ -29,40 +29,31 @@ describe('STYLE - TEXT MODE', () => {
   test('\\text', () => {
     // Whitespace should be preserved
     expect(check('a\\text{ and }b')).toMatchInlineSnapshot(`
-      latex     = ["Sequence", "a", "' and '", "b"]
-      ["Sequence", "a", "' and '", "b"]
+      latex     = ["InvisibleOperator", "a", "' and '", "b"]
+      ["Triple", "a", "' and '", "b"]
     `);
 
     // Math mode inside text mode
     expect(check('a\\text{ in $x$ }b')).toMatchInlineSnapshot(`
-      latex     = ["Sequence", "a", "' in $x$ '", "b"]
-      ["Sequence", "a", "' in $x$ '", "b"]
+      latex     = ["InvisibleOperator", "a", "'x' in  ''", "b"]
+      ["Triple", "a", "'x' in  ''", "b"]
     `);
 
     expect(check('a\\text{ black \\textcolor{red}{RED} }b'))
       .toMatchInlineSnapshot(`
-      latex     = ["Sequence", "a", "'red,RED, black \\textcolor '", "b"]
-      ["Sequence", "a", "'red,RED, black \\textcolor '", "b"]
+      latex     = ["InvisibleOperator", "a", "'red,RED, black \\textcolor '", "b"]
+      ["Triple", "a", "'red,RED, black \\textcolor '", "b"]
     `);
 
     expect(check('a\\text{ black \\color{red}RED\\color{blue}BLUE} b'))
       .toMatchInlineSnapshot(`
-      latex     = ["Multiply", "a", "' black '", "b"]
-      [
-        "Multiply",
-        "a",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
-          "' black '"
-        ],
-        "b"
-      ]
+      latex     = ["InvisibleOperator", "a", "' black '", "b"]
+      ["Triple", "a", "' black '", "b"]
     `);
     expect(check('a\\text{ black \\textcolor{red}{RED} black} b'))
       .toMatchInlineSnapshot(`
-      latex     = ["Sequence", "a", "'red,RED, black \\textcolor black'", "b"]
-      ["Sequence", "a", "'red,RED, black \\textcolor black'", "b"]
+      latex     = ["InvisibleOperator", "a", "'red,RED, black \\textcolor black'", "b"]
+      ["Triple", "a", "'red,RED, black \\textcolor black'", "b"]
     `);
 
     expect(

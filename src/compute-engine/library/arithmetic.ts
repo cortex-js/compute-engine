@@ -55,13 +55,14 @@ import { simplifyDivide } from './arithmetic-divide';
 import { processPower, processSqrt } from './arithmetic-power';
 import { applyN, apply2N, canonical } from '../symbolic/utils';
 import {
-  checkArg,
-  checkArgs,
+  checkDomain,
+  checkDomains,
   checkNumericArgs,
 } from '../boxed-expression/validate';
 import { flattenSequence } from '../symbolic/flatten';
 import { applicable } from '../function-utils';
 import { each, isCollection } from '../collection-utils';
+import { BoxedNumber } from '../boxed-expression/boxed-number';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic functions that should be considered:
@@ -91,9 +92,8 @@ export type CanonicalArithmeticFunctions =
 // See Scala/Breeze "universal functions": https://github.com/scalanlp/breeze/wiki/Universal-Functions
 
 // LogOnePlus: { domain: 'Numbers' },
-// mod (modulo). See https://numerics.diploid.ca/floating-point-part-4.html,
+// See https://numerics.diploid.ca/floating-point-part-4.html,
 // regarding 'remainder' and 'truncatingRemainder'
-// Mod: modulo
 // Boole
 // Zeta function
 // Random() -> random number between 0 and 1
@@ -113,7 +113,7 @@ export type CanonicalArithmeticFunctions =
 
 /*
 
-## THEORY OF OPERATIONS OF PRECEDENCE
+## THEORY OF OPERATIONS:  PRECEDENCE
 
 PEMDAS is a lie. But the ambiguity is essentially around the ÷ (or solidus /)
 sign and implicit multiplication.
@@ -276,6 +276,12 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        canonical: (ce, args) => {
+          const base = args[0];
+          if (base instanceof BoxedNumber && base.isNegative)
+            return ce.neg(ce._fn('Factorial', [ce.neg(base)]));
+          return ce._fn('Factorial', [base]);
+        },
         evaluate: (ce, ops) => {
           const n = asSmallInteger(ops[0]);
           if (n !== null && n >= 0) {
@@ -392,7 +398,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
         canonical: (ce, ops) => {
           if (ops.length === 1)
-            return ce._fn('Log', [checkArg(ce, ops[0], 'Numbers')]);
+            return ce._fn('Log', [checkDomain(ce, ops[0], 'Numbers')]);
 
           ops = checkNumericArgs(ce, ops, 2);
           if (ops.length !== 2) return ce._fn('Log', ops);
@@ -464,6 +470,30 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
                 : ce.complex(x.toNumber()).log().div(Math.LN10),
             (z) => z.log().div(Math.LN10)
           ),
+      },
+    },
+
+    Mod: {
+      description: 'Modulo',
+      wikidata: 'Q1799665',
+      complexity: 2500,
+      threadable: true,
+
+      signature: {
+        domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
+        evaluate: (ce, ops) => {
+          if (ops.length !== 2) return undefined;
+          const [lhs, rhs] = ops;
+          // @todo: use .numericValue instead, and handle bignum,
+          // complexnumbers, rationals, etc.
+          const nLhs = lhs.value;
+          const nRhs = rhs.value;
+          if (typeof nLhs !== 'number') return undefined;
+          if (typeof nRhs !== 'number') return undefined;
+          // In JavaScript, the % is remainder, not modulo
+          // so adapt it to return a modulo
+          return ce.number(((nLhs % nRhs) + nRhs) % nRhs);
+        },
       },
     },
 
@@ -542,7 +572,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           args = checkNumericArgs(ce, args, 2);
           if (args.length !== 2) return ce._fn('Power', args);
 
-          return ce.pow(args[0], args[1]);
+          const [base, exp] = args;
+          // If the base is a literal number and negative, treat it as a Negate
+          // i.e. -2^3 -> -(2^3)
+          if (base instanceof BoxedNumber && base.isNegative)
+            return ce.neg(ce.pow(base, exp));
+
+          return ce.pow(base, exp);
         },
         simplify: (ce, ops) => processPower(ce, ops[0], ops[1], 'simplify'),
         evaluate: (ce, ops) => processPower(ce, ops[0], ops[1], 'evaluate'),
@@ -585,10 +621,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
           if (args.length === 1)
             return ce._fn('Rational', [
-              checkArg(ce, args[0], 'ExtendedRealNumbers'),
+              checkDomain(ce, args[0], 'ExtendedRealNumbers'),
             ]);
 
-          args = checkArgs(ce, args, ['Integers', 'Integers']);
+          args = checkDomains(ce, args, ['Integers', 'Integers']);
 
           if (args.length !== 2 || !args[0].isValid || !args[1].isValid)
             return ce._fn('Rational', args);
@@ -767,7 +803,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // Not necessarily legal, but probably what was intended:
           // ['Subtract', 'x'] -> ['Negate', 'x']
           if (args.length === 1) {
-            const x = checkArg(ce, args[0], 'Numbers');
+            const x = checkDomain(ce, args[0], 'Numbers');
             if (x.isValid) return ce.neg(x);
           }
 

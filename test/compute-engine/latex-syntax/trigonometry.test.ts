@@ -52,8 +52,9 @@ describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
 describe('TRIGONOMETRIC FUNCTIONS', () => {
   test(`\\cos(k\\pi)`, () =>
     expect(check('\\cos(k\\pi)')).toMatchInlineSnapshot(`
-      latex     = ["Cos", ["Multiply", "k", "Pi"]]
-      box       = ["Cos", ["Multiply", "Pi", "k"]]
+      latex     = ["Cos", ["InvisibleOperator", "k", "Pi"]]
+      box       = ["Cos", ["Multiply", "k", "Pi"]]
+      canonical = ["Cos", ["Multiply", "Pi", "k"]]
       N-auto    = [
         "Cos",
         [

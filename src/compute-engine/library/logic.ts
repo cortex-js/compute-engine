@@ -66,6 +66,21 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
     complexity: 10200,
     signature: {
       domain: 'LogicOperators',
+      canonical: (ce: IComputeEngine, args: BoxedExpression[]) => {
+        const lhs = args[0].symbol;
+        const rhs = args[1].symbol;
+        if (
+          (lhs === 'True' && rhs === 'True') ||
+          (lhs === 'False' && rhs === 'False')
+        )
+          return ce.True;
+        if (
+          (lhs === 'True' && rhs === 'False') ||
+          (lhs === 'False' && rhs === 'True')
+        )
+          return ce.False;
+        return ce._fn('Equivalent', args);
+      },
       simplify: processEquivalent,
       evaluate: processEquivalent,
     },
@@ -155,7 +170,7 @@ function processNot(
   ce: IComputeEngine,
   args: BoxedExpression[]
 ): BoxedExpression | undefined {
-  const op1 = args[0].symbol;
+  const op1 = args[0]?.symbol;
   if (op1 === 'True') return ce.False;
   if (op1 === 'False') return ce.True;
   return undefined;

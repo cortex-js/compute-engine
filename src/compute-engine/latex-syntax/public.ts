@@ -462,28 +462,6 @@ export type LatexDictionary = Array<object>;
 
 export type ParseLatexOptions = {
   /**
-   * This function is invoked when a number is followed by a symbol,
-   * an open delimiter or a function.
-   *
-   * If this function is set to `null`, the lhs and rhs are joined as a
-   * `Sequence`.
-   *
-   * If this function is set to `undefined` it behaves in the following way:
-   * - a number followed by a numeric expression is considered as separated
-   *  with an invisible multiplication sign, and the two are joined as
-   *  ['Multiply', lhs, rhs].
-   * - a number followed by a rational number is considered to be separated
-   *  with an invisible plus, and the two are joined as ['Add', lhs,
-   *
-   * For example with `2\frac{3}{4}`: `["Add", 2, ["Divide", 3, 4]]`
-   *
-   */
-  applyInvisibleOperator:
-    | 'auto'
-    | null
-    | ((parser: Parser, lhs: Expression, rhs: Expression) => Expression | null);
-
-  /**
    * If true, ignore space characters in math mode.
    *
    * **Default**: `true`
@@ -561,24 +539,27 @@ export type ParseLatexOptions = {
 export type SerializeLatexOptions = {
   /**
    * LaTeX string used to render an invisible multiply, e.g. in '2x'.
-   * Leave it empty to join the adjacent terms, or use `\cdot` to insert
-   * a `\cdot` operator between them, i.e. `2\cdot x`.
+   *
+   * Leave it empty to join the adjacent terms, i.e. `2x`.
+   *
+   * Use `\cdot` to insert a `\cdot` operator between them, i.e. `2\cdot x`.
    *
    * Empty by default.
    */
   invisibleMultiply: LatexString;
 
   /**
-   * LaTeX string used for an invisible plus, e.g. in '1 3/4'.
+   * LaTeX string used for an invisible plus with mixed numbers e.g. in '1 3/4'.
+   *
    * Leave it empty to join the main number and the fraction, i.e. render it
-   * as `1\frac{3}{4}`, or use `+` to insert a `+` operator between them, i.e.
-   * `1+\frac{3}{4}`
+   * as `1\frac{3}{4}`.
+   *
+   * Use `+` to insert an explicit `+` operator between them,
+   *  i.e. `1+\frac{3}{4}`
    *
    * Empty by default.
    */
   invisiblePlus: LatexString;
-
-  // @todo: consider invisibleApply?: string;
 
   /**
    * LaTeX string used for an explicit multiply operator,

@@ -416,8 +416,6 @@ console.log(ce.parse("x__+1").json);
 console.log(ce.parse("x_{a").json);
 // ➔ ["Subscript", "x", ["Error", "'expected-closing-delimiter'", ["Latex","'{a'"]]]
 
-console.log(ce.parse("1()").json);
-// ➔ ["Multiply",1,["Error","'expected-expression'",["Latex","'()'"]]]
 
 console.log(ce.parse("x@2").json);
 // ➔ ["Sequence", "x", ["Error", ["ErrorCode", "'unexpected-token'", "'@'"], ["Latex", "'@2'"]]]

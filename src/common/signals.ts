@@ -94,9 +94,9 @@ export type WarningSignalHandler = (warnings: WarningSignal[]) => void;
  * do expected a subscript.
  *
  * * `unexpected-sequence`: some adjacent elements were encountered (for
- * example `xy`), but no `invisibleOperator` is defined, therefore the elements
- * can't be combined. The default `invisibleOperator` is `Multiply`, but you
- * can also use `list`.
+ * example `xy`), but the elements could not be combined. By default, adjacent
+ * symbols are combined with `Multiply`, but adjacent numbers or adjacent
+ * operators are not combined.
  *
  * * `expected-argument`: a LaTeX command that requires one or more argument
  * was encountered without the required arguments.

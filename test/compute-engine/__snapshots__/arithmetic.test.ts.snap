@@ -573,8 +573,13 @@ eval-mach = -50.599999999999994
 `;
 
 exports[`MULTIPLY Multiply: All exact 1`] = `
-latex     = ["Multiply", 2, ["Divide", 5, 7], ["Divide", 7, 9]]
-box       = ["Rational", 10, 9]
+latex     = [
+  "InvisibleOperator",
+  2,
+  ["Multiply", ["Divide", 5, 7], ["Divide", 7, 9]]
+]
+box       = ["Multiply", 2, ["Rational", 5, 9]]
+canonical = ["Rational", 10, 9]
 N-auto    = 1.(1)
 N-mach    = 1.1111111111111112
 `;

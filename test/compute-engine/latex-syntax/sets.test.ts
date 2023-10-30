@@ -93,51 +93,15 @@ describe('PARSING SETS', () => {
     expect(parse('\\{1, 2, 3...\\}')).toMatchInlineSnapshot(
       `["Error", "'unexpected-delimiter'", ["LatexString", "'\\{'"]]`
     );
-    expect(parse('\\{1, 2, 3, ...\\}')).toMatchInlineSnapshot(`
-      [
-        "Set",
-        1,
-        2,
-        3,
-        [
-          "Range",
-          [
-            "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
-            "'missing'"
-          ],
-          ["Error", ["ErrorCode", "'unexpected-token'", "'.'"]]
-        ]
-      ]
-    `);
-    expect(parse('\\{...-2, -1, 0, 1, 2, 3...\\}')).toMatchInlineSnapshot(`
-      [
-        "Set",
-        [
-          "Range",
-          [
-            "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
-            "'missing'"
-          ],
-          ["Error", ["ErrorCode", "'unexpected-token'", "'.'"]]
-        ]
-      ]
-    `);
-    expect(parse('\\{...-2, -1, 0\\}')).toMatchInlineSnapshot(`
-      [
-        "Set",
-        [
-          "Range",
-          [
-            "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Strings"],
-            "'missing'"
-          ],
-          ["Error", ["ErrorCode", "'unexpected-token'", "'.'"]]
-        ]
-      ]
-    `);
+    expect(parse('\\{1, 2, 3, ...\\}')).toMatchInlineSnapshot(
+      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\{'"]]`
+    );
+    expect(parse('\\{...-2, -1, 0, 1, 2, 3...\\}')).toMatchInlineSnapshot(
+      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\{'"]]`
+    );
+    expect(parse('\\{...-2, -1, 0\\}')).toMatchInlineSnapshot(
+      `["Error", "'unexpected-delimiter'", ["LatexString", "'\\{'"]]`
+    );
   });
   test('Union, Intersection, etc...', () => {
     expect(parse('\\N \\cup \\R')).toMatchInlineSnapshot(

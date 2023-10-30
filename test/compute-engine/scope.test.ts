@@ -79,19 +79,19 @@ describe('SETTING/FORGETTING', () => {
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`["Less", 30, "x4"]`); // @fixme
     expect(x4.isPrime ?? 'undefined').toMatchInlineSnapshot(`undefined`);
     expect(x4.evaluate().numericValue).toMatchInlineSnapshot(`null`);
-    expect(x4.domain.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
+    expect(x4.domain?.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
 
     ce.assume(['Equal', 'x4', 17]);
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`False`);
     expect(x4.isPrime ?? 'undefined').toEqual(true);
-    expect(x4.evaluate().numericValue).toEqual(17);
-    expect(x4.domain.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
+    expect(x4.evaluate().value).toEqual(17);
+    expect(x4.domain?.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
 
     ce.assign({ x4: 2017 });
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`True`);
     expect(x4.isPrime ?? 'undefined').toMatchInlineSnapshot(`true`);
-    expect(x4.numericValue).toMatchInlineSnapshot(`null`); // @fixme, should be 2017
-    expect(x4.domain.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
+    expect(x4.value).toMatchInlineSnapshot(`2017`);
+    expect(x4.domain?.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
   });
 });
 

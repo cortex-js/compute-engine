@@ -95,11 +95,4 @@ describe('Expression head', () => {
         ['Hold', 'x'],
       ])
     ).toMatchInlineSnapshot(`x`));
-
-  // Using a 'Sequence' so that the head can be a "neutral" identity function
-  // Note: could add a ["Hold", "x"] if there was a need to prevent evaluation
-  test('Anon function', () =>
-    expect(evaluate([['Sequence', '_'], 'x'])).toMatchInlineSnapshot(
-      `["Sequence", "x"]`
-    ));
 });

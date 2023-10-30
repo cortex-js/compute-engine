@@ -304,26 +304,26 @@ export function symbol(expr: Expression | null | undefined): string | null {
   return s;
 }
 
-export function isListLike(expr: Expression | null): boolean {
-  if (expr === null) return false;
-  const h = head(expr);
-  if (!h || typeof h !== 'string') return false;
-  return /^(List|Sequence|Tuple|Single|Pair|Triple)$/.test(h);
-}
+// export function isListLike(expr: Expression | null): boolean {
+//   if (expr === null) return false;
+//   const h = head(expr);
+//   if (!h || typeof h !== 'string') return false;
+//   return /^(List|Set|Sequence|Tuple|Single|Pair|Triple)$/.test(h);
+// }
 
-// Matrices are represented as lists of lists
-export function isMatrixLike(expr: Expression | null): boolean {
-  if (!isListLike(expr)) return false;
-  const rows = ops(expr);
-  return rows?.every((x) => isListLike(x)) ?? false;
-}
+// // Matrices are represented as lists of lists
+// export function isMatrixLike(expr: Expression | null): boolean {
+//   if (!isListLike(expr)) return false;
+//   const rows = ops(expr);
+//   return rows?.every((x) => isListLike(x)) ?? false;
+// }
 
-export function rank(expr: Expression | null): number {
-  if (!isMatrixLike(expr)) return 0;
-  const rows = ops(expr);
-  if (!rows) return 0;
-  return rows.length;
-}
+// export function rank(expr: Expression | null): number {
+//   if (!isMatrixLike(expr)) return 0;
+//   const rows = ops(expr);
+//   if (!rows) return 0;
+//   return rows.length;
+// }
 
 function keyValuePair(
   expr: Expression | null
@@ -561,22 +561,22 @@ export function getSequence(expr: Expression | null): Expression[] | null {
   if (h === 'Delimiter') {
     expr = op(expr, 1);
     if (expr === null) return [];
-    if (head(expr) !== 'Sequence') return [expr];
+    h = head(expr);
+    if (h !== 'Sequence') return [expr];
   }
 
-  h = head(expr);
   if (h !== 'Sequence') return null;
 
   return ops(expr) ?? [];
 }
 
 export function isEmptySequence(expr: Expression | null): boolean {
-  return expr !== null && head(expr) === 'Sequence' && nops(expr) === 0;
+  return head(expr) === 'Sequence' && nops(expr) === 0;
 }
 
 export function missingIfEmpty(expr: Expression | null): Expression {
-  if (expr === null || isEmptySequence(expr)) return MISSING;
-  return expr;
+  if (isEmptySequence(expr)) return MISSING;
+  return expr ?? MISSING;
 }
 
 function countFunctionLeaves(xs: Expression[]): number {

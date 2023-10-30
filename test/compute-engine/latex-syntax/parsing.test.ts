@@ -13,14 +13,14 @@ describe('ADVANCED PARSING', () => {
   // expected
   test('\\frac{x}{} y', () =>
     expect(parse('\\frac{x}{} \\text{ cm}')).toMatchInlineSnapshot(
-      `["Sequence", ["Divide", "x", ["Error", "'missing'"]], "' cm'"]`
+      `["Pair", ["Divide", "x", ["Error", "'missing'"]], "' cm'"]`
     ));
 });
 
 describe('FUNCTIONS', () => {
   test('Multiple arguments', () =>
     expect(parse('\\gamma(2, 1)')).toMatchInlineSnapshot(
-      `["EulerGamma", 2, 1]`
+      `["Multiply", "EulerGamma", 2, 1]`
     ));
 });
 
@@ -35,8 +35,8 @@ describe('UNKNOWN COMMANDS', () => {
     `);
     expect(parse('x=\\foo+1')).toMatchInlineSnapshot(`
       [
-        "Equal",
-        "x",
+        "Sequence",
+        ["Equal", "x", ["Error", "'missing'"]],
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\foo'"],
@@ -46,8 +46,8 @@ describe('UNKNOWN COMMANDS', () => {
     `);
     expect(parse('x=\\foo   {1}  {x+1}+1')).toMatchInlineSnapshot(`
       [
-        "Equal",
-        "x",
+        "Sequence",
+        ["Equal", "x", ["Error", "'missing'"]],
         [
           "Error",
           ["ErrorCode", "'unexpected-command'", "'\\foo'"],
