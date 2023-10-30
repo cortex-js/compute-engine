@@ -1,4 +1,4 @@
-import { LatexDictionary } from '../public';
+import { COMPARISON_PRECEDENCE, LatexDictionary } from '../public';
 
 export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
   {
@@ -54,7 +54,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['\\leqslant'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265, // Note different precedence than `<=` as per MathML
+    precedence: COMPARISON_PRECEDENCE + 5, // Note different precedence than `<=` as per MathML
     parse: 'LessEqual',
   },
   {
@@ -62,28 +62,28 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['\\lneqq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'NotLessNotEqual',
     latexTrigger: ['\\nleqq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'LessOverEqual',
     latexTrigger: ['\\leqq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265,
+    precedence: COMPARISON_PRECEDENCE + 5,
   },
   {
     name: 'GreaterOverEqual',
     latexTrigger: ['\\geqq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265,
+    precedence: COMPARISON_PRECEDENCE + 5,
     parse: 'GreaterEqual',
   },
   {
@@ -91,13 +91,13 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     latexTrigger: ['*', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
     parse: 'StarEqual',
   },
   {
@@ -105,56 +105,56 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['\\star', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'PlusEqual',
     latexTrigger: ['+', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'MinusEqual',
     latexTrigger: ['-', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'SlashEqual',
     latexTrigger: ['/', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'EqualEqual',
     latexTrigger: ['=', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'EqualEqualEqual',
     latexTrigger: ['=', '=', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265,
+    precedence: COMPARISON_PRECEDENCE + 5,
   },
   {
     name: 'TildeFullEqual', // MathML: approximately equal to
     latexTrigger: ['\\cong'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'NotTildeFullEqual', // MathML: approximately but not actually equal to
     latexTrigger: ['\\ncong'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'Approx', // Note: Mathematica TildeTilde
@@ -175,7 +175,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['\\approxeq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'NotApproxEqual', // Note: Mathematica NotTildeEqual
@@ -196,7 +196,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['!', '='],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260, // Note different precedence than \\ne per MathML
+    precedence: COMPARISON_PRECEDENCE, // Note different precedence than \\ne per MathML
   },
   {
     name: 'GreaterEqual',
@@ -223,7 +223,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['\\geqslant'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265, // Note: different precedence than `>=` as per MathML
+    precedence: COMPARISON_PRECEDENCE + 5, // Note: different precedence than `>=` as per MathML
     parse: 'GreaterEqual',
   },
   {
@@ -231,14 +231,14 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['\\gneqq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'NotGreaterNotEqual',
     latexTrigger: ['\\ngeqq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     latexTrigger: ['>'],
@@ -273,105 +273,105 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['\\circeq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'TriangleEqual', // MathML: delta equal to
     latexTrigger: ['\\triangleq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'DotEqual', // MathML: approaches the limit
     latexTrigger: ['\\doteq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265,
+    precedence: COMPARISON_PRECEDENCE + 5,
   },
   {
     name: 'DotEqualDot', // MathML: Geometrically equal
     latexTrigger: ['\\doteqdot'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265,
+    precedence: COMPARISON_PRECEDENCE + 5,
   },
   {
     name: 'FallingDotEqual', // MathML: approximately equal to or the image of
     latexTrigger: ['\\fallingdotseq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265,
+    precedence: COMPARISON_PRECEDENCE + 5,
   },
   {
     name: 'RisingDotEqual', // MathML: image of or approximately equal to
     latexTrigger: ['\\fallingdotseq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265,
+    precedence: COMPARISON_PRECEDENCE + 5,
   },
   {
     name: 'QuestionEqual',
     latexTrigger: ['\\questeq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'MuchLess',
     latexTrigger: ['\\ll'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'MuchGreater',
     latexTrigger: ['\\gg'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'Precedes',
     latexTrigger: ['\\prec'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'Succeeds',
     latexTrigger: ['\\succ'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'PrecedesEqual',
     latexTrigger: ['\\preccurlyeq'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'SucceedsEqual',
     latexTrigger: ['\\curlyeqprec'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'NotPrecedes',
     latexTrigger: ['\\nprec'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
   {
     name: 'NotSucceeds',
     latexTrigger: ['\\nsucc'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
 
   {
@@ -379,6 +379,6 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionary = [
     latexTrigger: ['\\between'],
     kind: 'infix',
     associativity: 'right',
-    precedence: 265,
+    precedence: COMPARISON_PRECEDENCE + 5,
   },
 ];

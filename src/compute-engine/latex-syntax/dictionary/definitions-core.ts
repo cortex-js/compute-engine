@@ -216,12 +216,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
 
+  // The mathtools package includes several synonmyms for \colonequals. The
+  // current preferred one is `\coloneq`
   {
     name: 'Assign',
-    latexTrigger: '\\coloneqq',
+    latexTrigger: '\\coloneq',
     kind: 'infix',
     associativity: 'right',
-    precedence: 260,
+    precedence: ASSIGNMENT_PRECEDENCE,
     // parse: (parser: Parser, lhs: Expression) => {
     //   const rhs = parser.parseExpression({ minPrec: 260 }) ?? 'Nothing';
     //   return ['Assign', lhs, rhs];
@@ -229,36 +231,32 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string => {
       return joinLatex([
         serializer.serialize(op(expr, 1)),
-        '\\coloneqq',
+        '\\coloneq',
         serializer.serialize(op(expr, 2)),
       ]);
     },
+    parse: parseAssign,
   },
   {
     latexTrigger: [':', '='],
     kind: 'infix',
     associativity: 'right',
     precedence: ASSIGNMENT_PRECEDENCE,
-    parse: 'Assign',
+    parse: parseAssign,
   },
-  // {
-  //   kind: 'function',
-  //   latexTrigger: ':=', // \coloneqq
-  //   parse: (parser: Parser, lhs: Expression) => {
-  //     const rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
-  //     return ['Assign', lhs, rhs];
-  //   },
-  // },
   {
-    latexTrigger: '\\colonequals', // \coloneqq
+    latexTrigger: '\\colonequals',
     kind: 'infix',
     associativity: 'right',
     precedence: ASSIGNMENT_PRECEDENCE,
-    parse: 'Assign',
-    // parse: (parser: Parser, lhs: Expression) => {
-    //   const rhs = parser.parseExpression({ minPrec: 270 }) ?? 'Nothing';
-    //   return ['Assign', lhs, rhs];
-    // },
+    parse: parseAssign,
+  },
+  {
+    latexTrigger: '\\coloneqq',
+    kind: 'infix',
+    associativity: 'right',
+    precedence: ASSIGNMENT_PRECEDENCE,
+    parse: parseAssign,
   },
 
   {
@@ -1244,3 +1242,36 @@ export const DELIMITERS_SHORTHAND = {
   // '⎾': '', // U+23BE RIGHT PARENTHESIS UPPER HOOK
   // '⎿': '', // U+23BF RIGHT PARENTHESIS LOWER HOOK
 };
+
+function parseAssign(parser: Parser, lhs: Expression): Expression | null {
+  const index = parser.index;
+
+  // Do we have an assignment of the form `f(x) := ...`?
+  if (
+    head(lhs) === 'InvisibleOperator' &&
+    nops(lhs) === 2 &&
+    head(op(lhs, 2)) === 'Delimiter' &&
+    head(op(op(lhs, 2), 1)) === 'Sequence'
+  ) {
+    const fn = symbol(op(lhs, 1));
+    if (!fn) return null;
+    const args = ops(op(op(lhs, 2), 1));
+    const rhs = parser.parseExpression({ minPrec: 0 });
+    if (rhs === null) {
+      parser.index = index;
+      return null;
+    }
+
+    return ['Assign', fn, ['Function', rhs, ...(args ?? [])]];
+  }
+
+  if (!symbol(lhs)) return null;
+
+  const rhs = parser.parseExpression({ minPrec: 0 });
+  if (rhs === null) {
+    parser.index = index;
+    return null;
+  }
+
+  return ['Assign', lhs, rhs];
+}

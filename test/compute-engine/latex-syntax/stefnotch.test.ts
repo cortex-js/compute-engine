@@ -85,14 +85,21 @@ describe('STEFNOTCH #12', () => {
 });
 
 describe('STEFNOTCH #13', () => {
-  test('1/ N(\\varepsilon)\\coloneqq\\lceil\\frac{4}{\\varepsilon^2}\\rceil', () => {
+  test('1/ Q(\\varepsilon)\\coloneq\\lceil\\frac{4}{\\varepsilon^2}\\rceil', () => {
     expect(
-      parse('N(\\varepsilon)\\coloneqq\\lceil\\frac{4}{\\varepsilon^2}\\rceil')
+      parse('Q(\\varepsilon)\\coloneq\\lceil\\frac{4}{\\varepsilon^2}\\rceil')
     ).toMatchInlineSnapshot(`
       [
         "Assign",
-        ["N", "epsilonSymbol"],
-        ["Ceil", ["Divide", 4, ["Power", "epsilonSymbol", 2]]]
+        ["Hold", "Q"],
+        [
+          "Hold",
+          [
+            "Function",
+            ["Ceil", ["Divide", 4, ["Power", "epsilonSymbol", 2]]],
+            "epsilonSymbol"
+          ]
+        ]
       ]
     `);
   });
@@ -105,7 +112,11 @@ describe('STEFNOTCH #13', () => {
           "Sequence",
           [
             "Equal",
-            ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], "','"]],
+            [
+              "Error",
+              "'expected-pure-expression'",
+              ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], "','"]]
+            ],
             1
           ],
           2
@@ -142,7 +153,11 @@ describe('STEFNOTCH #13', () => {
       [
         "Implies",
         ["LessEqual", ["Abs", "a_n"], ["Divide", 2, ["Sqrt", "n"]]],
-        ["Equal", ["To", "a_n", 0], 0]
+        [
+          "Equal",
+          ["Error", "'expected-pure-expression'", ["To", "a_n", 0]],
+          0
+        ]
       ]
     `);
   });

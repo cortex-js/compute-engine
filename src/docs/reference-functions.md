@@ -153,7 +153,10 @@ error to assign a function to it.
 
 `Assign` is not a [pure function](/compute-engine/guides/expressions#pure-expressions).
 
-{% latex "\\operatorname{double} \\coloneqq x \\mapsto 2x" %}
+{% latex "\\operatorname{double}(x) \\coloneq 2x" %}
+
+{% latex "\\operatorname{double} \\coloneq x \\mapsto 2x" %}
+
 
 ```json example
 ["Assign", "double", ["Function", ["Multiply", "x", 2], "x"]]

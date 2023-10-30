@@ -132,8 +132,8 @@ ce.parse("n := 31").evaluate();
 // ➔ n = 31
 ```
 
-In LaTeX, assignments are indicated by the `:=` or `\coloneqq` operator (note
-the two `qq`s). The `=` operator is used for equality.
+In LaTeX, assignments are indicated by the `:=` or `\coloneq` operator. 
+The `=` operator is used for equality.
 
 The right hand side argument of an assignment (with a `ce.assign()`,
 `expr.value` or `["Assign"]` expression) can be one of the following:

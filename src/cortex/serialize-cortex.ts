@@ -11,7 +11,10 @@ import {
   mapArgs,
 } from '../math-json/utils';
 import { splitGraphemes } from '../common/grapheme-splitter';
-import { NumberFormattingOptions } from '../compute-engine/latex-syntax/public';
+import {
+  COMPARISON_PRECEDENCE,
+  NumberFormattingOptions,
+} from '../compute-engine/latex-syntax/public';
 import { Expression } from '../math-json/math-json-format';
 import {
   serializeHexFloat,
@@ -197,12 +200,16 @@ export function serializeCortex(
       precedence: 255,
     },
     Assign: { symbol: '=', relational: true, precedence: 258 },
-    Equal: { symbol: '==', relational: true, precedence: 260 },
+    Equal: {
+      symbol: '==',
+      relational: true,
+      precedence: COMPARISON_PRECEDENCE,
+    },
     Same: {
       symbol: '===',
       fancySymbol: '\u2263',
       relational: true,
-      precedence: 260,
+      precedence: COMPARISON_PRECEDENCE,
     },
     KeyValuePair: {
       symbol: '->',

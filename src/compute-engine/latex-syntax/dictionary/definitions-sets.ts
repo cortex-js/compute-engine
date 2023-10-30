@@ -8,7 +8,13 @@ import {
 } from '../../../math-json/utils';
 import { joinLatex } from '../tokenizer';
 import { Expression } from '../../../math-json/math-json-format';
-import { LatexDictionary, Serializer, LatexString, Parser } from '../public';
+import {
+  LatexDictionary,
+  Serializer,
+  LatexString,
+  Parser,
+  COMPARISON_PRECEDENCE,
+} from '../public';
 
 export const DEFINITIONS_SETS: LatexDictionary = [
   // Constants
@@ -182,7 +188,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\triangle'], // or \\ominus
     kind: 'infix',
     // @todo: parser could check that lhs and rhs are sets
-    precedence: 260,
+    precedence: COMPARISON_PRECEDENCE,
   },
 
   // Predicates/Relations

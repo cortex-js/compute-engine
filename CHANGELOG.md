@@ -17,7 +17,7 @@
 
 ### Bug Fixes
 
-- **#25** Correctly parses chained relational operators, i.e. `a < b <= c`
+- **#25** Correctly parse chained relational operators, i.e. `a < b <= c`
 - **#126** Logic operators only accepted up to two arguments.
 - **#127** Correctly compile `Log` with bases other than 10.
 - Correctly parse numbers with repeating patterns but no fractional digits, i.e.
@@ -26,6 +26,8 @@
 
 ### New Features and Improvements
 
+- Function assignment can now be done with this syntax: `f(x) := 2x+1`. This
+  syntax is equivalent to `f := x -> 2x+1`.
 - Implement the `Mod` and `Congruent` function.
 - Correctly parse `11 \bmod 5` (`Mod`) and `26\equiv 11 \pmod5` (`Congruent`)
 - Better handle empty argument lists, i.e. `f()`
