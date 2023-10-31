@@ -547,6 +547,17 @@ export class BoxedFunction extends _BoxedExpression {
     // 1/ Use the canonical form
     //
     if (!this.isValid) return this;
+    if (options?.numericMode) {
+      const h = this.head;
+
+      //
+      // Transform N(Integrate) into NIntegrate(), etc...
+      //
+      if (h === 'Integrate' || h === 'Limit')
+        return this.engine
+          .box(['N', this], { canonical: true })
+          .evaluate(options);
+    }
     if (!this.isCanonical) {
       this.engine.pushScope();
       const canonical = this.canonical;

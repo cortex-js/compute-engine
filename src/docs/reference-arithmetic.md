@@ -187,47 +187,6 @@ If `lower`and `upper`are not provided, they take the default values of -1 and
 
 {% enddef %}
 
-{% def "Limit" %}
-
-[&quot;**Limit**&quot;, _fn_, _value_]{.signature}
-
-Evaluate the expression _fn_ as it approaches the value _value_.
-
-{% latex " \\lim_{x \\to 0} \\frac{\\sin(x)}{x} = 1" %}
-
-
-```json example
-["Limit", ["Divide", ["Sin", "_"], "_"], 0]
-
-["Limit", ["Function", ["Divide", ["Sin", "x"], "x"], "x"], 0]
-```
-
-This function evaluates to a numerical approximation when using `expr.N()`. To
-get a numerical evaluation with `expr.evaluate()`, use `NLimit`.
-
-
-
-{% enddef %}
-
-{% def "NLimit" %}
-
-[&quot;**NLimit**&quot;, _fn_, _value_]{.signature}
-
-Evaluate the expression _fn_ as it approaches the value _value_.
-
-```json example
-["NLimit", ["Divide", ["Sin", "_"], "_"], 0]
-// ➔ 1
-
-["NLimit", ["Function", ["Divide", ["Sin", "x"], "x"], "x"], 0]
-// ➔ 1
-```
-
-The numerical approximation is computed using a Richardson extrapolation
-algorithm.
-
-{% enddef %}
-
 {% def "Max" %}
 
 [&quot;**Max**&quot;, _x1_, _x2_, ...]{.signature}

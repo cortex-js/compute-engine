@@ -1,8 +1,8 @@
 import { Expression } from '../../../src/math-json';
-import { engine } from '../../utils';
+import { engine as ce } from '../../utils';
 
 function json(latex: string): Expression {
-  return engine.parse(latex)?.json ?? '';
+  return ce.parse(latex)?.json ?? '';
 }
 
 describe('INTEGRAL', () => {
@@ -193,4 +193,49 @@ describe('INTEGRAL', () => {
         2
       ]
     `));
+
+  test('numerically evaluated via N', () =>
+    expect(
+      Math.round(
+        10 *
+          (ce.box(['N', ce.parse('\\int^2_0\\frac{3x}{5}dx')]).value! as number)
+      )
+    ).toEqual(12));
+
+  test('numerically evaluated', () =>
+    expect(
+      Math.round(10 * (ce.parse('\\int^2_0\\frac{3x}{5}dx').value! as number))
+    ).toEqual(12));
+});
+
+describe('LIMIT', () => {
+  expect(
+    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).value
+  ).toMatchInlineSnapshot(`1`);
+
+  expect(
+    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).value
+  ).toMatchInlineSnapshot(`1`);
+
+  expect(
+    ce.box(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+      .value
+  ).toMatchInlineSnapshot(`1`);
+
+  expect(
+    ce.box(['NLimit', ['Divide', ['Sin', '_'], '_'], 0]).value
+  ).toMatchInlineSnapshot(`1`);
+
+  // Should be "1"
+  expect(
+    ce.box([
+      'NLimit',
+      ['Function', ['Cos', ['Divide', 1, 'x']], 'x'],
+      'Infinity',
+    ]).value
+  ).toMatchInlineSnapshot(`1`);
+
+  expect(
+    ce.parse('\\lim_{x \\to 0} \\frac{\\sin(x)}{x}').value
+  ).toMatchInlineSnapshot(`1`);
 });

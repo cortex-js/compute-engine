@@ -14,6 +14,7 @@ import { canonical } from '../symbolic/utils';
 import { isDomain } from '../boxed-expression/boxed-domain';
 import { isIndexableCollection } from '../collection-utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
+import { normalizeLimits } from './utils';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -443,7 +444,28 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
         result: (_ce, ops) => ops[0].domain,
-        canonical: (ce, ops) => ce._fn('N', checkArity(ce, ops, 1)),
+        canonical: (ce, ops) => {
+          // Only call checkArity (which canonicalize) if the
+          // argument length is invalid
+          if (ops.length !== 1) return ce._fn('N', checkArity(ce, ops, 1));
+
+          const h = ops[0].head;
+          if (h === 'N') return ops[0].canonical;
+          if (h === 'Integrate') {
+            const [index, lower, upper] = normalizeLimits(ops[0].op2);
+            if (!index || lower === undefined || upper === undefined)
+              return null;
+            const fn = ops[0].op1;
+            return ce._fn('NIntegrate', [
+              ce.box(['Function', fn, index]),
+              ce.number(lower),
+              ce.number(upper),
+            ]);
+          }
+          if (h === 'Limit') return ce._fn('NLimit', ops[0].ops!);
+
+          return ce._fn('N', ops);
+        },
         evaluate: (_ce, ops) => ops[0].N(),
       },
     },

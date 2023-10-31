@@ -91,14 +91,11 @@ describe('STEFNOTCH #13', () => {
     ).toMatchInlineSnapshot(`
       [
         "Assign",
-        ["Hold", "Q"],
+        "Q",
         [
-          "Hold",
-          [
-            "Function",
-            ["Ceil", ["Divide", 4, ["Power", "epsilonSymbol", 2]]],
-            "epsilonSymbol"
-          ]
+          "Function",
+          ["Ceil", ["Divide", 4, ["Power", "epsilonSymbol", 2]]],
+          "epsilonSymbol"
         ]
       ]
     `);

@@ -1,5 +1,5 @@
 ---
-title: Logic
+title: Linear Algebra
 permalink: /compute-engine/reference/linear-algebra/
 layout: single
 date: Last Modified
@@ -9,14 +9,29 @@ toc: true
 render_math_in_document: true
 ---
 
-Linear algebra is the branch of mathematics that studies vector spaces and linear transformations between them. It is
+[Linear algebra](https://en.wikipedia.org/wiki/Linear_algebra) is the branch of 
+mathematics that studies vector spaces and linear transformations between them like adding and scaling. It uses matrixes to represent
+linear maps. Linear algebra is
 widely used in science and engineering. 
 
-In the Compute Engine, vectors are represented as lists and matrices are 
-represented as lists of lists. 
+{% latex %} 
+\\mathbf{A} =  \\begin{bmatrix}
+1 & 3 & 7 \\\\
+2 & -1 & 4 \\\\
+5 & 0 & 2
+\\end{bmatrix} 
+{% endlatex %}
 
-For example, the matrix $$\begin{bmatrix} 1 & 2 \\ 3 & 4 \end{bmatrix}$$ is represented as
-`["List", ["List", 1, 2], ["List", 3, 4]]`. 
+In the Compute Engine, vectors are represented as lists and matrices are 
+represented as lists of lists.
+
+
+For example the matrix above is represented as the following list of lists:
+
+```json
+["List", ["List", 1, 3, 7], ["List", 2, -1, 4], ["List", 5, 0, 2]]
+```
+
 
 The Compute Engine provides a number of functions for working with matrices.
 

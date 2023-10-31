@@ -1,6 +1,20 @@
-## 0.20.1 
+## [Unreleased]
 
- **Release Date:** 2023-10-31
+### Bug Fixes
+
+- Fixed numerical evaluation of integrals and limits when parsed from LaTeX.
+
+```json
+console.info(ce.parse('\\lim_{x \\to 0} \\frac{\\sin(x)}{x}').value);
+// -> 1
+
+console.info(ce.parse('\\int_{0}^{2} x^2 dx').value);
+// -> 2.6666666666666665
+```
+
+## 0.20.1
+
+**Release Date:** 2023-10-31
 
 ### Bug Fixes
 

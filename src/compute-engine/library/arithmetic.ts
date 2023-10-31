@@ -20,7 +20,6 @@ import {
   fromDigits,
   gamma,
   gammaln,
-  limit,
   gcd,
   lcm,
   asBignum,
@@ -60,7 +59,6 @@ import {
   checkNumericArgs,
 } from '../boxed-expression/validate';
 import { flattenSequence } from '../symbolic/flatten';
-import { applicable } from '../function-utils';
 import { each, isCollection } from '../collection-utils';
 import { BoxedNumber } from '../boxed-expression/boxed-number';
 
@@ -1172,70 +1170,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'simplify'),
         evaluate: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'evaluate'),
         N: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'N'),
-      },
-    },
-
-    // Limits
-    Limit: {
-      description: 'Limit of a function',
-      complexity: 5000,
-      hold: 'all',
-      threadable: false,
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Anything',
-          'Numbers',
-          ['OptArg', 'Numbers'],
-          'Numbers',
-        ],
-        N: (ce, ops) => {
-          const [f, x, dir] = ops;
-          const target = asFloat(x.N());
-          if (target === null) return undefined;
-          const fn = applicable(f);
-          return ce.number(
-            limit(
-              (x) => {
-                const y = fn([ce.number(x)])?.value;
-                return typeof y === 'number' ? y : Number.NaN;
-              },
-              target,
-              dir ? asFloat(dir) ?? 1 : 1
-            )
-          );
-        },
-      },
-    },
-    NLimit: {
-      description: 'Numerical approximation of the limit of a function',
-      complexity: 5000,
-      hold: 'all',
-      threadable: false,
-      signature: {
-        domain: [
-          'FunctionOf',
-          'Anything',
-          'Numbers',
-          ['OptArg', 'Numbers'],
-          'Numbers',
-        ],
-        evaluate: (ce, ops) => {
-          const [f, x, dir] = ops;
-          const target = asFloat(x.N());
-          if (target === null) return undefined;
-          const fn = applicable(f);
-          return ce.number(
-            limit(
-              (x) => {
-                const y = fn([ce.number(x)])?.value;
-                return typeof y === 'number' ? y : Number.NaN;
-              },
-              target,
-              dir ? asFloat(dir) ?? 1 : 1
-            )
-          );
-        },
       },
     },
   },

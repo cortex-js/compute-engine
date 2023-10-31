@@ -92,11 +92,11 @@ export function canonicalFunctionExpression(
 ): BoxedExpression | undefined {
   //
   // Convert N operators:
-  //  - N(D) -> ND()
   //  - N(Integrate) -> NIntegrate()
+  //  - N(Limit) -> NLimit()
   //
   if (expr.head === 'N' && typeof expr.op1.head === 'string') {
-    const newHead = { D: 'ND', Integrate: 'NIntegrate' }[expr.op1.head];
+    const newHead = { Integrate: 'NIntegrate', Limit: 'NLimit' }[expr.op1.head];
     if (newHead) expr = expr.engine._fn(newHead, expr.op1.ops!);
   }
 

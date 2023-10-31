@@ -573,34 +573,6 @@ describe('EXP', () => {
   `);
 });
 
-describe('LIMIT', () => {
-  expect(
-    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).value
-  ).toMatchInlineSnapshot(`1`);
-
-  expect(
-    ce.box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0]).value
-  ).toMatchInlineSnapshot(`1`);
-
-  expect(
-    ce.box(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
-      .value
-  ).toMatchInlineSnapshot(`1`);
-
-  expect(
-    ce.box(['NLimit', ['Divide', ['Sin', '_'], '_'], 0]).value
-  ).toMatchInlineSnapshot(`1`);
-
-  // Should be "1"
-  expect(
-    ce.box([
-      'NLimit',
-      ['Function', ['Cos', ['Divide', 1, 'x']], 'x'],
-      'Infinity',
-    ]).value
-  ).toMatchInlineSnapshot(`1`);
-});
-
 describe('SUM', () => {
   it('should compute the sum of a function over a closed interval', () =>
     expect(

@@ -1,6 +1,11 @@
 import { checkDomain } from '../boxed-expression/validate';
-import { applicableN1 } from '../function-utils';
-import { centeredDiff8thOrder, monteCarloEstimate } from '../numerics/numeric';
+import { applicable, applicableN1 } from '../function-utils';
+import {
+  asFloat,
+  centeredDiff8thOrder,
+  limit,
+  monteCarloEstimate,
+} from '../numerics/numeric';
 import { BoxedExpression, IdentifierDefinitions } from '../public';
 import { differentiate } from '../symbolic/derivative';
 
@@ -297,6 +302,72 @@ volumes
           ce.numericMode = numericMode;
           ce.precision = precision;
           return result;
+        },
+      },
+    },
+  },
+
+  {
+    // Limits
+    Limit: {
+      description: 'Limit of a function',
+      complexity: 5000,
+      hold: 'all',
+      threadable: false,
+      signature: {
+        domain: [
+          'FunctionOf',
+          'Anything',
+          'Numbers',
+          ['OptArg', 'Numbers'],
+          'Numbers',
+        ],
+        N: (ce, ops) => {
+          const [f, x, dir] = ops;
+          const target = asFloat(x.N());
+          if (target === null) return undefined;
+          const fn = applicable(f);
+          return ce.number(
+            limit(
+              (x) => {
+                const y = fn([ce.number(x)])?.value;
+                return typeof y === 'number' ? y : Number.NaN;
+              },
+              target,
+              dir ? asFloat(dir) ?? 1 : 1
+            )
+          );
+        },
+      },
+    },
+    NLimit: {
+      description: 'Numerical approximation of the limit of a function',
+      complexity: 5000,
+      hold: 'all',
+      threadable: false,
+      signature: {
+        domain: [
+          'FunctionOf',
+          'Anything',
+          'Numbers',
+          ['OptArg', 'Numbers'],
+          'Numbers',
+        ],
+        evaluate: (ce, ops) => {
+          const [f, x, dir] = ops;
+          const target = asFloat(x.N());
+          if (target === null) return undefined;
+          const fn = applicable(f);
+          return ce.number(
+            limit(
+              (x) => {
+                const y = fn([ce.number(x)])?.value;
+                return typeof y === 'number' ? y : Number.NaN;
+              },
+              target,
+              dir ? asFloat(dir) ?? 1 : 1
+            )
+          );
         },
       },
     },
