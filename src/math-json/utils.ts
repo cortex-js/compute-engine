@@ -287,6 +287,12 @@ export function nops(expr: Expression | null | undefined): number {
   return 0;
 }
 
+export function unhold(expr: Expression | null | undefined): Expression | null {
+  if (expr === null || expr === undefined) return null;
+  if (head(expr) === 'Hold') return op(expr, 1);
+  return expr;
+}
+
 export function symbol(expr: Expression | null | undefined): string | null {
   if (expr === null || expr === undefined) return null;
 

@@ -11,6 +11,7 @@ import {
   stripText,
   isEmptySequence,
   symbol,
+  unhold,
 } from '../../../math-json/utils';
 import {
   ADDITION_PRECEDENCE,
@@ -144,12 +145,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (head(lhs) === 'Delimiter') lhs = op(lhs, 1) ?? 'Nothing';
       if (head(lhs) === 'Sequence') {
         for (const x of ops(lhs) ?? []) {
-          if (symbol(x)) params.push(symbol(x)!);
-          else return null;
+          if (!symbol(x)) return null;
+          params.push(symbol(x)!);
         }
       } else {
-        if (symbol(lhs)) params = [symbol(lhs)!];
-        else return null;
+        if (!symbol(lhs)) return null;
+        params = [symbol(lhs)!];
       }
 
       let rhs =
@@ -229,8 +230,25 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     //   return ['Assign', lhs, rhs];
     // },
     serialize: (serializer: Serializer, expr: Expression): string => {
+      const id = unhold(op(expr, 1));
+
+      if (head(op(expr, 2)) === 'Function') {
+        const op_2 = op(expr, 2);
+        const body = unhold(op(op_2, 1));
+        const args = ops(op_2)?.slice(1) ?? [];
+
+        return joinLatex([
+          serializer.serialize(id),
+          serializer.wrapString(
+            args.map((x) => serializer.serialize(x)).join(', '),
+            serializer.options.applyFunctionStyle(expr, serializer.level)
+          ),
+          '\\coloneq',
+          serializer.serialize(body),
+        ]);
+      }
       return joinLatex([
-        serializer.serialize(op(expr, 1)),
+        serializer.serialize(id),
         '\\coloneq',
         serializer.serialize(op(expr, 2)),
       ]);
@@ -1263,6 +1281,19 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
     }
 
     return ['Assign', fn, ['Function', rhs, ...(args ?? [])]];
+  }
+
+  // If this is a previously defined function, the lhs might be a
+  // function application...
+  if (typeof head(lhs) === 'string') {
+    const fn = head(lhs) as string;
+    const args = ops(lhs) ?? [];
+    const rhs = parser.parseExpression({ minPrec: 0 });
+    if (rhs === null) {
+      parser.index = index;
+      return null;
+    }
+    return ['Assign', fn, ['Function', rhs, ...args]];
   }
 
   if (!symbol(lhs)) return null;

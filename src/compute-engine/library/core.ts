@@ -349,7 +349,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           const op1 = args[0];
           if (!op1.symbol) return null;
           const op2 = args[1];
-          return ce._fn('Assign', [ce.hold(op1), ce.hold(op2)]);
+          return ce._fn('Assign', [op1, op2]);
         },
         evaluate: (ce, ops) => {
           const op1 = ops[0];
