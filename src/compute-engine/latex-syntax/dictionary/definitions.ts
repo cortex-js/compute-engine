@@ -27,6 +27,7 @@ import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
 import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
 import { DEFINITIONS_CORE } from './definitions-core';
 import { DEFINITIONS_INEQUALITIES } from './definitions-inequalities';
+import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra';
 import { DEFINITIONS_LOGIC } from './definitions-logic';
 import { DEFINITIONS_OTHERS } from './definitions-other';
 import { DEFINITIONS_TRIGONOMETRY } from './definitions-trigonometry';
@@ -934,23 +935,24 @@ function isValidEntry(
 export const DEFAULT_LATEX_DICTIONARY: {
   [category in LibraryCategory]?: LatexDictionary;
 } = {
-  algebra: DEFINITIONS_ALGEBRA,
-  arithmetic: DEFINITIONS_ARITHMETIC,
-  calculus: DEFINITIONS_CALCULUS,
-  complex: DEFINITIONS_COMPLEX,
-  core: DEFINITIONS_CORE,
-  logic: DEFINITIONS_LOGIC,
-  relop: DEFINITIONS_INEQUALITIES,
-  other: DEFINITIONS_OTHERS,
-  physics: [
+  'algebra': DEFINITIONS_ALGEBRA,
+  'arithmetic': DEFINITIONS_ARITHMETIC,
+  'calculus': DEFINITIONS_CALCULUS,
+  'complex': DEFINITIONS_COMPLEX,
+  'core': DEFINITIONS_CORE,
+  'linear-algebra': DEFINITIONS_LINEAR_ALGEBRA,
+  'logic': DEFINITIONS_LOGIC,
+  'relop': DEFINITIONS_INEQUALITIES,
+  'other': DEFINITIONS_OTHERS,
+  'physics': [
     {
       name: 'mu0',
       kind: 'symbol',
       latexTrigger: '\\mu_0',
     },
   ],
-  sets: DEFINITIONS_SETS,
-  statistics: DEFINITIONS_STATISTICS,
-  symbols: DEFINITIONS_SYMBOLS,
-  trigonometry: DEFINITIONS_TRIGONOMETRY,
+  'sets': DEFINITIONS_SETS,
+  'statistics': DEFINITIONS_STATISTICS,
+  'symbols': DEFINITIONS_SYMBOLS,
+  'trigonometry': DEFINITIONS_TRIGONOMETRY,
 };

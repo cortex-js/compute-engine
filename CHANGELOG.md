@@ -1,6 +1,14 @@
-## 0.20.0 
+## [Unreleased]
 
- **Release Date:** 2023-10-30
+### Bug Fixes
+
+- Fixed evaluation of functions with multiple arguments
+- Fixed compilation of some function assignments
+- Improved serialization of function assignment
+
+## 0.20.0
+
+**Release Date:** 2023-10-30
 
 ### Breaking Changes
 

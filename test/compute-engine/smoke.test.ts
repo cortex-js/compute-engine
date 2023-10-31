@@ -38,7 +38,11 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-console.info(ce.parse('f(x, y) := 2x+y').compile()?.toString());
+console.info(
+  ce.parse('\\operatorname{f}\\coloneqq (x, y) \\mapsto x + y').evaluate()
+);
+
+console.info(ce.parse('f(3, 3)').evaluate());
 
 const expr = ce.parse('x^{}');
 console.info(expr.json);
