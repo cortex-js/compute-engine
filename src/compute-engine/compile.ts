@@ -405,7 +405,7 @@ function compileExpr(
   if (h === 'Function') {
     // Anonymous function
     const params = args.slice(1).map((x) => x.symbol);
-    return `((${params.join(', ')}) => ${compile(args[0], {
+    return `((${params.join(', ')}) => ${compile(args[0].canonical, {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
     })})`;
