@@ -378,6 +378,8 @@ export interface BoxedExpression {
   /** The Compute Engine associated with this expression provides
    * a context in which to interpret it, such as definition of symbols
    * and functions.
+   *
+   * {@link ComputeEngine} is the class that implements IComputeEngine.
    */
   readonly engine: IComputeEngine;
 
@@ -2119,103 +2121,8 @@ export interface IComputeEngine {
   chop(n: Complex): Complex | 0;
   chop(n: number | Decimal | Complex): number | Decimal | Complex;
 
-  /** Create an arbitrary precision number. 
-   * 
-   * The return value is an object with methods to perform arithmetic
-   * operations:
-   * - `toNumber()`: convert to a JavaScript `number` with potential loss of precision
-   * - `add()`
-   * - `sub()`
-   * - `neg()` (unary minus)
-   * - `mul()`
-   * - `div()`
-   * - `pow()`
-   * - `sqrt()` (square root)
-   * - `cbrt()` (cube root)
-   * - `exp()`  (e^x)
-   * - `log()` 
-   * - `ln()` (natural logarithm)
-   * - `mod()`
-
-   * - `abs()`
-   * - `ceil()`
-   * - `floor()`
-   * - `round()`
-
-   * - `equals()`
-   * - `gt()`
-   * - `gte()`
-   * - `lt()`
-   * - `lte()`
-   * 
-   * - `cos()`
-   * - `sin()`
-   * - `tanh()`
-   * - `acos()`
-   * - `asin()`
-   * - `atan()`
-   * - `cosh()`
-   * - `sinh()`
-   * - `acosh()`
-   * - `asinh()`
-   * - `atanh()`
-   * 
-   * - `isFinite()`
-   * - `isInteger()`
-   * - `isNaN()`
-   * - `isNegative()`
-   * - `isPositive()`
-   * - `isZero()`
-   * - `sign()` (1, 0 or -1)
-   * 
-   */
   bignum: (a: Decimal.Value | bigint) => Decimal;
 
-  /** Create a complex number.
-   * The return value is an object with methods to perform arithmetic
-   * operations:
-   * - `re` (real part, as a JavaScript `number`)
-   * - `im` (imaginary part, as a JavaScript `number`)
-   * - `add()`
-   * - `sub()`
-   * - `neg()` (unary minus)
-   * - `mul()`
-   * - `div()`
-   * - `pow()`
-   * - `sqrt()` (square root)
-   * - `exp()`  (e^x)
-   * - `log()` 
-   * - `ln()` (natural logarithm)
-   * - `mod()`
-
-   * - `abs()`
-   * - `ceil()`
-   * - `floor()`
-   * - `round()`
-
-   * - `arg()` the angle of the complex number
-   * - `inverse()` the inverse of the complex number 1/z
-   * - `conjugate()` the conjugate of the complex number
-
-   * - `equals()`
-   * 
-   * - `cos()`
-   * - `sin()`
-   * - `tanh()`
-   * - `acos()`
-   * - `asin()`
-   * - `atan()`
-   * - `cosh()`
-   * - `sinh()`
-   * - `acosh()`
-   * - `asinh()`
-   * - `atanh()`
-   * 
-   * - `isFinite()`
-   * - `isNaN()`
-   * - `isZero()`
-   * - `sign()` (1, 0 or -1)
-   */
   complex: (a: number | Complex, b?: number) => Complex;
 
   isBignum(a: unknown): a is Decimal;
@@ -2226,36 +2133,11 @@ export interface IComputeEngine {
 
   costFunction: (expr: BoxedExpression) => number;
 
-  /** In strict mode (the default) the Compute Engine performs
-   * validation of domains and signature and may report errors.
-   *
-   * When strict mode is off, results may be incorrect or generate JavaScript
-   * errors if the input is not valid.
-   *
-   */
   strict: boolean;
 
-  /**
-   * Associate a new definition to a symbol in the current context.
-   *
-   * If a definition existed previously, it is replaced.
-   *
-   *
-   * For internal use. Use `ce.declare()` instead.
-   *
-   * @internal
-   */
+  /* @internal */
   defineSymbol(name: string, def: SymbolDefinition): BoxedSymbolDefinition;
 
-  /**
-   * Associate a new definition to a function in the current context.
-   *
-   * If a definition existed previously, it is replaced.
-   *
-   * For internal use. Use `ce.declare()` instead.
-   *
-   * @internal
-   */
   defineFunction(
     name: string,
     def: FunctionDefinition
@@ -2267,15 +2149,11 @@ export interface IComputeEngine {
     scope?: RuntimeScope
   ): undefined | BoxedSymbolDefinition;
 
-  /** Return `undefined` if no definition exist for this `head` */
   lookupFunction(
     head: string | BoxedExpression,
     scope?: RuntimeScope | null
   ): undefined | BoxedFunctionDefinition;
 
-  /**
-   * Return a boxed expression from the input.
-   */
   box(
     expr:
       | Decimal
@@ -2287,7 +2165,6 @@ export interface IComputeEngine {
 
   canonical(xs: SemiBoxedExpression[]): BoxedExpression[];
 
-  /** Return a boxed number */
   number(
     value:
       | number
@@ -2300,35 +2177,18 @@ export interface IComputeEngine {
     options?: { metadata?: Metadata; canonical?: boolean }
   ): BoxedExpression;
 
-  /** Return a canonical boxed symbol */
   symbol(
     sym: string,
     options?: { metadata?: Metadata; canonical?: boolean }
   ): BoxedExpression;
 
-  /** Return a canonical boxed string */
   string(s: string, metadata?: Metadata): BoxedExpression;
 
-  /** Return a canonical boxed domain.
-   *
-   * If the domain is invalid, may return an `["Error"]` expression
-   *
-   */
   domain(
     domain: BoxedDomain | DomainExpression,
     metadata?: Metadata
   ): BoxedDomain;
 
-  /**
-   * Return a canonical expression.
-   *
-   * Note that the result may not be a function, or may have a different
-   * `head` than the one specified.
-   *
-   * For example:
-   * `ce.fn("Rational", [ce.number(1),  ce.number(2)]))` \( \to \) `ce.number([1,2])`
-   *
-   */
   fn(
     head: string | SemiBoxedExpression,
     ops: SemiBoxedExpression[],
@@ -2344,6 +2204,8 @@ export interface IComputeEngine {
    * The result is canonical, but the caller has to ensure that all the
    * conditions are met (i.e. `ops` properly normalized and sorted, all
    * `ops` canonical, etc..) so that the result is actually canonical.
+   *
+   * @internal
    */
   _fn(
     head: string | BoxedExpression,
@@ -2351,10 +2213,6 @@ export interface IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression;
 
-  /** Shortcut for `this.fn("Error"...)`.
-   *
-   * The result is canonical.
-   */
   error(
     message: string | [string, ...SemiBoxedExpression[]],
     where?: SemiBoxedExpression
@@ -2366,86 +2224,41 @@ export interface IComputeEngine {
     where?: SemiBoxedExpression
   ): BoxedExpression;
 
-  /**
-   * Add a`["Hold"]` wrapper to `expr.
-   */
   hold(expr: SemiBoxedExpression): BoxedExpression;
 
-  /** Shortcut for `this.fn("Add"...)`.
-   *
-   * The result is canonical.
-   */
   add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression;
 
-  /** Shortcut for `this.fn("Multiply"...)`
-   *
-   * The result is canonical.
-   */
   mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression;
 
-  /** Shortcut for `this.fn("Power"...)`
-   *
-   * The result is canonical.
-   */
   pow(
     base: BoxedExpression,
     exponent: number | Rational | BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression;
 
-  /** Shortcut for `this.fn("Sqrt"...)`
-   *
-   * The result is canonical.
-   */
-  sqrt(base: BoxedExpression, metadata?: Metadata);
+  sqrt(base: BoxedExpression, metadata?: Metadata): BoxedExpression;
 
-  /** Shortcut for `this.fn("Divide", [1, expr])`
-   *
-   * The result is canonical.
-   */
   inv(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
 
-  /** Shortcut for `this.fn("Negate", [expr])`
-   *
-   * The result is canonical.
-   */
   neg(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
 
-  /** Shortcut for `this.fn("Divide", [num, denom])`
-   *
-   * The result is canonical.
-   */
   div(
     num: BoxedExpression,
     denom: BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression;
 
-  /** Shortcut for `this.fn("Pair"...)`
-   *
-   * The result is canonical.
-   */
   pair(
     first: BoxedExpression,
     second: BoxedExpression,
     metadata?: Metadata
   ): BoxedExpression;
 
-  /** Shortcut for `this.fn("Tuple"...)`
-   *
-   * The result is canonical.
-   */
   tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression;
 
   rules(rules: Rule[]): BoxedRuleSet;
   pattern(expr: LatexString | SemiBoxedExpression): Pattern;
 
-  /**
-   * Parse a string of LaTeX and return a corresponding `BoxedExpression`.
-   *
-   * The result may not be canonical.
-   *
-   */
   parse(
     s: LatexString | string,
     options?: { canonical?: boolean }
@@ -2456,24 +2269,11 @@ export interface IComputeEngine {
     options?: { canonical?: boolean }
   ): null | BoxedExpression;
 
-  /** Serialize a `BoxedExpression` or a `MathJSON` expression to
-   * a LaTeX string
-   */
   serialize(
     expr: SemiBoxedExpression,
     options?: { canonical?: boolean }
   ): LatexString;
 
-  /**
-   * Options to control the serialization of MathJSON expression to LaTeX
-   * when using `this.latex` or `this.engine.serialize()`.
-   *
-   *
-   * {@inheritDoc  NumberFormattingOptions}
-   * {@inheritDoc  ParseLatexOptions}
-   * {@inheritDoc  SerializeLatexOptions}
-   *
-   */
   get latexOptions(): NumberFormattingOptions &
     ParseLatexOptions &
     SerializeLatexOptions;
@@ -2483,41 +2283,17 @@ export interface IComputeEngine {
       Partial<SerializeLatexOptions>
   );
 
-  /** {@inheritDoc  JsonSerializationOptions} */
   get jsonSerializationOptions(): Readonly<JsonSerializationOptions>;
   set jsonSerializationOptions(val: Partial<JsonSerializationOptions>);
 
-  /** Create a new scope on top of the scope stack, and set it as current */
   pushScope(scope?: Partial<Scope>): IComputeEngine;
 
-  /** Remove the most recent scope from the scope stack, and set its
-   *  parent scope as current. */
   popScope(): IComputeEngine;
 
-  /** Set the current scope, return the previous scope. */
   swapScope(scope: RuntimeScope | null): RuntimeScope | null;
 
-  /**
-   * Reset the value of any identifiers that have been assigned a value
-   * in the current scope.
-   * @internal */
   resetContext(): void;
 
-  /** Assign a value to an identifier in the current scope.
-   * Use `undefined` to reset the identifier to no value.
-   *
-   * The identifier should be a valid MathJSON identifier
-   * not a LaTeX string.
-   *
-   * The identifier can take the form "f(x, y") to create a function
-   * with two parameters, "x" and "y".
-   *
-   * If the id was not previously declared, an automatic declaration
-   * is done. The domain of the identifier is inferred from the value.
-   * To more precisely define the domain of the identifier, use `ce.declare()`
-   * instead, which allows you to specify the domain, value and other
-   * attributes of the identifier.
-   */
   assign(ids: { [id: string]: AssignValue }): IComputeEngine;
   assign(id: string, value: AssignValue): IComputeEngine;
   assign(
@@ -2525,18 +2301,6 @@ export interface IComputeEngine {
     arg2?: AssignValue
   ): IComputeEngine;
 
-  /**
-   * Declare an identifier: specify their domain, and other attributes,
-   * including optionally a value.
-   *
-   * Once the domain of an identifier has been declared, it cannot be changed.
-   * The domain information is used to calculate the canonical form of
-   * expressions and ensure they are valid. If the domain could be changed
-   * after the fact, previously valid expressions could become invalid.
-   *
-   * Use the `Anyting` domain for a very generic domain.
-   *
-   */
   declare(identifiers: {
     [id: string]:
       | BoxedDomain
@@ -2565,36 +2329,19 @@ export interface IComputeEngine {
       | FunctionDefinition
   ): IComputeEngine;
 
-  /**
-   * Add an assumption.
-   *
-   * Note that the assumption is put into canonical form before being added.
-   *
-   * @param symbol - The symbol to make an assumption about
-   *
-   * Returns:
-   * - `contradiction` if the new assumption is incompatible with previous
-   * ones.
-   * - `tautology` if the new assumption is redundant with previous ones.
-   * - `ok` if the assumption was successfully added to the assumption set.
-   *
-   *
-   */
   assume(predicate: SemiBoxedExpression): AssumeResult;
 
-  /** Remove all assumptions about one or more symbols */
   forget(symbol?: string | string[]): void;
 
   get assumptions(): ExpressionMapInterface<boolean>;
 
-  /* Return a list of all the assumptions that match a pattern. */
   ask(pattern: SemiBoxedExpression): BoxedSubstitution[];
 
-  /** Using the current assumptions, answer a query. */
   verify(query: SemiBoxedExpression): boolean;
 
   /** @internal */
   shouldContinueExecution(): boolean;
+
   /** @internal */
   checkContinueExecution(): void;
 
@@ -2605,8 +2352,10 @@ export interface IComputeEngine {
 
   /** @internal */
   reset(): void;
+
   /** @internal */
   _register(expr: BoxedExpression): void;
+
   /** @internal */
   _unregister(expr: BoxedExpression): void;
 }
