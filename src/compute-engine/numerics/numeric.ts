@@ -624,7 +624,7 @@ export function limit(f: (x: number) => number, x: number, dir = 1): number {
   return val;
 }
 
-export function fromRoman(roman: string): [number, rest: string] {
+export function fromRoman(roman: string): [result: number, rest: string] {
   if (roman === 'N') return [0, ''];
 
   const romanMap = {
@@ -658,7 +658,7 @@ export function fromRoman(roman: string): [number, rest: string] {
 export function fromDigits(
   s: string,
   baseInput?: string | number
-): [number, rest: string] {
+): [result: number, rest: string] {
   s = s.trim();
   if (s.length === 0) return [NaN, ''];
   if (s.startsWith('+')) return fromDigits(s.slice(1), baseInput);

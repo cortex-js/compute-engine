@@ -316,6 +316,7 @@ export class BoxedSymbol extends _BoxedExpression {
     }
   }
 
+  // @ts-ignore
   get domain(): BoxedDomain | undefined {
     const def = this._def;
     if (def) {

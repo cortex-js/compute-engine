@@ -416,6 +416,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     throw new Error(`Can't change the value of \\(${this.latex}\\)`);
   }
 
+  // @ts-ignore
   get domain(): BoxedDomain | undefined {
     return undefined;
   }
