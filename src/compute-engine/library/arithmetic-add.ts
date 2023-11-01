@@ -42,7 +42,7 @@ export function canonicalAdd(
   }
 
   // Commutative, sort
-  if (ops.length > 1) ops = sortAdd(ce, ops);
+  if (ops.length > 1) ops = sortAdd(ops);
 
   return ce._fn('Add', ops);
 }

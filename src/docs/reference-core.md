@@ -211,6 +211,24 @@ Evaluate to the domain of _expression_
 {% enddef %}
 
 
+{% def "IsSame" %}
+
+[&quot;**IsSame**&quot;, _expression1_, _expression2_]{.signature}
+
+Evaluate to `True` if the two expressions are structurally identical, otherwise
+evaluate to `False`.
+
+```json example
+["IsSame", ["Add", 2, 3], ["Add", 2, 3]]
+// ➔ True
+```
+
+{% enddef %}
+
+
+{%enddef %}
+
+
 ## Transforming an Expression
 
 {% def "Evaluate" %}
@@ -230,6 +248,41 @@ The `Simplify` function applies a sequence of transformations to an expression
 in order to reduce, simplify and calculate its value.
 
 {% enddef %}
+
+
+{% def "CanonicalOrder" %}
+
+[&quot;**CanonicalOrder**&quot;, _expression_]{.signature}
+
+If _expression_ is a commutative function, sort the
+arguments according to the canonical order of the arguments of the function.
+
+If _expression_ is canonical, this function has no effect.
+
+```json
+["CanonicalOrder", ["Add", 3, 2, 1]]
+// -> ["Add", 1, 2, 3]
+```
+
+This can be useful to compare two non-canonical expressions for equality, for example:
+
+```json
+["IsSame",
+  ["Add", 1, "x"], 
+  ["Add", "x", 1]
+]
+// -> False
+
+["IsSame", 
+  ["CanonicalOrder", ["Add", 1, "x"]], 
+  ["CanonicalOrder", ["Add", "x", 1]]
+]
+// -> True
+```
+
+{% enddef %}
+
+
 
 {% def "N" %}
 

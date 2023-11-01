@@ -1,10 +1,6 @@
 import { Complex } from 'complex.js';
 import { asFloat } from '../numerics/numeric';
-import {
-  BoxedExpression,
-  IComputeEngine,
-  SemiBoxedExpression,
-} from '../public';
+import { BoxedExpression, SemiBoxedExpression } from '../public';
 import { lex, maxDegree, totalDegree } from '../symbolic/polynomials';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
@@ -15,10 +11,7 @@ export const DEFAULT_COMPLEXITY = 100000;
  * Sort by higher total degree (sum of degree), if tied, sort by max degree,
  * if tied,
  */
-export function sortAdd(
-  ce: IComputeEngine,
-  ops: BoxedExpression[]
-): BoxedExpression[] {
+export function sortAdd(ops: BoxedExpression[]): BoxedExpression[] {
   return ops.sort((a, b) => {
     const aLex = lex(a);
     const bLex = lex(b);
@@ -134,12 +127,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   }
 
   //
-  // 4/ Additive functions
-  // The `Add` function has a custom `order` handler
-  // @todo
-
-  //
-  // 5/ Functions
+  // 4/ Functions
   //
   if (a.ops) {
     if (b.ops) {
@@ -166,7 +154,7 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   }
 
   //
-  // 6/ Strings
+  // 5/ Strings
   //
   if (a.string) {
     if (b.string) {
@@ -198,6 +186,25 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
   return (
     (a.complexity ?? DEFAULT_COMPLEXITY) - (b.complexity ?? DEFAULT_COMPLEXITY)
   );
+}
+
+/** Return a version of the expression with its arguments sorted in
+ * canonical order
+ */
+export function canonicalOrder(
+  expr: BoxedExpression,
+  { recursive = false }: { recursive?: boolean }
+): BoxedExpression {
+  if (expr.ops) {
+    const ops = recursive
+      ? expr.ops!.map((x) => canonicalOrder(x, { recursive }))
+      : expr.ops!;
+
+    if (expr.head === 'Add') return expr.engine._fn('Add', sortAdd(ops));
+
+    return expr.engine._fn(expr.head, ops.sort(order));
+  }
+  return expr;
 }
 
 /**

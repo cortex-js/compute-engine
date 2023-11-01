@@ -189,6 +189,15 @@ console.log('Non-canonical isSame?', aPrime.isSame(bPrime));</pre>
 </code-playground>
 
 
+In some cases you may want to compare two expressions with a weak form 
+of canonicalization, for example to ignore the order of the arguments of a sum.
+
+You can achieve this by comparing the expressions in their canonical order:
+
+```json
+ce.box(["CanonicalOrder", ["Add", 1, "x"]]).isSame(["CanonicalOrder", ["Add", "x", 1]])
+```
+
 
 ### Mathematical Equality: `isEqual()`
 

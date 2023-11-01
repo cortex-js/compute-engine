@@ -1,6 +1,22 @@
-## 0.20.2 
+## [Unreleased]
 
- **Release Date:** 2023-10-31
+### New Features
+
+- Added `IsSame` function
+- Added `CanonicalOrder` function, which sorts the arguments of commutative
+  functions into canonical order. This is useful to compare two non-canonical
+  expressions for equality.
+
+```js
+ce.box(["CanonicalOrder", ["Add", 1, "x"]]).isSame(
+  ce.box(["CanonicalOrder", ["Add", "x", 1]])
+);
+// -> true
+```
+
+## 0.20.2
+
+**Release Date:** 2023-10-31
 
 ### Bug Fixes
 

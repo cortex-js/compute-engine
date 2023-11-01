@@ -1,3 +1,4 @@
+import { canonicalOrder } from '../boxed-expression/order';
 import { checkPure } from '../boxed-expression/validate';
 import {
   BoxedExpression,
@@ -42,6 +43,27 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
         if (typeof nRhs !== 'number') return undefined;
         if (typeof nModulo !== 'number') return undefined;
         return nLhs % nModulo === nRhs % nModulo ? ce.True : ce.False;
+      },
+    },
+  },
+
+  IsSame: {
+    description: 'Compare two expressions for structural equality',
+    hold: 'all',
+    signature: {
+      domain: 'RelationalOperators',
+
+      // Since we want to work on non-canonical expressions,
+      // do nothing to canonicalize the arguments
+
+      evaluate: (ce, ops) => {
+        if (ops.length !== 2) return undefined;
+        let [lhs, rhs] = ops;
+        if (lhs.head === 'CanonicalOrder') lhs = lhs.canonical;
+        if (rhs.head === 'CanonicalOrder') rhs = rhs.canonical;
+        const test = lhs.isSame(rhs);
+        if (test === true) return ce.True;
+        return ce.False;
       },
     },
   },

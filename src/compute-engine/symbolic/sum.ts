@@ -281,6 +281,6 @@ export class Sum {
     if (xs.length === 0) return ce.Zero;
     if (xs.length === 1 && !isIndexableCollection(xs[0])) return xs[0];
 
-    return ce._fn('Add', sortAdd(ce, xs));
+    return ce._fn('Add', sortAdd(xs));
   }
 }

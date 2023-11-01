@@ -15,6 +15,7 @@ import { isDomain } from '../boxed-expression/boxed-domain';
 import { isIndexableCollection } from '../collection-utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { normalizeLimits } from './utils';
+import { canonicalOrder } from '../boxed-expression/order';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -436,6 +437,20 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         result: (_ce, ops) => ops[0].domain,
         canonical: (ce, ops) => ce._fn('Simplify', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].simplify(),
+      },
+    },
+
+    // Can be used to sort arguments of an expression.
+    // Sorting arguments of commutative functions is a weak form of
+    // canonicalization that can be useful in some cases, for example
+    // to accept "x+1" and "1+x" while rejecting "x+1" and "2x-x+1"
+
+    CanonicalOrder: {
+      complexity: 8200,
+      hold: 'all',
+      signature: {
+        domain: ['FunctionOf', 'Anything', 'Anything'],
+        canonical: (_ce, ops) => canonicalOrder(ops[0], { recursive: true }),
       },
     },
 
