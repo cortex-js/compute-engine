@@ -793,11 +793,12 @@ export class _Parser implements Parser {
   }
 
   /** Parse a group as a a string, for example for `\operatorname` or `\begin` */
-  parseStringGroup(): string | null {
+  parseStringGroup(optional?: boolean): string | null {
+    if (optional === undefined) optional = false;
     const start = this.index;
     while (this.match('<space>')) {}
-    if (this.match('<{>')) {
-      this.addBoundary(['<}>']);
+    if (this.match(optional ? '[' : '<{>')) {
+      this.addBoundary([optional ? ']' : '<}>']);
       const arg = this.parseStringGroupContent();
       if (this.matchBoundary()) return arg;
       this.removeBoundary();

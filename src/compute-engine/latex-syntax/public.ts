@@ -910,8 +910,11 @@ export interface Parser {
    *
    * LaTeX commands are typically not allowed inside a string group (for example,
    * `\alpha` would result in an error), but we do not enforce this.
+   *
+   * If `optional` is true, this should be an optional group in square brackets
+   * otherwise it is a regular group in braces.
    */
-  parseStringGroup(): string | null;
+  parseStringGroup(optional?: boolean): string | null;
 
   /**
    * A symbol can be:
