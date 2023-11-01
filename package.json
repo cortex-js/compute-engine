@@ -38,6 +38,7 @@
   "files": [
     "/dist"
   ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/types/compute-engine.d.ts",
