@@ -38,18 +38,6 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-// ce.parse('f\\left(x\\right)\\coloneq3x').evaluate();
-// ce.parse('a:=3').evaluate();
-// const expr = ce.parse('\\sum_{m=1}^{a}{f(m)}');
-// console.info(expr.evaluate().toString());
-
-// const fn = expr.compile('javascript', {
-//   optimize: ['evaluate'],
-// });
-// console.log(fn?.toString());
-// const eva = expr.evaluate().valueOf();
-// console.info(fn!({}));
-
 // const expr = ce.parse('x^{}');
 // console.info(expr.json);
 // // expr.replace(ce.rules([['^{}', ['Sequence']]]));

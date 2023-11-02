@@ -18,6 +18,11 @@ ce.box(["CanonicalOrder", ["Add", 1, "x"]]).isSame(
 // -> true
 ```
 
+### Bug Fix
+
+- When evaluating a sum (`\sum`) with a bound that is not a number, return the
+  sum expression instead of an error.
+
 ## 0.20.2
 
 **Release Date:** 2023-10-31

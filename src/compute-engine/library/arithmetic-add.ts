@@ -180,16 +180,18 @@ export function evalSummation(
     return result ?? undefined;
   }
 
-  const [index, lower, upper, isFinite] = normalizeLimits(range);
+  const [index, lower, upper, isFinite] = normalizeLimits(range.evaluate());
 
   if (!index) return undefined;
 
   const fn = expr;
-  if (
-    mode == 'simplify' &&
-    (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS)
-  )
+
+  if (lower >= upper) return undefined;
+
+  if (mode === 'simplify' && upper - lower >= MAX_SYMBOLIC_TERMS)
     return undefined;
+
+  if (mode === 'evaluate' && upper - lower >= MAX_SYMBOLIC_TERMS) mode = 'N';
 
   const savedContext = ce.swapScope(fn.scope);
   ce.pushScope();

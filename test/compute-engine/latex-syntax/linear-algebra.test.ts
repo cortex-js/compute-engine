@@ -215,7 +215,6 @@ describe('Serializing matrix with column format', () => {
 describe('Serializing vectors', () => {
   it('should serialize a default vector', () => {
     const result = ce.box(['Vector', 5, 7, 0, -1]);
-    console.log(result.toString());
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{pmatrix}5\\\\
       7\\\\
