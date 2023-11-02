@@ -42,6 +42,7 @@ import {
   BoxedSubstitution,
   AssignValue,
   DomainLiteral,
+  ArrayValue,
 } from './public';
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
@@ -1896,6 +1897,18 @@ export class ComputeEngine implements IComputeEngine {
       metadata,
       canonical: true,
     });
+  }
+
+  array(
+    elements: ArrayValue[] | ArrayValue[][],
+    metadata?: Metadata
+  ): BoxedExpression {
+    // @todo
+    // return new BoxedFunction(this, 'List', canonical(elements), {
+    //   metadata,
+    //   canonical: true,
+    // });
+    return this.Nothing;
   }
 
   string(s: string, metadata?: Metadata): BoxedExpression {

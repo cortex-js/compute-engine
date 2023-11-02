@@ -784,26 +784,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'environment',
     name: 'Which',
     identifierTrigger: 'cases',
-    parse: (parser: Parser) => {
-      const tabular: Expression[][] | null = parser.parseTabular();
-      if (!tabular) return ['Which'];
-      // Note: return `True` for the condition, because it must be present
-      // as the second element of the Tuple. Return an empty sequence for the
-      // value, because it is optional
-      const result: Expression = ['Which'];
-      for (const row of tabular) {
-        if (row.length === 1) {
-          result.push('True');
-          result.push(row[0]);
-        } else if (row.length === 2) {
-          const s = stringValue(row[1]);
-          // If a string, probably 'else' or 'otherwise'
-          result.push(s ? 'True' : stripText(row[1]) ?? 'True');
-          result.push(row[0]);
-        }
-      }
-      return result;
-    },
+    parse: parseWhich,
     serialize: (serialize: Serializer, expr: Expression): string => {
       const rows: string[] = [];
       const args = ops(expr);
@@ -817,6 +798,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       }
       return joinLatex(['\\begin{cases}', rows.join('\\\\'), '\\end{cases}']);
     },
+  },
+  {
+    kind: 'environment',
+    identifierTrigger: 'dcases',
+    parse: parseWhich,
+  },
+  {
+    kind: 'environment',
+    identifierTrigger: 'rcases',
+    parse: parseWhich,
   },
 ];
 
@@ -1153,6 +1144,13 @@ export const DELIMITERS_SHORTHAND = {
   // '⎿': '', // U+23BF RIGHT PARENTHESIS LOWER HOOK
 };
 
+export function latexToDelimiterShorthand(s: string): string | undefined {
+  for (const key in DELIMITERS_SHORTHAND)
+    if (DELIMITERS_SHORTHAND[key] === s) return key;
+
+  return undefined;
+}
+
 function parseAssign(parser: Parser, lhs: Expression): Expression | null {
   const index = parser.index;
 
@@ -1197,4 +1195,25 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
   }
 
   return ['Assign', lhs, rhs];
+}
+
+function parseWhich(parser: Parser): Expression | null {
+  const tabular: Expression[][] | null = parser.parseTabular();
+  if (!tabular) return ['Which'];
+  // Note: return `True` for the condition, because it must be present
+  // as the second element of the Tuple. Return an empty sequence for the
+  // value, because it is optional
+  const result: Expression = ['Which'];
+  for (const row of tabular) {
+    if (row.length === 1) {
+      result.push('True');
+      result.push(row[0]);
+    } else if (row.length === 2) {
+      const s = stringValue(row[1]);
+      // If a string, probably 'else' or 'otherwise'
+      result.push(s ? 'True' : stripText(row[1]) ?? 'True');
+      result.push(row[0]);
+    }
+  }
+  return result;
 }

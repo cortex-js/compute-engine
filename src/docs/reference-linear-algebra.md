@@ -32,10 +32,25 @@ The Compute Engine provides a number of functions for working with matrices.
 
 
 
-## Constructing a Matrix
+
+{% def "Vector" %}
+
+[&quot;**Vector**&quot;, _x-1_, ..._x-2_]{.signature}
+
+`Vector` interprets the elements _x-1_... as a column vector
+
+This is essentially a shortcut for `["Matrix", ["List", ["List", _x-1_], ["List, _x-2_], ...]]]`.
+
+```json
+["Vector", 1, 3, 5, 0]
+```
+
+{% latex "\\begin{pmatrix} 1 \\\\ 3 \\\\ 5 \\\\ 0 \\end{pmatrix}" %}
 
 
-## Matrix Styling
+{% enddef %}
+
+## Formatting
 
 {% def "Matrix" %}
 

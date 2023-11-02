@@ -41,25 +41,6 @@ describe('LIST PARSING', () => {
       `["List", ["List", 1, 2], ["List", 3, 4]]`
     );
   });
-
-  test('Matrix', () => {
-    expect(parse('\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}'))
-      .toMatchInlineSnapshot(`
-      [
-        "Error",
-        ["ErrorCode", "'unknown-environment'", "'pmatrix'"],
-        ["LatexString", "'\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}'"]
-      ]
-    `);
-    expect(parse('\\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}'))
-      .toMatchInlineSnapshot(`
-      [
-        "Error",
-        ["ErrorCode", "'unknown-environment'", "'bmatrix'"],
-        ["LatexString", "'\\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}'"]
-      ]
-    `);
-  });
 });
 
 describe('LIST SERIALIZATION', () => {

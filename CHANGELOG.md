@@ -2,7 +2,11 @@
 
 ### New Features
 
-- Added `IsSame` function
+- **#125** Parse and serialize environemnts, i.e.
+  `\begin{matrix} 1 & 2 \\ 3 & 4 \end{matrix}` will be parsed as
+  `["Matrix", ["List", ["List", 1, 2], ["List", 3, 4]]]`.
+- Added `IsSame` function, which is the function expression corresponding to
+  `expr.isSame()`.
 - Added `CanonicalOrder` function, which sorts the arguments of commutative
   functions into canonical order. This is useful to compare two non-canonical
   expressions for equality.

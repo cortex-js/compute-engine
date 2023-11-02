@@ -280,6 +280,18 @@ This can be useful to compare two non-canonical expressions for equality, for ex
 // -> True
 ```
 
+To compare the input from a mathfield with an expected 
+answer, you could use:
+
+```js
+const correct = ce..box(
+    ['CanonicalOrder', ce.parse(mf.value, {canonical: false})])
+    .isSame(ce.box(ce.parse("1+x"))
+```
+
+Both `1+x` and `x+1` will return **true**, but `2-1+x` will return **false**.
+
+
 {% enddef %}
 
 

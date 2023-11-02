@@ -885,6 +885,20 @@ function canonicalList(
   ce: IComputeEngine,
   ops: BoxedExpression[]
 ): BoxedExpression {
+  // Do we have a matrix with a custom delimiter, i.e.
+  // \left\lbrack \begin{array}...\end{array} \right\rbrack
+
+  const op1 = ops[0];
+  if (ops.length === 1 && op1.head === 'Matrix') {
+    // Adjust the matrix to have the correct delimiter
+    const [body, delimiters, columns] = op1.ops!;
+
+    if (!delimiters || delimiters.string === '..') {
+      if (!columns) return ce._fn('Matrix', [body, delimiters]);
+      return ce._fn('Matrix', [body, ce.string('[]'), columns]);
+    }
+  }
+
   ops = ops.map((op) => {
     if (op.head === 'Delimiter') {
       if (op.op1.head === 'Sequence')

@@ -2,11 +2,13 @@ import { engine as ce } from '../../utils';
 
 const m4 = ['List', ['List', 1, 2], ['List', 3, 4]];
 
+const v1 = ['Vector', 5, 7, 0, -1];
+
 describe('Parsing environments', () => {
   it('should parse a pmatrix', () => {
     const result = ce.parse('\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'pmatrix'"],["LatexString","'\\\\begin{pmatrix} a & b \\\\\\\\ c & d \\\\end{pmatrix}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]]]`
     );
   });
 
@@ -15,87 +17,96 @@ describe('Parsing environments', () => {
       '\\begin{pmatrix}[ll] a & b \\\\ c & d \\end{pmatrix}'
     );
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'pmatrix'"],["LatexString","'\\\\begin{pmatrix}[ll] a & b \\\\\\\\ c & d \\\\end{pmatrix}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]],"'()'","'<<'"]`
     );
   });
 
   it('should parse a bmatrix', () => {
     const result = ce.parse('\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'bmatrix'"],["LatexString","'\\\\begin{bmatrix} a & b \\\\\\\\ c & d \\\\end{bmatrix}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]],"'[]'"]`
     );
   });
 
   it('should parse a Bmatrix', () => {
     const result = ce.parse('\\begin{Bmatrix} a & b \\\\ c & d \\end{Bmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'Bmatrix'"],["LatexString","'\\\\begin{Bmatrix} a & b \\\\\\\\ c & d \\\\end{Bmatrix}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]],"'{}'"]`
     );
   });
 
   it('should parse a vmatrix', () => {
     const result = ce.parse('\\begin{vmatrix} a & b \\\\ c & d \\end{vmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'vmatrix'"],["LatexString","'\\\\begin{vmatrix} a & b \\\\\\\\ c & d \\\\end{vmatrix}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]],"'||'"]`
     );
   });
 
   it('should parse a Vmatrix', () => {
     const result = ce.parse('\\begin{Vmatrix} a & b \\\\ c & d \\end{Vmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'Vmatrix'"],["LatexString","'\\\\begin{Vmatrix} a & b \\\\\\\\ c & d \\\\end{Vmatrix}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]],"'‖‖'"]`
     );
   });
 
   it('should parse a dcases', () => {
     const result = ce.parse('\\begin{dcases} a & b \\\\ c & d \\end{dcases}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'dcases'"],["LatexString","'\\\\begin{dcases} a & b \\\\\\\\ c & d \\\\end{dcases}'"]]`
+      `["Which","b","a","d","c"]`
     );
   });
 
   it('should parse a rcases', () => {
     const result = ce.parse('\\begin{rcases} a & b \\\\ c & d \\end{rcases}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'rcases'"],["LatexString","'\\\\begin{rcases} a & b \\\\\\\\ c & d \\\\end{rcases}'"]]`
+      `["Which","b","a","d","c"]`
     );
   });
 
   it('should parse an array', () => {
     const result = ce.parse('\\begin{array}{cc} a & b \\\\ c & d \\end{array}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'array'"],["LatexString","'\\\\begin{array}{cc} a & b \\\\\\\\ c & d \\\\end{array}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]],"'..'","'=='"]`
     );
   });
 
   it('should parse a matrix environment', () => {
     const result = ce.parse('\\begin{matrix} a & b \\\\ c & d \\end{matrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'matrix'"],["LatexString","'\\\\begin{matrix} a & b \\\\\\\\ c & d \\\\end{matrix}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]],"'..'"]`
+    );
+  });
+
+  it('should parse an environment wrapped with delimiters', () => {
+    const result = ce.parse(
+      '\\left(\\begin{matrix} a & b \\\\ c & d \\end{matrix}\\right)'
+    );
+    expect(result.toString()).toMatchInlineSnapshot(
+      `["Delimiter",["Sequence",["Matrix",["List",["List",["a","b"]],["List",["c","d"]]],"'..'"]]]`
     );
   });
 
   it('should parse an environment with custom delimiters', () => {
     const result = ce.parse(
-      '\\left\\langle\\begin{matrix} a & b \\\\ c & d \\end{matrix}\\right\\rangle'
+      '\\left\\lbrack\\begin{array}{cc} a & b \\\\ c & d \\end{array}\\right\\rbrack'
     );
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error","'unexpected-delimiter'",["LatexString","'\\\\left\\\\langle'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]],"'[]'","'=='"]`
     );
   });
+});
 
-  it('should parse an environment with custom delimiters', () => {
-    const result = ce.parse(
-      '\\left\\langle\\begin{array}{cc} a & b \\\\ c & d \\end{array}\\right\\rangle'
-    );
+describe('Parsing vectors', () => {
+  it('should parse a pmatrix vector', () => {
+    const result = ce.parse('\\begin{pmatrix} a \\\\ b \\\\ c \\end{pmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error","'unexpected-delimiter'",["LatexString","'\\\\left\\\\langle'"]]`
+      `["Matrix",["List",["List",["a"]],["List",["b"]],["List",["c"]]]]`
     );
   });
 });
 
 describe('Serializing matrix with delimiters', () => {
-  it('should parse a matrix with default delimiter', () => {
+  it('should serialize a matrix with default delimiter', () => {
     const result = ce.box(['Matrix', m4]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{pmatrix}1 & 2\\\\
@@ -103,100 +114,123 @@ describe('Serializing matrix with delimiters', () => {
     `);
   });
 
-  it('should parse a matrix with () delimiters', () => {
+  it('should serialize a matrix with () delimiters', () => {
     const result = ce.box(['Matrix', m4, { str: '()' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{pmatrix}1 & 2\\\\
+      3 & 4\\end{pmatrix}
     `);
   });
 
-  it('should parse a matrix with [] delimiters', () => {
+  it('should serialize a matrix with [] delimiters', () => {
     const result = ce.box(['Matrix', m4, { str: '[]' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{bmatrix}1 & 2\\\\
+      3 & 4\\end{bmatrix}
     `);
   });
 
-  it('should parse a matrix with {} delimiters', () => {
+  it('should serialize a matrix with {} delimiters', () => {
     const result = ce.box(['Matrix', m4, { str: '{}' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{Bmatrix}1 & 2\\\\
+      3 & 4\\end{Bmatrix}
     `);
   });
-  it('should parse a matrix with || delimiters', () => {
+  it('should serialize a matrix with || delimiters', () => {
     const result = ce.box(['Matrix', m4, { str: '||' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{vmatrix}1 & 2\\\\
+      3 & 4\\end{vmatrix}
     `);
   });
-  it('should parse a matrix with ‖‖ delimiters', () => {
+  it('should serialize a matrix with ‖‖ delimiters', () => {
     const result = ce.box(['Matrix', m4, { str: '‖‖' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{Vmatrix}1 & 2\\\\
+      3 & 4\\end{Vmatrix}
     `);
   });
   it('should parse a matrix with {. delimiters', () => {
     const result = ce.box(['Matrix', m4, { str: '{.' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{dcases}1 & 2\\\\
+      3 & 4\\end{dcases}
     `);
   });
-  it('should parse a matrix with .} delimiters', () => {
+  it('should serialize a matrix with .} delimiters', () => {
     const result = ce.box(['Matrix', m4, { str: '.}' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{rcases}1 & 2\\\\
+      3 & 4\\end{rcases}
     `);
   });
-  it('should parse a matrix with no delimiters', () => {
+  it('should serialize a matrix with no delimiters', () => {
     const result = ce.box(['Matrix', m4, { str: '..' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{matrix}1 & 2\\\\
+      3 & 4\\end{matrix}
     `);
   });
-  it('should parse a matrix with <> delimiters', () => {
+  it('should serialize a matrix with <> delimiters', () => {
     const result = ce.box(['Matrix', m4, { str: '<>' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\left\\langle\\begin{array}{}1 & 2\\\\
+      3 & 4\\end{array}\\right\\rangle
     `);
   });
 });
 
-describe('Serialazing matrix with column format', () => {
+describe('Serializing matrix with column format', () => {
   it('should parse a matrix left aligned cells', () => {
     const result = ce.box(['Matrix', m4, { str: '[]' }, { str: '<<<<' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{llll}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{bmatrix}[llll]1 & 2\\\\
+      3 & 4\\end{bmatrix}
     `);
   });
   it('should parse a matrix centered aligned cells', () => {
     const result = ce.box(['Matrix', m4, { str: '[]' }, { str: '====' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{cccc}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{bmatrix}[cccc]1 & 2\\\\
+      3 & 4\\end{bmatrix}
     `);
   });
   it('should parse a matrix right aligned cells', () => {
     const result = ce.box(['Matrix', m4, { str: '[]' }, { str: '>>>>' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{rrrr}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{bmatrix}[rrrr]1 & 2\\\\
+      3 & 4\\end{bmatrix}
     `);
   });
   it('should parse a matrix with mixed aligned cells', () => {
     const result = ce.box(['Matrix', m4, { str: '[]' }, { str: '>=<' }]);
     expect(result.latex).toMatchInlineSnapshot(`
-      \\left\\begin{array}{rcl}1 & 2\\\\
-      3 & 4\\end{array}\\right
+      \\begin{bmatrix}[rcl]1 & 2\\\\
+      3 & 4\\end{bmatrix}
+    `);
+  });
+});
+
+describe('Serializing vectors', () => {
+  it('should serialize a default vector', () => {
+    const result = ce.box(['Vector', 5, 7, 0, -1]);
+    console.log(result.toString());
+    expect(result.latex).toMatchInlineSnapshot(`
+      \\begin{pmatrix}5\\\\
+      7\\\\
+      0\\\\
+      -1\\end{pmatrix}
+    `);
+  });
+
+  it('should serialize a default vector with delimiters', () => {
+    const result = ce.box(['Matrix', ['Vector', 5, 7, 0, -1], { str: '[]' }]);
+    expect(result.latex).toMatchInlineSnapshot(`
+      \\begin{bmatrix}5\\\\
+      7\\\\
+      0\\\\
+      -1\\end{bmatrix}
     `);
   });
 });

@@ -64,34 +64,6 @@ the type of _expr_:
 
 
 
-{% def "Matrix" %} 
-
-[&quot;**Matrix**&quot;, _matrix_]{.signature}
-
-[&quot;**Matrix**&quot;, _matrix_, _delim_, _format_]{.signature}
-
-The `Matrix` function is **inert** and the value of a `["Matrix", _matrix_]` expression is `matrix`.
-
-_matrix_ is a `["List"]` of `["List"]`s of expressions.
-
-_delim_ is an optional string indicating the delimiters to use. It can be 
-any of the delimiters allowed by the `Delimiter` function. Note there is 
-no separator delimiter for matrixes.
-
-If _delim_ is not provided, the default is `"()"`.
-
-_format_ is an optional string indicating how to format the columns of the
-matrix. It can be any of the following:
-- `"<"`: left aligned
-- `"="`: centered
-- `">"`: right aligned
-- `"|"`: a solid vertial line
-- `":"`: a dashed vertial line
-
-If _format_ is not provided, the default is `"<<<<<<<<<<"`. 
-
-{% enddef %}
-
 
 {% def "Spacing" %} 
 
@@ -132,6 +104,10 @@ The `Style` function is **inert** and the value of a `["Style", _expr_]` express
 {% enddefs %}
 
 </section>
+
+
+{% readmore "/compute-engine/reference/linear-algebra/#formatting" %} Read more about formatting
+of **matrixes** and **vectors**{% endreadmore %}
 
 
 

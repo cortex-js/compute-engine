@@ -738,7 +738,10 @@ function isValidEntry(
   }
 
   // Check that the identifierTrigger is a valid identifier is present
-  if ('identifierTrigger' in entry) {
+  if (
+    'identifierTrigger' in entry &&
+    (!('kind' in entry) || entry.kind !== 'environment')
+  ) {
     if (
       typeof entry.identifierTrigger !== 'string' ||
       !isValidIdentifier(entry.identifierTrigger)

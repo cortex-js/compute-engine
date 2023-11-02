@@ -11,14 +11,14 @@ describe('Creating matrix', () => {
   it('should create a unit pmatrix', () => {
     const result = ce.parse('\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'pmatrix'"],["LatexString","'\\\\begin{pmatrix} a & b \\\\\\\\ c & d \\\\end{pmatrix}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]]]`
     );
   });
 
   it('should create a diagonal pmatrix', () => {
     const result = ce.parse('\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Error",["ErrorCode","'unknown-environment'","'pmatrix'"],["LatexString","'\\\\begin{pmatrix} a & b \\\\\\\\ c & d \\\\end{pmatrix}'"]]`
+      `["Matrix",["List",["List",["a","b"]],["List",["c","d"]]]]`
     );
   });
 });

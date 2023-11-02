@@ -38,13 +38,25 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-const expr = ce.parse('x^{}');
-console.info(expr.json);
-// expr.replace(ce.rules([['^{}', ['Sequence']]]));
-expr.replace(ce.rules([[['Power', '_1', ['Error', "'missing'"]], '_1']]), {
-  recursive: true,
-});
-console.info(expr.json);
+// ce.parse('f\\left(x\\right)\\coloneq3x').evaluate();
+// ce.parse('a:=3').evaluate();
+// const expr = ce.parse('\\sum_{m=1}^{a}{f(m)}');
+// console.info(expr.evaluate().toString());
+
+// const fn = expr.compile('javascript', {
+//   optimize: ['evaluate'],
+// });
+// console.log(fn?.toString());
+// const eva = expr.evaluate().valueOf();
+// console.info(fn!({}));
+
+// const expr = ce.parse('x^{}');
+// console.info(expr.json);
+// // expr.replace(ce.rules([['^{}', ['Sequence']]]));
+// expr.replace(ce.rules([[['Power', '_1', ['Error', "'missing'"]], '_1']]), {
+//   recursive: true,
+// });
+// console.info(expr.json);
 
 // Should distribute: prefer addition over multiplication
 const xp = ce.parse('a\\times(c+d)');

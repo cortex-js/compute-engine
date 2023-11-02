@@ -2054,6 +2054,15 @@ export type AssignValue =
   | ((ce, args) => BoxedExpression)
   | undefined;
 
+export type ArrayValue =
+  | boolean
+  | number
+  | string
+  | Decimal
+  | Complex
+  | BoxedExpression
+  | undefined;
+
 /** @internal */
 export interface IComputeEngine {
   latexDictionary: readonly LatexDictionaryEntry[];
@@ -2255,6 +2264,11 @@ export interface IComputeEngine {
   ): BoxedExpression;
 
   tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression;
+
+  array(
+    elements: ArrayValue[] | ArrayValue[][],
+    metadata?: Metadata
+  ): BoxedExpression;
 
   rules(rules: Rule[]): BoxedRuleSet;
   pattern(expr: LatexString | SemiBoxedExpression): Pattern;
