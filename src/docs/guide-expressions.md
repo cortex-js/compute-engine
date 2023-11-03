@@ -154,7 +154,7 @@ console.log(expr.json);
 You can check if a non-canonical expression is a reduced (canonical) rational 
 number by checking the GCD of the numerator and denominator:
 
-```json
+```js example
 const input = ce.parse("\\frac{30}{50}", {canonical: false});
 console.info(ce.box(
   ["GCD", ["NumeratorDenominator", input]]

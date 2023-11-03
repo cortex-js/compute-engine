@@ -19,10 +19,12 @@ export interface Tensor {
 // but could be extended in the future (with Tensorflow, for example).
 export interface AbstractArray<T = number> {
   readonly rank: number;
-  readonly size: number;
 
   readonly isSquare: boolean;
+  // a square matrix that is equal to its transpose. A^T = A
   readonly isSymmetric: boolean;
+  // aka antisymmetric matrix, skew-symmetric matrix, or antimetric matrix
+  // A square matrix whose transpose is also its negative. A^T = -A
   readonly isSkewSymmetric: boolean;
   readonly isUpperTriangular: boolean; // All entries below the diagonal are zero.
   readonly isLowerTriangular: boolean; // All entries above the diagonal are zero.
@@ -44,6 +46,11 @@ export interface AbstractArray<T = number> {
   axis(axis: number): AbstractArray<T>;
   diagonal(): AbstractArray<T>;
 
+  reshape(...shape: number[]): AbstractArray<T>;
+
+  // Flatten the tensor into a vector
+  flatten(): AbstractArray<T>;
+
   transpose(axis1: number, axis2: number): AbstractArray<T>;
   // Transpose the first and second axis
   transpose(): AbstractArray<T>;
@@ -51,7 +58,7 @@ export interface AbstractArray<T = number> {
   // a^H or A^*, or A^\dagger : conjugate transpose, aka Hermitian transpose, aka adjoint
   // https://en.wikipedia.org/wiki/Conjugate_transpose
   // transpose, then apply the complex conjugate to each entry
-  // (same aas transpose if all entries are real)
+  // (same as transpose if all entries are real)
   conjugateTranspose(axis1: number, axis2: number): AbstractArray<T>;
 
   determinant(): T;
@@ -60,8 +67,10 @@ export interface AbstractArray<T = number> {
   // A^+ is the Moore-Penrose pseudoinverse of A. https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
   // Pseudoinverse can also be defined for scalars: the pseudoinverse of a scalar is its reciprocal if it is non-zero, and zero otherwise.
   pseudoInverse(): AbstractArray<T>;
-  adjoint(): AbstractArray<T>;
-  cofactor(): AbstractArray<T>;
+
+  // The adjugate, classical adjoint, or adjunct of a square matrix is the transpose of its cofactor matrix. https://en.wikipedia.org/wiki/Adjugate_matrix
+  adjugateMatrix(): AbstractArray<T>;
+
   // The determinant of the matrix obtained by deleting row i and column j from this matrix. https://en.wikipedia.org/wiki/Minor_(linear_algebra)
   minor(i: number, j: number): T;
 
@@ -91,13 +100,6 @@ export interface AbstractArray<T = number> {
   outerProduct(rhs: AbstractArray<T>): AbstractArray<T>;
   innerProduct(rhs: AbstractArray<T>): AbstractArray<T>;
   matrixProduct(rhs: AbstractArray<T>): AbstractArray<T>;
-  matrixDivision(rhs: AbstractArray<T>): AbstractArray<T>;
-  matrixPower(rhs: AbstractArray<T>): AbstractArray<T>;
-  matrixRoot(rhs: AbstractArray<T>): AbstractArray<T>;
-  matrixSquareRoot(): AbstractArray<T>;
-  matrixSquare(): AbstractArray<T>;
-  matrixCube(): AbstractArray<T>;
-  matrixInverse(): AbstractArray<T>;
 
   equals(rhs: AbstractArray<T>): boolean;
 }

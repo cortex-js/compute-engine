@@ -2263,6 +2263,7 @@ export interface IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression;
 
+  tuple(elements: number[], metadata?: Metadata): BoxedExpression;
   tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression;
 
   array(

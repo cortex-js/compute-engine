@@ -11,10 +11,14 @@ import {
   BoxedSubstitution,
   PatternMatchOptions,
 } from '../public';
+import { AbstractArray, Tensor } from '../symbolic/tensors.js';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
 
-export class BoxedTensor extends _BoxedExpression {
+export class BoxedTensor
+  extends _BoxedExpression
+  implements AbstractArray<BoxedExpression>
+{
   private _rows: ArrayValue[];
 
   constructor(
@@ -79,6 +83,7 @@ export class BoxedTensor extends _BoxedExpression {
   isEqual(rhs: BoxedExpression): boolean {
     if (this === rhs) return true;
     return false;
+    // return this.equals(rhs);
   }
 
   match(
@@ -107,6 +112,197 @@ export class BoxedTensor extends _BoxedExpression {
 
   N(_options?: NOptions): BoxedExpression {
     return this;
+  }
+
+  //
+  // AbstractArray
+  //
+
+  get rank(): number {
+    return 1;
+  }
+
+  get shape(): number[] {
+    return [this._rows.length];
+  }
+
+  get isSquare(): boolean {
+    return false;
+  }
+  get isSymmetric(): boolean {
+    return false;
+  }
+  get isSkewSymmetric(): boolean {
+    return false;
+  }
+  get isUpperTriangular(): boolean {
+    return false;
+  }
+
+  get isLowerTriangular(): boolean {
+    return false;
+  }
+
+  get isTriangular(): boolean {
+    return false;
+  }
+
+  get isDiagonal(): boolean {
+    return false;
+  }
+
+  get isIdentity(): boolean {
+    return false;
+  }
+
+  get isZero(): boolean {
+    return false;
+  }
+
+  get isSparse(): boolean {
+    return false;
+  }
+
+  get isRegular(): boolean {
+    return false;
+  }
+
+  get isSingular(): boolean {
+    return false;
+  }
+
+  get dataType(): 'number' | 'complex' | 'boolean' | 'any' {
+    return 'any';
+  }
+
+  at(...indices: number[]): BoxedExpression {
+    return this.engine.Nothing;
+  }
+
+  axis(axis: number): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  diagonal(): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  reshape(...shape: number[]): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  flatten(): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  transpose(): AbstractArray<BoxedExpression>;
+  transpose(axis1?: number, axis2?: number): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  conjugateTranspose(
+    axis1: number,
+    axis2: number
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  determinant(): BoxedExpression {
+    return this;
+  }
+
+  inverse(): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  pseudoInverse(): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  adjugateMatrix(): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  minor(i: number, j: number): BoxedExpression {
+    return this;
+  }
+
+  trace(): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  add(rhs: AbstractArray<BoxedExpression>): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  subtract(
+    rhs: AbstractArray<BoxedExpression>
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  multiply(
+    rhs: AbstractArray<BoxedExpression>
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  divide(rhs: AbstractArray<BoxedExpression>): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  power(rhs: AbstractArray<BoxedExpression>): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  tensorProduct(
+    rhs: AbstractArray<BoxedExpression>
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  kroneckerProduct(
+    rhs: AbstractArray<BoxedExpression>
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  frobeniusProduct(rhs: AbstractArray<BoxedExpression>): BoxedExpression {
+    return this;
+  }
+
+  dotProduct(
+    rhs: AbstractArray<BoxedExpression>
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  crossProduct(
+    rhs: AbstractArray<BoxedExpression>
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  outerProduct(
+    rhs: AbstractArray<BoxedExpression>
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  innerProduct(
+    rhs: AbstractArray<BoxedExpression>
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  matrixProduct(
+    rhs: AbstractArray<BoxedExpression>
+  ): AbstractArray<BoxedExpression> {
+    return this;
+  }
+
+  equals(rhs: AbstractArray<BoxedExpression>): boolean {
+    return false;
   }
 }
 

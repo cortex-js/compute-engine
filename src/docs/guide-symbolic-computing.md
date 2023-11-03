@@ -194,7 +194,7 @@ of canonicalization, for example to ignore the order of the arguments of a sum.
 
 You can achieve this by comparing the expressions in their canonical order:
 
-```json
+```json example
 ce.box(["CanonicalOrder", ["Add", 1, "x"]]).isSame(["CanonicalOrder", ["Add", "x", 1]])
 ```
 

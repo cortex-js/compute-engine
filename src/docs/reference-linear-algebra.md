@@ -22,18 +22,25 @@ represented as lists of lists.
 
 For example the matrix above is represented as the following list of lists:
 
-```json
-["List", ["List", 1, 3, ["List", 5, 0]]
+```json example
+["List", ["List", 1, 3, ["List", 5, 0]]]
 ```
+
+In the Compute Engine, matrixes are stored in **row-major** order. This means that
+the first element of the list is the first row of the matrix, the second element
+of the list is the second row of the matrix, etc.
+
 
 {% readmore "/compute-engine/reference/collections/" %}Since vectors,
 matrixes and tensors are `List` collections, some **collection operations**
 can also be applied to them such as `At`, `Fold` and `Map`. {% endreadmore %}
 
 
-The Compute Engine provides a number of functions for working with matrices.
+An extension of linear algebra is [tensor algebra](https://en.wikipedia.org/wiki/Tensor_algebra) which studies tensors, which are
+multidimensional arrays. For example, a grayscale image can be represented by a matrix of grayscale values. But a color image is represented by a rank 3 tensor, an array of RGB triplets. Tensors are represented as nested lists.
 
 
+The Compute Engine provides a number of functions for working with matrices and tensors.
 
 
 
@@ -45,7 +52,7 @@ The Compute Engine provides a number of functions for working with matrices.
 
 This is essentially a shortcut for `["Matrix", ["List", ["List", _x-1_], ["List, _x-2_], ...]]]`.
 
-```json
+```json example
 ["Vector", 1, 3, 5, 0]
 ```
 
@@ -67,7 +74,7 @@ tensor along each of its axis.
 A list (or vector) has a single axis. A matrix has two axes. A tensor has more
 than two axes.
 
-A scalar has no dimension and `Shape` returns an empty tuple.
+For a scalar, `Shape` returns an empty tuple.
 
 ```json example
 ["Shape", 5]
@@ -80,17 +87,26 @@ A scalar has no dimension and `Shape` returns an empty tuple.
 // ➔ [2, 4]
 ```
 
+**Note:** The shape of a tensor is also sometimes called "dimensions".
+However, this terminology is ambiguous because the word "dimension" is also
+used to refer to the length of a tensor along a specific axis.
+
+
 {% enddef %}
 
 {% def "Rank" %}
 
-[&quot;**Rank**&quot;, _collection_]{.signature}
+[&quot;**Rank**&quot;, _tensor_]{.signature}
 
-Returns the number of dimensions of the collection, that is the number of its
-axes.
+Returns the number of axes of a tensor.
 
-A scalar (number) has rank 0, a vector or list has rank 1, a matrix has rank 2,
-a tensor has rank 3, etc.
+A scalar (a number, for exmaple) has **rank 0**.
+
+A vector or list has **rank 1**.
+
+A matrix has **rank 2**, a tensor has **rank 3**, etc.
+
+The rank is the length of the shape of the tensor.
 
 ```json example
 ["Rank", 5]
@@ -99,24 +115,62 @@ a tensor has rank 3, etc.
 ["Rank", ["List", 5, 2, 10, 18]]
 // ➔ 1
 
-["Rank", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
+["Rank", ["List", ["List", 5, 2, 10], ["List", 1, 2, 3]]]
 // ➔ 2
 ```
 
 {% enddef %}
 
 
+## Accessing the content of Tensors
+
+{% def "At" %}
+
+[&quot;**At**&quot;, _tensor_, _index-1_, _index-2_, ...]{.signature}
+
+Returns the element of the tensor at the specified indexes.
+
+_index-1_, ... is a sequence of integers, one for each axis of the tensor.
+
+Indexes start at 1. Negative indexes count elements from the end. A negative index is
+equivalent to adding the length of the axis to the index.
+
+```json example
+["At", ["List", 5, 2, 10, 18], 3]
+// ➔ 10
+
+["At", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]], 2, 3]
+// ➔ 3
+
+["At", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]], 2, -1]
+// ➔ 3
+```
 
 
-## Transforming Tensors
+In a list (or vector), there is only one axis, so there is only one index.
+
+In a matrix, the first index is the row, the second is the column.
+
+
+{% enddef %}
+
+
+
+
+
+
+
+## Transforming Matrixes and Tensors
 
 {% def "Flatten" %}
 
 [&quot;**Flatten**&quot;, _collection_]{.signature}
 
-Returns a list of all the elements of the collection, recursively.
+Returns a list of all the elements of the tensor or collection, recursively.
 
 Only elements with the same head as the collection are flattened.
+Tensors usually have a head of `List`, so only other `List` elements
+are flattened.
 
 For a matrix, it returns a list of all the elements in the matrix, in row-major
 order.
@@ -158,6 +212,153 @@ Returns the transpose of the matrix.
 ```json example
 ["Transpose", ["List", ["List", 1, 2, 3], ["List", 4, 5, 6]]]
 // ➔ ["List", ["List", 1, 4], ["List", 2, 5], ["List", 3, 6]]
+```
+
+[&quot;**Transpose**&quot;, _tensor_, _axis-1_, _axis-2_]{.signature}
+
+Swap the two specified axes of the tensor. Note that axis
+indexes start at 1.
+
+{% enddef %}
+
+
+{% def "ConjugateTranspose" %}
+
+[&quot;**ConjugateTranspose**&quot;, _matrix_]{.signature}
+
+{% latex "A^\star" %}
+
+Returns the [conjugate transpose](https://en.wikipedia.org/wiki/Conjugate_transpose) of the matrix, that is
+the transpose of the matrix with all its (complex) elements conjugated. Also known as the Hermitian transpose.
+
+```json example
+["ConjugateTranspose", ["List", ["List", 1, 2, 3], ["List", 4, 5, 6]]]
+// ➔ ["List", ["List", 1, 4], ["List", 2, 5], ["List", 3, 6]]
+```
+
+[&quot;**ConjugateTranspose**&quot;, _tensor_, _axis-1_, _axis-2_]{.signature}
+
+Swap the two specified axes of the tensor. Note that axis
+indexes start at 1. In addition, all the (complex) elements
+of the tensor are conjugated.
+
+
+{% enddef %}
+
+{% def "Inverse" %}
+
+[&quot;**Inverse**&quot;, _matrix_]{.signature}
+
+Returns the inverse of the matrix.
+
+```json example
+["Inverse", ["List", ["List", 1, 2], ["List", 3, 4]]]
+// ➔ ["List", ["List", -2, 1], ["List", 1.5, -0.5]]
+```
+
+{% enddef %}
+
+{% def "PseudoInverse" %}
+
+[&quot;**PseudoInverse**&quot;, _matrix_]{.signature}
+
+Returns the [Moore-Penrose pseudoinverse](https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse) of the matrix.
+
+```json example
+["PseudoInverse", ["List", ["List", 1, 2], ["List", 3, 4]]]
+// ➔ ["List", ["List", -2, 1], ["List", 1.5, -0.5]]
+```
+
+{% enddef %}
+  
+{% def "Diagonal" %}
+
+[&quot;**Diagonal**&quot;, _matrix_]{.signature}
+
+Returns the diagonal of the matrix.
+
+```json example
+["Diagonal", ["List", ["List", 1, 2], ["List", 3, 4]]]
+// ➔ ["List", 1, 4]
+```
+
+{% enddef %}
+
+{% def "AdjugateMatrix" %}
+
+[&quot;**AdjugateMatrix**&quot;, _matrix_]{.signature}
+
+{% latex "\\operatorname{adj}(\\mathbf{A})" %}
+
+Returns the [adjugate matrix](https://en.wikipedia.org/wiki/Adjugate_matrix) of the matrix, that is the inverse of the cofactor matrix.
+
+The cofactor matrix is a matrix of the determinants of the minors of the matrix multiplied by \\( (-1)^{i+j} \\). That is, for each element of the matrix, the cofactor is the determinant of the matrix without the row and column of the element.
+
+
+```json example
+["Adjoint", ["List", ["List", 1, 2], ["List", 3, 4]]]
+// ➔ ["List", ["List", 4, -2], ["List", -3, 1]]
+```
+
+{% enddef %}
+
+{% def "Minor" %}
+
+[&quot;**Minor**&quot;, _matrix_, _row_, _col_]{.signature}
+
+Returns the [minor](https://en.wikipedia.org/wiki/Minor_(linear_algebra)) of the matrix, that is the determinant of the matrix
+without the specified row and column.
+
+```json example
+["Minor", ["List", ["List", 1, 2], ["List", 3, 4]], 1, 2]
+// ➔ -2
+```
+
+{% enddef %}
+
+{% def "Trace" %}
+
+[&quot;**Trace**&quot;, _matrix_]{.signature}
+
+{% latex "\\operatorname{tr}(\\mathbf{A})" %}
+
+Returns the [trace](https://en.wikipedia.org/wiki/Trace_(linear_algebra)) of the matrix, the sum of the elements
+on the diagonal of the matrix. The trace is only defined for square matrices. The trace is also the sum of the eigenvalues of the matrix.
+
+```json example
+["Trace", ["List", ["List", 1, 2], ["List", 3, 4]]]
+// ➔ 5
+```
+
+{% enddef %}
+
+
+## Calculating with Matrixes and Tensors
+
+
+{% def "Determinant" %}
+
+[&quot;**Determinant**&quot;, _matrix_]{.signature}
+
+Returns the determinant of the matrix.
+
+```json example
+["Determinant", ["List", ["List", 1, 2], ["List", 3, 4]]]
+// ➔ -2
+```
+
+{% enddef %}
+
+{% def "Trace" %}
+
+[&quot;**Trace**&quot;, _matrix_]{.signature}
+
+Returns the trace of the matrix, that is the sum of the elements
+on the diagonal of the matrix.
+
+```json example
+["Trace", ["List", ["List", 1, 2], ["List", 3, 4]]]
+// ➔ 5
 ```
 
 {% enddef %}

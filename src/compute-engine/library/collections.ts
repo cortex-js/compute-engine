@@ -502,55 +502,6 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     },
   },
 
-  // Corresponds to monadic Shape `⍴` in APL
-  Dimensions: {
-    complexity: 8200,
-    signature: {
-      domain: ['FunctionOf', 'Values', 'Lists'],
-      evaluate: (_ce, _ops) => {
-        // @todo
-        return undefined;
-      },
-    },
-  },
-
-  Rank: {
-    complexity: 8200,
-    signature: {
-      domain: ['FunctionOf', 'Values', 'Numbers'],
-      evaluate: (_ce, _ops) => {
-        // @todo
-        return undefined;
-      },
-    },
-  },
-
-  // Corresponds to ArrayReshape in Mathematica
-  // and dyadic Shape `⍴` in APL
-  Reshape: {
-    complexity: 8200,
-    signature: {
-      domain: ['FunctionOf', 'Values', 'Values', 'Values'],
-      evaluate: (_ce, _ops) => {
-        // @todo
-        return undefined;
-      },
-    },
-  },
-
-  // Corresponds to Ravel `,` in APL
-  // Also Enlist `∊``⍋` in APL
-  Flatten: {
-    complexity: 8200,
-    signature: {
-      domain: ['FunctionOf', 'Values', 'Values'],
-      evaluate: (_ce, _ops) => {
-        // @todo
-        return undefined;
-      },
-    },
-  },
-
   // { f(x) for x in xs }
   // { 2x | x ∈ [ 1 , 10 ] }
   Map: {
@@ -634,19 +585,6 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Tuples'],
-      evaluate: (_ce, _ops) => {
-        // @todo
-        return undefined;
-      },
-    },
-  },
-
-  // Similar to Zip, but has a single argument, a matrix
-  // Ex: Transpose([[a, b, c], [1, 2, 3]]) = [[a, 1], [b, 2], [c, 3]]
-  Transpose: {
-    complexity: 8200,
-    signature: {
-      domain: ['FunctionOf', 'Values', 'Values'],
       evaluate: (_ce, _ops) => {
         // @todo
         return undefined;
