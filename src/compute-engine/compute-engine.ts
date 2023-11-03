@@ -1891,12 +1891,33 @@ export class ComputeEngine implements IComputeEngine {
    *
    * The result is canonical.
    */
-  tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression {
+  tuple(elements: number[], metadata?: Metadata): BoxedExpression;
+  tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression;
+  tuple(
+    elements: (number | BoxedExpression)[],
+    metadata?: Metadata
+  ): BoxedExpression {
     // Short path
-    return new BoxedFunction(this, 'Tuple', canonical(elements), {
-      metadata,
-      canonical: true,
-    });
+    if (typeof elements[0] === 'number') {
+      return new BoxedFunction(
+        this,
+        'Tuple',
+        (elements as number[]).map((x) => this.number(x)),
+        {
+          metadata,
+          canonical: true,
+        }
+      );
+    }
+    return new BoxedFunction(
+      this,
+      'Tuple',
+      canonical(elements as BoxedExpression[]),
+      {
+        metadata,
+        canonical: true,
+      }
+    );
   }
 
   array(
