@@ -223,10 +223,16 @@ evaluate to `False`.
 // ➔ True
 ```
 
+To compare two expressions for mathematical equality, use `Equal`.
+
+To compare two expressions structurally, but ignoring the order of the arguments
+of commutative functions, use [`CanonicalOrder`](#CanonicalOrder).
+
+
+See [Comparing Expressions](/compute-engine/guides/symbolic-computing/#comparing-expressions) for other options to compare two expressions, such 
+as the `Equal` function.
+
 {% enddef %}
-
-
-{%enddef %}
 
 
 ## Transforming an Expression
@@ -237,6 +243,11 @@ evaluate to `False`.
 
 Apply a sequence of definitions to an expression in order to reduce, simplify
 and calculate its value. Overrides `Hold` and hold attributes of a function.
+
+`Evaluate` only performs **exact** calculations. To perform numerical
+approximations, use `N`.
+
+Read more about [exact calculations and approximate calculations](/compute-engine/guides/numeric-evaluation/).
 
 {% enddef %}
 
@@ -272,7 +283,6 @@ This can be useful to compare two non-canonical expressions for equality, for ex
   ["Add", "x", 1]
 ]
 // -> False
-
 ["IsSame", 
   ["CanonicalOrder", ["Add", 1, "x"]], 
   ["CanonicalOrder", ["Add", "x", 1]]
@@ -284,9 +294,9 @@ To compare the input from a mathfield with an expected
 answer, you could use:
 
 ```js
-const correct = ce..box(
+const correct = ce.box(
     ['CanonicalOrder', ce.parse(mf.value, {canonical: false})])
-    .isSame(ce.box(ce.parse("1+x"))
+    .isSame(ce.parse("1+x")
 ```
 
 Both `1+x` and `x+1` will return **true**, but `2-1+x` will return **false**.

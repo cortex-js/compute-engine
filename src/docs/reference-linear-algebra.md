@@ -26,6 +26,10 @@ For example the matrix above is represented as the following list of lists:
 ["List", ["List", 1, 3, ["List", 5, 0]]
 ```
 
+{% readmore "/compute-engine/reference/collections/" %}Since vectors,
+matrixes and tensors are `List` collections, some **collection operations**
+can also be applied to them such as `At`, `Fold` and `Map`. {% endreadmore %}
+
 
 The Compute Engine provides a number of functions for working with matrices.
 
@@ -49,6 +53,117 @@ This is essentially a shortcut for `["Matrix", ["List", ["List", _x-1_], ["List,
 
 
 {% enddef %}
+
+
+## Information About Tensors
+
+{% def "Shape" %}
+
+[&quot;**Shape**&quot;, _tensor_]{.signature}
+
+Returns the shape of a tensor, a tuple of the lengths of the
+tensor along each of its axis.
+
+A list (or vector) has a single axis. A matrix has two axes. A tensor has more
+than two axes.
+
+A scalar has no dimension and `Shape` returns an empty tuple.
+
+```json example
+["Shape", 5]
+// ➔ []
+
+["Shape", ["List", 5, 2, 10, 18]]
+// ➔ [4]
+
+["Shape", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
+// ➔ [2, 4]
+```
+
+{% enddef %}
+
+{% def "Rank" %}
+
+[&quot;**Rank**&quot;, _collection_]{.signature}
+
+Returns the number of dimensions of the collection, that is the number of its
+axes.
+
+A scalar (number) has rank 0, a vector or list has rank 1, a matrix has rank 2,
+a tensor has rank 3, etc.
+
+```json example
+["Rank", 5]
+// ➔ 0
+
+["Rank", ["List", 5, 2, 10, 18]]
+// ➔ 1
+
+["Rank", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
+// ➔ 2
+```
+
+{% enddef %}
+
+
+
+
+## Transforming Tensors
+
+{% def "Flatten" %}
+
+[&quot;**Flatten**&quot;, _collection_]{.signature}
+
+Returns a list of all the elements of the collection, recursively.
+
+Only elements with the same head as the collection are flattened.
+
+For a matrix, it returns a list of all the elements in the matrix, in row-major
+order.
+
+```json example
+["Flatten", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
+// ➔ ["List", 5, 2, 10, 18, 1, 2, 3]
+```
+
+This is similar to the APL `,` Ravel operator or `numpy.ravel`
+[Numpy](https://numpy.org/doc/stable/reference/generated/numpy.ravel.html).
+
+{% enddef %}
+
+{% def "Reshape" %}
+
+[&quot;**Reshape**&quot;, _collection_, _dimensions_]{.signature}
+
+Returns a collection with the specified dimensions.
+
+`Reshape` can be used to convert a list into a matrix.
+
+```json example
+["Reshape", ["Range", 9], ["Tuple", 3, 3]]
+// ➔ ["List", ["List", 1, 2, 3], ["List", 4, 5, 6], ["List", 7, 8, 9]]
+```
+
+This is similar to the APL `⍴` Reshape operator or `numpy.reshape`
+[Numpy](https://numpy.org/doc/stable/reference/generated/numpy.reshape.html).
+
+{% enddef %}
+
+{% def "Transpose" %}
+
+[&quot;**Transpose**&quot;, _matrix_]{.signature}
+
+Returns the transpose of the matrix.
+
+```json example
+["Transpose", ["List", ["List", 1, 2, 3], ["List", 4, 5, 6]]]
+// ➔ ["List", ["List", 1, 4], ["List", 2, 5], ["List", 3, 6]]
+```
+
+{% enddef %}
+
+
+
 
 ## Formatting
 

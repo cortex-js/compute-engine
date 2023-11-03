@@ -51,6 +51,10 @@ And matrixes can be represented using LaTeX environments:
 
 {% latex "\\begin{pmatrix} 1 & 2 & 3 \\\\ 4 & 5 & 6 \\\\ 7 & 8 & 9 \\end{pmatrix}" %}
 
+{% readmore "/compute-engine/reference/linear-algebra/" %}See also the **Linear
+Algebra** section for operations on vectors, matrixes and tensors.
+{% endreadmore %}
+
 Another common collection is the `Range` which is used to represent a sequence
 of numbers from a lower bound to an upper bound. Both lower and upper bounds are
 included in the range.
@@ -304,88 +308,64 @@ Use `Take` to get a finite number of elements.
 This section contains functions whose argument is a collection and which return
 a collection made of a subset of the elements of the input.
 
-{% def "Flatten" %}
+{% def "Drop" %}
 
-[&quot;**Flatten**&quot;, _collection_]{.signature}
+[&quot;**Drop**&quot;, _collection_, _n_]{.signature}
 
-Returns a list of all the elements of the collection, recursively.
+Return a list without the first `n` elements.
 
-Only elements with the same head as the collection are flattened.
-
-For a matrix, it returns a list of all the elements in the matrix, in row-major
-order.
+If `n` is negative, it returns a list without the last `n` elements.
 
 ```json example
-["Flatten", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
-// ➔ ["List", 5, 2, 10, 18, 1, 2, 3]
-```
+["Drop", ["List", 5, 2, 10, 18], 2]
+// ➔ ["List", 10, 18]
 
-This is similar to the APL `,` Ravel operator or `numpy.ravel`
-[Numpy](https://numpy.org/doc/stable/reference/generated/numpy.ravel.html).
-
-{% enddef %}
-
-{% def "Reshape" %}
-
-[&quot;**Reshape**&quot;, _collection_, _dimensions_]{.signature}
-
-Returns a collection with the specified dimensions.
-
-`Reshape` can be used to convert a list into a matrix.
-
-```json example
-["Reshape", ["Range", 9], ["Tuple", 3, 3]]
-// ➔ ["List", ["List", 1, 2, 3], ["List", 4, 5, 6], ["List", 7, 8, 9]]
-```
-
-This is similar to the APL `⍴` Reshape operator or `numpy.reshape`
-[Numpy](https://numpy.org/doc/stable/reference/generated/numpy.reshape.html).
-
-{% enddef %}
-
-{% def "Reverse" %}
-
-[&quot;**Reverse**&quot;, _collection_]{.signature}
-
-Return the collection in reverse order.
-
-```json example
-["Reverse", ["List", 5, 2, 10, 18]]
-// ➔ ["List", 18, 10, 2, 5]
-```
-
-It's equivalent to `["Extract", _collection_, ["Tuple", -1, 1]]`.
-
-{% enddef %}
-
-{% def "Transpose" %}
-
-[&quot;**Transpose**&quot;, _matrix_]{.signature}
-
-Returns the transpose of the matrix.
-
-```json example
-["Transpose", ["List", ["List", 1, 2, 3], ["List", 4, 5, 6]]]
-// ➔ ["List", ["List", 1, 4], ["List", 2, 5], ["List", 3, 6]]
+["Drop", ["List", 5, 2], -2]
+// ➔ ["List", 5, 2]
 ```
 
 {% enddef %}
 
-{% def "Join" %}
 
-[&quot;**Join**&quot;, _collection-1_, _collection-2_, ...]{.signature}
+{% def "Exclude" %}
 
-Returns a collection that contains the elements of the first collection followed
-by the elements of the second collection.
+[&quot;**Exclude**&quot;, _collection_, _index_]{.signature}
 
-All the collections should have the same head.
+[&quot;**Exclude**&quot;, _collection_, _index1_, _index2_]{.signature}
+
+[&quot;**Exclude**&quot;, _collection_, _range_]{.signature}
+
+`Exclude` is the opposite of `Extract`. It returns a list of the elements that
+are not at the specified indexes.
+
+The elements are returned in the same order as they appear in the collection.
 
 ```json example
-["Join", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]
-// ➔ ["List", 5, 2, 10, 18, 1, 2, 3]
+["Exclude", ["List", 5, 2, 10, 18], 2]
+// ➔ ["List", 5, 10, 18]
+
+["Exclude", ["List", 5, 2, 10, 18], -2, 1]
+// ➔ ["List", 2, 18]
+
+["Exclude", ["List", 5, 2, 10, 18], ["Range", 2, 3]]
+// ➔ ["List", 5, 2]
+
+["Exclude", ["List", 5, 2, 10, 18], ["Range", 1, -1, 2]]
+
+// ➔ ["List", 2, 18]
+```
+
+An index may be repeated, but the corresponding element will only be dropped
+once.
+
+```json example
+["Exclude", ["List", 5, 2, 10, 18], 3, 3, 1]
+// ➔ ["List", 2, 18]
 ```
 
 {% enddef %}
+
+
 
 {% def "Extract" %}
 
@@ -449,79 +429,6 @@ An index can be repeated to extract the same element multiple times.
 
 {% enddef %}
 
-{% def "Exclude" %}
-
-[&quot;**Exclude**&quot;, _collection_, _index_]{.signature}
-
-[&quot;**Exclude**&quot;, _collection_, _index1_, _index2_]{.signature}
-
-[&quot;**Exclude**&quot;, _collection_, _range_]{.signature}
-
-`Exclude` is the opposite of `Extract`. It returns a list of the elements that
-are not at the specified indexes.
-
-The elements are returned in the same order as they appear in the collection.
-
-```json example
-["Exclude", ["List", 5, 2, 10, 18], 2]
-// ➔ ["List", 5, 10, 18]
-
-["Exclude", ["List", 5, 2, 10, 18], -2, 1]
-// ➔ ["List", 2, 18]
-
-["Exclude", ["List", 5, 2, 10, 18], ["Range", 2, 3]]
-// ➔ ["List", 5, 2]
-
-["Exclude", ["List", 5, 2, 10, 18], ["Range", 1, -1, 2]]
-
-// ➔ ["List", 2, 18]
-```
-
-An index may be repeated, but the corresponding element will only be dropped
-once.
-
-```json example
-["Exclude", ["List", 5, 2, 10, 18], 3, 3, 1]
-// ➔ ["List", 2, 18]
-```
-
-{% enddef %}
-
-{% def "Take" %}
-
-[&quot;**Take**&quot;, _collection_, _n_]{.signature}
-
-Return a list of the first `n` elements of the collection.
-
-If `n` is negative, it returns the last `n` elements.
-
-```json example
-["Take", ["List", 5, 2, 10, 18], 2]
-// ➔ ["List", 5, 2]
-
-["Take", ["List", 5, 2, 10, 18], -2]
-// ➔ ["List", 18, 10]
-```
-
-{% enddef %}
-
-{% def "Drop" %}
-
-[&quot;**Drop**&quot;, _collection_, _n_]{.signature}
-
-Return a list without the first `n` elements.
-
-If `n` is negative, it returns a list without the last `n` elements.
-
-```json example
-["Drop", ["List", 5, 2, 10, 18], 2]
-// ➔ ["List", 10, 18]
-
-["Drop", ["List", 5, 2], -2]
-// ➔ ["List", 5, 2]
-```
-
-{% enddef %}
 
 {% def "First" %}
 
@@ -541,15 +448,38 @@ It's equivalent to `["Take", _collection_, 1]`.
 
 {% enddef %}
 
-{% def "Second" %}
 
-[&quot;**Second**&quot;, _collection_]{.signature}
 
-Return the second element of the collection.
+{% def "Join" %}
+
+[&quot;**Join**&quot;, _collection-1_, _collection-2_, ...]{.signature}
+
+Returns a collection that contains the elements of the first collection followed
+by the elements of the second collection.
+
+All the collections should have the same head.
 
 ```json example
-["Second", ["Tuple", "x", "y"]]
-// ➔ "y"
+["Join", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]
+// ➔ ["List", 5, 2, 10, 18, 1, 2, 3]
+```
+
+{% enddef %}
+
+{% def "Take" %}
+
+[&quot;**Take**&quot;, _collection_, _n_]{.signature}
+
+Return a list of the first `n` elements of the collection.
+
+If `n` is negative, it returns the last `n` elements.
+
+```json example
+["Take", ["List", 5, 2, 10, 18], 2]
+// ➔ ["List", 5, 2]
+
+["Take", ["List", 5, 2, 10, 18], -2]
+// ➔ ["List", 18, 10]
 ```
 
 {% enddef %}
@@ -576,20 +506,6 @@ Return the last _n_ elements of the collection.
 
 {% enddef %}
 
-{% def "Rest" %}
-
-[&quot;**Rest**&quot;, _collection_]{.signature}
-
-Return everything but the first element of the collection.
-
-It's equivalent to `["Drop", _collection_, 1]`.
-
-```json example
-["Rest", ["List", 5, 2, 10, 18]]
-// ➔ ["List", 2, 10, 18]
-```
-
-{% enddef %}
 
 {% def "Most" %}
 
@@ -606,31 +522,34 @@ It's equivalent to `["Drop", _collection_, -1]`.
 
 {% enddef %}
 
-{% def "Sort" %}
+{% def "Rest" %}
 
-[&quot;**Sort**&quot;, _collection_]{.signature}
+[&quot;**Rest**&quot;, _collection_]{.signature}
 
-[&quot;**Sort**&quot;, _collection_, _order-function_]{.signature}
+Return everything but the first element of the collection.
 
-Return the collection in sorted order.
+It's equivalent to `["Drop", _collection_, 1]`.
 
 ```json example
-["Sort", ["List", 5, 2, 10, 18]]
-// ➔ ["List", 2, 5, 10, 18]
+["Rest", ["List", 5, 2, 10, 18]]
+// ➔ ["List", 2, 10, 18]
 ```
 
 {% enddef %}
 
-{% def "Shuffle" %}
 
-[&quot;**Shuffle**&quot;, _collection_]{.signature}
+{% def "Reverse" %}
 
-Return the collection in random order.
+[&quot;**Reverse**&quot;, _collection_]{.signature}
+
+Return the collection in reverse order.
 
 ```json example
-["Shuffle", ["List", 5, 2, 10, 18]]
-// ➔ ["List", 10, 18, 5, 5]
+["Reverse", ["List", 5, 2, 10, 18]]
+// ➔ ["List", 18, 10, 2, 5]
 ```
+
+It's equivalent to `["Extract", _collection_, ["Tuple", -1, 1]]`.
 
 {% enddef %}
 
@@ -658,6 +577,49 @@ specified count.
 ```json example
 ["RotateRight", ["List", 5, 2, 10, 18], 2]
 // ➔ ["List", 10, 18, 5, 2]
+```
+
+{% enddef %}
+
+{% def "Second" %}
+
+[&quot;**Second**&quot;, _collection_]{.signature}
+
+Return the second element of the collection.
+
+```json example
+["Second", ["Tuple", "x", "y"]]
+// ➔ "y"
+```
+
+{% enddef %}
+
+
+
+{% def "Shuffle" %}
+
+[&quot;**Shuffle**&quot;, _collection_]{.signature}
+
+Return the collection in random order.
+
+```json example
+["Shuffle", ["List", 5, 2, 10, 18]]
+// ➔ ["List", 10, 18, 5, 5]
+```
+
+{% enddef %}
+
+{% def "Sort" %}
+
+[&quot;**Sort**&quot;, _collection_]{.signature}
+
+[&quot;**Sort**&quot;, _collection_, _order-function_]{.signature}
+
+Return the collection in sorted order.
+
+```json example
+["Sort", ["List", 5, 2, 10, 18]]
+// ➔ ["List", 2, 5, 10, 18]
 ```
 
 {% enddef %}
@@ -705,6 +667,21 @@ There can be multiple indexes, up to the rank of the collection.
 ```
 
 {% enddef %}
+
+{% def "Filter" %}
+
+[&quot;**Filter**&quot;, _collection_, _function_]{.signature}
+
+Returns a collection where _function_ is applied to each element of the
+collection. Only the elements for which the function returns `"True"` are kept.
+
+```json example
+["Filter", ["List", 5, 2, 10, 18], ["Function", ["Less", "_", 10]]]
+// ➔ ["List", 5, 2]
+```
+
+{% enddef %}
+
 
 {% def "Fold" %}
 
@@ -793,53 +770,27 @@ Returns the symbol `True` if the collection is empty.
 
 {% enddef %}
 
-{% def "Dimensions" %}
+{% def "Map" %}
 
-[&quot;**Dimensions**&quot;, _collection_]{.signature}
+[&quot;**Map**&quot;, _collection_, _function_]{.signature}
 
-Returns the dimensions of the collection, a tuple of the lengths of the
-collection along each of its axis.
-
-A list (or vector) has a single axis. A matrix has two axes. A tensor has more
-than two axes.
-
-A scalar has no dimension and `Dimensions` returns an empty tuple.
+Returns a collection where _function_ is applied to each element of the input
+collection.
 
 ```json example
-["Dimension", 5]
-// ➔ []
+["Map", ["Function", ["Add", "x", 1], "x"], ["List", 5, 2, 10, 18]]
+// ➔ ["List", 6, 3, 11, 19]
+```
 
-["Dimensions", ["List", 5, 2, 10, 18]]
-// ➔ [4]
-
-["Dimensions", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
-// ➔ [2, 4]
+```json example
+["Map", ["List", 5, 2, 10, 18], ["Function", ["Add", "_", 1]]]
+// ➔ ["List", 6, 3, 11, 19]
 ```
 
 {% enddef %}
 
-{% def "Rank" %}
 
-[&quot;**Rank**&quot;, _collection_]{.signature}
 
-Returns the number of dimensions of the collection, that is the number of its
-axes.
-
-A scalar (number) has rank 0, a vector or list has rank 1, a matrix has rank 2,
-a tensor has rank 3, etc.
-
-```json example
-["Rank", 5]
-// ➔ 0
-
-["Rank", ["List", 5, 2, 10, 18]]
-// ➔ 1
-
-["Rank", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
-// ➔ 2
-```
-
-{% enddef %}
 
 {% def "Ordering" %}
 
@@ -881,39 +832,6 @@ Returns a tuples of two lists:
 ```json example
 ["Tally", ["List", 5, 2, 10, 18, 5, 2, 5]]
 // ➔ ["Tuple", ["List", 5, 2, 10, 18], ["List", 3, 2, 1, 1]]
-```
-
-{% enddef %}
-
-{% def "Map" %}
-
-[&quot;**Map**&quot;, _collection_, _function_]{.signature}
-
-Returns a collection where _function_ is applied to each element of the input
-collection.
-
-```json example
-["Map", ["Function", ["Add", "x", 1], "x"], ["List", 5, 2, 10, 18]]
-// ➔ ["List", 6, 3, 11, 19]
-```
-
-```json example
-["Map", ["List", 5, 2, 10, 18], ["Function", ["Add", "_", 1]]]
-// ➔ ["List", 6, 3, 11, 19]
-```
-
-{% enddef %}
-
-{% def "Filter" %}
-
-[&quot;**Filter**&quot;, _collection_, _function_]{.signature}
-
-Returns a collection where _function_ is applied to each element of the
-collection. Only the elements for which the function returns `"True"` are kept.
-
-```json example
-["Filter", ["List", 5, 2, 10, 18], ["Function", ["Less", "_", 10]]]
-// ➔ ["List", 5, 2]
 ```
 
 {% enddef %}
