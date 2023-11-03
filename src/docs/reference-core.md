@@ -270,19 +270,20 @@ arguments according to the canonical order of the arguments of the function.
 
 If _expression_ is canonical, this function has no effect.
 
-```json
+```json example
 ["CanonicalOrder", ["Add", 3, 2, 1]]
 // -> ["Add", 1, 2, 3]
 ```
 
 This can be useful to compare two non-canonical expressions for equality, for example:
 
-```json
+```json example
 ["IsSame",
   ["Add", 1, "x"], 
   ["Add", "x", 1]
 ]
 // -> False
+
 ["IsSame", 
   ["CanonicalOrder", ["Add", 1, "x"]], 
   ["CanonicalOrder", ["Add", "x", 1]]
