@@ -7,6 +7,13 @@
 - **#125** Parse and serialize environemnts, i.e.
   `\begin{matrix} 1 & 2 \\ 3 & 4 \end{matrix}` will be parsed as
   `["Matrix", ["List", ["List", 1, 2], ["List", 3, 4]]]`.
+  
+  A new section on [Linear Algebra](/compute-engine/reference/linear-algebra/#formatting)
+  has some details on the supported formats.
+
+  The linear algebra operations are limited at the moment, but will be expanded
+  in the future.
+
 - Added `IsSame` function, which is the function expression corresponding to
   `expr.isSame()`.
 - Added `CanonicalOrder` function, which sorts the arguments of commutative
