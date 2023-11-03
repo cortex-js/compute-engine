@@ -1,7 +1,8 @@
-// Calculate the determinant of matrix
+import { Tensor } from '../symbolic/tensors';
 
-// Test: determinant([[1,3,7],[2,-1,4],[5,0,2]]) === 81
-
+/** Calculate the determinant of matrix
+ *  Test: determinant([[1,3,7],[2,-1,4],[5,0,2]]) === 81
+ */
 export function determinant(matrix: number[][]): number {
   const n = matrix.length;
   if (n === 1) return matrix[0][0];
@@ -34,204 +35,206 @@ export function determinant(matrix: number[][]): number {
 // 0 -> scalar
 // 1 -> vector
 // 2 -> 2D matrix
-export function rank(matrix: any): number {
-  if (!Array.isArray(matrix)) return 0;
-
-  return 1 + Math.max(...matrix.map(rank));
+export function rank(tensor: Tensor): number {
+  return tensor.shape.length;
 }
 
-export function dimensions(tensor: any[]): number[] {
-  return tensor.length === 0
-    ? []
-    : [tensor.length].concat(dimensions(tensor[0]));
-  // return [matrix.length, matrix[0].length];
-}
+// export function transpose(
+//   tensor: Tensor,
+//   axis1: number,
+//   axis2: number
+// ): Tensor {
+//   if (!isFinite(axis1) || !isFinite(axis2)) {
+//     throw new Error('Axis must be finite numbers');
+//   }
+//   if (axis1 === axis2) return tensor;
 
-export function transpose(matrix: any[]): any[] {
-  return matrix[0].map((_, i) => matrix.map((row) => row[i]));
-}
+//   // Transpose axis1 and axis2 of tensor
 
-export function inverse(matrix: any[]): any[] {
-  return matrix;
-}
+//   // return matrix[0].map((_, i) => matrix.map((row) => row[i]));
+// }
 
-export function trace(matrix: any[]): number {
-  return matrix.reduce((r, e, i) => r + e[i], 0);
-}
+// export function inverse(matrix: any[]): any[] {
+//   return matrix;
+// }
 
-export function norm(matrix: any[]): number {
-  return Math.sqrt(matrix.reduce((r, e) => r + e * e, 0));
-}
+// export function trace(matrix: any[]): number {
+//   return matrix.reduce((r, e, i) => r + e[i], 0);
+// }
 
-export function frobeniusNorm(matrix: any[]): number {
-  return Math.sqrt(
-    matrix.reduce((r, e) => r + e.reduce((r, e) => r + e * e, 0), 0)
-  );
-}
+// export function norm(matrix: any[]): number {
+//   return Math.sqrt(matrix.reduce((r, e) => r + e * e, 0));
+// }
 
-export function add(matrix1: any[], matrix2: any[]): any[] {
-  return matrix1.map((row, i) => row.map((e, j) => e + matrix2[i][j]));
-}
+// export function frobeniusNorm(matrix: any[]): number {
+//   return Math.sqrt(
+//     matrix.reduce((r, e) => r + e.reduce((r, e) => r + e * e, 0), 0)
+//   );
+// }
 
-export function subtract(matrix1: any[], matrix2: any[]): any[] {
-  return matrix1.map((row, i) => row.map((e, j) => e - matrix2[i][j]));
-}
+// export function add(matrix1: any[], matrix2: any[]): any[] {
+//   return matrix1.map((row, i) => row.map((e, j) => e + matrix2[i][j]));
+// }
 
-export function multiply(matrix1: any[], matrix2: any[]): any[] {
-  return matrix1.map((row, i) =>
-    matrix2[0].map((_, j) => row.reduce((r, e, k) => r + e * matrix2[k][j], 0))
-  );
-}
+// export function subtract(matrix1: any[], matrix2: any[]): any[] {
+//   return matrix1.map((row, i) => row.map((e, j) => e - matrix2[i][j]));
+// }
 
-export function divide(matrix1: any[], matrix2: any[]): any[] {
-  return matrix1.map((row, i) => row.map((e, j) => e / matrix2[i][j]));
-}
+// export function multiply(matrix1: any[], matrix2: any[]): any[] {
+//   return matrix1.map((row, i) =>
+//     matrix2[0].map((_, j) => row.reduce((r, e, k) => r + e * matrix2[k][j], 0))
+//   );
+// }
 
-export function dot(matrix1: any[], matrix2: any[]): any[] {
-  return matrix1.map((row) =>
-    matrix2[0].map((_, i) => row.reduce((r, e, j) => r + e * matrix2[j][i], 0))
-  );
-}
+// export function divide(matrix1: any[], matrix2: any[]): any[] {
+//   return matrix1.map((row, i) => row.map((e, j) => e / matrix2[i][j]));
+// }
 
-export function cross(matrix1: any[], matrix2: any[]): any[] {
-  return matrix1.map((row, i) =>
-    matrix2.map((_, j) => row.reduce((r, e, k) => r + e * matrix2[k][j], 0))
-  );
-}
+// export function dot(matrix1: any[], matrix2: any[]): any[] {
+//   return matrix1.map((row) =>
+//     matrix2[0].map((_, i) => row.reduce((r, e, j) => r + e * matrix2[j][i], 0))
+//   );
+// }
 
-export function scale(matrix: any[], scalar: number): any[] {
-  return matrix.map((row) => row.map((e) => e * scalar));
-}
+// export function cross(matrix1: any[], matrix2: any[]): any[] {
+//   return matrix1.map((row, i) =>
+//     matrix2.map((_, j) => row.reduce((r, e, k) => r + e * matrix2[k][j], 0))
+//   );
+// }
 
-export function power(matrix: any[], power: number): any[] {
-  return matrix;
-}
+// export function scale(matrix: any[], scalar: number): any[] {
+//   return matrix.map((row) => row.map((e) => e * scalar));
+// }
 
-export function identity(size: number): any[] {
-  return Array(size)
-    .fill(0)
-    .map((_, i) =>
-      Array(size)
-        .fill(0)
-        .map((_, j) => (i === j ? 1 : 0))
-    );
-}
+// export function power(matrix: any[], power: number): any[] {
+//   return matrix;
+// }
 
-export function zeros(size: number): any[] {
-  return Array(size)
-    .fill(0)
-    .map((_) => Array(size).fill(0));
-}
+// export function identity(size: number): any[] {
+//   return Array(size)
+//     .fill(0)
+//     .map((_, i) =>
+//       Array(size)
+//         .fill(0)
+//         .map((_, j) => (i === j ? 1 : 0))
+//     );
+// }
 
-export function ones(size: number): any[] {
-  return Array(size)
-    .fill(0)
-    .map((_) => Array(size).fill(1));
-}
+// export function zeros(size: number): any[] {
+//   return Array(size)
+//     .fill(0)
+//     .map((_) => Array(size).fill(0));
+// }
 
-export function random(size: number): any[] {
-  return Array(size)
-    .fill(0)
-    .map((_) => Array(size).fill(Math.random()));
-}
+// export function ones(size: number): any[] {
+//   return Array(size)
+//     .fill(0)
+//     .map((_) => Array(size).fill(1));
+// }
 
-export function diagonal(matrix: any[]): any[] {
-  return matrix.map((row, i) =>
-    row.map((e, j) => (i === j ? e : 0)).filter((e) => e !== 0)
-  );
-}
+// export function random(size: number): any[] {
+//   return Array(size)
+//     .fill(0)
+//     .map((_) => Array(size).fill(Math.random()));
+// }
 
-export function diagonalize(matrix: any[]): any[] {
-  return matrix.map((row, i) =>
-    row.map((e, j) => (i === j ? e : 0)).filter((e) => e !== 0)
-  );
-}
+// export function diagonal(matrix: any[]): any[] {
+//   return matrix.map((row, i) =>
+//     row.map((e, j) => (i === j ? e : 0)).filter((e) => e !== 0)
+//   );
+// }
 
-export function flatten(matrix: any[]): any[] {
-  return matrix.reduce((r, e) => r.concat(e), []);
-}
+// export function diagonalize(matrix: any[]): any[] {
+//   return matrix.map((row, i) =>
+//     row.map((e, j) => (i === j ? e : 0)).filter((e) => e !== 0)
+//   );
+// }
 
-export function reshape(matrix: any[], shape: number[]): any[] {
-  return matrix;
-}
+// export function flatten(matrix: any[]): any[] {
+//   return matrix.reduce((r, e) => r.concat(e), []);
+// }
 
-export function slice(matrix: any[], start: number[], end: number[]): any[] {
-  return matrix;
-}
+// export function reshape(matrix: any[], shape: number[]): any[] {
+//   return matrix;
+// }
 
-export function dataType(matrix: any[]): string {
-  return 'number';
-}
+// export function slice(matrix: any[], start: number[], end: number[]): any[] {
+//   return matrix;
+// }
 
-export function isSquare(matrix: any[]): boolean {
-  return matrix.length === matrix[0].length;
-}
+// export function dataType(matrix: any[]): string {
+//   return 'number';
+// }
 
-export function isSymmetric(matrix: any[]): boolean {
-  return matrix.every((row, i) => row.every((e, j) => e === matrix[j][i]));
-}
+// export function isSquare(matrix: any[]): boolean {
+//   return matrix.length === matrix[0].length;
+// }
 
-export function isSkewSymmetric(matrix: any[]): boolean {
-  return matrix.every((row, i) => row.every((e, j) => e === -matrix[j][i]));
-}
+// export function isSymmetric(matrix: any[]): boolean {
+//   return matrix.every((row, i) => row.every((e, j) => e === matrix[j][i]));
+// }
 
-export function isUpperTriangular(matrix: any[]): boolean {
-  return matrix.every((row, i) =>
-    row.every((e, j) => (i > j ? e === 0 : true))
-  );
-}
+// export function isSkewSymmetric(matrix: any[]): boolean {
+//   return matrix.every((row, i) => row.every((e, j) => e === -matrix[j][i]));
+// }
 
-export function isLowerTriangular(matrix: any[]): boolean {
-  return matrix.every((row, i) =>
-    row.every((e, j) => (i < j ? e === 0 : true))
-  );
-}
+// export function isUpperTriangular(matrix: any[]): boolean {
+//   return matrix.every((row, i) =>
+//     row.every((e, j) => (i > j ? e === 0 : true))
+//   );
+// }
 
-export function isTriangular(matrix: any[]): boolean {
-  return isUpperTriangular(matrix) || isLowerTriangular(matrix);
-}
+// export function isLowerTriangular(matrix: any[]): boolean {
+//   return matrix.every((row, i) =>
+//     row.every((e, j) => (i < j ? e === 0 : true))
+//   );
+// }
 
-export function isDiagonal(matrix: any[]): boolean {
-  return matrix.every((row, i) =>
-    row.every((e, j) => (i === j ? true : e === 0))
-  );
-}
+// export function isTriangular(matrix: any[]): boolean {
+//   return isUpperTriangular(matrix) || isLowerTriangular(matrix);
+// }
 
-export function isIdentity(matrix: any[]): boolean {
-  return (
-    isDiagonal(matrix) &&
-    matrix.every((row, i) => row.every((e, j) => (i === j ? e === 1 : true)))
-  );
-}
+// export function isDiagonal(matrix: any[]): boolean {
+//   return matrix.every((row, i) =>
+//     row.every((e, j) => (i === j ? true : e === 0))
+//   );
+// }
 
-export function isZero(matrix: any[]): boolean {
-  return matrix.every((row) => row.every((e) => e === 0));
-}
+// export function isIdentity(matrix: any[]): boolean {
+//   return (
+//     isDiagonal(matrix) &&
+//     matrix.every((row, i) => row.every((e, j) => (i === j ? e === 1 : true)))
+//   );
+// }
 
-export function isSparse(matrix: any[]): boolean {
-  return (
-    matrix.reduce(
-      (r, e) => r + e.reduce((r, e) => r + (e === 0 ? 0 : 1), 0),
-      0
-    ) <
-    (matrix.length * matrix[0].length) / 2
-  );
-}
+// export function isZero(matrix: any[]): boolean {
+//   return matrix.every((row) => row.every((e) => e === 0));
+// }
 
-export function isSingular(matrix: any[]): boolean {
-  return determinant(matrix) === 0;
-}
+// export function isSparse(matrix: any[]): boolean {
+//   return (
+//     matrix.reduce(
+//       (r, e) => r + e.reduce((r, e) => r + (e === 0 ? 0 : 1), 0),
+//       0
+//     ) <
+//     (matrix.length * matrix[0].length) / 2
+//   );
+// }
 
-export function isOrthogonal(matrix: any[]): boolean {
-  return matrix.every((row, i) => row.every((e, j) => e === (i === j ? 1 : 0)));
-}
+// export function isSingular(matrix: any[]): boolean {
+//   return determinant(matrix) === 0;
+// }
 
-export function isPermutation(matrix: any[]): boolean {
-  return matrix.every(
-    (row) => row.reduce((r, e) => r + (e === 1 ? 1 : 0), 0) === 1
-  );
-}
+// export function isOrthogonal(matrix: any[]): boolean {
+//   return matrix.every((row, i) => row.every((e, j) => e === (i === j ? 1 : 0)));
+// }
 
-export function isStochastic(matrix: any[]): boolean {
-  return matrix.every((row) => row.reduce((r, e) => r + e, 0) === 1);
-}
+// export function isPermutation(matrix: any[]): boolean {
+//   return matrix.every(
+//     (row) => row.reduce((r, e) => r + (e === 1 ? 1 : 0), 0) === 1
+//   );
+// }
+
+// export function isStochastic(matrix: any[]): boolean {
+//   return matrix.every((row) => row.reduce((r, e) => r + e, 0) === 1);
+// }
