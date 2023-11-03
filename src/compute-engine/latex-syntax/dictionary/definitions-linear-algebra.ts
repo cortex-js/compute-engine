@@ -155,6 +155,70 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       return [head, cells, { str: '..' }];
     },
   },
+
+  {
+    name: 'ConjugateTranspose',
+    kind: 'postfix',
+    latexTrigger: ['^', '\\star'],
+  }
+
+  { 
+    kind: 'postfix',
+    latexTrigger: ['^', '\\dagger'],
+    parse: (_parser: Parser, lhs): Expression => {
+      return ['ConjugateTranspose', lhs];
+    },
+  },
+
+  { 
+    kind: 'postfix',
+    latexTrigger: ['^', '\\ast'],
+    parse: (_parser: Parser, lhs): Expression => {
+      return ['ConjugateTranspose', lhs];
+    },
+  },
+
+  {
+    kind: 'postfix',
+    latexTrigger: ['^', '\\top'],
+    parse: (parser: Parser, lhs: Expression): Expression => {
+      return ['Transpose', lhs];
+    },
+  },
+
+  {
+    kind: 'postfix',
+    latexTrigger: ['^', '\\intercal'],
+    parse: (parser: Parser, lhs: Expression): Expression => {
+      return ['Transpose', lhs];
+    },
+  },
+
+  {
+    name: 'Transpose',
+    kind: 'postfix',
+    latexTrigger: ['^', 'T'],
+  },
+
+  {
+    name: 'PseudoInverse',
+    kind: 'postfix',
+    latexTrigger: ['^', '+'],
+  },
+
+  {
+    name: 'Trace',
+    kind: 'function',
+    identifierTrigger: 'tr',
+  },
+
+  {
+    name: 'Determinant',
+    kind: 'function',
+    identifierTrigger: 'det',
+  },
+
+
 ];
 
 function parseCells(parser: Parser): [head: string, cells: Expression | null] {
