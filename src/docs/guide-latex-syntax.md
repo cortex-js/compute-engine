@@ -368,8 +368,6 @@ are usually prefixed with a backslash, such as `\frac` or `\pm`. It will also
 reference MathJSON identifiers. MathJSON identifiers are usually capitalized,
 such as `Divide` or `PlusMinus` and are not prefixed with a backslash.
 
-The Compute Engine includes a default LaTeX dictionary to parse and serialize
-common math expressions.
 
 **To extend the LaTeX syntax** update the `latexDictionary` property of the
 Compute Engine
@@ -402,34 +400,99 @@ console.log(ce.parse('\\smoll{1}{5}').json);
 // ➔ ["Rational", 1, 5]
 ```
 
+Do not modify the `ce.latexDictionary` array directly. Instead, create a new
+array that includes the entries from the default dictionary, and add your own
+entries. Later entries will override earlier ones, so you can replace or
+modify existing entries by providing a new definition for them.
+
+
 ### LaTeX Dictionary Entries
 
 Each entry in the LaTeX dictionary is an object with the following properties:
 
-- `kind`: the kind of expression associated with this entry. Valid values are
-  `prefix`, `postfix`, `infix`, `expression`, `function`, `symbol`,
-  `environment` and `matchfix`. If not provided, the default is `expression`.
+- `kind`
+
+  The kind of expression associated with this entry. 
+  
+  Valid values are `prefix`, `postfix`, `infix`, `expression`, `function`, `symbol`,
+  `environment` and `matchfix`. 
+  
+  If not provided, the default is `expression`.
+  
   The meaning of the values and how to use them is explained below.
-- `latexTrigger`: a sequence of LaTeX tokens that will trigger the entry. For
-  example, `^{+}` or `\mathbb{D}`.
-- `identifierTrigger`: a string, usually wrapped in a LaTeX command, that will
-  trigger the entry. For example, if `identifierTrigger` is `floor`, the LaTeX
+
+  Note that it is possible to provide multiple entries with the same `latexTrigger`
+  or `identifierTrigger` but with different `kind` properties. For example, the
+  `+` operator is both an `infix` (binary) and a `prefix` (unary) operator.
+
+- `latexTrigger`
+
+  A LaTeX fragment that will trigger the entry. For example, `^{+}` or `\mathbb{D}`.
+
+- `identifierTrigger`
+
+  A string, usually wrapped in a LaTeX command, that will trigger the entry. 
+  
+  For example, if `identifierTrigger` is `floor`, the LaTeX
   command `\mathrm{floor}` or `\operatorname{floor}` will trigger the entry.
-  Only one of `latexTrigger` or `identifierTrigger` should be provided. If kind
-  is `environment`, only `identifierTrigger` is valid. If kind is `matchfix`,
-  both `openTrigger` and `closeTrigger` must be provided instead.
-- `parse`: a handler that will be invoked when the trigger is encountered in the
-  LaTeX input. It will be passed a `parser` object that can be used to parse the
-  input. The `parse` handler should return a MathJSON expression. The signature
-  of the `parse` handler will vary depending on the `kind`. See below for more
-  info about parsing.
-- `serialize`: a handler that will be invoked when the `expr.latex` property is
-  read. It will be passed a `serializer` object that can be used to serialize
+
+  Only one of `latexTrigger` or `identifierTrigger` should be provided. 
+  
+  If `kind`  is `"environment"`, only `identifierTrigger` is valid, and it 
+  represents the name of the environment.
+  
+  If kind is `matchfix`, both `openTrigger` and `closeTrigger` must be provided instead.
+
+- `parse`
+
+  A handler that will be invoked when the trigger is encountered in the
+  LaTeX input. 
+  
+  It will be passed a `parser` object that can be used to parse the
+  input. 
+  
+  The `parse` handler is invoked when the preconditions for the entry are met. 
+  For example, an `infix` entry will only be invoked if the trigger is 
+  encountered in the LaTeX input and there is a left-hand side to the operator.
+  
+  The signature of the `parse` handler will vary depending on the `kind`. 
+  For example, for an entry of kind `infix` the left-hand side argument
+  will be passed to the `parse` handler. See below for more info about parsing
+  for each `kind`.
+
+  The `parse` handler should return a MathJSON expression or `null` if the
+  expression is not recognized. When `null` is returned, the Compute Engine
+  Natural Parser will backtrack and attempt to find another handler that matches
+  the current token. If there can be no ambiguity and the expression is not
+  recognized, the `parse` handler should return an `["Error"]` expression. In
+  general, it is better to return `null` and let the Compute Engine Natural
+  Parser attempt to find another handler that matches the current token.
+  If none is found, an `["Error"]` expression will be returned.
+
+
+- `serialize`
+
+  A handler that will be invoked when the `expr.latex` property is
+  read. It will be passed a `Serializer` object that can be used to serialize
   the expression. The `serialize` handler should return a LaTeX string. See
   below for more info about serialization.
-- `name`: the name of the MathJSON identifier associated with this entry. If
-  provided, a default `parse` handler will be used that is equivalent to:
-  `parse: name`. The `name` property must be unique. However, multiple entries
+
+  If a `serialize` handler is provided, the `name` property must be provided as
+  well.
+
+- `name`
+  
+  The name of the MathJSON identifier associated with this entry.
+  
+  If provided, a default `parse` handler will be used that is equivalent to:
+  `parse: name`.
+
+  It is possible to have multiple definitions with the same triggers, but the
+  `name` property must be unique. The record with the `name` property will be used
+  to serialize the expression. A `serialize` handler is invalid if the `name`
+  property is not provided.
+  
+  The `name` property must be unique. However, multiple entries
   can have different triggers that produce the same expression. This is useful
   for synonyms, such as `\operatorname{floor}` and `\lfloor`...`\rfloor`.
 
@@ -440,8 +503,7 @@ property is provided, the kind is assumed to be `expression`.
 
 For entries of kind `expression` the `parse` handler is invoked when the trigger
 is encountered in the LaTeX input. The `parse` handler is passed a `parser`
-object that can be used to parse the input. The `parse` handler should return a
-MathJSON expression.
+object that can be used to parse the input.
 
 The kind `expression` is suitable for a simple symbol, for example a
 mathematical constant. It can also be used for more complex constructs, such as
@@ -456,10 +518,12 @@ token.
 #### Functions
 
 The `function` kind is a special case of `expression` where the expression is a
-function, possibly using mutly-character identifiers, as in
-`\operatorname{concat}`. Unlike an `expression` entry, after the `parse` handler
-is invoked, the parser will look for a pair of parentheses to parse the
-arguments of the function and apply them to the function.
+function, possibly using multi-character identifiers, as in
+`\operatorname{concat}`. 
+
+Unlike an `expression` entry, after the `parse` handler is invoked, the 
+parser will look for a pair of parentheses to parse the arguments of the 
+function and apply them to the function.
 
 The parse handler should return the identifier corresponding to the function,
 such as `Concatenate`. As a shortcut, the `parse` handler can be provided as an
@@ -475,8 +539,7 @@ Expression. For example:
 
 #### Operators: prefix, infix, postfix
 
-The `prefix`, `infix` and `postfix` kinds are used for operators. The `parse`
-handler will be passed a `parser` object and the left-hand side of the operator.
+The `prefix`, `infix` and `postfix` kinds are used for operators.
 
 Entries for `prefix`, `infix` and `postfix` operators must include a
 `precedence` property. The `precedence` property is a number that indicates the
@@ -491,9 +554,6 @@ In `1 + 2 * 3`, the `Multiply` operator has a **higher** precedence than the
 `Add` operator, so it is applied first.
 
 The precedence range is an integer from 0 to 1000.
-
-The larger the number, the higher the precedence, the more "binding" the
-operator is.
 
 Here are some rough ranges for the precedence:
 
@@ -514,12 +574,12 @@ Here are some rough ranges for the precedence:
 - 0: `,`, `;`, etc...
 
 The `infix` kind is used for binary operators (operators with a left-hand-side
-and right-hand-side). The `parse` handler will be passed a `parser` object and
-the left-hand side of the operator, for `postfix` and `infix` operators. The
-`parser` object can be used to parse the right-hand side of the expression. The
-`parse` handler should return a MathJSON expression or `null` if the operator is
-not recognized, or the left-hand side or right-hand side of the operator is not
-valid.
+and right-hand-side). 
+
+The `parse` handler will be passed a `parser` object and
+the left-hand side of the operator, for `postfix` and `infix` operators. 
+
+The `parser` object can be used to parse the right-hand side of the expression.
 
 ```javascript
 {
@@ -532,9 +592,10 @@ valid.
 }
 ```
 
-The `prefix` kind is used for unary operators. The `parse` handler will be
-passed a `parser` object. The `parse` handler should return a MathJSON
-expression.
+The `prefix` kind is used for unary operators. 
+
+The `parse` handler will be passed a `parser` object. 
+
 
 ```javascript
 {
@@ -548,8 +609,7 @@ expression.
 ```
 
 The `postfix` kind is used for postfix operators. The `parse` handler will be
-passed a `parser` object and the left-hand side of the operator. The `parse`
-handler should return a MathJSON expression.
+passed a `parser` object and the left-hand side of the operator.
 
 ```javascript
 {
@@ -563,11 +623,15 @@ handler should return a MathJSON expression.
 
 #### Environment
 
-The `environment` kind is used for LaTeX environments. The `identifierTrigger`
-property in that case is the name of the environment. The `parse` handler will
-be passed a `parser` object. The `parseTabular()` method can be used to parse
-the rows and columns of the environment. It returns a two dimensional array of
-expressions. The `parse` handler should return a MathJSON expression.
+The `environment` kind is used for LaTeX environments. 
+
+The `identifierTrigger property in that case is the name of the environment. 
+
+The `parse` handler wil be passed a `parser` object. The `parseTabular()` 
+method can be used to parse the rows and columns of the environment. It 
+returns a two dimensional array of expressions. 
+
+The `parse` handler should return a MathJSON expression.
 
 ```javascript
 {
@@ -583,7 +647,9 @@ expressions. The `parse` handler should return a MathJSON expression.
 #### Matchfix
 
 The `matchfix` kind is used for LaTeX commands that are used to enclose an
-expression. The `openTrigger` and `closeTrigger` indicate the LaTeX commands
+expression. 
+
+The `openTrigger` and `closeTrigger` indicate the LaTeX commands
 that enclose the expression. The `parse` handler is passed a `parser` object and
 the "body" (the expression between the open and close delimiters). The `parse`
 handler should return a MathJSON expression.
