@@ -1,4 +1,4 @@
-import { Tensor } from '../symbolic/tensors';
+import { TensorData } from '../symbolic/tensors';
 
 /** Calculate the determinant of matrix
  *  Test: determinant([[1,3,7],[2,-1,4],[5,0,2]]) === 81
@@ -35,7 +35,7 @@ export function determinant(matrix: number[][]): number {
 // 0 -> scalar
 // 1 -> vector
 // 2 -> 2D matrix
-export function rank(tensor: Tensor): number {
+export function rank(tensor: TensorData): number {
   return tensor.shape.length;
 }
 

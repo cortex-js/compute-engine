@@ -1,7 +1,7 @@
 import { BoxedExpression, IComputeEngine } from '../public.js';
 
-export interface Tensor {
-  data: number[];
+export interface TensorData<T = number> {
+  data: T[];
   shape: number[];
 }
 
@@ -11,13 +11,14 @@ export interface Tensor {
 // - https://www.statmethods.net/advstats/matrix.html
 // https://ctan.math.illinois.edu/macros/latex/required/tools/array.pdf
 
-// Based class for all arrays (vectors, matrices, tensors, etc.)
-// - BoxedTensor: a general purpose tensor (lists of lists of lists ...). Has limited support for operations.
-// - Vector: a column vector (1D tensor) of numbers. Has full support for operations.
-// - Matrix: a matrix (2D tensor) of numbers. Has full support for operations.
-// - Tensor: a tensor of numbers. Has limited support for operations,
+// Based class for all tensors (vectors, matrices, tensors, etc.)
+// - BoxedTensor: a general purpose tensor (lists of lists of lists ...) with arbitrary elements (BoxedExpression).
+// Has limited support for operations.
+// - Vector: a column vector (1D tensor) of scalars (numbers, boolean, Complex). Has full support for operations.
+// - Matrix: a matrix (2D tensor) of scalars. Has full support for operations.
+// - Tensor: a tensor of scalars. Has limited support for operations,
 // but could be extended in the future (with Tensorflow, for example).
-export interface AbstractArray<T = number> {
+export interface AbstractTensor<T = number> {
   readonly rank: number;
 
   readonly isSquare: boolean;
@@ -38,70 +39,89 @@ export interface AbstractArray<T = number> {
 
   readonly dataType: 'number' | 'complex' | 'boolean' | 'any';
 
+  // A Boxed Expression that represents the tensor
+  expression(ce: IComputeEngine): BoxedExpression;
+
   // The number of indices should match the rank of the tensor.
   // Notation A[i, j] or A_{i, j} in math
   at(...indices: number[]): T;
   // The first axis is "1", the last axis is the rank of the tensor
   // For a matrix, axis(1) is the list of rows, axis(2) is the list of columns. Notation for third column: A_{\star, 3} in math, or A^T_3, for fourth row: A_{4} or A_{4, \star}
-  axis(axis: number): AbstractArray<T>;
-  diagonal(): AbstractArray<T>;
+  axis(axis: number): AbstractTensor<T>;
+  diagonal(): undefined | T[];
 
-  reshape(...shape: number[]): AbstractArray<T>;
+  // Change the shape of the tensor, broadcasting if necessary
+  reshape(...shape: number[]): AbstractTensor<T>;
 
-  // Flatten the tensor into a vector
-  flatten(): AbstractArray<T>;
+  // Flatten the tensor into an array of elements
+  flatten(): T[];
 
-  transpose(axis1: number, axis2: number): AbstractArray<T>;
+  transpose(
+    axis1: number,
+    axis2: number,
+    fn?: (v: T) => T
+  ): undefined | AbstractTensor<T>;
   // Transpose the first and second axis
-  transpose(): AbstractArray<T>;
+  transpose(): undefined | AbstractTensor<T>;
 
   // a^H or A^*, or A^\dagger : conjugate transpose, aka Hermitian transpose, aka adjoint
   // https://en.wikipedia.org/wiki/Conjugate_transpose
   // transpose, then apply the complex conjugate to each entry
   // (same as transpose if all entries are real)
-  conjugateTranspose(axis1: number, axis2: number): AbstractArray<T>;
+  conjugateTranspose(
+    axis1: number,
+    axis2: number
+  ): undefined | AbstractTensor<T>;
 
-  determinant(): T;
-  inverse(): AbstractArray<T>;
+  determinant(): undefined | T;
+  inverse(): undefined | AbstractTensor<T>;
 
   // A^+ is the Moore-Penrose pseudoinverse of A. https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
   // Pseudoinverse can also be defined for scalars: the pseudoinverse of a scalar is its reciprocal if it is non-zero, and zero otherwise.
-  pseudoInverse(): AbstractArray<T>;
+  pseudoInverse(): undefined | AbstractTensor<T>;
 
   // The adjugate, classical adjoint, or adjunct of a square matrix is the transpose of its cofactor matrix. https://en.wikipedia.org/wiki/Adjugate_matrix
-  adjugateMatrix(): AbstractArray<T>;
+  adjugateMatrix(): undefined | AbstractTensor<T>;
 
   // The determinant of the matrix obtained by deleting row i and column j from this matrix. https://en.wikipedia.org/wiki/Minor_(linear_algebra)
-  minor(i: number, j: number): T;
+  minor(i: number, j: number): undefined | T;
 
   // Trace is the sum of the diagonal entries of a square matrix.
-  trace(): AbstractArray<T>;
+  // \operatorname{tr}(A) = \sum_{i=1}^n a_{ii}
+  trace(): undefined | AbstractTensor<T>;
 
-  add(rhs: AbstractArray<T>): AbstractArray<T>;
-  subtract(rhs: AbstractArray<T>): AbstractArray<T>;
+  add(rhs: AbstractTensor<T>): AbstractTensor<T>;
+  subtract(rhs: AbstractTensor<T>): AbstractTensor<T>;
 
   // Hadamard product: \odot or \circ
-  multiply(rhs: AbstractArray<T>): AbstractArray<T>;
+  multiply(rhs: AbstractTensor<T>): AbstractTensor<T>;
   // hadamardProduct(rhs: AbstractArray<T>): AbstractArray<T>;
 
-  divide(rhs: AbstractArray<T>): AbstractArray<T>;
-  power(rhs: AbstractArray<T>): AbstractArray<T>;
+  divide(rhs: AbstractTensor<T>): AbstractTensor<T>;
+  power(rhs: AbstractTensor<T>): AbstractTensor<T>;
 
-  // aka matmul, \otimes or invisbleoperator
-  tensorProduct(rhs: AbstractArray<T>): AbstractArray<T>;
-  // \otimes
-  kroneckerProduct(rhs: AbstractArray<T>): AbstractArray<T>;
+  // aka inner product
+  dot(rhs: AbstractTensor<T>): AbstractTensor<T>;
+
+  // aka matmul, \otimes or invisibleoperator
+  // generalization of the outer product
+  tensorProduct(rhs: AbstractTensor<T>): AbstractTensor<T>;
+
+  // generalization of kroneckerProduct
+  outerProduct(rhs: AbstractTensor<T>): AbstractTensor<T>;
+
+  // for 2d
+  kroneckerProduct(rhs: AbstractTensor<T>): AbstractTensor<T>;
+
   // https://en.wikipedia.org/wiki/Frobenius_inner_product
   // \langle A, B \rangle_F, Frobenius norm: \lVert A \rVert_F =
   // \sqrt{\sum_{i,j} |a_{ij}|^2}
-  frobeniusProduct(rhs: AbstractArray<T>): T;
-  dotProduct(rhs: AbstractArray<T>): AbstractArray<T>;
-  crossProduct(rhs: AbstractArray<T>): AbstractArray<T>;
-  outerProduct(rhs: AbstractArray<T>): AbstractArray<T>;
-  innerProduct(rhs: AbstractArray<T>): AbstractArray<T>;
-  matrixProduct(rhs: AbstractArray<T>): AbstractArray<T>;
+  frobeniusProduct(rhs: AbstractTensor<T>): T;
+  crossProduct(rhs: AbstractTensor<T>): AbstractTensor<T>;
+  innerProduct(rhs: AbstractTensor<T>): AbstractTensor<T>;
+  matrixProduct(rhs: AbstractTensor<T>): AbstractTensor<T>;
 
-  equals(rhs: AbstractArray<T>): boolean;
+  equals(rhs: AbstractTensor<T>): boolean;
 }
 
 // export function createTensor(data: unknown[]): Tensor {
@@ -124,7 +144,7 @@ export interface AbstractArray<T = number> {
 //   return { data: flatData, shape };
 // }
 
-export function tensorToJSArray(tensor: Tensor): number[][] {
+export function tensorToJSArray(tensor: TensorData): number[][] {
   const { data, shape } = tensor;
   const array: number[][] = [];
   let index = 0;

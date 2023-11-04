@@ -26,7 +26,7 @@ import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
 import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
 import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
 import { DEFINITIONS_CORE } from './definitions-core';
-import { DEFINITIONS_INEQUALITIES } from './definitions-inequalities';
+import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
 import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra';
 import { DEFINITIONS_LOGIC } from './definitions-logic';
 import { DEFINITIONS_OTHERS } from './definitions-other';

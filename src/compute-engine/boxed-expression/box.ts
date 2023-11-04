@@ -25,6 +25,7 @@ import {
 import { asBigint, bigintValue } from './utils';
 import { bigint } from '../numerics/numeric-bigint';
 import { isDomainLiteral } from '../library/domains';
+import { BoxedTensor } from './boxed-tensor';
 
 /**
  * ## THEORY OF OPERATIONS
@@ -406,6 +407,21 @@ export function boxFunction(
       }
     }
     return new BoxedDictionary(ce, dict, options);
+  }
+
+  //
+  // Do we have a tensor?
+  // Any list is considered a potential tensor
+  //
+  if (head === 'List') {
+    // @todo tensor: check that all elements are of the same type
+    // and instantiate the appropriate tensor (Vector, Matrix)
+    return new BoxedTensor(
+      ce,
+      head,
+      ops.map((x) => ce.box(x)),
+      options
+    );
   }
 
   if (options.canonical)

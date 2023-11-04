@@ -38,6 +38,35 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
+ce.assign('A', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]));
+ce.assign(
+  'X',
+  ce.box(['Matrix', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]])
+);
+ce.assign('B', ce.box(['Matrix', ['List', ['List', 5, 6], ['List', 7, 8]]]));
+ce.assign(
+  'C',
+  ce.box([
+    'Matrix',
+    [
+      'List',
+      ['List', ['List', -1, -2, -3], ['List', -4, -5, -6]],
+      ['List', ['List', -7, -8, -9], ['List', -10, -11, -12]],
+    ],
+  ])
+);
+ce.assign('D', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4, 5]]]));
+
+console.log(ce.box(['Shape', 'A']).evaluate().toString());
+console.log(ce.box(['Rank', 'A']).evaluate().toString());
+
+console.log(ce.box(['Flatten', 'A']).evaluate().toString());
+console.log(ce.box(['Transpose', 'A']).evaluate().toString());
+
+console.log(ce.box(['Determinant', 'X']).evaluate().toString());
+
+console.log(ce.box(['Shape', 'C']).evaluate().toString());
+
 // const expr = ce.parse('x^{}');
 // console.info(expr.json);
 // // expr.replace(ce.rules([['^{}', ['Sequence']]]));

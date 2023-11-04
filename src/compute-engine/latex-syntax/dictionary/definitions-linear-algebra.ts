@@ -160,9 +160,15 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     name: 'ConjugateTranspose',
     kind: 'postfix',
     latexTrigger: ['^', '\\star'],
-  }
+  },
 
-  { 
+  {
+    kind: 'postfix',
+    latexTrigger: ['^', '\\H'],
+    parse: 'ConjugateTranspose',
+  },
+
+  {
     kind: 'postfix',
     latexTrigger: ['^', '\\dagger'],
     parse: (_parser: Parser, lhs): Expression => {
@@ -170,7 +176,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     },
   },
 
-  { 
+  {
     kind: 'postfix',
     latexTrigger: ['^', '\\ast'],
     parse: (_parser: Parser, lhs): Expression => {
@@ -217,13 +223,11 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     identifierTrigger: 'det',
   },
-
-
 ];
 
 function parseCells(parser: Parser): [head: string, cells: Expression | null] {
   const tabular: Expression[][] | null = parser.parseTabular();
-  // @todo: check if it's a vector, Victor.
+  // @todo tensor: check if it's a vector, Victor.
   if (!tabular) return ['', null];
   return [
     'Matrix',

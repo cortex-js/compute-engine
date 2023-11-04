@@ -65,18 +65,6 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     // @todo: check lhs and rhs are functions
   },
   {
-    name: 'Transpose',
-    latexTrigger: ['^', 'T'],
-    kind: 'postfix',
-    // @todo: if lhs is a list/tensor
-  },
-  {
-    // @todo: if lhs is a list/tensor
-    name: 'ConjugateTranspose',
-    latexTrigger: ['^', 'H'],
-    kind: 'postfix',
-  },
-  {
     name: 'StringJoin', // @todo From Mathematica...?
     latexTrigger: ['\\lt', '\\gt'],
     kind: 'infix',

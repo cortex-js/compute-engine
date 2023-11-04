@@ -1,15 +1,26 @@
-## 0.21.0 
+## [Unreleased]
 
- **Release Date:** 2023-11-02
+### New Features
+
+- Implemented some linear algebra functions: `Rank`, `Shape`,`Reshape`,
+  `Flatten`, `Determinant`, `Trace`, `Transpose`, `ConjugateTranspose`,
+  `Inverse`. See the
+  [Linear Algebra](https://cortexjs.io/compute-engine/reference/linear-algebra/)
+  reference guide.
+
+## 0.21.0
+
+**Release Date:** 2023-11-02
 
 ### New Features
 
 - **#125** Parse and serialize environemnts, i.e.
   `\begin{matrix} 1 & 2 \\ 3 & 4 \end{matrix}` will be parsed as
   `["Matrix", ["List", ["List", 1, 2], ["List", 3, 4]]]`.
-  
-  A new section on [Linear Algebra](/compute-engine/reference/linear-algebra/#formatting)
-  has some details on the supported formats.
+
+  A new section on
+  [Linear Algebra](/compute-engine/reference/linear-algebra/#formatting) has
+  some details on the supported formats.
 
   The linear algebra operations are limited at the moment, but will be expanded
   in the future.
