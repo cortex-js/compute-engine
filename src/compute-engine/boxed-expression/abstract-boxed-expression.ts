@@ -108,6 +108,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return JSON.stringify(this.json);
   }
 
+  print(): void {
+    console.log(this.toString());
+  }
+
   [Symbol.toPrimitive](
     hint: 'number' | 'string' | 'default'
   ): number | string | null {

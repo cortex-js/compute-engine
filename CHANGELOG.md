@@ -7,6 +7,7 @@
   `Inverse`. See the
   [Linear Algebra](https://cortexjs.io/compute-engine/reference/linear-algebra/)
   reference guide.
+- Added a `expr.print()` method as a synonym for `console.log(expr.toString())`.
 
 ## 0.21.0
 

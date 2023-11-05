@@ -407,6 +407,13 @@ export interface BoxedExpression {
    */
   toString(): string;
 
+  /**
+   * Output to the console a string representation of the expression.
+   *
+   * @category Primitive Methods
+   */
+  print(): void;
+
   /** Similar to`expr.valueOf()` but includes a hint.
    * @category Primitive Methods
    */
