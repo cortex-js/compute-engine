@@ -299,7 +299,6 @@ _tensor_ can be a list, a matrix, a tensor or a collection.
 
 _shape_ is a tuple of integers, one for each axis of the tensor.
 
-
 `Reshape` can be used to convert a list into a matrix.
 
 ```json example
@@ -309,6 +308,20 @@ _shape_ is a tuple of integers, one for each axis of the tensor.
 
 This is similar to the APL `⍴` Reshape operator or `numpy.reshape`
 [Numpy](https://numpy.org/doc/stable/reference/generated/numpy.reshape.html).
+
+The result may have fewer or more elements than the original tensor.
+
+When reshaping, the elements are taken from the original tensor in row-major
+order, that is the order of elements as returned by `Flatten`.
+
+If the result has fewer elements, the elements are dropped from the end of the
+element list. If the result has more elements, the lists of elements
+is filled cyclically. 
+
+This is a behavior to APL, but other environment may behave differently.
+For example, by default Mathematic `ArrayReshape` will fill the missing elements
+with zeros.
+
 
 {% enddef %}
 

@@ -242,6 +242,7 @@ console.log(expr.json);
 // ➔ ["double", 2] 🎉
 ```
 
+
 ### Defining a Function
 
 However, you still can't evaluate the expression, because the Compute Engine

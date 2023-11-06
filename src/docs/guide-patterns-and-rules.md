@@ -17,8 +17,8 @@ identify and manipulate the structure of expressions.{.xl}
 
 Wildcard symbols are placeholders in an expression. They start with a `_`.
 
-The `"_"` wildcard matches anything that is in the corresponding position in an
-expression.
+The `"_"` universal wildcard matches anything that is in the corresponding 
+position in an expression.
 
 The `"__"` wildcard matches any sequence of 1 or more expressions in its
 corresponding position. It is useful to capture the arguments of a function.
@@ -65,59 +65,57 @@ into the pattern by replacing the wildcards.
 ## Matching an Expression to a Pattern
 
 **To check if an expression matches a pattern**, use the
-`ce.match(<expression>, <pattern>)` function.
+`_pattern_.match(_expression_)` function.
 
-If there is a match, `ce.match()` returns a `Substitution` object literal with
+If there is a match, `pattern.match()` returns a `Substitution` object literal with
 keys corresponding to the matching named wildcards. If no named wildcards are
 used and there is a match it returns an empty object literal. If there is no
 match, it returns `null`.
 
-```js
-const pattern = ["Add", "x", '_'];
+```js example
+const pattern = ce.box(["Add", "x", "_"]);
 
-console.log(ce.match(["Add", "x", 1], pattern));
+console.log(pattern.match(ce.box(["Add", "x", 1])));
 // ➔ { } : the expression matches the pattern
 
-console.log(ce.match(["Multiply", "x", 1], pattern));
+console.log(pattern.match(ce.box(["Multiply", "x", 1])));
 // ➔ null : the expression does not match the pattern
 ```
 
-The `ce.match()` function accounts for the commutativity and associativity of
-functions.
 
-```js
-const pattern = ["Add", "x", '_'];
+```js example
+const pattern = ce.box(["Add", "x", "_"]);
 
-console.log(ce.match(["Add", "x", 1], pattern));
+console.log(patterm.match(ce.box(["Add", "x", 1])));
 // ➔ { } : the expression matches the pattern
 
-console.log(ce.match(["Add", 1, "x"], pattern));
+console.log(pattern.match(ce.box(["Add", 1, "x"])));
 // ➔ { } : the expression matches the pattern by commutativity
 ```
 
-The `ce.match()` does not consider sub-expressions, it is not recursive.
+The `pattern.match()` does not consider sub-expressions, it is not recursive.
 
-```js
-const pattern = ["Add", "x", '_'];
+```js example
+const pattern = ce.box(["Add", "x", "_"]);
 
-console.log(ce.match(["Multiply", 2, ["Add", "x", 1]], pattern));
+console.log(pattern.match(ce.box(["Multiply", 2, ["Add", "x", 1]])));
 // ➔ null : the expression does not match the pattern
 ```
 
 If the same named wildcard is used multiple times, all its values must match.
 
-```js
-console.log(ce.match(["Add", 1, "x"], ["Add", '_a', '_a']));
+```js example
+console.log(ce.box(["Add", '_a', '_a']).match(ce.box(["Add", 1, "x"])));
 // ➔ null
 
-console.log(ce.match(["Add", "x", "x"], ["Add", '_a', '_a']));
+console.log(ce.box(["Add", '_a', '_a']).match(ce.box(["Add", "x", "x"])));
 // ➔ { "a": "x" }
 ```
 
 Wildcards can be used to capture the head of functions:
 
-```js
-console.log(match(["Add", 1, "x"], ['_f', 1, "x"]));
+```js example
+console.log(ce.box(["_f", 1, "x"]).match(ce.box(["Add", 1, "x"])));
 // ➔ { "f": "Add" }
 ```
 
@@ -130,17 +128,19 @@ console.log(match(["Add", 1, "x"], ['_f', 1, "x"]));
 The return value of the `match()` function is a `Substitution` object: a mapping
 from wildcard names to expressions.
 
+If there is no match, `match()` returns `null`.
+
 **To apply a substitution to a pattern**, and therefore recover the expression
 it was derived from, use the `substitute()` function.
 
-```js
-const expression = ["Add", 1, "x"];
-const pattern = ["Add", 1, '_a'];
+```js example
+const expression = ce.box(["Add", 1, "x"]);
+const pattern = ce.box(["Add", 1, "_a"]);
 
-console.log(match(expression, pattern));
+console.log(pattern.match(expression));
 // ➔ { a: "x" }
 
-console.log(substitute(pattern, { a: "x" }));
+expression.subs({ a: "x" }).print();
 // ➔ ["Add", 1, "x"]
 ```
 
@@ -162,7 +162,7 @@ the expressions matched, an empty object literal, `{}` is returned. To check if
 the expressions simply match or not, check if the return value is `null`
 (indicating not a match) or not (indicating a match).
 
-```js
+```js example
 const ce = new ComputeEngine();
 
 const variable = "x";
@@ -187,40 +187,28 @@ console.log(
 
 ## Applying Rewrite Rules
 
-A rewrite rule is a triplet of:
+A rewrite rule is a `[_match_, _sub_]` tuple:
 
-- a left-hand-side pattern, `lhs`
-- a right-hand-side pattern, `rhs`
-
-When a rule is applied to an expression `expr`, if `expr` matches `lhs` the 
-result of the rule is the substitution applied to the `rhs`.
+- `match`: a matching pattern
+- `sub`: a substitution pattern, 
 
 **To apply a set of rules to an expression**, call the `expr.replace()`
 function.
 
-```ts
+When a rule is applied to an expression `expr` with `expr.replace()`, 
+if `expr` matches the `match` pattern the result of `expr.replace()` is the 
+substitution pattern `sub` applied to the expression.
+
+```ts example
 const squareRule = ce.rules([
   [
-    ["Multiply", '_x', '_x'],
-    ["Square", '_x'],
+    ["Multiply", "_x", "_x"],   // match pattern
+    ["Square", "_x"],           // substitution pattern
   ],
 ]);
 
-ce.box(["Multiply", 4, 4]).replace(squareRule);
+ce.box(["Multiply", 4, 4], {canonical: false}).replace(squareRule);
 // ➔ ["Square", 4]
-
-
-ce
-  .box(["Multiply", 4, 4])
-  .replace(
-    ce.rules([
-      [
-        ["Multiply", '_x', '_x'],
-        ["Square", '_x'],
-      ],
-    ])
-  );
-// ➔ 17
 ```
 
 The `expr.replace()` function continues applying all the rules in the ruleset
@@ -228,11 +216,5 @@ until no rules are applicable.
 
 The `expr.simplify()` function applies a collection of built-in rewrite rules.
 You can define your own rules and apply them using `expr.replace()`.
-
-</section>
-
-<section id="count">
-
-## `Count`
 
 </section>
