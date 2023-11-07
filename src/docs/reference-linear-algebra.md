@@ -240,7 +240,7 @@ square brackets following a matrix.
 
 {% latex "\\mathbf{A}_{2,3}" %}
 
-{% latex "\\mathbf{A}\lbrack2,3\rbrack" %}
+{% latex "\\mathbf{A}\\lbrack2,3\\rbrack" %}
 
 {% enddef %}
 
@@ -350,7 +350,7 @@ indexes start at 1.
 
 [&quot;**ConjugateTranspose**&quot;, _matrix_]{.signature}
 
-{% latex "A^\star" %}
+{% latex "A^\\star" %}
 
 Returns the [conjugate transpose](https://en.wikipedia.org/wiki/Conjugate_transpose) of the matrix, that is
 the transpose of the matrix with all its (complex) elements conjugated. 

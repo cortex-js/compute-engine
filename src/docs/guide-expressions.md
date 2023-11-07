@@ -151,6 +151,14 @@ console.log(expr.json);
 // ➔ ["Rational", -3, 5]
 ```
 
+The canonical form of a rational with a denominator of 1 is an integer.
+
+```js
+const expr = ce.parse("\\frac{17}{1}");
+console.log(expr.json);
+// ➔ 17
+```
+
 You can check if a non-canonical expression is a reduced (canonical) rational 
 number by checking the GCD of the numerator and denominator:
 
@@ -163,7 +171,7 @@ console.info(ce.box(
 ```
 
 
-The canonical form of an addition or mulipication will have its arguments
+The canonical form of an addition or multiplication will have its arguments
 ordered in a canonical way.
 
 ```js

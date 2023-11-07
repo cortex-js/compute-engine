@@ -36,8 +36,8 @@ expressions.
 The `ce.box()` and `ce.parse()` functions return a canonical expression by
 default, which is the desirable behavior in most cases.
 
-**To get a non-canonical version of an expression** set the `canonical` option
-of `ce.parse()` or `ce.box()` to `false`.
+**To get a non-canonical version of an expression** use
+of `ce.parse(s, {canonical: false})` or `ce.box(expr, {canonical: false})`.
 
 The non-canonical version will be closer to the literal LaTeX input, which may
 be desirable to compare a "raw" user input with an expected answer.
@@ -77,7 +77,8 @@ console.log(expr.json);
 
 The canonical form of an expression is always the same when used with a given
 Compute Engine instance. However, do not rely on the canonical form as future
-versions of the Compute Engine could provide a different result.
+versions of the Compute Engine could have a different definition of 
+canonical form.
 
 
 **To check if an expression is canonical** use `expr.isCanonical`.
