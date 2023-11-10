@@ -14,7 +14,7 @@ import {
   neg,
 } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
-import { canonicalLimits, normalizeLimits } from './utils';
+import { canonicalIndexingSet, normalizeIndexingSet } from './utils';
 import { each } from '../collection-utils';
 
 /** The canonical form of `Multiply`:
@@ -215,16 +215,16 @@ function multiply2(
 export function canonicalProduct(
   ce: IComputeEngine,
   body: BoxedExpression | undefined,
-  range: BoxedExpression | undefined
+  indexingSet: BoxedExpression | undefined
 ) {
   // Product is a scoped function (to declare the index)
   ce.pushScope();
 
   body ??= ce.error('missing');
 
-  const limits = canonicalLimits(range);
-  const result = limits
-    ? ce._fn('Product', [body.canonical, limits])
+  indexingSet = canonicalIndexingSet(indexingSet);
+  const result = indexingSet
+    ? ce._fn('Product', [body.canonical, indexingSet])
     : ce._fn('Product', [body.canonical]);
 
   ce.popScope();
@@ -234,7 +234,7 @@ export function canonicalProduct(
 export function evalMultiplication(
   ce: IComputeEngine,
   expr: BoxedExpression,
-  range: BoxedExpression | undefined,
+  indexingSet: BoxedExpression | undefined,
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
   let result: BoxedExpression | undefined | null = null;
@@ -244,7 +244,7 @@ export function evalMultiplication(
       ? expr.simplify()
       : expr.evaluate({ numericMode: mode === 'N' });
 
-  if (!range) {
+  if (!indexingSet) {
     // The body is a collection, e.g. Product({1, 2, 3})
     if (bignumPreferred(ce)) {
       let product = ce.bignum(1);
@@ -280,7 +280,7 @@ export function evalMultiplication(
     return result ?? undefined;
   }
 
-  const [index, lower, upper, isFinite] = normalizeLimits(range);
+  const [index, lower, upper, isFinite] = normalizeIndexingSet(indexingSet);
 
   if (!index) return undefined;
 

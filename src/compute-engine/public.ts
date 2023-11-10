@@ -139,6 +139,13 @@ export type LatexString = string;
  * In addition:
  *  - `__1` (`__a`, etc..) match a sequence of one or more expressions
  *  - `___1` (`___a`, etc...) match a sequence of zero or more expressions
+ *
+ * @todo: use an object literal instead:
+ * - match: SemiBoxedExpression | Pattern
+ * - when: (wildcards: BoxedSubstitution) => boolean
+ * - replace: SemiBoxedExpression | ((wildcards: BoxedSubstitution) => SemiBoxedExpression)
+ * - priority?
+ *
  */
 export type Rule = [
   lhs: LatexString | SemiBoxedExpression | Pattern,
@@ -2205,6 +2212,13 @@ export interface IComputeEngine {
     metadata?: Metadata
   ): BoxedDomain;
 
+  /**
+   * Create a boxed function expression.
+   *
+   * @param head
+   * @param ops
+   * @param options
+   */
   fn(
     head: string | SemiBoxedExpression,
     ops: SemiBoxedExpression[],

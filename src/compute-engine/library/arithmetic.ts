@@ -234,12 +234,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           args = checkNumericArgs(ce, args, 2);
 
-          const [numer, denom] = args;
           if (args.length !== 2) return ce._fn('Divide', args);
+
+          const [numer, denom] = args;
           return ce.div(numer, denom);
         },
         simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
-        evaluate: (ce, ops) =>
+        evaluate: (_ce, ops) =>
           apply2N(
             ops[0],
             ops[1],

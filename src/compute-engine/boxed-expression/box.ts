@@ -25,7 +25,7 @@ import {
 import { asBigint, bigintValue } from './utils';
 import { bigint } from '../numerics/numeric-bigint';
 import { isDomainLiteral } from '../library/domains';
-import { BoxedTensor } from './boxed-tensor';
+import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
 
 /**
  * ## THEORY OF OPERATIONS
@@ -284,6 +284,10 @@ export function boxFunction(
   // Number
   //
   if (head === 'Number' && ops.length === 1) return box(ce, ops[0], options);
+
+  //
+  // String
+  //
   if (head === 'String') {
     if (ops.length === 0) return new BoxedString(ce, '', options.metadata);
     return new BoxedString(
@@ -292,6 +296,10 @@ export function boxFunction(
       options.metadata
     );
   }
+
+  //
+  // Symbol
+  //
   if (head === 'Symbol' && ops.length > 0) {
     return ce.symbol(ops.map((x) => asString(x) ?? '').join(''), options);
   }
@@ -383,7 +391,7 @@ export function boxFunction(
   if (head === 'Dictionary') {
     const dict = {};
     for (const op of ops) {
-      const arg = ce.box(op);
+      const arg = ce.box(op, { canonical: options.canonical });
       const head = arg.head;
       if (
         head === 'KeyValuePair' ||
@@ -410,23 +418,24 @@ export function boxFunction(
   }
 
   //
-  // Do we have a tensor?
-  // Any list is considered a potential tensor
+  // Do we have a vector/matrix/tensor?
+  // It has to have a compatible shape: i.e. all elements on an axis have
+  // the same shape.
   //
-  if (head === 'List') {
-    // @todo tensor: check that all elements are of the same type
-    // and instantiate the appropriate tensor (Vector, Matrix)
-    return new BoxedTensor(
-      ce,
-      head,
-      ops.map((x) => ce.box(x)),
-      options
-    );
+  if (head === 'List' && options.canonical) {
+    const boxedOps = ops.map((x) => box(ce, x));
+    const { shape, dtype } = expressionTensorInfo('List', boxedOps) ?? {};
+
+    if (dtype && shape) return new BoxedTensor(ce, { head, ops: boxedOps });
+
+    return makeCanonicalFunction(ce, head, boxedOps, options.metadata);
   }
 
   if (options.canonical)
     return makeCanonicalFunction(ce, head, ops, options.metadata);
 
+  // options.canonical was false so we don't want to canonicalize the
+  // arguments
   return new BoxedFunction(
     ce,
     head,
@@ -491,6 +500,8 @@ export function box(
 
     if (typeof expr[0] === 'string')
       return boxFunction(ce, expr[0], expr.slice(1), options);
+
+    console.assert(Array.isArray(expr[0]));
 
     // It's a function with a head expression
     // Try to evaluate to something simpler

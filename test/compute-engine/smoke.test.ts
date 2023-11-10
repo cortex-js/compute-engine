@@ -38,6 +38,9 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
+const arsin = ce.box(['Apply', ['InverseFunction', 'Sin']]);
+console.log(arsin.rawJson);
+
 ce.assign('A', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]));
 ce.assign(
   'X',

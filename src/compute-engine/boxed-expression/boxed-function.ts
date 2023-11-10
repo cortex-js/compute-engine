@@ -42,7 +42,16 @@ import { at, isFiniteIndexableCollection } from '../collection-utils';
 import { narrow } from './boxed-domain';
 
 /**
- * BoxedFunction
+ * A boxed function represent an expression that can be
+ * represented by a function call.
+ *
+ * It is composed of a head (the name of the function) and
+ * a list of arguments.
+ *
+ * It has a definition associated with it, based
+ * on the head. The definition contains the signature of the function,
+ * and the implementation of the function.
+ *
  */
 
 export class BoxedFunction extends _BoxedExpression {
@@ -66,10 +75,6 @@ export class BoxedFunction extends _BoxedExpression {
 
   // The domain of the value of the function applied to its arguments
   private _result: BoxedDomain | undefined = undefined;
-
-  // The cached result of applying the tail to the head. If the function is
-  // not pure, its value is never cached.
-  private _numericValue: BoxedExpression | undefined;
 
   private _hash: number | undefined;
 
@@ -146,7 +151,6 @@ export class BoxedFunction extends _BoxedExpression {
 
   reset(): void {
     // Note: a non-canonical expression is never bound
-    this._numericValue = undefined;
     // this._def = null;
   }
 
@@ -332,6 +336,7 @@ export class BoxedFunction extends _BoxedExpression {
     // Each argument must match
     const lhsTail = this._ops;
     const rhsTail = rhs._ops;
+    // @todo: need to handle different lengths (sequence pattern)
     for (let i = 0; i < lhsTail.length; i++) {
       const m = lhsTail[i].match(rhsTail[i], options);
       if (m === null) return null;
@@ -640,7 +645,6 @@ export class BoxedFunction extends _BoxedExpression {
           result = this.engine.NaN;
         else if (!bignumPreferred(this.engine) && num instanceof Decimal)
           result = this.engine.number(num.toNumber());
-        if (this.isPure) this._numericValue = result;
       }
     }
     return result ?? this.engine.fn(this._head, tail);

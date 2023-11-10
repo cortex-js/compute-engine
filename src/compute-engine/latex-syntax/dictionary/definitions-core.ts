@@ -490,7 +490,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '[',
     closeTrigger: ']',
-    parse: parseList,
+    parse: parseBrackets,
     // Note: Avoid \\[ ... \\] because it is used for display math
     serialize: (serializer: Serializer, expr: Expression): string =>
       joinLatex([
@@ -1050,8 +1050,8 @@ function parseParenDelimiter(
 ): Expression | null {
   // Handle `()` used for example with `f()`
   if (body === null || isEmptySequence(body)) return ['Delimiter'];
-
-  if (head(body) === 'Delimiter' && op(body, 2)) {
+  const h = head(body);
+  if (h === 'Delimiter' && op(body, 2)) {
     const delims = stringValue(op(body, 2));
     if (delims?.length === 1) {
       // We have a Delimiter with a single character separator
@@ -1059,23 +1059,66 @@ function parseParenDelimiter(
     }
   }
 
-  if (head(body) === 'Sequence') {
+  if (h === 'Sequence') {
     if (nops(body) === 0) return ['Delimiter'];
     return ['Delimiter', body];
+  }
+
+  if (h === 'Matrix') {
+    let delims = stringValue(op(body, 2)) ?? '..';
+    if (delims === '..') return ['Matrix', op(body, 1)!];
   }
 
   return ['Delimiter', ['Sequence', body]];
 }
 
-function parseList(_parser: Parser, body: Expression | null): Expression {
+/**
+ *
+ * A list in enclosed in brackets, e.g. `[1, 2, 3]`.
+ *
+ * It may contain:
+ * - a single expression, e.g. `[1]`
+ * - an empty sequence, e.g. `[]`
+ * - a sequence of expressions, e.g. `[1, 2, 3]` (maybe)
+ * - a sequence of expressions separated by a "," delimiter, e.g. `[1, 2, 3]`
+ * - a sequence of expressions separated by a ";" delimiter,
+ *    which may contain a sequence of expression with a "," delimiter
+ *    e.g. `[1; 2; 3; 4]` or `[1, 2; 3, 4]`
+ * - a range, e.g. `[1..10]`
+ * - a range with a step, e.g. `[1, 3..10]`
+ * - a linspace, e.g. `[1..10:50]` (not yet supported)
+ * - a list comprehension, e.g. `[x^2 for x in 1..3 if x > 1]` (not yet supported)
+ *
+ */
+function parseBrackets(parser: Parser, body: Expression | null): Expression {
   if (body === null || isEmptySequence(body)) return ['List'];
-  if (head(body) === 'Delimiter') return parseList(_parser, op(body, 1));
 
-  if (head(body) === 'Range') return body;
-  if (head(body) !== 'Sequence' && head(body) !== 'List') return ['List', body];
-  return ['List', ...(ops(body) ?? [])];
+  const h = head(body);
+  if (h === 'Range' || h === 'Linspace') return body;
+  if (h === 'Sequence') return ['List', ...(ops(body) ?? [])];
+
+  if (h === 'Delimiter') {
+    const delim = stringValue(op(body, 2)) ?? '...';
+    if (delim === ';' || delim === '.;.') {
+      return [
+        'List',
+        ...(ops(op(body, 1)) ?? []).map((x) => parseBrackets(parser, x)),
+      ];
+    }
+    if (delim === ',' || delim === '.,.') {
+      body = op(body, 1);
+      if (head(body) === 'Sequence') return ['List', ...(ops(body) ?? [])];
+      return ['List', body ?? ['Sequence']];
+    }
+  }
+
+  return ['List', body];
 }
 
+/**
+ * A range is a sequence of numbers, e.g. `1..10`.
+ * Optionally, they may include a step, e.g. `1, 3..10`.
+ */
 function parseRange(parser: Parser, lhs: Expression): Expression | null {
   const index = parser.index;
   if (!lhs) return null;

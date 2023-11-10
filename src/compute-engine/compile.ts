@@ -1,6 +1,6 @@
 import { MathJsonIdentifier } from '../math-json/math-json-format';
 import { isCollection, isFiniteIndexableCollection } from './collection-utils';
-import { normalizeLimits } from './library/utils';
+import { normalizeIndexingSet } from './library/utils';
 import {
   asFloat,
   chop,
@@ -527,7 +527,7 @@ function compileLoop(
   if (!args[0]) throw new Error('Sum/Product: no body');
   // if (!args[1]) throw new Error('Sum/Product: no limits');
 
-  const [index, lower, upper, isFinite] = normalizeLimits(args[1]);
+  const [index, lower, upper, isFinite] = normalizeIndexingSet(args[1]);
 
   const op = h === 'Sum' ? '+' : '*';
 

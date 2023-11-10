@@ -14,7 +14,7 @@ import { canonical } from '../symbolic/utils';
 import { isDomain } from '../boxed-expression/boxed-domain';
 import { isIndexableCollection } from '../collection-utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
-import { normalizeLimits } from './utils';
+import { normalizeIndexingSet } from './utils';
 import { canonicalOrder } from '../boxed-expression/order';
 
 //   // := assign 80 // @todo
@@ -321,7 +321,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: 'Functions',
         canonical: (ce, args) => {
-          if (args[0].symbol) return ce.box([...args]);
+          if (args[0].symbol) return ce.box([args[0].symbol, ...args.slice(1)]);
           return ce._fn('Apply', args);
         },
         evaluate: (_ce, ops) => apply(ops[0], ops.slice(1)),
@@ -467,7 +467,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           const h = ops[0].head;
           if (h === 'N') return ops[0].canonical;
           if (h === 'Integrate') {
-            const [index, lower, upper] = normalizeLimits(ops[0].op2);
+            const [index, lower, upper] = normalizeIndexingSet(ops[0].op2);
             if (!index || lower === undefined || upper === undefined)
               return null;
             const fn = ops[0].op1;

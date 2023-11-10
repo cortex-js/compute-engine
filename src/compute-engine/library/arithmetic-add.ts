@@ -7,7 +7,7 @@ import { Sum } from '../symbolic/sum';
 import { asBignum, asFloat, MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
-import { canonicalLimits, normalizeLimits } from './utils';
+import { canonicalIndexingSet, normalizeIndexingSet } from './utils';
 import { each, isIndexableCollection } from '../collection-utils';
 
 /** The canonical form of `Add`:
@@ -115,16 +115,16 @@ export function evalAdd(
 export function canonicalSummation(
   ce: IComputeEngine,
   body: BoxedExpression,
-  range: BoxedExpression | undefined
+  indexingSet: BoxedExpression | undefined
 ) {
   // Sum is a scoped function (to declare the index)
   ce.pushScope();
 
   body ??= ce.error('missing');
 
-  const limits = canonicalLimits(range);
-  const result = limits
-    ? ce._fn('Sum', [body.canonical, limits])
+  indexingSet = canonicalIndexingSet(indexingSet);
+  const result = indexingSet
+    ? ce._fn('Sum', [body.canonical, indexingSet])
     : ce._fn('Sum', [body.canonical]);
 
   ce.popScope();
@@ -134,12 +134,12 @@ export function canonicalSummation(
 export function evalSummation(
   ce: IComputeEngine,
   expr: BoxedExpression,
-  range: BoxedExpression | undefined,
+  indexingSet: BoxedExpression | undefined,
   mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
   let result: BoxedExpression | undefined | null = null;
 
-  if (!range) {
+  if (!indexingSet) {
     // The body is a collection, e.g. Sum({1, 2, 3})
     const body =
       mode === 'simplify'
@@ -180,7 +180,9 @@ export function evalSummation(
     return result ?? undefined;
   }
 
-  const [index, lower, upper, isFinite] = normalizeLimits(range.evaluate());
+  const [index, lower, upper, isFinite] = normalizeIndexingSet(
+    indexingSet.evaluate()
+  );
 
   if (!index) return undefined;
 

@@ -33,7 +33,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
           return ce._fn('Matrix', [
             ce.box([
               'List',
-              ce.canonical(ops).map((op) => ce.box(['List', [op]])),
+              ...ce.canonical(ops).map((op) => ce.box(['List', op])),
             ]),
           ]);
         },
@@ -50,7 +50,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const op1 = ops[0];
 
-          if (isBoxedTensor(op1)) return ce.tuple(op1.shape);
+          if (isBoxedTensor(op1)) return ce.tuple(op1.tensor.shape);
 
           return ce.tuple([]);
         },
@@ -64,7 +64,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const op1 = ops[0];
 
-          if (isBoxedTensor(op1)) return ce.number(op1.rank);
+          if (isBoxedTensor(op1)) return ce.number(op1.tensor.rank);
 
           return ce.number(0);
         },
@@ -86,7 +86,8 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
           if (!isBoxedTensor(op1) && isFiniteIndexableCollection(op1))
             op1 = ce.box(['List', ...each(op1)]);
 
-          if (isBoxedTensor(op1)) return op1.reshape(...shape).expression(ce);
+          if (isBoxedTensor(op1))
+            return op1.tensor.reshape(...shape).expression;
 
           return undefined;
         },
@@ -102,7 +103,11 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           const op1 = ops[0];
 
-          if (isBoxedTensor(op1)) return ce.box(['List', op1.flatten()]);
+          if (isBoxedTensor(op1))
+            return ce.box([
+              'List',
+              ...op1.tensor.flatten().map((x) => ce.box(x)),
+            ]);
 
           if (isFiniteIndexableCollection(op1))
             return ce.box(['List', ...each(op1)]);
@@ -137,8 +142,8 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
             op1 = ce.box(['List', ...each(op1)]);
           if (isBoxedTensor(op1)) {
             if (axis1 === 1 && axis2 === 2)
-              return op1.transpose()?.expression(ce);
-            else return op1.transpose(axis1, axis2)?.expression(ce);
+              return op1.tensor.transpose()?.expression;
+            else return op1.tensor.transpose(axis1, axis2)?.expression;
           }
           return undefined;
         },
@@ -161,7 +166,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
           if (axis1 === axis2) return undefined;
 
           if (isBoxedTensor(op1))
-            return op1.conjugateTranspose(axis1, axis2)?.expression(ce);
+            return op1.tensor.conjugateTranspose(axis1, axis2)?.expression;
 
           return undefined;
         },
@@ -174,7 +179,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Values', 'Values'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
-          if (isBoxedTensor(op1)) return op1.determinant();
+          if (isBoxedTensor(op1)) return op1.tensor.determinant();
 
           return undefined;
         },
@@ -187,7 +192,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Values', 'Values'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
-          if (isBoxedTensor(op1)) return op1.inverse()?.expression(ce);
+          if (isBoxedTensor(op1)) return op1.tensor.inverse()?.expression;
 
           return undefined;
         },
@@ -200,7 +205,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Values', 'Values'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
-          if (isBoxedTensor(op1)) return op1.pseudoInverse()?.expression(ce);
+          if (isBoxedTensor(op1)) return op1.tensor.pseudoInverse()?.expression;
 
           return undefined;
         },
@@ -226,7 +231,8 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Values', 'Values'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
-          if (isBoxedTensor(op1)) return op1.adjugateMatrix()?.expression(ce);
+          if (isBoxedTensor(op1))
+            return op1.tensor.adjugateMatrix()?.expression;
 
           return undefined;
         },
@@ -252,7 +258,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Values', 'Values'],
         evaluate: (ce, ops) => {
           const op1 = ops[0];
-          if (isBoxedTensor(op1)) return op1.trace()?.expression(ce);
+          if (isBoxedTensor(op1)) return op1.tensor.trace();
 
           return undefined;
         },

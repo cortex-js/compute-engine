@@ -6,33 +6,33 @@ import { BoxedExpression } from '../public';
  * Assume the caller has setup a scope. The index
  * variable will be declared in that scope.
  *
- * @param limits
+ * @param indexingSet
  *
  */
-export function canonicalLimits(
-  limits: BoxedExpression | undefined
+export function canonicalIndexingSet(
+  indexingSet: BoxedExpression | undefined
 ): BoxedExpression | undefined {
-  if (!limits) return undefined;
+  if (!indexingSet) return undefined;
 
-  const ce = limits.engine;
+  const ce = indexingSet.engine;
 
   let index: BoxedExpression | null = null;
   let lower: BoxedExpression | null = null;
   let upper: BoxedExpression | null = null;
   if (
-    limits.head !== 'Tuple' &&
-    limits.head !== 'Triple' &&
-    limits.head !== 'Pair' &&
-    limits.head !== 'Single'
+    indexingSet.head !== 'Tuple' &&
+    indexingSet.head !== 'Triple' &&
+    indexingSet.head !== 'Pair' &&
+    indexingSet.head !== 'Single'
   ) {
-    index = limits;
+    index = indexingSet;
   } else {
     // Don't canonicalize the index. Canonicalization has the
     // side effect of declaring the symbol, here we're using
     // it to do a local declaration
-    index = limits.ops![0] ?? null;
-    lower = limits.ops![1]?.canonical ?? null;
-    upper = limits.ops![2]?.canonical ?? null;
+    index = indexingSet.ops![0] ?? null;
+    lower = indexingSet.ops![1]?.canonical ?? null;
+    upper = indexingSet.ops![2]?.canonical ?? null;
   }
   if (index.head === 'Hold') index = index.op1;
 
@@ -54,7 +54,7 @@ export function canonicalLimits(
 }
 
 /**
- * Limits is an expression describing an index variable
+ * IndexingSet is an expression describing an index variable
  * and a range of values for that variable.
  *
  * This can take several valid forms:
@@ -67,7 +67,7 @@ export function canonicalLimits(
  * @param limits
  * @returns
  */
-export function normalizeLimits(
+export function normalizeIndexingSet(
   limits: BoxedExpression | undefined
 ): [
   index: string | undefined,

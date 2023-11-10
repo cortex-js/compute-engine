@@ -231,7 +231,7 @@ function parseCells(parser: Parser): [head: string, cells: Expression | null] {
   if (!tabular) return ['', null];
   return [
     'Matrix',
-    ['List', ...tabular.map((row) => ['List', row])] as Expression,
+    ['List', ...tabular.map((row) => ['List', ...row])] as Expression,
   ];
 }
 

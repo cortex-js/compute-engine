@@ -516,52 +516,9 @@ describe('INDEXABLE OPERATIONS', () => {
 
 describe('ITERABLE OPERATIONS', () => {
   test('Flatten', () =>
-    expect(evaluate(['Flatten', matrix])).toMatchInlineSnapshot(`
-      [
-        "Flatten",
-        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]]
-      ]
-    `));
-
-  test('Reshape 2x2', () =>
-    expect(evaluate(['Flatten', matrix, ['Tuple', 2, 2]]))
-      .toMatchInlineSnapshot(`
-      [
-        "Flatten",
-        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
-        ["Error", "'unexpected-argument'", ["Pair", 2, 2]]
-      ]
-    `));
-
-  test('Reshape 3x3', () =>
-    expect(evaluate(['Flatten', matrix, ['Tuple', 3, 3]]))
-      .toMatchInlineSnapshot(`
-      [
-        "Flatten",
-        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
-        ["Error", "'unexpected-argument'", ["Pair", 3, 3]]
-      ]
-    `));
-
-  test('Reshape 3x2', () =>
-    expect(evaluate(['Flatten', matrix, ['Tuple', 3, 2]]))
-      .toMatchInlineSnapshot(`
-      [
-        "Flatten",
-        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
-        ["Error", "'unexpected-argument'", ["Pair", 3, 2]]
-      ]
-    `));
-
-  test('Reshape 4x4', () =>
-    expect(evaluate(['Flatten', matrix, ['Tuple', 4, 4]]))
-      .toMatchInlineSnapshot(`
-      [
-        "Flatten",
-        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]],
-        ["Error", "'unexpected-argument'", ["Pair", 4, 4]]
-      ]
-    `));
+    expect(evaluate(['Flatten', matrix])).toMatchInlineSnapshot(
+      `["List", 2, 3, 4, 6, 7, 9, 11, 12, 13]`
+    ));
 
   test('Reverse', () =>
     expect(evaluate(['Reverse', list])).toMatchInlineSnapshot(
@@ -618,14 +575,6 @@ describe('ITERABLE OPERATIONS', () => {
     expect(evaluate(['Zip', list1, list2])).toMatchInlineSnapshot(
       `["Zip", ["List", 100, 4, 2, 62, 34, 16, 8], ["List", 9, 7, 2, 24]]`
     ));
-
-  test('Transpose', () =>
-    expect(evaluate(['Transpose', matrix])).toMatchInlineSnapshot(`
-      [
-        "Transpose",
-        ["List", ["List", 2, 3, 4], ["List", 6, 7, 9], ["List", 11, 12, 13]]
-      ]
-    `));
 
   test('Join', () =>
     expect(evaluate(['Join', list1, list2])).toMatchInlineSnapshot(
