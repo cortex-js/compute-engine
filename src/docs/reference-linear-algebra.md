@@ -24,13 +24,26 @@ For example the matrix above is represented as the following list of lists:
 ["List", ["List", 1, 3, ["List", 5, 0]]]
 ```
 
+An **axis** is a dimension of a tensor. A vector has one axis, a matrix has two
+axes, a tensor (multi-dimensional matrix) has more than two axes.
+
+The **shape** of a tensor is the length of each of its axes. For example, a
+matrix with 3 rows and 4 columns has a shape of `(3, 4)`.
+
+The **rank** of a tensor is the number of axes of the tensor. For example, a
+matrix has a rank of 2. Note that rank is sometimes used with a different
+meaning. For example, the rank of a matrix can also be defined as the maximum
+number of linearly independent rows or columns of the matrix. In the Compute
+Engine, **rank** is always used with the meaning of the number of axes.
+
+
 In the Compute Engine, matrices are stored in **row-major** order. This means that
-the first element of the outer list is the first row of the matrix, the second element
+the first element of the outer axis is the first row of the matrix, the second element
 of the list is the second row of the matrix, etc.
 
 
-{% readmore "/compute-engine/reference/collections/" %}Since vectors,
-matrixes and tensors are `List` collections, some **collection operations**
+{% readmore "/compute-engine/reference/collections/" %}Since
+matrixes are `List` collections, some **collection operations**
 can also be applied to them such as `At`, `Fold` and `Map`. {% endreadmore %}
 
 
@@ -39,16 +52,23 @@ which studies tensors, which are multidimensional arrays.
 
 For example, a grayscale image can be represented by a matrix of grayscale 
 values. But a color image is represented by a rank 3 tensor, an array of RGB 
-triplets. Tensors are represented as nested lists.
+triplets. Tensors are also represented as nested lists.
 
+The Compute Engine provides a number of functions for working with matrices.
 
-The Compute Engine provides a number of functions for working with matrices 
-and tensors.
+### Representing Matrices
 
-### Representing Vectors, Matrices and Tensors
+Vectors (row vectors) are represented as lists, that is an expression with the 
+head `List`.
 
-Vectors, matrices and tensors are represented as lists of lists, that
-is expressions with the head `List`.
+Matrixes are represented as lists of lists.
+
+Tensors (multi-dimensional matrixes) are represented as nested lists.
+
+Tensors are represented internally using an optimized format that is more
+efficient than nested lists. Because of this, some operations on tensors 
+such as `Reshape` and `Transpose` can be done in O(1) time. {.notice--info}
+
 
 `Vector` is a convenience function that interprets a list of elements as a
 column vector.
@@ -145,15 +165,15 @@ columns and `:` indicate a dashed lines between two columns.
 
 
 
-## Tensor Properties
+## Matrix Properties
 
 
 {% def "Shape" %}
 
-[&quot;**Shape**&quot;, _tensor_]{.signature}
+[&quot;**Shape**&quot;, _matrix_]{.signature}
 
-Returns the shape of a tensor, a tuple of the lengths of the
-tensor along each of its axis.
+Returns the shape of a matrix, a tuple of the lengths of the
+matrix along each of its axis.
 
 A list (or vector) has a single axis. A matrix has two axes. A tensor has more
 than two axes.
@@ -171,19 +191,19 @@ For a scalar, `Shape` returns an empty tuple.
 // ➔ ["Tuple", 2, 4]
 ```
 
-**Note:** The shape of a tensor is also sometimes called "dimensions".
+**Note:** The shape of a matrix is also sometimes called "dimensions".
 However, this terminology is ambiguous because the word "dimension" is also
-used to refer to the length of a tensor along a specific axis.
+used to refer to the length of a matrix along a specific axis.
 
 {% enddef %}
 
 {% def "Rank" %}
 
-[&quot;**Rank**&quot;, _tensor_]{.signature}
+[&quot;**Rank**&quot;, _matrix_]{.signature}
 
-Returns the number of axes of a tensor.
+Returns the number of axes of a matrix.
 
-A scalar (a number, for exmaple) has **rank 0**.
+A scalar (a number, for example) has **rank 0**.
 
 A vector or list has **rank 1**.
 
@@ -209,11 +229,11 @@ The rank is the length of the shape of the tensor.
 
 {% def "At" %}
 
-[&quot;**At**&quot;, _tensor_, _index-1_, _index-2_, ...]{.signature}
+[&quot;**At**&quot;, _matrix_, _index-1_, _index-2_, ...]{.signature}
 
-Returns the element of the tensor at the specified indexes.
+Returns the element of the matrix at the specified indexes.
 
-_index-1_, ... is a sequence of integers, one for each axis of the tensor.
+_index-1_, ... is a sequence of integers, one for each axis of the matrix.
 
 Indexes start at 1. Negative indexes count elements from the end. A negative 
 index is equivalent to adding the length of the axis to the index. So `-1` is
@@ -246,60 +266,46 @@ square brackets following a matrix.
 
 
 
-{% def "Axis" %}
-
-[&quot;**Axis**&quot;, _tensor_, _axis_]{.signature}
-
-Returns the specified axis of the tensor.
-
-_axis_ is an integer, starting at 1.
-
-```json example
-["Axis", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]], 2]
-// ➔ ["List", 1, 2, 3]
-```
-
-{% enddef %}
 
 
 
-
-## Transforming Matrixes and Tensors
+## Transforming Matrixes
 
 {% def "Flatten" %}
 
-[&quot;**Flatten**&quot;, _collection_]{.signature}
+[&quot;**Flatten**&quot;, _matrix_]{.signature}
 
-Returns a list of all the elements of the tensor or collection, recursively.
+Returns a list of all the elements of the matrix, recursively, in row-major
+order.
+
+This function can also be applied to any collection.
 
 Only elements with the same head as the collection are flattened.
-Tensors usually have a head of `List`, so only other `List` elements
+Matrixes have a head of `List`, so only other `List` elements
 are flattened.
 
-For a matrix, it returns a list of all the elements in the matrix, in row-major
-order.
 
 ```json example
 ["Flatten", ["List", ["List", 5, 2, 10, 18], ["List", 1, 2, 3]]]
 // ➔ ["List", 5, 2, 10, 18, 1, 2, 3]
 ```
 
-This is similar to the APL `,` Ravel operator or `numpy.ravel`
+`Flatten` is similar to the APL `,` Ravel operator or `numpy.ravel`
 [Numpy](https://numpy.org/doc/stable/reference/generated/numpy.ravel.html).
 
 {% enddef %}
 
 {% def "Reshape" %}
 
-[&quot;**Reshape**&quot;, _tensor_, _shape_]{.signature}
+[&quot;**Reshape**&quot;, _matrix_, _shape_]{.signature}
 
-Returns a tensor with the specified shape.
+Returns a matrix with the specified shape.
 
-_tensor_ can be a list, a matrix, a tensor or a collection.
+_matrix_ can be a list, a matrix, a tensor or a collection.
 
-_shape_ is a tuple of integers, one for each axis of the tensor.
+_shape_ is a tuple of integers, one for each axis of the result matrix.
 
-`Reshape` can be used to convert a list into a matrix.
+`Reshape` can be used to convert a list or collection into a matrix.
 
 ```json example
 ["Reshape", ["Range", 9], ["Tuple", 3, 3]]
@@ -318,8 +324,8 @@ If the result has fewer elements, the elements are dropped from the end of the
 element list. If the result has more elements, the lists of elements
 is filled cyclically. 
 
-This is a behavior to APL, but other environment may behave differently.
-For example, by default Mathematic `ArrayReshape` will fill the missing elements
+This is the same behavior as APL, but other environment may behave differently.
+For example, by default Mathematica `ArrayReshape` will fill the missing elements
 with zeros.
 
 
@@ -361,9 +367,9 @@ Also known as the Hermitian transpose.
 // ➔ ["List", ["List", 1, 4], ["List", 2, 5], ["List", 3, 6]]
 ```
 
-[&quot;**ConjugateTranspose**&quot;, _tensor_, _axis-1_, _axis-2_]{.signature}
+[&quot;**ConjugateTranspose**&quot;, _matrix_, _axis-1_, _axis-2_]{.signature}
 
-Swap the two specified axes of the tensor. Note that axis
+Swap the two specified axes of the _matrix_. Note that axis
 indexes start at 1. In addition, all the (complex) elements
 of the tensor are conjugated.
 
@@ -404,7 +410,8 @@ Returns the [Moore-Penrose pseudoinverse](https://en.wikipedia.org/wiki/Moore%E2
 
 [&quot;**Diagonal**&quot;, _matrix_]{.signature}
 
-Returns the diagonal of the matrix.
+Returns the diagonal of the matrix, that is the list of all the elements
+on the diagonal of the matrix.
 
 ```json example
 ["Diagonal", ["List", ["List", 1, 2], ["List", 3, 4]]]
@@ -413,7 +420,7 @@ Returns the diagonal of the matrix.
 
 {% enddef %}
 
-## Calculating with Matrixes and Tensors
+## Calculating with Matrixes
 
 
 {% def "Determinant" %}
