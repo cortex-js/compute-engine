@@ -428,7 +428,7 @@ export function boxFunction(
 
     if (dtype && shape) return new BoxedTensor(ce, { head, ops: boxedOps });
 
-    return makeCanonicalFunction(ce, head, boxedOps, options.metadata);
+    return ce._fn(head, boxedOps);
   }
 
   if (options.canonical)

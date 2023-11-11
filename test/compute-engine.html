@@ -128,9 +128,7 @@
     </header>
     <main>
       <div class="row">
-        <math-field id="mf" class="mathfield" tabindex="0"
-          >f(x) \coloneq 2x^2+1</math-field
-        >
+        <math-field id="mf" class="mathfield" tabindex="0">x+y+1</math-field>
         <button id="random">🎲</button>
       </div>
       <!-- <textarea id="json-input" class="input">["Add", 0, ["Range", 1, 10]]</textarea> -->
@@ -396,11 +394,11 @@
       const mf = document.getElementById("mf");
       const ce = MathfieldElement.computeEngine;
       ce.strict = true;
-      console.info(
-        ce.parse("\\operatorname{f} := x \\mapsto 2x").evaluate().toString()
-      );
+      // console.info(
+      //   ce.parse("\\operatorname{f} := x \\mapsto 2x").evaluate().toString()
+      // );
       // console.info(ce.parse("f(x) := 2x").evaluate().toString());
-      console.info(ce.box(["f", 3]).value);
+      // console.info(ce.box(["f", 3]).value);
       // console.info(ce.parse("f(3)").value);
 
       // ce.numericMode = "machine";
@@ -680,7 +678,7 @@
           );
         } catch (e) {
           console.error(
-            "format(%c " + latex + "%c, ['json']) " + e.toString(),
+            "symbols(%c " + expr.rawJson + "%c) " + e.toString(),
             "color: red;  background: hsla(0, 60%, 90%)",
             "background: transparent"
           );
@@ -688,15 +686,15 @@
 
         try {
           const unknowns = expr.unknowns;
-          if (unknowns.length === 1) {
-            const sols = expr.solve(unknowns[0]);
+          if (unknowns.length >= 1) {
+            const sols = expr.solve(unknowns.includes("x") ? "x" : unknowns[0]);
             if (sols && sols.length > 0) {
               updateLatex(sols.map((x) => x.latex).join(",,\\:"), "solve");
             }
           }
         } catch (e) {
           console.error(
-            "format(%c " + latex + "%c, ['json']) " + e.toString(),
+            "solve(%c " + expr.rawJson + "%c) " + e.toString(),
             "color: red;  background: hsla(0, 60%, 90%)",
             "background: transparent"
           );

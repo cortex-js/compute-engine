@@ -27,9 +27,10 @@ The `"___"` wildcard matches any sequence of 0 or more expressions in its
 corresponding position.
 
 A wildcard symbol may include a name which is used to _capture_ the matching
-expression. When using a named wildcard, all instances of the named wildcard
-must match. In contrast, an un-named wildcard (a universal wildcard such as
-`"_"` `"__"` or `"___"`) can be used multiple times to match different values.
+expression, for example `_1` or `_a`. When using a named wildcard, all 
+instances of the named wildcard must match. In contrast, an un-named wildcard 
+(a universal wildcard such as `"_"` `"__"` or `"___"`) can be used multiple 
+times to match different values.
 
 </section>
 
@@ -52,7 +53,7 @@ values is called a **substitution**.
 
 For example, the pattern `["Add", 3, "_c"]` becomes the expression
 `["Add", 3, "x"]` by replacing the wildcard `"_c"` with `"x"`. The substitution
-is `{"c" : "x"}`.
+is `{_c : "x"}`.
 
 On the other hand, the expression `["Divide", "x", 2]` does not match the
 pattern `["Add", 3, "_c"]`: no substitution exists to transform the expression
@@ -109,14 +110,14 @@ console.log(ce.box(["Add", '_a', '_a']).match(ce.box(["Add", 1, "x"])));
 // ➔ null
 
 console.log(ce.box(["Add", '_a', '_a']).match(ce.box(["Add", "x", "x"])));
-// ➔ { "a": "x" }
+// ➔ { _a: "x" }
 ```
 
 Wildcards can be used to capture the head of functions:
 
 ```js example
 console.log(ce.box(["_f", 1, "x"]).match(ce.box(["Add", 1, "x"])));
-// ➔ { "f": "Add" }
+// ➔ { _f: "Add" }
 ```
 
 </section>
@@ -131,24 +132,24 @@ from wildcard names to expressions.
 If there is no match, `match()` returns `null`.
 
 **To apply a substitution to a pattern**, and therefore recover the expression
-it was derived from, use the `substitute()` function.
+it was derived from, use the `subs()` function.
 
 ```js example
 const expression = ce.box(["Add", 1, "x"]);
 const pattern = ce.box(["Add", 1, "_a"]);
 
 console.log(pattern.match(expression));
-// ➔ { a: "x" }
+// ➔ { _a: "x" }
 
-expression.subs({ a: "x" }).print();
+expression.subs({ _a: "x" }).print();
 // ➔ ["Add", 1, "x"]
 ```
 
 </section>
 
-<section id="comparing">
+<section id="matching">
 
-## Comparing
+## Matching Patterns
 
 **To check if an expression matches a pattern**, use the `pattern.match()`
 function.

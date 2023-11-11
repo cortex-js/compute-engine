@@ -5,13 +5,16 @@
 <h3><strong>Cortex Compute Engine</strong></h3>
 <h1>Symbolic manipulation and numeric evaluation of MathJSON expressions</h1>
 
-[MathJSON](https://cortexjs.io/math-json/) is a lightweight mathematical notation interchange format based on JSON.
+[MathJSON](https://cortexjs.io/math-json/) is a lightweight mathematical
+notation interchange format based on JSON.
 
 The Cortex Compute Engine can parse LaTeX to MathJSON, serialize MathJSON to
 LaTeX, format, simplify and evaluate MathJSON expressions.
 
 Reference documentation and guides at
 [cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/).
+
+[![](https://dcbadge.vercel.app/api/server/yhmvVeJ4Hd)](https://discord.gg/yhmvVeJ4Hd)
 
 ## Using Compute Engine
 
@@ -20,9 +23,9 @@ $ npm install --save @cortex-js/compute-engine
 ```
 
 ```js
-import { parse, evaluate } from '@cortex-js/compute-engine';
+import { parse, evaluate } from "@cortex-js/compute-engine";
 
-const expr = parse('2^{11}-1 \\in \\P');
+const expr = parse("2^{11}-1 \\in \\P");
 
 console.log(expr);
 // ➔ ["Element", ["Subtract", ["Power", 2, 11] , 1], "PrimeNumber"]

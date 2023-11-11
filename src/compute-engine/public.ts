@@ -120,48 +120,49 @@ export type BoxedSubstitution = Substitution<BoxedExpression>;
  */
 export type LatexString = string;
 
+export type PatternReplaceFunction = (
+  expr: BoxedExpression,
+  wildcards: BoxedSubstitution
+) => BoxedExpression;
+
+export type PatternConditionFunction = (
+  wildcards: BoxedSubstitution,
+  ce: IComputeEngine
+) => boolean;
+
 /**
- *  A rule describes how to modify an expressions that matches a `lhs` pattern
- * into a new expressions matching `rhs`.
+ *  A rule describes how to modify an expressions that matches a pattern `match`
+ * into a new expression `replace`.
  *
  * `x-1` \( \to \) `1-x`
  * `(x+1)(x-1)` \( \to \) `x^2-1
  *
- * The `lhs` can be expressed as a LaTeX string or a MathJSON expression.
+ * The `match` pattern can be expressed as a LaTeX string or a MathJSON expression.
  *
- * Unbound variables (`x`, but not `Pi`) are matched structurally with a
- * a target expression, then the expression is rewritten as the `rhs`, with
- * the corresponding unbound variables in the `rhs` replaced by their values
- * in the `lhs.
  *
- * Pattern symbols (e.g. `_1`, `_a`) can be used as well.
+ * Anonymous wildcards (`_`) will match any
+ * expression. Named wildcards (`_x`, `_a`, etc...) will match any expression
+ * and bind the expression to the wildcard name.
  *
- * In addition:
- *  - `__1` (`__a`, etc..) match a sequence of one or more expressions
- *  - `___1` (`___a`, etc...) match a sequence of zero or more expressions
- *
- * @todo: use an object literal instead:
- * - match: SemiBoxedExpression | Pattern
- * - when: (wildcards: BoxedSubstitution) => boolean
- * - replace: SemiBoxedExpression | ((wildcards: BoxedSubstitution) => SemiBoxedExpression)
- * - priority?
- *
+ * In addition the sequence wildcard (`__1`, `__a`, etc...) will match a sequence
+ * of one or more expressions, and bind the sequence to the wildcard name.
  */
-export type Rule = [
-  lhs: LatexString | SemiBoxedExpression | Pattern,
-  rhs: LatexString | SemiBoxedExpression,
-  options?: {
-    condition?: LatexString | ((wildcards: BoxedSubstitution) => boolean);
-    priority?: number;
-  },
-];
 
-export type BoxedRule = [
-  lhs: Pattern,
-  rhs: BoxedExpression,
-  priority: number,
-  condition: undefined | ((wildcards: BoxedSubstitution) => boolean),
-];
+export type Rule = {
+  match: LatexString | SemiBoxedExpression | Pattern;
+  replace: LatexString | SemiBoxedExpression | PatternReplaceFunction;
+  condition?: LatexString | PatternConditionFunction;
+  priority?: number;
+  id?: string; // For debugging
+};
+
+export type BoxedRule = {
+  match: Pattern;
+  replace: BoxedExpression | PatternReplaceFunction;
+  condition: undefined | PatternConditionFunction;
+  priority: number;
+  id?: string; // For debugging
+};
 
 export type BoxedRuleSet = Set<BoxedRule>;
 

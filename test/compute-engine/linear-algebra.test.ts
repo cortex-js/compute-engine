@@ -61,12 +61,16 @@ const t234_x = [
 describe('Creating matrix', () => {
   it('should create a unit pmatrix', () => {
     const result = ce.box(['Diagonal', ['List', 1, 1, 1]]);
-    expect(result.toString()).toMatchInlineSnapshot(); // @todo
+    expect(result.toString()).toMatchInlineSnapshot(
+      `["Diagonal",["List",1,1,1]]`
+    ); // @todo
   });
 
   it('should create a diagonal pmatrix', () => {
     const result = ce.box(['Diagonal', ['List', 1, 2, 3]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(); // @todo
+    expect(result.toString()).toMatchInlineSnapshot(
+      `["Diagonal",["List",1,2,3]]`
+    ); // @todo
   });
 });
 
@@ -370,7 +374,9 @@ describe('Reshape', () => {
 
   it('should reshape a numeric vector, expanding it', () => {
     const result = ce.box(['Reshape', v7_n, ['Tuple', 3, 3]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `["List",["List",7,-2,11],["List",-5,13,-7],["List",17]]`
+    );
   }); // @todo. Should cycle the ravel
 
   it('should reshape a general vector', () => {

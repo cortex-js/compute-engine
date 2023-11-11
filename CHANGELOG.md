@@ -1,13 +1,44 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The syntax to describe rules has changed. The syntax for a rule was previously
+  a tuple `[lhs, rhs, {condition} ]`. The new syntax is an object with the
+  properties `match`, `replace` and `condition`. For example:
+
+  - previous syntax: `[["Add", "_x", "_x"], ["Multiply", 2, "_x"]]`
+  - new syntax: `{match: ["Add", "_x", "_x"], replace: ["Multiply", 2, "_x"]}]`
+
+  The `condition` property is optional, and is either a boxed function or a
+  JavaScript function. For example, to add a condition that cheks that `_x` is a
+  number literal:
+
+  ```
+  {
+    match: ["Add", "_x", "_x"],
+    replace: ["Multiply", 2, "_x"],
+    condition: (_x) => _x.numericValue !== null
+  }
+  ```
+
+### Work In Progress
+
+- Linear algebra functions: `Rank`, `Shape`,`Reshape`, `Flatten`, `Determinant`,
+  `Trace`, `Transpose`, `ConjugateTranspose`, `Inverse`. See the
+  [Linear Algebra](https://cortexjs.io/compute-engine/reference/linear-algebra/)
+  reference guide. Some of these function may not yet return correct result in
+  all cases.
+
 ### New Features
 
-- Implemented some linear algebra functions: `Rank`, `Shape`,`Reshape`,
-  `Flatten`, `Determinant`, `Trace`, `Transpose`, `ConjugateTranspose`,
-  `Inverse`. See the
-  [Linear Algebra](https://cortexjs.io/compute-engine/reference/linear-algebra/)
-  reference guide.
 - Added a `expr.print()` method as a synonym for `console.log(expr.toString())`.
+
+### Improvements
+
+- The equation solver used by `expr.solve()` has been improved and can now solve
+  more equations.
+- The pattern matching engine has been improved and can now match more
+  expressions, including sequences for commutative functions.
 
 ## 0.21.0
 

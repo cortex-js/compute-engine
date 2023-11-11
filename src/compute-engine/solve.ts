@@ -8,97 +8,265 @@ import { expand } from './symbolic/expand';
 // UNIVARIATE_ROOTS is a collection of rules that find the roots for
 // various expressions.
 //
-// The lhs pattern is a function of (x, a, b)
 //
 // @todo: MOAR RULES
-// x^2, x^2 + a,  a x^2 + b
 // \sin(x)...
 // polynomials...
 // a \sqrt{x} + b
 // a \ln x + b
-// a e^x + b
 //
 // cos x, acos x, n cos x + a
 
 // Set of rules to find the root(s) for `x`
 export const UNIVARIATE_ROOTS: Rule[] = [
-  // ax = 0
-  [['Multiply', '_x', '_a'], 0],
-  // x + a = 0
-  [
-    ['Add', '_a', '_x'],
-    ['Negate', '_a'],
-  ],
-  [['Add', ['Negate', '_x'], '_a'], '_a'],
-  // ax + b = 0
-  [
-    ['Add', ['Multiply', '_x', '_a'], '_b'],
-    ['Divide', ['Negate', '_b'], '_a'],
-  ],
+  // x = 0
+  { match: '_x', replace: 0 },
 
+  // ax = 0
+  { match: ['Multiply', '_x', '__a'], replace: 0 },
+
+  // x/a = 0
+  { match: ['Divide', '_x', '_a'], replace: 0 },
+
+  // x/a + b = 0
+  {
+    match: ['Add', ['Divide', '_x', '_a'], '__b'],
+    replace: ['Multiply', ['Negate', '_a'], '__b'],
+  },
+
+  // a/x = 0
+  { match: ['Divide', '_a', '_x'], replace: Infinity },
+
+  // x + a = 0
+  {
+    match: ['Add', '_x', '__a'],
+    replace: ['Negate', '__a'],
+    id: 'x + a',
+  },
+  { match: ['Add', ['Negate', '_x'], '__a'], replace: '__a' },
+
+  // ax + b = 0
+  {
+    match: ['Add', ['Multiply', '_x', '__a'], '__b'],
+    replace: ['Divide', ['Negate', '__b'], '__a'],
+  },
+
+  // x^n = 0
+  {
+    match: ['Power', '_x', '_n'],
+    replace: 0,
+  },
+
+  // x^n + c = 0
+  {
+    match: ['Add', ['Power', '_x', '_n'], '__c'],
+    replace: ['Power', ['Negate', '__c'], ['Divide', 1, '_n']],
+    id: 'x^n + c',
+  },
+
+  // ax^n + b = 0
+  {
+    match: ['Add', ['Multiply', '_a', ['Power', '_x', '_n']], '__b'],
+    replace: [
+      'Divide',
+      ['Power', ['Negate', '__b'], ['Divide', 1, '_n']],
+      '_a',
+    ],
+  },
+
+  //
   // Quadratic formula (real)
   // ax^2 + bx + c = 0
-  [
-    [
+  {
+    match: [
       'Add',
-      ['Multiply', ['Power', '_x', 2], '_a'],
-      ['Multiply', '_x', '_b'],
-      '_c',
+      ['Multiply', '__a', ['Power', '_x', 2]],
+      ['Multiply', '__b', '_x'],
+      '__c',
     ],
-    [
+    replace: [
       'Divide',
       [
         'Add',
-        ['Negate', '_b'],
-        ['Sqrt', ['Subtract', ['Square', '_b'], ['Multiply', 4, '_a', '_c']]],
+        ['Negate', '__b'],
+        [
+          'Sqrt',
+          ['Subtract', ['Square', '__b'], ['Multiply', 4, '__a', '__c']],
+        ],
       ],
-      ['Multiply', 2, '_a'],
+      ['Multiply', 2, '__a'],
     ],
     // (_ce, vars): boolean => vars.x.isReal === true,
-  ],
+  },
 
-  [
-    [
+  {
+    match: [
       'Add',
-      ['Multiply', ['Power', '_x', 2], '_a'],
-      ['Multiply', '_x', '_b'],
-      '_c',
+      ['Multiply', '__a', ['Power', '_x', 2]],
+      ['Multiply', '__b', '_x'],
+      '__c',
     ],
-    [
+    replace: [
       'Divide',
       [
         'Subtract',
-        ['Negate', '_b'],
-        ['Sqrt', ['Subtract', ['Square', '_b'], ['Multiply', 4, '_a', '_c']]],
+        ['Negate', '__b'],
+        [
+          'Sqrt',
+          ['Subtract', ['Square', '__b'], ['Multiply', 4, '__a', '__c']],
+        ],
       ],
-      ['Multiply', 2, '_a'],
+      ['Multiply', 2, '__a'],
     ],
     // (_ce, vars): boolean => vars.x.isReal === true,
-  ],
+  },
 
   // ax^2 + bx = 0
-  [
-    ['Add', ['Multiply', ['Power', '_x', 2], '_a'], ['Multiply', '_x', '_b']],
-    0,
+  {
+    match: [
+      'Add',
+      ['Multiply', ['Power', '_x', 2], '__a'],
+      ['Multiply', '_x', '__b'],
+    ],
+    replace: 0,
     // (_ce, vars): boolean => vars.x.isReal === true,
-  ],
-  [
-    ['Add', ['Multiply', ['Power', '_x', 2], '_a'], ['Multiply', '_x', '_b']],
-    ['Divide', ['Negate', '_b'], '_a'],
+  },
+  {
+    match: [
+      'Add',
+      ['Multiply', ['Power', '_x', 2], '__a'],
+      ['Multiply', '_x', '__b'],
+    ],
+    replace: ['Divide', ['Negate', '__b'], '__a'],
     // (_ce, vars): boolean => vars.x.isReal === true,
-  ],
+  },
 
-  // ax^2 + b = 0
-  [
-    ['Add', ['Multiply', ['Power', '_x', 2], '_a'], '_b'],
-    ['Sqrt', ['Divide', ['Negate', '_b'], '_a']],
+  // // ax^2 + c = 0
+  // {
+  //   match: ['Add', ['Multiply', ['Power', '_x', 2], '__a'], '__c'],
+  //   replace: ['Sqrt', ['Divide', ['Negate', '__c'], '__a']],
+  //   // (_ce, vars): boolean => vars.x.isReal === true,
+  // },
+  // {
+  //   match: ['Add', ['Multiply', ['Power', '_x', 2], '__a'], '__b'],
+  //   replace: ['Negate', ['Sqrt', ['Divide', ['Negate', '__b'], '__a']]],
+  //   // (_ce, vars): boolean => vars.x.isReal === true,
+  // },
+
+  // x^2 + bx + c = 0
+  {
+    match: ['Add', ['Power', '_x', 2], ['Multiply', '__b', '_x'], '__c'],
+    replace: [
+      'Divide',
+      [
+        'Add',
+        ['Negate', '__b'],
+        ['Sqrt', ['Subtract', ['Square', '__b'], ['Multiply', 4, '__c']]],
+      ],
+      2,
+    ],
     // (_ce, vars): boolean => vars.x.isReal === true,
-  ],
-  [
-    ['Add', ['Multiply', ['Power', '_x', 2], '_a'], '_b'],
-    ['Negate', ['Sqrt', ['Divide', ['Negate', '_b'], '_a']]],
+  },
+
+  {
+    match: ['Add', ['Power', '_x', 2], ['Multiply', '__b', '_x'], '__c'],
+    replace: [
+      'Divide',
+      [
+        'Subtract',
+        ['Negate', '__b'],
+        ['Sqrt', ['Subtract', ['Square', '__b'], ['Multiply', 4, '__c']]],
+      ],
+      2,
+    ],
     // (_ce, vars): boolean => vars.x.isReal === true,
-  ],
+  },
+
+  // x^2 + bx = 0
+  {
+    match: ['Add', ['Power', '_x', 2], ['Multiply', '__b', '_x']],
+    replace: 0,
+    // (_ce, vars): boolean => vars.x.isReal === true,
+    id: 'x^2 + bx -> 0',
+  },
+
+  {
+    match: ['Add', ['Power', '_x', 2], ['Multiply', '__b', '_x']],
+    replace: ['Negate', '__b'],
+    // (_ce, vars): boolean => vars.x.isReal === true,
+    id: 'x^2 + bx -> -b',
+  },
+
+  // a * e^(bx) + c = 0
+  {
+    match: [
+      'Add',
+      ['Multiply', '__a', ['Exp', ['Multiply', '__b', '_x']]],
+      '__c',
+    ],
+    replace: ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
+    condition: ({ __a, __c }, ce) =>
+      (!__a.isZero && ce.div(__c, __a).isNegative) ?? false,
+  },
+
+  // a * e^(x) + c = 0
+  {
+    match: ['Add', ['Multiply', '__a', ['Exp', '_x']], '__c'],
+    replace: ['Ln', ['Negate', ['Divide', '__c', '__a']]],
+    condition: ({ __a, __c }, ce) =>
+      (!__a.isZero && ce.div(__c, __a).isNegative) ?? false,
+  },
+
+  // e^(x) + c = 0
+  {
+    match: ['Add', ['Exp', '_x'], '__c'],
+    replace: ['Ln', ['Negate', '__c']],
+    condition: ({ __c }) => __c.isNegative ?? false,
+  },
+
+  // e^(bx) + c = 0
+  {
+    match: ['Add', ['Exp', ['Multiply', '__b', '_x']], '__c'],
+    replace: ['Divide', ['Ln', ['Negate', '__c']], '__b'],
+    condition: ({ __c }) => __c.isNegative ?? false,
+  },
+
+  // // a * log_b(x) + c = 0
+  // {
+  //   match: ['Add', ['Multiply', '__a', ['Log', '_x', '__b']], '__c'],
+  //   replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
+  //   condition: ({ __a, __b }) => (!__a.isZero && __b.isPositive) ?? false,
+  // },
+
+  // // a * log_b(x) = 0
+  // {
+  //   match: ['Multiply', '__a', ['Log', '_x', '__b']],
+  //   replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
+  //   condition: ({ __a, __b }) => (!__a.isZero && __b.isPositive) ?? false,
+  // },
+
+  // |ax + b| + c = 0
+  {
+    match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
+    replace: ['Divide', ['Subtract', '__b', '__c'], '__a'],
+  },
+  {
+    match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
+    replace: ['Divide', ['Negate', ['Add', '__b', '__c'], '__a']],
+  },
+
+  // // x^2 + c = 0
+  // {
+  //   match: ['Add', ['Power', '_x', 2], '__c'],
+  //   replace: ['Power', ['Negate', '__c'], 'Half'],
+  //   // (_ce, vars): boolean => vars.x.isReal === true,
+  // },
+
+  // {
+  //   match: ['Add', ['Power', '_x', 2], '__c'],
+  //   replace: ['Negate', ['Power', ['Negate', '__c'], 'Half']],
+  //   // (_ce, vars): boolean => vars.x.isReal === true,
+  // },
 
   // Quadratic formula (complex)
   // [
@@ -147,7 +315,7 @@ export function findUnivariateRoots(
     );
   }
 
-  return result.map((x) => x.canonical.evaluate());
+  return result.map((x) => x.evaluate());
 }
 
 /** Expr is an equation with a head of
@@ -161,7 +329,6 @@ export function univariateSolve(
   expr: BoxedExpression,
   x: string
 ): SemiBoxedExpression[] | null {
-  console.log('univariateSolve', expr.toString(), x);
   const ce = expr.engine;
   const name = expr.head;
   if (name === 'And') {

@@ -82,15 +82,21 @@ function exprToStringRecursive(expr, start) {
     return `[\n${indent}  ${elements.join(`,\n${indent}  `)}\n${indent}]`;
   }
   if (expr === null) return 'null';
+  if (expr instanceof _BoxedExpression)
+    return exprToStringRecursive(expr.json, start);
   if (typeof expr === 'object') {
     const elements = {};
 
     for (const key of Object.keys(expr)) {
-      if (expr[key] instanceof _BoxedExpression)
+      if (expr[key] instanceof _BoxedExpression) {
         elements[key] = exprToStringRecursive(expr[key].json, start + 2);
-      else if (typeof expr[key] === 'object' && 'json' in expr[key])
+      } else if (expr[key] === null) {
+        elements[key] = 'null';
+      } else if (expr[key] === undefined) {
+        elements[key] = 'undefined';
+      } else if (typeof expr[key] === 'object' && 'json' in expr[key]) {
         elements[key] = exprToStringRecursive(expr[key].json, start + 2);
-      else elements[key] = exprToStringRecursive(expr[key], start + 2);
+      } else elements[key] = exprToStringRecursive(expr[key], start + 2);
     }
 
     const result = `{${Object.keys(expr)

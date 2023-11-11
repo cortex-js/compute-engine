@@ -6,6 +6,7 @@ import {
   BoxedRuleSet,
   ReplaceOptions,
   BoxedSubstitution,
+  PatternConditionFunction,
 } from './public';
 import { latexString } from './boxed-expression/utils';
 
@@ -42,44 +43,74 @@ export function matchRules(
 
 export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
   const result = new Set<BoxedRule>();
-  for (const [rawLhs, rawRhs, options] of rs) {
+  for (const { match, replace, condition, priority, id } of rs) {
     // Normalize the condition to a function
-    let cond: undefined | ((x: BoxedSubstitution) => boolean);
-    const latex = latexString(options?.condition);
-    if (latex) {
-      // Substitute any unbound vars in the condition to a wildcard
-      const condPattern = ce.pattern(latex);
-      cond = (x: BoxedSubstitution): boolean =>
-        condPattern.subs(x).evaluate()?.symbol === 'True';
-    } else cond = options?.condition as (x: BoxedSubstitution) => boolean;
+    let condFn: undefined | PatternConditionFunction;
+    if (typeof condition === 'string') {
+      const latex = latexString(condition);
+      if (latex) {
+        // Substitute any unbound vars in the condition to a wildcard
+        const condPattern = ce.pattern(latex);
+        condFn = (x: BoxedSubstitution, _ce: IComputeEngine): boolean =>
+          condPattern.subs(x).evaluate()?.symbol === 'True';
+      }
+    } else condFn = condition;
 
-    result.add([
-      ce.pattern(rawLhs),
-      ce.pattern(rawRhs),
-      options?.priority ?? 0,
-      cond,
-    ]);
+    result.add({
+      match: ce.pattern(match),
+      replace: typeof replace === 'function' ? replace : ce.pattern(replace),
+      priority: priority ?? 0,
+      condition: condFn,
+      // id:
+      //   id ??
+      //   ce.box(match, { canonical: false }).toString() +
+      //     (typeof replace === 'function'
+      //       ? '  ->  function'
+      //       : '  ->  ' + ce.box(replace, { canonical: false }).toString()),
+    });
   }
   return result;
 }
 
 function applyRule(
-  [lhs, rhs, _priority, condition]: BoxedRule,
+  { match, replace, condition, id }: BoxedRule,
   expr: BoxedExpression,
   substitution: BoxedSubstitution,
   options?: ReplaceOptions
 ): BoxedExpression | null {
-  const sub = lhs.match(expr, { substitution, ...options });
+  // console.info('applyRule', id);
+
+  const sub = match.match(expr, { substitution, ...options });
   // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return null;
 
   // If the condition doesn't match, the rule doesn't apply
-  if (typeof condition === 'function' && !condition(sub)) return null;
+  if (typeof condition === 'function' && !condition(sub, expr.engine))
+    return null;
 
   // @debug
-  // console.log('Applying rule ', lhs.latex, '->', rhs.latex);
-
-  return rhs.subs(sub, { canonical: true });
+  // if (typeof replace === 'function')
+  //   console.info('Applying rule ', match.toString(), '->', 'function');
+  // else
+  //   console.info('Applying rule ', match.toString(), '->', replace.toString());
+  // console.info(
+  //   'with substitution',
+  //   Object.entries(sub)
+  //     .map(([k, v]) => `${k} -> ${v.toString()}`)
+  //     .join(', ')
+  // );
+  // console.info(
+  //   'applying rule',
+  //   id,
+  //   'to',
+  //   expr.toString(),
+  //   'with',
+  //   Object.keys(sub)
+  //     .map((x) => `${x} -> ${sub[x].toString()}`)
+  //     .join(', ')
+  // );
+  if (typeof replace === 'function') return replace(expr, sub);
+  return replace.subs(sub, { canonical: true });
 }
 
 /**
@@ -117,69 +148,6 @@ export function replace(
     console.error(e);
   }
   return atLeastOneRule ? expr : null;
-}
-
-/**
- * Substitute some symbols with an expression.
- *
- * This is applied recursively to all subexpressions.
- *
- * While `replace()` applies a rule which may include expressions in
- * its `lhs` to an expression, `substitute` is a specialized version
- * that only apply rules that have a `lhs` made of a symbol.
- */
-// export function substitute(
-//   expr: BoxedExpression,
-//   substitution: Substitution
-// ): Pattern {
-//   //
-//   // Symbol
-//   //
-//   const symbol = expr.symbol;
-//   if (symbol !== null) return expr.engine.pattern(substitution[symbol] ?? expr);
-
-//   const ce = expr.engine;
-
-//   //
-//   // Dictionary
-//   //
-//   const keys = expr.keys;
-//   if (keys !== null) {
-//     const result = {};
-//     for (const key of keys) result[key] = substitute(keys[key], substitution);
-
-//     return ce.pattern({ dict: result });
-//   }
-
-//   // Not a function (or a dictionary or a symbol) => atomic
-//   if (expr.ops === null) return ce.pattern(expr);
-
-//   //
-//   // Function
-//   //
-//   const tail: SemiBoxedExpression = [];
-//   for (const arg of expr.ops) {
-//     const symbol = arg.symbol;
-//     if (symbol !== null && symbol.startsWith('__')) {
-//       // Wildcard sequence: `__` or `___`
-//       const seq = substitution[getWildcardName(symbol)];
-//       if (seq === undefined || seq.head !== 'Sequence') {
-//         tail.push(symbol);
-//       } else {
-//         tail.push(...seq.ops!);
-//       }
-//     } else {
-//       tail.push(substitute(arg, substitution));
-//     }
-//   }
-
-//   return ce.pattern(ce.fn(substitute(ce.box(expr.head), substitution), tail));
-// }
-
-export function getWildcardName(s: string): string {
-  const m = s.match(/^(__?_?[a-zA-Z0-9]+)/);
-  if (m === null) return '';
-  return m[1];
 }
 
 // @todo ['Alternatives', ...]:

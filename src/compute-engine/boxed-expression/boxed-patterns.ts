@@ -1,6 +1,5 @@
 import { Expression } from '../../math-json/math-json-format';
 import { NUMERIC_TOLERANCE } from '../numerics/numeric';
-import { getWildcardName } from '../rules';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
@@ -121,21 +120,22 @@ function captureWildcard(
   expr: BoxedExpression,
   substitution: BoxedSubstitution
 ): BoxedSubstitution | null {
-  const name = getWildcardName(wildcard);
+  console.assert(wildcard.startsWith('_'));
 
   // If this is a universal wildcard, it always matches and no need to add it
   // to the substitution record.
-  if (name === '') return substitution;
+  if (wildcard === '_' || wildcard === '__' || wildcard === '___')
+    return substitution;
 
-  if (substitution[name] !== undefined) {
+  if (wildcard in substitution) {
     // There was already a matching wildcard, make sure this one is identical
-    if (!expr.isSame(substitution[name])) return null;
+    if (!expr.isSame(substitution[wildcard])) return null;
     return substitution;
   }
 
   if (hasWildcards(expr)) return null;
 
-  return { ...substitution, [name]: expr };
+  return { ...substitution, [wildcard]: expr };
 }
 
 /**
@@ -187,9 +187,6 @@ function matchOnce(
     return symbol === expr.symbol ? substitution : null;
   }
 
-  // If the number of operands or keys don't match, it's not a match
-  if (pattern.nops !== expr.nops) return null;
-
   //
   // Match a dictionary
   //
@@ -232,63 +229,14 @@ function matchOnce(
     }
 
     return def?.commutative
-      ? matchCommutativeArguments(expr, pattern, substitution, options)
-      : matchNonCommutativeArguments(expr, pattern, substitution, options);
+      ? matchPermutation(expr, pattern, substitution, options)
+      : matchArguments(expr, pattern.ops, substitution, options);
   }
 
   return null; // no match
 }
 
 function matchPermutation(
-  ce: IComputeEngine,
-  ops: BoxedExpression[],
-  patterns: BoxedExpression[],
-  substitution: BoxedSubstitution,
-  options: { numericTolerance: number }
-): BoxedSubstitution | null {
-  let result: BoxedSubstitution = { ...substitution };
-
-  ops = [...ops];
-
-  // Iterate over each argument in pattern
-  let hasRest = false;
-  for (const arg of patterns) {
-    if (arg.symbol === '__') hasRest = true;
-    else {
-      let r: BoxedSubstitution | null = null;
-      if (arg.symbol?.startsWith('_')) {
-        for (let i = 0; i <= ops.length - 1; i++) {
-          r = captureWildcard(arg.symbol, ops[i], result);
-          if (r !== null) {
-            // Found a matching argument, remove it
-            ops.splice(i, 1);
-            break;
-          }
-        }
-      } else {
-        for (let i = 0; i <= ops.length - 1; i++) {
-          r = matchOnce(ops[i], arg, result, options);
-          if (r !== null) {
-            ops.splice(i, 1);
-            break;
-          }
-        }
-      }
-      if (r === null) return null;
-      result = r;
-    }
-  }
-
-  // If not all ops matched, and we don't have a 'rest' capture, fail
-  if (!hasRest && ops.length > 0) return null;
-
-  //  If the pattern included a 'rest' pattern, use any remaining arguments
-  if (result !== null && hasRest) result['__'] = ce._fn('Sequence', ops);
-
-  return result;
-}
-
-function matchCommutativeArguments(
   expr: BoxedExpression,
   pattern: BoxedExpression,
   substitution: BoxedSubstitution,
@@ -296,71 +244,83 @@ function matchCommutativeArguments(
 ): BoxedSubstitution | null {
   const patterns = permutations<BoxedExpression>(pattern.ops!);
   for (const pat of patterns) {
-    const result = matchPermutation(
-      expr.engine,
-      expr.ops!,
-      pat,
-      substitution,
-      options
-    );
+    const result = matchArguments(expr, pat, substitution, options);
     if (result !== null) return result;
   }
   return null;
 }
 
-function matchNonCommutativeArguments(
+function matchArguments(
   expr: BoxedExpression,
-  pattern: BoxedExpression,
+  patterns: BoxedExpression[],
   substitution: BoxedSubstitution,
   options: { numericTolerance: number }
 ): BoxedSubstitution | null {
-  const ce = expr.engine;
-  const ops = [...expr.ops!];
+  if (patterns.length === 0) return null;
+
+  const ce = patterns[0].engine;
   let result: BoxedSubstitution | null = { ...substitution };
+
+  // We're going to consume the ops array, so make a copy
+  const ops = [...expr.ops!];
+
   let i = 0; // Index in pattern
-  const patterns = pattern.ops!; // pattern.ops!.map((x) => ce.pattern(x));
-  while (i < pattern.nops) {
+
+  while (i < patterns.length) {
     const pat = patterns[i];
     const argName = pat.symbol;
+
     if (argName !== null) {
       if (argName.startsWith('__')) {
         // Match 0 or more expressions (__) or 1 or more (___)
         let j = 0; // Index in subject
         if (patterns[i + 1] === undefined) {
-          // No more args after, go till the end
+          // No more args in the pattern after, go till the end
           j = ops.length + 1;
         } else {
-          // Capture till the next matching arg
+          // Capture till the next matching arg in the pattern
           let found = false;
           while (!found && j < ops.length) {
             found =
               matchOnce(ops[j], patterns[i + 1], result, options) !== null;
             j += 1;
           }
-          if (!found) return null;
+          if (!found && argName.startsWith('___')) return null;
         }
+
+        // Unless we had a optional wildcard (matching 0 or more), we must have
+        // found at least one match
         if (!argName.startsWith('___') && j <= 1) return null;
-        result = captureWildcard(
-          argName,
-          ce.fn('Sequence', ops.splice(0, j - 1)),
-          result
-        );
+
+        // Determine the value to return for the wildcard
+        let value: BoxedExpression;
+        if (j <= 1) {
+          if (expr.head === 'Add') value = ce.number(0);
+          else if (expr.head === 'Multiply') value = ce.number(1);
+          else value = ce.box(['Sequence']);
+        } else value = ce.fn(expr.head, ops.splice(0, j - 1));
+
+        result = captureWildcard(argName, value, result);
       } else if (argName.startsWith('_')) {
+        // Match a single expression
         result = captureWildcard(argName, ops.shift()!, result);
       } else {
-        const sub = matchOnce(ops.shift()!, pat, result, options);
-        if (sub === null) return null;
-        result = sub;
+        result = matchOnce(ops.shift()!, pat, result, options);
+        if (result === null) return null;
       }
     } else {
-      const sub = matchOnce(ops.shift()!, pat, result, options);
-      if (sub === null) return null;
-      result = sub;
+      const arg = ops.shift()!;
+      if (!arg) return null;
+      result = matchOnce(arg, pat, result, options);
+      if (result === null) return null;
     }
 
     if (result === null) return null;
     i += 1;
   }
+  // If there are some arguments left in the subject that were not matched, it's
+  // not a match
+  if (ops.length > 0) return null;
 
   return result;
 }
@@ -409,22 +369,3 @@ function match(
 
   return null;
 }
-
-// function boxedSubstitution(ce: IComputeEngine, sub: null): null;
-// function boxedSubstitution(
-//   ce: IComputeEngine,
-//   sub: Substitution
-// ): BoxedSubstitution;
-// function boxedSubstitution(
-//   ce: IComputeEngine,
-//   sub: Substitution | null
-// ): BoxedSubstitution | null;
-// function boxedSubstitution(
-//   ce: IComputeEngine,
-//   sub: Substitution | null
-// ): BoxedSubstitution | null {
-//   if (sub === null) return null;
-//   return Object.fromEntries(
-//     Object.entries(sub).map(([k, v]) => [k, ce.box(v)])
-//   );
-// }
