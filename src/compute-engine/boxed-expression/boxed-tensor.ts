@@ -45,7 +45,7 @@ export class BoxedTensor
 
   bind(): void {}
 
-  reset(): undefined {}
+  reset(): void {}
 
   get hash(): number {
     let h = hashCode('BoxedArray');
