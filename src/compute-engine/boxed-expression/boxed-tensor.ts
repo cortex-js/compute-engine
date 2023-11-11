@@ -179,6 +179,14 @@ export class BoxedTensor extends _BoxedExpression {
     return this.expression.op3;
   }
 
+  get shape(): number[] {
+    return this.tensor.shape;
+  }
+
+  get rank(): number {
+    return this.tensor.rank;
+  }
+
   get domain(): BoxedDomain | undefined {
     if (this._tensor) return this.engine.domain('Lists');
     return this.expression.domain;

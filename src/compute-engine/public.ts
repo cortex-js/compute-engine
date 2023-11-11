@@ -831,10 +831,24 @@ export interface BoxedExpression {
    * Note it is possible for `numericValue` to be `null`, and for `isNotZero`
    * to be true. For example, when a symbol has been defined with an assumption.
    *
+   * Conversely, `isNumber` may be true even if `numericValue` is `null`,
+   * example the symbol `Pi` return true for `isNumber` but `numericValue` is
+   * `null`. It's value can be accessed with `.value.numericValue`
+   *
    * @category Numeric Expression
    *
    */
   readonly numericValue: number | Decimal | Complex | Rational | null;
+
+  /** The shape describes the axis of the expression.
+   * When the expression is a scalar (number), the shape is `[]`.
+   * When the expression is a vector, the shape is `[n]`.
+   * When the expression is a matrix, the shape is `[n, m]`.
+   */
+  readonly shape: number[];
+
+  /** Return 0 for a scalar, 1 for a vector, 2 for a matrix, > 2 for a multidimensional matrix. It's the length of `expr.shape` */
+  readonly rank: number;
 
   /**
    * Return the following, depending on the value of this expression:

@@ -299,6 +299,14 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
+  get shape(): number[] {
+    return [];
+  }
+
+  get rank(): number {
+    return 0;
+  }
+
   get sgn(): -1 | 0 | 1 | undefined | null {
     return null;
   }
