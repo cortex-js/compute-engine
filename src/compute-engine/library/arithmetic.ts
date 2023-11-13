@@ -560,6 +560,21 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       },
     },
 
+    PlusMinus: {
+      description: 'Plus or Minus',
+      wikidata: 'Q120812',
+      complexity: 1200,
+      involution: true,
+
+      signature: {
+        domain: ['FunctionOf', 'Values', 'Tuples'],
+        evaluate: (ce, ops) => {
+          if (ops.length !== 1) return undefined;
+          return ce.fn('Pair', [ops[0], ce.neg(ops[0])]);
+        },
+      },
+    },
+
     Power: {
       wikidata: 'Q33456',
       commutative: false,

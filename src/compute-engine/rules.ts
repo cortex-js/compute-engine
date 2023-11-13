@@ -11,8 +11,8 @@ import {
 import { latexString } from './boxed-expression/utils';
 
 /**
- * Go through all the rules in the rule set, and for all the rules that match
- * return the rhs of the rule applied to `expr`.
+ * For each rules in the rule set that match, return the `replace` of the rule
+ *
  * @param rules
  */
 export function matchRules(
@@ -20,12 +20,16 @@ export function matchRules(
   rules: BoxedRuleSet,
   sub: BoxedSubstitution
 ): BoxedExpression[] {
-  const result: BoxedExpression[] = [];
+  const results: BoxedExpression[] = [];
   for (const rule of rules) {
     const r = applyRule(rule, expr, sub);
-    if (r !== null) result.push(r);
+    if (r === null) continue;
+    // Verify that the results are unique
+    if (results.some((x) => x.isEqual(r))) continue;
+    results.push(r);
   }
-  return result;
+
+  return results;
 }
 
 // @future Generator functions
@@ -41,8 +45,15 @@ export function matchRules(
 
 // @future: priority for rules, sort and apply rules by priority
 
+/**
+ * Create a boxed rule set from a non-boxed rule set
+ * @param ce
+ * @param rs
+ * @returns
+ */
 export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
   const result = new Set<BoxedRule>();
+
   for (const { match, replace, condition, priority, id } of rs) {
     // Normalize the condition to a function
     let condFn: undefined | PatternConditionFunction;
@@ -61,17 +72,25 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
       replace: typeof replace === 'function' ? replace : ce.pattern(replace),
       priority: priority ?? 0,
       condition: condFn,
-      // id:
-      //   id ??
-      //   ce.box(match, { canonical: false }).toString() +
-      //     (typeof replace === 'function'
-      //       ? '  ->  function'
-      //       : '  ->  ' + ce.box(replace, { canonical: false }).toString()),
+      id:
+        id ??
+        ce.box(match, { canonical: false }).toString() +
+          (typeof replace === 'function'
+            ? '  ->  function'
+            : '  ->  ' + ce.box(replace, { canonical: false }).toString()),
     });
   }
   return result;
 }
 
+/**
+ * Apply a rule to an expression, assuming an incoming substitution
+ * @param param0 the rule to apply
+ * @param expr the expression to apply the rule to
+ * @param substitution an incoming substitution
+ * @param options
+ * @returns A transformed expression, if the rule matched. `null` otherwise.
+ */
 function applyRule(
   { match, replace, condition, id }: BoxedRule,
   expr: BoxedExpression,
@@ -81,6 +100,7 @@ function applyRule(
   // console.info('applyRule', id);
 
   const sub = match.match(expr, { substitution, ...options });
+
   // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return null;
 

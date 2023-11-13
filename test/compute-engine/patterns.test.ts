@@ -15,20 +15,12 @@ function pattern(p: Expression) {
 }
 
 function match(pattern: Pattern, expr: Expression): Substitution | null {
-  const result = pattern.match(engine.box(expr));
+  const result = pattern.match(engine.box(expr), {});
   if (result === null) return null;
   const r = {};
   for (const key of Object.keys(result)) r[key] = result[key].toString();
   return r;
 }
-
-// console.info(
-//   pattern(['Add', 1, 2, '___a', 3]).match(engine.box(['Add', 1, 2, 3]))
-// );
-
-const sub = pattern(['Multiply', 1, 2, '___a', 3]).match(
-  engine.box(['Multiply', 1, 2, 3], { canonical: false })
-);
 
 describe('PATTERNS  MATCH - Universal wildcard', () => {
   // Return not null (i.e. `{}`) when there is a match
@@ -225,4 +217,71 @@ describe('WILDCARDS', () => {
   //   const result = pattern.match(-1);
   //   expect(result).toBeNull();
   // });
+});
+
+// Some operations (add, multiply) can accept variations on patterns.
+// For example, "ax+b" can match "ax" or "x+b".
+describe('NON EXACT WILDCARDS', () => {
+  const match = (pattern, x) =>
+    pattern.match(ce.box(x), { substitution: { _x: ce.box('_x') } });
+
+  it('should match x for a + x', () => {
+    const pattern = ce.pattern(['Add', '_a', '_x']);
+    const result = match(pattern, '_x');
+    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: 0}`);
+  });
+
+  it('should match x - a for a + x', () => {
+    const pattern = ce.pattern(['Add', '_a', '_x']);
+    const result = match(pattern, ['Subtract', '_x', 5]);
+    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: -5}`);
+  });
+
+  it('should match x for x - a', () => {
+    const pattern = ce.pattern(['Subtract', '_x', '_a']);
+    const result = match(pattern, '_x');
+    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: 0}`);
+  });
+
+  it('should match -x for a - x', () => {
+    const pattern = ce.pattern(['Subtract', '_a', '_x']);
+    const result = match(pattern, ['Negate', '_x']);
+    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: 0}`);
+  });
+
+  it('should match x for ax', () => {
+    const pattern = ce.pattern(['Multiply', '_a', '_x']);
+    const result = match(pattern, '_x');
+    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: 1}`);
+  });
+
+  it('should match x/a for ax', () => {
+    const pattern = ce.pattern(['Multiply', '_a', '_x']);
+    const result = match(pattern, ['Divide', '_x', '2']);
+    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: "Half"}`);
+  });
+
+  it('should match -x for ax', () => {
+    const pattern = ce.pattern(['Multiply', '_a', '_x']);
+    const result = match(pattern, ['Negate', '_x']);
+    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: -1}`);
+  });
+
+  it('should match x/a for x', () => {
+    const pattern = ce.pattern(['Divide', '_x', '_a']);
+    const result = match(pattern, '_x');
+    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: 1}`);
+  });
+
+  it('should match a sequence with multiple potential zeros', () => {
+    const pattern = ce.pattern(['Add', '_a', ['Multiply', '_a', '_b']]);
+    const result = pattern.match(ce.number(1));
+    expect(result).toMatchInlineSnapshot(`{_a: 1; _b: 0}`);
+  });
+
+  it('should match a sequence with multiple potential zeros', () => {
+    const pattern = ce.pattern(['Add', '___b', ['Multiply', '_a', '_b']]);
+    const result = pattern.match(ce.number(1));
+    expect(result).toMatchInlineSnapshot(`{_a: 1; _b: 0; ___b: 1}`);
+  });
 });

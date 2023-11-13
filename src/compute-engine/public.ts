@@ -1306,6 +1306,14 @@ export type SemiBoxedExpression =
   | SemiBoxedExpression[]
   | BoxedExpression;
 
+/**
+ * Control how a pattern is matched to an expression.
+ *
+ * - `substitution`: if present, assumes these values for the named wildcards, and ensure that subsequent occurence of the same wildcard have the same value.
+ * - `recursive`: if true, match recursively, otherwise match only the top level.
+ * - `numericTolerance`: if present, the tolerance for numeric comparison.
+ * - `exact`: if true, only match expressions that are structurally identical. If false, match expressions that are structurally identical or equivalent. For example, when false, `["Add", '_a', 2]` matches `2`, with a value of `_a` of `0`. If true, the expression does not match.
+ */
 export type PatternMatchOptions = {
   substitution?: BoxedSubstitution;
   recursive?: boolean;

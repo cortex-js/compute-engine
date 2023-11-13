@@ -32,6 +32,10 @@
 ### New Features
 
 - Added a `expr.print()` method as a synonym for `console.log(expr.toString())`.
+- Added an `exact` option (false by default) to the `expr.match()` pattern
+  matching method. When `true` some additional patterns are automatically
+  recognized, for example, `x` will match `["Multiply", '_a', 'x']` when `exact`
+  is `false`, but not when `exact` is `true`.
 
 ### Improvements
 

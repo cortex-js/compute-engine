@@ -78,6 +78,7 @@ export class BoxedPattern extends _BoxedExpression implements Pattern {
       recursive: options?.recursive ?? false,
       numericTolerance: options?.numericTolerance ?? 0,
       substitution: options?.substitution ?? {},
+      exact: options?.exact ?? false,
     });
   }
 
@@ -151,12 +152,16 @@ function matchOnce(
   expr: BoxedExpression,
   pattern: BoxedExpression,
   substitution: BoxedSubstitution,
-  options: { numericTolerance: number }
+  options: {
+    numericTolerance: number;
+    exact?: boolean;
+  }
 ): BoxedSubstitution | null {
+  const exact = options.exact ?? false;
   const ce = expr.engine;
 
   if (pattern.head === 'Pattern')
-    return pattern.match(expr, { substitution, ...options });
+    return pattern.match(expr, { ...options, ...substitution });
 
   //
   // Match a number
@@ -177,7 +182,7 @@ function matchOnce(
   if (str !== null) return expr.string === str ? substitution : null;
 
   //
-  // Match a symbol or capture symbol
+  // Match a symbol or wildcard
   //
   const symbol = pattern.symbol;
   if (symbol !== null) {
@@ -215,7 +220,103 @@ function matchOnce(
 
     let def: BoxedFunctionDefinition | undefined = undefined;
     if (typeof head === 'string' && typeof expr.head === 'string') {
-      if (head !== expr.head) return null;
+      if (head !== expr.head) {
+        // The heads did not match and we want an exact match: bail
+        if (exact) return null;
+
+        // Let's try some variants...
+
+        if (head === 'Add') {
+          // a+x -> x
+          let result = matchOnce(
+            ce.box(['Add', 0, expr], { canonical: false }),
+            pattern,
+            substitution,
+            options
+          );
+          if (result !== null) return result;
+
+          // a+x -> a-(-x)
+          if (expr.head === 'Subtract') {
+            result = matchOnce(
+              ce.box(['Add', expr.op1!, ['Negate', expr.op2!]], {
+                canonical: false,
+              }),
+              pattern,
+              substitution,
+              options
+            );
+          }
+          if (result !== null) return result;
+        }
+
+        if (head === 'Subtract') {
+          let result = matchOnce(
+            ce.box(['Subtract', expr, 0], { canonical: false }),
+            pattern,
+            substitution,
+            options
+          );
+          if (result !== null) return result;
+
+          if (expr.head === 'Negate') {
+            result = matchOnce(
+              ce.box(['Subtract', 0, expr.op1!], { canonical: false }),
+              pattern,
+              substitution,
+              options
+            );
+          }
+          if (result !== null) return result;
+        }
+
+        if (head === 'Multiply') {
+          // ax -> x
+          let result = matchOnce(
+            ce.box(['Multiply', 1, expr], { canonical: false }),
+            pattern,
+            substitution,
+            options
+          );
+          if (result !== null) return result;
+
+          // ax -> -x
+          if (expr.head === 'Negate') {
+            result = matchOnce(
+              ce.box(['Multiply', -1, expr.op1!], { canonical: false }),
+              pattern,
+              substitution,
+              options
+            );
+            if (result !== null) return result;
+          }
+
+          // ax -> x/a
+          if (expr.head === 'Divide') {
+            result = matchOnce(
+              ce.box(['Multiply', expr.op1!, ['Divide', 1, expr.op2!]], {
+                canonical: false,
+              }),
+              pattern,
+              substitution,
+              options
+            );
+            if (result !== null) return result;
+          }
+        }
+
+        if (head === 'Divide') {
+          const result = matchOnce(
+            ce.box(['Divide', expr, 1], { canonical: false }),
+            pattern,
+            substitution,
+            options
+          );
+          if (result !== null) return result;
+        }
+
+        return null;
+      }
       def = ce.lookupFunction(head);
     } else {
       const r = matchOnce(
@@ -338,11 +439,7 @@ function matchArguments(
 function match(
   subject: BoxedExpression,
   pattern: BoxedExpression,
-  options: {
-    recursive: boolean;
-    numericTolerance: number;
-    substitution?: BoxedSubstitution;
-  }
+  options: PatternMatchOptions
 ): BoxedSubstitution | null {
   const substitution = matchOnce(subject, pattern, options.substitution ?? {}, {
     numericTolerance: options?.numericTolerance ?? NUMERIC_TOLERANCE,
