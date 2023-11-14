@@ -38,12 +38,6 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-const expr = ce.parse('2(0+x\\times x-1)', {
-  canonical: ['InvisibleOperator', 'Add', 'Order'],
-  // canonical: ['InvisibleOperator', 'Add', 'Order'],
-});
-expr.print();
-
 ce.assign('A', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]));
 ce.assign(
   'X',

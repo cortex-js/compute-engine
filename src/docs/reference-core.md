@@ -268,7 +268,7 @@ in order to reduce, simplify and calculate its value.
 [&quot;**CanonicalForm**&quot;, _expression_, _form-1_, _form-2_, ...]{.signature}
 
 
-If _expression_ is canonical, this function has no effect.
+If _expression_ is already canonical, this function has no effect.
 
 If there are no _form-n_ arguments, the expression is transformed to its
 canonical form.
@@ -309,7 +309,7 @@ This can be useful to compare two non-canonical expressions for equality, for ex
 ["CanonicalForm", ["Add", 1, ["Add", 2, 3]], "Flatten"]
 // -> ["Add", 1, 2, 3]
 
-["CanonicalForm", ["Add", 1, ["Delimiter", 2, 3]], "Flatten"] 
+["CanonicalForm", ["Add", 1, ["Delimiter", ["Sequence", 2, 3]]], "Flatten"] 
 // -> ["Add", 1, 2, 3]
 
 ["CanonicalForm", ["Add", 1, ["Sequence", 2, 3]], "Flatten"]
@@ -361,9 +361,8 @@ This can be useful to compare two non-canonical expressions for equality, for ex
 To compare the input from a mathfield with an expected 
 answer, you could use:
 
-```js
-const correct = ce.box(
-    ["CanonicalForm", ce.parse(mf.value, {canonical: false})], "Order")
+```js example
+const correct = ce.parse(mf.value, {canonical: "Order"})
     .isSame(ce.parse("1+x"))
 ```
 
@@ -372,9 +371,8 @@ Both `1+x` and `x+1` will return **true**, but `2-1+x` will return **false**.
 **Note**: see also the options for the `canonical` option of `ce.parse()` and
 `ce.box()` which can also be used to specify a custom canonical form:
 
-```js
-const correct = ce.box(
-    ce.parse(mf.value, {canonical: ['order']}))
+```js example
+const correct = ce.parse(mf.value, {canonical: "Order"})
     .isSame(ce.parse("x+1"))
 ```
 
@@ -390,7 +388,7 @@ const correct = ce.box(
 Evaluate to a numerical approximation of the expression.
 
 ```json example
-["N", ["Pi"]]
+["N", "Pi"]
 
 // ➔ 3.141592653589793
 ```
@@ -425,7 +423,7 @@ Evaluate to the inverse function of its argument for example `Arcsin` for `Sin`.
 {% latex "\\sin^{-1}(x)" %}
 
 ```json example
-[["InverseFunction", "Sin"], "x"]]
+[["InverseFunction", "Sin"], "x"]
 ```
 
 In the mathematical sense, this is an operator (a function that takes a function
