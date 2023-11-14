@@ -177,3 +177,72 @@ form:
 - `Root`:  `["Root", "x", 3]` \\(\to\\) `["Power", "x", ["Rational", 1, 3]]`
 - `Subtract`: `["Subtract", "a", "b"]` \\(\to\\) `["Add", ["Negate", "b"], "a"]`
 
+## Custom Canonical Form
+
+The full canonical form of an expression is not always the most convenient
+representation for a given application. For example, if you want to check
+the answers from a quizz, you may want to compare the user input with a
+canonical form that is closer to the user input.
+
+You can customize the canonical form of an expression by using the
+[`["CanonicalForm"]`](/compute-engine/reference/core/#CanonicalForm) function or by specifying the form you want to use
+with the `canonical` option of `ce.box()` and `ce.parse()`.
+
+**To get the non-canonical form**, use `ce.box(expr, { canonical: false })` or
+`ce.parse(s, { canonical: false })`.
+
+```js example
+const expr = ce.parse("2(0+x\\times x-1)", {canonical: false});
+console.log(expr.json);
+// ➔ ["InvisibleOperator", 
+//      2,
+//      ["Delimiter",
+//        ["Sequence", ["Add", 0, ["Subtract", ["Multiply","x","x"],1]]]
+//      ]
+//   ]
+```
+
+**To get the full canonical form**, use `ce.box(expr, { canonical: true })` or
+`ce.parse(s, { canonical: true })`.
+
+```js example
+const expr = ce.parse("2(0+x\\times x-1)", 
+  {canonical: true}
+);
+console.log(expr.json);
+// ➔ ["Multiply", 2, ["Subtract", ["Square", "x"], 1]]
+```
+
+**To order the arguments in a canonical order**, use `ce.box(expr, { canonical: "Order" })` or `ce.parse(s, { canonical: "Order" })`.
+
+```js example
+const expr = ce.parse("0+1+x+2+\\sqrt{5}", 
+  {canonical: "Order"}
+);
+expr.print();
+// ➔ ["Add", ["Sqrt", 5], "x", 0, 1, 2]
+```
+
+Note in particular that the `0` is preserved in the expression, which is not
+the case in the full canonical form.
+
+There are other forms that can be used to customize the canonical form of an
+expression. See the documentation of
+[`["CanonicalForm"]`](/compute-engine/reference/core/#CanonicalForm) for more details.
+
+For example:
+
+```js example
+const latex = "2(0+x\\times x-1)";
+ce.parse(latex, {canonical: false}).print();
+// -> ["InvisibleOperator",2,["Delimiter",["Sequence",["Add",0,["Subtract",["Multiply","x","x"],1]]]]]
+
+ce.parse(latex, {canonical: ["InvisibleOperator"]}).print();
+// -> ["Multiply",2,["Add",0,["Subtract",["Multiply","x","x"],1]]]
+
+ce.parse(latex, 
+  {canonical: ["InvisibleOperator", "Add", "Order", ]}
+);
+// -> ["Multiply",2,["Subtract",["Multiply","x","x"],1]]
+```
+
