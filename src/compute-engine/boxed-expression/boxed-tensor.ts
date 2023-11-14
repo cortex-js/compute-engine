@@ -305,5 +305,5 @@ export function expressionAsTensor<T extends TensorDataType>(
   };
   visit(rows);
   if (!isValid) return undefined;
-  return { shape, data, dtype };
+  return { shape, data, dtype: dtype as T };
 }
