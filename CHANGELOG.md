@@ -21,6 +21,23 @@
   }
   ```
 
+- The `CanonicalOrder` function has been replaced by the more flexible
+  `CanonicalForm` function. The `CanonicalForm` function takes an expression and
+  a list of transformations to apply. To apply the same transformations as
+  `CanonicalOrder`, use:
+
+  ```json
+  ['CanonicalForm', expr, 'Order']
+  ```
+
+  These canonical forms can also be specified with `box()` and `parse()`
+  options:
+
+  ```js
+  ce.box(expr, { canonical: "Order" });
+  ce.parse("x^2 + 2x + 1", { canonical: "Order" });
+  ```
+
 ### Work In Progress
 
 - Linear algebra functions: `Rank`, `Shape`,`Reshape`, `Flatten`, `Determinant`,

@@ -55,15 +55,10 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 
       // Since we want to work on non-canonical expressions,
       // do nothing to canonicalize the arguments
-
       evaluate: (ce, ops) => {
         if (ops.length !== 2) return undefined;
         let [lhs, rhs] = ops;
-        if (lhs.head === 'CanonicalOrder') lhs = lhs.canonical;
-        if (rhs.head === 'CanonicalOrder') rhs = rhs.canonical;
-        const test = lhs.isSame(rhs);
-        if (test === true) return ce.True;
-        return ce.False;
+        return lhs.isSame(rhs) === true ? ce.True : ce.False;
       },
     },
   },

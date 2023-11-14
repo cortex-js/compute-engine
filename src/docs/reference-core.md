@@ -226,7 +226,7 @@ evaluate to `False`.
 To compare two expressions for mathematical equality, use `Equal`.
 
 To compare two expressions structurally, but ignoring the order of the arguments
-of commutative functions, use [`CanonicalOrder`](#CanonicalOrder).
+of commutative functions, use [`CanonicalForm`](#CanonicalForm).
 
 
 See [Comparing Expressions](/compute-engine/guides/symbolic-computing/#comparing-expressions) for other options to compare two expressions, such 
@@ -261,17 +261,27 @@ in order to reduce, simplify and calculate its value.
 {% enddef %}
 
 
-{% def "CanonicalOrder" %}
+{% def "CanonicalForm" %}
 
-[&quot;**CanonicalOrder**&quot;, _expression_]{.signature}
+[&quot;**CanonicalForm**&quot;, _expression_]{.signature}
 
-If _expression_ is a commutative function, sort the
-arguments according to the canonical order of the arguments of the function.
+[&quot;**CanonicalForm**&quot;, _expression_, _form-1_, _form-2_, ...]{.signature}
+
 
 If _expression_ is canonical, this function has no effect.
 
+If there are no _form-n_ arguments, the expression is transformed to its
+canonical form.
+
+If some _form-n_ arguments are provided, they indicate one or more 
+canonical transformations to apply to the expression. The following
+canonical forms are supported:
+
+- **`Order`**: If _expression_ is a commutative function, sort the
+arguments according to the canonical order of the arguments of the function.
+
 ```json example
-["CanonicalOrder", ["Add", 3, 2, 1]]
+["CanonicalForm", ["Add", 3, 2, 1], "Order"]
 // -> ["Add", 1, 2, 3]
 ```
 
@@ -285,22 +295,88 @@ This can be useful to compare two non-canonical expressions for equality, for ex
 // -> False
 
 ["IsSame", 
-  ["CanonicalOrder", ["Add", 1, "x"]], 
-  ["CanonicalOrder", ["Add", "x", 1]]
+  ["CanonicalForm", ["Add", 1, "x"], "Order"], 
+  ["CanonicalForm", ["Add", "x", 1], "Order"]
 ]
 // -> True
 ```
+
+- **`Flatten`**: Simplify associative expressions, remove any
+  unnecessary delimiters indicating the order of operations,
+  flattens any `Sequence` expressions.
+
+```json example
+["CanonicalForm", ["Add", 1, ["Add", 2, 3]], "Flatten"]
+// -> ["Add", 1, 2, 3]
+
+["CanonicalForm", ["Add", 1, ["Delimiter", 2, 3]], "Flatten"] 
+// -> ["Add", 1, 2, 3]
+
+["CanonicalForm", ["Add", 1, ["Sequence", 2, 3]], "Flatten"]
+// -> ["Add", 1, 2, 3]
+```
+
+
+- **`Number`**: Transform some number forms, for example `["Add", 2, ["Multiply", 3, "ImaginaryI"]]`
+  to `["Complex", 2, 3]`, simplify and normalize numerator and denominator of
+  rational numbers, etc...
+
+- **`InvisibleOperator`**: Remove any invisible operators that may be 
+  contained in the expression and replace them with `Multiply` or function
+  application, depending on the context
+
+```json example
+["CanonicalForm", ["InvisibleOperator", "2", "x"], "InvisibleOperator"]
+// -> ["Multiply", 2, "x"]
+```
+
+- **`Multiply`**: If _expression_ is a `Multiply` function, simplify it by
+  combining the coefficients and the factors, transform product to a `Power` 
+  expression when possible.
+
+```json example
+["CanonicalForm", ["Multiply", 2, 3, "x"], "Multiply"]
+// -> ["Multiply", 6, "x"]
+```
+
+- **`Add`**: If _expression_ is an `Add` function, remove any `0`, transform
+  sum into multiplication when possible. If _expression_ is a `Subtract` 
+  transform it into an `Add`. If _expression_ is a `Negate` transform it into
+  a `Multiply` or negate number literals.
+
+- **`Power`**: Transform `Exp`, `Square`, `Sqrt`, `Root` function to a `Power` 
+  expression; 
+
+```json example
+["CanonicalForm", ["Exp", "x"], "Power"]
+
+```json example
+["CanonicalForm", ["Power", 2, 3], "Power"]
+// -> ["Power", 8]
+```  
+
+  
+
 
 To compare the input from a mathfield with an expected 
 answer, you could use:
 
 ```js
 const correct = ce.box(
-    ['CanonicalOrder', ce.parse(mf.value, {canonical: false})])
-    .isSame(ce.parse("1+x")
+    ["CanonicalForm", ce.parse(mf.value, {canonical: false})], "Order")
+    .isSame(ce.parse("1+x"))
 ```
 
 Both `1+x` and `x+1` will return **true**, but `2-1+x` will return **false**.
+
+**Note**: see also the options for the `canonical` option of `ce.parse()` and
+`ce.box()` which can also be used to specify a custom canonical form:
+
+```js
+const correct = ce.box(
+    ce.parse(mf.value, {canonical: ['order']}))
+    .isSame(ce.parse("x+1"))
+```
 
 
 {% enddef %}

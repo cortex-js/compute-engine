@@ -195,7 +195,9 @@ of canonicalization, for example to ignore the order of the arguments of a sum.
 You can achieve this by comparing the expressions in their canonical order:
 
 ```json example
-ce.box(["CanonicalOrder", ["Add", 1, "x"]]).isSame(["CanonicalOrder", ["Add", "x", 1]])
+ce.box(["CanonicalForm", ["Add", 1, "x"], "Order"]).isSame(
+  ["CanonicalForm", ["Add", "x", 1], "Order"]
+)
 ```
 
 

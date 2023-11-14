@@ -43,6 +43,7 @@ import {
   AssignValue,
   DomainLiteral,
   ArrayValue,
+  CanonicalForm,
 } from './public';
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
@@ -1595,7 +1596,7 @@ export class ComputeEngine implements IComputeEngine {
       | Complex
       | [num: number, denom: number]
       | SemiBoxedExpression,
-    options?: { canonical?: boolean }
+    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
   ): BoxedExpression {
     return box(this, expr, options);
   }
@@ -2101,16 +2102,19 @@ export class ComputeEngine implements IComputeEngine {
    */
   parse(
     latex: LatexString | string,
-    options?: { canonical?: boolean }
+    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
   ): BoxedExpression;
-  parse(s: null, options?: { canonical?: boolean }): null;
+  parse(
+    s: null,
+    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+  ): null;
   parse(
     latex: LatexString | string | null,
-    options?: { canonical?: boolean }
+    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
   ): null | BoxedExpression;
   parse(
     latex: LatexString | null | string,
-    options?: { canonical?: boolean }
+    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
   ): BoxedExpression | null {
     if (typeof latex !== 'string') return null;
     const result = this.latexSyntax.parse(latexString(latex) ?? latex);

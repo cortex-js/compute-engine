@@ -360,6 +360,16 @@ export type JsonSerializationOptions = {
   precision: 'auto' | 'max' | number;
 };
 
+export type CanonicalForm =
+  | 'InvisibleOperator'
+  | 'Number'
+  | 'Multiply'
+  | 'Add'
+  | 'Power'
+  | 'Divide'
+  | 'Flatten'
+  | 'Order';
+
 /**
  * ## THEORY OF OPERATIONS
  *
@@ -2206,7 +2216,7 @@ export interface IComputeEngine {
       | Complex
       | [num: number, denom: number]
       | SemiBoxedExpression,
-    options?: { canonical?: boolean }
+    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
   ): BoxedExpression;
 
   canonical(xs: SemiBoxedExpression[]): BoxedExpression[];
@@ -2320,12 +2330,15 @@ export interface IComputeEngine {
 
   parse(
     s: LatexString | string,
-    options?: { canonical?: boolean }
+    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
   ): BoxedExpression;
-  parse(s: null, options?: { canonical?: boolean }): null;
+  parse(
+    s: null,
+    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+  ): null;
   parse(
     s: LatexString | string | null,
-    options?: { canonical?: boolean }
+    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
   ): null | BoxedExpression;
 
   serialize(

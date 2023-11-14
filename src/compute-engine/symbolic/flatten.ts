@@ -1,4 +1,4 @@
-import { BoxedExpression } from '../public';
+import { BoxedExpression, IComputeEngine } from '../public';
 
 /**
  * Flatten the arguments.
@@ -47,4 +47,21 @@ export function flattenSequence(xs: BoxedExpression[]): BoxedExpression[] {
     } else ys.push(x);
   }
   return ys;
+}
+
+export function flattenDelimiter(
+  ce: IComputeEngine,
+  body: undefined | BoxedExpression
+): BoxedExpression {
+  // If empty delimiter, return an empty Tuple
+  if (body === undefined) return ce._fn('Tuple', []);
+
+  if (body.head === 'Delimiter') return flattenDelimiter(ce, body.op1);
+
+  // If a sequence, return as is
+  if (body.head === 'Sequence') return body;
+
+  if (body.ops) return ce._fn('Tuple', body.ops);
+
+  return body;
 }

@@ -1,6 +1,7 @@
 import {
   BoxedDomain,
   BoxedExpression,
+  CanonicalForm,
   IComputeEngine,
   IdentifierDefinitions,
 } from '../public';
@@ -15,7 +16,7 @@ import { isDomain } from '../boxed-expression/boxed-domain';
 import { isIndexableCollection } from '../collection-utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { normalizeIndexingSet } from './utils';
-import { canonicalOrder } from '../boxed-expression/order';
+import { canonicalForm } from '../boxed-expression/canonical';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -445,12 +446,22 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     // canonicalization that can be useful in some cases, for example
     // to accept "x+1" and "1+x" while rejecting "x+1" and "2x-x+1"
 
-    CanonicalOrder: {
+    CanonicalForm: {
       complexity: 8200,
       hold: 'all',
       signature: {
-        domain: ['FunctionOf', 'Anything', 'Anything'],
-        canonical: (_ce, ops) => canonicalOrder(ops[0], { recursive: true }),
+        domain: ['FunctionOf', 'Anything', ['VarArg', 'Symbols'], 'Anything'],
+        // Do not canonicalize the arguments, we want to preserve
+        // the original form before modifying it
+        canonical: (_ce, ops) => {
+          if (ops.length === 1) return ops[0].canonical;
+
+          const forms = ops
+            .slice(1)
+            .map((x) => x.symbol ?? x.string)
+            .filter((x) => x !== undefined && x !== null) as CanonicalForm[];
+          return canonicalForm(ops[0], forms);
+        },
       },
     },
 
@@ -713,7 +724,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
   },
 ];
 
-function canonicalInvisibleOperator(
+export function canonicalInvisibleOperator(
   ce: IComputeEngine,
   ops: BoxedExpression[]
 ): BoxedExpression | null {

@@ -7,6 +7,7 @@ import {
   Metadata,
   Rational,
   DomainExpression,
+  CanonicalForm,
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedDictionary } from './boxed-dictionary';
@@ -26,6 +27,7 @@ import { asBigint, bigintValue } from './utils';
 import { bigint } from '../numerics/numeric-bigint';
 import { isDomainLiteral } from '../library/domains';
 import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
+import { canonicalForm } from './canonical';
 
 /**
  * ## THEORY OF OPERATIONS
@@ -474,15 +476,20 @@ export function boxFunction(
 export function box(
   ce: IComputeEngine,
   expr: null | undefined | Decimal | Complex | Rational | SemiBoxedExpression,
-  options?: { canonical?: boolean }
+  options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
 ): BoxedExpression {
   if (expr === null || expr === undefined) return ce._fn('Sequence', []);
+
+  if (expr instanceof _BoxedExpression)
+    return canonicalForm(expr, options?.canonical ?? true);
 
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
 
-  if (expr instanceof _BoxedExpression)
-    return options.canonical ? expr.canonical : expr;
+  // If canonical is true, we want to canonicalize the arguments
+  // If it's false or a CanonicalForm, we don't want to canonicalize the
+  // arguments during create, we'll call canonicalForm to take care of it
+  const canonical = options.canonical === true;
 
   //
   //  Box a function or a rational
@@ -494,12 +501,18 @@ export function box(
       if (Number.isInteger(expr[0]) && Number.isInteger(expr[1]))
         return ce.number(expr);
       // This wasn't a valid rational, turn it into a `Divide`
-      return boxFunction(ce, 'Divide', expr, options);
+      return canonicalForm(
+        boxFunction(ce, 'Divide', expr, { canonical }),
+        options.canonical!
+      );
     }
     if (isBigRational(expr)) return ce.number(expr);
 
     if (typeof expr[0] === 'string')
-      return boxFunction(ce, expr[0], expr.slice(1), options);
+      return canonicalForm(
+        boxFunction(ce, expr[0], expr.slice(1), { canonical }),
+        options.canonical!
+      );
 
     console.assert(Array.isArray(expr[0]));
 
@@ -509,8 +522,8 @@ export function box(
     // The head could include some unknowns, i.e. `_` which we do *not*
     // want to get declated in the current scope, so use canonical: false
     // to avoid that.
-    const head = box(ce, expr[0], { ...options, canonical: false });
-    return new BoxedFunction(ce, head, ops);
+    const head = box(ce, expr[0], { canonical: false });
+    return canonicalForm(new BoxedFunction(ce, head, ops), options.canonical!);
   }
 
   //
@@ -537,7 +550,7 @@ export function box(
 
     if (!isValidIdentifier(expr))
       return ce.error('invalid-identifier', { str: expr });
-    return ce.symbol(expr, options);
+    return ce.symbol(expr, { canonical });
   }
 
   //
@@ -549,20 +562,29 @@ export function box(
       wikidata: expr.wikidata,
     };
     if ('dict' in expr)
-      return new BoxedDictionary(ce, expr.dict, { canonical: true, metadata });
+      return canonicalForm(
+        new BoxedDictionary(ce, expr.dict, { canonical: true, metadata }),
+        options.canonical!
+      );
     if ('fn' in expr) {
       if (typeof expr.fn[0] === 'string')
-        return boxFunction(ce, expr.fn[0], expr.fn.slice(1), options);
-      return new BoxedFunction(
-        ce,
-        box(ce, expr.fn[0], options),
-        expr.fn.slice(1).map((x) => box(ce, x, options)),
-        { metadata }
+        return canonicalForm(
+          boxFunction(ce, expr.fn[0], expr.fn.slice(1), { canonical }),
+          options.canonical!
+        );
+      return canonicalForm(
+        new BoxedFunction(
+          ce,
+          box(ce, expr.fn[0], options),
+          expr.fn.slice(1).map((x) => box(ce, x, options)),
+          { metadata }
+        ),
+        options.canonical!
       );
     }
     if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
-    if ('sym' in expr) return ce.symbol(expr.sym, options);
-    if ('num' in expr) return ce.number(expr, options);
+    if ('sym' in expr) return ce.symbol(expr.sym, { canonical });
+    if ('num' in expr) return ce.number(expr, { canonical });
   }
 
   return ce.symbol('Undefined');
