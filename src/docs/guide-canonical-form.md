@@ -5,7 +5,7 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: "universal"
-toc: false
+toc: true
 render_math_in_document: true
 ---
 
@@ -26,12 +26,11 @@ object:
 
 </div>
 
-The Compute Engine stores expressions internally in a canonical form to simplify
-comparisons and to make it easier to implement algorithms that work with
-expressions.
+The Compute Engine stores expressions internally in a canonical form to make
+it easier to work with symbolic expressions.
 
-The value of `expr.simplify()`, `expr.evaluate()` and `expr.N()` are canonical
-expressions.
+The return value of `expr.simplify()`, `expr.evaluate()` and `expr.N()` are 
+canonical expressions.
 
 The `ce.box()` and `ce.parse()` functions return a canonical expression by
 default, which is the desirable behavior in most cases.
@@ -39,16 +38,19 @@ default, which is the desirable behavior in most cases.
 **To get a non-canonical version of an expression** use
 of `ce.parse(s, {canonical: false})` or `ce.box(expr, {canonical: false})`.
 
+You can further customize the canonical form of an expression by using the
+[`["CanonicalForm"]`](/compute-engine/reference/core/#CanonicalForm) function or by specifying the form you want to use. See [below](#custom-canonical-form) for more details.
+
 The non-canonical version will be closer to the literal LaTeX input, which may
 be desirable to compare a "raw" user input with an expected answer.
 
 ```js
-ce.parse('\\frac{30}{-50}');
+ce.parse('\\frac{30}{-50}').print();
 // ➔ ["Rational", -3, 5]
 // The canonical version moves the sign to the numerator 
 // and reduces the numerator and denominator
 
-ce.parse('\\frac{30}{-50}', { canonical: false });
+ce.parse('\\frac{30}{-50}', { canonical: false }).print();
 // ➔ ["Divide", 30, -50]
 // The non-canonical version does not change the arguments,
 // so this is interpreted as a regular fraction ("Divide"), 
@@ -98,7 +100,7 @@ console.log(expr.json);
 console.log(expr.isCanonical);
 // ➔ false
 
-console.log(expr.canonical);
+console.log(expr.canonical.json);
 // ➔ ["Rational", 1, 3]
 ```
 
@@ -184,10 +186,6 @@ representation for a given application. For example, if you want to check
 the answers from a quizz, you may want to compare the user input with a
 canonical form that is closer to the user input.
 
-You can customize the canonical form of an expression by using the
-[`["CanonicalForm"]`](/compute-engine/reference/core/#CanonicalForm) function or by specifying the form you want to use
-with the `canonical` option of `ce.box()` and `ce.parse()`.
-
 **To get the non-canonical form**, use `ce.box(expr, { canonical: false })` or
 `ce.parse(s, { canonical: false })`.
 
@@ -203,15 +201,25 @@ console.log(expr.json);
 ```
 
 **To get the full canonical form**, use `ce.box(expr, { canonical: true })` or
-`ce.parse(s, { canonical: true })`.
+`ce.parse(s, { canonical: true })`. You can also ommit the `canonical` option
+as it is `true` by default.
 
 ```js example
 const expr = ce.parse("2(0+x\\times x-1)", 
   {canonical: true}
-);
-console.log(expr.json);
+).print();
+// ➔ ["Multiply", 2, ["Subtract", ["Square", "x"], 1]]
+
+const expr = ce.parse("2(0+x\\times x-1)").print();
 // ➔ ["Multiply", 2, ["Subtract", ["Square", "x"], 1]]
 ```
+
+**To get a custom canonical form of an expression**, use the
+[`["CanonicalForm"]`](/compute-engine/reference/core/#CanonicalForm) function 
+or specify the form you want to use with the `canonical` option of `ce.box()` 
+and `ce.parse()`.
+
+
 
 **To order the arguments in a canonical order**, use `ce.box(expr, { canonical: "Order" })` or `ce.parse(s, { canonical: "Order" })`.
 
