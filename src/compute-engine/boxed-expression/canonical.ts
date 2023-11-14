@@ -135,12 +135,12 @@ function addForm(expr: BoxedExpression) {
   if (expr.head === 'Add') return canonicalAdd(expr.engine, ops);
 
   if (expr.head === 'Subtract')
-    return canonicalAdd(expr.engine, [
-      expr.op1,
+    return expr.engine._fn('Add', [
+      addForm(expr.op1),
       addForm(expr.engine.neg(expr.op2)),
     ]);
 
-  return expr;
+  return expr.engine._fn(expr.head, ops);
 }
 
 function powerForm(expr: BoxedExpression) {
