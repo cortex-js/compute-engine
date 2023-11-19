@@ -63,7 +63,7 @@ representation before being returned, for example `["Power", "x", 2]` is
 returned as `["Square", "x"]`.
 
 You can customize how an expression is serialized to plain JSON by using
-[`ce.jsonSerializationOptions`](/docs/guide-expressions#unboxing).
+[`ce.jsonSerializationOptions`](/docs/compute-engine/#(ComputeEngine%3Aclass).(jsonSerializationOptions%3Ainstance)).
 
 ```js
 const expr = ce.parse("\\frac{3}{5}");
