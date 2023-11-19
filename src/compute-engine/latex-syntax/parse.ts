@@ -684,6 +684,9 @@ export class _Parser implements Parser {
   // This argument will usually be a single token, but can be a sequence of
   // tokens (e.g. `\sqrt\frac12` or `\sqrt\operatorname{speed}`).
   parseToken(): Expression | null {
+    // Skip any white space, for example in `\frac5 7`
+    this.skipSpace();
+
     const excluding = [
       ...'!"#$%&(),/;:?@[]\\`|~'.split(''),
       '\\left',

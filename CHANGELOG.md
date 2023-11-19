@@ -1,6 +1,13 @@
-## 0.22.0 
+## [Unreleased]
 
- **Release Date:** 2023-11-13
+## Bug Fixes
+
+- The expression `\frac5 7` is now parsed correctly as `\frac{5}{7}` instead of
+  `\frac{5}{}7`.
+
+## 0.22.0
+
+**Release Date:** 2023-11-13
 
 ### Breaking Changes
 
