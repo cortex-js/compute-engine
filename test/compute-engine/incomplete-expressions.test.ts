@@ -27,14 +27,14 @@ describe('basic', () => {
     `);
     expect(parse('\\frac{}}')).toMatchInlineSnapshot(`
       [
-        "Pair",
+        "Tuple",
         ["Divide", ["Error", "'missing'"], ["Error", "'missing'"]],
         ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ]
     `);
     expect(parse('\\frac{1}}')).toMatchInlineSnapshot(`
       [
-        "Pair",
+        "Tuple",
         ["Divide", 1, ["Error", "'missing'"]],
         ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ]
@@ -44,7 +44,7 @@ describe('basic', () => {
         "Divide",
         1,
         [
-          "Pair",
+          "Tuple",
           2,
           ["Error", "'expected-closing-delimiter'", ["LatexString", "'{2'"]]
         ]

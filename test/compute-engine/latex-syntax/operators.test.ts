@@ -302,7 +302,7 @@ describe('OPERATOR multiply', () => {
     `));
   test('2\\sin(x)\\frac12, function apply', () =>
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
-      latex     = ["InvisibleOperator", 2, ["Sin", "x"], "Half"]
+      latex     = ["InvisibleOperator", 2, ["Sin", "x"], ["Divide", 1, 2]]
       box       = ["Multiply", 2, ["Sin", "x"], "Half"]
       canonical = ["Sin", "x"]
     `));
@@ -319,7 +319,7 @@ describe('OPERATOR multiply', () => {
 describe('OPERATOR divide', () => {
   test('\\frac12', () =>
     expect(check('\\frac12')).toMatchInlineSnapshot(`
-      latex     = Half
+      latex     = ["Divide", 1, 2]
       box       = Half
       N-auto    = 0.5
     `));

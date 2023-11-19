@@ -4,6 +4,9 @@
 
 - The expression `\frac5 7` is now parsed correctly as `\frac{5}{7}` instead of
   `\frac{5}{}7`.
+- Do not sugar non-canonical expression. Previously,
+  `ce.parse('\frac{1}{2}', {canonical: false})` would return `Half` instead of
+  `['Divide', '1', '2']`.
 
 ## 0.22.0
 

@@ -9,7 +9,7 @@ function check(s: string, f: jest.ProvidesCallback) {
 check('Syntax error inside group with invisible operator', () =>
   expect(engine.parse('{2\\pi)}')).toMatchInlineSnapshot(`
     [
-      "Pair",
+      "Tuple",
       ["Multiply", 2, "Pi"],
       [
         "Error",
@@ -124,7 +124,7 @@ check('Missing argument with \\sqrt custom parser', () =>
 
 check('Paren instead of braces with \\sqrt', () =>
   expect(engine.parse('\\sqrt[x](y)')).toMatchInlineSnapshot(
-    `["Pair", ["Root", ["Error", "'missing'"], "x"], "y"]`
+    `["Tuple", ["Root", ["Error", "'missing'"], "x"], "y"]`
   )
 );
 
@@ -371,7 +371,7 @@ check('Expected closing delimiter', () =>
       "Divide",
       1,
       [
-        "Pair",
+        "Tuple",
         2,
         ["Error", "'expected-closing-delimiter'", ["LatexString", "'{2'"]]
       ]
@@ -384,7 +384,7 @@ check('Unexpected closing delimiter', () =>
     [
       "Add",
       [
-        "Pair",
+        "Tuple",
         "Half",
         ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ],
@@ -463,7 +463,7 @@ check('Syntax error', () =>
       "Equal",
       "x",
       [
-        "Pair",
+        "Tuple",
         2,
         ["Error", "'expected-closing-delimiter'", ["LatexString", "'{'"]]
       ]

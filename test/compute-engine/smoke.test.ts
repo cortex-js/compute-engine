@@ -433,7 +433,7 @@ describe('PARSING numbers', () => {
                                                 ]
                                               ],
                                               [
-                                                "Triple",
+                                                "Tuple",
                                                 [
                                                   "Error",
                                                   [
@@ -453,7 +453,7 @@ describe('PARSING numbers', () => {
                                       ]
                                     ],
                                     [
-                                      "Triple",
+                                      "Tuple",
                                       [
                                         "Error",
                                         [
@@ -479,7 +479,7 @@ describe('PARSING numbers', () => {
                   ]
                 ],
                 [
-                  "Triple",
+                  "Tuple",
                   [
                     "Error",
                     [

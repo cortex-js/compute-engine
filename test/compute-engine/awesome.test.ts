@@ -86,7 +86,7 @@ describe('Nth PRIME NUMBER', () =>
                                                   ]
                                                 ],
                                                 [
-                                                  "Triple",
+                                                  "Tuple",
                                                   ["Subscript", "v", 3],
                                                   2,
                                                   [
@@ -103,7 +103,7 @@ describe('Nth PRIME NUMBER', () =>
                                         ]
                                       ],
                                       [
-                                        "Triple",
+                                        "Tuple",
                                         ["Subscript", "v", 2],
                                         2,
                                         ["Subscript", "v", 1]
@@ -120,7 +120,7 @@ describe('Nth PRIME NUMBER', () =>
                     ]
                   ],
                   [
-                    "Triple",
+                    "Tuple",
                     ["Subscript", "v", 1],
                     2,
                     ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
@@ -198,7 +198,7 @@ describe('Nth PRIME NUMBER', () =>
                                                   ]
                                                 ],
                                                 [
-                                                  "Triple",
+                                                  "Tuple",
                                                   ["Subscript", "v", 3],
                                                   2,
                                                   [
@@ -215,7 +215,7 @@ describe('Nth PRIME NUMBER', () =>
                                         ]
                                       ],
                                       [
-                                        "Triple",
+                                        "Tuple",
                                         ["Subscript", "v", 2],
                                         2,
                                         ["Subscript", "v", 1]
@@ -232,7 +232,7 @@ describe('Nth PRIME NUMBER', () =>
                     ]
                   ],
                   [
-                    "Triple",
+                    "Tuple",
                     ["Subscript", "v", 1],
                     2,
                     ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
@@ -311,7 +311,7 @@ describe('Nth PRIME NUMBER', () =>
                                                 ]
                                               ],
                                               [
-                                                "Triple",
+                                                "Tuple",
                                                 ["Subscript", "v", 3],
                                                 2,
                                                 [
@@ -328,7 +328,7 @@ describe('Nth PRIME NUMBER', () =>
                                       ]
                                     ],
                                     [
-                                      "Triple",
+                                      "Tuple",
                                       ["Subscript", "v", 2],
                                       2,
                                       ["Subscript", "v", 1]
@@ -345,7 +345,7 @@ describe('Nth PRIME NUMBER', () =>
                   ]
                 ],
                 [
-                  "Triple",
+                  "Tuple",
                   ["Subscript", "v", 1],
                   2,
                   ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
