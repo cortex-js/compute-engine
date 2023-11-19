@@ -218,7 +218,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
 
   // The mathtools package includes several synonmyms for \colonequals. The
-  // current preferred one is `\coloneq`
+  // preferred one as of summer 2022 is `\coloneq` (see § 3.7.3 https://ctan.math.illinois.edu/macros/latex/contrib/mathtools/mathtools.pdf)
   {
     name: 'Assign',
     latexTrigger: '\\coloneq',
@@ -256,12 +256,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: parseAssign,
   },
   {
-    latexTrigger: [':', '='],
+    latexTrigger: '\\coloneqq',
     kind: 'infix',
     associativity: 'right',
     precedence: ASSIGNMENT_PRECEDENCE,
     parse: parseAssign,
   },
+  // From the colonequals package:
   {
     latexTrigger: '\\colonequals',
     kind: 'infix',
@@ -270,7 +271,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: parseAssign,
   },
   {
-    latexTrigger: '\\coloneqq',
+    latexTrigger: [':', '='],
     kind: 'infix',
     associativity: 'right',
     precedence: ASSIGNMENT_PRECEDENCE,

@@ -334,6 +334,21 @@ describe('OPERATOR divide', () => {
       box       = ["Rational", 7, 5]
       N-auto    = 1.4
     `));
+
+  test('\\frac 7 5', () =>
+    expect(check('\\frac 7 5')).toMatchInlineSnapshot(`
+      latex     = ["Divide", 7, 5]
+      box       = ["Rational", 7, 5]
+      N-auto    = 1.4
+    `));
+
+  test('\\frac    7    5', () =>
+    expect(check('\\frac    7    5')).toMatchInlineSnapshot(`
+      latex     = ["Divide", 7, 5]
+      box       = ["Rational", 7, 5]
+      N-auto    = 1.4
+    `));
+
   test('\\frac{10}{5}', () =>
     expect(check('\\frac{10}{5}')).toMatchInlineSnapshot(`
       latex     = ["Divide", 10, 5]
