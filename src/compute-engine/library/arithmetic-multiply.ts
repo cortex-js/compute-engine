@@ -241,7 +241,7 @@ function multiply2(
       if (isRationalZero(r)) return ce.Zero;
       if (t.head === 'Add') {
         if (sign < 0) c = canonicalNegate(c);
-        return ce.add(t.ops!.map((x) => multiply2(c, x)));
+        return ce.add(...t.ops!.map((x) => multiply2(c, x)));
       }
 
       const tr = asRational(t);
@@ -349,7 +349,7 @@ export function evalMultiplication(
       ce.assign({ [index]: i });
       terms.push(fn.simplify());
     }
-    result = ce.mul(terms).simplify();
+    result = ce.mul(...terms).simplify();
   }
 
   if (mode === 'evaluate') {
@@ -358,7 +358,7 @@ export function evalMultiplication(
       ce.assign({ [index]: i });
       terms.push(fn.evaluate());
     }
-    result = ce.mul(terms).evaluate();
+    result = ce.mul(...terms).evaluate();
   }
 
   if (mode === 'N') {

@@ -316,11 +316,11 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   add(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
-    return this.ce.add([lhs, rhs]);
+    return this.ce.add(lhs, rhs);
   }
 
   addn(...xs: BoxedExpression[]): BoxedExpression {
-    return this.ce.add(xs);
+    return this.ce.add(...xs);
   }
 
   neg(x: BoxedExpression): BoxedExpression {
@@ -328,15 +328,15 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   }
 
   sub(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
-    return this.ce.add([lhs, this.ce.neg(rhs)]);
+    return this.ce.add(lhs, this.ce.neg(rhs));
   }
 
   mul(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {
-    return this.ce.mul([lhs, rhs]);
+    return this.ce.mul(lhs, rhs);
   }
 
   muln(...xs: BoxedExpression[]): BoxedExpression {
-    return this.ce.mul(xs);
+    return this.ce.mul(...xs);
   }
 
   div(lhs: BoxedExpression, rhs: BoxedExpression): BoxedExpression {

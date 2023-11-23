@@ -72,14 +72,14 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
               if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
               if (fRadians[0] === 1)
                 return ce.div(ce.Pi, ce.number(fRadians[1]));
-              return ce.mul([ce.number(fRadians), ce.Pi]);
+              return ce.mul(ce.number(fRadians), ce.Pi);
             }
-            return ce.mul([ce.div(ce.number(fArg), ce.number(180)), ce.Pi]);
+            return ce.mul(ce.div(ce.number(fArg), ce.number(180)), ce.Pi);
           }
-          return ce.div(ce.mul([arg, ce.Pi]), ce.number(180));
+          return ce.div(ce.mul(arg, ce.Pi), ce.number(180));
         },
         evaluate: (ce, ops) =>
-          ce.mul([ops[0], ce.div(ce.Pi, ce.number(180))]).evaluate(),
+          ce.mul(ops[0], ce.div(ce.Pi, ce.number(180))).evaluate(),
       },
     },
     // Hypot: sqrt(x*x + y*y)

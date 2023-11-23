@@ -98,7 +98,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
       ce.assumptions.set(
         ce.fn('Equal', [
           ce
-            .add([proposition.op1.canonical, ce.neg(proposition.op2.canonical)])
+            .add(proposition.op1.canonical, ce.neg(proposition.op2.canonical))
             .simplify(),
           0,
         ]),
@@ -193,7 +193,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
     op = '<=';
   }
   if (!op) return 'internal-error';
-  const p = ce.add([lhs!.canonical, ce.neg(rhs!.canonical)]).simplify();
+  const p = ce.add(lhs!.canonical, ce.neg(rhs!.canonical)).simplify();
 
   // Case 2
   const result = ce.box([op === '<' ? 'Less' : 'LessEqual', p, 0]).evaluate();

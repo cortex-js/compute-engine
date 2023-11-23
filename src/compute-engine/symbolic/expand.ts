@@ -17,7 +17,7 @@ function distribute2(
 
   if (lhs.head === 'Divide' && rhs.head === 'Divide') {
     // Apply distribute to the numerators only.
-    const denom = ce.mul([lhs.op2, rhs.op2]);
+    const denom = ce.mul(lhs.op2, rhs.op2);
     return ce.div(distribute2(lhs.op1, rhs.op1), denom);
   }
 
@@ -25,10 +25,10 @@ function distribute2(
   if (rhs.head === 'Divide') return ce.div(distribute2(lhs, rhs.op1), rhs.op2);
 
   if (lhs.head === 'Add')
-    return ce.add(lhs.ops!.map((x) => distribute2(x, rhs)));
+    return ce.add(...lhs.ops!.map((x) => distribute2(x, rhs)));
   if (rhs.head === 'Add')
-    return ce.add(rhs.ops!.map((x) => distribute2(lhs, x)));
-  return ce.mul([lhs, rhs]);
+    return ce.add(...rhs.ops!.map((x) => distribute2(lhs, x)));
+  return ce.mul(lhs, rhs);
 }
 
 /* Distribute
@@ -139,9 +139,9 @@ export function expandMultinomial(
         else product.push(ce.pow(terms[i], val[i]));
       }
     }
-    result.push(ce.mul(product));
+    result.push(ce.mul(...product));
   }
-  return ce.add(result);
+  return ce.add(...result);
 }
 
 /** Expand all
@@ -169,7 +169,7 @@ function expandNumerator(expr: BoxedExpression): BoxedExpression | null {
   if (expandedNumerator === null) return null;
   const ce = expr.engine;
   if (expandedNumerator.head === 'Add') {
-    return ce.add(expandedNumerator.ops!.map((x) => ce.div(x, expr.op2)));
+    return ce.add(...expandedNumerator.ops!.map((x) => ce.div(x, expr.op2)));
   }
   return expr.engine.div(expandedNumerator, expr.op2);
 }
@@ -184,7 +184,7 @@ function expandDenominator(expr: BoxedExpression): BoxedExpression | null {
   if (expandedDenominator === null) return null;
   const ce = expr.engine;
   if (expandedDenominator.head === 'Add') {
-    return ce.add(expandedDenominator.ops!.map((x) => ce.div(expr.op1, x)));
+    return ce.add(...expandedDenominator.ops!.map((x) => ce.div(expr.op1, x)));
   }
   return ce.div(expr.op1, expandedDenominator);
 }

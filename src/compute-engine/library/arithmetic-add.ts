@@ -203,7 +203,7 @@ export function evalSummation(
       ce.assign(index, i);
       terms.push(fn.simplify());
     }
-    result = ce.add(terms).simplify();
+    result = ce.add(...terms).simplify();
   }
 
   if (mode === 'evaluate') {
@@ -212,7 +212,7 @@ export function evalSummation(
       ce.assign(index, i);
       terms.push(fn.evaluate());
     }
-    result = ce.add(terms).evaluate();
+    result = ce.add(...terms).evaluate();
   }
 
   if (mode === 'N') {

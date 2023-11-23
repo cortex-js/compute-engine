@@ -35,7 +35,7 @@ export function distribute1(
       )
       .simplify();
 
-  return ce.mul([lhs, rhs]);
+  return ce.mul(lhs, rhs);
 }
 
 function distribute2(

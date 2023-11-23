@@ -379,7 +379,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (s !== undefined) return false;
 
     // Try to simplify the difference of the expressions
-    const diff = this.engine.add([this, this.engine.neg(rhs)]).simplify();
+    const diff = this.engine.add(this, this.engine.neg(rhs)).simplify();
     if (diff.isZero) return true;
 
     return this.isSame(rhs);

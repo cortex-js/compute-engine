@@ -140,7 +140,7 @@ export function square(
   if (base.head === 'Power') {
     const exp = asSmallInteger(base.op2);
     if (exp !== null) return ce.pow(base.op1, ce.number(exp * 2));
-    return ce.pow(base.op1, ce.mul([ce.number(2), base.op2]));
+    return ce.pow(base.op1, ce.mul(ce.number(2), base.op2));
   }
 
   return ce.pow(base, ce.number(2));
@@ -206,7 +206,7 @@ function numEvalPower(
   if (invExp === 2) {
     if (floatBase < 0) {
       return complexAllowed(ce)
-        ? ce.mul([ce.I, ce.number(Math.sqrt(-floatBase))])
+        ? ce.mul(ce.I, ce.number(Math.sqrt(-floatBase)))
         : ce.NaN;
     }
     return ce.number(Math.sqrt(floatBase));
@@ -258,13 +258,13 @@ export function processPower(
     }
 
     if (!isRationalOne(c))
-      return ce.mul([
+      return ce.mul(
         processSqrt(ce, ce.number(c), mode) ?? ce.One,
         ce.pow(
-          processPower(ce, ce.mul(xs), exponent, mode) ?? ce.mul(xs),
+          processPower(ce, ce.mul(...xs), exponent, mode) ?? ce.mul(...xs),
           exponent
-        ),
-      ]);
+        )
+      );
   }
 
   if (base.head === 'Power') {
@@ -319,16 +319,16 @@ export function processPower(
           // If factor === 1, nothing special to do, fall through
           if (factor !== BigInt(1)) {
             if (root === BigInt(1))
-              return ce.mul([
+              return ce.mul(
                 sign,
-                ce.number(n >= 0 ? factor : [BigInt(1), factor]),
-              ]);
+                ce.number(n >= 0 ? factor : [BigInt(1), factor])
+              );
 
-            return ce.mul([
+            return ce.mul(
               sign,
               ce.number(factor),
-              ce.pow(ce.number(root), exponent),
-            ]);
+              ce.pow(ce.number(root), exponent)
+            );
           }
         } else if (typeof base.numericValue === 'number') {
           // Square root of a negative number, and no complex allowed
@@ -347,13 +347,13 @@ export function processPower(
           if (root === 1 && factor === 1) return sign;
           if (factor !== 1) {
             if (root === 1)
-              return ce.mul([sign, ce.number(n >= 0 ? factor : [1, factor])]);
+              return ce.mul(sign, ce.number(n >= 0 ? factor : [1, factor]));
 
-            return ce.mul([
+            return ce.mul(
               sign,
               ce.number(factor),
-              ce.pow(ce.number(root), exponent),
-            ]);
+              ce.pow(ce.number(root), exponent)
+            );
           }
         } else {
           //  @todo: handlebase  rationalValue
@@ -361,7 +361,7 @@ export function processPower(
       }
       if (base.isNegative) {
         if (!complexAllowed) return ce.NaN;
-        return ce.mul([ce.I, ce.fn('Sqrt', [ce.neg(base)])]);
+        return ce.mul(ce.I, ce.fn('Sqrt', [ce.neg(base)]));
       }
       return undefined;
     }
@@ -411,13 +411,10 @@ export function processSqrt(
     if (factor === 1) return ce._fn('Sqrt', [base]);
     if (n < 0) {
       if (root === 1) return ce.number(ce.complex(0, factor));
-      return ce.mul([
-        ce.number(ce.complex(0, factor)),
-        ce.sqrt(ce.number(root)),
-      ]);
+      return ce.mul(ce.number(ce.complex(0, factor)), ce.sqrt(ce.number(root)));
     }
     if (root === 1) return ce.number(factor);
-    return ce.mul([ce.number(factor), ce.sqrt(ce.number(root))]);
+    return ce.mul(ce.number(factor), ce.sqrt(ce.number(root)));
   }
 
   if (r) {
@@ -430,15 +427,15 @@ export function processSqrt(
         const [nFactor, nRoot] = factorPower(Math.abs(n), 2);
         const [dFactor, dRoot] = factorPower(d, 2);
         if (n < 0)
-          return ce.mul([
+          return ce.mul(
             ce.number([nFactor, dFactor]),
             ce.sqrt(ce.number([nRoot, dRoot])),
-            ce.I,
-          ]);
+            ce.I
+          );
 
         const factor = ce.number([nFactor, dFactor]);
         if (factor.isOne) return ce._fn('Sqrt', [ce.number([nRoot, dRoot])]);
-        return ce.mul([factor, ce.sqrt(ce.number([nRoot, dRoot]))]);
+        return ce.mul(factor, ce.sqrt(ce.number([nRoot, dRoot])));
       }
     }
     if (isBigRational(r) || bignumPreferred(ce)) {
@@ -447,15 +444,15 @@ export function processSqrt(
       const [dFactor, dRoot] = bigFactorPower(bigint(r[1]), 2);
 
       if (n < 0)
-        return ce.mul([
+        return ce.mul(
           ce.number([nFactor, dFactor]),
           ce.sqrt(ce.number([nRoot, dRoot])),
-          ce.I,
-        ]);
+          ce.I
+        );
 
       const factor = ce.number([nFactor, dFactor]);
       if (factor.isOne) return ce._fn('Sqrt', [ce.number([nRoot, dRoot])]);
-      return ce.mul([factor, ce.sqrt(ce.number([nRoot, dRoot]))]);
+      return ce.mul(factor, ce.sqrt(ce.number([nRoot, dRoot])));
     }
   }
 

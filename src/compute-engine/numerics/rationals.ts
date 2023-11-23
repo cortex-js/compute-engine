@@ -311,7 +311,7 @@ export function asCoefficient(
     coef = reducedRational(coef);
 
     if (isRationalOne(coef)) return [coef, expr];
-    return [coef, ce.mul(rest)];
+    return [coef, ce.mul(...rest)];
   }
 
   //
@@ -360,7 +360,7 @@ export function asCoefficient(
         // en = -1 -> inverse the extracted coef
         return [
           en === 1 ? [nCoef, dCoef] : [dCoef, nCoef],
-          ce.pow(ce.mul([ce.number([nRest, dRest]), base]), exponent),
+          ce.pow(ce.mul(ce.number([nRest, dRest]), base), exponent),
         ];
       }
     }

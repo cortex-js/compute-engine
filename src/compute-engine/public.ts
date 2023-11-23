@@ -2289,9 +2289,9 @@ export interface IComputeEngine {
 
   hold(expr: SemiBoxedExpression): BoxedExpression;
 
-  add(ops: BoxedExpression[]): BoxedExpression;
+  add(...ops: BoxedExpression[]): BoxedExpression;
 
-  mul(ops: BoxedExpression[]): BoxedExpression;
+  mul(...ops: BoxedExpression[]): BoxedExpression;
 
   pow(
     base: BoxedExpression,

@@ -41,8 +41,7 @@ export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
   if (expr.head === 'Add') {
     let ops = expr.ops!.map((x) => canonicalNegate(x));
-    ops = flattenOps(ops, 'Add');
-    return expr.engine.add(ops);
+    return expr.engine.add(...flattenOps(ops, 'Add'));
   }
 
   // Distribute over multiplication
@@ -80,7 +79,7 @@ function negateProduct(
       result.push(arg.op1);
     } else result.push(arg);
   }
-  if (done) return ce.mul(result);
+  if (done) return ce.mul(...result);
 
   // else If there is a literal integer, negate it
   result = [];
@@ -92,7 +91,7 @@ function negateProduct(
     }
   }
 
-  if (done) return ce.mul(result);
+  if (done) return ce.mul(...result);
 
   // else If there is a literal number, negate it
   result = [];
@@ -103,7 +102,7 @@ function negateProduct(
       result.push(canonicalNegate(arg));
     }
   }
-  if (done) return ce.mul(result);
+  if (done) return ce.mul(...result);
 
   return ce._fn('Negate', [ce._fn('Multiply', args)]);
 }

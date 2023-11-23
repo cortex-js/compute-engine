@@ -47,35 +47,35 @@ export function canonicalDivide(
   if (op1.head === 'Divide' && op2.head === 'Divide') {
     return canonicalDivide(
       ce,
-      ce.mul([op1.op1, op2.op2]),
-      ce.mul([op1.op2, op2.op1])
+      ce.mul(op1.op1, op2.op2),
+      ce.mul(op1.op2, op2.op1)
     );
   }
   if (op1.head === 'Divide')
-    return canonicalDivide(ce, ce.mul([op1.op1, op2]), op1.op2);
+    return canonicalDivide(ce, ce.mul(op1.op1, op2), op1.op2);
   if (op2.head === 'Divide')
-    return canonicalDivide(ce, ce.mul([op1, op2.op2]), op2.op1);
+    return canonicalDivide(ce, ce.mul(op1, op2.op2), op2.op1);
 
   const num1 = op1.numericValue;
   if (num1 !== null) {
     if (isMachineRational(num1)) {
       const [a, b] = num1;
-      return canonicalDivide(ce, ce.number(a), ce.mul([ce.number(b), op2]));
+      return canonicalDivide(ce, ce.number(a), ce.mul(ce.number(b), op2));
     }
     if (isBigRational(num1)) {
       const [a, b] = num1;
-      return canonicalDivide(ce, ce.number(a), ce.mul([ce.number(b), op2]));
+      return canonicalDivide(ce, ce.number(a), ce.mul(ce.number(b), op2));
     }
   }
   const num2 = op2.numericValue;
   if (num2 !== null) {
     if (isMachineRational(num2)) {
       const [a, b] = num2;
-      return canonicalDivide(ce, ce.mul([op1, ce.number(b)]), ce.number(a));
+      return canonicalDivide(ce, ce.mul(op1, ce.number(b)), ce.number(a));
     }
     if (isBigRational(num2)) {
       const [a, b] = num2;
-      return canonicalDivide(ce, ce.mul([op1, ce.number(b)]), ce.number(a));
+      return canonicalDivide(ce, ce.mul(op1, ce.number(b)), ce.number(a));
     }
   }
 
@@ -84,9 +84,9 @@ export function canonicalDivide(
   if (!isRationalOne(c1) || !isRationalOne(c2)) {
     const [cn, cd] = mul(c1, inverse(c2));
 
-    const en = ce.mul([ce.number(cn), t1]);
+    const en = ce.mul(ce.number(cn), t1);
     if (en.isZero) return ce.Zero;
-    const ed = ce.mul([ce.number(cd), t2]);
+    const ed = ce.mul(ce.number(cd), t2);
     if (ed.isOne) return en;
     return ce._fn('Divide', [en, ed]);
   }

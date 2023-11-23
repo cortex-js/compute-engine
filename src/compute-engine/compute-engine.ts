@@ -1714,7 +1714,7 @@ export class ComputeEngine implements IComputeEngine {
    * Shortcut for `this._fn("Add"...).evaluate()`.
    *
    */
-  add(ops: BoxedExpression[]): BoxedExpression {
+  add(...ops: BoxedExpression[]): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
 
     return evalAdd(this, flattenOps(flattenSequence(ops), 'Add'));
@@ -1737,7 +1737,7 @@ export class ComputeEngine implements IComputeEngine {
    * Shortcut for `this._fn("Multiply"...).evaluate()`
    *
    */
-  mul(ops: BoxedExpression[]): BoxedExpression {
+  mul(...ops: BoxedExpression[]): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
     const flatOps = flattenOps(flattenSequence(ops), 'Multiply');
     return evalMultiply(this, flatOps);
