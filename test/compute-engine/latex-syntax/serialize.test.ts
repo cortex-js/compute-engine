@@ -114,7 +114,7 @@ describe('LATEX SERIALIZING', () => {
   test('Missing', () => {
     expect(
       latex(['Equal', ['Multiply', 2, 2], ['Error', "'missing'"]])
-    ).toMatchInlineSnapshot(`4=\\error{\\blacksquare}`);
+    ).toMatchInlineSnapshot(`2\\times2=\\error{\\blacksquare}`);
   });
 });
 

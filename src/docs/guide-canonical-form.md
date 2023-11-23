@@ -147,23 +147,34 @@ transformations it applies.
 Below is a list of some of the transformations applied to obtain the canonical
 form:
 
-- Idempotency: \\( f(f(x)) \to f(x) \\)
-- Involution: \\( f(f(x)) \to x \\)
-- Associativity: \\( f(a, f(b, c)) \to f(a, b, c) \\)
-- **Literals**
+- **Literal Numbers**
   - Rationals are reduced, e.g. \\( \frac{6}{4} \to \frac{3}{2}\\)
   - The denominator of rationals is made positive, e.g. \\(\frac{5}{-11}
     \to \frac{-5}{11}\\)
-  - A rational with a denominator of 1 is replaced with a number, e.g.
+  - A rational with a denominator of 1 is replaced with the numerator, e.g.
     \\(\frac{19}{1} \to 19\\)
-  - Complex numbers with no imaginary component are replaced with a real number
+  - Complex numbers with no imaginary component are replaced with the real component
 - `Add`
-  - Arguments are sorted
+  - Literal 0 is removed
   - Sum of a literal and the product of a literal with the imaginary unit are
     replaced with a complex number.
-- `Multiply`: Arguments are sorted
-- `Negate`: `["Negate", 3]` \\(\to\\) `-3`
+  - Associativity is applied
+  - Arguments are sorted
+- `Multiply`
+  - Literal 1 is removed
+  - Product of a literal and the imaginary unit are replaced with a complex
+    number.
+  - Literal -1 multiplied by an expression is replaced with the negation of the
+    expression.
+  - Signs are simplified: (-x)(-y) -> xy
+  - Associativity is applied
+  - Arguments are sorted
+- `Negate`
+  - Literal numbers are negated
+  - Products that include a literal number have that literal negated
+  - Divisions that include a literal number have that literal negated
 - `Power`
+  - \\(x^n)^m \to x^{nm}\\)
   - \\(x^{\tilde\infty} \to \operatorname{NaN}\\)
   - \\(x^0 \to 1\\)
   - \\(x^1 \to x\\)
@@ -177,7 +188,13 @@ form:
 - `Square`: `["Power", "x", 2]` \\(\to\\) `["Square", "x"]`
 - `Sqrt`: `["Sqrt", "x"]` \\(\to\\)`["Power", "x", "Half"]`
 - `Root`:  `["Root", "x", 3]` \\(\to\\) `["Power", "x", ["Rational", 1, 3]]`
-- `Subtract`: `["Subtract", "a", "b"]` \\(\to\\) `["Add", ["Negate", "b"], "a"]`
+- `Subtract`
+  - Replaced with addition, e.g. `["Subtract", "a", "b"]` \\(\to\\) `["Add", ["Negate", "b"], "a"]`
+- Other functions:
+  - Simplified if idempotent: \\( f(f(x)) \to f(x) \\)
+  - Simplified if an involution: \\( f(f(x)) \to x \\)
+  - Simplified if associative: \\( f(a, f(b, c)) \to f(a, b, c) \\)
+
 
 ## Custom Canonical Form
 

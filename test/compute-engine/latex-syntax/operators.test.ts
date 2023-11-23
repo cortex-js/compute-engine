@@ -92,7 +92,8 @@ describe('OPERATOR add/subtract', () => {
   test('-1-2', () =>
     expect(check('-1-2')).toMatchInlineSnapshot(`
       latex     = ["Subtract", -1, 2]
-      box       = ["Subtract", -1, 2]
+      box       = ["Subtract", -2, 1]
+      canonical = ["Subtract", -1, 2]
       simplify  = -3
     `));
 
@@ -109,7 +110,7 @@ describe('OPERATOR invisible', () => {
     expect(check('2^{3}4+5')).toMatchInlineSnapshot(`
       latex     = ["Add", ["InvisibleOperator", ["Power", 2, 3], 4], 5]
       box       = ["Add", ["Multiply", ["Power", 2, 3], 4], 5]
-      canonical = ["Add", 5, 32]
+      canonical = ["Add", ["Multiply", 4, ["Power", 2, 3]], 5]
       simplify  = 37
     `));
 
@@ -146,7 +147,8 @@ describe('OPERATOR invisible', () => {
   test('2\\frac{1}{4} // Invisible PLUS operator', () =>
     expect(check('2\\frac{1}{4}')).toMatchInlineSnapshot(`
       latex     = ["InvisibleOperator", 2, ["Divide", 1, 4]]
-      box       = ["Add", ["Rational", 1, 4], 2]
+      box       = ["Add", 2, ["Rational", 1, 4]]
+      canonical = ["Add", ["Rational", 1, 4], 2]
       simplify  = ["Rational", 9, 4]
       N-auto    = 2.25
     `));
@@ -171,7 +173,9 @@ describe('OPERATOR prefix', () => {
   test('-x-1 // Negate', () =>
     expect(check('-x-1')).toMatchInlineSnapshot(`
       latex     = ["Subtract", ["Negate", "x"], 1]
-      ["Subtract", -1, "x"]
+      box       = ["Subtract", -1, "x"]
+      canonical = ["Subtract", ["Negate", "x"], 1]
+      simplify  = ["Subtract", -1, "x"]
     `));
   test('-x+1 // Negate', () =>
     expect(check('-x+1')).toMatchInlineSnapshot(`
@@ -304,13 +308,15 @@ describe('OPERATOR multiply', () => {
     expect(check('2\\sin(x)\\frac12')).toMatchInlineSnapshot(`
       latex     = ["InvisibleOperator", 2, ["Sin", "x"], ["Divide", 1, 2]]
       box       = ["Multiply", 2, ["Sin", "x"], "Half"]
-      canonical = ["Sin", "x"]
+      canonical = ["Multiply", "Half", 2, ["Sin", "x"]]
+      simplify  = ["Sin", "x"]
     `));
   test('3\\pi5', () =>
     expect(check('3\\pi5')).toMatchInlineSnapshot(`
       latex     = ["InvisibleOperator", 3, "Pi", 5]
       box       = ["Multiply", 3, "Pi", 5]
-      canonical = ["Multiply", 15, "Pi"]
+      canonical = ["Multiply", 3, 5, "Pi"]
+      simplify  = ["Multiply", 15, "Pi"]
       N-auto    = 47.12388980384689857693965074919254326295754099062658731462416888461724609429313497942052238013175602
       N-mach    = 47.12388980384689
     `));
@@ -400,13 +406,13 @@ describe('OPERATOR precedence', () => {
   test('2\\times3+4 // Precedence', () =>
     expect(check('2\\times3+4')).toMatchInlineSnapshot(`
       latex     = ["Add", ["Multiply", 2, 3], 4]
-      box       = ["Add", 4, 6]
+      box       = ["Add", ["Multiply", 2, 3], 4]
       simplify  = 10
     `));
   test('-2\\times-3-4 // Precedence', () =>
     expect(check('-2\\times-3-4')).toMatchInlineSnapshot(`
       latex     = ["Subtract", ["Multiply", -2, -3], 4]
-      box       = ["Subtract", 6, 4]
+      box       = ["Subtract", ["Multiply", 2, 3], 4]
       simplify  = 2
     `));
 
@@ -426,7 +432,8 @@ describe('OPERATOR postfix', () => {
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`
       latex     = ["Subtract", -2, ["Factorial", 5]]
-      box       = ["Subtract", -2, ["Factorial", 5]]
+      box       = ["Subtract", ["Negate", ["Factorial", 5]], 2]
+      canonical = ["Subtract", -2, ["Factorial", 5]]
       evaluate  = -122
     `));
   test('-5! // Precedence', () =>
@@ -459,13 +466,15 @@ describe('OPERATOR serialize, valid', () => {
     expect(latex(['Subtract', 1, 2])).toMatchInlineSnapshot(`1-2`));
 
   test('1-(-2)', () =>
-    expect(latex(['Subtract', 1, -2])).toMatchInlineSnapshot(`1+2`));
+    expect(latex(['Subtract', 1, -2])).toMatchInlineSnapshot(`1--2`));
 
   test(`['Multiply', 2, 3]`, () =>
-    expect(latex(['Multiply', 2, 3])).toMatchInlineSnapshot(`6`));
+    expect(latex(['Multiply', 2, 3])).toMatchInlineSnapshot(`2\\times3`));
 
   test(`['Multiply', 2, 3, 4]`, () =>
-    expect(latex(['Multiply', 2, 3, 4])).toMatchInlineSnapshot(`24`));
+    expect(latex(['Multiply', 2, 3, 4])).toMatchInlineSnapshot(
+      `2\\times3\\times4`
+    ));
 
   test(`['Multiply', ['Divide', 2, 'x'], ['Divide', 'x', 3]]`, () =>
     expect(

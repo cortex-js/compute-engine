@@ -70,13 +70,16 @@ export function getSymbols(expr: BoxedExpression, result: Set<string>): void {
  */
 export function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
   if (expr.symbol) {
-    const def = expr.engine.lookupSymbol(expr.symbol);
+    const s = expr.symbol;
+    if (s === 'Unknown' || s === 'Undefined' || s === 'Nothing') return;
+
+    const def = expr.engine.lookupSymbol(s);
     if (def && def.value !== undefined) return;
 
-    const fnDef = expr.engine.lookupFunction(expr.symbol);
+    const fnDef = expr.engine.lookupFunction(s);
     if (fnDef && (fnDef.signature.evaluate || fnDef.signature.N)) return;
 
-    result.add(expr.symbol);
+    result.add(s);
     return;
   }
 

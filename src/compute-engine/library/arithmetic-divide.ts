@@ -1,5 +1,5 @@
 import { BoxedExpression, IComputeEngine } from '../public';
-import { makePositive } from '../symbolic/utils';
+import { apply2N, makePositive } from '../symbolic/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import {
   asCoefficient,
@@ -125,4 +125,28 @@ export function simplifyDivide(
   }
 
   return new Product(ce, [op1, ce.inv(op2)]).asRationalExpression();
+}
+
+export function evalDivide(
+  ce: IComputeEngine,
+  op1: BoxedExpression,
+  op2: BoxedExpression
+): BoxedExpression {
+  let result = simplifyDivide(ce, op1, op2);
+  if (result?.head === 'Divide') {
+    if (!result.op1.isExact || !result.op2.isExact) {
+      result =
+        apply2N(
+          op1,
+          op2,
+          (n, d) => n / d,
+          (n, d) => n.div(d),
+          (n, d) => n.div(d)
+        ) ?? result;
+    }
+  }
+
+  if (result !== undefined) return result;
+
+  return ce._fn('Divide', [op1, op2]);
 }

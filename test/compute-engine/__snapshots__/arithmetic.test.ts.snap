@@ -255,6 +255,7 @@ latex     = [
 box       = [
   "Add",
   "Pi",
+  ["Sqrt", 4],
   ["Sqrt", 5],
   ["Sqrt", 5],
   ["Rational", 3, 11],
@@ -262,10 +263,9 @@ box       = [
   1.5,
   1.7,
   2,
-  2,
   4
 ]
-simplify  = ["Add", ["Multiply", ["Sqrt", 5], 2], "Pi", 3.2, ["Rational", 692, 77]]
+simplify  = ["Add", ["Multiply", 2, ["Sqrt", 5]], "Pi", 3.2, ["Rational", 692, 77]]
 evaluate  = 19.800741595602359644
 eval-mach = 19.80074159560236
 `;
@@ -477,13 +477,15 @@ exports[`INVALID ROOT Too many args 1`] = `["Root", 2.5, -1.1, ["Error", "'unexp
 
 exports[`MULTIPLY 2x(-2/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", -2, 3]]
-canonical = ["Rational", -4, 3]
+canonical = ["Multiply", -2, ["Rational", 2, 3]]
+simplify  = ["Rational", -4, 3]
 N-auto    = -1.(3)
 N-mach    = -1.3333333333333333
 `;
 
 exports[`MULTIPLY 2x(1+1.1i) 1`] = `
 box       = ["Multiply", 2, ["Complex", 1, 1.1]]
+simplify  = ["Complex", 2, 2.2]
 evaluate  = ["Complex", 2, 2.2]
 eval-big  = {num: "NaN"}
 eval-mach = {num: "NaN"}
@@ -499,6 +501,7 @@ N-cplx    = ["Complex", 2, 2]
 
 exports[`MULTIPLY 2x(1.1+1.1i) 1`] = `
 box       = ["Multiply", 2, ["Complex", 1.1, 1.1]]
+simplify  = ["Complex", 2.2, 2.2]
 evaluate  = ["Complex", 2.2, 2.2]
 eval-big  = {num: "NaN"}
 eval-mach = {num: "NaN"}
@@ -507,6 +510,7 @@ eval-cplx = ["Complex", 2.2, 2.2]
 
 exports[`MULTIPLY 2x(1.1+i) 1`] = `
 box       = ["Multiply", 2, ["Complex", 1.1, 1]]
+simplify  = ["Complex", 2.2, 2]
 evaluate  = ["Complex", 2.2, 2]
 eval-big  = {num: "NaN"}
 eval-mach = {num: "NaN"}
@@ -515,6 +519,7 @@ eval-cplx = ["Complex", 2.2, 2]
 
 exports[`MULTIPLY 2x(1.1i) 1`] = `
 box       = ["Multiply", 2, ["Complex", 0, 1.1]]
+simplify  = ["Complex", 0, 2.2]
 evaluate  = ["Complex", 0, 2.2]
 eval-big  = {num: "NaN"}
 eval-mach = {num: "NaN"}
@@ -523,36 +528,44 @@ eval-cplx = ["Complex", 0, 2.2]
 
 exports[`MULTIPLY 2x(2/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", 2, 3]]
-canonical = ["Rational", 4, 3]
+canonical = ["Multiply", ["Rational", 2, 3], 2]
+simplify  = ["Rational", 4, 3]
 N-auto    = 1.(3)
 N-mach    = 1.3333333333333333
 `;
 
 exports[`MULTIPLY 2x(1234567890987654321/3) 1`] = `
 box       = ["Multiply", 2, ["Rational", "1234567890987654321", 3]]
-canonical = 823045260658436214
+canonical = ["Multiply", 2, "411522630329218107"]
+simplify  = 823045260658436214
+evaluate  = 823045260658436214
+eval-mach = 823045260658436200
 `;
 
 exports[`MULTIPLY 2x-1234567890987654321.123456789 1`] = `
 box       = ["Multiply", 2, "1234567890987654321.1"]
+simplify  = 2469135781975308642.2
 evaluate  = 2469135781975308642.2
 eval-mach = 2469135781975309000
 `;
 
 exports[`MULTIPLY 2x1234567890987654321 1`] = `
 box       = ["Multiply", 2, "1234567890987654321"]
-canonical = 2469135781975308642
+simplify  = 2469135781975308642
+evaluate  = 2469135781975308642
+eval-mach = 2469135781975309000
 `;
 
 exports[`MULTIPLY 5x(-2.1) 1`] = `
 box       = ["Multiply", 5, -2.1]
 canonical = ["Multiply", -5, 2.1]
-evaluate  = -10.5
+simplify  = -10.5
 `;
 
 exports[`MULTIPLY 5x2 1`] = `
 box       = ["Multiply", 5, 2]
-canonical = 10
+canonical = ["Multiply", 2, 5]
+simplify  = 10
 `;
 
 exports[`MULTIPLY Multiply 1`] = `
@@ -562,13 +575,16 @@ canonical = 2.5
 
 exports[`MULTIPLY Multiply 2`] = `
 box       = ["Multiply", 2.5, 1.1]
-canonical = 2.75
+canonical = ["Multiply", 1.1, 2.5]
+simplify  = 2.75
 `;
 
 exports[`MULTIPLY Multiply 3`] = `
 box       = ["Multiply", 2.5, -1.1, 18.4]
-canonical = -50.6
+canonical = ["Multiply", -2.5, 1.1, 18.4]
+simplify  = -50.6
 evaluate  = -50.6
+N-auto    = -50.599999999999994
 eval-mach = -50.599999999999994
 `;
 
@@ -578,8 +594,9 @@ latex     = [
   2,
   ["Multiply", ["Divide", 5, 7], ["Divide", 7, 9]]
 ]
-box       = ["Multiply", 2, ["Rational", 5, 9]]
-canonical = ["Rational", 10, 9]
+box       = ["Multiply", 2, ["Rational", 5, 7], ["Rational", 7, 9]]
+canonical = ["Multiply", ["Rational", 5, 7], ["Rational", 7, 9], 2]
+simplify  = ["Rational", 10, 9]
 N-auto    = 1.(1)
 N-mach    = 1.1111111111111112
 `;
@@ -594,9 +611,25 @@ latex     = [
   ["Sqrt", 2],
   "Pi"
 ]
-box       = ["Multiply", "Pi", ["Sqrt", 2], ["Rational", 50, 9]]
-canonical = ["Multiply", ["Sqrt", 2], ["Rational", 50, 9], "Pi"]
-evaluate  = ["Multiply", "Pi", ["Sqrt", 2], ["Rational", 50, 9]]
+box       = [
+  "Multiply",
+  ["Sqrt", 2],
+  ["Rational", 5, 7],
+  ["Rational", 7, 9],
+  2,
+  5,
+  "Pi"
+]
+canonical = [
+  "Multiply",
+  ["Rational", 5, 7],
+  ["Rational", 7, 9],
+  2,
+  5,
+  "Pi",
+  ["Sqrt", 2]
+]
+simplify  = ["Multiply", ["Rational", 50, 9], "Pi", ["Sqrt", 2]]
 N-auto    = 24.682682989768701372
 N-mach    = 24.6826829897687
 `;
@@ -612,44 +645,66 @@ latex     = [
   ["Sqrt", 2],
   "Pi"
 ]
-box       = ["Multiply", "Pi", ["Sqrt", 2], 1.1, ["Rational", 50, 9]]
-canonical = ["Multiply", ["Sqrt", 2], 1.1, ["Rational", 50, 9], "Pi"]
+box       = [
+  "Multiply",
+  ["Sqrt", 2],
+  ["Rational", 5, 7],
+  ["Rational", 7, 9],
+  1.1,
+  2,
+  5,
+  "Pi"
+]
+canonical = [
+  "Multiply",
+  ["Rational", 5, 7],
+  ["Rational", 7, 9],
+  1.1,
+  2,
+  5,
+  "Pi",
+  ["Sqrt", 2]
+]
+simplify  = 27.15095128874557151
 evaluate  = 27.15095128874557151
-eval-mach = 27.15095128874557
+eval-mach = 27.150951288745574
+N-mach    = 27.150951288745578
 `;
 
 exports[`MULTIPLY with +Infinity 1`] = `
 box       = ["Multiply", "x", -2, 3.1, {num: "+Infinity"}]
 canonical = ["Multiply", -2, 3.1, {num: "+Infinity"}, "x"]
-evaluate  = {num: "+Infinity"}
+simplify  = {num: "+Infinity"}
 `;
 
 exports[`MULTIPLY with <0 1`] = `
 box       = ["Multiply", "x", -2, 3.1, -5.2]
-canonical = ["Multiply", 2, 16.12, "x"]
-evaluate  = ["Multiply", 32.24, "x"]
+canonical = ["Multiply", 2, 3.1, 5.2, "x"]
+simplify  = ["Multiply", 32.24, "x"]
 `;
 
 exports[`MULTIPLY with -Infinity 1`] = `
 box       = ["Multiply", "x", -2, 3.1, {num: "-Infinity"}]
 canonical = ["Multiply", 2, 3.1, {num: "+Infinity"}, "x"]
-evaluate  = {num: "+Infinity"}
+simplify  = {num: "+Infinity"}
 `;
 
 exports[`MULTIPLY with -Infinity and +Infinity 1`] = `
 box       = ["Multiply", "x", -2, 3.1, {num: "-Infinity"}, {num: "+Infinity"}]
-canonical = ["Multiply", 2, 3.1, {num: "+Infinity"}, "x"]
-evaluate  = {num: "+Infinity"}
+canonical = ["Multiply", 2, 3.1, {num: "+Infinity"}, {num: "+Infinity"}, "x"]
+simplify  = {num: "+Infinity"}
 `;
 
 exports[`MULTIPLY with NaN 1`] = `
 box       = ["Multiply", "x", 2, 3.1, {num: "NaN"}]
-canonical = {num: "NaN"}
+canonical = ["Multiply", 3.1, {num: "NaN"}, 2, "x"]
+simplify  = {num: "NaN"}
 `;
 
 exports[`MULTIPLY with zero 1`] = `
 box       = ["Multiply", "x", 2, 3.1, 0]
-canonical = 0
+canonical = ["Multiply", 0, 2, 3.1, "x"]
+simplify  = 0
 `;
 
 exports[`Max Max 1`] = `
@@ -873,7 +928,7 @@ exports[`RELATIONAL OPERATOR NotEqual 2`] = `True`;
 
 exports[`ROOT Root 2.5 1`] = `1.3572088082974532443`;
 
-exports[`ROOT Root 5/7 1`] = `0.89390353509656766727`;
+exports[`ROOT Root 5/7 1`] = `["Divide", ["Root", 5, 3], ["Root", 7, 3]]`;
 
 exports[`ROOT Root 1234567890987654321 1`] = `["Root", "1234567890987654321", 3]`;
 
@@ -928,7 +983,7 @@ simplify  = 5
 
 exports[`SQRT √(175) 1`] = `
 box       = ["Sqrt", 175]
-canonical = ["Multiply", ["Sqrt", 7], 5]
+evaluate  = ["Multiply", 5, ["Sqrt", 7]]
 N-auto    = 13.228756555322952953
 N-mach    = 13.228756555322953
 `;

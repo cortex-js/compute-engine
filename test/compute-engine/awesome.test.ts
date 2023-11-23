@@ -378,7 +378,13 @@ describe('Euler Prime Generating Polynomial', () => {
         ],
         7243
       ]
-      [
+      box       = [
+        "Add",
+        ["Multiply", 8, ["Square", "x"]],
+        ["Negate", ["Multiply", 488, "x"]],
+        7243
+      ]
+      canonical = [
         "Add",
         ["Multiply", 8, ["Square", "x"]],
         ["Multiply", -488, "x"],
@@ -396,7 +402,13 @@ describe('Euler Prime Generating Polynomial', () => {
         ],
         2971
       ]
-      [
+      box       = [
+        "Add",
+        ["Multiply", 43, ["Square", "x"]],
+        ["Negate", ["Multiply", 537, "x"]],
+        2971
+      ]
+      canonical = [
         "Add",
         ["Multiply", 43, ["Square", "x"]],
         ["Multiply", -537, "x"],
@@ -414,7 +426,13 @@ describe('Euler Prime Generating Polynomial', () => {
         ],
         2763
       ]
-      [
+      box       = [
+        "Add",
+        ["Multiply", 36, ["Square", "x"]],
+        ["Negate", ["Multiply", 810, "x"]],
+        2763
+      ]
+      canonical = [
         "Add",
         ["Multiply", 36, ["Square", "x"]],
         ["Multiply", -810, "x"],
@@ -428,7 +446,8 @@ describe('Euler Prime Generating Polynomial', () => {
         ["Subtract", ["Power", "x", 2], ["InvisibleOperator", 79, "x"]],
         1601
       ]
-      ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
+      box       = ["Add", ["Negate", ["Multiply", 79, "x"]], ["Square", "x"], 1601]
+      canonical = ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
     `));
   test('x in 0..10', () =>
     expect(check('2x^2 + 11')).toMatchInlineSnapshot(`
@@ -457,6 +476,14 @@ describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
       box       = [
         "Floor",
         ["Power", ["Rational", 3540326840, 2710032743], ["Power", 3, "n"]]
+      ]
+      evaluate  = [
+        "Floor",
+        [
+          "Multiply",
+          ["Power", 3540326840, ["Power", 3, "n"]],
+          ["Power", 2710032743, ["Negate", ["Power", 3, "n"]]]
+        ]
       ]
       N-auto    = [
         "Floor",
@@ -519,7 +546,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
           6
         ]
       ]
-      canonical = [
+      simplify  = [
         "Multiply",
         ["Power", ["Divide", "n", "ExponentialE"], "n"],
         [

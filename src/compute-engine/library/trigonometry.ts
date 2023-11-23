@@ -708,6 +708,8 @@ function constructibleValues(
   x: BoxedExpression | undefined
 ): undefined | BoxedExpression {
   if (!x) return undefined;
+  let theta = asFloat(x.N());
+  if (theta === null) return undefined;
 
   //
   // Create the cache of special values
@@ -737,9 +739,6 @@ function constructibleValues(
       return cache;
     }
   );
-
-  let theta = asFloat(x.N());
-  if (theta === null) return undefined;
 
   // Odd-even identities
   // Cos and Sec are even functions, the others are odd

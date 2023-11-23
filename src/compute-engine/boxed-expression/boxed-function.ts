@@ -40,6 +40,11 @@ import { apply } from '../function-utils';
 import { shouldHold } from '../symbolic/utils';
 import { at, isFiniteIndexableCollection } from '../collection-utils';
 import { narrow } from './boxed-domain';
+import { canonicalAdd } from '../library/arithmetic-add';
+import { canonicalPower } from '../library/arithmetic-power';
+import { canonicalNegate } from '../symbolic/negate';
+import { canonicalDivide } from '../library/arithmetic-divide';
+import { canonicalMultiply } from '../library/arithmetic-multiply';
 
 /**
  * A boxed function represent an expression that can be
@@ -690,19 +695,24 @@ function makeNumericFunction(
   // Short path for some functions
   // (avoid looking up a definition)
   //
-  if (head === 'Add') return ce.add(ops, metadata);
-  if (head === 'Negate') return ce.neg(ops[0], metadata);
-  if (head === 'Multiply') return ce.mul(ops, metadata);
-  if (head === 'Divide') return ce.div(ops[0], ops[1], metadata);
-  if (head === 'Exp') return ce.pow(ce.E, ops[0], metadata);
-  if (head === 'Power') return ce.pow(ops[0], ops[1], metadata);
-  if (head === 'Square') return ce.pow(ops[0], 2, metadata);
+  if (head === 'Add')
+    return canonicalAdd(ce, flattenOps(flattenSequence(ops), 'Add'));
+  if (head === 'Negate') return canonicalNegate(ops[0]);
+  if (head === 'Multiply')
+    return canonicalMultiply(ce, flattenOps(flattenSequence(ops), 'Multiply'));
+  if (head === 'Divide')
+    return canonicalDivide(ce, ops[0].canonical, ops[1].canonical);
+  if (head === 'Exp') return canonicalPower(ce, ce.E, ops[0].canonical);
+  if (head === 'Power')
+    return canonicalPower(ce, ops[0].canonical, ops[1].canonical);
+  if (head === 'Square')
+    return canonicalPower(ce, ops[0].canonical, ce.number(2));
   if (head === 'Sqrt') {
     const op = ops[0].canonical;
     // We preserve square roots of rationals as "exact" values
     if (isRational(op.numericValue)) return ce._fn('Sqrt', [op], metadata);
 
-    return ce.pow(op, ce.Half, metadata);
+    return canonicalPower(ce, op, ce.Half);
   }
   if (head === 'Ln') return ce._fn('Ln', ops, metadata);
 

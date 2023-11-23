@@ -8,6 +8,12 @@
   `ce.parse('\frac{1}{2}', {canonical: false})` would return `Half` instead of
   `['Divide', '1', '2']`.
 
+## Improvements
+
+- Significant improvements to symbolic computation. Now, boxing,
+  canonicalization and evaluation are more consistent and produce more
+  predictable results.
+
 ## 0.22.0
 
 **Release Date:** 2023-11-13

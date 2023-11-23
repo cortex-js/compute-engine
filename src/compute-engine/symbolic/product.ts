@@ -20,6 +20,7 @@ import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
 import { bigint } from '../numerics/numeric-bigint';
+import { asExactSqrt, isSqrt } from '../library/arithmetic-power';
 
 /**
  * Group terms in a product by common term.
@@ -42,11 +43,11 @@ export class Product {
 
   // Running products (if canonical)
   private _sign: number;
-  private _rational: Rational;
-  // private _squareRootRational: Rational;
+  private _number: number; // Non-exact (non-integer) numbers
   private _complex: Complex;
   private _bignum: Decimal;
-  private _number: number;
+  private _rational: Rational;
+  private _exactSqrt: Rational; // Exact square root, i.e. √(5/2), √2, but not √(x+1) or √(2.1) or √π
 
   // Other terms of the product, `term` is the key
   private _terms: {
@@ -72,7 +73,7 @@ export class Product {
     this.engine = ce;
     this._sign = 1;
     this._rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [1, 1];
-    // this._squareRootRational = this._rational;
+    this._exactSqrt = this._rational;
     this._complex = Complex.ONE;
     this._bignum = ce._BIGNUM_ONE;
     this._number = 1;
@@ -87,12 +88,12 @@ export class Product {
       this._hasInfinity === false &&
       this._hasZero === false &&
       this._sign === 1 &&
-      isRationalOne(this._rational) &&
-      // isRationalOne(this._squareRootRational) &&
+      this._number === 1 &&
       this._complex.re === 1 &&
       this._complex.im === 0 &&
       this._bignum.eq(this.engine._BIGNUM_ONE) &&
-      this._number === 1
+      isRationalOne(this._rational) &&
+      isRationalOne(this._exactSqrt)
     );
   }
 
@@ -173,6 +174,12 @@ export class Product {
           return;
         }
       }
+
+      const sqrt = asExactSqrt(term);
+      if (sqrt) {
+        this._exactSqrt = mul(this._exactSqrt, sqrt);
+        return;
+      }
     }
 
     let rest = term;
@@ -217,6 +224,10 @@ export class Product {
     if (!found) this._terms.push({ term: rest, exponent });
   }
 
+  /** Return all ther terms with an exponent of 1 and
+   * the square root of rationals (which technically have an
+   * exponent of 1/2, but are considered as degree 1 terms)
+   */
   unitTerms(
     mode: 'rational' | 'expression' | 'numeric'
   ): { exponent: Rational; terms: BoxedExpression[] }[] | null {
@@ -276,21 +287,50 @@ export class Product {
     const unitTerms: BoxedExpression[] = [];
     if (this._hasInfinity) unitTerms.push(ce.PositiveInfinity);
 
-    this._rational = reducedRational(this._rational);
-    // this._squareRootRational = reducedRational(this._squareRootRational);
+    //
+    // Square root of rationals
+    //
+    this._exactSqrt = reducedRational(this._exactSqrt);
+    // Attempt to reduce the square root
+    if (!isRationalOne(this._exactSqrt)) {
+      const [n, d] = this._exactSqrt;
+      const num = ce.sqrt(ce.number(n));
+      const den = ce.sqrt(ce.number(d));
 
+      if (den.isOne) {
+        const r = asRational(num);
+        if (r) this._rational = mul(this._rational, r);
+        else unitTerms.push(num);
+      } else if (num.isInteger && den.isInteger) {
+        this._rational = mul(mul(this._rational, num), ce.inv(den));
+        unitTerms.push(ce._fn('Sqrt', [ce.div(num.op1, den.op1)]));
+      } else if (isSqrt(num) && isSqrt(den)) {
+        unitTerms.push(ce._fn('Sqrt', [ce.div(num.op1, den.op1)]));
+      } else {
+        unitTerms.push(ce._fn('Divide', [num, den]));
+      }
+    }
+
+    //
     // Complex
+    //
     if (this._complex.re !== 1 || this._complex.im !== 0) {
       if (this._complex.im === 0) this._number *= Math.abs(this._complex.re);
-      if (this._complex.re < 0) this._rational = neg(this._rational);
       else {
         unitTerms.push(ce.number(this._complex));
       }
     }
 
+    //
+    // Floating point
+    //
     let n = this._sign * this._number;
     let b = this._bignum;
 
+    //
+    // Rational
+    //
+    this._rational = reducedRational(this._rational);
     if (!isRationalOne(this._rational)) {
       if (mode === 'rational') {
         if (machineNumerator(this._rational) !== 1) {
@@ -311,7 +351,10 @@ export class Product {
       }
     }
 
+    //
     // Literal
+    //
+
     if (!b.equals(ce._BIGNUM_ONE)) unitTerms.push(ce.number(b.mul(n)));
     else if (n !== 1) unitTerms.push(ce.number(n));
 

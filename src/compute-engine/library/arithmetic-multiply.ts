@@ -16,16 +16,15 @@ import {
 import { apply2N } from '../symbolic/utils';
 import { canonicalIndexingSet, normalizeIndexingSet } from './utils';
 import { each } from '../collection-utils';
+import { order } from '../boxed-expression/order';
 
 /** The canonical form of `Multiply`:
  * - remove `1`
- * - combine literal integers and rationals
- * - any arg is literal 0 -> return 0
- * - combine terms with same base
- *    `a a^3` -> `a^4`
  * - simplify the signs:
  *    - i.e. `-y \times -x` -> `x \times y`
  *    - `2 \times -x` -> `-2 \times x`
+ * - arguments are sorted
+ * - complex numbers promoted (['Multiply', 2, 'ImaginaryUnit'] -> 2i)
  *
  * The ops must be canonical, the result is canonical.
  */
@@ -37,14 +36,70 @@ export function canonicalMultiply(
 
   if (ops.length === 0) return ce.One;
   if (ops.length === 1) return ops[0];
-  if (ops.length === 2) return multiply2(ops[0], ops[1]);
 
-  const product = new Product(ce);
+  const result: BoxedExpression[] = [];
+  let sign = 1;
+  let num: number | undefined = undefined;
+  let imaginaryCount = 0;
   for (const op of ops) {
-    if (op.isNaN || op.symbol === 'Undefined') return ce.NaN;
-    product.addTerm(op);
+    if (op.isOne) continue;
+    if (op.isNegativeOne) {
+      sign = -sign;
+      continue;
+    }
+    if (op.head === 'Negate') {
+      sign = -sign;
+      result.push(op.op1);
+      continue;
+    }
+    // Capture the first machine literal, to potentially use as a imaginary coef
+    if (num === undefined && typeof op.numericValue === 'number') {
+      num = op.numericValue;
+      if (num < 0) {
+        sign = -sign;
+        num = -num;
+      }
+      continue;
+    }
+    if (op.numericValue !== null && op.isNegative) {
+      sign = -sign;
+      result.push(ce.neg(op));
+      continue;
+    }
+    if (op.symbol === 'ImaginaryUnit') {
+      imaginaryCount++;
+      continue;
+    }
+    result.push(op);
   }
-  return product.asExpression();
+
+  // See if we had a complex number
+  if (imaginaryCount > 0) {
+    if (imaginaryCount % 2 === 0) {
+      // Even number of imaginary units
+      sign = -sign;
+    } else {
+      // Odd number of imaginary units
+      result.push(ce.number(ce.complex(0, sign * (num ?? 1))));
+      sign = 1;
+      num = undefined;
+    }
+  }
+
+  if (typeof num === 'number') {
+    result.push(ce.number(sign * num));
+    sign = 1;
+  }
+
+  if (sign < 0) {
+    if (result.length === 0) return ce.NegativeOne;
+    if (result.length === 1) return ce.neg(result[0]);
+    return ce.neg(ce._fn('Multiply', result.sort(order)));
+  }
+
+  if (result.length === 0) return ce.One;
+  if (result.length === 1) return result[0];
+  return ce._fn('Multiply', result.sort(order));
 }
 
 export function simplifyMultiply(
@@ -66,8 +121,8 @@ export function evalMultiply(
   ce: IComputeEngine,
   ops: BoxedExpression[],
   mode: 'N' | 'evaluate' = 'evaluate'
-): BoxedExpression | undefined {
-  console.assert(ops.length > 1, 'evalMultiply(): no arguments');
+): BoxedExpression {
+  if (ops.length === 1) return ops[0];
 
   //
   // @fastpath
@@ -91,6 +146,7 @@ export function evalMultiply(
     if (op.isNaN || op.symbol === 'Undefined') return ce.NaN;
     if (!op.isExact) mode = 'N';
   }
+  if (!ops.every((x) => x.head !== 'Multiply')) debugger;
   console.assert(ops.every((x) => x.head !== 'Multiply'));
 
   if (mode === 'N') ops = ops.map((x) => x.N());
@@ -114,8 +170,7 @@ export function evalMultiply(
  */
 function multiply2(
   op1: BoxedExpression,
-  op2: BoxedExpression,
-  metadata?: Metadata
+  op2: BoxedExpression
 ): BoxedExpression {
   console.assert(op1.isCanonical);
   console.assert(op2.isCanonical);
@@ -186,20 +241,16 @@ function multiply2(
       if (isRationalZero(r)) return ce.Zero;
       if (t.head === 'Add') {
         if (sign < 0) c = canonicalNegate(c);
-        return ce.add(
-          t.ops!.map((x) => multiply2(c, x)),
-          metadata
-        );
+        return ce.add(t.ops!.map((x) => multiply2(c, x)));
       }
 
       const tr = asRational(t);
       if (tr) {
         const p = mul(r, tr);
-        return ce.number(sign < 0 ? neg(p) : p, { metadata });
+        return ce.number(sign < 0 ? neg(p) : p);
       }
-      if (sign < 0)
-        return ce._fn('Multiply', [canonicalNegate(c), t], metadata);
-      return ce._fn('Multiply', [c, t], metadata);
+      if (sign < 0) return ce._fn('Multiply', [canonicalNegate(c), t]);
+      return ce._fn('Multiply', [c, t]);
     }
   }
 
@@ -208,7 +259,7 @@ function multiply2(
   const product = new Product(ce, [c, t]);
 
   if (sign > 0) return product.asExpression();
-  return canonicalNegate(product.asExpression(), metadata);
+  return canonicalNegate(product.asExpression());
 }
 
 // Canonical form of `["Product"]` (`\prod`) expressions.

@@ -2289,27 +2289,22 @@ export interface IComputeEngine {
 
   hold(expr: SemiBoxedExpression): BoxedExpression;
 
-  add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression;
+  add(ops: BoxedExpression[]): BoxedExpression;
 
-  mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression;
+  mul(ops: BoxedExpression[]): BoxedExpression;
 
   pow(
     base: BoxedExpression,
-    exponent: number | Rational | BoxedExpression,
-    metadata?: Metadata
+    exponent: number | Rational | BoxedExpression
   ): BoxedExpression;
 
-  sqrt(base: BoxedExpression, metadata?: Metadata): BoxedExpression;
+  sqrt(base: BoxedExpression): BoxedExpression;
 
-  inv(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
+  inv(expr: BoxedExpression): BoxedExpression;
 
-  neg(expr: BoxedExpression, metadata?: Metadata): BoxedExpression;
+  neg(expr: BoxedExpression): BoxedExpression;
 
-  div(
-    num: BoxedExpression,
-    denom: BoxedExpression,
-    metadata?: Metadata
-  ): BoxedExpression;
+  div(num: BoxedExpression, denom: BoxedExpression): BoxedExpression;
 
   pair(
     first: BoxedExpression,

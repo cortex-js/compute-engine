@@ -12,14 +12,16 @@ describe('CANONICAL FORMS', () => {
   test('a-0', () => {
     expect(check('a-0')).toMatchInlineSnapshot(`
       latex     = ["Subtract", "a", 0]
-      a
+      box       = ["Subtract", "a", 0]
+      simplify  = a
     `);
   });
 
   test('0-a', () => {
     expect(check('0-a')).toMatchInlineSnapshot(`
       latex     = ["Subtract", 0, "a"]
-      ["Negate", "a"]
+      box       = ["Subtract", 0, "a"]
+      simplify  = ["Negate", "a"]
     `);
   });
 
@@ -39,7 +41,8 @@ describe('CANONICAL FORMS', () => {
     expect(check('2^3x')).toMatchInlineSnapshot(`
       latex     = ["InvisibleOperator", ["Power", 2, 3], "x"]
       box       = ["Multiply", ["Power", 2, 3], "x"]
-      canonical = ["Multiply", 8, "x"]
+      canonical = ["Multiply", "x", ["Power", 2, 3]]
+      simplify  = ["Multiply", 8, "x"]
     `);
   });
 
@@ -163,7 +166,8 @@ describe('CANONICAL FORMS', () => {
     expect(check('2x\\frac{0}{5}')).toMatchInlineSnapshot(`
       latex     = ["InvisibleOperator", 2, "x", ["Divide", 0, 5]]
       box       = ["Multiply", 2, "x", 0]
-      canonical = 0
+      canonical = ["Multiply", 0, 2, "x"]
+      simplify  = 0
     `);
   });
 
@@ -178,14 +182,15 @@ describe('CANONICAL FORMS', () => {
   test('2\\times0\\times5\\times4"', () => {
     expect(check('2\\times0\\times5\\times4')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, 0, 5, 4]
-      0
+      box       = ["Multiply", 0, 2, 4, 5]
+      simplify  = 0
     `);
   });
 
   test('2\\times(5-5)\\times5\\times4"', () => {
     expect(check('2\\times(5-5)\\times5\\times4')).toMatchInlineSnapshot(`
       latex     = ["Multiply", 2, ["Delimiter", ["Sequence", ["Subtract", 5, 5]]], 5, 4]
-      box       = ["Multiply", 40, ["Subtract", 5, 5]]
+      box       = ["Multiply", 2, 4, 5, ["Subtract", 5, 5]]
       simplify  = 0
     `);
   });
@@ -244,6 +249,18 @@ describe('COMMUTATIVE ORDER', () => {
       ]
       canonical = [
         "Multiply",
+        -2,
+        ["Rational", 3, 4],
+        3,
+        5,
+        "Pi",
+        "x",
+        "y",
+        "z",
+        ["Sqrt", "y"]
+      ]
+      simplify  = [
+        "Multiply",
         ["Rational", -45, 2],
         "Pi",
         "x",
@@ -254,10 +271,11 @@ describe('COMMUTATIVE ORDER', () => {
         "Multiply",
         "-70.68583470577034786540947612378881489443631148593988097193625332692586914143970246913078357019763403",
         "x",
+        "y",
         "z",
-        ["Power", "y", 1.5]
+        ["Sqrt", "y"]
       ]
-      N-mach    = ["Multiply", -70.68583470577035, "x", "z", ["Power", "y", 1.5]]
+      N-mach    = ["Multiply", -70.68583470577035, "x", "y", "z", ["Sqrt", "y"]]
     `);
   });
 
@@ -309,6 +327,31 @@ describe('COMMUTATIVE ORDER', () => {
         3
       ]
       canonical = [
+        "Multiply",
+        3,
+        "b",
+        "d",
+        "g",
+        "y",
+        ["Power", "b", 3],
+        ["Square", "c"],
+        ["Power", "x", 7],
+        ["Power", "a", 5],
+        ["Square", "b"],
+        ["Power", "x", 5]
+      ]
+      simplify  = [
+        "Multiply",
+        3,
+        "d",
+        "g",
+        "y",
+        ["Square", ["Multiply", "b", "c"]],
+        ["Power", "b", 4],
+        ["Power", ["Multiply", "a", "x"], 5],
+        ["Power", "x", 7]
+      ]
+      evaluate  = [
         "Multiply",
         3,
         "d",
@@ -409,7 +452,7 @@ describe('POLYNOMIAL ORDER', () => {
       canonical = [
         "Add",
         ["Multiply", 2, "Pi", ["Power", "x", 3]],
-        ["Multiply", 12, "Pi", ["Power", "x", 3]],
+        ["Multiply", 3, 4, "Pi", ["Power", "x", 3]],
         ["Power", "x", 3]
       ]
       simplify  = ["Add", ["Multiply", 14, "Pi", ["Power", "x", 3]], ["Power", "x", 3]]
@@ -457,10 +500,18 @@ describe('POLYNOMIAL ORDER', () => {
       canonical = [
         "Add",
         ["Multiply", ["Square", "x"], ["Power", "y", 3]],
+        ["Multiply", ["Power", "x", 3], ["Square", "y"]],
         ["Multiply", ["Square", "x"], ["Square", "y"]],
-        ["Multiply", ["Square", "y"], ["Power", "x", 3]],
         ["Multiply", "x", ["Power", "y", 4]],
         ["Multiply", "y", ["Power", "x", 4]]
+      ]
+      simplify  = [
+        "Add",
+        ["Multiply", ["Square", "x"], ["Power", "y", 3]],
+        ["Multiply", ["Square", "y"], ["Power", "x", 3]],
+        ["Multiply", "x", ["Power", "y", 4]],
+        ["Multiply", "y", ["Power", "x", 4]],
+        ["Square", ["Multiply", "x", "y"]]
       ]
     `);
   });
@@ -501,11 +552,11 @@ describe('POLYNOMIAL ORDER', () => {
       ]
       canonical = [
         "Add",
+        ["Multiply", ["Power", "a", 3], ["Square", "a"]],
+        ["Multiply", ["Power", "b", 3], ["Square", "b"]],
         ["Multiply", "b", ["Power", "a", 5]],
         ["Power", "a", 5],
-        ["Power", "a", 5],
-        ["Power", "b", 6],
-        ["Power", "b", 5]
+        ["Power", "b", 6]
       ]
       simplify  = [
         "Add",

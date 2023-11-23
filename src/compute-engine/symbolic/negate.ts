@@ -5,10 +5,7 @@ import { neg } from '../numerics/rationals';
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { flattenOps } from './flatten';
 
-function negateLiteral(
-  expr: BoxedExpression,
-  metadata?: Metadata
-): BoxedExpression | null {
+function negateLiteral(expr: BoxedExpression): BoxedExpression | null {
   // Applying negation is safe (doesn't introduce numeric errors)
   // even on floating point numbers
   let n = expr.numericValue;
@@ -19,7 +16,7 @@ function negateLiteral(
   else if (n instanceof Complex) n = n.neg();
   else if (Array.isArray(n)) n = neg(n);
 
-  return expr.engine.number(n, { metadata });
+  return expr.engine.number(n);
 }
 
 /**
@@ -29,21 +26,23 @@ function negateLiteral(
  * It is important to do all these to handle cases like
  * `-3x` -> ["Negate, ["Multiply", 3, "x"]] -> ["Multiply, -3, x]
  */
-export function canonicalNegate(
-  expr: BoxedExpression,
-  metadata?: Metadata
-): BoxedExpression {
+export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
   // Negate(Negate(x)) -> x
-  if (expr.head === 'Negate') return expr.op1;
+  let sign = -1;
+  while (expr.head === 'Negate') {
+    expr = expr.op1;
+    sign = -sign;
+  }
+  if (sign === 1) return expr;
 
-  if (expr.numericValue !== null) return negateLiteral(expr, metadata)!;
+  if (expr.numericValue !== null) return negateLiteral(expr)!;
 
   // Distribute over addition
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
   if (expr.head === 'Add') {
     let ops = expr.ops!.map((x) => canonicalNegate(x));
     ops = flattenOps(ops, 'Add');
-    return expr.engine.add(ops, metadata);
+    return expr.engine.add(ops);
   }
 
   // Distribute over multiplication
@@ -60,7 +59,7 @@ export function canonicalNegate(
   // 'Subtract' is canonicalized into `Add`, so don't have to worry about it
   console.assert(expr.head !== 'Subtract');
 
-  return expr.engine._fn('Negate', [expr], metadata);
+  return expr.engine._fn('Negate', [expr]);
 }
 
 // Given a list of terms in a product, find the "best" one to negate in

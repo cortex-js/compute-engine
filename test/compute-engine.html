@@ -689,7 +689,7 @@
           if (unknowns.length >= 1) {
             const sols = expr.solve(unknowns.includes("x") ? "x" : unknowns[0]);
             if (sols && sols.length > 0) {
-              updateLatex(sols.map((x) => x.latex).join(",,\\:"), "solve");
+              updateLatex(sols.map((x) => x.latex).join(",\\:"), "solve");
             }
           }
         } catch (e) {

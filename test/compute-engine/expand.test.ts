@@ -10,7 +10,7 @@ describe('EXPAND POWER', () => {
       box       = ["Expand", ["Power", ["Add", "a", "b"], 6]]
       evaluate  = [
         "Add",
-        ["Multiply", 20, ["Power", "a", 3], ["Power", "b", 3]],
+        ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]],
         ["Multiply", 15, ["Square", "a"], ["Power", "b", 4]],
         ["Multiply", 15, ["Square", "b"], ["Power", "a", 4]],
         ["Multiply", 6, "a", ["Power", "b", 5]],
@@ -31,13 +31,13 @@ describe('EXPAND POWER', () => {
       ]
       evaluate  = [
         "Add",
-        ["Multiply", ["Power", 4, 6], ["Power", ["Square", "b"], 6]],
-        ["Multiply", ["Power", 2, 6], ["Power", "a", 6]],
-        ["Multiply", 3840, ["Square", ["Square", "b"]], ["Power", "a", 4]],
-        ["Multiply", 10240, ["Power", "a", 3], ["Power", ["Square", "b"], 3]],
-        ["Multiply", 15360, ["Square", "a"], ["Power", ["Square", "b"], 4]],
-        ["Multiply", 768, ["Square", "b"], ["Power", "a", 5]],
-        ["Multiply", 12288, "a", ["Power", ["Square", "b"], 5]]
+        ["Multiply", 2, ["Power", "b", 72]],
+        ["Multiply", ["Sqrt", 2], ["Power", "a", 6]],
+        ["Multiply", 30, ["Sqrt", 2], ["Square", "a"], ["Power", "b", 32]],
+        ["Multiply", 40, ["Sqrt", 2], ["Power", "a", 3], ["Power", "b", 18]],
+        ["Multiply", 30, ["Sqrt", 2], ["Power", "a", 4], ["Power", "b", 8]],
+        ["Multiply", 24, ["Sqrt", 2], ["Square", "b"], ["Power", "a", 5]],
+        ["Multiply", 24, "a", ["Power", "b", 50]]
       ]
     `));
 });
@@ -53,9 +53,9 @@ describe('EXPAND PRODUCT', () => {
       box       = [
         "Expand",
         [
-          "Add",
-          ["Multiply", -5, ["Subtract", ["Multiply", 5, "x"], 4]],
-          ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]]
+          "Subtract",
+          ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]],
+          ["Multiply", 5, ["Subtract", ["Multiply", 5, "x"], 4]]
         ]
       ]
       simplify  = [
