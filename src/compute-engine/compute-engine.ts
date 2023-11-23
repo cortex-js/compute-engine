@@ -80,15 +80,8 @@ import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
-import {
-  inverse,
-  isBigRational,
-  isMachineRational,
-  isRational,
-  isRationalOne,
-  isRationalZero,
-} from './numerics/rationals';
-import { canonicalNegate } from './symbolic/negate';
+import { inverse, isRational } from './numerics/rationals';
+import { canonicalNegate, evalNegate } from './symbolic/negate';
 import { flattenOps, flattenSequence } from './symbolic/flatten';
 import { bigint } from './numerics/numeric-bigint';
 import { parseFunctionSignature } from './function-utils';
@@ -1727,9 +1720,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   neg(expr: BoxedExpression): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-
-    // Note: eval negate is same as canonical negate
-    return canonicalNegate(expr.canonical);
+    return evalNegate(expr.canonical);
   }
 
   /**

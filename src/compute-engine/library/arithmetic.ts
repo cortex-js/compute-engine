@@ -36,7 +36,7 @@ import {
   IComputeEngine,
 } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
-import { processNegate } from '../symbolic/negate';
+import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
   simplifyAdd,
   evalAdd,
@@ -58,7 +58,7 @@ import {
   checkDomains,
   checkNumericArgs,
 } from '../boxed-expression/validate';
-import { flattenSequence } from '../symbolic/flatten';
+import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { each, isCollection } from '../collection-utils';
 import { BoxedNumber } from '../boxed-expression/boxed-number';
 
@@ -811,14 +811,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // ['Subtract', 'x'] -> ['Negate', 'x']
           if (args.length === 1) {
             const x = checkDomain(ce, args[0], 'Numbers');
-            if (x.isValid) return ce._fn('Negate', [x]);
+            if (x.isValid) return canonicalNegate(x);
           }
 
           args = checkNumericArgs(ce, args, 2);
           const [a, b] = args;
           if (args.length !== 2 || !a.isValid || !b.isValid)
             return ce._fn('Subtract', args);
-          return ce._fn('Add', [a, ce._fn('Negate', [b])]);
+          return ce._fn('Add', flattenOps([a, canonicalNegate(b)], 'Add'));
         },
       },
     },

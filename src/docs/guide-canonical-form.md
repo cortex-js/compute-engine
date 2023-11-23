@@ -171,8 +171,7 @@ form:
   - Arguments are sorted
 - `Negate`
   - Literal numbers are negated
-  - Products that include a literal number have that literal negated
-  - Divisions that include a literal number have that literal negated
+  - Negate of a negation is removed
 - `Power`
   - \\(x^n)^m \to x^{nm}\\)
   - \\(x^{\tilde\infty} \to \operatorname{NaN}\\)

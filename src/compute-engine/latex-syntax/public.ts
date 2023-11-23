@@ -293,6 +293,8 @@ export type ExpressionEntry = BaseEntry &
   Trigger & {
     kind: 'expression'; // Default entry is "expression"
     parse: Expression | ExpressionParseHandler;
+
+    precedence?: Precedence;
   };
 
 export type MatchfixEntry = BaseEntry & {
@@ -536,6 +538,8 @@ export type ParseLatexOptions = {
   preserveLatex: boolean;
 };
 
+export type DelimiterScale = 'normal' | 'scaled' | 'big' | 'none';
+
 export type SerializeLatexOptions = {
   /**
    * LaTeX string used to render an invisible multiply, e.g. in '2x'.
@@ -575,15 +579,9 @@ export type SerializeLatexOptions = {
   missingSymbol: LatexString; // e.g. '\\placeholder{}'
 
   // Styles
-  applyFunctionStyle: (
-    expr: Expression,
-    level: number
-  ) => 'paren' | 'leftright' | 'big' | 'none';
+  applyFunctionStyle: (expr: Expression, level: number) => DelimiterScale;
 
-  groupStyle: (
-    expr: Expression,
-    level: number
-  ) => 'paren' | 'leftright' | 'big' | 'none';
+  groupStyle: (expr: Expression, level: number) => DelimiterScale;
 
   rootStyle: (
     expr: Expression,
@@ -736,11 +734,12 @@ export interface Serializer {
   /** Output a LaTeX string representing the expression */
   serialize: (expr: Expression | null) => string;
 
-  wrapString(
-    s: string,
-    style: 'paren' | 'leftright' | 'big' | 'none',
-    fence?: string
-  ): string;
+  /** Output `s` surrounded by delimiters.
+   *
+   * If `delimiters` is not specified, use `()`
+   *
+   */
+  wrapString(s: string, style: DelimiterScale, delimiters?: string): string;
 
   /** A string with the arguments of expr fenced appropriately and separated by
    * commas.
@@ -758,15 +757,9 @@ export interface Serializer {
   wrapShort(expr: Expression | null): string;
 
   /** Styles */
-  applyFunctionStyle: (
-    expr: Expression,
-    level: number
-  ) => 'paren' | 'leftright' | 'big' | 'none';
+  applyFunctionStyle: (expr: Expression, level: number) => DelimiterScale;
 
-  groupStyle: (
-    expr: Expression,
-    level: number
-  ) => 'paren' | 'leftright' | 'big' | 'none';
+  groupStyle: (expr: Expression, level: number) => DelimiterScale;
 
   rootStyle: (
     expr: Expression,

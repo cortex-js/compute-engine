@@ -353,9 +353,7 @@ describe('PARSING numbers', () => {
     ));
 
   test(`-5-2-3 (non-canonical)`, () =>
-    expect(parse('-5-2-3')).toMatchInlineSnapshot(
-      `["Subtract", ["Subtract", -2, 5], 3]`
-    ));
+    expect(parse('-5-2-3')).toMatchInlineSnapshot(`["Add", -5, -2, -3]`));
 
   test(`5+3+2 (non-canonical)`, () =>
     expect(parseToJson('5+3+2')).toMatchObject(['Add', 5, 3, 2]));

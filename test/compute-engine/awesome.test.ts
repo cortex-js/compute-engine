@@ -384,7 +384,7 @@ describe('Euler Prime Generating Polynomial', () => {
         ["Negate", ["Multiply", 488, "x"]],
         7243
       ]
-      canonical = [
+      simplify  = [
         "Add",
         ["Multiply", 8, ["Square", "x"]],
         ["Multiply", -488, "x"],
@@ -408,7 +408,7 @@ describe('Euler Prime Generating Polynomial', () => {
         ["Negate", ["Multiply", 537, "x"]],
         2971
       ]
-      canonical = [
+      simplify  = [
         "Add",
         ["Multiply", 43, ["Square", "x"]],
         ["Multiply", -537, "x"],
@@ -432,7 +432,7 @@ describe('Euler Prime Generating Polynomial', () => {
         ["Negate", ["Multiply", 810, "x"]],
         2763
       ]
-      canonical = [
+      simplify  = [
         "Add",
         ["Multiply", 36, ["Square", "x"]],
         ["Multiply", -810, "x"],
@@ -447,7 +447,7 @@ describe('Euler Prime Generating Polynomial', () => {
         1601
       ]
       box       = ["Add", ["Negate", ["Multiply", 79, "x"]], ["Square", "x"], 1601]
-      canonical = ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
+      simplify  = ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
     `));
   test('x in 0..10', () =>
     expect(check('2x^2 + 11')).toMatchInlineSnapshot(`

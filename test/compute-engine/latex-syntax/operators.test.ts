@@ -465,8 +465,21 @@ describe('OPERATOR serialize, valid', () => {
   test('1-2', () =>
     expect(latex(['Subtract', 1, 2])).toMatchInlineSnapshot(`1-2`));
 
+  test('1-x', () =>
+    expect(latex(['Subtract', 1, 'x'])).toMatchInlineSnapshot(`1-x`));
+
   test('1-(-2)', () =>
-    expect(latex(['Subtract', 1, -2])).toMatchInlineSnapshot(`1--2`));
+    expect(latex(['Subtract', 1, -2])).toMatchInlineSnapshot(`1+2`));
+
+  test('1-(x+1)', () =>
+    expect(latex(['Subtract', 1, ['Add', 'x', 1]])).toMatchInlineSnapshot(
+      `1-x-1`
+    ));
+
+  test('1-(2i+1)', () =>
+    expect(latex(['Subtract', 1, ['Complex', 1, 2]])).toMatchInlineSnapshot(
+      `1+(-1-2\\imaginaryI)`
+    ));
 
   test(`['Multiply', 2, 3]`, () =>
     expect(latex(['Multiply', 2, 3])).toMatchInlineSnapshot(`2\\times3`));

@@ -1204,7 +1204,7 @@ export class _Parser implements Parser {
     const start = this.index;
     for (const [def, n] of this.peekDefinitions('prefix')) {
       this.index = start + n;
-      const rhs = def.parse(this, until);
+      const rhs = def.parse(this, { ...until, minPrec: def.precedence + 1 });
       if (rhs) return rhs;
     }
     this.index = start;

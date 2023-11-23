@@ -179,7 +179,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           (ops(expr)?.slice(1) ?? [])
             .map((x) => serializer.serialize(x))
             .join(', '),
-          'paren'
+          'normal'
         ),
         '\\mapsto',
         serializer.serialize(op(expr, 1)),
