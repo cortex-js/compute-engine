@@ -222,7 +222,7 @@ export function findUnivariateRoots(
     );
   }
 
-  return result.map((x) => x.evaluate());
+  return result.map((x) => x.evaluate().simplify());
 }
 
 /** Expr is an equation with a head of

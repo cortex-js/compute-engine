@@ -1014,8 +1014,7 @@ function errorContextAsLatex(
   const arg = op(error, 2);
   if (!arg) return '';
 
-  if (head(arg) === 'LatexString')
-    return `\\texttt{${sanitizeLatex(stringValue(op(arg, 1)) ?? '')}}`;
+  if (head(arg) === 'LatexString') return stringValue(op(arg, 1)) ?? '';
 
   if (head(arg) === 'Hold') return serializer.serialize(op(arg, 1));
 

@@ -7,12 +7,16 @@
 - Do not sugar non-canonical expression. Previously,
   `ce.parse('\frac{1}{2}', {canonical: false})` would return `Half` instead of
   `['Divide', '1', '2']`.
+- **#132** Attempting to set a value to 0 with
+  `ce.defineSymbol("count", {value: 0})` would fail: the symbol would be
+  undefined.
 
 ## Improvements
 
 - Significant improvements to symbolic computation. Now, boxing,
   canonicalization and evaluation are more consistent and produce more
   predictable results.
+- Adedd the `\neg` command, synonym for `\lnot` -> `Not`.
 
 ## 0.22.0
 

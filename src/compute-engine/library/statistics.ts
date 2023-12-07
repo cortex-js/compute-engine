@@ -78,6 +78,7 @@ export const STATISTICS_LIBRARY: IdentifierDefinitions[] = [
     StandardDeviation: {
       complexity: 1200,
       threadable: false,
+      description: 'Sample Standard Deviation of a collection of numbers.',
       signature: {
         domain: ['FunctionOf', 'Collections', 'Numbers'],
         evaluate: (ce, ops) => {
