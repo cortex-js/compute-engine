@@ -97,7 +97,7 @@ export class _BoxedSymbolDefinition implements BoxedSymbolDefinition {
       this._defValue = def.value;
       this._value = null;
     } else {
-      if (def.value) {
+      if (def.value !== undefined) {
         if (isLatexString(def.value))
           this._value = ce.parse(def.value) ?? ce.symbol('Undefined');
         else if (typeof def.value === 'function')
