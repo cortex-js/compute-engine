@@ -602,6 +602,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (_parser, body) => (isEmptySequence(body) ? null : ['Abs', body]),
   },
   {
+    kind: 'matchfix',
+    openTrigger: '\\vert',
+    closeTrigger: '\\vert',
+    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Abs', body]),
+  },
+  {
     identifierTrigger: 'abs',
     kind: 'function',
     parse: 'Abs',
