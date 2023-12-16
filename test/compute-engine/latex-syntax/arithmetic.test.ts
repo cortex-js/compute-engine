@@ -43,4 +43,62 @@ describe('PRODUCT', () => {
       evaluate(`\\prod \\lbrack 1, 2, 3, 4, 5\\rbrack`)
     ).toMatchInlineSnapshot(`120`);
   });
+
+  test('parsing many indices with non symbol index', () => {
+    expect(engine.parse(`\\sum_{n,m} k_{n,m}`)).toMatchInlineSnapshot(`
+      [
+        "Sum",
+        ["Subscript", "k", ["Delimiter", ["Sequence", "n", "m"], "','"]],
+        "n",
+        "m"
+      ]
+    `);
+  });
+
+  test('sum but not actually of multiple indices', () => {
+    expect(engine.parse(`\\sum_{n=0,m=4}^{4,8}{n+m}`)).toMatchInlineSnapshot(`
+      [
+        "Sum",
+        ["Add", "m", "n"],
+        ["Triple", "n", 0, 4],
+        ["Triple", "m", 4, 8]
+      ]
+    `);
+  });
+
+  test('parsing indices with element', () => {
+    expect(engine.parse(`\\sum_{n \\in N}K_n`)).toMatchInlineSnapshot(
+      `["Sum", "K_n", ["Element", "n", "N"]]`
+    );
+  });
+
+  test('parsing indices with element', () => {
+    expect(engine.parse(`\\sum_{n \\in N; d \\in D} K`)).toMatchInlineSnapshot(
+      `["Sum", "K", ["Element", "n", "N"], ["Element", "d", "D"]]`
+    );
+  });
+
+  test('parsing indices with element', () => {
+    expect(engine.parse(`\\sum_{n = 6; d \\in D} K`)).toMatchInlineSnapshot(
+      `["Sum", "K", ["Pair", "n", 6], ["Element", "d", "D"]]`
+    );
+  });
+
+  test('parsing indices with element', () => {
+    expect(engine.parse(`\\sum_{d \\in D, d != V} K`)).toMatchInlineSnapshot(
+      `["Sum", "K", ["Element", "d", "D"], ["Unequal", "d", "V"]]`
+    );
+  });
+
+  test('parsing indices with element', () => {
+    expect(engine.parse(`\\sum_{d_1} K`)).toMatchInlineSnapshot(
+      `["Sum", "K", ["Subscript", "d", 1]]`
+    );
+  });
+
+  test('parsing indices with element', () => {
+    expect(engine.parse(`\\sum_{d_{1} = 2} K`)).toMatchInlineSnapshot(
+      `["Sum", "K", ["Pair", "d_1", 2]]`
+    );
+  });
 });

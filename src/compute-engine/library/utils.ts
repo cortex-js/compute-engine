@@ -1,5 +1,6 @@
 import { checkDomain } from '../boxed-expression/validate';
 import { MAX_ITERATION, asSmallInteger } from '../numerics/numeric';
+import { _BoxedExpression } from '../private.js';
 import { BoxedExpression } from '../public';
 
 /**
@@ -7,15 +8,87 @@ import { BoxedExpression } from '../public';
  * variable will be declared in that scope.
  *
  * @param indexingSet
- *
+
+ * IndexingSet is an expression describing an index variable
+ * and a range of values for that variable.
+ * 
+ * The MultiIndexingSet function takes an expression of the form
+ * \sum_{i=1,j=1}^{10,10} x and returns an array of expressions
+ * ["Sum","x",["Triple","i",1,10],["Triple","j",1,10]
  */
-export function canonicalIndexingSet(
+
+export function MultiIndexingSet(
+  indexingSet: BoxedExpression | undefined
+): BoxedExpression[] | undefined {
+  if (!indexingSet) return undefined;
+  const ce = indexingSet.engine;
+  let indexes: BoxedExpression[] = [];
+  let hasSuperSequence = true ? indexingSet.ops?.length == 3 : false;
+
+  let subSequence = indexingSet.ops![0].ops![0].ops;
+  let sequenceLength = subSequence?.length ?? 0;
+  let superSequence: BoxedExpression[] | null = null;
+  if (hasSuperSequence) {
+    superSequence = indexingSet.ops![2].ops![0].ops;
+    // check that the sequence lengths are the same in the sub and super scripts
+    if (subSequence?.length != superSequence?.length) {
+      return undefined;
+    }
+  }
+  // iterate through seuqences and call subscriptAgnosticIndexingSet
+  for (let i = 0; i < sequenceLength; i++) {
+    // this for loop separates any sequences of element in the sub and super script
+    // and put them into a proper indexing set
+    // e.g. \sum_{i=1,j=1}^{10,10} x -> ["Sum","x",["Triple","i",1,10],["Triple","j",1,10]
+    let canonicalizedIndex: BoxedExpression | undefined = undefined;
+    let index: BoxedExpression;
+    let lower: BoxedExpression | null = null;
+    let upper: BoxedExpression | null = null;
+
+    index = subSequence![i].canonical;
+    if (subSequence) {
+      if (subSequence[i].head === 'Equal') {
+        index = subSequence[i].op1.canonical;
+        lower = subSequence[i].op2.canonical;
+      }
+    }
+    if (superSequence) {
+      upper = superSequence[i].canonical;
+    }
+
+    if (upper && lower)
+      canonicalizedIndex = SingleIndexingSet(ce.tuple([index, lower, upper]));
+    else if (upper)
+      canonicalizedIndex = SingleIndexingSet(ce.tuple([index, ce.One, upper]));
+    else if (lower)
+      canonicalizedIndex = SingleIndexingSet(ce.tuple([index, lower]));
+    else canonicalizedIndex = SingleIndexingSet(index);
+
+    if (canonicalizedIndex) indexes.push(canonicalizedIndex);
+  }
+
+  return indexes;
+}
+
+/**
+ * Assume the caller has setup a scope. The index
+ * variable will be declared in that scope.
+ *
+ * @param indexingSet
+
+ * IndexingSet is an expression describing an index variable
+ * and a range of values for that variable.
+ * 
+ * The SingleIndexingSet function takes an expression of the form
+ * \sum_{i=1}^{10} x and returns an array of expressions
+ * ["Sum","x",["Triple","i",1,10]
+ */
+
+export function SingleIndexingSet(
   indexingSet: BoxedExpression | undefined
 ): BoxedExpression | undefined {
   if (!indexingSet) return undefined;
-
   const ce = indexingSet.engine;
-
   let index: BoxedExpression | null = null;
   let lower: BoxedExpression | null = null;
   let upper: BoxedExpression | null = null;
@@ -39,8 +112,7 @@ export function canonicalIndexingSet(
   if (index.symbol) {
     ce.declare(index.symbol, { domain: 'Integers' });
     index.bind();
-    index = ce.hold(index);
-  } else index = ce.domainError('Symbols', index.domain, index);
+  }
 
   // The range bounds, if present, should be integers numbers
   if (lower && lower.isFinite) lower = checkDomain(ce, lower, 'Integers');

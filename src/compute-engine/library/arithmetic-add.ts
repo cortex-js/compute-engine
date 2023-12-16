@@ -7,7 +7,12 @@ import { Sum } from '../symbolic/sum';
 import { asBignum, asFloat, MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
-import { canonicalIndexingSet, normalizeIndexingSet } from './utils';
+// import { canonicalIndexingSet, normalizeIndexingSet } from './utils';
+import {
+  MultiIndexingSet,
+  SingleIndexingSet,
+  normalizeIndexingSet,
+} from './utils';
 import { each, isIndexableCollection } from '../collection-utils';
 
 /** The canonical form of `Add`:
@@ -121,11 +126,26 @@ export function canonicalSummation(
   ce.pushScope();
 
   body ??= ce.error('missing');
+  var result: BoxedExpression | undefined = undefined;
 
-  indexingSet = canonicalIndexingSet(indexingSet);
-  const result = indexingSet
-    ? ce._fn('Sum', [body.canonical, indexingSet])
-    : ce._fn('Sum', [body.canonical]);
+  if (
+    indexingSet &&
+    indexingSet.ops &&
+    indexingSet.ops[0]?.head === 'Delimiter'
+  ) {
+    var multiIndex = MultiIndexingSet(indexingSet);
+    if (!multiIndex) return undefined;
+    var bodyAndIndex = [body.canonical];
+    multiIndex.forEach((element) => {
+      bodyAndIndex.push(element);
+    });
+    result = ce._fn('Sum', bodyAndIndex);
+  } else {
+    var singleIndex = SingleIndexingSet(indexingSet);
+    result = singleIndex
+      ? ce._fn('Sum', [body.canonical, singleIndex])
+      : ce._fn('Sum', [body.canonical]);
+  }
 
   ce.popScope();
   return result;

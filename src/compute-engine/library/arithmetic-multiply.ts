@@ -14,7 +14,12 @@ import {
   neg,
 } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
-import { canonicalIndexingSet, normalizeIndexingSet } from './utils';
+import {
+  MultiIndexingSet,
+  SingleIndexingSet,
+  normalizeIndexingSet,
+} from './utils';
+// import { canonicalIndexingSet, normalizeIndexingSet } from './utils';
 import { each } from '../collection-utils';
 
 /** The canonical form of `Multiply`:
@@ -221,11 +226,26 @@ export function canonicalProduct(
   ce.pushScope();
 
   body ??= ce.error('missing');
+  var result: BoxedExpression | undefined = undefined;
 
-  indexingSet = canonicalIndexingSet(indexingSet);
-  const result = indexingSet
-    ? ce._fn('Product', [body.canonical, indexingSet])
-    : ce._fn('Product', [body.canonical]);
+  if (
+    indexingSet &&
+    indexingSet.ops &&
+    indexingSet.ops[0]?.head === 'Delimiter'
+  ) {
+    var multiIndex = MultiIndexingSet(indexingSet);
+    if (!multiIndex) return undefined;
+    var bodyAndIndex = [body.canonical];
+    multiIndex.forEach((element) => {
+      bodyAndIndex.push(element);
+    });
+    result = ce._fn('Product', bodyAndIndex);
+  } else {
+    var singleIndex = SingleIndexingSet(indexingSet);
+    result = singleIndex
+      ? ce._fn('Product', [body.canonical, singleIndex])
+      : ce._fn('Product', [body.canonical]);
+  }
 
   ce.popScope();
   return result;
