@@ -1,6 +1,5 @@
 import { checkDomain } from '../boxed-expression/validate';
 import { MAX_ITERATION, asSmallInteger } from '../numerics/numeric';
-import { _BoxedExpression } from '../private.js';
 import { BoxedExpression } from '../public';
 
 /**
@@ -185,4 +184,15 @@ export function normalizeIndexingSet(
     upper = lower + MAX_ITERATION;
   }
   return [index, lower, upper, isFinite];
+}
+
+export function cartesianProduct(
+  array1: number[],
+  array2: number[]
+): number[][] {
+  return array1.flatMap((item1) => array2.map((item2) => [item1, item2]));
+}
+
+export function range(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
 }

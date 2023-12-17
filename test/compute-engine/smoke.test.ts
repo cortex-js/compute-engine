@@ -372,128 +372,91 @@ describe('PARSING numbers', () => {
         [
           "Add",
           [
-            "Delimiter",
+            "Sum",
             [
-              "Sequence",
+              "Delimiter",
               [
-                "Sum",
+                "Sequence",
                 [
-                  "Delimiter",
+                  "Floor",
                   [
-                    "Sequence",
+                    "Divide",
+                    1,
                     [
-                      "Floor",
+                      "Add",
                       [
-                        "Divide",
-                        1,
+                        "Power",
+                        0,
                         [
-                          "Add",
+                          "Subtract",
+                          "n",
                           [
-                            "Power",
-                            0,
+                            "Sum",
                             [
-                              "Subtract",
-                              "n",
+                              "Delimiter",
                               [
-                                "Delimiter",
+                                "Sequence",
                                 [
-                                  "Sequence",
+                                  "Delimiter",
                                   [
-                                    "Sum",
+                                    "Sequence",
                                     [
-                                      "Delimiter",
+                                      "Product",
                                       [
-                                        "Sequence",
+                                        "Delimiter",
                                         [
-                                          "Delimiter",
+                                          "Sequence",
                                           [
-                                            "Sequence",
+                                            "Subtract",
+                                            1,
                                             [
-                                              "Product",
+                                              "Power",
+                                              0,
                                               [
-                                                "Delimiter",
+                                                "Abs",
                                                 [
-                                                  "Sequence",
+                                                  "Add",
                                                   [
-                                                    "Subtract",
-                                                    1,
-                                                    [
-                                                      "Power",
-                                                      0,
-                                                      [
-                                                        "Abs",
-                                                        [
-                                                                                                              ...,
-                                                                                                              ...,
-                                                                                                              ...
-                                                        ]
-                                                      ]
-                                                    ]
+                                                    "Divide",
+                                                    ["Negate", "v_2"],
+                                                    "v_3"
+                                                  ],
+                                                  [
+                                                    "Floor",
+                                                    ["Divide", "v_2", "v_3"]
                                                   ]
                                                 ]
-                                              ],
-                                              [
-                                                "Triple",
-                                                [
-                                                  "Error",
-                                                  [
-                                                    "ErrorCode",
-                                                    "'incompatible-domain'",
-                                                    "Symbols",
-                                                    "Undefined"
-                                                  ],
-                                                  ["Subscript", "v", 3]
-                                                ],
-                                                2,
-                                                ["Floor", ["Sqrt", "v_2"]]
                                               ]
                                             ]
                                           ]
                                         ]
-                                      ]
-                                    ],
-                                    [
-                                      "Triple",
-                                      [
-                                        "Error",
-                                        [
-                                          "ErrorCode",
-                                          "'incompatible-domain'",
-                                          "Symbols",
-                                          "Undefined"
-                                        ],
-                                        ["Subscript", "v", 2]
                                       ],
-                                      2,
-                                      "v_1"
+                                      [
+                                        "Triple",
+                                        "v_3",
+                                        2,
+                                        ["Floor", ["Sqrt", "v_2"]]
+                                      ]
                                     ]
                                   ]
                                 ]
                               ]
-                            ]
-                          ],
-                          1
+                            ],
+                            ["Triple", "v_2", 2, "v_1"]
+                          ]
                         ]
-                      ]
+                      ],
+                      1
                     ]
                   ]
-                ],
-                [
-                  "Triple",
-                  [
-                    "Error",
-                    [
-                      "ErrorCode",
-                      "'incompatible-domain'",
-                      "Symbols",
-                      "Undefined"
-                    ],
-                    ["Subscript", "v", 1]
-                  ],
-                  2,
-                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
               ]
+            ],
+            [
+              "Triple",
+              "v_1",
+              2,
+              ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
             ]
           ],
           2
