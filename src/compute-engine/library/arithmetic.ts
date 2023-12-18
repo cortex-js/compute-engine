@@ -1153,11 +1153,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         // codomain: (ce, args) => domainAdd(ce, args),
         // The 'body' and 'range' need to be interpreted by canonicalMultiplication(). Don't canonicalize them yet.
         canonical: (ce, ops) => canonicalProduct(ce, ops[0], ops[1]),
-        simplify: (ce, ops) =>
-          evalMultiplication(ce, ops[0], ops[1], 'simplify'),
-        evaluate: (ce, ops) =>
-          evalMultiplication(ce, ops[0], ops[1], 'evaluate'),
-        N: (ce, ops) => evalMultiplication(ce, ops[0], ops[1], 'N'),
+        simplify: (ce, ops) => evalMultiplication(ce, ops, 'simplify'),
+        evaluate: (ce, ops) => evalMultiplication(ce, ops, 'evaluate'),
+        N: (ce, ops) => evalMultiplication(ce, ops, 'N'),
       },
     },
 
@@ -1176,9 +1174,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           'Numbers',
         ],
         canonical: (ce, ops) => canonicalSummation(ce, ops[0], ops[1]),
-        simplify: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'simplify'),
-        evaluate: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'evaluate'),
-        N: (ce, ops) => evalSummation(ce, ops[0], ops[1], 'N'),
+        simplify: (ce, ops) => evalSummation(ce, ops, 'simplify'),
+        evaluate: (ce, ops) => evalSummation(ce, ops, 'evaluate'),
+        N: (ce, ops) => evalSummation(ce, ops, 'N'),
       },
     },
   },

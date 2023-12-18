@@ -14,7 +14,13 @@ import {
   neg,
 } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
-import { canonicalIndexingSet, normalizeIndexingSet } from './utils';
+import {
+  MultiIndexingSet,
+  SingleIndexingSet,
+  normalizeIndexingSet,
+  cartesianProduct,
+  range,
+} from './utils';
 import { each } from '../collection-utils';
 import { order } from '../boxed-expression/order';
 
@@ -267,16 +273,31 @@ export function canonicalProduct(
   ce: IComputeEngine,
   body: BoxedExpression | undefined,
   indexingSet: BoxedExpression | undefined
-) {
+): BoxedExpression | null {
   // Product is a scoped function (to declare the index)
   ce.pushScope();
 
   body ??= ce.error('missing');
+  var result: BoxedExpression | undefined = undefined;
 
-  indexingSet = canonicalIndexingSet(indexingSet);
-  const result = indexingSet
-    ? ce._fn('Product', [body.canonical, indexingSet])
-    : ce._fn('Product', [body.canonical]);
+  if (
+    indexingSet &&
+    indexingSet.ops &&
+    indexingSet.ops[0]?.head === 'Delimiter'
+  ) {
+    var multiIndex = MultiIndexingSet(indexingSet);
+    if (!multiIndex) return null;
+    var bodyAndIndex = [body.canonical];
+    multiIndex.forEach((element) => {
+      bodyAndIndex.push(element);
+    });
+    result = ce._fn('Product', bodyAndIndex);
+  } else {
+    var singleIndex = SingleIndexingSet(indexingSet);
+    result = singleIndex
+      ? ce._fn('Product', [body.canonical, singleIndex])
+      : ce._fn('Product', [body.canonical]);
+  }
 
   ce.popScope();
   return result;
@@ -284,18 +305,25 @@ export function canonicalProduct(
 
 export function evalMultiplication(
   ce: IComputeEngine,
-  expr: BoxedExpression,
-  indexingSet: BoxedExpression | undefined,
-  mode: 'simplify' | 'evaluate' | 'N'
+  summationEquation: BoxedExpression[],
+  mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
+  let expr = summationEquation[0];
+  let indexingSet: BoxedExpression[] = [];
+  if (summationEquation) {
+    indexingSet = [];
+    for (let i = 1; i < summationEquation.length; i++) {
+      indexingSet.push(summationEquation[i]);
+    }
+  }
   let result: BoxedExpression | undefined | null = null;
 
-  const body =
-    mode === 'simplify'
-      ? expr.simplify()
-      : expr.evaluate({ numericMode: mode === 'N' });
+  if (indexingSet?.length === 0) {
+    const body =
+      mode === 'simplify'
+        ? expr.simplify()
+        : expr.evaluate({ numericMode: mode === 'N' });
 
-  if (!indexingSet) {
     // The body is a collection, e.g. Product({1, 2, 3})
     if (bignumPreferred(ce)) {
       let product = ce.bignum(1);
@@ -331,111 +359,122 @@ export function evalMultiplication(
     return result ?? undefined;
   }
 
-  const [index, lower, upper, isFinite] = normalizeIndexingSet(indexingSet);
-
-  if (!index) return undefined;
+  var indexArray: string[] = [];
+  let lowerArray: number[] = [];
+  let upperArray: number[] = [];
+  let isFiniteArray: boolean[] = [];
+  indexingSet.forEach((indexingSetElement) => {
+    const [index, lower, upper, isFinite] = normalizeIndexingSet(
+      indexingSetElement.evaluate()
+    );
+    if (!index) return undefined;
+    indexArray.push(index);
+    lowerArray.push(lower);
+    upperArray.push(upper);
+    isFiniteArray.push(isFinite);
+  });
 
   const fn = expr;
-  if (mode !== 'N' && (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS))
-    return undefined;
-
   const savedContext = ce.swapScope(fn.scope);
   ce.pushScope();
   fn.bind();
 
-  if (mode === 'simplify') {
-    const terms: BoxedExpression[] = [];
-    for (let i = lower; i <= upper; i++) {
-      ce.assign({ [index]: i });
-      terms.push(fn.simplify());
+  for (let i = 0; i < indexArray.length; i++) {
+    const index = indexArray[i];
+    const lower = lowerArray[i];
+    const upper = upperArray[i];
+    const isFinite = isFiniteArray[i];
+    if (lower >= upper) return undefined;
+
+    if (mode !== 'N' && (lower >= upper || upper - lower >= MAX_SYMBOLIC_TERMS))
+      return undefined;
+
+    if (mode === 'simplify') {
+      const terms: BoxedExpression[] = [];
+      for (let i = lower; i <= upper; i++) {
+        ce.assign({ [index]: i });
+        terms.push(fn.simplify());
+      }
+      result = ce.mul(terms).simplify();
     }
-    result = ce.mul(...terms).simplify();
+  }
+
+  // create cartesian product of ranges
+  let cartesianArray: number[][] = [];
+  if (indexArray.length > 1) {
+    for (let i = 0; i < indexArray.length - 1; i++) {
+      if (cartesianArray.length === 0) {
+        cartesianArray = cartesianProduct(
+          range(lowerArray[i], upperArray[i]),
+          range(lowerArray[i + 1], upperArray[i + 1])
+        );
+      } else {
+        cartesianArray = cartesianProduct(
+          cartesianArray.map((x) => x[0]),
+          range(lowerArray[i + 1], upperArray[i + 1])
+        );
+      }
+    }
+  } else {
+    cartesianArray = range(lowerArray[0], upperArray[0]).map((x) => [x]);
   }
 
   if (mode === 'evaluate') {
     const terms: BoxedExpression[] = [];
-    for (let i = lower; i <= upper; i++) {
-      ce.assign({ [index]: i });
+    for (const element of cartesianArray) {
+      const index = indexArray.map((x, i) => {
+        ce.assign(x, element[i]);
+        return x;
+      });
+      //ce.assign({ [index]: i });
       terms.push(fn.evaluate());
     }
     result = ce.mul(...terms).evaluate();
   }
 
   if (mode === 'N') {
-    // if (result === null && !fn.scope) {
-    //   //
-    //   // The term is not a function of the index
-    //   //
+    for (let i = 0; i < indexArray.length; i++) {
+      const index = indexArray[i];
+      const lower = lowerArray[i];
+      const upper = upperArray[i];
+      const isFinite = isFiniteArray[i];
+      // if (result === null && !fn.scope) {
+      //   //
+      //   // The term is not a function of the index
+      //   //
 
-    //   const n = fn.N();
-    //   if (!isFinite) {
-    //     if (n.isZero) result = ce._ZERO;
-    //     else if (n.isPositive) result = ce._POSITIVE_INFINITY;
-    //     else result = ce._NEGATIVE_INFINITY;
-    //   }
-    //   if (result === null && fn.isPure)
-    //     result = ce.pow(n, ce.number(upper - lower + 1));
+      //   const n = fn.N();
+      //   if (!isFinite) {
+      //     if (n.isZero) result = ce._ZERO;
+      //     else if (n.isPositive) result = ce._POSITIVE_INFINITY;
+      //     else result = ce._NEGATIVE_INFINITY;
+      //   }
+      //   if (result === null && fn.isPure)
+      //     result = ce.pow(n, ce.number(upper - lower + 1));
 
-    //   // If the term is not a function of the index, but it is not pure,
-    //   // fall through to the general case
-    // }
+      //   // If the term is not a function of the index, but it is not pure,
+      //   // fall through to the general case
+      // }
 
-    //
-    // Finite series. Evaluate each term and multiply them
-    //
-    if (result === null && isFinite) {
-      if (bignumPreferred(ce)) {
-        let product = ce.bignum(1);
-        for (let i = lower; i <= upper; i++) {
-          ce.assign({ [index]: i });
-          const term = asBignum(fn.N());
-          if (term === null || !term.isFinite()) {
-            result = term !== null ? ce.number(term) : undefined;
-            break;
+      //
+      // Finite series. Evaluate each term and multiply them
+      //
+      if (result === null && isFinite) {
+        if (bignumPreferred(ce)) {
+          let product = ce.bignum(1);
+          for (let i = lower; i <= upper; i++) {
+            ce.assign({ [index]: i });
+            const term = asBignum(fn.N());
+            if (term === null || !term.isFinite()) {
+              result = term !== null ? ce.number(term) : undefined;
+              break;
+            }
+            product = product.mul(term);
           }
-          product = product.mul(term);
+          if (result === null) result = ce.number(product);
         }
-        if (result === null) result = ce.number(product);
-      }
 
-      // Machine precision
-      let product = 1;
-      const numericMode = ce.numericMode;
-      const precision = ce.precision;
-      ce.numericMode = 'machine';
-      for (let i = lower; i <= upper; i++) {
-        ce.assign({ [index]: i });
-        const term = asFloat(fn.N());
-        if (term === null || !Number.isFinite(term)) {
-          result = term !== null ? ce.number(term) : undefined;
-          break;
-        }
-        product *= term;
-      }
-      ce.numericMode = numericMode;
-      ce.precision = precision;
-
-      if (result === null) result = ce.number(product);
-    }
-
-    if (result === null) {
-      //
-      // Infinite series.
-      //
-
-      // First, check for divergence
-      ce.assign({ [index]: 1000 });
-      const nMax = fn.N();
-      ce.assign({ [index]: 999 });
-      const nMaxMinusOne = fn.N();
-
-      const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
-      if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
-        result = ce.PositiveInfinity;
-      } else {
-        // Potentially converging series.
-        // Evaluate as a machine number (it's an approximation to infinity, so
-        // no point in calculating with high precision), and check for convergence
+        // Machine precision
         let product = 1;
         const numericMode = ce.numericMode;
         const precision = ce.precision;
@@ -443,20 +482,64 @@ export function evalMultiplication(
         for (let i = lower; i <= upper; i++) {
           ce.assign({ [index]: i });
           const term = asFloat(fn.N());
-          if (term === null) {
-            result = undefined;
+          if (term === null || !Number.isFinite(term)) {
+            result = term !== null ? ce.number(term) : undefined;
             break;
           }
-          // Converged (or diverged), early exit
-          if (Math.abs(1 - term) < Number.EPSILON || !Number.isFinite(term))
-            break;
           product *= term;
         }
-        if (result === null) result = ce.number(product);
         ce.numericMode = numericMode;
         ce.precision = precision;
+
+        if (result === null) result = ce.number(product);
+      }
+
+      if (result === null) {
+        //
+        // Infinite series.
+        //
+
+        // First, check for divergence
+        ce.assign({ [index]: 1000 });
+        const nMax = fn.N();
+        ce.assign({ [index]: 999 });
+        const nMaxMinusOne = fn.N();
+
+        const ratio = asFloat(ce.div(nMax, nMaxMinusOne).N());
+        if (ratio !== null && Number.isFinite(ratio) && Math.abs(ratio) > 1) {
+          result = ce.PositiveInfinity;
+        } else {
+          // Potentially converging series.
+          // Evaluate as a machine number (it's an approximation to infinity, so
+          // no point in calculating with high precision), and check for convergence
+          let product = 1;
+          const numericMode = ce.numericMode;
+          const precision = ce.precision;
+          ce.numericMode = 'machine';
+          for (let i = lower; i <= upper; i++) {
+            ce.assign({ [index]: i });
+            const term = asFloat(fn.N());
+            if (term === null) {
+              result = undefined;
+              break;
+            }
+            // Converged (or diverged), early exit
+            if (Math.abs(1 - term) < Number.EPSILON || !Number.isFinite(term))
+              break;
+            product *= term;
+          }
+          if (result === null) result = ce.number(product);
+          ce.numericMode = numericMode;
+          ce.precision = precision;
+        }
       }
     }
+  }
+
+  for (let i = 0; i < indexArray.length; i++) {
+    // unassign indexes once done because if left assigned to an integer value,
+    // the .evaluate will assume the inner index value = upper in the following pass
+    ce.assign(indexArray[i], undefined);
   }
 
   ce.popScope();
