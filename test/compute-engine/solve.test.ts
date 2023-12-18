@@ -4,10 +4,6 @@ function expr(s: string) {
   return engine.parse(s);
 }
 
-const eqn = engine.box(['Multiply', '5', 'x']);
-
-console.log(engine.pattern(['Multiply', 'x', '__a']).match(eqn));
-
 describe('SOLVING A QUADRATIC EQUATION', () => {
   const ce = engine;
 

@@ -684,6 +684,9 @@ export class _Parser implements Parser {
   // This argument will usually be a single token, but can be a sequence of
   // tokens (e.g. `\sqrt\frac12` or `\sqrt\operatorname{speed}`).
   parseToken(): Expression | null {
+    // Skip any white space, for example in `\frac5 7`
+    this.skipSpace();
+
     const excluding = [
       ...'!"#$%&(),/;:?@[]\\`|~'.split(''),
       '\\left',
@@ -1201,7 +1204,7 @@ export class _Parser implements Parser {
     const start = this.index;
     for (const [def, n] of this.peekDefinitions('prefix')) {
       this.index = start + n;
-      const rhs = def.parse(this, until);
+      const rhs = def.parse(this, { ...until, minPrec: def.precedence + 1 });
       if (rhs) return rhs;
     }
     this.index = start;

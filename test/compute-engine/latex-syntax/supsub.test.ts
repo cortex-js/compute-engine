@@ -94,7 +94,7 @@ describe('SUPSUB', () => {
     ); // @fixme: nope...
     expect(parse('_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
-        "Triple",
+        "Tuple",
         "_",
         ["Power", ["Add", "p", 1], ["Add", "q", 1]],
         [
@@ -110,7 +110,7 @@ describe('SUPSUB', () => {
     `); // @fixme: nope...
     expect(parse('x{}_{p+1}^{q+1}x_{r+1}^{s+1}')).toMatchInlineSnapshot(`
       [
-        "Pair",
+        "Tuple",
         [
           "Power",
           [

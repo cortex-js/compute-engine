@@ -180,8 +180,9 @@ export function findUnivariateRoots(
   const ce = expr.engine;
 
   if (expr.head === 'Equal') {
-    expr = ce.add([expr.op1.canonical, ce.neg(expr.op2.canonical)]).simplify();
+    expr = ce.add(expr.op1.canonical, ce.neg(expr.op2.canonical)).simplify();
   }
+
   const rules = ce.cache('univariate-roots-rules', () =>
     boxRules(ce, UNIVARIATE_ROOTS)
   );
@@ -221,7 +222,7 @@ export function findUnivariateRoots(
     );
   }
 
-  return result.map((x) => x.evaluate());
+  return result.map((x) => x.evaluate().simplify());
 }
 
 /** Expr is an equation with a head of
@@ -279,7 +280,7 @@ export const HARMONIZATION_RULES: Rule[] = [
     match: ['Multiply', '__a', ['Power', '_b', '_n']],
     replace: '_b',
     condition: ({ __a, _b, _n }) =>
-      !__a.has('_x') && _b.has('_x') && !_n.isZero,
+      !__a.has('_x') && _b.has('_x') && !_n.isZero && !_n.has('_x'),
   },
   // a√b(x)  -> a^2 b(x)
   {
@@ -291,9 +292,11 @@ export const HARMONIZATION_RULES: Rule[] = [
   {
     match: ['Divide', '_a', '_b'],
     replace: '_a',
+    // @todo: check _b after the substitution
     condition: ({ _a, _b }) => _a.has('_x') && !_b.isZero,
   },
   // ab(x) -> b(x)
+  // The solution for a product are the solutions for each term,
   {
     match: ['Multiply', '__a', '_b'],
     replace: '_b',
@@ -313,6 +316,7 @@ export const HARMONIZATION_RULES: Rule[] = [
   {
     match: ['Ln', '_a'],
     replace: ['Subtract', '_a', 1],
+    // @todo: additional condition, f(x) > 0
     condition: ({ _a }) => _a.has('_x'),
   },
   // sin(f(x)) -> f(x)

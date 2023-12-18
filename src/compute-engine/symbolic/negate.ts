@@ -3,12 +3,9 @@ import { Decimal } from 'decimal.js';
 import { neg } from '../numerics/rationals';
 
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
-import { flattenOps } from './flatten';
+import { flattenOps, flattenSequence } from './flatten';
 
-function negateLiteral(
-  expr: BoxedExpression,
-  metadata?: Metadata
-): BoxedExpression | null {
+function negateLiteral(expr: BoxedExpression): BoxedExpression | null {
   // Applying negation is safe (doesn't introduce numeric errors)
   // even on floating point numbers
   let n = expr.numericValue;
@@ -19,7 +16,7 @@ function negateLiteral(
   else if (n instanceof Complex) n = n.neg();
   else if (Array.isArray(n)) n = neg(n);
 
-  return expr.engine.number(n, { metadata });
+  return expr.engine.number(n);
 }
 
 /**
@@ -29,38 +26,59 @@ function negateLiteral(
  * It is important to do all these to handle cases like
  * `-3x` -> ["Negate, ["Multiply", 3, "x"]] -> ["Multiply, -3, x]
  */
-export function canonicalNegate(
-  expr: BoxedExpression,
-  metadata?: Metadata
-): BoxedExpression {
+export function evalNegate(expr: BoxedExpression): BoxedExpression {
   // Negate(Negate(x)) -> x
-  if (expr.head === 'Negate') return expr.op1;
+  let sign = -1;
+  while (expr.head === 'Negate') {
+    expr = expr.op1;
+    sign = -sign;
+  }
+  if (sign === 1) return expr;
 
-  if (expr.numericValue !== null) return negateLiteral(expr, metadata)!;
+  if (expr.numericValue !== null) return negateLiteral(expr)!;
+
+  const ce = expr.engine;
+
+  // Negate(Subtract(a, b)) -> Subtract(b, a)
+  if (expr.head === 'Subtract') return ce.add(expr.op2, evalNegate(expr.op1));
 
   // Distribute over addition
   // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
   if (expr.head === 'Add') {
-    let ops = expr.ops!.map((x) => canonicalNegate(x));
-    ops = flattenOps(ops, 'Add');
-    return expr.engine.add(ops, metadata);
+    let ops = expr.ops!.map((x) => evalNegate(x));
+    return ce.add(...ops);
   }
 
   // Distribute over multiplication
   // Negate(Multiply(a, b)) -> Multiply(Negate(a), b)
-  if (expr.head === 'Multiply') {
-    return negateProduct(expr.engine, expr.ops!);
-  }
+  if (expr.head === 'Multiply') return negateProduct(ce, expr.ops!);
 
   // Distribute over division
   // Negate(Divide(a, b)) -> Divide(Negate(a), b)
-  if (expr.head === 'Divide')
-    return expr.engine._fn('Divide', [canonicalNegate(expr.op1), expr.op2]);
+  if (expr.head === 'Divide') return ce.div(evalNegate(expr.op1), expr.op2);
 
-  // 'Subtract' is canonicalized into `Add`, so don't have to worry about it
-  console.assert(expr.head !== 'Subtract');
+  return ce._fn('Negate', [expr]);
+}
 
-  return expr.engine._fn('Negate', [expr], metadata);
+export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
+  // Negate(Negate(x)) -> x
+  let sign = -1;
+  while (expr.head === 'Negate') {
+    expr = expr.op1;
+    sign = -sign;
+  }
+  if (sign === 1) return expr;
+
+  const ce = expr.engine;
+
+  if (expr.head === 'Add') {
+    let ops = expr.ops!.map((x) => canonicalNegate(x));
+    return ce._fn('Add', flattenOps(flattenSequence(ops), 'Add'));
+  }
+
+  if (expr.numericValue !== null) return negateLiteral(expr)!;
+
+  return ce._fn('Negate', [expr]);
 }
 
 // Given a list of terms in a product, find the "best" one to negate in
@@ -81,7 +99,7 @@ function negateProduct(
       result.push(arg.op1);
     } else result.push(arg);
   }
-  if (done) return ce.mul(result);
+  if (done) return ce.mul(...result);
 
   // else If there is a literal integer, negate it
   result = [];
@@ -93,7 +111,7 @@ function negateProduct(
     }
   }
 
-  if (done) return ce.mul(result);
+  if (done) return ce.mul(...result);
 
   // else If there is a literal number, negate it
   result = [];
@@ -104,7 +122,7 @@ function negateProduct(
       result.push(canonicalNegate(arg));
     }
   }
-  if (done) return ce.mul(result);
+  if (done) return ce.mul(...result);
 
   return ce._fn('Negate', [ce._fn('Multiply', args)]);
 }

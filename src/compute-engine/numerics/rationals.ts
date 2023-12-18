@@ -310,10 +310,8 @@ export function asCoefficient(
 
     coef = reducedRational(coef);
 
-    if (isRationalOne(coef)) return [[1, 1], expr];
-    if (rest.length === 0) return [coef, ce.One];
-    if (rest.length === 1) return [coef, rest[0]];
-    return [coef, ce.mul(rest)];
+    if (isRationalOne(coef)) return [coef, expr];
+    return [coef, ce.mul(...rest)];
   }
 
   //
@@ -327,6 +325,7 @@ export function asCoefficient(
     const coef = reducedRational(mul(coef1, inverse(coef2)));
 
     if (denom.isOne) return [coef, numer];
+    if (isRationalOne(coef)) return [coef, expr];
     return [coef, ce.div(numer, denom)];
   }
 
@@ -361,7 +360,7 @@ export function asCoefficient(
         // en = -1 -> inverse the extracted coef
         return [
           en === 1 ? [nCoef, dCoef] : [dCoef, nCoef],
-          ce.pow(ce.mul([ce.number([nRest, dRest]), base]), exponent),
+          ce.pow(ce.mul(ce.number([nRest, dRest]), base), exponent),
         ];
       }
     }

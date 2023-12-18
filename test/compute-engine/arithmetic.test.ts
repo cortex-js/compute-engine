@@ -580,7 +580,7 @@ describe('SUM', () => {
         .box(['Sum', ['Divide', 1, 'x'], ['Tuple', ['Hold', 'x'], 1, 10]])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`"2.9289682539682539683"`));
+    ).toMatchInlineSnapshot(`(7381/2520)`));
 
   it('should compute the sum of a function over an open interval', () =>
     expect(
@@ -588,7 +588,7 @@ describe('SUM', () => {
         .box(['Sum', ['Divide', 1, 'x'], 'x'])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`"14.392727722864723632"`));
+    ).toMatchInlineSnapshot(`"14.392727722864723528"`));
 
   it('should compute the sum of a collection', () =>
     expect(

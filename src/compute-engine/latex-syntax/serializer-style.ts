@@ -1,18 +1,19 @@
 import { Expression } from '../../math-json/math-json-format';
 import { countLeaves, head, op1, op2 } from '../../math-json/utils';
+import { DelimiterScale } from './public.js';
 
 export function getApplyFunctionStyle(
   _expr: Expression,
   _level: number
-): 'paren' | 'leftright' | 'big' | 'none' {
-  return 'paren';
+): DelimiterScale {
+  return 'normal';
 }
 
 export function getGroupStyle(
   _expr: Expression,
   _level: number
-): 'paren' | 'leftright' | 'big' | 'none' {
-  return 'paren';
+): DelimiterScale {
+  return 'normal';
 }
 
 export function getRootStyle(

@@ -36,7 +36,7 @@ import {
   IComputeEngine,
 } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
-import { processNegate } from '../symbolic/negate';
+import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
   simplifyAdd,
   evalAdd,
@@ -50,7 +50,7 @@ import {
   evalMultiplication,
   canonicalProduct,
 } from './arithmetic-multiply';
-import { simplifyDivide } from './arithmetic-divide';
+import { evalDivide, simplifyDivide } from './arithmetic-divide';
 import { processPower, processSqrt } from './arithmetic-power';
 import { applyN, apply2N, canonical } from '../symbolic/utils';
 import {
@@ -58,12 +58,12 @@ import {
   checkDomains,
   checkNumericArgs,
 } from '../boxed-expression/validate';
-import { flattenSequence } from '../symbolic/flatten';
+import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { each, isCollection } from '../collection-utils';
 import { BoxedNumber } from '../boxed-expression/boxed-number';
 
 // When considering processing an arithmetic expression, the following
-// are the core canonical arithmetic functions that should be considered:
+// are the core canonical arithmetic operations that should be considered:
 export type CanonicalArithmeticFunctions =
   | 'Add'
   | 'Negate' // Distributed over mul/div/add
@@ -240,14 +240,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ce.div(numer, denom);
         },
         simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
-        evaluate: (_ce, ops) =>
-          apply2N(
-            ops[0],
-            ops[1],
-            (n, d) => n / d,
-            (n, d) => n.div(d),
-            (n, d) => n.div(d)
-          ),
+        evaluate: (ce, ops) => evalDivide(ce, ops[0], ops[1]),
       },
     },
 
@@ -818,14 +811,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           // ['Subtract', 'x'] -> ['Negate', 'x']
           if (args.length === 1) {
             const x = checkDomain(ce, args[0], 'Numbers');
-            if (x.isValid) return ce.neg(x);
+            if (x.isValid) return canonicalNegate(x);
           }
 
           args = checkNumericArgs(ce, args, 2);
           const [a, b] = args;
           if (args.length !== 2 || !a.isValid || !b.isValid)
             return ce._fn('Subtract', args);
-          return ce.add([a, ce.neg(b)]);
+          return ce._fn('Add', flattenOps([a, canonicalNegate(b)], 'Add'));
         },
       },
     },

@@ -36,8 +36,7 @@ export function canonicalAdd(
   //
   if (ops.length === 2) {
     let im: number | null = 0;
-    let re: number | null = 0;
-    re = asFloat(ops[0]);
+    let re = asFloat(ops[0]);
     if (re !== null && re !== 0) im = getImaginaryCoef(ops[1]);
     else {
       im = getImaginaryCoef(ops[0]);
@@ -48,9 +47,8 @@ export function canonicalAdd(
   }
 
   // Commutative, sort
-  if (ops.length > 1) ops = sortAdd(ops);
-
-  return ce._fn('Add', ops);
+  if (ops.length === 1) return ops[0];
+  return ce._fn('Add', sortAdd(ops));
 }
 
 export function domainAdd(
@@ -279,7 +277,7 @@ export function evalSummation(
       });
       terms.push(fn.evaluate());
     }
-    result = ce.add(terms).evaluate();
+    result = ce.add(...terms).evaluate();
   }
 
   for (let i = 0; i < indexArray.length; i++) {

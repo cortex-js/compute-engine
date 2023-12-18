@@ -1,6 +1,26 @@
-## 0.22.0 
+## [Unreleased]
 
- **Release Date:** 2023-11-13
+## Bug Fixes
+
+- The expression `\frac5 7` is now parsed correctly as `\frac{5}{7}` instead of
+  `\frac{5}{}7`.
+- Do not sugar non-canonical expression. Previously,
+  `ce.parse('\frac{1}{2}', {canonical: false})` would return `Half` instead of
+  `['Divide', '1', '2']`.
+- **#132** Attempting to set a value to 0 with
+  `ce.defineSymbol("count", {value: 0})` would fail: the symbol would be
+  undefined.
+
+## Improvements
+
+- Significant improvements to symbolic computation. Now, boxing,
+  canonicalization and evaluation are more consistent and produce more
+  predictable results.
+- Adedd the `\neg` command, synonym for `\lnot` -> `Not`.
+
+## 0.22.0
+
+**Release Date:** 2023-11-13
 
 ### Breaking Changes
 

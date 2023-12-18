@@ -60,11 +60,15 @@ import { boxRules } from './rules';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber } from './boxed-expression/boxed-number';
 import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definition';
-import { canonicalPower } from './library/arithmetic-power';
+import { canonicalPower, processSqrt } from './library/arithmetic-power';
 import { BoxedFunction } from './boxed-expression/boxed-function';
-import { canonicalMultiply } from './library/arithmetic-multiply';
-import { canonicalAdd } from './library/arithmetic-add';
-import { canonicalDivide } from './library/arithmetic-divide';
+import {
+  canonicalMultiply,
+  evalMultiply,
+  simplifyMultiply,
+} from './library/arithmetic-multiply';
+import { canonicalAdd, evalAdd } from './library/arithmetic-add';
+import { canonicalDivide, evalDivide } from './library/arithmetic-divide';
 import {
   BoxedSymbol,
   makeCanonicalSymbol,
@@ -76,15 +80,8 @@ import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
-import {
-  inverse,
-  isBigRational,
-  isMachineRational,
-  isRational,
-  isRationalOne,
-  isRationalZero,
-} from './numerics/rationals';
-import { canonicalNegate } from './symbolic/negate';
+import { inverse, isRational } from './numerics/rationals';
+import { canonicalNegate, evalNegate } from './symbolic/negate';
 import { flattenOps, flattenSequence } from './symbolic/flatten';
 import { bigint } from './numerics/numeric-bigint';
 import { parseFunctionSignature } from './function-utils';
@@ -1706,156 +1703,102 @@ export class ComputeEngine implements IComputeEngine {
     return this._fn('Hold', [this.box(expr, { canonical: false })]);
   }
 
-  /** Shortcut for `this.fn("Add"...)`.
+  /**
+   * Shortcut for `this._fn("Add"...).evaluate()`.
    *
-   * The result is canonical.
    */
-  add(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
+  add(...ops: BoxedExpression[]): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
 
-    const result = canonicalAdd(this, flattenOps(flattenSequence(ops), 'Add'));
-    if (metadata?.latex !== undefined) result.latex = metadata.latex;
-    return result;
+    return evalAdd(this, flattenOps(flattenSequence(ops), 'Add'));
   }
 
-  /** Shortcut for `this.fn("Negate", [expr])`
+  /**
    *
-   * The result is canonical.
+   * Shortcut for `this._fn("Negate", [expr]).evaluate()`
+   *
    */
-  neg(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
+  neg(expr: BoxedExpression): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
-    return canonicalNegate(expr, metadata);
+    return evalNegate(expr.canonical);
   }
 
-  /** Shortcut for `this.fn("Multiply"...)`
+  /**
+   *
+   * Shortcut for `this._fn("Multiply"...).evaluate()`
+   *
+   */
+  mul(...ops: BoxedExpression[]): BoxedExpression {
+    // Short path. Note that are arguments are **not** validated.
+    const flatOps = flattenOps(flattenSequence(ops), 'Multiply');
+    return evalMultiply(this, flatOps);
+  }
+
+  /**
+   *
+   * Shortcut for `this._fn("Divide", [num, denom]).evaluate()`
    *
    * The result is canonical.
    */
-  mul(ops: BoxedExpression[], metadata?: Metadata): BoxedExpression {
+  div(num: BoxedExpression, denom: BoxedExpression): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
 
-    const result = canonicalMultiply(
-      this,
-      flattenOps(flattenSequence(ops), ' Multiply')
+    return evalDivide(this, num.canonical, denom.canonical);
+  }
+
+  /**
+   *
+   * Shortcut for `this._fn("Sqrt"...).evaluate()`
+   *
+   */
+  sqrt(base: BoxedExpression) {
+    return (
+      processSqrt(this, base, 'evaluate') ??
+      this._fn('Power', [base, this.Half])
     );
-    if (metadata?.latex !== undefined) result.latex = metadata.latex;
-    return result;
   }
 
-  /** Shortcut for `this.fn("Divide", [num, denom])`
+  /**
    *
-   * The result is canonical.
-   */
-  div(
-    num: BoxedExpression,
-    denom: BoxedExpression,
-    metadata?: Metadata
-  ): BoxedExpression {
-    // Short path. Note that are arguments are **not** validated.
-
-    const result = canonicalDivide(this, num, denom);
-    if (metadata?.latex !== undefined) result.latex = metadata.latex;
-    return result;
-  }
-
-  /** Shortcut for `this.fn("Sqrt"...)`
+   * Shortcut for `this._fn("Power"...).evaluate()`
    *
-   * The result is canonical.
-   */
-  sqrt(base: BoxedExpression, metadata?: Metadata) {
-    return canonicalPower(this, base, this.Half, metadata);
-  }
-
-  /** Shortcut for `this.fn("Power"...)`
-   *
-   * The result is canonical.
    */
   pow(
     base: BoxedExpression,
-    exponent: number | Rational | BoxedExpression,
-    metadata?: Metadata
+    exponent: number | Rational | BoxedExpression
   ): BoxedExpression {
     // Short path. Note that arguments are **not** validated.
-
-    // Handle complex numbers (exp^{ci}}) as a special case
-    if (base.symbol === 'ExponentialE' && exponent instanceof Complex) {
-      const im = exponent.im;
-      const re = exponent.re;
-      if (re === 0)
-        return this.number(this.complex(Math.cos(im), Math.sin(im)));
-      if (im === 0) return this.number(Math.exp(re));
-      const e = Math.exp(re);
-      return this.number(this.complex(e * Math.cos(im), e * Math.sin(im)));
-    }
-
-    // The logic here handles the cases where the exponent is a number or Rational
-    if (exponent instanceof _BoxedExpression) {
-      const num = exponent.numericValue;
-      if (num !== null) {
-        if (typeof num === 'number') exponent = num;
-        if (isRational(num)) exponent = num;
-      }
-    }
-
-    let e: number | null = null;
-
-    if (typeof exponent === 'number') e = exponent;
-    else if (isRational(exponent)) {
-      if (isRationalZero(exponent)) return this.One;
-      if (isRationalOne(exponent)) return base;
-      // Is the denominator 1?
-      if (isMachineRational(exponent) && exponent[1] === 1) e = exponent[0];
-      else if (isBigRational(exponent) && exponent[1] === BigInt(1))
-        e = Number(exponent[0]);
-    }
-
-    // x^0
-    if (e === 0) return this.One;
-
-    // x^1
-    if (e === 1) return base;
-
-    // x^(-1)
-    const r = base.numericValue;
-    if (e === -1 && r !== null) {
-      if (typeof r === 'number' && Number.isInteger(r))
-        return this.number([1, r]);
-      else if (r instanceof Decimal && r.isInteger())
-        return this.number([BigInt(1), bigint(r)]);
-      else if (isRational(r)) return this.number([r[1], r[0]] as Rational);
-    }
 
     if (typeof exponent === 'number' || isRational(exponent))
       exponent = this.number(exponent);
 
-    return canonicalPower(this, base, exponent, metadata);
+    return canonicalPower(this, base, exponent);
   }
 
-  /** Shortcut for `this.fn("Divide", [1, expr])`
+  /**
    *
-   * The result is canonical.
+   * Shortcut for `this._fn("Divide", [1, expr]).evaluate()`
+   *
    */
-  inv(expr: BoxedExpression, metadata?: Metadata): BoxedExpression {
+  inv(expr: BoxedExpression): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
     if (expr.isOne) return this.One;
     if (expr.isNegativeOne) return this.NegativeOne;
     if (expr.isInfinity) return this.Zero;
     const n = expr.numericValue;
     if (n !== null) {
-      if (isRational(n)) return this.number(inverse(n), { metadata });
+      if (isRational(n)) return this.number(inverse(n));
       if (typeof n === 'number' && Number.isInteger(n))
-        return this.number([1, n], { metadata });
+        return this.number([1, n]);
 
       if (n instanceof Decimal && n.isInteger())
-        return this.number([BigInt(1), bigint(n)], { metadata });
-      return this._fn('Divide', [this.One, expr], metadata);
+        return this.number([BigInt(1), bigint(n)]);
+      return this._fn('Divide', [this.One, expr]);
     }
 
-    if (expr.head === 'Sqrt')
-      return this._fn('Sqrt', [this.inv(expr.op1)], metadata);
+    if (expr.head === 'Sqrt') return this._fn('Sqrt', [this.inv(expr.op1)]);
 
-    if (expr.head === 'Divide')
-      return this._fn('Divide', [expr.op1, expr.op2], metadata);
+    if (expr.head === 'Divide') return this._fn('Divide', [expr.op1, expr.op2]);
 
     // Inverse(expr) -> expr^{-1}
     let e = this.NegativeOne;
@@ -1868,8 +1811,8 @@ export class ComputeEngine implements IComputeEngine {
       e = canonicalNegate(expr.op2);
       expr = expr.op1;
     }
-    if (e.isNegativeOne) return this._fn('Divide', [this.One, expr], metadata);
-    return this._fn('Power', [expr, e], metadata);
+    if (e.isNegativeOne) return this._fn('Divide', [this.One, expr]);
+    return this._fn('Power', [expr, e]);
   }
 
   /** Shortcut for `this.fn("Pair"...)`

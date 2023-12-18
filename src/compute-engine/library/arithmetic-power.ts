@@ -45,85 +45,67 @@ export function canonicalPower(
 
   if (exponent.isNegativeOne) return ce.inv(base);
 
-  if (exponent.numericValue !== null) {
-    if (base.numericValue !== null) {
-      const numBase = asFloat(base);
-
-      //
-      // Special cases
-      //
-      // Implement same results as sympy.
-      // See https://docs.sympy.org/1.6/modules/core.html#pow
-      //
-      // if (base.isOne) return ce._ONE;
-      if (numBase === 1) return ce.One;
-      // if (base.isZero) {
-      if (numBase === 0) {
-        if (exponent.isPositive) return ce.Zero;
-        if (exponent.isNegative) return ce.ComplexInfinity; //  Unsigned Infinity...
-      }
-
-      //  x^(-1)
-      if (exponent.isNegativeOne) return ce.inv(base);
-
-      // x^{0.5}, x^{1/2} -> Square Root
-      const e = asFloat(exponent);
-      if (e === 0.5 || e === -0.5) {
-        const b = asSmallInteger(base);
-        if (b !== null && b > 0) {
-          // Factor out small integers
-          // √(12) -> 2√3
-          const [coef, radicand] = factorPower(b, 2);
-
-          if (radicand === 1 && coef === 1) return ce.One;
-          if (coef !== 1) {
-            if (radicand === 1) return ce.number(e >= 0 ? coef : [1, coef]);
-            return ce.mul([
-              ce.number(coef),
-              ce._fn('Sqrt', [ce.number(radicand)]),
-            ]);
-          }
-          if (e > 0) return ce._fn('Sqrt', [base], metadata);
-          return ce.inv(ce._fn('Sqrt', [base]), metadata);
-        }
-
-        if (e > 0) return ce._fn('Power', [base, ce.Half], metadata);
-        return ce._fn('Power', [base, ce.number([-1, 2])], metadata);
-      }
-
-      if (base.isInfinity) {
-        if (exponent.numericValue instanceof Complex) {
-          const re = exponent.numericValue.re;
-          if (re === 0) return ce.NaN;
-          if (re < 0) return ce.Zero;
-          if (re > 0) return ce.ComplexInfinity;
-        }
-        if (base.isNegative) {
-          // base = -∞
-          if (exponent.isInfinity) return ce.NaN;
-        } else if (base.isPositive) {
-          // base = +∞
-          if (exponent.isNegativeOne) return ce.Zero;
-          if (exponent.isInfinity)
-            return exponent.isNegative ? ce.Zero : ce.PositiveInfinity;
-        }
-      }
-
-      if (exponent.isInfinity && (base.isOne || base.isNegativeOne))
-        return ce.NaN;
+  if (exponent.numericValue !== null && base.numericValue !== null) {
+    //
+    // Special cases
+    //
+    // Implement same results as sympy.
+    // See https://docs.sympy.org/1.6/modules/core.html#pow
+    //
+    if (base.isOne) return ce.One;
+    if (base.isZero) {
+      if (exponent.isPositive) return ce.Zero;
+      if (exponent.isNegative) return ce.ComplexInfinity; //  Unsigned Infinity...
     }
+
+    //  x^(-1)
+    if (exponent.isNegativeOne) return ce.inv(base);
+
+    // x^{0.5}, x^{1/2} -> Square Root
+    const e = asFloat(exponent);
+    if (e === 0.5 || e === -0.5) {
+      // Preserve square root of rationals as sqrt
+      const r = asRational(base);
+      if (r) {
+        const result = ce._fn('Sqrt', [base], metadata);
+        if (e > 0) return result;
+        return ce._fn('Divide', [ce.One, result], metadata);
+      }
+      return ce._fn('Power', [base, exponent], metadata);
+    }
+
+    if (base.isInfinity) {
+      if (exponent.numericValue instanceof Complex) {
+        const re = exponent.numericValue.re;
+        if (re === 0) return ce.NaN;
+        if (re < 0) return ce.Zero;
+        if (re > 0) return ce.ComplexInfinity;
+      }
+      if (base.isNegative) {
+        // base = -∞
+        if (exponent.isInfinity) return ce.NaN;
+      } else if (base.isPositive) {
+        // base = +∞
+        if (exponent.isNegativeOne) return ce.Zero;
+        if (exponent.isInfinity)
+          return exponent.isNegative ? ce.Zero : ce.PositiveInfinity;
+      }
+    }
+
+    if (exponent.isInfinity && (base.isOne || base.isNegativeOne))
+      return ce.NaN;
   }
 
   //
   // Power rule
   //
+
+  // a^b^c -> a^(b*c)
   if (base.head === 'Power' && base.op1.isReal) {
     const a = asSmallInteger(exponent);
     if (a !== null) {
       const b = asSmallInteger(base.op2);
-      if (b !== null) {
-        return ce.pow(base.op1, ce.number(a * b));
-      }
+      if (b !== null) return ce.pow(base.op1, ce.number(a * b));
     }
     if (base.op1.isNonNegative) {
       const ar = asRational(exponent);
@@ -132,17 +114,6 @@ export function canonicalPower(
         if (br) return ce.pow(base.op1, ce.number(mul(ar, br)));
       }
     }
-  }
-
-  // Distribute over multiplication
-  // (abc)^n -> a^n b^n c^n
-  if (base.head === 'Multiply') {
-    const e = asSmallInteger(exponent);
-    if (e !== null)
-      return ce._fn(
-        'Multiply',
-        base.ops!.map((x) => ce.pow(x, exponent!))
-      ); // Don't call ce.mul() to avoid infinite loops
   }
 
   return ce._fn('Power', [base, exponent], metadata);
@@ -169,7 +140,7 @@ export function square(
   if (base.head === 'Power') {
     const exp = asSmallInteger(base.op2);
     if (exp !== null) return ce.pow(base.op1, ce.number(exp * 2));
-    return ce.pow(base.op1, ce.mul([ce.number(2), base.op2]));
+    return ce.pow(base.op1, ce.mul(ce.number(2), base.op2));
   }
 
   return ce.pow(base, ce.number(2));
@@ -235,7 +206,7 @@ function numEvalPower(
   if (invExp === 2) {
     if (floatBase < 0) {
       return complexAllowed(ce)
-        ? ce.mul([ce.I, ce.number(Math.sqrt(-floatBase))])
+        ? ce.mul(ce.I, ce.number(Math.sqrt(-floatBase)))
         : ce.NaN;
     }
     return ce.number(Math.sqrt(floatBase));
@@ -255,6 +226,28 @@ export function processPower(
   exponent: BoxedExpression,
   mode: 'simplify' | 'evaluate' | 'N'
 ): BoxedExpression | undefined {
+  //
+  // Handle complex numbers (exp^{ci}})
+  //
+  if (
+    mode !== 'simplify' &&
+    base.symbol === 'ExponentialE' &&
+    exponent instanceof Complex
+  ) {
+    const im = exponent.im;
+    const re = exponent.re;
+    let result: BoxedExpression;
+    if (re === 0)
+      result = this.number(this.complex(Math.cos(im), Math.sin(im)));
+    else if (im === 0) return this.number(Math.exp(re));
+    else {
+      const e = Math.exp(re);
+      result = this.number(this.complex(e * Math.cos(im), e * Math.sin(im)));
+    }
+    if (mode === 'N') return result.N();
+    return result;
+  }
+
   if (base.head === 'Multiply') {
     let c: Rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [1, 1];
     const xs: BoxedExpression[] = [];
@@ -265,13 +258,13 @@ export function processPower(
     }
 
     if (!isRationalOne(c))
-      return ce.mul([
+      return ce.mul(
         processSqrt(ce, ce.number(c), mode) ?? ce.One,
         ce.pow(
-          processPower(ce, ce.mul(xs), exponent, mode) ?? ce.mul(xs),
+          processPower(ce, ce.mul(...xs), exponent, mode) ?? ce.mul(...xs),
           exponent
-        ),
-      ]);
+        )
+      );
   }
 
   if (base.head === 'Power') {
@@ -326,16 +319,16 @@ export function processPower(
           // If factor === 1, nothing special to do, fall through
           if (factor !== BigInt(1)) {
             if (root === BigInt(1))
-              return ce.mul([
+              return ce.mul(
                 sign,
-                ce.number(n >= 0 ? factor : [BigInt(1), factor]),
-              ]);
+                ce.number(n >= 0 ? factor : [BigInt(1), factor])
+              );
 
-            return ce.mul([
+            return ce.mul(
               sign,
               ce.number(factor),
-              ce.pow(ce.number(root), exponent),
-            ]);
+              ce.pow(ce.number(root), exponent)
+            );
           }
         } else if (typeof base.numericValue === 'number') {
           // Square root of a negative number, and no complex allowed
@@ -354,13 +347,13 @@ export function processPower(
           if (root === 1 && factor === 1) return sign;
           if (factor !== 1) {
             if (root === 1)
-              return ce.mul([sign, ce.number(n >= 0 ? factor : [1, factor])]);
+              return ce.mul(sign, ce.number(n >= 0 ? factor : [1, factor]));
 
-            return ce.mul([
+            return ce.mul(
               sign,
               ce.number(factor),
-              ce.pow(ce.number(root), exponent),
-            ]);
+              ce.pow(ce.number(root), exponent)
+            );
           }
         } else {
           //  @todo: handlebase  rationalValue
@@ -368,10 +361,18 @@ export function processPower(
       }
       if (base.isNegative) {
         if (!complexAllowed) return ce.NaN;
-        return ce.mul([ce.I, ce.fn('Sqrt', [ce.neg(base)])]);
+        return ce.mul(ce.I, ce.fn('Sqrt', [ce.neg(base)]));
       }
       return undefined;
     }
+  }
+
+  if (mode !== 'N' && isRational(base.numericValue)) {
+    const [n, d] = base.numericValue;
+    return ce.div(
+      ce.pow(ce.number(n), exponent),
+      ce.pow(ce.number(d), exponent)
+    );
   }
 
   if (
@@ -407,15 +408,13 @@ export function processSqrt(
   const n = asSmallInteger(base);
   if (n !== null) {
     const [factor, root] = factorPower(Math.abs(n), 2);
+    if (factor === 1) return ce._fn('Sqrt', [base]);
     if (n < 0) {
-      if (root === 1) ce.mul([ce.number(ce.complex(0, factor))]);
-      return ce.mul([
-        ce.number(ce.complex(0, factor)),
-        ce.sqrt(ce.number(root)),
-      ]);
+      if (root === 1) return ce.number(ce.complex(0, factor));
+      return ce.mul(ce.number(ce.complex(0, factor)), ce.sqrt(ce.number(root)));
     }
     if (root === 1) return ce.number(factor);
-    return ce.mul([ce.number(factor), ce.sqrt(ce.number(root))]);
+    return ce.mul(ce.number(factor), ce.sqrt(ce.number(root)));
   }
 
   if (r) {
@@ -428,16 +427,15 @@ export function processSqrt(
         const [nFactor, nRoot] = factorPower(Math.abs(n), 2);
         const [dFactor, dRoot] = factorPower(d, 2);
         if (n < 0)
-          return ce.mul([
+          return ce.mul(
             ce.number([nFactor, dFactor]),
             ce.sqrt(ce.number([nRoot, dRoot])),
-            ce.I,
-          ]);
+            ce.I
+          );
 
-        return ce.mul([
-          ce.number([nFactor, dFactor]),
-          ce.sqrt(ce.number([nRoot, dRoot])),
-        ]);
+        const factor = ce.number([nFactor, dFactor]);
+        if (factor.isOne) return ce._fn('Sqrt', [ce.number([nRoot, dRoot])]);
+        return ce.mul(factor, ce.sqrt(ce.number([nRoot, dRoot])));
       }
     }
     if (isBigRational(r) || bignumPreferred(ce)) {
@@ -446,16 +444,15 @@ export function processSqrt(
       const [dFactor, dRoot] = bigFactorPower(bigint(r[1]), 2);
 
       if (n < 0)
-        return ce.mul([
+        return ce.mul(
           ce.number([nFactor, dFactor]),
           ce.sqrt(ce.number([nRoot, dRoot])),
-          ce.I,
-        ]);
+          ce.I
+        );
 
-      return ce.mul([
-        ce.number([nFactor, dFactor]),
-        ce.sqrt(ce.number([nRoot, dRoot])),
-      ]);
+      const factor = ce.number([nFactor, dFactor]);
+      if (factor.isOne) return ce._fn('Sqrt', [ce.number([nRoot, dRoot])]);
+      return ce.mul(factor, ce.sqrt(ce.number([nRoot, dRoot])));
     }
   }
 
@@ -481,4 +478,16 @@ function rootExp(exponent: BoxedExpression): number | null {
   ];
   if (n !== 1 && n !== -1) return null;
   return n * d;
+}
+
+export function isSqrt(expr: BoxedExpression): boolean {
+  return (
+    (expr.head === 'Power' && expr.op2.isEqual(expr.engine.Half)) ||
+    expr.head === 'Sqrt'
+  );
+}
+
+export function asExactSqrt(expr: BoxedExpression): Rational | null {
+  if (!isSqrt(expr)) return null;
+  return asRational(expr.op1) ?? null;
 }

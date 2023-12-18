@@ -11,6 +11,7 @@ import {
   ops,
   isNumberExpression,
   ONLY_EMOJIS,
+  machineValue,
 } from '../../math-json/utils';
 
 import { WarningSignalHandler } from '../../common/signals';
@@ -19,6 +20,8 @@ import {
   NumberFormattingOptions,
   LatexString,
   SerializeLatexOptions,
+  DelimiterScale,
+  ADDITION_PRECEDENCE,
 } from './public';
 
 import {
@@ -110,7 +113,7 @@ export class Serializer {
 
   /**
    * Serialize the expression, and if the expression is an operator
-   * of precedence less than or equal to prec, wrap it in some paren.
+   * of precedence less than or equal to prec, wrap it in some parens.
    * @todo: don't wrap Abs, Floor, Ceil, Delimiter
    */
   wrap(expr: Expression | null, prec?: number): string {
@@ -121,12 +124,11 @@ export class Serializer {
         this.options.groupStyle(expr, this.level + 1)
       );
     }
-    if (
-      typeof expr === 'number' ||
-      isNumberObject(expr) ||
-      typeof expr === 'string' ||
-      isSymbolObject(expr)
-    ) {
+
+    if (typeof expr === 'number' || isNumberObject(expr)) {
+      const val = machineValue(expr);
+      if (val !== null && val < 0 && prec > ADDITION_PRECEDENCE)
+        return this.wrap(expr);
       return this.serialize(expr);
     }
     const name = head(expr);
@@ -139,6 +141,7 @@ export class Serializer {
       if (
         def &&
         (def.kind === 'symbol' ||
+          def.kind === 'expression' ||
           def.kind === 'prefix' ||
           def.kind === 'infix' ||
           def.kind === 'postfix') &&
@@ -188,18 +191,11 @@ export class Serializer {
     );
   }
 
-  wrapString(
-    s: string,
-    style: 'paren' | 'leftright' | 'big' | 'none',
-    fence?: string
-  ): string {
+  wrapString(s: string, style: DelimiterScale, fence?: string): string {
     if (style === 'none') return s;
-    if (fence === undefined) fence = '()';
+    fence ??= '()';
     let openFence = fence?.[0] ?? '.';
     let closeFence = fence?.[1] ?? '.';
-
-    if ((openFence === '.' || closeFence === '.') && style === 'paren')
-      style = 'leftright';
 
     // Map Unicode characters to LaTeX commands
     if (openFence === '"') openFence = '``';
@@ -212,13 +208,14 @@ export class Serializer {
 
     if (openFence === '.' && closeFence === '.') return s;
 
-    if (style === 'leftright')
+    if ((openFence === '.' || closeFence === '.') && style === 'normal')
+      style = 'scaled';
+
+    if (style === 'scaled')
       return `\\left${openFence}${s}\\right${closeFence}}`;
 
     if (style === 'big')
-      return `${openFence === '.' ? '' : `\\Bigl${openFence}`}${s}${
-        closeFence === '.' ? '' : `\\Bigr${closeFence}`
-      })`;
+      return `${`\\Bigl${openFence}`}${s}${`\\Bigr${closeFence}`})`;
 
     return openFence + s + closeFence;
   }
@@ -396,17 +393,11 @@ export class Serializer {
     this.canonical = savedCanonical;
     return '';
   }
-  applyFunctionStyle(
-    expr: Expression,
-    level: number
-  ): 'paren' | 'leftright' | 'big' | 'none' {
+  applyFunctionStyle(expr: Expression, level: number): DelimiterScale {
     return this.options.applyFunctionStyle(expr, level);
   }
 
-  groupStyle(
-    expr: Expression,
-    level: number
-  ): 'paren' | 'leftright' | 'big' | 'none' {
+  groupStyle(expr: Expression, level: number): DelimiterScale {
     return this.options.groupStyle(expr, level);
   }
 

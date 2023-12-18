@@ -8,13 +8,13 @@ function evaluate(s: string): Expression {
 describe('SUM', () => {
   test('k is an Integer (as the index) and used a a Number (in the fraction)', () => {
     expect(evaluate(`\\sum_{k=0}^{10}\\frac{k}{2}`)).toMatchInlineSnapshot(
-      `27.5`
+      `["Rational", 55, 2]`
     );
   });
 
   test('i is a valid index', () => {
     expect(evaluate(`\\sum_{i=0}^{10}\\frac{i}{2}`)).toMatchInlineSnapshot(
-      `27.5`
+      `["Rational", 55, 2]`
     );
   });
 
@@ -28,13 +28,13 @@ describe('SUM', () => {
 describe('PRODUCT', () => {
   test('k is an Integer (as the index) and used a a Number (in the fraction)', () => {
     expect(evaluate(`\\prod_{k=1}^{10}\\frac{k}{2}`)).toMatchInlineSnapshot(
-      `3543.75`
+      `["Rational", 14175, 4]`
     );
   });
 
   test('i is a valid index', () => {
     expect(evaluate(`\\prod_{i=1}^{10}\\frac{i}{2}`)).toMatchInlineSnapshot(
-      `3543.75`
+      `["Rational", 14175, 4]`
     );
   });
 

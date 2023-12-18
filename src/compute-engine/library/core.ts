@@ -751,7 +751,7 @@ export function canonicalInvisibleOperator(
           Number.isInteger(n) &&
           Number.isInteger(d)
         )
-          return ce.add([lhs.canonical, rhs.canonical]);
+          return ce._fn('Add', [lhs.canonical, rhs.canonical]);
       }
     }
 

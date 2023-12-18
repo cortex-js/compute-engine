@@ -88,6 +88,12 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     latexTrigger: ['\\lnot'],
     precedence: 880,
   },
+  {
+    kind: 'prefix',
+    latexTrigger: ['\\neg'],
+    parse: 'Not',
+    precedence: 880,
+  },
 
   {
     name: 'Nand',

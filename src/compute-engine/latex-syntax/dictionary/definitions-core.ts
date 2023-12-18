@@ -179,7 +179,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           (ops(expr)?.slice(1) ?? [])
             .map((x) => serializer.serialize(x))
             .join(', '),
-          'paren'
+          'normal'
         ),
         '\\mapsto',
         serializer.serialize(op(expr, 1)),
@@ -218,7 +218,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
 
   // The mathtools package includes several synonmyms for \colonequals. The
-  // current preferred one is `\coloneq`
+  // preferred one as of summer 2022 is `\coloneq` (see § 3.7.3 https://ctan.math.illinois.edu/macros/latex/contrib/mathtools/mathtools.pdf)
   {
     name: 'Assign',
     latexTrigger: '\\coloneq',
@@ -256,12 +256,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: parseAssign,
   },
   {
-    latexTrigger: [':', '='],
+    latexTrigger: '\\coloneqq',
     kind: 'infix',
     associativity: 'right',
     precedence: ASSIGNMENT_PRECEDENCE,
     parse: parseAssign,
   },
+  // From the colonequals package:
   {
     latexTrigger: '\\colonequals',
     kind: 'infix',
@@ -270,7 +271,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: parseAssign,
   },
   {
-    latexTrigger: '\\coloneqq',
+    latexTrigger: [':', '='],
     kind: 'infix',
     associativity: 'right',
     precedence: ASSIGNMENT_PRECEDENCE,
@@ -1013,8 +1014,7 @@ function errorContextAsLatex(
   const arg = op(error, 2);
   if (!arg) return '';
 
-  if (head(arg) === 'LatexString')
-    return `\\texttt{${sanitizeLatex(stringValue(op(arg, 1)) ?? '')}}`;
+  if (head(arg) === 'LatexString') return stringValue(op(arg, 1)) ?? '';
 
   if (head(arg) === 'Hold') return serializer.serialize(op(arg, 1));
 

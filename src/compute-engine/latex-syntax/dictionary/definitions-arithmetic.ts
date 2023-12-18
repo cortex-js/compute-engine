@@ -26,7 +26,6 @@ import {
   POSTFIX_PRECEDENCE,
   COMPARISON_PRECEDENCE,
 } from '../public';
-import { getFractionStyle, getRootStyle } from '../serializer-style';
 import { joinLatex } from '../tokenizer';
 
 /**
@@ -282,7 +281,7 @@ function serializeMultiply(
         if (n === 1 && d !== null) {
           result += serializeRoot(
             serializer,
-            getRootStyle(arg, serializer.level),
+            serializer.rootStyle(arg, serializer.level),
             op(arg, 1),
             d
           );
@@ -403,7 +402,7 @@ function serializeFraction(
   const denom = missingIfEmpty(op(expr, 2));
 
   const style = serializer.canonical
-    ? getFractionStyle(expr, serializer.level)
+    ? serializer.fractionStyle(expr, serializer.level)
     : 'quotient';
   if (style === 'inline-solidus' || style === 'nice-solidus') {
     const numerStr = serializer.wrapShort(numer);
@@ -419,9 +418,11 @@ function serializeFraction(
     return (
       '\\frac{1}{' +
       serializer.serialize(denom) +
-      '}{' +
-      serializer.wrap(numer) +
-      '}'
+      '}' +
+      serializer.wrapString(
+        serializer.serialize(numer),
+        serializer.groupStyle(expr, 1)
+      )
     );
   }
 
@@ -439,13 +440,15 @@ function serializePower(
   serializer: Serializer,
   expr: Expression | null
 ): string {
+  if (!expr) return '';
+
   const name = head(expr);
   const base = missingIfEmpty(op(expr, 1));
 
   if (name === 'Sqrt') {
     return serializeRoot(
       serializer,
-      getRootStyle(expr, serializer.level - 1),
+      serializer.rootStyle(expr, serializer.level - 1),
       base,
       2
     );
@@ -455,7 +458,7 @@ function serializePower(
   if (name === 'Root')
     return serializeRoot(
       serializer,
-      getRootStyle(expr, serializer.level - 1),
+      serializer.rootStyle(expr, serializer.level - 1),
       base,
       exp
     );
@@ -469,7 +472,7 @@ function serializePower(
     } else if (head(exp) === 'Divide' || head(exp) === 'Rational') {
       if (machineValue(op(exp, 1)) === 1) {
         // It's x^{1/n} -> it's a root
-        const style = getRootStyle(expr, serializer.level);
+        const style = serializer.rootStyle(expr, serializer.level);
         return serializeRoot(serializer, style, base, op(exp, 2));
       }
       if (machineValue(op(exp, 2)) === 2) {
@@ -481,7 +484,7 @@ function serializePower(
     } else if (head(exp) === 'Power') {
       if (machineValue(op(exp, 2)) === -1) {
         // It's x^{n^-1} -> it's a root
-        const style = getRootStyle(expr, serializer.level);
+        const style = serializer.rootStyle(expr, serializer.level);
         return serializeRoot(serializer, style, base, op(exp, 1));
       }
     }
@@ -599,6 +602,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (_parser, body) => (isEmptySequence(body) ? null : ['Abs', body]),
   },
   {
+    kind: 'matchfix',
+    openTrigger: '\\vert',
+    closeTrigger: '\\vert',
+    parse: (_parser, body) => (isEmptySequence(body) ? null : ['Abs', body]),
+  },
+  {
     identifierTrigger: 'abs',
     kind: 'function',
     parse: 'Abs',
@@ -657,9 +666,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Complex',
     precedence: ADDITION_PRECEDENCE - 1, // One less than precedence of `Add`: used for correct wrapping
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const re = machineValue(op(expr, 1));
+      const rePart = serializer.serialize(op(expr, 1));
+
       const im = machineValue(op(expr, 2));
-      if (im === 0) return serializer.serialize(op(expr, 1));
+      if (im === 0) return rePart;
 
       const imPart =
         im === 1
@@ -667,11 +677,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
           : im === -1
           ? '-\\imaginaryI'
           : joinLatex([serializer.serialize(op(expr, 2)), '\\imaginaryI']);
-      if (re === 0) return imPart;
-      if (im !== null && im < 0)
-        return joinLatex([serializer.serialize(op(expr, 1)), imPart]);
 
-      return joinLatex([serializer.serialize(op(expr, 1)), '+', imPart]);
+      const re = machineValue(op(expr, 1));
+      if (re === 0) return imPart;
+
+      if (im !== null && im < 0) return joinLatex([rePart, imPart]);
+
+      return joinLatex([rePart, '+', imPart]);
     },
   },
   {
@@ -947,7 +959,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Negate',
     latexTrigger: ['-'],
     kind: 'prefix',
-    precedence: ADDITION_PRECEDENCE,
+    precedence: ADDITION_PRECEDENCE + 2,
     parse: (parser, terminator) => {
       // Quick check if the next token is a digit, if so, it's a number
       // not a Negate
@@ -963,7 +975,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
 
       const rhs = parser.parseExpression({
         ...terminator,
-        minPrec: ADDITION_PRECEDENCE + 1,
+        minPrec: ADDITION_PRECEDENCE + 3,
       });
       return ['Negate', missingIfEmpty(rhs)] as Expression;
     },
@@ -1116,13 +1128,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['-'],
     kind: 'infix',
     associativity: 'both',
-    precedence: ADDITION_PRECEDENCE,
+    precedence: ADDITION_PRECEDENCE + 2,
     parse: (parser, lhs, terminator) => {
       const rhs = parser.parseExpression({
         ...terminator,
-        minPrec: ADDITION_PRECEDENCE + 2,
+        minPrec: ADDITION_PRECEDENCE + 3,
       });
       return ['Subtract', lhs, missingIfEmpty(rhs)] as Expression;
+    },
+    serialize: (serializer, expr) => {
+      const lhs = serializer.wrap(op(expr, 1), ADDITION_PRECEDENCE + 2);
+      const rhs = serializer.wrap(op(expr, 2), ADDITION_PRECEDENCE + 3);
+      return joinLatex([lhs, '-', rhs]);
     },
   },
 ];

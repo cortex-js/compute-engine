@@ -258,7 +258,7 @@ describe('NON EXACT WILDCARDS', () => {
   it('should match x/a for ax', () => {
     const pattern = ce.pattern(['Multiply', '_a', '_x']);
     const result = match(pattern, ['Divide', '_x', '2']);
-    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: "Half"}`);
+    expect(result).toMatchInlineSnapshot(`{_x: "_x"; _a: ["Divide", 1, 2]}`);
   });
 
   it('should match -x for ax', () => {

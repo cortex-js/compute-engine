@@ -21,6 +21,7 @@ import {
   Parser,
   isEnvironmentEntry,
   Terminator,
+  isExpressionEntry,
 } from '../public';
 import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
 import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
@@ -78,6 +79,9 @@ export function isIndexedSymbolEntry(
 
 export type IndexedExpressionEntry = CommonEntry & {
   kind: 'expression';
+
+  // The 'precedence' of expressions is used to determine appropriate wrapping when serializing
+  precedence: Precedence;
 
   parse: ExpressionParseHandler;
 };
@@ -382,7 +386,14 @@ function makeIndexedEntry(
   }
 
   //
-  // 3. Postfix, prefix
+  // 3. Expression definition
+  //
+  if (result.kind === 'expression' && isExpressionEntry(entry)) {
+    result.precedence = entry.precedence ?? 10000;
+  }
+
+  //
+  // 4. Postfix, prefix
   //
 
   if (
@@ -474,14 +485,18 @@ function makeSerializeHandler(
         joinLatex([latex!, serializer.serialize(op(expr, 1))]);
 
     if (kind === 'infix') {
-      return (serializer, expr) =>
-        joinLatex(
-          (ops(expr) ?? []).flatMap((val, i) =>
-            i < nops(expr) - 1
-              ? [serializer.serialize(val), latex!]
-              : [serializer.serialize(val)]
-          )
+      return (serializer, expr) => {
+        const n = nops(expr);
+        if (n === 0) return '';
+        const prec = entry['precedence'] ?? 10000;
+        // Insert the operator (latex) between each argument
+        return joinLatex(
+          ops(expr)!.flatMap((val, i) => {
+            const arg = serializer.wrap(val, prec + 1);
+            return i < n - 1 ? [arg, latex!] : [arg];
+          })
         );
+      };
     }
 
     // Function, symbol or expression. Depends on the actual shape of the

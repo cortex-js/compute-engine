@@ -353,7 +353,7 @@ describe('PARSING numbers', () => {
     ));
 
   test(`-5-2-3 (non-canonical)`, () =>
-    expect(parse('-5-2-3')).toMatchInlineSnapshot(`["Add", -5, -3, -2]`));
+    expect(parse('-5-2-3')).toMatchInlineSnapshot(`["Add", -5, -2, -3]`));
 
   test(`5+3+2 (non-canonical)`, () =>
     expect(parseToJson('5+3+2')).toMatchObject(['Add', 5, 3, 2]));
@@ -430,6 +430,7 @@ describe('PARSING numbers', () => {
                                             ]
                                           ]
                                         ]
+
                                       ],
                                       [
                                         "Triple",
@@ -509,7 +510,7 @@ describe('SERIALIZING Negative factors', () => {
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () => {
     expect(
       engine.parse('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}').latex
-    ).toMatchInlineSnapshot(`\\frac{-6xy}{5}`);
+    ).toMatchInlineSnapshot(`\\frac{-2\\times3xy}{5}`);
   });
 });
 
@@ -560,10 +561,14 @@ describe('CANONICALIZATION Add', () => {
 });
 describe('CANONICALIZATION multiply', () => {
   test('2\\times3', () =>
-    expect(canonicalToJson('2\\times3')).toStrictEqual(6));
+    expect(canonicalToJson('2\\times3')).toMatchInlineSnapshot(
+      `["Multiply", 2, 3]`
+    ));
 
   test(`-2\\times-3`, () =>
-    expect(canonicalToJson('-2\\times-3')).toStrictEqual(6));
+    expect(canonicalToJson('-2\\times-3')).toMatchInlineSnapshot(
+      `["Multiply", 2, 3]`
+    ));
 
   test(`x\\times(-y)`, () =>
     expect(canonicalToJson('x\\times(-y)')).toMatchObject([
@@ -572,24 +577,36 @@ describe('CANONICALIZATION multiply', () => {
     ]));
 
   test(`2\\times\\frac12`, () =>
-    expect(canonicalToJson('2\\times\\frac12')).toStrictEqual(1));
+    expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(
+      `["Multiply", "Half", 2]`
+    ));
 
   test(`2\\times(5-5)\\times5\\times4`, () =>
     expect(
       canonicalToJson('2\\times(5-5)\\times5\\times4')
-    ).toMatchInlineSnapshot(`["Multiply", 40, ["Subtract", 5, 5]]`));
+    ).toMatchInlineSnapshot(`["Multiply", 2, 4, 5, ["Subtract", 5, 5]]`));
 
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () =>
     expect(
       canonicalToJson('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}')
-    ).toMatchInlineSnapshot(`["Multiply", ["Rational", -6, 5], "x", "y"]`));
+    ).toMatchInlineSnapshot(`["Multiply", -2, ["Rational", 3, 5], "x", "y"]`));
 
   test(`'1\\times x\\times 2\\times -5.23 \\times 3.2 \\times \\frac23\\times \\frac1x  // Commutative order'`, () => {
     expect(
       canonicalToJson(
         '1\\times x\\times 2\\times -5.23 \\times 3.2 \\times \\frac23\\times \\frac1x'
       )
-    ).toMatchInlineSnapshot(`["Multiply", ["Rational", -4, 3], 16.736]`);
+    ).toMatchInlineSnapshot(`
+      [
+        "Multiply",
+        -2,
+        ["Rational", 2, 3],
+        3.2,
+        5.23,
+        "x",
+        ["Divide", 1, "x"]
+      ]
+    `);
   });
 });
 describe('CANONICALIZATION divide', () => {
@@ -615,9 +632,7 @@ describe('CANONICALIZATION sqrt', () => {
   test('\\sqrt{3^2}', () => {
     expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`);
     // Canonical of Sqrt should not transform to Power
-    expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(
-      `["Multiply", ["Sqrt", 3], 2]`
-    );
+    expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(`["Sqrt", 12]`);
   });
   test(`\\sqrt[3]{x}`, () =>
     expect(canonicalToJson('\\sqrt[3]{x}')).toMatchObject(['Root', 'x', 3]));
@@ -630,7 +645,7 @@ describe('CANONICALIZATION invisible operators', () => {
   });
   test(`'3\\frac18 // invisible add`, () =>
     expect(canonicalToJson('3\\frac18')).toMatchInlineSnapshot(
-      `["Add", ["Rational", 1, 8], 3]`
+      `["Add", 3, ["Rational", 1, 8]]`
     ));
   test(`2(x)`, () =>
     expect(canonicalToJson('2(x)')).toMatchObject(['Multiply', 2, 'x']));
@@ -659,7 +674,7 @@ describe('SIMPLIFICATION add', () => {
 
   test(`2\\sqrt{3}+\\sqrt{1+2}`, () =>
     expect(simplifyToJson('2\\sqrt{3}+\\sqrt{1+2}')).toMatchInlineSnapshot(
-      `["Multiply", ["Sqrt", 3], 3]`
+      `["Multiply", 3, ["Sqrt", 3]]`
     ));
 
   test(`2x+x`, () =>
@@ -672,8 +687,8 @@ describe('SIMPLIFICATION divide', () => {
   test(`simplify('\\frac{\\sqrt{5040}}{3}')`, () => {
     expect(simplifyToJson('\\frac{\\sqrt{5040}}{3}')).toMatchObject([
       'Multiply',
-      ['Sqrt', 35],
       4,
+      ['Sqrt', 35],
     ]);
   });
 
@@ -694,25 +709,25 @@ describe('SIMPLIFICATION divide', () => {
   test(`simplify('\\frac{\\sqrt{15}}{\\sqrt{3}}')`, () =>
     expect(
       simplifyToJson('\\frac{\\sqrt{15}}{\\sqrt{3}}')
-    ).toMatchInlineSnapshot(`["Divide", ["Sqrt", 15], ["Sqrt", 3]]`)); // @fixme
+    ).toMatchInlineSnapshot(`["Sqrt", 5]`)); // @fixme
 });
 
 describe('SIMPLIFICATION sqrt', () => {
   test(`\\sqrt{5040}`, () =>
-    expect(simplifyToJson('\\sqrt{5040}')).toMatchObject([
+    expect(evaluateToJson('\\sqrt{5040}')).toMatchObject([
       'Multiply',
-      ['Sqrt', 35],
       12,
+      ['Sqrt', 35],
     ]));
 
   test(`simplify('\\sqrt{3^2}')`, () =>
     expect(simplifyToJson('\\sqrt{3^2}')).toEqual(3));
 
-  test(`simplify('\\sqrt{12}')`, () =>
-    expect(simplifyToJson('\\sqrt{12}')).toMatchObject([
+  test(`evaluate('\\sqrt{12}')`, () =>
+    expect(evaluateToJson('\\sqrt{12}')).toMatchObject([
       'Multiply',
-      ['Sqrt', 3],
       2,
+      ['Sqrt', 3],
     ]));
 
   // A math olympiad problem
@@ -720,16 +735,16 @@ describe('SIMPLIFICATION sqrt', () => {
   // Result is \frac{-4}{15}
   test(`simplify('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')`, () =>
     expect(
-      simplifyToJson('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')
+      evaluateToJson('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')
     ).toMatchInlineSnapshot(`
       [
-        "Add",
-        ["Divide", ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 2], 4]], 15],
+        "Divide",
         [
-          "Multiply",
-          ["Rational", -1, 15],
-          ["Sqrt", ["Add", ["Multiply", ["Sqrt", 3], 10], 28]]
-        ]
+          "Subtract",
+          ["Sqrt", ["Add", ["Multiply", 2, ["Sqrt", 3]], 4]],
+          ["Sqrt", ["Add", ["Multiply", 10, ["Sqrt", 3]], 28]]
+        ],
+        15
       ]
     `));
 });
@@ -776,7 +791,7 @@ describe('EXPAND', () => {
     expect(expand('(a+b)^6')).toMatchInlineSnapshot(`
       [
         "Add",
-        ["Multiply", 20, ["Power", "a", 3], ["Power", "b", 3]],
+        ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]],
         ["Multiply", 15, ["Square", "a"], ["Power", "b", 4]],
         ["Multiply", 15, ["Square", "b"], ["Power", "a", 4]],
         ["Multiply", 6, "a", ["Power", "b", 5]],

@@ -173,7 +173,7 @@ describe('STEFNOTCH #13', () => {
         "Equal",
         "a",
         [
-          "Triple",
+          "Tuple",
           [
             "Error",
             "'expected-closing-delimiter'",

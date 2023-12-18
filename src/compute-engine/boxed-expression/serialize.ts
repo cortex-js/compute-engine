@@ -166,6 +166,36 @@ export function serializeJsonCanonicalFunction(
     }
   }
 
+  if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
+    if (args[1]?.numericValue !== null) {
+      const t1 = asSmallInteger(args[1]);
+      if (t1 !== null && t1 < 0)
+        return serializeJsonFunction(
+          ce,
+          'Subtract',
+          [args[0], ce.number(-t1)],
+          metadata
+        );
+    }
+    if (args[1]?.head === 'Negate') {
+      return serializeJsonFunction(
+        ce,
+        'Subtract',
+        [args[0], args[1].op1],
+        metadata
+      );
+    }
+  }
+
+  if (head === 'Tuple') {
+    if (args.length === 1 && !exclusions.includes('Single'))
+      return serializeJsonFunction(ce, 'Single', args, metadata);
+    if (args.length === 2 && !exclusions.includes('Pair'))
+      return serializeJsonFunction(ce, 'Pair', args, metadata);
+    if (args.length === 3 && !exclusions.includes('Triple'))
+      return serializeJsonFunction(ce, 'Triple', args, metadata);
+  }
+
   return serializeJsonFunction(ce, head, args, metadata);
 }
 
@@ -175,32 +205,27 @@ export function serializeJsonFunction(
   args: (undefined | BoxedExpression)[],
   metadata?: Metadata
 ): Expression {
-  // Special case some functions...
-
   const exclusions = ce.jsonSerializationOptions.exclude;
 
-  if (
-    (head === 'Rational' || head === 'Divide') &&
-    args.length === 2 &&
-    asSmallInteger(args[0]) === 1 &&
-    asSmallInteger(args[1]) === 2 &&
-    !exclusions.includes('Half')
-  ) {
-    return serializeJsonSymbol(ce, 'Half', {
-      ...metadata,
-      wikidata: 'Q39373172',
-    });
-  }
-
-  if (args.length === 1) {
+  //
+  // The only sugaring done for both canonical and non-canonical expressions
+  // is for 'Negate', since `-2` gets parsed as `['Negate', 2]` and not
+  // `-2`.
+  //
+  if (head === 'Negate' && args.length === 1) {
     const num0 = args[0]?.numericValue;
-    if (head === 'Negate' && num0 !== null) {
+    if (num0 !== null) {
       if (typeof num0 === 'number') return serializeJsonNumber(ce, -num0);
       if (num0 instanceof Decimal) return serializeJsonNumber(ce, num0.neg());
       if (num0 instanceof Complex) return serializeJsonNumber(ce, num0.neg());
       if (isRational(num0)) return serializeJsonNumber(ce, neg(num0));
     }
   }
+
+  //
+  // If there are some exclusions, try to avoid them.
+  // This is done both to canonical or non-canonical expressions.
+  //
   if (typeof head === 'string' && exclusions.includes(head)) {
     if (head === 'Rational' && args.length === 2)
       return serializeJsonFunction(ce, 'Divide', args, metadata);
@@ -267,8 +292,11 @@ export function serializeJsonFunction(
     if (head === 'Exp' && args.length === 1)
       return serializeJsonFunction(ce, 'Power', [ce.E, args[0]], metadata);
 
+    if (head === 'Pair' || head == 'Single' || head === 'Triple')
+      return serializeJsonFunction(ce, 'Tuple', args, metadata);
+
     // Note: even though 'Subtract' is boxed out, we still need to handle it here
-    // because the function may be called with a 'Subtract' head.
+    // because the function may be called with a non-canonical 'Subtract' head.
     if (head === 'Subtract' && args.length === 2)
       return serializeJsonFunction(
         ce,
@@ -278,36 +306,6 @@ export function serializeJsonFunction(
       );
     if (head === 'Subtract' && args.length === 1)
       return serializeJsonFunction(ce, 'Negate', args, metadata);
-  }
-
-  if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
-    if (args[1]?.numericValue !== null) {
-      const t1 = asSmallInteger(args[1]);
-      if (t1 !== null && t1 < 0)
-        return serializeJsonFunction(
-          ce,
-          'Subtract',
-          [args[0], ce.number(-t1)],
-          metadata
-        );
-    }
-    if (args[1]?.head === 'Negate') {
-      return serializeJsonFunction(
-        ce,
-        'Subtract',
-        [args[0], args[1].op1],
-        metadata
-      );
-    }
-  }
-
-  if (head === 'Tuple') {
-    if (args.length === 1 && !exclusions.includes('Single'))
-      return serializeJsonFunction(ce, 'Single', args, metadata);
-    if (args.length === 2 && !exclusions.includes('Pair'))
-      return serializeJsonFunction(ce, 'Pair', args, metadata);
-    if (args.length === 3 && !exclusions.includes('Triple'))
-      return serializeJsonFunction(ce, 'Triple', args, metadata);
   }
 
   const jsonHead =

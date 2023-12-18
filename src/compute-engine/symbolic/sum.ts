@@ -228,10 +228,10 @@ export class Sum {
         if (isRationalOne(coef)) xs.push(term);
         else if (isRationalNegativeOne(coef)) xs.push(ce.neg(term));
         else if (machineDenominator(coef) === 1)
-          xs.push(ce.mul([ce.number(coef[0]), term]));
+          xs.push(ce.mul(ce.number(coef[0]), term));
         else if (machineNumerator(coef) === 1)
           xs.push(ce.div(term, ce.number(coef[1])));
-        else xs.push(ce.mul([ce.number(coef), term]));
+        else xs.push(ce.mul(ce.number(coef), term));
       }
     }
 

@@ -5,7 +5,7 @@ layout: single
 date: Last Modified
 sidebar:
   - nav: "universal"
-toc: false
+toc: true
 render_math_in_document: true
 ---
 
@@ -26,12 +26,11 @@ object:
 
 </div>
 
-The Compute Engine stores expressions internally in a canonical form to simplify
-comparisons and to make it easier to implement algorithms that work with
-expressions.
+The Compute Engine stores expressions internally in a canonical form to make
+it easier to work with symbolic expressions.
 
-The value of `expr.simplify()`, `expr.evaluate()` and `expr.N()` are canonical
-expressions.
+The return value of `expr.simplify()`, `expr.evaluate()` and `expr.N()` are 
+canonical expressions.
 
 The `ce.box()` and `ce.parse()` functions return a canonical expression by
 default, which is the desirable behavior in most cases.
@@ -39,16 +38,19 @@ default, which is the desirable behavior in most cases.
 **To get a non-canonical version of an expression** use
 of `ce.parse(s, {canonical: false})` or `ce.box(expr, {canonical: false})`.
 
+You can further customize the canonical form of an expression by using the
+[`["CanonicalForm"]`](/compute-engine/reference/core/#CanonicalForm) function or by specifying the form you want to use. See [below](#custom-canonical-form) for more details.
+
 The non-canonical version will be closer to the literal LaTeX input, which may
 be desirable to compare a "raw" user input with an expected answer.
 
 ```js
-ce.parse('\\frac{30}{-50}');
+ce.parse('\\frac{30}{-50}').print();
 // ➔ ["Rational", -3, 5]
 // The canonical version moves the sign to the numerator 
 // and reduces the numerator and denominator
 
-ce.parse('\\frac{30}{-50}', { canonical: false });
+ce.parse('\\frac{30}{-50}', { canonical: false }).print();
 // ➔ ["Divide", 30, -50]
 // The non-canonical version does not change the arguments,
 // so this is interpreted as a regular fraction ("Divide"), 
@@ -61,7 +63,7 @@ representation before being returned, for example `["Power", "x", 2]` is
 returned as `["Square", "x"]`.
 
 You can customize how an expression is serialized to plain JSON by using
-[`ce.jsonSerializationOptions`](/docs/guide-expressions#unboxing).
+[`ce.jsonSerializationOptions`](/docs/compute-engine/#(ComputeEngine%3Aclass).(jsonSerializationOptions%3Ainstance)).
 
 ```js
 const expr = ce.parse("\\frac{3}{5}");
@@ -98,7 +100,7 @@ console.log(expr.json);
 console.log(expr.isCanonical);
 // ➔ false
 
-console.log(expr.canonical);
+console.log(expr.canonical.json);
 // ➔ ["Rational", 1, 3]
 ```
 
@@ -145,23 +147,33 @@ transformations it applies.
 Below is a list of some of the transformations applied to obtain the canonical
 form:
 
-- Idempotency: \\( f(f(x)) \to f(x) \\)
-- Involution: \\( f(f(x)) \to x \\)
-- Associativity: \\( f(a, f(b, c)) \to f(a, b, c) \\)
-- **Literals**
+- **Literal Numbers**
   - Rationals are reduced, e.g. \\( \frac{6}{4} \to \frac{3}{2}\\)
   - The denominator of rationals is made positive, e.g. \\(\frac{5}{-11}
     \to \frac{-5}{11}\\)
-  - A rational with a denominator of 1 is replaced with a number, e.g.
+  - A rational with a denominator of 1 is replaced with the numerator, e.g.
     \\(\frac{19}{1} \to 19\\)
-  - Complex numbers with no imaginary component are replaced with a real number
+  - Complex numbers with no imaginary component are replaced with the real component
 - `Add`
-  - Arguments are sorted
+  - Literal 0 is removed
   - Sum of a literal and the product of a literal with the imaginary unit are
     replaced with a complex number.
-- `Multiply`: Arguments are sorted
-- `Negate`: `["Negate", 3]` \\(\to\\) `-3`
+  - Associativity is applied
+  - Arguments are sorted
+- `Multiply`
+  - Literal 1 is removed
+  - Product of a literal and the imaginary unit are replaced with a complex
+    number.
+  - Literal -1 multiplied by an expression is replaced with the negation of the
+    expression.
+  - Signs are simplified: (-x)(-y) -> xy
+  - Associativity is applied
+  - Arguments are sorted
+- `Negate`
+  - Literal numbers are negated
+  - Negate of a negation is removed
 - `Power`
+  - \\(x^n)^m \to x^{nm}\\)
   - \\(x^{\tilde\infty} \to \operatorname{NaN}\\)
   - \\(x^0 \to 1\\)
   - \\(x^1 \to x\\)
@@ -175,7 +187,13 @@ form:
 - `Square`: `["Power", "x", 2]` \\(\to\\) `["Square", "x"]`
 - `Sqrt`: `["Sqrt", "x"]` \\(\to\\)`["Power", "x", "Half"]`
 - `Root`:  `["Root", "x", 3]` \\(\to\\) `["Power", "x", ["Rational", 1, 3]]`
-- `Subtract`: `["Subtract", "a", "b"]` \\(\to\\) `["Add", ["Negate", "b"], "a"]`
+- `Subtract`
+  - Replaced with addition, e.g. `["Subtract", "a", "b"]` \\(\to\\) `["Add", ["Negate", "b"], "a"]`
+- Other functions:
+  - Simplified if idempotent: \\( f(f(x)) \to f(x) \\)
+  - Simplified if an involution: \\( f(f(x)) \to x \\)
+  - Simplified if associative: \\( f(a, f(b, c)) \to f(a, b, c) \\)
+
 
 ## Custom Canonical Form
 
@@ -183,10 +201,6 @@ The full canonical form of an expression is not always the most convenient
 representation for a given application. For example, if you want to check
 the answers from a quizz, you may want to compare the user input with a
 canonical form that is closer to the user input.
-
-You can customize the canonical form of an expression by using the
-[`["CanonicalForm"]`](/compute-engine/reference/core/#CanonicalForm) function or by specifying the form you want to use
-with the `canonical` option of `ce.box()` and `ce.parse()`.
 
 **To get the non-canonical form**, use `ce.box(expr, { canonical: false })` or
 `ce.parse(s, { canonical: false })`.
@@ -203,15 +217,25 @@ console.log(expr.json);
 ```
 
 **To get the full canonical form**, use `ce.box(expr, { canonical: true })` or
-`ce.parse(s, { canonical: true })`.
+`ce.parse(s, { canonical: true })`. You can also ommit the `canonical` option
+as it is `true` by default.
 
 ```js example
 const expr = ce.parse("2(0+x\\times x-1)", 
   {canonical: true}
-);
-console.log(expr.json);
+).print();
+// ➔ ["Multiply", 2, ["Subtract", ["Square", "x"], 1]]
+
+const expr = ce.parse("2(0+x\\times x-1)").print();
 // ➔ ["Multiply", 2, ["Subtract", ["Square", "x"], 1]]
 ```
+
+**To get a custom canonical form of an expression**, use the
+[`["CanonicalForm"]`](/compute-engine/reference/core/#CanonicalForm) function 
+or specify the form you want to use with the `canonical` option of `ce.box()` 
+and `ce.parse()`.
+
+
 
 **To order the arguments in a canonical order**, use `ce.box(expr, { canonical: "Order" })` or `ce.parse(s, { canonical: "Order" })`.
 

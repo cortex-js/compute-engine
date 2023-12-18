@@ -27,14 +27,14 @@ describe('basic', () => {
     `);
     expect(parse('\\frac{}}')).toMatchInlineSnapshot(`
       [
-        "Pair",
+        "Tuple",
         ["Divide", ["Error", "'missing'"], ["Error", "'missing'"]],
         ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ]
     `);
     expect(parse('\\frac{1}}')).toMatchInlineSnapshot(`
       [
-        "Pair",
+        "Tuple",
         ["Divide", 1, ["Error", "'missing'"]],
         ["Error", "'unexpected-closing-delimiter'", ["LatexString", "'}'"]]
       ]
@@ -44,7 +44,7 @@ describe('basic', () => {
         "Divide",
         1,
         [
-          "Pair",
+          "Tuple",
           2,
           ["Error", "'expected-closing-delimiter'", ["LatexString", "'{2'"]]
         ]
@@ -105,7 +105,7 @@ describe('basic', () => {
       `["Equal", "x", ["Error", "'missing'"]]`
     );
     expect(parse('2 \\times 2 = ')).toMatchInlineSnapshot(
-      `["Equal", 4, ["Error", "'missing'"]]`
+      `["Equal", ["Multiply", 2, 2], ["Error", "'missing'"]]`
     );
     expect(parse('x+1=')).toMatchInlineSnapshot(
       `["Equal", ["Add", "x", 1], ["Error", "'missing'"]]`

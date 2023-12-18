@@ -25,7 +25,7 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
             if (numerator) {
               if (numerator.head === 'Add')
                 return ce
-                  .add(numerator.ops!.map((x) => ce.div(x, denominator)))
+                  .add(...numerator.ops!.map((x) => ce.div(x, denominator)))
                   .evaluate();
 
               return ce.div(numerator, denominator).evaluate();
