@@ -794,7 +794,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           args = canonical(flattenSequence(args));
           if (args.length !== 1) return ce._fn('Square', args);
-          return ce.pow(args[0], ce.number(2));
+          return ce._fn('Power', [args[0], ce.number(2)]).canonical;
         },
       },
     },
