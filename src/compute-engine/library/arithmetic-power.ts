@@ -250,21 +250,29 @@ export function processPower(
 
   if (base.head === 'Multiply') {
     let c: Rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [1, 1];
+    let sqrt = c;
     const xs: BoxedExpression[] = [];
     for (const op of base.ops!) {
       const r = asRational(op);
       if (r) c = mul(c, r);
-      else xs.push(op);
+      else {
+        const s = asExactSqrt(op);
+        if (s) sqrt = mul(sqrt, s);
+        else xs.push(op);
+      }
     }
 
-    if (!isRationalOne(c))
-      return ce.mul(
-        processSqrt(ce, ce.number(c), mode) ?? ce.One,
-        ce.pow(
-          processPower(ce, ce.mul(...xs), exponent, mode) ?? ce.mul(...xs),
-          exponent
-        )
+    if (!isRationalOne(c) || !isRationalOne(sqrt)) {
+      const a1 = processPower(ce, ce.number(c), exponent, mode);
+      const a2 = processPower(
+        ce,
+        ce.number(sqrt),
+        ce.div(exponent, ce.number(2)),
+        mode
       );
+      const a3 = processPower(ce, ce.mul(...xs), exponent, mode);
+      if (a1 && a2 && a3) return ce.mul(a1, a2, a3);
+    }
   }
 
   if (base.head === 'Power') {

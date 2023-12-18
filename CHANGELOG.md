@@ -10,6 +10,8 @@
 - **#132** Attempting to set a value to 0 with
   `ce.defineSymbol("count", {value: 0})` would fail: the symbol would be
   undefined.
+- Correctly evaluate power expressions in some cases, for example
+  `(\sqrt2 + \sqrt2)^2`.
 
 ## Improvements
 
