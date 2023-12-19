@@ -31,71 +31,56 @@ describe('Nth PRIME NUMBER', () =>
             [
               "Delimiter",
               [
-                "Sequence",
+                "Sum",
                 [
-                  "Sum",
+                  "Delimiter",
                   [
-                    "Delimiter",
+                    "Floor",
                     [
-                      "Sequence",
+                      "Divide",
+                      1,
                       [
-                        "Floor",
+                        "Add",
                         [
-                          "Divide",
-                          1,
+                          "Power",
+                          0,
                           [
-                            "Add",
+                            "Subtract",
+                            "n",
                             [
-                              "Power",
-                              0,
+                              "Delimiter",
                               [
-                                "Subtract",
-                                "n",
+                                "Sum",
                                 [
                                   "Delimiter",
                                   [
-                                    "Sequence",
+                                    "Delimiter",
                                     [
-                                      "Sum",
+                                      "Product",
                                       [
                                         "Delimiter",
                                         [
-                                          "Sequence",
+                                          "Subtract",
+                                          1,
                                           [
-                                            "Delimiter",
+                                            "Power",
+                                            0,
                                             [
-                                              "Sequence",
+                                              "Abs",
                                               [
-                                                "Product",
+                                                "Subtract",
                                                 [
-                                                  "Delimiter",
+                                                  "Floor",
                                                   [
-                                                    "Sequence",
-                                                    [
-                                                      "Subtract",
-                                                      1,
-                                                      [
-                                                        "Power",
-                                                        0,
-                                                        [
-                                                                                                              ...,
-                                                                                                              ...
-                                                        ]
-                                                      ]
-                                                    ]
+                                                    "Divide",
+                                                    ["Subscript", "v", 2],
+                                                    ["Subscript", "v", 3]
                                                   ]
                                                 ],
                                                 [
-                                                  "Tuple",
-                                                  ["Subscript", "v", 3],
-                                                  2,
-                                                  [
-                                                    "Floor",
-                                                    [
-                                                      "Sqrt",
-                                                      ["Subscript", "v", 2]
-                                                    ]
-                                                  ]
+                                                  "Divide",
+                                                  ["Subscript", "v", 2],
+                                                  ["Subscript", "v", 3]
                                                 ]
                                               ]
                                             ]
@@ -104,27 +89,36 @@ describe('Nth PRIME NUMBER', () =>
                                       ],
                                       [
                                         "Tuple",
-                                        ["Subscript", "v", 2],
+                                        ["Subscript", "v", 3],
                                         2,
-                                        ["Subscript", "v", 1]
+                                        [
+                                          "Floor",
+                                          ["Sqrt", ["Subscript", "v", 2]]
+                                        ]
                                       ]
                                     ]
                                   ]
+                                ],
+                                [
+                                  "Tuple",
+                                  ["Subscript", "v", 2],
+                                  2,
+                                  ["Subscript", "v", 1]
                                 ]
                               ]
-                            ],
-                            1
+                            ]
                           ]
-                        ]
+                        ],
+                        1
                       ]
                     ]
-                  ],
-                  [
-                    "Tuple",
-                    ["Subscript", "v", 1],
-                    2,
-                    ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                   ]
+                ],
+                [
+                  "Tuple",
+                  ["Subscript", "v", 1],
+                  2,
+                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
               ]
             ],
@@ -143,71 +137,56 @@ describe('Nth PRIME NUMBER', () =>
             [
               "Delimiter",
               [
-                "Sequence",
+                "Sum",
                 [
-                  "Sum",
+                  "Delimiter",
                   [
-                    "Delimiter",
+                    "Floor",
                     [
-                      "Sequence",
+                      "Divide",
+                      1,
                       [
-                        "Floor",
+                        "Add",
                         [
-                          "Divide",
-                          1,
+                          "Power",
+                          0,
                           [
-                            "Add",
+                            "Subtract",
+                            "n",
                             [
-                              "Power",
-                              0,
+                              "Delimiter",
                               [
-                                "Subtract",
-                                "n",
+                                "Sum",
                                 [
                                   "Delimiter",
                                   [
-                                    "Sequence",
+                                    "Delimiter",
                                     [
-                                      "Sum",
+                                      "Product",
                                       [
                                         "Delimiter",
                                         [
-                                          "Sequence",
+                                          "Subtract",
+                                          1,
                                           [
-                                            "Delimiter",
+                                            "Power",
+                                            0,
                                             [
-                                              "Sequence",
+                                              "Abs",
                                               [
-                                                "Product",
+                                                "Subtract",
                                                 [
-                                                  "Delimiter",
+                                                  "Floor",
                                                   [
-                                                    "Sequence",
-                                                    [
-                                                      "Subtract",
-                                                      1,
-                                                      [
-                                                        "Power",
-                                                        0,
-                                                        [
-                                                                                                              ...,
-                                                                                                              ...
-                                                        ]
-                                                      ]
-                                                    ]
+                                                    "Divide",
+                                                    ["Subscript", "v", 2],
+                                                    ["Subscript", "v", 3]
                                                   ]
                                                 ],
                                                 [
-                                                  "Tuple",
-                                                  ["Subscript", "v", 3],
-                                                  2,
-                                                  [
-                                                    "Floor",
-                                                    [
-                                                      "Sqrt",
-                                                      ["Subscript", "v", 2]
-                                                    ]
-                                                  ]
+                                                  "Divide",
+                                                  ["Subscript", "v", 2],
+                                                  ["Subscript", "v", 3]
                                                 ]
                                               ]
                                             ]
@@ -216,27 +195,36 @@ describe('Nth PRIME NUMBER', () =>
                                       ],
                                       [
                                         "Tuple",
-                                        ["Subscript", "v", 2],
+                                        ["Subscript", "v", 3],
                                         2,
-                                        ["Subscript", "v", 1]
+                                        [
+                                          "Floor",
+                                          ["Sqrt", ["Subscript", "v", 2]]
+                                        ]
                                       ]
                                     ]
                                   ]
+                                ],
+                                [
+                                  "Tuple",
+                                  ["Subscript", "v", 2],
+                                  2,
+                                  ["Subscript", "v", 1]
                                 ]
                               ]
-                            ],
-                            1
+                            ]
                           ]
-                        ]
+                        ],
+                        1
                       ]
                     ]
-                  ],
-                  [
-                    "Tuple",
-                    ["Subscript", "v", 1],
-                    2,
-                    ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                   ]
+                ],
+                [
+                  "Tuple",
+                  ["Subscript", "v", 1],
+                  2,
+                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
               ]
             ],
@@ -252,75 +240,56 @@ describe('Nth PRIME NUMBER', () =>
           [
             "Delimiter",
             [
-              "Sequence",
+              "Sum",
               [
-                "Sum",
+                "Delimiter",
                 [
-                  "Delimiter",
+                  "Floor",
                   [
-                    "Sequence",
+                    "Divide",
+                    1,
                     [
-                      "Floor",
+                      "Add",
                       [
-                        "Divide",
-                        1,
+                        "Power",
+                        0,
                         [
-                          "Add",
+                          "Subtract",
+                          "n",
                           [
-                            "Power",
-                            0,
+                            "Delimiter",
                             [
-                              "Subtract",
-                              "n",
+                              "Sum",
                               [
                                 "Delimiter",
                                 [
-                                  "Sequence",
+                                  "Delimiter",
                                   [
-                                    "Sum",
+                                    "Product",
                                     [
                                       "Delimiter",
                                       [
-                                        "Sequence",
+                                        "Subtract",
+                                        1,
                                         [
-                                          "Delimiter",
+                                          "Power",
+                                          0,
                                           [
-                                            "Sequence",
+                                            "Abs",
                                             [
-                                              "Product",
+                                              "Subtract",
                                               [
-                                                "Delimiter",
+                                                "Floor",
                                                 [
-                                                  "Sequence",
-                                                  [
-                                                    "Subtract",
-                                                    1,
-                                                    [
-                                                      "Power",
-                                                      0,
-                                                      [
-                                                        "Abs",
-                                                        [
-                                                                                                              ...,
-                                                                                                              ...,
-                                                                                                              ...
-                                                        ]
-                                                      ]
-                                                    ]
-                                                  ]
+                                                  "Divide",
+                                                  ["Subscript", "v", 2],
+                                                  ["Subscript", "v", 3]
                                                 ]
                                               ],
                                               [
-                                                "Tuple",
-                                                ["Subscript", "v", 3],
-                                                2,
-                                                [
-                                                  "Floor",
-                                                  [
-                                                    "Sqrt",
-                                                    ["Subscript", "v", 2]
-                                                  ]
-                                                ]
+                                                "Divide",
+                                                ["Subscript", "v", 2],
+                                                ["Subscript", "v", 3]
                                               ]
                                             ]
                                           ]
@@ -329,27 +298,36 @@ describe('Nth PRIME NUMBER', () =>
                                     ],
                                     [
                                       "Tuple",
-                                      ["Subscript", "v", 2],
+                                      ["Subscript", "v", 3],
                                       2,
-                                      ["Subscript", "v", 1]
+                                      [
+                                        "Floor",
+                                        ["Sqrt", ["Subscript", "v", 2]]
+                                      ]
                                     ]
                                   ]
                                 ]
+                              ],
+                              [
+                                "Tuple",
+                                ["Subscript", "v", 2],
+                                2,
+                                ["Subscript", "v", 1]
                               ]
                             ]
-                          ],
-                          1
+                          ]
                         ]
-                      ]
+                      ],
+                      1
                     ]
                   ]
-                ],
-                [
-                  "Tuple",
-                  ["Subscript", "v", 1],
-                  2,
-                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
+              ],
+              [
+                "Tuple",
+                ["Subscript", "v", 1],
+                2,
+                ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
               ]
             ]
           ],
@@ -469,7 +447,7 @@ describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
         "Floor",
         [
           "Power",
-          ["Delimiter", ["Sequence", ["Divide", 3540326840, 2710032743]]],
+          ["Delimiter", ["Divide", 3540326840, 2710032743]],
           ["Power", 3, "n"]
         ]
       ]
@@ -517,7 +495,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       latex     = [
         "InvisibleOperator",
         ["Sqrt", "Pi"],
-        ["Power", ["Delimiter", ["Sequence", ["Divide", "n", "e"]]], "n"],
+        ["Power", ["Delimiter", ["Divide", "n", "e"]], "n"],
         [
           "Root",
           [

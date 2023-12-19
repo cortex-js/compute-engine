@@ -114,7 +114,7 @@ describe('MATCHFIX abs and norm', () => {
 
   test('|(1+|a|+2)|', () =>
     expect(check('|(1+|a|+2)|')).toMatchInlineSnapshot(`
-      latex     = ["Abs", ["Delimiter", ["Sequence", ["Add", 1, ["Abs", "a"], 2]]]]
+      latex     = ["Abs", ["Delimiter", ["Add", 1, ["Abs", "a"], 2]]]
       box       = ["Abs", ["Add", ["Abs", "a"], 1, 2]]
       simplify  = ["Abs", ["Add", ["Abs", "a"], 3]]
     `));

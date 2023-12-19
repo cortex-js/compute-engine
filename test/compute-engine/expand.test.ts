@@ -19,7 +19,10 @@ describe('EXPAND POWER', () => {
         ["Power", "b", 6]
       ]
     `));
+
   test(`Power`, () =>
+    // 64*a**6 + 768*a**5*b**2 + 3840*a**4*b**4 + 10240*a**3*b**6 + 15360*a**2*b**8 + 12288*a*b**10 + 4096*b**12
+
     expect(checkExpand(`(2a+4b^2)^6`)).toMatchInlineSnapshot(`
       box       = [
         "Expand",
@@ -31,13 +34,13 @@ describe('EXPAND POWER', () => {
       ]
       evaluate  = [
         "Add",
-        ["Multiply", 2, ["Power", "b", 72]],
-        ["Multiply", ["Sqrt", 2], ["Power", "a", 6]],
-        ["Multiply", 30, ["Sqrt", 2], ["Square", "a"], ["Power", "b", 32]],
-        ["Multiply", 40, ["Sqrt", 2], ["Power", "a", 3], ["Power", "b", 18]],
-        ["Multiply", 30, ["Sqrt", 2], ["Power", "a", 4], ["Power", "b", 8]],
-        ["Multiply", 24, ["Sqrt", 2], ["Square", "b"], ["Power", "a", 5]],
-        ["Multiply", 24, "a", ["Power", "b", 50]]
+        ["Multiply", 3840, ["Power", ["Multiply", "a", "b"], 4]],
+        ["Multiply", 64, ["Power", "a", 6]],
+        ["Multiply", 15360, ["Square", "a"], ["Power", "b", 8]],
+        ["Multiply", 10240, ["Power", "a", 3], ["Power", "b", 6]],
+        ["Multiply", 4096, ["Power", "b", 12]],
+        ["Multiply", 768, ["Square", "b"], ["Power", "a", 5]],
+        ["Multiply", 12288, "a", ["Power", "b", 10]]
       ]
     `));
 });

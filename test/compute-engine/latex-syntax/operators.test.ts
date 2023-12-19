@@ -77,7 +77,7 @@ describe('OPERATOR add/subtract', () => {
 
   test('1+(2+3)', () =>
     expect(check('1+(2+3)')).toMatchInlineSnapshot(`
-      latex     = ["Add", 1, ["Delimiter", ["Sequence", ["Add", 2, 3]]]]
+      latex     = ["Add", 1, ["Delimiter", ["Add", 2, 3]]]
       box       = ["Add", 1, 2, 3]
       simplify  = 6
     `));
@@ -131,7 +131,7 @@ describe('OPERATOR invisible', () => {
       latex     = [
         "InvisibleOperator",
         2,
-        ["Delimiter", ["Sequence", ["InvisibleOperator", "x", "y", "z"]]]
+        ["Delimiter", ["InvisibleOperator", "x", "y", "z"]]
       ]
       ["Multiply", 2, "x", "y", "z"]
     `));
@@ -139,8 +139,8 @@ describe('OPERATOR invisible', () => {
     expect(check('(abc)(xyz)')).toMatchInlineSnapshot(`
       latex     = [
         "InvisibleOperator",
-        ["Delimiter", ["Sequence", ["InvisibleOperator", "a", "b", "c"]]],
-        ["Delimiter", ["Sequence", ["InvisibleOperator", "x", "y", "z"]]]
+        ["Delimiter", ["InvisibleOperator", "a", "b", "c"]],
+        ["Delimiter", ["InvisibleOperator", "x", "y", "z"]]
       ]
       ["Multiply", "a", "b", "c", "x", "y", "z"]
     `));
@@ -189,10 +189,7 @@ describe('OPERATOR prefix', () => {
     `));
   test('-(ab) // Negate', () =>
     expect(check('-(ab)')).toMatchInlineSnapshot(`
-      latex     = [
-        "Negate",
-        ["Delimiter", ["Sequence", ["InvisibleOperator", "a", "b"]]]
-      ]
+      latex     = ["Negate", ["Delimiter", ["InvisibleOperator", "a", "b"]]]
       ["Negate", ["Multiply", "a", "b"]]
     `));
   test('--x // Predecrement', () =>
@@ -202,7 +199,7 @@ describe('OPERATOR prefix', () => {
     `));
   test('-(-x) // Negate', () =>
     expect(check('-(-x)')).toMatchInlineSnapshot(`
-      latex     = ["Negate", ["Delimiter", ["Sequence", ["Negate", "x"]]]]
+      latex     = ["Negate", ["Delimiter", ["Negate", "x"]]]
       x
     `));
   test('-i // Negate', () =>
@@ -286,7 +283,7 @@ describe('OPERATOR multiply', () => {
     `));
   test('2(x+1)', () =>
     expect(check('2(x+1)')).toMatchInlineSnapshot(`
-      latex     = ["InvisibleOperator", 2, ["Delimiter", ["Sequence", ["Add", "x", 1]]]]
+      latex     = ["InvisibleOperator", 2, ["Delimiter", ["Add", "x", 1]]]
       box       = ["Multiply", 2, ["Add", "x", 1]]
       simplify  = ["Add", ["Multiply", 2, "x"], 2]
       evaluate  = ["Multiply", 2, ["Add", "x", 1]]

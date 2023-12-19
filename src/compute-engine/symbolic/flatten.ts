@@ -38,10 +38,12 @@ export function flattenSequence(xs: BoxedExpression[]): BoxedExpression[] {
   for (const x of xs) {
     if (!x.isValid) ys.push(x);
     else if (x.head === 'Delimiter') {
-      const seq = x.op1.ops ?? [];
-      // If this is an empty delimiter, i.e. `()`, preserve it as a tuple, don't flatten it.
-      if (seq.length === 0) ys.push(x.engine.box(['Tupple']));
-      else ys.push(...flattenSequence(seq));
+      if (x.op1.head === 'Sequence') {
+        const seq = x.op1.ops ?? [];
+        // If this is an empty delimiter, i.e. `()`, preserve it as a tuple, don't flatten it.
+        if (seq.length === 0) ys.push(x.engine.box(['Tupple']));
+        else ys.push(...flattenSequence(seq));
+      } else ys.push(x.op1);
     } else if (x.head === 'Sequence') {
       if (x.ops) ys.push(...x.ops);
     } else ys.push(x);

@@ -85,60 +85,18 @@ describe('CANONICAL FORMS', () => {
         "InvisibleOperator",
         [
           "Delimiter",
-          [
-            "Sequence",
-            [
-              "Add",
-              1,
-              [
-                "Delimiter",
-                [
-                  "Sequence",
-                  ["Add", 2, ["Delimiter", ["Sequence", ["Add", 3, 4]]]]
-                ]
-              ]
-            ]
-          ]
+          ["Add", 1, ["Delimiter", ["Add", 2, ["Delimiter", ["Add", 3, 4]]]]]
         ],
         [
           "Delimiter",
           [
-            "Sequence",
+            "InvisibleOperator",
+            ["Delimiter", ["Add", ["Delimiter", ["Add", 5, 6]], 7]],
             [
-              "InvisibleOperator",
-              [
-                "Delimiter",
-                [
-                  "Sequence",
-                  ["Add", ["Delimiter", ["Sequence", ["Add", 5, 6]]], 7]
-                ]
-              ],
-              [
-                "Delimiter",
-                [
-                  "Sequence",
-                  [
-                    "Delimiter",
-                    [
-                      "Sequence",
-                      ["Add", 8, ["Delimiter", ["Sequence", ["Add", 9, 10]]]]
-                    ]
-                  ]
-                ]
-              ],
-              [
-                "Delimiter",
-                [
-                  "Sequence",
-                  [
-                    "Add",
-                    11,
-                    ["Delimiter", ["Sequence", ["Add", 12, 13]]],
-                    14
-                  ]
-                ]
-              ]
-            ]
+              "Delimiter",
+              ["Delimiter", ["Add", 8, ["Delimiter", ["Add", 9, 10]]]]
+            ],
+            ["Delimiter", ["Add", 11, ["Delimiter", ["Add", 12, 13]], 14]]
           ]
         ]
       ]
@@ -146,7 +104,7 @@ describe('CANONICAL FORMS', () => {
         "Multiply",
         ["Add", 1, 2, 3, 4],
         ["Add", 5, 6, 7],
-        ["Add", 8, 9, 10],
+        ["Delimiter", ["Add", 8, 9, 10]],
         ["Add", 11, 12, 13, 14]
       ]
       canonical = [
@@ -189,7 +147,7 @@ describe('CANONICAL FORMS', () => {
 
   test('2\\times(5-5)\\times5\\times4"', () => {
     expect(check('2\\times(5-5)\\times5\\times4')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", 2, ["Delimiter", ["Sequence", ["Subtract", 5, 5]]], 5, 4]
+      latex     = ["Multiply", 2, ["Delimiter", ["Subtract", 5, 5]], 5, 4]
       box       = ["Multiply", 2, 4, 5, ["Subtract", 5, 5]]
       simplify  = 0
     `);
@@ -285,31 +243,13 @@ describe('COMMUTATIVE ORDER', () => {
         "InvisibleOperator",
         [
           "Delimiter",
-          [
-            "Sequence",
-            ["InvisibleOperator", ["Power", "b", 3], ["Power", "c", 2], "d"]
-          ]
+          ["InvisibleOperator", ["Power", "b", 3], ["Power", "c", 2], "d"]
         ],
+        ["Delimiter", ["InvisibleOperator", ["Power", "x", 7], "y"]],
+        ["Delimiter", ["InvisibleOperator", ["Power", "a", 5], "g"]],
         [
           "Delimiter",
-          ["Sequence", ["InvisibleOperator", ["Power", "x", 7], "y"]]
-        ],
-        [
-          "Delimiter",
-          ["Sequence", ["InvisibleOperator", ["Power", "a", 5], "g"]]
-        ],
-        [
-          "Delimiter",
-          [
-            "Sequence",
-            [
-              "InvisibleOperator",
-              ["Power", "b", 2],
-              ["Power", "x", 5],
-              "b",
-              3
-            ]
-          ]
+          ["InvisibleOperator", ["Power", "b", 2], ["Power", "x", 5], "b", 3]
         ]
       ]
       box       = [
@@ -523,24 +463,15 @@ describe('POLYNOMIAL ORDER', () => {
         "Add",
         [
           "Delimiter",
-          [
-            "Sequence",
-            ["InvisibleOperator", ["Power", "b", 3], ["Power", "b", 2]]
-          ]
+          ["InvisibleOperator", ["Power", "b", 3], ["Power", "b", 2]]
         ],
         [
           "Delimiter",
-          [
-            "Sequence",
-            ["InvisibleOperator", ["Power", "a", 3], ["Power", "a", 2]]
-          ]
+          ["InvisibleOperator", ["Power", "a", 3], ["Power", "a", 2]]
         ],
-        ["Delimiter", ["Sequence", ["Power", "b", 6]]],
-        [
-          "Delimiter",
-          ["Sequence", ["InvisibleOperator", ["Power", "a", 5], "b"]]
-        ],
-        ["Delimiter", ["Sequence", ["Power", "a", 5]]]
+        ["Delimiter", ["Power", "b", 6]],
+        ["Delimiter", ["InvisibleOperator", ["Power", "a", 5], "b"]],
+        ["Delimiter", ["Power", "a", 5]]
       ]
       box       = [
         "Add",

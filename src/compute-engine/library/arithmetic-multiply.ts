@@ -395,7 +395,7 @@ export function evalMultiplication(
         ce.assign({ [index]: i });
         terms.push(fn.simplify());
       }
-      result = ce.mul(terms).simplify();
+      result = ce.mul(...terms).simplify();
     }
   }
 

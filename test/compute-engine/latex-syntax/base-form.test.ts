@@ -11,7 +11,7 @@ describe('BASE FORM', () => {
     expect(json('\\text{00111}_2')).toMatchInlineSnapshot(`7`);
     expect(json('\\text{00\\;111}_2')).toMatchInlineSnapshot(`7`);
     expect(json('(\\text{00\\;111})_2')).toMatchInlineSnapshot(
-      `["Subscript", ["Delimiter", ["Sequence", "'00 111'"]], 2]`
+      `["Subscript", ["Delimiter", "'00 111'"], 2]`
     ); // @fixme
   });
   test('decimal', () => {

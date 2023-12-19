@@ -1,6 +1,17 @@
 import { Rule } from './public';
 
 /**
+ * @todo: a set to "tidy" an expression. Different from a canonical form, but
+ * inline with the user's expectations.
+ *
+ * Example:
+ *
+ * - a^n * a^m -> a^(n+m)
+ * - a / √b -> (a * √b) / b
+ *
+ */
+
+/**
  * A set of simplification rules.
  *
  * The rules are expressed as

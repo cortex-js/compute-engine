@@ -85,8 +85,8 @@ describe('expr.solve()', () => {
     const e = expr('x^2 + 2x + \\frac{1}{4} = 0');
     const result = e.solve('x')?.map((x) => x.json);
     expect(result).toEqual([
-      ['Divide', ['Subtract', ['Sqrt', 3], 2], 2],
-      ['Divide', ['Subtract', -2, ['Sqrt', 3]], 2],
+      ['Subtract', ['Divide', ['Sqrt', 3], 2], 1],
+      ['Subtract', ['Multiply', ['Rational', -1, 2], ['Sqrt', 3]], 1],
     ]);
   });
 

@@ -66,7 +66,8 @@ describe('DELIMITERS SERIALIZING', () => {
   test('Sequence expression with default parens and comma', () =>
     expect(check(['Delimiter', ['Sequence', ['Add', 1, 2]]]))
       .toMatchInlineSnapshot(`
-      ["Delimiter", ["Sequence", ["Add", 1, 2]]]
+      box       = ["Delimiter", ["Sequence", ["Add", 1, 2]]]
+      canonical = ["Delimiter", ["Add", 1, 2]]
       box-latex = (1+2)
       latex     = (1+2)
     `));
@@ -74,8 +75,8 @@ describe('DELIMITERS SERIALIZING', () => {
   test('Non-collection with default parens and comma', () =>
     expect(check(['Delimiter', ['Add', 1, 2]])).toMatchInlineSnapshot(`
       ["Delimiter", ["Add", 1, 2]]
-      box-latex = (1,2)
-      latex     = (1,2)
+      box-latex = (1+2)
+      latex     = (1+2)
     `));
 
   test('List with default parens and comma', () =>
@@ -162,14 +163,14 @@ describe('DELIMITERS PARSING', () => {
     `);
 
     expect(check('(1)')).toMatchInlineSnapshot(`
-      ["Delimiter", ["Sequence", 1]]
+      ["Delimiter", 1]
       box-latex = (1)
       latex     = (1)
     `);
 
     expect(check('(2x)')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", ["InvisibleOperator", 2, "x"]]]
-      canonical = ["Delimiter", ["Sequence", ["Multiply", 2, "x"]]]
+      box       = ["Delimiter", ["InvisibleOperator", 2, "x"]]
+      canonical = ["Delimiter", ["Multiply", 2, "x"]]
       box-latex = (2x)
       latex     = (2x)
     `);
@@ -238,53 +239,31 @@ describe('DELIMITERS PARSING', () => {
     // expect(check('')).toMatchInlineSnapshot();
 
     expect(check('(a+b)')).toMatchInlineSnapshot(`
-      ["Delimiter", ["Sequence", ["Add", "a", "b"]]]
+      ["Delimiter", ["Add", "a", "b"]]
       box-latex = (a+b)
       latex     = (a+b)
     `);
     expect(check('-(a+b)')).toMatchInlineSnapshot(`
-      box       = ["Negate", ["Delimiter", ["Sequence", ["Add", "a", "b"]]]]
+      box       = ["Negate", ["Delimiter", ["Add", "a", "b"]]]
       canonical = ["Subtract", ["Negate", "b"], "a"]
       box-latex = -(a+b)
       latex     = -b-a
     `);
     expect(check('(a+(c+d))')).toMatchInlineSnapshot(`
-      box       = [
-        "Delimiter",
-        [
-          "Sequence",
-          ["Add", "a", ["Delimiter", ["Sequence", ["Add", "c", "d"]]]]
-        ]
-      ]
-      canonical = ["Delimiter", ["Sequence", ["Add", "a", "c", "d"]]]
+      box       = ["Delimiter", ["Add", "a", ["Delimiter", ["Add", "c", "d"]]]]
+      canonical = ["Delimiter", ["Add", "a", "c", "d"]]
       box-latex = (a+(c+d))
       latex     = (a+c+d)
     `);
     expect(check('(a\\times(c\\times d))')).toMatchInlineSnapshot(`
-      box       = [
-        "Delimiter",
-        [
-          "Sequence",
-          [
-            "Multiply",
-            "a",
-            ["Delimiter", ["Sequence", ["Multiply", "c", "d"]]]
-          ]
-        ]
-      ]
-      canonical = ["Delimiter", ["Sequence", ["Multiply", "a", "c", "d"]]]
+      box       = ["Delimiter", ["Multiply", "a", ["Delimiter", ["Multiply", "c", "d"]]]]
+      canonical = ["Delimiter", ["Multiply", "a", "c", "d"]]
       box-latex = (a(cd))
       latex     = (acd)
     `);
     expect(check('(a\\times(c+d))')).toMatchInlineSnapshot(`
-      box       = [
-        "Delimiter",
-        [
-          "Sequence",
-          ["Multiply", "a", ["Delimiter", ["Sequence", ["Add", "c", "d"]]]]
-        ]
-      ]
-      canonical = ["Delimiter", ["Sequence", ["Multiply", "a", ["Add", "c", "d"]]]]
+      box       = ["Delimiter", ["Multiply", "a", ["Delimiter", ["Add", "c", "d"]]]]
+      canonical = ["Delimiter", ["Multiply", "a", ["Add", "c", "d"]]]
       box-latex = (a(c+d))
       latex     = (a(c+d))
     `);

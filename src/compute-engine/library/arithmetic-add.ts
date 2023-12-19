@@ -244,7 +244,7 @@ export function evalSummation(
         ce.assign(index, i);
         terms.push(fn.simplify());
       }
-      result = ce.add(terms).simplify();
+      result = ce.add(...terms).simplify();
     }
   }
 

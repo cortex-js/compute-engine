@@ -62,10 +62,15 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
      *   with an open and close delimiter and separator. They capture the
      *   input syntax, and can get transformed into other expressions
      *   during boxing and canonicalization.
+     *
      *   The first argument is a function expression, such as `List`
      *   or `Sequence`. The arguments of that expression are represented
      *   with a separator between them and delimiters around the whole
      *   group.
+     *
+     *   If the first argument is a `Sequence` with a single element,
+     *   the `Sequence` can be omitted.
+     *
      *   The second argument specify the separator and delimiters. If not
      *   specified, the default is the string `"(,)"`
      *
@@ -73,7 +78,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
      * - `f(x)` ->
      *    `["InvisibleOperator",
      *        "f",
-     *        ["Delimiter", ["Sequence", "x"], "'(,)'"]
+     *        ["Delimiter", "x"]
      *     ]`
      *
      * - `1, 2; 3, 4` ->
@@ -87,7 +92,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
      *
      * - `2x` -> `["InvisibleOperator", 2, "x"]`
      *
-     * - `2+` -> `["InvisibleOperator", 2, ["Error", "'unexpected-operator'", "+"]]`
+     * - `2+` -> `["InvisibleOperator", 2,
+     *              ["Error", "'unexpected-operator'", "+"]]`
      *
      *
      *
@@ -139,12 +145,17 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         // argument, which is a function expression (e.g. `List` or `Sequence`)
         canonical: (ce, args) => {
           if (args.length === 0) return ce._fn('Tuple', []);
+
           let body = args[0];
-          console.assert(body.ops !== null);
 
           // If the body is a sequence, preserve it (don't flatten it)
           if (body.head === 'Sequence')
             body = ce._fn('Sequence', ce.canonical(body.ops!));
+          else body = body.canonical;
+
+          // If it's a sequence with a single element, unpack it
+          if (body.head === 'Sequence' && body.ops!.length === 1)
+            body = body.ops![0];
 
           args = [body, ...args.slice(1)];
 
@@ -173,6 +184,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (op1.head === 'Sequence' || op1.head === 'Delimiter')
             ops = flattenSequence(ops[0].ops!);
 
+          if (ops.length === 1) return ops[0].evaluate();
+
           return ce._fn(
             'Tuple',
             ops.map((x) => x.evaluate())
@@ -185,6 +198,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           if (op1.head === 'Sequence' || op1.head === 'Delimiter')
             ops = flattenSequence(ops[0].ops!);
+
+          if (ops.length === 1) return ops[0].N();
 
           return ce._fn(
             'Tuple',

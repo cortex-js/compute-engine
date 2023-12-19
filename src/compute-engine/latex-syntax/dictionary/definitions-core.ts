@@ -225,10 +225,6 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'infix',
     associativity: 'right',
     precedence: ASSIGNMENT_PRECEDENCE,
-    // parse: (parser: Parser, lhs: Expression) => {
-    //   const rhs = parser.parseExpression({ minPrec: 260 }) ?? 'Nothing';
-    //   return ['Assign', lhs, rhs];
-    // },
     serialize: (serializer: Serializer, expr: Expression): string => {
       const id = unhold(op(expr, 1));
 
@@ -335,22 +331,24 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // delimiters and separator.
     name: 'Delimiter',
     serialize: (serializer: Serializer, expr: Expression): string => {
-      const arg1 = op(expr, 1);
-
       const style = serializer.options.groupStyle(expr, serializer.level + 1);
 
-      const h1 = head(arg1)!;
-      let delims =
-        {
-          Set: '{,}',
-          List: '[,]',
-          Tuple: '(,)',
-          Single: '(,)',
-          Pair: '(,)',
-          Triple: '(,)',
-          Sequence: '(,)',
-          String: '""',
-        }[typeof h1 === 'string' ? h1 : ''] ?? '(,)';
+      const arg1 = op(expr, 1);
+      const h1 = head(arg1);
+      let delims = {
+        Set: '{,}',
+        List: '[,]',
+        Tuple: '(,)',
+        Single: '(,)',
+        Pair: '(,)',
+        Triple: '(,)',
+        Sequence: '(,)',
+        String: '""',
+      }[typeof h1 === 'string' ? h1 : ''];
+
+      const items = delims ? arg1 : (['Sequence', arg1] as Expression);
+
+      delims ??= '(,)';
 
       // Check if there are custom delimiters specified
       if (nops(expr) > 1) {
@@ -364,8 +362,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       else if (delims.length === 1) sep = delims;
 
       const body = arg1
-        ? ops(arg1)
-          ? serializeOps(sep)(serializer, arg1)
+        ? items
+          ? serializeOps(sep)(serializer, items)
           : serializer.serialize(arg1)
         : '';
 
@@ -1061,6 +1059,7 @@ function parseParenDelimiter(
 
   if (h === 'Sequence') {
     if (nops(body) === 0) return ['Delimiter'];
+    if (nops(body) === 1) return ['Delimiter', op(body, 1)!];
     return ['Delimiter', body];
   }
 
@@ -1069,7 +1068,7 @@ function parseParenDelimiter(
     if (delims === '..') return ['Matrix', op(body, 1)!];
   }
 
-  return ['Delimiter', ['Sequence', body]];
+  return ['Delimiter', body];
 }
 
 /**
@@ -1201,17 +1200,21 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
   if (
     head(lhs) === 'InvisibleOperator' &&
     nops(lhs) === 2 &&
-    head(op(lhs, 2)) === 'Delimiter' &&
-    head(op(op(lhs, 2), 1)) === 'Sequence'
+    head(op(lhs, 2)) === 'Delimiter'
   ) {
     const fn = symbol(op(lhs, 1));
     if (!fn) return null;
-    const args = ops(op(op(lhs, 2), 1));
+
     const rhs = parser.parseExpression({ minPrec: 0 });
     if (rhs === null) {
       parser.index = index;
       return null;
     }
+
+    const delimBody = op(op(lhs, 2), 1);
+    let args: Expression[] = [];
+    if (head(delimBody) === 'Sequence') args = ops(delimBody) ?? [];
+    else if (delimBody) args = [delimBody!];
 
     return ['Assign', fn, ['Function', rhs, ...(args ?? [])]];
   }

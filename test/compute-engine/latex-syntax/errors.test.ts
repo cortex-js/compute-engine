@@ -301,13 +301,13 @@ check('VALID function application', () =>
 // tupple as an argument.
 check('VALID empty delimiter expression', () =>
   expect(engine.parse('1()')).toMatchInlineSnapshot(
-    `["Multiply", 1, ["Tupple"]]`
+    `["Multiply", 1, "Nothing"]`
   )
 );
 
 check('Invalid empty delimiter expression', () =>
   expect(engine.parse('1\\left(\\right)')).toMatchInlineSnapshot(
-    `["Multiply", 1, ["Tupple"]]`
+    `["Multiply", 1, "Nothing"]`
   )
 ); // @fixme
 

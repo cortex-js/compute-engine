@@ -270,7 +270,10 @@ export function processPower(
         ce.div(exponent, ce.number(2)),
         mode
       );
-      const a3 = processPower(ce, ce.mul(...xs), exponent, mode);
+      const xsprod = ce.mul(...xs);
+      const a3 =
+        processPower(ce, xsprod, exponent, mode) ??
+        ce._fn('Power', [xsprod, exponent]);
       if (a1 && a2 && a3) return ce.mul(a1, a2, a3);
     }
   }
@@ -303,6 +306,7 @@ export function processPower(
   // factors: sqrt(75) -> 5^2 * 3
   //
   if (mode !== 'N' && base.numericValue !== null && base.isInteger) {
+    if (base.isOne) return ce.One;
     const smallExpr = asSmallInteger(exponent);
     if (smallExpr) return numEvalPower(ce, base, exponent);
 

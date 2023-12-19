@@ -38,6 +38,12 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
+console.log(ce.parse('\\sqrt{4x}').evaluate().json);
+
+const expr1 = engine.parse('2(13.1x+1)');
+const expr2 = engine.parse('26.2x+2');
+console.log('expr1 is equal to expr2: ', expr1.isEqual(expr2));
+
 ce.assign('A', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]));
 ce.assign(
   'X',
@@ -363,104 +369,113 @@ describe('PARSING numbers', () => {
   test('nth prime', () =>
     expect(
       parse(
-        'p(n)=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
+        'p(n):=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
       )
     ).toMatchInlineSnapshot(`
       [
-        "Equal",
-        ["p", "n"],
+        "Assign",
+        "p",
         [
-          "Add",
+          "Function",
           [
-            "Sum",
+            "Add",
             [
               "Delimiter",
               [
-                "Sequence",
+                "Sum",
                 [
-                  "Floor",
+                  "Delimiter",
                   [
-                    "Divide",
-                    1,
+                    "Floor",
                     [
-                      "Add",
+                      "Divide",
+                      1,
                       [
-                        "Power",
-                        0,
+                        "Add",
                         [
-                          "Subtract",
-                          "n",
+                          "Power",
+                          0,
                           [
-                            "Sum",
+                            "Subtract",
+                            "n",
                             [
                               "Delimiter",
                               [
-                                "Sequence",
+                                "Sum",
                                 [
                                   "Delimiter",
                                   [
-                                    "Sequence",
+                                    "Delimiter",
                                     [
                                       "Product",
                                       [
                                         "Delimiter",
                                         [
-                                          "Sequence",
+                                          "Subtract",
+                                          1,
                                           [
-                                            "Subtract",
-                                            1,
+                                            "Power",
+                                            0,
                                             [
-                                              "Power",
-                                              0,
+                                              "Abs",
                                               [
-                                                "Abs",
+                                                "Subtract",
                                                 [
-                                                  "Add",
+                                                  "Floor",
                                                   [
                                                     "Divide",
-                                                    ["Negate", "v_2"],
-                                                    "v_3"
-                                                  ],
-                                                  [
-                                                    "Floor",
-                                                    ["Divide", "v_2", "v_3"]
+                                                    ["Subscript", "v", 2],
+                                                    ["Subscript", "v", 3]
                                                   ]
+                                                ],
+                                                [
+                                                  "Divide",
+                                                  ["Subscript", "v", 2],
+                                                  ["Subscript", "v", 3]
                                                 ]
                                               ]
                                             ]
                                           ]
                                         ]
-
                                       ],
                                       [
-                                        "Triple",
-                                        "v_3",
+                                        "Tuple",
+                                        ["Subscript", "v", 3],
                                         2,
-                                        ["Floor", ["Sqrt", "v_2"]]
+                                        [
+                                          "Floor",
+                                          ["Sqrt", ["Subscript", "v", 2]]
+                                        ]
                                       ]
                                     ]
                                   ]
+                                ],
+                                [
+                                  "Tuple",
+                                  ["Subscript", "v", 2],
+                                  2,
+                                  ["Subscript", "v", 1]
                                 ]
                               ]
-                            ],
-                            ["Triple", "v_2", 2, "v_1"]
+                            ]
                           ]
-                        ]
-                      ],
-                      1
+                        ],
+                        1
+                      ]
                     ]
                   ]
+                ],
+                [
+                  "Tuple",
+                  ["Subscript", "v", 1],
+                  2,
+                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
                 ]
               ]
             ],
-            [
-              "Triple",
-              "v_1",
-              2,
-              ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
-            ]
+            2
           ],
-          2
+          "n"
         ]
       ]
     `));

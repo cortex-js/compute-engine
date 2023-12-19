@@ -136,20 +136,16 @@ describe('SUPSUB', () => {
     expect(parse('(x+1)^{n-1}')).toMatchInlineSnapshot(
       `["Power", ["Add", "x", 1], ["Subtract", "n", 1]]`
     );
-    expect(parse('(x+1)_{n-1}')).toMatchInlineSnapshot(`
-      [
-        "Subscript",
-        ["Delimiter", ["Sequence", ["Add", "x", 1]]],
-        ["Subtract", "n", 1]
-      ]
-    `);
+    expect(parse('(x+1)_{n-1}')).toMatchInlineSnapshot(
+      `["Subscript", ["Delimiter", ["Add", "x", 1]], ["Subtract", "n", 1]]`
+    );
     expect(parse('(x+1)^n_0')).toMatchInlineSnapshot(`
       [
         "Power",
         [
           "Error",
           ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
-          ["Subscript", ["Delimiter", ["Sequence", ["Add", "x", 1]]], 0]
+          ["Subscript", ["Delimiter", ["Add", "x", 1]], 0]
         ],
         "n"
       ]
