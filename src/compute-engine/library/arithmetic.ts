@@ -176,9 +176,22 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             args.map((x) => x.domain)
           ),
         // canonical: (ce, args) => canonicalAdd(ce, args), // never called: shortpath
-        simplify: (ce, ops) => simplifyAdd(ce, ops),
-        evaluate: (ce, ops) => evalAdd(ce, ops),
-        N: (ce, ops) => evalAdd(ce, ops, 'N'),
+        simplify: (ce, ops) =>
+          simplifyAdd(
+            ce,
+            ops.map((x) => x.simplify())
+          ),
+        evaluate: (ce, ops) =>
+          evalAdd(
+            ce,
+            ops.map((x) => x.evaluate())
+          ),
+        N: (ce, ops) =>
+          evalAdd(
+            ce,
+            ops.map((x) => x.N()),
+            'N'
+          ),
       },
     },
 
@@ -503,9 +516,22 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         // Never called: fastpath
         // canonical: (ce, args) => canonicalMultiply(ce, args)
         //
-        simplify: (ce, ops) => simplifyMultiply(ce, ops),
-        evaluate: (ce, ops) => evalMultiply(ce, ops),
-        N: (ce, ops) => evalMultiply(ce, ops, 'N'),
+        simplify: (ce, ops) =>
+          simplifyMultiply(
+            ce,
+            ops.map((x) => x.simplify())
+          ),
+        evaluate: (ce, ops) =>
+          evalMultiply(
+            ce,
+            ops.map((x) => x.evaluate())
+          ),
+        N: (ce, ops) =>
+          evalMultiply(
+            ce,
+            ops.map((x) => x.N()),
+            'N'
+          ),
       },
     },
 
@@ -996,10 +1022,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.box(['Sequence']);
           const op = ops[0];
-          if (op.head === 'Rational' || op.head === 'Divide') return op.op1;
-          const num = asRational(op);
+          if (op.head === 'Rational' || op.head === 'Divide')
+            return op.op1.evaluate();
+          const num = asRational(op.evaluate());
           if (num !== undefined) return ce.number(num[0]);
-          return ce._fn('Numerator', canonical(ops));
+          return ce._fn(
+            'Numerator',
+            ops.map((x) => x.evaluate())
+          );
         },
       },
     },
@@ -1024,10 +1054,14 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.box(['Sequence']);
           const op = ops[0];
-          if (op.head === 'Rational' || op.head === 'Divide') return op.op2;
-          const num = asRational(op);
+          if (op.head === 'Rational' || op.head === 'Divide')
+            return op.op2.evaluate();
+          const num = asRational(op.evaluate());
           if (num !== undefined) return ce.number(num[1]);
-          return ce._fn('Denominator', canonical(ops));
+          return ce._fn(
+            'Denominator',
+            ops.map((x) => x.evaluate())
+          );
         },
       },
     },
@@ -1047,10 +1081,13 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const op = ops[0];
           if (op.head === 'Rational' || op.head === 'Divide')
             return ce._fn('Sequence', op.ops!);
-          const num = asRational(op);
+          const num = asRational(op.evaluate());
           if (num !== undefined)
             return ce._fn('Sequence', [ce.number(num[0]), ce.number(num[1])]);
-          return ce._fn('NumeratorDenominator', canonical(ops));
+          return ce._fn(
+            'NumeratorDenominator',
+            ops.map((x) => x.evaluate())
+          );
         },
         evaluate: (ce, ops) => {
           if (ops.length === 0) return ce.box(['Sequence']);
