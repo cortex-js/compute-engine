@@ -35,7 +35,7 @@ import {
   IdentifierDefinitions,
   IComputeEngine,
 } from '../public';
-import { bignumPreferred } from '../boxed-expression/utils';
+import { bignumPreferred, complexAllowed } from '../boxed-expression/utils';
 import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
   simplifyAdd,
@@ -383,6 +383,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        simplify: processLn,
+        evaluate: processLn,
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -1475,4 +1477,28 @@ function processGcdLcm(
   if (rest.length === 0) return result === null ? ce.One : ce.number(result);
   if (result === null) return ce._fn(mode, rest);
   return ce._fn(mode, [ce.number(result), ...rest]);
+}
+
+function processLn(ce: IComputeEngine, ops: BoxedExpression[]) {
+  const n = ops[0];
+  if (n.isZero) return ce.NaN;
+  if (n.isOne) return ce.Zero;
+  if (n.isNegativeOne && complexAllowed(ce)) return ce.mul(ce.Pi, ce.I);
+  if (n.symbol === 'ExponentialE') return ce.One;
+  if (n.head === 'Power' && n.op1.symbol === 'ExporentialE') return n.op2;
+  if (n.head === 'Power') {
+    const [base, exp] = n.ops!;
+    return ce.mul(exp, ce.fn('Ln', [base]).simplify());
+  }
+  if (n.head === 'Multiply') {
+    const [a, b] = n.ops!;
+    return ce.add(ce.fn('Ln', [a]).simplify(), ce.fn('Ln', [b]).simplify());
+  }
+  if (n.head === 'Divide') {
+    const [a, b] = n.ops!;
+    return ce.add(
+      ce.fn('Ln', [a]).simplify(),
+      ce.neg(ce.fn('Ln', [b]).simplify())
+    );
+  }
 }

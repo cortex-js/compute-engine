@@ -56,8 +56,8 @@ const DERIVATIVES_TABLE = {
     ['Power', ['Multiply', '2', 'Add', ['Power', '_', 2]], ['Negate', 'Half']],
   ],
   Arccoth: ['Negate', ['Power', ['Subtract', 1, ['Power', '_', 2]], -1]],
-  Exp: ['Exp', '_'],
-  Ln: ['Power', '_', -1],
+  // Exp: ['Exp', '_'],   // Gets canonicalized to Power
+  Ln: ['Divide', 1, '_'],
   Log: ['Power', ['Multiply', '_', ['Ln', '10']], -1],
   Sqrt: ['Multiply', ['Power', '_', ['Negate', 'Half']], 'Half'],
   Abs: [
@@ -194,6 +194,18 @@ export function differentiate(
 
         return ce.mul(exponent, ce.pow(base, ce.add(exponent, ce.NegativeOne)));
       }
+
+      // Generalized case:
+      // d/dx f(x)^g(x) = f(x)^g(x) * (g'(x) * ln(f(x)) + g(x) * f'(x) / f(x))
+      const f = base;
+      const g = exponent;
+      const fPrime = differentiate(f, v) ?? ce._fn('D', [f, ce.symbol(v)]);
+      const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
+      const lnf = ce.fn('Ln', [f]).evaluate();
+      const term1 = ce.mul(gPrime, lnf);
+      const term2 = ce.mul(g, fPrime);
+      const term3 = ce.div(term2, f);
+      return ce.mul(expr, ce.add(term1, term3));
     }
 
     // Quotient rule
@@ -212,11 +224,15 @@ export function differentiate(
 
     const h = DERIVATIVES_TABLE[expr.head];
     if (!h) {
+      if (expr.nops > 1) return undefined;
+
       // If we don't know how to differentiate this function, assume it's a
       // function of v and apply the chain rule.
-      const fPrime = ce._fn('Derivative', [ce.symbol(expr.head), ce.number(1)]);
+      const fPrime = ce._fn('Derivative', [ce.symbol(expr.head), ce.One]);
+      if (!fPrime.isValid) return undefined;
       const g = expr.ops![0];
       const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
+      if (!gPrime.isValid) return undefined;
       return ce.mul(ce._fn('Apply', [fPrime, g]), gPrime);
     }
     // Apply the chain rule:
