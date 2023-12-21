@@ -396,8 +396,8 @@ function matchArguments(
         // Determine the value to return for the wildcard
         let value: BoxedExpression;
         if (j <= 1) {
-          if (expr.head === 'Add') value = ce.number(0);
-          else if (expr.head === 'Multiply') value = ce.number(1);
+          if (expr.head === 'Add') value = ce.Zero;
+          else if (expr.head === 'Multiply') value = ce.One;
           else value = ce.box(['Sequence']);
         } else value = ce.fn(expr.head, ops.splice(0, j - 1));
 

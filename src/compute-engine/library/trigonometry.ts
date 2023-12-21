@@ -68,7 +68,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
             // Convert fArg to radians
             if (Number.isInteger(fArg)) {
               const fRadians = reducedRational([fArg, 180]);
-              if (fRadians[0] === 0) return ce.number(0);
+              if (fRadians[0] === 0) return ce.Zero;
               if (fRadians[0] === 1 && fRadians[1] === 1) return ce.Pi;
               if (fRadians[0] === 1)
                 return ce.div(ce.Pi, ce.number(fRadians[1]));

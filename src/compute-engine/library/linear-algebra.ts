@@ -66,7 +66,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
 
           if (isBoxedTensor(op1)) return ce.number(op1.tensor.rank);
 
-          return ce.number(0);
+          return ce.Zero;
         },
       },
     },

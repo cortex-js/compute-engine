@@ -44,7 +44,7 @@ export const COMPLEX_LIBRARY: IdentifierDefinitions[] = [
           const f = asFloat(ops[0]);
           if (f === null) return undefined;
           if (f >= 0) return ce.Zero;
-          return ce.number(Math.PI);
+          return ce.Pi;
         },
       },
     },

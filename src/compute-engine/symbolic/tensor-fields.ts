@@ -227,9 +227,9 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
   private ce: IComputeEngine;
 
   constructor(ce: IComputeEngine) {
-    this.one = ce.number(1);
-    this.zero = ce.number(0);
-    this.nan = ce.number(NaN);
+    this.one = ce.One;
+    this.zero = ce.Zero;
+    this.nan = ce.NaN;
     this.ce = ce;
   }
 
