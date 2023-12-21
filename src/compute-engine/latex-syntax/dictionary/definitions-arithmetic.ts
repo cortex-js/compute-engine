@@ -729,7 +729,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer: Serializer, expr: Expression): string => {
       const op1 = op(expr, 1);
       if (symbol(op1) || machineValue(op1) !== null)
-        return joinLatex(['\\exponentialE^{', serializer.serialize(op1)]);
+        return joinLatex(['\\exponentialE^{', serializer.serialize(op1), '}']);
 
       return joinLatex(['\\exp', serializer.wrap(missingIfEmpty(op1))]);
     },
