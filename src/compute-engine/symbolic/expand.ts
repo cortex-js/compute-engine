@@ -102,18 +102,19 @@ export function expandMultinomial(
   const exp = asSmallInteger(expr.op2);
   if (exp === null || exp < 0) return null;
   if (exp === 0) return expr.engine.One;
-  if (exp === 1) return expr.op1;
+  if (exp === 1) return expand(expr.op1);
   const ce = expr.engine;
   if (expr.op1.head === 'Negate') {
     const sign = exp % 2 === 0 ? 1 : -1;
-    const result = expandMultinomial(ce.pow(expr.op1.op1, expr.op2));
+    const result = expandMultinomial(ce._fn('Power', [expr.op1.op1, expr.op2]));
     if (result === null) return null;
-    if (sign > 0) return result;
-    return ce.neg(result);
+    return sign > 0 ? result : ce.neg(result);
   }
 
+  // Subtract is non-canonical, so we don't expect to see it here.
   console.assert(expr.op1.head !== 'Subtract');
 
+  // We can expand only if the expression is a power of a sum.
   if (expr.op1.head !== 'Add') return null;
 
   // Apply the multinomial theorem
@@ -147,12 +148,10 @@ export function expandMultinomial(
 /** Expand all
  * Recursive expand of all terms in the expression
  */
-function expandAll(expr: BoxedExpression): BoxedExpression | null {
+export function expandAll(expr: BoxedExpression): BoxedExpression | null {
   if (expr.head && expr.ops) {
-    const result = expr.engine.fn(
-      expr.head,
-      expr.ops.map((x) => expandAll(x) ?? x)
-    );
+    const ops = expr.ops.map((x) => expandAll(x) ?? x);
+    const result = expr.engine.fn(expr.head, ops);
     return expand(result) ?? result;
   }
 

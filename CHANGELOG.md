@@ -19,6 +19,7 @@
   canonicalization and evaluation are more consistent and produce more
   predictable results.
 - Adedd the `\neg` command, synonym for `\lnot` -> `Not`.
+- Added `ExpandAll` function to expand an expression recursively.
 
 ## 0.22.0
 
