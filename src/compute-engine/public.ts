@@ -656,6 +656,11 @@ export interface BoxedExpression {
    * An exact value is not further transformed when evaluated. To get an
    * approximate evaluation of an exact value, use `.N()`.
    *
+   * Exact numbers are:
+   * - rationals (including integers)
+   * - complex numbers with integer real and imaginary parts (Gaussian integers)
+   * - square root of rationals
+   *
    * Non-exact values includes:
    * - numbers with a fractional part
    * - complex numbers with a real or imaginary fractional part
@@ -2246,23 +2251,10 @@ export interface IComputeEngine {
   ): BoxedDomain;
 
   /**
-   * Create a boxed function expression.
-   *
-   * @param head
-   * @param ops
-   * @param options
-   */
-  fn(
-    head: string | SemiBoxedExpression,
-    ops: SemiBoxedExpression[],
-    options?: { canonical: boolean }
-  ): BoxedExpression;
-
-  /**
    * This is a primitive to create a boxed function. It doesn't perform
    * any checks or normalization on its arguments.
    *
-   * In general, consider using `ce.fn()` or `ce.box()` instead.
+   * In general, consider using `ce.box()` instead.
    *
    * The result is canonical, but the caller has to ensure that all the
    * conditions are met (i.e. `ops` properly normalized and sorted, all

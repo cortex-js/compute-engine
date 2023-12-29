@@ -61,28 +61,28 @@ export function applyAssociativeOperator(
 ): BoxedExpression {
   const ce = lhs.engine;
 
-  if (associativity === 'non') return ce.fn(op, [lhs, rhs]);
+  if (associativity === 'non') return ce.box([op, lhs, rhs]);
 
   const lhsName = lhs.head;
   const rhsName = rhs.head;
 
   if (associativity === 'left') {
-    if (lhsName === op) return ce.fn(op, [...(lhs.ops ?? []), rhs]);
-    return ce.fn(op, [lhs, rhs]);
+    if (lhsName === op) return ce.box([op, ...(lhs.ops ?? []), rhs]);
+    return ce.box([op, lhs, rhs]);
   }
 
   if (associativity === 'right') {
-    if (rhsName === op) return ce.fn(op, [lhs, ...(rhs.ops ?? [])]);
-    return ce.fn(op, [lhs, rhs]);
+    if (rhsName === op) return ce.box([op, lhs, ...(rhs.ops ?? [])]);
+    return ce.box([op, lhs, rhs]);
   }
 
   // Associativity: 'both'
   if (lhsName === op && rhsName === op) {
-    return ce.fn(op, [...(lhs.ops ?? []), ...(rhs.ops ?? [])]);
+    return ce.box([op, ...(lhs.ops ?? []), ...(rhs.ops ?? [])]);
   }
-  if (lhsName === op) return ce.fn(op, [...(lhs.ops ?? []), rhs]);
-  if (rhsName === op) return ce.fn(op, [lhs, ...(rhs.ops ?? [])]);
-  return ce.fn(op, [lhs, rhs]);
+  if (lhsName === op) return ce.box([op, ...(lhs.ops ?? []), rhs]);
+  if (rhsName === op) return ce.box([op, lhs, ...(rhs.ops ?? [])]);
+  return ce.box([op, lhs, rhs]);
 }
 
 // @todo: replace usage with asCoefficient():

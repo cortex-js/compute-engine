@@ -11,7 +11,6 @@ export const MISSING: Expression = ['Error', "'missing'"];
 export function isNumberExpression(
   expr: Expression | null
 ): expr is number | string | MathJsonNumber {
-  if (expr === null) return false;
   if (typeof expr === 'number' || isNumberObject(expr)) return true;
   if (typeof expr === 'string' && /^[+-]?[0-9\.]/.test(expr)) return true;
   return false;
@@ -205,13 +204,11 @@ export function stripText(
     return null;
 
   const h = head(expr);
-  if (h !== null) {
-    return [
-      h,
-      ...(ops(expr) ?? []).map((x) => stripText(x)!).filter((x) => x !== null),
-    ];
-  }
-  return expr;
+  if (h == null) return expr;
+  return [
+    h,
+    ...(ops(expr) ?? []).map((x) => stripText(x)!).filter((x) => x !== null),
+  ];
 }
 
 /**
@@ -224,7 +221,6 @@ export function stripText(
  * * `[["Prime", "f"], "x"]` -> `["Prime", "f"]`
  */
 export function head(expr: Expression | null | undefined): Expression | null {
-  if (expr === null || expr === undefined) return null;
   if (Array.isArray(expr)) {
     if (typeof expr[0] === 'string' && !isValidIdentifier(expr[0])) {
       console.error(
@@ -234,7 +230,11 @@ export function head(expr: Expression | null | undefined): Expression | null {
     }
     return expr[0];
   }
+
+  if (expr === null || expr === undefined) return null;
+
   if (isFunctionObject(expr)) return expr.fn[0];
+
   return null;
 }
 
@@ -249,9 +249,9 @@ export function headName(expr: Expression | null): string {
  * function.
  */
 export function ops(expr: Expression | null | undefined): Expression[] | null {
-  if (expr === null || expr === undefined) return null;
-
   if (Array.isArray(expr)) return expr.slice(1);
+
+  if (expr === null || expr === undefined) return null;
 
   if (isFunctionObject(expr)) return expr.fn.slice(1);
 
@@ -263,9 +263,9 @@ export function op(
   expr: Expression | null | undefined,
   n: number
 ): Expression | null {
-  if (expr === null || expr === undefined) return null;
-
   if (Array.isArray(expr)) return expr[n] ?? null;
+
+  if (expr === null || expr === undefined) return null;
 
   if (isFunctionObject(expr)) return expr.fn[n] ?? null;
 
@@ -294,42 +294,22 @@ export function unhold(expr: Expression | null | undefined): Expression | null {
 }
 
 export function symbol(expr: Expression | null | undefined): string | null {
-  if (expr === null || expr === undefined) return null;
-
   if (typeof expr === 'string') {
     // Is it a number?
-    if (/^[+\-\.0-9]/.test(expr)) return null;
+    if (/^[+-]?[0-9\.]/.test(expr)) return null;
     // Is it a string literal?
     if (expr.length >= 2 && expr[0] === "'" && expr[expr.length - 1] === "'")
       return null;
+    return expr;
   }
+
+  if (expr === null || expr === undefined) return null;
 
   const s = isSymbolObject(expr) ? expr.sym : expr;
   if (typeof s !== 'string') return null;
 
   return s;
 }
-
-// export function isListLike(expr: Expression | null): boolean {
-//   if (expr === null) return false;
-//   const h = head(expr);
-//   if (!h || typeof h !== 'string') return false;
-//   return /^(List|Set|Sequence|Tuple|Single|Pair|Triple)$/.test(h);
-// }
-
-// // Matrices are represented as lists of lists
-// export function isMatrixLike(expr: Expression | null): boolean {
-//   if (!isListLike(expr)) return false;
-//   const rows = ops(expr);
-//   return rows?.every((x) => isListLike(x)) ?? false;
-// }
-
-// export function rank(expr: Expression | null): number {
-//   if (!isMatrixLike(expr)) return 0;
-//   const rows = ops(expr);
-//   if (!rows) return 0;
-//   return rows.length;
-// }
 
 function keyValuePair(
   expr: Expression | null
@@ -370,11 +350,13 @@ export function dictionary(
 function machineValueOfString(s: string): number | null {
   s = s
     .toLowerCase()
-    .replace(/[nd]$/g, '')
+    .replace(/[nd]$/, '')
     .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+
   if (s === 'nan') return NaN;
-  if (s === '+infinity') return Infinity;
+  if (s === 'infinity' || s === '+infinity') return Infinity;
   if (s === '-infinity') return -Infinity;
+
   // Are there some repeating decimals?
   if (/\([0-9]+\)/.test(s)) {
     const [_, body, repeat, trail] = s.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
@@ -393,10 +375,11 @@ function machineValueOfString(s: string): number | null {
 export function machineValue(
   expr: Expression | null | undefined
 ): number | null {
-  if (expr === null || expr === undefined) return null;
-
   if (typeof expr === 'number') return expr;
+
   if (typeof expr === 'string') return machineValueOfString(expr);
+
+  if (expr === null || expr === undefined) return null;
 
   // Stricly, expr.num should be a string, but we allow it to be a number
   if (isNumberObject(expr)) return machineValue(expr.num);
@@ -420,6 +403,7 @@ export function rationalValue(
   expr: Expression | undefined | null
 ): [number, number] | null {
   if (expr === undefined || expr === null) return null;
+
   if (symbol(expr) === 'Half') return [1, 2];
 
   const h = head(expr);

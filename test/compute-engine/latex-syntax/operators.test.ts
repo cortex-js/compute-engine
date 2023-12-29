@@ -92,8 +92,7 @@ describe('OPERATOR add/subtract', () => {
   test('-1-2', () =>
     expect(check('-1-2')).toMatchInlineSnapshot(`
       latex     = ["Subtract", -1, 2]
-      box       = ["Subtract", -2, 1]
-      canonical = ["Subtract", -1, 2]
+      box       = ["Subtract", -1, 2]
       simplify  = -3
     `));
 
@@ -174,13 +173,13 @@ describe('OPERATOR prefix', () => {
     expect(check('-x-1')).toMatchInlineSnapshot(`
       latex     = ["Subtract", ["Negate", "x"], 1]
       box       = ["Subtract", -1, "x"]
-      canonical = ["Subtract", ["Negate", "x"], 1]
-      simplify  = ["Subtract", -1, "x"]
+      evaluate  = ["Subtract", ["Negate", "x"], 1]
     `));
   test('-x+1 // Negate', () =>
     expect(check('-x+1')).toMatchInlineSnapshot(`
       latex     = ["Add", ["Negate", "x"], 1]
-      ["Subtract", 1, "x"]
+      box       = ["Subtract", 1, "x"]
+      evaluate  = ["Add", ["Negate", "x"], 1]
     `));
   test('-ab // Negate', () =>
     expect(check('-ab')).toMatchInlineSnapshot(`
@@ -429,9 +428,8 @@ describe('OPERATOR postfix', () => {
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`
       latex     = ["Subtract", -2, ["Factorial", 5]]
-      box       = ["Subtract", ["Negate", ["Factorial", 5]], 2]
-      canonical = ["Subtract", -2, ["Factorial", 5]]
-      evaluate  = -122
+      box       = ["Subtract", -2, ["Factorial", 5]]
+      simplify  = -122
     `));
   test('-5! // Precedence', () =>
     expect(check('-5!')).toMatchInlineSnapshot(`
@@ -470,7 +468,7 @@ describe('OPERATOR serialize, valid', () => {
 
   test('1-(x+1)', () =>
     expect(latex(['Subtract', 1, ['Add', 'x', 1]])).toMatchInlineSnapshot(
-      `1-x-1`
+      `-x-1+1`
     ));
 
   test('1-(2i+1)', () =>

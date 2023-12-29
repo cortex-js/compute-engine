@@ -131,14 +131,11 @@ function addForm(expr: BoxedExpression) {
   if (!expr.ops) return expr;
   const ops = expr.ops.map(addForm);
 
-  // If this is a multiply, canonicalize it
+  // If this is an addition or subtraction, canonicalize it
   if (expr.head === 'Add') return canonicalAdd(expr.engine, ops);
 
   if (expr.head === 'Subtract')
-    return expr.engine._fn('Add', [
-      addForm(expr.op1),
-      addForm(expr.engine.neg(expr.op2)),
-    ]);
+    return canonicalAdd(expr.engine, [ops[0], expr.engine.neg(ops[1])]);
 
   return expr.engine._fn(expr.head, ops);
 }
@@ -146,7 +143,7 @@ function addForm(expr: BoxedExpression) {
 function powerForm(expr: BoxedExpression) {
   if (!expr.ops) return expr;
 
-  // If this is a multiply, canonicalize it
+  // If this is a power, canonicalize it
   if (expr.head === 'Power')
     return canonicalPower(
       expr.engine,

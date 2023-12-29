@@ -23,8 +23,8 @@ import {
   isRational,
   neg,
 } from '../numerics/rationals';
-import { asBigint, bigintValue } from './utils';
-import { bigint } from '../numerics/numeric-bigint';
+import { asBigint } from './utils';
+import { bigint, bigintValue } from '../numerics/numeric-bigint';
 import { isDomainLiteral } from '../library/domains';
 import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
 import { canonicalForm } from './canonical';
@@ -246,7 +246,7 @@ function boxHold(
  *
  * If available, preserve LaTeX and wikidata metadata in the boxed expression.
  *
- * Note that `boxFunction()` should only be called from `ce.fn()` or `box()`
+ * Note that `boxFunction()` should only be called from `ce.box()`
  */
 
 export function boxFunction(
@@ -333,8 +333,8 @@ export function boxFunction(
       if (n !== null && d !== null) return ce.number([n, d], options);
     } else {
       const [n, d] = [
-        bigintValue(ce, ops[0] as Expression),
-        bigintValue(ce, ops[1] as Expression),
+        bigintValue(ops[0] as Expression),
+        bigintValue(ops[1] as Expression),
       ];
       if (n !== null && d !== null) return ce.number([n, d], options);
     }

@@ -24,7 +24,7 @@ import {
   Hold,
 } from '../public';
 import { findUnivariateRoots } from '../solve';
-import { isRational, signDiff } from '../numerics/rationals';
+import { isRational } from '../numerics/rationals';
 import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
 import { DEFAULT_COMPLEXITY, order } from './order';
@@ -41,10 +41,11 @@ import { shouldHold } from '../symbolic/utils';
 import { at, isFiniteIndexableCollection } from '../collection-utils';
 import { narrow } from './boxed-domain';
 import { canonicalAdd } from '../library/arithmetic-add';
-import { canonicalPower } from '../library/arithmetic-power';
+import { canonicalPower, isSqrt } from '../library/arithmetic-power';
 import { canonicalNegate } from '../symbolic/negate';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
+import { signDiff } from '../numerics/numeric';
 
 /**
  * A boxed function represent an expression that can be
@@ -157,6 +158,10 @@ export class BoxedFunction extends _BoxedExpression {
   reset(): void {
     // Note: a non-canonical expression is never bound
     // this._def = null;
+  }
+
+  get isExact(): boolean {
+    return isSqrt(this) && this.op1.isExact;
   }
 
   get isCanonical(): boolean {
@@ -504,8 +509,8 @@ export class BoxedFunction extends _BoxedExpression {
       }
     }
 
-    if (!expr) expr = this.engine.fn(this._head, tail);
-    else expr = cheapest(this.engine.fn(this._head, tail), expr);
+    if (!expr) expr = this.engine.box([this._head, ...tail]);
+    else expr = cheapest(this.engine.box([this._head, ...tail]), expr);
 
     expr = cheapest(this, expr);
 
@@ -652,7 +657,7 @@ export class BoxedFunction extends _BoxedExpression {
           result = this.engine.number(num.toNumber());
       }
     }
-    return result ?? this.engine.fn(this._head, tail);
+    return result ?? this.engine.box([this._head, ...tail]);
   }
 
   N(options?: NOptions): BoxedExpression {

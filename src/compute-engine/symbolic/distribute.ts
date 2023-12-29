@@ -21,19 +21,9 @@ export function distribute1(
   }
 
   if (lhs.head === g)
-    return ce
-      .fn(
-        g,
-        lhs.ops!.map((x) => distribute1(x, rhs))
-      )
-      .simplify();
+    return ce.box([g, ...lhs.ops!.map((x) => distribute1(x, rhs))]).simplify();
   if (rhs.head === g)
-    return ce
-      .fn(
-        g,
-        rhs.ops!.map((x) => distribute1(lhs, x))
-      )
-      .simplify();
+    return ce.box([g, ...rhs.ops!.map((x) => distribute1(lhs, x))]).simplify();
 
   return ce.mul(lhs, rhs);
 }
@@ -47,17 +37,11 @@ function distribute2(
   const ce = lhs.engine;
 
   if (lhs.head === g)
-    return ce.fn(
-      f,
-      lhs.ops!.map((x) => distribute2(x, rhs, g, f))
-    );
+    return ce.box([f, ...lhs.ops!.map((x) => distribute2(x, rhs, g, f))]);
   if (rhs.head === g)
-    return ce.fn(
-      f,
-      rhs.ops!.map((x) => distribute2(lhs, x, g, f))
-    );
+    return ce.box([f, ...rhs.ops!.map((x) => distribute2(lhs, x, g, f))]);
 
-  return ce.fn(f, [lhs, rhs]);
+  return ce.box([f, lhs, rhs]);
 }
 
 /**

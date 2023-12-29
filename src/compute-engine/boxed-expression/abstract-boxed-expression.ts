@@ -1,5 +1,5 @@
 import { Complex } from 'complex.js';
-import type { Decimal } from 'decimal.js';
+import { Decimal } from 'decimal.js';
 
 import { Expression } from '../../math-json/math-json-format';
 
@@ -24,12 +24,6 @@ import {
   Rational,
   BoxedSubstitution,
 } from '../public';
-import {
-  getUnknowns,
-  getSubexpressions,
-  getSymbols,
-  getFreeVariables,
-} from './utils';
 import { isBigRational, isMachineRational } from '../numerics/rationals';
 import { asFloat } from '../numerics/numeric';
 import { compileToJavascript } from '../compile';
@@ -89,10 +83,11 @@ export abstract class _BoxedExpression implements BoxedExpression {
   /** Object.toString() */
   toString(): string {
     if (this.symbol) return this.symbol;
-    if (this.string) return this.string;
+    if (this.string) return `"${this.string}"`;
     const num = this.numericValue;
     if (num !== null) {
       if (typeof num === 'number') return num.toString();
+      if (num instanceof Decimal) return num.toString();
       if (isMachineRational(num))
         return `(${num[0].toString()}/${num[1].toString()})`;
       if (isBigRational(num))
@@ -103,6 +98,13 @@ export abstract class _BoxedExpression implements BoxedExpression {
         if (num.im < 0) return `${num.re.toString()}${im}i`;
         return `(${num.re.toString()}+${im}i)`;
       }
+    }
+
+    if (this.head && typeof this.head === 'string') {
+      if (this.head === 'List')
+        return `[${this.ops?.map((x) => x.toString())}]`;
+      if (this.head === 'Domain') return JSON.stringify(this.json);
+      return `${this.head}(${this.ops?.map((x) => x.toString()).join(', ')})`;
     }
 
     return JSON.stringify(this.json);
@@ -222,7 +224,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   get isExact(): boolean {
-    return true;
+    return false;
   }
 
   /** For a symbol, true if the symbol is a constant (unchangeable value) */
@@ -500,4 +502,97 @@ export abstract class _BoxedExpression implements BoxedExpression {
     // } catch (e) {}
     // return undefined;
   }
+}
+
+/**
+ * Return the free variables (non local variable) in the expression,
+ * recursively.
+ *
+ * A free variable is an identifier that is not an argument to a function,
+ * or a local variable.
+ *
+ */
+function getFreeVariables(expr: BoxedExpression, result: Set<string>): void {
+  // @todo: need to check for '["Block"]' which may contain ["Declare"] expressions and exclude those
+
+  if (expr.head === 'Block') {
+  }
+
+  if (expr.symbol) {
+    const def = expr.engine.lookupSymbol(expr.symbol);
+    if (def && def.value !== undefined) return;
+
+    const fnDef = expr.engine.lookupFunction(expr.symbol);
+    if (fnDef && (fnDef.signature.evaluate || fnDef.signature.N)) return;
+
+    result.add(expr.symbol);
+    return;
+  }
+
+  if (expr.head && typeof expr.head !== 'string')
+    getFreeVariables(expr.head, result);
+
+  if (expr.ops) for (const op of expr.ops) getFreeVariables(op, result);
+
+  if (expr.keys)
+    for (const key of expr.keys) getFreeVariables(expr.getKey(key)!, result);
+}
+
+function getSymbols(expr: BoxedExpression, result: Set<string>): void {
+  if (expr.symbol) {
+    result.add(expr.symbol);
+    return;
+  }
+
+  if (expr.head && typeof expr.head !== 'string') getSymbols(expr.head, result);
+
+  if (expr.ops) for (const op of expr.ops) getSymbols(op, result);
+
+  if (expr.keys)
+    for (const key of expr.keys) getSymbols(expr.getKey(key)!, result);
+}
+
+/**
+ * Return the unknowns in the expression, recursively.
+ *
+ * An unknown is an identifier (symbol or function) that is not bound
+ * to a value.
+ *
+ */
+function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
+  if (expr.symbol) {
+    const s = expr.symbol;
+    if (s === 'Unknown' || s === 'Undefined' || s === 'Nothing') return;
+
+    const def = expr.engine.lookupSymbol(s);
+    if (def && def.value !== undefined) return;
+
+    const fnDef = expr.engine.lookupFunction(s);
+    if (fnDef && (fnDef.signature.evaluate || fnDef.signature.N)) return;
+
+    result.add(s);
+    return;
+  }
+
+  if (expr.head && typeof expr.head !== 'string')
+    getUnknowns(expr.head, result);
+
+  if (expr.ops) for (const op of expr.ops) getUnknowns(op, result);
+
+  if (expr.keys)
+    for (const key of expr.keys) getUnknowns(expr.getKey(key)!, result);
+}
+
+export function getSubexpressions(
+  expr: BoxedExpression,
+  head: string
+): BoxedExpression[] {
+  const result = !head || expr.head === head ? [expr] : [];
+  if (expr.ops) {
+    for (const op of expr.ops) result.push(...getSubexpressions(op, head));
+  } else if (expr.keys) {
+    for (const op of expr.keys)
+      result.push(...getSubexpressions(expr.getKey(op)!, head));
+  }
+  return result;
 }

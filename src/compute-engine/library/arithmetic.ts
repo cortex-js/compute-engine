@@ -43,6 +43,7 @@ import {
   domainAdd,
   evalSummation,
   canonicalSummation,
+  canonicalAdd,
 } from './arithmetic-add';
 import {
   simplifyMultiply,
@@ -591,7 +592,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Values', 'Tuples'],
         evaluate: (ce, ops) => {
           if (ops.length !== 1) return undefined;
-          return ce.fn('Pair', [ops[0], ce.neg(ops[0])]);
+          return ce.box(['Pair', ops[0], ce.neg(ops[0])]);
         },
       },
     },
@@ -846,7 +847,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           const [a, b] = args;
           if (args.length !== 2 || !a.isValid || !b.isValid)
             return ce._fn('Subtract', args);
-          return ce._fn('Add', flattenOps([a, canonicalNegate(b)], 'Add'));
+          return canonicalAdd(ce, flattenOps([a, canonicalNegate(b)], 'Add'));
         },
       },
     },
@@ -1119,7 +1120,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce.NegativeInfinity;
           if (ops.length === 1) return ops[0];
-          return ce.fn('Max', ops);
+          return ce.box(['Max', ...ops]);
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Max'),
       },
@@ -1135,7 +1136,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce.PositiveInfinity;
           if (ops.length === 1) return ops[0];
-          return ce.fn('Min', ops);
+          return ce.box(['Min', ...ops]);
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Min'),
       },
@@ -1152,7 +1153,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce.NegativeInfinity;
           if (ops.length === 1) return ops[0];
-          return ce.fn('Min', ops);
+          return ce.box(['Min', ...ops]);
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Supremum'),
       },
@@ -1169,7 +1170,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         simplify: (ce, ops) => {
           if (ops.length === 0) return ce.PositiveInfinity;
           if (ops.length === 1) return ops[0];
-          return ce.fn('Min', ops);
+          return ce.box(['Min', ...ops]);
         },
         evaluate: (ce, ops) => processMinMax(ce, ops, 'Infimum'),
       },
@@ -1488,17 +1489,17 @@ function processLn(ce: IComputeEngine, ops: BoxedExpression[]) {
   if (n.head === 'Power' && n.op1.symbol === 'ExporentialE') return n.op2;
   if (n.head === 'Power') {
     const [base, exp] = n.ops!;
-    return ce.mul(exp, ce.fn('Ln', [base]).simplify());
+    return ce.mul(exp, ce.box(['Ln', base]).simplify());
   }
   if (n.head === 'Multiply') {
     const [a, b] = n.ops!;
-    return ce.add(ce.fn('Ln', [a]).simplify(), ce.fn('Ln', [b]).simplify());
+    return ce.add(ce.box(['Ln', a]).simplify(), ce.box(['Ln', b]).simplify());
   }
   if (n.head === 'Divide') {
     const [a, b] = n.ops!;
     return ce.add(
-      ce.fn('Ln', [a]).simplify(),
-      ce.neg(ce.fn('Ln', [b]).simplify())
+      ce.box(['Ln', a]).simplify(),
+      ce.neg(ce.box(['Ln', b]).simplify())
     );
   }
 }

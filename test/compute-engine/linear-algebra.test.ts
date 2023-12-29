@@ -61,16 +61,12 @@ const t234_x = [
 describe('Creating matrix', () => {
   it('should create a unit pmatrix', () => {
     const result = ce.box(['Diagonal', ['List', 1, 1, 1]]);
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["Diagonal",["List",1,1,1]]`
-    ); // @todo
+    expect(result.toString()).toMatchInlineSnapshot(`Diagonal([1,1,1])`); // @todo
   });
 
   it('should create a diagonal pmatrix', () => {
     const result = ce.box(['Diagonal', ['List', 1, 2, 3]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["Diagonal",["List",1,2,3]]`
-    ); // @todo
+    expect(result.toString()).toMatchInlineSnapshot(`Diagonal([1,2,3])`); // @todo
   });
 });
 
@@ -92,17 +88,17 @@ describe('Tensor Properties', () => {
 
   it('should get the shape of a matrix', () => {
     const result = ce.box(['Shape', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Pair",2,2]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Tuple(2, 2)`);
   });
 
   it('should get the shape of a vector', () => {
     const result = ce.box(['Shape', v2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Single",2]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Tuple(2)`);
   });
 
   it('should get the shape of a scalar', () => {
     const result = ce.box(['Shape', 5]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Tuple"]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Tuple()`);
   });
 });
 
@@ -110,28 +106,28 @@ describe('Matrix addition', () => {
   it('should add a scalar to a matrix', () => {
     const result = ce.box(['Add', sq2_n, 10]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Add",["Error",["ErrorCode","'incompatible-domain'","Numbers","Lists"],["List",["List",1,2],["List",3,4]]],10]`
+      `Add(Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[1,2],[3,4]]), 10)`
     ); // @todo: should not return error
   });
 
   it('should add two matrixes', () => {
     const result = ce.box(['Add', sq2_n, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Add",["Error",["ErrorCode","'incompatible-domain'","Numbers","Lists"],["List",["List",1,2],["List",3,4]]],["Error",["ErrorCode","'incompatible-domain'","Numbers","Lists"],["List",["List",5,6],["List",7,8]]]]`
+      `Add(Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[1,2],[3,4]]), Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[5,6],[7,8]]))`
     ); // @todo: should not return error
   });
 
   it('should handle adding two matrixes of different dimension', () => {
     const result = ce.box(['Add', m23_n, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Add",["Error",["ErrorCode","'incompatible-domain'","Numbers","Lists"],["List",["List",1,2,3],["List",4,5,6]]],["Error",["ErrorCode","'incompatible-domain'","Numbers","Lists"],["List",["List",5,6],["List",7,8]]]]`
+      `Add(Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[1,2,3],[4,5,6]]), Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[5,6],[7,8]]))`
     ); // @todo: should not return error
   });
 
   it('should add two matrixes and a scalar', () => {
     const result = ce.box(['Add', sq2_n, 10, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Add",["Error",["ErrorCode","'incompatible-domain'","Numbers","Lists"],["List",["List",1,2],["List",3,4]]],10,["Error",["ErrorCode","'incompatible-domain'","Numbers","Lists"],["List",["List",5,6],["List",7,8]]]]`
+      `Add(Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[1,2],[3,4]]), 10, Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[5,6],[7,8]]))`
     ); // @todo: should not return error
   });
 });
@@ -139,37 +135,35 @@ describe('Matrix addition', () => {
 describe('Flatten', () => {
   it('should flatten a scalar', () => {
     const result = ce.box(['Flatten', 42]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Flatten",42]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Flatten(42)`);
   }); // @todo: should return ["List", 42]
 
   it('should flatten a numeric vector', () => {
     const result = ce.box(['Flatten', v7_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",7,-2,11,-5,13,-7,17]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[7,-2,11,-5,13,-7,17]`);
   });
 
   it('should flatten a numeric matrix', () => {
     const result = ce.box(['Flatten', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["List",1,2,3,4]`);
+    expect(result.toString()).toMatchInlineSnapshot(`[1,2,3,4]`);
   });
 
   it('should flatten a matrix with unknowns', () => {
     const result = ce.box(['Flatten', sq2_x]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["List","a","b","c","d"]`);
+    expect(result.toString()).toMatchInlineSnapshot(`[a,b,c,d]`);
   });
 
   it('should flatten a numeric tensor', () => {
     const result = ce.box(['Flatten', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]`
+      `[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]`
     );
   });
 
   it('should flatten a tensor with unknowns', () => {
     const result = ce.box(['Flatten', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List","a","b","c","d","e_1","f","g","h","i_1","j","k","l","m","n_1","o","p","q","r","s","t","u","v","w","x_1"]`
+      `[a,b,c,d,e_1,f,g,h,i_1,j,k,l,m,n_1,o,p,q,r,s,t,u,v,w,x_1]`
     );
   });
 });
@@ -177,41 +171,37 @@ describe('Flatten', () => {
 describe('Transpose', () => {
   it('should transpose a scalar', () => {
     const result = ce.box(['Transpose', 42]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Transpose",42]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Transpose(42)`);
   }); // @todo should return 42
 
   it('should transpose a numeric vector', () => {
     const result = ce.box(['Transpose', v7_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Transpose",["List",7,-2,11,-5,13,-7,17]]`
+      `Transpose([7,-2,11,-5,13,-7,17])`
     );
   });
 
   it('should transpose a numeric matrix', () => {
     const result = ce.box(['Transpose', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",1,3],["List",2,4]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[1,3],[2,4]]`);
   });
 
   it('should transpose a matrix with unknowns', () => {
     const result = ce.box(['Transpose', sq2_x]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List","a","c"],["List","b","d"]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[a,c],[b,d]]`);
   });
 
   it('should transpose a numeric tensor', () => {
     const result = ce.box(['Transpose', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Transpose",["List",["List",["List",1,2,3,4],["List",5,6,7,8],["List",9,10,11,12]],["List",["List",13,14,15,16],["List",17,18,19,20],["List",21,22,23,24]]]]`
+      `Transpose([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   }); // @todo fails
 
   it('should transpose a tensor with unknowns', () => {
     const result = ce.box(['Transpose', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Transpose",["List",["List",["List","a","b"],["List","c","d"],["List","e_1","f"],["List","g","h"]],["List",["List","i_1","j"],["List","k","l"],["List","m","n_1"],["List","o","p"]],["List",["List","q","r"],["List","s","t"],["List","u","v"],["List","w","x_1"]]]]`
+      `Transpose([[[a,b],[c,d],[e_1,f],[g,h]],[[i_1,j],[k,l],[m,n_1],[o,p]],[[q,r],[s,t],[u,v],[w,x_1]]])`
     );
   });
 }); // @todo fails
@@ -219,50 +209,44 @@ describe('Transpose', () => {
 describe('ConjugateTranspose', () => {
   it('should conjugate transpose a scalar', () => {
     const result = ce.box(['ConjugateTranspose', 42]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["ConjugateTranspose",42]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`ConjugateTranspose(42)`);
   }); // @todo should return 42
 
   it('should conjugate transpose a numeric vector', () => {
     const result = ce.box(['ConjugateTranspose', v7_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["ConjugateTranspose",["List",7,-2,11,-5,13,-7,17]]`
+      `ConjugateTranspose([7,-2,11,-5,13,-7,17])`
     );
   });
 
   it('should conjugate transpose a numeric matrix', () => {
     const result = ce.box(['ConjugateTranspose', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",1,3],["List",2,4]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[1,3],[2,4]]`);
   });
 
   it('should conjugate transpose a complex matrix', () => {
     const result = ce.box(['ConjugateTranspose', sq4_c]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",["Complex",2,-3],0],["List",2,["Complex",0,1]]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[2-3i,0],[2,i]]`);
   });
 
   it('should conjugate transpose a matrix with unknowns', () => {
     const result = ce.box(['ConjugateTranspose', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",["Conjugate","a"],["Conjugate","c"]],["List",["Conjugate","b"],["Conjugate","d"]]]`
+      `[[Conjugate(a),Conjugate(c)],[Conjugate(b),Conjugate(d)]]`
     );
   });
 
   it('should conjugate transpose a numeric tensor', () => {
     const result = ce.box(['ConjugateTranspose', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["ConjugateTranspose",["List",["List",["List",1,2,3,4],["List",5,6,7,8],["List",9,10,11,12]],["List",["List",13,14,15,16],["List",17,18,19,20],["List",21,22,23,24]]]]`
+      `ConjugateTranspose([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   }); // @todo fails
 
   it('should conjugate transpose a tensor with unnknowns', () => {
     const result = ce.box(['ConjugateTranspose', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["ConjugateTranspose",["List",["List",["List","a","b"],["List","c","d"],["List","e_1","f"],["List","g","h"]],["List",["List","i_1","j"],["List","k","l"],["List","m","n_1"],["List","o","p"]],["List",["List","q","r"],["List","s","t"],["List","u","v"],["List","w","x_1"]]]]`
+      `ConjugateTranspose([[[a,b],[c,d],[e_1,f],[g,h]],[[i_1,j],[k,l],[m,n_1],[o,p]],[[q,r],[s,t],[u,v],[w,x_1]]])`
     );
   });
 }); // @todo fails
@@ -270,13 +254,13 @@ describe('ConjugateTranspose', () => {
 describe('Determinant', () => {
   it('should calculate the determinant of a scalar', () => {
     const result = ce.box(['Determinant', 42]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Determinant",42]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Determinant(42)`);
   }); // @todo should return 42
 
   it('should calculate the determinant of a numeric vector', () => {
     const result = ce.box(['Determinant', v7_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Determinant",["List",7,-2,11,-5,13,-7,17]]`
+      `Determinant([7,-2,11,-5,13,-7,17])`
     );
   }); // @todo should return 'expected-square-matrix'
 
@@ -288,21 +272,21 @@ describe('Determinant', () => {
   it('should calculate the determinant of a matrix with unknowns', () => {
     const result = ce.box(['Determinant', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Subtract",["Multiply","a","d"],["Multiply","b","c"]]`
+      `Add(Multiply(a, d), Multiply(-1, b, c))`
     );
   });
 
   it('should calculate the determinant of a numeric tensor', () => {
     const result = ce.box(['Determinant', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Determinant",["List",["List",["List",1,2,3,4],["List",5,6,7,8],["List",9,10,11,12]],["List",["List",13,14,15,16],["List",17,18,19,20],["List",21,22,23,24]]]]`
+      `Determinant([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   }); // @todo fails
 
   it('should calculate the determinant of a tensor with unknowns', () => {
     const result = ce.box(['Determinant', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Determinant",["List",["List",["List","a","b"],["List","c","d"],["List","e_1","f"],["List","g","h"]],["List",["List","i_1","j"],["List","k","l"],["List","m","n_1"],["List","o","p"]],["List",["List","q","r"],["List","s","t"],["List","u","v"],["List","w","x_1"]]]]`
+      `Determinant([[[a,b],[c,d],[e_1,f],[g,h]],[[i_1,j],[k,l],[m,n_1],[o,p]],[[q,r],[s,t],[u,v],[w,x_1]]])`
     );
   });
 });
@@ -310,13 +294,13 @@ describe('Determinant', () => {
 describe('Trace', () => {
   it('should calculate the trace of a scalar', () => {
     const result = ce.box(['Trace', 42]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Trace",42]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Trace(42)`);
   }); // @todo should return 42
 
   it('should calculate the trace of a numeric vector', () => {
     const result = ce.box(['Trace', v7_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Trace",["List",7,-2,11,-5,13,-7,17]]`
+      `Trace([7,-2,11,-5,13,-7,17])`
     );
   }); // @todo should return 'expected-square-matrix'
 
@@ -327,20 +311,20 @@ describe('Trace', () => {
 
   it('should calculate the trace of a matrix with unknowns', () => {
     const result = ce.box(['Trace', sq2_x]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Add","a","d"]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Add(a, d)`);
   });
 
   it('should calculate the trace of a numeric tensor', () => {
     const result = ce.box(['Trace', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Trace",["List",["List",["List",1,2,3,4],["List",5,6,7,8],["List",9,10,11,12]],["List",["List",13,14,15,16],["List",17,18,19,20],["List",21,22,23,24]]]]`
+      `Trace([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   }); // @todo fails, should be sum of matrixes on diagonal
 
   it('should calculate the trace of a numeric tensor', () => {
     const result = ce.box(['Trace', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Trace",["List",["List",["List","a","b"],["List","c","d"],["List","e_1","f"],["List","g","h"]],["List",["List","i_1","j"],["List","k","l"],["List","m","n_1"],["List","o","p"]],["List",["List","q","r"],["List","s","t"],["List","u","v"],["List","w","x_1"]]]]`
+      `Trace([[[a,b],[c,d],[e_1,f],[g,h]],[[i_1,j],[k,l],[m,n_1],[o,p]],[[q,r],[s,t],[u,v],[w,x_1]]])`
     );
   });
 }); // @todo fails
@@ -348,90 +332,80 @@ describe('Trace', () => {
 describe('Reshape', () => {
   it('should reshape a scalar', () => {
     const result = ce.box(['Reshape', 42, ['Tuple', 2, 2]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["Reshape",42,["Pair",2,2]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`Reshape(42, Tuple(2, 2))`);
   }); // @todo: fails should return a 2x2 matrix filled with 42
 
   it('should reshape a scalar', () => {
     const result = ce.box(['Reshape', 42, ['Tuple']]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Reshape",42,["Tuple"]]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Reshape(42, Tuple())`);
   }); // @todo should return 42
 
   it('should reshape a numeric vector, extending it', () => {
     const result = ce.box(['Reshape', v7_n, ['Tuple', 3, 3]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",7,-2,11],["List",-5,13,-7],["List",17]]`
+      `[[7,-2,11],[-5,13,-7],[17]]`
     );
   });
 
   it('should reshape a numeric vector, contracting it', () => {
     const result = ce.box(['Reshape', v7_n, ['Tuple', 2, 2]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",7,-2],["List",11,-5]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[7,-2],[11,-5]]`);
   });
 
   it('should reshape a numeric vector, expanding it', () => {
     const result = ce.box(['Reshape', v7_n, ['Tuple', 3, 3]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",7,-2,11],["List",-5,13,-7],["List",17]]`
+      `[[7,-2,11],[-5,13,-7],[17]]`
     );
   }); // @todo. Should cycle the ravel
 
   it('should reshape a general vector', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 3, 3]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List","a","b","c"],["List","d","e_1","f"],["List","g","h","i_1"]]`
+      `[[a,b,c],[d,e_1,f],[g,h,i_1]]`
     );
   });
 
   it('should reshape a general vector, extending it', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 3, 4]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List","a","b","c","d"],["List","e_1","f","g","h"],["List","i_1"]]`
+      `[[a,b,c,d],[e_1,f,g,h],[i_1]]`
     );
   }); // @todo fails, should cycle the ravel
 
   it('should reshape a general vector, contracting it', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 2, 3]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List","a","b","c"],["List","d","e_1","f"]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[a,b,c],[d,e_1,f]]`);
   });
 
   it('should reshape a general vector to a tensor', () => {
     const result = ce.box(['Reshape', v9_x, ['Tuple', 2, 3, 2]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",["List","a","b"],["List","c","d"],["List","e_1","f"]],["List",["List","g","h"],["List","i_1"],["List"]]]`
+      `[[[a,b],[c,d],[e_1,f]],[[g,h],[i_1],[]]]`
     );
   }); // @todo fails, should cycle the ravel
 
   it('should reshape a numeric matrix', () => {
     const result = ce.box(['Reshape', sq2_n, ['Tuple', 2, 2]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",1,2],["List",3,4]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[1,2],[3,4]]`);
   });
 
   it('should reshape a matrix with unknowns', () => {
     const result = ce.box(['Reshape', sq2_x, ['Tuple', 2, 2]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List","a","b"],["List","c","d"]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[a,b],[c,d]]`);
   });
 
   it('should reshape a numeric tensor', () => {
     const result = ce.box(['Reshape', t234_n, ['Tuple', 2, 2, 3]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",["List",1,2,3],["List",4,5,6]],["List",["List",7,8,9],["List",10,11,12]]]`
+      `[[[1,2,3],[4,5,6]],[[7,8,9],[10,11,12]]]`
     );
   });
 
   it('should reshape a tensor with unknowns', () => {
     const result = ce.box(['Reshape', t234_x, ['Tuple', 2, 2, 3]]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",["List","a","b","c"],["List","d","e_1","f"]],["List",["List","g","h","i_1"],["List","j","k","l"]]]`
+      `[[[a,b,c],[d,e_1,f]],[[g,h,i_1],[j,k,l]]]`
     );
   });
 });
@@ -439,41 +413,39 @@ describe('Reshape', () => {
 describe('Inverse', () => {
   it('should calculate the inverse of a scalar', () => {
     const result = ce.box(['Inverse', 42]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Inverse",42]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Inverse(42)`);
   }); // @todo should return 1/42
 
   it('should calculate the inverse of a numeric vector', () => {
     const result = ce.box(['Inverse', v7_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Inverse",["List",7,-2,11,-5,13,-7,17]]`
+      `Inverse([7,-2,11,-5,13,-7,17])`
     );
   }); // @todo should return `expected-square-matrix`
 
   it('should calculate the inverse of a numeric matrix', () => {
     const result = ce.box(['Inverse', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",-2,1],["List",1.5,-0.5]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`[[-2,1],[1.5,-0.5]]`);
   });
 
   it('should calculate the inverse of a matrix with unknowns', () => {
     const result = ce.box(['Inverse', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["List",["List",["Divide","d",["Subtract",["Multiply","a","d"],["Multiply","b","c"]]],["Divide",["Negate","b"],["Subtract",["Multiply","a","d"],["Multiply","b","c"]]]],["List",["Divide",["Negate","c"],["Subtract",["Multiply","a","d"],["Multiply","b","c"]]],["Divide","a",["Subtract",["Multiply","a","d"],["Multiply","b","c"]]]]]`
+      `[[Divide(d, Add(Multiply(a, d), Multiply(-1, b, c))),Divide(Multiply(-1, b), Add(Multiply(a, d), Multiply(-1, b, c)))],[Divide(Multiply(-1, c), Add(Multiply(a, d), Multiply(-1, b, c))),Divide(a, Add(Multiply(a, d), Multiply(-1, b, c)))]]`
     );
   });
 
   it('should calculate the inverse of a numeric tensor', () => {
     const result = ce.box(['Inverse', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Inverse",["List",["List",["List",1,2,3,4],["List",5,6,7,8],["List",9,10,11,12]],["List",["List",13,14,15,16],["List",17,18,19,20],["List",21,22,23,24]]]]`
+      `Inverse([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   }); // @todo 'expected-square-matrix'
 
   it('should calculate the inverse of a numeric tensor', () => {
     const result = ce.box(['Inverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Inverse",["List",["List",["List","a","b"],["List","c","d"],["List","e_1","f"],["List","g","h"]],["List",["List","i_1","j"],["List","k","l"],["List","m","n_1"],["List","o","p"]],["List",["List","q","r"],["List","s","t"],["List","u","v"],["List","w","x_1"]]]]`
+      `Inverse([[[a,b],[c,d],[e_1,f],[g,h]],[[i_1,j],[k,l],[m,n_1],[o,p]],[[q,r],[s,t],[u,v],[w,x_1]]])`
     );
   });
 }); // @todo `expected-square-matrix`
@@ -481,41 +453,41 @@ describe('Inverse', () => {
 describe('PseudoInverse', () => {
   it('should calculate the pseudo inverse of a scalar', () => {
     const result = ce.box(['PseudoInverse', 42]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["PseudoInverse",42]`);
+    expect(result.toString()).toMatchInlineSnapshot(`PseudoInverse(42)`);
   }); // @todo
 
   it('should calculate the pseudo inverse of a numeric vector', () => {
     const result = ce.box(['PseudoInverse', v7_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["PseudoInverse",["List",7,-2,11,-5,13,-7,17]]`
+      `PseudoInverse([7,-2,11,-5,13,-7,17])`
     );
   }); // @todo
 
   it('should calculate the pseudo inverse of a numeric matrix', () => {
     const result = ce.box(['PseudoInverse', sq2_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["PseudoInverse",["List",["List",1,2],["List",3,4]]]`
+      `PseudoInverse([[1,2],[3,4]])`
     );
   }); // @todo
 
   it('should calculate the pseudo inverse of a matrix with unknowns', () => {
     const result = ce.box(['PseudoInverse', sq2_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["PseudoInverse",["List",["List","a","b"],["List","c","d"]]]`
+      `PseudoInverse([[a,b],[c,d]])`
     );
   }); // @todo
 
   it('should calculate the pseudo inverse of a numeric tensor', () => {
     const result = ce.box(['PseudoInverse', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["PseudoInverse",["List",["List",["List",1,2,3,4],["List",5,6,7,8],["List",9,10,11,12]],["List",["List",13,14,15,16],["List",17,18,19,20],["List",21,22,23,24]]]]`
+      `PseudoInverse([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   }); // @todo
 
   it('should calculate the pseudo inverse of a numeric tensor', () => {
     const result = ce.box(['PseudoInverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["PseudoInverse",["List",["List",["List","a","b"],["List","c","d"],["List","e_1","f"],["List","g","h"]],["List",["List","i_1","j"],["List","k","l"],["List","m","n_1"],["List","o","p"]],["List",["List","q","r"],["List","s","t"],["List","u","v"],["List","w","x_1"]]]]`
+      `PseudoInverse([[[a,b],[c,d],[e_1,f],[g,h]],[[i_1,j],[k,l],[m,n_1],[o,p]],[[q,r],[s,t],[u,v],[w,x_1]]])`
     );
   });
 }); // @todo
@@ -523,34 +495,30 @@ describe('PseudoInverse', () => {
 describe('Diagonal', () => {
   it('should create a diagonal matrix', () => {
     const result = ce.box(['Diagonal', 5]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`["Diagonal",5]`);
+    expect(result.toString()).toMatchInlineSnapshot(`Diagonal(5)`);
   }); // @todo
 
   it('should create a diagonal matrix from a vector', () => {
     const result = ce.box(['Diagonal', v7_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Diagonal",["List",7,-2,11,-5,13,-7,17]]`
+      `Diagonal([7,-2,11,-5,13,-7,17])`
     );
   }); // @todo
 
   it('should calculate the diagonal of a numeric square matrix', () => {
     const result = ce.box(['Diagonal', sq2_n]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["Diagonal",["List",["List",1,2],["List",3,4]]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`Diagonal([[1,2],[3,4]])`);
   }); // @todo
 
   it('should calculate the diagonal of a matrix with unknowns', () => {
     const result = ce.box(['Diagonal', sq2_x]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `["Diagonal",["List",["List","a","b"],["List","c","d"]]]`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`Diagonal([[a,b],[c,d]])`);
   }); // @todo
 
   it('should calculate the diagonal of a numeric tensor', () => {
     const result = ce.box(['Diagonal', t234_n]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `["Diagonal",["List",["List",["List",1,2,3,4],["List",5,6,7,8],["List",9,10,11,12]],["List",["List",13,14,15,16],["List",17,18,19,20],["List",21,22,23,24]]]]`
+      `Diagonal([[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   }); // @todo `expected-square-matrix`
 });

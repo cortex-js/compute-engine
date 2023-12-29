@@ -136,7 +136,7 @@ function evaluateBlock(
       break;
     }
     if (h === 'Break' || h === 'Continue') {
-      result = ce.fn(h, [op.op1.evaluate()]);
+      result = ce.box([h, op.op1.evaluate()]);
       break;
     }
     result = op.evaluate();

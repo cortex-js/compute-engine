@@ -12,16 +12,14 @@ describe('CANONICAL FORMS', () => {
   test('a-0', () => {
     expect(check('a-0')).toMatchInlineSnapshot(`
       latex     = ["Subtract", "a", 0]
-      box       = ["Add", "a", 0]
-      canonical = a
+      a
     `);
   });
 
   test('0-a', () => {
     expect(check('0-a')).toMatchInlineSnapshot(`
       latex     = ["Subtract", 0, "a"]
-      box       = ["Subtract", 0, "a"]
-      simplify  = ["Negate", "a"]
+      ["Negate", "a"]
     `);
   });
 

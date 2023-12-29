@@ -50,7 +50,7 @@ export function NToJson(latex: string): Expression {
 
 export function expand(latex: string): Expression {
   const expr = engine.parse(latex);
-  return engine.fn('Expand', [expr]).evaluate().json;
+  return engine.box(['Expand', expr]).evaluate().json;
 }
 
 export function latexToJson(expr: Expression | undefined | null): Expression {

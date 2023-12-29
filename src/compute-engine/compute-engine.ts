@@ -55,20 +55,16 @@ import {
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 import { ExpressionMap } from './boxed-expression/expression-map';
 import { BoxedPattern } from './boxed-expression/boxed-patterns';
-import { latexString } from './boxed-expression/utils';
+import { asLatexString } from './boxed-expression/utils';
 import { boxRules } from './rules';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedNumber } from './boxed-expression/boxed-number';
 import { _BoxedSymbolDefinition } from './boxed-expression/boxed-symbol-definition';
 import { canonicalPower, processSqrt } from './library/arithmetic-power';
 import { BoxedFunction } from './boxed-expression/boxed-function';
-import {
-  canonicalMultiply,
-  evalMultiply,
-  simplifyMultiply,
-} from './library/arithmetic-multiply';
-import { canonicalAdd, evalAdd } from './library/arithmetic-add';
-import { canonicalDivide, evalDivide } from './library/arithmetic-divide';
+import { evalMultiply } from './library/arithmetic-multiply';
+import { evalAdd } from './library/arithmetic-add';
+import { evalDivide } from './library/arithmetic-divide';
 import {
   BoxedSymbol,
   makeCanonicalSymbol,
@@ -1607,38 +1603,21 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Return a function expression.
+   * Return a function expression, but the caller is responsible for making
+   * sure that the arguments are canonical.
    *
-   * Note that the result may not be a function, or may have a different
-   * `head` than the one specified.
-   *
-   * For example:
-   * `ce.fn("Rational", [ce.number(1),  ce.number(2)]))` \( \to \) `ce.number([1,2])`
-   *
-   */
-  fn(
-    head: string,
-    ops: BoxedExpression[],
-    options?: { canonical: boolean }
-  ): BoxedExpression {
-    return boxFunction(this, head, ops, options ?? { canonical: true });
-  }
-
-  /** @internal */
+   * @internal */
   _fn(
     head: string | BoxedExpression,
     ops: BoxedExpression[],
     metadata?: Metadata
   ): BoxedExpression {
-    return new BoxedFunction(this, head, ops, {
-      metadata,
-      canonical: true,
-    });
+    return new BoxedFunction(this, head, ops, { metadata, canonical: true });
   }
 
   /**
    *
-   * Shortcut for `this.fn("Error"...)`.
+   * Shortcut for `this.box(["Error",...])`.
    *
    * The result is canonical.
    */
@@ -1704,7 +1683,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Shortcut for `this._fn("Add"...).evaluate()`.
+   * Shortcut for `this.box(["Add", ...]).evaluate()`.
    *
    */
   add(...ops: BoxedExpression[]): BoxedExpression {
@@ -1715,7 +1694,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    *
-   * Shortcut for `this._fn("Negate", [expr]).evaluate()`
+   * Shortcut for `this.box(["Negate", expr]).evaluate()`
    *
    */
   neg(expr: BoxedExpression): BoxedExpression {
@@ -1725,7 +1704,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    *
-   * Shortcut for `this._fn("Multiply"...).evaluate()`
+   * Shortcut for `this.box(["Multiply", ...]).evaluate()`
    *
    */
   mul(...ops: BoxedExpression[]): BoxedExpression {
@@ -1736,7 +1715,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    *
-   * Shortcut for `this._fn("Divide", [num, denom]).evaluate()`
+   * Shortcut for `this.box(["Divide", num, denom]).evaluate()`
    *
    * The result is canonical.
    */
@@ -1748,7 +1727,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    *
-   * Shortcut for `this._fn("Sqrt"...).evaluate()`
+   * Shortcut for `this.box(["Sqrt", base]).evaluate()`
    *
    */
   sqrt(base: BoxedExpression) {
@@ -1760,7 +1739,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    *
-   * Shortcut for `this._fn("Power"...).evaluate()`
+   * Shortcut for `this.box(["Power", base, exponent]).evaluate()`
    *
    */
   pow(
@@ -1777,7 +1756,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    *
-   * Shortcut for `this._fn("Divide", [1, expr]).evaluate()`
+   * Shortcut for `this.box(["Divide", 1, expr]).evaluate()`
    *
    */
   inv(expr: BoxedExpression): BoxedExpression {
@@ -1815,7 +1794,7 @@ export class ComputeEngine implements IComputeEngine {
     return this._fn('Power', [expr, e]);
   }
 
-  /** Shortcut for `this.fn("Pair"...)`
+  /** Shortcut for `this.box(["Pair", ...])`
    *
    * The result is canonical.
    */
@@ -1825,13 +1804,18 @@ export class ComputeEngine implements IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression {
     // Short path
-    return new BoxedFunction(this, 'Tuple', [first, second], {
-      metadata,
-      canonical: true,
-    });
+    return new BoxedFunction(
+      this,
+      'Tuple',
+      [first.canonical, second.canonical],
+      {
+        metadata,
+        canonical: true,
+      }
+    );
   }
 
-  /** Shortcut for `this.fn("Tuple"...)`
+  /** Shortcut for `this.box(["Tuple", ...])`
    *
    * The result is canonical.
    */
@@ -1842,21 +1826,14 @@ export class ComputeEngine implements IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression {
     // Short path
-    if (typeof elements[0] === 'number') {
-      return new BoxedFunction(
-        this,
-        'Tuple',
-        (elements as number[]).map((x) => this.number(x)),
-        {
-          metadata,
-          canonical: true,
-        }
-      );
-    }
     return new BoxedFunction(
       this,
       'Tuple',
-      canonical(elements as BoxedExpression[]),
+      canonical(
+        elements.map((x) =>
+          typeof x === 'number' ? this.number(x) : x.canonical
+        )
+      ),
       {
         metadata,
         canonical: true,
@@ -2060,7 +2037,7 @@ export class ComputeEngine implements IComputeEngine {
     options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
   ): BoxedExpression | null {
     if (typeof latex !== 'string') return null;
-    const result = this.latexSyntax.parse(latexString(latex) ?? latex);
+    const result = this.latexSyntax.parse(asLatexString(latex) ?? latex);
     return this.box(result, options);
   }
 

@@ -138,7 +138,7 @@ describe('NUMBERS', () => {
       `["Add", 2, {num: "+Infinity"}]`
     );
     expect(parse('\\infty-\\infty')).toMatchInlineSnapshot(
-      `["Add", {num: "+Infinity"}, {num: "-Infinity"}]`
+      `["Add", {num: "-Infinity"}, {num: "+Infinity"}]`
     );
     // Should not be interpreted as infinity
     expect(parse('\\frac{0}{0}')).toMatchInlineSnapshot(`{num: "NaN"}`);

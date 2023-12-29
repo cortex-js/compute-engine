@@ -6,7 +6,7 @@ import { benchmark, engine } from '../../utils';
 //
 
 function expand(e: BoxedExpression): BoxedExpression {
-  return engine.fn('Expand', [e]).evaluate();
+  return engine.box(['Expand', e]).evaluate();
 }
 
 const p = engine.parse(`3x^2yz^7 + 7xyz^2 + 4x + xy^4`);

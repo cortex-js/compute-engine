@@ -4,6 +4,7 @@ import { neg } from '../numerics/rationals';
 
 import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { flattenOps, flattenSequence } from './flatten';
+import { canonicalAdd } from '../library/arithmetic-add';
 
 function negateLiteral(expr: BoxedExpression): BoxedExpression | null {
   // Applying negation is safe (doesn't introduce numeric errors)
@@ -73,7 +74,7 @@ export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
 
   if (expr.head === 'Add') {
     let ops = expr.ops!.map((x) => canonicalNegate(x));
-    return ce._fn('Add', flattenOps(flattenSequence(ops), 'Add'));
+    return canonicalAdd(ce, flattenOps(flattenSequence(ops), 'Add'));
   }
 
   if (expr.numericValue !== null) return negateLiteral(expr)!;

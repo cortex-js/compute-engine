@@ -1,5 +1,6 @@
 import { MathJsonIdentifier } from '../math-json/math-json-format';
 import { isCollection, isFiniteIndexableCollection } from './collection-utils';
+import { isRelationalOperator } from './latex-syntax/dictionary/definitions-relational-operators';
 import { normalizeIndexingSet } from './library/utils';
 import {
   asFloat,
@@ -368,16 +369,7 @@ function compileExpr(
     // for operator precedence in JavaScript
     const op = target.operators?.(h);
 
-    if (
-      (h === 'NotEqual' ||
-        h === 'Equal' ||
-        h === 'Less' ||
-        h === 'Greater' ||
-        h === 'LessEqual' ||
-        h === 'GreaterEqual') &&
-      args.length > 2 &&
-      op
-    ) {
+    if (isRelationalOperator(h) && args.length > 2 && op) {
       // JavaScript relational operators only take two arguments
       // We need to chain them
       const result: string[] = [];

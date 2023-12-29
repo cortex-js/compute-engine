@@ -588,7 +588,7 @@ describe('SUM', () => {
         .box(['Sum', ['Divide', 1, 'x'], 'x'])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`"14.392727722864723528"`));
+    ).toMatchInlineSnapshot(`14.3927277228647235281448`));
 
   it('should compute the sum of a collection', () =>
     expect(
@@ -623,12 +623,12 @@ describe('GCD/LCM', () => {
   it('should compute the GCD of some integers and other stuff', () =>
     expect(
       ce.box(['GCD', 60, 'foo', 12]).evaluate().toString()
-    ).toMatchInlineSnapshot(`["GCD",12,"foo"]`));
+    ).toMatchInlineSnapshot(`GCD(12, foo)`));
 
   it('should compute the GCD of only stuff', () =>
     expect(
       ce.box(['GCD', 'foo', 'bar']).evaluate().toString()
-    ).toMatchInlineSnapshot(`["GCD","foo","bar"]`));
+    ).toMatchInlineSnapshot(`GCD(foo, bar)`));
 
   it('should compute the GCD of a single number', () =>
     expect(ce.box(['GCD', 42]).evaluate().toString()).toMatchInlineSnapshot(
@@ -638,7 +638,7 @@ describe('GCD/LCM', () => {
   it('should compute the GCD of some numbers', () =>
     expect(
       ce.box(['GCD', 60, 12, 3.1415]).evaluate().toString()
-    ).toMatchInlineSnapshot(`["GCD",12,3.1415]`));
+    ).toMatchInlineSnapshot(`GCD(12, 3.1415)`));
 
   it('should compute the GCD of a list', () =>
     expect(
@@ -646,17 +646,17 @@ describe('GCD/LCM', () => {
         .box(['GCD', ['List', 60, 12, 3.1415]])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`["GCD",["List",60,12,3.1415]]`));
+    ).toMatchInlineSnapshot(`GCD([60,12,3.1415])`));
 
   it('should compute the LCM of some integers and other stuff', () =>
     expect(
       ce.box(['LCM', 60, 'foo', 12]).evaluate().toString()
-    ).toMatchInlineSnapshot(`["LCM",60,"foo"]`));
+    ).toMatchInlineSnapshot(`LCM(60, foo)`));
 
   it('should compute the LCM of only stuff', () =>
     expect(
       ce.box(['LCM', 'foo', 'bar']).evaluate().toString()
-    ).toMatchInlineSnapshot(`["LCM","foo","bar"]`));
+    ).toMatchInlineSnapshot(`LCM(foo, bar)`));
 
   it('should compute the LCM of a single number', () =>
     expect(ce.box(['LCM', 42]).evaluate().toString()).toMatchInlineSnapshot(
@@ -666,7 +666,7 @@ describe('GCD/LCM', () => {
   it('should compute the LCM of some numbers', () =>
     expect(
       ce.box(['LCM', 60, 12, 3.1415]).evaluate().toString()
-    ).toMatchInlineSnapshot(`["LCM",60,3.1415]`));
+    ).toMatchInlineSnapshot(`LCM(60, 3.1415)`));
 
   it('should compute the LCM of a list', () =>
     expect(
@@ -674,5 +674,31 @@ describe('GCD/LCM', () => {
         .box(['LCM', ['List', 60, 12, 3.1415]])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`["LCM",["List",60,12,3.1415]]`));
+    ).toMatchInlineSnapshot(`LCM([60,12,3.1415])`));
+});
+
+describe('FACTOR', () => {
+  it('should factor a relational operator with fractional roots', () =>
+    expect(
+      ce
+        .box(['Factor', ce.parse('\\sqrt{7}\\sqrt{35}x^2 \\lt \\sqrt{5}x')])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`Less(Multiply(7, x), 1)`));
+
+  it('should factor integers', () =>
+    expect(
+      ce
+        .box(['Factor', ce.parse('2a \\lt 4b')])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`Less(a, Multiply(2, b))`));
+
+  it('should factor additions', () =>
+    expect(
+      ce
+        .box(['Factor', ce.parse('\\sqrt{3}x+2\\sqrt{3}x')])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`Multiply(x, Add(Multiply(2, Sqrt(3)), Sqrt(3)))`));
 });

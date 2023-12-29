@@ -151,7 +151,7 @@ export function expandMultinomial(
 export function expandAll(expr: BoxedExpression): BoxedExpression | null {
   if (expr.head && expr.ops) {
     const ops = expr.ops.map((x) => expandAll(x) ?? x);
-    const result = expr.engine.fn(expr.head, ops);
+    const result = expr.engine.box([expr.head, ...ops]);
     return expand(result) ?? result;
   }
 

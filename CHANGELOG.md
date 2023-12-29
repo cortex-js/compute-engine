@@ -1,44 +1,54 @@
 ## [Unreleased]
 
-## Bug Fixes
+### New Features
+
+- Added `ExpandAll` function to expand an expression recursively.
+- Added `Factor` function to factor an expression.
+- Added `Together` function to combine rational expressions into a single
+  fraction.
+
+### Issues Resolved
 
 - The expression `\frac5 7` is now parsed correctly as `\frac{5}{7}` instead of
   `\frac{5}{}7`.
 - Do not sugar non-canonical expression. Previously,
-  `ce.parse('\frac{1}{2}', {canonical: false})` would return `Half` instead of
+  `ce.parse('\\frac{1}{2}', {canonical: false})` would return `Half` instead of
   `['Divide', '1', '2']`.
 - **#132** Attempting to set a value to 0 with
   `ce.defineSymbol("count", {value: 0})` would fail: the symbol would be
   undefined.
 - Correctly evaluate power expressions in some cases, for example
   `(\sqrt2 + \sqrt2)^2`.
+- Comparison of expressions containing non-exact numbers could fail. For
+  example: `2(13.1+3.1x)` and `26.2+6.2x` would not be considered equal.
 
-## Improvements
+### Improvements
 
 - Significant improvements to symbolic computation. Now, boxing,
   canonicalization and evaluation are more consistent and produce more
   predictable results.
 - Adedd the `\neg` command, synonym for `\lnot` -> `Not`.
-- Added `ExpandAll` function to expand an expression recursively.
+- Relational expressions (inequalities, etc...) are now properly factored.
+- Integers are now factored when simplifying, i.e. `2x = 4x` -> `x = 2x`.
 
-## 0.22.0
-
-**Release Date:** 2023-11-13
+## 0.22.0 _2023-11-13_
 
 ### Breaking Changes
 
-- The syntax to describe rules has changed. The syntax for a rule was previously
+- **Rule Syntax**
+
+  The syntax to describe rules has changed. The syntax for a rule was previously
   a tuple `[lhs, rhs, {condition} ]`. The new syntax is an object with the
   properties `match`, `replace` and `condition`. For example:
 
   - previous syntax: `[["Add", "_x", "_x"], ["Multiply", 2, "_x"]]`
-  - new syntax: `{match: ["Add", "_x", "_x"], replace: ["Multiply", 2, "_x"]}]`
+  - new syntax: `{match: ["Add", "_x", "_x"], replace: ["Multiply", 2, "_x"]}`
 
   The `condition` property is optional, and is either a boxed function or a
   JavaScript function. For example, to add a condition that cheks that `_x` is a
   number literal:
 
-  ```
+  ```js
   {
     match: ["Add", "_x", "_x"],
     replace: ["Multiply", 2, "_x"],
@@ -46,7 +56,9 @@
   }
   ```
 
-- The `CanonicalOrder` function has been replaced by the more flexible
+- **`CanonicalForm`**
+
+  The `CanonicalOrder` function has been replaced by the more flexible
   `CanonicalForm` function. The `CanonicalForm` function takes an expression and
   a list of transformations to apply. To apply the same transformations as
   `CanonicalOrder`, use:
@@ -86,9 +98,7 @@
 - The pattern matching engine has been improved and can now match more
   expressions, including sequences for commutative functions.
 
-## 0.21.0
-
-**Release Date:** 2023-11-02
+## 0.21.0 _2023-11-02_
 
 ### New Features
 
@@ -105,9 +115,9 @@
 
 - Added `IsSame` function, which is the function expression corresponding to
   `expr.isSame()`.
-- Added `CanonicalOrder` function, which sorts the arguments of commutative
+- <s>Added `CanonicalOrder` function, which sorts the arguments of commutative
   functions into canonical order. This is useful to compare two non-canonical
-  expressions for equality.
+  expressions for equality.</s>
 
 ```js
 ce.box(["CanonicalOrder", ["Add", 1, "x"]]).isSame(
@@ -116,16 +126,14 @@ ce.box(["CanonicalOrder", ["Add", 1, "x"]]).isSame(
 // -> true
 ```
 
-### Bug Fix
+### Issue Resolved
 
 - When evaluating a sum (`\sum`) with a bound that is not a number, return the
   sum expression instead of an error.
 
-## 0.20.2
+## 0.20.2 _2023-10-31_
 
-**Release Date:** 2023-10-31
-
-### Bug Fixes
+### Issues Resolved
 
 - Fixed numerical evaluation of integrals and limits when parsed from LaTeX.
 
@@ -137,19 +145,15 @@ console.info(ce.parse('\\int_{0}^{2} x^2 dx').value);
 // -> 2.6666666666666665
 ```
 
-## 0.20.1
+## 0.20.1 _2023-10-31_
 
-**Release Date:** 2023-10-31
-
-### Bug Fixes
+### Issues Resolved
 
 - Fixed evaluation of functions with multiple arguments
 - Fixed compilation of some function assignments
 - Improved serialization of function assignment
 
-## 0.20.0
-
-**Release Date:** 2023-10-30
+## 0.20.0 _2023-10-30_
 
 ### Breaking Changes
 
@@ -166,7 +170,7 @@ console.info(ce.parse('\\int_{0}^{2} x^2 dx').value);
   The `applyInvisibleOperator` parsing option has been removed. To support
   custom invisible operators, use the `InvisibleOperator` function.
 
-### Bug Fixes
+### Issues Resolved
 
 - **#25** Correctly parse chained relational operators, i.e. `a < b <= c`
 - **#126** Logic operators only accepted up to two arguments.
@@ -197,11 +201,9 @@ console.info(ce.parse('\\int_{0}^{2} x^2 dx').value);
   spacing commands. As a result, `ce.parse("\\text{dead\;beef}_{16}")` correctly
   gets evaluated to 3,735,928,559.
 
-## 0.19.1
+## 0.19.1 _2023-10-26_
 
-**Release Date:** 2023-10-26
-
-### Bug Fixes
+### Issues Resolved
 
 - Assigning a function to an indentifier works correctly now, i.e.
 
@@ -209,9 +211,7 @@ console.info(ce.parse('\\int_{0}^{2} x^2 dx').value);
 ce.parse("\\operatorname{f} := x \\mapsto 2x").evaluate();
 ```
 
-## 0.19.0
-
-**Release Date:** 2023-10-25
+## 0.19.0 _2023-10-25_
 
 ### Breaking Changes
 
@@ -220,7 +220,7 @@ ce.parse("\\operatorname{f} := x \\mapsto 2x").evaluate();
   instead. The `domain` property is still supported for backward compatibility,
   but will be removed in a future version.
 
-### Bug Fixes
+### Issues Resolved
 
 - When invoking a declared function in a numeric operation, correctly infer the
   result type.
@@ -308,11 +308,9 @@ ce.parse("30\\degree)
   JavaScript primitive (`number`, `boolean`, `string`, etc...) when possible.
   This is a more succinct version of `expr.N().valueOf()`.
 
-## 0.18.1
+## 0.18.1 _2023-10-16_
 
-**Release Date:** 2023-10-16
-
-### Bug Fixes
+### Issues Resolved
 
 - Parsing of whole numbers while in `rational` mode would return incorrect
   results.
@@ -329,9 +327,7 @@ ce.parse("\\mathrm{ND}(x \\mapsto 3x^2+5x+7, 2)").N();
 - Speed up `NIntegrate` by temporarily switching the numeric mode to `machine`
   while computing the Monte Carlo approximation.
 
-## 0.18.0
-
-**Release Date:** 2023-10-16
+## 0.18.0 _2023-10-16_
 
 ### New Features
 
@@ -382,9 +378,7 @@ ce.box(["Block", ["Assign", "c", 5], ["Multiply", "c", 2]]).evaluate().json;
 - LaTeX parser: empty superscripts are now ignored, e.g. `4^{}` is interpreted
   as `4`.
 
-## 0.17.0
-
-**Release Date:** 2023-10-12
+## 0.17.0 _2023-10-12_
 
 ### Breaking Changes
 
@@ -421,9 +415,7 @@ ce.box(["Block", ["Assign", "c", 5], ["Multiply", "c", 2]]).evaluate().json;
 - Invoking a function repeatedly would invoke the function in the original scope
   rather than using a new scope for each invocation.
 
-## 0.16.0
-
-**Release Date:** 2023-09-29
+## 0.16.0 _2023-09-29_
 
 ### Breaking Changes
 
@@ -453,12 +445,12 @@ ce.box(["Block", ["Assign", "c", 5], ["Multiply", "c", 2]]).evaluate().json;
 
 - Added `Factorial2` (double factorial)
 
-### Functions
+#### Functions
 
 - Functions can now be defined:
 
   - using `ce.assign()` or `ce.declare()`
-  - evaluating LaTeX: `(x, y) \\mapsto x^2 + y^2`
+  - evaluating LaTeX: `(x, y) \mapsto x^2 + y^2`
   - evaluating MathJSON:
     `["Function", ["Add", ["Power", "x", 2], ["Power", "y", 2]]], "x", "y"]`
 
@@ -472,7 +464,7 @@ See
 [Adding New Definitions](https://cortexjs.io/compute-engine/guides/augmenting/)
 and [Functions](https://cortexjs.io/compute-engine/reference/functions/).
 
-### Control Structures
+#### Control Structures
 
 - Added `FixedPoint`, `Block`, `If`, `Loop`
 - Added `Break`, `Continue` and `Return` statements
@@ -522,17 +514,15 @@ They can be iterated, sliced, filtered, mapped, etc...
 
 ### Improvements
 
-- The documentation at https://cortexjs.io/compute-engine/ has been
+- The [documentation](https://cortexjs.io/compute-engine/) has been
   significantly rewritten with help from an AI-powered writing assistant.
 
-### Bug Fixes
+### Issues Resolved
 
 - The LaTeX string returned in `["Error"]` expression was incorrectly tagged as
   `Latex` instead of `LatexString`.
 
-## 0.15.0
-
-**Release Date:** 2023-09-14
+## 0.15.0 _2023-09-14_
 
 ### Improvements
 
@@ -543,18 +533,16 @@ They can be iterated, sliced, filtered, mapped, etc...
   ce.serialize(["Power", "x", -1], {canonical: false}) returns`x^{-1}`.
 - Improved parsing of delimiters, i.e. `\left(`, `\right]`, etc...
 - Added complex functions `Real`, `Imaginary`, `Arg`, `Conjugate`, `AbsArg`. See
-  https://cortexjs.io/compute-engine/reference/complex/
+  [Complex](https://cortexjs.io/compute-engine/reference/complex/)
 - Added parsing and evaluation of `\Re`, `\Im`, `\arg`, `^\star` (Conjugate).
 - **#104** Added the `["ComplexRoots", x, n]` function which returns the nthroot
   of `x`.
 - Added parsing and evaluation of statistics functions `Mean`, `Median`,
   `StandardDeviation`, `Variance`, `Skewness`, `Kurtosis`, `Quantile`,
   `Quartiles`, `InterquartileRange`, `Mode`, `Count`, `Erf`, `Erfc`. See
-  https://cortexjs.io/compute-engine/reference/statistics/
+  [Statistics](https://cortexjs.io/compute-engine/reference/statistics/)
 
-## 0.14.0
-
-**Release Date:** 2023-09-13
+## 0.14.0 _2023-09-13_
 
 ### Breaking Changes
 
@@ -588,16 +576,17 @@ They can be iterated, sliced, filtered, mapped, etc...
     'Equal', 'NotEqual'
   - Some logical operators and constants: `And`, `Or`, `Not`, `True`, `False`
 
-- More complex identifiers syntax are recognized, including `\\mathbin{}`,
-  `\\mathord{}`, etc... `\\operatorname{}` is the recommended syntax, though: it
+- More complex identifiers syntax are recognized, including `\mathbin{}`,
+  `\mathord{}`, etc... `\operatorname{}` is the recommended syntax, though: it
   will display the identifier in upright font and with the propert spacing, and
-  is properly enclosing. Some commands, such as `\\mathrm{}` are not properly
-  enclosing: two adjacent `\\mathrm{}` command could be merged into one.
+  is properly enclosing. Some commands, such as `\mathrm{}` are not properly
+  enclosing: two adjacent `\mathrm{}` command could be merged into one.
 
 - Environments are now parsed and serialized correctly.
 
 - When parsing LaTeX, function application is properly handled in more cases,
   including custom functions, e.g. `f(x)`
+
 - When parsing LaTeX, multiple arguments are properly handled, e.g. `f(x, y)`
 
 - Add LaTeX syntax for logical operators:
@@ -630,39 +619,33 @@ They can be iterated, sliced, filtered, mapped, etc...
 - Properly handle inverse and derivate notations, e.g. `\sin^{-1}(x)`,
   `\sin'(x)`, `\cos''(x)`, \cos^{(4)}(x)`or even`\sin^{-1}''(x)`
 
-## 0.13.0
-
-**Release Date:** 2023-09-09
+## 0.13.0 _2023-09-09_
 
 ### New Features
 
-- Some expressions can be compiled to Javascript. This is useful to evaluate an
-  expression many times, for example in a loop. The compiled expression is
-  faster to evaluate than the original expression. To get the compiled
-  expression, use `expr.compile()`. Read more at
-  https://cortexjs.io/compute-engine/guides/compiling
+- **Compilation** Some expressions can be compiled to Javascript. This is useful
+  to evaluate an expression many times, for example in a loop. The compiled
+  expression is faster to evaluate than the original expression. To get the
+  compiled expression, use `expr.compile()`. Read more at
+  [Compiling](https://cortexjs.io/compute-engine/guides/compiling)
 
-### Bug Fixes and Improvements
+### Issues Resolved and Improvements
 
 - Fixed parsing and serialization of extended LaTeX synonyms for `e` and `i`.
 - Fixed serialization of `Half`.
 - Fixed serialization of `Which`
 - Improved serialization of `["Delimiter"]` expressions.
 
-## 0.12.7
-
-**Release Date:** 2023-09-08
+## 0.12.7 _2023-09-08_
 
 ### Improvements
 
 - Made customization of the LaTeX dictionary simpler. The `ce.latexDictionary`
-  property can be used to access and modify the dictionary. The documentation at
-  https://cortexjs.io/compute-engine/guides/latex-syntax/#customizing-the-latex-dictionary
+  property can be used to access and modify the dictionary. The
+  [documentation](https://cortexjs.io/compute-engine/guides/latex-syntax/#customizing-the-latex-dictionary)
   has been updated.
 
-## 0.12.6
-
-**Release Date:** 2023-09-08
+## 0.12.6 _2023-09-08_
 
 ### Breaking Changes
 
@@ -684,15 +667,11 @@ They can be iterated, sliced, filtered, mapped, etc...
 - Support complex identifiers (i.e. non-latin scripts, emojis).
 - Fixed serialization of mixed numbers.
 
-## 0.12.1
-
-**Release Date:** 2022-12-01
+## 0.12.1 _2022-12-01_
 
 Work around unpckg.com issue with libraries using BigInt.
 
-## 0.12.0
-
-**Release Date:** 2022-11-27
+## 0.12.0 _2022-11-27_
 
 ### Breaking Changes
 
@@ -709,7 +688,7 @@ Work around unpckg.com issue with libraries using BigInt.
 - Improved accuracy of some operations, for example
   `expr.parse("1e999 + 1").simplify()`
 
-### Bug Fixes
+### Issues Resolved
 
 - When `ce.numericMode === "auto"`, square roots of negative numbers would
   return an expression instead of a complex number.
@@ -723,9 +702,7 @@ Work around unpckg.com issue with libraries using BigInt.
 - Fixed `expr.isLess`, `expr.isGreater`, `expr.isLessEqual`,
   `expr.isGreaterEqual` and `["Min"]`, `["Max"]`
 
-## 0.11.0
-
-**Release Date:** 2022-11-18
+## 0.11.0 _2022-11-18_
 
 ### Breaking Changes
 
@@ -738,7 +715,7 @@ Work around unpckg.com issue with libraries using BigInt.
   precisely controlled. The `hold` symbol attribute is now `holdUntil` and can
   specify at which stage the substitution should take place.
 
-### Bug Fixes
+### Issues Resolved
 
 - Some constants would return a value as bignum or complex even when the
   `numericMode` did not allow it.
@@ -747,16 +724,14 @@ Work around unpckg.com issue with libraries using BigInt.
 - When a symbol does not have a value associated with it, assumptions about it
   (e.g. "x > 0") are now correctly tracked and reflected.
 
-## 0.10.0
-
-**Release Date:** 2022-11-17
+## 0.10.0 _2022-11-17_
 
 ### Breaking Changes
 
 - `expr.isLiteral` has been removed. Use `expr.numericValue !== null` and
   `expr.string !== null` instead.
 
-### Bug Fixes
+### Issues Resolved
 
 - Calling `ce.forget()` would not affect expressions that previously referenced
   the symbol.
@@ -768,9 +743,7 @@ Work around unpckg.com issue with libraries using BigInt.
   when evaluating a simple polynomial in a loop.
 - `ce.strict` can be set to `false` to bypass some domain and validity checks.
 
-## 0.9.0
-
-**Release Date:** 2022-11-15
+## 0.9.0 _2022-11-15_
 
 ### Breaking Changes
 
@@ -864,9 +837,7 @@ Work around unpckg.com issue with libraries using BigInt.
   rendered to LaTeX correctly, e.g. `V20_20`.
 - Correctly return `isReal` for real numbers
 
-## 0.8.0
-
-**Release Date:** 2022-10-02
+## 0.8.0 _2022-10-02_
 
 ### Breaking Changes
 
@@ -887,9 +858,7 @@ Work around unpckg.com issue with libraries using BigInt.
 - Numerical evaluation of expressions containing complex numbers when in
   `decimal` or `auto` mode produced incorrect results. Example: `e^{i\\pi}`
 
-## 0.7.0
-
-**Release Date:** 2022-09-30
+## 0.7.0 _2022-09-30_
 
 ### Breaking Changes
 
@@ -936,9 +905,7 @@ Read more at
 - Evaluating some functions, such as `\arccos` would result in a crash
 - Correctly handle parsing of multi-token decimal markers, e.g. `{,}`
 
-## 0.6.0
-
-**Release Date:** 2022-04-18
+## 0.6.0 _2022-04-18_
 
 ### Improvements
 
@@ -951,9 +918,7 @@ Read more at
   `\mathrm{radius}`
 - Parse/serialize some LaTeX styling commands: `\displaystyle`, `\tiny` and more
 
-## 0.5.0
-
-**Release Date:** 2022-04-05
+## 0.5.0 _2022-04-05_
 
 ### Improvements
 

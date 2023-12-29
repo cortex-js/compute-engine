@@ -1,10 +1,12 @@
+import { Complex } from 'complex.js';
+import { Decimal } from 'decimal.js';
+
 import { BoxedExpression, IComputeEngine, Rational } from '../public';
 
-import { flattenOps } from './flatten';
 import { order } from '../boxed-expression/order';
+import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
 import {
   add,
-  asCoefficient,
   asRational,
   isBigRational,
   isNeg,
@@ -16,11 +18,11 @@ import {
   neg,
   reducedRational,
 } from '../numerics/rationals';
-import { Complex } from 'complex.js';
-import { Decimal } from 'decimal.js';
-import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
 import { bigint } from '../numerics/numeric-bigint';
-import { asExactSqrt, isSqrt } from '../library/arithmetic-power';
+import { asCoefficient } from '../numerics/factor';
+import { asRationalSqrt, isSqrt } from '../library/arithmetic-power';
+
+import { flattenOps } from './flatten';
 
 /**
  * Group terms in a product by common term.
@@ -47,7 +49,7 @@ export class Product {
   private _complex: Complex;
   private _bignum: Decimal;
   private _rational: Rational;
-  private _exactSqrt: Rational; // Exact square root, i.e. √(5/2), √2, but not √(x+1) or √(2.1) or √π
+  private _rationalSqrt: Rational; // Exact square root, i.e. √(5/2), √2, but not √(x+1) or √(2.1) or √π
 
   // Other terms of the product, `term` is the key
   private _terms: {
@@ -73,7 +75,7 @@ export class Product {
     this.engine = ce;
     this._sign = 1;
     this._rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [1, 1];
-    this._exactSqrt = this._rational;
+    this._rationalSqrt = this._rational;
     this._complex = Complex.ONE;
     this._bignum = ce._BIGNUM_ONE;
     this._number = 1;
@@ -93,7 +95,7 @@ export class Product {
       this._complex.im === 0 &&
       this._bignum.eq(this.engine._BIGNUM_ONE) &&
       isRationalOne(this._rational) &&
-      isRationalOne(this._exactSqrt)
+      isRationalOne(this._rationalSqrt)
     );
   }
 
@@ -175,9 +177,9 @@ export class Product {
         }
       }
 
-      const sqrt = asExactSqrt(term);
+      const sqrt = asRationalSqrt(term);
       if (sqrt) {
-        this._exactSqrt = mul(this._exactSqrt, sqrt);
+        this._rationalSqrt = mul(this._rationalSqrt, sqrt);
         return;
       }
     }
@@ -185,13 +187,16 @@ export class Product {
     let rest = term;
     if (this._isCanonical) {
       // If possible, factor out a rational coefficient
-      let coef: Rational;
+      let coef: BoxedExpression;
       [coef, rest] = asCoefficient(term);
-      this._rational = mul(this._rational, coef);
-      if (isNeg(this._rational)) {
-        this._sign *= -1;
-        this._rational = neg(this._rational);
-      }
+      const r = asRational(coef);
+      if (r) {
+        this._rational = mul(this._rational, r);
+        if (isNeg(this._rational)) {
+          this._sign *= -1;
+          this._rational = neg(this._rational);
+        }
+      } else rest = term;
     }
 
     // Note: rest should be positive, so no need to handle the -1 case
@@ -290,10 +295,10 @@ export class Product {
     //
     // Square root of rationals
     //
-    this._exactSqrt = reducedRational(this._exactSqrt);
+    this._rationalSqrt = reducedRational(this._rationalSqrt);
     // Attempt to reduce the square root
-    if (!isRationalOne(this._exactSqrt)) {
-      const [n, d] = this._exactSqrt;
+    if (!isRationalOne(this._rationalSqrt)) {
+      const [n, d] = this._rationalSqrt;
       const num = ce.sqrt(ce.number(n));
       const den = ce.sqrt(ce.number(d));
 
@@ -441,6 +446,8 @@ export class Product {
 
   /** The product, expressed as a numerator and denominator */
   asNumeratorDenominator(): [BoxedExpression, BoxedExpression] {
+    if (this._hasZero) return [this.engine.Zero, this.engine.One];
+    if (this._hasInfinity) return [this.engine.NaN, this.engine.NaN];
     const xs = this.groupedByDegrees({ mode: 'rational' });
     if (xs === null) return [this.engine.NaN, this.engine.NaN];
     const xsNumerator: {

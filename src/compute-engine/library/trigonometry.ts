@@ -8,7 +8,7 @@ import {
 } from '../public';
 import {
   complexAllowed,
-  latexString,
+  asLatexString,
   bignumPreferred,
 } from '../boxed-expression/utils';
 import { Expression } from '../../math-json/math-json-format';
@@ -726,7 +726,7 @@ function constructibleValues(
         Object.fromEntries(
           Object.entries(results).map(([head, r]) => [
             head,
-            ce.parse(latexString(r)) ?? ce.box(r),
+            ce.parse(asLatexString(r)) ?? ce.box(r),
           ])
         ),
       ]);

@@ -318,7 +318,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         },
         evaluate: (ce, ops) => {
           const op1 = ops[0];
-          if (op1?.ops) return ce.fn('Sequence', op1.ops);
+          if (op1?.ops) return ce.box(['Sequence', ...op1.ops]);
           return ce.box(['Sequence']);
         },
       },
@@ -527,7 +527,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           const name = ops[0].symbol;
           if (!name) return ce.Nothing;
           const def = ce.lookupFunction(name);
-          if (!def) return ce.fn('List', []);
+          if (!def) return ce.box(['List']);
           const sig = def.signature;
           const fnParams: BoxedExpression[] = [...sig.params];
           if (sig.optParams.length > 0)
@@ -537,7 +537,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (typeof sig.result === 'function')
             fnParams.push(sig.result(ce, []) ?? ce.symbol('Undefined'));
           else fnParams.push(sig.result);
-          return ce.fn('List', fnParams);
+          return ce.box(['List', ...fnParams]);
         },
       },
     },
@@ -709,7 +709,10 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', ['VarArg', 'Anything'], 'Strings'],
         evaluate: (ce, ops) =>
-          ce.fn('LatexString', [ce.string(joinLatex(ops.map((x) => x.latex)))]),
+          ce.box([
+            'LatexString',
+            ce.string(joinLatex(ops.map((x) => x.latex))),
+          ]),
       },
     },
 

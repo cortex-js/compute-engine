@@ -8,7 +8,7 @@ import {
   BoxedSubstitution,
   PatternConditionFunction,
 } from './public';
-import { latexString } from './boxed-expression/utils';
+import { asLatexString } from './boxed-expression/utils';
 
 /**
  * For each rules in the rule set that match, return the `replace` of the rule
@@ -58,7 +58,7 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
     // Normalize the condition to a function
     let condFn: undefined | PatternConditionFunction;
     if (typeof condition === 'string') {
-      const latex = latexString(condition);
+      const latex = asLatexString(condition);
       if (latex) {
         // Substitute any unbound vars in the condition to a wildcard
         const condPattern = ce.pattern(latex);

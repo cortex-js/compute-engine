@@ -150,7 +150,7 @@ export function evalMultiply(
   //
   for (const op of ops) {
     if (op.isNaN || op.symbol === 'Undefined') return ce.NaN;
-    if (!op.isExact) mode = 'N';
+    if (op.numericValue !== null && !op.isExact) mode = 'N';
   }
   if (!ops.every((x) => x.head !== 'Multiply')) debugger;
   console.assert(ops.every((x) => x.head !== 'Multiply'));

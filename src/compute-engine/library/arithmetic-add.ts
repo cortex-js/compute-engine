@@ -1,8 +1,5 @@
 import { BoxedExpression, BoxedDomain, IComputeEngine } from '../public';
-import {
-  getImaginaryCoef,
-  bignumPreferred as bignumPreferred,
-} from '../boxed-expression/utils';
+import { bignumPreferred } from '../boxed-expression/utils';
 import { Sum } from '../symbolic/sum';
 import { asBignum, asFloat, MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
@@ -15,6 +12,7 @@ import {
   range,
 } from './utils';
 import { each, isIndexableCollection } from '../collection-utils';
+import Complex from 'complex.js';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -108,7 +106,7 @@ export function evalAdd(
   for (const arg of ops) {
     if (arg.isImaginary && arg.isInfinity) return ce.ComplexInfinity;
     if (arg.isNaN || arg.symbol === 'Undefined') return ce.NaN;
-    if (!arg.isExact) mode = 'N';
+    if (arg.numericValue !== null && !arg.isExact) mode = 'N';
   }
 
   if (mode === 'N') ops = ops.map((x) => x.N());
@@ -402,4 +400,36 @@ export function evalSummation(
   ce.swapScope(savedContext);
 
   return result ?? undefined;
+}
+
+/**
+ * Return a multiple of the imaginary unit, e.g.
+ * - 'ImaginaryUnit'  -> 1
+ * - ['Negate', 'ImaginaryUnit']  -> -1
+ * - ['Negate', ['Multiply', 3, 'ImaginaryUnit']] -> -3
+ * - ['Multiply', 5, 'ImaginaryUnit'] -> 5
+ * - ['Multiply', 'ImaginaryUnit', 5] -> 5
+ * - ['Divide', 'ImaginaryUnit', 2] -> 0.5
+ */
+export function getImaginaryCoef(expr: BoxedExpression): number {
+  if (expr.symbol === 'ImaginaryUnit') return 1;
+
+  const z = expr.numericValue;
+  if (z !== null && z instanceof Complex && z.re === 0) return z.im;
+
+  if (expr.head === 'Negate') return -getImaginaryCoef(expr.op1);
+
+  if (expr.head === 'Multiply' && expr.nops === 2) {
+    if (expr.op1.symbol === 'ImaginaryUnit') return asFloat(expr.op2) ?? 0;
+    if (expr.op2.symbol === 'ImaginaryUnit') return asFloat(expr.op1) ?? 0;
+  }
+
+  if (expr.head === 'Divide') {
+    const v = getImaginaryCoef(expr.op1);
+    const denom = asFloat(expr.op2);
+    if (denom === null) return 0;
+    return v / denom;
+  }
+
+  return 0;
 }

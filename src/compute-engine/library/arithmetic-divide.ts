@@ -2,15 +2,14 @@ import { BoxedExpression, IComputeEngine } from '../public';
 import { apply2N, makePositive } from '../symbolic/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import {
-  asCoefficient,
   asRational,
   inverse,
   isBigRational,
   isMachineRational,
-  isRationalOne,
   isRationalZero,
   mul,
 } from '../numerics/rationals';
+import { asCoefficient } from '../numerics/factor';
 import { Product } from '../symbolic/product';
 
 /**
@@ -81,17 +80,30 @@ export function canonicalDivide(
 
   const [c1, t1] = asCoefficient(op1);
   const [c2, t2] = asCoefficient(op2);
-  if (!isRationalOne(c1) || !isRationalOne(c2)) {
-    const [cn, cd] = mul(c1, inverse(c2));
+  if (!c1.isOne || !c2.isOne) {
+    const c = ce.div(c1, c2);
+    const r = asRational(c);
+    if (r) {
+      const [n, d] = r;
+      let [nt, dt] = [ce.mul(ce.number(n), t1), ce.mul(ce.number(d), t2)];
+      if (dt.isNegative) {
+        dt = ce.neg(dt);
+        nt = ce.neg(nt);
+      }
+      if (dt.head === 'Negate') {
+        dt = dt.op1;
+        nt = ce.neg(nt);
+      }
+      if (nt.isZero) return ce.Zero;
+      if (dt.isOne) return nt;
+      return ce._fn('Divide', [nt, dt]);
+    }
 
-    const en = ce.mul(ce.number(cn), t1);
+    const en = ce.mul(c, t1);
     if (en.isZero) return ce.Zero;
-    const ed = ce.mul(ce.number(cd), t2);
-    if (ed.isOne) return en;
-    return ce._fn('Divide', [en, ed]);
+    if (t2.isOne) return en;
+    return ce._fn('Divide', [en, t2]);
   }
-
-  // return ce.mul([ce.number(mul(c1, inverse(c2))), ce.div(t1, t2)]);
 
   // eslint-disable-next-line prefer-const
   let [nSign, n] = makePositive(op1);

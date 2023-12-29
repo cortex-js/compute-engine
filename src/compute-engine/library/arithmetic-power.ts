@@ -256,7 +256,7 @@ export function processPower(
       const r = asRational(op);
       if (r) c = mul(c, r);
       else {
-        const s = asExactSqrt(op);
+        const s = asRationalSqrt(op);
         if (s) sqrt = mul(sqrt, s);
         else xs.push(op);
       }
@@ -373,7 +373,7 @@ export function processPower(
       }
       if (base.isNegative) {
         if (!complexAllowed) return ce.NaN;
-        return ce.mul(ce.I, ce.fn('Sqrt', [ce.neg(base)]));
+        return ce.mul(ce.I, ce.box(['Sqrt', ce.neg(base)]));
       }
       return undefined;
     }
@@ -471,6 +471,9 @@ export function processSqrt(
   return undefined;
 }
 
+/** Return the inverse of `exponent`.
+ * Used to check if a power is a square root or cube root.
+ */
 function rootExp(exponent: BoxedExpression): number | null {
   if (typeof exponent.numericValue === 'number') {
     const inv = 1 / exponent.numericValue;
@@ -494,12 +497,11 @@ function rootExp(exponent: BoxedExpression): number | null {
 
 export function isSqrt(expr: BoxedExpression): boolean {
   return (
-    (expr.head === 'Power' && expr.op2.isEqual(expr.engine.Half)) ||
-    expr.head === 'Sqrt'
+    expr.head === 'Sqrt' || (expr.head === 'Power' && asFloat(expr.op2) === 0.5)
   );
 }
 
-export function asExactSqrt(expr: BoxedExpression): Rational | null {
+export function asRationalSqrt(expr: BoxedExpression): Rational | null {
   if (!isSqrt(expr)) return null;
   return asRational(expr.op1) ?? null;
 }

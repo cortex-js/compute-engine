@@ -399,7 +399,7 @@ function matchArguments(
           if (expr.head === 'Add') value = ce.Zero;
           else if (expr.head === 'Multiply') value = ce.One;
           else value = ce.box(['Sequence']);
-        } else value = ce.fn(expr.head, ops.splice(0, j - 1));
+        } else value = ce.box([expr.head, ...ops.splice(0, j - 1)]);
 
         result = captureWildcard(argName, value, result);
       } else if (argName.startsWith('_')) {

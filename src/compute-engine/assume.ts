@@ -96,7 +96,8 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
     const sols = findUnivariateRoots(proposition, lhs);
     if (sols.length === 0) {
       ce.assumptions.set(
-        ce.fn('Equal', [
+        ce.box([
+          'Equal',
           ce
             .add(proposition.op1.canonical, ce.neg(proposition.op2.canonical))
             .simplify(),
@@ -106,7 +107,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
       );
     }
 
-    const val = sols.length === 1 ? sols[0] : ce.fn('List', sols);
+    const val = sols.length === 1 ? sols[0] : ce.box(['List', ...sols]);
     const def = ce.lookupSymbol(lhs);
     if (!def) {
       ce.defineSymbol(lhs, { value: val, domain: val.domain });

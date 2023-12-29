@@ -8,18 +8,24 @@ N-mach    = 0.09531017980432493
 
 exports[` 2`] = `
 box       = ["Ln", 1]
-N-auto    = 0
+simplify  = 0
 `;
 
 exports[` 3`] = `
 box       = ["Ln", 0]
+simplify  = {num: "NaN"}
 N-auto    = {num: "-Infinity"}
 `;
 
 exports[` 4`] = `
 box       = ["Ln", -1]
+simplify  = ["Multiply", ["Complex", 0, 1], "Pi"]
+evaluate  = ["Multiply", ["Complex", 0, 1], "Pi"]
 N-auto    = ["Complex", 0, 3.141592653589793]
+eval-big  = ["Ln", -1]
 N-big     = {num: "NaN"}
+eval-mach = ["Ln", -1]
+eval-cplx = ["Multiply", ["Complex", 0, 1], "Pi"]
 N-cplx    = ["Complex", 0, 3.141592653589793]
 `;
 
@@ -265,7 +271,7 @@ box       = [
   2,
   4
 ]
-simplify  = ["Add", ["Multiply", 2, ["Sqrt", 5]], "Pi", 3.2, ["Rational", 692, 77]]
+simplify  = ["Add", "Pi", ["Sqrt", 5], ["Sqrt", 5], 3.2, ["Rational", 692, 77]]
 evaluate  = 19.800741595602359644
 eval-mach = 19.80074159560236
 `;
@@ -328,8 +334,7 @@ N-mach    = 2.718281828459045
 
 exports[`CONSTANTS GoldenRatio 1`] = `
 box       = GoldenRatio
-simplify  = ["Add", ["Divide", ["Sqrt", 5], 2], "Half"]
-evaluate  = ["Divide", ["Add", ["Sqrt", 5], 1], 2]
+simplify  = ["Divide", ["Add", ["Sqrt", 5], 1], 2]
 N-auto    = 1.6180339887498948482
 N-mach    = 1.618033988749895
 `;
@@ -893,7 +898,7 @@ N-mach    = 3.141592653589793
 
 exports[`RATIONAL Rational as Divide 1`] = `
 box       = ["Rational", 3.1, 2.8]
-canonical = ["Divide", 3.1, 2.8]
+canonical = 1.1071428571428571429
 evaluate  = 1.1071428571428571429
 eval-mach = 1.1071428571428572
 `;
@@ -1011,9 +1016,7 @@ N-mach    = 0.7254762640277013
 exports[`SQRT √(12345670000000000000000000) 1`] = `
 box       = ["Sqrt", 1.234567e+25]
 simplify  = ["Multiply", 1000000000, ["Sqrt", 12345670]]
-evaluate  = ["Multiply", 1000000000, ["Sqrt", 12345670]]
 N-auto    = 3513640562152.025248
-eval-mach = ["Sqrt", 1.234567e+25]
 N-mach    = 3513640562152.0254
 `;
 

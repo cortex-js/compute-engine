@@ -16,13 +16,13 @@ import {
 import { inferNumericDomain } from '../domain-utils';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { isPrime } from '../numerics/primes';
+import { signDiff } from '../numerics/numeric';
 import {
   isBigRational,
   isRational,
   isRationalNegativeOne,
   isRationalOne,
   reducedRational,
-  signDiff,
 } from '../numerics/rationals';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
@@ -128,13 +128,12 @@ export class BoxedNumber extends _BoxedExpression {
   }
 
   get isExact(): boolean {
-    if (typeof this._value === 'number') return Number.isInteger(this._value);
-    if (this._value instanceof Decimal) return this._value.isInteger();
-    if (this._value instanceof Complex)
-      return (
-        Number.isInteger(this._value.re) && Number.isInteger(this._value.im)
-      );
-    return isRational(this._value);
+    const v = this._value;
+    if (typeof v === 'number') return Number.isInteger(v);
+    if (v instanceof Decimal) return v.isInteger();
+    if (v instanceof Complex)
+      return Number.isInteger(v.re) && Number.isInteger(v.im);
+    return isRational(v);
   }
 
   get isCanonical(): boolean {

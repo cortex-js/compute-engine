@@ -21,6 +21,7 @@ import {
 } from '../symbolic/tensor-fields';
 import { AbstractTensor, TensorData, makeTensor } from '../symbolic/tensors';
 import { _BoxedExpression } from './abstract-boxed-expression';
+import { BoxedFunction } from './boxed-function';
 import { hashCode } from './utils';
 
 /**
@@ -36,11 +37,10 @@ import { hashCode } from './utils';
  *
  */
 export class BoxedTensor extends _BoxedExpression {
-  private readonly _head?: string;
-  private readonly _ops?: BoxedExpression[];
-
   private _tensor: undefined | AbstractTensor<'expression'>;
 
+  private readonly _head?: string;
+  private readonly _ops?: BoxedExpression[];
   private _expression: undefined | BoxedExpression;
 
   constructor(
@@ -63,8 +63,9 @@ export class BoxedTensor extends _BoxedExpression {
       this._head = input.head ?? 'List';
       this._ops = options.canonical ? ce.canonical(input.ops) : input.ops;
 
-      this._expression = ce._fn(this._head, this._ops);
-      this.expression.isCanonical = options.canonical;
+      this._expression = new BoxedFunction(ce, this._head, this._ops, {
+        canonical: options.canonical,
+      });
     }
 
     ce._register(this);
@@ -113,12 +114,17 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   get canonical(): BoxedExpression {
-    return this.expression.canonical;
+    if (this.isCanonical) return this;
+    return new BoxedTensor(
+      this.engine,
+      { head: this._head, ops: this._ops! },
+      { canonical: true }
+    );
   }
 
   get isCanonical(): boolean {
     if (this._tensor) return true;
-    return this.expression.isCanonical;
+    return this._expression!.isCanonical;
   }
 
   set isCanonical(val: boolean) {

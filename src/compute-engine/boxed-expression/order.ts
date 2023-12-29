@@ -196,13 +196,12 @@ export function canonicalOrder(
   { recursive = false }: { recursive?: boolean }
 ): BoxedExpression {
   if (expr.ops) {
-    const ops = recursive
+    let ops = recursive
       ? expr.ops!.map((x) => canonicalOrder(x, { recursive }))
       : expr.ops!;
 
-    if (expr.head === 'Add') return expr.engine._fn('Add', sortAdd(ops));
-
-    return expr.engine._fn(expr.head, ops.sort(order));
+    ops = expr.head === 'Add' ? sortAdd(ops) : ops.sort(order);
+    return expr.engine._fn(expr.head, ops);
   }
   return expr;
 }

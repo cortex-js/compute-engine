@@ -1,6 +1,36 @@
 import Decimal from 'decimal.js';
 import { primeFactors as machinePrimeFactors } from './numeric';
+import { Expression } from '../../math-json.js';
+import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 
+export function bigintValue(
+  expr: Expression | null | undefined
+): bigint | null {
+  if (typeof expr === 'number')
+    return Number.isInteger(expr) ? BigInt(expr) : null;
+
+  if (expr === null || expr === undefined) return null;
+
+  if (!isNumberExpression(expr)) return null;
+
+  const num = isNumberObject(expr) ? expr.num : expr;
+
+  if (typeof num === 'number')
+    return Number.isInteger(num) ? BigInt(num) : null;
+  if (typeof num !== 'string') return null;
+
+  let s = num
+    .toLowerCase()
+    .replace(/[nd]$/, '')
+    .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
+
+  if (s === 'nan') return null;
+  if (s === 'infinity' || s === '+infinity') return null;
+  if (s === '-infinity') return null;
+  if (s.includes('.')) return null;
+
+  return bigint(s);
+}
 export function bigint(a: Decimal | number | bigint | string): bigint {
   if (typeof a === 'bigint') return a;
   if (a instanceof Decimal) return bigint(a.toString());

@@ -66,7 +66,7 @@ describe('expr.solve()', () => {
   test('should solve a simple equation with a variable', () => {
     const e = expr('x - 1 + y = 0');
     const result = e.solve('x')?.map((x) => x.json);
-    expect(result).toEqual([['Subtract', 1, 'y']]);
+    expect(result).toMatchInlineSnapshot(`[["Add", ["Negate", "y"], 1]]`);
   });
 
   test('should solve a simple equation', () => {
@@ -84,10 +84,12 @@ describe('expr.solve()', () => {
   test('should solve an equation with a fractional root', () => {
     const e = expr('x^2 + 2x + \\frac{1}{4} = 0');
     const result = e.solve('x')?.map((x) => x.json);
-    expect(result).toEqual([
-      ['Subtract', ['Divide', ['Sqrt', 3], 2], 1],
-      ['Subtract', ['Multiply', ['Rational', -1, 2], ['Sqrt', 3]], 1],
-    ]);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        ["Divide", ["Subtract", ["Sqrt", 3], 2], 2],
+        ["Subtract", ["Multiply", ["Rational", -1, 2], ["Sqrt", 3]], 1]
+      ]
+    `);
   });
 
   test('should solve an equation with a complex root', () => {

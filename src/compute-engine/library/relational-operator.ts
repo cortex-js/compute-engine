@@ -124,7 +124,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
           if (!arg.isNumber) return undefined;
           if (!lhs) lhs = arg;
           else {
-            const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
+            const test = ce.box(['Subtract', arg, lhs]).N().sgn;
             if (test === null || test === undefined) return undefined;
             if (test <= 0) return ce.False;
             lhs = arg;
@@ -158,7 +158,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
           if (!arg.isNumber) return undefined;
           if (!lhs) lhs = arg;
           else {
-            const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
+            const test = ce.box(['Subtract', arg, lhs]).N().sgn;
             if (test === null || test === undefined) return undefined;
             if (test >= 0) return ce.False;
             lhs = arg;
@@ -190,7 +190,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
           if (!arg.isNumber) return undefined;
           if (!lhs) lhs = arg;
           else {
-            const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
+            const test = ce.box(['Subtract', arg, lhs]).N().sgn;
             if (test === null || test === undefined) return undefined;
             if (test < 0) return ce.False;
             lhs = arg;
@@ -225,7 +225,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
           if (!arg.isNumber) return undefined;
           if (!lhs) lhs = arg;
           else {
-            const test = ce.fn('Subtract', [arg, lhs]).N().sgn;
+            const test = ce.box(['Subtract', arg, lhs]).N().sgn;
             if (test === null || test === undefined) return undefined;
             if (test > 0) return ce.False;
             lhs = arg;

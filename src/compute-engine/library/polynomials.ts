@@ -1,5 +1,6 @@
-import { IdentifierDefinitions } from '../public';
-import { distribute, expand } from '../symbolic/expand';
+import { factor, together } from '../numerics/factor';
+import { BoxedExpression, IdentifierDefinitions } from '../public';
+import { distribute, expand, expandAll } from '../symbolic/expand';
 
 export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
   {
@@ -8,6 +9,29 @@ export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Values', 'Values'],
         evaluate: (_ce, ops) => expand(ops[0]) ?? ops[0],
+      },
+    },
+    ExpandAll: {
+      description:
+        'Recursively expand out products and positive integer powers',
+      signature: {
+        domain: ['FunctionOf', 'Values', 'Values'],
+        evaluate: (_ce, ops) => expandAll(ops[0]) ?? ops[0],
+      },
+    },
+    Factor: {
+      description:
+        'Factors an algebraic expression into a product of irreducible factors',
+      signature: {
+        domain: ['FunctionOf', 'Values', 'Values'],
+        evaluate: (_ce, ops) => factor(ops[0]),
+      },
+    },
+    Together: {
+      description: 'Combine rational expressions into a single fraction',
+      signature: {
+        domain: ['FunctionOf', 'Values', 'Values'],
+        evaluate: (_ce, ops) => together(ops[0]),
       },
     },
     Distribute: {

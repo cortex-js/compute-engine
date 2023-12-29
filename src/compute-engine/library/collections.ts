@@ -379,7 +379,7 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
             const val = def.at(ops[0], i);
             if (val) result.push(val);
           }
-        return ce.fn('List', result);
+        return ce.box(['List', ...result]);
       },
     },
   },
@@ -781,7 +781,7 @@ function take(
       }
     }
   }
-  return ce.fn('List', list);
+  return ce.box(['List', ...list]);
 }
 
 function takeString(

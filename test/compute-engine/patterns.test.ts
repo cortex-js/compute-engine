@@ -47,10 +47,10 @@ describe('PATTERNS  MATCH - Named wildcard', () => {
   });
   test('Associative wildcards', () => {
     expect(match(pattern, ['Add', 2, 1, 3])).toMatchInlineSnapshot(
-      `{__a: "["Add",2,3]"}`
+      `{__a: "Add(2, 3)"}`
     );
     expect(match(pattern, ['Add', 1, ['Add', 2, 3]])).toMatchInlineSnapshot(
-      `{__a: "["Add",2,3]"}`
+      `{__a: "Add(2, 3)"}`
     );
   });
 });
@@ -275,13 +275,13 @@ describe('NON EXACT WILDCARDS', () => {
 
   it('should match a sequence with multiple potential zeros', () => {
     const pattern = ce.pattern(['Add', '_a', ['Multiply', '_a', '_b']]);
-    const result = pattern.match(ce.number(1));
+    const result = pattern.match(ce.One);
     expect(result).toMatchInlineSnapshot(`{_a: 1; _b: 0}`);
   });
 
   it('should match a sequence with multiple potential zeros', () => {
     const pattern = ce.pattern(['Add', '___b', ['Multiply', '_a', '_b']]);
-    const result = pattern.match(ce.number(1));
+    const result = pattern.match(ce.One);
     expect(result).toMatchInlineSnapshot(`{_a: 1; _b: 0; ___b: 1}`);
   });
 });

@@ -201,7 +201,7 @@ export function differentiate(
       const g = exponent;
       const fPrime = differentiate(f, v) ?? ce._fn('D', [f, ce.symbol(v)]);
       const gPrime = differentiate(g, v) ?? ce._fn('D', [g, ce.symbol(v)]);
-      const lnf = ce.fn('Ln', [f]).evaluate();
+      const lnf = ce.box(['Ln', f]).evaluate();
       const term1 = ce.mul(gPrime, lnf);
       const term2 = ce.mul(g, fPrime);
       const term3 = ce.div(term2, f);

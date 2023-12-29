@@ -2,6 +2,7 @@ import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { BoxedExpression } from '../public';
 import { extrapolate } from './richardson';
+import { isRational } from './rationals';
 
 export const MACHINE_PRECISION_BITS = 53;
 export const MACHINE_PRECISION = Math.log10(
@@ -754,4 +755,64 @@ export function fromDigits(
   }
 
   return [value, ''];
+}
+
+/**
+ *
+ * @param lhs
+ * @param rhs
+ * @returns the sign (-1, 0, 1) of the difference between `lhs` and `rhs`
+ */
+export function signDiff(
+  lhs: BoxedExpression,
+  rhs: BoxedExpression,
+  tolerance?: number
+): -1 | 0 | 1 | undefined {
+  if (lhs === rhs) return 0;
+
+  const lhsN = lhs.N();
+  const rhsN = rhs.N();
+
+  const lhsNum = lhsN.numericValue;
+  const rhsNum = rhsN.numericValue;
+
+  if (lhsNum === null || rhsNum === null) {
+    // Couldn't calculate numeric value, use the `sgn` property
+    const lhsS = lhsN.sgn;
+    const rhsS = rhsN.sgn;
+    if (typeof lhsS !== 'number' || typeof rhsS !== 'number') return undefined;
+    if (lhsS === 0 && rhsS === 0) return 0;
+    if (lhsS < 0 && rhsS > 0) return -1;
+    if (lhsS > 0 && rhsS < 0) return +1;
+    return undefined;
+  }
+
+  tolerance ??= lhs.engine.tolerance;
+
+  if (lhsNum instanceof Complex && rhsNum instanceof Complex)
+    return chop(lhsNum.re - rhsNum.re, tolerance) === 0 &&
+      chop(lhsNum.im - rhsNum.im, tolerance) === 0
+      ? 0
+      : undefined;
+
+  if (lhsNum instanceof Complex || rhsNum instanceof Complex) return undefined;
+
+  // In general, it is impossible to always prove equality
+  // (Richardson's theorem) but this works often...
+
+  // At this point, lhsNum and rhsNum are either number or Decimal
+  // (it can't be a rational, because lhs.N() simplifies rationals to number or Decimal)
+  console.assert(!isRational(lhsNum) && !isRational(rhsNum));
+
+  if (typeof lhsNum === 'number' && typeof rhsNum === 'number') {
+    if (chop(rhsNum - lhsNum, tolerance) === 0) return 0;
+    return lhsNum < rhsNum ? -1 : 1;
+  }
+  const ce = lhs.engine;
+  const delta = ce
+    .bignum(rhsNum as number | Decimal)
+    .sub(ce.bignum(lhsNum as number | Decimal));
+
+  if (chop(delta, tolerance) === 0) return 0;
+  return delta.isPos() ? 1 : -1;
 }

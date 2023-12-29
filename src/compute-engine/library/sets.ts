@@ -43,7 +43,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     hold: 'all',
     signature: {
       domain: 'Predicates',
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('Element', args)]),
+      canonical: (ce, args) => ce.box(['Not', ['Element', ...args]]),
     },
   },
   Subset: {
@@ -54,7 +54,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     complexity: 11200,
     signature: {
       domain: 'Predicates',
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('Subset', args)]),
+      canonical: (ce, args) => ce.box(['Not', ['Subset', ...args]]),
     },
   },
   Superset: {
@@ -69,14 +69,14 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     complexity: 11200,
     signature: {
       domain: 'Predicates',
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('Superset', args)]),
+      canonical: (ce, args) => ce.box(['Not', ['Superset', ...args]]),
     },
   },
   NotSupersetEqual: {
     complexity: 11200,
     signature: {
       domain: 'Predicates',
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('SupersetEqual', args)]),
+      canonical: (ce, args) => ce.box(['Not', ['SupersetEqual', ...args]]),
     },
   },
   SubsetEqual: {
@@ -88,7 +88,7 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
     complexity: 11200,
     signature: {
       domain: 'Predicates',
-      canonical: (ce, args) => ce.fn('Not', [ce.fn('SubsetEqual', args)]),
+      canonical: (ce, args) => ce.box(['Not', ['SubsetEqual', ...args]]),
     },
   },
 
