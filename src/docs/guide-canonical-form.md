@@ -199,7 +199,7 @@ form:
 
 The full canonical form of an expression is not always the most convenient
 representation for a given application. For example, if you want to check
-the answers from a quizz, you may want to compare the user input with a
+the answers from a quiz, you may want to compare the user input with a
 canonical form that is closer to the user input.
 
 **To get the non-canonical form**, use `ce.box(expr, { canonical: false })` or

@@ -251,6 +251,66 @@ Read more about [exact calculations and approximate calculations](/compute-engin
 
 {% enddef %}
 
+{% def "Expand" %}
+
+[&quot;**Expand**&quot;, _expression_]{.signature}
+
+Apply the distributive law if the expression is a product or power of sums.
+
+For example: `a(b + c) = ab + ac`
+
+- Expand the terms of the expression if it is a sum or negate.
+- If the expression is a fraction, expand the numerator.
+  
+```json example
+["Expand", ["Power", ["Add", "x", 1], 2]]
+// ➔ ["Add", 1, ["Multiply", 2, "x"], ["Power", "x", 2]]
+```
+
+{% enddef %}
+
+{% def "ExpandAll" %}
+
+[&quot;**ExpandAll**&quot;, _expression_]{.signature}
+
+Expand an expression, recursively.
+
+```json example
+["ExpandAll", ["Power", ["Multiply", ["Add", "x", 1], 3], 2]]
+// ➔ ["Add", 1, ["Multiply", 6, "x"], ["Multiply", 6, ["Power", "x", 2]], ["Power", "x", 3]]
+```
+
+
+{% enddef %}
+
+{% def "Factor" %}
+
+[&quot;**Factor**&quot;, _expression_]{.signature}
+
+Factor an expression.
+
+```json example
+["Factor", ["Add", ["Multiply", 2, "x"], ["Multiply", 2, "y"]]]
+// ➔ ["Multiply", 2, ["Add", "x", "y"]]
+```
+
+{% enddef %}
+
+
+{% def "Together" %}
+
+[&quot;**Together**&quot;, _expression_]{.signature}
+
+Combine the terms of a sum of fractions into a single fraction.
+
+```json example
+["Together", ["Add", ["Divide", 1, 2], ["Divide", 1, 3]]]
+// ➔ ["Divide", 5, 6]
+```
+
+{% enddef %}
+
+
 {% def "Simplify" %}
 
 [&quot;**Simplify**&quot;, _expression_]{.signature}
