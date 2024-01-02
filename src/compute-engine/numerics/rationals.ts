@@ -1,7 +1,8 @@
-import { BoxedExpression, Rational } from '../public';
-
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
+
+import { BoxedExpression, Rational } from '../public';
+
 import { factorPower, gcd } from './numeric';
 import {
   bigint,
@@ -62,13 +63,13 @@ export function inverse(x: [number, number]): [number, number];
 export function inverse(x: [bigint, bigint]): [bigint, bigint];
 export function inverse(x: Rational): Rational;
 export function inverse(x: Rational): Rational {
-  return x[0] < 0 ? ([-x[1], -x[0]] as Rational) : ([x[1], x[0]] as Rational);
+  return (x[0] < 0 ? [-x[1], -x[0]] : [x[1], x[0]]) as Rational;
 }
 
 export function asRational(expr: BoxedExpression): Rational | undefined {
   const num = expr.numericValue;
-  if (num === null) return undefined;
   if (Array.isArray(num)) return num;
+  if (num === null) return undefined;
   if (typeof num === 'number' && Number.isInteger(num)) {
     if (num > 1e9 || num < -1e9) return [bigint(num), BigInt(1)];
     return [num, 1];
@@ -84,7 +85,7 @@ function asMachineRational(r: Rational): [number, number] {
 
 /**
  * Add a literal numeric value to a rational.
- * If the rational is a bignum, this is a hint to do the calculation in bignum
+ * If the rational is a bigint, this is a hint to do the calculation in bigint
  * (no need to check `bignumPreferred()`).
  * @param lhs
  * @param rhs
@@ -183,6 +184,10 @@ export function mul(lhs: Rational, rhs: BoxedExpression | Rational): Rational {
   return lhs;
 }
 
+export function div(lhs: Rational, rhs: Rational): Rational {
+  return mul(lhs, inverse(rhs));
+}
+
 export function pow(r: Rational, exp: number): Rational {
   console.assert(Number.isInteger(exp));
   if (exp === 0) return [1, 1];
@@ -195,6 +200,14 @@ export function pow(r: Rational, exp: number): Rational {
   if (isMachineRational(r)) return [Math.pow(r[0], exp), Math.pow(r[1], exp)];
   const bigexp = bigint(exp);
   return [r[0] ** bigexp, r[1] ** bigexp];
+}
+
+export function sqrt(r: Rational): Rational | undefined {
+  const num = Math.sqrt(Number(r[0]));
+  const den = Math.sqrt(Number(r[1]));
+  if (Number.isInteger(num) && Number.isInteger(den)) return [num, den];
+
+  return undefined;
 }
 
 // export function rationalGcd(lhs: Rational, rhs: Rational): Rational {

@@ -1580,6 +1580,14 @@ export class ComputeEngine implements IComputeEngine {
     return this._cache[cacheName]?.value;
   }
 
+  canonical(xs: SemiBoxedExpression[]): BoxedExpression[] {
+    if (!xs.every((x) => x instanceof _BoxedExpression))
+      return xs.map((x) => this.box(x));
+
+    const bxs = xs as BoxedExpression[];
+    return bxs.every((x) => x.isCanonical) ? bxs : bxs.map((x) => x.canonical);
+  }
+
   /**
    * Return a boxed expression from the input.
    */
@@ -1594,25 +1602,14 @@ export class ComputeEngine implements IComputeEngine {
     return box(this, expr, options);
   }
 
-  canonical(xs: SemiBoxedExpression[]): BoxedExpression[] {
-    if (!xs.every((x) => x instanceof _BoxedExpression))
-      return xs.map((x) => this.box(x));
-
-    const bxs = xs as BoxedExpression[];
-    return bxs.every((x) => x.isCanonical) ? bxs : bxs.map((x) => x.canonical);
-  }
-
-  /**
-   * Return a function expression, but the caller is responsible for making
-   * sure that the arguments are canonical.
-   *
-   * @internal */
-  _fn(
-    head: string | BoxedExpression,
-    ops: BoxedExpression[],
-    metadata?: Metadata
+  function(
+    head: string,
+    ops: SemiBoxedExpression[],
+    options?: { metadata?: Metadata; canonical?: boolean }
   ): BoxedExpression {
-    return new BoxedFunction(this, head, ops, { metadata, canonical: true });
+    options ??= {};
+    if (!('canonical' in options)) options.canonical = true;
+    return boxFunction(this, head, ops, options);
   }
 
   /**
@@ -2012,6 +2009,19 @@ export class ComputeEngine implements IComputeEngine {
 
   pattern(expr: LatexString | SemiBoxedExpression): Pattern {
     return new BoxedPattern(this, expr);
+  }
+
+  /**
+   * Return a function expression, but the caller is responsible for making
+   * sure that the arguments are canonical.
+   *
+   * @internal */
+  _fn(
+    head: string | BoxedExpression,
+    ops: BoxedExpression[],
+    metadata?: Metadata
+  ): BoxedExpression {
+    return new BoxedFunction(this, head, ops, { metadata, canonical: true });
   }
 
   /**

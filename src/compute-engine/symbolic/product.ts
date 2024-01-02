@@ -187,16 +187,13 @@ export class Product {
     let rest = term;
     if (this._isCanonical) {
       // If possible, factor out a rational coefficient
-      let coef: BoxedExpression;
+      let coef: Rational;
       [coef, rest] = asCoefficient(term);
-      const r = asRational(coef);
-      if (r) {
-        this._rational = mul(this._rational, r);
-        if (isNeg(this._rational)) {
-          this._sign *= -1;
-          this._rational = neg(this._rational);
-        }
-      } else rest = term;
+      this._rational = mul(this._rational, coef);
+      if (isNeg(this._rational)) {
+        this._sign *= -1;
+        this._rational = neg(this._rational);
+      }
     }
 
     // Note: rest should be positive, so no need to handle the -1 case

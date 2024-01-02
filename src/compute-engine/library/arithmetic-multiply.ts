@@ -1,11 +1,9 @@
+import { BoxedExpression, IComputeEngine } from '../public';
+
 import { MAX_SYMBOLIC_TERMS, asBignum, asFloat } from '../numerics/numeric';
-import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
-
-import { square } from './arithmetic-power';
-
 import {
   asRational,
   isRationalOne,
@@ -23,6 +21,8 @@ import {
 } from './utils';
 import { each } from '../collection-utils';
 import { order } from '../boxed-expression/order';
+
+import { square } from './arithmetic-power';
 
 /** The canonical form of `Multiply`:
  * - remove `1`
@@ -152,7 +152,6 @@ export function evalMultiply(
     if (op.isNaN || op.symbol === 'Undefined') return ce.NaN;
     if (op.numericValue !== null && !op.isExact) mode = 'N';
   }
-  if (!ops.every((x) => x.head !== 'Multiply')) debugger;
   console.assert(ops.every((x) => x.head !== 'Multiply'));
 
   if (mode === 'N') ops = ops.map((x) => x.N());
@@ -333,7 +332,7 @@ export function evalMultiplication(
           result = undefined;
           break;
         }
-        if (!term.isFinite()) {
+        if (term.isFinite() === false) {
           product = term;
           break;
         }
@@ -465,7 +464,7 @@ export function evalMultiplication(
           for (let i = lower; i <= upper; i++) {
             ce.assign({ [index]: i });
             const term = asBignum(fn.N());
-            if (term === null || !term.isFinite()) {
+            if (term === null || term.isFinite() === false) {
               result = term !== null ? ce.number(term) : undefined;
               break;
             }

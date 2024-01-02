@@ -3,9 +3,11 @@ import { apply2N, makePositive } from '../symbolic/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import {
   asRational,
+  div,
   inverse,
   isBigRational,
   isMachineRational,
+  isRationalOne,
   isRationalZero,
   mul,
 } from '../numerics/rationals';
@@ -80,29 +82,20 @@ export function canonicalDivide(
 
   const [c1, t1] = asCoefficient(op1);
   const [c2, t2] = asCoefficient(op2);
-  if (!c1.isOne || !c2.isOne) {
-    const c = ce.div(c1, c2);
-    const r = asRational(c);
-    if (r) {
-      const [n, d] = r;
-      let [nt, dt] = [ce.mul(ce.number(n), t1), ce.mul(ce.number(d), t2)];
-      if (dt.isNegative) {
-        dt = ce.neg(dt);
-        nt = ce.neg(nt);
-      }
-      if (dt.head === 'Negate') {
-        dt = dt.op1;
-        nt = ce.neg(nt);
-      }
-      if (nt.isZero) return ce.Zero;
-      if (dt.isOne) return nt;
-      return ce._fn('Divide', [nt, dt]);
+  if (!isRationalOne(c1) || !isRationalOne(c2)) {
+    const [n, d] = div(c1, c2);
+    let [nt, dt] = [ce.mul(ce.number(n), t1), ce.mul(ce.number(d), t2)];
+    if (dt.isNegative) {
+      dt = ce.neg(dt);
+      nt = ce.neg(nt);
     }
-
-    const en = ce.mul(c, t1);
-    if (en.isZero) return ce.Zero;
-    if (t2.isOne) return en;
-    return ce._fn('Divide', [en, t2]);
+    if (dt.head === 'Negate') {
+      dt = dt.op1;
+      nt = ce.neg(nt);
+    }
+    if (nt.isZero) return ce.Zero;
+    if (dt.isOne) return nt;
+    return ce._fn('Divide', [nt, dt]);
   }
 
   // eslint-disable-next-line prefer-const

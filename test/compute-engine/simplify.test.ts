@@ -20,10 +20,7 @@ function simplifyExpr(expr: Expression): Expression {
 const exprs: [Expression, Expression][] = [
   [['Add', 'x', 0], 'x'],
   [['Add', 1, 0], 1],
-  [
-    ['Add', 1, 2, 1.0001],
-    ['Add', 1.0001, 3],
-  ],
+  [['Add', 1, 2, 1.0001], 4.0001],
 ];
 
 describe('SIMPLIFY', () => {
@@ -41,9 +38,7 @@ describe('SIMPLIFY', () => {
     ));
 
   test(`1.234 + 5678`, () =>
-    expect(simplifyToJson('1.234 + 5678')).toMatchInlineSnapshot(
-      `["Add", 1.234, 5678]`
-    ));
+    expect(simplifyToJson('1.234 + 5678')).toMatchInlineSnapshot(`5679.234`));
 
   test(`1.234 + 5.678`, () =>
     expect(simplifyToJson('1.234 + 5.678')).toMatchInlineSnapshot(`6.912`));
@@ -76,7 +71,7 @@ describe('SIMPLIFY', () => {
   test(`1234 + 5678  + 1.0000000000001`, () =>
     expect(
       simplifyToJson('1234 + 5678  + 1.0000000000001')
-    ).toMatchInlineSnapshot(`["Add", 1.0000000000001, 6912]`));
+    ).toMatchInlineSnapshot(`6913.0000000000001`));
 
   test(`1e149 + 1e150`, () =>
     expect(simplifyToJson('1e149 + 1e150')).toMatchInlineSnapshot(`1.1e+150`));

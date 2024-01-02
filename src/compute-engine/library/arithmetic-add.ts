@@ -1,9 +1,13 @@
+import Complex from 'complex.js';
+
 import { BoxedExpression, BoxedDomain, IComputeEngine } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
-import { Sum } from '../symbolic/sum';
 import { asBignum, asFloat, MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
+import { each, isIndexableCollection } from '../collection-utils';
+import { Terms } from '../numerics/terms';
+
 import {
   MultiIndexingSet,
   SingleIndexingSet,
@@ -11,8 +15,6 @@ import {
   cartesianProduct,
   range,
 } from './utils';
-import { each, isIndexableCollection } from '../collection-utils';
-import Complex from 'complex.js';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -67,15 +69,26 @@ export function simplifyAdd(
 ): BoxedExpression {
   // console.assert(args.length > 1, `simplifyAdd: not enough args`);
 
-  const sum = new Sum(ce);
+  const terms = new Terms(ce, []);
+
   for (let arg of args) {
     arg = arg.simplify();
     if (arg.isImaginary && arg.isInfinity) return ce.ComplexInfinity;
     if (arg.isNaN || arg.symbol === 'Undefined') return ce.NaN;
-    if (!arg.isZero) sum.addTerm(arg);
+    terms.add(arg);
   }
+  terms.reduceNumbers({ exact: true });
+  return terms.asExpression();
 
-  return sum.asExpression('expression');
+  // const sum = new Sum(ce);
+  // for (let arg of args) {
+  //   arg = arg.simplify();
+  //   if (arg.isImaginary && arg.isInfinity) return ce.ComplexInfinity;
+  //   if (arg.isNaN || arg.symbol === 'Undefined') return ce.NaN;
+  //   if (!arg.isZero) sum.addTerm(arg);
+  // }
+
+  // return sum.asExpression('expression');
 }
 
 function evalAddNum(ops: BoxedExpression[]): number | null {
@@ -111,7 +124,14 @@ export function evalAdd(
 
   if (mode === 'N') ops = ops.map((x) => x.N());
   else ops = ops.map((x) => x.evaluate());
-  return new Sum(ce, ops).asExpression(mode === 'N' ? 'numeric' : 'expression');
+
+  const terms = new Terms(ce, ops);
+  if (mode === 'N') terms.reduceNumbers();
+  else terms.reduceNumbers({ exact: true });
+
+  return terms.asExpression();
+
+  // return new Sum(ce, ops).asExpression(mode === 'N' ? 'numeric' : 'expression');
 }
 
 export function canonicalSummation(
@@ -178,7 +198,7 @@ export function evalSummation(
           result = undefined;
           break;
         }
-        if (!term.isFinite()) {
+        if (term.isFinite() === false) {
           sum = term;
           break;
         }
@@ -324,7 +344,7 @@ export function evalSummation(
               result = undefined;
               break;
             }
-            if (!term.isFinite()) {
+            if (term.isFinite() === false) {
               sum = term;
               break;
             }

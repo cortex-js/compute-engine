@@ -1,15 +1,23 @@
 import Complex from 'complex.js';
-import { asRationalSqrt } from '../library/arithmetic-power';
+import Decimal from 'decimal.js';
+
 import { BoxedExpression, IComputeEngine, Rational } from '../public';
 import { isRelationalOperator } from '../latex-syntax/dictionary/definitions-relational-operators';
 import {
   asRational,
+  inverse,
+  isBigRational,
+  isRational,
   isRationalInteger,
+  isRationalNegativeOne,
   isRationalOne,
+  isRationalZero,
   machineNumerator,
   mul,
+  neg,
   pow,
   reduceRationalSquareRoot,
+  sqrt,
 } from './rationals';
 import { asFloat, gcd } from './numeric';
 
@@ -31,7 +39,7 @@ import { asFloat, gcd } from './numeric';
  */
 export function asCoefficient(
   expr: BoxedExpression
-): [coef: BoxedExpression, rest: BoxedExpression] {
+): [coef: Rational, rest: BoxedExpression] {
   console.assert(expr.isCanonical);
 
   const ce = expr.engine;
@@ -41,14 +49,14 @@ export function asCoefficient(
   //
   if (expr.head === 'Multiply') {
     const rest: BoxedExpression[] = [];
-    let coef = ce.One;
+    let coef: Rational = [1, 1];
     for (const arg of expr.ops!) {
-      if (arg.numericValue !== null || asRationalSqrt(arg) != null)
-        coef = ce.mul(coef, arg);
+      const r = asRational(arg);
+      if (r) coef = mul(coef, r);
       else rest.push(arg);
     }
 
-    if (coef.isOne) return [coef, expr];
+    if (isRationalOne(coef)) return [coef, expr];
     return [coef, ce.mul(...rest)];
   }
 
@@ -60,12 +68,10 @@ export function asCoefficient(
     const [coef1, numer] = asCoefficient(expr.op1);
     const [coef2, denom] = asCoefficient(expr.op2);
 
-    if (numer.isOne && denom.isOne) return [expr, ce.One];
-
-    const coef = ce.div(coef1, coef2);
+    const coef = mul(coef1, inverse(coef2));
 
     if (denom.isOne) return [coef, numer];
-    if (coef.isOne) return [coef, expr];
+    if (isRationalOne(coef)) return [coef, expr];
     return [coef, ce.div(numer, denom)];
   }
 
@@ -74,27 +80,30 @@ export function asCoefficient(
   //
   if (expr.head === 'Power') {
     // We can only extract a coef if the exponent is a literal
-    if (expr.op2.numericValue === null) return [ce.One, expr];
+    if (expr.op2.numericValue === null) return [[1, 1], expr];
 
     // eslint-disable-next-line prefer-const
     let [coef, base] = asCoefficient(expr.op1);
-    if (coef.isOne) return [ce.One, expr];
+    if (isRationalOne(coef)) return [coef, expr];
 
-    const exponent = expr.op2;
+    const exponent = asFloat(expr.op2);
+    if (typeof exponent === 'number' && Number.isInteger(exponent))
+      return [pow(coef, exponent), ce.pow(base, expr.op2)];
 
-    return [ce.pow(coef, exponent), ce.pow(base, exponent)];
+    return [[1, 1], expr];
   }
 
   if (expr.head === 'Sqrt') {
     const [coef, rest] = asCoefficient(expr.op1);
-    return [ce.sqrt(coef), ce.sqrt(rest)];
+    let sqrtCoef = sqrt(coef);
+    return sqrtCoef ? [sqrtCoef, ce.sqrt(rest)] : [[1, 1], expr];
   }
 
   //
   // Add
   //
   if (expr.head === 'Add') {
-    // @todo
+    // @todo: use factor() to factor out common factors
   }
 
   //
@@ -102,7 +111,7 @@ export function asCoefficient(
   //
   if (expr.head === 'Negate') {
     const [coef, rest] = asCoefficient(expr.op1);
-    return [ce.neg(coef), rest];
+    return [neg(coef), rest];
   }
 
   // @todo:  could consider others.. `Ln`, `Abs`, trig functions
@@ -110,16 +119,63 @@ export function asCoefficient(
   //
   // Literal
   //
-  const n = expr.numericValue;
-  if (n !== null) {
-    // Make the part positive if the real part is negative
-    if (n instanceof Complex && n.re < 0)
-      return [ce.NegativeOne, ce.number(ce.complex(-n.re, -n.im))];
 
-    return [expr, ce.One];
+  // Make the part positive if the real part is negative
+  const z = expr.numericValue;
+  if (z instanceof Complex && z.re < 0)
+    return [[-1, 1], ce.number(ce.complex(-z.re, -z.im))];
+
+  const r = asRational(expr);
+  return r ? [r, ce.One] : [[1, 1], expr];
+}
+
+export function applyCoefficient(
+  value: number | Decimal | Complex | Rational | null,
+  coef: Rational
+): number | Decimal | Complex | Rational | null {
+  if (isRationalOne(coef)) return value;
+  if (isRationalZero(coef)) return 0;
+  if (value === null) return null;
+  if (isRationalNegativeOne(coef)) {
+    if (typeof value === 'number') return -value;
+    if (value instanceof Decimal) return value.neg();
+    if (value instanceof Complex) return value.neg();
+    return neg(value);
   }
 
-  return [ce.One, expr];
+  if (isRational(value)) return mul(value, coef);
+
+  if (isBigRational(coef)) {
+    const [n, d]: [bigint, bigint] = coef;
+    if (typeof value === 'number') {
+      if (Number.isInteger(value))
+        return [BigInt(value) * n, BigInt(value) * d] as Rational;
+      return new Decimal(value).mul(n.toString()).div(d.toString());
+    }
+    if (value instanceof Decimal) {
+      const [nd, dd] = [new Decimal(n.toString()), new Decimal(d.toString())];
+      if (value.isInteger()) {
+        if (d === BigInt(1)) return value.mul(nd);
+        return [BigInt(value.mul(nd).toString()), d] as Rational;
+      }
+      return value.mul(nd).div(dd);
+    }
+    if (value instanceof Complex) return value.mul(Number(n)).div(Number(d));
+  } else {
+    const [n, d] = coef;
+
+    if (typeof value === 'number') {
+      if (Number.isInteger(value)) return [value * n, d] as Rational;
+      return (value * n) / d;
+    }
+    if (value instanceof Decimal) {
+      if (value.isInteger())
+        return [BigInt(value.mul(n).toString()), BigInt(d)] as Rational;
+      return value.mul(n).div(d);
+    }
+    if (value instanceof Complex) return value.mul(n).div(d);
+  }
+  return null;
 }
 
 /** Combine rational expressions into a single fraction */
@@ -129,7 +185,7 @@ export function together(op: BoxedExpression): BoxedExpression {
 
   // Thread over inequality
   if (isRelationalOperator(h))
-    return ce._fn(h, [together(op.ops![0]), together(op.ops![1])]);
+    return ce.function(h, [together(op.ops![0]), together(op.ops![1])]);
 
   if (h === 'Divide') return ce.div(op.ops![0], op.ops![1]);
   if (h === 'Add') {
@@ -209,7 +265,7 @@ export function factor(expr: BoxedExpression): BoxedExpression {
       lhs.div(common);
       rhs.div(common);
     }
-    return expr.engine._fn(h, [lhs.asExpression(), rhs.asExpression()]);
+    return expr.engine.function(h, [lhs.asExpression(), rhs.asExpression()]);
   }
 
   if (h === 'Add') {

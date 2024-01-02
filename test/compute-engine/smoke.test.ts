@@ -38,11 +38,9 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-console.log(ce.parse('\\sqrt{4x}').evaluate().json);
-
-const expr1 = engine.parse('2(13.1x+1)');
-const expr2 = engine.parse('26.2x+2');
-console.log('expr1 is equal to expr2: ', expr1.isEqual(expr2));
+const expr5 = engine.parse('x^{3}+3.1x^{3}+x^3');
+console.log(expr5.N().latex);
+console.log(ce.box(['Factor', expr5.N()]).evaluate().latex);
 
 ce.assign('A', ce.box(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]));
 ce.assign(
@@ -359,7 +357,7 @@ describe('PARSING numbers', () => {
     ));
 
   test(`-5-2-3 (non-canonical)`, () =>
-    expect(parse('-5-2-3')).toMatchInlineSnapshot(`["Add", -5, -2, -3]`));
+    expect(parse('-5-2-3')).toMatchInlineSnapshot(`["Add", -5, -3, -2]`));
 
   test(`5+3+2 (non-canonical)`, () =>
     expect(parseToJson('5+3+2')).toMatchObject(['Add', 5, 3, 2]));
@@ -755,9 +753,9 @@ describe('SIMPLIFICATION sqrt', () => {
       [
         "Divide",
         [
-          "Subtract",
-          ["Sqrt", ["Add", ["Multiply", 2, ["Sqrt", 3]], 4]],
-          ["Sqrt", ["Add", ["Multiply", 10, ["Sqrt", 3]], 28]]
+          "Add",
+          ["Negate", ["Sqrt", ["Add", ["Multiply", 10, ["Sqrt", 3]], 28]]],
+          ["Sqrt", ["Add", ["Multiply", 2, ["Sqrt", 3]], 4]]
         ],
         15
       ]

@@ -5,7 +5,7 @@ describe('COMPILE', () => {
     it('should compile (and simplify) a simple expression', () => {
       expect(
         ce.parse('3.45 + \\frac57').compile()?.toString()
-      ).toMatchInlineSnapshot(`0.7142857142857143 + 3.45`);
+      ).toMatchInlineSnapshot(`4.164285714285715`);
     });
 
     it('should compile an expression with a constant', () => {

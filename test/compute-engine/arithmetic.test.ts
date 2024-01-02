@@ -100,6 +100,19 @@ describe('ADD', () => {
 
   test(`Add ['Add', 2.5, -1.1]`, () =>
     expect(ce.box(['Add', 2.5, -1.1]).evaluate()).toMatchSnapshot());
+
+  test(`Add ['Add', 4, -1.1]`, () =>
+    expect(ce.box(['Add', 4, -1.1]).evaluate()).toMatchSnapshot());
+
+  test(`Add \\sqrt{3}+2\\sqrt{3}`, () =>
+    expect(ce.parse('\\sqrt{3}+2\\sqrt{3}').evaluate()).toMatchSnapshot());
+
+  test(`Add 8+\\sqrt{3}`, () =>
+    expect(ce.parse('8+\\sqrt{3}').evaluate()).toMatchSnapshot());
+
+  test(`Add 8.1+\\sqrt{3}`, () =>
+    expect(ce.parse('8.1+\\sqrt{3}').evaluate()).toMatchSnapshot());
+
   test(`Add ['Add', 2.5, -1.1, 18.4]`, () =>
     expect(ce.box(['Add', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 
@@ -700,5 +713,5 @@ describe('FACTOR', () => {
         .box(['Factor', ce.parse('\\sqrt{3}x+2\\sqrt{3}x')])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`Multiply(x, Add(Multiply(2, Sqrt(3)), Sqrt(3)))`));
+    ).toMatchInlineSnapshot(`Multiply(x, 3, Sqrt(3))`));
 });

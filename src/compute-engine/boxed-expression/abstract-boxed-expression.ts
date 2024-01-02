@@ -144,6 +144,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.isSame(this.engine.box(rhs));
   }
 
+  get canonical(): BoxedExpression {
+    return this;
+  }
+
   get latex(): LatexString {
     return this._latex ?? this.engine.serialize(this);
   }
@@ -232,27 +236,6 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  get canonical(): BoxedExpression {
-    return this;
-  }
-
-  subs(_sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
-    if (options?.canonical) return this.canonical;
-    return this;
-  }
-
-  solve(_vars: Iterable<string>): null | BoxedExpression[] {
-    return null;
-  }
-
-  replace(_rules: BoxedRuleSet): null | BoxedExpression {
-    return null;
-  }
-
-  has(_v: string | string[]): boolean {
-    return false;
-  }
-
   get isNaN(): boolean | undefined {
     return undefined;
   }
@@ -260,6 +243,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
   get isZero(): boolean | undefined {
     return undefined;
   }
+
   get isNotZero(): boolean | undefined {
     return undefined;
   }
@@ -301,6 +285,10 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
+  get sgn(): -1 | 0 | 1 | undefined | null {
+    return null;
+  }
+
   get shape(): number[] {
     return [];
   }
@@ -309,8 +297,21 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return 0;
   }
 
-  get sgn(): -1 | 0 | 1 | undefined | null {
+  subs(_sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
+    if (options?.canonical) return this.canonical;
+    return this;
+  }
+
+  solve(_vars: Iterable<string>): null | BoxedExpression[] {
     return null;
+  }
+
+  replace(_rules: BoxedRuleSet): null | BoxedExpression {
+    return null;
+  }
+
+  has(_v: string | string[]): boolean {
+    return false;
   }
 
   isLess(_rhs: BoxedExpression): boolean | undefined {

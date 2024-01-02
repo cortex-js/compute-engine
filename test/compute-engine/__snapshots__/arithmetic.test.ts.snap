@@ -271,7 +271,7 @@ box       = [
   2,
   4
 ]
-simplify  = ["Add", "Pi", ["Sqrt", 5], ["Sqrt", 5], 3.2, ["Rational", 692, 77]]
+simplify  = ["Add", ["Multiply", 2, ["Sqrt", 5]], "Pi", "12.187012987012987013"]
 evaluate  = 19.800741595602359644
 eval-mach = 19.80074159560236
 `;
@@ -304,6 +304,8 @@ exports[`ADD Add ['Add', 2.5, -1.1] 1`] = `1.4`;
 
 exports[`ADD Add ['Add', 2.5] 1`] = `2.5`;
 
+exports[`ADD Add ['Add', 4, -1.1] 1`] = `2.9`;
+
 exports[`ADD Add ['Add'] 1`] = `0`;
 
 exports[`ADD Add \\frac{2}{-3222233}+\\frac{1}{3} 1`] = `
@@ -313,6 +315,12 @@ simplify  = ["Rational", 3222227, 9666699]
 N-auto    = 0.33333271264575425386
 N-mach    = 0.33333271264575426
 `;
+
+exports[`ADD Add \\sqrt{3}+2\\sqrt{3} 1`] = `["Multiply", 3, ["Sqrt", 3]]`;
+
+exports[`ADD Add 8+\\sqrt{3} 1`] = `["Add", ["Sqrt", 3], 8]`;
+
+exports[`ADD Add 8.1+\\sqrt{3} 1`] = `9.8320508075688772935`;
 
 exports[`CONSTANTS CatalanConstant 1`] = `
 box       = CatalanConstant
@@ -412,7 +420,7 @@ box       = [
   2,
   5
 ]
-simplify  = ["Add", "Pi", ["Sqrt", 2], 1.1, ["Rational", 535, 63]]
+simplify  = ["Add", "Pi", ["Sqrt", 2], "9.5920634920634920635"]
 evaluate  = 14.147869708026380351
 eval-mach = 14.14786970802638
 `;
@@ -898,7 +906,7 @@ N-mach    = 3.141592653589793
 
 exports[`RATIONAL Rational as Divide 1`] = `
 box       = ["Rational", 3.1, 2.8]
-canonical = 1.1071428571428571429
+canonical = ["Divide", 3.1, 2.8]
 evaluate  = 1.1071428571428571429
 eval-mach = 1.1071428571428572
 `;

@@ -1,6 +1,8 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
+
 import { BoxedExpression } from '../public';
+
 import { extrapolate } from './richardson';
 import { isRational } from './rationals';
 
@@ -206,6 +208,7 @@ export function factorPower(
   exponent: number
 ): [factor: number, root: number] {
   if (n >= Number.MAX_SAFE_INTEGER) return [1, n];
+  if (n === 0) return [0, 0];
   // @todo: handle negative n
   console.assert(Number.isInteger(n) && n > 0 && n < Number.MAX_SAFE_INTEGER);
   const factors = primeFactors(n);

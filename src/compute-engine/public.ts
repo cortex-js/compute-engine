@@ -2183,10 +2183,9 @@ export interface IComputeEngine {
   chop(n: number | Decimal | Complex): number | Decimal | Complex;
 
   bignum: (a: Decimal.Value | bigint) => Decimal;
+  isBignum(a: unknown): a is Decimal;
 
   complex: (a: number | Complex, b?: number) => Complex;
-
-  isBignum(a: unknown): a is Decimal;
   isComplex(a: unknown): a is Complex;
 
   set precision(p: number | 'machine');
@@ -2194,27 +2193,18 @@ export interface IComputeEngine {
 
   costFunction: (expr: BoxedExpression) => number;
 
+  /** In strict mode the compute engine performs additional checks,
+   * for example to ensure the correct number and domain of arguments. These
+   * checks may impact performance.
+   */
   strict: boolean;
 
-  /* @internal */
-  defineSymbol(name: string, def: SymbolDefinition): BoxedSymbolDefinition;
+  /** Return a canonical version of an array of semi-boxed-expressions. */
+  canonical(xs: SemiBoxedExpression[]): BoxedExpression[];
 
-  defineFunction(
-    name: string,
-    def: FunctionDefinition
-  ): BoxedFunctionDefinition;
-
-  lookupSymbol(
-    name: string,
-    wikidata?: string,
-    scope?: RuntimeScope
-  ): undefined | BoxedSymbolDefinition;
-
-  lookupFunction(
-    head: string | BoxedExpression,
-    scope?: RuntimeScope | null
-  ): undefined | BoxedFunctionDefinition;
-
+  /** Return as boxed expression from a number, string or semiboxed expression.
+   * Calls `function()`, `number()` or `symbol()` as appropriate.
+   */
   box(
     expr:
       | Decimal
@@ -2224,7 +2214,11 @@ export interface IComputeEngine {
     options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
   ): BoxedExpression;
 
-  canonical(xs: SemiBoxedExpression[]): BoxedExpression[];
+  function(
+    head: string | BoxedExpression,
+    ops: SemiBoxedExpression[],
+    options?: { metadata?: Metadata; canonical?: boolean }
+  ): BoxedExpression;
 
   number(
     value:
@@ -2249,24 +2243,6 @@ export interface IComputeEngine {
     domain: BoxedDomain | DomainExpression,
     metadata?: Metadata
   ): BoxedDomain;
-
-  /**
-   * This is a primitive to create a boxed function. It doesn't perform
-   * any checks or normalization on its arguments.
-   *
-   * In general, consider using `ce.box()` instead.
-   *
-   * The result is canonical, but the caller has to ensure that all the
-   * conditions are met (i.e. `ops` properly normalized and sorted, all
-   * `ops` canonical, etc..) so that the result is actually canonical.
-   *
-   * @internal
-   */
-  _fn(
-    head: string | BoxedExpression,
-    ops: BoxedExpression[],
-    metadata?: Metadata
-  ): BoxedExpression;
 
   error(
     message: string | [string, ...SemiBoxedExpression[]],
@@ -2315,6 +2291,24 @@ export interface IComputeEngine {
   rules(rules: Rule[]): BoxedRuleSet;
   pattern(expr: LatexString | SemiBoxedExpression): Pattern;
 
+  /**
+   * This is a primitive to create a boxed function.
+   *
+   * In general, consider using `ce.box()` or `canonicalXXX()` instead.
+   *
+   * The caller must ensure that the arguments are in canonical form:
+   * - arguments are `canonical()`
+   * - arguments are sorted
+   * - arguments are flattened and desequenced
+   *
+   * @internal
+   */
+  _fn(
+    head: string | BoxedExpression,
+    ops: BoxedExpression[],
+    metadata?: Metadata
+  ): BoxedExpression;
+
   parse(
     s: LatexString | string,
     options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
@@ -2352,6 +2346,22 @@ export interface IComputeEngine {
   swapScope(scope: RuntimeScope | null): RuntimeScope | null;
 
   resetContext(): void;
+
+  defineSymbol(name: string, def: SymbolDefinition): BoxedSymbolDefinition;
+  lookupSymbol(
+    name: string,
+    wikidata?: string,
+    scope?: RuntimeScope
+  ): undefined | BoxedSymbolDefinition;
+
+  defineFunction(
+    name: string,
+    def: FunctionDefinition
+  ): BoxedFunctionDefinition;
+  lookupFunction(
+    head: string | BoxedExpression,
+    scope?: RuntimeScope | null
+  ): undefined | BoxedFunctionDefinition;
 
   assign(ids: { [id: string]: AssignValue }): IComputeEngine;
   assign(id: string, value: AssignValue): IComputeEngine;
@@ -2407,6 +2417,7 @@ export interface IComputeEngine {
   /** @internal */
   cache<T>(name: string, build: () => T, purge?: (T) => T | undefined): T;
 
+  /** @internal */
   readonly stats: ComputeEngineStats;
 
   /** @internal */
