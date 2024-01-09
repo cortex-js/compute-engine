@@ -1,3 +1,10 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- Using a custom canonical order of `"Multiply"` would not distribute the
+  `Negate` function.
+
 ## 0.23.0 _2024-01-01_
 
 ### New Features
