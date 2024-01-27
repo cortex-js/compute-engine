@@ -68,7 +68,7 @@ function flattenForm(expr: BoxedExpression) {
   let ops = expr.ops.map(flattenForm);
 
   //
-  // Flatter any delimiters
+  // Flatten any delimiters
   //
   if (expr.head === 'Delimiter')
     ops = [flattenDelimiter(expr.engine, expr.op1)];
@@ -77,12 +77,12 @@ function flattenForm(expr: BoxedExpression) {
   // Now, flatten any associative function
   //
   const ce = expr.engine;
-  let isCommutative = expr.head === 'Add' || expr.head === 'Multiply';
-  if (!isCommutative) {
+  let isAssociative = expr.head === 'Add' || expr.head === 'Multiply';
+  if (!isAssociative) {
     const def = ce.lookupFunction(expr.head);
-    if (def?.commutative) isCommutative = true;
+    if (def?.associative) isAssociative = true;
   }
-  if (isCommutative && typeof expr.head === 'string')
+  if (isAssociative && typeof expr.head === 'string')
     expr = ce._fn(expr.head, flattenOps(ops, expr.head));
 
   return expr;

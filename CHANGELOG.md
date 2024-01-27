@@ -4,6 +4,8 @@
 
 - Using a custom canonical order of `"Multiply"` would not distribute the
   `Negate` function.
+- **#141** The canonical form `"Order"` was applied to non-commutative
+  functions.
 
 ## 0.23.0 _2024-01-01_
 
