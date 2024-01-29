@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- Fix parsing of very deeply nested expressions.
+
 ## 0.23.1 _2024-01-27_
 
 ### Issues Resolved
