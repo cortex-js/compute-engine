@@ -42,17 +42,10 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-const expr = '\\frac{3}{2}';
-const parsedExpr = ce.parse(expr, { canonical: ['Order'] });
+const expr =
+  'x=\\frac{-b\\pm\\sqrt{b^{2\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\placeholder{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}-4ac}}{2a}';
+const parsedExpr = ce.parse(expr);
 console.log(parsedExpr.latex.toString());
-
-ce.declare('h', 'Numbers');
-const expectedAnswer = ce.parse('h\\left(3x^2+1\\right)');
-const studentInput = '3x^2h+h';
-const input = ce.parse(studentInput);
-console.log(expectedAnswer.rawJson);
-console.log(input.rawJson);
-console.log(input.isEqual(expectedAnswer));
 
 const expr5 = engine.parse('x^{3}+3.1x^{3}+x^3');
 console.log(expr5.N().latex);

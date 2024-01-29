@@ -160,7 +160,16 @@ export class _Parser implements Parser {
   readonly computeEngine: IComputeEngine;
   readonly options: NumberFormattingOptions & ParseLatexOptions;
 
-  index = 0;
+  _index = 0;
+
+  get index(): number {
+    return this._index;
+  }
+  set index(val: number) {
+    this._index = val;
+    this._lastPeek = '';
+    this._peekCounter = 0;
+  }
 
   private _tokens: LatexToken[];
 

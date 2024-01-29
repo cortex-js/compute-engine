@@ -675,8 +675,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         im === 1
           ? '\\imaginaryI'
           : im === -1
-          ? '-\\imaginaryI'
-          : joinLatex([serializer.serialize(op(expr, 2)), '\\imaginaryI']);
+            ? '-\\imaginaryI'
+            : joinLatex([serializer.serialize(op(expr, 2)), '\\imaginaryI']);
 
       const re = machineValue(op(expr, 1));
       if (re === 0) return imPart;
