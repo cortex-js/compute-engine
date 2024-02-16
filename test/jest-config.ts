@@ -66,6 +66,9 @@ function formatStackTrace(s: string): string {
   return RESET + lines.filter((line) => line.length > 0).join('\n') + RESET;
 }
 
+/**
+ * @noInheritDoc
+ */
 class CortexConsole extends CustomConsole {
   constructor(stdout, stderr, formatBuffer = (_type, message) => message) {
     super(stdout, stderr, formatBuffer);

@@ -94,9 +94,8 @@
 
 - Linear algebra functions: `Rank`, `Shape`,`Reshape`, `Flatten`, `Determinant`,
   `Trace`, `Transpose`, `ConjugateTranspose`, `Inverse`. See the
-  [Linear Algebra](https://cortexjs.io/compute-engine/reference/linear-algebra/)
-  reference guide. Some of these function may not yet return correct result in
-  all cases.
+  [Linear Algebra](/compute-engine/reference/linear-algebra/) reference guide.
+  Some of these function may not yet return correct result in all cases.
 
 ### New Features
 
@@ -152,11 +151,11 @@ ce.box(["CanonicalOrder", ["Add", 1, "x"]]).isSame(
 
 - Fixed numerical evaluation of integrals and limits when parsed from LaTeX.
 
-```json
-console.info(ce.parse('\\lim_{x \\to 0} \\frac{\\sin(x)}{x}').value);
+```js
+console.info(ce.parse("\\lim_{x \\to 0} \\frac{\\sin(x)}{x}").value);
 // -> 1
 
-console.info(ce.parse('\\int_{0}^{2} x^2 dx').value);
+console.info(ce.parse("\\int_{0}^{2} x^2 dx").value);
 // -> 2.6666666666666665
 ```
 
@@ -314,7 +313,7 @@ return type.
 
 - Improved parsing of `\degree` command
 
-```json
+```js
 ce.parse("30\\degree)
 // -> ["Divide", "Pi", 6]
 ```
@@ -1088,18 +1087,18 @@ console.log(expr.isEqual(ce.box(2)));
 
 ### Before / After
 
-| Before                                    | After                                   |
-| :---------------------------------------- | :-------------------------------------- |
-| `expr = ["Add", 1, 2]`                    | `expr = ce.box(["Add", 1, 2])`          |
-| `expr = ce.evaluate(expr)`                | `expr = expr.evaluate()`                |
-| `console.log(expr)`                       | `console.log(expr.json)`                |
-| `expr = new LatexSyntax().parse("x^2+1")` | `expr = ce.parse("x^2+1")`              |
-| `new LatexSyntax().serialize(expr)`       | `expr.latex`                            |
-| `ce.simplify(expr)`                       | `expr.simplify()`                       |
-| `await ce.evaluate(expr)`                 | `expr.evaluate()`                       |
-| `ce.N(expr)`                              | `expr.N()`                              |
-| `ce.domain(expr)`                         | `expr.domain`                           |
-| `ce.format(expr...)`                      | `expr.canonical` <br> `expr.simplify()` |
+| Before                                    | After                                    |
+| :---------------------------------------- | :--------------------------------------- |
+| `expr = ["Add", 1, 2]`                    | `expr = ce.box(["Add", 1, 2])`           |
+| `expr = ce.evaluate(expr)`                | `expr = expr.evaluate()`                 |
+| `console.log(expr)`                       | `console.log(expr.json)`                 |
+| `expr = new LatexSyntax().parse("x^2+1")` | `expr = ce.parse("x^2+1")`               |
+| `new LatexSyntax().serialize(expr)`       | `expr.latex`                             |
+| `ce.simplify(expr)`                       | `expr.simplify()`                        |
+| `await ce.evaluate(expr)`                 | `expr.evaluate()`                        |
+| `ce.N(expr)`                              | `expr.N()`                               |
+| `ce.domain(expr)`                         | `expr.domain`                            |
+| `ce.format(expr...)`                      | `expr.canonical` <br/> `expr.simplify()` |
 
 ## 0.3.0
 

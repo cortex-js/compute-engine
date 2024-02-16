@@ -31,6 +31,8 @@ import { hashCode, bignumPreferred } from './utils';
 
 /**
  * BoxedNumber
+ *
+ * @noInheritDoc
  */
 
 export class BoxedNumber extends _BoxedExpression {

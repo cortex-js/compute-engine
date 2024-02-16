@@ -1,11 +1,16 @@
 /**
- * The most important classes are {@link ComputeEngine} and
- * {@link BoxedExpression}.
  *
- * With `ComputeEngine` you create `BoxedExpression` objects. With
- * `BoxedExpression` you simplify, evaluate and serialize expressions.
+ * The Compute Engine is a symbolic computation engine that can be used to
+ * manipulate and evaluate mathematical expressions.
  *
- * @module ComputeEngine
+ * Use an instance of {@linkcode ComputeEngine} to create boxed expressions
+ * with {@linkcode ComputeEngine.parse} and {@linkcode ComputeEngine.box}.
+ *
+ * Use a {@linkcode BoxedExpression} object to manipulate and evaluate
+ * mathematical expressions.
+ *
+ * @module "compute-engine"
+ *
  */
 
 import type { Complex } from 'complex.js';
@@ -26,6 +31,7 @@ import type {
 } from './latex-syntax/public';
 
 export * from './latex-syntax/public';
+export * from './compute-engine';
 
 export type Rational = [number, number] | [bigint, bigint];
 
@@ -41,7 +47,7 @@ export type Metadata = {
 /**
  * The numeric evaluation mode:
  * 
-<div class=symbols-table>
+<div className="symbols-table">
 
 | Mode | |
 | :--- | :----- |
@@ -70,7 +76,6 @@ export type EvaluateOptions = {
 };
 
 /** Options for `BoxedExpression.N()`
- * @internal
  */
 export type NOptions = {
   //
@@ -250,6 +255,9 @@ export type DomainExpression<T = SemiBoxedExpression> =
   | ['Invariant', DomainExpression<T>]
   | ['FunctionOf', ...DomainExpression<T>[]];
 
+/**
+ * @noInheritDoc
+ */
 export interface BoxedDomain extends BoxedExpression {
   get canonical(): BoxedDomain;
   get json(): Expression;
@@ -371,7 +379,7 @@ export type CanonicalForm =
   | 'Order';
 
 /**
- * ## THEORY OF OPERATIONS
+ * ### THEORY OF OPERATIONS
  *
  * The `BoxedExpression` interface includes most of the member functions
  * applicable to any kind of expression, for example `get symbol()` or
@@ -382,6 +390,8 @@ export type CanonicalForm =
  *
  * This convention makes it convenient to manipulate expressions without
  * having to check what kind of instance they are before manipulating them.
+ *
+ * @category BoxedExpression
  *
  */
 export interface BoxedExpression {
@@ -397,7 +407,6 @@ export interface BoxedExpression {
    * a context in which to interpret it, such as definition of symbols
    * and functions.
    *
-   * {@link ComputeEngine} is the class that implements IComputeEngine.
    */
   readonly engine: IComputeEngine;
 
@@ -933,7 +942,7 @@ export interface BoxedExpression {
    */
   readonly isNegative: boolean | undefined;
 
-  /** The numeric value of this expression is <= 0, same as `isLessEqual(0)`
+  /** The numeric value of this expression is &lt;= 0, same as `isLessEqual(0)`
    *
    * @category Expression Properties
    */
@@ -1302,11 +1311,13 @@ export interface BoxedExpression {
   isEqual(rhs: BoxedExpression): boolean;
 }
 
-/** A semi boxed expression is an MathJSON expression which can include some
+/** A semi boxed expression is a MathJSON expression which can include some
  * boxed terms.
  *
  * This is convenient when creating new expressions from portions
  * of an existing `BoxedExpression` while avoiding unboxing and reboxing.
+ *
+ * @category BoxedExpression
  */
 export type SemiBoxedExpression =
   | number
@@ -1328,6 +1339,9 @@ export type SemiBoxedExpression =
  * - `recursive`: if true, match recursively, otherwise match only the top level.
  * - `numericTolerance`: if present, the tolerance for numeric comparison.
  * - `exact`: if true, only match expressions that are structurally identical. If false, match expressions that are structurally identical or equivalent. For example, when false, `["Add", '_a', 2]` matches `2`, with a value of `_a` of `0`. If true, the expression does not match.
+ *
+ * @category Pattern Matching
+ *
  */
 export type PatternMatchOptions = {
   substitution?: BoxedSubstitution;
@@ -1336,6 +1350,11 @@ export type PatternMatchOptions = {
   exact?: boolean;
 };
 
+/**
+ * @noInheritDoc
+ *
+ * @category Pattern Matching
+ */
 export interface Pattern extends BoxedExpression {
   /** If `expr` matches the pattern, return `true`, otherwise `false` */
   test(expr: BoxedExpression, options?: PatternMatchOptions): boolean;
@@ -1384,6 +1403,7 @@ export interface ExpressionMapInterface<U> {
  * - Functions and symbols exported from a library should start with an uppercase letter `/^[A-Z]/`
  *
  * If a semi boxed expression
+ * @category Definitions
  *
  */
 
@@ -1392,6 +1412,10 @@ export type IdentifierDefinition =
   | FunctionDefinition
   | SemiBoxedExpression;
 
+/**
+ * @category Definitions
+ *
+ */
 export type IdentifierDefinitions = Readonly<{
   [id: string]: IdentifierDefinition;
 }>;
@@ -1401,6 +1425,8 @@ export type IdentifierDefinitions = Readonly<{
  *
  * When a new scope is created with `pushScope()` or when creating a new
  * engine instance, new instances of this type are created as needed.
+ *
+ * @category Definitions
  */
 export type RuntimeIdentifierDefinitions = Map<
   string,
@@ -1472,6 +1498,10 @@ export type RuntimeScope = Scope & {
   // lowWaterMark?: number;
 };
 
+/**
+ * @category Definitions
+ *
+ */
 export type BaseDefinition = {
   /** A short (about 1 line) description. May contain Markdown. */
   description?: string | string[];
@@ -1488,6 +1518,10 @@ export type BaseDefinition = {
   wikidata?: string;
 };
 
+/**
+ * @category Definitions
+ *
+ */
 export interface BoxedBaseDefinition {
   name: string;
   wikidata?: string;
@@ -1509,6 +1543,7 @@ export interface BoxedBaseDefinition {
 /**
  * A function definition can have some flags to indicate specific
  * properties of the function.
+ * @category Definitions
  */
 export type FunctionDefinitionFlags = {
   /**  If `true`, the function is applied element by element to lists, matrices
@@ -1801,6 +1836,10 @@ export type FunctionSignature = {
   compile?: (expr: BoxedExpression) => CompiledExpression;
 };
 
+/**
+ * @category Definitions
+ *
+ */
 export type BoxedFunctionSignature = {
   inferredSignature: boolean;
 
@@ -1868,7 +1907,7 @@ export type CollectionHandlers = {
 
   /** Return the element at the specified index.
    * The first element is `at(1)`, the last element is `at(-1)`.
-   * If the index is <0, return the element at index `size() + index + 1`.
+   * If the index is &lt;0, return the element at index `size() + index + 1`.
    * The index can also be a string for example for dictionaries.
    * If the index is invalid, return `undefined`.
    */
@@ -1908,6 +1947,7 @@ export type CollectionHandlers = {
 
 /**
  * Definition record for a function.
+ * @category Definitions
  *
  */
 export type FunctionDefinition = BaseDefinition &
@@ -1951,6 +1991,10 @@ export type FunctionDefinition = BaseDefinition &
     signature: FunctionSignature;
   };
 
+/**
+ * @category Definitions
+ *
+ */
 export type BoxedFunctionDefinition = BoxedBaseDefinition &
   Partial<CollectionHandlers> &
   FunctionDefinitionFlags & {
@@ -1968,6 +2012,7 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
  *
  * For example, it might be useful to override `algebraic = false`
  * for a transcendental number.
+ * @category Definitions
  */
 export type NumericFlags = {
   number: boolean | undefined;
@@ -2000,6 +2045,10 @@ export type NumericFlags = {
   composite: boolean | undefined; // True if not a prime number
 };
 
+/**
+ * @category Definitions
+ *
+ */
 export type SymbolAttributes = {
   /**
    * If `true` the value of the symbol is constant. The value or domain of
@@ -2015,7 +2064,7 @@ export type SymbolAttributes = {
    * If the symbol has a value, it is held as indicated in the table below.
    * A green checkmark indicate that the symbol is substituted.
 
-<div class=symbols-table>
+<div className="symbols-table">
 
 | Operation | `"never"` | `"simplify"` | `"evaluate"` | `"N"` |
 | :--- | :----- |
@@ -2040,6 +2089,7 @@ export type SymbolAttributes = {
 /**
  * A bound symbol (i.e. one with an associated definition) has either a domain
  * (e.g. ∀ x ∈ ℝ), a value (x = 5) or both (π: value = 3.14... domain = TranscendentalNumbers)
+ * @category Definitions
  */
 export type SymbolDefinition = BaseDefinition &
   Partial<SymbolAttributes> & {
@@ -2062,6 +2112,10 @@ export type SymbolDefinition = BaseDefinition &
     flags?: Partial<NumericFlags>;
   };
 
+/**
+ * @noInheritDoc
+ * @category Definitions
+ */
 export interface BoxedSymbolDefinition
   extends BoxedBaseDefinition,
     SymbolAttributes,
@@ -2089,6 +2143,7 @@ export type CompiledExpression = {
   }) => number | BoxedExpression;
 };
 
+/** @internal */
 export interface ComputeEngineStats {
   symbols: Set<BoxedExpression>;
   expressions: null | Set<BoxedExpression>;
@@ -2103,7 +2158,7 @@ export type AssignValue =
   | Complex
   | LatexString
   | SemiBoxedExpression
-  | ((ce, args) => BoxedExpression)
+  | ((ce: IComputeEngine, args) => BoxedExpression)
   | undefined;
 
 export type ArrayValue =
@@ -2166,17 +2221,17 @@ export interface IComputeEngine {
    */
   deadline?: number;
 
-  /** @experimental */
+  /** @hidden */
   readonly timeLimit: number;
-  /** @experimental */
+  /** @hidden */
   readonly iterationLimit: number;
-  /** @experimental */
+  /** @hidden */
   readonly recursionLimit: number;
 
-  /** {@inheritDoc  NumericMode} */
   numericMode: NumericMode;
 
   tolerance: number;
+
   chop(n: number): number;
   chop(n: Decimal): Decimal | 0;
   chop(n: Complex): Complex | 0;
@@ -2193,18 +2248,10 @@ export interface IComputeEngine {
 
   costFunction: (expr: BoxedExpression) => number;
 
-  /** In strict mode the compute engine performs additional checks,
-   * for example to ensure the correct number and domain of arguments. These
-   * checks may impact performance.
-   */
   strict: boolean;
 
-  /** Return a canonical version of an array of semi-boxed-expressions. */
   canonical(xs: SemiBoxedExpression[]): BoxedExpression[];
 
-  /** Return as boxed expression from a number, string or semiboxed expression.
-   * Calls `function()`, `number()` or `symbol()` as appropriate.
-   */
   box(
     expr:
       | Decimal

@@ -34,7 +34,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
   //
   {
     /**
-     * ## THEORY OF OPERATIONS: SEQUENCES
+     * ### THEORY OF OPERATIONS: SEQUENCES
      *
      * There are two similar functions used to represent sequences of
      * expressions:

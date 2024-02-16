@@ -112,7 +112,7 @@ export type CanonicalArithmeticFunctions =
 
 /*
 
-## THEORY OF OPERATIONS:  PRECEDENCE
+### THEORY OF OPERATIONS:  PRECEDENCE
 
 PEMDAS is a lie. But the ambiguity is essentially around the ÷ (or solidus /)
 sign and implicit multiplication.

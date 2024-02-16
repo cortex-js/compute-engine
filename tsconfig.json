@@ -15,11 +15,7 @@
     "noLib": false,
     "removeComments": false,
     "sourceMap": true,
-    "strictNullChecks": true
+    "strictNullChecks": true,
   },
   "include": ["src/**/*"],
-  "ts-node": {
-    "transpileOnly": true,
-    "moduleTypes": "NodeNext"
-  }
 }

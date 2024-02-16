@@ -42,6 +42,9 @@ import { domainToSignature, signatureToDomain } from '../domain-utils';
  * If a `BoxedFunctionDefinition`, it it a reference to a function name,
  * not a function expression, i.e. `Sin`, not `["Sin", "Pi"]`. This is used
  * for example in `["InverseFunction", "Sin"]`
+ *
+ * @noInheritDoc
+ *
  */
 export class BoxedSymbol extends _BoxedExpression {
   private _scope: RuntimeScope | null;

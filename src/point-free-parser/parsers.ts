@@ -35,6 +35,8 @@ export type DiagnosticMessage = DiagnosticCode | [DiagnosticCode, ...any];
  * error will be thrown.
  *
  * This would happen if a `#error` directive is encountered.
+ *
+ * @noInheritDoc
  */
 export class FatalParsingError extends Error {
   constructor(msg: string) {
@@ -131,8 +133,8 @@ export class Parser {
       typeof rule === 'string'
         ? rule
         : typeof rule === 'function'
-        ? '???'
-        : rule[0],
+          ? '???'
+          : rule[0],
     ];
   }
 
@@ -155,8 +157,8 @@ export class Parser {
       typeof rule === 'string'
         ? rule
         : typeof rule === 'function'
-        ? '???'
-        : rule[0]
+          ? '???'
+          : rule[0]
     );
 
     if (fromOffset !== undefined) this.skipTo(fromOffset);

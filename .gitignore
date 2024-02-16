@@ -2,6 +2,7 @@ build/
 dist/
 stage/
 coverage/
+temp-docs/
 
 # OS Files
 .DS_Store

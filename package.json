@@ -1,6 +1,7 @@
 {
   "version": "0.23.1",
   "scripts": {
+    "doc": "bash ./scripts/doc.sh",
     "build": "bash ./scripts/build.sh",
     "clean": "bash ./scripts/clean.sh",
     "coverage": "bash ./scripts/test.sh coverage",
@@ -64,6 +65,7 @@
     "@typescript-eslint/typescript-estree": "^6.7.2",
     "chalk": "^5.3.0",
     "check-node-version": "^4.2.1",
+    "concat-md": "^0.5.1",
     "esbuild": "^0.19.3",
     "eslint": "^8.50.0",
     "eslint-config-prettier": "^9.0.0",
@@ -74,12 +76,15 @@
     "jest-silent-reporter": "^0.5.0",
     "open": "^9.1.0",
     "prettier": "^3.0.3",
+    "prettier-2": "npm:prettier@^2",
     "serve-http": "^1.0.7",
     "ts-jest": "^29.1.1",
     "ts-node": "^10.9.1",
+    "typedoc": "^0.25.8",
+    "typedoc-plugin-markdown": "^4.0.0-next.53",
+    "typedoc-plugin-no-inherit": "^1.4.0",
     "typescript": "^5.2.2",
-    "update-notifier": "^6.0.2",
-    "prettier-2": "npm:prettier@^2"
+    "update-notifier": "^6.0.2"
   },
   "prettier": "@cortex-js/prettier-config",
   "dependencies": {

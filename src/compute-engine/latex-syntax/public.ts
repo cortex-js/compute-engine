@@ -8,17 +8,20 @@ import type { IComputeEngine } from '../public';
  * It can be one of the indicated tokens, or a string that starts with a
  * `\` for LaTeX commands, or a LaTeX character which includes digits,
  * letters and punctuation.
+ * @category Latex Parsing and Serialization
  */
 export type LatexToken = string | '<{>' | '<}>' | '<space>' | '<$>' | '<$$>';
 
 /** A LatexString is a regular string of LaTeX, for example:
  * `\frac{\pi}{2}`
+ * @category Latex Parsing and Serialization
  */
 export type LatexString = string;
 
 /**
- * Open and close delimiters that can be used with {@link MatchfixEntry}
+ * Open and close delimiters that can be used with {@linkcode MatchfixEntry}
  * record to define new LaTeX dictionary entries.
+ * @category Latex Parsing and Serialization
  */
 export type Delimiter =
   | ')'
@@ -36,6 +39,9 @@ export type Delimiter =
   | '\\lfloor'
   | '\\rfloor';
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type LibraryCategory =
   | 'algebra'
   | 'arithmetic'
@@ -64,7 +70,7 @@ export type LibraryCategory =
 
 /**
  *
- * ## THEORY OF OPERATIONS
+ * ### THEORY OF OPERATIONS
  *
  * The precedence of an operator is a number that indicates the order in which
  * operators are applied.
@@ -100,19 +106,23 @@ export type LibraryCategory =
  * Some constants are defined below for common precedence values.
  *
  *
- * Note: MathML defines some operator precedence, but it has some
- * issues and inconsistencies. However, whenever possible we adopted the
- * MathML precedence. See https://www.w3.org/TR/2009/WD-MathML3-20090924/appendixc.html
+ * **Note**: MathML defines
+ * [some operator precedence](https://www.w3.org/TR/2009/WD-MathML3-20090924/appendixc.html),
+ * but it has some issues and inconsistencies. However,
+ * whenever possible we adopted the MathML precedence.
  *
- * For reference, the JavaScript operator precedence is documented
- * here: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence
+ * The JavaScript operator precedence is documented
+ * [here](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence).
+ * @category Latex Parsing and Serialization
  */
 export type Precedence = number;
 
 // > < >= ≥ <= ≤ == === ≡ != ≠ !== ≢ ∈ ∉ ∋ ∌ ⊆ ⊈ ⊂ ⊄ ⊊ ∝ ∊ ∍ ∥ ∦ ∷ ∺ ∻ ∽ ∾ ≁ ≃ ≂ ≄ ≅ ≆ ≇ ≈ ≉ ≊ ≋ ≌ ≍ ≎ ≐ ≑ ≒ ≓ ≖ ≗ ≘ ≙ ≚ ≛ ≜ ≝ ≞ ≟ ≣ ≦ ≧ ≨ ≩ ≪ ≫ ≬ ≭ ≮ ≯ ≰ ≱ ≲ ≳ ≴ ≵ ≶ ≷ ≸ ≹ ≺ ≻ ≼ ≽ ≾ ≿ ⊀ ⊁ ⊃ ⊅ ⊇ ⊉ ⊋ ⊏ ⊐ ⊑ ⊒ ⊜ ⊩ ⊬ ⊮ ⊰ ⊱ ⊲ ⊳ ⊴ ⊵ ⊶ ⊷ ⋍ ⋐ ⋑ ⋕ ⋖ ⋗ ⋘ ⋙ ⋚ ⋛ ⋜ ⋝ ⋞ ⋟ ⋠ ⋡ ⋢ ⋣ ⋤ ⋥ ⋦ ⋧ ⋨ ⋩ ⋪ ⋫ ⋬ ⋭ ⋲ ⋳ ⋴ ⋵ ⋶ ⋷ ⋸ ⋹ ⋺ ⋻ ⋼ ⋽ ⋾ ⋿ ⟈ ⟉ ⟒ ⦷ ⧀ ⧁ ⧡ ⧣ ⧤ ⧥ ⩦ ⩧ ⩪ ⩫ ⩬ ⩭ ⩮ ⩯ ⩰ ⩱ ⩲ ⩳ ⩵ ⩶ ⩷ ⩸ ⩹ ⩺ ⩻ ⩼ ⩽ ⩾ ⩿ ⪀ ⪁ ⪂ ⪃ ⪄ ⪅ ⪆ ⪇ ⪈ ⪉ ⪊ ⪋ ⪌ ⪍ ⪎ ⪏ ⪐ ⪑ ⪒ ⪓ ⪔ ⪕ ⪖ ⪗ ⪘ ⪙ ⪚ ⪛ ⪜ ⪝ ⪞ ⪟ ⪠ ⪡ ⪢ ⪣ ⪤ ⪥ ⪦ ⪧ ⪨ ⪩ ⪪ ⪫ ⪬ ⪭ ⪮ ⪯ ⪰ ⪱ ⪲ ⪳ ⪴ ⪵ ⪶ ⪷ ⪸ ⪹ ⪺ ⪻ ⪼ ⪽ ⪾ ⪿ ⫀ ⫁ ⫂ ⫃ ⫄ ⫅ ⫆ ⫇ ⫈ ⫉ ⫊ ⫋ ⫌ ⫍ ⫎ ⫏ ⫐ ⫑ ⫒ ⫓ ⫔ ⫕ ⫖ ⫗ ⫘ ⫙ ⫷ ⫸ ⫹ ⫺ ⊢ ⊣ ⟂ ⫪ ⫫ <: >:
+/** @hidden */
 export const COMPARISON_PRECEDENCE: Precedence = 245;
 
 // := $= = += -= −= *= /= //= |\\=| ^= ÷= %= <<= >>= >>>= |\|=| &= ⊻= ≔ ⩴ ≕
+/** @hidden */
 export const ASSIGNMENT_PRECEDENCE: Precedence = 260;
 
 // Unicode U+2190 to U+2950:
@@ -121,20 +131,26 @@ export const ASSIGNMENT_PRECEDENCE: Precedence = 260;
 // ⧴ ⬱ ⬰ ⬲ ⬳ ⬴ ⬵ ⬶ ⬷ ⬸ ⬹ ⬺ ⬻ ⬼ ⬽ ⬾ ⬿ ⭀ ⭁ ⭂ ⭃ ⥷ ⭄ ⥺ ⭇ ⭈ ⭉ ⭊ ⭋ ⭌ ￩ ￫ ⇜ ⇝ ↜ ↝ ↩ ↪ ↫ ↬ ↼ ↽ ⇀ ⇁ ⇄ ⇆ ⇇ ⇉ ⇋ ⇌ ⇚ ⇛ ⇠ ⇢ ↷ ↶ ↺ ↻ --> <-- <--> <==>
 //
 // See unicode.ts for equivalent LaTeX commands
+/** @hidden */
 export const ARROW_PRECEDENCE: Precedence = 270;
 
 // + - − ¦ |\|| ⊕ ⊖ ⊞ ⊟ |++| ∪ ∨ ⊔ ± ∓ ∔ ∸ ≏ ⊎ ⊻ ⊽ ⋎ ⋓ ⟇ ⧺ ⧻ ⨈ ⨢ ⨣ ⨤ ⨥ ⨦ ⨧ ⨨ ⨩ ⨪ ⨫ ⨬ ⨭ ⨮ ⨹ ⨺ ⩁ ⩂ ⩅ ⩊ ⩌ ⩏ ⩐ ⩒ ⩔ ⩖ ⩗ ⩛ ⩝ ⩡ ⩢ ⩣)
+/** @hidden */
 export const ADDITION_PRECEDENCE: Precedence = 275;
 // * / ⌿ ÷ % & · · ⋅ ∘ × |\\| ∩ ∧ ⊗ ⊘ ⊙ ⊚ ⊛ ⊠ ⊡ ⊓ ∗ ∙ ∤ ⅋ ≀ ⊼ ⋄ ⋆ ⋇ ⋉ ⋊ ⋋ ⋌ ⋏ ⋒ ⟑ ⦸ ⦼ ⦾ ⦿ ⧶ ⧷ ⨇ ⨰ ⨱ ⨲ ⨳ ⨴ ⨵ ⨶ ⨷ ⨸ ⨻ ⨼ ⨽ ⩀ ⩃ ⩄ ⩋ ⩍ ⩎ ⩑ ⩓ ⩕ ⩘ ⩚ ⩜ ⩞ ⩟ ⩠ ⫛ ⊍ ▷ ⨝ ⟕ ⟖ ⟗ ⨟
+/** @hidden */
 export const MULTIPLICATION_PRECEDENCE: Precedence = 390;
 
 // Rational, Divide
+/** @hidden */
 export const DIVISION_PRECEDENCE: Precedence = 600;
 
 // Power, Square, Overscript
+/** @hidden */
 export const EXPONENTIATION_PRECEDENCE: Precedence = 700;
 
 // Factorial, Prime
+/** @hidden */
 export const POSTFIX_PRECEDENCE: Precedence = 810;
 
 /**
@@ -142,6 +158,7 @@ export const POSTFIX_PRECEDENCE: Precedence = 810;
  * - an operator of a precedence higher than specified has been encountered
  * - the last token has been reached
  * - or if a condition is provided, the condition returns true;
+ * @category Latex Parsing and Serialization
  */
 export type Terminator = {
   minPrec: Precedence;
@@ -168,45 +185,66 @@ export type Terminator = {
  * (didn't match the syntax that was expected). The matching expression
  * otherwise.
  *
+ * @category Latex Parsing and Serialization
  */
-
 export type ExpressionParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
 ) => Expression | null;
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type PrefixParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
 ) => Expression | null;
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type SymbolParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
 ) => Expression | null;
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type FunctionParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
 ) => Expression | null;
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type EnvironmentParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
 ) => Expression | null;
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type PostfixParseHandler = (
   parser: Parser,
   lhs: Expression,
   until?: Readonly<Terminator>
 ) => Expression | null;
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type InfixParseHandler = (
   parser: Parser,
   lhs: Expression,
   until: Readonly<Terminator>
 ) => Expression | null;
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type MatchfixParseHandler = (
   parser: Parser,
   body: Expression
@@ -221,6 +259,9 @@ export type MatchfixParseHandler = (
 //   | InfixParseHandler
 //   | MatchfixParseHandler;
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type LatexArgumentType =
   | '{expression}' /** A required math mode expression */
   | '[expression]' /** An optional math mode expression */
@@ -248,6 +289,7 @@ export type LatexArgumentType =
  *
  * `matchfix` operators use `openTrigger` and `closeTrigger` instead.
  *
+ * @category Latex Parsing and Serialization
  */
 
 export type Trigger = {
@@ -257,7 +299,7 @@ export type Trigger = {
 
 /**
  * Maps a string of LaTeX tokens to a function or symbol and vice-versa.
- *
+ * @category Latex Parsing and Serialization
  */
 
 export type BaseEntry = {
@@ -284,11 +326,17 @@ export type BaseEntry = {
   serialize?: LatexString | SerializeHandler;
 };
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type DefaultEntry = BaseEntry &
   Trigger & {
     parse: Expression | ExpressionParseHandler;
   };
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type ExpressionEntry = BaseEntry &
   Trigger & {
     kind: 'expression'; // Default entry is "expression"
@@ -297,6 +345,9 @@ export type ExpressionEntry = BaseEntry &
     precedence?: Precedence;
   };
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type MatchfixEntry = BaseEntry & {
   kind: 'matchfix';
   /**
@@ -313,6 +364,9 @@ export type MatchfixEntry = BaseEntry & {
   parse?: MatchfixParseHandler;
 };
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type InfixEntry = BaseEntry &
   Trigger & {
     /**
@@ -339,6 +393,9 @@ export type InfixEntry = BaseEntry &
     parse?: string | InfixParseHandler;
   };
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type PostfixEntry = BaseEntry &
   Trigger & {
     /**
@@ -353,6 +410,9 @@ export type PostfixEntry = BaseEntry &
     parse?: PostfixParseHandler;
   };
 
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type PrefixEntry = BaseEntry &
   Trigger & {
     /**
@@ -369,13 +429,16 @@ export type PrefixEntry = BaseEntry &
 /**
  * A LaTeX dictionary entry for an environment, that is a LaTeX
  * construct using `\begin{...}...\end{...}`.
+ * @category Latex Parsing and Serialization
  */
 export type EnvironmentEntry = BaseEntry & {
   kind: 'environment';
   parse: EnvironmentParseHandler;
   identifierTrigger: string;
 };
-
+/**
+ * @category Latex Parsing and Serialization
+ */
 export type SymbolEntry = BaseEntry &
   Trigger & {
     kind: 'symbol';
@@ -394,6 +457,7 @@ export type SymbolEntry = BaseEntry &
  * For more complex situations, for example implicit arguments or
  * inverse functions postfix (i.e. ^{-1}), use a custom parse handler with a
  * entry of kind `expression`.
+ * @category Latex Parsing and Serialization
  */
 export type FunctionEntry = BaseEntry &
   Trigger & {
@@ -401,6 +465,17 @@ export type FunctionEntry = BaseEntry &
     parse?: Expression | FunctionParseHandler;
   };
 
+/**
+ *
+ * A dictionary entry is a record that maps a LaTeX token or string of tokens
+ * to a MathJSON expression or to a parsing handler.
+ *
+ * Set the {@linkcode ComputeEngine.latexDictionary} property to an array of
+ * dictionary entries to define custom LaTeX parsing and serialization.
+ *
+ * @category Latex Parsing and Serialization
+ *
+ */
 export type LatexDictionaryEntry =
   | DefaultEntry
   | ExpressionEntry
@@ -460,7 +535,20 @@ export function isEnvironmentEntry(
   return 'kind' in entry && entry.kind === 'environment';
 }
 
+/**
+ *
+ * @category Latex Parsing and Serialization
+ * @internal
+ */
 export type LatexDictionary = Array<object>;
+
+/**
+ *
+ * The LaTeX parsing options can be set using the
+ * {@linkcode ComputeEngine.latexOptions} property.
+ *
+ * @category Latex Parsing and Serialization
+ */
 
 export type ParseLatexOptions = {
   /**
@@ -504,9 +592,7 @@ export type ParseLatexOptions = {
    * This handler is invoked when the parser encounters an identifier
    * that does not have a corresponding entry in the dictionary.
    *
-   * The `identifier` argument is a valid identifier
-   * (see https://cortexjs.io/math-json/#identifiers for the definition of a
-   * valid identifier).
+   * The `identifier` argument is a (valid identifier)[/math-json/#identifiers].
    *
    * The handler can return:
    *
@@ -539,6 +625,14 @@ export type ParseLatexOptions = {
 };
 
 export type DelimiterScale = 'normal' | 'scaled' | 'big' | 'none';
+
+/**
+ *
+ * The LaTeX serialization options can be set using the
+ * {@linkcode ComputeEngine.latexOptions} property.
+ *
+ * @category Latex Parsing and Serialization
+ */
 
 export type SerializeLatexOptions = {
   /**
@@ -616,6 +710,14 @@ export type SerializeLatexOptions = {
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
 };
 
+/**
+ *
+ * The options to format numbers can be set using the
+ * {@linkcode ComputeEngine.latexOptions} property.
+ *
+ * @category Latex Parsing and Serialization
+ */
+
 export type NumberFormattingOptions = {
   precision: number;
   positiveInfinity: LatexString;
@@ -663,13 +765,19 @@ export type NumberFormattingOptions = {
 };
 
 /**
- * To customize the parsing and serializing of LaTeX syntax, create a `LatexSyntax`
- * instance.
+ * The {@linkcode ComputeEngine.latexSyntax} property is an instance of
+ * `LatexSyntax` that can be used to parse and serialize LaTeX strings.
+ *
+ * Its methods are exposed with `ce.parse`, `ce.serialize` and
+ * `ce.getLatexDictionary`.
+ *
+ * @category Latex Parsing and Serialization
+ * @internal
  */
 export declare class LatexSyntax {
   /**
    *
-   * @param onError - Called when a non-fatal error is encountered. When parsing,
+   * @param options.onError - Called when a non-fatal error is encountered. When parsing,
    * the parser will attempt to recover and continue.
    *
    */
@@ -706,10 +814,19 @@ export declare class LatexSyntax {
     domain?: LibraryCategory | 'all'
   ): Readonly<LatexDictionary>;
 
+  /** Parse a  */
   parse(latex: LatexString): Expression;
   serialize(expr: Expression): LatexString;
 }
 
+/**
+ *
+ * An instance of `Serializer` is provided to the `serialize` handlers of custom
+ * LaTeX dictionary entries.
+ *
+ * @category Latex Parsing and Serialization
+ *
+ */
 export interface Serializer {
   readonly onError: WarningSignalHandler;
   readonly options: Required<SerializeLatexOptions>;
@@ -798,10 +915,23 @@ export interface Serializer {
   serializeSymbol(expr: Expression): LatexString;
 }
 
+/** The `serialize` handler of a custom LaTeX dictionary entry can be
+ * a function of this type.
+ *
+ * @category Latex Parsing and Serialization
+ *
+ */
 export type SerializeHandler = (
   serializer: Serializer,
   expr: Expression
 ) => string;
+
+/**
+ * An instance of `Parser` is provided to the `parse` handlers of custom
+ * LaTeX dictionary entries.
+ *
+ * @category Latex Parsing and Serialization
+ */
 
 export interface Parser {
   readonly options: Required<ParseLatexOptions>;

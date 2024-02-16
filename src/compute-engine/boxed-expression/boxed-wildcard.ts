@@ -18,6 +18,9 @@ import { BoxedSymbol } from './boxed-symbol';
  *
  * A boxed is a symbol that is used as a wildcard. The name of the
  * symbol begins with a `_`.
+ *
+ * @noInheritDoc
+ *
  */
 
 export class BoxedWildcard extends BoxedSymbol {

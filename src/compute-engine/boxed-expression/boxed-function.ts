@@ -58,6 +58,8 @@ import { signDiff } from '../numerics/numeric';
  * on the head. The definition contains the signature of the function,
  * and the implementation of the function.
  *
+ * @noInheritDoc
+ *
  */
 
 export class BoxedFunction extends _BoxedExpression {

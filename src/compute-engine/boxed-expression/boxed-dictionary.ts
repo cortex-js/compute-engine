@@ -20,6 +20,8 @@ import { hashCode } from './utils';
 
 /**
  * BoxedDictionary
+ *
+ * @noInheritDoc
  */
 
 export class BoxedDictionary extends _BoxedExpression {

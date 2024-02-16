@@ -13,6 +13,8 @@ import { hashCode } from './utils';
 
 /**
  * BoxedString
+ *
+ * @noInheritDoc
  */
 
 export class BoxedString extends _BoxedExpression {

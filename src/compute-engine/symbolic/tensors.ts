@@ -8,6 +8,9 @@ import {
   makeTensorField,
 } from './tensor-fields';
 
+/**
+ * @noInheritDoc
+ */
 export interface TensorData<DT extends keyof DataTypeMap = 'float64'> {
   dtype: DT;
   shape: number[]; // dimension of each axis
@@ -708,6 +711,9 @@ function getStrides(shape: number[]): number[] {
   return strides;
 }
 
+/**
+ * @noInheritDoc
+ */
 class NumberTensor extends AbstractTensor<'float64'> {
   readonly dtype = 'float64' as const;
   readonly data: number[];
@@ -722,6 +728,9 @@ class NumberTensor extends AbstractTensor<'float64'> {
   }
 }
 
+/**
+ * @noInheritDoc
+ */
 class ComplexTensor extends AbstractTensor<'complex128'> {
   readonly dtype = 'complex128' as const;
   readonly data: Complex[];
@@ -732,6 +741,9 @@ class ComplexTensor extends AbstractTensor<'complex128'> {
   }
 }
 
+/**
+ * @noInheritDoc
+ */
 class BooleanTensor extends AbstractTensor<'bool'> {
   readonly dtype = 'bool' as const;
   readonly data: boolean[];
@@ -742,6 +754,9 @@ class BooleanTensor extends AbstractTensor<'bool'> {
   }
 }
 
+/**
+ * @noInheritDoc
+ */
 class GenericTensor extends AbstractTensor<'expression'> {
   readonly dtype = 'expression' as const;
   readonly data: BoxedExpression[];

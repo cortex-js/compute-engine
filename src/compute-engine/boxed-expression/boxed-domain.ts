@@ -26,6 +26,7 @@ import { hashCode } from './utils';
  *
  * It could be an invalid domain, in which case `isValid` is `false`.
  *
+ * @noInheritDoc
  */
 export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   private _hash: number;

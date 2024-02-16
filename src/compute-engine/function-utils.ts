@@ -3,7 +3,7 @@ import { BoxedExpression } from './public';
 import { checkArity } from './boxed-expression/validate';
 
 /***
- * ## THEORY OF OPERATIONS
+ * ### THEORY OF OPERATIONS
  *
  * A `["Function"]` expression has its own scope.
  * This scope includes the parameters and local variables.
@@ -18,7 +18,7 @@ import { checkArity } from './boxed-expression/validate';
  * be a number, a symbol or (more commonly) an function expression.
  *
  *
- * ### DURING BOXING (in makeLambda())
+ * #### DURING BOXING (in makeLambda())
  *
  * During the boxing/canonicalization phase of a function
  * (`["Function"]` expression or head expression):
@@ -31,7 +31,7 @@ import { checkArity } from './boxed-expression/validate';
  *    is associated with the function
  *
  *
- * ### DURING EVALUATION (executing the result of makeLambda())
+ * #### DURING EVALUATION (executing the result of makeLambda())
  *
  * 1/ The arguments are evaluated in the current scope
  * 2/ The context is swapped to the function scope

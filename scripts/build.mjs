@@ -11,7 +11,7 @@ const SDK_VERSION = pkg.version || 'v?.?.?';
 // `require()` which needs the UMD wrapper. See MathLive #1833)
 const COMPUTE_ENGINE_UMD_OPTIONS = {
   banner: {
-    js: `/** CortexJS Compute Engine ${SDK_VERSION} ${
+    js: `/** Compute Engine ${SDK_VERSION} ${
       process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
     }*/
     (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ComputeEngine = {}));})(this, (function (exports) { 'use strict';`,
@@ -23,7 +23,7 @@ const COMPUTE_ENGINE_UMD_OPTIONS = {
 
 const MATH_JSON_UMD_OPTIONS = {
   banner: {
-    js: `/** CortexJS MathJSON ${SDK_VERSION} ${
+    js: `/** MathJSON ${SDK_VERSION} ${
       process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
     }*/
     (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.MathJson = {}));})(this, (function (exports) { 'use strict';`,
@@ -35,7 +35,7 @@ const MATH_JSON_UMD_OPTIONS = {
 
 const BUILD_OPTIONS = {
   banner: {
-    js: `/** CortexJS Compute Engine ${SDK_VERSION} ${
+    js: `/** Compute Engine ${SDK_VERSION} ${
       process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
     }*/`,
   },

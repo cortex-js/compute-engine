@@ -20,7 +20,7 @@ import { bignumPreferred, complexAllowed, isLatexString } from './utils';
 import { widen } from './boxed-domain';
 
 /**
- * ## THEORY OF OPERATIONS
+ * ### THEORY OF OPERATIONS
  *
  * - The value or domain of a constant cannot be changed.
  * - If set explicitly, the value is the source of truth: it overrides any

@@ -1,5 +1,5 @@
 <div align="center">
-    <img alt="math live" src="assets/compute-engine.jpg?raw=true">
+    <img alt="math live" src="assets/compute-engine.jpg?raw=true"/>
 </div>
 
 <h3><strong>Cortex Compute Engine</strong></h3>
@@ -58,4 +58,4 @@ console.log(evaluate(expr));
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE.txt).
+This project is licensed under the [MIT License](LICENSE).

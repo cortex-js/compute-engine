@@ -30,7 +30,7 @@ import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
 import { canonicalForm } from './canonical';
 
 /**
- * ## THEORY OF OPERATIONS
+ * ### THEORY OF OPERATIONS
  *
  * 1/ Boxing does not depend on the numeric mode. The numeric mode could be
  * changed later, but the previously boxed numbers could not be retroactively

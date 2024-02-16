@@ -92,14 +92,24 @@ import { domainToSignature } from './domain-utils';
 
 /**
  *
- * To use the CortexJS Compute Engine, create a `ComputeEngine` instance, or if using a
- * mathfield, use the default Compute Engine instance from the `MathfieldElement` class: `ce = MathfieldElement.computeEngine`.
+ * To use the Compute Engine, create a `ComputeEngine` instance:
+ *
+ * ```js
+ * ce = new ComputeEngine();
+ * ```
+ *
+ * If using a mathfield, use the default Compute Engine instance from the
+ * `MathfieldElement` class:
+ *
+ * ```js
+ * ce = MathfieldElement.computeEngine
+ * ```
  *
  * Use the instance to create boxed expressions with `ce.parse()` and `ce.box()`.
  *
- *
- * ```ts
+ * ```js
  * const ce = new ComputeEngine();
+ *
  * let expr = ce.parse("e^{i\\pi}");
  * console.log(expr.N().latex);
  * // ➔ "-1"
@@ -269,6 +279,8 @@ export class ComputeEngine implements IComputeEngine {
 
   /** In strict mode (the default) the Compute Engine performs
    * validation of domains and signature and may report errors.
+   *
+   * These checks may impact performance
    *
    * When strict mode is off, results may be incorrect or generate JavaScript
    * errors if the input is not valid.
@@ -520,6 +532,7 @@ export class ComputeEngine implements IComputeEngine {
     // }
   }
 
+  /** @internal */
   get stats(): ComputeEngineStats {
     const expressions = this._stats.expressions;
     this._stats.expressions = null;
@@ -558,6 +571,12 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _bignum: Decimal.Constructor;
 
+  get precision(): number {
+    if (this._numericMode === 'machine' || this._numericMode === 'complex')
+      return Math.floor(MACHINE_PRECISION);
+    return this._precision;
+  }
+
   /** The precision, or number of significant digits, of numeric
    * calculations when the numeric mode is `"auto"` or `"bignum"`.
    *
@@ -569,12 +588,6 @@ export class ComputeEngine implements IComputeEngine {
    * Trigonometric operations are accurate for precision up to 1,000.
    *
    */
-  get precision(): number {
-    if (this._numericMode === 'machine' || this._numericMode === 'complex')
-      return Math.floor(MACHINE_PRECISION);
-    return this._precision;
-  }
-
   set precision(p: number | 'machine') {
     if (p === 'machine') p = Math.floor(MACHINE_PRECISION);
     const currentPrecision = this._precision;
@@ -614,6 +627,7 @@ export class ComputeEngine implements IComputeEngine {
     return this._numericMode;
   }
 
+  /** {@inheritDoc  NumericMode} */
   set numericMode(f: NumericMode) {
     if (f === this._numericMode) return;
 
@@ -665,14 +679,14 @@ export class ComputeEngine implements IComputeEngine {
     return 1024;
   }
 
+  get tolerance(): number {
+    return this._tolerance;
+  }
   /**
    * Values smaller than the tolerance are considered to be zero for the
    * purpose of comparison, i.e. if `|b - a| <= tolerance`, `b` is considered
    * equal to `a`.
    */
-  get tolerance(): number {
-    return this._tolerance;
-  }
   set tolerance(val: number) {
     if (typeof val === 'number' && Number.isFinite(val))
       this._tolerance = Math.max(val, 0);
@@ -682,7 +696,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /** Replace a number that is close to 0 with the exact integer 0.
    *
-   * How close to 0 the number has to be to be considered 0 is determined by {@link tolerance}.
+   * How close to 0 the number has to be to be considered 0 is determined by {@linkcode tolerance}.
    */
   chop(n: number): number;
   chop(n: Decimal): Decimal | 0;
@@ -821,6 +835,7 @@ export class ComputeEngine implements IComputeEngine {
     return a instanceof Complex;
   }
 
+  /** @internal */
   private get latexSyntax(): LatexSyntax {
     if (!this._latexSyntax) {
       const precision = this.precision;
@@ -842,13 +857,16 @@ export class ComputeEngine implements IComputeEngine {
     return LatexSyntax.getDictionary(domain);
   }
 
+  /**
+   * The cost function is used to determine the "cost" of an expression. For example, when simplifying an expression, the simplification that results in the lowest cost is chosen.
+   */
+  get costFunction(): (expr: BoxedExpression) => number {
+    return this._cost ?? DEFAULT_COST_FUNCTION;
+  }
+
   set costFunction(fn: ((expr: BoxedExpression) => number) | undefined) {
     if (typeof fn !== 'function') this._cost = DEFAULT_COST_FUNCTION;
     this._cost = fn;
-  }
-
-  get costFunction(): (expr: BoxedExpression) => number {
-    return this._cost ?? DEFAULT_COST_FUNCTION;
   }
 
   /**
@@ -1090,8 +1108,8 @@ export class ComputeEngine implements IComputeEngine {
             const val = v.value?.isValid
               ? v.value.toString()
               : v.value
-              ? `${INVERSE_RED}${v.value!.toString()}${RESET}`
-              : undef;
+                ? `${INVERSE_RED}${v.value!.toString()}${RESET}`
+                : undef;
             console.info(`${id}: ${v.domain?.toString() ?? undef} = ${val}`);
           } else if (v instanceof _BoxedFunctionDefinition) {
             if (typeof v.signature.evaluate === 'function')
@@ -1580,6 +1598,7 @@ export class ComputeEngine implements IComputeEngine {
     return this._cache[cacheName]?.value;
   }
 
+  /** Return a canonical version of an array of semi-boxed-expressions. */
   canonical(xs: SemiBoxedExpression[]): BoxedExpression[] {
     if (!xs.every((x) => x instanceof _BoxedExpression))
       return xs.map((x) => this.box(x));
@@ -1588,8 +1607,8 @@ export class ComputeEngine implements IComputeEngine {
     return bxs.every((x) => x.isCanonical) ? bxs : bxs.map((x) => x.canonical);
   }
 
-  /**
-   * Return a boxed expression from the input.
+  /** Return a boxed expression from a number, string or semiboxed expression.
+   * Calls `function()`, `number()` or `symbol()` as appropriate.
    */
   box(
     expr:
@@ -2068,16 +2087,6 @@ export class ComputeEngine implements IComputeEngine {
     return this.latexSyntax.serialize(x as Expression, options);
   }
 
-  /**
-   * Options to control the serialization of MathJSON expression to LaTeX
-   * when using `this.latex` or `this.engine.serialize()`.
-   *
-   *
-   * {@inheritDoc  NumberFormattingOptions}
-   * {@inheritDoc  ParseLatexOptions}
-   * {@inheritDoc  SerializeLatexOptions}
-   *
-   */
   get latexOptions(): NumberFormattingOptions &
     ParseLatexOptions &
     SerializeLatexOptions {
@@ -2097,6 +2106,15 @@ export class ComputeEngine implements IComputeEngine {
     );
   }
 
+  /**
+   * Options to control the serialization of MathJSON expression to LaTeX
+   * when using `expr.latex` or `ce.serialize()`.
+   *
+   */
+  /** {@inheritDoc  NumberFormattingOptions} */
+  /** {@inheritDoc  ParseLatexOptions} */
+  /** {@inheritDoc  SerializeLatexOptions} */
+
   set latexOptions(
     opts: Partial<NumberFormattingOptions> &
       Partial<ParseLatexOptions> &
@@ -2105,7 +2123,6 @@ export class ComputeEngine implements IComputeEngine {
     this.latexSyntax.updateOptions(opts);
   }
 
-  /** {@inheritDoc  JsonSerializationOptions} */
   get jsonSerializationOptions(): Readonly<JsonSerializationOptions> {
     if (this._useRawJsonSerializationOptions) {
       return new Proxy(this._rawJsonSerializationOptions, {

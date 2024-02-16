@@ -35,6 +35,8 @@ import { hashCode } from './utils';
  * The counterpart (expression if input is tensor, or tensor
  * if input is expression) is created lazily.
  *
+ * @noInheritDoc
+ *
  */
 export class BoxedTensor extends _BoxedExpression {
   private _tensor: undefined | AbstractTensor<'expression'>;

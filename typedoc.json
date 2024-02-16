@@ -1,0 +1,46 @@
+{
+  // https://typedoc.org/options/
+  "out": "./temp-docs",
+  "compilerOptions": {
+    // "esModuleInterop": true,
+
+    // More lenient...
+    "noImplicitAny": false,
+    "strictNullChecks": false
+  },
+  // "includes": "./src/compute-engine/**/*",
+  "externalPattern": ["**/node_modules/**", "./common/**", "./cortex/**"],
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeReferences": true,
+  "name": "Compute Engine",
+  "disableSources": true,
+  "disableGit": true,
+  "stripYamlFrontmatter": true,
+  "outputFileStrategy": "modules",
+  "entryPoints": [
+    "./src/compute-engine/public.ts",
+    "./src/math-json/math-json-format.ts",
+    "./src/common/signals.ts"
+  ],
+  "readme": "none",
+  "excludeExternals": true,
+
+  // https://typedoc-plugin-markdown.org/options
+  "plugin": [
+    "typedoc-plugin-no-inherit",
+    "typedoc-plugin-markdown",
+    "./plugins/grok-theme/index.js"
+  ],
+  "theme": "grok-theme",
+  "namedAnchors": true,
+  "hidePageHeader": true,
+  "hidePageTitle": true,
+  "hideBreadcrumbs": true,
+  "excludeGroups": true,
+  "useCodeBlocks": true,
+  "parametersFormat": "list", // table | list
+  "propertiesFormat": "list", // table | list
+  "typeDeclarationFormat": "list" // table | list
+}

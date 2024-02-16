@@ -19,6 +19,10 @@ import { serializeJsonFunction } from './serialize';
 import { BoxedNumber } from './boxed-number';
 import { permutations } from '../../common/utils';
 
+/**
+ *
+ * @noInheritDoc
+ */
 export class BoxedPattern extends _BoxedExpression implements Pattern {
   _pattern: BoxedExpression;
 
@@ -427,7 +431,7 @@ function matchArguments(
 }
 
 /**
- * The function attempts to match a [pattern](http://cortexjs.io/compute-engine/guides/patterns-and-rules/)
+ * The function attempts to match a [pattern](/compute-engine/guides/patterns-and-rules/)
  * with a subject expression.
  *
  * If the match is successful, it returns a `Substitution` indicating how to
