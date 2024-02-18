@@ -1,3 +1,6 @@
+/** @module "compute-engine" */
+
+/** @category MathJSON */
 export type Attributes = {
   /** A human readable string to annotate this expression, since JSON does not
    * allow comments in its encoding */
@@ -64,6 +67,7 @@ export type Attributes = {
   sourceOffsets?: [start: number, end: number];
 };
 
+/** @category MathJSON */
 export type MathJsonIdentifier = string;
 
 /**
@@ -89,23 +93,28 @@ export type MathJsonIdentifier = string;
  * - `0.234e-56`
  * - `1.(3)`
  * - `123456789123456789.123(4567)e999`
+ * @category MathJSON
  */
 export type MathJsonNumber = {
   num: 'NaN' | '-Infinity' | '+Infinity' | string;
 } & Attributes;
 
+/** @category MathJSON */
 export type MathJsonSymbol = {
   sym: MathJsonIdentifier;
 } & Attributes;
 
+/** @category MathJSON */
 export type MathJsonString = {
   str: string;
 } & Attributes;
 
+/** @category MathJSON */
 export type MathJsonFunction = {
   fn: [Expression, ...Expression[]];
 } & Attributes;
 
+/** @category MathJSON */
 export type MathJsonDictionary = {
   dict: { [key: string]: Expression };
 } & Attributes;
@@ -116,6 +125,7 @@ export type MathJsonDictionary = {
  * The leaf nodes of an expression are numbers, strings and symbols.
  * The dictionary and function nodes can contain expressions themselves.
  *
+ * @category MathJSON
  */
 export type Expression =
   // Shortcut for MathJsonNumber without metadata and in the JavaScript

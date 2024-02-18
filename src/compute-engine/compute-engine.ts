@@ -118,6 +118,9 @@ import { domainToSignature } from './domain-utils';
  * console.log(expr.evaluate().latex);
  * // ➔ "a^2 +  2ab + b^2"
  * ```
+ *
+ * @category Compute Engine
+ *
  */
 export class ComputeEngine implements IComputeEngine {
   // Common domains
@@ -2223,8 +2226,6 @@ export class ComputeEngine implements IComputeEngine {
    * Add an assumption.
    *
    * Note that the assumption is put into canonical form before being added.
-   *
-   * @param symbol - The symbol to make an assumption about
    *
    * Returns:
    * - `contradiction` if the new assumption is incompatible with previous

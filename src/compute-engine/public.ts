@@ -33,10 +33,15 @@ import type {
 export * from './latex-syntax/public';
 export * from './compute-engine';
 
+/**
+ * @category Boxed Expression
+ */
 export type Rational = [number, number] | [bigint, bigint];
 
 /**
  * Metadata that can be associated with a `BoxedExpression`
+ *
+ * @category Boxed Expression
  */
 
 export type Metadata = {
@@ -57,12 +62,18 @@ export type Metadata = {
 | `"complex"` | Complex number represented by two machine numbers, a real and an imaginary part, as provided by the "complex.js" library |
 
 </div>
+
+ * @category Compute Engine
  */
 export type NumericMode = 'auto' | 'machine' | 'bignum' | 'complex';
 
+/** @category Compute Engine */
 export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
-/** Options for `BoxedExpression.simplify()` */
+/** Options for `BoxedExpression.simplify()`
+ *
+ * @category Compute Engine
+ */
 export type SimplifyOptions = {
   recursive?: boolean;
   rules?: BoxedRuleSet;
@@ -70,22 +81,29 @@ export type SimplifyOptions = {
 
 /** Options for `BoxedExpression.evaluate()`
  *
+ * @category Boxed Expression
  */
 export type EvaluateOptions = {
   numericMode?: boolean; // Default to false
 };
 
 /** Options for `BoxedExpression.N()`
+ *
+ * @category Boxed Expression
  */
 export type NOptions = {
   //
 };
 
+/**
+ * @category Boxed Expression
+ *
+ */
 export type ReplaceOptions = {
   /** If `true`, apply replacement rules to all sub-expressions.
    * If `false`, only consider the top-level expression.
    *
-   * **Default**: `true`
+   * **Default**: `false`
    */
   recursive?: boolean;
   /**
@@ -93,7 +111,7 @@ export type ReplaceOptions = {
    *
    * If `false`, apply all the remaining rules even after the first match.
    *
-   * **Default**: `true`
+   * **Default**: `false`
    */
   once?: boolean;
   /**
@@ -113,23 +131,33 @@ export type ReplaceOptions = {
  *
  * A substitution can also be considered a more constrained version of a
  * rule whose `lhs` is always a symbol.
+
+* @category Boxed Expression
  */
 export type Substitution<T = SemiBoxedExpression> = {
   [symbol: string]: T;
 };
 
+/**
+ * @category Boxed Expression
+ *
+ */
 export type BoxedSubstitution = Substitution<BoxedExpression>;
 
 /** A LaTeX string starts and end with `$`, for example
  * `"$\frac{\pi}{2}$"`.
+ *
+ * @category Latex Parsing and Serialization
  */
 export type LatexString = string;
 
+/** @category Rules */
 export type PatternReplaceFunction = (
   expr: BoxedExpression,
   wildcards: BoxedSubstitution
 ) => BoxedExpression;
 
+/** @category Rules */
 export type PatternConditionFunction = (
   wildcards: BoxedSubstitution,
   ce: IComputeEngine
@@ -142,15 +170,19 @@ export type PatternConditionFunction = (
  * `x-1` \( \to \) `1-x`
  * `(x+1)(x-1)` \( \to \) `x^2-1
  *
- * The `match` pattern can be expressed as a LaTeX string or a MathJSON expression.
+ * The `match` pattern can be expressed as a LaTeX string or a
+ * MathJSON expression.
  *
  *
  * Anonymous wildcards (`_`) will match any
  * expression. Named wildcards (`_x`, `_a`, etc...) will match any expression
  * and bind the expression to the wildcard name.
  *
- * In addition the sequence wildcard (`__1`, `__a`, etc...) will match a sequence
- * of one or more expressions, and bind the sequence to the wildcard name.
+ * In addition the sequence wildcard (`__1`, `__a`, etc...) will match
+ * a sequence of one or more expressions, and bind the sequence to the
+ * wildcard name.
+ *
+ * @category Rules
  */
 
 export type Rule = {
@@ -161,6 +193,7 @@ export type Rule = {
   id?: string; // For debugging
 };
 
+/** @category Rules */
 export type BoxedRule = {
   match: Pattern;
   replace: BoxedExpression | PatternReplaceFunction;
@@ -169,11 +202,14 @@ export type BoxedRule = {
   id?: string; // For debugging
 };
 
+/** @category Rules */
 export type BoxedRuleSet = Set<BoxedRule>;
 
 // Use `contravariant` for the arguments of a function.
 // Use `covariant` for the result of a function.
 // Use `bivariant` to check the domain matches exactly.
+
+/** @category Boxed Expression */
 
 export type DomainCompatibility =
   | 'covariant' // A <: B
@@ -181,7 +217,11 @@ export type DomainCompatibility =
   | 'bivariant' // A <: B and A :>B, A := B
   | 'invariant'; // Neither A <: B, nor A :> B
 
-/** A domain constructor is the head of a domain expression. */
+/** A domain constructor is the head of a domain expression.
+ *
+ * @category Boxed Expression
+ *
+ */
 export type DomainConstructor =
   | 'FunctionOf' // <domain-of-args>* <co-domain>
   | 'ListOf' // <domain-of-elements>
@@ -196,6 +236,7 @@ export type DomainConstructor =
   | 'Bivariant'
   | 'Invariant';
 
+/** @category Boxed Expression */
 export type DomainLiteral =
   | 'Anything'
   | 'Values'
@@ -237,6 +278,7 @@ export type DomainLiteral =
   | 'RationalNumbers'
   | 'RealNumbers';
 
+/** @category Boxed Expression */
 export type DomainExpression<T = SemiBoxedExpression> =
   | DomainLiteral
   | ['Union', ...DomainExpression<T>[]]
@@ -257,6 +299,8 @@ export type DomainExpression<T = SemiBoxedExpression> =
 
 /**
  * @noInheritDoc
+ *
+ * @category Boxed Expression
  */
 export interface BoxedDomain extends BoxedExpression {
   get canonical(): BoxedDomain;
@@ -313,6 +357,8 @@ export interface BoxedDomain extends BoxedExpression {
 
 /**
  * Options to control the serialization to MathJSON when using `BoxedExpression.json`.
+ *
+ * @category Compute Engine
  */
 export type JsonSerializationOptions = {
   /** A list of space separated function names that should be excluded from
@@ -368,6 +414,9 @@ export type JsonSerializationOptions = {
   precision: 'auto' | 'max' | number;
 };
 
+/**
+ * @category Boxed Expression
+ */
 export type CanonicalForm =
   | 'InvisibleOperator'
   | 'Number'
@@ -379,7 +428,7 @@ export type CanonicalForm =
   | 'Order';
 
 /**
- * ### THEORY OF OPERATIONS
+ * :::info[THEORY OF OPERATIONS]
  *
  * The `BoxedExpression` interface includes most of the member functions
  * applicable to any kind of expression, for example `get symbol()` or
@@ -390,8 +439,11 @@ export type CanonicalForm =
  *
  * This convention makes it convenient to manipulate expressions without
  * having to check what kind of instance they are before manipulating them.
+ * :::
  *
- * @category BoxedExpression
+ * To get a boxed expression, use `ce.box()` or `ce.parse()`.
+ *
+ * @category Boxed Expression
  *
  */
 export interface BoxedExpression {
@@ -726,7 +778,8 @@ export interface BoxedExpression {
 
   /**
    * Transform the expression by applying the rules:
-   * if the `lhs` of a rule matches, it is replaced by its `rhs`.
+   * if an expression matches the `match` pattern, replace it with
+   * the `replace` pattern.
    *
    * If no rules apply, return `null`.
    *
@@ -737,7 +790,7 @@ export interface BoxedExpression {
    *
    */
   replace(
-    rules: BoxedRuleSet,
+    rules: BoxedRuleSet | Rule | Rule[],
     options?: ReplaceOptions
   ): null | BoxedExpression;
 
@@ -1317,7 +1370,7 @@ export interface BoxedExpression {
  * This is convenient when creating new expressions from portions
  * of an existing `BoxedExpression` while avoiding unboxing and reboxing.
  *
- * @category BoxedExpression
+ * @category Boxed Expression
  */
 export type SemiBoxedExpression =
   | number
@@ -1382,6 +1435,7 @@ export interface Pattern extends BoxedExpression {
   // subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression;
 }
 
+/** @category Assumptions */
 export interface ExpressionMapInterface<U> {
   has(expr: BoxedExpression): boolean;
   get(expr: BoxedExpression): U | undefined;
@@ -1447,6 +1501,7 @@ export type RuntimeIdentifierDefinitions = Map<
  * Scopes are lexical (also called a static scope): they are defined based on
  * where they are in an expression, they are not determined at runtime.
  *
+ * @category Compute Engine
  */
 export type Scope = {
   /** Signal `timeout` when the execution time for this scope is exceeded.
@@ -1480,6 +1535,7 @@ export type Scope = {
   iterationLimit: number;
 };
 
+/** @category Compute Engine */
 export type RuntimeScope = Scope & {
   parentScope?: RuntimeScope;
 
@@ -1642,6 +1698,7 @@ export type FunctionDefinitionFlags = {
 };
 
 /**
+ * @category Definitions
  *
  */
 
@@ -1889,15 +1946,18 @@ export type BoxedFunctionSignature = {
  *  The `size()` handler of infinite collections returns `Infinity`
  *  Infinite collections are not indexable, they have no `at()` handler.
  *
+ *  @category Definitions
  */
 export type CollectionHandlers = {
   /** Return an iterator
    * - start is optional and is a 1-based index.
    * - if start is not specified, start from index 1
    * - count is optional and is the number of elements to return
-   * - if count is not specified or negative, return all the elements from start to the end
+   * - if count is not specified or negative, return all the elements from start to the endna
    *
    * If there is a `keys()` handler, there is no `iterator()` handler.
+   *
+   * @category Definitions
    */
   iterator: (
     expr: BoxedExpression,
@@ -2012,6 +2072,7 @@ export type BoxedFunctionDefinition = BoxedBaseDefinition &
  *
  * For example, it might be useful to override `algebraic = false`
  * for a transcendental number.
+ *
  * @category Definitions
  */
 export type NumericFlags = {
@@ -2130,6 +2191,7 @@ export interface BoxedSymbolDefinition
   inferredDomain: boolean;
 }
 
+/** @category Assumptions */
 export type AssumeResult =
   | 'internal-error'
   | 'not-a-predicate'
@@ -2137,6 +2199,7 @@ export type AssumeResult =
   | 'tautology'
   | 'ok';
 
+/** @category Compiling */
 export type CompiledExpression = {
   evaluate?: (scope: {
     [symbol: string]: BoxedExpression;
@@ -2150,6 +2213,7 @@ export interface ComputeEngineStats {
   highwaterMark: number;
 }
 
+/** @category Compute Engine */
 export type AssignValue =
   | boolean
   | number
@@ -2161,6 +2225,7 @@ export type AssignValue =
   | ((ce: IComputeEngine, args) => BoxedExpression)
   | undefined;
 
+/** @category Compute Engine */
 export type ArrayValue =
   | boolean
   | number

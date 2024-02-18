@@ -1,9 +1,13 @@
+/** @module "compute-engine" */
+
+/** @category Error Handling */
 export type RuntimeSignalCode =
   | 'timeout'
   | 'out-of-memory'
   | 'recursion-depth-exceeded'
   | 'iteration-limit-exceeded';
 
+/** @category Error Handling */
 export type SignalCode =
   | RuntimeSignalCode
   | (
@@ -25,8 +29,10 @@ export type SignalCode =
       | 'syntax-error'
     );
 
+/** @category Error Handling */
 export type SignalMessage = SignalCode | [SignalCode, ...any[]];
 
+/** @category Error Handling */
 export type SignalOrigin = {
   url?: string;
   source?: string;
@@ -36,6 +42,7 @@ export type SignalOrigin = {
   around?: string;
 };
 
+/** @category Error Handling */
 export type Signal = {
   severity?: 'warning' | 'error';
 
@@ -53,14 +60,17 @@ export type Signal = {
   origin?: SignalOrigin;
 };
 
+/** @category Error Handling */
 export type ErrorSignal = Signal & {
   severity: 'error';
 };
 
+/** @category Error Handling */
 export type WarningSignal = Signal & {
   severity: 'warning';
 };
 
+/** @category Error Handling */
 export type WarningSignalHandler = (warnings: WarningSignal[]) => void;
 
 /**
@@ -115,6 +125,8 @@ export type WarningSignalHandler = (warnings: WarningSignal[]) => void;
  * a single argument was encountered with no arguments or more than one argument
  *
  * * `base-out-of-range`:  The base is expected to be between 2 and 36.
+ *
+ * @category Error Handling
  *
  */
 export type ErrorCode =

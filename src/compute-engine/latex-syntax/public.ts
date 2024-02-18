@@ -70,7 +70,7 @@ export type LibraryCategory =
 
 /**
  *
- * ### THEORY OF OPERATIONS
+ * :::info[THEORY OF OPERATIONS]
  *
  * The precedence of an operator is a number that indicates the order in which
  * operators are applied.
@@ -113,6 +113,9 @@ export type LibraryCategory =
  *
  * The JavaScript operator precedence is documented
  * [here](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence).
+ *
+ * :::
+ *
  * @category Latex Parsing and Serialization
  */
 export type Precedence = number;
@@ -624,6 +627,7 @@ export type ParseLatexOptions = {
   preserveLatex: boolean;
 };
 
+/** @category Latex Parsing and Serialization */
 export type DelimiterScale = 'normal' | 'scaled' | 'big' | 'none';
 
 /**

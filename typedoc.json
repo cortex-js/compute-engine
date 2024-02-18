@@ -1,5 +1,18 @@
 {
   // https://typedoc.org/options/
+
+  "categoryOrder": [
+    "Compute Engine",
+    "Boxed Expression",
+    "Pattern Matching",
+    "Rules",
+    "Assumptions",
+    "Compiling",
+    "Definitions",
+    "Latex Parsing and Serializing",
+    "*"
+  ],
+
   "out": "./temp-docs",
   "compilerOptions": {
     // "esModuleInterop": true,
@@ -26,6 +39,7 @@
   ],
   "readme": "none",
   "excludeExternals": true,
+  "sort": ["source-order"],
 
   // https://typedoc-plugin-markdown.org/options
   "plugin": [
