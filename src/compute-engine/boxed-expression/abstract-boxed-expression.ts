@@ -112,7 +112,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   print(): void {
-    console.log(this.toString());
+    // Make sure the console.log is not removed by minification
+    const log = console["log"] ?? (() => ());
+    log(this.toString());
   }
 
   [Symbol.toPrimitive](
