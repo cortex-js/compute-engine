@@ -748,7 +748,7 @@ export function canonicalInvisibleOperator(
 ): BoxedExpression | null {
   if (ops.length === 0) return null;
   const lhs = ops[0];
-  if (ops.length === 1) return canonicalInvisibleOperator(ce, [lhs.canonical]);
+  if (ops.length === 1) return lhs.canonical;
 
   if (ops.length === 2) {
     //

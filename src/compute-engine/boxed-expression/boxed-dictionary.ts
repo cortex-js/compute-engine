@@ -13,6 +13,7 @@ import {
   PatternMatchOptions,
   BoxedDomain,
   BoxedSubstitution,
+  Rule,
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonFunction } from './serialize';
@@ -203,7 +204,7 @@ export class BoxedDictionary extends _BoxedExpression {
   }
 
   replace(
-    rules: BoxedRuleSet,
+    rules: BoxedRuleSet | Rule | Rule[],
     options?: ReplaceOptions
   ): null | BoxedExpression {
     // @todo: rules that apply to a `Dictionary` head should be accounted for

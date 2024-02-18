@@ -22,6 +22,7 @@ import {
   EvaluateOptions,
   BoxedBaseDefinition,
   Hold,
+  Rule,
 } from '../public';
 import { findUnivariateRoots } from '../solve';
 import { isRational } from '../numerics/rationals';
@@ -279,7 +280,7 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   replace(
-    rules: BoxedRuleSet,
+    rules: BoxedRuleSet | Rule | Rule[],
     options?: ReplaceOptions
   ): BoxedExpression | null {
     return replace(this, rules, options);

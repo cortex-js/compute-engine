@@ -23,6 +23,7 @@ import {
   BoxedBaseDefinition,
   Rational,
   BoxedSubstitution,
+  Rule,
 } from '../public';
 import { isBigRational, isMachineRational } from '../numerics/rationals';
 import { asFloat } from '../numerics/numeric';
@@ -306,7 +307,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
-  replace(_rules: BoxedRuleSet): null | BoxedExpression {
+  replace(_rules: BoxedRuleSet | Rule | Rule[]): null | BoxedExpression {
     return null;
   }
 

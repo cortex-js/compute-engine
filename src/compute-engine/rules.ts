@@ -92,17 +92,31 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
  * @returns A transformed expression, if the rule matched. `null` otherwise.
  */
 function applyRule(
-  { match, replace, condition, id }: BoxedRule,
+  rule: BoxedRule,
   expr: BoxedExpression,
   substitution: BoxedSubstitution,
   options?: ReplaceOptions
 ): BoxedExpression | null {
   // console.info('applyRule', id);
+  const { match, replace, condition, id } = rule;
+
+  let changed = false;
+  if (expr.ops && options?.recursive) {
+    // Apply the rule to the operands of the expression
+    const ce = expr.engine;
+    const ops = expr.ops;
+    const newOps = ops.map((op) => {
+      const subExpr = applyRule(rule, op, {}, options);
+      if (subExpr) changed = true;
+      return subExpr ?? op;
+    });
+    if (changed) expr = ce.function(expr.head, newOps, { canonical: false });
+  }
 
   const sub = match.match(expr, { substitution, ...options });
 
   // If the `expr` does not match the pattern, the rule doesn't apply
-  if (sub === null) return null;
+  if (sub === null) return changed ? expr : null;
 
   // If the condition doesn't match, the rule doesn't apply
   if (typeof condition === 'function' && !condition(sub, expr.engine))
@@ -140,12 +154,15 @@ function applyRule(
  */
 export function replace(
   expr: BoxedExpression,
-  ruleSet: BoxedRuleSet,
+  ruleSet: BoxedRuleSet | Rule | Rule[],
   options?: ReplaceOptions
 ): BoxedExpression | null {
   const iterationLimit = options?.iterationLimit ?? 1;
   let iterationCount = 0;
   const once = options?.once ?? false;
+
+  if (!(ruleSet instanceof Set))
+    ruleSet = expr.engine.rules(Array.isArray(ruleSet) ? ruleSet : [ruleSet]);
 
   let done = false;
   let atLeastOneRule = false;

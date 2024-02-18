@@ -3,6 +3,7 @@
 ### Issues Resolved
 
 - Fix parsing of very deeply nested expressions.
+- Correctly apply rules to deeply nested expressions.
 
 ## 0.23.1 _2024-01-27_
 

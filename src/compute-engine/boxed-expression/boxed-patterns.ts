@@ -403,7 +403,10 @@ function matchArguments(
           if (expr.head === 'Add') value = ce.Zero;
           else if (expr.head === 'Multiply') value = ce.One;
           else value = ce.box(['Sequence']);
-        } else value = ce.box([expr.head, ...ops.splice(0, j - 1)]);
+        } else
+          value = ce.box([expr.head, ...ops.splice(0, j - 1)], {
+            canonical: false,
+          });
 
         result = captureWildcard(argName, value, result);
       } else if (argName.startsWith('_')) {
@@ -445,28 +448,7 @@ function match(
   pattern: BoxedExpression,
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
-  const substitution = matchOnce(subject, pattern, options.substitution ?? {}, {
+  return matchOnce(subject, pattern, options.substitution ?? {}, {
     numericTolerance: options?.numericTolerance ?? NUMERIC_TOLERANCE,
   });
-  if (substitution) {
-    // console.info('match', subject.toString(), pattern.toString(), substitution);
-    return substitution;
-  }
-
-  if (!options.recursive) return null;
-
-  // Attempt to match recursively on the arguments of a function (or the keys
-  // of a dictionary) @todo
-
-  if (subject.ops) {
-    const ops = subject.ops;
-    const result = {};
-    for (let i = 0; i < ops.length; i++) {
-      const sub = match(ops[i], pattern, options);
-      if (sub !== null) return sub;
-    }
-    return result;
-  }
-
-  return null;
 }

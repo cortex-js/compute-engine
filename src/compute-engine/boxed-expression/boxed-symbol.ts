@@ -20,6 +20,7 @@ import {
   BoxedBaseDefinition,
   DomainExpression,
   BoxedSubstitution,
+  Rule,
 } from '../public';
 import { replace } from '../rules';
 import { serializeJsonSymbol } from './serialize';
@@ -623,7 +624,7 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   replace(
-    rules: BoxedRuleSet,
+    rules: BoxedRuleSet | Rule | Rule[],
     options?: ReplaceOptions
   ): BoxedExpression | null {
     return replace(this, rules, options);
