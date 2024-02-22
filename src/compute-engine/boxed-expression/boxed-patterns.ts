@@ -1,115 +1,30 @@
-import { Expression } from '../../math-json/math-json-format';
-import { NUMERIC_TOLERANCE } from '../numerics/numeric';
-import { _BoxedExpression } from './abstract-boxed-expression';
 import {
   BoxedExpression,
   BoxedSubstitution,
-  BoxedDomain,
-  IComputeEngine,
-  LatexString,
-  Metadata,
-  Pattern,
   PatternMatchOptions,
   SemiBoxedExpression,
-  Substitution,
-  BoxedFunctionDefinition,
 } from '../public';
-import { hashCode, isLatexString } from './utils';
-import { serializeJsonFunction } from './serialize';
-import { BoxedNumber } from './boxed-number';
+import { NUMERIC_TOLERANCE } from '../numerics/numeric';
 import { permutations } from '../../common/utils';
+import { _BoxedExpression } from './abstract-boxed-expression';
+import { BoxedNumber } from './boxed-number';
+import { BoxedSymbol } from './boxed-symbol';
+import { isBoxedExpression } from './utils';
+import Complex from 'complex.js';
+import Decimal from 'decimal.js';
 
-/**
- *
- * @noInheritDoc
- */
-export class BoxedPattern extends _BoxedExpression implements Pattern {
-  _pattern: BoxedExpression;
+export function isWildcard(expr: BoxedExpression): expr is BoxedSymbol {
+  return expr.symbol?.startsWith('_') ?? false;
+}
 
-  constructor(
-    ce: IComputeEngine,
-    pattern: LatexString | SemiBoxedExpression,
-    metadata?: Metadata
-  ) {
-    super(ce, metadata);
-    this._pattern = isLatexString(pattern)
-      ? ce.parse(pattern, { canonical: false })!
-      : ce.box(pattern, { canonical: false });
-  }
-
-  get hash(): number {
-    return hashCode('Pattern') ^ this._pattern.hash;
-  }
-
-  reset(): void {
-    this._pattern.reset();
-  }
-
-  get json(): Expression {
-    return serializeJsonFunction(this.engine, 'Pattern', [this._pattern]);
-  }
-
-  get head(): string | BoxedExpression {
-    return 'Pattern';
-  }
-
-  get domain(): BoxedDomain {
-    return this.engine.domain('Values');
-  }
-
-  get isCanonical(): boolean {
-    return true;
-  }
-
-  set isCanonical(_val: boolean) {
-    return;
-  }
-
-  isSame(rhs: BoxedExpression): boolean {
-    if (this === rhs) return true;
-    return rhs instanceof BoxedPattern && this._pattern.isSame(rhs._pattern);
-  }
-
-  isEqual(rhs: BoxedExpression): boolean {
-    return rhs instanceof BoxedPattern && this._pattern.isEqual(rhs._pattern);
-  }
-
-  match(
-    expr: BoxedExpression,
-    options?: PatternMatchOptions
-  ): BoxedSubstitution | null {
-    return match(expr, this._pattern, {
-      recursive: options?.recursive ?? false,
-      numericTolerance: options?.numericTolerance ?? 0,
-      substitution: options?.substitution ?? {},
-      exact: options?.exact ?? false,
-    });
-  }
-
-  test(expr: BoxedExpression, options?: PatternMatchOptions): boolean {
-    return this.match(expr, options) !== null;
-  }
-
-  count(
-    exprs: Iterable<BoxedExpression>,
-    options?: PatternMatchOptions
-  ): number {
-    let result = 0;
-    for (const expr of exprs) {
-      if (this.match(expr, options) !== null) result += 1;
-    }
-    return result;
-  }
-
-  subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
-    return this._pattern.subs(sub, options);
-  }
+export function wildcardName(expr: BoxedExpression): string | null {
+  return expr.symbol?.startsWith('_') ? expr.symbol : null;
 }
 
 function hasWildcards(expr: string | BoxedExpression): boolean {
   if (typeof expr === 'string') return expr.startsWith('_');
 
-  if (expr.symbol?.startsWith('_')) return true;
+  if (isWildcard(expr)) return true;
 
   if (expr.ops) return hasWildcards(expr.head) || expr.ops.some(hasWildcards);
 
@@ -146,37 +61,49 @@ function captureWildcard(
 /**
  * If `expr` matches pattern, given `substitution` (checks for inconsistency)
  * return `substitution`, amended with additional matched. Otherwise, `null`.
- * @param expr
- * @param pattern
- * @param substitution
- * @param options
- * @returns
+ *
+ * When `acceptVariants` and `exact` ar `true`, the function will attempt to match the
+ * expression to a variant of the pattern (e.g. `5` to `5+_`).
+ *
+ * Set `acceptVariants` to `false` to prevent recursive matching of variants.
+ *
  */
 function matchOnce(
   expr: BoxedExpression,
   pattern: BoxedExpression,
   substitution: BoxedSubstitution,
-  options: {
-    numericTolerance: number;
-    exact?: boolean;
+  options: PatternMatchOptions & {
+    acceptVariants?: boolean;
   }
 ): BoxedSubstitution | null {
-  const exact = options.exact ?? false;
-  const ce = expr.engine;
+  //
+  // Match a wildcard
+  //
+  if (isWildcard(pattern))
+    return captureWildcard(wildcardName(pattern)!, expr, substitution);
 
-  if (pattern.head === 'Pattern')
-    return pattern.match(expr, { ...options, ...substitution });
+  // Reset accept variant (we don't want to call it recursively for the same
+  // expression, but we do want to call it for the arguments)
+  const acceptVariants = options.acceptVariants ?? true;
+  options = { ...options, acceptVariants: true };
 
   //
   // Match a number
   //
   if (pattern instanceof BoxedNumber) {
+    const numericTolerance = options?.numericTolerance ?? NUMERIC_TOLERANCE;
     if (!(expr instanceof BoxedNumber)) return null;
-    if (options.numericTolerance === 0)
-      return pattern.isSame(expr) ? substitution : null;
-    return pattern.isEqualWithTolerance(expr, options.numericTolerance)
-      ? substitution
-      : null;
+    if (
+      (numericTolerance === 0 && pattern.isSame(expr)) ||
+      pattern.isEqualWithTolerance(expr, numericTolerance)
+    )
+      return substitution;
+
+    // Attempt to match the expression to a variant of the pattern
+    // (e.g. `5` to `5+_`).
+
+    if (!acceptVariants) return null;
+    return matchVariants(expr, pattern, substitution, options);
   }
 
   //
@@ -186,14 +113,15 @@ function matchOnce(
   if (str !== null) return expr.string === str ? substitution : null;
 
   //
-  // Match a symbol or wildcard
+  // Match a symbol
   //
   const symbol = pattern.symbol;
   if (symbol !== null) {
-    if (symbol.startsWith('_'))
-      return captureWildcard(symbol, expr, substitution);
-
-    return symbol === expr.symbol ? substitution : null;
+    if (symbol === expr.symbol) return substitution;
+    // Match the symbol to a variant of the pattern
+    // (e.g. `x` to `0+x`).
+    if (!acceptVariants) return null;
+    return matchVariants(expr, pattern, substitution, options);
   }
 
   //
@@ -216,136 +144,241 @@ function matchOnce(
   //
 
   if (pattern.ops) {
+    const exact = options.exact ?? false;
+    const ce = expr.engine;
+
+    let result: BoxedSubstitution | null = null;
+
     const head = pattern.head;
 
-    // Match the function head
-    if (typeof head === 'string' && head.startsWith('_'))
-      return captureWildcard(head, ce.box(expr.head), substitution);
-
-    let def: BoxedFunctionDefinition | undefined = undefined;
-    if (typeof head === 'string' && typeof expr.head === 'string') {
-      if (head !== expr.head) {
-        // The heads did not match and we want an exact match: bail
-        if (exact) return null;
-
-        // Let's try some variants...
-
-        if (head === 'Add') {
-          // a+x -> x
-          let result = matchOnce(
-            ce.box(['Add', 0, expr], { canonical: false }),
-            pattern,
-            substitution,
-            options
-          );
-          if (result !== null) return result;
-
-          // a+x -> a-(-x)
-          if (expr.head === 'Subtract') {
-            result = matchOnce(
-              ce.box(['Add', expr.op1!, ['Negate', expr.op2!]], {
-                canonical: false,
-              }),
-              pattern,
-              substitution,
-              options
-            );
-          }
-          if (result !== null) return result;
-        }
-
-        if (head === 'Subtract') {
-          let result = matchOnce(
-            ce.box(['Subtract', expr, 0], { canonical: false }),
-            pattern,
-            substitution,
-            options
-          );
-          if (result !== null) return result;
-
-          if (expr.head === 'Negate') {
-            result = matchOnce(
-              ce.box(['Subtract', 0, expr.op1!], { canonical: false }),
-              pattern,
-              substitution,
-              options
-            );
-          }
-          if (result !== null) return result;
-        }
-
-        if (head === 'Multiply') {
-          // ax -> x
-          let result = matchOnce(
-            ce.box(['Multiply', 1, expr], { canonical: false }),
-            pattern,
-            substitution,
-            options
-          );
-          if (result !== null) return result;
-
-          // ax -> -x
-          if (expr.head === 'Negate') {
-            result = matchOnce(
-              ce.box(['Multiply', -1, expr.op1!], { canonical: false }),
-              pattern,
-              substitution,
-              options
-            );
-            if (result !== null) return result;
-          }
-
-          // ax -> x/a
-          if (expr.head === 'Divide') {
-            result = matchOnce(
-              ce.box(['Multiply', expr.op1!, ['Divide', 1, expr.op2!]], {
-                canonical: false,
-              }),
-              pattern,
-              substitution,
-              options
-            );
-            if (result !== null) return result;
-          }
-        }
-
-        if (head === 'Divide') {
-          const result = matchOnce(
-            ce.box(['Divide', expr, 1], { canonical: false }),
-            pattern,
-            substitution,
-            options
-          );
-          if (result !== null) return result;
-        }
-
-        return null;
+    if (typeof head === 'string') {
+      if (head.startsWith('_')) {
+        //
+        // 1. The pattern head is a wildcard
+        //
+        result = captureWildcard(head, ce.box(expr.head), substitution);
+        if (result !== null)
+          result = matchArguments(expr, pattern.ops, result, options);
+      } else if (head === expr.head) {
+        //
+        // 2. Both heads are strings and they match
+        //
+        const def = ce.lookupFunction(head);
+        result = def?.commutative
+          ? matchPermutation(expr, pattern, substitution, options)
+          : matchArguments(expr, pattern.ops, substitution, options);
+      } else if (typeof expr.head === 'string' && !exact) {
+        //
+        // 3. Both heads are strings and they don't match
+        //
+        if (!acceptVariants) return null;
+        result = matchVariants(expr, pattern, substitution, options);
       }
-      def = ce.lookupFunction(head);
-    } else {
-      const r = matchOnce(
+    } else if (typeof expr.head !== 'string') {
+      //
+      // 4. The heads are an expression, let's try to match them
+      //
+      result = matchOnce(
         ce.box(expr.head, { canonical: false }),
         ce.box(head, { canonical: false }),
         substitution,
         options
       );
-      if (r === null) return null;
-      substitution = r;
+      if (result !== null)
+        result = matchArguments(expr, pattern.ops, result, options);
     }
+    if (result !== null) substitution = result;
 
-    return def?.commutative
-      ? matchPermutation(expr, pattern, substitution, options)
-      : matchArguments(expr, pattern.ops, substitution, options);
+    // If requested, try to match the pattern recursively
+    if (options.recursive && expr.ops)
+      result = matchRecursive(expr, pattern, substitution, options) ?? result;
+
+    return result;
   }
 
   return null; // no match
+}
+
+/** Assuming expr is a function, attempts to match the patterns
+ * to the arguments of the function.
+ */
+function matchRecursive(
+  expr: BoxedExpression,
+  pattern: BoxedExpression,
+  substitution: BoxedSubstitution,
+  options: PatternMatchOptions
+): BoxedSubstitution | null {
+  console.assert(expr.ops !== null);
+  let result: BoxedSubstitution | null = null;
+  for (const op of expr.ops!) {
+    let r = matchOnce(op, pattern, substitution, options);
+    if (r !== null) {
+      result = r;
+      substitution = r;
+    }
+  }
+
+  return result;
+}
+
+/** For some patterns, we accept "variants" to avoid having to
+ * specify all possible forms of the pattern.
+ *
+ * For example, we accept `0+x` as a match for `x`, and
+ * 'Square(x)' as a match for 'Power(x, 2)`.
+ */
+function matchVariants(
+  expr: BoxedExpression,
+  pattern: BoxedExpression,
+  substitution: BoxedSubstitution,
+  options: PatternMatchOptions
+): BoxedSubstitution | null {
+  if (options.exact) return null;
+  console.assert(typeof pattern.head === 'string');
+  const head = pattern.head;
+  const ce = expr.engine;
+  let result: BoxedSubstitution | null = null;
+
+  const varOptions = { ...options, acceptVariants: false };
+
+  if (head === 'Add') {
+    // a+x -> x
+    let result = matchOnce(
+      ce.box(['Add', 0, expr], { canonical: false }),
+      pattern,
+      substitution,
+      varOptions
+    );
+    if (result !== null) return result;
+
+    // a+x -> a-(-x)
+    if (expr.head === 'Subtract') {
+      result = matchOnce(
+        ce.box(['Add', expr.op1!, ['Negate', expr.op2!]], {
+          canonical: false,
+        }),
+        pattern,
+        substitution,
+        varOptions
+      );
+    }
+    if (result !== null) return result;
+  }
+
+  if (head === 'Subtract') {
+    let result = matchOnce(
+      ce.box(['Subtract', expr, 0], { canonical: false }),
+      pattern,
+      substitution,
+      varOptions
+    );
+    if (result !== null) return result;
+
+    if (expr.head === 'Negate') {
+      result = matchOnce(
+        ce.box(['Subtract', 0, expr.op1!], { canonical: false }),
+        pattern,
+        substitution,
+        varOptions
+      );
+    }
+    if (result !== null) return result;
+  }
+
+  if (head === 'Multiply') {
+    // ax -> x
+    let result = matchOnce(
+      ce.box(['Multiply', 1, expr], { canonical: false }),
+      pattern,
+      substitution,
+      varOptions
+    );
+    if (result !== null) return result;
+
+    // ax -> -x
+    if (expr.head === 'Negate') {
+      result = matchOnce(
+        ce.box(['Multiply', -1, expr.op1!], { canonical: false }),
+        pattern,
+        substitution,
+        varOptions
+      );
+      if (result !== null) return result;
+    }
+
+    // ax -> x/a
+    if (expr.head === 'Divide') {
+      result = matchOnce(
+        ce.box(['Multiply', expr.op1!, ['Divide', 1, expr.op2!]], {
+          canonical: false,
+        }),
+        pattern,
+        substitution,
+        varOptions
+      );
+      if (result !== null) return result;
+    }
+  }
+
+  if (head === 'Divide') {
+    const result = matchOnce(
+      ce.box(['Divide', expr, 1], { canonical: false }),
+      pattern,
+      substitution,
+      varOptions
+    );
+    if (result !== null) return result;
+  }
+
+  if (head === 'Square') {
+    const result = matchOnce(
+      ce.box(['Power', expr, 2], { canonical: false }),
+      pattern,
+      substitution,
+      varOptions
+    );
+    if (result !== null) return result;
+  }
+
+  if (head === 'Exp') {
+    const result = matchOnce(
+      ce.box(['Power', ce.box('ExponentialE'), expr], { canonical: false }),
+      pattern,
+      substitution,
+      varOptions
+    );
+    if (result !== null) return result;
+  }
+
+  if (head === 'Power') {
+    if (pattern.op2.numericValue === 2) {
+      const result = matchOnce(
+        ce.box(['Square', expr], { canonical: false }),
+        pattern,
+        substitution,
+        varOptions
+      );
+      if (result !== null) return result;
+    }
+    if (pattern.op2.symbol === 'ExponentialE') {
+      const result = matchOnce(
+        ce.box(['Exp', expr], { canonical: false }),
+        pattern,
+        substitution,
+        varOptions
+      );
+      if (result !== null) return result;
+    }
+  }
+
+  return result;
 }
 
 function matchPermutation(
   expr: BoxedExpression,
   pattern: BoxedExpression,
   substitution: BoxedSubstitution,
-  options: { numericTolerance: number }
+  options: PatternMatchOptions
 ): BoxedSubstitution | null {
   const patterns = permutations<BoxedExpression>(pattern.ops!);
   for (const pat of patterns) {
@@ -359,9 +392,12 @@ function matchArguments(
   expr: BoxedExpression,
   patterns: BoxedExpression[],
   substitution: BoxedSubstitution,
-  options: { numericTolerance: number }
+  options: PatternMatchOptions
 ): BoxedSubstitution | null {
-  if (patterns.length === 0) return null;
+  if (patterns.length === 0) {
+    if (expr.ops && expr.ops.length === 0) return substitution;
+    return null;
+  }
 
   const ce = patterns[0].engine;
   let result: BoxedSubstitution | null = { ...substitution };
@@ -373,7 +409,7 @@ function matchArguments(
 
   while (i < patterns.length) {
     const pat = patterns[i];
-    const argName = pat.symbol;
+    const argName = wildcardName(pat);
 
     if (argName !== null) {
       if (argName.startsWith('__')) {
@@ -403,24 +439,29 @@ function matchArguments(
           if (expr.head === 'Add') value = ce.Zero;
           else if (expr.head === 'Multiply') value = ce.One;
           else value = ce.box(['Sequence']);
-        } else
-          value = ce.box([expr.head, ...ops.splice(0, j - 1)], {
-            canonical: false,
-          });
-
+        } else if (j === 2) {
+          // Capturing a single element
+          value = ops.shift()!;
+        } else {
+          const def = ce.lookupFunction(expr.head);
+          const args = ops.splice(0, j - 1);
+          if (def?.associative) {
+            value = ce.box([expr.head, ...args], { canonical: false });
+          } else {
+            value = ce.box(['Sequence', ...args], { canonical: false });
+          }
+        }
         result = captureWildcard(argName, value, result);
       } else if (argName.startsWith('_')) {
         // Match a single expression
         result = captureWildcard(argName, ops.shift()!, result);
       } else {
         result = matchOnce(ops.shift()!, pat, result, options);
-        if (result === null) return null;
       }
     } else {
       const arg = ops.shift()!;
       if (!arg) return null;
       result = matchOnce(arg, pat, result, options);
-      if (result === null) return null;
     }
 
     if (result === null) return null;
@@ -434,21 +475,40 @@ function matchArguments(
 }
 
 /**
- * The function attempts to match a [pattern](/compute-engine/guides/patterns-and-rules/)
- * with a subject expression.
+ * The function attempts to match a subject expression to a
+ * [pattern](/compute-engine/guides/patterns-and-rules/).
  *
  * If the match is successful, it returns a `Substitution` indicating how to
  * transform the pattern to become the subject.
  *
- * If the pattern is not a match, it returns `null`.
+ * If the expression does not match the pattern, it returns `null`.
  *
  */
-function match(
+export function match(
   subject: BoxedExpression,
-  pattern: BoxedExpression,
-  options: PatternMatchOptions
+  pattern:
+    | Decimal
+    | Complex
+    | [num: number, denom: number]
+    | SemiBoxedExpression
+    | BoxedExpression,
+  options?: PatternMatchOptions
 ): BoxedSubstitution | null {
-  return matchOnce(subject, pattern, options.substitution ?? {}, {
+  // If the pattern is not boxed, box it
+  if (!isBoxedExpression(pattern))
+    pattern = subject.engine.box(pattern, { canonical: false });
+
+  // If the pattern is a wildcard, capture the subject
+  if (isWildcard(pattern)) return { [wildcardName(pattern)!]: subject };
+
+  // Default options
+  const opts = {
+    recursive: options?.recursive ?? false,
+    exact: options?.exact ?? false,
+    acceptVariants: !(options?.exact ?? false),
     numericTolerance: options?.numericTolerance ?? NUMERIC_TOLERANCE,
-  });
+  };
+  const substitution = options?.substitution ?? {};
+
+  return matchOnce(subject, pattern, substitution, opts);
 }

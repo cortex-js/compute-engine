@@ -7,9 +7,13 @@ import {
   Metadata,
   PatternMatchOptions,
   BoxedSubstitution,
+  SemiBoxedExpression,
 } from '../public';
 import { serializeJsonString } from './serialize';
-import { hashCode } from './utils';
+import { hashCode, isBoxedExpression } from './utils';
+import Complex from 'complex.js';
+import Decimal from 'decimal.js';
+import { isWildcard, wildcardName } from './boxed-patterns';
 
 /**
  * BoxedString
@@ -61,11 +65,21 @@ export class BoxedString extends _BoxedExpression {
     return rhs.string === this._string;
   }
   match(
-    rhs: BoxedExpression,
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
     _options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    if (!(rhs instanceof BoxedString)) return null;
-    if (this._string === rhs._string) return {};
+    if (!isBoxedExpression(pattern))
+      pattern = this.engine.box(pattern, { canonical: false });
+
+    if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
+
+    if (!(pattern instanceof BoxedString)) return null;
+    if (this._string === pattern._string) return {};
     return null;
   }
 }

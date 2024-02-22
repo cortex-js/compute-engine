@@ -4,6 +4,10 @@ import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 import { bigint } from '../numerics/numeric-bigint';
 import { BoxedExpression, IComputeEngine } from '../public';
 
+export function isBoxedExpression(x: unknown): x is BoxedExpression {
+  return typeof x === 'object' && x !== null && 'engine' in x;
+}
+
 /**
  * For any numeric result, if `bignumPreferred()` is true, calculate using
  * bignums. If `bignumPreferred()` is false, calculate using machine numbers
@@ -115,51 +119,4 @@ export function asBigint(expr: BoxedExpression): bigint | null {
 //       const id = statement.op1.symbol;
 //       if (id) result.add(id);
 //     }
-// }
-
-/**
- * Assert that `expr` is  in fact canonical.
- *
- * Called for example from within a `canonical` handler.
- *
- * To make an expression whose canonical status is unknown, canonical, call
- * `expr.canonical`.
- */
-// export function asCanonical(expr: BoxedExpression): BoxedExpression {
-//   expr.isCanonical = true;
-//   return expr;
-// }
-
-// export function isDictionaryLike(expr: BoxedExpression): boolean {
-//   if (expr.keys) return true;
-//   const head = expr.head;
-//   if (
-//     typeof head === 'string' &&
-//     ['KeyValuePair', 'Pair', 'Tuple'].includes(head)
-//   )
-//     return true;
-//   return false;
-// }
-
-// export function getDictionaryLike(expr: BoxedExpression): {
-//   [key: string]: BoxedExpression;
-// } {
-//   const keys = expr.keys;
-//   if (keys) {
-//     const result: { [key: string]: BoxedExpression } = {};
-//     for (const key of keys) result[key] = expr.getKey(key)!;
-//     return result;
-//   }
-
-//   const head = expr.head;
-//   if (
-//     typeof head === 'string' &&
-//     ['KeyValuePair', 'Pair', 'Tuple'].includes(head)
-//   ) {
-//     const key = expr.op1.string ?? expr.op1.symbol;
-//     if (typeof key === 'string') return { [key]: expr.op2 };
-//   }
-//   // The dictionary argument can be a ["Dictionary"] expression, a ["KeyValuePair"] expression, a ["Pair"] expression or a ["Tuple"] expression.
-
-//   return {};
 // }

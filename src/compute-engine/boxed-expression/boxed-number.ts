@@ -12,6 +12,7 @@ import {
   SimplifyOptions,
   BoxedSubstitution,
   EvaluateOptions,
+  SemiBoxedExpression,
 } from '../public';
 import { inferNumericDomain } from '../domain-utils';
 import { isInMachineRange } from '../numerics/numeric-bignum';
@@ -28,6 +29,7 @@ import {
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonNumber } from './serialize';
 import { hashCode, bignumPreferred } from './utils';
+import { match } from './boxed-patterns';
 
 /**
  * BoxedNumber
@@ -229,17 +231,20 @@ export class BoxedNumber extends _BoxedExpression {
     // Note: this is not the same as `isSame()`: we want 0.09 and [9,100]
     // to be considered equal.
     // We also want a number to be equal to an exact expression, so don't
-    // bail if rhs is not a BoxedNumebr.
+    // bail if rhs is not a BoxedNumber
     return this === rhs || signDiff(this, rhs) === 0;
   }
 
   match(
-    rhs: BoxedExpression,
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    if (this.isEqualWithTolerance(rhs, options?.numericTolerance ?? 0))
-      return {};
-    return null;
+    return match(this, pattern, options);
   }
 
   /** Compare this with another BoxedNumber.

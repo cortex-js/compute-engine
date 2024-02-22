@@ -811,24 +811,27 @@ export interface BoxedExpression {
    */
   isSame(rhs: BoxedExpression): boolean;
 
-  /** Attempt to match this expression to the `rhs` expression.
+  /**
+   * If this expression matches `pattern`, return a substitution that makes
+   * `pattern` equal to `this`. Otherwise return `null`.
    *
-   * If `rhs` does not match, return `null`.
-   *
-   * Otherwise return an object literal.
-   *
-   * If this expression includes wildcards (symbols with a name that starts
-   * with `_`), the object literal will include a prop for each matching named
+   * If `pattern` includes wildcards (identifiers that starts
+   * with `_`), the substitution will include a prop for each matching named
    * wildcard.
    *
-   * If `rhs` matches this pattern but there are no named wildcards, return
-   * the empty object literal, `{}`.
+   * If this expression matches `pattern` but there are no named wildcards,
+   * return the empty substitution, `{}`.
    *
    * **Note** applicable to canonical and non-canonical expressions.
    *
    */
   match(
-    rhs: BoxedExpression,
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null;
 
@@ -1408,32 +1411,7 @@ export type PatternMatchOptions = {
  *
  * @category Pattern Matching
  */
-export interface Pattern extends BoxedExpression {
-  /** If `expr` matches the pattern, return `true`, otherwise `false` */
-  test(expr: BoxedExpression, options?: PatternMatchOptions): boolean;
-
-  /** Return the number of exprs that matched the pattern */
-  count(
-    exprs: Iterable<BoxedExpression>,
-    options?: PatternMatchOptions
-  ): number;
-
-  /**
-   * If `expr` does not match the pattern, return `null`.
-   *
-   * Otherwise, return a substitution describing the values that the named
-   * wildcards in the pattern should be changed to in order for the pattern
-   * to be equal to the expression. If there are no named wildcards and
-   * the expression matches the pattern, an empty object literal `{}` is
-   * returned.
-   */
-  // match(
-  //   expr: BoxedExpression,
-  //   options?: PatternMatchOptions
-  // ): BoxedSubstitution | null;
-
-  // subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression;
-}
+export type Pattern = BoxedExpression;
 
 /** @category Assumptions */
 export interface ExpressionMapInterface<U> {
@@ -2401,7 +2379,6 @@ export interface IComputeEngine {
   ): BoxedExpression;
 
   rules(rules: Rule[]): BoxedRuleSet;
-  pattern(expr: LatexString | SemiBoxedExpression): Pattern;
 
   /**
    * This is a primitive to create a boxed function.

@@ -1,3 +1,5 @@
+import Complex from 'complex.js';
+import Decimal from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 import { functionDomain } from '../domain-utils';
 import {
@@ -16,9 +18,11 @@ import {
   IComputeEngine,
   Metadata,
   PatternMatchOptions,
+  SemiBoxedExpression,
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { hashCode } from './utils';
+import { hashCode, isBoxedExpression } from './utils';
+import { isWildcard, wildcardName } from './boxed-patterns';
 
 /**
  * A `_BoxedDomain` is a wrapper around a boxed, canonical, domain
@@ -173,11 +177,19 @@ export class _BoxedDomain extends _BoxedExpression implements BoxedDomain {
   }
 
   match(
-    rhs: BoxedExpression,
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
     _options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    if (!(rhs instanceof _BoxedDomain)) return null;
-    if (this.isCompatible(rhs, 'invariant')) return {};
+    if (!isBoxedExpression(pattern))
+      pattern = this.engine.box(pattern, { canonical: false });
+    if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
+    if (!(pattern instanceof _BoxedDomain)) return null;
+    if (this.isCompatible(pattern, 'invariant')) return {};
     return null;
   }
 

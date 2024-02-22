@@ -1,3 +1,5 @@
+import Complex from 'complex.js';
+import Decimal from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 import {
   BoxedExpression,
@@ -11,6 +13,7 @@ import {
   PatternMatchOptions,
   BoxedBaseDefinition,
   BoxedFunctionDefinition,
+  SemiBoxedExpression,
 } from '../public';
 import {
   DataTypeMap,
@@ -22,7 +25,8 @@ import {
 import { AbstractTensor, TensorData, makeTensor } from '../symbolic/tensors';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedFunction } from './boxed-function';
-import { hashCode } from './utils';
+import { hashCode, isBoxedExpression } from './utils';
+import { isWildcard, wildcardName } from './boxed-patterns';
 
 /**
  * A boxed tensor represents an expression that can be
@@ -231,10 +235,18 @@ export class BoxedTensor extends _BoxedExpression {
   }
 
   match(
-    rhs: BoxedExpression,
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    return this.expression.match(rhs, options);
+    if (!isBoxedExpression(pattern))
+      pattern = this.engine.box(pattern, { canonical: false });
+    if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
+    return this.expression.match(pattern, options);
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {

@@ -1,3 +1,5 @@
+import Complex from 'complex.js';
+import Decimal from 'decimal.js';
 import { Expression } from '../../math-json/math-json-format';
 import {
   BoxedExpression,
@@ -17,7 +19,8 @@ import {
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonFunction } from './serialize';
-import { hashCode } from './utils';
+import { hashCode, isBoxedExpression } from './utils';
+import { isWildcard, wildcardName } from './boxed-patterns';
 
 /**
  * BoxedDictionary
@@ -148,18 +151,28 @@ export class BoxedDictionary extends _BoxedExpression {
   }
 
   match(
-    rhs: BoxedExpression,
-    _options?: PatternMatchOptions
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
+    options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    if (!(rhs instanceof BoxedDictionary)) return null;
+    if (!isBoxedExpression(pattern))
+      pattern = this.engine.box(pattern, { canonical: false });
 
-    if (this._value.size !== rhs._value.size) return null;
+    if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
+
+    if (!(pattern instanceof BoxedDictionary)) return null;
+
+    if (this._value.size !== pattern._value.size) return null;
 
     let result = {};
     for (const [k, v] of this._value) {
-      const rhsV = rhs.getKey(k);
+      const rhsV = pattern.getKey(k);
       if (!rhsV) return null;
-      const m = v.match(rhsV);
+      const m = v.match(rhsV, options);
       if (m === null) return null;
       result = { ...result, ...m };
     }

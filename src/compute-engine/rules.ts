@@ -61,15 +61,18 @@ export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
       const latex = asLatexString(condition);
       if (latex) {
         // Substitute any unbound vars in the condition to a wildcard
-        const condPattern = ce.pattern(latex);
+        const condPattern = ce.parse(latex, { canonical: false });
         condFn = (x: BoxedSubstitution, _ce: IComputeEngine): boolean =>
           condPattern.subs(x).evaluate()?.symbol === 'True';
       }
     } else condFn = condition;
 
     result.add({
-      match: ce.pattern(match),
-      replace: typeof replace === 'function' ? replace : ce.pattern(replace),
+      match: ce.box(match, { canonical: false }),
+      replace:
+        typeof replace === 'function'
+          ? replace
+          : ce.box(replace, { canonical: false }),
       priority: priority ?? 0,
       condition: condFn,
       id:
@@ -113,7 +116,7 @@ function applyRule(
     if (changed) expr = ce.function(expr.head, newOps, { canonical: false });
   }
 
-  const sub = match.match(expr, { substitution, ...options });
+  const sub = expr.match(match, { substitution, ...options });
 
   // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return changed ? expr : null;

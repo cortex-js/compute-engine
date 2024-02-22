@@ -24,6 +24,7 @@ import {
   Rational,
   BoxedSubstitution,
   Rule,
+  SemiBoxedExpression,
 } from '../public';
 import { isBigRational, isMachineRational } from '../numerics/rationals';
 import { asFloat } from '../numerics/numeric';
@@ -43,7 +44,12 @@ export abstract class _BoxedExpression implements BoxedExpression {
   abstract isSame(rhs: BoxedExpression): boolean;
   abstract isEqual(rhs: BoxedExpression): boolean;
   abstract match(
-    rhs: BoxedExpression,
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null;
 
@@ -103,9 +109,9 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
     if (this.head && typeof this.head === 'string') {
       if (this.head === 'List')
-        return `[${this.ops?.map((x) => x.toString())}]`;
+        return `[${this.ops?.map((x) => x.toString()) ?? ''}]`;
       if (this.head === 'Domain') return JSON.stringify(this.json);
-      return `${this.head}(${this.ops?.map((x) => x.toString()).join(', ')})`;
+      return `${this.head}(${this.ops?.map((x) => x.toString()).join(', ') ?? ''})`;
     }
 
     return JSON.stringify(this.json);
@@ -113,8 +119,8 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   print(): void {
     // Make sure the console.log is not removed by minification
-    const log = console["log"] ?? (() => ());
-    log(this.toString());
+    const log = console['log'];
+    log?.(this.toString());
   }
 
   [Symbol.toPrimitive](

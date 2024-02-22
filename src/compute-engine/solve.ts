@@ -1,3 +1,4 @@
+import { isInequality } from './library/relational-operator';
 import { BoxedExpression, Rule, SemiBoxedExpression } from './public';
 import { boxRules, matchRules } from './rules';
 import { expand } from './symbolic/expand';
@@ -243,13 +244,7 @@ export function univariateSolve(
     return null;
   }
 
-  if (
-    name === null ||
-    (typeof name === 'string' &&
-      !['Equal', 'Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(name))
-  ) {
-    return null;
-  }
+  if (name === null || !isInequality(expr)) return null;
 
   let lhs: SemiBoxedExpression = expr.op1;
   const rhs = expr.op2;

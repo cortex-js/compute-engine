@@ -16,8 +16,12 @@ import { BoxedSymbol } from './boxed-symbol';
 /**
  * BoxedWildcard
  *
- * A boxed is a symbol that is used as a wildcard. The name of the
- * symbol begins with a `_`.
+ * A boxed wildcard is an identifier that is used as a wildcard. The
+ * identifier begins with a `_`.
+ *
+ * @todo: not used right now. Might not be the right approach.
+ * Maybe a `isWildcard()` function would be better.
+ * And something like `wildcardCondition()`.
  *
  * @noInheritDoc
  *
@@ -32,6 +36,7 @@ export class BoxedWildcard extends BoxedSymbol {
   private _repeatMax: number;
 
   constructor(ce: IComputeEngine, name: string, metadata?: Metadata) {
+    // @todo: ":" is not a valid character in an identifier
     const segments = name.split(':');
     super(ce, segments[0], { metadata, canonical: false });
     if (name.startsWith('___')) {

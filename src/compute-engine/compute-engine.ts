@@ -54,7 +54,6 @@ import {
 } from './library/library';
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 import { ExpressionMap } from './boxed-expression/expression-map';
-import { BoxedPattern } from './boxed-expression/boxed-patterns';
 import { asLatexString } from './boxed-expression/utils';
 import { boxRules } from './rules';
 import { BoxedString } from './boxed-expression/boxed-string';
@@ -2029,10 +2028,6 @@ export class ComputeEngine implements IComputeEngine {
     return boxRules(this, rules);
   }
 
-  pattern(expr: LatexString | SemiBoxedExpression): Pattern {
-    return new BoxedPattern(this, expr);
-  }
-
   /**
    * Return a function expression, but the caller is responsible for making
    * sure that the arguments are canonical.
@@ -2201,7 +2196,7 @@ export class ComputeEngine implements IComputeEngine {
    * ```
    */
   ask(pattern: SemiBoxedExpression): BoxedSubstitution[] {
-    const pat = this.pattern(pattern);
+    const pat = this.box(pattern, { canonical: false });
     const result: BoxedSubstitution[] = [];
     for (const [assumption, val] of this.assumptions) {
       const m = pat.match(assumption, {

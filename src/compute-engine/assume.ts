@@ -1,4 +1,5 @@
 import { signatureToDomain } from './domain-utils';
+import { isInequality } from './library/relational-operator';
 import {
   AssumeResult,
   BoxedExpression,
@@ -36,6 +37,8 @@ import { findUnivariateRoots } from './solve';
 export function assume(proposition: BoxedExpression): AssumeResult {
   if (proposition.head === 'Element') return assumeElement(proposition);
   if (proposition.head === 'Equal') return assumeEquality(proposition);
+  // isInequality also returns true for 'Equal', but we have already handled
+  // it above.
   if (isInequality(proposition)) return assumeInequality(proposition);
 
   return 'not-a-predicate';
@@ -292,10 +295,4 @@ function undefinedIdentifiers(expr: BoxedExpression): string[] {
 function hasValue(ce: IComputeEngine, s: string): boolean {
   if (ce.lookupFunction(s)) return false;
   return ce.lookupSymbol(s)?.value !== undefined;
-}
-
-function isInequality(expr: BoxedExpression): boolean {
-  const h = expr.head;
-  if (typeof h !== 'string') return false;
-  return ['Less', 'Greater', 'LessEqual', 'GreaterEqual'].includes(h);
 }

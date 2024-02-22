@@ -47,6 +47,8 @@ import { canonicalNegate } from '../symbolic/negate';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { signDiff } from '../numerics/numeric';
+import { match } from './boxed-patterns';
+import { isRelationalOperator } from '../latex-syntax/dictionary/definitions-relational-operators';
 
 /**
  * A boxed function represent an expression that can be
@@ -326,36 +328,15 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   match(
-    rhs: BoxedExpression,
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    if (!(rhs instanceof BoxedFunction)) return null;
-
-    let result: BoxedSubstitution = {};
-
-    // Head must match
-    if (typeof this.head === 'string') {
-      if (this.head !== rhs.head) return null;
-    } else {
-      if (typeof rhs.head === 'string') return null;
-      else {
-        if (!rhs.head) return null;
-        const m = this.head.match(rhs.head, options);
-        if (m === null) return null;
-        result = { ...result, ...m };
-      }
-    }
-
-    // Each argument must match
-    const lhsTail = this._ops;
-    const rhsTail = rhs._ops;
-    // @todo: need to handle different lengths (sequence pattern)
-    for (let i = 0; i < lhsTail.length; i++) {
-      const m = lhsTail[i].match(rhsTail[i], options);
-      if (m === null) return null;
-      result = { ...result, ...m };
-    }
-    return result;
+    return match(this, pattern, options);
   }
 
   //
@@ -382,6 +363,72 @@ export class BoxedFunction extends _BoxedExpression {
   /** `isEqual` is mathematical equality */
   isEqual(rhs: BoxedExpression): boolean {
     if (this === rhs) return true;
+
+    const head = this.head;
+    //
+    // Handle relational operators
+    //
+    if (head === 'Equal' || head === 'NotEqual' || head === 'Unequal') {
+      if (rhs.head !== head) return false;
+      // Equality is commutative
+      if (
+        (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) ||
+        (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1))
+      )
+        return true;
+      return false;
+    }
+    if (head === 'Less') {
+      if (rhs.head === 'Less') {
+        if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+        return false;
+      }
+      if (rhs.head === 'Greater') {
+        if (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1)) return true;
+        return false;
+      }
+      return false;
+    }
+    if (head === 'Greater') {
+      if (rhs.head === 'Greater') {
+        if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+        return false;
+      }
+      if (rhs.head === 'Less') {
+        if (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1)) return true;
+        return false;
+      }
+      return false;
+    }
+    if (head === 'LessEqual') {
+      if (rhs.head === 'LessEqual') {
+        if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+        return false;
+      }
+      if (rhs.head === 'GreaterEqual') {
+        if (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1)) return true;
+        return false;
+      }
+      return false;
+    }
+    if (head === 'GreaterEqual') {
+      if (rhs.head === 'GreaterEqual') {
+        if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+        return false;
+      }
+      if (rhs.head === 'LessEqual') {
+        if (this.op1.isEqual(rhs.op2) && this.op2.isEqual(rhs.op1)) return true;
+        return false;
+      }
+      return false;
+    }
+    if (isRelationalOperator(head)) {
+      if (rhs.head !== this.head) return false;
+      if (this.op1.isEqual(rhs.op1) && this.op2.isEqual(rhs.op2)) return true;
+      return false;
+    }
+
+    // Not a relational operator. An algebraic expression?
     const s = signDiff(this, rhs);
     if (s === 0) return true;
     if (s !== undefined) return false;

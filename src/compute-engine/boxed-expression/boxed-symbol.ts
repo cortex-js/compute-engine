@@ -21,6 +21,7 @@ import {
   DomainExpression,
   BoxedSubstitution,
   Rule,
+  SemiBoxedExpression,
 } from '../public';
 import { replace } from '../rules';
 import { serializeJsonSymbol } from './serialize';
@@ -30,6 +31,7 @@ import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { narrow } from './boxed-domain';
 import { domainToSignature, signatureToDomain } from '../domain-utils';
+import { match } from './boxed-patterns';
 
 /**
  * BoxedSymbol
@@ -396,12 +398,15 @@ export class BoxedSymbol extends _BoxedExpression {
   }
 
   match(
-    rhs: BoxedExpression,
-    _options?: PatternMatchOptions
+    pattern:
+      | Decimal
+      | Complex
+      | [num: number, denom: number]
+      | SemiBoxedExpression
+      | BoxedExpression,
+    options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    if (!(rhs instanceof BoxedSymbol)) return null;
-    if (this._id === rhs._id) return {};
-    return null;
+    return match(this, pattern, options);
   }
 
   isEqual(rhs: BoxedExpression): boolean {

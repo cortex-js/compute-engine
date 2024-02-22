@@ -1,6 +1,6 @@
 import { Expression } from '../../math-json/math-json-format';
 import { countLeaves, head, op1, op2 } from '../../math-json/utils';
-import { DelimiterScale } from './public.js';
+import { DelimiterScale } from './public';
 
 export function getApplyFunctionStyle(
   _expr: Expression,

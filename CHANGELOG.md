@@ -4,6 +4,14 @@
 
 - Fix parsing of very deeply nested expressions.
 - Correctly apply rules to deeply nested expressions.
+- `expr.print()` now correctly prints the expression when using the minified
+  version of the library.
+- `expr.isEqual()` now correctly compares equalities and inequalities.
+- `expr.match()` has been improved and works correctly in more cases. The
+  signature of the `match` function has been changed so that the pattern is the
+  first argument, i.e. instead of `pattern.match(expr)` use
+  `expr.match(pattern)`.
+- Fix `expr.print()` when using the minified version of the library.
 
 ## 0.23.1 _2024-01-27_
 

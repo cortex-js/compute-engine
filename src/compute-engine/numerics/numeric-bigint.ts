@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { primeFactors as machinePrimeFactors } from './numeric';
-import { Expression } from '../../math-json.js';
+import { Expression } from '../../math-json';
 import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 
 export function bigintValue(
