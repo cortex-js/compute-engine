@@ -799,30 +799,29 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser: Parser) => {
       const args = parser.parseArguments('implicit');
       if (args === null) return 'Log' as Expression;
-      return ['Log', ...args, 2] as Expression;
+      return ['Log', args[0], 2] as Expression;
     },
   },
   {
     name: 'Ln',
     latexTrigger: ['\\ln'],
-    serialize: (serializer, expr): string =>
-      '\\ln' + serializer.wrapArguments(expr),
     parse: (parser: Parser) => parseLog('Ln', parser),
+    serialize: (serializer, expr) => '\\ln' + serializer.wrapArguments(expr),
   },
   {
     name: 'Log',
     latexTrigger: ['\\log'],
     parse: (parser: Parser) => parseLog('Log', parser),
-    serialize: (serializer, expr): string => {
+    serialize: (serializer, expr) => {
       const base = op2(expr);
-      if (base)
-        return joinLatex([
-          '\\log_{',
-          base.toString(),
-          '}',
-          serializer.wrap(op1(expr)),
-        ]);
-      return '\\log' + serializer.wrapArguments(expr);
+      if (!base) return '\\log' + serializer.wrapArguments(expr);
+
+      return joinLatex([
+        '\\log_{',
+        serializer.serialize(base),
+        '}',
+        serializer.wrap(op1(expr)),
+      ]);
     },
   },
 
@@ -1228,16 +1227,18 @@ function serializeBigOp(command: string) {
 }
 
 function parseLog(command: string, parser: Parser): Expression | null {
-  let sub: string | null = null;
-  let base: number | null = null;
-  if (parser.match('_')) {
-    sub = parser.parseStringGroup()?.trim() ?? parser.nextToken();
-    base = Number.parseFloat(sub ?? '10');
-  }
+  let sub: Expression | null = null;
+
+  if (parser.match('_')) sub = parser.parseGroup() ?? parser.nextToken();
+
   const args = parser.parseArguments('implicit');
-  if (args === null) return command;
-  if (base === 10) return ['Log', args[0]] as Expression;
-  if (base === 2) return ['Lb', ...args] as Expression;
+
+  if (args === null && sub === null) return [command] as Expression;
+  if (args === null) return [command, sub] as Expression;
+
   if (sub === null) return [command, ...args] as Expression;
-  return ['Log', ...args, sub] as Expression;
+
+  if (sub === 10) return ['Log', args[0]] as Expression;
+  if (sub === 2) return ['Lb', ...args] as Expression;
+  return ['Log', args[0], sub] as Expression;
 }

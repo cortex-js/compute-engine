@@ -12,6 +12,8 @@
   first argument, i.e. instead of `pattern.match(expr)` use
   `expr.match(pattern)`.
 - Fix `expr.print()` when using the minified version of the library.
+- **#142** Accept complex expressions as the subcript of `\ln` and `\log` in
+  LaTeX.
 
 ## 0.23.1 _2024-01-27_
 
