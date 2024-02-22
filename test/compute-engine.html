@@ -397,29 +397,6 @@
       const mf = document.getElementById("mf");
       const ce = MathfieldElement.computeEngine;
 
-      const e = ce.parse("x^2 + 1 = 0");
-      const sols = e.solve("x")?.map((x) => x.json);
-      console.log(sols);
-
-      const result = ce.One.match(["Add", "_a", ["Multiply", "_a", "_b"]]);
-      console.log(result);
-
-      // const expr3 = ce.parse("1x-7-1y", { canonical: false });
-      // console.log(
-      //   expr3
-      //     .replace(
-      //       [
-      //         {
-      //           match: ["InvisibleOperator", "1", "__a"],
-      //           replace: "__a",
-      //         },
-      //       ],
-      //       { recursive: true }
-      //     )
-      //     .toString()
-      // );
-      // console.log(expr3.simplify().json);
-
       ce.strict = true;
       // console.info(
       //   ce.parse("\\operatorname{f} := x \\mapsto 2x").evaluate().toString()
