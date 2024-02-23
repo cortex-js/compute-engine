@@ -70,7 +70,7 @@ export function bignumValue(
 
   let s = num
     .toLowerCase()
-    .replace(/[nd]$/, '')
+    .replace(/[0-9][nd]$/, '')
     .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
   if (/\([0-9]+\)/.test(s)) {
     const [_, body, repeat, trail] = s.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];

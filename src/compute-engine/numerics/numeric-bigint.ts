@@ -21,7 +21,7 @@ export function bigintValue(
 
   let s = num
     .toLowerCase()
-    .replace(/[nd]$/, '')
+    .replace(/[0-9][nd]$/, '')
     .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
 
   if (s === 'nan') return null;
@@ -36,7 +36,13 @@ export function bigint(a: Decimal | number | bigint | string): bigint {
   if (a instanceof Decimal) return bigint(a.toString());
 
   // BigInt constructor does not deal well with e.g. `1e30` or `1.2e5`
-  let s = a.toString();
+  let s = a.toString().toLowerCase();
+
+  if (s === 'nan') return NaN as unknown as bigint;
+  if (s === 'infinity' || s === '+infinity')
+    return Infinity as unknown as bigint;
+  if (s === '-infinity') return -Infinity as unknown as bigint;
+
   const m = s.match(/([^\.]+)(?:\.([0-9]+))?e(.+)$/);
   if (m) {
     s =
@@ -44,6 +50,7 @@ export function bigint(a: Decimal | number | bigint | string): bigint {
       (m[2] ?? '') +
       '0'.repeat(parseInt(m[3]) - (m[2] ? m[2].length : 0));
   }
+
   return BigInt(s);
 }
 

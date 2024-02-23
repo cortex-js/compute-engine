@@ -350,7 +350,7 @@ export function dictionary(
 function machineValueOfString(s: string): number | null {
   s = s
     .toLowerCase()
-    .replace(/[nd]$/, '')
+    .replace(/[0-9][nd]$/, '')
     .replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
 
   if (s === 'nan') return NaN;

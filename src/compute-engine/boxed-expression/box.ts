@@ -143,6 +143,9 @@ export function boxNumber(
         'Array argument to `boxNumber()` should be two integers or two bignums'
       );
 
+    if (!isFinite(n) || !isFinite(d))
+      return ce.div(ce.number(n, options), ce.number(d, options));
+
     if (!Number.isInteger(n) || !Number.isInteger(d))
       throw new Error('Array argument to `boxNumber()` should be two integers');
     if (d === n) return d === 0 ? ce.NaN : ce.One;
