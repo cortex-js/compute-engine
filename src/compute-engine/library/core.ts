@@ -690,7 +690,42 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         },
       },
     },
-    // {name: 'Pattern',},
+  },
+
+  //
+  // Wildcards
+  //
+  {
+    Wildcard: {
+      signature: {
+        params: ['Symbols'],
+        result: 'Symbols',
+        canonical: (ce, args) => {
+          if (args.length !== 1) return ce.symbol('_');
+          return ce.symbol('_' + args[0].symbol);
+        },
+      },
+    },
+    WildcardSequence: {
+      signature: {
+        params: ['Symbols'],
+        result: 'Symbols',
+        canonical: (ce, args) => {
+          if (args.length !== 1) return ce.symbol('__');
+          return ce.symbol('__' + args[0].symbol);
+        },
+      },
+    },
+    WildcardOptionalSequence: {
+      signature: {
+        params: ['Symbols'],
+        result: 'Symbols',
+        canonical: (ce, args) => {
+          if (args.length !== 1) return ce.symbol('___');
+          return ce.symbol('___' + args[0].symbol);
+        },
+      },
+    },
   },
 
   //
