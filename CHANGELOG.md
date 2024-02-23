@@ -14,6 +14,7 @@
 - Fix `expr.print()` when using the minified version of the library.
 - **#142** Accept complex expressions as the subcript of `\ln` and `\log` in
   LaTeX.
+- **#139** Parse quantifiers `\forall` and `\exists` in LaTeX.
 
 ## 0.23.1 _2024-01-27_
 

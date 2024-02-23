@@ -1,5 +1,6 @@
-import { LatexDictionary } from '../public';
+import { InfixEntry, LatexDictionary, Parser, Terminator } from '../public';
 import { head, missingIfEmpty, op } from '../../../math-json/utils';
+import { Expression } from '../../../math-json.js';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
 
@@ -161,7 +162,11 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'infix',
     associativity: 'right',
     precedence: 219,
-    parse: (parser, lhs, terminator) => {
+    parse: (
+      parser: Parser,
+      lhs: Expression,
+      terminator: Readonly<Terminator>
+    ) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 219 });
 
       const index = parser.index;
@@ -171,9 +176,9 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
         return ['Congruent', lhs, rhs, missingIfEmpty(op(modulus, 1))];
 
       parser.index = index;
-      return ['Equivalent', lhs, missingIfEmpty(rhs)];
+      return ['Equivalent', lhs, missingIfEmpty(rhs)] as Expression;
     },
-  },
+  } as InfixEntry,
 
   {
     name: 'Proves',
@@ -199,4 +204,106 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     associativity: 'right',
     serialize: '\\models',
   },
+  // Quantifiers: for all, exists
+  {
+    name: 'ForAll',
+    kind: 'prefix',
+    latexTrigger: ['\\forall'],
+    precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE
+    serialize: '\\forall',
+    parse: parseQuantifier('ForAll'),
+  },
+  {
+    name: 'Exists',
+    kind: 'prefix',
+    latexTrigger: ['\\exists'],
+    precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE,
+    serialize: '\\exists',
+    parse: parseQuantifier('Exists'),
+  },
+  {
+    name: 'ForAllUnique',
+    kind: 'prefix',
+    latexTrigger: ['\\forall', '!'],
+    precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE,
+    serialize: '\\forall!',
+    parse: parseQuantifier('ForAllUnique'),
+  },
+  {
+    name: 'ExistsUnique',
+    kind: 'prefix',
+    latexTrigger: ['\\exists', '!'],
+    precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE,
+    serialize: '\\exists!',
+    parse: parseQuantifier('ExistsUnique'),
+  },
 ];
+
+function parseQuantifier(
+  kind: 'ForAll' | 'Exists' | 'ForAllUnique' | 'ExistsUnique'
+): (parser: Parser, terminator: Readonly<Terminator>) => Expression | null {
+  return (parser, terminator) => {
+    const index = parser.index;
+
+    // There are several acceptable forms:
+    // - \forall x, x>0
+    // - \forall x (x>0)
+    // - \forall x \in S, x>0
+    // - \forall x \in S (x>0)
+    // - \forall x  \mid x>0
+
+    // As a BNF:
+    // - <quantifier> ::= '\forall' | '\exists' | '\forall!' | '\exists!'
+    // - <quantifier-expression> ::= <quantifier> <condition> [',' | '\mid'] <condition>
+    // - <quantifier-expression> ::=  <quantifier> <condition> '(' <condition> ')'
+
+    //
+    // 1. First, we check for a standalone identifier, that is an identifier
+    //    followed by a comma, a vertical bar or a parenthesis
+    //
+
+    const id = parser.parseSymbol(terminator);
+    if (id) {
+      parser.skipSpace();
+      if (parser.match(',') || parser.match('\\mid')) {
+        const body = parser.parseExpression(terminator);
+        return [kind, id, missingIfEmpty(body)] as Expression;
+      }
+      if (parser.match('(')) {
+        const body = parser.parseExpression(terminator);
+        if (!parser.match(')')) {
+          parser.index = index;
+          return null;
+        }
+        return [kind, id, missingIfEmpty(body)];
+      }
+    }
+
+    //
+    // 2. If we didn't find a standalone identifier, we look for a condition
+    //
+    parser.index = index;
+    const condition = parser.parseExpression(terminator);
+    if (!condition) {
+      parser.index = index;
+      return null;
+    }
+    // Either a separator or a parenthesis
+    parser.skipSpace();
+    if (parser.matchAny([',', '\\mid', ':', '\\colon'])) {
+      const body = parser.parseExpression(terminator);
+      return [kind, condition, missingIfEmpty(body)] as Expression;
+    }
+    if (parser.match('(')) {
+      const body = parser.parseExpression(terminator);
+      if (!parser.match(')')) {
+        parser.index = index;
+        return null;
+      }
+      return [kind, condition, missingIfEmpty(body)] as Expression;
+    }
+
+    parser.index = index;
+    return null;
+  };
+}

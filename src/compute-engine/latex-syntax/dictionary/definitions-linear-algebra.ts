@@ -45,11 +45,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [head, cells] = parseCells(parser);
 
-      if (columns) return [head, cells, { str: '()' }, { str: columns }];
+      if (columns)
+        return [head, cells, { str: '()' }, { str: columns }] as Expression;
 
       // `pmatrix` is the default environment, so no need to specify the
       // delimiters
-      return [head, cells];
+      return [head, cells] as Expression;
     },
   },
 
@@ -60,9 +61,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [head, cells] = parseCells(parser);
 
-      if (columns) return [head, cells, { str: '[]' }, { str: columns }];
+      if (columns)
+        return [head, cells, { str: '[]' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '[]' }];
+      return [head, cells, { str: '[]' }] as Expression;
     },
   },
 
@@ -73,9 +75,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [head, cells] = parseCells(parser);
 
-      if (columns) return [head, cells, { str: '{}' }, { str: columns }];
+      if (columns)
+        return [head, cells, { str: '{}' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '{}' }];
+      return [head, cells, { str: '{}' }] as Expression;
     },
   },
 
@@ -86,9 +89,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [head, cells] = parseCells(parser);
 
-      if (columns) return [head, cells, { str: '||' }, { str: columns }];
+      if (columns)
+        return [head, cells, { str: '||' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '||' }];
+      return [head, cells, { str: '||' }] as Expression;
     },
   },
 
@@ -99,9 +103,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [head, cells] = parseCells(parser);
 
-      if (columns) return [head, cells, { str: '‖‖' }, { str: columns }];
+      if (columns)
+        return [head, cells, { str: '‖‖' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '‖‖' }];
+      return [head, cells, { str: '‖‖' }] as Expression;
     },
   },
 
@@ -112,9 +117,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [head, cells] = parseCells(parser);
 
-      if (columns) return [head, cells, { str: '()' }, { str: columns }];
+      if (columns)
+        return [head, cells, { str: '()' }, { str: columns }] as Expression;
 
-      return [head, cells];
+      return [head, cells] as Expression;
     },
   },
 
@@ -125,9 +131,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser, false);
       const [head, cells] = parseCells(parser);
 
-      if (columns) return [head, cells, { str: '..' }, { str: columns }];
+      if (columns)
+        return [head, cells, { str: '..' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '..' }];
+      return [head, cells, { str: '..' }] as Expression;
     },
   },
 
@@ -138,9 +145,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [head, cells] = parseCells(parser);
 
-      if (columns) return [head, cells, { str: '..' }, { str: columns }];
+      if (columns)
+        return [head, cells, { str: '..' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '..' }];
+      return [head, cells, { str: '..' }] as Expression;
     },
   },
   {
@@ -150,9 +158,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [head, cells] = parseCells(parser);
 
-      if (columns) return [head, cells, { str: '..' }, { str: columns }];
+      if (columns)
+        return [head, cells, { str: '..' }, { str: columns }] as Expression;
 
-      return [head, cells, { str: '..' }];
+      return [head, cells, { str: '..' }] as Expression;
     },
   },
 

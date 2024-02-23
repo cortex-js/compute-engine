@@ -603,8 +603,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     kind: 'matchfix',
-    openTrigger: '\\vert',
-    closeTrigger: '\\vert',
+    openTrigger: ['\\vert'],
+    closeTrigger: ['\\vert'],
     parse: (_parser, body) => (isEmptySequence(body) ? null : ['Abs', body]),
   },
   {
@@ -847,12 +847,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: '\\lim',
     kind: 'expression',
     parse: (parser: Parser) => {
-      if (!parser.match('_')) return undefined;
+      if (!parser.match('_')) return null;
       const base = parser.parseGroup();
-      if (head(base) !== 'To') return undefined;
+      if (head(base) !== 'To') return null;
       const expr = parser.parseArguments('implicit');
-      if (!expr) return undefined;
-      return ['Limit', ['Function', expr[0], op(base, 1)], op(base, 2)];
+      if (!expr) return null;
+      return [
+        'Limit',
+        ['Function', expr[0], op(base, 1)],
+        op(base, 2),
+      ] as Expression;
     },
     serialize: (serializer, expr) => {
       const fn = op(expr, 1);

@@ -1003,7 +1003,7 @@ export class _Parser implements Parser {
    * Parse a number, with an optional sign, exponent, decimal marker,
    * repeating decimals, etc...
    */
-  private parseNumber(): Expression | null {
+  parseNumber(): Expression | null {
     // If we don't parse numbers, we'll return them as individual tokens
     if (
       (this.options.parseNumbers as any as boolean) === false ||

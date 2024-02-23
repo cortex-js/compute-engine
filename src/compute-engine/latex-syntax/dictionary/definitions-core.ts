@@ -42,12 +42,12 @@ import { joinLatex } from '../tokenizer';
  */
 function parseSequence(
   parser: Parser,
-  terminator: Readonly<Terminator>,
+  terminator: Readonly<Terminator> | undefined,
   lhs: Expression | null,
   prec: number,
   sep: string
 ): Expression[] | null {
-  if (terminator.minPrec >= prec) return null;
+  if (terminator && terminator.minPrec >= prec) return null;
 
   const result: Expression[] = lhs ? [lhs] : ['Nothing'];
   let done = false;
@@ -397,7 +397,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     latexTrigger: ['\\error'],
-    parse: (parser: Parser) => ['Error', parser.parseGroup()],
+    parse: (parser: Parser) => ['Error', parser.parseGroup()] as Expression,
   },
   {
     name: 'Error',
@@ -710,12 +710,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     latexTrigger: ['^', '<{>', '('],
     kind: 'postfix',
-    parse: (parser: Parser, lhs) => {
+    parse: (parser: Parser, lhs, until) => {
       if (!parser.computeEngine?.box(lhs)?.domain?.isFunction) return null;
 
       const start = parser.index;
       parser.addBoundary([')']);
-      const expr = parser.parseExpression();
+      const expr = parser.parseExpression(until);
       if (!parser.matchBoundary()) {
         parser.index = start;
         return null;
@@ -724,7 +724,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         parser.index = start;
         return null;
       }
-      return ['Derivative', lhs, expr];
+      return ['Derivative', lhs, expr] as Expression;
     },
   },
 

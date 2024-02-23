@@ -410,7 +410,7 @@ export type PostfixEntry = BaseEntry &
 
     precedence?: Precedence;
 
-    parse?: PostfixParseHandler;
+    parse?: string | PostfixParseHandler;
   };
 
 /**
@@ -426,7 +426,7 @@ export type PrefixEntry = BaseEntry &
     kind: 'prefix';
     precedence: Precedence;
 
-    parse?: PrefixParseHandler;
+    parse?: string | PrefixParseHandler;
   };
 
 /**
@@ -543,7 +543,7 @@ export function isEnvironmentEntry(
  * @category Latex Parsing and Serialization
  * @internal
  */
-export type LatexDictionary = Array<object>;
+export type LatexDictionary = Array<Partial<LatexDictionaryEntry>>;
 
 /**
  *
@@ -1115,6 +1115,11 @@ export interface Parser {
    * `until` is `{ minPrec:0 }` by default.
    */
   parseExpression(until?: Partial<Terminator>): Expression | null;
+
+  /**
+   * Parse a number.
+   */
+  parseNumber(): Expression | null;
 
   /**
    * Boundaries are used to detect the end of an expression.

@@ -189,9 +189,9 @@ describe('STEFNOTCH #13', () => {
   test('9/  \\forall x\\in\\C^2:|x|<0', () => {
     expect(parse('\\forall x\\in\\C^2:|x|<0')).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\forall'"],
-        ["LatexString", "'\\forall'"]
+        "ForAll",
+        ["Element", "x", ["Power", "ComplexNumbers", 2]],
+        ["Less", ["Abs", "x"], 0]
       ]
     `);
   });
@@ -203,9 +203,26 @@ describe('STEFNOTCH #13', () => {
       )
     ).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["ErrorCode", "'unexpected-command'", "'\\forall'"],
-        ["LatexString", "'\\forall'"]
+        "Sequence",
+        [
+          "ForAll",
+          "n",
+          [
+            "Implies",
+            [
+              "LessEqual",
+              ["Subscript", "a", "n"],
+              ["Subscript", "c", "n"],
+              ["Subscript", "b", "n"]
+            ],
+            ["Error", "'missing'"]
+          ]
+        ],
+        [
+          "Error",
+          ["ErrorCode", "'unexpected-command'", "'\\lim'"],
+          ["LatexString", "'\\lim'"]
+        ]
       ]
     `);
   });
