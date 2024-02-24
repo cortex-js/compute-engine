@@ -147,7 +147,7 @@ function applyRule(
   //     .join(', ')
   // );
   if (typeof replace === 'function') return replace(expr, sub);
-  return replace.subs(sub, { canonical: true });
+  return replace.subs(sub, { canonical: expr.isCanonical });
 }
 
 /**
