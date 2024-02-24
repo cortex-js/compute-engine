@@ -18,7 +18,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   },
   {
     kind: 'symbol',
-    latexTrigger: '\\operator{True}',
+    latexTrigger: '\\operatorname{True}',
     parse: 'True',
   },
   {
@@ -34,7 +34,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   },
   {
     kind: 'symbol',
-    latexTrigger: '\\operator{False}',
+    latexTrigger: '\\operatorname{False}',
     parse: 'False',
   },
   {
