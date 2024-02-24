@@ -778,7 +778,8 @@ export interface BoxedExpression {
 
   /**
    * Transform the expression by applying the rules:
-   * if an expression matches the `match` pattern, replace it with
+   *
+   * if the expression matches the `match` pattern, replace it with
    * the `replace` pattern.
    *
    * If no rules apply, return `null`.
@@ -786,7 +787,8 @@ export interface BoxedExpression {
    * See also `subs` for a simple substitution.
    *
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * **Note** applicable to canonical and non-canonical expressions. If the
+   * expression is non-canonical, the result is also non-canonical.
    *
    */
   replace(
