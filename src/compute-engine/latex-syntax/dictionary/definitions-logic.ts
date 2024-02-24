@@ -222,14 +222,6 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     parse: parseQuantifier('Exists'),
   },
   {
-    name: 'ForAllUnique',
-    kind: 'prefix',
-    latexTrigger: ['\\forall', '!'],
-    precedence: 200, // Has to be lower than COMPARISON_PRECEDENCE,
-    serialize: '\\forall!',
-    parse: parseQuantifier('ForAllUnique'),
-  },
-  {
     name: 'ExistsUnique',
     kind: 'prefix',
     latexTrigger: ['\\exists', '!'],
@@ -240,7 +232,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
 ];
 
 function parseQuantifier(
-  kind: 'ForAll' | 'Exists' | 'ForAllUnique' | 'ExistsUnique'
+  kind: 'ForAll' | 'Exists' | 'ExistsUnique'
 ): (parser: Parser, terminator: Readonly<Terminator>) => Expression | null {
   return (parser, terminator) => {
     const index = parser.index;

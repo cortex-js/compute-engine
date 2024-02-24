@@ -98,7 +98,6 @@ export const LOGIC_LIBRARY: IdentifierDefinitions = {
   Exists: { signature: { domain: 'Functions' }, hold: 'all' },
   ExistsUnique: { signature: { domain: 'Functions' }, hold: 'all' },
   ForAll: { signature: { domain: 'Functions' }, hold: 'all' },
-  ForAllUnique: { signature: { domain: 'Functions' }, hold: 'all' },
 };
 
 function processAnd(
