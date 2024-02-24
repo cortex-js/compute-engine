@@ -20,7 +20,7 @@ export class Terms {
   private engine: IComputeEngine;
   private terms: { coef: Rational; term: BoxedExpression }[] = [];
 
-  constructor(ce: IComputeEngine, terms: BoxedExpression[]) {
+  constructor(ce: IComputeEngine, terms: ReadonlyArray<BoxedExpression>) {
     this.engine = ce;
     for (const term of terms) this.add(term);
   }

@@ -165,7 +165,9 @@ export function replace(
   const once = options?.once ?? false;
 
   if (!(ruleSet instanceof Set))
-    ruleSet = expr.engine.rules(Array.isArray(ruleSet) ? ruleSet : [ruleSet]);
+    ruleSet = expr.engine.rules(
+      Array.isArray(ruleSet) ? ruleSet : [ruleSet as Rule]
+    );
 
   let done = false;
   let atLeastOneRule = false;

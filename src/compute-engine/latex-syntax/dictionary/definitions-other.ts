@@ -10,7 +10,11 @@ import {
   ops,
   isEmptySequence,
 } from '../../../math-json/utils';
-import { Expression } from '../../../math-json/math-json-format';
+import {
+  Expression,
+  MathJsonFunction,
+  MathJsonIdentifier,
+} from '../../../math-json/math-json-format';
 import { joinLatex } from '../tokenizer';
 
 function parseSingleArg(cmd: string): (parser: Parser) => Expression {
@@ -105,7 +109,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       let rhs = parser.parseGroup() ?? 'Nothing';
       if (rhs !== 'Nothing' && !isEmptySequence(rhs)) {
         const args = parser.parseArguments() ?? ['Nothing'];
-        rhs = [rhs, ...args];
+        rhs = [rhs as MathJsonIdentifier | MathJsonFunction, ...args];
       }
       return ['PartialDerivative', rhs, sub, sup] as Expression;
     },

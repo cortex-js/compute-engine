@@ -176,7 +176,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.engine.box(this._id);
   }
 
-  solve(vars: string[]): null | BoxedExpression[] {
+  solve(vars: string[]): null | ReadonlyArray<BoxedExpression> {
     if (vars.length !== 1) return null;
     if (vars.includes(this.symbol)) return [this.engine.Zero];
     return null;

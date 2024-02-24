@@ -1,7 +1,11 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 
-import { Expression, MathJsonNumber } from '../math-json/math-json-format';
+import {
+  Expression,
+  MathJsonIdentifier,
+  MathJsonNumber,
+} from '../math-json/math-json-format';
 
 import { LatexSyntax } from './latex-syntax/latex-syntax';
 import type {
@@ -1640,11 +1644,15 @@ export class ComputeEngine implements IComputeEngine {
    * The result is canonical.
    */
   error(
-    message: string | [string, ...SemiBoxedExpression[]],
+    message:
+      | MathJsonIdentifier
+      | [MathJsonIdentifier, ...SemiBoxedExpression[]],
     where?: SemiBoxedExpression
   ): BoxedExpression;
   error(
-    message: string | [string, ...SemiBoxedExpression[]],
+    message:
+      | MathJsonIdentifier
+      | [MathJsonIdentifier, ...SemiBoxedExpression[]],
     where?: SemiBoxedExpression
   ): BoxedExpression {
     if (where instanceof _BoxedExpression) {
@@ -1725,7 +1733,7 @@ export class ComputeEngine implements IComputeEngine {
    * Shortcut for `this.box(["Multiply", ...]).evaluate()`
    *
    */
-  mul(...ops: BoxedExpression[]): BoxedExpression {
+  mul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression {
     // Short path. Note that are arguments are **not** validated.
     const flatOps = flattenOps(flattenSequence(ops), 'Multiply');
     return evalMultiply(this, flatOps);

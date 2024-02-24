@@ -177,7 +177,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 export function findUnivariateRoots(
   expr: BoxedExpression,
   x: string
-): BoxedExpression[] {
+): ReadonlyArray<BoxedExpression> {
   const ce = expr.engine;
 
   if (expr.head === 'Equal') {
@@ -236,7 +236,7 @@ export function findUnivariateRoots(
 export function univariateSolve(
   expr: BoxedExpression,
   x: string
-): SemiBoxedExpression[] | null {
+): ReadonlyArray<SemiBoxedExpression> | null {
   const ce = expr.engine;
   const name = expr.head;
   if (name === 'Tuple') {

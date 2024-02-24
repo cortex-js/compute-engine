@@ -3,7 +3,11 @@ import { Decimal } from 'decimal.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 
-import { Expression } from '../../math-json/math-json-format';
+import {
+  Expression,
+  MathJsonFunction,
+  MathJsonIdentifier,
+} from '../../math-json/math-json-format';
 import {
   BoxedExpression,
   BoxedFunctionDefinition,
@@ -70,7 +74,7 @@ export class BoxedFunction extends _BoxedExpression {
   private readonly _head: string | BoxedExpression;
 
   // The arguments of the function
-  private readonly _ops: BoxedExpression[];
+  private readonly _ops: ReadonlyArray<BoxedExpression>;
 
   // The canonical representation of this expression.
   // If this expression is not canonical, this property is undefined.
@@ -92,7 +96,7 @@ export class BoxedFunction extends _BoxedExpression {
   constructor(
     ce: IComputeEngine,
     head: string | BoxedExpression,
-    ops: BoxedExpression[],
+    ops: ReadonlyArray<BoxedExpression>,
     options?: {
       metadata?: Metadata;
       canonical?: boolean;
@@ -212,7 +216,9 @@ export class BoxedFunction extends _BoxedExpression {
   // of canonicalization.
   get rawJson(): Expression {
     const head =
-      typeof this._head === 'string' ? this._head : this._head.rawJson;
+      typeof this._head === 'string'
+        ? this._head
+        : (this._head.rawJson as MathJsonIdentifier | MathJsonFunction);
     return [head, ...this.ops.map((x) => x.rawJson)];
   }
 
@@ -224,7 +230,7 @@ export class BoxedFunction extends _BoxedExpression {
     return this._head;
   }
 
-  get ops(): BoxedExpression[] {
+  get ops(): ReadonlyArray<BoxedExpression> {
     return this._ops;
   }
 
@@ -714,7 +720,7 @@ export class BoxedFunction extends _BoxedExpression {
     return this.evaluate({ ...options, numericMode: true });
   }
 
-  solve(vars: string[]): null | BoxedExpression[] {
+  solve(vars: string[]): null | ReadonlyArray<BoxedExpression> {
     if (vars.length !== 1) return null;
     const roots = findUnivariateRoots(this.simplify(), vars[0]);
     return roots;
@@ -724,10 +730,10 @@ export class BoxedFunction extends _BoxedExpression {
 function makeNumericFunction(
   ce: IComputeEngine,
   head: string,
-  semiOps: SemiBoxedExpression[],
+  semiOps: ReadonlyArray<SemiBoxedExpression>,
   metadata?: Metadata
 ): BoxedExpression | null {
-  let ops: BoxedExpression[] = [];
+  let ops: ReadonlyArray<BoxedExpression> = [];
   if (head === 'Add' || head === 'Multiply')
     ops = checkNumericArgs(ce, ce.canonical(semiOps), { flatten: head });
   else if (
@@ -777,7 +783,7 @@ function makeNumericFunction(
 export function makeCanonicalFunction(
   ce: IComputeEngine,
   head: string | BoxedExpression,
-  ops: SemiBoxedExpression[],
+  ops: ReadonlyArray<SemiBoxedExpression>,
   metadata?: Metadata
 ): BoxedExpression {
   //
@@ -856,12 +862,12 @@ export function makeCanonicalFunction(
   // Flatten any sequence
   // f(a, Sequence(b, c), d) -> f(a, b, c, d)
   //
-  xs = flattenSequence(xs);
-  if (def.associative) xs = flattenOps(xs, head as string);
+  let args = flattenSequence(xs);
+  if (def.associative) args = flattenOps(args, head as string);
 
   const adjustedArgs = adjustArguments(
     ce,
-    xs,
+    args,
     def.hold,
     def.threadable,
     sig.params,
@@ -876,20 +882,20 @@ export function makeCanonicalFunction(
   //
   // 4/ Apply `idempotent` and `involution`
   //
-  if (xs.length === 1 && xs[0].head === head) {
+  if (args.length === 1 && args[0].head === head) {
     // f(f(x)) -> x
-    if (def.involution) return xs[0].op1;
+    if (def.involution) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (def.idempotent) xs = xs[0].ops!;
+    if (def.idempotent) args = xs[0].ops!;
   }
 
   //
   // 5/ Sort the arguments
   //
-  if (xs.length > 1 && def.commutative === true) xs = xs.sort(order);
+  if (args.length > 1 && def.commutative === true) args = [...args].sort(order);
 
-  return ce._fn(head, xs, metadata);
+  return ce._fn(head, args, metadata);
 }
 
 /** Apply the function `f` to elements of `xs`, except to the elements
@@ -906,11 +912,11 @@ export function makeCanonicalFunction(
  * If `f` returns `null`, the element is not added to the result
  */
 export function holdMap(
-  xs: BoxedExpression[],
+  xs: ReadonlyArray<BoxedExpression>,
   skip: Hold,
   associativeHead: string,
   f: (x: BoxedExpression) => BoxedExpression | null
-): BoxedExpression[] {
+): ReadonlyArray<BoxedExpression> {
   if (xs.length === 0) return [];
 
   // f(a, f(b, c), d) -> f(a, b, c, d)

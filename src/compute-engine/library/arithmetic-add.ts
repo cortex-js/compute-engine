@@ -22,7 +22,7 @@ import {
  * */
 export function canonicalAdd(
   ce: IComputeEngine,
-  ops: BoxedExpression[]
+  ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   console.assert(ops.every((x) => x.isCanonical));
 
@@ -65,7 +65,7 @@ export function domainAdd(
 
 export function simplifyAdd(
   ce: IComputeEngine,
-  args: BoxedExpression[]
+  args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   // console.assert(args.length > 1, `simplifyAdd: not enough args`);
 
@@ -91,7 +91,7 @@ export function simplifyAdd(
   // return sum.asExpression('expression');
 }
 
-function evalAddNum(ops: BoxedExpression[]): number | null {
+function evalAddNum(ops: ReadonlyArray<BoxedExpression>): number | null {
   let sum = 0;
   for (const op of ops) {
     const v = op.numericValue;
@@ -103,7 +103,7 @@ function evalAddNum(ops: BoxedExpression[]): number | null {
 
 export function evalAdd(
   ce: IComputeEngine,
-  ops: BoxedExpression[],
+  ops: ReadonlyArray<BoxedExpression>,
   mode: 'N' | 'evaluate' = 'evaluate'
 ): BoxedExpression {
   // @fastpath
@@ -170,7 +170,7 @@ export function canonicalSummation(
 
 export function evalSummation(
   ce: IComputeEngine,
-  summationEquation: BoxedExpression[],
+  summationEquation: ReadonlyArray<BoxedExpression>,
   mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
   let expr = summationEquation[0];

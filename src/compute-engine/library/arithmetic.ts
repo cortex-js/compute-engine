@@ -1347,7 +1347,7 @@ function processAbs(
 function processMinMaxItem(
   item: BoxedExpression,
   mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
-): [BoxedExpression | undefined, BoxedExpression[]] {
+): [BoxedExpression | undefined, ReadonlyArray<BoxedExpression>] {
   const ce = item.engine;
   const upper = mode === 'Max' || mode === 'Supremum';
 
@@ -1410,7 +1410,7 @@ function processMinMaxItem(
 
 function processMinMax(
   ce: IComputeEngine,
-  ops: BoxedExpression[],
+  ops: ReadonlyArray<BoxedExpression>,
   mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
 ): BoxedExpression {
   const upper = mode === 'Max' || mode === 'Supremum';
@@ -1439,7 +1439,7 @@ function processMinMax(
 
 function processGcdLcm(
   ce: IComputeEngine,
-  ops: BoxedExpression[],
+  ops: ReadonlyArray<BoxedExpression>,
   mode: 'LCM' | 'GCD'
 ) {
   const fn = mode === 'LCM' ? lcm : gcd;
@@ -1480,7 +1480,7 @@ function processGcdLcm(
   return ce._fn(mode, [ce.number(result), ...rest]);
 }
 
-function processLn(ce: IComputeEngine, ops: BoxedExpression[]) {
+function processLn(ce: IComputeEngine, ops: ReadonlyArray<BoxedExpression>) {
   const n = ops[0];
   if (n.isZero) return ce.NaN;
   if (n.isOne) return ce.Zero;

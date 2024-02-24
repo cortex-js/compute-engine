@@ -103,7 +103,7 @@ function domainWhich(ce: IComputeEngine, args: BoxedDomain[]): BoxedDomain {
 
 function whichEvaluate(
   ce: IComputeEngine,
-  args: BoxedExpression[],
+  args: ReadonlyArray<BoxedExpression>,
   mode: 'N' | 'evaluate'
 ): BoxedExpression {
   let i = 0;
@@ -121,7 +121,7 @@ function whichEvaluate(
 /** Evaluate a Block expression */
 function evaluateBlock(
   ce: IComputeEngine,
-  ops: BoxedExpression[]
+  ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   // Empty block?
   if (ops.length === 0) return ce.Nothing;
@@ -157,7 +157,7 @@ function evaluateBlock(
 
 function canonicalBlock(
   ce: IComputeEngine,
-  ops: BoxedExpression[]
+  ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | null {
   // Empty block?
   if (ops.length === 0) return null;

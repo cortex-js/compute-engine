@@ -1,6 +1,7 @@
 import {
   Expression,
   MathJsonFunction,
+  MathJsonIdentifier,
   MathJsonNumber,
   MathJsonString,
   MathJsonSymbol,
@@ -206,7 +207,7 @@ export function stripText(
   const h = head(expr);
   if (h == null) return expr;
   return [
-    h,
+    h as MathJsonIdentifier | MathJsonFunction,
     ...(ops(expr) ?? []).map((x) => stripText(x)!).filter((x) => x !== null),
   ];
 }
@@ -455,7 +456,10 @@ export function applyRecursively<T extends Expression = Expression>(
 ): Expression {
   const h = head(expr);
   if (h !== null) {
-    return [fn(h as T), ...(ops(expr) ?? []).map(fn)];
+    return [
+      fn(h as T) as MathJsonIdentifier | MathJsonFunction,
+      ...(ops(expr) ?? []).map(fn),
+    ];
   }
   const dict = dictionary(expr);
   if (dict !== null) {
@@ -473,7 +477,10 @@ export function subs(
 ): Expression {
   const h = head(expr);
   if (h !== null)
-    return [subs(h, s), ...(ops(expr) ?? []).map((x) => subs(x, s))];
+    return [
+      subs(h, s) as MathJsonIdentifier | MathJsonFunction,
+      ...(ops(expr) ?? []).map((x) => subs(x, s)),
+    ];
 
   const dict = dictionary(expr);
   if (dict !== null) {

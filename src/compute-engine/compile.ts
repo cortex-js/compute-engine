@@ -27,7 +27,7 @@ export type CompiledFunctions = {
   [id: MathJsonIdentifier]:
     | string
     | ((
-        args: BoxedExpression[],
+        args: ReadonlyArray<BoxedExpression>,
         compile: (expr: BoxedExpression) => JSSource
       ) => JSSource);
 };
@@ -336,7 +336,7 @@ export function compileToJavascript(
 
 function compileExpr(
   h: string,
-  args: BoxedExpression[],
+  args: ReadonlyArray<BoxedExpression>,
   prec: number,
   target: CompileTarget
 ): JSSource {
@@ -512,7 +512,7 @@ export function compile(
 
 function compileLoop(
   h: string,
-  args: BoxedExpression[],
+  args: ReadonlyArray<BoxedExpression>,
   target: CompileTarget
 ): string {
   if (args === null) throw new Error('Sum/Product: no arguments');

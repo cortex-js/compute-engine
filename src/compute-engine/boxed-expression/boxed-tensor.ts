@@ -46,7 +46,7 @@ export class BoxedTensor extends _BoxedExpression {
   private _tensor: undefined | AbstractTensor<'expression'>;
 
   private readonly _head?: string;
-  private readonly _ops?: BoxedExpression[];
+  private readonly _ops?: ReadonlyArray<BoxedExpression>;
   private _expression: undefined | BoxedExpression;
 
   constructor(
@@ -54,7 +54,7 @@ export class BoxedTensor extends _BoxedExpression {
     input:
       | {
           head?: string;
-          ops: BoxedExpression[];
+          ops: ReadonlyArray<BoxedExpression>;
         }
       | AbstractTensor<'expression'>,
     options?: { canonical?: boolean; metadata?: Metadata }
@@ -160,7 +160,7 @@ export class BoxedTensor extends _BoxedExpression {
     return this.expression.nops;
   }
 
-  get ops(): BoxedExpression[] {
+  get ops(): ReadonlyArray<BoxedExpression> {
     return this.expression.ops!;
   }
 
@@ -269,12 +269,15 @@ export function isBoxedTensor(val: unknown): val is BoxedTensor {
   return val instanceof BoxedTensor;
 }
 
-export function expressionTensorInfo(head: string, rows: BoxedExpression[]) {
+export function expressionTensorInfo(
+  head: string,
+  rows: ReadonlyArray<BoxedExpression>
+) {
   let dtype: TensorDataType | undefined = undefined;
   let shape: number[] = [];
   let valid = true;
 
-  const visit = (t: BoxedExpression[], axis = 0) => {
+  const visit = (t: ReadonlyArray<BoxedExpression>, axis = 0) => {
     if (t.length === 0) return;
     if (t.length > 1 && shape[axis] !== undefined)
       valid = valid && shape[axis] === t.length;
@@ -298,7 +301,7 @@ export function expressionTensorInfo(head: string, rows: BoxedExpression[]) {
 
 export function expressionAsTensor<T extends TensorDataType>(
   head: string,
-  rows: BoxedExpression[]
+  rows: ReadonlyArray<BoxedExpression>
 ): TensorData<T> | undefined {
   let { shape, dtype } = expressionTensorInfo(head, rows) ?? {
     shape: [],
@@ -310,7 +313,7 @@ export function expressionAsTensor<T extends TensorDataType>(
   const data: DataTypeMap[T][] = [];
   const f = makeTensorField(rows[0].engine, 'expression');
   const cast = f.cast.bind(f);
-  const visit = (t: BoxedExpression[]) => {
+  const visit = (t: ReadonlyArray<BoxedExpression>) => {
     for (const item of t) {
       if (item.head === head) visit(item.ops!);
       else {

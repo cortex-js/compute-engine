@@ -414,7 +414,7 @@ function matchPermutation(
 
 function matchArguments(
   expr: BoxedExpression,
-  patterns: BoxedExpression[],
+  patterns: ReadonlyArray<BoxedExpression>,
   substitution: BoxedSubstitution,
   options: PatternMatchOptions
 ): BoxedSubstitution | null {

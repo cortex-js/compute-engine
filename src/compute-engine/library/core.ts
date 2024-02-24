@@ -567,7 +567,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
-        result: (ce, args: BoxedExpression[]) => {
+        result: (ce, args: ReadonlyArray<BoxedExpression>) => {
           const op1 = args[0];
           const op2 = args[1];
           if (op1.string && asSmallInteger(op2) !== null)
@@ -779,7 +779,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
 export function canonicalInvisibleOperator(
   ce: IComputeEngine,
-  ops: BoxedExpression[]
+  ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | null {
   if (ops.length === 0) return null;
   const lhs = ops[0];

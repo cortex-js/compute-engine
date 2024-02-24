@@ -5,9 +5,9 @@ import { BoxedExpression, IComputeEngine } from '../public';
  */
 
 export function flattenOps(
-  ops: BoxedExpression[],
+  ops: ReadonlyArray<BoxedExpression>,
   head: string
-): BoxedExpression[] {
+): ReadonlyArray<BoxedExpression> {
   if (!head) return ops;
   // Bypass memory allocation for the common case where there is nothing to flatten
   if (ops.every((x) => !x.ops || x.head !== head)) return ops;
@@ -29,7 +29,9 @@ export function flattenOps(
   return result;
 }
 
-export function flattenSequence(xs: BoxedExpression[]): BoxedExpression[] {
+export function flattenSequence(
+  xs: ReadonlyArray<BoxedExpression>
+): ReadonlyArray<BoxedExpression> {
   // Bypass memory allocation for the common case where there are no sequences or delimiters
   if (xs.every((x) => x.head !== 'Sequence' && x.head !== 'Delimiter'))
     return xs;

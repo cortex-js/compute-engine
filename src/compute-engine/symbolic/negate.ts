@@ -89,7 +89,7 @@ export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
 // 3/ `Negate` expressions
 function negateProduct(
   ce: IComputeEngine,
-  args: BoxedExpression[]
+  args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   let result: BoxedExpression[] = [];
   let done = false;

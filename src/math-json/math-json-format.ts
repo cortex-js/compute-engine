@@ -111,7 +111,7 @@ export type MathJsonString = {
 
 /** @category MathJSON */
 export type MathJsonFunction = {
-  fn: [Expression, ...Expression[]];
+  fn: [MathJsonIdentifier | MathJsonFunction, ...Expression[]];
 } & Attributes;
 
 /** @category MathJSON */
@@ -140,4 +140,4 @@ export type Expression =
   | MathJsonSymbol
   | MathJsonFunction
   | MathJsonDictionary
-  | [Expression, ...Expression[]];
+  | [MathJsonIdentifier | MathJsonFunction, ...Expression[]];

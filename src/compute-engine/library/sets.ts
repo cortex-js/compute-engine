@@ -167,19 +167,25 @@ export const SETS_LIBRARY: IdentifierDefinitions = {
   },
 };
 
-function subset(ce: IComputeEngine, _ops: BoxedExpression[]): BoxedExpression {
+function subset(
+  ce: IComputeEngine,
+  _ops: ReadonlyArray<BoxedExpression>
+): BoxedExpression {
   // @todo
   return ce.False;
 }
 function subsetEqual(
   ce: IComputeEngine,
-  _ops: BoxedExpression[]
+  _ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   // @todo
   return ce.False;
 }
 
-function union(ce: IComputeEngine, ops: BoxedExpression[]): BoxedExpression {
+function union(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<BoxedExpression>
+): BoxedExpression {
   const elements: BoxedExpression[] = [];
   for (const op of ops) {
     if (isFiniteIndexableCollection(op)) {
@@ -198,9 +204,9 @@ function union(ce: IComputeEngine, ops: BoxedExpression[]): BoxedExpression {
 
 function intersection(
   ce: IComputeEngine,
-  ops: BoxedExpression[]
+  ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
-  let elements: BoxedExpression[] = ops[0].ops ?? [];
+  let elements: BoxedExpression[] = [...(ops[0].ops ?? [])];
 
   // Remove elements that are not in all the other sets
   for (const op of ops.slice(1)) {
@@ -233,7 +239,7 @@ function cartesianProduct(
 
 function evaluateElement(
   ce: IComputeEngine,
-  ops: BoxedExpression[]
+  ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   console.assert(ops.length === 2);
   const [lhs, rhs] = ops;

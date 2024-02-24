@@ -397,6 +397,14 @@
       const mf = document.getElementById("mf");
       const ce = MathfieldElement.computeEngine;
 
+      const expr = ce.box(["Add", ["Multiply", "a", "x"], "b"]);
+
+      const result = expr.replace([
+        { match: "a", replace: 2 },
+        { match: "b", replace: 3 },
+      ]);
+      console.log(result);
+
       ce.strict = true;
       // console.info(
       //   ce.parse("\\operatorname{f} := x \\mapsto 2x").evaluate().toString()

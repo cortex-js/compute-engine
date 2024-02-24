@@ -1,5 +1,7 @@
-export function permutations<T>(xs: T[]): T[][] {
-  const result: T[][] = [];
+export function permutations<T>(
+  xs: ReadonlyArray<T>
+): ReadonlyArray<ReadonlyArray<T>> {
+  const result: ReadonlyArray<T>[] = [];
 
   const permute = (arr, m = []) => {
     if (arr.length === 0) {

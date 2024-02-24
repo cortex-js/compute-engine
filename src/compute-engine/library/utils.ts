@@ -18,7 +18,7 @@ import { BoxedExpression } from '../public';
 
 export function MultiIndexingSet(
   indexingSet: BoxedExpression | undefined
-): BoxedExpression[] | undefined {
+): ReadonlyArray<BoxedExpression> | undefined {
   if (!indexingSet) return undefined;
   const ce = indexingSet.engine;
   let indexes: BoxedExpression[] = [];
@@ -26,7 +26,7 @@ export function MultiIndexingSet(
 
   let subSequence = indexingSet.ops![0].ops![0].ops;
   let sequenceLength = subSequence?.length ?? 0;
-  let superSequence: BoxedExpression[] | null = null;
+  let superSequence: ReadonlyArray<BoxedExpression> | null = null;
   if (hasSuperSequence) {
     superSequence = indexingSet.ops![2].ops![0].ops;
     // check that the sequence lengths are the same in the sub and super scripts

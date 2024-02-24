@@ -543,7 +543,7 @@ export function isEnvironmentEntry(
  * @category Latex Parsing and Serialization
  * @internal
  */
-export type LatexDictionary = Array<Partial<LatexDictionaryEntry>>;
+export type LatexDictionary = ReadonlyArray<Partial<LatexDictionaryEntry>>;
 
 /**
  *

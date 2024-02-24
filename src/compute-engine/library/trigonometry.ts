@@ -766,7 +766,7 @@ function constructibleValues(
 
 function processInverseFunction(
   ce: IComputeEngine,
-  xs: BoxedExpression[]
+  xs: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | undefined {
   if (xs.length !== 1 || !xs[0].isValid) return undefined;
   const expr = xs[0];

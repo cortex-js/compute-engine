@@ -19,6 +19,7 @@ import type {
   Expression,
   MathJsonDictionary,
   MathJsonFunction,
+  MathJsonIdentifier,
   MathJsonNumber,
   MathJsonString,
   MathJsonSymbol,
@@ -203,13 +204,15 @@ export type BoxedRule = {
 };
 
 /** @category Rules */
-export type BoxedRuleSet = Set<BoxedRule>;
+export type BoxedRuleSet = ReadonlySet<BoxedRule>;
 
-// Use `contravariant` for the arguments of a function.
-// Use `covariant` for the result of a function.
-// Use `bivariant` to check the domain matches exactly.
-
-/** @category Boxed Expression */
+/**
+ * Use `contravariant` for the arguments of a function.
+ * Use `covariant` for the result of a function.
+ * Use `bivariant` to check the domain matches exactly.
+ *
+ * @category Boxed Expression
+ */
 
 export type DomainCompatibility =
   | 'covariant' // A <: B
@@ -595,14 +598,14 @@ export interface BoxedExpression {
    * **Note** applicable to canonical and non-canonical expressions.
    *
    */
-  getSubexpressions(head: string): BoxedExpression[];
+  getSubexpressions(head: string): ReadonlyArray<BoxedExpression>;
 
   /** All the subexpressions in this expression, recursively
    *
    * **Note** applicable to canonical and non-canonical expressions.
    *
    */
-  readonly subexpressions: BoxedExpression[];
+  readonly subexpressions: ReadonlyArray<BoxedExpression>;
 
   /**
    *
@@ -611,13 +614,13 @@ export interface BoxedExpression {
    * **Note** applicable to canonical and non-canonical expressions.
    *
    */
-  readonly symbols: string[];
+  readonly symbols: ReadonlyArray<string>;
 
   /**
    * All the identifiers used in the expression that do not have a value
    * associated with them, i.e. they are declared but not defined.
    */
-  readonly unknowns: string[];
+  readonly unknowns: ReadonlyArray<string>;
 
   /**
    *
@@ -625,14 +628,14 @@ export interface BoxedExpression {
    * not a local variable or a parameter of that function.
    *
    */
-  readonly freeVariables: string[];
+  readonly freeVariables: ReadonlyArray<string>;
 
   /** All the `["Error"]` subexpressions
    *
    * **Note** applicable to canonical and non-canonical expressions.
    *
    */
-  readonly errors: BoxedExpression[];
+  readonly errors: ReadonlyArray<BoxedExpression>;
 
   /** All boxed expressions have a head.
    *
@@ -656,7 +659,7 @@ export interface BoxedExpression {
    * @category Function Expression
    *
    */
-  readonly ops: null | BoxedExpression[];
+  readonly ops: null | ReadonlyArray<BoxedExpression>;
 
   /** If this expression is a function, the number of operands, otherwise 0.
    *
@@ -779,7 +782,7 @@ export interface BoxedExpression {
   /**
    * Transform the expression by applying the rules:
    *
-   * if the expression matches the `match` pattern, replace it with
+   * If the expression matches the `match` pattern, replace it with
    * the `replace` pattern.
    *
    * If no rules apply, return `null`.
@@ -1212,7 +1215,7 @@ export interface BoxedExpression {
     options?: { optimize: ('simplify' | 'evaluate')[] }
   ): ((args: Record<string, any>) => any | undefined) | undefined;
 
-  solve(vars: Iterable<string>): null | BoxedExpression[];
+  solve(vars: Iterable<string>): null | ReadonlyArray<BoxedExpression>;
 
   /**
    * Return a JavaScript primitive representing the value of this expression.
@@ -1747,7 +1750,7 @@ export type FunctionSignature = {
    */
   canonical?: (
     ce: IComputeEngine,
-    args: BoxedExpression[]
+    args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | null;
 
   /**
@@ -1779,7 +1782,7 @@ export type FunctionSignature = {
    */
   simplify?: (
     ce: IComputeEngine,
-    args: BoxedExpression[]
+    args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | undefined;
 
   /**
@@ -1809,7 +1812,7 @@ export type FunctionSignature = {
     | SemiBoxedExpression
     | ((
         ce: IComputeEngine,
-        args: BoxedExpression[]
+        args: ReadonlyArray<BoxedExpression>
       ) => BoxedExpression | undefined);
 
   /**
@@ -1855,7 +1858,7 @@ export type FunctionSignature = {
    */
   N?: (
     ce: IComputeEngine,
-    args: BoxedExpression[]
+    args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | undefined;
 
   /** Dimensional analysis
@@ -1863,11 +1866,14 @@ export type FunctionSignature = {
    */
   evalDimension?: (
     ce: IComputeEngine,
-    args: BoxedExpression[]
+    args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression;
 
   /** Return the sign of the function expression. */
-  sgn?: (ce: IComputeEngine, args: BoxedExpression[]) => -1 | 0 | 1 | undefined;
+  sgn?: (
+    ce: IComputeEngine,
+    args: ReadonlyArray<BoxedExpression>
+  ) => -1 | 0 | 1 | undefined;
 
   /** Return a compiled (optimized) expression. */
   compile?: (expr: BoxedExpression) => CompiledExpression;
@@ -1887,30 +1893,33 @@ export type BoxedFunctionSignature = {
     | BoxedDomain
     | ((
         ce: IComputeEngine,
-        args: BoxedExpression[]
+        args: ReadonlyArray<BoxedExpression>
       ) => BoxedDomain | null | undefined);
 
   canonical?: (
     ce: IComputeEngine,
-    args: BoxedExpression[]
+    args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | null;
   simplify?: (
     ce: IComputeEngine,
-    args: BoxedExpression[]
+    args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | undefined;
   evaluate?: (
     ce: IComputeEngine,
-    args: BoxedExpression[]
+    args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | undefined;
   N?: (
     ce: IComputeEngine,
-    args: BoxedExpression[]
+    args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression | undefined;
   evalDimension?: (
     ce: IComputeEngine,
-    args: BoxedExpression[]
+    args: ReadonlyArray<BoxedExpression>
   ) => BoxedExpression;
-  sgn?: (ce: IComputeEngine, args: BoxedExpression[]) => -1 | 0 | 1 | undefined;
+  sgn?: (
+    ce: IComputeEngine,
+    args: ReadonlyArray<BoxedExpression>
+  ) => -1 | 0 | 1 | undefined;
 
   compile?: (expr: BoxedExpression) => CompiledExpression;
 };
@@ -2295,7 +2304,9 @@ export interface IComputeEngine {
 
   strict: boolean;
 
-  canonical(xs: SemiBoxedExpression[]): BoxedExpression[];
+  canonical(
+    xs: ReadonlyArray<SemiBoxedExpression>
+  ): ReadonlyArray<BoxedExpression>;
 
   box(
     expr:
@@ -2308,7 +2319,7 @@ export interface IComputeEngine {
 
   function(
     head: string | BoxedExpression,
-    ops: SemiBoxedExpression[],
+    ops: ReadonlyArray<SemiBoxedExpression>,
     options?: { metadata?: Metadata; canonical?: boolean }
   ): BoxedExpression;
 
@@ -2337,7 +2348,9 @@ export interface IComputeEngine {
   ): BoxedDomain;
 
   error(
-    message: string | [string, ...SemiBoxedExpression[]],
+    message:
+      | MathJsonIdentifier
+      | [MathJsonIdentifier, ...ReadonlyArray<SemiBoxedExpression>],
     where?: SemiBoxedExpression
   ): BoxedExpression;
 
@@ -2349,9 +2362,9 @@ export interface IComputeEngine {
 
   hold(expr: SemiBoxedExpression): BoxedExpression;
 
-  add(...ops: BoxedExpression[]): BoxedExpression;
+  add(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
-  mul(...ops: BoxedExpression[]): BoxedExpression;
+  mul(...ops: ReadonlyArray<BoxedExpression>): BoxedExpression;
 
   pow(
     base: BoxedExpression,
@@ -2372,8 +2385,11 @@ export interface IComputeEngine {
     metadata?: Metadata
   ): BoxedExpression;
 
-  tuple(elements: number[], metadata?: Metadata): BoxedExpression;
-  tuple(elements: BoxedExpression[], metadata?: Metadata): BoxedExpression;
+  tuple(elements: ReadonlyArray<number>, metadata?: Metadata): BoxedExpression;
+  tuple(
+    elements: ReadonlyArray<BoxedExpression>,
+    metadata?: Metadata
+  ): BoxedExpression;
 
   array(
     elements: ArrayValue[] | ArrayValue[][],
@@ -2396,7 +2412,7 @@ export interface IComputeEngine {
    */
   _fn(
     head: string | BoxedExpression,
-    ops: BoxedExpression[],
+    ops: ReadonlyArray<BoxedExpression>,
     metadata?: Metadata
   ): BoxedExpression;
 

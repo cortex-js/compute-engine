@@ -11,8 +11,10 @@ export const DEFAULT_COMPLEXITY = 100000;
  * Sort by higher total degree (sum of degree), if tied, sort by max degree,
  * if tied,
  */
-export function sortAdd(ops: BoxedExpression[]): BoxedExpression[] {
-  return ops.sort((a, b) => {
+export function sortAdd(
+  ops: ReadonlyArray<BoxedExpression>
+): ReadonlyArray<BoxedExpression> {
+  return [...ops].sort((a, b) => {
     const aLex = lex(a);
     const bLex = lex(b);
     if (!aLex && !bLex) return order(a, b);
@@ -205,7 +207,7 @@ export function canonicalOrder(
       let isCommutative =
         expr.head === 'Multiply' ||
         (ce.lookupFunction(expr.head)?.commutative ?? false);
-      if (isCommutative) ops = ops.sort(order);
+      if (isCommutative) ops = [...ops].sort(order);
     }
     return expr.engine._fn(expr.head, ops);
   }
@@ -226,7 +228,7 @@ export function polynomialOrder(expr: BoxedExpression): SemiBoxedExpression {
 
 export function lexicographicOrder(
   expr: BoxedExpression,
-  vars?: string[]
+  vars?: ReadonlyArray<string>
 ): SemiBoxedExpression {
   // @todo
   vars = vars ?? expr.unknowns;
@@ -235,7 +237,7 @@ export function lexicographicOrder(
 
 export function degreeLexicographicOrder(
   expr: BoxedExpression,
-  vars?: string[]
+  vars?: ReadonlyArray<string>
 ): SemiBoxedExpression {
   // @todo
   vars = vars ?? expr.unknowns;
@@ -244,7 +246,7 @@ export function degreeLexicographicOrder(
 
 export function degreeReverseLexicographicOrder(
   expr: BoxedExpression,
-  vars?: string[]
+  vars?: ReadonlyArray<string>
 ): SemiBoxedExpression {
   // @todo
   vars = vars ?? expr.unknowns;
@@ -253,7 +255,7 @@ export function degreeReverseLexicographicOrder(
 
 export function eliminationOrder(
   expr: BoxedExpression,
-  vars?: string[]
+  vars?: ReadonlyArray<string>
 ): SemiBoxedExpression {
   // @todo
   vars = vars ?? expr.unknowns;

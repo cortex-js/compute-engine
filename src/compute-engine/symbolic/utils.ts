@@ -228,7 +228,9 @@ export function shouldHold(skip: Hold, count: number, index: number): boolean {
   return true;
 }
 
-export function canonical(xs: BoxedExpression[]): BoxedExpression[] {
+export function canonical(
+  xs: ReadonlyArray<BoxedExpression>
+): ReadonlyArray<BoxedExpression> {
   // Avoid memory allocation if possible
   return xs.every((x) => x.isCanonical) ? xs : xs.map((x) => x.canonical);
 }

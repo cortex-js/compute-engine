@@ -153,7 +153,9 @@ export function canonicalFunctionExpression(
 
 function makeLambda(
   expr: BoxedExpression
-): ((params: BoxedExpression[]) => BoxedExpression | undefined) | undefined {
+):
+  | ((params: ReadonlyArray<BoxedExpression>) => BoxedExpression | undefined)
+  | undefined {
   const ce = expr.engine;
   //
   // Is `expr` a function name, e.g. `Sin`
@@ -229,7 +231,7 @@ function makeLambda(
  */
 export function apply(
   fn: BoxedExpression,
-  args: BoxedExpression[]
+  args: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   return makeLambda(fn)?.(args) ?? fn.engine._fn(fn, args);
 }

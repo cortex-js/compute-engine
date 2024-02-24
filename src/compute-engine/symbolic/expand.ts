@@ -34,7 +34,9 @@ function distribute2(
 /* Distribute
  * Assuming `expr` is a product of expressions, distribute each term of the product.
  */
-export function distribute(expr: BoxedExpression[]): BoxedExpression {
+export function distribute(
+  expr: ReadonlyArray<BoxedExpression>
+): BoxedExpression {
   if (expr.length === 1) return expr[0];
   if (expr.length === 2) return distribute2(expr[0], expr[1]);
 

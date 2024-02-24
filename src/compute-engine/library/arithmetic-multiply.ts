@@ -36,7 +36,7 @@ import { square } from './arithmetic-power';
  */
 export function canonicalMultiply(
   ce: IComputeEngine,
-  ops: BoxedExpression[]
+  ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   console.assert(ops.every((x) => x.isCanonical));
 
@@ -125,7 +125,7 @@ export function simplifyMultiply(
 
 export function evalMultiply(
   ce: IComputeEngine,
-  ops: BoxedExpression[],
+  ops: ReadonlyArray<BoxedExpression>,
   mode: 'N' | 'evaluate' = 'evaluate'
 ): BoxedExpression {
   if (ops.length === 1) return ops[0];
@@ -304,7 +304,7 @@ export function canonicalProduct(
 
 export function evalMultiplication(
   ce: IComputeEngine,
-  summationEquation: BoxedExpression[],
+  summationEquation: ReadonlyArray<BoxedExpression>,
   mode: 'simplify' | 'N' | 'evaluate'
 ): BoxedExpression | undefined {
   let expr = summationEquation[0];

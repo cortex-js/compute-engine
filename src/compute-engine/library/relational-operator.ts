@@ -149,7 +149,8 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
     complexity: 11000,
     signature: {
       domain: 'RelationalOperators',
-      canonical: (ce, ops) => canonicalRelational(ce, 'Less', ops.reverse()),
+      canonical: (ce, ops) =>
+        canonicalRelational(ce, 'Less', [...ops].reverse()),
 
       evaluate: (ce, ops) => {
         if (ops.length < 2) return ce.True;
@@ -216,7 +217,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
       domain: 'RelationalOperators',
 
       canonical: (ce, args) =>
-        canonicalRelational(ce, 'LessEqual', args.reverse()),
+        canonicalRelational(ce, 'LessEqual', [...args].reverse()),
 
       evaluate: (ce, ops) => {
         if (ops.length < 2) return ce.True;
@@ -378,7 +379,7 @@ export const RELOP_LIBRARY: IdentifierDefinitions = {
 function canonicalRelational(
   ce: IComputeEngine,
   head: string,
-  ops: BoxedExpression[]
+  ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   ops = flattenOps(flattenSequence(canonical(ops)), head);
 

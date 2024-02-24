@@ -1,7 +1,11 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 
-import { Expression } from '../../math-json/math-json-format';
+import {
+  Expression,
+  MathJsonFunction,
+  MathJsonIdentifier,
+} from '../../math-json/math-json-format';
 
 import { BoxedExpression, IComputeEngine, Metadata, Rational } from '../public';
 import { isInMachineRange } from '../numerics/numeric-bignum';
@@ -58,7 +62,7 @@ function subtract(
 export function serializeJsonCanonicalFunction(
   ce: IComputeEngine,
   head: string | BoxedExpression,
-  args: BoxedExpression[],
+  args: ReadonlyArray<BoxedExpression>,
   metadata?: Metadata
 ): Expression {
   const exclusions = ce.jsonSerializationOptions.exclude;
@@ -202,7 +206,7 @@ export function serializeJsonCanonicalFunction(
 export function serializeJsonFunction(
   ce: IComputeEngine,
   head: string | BoxedExpression,
-  args: (undefined | BoxedExpression)[],
+  args: ReadonlyArray<undefined | BoxedExpression>,
   metadata?: Metadata
 ): Expression {
   const exclusions = ce.jsonSerializationOptions.exclude;
@@ -309,7 +313,9 @@ export function serializeJsonFunction(
   }
 
   const jsonHead =
-    typeof head === 'string' ? _escapeJsonString(head) : head.json;
+    typeof head === 'string'
+      ? _escapeJsonString(head)
+      : (head.json as MathJsonIdentifier | MathJsonFunction);
 
   const fn: Expression = [jsonHead, ...args.map((x) => x?.json ?? 'Undefined')];
 
@@ -448,8 +454,8 @@ export function serializeJsonNumber(
     return metadata.latex !== undefined
       ? { num, latex: metadata.latex }
       : shorthandAllowed
-      ? num
-      : { num };
+        ? num
+        : { num };
   }
 
   //

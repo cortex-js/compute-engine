@@ -177,38 +177,38 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return null;
   }
 
-  getSubexpressions(head: string): BoxedExpression[] {
+  getSubexpressions(head: string): ReadonlyArray<BoxedExpression> {
     return getSubexpressions(this, head);
   }
 
-  get subexpressions(): BoxedExpression[] {
+  get subexpressions(): ReadonlyArray<BoxedExpression> {
     return this.getSubexpressions('');
   }
 
-  get symbols(): string[] {
+  get symbols(): ReadonlyArray<string> {
     const set = new Set<string>();
     getSymbols(this, set);
     return Array.from(set);
   }
 
-  get unknowns(): string[] {
+  get unknowns(): ReadonlyArray<string> {
     const set = new Set<string>();
     getUnknowns(this, set);
     return Array.from(set);
   }
 
-  get freeVariables(): string[] {
+  get freeVariables(): ReadonlyArray<string> {
     const set = new Set<string>();
     getFreeVariables(this, set);
     return Array.from(set);
   }
 
-  get errors(): BoxedExpression[] {
+  get errors(): ReadonlyArray<BoxedExpression> {
     return this.getSubexpressions('Error');
   }
 
   // Only return non-null for functions
-  get ops(): null | BoxedExpression[] {
+  get ops(): null | ReadonlyArray<BoxedExpression> {
     return null;
   }
 
@@ -311,7 +311,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this;
   }
 
-  solve(_vars: Iterable<string>): null | BoxedExpression[] {
+  solve(_vars: Iterable<string>): null | ReadonlyArray<BoxedExpression> {
     return null;
   }
 
@@ -596,7 +596,7 @@ function getUnknowns(expr: BoxedExpression, result: Set<string>): void {
 export function getSubexpressions(
   expr: BoxedExpression,
   head: string
-): BoxedExpression[] {
+): ReadonlyArray<BoxedExpression> {
   const result = !head || expr.head === head ? [expr] : [];
   if (expr.ops) {
     for (const op of expr.ops) result.push(...getSubexpressions(op, head));

@@ -16,10 +16,10 @@ import { canonical, shouldHold } from '../symbolic/utils';
  */
 export function checkArity(
   ce: IComputeEngine,
-  ops: BoxedExpression[],
+  ops: ReadonlyArray<BoxedExpression>,
   count: number
   // { flatten } = { flatten: true }
-): BoxedExpression[] {
+): ReadonlyArray<BoxedExpression> {
   ops = canonical(ops);
   // if (flatten) ops = flattenSequence(ops);
   ops = flattenSequence(ops);
@@ -58,9 +58,9 @@ export function checkArity(
  */
 export function checkNumericArgs(
   ce: IComputeEngine,
-  ops: BoxedExpression[],
+  ops: ReadonlyArray<BoxedExpression>,
   options?: number | { count?: number; flatten?: boolean | string }
-): BoxedExpression[] {
+): ReadonlyArray<BoxedExpression> {
   let count = typeof options === 'number' ? options : options?.count;
   const flatten = typeof options === 'number' || (options?.flatten ?? true);
   ops = canonical(ops);
@@ -179,9 +179,9 @@ export function checkPure(
 
 export function checkDomains(
   ce: IComputeEngine,
-  args: BoxedExpression[],
+  args: ReadonlyArray<BoxedExpression>,
   doms: (BoxedDomain | DomainLiteral)[]
-): BoxedExpression[] {
+): ReadonlyArray<BoxedExpression> {
   // Do a quick check for the common case where everything is as expected.
   // Avoid allocating arrays and objects
   if (
@@ -210,13 +210,13 @@ export function checkDomains(
  */
 export function adjustArguments(
   ce: IComputeEngine,
-  ops: BoxedExpression[],
+  ops: ReadonlyArray<BoxedExpression>,
   hold: Hold,
   threadable: boolean,
   params: BoxedDomain[],
   optParams: BoxedDomain[],
   restParam: BoxedDomain | undefined
-): BoxedExpression[] | null {
+): ReadonlyArray<BoxedExpression> | null {
   // @fastpath
   if (!ce.strict) return null;
 

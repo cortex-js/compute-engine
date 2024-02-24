@@ -65,7 +65,7 @@ export class Product {
 
   constructor(
     ce: IComputeEngine,
-    xs?: BoxedExpression[],
+    xs?: ReadonlyArray<BoxedExpression>,
     readonly options?: { canonical?: boolean }
   ) {
     options = options ? { ...options } : {};
@@ -533,11 +533,11 @@ function degreeOrder(
 
 function termsAsExpressions(
   ce: IComputeEngine,
-  terms: { exponent: Rational; terms: BoxedExpression[] }[]
-): BoxedExpression[] {
+  terms: { exponent: Rational; terms: ReadonlyArray<BoxedExpression> }[]
+): ReadonlyArray<BoxedExpression> {
   const result = terms.sort(degreeOrder).map((x) => {
     const t = flattenOps(x.terms, 'Multiply');
-    const base = t.length <= 1 ? t[0] : ce._fn('Multiply', t.sort(order));
+    const base = t.length <= 1 ? t[0] : ce._fn('Multiply', [...t].sort(order));
     return ce.pow(base, x.exponent);
   });
   return flattenOps(result, 'Multiply') ?? result;
