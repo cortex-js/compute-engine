@@ -209,7 +209,11 @@ function matchOnce(
 
     // If requested, try to match the pattern recursively
     if (options.recursive && expr.ops)
-      result = matchRecursive(expr, pattern, substitution, options) ?? result;
+      result =
+        matchRecursive(expr, pattern, substitution, {
+          ...options,
+          acceptVariants,
+        }) ?? result;
 
     return result;
   }
@@ -224,7 +228,9 @@ function matchRecursive(
   expr: BoxedExpression,
   pattern: BoxedExpression,
   substitution: BoxedSubstitution,
-  options: PatternMatchOptions
+  options: PatternMatchOptions & {
+    acceptVariants?: boolean;
+  }
 ): BoxedSubstitution | null {
   console.assert(expr.ops !== null);
   let result: BoxedSubstitution | null = null;

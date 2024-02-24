@@ -24,6 +24,53 @@ function match(
   return r;
 }
 
+describe('Examples from Patterns and Rules guide', () => {
+  const pattern = ['Add', '_', 'x'];
+
+  // console.log("x+42", ce.box(["Add", "x", 42]).match(pattern));
+  // ➔ { } : the expression matches the pattern by commutativity
+
+  // console.log("5*x", ce.box(["Multiply", 5, "x"]).match(pattern));
+  test('1+x', () =>
+    expect(match(pattern, ['Add', 1, 'x'])).toMatchInlineSnapshot(`{}`));
+  test('x+42', () =>
+    expect(match(pattern, ['Add', 'x', 42])).toMatchInlineSnapshot(`{}`));
+  test('5*x', () =>
+    expect(match(pattern, ['Multiply', 5, 'x'])).toMatchInlineSnapshot(`null`));
+  test('non-recursive: 2(1+x)', () =>
+    expect(
+      match(pattern, ['Multiply', 2, ['Add', 1, 'x']])
+    ).toMatchInlineSnapshot(`null`));
+  test('recursive: 2(1+x)', () =>
+    expect(
+      match(pattern, ['Multiply', 2, ['Add', 1, 'x']], { recursive: true })
+    ).toMatchInlineSnapshot(`{}`));
+
+  test('implicit addition (variants)', () =>
+    expect(match(['Add', 'x', '_a'], 'x')).toMatchInlineSnapshot(`{_a: 0}`));
+
+  test('prevent implicit addition (variants)', () =>
+    expect(
+      match(['Add', 'x', '_a'], 'x', {
+        exact: true,
+      })
+    ).toMatchInlineSnapshot(`null`));
+
+  test('Repeated named wildcards (fail)', () =>
+    expect(match(['Add', '_a', '_a'], ['Add', 1, 'x'])).toMatchInlineSnapshot(
+      `null`
+    ));
+  test('Repeated named wildcards (success)', () =>
+    expect(match(['Add', '_a', '_a'], ['Add', 'x', 'x'])).toMatchInlineSnapshot(
+      `{_a: "x"}`
+    ));
+
+  test('Capture function head', () =>
+    expect(match(['_f', '__args'], ['Add', 'x', 1])).toMatchInlineSnapshot(
+      `{_f: "Add"; __args: ["Add", "x", 1]}`
+    ));
+});
+
 describe('PATTERNS  MATCH - Universal wildcard', () => {
   // Return not null (i.e. `{}`) when there is a match
   const pattern = ['Add', 1, '__'];
