@@ -14,11 +14,7 @@
  * - numerical evaluation
  */
 
-import {
-  CanonicalForm,
-  ComputeEngine,
-  Rational,
-} from '../../src/compute-engine';
+import { ComputeEngine, Rational } from '../../src/compute-engine';
 import { primeFactors } from '../../src/compute-engine/numerics/numeric';
 import { primeFactors as bigPrimeFactors } from '../../src/compute-engine/numerics/numeric-bigint';
 import {
@@ -41,11 +37,6 @@ import {
 
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
-
-const expr =
-  'x=\\frac{-b\\pm\\sqrt{b^{2\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\sqrt{\\placeholder{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}-4ac}}{2a}';
-const parsedExpr = ce.parse(expr);
-console.log(parsedExpr.latex.toString());
 
 const expr5 = engine.parse('x^{3}+3.1x^{3}+x^3');
 console.log(expr5.N().latex);

@@ -4,11 +4,8 @@ import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { canonicalPower } from '../library/arithmetic-power';
 import { canonicalInvisibleOperator } from '../library/core';
 import { BoxedExpression, CanonicalForm } from '../public';
-import {
-  flattenDelimiter,
-  flattenOps,
-  flattenSequence,
-} from '../symbolic/flatten';
+import { flattenDelimiter, flattenOps } from '../symbolic/flatten';
+import { BoxedFunction } from './boxed-function';
 import { canonicalOrder } from './order';
 
 export function canonicalForm(
@@ -83,7 +80,7 @@ function flattenForm(expr: BoxedExpression) {
     if (def?.associative) isAssociative = true;
   }
   if (isAssociative && typeof expr.head === 'string')
-    expr = ce._fn(expr.head, flattenOps(ops, expr.head));
+    expr = new BoxedFunction(ce, expr.head, flattenOps(ops, expr.head));
 
   return expr;
 }
@@ -100,7 +97,11 @@ function invisibleOperatorForm(expr: BoxedExpression) {
     );
   }
 
-  return expr.engine._fn(expr.head, expr.ops.map(invisibleOperatorForm));
+  return new BoxedFunction(
+    expr.engine,
+    expr.head,
+    expr.ops.map(invisibleOperatorForm)
+  );
 }
 
 function numberForm(expr: BoxedExpression) {
@@ -108,7 +109,8 @@ function numberForm(expr: BoxedExpression) {
   if (expr.numericValue) return expr.canonical;
 
   // Recursively visit all sub-expressions
-  if (expr.ops) return expr.engine._fn(expr.head, expr.ops.map(numberForm));
+  if (expr.ops)
+    return new BoxedFunction(expr.engine, expr.head, expr.ops.map(numberForm));
   return expr;
 }
 
@@ -138,7 +140,7 @@ function addForm(expr: BoxedExpression) {
   if (expr.head === 'Subtract')
     return canonicalAdd(expr.engine, [ops[0], expr.engine.neg(ops[1])]);
 
-  return expr.engine._fn(expr.head, ops);
+  return new BoxedFunction(expr.engine, expr.head, ops);
 }
 
 function powerForm(expr: BoxedExpression) {
@@ -155,7 +157,7 @@ function powerForm(expr: BoxedExpression) {
   // Recursively visit all sub-expressions
   if (!expr.ops) return expr;
 
-  return expr.engine._fn(expr.head, expr.ops.map(powerForm));
+  return new BoxedFunction(expr.engine, expr.head, expr.ops.map(powerForm));
 }
 
 function divideForm(expr: BoxedExpression) {
@@ -170,5 +172,5 @@ function divideForm(expr: BoxedExpression) {
   // Recursively visit all sub-expressions
   if (!expr.ops) return expr;
 
-  return expr.engine._fn(expr.head, expr.ops.map(divideForm));
+  return new BoxedFunction(expr.engine, expr.head, expr.ops.map(divideForm));
 }

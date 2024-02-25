@@ -2,6 +2,7 @@ import { Complex } from 'complex.js';
 import { asFloat } from '../numerics/numeric';
 import { BoxedExpression, SemiBoxedExpression } from '../public';
 import { lex, maxDegree, totalDegree } from '../symbolic/polynomials';
+import { BoxedFunction } from './boxed-function';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
@@ -209,7 +210,9 @@ export function canonicalOrder(
         (ce.lookupFunction(expr.head)?.commutative ?? false);
       if (isCommutative) ops = [...ops].sort(order);
     }
-    return expr.engine._fn(expr.head, ops);
+    return new BoxedFunction(expr.engine, expr.head, ops, {
+      canonical: expr.isCanonical,
+    });
   }
   return expr;
 }
