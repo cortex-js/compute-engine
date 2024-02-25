@@ -53,7 +53,7 @@ export function canonicalDivide(
     );
   }
   if (op1.head === 'Divide')
-    return canonicalDivide(ce, ce.mul(op1.op1, op2), op1.op2);
+    return canonicalDivide(ce, op1.op1, ce.mul(op1.op2, op2));
   if (op2.head === 'Divide')
     return canonicalDivide(ce, ce.mul(op1, op2.op2), op2.op1);
 
