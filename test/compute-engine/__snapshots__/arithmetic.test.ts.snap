@@ -360,9 +360,15 @@ box       = MachineEpsilon
 N-auto    = 2.220446049250313e-16
 `;
 
+exports[`DIVIDE Divide (1/5)/7 1`] = `["Rational", 1, 35]`;
+
 exports[`DIVIDE Divide 1`] = `2`;
 
 exports[`DIVIDE Divide 2`] = `2.(27)`;
+
+exports[`DIVIDE Divide 2.5/1.1 1`] = `2.(27)`;
+
+exports[`DIVIDE Divide 6/3 1`] = `2`;
 
 exports[`DIVIDE INVALID  Divide 1`] = `["Divide", 2.5, ["Error", "'missing'"]]`;
 
