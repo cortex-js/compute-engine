@@ -300,12 +300,16 @@ describe('MULTIPLY', () => {
 });
 
 describe('DIVIDE', () => {
+  test(`Divide (1/5)/7`, () =>
+    expect(
+      ce.box(['Divide', ['Divide', 1, 5], 7]).evaluate()
+    ).toMatchSnapshot());
+  test(`Divide 6/3`, () =>
+    expect(ce.box(['Divide', 6, 3]).evaluate()).toMatchSnapshot());
+  test(`Divide 2.5/1.1`, () =>
+    expect(ce.box(['Divide', 2.5, 1.1]).evaluate()).toMatchSnapshot());
   test(`INVALID  Divide`, () =>
     expect(ce.box(['Divide', 2.5]).evaluate()).toMatchSnapshot());
-  test(`Divide`, () =>
-    expect(ce.box(['Divide', 6, 3]).evaluate()).toMatchSnapshot());
-  test(`Divide`, () =>
-    expect(ce.box(['Divide', 2.5, 1.1]).evaluate()).toMatchSnapshot());
   test(`INVALID Divide`, () =>
     expect(ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
