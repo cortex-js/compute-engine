@@ -818,21 +818,26 @@ export function canonicalInvisibleOperator(
       rhs.head === 'Delimiter' &&
       !ce.lookupSymbol(lhs.symbol)
     ) {
-      // Infer the type of the symbol
-      if (!ce.lookupFunction(lhs.symbol)) {
-        ce.declare(lhs.symbol, 'Functions');
+      // We have encountered something like `f(a+b)`, where `f` is not
+      // defined. But it also could be `x(x+1)` where `x` is a number.
+      // So, start with boxing the arguments and see if it makes sense.
+
+      // No arguments, i.e. `f()`? It's a function call.
+      if (rhs.nops === 0) {
+        if (!ce.lookupFunction(lhs.symbol)) ce.declare(lhs.symbol, 'Functions');
+        return ce.box([lhs.symbol]);
       }
 
-      //
-      // Function call with an empty argument list?
-      //
-      if (rhs.nops === 0) return ce.box([lhs.symbol]);
-
-      // The first argument of the delimiter should be sequence...
-      rhs = rhs.op1!;
-      if (rhs.head === 'Sequence')
-        return ce.box([lhs.symbol, ...ce.canonical(rhs.ops!)]);
-      return ce.box([lhs.symbol, rhs.canonical]);
+      // Parse the arguments first, in case they reference lhs.symbol
+      // i.e. `x(x+1)`.
+      let args = rhs.op1.head === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
+      args = canonical(flattenSequence(args));
+      if (!ce.lookupSymbol(lhs.symbol)) {
+        // Still not a symbol (i.e. wasn't used as a symbol in the
+        // subexpression), so it's a function call.
+        if (!ce.lookupFunction(lhs.symbol)) ce.declare(lhs.symbol, 'Functions');
+        return ce.function(lhs.symbol, args);
+      }
     }
   }
 

@@ -134,6 +134,25 @@ describe('OPERATOR invisible', () => {
       ]
       ["Multiply", 2, "x", "y", "z"]
     `));
+
+  test('q(2q) // Invisible operator as multiply', () =>
+    expect(check('q(2q)')).toMatchInlineSnapshot(`
+      latex     = [
+        "InvisibleOperator",
+        "q",
+        ["Delimiter", ["InvisibleOperator", 2, "q"]]
+      ]
+      box       = ["Multiply", "q", 2, "q"]
+      canonical = ["Multiply", 2, "q", "q"]
+      evaluate  = ["Multiply", 2, ["Square", "q"]]
+    `));
+
+  test('f(2q) // Invisible operator as a function', () =>
+    expect(check('f(2q)')).toMatchInlineSnapshot(`
+      latex     = ["f", ["InvisibleOperator", 2, "q"]]
+      ["f", ["Multiply", 2, "q"]]
+    `));
+
   test('(abc)(xyz) // Invisible operator', () =>
     expect(check('(abc)(xyz)')).toMatchInlineSnapshot(`
       latex     = [
