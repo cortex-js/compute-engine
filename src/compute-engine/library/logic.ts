@@ -163,7 +163,7 @@ function processOr(
       if (!duplicate) ops.push(arg);
     }
   }
-  if (ops.length === 0) return ce.True;
+  if (ops.length === 0) return ce.False;
   if (ops.length === 1) return ops[0];
   return ce._fn('Or', ops);
 }
