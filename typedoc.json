@@ -22,7 +22,7 @@
     "strictNullChecks": false
   },
   // "includes": "./src/compute-engine/**/*",
-  "externalPattern": ["**/node_modules/**", "./common/**", "./cortex/**"],
+  "externalPattern": ["**/node_modules/**", "./cortex/**"],
   "excludeInternal": true,
   "excludePrivate": true,
   "excludeProtected": true,

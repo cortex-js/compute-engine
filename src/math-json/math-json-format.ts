@@ -1,4 +1,4 @@
-/** @module "compute-engine" */
+/** @module "math-json" */
 
 /** @category MathJSON */
 export type Attributes = {

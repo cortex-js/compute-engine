@@ -513,7 +513,6 @@ export interface BoxedExpression {
 
   /** If `true`, this expression is in a canonical form.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
    *
    */
   get isCanonical(): boolean;
@@ -525,7 +524,9 @@ export interface BoxedExpression {
 
   /** MathJSON representation of this expression.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    */
   readonly json: Expression;
@@ -554,14 +555,18 @@ export interface BoxedExpression {
    *
    * The serialization can be customized with `ComputeEngine.latexOptions`
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    */
   get latex(): LatexString;
 
   /**
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    * @internal
    */
   set latex(val: string);
@@ -569,7 +574,9 @@ export interface BoxedExpression {
   /** If this expression is a symbol, return the name of the symbol as a string.
    * Otherwise, return `null`.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
 
   * @category Symbol Expression
    *
@@ -579,14 +586,18 @@ export interface BoxedExpression {
   /**
    * If this is the `Nothing` symbol, return `true`.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    */
   readonly isNothing: boolean;
 
   /** If this expression is a string, return the value of the string.
    * Otherwise, return `null`.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
 
   * @category String Expression
    *
@@ -595,14 +606,18 @@ export interface BoxedExpression {
 
   /** All the subexpressions matching the head
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    */
   getSubexpressions(head: string): ReadonlyArray<BoxedExpression>;
 
   /** All the subexpressions in this expression, recursively
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    */
   readonly subexpressions: ReadonlyArray<BoxedExpression>;
@@ -611,7 +626,9 @@ export interface BoxedExpression {
    *
    * All the symbols in the expression, recursively
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    */
   readonly symbols: ReadonlyArray<string>;
@@ -632,7 +649,9 @@ export interface BoxedExpression {
 
   /** All the `["Error"]` subexpressions
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    */
   readonly errors: ReadonlyArray<BoxedExpression>;
@@ -644,17 +663,22 @@ export interface BoxedExpression {
    * If the head expression can be represented as a string, it is returned
    * as a string.
    *
-   * **Note** applicable to canonical and non-canonical expressions. The head
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions. The head
    * of a non-canonical expression may be different than the head of its
    * canonical counterpart. For example the canonical counterpart of `["Divide", 5, 7]` is `["Rational", 5, 5]`.
-   */
+   * :::
+
+  */
   readonly head: BoxedExpression | string;
 
   /** The list of arguments of the function, its "tail".
    *
    * If the expression is not a function, return `null`.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    * @category Function Expression
    *
@@ -666,7 +690,9 @@ export interface BoxedExpression {
    * Note that a function can have 0 operands, so to check if this expression
    * is a function, check if `this.ops !== null` instead.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    * @category Function Expression
    *
@@ -675,7 +701,9 @@ export interface BoxedExpression {
 
   /** First operand, i.e.`this.ops[0]`
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    * @category Function Expression
    *
@@ -685,7 +713,9 @@ export interface BoxedExpression {
 
   /** Second operand, i.e.`this.ops[1]`
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    * @category Function Expression
    *
@@ -695,7 +725,9 @@ export interface BoxedExpression {
 
   /** Third operand, i.e. `this.ops[2]`
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    * @category Function Expression
    *
@@ -706,10 +738,12 @@ export interface BoxedExpression {
   /** `true` if this expression or any of its subexpressions is an `["Error"]`
    * expression.
    *
-   * **Note** applicable to canonical and non-canonical expressions. For
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions. For
    * non-canonical expression, this may indicate a syntax error while parsing
    * LaTeX. For canonical expression, this may indicate argument domain
    * mismatch, or missing or unexpected arguments.
+   * :::
    *
    * @category Symbol Expression
    *
@@ -742,7 +776,9 @@ export interface BoxedExpression {
    *
    * As an example, the `Random` function is not pure.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    */
   readonly isPure: boolean;
 
@@ -774,7 +810,9 @@ export interface BoxedExpression {
    * Note the same effect can be achieved with `this.replace()`, but
    * using `this.subs()` is more efficient, and simpler.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    */
   subs(sub: Substitution, options?: { canonical?: boolean }): BoxedExpression;
@@ -790,9 +828,10 @@ export interface BoxedExpression {
    * See also `subs` for a simple substitution.
    *
    *
-   * **Note** applicable to canonical and non-canonical expressions. If the
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions. If the
    * expression is non-canonical, the result is also non-canonical.
-   *
+   * :::
    */
   replace(
     rules: BoxedRuleSet | Rule | Rule[],
@@ -802,7 +841,9 @@ export interface BoxedExpression {
   /**
    * True if the expression includes a symbol `v` or a function head `v`.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    */
   has(v: string | string[]): boolean;
 
@@ -810,7 +851,9 @@ export interface BoxedExpression {
    *
    * `ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    * @category Relational Operator
    */
@@ -820,14 +863,18 @@ export interface BoxedExpression {
    * If this expression matches `pattern`, return a substitution that makes
    * `pattern` equal to `this`. Otherwise return `null`.
    *
-   * If `pattern` includes wildcards (identifiers that starts
+   * If `pattern` includes wildcards (identifiers that start
    * with `_`), the substitution will include a prop for each matching named
    * wildcard.
    *
    * If this expression matches `pattern` but there are no named wildcards,
    * return the empty substitution, `{}`.
    *
-   * **Note** applicable to canonical and non-canonical expressions.
+   * Read more about [**patterns and rules**](/compute-engine/guides/patterns-and-rules/).
+   *
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
    *
    */
   match(
@@ -849,7 +896,7 @@ export interface BoxedExpression {
    * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
    * number).
    *
-   * @category Expression Properties
+   * @category Numeric Expression
    *
    */
   readonly isNaN: boolean | undefined;
@@ -857,56 +904,56 @@ export interface BoxedExpression {
   /**
    * The numeric value of this expression is 0.
    *
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isZero: boolean | undefined;
   /**
    * The numeric value of this expression is not 0.
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isNotZero: boolean | undefined;
 
   /**
    * The numeric value of this expression is not 1.
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isOne: boolean | undefined;
 
   /**
    * The numeric value of this expression is not -1.
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isNegativeOne: boolean | undefined;
 
   /** The numeric value of this expression is ±Infinity or Complex Infinity
    *
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isInfinity: boolean | undefined;
 
   /** This expression is a number, but not ±Infinity and not `NaN`
    *
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isFinite: boolean | undefined;
 
   /**
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isEven: boolean | undefined;
 
   /**
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isOdd: boolean | undefined;
 
   /**
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isPrime: boolean | undefined;
 
   /**
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isComposite: boolean | undefined;
 
@@ -918,7 +965,7 @@ export interface BoxedExpression {
    *
    * Conversely, `isNumber` may be true even if `numericValue` is `null`,
    * example the symbol `Pi` return true for `isNumber` but `numericValue` is
-   * `null`. It's value can be accessed with `.value.numericValue`
+   * `null`. Its value can be accessed with `.value.numericValue`
    *
    * @category Numeric Expression
    *
@@ -987,25 +1034,25 @@ export interface BoxedExpression {
 
   /** The numeric value of this expression is > 0, same as `isGreater(0)`
    *
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isPositive: boolean | undefined;
 
   /** The numeric value of this expression is >= 0, same as `isGreaterEqual(0)`
    *
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isNonNegative: boolean | undefined;
 
   /** The numeric value of this expression is < 0, same as `isLess(0)`
    *
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isNegative: boolean | undefined;
 
   /** The numeric value of this expression is &lt;= 0, same as `isLessEqual(0)`
    *
-   * @category Expression Properties
+   * @category Numeric Expression
    */
   readonly isNonPositive: boolean | undefined;
 
@@ -1050,7 +1097,9 @@ export interface BoxedExpression {
 
   /** Wikidata identifier.
    *
-   * **Note** `undefined` if not a canonical expression.
+   * :::info[Note]
+   * `undefined` if not a canonical expression.
+   * :::
    */
   readonly wikidata: string | undefined;
 
@@ -1058,7 +1107,9 @@ export interface BoxedExpression {
    *
    * May include markdown. Each string is a paragraph.
    *
-   * **Note** `undefined` if not a canonical expression.
+   * :::info[Note]
+   * `undefined` if not a canonical expression.
+   * :::
    *
    */
   readonly description: undefined | string[];
@@ -1066,7 +1117,9 @@ export interface BoxedExpression {
   /** An optional URL pointing to more information about the symbol or
    *  function head.
    *
-   * **Note** `undefined` if not a canonical expression.
+   * :::info[Note]
+   * `undefined` if not a canonical expression.
+   * :::
    *
    */
   readonly url: string | undefined;
@@ -1074,7 +1127,9 @@ export interface BoxedExpression {
   /** Expressions with a higher complexity score are sorted
    * first in commutative functions
    *
-   * **Note** `undefined` if not a canonical expression.
+   * :::info[Note]
+   * `undefined` if not a canonical expression.
+   * :::
    */
   readonly complexity: number | undefined;
 
@@ -1083,7 +1138,9 @@ export interface BoxedExpression {
    *  expression. `baseDefinition` is the base class of symbol and function
    *  definition.
    *
-   * **Note** `undefined` if not a canonical expression.
+   * :::info[Note]
+   * `undefined` if not a canonical expression.
+   * :::
    *
    */
   readonly baseDefinition: BoxedBaseDefinition | undefined;
@@ -1091,7 +1148,9 @@ export interface BoxedExpression {
   /**
    * For functions, a possible definition associated with the expression.
    *
-   * **Note** `undefined` if not a canonical expression or not a function.
+   * :::info[Note]
+   * `undefined` if not a canonical expression or not a function.
+   * :::
    *
    */
   readonly functionDefinition: BoxedFunctionDefinition | undefined;
@@ -1099,7 +1158,7 @@ export interface BoxedExpression {
   /**
    * For symbols, a possible definition associated with the expression.
    *
-   * **Note** `undefined` if not a symbol
+   * Return `undefined` if not a symbol
    *
    */
   readonly symbolDefinition: BoxedSymbolDefinition | undefined;
@@ -1231,7 +1290,9 @@ export interface BoxedExpression {
    *
    * Throws a runtime error if a constant.
    *
-   * **Note**: If non-canonical, does nothing.
+   * :::info[Note]
+   * If non-canonical, does nothing
+   * :::
    *
    */
   set value(
@@ -1260,14 +1321,18 @@ export interface BoxedExpression {
    * Use `expr.head` to determine if an expression is a symbol or function
    * expression.
    *
-   * **Note**: if non-canonical or not valid, return `undefined`.
+   * :::info[Note]
+   * If non-canonical or not valid, return `undefined`.
+   * :::
    *
    */
   get domain(): BoxedDomain | undefined;
 
   /** Modify the domain of a symbol.
    *
-   * **Note**: If non-canonical, does nothing.
+   * :::info[Note]
+   * If non-canonical does nothing
+   * :::
    *
    */
   set domain(domain: DomainExpression | BoxedDomain | undefined);

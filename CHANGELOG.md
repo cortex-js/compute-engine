@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **#146** When parsing an expression like `x(x+1)` where `x` is an undeclared
+  symbol, do not infer that `x` is a function. Instead, infer that `x` is a
+  variable and that the expression is a product.
+- **#145** The expression `["Or", "False", "False"]`, that is when all the
+  arguments are `False`, is now evaluates to `False`.
+
 ## 0.24.0 _2024-02-23_
 
 ### Issues Resolved
