@@ -47,44 +47,6 @@ import { BoxedExpression, Hold, Rational } from '../public';
 //   return { coef: [1, 1], term: expr, constant: [0, 1] };
 // }
 
-/**
- * Apply the operator `op` to the left-hand-side and right-hand-side
- * expression. Applies the associativity rule specified by the definition,
- * i.e. 'op(a, op(b, c))` -> `op(a, b, c)`, etc...
- *
- */
-export function applyAssociativeOperator(
-  op: string,
-  lhs: BoxedExpression,
-  rhs: BoxedExpression,
-  associativity: 'right' | 'left' | 'non' | 'both' = 'both'
-): BoxedExpression {
-  const ce = lhs.engine;
-
-  if (associativity === 'non') return ce.box([op, lhs, rhs]);
-
-  const lhsName = lhs.head;
-  const rhsName = rhs.head;
-
-  if (associativity === 'left') {
-    if (lhsName === op) return ce.box([op, ...(lhs.ops ?? []), rhs]);
-    return ce.box([op, lhs, rhs]);
-  }
-
-  if (associativity === 'right') {
-    if (rhsName === op) return ce.box([op, lhs, ...(rhs.ops ?? [])]);
-    return ce.box([op, lhs, rhs]);
-  }
-
-  // Associativity: 'both'
-  if (lhsName === op && rhsName === op) {
-    return ce.box([op, ...(lhs.ops ?? []), ...(rhs.ops ?? [])]);
-  }
-  if (lhsName === op) return ce.box([op, ...(lhs.ops ?? []), rhs]);
-  if (rhsName === op) return ce.box([op, lhs, ...(rhs.ops ?? [])]);
-  return ce.box([op, lhs, rhs]);
-}
-
 // @todo: replace usage with asCoefficient():
 // it does the same thing, but also extracts any literal coefficient
 export function makePositive(

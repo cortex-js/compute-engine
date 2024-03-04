@@ -2,6 +2,10 @@
 
 ### Issues Resolved
 
+- **#147** The associativity of some operators, including `/` was not applied
+  correctly, resulting in unexpected results. For example, `1/2/3` would be
+  parsed as `["Divide", 1, ["Divide", 2, 3]]` instead of
+  `["Divide", ["Divide", 1, 2], 3]`.
 - **#146** When parsing an expression like `x(x+1)` where `x` is an undeclared
   symbol, do not infer that `x` is a function. Instead, infer that `x` is a
   variable and that the expression is a product.

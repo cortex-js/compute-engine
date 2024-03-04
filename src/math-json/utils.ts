@@ -515,36 +515,20 @@ export function mapArgs<T>(expr: Expression, fn: (x: Expression) => T): T[] {
 }
 
 /**
- * Apply the operator `op` to the left-hand-side and right-hand-side
- * expression. Applies the associativity rule specified by the definition,
- * i.e. 'op(a, op(b, c))` -> `op(a, b, c)`, etc...
- *
+ * Assuming that op is an associative operator, fold lhs or rhs
+ * if either are the same operator.
  */
-export function applyAssociativeOperator(
+export function foldAssociativeOperator(
   op: string,
   lhs: Expression,
-  rhs: Expression,
-  associativity: 'right' | 'left' | 'non' | 'both' = 'both'
+  rhs: Expression
 ): Expression {
-  if (associativity === 'non') return [op, lhs, rhs];
-
   const lhsName = head(lhs);
   const rhsName = head(rhs);
 
-  if (associativity === 'left') {
-    if (lhsName === op) return [op, ...(ops(lhs) ?? []), rhs];
-    return [op, lhs, rhs];
-  }
-
-  if (associativity === 'right') {
-    if (rhsName === op) return [op, lhs, ...(ops(rhs) ?? [])];
-    return [op, lhs, rhs];
-  }
-
-  // Associativity: 'both'
-  if (lhsName === op && rhsName === op) {
+  if (lhsName === op && rhsName === op)
     return [op, ...(ops(lhs) ?? []), ...(ops(rhs) ?? [])];
-  }
+
   if (lhsName === op) return [op, ...(ops(lhs) ?? []), rhs];
   if (rhsName === op) return [op, lhs, ...(ops(rhs) ?? [])];
   return [op, lhs, rhs];

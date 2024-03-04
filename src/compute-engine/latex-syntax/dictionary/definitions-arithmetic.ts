@@ -1,7 +1,7 @@
 import { Expression } from '../../../math-json/math-json-format';
 import {
   machineValue,
-  applyAssociativeOperator,
+  foldAssociativeOperator,
   rationalValue,
   op,
   nops,
@@ -616,7 +616,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Add',
     latexTrigger: ['+'],
     kind: 'infix',
-    associativity: 'both',
+    associativity: 'any',
     precedence: ADDITION_PRECEDENCE,
     parse: (parser, lhs, until) => {
       if (until && ADDITION_PRECEDENCE < until.minPrec) return null;
@@ -630,7 +630,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // This is the case for |a+|b||.
       if (rhs === null) return null;
 
-      return applyAssociativeOperator('Add', lhs, rhs);
+      return foldAssociativeOperator('Add', lhs, rhs);
     },
     serialize: serializeAdd,
   },
@@ -698,13 +698,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'infix',
     latexTrigger: '\\over',
+    associativity: 'none', // In LaTeX, the \over command is not associative
     precedence: DIVISION_PRECEDENCE,
     parse: 'Divide',
   },
   {
     latexTrigger: ['\\/'],
     kind: 'infix',
-    associativity: 'non',
+    associativity: 'left',
     precedence: DIVISION_PRECEDENCE, // ??? MathML has 265, but it's wrong.
     // It has to be at least higher than multiply
     // e.g. `1/2+3*x` -> `1/2 + 3*x` , not `1/(2+3*x)`
@@ -713,14 +714,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     latexTrigger: ['/'],
     kind: 'infix',
-    associativity: 'non',
+    associativity: 'left',
     precedence: DIVISION_PRECEDENCE,
     parse: 'Divide',
   },
   {
     latexTrigger: ['\\div'],
     kind: 'infix',
-    associativity: 'non',
+    associativity: 'left',
     precedence: DIVISION_PRECEDENCE, // ??? according to MathML
     parse: 'Divide',
   },
@@ -877,21 +878,21 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'MinusPlus',
     latexTrigger: ['\\mp'],
     kind: 'infix',
-    associativity: 'both',
+    associativity: 'any',
     precedence: ARROW_PRECEDENCE,
   },
   {
     name: 'Multiply',
     latexTrigger: ['\\times'],
     kind: 'infix',
-    associativity: 'both',
+    associativity: 'any',
     precedence: MULTIPLICATION_PRECEDENCE,
     serialize: serializeMultiply,
   },
   {
     latexTrigger: ['\\cdot'],
     kind: 'infix',
-    associativity: 'both',
+    associativity: 'any',
     precedence: MULTIPLICATION_PRECEDENCE,
     parse: (parser, lhs, terminator) => {
       const rhs = parser.parseExpression({
@@ -900,13 +901,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
-      return applyAssociativeOperator('Multiply', lhs, rhs);
+      return foldAssociativeOperator('Multiply', lhs, rhs);
     },
   },
   {
     latexTrigger: ['*'],
     kind: 'infix',
-    associativity: 'both',
+    associativity: 'any',
     precedence: MULTIPLICATION_PRECEDENCE,
     parse: (parser, lhs, terminator) => {
       const rhs = parser.parseExpression({
@@ -915,7 +916,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
-      return applyAssociativeOperator('Multiply', lhs, rhs);
+      return foldAssociativeOperator('Multiply', lhs, rhs);
     },
   },
   // Infix modulo, as in `26 \bmod 5`
@@ -1020,7 +1021,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'PlusMinus',
     latexTrigger: ['\\pm'],
     kind: 'infix',
-    associativity: 'both',
+    associativity: 'any',
     precedence: ARROW_PRECEDENCE,
     serialize: (serializer, expr) => {
       const op1 = op(expr, 1);
@@ -1047,7 +1048,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     latexTrigger: ['\\plusmn'],
     kind: 'infix',
-    associativity: 'both',
+    associativity: 'any',
     precedence: ARROW_PRECEDENCE,
     parse: (parser, lhs, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
@@ -1081,7 +1082,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // {
   //   trigger: ['*', '*'],
   //   kind: 'infix',
-  //   associativity: 'non',
+  //   associativity: 'none',
   //   precedence: 720,
   // },
   {
@@ -1130,7 +1131,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Subtract',
     latexTrigger: ['-'],
     kind: 'infix',
-    associativity: 'both',
+    associativity: 'left',
     precedence: ADDITION_PRECEDENCE + 2,
     parse: (parser, lhs, terminator) => {
       const rhs = parser.parseExpression({

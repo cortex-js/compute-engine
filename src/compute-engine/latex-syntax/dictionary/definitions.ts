@@ -36,7 +36,7 @@ import { DEFINITIONS_SETS } from './definitions-sets';
 import { DEFINITIONS_CALCULUS } from './definitions-calculus';
 import { DEFINITIONS_SYMBOLS } from './definitions-symbols';
 import {
-  applyAssociativeOperator,
+  foldAssociativeOperator,
   head,
   isEmptySequence,
   isValidIdentifier,
@@ -130,7 +130,7 @@ export function isIndexedMatchfixEntry(
 
 export type IndexedInfixEntry = CommonEntry & {
   kind: 'infix';
-  associativity: 'right' | 'left' | 'non' | 'both';
+  associativity: 'right' | 'left' | 'none' | 'any';
   precedence: Precedence;
 
   parse: InfixParseHandler;
@@ -418,9 +418,9 @@ function makeIndexedEntry(
       !tokensTrigger ||
         (tokensTrigger[0] !== '^' && tokensTrigger[0] !== '_') ||
         !entry.associativity ||
-        entry.associativity === 'non'
+        entry.associativity === 'none'
     );
-    result.associativity = entry.associativity ?? 'non';
+    result.associativity = entry.associativity ?? 'none';
     result.precedence = entry.precedence ?? 10000;
   }
 
@@ -633,27 +633,55 @@ function makeParseHandler(
       ];
     }
     const h = entry.parse ?? entry.name ?? idTrigger;
-    const prec = entry['precedence'] ?? 10000;
-    const associativity = entry['associativity'] ?? 'non';
-    if (h)
+    if (h) {
+      const prec = entry['precedence'] ?? 10000;
+      const associativity = entry['associativity'] ?? 'none';
+
+      // Note: for infix operators, we are lenient and tolerate
+      // a missing rhs.
+      // This is because it is unlikely to be an ambiguous parse
+      // (i.e. `x+`) and more likely to be a syntax error we want to
+      // capture as `['Add', 'x', ['Error', "'missing'"]`.
+
+      if (associativity === 'none') {
+        return (parser, lhs, until) => {
+          if (lhs === null) return null;
+          const rhs = missingIfEmpty(
+            parser.parseExpression({ ...until, minPrec: prec })
+          );
+          return [h, lhs, rhs];
+        };
+      }
+      if (associativity === 'left') {
+        return (parser, lhs, until) => {
+          if (lhs === null) return null;
+          const rhs = missingIfEmpty(
+            parser.parseExpression({ ...until, minPrec: prec + 1 })
+          );
+          if (typeof h !== 'string') return [h, lhs, rhs];
+          return [h, lhs, rhs];
+        };
+      }
+      if (associativity === 'right') {
+        return (parser, lhs, until) => {
+          if (lhs === null) return null;
+          const rhs = missingIfEmpty(
+            parser.parseExpression({ ...until, minPrec: prec })
+          );
+          if (typeof h !== 'string') return [h, lhs, rhs];
+          return [h, lhs, rhs];
+        };
+      }
+      // "both"-associative: fold identical operators
       return (parser, lhs, until) => {
         if (lhs === null) return null;
-        // If the precedence is too high, return
-        if (prec < until.minPrec) return null; // @todo should not be needed
-        // Get the rhs
-        // Note: for infix operators, we are lenient and tolerate
-        // a missing rhs.
-        // This is because it is unlikely to be an ambiguous parse
-        // (i.e. `x+`) and more likely to be a syntax error we want to
-        // capture as `['Add', 'x', ['Error', "'missing'"]`.
         const rhs = missingIfEmpty(
           parser.parseExpression({ ...until, minPrec: prec })
         );
-
-        return typeof h === 'string'
-          ? applyAssociativeOperator(h, lhs, rhs, associativity)
-          : [h, lhs, rhs];
+        if (typeof h !== 'string') return [h, lhs, rhs];
+        return foldAssociativeOperator(h, lhs, rhs);
       };
+    }
   }
 
   //

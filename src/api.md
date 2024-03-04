@@ -2627,7 +2627,9 @@ get json(): Expression
 
 MathJSON representation of this expression.
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 [`Expression`](#expression)
 
@@ -2942,7 +2944,104 @@ The value of this expression is a number with a imaginary part
 
 </MemberCard>
 
-#### Expression Properties
+#### Function Expression
+
+<a id="ops" name="ops"></a>
+
+<MemberCard>
+
+##### BoxedExpression.ops
+
+```ts
+readonly ops: readonly BoxedExpression[];
+```
+
+The list of arguments of the function, its "tail".
+
+If the expression is not a function, return `null`.
+
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
+
+</MemberCard>
+
+<a id="nops" name="nops"></a>
+
+<MemberCard>
+
+##### BoxedExpression.nops
+
+```ts
+readonly nops: number;
+```
+
+If this expression is a function, the number of operands, otherwise 0.
+
+Note that a function can have 0 operands, so to check if this expression
+is a function, check if `this.ops !== null` instead.
+
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
+
+</MemberCard>
+
+<a id="op1" name="op1"></a>
+
+<MemberCard>
+
+##### BoxedExpression.op1
+
+```ts
+readonly op1: BoxedExpression;
+```
+
+First operand, i.e.`this.ops[0]`
+
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
+
+</MemberCard>
+
+<a id="op2" name="op2"></a>
+
+<MemberCard>
+
+##### BoxedExpression.op2
+
+```ts
+readonly op2: BoxedExpression;
+```
+
+Second operand, i.e.`this.ops[1]`
+
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
+
+</MemberCard>
+
+<a id="op3" name="op3"></a>
+
+<MemberCard>
+
+##### BoxedExpression.op3
+
+```ts
+readonly op3: BoxedExpression;
+```
+
+Third operand, i.e. `this.ops[2]`
+
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
+
+</MemberCard>
+
+#### Numeric Expression
 
 <a id="isnan" name="isnan"></a>
 
@@ -3096,6 +3195,57 @@ readonly isComposite: boolean;
 
 </MemberCard>
 
+<a id="numericvalue" name="numericvalue"></a>
+
+<MemberCard>
+
+##### BoxedExpression.numericValue
+
+```ts
+readonly numericValue: number | Complex | Decimal | Rational;
+```
+
+Return the value of this expression, if a number literal.
+
+Note it is possible for `numericValue` to be `null`, and for `isNotZero`
+to be true. For example, when a symbol has been defined with an assumption.
+
+Conversely, `isNumber` may be true even if `numericValue` is `null`,
+example the symbol `Pi` return true for `isNumber` but `numericValue` is
+`null`. Its value can be accessed with `.value.numericValue`
+
+</MemberCard>
+
+<a id="sgn" name="sgn"></a>
+
+<MemberCard>
+
+##### BoxedExpression.sgn
+
+```ts
+readonly sgn: 0 | 1 | -1;
+```
+
+Return the following, depending on the value of this expression:
+
+* `-1` if it is `< 0
+* `0` if it is = 0
+* `+1` if it is >` 0
+* `undefined` this value may be positive, negative or zero. We don't know
+   right now (a symbol with an Integer domain, but no currently assigned
+   value, for example)
+* `null` this value will never be positive, negative or zero (`NaN`,
+    a string or a complex number for example)
+
+Note that complex numbers have no natural ordering,
+so if the value is a complex number, `sgn` is either 0, or `null`
+
+If a symbol, this does take assumptions into account, that is `this.sgn`
+will return `1` if `isPositive` is `true`, even if this expression has
+no value
+
+</MemberCard>
+
 <a id="ispositive" name="ispositive"></a>
 
 <MemberCard>
@@ -3152,146 +3302,6 @@ The numeric value of this expression is &lt;= 0, same as `isLessEqual(0)`
 
 </MemberCard>
 
-#### Function Expression
-
-<a id="ops" name="ops"></a>
-
-<MemberCard>
-
-##### BoxedExpression.ops
-
-```ts
-readonly ops: readonly BoxedExpression[];
-```
-
-The list of arguments of the function, its "tail".
-
-If the expression is not a function, return `null`.
-
-**Note** applicable to canonical and non-canonical expressions.
-
-</MemberCard>
-
-<a id="nops" name="nops"></a>
-
-<MemberCard>
-
-##### BoxedExpression.nops
-
-```ts
-readonly nops: number;
-```
-
-If this expression is a function, the number of operands, otherwise 0.
-
-Note that a function can have 0 operands, so to check if this expression
-is a function, check if `this.ops !== null` instead.
-
-**Note** applicable to canonical and non-canonical expressions.
-
-</MemberCard>
-
-<a id="op1" name="op1"></a>
-
-<MemberCard>
-
-##### BoxedExpression.op1
-
-```ts
-readonly op1: BoxedExpression;
-```
-
-First operand, i.e.`this.ops[0]`
-
-**Note** applicable to canonical and non-canonical expressions.
-
-</MemberCard>
-
-<a id="op2" name="op2"></a>
-
-<MemberCard>
-
-##### BoxedExpression.op2
-
-```ts
-readonly op2: BoxedExpression;
-```
-
-Second operand, i.e.`this.ops[1]`
-
-**Note** applicable to canonical and non-canonical expressions.
-
-</MemberCard>
-
-<a id="op3" name="op3"></a>
-
-<MemberCard>
-
-##### BoxedExpression.op3
-
-```ts
-readonly op3: BoxedExpression;
-```
-
-Third operand, i.e. `this.ops[2]`
-
-**Note** applicable to canonical and non-canonical expressions.
-
-</MemberCard>
-
-#### Numeric Expression
-
-<a id="numericvalue" name="numericvalue"></a>
-
-<MemberCard>
-
-##### BoxedExpression.numericValue
-
-```ts
-readonly numericValue: number | Complex | Decimal | Rational;
-```
-
-Return the value of this expression, if a number literal.
-
-Note it is possible for `numericValue` to be `null`, and for `isNotZero`
-to be true. For example, when a symbol has been defined with an assumption.
-
-Conversely, `isNumber` may be true even if `numericValue` is `null`,
-example the symbol `Pi` return true for `isNumber` but `numericValue` is
-`null`. It's value can be accessed with `.value.numericValue`
-
-</MemberCard>
-
-<a id="sgn" name="sgn"></a>
-
-<MemberCard>
-
-##### BoxedExpression.sgn
-
-```ts
-readonly sgn: 0 | 1 | -1;
-```
-
-Return the following, depending on the value of this expression:
-
-* `-1` if it is `< 0
-* `0` if it is = 0
-* `+1` if it is >` 0
-* `undefined` this value may be positive, negative or zero. We don't know
-   right now (a symbol with an Integer domain, but no currently assigned
-   value, for example)
-* `null` this value will never be positive, negative or zero (`NaN`,
-    a string or a complex number for example)
-
-Note that complex numbers have no natural ordering,
-so if the value is a complex number, `sgn` is either 0, or `null`
-
-If a symbol, this does take assumptions into account, that is `this.sgn`
-will return `1` if `isPositive` is `true`, even if this expression has
-no value
-
-</MemberCard>
-
 #### Other
 
 <a id="engine" name="engine"></a>
@@ -3322,8 +3332,6 @@ get isCanonical(): boolean
 
 If `true`, this expression is in a canonical form.
 
-**Note** applicable to canonical and non-canonical expressions.
-
 `boolean`
 
 </MemberCard>
@@ -3340,7 +3348,9 @@ readonly json: Expression;
 
 MathJSON representation of this expression.
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 </MemberCard>
 
@@ -3373,7 +3383,9 @@ LaTeX representation of this expression.
 
 The serialization can be customized with `ComputeEngine.latexOptions`
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 `string`
 
@@ -3391,7 +3403,9 @@ readonly isNothing: boolean;
 
 If this is the `Nothing` symbol, return `true`.
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 </MemberCard>
 
@@ -3407,7 +3421,9 @@ getSubexpressions(head): readonly BoxedExpression[]
 
 All the subexpressions matching the head
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 • **head**: `string`
 
@@ -3425,7 +3441,9 @@ readonly subexpressions: readonly BoxedExpression[];
 
 All the subexpressions in this expression, recursively
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 </MemberCard>
 
@@ -3441,7 +3459,9 @@ readonly symbols: readonly string[];
 
 All the symbols in the expression, recursively
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 </MemberCard>
 
@@ -3487,7 +3507,9 @@ readonly errors: readonly BoxedExpression[];
 
 All the `["Error"]` subexpressions
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 </MemberCard>
 
@@ -3508,9 +3530,11 @@ If not a function this can be `Symbol`, `String`, `Number` or `Dictionary`.
 If the head expression can be represented as a string, it is returned
 as a string.
 
-**Note** applicable to canonical and non-canonical expressions. The head
+:::info[Note]
+Applicable to canonical and non-canonical expressions. The head
 of a non-canonical expression may be different than the head of its
 canonical counterpart. For example the canonical counterpart of `["Divide", 5, 7]` is `["Rational", 5, 5]`.
+:::
 
 </MemberCard>
 
@@ -3558,7 +3582,9 @@ If `this.isPure` is `false`, `this.value` is undefined. Call
 
 As an example, the `Random` function is not pure.
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 </MemberCard>
 
@@ -3620,7 +3646,9 @@ Replace all the symbols in the expression as indicated.
 Note the same effect can be achieved with `this.replace()`, but
 using `this.subs()` is more efficient, and simpler.
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 • **sub**: [`Substitution`](#substitutiont)\<[`SemiBoxedExpression`](#semiboxedexpression)\>
 
@@ -3649,8 +3677,10 @@ If no rules apply, return `null`.
 
 See also `subs` for a simple substitution.
 
-**Note** applicable to canonical and non-canonical expressions. If the
+:::info[Note]
+Applicable to canonical and non-canonical expressions. If the
 expression is non-canonical, the result is also non-canonical.
+:::
 
 • **rules**: [`BoxedRuleSet`](#boxedruleset) \| [`Rule`](#rule) \| [`Rule`](#rule)[]
 
@@ -3670,7 +3700,9 @@ has(v): boolean
 
 True if the expression includes a symbol `v` or a function head `v`.
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 • **v**: `string` \| `string`[]
 
@@ -3689,16 +3721,12 @@ match(pattern, options?): BoxedSubstitution
 If this expression matches `pattern`, return a substitution that makes
 `pattern` equal to `this`. Otherwise return `null`.
 
-If `pattern` includes wildcards (identifiers that starts
+If `pattern` includes wildcards (identifiers that start
 with `_`), the substitution will include a prop for each matching named
 wildcard.
 
 If this expression matches `pattern` but there are no named wildcards,
 return the empty substitution, `{}`.
-
-`<ReadMore path="/compute-engine/guides/patterns-and-rules/">`
-Read more about [**patterns and rules**](/compute-engine/guides/patterns-and-rules/).
-`</ReadMore>`
 
 Read more about [**patterns and rules**](/compute-engine/guides/patterns-and-rules/).
 
@@ -3755,7 +3783,9 @@ readonly wikidata: string;
 
 Wikidata identifier.
 
-**Note** `undefined` if not a canonical expression.
+:::info[Note]
+`undefined` if not a canonical expression.
+:::
 
 </MemberCard>
 
@@ -3773,7 +3803,9 @@ An optional short description if a symbol or function expression.
 
 May include markdown. Each string is a paragraph.
 
-**Note** `undefined` if not a canonical expression.
+:::info[Note]
+`undefined` if not a canonical expression.
+:::
 
 </MemberCard>
 
@@ -3790,7 +3822,9 @@ readonly url: string;
 An optional URL pointing to more information about the symbol or
  function head.
 
-**Note** `undefined` if not a canonical expression.
+:::info[Note]
+`undefined` if not a canonical expression.
+:::
 
 </MemberCard>
 
@@ -3807,7 +3841,9 @@ readonly complexity: number;
 Expressions with a higher complexity score are sorted
 first in commutative functions
 
-**Note** `undefined` if not a canonical expression.
+:::info[Note]
+`undefined` if not a canonical expression.
+:::
 
 </MemberCard>
 
@@ -3825,7 +3861,9 @@ For symbols and functions, a possible definition associated with the
  expression. `baseDefinition` is the base class of symbol and function
  definition.
 
-**Note** `undefined` if not a canonical expression.
+:::info[Note]
+`undefined` if not a canonical expression.
+:::
 
 </MemberCard>
 
@@ -3841,7 +3879,9 @@ readonly functionDefinition: BoxedFunctionDefinition;
 
 For functions, a possible definition associated with the expression.
 
-**Note** `undefined` if not a canonical expression or not a function.
+:::info[Note]
+`undefined` if not a canonical expression or not a function.
+:::
 
 </MemberCard>
 
@@ -3857,7 +3897,7 @@ readonly symbolDefinition: BoxedSymbolDefinition;
 
 For symbols, a possible definition associated with the expression.
 
-**Note** `undefined` if not a symbol
+Return `undefined` if not a symbol
 
 </MemberCard>
 
@@ -4014,7 +4054,9 @@ constants).
 
 Throws a runtime error if a constant.
 
-**Note**: If non-canonical, does nothing.
+:::info[Note]
+If non-canonical, does nothing
+:::
 
 `string` \| `number` \| `boolean` \| `number`[]
 
@@ -4055,11 +4097,15 @@ If a symbol the domain of the value of the symbol.
 Use `expr.head` to determine if an expression is a symbol or function
 expression.
 
-**Note**: if non-canonical or not valid, return `undefined`.
+:::info[Note]
+If non-canonical or not valid, return `undefined`.
+:::
 
 Modify the domain of a symbol.
 
-**Note**: If non-canonical, does nothing.
+:::info[Note]
+If non-canonical does nothing
+:::
 
 [`BoxedDomain`](#boxeddomain)
 
@@ -4187,7 +4233,9 @@ Structural/symbolic equality (weak equality).
 
 `ce.parse('1+x').isSame(ce.parse('x+1'))` is `false`
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 • **rhs**: [`BoxedExpression`](#boxedexpression)
 
@@ -4297,7 +4345,9 @@ readonly string: string;
 If this expression is a string, return the value of the string.
 Otherwise, return `null`.
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 </MemberCard>
 
@@ -4316,7 +4366,9 @@ readonly symbol: string;
 If this expression is a symbol, return the name of the symbol as a string.
 Otherwise, return `null`.
 
-**Note** applicable to canonical and non-canonical expressions.
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 </MemberCard>
 
@@ -4333,10 +4385,12 @@ readonly isValid: boolean;
 `true` if this expression or any of its subexpressions is an `["Error"]`
 expression.
 
-**Note** applicable to canonical and non-canonical expressions. For
+:::info[Note]
+Applicable to canonical and non-canonical expressions. For
 non-canonical expression, this may indicate a syntax error while parsing
 LaTeX. For canonical expression, this may indicate argument domain
 mismatch, or missing or unexpected arguments.
+:::
 
 </MemberCard>
 
@@ -6891,16 +6945,16 @@ Example: `+`, `\times`.
 ##### InfixEntry.associativity?
 
 ```ts
-optional associativity: "right" | "left" | "non" | "both";
+optional associativity: "right" | "left" | "none" | "any";
 ```
 
-- **`both`**: a + b + c  +(a, b, c)
+- **`none`**: a ? b ? c -> syntax error
+- **`any`**: a + b + c -> +(a, b, c)
 - **`left`**: a / b / c -> /(/(a, b), c)
 - **`right`**: a = b = c -> =(a, =(b, c))
-- **`non`**: a < b `< c ->` syntax error
 
-- a `both`-associative operator has an unlimited number of arguments
-- a `left`, `right` or `non` associative operator has at most two arguments
+- `any`-associative operators have an unlimited number of arguments
+- `left`, `right` or `none` associative operators have two arguments
 
 </MemberCard>
 

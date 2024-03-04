@@ -380,16 +380,16 @@ export type InfixEntry = BaseEntry &
     kind: 'infix';
 
     /**
-     * - **`both`**: a + b + c  +(a, b, c)
+     * - **`none`**: a ? b ? c -> syntax error
+     * - **`any`**: a + b + c -> +(a, b, c)
      * - **`left`**: a / b / c -> /(/(a, b), c)
      * - **`right`**: a = b = c -> =(a, =(b, c))
-     * - **`non`**: a < b < c -> syntax error
      *
-     * - a `both`-associative operator has an unlimited number of arguments
-     * - a `left`, `right` or `non` associative operator has at most two arguments
+     * - `any`-associative operators have an unlimited number of arguments
+     * - `left`, `right` or `none` associative operators have two arguments
      *
      */
-    associativity?: 'right' | 'left' | 'non' | 'both';
+    associativity?: 'right' | 'left' | 'none' | 'any';
 
     precedence?: Precedence;
 
