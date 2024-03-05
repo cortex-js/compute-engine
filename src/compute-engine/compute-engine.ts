@@ -48,6 +48,7 @@ import {
   DomainLiteral,
   ArrayValue,
   CanonicalForm,
+  AngularUnit,
 } from './public';
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
@@ -168,8 +169,13 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   private _precision: number;
+
   /** @internal */
   private _numericMode: NumericMode;
+
+  /** @ internal */
+  private _angularUnit: AngularUnit;
+
   /** @internal */
   private _latexSyntax?: LatexSyntax; // To parse rules as LaTeX
 
@@ -385,6 +391,8 @@ export class ComputeEngine implements IComputeEngine {
     this._bignum = Decimal.clone({ precision: this._precision });
 
     this.tolerance = options?.tolerance ?? NUMERIC_TOLERANCE;
+
+    this._angularUnit = 'rad';
 
     this.Zero = new BoxedNumber(this, 0);
     this.One = new BoxedNumber(this, 1);
@@ -654,6 +662,23 @@ export class ComputeEngine implements IComputeEngine {
       this.jsonSerializationOptions = { precision: this._precision };
 
     // Reset the caches: the values in the cache depend on the numeric mode)
+    this.reset();
+  }
+
+  /**
+   * The unit used for angles in trigonometric functions.
+   * Default is `"rad"` (radians).
+   */
+  get angularUnit(): AngularUnit {
+    return this._angularUnit;
+  }
+
+  set angularUnit(u: AngularUnit) {
+    if (u === this._angularUnit) return;
+
+    if (typeof u !== 'string') throw Error('Expected a string');
+
+    this._angularUnit = u;
     this.reset();
   }
 

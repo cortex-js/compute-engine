@@ -17,6 +17,7 @@ import { applyN, apply2N } from '../symbolic/utils';
 import { asFloat } from '../numerics/numeric';
 import { checkArity, checkNumericArgs } from '../boxed-expression/validate';
 import { reducedRational } from '../numerics/rationals';
+import Complex from 'complex.js';
 
 //
 //Note: Names of trigonometric functions follow ISO 80000 Section 13
@@ -55,6 +56,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, ops) => {
+          if (ce.angularUnit === 'deg') return ops[0];
           ops = checkNumericArgs(ce, ops, 1);
           if (ops.length !== 1) return ce._fn('Degrees', ops);
           const arg = ops[0];
@@ -78,8 +80,10 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
           }
           return ce.div(ce.mul(arg, ce.Pi), ce.number(180));
         },
-        evaluate: (ce, ops) =>
-          ce.mul(ops[0], ce.div(ce.Pi, ce.number(180))).evaluate(),
+        evaluate: (ce, ops) => {
+          if (ce.angularUnit === 'deg') return ops[0];
+          return ce.mul(ops[0], ce.div(ce.Pi, ce.number(180))).evaluate();
+        },
       },
     },
     // Hypot: sqrt(x*x + y*y)
@@ -708,6 +712,8 @@ function constructibleValues(
   x: BoxedExpression | undefined
 ): undefined | BoxedExpression {
   if (!x) return undefined;
+  if (ce.angularUnit !== 'rad') return undefined;
+
   let theta = asFloat(x.N());
   if (theta === null) return undefined;
 
@@ -813,103 +819,131 @@ function evalTrig(
   if (mode === 'evaluate' && op.isExact) return undefined;
   switch (head) {
     case 'Arccos':
-      return applyN(
-        op,
-        Math.acos,
-        (x) => x.acos(),
-        (x) => x.acos()
+      return radiansToAngle(
+        applyN(
+          op,
+          Math.acos,
+          (x) => x.acos(),
+          (x) => x.acos()
+        )
       );
     case 'Arccot':
-      return applyN(
-        op,
-        (x) => Math.atan2(1, x),
-        (x) => Decimal.atan2(ce._BIGNUM_ONE, x),
-        (x) => x.inverse().atan()
+      return radiansToAngle(
+        applyN(
+          op,
+          (x) => Math.atan2(1, x),
+          (x) => Decimal.atan2(ce._BIGNUM_ONE, x),
+          (x) => x.inverse().atan()
+        )
       );
     case 'Arccsc':
-      return applyN(
-        op,
-        (x) => Math.asin(1 / x),
-        (x) => ce._BIGNUM_ONE.div(x).asin(),
-        (x) => x.inverse().asin()
+      return radiansToAngle(
+        applyN(
+          op,
+          (x) => Math.asin(1 / x),
+          (x) => ce._BIGNUM_ONE.div(x).asin(),
+          (x) => x.inverse().asin()
+        )
       );
     case 'Arcosh':
-      return applyN(
-        op,
-        Math.acosh,
-        (x) => x.acosh(),
-        (x) => x.acosh()
+      return radiansToAngle(
+        applyN(
+          op,
+          Math.acosh,
+          (x) => x.acosh(),
+          (x) => x.acosh()
+        )
       );
     case 'Arcoth':
       // ln[(1 + x) /(x − 1)] /2
-      return applyN(
-        op,
-        (x) => x,
-        (x) => x.acosh(),
-        (x) => x.acosh()
+      return radiansToAngle(
+        applyN(
+          op,
+          (x) => Math.log((1 + x) / (x - 1)) / 2,
+          (x) => ce._BIGNUM_ONE.add(x).div(x.sub(ce._BIGNUM_ONE)).log().div(2),
+          (x) => ce.complex(1).add(x).div(x.sub(1)).log().div(2)
+        )
       );
 
     case 'Arcsch':
       // ln[1/x + √(1/x2 + 1)],
-      return applyN(
-        op,
-        (x) => Math.log(1 / x + Math.sqrt(1 / (x * x) + 1)),
-        (x) =>
-          ce._BIGNUM_ONE
-            .div(x.mul(x))
-            .add(ce._BIGNUM_ONE)
-            .sqrt()
-            .add(ce._BIGNUM_ONE.div(x))
-            .log(),
-        (x) => x.mul(x).inverse().add(1).sqrt().add(x.inverse()).log()
+      return radiansToAngle(
+        applyN(
+          op,
+          (x) => Math.log(1 / x + Math.sqrt(1 / (x * x) + 1)),
+          (x) =>
+            ce._BIGNUM_ONE
+              .div(x.mul(x))
+              .add(ce._BIGNUM_ONE)
+              .sqrt()
+              .add(ce._BIGNUM_ONE.div(x))
+              .log(),
+          (x) => x.mul(x).inverse().add(1).sqrt().add(x.inverse()).log()
+        )
       );
 
     case 'Arcsec':
-      return applyN(
-        op,
-        (x) => Math.acos(1 / x),
-        (x) => ce._BIGNUM_ONE.div(x).acos(),
-        (x) => x.inverse().acos()
+      return radiansToAngle(
+        applyN(
+          op,
+          (x) => Math.acos(1 / x),
+          (x) => ce._BIGNUM_ONE.div(x).acos(),
+          (x) => x.inverse().acos()
+        )
       );
+
     case 'Arcsin':
-      return applyN(
-        op,
-        Math.asin,
-        (x) => x.asin(),
-        (x) => x.asin()
+      return radiansToAngle(
+        applyN(
+          op,
+          Math.asin,
+          (x) => x.asin(),
+          (x) => x.asin()
+        )
       );
 
     case 'Arsech':
-      return applyN(
-        op,
-        (x) => Math.log((1 + Math.sqrt(1 - x * x)) / x),
-        (x) => ce._BIGNUM_ONE.sub(x.mul(x).add(ce._BIGNUM_ONE).div(x)).log(),
-        (x) => ce.complex(1).sub(x.mul(x)).add(1).div(x).log()
+      return radiansToAngle(
+        applyN(
+          op,
+          (x) => Math.log((1 + Math.sqrt(1 - x * x)) / x),
+          (x) => ce._BIGNUM_ONE.sub(x.mul(x).add(ce._BIGNUM_ONE).div(x)).log(),
+          (x) => ce.complex(1).sub(x.mul(x)).add(1).div(x).log()
+        )
       );
 
     case 'Arsinh':
-      return applyN(
-        op,
-        Math.asinh,
-        (x) => x.asinh(),
-        (x) => x.asinh()
+      return radiansToAngle(
+        applyN(
+          op,
+          Math.asinh,
+          (x) => x.asinh(),
+          (x) => x.asinh()
+        )
       );
+
     case 'Arctan':
-      return applyN(
-        op,
-        Math.atan,
-        (x) => x.atan(),
-        (x) => x.atan()
+      return radiansToAngle(
+        applyN(
+          op,
+          Math.atan,
+          (x) => x.atan(),
+          (x) => x.atan()
+        )
       );
+
     case 'Artanh':
-      return applyN(
-        op,
-        Math.atanh,
-        (x) => x.atanh(),
-        (x) => x.atanh()
+      return radiansToAngle(
+        applyN(
+          op,
+          Math.atanh,
+          (x) => x.atanh(),
+          (x) => x.atanh()
+        )
       );
+
     case 'Cos':
-      return applyN(
+      return applyAngle(
         op,
         Math.cos,
         (x) =>
@@ -919,57 +953,59 @@ function evalTrig(
             .toSignificantDigits(ce.precision),
         (x) => x.cos()
       );
+
     case 'Cosh':
-      return applyN(
+      return applyAngle(
         op,
         Math.cosh,
         (x) => x.cosh(),
         (x) => x.cosh()
       );
+
     case 'Cot':
-      return applyN(
+      return applyAngle(
         op,
         (x) => 1 / Math.tan(x),
         (x) => ce._BIGNUM_ONE.div(x.tan()),
         (x) => x.tan().inverse()
       );
     case 'Coth':
-      return applyN(
+      return applyAngle(
         op,
         (x) => 1 / Math.tanh(x),
         (x) => ce._BIGNUM_ONE.div(x.tanh()),
         (x) => x.tanh().inverse()
       );
     case 'Csc':
-      return applyN(
+      return applyAngle(
         op,
         (x) => 1 / Math.sin(x),
         (x) => ce._BIGNUM_ONE.div(x.sin()),
         (x) => x.sin().inverse()
       );
     case 'Csch':
-      return applyN(
+      return applyAngle(
         op,
         (x) => 1 / Math.sinh(x),
         (x) => ce._BIGNUM_ONE.div(x.sinh()),
         (x) => x.sinh().inverse()
       );
     case 'Sec':
-      return applyN(
+      return applyAngle(
         op,
         (x) => 1 / Math.cos(x),
         (x) => ce._BIGNUM_ONE.div(x.cos()),
         (x) => x.cos().inverse()
       );
     case 'Sech':
-      return applyN(
+      return applyAngle(
         op,
         (x) => 1 / Math.cosh(x),
         (x) => ce._BIGNUM_ONE.div(x.cosh()),
         (x) => x.cosh().inverse()
       );
     case 'Sin':
-      return applyN(
+      return applyAngle(
         op,
         Math.sin,
         (x) =>
@@ -980,14 +1016,14 @@ function evalTrig(
         (x) => x.sin()
       );
     case 'Sinh':
-      return applyN(
+      return applyAngle(
         op,
         Math.sinh,
         (x) => x.sinh(),
         (x) => x.sinh()
       );
     case 'Tan':
-      return applyN(
+      return applyAngle(
         op,
         Math.tan,
         (x) =>
@@ -998,7 +1034,7 @@ function evalTrig(
         (x) => x.tan()
       );
     case 'Tanh':
-      return applyN(
+      return applyAngle(
         op,
         Math.tanh,
         (x) => x.tanh(),
@@ -1006,4 +1042,40 @@ function evalTrig(
       );
   }
   return undefined;
+}
+
+function applyAngle(
+  angle: BoxedExpression,
+  fn: (x: number) => number | Complex,
+  bigFn?: (x: Decimal) => Decimal | Complex | number,
+  complexFn?: (x: Complex) => number | Complex
+): BoxedExpression | undefined {
+  // Convert "angle" to radians from the current angular unit
+  const ce = angle.engine;
+  const angularUnit = ce.angularUnit;
+  if (angularUnit === 'rad') return applyN(angle, fn, bigFn, complexFn);
+
+  const theta = asFloat(angle.N());
+  if (theta === null) return undefined;
+  if (angularUnit === 'deg') angle = ce.number(theta * (Math.PI / 180));
+  if (angularUnit === 'grad') angle = ce.number(theta * (Math.PI / 200));
+  if (angularUnit === 'turn') angle = ce.number(theta * (2 * Math.PI));
+  return applyN(angle, fn, bigFn, complexFn);
+}
+
+/** Assuming x in an expression in radians, convert to current angular unit. */
+function radiansToAngle(
+  x: BoxedExpression | undefined
+): BoxedExpression | undefined {
+  if (!x) return x;
+  const ce = x.engine;
+  const angularUnit = ce.angularUnit;
+  if (angularUnit === 'rad') return x;
+
+  const theta = asFloat(x.N());
+  if (theta === null) return x;
+  if (angularUnit === 'deg') return ce.number(theta * (180 / Math.PI));
+  if (angularUnit === 'grad') return ce.number(theta * (200 / Math.PI));
+  if (angularUnit === 'turn') return ce.number(theta / (2 * Math.PI));
+  return x;
 }

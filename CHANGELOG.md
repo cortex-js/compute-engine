@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### New Features
+
+- **#82** Support for angular units. The default is radians, but degrees can be
+  used by setting `ce.angularUnit = "deg"`. Other possible values are "grad" and
+  "turn". This affects how unitless numbers with a trigonometric function are
+  interpreted. For example, `sin(90)` will return 1 when `ce.angularUnit` is
+  "deg", 0.8939966636005579 when `ce.angularUnit` is "grad" and 0 when
+  `ce.angularUnit` is "turn".
+
 ### Issues Resolved
 
 - **#147** The associativity of some operators, including `/` was not applied

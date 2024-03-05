@@ -68,6 +68,19 @@ export type Metadata = {
  */
 export type NumericMode = 'auto' | 'machine' | 'bignum' | 'complex';
 
+/**
+ * When a unitless value is passed to or returned from a trigonometric function,
+ * the angular unit of the value.
+ *
+ * - `rad`: radians, 2π radians is a full circle
+ * - `deg`: degrees, 360 degrees is a full circle
+ * - `grad`: gradians, 400 gradians is a full circle
+ * - `turn`: turns, 1 turn is a full circle
+ *
+ * @category Compute Engine
+ */
+export type AngularUnit = 'rad' | 'deg' | 'grad' | 'turn';
+
 /** @category Compute Engine */
 export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
@@ -2350,6 +2363,8 @@ export interface IComputeEngine {
   numericMode: NumericMode;
 
   tolerance: number;
+
+  angularUnit: AngularUnit;
 
   chop(n: number): number;
   chop(n: Decimal): Decimal | 0;
