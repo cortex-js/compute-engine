@@ -712,8 +712,7 @@ function constructibleValues(
   x: BoxedExpression | undefined
 ): undefined | BoxedExpression {
   if (!x) return undefined;
-  if (ce.angularUnit !== 'rad') return undefined;
-
+  x = angleToRadians(x)!;
   let theta = asFloat(x.N());
   if (theta === null) return undefined;
 
@@ -1050,17 +1049,23 @@ function applyAngle(
   bigFn?: (x: Decimal) => Decimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
 ): BoxedExpression | undefined {
-  // Convert "angle" to radians from the current angular unit
-  const ce = angle.engine;
-  const angularUnit = ce.angularUnit;
-  if (angularUnit === 'rad') return applyN(angle, fn, bigFn, complexFn);
+  return applyN(angleToRadians(angle)!, fn, bigFn, complexFn);
+}
 
-  const theta = asFloat(angle.N());
-  if (theta === null) return undefined;
-  if (angularUnit === 'deg') angle = ce.number(theta * (Math.PI / 180));
-  if (angularUnit === 'grad') angle = ce.number(theta * (Math.PI / 200));
-  if (angularUnit === 'turn') angle = ce.number(theta * (2 * Math.PI));
-  return applyN(angle, fn, bigFn, complexFn);
+function angleToRadians(
+  x: BoxedExpression | undefined
+): BoxedExpression | undefined {
+  if (!x) return x;
+  const ce = x.engine;
+  const angularUnit = ce.angularUnit;
+  if (angularUnit === 'rad') return x;
+
+  const theta = asFloat(x.N());
+  if (theta === null) return x;
+  if (angularUnit === 'deg') return ce.number(theta * (Math.PI / 180));
+  if (angularUnit === 'grad') return ce.number(theta * (Math.PI / 200));
+  if (angularUnit === 'turn') return ce.number(theta * (2 * Math.PI));
+  return x;
 }
 
 /** Assuming x in an expression in radians, convert to current angular unit. */
