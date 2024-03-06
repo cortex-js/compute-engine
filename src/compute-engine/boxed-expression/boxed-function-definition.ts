@@ -236,6 +236,12 @@ export class _BoxedFunctionDefinition implements BoxedFunctionDefinition {
         evaluate.toString = () => boxedFn.toString(); // For debugging/_printScope()
       } else evaluate = sig.evaluate as any;
 
+      if (def.signature.result) {
+        if (typeof def.signature.result === 'function')
+          result = def.signature.result;
+        else result = ce.domain(def.signature.result);
+      }
+
       this.signature = {
         inferredSignature,
         params,
