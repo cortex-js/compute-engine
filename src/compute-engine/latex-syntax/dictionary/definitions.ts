@@ -324,7 +324,7 @@ export function indexLatexDictionary(
   return result;
 }
 
-/** Normalie a dictionary entry
+/** Normalize a dictionary entry
  * - Ensure it has a kind property
  * - Ensure if it has a serialize property, it is a function, and it has a name
  *   property as a valid identifier
