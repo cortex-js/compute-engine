@@ -809,6 +809,12 @@ export function canonicalInvisibleOperator(
     }
 
     //
+    // Is it a complex number, i.e. "2i"?
+    //
+    if (lhsNumber !== null && ops[1].symbol === 'ImaginaryUnit')
+      return ce.number(ce.complex(0, lhsNumber));
+
+    //
     // Is it a function application: symbol with a function
     // definition followed by delimiter
     //
