@@ -358,6 +358,10 @@ export function evalMultiplication(
     return result ?? undefined;
   }
 
+  const fn = expr;
+  const savedContext = ce.swapScope(fn.scope);
+  ce.pushScope();
+
   var indexArray: string[] = [];
   let lowerArray: number[] = [];
   let upperArray: number[] = [];
@@ -367,15 +371,15 @@ export function evalMultiplication(
       indexingSetElement.evaluate()
     );
     if (!index) return undefined;
+
+    ce.declare(index, { holdUntil: 'simplify', domain: 'Numbers' });
+
     indexArray.push(index);
     lowerArray.push(lower);
     upperArray.push(upper);
     isFiniteArray.push(isFinite);
   });
 
-  const fn = expr;
-  const savedContext = ce.swapScope(fn.scope);
-  ce.pushScope();
   fn.bind();
 
   for (let i = 0; i < indexArray.length; i++) {

@@ -224,6 +224,10 @@ export function evalSummation(
     return result ?? undefined;
   }
 
+  const fn = expr;
+  const savedContext = ce.swapScope(fn.scope);
+  ce.pushScope();
+
   var indexArray: string[] = [];
   let lowerArray: number[] = [];
   let upperArray: number[] = [];
@@ -233,15 +237,19 @@ export function evalSummation(
       indexingSetElement.evaluate()
     );
     if (!index) return undefined;
+
+    // Declare the index and set its holdUntil to simplify:
+    // when evaluating below we sometimes use 'simplify',
+    // but in that case we want the value of the index to
+    // be substituted, not keep the index name
+    ce.declare(index, { holdUntil: 'simplify', domain: 'Numbers' });
+
     indexArray.push(index);
     lowerArray.push(lower);
     upperArray.push(upper);
     isFiniteArray.push(isFinite);
   });
 
-  const fn = expr;
-  const savedContext = ce.swapScope(fn.scope);
-  ce.pushScope();
   fn.bind();
 
   for (let i = 0; i < indexArray.length; i++) {
