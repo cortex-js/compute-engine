@@ -101,7 +101,7 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Symbols"],
             ["Subscript", "x", ["Add", "r", 1]]
           ],
           ["Add", "s", 1]
@@ -115,7 +115,7 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Symbols"],
             ["Subscript", "x", ["Add", "p", 1]]
           ],
           ["Add", "q", 1]
@@ -124,7 +124,7 @@ describe('SUPSUB', () => {
           "Power",
           [
             "Error",
-            ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
+            ["ErrorCode", "'incompatible-domain'", "Numbers", "Symbols"],
             ["Subscript", "x", ["Add", "r", 1]]
           ],
           ["Add", "s", 1]
@@ -139,17 +139,9 @@ describe('SUPSUB', () => {
     expect(parse('(x+1)_{n-1}')).toMatchInlineSnapshot(
       `["Subscript", ["Delimiter", ["Add", "x", 1]], ["Subtract", "n", 1]]`
     );
-    expect(parse('(x+1)^n_0')).toMatchInlineSnapshot(`
-      [
-        "Power",
-        [
-          "Error",
-          ["ErrorCode", "'incompatible-domain'", "Numbers", "Anything"],
-          ["Subscript", ["Delimiter", ["Add", "x", 1]], 0]
-        ],
-        "n"
-      ]
-    `);
+    expect(parse('(x+1)^n_0')).toMatchInlineSnapshot(
+      `["Power", ["Subscript", ["Delimiter", ["Add", "x", 1]], 0], "n"]`
+    );
     expect(parse('^p_q{x+1}^n_0')).toMatchInlineSnapshot(`
       [
         "Superscript",
