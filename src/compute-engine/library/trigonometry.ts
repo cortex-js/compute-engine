@@ -827,7 +827,7 @@ function constructibleValuesInverse(
   }
 
   for (const [[match_arg, match_arg_N], [n,d]] of specialInverseValues) {
-    if (ce.chop(x_N - match_arg_N) === 0 && match_arg.isSame(x)) {
+    if (ce.chop(x_N - match_arg_N) === 0 && match_arg.isEqual(x)) {
       // there is an implicit Pi in the numerator
       let theta = ce.box(['Divide',['Multiply',n,'Pi'],d]);
       if( quadrant == -1 ) {
