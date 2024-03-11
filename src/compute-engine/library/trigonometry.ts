@@ -706,6 +706,11 @@ const TRIG_IDENTITIES: { [key: string]: [sign: number, head: string][] } = {
   ],
 };
 
+type ConstructibleTrigValues = [
+  [numerator: number, denominator: number],
+  { [head: string]: BoxedExpression },
+][];
+
 function constructibleValues(
   ce: IComputeEngine,
   head: string,
@@ -719,11 +724,7 @@ function constructibleValues(
   //
   // Create the cache of special values
   //
-  type ConstructibleValues = [
-    [numerator: number, denominator: number],
-    { [head: string]: BoxedExpression },
-  ][];
-  const specialValues = ce.cache<ConstructibleValues>(
+  const specialValues = ce.cache<ConstructibleTrigValues>(
     'constructible-trigonometric-values',
     () => {
       return CONSTRUCTIBLE_VALUES.map(([val, results]) => [
@@ -737,7 +738,7 @@ function constructibleValues(
       ]);
     },
 
-    (cache: ConstructibleValues) => {
+    (cache: ConstructibleTrigValues) => {
       for (const [_k, v] of cache) {
         for (const v2 of Object.values(v)) v2.reset();
       }
@@ -745,9 +746,12 @@ function constructibleValues(
     }
   );
 
+  if( isInverseTrigFunc(head) ) {
+    return constructibleValuesInverse(ce,head,x,specialValues);
+  }
+
   // Odd-even identities
-  // Cos and Sec are even functions, the others are odd
-  const identitySign = head !== 'Cos' && head !== 'Sec' ? Math.sign(theta) : +1;
+  const identitySign = trigFuncParity(head)==-1 ? Math.sign(theta) : +1;
 
   theta = Math.abs(theta % (2 * Math.PI));
 
@@ -769,16 +773,93 @@ function constructibleValues(
   return undefined;
 }
 
-function processInverseFunction(
+function constructibleValuesInverse(
   ce: IComputeEngine,
-  xs: ReadonlyArray<BoxedExpression>
-): BoxedExpression | undefined {
-  if (xs.length !== 1 || !xs[0].isValid) return undefined;
-  const expr = xs[0];
-  const head = expr.symbol;
-  if (typeof head !== 'string') return undefined;
-  if (head === 'InverseFunction') return expr.op1;
-  const newHead = {
+  head: string,
+  x: BoxedExpression | undefined,
+  specialValues: ConstructibleTrigValues
+): undefined | BoxedExpression {
+
+  if (!x) return undefined;
+  let x_N = asFloat(x.N());
+  if (x_N === null) return undefined;
+  // head is arcFn, and inverse_head is Fn
+  let inverse_head = inverseTrigFuncName(head);
+
+  //
+  // Create the cache of special values of the head function by inverting
+  // specialValues of inverse_head function
+  //
+  type ConstructibleTrigValuesInverse = [
+    [match_arg: BoxedExpression, match_arg_N: number],
+    angle: [numerator: number,denominator: number],
+  ][];
+  const specialInverseValues = ce.cache<ConstructibleTrigValuesInverse>(
+    'constructible-inverse-trigonometric-values-' + head,
+    () => {
+      let cache: ConstructibleTrigValuesInverse = [];
+      for (const [[n,d],value] of specialValues) {
+        const r = value[inverse_head];
+        if( r === undefined ) continue;
+        let rn = asFloat(r.N());
+        if( rn === null ) continue;
+        cache.push([[r,rn],[n,d]]);
+      }
+      return cache;
+    },
+
+    (cache: ConstructibleTrigValuesInverse) => {
+      for (const [[match_arg, match_arg_N], [n,d]] of cache) {
+        match_arg.reset();
+      }
+      return cache;
+    }
+  );
+
+  // Odd-even identities
+
+  let quadrant = 0;
+  if( x_N<0 ) {
+    quadrant = trigFuncParity(inverse_head)==-1 ? -1 : 1;
+    // shift x to quadrant 0 to match the key in specialInverseValues
+    x_N = -x_N;
+    x = canonicalNegate(x);
+  }
+
+  for (const [[match_arg, match_arg_N], [n,d]] of specialInverseValues) {
+    if (ce.chop(x_N - match_arg_N) === 0 && match_arg.isSame(x)) {
+      // there is an implicit Pi in the numerator
+      let theta = ce.box(['Divide',['Multiply',n,'Pi'],d]);
+      if( quadrant == -1 ) {
+        theta = canonicalNegate(theta);
+      }
+      else if( quadrant == 1 ) {
+        theta = ce.box(['Subtract','Pi',theta]);
+      }
+      return theta;
+    }
+  }
+  return undefined;
+}
+
+function trigFuncParity(
+  head: string
+): number {
+  // Cos and Sec are even functions, the others are odd
+  return head !== 'Cos' && head !== 'Sec' ? -1 : 1;
+}
+
+function isInverseTrigFunc(
+  head: string
+): Boolean {
+  if( head.startsWith('Ar') && inverseTrigFuncName(head) ) return true;
+  return false;
+}
+
+function inverseTrigFuncName(
+  head: string
+): string | undefined {
+  return {
     Sin: 'Arcsin',
     Cos: 'Arccos',
     Tan: 'Arctan',
@@ -801,6 +882,18 @@ function processInverseFunction(
     Arctan: 'Tan',
     Artanh: 'Tanh',
   }[head];
+}
+
+function processInverseFunction(
+  ce: IComputeEngine,
+  xs: ReadonlyArray<BoxedExpression>
+): BoxedExpression | undefined {
+  if (xs.length !== 1 || !xs[0].isValid) return undefined;
+  const expr = xs[0];
+  const head = expr.symbol;
+  if (typeof head !== 'string') return undefined;
+  if (head === 'InverseFunction') return expr.op1;
+  const newHead = inverseTrigFuncName(head);
   return newHead ? ce.symbol(newHead) : undefined;
 }
 
