@@ -746,12 +746,12 @@ function constructibleValues(
     }
   );
 
-  if( isInverseTrigFunc(head) ) {
-    return constructibleValuesInverse(ce,head,x,specialValues);
+  if (isInverseTrigFunc(head)) {
+    return constructibleValuesInverse(ce, head, x, specialValues);
   }
 
   // Odd-even identities
-  const identitySign = trigFuncParity(head)==-1 ? Math.sign(theta) : +1;
+  const identitySign = trigFuncParity(head) == -1 ? Math.sign(theta) : +1;
 
   theta = Math.abs(theta % (2 * Math.PI));
 
@@ -779,7 +779,6 @@ function constructibleValuesInverse(
   x: BoxedExpression | undefined,
   specialValues: ConstructibleTrigValues
 ): undefined | BoxedExpression {
-
   if (!x) return undefined;
   let x_N = asFloat(x.N());
   if (x_N === null) return undefined;
@@ -792,24 +791,27 @@ function constructibleValuesInverse(
   //
   type ConstructibleTrigValuesInverse = [
     [match_arg: BoxedExpression, match_arg_N: number],
-    angle: [numerator: number,denominator: number],
+    angle: [numerator: number, denominator: number],
   ][];
   const specialInverseValues = ce.cache<ConstructibleTrigValuesInverse>(
     'constructible-inverse-trigonometric-values-' + head,
     () => {
       let cache: ConstructibleTrigValuesInverse = [];
-      for (const [[n,d],value] of specialValues) {
-        const r = value[inverse_head];
-        if( r === undefined ) continue;
+      for (const [[n, d], value] of specialValues) {
+        const r = value[inverse_head!];
+        if (r === undefined) continue;
         let rn = asFloat(r.N());
-        if( rn === null ) continue;
-        cache.push([[r,rn],[n,d]]);
+        if (rn === null) continue;
+        cache.push([
+          [r, rn],
+          [n, d],
+        ]);
       }
       return cache;
     },
 
     (cache: ConstructibleTrigValuesInverse) => {
-      for (const [[match_arg, match_arg_N], [n,d]] of cache) {
+      for (const [[match_arg, match_arg_N], [n, d]] of cache) {
         match_arg.reset();
       }
       return cache;
@@ -819,22 +821,21 @@ function constructibleValuesInverse(
   // Odd-even identities
 
   let quadrant = 0;
-  if( x_N<0 ) {
-    quadrant = trigFuncParity(inverse_head)==-1 ? -1 : 1;
+  if (x_N < 0) {
+    quadrant = trigFuncParity(inverse_head!) == -1 ? -1 : 1;
     // shift x to quadrant 0 to match the key in specialInverseValues
     x_N = -x_N;
     x = canonicalNegate(x);
   }
 
-  for (const [[match_arg, match_arg_N], [n,d]] of specialInverseValues) {
-    if (ce.chop(x_N - match_arg_N) === 0 && match_arg.isSame(x)) {
+  for (const [[match_arg, match_arg_N], [n, d]] of specialInverseValues) {
+    if (ce.chop(x_N - match_arg_N) === 0) {
       // there is an implicit Pi in the numerator
-      let theta = ce.box(['Divide',['Multiply',n,'Pi'],d]);
-      if( quadrant == -1 ) {
+      let theta = ce.box(['Divide', ['Multiply', n, 'Pi'], d]);
+      if (quadrant == -1) {
         theta = canonicalNegate(theta);
-      }
-      else if( quadrant == 1 ) {
-        theta = ce.box(['Subtract','Pi',theta]);
+      } else if (quadrant == 1) {
+        theta = ce.box(['Subtract', 'Pi', theta]);
       }
       return theta;
     }
@@ -842,23 +843,17 @@ function constructibleValuesInverse(
   return undefined;
 }
 
-function trigFuncParity(
-  head: string
-): number {
+function trigFuncParity(head: string): number {
   // Cos and Sec are even functions, the others are odd
   return head !== 'Cos' && head !== 'Sec' ? -1 : 1;
 }
 
-function isInverseTrigFunc(
-  head: string
-): Boolean {
-  if( head.startsWith('Ar') && inverseTrigFuncName(head) ) return true;
+function isInverseTrigFunc(head: string): boolean {
+  if (head.startsWith('Ar') && inverseTrigFuncName(head)) return true;
   return false;
 }
 
-function inverseTrigFuncName(
-  head: string
-): string | undefined {
+function inverseTrigFuncName(head: string): string | undefined {
   return {
     Sin: 'Arcsin',
     Cos: 'Arccos',
