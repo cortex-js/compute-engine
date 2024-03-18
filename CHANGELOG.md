@@ -20,6 +20,9 @@
   variable and that the expression is a product.
 - **#145** The expression `["Or", "False", "False"]`, that is when all the
   arguments are `False`, is now evaluates to `False`.
+- **#154** In some cases, parsing implicit argument of trig function return more
+  natural results, for example `\cos a \sin b` is now parsed as
+  `(\cos a)(\sin b)` and not `\cos (a \sin b)`.
 
 ## 0.24.0 _2024-02-23_
 

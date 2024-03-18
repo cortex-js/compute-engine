@@ -2,6 +2,7 @@ import { Expression } from '../../../math-json/math-json-format';
 import {
   ExpressionParseHandler,
   LatexDictionary,
+  MULTIPLICATION_PRECEDENCE,
   Parser,
   Terminator,
 } from '../public';
@@ -15,42 +16,40 @@ import {
 function parseTrig(op: string): ExpressionParseHandler {
   return (parser: Parser, until?: Terminator): Expression | null => {
     // Note: names as per NIST-DLMF
-    const head: Expression =
-      {
-        '\\arcsin': 'Arcsin',
-        '\\arccos': 'Arccos',
-        '\\arctan': 'Arctan',
-        '\\arctg': 'Arctan',
-        '\\arcctg': 'Arctan',
-        '\\arcsec': 'Arcsec',
-        '\\arccsc': ' Arccsc',
-        '\\arsinh': 'Arsinh',
-        '\\arcosh': 'Arcosh',
-        '\\artanh': 'Artanh',
-        '\\arcsech': 'Arcsech',
-        '\\arccsch': 'Arcsch',
-        // '\\arg',
-        '\\ch': 'Cosh',
-        '\\cos': 'Cos',
-        '\\cosec': 'Csc',
-        '\\cosh': 'Csch',
-        '\\cot': 'Cot',
-        '\\cotg': 'Cot',
-        '\\coth': 'Coth',
-        '\\csc': 'Csc',
-        '\\ctg': 'Cot',
-        '\\cth': 'Coth',
-        '\\sec': 'Sec',
-        '\\sin': 'Sin',
-        '\\sinh': 'Sinh',
-        '\\sh': 'Sinh',
-        '\\tan': 'Tan',
-        '\\tanh': 'Tanh',
-        '\\tg': 'Tan',
-        '\\th': 'Tanh',
-      }[op ?? ''] ??
-      op ??
-      '';
+    const trigCommands = {
+      '\\arcsin': 'Arcsin',
+      '\\arccos': 'Arccos',
+      '\\arctan': 'Arctan',
+      '\\arctg': 'Arctan',
+      '\\arcctg': 'Arctan',
+      '\\arcsec': 'Arcsec',
+      '\\arccsc': ' Arccsc',
+      '\\arsinh': 'Arsinh',
+      '\\arcosh': 'Arcosh',
+      '\\artanh': 'Artanh',
+      '\\arcsech': 'Arcsech',
+      '\\arccsch': 'Arcsch',
+      // '\\arg',
+      '\\ch': 'Cosh',
+      '\\cos': 'Cos',
+      '\\cosec': 'Csc',
+      '\\cosh': 'Csch',
+      '\\cot': 'Cot',
+      '\\cotg': 'Cot',
+      '\\coth': 'Coth',
+      '\\csc': 'Csc',
+      '\\ctg': 'Cot',
+      '\\cth': 'Coth',
+      '\\sec': 'Sec',
+      '\\sin': 'Sin',
+      '\\sinh': 'Sinh',
+      '\\sh': 'Sinh',
+      '\\tan': 'Tan',
+      '\\tanh': 'Tanh',
+      '\\tg': 'Tan',
+      '\\th': 'Tanh',
+    };
+    const head: Expression = trigCommands[op ?? ''] ?? op ?? '';
 
     if (parser.atTerminator(until)) return head;
 
@@ -64,14 +63,21 @@ function parseTrig(op: string): ExpressionParseHandler {
     let sup: Expression | null = null;
     if (parser.match('^')) sup = parser.parseGroup() ?? parser.parseToken();
 
-    const args = parser.parseArguments('implicit', until);
+    // Look for an implicit argument (a product of terms) but stop if another
+    // trig function is encountered, i.e. ensure that
+    // "\cos a \sin b" is parsed as "(\cos a)(\sin b)" and not "\cos (a \sin b)"
+    const args = parser.parseArguments('implicit', {
+      minPrec: MULTIPLICATION_PRECEDENCE,
+      condition: (parser) =>
+        trigCommands[parser.peek] || (until?.condition?.(parser) ?? false),
+    });
 
     const appliedFn: Expression =
       args === null
         ? fn
         : typeof fn === 'string'
-        ? [fn, ...args]
-        : ['Apply', fn, ...args];
+          ? [fn, ...args]
+          : ['Apply', fn, ...args];
 
     return sup === null ? appliedFn : ['Power', appliedFn, sup];
   };
