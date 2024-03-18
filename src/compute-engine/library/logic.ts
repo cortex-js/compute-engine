@@ -122,7 +122,7 @@ function processAnd(
           (x.head === 'Not' && x.op1.isSame(arg))
         ) {
           // ['And', ['Not', a],... a]
-          // Contradition
+          // Contradiction
           return ce.False;
         }
       }
