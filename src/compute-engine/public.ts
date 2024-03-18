@@ -431,6 +431,28 @@ export type JsonSerializationOptions = {
 };
 
 /**
+ * When provided, canonical forms are used to put an expression in a
+ * "standard" form.
+ *
+ * Each canonical form applies some transformation to an expression. When
+ * specified as an array, each transformation is done in the order in which
+ * it was provided.
+ *
+ * - `InvisibleOperator`: replace use of the `InvisibleOperator` with
+ *    another operation, such as multiplication (i.e. `2x` or function
+ *    application (`f(x)`).
+ * - `Number`: replace all numeric values with their
+ *    canonical representation, for example, reduce
+ *    rationals and replace complex numbers with no imaginary part with a real number.
+ * - `Multiply`: replace negation with multiplication by -1, remove 1 from multiplications, simplify signs (`-y \times -x` -> `x \times y`), complex numbers are promoted (['Multiply', 2, 'ImaginaryUnit'] -> `["Complex", 0, 2]`)
+ * - `Add`: replace `Subtract` with `Add`, removes 0 in addition, promote complex numbers (["Add", "a", ["Complex", 0, "b"] -> `["Complex", "a", "b"]`)
+ * - `Power`: simplify `Power` expression, for example, `x^{-1}` -> `\frac{1}{x}`, `x^0` -> `1`, `x^1` -> `x`, `1^x` -> `1`, `x^{\frac{1}{2}}` -> `\sqrt{x}`, `a^b^c` -> `a^{bc}`...
+ * - `Divide`: replace with a `Rational` number if numerator and denominator are integers, simplify, e.g. `\frac{x}{1}` -> `x`...
+ * - `Flatten`: remove any unnecessary `Delimiter` expression, and flatten any associative functions, for example `["Add", ["Add", "a", "b"], "c"]` -> `["Add", "a", "b", "c"]`
+ * - `Order`: when applicable, sort the arguments in a specific order, for
+ *    example for addition and multiplication.
+ *
+ *
  * @category Boxed Expression
  */
 export type CanonicalForm =
