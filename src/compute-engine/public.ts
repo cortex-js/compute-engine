@@ -1309,7 +1309,13 @@ export interface BoxedExpression {
     options?: { optimize: ('simplify' | 'evaluate')[] }
   ): ((args: Record<string, any>) => any | undefined) | undefined;
 
-  solve(vars: Iterable<string>): null | ReadonlyArray<BoxedExpression>;
+  solve(
+    vars:
+      | Iterable<string>
+      | string
+      | BoxedExpression
+      | Iterable<BoxedExpression>
+  ): null | ReadonlyArray<BoxedExpression>;
 
   /**
    * Return a JavaScript primitive representing the value of this expression.

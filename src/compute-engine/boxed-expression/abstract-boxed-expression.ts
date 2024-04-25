@@ -311,7 +311,13 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this;
   }
 
-  solve(_vars: Iterable<string>): null | ReadonlyArray<BoxedExpression> {
+  solve(
+    _vars:
+      | Iterable<string>
+      | string
+      | BoxedExpression
+      | Iterable<BoxedExpression>
+  ): null | ReadonlyArray<BoxedExpression> {
     return null;
   }
 

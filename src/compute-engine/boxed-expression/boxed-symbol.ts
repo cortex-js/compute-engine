@@ -26,7 +26,7 @@ import {
 import { replace } from '../rules';
 import { serializeJsonSymbol } from './serialize';
 import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
-import { hashCode } from './utils';
+import { hashCode, normalizedUnknownsForSolve } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { narrow } from './boxed-domain';
@@ -176,9 +176,16 @@ export class BoxedSymbol extends _BoxedExpression {
     return this.engine.box(this._id);
   }
 
-  solve(vars: string[]): null | ReadonlyArray<BoxedExpression> {
-    if (vars.length !== 1) return null;
-    if (vars.includes(this.symbol)) return [this.engine.Zero];
+  solve(
+    vars:
+      | Iterable<string>
+      | string
+      | BoxedExpression
+      | Iterable<BoxedExpression>
+  ): null | ReadonlyArray<BoxedExpression> {
+    const varNames = normalizedUnknownsForSolve(vars);
+    if (varNames.length !== 1) return null;
+    if (varNames.includes(this.symbol)) return [this.engine.Zero];
     return null;
   }
 

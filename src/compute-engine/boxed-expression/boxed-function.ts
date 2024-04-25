@@ -37,7 +37,12 @@ import {
   serializeJsonCanonicalFunction,
   serializeJsonFunction,
 } from './serialize';
-import { complexAllowed, hashCode, bignumPreferred } from './utils';
+import {
+  complexAllowed,
+  hashCode,
+  bignumPreferred,
+  normalizedUnknownsForSolve,
+} from './utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { checkNumericArgs, adjustArguments } from './validate';
 import { expand } from '../symbolic/expand';
@@ -53,6 +58,7 @@ import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { signDiff } from '../numerics/numeric';
 import { match } from './boxed-patterns';
 import { isRelationalOperator } from '../latex-syntax/dictionary/definitions-relational-operators';
+import { BoxedSymbol } from './boxed-symbol.js';
 
 /**
  * A boxed function represent an expression that can be
@@ -720,10 +726,16 @@ export class BoxedFunction extends _BoxedExpression {
     return this.evaluate({ ...options, numericMode: true });
   }
 
-  solve(vars: string[]): null | ReadonlyArray<BoxedExpression> {
-    if (vars.length !== 1) return null;
-    const roots = findUnivariateRoots(this.simplify(), vars[0]);
-    return roots;
+  solve(
+    vars:
+      | Iterable<string>
+      | string
+      | BoxedExpression
+      | Iterable<BoxedExpression>
+  ): null | ReadonlyArray<BoxedExpression> {
+    const varNames = normalizedUnknownsForSolve(vars);
+    if (varNames.length !== 1) return null;
+    return findUnivariateRoots(this.simplify(), varNames[0]);
   }
 }
 

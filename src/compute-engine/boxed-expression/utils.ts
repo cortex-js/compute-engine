@@ -97,6 +97,25 @@ export function asBigint(expr: BoxedExpression): bigint | null {
   return null;
 }
 
+export function normalizedUnknownsForSolve(
+  syms:
+    | string
+    | Iterable<string>
+    | BoxedExpression
+    | Iterable<BoxedExpression>
+    | null
+    | undefined
+): string[] {
+  if (syms === null || syms === undefined) return [];
+  if (typeof syms === 'string') return [syms];
+  if (isBoxedExpression(syms)) return normalizedUnknownsForSolve(syms.symbol);
+  if (typeof syms[Symbol.iterator] === 'function')
+    return Array.from(syms as Iterable<any>).map((s) =>
+      typeof s === 'string' ? s : s.symbol
+    );
+  return [];
+}
+
 /** Return the local variables in the expression.
  *
  * A local variable is an identifier that is declared with a `Declare`
