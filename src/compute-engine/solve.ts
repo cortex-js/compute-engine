@@ -46,10 +46,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '_a', ['Power', '_x', '_n']], '__b'],
     replace: [
-      'Divide',
-      ['Power', ['Negate', '__b'], ['Divide', 1, '_n']],
-      '_a',
+      'Power',
+      ['Divide', ['Negate', '__b'], '_a'],
+      ['Divide', 1, '_n'],
     ],
+
     condition: ({ _a, __b, _n }) =>
       !_a.has('_x') && !__b.has('_x') && !_n.isZero,
   },
@@ -197,7 +198,7 @@ export function findUnivariateRoots(
   // If we didn't find a solution yet, try modifying the expression
   //
   // Note: @todo we can try different heuristics here:
-  // Collection: reduce the numbers of occurences of the unknown
+  // Collection: reduce the numbers of occurrences of the unknown
   // Attraction: bring the occurences of the unknonw closer together
   // Function Swapping: replacing function with ones easier to solve
   //    - square roots: square both sides
