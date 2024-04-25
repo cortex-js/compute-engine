@@ -13,7 +13,7 @@ import { LatexDictionary, SymbolEntry } from '../public';
 // "If you add multiple accents, then the input accents are assigned from left to right to the closest preceding variable or index."
 //
 
-// From sympy: sympy/printing/latex.py
+// From sympy: https://github.com/sympy/sympy/blob/master/sympy/printing/latex.py
 // - Fmathring
 
 // From Gina: // https://www.ginac.de/ginac.git/?p=ginac.git;a=blob;f=ginac/symbol.cpp;h=b8068c800fffd0de592dc84e85868cf021c62ef3;hb=refs/heads/master
