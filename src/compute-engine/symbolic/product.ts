@@ -226,7 +226,7 @@ export class Product {
     if (!found) this._terms.push({ term: rest, exponent });
   }
 
-  /** Return all ther terms with an exponent of 1 and
+  /** Return all the terms with an exponent of 1 and
    * the square root of rationals (which technically have an
    * exponent of 1/2, but are considered as degree 1 terms)
    */
