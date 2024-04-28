@@ -1,5 +1,5 @@
 import { factor, together } from '../numerics/factor';
-import { BoxedExpression, IdentifierDefinitions } from '../public';
+import { IdentifierDefinitions } from '../public';
 import { distribute, expand, expandAll } from '../symbolic/expand';
 
 export const POLYNOMIALS_LIBRARY: IdentifierDefinitions[] = [
