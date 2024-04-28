@@ -53,10 +53,6 @@ export function canonicalForm(
     }
   }
 
-  // An expression is not canonical unless all forms are applied
-  // This prevent desugaring from being applied unexpectedly
-  expr.isCanonical = false;
-
   return expr;
 }
 
