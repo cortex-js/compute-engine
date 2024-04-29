@@ -853,6 +853,11 @@ export interface BoxedExpression {
   subs(sub: Substitution, options?: { canonical?: boolean }): BoxedExpression;
 
   /**
+   * Recursively replace all the terms in the expression as indicated.
+   */
+  map(fn: (expr: BoxedExpression) => BoxedExpression): BoxedExpression;
+
+  /**
    * Transform the expression by applying the rules:
    *
    * If the expression matches the `match` pattern, replace it with

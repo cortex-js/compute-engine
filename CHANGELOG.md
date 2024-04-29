@@ -8,6 +8,8 @@
   interpreted. For example, `sin(90)` will return 1 when `ce.angularUnit` is
   "deg", 0.8939966636005579 when `ce.angularUnit` is "grad" and 0 when
   `ce.angularUnit` is "turn".
+- Added `expr.map(fn)` method to apply a function to each subexpression of an
+  expression.
 
 ### Issues Resolved
 

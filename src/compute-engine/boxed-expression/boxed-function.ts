@@ -264,17 +264,10 @@ export class BoxedFunction extends _BoxedExpression {
 
   get canonical(): BoxedExpression {
     this._canonical ??= this.isValid
-      ? makeCanonicalFunction(this.engine, this._head, this._ops)
+      ? this.engine.function(this._head, this._ops)
       : this;
 
     return this._canonical;
-  }
-
-  *map<T = BoxedExpression>(
-    fn: (x: BoxedExpression) => T
-  ): IterableIterator<T> {
-    let i = 0;
-    while (i < this._ops.length) yield fn(this._ops[i++]);
   }
 
   // Note: the resulting expression is bound to the current scope, not
@@ -286,7 +279,7 @@ export class BoxedFunction extends _BoxedExpression {
     const ops = this._ops.map((x) => x.subs(sub, options));
 
     if (options.canonical && ops.every((x) => x.isValid))
-      return makeCanonicalFunction(this.engine, this._head, ops);
+      return this.engine.function(this._head, ops);
 
     return new BoxedFunction(this.engine, this._head, ops, {
       canonical: false,

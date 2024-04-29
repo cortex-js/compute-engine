@@ -311,6 +311,14 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this;
   }
 
+  map(fn: (x: BoxedExpression) => BoxedExpression): BoxedExpression {
+    if (!this.ops) return fn(this);
+    const ops = this.ops.map(fn);
+    return this.engine.function(this.head, ops, {
+      canonical: this.isCanonical,
+    });
+  }
+
   solve(
     _vars:
       | Iterable<string>
