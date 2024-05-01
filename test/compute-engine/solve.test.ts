@@ -28,7 +28,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
   it('should solve ax^2 + c', () => {
     const eqn = ce.box(['Add', ['Multiply', 2, ['Square', 'x']], -16]);
     const result = eqn.solve('x')?.map((x) => x.json);
-    expect(result).toMatchInlineSnapshot(`[2]`);
+    expect(result).toMatchInlineSnapshot(`[["Multiply", 2, ["Sqrt", 2]]]`);
   });
 
   it('should solve ax^2 + bx + c', () => {
