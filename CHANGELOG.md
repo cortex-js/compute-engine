@@ -9,7 +9,9 @@
   "deg", 0.8939966636005579 when `ce.angularUnit` is "grad" and 0 when
   `ce.angularUnit` is "turn".
 - Added `expr.map(fn)` method to apply a function to each subexpression of an
-  expression.
+  expression. This can be useful to apply custom canonical forms and compare two
+  expressions.
+- An optional canonical form can now be specified with the `ce.function()`.
 
 ### Issues Resolved
 

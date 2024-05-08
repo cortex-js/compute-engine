@@ -14,7 +14,17 @@
  * - numerical evaluation
  */
 
-import { ComputeEngine, Rational } from '../../src/compute-engine';
+import {
+  BoxedExpression,
+  ComputeEngine,
+  DefaultEntry,
+  ExpressionParseHandler,
+  InfixEntry,
+  LatexDictionaryEntry,
+  Parser,
+  Rational,
+  Terminator,
+} from '../../src/compute-engine';
 import { primeFactors } from '../../src/compute-engine/numerics/numeric';
 import { primeFactors as bigPrimeFactors } from '../../src/compute-engine/numerics/numeric-bigint';
 import {
@@ -37,6 +47,58 @@ import {
 
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
+
+export function customCanonical(
+  expr: BoxedExpression,
+  { fractionIrreductibleSeulement = false } = {
+    fractionIrreductibleSeulement: false,
+  }
+): BoxedExpression {
+  if (
+    (expr.head === 'Divide' || expr.head === 'Rational') &&
+    typeof expr.value === 'number'
+  ) {
+    if (fractionIrreductibleSeulement) {
+      if (
+        expr.engine.box(['GCD', expr.op1, expr.op2]).value !== 1 ||
+        expr.op2.value === 1
+      )
+        return expr;
+    }
+    return expr.engine.number(expr.value);
+  }
+  if (expr.ops)
+    return expr.engine.box(
+      [
+        expr.head,
+        ...expr.ops.map((x) =>
+          customCanonical(x, { fractionIrreductibleSeulement })
+        ),
+      ],
+      {
+        canonical: ['InvisibleOperator', 'Order'],
+      }
+    );
+
+  return expr.canonical;
+}
+
+let exp1 = engine.parse('2x+2+\\frac12+x', { canonical: false });
+
+const f = (x) => {
+  if (typeof x.value === 'number') return x.engine.number(x.value);
+  return x;
+};
+
+console.log(
+  exp1.map(f, { canonical: ['Order', 'InvisibleOperator'] }).toString()
+);
+
+let exp2 = engine.parse('2', { canonical: false });
+
+exp1 = customCanonical(exp1);
+exp2 = customCanonical(exp2);
+console.log('exp1 = exp2', exp1.isSame(exp2));
 
 const expr5 = engine.parse('x^{3}+3.1x^{3}+x^3');
 console.log(expr5.N().latex);

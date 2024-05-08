@@ -465,6 +465,8 @@ export type CanonicalForm =
   | 'Flatten'
   | 'Order';
 
+export type CanonicalOptions = boolean | CanonicalForm | CanonicalForm[];
+
 /**
  * :::info[THEORY OF OPERATIONS]
  *
@@ -823,7 +825,7 @@ export interface BoxedExpression {
   /**
    * Return the canonical form of this expression.
    *
-   * If this is a function expressin, a definition is associated with the
+   * If this is a function expression, a definition is associated with the
    * canonical expression.
    *
    * When determining the canonical form the following function definition
@@ -833,7 +835,7 @@ export interface BoxedExpression {
    * - `involution`: \\( f(f(a)) \longrightarrow a \\)
    * - `commutative`: sort the arguments.
    *
-   * If his expression is already canonical, the value of canonical is
+   * If this expression is already canonical, the value of canonical is
    * `this`.
    *
    */
@@ -850,12 +852,23 @@ export interface BoxedExpression {
    * :::
    *
    */
-  subs(sub: Substitution, options?: { canonical?: boolean }): BoxedExpression;
+  subs(
+    sub: Substitution,
+    options?: { canonical?: CanonicalOptions }
+  ): BoxedExpression;
 
   /**
    * Recursively replace all the terms in the expression as indicated.
+   *
+   * To remove a subexpression, return an empty Sequence expression.
+   *
+   * The canonical option is applied to each function subexpression after
+   * the substitution is applied.
    */
-  map(fn: (expr: BoxedExpression) => BoxedExpression): BoxedExpression;
+  map(
+    fn: (expr: BoxedExpression) => BoxedExpression,
+    options?: { canonical: CanonicalOptions }
+  ): BoxedExpression;
 
   /**
    * Transform the expression by applying the rules:
@@ -2417,23 +2430,19 @@ export interface IComputeEngine {
 
   strict: boolean;
 
-  canonical(
-    xs: ReadonlyArray<SemiBoxedExpression>
-  ): ReadonlyArray<BoxedExpression>;
-
   box(
     expr:
       | Decimal
       | Complex
       | [num: number, denom: number]
       | SemiBoxedExpression,
-    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+    options?: { canonical?: CanonicalOptions }
   ): BoxedExpression;
 
   function(
     head: string | BoxedExpression,
     ops: ReadonlyArray<SemiBoxedExpression>,
-    options?: { metadata?: Metadata; canonical?: boolean }
+    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
   ): BoxedExpression;
 
   number(
@@ -2445,12 +2454,12 @@ export interface IComputeEngine {
       | Decimal
       | Complex
       | Rational,
-    options?: { metadata?: Metadata; canonical?: boolean }
+    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
   ): BoxedExpression;
 
   symbol(
     sym: string,
-    options?: { metadata?: Metadata; canonical?: boolean }
+    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
   ): BoxedExpression;
 
   string(s: string, metadata?: Metadata): BoxedExpression;
@@ -2531,15 +2540,12 @@ export interface IComputeEngine {
 
   parse(
     s: LatexString | string,
-    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+    options?: { canonical?: CanonicalOptions }
   ): BoxedExpression;
-  parse(
-    s: null,
-    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
-  ): null;
+  parse(s: null, options?: { canonical?: CanonicalOptions }): null;
   parse(
     s: LatexString | string | null,
-    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+    options?: { canonical?: CanonicalOptions }
   ): null | BoxedExpression;
 
   serialize(

@@ -29,7 +29,6 @@ import {
   IdentifierDefinitions,
   ExpressionMapInterface,
   NumericMode,
-  Pattern,
   RuntimeScope,
   Scope,
   SemiBoxedExpression,
@@ -47,8 +46,8 @@ import {
   AssignValue,
   DomainLiteral,
   ArrayValue,
-  CanonicalForm,
   AngularUnit,
+  CanonicalOptions,
 } from './public';
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
 import {
@@ -1629,17 +1628,8 @@ export class ComputeEngine implements IComputeEngine {
     return this._cache[cacheName]?.value;
   }
 
-  /** Return a canonical version of an array of semi-boxed-expressions. */
-  canonical(xs: SemiBoxedExpression[]): BoxedExpression[] {
-    if (!xs.every((x) => x instanceof _BoxedExpression))
-      return xs.map((x) => this.box(x));
-
-    const bxs = xs as BoxedExpression[];
-    return bxs.every((x) => x.isCanonical) ? bxs : bxs.map((x) => x.canonical);
-  }
-
   /** Return a boxed expression from a number, string or semiboxed expression.
-   * Calls `function()`, `number()` or `symbol()` as appropriate.
+   * Calls `ce.function()`, `ce.number()` or `ce.symbol()` as appropriate.
    */
   box(
     expr:
@@ -1647,7 +1637,7 @@ export class ComputeEngine implements IComputeEngine {
       | Complex
       | [num: number, denom: number]
       | SemiBoxedExpression,
-    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+    options?: { canonical?: CanonicalOptions }
   ): BoxedExpression {
     return box(this, expr, options);
   }
@@ -1655,10 +1645,8 @@ export class ComputeEngine implements IComputeEngine {
   function(
     head: string,
     ops: SemiBoxedExpression[],
-    options?: { metadata?: Metadata; canonical?: boolean }
+    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
   ): BoxedExpression {
-    options ??= {};
-    if (!('canonical' in options)) options.canonical = true;
     return boxFunction(this, head, ops, options);
   }
 
@@ -1668,12 +1656,12 @@ export class ComputeEngine implements IComputeEngine {
    *
    * The result is canonical.
    */
-  error(
-    message:
-      | MathJsonIdentifier
-      | [MathJsonIdentifier, ...SemiBoxedExpression[]],
-    where?: SemiBoxedExpression
-  ): BoxedExpression;
+  // error(
+  //   message:
+  //     | MathJsonIdentifier
+  //     | [MathJsonIdentifier, ...SemiBoxedExpression[]],
+  //   where?: SemiBoxedExpression
+  // ): BoxedExpression;
   error(
     message:
       | MathJsonIdentifier
@@ -1911,7 +1899,7 @@ export class ComputeEngine implements IComputeEngine {
   /** Return a boxed symbol */
   symbol(
     name: string,
-    options?: { metadata?: Metadata; canonical?: boolean }
+    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
   ): BoxedExpression {
     options = options ? { ...options } : {};
     if (!('canonical' in options)) options.canonical = true;
@@ -1940,22 +1928,20 @@ export class ComputeEngine implements IComputeEngine {
 
     // If there is some LaTeX metadata provided, we can't use the
     // `_commonSymbols` cache, as their LaTeX metadata may not match.
-    if (options?.metadata?.latex !== undefined && !options.canonical)
+    if (options?.metadata?.latex !== undefined && options.canonical !== true)
       return new BoxedSymbol(this, name, options);
 
     const result = this._commonSymbols[name];
-    if (result) {
-      // Only use the cache if there is no metadata or it matches
-      if (
-        !options?.metadata?.wikidata ||
+    // Only use the cache if there is no metadata or it matches
+    if (
+      result &&
+      (!options?.metadata?.wikidata ||
         !result.wikidata ||
-        result.wikidata === options.metadata.wikidata
-      )
-        return result;
-      if (options.canonical) return makeCanonicalSymbol(this, name);
-      return new BoxedSymbol(this, name, options);
-    }
-    if (options.canonical) return makeCanonicalSymbol(this, name);
+        result.wikidata === options.metadata.wikidata)
+    )
+      return result;
+
+    if (options.canonical === true) return makeCanonicalSymbol(this, name);
     return new BoxedSymbol(this, name, options);
   }
 
@@ -2019,13 +2005,20 @@ export class ComputeEngine implements IComputeEngine {
       | Decimal
       | Complex
       | Rational,
-    options?: { canonical?: boolean; metadata?: Metadata }
+    options?: { metadata?: Metadata; canonical?: CanonicalOptions }
   ): BoxedExpression {
     options = options ? { ...options } : {};
     if (!('canonical' in options)) options.canonical = true;
+    if (options.canonical === 'Number') options.canonical = true;
+    if (
+      Array.isArray(options.canonical) &&
+      options.canonical.includes('Number')
+    )
+      options.canonical = true;
 
     //
     // Is this number eligible to be a cached number expression?
+    // (i.e. it has no associated metadata)
     //
     if (options.metadata === undefined) {
       if (typeof value === 'bigint') {
@@ -2054,7 +2047,12 @@ export class ComputeEngine implements IComputeEngine {
 
     if (typeof value === 'bigint') value = this.bignum(value);
 
-    return boxNumber(this, value, options) ?? this.NaN;
+    return (
+      boxNumber(this, value, {
+        metadata: options.metadata,
+        canonical: options.canonical === true,
+      }) ?? this.NaN
+    );
   }
 
   rules(rules: Rule[]): BoxedRuleSet {
@@ -2082,27 +2080,31 @@ export class ComputeEngine implements IComputeEngine {
    */
   parse(
     latex: LatexString | string,
-    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+    options?: { canonical?: CanonicalOptions }
   ): BoxedExpression;
-  parse(
-    s: null,
-    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
-  ): null;
+  parse(s: null, options?: { canonical?: CanonicalOptions }): null;
   parse(
     latex: LatexString | string | null,
-    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+    options?: { canonical?: CanonicalOptions }
   ): null | BoxedExpression;
   parse(
     latex: LatexString | null | string,
-    options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+    options?: { canonical?: CanonicalOptions }
   ): BoxedExpression | null {
     if (typeof latex !== 'string') return null;
     const result = this.latexSyntax.parse(asLatexString(latex) ?? latex);
     return this.box(result, options);
   }
 
-  /** Serialize a `BoxedExpression` or a `MathJSON` expression to
-   * a LaTeX string
+  /** Serialize a `BoxedExpression` or a `MathJSON` expression to a LaTeX
+   * string.
+   *
+   * If the `canonical` option is set to `true`, the result will use canonical
+   * serialization rules (for example (a/b)*(c/d) -> (a*c)/(b*d)).
+   * If false, avoid any canonicalization (i.e. (a/b)*(c/d) -> (a/b)*(c/d)).
+   *
+   * The `canonical` option is true by default.
+   *
    */
   serialize(
     x: Expression | BoxedExpression,

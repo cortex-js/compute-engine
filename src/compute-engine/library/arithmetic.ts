@@ -650,7 +650,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           'RationalNumbers',
         ],
         canonical: (ce, args) => {
-          args = canonical(flattenSequence(args));
+          args = flattenSequence(canonical(args));
 
           if (args.length === 0)
             return ce._fn('Rational', [ce.error('missing')]);
@@ -801,7 +801,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
-          args = canonical(flattenSequence(args));
+          args = flattenSequence(canonical(args));
           if (args.length !== 1) return ce._fn('Sqrt', args);
           return ce.pow(args[0], ce.Half);
         },
@@ -821,7 +821,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
-          args = canonical(flattenSequence(args));
+          args = flattenSequence(canonical(args));
           if (args.length !== 1) return ce._fn('Square', args);
           return ce._fn('Power', [args[0], ce.number(2)]).canonical;
         },

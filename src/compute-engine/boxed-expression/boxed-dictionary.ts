@@ -16,6 +16,7 @@ import {
   BoxedDomain,
   BoxedSubstitution,
   Rule,
+  CanonicalOptions,
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { serializeJsonFunction } from './serialize';
@@ -35,7 +36,7 @@ export class BoxedDictionary extends _BoxedExpression {
   constructor(
     ce: IComputeEngine,
     dict: { [key: string]: SemiBoxedExpression } | Map<string, BoxedExpression>,
-    options?: { canonical?: boolean; metadata?: Metadata }
+    options?: { canonical?: CanonicalOptions; metadata?: Metadata }
   ) {
     options ??= {};
 
@@ -232,7 +233,10 @@ export class BoxedDictionary extends _BoxedExpression {
     return changeCount === 0 ? null : new BoxedDictionary(this.engine, result);
   }
 
-  subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
+  subs(
+    sub: Substitution,
+    options?: { canonical?: CanonicalOptions }
+  ): BoxedExpression {
     const result = {};
     for (const key of this.keys)
       result[key] = this.getKey(key)!.subs(sub, options);

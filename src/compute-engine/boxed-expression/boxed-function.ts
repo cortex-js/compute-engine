@@ -27,6 +27,7 @@ import {
   BoxedBaseDefinition,
   Hold,
   Rule,
+  CanonicalOptions,
 } from '../public';
 import { findUnivariateRoots } from '../solve';
 import { isRational } from '../numerics/rationals';
@@ -47,7 +48,7 @@ import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { checkNumericArgs, adjustArguments } from './validate';
 import { expand } from '../symbolic/expand';
 import { apply } from '../function-utils';
-import { shouldHold } from '../symbolic/utils';
+import { semiCanonical, shouldHold } from '../symbolic/utils';
 import { at, isFiniteIndexableCollection } from '../collection-utils';
 import { narrow } from './boxed-domain';
 import { canonicalAdd } from '../library/arithmetic-add';
@@ -58,7 +59,6 @@ import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { signDiff } from '../numerics/numeric';
 import { match } from './boxed-patterns';
 import { isRelationalOperator } from '../latex-syntax/dictionary/definitions-relational-operators';
-import { BoxedSymbol } from './boxed-symbol.js';
 
 /**
  * A boxed function represent an expression that can be
@@ -108,7 +108,7 @@ export class BoxedFunction extends _BoxedExpression {
       canonical?: boolean;
     }
   ) {
-    options ??= {};
+    options = options ? { ...options } : {};
     options.canonical ??= false;
 
     super(ce, options.metadata);
@@ -272,18 +272,16 @@ export class BoxedFunction extends _BoxedExpression {
 
   // Note: the resulting expression is bound to the current scope, not
   // the scope of the original expression.
-  subs(sub: Substitution, options?: { canonical?: boolean }): BoxedExpression {
-    options = options ? { ...options } : {};
-    if (!('canonical' in options)) options.canonical = true;
-
+  subs(
+    sub: Substitution,
+    options?: { canonical?: CanonicalOptions }
+  ): BoxedExpression {
     const ops = this._ops.map((x) => x.subs(sub, options));
 
-    if (options.canonical && ops.every((x) => x.isValid))
-      return this.engine.function(this._head, ops);
+    if (!ops.every((x) => x.isValid))
+      return this.engine.function(this._head, ops, { canonical: false });
 
-    return new BoxedFunction(this.engine, this._head, ops, {
-      canonical: false,
-    });
+    return this.engine.function(this._head, ops, options);
   }
 
   replace(
@@ -740,7 +738,7 @@ function makeNumericFunction(
 ): BoxedExpression | null {
   let ops: ReadonlyArray<BoxedExpression> = [];
   if (head === 'Add' || head === 'Multiply')
-    ops = checkNumericArgs(ce, ce.canonical(semiOps), { flatten: head });
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), { flatten: head });
   else if (
     head === 'Negate' ||
     head === 'Square' ||
@@ -748,9 +746,9 @@ function makeNumericFunction(
     head === 'Exp' ||
     head === 'Ln'
   )
-    ops = checkNumericArgs(ce, ce.canonical(semiOps), 1);
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 1);
   else if (head === 'Divide' || head === 'Power')
-    ops = checkNumericArgs(ce, ce.canonical(semiOps), 2);
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 2);
   else return null;
 
   // If some of the arguments are not valid, we're done

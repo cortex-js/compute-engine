@@ -27,6 +27,7 @@ import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedFunction } from './boxed-function';
 import { hashCode, isBoxedExpression } from './utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
+import { canonical } from '../symbolic/utils';
 
 /**
  * A boxed tensor represents an expression that can be
@@ -57,17 +58,18 @@ export class BoxedTensor extends _BoxedExpression {
           ops: ReadonlyArray<BoxedExpression>;
         }
       | AbstractTensor<'expression'>,
-    options?: { canonical?: boolean; metadata?: Metadata }
+    options?: { metadata?: Metadata; canonical?: boolean }
   ) {
-    options ??= {};
+    options = options ? { ...options } : {};
     options.canonical ??= true;
+
     super(ce, options.metadata);
 
     if (input instanceof AbstractTensor) {
       this._tensor = input;
     } else {
       this._head = input.head ?? 'List';
-      this._ops = options.canonical ? ce.canonical(input.ops) : input.ops;
+      this._ops = options.canonical === true ? canonical(input.ops) : input.ops;
 
       this._expression = new BoxedFunction(ce, this._head, this._ops, {
         canonical: options.canonical,

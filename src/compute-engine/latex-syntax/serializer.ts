@@ -312,8 +312,7 @@ export class Serializer {
   ): LatexString {
     if (expr === null || expr === undefined) return '';
 
-    options ??= {};
-    options = { ...options };
+    options = options ? { ...options } : {};
     if (!('canonical' in options)) options.canonical = true;
     const savedCanonical = this.canonical;
     if (this.canonical === undefined) this.canonical = options.canonical;

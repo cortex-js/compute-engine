@@ -123,7 +123,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           return ce.Anything;
         },
         canonical: (ce, args) => {
-          const xs = canonical(flattenSequence(args));
+          const xs = flattenSequence(canonical(args));
           if (xs.length === 0) return ce._fn('Sequence', []);
           if (xs.length === 1) return xs[0];
           return ce._fn('Sequence', xs);
@@ -150,7 +150,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
 
           // If the body is a sequence, preserve it (don't flatten it)
           if (body.head === 'Sequence')
-            body = ce._fn('Sequence', ce.canonical(body.ops!));
+            body = ce._fn('Sequence', canonical(body.ops!));
           else body = body.canonical;
 
           // If it's a sequence with a single element, unpack it
@@ -837,7 +837,7 @@ export function canonicalInvisibleOperator(
       // Parse the arguments first, in case they reference lhs.symbol
       // i.e. `x(x+1)`.
       let args = rhs.op1.head === 'Sequence' ? rhs.op1.ops! : [rhs.op1];
-      args = canonical(flattenSequence(args));
+      args = flattenSequence(canonical(args));
       if (!ce.lookupSymbol(lhs.symbol)) {
         // Still not a symbol (i.e. wasn't used as a symbol in the
         // subexpression), so it's a function call.
@@ -847,7 +847,7 @@ export function canonicalInvisibleOperator(
     }
   }
 
-  ops = canonical(flattenSequence(ops));
+  ops = flattenSequence(canonical(ops));
 
   //
   // Is it an invisible multiplication?

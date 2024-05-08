@@ -25,6 +25,7 @@ import {
   BoxedSubstitution,
   Rule,
   SemiBoxedExpression,
+  CanonicalOptions,
 } from '../public';
 import { isBigRational, isMachineRational } from '../numerics/rationals';
 import { asFloat } from '../numerics/numeric';
@@ -306,17 +307,19 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return 0;
   }
 
-  subs(_sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
-    if (options?.canonical) return this.canonical;
-    return this;
+  subs(
+    _sub: Substitution,
+    options?: { canonical?: CanonicalOptions }
+  ): BoxedExpression {
+    return options?.canonical === true ? this.canonical : this;
   }
 
-  map(fn: (x: BoxedExpression) => BoxedExpression): BoxedExpression {
+  map(
+    fn: (x: BoxedExpression) => BoxedExpression,
+    options?: { canonical: CanonicalOptions }
+  ): BoxedExpression {
     if (!this.ops) return fn(this);
-    const ops = this.ops.map(fn);
-    return this.engine.function(this.head, ops, {
-      canonical: this.isCanonical,
-    });
+    return fn(this.engine.function(this.head, this.ops.map(fn), options));
   }
 
   solve(

@@ -7,7 +7,7 @@ import {
   Metadata,
   Rational,
   DomainExpression,
-  CanonicalForm,
+  CanonicalOptions,
 } from '../public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedDictionary } from './boxed-dictionary';
@@ -99,14 +99,14 @@ export function boxNumber(
     | [Decimal, Decimal],
   options?: { metadata?: Metadata; canonical?: boolean }
 ): BoxedExpression | null {
+  options = options ? { ...options } : {};
+  if (!('canonical' in options)) options.canonical = true;
+
   //
   // Do we have a machine number or bignum?
   //
   if (typeof num === 'number' || num instanceof Decimal)
     return new BoxedNumber(ce, num, options);
-
-  options = options ? { ...options } : {};
-  if (!('canonical' in options)) options.canonical = true;
 
   //
   // Do we have a rational or big rational?
@@ -220,7 +220,7 @@ export function boxNumber(
 function boxHold(
   ce: IComputeEngine,
   expr: SemiBoxedExpression | null,
-  options: { canonical?: boolean }
+  options: { canonical?: CanonicalOptions }
 ): BoxedExpression {
   if (expr === null) return ce.error('missing');
   if (typeof expr === 'object' && expr instanceof _BoxedExpression) return expr;
@@ -249,18 +249,22 @@ function boxHold(
  *
  * If available, preserve LaTeX and wikidata metadata in the boxed expression.
  *
- * Note that `boxFunction()` should only be called from `ce.box()`
+ * Note that `boxFunction()` should only be called from `ce.function()`
  */
 
 export function boxFunction(
   ce: IComputeEngine,
   head: string,
-  ops: SemiBoxedExpression[],
-  options: { metadata?: Metadata; canonical?: boolean }
+  ops: readonly SemiBoxedExpression[],
+  options?: { metadata?: Metadata; canonical?: CanonicalOptions }
 ): BoxedExpression {
+  options = options ? { ...options } : {};
+  if (!('canonical' in options)) options.canonical = true;
+
   //
   // Hold
   //
+
   if (head === 'Hold') {
     return new BoxedFunction(ce, 'Hold', [boxHold(ce, ops[0], options)], {
       ...options,
@@ -278,17 +282,6 @@ export function boxFunction(
       options.metadata
     );
   }
-
-  //
-  // Domain
-  //
-  if (head === 'Domain')
-    return ce.domain(ops[0] as DomainExpression, options.metadata);
-
-  //
-  // Number
-  //
-  if (head === 'Number' && ops.length === 1) return box(ce, ops[0], options);
 
   //
   // String
@@ -310,83 +303,101 @@ export function boxFunction(
   }
 
   //
-  // Rational (as Divide)
-  // (only if canonical)
+  // Domain
   //
-  if (
-    options.canonical &&
-    (head === 'Divide' || head === 'Rational') &&
-    ops.length === 2
-  ) {
-    if (
-      ops[0] instanceof _BoxedExpression &&
-      ops[1] instanceof _BoxedExpression
-    ) {
-      if (ce.numericMode === 'machine') {
-        const [fn, fd] = [asFloat(ops[0]), asFloat(ops[1])];
-        if (
-          fn !== null &&
-          Number.isInteger(fn) &&
-          fd !== null &&
-          Number.isInteger(fd)
-        )
-          return ce.number([fn, fd], options);
+  if (head === 'Domain')
+    return ce.domain(ops[0] as DomainExpression, options.metadata);
+
+  //
+  // Number
+  //
+  if (head === 'Number' && ops.length === 1) return box(ce, ops[0], options);
+
+  const canonicalNumber =
+    options.canonical === true ||
+    options.canonical === 'Number' ||
+    (Array.isArray(options.canonical) && options.canonical.includes('Number'));
+
+  if (canonicalNumber) {
+    // If we have a full canonical form or a canonical form for numbers
+    // do some additional simplifications
+
+    //
+    // Rational (as Divide)
+    //
+    if ((head === 'Divide' || head === 'Rational') && ops.length === 2) {
+      if (
+        ops[0] instanceof _BoxedExpression &&
+        ops[1] instanceof _BoxedExpression
+      ) {
+        if (ce.numericMode === 'machine') {
+          const [fn, fd] = [asFloat(ops[0]), asFloat(ops[1])];
+          if (
+            fn !== null &&
+            Number.isInteger(fn) &&
+            fd !== null &&
+            Number.isInteger(fd)
+          )
+            return ce.number([fn, fd], options);
+        }
+        const [n, d] = [asBigint(ops[0]), asBigint(ops[1])];
+        if (n !== null && d !== null) return ce.number([n, d], options);
+      } else {
+        const [n, d] = [
+          bigintValue(ops[0] as Expression),
+          bigintValue(ops[1] as Expression),
+        ];
+        if (n !== null && d !== null) return ce.number([n, d], options);
       }
-      const [n, d] = [asBigint(ops[0]), asBigint(ops[1])];
-      if (n !== null && d !== null) return ce.number([n, d], options);
-    } else {
-      const [n, d] = [
-        bigintValue(ops[0] as Expression),
-        bigintValue(ops[1] as Expression),
-      ];
-      if (n !== null && d !== null) return ce.number([n, d], options);
+
+      head = 'Divide';
     }
 
-    head = 'Divide';
-  }
-
-  //
-  // Complex
-  //
-  if (options.canonical && head === 'Complex') {
-    if (ops.length === 1) {
-      // If single argument, assume it's imaginary
-      // @todo: use machineValue() & symbol() instead of box()
-      const op1 = box(ce, ops[0], options);
-      const im = asFloat(op1);
-      if (im !== null && im !== 0) return ce.number(ce.complex(0, im), options);
-      return ce.mul(op1, ce.I);
-    }
-    if (ops.length === 2) {
-      const op1 = box(ce, ops[0], options);
-      const op2 = box(ce, ops[1], options);
-      const re = asFloat(op1);
-      const im = asFloat(op2);
-      if (im !== null && re !== null) {
-        if (im === 0 && re === 0) return ce.Zero;
+    //
+    // Complex
+    //
+    if (head === 'Complex') {
+      if (ops.length === 1) {
+        // If single argument, assume it's imaginary
+        // @todo: use machineValue() & symbol() instead of box()
+        const op1 = box(ce, ops[0], options);
+        const im = asFloat(op1);
         if (im !== null && im !== 0)
-          return ce.number(ce.complex(re, im), options);
-        return op1;
+          return ce.number(ce.complex(0, im), options);
+        return ce.mul(op1, ce.I);
       }
-      return ce.add(op1, ce.mul(op2, ce.I));
+      if (ops.length === 2) {
+        const op1 = box(ce, ops[0], options);
+        const op2 = box(ce, ops[1], options);
+        const re = asFloat(op1);
+        const im = asFloat(op2);
+        if (im !== null && re !== null) {
+          if (im === 0 && re === 0) return ce.Zero;
+          if (im !== null && im !== 0)
+            return ce.number(ce.complex(re, im), options);
+          return op1;
+        }
+        return ce.add(op1, ce.mul(op2, ce.I));
+      }
+      throw new Error('Expected one or two arguments with Complex expression');
     }
-  }
 
-  //
-  // Negate
-  //
-  // Distribute over literals
-  //
-  if (options.canonical && head === 'Negate' && ops.length === 1) {
-    const op1 = ops[0];
-    if (typeof op1 === 'number') return ce.number(-op1, options);
-    if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
-    const num = ce.box(op1, options).numericValue;
-    if (num !== null) {
-      if (typeof num === 'number') return ce.number(-num, options);
-      if (num instanceof Decimal) return ce.number(num.neg(), options);
-      if (num instanceof Complex) return ce.number(num.neg());
-      if (isRational(num)) return ce.number(neg(num));
+    //
+    // Negate
+    //
+    // Distribute over literals
+    //
+    if (head === 'Negate' && ops.length === 1) {
+      const op1 = ops[0];
+      if (typeof op1 === 'number') return ce.number(-op1, options);
+      if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
+      const num = ce.box(op1, options).numericValue;
+      if (num !== null) {
+        if (typeof num === 'number') return ce.number(-num, options);
+        if (num instanceof Decimal) return ce.number(num.neg(), options);
+        if (num instanceof Complex) return ce.number(num.neg());
+        if (isRational(num)) return ce.number(neg(num));
+      }
     }
   }
 
@@ -427,7 +438,8 @@ export function boxFunction(
   // It has to have a compatible shape: i.e. all elements on an axis have
   // the same shape.
   //
-  if (head === 'List' && options.canonical) {
+  if (head === 'List' && options.canonical === true) {
+    // @todo: note: we could have a special canonical form for tensors
     const boxedOps = ops.map((x) => box(ce, x));
     const { shape, dtype } = expressionTensorInfo('List', boxedOps) ?? {};
 
@@ -436,16 +448,17 @@ export function boxFunction(
     return ce._fn(head, boxedOps);
   }
 
-  if (options.canonical)
+  if (options.canonical === true)
     return makeCanonicalFunction(ce, head, ops, options.metadata);
 
-  // options.canonical was false so we don't want to canonicalize the
-  // arguments
-  return new BoxedFunction(
-    ce,
-    head,
-    ops.map((x) => box(ce, x, { canonical: false })),
-    options
+  return canonicalForm(
+    new BoxedFunction(
+      ce,
+      head,
+      ops.map((x) => box(ce, x, { canonical: options.canonical })),
+      { metadata: options.metadata, canonical: false }
+    ),
+    options.canonical ?? false
   );
 }
 
@@ -468,18 +481,17 @@ export function boxFunction(
  *
  * [4] A `Negate` function applied to a number literal is converted to a number.
  *
- *
- * Note that `Negate` is only distributed over addition. In practice, having
+ *     Note that `Negate` is only distributed over addition. In practice, having
  * `Negate` factored on multiply/divide is more useful to detect patterns.
  *
- * Note that the `box()` function should only be called from `ce.box()`
+ * Note that this function should only be called from `ce.box()`
  *
  */
 
 export function box(
   ce: IComputeEngine,
   expr: null | undefined | Decimal | Complex | Rational | SemiBoxedExpression,
-  options?: { canonical?: boolean | CanonicalForm | CanonicalForm[] }
+  options?: { canonical?: CanonicalOptions }
 ): BoxedExpression {
   if (expr === null || expr === undefined) return ce._fn('Sequence', []);
 
@@ -505,7 +517,7 @@ export function box(
         return ce.number(expr);
       // This wasn't a valid rational, turn it into a `Divide`
       return canonicalForm(
-        boxFunction(ce, 'Divide', expr, { canonical }),
+        ce.function('Divide', expr, { canonical }),
         options.canonical!
       );
     }
@@ -513,7 +525,7 @@ export function box(
 
     if (typeof expr[0] === 'string')
       return canonicalForm(
-        boxFunction(ce, expr[0], expr.slice(1), { canonical }),
+        ce.function(expr[0], expr.slice(1), { canonical }),
         options.canonical!
       );
 
@@ -572,7 +584,7 @@ export function box(
     if ('fn' in expr) {
       if (typeof expr.fn[0] === 'string')
         return canonicalForm(
-          boxFunction(ce, expr.fn[0], expr.fn.slice(1), { canonical }),
+          ce.function(expr.fn[0], expr.fn.slice(1), { canonical }),
           options.canonical!
         );
       return canonicalForm(

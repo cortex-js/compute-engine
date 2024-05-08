@@ -2,7 +2,14 @@ import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
 import { isMachineRational, isBigRational } from '../numerics/rationals';
-import { BoxedExpression, Hold, Rational } from '../public';
+import {
+  BoxedExpression,
+  Hold,
+  IComputeEngine,
+  Rational,
+  SemiBoxedExpression,
+} from '../public';
+import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';
 
 /**
  * Return a rational coef and constant such that `coef * mod + constant = expr`
@@ -190,9 +197,26 @@ export function shouldHold(skip: Hold, count: number, index: number): boolean {
   return true;
 }
 
+export function semiCanonical(
+  ce: IComputeEngine,
+  xs: ReadonlyArray<SemiBoxedExpression>
+): BoxedExpression[] {
+  if (!xs.every((x) => x instanceof _BoxedExpression))
+    return xs.map((x) => ce.box(x));
+
+  // Avoid memory allocation if possible
+  return (xs as BoxedExpression[]).every((x) => x.isCanonical)
+    ? (xs as BoxedExpression[])
+    : (xs as BoxedExpression[]).map((x) => x.canonical);
+}
+
 export function canonical(
   xs: ReadonlyArray<BoxedExpression>
 ): ReadonlyArray<BoxedExpression> {
+  if (!xs.every((x) => x instanceof _BoxedExpression))
+    return xs.map((x) => x.canonical);
   // Avoid memory allocation if possible
-  return xs.every((x) => x.isCanonical) ? xs : xs.map((x) => x.canonical);
+  return xs.every((x) => x instanceof _BoxedExpression && x.isCanonical)
+    ? xs
+    : xs.map((x) => x.canonical);
 }

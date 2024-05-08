@@ -3,14 +3,14 @@ import { canonicalDivide } from '../library/arithmetic-divide';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { canonicalPower } from '../library/arithmetic-power';
 import { canonicalInvisibleOperator } from '../library/core';
-import { BoxedExpression, CanonicalForm } from '../public';
+import { BoxedExpression, CanonicalOptions } from '../public';
 import { flattenDelimiter, flattenOps } from '../symbolic/flatten';
 import { BoxedFunction } from './boxed-function';
 import { canonicalOrder } from './order';
 
 export function canonicalForm(
   expr: BoxedExpression,
-  forms: boolean | CanonicalForm | CanonicalForm[]
+  forms: CanonicalOptions
 ): BoxedExpression {
   // No canonical form?
   if (forms === false) return expr;
@@ -23,6 +23,7 @@ export function canonicalForm(
   // Apply each form in turn
   for (const form of forms) {
     switch (form) {
+      // @todo: consider additional forms: "Symbol", "Tensor"
       case 'InvisibleOperator':
         expr = invisibleOperatorForm(expr);
         break;

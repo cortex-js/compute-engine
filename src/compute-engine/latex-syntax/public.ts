@@ -671,7 +671,7 @@ export type SerializeLatexOptions = {
   multiply: LatexString; // e.g. '\\times', '\\cdot'
 
   /**
-   * When an expression contains the error expression `["Error", 'missing']`,
+   * When an expression contains the error expression `["Error", "'missing'"]`,
    * serialize it with this LaTeX string
    */
   missingSymbol: LatexString; // e.g. '\\placeholder{}'
@@ -848,7 +848,7 @@ export interface Serializer {
   level: number;
 
   /** If true, apply transformations to the expression so the output
-   * doesn't necesarily match the raw MathJSON, but is more visually pleasing
+   * doesn't necessarily match the raw MathJSON, but is more visually pleasing
    * and easier to read. If false, output the raw MathJSON. */
   canonical?: boolean;
 

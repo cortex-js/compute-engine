@@ -33,7 +33,7 @@ export const LINEAR_ALGEBRA_LIBRARY: IdentifierDefinitions[] = [
           return ce._fn('Matrix', [
             ce.box([
               'List',
-              ...ce.canonical(ops).map((op) => ce.box(['List', op])),
+              ...ops.map((op) => ce.box(['List', op.canonical])),
             ]),
           ]);
         },

@@ -383,8 +383,120 @@
       });
     });
 
+
+
+
+    const engine = new ComputeEngine()
+
+    engine.latexDictionary = [
+      ...engine.latexDictionary.filter((x) => x.name !== 'Subtract'),
+      {
+        ...engine.latexDictionary.find((x) => x.name === "Subtract"),
+        parse: (parser, lhs, terminator) => {
+          // Go back one token: we'll parse the '-' as part of the rhs so we
+          // can keep the expression an 'Add'.
+          parser.index -= 1;
+          const rhs = parser.parseExpression({ ...terminator, minPrec: 275 + 3 });
+          return ['Add', lhs, rhs];
+        },
+      }]
+
+    function customCanonical(expr) {
+      if (typeof expr.value === 'number') {
+        if (expr.head === 'Divide' || expr.head === 'Rational') {
+          if (expr.engine.box(["GCD", expr.op1, expr.op2]).value !== 1) return expr;
+        }
+        return expr.engine.number(expr.value);
+      }
+
+      if (expr.ops) return expr.engine.box([expr.head, ...expr.ops.map(customCanonical)], { canonical: ['InvisibleOperator', 'Order'] });
+
+      return expr.canonical;
+    }
+
+    console.log(customCanonical(engine.parse("\\frac34", { canonical: false })).json);
+    console.log(customCanonical(engine.parse("\\frac{6}{8}", { canonical: false })).json);
+
+    const ce = new ComputeEngine();
+
+    //   ce.latexDictionary = [
+    //     ...ce.latexDictionary.filter((x) => x.name !== 'Subtract'),
+    //     {
+    //       ...ce.latexDictionary.find((x) => x.name === "Subtract"),
+    //       parse: (parser, lhs, terminator) => {
+    //         // Go back one token: we'll parse the '-' as part of the rhs so we
+    //         // can keep the expression an 'Add'.
+    //         parser.index -= 1;
+    //         const rhs = parser.parseExpression({ ...terminator, minPrec: 275 + 3 });
+    //         return ['Add', lhs, rhs];
+    //       },
+    //     }]
+
+    // function customCanonical(expr) {
+    //   if (expr.ops) {
+    //     return ce.function(expr.head, ...expr.ops.map(customCanonical), { canonical: ['InvisibleOperator', 'Order'] });
+    //   }
+    //   return typeof expr.value === 'number' ? ce.number(expr.value) : expr.canonical;
+    // }
+
+    // let expr1 = ce.parse('3x+2', { canonical: false });
+    // let expr2 = ce.parse('3x+2+0', { canonical: false });
+    // expr1 = customCanonical(expr1);
+    // expr2 = customCanonical(expr2);
+    // console.log(expr1.isSame(expr2));
+
+    const arbre = ce.parse('(5x+3)-(2x^2-3x+4)+(4x+7-3x^3)', { canonical: false })
+    console.log(ce.box(['CanonicalForm', arbre, 'Flatten']).latex)
+
+
+    const exp = ce.parse('(5x+3)-(2x^2-3x+4)+(4x+7-3x^3)', { canonical: false })
+    const noPar = ce.box(['CanonicalForm', exp, 'Flatten']).latex;
+    console.log(noPar);
+
+
+    const term = ce.parse('-\\frac{z}{3}')
+    const sqTerm1 = ce.box(["ExpandAll", ['Square', term]]).evaluate().latex // (-\\frac{z}{3})^2
+    console.log(sqTerm1);
+    const sqTerm2 = ce.box(['Multiply', term, term]).evaluate().latex // \\frac{z^2}{9} that's what I want !
+    console.log(sqTerm2);
+
+
+    let expr5 = ce.parse("x \\times x", { canonical: "Multiply" });
+    console.log(expr5.json);
+
+    const expr = ce.parse("\\frac{x}{3}");
+
+
+    let a = ce.parse('\\frac{x^{-1}}{9}').subs({
+      x: ce.parse('\\frac{3}{7}'),
+    });
+
+    // After a subs, should generate a rational numbnrt
+
+    let b = ce.parse('\\frac{(\\frac{3}{7})^{-1}}{9}');
+
+    console.log(a, b.value);
+
+
     const mf = document.getElementById("mf");
-    const ce = MathfieldElement.computeEngine;
+    // const ce = MathfieldElement.computeEngine;
+
+    // let a = ce.parse('\\frac{x^{-1}}{9}').subs({
+    //   x: ce.parse('\\frac{3}{7}'),
+    // });
+
+    // let a = ce.parse('\\frac{x^{-1}}{9}').subs({
+    //   x: ce.parse('\\frac{3}{7}'),
+    // });
+
+
+    // //x=3/7 but included in expression
+    // let b = ce.parse('\\frac{(\\frac{3}{7})^{-1}}{9}');
+    // console.log(a.value, b.value);
+
+
+
+    console.log(ce.parse("3xy^2").toJSON());
 
 
     ce.strict = true;

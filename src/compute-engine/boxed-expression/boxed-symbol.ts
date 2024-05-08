@@ -22,6 +22,7 @@ import {
   BoxedSubstitution,
   Rule,
   SemiBoxedExpression,
+  CanonicalOptions,
 } from '../public';
 import { replace } from '../rules';
 import { serializeJsonSymbol } from './serialize';
@@ -76,7 +77,7 @@ export class BoxedSymbol extends _BoxedExpression {
     name: string,
     options?: {
       metadata?: Metadata;
-      canonical?: boolean;
+      canonical?: CanonicalOptions;
       def?: BoxedSymbolDefinition | BoxedFunctionDefinition;
     }
   ) {
@@ -89,7 +90,7 @@ export class BoxedSymbol extends _BoxedExpression {
     this._id = name;
     this._def = options?.def ?? undefined; // Mark the def as not cached if not provided
 
-    if (!(options?.canonical ?? true)) this._scope = null;
+    if ((options?.canonical ?? true) !== true) this._scope = null;
     else if (this._def) this._scope = ce.context;
     else this.bind();
   }
@@ -642,9 +643,12 @@ export class BoxedSymbol extends _BoxedExpression {
     return replace(this, rules, options);
   }
 
-  subs(sub: Substitution, options?: { canonical: boolean }): BoxedExpression {
+  subs(
+    sub: Substitution,
+    options?: { canonical?: CanonicalOptions }
+  ): BoxedExpression {
     if (sub[this._id] === undefined)
-      return options?.canonical ? this.canonical : this;
+      return options?.canonical === true ? this.canonical : this;
 
     return this.engine.box(sub[this._id], options);
   }
