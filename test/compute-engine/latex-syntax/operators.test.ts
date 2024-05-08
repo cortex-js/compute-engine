@@ -84,14 +84,14 @@ describe('OPERATOR add/subtract', () => {
 
   test('1-2', () =>
     expect(check('1-2')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", 1, 2]
+      latex     = ["Add", 1, -2]
       box       = ["Subtract", 1, 2]
       simplify  = -1
     `));
 
   test('-1-2', () =>
     expect(check('-1-2')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", -1, 2]
+      latex     = ["Add", -1, -2]
       box       = ["Subtract", -1, 2]
       simplify  = -3
     `));
@@ -190,7 +190,7 @@ describe('OPERATOR prefix', () => {
     `));
   test('-x-1 // Negate', () =>
     expect(check('-x-1')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", ["Negate", "x"], 1]
+      latex     = ["Add", ["Negate", "x"], -1]
       box       = ["Subtract", -1, "x"]
       evaluate  = ["Subtract", ["Negate", "x"], 1]
     `));
@@ -269,25 +269,25 @@ describe('OPERATOR infix', () => {
     `));
   test('1- // Invalid subtract', () =>
     expect(check('1-')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", 1, ["Error", "'missing'"]]
-      ["Subtract", 1, ["Error", "'missing'"]]
+      latex     = ["Add", 1, ["Negate", ["Error", "'missing'"]]]
+      ["Add", 1, ["Negate", ["Error", "'missing'"]]]
     `));
 
   test('-1+2+3-4 // Add', () =>
     expect(check('-1+2+3-4')).toMatchInlineSnapshot(`
-      latex     = ["Add", -1, 2, ["Subtract", 3, 4]]
+      latex     = ["Add", -1, 2, 3, -4]
       box       = ["Add", -4, -1, 2, 3]
       simplify  = 0
     `));
   test('a-b+c+d // Add', () =>
     expect(check('a-b+c+d')).toMatchInlineSnapshot(`
-      latex     = ["Add", ["Subtract", "a", "b"], "c", "d"]
+      latex     = ["Add", "a", ["Negate", "b"], "c", "d"]
       ["Add", ["Negate", "b"], "a", "c", "d"]
     `));
 
   test('-2+3x-4', () =>
     expect(check('-2+3x-4')).toMatchInlineSnapshot(`
-      latex     = ["Add", -2, ["Subtract", ["InvisibleOperator", 3, "x"], 4]]
+      latex     = ["Add", -2, ["InvisibleOperator", 3, "x"], -4]
       box       = ["Add", ["Multiply", 3, "x"], -4, -2]
       simplify  = ["Subtract", ["Multiply", 3, "x"], 6]
     `));
@@ -426,7 +426,7 @@ describe('OPERATOR precedence', () => {
     `));
   test('-2\\times-3-4 // Precedence', () =>
     expect(check('-2\\times-3-4')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", ["Multiply", -2, -3], 4]
+      latex     = ["Add", ["Multiply", -2, -3], -4]
       box       = ["Subtract", ["Multiply", 2, 3], 4]
       simplify  = 2
     `));
@@ -446,7 +446,7 @@ describe('OPERATOR postfix', () => {
     `));
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", -2, ["Factorial", 5]]
+      latex     = ["Add", -2, ["Factorial", -5]]
       box       = ["Subtract", -2, ["Factorial", 5]]
       simplify  = -122
     `));

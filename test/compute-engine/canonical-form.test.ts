@@ -11,14 +11,14 @@ describe('CANONICAL FORMS', () => {
   // Addition/substraction of 0 gets simplified in canonical  form
   test('a-0', () => {
     expect(check('a-0')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", "a", 0]
+      latex     = ["Add", "a", 0]
       a
     `);
   });
 
   test('0-a', () => {
     expect(check('0-a')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", 0, "a"]
+      latex     = ["Add", 0, ["Negate", "a"]]
       ["Negate", "a"]
     `);
   });
@@ -145,7 +145,7 @@ describe('CANONICAL FORMS', () => {
 
   test('2\\times(5-5)\\times5\\times4"', () => {
     expect(check('2\\times(5-5)\\times5\\times4')).toMatchInlineSnapshot(`
-      latex     = ["Multiply", 2, ["Delimiter", ["Subtract", 5, 5]], 5, 4]
+      latex     = ["Multiply", 2, ["Delimiter", ["Add", 5, -5]], 5, 4]
       box       = ["Multiply", 2, 4, 5, ["Subtract", 5, 5]]
       simplify  = 0
     `);

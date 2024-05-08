@@ -56,9 +56,9 @@ describe('EXPAND PRODUCT', () => {
       box       = [
         "Expand",
         [
-          "Subtract",
-          ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]],
-          ["Multiply", 5, ["Subtract", ["Multiply", 5, "x"], 4]]
+          "Add",
+          ["Multiply", -5, ["Subtract", ["Multiply", 5, "x"], 4]],
+          ["Multiply", 4, "x", ["Add", ["Multiply", 3, "x"], 2]]
         ]
       ]
       simplify  = [

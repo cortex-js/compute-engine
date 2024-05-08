@@ -8,7 +8,7 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
     `));
   test(`\\cos x - \\sin x`, () =>
     expect(check('\\cos x - \\sin x')).toMatchInlineSnapshot(`
-      latex     = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
+      latex     = ["Add", ["Cos", "x"], ["Negate", ["Sin", "x"]]]
       box       = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
       simplify  = ["Add", ["Cos", "x"], ["Negate", ["Sin", "x"]]]
     `));

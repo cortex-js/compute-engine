@@ -1134,11 +1134,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     associativity: 'left',
     precedence: ADDITION_PRECEDENCE + 2,
     parse: (parser, lhs, terminator) => {
+      // Go back one token: we'll parse the '-' as part of the rhs so we
+      // can keep the expression an 'Add'.
+      parser.index -= 1;
       const rhs = parser.parseExpression({
         ...terminator,
         minPrec: ADDITION_PRECEDENCE + 3,
       });
-      return ['Subtract', lhs, missingIfEmpty(rhs)] as Expression;
+      return ['Add', lhs, missingIfEmpty(rhs)] as Expression;
     },
     serialize: (serializer, expr) => {
       const lhs = serializer.wrap(op(expr, 1), ADDITION_PRECEDENCE + 2);

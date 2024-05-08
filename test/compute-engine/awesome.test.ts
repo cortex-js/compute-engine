@@ -45,65 +45,71 @@ describe('Nth PRIME NUMBER', () =>
                           "Power",
                           0,
                           [
-                            "Subtract",
+                            "Add",
                             "n",
                             [
-                              "Delimiter",
+                              "Negate",
                               [
-                                "Sum",
+                                "Delimiter",
                                 [
-                                  "Delimiter",
+                                  "Sum",
                                   [
                                     "Delimiter",
                                     [
-                                      "Product",
+                                      "Delimiter",
                                       [
-                                        "Delimiter",
+                                        "Product",
                                         [
-                                          "Subtract",
-                                          1,
+                                          "Delimiter",
                                           [
-                                            "Power",
-                                            0,
+                                            "Add",
+                                            1,
                                             [
-                                              "Abs",
+                                              "Power",
+                                              0,
                                               [
-                                                "Subtract",
+                                                "Abs",
                                                 [
-                                                  "Floor",
+                                                  "Add",
                                                   [
-                                                    "Divide",
-                                                    ["Subscript", "v", 2],
-                                                    ["Subscript", "v", 3]
+                                                    "Floor",
+                                                    [
+                                                      "Divide",
+                                                      ["Subscript", "v", 2],
+                                                      ["Subscript", "v", 3]
+                                                    ]
+                                                  ],
+                                                  [
+                                                    "Negate",
+                                                    [
+                                                      "Divide",
+                                                      ["Subscript", "v", 2],
+                                                      ["Subscript", "v", 3]
+                                                    ]
                                                   ]
-                                                ],
-                                                [
-                                                  "Divide",
-                                                  ["Subscript", "v", 2],
-                                                  ["Subscript", "v", 3]
                                                 ]
                                               ]
                                             ]
                                           ]
-                                        ]
-                                      ],
-                                      [
-                                        "Tuple",
-                                        ["Subscript", "v", 3],
-                                        2,
+                                        ],
                                         [
-                                          "Floor",
-                                          ["Sqrt", ["Subscript", "v", 2]]
+                                          "Tuple",
+                                          ["Subscript", "v", 3],
+                                          2,
+                                          [
+                                            "Floor",
+                                            ["Sqrt", ["Subscript", "v", 2]]
+                                          ]
                                         ]
                                       ]
                                     ]
+                                  ],
+                                  [
+                                    "Tuple",
+                                    ["Subscript", "v", 2],
+                                    2,
+                                    ["Subscript", "v", 1]
                                   ]
-                                ],
-                                [
-                                  "Tuple",
-                                  ["Subscript", "v", 2],
-                                  2,
-                                  ["Subscript", "v", 1]
                                 ]
                               ]
                             ]
@@ -151,65 +157,71 @@ describe('Nth PRIME NUMBER', () =>
                           "Power",
                           0,
                           [
-                            "Subtract",
+                            "Add",
                             "n",
                             [
-                              "Delimiter",
+                              "Negate",
                               [
-                                "Sum",
+                                "Delimiter",
                                 [
-                                  "Delimiter",
+                                  "Sum",
                                   [
                                     "Delimiter",
                                     [
-                                      "Product",
+                                      "Delimiter",
                                       [
-                                        "Delimiter",
+                                        "Product",
                                         [
-                                          "Subtract",
-                                          1,
+                                          "Delimiter",
                                           [
-                                            "Power",
-                                            0,
+                                            "Add",
+                                            1,
                                             [
-                                              "Abs",
+                                              "Power",
+                                              0,
                                               [
-                                                "Subtract",
+                                                "Abs",
                                                 [
-                                                  "Floor",
+                                                  "Add",
                                                   [
-                                                    "Divide",
-                                                    ["Subscript", "v", 2],
-                                                    ["Subscript", "v", 3]
+                                                    "Floor",
+                                                    [
+                                                      "Divide",
+                                                      ["Subscript", "v", 2],
+                                                      ["Subscript", "v", 3]
+                                                    ]
+                                                  ],
+                                                  [
+                                                    "Negate",
+                                                    [
+                                                      "Divide",
+                                                      ["Subscript", "v", 2],
+                                                      ["Subscript", "v", 3]
+                                                    ]
                                                   ]
-                                                ],
-                                                [
-                                                  "Divide",
-                                                  ["Subscript", "v", 2],
-                                                  ["Subscript", "v", 3]
                                                 ]
                                               ]
                                             ]
                                           ]
-                                        ]
-                                      ],
-                                      [
-                                        "Tuple",
-                                        ["Subscript", "v", 3],
-                                        2,
+                                        ],
                                         [
-                                          "Floor",
-                                          ["Sqrt", ["Subscript", "v", 2]]
+                                          "Tuple",
+                                          ["Subscript", "v", 3],
+                                          2,
+                                          [
+                                            "Floor",
+                                            ["Sqrt", ["Subscript", "v", 2]]
+                                          ]
                                         ]
                                       ]
                                     ]
+                                  ],
+                                  [
+                                    "Tuple",
+                                    ["Subscript", "v", 2],
+                                    2,
+                                    ["Subscript", "v", 1]
                                   ]
-                                ],
-                                [
-                                  "Tuple",
-                                  ["Subscript", "v", 2],
-                                  2,
-                                  ["Subscript", "v", 1]
                                 ]
                               ]
                             ]
@@ -254,65 +266,71 @@ describe('Nth PRIME NUMBER', () =>
                         "Power",
                         0,
                         [
-                          "Subtract",
+                          "Add",
                           "n",
                           [
-                            "Delimiter",
+                            "Negate",
                             [
-                              "Sum",
+                              "Delimiter",
                               [
-                                "Delimiter",
+                                "Sum",
                                 [
                                   "Delimiter",
                                   [
-                                    "Product",
+                                    "Delimiter",
                                     [
-                                      "Delimiter",
+                                      "Product",
                                       [
-                                        "Subtract",
-                                        1,
+                                        "Delimiter",
                                         [
-                                          "Power",
-                                          0,
+                                          "Add",
+                                          1,
                                           [
-                                            "Abs",
+                                            "Power",
+                                            0,
                                             [
-                                              "Subtract",
+                                              "Abs",
                                               [
-                                                "Floor",
+                                                "Add",
                                                 [
-                                                  "Divide",
-                                                  ["Subscript", "v", 2],
-                                                  ["Subscript", "v", 3]
+                                                  "Floor",
+                                                  [
+                                                    "Divide",
+                                                    ["Subscript", "v", 2],
+                                                    ["Subscript", "v", 3]
+                                                  ]
+                                                ],
+                                                [
+                                                  "Negate",
+                                                  [
+                                                    "Divide",
+                                                    ["Subscript", "v", 2],
+                                                    ["Subscript", "v", 3]
+                                                  ]
                                                 ]
-                                              ],
-                                              [
-                                                "Divide",
-                                                ["Subscript", "v", 2],
-                                                ["Subscript", "v", 3]
                                               ]
                                             ]
                                           ]
                                         ]
-                                      ]
-                                    ],
-                                    [
-                                      "Tuple",
-                                      ["Subscript", "v", 3],
-                                      2,
+                                      ],
                                       [
-                                        "Floor",
-                                        ["Sqrt", ["Subscript", "v", 2]]
+                                        "Tuple",
+                                        ["Subscript", "v", 3],
+                                        2,
+                                        [
+                                          "Floor",
+                                          ["Sqrt", ["Subscript", "v", 2]]
+                                        ]
                                       ]
                                     ]
                                   ]
+                                ],
+                                [
+                                  "Tuple",
+                                  ["Subscript", "v", 2],
+                                  2,
+                                  ["Subscript", "v", 1]
                                 ]
-                              ],
-                              [
-                                "Tuple",
-                                ["Subscript", "v", 2],
-                                2,
-                                ["Subscript", "v", 1]
                               ]
                             ]
                           ]
@@ -349,20 +367,11 @@ describe('Euler Prime Generating Polynomial', () => {
     expect(check('8x^2 - 488 x + 7243')).toMatchInlineSnapshot(`
       latex     = [
         "Add",
-        [
-          "Subtract",
-          ["InvisibleOperator", 8, ["Power", "x", 2]],
-          ["InvisibleOperator", 488, "x"]
-        ],
+        ["InvisibleOperator", 8, ["Power", "x", 2]],
+        ["InvisibleOperator", -488, "x"],
         7243
       ]
-      box       = [
-        "Add",
-        ["Multiply", 8, ["Square", "x"]],
-        ["Negate", ["Multiply", 488, "x"]],
-        7243
-      ]
-      simplify  = [
+      [
         "Add",
         ["Multiply", 8, ["Square", "x"]],
         ["Multiply", -488, "x"],
@@ -373,20 +382,11 @@ describe('Euler Prime Generating Polynomial', () => {
     expect(check('43 x^2 - 537x + 2971')).toMatchInlineSnapshot(`
       latex     = [
         "Add",
-        [
-          "Subtract",
-          ["InvisibleOperator", 43, ["Power", "x", 2]],
-          ["InvisibleOperator", 537, "x"]
-        ],
+        ["InvisibleOperator", 43, ["Power", "x", 2]],
+        ["InvisibleOperator", -537, "x"],
         2971
       ]
-      box       = [
-        "Add",
-        ["Multiply", 43, ["Square", "x"]],
-        ["Negate", ["Multiply", 537, "x"]],
-        2971
-      ]
-      simplify  = [
+      [
         "Add",
         ["Multiply", 43, ["Square", "x"]],
         ["Multiply", -537, "x"],
@@ -397,20 +397,11 @@ describe('Euler Prime Generating Polynomial', () => {
     expect(check('36 x^2 - 810 x + 2763')).toMatchInlineSnapshot(`
       latex     = [
         "Add",
-        [
-          "Subtract",
-          ["InvisibleOperator", 36, ["Power", "x", 2]],
-          ["InvisibleOperator", 810, "x"]
-        ],
+        ["InvisibleOperator", 36, ["Power", "x", 2]],
+        ["InvisibleOperator", -810, "x"],
         2763
       ]
-      box       = [
-        "Add",
-        ["Multiply", 36, ["Square", "x"]],
-        ["Negate", ["Multiply", 810, "x"]],
-        2763
-      ]
-      simplify  = [
+      [
         "Add",
         ["Multiply", 36, ["Square", "x"]],
         ["Multiply", -810, "x"],
@@ -419,13 +410,8 @@ describe('Euler Prime Generating Polynomial', () => {
     `));
   test('x in', () =>
     expect(check('x^2 - 79x + 1601')).toMatchInlineSnapshot(`
-      latex     = [
-        "Add",
-        ["Subtract", ["Power", "x", 2], ["InvisibleOperator", 79, "x"]],
-        1601
-      ]
-      box       = ["Add", ["Negate", ["Multiply", 79, "x"]], ["Square", "x"], 1601]
-      simplify  = ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
+      latex     = ["Add", ["Power", "x", 2], ["InvisibleOperator", -79, "x"], 1601]
+      ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
     `));
   test('x in 0..10', () =>
     expect(check('2x^2 + 11')).toMatchInlineSnapshot(`

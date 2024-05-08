@@ -456,65 +456,71 @@ describe('PARSING numbers', () => {
                           "Power",
                           0,
                           [
-                            "Subtract",
+                            "Add",
                             "n",
                             [
-                              "Delimiter",
+                              "Negate",
                               [
-                                "Sum",
+                                "Delimiter",
                                 [
-                                  "Delimiter",
+                                  "Sum",
                                   [
                                     "Delimiter",
                                     [
-                                      "Product",
+                                      "Delimiter",
                                       [
-                                        "Delimiter",
+                                        "Product",
                                         [
-                                          "Subtract",
-                                          1,
+                                          "Delimiter",
                                           [
-                                            "Power",
-                                            0,
+                                            "Add",
+                                            1,
                                             [
-                                              "Abs",
+                                              "Power",
+                                              0,
                                               [
-                                                "Subtract",
+                                                "Abs",
                                                 [
-                                                  "Floor",
+                                                  "Add",
                                                   [
-                                                    "Divide",
-                                                    ["Subscript", "v", 2],
-                                                    ["Subscript", "v", 3]
+                                                    "Floor",
+                                                    [
+                                                      "Divide",
+                                                      ["Subscript", "v", 2],
+                                                      ["Subscript", "v", 3]
+                                                    ]
+                                                  ],
+                                                  [
+                                                    "Negate",
+                                                    [
+                                                      "Divide",
+                                                      ["Subscript", "v", 2],
+                                                      ["Subscript", "v", 3]
+                                                    ]
                                                   ]
-                                                ],
-                                                [
-                                                  "Divide",
-                                                  ["Subscript", "v", 2],
-                                                  ["Subscript", "v", 3]
                                                 ]
                                               ]
                                             ]
                                           ]
-                                        ]
-                                      ],
-                                      [
-                                        "Tuple",
-                                        ["Subscript", "v", 3],
-                                        2,
+                                        ],
                                         [
-                                          "Floor",
-                                          ["Sqrt", ["Subscript", "v", 2]]
+                                          "Tuple",
+                                          ["Subscript", "v", 3],
+                                          2,
+                                          [
+                                            "Floor",
+                                            ["Sqrt", ["Subscript", "v", 2]]
+                                          ]
                                         ]
                                       ]
                                     ]
+                                  ],
+                                  [
+                                    "Tuple",
+                                    ["Subscript", "v", 2],
+                                    2,
+                                    ["Subscript", "v", 1]
                                   ]
-                                ],
-                                [
-                                  "Tuple",
-                                  ["Subscript", "v", 2],
-                                  2,
-                                  ["Subscript", "v", 1]
                                 ]
                               ]
                             ]
