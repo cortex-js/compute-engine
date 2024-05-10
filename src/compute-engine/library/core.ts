@@ -803,8 +803,12 @@ export function canonicalInvisibleOperator(
           d <= 1000 &&
           Number.isInteger(n) &&
           Number.isInteger(d)
-        )
-          return ce._fn('Add', [lhs.canonical, rhs.canonical]);
+        ) {
+          let frac = rhs.canonical;
+          if (lhsNumber < 0) frac = ce.neg(frac);
+
+          return ce._fn('Add', [lhs.canonical, frac]);
+        }
       }
     }
 

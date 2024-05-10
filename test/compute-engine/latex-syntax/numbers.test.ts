@@ -15,6 +15,7 @@ describe('NUMBERS', () => {
     expect(box({ num: 4 } as any as Expression)).toMatch('4');
     expect(parse('3\\times10^4')).toMatch('30000');
   });
+
   test('Parsing plus/minus', () => {
     expect(parse('+1')).toMatch('1');
     expect(parse('++1')).toMatchInlineSnapshot(`["PreIncrement", 1]`);
@@ -22,6 +23,19 @@ describe('NUMBERS', () => {
     expect(parse('--1')).toMatchInlineSnapshot(`["PreDecrement", 1]`);
     expect(parse('-+-1')).toMatchInlineSnapshot(`1`);
   });
+
+  test('Parsing invisible add/mixed fraction', () => {
+    expect(parse('3\\frac14')).toMatchInlineSnapshot(
+      `["Add", 3, ["Rational", 1, 4]]`
+    );
+    expect(parse('-3\\frac14')).toMatchInlineSnapshot(
+      `["Subtract", ["Rational", -1, 4], 3]`
+    );
+    expect(parse('3\\frac14+\\frac12')).toMatchInlineSnapshot(
+      `["Add", ["Rational", 1, 4], "Half", 3]`
+    );
+  });
+
   test('Parsing numbers with repeating pattern', () => {
     expect(parse('1.(3)')).toMatchInlineSnapshot(`1.(3)`);
     expect(parse('0.(142857)')).toMatchInlineSnapshot(`0.(142857)`);
@@ -98,6 +112,7 @@ describe('NUMBERS', () => {
     expect(parse('+ 1')).toMatch('1');
     expect(parse(' -  +   -   -1')).toMatch('-1');
   });
+
   test('Parsing digits', () => {
     // Number with exactly three digits after the decimal point
     expect(parse('3.423e4')).toMatch('34230');
