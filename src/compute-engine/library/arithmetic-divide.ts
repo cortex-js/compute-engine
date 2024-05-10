@@ -1,4 +1,4 @@
-import { BoxedExpression, IComputeEngine } from '../public';
+import { BoxedExpression, IComputeEngine, Rational } from '../public';
 import { apply2N, makePositive } from '../symbolic/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import {
@@ -149,6 +149,38 @@ export function evalDivide(
           (n, d) => n.div(d)
         ) ?? result;
     }
+  }
+
+  if (result !== undefined) return result;
+
+  return ce._fn('Divide', [op1, op2]);
+}
+
+export function evalNDivide(
+  ce: IComputeEngine,
+  op1: BoxedExpression,
+  op2: BoxedExpression
+): BoxedExpression {
+  let result = simplifyDivide(ce, op1, op2);
+  if (result?.head === 'Divide') {
+    result =
+      apply2N(
+        op1,
+        op2,
+        (n, d) => n / d,
+        (n, d) => n.div(d),
+        (n, d) => n.div(d)
+      ) ?? result;
+  }
+
+  const num = result?.numericValue;
+  if (isBigRational(num)) {
+    const [n, d] = num;
+    return ce.number(n / d);
+  }
+  if (isMachineRational(num)) {
+    const [n, d] = num;
+    return ce.number(n / d);
   }
 
   if (result !== undefined) return result;

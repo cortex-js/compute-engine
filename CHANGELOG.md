@@ -16,6 +16,8 @@
 ### Issues Resolved
 
 - **#164** Negative mixed fractions (e.g. `-1\frac23`) are now parsed correctly.
+- **#162** Numeric evaluation of expressions with large exponents could result
+  in machine precision numbers instead of bignum numbers.
 - **#147** The associativity of some operators, including `/` was not applied
   correctly, resulting in unexpected results. For example, `1/2/3` would be
   parsed as `["Divide", 1, ["Divide", 2, 3]]` instead of

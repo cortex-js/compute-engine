@@ -51,7 +51,7 @@ import {
   evalMultiplication,
   canonicalProduct,
 } from './arithmetic-multiply';
-import { evalDivide, simplifyDivide } from './arithmetic-divide';
+import { evalDivide, evalNDivide, simplifyDivide } from './arithmetic-divide';
 import { processPower, processSqrt } from './arithmetic-power';
 import { applyN, apply2N, canonical } from '../symbolic/utils';
 import {
@@ -255,6 +255,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         },
         simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
         evaluate: (ce, ops) => evalDivide(ce, ops[0], ops[1]),
+        N: (ce, ops) => evalNDivide(ce, ops[0], ops[1]),
       },
     },
 

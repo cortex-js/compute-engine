@@ -48,8 +48,6 @@ import {
 const ce = engine;
 // engine.jsonSerializationOptions.precision = 16;
 
-console.log(ce.parse('3\\frac14+\\frac12', { canonical: false }).toString());
-
 ///
 ///
 ///

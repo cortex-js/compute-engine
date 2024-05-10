@@ -197,9 +197,10 @@ export function pow(r: Rational, exp: number): Rational {
   }
   if (exp === 1) return r;
 
-  if (isMachineRational(r)) return [Math.pow(r[0], exp), Math.pow(r[1], exp)];
+  // Always use bigint to calculate powers. Avoids underflow/overflow.
+
   const bigexp = bigint(exp);
-  return [r[0] ** bigexp, r[1] ** bigexp];
+  return [bigint(r[0]) ** bigexp, bigint(r[1]) ** bigexp];
 }
 
 export function sqrt(r: Rational): Rational | undefined {
