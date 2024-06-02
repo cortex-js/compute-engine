@@ -1,4 +1,4 @@
-import { BoxedExpression, IComputeEngine } from '../public';
+import { BoxedExpression } from '../public';
 
 /**
  * Flatten the arguments.
@@ -43,7 +43,7 @@ export function flattenSequence(
       if (x.op1.head === 'Sequence') {
         const seq = x.op1.ops ?? [];
         // If this is an empty delimiter, i.e. `()`, preserve it as a tuple, don't flatten it.
-        if (seq.length === 0) ys.push(x.engine.box(['Tupple']));
+        if (seq.length === 0) ys.push(x.engine.box(['Tuple']));
         else ys.push(...flattenSequence(seq));
       } else ys.push(x.op1);
     } else if (x.head === 'Sequence') {
@@ -51,21 +51,4 @@ export function flattenSequence(
     } else ys.push(x);
   }
   return ys;
-}
-
-export function flattenDelimiter(
-  ce: IComputeEngine,
-  body: undefined | BoxedExpression
-): BoxedExpression {
-  // If empty delimiter, return an empty Tuple
-  if (body === undefined) return ce._fn('Tuple', []);
-
-  if (body.head === 'Delimiter') return flattenDelimiter(ce, body.op1);
-
-  // If a sequence, return as is
-  if (body.head === 'Sequence') return body;
-
-  if (body.ops) return ce._fn('Tuple', body.ops);
-
-  return body;
 }

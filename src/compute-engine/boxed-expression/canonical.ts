@@ -4,7 +4,7 @@ import { canonicalMultiply } from '../library/arithmetic-multiply';
 import { canonicalPower } from '../library/arithmetic-power';
 import { canonicalInvisibleOperator } from '../library/core';
 import { BoxedExpression, CanonicalOptions } from '../public';
-import { flattenDelimiter, flattenOps } from '../symbolic/flatten';
+import { flattenOps } from '../symbolic/flatten';
 import { BoxedFunction } from './boxed-function';
 import { canonicalOrder } from './order';
 
@@ -57,31 +57,37 @@ export function canonicalForm(
   return expr;
 }
 
+/**
+ * Apply the "Flatten" form to the expression:
+ * - remove delimiters
+ * - flatten associative functions
+ *
+ * This function is recursive.
+ */
 function flattenForm(expr: BoxedExpression) {
-  if (!expr.ops) return expr;
+  if (!expr.head) return expr;
 
-  //
-  // Recursively visit all sub-expressions
-  //
-  let ops = expr.ops.map(flattenForm);
+  if (!expr.ops || expr.nops === 0) return expr;
 
-  //
-  // Flatten any delimiters
-  //
-  if (expr.head === 'Delimiter')
-    ops = [flattenDelimiter(expr.engine, expr.op1)];
+  if (expr.head === 'Delimiter') return flattenForm(expr.op1);
 
   //
   // Now, flatten any associative function
   //
+
   const ce = expr.engine;
+
   let isAssociative = expr.head === 'Add' || expr.head === 'Multiply';
   if (!isAssociative) {
     const def = ce.lookupFunction(expr.head);
     if (def?.associative) isAssociative = true;
   }
+
   if (isAssociative && typeof expr.head === 'string')
-    expr = new BoxedFunction(ce, expr.head, flattenOps(ops, expr.head));
+    return ce.function(
+      expr.head,
+      flattenOps(expr.ops.map(flattenForm), expr.head)
+    );
 
   return expr;
 }
