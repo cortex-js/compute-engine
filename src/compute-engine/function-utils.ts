@@ -188,7 +188,11 @@ function makeLambda(
 
   const fnScope = fn.scope!;
 
-  if (params.length === 0)
+  // The function may have some arguments, but the body of the function does
+  // not reference them
+  if (!fnScope) return () => fn.N() ?? fn.evaluate();
+
+  if (params.length === 0) {
     return () => {
       const context = ce.swapScope(fnScope);
       ce.resetContext();
@@ -196,6 +200,7 @@ function makeLambda(
       ce.swapScope(context);
       return result;
     };
+  }
 
   return (args) => {
     if (ce.strict) {
