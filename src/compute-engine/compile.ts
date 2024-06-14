@@ -11,6 +11,7 @@ import {
   lcm,
   gammaln,
   limit,
+  monteCarloEstimate,
 } from './numerics/numeric';
 import { BoxedExpression } from './public';
 
@@ -77,6 +78,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Gamma: '_SYS.gamma',
   GCD: '_SYS.gcd',
   // Math.hypot
+  Integrate: (args, compile) => compileIntegrate(args, compile),
   LCM: '_SYS.lcm',
   Limit: (args, compile) =>
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
@@ -270,12 +272,13 @@ export type CompileTarget = {
  * a custom scope for "global" functions. */
 export class ComputeEngineFunction extends Function {
   private sys = {
+    chop: chop,
     factorial: factorial,
     gamma: gamma,
-    lngamma: gammaln,
     gcd: gcd,
+    integrate: monteCarloEstimate,
     lcm: lcm,
-    chop: chop,
+    lngamma: gammaln,
     limit: limit,
   };
   constructor(body) {
@@ -451,7 +454,7 @@ function compileExpr(
         (expr) => compile(expr, target)
       )})`;
     }
-    return fn(args, (expr) => compile(expr, target));
+    return fn(args, (expr) => compile(expr, target), target);
   }
 
   if (args === null) return `${fn}()`;
@@ -583,4 +586,14 @@ function rndVar(): string {
   // Return a random variable name made up of a single underscore
   // followed by some digits and letters
   return `_${Math.random().toString(36).substring(2)}`;
+}
+
+function compileIntegrate(args, _, target: CompileTarget): string {
+  const [index, lower, upper] = normalizeIndexingSet(args[1]);
+  const f = compile(args[0], {
+    ...target,
+    var: (id) => (id === index ? id : target.var(id)),
+  });
+
+  return `_SYS.integrate((${index}) => (${f}), ${lower}, ${upper})`;
 }
