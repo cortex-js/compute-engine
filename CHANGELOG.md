@@ -122,6 +122,8 @@
 
 ### Issues Resolved
 
+- **#165** More aggressive simplification of expressions with exponent greater
+  than 3.
 - Fixed canonical form of `e^x^2`, and more generally apply power rule in more
   cases.
 - Added missing Sech and Csch functions.

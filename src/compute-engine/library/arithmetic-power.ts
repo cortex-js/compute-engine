@@ -316,7 +316,7 @@ export function processPower(
     const r = asRational(exponent);
     if (r) {
       const [n, d] = [machineNumerator(r), machineDenominator(r)];
-      if ((n === 1 || n === -1) && (d === 2 || d === 3)) {
+      if ((n === 1 || n === -1) && (d % 2 === 0 || d === 3)) {
         if (bignumPreferred(ce) || base.numericValue instanceof Decimal) {
           const bigBase = asBigint(base)!;
           if (d % 2 === 0 && bigBase < 0 && !complexAllowed(ce)) return ce.NaN;
