@@ -122,22 +122,20 @@
 
 ### Issues Resolved
 
-- **#165** More aggressive simplification of expressions with exponent greater
-  than 3.
-- Fixed canonical form of `e^x^2`, and more generally apply power rule in more
-  cases.
-- Added missing Sech and Csch functions.
-- The digit grouping serializing would place the separator in the wrong place
-  for some numbers.
-- The `avoidExponentsInRange` formating option would not always avoid exponents
-  in the specified range.
 - **#173** Parsing `1++2` would result in an expression with a `PreIncrement`
   function. It is now correctly parsed as `["Add", 1, 2]`.
+- **#161** Power expressions would not be processed when their argument was a
+  Divide expression.
+- **#165** More aggressive simplification of expressions with exponent greater
+  than 3.
 - **#169** Calculating a constant integral (and integral that did not depend on
   the variable) would result in a runtime error.
 - **#164** Negative mixed fractions (e.g. `-1\frac23`) are now parsed correctly.
 - **#162** Numeric evaluation of expressions with large exponents could result
   in machine precision numbers instead of bignum numbers.
+- **#154** In some cases, parsing implicit argument of trig function return more
+  natural results, for example `\cos a \sin b` is now parsed as
+  `(\cos a)(\sin b)` and not `\cos (a \sin b)`.
 - **#147** The associativity of some operators, including `/` was not applied
   correctly, resulting in unexpected results. For example, `1/2/3` would be
   parsed as `["Divide", 1, ["Divide", 2, 3]]` instead of
@@ -147,9 +145,13 @@
   variable and that the expression is a product.
 - **#145** The expression `["Or", "False", "False"]`, that is when all the
   arguments are `False`, is now evaluates to `False`.
-- **#154** In some cases, parsing implicit argument of trig function return more
-  natural results, for example `\cos a \sin b` is now parsed as
-  `(\cos a)(\sin b)` and not `\cos (a \sin b)`.
+- Fixed canonical form of `e^x^2`, and more generally apply power rule in more
+  cases.
+- Added missing Sech and Csch functions.
+- The digit grouping serializing would place the separator in the wrong place
+  for some numbers.
+- The `avoidExponentsInRange` formating option would not always avoid exponents
+  in the specified range.
 
 ## 0.24.0 _2024-02-23_
 

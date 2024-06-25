@@ -251,6 +251,15 @@ export function processPower(
     return result;
   }
 
+  if (base.head === 'Divide') {
+    return ce.function('Divide', [
+      processPower(ce, base.op1, exponent, mode) ??
+        ce._fn('Power', [base.op1, exponent]),
+      processPower(ce, base.op2, exponent, mode) ??
+        ce._fn('Power', [base.op2, exponent]),
+    ]);
+  }
+
   if (base.head === 'Multiply') {
     let c: Rational = bignumPreferred(ce) ? [BigInt(1), BigInt(1)] : [1, 1];
     let sqrt = c;
