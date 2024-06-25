@@ -47,8 +47,7 @@ export function asCoefficient(
     const rest: BoxedExpression[] = [];
     let coef: Rational = [1, 1];
     for (const arg of expr.ops!) {
-      // const r = asApproximateRational(arg);
-      const r = asRational(arg);
+      const r = asApproximateRational(arg);
       if (r) coef = mul(coef, r);
       else rest.push(arg);
     }

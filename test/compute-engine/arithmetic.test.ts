@@ -135,6 +135,13 @@ describe('ADD', () => {
 });
 
 describe('SUBTRACT', () => {
+  test(`Subtract rational and float`, () =>
+    expect(
+      ce
+        .box(['Subtract', ['Multiply', 0.5, 'x'], ['Divide', 'x', 2]])
+        .evaluate()
+    ).toMatchInlineSnapshot(`0`));
+
   test(`Subtract`, () =>
     expect(ce.box(['Subtract', 2.5]).evaluate()).toMatchSnapshot());
   test(`Subtract`, () =>

@@ -8,6 +8,8 @@ import { bignumPreferred } from '../boxed-expression/utils';
 import { applyCoefficient } from '../boxed-expression/factor';
 import {
   Rational,
+  isBigRational,
+  isMachineRational,
   isRational,
   isRationalNegativeOne,
   isRationalOne,
@@ -175,8 +177,9 @@ export class Terms {
       this.terms.push({ coef: [1, 1], term: ce.number(rational) });
   }
 
-  asExpression(): BoxedExpression {
+  asExpression(options: { exact: boolean }): BoxedExpression {
     const ce = this.engine;
+    const { exact } = options;
 
     const terms = this.terms.filter(
       ({ coef, term }) => !isRationalZero(coef) && !term.isZero
@@ -188,12 +191,26 @@ export class Terms {
       const { coef, term } = terms[0];
       if (isRationalOne(coef)) return term;
       if (isRationalNegativeOne(coef)) return ce.neg(term);
-      return ce.mul(ce.number(coef), term);
+      let c: number | Rational | Decimal = coef;
+      if (!exact) {
+        if (isMachineRational(coef)) c = coef[0] / coef[1];
+        else if (isBigRational(coef))
+          c = ce.bignum(coef[0]).div(ce.bignum(coef[1]));
+      }
+      return ce.mul(ce.number(c), term);
     }
 
     return ce.function(
       'Add',
-      terms.map(({ coef, term }) => ce.mul(ce.number(coef), term))
+      terms.map(({ coef, term }) => {
+        let c: number | Rational | Decimal = coef;
+        if (!exact) {
+          if (isMachineRational(coef)) c = coef[0] / coef[1];
+          else if (isBigRational(coef))
+            c = ce.bignum(coef[0]).div(ce.bignum(coef[1]));
+        }
+        return ce.mul(ce.number(c), term);
+      })
     );
   }
 }

@@ -79,7 +79,7 @@ export function simplifyAdd(
     terms.add(arg);
   }
   terms.reduceNumbers({ exact: true });
-  return terms.asExpression();
+  return terms.asExpression({ exact: true });
 
   // const sum = new Sum(ce);
   // for (let arg of args) {
@@ -129,7 +129,7 @@ export function evalAdd(
   const terms = new Terms(ce, ops);
   terms.reduceNumbers({ exact: mode !== 'N' });
 
-  return terms.asExpression();
+  return terms.asExpression({ exact: mode !== 'N' });
 
   // return new Sum(ce, ops).asExpression(mode === 'N' ? 'numeric' : 'expression');
 }
