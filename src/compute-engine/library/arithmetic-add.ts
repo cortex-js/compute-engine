@@ -127,8 +127,7 @@ export function evalAdd(
   else ops = ops.map((x) => x.evaluate());
 
   const terms = new Terms(ce, ops);
-  if (mode === 'N') terms.reduceNumbers();
-  else terms.reduceNumbers({ exact: true });
+  terms.reduceNumbers({ exact: mode !== 'N' });
 
   return terms.asExpression();
 

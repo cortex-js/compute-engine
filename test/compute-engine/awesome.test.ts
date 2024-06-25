@@ -400,7 +400,8 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       ]
       simplify  = [
         "Multiply",
-        ["Power", ["Divide", "n", "ExponentialE"], "n"],
+        ["Power", "n", "n"],
+        ["Exp", ["Negate", "n"]],
         [
           "Root",
           [
@@ -417,14 +418,11 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       N-auto    = [
         "Multiply",
         "1.772453850905516027298167483341145182797549456122387128213807789852911284591032181374950656738544665",
+        ["Power", "n", "n"],
         [
           "Power",
-          [
-            "Divide",
-            "n",
-            "2.718281828459045235360287471352662497757247093699959574966967627724076630353547594571382178525166427"
-          ],
-          "n"
+          "2.718281828459045235360287471352662497757247093699959574966967627724076630353547594571382178525166427",
+          ["Negate", "n"]
         ],
         [
           "Power",
@@ -441,7 +439,8 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
       N-mach    = [
         "Multiply",
         1.7724538509055159,
-        ["Power", ["Divide", "n", 2.718281828459045], "n"],
+        ["Power", "n", "n"],
+        ["Power", 2.718281828459045, ["Negate", "n"]],
         [
           "Power",
           [

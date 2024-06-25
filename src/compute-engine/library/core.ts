@@ -782,11 +782,9 @@ export function canonicalInvisibleOperator(
   ce: IComputeEngine,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | null {
-  ops = flattenSequence(canonical(ops));
-
   if (ops.length === 0) return null;
   const lhs = ops[0];
-  if (ops.length === 1) return lhs;
+  if (ops.length === 1) return lhs.canonical;
 
   if (ops.length === 2) {
     //
@@ -807,10 +805,10 @@ export function canonicalInvisibleOperator(
           Number.isInteger(n) &&
           Number.isInteger(d)
         ) {
-          let frac = rhs;
+          let frac = rhs.canonical;
           if (lhsNumber < 0) frac = ce.neg(frac);
 
-          return ce._fn('Add', [lhs, frac]);
+          return ce._fn('Add', [lhs.canonical, frac]);
         }
       }
     }
@@ -853,6 +851,9 @@ export function canonicalInvisibleOperator(
       }
     }
   }
+
+  // Only call canonical here, because it will bind (auto-declare) the arguments
+  ops = flattenSequence(canonical(ops));
 
   //
   // Is it an invisible multiplication?

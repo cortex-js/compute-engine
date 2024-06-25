@@ -15,6 +15,7 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
     expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Power", ["Divide", "x", 2], 2]]
       canonical = ["Cos", ["Square", ["Divide", "x", 2]]]
+      simplify  = ["Cos", ["Divide", ["Square", "x"], 4]]
     `));
 });
 

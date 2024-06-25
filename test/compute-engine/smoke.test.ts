@@ -823,7 +823,7 @@ describe('CANONICALIZATION invisible operators', () => {
   test(`'3\\frac18 // invisible add`, () =>
     expect(canonicalToJson('3\\frac18')).toMatchInlineSnapshot(`
       [
-        Multiply,
+        Add,
         3,
         [
           Rational,

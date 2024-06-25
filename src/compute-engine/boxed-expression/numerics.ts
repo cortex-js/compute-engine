@@ -10,6 +10,7 @@ import {
   isRationalOne,
   neg,
   pow,
+  rationalize,
   sqrt,
 } from '../numerics/rationals';
 import { BoxedExpression } from './public';
@@ -46,6 +47,7 @@ export function asCoefficient(
     const rest: BoxedExpression[] = [];
     let coef: Rational = [1, 1];
     for (const arg of expr.ops!) {
+      // const r = asApproximateRational(arg);
       const r = asRational(arg);
       if (r) coef = mul(coef, r);
       else rest.push(arg);
@@ -134,6 +136,18 @@ export function asRational(expr: BoxedExpression): Rational | undefined {
   }
   if (num instanceof Decimal && num.isInteger())
     return [bigint(num), BigInt(1)];
+  return undefined;
+}
+
+export function asApproximateRational(
+  expr: BoxedExpression
+): Rational | undefined {
+  let result: number | Rational | undefined = asRational(expr);
+  if (result) return result;
+  const f = asFloat(expr);
+  if (f === null) return undefined;
+  result = rationalize(f);
+  if (isRational(result)) return result;
   return undefined;
 }
 

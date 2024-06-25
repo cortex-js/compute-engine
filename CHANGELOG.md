@@ -133,6 +133,9 @@
 - **#164** Negative mixed fractions (e.g. `-1\frac23`) are now parsed correctly.
 - **#162** Numeric evaluation of expressions with large exponents could result
   in machine precision numbers instead of bignum numbers.
+- **#155** The expression
+  `["Subtract", ["Multiply", 0.5, "x"], ["Divide", "x", 2]]` will now evaluate
+  to `0`.
 - **#154** In some cases, parsing implicit argument of trig function return more
   natural results, for example `\cos a \sin b` is now parsed as
   `(\cos a)(\sin b)` and not `\cos (a \sin b)`.

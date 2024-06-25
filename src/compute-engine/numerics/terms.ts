@@ -58,7 +58,7 @@ export class Terms {
   }
 
   /** If `exact` is true, keep exact numbers */
-  reduceNumbers({ exact }: { exact: boolean } = { exact: true }): void {
+  reduceNumbers({ exact }: { exact: boolean }): void {
     const ce = this.engine;
     let terms = this.terms;
     this.terms = [];
@@ -119,6 +119,11 @@ export class Terms {
       !bignum.isInteger() ||
       !Number.isInteger(imaginary)
     ) {
+      if (!isRationalZero(rational)) {
+        bignum = bignum.add(ce.bignum(rational[0]).div(ce.bignum(rational[1])));
+        rational = [0, 1] as Rational;
+      }
+
       if (!bignum.isZero() && bignumPreferred(ce)) {
         bignum = bignum.add(real);
         bignum = bignum.add(ce.bignum(rational[0]).div(ce.bignum(rational[1])));
