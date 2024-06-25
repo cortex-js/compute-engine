@@ -1,5 +1,5 @@
+import { isInequality } from './boxed-expression/utils';
 import { signatureToDomain } from './domain-utils';
-import { isInequality } from './library/relational-operator';
 import {
   AssumeResult,
   BoxedExpression,

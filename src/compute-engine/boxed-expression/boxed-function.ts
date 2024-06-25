@@ -9,12 +9,10 @@ import {
   MathJsonIdentifier,
 } from '../../math-json/math-json-format';
 import {
-  BoxedExpression,
   BoxedFunctionDefinition,
   IComputeEngine,
   NOptions,
   BoxedRuleSet,
-  SemiBoxedExpression,
   SimplifyOptions,
   Substitution,
   ReplaceOptions,
@@ -35,14 +33,11 @@ import { boxRules, replace } from '../rules';
 import { SIMPLIFY_RULES } from '../simplify-rules';
 import { DEFAULT_COMPLEXITY, order } from './order';
 import {
-  serializeJsonCanonicalFunction,
-  serializeJsonFunction,
-} from './serialize';
-import {
   complexAllowed,
   hashCode,
   bignumPreferred,
   normalizedUnknownsForSolve,
+  isRelationalOperator,
 } from './utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { checkNumericArgs, adjustArguments } from './validate';
@@ -56,9 +51,9 @@ import { canonicalPower, isSqrt } from '../library/arithmetic-power';
 import { canonicalNegate } from '../symbolic/negate';
 import { canonicalDivide } from '../library/arithmetic-divide';
 import { canonicalMultiply } from '../library/arithmetic-multiply';
-import { signDiff } from '../numerics/numeric';
-import { match } from './boxed-patterns';
-import { isRelationalOperator } from '../latex-syntax/dictionary/definitions-relational-operators';
+import { BoxedExpression, SemiBoxedExpression } from './public';
+import { signDiff } from './numerics';
+import { match } from './match';
 
 /**
  * A boxed function represent an expression that can be
@@ -203,29 +198,11 @@ export class BoxedFunction extends _BoxedExpression {
   }
 
   get json(): Expression {
-    // If this expression is canonical, apply some transformations to the
-    // JSON serialization to "reverse" some of the effects of canonicalization.
-    if (this.isValid && this._canonical === this)
-      return serializeJsonCanonicalFunction(
-        this.engine,
-        this._head,
-        this._ops,
-        { latex: this._latex, wikidata: this.wikidata }
-      );
-    return serializeJsonFunction(this.engine, this._head, this._ops, {
-      latex: this._latex,
-      wikidata: this.wikidata,
-    });
-  }
-
-  // The JSON representation of the expression, without any effects
-  // of canonicalization.
-  get rawJson(): Expression {
     const head =
       typeof this._head === 'string'
         ? this._head
-        : (this._head.rawJson as MathJsonIdentifier | MathJsonFunction);
-    return [head, ...this.ops.map((x) => x.rawJson)];
+        : (this._head.json as MathJsonIdentifier | MathJsonFunction);
+    return [head, ...this.ops.map((x) => x.json)];
   }
 
   get scope(): RuntimeScope | null {
@@ -521,7 +498,7 @@ export class BoxedFunction extends _BoxedExpression {
     if (recursive) {
       expr = expand(this);
       if (expr !== null) {
-        expr = expr.simplify({ ...options, recursive: false });
+        expr = expr!.simplify({ ...options, recursive: false });
         return cheapest(this, expr);
       }
     }

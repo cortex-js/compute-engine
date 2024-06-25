@@ -1,79 +1,31 @@
 import type { Expression } from '../src/math-json/math-json-format';
 import { ParsingDiagnostic } from '../src/point-free-parser/parsers';
-import {
-  BoxedExpression,
-  ComputeEngine,
-  SemiBoxedExpression,
-} from '../src/compute-engine';
+import { ComputeEngine, SemiBoxedExpression } from '../src/compute-engine';
+
 import { parseCortex } from '../src/cortex';
-import { LatexSyntax } from '../src/compute-engine/latex-syntax/latex-syntax';
 import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
+
+const MAX_LINE_LENGTH = 72;
 
 let errors: string[] = [];
 
 export const engine = new ComputeEngine();
 engine.precision = 100; // Some arithmetic test cases assume a precision of at least 100
-// engine.jsonSerializationOptions.precision = 32;
 
 engine.assume(['Element', 'f', 'Functions']);
 
-const rawLatex = new LatexSyntax({
-  computeEngine: engine,
-  parseArgumentsOfUnknownLatexCommands: false,
-  parseUnknownIdentifier: () => 'symbol',
-  dictionary: [],
-});
-
-export function boxToJson(expr: Expression): Expression {
-  return engine.box(expr).json;
-}
-
-export function parseToJson(latex: string): Expression {
-  return engine.parse(latex, { canonical: false }).json;
-}
-
-export function canonicalToJson(latex: string): Expression {
-  return engine.parse(latex).json;
-}
-
-export function evaluateToJson(latex: string): Expression {
-  return engine.parse(latex).evaluate()?.json ?? 'NULL';
-}
-
-export function simplifyToJson(latex: string): Expression {
-  return engine.parse(latex).simplify().json;
-}
-
-export function NToJson(latex: string): Expression {
-  return engine.parse(latex).N()?.json ?? `NULL`;
-}
-
-export function expand(latex: string): Expression {
-  const expr = engine.parse(latex);
-  return engine.box(['Expand', expr]).evaluate().json;
-}
-
-export function latexToJson(expr: Expression | undefined | null): Expression {
-  if (expr === undefined) return 'UNDEFINED';
-  if (expr === null) return 'NULL';
-
-  errors = [];
-  let result = '';
-  try {
-    result = engine.box(expr).latex ?? 'NULL';
-  } catch (e) {
-    errors.push(e.toString());
-  }
-  if (errors.length !== 0) return ['Error', errors.join('\n'), result];
-  return result;
-}
-
-const MAX_LINE_LENGTH = 72;
-
-function exprToStringRecursive(expr, start) {
+function exprToStringRecursive(expr: SemiBoxedExpression, start: number) {
   const indent = ' '.repeat(start);
 
   if (start > 50) return indent + '...';
+
+  if (expr === null) return 'null';
+  if (expr instanceof _BoxedExpression) {
+    return exprToStringRecursive(
+      engine.box(expr, { canonical: false }).toMathJson(),
+      start
+    );
+  }
 
   if (Array.isArray(expr)) {
     const elements = expr.map((x) => exprToStringRecursive(x, start + 2));
@@ -81,21 +33,18 @@ function exprToStringRecursive(expr, start) {
     if (start + result.length < MAX_LINE_LENGTH) return result;
     return `[\n${indent}  ${elements.join(`,\n${indent}  `)}\n${indent}]`;
   }
-  if (expr === null) return 'null';
-  if (expr instanceof _BoxedExpression)
-    return exprToStringRecursive(expr.json, start);
   if (typeof expr === 'object') {
     const elements = {};
 
     for (const key of Object.keys(expr)) {
       if (expr[key] instanceof _BoxedExpression) {
-        elements[key] = exprToStringRecursive(expr[key].json, start + 2);
+        elements[key] = exprToStringRecursive(expr[key], start + 2);
       } else if (expr[key] === null) {
         elements[key] = 'null';
       } else if (expr[key] === undefined) {
         elements[key] = 'undefined';
       } else if (typeof expr[key] === 'object' && 'json' in expr[key]) {
-        elements[key] = exprToStringRecursive(expr[key].json, start + 2);
+        elements[key] = exprToStringRecursive(expr[key], start + 2);
       } else elements[key] = exprToStringRecursive(expr[key], start + 2);
     }
 
@@ -119,18 +68,16 @@ function exprToStringRecursive(expr, start) {
   return JSON.stringify(expr, null, 2);
 }
 
-export function exprToString(expr: BoxedExpression | null): string {
+export function exprToString(
+  expr: SemiBoxedExpression | null | undefined
+): string {
   if (!expr) return '';
-  return exprToStringRecursive(expr.json, 0);
+  return exprToStringRecursive(expr, 0);
 }
 
-export function box(expr: Expression): string {
-  return exprToString(engine.box(expr));
-}
-
-export function parse(latex: string): string {
-  return exprToString(engine.parse(latex));
-}
+// export function parse(latex: string): string {
+//   return exprToString(engine.parse(latex));
+// }
 
 export function evaluate(latex: string): string {
   return exprToString(engine.parse(latex)?.evaluate());
@@ -140,42 +87,40 @@ export function N(latex: string): string {
   return exprToString(engine.parse(latex)?.N());
 }
 
-export function checkJson(inExpr: SemiBoxedExpression): string {
+export function simplify(latex: string): string {
+  return exprToString(engine.parse(latex)?.simplify());
+}
+
+export function checkJson(inExpr: SemiBoxedExpression | null): string {
+  if (!inExpr) return 'null';
   try {
     const precision = engine.precision;
-    const displayPrecision = engine.jsonSerializationOptions.precision;
     engine.numericMode = 'auto';
 
-    const boxed = printExpression(
-      engine.box(inExpr, { canonical: false }).json
-    );
+    const boxed = exprToString(engine.box(inExpr, { canonical: false }));
 
     const expr = engine.box(inExpr);
-    const canonical = printExpression(expr.json);
-    const simplify = printExpression(expr.simplify().json);
+    const canonical = exprToString(expr);
+    const simplify = exprToString(expr.simplify());
 
-    const evaluate = printExpression(expr.evaluate().json);
-    const numEvalAuto = printExpression(expr.N().json);
+    const evaluate = exprToString(expr.evaluate());
+    const numEvalAuto = exprToString(expr.N());
     engine.numericMode = 'bignum';
 
     engine.precision = precision;
-    engine.jsonSerializationOptions = { precision: displayPrecision };
-    const evalBignum = printExpression(engine.box(inExpr).evaluate().json);
-    const numEvalBignum = printExpression(engine.box(inExpr).N().json);
-
+    const evalBignum = exprToString(engine.box(inExpr).evaluate());
+    const numEvalBignum = exprToString(engine.box(inExpr).N());
+    exprToString;
     engine.numericMode = 'machine';
-    engine.jsonSerializationOptions = { precision: displayPrecision };
-    const evalMachine = printExpression(engine.box(inExpr).evaluate().json);
-    const numEvalMachine = printExpression(engine.box(inExpr).N().json);
+    const evalMachine = exprToString(engine.box(inExpr).evaluate());
+    const numEvalMachine = exprToString(engine.box(inExpr).N());
 
     engine.numericMode = 'complex';
-    engine.jsonSerializationOptions = { precision: displayPrecision };
-    const evalComplex = printExpression(engine.box(inExpr).evaluate().json);
-    const numEvalComplex = printExpression(engine.box(inExpr).N().json);
+    const evalComplex = exprToString(engine.box(inExpr).evaluate());
+    const numEvalComplex = exprToString(engine.box(inExpr).N());
 
     engine.numericMode = 'auto';
     engine.precision = precision;
-    engine.jsonSerializationOptions = { precision: displayPrecision };
 
     if (
       boxed === canonical &&
@@ -224,9 +169,7 @@ export function checkJson(inExpr: SemiBoxedExpression): string {
 }
 
 export function check(latex: string): string {
-  const boxed = printExpression(engine.parse(latex, { canonical: false }).json);
-
-  return 'latex     = ' + boxed + '\n' + checkJson(engine.parse(latex).json);
+  return checkJson(engine.parse(latex, { canonical: false }));
 }
 
 export function latex(expr: Expression | undefined | null): string {
@@ -251,61 +194,23 @@ export function expressionError(latex: string): string | string[] {
   return errors.length === 1 ? errors[0] : errors;
 }
 
-export function rawExpression(latex: string): Expression {
-  errors = [];
-  return JSON.stringify(
-    engine.box(rawLatex.parse(latex), { canonical: false }).json,
-    null,
-    2
-  );
-}
-
-export function printExpression(expr: Expression): string {
-  return exprToStringRecursive(expr, 0);
-}
-
-// beforeEach(() => {
-//   jest.spyOn(console, 'assert').mockImplementation((assertion) => {
-//     if (!assertion) debugger;
-//   });
-//   jest.spyOn(console, 'log').mockImplementation(() => {
-//     debugger;
-//   });
-//   jest.spyOn(console, 'warn').mockImplementation(() => {
-//     debugger;
-//   });
-//   jest.spyOn(console, 'info').mockImplementation(() => {
-//     debugger;
-//   });
-// });
-expect.addSnapshotSerializer({
-  // test: (val): boolean => Array.isArray(val) || typeof val === 'object',
-  test: (_val): boolean => true,
-
-  serialize: (val, _config, _indentation, _depth, _refs, _printer): string => {
-    if (val instanceof _BoxedExpression) return printExpression(val.json);
-    return printExpression(val);
-  },
-});
-
-function isValidJSONNumber(num: string): string | number {
-  if (typeof num === 'string') {
-    const val = Number(num);
-    if (num[0] === '+') num = num.slice(1);
-    if (val.toString() === num) {
-      // If the number roundtrips, it can be represented by a
-      // JavaScript number
-      // However, NaN and Infinity cannot be represented by JSON
-      if (isNaN(val)) return 'NaN';
-      if (!isFinite(val) && val < 0) return '-Infinity';
-      if (!isFinite(val) && val > 0) return '+Infinity';
-      return val;
-    }
+function validJSONNumber(num: string | number) {
+  if (typeof num === 'number') return num;
+  const val = Number(num);
+  if (num[0] === '+') num = num.slice(1);
+  if (val.toString() === num) {
+    // If the number roundtrips, it can be represented by a
+    // JavaScript number
+    // However, NaN and Infinity cannot be represented by JSON
+    if (isNaN(val)) return 'NaN';
+    if (!isFinite(val) && val < 0) return 'NegativeInfinity';
+    if (!isFinite(val) && val > 0) return 'PositiveInfinity';
+    return val;
   }
-  return num;
+  return { num };
 }
 
-export function strip(expr: Expression): Expression | null {
+function strip(expr: Expression): Expression | null {
   if (typeof expr === 'number') return expr;
   if (typeof expr === 'string') {
     if (expr[0] === "'" && expr[expr.length - 1] === "'") {
@@ -317,17 +222,14 @@ export function strip(expr: Expression): Expression | null {
     return expr.map((x) => strip(x ?? 'Nothing') ?? 'Nothing') as Expression;
 
   if (typeof expr === 'object') {
-    if ('num' in expr) {
-      const val = isValidJSONNumber(expr.num);
-      if (typeof val === 'number') return val;
-      return { num: val };
-    } else if ('sym' in expr) {
-      return expr.sym;
-    } else if ('fn' in expr) {
+    if ('num' in expr) return validJSONNumber(expr.num);
+    if ('sym' in expr) return expr.sym;
+    if ('fn' in expr) {
       return expr.fn.map(
         (x) => strip(x ?? 'Nothing') ?? 'Nothing'
       ) as Expression;
-    } else if ('dict' in expr) {
+    }
+    if ('dict' in expr) {
       return {
         dict: Object.fromEntries(
           Object.entries(expr.dict).map((keyValue) => {
@@ -335,17 +237,17 @@ export function strip(expr: Expression): Expression | null {
           })
         ),
       };
-    } else if ('str' in expr) {
-      return { str: expr.str };
-    } else {
-      console.log('Unexpected object literal as an Expression');
     }
+
+    if ('str' in expr) return { str: expr.str };
+
+    console.log('Unexpected object literal as an Expression');
   }
 
   return null;
 }
 
-export function formatError(errors: ParsingDiagnostic[]): Expression {
+function formatError(errors: ParsingDiagnostic[]): Expression {
   return [
     'Error',
     [
@@ -468,3 +370,37 @@ function emoji(a, b): string {
   if (a < b) return '\u001b[32m\u25BC\u001b[0m'; // green up triangle
   return '\u001b[31m\u25B2\u001b[0m';
 }
+
+//
+// Custom serializers for Jest
+//
+
+// beforeEach(() => {
+//   jest.spyOn(console, 'assert').mockImplementation((assertion) => {
+//     if (!assertion) debugger;
+//   });
+//   jest.spyOn(console, 'log').mockImplementation(() => {
+//     debugger;
+//   });
+//   jest.spyOn(console, 'warn').mockImplementation(() => {
+//     debugger;
+//   });
+//   jest.spyOn(console, 'info').mockImplementation(() => {
+//     debugger;
+//   });
+// });
+
+// Serializer for Boxed Expressions
+expect.addSnapshotSerializer({
+  // Is the value to serialize an instance of the BoxedExpression class?
+  test: (val): boolean => val && val instanceof _BoxedExpression,
+
+  serialize: (val, _config, _indentation, _depth, _refs, _printer): string =>
+    exprToString(val),
+});
+
+// Serializer for strings: output without quotes
+expect.addSnapshotSerializer({
+  test: (val): boolean => typeof val === 'string',
+  serialize: (val) => val,
+});

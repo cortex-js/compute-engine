@@ -1,10 +1,8 @@
-import { ComputeEngine } from '../../src/compute-engine';
-import { parse } from '../utils';
-export const ce = new ComputeEngine();
+import { engine as ce } from '../utils';
 
-// function parse(s: string): Expression {
-//   return parse(s).json;
-// }
+function parse(s: string) {
+  return ce.parse(s);
+}
 
 describe('basic', () => {
   test('LaTex Syntax Errors', () => {

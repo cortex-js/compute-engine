@@ -1,12 +1,15 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
-import { isMachineRational, isBigRational } from '../numerics/rationals';
+import {
+  isMachineRational,
+  isBigRational,
+  Rational,
+} from '../numerics/rationals';
 import {
   BoxedExpression,
   Hold,
   IComputeEngine,
-  Rational,
   SemiBoxedExpression,
 } from '../public';
 import { _BoxedExpression } from '../boxed-expression/abstract-boxed-expression';

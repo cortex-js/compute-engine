@@ -17,9 +17,8 @@ import {
   BoxedSubstitution,
   Rule,
   CanonicalOptions,
-} from '../public';
+} from './public';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { serializeJsonFunction } from './serialize';
 import { hashCode, isBoxedExpression } from './utils';
 import { isWildcard, wildcardName } from './boxed-patterns';
 
@@ -111,30 +110,12 @@ export class BoxedDictionary extends _BoxedExpression {
   }
 
   get json(): Expression {
-    // Is dictionary shorthand notation allowed?
-    if (
-      this.engine.jsonSerializationOptions.shorthands.includes('dictionary')
-    ) {
-      const dict = {};
-      for (const key of this._value.keys())
-        dict[key] = this._value.get(key)!.json;
-      return { dict };
-    }
-
-    // The dictionary shorthand is not allowed, output it as a "Dictionary"
-    // function
+    const ce = this.engine;
     const kvs: BoxedExpression[] = [];
     for (const key of this._value.keys())
-      kvs.push(
-        this.engine._fn('KeyValuePair', [
-          this.engine.string(key),
-          this._value.get(key)!,
-        ])
-      );
+      kvs.push(ce._fn('KeyValuePair', [ce.string(key), this._value.get(key)!]));
 
-    return serializeJsonFunction(this.engine, 'Dictionary', kvs, {
-      latex: this._latex,
-    });
+    return ['Dictionary', ...kvs.map((x) => x.json)];
   }
 
   /** Structural equality */
@@ -163,7 +144,8 @@ export class BoxedDictionary extends _BoxedExpression {
     if (!isBoxedExpression(pattern))
       pattern = this.engine.box(pattern, { canonical: false });
 
-    if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
+    if (isWildcard(pattern as BoxedExpression))
+      return { [wildcardName(pattern)!]: this };
 
     if (!(pattern instanceof BoxedDictionary)) return null;
 

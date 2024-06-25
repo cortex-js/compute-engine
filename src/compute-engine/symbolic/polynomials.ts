@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
-import { asSmallInteger } from '../numerics/numeric';
 import { BoxedExpression, SemiBoxedExpression } from '../public';
+import { asSmallInteger } from '../boxed-expression/numerics';
 
 /**
  * Coefficient of a univariate (single variable) polynomial.

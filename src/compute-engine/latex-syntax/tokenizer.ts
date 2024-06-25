@@ -300,7 +300,7 @@ function expand(lex: Tokenizer, args: string[]): Token[] {
  * @param s - A string of LaTeX. It can include comments (with the `%`
  * marker) and multiple lines.
  */
-export function tokenize(s: string, args: string[]): Token[] {
+export function tokenize(s: string, args: string[] = []): Token[] {
   // Merge multiple lines into one, and remove comments
   const lines = s.toString().split(/\r?\n/);
   let stream = '';
@@ -324,30 +324,31 @@ export function tokenize(s: string, args: string[]): Token[] {
 }
 
 export function countTokens(s: string): number {
-  return tokenize(s, []).length;
+  return tokenize(s).length;
 }
 
 export function joinLatex(segments: Iterable<string>): string {
   let sep = '';
   let result = '';
   for (const segment of segments) {
-    if (segment) {
-      if (/[a-zA-Z*]/.test(segment[0])) {
-        // If the segment begins with a char that *could* be in a command
-        // name... insert a separator (if one was needed for the previous segment)
-        result += sep;
-      }
-      // If the segment ends in a command...
-      if (/\\[a-zA-Z]+\*?$/.test(segment)) {
-        // ... potentially add a space before the next segment
-        sep = ' ';
-      } else {
-        sep = '';
-      }
-      result += segment;
+    if (segment === undefined || segment === null) continue;
+    if (typeof segment === 'string') {
+      // If the segment begins with a char that *could* be in a command
+      // name... insert a separator (if one was needed for the previous segment)
+      if (/[a-zA-Z*]/.test(segment[0])) result += sep;
+
+      // If the segment ends in a command add a space before the next segment
+      if (/\\[a-zA-Z]+\*?$/.test(segment)) sep = ' ';
+      else sep = '';
     }
+    result += segment.toString();
   }
   return result;
+}
+
+export function supsub(c: '_' | '^', x: string): string {
+  if (/^[0-9]$/.test(x)) return `${c}${x}`;
+  return `${c}{${x}}`;
 }
 
 export function tokensToString(

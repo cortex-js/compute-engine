@@ -15,35 +15,35 @@ describe('Parsing environments', () => {
       '\\begin{pmatrix}[ll] a & b \\\\ c & d \\end{pmatrix}'
     );
     expect(result.toString()).toMatchInlineSnapshot(
-      `Matrix([[a,b],[c,d]], "()", "<<")`
+      `Matrix([[a,b],[c,d]], (), <<)`
     );
   });
 
   it('should parse a bmatrix', () => {
     const result = ce.parse('\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `Matrix([[a,b],[c,d]], "[]")`
+      `Matrix([[a,b],[c,d]], [])`
     );
   });
 
   it('should parse a Bmatrix', () => {
     const result = ce.parse('\\begin{Bmatrix} a & b \\\\ c & d \\end{Bmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `Matrix([[a,b],[c,d]], "{}")`
+      `Matrix([[a,b],[c,d]], {})`
     );
   });
 
   it('should parse a vmatrix', () => {
     const result = ce.parse('\\begin{vmatrix} a & b \\\\ c & d \\end{vmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `Matrix([[a,b],[c,d]], "||")`
+      `Matrix([[a,b],[c,d]], ||)`
     );
   });
 
   it('should parse a Vmatrix', () => {
     const result = ce.parse('\\begin{Vmatrix} a & b \\\\ c & d \\end{Vmatrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `Matrix([[a,b],[c,d]], "‖‖")`
+      `Matrix([[a,b],[c,d]], ‖‖)`
     );
   });
 
@@ -60,14 +60,14 @@ describe('Parsing environments', () => {
   it('should parse an array', () => {
     const result = ce.parse('\\begin{array}{cc} a & b \\\\ c & d \\end{array}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `Matrix([[a,b],[c,d]], "..", "==")`
+      `Matrix([[a,b],[c,d]], .., ==)`
     );
   });
 
   it('should parse a matrix environment', () => {
     const result = ce.parse('\\begin{matrix} a & b \\\\ c & d \\end{matrix}');
     expect(result.toString()).toMatchInlineSnapshot(
-      `Matrix([[a,b],[c,d]], "..")`
+      `Matrix([[a,b],[c,d]], ..)`
     );
   });
 
@@ -83,7 +83,7 @@ describe('Parsing environments', () => {
       '\\left\\lbrack\\begin{array}{cc} a & b \\\\ c & d \\end{array}\\right\\rbrack'
     );
     expect(result.toString()).toMatchInlineSnapshot(
-      `[Matrix([[a,b],[c,d]], "..", "==")]`
+      `[Matrix([[a,b],[c,d]], .., ==)]`
     );
   });
 });

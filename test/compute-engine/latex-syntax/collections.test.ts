@@ -1,4 +1,8 @@
-import { latex, parse } from '../../utils';
+import { latex, engine as ce } from '../../utils';
+
+function parse(s: string) {
+  return ce.parse(s);
+}
 
 describe('LIST PARSING', () => {
   test('Empty list', () => {

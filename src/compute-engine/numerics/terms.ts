@@ -1,20 +1,20 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 
-import { BoxedExpression, IComputeEngine, Rational } from '../public';
+import { BoxedExpression, IComputeEngine } from '../public';
 
 import { bignumPreferred } from '../boxed-expression/utils';
 
-import { applyCoefficient, asCoefficient } from './factor';
+import { applyCoefficient } from '../boxed-expression/factor';
 import {
-  add,
+  Rational,
   isRational,
   isRationalNegativeOne,
   isRationalOne,
   isRationalZero,
-  mul,
   neg,
 } from './rationals';
+import { add, asCoefficient, mul } from '../boxed-expression/numerics';
 
 export class Terms {
   private engine: IComputeEngine;

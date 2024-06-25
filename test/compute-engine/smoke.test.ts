@@ -14,39 +14,52 @@
  * - numerical evaluation
  */
 
-import {
-  BoxedExpression,
-  ComputeEngine,
-  DefaultEntry,
-  ExpressionParseHandler,
-  InfixEntry,
-  LatexDictionaryEntry,
-  Parser,
-  Rational,
-  Terminator,
-} from '../../src/compute-engine';
-import { primeFactors } from '../../src/compute-engine/numerics/numeric';
+import { ComputeEngine } from '../../src/compute-engine';
+import { add, mul } from '../../src/compute-engine/boxed-expression/numerics';
 import { primeFactors as bigPrimeFactors } from '../../src/compute-engine/numerics/numeric-bigint';
+import { primeFactors } from '../../src/compute-engine/numerics/primes';
 import {
-  mul,
-  add,
+  Rational,
   reducedRational,
 } from '../../src/compute-engine/numerics/rationals';
 import { Expression } from '../../src/math-json/math-json-format';
-import {
-  boxToJson,
-  canonicalToJson,
-  engine,
-  evaluateToJson,
-  expand,
-  NToJson,
-  parse,
-  parseToJson,
-  simplifyToJson,
-} from '../utils';
+import { engine, simplify } from '../utils';
 
 const ce = engine;
+
 // engine.jsonSerializationOptions.precision = 16;
+function parseToJson(latex: string): Expression {
+  return engine.parse(latex, { canonical: false }).json;
+}
+
+function canonicalToJson(latex: string): Expression {
+  return engine.parse(latex).json;
+}
+
+function evaluateToJson(latex: string): Expression {
+  return engine.parse(latex).evaluate()?.toMathJson() ?? 'NULL';
+}
+
+function NToJson(latex: string): Expression {
+  // toMathJson() produces a sugared expression, unlike .json
+  return engine.parse(latex).N().toMathJson({ fractionalDigits: 'max' });
+}
+
+function customCanonical(expr) {
+  if (typeof expr.value === 'number') {
+    if (expr.head === 'Divide' || expr.head === 'Rational') {
+      if (expr.engine.box(['GCD', expr.op1, expr.op2]).value !== 1) return expr;
+    }
+    return expr.engine.number(expr.value);
+  }
+
+  if (expr.ops)
+    return expr.engine.box([expr.head, ...expr.ops.map(customCanonical)], {
+      canonical: ['InvisibleOperator', 'Order', 'Flatten'],
+    });
+
+  return expr.canonical;
+}
 
 ///
 ///
@@ -92,7 +105,7 @@ console.log(ce.box(['Shape', 'C']).evaluate().toString());
 
 // Should distribute: prefer addition over multiplication
 const xp = ce.parse('a\\times(c+d)');
-console.info(xp.rawJson);
+console.info(xp.json);
 console.info(xp.latex);
 console.info(xp.simplify().toString());
 
@@ -107,8 +120,6 @@ slowEval();
 fastEval();
 turboEval();
 // perfTestRationals();
-engine.latexOptions.notation = 'engineering';
-engine.latexOptions.avoidExponentsInRange = null;
 
 const t1 = ce.parse('\\cos(5\\pi+k)');
 // Canonical should simplify argument to -π/+π range
@@ -343,13 +354,13 @@ describe('PARSING numbers', () => {
   test(`{ num: '-12n' }`, () => {
     // The `n` prefix is not necessary, but is supported for legacy reasons
     // (an earlier version of the MathJSON spec included it)
-    expect(boxToJson({ num: '-12n' })).toEqual(-12);
+    expect(ce.box({ num: '-12n' }).numericValue).toEqual(-12);
   });
   test(`-2+3-4`, () => {
-    expect(parse('-2+3-4')).toMatchInlineSnapshot(`["Add", -4, -2, 3]`);
+    expect(ce.parse('-2+3-4')).toMatchInlineSnapshot(`["Add", -4, -2, 3]`);
   });
   test(`-i`, () => {
-    expect(parse('-i')).toMatchInlineSnapshot(`["Negate", "ImaginaryUnit"]`);
+    expect(ce.parse('-i')).toMatchInlineSnapshot(`["Negate", "ImaginaryUnit"]`);
   });
 
   test(`3.424242334e4`, () =>
@@ -357,27 +368,34 @@ describe('PARSING numbers', () => {
 
   // Should not sum, loss of precision (very big intger + small integer)
   test(`1 + 1e199`, () =>
-    expect(parse('1 + 1e199')).toMatch('["Add", 1, 1e+199]'));
+    expect(ce.parse('1 + 1e199')).toMatchInlineSnapshot(`["Add", 1, 1e+199]`));
 
   test(`421.35e+1000`, () =>
-    expect(parse('421.35e+1000')).toMatch('4.2135e+1002'));
+    expect(ce.parse('421.35e+1000')).toMatchInlineSnapshot(`4.2135e+1002`));
 
   test(`\\frac34 + 1e199`, () =>
-    expect(parse('\\frac34 + 1e199')).toMatch(
+    expect(ce.parse('\\frac34 + 1e199')).toMatchInlineSnapshot(
       '["Add", ["Rational", 3, 4], 1e+199]'
     ));
 
   test(`-5-2-3 (non-canonical)`, () =>
-    expect(parse('-5-2-3')).toMatchInlineSnapshot(`["Add", -5, -3, -2]`));
+    expect(ce.parse('-5-2-3')).toMatchInlineSnapshot(`["Add", -5, -3, -2]`));
 
   test(`5+3+2 (non-canonical)`, () =>
-    expect(parseToJson('5+3+2')).toMatchObject(['Add', 5, 3, 2]));
+    expect(parseToJson('5+3+2')).toMatchInlineSnapshot(`
+      [
+        Add,
+        5,
+        3,
+        2,
+      ]
+    `));
 
   // From https://github.com/uellenberg/Logimat/tree/master/examples/nth-prime
 
   test('nth prime', () =>
     expect(
-      parse(
+      ce.parse(
         'p(n):=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
       )
     ).toMatchInlineSnapshot(`
@@ -497,16 +515,16 @@ describe('PARSING numbers', () => {
 });
 
 describe('PARSING symbols', () => {
-  test('x', () => expect(parse('x')).toMatch('x'));
-  test('\\pi', () => expect(parse('\\pi')).toMatch('Pi'));
+  test('x', () => expect(ce.parse('x')).toMatchInlineSnapshot('x'));
+  test('\\pi', () => expect(ce.parse('\\pi')).toMatchInlineSnapshot('Pi'));
   test('3\\pi', () => {
-    expect(parse('3\\pi')).toMatchInlineSnapshot(`["Multiply", 3, "Pi"]`);
+    expect(ce.parse('3\\pi')).toMatchInlineSnapshot(`["Multiply", 3, "Pi"]`);
   });
 });
 
 describe('PARSING functions', () => {
   test(`\\frac{-x}{-n}`, () => {
-    expect(parse('\\frac{-x}{-n}')).toMatchInlineSnapshot(
+    expect(ce.parse('\\frac{-x}{-n}')).toMatchInlineSnapshot(
       `["Divide", "x", "n"]`
     );
   });
@@ -519,20 +537,18 @@ describe('PARSING functions', () => {
 describe('SERIALIZING Incomplete expressions', () => {
   test(`['Multiply', 2, ['Rational', 1, 3]]`, () => {
     expect(
-      engine.serialize(['Multiply', 2, ['Rational', 1, 3]])
+      engine.box(['Multiply', 2, ['Rational', 1, 3]]).latex
     ).toMatchInlineSnapshot(`\\frac{2}{3}`);
   });
   test(`['Divide']`, () =>
-    expect(
-      ce.box(['Divide'], { canonical: false }).toJSON()
-    ).toMatchInlineSnapshot(`["Divide"]`));
+    expect(ce.box(['Divide'], { canonical: false })).toMatchInlineSnapshot(
+      `["Divide"]`
+    ));
   test(`['Power', undefined]`, () =>
     expect(
-      ce
-        .box(['Power', undefined as unknown as Expression], {
-          canonical: false,
-        })
-        .toJSON()
+      ce.box(['Power', undefined as unknown as Expression], {
+        canonical: false,
+      })
     ).toMatchInlineSnapshot(`["Power", ["Sequence"]]`));
 });
 
@@ -556,7 +572,16 @@ describe('CANONICALIZATION negate', () => {
     expect(canonicalToJson('-(-x)')).toEqual('x');
   });
   test(`2-q`, () => {
-    expect(canonicalToJson('2-q')).toMatchObject(['Subtract', 2, 'q']);
+    expect(canonicalToJson('2-q')).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Negate,
+          q,
+        ],
+        2,
+      ]
+    `);
   });
 });
 describe('CANONICALIZATION Add', () => {
@@ -564,41 +589,87 @@ describe('CANONICALIZATION Add', () => {
     expect(canonicalToJson('7 + 2 + 5')).toMatchObject(['Add', 2, 5, 7]));
 
   test(`7 + \\frac12`, () =>
-    expect(canonicalToJson('7 + \\frac12')).toMatchObject(['Add', 'Half', 7]));
+    expect(canonicalToJson('7 + \\frac12')).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Rational,
+          1,
+          2,
+        ],
+        7,
+      ]
+    `));
 
   test(`1 + 2 + x`, () =>
     expect(canonicalToJson('1 + 2 + x')).toMatchObject(['Add', 'x', 1, 2]));
 
   test(`1 + \\infty`, () =>
-    expect(canonicalToJson('1 + \\infty')).toMatchInlineSnapshot(
-      `["Add", 1, {num: "+Infinity"}]`
-    ));
+    expect(canonicalToJson('1 + \\infty')).toMatchInlineSnapshot(`
+      [
+        Add,
+        1,
+        PositiveInfinity,
+      ]
+    `));
 
   test(`7 + (2 + 5) // Associative`, () =>
-    expect(canonicalToJson('7 + (2 + 5)')).toMatchInlineSnapshot(
-      `["Add", 2, 5, 7]`
-    ));
+    expect(canonicalToJson('7 + (2 + 5)')).toMatchInlineSnapshot(`
+      [
+        Add,
+        2,
+        5,
+        7,
+      ]
+    `));
 
   test(`-2+a+b`, () =>
-    expect(canonicalToJson('-2+a+b')).toMatchInlineSnapshot(
-      `["Add", "a", "b", -2]`
-    ));
+    expect(canonicalToJson('-2+a+b')).toMatchInlineSnapshot(`
+      [
+        Add,
+        a,
+        b,
+        -2,
+      ]
+    `));
 
   test(`-2+a^2+a+a^2`, () =>
-    expect(canonicalToJson('-2+a^2+a+a^2')).toMatchInlineSnapshot(
-      `["Add", ["Square", "a"], ["Square", "a"], "a", -2]`
-    ));
+    expect(canonicalToJson('-2+a^2+a+a^2')).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Power,
+          a,
+          2,
+        ],
+        [
+          Power,
+          a,
+          2,
+        ],
+        a,
+        -2,
+      ]
+    `));
 });
 describe('CANONICALIZATION multiply', () => {
   test('2\\times3', () =>
-    expect(canonicalToJson('2\\times3')).toMatchInlineSnapshot(
-      `["Multiply", 2, 3]`
-    ));
+    expect(canonicalToJson('2\\times3')).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        3,
+      ]
+    `));
 
   test(`-2\\times-3`, () =>
-    expect(canonicalToJson('-2\\times-3')).toMatchInlineSnapshot(
-      `["Multiply", 2, 3]`
-    ));
+    expect(canonicalToJson('-2\\times-3')).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        3,
+      ]
+    `));
 
   test(`x\\times(-y)`, () =>
     expect(canonicalToJson('x\\times(-y)')).toMatchObject([
@@ -607,19 +678,49 @@ describe('CANONICALIZATION multiply', () => {
     ]));
 
   test(`2\\times\\frac12`, () =>
-    expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(
-      `["Multiply", "Half", 2]`
-    ));
+    expect(canonicalToJson('2\\times\\frac12')).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        [
+          Rational,
+          1,
+          2,
+        ],
+        2,
+      ]
+    `));
 
   test(`2\\times(5-5)\\times5\\times4`, () =>
-    expect(
-      canonicalToJson('2\\times(5-5)\\times5\\times4')
-    ).toMatchInlineSnapshot(`["Multiply", 2, 4, 5, ["Subtract", 5, 5]]`));
+    expect(canonicalToJson('2\\times(5-5)\\times5\\times4'))
+      .toMatchInlineSnapshot(`
+      [
+        Multiply,
+        2,
+        4,
+        5,
+        [
+          Add,
+          -5,
+          5,
+        ],
+      ]
+    `));
 
   test(`(-2)\\times(-x)\\times y\\times\\frac{3}{-5}`, () =>
-    expect(
-      canonicalToJson('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}')
-    ).toMatchInlineSnapshot(`["Multiply", -2, ["Rational", 3, 5], "x", "y"]`));
+    expect(canonicalToJson('(-2)\\times(-x)\\times y\\times\\frac{3}{-5}'))
+      .toMatchInlineSnapshot(`
+      [
+        Multiply,
+        -2,
+        [
+          Rational,
+          3,
+          5,
+        ],
+        x,
+        y,
+      ]
+    `));
 
   test(`'1\\times x\\times 2\\times -5.23 \\times 3.2 \\times \\frac23\\times \\frac1x  // Commutative order'`, () => {
     expect(
@@ -628,13 +729,21 @@ describe('CANONICALIZATION multiply', () => {
       )
     ).toMatchInlineSnapshot(`
       [
-        "Multiply",
+        Multiply,
         -2,
-        ["Rational", 2, 3],
+        [
+          Rational,
+          2,
+          3,
+        ],
         3.2,
         5.23,
-        "x",
-        ["Divide", 1, "x"]
+        x,
+        [
+          Divide,
+          1,
+          x,
+        ],
       ]
     `);
   });
@@ -648,43 +757,97 @@ describe('CANONICALIZATION divide', () => {
     ]);
   });
   test(`\\frac{-x}{2}`, () => {
-    expect(canonicalToJson('\\frac{-x}{2}')).toMatchInlineSnapshot(
-      `["Divide", ["Negate", "x"], 2]`
-    );
+    expect(canonicalToJson('\\frac{-x}{2}')).toMatchInlineSnapshot(`
+      [
+        Divide,
+        [
+          Multiply,
+          -1,
+          x,
+        ],
+        2,
+      ]
+    `);
   });
   test(`\\frac{-x}{\\frac{1}{n}}`, () => {
-    expect(canonicalToJson('\\frac{-x}{\\frac{1}{n}}')).toMatchInlineSnapshot(
-      `["Negate", ["Multiply", "n", "x"]]`
-    );
+    expect(canonicalToJson('\\frac{-x}{\\frac{1}{n}}')).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        -1,
+        n,
+        x,
+      ]
+    `);
   });
 });
 describe('CANONICALIZATION sqrt', () => {
   test('\\sqrt{3^2}', () => {
     expect(canonicalToJson('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`);
     // Canonical of Sqrt should not transform to Power
-    expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(`["Sqrt", 12]`);
+    expect(canonicalToJson('\\sqrt{12}')).toMatchInlineSnapshot(`
+      [
+        Sqrt,
+        12,
+      ]
+    `);
   });
   test(`\\sqrt[3]{x}`, () =>
-    expect(canonicalToJson('\\sqrt[3]{x}')).toMatchObject(['Root', 'x', 3]));
+    expect(canonicalToJson('\\sqrt[3]{x}')).toMatchInlineSnapshot(`
+      [
+        Power,
+        x,
+        [
+          Rational,
+          1,
+          3,
+        ],
+      ]
+    `));
   test(`\\sqrt{x}`, () =>
-    expect(canonicalToJson('\\sqrt{x}')).toMatchObject(['Sqrt', 'x']));
+    expect(canonicalToJson('\\sqrt{x}')).toMatchInlineSnapshot(`
+      [
+        Power,
+        x,
+        [
+          Rational,
+          1,
+          2,
+        ],
+      ]
+    `));
 });
 describe('CANONICALIZATION invisible operators', () => {
   test('2x // invisible multiply', () => {
     expect(canonicalToJson('2x')).toMatchObject(['Multiply', 2, 'x']);
   });
   test(`'3\\frac18 // invisible add`, () =>
-    expect(canonicalToJson('3\\frac18')).toMatchInlineSnapshot(
-      `["Add", 3, ["Rational", 1, 8]]`
-    ));
+    expect(canonicalToJson('3\\frac18')).toMatchInlineSnapshot(`
+      [
+        Multiply,
+        3,
+        [
+          Rational,
+          1,
+          8,
+        ],
+      ]
+    `));
   test(`2(x)`, () =>
     expect(canonicalToJson('2(x)')).toMatchObject(['Multiply', 2, 'x']));
   test(`(2)(x)`, () =>
     expect(canonicalToJson('(2)(x)')).toMatchObject(['Multiply', 2, 'x']));
   test(`2x+x`, () =>
-    expect(canonicalToJson('2x+x')).toMatchInlineSnapshot(
-      `["Add", ["Multiply", 2, "x"], "x"]`
-    ));
+    expect(canonicalToJson('2x+x')).toMatchInlineSnapshot(`
+      [
+        Add,
+        [
+          Multiply,
+          2,
+          x,
+        ],
+        x,
+      ]
+    `));
 });
 
 //
@@ -692,73 +855,75 @@ describe('CANONICALIZATION invisible operators', () => {
 //
 
 describe('SIMPLIFICATION add', () => {
-  test('7 + 2 + 5', () => expect(simplifyToJson('7 + 2 + 5')).toEqual(14));
+  test('7 + 2 + 5', () => expect(simplify('7 + 2 + 5')).toEqual('14'));
   test(`2-q`, () =>
-    expect(simplifyToJson('2-q')).toMatchObject(['Subtract', 2, 'q']));
+    expect(simplify('2-q')).toMatchInlineSnapshot(`["Subtract", 2, "q"]`));
 
   test(`-i`, () =>
-    expect(simplifyToJson('-i')).toMatchInlineSnapshot(
+    expect(simplify('-i')).toMatchInlineSnapshot(
       `["Negate", "ImaginaryUnit"]`
     )); // @fixme ['Complex', 0, -1]?
-  test(`3-i`, () => expect(simplifyToJson('3-i')).toEqual(['Complex', 3, -1]));
+  test(`3-i`, () =>
+    expect(simplify('3-i')).toMatchInlineSnapshot(`["Complex", 3, -1]`));
 
   test(`2\\sqrt{3}+\\sqrt{1+2}`, () =>
-    expect(simplifyToJson('2\\sqrt{3}+\\sqrt{1+2}')).toMatchInlineSnapshot(
+    expect(simplify('2\\sqrt{3}+\\sqrt{1+2}')).toMatchInlineSnapshot(
       `["Multiply", 3, ["Sqrt", 3]]`
     ));
 
   test(`2x+x`, () =>
-    expect(simplifyToJson('2x+x')).toMatchInlineSnapshot(
-      `["Multiply", 3, "x"]`
-    ));
+    expect(simplify('2x+x')).toMatchInlineSnapshot(`["Multiply", 3, "x"]`));
 });
 
 describe('SIMPLIFICATION divide', () => {
-  test(`simplify('\\frac{\\sqrt{5040}}{3}')`, () => {
-    expect(simplifyToJson('\\frac{\\sqrt{5040}}{3}')).toMatchObject([
-      'Multiply',
-      4,
-      ['Sqrt', 35],
-    ]);
-  });
+  test(`simplify('\\frac{\\sqrt{5040}}{3}')`, () =>
+    expect(simplify('\\frac{\\sqrt{5040}}{3}')).toMatchInlineSnapshot(
+      `["Multiply", 4, ["Sqrt", 35]]`
+    ));
 
   test(`'\\frac{-x}{-n}'`, () =>
-    expect(simplifyToJson('\\frac{-x}{-n}')).toMatchObject([
-      'Divide',
-      'x',
-      'n',
-    ]));
+    expect(simplify('\\frac{-x}{-n}')).toMatchInlineSnapshot(
+      `["Divide", "x", "n"]`
+    ));
 
   test(`\\frac{5}{\\frac{7}{x}}`, () =>
-    expect(simplifyToJson('\\frac{5}{\\frac{7}{x}}')).toMatchObject([
-      'Divide',
-      ['Multiply', 5, 'x'],
-      7,
-    ]));
+    expect(simplify('\\frac{5}{\\frac{7}{x}}')).toMatchInlineSnapshot(
+      `["Divide", ["Multiply", 5, "x"], 7]`
+    ));
 
   test(`simplify('\\frac{\\sqrt{15}}{\\sqrt{3}}')`, () =>
-    expect(
-      simplifyToJson('\\frac{\\sqrt{15}}{\\sqrt{3}}')
-    ).toMatchInlineSnapshot(`["Sqrt", 5]`)); // @fixme
+    expect(simplify('\\frac{\\sqrt{15}}{\\sqrt{3}}')).toMatchInlineSnapshot(
+      `["Sqrt", 5]`
+    ));
 });
 
 describe('SIMPLIFICATION sqrt', () => {
   test(`\\sqrt{5040}`, () =>
-    expect(evaluateToJson('\\sqrt{5040}')).toMatchObject([
-      'Multiply',
-      12,
-      ['Sqrt', 35],
-    ]));
+    expect(evaluateToJson('\\sqrt{5040}')).toMatchInlineSnapshot(`
+          [
+            Multiply,
+            12,
+            [
+              Sqrt,
+              35,
+            ],
+          ]
+      `));
 
   test(`simplify('\\sqrt{3^2}')`, () =>
-    expect(simplifyToJson('\\sqrt{3^2}')).toEqual(3));
+    expect(simplify('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`));
 
   test(`evaluate('\\sqrt{12}')`, () =>
-    expect(evaluateToJson('\\sqrt{12}')).toMatchObject([
-      'Multiply',
-      2,
-      ['Sqrt', 3],
-    ]));
+    expect(evaluateToJson('\\sqrt{12}')).toMatchInlineSnapshot(`
+          [
+            Multiply,
+            2,
+            [
+              Sqrt,
+              3,
+            ],
+          ]
+      `));
 
   // A math olympiad problem
   // Simplify[ToExpression["\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}", TeXForm]]
@@ -768,57 +933,87 @@ describe('SIMPLIFICATION sqrt', () => {
       evaluateToJson('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')
     ).toMatchInlineSnapshot(`
       [
-        "Divide",
+        Divide,
         [
-          "Add",
-          ["Negate", ["Sqrt", ["Add", ["Multiply", 10, ["Sqrt", 3]], 28]]],
-          ["Sqrt", ["Add", ["Multiply", 2, ["Sqrt", 3]], 4]]
+          Add,
+          [
+            Negate,
+            [
+              Sqrt,
+              [
+                Add,
+                [
+                  Multiply,
+                  10,
+                  [
+                    Sqrt,
+                    3,
+                  ],
+                ],
+                28,
+              ],
+            ],
+          ],
+          [
+            Sqrt,
+            [
+              Add,
+              [
+                Multiply,
+                2,
+                [
+                  Sqrt,
+                  3,
+                ],
+              ],
+              4,
+            ],
+          ],
         ],
-        15
+        15,
       ]
     `));
 });
 
 describe('SIMPLIFICATION negate', () => {
-  test(`simplify('-(-x)')`, () => expect(simplifyToJson('-(-x)')).toMatch('x'));
+  test(`simplify('-(-x)')`, () =>
+    expect(simplify('-(-x)')).toMatchInlineSnapshot(`x`));
 
   test(`simplify('-(x+1)')`, () =>
-    expect(simplifyToJson('-(x+1)')).toMatchInlineSnapshot(
-      `["Subtract", -1, "x"]`
-    ));
+    expect(simplify('-(x+1)')).toMatchInlineSnapshot(`["Subtract", -1, "x"]`));
 });
 
 describe('SIMPLIFICATION trigonometry', () => {
   test(`simplify('\\sin\\pi')`, () =>
-    expect(simplifyToJson('\\sin\\pi')).toEqual(0));
+    expect(simplify('\\sin\\pi')).toMatchInlineSnapshot(`0`));
 
   test(`simplify('1+4\\times\\sin\\frac{\\pi}{10}')`, () =>
-    expect(simplifyToJson('1+4\\times\\sin\\frac{\\pi}{10}')).toMatchObject([
-      'Sqrt',
-      5,
-    ]));
+    expect(simplify('1+4\\times\\sin\\frac{\\pi}{10}')).toMatchInlineSnapshot(
+      `["Sqrt", 5]`
+    ));
 });
 
 describe('SIMPLIFICATION power', () => {
   test(`simplify('a^3a\\times a^2')`, () =>
-    expect(simplifyToJson('a^3a\\times a^2')).toMatchInlineSnapshot(
+    expect(simplify('a^3a\\times a^2')).toMatchInlineSnapshot(
       `["Power", "a", 6]`
     ));
 
   test(`simplify('\\frac{a^4}{a^2}')`, () =>
-    expect(simplifyToJson('\\frac{a^4}{a^2}')).toMatchInlineSnapshot(
+    expect(simplify('\\frac{a^4}{a^2}')).toMatchInlineSnapshot(
       `["Square", "a"]`
     ));
 
   test(`simplify('(a+b)^6')`, () =>
-    expect(simplifyToJson('(a+b)^6')).toMatchInlineSnapshot(
+    expect(simplify('(a+b)^6')).toMatchInlineSnapshot(
       `["Power", ["Add", "a", "b"], 6]`
     ));
 });
 
 describe('EXPAND', () => {
   test(`Expand('(a+b)^6')`, () =>
-    expect(expand('(a+b)^6')).toMatchInlineSnapshot(`
+    expect(ce.box(['Expand', ce.parse('(a+b)^6')]).evaluate())
+      .toMatchInlineSnapshot(`
       [
         "Add",
         ["Multiply", 20, ["Power", ["Multiply", "a", "b"], 3]],
@@ -834,15 +1029,15 @@ describe('EXPAND', () => {
 
 describe('SIMPLIFICATION multiply', () => {
   test(`3(2+5)`, () => {
-    expect(simplifyToJson('3(2+5)')).toStrictEqual(21);
+    expect(simplify('3(2+5)')).toMatchInlineSnapshot(`21`);
   });
 
   test('2x', () =>
-    expect(simplifyToJson('2x')).toMatchObject(['Multiply', 2, 'x']));
+    expect(simplify('2x')).toMatchInlineSnapshot(`["Multiply", 2, "x"]`));
 
   test(`-\\frac{-x+2\\times x}{-2\\times x + 1}`, () => {
     expect(
-      simplifyToJson('-\\frac{-x+2\\times x}{-2\\times x + 1}')
+      simplify('-\\frac{-x+2\\times x}{-2\\times x + 1}')
     ).toMatchInlineSnapshot(
       `["Divide", ["Negate", "x"], ["Add", ["Multiply", -2, "x"], 1]]`
     );
@@ -855,21 +1050,35 @@ describe('SIMPLIFICATION multiply', () => {
 
 describe('SYMBOLIC EVALUATION trigonometric functions', () => {
   test(`\\sin\\frac\\pi3 // constructible values`, () =>
-    expect(evaluateToJson('\\sin\\frac\\pi3')).toMatchInlineSnapshot(
-      `["Divide", ["Sqrt", 3], 2]`
-    ));
+    expect(evaluateToJson('\\sin\\frac\\pi3')).toMatchInlineSnapshot(`
+      [
+        Divide,
+        [
+          Sqrt,
+          3,
+        ],
+        2,
+      ]
+    `));
   test(`\\sin(\\frac13\\pi) // constructible values`, () =>
-    expect(evaluateToJson('\\sin(\\frac13\\pi)')).toMatchInlineSnapshot(
-      `["Divide", ["Sqrt", 3], 2]`
-    ));
+    expect(evaluateToJson('\\sin(\\frac13\\pi)')).toMatchInlineSnapshot(`
+      [
+        Divide,
+        [
+          Sqrt,
+          3,
+        ],
+        2,
+      ]
+    `));
 });
 
 describe('SYMBOLIC EVALUATION Other functions', () => {
   test('-(-x)', () => expect(NToJson('-(-x)')).toMatch('x'));
 
   test('50!', () =>
-    expect(evaluateToJson('50!')).toMatch(
-      '3.0414093201713378043612608166064768844377641568960512e+64'
+    expect(evaluateToJson('50!')).toMatchInlineSnapshot(
+      `3.0414093201713378043612608166064768844377641568960512e+64`
     ));
 
   test(`eval('8844418+\\frac{85}{7}')`, () =>
@@ -886,7 +1095,7 @@ describe('SYMBOLIC EVALUATION Other functions', () => {
 
 describe('NUMERIC EVALUATION arithmetic', () => {
   test(`N('88444111111113418+8')`, () => {
-    expect(NToJson('88444111111113418+8')).toMatch('88444111111113426');
+    expect(NToJson('88444111111113418+8')).toEqual('88444111111113426');
   });
 
   test(`N('1 + \\frac{1}{3}')`, () => {

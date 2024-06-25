@@ -7,7 +7,7 @@
 // Other benchmarks:
 // http://134.155.108.17/cabench/ca-challenge.html
 
-import { ComputeEngine } from '../../src/cortex';
+import { ComputeEngine } from '../../src/compute-engine';
 
 export const ce = new ComputeEngine();
 

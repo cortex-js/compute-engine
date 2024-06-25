@@ -1,4 +1,4 @@
-import { factor, together } from '../numerics/factor';
+import { factor, together } from '../boxed-expression/factor';
 import { IdentifierDefinitions } from '../public';
 import { distribute, expand, expandAll } from '../symbolic/expand';
 

@@ -24,10 +24,9 @@ import {
 } from '../symbolic/tensor-fields';
 import { AbstractTensor, TensorData, makeTensor } from '../symbolic/tensors';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { BoxedFunction } from './boxed-function';
 import { hashCode, isBoxedExpression } from './utils';
-import { isWildcard, wildcardName } from './boxed-patterns';
 import { canonical } from '../symbolic/utils';
+import { isWildcard, wildcardName } from './boxed-patterns';
 
 /**
  * A boxed tensor represents an expression that can be
@@ -71,7 +70,7 @@ export class BoxedTensor extends _BoxedExpression {
       this._head = input.head ?? 'List';
       this._ops = options.canonical === true ? canonical(input.ops) : input.ops;
 
-      this._expression = new BoxedFunction(ce, this._head, this._ops, {
+      this._expression = ce._fn(this._head, this._ops, {
         canonical: options.canonical,
       });
     }
@@ -210,12 +209,6 @@ export class BoxedTensor extends _BoxedExpression {
     // @todo tensor: could be optimized by avoiding creating
     // an expression and getting the JSON from the tensor directly
     return this.expression.json;
-  }
-
-  get rawJson(): Expression {
-    // @todo tensor: could be optimized by avoiding creating
-    // an expression and getting the JSON from the tensor directly
-    return this.expression.rawJson;
   }
 
   /** Structural equality */

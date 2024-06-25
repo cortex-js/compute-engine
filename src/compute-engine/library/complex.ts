@@ -1,4 +1,4 @@
-import { asFloat } from '../numerics/numeric';
+import { asFloat } from '../boxed-expression/numerics';
 import { IdentifierDefinitions } from '../public';
 
 // complex-cartesian (constructor) = re + i * im

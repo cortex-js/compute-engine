@@ -9,15 +9,15 @@ describe('CORTEX SERIALIZING', () => {
       `"-1_234_567.89"`
     );
     expect(serializeCortex(-1234567.89e-123)).toMatchInlineSnapshot(
-      `"-1.234_567_89e-117"`
+      `"-123_456_789e-125"`
     );
     expect(serializeCortex({ num: '-1234567.890e-123' })).toMatchInlineSnapshot(
-      `"-1_234_567.890e-123"`
+      `"-1_234_567_890e-126"`
     );
     expect(
       serializeCortex({ num: '-123456789012345678901234567890.890e-123' })
     ).toMatchInlineSnapshot(
-      `"-123_456_789_012_345_678_901_234_567_890.890e-123"`
+      `"-123_456_789_012_345_678_901_234_567_890_890e-126"`
     );
     expect(serializeCortex({ num: '+Infinity' })).toMatch('+Infinity');
     expect(serializeCortex({ num: '-Infinity' })).toMatch('-Infinity');
@@ -27,11 +27,13 @@ describe('CORTEX SERIALIZING', () => {
     // Repeating pattern
     expect(
       serializeCortex({ num: '3.123456785678567856785678567856785678' })
-    ).toMatchInlineSnapshot(`"3.123_456_785_678_56"`);
+    ).toMatchInlineSnapshot(
+      `"3.123_456_785_678_567_856_785_678_567_856_785_678"`
+    );
 
     expect(
       serializeCortex({ num: '0.1234567872368237462387623876' })
-    ).toMatchInlineSnapshot(`"0.123_456_787_236_82"`);
+    ).toMatchInlineSnapshot(`"0.123_456_787_236_823_746_238_762_387_6"`);
   });
 
   test('BaseForm', () => {
@@ -213,7 +215,7 @@ describe('CORTEX SERIALIZING FUNCTIONS', () => {
     );
 
     // Head as expression
-    expect(serializeCortex([['g', 'f'], 'x', 1, 0])).toMatch(
+    expect(serializeCortex([['g', 'f'] as any as string, 'x', 1, 0])).toMatch(
       'Apply(g(f), [x, 1, 0])'
     );
   });

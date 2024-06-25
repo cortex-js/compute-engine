@@ -21,118 +21,6 @@ describe('Nth PRIME NUMBER', () =>
         'p(n):=(\\sum_{v_{1}=2}^{\\operatorname{floor}\\left(1.5*n*\\ln(n)\\right)}(\\operatorname{floor}(\\frac{1}{0^{n-(\\sum_{v_{2}=2}^{v_{1}}((\\prod_{v_{3}=2}^{\\operatorname{floor}(\\sqrt{v_{2}})}(1-0^{\\operatorname{abs}(\\operatorname{floor}(\\frac{v_{2}}{v_{3}})-\\frac{v_{2}}{v_{3}})}))))}+1})))+2'
       )
     ).toMatchInlineSnapshot(`
-      latex     = [
-        "Assign",
-        "p",
-        [
-          "Function",
-          [
-            "Add",
-            [
-              "Delimiter",
-              [
-                "Sum",
-                [
-                  "Delimiter",
-                  [
-                    "Floor",
-                    [
-                      "Divide",
-                      1,
-                      [
-                        "Add",
-                        [
-                          "Power",
-                          0,
-                          [
-                            "Add",
-                            "n",
-                            [
-                              "Negate",
-                              [
-                                "Delimiter",
-                                [
-                                  "Sum",
-                                  [
-                                    "Delimiter",
-                                    [
-                                      "Delimiter",
-                                      [
-                                        "Product",
-                                        [
-                                          "Delimiter",
-                                          [
-                                            "Add",
-                                            1,
-                                            [
-                                              "Power",
-                                              0,
-                                              [
-                                                "Abs",
-                                                [
-                                                  "Add",
-                                                  [
-                                                    "Floor",
-                                                    [
-                                                      "Divide",
-                                                      ["Subscript", "v", 2],
-                                                      ["Subscript", "v", 3]
-                                                    ]
-                                                  ],
-                                                  [
-                                                    "Negate",
-                                                    [
-                                                      "Divide",
-                                                      ["Subscript", "v", 2],
-                                                      ["Subscript", "v", 3]
-                                                    ]
-                                                  ]
-                                                ]
-                                              ]
-                                            ]
-                                          ]
-                                        ],
-                                        [
-                                          "Tuple",
-                                          ["Subscript", "v", 3],
-                                          2,
-                                          [
-                                            "Floor",
-                                            ["Sqrt", ["Subscript", "v", 2]]
-                                          ]
-                                        ]
-                                      ]
-                                    ]
-                                  ],
-                                  [
-                                    "Tuple",
-                                    ["Subscript", "v", 2],
-                                    2,
-                                    ["Subscript", "v", 1]
-                                  ]
-                                ]
-                              ]
-                            ]
-                          ]
-                        ],
-                        1
-                      ]
-                    ]
-                  ]
-                ],
-                [
-                  "Tuple",
-                  ["Subscript", "v", 1],
-                  2,
-                  ["Floor", ["Multiply", 1.5, "n", ["Ln", "n"]]]
-                ]
-              ]
-            ],
-            2
-          ],
-          "n"
-        ]
-      ]
       box       = [
         "Assign",
         "p",
@@ -360,18 +248,18 @@ describe('Nth PRIME NUMBER', () =>
 describe('Euler Prime Generating Polynomial', () => {
   test('x in 0..39', () =>
     expect(check('n^2 + n + 41')).toMatchInlineSnapshot(`
-      latex     = ["Add", ["Power", "n", 2], "n", 41]
-      ["Add", ["Square", "n"], "n", 41]
+      box       = ["Add", ["Power", "n", 2], "n", 41]
+      canonical = ["Add", ["Square", "n"], "n", 41]
     `));
   test('x in 0..61', () =>
     expect(check('8x^2 - 488 x + 7243')).toMatchInlineSnapshot(`
-      latex     = [
+      box       = [
         "Add",
         ["InvisibleOperator", 8, ["Power", "x", 2]],
         ["InvisibleOperator", -488, "x"],
         7243
       ]
-      [
+      canonical = [
         "Add",
         ["Multiply", 8, ["Square", "x"]],
         ["Multiply", -488, "x"],
@@ -380,13 +268,13 @@ describe('Euler Prime Generating Polynomial', () => {
     `));
   test('x in ', () =>
     expect(check('43 x^2 - 537x + 2971')).toMatchInlineSnapshot(`
-      latex     = [
+      box       = [
         "Add",
         ["InvisibleOperator", 43, ["Power", "x", 2]],
         ["InvisibleOperator", -537, "x"],
         2971
       ]
-      [
+      canonical = [
         "Add",
         ["Multiply", 43, ["Square", "x"]],
         ["Multiply", -537, "x"],
@@ -395,13 +283,13 @@ describe('Euler Prime Generating Polynomial', () => {
     `));
   test('x in 0..45', () =>
     expect(check('36 x^2 - 810 x + 2763')).toMatchInlineSnapshot(`
-      latex     = [
+      box       = [
         "Add",
         ["InvisibleOperator", 36, ["Power", "x", 2]],
         ["InvisibleOperator", -810, "x"],
         2763
       ]
-      [
+      canonical = [
         "Add",
         ["Multiply", 36, ["Square", "x"]],
         ["Multiply", -810, "x"],
@@ -410,18 +298,18 @@ describe('Euler Prime Generating Polynomial', () => {
     `));
   test('x in', () =>
     expect(check('x^2 - 79x + 1601')).toMatchInlineSnapshot(`
-      latex     = ["Add", ["Power", "x", 2], ["InvisibleOperator", -79, "x"], 1601]
-      ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
+      box       = ["Add", ["Power", "x", 2], ["InvisibleOperator", -79, "x"], 1601]
+      canonical = ["Add", ["Multiply", -79, "x"], ["Square", "x"], 1601]
     `));
   test('x in 0..10', () =>
     expect(check('2x^2 + 11')).toMatchInlineSnapshot(`
-      latex     = ["Add", ["InvisibleOperator", 2, ["Power", "x", 2]], 11]
-      ["Add", ["Multiply", 2, ["Square", "x"]], 11]
+      box       = ["Add", ["InvisibleOperator", 2, ["Power", "x", 2]], 11]
+      canonical = ["Add", ["Multiply", 2, ["Square", "x"]], 11]
     `));
   test('x in 0..10', () =>
     expect(check('x^3 + x^2 + 17')).toMatchInlineSnapshot(`
-      latex     = ["Add", ["Power", "x", 3], ["Power", "x", 2], 17]
-      ["Add", ["Power", "x", 3], ["Square", "x"], 17]
+      box       = ["Add", ["Power", "x", 3], ["Power", "x", 2], 17]
+      canonical = ["Add", ["Power", "x", 3], ["Square", "x"], 17]
     `));
 });
 
@@ -429,7 +317,7 @@ describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
   test('Sequence https://oeis.org/A051254', () =>
     expect(check('\\lfloor (\\frac{3540326840}{2710032743})^{3^{n}} \\rfloor'))
       .toMatchInlineSnapshot(`
-      latex     = [
+      box       = [
         "Floor",
         [
           "Power",
@@ -437,7 +325,7 @@ describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
           ["Power", 3, "n"]
         ]
       ]
-      box       = [
+      canonical = [
         "Floor",
         ["Power", ["Rational", 3540326840, 2710032743], ["Power", 3, "n"]]
       ]
@@ -464,8 +352,8 @@ describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
 describe('⌈e⌉ = ⌊π⌋', () =>
   test('', () =>
     expect(check('⌈e⌉ = ⌊π⌋')).toMatchInlineSnapshot(`
-      latex     = ["Equal", ["Ceil", "e"], ["Floor", "Pi"]]
-      box       = ["Equal", ["Ceil", "ExponentialE"], ["Floor", "Pi"]]
+      box       = ["Equal", ["Ceil", "e"], ["Floor", "Pi"]]
+      canonical = ["Equal", ["Ceil", "ExponentialE"], ["Floor", "Pi"]]
       evaluate  = True
     `)));
 
@@ -478,7 +366,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
         '\\sqrt{\\pi}\\left(\\frac{n}{e}\\right)^n\\sqrt[6]{8n^3+4n^2+n+\\frac{1}{30}}'
       )
     ).toMatchInlineSnapshot(`
-      latex     = [
+      box       = [
         "InvisibleOperator",
         ["Sqrt", "Pi"],
         ["Power", ["Delimiter", ["Divide", "n", "e"]], "n"],
@@ -494,7 +382,7 @@ describe('RAMANUJAN FACTORIAL APPROXIMATION', () =>
           6
         ]
       ]
-      box       = [
+      canonical = [
         "Multiply",
         ["Sqrt", "Pi"],
         ["Power", ["Divide", "n", "ExponentialE"], "n"],

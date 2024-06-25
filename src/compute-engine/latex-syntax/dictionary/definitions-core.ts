@@ -10,8 +10,8 @@ import {
   missingIfEmpty,
   stripText,
   isEmptySequence,
-  symbol,
   unhold,
+  symbol,
 } from '../../../math-json/utils';
 import {
   ADDITION_PRECEDENCE,
@@ -711,7 +711,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['^', '<{>', '('],
     kind: 'postfix',
     parse: (parser: Parser, lhs, until) => {
-      if (!parser.computeEngine?.box(lhs)?.domain?.isFunction) return null;
+      const sym = symbol(lhs);
+      if (!sym || parser.getIdentifierType(sym) !== 'function') return null;
 
       const start = parser.index;
       parser.addBoundary([')']);
@@ -735,7 +736,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: (parser: Parser, lhs: Expression) => {
       // If the lhs is a function, return the inverse function
       // i.e. f^{-1} -> InverseFunction(f)
-      if (!parser.computeEngine?.box(lhs)?.domain?.isFunction) return null;
+      const sym = symbol(lhs);
+      if (!sym || parser.getIdentifierType(sym) !== 'function') return null;
 
       // There may be additional postfixes, i.e. \prime, \doubleprime,
       // \tripleprime in the superscript. Account for them.
@@ -1030,9 +1032,12 @@ function parsePrime(
     const n = machineValue(op(lhs, 2)) ?? 1;
     return [lhsh, missingIfEmpty(op(lhs, 1)), n + order];
   }
+
   // If the lhs is a function, return the derivative
   // i.e. f' -> Derivative(f)
-  if (parser.computeEngine?.box(lhs)?.domain?.isFunction) {
+
+  const sym = symbol(lhs);
+  if ((sym && parser.getIdentifierType(sym) === 'function') || head(lhs)) {
     if (order === 1) return ['Derivative', lhs];
     return ['Derivative', lhs, order];
   }

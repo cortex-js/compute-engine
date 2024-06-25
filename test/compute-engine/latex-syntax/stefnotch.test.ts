@@ -1,4 +1,8 @@
-import { parse } from '../../utils';
+import { engine as ce } from '../../utils';
+
+function parse(s: string) {
+  return ce.parse(s);
+}
 
 describe('STEFNOTCH #9', () => {
   test('\\int_{\\placeholder{⬚}}^{\\placeholder{⬚}}3x', () => {
@@ -57,7 +61,7 @@ describe('STEFNOTCH #10', () => {
 
   test('7/ \\lim_{n\\to\\infty}3', () => {
     expect(parse('\\lim_{n\\to\\infty}3')).toMatchInlineSnapshot(
-      `["Limit", ["Function", 3, "n"], {num: "+Infinity"}]`
+      `["Limit", ["Function", 3, "n"], "PositiveInfinity"]`
     );
   });
 
@@ -77,7 +81,7 @@ describe('STEFNOTCH #12', () => {
         [
           "Error",
           ["ErrorCode", "'incompatible-domain'", "Numbers", "Tuples"],
-          ["Triple", "ImaginaryUnit", "Pi", "'nope!?\\lparensum'"]
+          ["Tuple", "ImaginaryUnit", "Pi", "'nope!?\\lparensum'"]
         ]
       ]
     `);

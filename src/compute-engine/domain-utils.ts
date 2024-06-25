@@ -1,14 +1,13 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
-import { isRational } from './numerics/rationals';
-import {
+import { Rational, isRational } from './numerics/rationals';
+import type {
   BoxedDomain,
   BoxedFunctionSignature,
   DomainExpression,
   DomainLiteral,
   FunctionSignature,
   IComputeEngine,
-  Rational,
   SemiBoxedExpression,
 } from './public';
 import { ops, head, nops } from '../math-json/utils';

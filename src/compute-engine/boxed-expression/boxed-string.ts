@@ -8,8 +8,7 @@ import {
   PatternMatchOptions,
   BoxedSubstitution,
   SemiBoxedExpression,
-} from '../public';
-import { serializeJsonString } from './serialize';
+} from './public';
 import { hashCode, isBoxedExpression } from './utils';
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
@@ -31,11 +30,11 @@ export class BoxedString extends _BoxedExpression {
 
     ce._register(this);
   }
+  get json(): string {
+    return `'${this._string}'`;
+  }
   get hash(): number {
     return hashCode('String' + this._string);
-  }
-  get json(): Expression {
-    return serializeJsonString(this.engine, this._string);
   }
   get head(): string {
     return 'String';

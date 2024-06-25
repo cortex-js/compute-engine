@@ -1,3 +1,4 @@
+import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 import {
   BoxedExpression,
@@ -14,10 +15,9 @@ import {
 import { Expression } from '../../math-json/math-json-format';
 import { canonicalNegate } from '../symbolic/negate';
 import { applyN, apply2N } from '../symbolic/utils';
-import { asFloat } from '../numerics/numeric';
 import { checkArity, checkNumericArgs } from '../boxed-expression/validate';
 import { reducedRational } from '../numerics/rationals';
-import Complex from 'complex.js';
+import { asFloat } from '../boxed-expression/numerics';
 
 //
 //Note: Names of trigonometric functions follow ISO 80000 Section 13

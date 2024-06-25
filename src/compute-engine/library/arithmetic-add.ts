@@ -1,11 +1,11 @@
 import Complex from 'complex.js';
 
-import { BoxedExpression, BoxedDomain, IComputeEngine } from '../public';
+import { BoxedDomain, BoxedExpression, IComputeEngine } from '../public';
 import { bignumPreferred } from '../boxed-expression/utils';
-import { asBignum, asFloat, MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
+import { MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { widen } from '../boxed-expression/boxed-domain';
 import { sortAdd } from '../boxed-expression/order';
-import { each, isIndexableCollection } from '../collection-utils';
+import { each, isCollection, isIndexableCollection } from '../collection-utils';
 import { Terms } from '../numerics/terms';
 
 import {
@@ -15,6 +15,7 @@ import {
   cartesianProduct,
   range,
 } from './utils';
+import { asBignum, asFloat } from '../boxed-expression/numerics';
 
 /** The canonical form of `Add`:
  * - removes `0`
@@ -153,9 +154,7 @@ export function canonicalSummation(
     var multiIndex = MultiIndexingSet(indexingSet);
     if (!multiIndex) return null;
     var bodyAndIndex = [body.canonical];
-    multiIndex.forEach((element) => {
-      bodyAndIndex.push(element);
-    });
+    multiIndex.forEach((element) => bodyAndIndex.push(element));
     result = ce._fn('Sum', bodyAndIndex);
   } else {
     var singleIndex = SingleIndexingSet(indexingSet);
@@ -177,13 +176,12 @@ export function evalSummation(
   let indexingSet: BoxedExpression[] = [];
   if (summationEquation) {
     indexingSet = [];
-    for (let i = 1; i < summationEquation.length; i++) {
+    for (let i = 1; i < summationEquation.length; i++)
       indexingSet.push(summationEquation[i]);
-    }
   }
   let result: BoxedExpression | undefined | null = null;
 
-  if (indexingSet?.length === 0) {
+  if (indexingSet?.length === 0 || isCollection(expr)) {
     // The body is a collection, e.g. Sum({1, 2, 3})
     const body =
       mode === 'simplify'
@@ -225,7 +223,6 @@ export function evalSummation(
   }
 
   const fn = expr;
-  const savedContext = ce.swapScope(fn.scope);
   ce.pushScope();
 
   var indexArray: string[] = [];
@@ -425,7 +422,6 @@ export function evalSummation(
   }
 
   ce.popScope();
-  ce.swapScope(savedContext);
 
   return result ?? undefined;
 }

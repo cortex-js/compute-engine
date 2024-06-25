@@ -1,28 +1,31 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 
-import { BoxedExpression, IComputeEngine, Rational } from '../public';
+import { BoxedExpression, IComputeEngine } from '../public';
 
 import { order } from '../boxed-expression/order';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
 import {
-  add,
-  asRational,
+  Rational,
   isBigRational,
   isNeg,
   isRational,
   isRationalOne,
   machineDenominator,
   machineNumerator,
-  mul,
   neg,
   reducedRational,
 } from '../numerics/rationals';
 import { bigint } from '../numerics/numeric-bigint';
-import { asCoefficient } from '../numerics/factor';
 import { asRationalSqrt, isSqrt } from '../library/arithmetic-power';
 
 import { flattenOps } from './flatten';
+import {
+  mul,
+  asCoefficient,
+  asRational,
+  add,
+} from '../boxed-expression/numerics';
 
 /**
  * Group terms in a product by common term.
@@ -114,7 +117,7 @@ export class Product {
     }
 
     if (this._isCanonical) {
-      if (term.isNothing) return;
+      if (term.symbol === 'Nothing') return;
 
       // If we're calculation a canonical  product, fold exact literals into
       // running terms

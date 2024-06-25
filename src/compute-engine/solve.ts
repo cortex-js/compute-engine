@@ -1,5 +1,9 @@
-import { isInequality } from './library/relational-operator';
-import { BoxedExpression, Rule, SemiBoxedExpression } from './public';
+import {
+  BoxedExpression,
+  SemiBoxedExpression,
+} from './boxed-expression/public';
+import { isInequality } from './boxed-expression/utils';
+import { Rule } from './public';
 import { boxRules, matchRules } from './rules';
 import { expand } from './symbolic/expand';
 

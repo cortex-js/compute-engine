@@ -1,4 +1,4 @@
-import { asFloat } from '../../src/compute-engine/numerics/numeric';
+import { asFloat } from '../../src/compute-engine/boxed-expression/numerics';
 import { engine } from '../utils';
 
 describe('TRIGONOMETRY constructible values', () => {
@@ -23,16 +23,16 @@ describe('TRIGONOMETRY constructible values', () => {
           h === 'Cos'
             ? Math.cos(theta)
             : h === 'Sin'
-            ? Math.sin(theta)
-            : h === 'Tan'
-            ? Math.tan(theta)
-            : h === 'Sec'
-            ? 1 / Math.cos(theta)
-            : h === 'Csc'
-            ? 1 / Math.sin(theta)
-            : h === 'Cot'
-            ? 1 / Math.tan(theta)
-            : NaN;
+              ? Math.sin(theta)
+              : h === 'Tan'
+                ? Math.tan(theta)
+                : h === 'Sec'
+                  ? 1 / Math.cos(theta)
+                  : h === 'Csc'
+                    ? 1 / Math.sin(theta)
+                    : h === 'Cot'
+                      ? 1 / Math.tan(theta)
+                      : NaN;
 
         // const arg = engine
         //   .box([

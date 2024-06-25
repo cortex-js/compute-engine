@@ -1,28 +1,4 @@
 import { Expression } from '../../../math-json/math-json-format';
-import {
-  LatexDictionary,
-  LatexString,
-  LatexToken,
-  SerializeHandler,
-  LatexDictionaryEntry,
-  LibraryCategory,
-  Delimiter,
-  PostfixParseHandler,
-  MatchfixParseHandler,
-  InfixParseHandler,
-  EnvironmentParseHandler,
-  isMatchfixEntry,
-  isInfixEntry,
-  isSymbolEntry,
-  isPostfixEntry,
-  isPrefixEntry,
-  ExpressionParseHandler,
-  Precedence,
-  Parser,
-  isEnvironmentEntry,
-  Terminator,
-  isExpressionEntry,
-} from '../public';
 import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
 import { DEFINITIONS_ALGEBRA } from './definitions-algebra';
 import { DEFINITIONS_ARITHMETIC } from './definitions-arithmetic';
@@ -48,6 +24,30 @@ import {
 import { ErrorSignal, WarningSignal } from '../../../common/signals';
 import { DEFINITIONS_COMPLEX } from './definitions-complex';
 import { DEFINITIONS_STATISTICS } from './definitions-statistics';
+import {
+  Delimiter,
+  EnvironmentParseHandler,
+  ExpressionParseHandler,
+  InfixParseHandler,
+  LatexDictionary,
+  LatexDictionaryEntry,
+  LatexString,
+  LatexToken,
+  LibraryCategory,
+  MatchfixParseHandler,
+  Parser,
+  PostfixParseHandler,
+  Precedence,
+  SerializeHandler,
+  Terminator,
+  isEnvironmentEntry,
+  isExpressionEntry,
+  isInfixEntry,
+  isMatchfixEntry,
+  isPostfixEntry,
+  isPrefixEntry,
+  isSymbolEntry,
+} from '../public';
 
 export type CommonEntry = {
   /** Note: a name is required if a serialize handler is provided */
@@ -244,7 +244,7 @@ function addEntry(
   // 1.1 Handle single token synonyms for ^ and _
   //
   // Turn the latex string into tokens
-  const tokensTrigger = tokenize(latexTrigger ?? '', []);
+  const tokensTrigger = tokenize(latexTrigger ?? '');
   if (
     tokensTrigger.length === 2 &&
     /[_^]/.test(tokensTrigger[0]) &&
@@ -309,7 +309,7 @@ function addEntry(
 }
 
 export function indexLatexDictionary(
-  dic: readonly Partial<LatexDictionaryEntry>[],
+  dic: Readonly<Partial<LatexDictionaryEntry>[]>,
   onError: (sig: WarningSignal) => void
 ): IndexedLatexDictionary {
   const result: IndexedLatexDictionary = {
@@ -345,7 +345,7 @@ function makeIndexedEntry(
   let tokensTrigger: LatexToken[] | null = null;
   if ('latexTrigger' in entry) {
     if (typeof entry.latexTrigger === 'string')
-      tokensTrigger = tokenize(entry.latexTrigger, []);
+      tokensTrigger = tokenize(entry.latexTrigger);
     else tokensTrigger = entry.latexTrigger as LatexToken[];
   }
   let idTrigger: string | null = null;
@@ -1002,3 +1002,22 @@ export const DEFAULT_LATEX_DICTIONARY: {
   'symbols': DEFINITIONS_SYMBOLS,
   'trigonometry': DEFINITIONS_TRIGONOMETRY,
 };
+
+export function getLatexDictionary(
+  category: LibraryCategory | 'all' = 'all'
+): readonly Readonly<LatexDictionaryEntry>[] {
+  if (category === 'all') {
+    const result: LatexDictionaryEntry[] = [];
+    for (const domain of Object.keys(DEFAULT_LATEX_DICTIONARY))
+      if (DEFAULT_LATEX_DICTIONARY[domain])
+        result.push(...DEFAULT_LATEX_DICTIONARY[domain]!);
+
+    return result;
+  }
+
+  if (!DEFAULT_LATEX_DICTIONARY[category]) return [];
+
+  return Object.freeze([
+    ...DEFAULT_LATEX_DICTIONARY[category]!,
+  ]) as Readonly<LatexDictionaryEntry>[];
+}

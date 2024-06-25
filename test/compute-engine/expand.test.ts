@@ -20,9 +20,8 @@ describe('EXPAND POWER', () => {
       ]
     `));
 
+  // 64*a**6 + 768*a**5*b**2 + 3840*a**4*b**4 + 10240*a**3*b**6 + 15360*a**2*b**8 + 12288*a*b**10 + 4096*b**12
   test(`Power`, () =>
-    // 64*a**6 + 768*a**5*b**2 + 3840*a**4*b**4 + 10240*a**3*b**6 + 15360*a**2*b**8 + 12288*a*b**10 + 4096*b**12
-
     expect(checkExpand(`(2a+4b^2)^6`)).toMatchInlineSnapshot(`
       box       = [
         "Expand",

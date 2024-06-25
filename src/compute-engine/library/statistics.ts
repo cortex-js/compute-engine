@@ -1,5 +1,6 @@
+import { asFloat } from '../boxed-expression/numerics';
 import { each } from '../collection-utils';
-import { asFloat, erf, erfInv } from '../numerics/numeric';
+import { erf, erfInv } from '../numerics/numeric';
 import { IdentifierDefinitions } from '../public';
 
 // Geometric mean:

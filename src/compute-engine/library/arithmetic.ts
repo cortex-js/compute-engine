@@ -13,8 +13,6 @@ import {
   lcm as bigLcm,
 } from '../numerics/numeric-bignum';
 import {
-  asFloat,
-  asSmallInteger,
   factorial,
   factorial2,
   fromDigits,
@@ -22,19 +20,13 @@ import {
   gammaln,
   gcd,
   lcm,
-  asBignum,
 } from '../numerics/numeric';
 import {
-  asRational,
   isBigRational,
   isMachineRational,
   rationalize,
 } from '../numerics/rationals';
-import {
-  BoxedExpression,
-  IdentifierDefinitions,
-  IComputeEngine,
-} from '../public';
+import { IdentifierDefinitions } from '../public';
 import { bignumPreferred, complexAllowed } from '../boxed-expression/utils';
 import { canonicalNegate, processNegate } from '../symbolic/negate';
 import {
@@ -62,6 +54,13 @@ import {
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { each, isCollection } from '../collection-utils';
 import { BoxedNumber } from '../boxed-expression/boxed-number';
+import { IComputeEngine, BoxedExpression } from '../boxed-expression/public';
+import {
+  asSmallInteger,
+  asFloat,
+  asRational,
+  asBignum,
+} from '../boxed-expression/numerics';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
@@ -1255,7 +1254,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           if (op1.startsWith('0b')) return ce.number(parseInt(op1.slice(2), 2));
 
           const op2 = ops[1] ?? ce.Nothing;
-          if (op2.isNothing) return ce.number(Number.parseInt(op1, 10));
+          if (op2.symbol === 'Nothing')
+            return ce.number(Number.parseInt(op1, 10));
 
           const base = asFloat(op2)!;
           if (base && (!Number.isInteger(base) || base < 2 || base > 36))
@@ -1289,7 +1289,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             return ce.domainError('Integers', op1.domain, op1);
 
           const op2 = ops[1] ?? ce.Nothing;
-          if (op2.isNothing) {
+          if (op2.symbol === 'Nothing') {
             const op1Num = op1.numericValue;
             if (typeof op1Num === 'number')
               return ce.string(Math.abs(op1Num).toString());

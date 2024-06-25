@@ -38,9 +38,11 @@ function parseTrig(op: string): ExpressionParseHandler {
       '\\cotg': 'Cot',
       '\\coth': 'Coth',
       '\\csc': 'Csc',
+      '\\csch': 'Csch',
       '\\ctg': 'Cot',
       '\\cth': 'Coth',
       '\\sec': 'Sec',
+      '\\sech': 'Sech',
       '\\sin': 'Sin',
       '\\sinh': 'Sinh',
       '\\sh': 'Sinh',
@@ -197,6 +199,12 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     parse: parseTrig('Csc'),
   },
   {
+    name: 'Csch',
+    latexTrigger: ['\\csch'],
+
+    parse: parseTrig('Csch'),
+  },
+  {
     // Rusian cotangent
     latexTrigger: ['\\ctg'],
 
@@ -212,6 +220,12 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     latexTrigger: ['\\sec'],
 
     parse: parseTrig('Sec'),
+  },
+  {
+    name: 'Sech',
+    latexTrigger: ['\\sech'],
+
+    parse: parseTrig('Sech'),
   },
   {
     name: 'Sinh',

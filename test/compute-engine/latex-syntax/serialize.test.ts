@@ -1,6 +1,4 @@
-import { engine, box, latex, parse } from '../../utils';
-
-const ce = engine;
+import { engine as ce, latex } from '../../utils';
 
 describe('LATEX SERIALIZING', () => {
   test('Numbers', () => {
@@ -9,21 +7,29 @@ describe('LATEX SERIALIZING', () => {
     expect(latex(-123)).toMatch('-123');
     expect(latex(-1234567.89)).toMatch('-1\\,234\\,567.89');
     expect(latex(-1234567.89e-123)).toMatchInlineSnapshot(
-      `-1.234\\,567\\,89\\cdot10^{-117}`
+      `-123\\,456\\,789\\cdot10^{-125}`
     );
-    expect(box({ num: '-1234567.890e-123' })).toMatchInlineSnapshot(
+    expect(ce.box({ num: '-1234567.890e-123' })).toMatchInlineSnapshot(
       `-1.23456789e-117`
     );
-    // Should not `1\\times` as `1\\times10^{199}`
-    expect(latex({ num: '1e199' })).toMatchInlineSnapshot(`10^{+199}`);
-    // Should not `-1\\times` as `-1\\times10^{-199}`
-    expect(latex({ num: '-1e-199' })).toMatchInlineSnapshot(
-      `-1\\cdot10^{-199}`
+
+    // Should remove fractional part. Avoid exponent in range [-7, 20]
+    expect(latex('-1234567.89e10')).toMatchInlineSnapshot(
+      `-12\\,345\\,678\\,900\\,000\\,000`
     );
+    // Keep exponent...
+    expect(latex('-1234567.89e23')).toMatchInlineSnapshot(
+      `-123\\,456\\,789\\cdot10^{21}`
+    );
+
+    // Should not `1\\times` as `1\\times10^{199}`
+    expect(latex({ num: '1e199' })).toMatchInlineSnapshot(`10^{199}`);
+    // Should not `-1\\times` as `-1\\times10^{-199}`
+    expect(latex({ num: '-1e-199' })).toMatchInlineSnapshot(`-10^{-199}`);
     expect(
       latex({ num: '-123456789012345678901234567890.890e-123' })
     ).toMatchInlineSnapshot(
-      `-1.234\\,567\\,890\\,123\\,456\\,789\\,012\\,345\\,678\\,908\\,9\\cdot10^{-94}`
+      `-12\\,345\\,678\\,901\\,234\\,567\\,890\\,123\\,456\\,789\\,089\\cdot10^{-125}`
     );
     expect(latex({ num: '+Infinity' })).toMatchInlineSnapshot(`\\infty`);
     expect(latex({ num: '-Infinity' })).toMatchInlineSnapshot(`-\\infty`);
@@ -41,14 +47,24 @@ describe('LATEX SERIALIZING', () => {
       `0.123\\,456\\,787\\,236\\,823\\,746\\,238\\,762\\,387\\,6`
     );
 
-    expect(parse('  - 1 2')).toMatchInlineSnapshot(`-12`);
-    expect(parse('-123\\,456.789\\,012')).toMatchInlineSnapshot(
+    expect(ce.parse('  - 1 2')).toMatchInlineSnapshot(`-12`);
+    expect(ce.parse('-123\\,456.789\\,012')).toMatchInlineSnapshot(
       `-123456.789012`
     );
-    expect(parse('-1\\,23456.7890\\,12')).toMatchInlineSnapshot(
+    expect(ce.parse('-1\\,23456.7890\\,12')).toMatchInlineSnapshot(
       `-123456.789012`
     );
   });
+
+  test('Complex Numbers', () => {
+    expect(latex(['Complex', 1, 2])).toMatchInlineSnapshot(`1+2\\imaginaryI`);
+    expect(latex(['Complex', 1, 0])).toMatchInlineSnapshot(`1`);
+    expect(latex(['Complex', 0, 1])).toMatchInlineSnapshot(`\\imaginaryI`);
+    expect(latex(['Complex', 2.345, 7.689])).toMatchInlineSnapshot(
+      `2.345+7.689\\imaginaryI`
+    );
+  });
+
   // Leave space between pi and x
   test('Spacing', () => {
     expect(latex(['Multiply', 'Pi', 'x'])).toMatchInlineSnapshot(`\\pi x`);
@@ -68,7 +84,7 @@ describe('LATEX SERIALIZING', () => {
     );
     expect(latex(['Divide', 'n', 4])).toMatchInlineSnapshot(`\\frac{n}{4}`);
 
-    expect(parse('\\foo[0]{1}{2}')).toMatchInlineSnapshot(`
+    expect(ce.parse('\\foo[0]{1}{2}')).toMatchInlineSnapshot(`
       [
         "Error",
         ["ErrorCode", "'unexpected-command'", "'\\foo'"],
@@ -77,7 +93,7 @@ describe('LATEX SERIALIZING', () => {
     `);
 
     // Head as expression
-    expect(latex([['g', 'f'], 'x', 1, 0])).toMatchInlineSnapshot(
+    expect(latex([['g', 'f'], 'x', 1, 0] as any)).toMatchInlineSnapshot(
       `\\operatorname{apply}(g(f), \\bigl\\lbrack x, 1, 0\\bigr\\rbrack)`
     );
   });
@@ -126,46 +142,68 @@ describe('LATEX', () => {
   });
 
   test('INVALID LatexString', () => {
-    expect(ce.box(['LatexString']).evaluate().json).toMatchInlineSnapshot(
-      `["LatexString", ["Error", "'missing'"]]`
-    );
+    expect(ce.box(['LatexString']).evaluate().json).toMatchInlineSnapshot(`
+      [
+        LatexString,
+        [
+          Error,
+          'missing',
+        ],
+      ]
+    `);
     expect(ce.box(['LatexString', 22]).evaluate().json).toMatchInlineSnapshot(`
       [
-        "LatexString",
+        LatexString,
         [
-          "Error",
+          Error,
           [
-            "ErrorCode",
-            "'incompatible-domain'",
-            "Strings",
-            "PositiveIntegers"
+            ErrorCode,
+            'incompatible-domain',
+            Strings,
+            PositiveIntegers,
           ],
-          22
-        ]
+          22,
+        ],
       ]
     `);
     expect(ce.box(['LatexString', "'\\sqrt{x}'", "'+1'"]).evaluate().json)
       .toMatchInlineSnapshot(`
       [
-        "LatexString",
-        "'\\sqrt{x}'",
-        ["Error", "'unexpected-argument'", "'+1'"]
+        LatexString,
+        '\\sqrt{x}',
+        [
+          Error,
+          'unexpected-argument',
+          '+1',
+        ],
       ]
     `);
   });
 
   test('Valid ParseLatex', () => {
-    expect(ce.box(['Parse']).evaluate().json).toMatchInlineSnapshot(
-      `["Parse", ["Error", "'missing'"]]`
-    );
-    expect(
-      ce.box(['Parse', "'\\frac{2}{\\cos x}'"]).evaluate().json
-    ).toMatchInlineSnapshot(`["Sequence"]`);
+    expect(ce.box(['Parse']).evaluate().json).toMatchInlineSnapshot(`
+      [
+        Parse,
+        [
+          Error,
+          'missing',
+        ],
+      ]
+    `);
+    expect(ce.box(['Parse', "'\\frac{2}{\\cos x}'"]).evaluate().json)
+      .toMatchInlineSnapshot(`
+      [
+        Sequence,
+      ]
+    `);
   });
 
   test('Invalid ParseLatex', () => {
-    expect(
-      ce.box(['Parse', ['Add', 2, 'Pi']]).evaluate().json
-    ).toMatchInlineSnapshot(`["Sequence"]`);
+    expect(ce.box(['Parse', ['Add', 2, 'Pi']]).evaluate().json)
+      .toMatchInlineSnapshot(`
+      [
+        Sequence,
+      ]
+    `);
   });
 });

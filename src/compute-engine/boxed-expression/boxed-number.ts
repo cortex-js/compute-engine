@@ -1,6 +1,5 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
-import { Expression } from '../../math-json/math-json-format';
 import {
   BoxedExpression,
   BoxedDomain,
@@ -8,7 +7,6 @@ import {
   Metadata,
   NOptions,
   PatternMatchOptions,
-  Rational,
   SimplifyOptions,
   BoxedSubstitution,
   EvaluateOptions,
@@ -17,8 +15,8 @@ import {
 import { inferNumericDomain } from '../domain-utils';
 import { isInMachineRange } from '../numerics/numeric-bignum';
 import { isPrime } from '../numerics/primes';
-import { signDiff } from '../numerics/numeric';
 import {
+  Rational,
   isBigRational,
   isRational,
   isRationalNegativeOne,
@@ -27,9 +25,10 @@ import {
 } from '../numerics/rationals';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { serializeJsonNumber } from './serialize';
 import { hashCode, bignumPreferred } from './utils';
-import { match } from './boxed-patterns';
+import { Expression } from '../../math-json';
+import { signDiff } from './numerics';
+import { match } from './match';
 
 /**
  * BoxedNumber
@@ -123,6 +122,48 @@ export class BoxedNumber extends _BoxedExpression {
     return h;
   }
 
+  get json(): Expression {
+    // Note: the `.json` property outputs a "default" serialization
+    // which does not attempt to capture all the information in the expression.
+    // In particular for numbers, it may output a numeric approximation of
+    // the number that can be represented as a JSON number, rather than
+    // the exact value.
+
+    const value = this._value;
+
+    if (value instanceof Decimal) {
+      if (value.isNaN()) return 'NaN';
+      const val = value.toNumber();
+      if (!Number.isFinite(val))
+        return val > 0 ? 'PositiveInfinity' : 'NegativeInfinity';
+      return val;
+    }
+
+    if (value instanceof Complex) {
+      if (value.isNaN()) return 'NaN';
+      if (value.isInfinite()) return 'ComplexInfinity';
+      if (value.im === 0) return value.re;
+      return ['Complex', value.re, value.im];
+    }
+
+    if (isBigRational(value)) {
+      const [n, d] = value;
+      return [
+        'Rational',
+        { num: `${n.toString()}n` },
+        { num: `${d.toString()}n` },
+      ];
+    } else if (isRational(value)) {
+      const [n, d] = value;
+      return ['Rational', n, d];
+    }
+
+    if (Number.isNaN(value)) return 'NaN';
+    if (!Number.isFinite(value))
+      return value > 0 ? 'PositiveInfinity' : 'NegativeInfinity';
+    return value;
+  }
+
   get head(): string {
     return 'Number';
   }
@@ -158,12 +199,6 @@ export class BoxedNumber extends _BoxedExpression {
   get domain(): BoxedDomain {
     this._domain ??= this.engine.domain(inferNumericDomain(this._value));
     return this._domain;
-  }
-
-  get json(): Expression {
-    return serializeJsonNumber(this.engine, this._value, {
-      latex: this._latex,
-    });
   }
 
   get sgn(): -1 | 0 | 1 | undefined | null {

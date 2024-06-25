@@ -12,6 +12,7 @@ import './boxed-expression/boxed-patterns';
 import './boxed-expression/boxed-string';
 import './boxed-expression/order';
 import './boxed-expression/utils';
+import './boxed-expression/serialize';
 import './rules';
 import './simplify-rules';
 import './solve';

@@ -1,16 +1,10 @@
 import { BoxedExpression, IComputeEngine } from '../public';
 
-import { MAX_SYMBOLIC_TERMS, asBignum, asFloat } from '../numerics/numeric';
+import { MAX_SYMBOLIC_TERMS } from '../numerics/numeric';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import { Product } from '../symbolic/product';
-import {
-  asRational,
-  isRationalOne,
-  isRationalZero,
-  mul,
-  neg,
-} from '../numerics/rationals';
+import { isRationalOne, isRationalZero, neg } from '../numerics/rationals';
 import { apply2N } from '../symbolic/utils';
 import {
   MultiIndexingSet,
@@ -19,10 +13,16 @@ import {
   cartesianProduct,
   range,
 } from './utils';
-import { each } from '../collection-utils';
+import { each, isCollection } from '../collection-utils';
 import { order } from '../boxed-expression/order';
 
 import { square } from './arithmetic-power';
+import {
+  asBignum,
+  asFloat,
+  asRational,
+  mul,
+} from '../boxed-expression/numerics';
 
 /** The canonical form of `Multiply`:
  * - remove `1`
@@ -220,8 +220,8 @@ function multiply2(
     op2.symbol === 'Undefined'
   )
     return ce.NaN;
-  if (op1.isNothing) return op2;
-  if (op2.isNothing) return op1;
+  if (op1.symbol === 'Nothing') return op2;
+  if (op2.symbol === 'Nothing') return op1;
   if (op1.numericValue !== null) {
     if (op1.isOne) return op2;
     if (op1.isNegativeOne) return canonicalNegate(op2);
@@ -317,7 +317,7 @@ export function evalMultiplication(
   }
   let result: BoxedExpression | undefined | null = null;
 
-  if (indexingSet?.length === 0) {
+  if (indexingSet?.length === 0 || isCollection(expr)) {
     const body =
       mode === 'simplify'
         ? expr.simplify()
@@ -359,7 +359,6 @@ export function evalMultiplication(
   }
 
   const fn = expr;
-  const savedContext = ce.swapScope(fn.scope);
   ce.pushScope();
 
   var indexArray: string[] = [];
@@ -546,7 +545,6 @@ export function evalMultiplication(
   }
 
   ce.popScope();
-  ce.swapScope(savedContext);
 
   return result ?? undefined;
 }

@@ -1,9 +1,4 @@
-import { Expression } from '../../../src/math-json';
-import { engine } from '../../utils';
-
-function evaluate(s: string): Expression {
-  return engine.parse(s).evaluate()?.json ?? 'ERROR';
-}
+import { engine, evaluate } from '../../utils';
 
 describe('SUM', () => {
   test('k is an Integer (as the index) and used a a Number (in the fraction)', () => {

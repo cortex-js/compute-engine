@@ -98,24 +98,12 @@ function makeIntegral(
   if (fn && ranges.length === 0) return [command, fn];
 
   fn ??= 'Nothing';
-  if (parser.computeEngine) {
-    const ce = parser.computeEngine;
-    let hasIndex = false;
-    const idTable = {};
-    for (const r of ranges)
-      if (r.index) {
-        hasIndex = true;
-        idTable[r.index] = { domain: 'ExtendedRealNumbers' };
-      }
+  parser.pushSymbolTable();
+  for (const r of ranges) if (r.index) parser.addSymbol(r.index, 'symbol');
 
-    if (hasIndex) ce.pushScope().declare(idTable);
+  parser.popSymbolTable();
 
-    fn = ce.box(fn).json;
-
-    if (hasIndex) ce.popScope();
-  }
-
-  return [command, fn, ...ranges.map((r) => makeRange(r))];
+  return [command, fn!, ...ranges.map((r) => makeRange(r))];
 }
 
 function makeRange(range: {

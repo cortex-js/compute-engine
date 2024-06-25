@@ -1,6 +1,5 @@
 import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
-import { asFloat } from '../numerics/numeric';
 import { isPrime } from '../numerics/primes';
 import {
   BoxedExpression,
@@ -14,10 +13,11 @@ import {
   SymbolDefinition,
   NumericFlags,
   LatexString,
-} from '../public';
+} from './public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { bignumPreferred, complexAllowed, isLatexString } from './utils';
 import { widen } from './boxed-domain';
+import { asFloat } from './numerics';
 
 /**
  * ### THEORY OF OPERATIONS

@@ -1,5 +1,5 @@
 import { Expression } from '../../../src/math-json';
-import { engine, printExpression } from '../../utils';
+import { engine, exprToString } from '../../utils';
 
 function check(arg: string | Expression): string {
   const boxed =
@@ -9,8 +9,8 @@ function check(arg: string | Expression): string {
   const canonical = boxed.canonical;
   // const evaluated = canonical.evaluate();
 
-  const boxStr = printExpression(boxed.json);
-  const canonicalStr = printExpression(canonical.json);
+  const boxStr = exprToString(boxed);
+  const canonicalStr = exprToString(canonical);
 
   let result =
     boxStr === canonicalStr
@@ -232,7 +232,7 @@ describe('DELIMITERS PARSING', () => {
         ["Equal", ["Add", "x", 1], 0],
         ["Equal", ["Add", ["Multiply", 2, ["Square", "x"]], 5], 1]
       ]
-      box-latex = \\bigl\\lbrack x+1=0, 2x^{2}+5=1\\bigr\\rbrack
+      box-latex = \\bigl\\lbrack x+1=0, 2x^2+5=1\\bigr\\rbrack
       latex     = \\bigl\\lbrack x+1=0, 2x^2+5=1\\bigr\\rbrack
     `);
 
@@ -245,9 +245,9 @@ describe('DELIMITERS PARSING', () => {
     `);
     expect(check('-(a+b)')).toMatchInlineSnapshot(`
       box       = ["Negate", ["Delimiter", ["Add", "a", "b"]]]
-      canonical = ["Subtract", ["Negate", "b"], "a"]
+      canonical = ["Subtract", ["Negate", "a"], "b"]
       box-latex = -(a+b)
-      latex     = -b-a
+      latex     = -a-b
     `);
     expect(check('(a+(c+d))')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Add", "a", ["Delimiter", ["Add", "c", "d"]]]]

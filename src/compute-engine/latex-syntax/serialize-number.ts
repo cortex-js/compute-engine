@@ -1,5 +1,5 @@
 import { Expression } from '../../math-json/math-json-format';
-import { NumberFormattingOptions } from './public';
+import { NumberFormat, NumberSerializationFormat } from './public';
 
 // Some vocabulary:
 // 123.456e78
@@ -14,73 +14,89 @@ import { NumberFormattingOptions } from './public';
  * Return a formatted fractional part by detecting repeating patterns.
  * 1234567 -> 123 456 7...
  * 1233333 -> 12(3)
+ *
+ * digitsCount is the number of digits in the whole part and fractional part
+ *
  */
 function formatFractionalPart(
-  m: string,
-  options: NumberFormattingOptions
+  digits: string,
+  wholeDigitsCount: number,
+  options: NumberSerializationFormat
 ): string {
-  const originalLength = m.length;
-  const originalM = m;
-
-  if (options.beginRepeatingDigits && options.endRepeatingDigits) {
+  if (options.repeatingDecimal && options.repeatingDecimal !== 'none') {
     // The last digit may have been rounded off, if it exceeds the precision,
     // which could throw off the repeating pattern detection. Ignore it.
-    m = m.slice(0, -1);
-    for (let i = 0; i < m.length - 16; i++) {
+    const truncatedDigits = digits.slice(0, -1);
+    for (let i = 0; i < digits.length - 16; i++) {
       // Offset is the part of the fractional part that is not repeating
-      const offset = m.substring(0, i);
+      const offset = truncatedDigits.substring(0, i);
       // Try to find a repeating pattern of length j
       for (let j = 0; j < 17; j++) {
-        const cycle = m.substring(i, i + j + 1);
-        const times = Math.floor((m.length - offset.length) / cycle.length);
+        const cycle = truncatedDigits.substring(i, i + j + 1);
+        const times = Math.floor(
+          (truncatedDigits.length - offset.length) / cycle.length
+        );
         if (times <= 3) break;
-        if ((offset + cycle.repeat(times + 1)).startsWith(m)) {
+        if ((offset + cycle.repeat(times + 1)).startsWith(truncatedDigits)) {
           // We've found a repeating pattern!
           if (cycle === '0') {
             // Psych! That pattern is '0'...
-            return offset.replace(/(\d{3})/g, '$1' + options.groupSeparator);
+            return insertFractionalGroupSeparator(offset, options);
           }
           // There is what looks like a true repeating pattern...
-          return (
-            offset.replace(/(\d{3})/g, '$1' + options.groupSeparator) +
-            options.beginRepeatingDigits +
-            cycle +
-            options.endRepeatingDigits
-          );
+          let pattern =
+            {
+              vinculum: '\\overline{#}',
+              parentheses: '(#)',
+              dots: '\\overset{\\cdots}{#1}#2\\overset{\\cdots}{#3}',
+              arc: '\\wideparen{#}',
+            }[options.repeatingDecimal] ?? '\\overline{#}';
+          pattern = pattern
+            .replace(/#1/g, cycle[0])
+            .replace(/#2/g, cycle.slice(1))
+            .replace(/#3/g, cycle.slice(-1))
+            .replace(/#/, cycle);
+          return insertFractionalGroupSeparator(offset, options) + pattern;
         }
       }
     }
   }
+
+  //
   // There was no repeating pattern we could find...
+  //
 
   // Are we displaying fewer digits than were provided?
   // Display a truncation marker.
-  const extraDigits = originalLength > options.precision - 1;
-  m = originalM;
-  if (extraDigits) m = m.substring(0, options.precision - 1);
+  let maxFractionalDigits =
+    typeof options.fractionalDigits === 'number'
+      ? options.fractionalDigits
+      : Infinity;
+  if (maxFractionalDigits < 0)
+    maxFractionalDigits = maxFractionalDigits - wholeDigitsCount;
+  if (maxFractionalDigits < 0) maxFractionalDigits = 0;
+  const extraDigits = digits.length > maxFractionalDigits;
+  if (extraDigits) digits = digits.substring(0, maxFractionalDigits);
 
   // Insert group separators if necessary
-  if (options.groupSeparator) {
-    m = m.replace(/(\d{3})/g, '$1' + options.groupSeparator);
-    if (m.endsWith(options.groupSeparator)) {
-      m = m.slice(0, -options.groupSeparator.length);
-    }
-  }
-  if (extraDigits) return m + options.truncationMarker;
-  return m;
+  digits = insertFractionalGroupSeparator(digits, options);
+
+  if (extraDigits) digits += options.truncationMarker;
+
+  return digits;
 }
 
-function formatExponent(exp: string, options: NumberFormattingOptions): string {
-  if (!exp) return '';
+function formatExponent(exp: string, options: NumberFormat): string {
+  if (!exp || exp === '0') return '';
   if (options.beginExponentMarker) {
     return (
       options.beginExponentMarker + exp + (options.endExponentMarker ?? '')
     );
   }
-  return '10^{' + exp + '}';
+  return `10^{${exp}}`;
 }
 
-/*
+/**
  * @param expr - A number, can be represented as a string
  *  particularly useful for arbitrary precision numbers) or a number (-12.45)
  * @return A textual representation of the number, formatted according to the
@@ -88,7 +104,7 @@ function formatExponent(exp: string, options: NumberFormattingOptions): string {
  */
 export function serializeNumber(
   expr: Expression | null,
-  options: NumberFormattingOptions
+  options: NumberSerializationFormat
 ): string {
   if (expr === null) return '';
   let num: string | number;
@@ -131,10 +147,7 @@ export function serializeNumber(
   // If so, "unrepeat" (expand) them
   if (/\([0-9]+\)/.test(num)) {
     const [_, body, repeat, trail] = num.match(/(.+)\(([0-9]+)\)(.*)$/) ?? [];
-    num =
-      body +
-      repeat.repeat(Math.ceil(options.precision / repeat.length)) +
-      trail;
+    num = body + repeat.repeat(6) + trail;
   }
 
   let sign = '';
@@ -171,7 +184,7 @@ export function serializeNumber(
  */
 function serializeScientificNotationNumber(
   valString: string,
-  options: NumberFormattingOptions,
+  options: NumberSerializationFormat,
   expMultiple = 1
 ): string | undefined {
   // For '7' returns '7e+0'
@@ -265,56 +278,88 @@ function serializeScientificNotationNumber(
     fractionalPart = m[2];
   }
 
-  const expString =
-    exponent !== 0 ? formatExponent(Number(exponent).toString(), options) : '';
+  const expString = formatExponent(Number(exponent).toString(), options);
 
-  if (options.groupSeparator) {
-    wholePart = wholePart.replace(
-      /\B(?=(\d{3})+(?!\d))/g,
-      options.groupSeparator
-    );
-    fractionalPart = formatFractionalPart(fractionalPart, options);
-  }
-  if (fractionalPart) fractionalPart = options.decimalMarker + fractionalPart;
+  fractionalPart = formatFractionalPart(
+    fractionalPart,
+    wholePart.length,
+    options
+  );
+  wholePart = insertWholeGroupSeparator(wholePart, options);
+
+  if (fractionalPart)
+    fractionalPart = options.decimalSeparator + fractionalPart;
 
   // @todo: does not respect the options.precision option
 
   if (!expString) return wholePart + fractionalPart;
-  if (wholePart === '1' && !fractionalPart) return expString;
+  if (!fractionalPart) {
+    if (wholePart === '1') return expString;
+    if (wholePart === '-1') return '-' + expString;
+  }
   return wholePart + fractionalPart + options.exponentProduct + expString;
 }
 
 function serializeAutoNotationNumber(
   valString: string,
-  options: NumberFormattingOptions
+  options: NumberSerializationFormat
 ): string {
   let m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/i);
-  let exponent: string | undefined = undefined;
   // if valString === '-1234567.89e-123'
   // m[1] = '-1234567.89'
   // m[2] = -123
+
+  // Is there is an exponent...
+  let exp = 0;
   if (m?.[1] && m[2]) {
-    // There is an exponent...
-    exponent = formatExponent(m[2], options);
+    exp = parseInt(m[2]);
+    valString = m[1];
   }
+
   let wholePart = m?.[1] ?? valString;
+
   let fractionalPart = '';
-  m = (exponent ? m![1] : valString).match(/^(.*)\.(.*)$/);
+  m = valString.match(/^(.*)\.(.*)$/);
   if (m?.[1] && m[2]) {
     wholePart = m[1];
     fractionalPart = m[2];
   }
-  if (options.groupSeparator) {
-    wholePart = wholePart.replace(
-      /\B(?=(\d{3})+(?!\d))/g,
-      options.groupSeparator
-    );
-    fractionalPart = formatFractionalPart(fractionalPart, options);
+
+  // If we have some fractional digits *and* an exponent, we need to
+  // adjust the whole part to include the fractional part.
+  // 1.23e4 -> 123e2
+  if (exp !== 0 && fractionalPart) {
+    wholePart += fractionalPart;
+    exp -= fractionalPart.length;
+    fractionalPart = '';
   }
-  if (fractionalPart) fractionalPart = options.decimalMarker + fractionalPart;
+
+  // Check if the exponent is in a range to be avoided
+  const avoid = options.avoidExponentsInRange;
+  if (exp !== 0 && avoid) {
+    if (exp >= avoid[0] && exp <= avoid[1]) {
+      [wholePart, fractionalPart] = toDecimalNumber(
+        wholePart,
+        fractionalPart,
+        exp
+      );
+    }
+  }
+
+  let exponent = formatExponent(exp.toString(), options);
+
+  if (fractionalPart)
+    fractionalPart =
+      options.decimalSeparator +
+      formatFractionalPart(fractionalPart, wholePart.length, options);
+
+  wholePart = insertWholeGroupSeparator(wholePart, options);
 
   if (!exponent) return wholePart + fractionalPart;
-  if (wholePart === '1' && !fractionalPart) return exponent;
+  if (!fractionalPart) {
+    if (wholePart === '1') return exponent;
+    if (wholePart === '-1') return '-' + exponent;
+  }
   return wholePart + fractionalPart + options.exponentProduct + exponent;
 }
 
@@ -492,4 +537,130 @@ export function deserializeHexFloat(value: string): number {
   }
 
   return negative ? -result : result;
+}
+
+function insertSeparatorEveryNDigitsFromLeft(
+  numberString: string,
+  n: number,
+  separator: string
+): string {
+  const regex = new RegExp(`(\\d{${n}})(?=\\d)`, 'g');
+  return numberString.replace(regex, `$1${separator}`);
+}
+
+function insertSeparatorEveryNDigitsFromRight(
+  numberString: string,
+  n: number,
+  separator: string
+): string {
+  const regex = new RegExp(`(\\d{${n}})(?=\\d)`, 'g');
+  const reversedSeparator = separator.split('').reverse().join('');
+  return numberString
+    .split('')
+    .reverse()
+    .join('')
+    .replace(regex, `$1${reversedSeparator}`)
+    .split('')
+    .reverse()
+    .join('');
+}
+
+function insertIndianNumberingSystem(numberString: string, separator: string) {
+  let reverseString = numberString.split('').reverse().join('');
+  const reversedSeparator = separator.split('').reverse().join('');
+  let formattedString = reverseString.replace(
+    /(\d{3})(?=\d)/,
+    `$1${reversedSeparator}`
+  );
+  formattedString = formattedString.replace(
+    /(\d{2})(?=(\d{2})+,)/g,
+    `$1${reversedSeparator}`
+  );
+  return formattedString.split('').reverse().join('');
+}
+
+function insertGroupSeparator(
+  numberString: string,
+  options: NumberSerializationFormat,
+  part: 0 | 1
+): string {
+  let group = options.digitGroup;
+  if (typeof group !== 'string' && Array.isArray(group)) group = group[part];
+
+  const separator =
+    typeof options.digitGroupSeparator === 'string'
+      ? options.digitGroupSeparator
+      : options.digitGroupSeparator[part];
+  if (!separator) return numberString;
+
+  if (group === 'lakh') {
+    if (part === 0) return insertIndianNumberingSystem(numberString, separator);
+    return insertSeparatorEveryNDigitsFromLeft(numberString, 3, separator);
+  }
+
+  if ((group as any as boolean) === false || group <= 0) return numberString;
+  if (part === 1)
+    return insertSeparatorEveryNDigitsFromLeft(numberString, group, separator);
+  return insertSeparatorEveryNDigitsFromRight(numberString, group, separator);
+}
+
+function insertFractionalGroupSeparator(
+  numberString: string,
+  options: NumberSerializationFormat
+): string {
+  return insertGroupSeparator(numberString, options, 1);
+}
+
+function insertWholeGroupSeparator(
+  numberString: string,
+  options: NumberSerializationFormat
+): string {
+  return insertGroupSeparator(numberString, options, 0);
+}
+
+interface Result {
+  newWholePart: string;
+  newFractionalPart: string;
+}
+
+// Given a whole part, fractional part and exponent, return a new whole part
+// and fractional part that represents the number in decimal form
+// For example, toDecimalNumber(123, 456, 2) -> 12345.6
+function toDecimalNumber(
+  wholePart: string,
+  fractionalPart: string,
+  exp: number
+): [string, string] {
+  // Combine the whole part and fractional part into a single string
+  let combinedNumber = wholePart + fractionalPart;
+
+  // Find the length of the whole part
+  const wholeLength = wholePart.length;
+
+  // Calculate the new position of the decimal point
+  const newDecimalPosition = wholeLength + exp;
+
+  let newWholePart: string;
+  let newFractionalPart: string;
+
+  // Handle cases where the new decimal position is within the number, or outside
+  if (newDecimalPosition > 0) {
+    if (newDecimalPosition >= combinedNumber.length) {
+      // If the new decimal position is beyond the number length, pad with zeros
+      combinedNumber =
+        combinedNumber + '0'.repeat(newDecimalPosition - combinedNumber.length);
+      newWholePart = combinedNumber;
+      newFractionalPart = '';
+    } else {
+      // If the new decimal position is within the number length, split at the decimal point
+      newWholePart = combinedNumber.slice(0, newDecimalPosition);
+      newFractionalPart = combinedNumber.slice(newDecimalPosition);
+    }
+  } else {
+    // If the new decimal position is negative or zero, pad with zeros in front
+    newWholePart = '0';
+    newFractionalPart = '0'.repeat(-newDecimalPosition) + combinedNumber;
+  }
+
+  return [newWholePart, newFractionalPart];
 }

@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { Expression } from '../../src/math-json/math-json-format';
-import { latex, simplifyToJson } from '../utils';
+import { latex, simplify } from '../utils';
 
 export const ce = new ComputeEngine();
 
@@ -33,23 +33,23 @@ describe('SIMPLIFY', () => {
 
 describe('SIMPLIFY', () => {
   test(`simplify(1 + 1e199) (precision loss)`, () =>
-    expect(simplifyToJson('1 + 1e999')).toMatchInlineSnapshot(
+    expect(simplify('1 + 1e999')).toMatchInlineSnapshot(
       `1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001`
     ));
 
   test(`1.234 + 5678`, () =>
-    expect(simplifyToJson('1.234 + 5678')).toMatchInlineSnapshot(`5679.234`));
+    expect(simplify('1.234 + 5678')).toMatchInlineSnapshot(`5679.234`));
 
   test(`1.234 + 5.678`, () =>
-    expect(simplifyToJson('1.234 + 5.678')).toMatchInlineSnapshot(`6.912`));
+    expect(simplify('1.234 + 5.678')).toMatchInlineSnapshot(`6.912`));
 
   test(`\\frac34 + \\frac12`, () =>
-    expect(simplifyToJson('\\frac34 + \\frac12')).toMatchInlineSnapshot(
+    expect(simplify('\\frac34 + \\frac12')).toMatchInlineSnapshot(
       `["Rational", 5, 4]`
     ));
 
   test(`\\frac34 + 1e99`, () =>
-    expect(simplifyToJson('\\frac34 + 1e99')).toMatchInlineSnapshot(`
+    expect(simplify('\\frac34 + 1e99')).toMatchInlineSnapshot(`
       [
         "Rational",
         "4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003",
@@ -58,21 +58,21 @@ describe('SIMPLIFY', () => {
     `));
 
   test(`\\frac34 + 2`, () =>
-    expect(simplifyToJson('\\frac34 + 2')).toMatchInlineSnapshot(
+    expect(simplify('\\frac34 + 2')).toMatchInlineSnapshot(
       `["Rational", 11, 4]`
     ));
 
   test(`1234 + 5678`, () =>
-    expect(simplifyToJson('1234 + 5678')).toMatchInlineSnapshot(`6912`));
+    expect(simplify('1234 + 5678')).toMatchInlineSnapshot(`6912`));
 
   test(`-1234 - 5678`, () =>
-    expect(simplifyToJson('-1234 - 5678')).toMatchInlineSnapshot(`-6912`));
+    expect(simplify('-1234 - 5678')).toMatchInlineSnapshot(`-6912`));
 
   test(`1234 + 5678  + 1.0000000000001`, () =>
-    expect(
-      simplifyToJson('1234 + 5678  + 1.0000000000001')
-    ).toMatchInlineSnapshot(`6913.0000000000001`));
+    expect(simplify('1234 + 5678  + 1.0000000000001')).toMatchInlineSnapshot(
+      `6913.0000000000001`
+    ));
 
   test(`1e149 + 1e150`, () =>
-    expect(simplifyToJson('1e149 + 1e150')).toMatchInlineSnapshot(`1.1e+150`));
+    expect(simplify('1e149 + 1e150')).toMatchInlineSnapshot(`1.1e+150`));
 });

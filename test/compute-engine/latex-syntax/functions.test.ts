@@ -1,4 +1,8 @@
-import { parse } from '../../utils';
+import { engine as ce } from '../../utils';
+
+function parse(s: string) {
+  return ce.parse(s);
+}
 
 describe('Custom Function Parsing', () => {
   test('No arg list', () => expect(parse('f')).toMatchInlineSnapshot(`f`));

@@ -1,5 +1,5 @@
+import { isRelationalOperator } from '../boxed-expression/utils';
 import { checkPure } from '../boxed-expression/validate';
-import { isRelationalOperator } from '../latex-syntax/dictionary/definitions-relational-operators';
 import {
   BoxedExpression,
   IComputeEngine,
@@ -400,10 +400,4 @@ function canonicalRelational(
   return ce._fn('And', [ce._fn(head, newOps), ...nestedRelational]);
 
   // if (!ops.every((op) => op.isValid))
-}
-
-export function isInequality(expr: BoxedExpression): boolean {
-  const h = expr.head;
-  if (typeof h !== 'string') return false;
-  return ['Equal', 'Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(h);
 }

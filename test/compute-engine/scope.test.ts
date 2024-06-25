@@ -2,7 +2,6 @@ import { ComputeEngine } from '../../src/compute-engine/compute-engine';
 
 import { engine } from '../utils';
 
-engine.jsonSerializationOptions = { precision: 20 };
 const ce: ComputeEngine = engine;
 
 describe('SETTING/FORGETTING', () => {
@@ -16,28 +15,34 @@ describe('SETTING/FORGETTING', () => {
     expect(ce.box(['Add', 'x1', 1]).evaluate().json).toEqual(43);
 
     const expr = ce.box(['Add', 'x1', -1]);
-    expect(expr.json).toMatchObject(['Subtract', 'x1', 1]);
+    expect(expr).toMatchInlineSnapshot(`["Subtract", "x1", 1]`);
     expect(expr.evaluate().json).toEqual(41);
 
     ce.forget('x1');
 
     // Expression should be symbolic 'x1'
-    expect(expr.json).toMatchObject(['Subtract', 'x1', 1]);
-    expect(expr.evaluate().json).toMatchObject(['Subtract', 'x1', 1]);
+    expect(expr).toMatchInlineSnapshot(`["Subtract", "x1", 1]`);
+    expect(expr.evaluate()).toMatchInlineSnapshot(`["Subtract", "x1", 1]`);
 
     expect(ce.box(`x1`).domain).toMatchInlineSnapshot(`PositiveIntegers`);
-    expect(ce.box(`x1`).json).toMatch('x1');
-    expect(ce.box(`x1`).evaluate().json).toMatch('x1');
-    expect(ce.box(['Add', 'x1', 5]).evaluate().json).toMatchInlineSnapshot(
+    expect(ce.box(`x1`)).toMatchInlineSnapshot(`x1`);
+    expect(ce.box(`x1`).evaluate()).toMatchInlineSnapshot(`x1`);
+    expect(ce.box(['Add', 'x1', 5]).evaluate()).toMatchInlineSnapshot(
       `["Add", "x1", 5]`
     );
-    expect(expr.evaluate().json).toMatchObject(['Subtract', 'x1', 1]);
+    expect(expr.evaluate().json).toMatchInlineSnapshot(`
+      [
+        Add,
+        x1,
+        -1,
+      ]
+    `);
   });
 
   test(`Forget with assign`, () => {
     ce.assign('x2', 42);
 
-    expect(ce.box(`x2`).json).toMatchInlineSnapshot(`x2`);
+    expect(ce.box(`x2`)).toMatchInlineSnapshot(`x2`);
     expect(ce.box(`x2`).evaluate().json).toEqual(42);
 
     expect(ce.box(['Add', 'x2', 1]).evaluate().json).toEqual(43);
@@ -48,7 +53,13 @@ describe('SETTING/FORGETTING', () => {
     ce.assign('x2', undefined);
 
     // Expression should be symbolic 'y1'
-    expect(expr.evaluate().json).toMatchObject(['Subtract', 'x2', 1]);
+    expect(expr.evaluate().json).toMatchInlineSnapshot(`
+      [
+        Add,
+        x2,
+        -1,
+      ]
+    `);
 
     expect(ce.box(`x2`).domain).toMatchInlineSnapshot(`PositiveIntegers`);
     expect(ce.box(`x2`).json).toMatch('x2');
@@ -79,19 +90,19 @@ describe('SETTING/FORGETTING', () => {
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`["Less", 30, "x4"]`); // @fixme
     expect(x4.isPrime ?? 'undefined').toMatchInlineSnapshot(`undefined`);
     expect(x4.evaluate().numericValue).toMatchInlineSnapshot(`null`);
-    expect(x4.domain?.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
+    expect(x4.domain).toMatchInlineSnapshot(`ExtendedRealNumbers`);
 
     ce.assume(['Equal', 'x4', 17]);
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`False`);
     expect(x4.isPrime ?? 'undefined').toEqual(true);
     expect(x4.evaluate().value).toEqual(17);
-    expect(x4.domain?.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
+    expect(x4.domain).toMatchInlineSnapshot(`ExtendedRealNumbers`);
 
     ce.assign({ x4: 2017 });
     expect(testX4_1.evaluate()).toMatchInlineSnapshot(`True`);
     expect(x4.isPrime ?? 'undefined').toMatchInlineSnapshot(`true`);
     expect(x4.value).toMatchInlineSnapshot(`2017`);
-    expect(x4.domain?.json).toMatchInlineSnapshot(`ExtendedRealNumbers`);
+    expect(x4.domain).toMatchInlineSnapshot(`ExtendedRealNumbers`);
   });
 });
 

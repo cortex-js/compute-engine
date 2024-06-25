@@ -1,4 +1,3 @@
-// import { parseCortex } from '../src/cortex/parse-cortex';
 import { validCortex, invalidCortex } from '../utils';
 
 describe('CORTEX PARSING SHEBANG', () => {
@@ -6,9 +5,19 @@ describe('CORTEX PARSING SHEBANG', () => {
     expect(validCortex('#! /bin/cortex\n3.14 ')).toBe(3.14);
   });
   test('Invalid shebang', () => {
-    expect(invalidCortex('\n#! boo\n ')).toMatchInlineSnapshot(
-      `["Error", ["String", ["unexpected-symbol", "#"]]]`
-    );
+    // @fixme: should output shebang specific error message
+    expect(invalidCortex('\n#! boo\n ')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            #,
+          ],
+        ],
+      ]
+    `);
   });
 });
 
@@ -54,9 +63,19 @@ describe('CORTEX PARSING SPACES', () => {
     expect(validCortex(' \u2000 ')).toBe('Nothing');
     expect(validCortex(' \u2009 ')).toBe('Nothing');
     expect(validCortex('1\t2')).toStrictEqual(['Do', 1, 2]);
-    expect(validCortex('1\t+\t2')).toMatchInlineSnapshot(
-      `["Error", ["String", ["unexpected-symbol", "+"]]]`
-    );
+    // @fixme: should parse tab correctly
+    expect(validCortex('1\t+\t2')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            +,
+          ],
+        ],
+      ]
+    `);
     expect(validCortex(' 2 \t 1')).toStrictEqual(['Do', 2, 1]);
   });
 });
@@ -83,42 +102,77 @@ describe('CORTEX PARSING COMMENTS', () => {
  * Multi-line comment
  */`)
     ).toBe(3.14);
+
+    // @fixme: should parse multi-line comment correctly
     expect(
       validCortex(`3.14 +
 3.14 /*
  * Multi-line comment
  */`)
-    ).toMatchInlineSnapshot(
-      `["Error", ["String", ["unexpected-symbol", "+"]]]`
-    );
+    ).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            +,
+          ],
+        ],
+      ]
+    `);
     expect(
       validCortex(`3.14 +
 5.67 /*
  * Nested /* Comment */
  */`)
-    ).toMatchInlineSnapshot(
-      `["Error", ["String", ["unexpected-symbol", "+"]]]`
-    );
+    ).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            +,
+          ],
+        ],
+      ]
+    `);
   });
   test('Invalid multiline comment', () => {
-    expect(
-      invalidCortex(`   /* over nested /* comment */ */ */`)
-    ).toMatchInlineSnapshot(
-      `["Error", ["String", ["unexpected-symbol", "*"]]]`
-    );
+    expect(invalidCortex(`   /* over nested /* comment */ */ */`))
+      .toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            *,
+          ],
+        ],
+      ]
+    `);
 
-    expect(
-      invalidCortex(`   /* under nested /* comment */`)
-    ).toMatchInlineSnapshot(`["Error", ["String", "end-of-comment-expected"]]`);
+    expect(invalidCortex(`   /* under nested /* comment */`))
+      .toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          end-of-comment-expected,
+        ],
+      ]
+    `);
   });
 });
 
 describe('CORTEX PARSING NUMBERS', () => {
   test('Constants', () => {
-    expect(validCortex('NaN')).toStrictEqual({ num: 'NaN' });
-    expect(validCortex('-Infinity')).toStrictEqual({ num: '-Infinity' });
-    expect(validCortex('Infinity')).toStrictEqual({ num: '+Infinity' });
-    expect(validCortex('+Infinity')).toStrictEqual({ num: '+Infinity' });
+    expect(validCortex('NaN')).toStrictEqual('NaN');
+    expect(validCortex('-Infinity')).toStrictEqual('NegativeInfinity');
+    expect(validCortex('Infinity')).toStrictEqual('PositiveInfinity');
+    expect(validCortex('+Infinity')).toStrictEqual('PositiveInfinity');
   });
   test('Integers', () => {
     expect(validCortex('0')).toBe(0);
@@ -161,28 +215,71 @@ describe('CORTEX PARSING NUMBERS', () => {
     expect(validCortex('-0b10')).toBe(-2);
   });
   test('Invalid Floating-point number', () => {
-    expect(invalidCortex('1.2.3')).toMatchInlineSnapshot(
-      `["Error", ["String", ["unexpected-symbol", "."]]]`
-    );
+    expect(invalidCortex('1.2.3')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            .,
+          ],
+        ],
+      ]
+    `);
     // @todo: revisit
-    expect(invalidCortex('2et')).toMatchInlineSnapshot(
-      `["UnexpectedSuccess", "2et"]`
-    );
-    expect(invalidCortex('62_73_7547.k-13')).toMatchInlineSnapshot(
-      `["UnexpectedSuccess", ["Do", 62737547, "k", -13]]`
-    );
-    expect(invalidCortex('62_73_7547k-13')).toMatchInlineSnapshot(
-      `["UnexpectedSuccess", ["Do", 62737547, "k", -13]]`
-    );
-    expect(invalidCortex('.1e-13')).toMatchInlineSnapshot(
-      `["Error", ["String", ["unexpected-symbol", "."]]]`
-    );
-    expect(invalidCortex('62_73_7547.e-13')).toMatchInlineSnapshot(
-      `["UnexpectedSuccess", 0.0000062737547]`
-    );
-    expect(invalidCortex('-62_73_7547.e-13')).toMatchInlineSnapshot(
-      `["UnexpectedSuccess", -0.0000062737547]`
-    );
+    expect(invalidCortex('2et')).toMatchInlineSnapshot(`
+      [
+        UnexpectedSuccess,
+        2et,
+      ]
+    `);
+    expect(invalidCortex('62_73_7547.k-13')).toMatchInlineSnapshot(`
+      [
+        UnexpectedSuccess,
+        [
+          Do,
+          62737547,
+          k,
+          -13,
+        ],
+      ]
+    `);
+    expect(invalidCortex('62_73_7547k-13')).toMatchInlineSnapshot(`
+      [
+        UnexpectedSuccess,
+        [
+          Do,
+          62737547,
+          k,
+          -13,
+        ],
+      ]
+    `);
+    expect(invalidCortex('.1e-13')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unexpected-symbol,
+            .,
+          ],
+        ],
+      ]
+    `);
+    expect(invalidCortex('62_73_7547.e-13')).toMatchInlineSnapshot(`
+      [
+        UnexpectedSuccess,
+        0.0000062737547,
+      ]
+    `);
+    expect(invalidCortex('-62_73_7547.e-13')).toMatchInlineSnapshot(`
+      [
+        UnexpectedSuccess,
+        -0.0000062737547,
+      ]
+    `);
   });
   test('Invalid Binary numbers', () => {
     // expect(invalidCortex('0b0b0')).toMatchInlineSnapshot();
@@ -223,44 +320,110 @@ describe('CORTEX PARSING SYMBOLS', () => {
     expect(validCortex('`👩🏻‍🎤🤯`')).toBe('👩🏻‍🎤🤯');
   });
   test('Invalid Symbols', () => {
-    expect(invalidCortex('`abc')).toMatchInlineSnapshot(
-      `["Error", ["String", ["unbalanced-verbatim-symbol", "abc"]]]`
-    );
+    expect(invalidCortex('`abc')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            unbalanced-verbatim-symbol,
+            abc,
+          ],
+        ],
+      ]
+    `);
     // Symbol must fit on a line
     expect(invalidCortex('`abc\nd`')).toMatchInlineSnapshot(`
       [
-        "Error",
+        Error,
         [
-          "String",
-          ["unbalanced-verbatim-symbol", "abc
-      "],
-          ["unexpected-symbol", "d"]
-        ]
+          String,
+          [
+            unbalanced-verbatim-symbol,
+            abc
+      ,
+          ],
+          [
+            unexpected-symbol,
+            d,
+          ],
+        ],
       ]
     `);
-    expect(invalidCortex('``')).toMatchInlineSnapshot(
-      `["Error", ["String", "empty-verbatim-symbol"]]`
-    );
+    expect(invalidCortex('``')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          empty-verbatim-symbol,
+        ],
+      ]
+    `);
     // Start with a hash sign
-    expect(invalidCortex('`#abcd`')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-symbol-name", "#abcd"]]]`
-    );
+    expect(invalidCortex('`#abcd`')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-symbol-name,
+            #abcd,
+          ],
+        ],
+      ]
+    `);
     // Starts with a dollar sign:
-    expect(invalidCortex('`$abcd`')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-symbol-name", "$abcd"]]]`
-    );
+    expect(invalidCortex('`$abcd`')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-symbol-name,
+            $abcd,
+          ],
+        ],
+      ]
+    `);
     // Starts with a quotation mark:
-    expect(invalidCortex('`"abcd`')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-symbol-name", ""abcd"]]]`
-    );
+    expect(invalidCortex('`"abcd`')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-symbol-name,
+            "abcd,
+          ],
+        ],
+      ]
+    `);
     // Includes a space:
-    expect(invalidCortex('`ab cd`')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-symbol-name", "ab cd"]]]`
-    );
+    expect(invalidCortex('`ab cd`')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-symbol-name,
+            ab cd,
+          ],
+        ],
+      ]
+    `);
     // Includes a space:
-    expect(validCortex('`Mind 🤯`')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-symbol-name", "Mind 🤯"]]]`
-    );
+    expect(validCortex('`Mind 🤯`')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-symbol-name,
+            Mind 🤯,
+          ],
+        ],
+      ]
+    `);
     // expect(invalidCortex('#abcd')).toMatchInlineSnapshot();
     // expect(invalidCortex('$abcd')).toMatchInlineSnapshot();
     // expect(invalidCortex('$ab_cd$')).toMatchInlineSnapshot();
@@ -339,83 +502,203 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
   });
 
   test('Invalid string', () => {
-    expect(invalidCortex('"invalid \\x escape "')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-escape-sequence", "\\x"]]]`
-    );
+    expect(invalidCortex('"invalid \\x escape "')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-escape-sequence,
+            \\x,
+          ],
+        ],
+      ]
+    `);
 
     expect(invalidCortex('end"')).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["String", ["string-literal-opening-delimiter-expected", """]]
+        Error,
+        [
+          String,
+          [
+            string-literal-opening-delimiter-expected,
+            ",
+          ],
+        ],
       ]
     `);
     expect(invalidCortex('end"\n')).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["String", ["string-literal-opening-delimiter-expected", """]]
+        Error,
+        [
+          String,
+          [
+            string-literal-opening-delimiter-expected,
+            ",
+          ],
+        ],
       ]
     `);
     expect(invalidCortex('"start\nend"')).toMatchInlineSnapshot(`
       [
-        "Error",
+        Error,
         [
-          "String",
-          ["string-literal-closing-delimiter-expected", """],
-          ["unexpected-symbol", "e"]
-        ]
+          String,
+          [
+            string-literal-closing-delimiter-expected,
+            ",
+          ],
+          [
+            unexpected-symbol,
+            e,
+          ],
+        ],
       ]
     `);
     expect(invalidCortex('"start')).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["String", ["string-literal-closing-delimiter-expected", """]]
+        Error,
+        [
+          String,
+          [
+            string-literal-closing-delimiter-expected,
+            ",
+          ],
+        ],
       ]
     `);
-    expect(invalidCortex('"invalid \\x escape "')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-escape-sequence", "\\x"]]]`
-    );
-    expect(invalidCortex('"invalid \\U0041 escape "')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-escape-sequence", "\\U"]]]`
-    );
-    expect(invalidCortex('"invalid \\u23ghjik escape "')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-unicode-codepoint-string", "23g"]]]`
-    );
-    expect(
-      invalidCortex('"invalid \\u{defughjik} escape "')
-    ).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-unicode-codepoint-string", "defughji"]]]`
-    );
+    expect(invalidCortex('"invalid \\x escape "')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-escape-sequence,
+            \\x,
+          ],
+        ],
+      ]
+    `);
+    expect(invalidCortex('"invalid \\U0041 escape "')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-escape-sequence,
+            \\U,
+          ],
+        ],
+      ]
+    `);
+    expect(invalidCortex('"invalid \\u23ghjik escape "'))
+      .toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-unicode-codepoint-string,
+            23g,
+          ],
+        ],
+      ]
+    `);
+    expect(invalidCortex('"invalid \\u{defughjik} escape "'))
+      .toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-unicode-codepoint-string,
+            defughji,
+          ],
+        ],
+      ]
+    `);
     expect(invalidCortex('"invalid \\u{20ffff} escape "'))
       .toMatchInlineSnapshot(`
       [
-        "Error",
-        ["String", ["invalid-unicode-codepoint-value", "U+0020FFFF"]]
+        Error,
+        [
+          String,
+          [
+            invalid-unicode-codepoint-value,
+            U+0020FFFF,
+          ],
+        ],
       ]
     `);
-    expect(invalidCortex('"invalid \\u{d888} escape "')).toMatchInlineSnapshot(
-      `["Error", ["String", ["invalid-unicode-codepoint-value", "U+D888"]]]`
-    );
+    expect(invalidCortex('"invalid \\u{d888} escape "')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            invalid-unicode-codepoint-value,
+            U+D888,
+          ],
+        ],
+      ]
+    `);
     // Prematurely closed interpolated expression
     expect(invalidCortex('"start \\("')).toMatchInlineSnapshot(`
       [
-        "Error",
+        Error,
         [
-          "String",
-          ["string-literal-opening-delimiter-expected", """],
-          ["closing-bracket-expected", ")"],
-          ["string-literal-closing-delimiter-expected", """]
-        ]
+          String,
+          [
+            string-literal-opening-delimiter-expected,
+            ",
+          ],
+          [
+            closing-bracket-expected,
+            ),
+          ],
+          [
+            string-literal-closing-delimiter-expected,
+            ",
+          ],
+        ],
       ]
     `);
-    expect(invalidCortex('"start \\(+"')).toMatchInlineSnapshot(
-      `["Error", ["String", ["closing-bracket-expected", ")"]]]`
-    );
-    expect(invalidCortex('"start \\(end"')).toMatchInlineSnapshot(
-      `["Error", ["String", ["closing-bracket-expected", ")"]]]`
-    );
-    expect(invalidCortex('"start \\( end"')).toMatchInlineSnapshot(
-      `["Error", ["String", ["closing-bracket-expected", ")"]]]`
-    );
+    expect(invalidCortex('"start \\(+"')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            closing-bracket-expected,
+            ),
+          ],
+        ],
+      ]
+    `);
+    expect(invalidCortex('"start \\(end"')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            closing-bracket-expected,
+            ),
+          ],
+        ],
+      ]
+    `);
+    expect(invalidCortex('"start \\( end"')).toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          [
+            closing-bracket-expected,
+            ),
+          ],
+        ],
+      ]
+    `);
   });
 });
 
@@ -448,14 +731,28 @@ describe('CORTEX PARSING MULTILINE STRINGS', () => {
   test('Invalid string', () => {
     expect(invalidCortex('"""abc\nhello\nworld\n"""')).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["String", "multiline-string-expected", ["unexpected-symbol", "a"]]
+        Error,
+        [
+          String,
+          multiline-string-expected,
+          [
+            unexpected-symbol,
+            a,
+          ],
+        ],
       ]
     `);
 
-    expect(invalidCortex('"""\nhello\nworld\n boo  """')).toMatchInlineSnapshot(
-      `["Error", ["String", "multiline-whitespace-expected"]]`
-    );
+    expect(invalidCortex('"""\nhello\nworld\n boo  """'))
+      .toMatchInlineSnapshot(`
+      [
+        Error,
+        [
+          String,
+          multiline-whitespace-expected,
+        ],
+      ]
+    `);
   });
 });
 
@@ -470,21 +767,35 @@ describe('CORTEX PARSING EXTENDED STRINGS', () => {
     expect(validCortex('#"hello "world""#')).toStrictEqual({
       str: 'hello "world"',
     });
-    expect(validCortex('#"hello \\n "world""#')).toMatchInlineSnapshot(
-      `{str: "hello \\n "world""}`
-    );
+    expect(validCortex('#"hello \\n "world""#')).toMatchInlineSnapshot(`
+      {
+        str: hello \\n "world",
+      }
+    `);
   });
   test('Invalid string', () => {
     expect(invalidCortex('#"hello world"')).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["String", ["string-literal-closing-delimiter-expected", "#""]]
+        Error,
+        [
+          String,
+          [
+            string-literal-closing-delimiter-expected,
+            #",
+          ],
+        ],
       ]
     `);
     expect(invalidCortex('##"hello world"#')).toMatchInlineSnapshot(`
       [
-        "Error",
-        ["String", ["string-literal-closing-delimiter-expected", "##""]]
+        Error,
+        [
+          String,
+          [
+            string-literal-closing-delimiter-expected,
+            ##",
+          ],
+        ],
       ]
     `);
   });

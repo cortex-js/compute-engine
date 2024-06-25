@@ -1,9 +1,9 @@
 import { MathJsonIdentifier } from '../math-json/math-json-format';
+import { asFloat } from './boxed-expression/numerics';
+import { isRelationalOperator } from './boxed-expression/utils';
 import { isCollection, isFiniteIndexableCollection } from './collection-utils';
-import { isRelationalOperator } from './latex-syntax/dictionary/definitions-relational-operators';
 import { normalizeIndexingSet } from './library/utils';
 import {
-  asFloat,
   chop,
   factorial,
   gamma,
@@ -29,7 +29,8 @@ export type CompiledFunctions = {
     | string
     | ((
         args: ReadonlyArray<BoxedExpression>,
-        compile: (expr: BoxedExpression) => JSSource
+        compile: (expr: BoxedExpression) => JSSource,
+        target: CompileTarget
       ) => JSSource);
 };
 
@@ -78,7 +79,7 @@ const NATIVE_JS_FUNCTIONS: CompiledFunctions = {
   Gamma: '_SYS.gamma',
   GCD: '_SYS.gcd',
   // Math.hypot
-  Integrate: (args, compile) => compileIntegrate(args, compile),
+  Integrate: (args, compile, target) => compileIntegrate(args, compile, target),
   LCM: '_SYS.lcm',
   Limit: (args, compile) =>
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,

@@ -1,5 +1,5 @@
+import { asSmallInteger } from '../boxed-expression/numerics';
 import { simplifyAdd } from '../library/arithmetic-add';
-import { asSmallInteger } from '../numerics/numeric';
 import { BoxedExpression } from '../public';
 import { canonicalNegate } from './negate';
 

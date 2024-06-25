@@ -29,6 +29,9 @@ export function flattenOps(
   return result;
 }
 
+/**
+ * @todo: this function should probably not be recursive. As it, it is semi-recursive.
+ */
 export function flattenSequence(
   xs: ReadonlyArray<BoxedExpression>
 ): ReadonlyArray<BoxedExpression> {

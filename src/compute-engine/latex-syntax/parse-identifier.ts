@@ -271,13 +271,13 @@ export function parseInvalidIdentifier(parser: Parser): Expression | null {
   // if (prefix === null) return null;
 
   // const start = parser.index;
-  // parser.next();
+  // parser.nextToken();
   // if (parser.match('<{>')) {
   //   let level = 0;
   //   while (!parser.atEnd && level === 0 && parser.peek !== '<}>') {
   //     if (parser.peek === '<{>') level += 1;
   //     if (parser.peek === '<}>') level -= 1;
-  //     parser.next();
+  //     parser.nextToken();
   //   }
   //   parser.match('<}>');
   // }

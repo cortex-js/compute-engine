@@ -1,6 +1,113 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The canonical form of expressions has changed. It is now more consistent and
+  simpler and should produce more predictable results.
+
+  For example, previously `ce.parse("1-x^2")` would produce
+  `["Subtract", 1, ["Square", "x"]]`.
+
+  While this is a readable form, it introduces some complications when
+  manipulating the expression: both the `Subtract` and `Square` functions have
+  to be handled, in addition to `Add` and `Power`.
+
+  The new canonical form of this expression is
+  `["Add", 1, ["Negate", ["Power", "x", 2]]]`. It is a bit more verbose, but it
+  is simpler to manipulate.
+
+- The `ce.serialize()` method has been replaced with `expr.toLatex()` and
+  `expr.toMathJson()`. These methods take an optional serialization option
+  object. The `ce.latexOptions` and `ce.jsonSerializationOptions` properties
+  have been removed. Use the `options` argument of `toLatex()` and
+  `toMathJson()` instead.
+
+- The default JSON serialization of an expression has changed.
+
+  Previously, the default JSON serialization, accessed via the `.json` property,
+  had some transformations applied to it (sugaring) to make the JSON more human
+  readable.
+
+  For example, `ce.parse("\\frac12").json` would return the symbol `"Half"`
+  instead of `["Divide", 1, 2]`.
+
+  However, this could lead to some confusion when manipulating the JSON
+  directly. Since the JSON is intended to be used by machine more than humans,
+  the transformations have been removed.
+
+  The `expr.json` property now returns the JSON representing the expression,
+  without any transformations.
+
+  Note that the `expr.json` property ignores the settings from
+  `ce.jsonSerializationOptions`.
+
+  To get a version of JSON with some transformations and shorthands applied use
+  the `ce.serialize()` function. You can control the output of `ce.serialize()`
+  with `ce.jsonSerializationOptions`.
+
+  ```js
+  ce.serialize(expr, {format: "json"})
+  ```
+
+  In practice, the impact of both of these changes should be minimal. If you
+  were manipulating expressions using `BoxedExpression`, the new canonical form
+  should make it easier to manipulate expressions. You can potentially simplify
+  your code by removing special cases for functions such as `Square` and
+  `Subtract`.
+
+  If you were using the JSON serialization directly, you may also be able to
+  simplify you code since the default output from `expr.json` is now more
+  consistent and simpler.
+
+- The name of some number formatting options has changed. See the  
+  `NumberFormat` and `NumberSerializationFormat` types.
+
+- The values +infinity, -infinity and NaN are now represented preferably with
+  the symbols `PositiveInfinity`, `NegativeInfinity` and `NaN` respectively.
+  Previously they were represent with corresponding numeric values, i.e.
+  `{num: "+Infinity"}`, `{num: "-Infinity"}` and `{num: "NaN"}`. The numeric
+  values are still supported, but the symbols are preferred.
+
+- The method `expr.isNothing` has been removed. Instead, use
+  `expr.symbol === "Nothing"`.
+
 ### New Features
+
+- When serializing to LaTeX, the output can be "prettified". This involves
+  modifying the LaTeX output to make it more pleasant to read, for example:
+
+  - `a+\\frac{-b}{c}` -> `a-\\frac{b}{c}`
+  - `a\\times b^{-1}` -> `\\frac{a}{b}`
+  - `\\frac{a}{b}\\frac{c}{d}` -> `\\frac{a\\cdot c}{b\\cdot d}`
+  - `--2` -> `2`
+
+  This is on by default and can be turned off by setting the `prettify` option
+  to `false`. For example:
+
+  ```js
+  ce.parse("a+\\frac{-b}{c}").toLatex({prettify: true})
+  // -> "a-\\frac{b}{c}"
+  ce.parse("a+\\frac{-b}{c}").toLatex({prettify: false})
+  // -> "a+\\frac{-b}{c}"
+  ```
+
+- Numbers can have a different digit group length for the whole and fractional
+  part of a number. For example,
+  `ce.toLatex(ce.parse("1234.5678"), {digitGroup: [3, 0]})` will return
+  `1,234.5678`.
+- Numbers can now be formatted using South-East Asian Numbering System, i.e.
+  lakh and crore. For example,
+  `ce.toLatex(ce.parse("12345678"), {digitGroup: "lakh"})` will return
+  `1,23,45,678`.
+- Expressions with Integrate functions can now be compiled to JavaScript. The
+  compiled function can be used to evaluate the integral numerically. For
+  example:
+
+  ```js
+  const f = ce.parse("\\int_0^1 x^2 dx");
+  const compiled = f.compile();
+  console.log(compiled()); // -> 0.33232945619482307
+  ```
 
 - **#82** Support for angular units. The default is radians, but degrees can be
   used by setting `ce.angularUnit = "deg"`. Other possible values are "grad" and
@@ -15,6 +122,17 @@
 
 ### Issues Resolved
 
+- Fixed canonical form of `e^x^2`, and more generally apply power rule in more
+  cases.
+- Added missing Sech and Csch functions.
+- The digit grouping serializing would place the separator in the wrong place
+  for some numbers.
+- The `avoidExponentsInRange` formating option would not always avoid exponents
+  in the specified range.
+- **#173** Parsing `1++2` would result in an expression with a `PreIncrement`
+  function. It is now correctly parsed as `["Add", 1, 2]`.
+- **#169** Calculating a constant integral (and integral that did not depend on
+  the variable) would result in a runtime error.
 - **#164** Negative mixed fractions (e.g. `-1\frac23`) are now parsed correctly.
 - **#162** Numeric evaluation of expressions with large exponents could result
   in machine precision numbers instead of bignum numbers.

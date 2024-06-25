@@ -39,7 +39,7 @@ export const CONTROL_STRUCTURES_LIBRARY: IdentifierDefinitions[] = [
         domain: 'Functions',
         evaluate: (ce, ops) => {
           const body = ops[0] ?? ce.Nothing;
-          if (body.isNothing) return body;
+          if (body.symbol === 'Nothing') return body;
 
           const collection = ops[1];
 

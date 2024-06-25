@@ -1,4 +1,9 @@
-import { LatexDictionary, Parser, Serializer } from '../public';
+import {
+  ADDITION_PRECEDENCE,
+  LatexDictionary,
+  Parser,
+  Serializer,
+} from '../public';
 
 import {
   op,
@@ -9,6 +14,8 @@ import {
   machineValue,
   ops,
   isEmptySequence,
+  isNumberExpression,
+  symbol,
 } from '../../../math-json/utils';
 import {
   Expression,
@@ -42,24 +49,46 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     latexTrigger: ['+', '+'],
     kind: 'postfix',
     precedence: 880,
+    parse: (_parser, lhs) => {
+      // If lhs is not a symbol, ignore it, i.e. "5++"
+      if (symbol(lhs) === null) return null;
+      return ['Decrement', lhs];
+    },
   },
   {
     name: 'Decrement',
     latexTrigger: ['-', '-'],
     kind: 'postfix',
     precedence: 880,
+    parse: (_parser, lhs) => {
+      // If lhs is not a symbol, ignore it, i.e. "5--"
+      if (symbol(lhs) === null) return null;
+      return ['Decrement', lhs];
+    },
   },
   {
     name: 'PreIncrement',
     latexTrigger: ['+', '+'],
     kind: 'prefix',
     precedence: 880,
+    parse: (parser, until): Expression | null => {
+      if (until && ADDITION_PRECEDENCE < until.minPrec) return null; // @fixme: not needed?
+      const rhs = parser.parseExpression(until);
+      if (symbol(rhs) === null) return null;
+      return ['PreIncrement', rhs!];
+    },
   },
   {
     name: 'PreDecrement',
     latexTrigger: ['-', '-'],
     kind: 'prefix',
     precedence: 880,
+    parse: (parser, until): Expression | null => {
+      if (until && ADDITION_PRECEDENCE < until.minPrec) return null;
+      const rhs = parser.parseExpression(until);
+      if (symbol(rhs) === null) return null;
+      return ['PreDecrement', rhs!];
+    },
   },
   {
     name: 'Ring', // Aka 'Composition', i.e. function composition

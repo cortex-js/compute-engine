@@ -130,7 +130,7 @@
   </header>
   <main>
     <div class="row">
-      <math-field id="mf" class="mathfield" tabindex="0">(x-1)-(-2)</math-field>
+      <math-field id="mf" class="mathfield" tabindex="0">\int_1^8\!x\,\mathrm{d}x</math-field>
       <button id="random">🎲</button>
     </div>
 
@@ -888,7 +888,7 @@
                 val,
                 "compile",
                 `⏱️\uFE0E ${compileTiming.toFixed(
-                  2
+                  6
                 )}ms / ${evalTiming.toFixed(6)}ms`
               );
             } catch (e) {

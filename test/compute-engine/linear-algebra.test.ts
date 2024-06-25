@@ -106,28 +106,28 @@ describe('Matrix addition', () => {
   it('should add a scalar to a matrix', () => {
     const result = ce.box(['Add', sq2_n, 10]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Add(Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[1,2],[3,4]]), 10)`
+      `Add(Error(ErrorCode(incompatible-domain, "Numbers", "Lists"), [[1,2],[3,4]]), 10)`
     ); // @todo: should not return error
   });
 
   it('should add two matrixes', () => {
     const result = ce.box(['Add', sq2_n, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Add(Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[1,2],[3,4]]), Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[5,6],[7,8]]))`
+      `Add(Error(ErrorCode(incompatible-domain, "Numbers", "Lists"), [[1,2],[3,4]]), Error(ErrorCode(incompatible-domain, "Numbers", "Lists"), [[5,6],[7,8]]))`
     ); // @todo: should not return error
   });
 
   it('should handle adding two matrixes of different dimension', () => {
     const result = ce.box(['Add', m23_n, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Add(Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[1,2,3],[4,5,6]]), Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[5,6],[7,8]]))`
+      `Add(Error(ErrorCode(incompatible-domain, "Numbers", "Lists"), [[1,2,3],[4,5,6]]), Error(ErrorCode(incompatible-domain, "Numbers", "Lists"), [[5,6],[7,8]]))`
     ); // @todo: should not return error
   });
 
   it('should add two matrixes and a scalar', () => {
     const result = ce.box(['Add', sq2_n, 10, sq2_n2]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Add(Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[1,2],[3,4]]), 10, Error(ErrorCode("incompatible-domain", "Numbers", "Lists"), [[5,6],[7,8]]))`
+      `Add(Error(ErrorCode(incompatible-domain, "Numbers", "Lists"), [[1,2],[3,4]]), 10, Error(ErrorCode(incompatible-domain, "Numbers", "Lists"), [[5,6],[7,8]]))`
     ); // @todo: should not return error
   });
 });

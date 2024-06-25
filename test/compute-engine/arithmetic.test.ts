@@ -1,6 +1,5 @@
 import { check, checkJson, engine } from '../utils';
 
-engine.jsonSerializationOptions = { precision: 20 };
 const ce = engine;
 
 describe('CONSTANTS', () => {
@@ -473,14 +472,14 @@ describe('Max', () => {
 
   test('Max of a set', () => {
     expect(ce.box(['Max', ['Set', 4, 1, 56, 18]]).value).toMatchInlineSnapshot(
-      `["Max",["Set",4,1,56,18]]`
+      `56`
     );
   });
 
   test('Max of a list with non-comparable', () => {
     expect(
       ce.box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]]).value
-    ).toMatchInlineSnapshot(`["Max",56,"bar","foo"]`);
+    ).toMatchInlineSnapshot(`["Max", 56, "bar", "foo"]`);
   });
 });
 
@@ -577,17 +576,7 @@ describe('EXP', () => {
   expect(checkJson(['Exp', -1])).toMatchSnapshot();
   expect(checkJson(['Exp', 'Pi'])).toMatchSnapshot();
   expect(checkJson(['Exp', ['Complex', 1.1, 1.1]])).toMatchSnapshot();
-  expect(checkJson(['Exp', ['List', 1.1, 2, 4]])).toMatchInlineSnapshot(`
-    box       = ["Exp", ["List", 1.1, 2, 4]]
-    evaluate  = ["List", ["Exp", 1.1], ["Exp", 2], ["Exp", 4]]
-    N-auto    = [
-      "List",
-      "3.0041660239464331121",
-      "7.3890560989306502272",
-      "54.598150033144239078"
-    ]
-    N-mach    = ["List", 3.004166023946433, 7.3890560989306495, 54.59815003314423]
-  `);
+  expect(checkJson(['Exp', ['List', 1.1, 2, 4]])).toMatchSnapshot();
 });
 
 describe('SUM', () => {

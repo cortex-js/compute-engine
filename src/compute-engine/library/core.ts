@@ -1,12 +1,11 @@
 import {
   BoxedDomain,
-  BoxedExpression,
   CanonicalForm,
   IComputeEngine,
   IdentifierDefinitions,
 } from '../public';
 import { joinLatex } from '../latex-syntax/tokenizer';
-import { asFloat, asSmallInteger, fromDigits } from '../numerics/numeric';
+import { fromDigits } from '../numerics/numeric';
 
 import { checkDomain, checkArity } from '../boxed-expression/validate';
 import { randomExpression } from './random-expression';
@@ -17,6 +16,8 @@ import { isIndexableCollection } from '../collection-utils';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { normalizeIndexingSet } from './utils';
 import { canonicalForm } from '../boxed-expression/canonical';
+import { BoxedExpression } from '../boxed-expression/public';
+import { asFloat, asSmallInteger } from '../boxed-expression/numerics';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -781,9 +782,11 @@ export function canonicalInvisibleOperator(
   ce: IComputeEngine,
   ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression | null {
+  ops = flattenSequence(canonical(ops));
+
   if (ops.length === 0) return null;
   const lhs = ops[0];
-  if (ops.length === 1) return lhs.canonical;
+  if (ops.length === 1) return lhs;
 
   if (ops.length === 2) {
     //
@@ -804,10 +807,10 @@ export function canonicalInvisibleOperator(
           Number.isInteger(n) &&
           Number.isInteger(d)
         ) {
-          let frac = rhs.canonical;
+          let frac = rhs;
           if (lhsNumber < 0) frac = ce.neg(frac);
 
-          return ce._fn('Add', [lhs.canonical, frac]);
+          return ce._fn('Add', [lhs, frac]);
         }
       }
     }
@@ -851,8 +854,6 @@ export function canonicalInvisibleOperator(
     }
   }
 
-  ops = flattenSequence(canonical(ops));
-
   //
   // Is it an invisible multiplication?
   // (are all argument numeric or indexable collections?)
@@ -865,8 +866,11 @@ export function canonicalInvisibleOperator(
           x.domain.isNumeric ||
           (isIndexableCollection(x) && !x.string))
     )
-  )
-    return ce._fn('Multiply', flattenOps(ops, 'Multiply'));
+  ) {
+    ops = flattenOps(ops, 'Multiply');
+    if (ops.length === 1) return ops[0];
+    return ce._fn('Multiply', ops);
+  }
 
   //
   // If some of the elements are not numeric (or of unknown domain)

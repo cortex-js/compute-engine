@@ -1,5 +1,4 @@
-import { BoxedExpression } from '../../public';
-import { COMPARISON_PRECEDENCE, LatexDictionaryEntry } from '../public';
+import { LatexDictionaryEntry, COMPARISON_PRECEDENCE } from '../public';
 
 export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
   {
@@ -383,8 +382,3 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     precedence: COMPARISON_PRECEDENCE + 5,
   },
 ];
-
-export function isRelationalOperator(name: BoxedExpression | string): boolean {
-  if (typeof name !== 'string') return false;
-  return DEFINITIONS_INEQUALITIES.some((x) => x.name === name);
-}

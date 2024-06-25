@@ -14,6 +14,7 @@ export type {
   MathJsonString,
   MathJsonFunction,
   MathJsonDictionary,
+  MathJsonIdentifier,
 } from './math-json/math-json-format';
 
 export {

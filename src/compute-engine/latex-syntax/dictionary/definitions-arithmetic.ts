@@ -14,6 +14,7 @@ import {
   missingIfEmpty,
   isNumberExpression,
   MISSING,
+  headName,
 } from '../../../math-json/utils';
 import {
   Serializer,
@@ -26,7 +27,7 @@ import {
   POSTFIX_PRECEDENCE,
   COMPARISON_PRECEDENCE,
 } from '../public';
-import { joinLatex } from '../tokenizer';
+import { joinLatex, supsub } from '../tokenizer';
 
 /**
  * If expression is a product, collect all the terms with a
@@ -55,7 +56,10 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
           numerator.push(arg);
         }
       }
-    } else if (head(arg) === 'Rational' && nops(arg) === 2) {
+    } else if (
+      (head(arg) === 'Rational' && nops(arg) === 2) ||
+      head(arg) === 'Divide'
+    ) {
       const op1 = op(arg, 1)!;
       const op2 = op(arg, 2)!;
       if (machineValue(op1) !== 1) numerator.push(op1);
@@ -125,12 +129,21 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
   let result = '';
   let arg = op(expr, 1);
   if (name === 'Negate') {
-    result = '-' + serializer.wrap(arg, 276);
+    result = '-' + serializer.wrap(arg, ADDITION_PRECEDENCE + 1);
+  } else if (name === 'Subtract') {
+    result = serializer.wrap(arg, ADDITION_PRECEDENCE);
+    const arg2 = op(expr, 2);
+    if (arg2 !== null) {
+      const term = serializer.wrap(arg2, ADDITION_PRECEDENCE);
+      if (term[0] === '-') result += '+' + term.slice(1);
+      else if (term[0] === '+') result += '-' + term.slice(1);
+      else result = result + '-' + term;
+    }
   } else if (name === 'Add') {
     // If it is the sum of an integer and a rational, use a special form
     // (e.g. 1 + 1/2 -> 1 1/2)
     if (
-      serializer.canonical &&
+      serializer.options.prettify &&
       nops(expr) === 2 &&
       serializer.options.invisiblePlus !== '+'
     ) {
@@ -170,31 +183,40 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
       }
     }
 
-    let val = machineValue(arg) ?? NaN;
+    // If we have (-a)+b, we want to render it as b-a
+    if (serializer.options.prettify && nops(expr) === 2) {
+      const [first, firstSign] = unsign(arg!);
+      const [second, secondSign] = unsign(op(expr, 2)!);
+      if (firstSign < 0 && secondSign > 0) {
+        result =
+          serializer.wrap(second, ADDITION_PRECEDENCE) +
+          '-' +
+          serializer.wrap(first, ADDITION_PRECEDENCE);
+        serializer.level += 1;
+        return result;
+      }
+    }
+
     result = serializer.serialize(arg);
     const last = nops(expr) + 1;
     for (let i = 2; i < last; i++) {
-      arg = op(expr, i);
-      val = machineValue(arg) ?? NaN;
-      if (val < 0) {
-        // Don't include the minus sign, it will be serialized for the arg
-        result += serializer.serialize(arg);
-      } else if (head(arg) === 'Negate') {
-        result += serializer.wrap(arg, ADDITION_PRECEDENCE);
+      arg = op(expr, i)!;
+      if (serializer.options.prettify) {
+        const [newArg, sign] = unsign(arg);
+        const term = serializer.wrap(newArg, ADDITION_PRECEDENCE);
+        if (sign > 0) {
+          if (term.startsWith('+') || term.startsWith('-')) result += term;
+          else result += '+' + term;
+        } else {
+          if (term.startsWith('+')) result += '-' + term.slice(1);
+          else if (term.startsWith('-')) result += '+' + term.slice(1);
+          else result += '-' + term;
+        }
       } else {
         const term = serializer.wrap(arg, ADDITION_PRECEDENCE);
         if (term[0] === '-' || term[0] === '+') result += term;
         else result += '+' + term;
       }
-    }
-  } else if (name === 'Subtract') {
-    result = serializer.wrap(arg, ADDITION_PRECEDENCE);
-    const arg2 = op(expr, 2);
-    if (arg2 !== null) {
-      const term = serializer.wrap(arg2, ADDITION_PRECEDENCE);
-      if (term[0] === '-') result += '+' + term.slice(1);
-      else if (term[0] === '+') result += '-' + term.slice(1);
-      else result = result + '-' + term;
     }
   }
 
@@ -220,7 +242,7 @@ function serializeMultiply(
   // Is it a fraction?
   // (i.e. does it have a denominator, i.e. some factors with a negative power)
   //
-  if (serializer.canonical === true) {
+  if (serializer.options.prettify === true) {
     const [numer, denom] = numeratorDenominator(expr);
     if (denom.length > 0) {
       if (denom.length === 1 && denom[0] === 1) {
@@ -246,9 +268,18 @@ function serializeMultiply(
   let isNegative = false;
   let arg: Expression | null = null;
   const count = nops(expr) + 1;
+  let xs = ops(expr) ?? [];
+
+  if (serializer.options.prettify === true) {
+    if (xs.length === 2) {
+      if (isNumberExpression(xs[1]) && !isNumberExpression(xs[0])) {
+        xs = [xs[1], xs[0]];
+      }
+    }
+  }
   let prevWasNumber = false;
   for (let i = 1; i < count; i++) {
-    arg = op(expr, i);
+    arg = xs[i - 1];
     if (arg === null) continue;
     let term: string;
     //
@@ -401,7 +432,7 @@ function serializeFraction(
   const numer = missingIfEmpty(op(expr, 1));
   const denom = missingIfEmpty(op(expr, 2));
 
-  const style = serializer.canonical
+  const style = serializer.options.prettify
     ? serializer.fractionStyle(expr, serializer.level)
     : 'quotient';
   if (style === 'inline-solidus' || style === 'nice-solidus') {
@@ -463,7 +494,7 @@ function serializePower(
       exp
     );
 
-  if (serializer.canonical) {
+  if (serializer.options.prettify) {
     const val2 = machineValue(exp) ?? 1;
     if (val2 === -1) {
       return serializer.serialize(['Divide', '1', base]);
@@ -477,9 +508,10 @@ function serializePower(
       }
       if (machineValue(op(exp, 2)) === 2) {
         // It's x^(n/2) -> it's √x^n
-        return `${serializer.serialize(['Sqrt', base])}^{${serializer.serialize(
-          op(exp, 1)
-        )}}`;
+        return `${serializer.serialize(['Sqrt', base])}${supsub(
+          '^',
+          serializer.serialize(op(exp, 1))
+        )}`;
       }
     } else if (head(exp) === 'Power') {
       if (machineValue(op(exp, 2)) === -1) {
@@ -489,7 +521,7 @@ function serializePower(
       }
     }
   }
-  return serializer.wrapShort(base) + '^{' + serializer.serialize(exp) + '}';
+  return serializer.wrapShort(base) + supsub('^', serializer.serialize(exp));
 }
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
@@ -540,7 +572,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     latexTrigger: ['\\infty'],
-    parse: { num: '+Infinity' },
+    parse: 'PositiveInfinity',
+  },
+  {
+    name: 'PositiveInfinity',
+    serialize: (serializer) => serializer.options.positiveInfinity,
+  },
+  {
+    name: 'NegativeInfinity',
+    serialize: (serializer) => serializer.options.negativeInfinity,
   },
   {
     name: 'ComplexInfinity',
@@ -1168,16 +1208,23 @@ function parseBigOp(name: string, prec: number) {
     if (sub === 'Nothing' || isEmptySequence(sub)) sub = null;
     if (sup === 'Nothing' || isEmptySequence(sup)) sup = null;
 
+    // @todo: parse multiple indexes in sub, i.e. \sum_{i=1..2; j=2..5}(i+j)
     let index: Expression | null = null;
     let lower: Expression | null = null;
     if (head(sub) === 'Equal') {
       index = op(sub, 1);
       lower = op(sub, 2);
+      // @todo else head(sub) === 'ElementOf'
     } else {
       index = sub;
     }
 
+    parser.pushSymbolTable();
+    if (index) parser.addSymbol(symbol(index)!, 'symbol');
+
     const fn = parser.parseExpression({ minPrec: prec + 1 });
+
+    parser.popSymbolTable();
 
     if (!fn) return [name];
 
@@ -1249,4 +1296,44 @@ function parseLog(command: string, parser: Parser): Expression | null {
   if (sub === 10) return ['Log', args[0]] as Expression;
   if (sub === 2) return ['Lb', ...args] as Expression;
   return ['Log', args[0], sub] as Expression;
+}
+
+/**
+ * Attempt to recognize expressions that could be represented with a
+ * leading negative sign.
+ * For example, `-2`, `\frac{-2}{x}`, `-2x`, etc...
+ * Also take care of (--2) -> 2, `-\frac{-2}{x}` -> \frac{2}{x}, etc...
+ * This will be used when serialization additions to insert the negative
+ * sign in the correct place.
+ */
+function unsign(expr: Expression): [Expression, -1 | 1] {
+  let sign: -1 | 1 = 1;
+  let newExpr = expr;
+  do {
+    expr = newExpr;
+    if (headName(expr) === 'Negate') {
+      sign *= -1;
+      newExpr = op(expr, 1)!;
+    } else if (headName(expr) === 'Multiply') {
+      const [first, firstSign] = unsign(op(expr, 1)!);
+      if (firstSign < 0) {
+        sign *= -1;
+        if (first === 1) newExpr = ['Multiply', ...ops(expr)!.slice(1)];
+        else newExpr = ['Multiply', first, ...ops(expr)!.slice(1)];
+      }
+    } else if (headName(expr) === 'Divide' || headName(expr) === 'Rational') {
+      const [numer, numerSign] = unsign(op(expr, 1)!);
+      if (numerSign < 0) {
+        sign *= -1;
+        newExpr = [headName(expr)! as string, numer, op(expr, 2)!];
+      }
+    } else {
+      const val = machineValue(expr);
+      if (val !== null && val < 0) {
+        sign *= -1;
+        newExpr = -val;
+      }
+    }
+  } while (newExpr !== expr);
+  return [expr, sign as -1 | 1];
 }

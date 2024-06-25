@@ -1,5 +1,6 @@
+import { asSmallInteger } from '../boxed-expression/numerics';
 import { checkDomain } from '../boxed-expression/validate';
-import { MAX_ITERATION, asSmallInteger } from '../numerics/numeric';
+import { MAX_ITERATION } from '../numerics/numeric';
 import { BoxedExpression } from '../public';
 
 /**
@@ -165,7 +166,7 @@ export function normalizeIndexingSet(
 
     if (!Number.isFinite(lower)) isFinite = false;
 
-    if (limits.op3.isNothing || limits.op3.isInfinity) {
+    if (limits.op3.symbol === 'Nothing' || limits.op3.isInfinity) {
       isFinite = false;
     } else {
       const u = asSmallInteger(limits.op3);

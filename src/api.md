@@ -773,6 +773,29 @@ The numeric evaluation mode:
 
 </MemberCard>
 
+<a id="angularunit" name="angularunit"></a>
+
+<MemberCard>
+
+##### ComputeEngine.angularUnit
+
+```ts
+get angularUnit(): AngularUnit
+```
+
+```ts
+set angularUnit(u): void
+```
+
+The unit used for angles in trigonometric functions.
+Default is `"rad"` (radians).
+
+[`AngularUnit`](#angularunit-1)
+
+• **u**: [`AngularUnit`](#angularunit-1)
+
+</MemberCard>
+
 <a id="timelimit" name="timelimit"></a>
 
 <MemberCard>
@@ -1352,22 +1375,6 @@ assign(ids): ComputeEngine
 
 </MemberCard>
 
-<a id="canonical" name="canonical"></a>
-
-<MemberCard>
-
-##### ComputeEngine.canonical()
-
-```ts
-canonical(xs): BoxedExpression[]
-```
-
-Return a canonical version of an array of semi-boxed-expressions.
-
-• **xs**: [`SemiBoxedExpression`](#semiboxedexpression)[]
-
-</MemberCard>
-
 <a id="box" name="box"></a>
 
 <MemberCard>
@@ -1379,13 +1386,13 @@ box(expr, options?): BoxedExpression
 ```
 
 Return a boxed expression from a number, string or semiboxed expression.
-Calls `function()`, `number()` or `symbol()` as appropriate.
+Calls `ce.function()`, `ce.number()` or `ce.symbol()` as appropriate.
 
 • **expr**: [`SemiBoxedExpression`](#semiboxedexpression) \| [`number`, `number`]
 
 • **options?**
 
-• **options\.canonical?**: `boolean` \| [`CanonicalForm`](#canonicalform) \| [`CanonicalForm`](#canonicalform)[]
+• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
 
 </MemberCard>
 
@@ -1410,7 +1417,7 @@ function(
 
 • **options\.metadata?**: [`Metadata`](#metadata)
 
-• **options\.canonical?**: `boolean`
+• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
 
 </MemberCard>
 
@@ -1696,7 +1703,7 @@ Return a boxed symbol
 
 • **options\.metadata?**: [`Metadata`](#metadata)
 
-• **options\.canonical?**: `boolean`
+• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
 
 </MemberCard>
 
@@ -1744,9 +1751,9 @@ to a common value for which we have a shared instance (-1, 0, NaN, etc...)
 
 • **options?**
 
-• **options\.canonical?**: `boolean`
-
 • **options\.metadata?**: [`Metadata`](#metadata)
+
+• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
 
 </MemberCard>
 
@@ -1784,7 +1791,7 @@ The result may not be canonical.
 
 • **options?**
 
-• **options\.canonical?**: `boolean` \| [`CanonicalForm`](#canonicalform) \| [`CanonicalForm`](#canonicalform)[]
+• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
 
 ###### parse(s, options)
 
@@ -1796,7 +1803,7 @@ parse(s, options?): null
 
 • **options?**
 
-• **options\.canonical?**: `boolean` \| [`CanonicalForm`](#canonicalform) \| [`CanonicalForm`](#canonicalform)[]
+• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
 
 ###### parse(latex, options)
 
@@ -1808,7 +1815,7 @@ parse(latex, options?): BoxedExpression
 
 • **options?**
 
-• **options\.canonical?**: `boolean` \| [`CanonicalForm`](#canonicalform) \| [`CanonicalForm`](#canonicalform)[]
+• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
 
 </MemberCard>
 
@@ -1822,8 +1829,14 @@ parse(latex, options?): BoxedExpression
 serialize(x, options?): string
 ```
 
-Serialize a `BoxedExpression` or a `MathJSON` expression to
-a LaTeX string
+Serialize a `BoxedExpression` or a `MathJSON` expression to a LaTeX
+string.
+
+If the `canonical` option is set to `true`, the result will use canonical
+serialization rules (for example (a/b)*(c/d) -> (a*c)/(b*d)).
+If false, avoid any canonicalization (i.e. (a/b)*(c/d) -> (a/b)*(c/d)).
+
+The `canonical` option is true by default.
 
 • **x**: [`Expression`](#expression) \| [`BoxedExpression`](#boxedexpression)
 
@@ -1945,6 +1958,22 @@ The numeric evaluation mode:
 | `"complex"` | Complex number represented by two machine numbers, a real and an imaginary part, as provided by the "complex.js" library |
 
 </div>
+
+<a id="angularunit-1" name="angularunit-1"></a>
+
+### AngularUnit
+
+```ts
+type AngularUnit: "rad" | "deg" | "grad" | "turn";
+```
+
+When a unitless value is passed to or returned from a trigonometric function,
+the angular unit of the value.
+
+- `rad`: radians, 2π radians is a full circle
+- `deg`: degrees, 360 degrees is a full circle
+- `grad`: gradians, 400 gradians is a full circle
+- `turn`: turns, 1 turn is a full circle
 
 <a id="hold-1" name="hold-1"></a>
 
@@ -2586,7 +2615,7 @@ readonly isFunction: boolean;
 
 </MemberCard>
 
-<a id="canonical-2" name="canonical-2"></a>
+<a id="canonical-1" name="canonical-1"></a>
 
 <MemberCard>
 
@@ -2598,7 +2627,7 @@ get canonical(): BoxedDomain
 
 Return the canonical form of this expression.
 
-If this is a function expressin, a definition is associated with the
+If this is a function expression, a definition is associated with the
 canonical expression.
 
 When determining the canonical form the following function definition
@@ -2608,7 +2637,7 @@ flags are applied:
 - `involution`: \\( f(f(a)) \longrightarrow a \\)
 - `commutative`: sort the arguments.
 
-If his expression is already canonical, the value of canonical is
+If this expression is already canonical, the value of canonical is
 `this`.
 
 [`BoxedDomain`](#boxeddomain)
@@ -2711,6 +2740,27 @@ type CanonicalForm:
   | "Flatten"
   | "Order";
 ```
+
+When provided, canonical forms are used to put an expression in a
+"standard" form.
+
+Each canonical form applies some transformation to an expression. When
+specified as an array, each transformation is done in the order in which
+it was provided.
+
+- `InvisibleOperator`: replace use of the `InvisibleOperator` with
+   another operation, such as multiplication (i.e. `2x` or function
+   application (`f(x)`).
+- `Number`: replace all numeric values with their
+   canonical representation, for example, reduce
+   rationals and replace complex numbers with no imaginary part with a real number.
+- `Multiply`: replace negation with multiplication by -1, remove 1 from multiplications, simplify signs (`-y \times -x` -> `x \times y`), complex numbers are promoted (['Multiply', 2, 'ImaginaryUnit'] -> `["Complex", 0, 2]`)
+- `Add`: replace `Subtract` with `Add`, removes 0 in addition, promote complex numbers (["Add", "a", ["Complex", 0, "b"] -> `["Complex", "a", "b"]`)
+- `Power`: simplify `Power` expression, for example, `x^{-1}` -> `\frac{1}{x}`, `x^0` -> `1`, `x^1` -> `x`, `1^x` -> `1`, `x^{\frac{1}{2}}` -> `\sqrt{x}`, `a^b^c` -> `a^{bc}`...
+- `Divide`: replace with a `Rational` number if numerator and denominator are integers, simplify, e.g. `\frac{x}{1}` -> `x`...
+- `Flatten`: remove any unnecessary `Delimiter` expression, and flatten any associative functions, for example `["Add", ["Add", "a", "b"], "c"]` -> `["Add", "a", "b", "c"]`
+- `Order`: when applicable, sort the arguments in a specific order, for
+   example for addition and multiplication.
 
 <a id="boxedexpression" name="boxedexpression"></a>
 
@@ -3602,7 +3652,7 @@ True if the expression is a constant, that is a symbol with an immutable value
 
 </MemberCard>
 
-<a id="canonical-3" name="canonical-3"></a>
+<a id="canonical-2" name="canonical-2"></a>
 
 <MemberCard>
 
@@ -3614,7 +3664,7 @@ get canonical(): BoxedExpression
 
 Return the canonical form of this expression.
 
-If this is a function expressin, a definition is associated with the
+If this is a function expression, a definition is associated with the
 canonical expression.
 
 When determining the canonical form the following function definition
@@ -3624,7 +3674,7 @@ flags are applied:
 - `involution`: \\( f(f(a)) \longrightarrow a \\)
 - `commutative`: sort the arguments.
 
-If his expression is already canonical, the value of canonical is
+If this expression is already canonical, the value of canonical is
 `this`.
 
 [`BoxedExpression`](#boxedexpression)
@@ -3654,7 +3704,32 @@ Applicable to canonical and non-canonical expressions.
 
 • **options?**
 
-• **options\.canonical?**: `boolean`
+• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
+
+</MemberCard>
+
+<a id="map" name="map"></a>
+
+<MemberCard>
+
+##### BoxedExpression.map()
+
+```ts
+map(fn, options?): BoxedExpression
+```
+
+Recursively replace all the terms in the expression as indicated.
+
+To remove a subexpression, return an empty Sequence expression.
+
+The canonical option is applied to each function subexpression after
+the substitution is applied.
+
+• **fn**
+
+• **options?**
+
+• **options\.canonical?**: [`CanonicalOptions`](#canonicaloptions)
 
 </MemberCard>
 
@@ -4027,7 +4102,7 @@ compile(to?, options?): (args) => any
 solve(vars): readonly BoxedExpression[]
 ```
 
-• **vars**: `Iterable`\<`string`\>
+• **vars**: `string` \| `Iterable`\<`string`\> \| [`BoxedExpression`](#boxedexpression) \| `Iterable`\<[`BoxedExpression`](#boxedexpression)\>
 
 </MemberCard>
 
@@ -5247,7 +5322,7 @@ expression, or a function that returns a boxed domain.
 
 </MemberCard>
 
-<a id="canonical-4" name="canonical-4"></a>
+<a id="canonical-3" name="canonical-3"></a>
 
 <MemberCard>
 
@@ -5558,7 +5633,7 @@ result: BoxedDomain | (ce, args) => BoxedDomain | null | undefined;
 
 </MemberCard>
 
-<a id="canonical-5" name="canonical-5"></a>
+<a id="canonical-4" name="canonical-4"></a>
 
 <MemberCard>
 
@@ -7430,7 +7505,7 @@ Default: `\times`
 missingSymbol: LatexString;
 ```
 
-When an expression contains the error expression `["Error", 'missing']`,
+When an expression contains the error expression `["Error", "'missing'"]`,
 serialize it with this LaTeX string
 
 </MemberCard>
@@ -7820,7 +7895,7 @@ for the top level, and `\bigl(` or `(` for others.
 
 </MemberCard>
 
-<a id="canonical-1" name="canonical-1"></a>
+<a id="canonical" name="canonical"></a>
 
 <MemberCard>
 
@@ -7831,7 +7906,7 @@ optional canonical: boolean;
 ```
 
 If true, apply transformations to the expression so the output
-doesn't necesarily match the raw MathJSON, but is more visually pleasing
+doesn't necessarily match the raw MathJSON, but is more visually pleasing
 and easier to read. If false, output the raw MathJSON.
 
 </MemberCard>
@@ -8642,6 +8717,16 @@ type LatexString: string;
 
 A LaTeX string starts and end with `$`, for example
 `"$\frac{\pi}{2}$"`.
+
+## Other
+
+<a id="canonicaloptions" name="canonicaloptions"></a>
+
+### CanonicalOptions
+
+```ts
+type CanonicalOptions: boolean | CanonicalForm | CanonicalForm[];
+```
 
 
 <a name="math-jsonmd"></a>

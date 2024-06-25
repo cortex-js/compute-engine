@@ -91,30 +91,30 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   // Set Expressions
   //
   // @todo: could also have a `CartesianPower` function with a number `rhs`
-  {
-    name: 'CartesianProduct',
-    latexTrigger: ['\\times'],
-    kind: 'infix',
-    associativity: 'right', // Caution: cartesian product is not associative
-    precedence: 390, // Same as Multiply?
-    parse: (parser, lhs, until) => {
-      if (390 < until.minPrec) return null;
-      // Since this is triggered on `\times` we have to be careful we only
-      // accept arguments that are `Set`
-      const ce = parser.computeEngine!;
+  // {
+  //   name: 'CartesianProduct',
+  //   latexTrigger: ['\\times'],
+  //   kind: 'infix',
+  //   associativity: 'right', // Caution: cartesian product is not associative
+  //   precedence: 390, // Same as Multiply?
+  //   parse: (parser, lhs, until) => {
+  //     if (390 < until.minPrec) return null;
+  //     // Since this is triggered on `\times` we have to be careful we only
+  //     // accept arguments that are `Set`
+  //     const ce = parser.computeEngine!;
 
-      if (!ce || !ce.box(lhs).domain?.isCompatible('Sets')) return null;
+  //     if (!ce || !ce.box(lhs).domain?.isCompatible('Sets')) return null;
 
-      const index = parser.index;
-      const rhs = parser.parseExpression({ ...until, minPrec: 390 });
-      // If the rhs argument is not a set, bail
-      if (rhs === null || ce.box(lhs).domain?.isCompatible('Sets') !== true) {
-        parser.index = index;
-        return null;
-      }
-      return ['CartesianProduct', lhs, rhs];
-    },
-  },
+  //     const index = parser.index;
+  //     const rhs = parser.parseExpression({ ...until, minPrec: 390 });
+  //     // If the rhs argument is not a set, bail
+  //     if (rhs === null || ce.box(lhs).domain?.isCompatible('Sets') !== true) {
+  //       parser.index = index;
+  //       return null;
+  //     }
+  //     return ['CartesianProduct', lhs, rhs];
+  //   },
+  // },
   {
     latexTrigger: ['^', '\\complement'],
     kind: 'postfix',

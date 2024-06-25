@@ -49,7 +49,7 @@ describe('Anonymous function with missing param', () => {
   test('Missing Param Expression', () =>
     expect(evaluate(['f2'])).toMatchInlineSnapshot(`["f2"]`));
   test('Missing Param JS Function', () =>
-    expect(evaluate(['f3'])).toMatchInlineSnapshot(`{num: "NaN"}`)); // NaN is correct
+    expect(evaluate(['f3'])).toMatchInlineSnapshot(`NaN`)); // NaN is correct
   test('Missing Param Declared JS Function', () =>
     expect(evaluate(['f4'])).toMatchInlineSnapshot(
       `["f4", ["Error", "'missing'"]]`

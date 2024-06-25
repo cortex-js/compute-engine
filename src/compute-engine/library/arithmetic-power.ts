@@ -5,28 +5,29 @@ import {
   bignumPreferred,
   asBigint,
 } from '../boxed-expression/utils';
-import {
-  asBignum,
-  asFloat,
-  asSmallInteger,
-  factorPower,
-} from '../numerics/numeric';
+import { factorPower } from '../numerics/numeric';
 import {
   bigint,
   factorPower as bigFactorPower,
 } from '../numerics/numeric-bigint';
 import {
-  asRational,
+  Rational,
   isBigRational,
   isMachineRational,
   isRational,
   isRationalOne,
   machineDenominator,
   machineNumerator,
-  mul,
 } from '../numerics/rationals';
-import { BoxedExpression, IComputeEngine, Metadata, Rational } from '../public';
+import { BoxedExpression, IComputeEngine, Metadata } from '../public';
 import { applyN } from '../symbolic/utils';
+import {
+  asFloat,
+  asRational,
+  asSmallInteger,
+  mul,
+  asBignum,
+} from '../boxed-expression/numerics';
 
 /**
  *
@@ -115,6 +116,8 @@ export function canonicalPower(
       }
     }
   }
+  if (base.head === 'Power')
+    return ce._fn('Power', [base.op1, ce.mul(base.op2, exponent)], metadata);
 
   return ce._fn('Power', [base, exponent], metadata);
 }

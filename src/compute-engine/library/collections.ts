@@ -1,12 +1,12 @@
 import { checkArity, checkDomains } from '../boxed-expression/validate';
 import { canonical } from '../symbolic/utils';
-import { asFloat } from '../numerics/numeric';
 import {
   BoxedExpression,
   IComputeEngine,
   IdentifierDefinitions,
   SemiBoxedExpression,
 } from '../public';
+import { asFloat } from '../boxed-expression/numerics';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
@@ -102,6 +102,33 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         if (expr.ops![i - 1]!.isEqual(target)) return i;
 
       return undefined;
+    },
+  },
+
+  // Extensional set. Elements do not repeat. The order of the elements is not significant.
+  // For intensional set, use `Any` with a condition, e.g. `Any(x > 0, x in RealNumbers)` @todo
+  Set: {
+    complexity: 8200,
+    hold: 'all',
+    signature: {
+      domain: ['FunctionOf', ['VarArg', 'Anything'], 'Sets'],
+      canonical: canonicalSet,
+    },
+    size: (expr) => expr.nops!,
+    iterator: (expr, start, count) => {
+      let index = start ?? 1;
+      count = Math.min(count ?? expr.nops!, expr.nops!);
+      if (count <= 0) return { next: () => ({ value: undefined, done: true }) };
+      return {
+        next: () => {
+          if (count! > 0) {
+            count!--;
+            return { value: expr.ops![index++ - 1], done: false };
+          } else {
+            return { value: undefined, done: true };
+          }
+        },
+      };
     },
   },
 
@@ -846,4 +873,17 @@ function canonicalList(
     return op.canonical;
   });
   return ce.box(['List', ...ops]);
+}
+
+function canonicalSet(
+  ce: IComputeEngine,
+  ops: BoxedExpression[]
+): BoxedExpression {
+  // Check that each element is only present once
+  const set: BoxedExpression[] = [];
+  const has = (x) => set.some((y) => y.isEqual(x));
+
+  for (const op of ops) if (!has(op)) set.push(op);
+
+  return ce.function('Set', set, { canonical: false });
 }

@@ -3,33 +3,48 @@ import { Decimal } from 'decimal.js';
 
 import { Expression } from '../../math-json/math-json-format';
 
+import { LatexString } from '../public';
 import {
+  Rational,
+  isBigRational,
+  isMachineRational,
+} from '../numerics/rationals';
+import { compileToJavascript } from '../compile';
+import {
+  getApplyFunctionStyle,
+  getFractionStyle,
+  getGroupStyle,
+  getLogicStyle,
+  getNumericSetStyle,
+  getPowerStyle,
+  getRootStyle,
+} from '../latex-syntax/serializer-style';
+import { serializeLatex } from '../latex-syntax/serializer';
+import {
+  BoxedBaseDefinition,
+  BoxedDomain,
   BoxedExpression,
   BoxedFunctionDefinition,
   BoxedRuleSet,
+  BoxedSubstitution,
   BoxedSymbolDefinition,
-  BoxedDomain,
+  CanonicalOptions,
+  DomainCompatibility,
+  DomainLiteral,
   EvaluateOptions,
   IComputeEngine,
-  LatexString,
+  JsonSerializationOptions,
   Metadata,
   NOptions,
   PatternMatchOptions,
+  Rule,
+  RuntimeScope,
+  SemiBoxedExpression,
   SimplifyOptions,
   Substitution,
-  RuntimeScope,
-  DomainCompatibility,
-  DomainLiteral,
-  BoxedBaseDefinition,
-  Rational,
-  BoxedSubstitution,
-  Rule,
-  SemiBoxedExpression,
-  CanonicalOptions,
-} from '../public';
-import { isBigRational, isMachineRational } from '../numerics/rationals';
-import { asFloat } from '../numerics/numeric';
-import { compileToJavascript } from '../compile';
+} from './public';
+import { SerializeLatexOptions } from '../latex-syntax/public';
+import { asFloat } from './numerics';
 
 /**
  * _BoxedExpression
@@ -59,39 +74,35 @@ export abstract class _BoxedExpression implements BoxedExpression {
   /** Verbatim LaTeX, obtained from a source, i.e. from parsing,
    *  not generated synthetically
    */
-  protected _latex?: string;
+  verbatimLatex?: string;
 
   constructor(ce: IComputeEngine, metadata?: Metadata) {
     this.engine = ce;
-    if (metadata?.latex !== undefined) this._latex = metadata.latex;
+    if (metadata?.latex !== undefined) this.verbatimLatex = metadata.latex;
   }
 
   /**
    *
    * `Object.valueOf()`: return a JavaScript primitive value for the expression
    *
+   * Primitive values are: boolean, number, bigint, string, null, undefined
+   *
    */
-  valueOf(): number | any[] | string | boolean {
+  valueOf(): number | Object | string | boolean {
     if (this.symbol === 'True') return true;
     if (this.symbol === 'False') return false;
-    if (
-      this.head &&
-      typeof this.head === 'string' &&
-      ['List', 'Set', 'Sequence', 'Tuple', 'Pair', 'Single', 'Triple'].includes(
-        this.head
-      )
-    ) {
-      return this.ops?.map((x) => x.valueOf()) as any[];
-    }
-    return (
-      asFloat(this) ?? this.string ?? this.symbol ?? JSON.stringify(this.json)
-    );
+    if (this.symbol === 'NaN') return NaN;
+    if (this.symbol === 'PositiveInfinity') return Infinity;
+    if (this.symbol === 'NegativeInfinity') return -Infinity;
+    if (typeof this.string === 'string') return this.string;
+    if (typeof this.symbol === 'string') return this.symbol;
+    return asFloat(this) ?? this;
   }
 
   /** Object.toString() */
   toString(): string {
     if (this.symbol) return this.symbol;
-    if (this.string) return `"${this.string}"`;
+    if (this.string) return this.string;
     const num = this.numericValue;
     if (num !== null) {
       if (typeof num === 'number') return num.toString();
@@ -134,14 +145,138 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return this.toString();
   }
 
-  /** Called by `JSON.stringify()` when serializing to json */
+  /** Called by `JSON.stringify()` when serializing to json.
+   *
+   * Note: this is a standard method of JavaScript objects.
+   *
+   */
   toJSON(): Expression {
     return this.json;
   }
 
-  /** @internal */
-  get rawJson(): Expression {
-    return this.json;
+  toMathJson(
+    options?: Readonly<Partial<JsonSerializationOptions>>
+  ): Expression {
+    const defaultOptions: JsonSerializationOptions = {
+      exclude: [],
+      shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
+      metadata: [],
+      fractionalDigits: 'max',
+      repeatingDecimal: true,
+      prettify: true,
+    };
+
+    if (options) {
+      if (
+        (typeof options.shorthands === 'string' &&
+          options.shorthands === 'all') ||
+        options.shorthands?.includes('all')
+      ) {
+        defaultOptions.shorthands = [
+          'function',
+          'symbol',
+          'string',
+          'dictionary',
+          'number',
+        ];
+      }
+      if (
+        (typeof options.metadata === 'string' && options.metadata === 'all') ||
+        options.metadata?.includes('all')
+      ) {
+        defaultOptions.metadata = ['latex', 'wikidata'];
+      }
+      if (options.fractionalDigits === 'auto')
+        defaultOptions.fractionalDigits = -this.engine.precision; // When negative, indicate that the number of digits should be less than the number of whole digits + this value
+    }
+    const opts: JsonSerializationOptions = {
+      ...defaultOptions,
+      ...options,
+      fractionalDigits: defaultOptions.fractionalDigits,
+      shorthands: defaultOptions.shorthands,
+      metadata: defaultOptions.metadata,
+    };
+
+    return serializeJson(this.engine, this, opts);
+  }
+
+  toLatex(options?: Partial<SerializeLatexOptions>): LatexString {
+    // We want to use toMathJson(), not .json, so that we have all
+    // the digits for numbers, repeated decimals
+    const json = this.toMathJson();
+
+    let effectiveOptions: SerializeLatexOptions = {
+      imaginaryUnit: '\\imaginaryI',
+
+      positiveInfinity: '\\infty',
+      negativeInfinity: '-\\infty',
+      notANumber: '\\operatorname{NaN}',
+
+      decimalSeparator: this.engine.decimalSeparator,
+      digitGroupSeparator: '\\,', // for thousands, etc...
+      exponentProduct: '\\cdot',
+      beginExponentMarker: '10^{', // could be 'e'
+      endExponentMarker: '}',
+
+      digitGroup: 3,
+
+      truncationMarker: '\\ldots',
+
+      repeatingDecimal: 'vinculum',
+
+      fractionalDigits: 'max',
+      notation: 'auto',
+      avoidExponentsInRange: [-7, 20],
+
+      prettify: true,
+
+      invisibleMultiply: '', // '\\cdot',
+      invisiblePlus: '', // '+',
+      // invisibleApply: '',
+
+      multiply: '\\times',
+
+      missingSymbol: '\\blacksquare',
+
+      // openGroup: '(',
+      // closeGroup: ')',
+      // divide: '\\frac{#1}{#2}',
+      // subtract: '#1-#2',
+      // add: '#1+#2',
+      // negate: '-#1',
+      // squareRoot: '\\sqrt{#1}',
+      // nthRoot: '\\sqrt[#2]{#1}',
+      applyFunctionStyle: getApplyFunctionStyle,
+      groupStyle: getGroupStyle,
+      rootStyle: getRootStyle,
+      fractionStyle: getFractionStyle,
+      logicStyle: getLogicStyle,
+      powerStyle: getPowerStyle,
+      numericSetStyle: getNumericSetStyle,
+    };
+
+    if (options?.fractionalDigits === 'auto')
+      effectiveOptions.fractionalDigits = -this.engine.precision;
+    if (
+      typeof effectiveOptions.fractionalDigits === 'number' &&
+      effectiveOptions.fractionalDigits > this.engine.precision
+    )
+      effectiveOptions.fractionalDigits = this.engine.precision;
+
+    effectiveOptions = {
+      ...effectiveOptions,
+      ...(options ?? {}),
+      fractionalDigits: effectiveOptions.fractionalDigits,
+    };
+
+    if (!effectiveOptions.prettify && this.verbatimLatex)
+      return this.verbatimLatex;
+
+    return serializeLatex(
+      json,
+      this.engine.indexedLatexDictionary,
+      effectiveOptions
+    );
   }
 
   get scope(): RuntimeScope | null {
@@ -159,19 +294,15 @@ export abstract class _BoxedExpression implements BoxedExpression {
   }
 
   get latex(): LatexString {
-    return this._latex ?? this.engine.serialize(this);
+    return this.toLatex();
   }
 
   set latex(val: LatexString) {
-    this._latex = val;
+    this.verbatimLatex = val;
   }
 
   get symbol(): string | null {
     return null;
-  }
-
-  get isNothing(): boolean {
-    return false;
   }
 
   get string(): string | null {
@@ -447,7 +578,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return false;
   }
 
-  get value(): number | boolean | string | number[] | undefined {
+  get value(): number | boolean | string | Object | undefined {
     return this.N().valueOf();
   }
 
@@ -623,3 +754,8 @@ export function getSubexpressions(
   }
   return result;
 }
+
+// To avoid circular dependency issues we have to import the following
+// function *after* the class definition
+
+import { serializeJson } from './serialize';

@@ -1,6 +1,6 @@
 import { InfixEntry, LatexDictionary, Parser, Terminator } from '../public';
 import { head, missingIfEmpty, op } from '../../../math-json/utils';
-import { Expression } from '../../../math-json.js';
+import { Expression } from '../../../math-json';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
 

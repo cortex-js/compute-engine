@@ -1,8 +1,12 @@
-import { latex, parse } from '../../utils';
+import { latex, engine as ce } from '../../utils';
+
+function parse(s) {
+  return ce.parse(s);
+}
 
 describe('SERIALIZING SETS', () => {
   test('Set', () => {
-    expect(latex(['Set'])).toMatchInlineSnapshot(`\\lbrace\\rbrace`);
+    expect(latex(['Set'])).toMatchInlineSnapshot(`\\lbrace \\rbrace`);
     expect(latex(['Set', 2, 5, 7])).toMatchInlineSnapshot(
       `\\lbrace2, 5, 7\\rbrace`
     );
@@ -52,25 +56,25 @@ describe('SERIALIZING SETS', () => {
       `\\mathrm{ComplexNumber}^{\\complement}`
     );
     expect(latex(['CartesianProduct'])).toMatchInlineSnapshot(
-      `\\error{\\blacksquare}`
+      `\\mathrm{CartesianProduct}(\\error{\\blacksquare})`
     );
     expect(latex(['CartesianProduct', 'Integers'])).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}`
+      `\\mathrm{CartesianProduct}(\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}})`
     );
     expect(
       latex(['CartesianProduct', 'Integers', 'Integers'])
     ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}`
+      `\\mathrm{CartesianProduct}(\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}, \\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}})`
     );
     expect(
       latex(['CartesianProduct', 'Integers', 'RationalNumber'])
     ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\mathrm{RationalNumber}`
+      `\\mathrm{CartesianProduct}(\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}, \\mathrm{RationalNumber})`
     );
     expect(
       latex(['CartesianProduct', 'Integers', 'Integers', 'Integers'])
     ).toMatchInlineSnapshot(
-      `\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}\\times\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}`
+      `\\mathrm{CartesianProduct}(\\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}, \\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}}, \\mathtip{\\error{\\Z}}{\\in \\mathrm{Domains}\\notin \\mathrm{Sets}})`
     );
     expect(latex(['CartesianPower', 'Integers', 3])).toMatchInlineSnapshot(
       `\\mathrm{CartesianPower}(\\Z, 3)`

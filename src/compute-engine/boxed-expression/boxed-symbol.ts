@@ -23,16 +23,15 @@ import {
   Rule,
   SemiBoxedExpression,
   CanonicalOptions,
-} from '../public';
+} from './public';
 import { replace } from '../rules';
-import { serializeJsonSymbol } from './serialize';
 import { isValidIdentifier, validateIdentifier } from '../../math-json/utils';
 import { hashCode, normalizedUnknownsForSolve } from './utils';
 import { _BoxedSymbolDefinition } from './boxed-symbol-definition';
 import { _BoxedFunctionDefinition } from './boxed-function-definition';
 import { narrow } from './boxed-domain';
 import { domainToSignature, signatureToDomain } from '../domain-utils';
-import { match } from './boxed-patterns';
+import { match } from './match';
 
 /**
  * BoxedSymbol
@@ -95,6 +94,10 @@ export class BoxedSymbol extends _BoxedExpression {
     else this.bind();
   }
 
+  get json(): Expression {
+    return this._id;
+  }
+
   get hash(): number {
     if (this._hash === undefined) this._hash = hashCode(this._id);
     return this._hash;
@@ -102,16 +105,6 @@ export class BoxedSymbol extends _BoxedExpression {
 
   get isPure(): boolean {
     return true;
-  }
-
-  get json(): Expression {
-    // Accessing the wikidata could have a side effect of binding the symbol
-    // We want to avoid that.
-    const wikidata = this._scope ? this.wikidata : undefined;
-    return serializeJsonSymbol(this.engine, this._id, {
-      latex: this._latex,
-      wikidata,
-    });
   }
 
   get scope(): RuntimeScope | null {
@@ -202,10 +195,6 @@ export class BoxedSymbol extends _BoxedExpression {
     return this._id;
   }
 
-  get isNothing(): boolean {
-    return this._id === 'Nothing';
-  }
-
   //  A base definition is the base class of both symbol and function definition
   get baseDefinition(): BoxedBaseDefinition | undefined {
     if (this._def === undefined) this.bind();
@@ -254,7 +243,7 @@ export class BoxedSymbol extends _BoxedExpression {
     return false;
   }
 
-  get value(): number | boolean | string | number[] | undefined {
+  get value(): number | boolean | string | Object | undefined {
     const def = this._def;
     if (def && def instanceof _BoxedSymbolDefinition) return def.value?.value;
     return undefined;

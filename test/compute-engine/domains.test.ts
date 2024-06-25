@@ -6,15 +6,23 @@ export const engine = new ComputeEngine();
 
 describe('Domain of function identifiers', () =>
   test('Domain of \\sin', () =>
-    expect(engine.parse('\\sin').domain?.toJSON()).toMatchInlineSnapshot(
-      `["FunctionOf", "Numbers", "Numbers"]`
-    )));
+    expect(engine.parse('\\sin')?.domain?.toJSON()).toMatchInlineSnapshot(`
+      [
+        FunctionOf,
+        Numbers,
+        Numbers,
+      ]
+    `)));
 
 describe('Domain of function identifiers', () =>
   test('Domain of Sin', () =>
-    expect(engine.box('Sin').domain?.toJSON()).toMatchInlineSnapshot(
-      `["FunctionOf", "Numbers", "Numbers"]`
-    )));
+    expect(engine.box('Sin').domain?.toJSON()).toMatchInlineSnapshot(`
+      [
+        FunctionOf,
+        Numbers,
+        Numbers,
+      ]
+    `)));
 
 describe('INFERRED DOMAINS', () => {
   test('42', () =>
@@ -40,14 +48,22 @@ describe('INFERRED DOMAINS', () => {
 
   // The symbol `Sin` references the sine function
   test('Symbol \\sin', () =>
-    expect(engine.parse('\\sin').domain?.toJSON()).toMatchInlineSnapshot(
-      `["FunctionOf", "Numbers", "Numbers"]`
-    ));
+    expect(engine.parse('\\sin')?.domain?.toJSON()).toMatchInlineSnapshot(`
+      [
+        FunctionOf,
+        Numbers,
+        Numbers,
+      ]
+    `));
 
   test('Symbol Sin', () =>
-    expect(engine.box('Sin').domain?.toJSON()).toMatchInlineSnapshot(
-      `["FunctionOf", "Numbers", "Numbers"]`
-    ));
+    expect(engine.box('Sin').domain?.toJSON()).toMatchInlineSnapshot(`
+      [
+        FunctionOf,
+        Numbers,
+        Numbers,
+      ]
+    `));
 
   test('\\sin(3)', () => {
     expect(engine.box(['Sin', 3]).domain?.toJSON()).toMatchInlineSnapshot(

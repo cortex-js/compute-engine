@@ -1,13 +1,8 @@
 import { each, isFiniteIndexableCollection } from '../collection-utils';
-import {
-  IComputeEngine,
-  BoxedExpression,
-  BoxedDomain,
-  DomainLiteral,
-  Hold,
-} from '../public';
+import { IComputeEngine, BoxedDomain, DomainLiteral, Hold } from '../public';
 import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { canonical, shouldHold } from '../symbolic/utils';
+import { BoxedExpression } from './public';
 
 /**
  * Check that the number of arguments is as expected.

@@ -5,10 +5,9 @@ import {
   SemiBoxedExpression,
   BoxedExpression,
   Metadata,
-  Rational,
   DomainExpression,
   CanonicalOptions,
-} from '../public';
+} from './public';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { BoxedDictionary } from './boxed-dictionary';
 import { BoxedFunction, makeCanonicalFunction } from './boxed-function';
@@ -16,8 +15,8 @@ import { BoxedNumber } from './boxed-number';
 import { BoxedString } from './boxed-string';
 import { Expression, MathJsonNumber } from '../../math-json/math-json-format';
 import { isValidIdentifier, missingIfEmpty } from '../../math-json/utils';
-import { asFloat, asSmallInteger } from '../numerics/numeric';
 import {
+  Rational,
   isBigRational,
   isMachineRational,
   isRational,
@@ -28,6 +27,7 @@ import { bigint, bigintValue } from '../numerics/numeric-bigint';
 import { isDomainLiteral } from '../library/domains';
 import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
 import { canonicalForm } from './canonical';
+import { asFloat, asSmallInteger } from './numerics';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -415,7 +415,7 @@ export function boxFunction(
         (head === 'Tuple' && arg.nops === 2)
       ) {
         const key = arg.op1;
-        if (key.isValid && !key.isNothing) {
+        if (key.isValid && key.symbol !== 'Nothing') {
           const value = arg.op2;
           let k = key.symbol ?? key.string;
           if (!k && (key.numericValue !== null || key.string)) {
@@ -455,7 +455,7 @@ export function boxFunction(
     new BoxedFunction(
       ce,
       head,
-      ops.map((x) => box(ce, x, { canonical: options.canonical })),
+      ops.map((x) => box(ce, x, { canonical: options?.canonical ?? true })),
       { metadata: options.metadata, canonical: false }
     ),
     options.canonical ?? false

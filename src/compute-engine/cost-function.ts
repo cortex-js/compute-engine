@@ -1,7 +1,7 @@
 import { Complex } from 'complex.js';
-import { asFloat } from './numerics/numeric';
 import { isMachineRational, isRational } from './numerics/rationals';
 import { BoxedExpression } from './public';
+import { asFloat } from './boxed-expression/numerics';
 
 /**
  * The Cost Function is used to select the simplest between two expressions:
@@ -108,6 +108,7 @@ export function costFunction(expr: BoxedExpression): number {
         // '??': 'Cot',
         // '??': 'Coth',
         'Sec',
+        'Sech',
         'Sin',
         'Sinh',
         'Tan',

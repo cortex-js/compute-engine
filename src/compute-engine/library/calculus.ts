@@ -1,7 +1,7 @@
+import { asFloat } from '../boxed-expression/numerics';
 import { checkDomain } from '../boxed-expression/validate';
 import { applicable, applicableN1 } from '../function-utils';
 import {
-  asFloat,
   centeredDiff8thOrder,
   limit,
   monteCarloEstimate,
@@ -243,7 +243,7 @@ volumes
           ) {
             index = range;
           } else if (range) {
-            // Don't canonicalize the index. Canonicalization as the
+            // Don't canonicalize the index. Canonicalization has the
             // side effect of declaring the symbol, here we're using
             // it to do a local declaration
             index = range.ops?.[0] ?? null;
@@ -276,7 +276,7 @@ volumes
           // @todo: implement using Risch Algorithm
           // },
           // N: (ce, ops) => {
-          // @todo: implement using Monte Carlo integration
+          // N(Integrate) is transformed into NIntegrate
           // }
         },
       },
@@ -287,18 +287,20 @@ volumes
       threadable: false,
       signature: {
         domain: ['FunctionOf', 'Functions', 'Numbers', 'Numbers', 'Numbers'],
+        params: ['Functions', 'Numbers', 'Numbers'],
+        restParam: 'Numbers',
         evaluate: (ce, ops) => {
           // Switch to machine mode
           const numericMode = ce.numericMode;
           const precision = ce.precision;
           ce.numericMode = 'machine';
 
-          const f = applicableN1(ops[0]);
           const [a, b] = ops.slice(1).map((op) => op.value);
           let result: BoxedExpression | undefined = undefined;
-          if (typeof a === 'number' && typeof b === 'number')
+          if (typeof a === 'number' && typeof b === 'number') {
+            const f = applicableN1(ops[0]);
             result = ce.number(monteCarloEstimate(f, a, b));
-
+          }
           ce.numericMode = numericMode;
           ce.precision = precision;
           return result;

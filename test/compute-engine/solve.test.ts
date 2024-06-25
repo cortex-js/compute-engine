@@ -7,28 +7,58 @@ function expr(s: string) {
 describe('SOLVING A QUADRATIC EQUATION', () => {
   const ce = engine;
 
+  test('Solving x^2 + 200x - 0.0000015 = 0', () => {
+    // Sols -200.000000075 and 0.000000075
+    // From https://en.wikipedia.org/wiki/Loss_of_significance
+
+    const result = engine
+      .parse(`x^2 + 200x - 0.000015 = 0`)
+      .solve(['x'])
+      ?.map((x) => x.json);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        7.4999999971875e-8,
+        -200.000000075,
+      ]
+    `);
+  });
+
   it('should solve bx', () => {
     const eqn = ce.box(['Multiply', 5, 'x']);
     const result = eqn.solve('x')?.map((x) => x.json);
-    expect(result).toMatchInlineSnapshot(`[0]`);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        0,
+      ]
+    `);
   });
 
   it('should solve bx + c', () => {
     const eqn = ce.box(['Add', ['Multiply', 5, 'x'], -10]);
     const result = eqn.solve('x')?.map((x) => x.json);
-    expect(result).toMatchInlineSnapshot(`[2]`);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        2,
+      ]
+    `);
   });
 
   it('should solve ax^2', () => {
     const eqn = ce.box(['Multiply', 16, ['Square', 'x']]);
-    const result = eqn.solve('x')?.map((x) => x.json);
-    expect(result).toMatchInlineSnapshot(`[0]`);
+    expect(eqn.solve('x')).toMatchInlineSnapshot(`
+      [
+        0,
+      ]
+    `);
   });
 
   it('should solve ax^2 + c', () => {
     const eqn = ce.box(['Add', ['Multiply', 2, ['Square', 'x']], -16]);
-    const result = eqn.solve('x')?.map((x) => x.json);
-    expect(result).toMatchInlineSnapshot(`[["Multiply", 2, ["Sqrt", 2]]]`);
+    expect(eqn.solve('x')).toMatchInlineSnapshot(`
+      [
+        ["Multiply", 2, ["Sqrt", 2]],
+      ]
+    `);
   });
 
   it('should solve ax^2 + bx + c', () => {
@@ -39,8 +69,12 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
       4,
     ]);
 
-    const result = eqn.solve('x')?.map((x) => x.json);
-    expect(result).toMatchInlineSnapshot(`[-1, -2]`);
+    expect(eqn.solve('x')).toMatchInlineSnapshot(`
+      [
+        -1,
+        -2,
+      ]
+    `);
   });
 });
 
@@ -66,7 +100,19 @@ describe('expr.solve()', () => {
   test('should solve a simple equation with a variable', () => {
     const e = expr('x - 1 + y = 0');
     const result = e.solve('x')?.map((x) => x.json);
-    expect(result).toMatchInlineSnapshot(`[["Add", ["Negate", "y"], 1]]`);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        [
+          Add,
+          [
+            Multiply,
+            -1,
+            y,
+          ],
+          1,
+        ],
+      ]
+    `);
   });
 
   test('should solve a simple equation', () => {
@@ -86,8 +132,34 @@ describe('expr.solve()', () => {
     const result = e.solve('x')?.map((x) => x.json);
     expect(result).toMatchInlineSnapshot(`
       [
-        ["Divide", ["Subtract", ["Sqrt", 3], 2], 2],
-        ["Subtract", ["Multiply", ["Rational", -1, 2], ["Sqrt", 3]], 1]
+        [
+          Divide,
+          [
+            Add,
+            [
+              Sqrt,
+              3,
+            ],
+            -2,
+          ],
+          2,
+        ],
+        [
+          Add,
+          [
+            Multiply,
+            [
+              Rational,
+              -1,
+              2,
+            ],
+            [
+              Sqrt,
+              3,
+            ],
+          ],
+          -1,
+        ],
       ]
     `);
   });

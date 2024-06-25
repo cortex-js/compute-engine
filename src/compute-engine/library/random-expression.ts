@@ -60,7 +60,7 @@ export function randomExpression(level?: number): Expression {
           [
             'Sum',
             ['Divide', 1, ['Power', 'n', 2]],
-            ['Triple', ['Hold', 'n'], 1, { num: '+Infinity' }],
+            ['Triple', ['Hold', 'n'], 1, 'PositiveInfinity'],
           ],
         ],
       ],

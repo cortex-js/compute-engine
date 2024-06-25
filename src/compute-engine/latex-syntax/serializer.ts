@@ -14,10 +14,7 @@ import {
   machineValue,
 } from '../../math-json/utils';
 
-import { WarningSignalHandler } from '../../common/signals';
-
 import {
-  NumberFormattingOptions,
   LatexString,
   SerializeLatexOptions,
   DelimiterScale,
@@ -29,7 +26,7 @@ import {
   IndexedLatexDictionaryEntry,
 } from './dictionary/definitions';
 
-import { countTokens, joinLatex } from './tokenizer';
+import { countTokens, joinLatex, supsub } from './tokenizer';
 import { serializeNumber } from './serialize-number';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core';
@@ -73,42 +70,15 @@ const STYLE_MODIFIERS = {
 };
 
 export class Serializer {
-  readonly onError: WarningSignalHandler;
-  options: NumberFormattingOptions & SerializeLatexOptions;
+  options: SerializeLatexOptions;
   readonly dictionary: IndexedLatexDictionary;
   level = -1;
-  // If true, serialize using canonical serialization rules (i.e. (a/b)*(c/d) -> (a*c)/(b*d))
-  // If false, avoid any canonicalization (i.e. (a/b)*(c/d) -> (a/b)*(c/d))
-  canonical: undefined | boolean;
   constructor(
-    options: NumberFormattingOptions & SerializeLatexOptions,
     dictionary: IndexedLatexDictionary,
-    onError: WarningSignalHandler
+    options: SerializeLatexOptions
   ) {
-    this.options = options;
-    if (options.invisibleMultiply) {
-      if (
-        !/#1/.test(options.invisibleMultiply) ||
-        !/#2/.test(options.invisibleMultiply)
-      ) {
-        onError([
-          {
-            severity: 'warning',
-            message: ['expected-argument', 'invisibleMultiply'],
-          },
-        ]);
-      }
-    }
-    this.onError = onError;
     this.dictionary = dictionary;
-    this.canonical = undefined;
-  }
-
-  updateOptions(
-    opt: Partial<NumberFormattingOptions> & Partial<SerializeLatexOptions>
-  ) {
-    for (const k of Object.keys(this.options))
-      if (k in opt) this.options[k] = opt[k];
+    this.options = options;
   }
 
   /**
@@ -253,7 +223,7 @@ export class Serializer {
     if (def?.serialize) return def.serialize(this, expr);
 
     // It's a function without a serializer.
-    // It may have come from `parseUnknownIdentifier()`
+    // It may have come from `getIdentifierType()`
     // Serialize the arguments as function arguments
     const h = head(expr);
     if (typeof h === 'string')
@@ -306,16 +276,8 @@ export class Serializer {
       .join('\\\\')}\\end{array}\\right\\rbrack`;
   }
 
-  serialize(
-    expr: Expression | null,
-    options?: { canonical?: boolean }
-  ): LatexString {
+  serialize(expr: Expression | null): LatexString {
     if (expr === null || expr === undefined) return '';
-
-    options = options ? { ...options } : {};
-    if (!('canonical' in options)) options.canonical = true;
-    const savedCanonical = this.canonical;
-    if (this.canonical === undefined) this.canonical = options.canonical;
 
     this.level += 1;
     try {
@@ -354,7 +316,8 @@ export class Serializer {
         //
         const fnName = headName(expr);
         if (fnName) {
-          return this.serializeFunction(expr, this.dictionary.ids.get(fnName));
+          const def = this.dictionary.ids.get(fnName);
+          return this.serializeFunction(expr, def);
         }
 
         //
@@ -373,23 +336,13 @@ export class Serializer {
         // `{num: 'not a number'}`
         // `{foo: 'not an expression}`
 
-        this.onError([
-          {
-            severity: 'warning',
-            message: [
-              'syntax-error',
-              expr ? JSON.stringify(expr) : 'undefined',
-            ],
-          },
-        ]);
+        throw Error(`Syntax error ${expr ? JSON.stringify(expr) : ''}`);
       })();
       this.level -= 1;
-      this.canonical = savedCanonical;
       return result ?? '';
     } catch (e) {}
 
     this.level -= 1;
-    this.canonical = savedCanonical;
     return '';
   }
   applyFunctionStyle(expr: Expression, level: number): DelimiterScale {
@@ -596,8 +549,8 @@ function parseIdentifierBody(
     }
 
     // Apply the superscripts and subscripts
-    if (sups.length > 0) body = `${body}^{${sups.join(',')}}`;
-    if (subs.length > 0) body = `${body}_{${subs.join(',')}}`;
+    if (sups.length > 0) body = `${body}${supsub('^', sups.join(','))}`;
+    if (subs.length > 0) body = `${body}${supsub('_', subs.join(','))}`;
   }
 
   for (const style of styles) {
@@ -672,4 +625,22 @@ function serializeIdentifier(
   if (rest.length > 0) return `\\operatorname{${s}}`;
 
   return body;
+}
+
+export function serializeLatex(
+  expr: Expression | null,
+  dict: IndexedLatexDictionary,
+  options: SerializeLatexOptions
+): string {
+  if (options.invisibleMultiply) {
+    if (
+      !/#1/.test(options.invisibleMultiply) ||
+      !/#2/.test(options.invisibleMultiply)
+    ) {
+      throw Error('Expected 2 arguments (#1 and #2) for invisibleMultiply');
+    }
+  }
+
+  const serializer = new Serializer(dict, options);
+  return serializer.serialize(expr);
 }

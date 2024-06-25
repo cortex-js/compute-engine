@@ -13,7 +13,7 @@ import {
 import { splitGraphemes } from '../common/grapheme-splitter';
 import {
   COMPARISON_PRECEDENCE,
-  NumberFormattingOptions,
+  NumberSerializationFormat,
 } from '../compute-engine/latex-syntax/public';
 import { Expression } from '../math-json/math-json-format';
 import {
@@ -34,21 +34,25 @@ import {
 } from '../point-free-parser/characters';
 import { RESERVED_WORDS } from './reserved-words';
 
-export const NUMBER_FORMATTING_OPTIONS: NumberFormattingOptions = {
-  precision: 15, // with machine numbers, up to 15 assuming 2^53 bits floating points
-  decimalMarker: '.',
-  groupSeparator: '_', // for thousands, etc...
-  exponentProduct: '',
-  beginExponentMarker: 'e',
-  endExponentMarker: '',
-  notation: 'auto',
-  imaginaryUnit: 'i',
-  truncationMarker: '',
-  beginRepeatingDigits: '',
-  endRepeatingDigits: '',
+export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
   positiveInfinity: '+Infinity',
   negativeInfinity: '-Infinity',
   notANumber: 'NaN',
+  imaginaryUnit: 'i',
+
+  decimalSeparator: '.',
+  digitGroupSeparator: '_', // for thousands, etc...
+  digitGroup: 3,
+
+  exponentProduct: '',
+  beginExponentMarker: 'e',
+  endExponentMarker: '',
+  truncationMarker: '',
+
+  repeatingDecimal: 'none',
+
+  fractionalDigits: 'max',
+  notation: 'auto',
   avoidExponentsInRange: [-7, 20],
 };
 

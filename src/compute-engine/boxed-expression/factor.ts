@@ -1,11 +1,8 @@
 import Complex from 'complex.js';
 import Decimal from 'decimal.js';
 
-import { BoxedExpression, IComputeEngine, Rational } from '../public';
-import { isRelationalOperator } from '../latex-syntax/dictionary/definitions-relational-operators';
 import {
-  asRational,
-  inverse,
+  Rational,
   isBigRational,
   isRational,
   isRationalInteger,
@@ -13,121 +10,14 @@ import {
   isRationalOne,
   isRationalZero,
   machineNumerator,
-  mul,
   neg,
   pow,
   reduceRationalSquareRoot,
-  sqrt,
-} from './rationals';
-import { asFloat, gcd } from './numeric';
-
-/**
- * Attempt to factor a numeric coefficient `c` and a `rest` out of a
- * canonical expression `expr` such that `ce.mul(c, rest)` is equal to `expr`.
- *
- * Attempts to make `rest` a positive value (i.e. pulls out negative sign).
- *
- * The numeric coefficient could be an expression, for example:
- * ['Multiply', 2, ['Sqrt', 5], 'x']
- *    -> [['Multiply', 2, ['Sqrt', 5]], 'x']
- *
- * ['Multiply', 2, 'x', 3, 'a']
- *    -> [6, ['Multiply', 'x', 'a']]
- *
- * ['Divide', ['Multiply', 2, 'x'], ['Multiply', 3, 'y', 'a']]
- *    -> [['Rational', 2, 3], ['Divide', 'x', ['Multiply, 'y', 'a']]]
- */
-export function asCoefficient(
-  expr: BoxedExpression
-): [coef: Rational, rest: BoxedExpression] {
-  console.assert(expr.isCanonical);
-
-  const ce = expr.engine;
-
-  //
-  // Multiply
-  //
-  if (expr.head === 'Multiply') {
-    const rest: BoxedExpression[] = [];
-    let coef: Rational = [1, 1];
-    for (const arg of expr.ops!) {
-      const r = asRational(arg);
-      if (r) coef = mul(coef, r);
-      else rest.push(arg);
-    }
-
-    if (isRationalOne(coef)) return [coef, expr];
-    return [coef, ce.mul(...rest)];
-  }
-
-  //
-  // Divide
-  //
-  if (expr.head === 'Divide') {
-    // eslint-disable-next-line prefer-const
-    const [coef1, numer] = asCoefficient(expr.op1);
-    const [coef2, denom] = asCoefficient(expr.op2);
-
-    const coef = mul(coef1, inverse(coef2));
-
-    if (denom.isOne) return [coef, numer];
-    if (isRationalOne(coef)) return [coef, expr];
-    return [coef, ce.div(numer, denom)];
-  }
-
-  //
-  // Power
-  //
-  if (expr.head === 'Power') {
-    // We can only extract a coef if the exponent is a literal
-    if (expr.op2.numericValue === null) return [[1, 1], expr];
-
-    // eslint-disable-next-line prefer-const
-    let [coef, base] = asCoefficient(expr.op1);
-    if (isRationalOne(coef)) return [coef, expr];
-
-    const exponent = asFloat(expr.op2);
-    if (typeof exponent === 'number' && Number.isInteger(exponent))
-      return [pow(coef, exponent), ce.pow(base, expr.op2)];
-
-    return [[1, 1], expr];
-  }
-
-  if (expr.head === 'Sqrt') {
-    const [coef, rest] = asCoefficient(expr.op1);
-    let sqrtCoef = sqrt(coef);
-    return sqrtCoef ? [sqrtCoef, ce.sqrt(rest)] : [[1, 1], expr];
-  }
-
-  //
-  // Add
-  //
-  if (expr.head === 'Add') {
-    // @todo: use factor() to factor out common factors
-  }
-
-  //
-  // Negate
-  //
-  if (expr.head === 'Negate') {
-    const [coef, rest] = asCoefficient(expr.op1);
-    return [neg(coef), rest];
-  }
-
-  // @todo:  could consider others.. `Ln`, `Abs`, trig functions
-
-  //
-  // Literal
-  //
-
-  // Make the part positive if the real part is negative
-  const z = expr.numericValue;
-  if (z instanceof Complex && z.re < 0)
-    return [[-1, 1], ce.number(ce.complex(-z.re, -z.im))];
-
-  const r = asRational(expr);
-  return r ? [r, ce.One] : [[1, 1], expr];
-}
+} from '../numerics/rationals';
+import { gcd } from '../numerics/numeric';
+import { BoxedExpression, IComputeEngine } from './public';
+import { asFloat, asRational, mul } from './numerics';
+import { isRelationalOperator } from './utils';
 
 export function applyCoefficient(
   value: number | Decimal | Complex | Rational | null,
@@ -308,7 +198,7 @@ class Factors {
   div(den: BoxedExpression) {
     if (den.isOne) return;
     if (den.isNegativeOne) {
-      this.sign *= -1;
+      this.sign = -this.sign;
       return;
     }
     this.mul(den, this.engine.NegativeOne);
@@ -318,7 +208,7 @@ class Factors {
     exponent ??= factor.engine.One;
 
     if (factor.head === 'Negate') {
-      this.sign *= -1;
+      this.sign = -this.sign;
       factor = factor.ops![0];
     }
     if (factor.head === 'Divide') {
@@ -340,7 +230,7 @@ class Factors {
     }
 
     if (factor.isNegative) {
-      this.sign *= -1;
+      this.sign = -this.sign;
       factor = this.engine.neg(factor);
     }
 

@@ -2,27 +2,23 @@ import { Complex } from 'complex.js';
 import { Decimal } from 'decimal.js';
 
 import {
-  Expression,
   MathJsonIdentifier,
   MathJsonNumber,
 } from '../math-json/math-json-format';
 
-import { LatexSyntax } from './latex-syntax/latex-syntax';
 import type {
   LibraryCategory,
   LatexDictionaryEntry,
   LatexString,
-  NumberFormattingOptions,
   ParseLatexOptions,
-  SerializeLatexOptions,
 } from './latex-syntax/public';
 
 import { assume } from './assume';
 
 import { MACHINE_PRECISION, NUMERIC_TOLERANCE } from './numerics/numeric';
+
 import {
   AssumeResult,
-  BoxedExpression,
   BoxedFunctionDefinition,
   BoxedSymbolDefinition,
   IComputeEngine,
@@ -31,17 +27,14 @@ import {
   NumericMode,
   RuntimeScope,
   Scope,
-  SemiBoxedExpression,
   SymbolDefinition,
   BoxedRuleSet,
   Rule,
-  JsonSerializationOptions,
   ComputeEngineStats,
   Metadata,
   BoxedDomain,
   DomainExpression,
   FunctionDefinition,
-  Rational,
   BoxedSubstitution,
   AssignValue,
   DomainLiteral,
@@ -49,13 +42,16 @@ import {
   AngularUnit,
   CanonicalOptions,
 } from './public';
+
 import { box, boxFunction, boxNumber } from './boxed-expression/box';
+
 import {
   setIdentifierDefinitions,
   getStandardLibrary,
   isSymbolDefinition,
   isFunctionDefinition,
 } from './library/library';
+
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 import { ExpressionMap } from './boxed-expression/expression-map';
 import { asLatexString } from './boxed-expression/utils';
@@ -79,7 +75,7 @@ import {
   makeFunctionDefinition,
   _BoxedFunctionDefinition,
 } from './boxed-expression/boxed-function-definition';
-import { inverse, isRational } from './numerics/rationals';
+import { Rational, inverse, isRational } from './numerics/rationals';
 import { canonicalNegate, evalNegate } from './symbolic/negate';
 import { flattenOps, flattenSequence } from './symbolic/flatten';
 import { bigint } from './numerics/numeric-bigint';
@@ -92,6 +88,20 @@ import {
 } from './library/domains';
 import { canonical } from './symbolic/utils';
 import { domainToSignature } from './domain-utils';
+import {
+  IndexedLatexDictionary,
+  getLatexDictionary,
+  indexLatexDictionary,
+} from './latex-syntax/dictionary/definitions';
+import { parse } from './latex-syntax/parse';
+import {
+  BoxedExpression,
+  SemiBoxedExpression,
+} from './boxed-expression/public';
+
+// To avoid circular dependencies, serializeToJson is forward declared. Type
+// to import it.
+import './boxed-expression/serialize';
 
 /**
  *
@@ -151,6 +161,18 @@ export class ComputeEngine implements IComputeEngine {
   readonly NegativeInfinity: BoxedExpression;
   readonly ComplexInfinity: BoxedExpression;
 
+  /** The symbol separating the whole part of a number from its fractional
+   *  part.
+   *
+   * Commonly a period (`.`) in English, but a comma (`,`) in many European
+   * languages. For the comma, use `"{,}"` so that the spacing is correct.
+   *
+   * Note that this is a LaTeX string and is used when parsing or serializing
+   * LaTeX. MathJSON always uses a period.
+   *
+   * */
+  decimalSeparator: LatexString = '.';
+
   /** @internal */
   _BIGNUM_NAN: Decimal;
   /** @internal */
@@ -176,9 +198,6 @@ export class ComputeEngine implements IComputeEngine {
   private _angularUnit: AngularUnit;
 
   /** @internal */
-  private _latexSyntax?: LatexSyntax; // To parse rules as LaTeX
-
-  /** @internal */
   private _tolerance: number;
   /** @internal */
   private _bignumTolerance: Decimal;
@@ -199,18 +218,6 @@ export class ComputeEngine implements IComputeEngine {
   private _cost?: (expr: BoxedExpression) => number;
 
   /** @internal */
-  private _jsonSerializationOptions: JsonSerializationOptions;
-
-  /**
-   * During certain operations  (serializing to LaTeX, constructing error
-   * messages) we need to use a "raw" JSON serialization without any customization. Setting the `_useRawJsonSerializationOptions` will bypass
-   * the `_jsonSerializationOptions` and use `_rawJsonSerializationOptions`
-   * instead
-   * @internal */
-  private _useRawJsonSerializationOptions: boolean;
-  private _rawJsonSerializationOptions: JsonSerializationOptions;
-
-  /** @internal */
   private _commonSymbols: { [symbol: string]: null | BoxedExpression } = {
     True: null,
     False: null,
@@ -225,6 +232,7 @@ export class ComputeEngine implements IComputeEngine {
     ImaginaryUnit: null,
     ExponentialE: null,
   };
+
   /** @internal */
   private _commonNumbers: { [num: number]: null | BoxedExpression } = {
     '-5': null,
@@ -244,8 +252,8 @@ export class ComputeEngine implements IComputeEngine {
     12: null,
     36: null,
   };
-  /** @internal */
 
+  /** @internal */
   private _commonDomains: Partial<{
     [dom in DomainLiteral]: null | BoxedDomain;
   }> = {
@@ -313,6 +321,12 @@ export class ComputeEngine implements IComputeEngine {
    * manipulate them.
    *
    */
+
+  /** @private */
+  private _latexDictionaryInput: Readonly<LatexDictionaryEntry[]>;
+  /** @private */
+  _indexedLatexDictionary: IndexedLatexDictionary;
+
   static getStandardLibrary(
     categories: LibraryCategory[] | LibraryCategory | 'all' = 'all'
   ): readonly IdentifierDefinitions[] {
@@ -346,33 +360,15 @@ export class ComputeEngine implements IComputeEngine {
    * `chop()` as well.
    */
   constructor(options?: {
+    ids?: readonly IdentifierDefinitions[];
     numericMode?: NumericMode;
     numericPrecision?: number;
-    ids?: readonly IdentifierDefinitions[];
     tolerance?: number;
   }) {
     if (options !== undefined && typeof options !== 'object')
       throw Error('Unexpected argument');
 
     this.strict = true;
-
-    this._jsonSerializationOptions = {
-      exclude: [],
-      shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
-      metadata: [],
-      precision: 'max',
-      repeatingDecimals: true,
-    };
-
-    this._useRawJsonSerializationOptions = false;
-    // These options are not customizable...
-    this._rawJsonSerializationOptions = {
-      exclude: [],
-      shorthands: ['function', 'symbol', 'string', 'dictionary', 'number'],
-      metadata: [],
-      precision: 'max',
-      repeatingDecimals: false,
-    };
 
     this._stats = {
       highwaterMark: 0,
@@ -461,12 +457,34 @@ export class ComputeEngine implements IComputeEngine {
     this.pushScope();
   }
 
-  get latexDictionary(): readonly LatexDictionaryEntry[] {
-    return this.latexSyntax.dictionary;
+  get latexDictionary(): Readonly<LatexDictionaryEntry[]> {
+    return this._latexDictionaryInput;
   }
 
-  set latexDictionary(dic: readonly LatexDictionaryEntry[]) {
-    this.latexSyntax.dictionary = dic;
+  set latexDictionary(dic: Readonly<LatexDictionaryEntry[]>) {
+    this._latexDictionaryInput = dic;
+    this._indexedLatexDictionary = indexLatexDictionary(dic, (sig) => {
+      throw Error(
+        typeof sig.message === 'string' ? sig.message : sig.message.join(',')
+      );
+    });
+  }
+
+  get indexedLatexDictionary(): IndexedLatexDictionary {
+    if (this._indexedLatexDictionary) return this._indexedLatexDictionary;
+    if (!this._latexDictionaryInput) {
+      this._indexedLatexDictionary = indexLatexDictionary(
+        ComputeEngine.getLatexDictionary(),
+        (sig) => console.error(sig)
+      );
+      return this._indexedLatexDictionary;
+    }
+
+    this._indexedLatexDictionary = indexLatexDictionary(
+      this._latexDictionaryInput,
+      (sig) => console.error(sig)
+    );
+    return this._indexedLatexDictionary;
   }
 
   /** After the configuration of the engine has changed, clear the caches
@@ -612,15 +630,8 @@ export class ComputeEngine implements IComputeEngine {
 
     // Set the display precision as requested.
     // It may be less than the effective precision, which is never less than 15
-    this._latexSyntax?.updateOptions({
-      precision: p,
-      avoidExponentsInRange: [-6, p],
-    });
 
     this._precision = Math.max(p, Math.floor(MACHINE_PRECISION));
-
-    if ((this.jsonSerializationOptions.precision as number) > this._precision)
-      this.jsonSerializationOptions = { precision: this._precision };
 
     if (
       this._numericMode !== 'auto' &&
@@ -649,16 +660,6 @@ export class ComputeEngine implements IComputeEngine {
     this._numericMode = f;
     if (f === 'complex' || f === 'machine')
       this._precision = Math.floor(MACHINE_PRECISION);
-
-    // Make sure the display precision is not larger than the computation precision
-    if (
-      this._latexSyntax &&
-      this.latexSyntax.options.precision > this._precision
-    )
-      this.latexSyntax.updateOptions({ precision: this._precision });
-
-    if ((this.jsonSerializationOptions.precision as number) > this._precision)
-      this.jsonSerializationOptions = { precision: this._precision };
 
     // Reset the caches: the values in the cache depend on the numeric mode)
     this.reset();
@@ -865,26 +866,42 @@ export class ComputeEngine implements IComputeEngine {
     return a instanceof Complex;
   }
 
-  /** @internal */
-  private get latexSyntax(): LatexSyntax {
-    if (!this._latexSyntax) {
-      const precision = this.precision;
-      this._latexSyntax = new LatexSyntax({
-        computeEngine: this,
-        precision,
-        avoidExponentsInRange: [-6, precision],
-        onError: (err) => {
-          throw new Error(JSON.stringify(err[0].message));
-        },
-      });
-    }
-    return this._latexSyntax;
-  }
+  /**
+   * Return a LaTeX dictionary suitable for the specified category, or `"all"`
+   * for all categories (`"arithmetic"`, `"algebra"`, etc...).
+   *
+   * A LaTeX dictionary is needed to translate between LaTeX and MathJSON.
+   *
+   * Each entry in the dictionary indicate how a LaTeX token (or string of
+   * tokens) should be parsed into a MathJSON expression.
+   *
+   * For example an entry can define that the `\pi` LaTeX token should map to the
+   * symbol `"Pi"`, or that the token `-` should map to the function
+   * `["Negate",...]` when in a prefix position and to the function
+   * `["Subtract", ...]` when in an infix position.
+   *
+   * Furthermore, the information in each dictionary entry is used to serialize
+   * the LaTeX string corresponding to a MathJSON expression.
+   *
+   * Use with `ce.latexDictionary` to set the dictionary. You can complement
+   * it with your own definitions, for example with:
+   *
+   * ```ts
+   * ce.latexDictionary = [
+   *  ...ce.getLatexDictionary("all"),
+   *  {
+   *    kind: "function",
+   *    identifierTrigger: "concat",
+   *    parse: "Concatenate"
+   *  }
+   * ];
+   * ```
+   */
 
   static getLatexDictionary(
     domain: LibraryCategory | 'all' = 'all'
-  ): readonly Readonly<object>[] {
-    return LatexSyntax.getDictionary(domain);
+  ): readonly Readonly<LatexDictionaryEntry>[] {
+    return getLatexDictionary(domain);
   }
 
   /**
@@ -1073,6 +1090,8 @@ export class ComputeEngine implements IComputeEngine {
 
     this.context = this.context.parentScope ?? null;
 
+    if (!this.context) debugger;
+
     console.assert(this.context);
     return this;
   }
@@ -1081,6 +1100,7 @@ export class ComputeEngine implements IComputeEngine {
   swapScope(scope: RuntimeScope | null): RuntimeScope | null {
     const oldScope = this.context;
     this.context = scope;
+    if (!this.context) debugger;
     console.assert(this.context);
     return oldScope;
   }
@@ -1669,7 +1689,7 @@ export class ComputeEngine implements IComputeEngine {
     where?: SemiBoxedExpression
   ): BoxedExpression {
     if (where instanceof _BoxedExpression) {
-      where = this.rawJson(where);
+      where = where.json;
     } else if (where && Array.isArray(where) && where[0] === 'LatexString') {
       if (where[1] === undefined || !where[1]) where = '';
       if (typeof where[1] === 'object' && 'str' in where[1] && !where[1].str)
@@ -1910,9 +1930,14 @@ export class ComputeEngine implements IComputeEngine {
     // These three are not symbols (some of them are not even valid
     // identifiers) but they're a common type
     if (name === 'NaN') return this.NaN;
-    if (name === 'Infinity') return this.PositiveInfinity;
-    if (name === '+Infinity') return this.PositiveInfinity;
-    if (name === '-Infinity') return this.NegativeInfinity;
+    if (
+      name === 'Infinity' ||
+      name === '+Infinity' ||
+      name === 'PositiveInfinity'
+    )
+      return this.PositiveInfinity;
+    if (name === '-Infinity' || name === 'NegativeInfinity')
+      return this.NegativeInfinity;
 
     // `Half` is a synonym for the rational 1/2
     if (name === 'Half') return this.Half;
@@ -2067,158 +2092,73 @@ export class ComputeEngine implements IComputeEngine {
   _fn(
     head: string | BoxedExpression,
     ops: BoxedExpression[],
-    metadata?: Metadata
+    options?: Metadata & { canonical?: boolean }
   ): BoxedExpression {
-    return new BoxedFunction(this, head, ops, { metadata, canonical: true });
+    const canonical = options?.canonical ?? true;
+    return new BoxedFunction(this, head, ops, { ...options, canonical });
   }
 
   /**
    * Parse a string of LaTeX and return a corresponding `BoxedExpression`.
    *
-   * The result may not be canonical.
+   * If the `canonical` option is set to `true`, the result will be canonical
    *
    */
   parse(
-    latex: LatexString | string,
-    options?: { canonical?: CanonicalOptions }
+    latex: null,
+    options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
+  ): null;
+  parse(
+    latex: LatexString,
+    options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
   ): BoxedExpression;
-  parse(s: null, options?: { canonical?: CanonicalOptions }): null;
   parse(
-    latex: LatexString | string | null,
-    options?: { canonical?: CanonicalOptions }
-  ): null | BoxedExpression;
-  parse(
-    latex: LatexString | null | string,
-    options?: { canonical?: CanonicalOptions }
+    latex: LatexString | null,
+    options?: Partial<ParseLatexOptions> & { canonical?: CanonicalOptions }
   ): BoxedExpression | null {
-    if (typeof latex !== 'string') return null;
-    const result = this.latexSyntax.parse(asLatexString(latex) ?? latex);
-    return this.box(result, options);
-  }
+    if (latex === null || latex === undefined) return null;
+    if (typeof latex !== 'string')
+      throw Error('ce.parse(): expected a LaTeX string');
 
-  /** Serialize a `BoxedExpression` or a `MathJSON` expression to a LaTeX
-   * string.
-   *
-   * If the `canonical` option is set to `true`, the result will use canonical
-   * serialization rules (for example (a/b)*(c/d) -> (a*c)/(b*d)).
-   * If false, avoid any canonicalization (i.e. (a/b)*(c/d) -> (a/b)*(c/d)).
-   *
-   * The `canonical` option is true by default.
-   *
-   */
-  serialize(
-    x: Expression | BoxedExpression,
-    options?: { canonical?: boolean }
-  ): string {
-    if (typeof x === 'object' && 'json' in x) {
-      const ce = 'engine' in x ? x.engine : this;
-      return this.latexSyntax.serialize(
-        this.rawJson(ce.box(x, { canonical: false })),
-        options
-      );
-    }
-    return this.latexSyntax.serialize(x as Expression, options);
-  }
+    const defaultOptions: ParseLatexOptions = {
+      imaginaryUnit: '\\imaginaryI',
 
-  get latexOptions(): NumberFormattingOptions &
-    ParseLatexOptions &
-    SerializeLatexOptions {
-    const latexSyntax = this.latexSyntax;
-    return new Proxy(
-      {
-        ...this.latexSyntax.options,
-        ...this.latexSyntax.serializer.options,
+      positiveInfinity: '\\infty',
+      negativeInfinity: '-\\infty',
+      notANumber: '\\operatorname{NaN}',
+
+      decimalSeparator: this.decimalSeparator,
+
+      digitGroup: 3,
+      digitGroupSeparator: '\\,', // for thousands, etc...
+
+      exponentProduct: '\\cdot',
+      beginExponentMarker: '10^{', // could be 'e'
+      endExponentMarker: '}',
+
+      truncationMarker: '\\ldots',
+
+      repeatingDecimal: 'auto', // auto will accept any notation
+
+      skipSpace: true,
+      parseNumbers: 'auto',
+      getIdentifierType: (id) => {
+        if (this.lookupFunction(id)) return 'function';
+        // const def = this.lookupSymbol(id);
+        // if (def?.domain) return 'symbol';
+        return 'symbol';
       },
-      {
-        set(options, prop, value): boolean {
-          if (!(prop in options)) return false;
-          latexSyntax.updateOptions({ [prop]: value });
-          return true;
-        },
-      }
+      parseUnexpectedToken: (lhs, parser) => null,
+      preserveLatex: false,
+    };
+
+    const result = parse(
+      asLatexString(latex) ?? latex,
+      this.indexedLatexDictionary,
+      { ...defaultOptions, ...options }
     );
-  }
-
-  /**
-   * Options to control the serialization of MathJSON expression to LaTeX
-   * when using `expr.latex` or `ce.serialize()`.
-   *
-   */
-  /** {@inheritDoc  NumberFormattingOptions} */
-  /** {@inheritDoc  ParseLatexOptions} */
-  /** {@inheritDoc  SerializeLatexOptions} */
-
-  set latexOptions(
-    opts: Partial<NumberFormattingOptions> &
-      Partial<ParseLatexOptions> &
-      Partial<SerializeLatexOptions>
-  ) {
-    this.latexSyntax.updateOptions(opts);
-  }
-
-  get jsonSerializationOptions(): Readonly<JsonSerializationOptions> {
-    if (this._useRawJsonSerializationOptions) {
-      return new Proxy(this._rawJsonSerializationOptions, {
-        get(options, prop) {
-          if (!(prop in options)) return undefined;
-          return options[prop];
-        },
-      });
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
-    return new Proxy(this._jsonSerializationOptions, {
-      get(options, prop) {
-        if (!(prop in options)) return undefined;
-        return options[prop];
-      },
-      set(options, prop, value): boolean {
-        if (!(prop in options)) return false;
-        self.jsonSerializationOptions = { [prop]: value };
-        return true;
-      },
-    });
-  }
-
-  set jsonSerializationOptions(val: Partial<JsonSerializationOptions>) {
-    if (val.exclude) this._jsonSerializationOptions.exclude = [...val.exclude];
-    if (val.shorthands) {
-      if (
-        (val.shorthands as unknown as string) === 'all' ||
-        val.shorthands.includes('all')
-      ) {
-        this._jsonSerializationOptions.shorthands = [
-          'function',
-          'symbol',
-          'string',
-          'dictionary',
-          'number',
-        ];
-      } else this._jsonSerializationOptions.shorthands = [...val.shorthands];
-    }
-    if (val.metadata) {
-      if (
-        (val.metadata as unknown as string) === 'all' ||
-        val.metadata.includes('all')
-      ) {
-        this._jsonSerializationOptions.metadata = ['latex', 'wikidata'];
-      } else this._jsonSerializationOptions.metadata = [...val.metadata];
-    }
-    if (typeof val.precision === 'number' && val.precision > 0) {
-      this._jsonSerializationOptions.precision = val.precision;
-    }
-    if (typeof val.repeatingDecimals === 'boolean') {
-      this._jsonSerializationOptions.repeatingDecimals = val.repeatingDecimals;
-    }
-  }
-
-  rawJson(expr: BoxedExpression): Expression {
-    const save = this._useRawJsonSerializationOptions;
-    this._useRawJsonSerializationOptions = true;
-    const result = expr.json;
-    this._useRawJsonSerializationOptions = save;
-    return result;
+    if (!result) throw Error('Failed to parse LaTeX string');
+    return this.box(result, { canonical: options?.canonical ?? true });
   }
 
   /**

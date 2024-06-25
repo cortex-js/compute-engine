@@ -1,18 +1,20 @@
-import { BoxedExpression, IComputeEngine, Rational } from '../public';
+import { BoxedExpression, IComputeEngine } from '../public';
 import { apply2N, makePositive } from '../symbolic/utils';
 import { canonicalNegate } from '../symbolic/negate';
 import {
-  asRational,
-  div,
   inverse,
   isBigRational,
   isMachineRational,
   isRationalOne,
   isRationalZero,
-  mul,
 } from '../numerics/rationals';
-import { asCoefficient } from '../numerics/factor';
 import { Product } from '../symbolic/product';
+import {
+  asCoefficient,
+  asRational,
+  div,
+  mul,
+} from '../boxed-expression/numerics';
 
 /**
  * Canonical form of 'Divide' (and 'Rational')

@@ -1,17 +1,27 @@
-/* eslint-disable no-empty */
-/* eslint-disable @typescript-eslint/no-empty-function */
+import type { Expression } from '../../math-json/math-json-format';
+import {
+  getSequence,
+  head,
+  missingIfEmpty,
+  nops,
+  op1,
+  ops,
+  symbol,
+} from '../../math-json/utils';
 
 import {
   ParseLatexOptions,
   LatexToken,
-  NumberFormattingOptions,
   Delimiter,
   Terminator,
   Parser,
   MULTIPLICATION_PRECEDENCE,
+  SymbolTable,
+  SymbolType,
 } from './public';
 import { tokenize, tokensToString } from './tokenizer';
-import {
+import { parseIdentifier, parseInvalidIdentifier } from './parse-identifier';
+import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
   IndexedInfixEntry,
@@ -23,20 +33,6 @@ import {
   IndexedEnvironmentEntry,
   IndexedMatchfixEntry,
 } from './dictionary/definitions';
-
-import { IComputeEngine } from '../public';
-
-import { Expression } from '../../math-json/math-json-format';
-import {
-  getSequence,
-  head,
-  missingIfEmpty,
-  nops,
-  op1,
-  ops,
-  symbol,
-} from '../../math-json/utils';
-import { parseIdentifier, parseInvalidIdentifier } from './parse-identifier';
 
 /** These delimiters can be used as 'shorthand' delimiters in
  * `openTrigger` and `closeTrigger` for `matchfix` operators.
@@ -126,41 +122,64 @@ const CLOSE_DELIMITER = {
   '\\lmoustache': '\\rmoustache',
 };
 
-export const DEFAULT_LATEX_NUMBER_OPTIONS: NumberFormattingOptions = {
-  precision: 6, // with machine numbers, up to 15 assuming 2^53 bits floating points
-  positiveInfinity: '\\infty',
-  negativeInfinity: '-\\infty',
-  notANumber: '\\operatorname{NaN}',
-  decimalMarker: '.', // Use `{,}` for comma as a decimal marker
-  groupSeparator: '\\,', // for thousands, etc...
-  exponentProduct: '\\cdot',
-  beginExponentMarker: '10^{', // could be 'e'
-  endExponentMarker: '}',
-  notation: 'auto',
-  truncationMarker: '\\ldots',
-  beginRepeatingDigits: '\\overline{',
-  endRepeatingDigits: '}',
-  imaginaryUnit: '\\imaginaryI',
-  avoidExponentsInRange: [-7, 20],
-};
-
-export const DEFAULT_PARSE_LATEX_OPTIONS: ParseLatexOptions = {
-  skipSpace: true,
-
-  parseArgumentsOfUnknownLatexCommands: true,
-  parseNumbers: 'auto',
-  parseUnknownIdentifier: (id, parser) =>
-    parser.computeEngine?.lookupFunction(id) !== undefined
-      ? 'function'
-      : 'symbol',
-  preserveLatex: false,
-};
-
+/**
+ * ## THEORY OF OPERATIONS
+ *
+ * The parser is a recursive descent parser that uses a dictionary of
+ * LaTeX commands to parse a LaTeX string into a MathJSON expression.
+ *
+ * The parser is a stateful object that keeps track of the current position
+ * in the token stream, and the boundaries of the current parsing operation.
+ *
+ * To parse correctly some constructs, the parser needs to know the context
+ * in which it is parsing. For example, parsing `k(2+x)` can be interpreted
+ * as a function `k` applied to the sum of `2` and `x`, or as the product
+ * of `k` and the sum of `2` and `x`. The parser needs to know that `k` is
+ * a function to interpret the expression as a function application.
+ *
+ * The parser uses the current state of the compute engine, and any
+ * identifier that may have been declared, to determine the correct
+ * interpretation.
+ *
+ * Some constructs declare variables or functions while parsing. For example,
+ * `\sum_{i=1}^n i` declares the variable `i` as the index of the sum.
+ *
+ * The parser keeps track of the parsing state with a stack of symbol tables.
+ *
+ * In addition, the handler `getIdentifierType()` is called when the parser
+ * encounters an unknown identifier. This handler can be used to declare the
+ * identifier, or to return `unknown` if the identifier is not known.
+ *
+ * Some functions affect the state of the parser:
+ * - `Declare`, `Assign` modify the symbol table
+ * - `Block` create a new symbol table (local scope)
+ * - `Function` create a new symbol table with named arguments
+ *
+ *
+ */
 export class _Parser implements Parser {
-  readonly computeEngine: IComputeEngine;
-  readonly options: NumberFormattingOptions & ParseLatexOptions;
+  readonly options: Readonly<ParseLatexOptions>;
 
   _index = 0;
+
+  symbolTable: SymbolTable = {
+    parent: null,
+    ids: {},
+  };
+
+  pushSymbolTable(): void {
+    this.symbolTable = { parent: this.symbolTable, ids: {} };
+  }
+
+  popSymbolTable(): void {
+    this.symbolTable = this.symbolTable.parent ?? this.symbolTable;
+  }
+
+  addSymbol(id: string, type: SymbolType): void {
+    if (id in this.symbolTable.ids && this.symbolTable.ids[id] !== type)
+      throw new Error(`Symbol ${id} already declared as a different type`);
+    this.symbolTable.ids[id] = type;
+  }
 
   get index(): number {
     return this._index;
@@ -176,15 +195,14 @@ export class _Parser implements Parser {
   private _positiveInfinityTokens: LatexToken[];
   private _negativeInfinityTokens: LatexToken[];
   private _notANumberTokens: LatexToken[];
-  private _decimalMarkerTokens: LatexToken[];
-  private _groupSeparatorTokens: LatexToken[];
+  private _decimalSeparatorTokens: LatexToken[];
+  private _wholeDigitGroupSeparatorTokens: LatexToken[];
+  private _fractionalDigitGroupSeparatorTokens: LatexToken[];
   private _exponentProductTokens: LatexToken[];
   private _beginExponentMarkerTokens: LatexToken[];
   private _endExponentMarkerTokens: LatexToken[];
   private _truncationMarkerTokens: LatexToken[];
-  private _beginRepeatingDigitsTokens: LatexToken[];
-  private _endRepeatingDigitsTokens: LatexToken[];
-  private _imaginaryNumberTokens: LatexToken[];
+  private _imaginaryUnitTokens: LatexToken[];
   private readonly _dictionary: IndexedLatexDictionary;
 
   // A parsing boundary is a sequence of tokens that indicate that a
@@ -208,81 +226,61 @@ export class _Parser implements Parser {
 
   constructor(
     tokens: LatexToken[],
-    options: NumberFormattingOptions & ParseLatexOptions,
     dictionary: IndexedLatexDictionary,
-    computeEngine: IComputeEngine
+    options: Readonly<ParseLatexOptions>
   ) {
     this._tokens = tokens;
-    this.options = {
-      ...DEFAULT_LATEX_NUMBER_OPTIONS,
-      ...DEFAULT_PARSE_LATEX_OPTIONS,
-      ...options,
-    };
+    this.options = options;
+    if (!dictionary) debugger;
     this._dictionary = dictionary;
-    this.computeEngine = computeEngine;
 
-    this._positiveInfinityTokens = tokenize(this.options.positiveInfinity, []);
-    this._negativeInfinityTokens = tokenize(this.options.negativeInfinity, []);
-    this._notANumberTokens = tokenize(this.options.notANumber, []);
-    this._decimalMarkerTokens = tokenize(this.options.decimalMarker, []);
-    this._groupSeparatorTokens = tokenize(this.options.groupSeparator, []);
-    this._exponentProductTokens = tokenize(this.options.exponentProduct, []);
+    this._positiveInfinityTokens = tokenize(this.options.positiveInfinity);
+    this._negativeInfinityTokens = tokenize(this.options.negativeInfinity);
+    this._notANumberTokens = tokenize(this.options.notANumber);
+    this._decimalSeparatorTokens = tokenize(this.options.decimalSeparator);
+
+    this._wholeDigitGroupSeparatorTokens = [];
+    this._fractionalDigitGroupSeparatorTokens = [];
+    if (this.options.digitGroupSeparator) {
+      if (typeof this.options.digitGroupSeparator === 'string') {
+        this._wholeDigitGroupSeparatorTokens = tokenize(
+          this.options.digitGroupSeparator
+        );
+        this._fractionalDigitGroupSeparatorTokens =
+          this._wholeDigitGroupSeparatorTokens;
+      } else if (Array.isArray(this.options.digitGroupSeparator)) {
+        this._wholeDigitGroupSeparatorTokens = tokenize(
+          this.options.digitGroupSeparator[0]
+        );
+        this._fractionalDigitGroupSeparatorTokens = tokenize(
+          this.options.digitGroupSeparator[1]
+        );
+      }
+    }
+
+    this._exponentProductTokens = tokenize(this.options.exponentProduct);
     this._beginExponentMarkerTokens = tokenize(
-      this.options.beginExponentMarker,
-      []
+      this.options.beginExponentMarker
     );
-    this._endExponentMarkerTokens = tokenize(
-      this.options.endExponentMarker,
-      []
-    );
-    this._truncationMarkerTokens = tokenize(this.options.truncationMarker, []);
-    this._beginRepeatingDigitsTokens = tokenize(
-      this.options.beginRepeatingDigits,
-      []
-    );
-    this._endRepeatingDigitsTokens = tokenize(
-      this.options.endRepeatingDigits,
-      []
-    );
-    this._imaginaryNumberTokens = tokenize(this.options.imaginaryUnit, []);
+    this._endExponentMarkerTokens = tokenize(this.options.endExponentMarker);
+    this._truncationMarkerTokens = tokenize(this.options.truncationMarker);
+    this._imaginaryUnitTokens = tokenize(this.options.imaginaryUnit);
   }
 
-  updateOptions(
-    opt: Partial<NumberFormattingOptions> & Partial<ParseLatexOptions>
-  ) {
-    for (const [k, v] of Object.entries(opt))
-      if (k in this.options) {
-        this.options[k] = v;
-        if (typeof v === 'string') {
-          if (k === 'positiveInfinity')
-            this._positiveInfinityTokens = tokenize(v, []);
-          if (k === 'negativeInfinity')
-            this._negativeInfinityTokens = tokenize(v, []);
-          if (k === 'notANumber') this._notANumberTokens = tokenize(v, []);
-          if (k === 'decimalMarker')
-            this._decimalMarkerTokens = tokenize(v, []);
-          if (k === 'groupSeparator')
-            this._groupSeparatorTokens = tokenize(v, []);
-          if (k === 'exponentProduct')
-            this._exponentProductTokens = tokenize(v, []);
-          if (k === 'beginExponentMarker')
-            this._beginExponentMarkerTokens = tokenize(v, []);
-          if (k === 'endExponentMarker')
-            this._endExponentMarkerTokens = tokenize(v, []);
-          if (k === 'truncationMarker')
-            this._truncationMarkerTokens = tokenize(v, []);
-          if (k === 'beginRepeatingDigits')
-            this._beginRepeatingDigitsTokens = tokenize(v, []);
-          if (k === 'endRepeatingDigits')
-            this._endRepeatingDigitsTokens = tokenize(v, []);
-          if (k === 'imaginaryNumber')
-            this._imaginaryNumberTokens = tokenize(v, []);
-        }
-      } else throw Error(`Unexpected option "${k}"`);
-  }
+  getIdentifierType(id: string): SymbolType {
+    // Check if the identifier is in the symbol table
+    // (which means it has been encountered as part of the current parsing)
+    let table: SymbolTable | null = this.symbolTable;
+    while (table) {
+      if (id in table.ids) return table.ids[id];
+      table = table.parent;
+    }
 
-  get atEnd(): boolean {
-    return this.index >= this._tokens.length;
+    // Is the identifier known in the compute engine current scope?
+    if (this.options.getIdentifierType)
+      return this.options.getIdentifierType(id);
+
+    return 'unknown';
   }
 
   get peek(): LatexToken {
@@ -302,6 +300,10 @@ export class _Parser implements Parser {
 
   nextToken(): LatexToken {
     return this._tokens[this.index++];
+  }
+
+  get atEnd(): boolean {
+    return this.index >= this._tokens.length;
   }
 
   /**
@@ -517,18 +519,15 @@ export class _Parser implements Parser {
   }
 
   match(token: LatexToken): boolean {
-    if (this._tokens[this.index] === token) {
-      this.index++;
-      return true;
-    }
-    return false;
+    if (this._tokens[this.index] !== token) return false;
+    this.index++;
+    return true;
   }
 
   matchAll(tokens: LatexToken[]): boolean {
-    console.assert(Array.isArray(tokens));
     if (tokens.length === 0) return false;
 
-    let matched = true;
+    let matched: boolean;
     let i = 0;
     do {
       matched = this._tokens[this.index + i] === tokens[i++];
@@ -545,6 +544,9 @@ export class _Parser implements Parser {
     return '';
   }
 
+  // Match a LaTeX char, which can be a char literal, or a Unicode codepoint
+  // in hexadecimal or decimal notation  with the `\char` or `\unicode` command,
+  // or the `^` character repeated twice followed by a hexadecimal codepoint.
   matchChar(): string | null {
     const index = this.index;
     let caretCount = 0;
@@ -688,6 +690,20 @@ export class _Parser implements Parser {
     return null;
   }
 
+  parseOptionalGroup(): Expression | null {
+    const index = this.index;
+    this.skipSpaceTokens();
+    if (this.match('[')) {
+      this.addBoundary([']']);
+      const expr = this.parseExpression();
+      this.skipSpace();
+      if (this.matchBoundary()) return expr;
+      return this.boundaryError('expected-closing-delimiter');
+    }
+    this.index = index;
+    return null;
+  }
+
   // Some LaTeX commands (but not all) can accept an argument without braces,
   // for example `^` , `\sqrt` or `\frac`.
   // This argument will usually be a single token, but can be a sequence of
@@ -722,20 +738,6 @@ export class _Parser implements Parser {
     if (!result) return null;
     // this.index += 1;
     return result;
-  }
-
-  parseOptionalGroup(): Expression | null {
-    const index = this.index;
-    this.skipSpaceTokens();
-    if (this.match('[')) {
-      this.addBoundary([']']);
-      const expr = this.parseExpression();
-      this.skipSpace();
-      if (this.matchBoundary()) return expr;
-      return this.boundaryError('expected-closing-delimiter');
-    }
-    this.index = index;
-    return null;
   }
 
   /**
@@ -804,6 +806,42 @@ export class _Parser implements Parser {
     return result;
   }
 
+  /** Match a string used as a LaTeX identifier, for example an environment
+   * name.
+   * Not suitable for general purpose text, e.g. argument of a `\text{}
+   * command. See `matchChar()` instead.
+   */
+  private parseStringGroupContent(): string {
+    const start = this.index;
+    let result = '';
+    let level = 0;
+    while (!this.atBoundary || level > 0) {
+      const token = this.nextToken();
+      if (token === '<$>' || token === '<$$>') {
+        this.index = start;
+        return '';
+      }
+      if (token === '<{>') {
+        level += 1;
+        result += '\\{';
+      } else if (token === '<}>') {
+        level -= 1;
+        result += '\\}';
+      } else if (token === '<space>') {
+        result += ' ';
+      } else if (token[0] === '\\') {
+        // TeX will give a 'Missing \endcsname inserted' error
+        // if it encounters any command when expecting a string.
+        // We're a bit more lax.
+        // @todo: interpret some symbols, i.e. \alpha, etc..
+        result += token;
+      } else {
+        result += token;
+      }
+    }
+    return result;
+  }
+
   /** Parse a group as a a string, for example for `\operatorname` or `\begin` */
   parseStringGroup(optional?: boolean): string | null {
     if (optional === undefined) optional = false;
@@ -856,8 +894,9 @@ export class _Parser implements Parser {
     return this.error(['unknown-environment', { str: name }], index);
   }
 
-  /** If the next token matches a `+` or `-` sign, return it and advance the index.
-   * Otherwise return `''` and do not advance */
+  /** If the next token matches a `-` sign, return '-', otherwise return '+'
+   *
+   */
   private parseOptionalSign(): string {
     let isNegative = !!this.matchAny(['-', '\u2212']);
     while (this.matchAny(['+', '\ufe62']) || this.skipSpace())
@@ -866,10 +905,12 @@ export class _Parser implements Parser {
     return isNegative ? '-' : '+';
   }
 
-  private parseDecimalDigits(options?: { withGrouping?: boolean }): string {
-    options ??= {};
-    options.withGrouping ??= true;
-
+  /** Parse a sequence of decimal digits. The part indicates which
+   * grouping separator should be expected.
+   */
+  private parseDecimalDigits(
+    part: 'none' | 'whole' | 'fraction' = 'whole'
+  ): string {
     const result: string[] = [];
     let done = false;
     while (!done) {
@@ -879,10 +920,14 @@ export class _Parser implements Parser {
       }
 
       done = true;
-      if (options.withGrouping && this.options.groupSeparator) {
+      const group =
+        part === 'whole'
+          ? this._wholeDigitGroupSeparatorTokens
+          : this._fractionalDigitGroupSeparatorTokens;
+      if (part !== 'none' && group.length > 0) {
         const savedIndex = this.index;
         this.skipVisualSpace();
-        if (this.matchAll(this._groupSeparatorTokens)) {
+        if (this.matchAll(group)) {
           this.skipVisualSpace();
           // Are there more digits after a group separator
           if (/^[0-9]$/.test(this.peek)) done = false;
@@ -893,14 +938,14 @@ export class _Parser implements Parser {
     return result.join('');
   }
 
-  private parseSignedInteger(options?: { withGrouping?: boolean }): string {
-    options ??= {};
-    options.withGrouping ??= true;
-
+  /** The 'part' argument is used to dermine what grouping separator
+   *  should be expected.
+   */
+  private parseSignedInteger(part: 'whole' | 'fraction' | 'none'): string {
     const start = this.index;
 
     const sign = this.parseOptionalSign();
-    const result = this.parseDecimalDigits(options);
+    const result = this.parseDecimalDigits(part);
     if (result) return sign === '-' ? '-' + result : result;
 
     this.index = start;
@@ -910,45 +955,51 @@ export class _Parser implements Parser {
   private parseExponent(): string {
     const start = this.index;
 
+    this.skipVisualSpace();
+
     if (this.matchAny(['e', 'E'])) {
       // The exponent does not contain grouping markers. See
       // https://physics.nist.gov/cuu/Units/checklist.html  #16
-      const exponent = this.parseSignedInteger({ withGrouping: false });
+      const exponent = this.parseSignedInteger('none');
       if (exponent) return exponent;
     }
 
     this.index = start;
     if (this.match('\\times')) {
-      this.skipSpaceTokens();
-      if (this.match('1') && this.match('0') && this.match('^')) {
-        // Is it a single digit exponent, i.e. `\times 10^5`
-        if (/^[0-9]$/.test(this.peek)) return this.nextToken();
+      this.skipVisualSpace();
+      if (this.matchAll(['1', '0'])) {
+        this.skipVisualSpace();
+        if (this.match('^')) {
+          this.skipVisualSpace();
+          // Is it a single digit exponent, i.e. `\times 10^5`
+          if (/^[0-9]$/.test(this.peek)) return this.nextToken();
 
-        if (this.match('<{>')) {
-          // Multi digit exponent,i.e. `\times 10^{10}` or `\times 10^{-5}`
-          this.skipSpaceTokens();
-          // Note: usually don't have group markers, but since we're inside
-          // a `{}` there can't be ambiguity, so we're lenient
-          const exponent = this.parseSignedInteger();
-          this.skipSpaceTokens();
-          if (this.match('<}>') && exponent) return exponent;
+          if (this.match('<{>')) {
+            // Multi digit exponent,i.e. `\times 10^{10}` or `\times 10^{-5}`
+            this.skipVisualSpace();
+            // Note: usually don't have group markers, but since we're inside
+            // a `{}` there can't be ambiguity, so we're lenient
+            const exponent = this.parseSignedInteger('whole');
+            this.skipVisualSpace();
+            if (exponent && this.match('<}>')) return exponent;
+          }
         }
       }
     }
 
     this.index = start;
     // `%` is a synonym for `e-2`. See // https://physics.nist.gov/cuu/Units/checklist.html  #10
-    this.skipSpaceTokens();
+    this.skipVisualSpace();
     if (this.match('\\%')) return `-2`;
 
     this.index = start;
     if (this.matchAll(this._exponentProductTokens)) {
-      this.skipSpaceTokens();
+      this.skipVisualSpace();
       if (this.matchAll(this._beginExponentMarkerTokens)) {
-        this.skipSpaceTokens();
-        const exponent = this.parseSignedInteger({ withGrouping: false });
-        this.skipSpaceTokens();
-        if (this.matchAll(this._endExponentMarkerTokens) && exponent)
+        this.skipVisualSpace();
+        const exponent = this.parseSignedInteger('none');
+        this.skipVisualSpace();
+        if (exponent && this.matchAll(this._endExponentMarkerTokens))
           return exponent;
       }
     }
@@ -959,40 +1010,68 @@ export class _Parser implements Parser {
 
   parseRepeatingDecimal(): string {
     const start = this.index;
+    let format = this.options.repeatingDecimal;
+
     let repeatingDecimals = '';
-    if (this.match('(')) {
-      repeatingDecimals = this.parseDecimalDigits();
-      if (repeatingDecimals && this.match(')'))
-        return '(' + repeatingDecimals + ')';
+    if ((format === 'auto' || format === 'parentheses') && this.match('(')) {
+      repeatingDecimals = this.parseDecimalDigits('fraction');
+      if (repeatingDecimals && this.match(')')) return `(${repeatingDecimals})`;
       this.index = start;
       return '';
     }
 
     this.index = start;
-    if (this.matchAll([`\\left`, '('])) {
-      repeatingDecimals = this.parseDecimalDigits();
+    if (
+      (format === 'auto' || format === 'parentheses') &&
+      this.matchAll([`\\left`, '('])
+    ) {
+      repeatingDecimals = this.parseDecimalDigits('fraction');
       if (repeatingDecimals && this.matchAll([`\\right`, ')']))
-        return '(' + repeatingDecimals + ')';
+        return `(${repeatingDecimals})`;
       this.index = start;
       return '';
     }
 
     this.index = start;
-    if (this.matchAll([`\\overline`, '<{>'])) {
-      repeatingDecimals = this.parseDecimalDigits();
+    if (
+      (format === 'auto' || format === 'vinculum') &&
+      this.matchAll([`\\overline`, '<{>'])
+    ) {
+      repeatingDecimals = this.parseDecimalDigits('fraction');
       if (repeatingDecimals && this.match('<}>'))
-        return '(' + repeatingDecimals + ')';
+        return `(${repeatingDecimals})`;
       this.index = start;
       return '';
     }
 
     this.index = start;
-    if (this.matchAll(this._beginRepeatingDigitsTokens)) {
-      repeatingDecimals = this.parseDecimalDigits();
-      if (repeatingDecimals && this.matchAll(this._endRepeatingDigitsTokens))
-        return '(' + repeatingDecimals + ')';
+    if (
+      (format === 'auto' || format === 'arc') &&
+      (this.matchAll([`\\wideparen`, '<{>']) ||
+        this.matchAll([`\\overarc`, '<{>']))
+    ) {
+      repeatingDecimals = this.parseDecimalDigits('fraction');
+      if (repeatingDecimals && this.match('<}>'))
+        return `(${repeatingDecimals})`;
       this.index = start;
       return '';
+    }
+
+    this.index = start;
+    if (format === 'auto' || format === 'dots') {
+      const first = dotOverDigit(this);
+      if (first !== null) {
+        repeatingDecimals = this.parseDecimalDigits('fraction');
+
+        // Is there a single digit, i.e. `1.\overset{.}{3}`
+        if (!repeatingDecimals) return `(${first})`;
+
+        // If there are repeating decimals, we should have a final digit
+        const last = dotOverDigit(this);
+        if (last !== null) {
+          return `(${first}${repeatingDecimals}${last})`;
+        }
+      }
     }
 
     this.index = start;
@@ -1018,7 +1097,7 @@ export class _Parser implements Parser {
     // Parse a '+' or '-' sign
     let sign = +1;
     while (this.peek === '-' || this.peek === '+') {
-      if (this.match('-')) sign *= -1;
+      if (this.match('-')) sign = -sign;
       else this.match('+');
       this.skipVisualSpace();
     }
@@ -1027,20 +1106,16 @@ export class _Parser implements Parser {
     let fractionalPart = '';
 
     // Does the number start with the decimal marker? i.e. `.5`
-    let startsWithDecimalMarker = false;
+    let startsWithdecimalSeparator = false;
 
-    if (this.match('.') || this.matchAll(this._decimalMarkerTokens)) {
+    if (this.match('.') || this.matchAll(this._decimalSeparatorTokens)) {
       const peek = this.peek;
-      // We have a number if followed by a digit, or a `\overline` or a `\ldots`
-      if (
-        peek === '\\overline' ||
-        peek === this._beginRepeatingDigitsTokens[0] ||
-        /[0-9\(]/.test(peek)
-      ) {
-        startsWithDecimalMarker = true;
+      // We have a number if followed by a digit, or a repeating digit marker
+      if (/^[\d]$/.test(peek) || mayBeRepeatingDigits(this)) {
+        startsWithdecimalSeparator = true;
         wholePart = '0';
       }
-    } else wholePart = this.parseDecimalDigits();
+    } else wholePart = this.parseDecimalDigits('whole');
 
     if (!wholePart) {
       this.index = start;
@@ -1050,11 +1125,11 @@ export class _Parser implements Parser {
     const fractionalIndex = this.index;
     let hasFractionalPart = false;
     if (
-      startsWithDecimalMarker ||
+      startsWithdecimalSeparator ||
       this.match('.') ||
-      this.matchAll(this._decimalMarkerTokens)
+      this.matchAll(this._decimalSeparatorTokens)
     ) {
-      fractionalPart = this.parseDecimalDigits();
+      fractionalPart = this.parseDecimalDigits('fraction');
       hasFractionalPart = true;
     }
 
@@ -1064,7 +1139,8 @@ export class _Parser implements Parser {
       if (repeat) {
         fractionalPart += repeat;
         hasRepeatingPart = true;
-      } else if (
+      }
+      if (
         this.match('\\ldots') ||
         this.matchAll(this._truncationMarkerTokens)
       ) {
@@ -1079,8 +1155,6 @@ export class _Parser implements Parser {
       this.index = fractionalIndex;
       return { num: sign < 0 ? '-' + wholePart : wholePart };
     }
-
-    this.skipVisualSpace();
 
     const exponent = this.parseExponent();
 
@@ -1305,44 +1379,44 @@ export class _Parser implements Parser {
    *
    * @internal
    */
-  private matchOpenDelimiter(
-    openDelim: Delimiter,
-    closeDelim: Delimiter
-  ): LatexToken[] | null {
-    const index = this.index;
+  // private matchOpenDelimiter(
+  //   openDelim: Delimiter,
+  //   closeDelim: Delimiter
+  // ): LatexToken[] | null {
+  //   const index = this.index;
 
-    const closePrefix = OPEN_DELIMITER_PREFIX[this.peek];
-    if (closePrefix) this.nextToken();
+  //   const closePrefix = OPEN_DELIMITER_PREFIX[this.peek];
+  //   if (closePrefix) this.nextToken();
 
-    const alternatives = DELIMITER_SHORTHAND[openDelim] ?? [openDelim];
+  //   const alternatives = DELIMITER_SHORTHAND[openDelim] ?? [openDelim];
 
-    const result = closePrefix ? [closePrefix] : [];
+  //   const result = closePrefix ? [closePrefix] : [];
 
-    // Special case '||' delimiter
-    if (alternatives.includes('||') && this.matchAll(['|', '|'])) {
-      result.push('|');
-      result.push('|');
-      return result;
-    }
+  //   // Special case '||' delimiter
+  //   if (alternatives.includes('||') && this.matchAll(['|', '|'])) {
+  //     result.push('|');
+  //     result.push('|');
+  //     return result;
+  //   }
 
-    if (!alternatives.includes(this.peek)) {
-      // Not the delimiter we were expecting: backtrack
-      this.index = index;
-      return null;
-    }
+  //   if (!alternatives.includes(this.peek)) {
+  //     // Not the delimiter we were expecting: backtrack
+  //     this.index = index;
+  //     return null;
+  //   }
 
-    if (CLOSE_DELIMITER[openDelim] === closeDelim) {
-      // If this is the standard pair (i.e. '(' and ')')
-      // use the matching closing (i.e. '\lparen' -> '\rparen')
-      result.push(CLOSE_DELIMITER[this.peek]);
-    } else {
-      result.push(closeDelim);
-    }
+  //   if (CLOSE_DELIMITER[openDelim] === closeDelim) {
+  //     // If this is the standard pair (i.e. '(' and ')')
+  //     // use the matching closing (i.e. '\lparen' -> '\rparen')
+  //     result.push(CLOSE_DELIMITER[this.peek]);
+  //   } else {
+  //     result.push(closeDelim);
+  //   }
 
-    this.nextToken();
+  //   this.nextToken();
 
-    return result;
-  }
+  //   return result;
+  // }
 
   // matchMiddleDelimiter(delimiter: '|' | ':' | LatexToken): boolean {
   //   const delimiters = MIDDLE_DELIMITER[delimiter] ?? [delimiter];
@@ -1413,7 +1487,7 @@ export class _Parser implements Parser {
   }
 
   /**
-   * A generic expression is used for dictionary entries that take do
+   * A generic expression is used for dictionary entries that do
    * some complex (non-standard) parsing. This includes trig functions (to
    * parse implicit arguments), and integrals (to parse the integrand and
    * limits and the "dx" terminator).
@@ -1511,7 +1585,7 @@ export class _Parser implements Parser {
     //
     for (const [def, tokenCount] of this.peekDefinitions('symbol')) {
       this.index = start + tokenCount;
-      // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling parseUnknownIdentifier() or somethinglike it (parseUnknownIdentifier() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
+      // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling getIdentifierType() or somethinglike it (getIdentifierType() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
       if (typeof def.parse === 'function') {
         const result = def.parse(this, until);
         if (result) return result;
@@ -1527,9 +1601,10 @@ export class _Parser implements Parser {
     if (id === null) return null;
 
     // Are we OK with it as a symbol?
-    // Note: by the time we call parseUnknownIdentifier(),
-    // we know it is a valid identifier
-    if (this.options.parseUnknownIdentifier?.(id, this) === 'symbol') return id;
+    // Note: by the time we call getIdentifierType(), we know it is a valid
+    // identifier
+    const type = this.getIdentifierType(id);
+    if (type === 'symbol') return id;
 
     // This was an identifier, but not a valid symbol. Backtrack
     this.index = start;
@@ -1670,48 +1745,13 @@ export class _Parser implements Parser {
     return null;
   }
 
-  /** Match a string used as a LaTeX identifier, for example an environment
-   * name.
-   * Not suitable for general purpose text, e.g. argument of a `\text{}
-   * command. See `matchChar()` instead.
-   */
-  private parseStringGroupContent(): string {
-    const start = this.index;
-    let result = '';
-    let level = 0;
-    while (!this.atBoundary || level > 0) {
-      const token = this.nextToken();
-      if (token === '<$>' || token === '<$$>') {
-        this.index = start;
-        return '';
-      }
-      if (token === '<{>') {
-        level += 1;
-        result += '\\{';
-      } else if (token === '<}>') {
-        level -= 1;
-        result += '\\}';
-      } else if (token === '<space>') {
-        result += ' ';
-      } else if (token[0] === '\\') {
-        // TeX will give a 'Missing \endcsname inserted' error
-        // if it encounters any command when expecting a string.
-        // We're a bit more lax.
-        // @todo: interpret some symbols, i.e. \alpha, etc..
-        result += token;
-      } else {
-        result += token;
-      }
-    }
-    return result;
-  }
-
   /**
-   * This method can be invoked when we know we're in an error situation.
+   * This method can be invoked when we know we're in an error situation,
+   * for example when there are tokens remaining after we've finished parsing.
    *
    * In general, if a context does not apply, we return `null` to give
    * the chance to some other option to be considered. However, in some cases
-   * we know we've exhausted all posibilities, and in this case this method
+   * we know we've exhausted all possibilities, and in this case this method
    * will return an error expression as informative as possible.
    *
    * We've encountered a LaTeX command or symbol but were not able to match it
@@ -1790,12 +1830,11 @@ export class _Parser implements Parser {
     let id = parseInvalidIdentifier(this);
     if (id) return id;
     id = parseIdentifier(this);
-    if (id) return this.error(['unexpected-identifier', id], index);
+    if (id) return this.error(['unexpected-identifier', { str: id }], index);
 
     const command = this.peek;
-    if (!command) {
-      return this.error('syntax-error', start);
-    }
+    if (!command) return this.error('syntax-error', start);
+
     if (command[0] !== '\\') {
       return this.error(
         ['unexpected-token', { str: tokensToString(command) }],
@@ -1911,11 +1950,11 @@ export class _Parser implements Parser {
     //
 
     if (result === null && this.matchAll(this._positiveInfinityTokens))
-      result = { num: '+Infinity' };
+      result = 'PositiveInfinity';
     if (result === null && this.matchAll(this._negativeInfinityTokens))
-      result = { num: '-Infinity' };
+      result = 'NegativeInfinity';
     if (result === null && this.matchAll(this._notANumberTokens))
-      result = { num: 'NaN' };
+      result = 'NaN';
 
     // ParseGenericExpression() has priority. Some generic expressions
     // may include symbols which have not been explicitly defined
@@ -1952,6 +1991,10 @@ export class _Parser implements Parser {
     // 7. Are there superscript or subfix operators?
     //
     if (result !== null) result = this.parseSupsub(result);
+
+    if (result === null) {
+      result = this.options.parseUnexpectedToken?.(null, this) ?? null;
+    }
 
     return this.decorate(result, start);
   }
@@ -2025,6 +2068,10 @@ export class _Parser implements Parser {
               } else if (head(rhs) === 'InvisibleOperator') {
                 result = ['InvisibleOperator', lhs, ...ops(rhs)!];
               } else result = ['InvisibleOperator', lhs, rhs];
+            } else {
+              if (result === null) {
+                result = this.options.parseUnexpectedToken?.(lhs, this) ?? null;
+              }
             }
           }
         }
@@ -2086,12 +2133,8 @@ export class _Parser implements Parser {
     const s = symbol(expr);
     if (!s) return false;
 
-    // Is this a known symbol with a definition?
-    if (this.computeEngine?.lookupFunction(s) !== undefined) return true;
-
     // Is this a valid function identifier?
-    if (this.options.parseUnknownIdentifier?.(s, this) === 'function')
-      return true;
+    if (this.getIdentifierType(s) === 'function') return true;
 
     // This doesn't look like the expression could be the head of a function:
     // it's a number, a string, a symbol identifier or something else.
@@ -2143,4 +2186,70 @@ function isDelimiterCommand(parser: Parser): boolean {
   }
 
   return false;
+}
+
+function dotOverDigit(parser: Parser): string | null {
+  // Check if the next tokens is \overset with a dot and a digit
+  const start = parser.index;
+  if (parser.matchAll([`\\overset`, '<{>'])) {
+    if (parser.match('.') || parser.match('\\cdots')) {
+      if (parser.matchAll([`<}>`, '<{>'])) {
+        const digit = parser.nextToken();
+        if (digit && /^\d$/.test(digit)) {
+          if (parser.match('<}>')) {
+            return digit;
+          }
+        }
+      }
+    }
+  }
+  parser.index = start;
+  return null;
+}
+
+function mayBeRepeatingDigits(parser: Parser): boolean {
+  const peek = parser.peek;
+  if (peek === '\\overline') return true;
+  if (peek === '\\overset') return true;
+  if (peek === '\\wideparent' || peek === '\\overarc') return true;
+  if (peek === '(') return true;
+  if (peek === '\\left') return true;
+
+  return false;
+}
+
+export function parse(
+  latex: string,
+  dictionary: IndexedLatexDictionary,
+  options: Readonly<ParseLatexOptions>
+): Expression | null {
+  const parser = new _Parser(tokenize(latex), dictionary, options);
+
+  let expr = parser.parseExpression();
+
+  // If we didn't reach the end of the input, there was an error
+  if (!parser.atEnd) {
+    const error = parser.parseSyntaxError();
+    // Note: there may still be tokens left in the input, but we will
+    // ignore them
+    expr = expr ? ['Sequence', expr, error] : error;
+  }
+
+  expr ??= ['Sequence'];
+
+  if (options.preserveLatex) {
+    if (Array.isArray(expr)) expr = { latex, fn: expr };
+    else if (typeof expr === 'number')
+      expr = { latex, num: Number(expr).toString() };
+    else if (
+      typeof expr === 'string' &&
+      expr.startsWith("'") &&
+      expr.endsWith("'")
+    )
+      expr = { latex, str: expr.slice(1, -1) };
+    else if (typeof expr === 'string') expr = { latex, sym: expr };
+    else if (typeof expr === 'object' && expr !== null) expr.latex = latex;
+  }
+
+  return expr;
 }
