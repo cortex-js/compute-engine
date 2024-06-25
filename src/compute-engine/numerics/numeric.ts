@@ -391,7 +391,7 @@ export function monteCarloEstimate(
   f: (x: number) => number,
   a: number,
   b: number,
-  n = 100000
+  n = 1e5
 ): number {
   let sum = 0;
 

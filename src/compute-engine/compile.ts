@@ -277,7 +277,7 @@ export class ComputeEngineFunction extends Function {
     factorial: factorial,
     gamma: gamma,
     gcd: gcd,
-    integrate: monteCarloEstimate,
+    integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6),
     lcm: lcm,
     lngamma: gammaln,
     limit: limit,

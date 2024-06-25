@@ -458,7 +458,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   get latexDictionary(): Readonly<LatexDictionaryEntry[]> {
-    return this._latexDictionaryInput;
+    return this._latexDictionaryInput ?? ComputeEngine.getLatexDictionary();
   }
 
   set latexDictionary(dic: Readonly<LatexDictionaryEntry[]>) {
@@ -471,17 +471,8 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   get indexedLatexDictionary(): IndexedLatexDictionary {
-    if (this._indexedLatexDictionary) return this._indexedLatexDictionary;
-    if (!this._latexDictionaryInput) {
-      this._indexedLatexDictionary = indexLatexDictionary(
-        ComputeEngine.getLatexDictionary(),
-        (sig) => console.error(sig)
-      );
-      return this._indexedLatexDictionary;
-    }
-
-    this._indexedLatexDictionary = indexLatexDictionary(
-      this._latexDictionaryInput,
+    this._indexedLatexDictionary ??= indexLatexDictionary(
+      this.latexDictionary,
       (sig) => console.error(sig)
     );
     return this._indexedLatexDictionary;

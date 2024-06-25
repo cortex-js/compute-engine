@@ -294,6 +294,8 @@ volumes
           const numericMode = ce.numericMode;
           const precision = ce.precision;
           ce.numericMode = 'machine';
+          const wasStrict = ce.strict;
+          ce.strict = false;
 
           const [a, b] = ops.slice(1).map((op) => op.value);
           let result: BoxedExpression | undefined = undefined;
@@ -303,6 +305,7 @@ volumes
           }
           ce.numericMode = numericMode;
           ce.precision = precision;
+          ce.strict = wasStrict;
           return result;
         },
       },
