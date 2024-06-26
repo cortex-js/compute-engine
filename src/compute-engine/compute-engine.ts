@@ -102,6 +102,8 @@ import {
 // To avoid circular dependencies, serializeToJson is forward declared. Type
 // to import it.
 import './boxed-expression/serialize';
+import { SIMPLIFY_RULES } from './simplify-rules';
+import { HARMONIZATION_RULES, UNIVARIATE_ROOTS } from './solve';
 
 /**
  *
@@ -207,7 +209,7 @@ export class ComputeEngine implements IComputeEngine {
     [key: string]: {
       value: any;
       build: () => any;
-      purge: (v: unknown) => void;
+      purge?: (v: unknown) => void;
     };
   } = {};
 
@@ -522,7 +524,7 @@ export class ComputeEngine implements IComputeEngine {
     for (const k of Object.keys(this._cache))
       if (this._cache[k].value) {
         if (!this._cache[k].purge) delete this._cache[k];
-        else this._cache[k].value = this._cache[k].purge(this._cache[k].value);
+        else this._cache[k].value = this._cache[k].purge!(this._cache[k].value);
       }
   }
 
@@ -1625,7 +1627,7 @@ export class ComputeEngine implements IComputeEngine {
   // }
 
   /** @internal */
-  cache<T>(cacheName: string, build: () => T, purge: (T) => T | undefined): T {
+  cache<T>(cacheName: string, build: () => T, purge?: (T) => T | undefined): T {
     if (this._cache[cacheName] === undefined) {
       try {
         this._cache[cacheName] = { build, purge, value: build() };
@@ -2073,6 +2075,27 @@ export class ComputeEngine implements IComputeEngine {
 
   rules(rules: Rule[]): BoxedRuleSet {
     return boxRules(this, rules);
+  }
+
+  getRuleSet(id?: string): BoxedRuleSet | undefined {
+    id ??= 'standard-simplification';
+
+    if (id === 'standard-simplification')
+      return this.cache('standard-simplification-rules', () =>
+        boxRules(this, SIMPLIFY_RULES)
+      );
+
+    if (id === 'solve-univariate')
+      return this.cache('univariate-roots-rules', () =>
+        boxRules(this, UNIVARIATE_ROOTS)
+      );
+
+    if (id === 'harmonization')
+      return this.cache('harmonization-rules', () =>
+        boxRules(this, HARMONIZATION_RULES)
+      );
+
+    return undefined;
   }
 
   /**

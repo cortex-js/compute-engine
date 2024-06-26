@@ -105,8 +105,7 @@ describe('expr.solve()', () => {
         [
           Add,
           [
-            Multiply,
-            -1,
+            Negate,
             y,
           ],
           1,

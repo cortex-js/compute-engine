@@ -36,7 +36,7 @@ export interface CoefficientData {
 }
 
 export class Coefficient implements CoefficientData {
-  static zero = new Coefficient({ float: 0 });
+  static zero = new Coefficient(0);
   static one = new Coefficient(1);
 
   /**
@@ -205,20 +205,27 @@ export class Coefficient implements CoefficientData {
       this.sqrt = 1;
     }
 
-    // 3/ If float is not an integer, convert all to float
+    // 3/ Attempt to convert float to a rational with a denominator of 10 or less
+    const r = rationalize(this.float);
+    if (isRational(r) && r[1] <= 10) {
+      this.rational = mul(this.rational, r);
+      this.float = 1;
+    }
+
+    // 4/ If float is not an integer, convert all to float
     if (!Number.isInteger(this.float)) {
       this.float = this.asFloat();
       this.sqrt = 1;
       this.rational = [1, 1];
     }
 
-    // 4/ If float *is* an integer, convert to rational
+    // 5/ If float *is* an integer, convert to rational
     if (Number.isInteger(this.float)) {
       this.rational = mul(this.rational, [this.float, 1]);
       this.float = 1;
     }
 
-    // 5/ Carry the sign on the float
+    // 6/ Carry the sign on the float
     if (isNeg(this.rational)) {
       this.rational = neg(this.rational);
       this.float = -this.float;
@@ -234,6 +241,22 @@ export class Coefficient implements CoefficientData {
 
   get sign(): number {
     return Math.sign(this.float);
+  }
+
+  neg(): Coefficient {
+    return new Coefficient({
+      float: -this.float,
+      rational: this.rational,
+      sqrt: this.sqrt,
+    });
+  }
+
+  inv(): Coefficient {
+    return new Coefficient({
+      float: 1 / this.float,
+      rational: inverse(this.rational),
+      sqrt: 1 / this.sqrt,
+    });
   }
 
   mul(other: Partial<CoefficientData> | number | Rational): Coefficient {
@@ -267,35 +290,23 @@ export class Coefficient implements CoefficientData {
     });
   }
 
-  neg(): Coefficient {
-    return new Coefficient({
-      float: -this.float,
-      rational: this.rational,
-      sqrt: this.sqrt,
-    });
-  }
-
-  inv(): Coefficient {
-    return new Coefficient({
-      float: 1 / this.float,
-      rational: inverse(this.rational),
-      sqrt: 1 / this.sqrt,
-    });
-  }
-
   add(other: Partial<CoefficientData> | number | Rational): Coefficient {
     if (typeof other === 'number') other = { float: other };
     else if (isRational(other)) other = { rational: other };
 
     // Can we keep a rational result?
     if (
-      this.float === 1 &&
-      other.float === 1 &&
+      Math.abs(this.float) === 1 &&
+      Math.abs(other.float ?? 1) === 1 &&
       this.sqrt === 1 &&
-      other.sqrt === 1 &&
+      (other.sqrt ?? 1) === 1 &&
       other.rational
     ) {
-      return new Coefficient({ rational: add(this.rational, other.rational) });
+      return new Coefficient({
+        // Preserve the sign of the float
+        float: this.float * (other.float ?? 1),
+        rational: add(this.rational, other.rational),
+      });
     }
 
     return new Coefficient(this.asFloat() + new Coefficient(other).asFloat());
@@ -305,13 +316,14 @@ export class Coefficient implements CoefficientData {
     if (typeof other === 'number') other = { float: other };
     else if (isRational(other)) other = { rational: other };
     if (
-      this.float === 1 &&
-      other.float === 1 &&
+      Math.abs(this.float) === 1 &&
+      Math.abs(other.float ?? 1) === 1 &&
       this.sqrt === 1 &&
-      other.sqrt === 1 &&
+      (other.sqrt ?? 1) === 1 &&
       other.rational
     ) {
       return new Coefficient({
+        float: this.float * (other.float ?? 1),
         rational: add(this.rational, neg(other.rational)),
       });
     }

@@ -4,8 +4,6 @@ function parse(s: string) {
   return ce.parse(s);
 }
 
-console.log(parse('\\int\\sin x \\, \\operatorname{d}x'));
-
 describe('INTEGRAL', () => {
   test('simple with no index', () => {
     expect(parse('\\int\\sin x + 1 = 2')).toMatchInlineSnapshot(

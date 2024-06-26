@@ -525,18 +525,19 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             ce,
             ops.map((x) => x.simplify())
           ),
+
         evaluate: (ce, ops) => {
           ops = ops.map((x) => x.evaluate());
           const expr = distribute(ops);
           if (expr.head !== 'Multiply') return expr.evaluate();
-
+          // ops = flattenOps(expr.ops!, 'Multiply');
           return evalMultiply(ce, ops);
         },
         N: (ce, ops) => {
           ops = ops.map((x) => x.N());
           const expr = distribute(ops);
           if (expr.head !== 'Multiply') return expr.N();
-
+          ops = flattenOps(expr.ops!, 'Multiply');
           return evalMultiply(ce, ops, 'N');
         },
       },

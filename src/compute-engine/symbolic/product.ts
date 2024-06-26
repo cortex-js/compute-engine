@@ -208,8 +208,27 @@ export class Product {
       // Term is `Power(op1, op2)`
       const r = asRational(rest.op2);
       if (r) {
+        const exponentExpr = rest.op2;
         exponent = r;
         rest = rest.op1;
+        if (rest.head === 'Multiply') {
+          // We have Power(Multiply(...), exponent): apply the power law
+          // to each term
+          for (const x of rest.ops!)
+            this.addTerm(this.engine._fn('Power', [x, exponentExpr]));
+          return;
+        } else if (rest.head === 'Divide') {
+          // We have Power(Divide(...), exponent): apply the power law
+          // to each term
+          this.addTerm(this.engine._fn('Power', [rest.op1, exponentExpr]));
+          this.addTerm(
+            this.engine._fn('Power', [
+              rest.op2,
+              this.engine.number(neg(exponent)),
+            ])
+          );
+          return;
+        }
       }
     } else if (rest.head === 'Divide') {
       this.addTerm(rest.op1);

@@ -54,36 +54,70 @@ export function matchRules(
 export function boxRules(ce: IComputeEngine, rs: Iterable<Rule>): BoxedRuleSet {
   const result = new Set<BoxedRule>();
 
-  for (const { match, replace, condition, priority, id } of rs) {
-    // Normalize the condition to a function
-    let condFn: undefined | PatternConditionFunction;
-    if (typeof condition === 'string') {
-      const latex = asLatexString(condition);
-      if (latex) {
-        // Substitute any unbound vars in the condition to a wildcard
-        const condPattern = ce.parse(latex, { canonical: false });
-        condFn = (x: BoxedSubstitution, _ce: IComputeEngine): boolean =>
-          condPattern.subs(x).evaluate()?.symbol === 'True';
-      }
-    } else condFn = condition;
+  for (const rule of rs) result.add(normalizeRule(ce, rule));
 
-    result.add({
-      match: ce.box(match, { canonical: false }),
-      replace:
-        typeof replace === 'function'
-          ? replace
-          : ce.box(replace, { canonical: false }),
-      priority: priority ?? 0,
-      condition: condFn,
-      id:
-        id ??
-        ce.box(match, { canonical: false }).toString() +
-          (typeof replace === 'function'
-            ? '  ->  function'
-            : '  ->  ' + ce.box(replace, { canonical: false }).toString()),
-    });
-  }
   return result;
+}
+
+function normalizeLatexRule(
+  ce: IComputeEngine,
+  latex: string
+): BoxedExpression {
+  let expr = ce.parse(latex, { canonical: false });
+  expr = expr.map(
+    (x) => {
+      // Only transform single character symbols. Avoid \pi, \imaginaryUnit, etc..
+      if (x.symbol && x.symbol.length === 1) return ce.symbol('_' + x.symbol);
+      return x;
+    },
+    { canonical: false }
+  );
+  return expr;
+}
+
+function normalizeStringRule(ce: IComputeEngine, rule: string): BoxedRule {
+  const [lhs, rhs] = rule.split(/->|\\to/).map((x) => x.trim());
+  return normalizeRule(ce, {
+    match: normalizeLatexRule(ce, lhs),
+    replace: normalizeLatexRule(ce, rhs),
+    priority: 0,
+    condition: undefined,
+    id: lhs + ' -> ' + rhs,
+  });
+}
+
+function normalizeRule(ce: IComputeEngine, rule: Rule): BoxedRule {
+  if (typeof rule === 'string') return normalizeStringRule(ce, rule);
+
+  const { match, replace, condition, priority, id } = rule;
+  // Normalize the condition to a function
+  let condFn: undefined | PatternConditionFunction;
+  if (typeof condition === 'string') {
+    const latex = asLatexString(condition);
+    if (latex) {
+      // Substitute any unbound vars in the condition to a wildcard
+      const condPattern = ce.parse(latex, { canonical: false });
+      condFn = (x: BoxedSubstitution, _ce: IComputeEngine): boolean =>
+        condPattern.subs(x).evaluate()?.symbol === 'True';
+    }
+  } else condFn = condition;
+
+  return {
+    match: ce.box(match, { canonical: false }),
+    replace:
+      typeof replace === 'function'
+        ? replace
+        : ce.box(replace, { canonical: false }),
+    priority: priority ?? 0,
+    condition: condFn,
+    exact: rule.exact ?? true,
+    id:
+      id ??
+      ce.box(match, { canonical: false }).toString() +
+        (typeof replace === 'function'
+          ? '  ->  function'
+          : '  ->  ' + ce.box(replace, { canonical: false }).toString()),
+  };
 }
 
 /**
@@ -100,7 +134,6 @@ function applyRule(
   substitution: BoxedSubstitution,
   options?: ReplaceOptions
 ): BoxedExpression | null {
-  // console.info('applyRule', id);
   const { match, replace, condition, id } = rule;
 
   let changed = false;
@@ -116,7 +149,12 @@ function applyRule(
     if (changed) expr = ce.function(expr.head, newOps, { canonical: false });
   }
 
-  const sub = expr.match(match, { substitution, ...options });
+  // if (id === '\\log(\\frac{x}{y}) -> \\log(x) - \\log(y)') debugger;
+  const sub = expr.match(match, {
+    substitution,
+    ...options,
+    exact: rule.exact ?? true,
+  });
 
   // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return changed ? expr : null;
@@ -124,6 +162,8 @@ function applyRule(
   // If the condition doesn't match, the rule doesn't apply
   if (typeof condition === 'function' && !condition(sub, expr.engine))
     return null;
+
+  console.info('applyRule', id);
 
   // @debug
   // if (typeof replace === 'function')

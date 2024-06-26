@@ -1,3 +1,48 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **#174** Fixed some simplifications, such as `\frac{a^n}{a^m} = a^{n-m)`
+
+### New Features
+
+- Rules can be defined using a new shorthand syntax, where each rule is a string
+  of LaTeX:
+
+  ```js
+  expr.simplify(["\\frac{x}{x} -> 1", "x + x -> 2x"]);
+  ```
+
+Additionally, the expanded form can also include LaTeX strings. The previous
+syntax using expressions can still be used, and the new and old syntax can be
+mixed.
+
+For example:
+
+```js
+expr.simplify([
+  {
+    match: "\\frac{x}{x}",
+    replace: "1"
+  },
+  {
+    match: ["Add", "x", "x"],
+    replace: "2x"
+  }
+]);
+```
+
+The `condition` function can also be expressed as a LaTeX string.
+
+```js
+  expr.simplify([ { match: "\\frac{x}{x}", replace: "1", condition: "x != 0" }, ]);
+```
+
+The shorthand syntax can be used any where a ruleset is expected, including with
+the `ce.rule()` function.
+
+- A new `ce.getRuleSet()` method gives access to the built-in rules.
+
 ## 0.25.0 _2024-06-25_
 
 ### Breaking Changes
@@ -1085,8 +1130,7 @@ Work around unpckg.com issue with libraries using BigInt.
 
 Read more at
 [Core Reference](https://cortexjs.io/compute-engine/reference/core/) and
-[Arithmetic Reference]
-(https://cortexjs.io/compute-engine/reference/arithmetic/)
+[Arithmetic Reference] (https://cortexjs.io/compute-engine/reference/arithmetic/)
 
 ### Bugs Fixed
 

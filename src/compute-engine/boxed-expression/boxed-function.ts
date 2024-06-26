@@ -29,8 +29,7 @@ import {
 } from '../public';
 import { findUnivariateRoots } from '../solve';
 import { isRational } from '../numerics/rationals';
-import { boxRules, replace } from '../rules';
-import { SIMPLIFY_RULES } from '../simplify-rules';
+import { replace } from '../rules';
 import { DEFAULT_COMPLEXITY, order } from './order';
 import {
   complexAllowed,
@@ -498,7 +497,13 @@ export class BoxedFunction extends _BoxedExpression {
     if (recursive) {
       expr = expand(this);
       if (expr !== null) {
-        expr = expr!.simplify({ ...options, recursive: false });
+        if (!expr.ops) return expr;
+        expr = this.engine
+          ._fn(
+            expr.head,
+            expr.ops.map((x) => x.simplify(options))
+          )
+          .simplify({ ...options, recursive: false });
         return cheapest(this, expr);
       }
     }
@@ -547,43 +552,34 @@ export class BoxedFunction extends _BoxedExpression {
     //
     // 6/ Apply rules, until no rules can be applied
     //
-    const rules =
-      options?.rules ??
-      this.engine.cache<BoxedRuleSet>(
-        'standard-simplification-rules',
-        () => boxRules(this.engine, SIMPLIFY_RULES),
-        (rules) => {
-          for (const [lhs, rhs, _priority, _condition] of rules) {
-            lhs.reset();
-            rhs.reset();
-          }
-          return rules;
-        }
-      );
+    if (options?.rules !== null) {
+      const rules =
+        options?.rules ?? this.engine.getRuleSet('standard-simplification')!;
 
-    let iterationCount = 0;
-    let done = false;
-    do {
-      const newExpr = expr.replace(rules);
-      if (newExpr !== null) {
-        expr = cheapest(expr, newExpr);
-        if (expr === newExpr) done = true;
-      } else done = true; // no rules applied
+      let iterationCount = 0;
+      let done = false;
+      do {
+        let newExpr = expr.replace(rules);
+        if (newExpr) newExpr = newExpr.simplify({ rules: null });
+        if (newExpr !== null) {
+          expr = cheapest(expr, newExpr);
+          if (expr === newExpr) done = true;
+        } else done = true; // no rules applied
 
-      iterationCount += 1;
+        iterationCount += 1;
+        // @debug-begin
+        // if (iterationCount > 100) {
+        //   console.log('Iterating... ', newExpr?.toJSON() ?? '()', expr.toJSON());
+        // }
+        // @debug-end
+      } while (!done && iterationCount < this.engine.iterationLimit);
+
       // @debug-begin
-      // if (iterationCount > 100) {
-      //   console.log('Iterating... ', newExpr?.toJSON() ?? '()', expr.toJSON());
+      // if (iterationCount >= this.engine.iterationLimit) {
+      //   console.error('Iteration Limit reached simplifying', this.toJSON());
       // }
       // @debug-end
-    } while (!done && iterationCount < this.engine.iterationLimit);
-
-    // @debug-begin
-    // if (iterationCount >= this.engine.iterationLimit) {
-    //   console.error('Iteration Limit reached simplifying', this.toJSON());
-    // }
-    // @debug-end
-
+    }
     return cheapest(this, expr);
   }
 
@@ -966,6 +962,8 @@ function cheapest(
 
   const ce = oldExpr.engine;
   const boxedNewExpr = ce.box(newExpr);
+
+  if (oldExpr.isSame(boxedNewExpr)) return oldExpr;
 
   if (ce.costFunction(boxedNewExpr) <= 1.2 * ce.costFunction(oldExpr)) {
     // console.log(

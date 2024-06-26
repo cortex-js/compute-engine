@@ -422,10 +422,12 @@ export interface BoxedExpression {
    *
    * The canonical option is applied to each function subexpression after
    * the substitution is applied.
+   *
+   * **Default**: `{canonical: true, recursive: true}`
    */
   map(
     fn: (expr: BoxedExpression) => BoxedExpression,
-    options?: { canonical: CanonicalOptions }
+    options?: { canonical: CanonicalOptions; recursive?: boolean }
   ): BoxedExpression;
 
   /**
@@ -1554,6 +1556,10 @@ export type BoxedRule = {
   replace: BoxedExpression | PatternReplaceFunction;
   condition: undefined | PatternConditionFunction;
   priority: number;
+  exact?: boolean; // If false, the rule will match variants, for example
+  // 'x' will match 'a + x', 'x' will match 'ax', etc...
+  // For simplification rules, you generally want exact to be true, but
+  // to solve equations, you want it to be false. Default to true.
   id?: string; // For debugging
 };
 
@@ -1670,7 +1676,7 @@ export type DomainExpression<T = SemiBoxedExpression> =
  */
 export type SimplifyOptions = {
   recursive?: boolean;
-  rules?: BoxedRuleSet;
+  rules?: null | BoxedRuleSet;
 };
 
 /** Options for `BoxedExpression.evaluate()`
@@ -1937,6 +1943,13 @@ export interface IComputeEngine {
   ): BoxedExpression;
 
   rules(rules: Rule[]): BoxedRuleSet;
+
+  /**
+   * Return a set of built-in rules.
+   */
+  getRuleSet(
+    id?: 'harmonization' | 'solve-univariate' | 'standard-simplification'
+  ): BoxedRuleSet | undefined;
 
   /**
    * This is a primitive to create a boxed function.
@@ -2212,24 +2225,34 @@ export type Substitution<T = SemiBoxedExpression> = {
  * MathJSON expression.
  *
  *
- * Anonymous wildcards (`_`) will match any
- * expression. Named wildcards (`_x`, `_a`, etc...) will match any expression
- * and bind the expression to the wildcard name.
+ * Anonymous wildcards (`_`) will match any expression. Named wildcards
+ * (`_x`, `_a`, etc...) will match any expression and bind the expression to
+ * the wildcard name.
  *
  * In addition the sequence wildcard (`__1`, `__a`, etc...) will match
  * a sequence of one or more expressions, and bind the sequence to the
  * wildcard name.
  *
+ * If `exact` is false, the rule will match variants. For example
+ * 'x' will match 'a + x', 'x' will match 'ax', etc...
+ * For simplification rules, you generally want `exact` to be true, but
+ * to solve equations, you want it to be false. Default to true.
+ *
+ * When set to false, infinite recursion is possible.
+ *
  * @category Rules
  */
 
-export type Rule = {
-  match: LatexString | SemiBoxedExpression | Pattern;
-  replace: LatexString | SemiBoxedExpression | PatternReplaceFunction;
-  condition?: LatexString | PatternConditionFunction;
-  priority?: number;
-  id?: string; // For debugging
-};
+export type Rule =
+  | string
+  | {
+      match: LatexString | SemiBoxedExpression | Pattern;
+      replace: LatexString | SemiBoxedExpression | PatternReplaceFunction;
+      condition?: LatexString | PatternConditionFunction;
+      exact?: boolean; // Default to true
+      priority?: number;
+      id?: string; // For debugging
+    };
 
 /** @category Assumptions */
 export interface ExpressionMapInterface<U> {

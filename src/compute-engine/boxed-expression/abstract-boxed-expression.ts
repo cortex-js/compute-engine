@@ -447,10 +447,30 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   map(
     fn: (x: BoxedExpression) => BoxedExpression,
-    options?: { canonical: CanonicalOptions }
+    options?: { canonical: CanonicalOptions; recursive?: boolean }
   ): BoxedExpression {
     if (!this.ops) return fn(this);
-    return fn(this.engine.function(this.head, this.ops.map(fn), options));
+    const canonical = options?.canonical ?? true;
+    const recursive = options?.recursive ?? true;
+    if (!recursive)
+      return fn(
+        this.engine.function(
+          this.head,
+          this.ops.map((x) => fn(x)),
+          {
+            canonical,
+          }
+        )
+      );
+    return fn(
+      this.engine.function(
+        this.head,
+        this.ops.map((x) => x.map(fn, options)),
+        {
+          canonical,
+        }
+      )
+    );
   }
 
   solve(
