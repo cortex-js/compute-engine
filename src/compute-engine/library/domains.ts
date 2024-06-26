@@ -126,7 +126,7 @@ export const DOMAIN_ALIAS = {
  * each domain literal.
  */
 
-const DOMAIN_LITERAL = {
+const DOMAIN_LITERAL: Record<string, DomainLiteral | DomainLiteral[]> = {
   Anything: [],
 
   Values: 'Anything',
@@ -281,9 +281,12 @@ export function ancestors(dom: DomainLiteral): DomainLiteral[] {
   }
 
   if (typeof DOMAIN_LITERAL[dom] === 'string')
-    result = [DOMAIN_LITERAL[dom], ...ancestors(DOMAIN_LITERAL[dom])];
+    result = [
+      DOMAIN_LITERAL[dom] as DomainLiteral,
+      ...ancestors(DOMAIN_LITERAL[dom] as DomainLiteral),
+    ];
   else if (Array.isArray(DOMAIN_LITERAL[dom]))
-    for (const parent of DOMAIN_LITERAL[dom]) {
+    for (const parent of DOMAIN_LITERAL[dom] as DomainLiteral[]) {
       result.push(parent);
       result.push(...ancestors(parent));
     }

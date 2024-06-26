@@ -110,7 +110,7 @@ export function canonicalMultiply(
 
 export function simplifyMultiply(
   ce: IComputeEngine,
-  ops: BoxedExpression[]
+  ops: ReadonlyArray<BoxedExpression>
 ): BoxedExpression {
   console.assert(ops.every((x) => x.head !== 'Multiply'));
   const product = new Product(ce);

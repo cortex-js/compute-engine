@@ -203,14 +203,16 @@ export function shouldHold(skip: Hold, count: number, index: number): boolean {
 export function semiCanonical(
   ce: IComputeEngine,
   xs: ReadonlyArray<SemiBoxedExpression>
-): BoxedExpression[] {
+): ReadonlyArray<BoxedExpression> {
   if (!xs.every((x) => x instanceof _BoxedExpression))
     return xs.map((x) => ce.box(x));
 
   // Avoid memory allocation if possible
-  return (xs as BoxedExpression[]).every((x) => x.isCanonical)
-    ? (xs as BoxedExpression[])
-    : (xs as BoxedExpression[]).map((x) => x.canonical);
+  return (xs as ReadonlyArray<BoxedExpression>).every((x) => x.isCanonical)
+    ? (xs as ReadonlyArray<BoxedExpression>)
+    : ((xs as ReadonlyArray<BoxedExpression>).map(
+        (x) => x.canonical
+      ) as ReadonlyArray<BoxedExpression>);
 }
 
 export function canonical(

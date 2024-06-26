@@ -2068,7 +2068,7 @@ export interface ComputeEngineStats {
 }
 
 /**
- * Options to control the serialization to MathJSON when using `BoxedExpression.json`.
+ * Options to control the serialization to MathJSON when using `BoxedExpression.toMathJson()`.
  *
  * @category Compute Engine
  */
