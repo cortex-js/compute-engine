@@ -1544,11 +1544,47 @@ export type PatternConditionFunction = (
 ) => boolean;
 
 /**
- * @noInheritDoc
+ * A rule describes how to modify an expressions that matches a pattern `match`
+ * into a new expression `replace`.
  *
- * @category Pattern Matching
+ * - `x-1` \( \to \) `1-x`
+ * - `(x+1)(x-1)` \( \to \) `x^2-1
+ *
+ * The patterns can be expressed as LaTeX strings or a MathJSON expressions.
+ *
+ * As a shortcut, a rule can be defined as a LaTeX string: `x-1 -> 1-x`.
+ * The expression to the left of `->` is the `match` and the expression to the
+ * right is the `replace`. When using LaTeX strings, single character variables
+ * are assumed to be wildcards.
+ *
+ * When using MathJSON expressions, anonymous wildcards (`_`) will match any
+ * expression. Named wildcards (`_x`, `_a`, etc...) will match any expression
+ * and bind the expression to the wildcard name.
+ *
+ * In addition the sequence wildcard (`__1`, `__a`, etc...) will match
+ * a sequence of one or more expressions, and bind the sequence to the
+ * wildcard name.
+ *
+ * If `exact` is false, the rule will match variants. For example
+ * 'x' will match 'a + x', 'x' will match 'ax', etc...
+ * For simplification rules, you generally want `exact` to be true, but
+ * to solve equations, you want it to be false. Default to true.
+ *
+ * When set to false, infinite recursion is possible.
+ *
+ * @category Rules
  */
-export type Pattern = BoxedExpression;
+
+export type Rule =
+  | string
+  | {
+      match: LatexString | SemiBoxedExpression | Pattern;
+      replace: LatexString | SemiBoxedExpression | PatternReplaceFunction;
+      condition?: LatexString | PatternConditionFunction;
+      exact?: boolean; // Default to true
+      priority?: number;
+      id?: string; // For debugging
+    };
 
 /** @category Rules */
 export type BoxedRule = {
@@ -1564,7 +1600,14 @@ export type BoxedRule = {
 };
 
 /** @category Rules */
-export type BoxedRuleSet = ReadonlySet<BoxedRule>;
+export type BoxedRuleSet = Iterable<BoxedRule>;
+
+/**
+ * @noInheritDoc
+ *
+ * @category Pattern Matching
+ */
+export type Pattern = BoxedExpression;
 
 /**
  * @category Boxed Expression
@@ -2213,46 +2256,6 @@ export type ReplaceOptions = {
 export type Substitution<T = SemiBoxedExpression> = {
   [symbol: string]: T;
 };
-
-/**
- *  A rule describes how to modify an expressions that matches a pattern `match`
- * into a new expression `replace`.
- *
- * `x-1` \( \to \) `1-x`
- * `(x+1)(x-1)` \( \to \) `x^2-1
- *
- * The `match` pattern can be expressed as a LaTeX string or a
- * MathJSON expression.
- *
- *
- * Anonymous wildcards (`_`) will match any expression. Named wildcards
- * (`_x`, `_a`, etc...) will match any expression and bind the expression to
- * the wildcard name.
- *
- * In addition the sequence wildcard (`__1`, `__a`, etc...) will match
- * a sequence of one or more expressions, and bind the sequence to the
- * wildcard name.
- *
- * If `exact` is false, the rule will match variants. For example
- * 'x' will match 'a + x', 'x' will match 'ax', etc...
- * For simplification rules, you generally want `exact` to be true, but
- * to solve equations, you want it to be false. Default to true.
- *
- * When set to false, infinite recursion is possible.
- *
- * @category Rules
- */
-
-export type Rule =
-  | string
-  | {
-      match: LatexString | SemiBoxedExpression | Pattern;
-      replace: LatexString | SemiBoxedExpression | PatternReplaceFunction;
-      condition?: LatexString | PatternConditionFunction;
-      exact?: boolean; // Default to true
-      priority?: number;
-      id?: string; // For debugging
-    };
 
 /** @category Assumptions */
 export interface ExpressionMapInterface<U> {

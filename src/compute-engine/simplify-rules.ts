@@ -83,7 +83,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   '\\sin(x) * \\sin(y) -> \\frac{1}{2} (\\cos(x-y) - \\cos(x+y))',
   '\\cos(x) * \\cos(y) -> \\frac{1}{2} (\\cos(x-y) + \\cos(x+y))',
   '\\tan(x) * \\cot(x) -> 1',
-  '\\sin(x)^2 + \\cos(x)^2 -> 1',
+  // '\\sin(x)^2 + \\cos(x)^2 -> 1',
   '\\sin(x)^2 -> \\frac{1 - \\cos(2x)}{2}',
   '\\cos(x)^2 -> \\frac{1 + \\cos(2x)}{2}',
 ];

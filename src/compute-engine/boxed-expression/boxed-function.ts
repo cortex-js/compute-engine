@@ -527,7 +527,7 @@ export class BoxedFunction extends _BoxedExpression {
     // 4/ If a function expression, apply the arguments, and simplify the result
     //
     if (typeof this._head !== 'string') {
-      const expr = apply(this._head, tail);
+      expr = apply(this._head, tail);
       if (typeof expr.head !== 'string') return expr;
       return expr.simplify(options);
     }
@@ -549,38 +549,23 @@ export class BoxedFunction extends _BoxedExpression {
 
     expr = cheapest(this, expr);
 
+    if (options?.rules === null) return expr;
+
     //
     // 6/ Apply rules, until no rules can be applied
     //
-    if (options?.rules !== null) {
-      const rules =
-        options?.rules ?? this.engine.getRuleSet('standard-simplification')!;
+    const rules =
+      options?.rules ?? this.engine.getRuleSet('standard-simplification')!;
 
-      let iterationCount = 0;
-      let done = false;
-      do {
-        let newExpr = expr.replace(rules);
-        if (newExpr) newExpr = newExpr.simplify({ rules: null });
-        if (newExpr !== null) {
-          expr = cheapest(expr, newExpr);
-          if (expr === newExpr) done = true;
-        } else done = true; // no rules applied
+    let iterationCount = 0;
+    do {
+      let newExpr = expr!.replace(rules);
+      if (!newExpr) break;
+      expr = newExpr.simplify({ rules: null });
 
-        iterationCount += 1;
-        // @debug-begin
-        // if (iterationCount > 100) {
-        //   console.log('Iterating... ', newExpr?.toJSON() ?? '()', expr.toJSON());
-        // }
-        // @debug-end
-      } while (!done && iterationCount < this.engine.iterationLimit);
-
-      // @debug-begin
-      // if (iterationCount >= this.engine.iterationLimit) {
-      //   console.error('Iteration Limit reached simplifying', this.toJSON());
-      // }
-      // @debug-end
-    }
-    return cheapest(this, expr);
+      iterationCount += 1;
+    } while (iterationCount < this.engine.iterationLimit);
+    return expr!; // cheapest(this, expr);
   }
 
   evaluate(options?: EvaluateOptions): BoxedExpression {
