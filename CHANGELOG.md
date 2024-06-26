@@ -17,10 +17,10 @@
   is simpler to manipulate.
 
 - The `ce.serialize()` method has been replaced with `expr.toLatex()` and
-  `expr.toMathJson()`. These methods take an optional serialization option
-  object. The `ce.latexOptions` and `ce.jsonSerializationOptions` properties
-  have been removed. Use the `options` argument of `toLatex()` and
-  `toMathJson()` instead.
+  `expr.toMathJson()`. The `ce.latexOptions` and `ce.jsonSerializationOptions`
+  properties have been removed. Instead, pass the formating options directly to
+  the `toLatex()` and `toMathJson()` methods. The `ce.parse()` method now takes
+  an optional argument to specify the format of the input string.
 
 - The default JSON serialization of an expression has changed.
 
@@ -28,25 +28,27 @@
   had some transformations applied to it (sugaring) to make the JSON more human
   readable.
 
-  For example, `ce.parse("\\frac12").json` would return the symbol `"Half"`
+  For example, `ce.parse("\frac12").json` would return the symbol `"Half"`
   instead of `["Divide", 1, 2]`.
 
   However, this could lead to some confusion when manipulating the JSON
   directly. Since the JSON is intended to be used by machine more than humans,
-  the transformations have been removed.
+  these additional transformations have been removed.
 
   The `expr.json` property now returns the JSON representing the expression,
   without any transformations.
 
-  Note that the `expr.json` property ignores the settings from
-  `ce.jsonSerializationOptions`.
-
-  To get a version of JSON with some transformations and shorthands applied use
-  the `ce.serialize()` function. You can control the output of `ce.serialize()`
-  with `ce.jsonSerializationOptions`.
+  To get a version of JSON with some transformations applied use the
+  `ce.toMathJson()` function.
 
   ```js
-  ce.serialize(expr, {format: "json"})
+  expr = ce.box(["Subtract", 1, ["Square", "x"]]);
+  console.log(expr.json);
+  // -> ["Add", 1, ["Negate", ["Power", "x", 2]]]
+  expr.toMathJson()
+  // -> ["Subtract", 1, ["Square", "x"]]
+  expr.toMathJson({exclude: "Square"})
+  // -> ["Subtract", 1, ["Power", "x", 2]]
   ```
 
   In practice, the impact of both of these changes should be minimal. If you
@@ -59,12 +61,13 @@
   simplify you code since the default output from `expr.json` is now more
   consistent and simpler.
 
-- The name of some number formatting options has changed. See the  
+- The name of some number formatting options has changed. The number formatting
+  options are an optional argument of `ce.parse()` and `ce.toLatex()`. See the  
   `NumberFormat` and `NumberSerializationFormat` types.
 
 - The values +infinity, -infinity and NaN are now represented preferably with
   the symbols `PositiveInfinity`, `NegativeInfinity` and `NaN` respectively.
-  Previously they were represent with corresponding numeric values, i.e.
+  Previously they were represented with numeric values, i.e.
   `{num: "+Infinity"}`, `{num: "-Infinity"}` and `{num: "NaN"}`. The numeric
   values are still supported, but the symbols are preferred.
 
@@ -94,11 +97,15 @@
 - Numbers can have a different digit group length for the whole and fractional
   part of a number. For example,
   `ce.toLatex(ce.parse("1234.5678"), {digitGroup: [3, 0]})` will return
-  `1,234.5678`.
+  `1\,234.5678`.
 - Numbers can now be formatted using South-East Asian Numbering System, i.e.
-  lakh and crore. For example,
-  `ce.toLatex(ce.parse("12345678"), {digitGroup: "lakh"})` will return
-  `1,23,45,678`.
+  lakh and crore. For example:
+
+  ```js
+  ce.toLatex(ce.parse("12345678"), {digitGroup: "lakh"})
+  // -> "1,23,45,678"
+  ```
+
 - Expressions with Integrate functions can now be compiled to JavaScript. The
   compiled function can be used to evaluate the integral numerically. For
   example:
@@ -150,7 +157,7 @@
   arguments are `False`, is now evaluates to `False`.
 - Fixed canonical form of `e^x^2`, and more generally apply power rule in more
   cases.
-- Added missing Sech and Csch functions.
+- Added missing "Sech" and "Csch" functions.
 - The digit grouping serializing would place the separator in the wrong place
   for some numbers.
 - The `avoidExponentsInRange` formating option would not always avoid exponents
