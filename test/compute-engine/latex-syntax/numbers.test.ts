@@ -10,8 +10,6 @@ function parseVal(s: string) {
   return ce.parse(s).numericValue;
 }
 
-console.log(parse('1.\\overset{.}{3}'));
-
 describe('PARSING OF NUMBER', () => {
   test('Basic Parsing', () => {
     expect(parseVal('1')).toEqual(1);

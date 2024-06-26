@@ -24,7 +24,7 @@ import { applyN } from '../symbolic/utils';
 import {
   asFloat,
   asRational,
-  asSmallInteger,
+  asMachineInteger,
   mul,
   asBignum,
 } from '../boxed-expression/numerics';
@@ -103,9 +103,9 @@ export function canonicalPower(
 
   // a^b^c -> a^(b*c)
   if (base.head === 'Power' && base.op1.isReal) {
-    const a = asSmallInteger(exponent);
+    const a = asMachineInteger(exponent);
     if (a !== null) {
-      const b = asSmallInteger(base.op2);
+      const b = asMachineInteger(base.op2);
       if (b !== null) return ce.pow(base.op1, ce.number(a * b));
     }
     if (base.op1.isNonNegative) {
@@ -141,7 +141,7 @@ export function square(
     ); // Don't call ce.mul() to avoid infinite loops
 
   if (base.head === 'Power') {
-    const exp = asSmallInteger(base.op2);
+    const exp = asMachineInteger(base.op2);
     if (exp !== null) return ce.pow(base.op1, ce.number(exp * 2));
     return ce.pow(base.op1, ce.mul(ce.number(2), base.op2));
   }
@@ -292,7 +292,7 @@ export function processPower(
 
   if (base.head === 'Power') {
     // a^-1^-1 -> a
-    if (asSmallInteger(base.op2) === -1 && asSmallInteger(exponent) === -1)
+    if (asMachineInteger(base.op2) === -1 && asMachineInteger(exponent) === -1)
       return base.op1;
 
     const e1 = asRational(base.op2);
@@ -319,7 +319,7 @@ export function processPower(
   //
   if (mode !== 'N' && base.numericValue !== null && base.isInteger) {
     if (base.isOne) return ce.One;
-    const smallExpr = asSmallInteger(exponent);
+    const smallExpr = asMachineInteger(exponent);
     if (smallExpr) return numEvalPower(ce, base, exponent);
 
     const r = asRational(exponent);
@@ -429,7 +429,7 @@ export function processSqrt(
       (x) => x.sqrt()
     );
 
-  const n = asSmallInteger(base);
+  const n = asMachineInteger(base);
   if (n !== null) {
     const [factor, root] = factorPower(Math.abs(n), 2);
     if (factor === 1) return ce._fn('Sqrt', [base]);

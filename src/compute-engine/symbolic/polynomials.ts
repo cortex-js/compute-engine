@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { BoxedExpression, SemiBoxedExpression } from '../public';
-import { asSmallInteger } from '../boxed-expression/numerics';
+import { asMachineInteger } from '../boxed-expression/numerics';
 
 /**
  * Coefficient of a univariate (single variable) polynomial.
@@ -147,7 +147,7 @@ function getDegree(expr: BoxedExpression | undefined): number {
  */
 export function totalDegree(expr: BoxedExpression): number {
   if (expr.head === 'Power' && expr.op2.numericValue !== null) {
-    const deg = asSmallInteger(expr.op2);
+    const deg = asMachineInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
     return 1;
   }
@@ -173,7 +173,7 @@ export function totalDegree(expr: BoxedExpression): number {
  */
 export function maxDegree(expr: BoxedExpression): number {
   if (expr.head === 'Power' && expr.op2.numericValue !== null) {
-    const deg = asSmallInteger(expr.op2);
+    const deg = asMachineInteger(expr.op2);
     if (deg !== null && deg > 0) return deg;
     return 1;
   }

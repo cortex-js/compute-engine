@@ -56,11 +56,12 @@ import { each, isCollection } from '../collection-utils';
 import { BoxedNumber } from '../boxed-expression/boxed-number';
 import { IComputeEngine, BoxedExpression } from '../boxed-expression/public';
 import {
-  asSmallInteger,
+  asMachineInteger,
   asFloat,
   asRational,
   asBignum,
 } from '../boxed-expression/numerics';
+import { distribute } from '../symbolic/expand';
 
 // When considering processing an arithmetic expression, the following
 // are the core canonical arithmetic operations that should be considered:
@@ -289,7 +290,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
           return ce._fn('Factorial', [base]);
         },
         evaluate: (ce, ops) => {
-          const n = asSmallInteger(ops[0]);
+          const n = asMachineInteger(ops[0]);
           if (n !== null && n >= 0) {
             if (!bignumPreferred(ce)) return ce.number(factorial(n));
             return ce.number(bigFactorial(ce, ce.bignum(n)));
@@ -316,7 +317,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         evaluate: (ce, ops) => {
           // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
-          const n = asSmallInteger(ops[0]);
+          const n = asMachineInteger(ops[0]);
           if (n === null) return undefined;
           if (bignumPreferred(ce))
             return ce.number(bigFactorial2(ce, ce.bignum(n)));
@@ -524,17 +525,20 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             ce,
             ops.map((x) => x.simplify())
           ),
-        evaluate: (ce, ops) =>
-          evalMultiply(
-            ce,
-            ops.map((x) => x.evaluate())
-          ),
-        N: (ce, ops) =>
-          evalMultiply(
-            ce,
-            ops.map((x) => x.N()),
-            'N'
-          ),
+        evaluate: (ce, ops) => {
+          ops = ops.map((x) => x.evaluate());
+          const expr = distribute(ops);
+          if (expr.head !== 'Multiply') return expr.evaluate();
+
+          return evalMultiply(ce, ops);
+        },
+        N: (ce, ops) => {
+          ops = ops.map((x) => x.N());
+          const expr = distribute(ops);
+          if (expr.head !== 'Multiply') return expr.N();
+
+          return evalMultiply(ce, ops, 'N');
+        },
       },
     },
 
@@ -673,7 +677,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         },
         evaluate: (ce, ops) => {
           if (ops.length === 2) {
-            const [n, d] = [asSmallInteger(ops[0]), asSmallInteger(ops[1])];
+            const [n, d] = [asMachineInteger(ops[0]), asMachineInteger(ops[1])];
             if (n !== null && d !== null) return ce.number([n, d]);
             return undefined;
           }
@@ -1300,10 +1304,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
             );
           }
 
-          if (asSmallInteger(op2) === null)
+          if (asMachineInteger(op2) === null)
             return ce.domainError('Integers', op2.domain, op2);
 
-          const base = asSmallInteger(op2)!;
+          const base = asMachineInteger(op2)!;
           if (base < 2 || base > 36)
             return ce.error(['out-of-range', 2, 36, base], op2);
 

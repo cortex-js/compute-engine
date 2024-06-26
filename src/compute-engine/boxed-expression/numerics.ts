@@ -23,9 +23,7 @@ import { bigint } from '../numerics/numeric-bigint';
  *
  * Attempts to make `rest` a positive value (i.e. pulls out negative sign).
  *
- * The numeric coefficient could be an expression, for example:
- * ['Multiply', 2, ['Sqrt', 5], 'x']
- *    -> [['Multiply', 2, ['Sqrt', 5]], 'x']
+ * For example:
  *
  * ['Multiply', 2, 'x', 3, 'a']
  *    -> [6, ['Multiply', 'x', 'a']]
@@ -296,7 +294,7 @@ export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
   return null;
 }
 
-export function asSmallInteger(
+export function asMachineInteger(
   expr: BoxedExpression | undefined
 ): number | null {
   if (expr === undefined || expr === null) return null;

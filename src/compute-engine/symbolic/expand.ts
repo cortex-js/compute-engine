@@ -1,4 +1,4 @@
-import { asSmallInteger } from '../boxed-expression/numerics';
+import { asMachineInteger } from '../boxed-expression/numerics';
 import { simplifyAdd } from '../library/arithmetic-add';
 import { BoxedExpression } from '../public';
 import { canonicalNegate } from './negate';
@@ -101,7 +101,7 @@ export function expandMultinomial(
   expr: BoxedExpression
 ): BoxedExpression | null {
   if (expr.head !== 'Power') return null;
-  const exp = asSmallInteger(expr.op2);
+  const exp = asMachineInteger(expr.op2);
   if (exp === null || exp < 0) return null;
   if (exp === 0) return expr.engine.One;
   if (exp === 1) return expand(expr.op1);

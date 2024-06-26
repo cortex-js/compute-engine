@@ -27,6 +27,16 @@ import { engine, simplify } from '../utils';
 
 const ce = engine;
 
+console.log(ce.parse('0.123x').evaluate().toString());
+
+let expr0 = engine.parse('2(2x+1)');
+console.log('expr0: ', expr0.evaluate().toString());
+
+let expr1 = engine.parse('2(13.1x+1)');
+let expr2 = engine.parse('26.2x+2');
+console.log('expr1: ', expr1.evaluate().toString());
+console.log('expr1 is equal to expr2: ', expr1.isEqual(expr2));
+
 // engine.jsonSerializationOptions.precision = 16;
 function parseToJson(latex: string): Expression {
   return engine.parse(latex, { canonical: false }).json;
@@ -900,30 +910,30 @@ describe('SIMPLIFICATION divide', () => {
 describe('SIMPLIFICATION sqrt', () => {
   test(`\\sqrt{5040}`, () =>
     expect(evaluateToJson('\\sqrt{5040}')).toMatchInlineSnapshot(`
-          [
-            Multiply,
-            12,
-            [
-              Sqrt,
-              35,
-            ],
-          ]
-      `));
+      [
+        Multiply,
+        12,
+        [
+          Sqrt,
+          35,
+        ],
+      ]
+    `));
 
   test(`simplify('\\sqrt{3^2}')`, () =>
     expect(simplify('\\sqrt{3^2}')).toMatchInlineSnapshot(`3`));
 
   test(`evaluate('\\sqrt{12}')`, () =>
     expect(evaluateToJson('\\sqrt{12}')).toMatchInlineSnapshot(`
-          [
-            Multiply,
-            2,
-            [
-              Sqrt,
-              3,
-            ],
-          ]
-      `));
+      [
+        Multiply,
+        2,
+        [
+          Sqrt,
+          3,
+        ],
+      ]
+    `));
 
   // A math olympiad problem
   // Simplify[ToExpression["\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}", TeXForm]]

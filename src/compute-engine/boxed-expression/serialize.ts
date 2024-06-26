@@ -14,7 +14,7 @@ import {
   Metadata,
 } from '../public';
 
-import { asSmallInteger, asFloat } from './numerics';
+import { asMachineInteger, asFloat } from './numerics';
 
 import { isInMachineRange } from '../numerics/numeric-bignum';
 
@@ -66,7 +66,7 @@ function serializeSubtract(
       }
       return null;
     }
-    const t0 = asSmallInteger(a);
+    const t0 = asMachineInteger(a);
     if (t0 !== null && t0 < 0)
       return serializeJsonFunction(
         ce,
@@ -148,7 +148,7 @@ function serializePrettyJsonFunction(
       return serializeJsonFunction(ce, 'Exp', [args[1]], options, metadata);
 
     if (args[1]?.numericValue !== null) {
-      const exp = asSmallInteger(args[1]);
+      const exp = asMachineInteger(args[1]);
       if (exp === 2 && !exclusions.includes('Square'))
         return serializeJsonFunction(
           ce,
@@ -226,7 +226,7 @@ function serializePrettyJsonFunction(
 
   if (head === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
     if (args[1]?.numericValue !== null) {
-      const t1 = asSmallInteger(args[1]);
+      const t1 = asMachineInteger(args[1]);
       if (t1 !== null && t1 < 0)
         return serializeJsonFunction(
           ce,
@@ -319,7 +319,7 @@ function serializeJsonFunction(
       args.length === 2 &&
       args[1]?.numericValue !== null
     ) {
-      const n = asSmallInteger(args[1]);
+      const n = asMachineInteger(args[1]);
       if (n === 2) return serializeJsonFunction(ce, 'Sqrt', [args[0]], options);
 
       if (n !== null) {

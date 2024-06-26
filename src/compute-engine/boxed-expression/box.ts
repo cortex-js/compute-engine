@@ -27,7 +27,7 @@ import { bigint, bigintValue } from '../numerics/numeric-bigint';
 import { isDomainLiteral } from '../library/domains';
 import { BoxedTensor, expressionTensorInfo } from './boxed-tensor';
 import { canonicalForm } from './canonical';
-import { asFloat, asSmallInteger } from './numerics';
+import { asFloat, asMachineInteger } from './numerics';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -422,7 +422,7 @@ export function boxFunction(
             const n =
               typeof key.numericValue === 'number'
                 ? key.numericValue
-                : asSmallInteger(key);
+                : asMachineInteger(key);
             if (n && Number.isFinite(n) && Number.isInteger(n))
               k = n.toString();
           }

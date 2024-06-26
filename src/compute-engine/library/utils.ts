@@ -1,4 +1,4 @@
-import { asSmallInteger } from '../boxed-expression/numerics';
+import { asMachineInteger } from '../boxed-expression/numerics';
 import { checkDomain } from '../boxed-expression/validate';
 import { MAX_ITERATION } from '../numerics/numeric';
 import { BoxedExpression } from '../public';
@@ -162,14 +162,14 @@ export function normalizeIndexingSet(
       (limits.op1.head === 'Hold'
         ? limits.op1.op1.symbol
         : limits.op1.symbol) ?? 'Nothing';
-    lower = asSmallInteger(limits.op2) ?? 1;
+    lower = asMachineInteger(limits.op2) ?? 1;
 
     if (!Number.isFinite(lower)) isFinite = false;
 
     if (limits.op3.symbol === 'Nothing' || limits.op3.isInfinity) {
       isFinite = false;
     } else {
-      const u = asSmallInteger(limits.op3);
+      const u = asMachineInteger(limits.op3);
       if (u === null) isFinite = false;
       else {
         upper = u;

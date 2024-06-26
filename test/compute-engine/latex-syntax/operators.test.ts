@@ -269,7 +269,6 @@ describe('OPERATOR multiply', () => {
       box       = ["InvisibleOperator", 2, ["Delimiter", ["Add", "x", 1]]]
       canonical = ["Multiply", 2, ["Add", "x", 1]]
       simplify  = ["Add", ["Multiply", 2, "x"], 2]
-      evaluate  = ["Multiply", 2, ["Add", "x", 1]]
     `));
   test('2\\pi', () =>
     expect(check('2\\pi')).toMatchInlineSnapshot(`

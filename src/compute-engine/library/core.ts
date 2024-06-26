@@ -17,7 +17,7 @@ import { flattenOps, flattenSequence } from '../symbolic/flatten';
 import { normalizeIndexingSet } from './utils';
 import { canonicalForm } from '../boxed-expression/canonical';
 import { BoxedExpression } from '../boxed-expression/public';
-import { asFloat, asSmallInteger } from '../boxed-expression/numerics';
+import { asFloat, asMachineInteger } from '../boxed-expression/numerics';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -571,7 +571,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
         result: (ce, args: ReadonlyArray<BoxedExpression>) => {
           const op1 = args[0];
           const op2 = args[1];
-          if (op1.string && asSmallInteger(op2) !== null)
+          if (op1.string && asMachineInteger(op2) !== null)
             return ce.domain('Integers');
           if (op1.symbol) {
             const vh = op1.evaluate()?.head;
@@ -589,7 +589,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           // Is it a string in a base form:
           // `"deadbeef"_{16}` `"0101010"_2?
           if (op1.string) {
-            const base = asSmallInteger(op2);
+            const base = asMachineInteger(op2);
             if (base !== null && base > 1 && base <= 36) {
               const [value, rest] = fromDigits(op1.string, base);
               if (rest) {
@@ -612,7 +612,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
             }
             // Maybe a compound symbol
             const sub =
-              op2.string ?? op2.symbol ?? asSmallInteger(op2)?.toString();
+              op2.string ?? op2.symbol ?? asMachineInteger(op2)?.toString();
 
             if (sub) return ce.symbol(op1.symbol + '_' + sub);
           }
@@ -636,7 +636,8 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           if (ops.length === 0) return ce.Nothing;
           const arg = ops
             .map(
-              (x) => x.symbol ?? x.string ?? asSmallInteger(x)?.toString() ?? ''
+              (x) =>
+                x.symbol ?? x.string ?? asMachineInteger(x)?.toString() ?? ''
             )
             .join('');
 
@@ -670,7 +671,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
           }
 
           // Evaluate multiple times
-          let n = Math.max(3, Math.round(asSmallInteger(ops[1]) ?? 3));
+          let n = Math.max(3, Math.round(asMachineInteger(ops[1]) ?? 3));
 
           let timings: number[] = [];
           let result: BoxedExpression;
