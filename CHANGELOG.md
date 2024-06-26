@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.25.0 _2024-06-25_
 
 ### Breaking Changes
 
