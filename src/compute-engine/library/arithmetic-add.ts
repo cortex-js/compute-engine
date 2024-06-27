@@ -329,7 +329,7 @@ export function evalSummation(
       //     else result = ce._NEGATIVE_INFINITY;
       //   }
       //   if (result === null && fn.isPure)
-      //     result = ce.mul([ce.number(upper - lower + 1), n]);
+      //     result = ce.mul(ce.number(upper - lower + 1), n);
 
       //   // If the term is not a function of the index, but it is not pure,
       //   // fall through to the general case

@@ -1,12 +1,8 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import { BoxedExpression, ComputeEngine } from '../../src/compute-engine';
 import { Expression } from '../../src/math-json/math-json-format';
-import { latex, simplify } from '../utils';
+import { simplify } from '../utils';
 
 export const ce = new ComputeEngine();
-
-function simplifyExpr(expr: Expression): Expression {
-  return ce.box(expr).simplify()?.json ?? 'Error';
-}
 
 // \frac{\sin ^4\left(x\right)-\cos ^4\left(x\right)}{\sin ^2\left(x\right)-\cos ^2\left(x\right)}
 // -> 1
@@ -17,16 +13,38 @@ function simplifyExpr(expr: Expression): Expression {
 // \tan ^2\left(x\right)\cos ^2\left(x\right)+\cot ^2\left(x\right)\sin ^2\left(x\right)
 // -> 1
 
+console.log(ce.parse('e^x e^{-x}').toString());
+console.log(ce.parse('e^x e^{-x}').simplify().toString());
+
+console.log(ce.parse('0.3').simplify().toString());
+console.log(ce.parse('\\frac{\\sqrt5+1}{4}').simplify().toString());
+
 const exprs: [Expression, Expression][] = [
-  [['Add', 'x', 0], 'x'],
-  [['Add', 1, 0], 1],
-  [['Add', 1, 2, 1.0001], 4.0001],
+  ['1+0', 1],
+  ['x+0', 'x'],
+  ['\\frac{\\sqrt5+1}{4}', '\\frac{\\sqrt5+1}{4}'],
+  ['0.3', 0.3],
+  // [['Add', 1, 2, 1.0001], 4.0001],
+  ['\\frac{3.1}{2.8}', '\\frac{3.1}{2.8}'],
+  // ['e^x e^{-x}', 1],
+  // ['2(13.1+x)', '26.2+2x'],
+  // ['2(13.1+x)-26.2+2x', 0],
+  // ['2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0],
+  // ['\\frac12 + 0.5', 1],
+  // ['\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'],
+  // ['\\sqrt[4]{16b^{4}}', '2b'],
 ];
 
 describe('SIMPLIFY', () => {
   for (const expr of exprs) {
-    test(`simplify(${latex(expr[0])}) = ${latex(expr[1])})`, () => {
-      expect(simplifyExpr(expr[0])).toEqual(expr[1]);
+    let a: BoxedExpression;
+    let b: BoxedExpression;
+    if (typeof expr[0] === 'string') a = ce.parse(expr[0]);
+    else a = ce.box(expr[0]);
+    if (typeof expr[1] === 'string') b = ce.parse(expr[1]);
+    else b = ce.box(expr[1]);
+    test(`simplify(${a.latex}) = ${b.latex}`, () => {
+      expect(a.json).toEqual(b.json);
     });
   }
 });

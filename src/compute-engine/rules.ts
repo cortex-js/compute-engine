@@ -161,6 +161,11 @@ function applyRule(
     exact: rule.exact ?? true,
   });
 
+  // if (rule.id?.startsWith('x^n * x^m')) {
+  //   console.log('expr', expr.toString(), 'sub', sub);
+  //   // debugger;
+  // }
+
   // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return changed ? expr : null;
 

@@ -22,8 +22,9 @@ import {
   neg,
   pow,
   rationalize,
+  sqrt,
 } from '../numerics/rationals';
-import { factor } from './factor.js';
+import { factor } from './factor';
 import { add, asMachineInteger, asRational, div, mul } from './numerics';
 import { BoxedExpression } from './public';
 
@@ -64,7 +65,7 @@ export class Coefficient implements CoefficientData {
     // Add
     //
     //  use factor() to factor out common factors
-    if (expr.head === 'Add') expr = factor(expr);
+    // if (expr.head === 'Add') expr = factor(expr);
 
     //
     // Multiply
@@ -77,7 +78,7 @@ export class Coefficient implements CoefficientData {
         coef = coef.mul(c);
         if (!r.isOne) rest.push(r);
       }
-
+      if (coef.isOne) return [coef, ce._fn('Multiply', rest)];
       return [coef, ce.mul(...rest)];
     }
 
@@ -87,8 +88,9 @@ export class Coefficient implements CoefficientData {
     if (expr.head === 'Divide') {
       const [coef1, numer] = Coefficient.fromExpression(expr.op1);
       const [coef2, denom] = Coefficient.fromExpression(expr.op2);
-
-      return [coef1.div(coef2), ce.div(numer, denom)];
+      const coef = coef1.div(coef2);
+      if (coef.isOne) return [coef, expr];
+      return [coef, ce.div(numer, denom)];
     }
 
     //
@@ -110,12 +112,10 @@ export class Coefficient implements CoefficientData {
     }
 
     console.assert(expr.head !== 'Root');
-    console.assert(expr.head !== 'Sqrt');
-    // if (expr.head === 'Sqrt') {
-    //   const [coef, rest] = Coefficient.fromExpression(expr.op1);
-    //   let sqrtCoef = sqrt(coef);
-    //   return sqrtCoef ? [sqrtCoef, ce.sqrt(rest)] : [[1, 1], expr];
-    // }
+    if (expr.head === 'Sqrt') {
+      const [coef, rest] = Coefficient.fromExpression(expr.op1);
+      return [coef.pow(0.5), ce.sqrt(rest)];
+    }
 
     //
     // Negate
@@ -176,9 +176,11 @@ export class Coefficient implements CoefficientData {
     );
   }
   asRational(): Rational {
-    let result = rationalize(this.asFloat());
+    if (this.sqrt === 1 && this.float === 1) return this.rational;
 
+    let result = rationalize(this.asFloat());
     if (typeof result === 'number') return [result, 1];
+
     return result;
   }
 
@@ -271,7 +273,24 @@ export class Coefficient implements CoefficientData {
   }
 
   pow(exponent: number): Coefficient {
-    console.assert(Number.isInteger(exponent));
+    if (exponent === 0.5) {
+      const rational =
+        sqrt(this.rational) ??
+        Math.sqrt(Number(this.rational[0]) / Number(this.rational[1]));
+      if (typeof rational === 'number') {
+        return new Coefficient({
+          float: Math.sqrt(this.float) * rational,
+          rational: [1, 1],
+          sqrt: rational,
+        });
+      }
+      return new Coefficient({
+        float: Math.pow(this.float, exponent),
+        rational,
+        sqrt: this.sqrt ** exponent,
+      });
+    }
+
     return new Coefficient({
       float: Math.pow(this.float, exponent),
       rational: pow(this.rational, exponent),

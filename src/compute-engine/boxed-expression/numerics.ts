@@ -16,6 +16,7 @@ import {
 import { BoxedExpression } from './public';
 import { SMALL_INTEGER, chop } from '../numerics/numeric';
 import { bigint } from '../numerics/numeric-bigint';
+import { Coefficient } from './coefficient-field';
 
 /**
  * Attempt to factor a numeric coefficient `c` and a `rest` out of a
@@ -32,6 +33,36 @@ import { bigint } from '../numerics/numeric-bigint';
  *    -> [['Rational', 2, 3], ['Divide', 'x', ['Multiply, 'y', 'a']]]
  */
 export function asCoefficient(
+  expr: BoxedExpression
+): [coef: Rational, rest: BoxedExpression] {
+  const [oldCoef, oldRest] = oldAsCoefficient(expr);
+
+  return [oldCoef, oldRest];
+
+  const [coef, rest] = Coefficient.fromExpression(expr);
+  // if (coef.sqrt === 1 && coef.float === 1) return [coef.rational, rest];
+  const ce = expr.engine;
+
+  const restCoef = coef.float * Math.sqrt(coef.sqrt);
+
+  let newRest = restCoef === 1 ? rest : ce.mul(ce.number(restCoef), rest);
+
+  if (add(coef.rational, neg(oldCoef))[0] !== 0) {
+    const [againCoef, againRest] = Coefficient.fromExpression(expr);
+    console.log(`asCoefficient(${expr.toString()}) ${oldCoef} -> ${coef}`);
+  }
+
+  if (!oldRest.isSame(newRest)) {
+    const [againCoef, againRest] = Coefficient.fromExpression(expr);
+    console.log(
+      `asCoefficient(${expr.toString()}) ${oldRest.toString()} -> ${newRest.toString()}`
+    );
+  }
+
+  return [coef.rational, newRest];
+}
+
+function oldAsCoefficient(
   expr: BoxedExpression
 ): [coef: Rational, rest: BoxedExpression] {
   console.assert(expr.isCanonical);

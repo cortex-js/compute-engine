@@ -256,7 +256,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           args = checkNumericArgs(ce, args);
           if (args.length < 2) return args[0] ?? ce.error('missing');
-          if (args.length !== 2) debugger;
           let result = args[0];
           if (!result) return ce.error('missing');
           const rest = args.slice(1);
@@ -277,11 +276,12 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // Exp(x) -> e^x
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
+        result: 'Numbers',
         canonical: (ce, args) => {
           // The canonical handler is responsible for arg validation
           args = checkNumericArgs(ce, args, 1);
-          if (args.length !== 1) return ce._fn('Power', [ce.E, ...args]);
+          if (args.length !== 1) return ce.function('Power', [ce.E, ...args]);
           return ce.pow(ce.E, args[0]);
         },
       },
@@ -294,7 +294,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       complexity: 9000,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
+        result: 'Numbers',
         canonical: (ce, args) => {
           const base = args[0];
           if (base instanceof BoxedNumber && base.isNegative)
@@ -325,7 +326,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
+        result: 'Numbers',
         evaluate: (ce, ops) => {
           // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
@@ -362,7 +364,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
+        result: 'Numbers',
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -378,7 +381,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
+        result: 'Numbers',
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -396,7 +400,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
+        result: 'Numbers',
         simplify: processLn,
         evaluate: processLn,
         N: (ce, ops) =>
@@ -457,7 +462,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
+        result: 'Numbers',
 
         N: (ce, ops) =>
           applyN(
@@ -479,7 +485,8 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
+        result: 'Numbers',
         N: (ce, ops) =>
           applyN(
             ops[0],
@@ -562,8 +569,9 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
         result: (ce, args) => {
+          if (args.length !== 1) return ce.domain('NothingDomain');
           const arg = args[0].domain;
           if (!arg?.base) return arg;
           const negDomain = {
@@ -1248,7 +1256,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       inert: true,
       signature: {
         domain: ['FunctionOf', 'Values', ['OptArg', 'Integers'], 'Values'],
-        result: (_ce, args) => args[0].domain,
+        result: (ce, args) => {
+          if (args.length !== 1) return ce.domain('NothingDomain');
+          return args[0].domain;
+        },
       },
     },
     FromDigits: {

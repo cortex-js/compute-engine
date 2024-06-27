@@ -140,7 +140,10 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         params: ['Anything'],
         optParams: ['Strings'],
-        result: (_ce, args) => args[0].domain,
+        result: (ce, args) => {
+          if (args.length === 0) return ce.domain('NothingDomain');
+          return args[0].domain;
+        },
 
         // During canonicalization, Delimiters get replaced by their first
         // argument, which is a function expression (e.g. `List` or `Sequence`)
@@ -245,6 +248,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
         result: (ce, args) => {
+          if (args.length !== 1) return ce.domain('NothingDomain');
           const op1 = args[0];
           if (op1.symbol) return ce.domain('Symbols');
           if (op1.string) return ce.domain('Strings');
@@ -328,7 +332,10 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
     Identity: {
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        result: (_ce, ops) => ops[0].domain,
+        result: (ce, ops) => {
+          if (ops.length !== 1) return ce.domain('NothingDomain');
+          return ops[0].domain;
+        },
         evaluate: (_ce, ops) => ops[0],
       },
     },
@@ -414,7 +421,10 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        result: (_ce, ops) => ops[0].domain,
+        result: (ce, ops) => {
+          if (ops.length !== 1) return ce.domain('NothingDomain');
+          return ops[0].domain;
+        },
         canonical: (ce, ops) => ce._fn('Evaluate', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].evaluate(),
       },
@@ -451,7 +461,10 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        result: (_ce, ops) => ops[0].domain,
+        result: (ce, ops) => {
+          if (ops.length !== 1) return ce.domain('NothingDomain');
+          return ops[0].domain;
+        },
         canonical: (ce, ops) => ce._fn('Simplify', checkArity(ce, ops, 1)),
         evaluate: (_ce, ops) => ops[0].simplify(),
       },
@@ -485,7 +498,10 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       hold: 'all',
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything'],
-        result: (_ce, ops) => ops[0].domain,
+        result: (ce, ops) => {
+          if (ops.length !== 1) return ce.domain('NothingDomain');
+          return ops[0].domain;
+        },
         canonical: (ce, ops) => {
           // Only call checkArity (which canonicalize) if the
           // argument length is invalid
@@ -569,6 +585,7 @@ export const CORE_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Anything', 'Anything', 'Anything'],
         result: (ce, args: ReadonlyArray<BoxedExpression>) => {
+          if (args.length !== 2) return ce.domain('NothingDomain');
           const op1 = args[0];
           const op2 = args[1];
           if (op1.string && asMachineInteger(op2) !== null)
