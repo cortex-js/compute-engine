@@ -393,8 +393,6 @@ function canonicalRelational(
     } else newOps.push(op);
   }
 
-  newOps = newOps.map((op) => checkPure(ce, op));
-
   if (nestedRelational.length === 0) return ce._fn(head, newOps);
 
   return ce._fn('And', [ce._fn(head, newOps), ...nestedRelational]);

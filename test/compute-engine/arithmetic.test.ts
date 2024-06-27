@@ -146,7 +146,9 @@ describe('SUBTRACT', () => {
     expect(ce.box(['Subtract', 2.5]).evaluate()).toMatchSnapshot());
   test(`Subtract`, () =>
     expect(ce.box(['Subtract', 2.5, 1.1]).evaluate()).toMatchSnapshot());
-  test(`INVALID Subtract`, () =>
+  test(`Subtract with single argument`, () =>
+    expect(ce.box(['Subtract', 2.5]).evaluate()).toMatchSnapshot());
+  test(`Subtract with multiple arguments`, () =>
     expect(ce.box(['Subtract', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 
@@ -314,9 +316,9 @@ describe('DIVIDE', () => {
     expect(ce.box(['Divide', 6, 3]).evaluate()).toMatchSnapshot());
   test(`Divide 2.5/1.1`, () =>
     expect(ce.box(['Divide', 2.5, 1.1]).evaluate()).toMatchSnapshot());
-  test(`INVALID  Divide`, () =>
+  test(`Divide with single argument`, () =>
     expect(ce.box(['Divide', 2.5]).evaluate()).toMatchSnapshot());
-  test(`INVALID Divide`, () =>
+  test(`Divide with many arguments`, () =>
     expect(ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 

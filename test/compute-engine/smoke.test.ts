@@ -27,8 +27,6 @@ import { engine, simplify } from '../utils';
 
 const ce = engine;
 
-console.log(ce.parse('0.123x').evaluate().toString());
-
 let expr0 = engine.parse('2(2x+1)');
 console.log('expr0: ', expr0.evaluate().toString());
 

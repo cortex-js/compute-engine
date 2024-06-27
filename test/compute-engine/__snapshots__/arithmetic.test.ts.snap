@@ -378,9 +378,9 @@ exports[`DIVIDE Divide 2.5/1.1 1`] = `2.(27)`;
 
 exports[`DIVIDE Divide 6/3 1`] = `2`;
 
-exports[`DIVIDE INVALID  Divide 1`] = `["Divide", 2.5, ["Error", "'missing'"]]`;
+exports[`DIVIDE Divide with many arguments 1`] = `-0.1235177865612648221343873517786561264822134387351778656126482213438735177865612648221343873517786561`;
 
-exports[`DIVIDE INVALID Divide 1`] = `["Divide", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`;
+exports[`DIVIDE Divide with single argument 1`] = `2.5`;
 
 exports[`EXACT EVALUATION Add: All exact 1`] = `
 box       = ["Add", 6, ["Divide", 10, 14], ["Sqrt", ["Divide", 18, 9]]]
@@ -1047,11 +1047,13 @@ N-auto    = 3513641828.820144253093654172555782217909240844808040670317509692597
 N-mach    = 3513641828.820144
 `;
 
-exports[`SUBTRACT INVALID Subtract 1`] = `["Subtract", 2.5, -1.1, ["Error", "'unexpected-argument'", 18.4]]`;
-
-exports[`SUBTRACT Subtract 1`] = `-2.5`;
+exports[`SUBTRACT Subtract 1`] = `2.5`;
 
 exports[`SUBTRACT Subtract 2`] = `1.4`;
+
+exports[`SUBTRACT Subtract with multiple arguments 1`] = `-14.8`;
+
+exports[`SUBTRACT Subtract with single argument 1`] = `2.5`;
 
 exports[`Square INVALID Square 1`] = `
 box       = ["Square", 2.5, 1.1]

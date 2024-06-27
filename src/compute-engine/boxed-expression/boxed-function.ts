@@ -705,8 +705,10 @@ function makeNumericFunction(
     head === 'Ln'
   )
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 1);
-  else if (head === 'Divide' || head === 'Power')
+  else if (head === 'Power')
     ops = checkNumericArgs(ce, semiCanonical(ce, semiOps), 2);
+  else if (head === 'Divide')
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps));
   else return null;
 
   // If some of the arguments are not valid, we're done
@@ -723,7 +725,7 @@ function makeNumericFunction(
   if (head === 'Multiply')
     return canonicalMultiply(ce, flattenOps(flattenSequence(ops), 'Multiply'));
   if (head === 'Divide')
-    return canonicalDivide(ce, ops[0].canonical, ops[1].canonical);
+    return ops.slice(1).reduce((a, b) => canonicalDivide(ce, a, b), ops[0]);
   if (head === 'Exp') return canonicalPower(ce, ce.E, ops[0].canonical);
   if (head === 'Power')
     return canonicalPower(ce, ops[0].canonical, ops[1].canonical);

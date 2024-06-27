@@ -42,6 +42,9 @@ The shorthand syntax can be used any where a ruleset is expected, including with
 the `ce.rule()` function.
 
 - A new `ce.getRuleSet()` method gives access to the built-in rules.
+- **#171** The `Subtract` and `Divide` function can now accept an arbitrary
+  number of arguments. For example, `["Subtract", 1, 2, 3]` is equivalent to
+  `["Subtract", ["Subtract", 1, 2], 3]`.
 
 ## 0.25.0 _2024-06-25_
 

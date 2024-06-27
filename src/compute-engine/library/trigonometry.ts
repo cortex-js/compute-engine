@@ -57,7 +57,6 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, ops) => {
           if (ce.angularUnit === 'deg') return ops[0];
-          ops = checkNumericArgs(ce, ops, 1);
           if (ops.length !== 1) return ce._fn('Degrees', ops);
           const arg = ops[0];
           if (arg.numericValue === null || !arg.isValid)
@@ -496,6 +495,7 @@ export const TRIGONOMETRY_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Functions', 'Functions'],
         canonical: (ce, ops) => {
+          // The canonical handler is responsible for validating the arguments
           ops = checkArity(ce, ops, 1);
           return (
             processInverseFunction(ce, ops) ?? ce._fn('InverseFunction', ops)

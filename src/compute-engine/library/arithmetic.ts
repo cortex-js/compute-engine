@@ -43,7 +43,12 @@ import {
   evalMultiplication,
   canonicalProduct,
 } from './arithmetic-multiply';
-import { evalDivide, evalNDivide, simplifyDivide } from './arithmetic-divide';
+import {
+  canonicalDivide,
+  evalDivide,
+  evalNDivide,
+  simplifyDivide,
+} from './arithmetic-divide';
 import { processPower, processSqrt } from './arithmetic-power';
 import { applyN, apply2N, canonical } from '../symbolic/utils';
 import {
@@ -244,14 +249,20 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
+        params: ['Numbers'],
+        restParam: 'Numbers',
+        result: 'Numbers',
+
         canonical: (ce, args) => {
-          args = checkNumericArgs(ce, args, 2);
+          args = checkNumericArgs(ce, args);
+          if (args.length < 2) return args[0] ?? ce.error('missing');
+          if (args.length !== 2) debugger;
+          let result = args[0];
+          if (!result) return ce.error('missing');
+          const rest = args.slice(1);
+          for (const x of rest) result = canonicalDivide(ce, result, x);
 
-          if (args.length !== 2) return ce._fn('Divide', args);
-
-          const [numer, denom] = args;
-          return ce.div(numer, denom);
+          return result;
         },
         simplify: (ce, args) => simplifyDivide(ce, args[0], args[1]),
         evaluate: (ce, ops) => evalDivide(ce, ops[0], ops[1]),
@@ -268,6 +279,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       signature: {
         domain: ['FunctionOf', 'Numbers', 'Numbers'],
         canonical: (ce, args) => {
+          // The canonical handler is responsible for arg validation
           args = checkNumericArgs(ce, args, 1);
           if (args.length !== 1) return ce._fn('Power', [ce.E, ...args]);
           return ce.pow(ce.E, args[0]);
@@ -569,7 +581,7 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         },
         canonical: (ce, args) => {
           args = checkNumericArgs(ce, args);
-          if (args.length !== 1) return ce._fn('Negate', args);
+          if (args.length === 0) return ce.error('missing');
 
           return ce.neg(args[0]);
         },
@@ -612,7 +624,6 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
         canonical: (ce, args) => {
           args = checkNumericArgs(ce, args, 2);
           if (args.length !== 2) return ce._fn('Power', args);
-
           const [base, exp] = args;
           // If the base is a literal number and negative, treat it as a Negate
           // i.e. -2^3 -> -(2^3)
@@ -710,10 +721,10 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', 'Numbers', 'Numbers'],
+        params: ['Numbers', 'Numbers'],
+        result: 'Numbers',
         canonical: (ce, args) => {
           args = checkNumericArgs(ce, args, 2);
-
           const [base, exp] = args;
           if (args.length !== 2 || !base.isValid || !exp.isValid)
             return ce._fn('Root', args);
@@ -839,20 +850,21 @@ export const ARITHMETIC_LIBRARY: IdentifierDefinitions[] = [
       threadable: true,
 
       signature: {
-        domain: ['FunctionOf', 'Numbers', ['OptArg', 'Numbers'], 'Numbers'],
+        params: ['Numbers'],
+        restParam: 'Numbers',
+        result: 'Numbers',
         canonical: (ce, args) => {
-          // Not necessarily legal, but probably what was intended:
-          // ['Subtract', 'x'] -> ['Negate', 'x']
-          if (args.length === 1) {
-            const x = checkDomain(ce, args[0], 'Numbers');
-            if (x.isValid) return canonicalNegate(x);
-          }
+          // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
+          // left-associative: a - b - c -> (a - b) - c
 
-          args = checkNumericArgs(ce, args, 2);
-          const [a, b] = args;
-          if (args.length !== 2 || !a.isValid || !b.isValid)
-            return ce._fn('Subtract', args);
-          return canonicalAdd(ce, flattenOps([a, canonicalNegate(b)], 'Add'));
+          args = checkNumericArgs(ce, args);
+          const first = args[0];
+          if (!first) return ce.error('missing');
+          const rest = args.slice(1);
+          return canonicalAdd(
+            ce,
+            flattenOps([first, ...rest.map((x) => canonicalNegate(x))], 'Add')
+          );
         },
       },
     },

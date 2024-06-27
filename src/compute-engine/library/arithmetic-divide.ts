@@ -23,7 +23,6 @@ import {
  * - factor out negate (make the numerator and denominator positive)
  * - if numerator and denominator are integer literals, return a rational number
  *   or Rational experssion
- * - if Divide, transform into Multiply/Power
  */
 export function canonicalDivide(
   ce: IComputeEngine,

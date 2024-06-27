@@ -113,11 +113,7 @@ describe('STEFNOTCH #13', () => {
           "Sequence",
           [
             "Equal",
-            [
-              "Error",
-              "'expected-pure-expression'",
-              ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], "','"]]
-            ],
+            ["Subscript", "x", ["Delimiter", ["Sequence", 1, 2], "','"]],
             1
           ],
           2
@@ -154,11 +150,7 @@ describe('STEFNOTCH #13', () => {
       [
         "Implies",
         ["LessEqual", ["Abs", "a_n"], ["Divide", 2, ["Sqrt", "n"]]],
-        [
-          "Equal",
-          ["Error", "'expected-pure-expression'", ["To", "a_n", 0]],
-          0
-        ]
+        ["Equal", ["To", "a_n", 0], 0]
       ]
     `);
   });
