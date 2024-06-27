@@ -167,13 +167,18 @@ export function signatureToDomain(
   ce: IComputeEngine,
   sig: BoxedFunctionSignature
 ): BoxedDomain {
-  const fnParams: SemiBoxedExpression[] = [...sig.params];
-  if (sig.optParams.length > 0) fnParams.push(['OptArg', ...sig.optParams]);
-  if (sig.restParam) fnParams.push(['VarArg', sig.restParam]);
+  try {
+    const fnParams: SemiBoxedExpression[] = [...sig.params];
+    if (sig.optParams.length > 0) fnParams.push(['OptArg', ...sig.optParams]);
+    if (sig.restParam) fnParams.push(['VarArg', sig.restParam]);
 
-  if (typeof sig.result === 'function')
-    fnParams.push(sig.result(ce, []) ?? ce.symbol('Undefined'));
-  else fnParams.push(sig.result);
+    if (typeof sig.result === 'function')
+      fnParams.push(sig.result(ce, []) ?? ce.symbol('Undefined'));
+    else fnParams.push(sig.result);
 
-  return ce.domain(['FunctionOf', ...(fnParams as DomainExpression[])]);
+    return ce.domain(['FunctionOf', ...(fnParams as DomainExpression[])]);
+  } catch (e) {
+    console.log('signatureToDomain():', e);
+  }
+  return ce.domain(['FunctionOf', 'Anything', 'Anything']);
 }
