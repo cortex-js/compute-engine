@@ -1,4 +1,4 @@
-import { Complex } from 'complex.js';
+import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { Rational, isRational } from './numerics/rationals';
 import type {

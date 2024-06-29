@@ -96,7 +96,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     if (this.symbol === 'NegativeInfinity') return -Infinity;
     if (typeof this.string === 'string') return this.string;
     if (typeof this.symbol === 'string') return this.symbol;
-    return asFloat(this) ?? this;
+    return asFloat(this) ?? this.toString();
   }
 
   /** Object.toString() */

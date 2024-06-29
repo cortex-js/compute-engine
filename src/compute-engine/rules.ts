@@ -128,7 +128,7 @@ function normalizeRule(ce: IComputeEngine, rule: Rule): BoxedRule {
 
 /**
  * Apply a rule to an expression, assuming an incoming substitution
- * @param param0 the rule to apply
+ * @param rule the rule to apply
  * @param expr the expression to apply the rule to
  * @param substitution an incoming substitution
  * @param options
@@ -155,16 +155,8 @@ function applyRule(
     if (changed) expr = ce.function(expr.head, newOps, { canonical: false });
   }
 
-  const sub = expr.match(match, {
-    substitution,
-    ...options,
-    exact: rule.exact ?? true,
-  });
-
-  // if (rule.id?.startsWith('x^n * x^m')) {
-  //   console.log('expr', expr.toString(), 'sub', sub);
-  //   // debugger;
-  // }
+  const exact = rule.exact ?? true;
+  const sub = expr.match(match, { substitution, ...options, exact });
 
   // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return changed ? expr : null;

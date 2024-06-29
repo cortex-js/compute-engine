@@ -1,4 +1,4 @@
-import { Complex } from 'complex.js';
+import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 import { complexAllowed, bignumPreferred } from '../boxed-expression/utils';
 import {

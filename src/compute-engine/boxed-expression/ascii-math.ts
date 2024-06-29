@@ -3,8 +3,6 @@ import Decimal from 'decimal.js';
 import { isBigRational, isMachineRational } from '../numerics/rationals';
 import { BoxedExpression } from './public';
 
-const DELIMITERS = {};
-
 const SYMBOLS = {
   PositiveInfinity: 'oo',
   NegativeInfinity: '-oo',

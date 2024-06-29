@@ -1,4 +1,4 @@
-import { Complex } from 'complex.js';
+import Complex from 'complex.js';
 import { isMachineRational, isRational } from './numerics/rationals';
 import { BoxedExpression } from './public';
 import { asFloat } from './boxed-expression/numerics';

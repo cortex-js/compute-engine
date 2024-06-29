@@ -1,4 +1,4 @@
-import { Complex } from 'complex.js';
+import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression';

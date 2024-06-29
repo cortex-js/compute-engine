@@ -1,4 +1,4 @@
-import { Complex } from 'complex.js';
+import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
 import {
@@ -2157,7 +2157,8 @@ export class ComputeEngine implements IComputeEngine {
       skipSpace: true,
       parseNumbers: 'auto',
       getIdentifierType: (id) => {
-        if (this.lookupFunction(id)) return 'function';
+        const def = this.lookupFunction(id);
+        if (def) return 'function';
         // const def = this.lookupSymbol(id);
         // if (def?.domain) return 'symbol';
         return 'symbol';

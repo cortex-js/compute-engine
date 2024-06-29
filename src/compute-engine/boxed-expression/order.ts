@@ -1,4 +1,4 @@
-import { Complex } from 'complex.js';
+import Complex from 'complex.js';
 import { lex, maxDegree, totalDegree } from '../symbolic/polynomials';
 import { BoxedExpression, SemiBoxedExpression } from './public';
 import { asFloat } from './numerics';

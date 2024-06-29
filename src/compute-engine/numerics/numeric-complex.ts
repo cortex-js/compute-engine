@@ -1,4 +1,4 @@
-import { Complex } from 'complex.js';
+import Complex from 'complex.js';
 
 export function gamma(c: Complex): Complex {
   // @todo
