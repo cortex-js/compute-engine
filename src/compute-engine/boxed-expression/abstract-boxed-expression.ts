@@ -1,4 +1,4 @@
-import { Complex } from 'complex.js';
+import Complex from 'complex.js';
 import { Decimal } from 'decimal.js';
 
 import { Expression } from '../../math-json/math-json-format';
@@ -101,32 +101,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
 
   /** Object.toString() */
   toString(): string {
-    if (this.symbol) return this.symbol;
-    if (this.string) return this.string;
-    const num = this.numericValue;
-    if (num !== null) {
-      if (typeof num === 'number') return num.toString();
-      if (num instanceof Decimal) return num.toString();
-      if (isMachineRational(num))
-        return `(${num[0].toString()}/${num[1].toString()})`;
-      if (isBigRational(num))
-        return `(${num[0].toString()}/${num[1].toString()})`;
-      if (num instanceof Complex) {
-        const im = num.im === 1 ? '' : num.im === -1 ? '-' : num.im.toString();
-        if (num.re === 0) return im + 'i';
-        if (num.im < 0) return `${num.re.toString()}${im}i`;
-        return `(${num.re.toString()}+${im}i)`;
-      }
-    }
-
-    if (this.head && typeof this.head === 'string') {
-      if (this.head === 'List')
-        return `[${this.ops?.map((x) => x.toString()) ?? ''}]`;
-      if (this.head === 'Domain') return JSON.stringify(this.json);
-      return `${this.head}(${this.ops?.map((x) => x.toString()).join(', ') ?? ''})`;
-    }
-
-    return JSON.stringify(this.json);
+    return toAsciiMath(this);
   }
 
   print(): void {
@@ -779,3 +754,4 @@ export function getSubexpressions(
 // function *after* the class definition
 
 import { serializeJson } from './serialize';
+import { toAsciiMath } from './ascii-math.js';

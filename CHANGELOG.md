@@ -1,5 +1,10 @@
 ## [Unrelease]
 
+### New Features
+
+- The `expr.toString()` method now returns a serialization of the expression
+  using the [AsciiMath](https://asciimath.org/) format.
+
 ### Issues Resolved
 
 - **#175** Matching some patterns when the target had not enough operands would
