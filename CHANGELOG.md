@@ -4,6 +4,18 @@
 
 - The `expr.toString()` method now returns a serialization of the expression
   using the [AsciiMath](https://asciimath.org/) format.
+- Implemented the Map, Filter and Tabulate functions. These functions can be
+  used to transform collections, for example:
+
+  ```js
+  console.log(
+    ce.box(['Map', ['List', 3, 5, 7], ['Function', ['Square', '_']]]).value
+  );
+  // -> [9, 25, 49]
+
+  console.log(ce.box(['Tabulate', ['Function', ['Square', '_']], 5]).value);
+  // -> [1, 4, 9, 16, 25]
+  ```
 
 ### Issues Resolved
 

@@ -6,7 +6,9 @@ import {
   IdentifierDefinitions,
   SemiBoxedExpression,
 } from '../public';
-import { asFloat } from '../boxed-expression/numerics';
+import { asFloat, asMachineInteger } from '../boxed-expression/numerics';
+import { each, isFiniteIndexableCollection } from '../collection-utils.js';
+import { applicable } from '../function-utils.js';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
@@ -535,9 +537,28 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Collections', 'Functions', 'Collections'],
-      evaluate: (_ce, _ops) => {
-        // @todo
-        return undefined;
+      evaluate: (ce, ops) => {
+        const [collection, fn] = collectionFunction(ops);
+        if (!fn) return undefined;
+
+        const result: BoxedExpression[] = [];
+        for (const op of collection) result.push(fn([op]) ?? ce.Nothing);
+
+        const h = ops[0].head;
+        const newHead =
+          {
+            List: 'List',
+            Set: 'Set',
+            Range: 'List',
+            Linspace: 'List',
+            Single: 'List',
+            Pair: 'List',
+            Triple: 'List',
+            Tuple: 'List',
+            String: 'String',
+          }[typeof h === 'string' ? h : 'List'] ?? 'List';
+
+        return ce.function(newHead, result);
       },
     },
   },
@@ -548,9 +569,39 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
     complexity: 8200,
     signature: {
       domain: ['FunctionOf', 'Values', 'Functions', 'Values'],
-      evaluate: (_ce, _ops) => {
-        // @todo
-        return undefined;
+      evaluate: (ce, ops) => {
+        const fn = applicable(ops[1]);
+        if (!fn) return undefined;
+
+        const collection = ops[0];
+        if (collection.string) {
+          return ce.string(
+            collection.string
+              .split('')
+              .map((c) => (fn([ce.string(c)])?.symbol === 'True' ? c : ''))
+              .join('')
+          );
+        }
+
+        if (!isFiniteIndexableCollection(ops[0]) || !ops[1]) return undefined;
+        const result: BoxedExpression[] = [];
+        for (const op of each(collection))
+          if (fn([op])?.symbol === 'True') result.push(op);
+
+        const h = collection.head;
+        const newHead =
+          {
+            List: 'List',
+            Set: 'Set',
+            Range: 'List',
+            Linspace: 'List',
+            Single: 'List',
+            Pair: 'List',
+            Triple: 'List',
+            Tuple: 'List',
+          }[typeof h === 'string' ? h : 'List'] ?? 'List';
+
+        return ce.function(newHead, result);
       },
     },
   },
@@ -584,9 +635,20 @@ export const COLLECTIONS_LIBRARY: IdentifierDefinitions = {
         ['VarArg', 'Integers'],
         'Values',
       ],
-      evaluate: (_ce, _ops) => {
-        // @todo
-        return undefined;
+      evaluate: (ce, ops) => {
+        const fn = applicable(ops[0]);
+        if (!fn) return undefined;
+
+        let lower = asMachineInteger(ops[1]) ?? 1;
+        let upper = asMachineInteger(ops[2]);
+        if (upper === null) {
+          upper = lower;
+          lower = 1;
+        }
+        const result: BoxedExpression[] = [];
+        for (let i = lower; i <= upper; i++)
+          result.push(fn([ce.number(i)]) ?? ce.Nothing);
+        return ce.function('List', result);
       },
     },
   },
@@ -886,4 +948,36 @@ function canonicalSet(
   for (const op of ops) if (!has(op)) set.push(op);
 
   return ce.function('Set', set, { canonical: false });
+}
+
+function collectionFunction(
+  ops: ReadonlyArray<BoxedExpression>
+): [
+  Iterable<BoxedExpression>,
+  undefined | ((args: BoxedExpression[]) => BoxedExpression | undefined),
+] {
+  if (ops.length !== 2) return [[], undefined];
+
+  const fn = applicable(ops[1]);
+  if (!fn) return [[], undefined];
+
+  if (ops[0].string) {
+    return [
+      [ops[0]],
+      (args) => {
+        const s = args[0].string;
+        if (s === null) return undefined;
+        const ce = args[0].engine;
+        return ce.string(
+          s
+            .split('')
+            .map((c) => fn([ce.string(c)])?.string ?? '')
+            .join('')
+        );
+      },
+    ];
+  }
+
+  if (!isFiniteIndexableCollection(ops[0]) || !ops[1]) return [[], undefined];
+  return [each(ops[0]), fn];
 }
