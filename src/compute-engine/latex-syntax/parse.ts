@@ -631,10 +631,6 @@ export class _Parser implements Parser {
     open: Delimiter | LatexToken[],
     close: Delimiter | LatexToken[]
   ): boolean {
-    // A standalone `[` is not a valid delimiter, because it is used
-    // for optional arguments, but `\left[` is OK
-    if (this.peek === '[') return false;
-
     // If the delimiters are token arrays, look specifically for those
     if (Array.isArray(open)) {
       // If the open trigger is an array, the close trigger must be an array too
