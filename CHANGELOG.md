@@ -1,3 +1,10 @@
+## [Unrelease]
+
+### Issues Resolved
+
+- **#175** Matching some patterns when the target had not enough operands would
+  result in a runtime error.
+
 ## 0.25.1 _2024-06-27_
 
 ### Issues Resolved

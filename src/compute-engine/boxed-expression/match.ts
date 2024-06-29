@@ -440,6 +440,7 @@ function matchArguments(
           else value = ce.box(['Sequence']);
         } else if (j === 2) {
           // Capturing a single element
+          if (ops.length === 0) return null;
           value = ops.shift()!;
         } else {
           const def = ce.lookupFunction(expr.head);
@@ -453,12 +454,13 @@ function matchArguments(
         result = captureWildcard(argName, value, result);
       } else if (argName.startsWith('_')) {
         // Match a single expression
+        if (ops.length === 0) return null;
         result = captureWildcard(argName, ops.shift()!, result);
       } else {
         result = matchOnce(ops.shift()!, pat, result, options);
       }
     } else {
-      const arg = ops.shift()!;
+      const arg = ops.shift();
       if (!arg) return null;
       result = matchOnce(arg, pat, result, options);
     }
