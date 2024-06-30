@@ -97,6 +97,7 @@ const FUNCTIONS = {
   Log10: 'log10',
   Sqrt: 'sqrt',
   Root: (expr) => `root(${toAsciiMath(expr.op1)})(${toAsciiMath(expr.op2)})`,
+  Square: (expr) => `${toAsciiMath(expr.op1, 12)}^2`,
 
   Det: 'det',
   Dim: 'dim',
