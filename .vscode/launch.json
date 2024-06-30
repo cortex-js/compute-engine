@@ -5,18 +5,75 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Launch Chrome",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:9029/compute-engine.html",
+      "webRoot": "${workspaceFolder}/dist",
+      "preLaunchTask": "npm: start",
+      "sourceMaps": true,
+      "sourceMapPathOverrides": {
+        "webpack:///src/*": "${workspaceFolder}/src/*"
+      }
+    },
+    {
+      "name": "tsx Current File",
       "type": "node",
       "request": "launch",
-      "name": "Jest Smoke",
-      "program": "${workspaceFolder}/node_modules/.bin/jest",
-      "args": [
-        "smoke.test",
-        "--no-cache",
-        "--config",
-        "./config/jest.config.js"
-      ],
+
+      // Debug current file in VSCode
+      "program": "${file}",
+
+      /*
+      Path to tsx binary
+      Assuming locally installed
+      */
+      "runtimeExecutable": "tsx",
+
+      /*
+      Open terminal when debugging starts (Optional)
+      Useful to see console.logs
+      */
       "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen"
+      "internalConsoleOptions": "neverOpen",
+
+      // Files to exclude from debugger (e.g. call stack)
+      "skipFiles": [
+        // Node.js internal core modules
+        "<node_internals>/**",
+
+        // Ignore all dependencies (optional)
+        "${workspaceFolder}/node_modules/**"
+      ]
+    },
+    {
+      "name": "tsx playground.ts",
+      "type": "node",
+      "request": "launch",
+
+      "program": "${workspaceFolder}/test/playground.ts",
+
+      /*
+      Path to tsx binary
+      Assuming locally installed
+      */
+      "runtimeExecutable": "tsx",
+
+      /*
+      Open terminal when debugging starts (Optional)
+      Useful to see console.logs
+      */
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+
+      // Files to exclude from debugger (e.g. call stack)
+      "skipFiles": [
+        // Node.js internal core modules
+        "<node_internals>/**",
+
+        // Ignore all dependencies (optional)
+        "${workspaceFolder}/node_modules/**"
+      ]
     },
     {
       "type": "node",
@@ -55,7 +112,7 @@
       "args": ["--runInBand", "--config", "./config/jest.config.cjs"],
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen"
-    }
+    },
     // {
     //   "type": "node",
     //   "request": "launch",
@@ -66,5 +123,19 @@
     //   "sourceMaps": true,
     //   "cwd": "${workspaceFolder}"
     // }
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Jest Smoke",
+      "program": "${workspaceFolder}/node_modules/.bin/jest",
+      "args": [
+        "smoke.test",
+        "--no-cache",
+        "--config",
+        "./config/jest.config.js"
+      ],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    }
   ]
 }

@@ -33,11 +33,11 @@ esbuild
   })
   .then((ctx) =>
     ctx
-      .serve({ host: '127.0.0.1', port: 9029, servedir: '.' })
+      .serve({ host: '127.0.0.1', port: 9029, servedir: 'dist' })
       .then(({ host, port }) => {
-        if (host === '0.0.0.0') host = 'localhost';
+        if (host === '0.0.0.0' || host === '127.0.0.1') host = 'localhost';
         console.log(
-          ` 🚀 Server ready \u001b[1;35m http://${host}:${port}/dist/compute-engine.html/\u001b[0m`
+          `\n 🚀 Server ready \u001b[1;35m http://${host}:${port}/compute-engine.html/\u001b[0m`
         );
       })
   );
